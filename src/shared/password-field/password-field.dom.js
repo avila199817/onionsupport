@@ -3,8 +3,10 @@
    Archivo: src/shared/password-field/password-field.dom.js
 
    Responsabilidad:
-   - Binder DOM mínimo para campos password reutilizables.
+   - Binder DOM mínimo para password-field reutilizable.
    - Mostrar/ocultar password.
+   - Alternar aria-pressed / aria-label.
+   - Alternar iconos eye / eye-off si existen.
    - Binding idempotente.
    - Cleanup real.
    - Sin AppCore.
@@ -15,12 +17,12 @@
    - Sin recrear SVGs desde JS.
 ========================================================= */
 
-export const PASSWORD_FIELD_DOM_VERSION = "minimal-1";
+export const PASSWORD_FIELD_DOM_VERSION = "minimal-2";
 
-const FIELD_SELECTOR = "[data-password-field='true'], [data-password-field]";
-const WRAPPER_SELECTOR = "[data-password-wrapper='true'], [data-password-wrapper], .password-wrapper, .login-password-wrapper";
-const INPUT_SELECTOR = "[data-password-input='true'], [data-password-input], [data-login-password='true'], [data-login-password], input[name='password']";
-const TOGGLE_SELECTOR = "[data-password-toggle='true'], [data-password-toggle], [data-login-password-toggle='true'], [data-login-password-toggle], .password-toggle, .login-password-toggle";
+const FIELD_SELECTOR = "[data-password-field]";
+const WRAPPER_SELECTOR = "[data-password-wrapper], .password-wrapper, .login-password-wrapper, .password-reset-password-wrapper";
+const INPUT_SELECTOR = "[data-password-input], [data-login-password], input[name='password'], input[name='confirmPassword']";
+const TOGGLE_SELECTOR = "[data-password-toggle], [data-login-password-toggle], .password-toggle, .login-password-toggle";
 const ICON_SELECTOR = "[data-password-toggle-icon], .password-toggle-icon";
 
 const DEFAULT_SHOW_LABEL = "Mostrar contraseña";
@@ -29,9 +31,7 @@ const DEFAULT_HIDE_LABEL = "Ocultar contraseña";
 const BOUND_DATA_KEY = "passwordFieldBound";
 const VISIBLE_DATA_KEY = "passwordVisible";
 
-const ROOT_BINDINGS = new WeakMap();
-const INPUT_BINDINGS = new WeakMap();
-const TOGGLE_BINDINGS = new WeakMap();
+const BINDINGS = new WeakMap();
 
 /* =========================================================
    BASICS
@@ -149,22 +149,6 @@ function toggleClass(node, className = "", enabled = false) {
   }
 }
 
-function focusInput(input) {
-  if (!isInput(input) || input.disabled) return false;
-
-  try {
-    input.focus({ preventScroll: true });
-    return true;
-  } catch {
-    try {
-      input.focus();
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-
 function bindDom(node, eventName = "", handler = null, options = false) {
   if (!node || !eventName || !isFn(handler) || !isFn(node.addEventListener)) {
     return () => {};
@@ -188,6 +172,22 @@ function bindDom(node, eventName = "", handler = null, options = false) {
       // noop
     }
   };
+}
+
+function focusInput(input) {
+  if (!isInput(input) || input.disabled) return false;
+
+  try {
+    input.focus({ preventScroll: true });
+    return true;
+  } catch {
+    try {
+      input.focus();
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 /* =========================================================
@@ -235,18 +235,13 @@ function resolveParts(node) {
       root: null,
       input: null,
       toggle: null,
-      icon: null,
     };
   }
 
-  const input = findInput(root);
-  const toggle = findToggle(root);
-
   return {
     root,
-    input,
-    toggle,
-    icon: findIcon(toggle),
+    input: findInput(root),
+    toggle: findToggle(root),
   };
 }
 
@@ -258,13 +253,9 @@ function validParts(parts = {}) {
   );
 }
 
-function bindingFromParts(parts = {}) {
-  return (
-    ROOT_BINDINGS.get(parts.root) ||
-    INPUT_BINDINGS.get(parts.input) ||
-    TOGGLE_BINDINGS.get(parts.toggle) ||
-    null
-  );
+function getBinding(node) {
+  const parts = resolveParts(node);
+  return parts.root ? BINDINGS.get(parts.root) || null : null;
 }
 
 /* =========================================================
@@ -287,7 +278,7 @@ function hideLabel(toggle) {
   );
 }
 
-function getVisible(input) {
+function isVisible(input) {
   return isInput(input) && input.type === "text";
 }
 
@@ -325,7 +316,8 @@ function setInputType(input, visible = false) {
   return true;
 }
 
-function setIconState(icon, visible = false) {
+function syncIcon(toggle, visible = false) {
+  const icon = findIcon(toggle);
   if (!isElement(icon)) return false;
 
   const active = Boolean(visible);
@@ -337,21 +329,19 @@ function setIconState(icon, visible = false) {
   const eye = qs(icon, ".password-eye-icon");
   const eyeOff = qs(icon, ".password-eye-off-icon");
 
-  if (eye && eyeOff) {
-    try {
-      eye.hidden = active;
-      eyeOff.hidden = !active;
-    } catch {
-      // noop
-    }
+  try {
+    if (eye) eye.hidden = active;
+    if (eyeOff) eyeOff.hidden = !active;
+  } catch {
+    // noop
   }
 
   return true;
 }
 
 function syncState(parts = {}) {
-  const { root, input, toggle, icon } = parts;
-  const visible = getVisible(input);
+  const { root, input, toggle } = parts;
+  const visible = isVisible(input);
 
   setData(root, VISIBLE_DATA_KEY, visible ? "true" : "false");
   setData(input, VISIBLE_DATA_KEY, visible ? "true" : "false");
@@ -369,7 +359,7 @@ function syncState(parts = {}) {
   toggleClass(toggle, "is-visible", visible);
   toggleClass(toggle, "is-hidden", !visible);
 
-  setIconState(icon, visible);
+  syncIcon(toggle, visible);
 
   return visible;
 }
@@ -395,9 +385,10 @@ export function bindPasswordField(fieldRoot) {
 
   if (!validParts(parts)) return null;
 
-  const existing = bindingFromParts(parts);
+  const existing = BINDINGS.get(parts.root);
 
   if (existing && existing.destroyed !== true) {
+    existing.sync();
     return existing;
   }
 
@@ -423,10 +414,10 @@ export function bindPasswordField(fieldRoot) {
     if (destroyed) return false;
 
     if (!canToggle(parts)) {
-      return getVisible(input);
+      return isVisible(input);
     }
 
-    return setVisible(!getVisible(input), options);
+    return setVisible(!isVisible(input), options);
   }
 
   function handleToggleClick(event) {
@@ -442,7 +433,9 @@ export function bindPasswordField(fieldRoot) {
   function handleFormReset() {
     try {
       window.setTimeout(() => {
-        if (!destroyed) setVisible(false, { focus: false });
+        if (!destroyed) {
+          setVisible(false, { focus: false });
+        }
       }, 0);
     } catch {
       // noop
@@ -459,7 +452,6 @@ export function bindPasswordField(fieldRoot) {
   setData(root, BOUND_DATA_KEY, "true");
   setData(input, BOUND_DATA_KEY, "true");
   setData(toggle, BOUND_DATA_KEY, "true");
-
   setData(root, "passwordFieldDomVersion", PASSWORD_FIELD_DOM_VERSION);
 
   syncState(parts);
@@ -470,14 +462,13 @@ export function bindPasswordField(fieldRoot) {
     root,
     input,
     toggle,
-    iconHolder: parts.icon || null,
 
     get destroyed() {
       return destroyed;
     },
 
     get visible() {
-      return getVisible(input);
+      return isVisible(input);
     },
 
     isDestroyed() {
@@ -485,7 +476,7 @@ export function bindPasswordField(fieldRoot) {
     },
 
     getVisible() {
-      return getVisible(input);
+      return isVisible(input);
     },
 
     setVisible,
@@ -501,6 +492,7 @@ export function bindPasswordField(fieldRoot) {
 
       try {
         setInputType(input, false);
+        syncState(parts);
       } catch {
         // noop
       }
@@ -531,9 +523,7 @@ export function bindPasswordField(fieldRoot) {
       setAttr(toggle, "aria-pressed", "false");
       setAttr(toggle, "aria-label", showLabel(toggle));
 
-      ROOT_BINDINGS.delete(root);
-      INPUT_BINDINGS.delete(input);
-      TOGGLE_BINDINGS.delete(toggle);
+      BINDINGS.delete(root);
 
       return true;
     },
@@ -555,28 +545,18 @@ export function bindPasswordField(fieldRoot) {
     },
   };
 
-  ROOT_BINDINGS.set(root, binding);
-  INPUT_BINDINGS.set(input, binding);
-  TOGGLE_BINDINGS.set(toggle, binding);
+  BINDINGS.set(root, binding);
 
   return binding;
 }
 
 export function unbindPasswordField(fieldRoot) {
-  if (!isElement(fieldRoot)) return false;
-
-  const parts = resolveParts(fieldRoot);
-  const binding = bindingFromParts(parts);
-
+  const binding = getBinding(fieldRoot);
   return binding ? binding.destroy() : false;
 }
 
 export function isPasswordFieldBound(fieldRoot) {
-  if (!isElement(fieldRoot)) return false;
-
-  const parts = resolveParts(fieldRoot);
-  const binding = bindingFromParts(parts);
-
+  const binding = getBinding(fieldRoot);
   return Boolean(binding && binding.destroyed !== true);
 }
 
@@ -589,22 +569,18 @@ function collectFieldRoots(scope = null) {
   const seen = new Set();
 
   function add(node) {
-    if (!isElement(node) || seen.has(node)) return;
+    if (!isElement(node)) return;
 
     const parts = resolveParts(node);
-    if (!validParts(parts)) return;
+
+    if (!validParts(parts) || seen.has(parts.root)) return;
 
     seen.add(parts.root);
     output.push(parts.root);
   }
 
   if (isElement(root)) {
-    if (matches(root, FIELD_SELECTOR) || matches(root, WRAPPER_SELECTOR)) {
-      add(root);
-    }
-
-    const ownParts = resolveParts(root);
-    if (validParts(ownParts)) add(ownParts.root);
+    add(root);
   }
 
   for (const field of qsa(root, FIELD_SELECTOR)) {
@@ -643,8 +619,7 @@ export function unbindPasswordFieldsInScope(scope = null) {
 ========================================================= */
 
 export function getPasswordFieldSnapshot(fieldRoot = null) {
-  const parts = isElement(fieldRoot) ? resolveParts(fieldRoot) : {};
-  const binding = bindingFromParts(parts);
+  const binding = getBinding(fieldRoot);
 
   if (!binding) {
     return {

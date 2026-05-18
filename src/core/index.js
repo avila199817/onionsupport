@@ -1,4 +1,4 @@
- /* =========================================================
+/* =========================================================
    Onion Support - Core
    Archivo: /src/core/index.js
 
@@ -17,6 +17,7 @@
    - Sin DOM cache complejo.
    - Sin network listeners.
    - Sin framework interno.
+   - Sin magia negra.
 ========================================================= */
 
 import { config } from "./config.js";
@@ -25,13 +26,19 @@ export const CORE_VERSION = "simple";
 
 const API_BASE =
   config?.apiBase ||
+  config?.apiBaseUrl ||
   config?.api?.baseUrl ||
+  config?.api?.baseURL ||
   "https://api.onionit.net";
 
 const APP_NAME =
   config?.appName ||
   config?.name ||
   "Onion Support";
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -63,7 +70,7 @@ function clone(value) {
 }
 
 function cleanRole(value = "") {
-  return String(value).toLowerCase() === "admin" ? "admin" : "user";
+  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
 }
 
 function tokenOk(value = "") {
@@ -72,9 +79,11 @@ function tokenOk(value = "") {
   if (!token) return false;
   if (/\s/.test(token)) return false;
 
-  const invalid = ["null", "undefined", "false", "true", "[object object]"];
-
-  if (invalid.includes(token.toLowerCase())) {
+  if (
+    ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
+      token.toLowerCase()
+    )
+  ) {
     return false;
   }
 
@@ -83,7 +92,6 @@ function tokenOk(value = "") {
 
 function userOk(user = null) {
   if (!isObject(user)) return false;
-
   if (user.disabled === true) return false;
 
   const status = String(user.status || "").toLowerCase();
@@ -101,21 +109,21 @@ function userOk(user = null) {
 function publicUser(user = null) {
   if (!isObject(user)) return null;
 
+  const name =
+    user.name ||
+    user.fullName ||
+    user.displayName ||
+    user.nombre ||
+    user.username ||
+    user.email ||
+    null;
+
   return {
     id: user.id || user.userId || null,
     userId: user.userId || user.id || null,
     username: user.username || user.slug || user.email || null,
-    displayName:
-      user.name ||
-      user.fullName ||
-      user.displayName ||
-      user.username ||
-      null,
-    fullName:
-      user.name ||
-      user.fullName ||
-      user.displayName ||
-      null,
+    displayName: name,
+    fullName: name,
     role: cleanRole(user.role || user.rol),
     hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
   };
@@ -134,6 +142,24 @@ function joinUrl(base = "", path = "") {
   const clean = String(path || "").replace(/^\/+/g, "");
 
   return `${root}/${clean}`;
+}
+
+function isFormData(value) {
+  return typeof FormData !== "undefined" && value instanceof FormData;
+}
+
+function isUrlSearchParams(value) {
+  return typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams;
+}
+
+function buildBody(body, method = "GET") {
+  if (body === undefined || body === null) return undefined;
+  if (method === "GET" || method === "HEAD") return undefined;
+  if (isFormData(body)) return body;
+  if (isUrlSearchParams(body)) return body;
+  if (typeof body === "string") return body;
+
+  return JSON.stringify(body);
 }
 
 /* =========================================================
@@ -287,10 +313,18 @@ function createCleanup() {
   function event(scope, target, eventName, handler, options = false) {
     if (!target || !eventName || !isFn(handler)) return () => false;
 
-    target.addEventListener(eventName, handler, options);
+    try {
+      target.addEventListener(eventName, handler, options);
+    } catch {
+      return () => false;
+    }
 
     return add(scope, () => {
-      target.removeEventListener(eventName, handler, options);
+      try {
+        target.removeEventListener(eventName, handler, options);
+      } catch {
+        // noop
+      }
     });
   }
 
@@ -403,6 +437,10 @@ const registry = {
   cleanup,
 };
 
+/* =========================================================
+   INITIAL STATE
+========================================================= */
+
 const initialLang = isBrowser()
   ? document.documentElement.lang || "en"
   : "en";
@@ -444,6 +482,8 @@ const state = {
   isSupport: false,
   isManager: false,
   isClient: false,
+
+  sidebarOpen: false,
 
   lang: initialLang,
   language: initialLang,
@@ -577,8 +617,17 @@ function getAuthHeader() {
    STATE WRAPPERS
 ========================================================= */
 
+function normalizeRoutePath(route = "/") {
+  let path = String(route || "/").split("?")[0].split("#")[0] || "/";
+
+  if (!path.startsWith("/")) path = `/${path}`;
+  if (path.length > 1) path = path.replace(/\/+$/g, "") || "/";
+
+  return path;
+}
+
 function setRoute(route = "/", options = {}) {
-  const path = String(route || "/").split("?")[0].split("#")[0] || "/";
+  const path = normalizeRoutePath(route);
 
   setState(
     {
@@ -596,7 +645,7 @@ function setRoute(route = "/", options = {}) {
 
 function setPublicPath(path = "/", options = {}) {
   const publicPath = String(path || "/");
-  const route = publicPath.split("?")[0].split("#")[0] || "/";
+  const route = normalizeRoutePath(publicPath);
 
   setState(
     {
@@ -872,11 +921,56 @@ function getBridge(name = "") {
 }
 
 /* =========================================================
+   NAVIGATION COMPAT
+========================================================= */
+
+async function navigate(path = "/", options = {}) {
+  const target = String(path || "/");
+
+  try {
+    const router = getBridge("Router");
+
+    if (isFn(router?.replace) && options.replaceState === true) {
+      await router.replace(target, {
+        source: options.source || "core:navigate",
+        ...options,
+      });
+      return true;
+    }
+
+    if (isFn(router?.navigate)) {
+      await router.navigate(target, {
+        source: options.source || "core:navigate",
+        ...options,
+      });
+      return true;
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  if (!isBrowser()) return false;
+
+  try {
+    window.location.assign(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
    HTTP
 ========================================================= */
 
 async function request(url = "", options = {}) {
-  if (!isBrowser() || !isFn(fetch)) {
+  const fetchFn = isBrowser()
+    ? window.fetch?.bind(window)
+    : typeof globalThis !== "undefined"
+      ? globalThis.fetch?.bind(globalThis)
+      : null;
+
+  if (!isFn(fetchFn)) {
     throw new Error("Fetch API no disponible.");
   }
 
@@ -888,25 +982,18 @@ async function request(url = "", options = {}) {
     options.auth === false ||
     options.skipAuth === true;
 
-  const body =
-    options.body &&
-    method !== "GET" &&
-    method !== "HEAD"
-      ? options.body instanceof FormData
-        ? options.body
-        : JSON.stringify(options.body)
-      : undefined;
+  const body = buildBody(options.body, method);
 
   const headers = {
     Accept: "application/json",
-    ...(body && !(options.body instanceof FormData)
+    ...(body && !isFormData(options.body) && !isUrlSearchParams(options.body)
       ? { "Content-Type": "application/json" }
       : {}),
     ...(publicRequest ? {} : getAuthHeader()),
     ...(options.headers || {}),
   };
 
-  const response = await fetch(finalUrl, {
+  const response = await fetchFn(finalUrl, {
     method,
     headers,
     credentials: options.credentials || "include",
@@ -929,6 +1016,7 @@ async function request(url = "", options = {}) {
     );
 
     error.status = response.status;
+    error.statusCode = response.status;
     error.data = data;
 
     throw error;
@@ -1093,17 +1181,23 @@ function getSnapshot() {
 
   return {
     version: CORE_VERSION,
+
     initialized,
     ready: Boolean(state.ready),
     booting: Boolean(state.booting),
+
     authenticated: Boolean(state.authenticated),
     hasToken: Boolean(state.hasToken),
+
     user: publicUser(state.user),
     role: state.role,
+
     route: redact(state.route || "/"),
     publicPath: redact(state.publicPath || "/"),
+
     lang: state.lang,
     theme: state.theme,
+
     hasHttp: Boolean(httpClient),
     modules: modules.list(),
   };
@@ -1182,6 +1276,8 @@ export const AppCore = {
   registerBridge,
   getBridge,
 
+  navigate,
+
   installHttpBridge,
   getHttpClient,
   getActiveRequest,
@@ -1198,6 +1294,7 @@ export const AppCore = {
 
   getUserDisplayName: (user) =>
     user?.name ||
+    user?.fullName ||
     user?.displayName ||
     user?.username ||
     "",

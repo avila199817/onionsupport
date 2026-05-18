@@ -4,9 +4,9 @@
 
    Responsabilidad:
    - Aplicar tema inicial según sistema.
-   - Aplicar idioma inicial según navegador.
+   - Aplicar idioma base inicial: castellano.
    - Preparar html/body antes del arranque SPA.
-   - Base primaria: castellano.
+   - Base primaria: es.
    - Sin imports.
    - Sin storage.
    - Sin API.
@@ -15,6 +15,7 @@
    - Sin HTTP.
    - Sin eventos custom.
    - Sin i18n propio.
+   - Sin detección de idioma por ahora.
    - Sin magia negra.
 ========================================================= */
 
@@ -22,7 +23,7 @@
   "use strict";
 
   const SUPPORTED_LOCALES = Object.freeze(["es", "ca", "en"]);
-  const FALLBACK_LOCALE = "es";
+  const BASE_LOCALE = "es";
 
   const THEMES = Object.freeze(["light", "dark"]);
   const FALLBACK_THEME = "light";
@@ -31,6 +32,10 @@
     light: "#ffffff",
     dark: "#0a0c11",
   });
+
+  /* =========================================================
+     BASICS
+  ========================================================= */
 
   function isBrowser() {
     return typeof window !== "undefined" && typeof document !== "undefined";
@@ -41,47 +46,15 @@
     return output || fallback;
   }
 
-  function normalizeLocale(value = "", fallback = FALLBACK_LOCALE) {
-    const locale = text(value, "")
-      .toLowerCase()
-      .replace("_", "-")
-      .split("-")[0];
-
-    return SUPPORTED_LOCALES.includes(locale) ? locale : fallback;
-  }
-
   function normalizeTheme(value = "", fallback = FALLBACK_THEME) {
     const theme = text(value, "").toLowerCase();
     return THEMES.includes(theme) ? theme : fallback;
   }
 
-  function getBrowserLanguages() {
-    const languages = Array.isArray(window.navigator?.languages)
-      ? window.navigator.languages
-      : [];
-
-    const language = window.navigator?.language
-      ? [window.navigator.language]
-      : [];
-
-    return [...languages, ...language];
-  }
-
   function resolveLocale() {
-    for (const language of getBrowserLanguages()) {
-      const locale = normalizeLocale(language, "");
-
-      if (locale) {
-        return {
-          value: locale,
-          source: "browser",
-        };
-      }
-    }
-
     return {
-      value: FALLBACK_LOCALE,
-      source: "fallback",
+      value: BASE_LOCALE,
+      source: "base",
     };
   }
 
@@ -95,7 +68,11 @@
     }
   }
 
-  function applyThemeToElement(element, theme = FALLBACK_THEME) {
+  /* =========================================================
+     APPLY
+  ========================================================= */
+
+  function applyThemeToElement(element = null, theme = FALLBACK_THEME) {
     if (!element) return false;
 
     const cleanTheme = normalizeTheme(theme);
@@ -116,19 +93,16 @@
     }
   }
 
-  function applyLocaleToElement(element, locale = null) {
+  function applyLocaleToElement(element = null, locale = null) {
     if (!element || !locale) return false;
 
-    const cleanLocale = normalizeLocale(locale.value);
-    const source = text(locale.source, "fallback");
-
     try {
-      element.lang = cleanLocale;
+      element.lang = BASE_LOCALE;
       element.dir = "ltr";
 
-      element.dataset.locale = cleanLocale;
-      element.dataset.localeSource = source;
-      element.dataset.localeFallback = FALLBACK_LOCALE;
+      element.dataset.locale = BASE_LOCALE;
+      element.dataset.localeSource = text(locale.source, "base");
+      element.dataset.localeFallback = BASE_LOCALE;
       element.dataset.localeSupported = SUPPORTED_LOCALES.join(" ");
 
       return true;
@@ -166,7 +140,6 @@
 
   function writePrebootSnapshot(theme = FALLBACK_THEME, locale = null) {
     const cleanTheme = normalizeTheme(theme);
-    const cleanLocale = normalizeLocale(locale?.value);
 
     try {
       window.__ONION_PREBOOT__ = {
@@ -175,9 +148,9 @@
         themeSource: "system",
         systemTheme: cleanTheme,
 
-        locale: cleanLocale,
-        localeSource: text(locale?.source, "fallback"),
-        fallbackLocale: FALLBACK_LOCALE,
+        locale: BASE_LOCALE,
+        localeSource: text(locale?.source, "base"),
+        fallbackLocale: BASE_LOCALE,
         supportedLocales: [...SUPPORTED_LOCALES],
       };
 
@@ -207,25 +180,9 @@
     return true;
   }
 
-  function bindSystemThemeListener() {
-    try {
-      const media = window.matchMedia("(prefers-color-scheme: dark)");
-
-      if (typeof media.addEventListener === "function") {
-        media.addEventListener("change", applyPreboot);
-        return true;
-      }
-
-      if (typeof media.addListener === "function") {
-        media.addListener(applyPreboot);
-        return true;
-      }
-    } catch {
-      return false;
-    }
-
-    return false;
-  }
+  /* =========================================================
+     RUN
+  ========================================================= */
 
   if (!isBrowser()) return;
 
@@ -236,6 +193,4 @@
       once: true,
     });
   }
-
-  bindSystemThemeListener();
 })();

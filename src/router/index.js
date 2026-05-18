@@ -8,6 +8,7 @@
    - Consultar guard.
    - Renderizar vista.
    - Actualizar history.
+   - Actualizar estado de ruta.
    - Sin Auth estático.
    - Sin fetch.
    - Sin storage.
@@ -20,44 +21,27 @@
 
 import { AppCore } from "../core/index.js";
 
-import {
-  ROUTE_PATHS,
-  getImmutableRoutes,
-} from "./routes.js";
-
-import {
-  shouldAllowRoute,
-} from "./guards.js";
-
-import {
-  updateHistory,
-  ensureInitialHistoryState,
-  back,
-} from "./history.js";
-
-import {
-  renderRouteSuccess,
-  renderRouteForbidden,
-  renderRouteNotFound,
-  renderLoginRedirect,
-  renderRouteRuntimeError,
-} from "./render.js";
-
-import {
-  clearDynamicContainers,
-  setDocumentTitle,
-  setActiveMenu,
-  setShellMode,
-} from "./shell.js";
+import * as Routes from "./routes.js";
+import * as RouteGuards from "./guards.js";
+import * as History from "./history.js";
+import * as Render from "./render.js";
+import * as Shell from "./shell.js";
 
 export const ROUTER_VERSION = "simple";
+
+const ROUTE_PATHS = Routes.ROUTE_PATHS || {
+  HOME: "/",
+  LOGIN: "/login",
+};
+
+const getImmutableRoutes = Routes.getImmutableRoutes || (() => []);
 
 export const Router = (() => {
   "use strict";
 
   const SOURCE = "router";
-  const HOME_PATH = ROUTE_PATHS?.HOME || "/";
-  const LOGIN_PATH = ROUTE_PATHS?.LOGIN || "/login";
+  const HOME_PATH = ROUTE_PATHS.HOME || "/";
+  const LOGIN_PATH = ROUTE_PATHS.LOGIN || "/login";
 
   const routes = getImmutableRoutes();
 
@@ -90,13 +74,25 @@ export const Router = (() => {
     return output || fallback;
   }
 
+  function readState() {
+    return isObject(AppCore?.state) ? AppCore.state : {};
+  }
+
   function emit(name = "", payload = {}) {
+    const eventName = text(name, "");
+
+    if (!eventName) return false;
+
     try {
-      AppCore?.events?.emit?.(name, {
+      AppCore?.events?.emit?.(eventName, {
         source: SOURCE,
         version: ROUTER_VERSION,
         ...payload,
+        token: null,
+        accessToken: null,
+        refreshToken: null,
       });
+
       return true;
     } catch {
       return false;
@@ -118,13 +114,8 @@ export const Router = (() => {
   function normalizePublicPath(path = HOME_PATH) {
     let value = text(path, HOME_PATH);
 
-    if (value.startsWith("#/")) {
-      value = value.slice(1);
-    }
-
-    if (value.startsWith("#!")) {
-      value = value.replace(/^#!\/?/, "/");
-    }
+    if (value.startsWith("#/")) value = value.slice(1);
+    if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
 
     try {
       if (/^https?:\/\//i.test(value)) {
@@ -135,9 +126,7 @@ export const Router = (() => {
       // noop
     }
 
-    if (!value.startsWith("/")) {
-      value = `/${value}`;
-    }
+    if (!value.startsWith("/")) value = `/${value}`;
 
     value = value.replace(/\/{2,}/g, "/");
 
@@ -145,11 +134,10 @@ export const Router = (() => {
   }
 
   function normalizeCanonicalPath(path = HOME_PATH) {
-    const publicPath = normalizePublicPath(path);
-    let canonical = publicPath.split("?")[0].split("#")[0] || HOME_PATH;
+    let canonical = normalizePublicPath(path).split("?")[0].split("#")[0] || HOME_PATH;
 
     if (canonical.length > 1) {
-      canonical = canonical.replace(/\/+$/g, "");
+      canonical = canonical.replace(/\/+$/g, "") || HOME_PATH;
     }
 
     return canonical || HOME_PATH;
@@ -174,21 +162,15 @@ export const Router = (() => {
   }
 
   function currentPublicPath() {
-    return normalizePublicPath(AppCore?.state?.publicPath || browserPath());
+    return normalizePublicPath(readState().publicPath || browserPath());
   }
 
   function currentCanonicalPath() {
     return normalizeCanonicalPath(
-      AppCore?.state?.canonicalPath ||
-        AppCore?.state?.route ||
+      readState().canonicalPath ||
+        readState().route ||
         currentPublicPath()
     );
-  }
-
-  function isExternalHref(href = "") {
-    const value = text(href, "");
-
-    return /^https?:\/\//i.test(value) && isBrowser() && !value.startsWith(window.location.origin);
   }
 
   function isUnsafeHref(href = "") {
@@ -199,8 +181,26 @@ export const Router = (() => {
       value.startsWith("//") ||
       /^javascript:/i.test(value) ||
       /^data:/i.test(value) ||
-      /^vbscript:/i.test(value)
+      /^vbscript:/i.test(value) ||
+      /^file:/i.test(value) ||
+      /^mailto:/i.test(value) ||
+      /^tel:/i.test(value) ||
+      /[\r\n\t\\]/.test(value)
     );
+  }
+
+  function isExternalHref(href = "") {
+    if (!isBrowser()) return false;
+
+    const value = text(href, "");
+
+    if (!/^https?:\/\//i.test(value)) return false;
+
+    try {
+      return new URL(value).origin !== window.location.origin;
+    } catch {
+      return true;
+    }
   }
 
   function isHashOnlyHref(href = "") {
@@ -220,26 +220,8 @@ export const Router = (() => {
     const publicPath = normalizePublicPath(path);
     const canonicalPath = normalizeCanonicalPath(publicPath);
 
-    const route = routes.find((item) => {
-      if (routePath(item) === canonicalPath) return true;
-
-      try {
-        if (isFunction(item.match) && item.match(canonicalPath)) return true;
-      } catch {
-        // noop
-      }
-
-      try {
-        if (item.pattern instanceof RegExp) {
-          item.pattern.lastIndex = 0;
-          return item.pattern.test(canonicalPath);
-        }
-      } catch {
-        // noop
-      }
-
-      return false;
-    }) || null;
+    const route =
+      routes.find((item) => routePath(item) === canonicalPath) || null;
 
     return {
       route,
@@ -268,40 +250,22 @@ export const Router = (() => {
     const canonical = normalizeCanonicalPath(canonicalPath);
     const visible = normalizePublicPath(publicPath || canonical);
 
-    try {
-      AppCore?.setRoute?.(canonical);
-    } catch {
-      // noop
-    }
+    const patch = {
+      route: canonical,
+      canonicalPath: canonical,
+      publicPath: visible,
+      initialRouteRendered: true,
+    };
 
     try {
-      AppCore?.setPublicPath?.(visible);
-    } catch {
-      // noop
-    }
-
-    try {
-      AppCore?.setState?.(
-        {
-          route: canonical,
-          canonicalPath: canonical,
-          publicPath: visible,
-          initialRouteRendered: true,
-        },
-        {
-          source: SOURCE,
-          silent: true,
-          emit: false,
-        }
-      );
+      AppCore?.setState?.(patch, {
+        source: SOURCE,
+        silent: true,
+        emit: false,
+      });
     } catch {
       try {
-        Object.assign(AppCore.state, {
-          route: canonical,
-          canonicalPath: canonical,
-          publicPath: visible,
-          initialRouteRendered: true,
-        });
+        Object.assign(readState(), patch);
       } catch {
         // noop
       }
@@ -314,24 +278,19 @@ export const Router = (() => {
   }
 
   function updateShell(route = null, canonicalPath = HOME_PATH) {
-    try {
-      setShellMode(AppCore, route);
-    } catch {
-      // noop
-    }
+    safeCall(Shell.setShellMode, AppCore, route);
+    safeCall(Shell.setActiveMenu, AppCore, canonicalPath);
+    safeCall(
+      Shell.setDocumentTitle,
+      AppCore,
+      route?.title || route?.label || route?.name || "Onion Support"
+    );
 
-    try {
-      setActiveMenu(AppCore, canonicalPath);
-    } catch {
-      // noop
-    }
+    return true;
+  }
 
-    try {
-      setDocumentTitle(AppCore, route?.title || route?.label || route?.name || "Onion Support");
-    } catch {
-      // noop
-    }
-
+  function clearChrome() {
+    safeCall(Shell.clearDynamicContainers, AppCore);
     return true;
   }
 
@@ -347,25 +306,65 @@ export const Router = (() => {
       loader.classList.remove("is-visible");
       loader.setAttribute("aria-hidden", "true");
       loader.setAttribute("aria-busy", "false");
+      return true;
     } catch {
-      // noop
+      return false;
     }
-
-    return true;
   }
 
   function destroyActiveView() {
     if (!activeView) return false;
 
-    try {
-      activeView.destroy?.();
-    } catch {
-      // noop
+    for (const method of ["destroy", "unmount", "cleanup"]) {
+      try {
+        if (isFunction(activeView?.[method])) {
+          activeView[method]();
+          break;
+        }
+      } catch {
+        // noop
+      }
     }
 
     activeView = null;
-
     return true;
+  }
+
+  function viewRoot() {
+    if (!isBrowser()) return null;
+
+    return (
+      document.getElementById("view-container") ||
+      document.getElementById("app-content") ||
+      document.getElementById("main-content") ||
+      document.body ||
+      null
+    );
+  }
+
+  function renderFallback(title = "Onion Support", message = "") {
+    const root = viewRoot();
+
+    if (!root) return null;
+
+    const section = document.createElement("section");
+    section.className = "route-fallback-view";
+    section.setAttribute("role", "status");
+
+    const h1 = document.createElement("h1");
+    h1.textContent = title;
+
+    section.appendChild(h1);
+
+    if (message) {
+      const p = document.createElement("p");
+      p.textContent = message;
+      section.appendChild(p);
+    }
+
+    root.replaceChildren(section);
+
+    return section;
   }
 
   /* =======================================================
@@ -374,31 +373,92 @@ export const Router = (() => {
 
   function getAuth() {
     try {
-      return AppCore?.Auth || AppCore?.auth || AppCore?.modules?.get?.("Auth") || null;
+      return (
+        AppCore?.Auth ||
+        AppCore?.auth ||
+        AppCore?.modules?.get?.("Auth") ||
+        AppCore?.modules?.get?.("auth") ||
+        null
+      );
     } catch {
       return null;
     }
   }
 
-  function checkAccess(route, canonicalPath, publicPath) {
-    try {
-      const result = shouldAllowRoute({
-        AppCore,
-        Auth: getAuth(),
-        route,
-        requestedCanonicalPath: canonicalPath,
-        requestedPublicPath: publicPath,
-        getRoute,
-      });
+  function fallbackAllowRoute({ route, requestedPublicPath }) {
+    if (!route) {
+      return {
+        allowed: false,
+        reason: "not-found",
+      };
+    }
 
-      return isObject(result)
-        ? {
-            allowed: result.allowed !== false,
-            ...result,
-          }
-        : {
-            allowed: result !== false,
-          };
+    if (route.public === true) {
+      return {
+        allowed: true,
+        reason: "public",
+      };
+    }
+
+    const Auth = getAuth();
+    const authenticated =
+      Auth?.isAuthenticated?.() === true ||
+      readState().authenticated === true;
+
+    if (!authenticated) {
+      return {
+        allowed: false,
+        reason: "not-authenticated",
+        redirectTo: `${LOGIN_PATH}?redirect=${encodeURIComponent(
+          normalizePublicPath(requestedPublicPath || HOME_PATH)
+        )}`,
+      };
+    }
+
+    const roles = Array.isArray(route.roles) ? route.roles : [];
+
+    if (!roles.length) {
+      return {
+        allowed: true,
+        reason: "authenticated",
+      };
+    }
+
+    const currentRole =
+      Auth?.getRole?.() ||
+      Auth?.getCurrentRole?.() ||
+      readState().role ||
+      "";
+
+    return {
+      allowed: roles.includes(currentRole),
+      reason: roles.includes(currentRole) ? "role-match" : "insufficient-role",
+    };
+  }
+
+  function checkAccess(route, canonicalPath, publicPath) {
+    const shouldAllowRoute = RouteGuards.shouldAllowRoute;
+
+    try {
+      if (isFunction(shouldAllowRoute)) {
+        const result = shouldAllowRoute({
+          AppCore,
+          Auth: getAuth(),
+          route,
+          requestedCanonicalPath: canonicalPath,
+          requestedPublicPath: publicPath,
+          getRoute,
+        });
+
+        return isObject(result)
+          ? {
+              allowed: result.allowed !== false,
+              ...result,
+            }
+          : {
+              allowed: result !== false,
+            };
+      }
     } catch (error) {
       return {
         allowed: false,
@@ -406,27 +466,60 @@ export const Router = (() => {
         error,
       };
     }
+
+    return fallbackAllowRoute({
+      route,
+      requestedCanonicalPath: canonicalPath,
+      requestedPublicPath: publicPath,
+    });
   }
 
   /* =======================================================
-     RENDER
+     HISTORY
+  ======================================================= */
+
+  function writeHistory(publicPath = HOME_PATH, options = {}) {
+    if (options.skipHistory === true) return false;
+
+    return Boolean(
+      safeCall(History.updateHistory, {
+        AppCore,
+        getRoute,
+        pathname: publicPath,
+        options,
+      })
+    );
+  }
+
+  function initHistory() {
+    safeCall(History.ensureInitialHistoryState, { AppCore });
+    return true;
+  }
+
+  /* =======================================================
+     RENDER HELPERS
   ======================================================= */
 
   function renderNotFound(data) {
     destroyActiveView();
-    clearDynamicContainers(AppCore);
+    clearChrome();
 
-    renderRouteNotFound({
-      AppCore,
-      getRoute,
-      updateHistory,
-      requestedPath: data.publicPath,
-      canonicalPath: data.canonicalPath,
-      setShellMode: (route) => setShellMode(AppCore, route),
-      setDocumentTitle: (title) => setDocumentTitle(AppCore, title),
-    });
+    if (isFunction(Render.renderRouteNotFound)) {
+      Render.renderRouteNotFound({
+        AppCore,
+        getRoute,
+        updateHistory: History.updateHistory,
+        requestedPath: data.publicPath,
+        canonicalPath: data.canonicalPath,
+        setShellMode: (route) => Shell.setShellMode?.(AppCore, route),
+        setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
+      });
+    } else {
+      renderFallback("Ruta no encontrada", "La vista solicitada no existe.");
+    }
 
     const state = setRouterState(data);
+
     updateShell(null, state.canonicalPath);
     hideLoader();
 
@@ -440,20 +533,25 @@ export const Router = (() => {
 
   function renderForbidden(route, data, reason = "forbidden") {
     destroyActiveView();
-    clearDynamicContainers(AppCore);
+    clearChrome();
 
-    renderRouteForbidden({
-      AppCore,
-      getRoute,
-      updateHistory,
-      route,
-      requestedPath: data.publicPath,
-      canonicalPath: data.canonicalPath,
-      setShellMode: (nextRoute) => setShellMode(AppCore, nextRoute),
-      setDocumentTitle: (title) => setDocumentTitle(AppCore, title),
-    });
+    if (isFunction(Render.renderRouteForbidden)) {
+      Render.renderRouteForbidden({
+        AppCore,
+        getRoute,
+        updateHistory: History.updateHistory,
+        route,
+        requestedPath: data.publicPath,
+        canonicalPath: data.canonicalPath,
+        setShellMode: (nextRoute) => Shell.setShellMode?.(AppCore, nextRoute),
+        setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
+      });
+    } else {
+      renderFallback("Acceso no permitido", "No tienes permisos para ver esta vista.");
+    }
 
     const state = setRouterState(data);
+
     updateShell(route, state.canonicalPath);
     hideLoader();
 
@@ -468,22 +566,34 @@ export const Router = (() => {
 
   function renderLogin(data, redirectTo = LOGIN_PATH) {
     destroyActiveView();
-    clearDynamicContainers(AppCore);
-
-    renderLoginRedirect({
-      AppCore,
-      getRoute,
-      updateHistory,
-      canonicalPath: data.canonicalPath,
-      publicPath: data.publicPath,
-      redirectTo,
-      clearDynamicContainers: () => clearDynamicContainers(AppCore),
-      setActiveMenu: (path) => setActiveMenu(AppCore, path),
-      setShellMode: (route) => setShellMode(AppCore, route),
-      setDocumentTitle: (title) => setDocumentTitle(AppCore, title),
-    });
+    clearChrome();
 
     const loginData = getRouteMatch(redirectTo);
+
+    if (isFunction(Render.renderLoginRedirect)) {
+      Render.renderLoginRedirect({
+        AppCore,
+        getRoute,
+        updateHistory: History.updateHistory,
+        canonicalPath: data.canonicalPath,
+        publicPath: data.publicPath,
+        redirectTo,
+        clearDynamicContainers: () => clearChrome(),
+        setActiveMenu: (path) => Shell.setActiveMenu?.(AppCore, path),
+        setShellMode: (route) => Shell.setShellMode?.(AppCore, route),
+        setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
+      });
+    } else if (loginData.route?.render) {
+      // Fallback mínimo: render de login sin lógica extra.
+      void loginData.route.render(viewRoot(), {
+        route: loginData.route,
+        requestedPath: loginData.publicPath,
+        canonicalPath: loginData.canonicalPath,
+      });
+    } else {
+      renderFallback("Acceso requerido", "Inicia sesión para continuar.");
+    }
+
     const state = setRouterState(loginData);
 
     updateShell(loginData.route, state.canonicalPath);
@@ -500,29 +610,30 @@ export const Router = (() => {
 
   async function renderSuccess(route, data, options = {}) {
     destroyActiveView();
-    clearDynamicContainers(AppCore);
+    clearChrome();
     updateShell(route, data.canonicalPath);
+    writeHistory(data.publicPath, options);
 
-    if (options.skipHistory !== true) {
-      updateHistory({
-        AppCore,
-        getRoute,
-        pathname: data.publicPath,
-        options,
-      });
-    }
+    let view = null;
 
-    const view = await Promise.resolve(
-      renderRouteSuccess({
+    if (isFunction(Render.renderRouteSuccess)) {
+      view = await Render.renderRouteSuccess({
         AppCore,
         route,
         requestedPath: data.publicPath,
         canonicalPath: data.canonicalPath,
         getRoute,
-        setShellMode: (nextRoute) => setShellMode(AppCore, nextRoute),
-        setDocumentTitle: (title) => setDocumentTitle(AppCore, title),
-      })
-    );
+        setShellMode: (nextRoute) => Shell.setShellMode?.(AppCore, nextRoute),
+        setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
+      });
+    } else if (isFunction(route?.render)) {
+      view = await route.render(viewRoot(), {
+        route,
+        requestedPath: data.publicPath,
+        canonicalPath: data.canonicalPath,
+        publicPath: data.publicPath,
+      });
+    }
 
     activeView = view || null;
 
@@ -537,6 +648,43 @@ export const Router = (() => {
       canonicalPath: state.canonicalPath,
       publicPath: state.publicPath,
       route,
+    };
+  }
+
+  async function renderRuntimeError(route, data, error) {
+    destroyActiveView();
+
+    if (isFunction(Render.renderRouteRuntimeError)) {
+      Render.renderRouteRuntimeError({
+        AppCore,
+        getRoute,
+        route,
+        error,
+        requestedPath: data.publicPath,
+        canonicalPath: data.canonicalPath,
+        setShellMode: (nextRoute) => Shell.setShellMode?.(AppCore, nextRoute),
+        setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
+      });
+    } else {
+      renderFallback("Error de vista", "No se pudo renderizar esta vista.");
+    }
+
+    const state = setRouterState(data);
+
+    updateShell(route, state.canonicalPath);
+    hideLoader();
+
+    emit("router:render:error", {
+      canonicalPath: state.canonicalPath,
+      publicPath: state.publicPath,
+      message: error?.message || "Render error",
+    });
+
+    return {
+      ok: false,
+      error,
+      canonicalPath: state.canonicalPath,
+      publicPath: state.publicPath,
     };
   }
 
@@ -582,35 +730,7 @@ export const Router = (() => {
 
       return result;
     } catch (error) {
-      destroyActiveView();
-
-      renderRouteRuntimeError({
-        AppCore,
-        getRoute,
-        route: data.route,
-        error,
-        requestedPath: data.publicPath,
-        canonicalPath: data.canonicalPath,
-        setShellMode: (route) => setShellMode(AppCore, route),
-        setDocumentTitle: (title) => setDocumentTitle(AppCore, title),
-      });
-
-      const state = setRouterState(data);
-      updateShell(data.route, state.canonicalPath);
-      hideLoader();
-
-      emit("router:render:error", {
-        canonicalPath: state.canonicalPath,
-        publicPath: state.publicPath,
-        message: error?.message || "Render error",
-      });
-
-      return {
-        ok: false,
-        error,
-        canonicalPath: state.canonicalPath,
-        publicPath: state.publicPath,
-      };
+      return renderRuntimeError(data.route, data, error);
     }
   }
 
@@ -658,8 +778,8 @@ export const Router = (() => {
 
   function goAfterLogin(fallback = HOME_PATH, options = {}) {
     const target =
-      AppCore?.state?.redirectAfterLogin ||
-      AppCore?.state?.postLoginTarget ||
+      readState().redirectAfterLogin ||
+      readState().postLoginTarget ||
       fallback ||
       HOME_PATH;
 
@@ -680,7 +800,11 @@ export const Router = (() => {
       return () => false;
     }
 
-    target.addEventListener(eventName, handler, options);
+    try {
+      target.addEventListener(eventName, handler, options);
+    } catch {
+      return () => false;
+    }
 
     return () => {
       try {
@@ -716,7 +840,10 @@ export const Router = (() => {
     if (isUnsafeHref(href) || isExternalHref(href) || isHashOnlyHref(href)) return;
 
     event.preventDefault();
-    navigate(href, { source: "link-click" });
+
+    navigate(href, {
+      source: "link-click",
+    });
   }
 
   function handlePopState() {
@@ -748,11 +875,7 @@ export const Router = (() => {
       disposers.push(onDom(window, "popstate", handlePopState));
     }
 
-    try {
-      ensureInitialHistoryState({ AppCore });
-    } catch {
-      // noop
-    }
+    initHistory();
 
     bound = true;
     attachToCore();
@@ -789,7 +912,11 @@ export const Router = (() => {
   function start(options = {}) {
     init();
 
-    if (options.render === false || options.skipInitialRender === true || options.appManagedInitialRender === true) {
+    if (
+      options.render === false ||
+      options.skipInitialRender === true ||
+      options.appManagedInitialRender === true
+    ) {
       return Promise.resolve(api);
     }
 
@@ -823,6 +950,8 @@ export const Router = (() => {
         path: route.path,
         name: route.name || route.id || "",
         title: route.title || route.label || "",
+        public: Boolean(route.public),
+        roles: Array.isArray(route.roles) ? route.roles : [],
       })),
 
       policy: {
@@ -835,10 +964,6 @@ export const Router = (() => {
         repairStorm: false,
       },
     };
-  }
-
-  function readState() {
-    return isObject(AppCore?.state) ? AppCore.state : {};
   }
 
   function debug(path = "") {
@@ -860,6 +985,7 @@ export const Router = (() => {
     init,
     start,
     configure: init,
+
     bind,
     unbind,
     destroy: unbind,
@@ -880,7 +1006,7 @@ export const Router = (() => {
 
     go: navigate,
     push: navigate,
-    back: (...args) => back(...args),
+    back: (...args) => safeCall(History.back, ...args),
     handlePopState,
     bindLinks: bind,
 
@@ -893,9 +1019,12 @@ export const Router = (() => {
     buildPublicPath: normalizePublicPath,
     stripUsernamePrefix: normalizePublicPath,
     extractUsernameFromPath: () => null,
+
     resolveSpaHref: normalizePublicPath,
+
     isSlugCandidatePath: () => false,
-    isSameCanonicalPath: (a = HOME_PATH, b = HOME_PATH) => normalizeCanonicalPath(a) === normalizeCanonicalPath(b),
+    isSameCanonicalPath: (a = HOME_PATH, b = HOME_PATH) =>
+      normalizeCanonicalPath(a) === normalizeCanonicalPath(b),
     canUsePublicSlugForRoute: () => false,
 
     getRequestedData: getRouteMatch,

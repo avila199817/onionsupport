@@ -1,34 +1,67 @@
 /* =========================================================
-   Onion SPA - Toast Helpers
-   Archivo: src/ui/toast/helpers.js
+   Onion Support - Toast Helpers
+   Archivo: /src/ui/toast/helpers.js
 
-   TOAST HELPERS · SIMPLE
-   - utilidades puras
-   - ids seguros
-   - tipos normalizados
-   - duración normalizada por tipo
-   - texto limitado
-   - reduced motion safe
-   - cero dependencia AppCore
-   - cero lógica DOM/store/timers
+   Responsabilidad:
+   - Helpers puros mínimos de compat para Toast.
+   - Sin imports.
+   - Sin DOM mutation.
+   - Sin store.
+   - Sin timers.
+   - Sin events.
+   - Sin AppCore.
+   - Sin magia negra.
+   - El Toast real vive en src/ui/toast/index.js.
 ========================================================= */
 
-import {
-  TOAST_DEFAULT_DURATION,
-  TOAST_MIN_DURATION,
-  TOAST_MAX_DURATION,
-  TOAST_MAX_TEXT_LENGTH,
-  TOAST_MAX_TITLE_LENGTH,
-  TOAST_DEFAULT_TYPE,
-  TOAST_TYPES,
-  TOAST_TYPE_SET,
-  TOAST_TYPE_ALIASES,
-  TOAST_TYPE_INFO,
-  TOAST_TYPE_LOADING,
-  TOAST_DURATIONS_BY_TYPE,
-} from "./constants.js";
+export const TOAST_HELPERS_VERSION = "simple";
 
-export const TOAST_HELPERS_VERSION = "18.0.0-simple";
+/* =========================================================
+   LOCAL CONTRACT
+========================================================= */
+
+const TYPES = Object.freeze([
+  "success",
+  "error",
+  "warning",
+  "info",
+  "loading",
+]);
+
+const DEFAULT_TYPE = "info";
+
+const TYPE_ALIASES = Object.freeze({
+  ok: "success",
+  done: "success",
+  saved: "success",
+
+  danger: "error",
+  fail: "error",
+  failed: "error",
+  failure: "error",
+
+  warn: "warning",
+  alert: "warning",
+  caution: "warning",
+
+  pending: "loading",
+  progress: "loading",
+  processing: "loading",
+  spinner: "loading",
+});
+
+const DURATIONS = Object.freeze({
+  success: 3500,
+  error: 6000,
+  warning: 5000,
+  info: 4000,
+  loading: 0,
+});
+
+const MAX_TEXT = 240;
+const MAX_TITLE = 80;
+const MIN_DURATION = 1000;
+const MAX_DURATION = 30000;
 
 let seed = 0;
 
@@ -49,7 +82,7 @@ export function isObject(value) {
 }
 
 export function isPlainObject(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (!isObject(value)) return false;
 
   try {
     const proto = Object.getPrototypeOf(value);
@@ -66,13 +99,12 @@ export function safeObject(value, fallback = {}) {
 export function safeArray(value) {
   if (Array.isArray(value)) return value;
   if (value instanceof Set) return [...value];
-  if (value === null || value === undefined) return [];
+  if (value === null || value === undefined || value === "") return [];
   return [value];
 }
 
 export function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const output = String(value).trim();
+  const output = String(value ?? "").trim();
   return output || fallback;
 }
 
@@ -87,6 +119,7 @@ export function safeBool(value, fallback = false) {
   if (value === 0 || value === "0") return false;
 
   const output = safeText(value, "").toLowerCase();
+
   if (["true", "yes", "si", "sí", "on", "ok"].includes(output)) return true;
   if (["false", "no", "off"].includes(output)) return false;
 
@@ -99,11 +132,7 @@ export function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
 }
 
 export function now() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
+  return Date.now();
 }
 
 export function nowIso(ms = now()) {
@@ -121,10 +150,12 @@ export function unique(values = []) {
   const seen = new Set();
 
   for (const value of safeArray(values).flat(Infinity)) {
-    const text = safeText(value, "");
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
-    output.push(text);
+    const clean = safeText(value, "");
+
+    if (!clean || seen.has(clean)) continue;
+
+    seen.add(clean);
+    output.push(clean);
   }
 
   return output;
@@ -139,8 +170,12 @@ export function safeClone(value, fallback = null) {
   if (value === null) return null;
 
   try {
-    if (typeof structuredClone === "function") return structuredClone(value);
-  } catch {}
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
+    }
+  } catch {
+    // fallback abajo
+  }
 
   try {
     return JSON.parse(JSON.stringify(value));
@@ -153,9 +188,10 @@ export function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ");
 }
 
-export function limitText(value = "", max = 240) {
+export function limitText(value = "", max = MAX_TEXT) {
   const clean = normalizeWhitespace(value);
-  const limit = Math.max(0, safeNumber(max, 240));
+  const limit = Math.max(0, safeNumber(max, MAX_TEXT));
+
   return clean.slice(0, limit);
 }
 
@@ -165,8 +201,12 @@ export function limitText(value = "", max = 240) {
 
 function randomPart() {
   try {
-    if (isBrowser() && window.crypto?.randomUUID) return window.crypto.randomUUID();
-  } catch {}
+    if (isBrowser() && window.crypto?.randomUUID) {
+      return window.crypto.randomUUID();
+    }
+  } catch {
+    // fallback abajo
+  }
 
   try {
     if (isBrowser() && window.crypto?.getRandomValues) {
@@ -174,7 +214,9 @@ function randomPart() {
       window.crypto.getRandomValues(buffer);
       return [...buffer].map((item) => item.toString(36)).join("-");
     }
-  } catch {}
+  } catch {
+    // fallback abajo
+  }
 
   return Math.random().toString(36).slice(2);
 }
@@ -206,11 +248,11 @@ export function escapeHtml(value = "") {
     .replace(/'/g, "&#039;");
 }
 
-export function normalizeToastText(value, fallback = "", max = TOAST_MAX_TEXT_LENGTH) {
+export function normalizeToastText(value, fallback = "", max = MAX_TEXT) {
   return limitText(value === null || value === undefined ? fallback : value, max);
 }
 
-export function normalizeToastTitle(value, fallback = "", max = TOAST_MAX_TITLE_LENGTH) {
+export function normalizeToastTitle(value, fallback = "", max = MAX_TITLE) {
   return limitText(value === null || value === undefined ? fallback : value, max);
 }
 
@@ -236,34 +278,30 @@ export function prefersReducedMotion() {
    TYPE
 ========================================================= */
 
-export function normalizeToastType(value = TOAST_DEFAULT_TYPE) {
-  const raw = safeText(value, TOAST_DEFAULT_TYPE).toLowerCase().replace(/\s+/g, "-");
-  const alias = TOAST_TYPE_ALIASES?.[raw] || raw;
+export function normalizeToastType(value = DEFAULT_TYPE) {
+  const raw = safeText(value, DEFAULT_TYPE)
+    .toLowerCase()
+    .replace(/\s+/g, "-");
 
-  try {
-    if (TOAST_TYPE_SET?.has?.(alias)) return alias;
-  } catch {}
+  const alias = TYPE_ALIASES[raw] || raw;
 
-  if (Array.isArray(TOAST_TYPES) && TOAST_TYPES.includes(alias)) return alias;
-
-  return TOAST_DEFAULT_TYPE || TOAST_TYPE_INFO;
+  return TYPES.includes(alias) ? alias : DEFAULT_TYPE;
 }
 
 export function isValidToastType(value = "") {
-  const raw = safeText(value, "").toLowerCase().replace(/\s+/g, "-");
+  const raw = safeText(value, "")
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+
   if (!raw) return false;
 
-  const alias = TOAST_TYPE_ALIASES?.[raw] || raw;
+  const alias = TYPE_ALIASES[raw] || raw;
 
-  try {
-    if (TOAST_TYPE_SET?.has?.(alias)) return true;
-  } catch {}
-
-  return Array.isArray(TOAST_TYPES) && TOAST_TYPES.includes(alias);
+  return TYPES.includes(alias);
 }
 
 export function isToastLoading(type = "") {
-  return normalizeToastType(type) === TOAST_TYPE_LOADING;
+  return normalizeToastType(type) === "loading";
 }
 
 /* =========================================================
@@ -272,38 +310,48 @@ export function isToastLoading(type = "") {
 
 function parseDurationString(value = "") {
   const raw = safeText(value, "").toLowerCase();
+
   if (!raw) return null;
 
-  if (["persist", "persistent", "manual", "infinite", "infinity", "none", "off", "false"].includes(raw)) return 0;
+  if (["persist", "persistent", "manual", "infinite", "infinity", "none", "off", "false"].includes(raw)) {
+    return 0;
+  }
 
   const match = raw.match(/^(\d+(?:\.\d+)?)(ms|s)?$/);
+
   if (!match) return null;
 
   const amount = Number(match[1]);
+
   if (!Number.isFinite(amount)) return null;
 
   return match[2] === "s" ? amount * 1000 : amount;
 }
 
-function defaultDurationForType(type = TOAST_DEFAULT_TYPE) {
-  const normalizedType = normalizeToastType(type);
-  return safeNumber(TOAST_DURATIONS_BY_TYPE?.[normalizedType], TOAST_DEFAULT_DURATION);
+function defaultDurationForType(type = DEFAULT_TYPE) {
+  return DURATIONS[normalizeToastType(type)] ?? DURATIONS.info;
 }
 
-export function normalizeToastDuration(type = TOAST_DEFAULT_TYPE, duration = undefined) {
+export function normalizeToastDuration(type = DEFAULT_TYPE, duration = undefined) {
   const normalizedType = normalizeToastType(type);
-  if (normalizedType === TOAST_TYPE_LOADING) return 0;
+
+  if (normalizedType === "loading") return 0;
 
   let value = duration;
 
-  if (value === undefined || value === true) value = defaultDurationForType(normalizedType);
-  else if (value === false || value === null || value === 0) return 0;
-  else if (typeof value === "string") value = parseDurationString(value) ?? defaultDurationForType(normalizedType);
+  if (value === undefined || value === true) {
+    value = defaultDurationForType(normalizedType);
+  } else if (value === false || value === null || value === 0) {
+    return 0;
+  } else if (typeof value === "string") {
+    value = parseDurationString(value) ?? defaultDurationForType(normalizedType);
+  }
 
   const output = safeNumber(value, defaultDurationForType(normalizedType));
+
   if (output <= 0) return 0;
 
-  return clampNumber(output, TOAST_MIN_DURATION, TOAST_MAX_DURATION);
+  return clampNumber(output, MIN_DURATION, MAX_DURATION);
 }
 
 export function isPersistentToastDuration(duration = 0) {
@@ -311,7 +359,7 @@ export function isPersistentToastDuration(duration = 0) {
 }
 
 /* =========================================================
-   OPTIONS NORMALIZATION
+   OPTIONS
 ========================================================= */
 
 export function normalizeToastOptions(options = {}) {
@@ -321,55 +369,80 @@ export function normalizeToastOptions(options = {}) {
   const message = normalizeToastText(
     source.message ?? source.text ?? "",
     "",
-    source.maxTextLength || TOAST_MAX_TEXT_LENGTH
+    source.maxTextLength || MAX_TEXT
   );
 
   const title = normalizeToastTitle(
     source.title ?? source.heading ?? "",
     "",
-    source.maxTitleLength || TOAST_MAX_TITLE_LENGTH
+    source.maxTitleLength || MAX_TITLE
   );
 
-  const duration = source.persist === true || source.persistent === true
-    ? 0
-    : normalizeToastDuration(type, source.duration);
+  const duration =
+    source.persist === true || source.persistent === true
+      ? 0
+      : normalizeToastDuration(type, source.duration);
 
   const id = normalizeToastId(source.id || source.toastId || source.key || "");
 
   return {
     ...source,
+
     id,
     toastId: normalizeToastId(source.toastId || source.id || source.key || ""),
+
     type,
+
     title,
     message,
     text: message,
+
     duration,
     persist: duration <= 0,
     persistent: duration <= 0,
-    closable: source.closable !== undefined ? source.closable !== false : type !== TOAST_TYPE_LOADING,
+
+    closable:
+      source.closable !== undefined
+        ? source.closable !== false
+        : type !== "loading",
   };
 }
 
 /* =========================================================
-   DEBUG
+   SNAPSHOT
 ========================================================= */
 
 export function getToastHelpersSnapshot() {
   return {
     version: TOAST_HELPERS_VERSION,
+
     seed,
     browser: isBrowser(),
     reducedMotion: prefersReducedMotion(),
-    defaultType: TOAST_DEFAULT_TYPE,
-    types: Array.isArray(TOAST_TYPES) ? [...TOAST_TYPES] : [],
-    defaultDuration: TOAST_DEFAULT_DURATION,
-    minDuration: TOAST_MIN_DURATION,
-    maxDuration: TOAST_MAX_DURATION,
-    maxTextLength: TOAST_MAX_TEXT_LENGTH,
-    maxTitleLength: TOAST_MAX_TITLE_LENGTH,
+
+    defaultType: DEFAULT_TYPE,
+    types: [...TYPES],
+
+    defaultDuration: DURATIONS.info,
+    minDuration: MIN_DURATION,
+    maxDuration: MAX_DURATION,
+    maxTextLength: MAX_TEXT,
+    maxTitleLength: MAX_TITLE,
+
+    policy: {
+      noImports: true,
+      pureHelpers: true,
+      noDomMutation: true,
+      noStore: true,
+      noTimers: true,
+      noEvents: true,
+    },
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   TOAST_HELPERS_VERSION,

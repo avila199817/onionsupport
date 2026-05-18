@@ -2,688 +2,210 @@
    Onion SPA - Reset Password Confirm DOM
    Archivo: src/views/password-reset/confirm/confirm.dom.js
 
-   Responsabilidades:
-   - resolver refs del DOM confirm
-   - aplicar / limpiar errores
-   - controlar loading UI
-   - success state
-   - focus inicial
-   - lectura robusta del formulario
-   - binds desacoplados
-   - integrar el sistema compartido de password-field
+   Responsabilidad:
+   - Compat DOM mínimo para confirm reset.
+   - Delegar DOM real en ../reset-password.dom.js.
+   - Mantener nombres antiguos usados por confirmView legacy.
+   - Conectar password toggle mediante shared/password-field.
+   - Sin DOM propio complejo.
+   - Sin innerHTML.
+   - Sin Toast.
+   - Sin theme toggle.
+   - Sin CapsLock propio.
+   - Sin duplicar password-field.
 ========================================================= */
 
 import {
-  bindPasswordFieldsInScope,
-} from "../../../shared/password-field/index.js";
+  getResetPasswordRefs,
+  bindResetPasswordFields,
+  destroyResetPasswordFields,
+  clearResetPasswordErrors,
+  applyResetPasswordErrors,
+  setGlobalResetPasswordError,
+  setResetPasswordLoading,
+  setResetPasswordSuccessState,
+  focusResetPasswordPrimaryField,
+  readResetPasswordFormState,
+  bindResetPasswordInputClearers,
+  bindResetPasswordSubmit,
+  bindResetPasswordBackLink,
+  getResetPasswordDomSnapshot,
+} from "../reset-password.dom.js";
+
+export const CONFIRM_DOM_VERSION = "minimal-1";
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
-function qs(
-  root,
-  selector
-) {
-  return (
-    root?.querySelector?.(
-      selector
-    ) || null
-  );
+function isFn(value) {
+  return typeof value === "function";
 }
 
-function safeText(
-  value,
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text = String(
-    value
-  ).trim();
-
-  return text || fallback;
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
 }
 
-function toggleClass(
-  node,
-  className,
-  active = false
-) {
-  if (
-    !node ||
-    !className
-  ) {
-    return;
-  }
+function toResetRefs(refs = {}) {
+  const passwordInput = refs.passwordInput || refs.newPasswordInput || null;
+  const backToLoginLink = refs.backToLoginLink || refs.backLink || null;
 
-  node.classList.toggle(
-    className,
-    Boolean(active)
-  );
-}
-
-function setText(
-  node,
-  value = ""
-) {
-  if (!node) {
-    return;
-  }
-
-  node.textContent =
-    safeText(value, "");
-}
-
-function setDisabled(
-  node,
-  active = false
-) {
-  if (!node) {
-    return;
-  }
-
-  node.disabled =
-    Boolean(active);
-}
-
-function setInvalid(
-  node,
-  active = false
-) {
-  if (!node) {
-    return;
-  }
-
-  toggleClass(
-    node,
-    "is-invalid",
-    active
-  );
-
-  node.setAttribute(
-    "aria-invalid",
-    active
-      ? "true"
-      : "false"
-  );
-}
-
-function setAriaDisabled(
-  node,
-  active = false
-) {
-  if (!node) {
-    return;
-  }
-
-  node.setAttribute(
-    "aria-disabled",
-    active
-      ? "true"
-      : "false"
-  );
-}
-
-function resolvePasswordFieldByInput(
-  root,
-  inputId = ""
-) {
-  const input = qs(
-    root,
-    `#${inputId}`
-  );
-
-  if (!input) {
-    return {
-      input: null,
-      field: null,
-      toggle: null,
-      caps: null,
-    };
-  }
-
-  const field =
-    input.closest(
-      '[data-password-field="true"]'
-    ) ||
-    input.closest(
-      ".login-field"
-    );
+  const passwordToggleButtons = Array.isArray(refs.passwordToggleButtons)
+    ? refs.passwordToggleButtons
+    : [
+        refs.togglePasswordButton,
+        refs.toggleNewPasswordButton,
+        refs.toggleConfirmPasswordButton,
+      ].filter(Boolean);
 
   return {
-    input,
-    field,
-    toggle: qs(
-      field,
-      '[data-password-toggle="true"]'
-    ),
-    caps: qs(
-      field,
-      '[data-password-caps="true"]'
-    ),
+    ...refs,
+
+    passwordInput,
+    newPasswordInput: passwordInput,
+    confirmPasswordInput: refs.confirmPasswordInput || null,
+
+    backToLoginLink,
+
+    fieldPassword: refs.fieldPassword || refs.fieldNewPassword || null,
+    fieldConfirmPassword: refs.fieldConfirmPassword || null,
+
+    passwordToggleButtons,
   };
 }
 
-function getBoundPasswordField(
-  bindings = [],
-  inputId = ""
-) {
-  return (
-    bindings.find(
-      (entry) =>
-        entry?.input?.id ===
-        inputId
-    ) || null
-  );
+function toConfirmRefs(refs = {}) {
+  const resetRefs = toResetRefs(refs);
+  const toggles = resetRefs.passwordToggleButtons || [];
+
+  return {
+    ...resetRefs,
+
+    card:
+      resetRefs.card ||
+      resetRefs.root?.querySelector?.(".auth-card, .password-reset-card") ||
+      null,
+
+    tokenInput: resetRefs.tokenInput || null,
+
+    passwordInput: resetRefs.passwordInput || null,
+    newPasswordInput: resetRefs.passwordInput || null,
+    confirmPasswordInput: resetRefs.confirmPasswordInput || null,
+
+    backLink: resetRefs.backToLoginLink || null,
+
+    fieldPassword: resetRefs.fieldPassword || null,
+    fieldNewPassword: resetRefs.fieldPassword || null,
+    fieldConfirmPassword: resetRefs.fieldConfirmPassword || null,
+
+    togglePasswordButton: toggles[0] || null,
+    toggleNewPasswordButton: toggles[0] || null,
+    toggleConfirmPasswordButton: toggles[1] || null,
+
+    capsIndicator: null,
+    newPasswordCapsIndicator: null,
+    confirmCapsIndicator: null,
+
+    passwordField: resetRefs.passwordFieldBindings?.[0] || null,
+    confirmPasswordField: resetRefs.passwordFieldBindings?.[1] || null,
+  };
+}
+
+/* =========================================================
+   PASSWORD FIELD
+========================================================= */
+
+export function bindConfirmPasswordFields(container = null, options = {}) {
+  return bindResetPasswordFields(container, options);
+}
+
+export function destroyConfirmPasswordFields(container = null) {
+  return destroyResetPasswordFields(container);
 }
 
 /* =========================================================
    REFS
 ========================================================= */
 
-export function getConfirmRefs(
-  container
-) {
-  const root =
-    qs(
-      container,
-      ".confirm-reset-view"
-    ) ||
-    qs(
-      container,
-      '[data-confirm-reset-view="true"]'
-    ) ||
-    qs(
-      container,
-      '[data-view="reset-password-confirm"]'
-    ) ||
-    container;
-
-  const passwordFieldBindings =
-    bindPasswordFieldsInScope(
-      root || container || document
-    );
-
-  const boundNewPasswordField =
-    getBoundPasswordField(
-      passwordFieldBindings,
-      "newPassword"
-    );
-
-  const boundConfirmPasswordField =
-    getBoundPasswordField(
-      passwordFieldBindings,
-      "confirmPassword"
-    );
-
-  const fallbackNewPasswordField =
-    resolvePasswordFieldByInput(
-      root,
-      "newPassword"
-    );
-
-  const fallbackConfirmPasswordField =
-    resolvePasswordFieldByInput(
-      root,
-      "confirmPassword"
-    );
-
-  const newPasswordField =
-    boundNewPasswordField || fallbackNewPasswordField;
-
-  const confirmPasswordField =
-    boundConfirmPasswordField || fallbackConfirmPasswordField;
-
-  return {
-    container,
-    root,
-
-    form:
-      qs(
-        root,
-        "#confirmResetForm"
-      ),
-
-    card:
-      qs(
-        root,
-        "#confirmResetCard"
-      ),
-
-    tokenInput:
-      qs(
-        root,
-        "#resetToken"
-      ),
-
-    passwordInput:
-      newPasswordField?.input ||
-      null,
-
-    newPasswordInput:
-      newPasswordField?.input ||
-      null,
-
-    confirmPasswordInput:
-      confirmPasswordField?.input ||
-      null,
-
-    submitButton:
-      qs(
-        root,
-        "#confirmResetButton"
-      ),
-
-    errorBox:
-      qs(
-        root,
-        "#confirmResetError"
-      ),
-
-    backLink:
-      qs(
-        root,
-        "#confirmBackToLogin"
-      ),
-
-    fieldPassword:
-      newPasswordField?.field ||
-      qs(
-        root,
-        '[data-field="password"]'
-      ),
-
-    fieldNewPassword:
-      newPasswordField?.field ||
-      qs(
-        root,
-        '[data-field="password"]'
-      ),
-
-    fieldConfirmPassword:
-      confirmPasswordField?.field ||
-      qs(
-        root,
-        '[data-field="confirm-password"]'
-      ),
-
-    togglePasswordButton:
-      newPasswordField?.toggle ||
-      null,
-
-    toggleNewPasswordButton:
-      newPasswordField?.toggle ||
-      null,
-
-    toggleConfirmPasswordButton:
-      confirmPasswordField?.toggle ||
-      null,
-
-    capsIndicator:
-      newPasswordField?.caps ||
-      null,
-
-    newPasswordCapsIndicator:
-      newPasswordField?.caps ||
-      null,
-
-    confirmCapsIndicator:
-      confirmPasswordField?.caps ||
-      null,
-
-    passwordFieldBindings,
-    passwordField:
-      boundNewPasswordField || null,
-    confirmPasswordField:
-      boundConfirmPasswordField || null,
-  };
+export function getConfirmRefs(container = null) {
+  return toConfirmRefs(getResetPasswordRefs(container));
 }
 
 /* =========================================================
    ERRORS
 ========================================================= */
 
-export function clearConfirmErrors(
-  refs = {}
-) {
-  setInvalid(
-    refs.passwordInput,
-    false
-  );
+export function clearConfirmErrors(refs = {}) {
+  return clearResetPasswordErrors(toResetRefs(refs));
+}
 
-  setInvalid(
-    refs.newPasswordInput,
-    false
-  );
+export function applyConfirmErrors(refs = {}, errors = {}, options = {}) {
+  return applyResetPasswordErrors(
+    toResetRefs(refs),
+    {
+      password:
+        text(errors.password, "") ||
+        text(errors.newPassword, ""),
 
-  setInvalid(
-    refs.confirmPasswordInput,
-    false
-  );
+      confirmPassword:
+        text(errors.confirmPassword, "") ||
+        text(errors.confirm, "") ||
+        text(errors.passwordConfirm, ""),
 
-  toggleClass(
-    refs.fieldPassword,
-    "is-invalid",
-    false
-  );
-
-  toggleClass(
-    refs.fieldNewPassword,
-    "is-invalid",
-    false
-  );
-
-  toggleClass(
-    refs.fieldConfirmPassword,
-    "is-invalid",
-    false
-  );
-
-  setText(
-    refs.errorBox,
-    ""
+      global:
+        text(errors.global, "") ||
+        text(errors.token, "") ||
+        text(errors.message, ""),
+    },
+    options
   );
 }
 
-export function applyConfirmErrors(
-  refs = {},
-  errors = {}
-) {
-  const passwordError =
-    safeText(
-      errors.password,
-      ""
-    ) ||
-    safeText(
-      errors.newPassword,
-      ""
-    );
-
-  const confirmError =
-    safeText(
-      errors.confirmPassword,
-      ""
-    ) ||
-    safeText(
-      errors.confirm,
-      ""
-    );
-
-  const tokenError =
-    safeText(
-      errors.token,
-      ""
-    );
-
-  const globalError =
-    safeText(
-      errors.global,
-      ""
-    );
-
-  if (passwordError) {
-    setInvalid(
-      refs.passwordInput,
-      true
-    );
-
-    setInvalid(
-      refs.newPasswordInput,
-      true
-    );
-
-    toggleClass(
-      refs.fieldPassword,
-      "is-invalid",
-      true
-    );
-
-    toggleClass(
-      refs.fieldNewPassword,
-      "is-invalid",
-      true
-    );
-  }
-
-  if (confirmError) {
-    setInvalid(
-      refs.confirmPasswordInput,
-      true
-    );
-
-    toggleClass(
-      refs.fieldConfirmPassword,
-      "is-invalid",
-      true
-    );
-  }
-
-  setText(
-    refs.errorBox,
-    globalError ||
-      tokenError ||
-      passwordError ||
-      confirmError
-  );
-}
-
-export function setGlobalConfirmError(
-  refs = {},
-  message = ""
-) {
-  setText(
-    refs.errorBox,
-    message
-  );
+export function setGlobalConfirmError(refs = {}, message = "") {
+  return setGlobalResetPasswordError(toResetRefs(refs), message);
 }
 
 /* =========================================================
-   LOADING
+   LOADING / SUCCESS
 ========================================================= */
 
-export function setConfirmLoading(
-  refs = {},
-  loading = false,
-  options = {}
-) {
-  const isLoading =
-    Boolean(loading);
+export function setConfirmLoading(refs = {}, loading = false, options = {}) {
+  return setResetPasswordLoading(toResetRefs(refs), loading, {
+    submitLabel: "Actualizar contraseña",
+    loadingLabel: "Procesando...",
+    ...options,
+  });
+}
 
-  const submitLabel =
-    safeText(
-      options.submitLabel,
-      "Actualizar contraseña"
-    );
-
-  const loadingLabel =
-    safeText(
-      options.loadingLabel,
-      "Procesando..."
-    );
-
-  if (refs.form) {
-    refs.form.setAttribute(
-      "aria-busy",
-      isLoading
-        ? "true"
-        : "false"
-    );
-
-    refs.form.dataset.submitting =
-      String(isLoading);
-  }
-
-  /*
-    No deshabilitamos los campos password
-    ni los toggles del sistema compartido
-    para no romper eye / caps ni la UX.
-  */
-  setDisabled(
-    refs.tokenInput,
-    isLoading
-  );
-
-  if (refs.submitButton) {
-    refs.submitButton.disabled =
-      isLoading;
-
-    refs.submitButton.dataset.loading =
-      String(
-        isLoading
-      );
-
-    refs.submitButton.innerHTML =
-      isLoading
-        ? `
-          <span class="login-view__spinner" aria-hidden="true"></span>
-          <span class="login-submit-text">${loadingLabel}</span>
-        `
-        : `<span class="login-submit-text">${submitLabel}</span>`;
-  }
-
-  if (refs.backLink) {
-    setAriaDisabled(
-      refs.backLink,
-      isLoading
-    );
-
-    toggleClass(
-      refs.backLink,
-      "is-disabled",
-      isLoading
-    );
-
-    refs.backLink.tabIndex =
-      isLoading
-        ? -1
-        : 0;
-  }
+export function setConfirmSuccessState(refs = {}, message = "") {
+  return setResetPasswordSuccessState(toResetRefs(refs), {
+    message: text(message, "Contraseña actualizada correctamente."),
+  });
 }
 
 /* =========================================================
-   SUCCESS
+   FOCUS / FORM STATE
 ========================================================= */
 
-export function setConfirmSuccessState(
-  refs = {},
-  message = ""
-) {
-  setConfirmLoading(
-    refs,
-    false
-  );
-
-  setDisabled(
-    refs.passwordInput,
-    true
-  );
-
-  setDisabled(
-    refs.newPasswordInput,
-    true
-  );
-
-  setDisabled(
-    refs.confirmPasswordInput,
-    true
-  );
-
-  setDisabled(
-    refs.togglePasswordButton,
-    true
-  );
-
-  setDisabled(
-    refs.toggleNewPasswordButton,
-    true
-  );
-
-  setDisabled(
-    refs.toggleConfirmPasswordButton,
-    true
-  );
-
-  setDisabled(
-    refs.submitButton,
-    true
-  );
-
-  if (
-    refs.submitButton
-  ) {
-    refs.submitButton.dataset.loading =
-      "false";
-
-    refs.submitButton.innerHTML =
-      `<span class="login-submit-text">Actualizado</span>`;
-  }
-
-  setText(
-    refs.errorBox,
-    message
-  );
-
-  refs.form?.setAttribute(
-    "data-success",
-    "true"
-  );
+export function focusConfirmPrimaryField(refs = {}, options = {}) {
+  return focusResetPasswordPrimaryField(toResetRefs(refs), {
+    ...options,
+    mode: "confirm",
+  });
 }
 
-/* =========================================================
-   FOCUS
-========================================================= */
+export function readConfirmFormState(refs = {}) {
+  const state = readResetPasswordFormState(toResetRefs(refs));
 
-export function focusConfirmPrimaryField(
-  refs = {}
-) {
-  queueMicrotask(
-    () => {
-      try {
-        refs.passwordInput?.focus?.();
-      } catch {}
-    }
-  );
-}
-
-/* =========================================================
-   FORM SNAPSHOT
-========================================================= */
-
-export function readConfirmFormState(
-  refs = {}
-) {
   return {
-    token:
-      safeText(
-        refs.tokenInput
-          ?.value,
-        ""
-      ),
+    token: state.token || "",
 
-    password:
-      String(
-        refs.passwordInput
-          ?.value || ""
-      ),
+    password: state.password || "",
+    newPassword: state.password || "",
 
-    newPassword:
-      String(
-        refs.newPasswordInput
-          ?.value || ""
-      ),
-
-    confirmPassword:
-      String(
-        refs
-          .confirmPasswordInput
-          ?.value || ""
-      ),
+    confirmPassword: state.confirmPassword || "",
+    passwordConfirm: state.confirmPassword || "",
   };
 }
 
@@ -691,72 +213,59 @@ export function readConfirmFormState(
    BINDS
 ========================================================= */
 
-function bind(
-  node,
-  eventName,
-  handler
-) {
-  if (
-    !node ||
-    typeof handler !==
-      "function"
-  ) {
-    return () => {};
-  }
+export function bindConfirmSubmit(refs = {}, handler = null) {
+  return bindResetPasswordSubmit(toResetRefs(refs), handler);
+}
 
-  node.addEventListener(
-    eventName,
-    handler
-  );
+export function bindConfirmInputClearers(refs = {}, handler = null) {
+  return bindResetPasswordInputClearers(toResetRefs(refs), handler);
+}
 
-  return () => {
-    node.removeEventListener(
-      eventName,
-      handler
-    );
+export function bindConfirmBack(refs = {}, handler = null) {
+  return bindResetPasswordBackLink(toResetRefs(refs), handler);
+}
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
+export function getConfirmDomSnapshot(refs = {}) {
+  const snapshot = isFn(getResetPasswordDomSnapshot)
+    ? getResetPasswordDomSnapshot(toResetRefs(refs))
+    : {};
+
+  return {
+    ...snapshot,
+    version: CONFIRM_DOM_VERSION,
+    confirmCompat: true,
   };
 }
 
-export function bindConfirmSubmit(
-  refs = {},
-  handler
-) {
-  return bind(
-    refs.form,
-    "submit",
-    handler
-  );
-}
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
-export function bindConfirmInputClearers(
-  refs = {},
-  handler
-) {
-  const off1 = bind(
-    refs.passwordInput,
-    "input",
-    handler
-  );
+export default {
+  CONFIRM_DOM_VERSION,
 
-  const off2 = bind(
-    refs.confirmPasswordInput,
-    "input",
-    handler
-  );
+  getConfirmRefs,
 
-  return () => {
-    off1();
-    off2();
-  };
-}
+  bindConfirmPasswordFields,
+  destroyConfirmPasswordFields,
 
-export function bindConfirmBack(
-  refs = {},
-  handler
-) {
-  return bind(
-    refs.backLink,
-    "click",
-    handler
-  );
-}
+  clearConfirmErrors,
+  applyConfirmErrors,
+  setGlobalConfirmError,
+
+  setConfirmLoading,
+  setConfirmSuccessState,
+
+  focusConfirmPrimaryField,
+  readConfirmFormState,
+
+  bindConfirmSubmit,
+  bindConfirmInputClearers,
+  bindConfirmBack,
+
+  getConfirmDomSnapshot,
+};

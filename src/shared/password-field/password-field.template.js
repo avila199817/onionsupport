@@ -6,29 +6,39 @@
    - Renderer puro del password-field compartido.
    - Pintar label + input password + toggle eye.
    - Pintar CapsLock opcional.
+   - Textos base en castellano.
    - Sin DOM.
    - Sin listeners.
    - Sin AppCore.
+   - Sin Auth.
+   - Sin Router.
+   - Sin Store.
+   - Sin Toast.
    - Sin CSS inline.
    - Sin handlers inline.
+   - Sin value sensible en markup.
    - Sin lógica duplicada.
 ========================================================= */
 
-export const PASSWORD_FIELD_TEMPLATE_VERSION = "minimal-4";
+export const PASSWORD_FIELD_TEMPLATE_VERSION = "password-field.template.v1";
 
 const DEFAULT_ID = "passwordInput";
 const DEFAULT_NAME = "password";
+
 const DEFAULT_FIELD_CLASS = "login-field";
 const DEFAULT_WRAPPER_CLASS = "password-wrapper";
 const DEFAULT_INPUT_CLASS = "input-text";
 const DEFAULT_LABEL_CLASS = "password-label";
 const DEFAULT_TOGGLE_CLASS = "password-toggle";
 const DEFAULT_ICON_CLASS = "password-toggle-icon";
+
 const DEFAULT_CAPS_CLASS = "password-caps";
 const DEFAULT_CAPS_ICON_CLASS = "caps-icon";
 const DEFAULT_CAPS_LABEL_CLASS = "caps-label";
+
 const DEFAULT_PLACEHOLDER = "Contraseña";
 const DEFAULT_AUTOCOMPLETE = "current-password";
+
 const DEFAULT_SHOW_LABEL = "Mostrar contraseña";
 const DEFAULT_HIDE_LABEL = "Ocultar contraseña";
 const DEFAULT_CAPS_LABEL = "Bloq Mayús";
@@ -57,11 +67,6 @@ function text(value = "", fallback = "") {
     .trim();
 
   return output || fallback;
-}
-
-function rawText(value = "", fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  return String(value);
 }
 
 function bool(value, fallback = false) {
@@ -100,11 +105,13 @@ function cleanClass(value = "", fallback = "") {
 }
 
 function cleanDataName(value = "", fallback = "password") {
-  return text(value, fallback)
-    .replace(/[^\w.-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^[.-]+|[.-]+$/g, "")
-    .slice(0, 80) || fallback;
+  return (
+    text(value, fallback)
+      .replace(/[^\w.-]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^[.-]+|[.-]+$/g, "")
+      .slice(0, 80) || fallback
+  );
 }
 
 function cleanDataKey(value = "") {
@@ -127,7 +134,9 @@ function dataAttrs(attrs = {}, blocked = []) {
       const dataKey = cleanDataKey(key);
 
       if (!dataKey || blockedKeys.has(dataKey)) return "";
-      if (value === null || value === undefined || value === false || value === "") return "";
+      if (value === null || value === undefined || value === false || value === "") {
+        return "";
+      }
 
       return ` data-${dataKey}="${escapeHtml(value === true ? "true" : value)}"`;
     })
@@ -162,14 +171,14 @@ export function getEyeIcon(options = {}) {
         stroke="currentColor"
         stroke-width="1.8"
         stroke-linejoin="round"
-      />
+      ></path>
       <circle
         cx="12"
         cy="12"
         r="2.7"
         stroke="currentColor"
         stroke-width="1.8"
-      />
+      ></circle>
     </svg>
   `;
 }
@@ -193,28 +202,28 @@ export function getEyeOffIcon(options = {}) {
         stroke="currentColor"
         stroke-width="1.8"
         stroke-linecap="round"
-      />
+      ></path>
       <path
         d="M10.58 5.63A10.5 10.5 0 0 1 12 5.55c6 0 9.25 6 9.25 6a15.72 15.72 0 0 1-3.48 4.11"
         stroke="currentColor"
         stroke-width="1.8"
         stroke-linecap="round"
         stroke-linejoin="round"
-      />
+      ></path>
       <path
         d="M6.2 8.12A15.18 15.18 0 0 0 2.75 11.55s3.25 6 9.25 6c1.36 0 2.59-.3 3.7-.79"
         stroke="currentColor"
         stroke-width="1.8"
         stroke-linecap="round"
         stroke-linejoin="round"
-      />
+      ></path>
       <path
         d="M9.88 9.96A2.9 2.9 0 0 0 9.3 11.7a2.7 2.7 0 0 0 4.57 1.96"
         stroke="currentColor"
         stroke-width="1.8"
         stroke-linecap="round"
         stroke-linejoin="round"
-      />
+      ></path>
     </svg>
   `;
 }
@@ -236,13 +245,13 @@ export function getCapsIcon() {
         stroke="currentColor"
         stroke-width="1.8"
         stroke-linejoin="round"
-      />
+      ></path>
       <path
         d="M8 18.5h8"
         stroke="currentColor"
         stroke-width="1.8"
         stroke-linecap="round"
-      />
+      ></path>
     </svg>
   `;
 }
@@ -278,8 +287,16 @@ function normalizeOptions(options = {}) {
     inputId,
     inputName,
 
-    toggleId: cleanId(opts.toggleId || opts.buttonId || `${inputId}Toggle`, `${inputId}Toggle`),
-    capsId: cleanId(opts.capsId || opts.capsIndicatorId || `${inputId}Caps`, `${inputId}Caps`),
+    toggleId: cleanId(
+      opts.toggleId || opts.buttonId || `${inputId}Toggle`,
+      `${inputId}Toggle`
+    ),
+
+    capsId: cleanId(
+      opts.capsId || opts.capsIndicatorId || `${inputId}Caps`,
+      `${inputId}Caps`
+    ),
+
     fieldRootId: cleanId(opts.fieldRootId || opts.rootId, ""),
     wrapperId: cleanId(opts.wrapperId, ""),
 
@@ -337,7 +354,6 @@ function normalizeOptions(options = {}) {
     ),
 
     autocomplete: text(opts.autocomplete, DEFAULT_AUTOCOMPLETE),
-    value: rawText(opts.value, ""),
 
     required: opts.required !== false,
     disabled: bool(opts.disabled, false),
@@ -377,7 +393,9 @@ function normalizeOptions(options = {}) {
         ? opts.fieldDataAttrs
         : {},
 
-    wrapperDataAttrs: isObject(opts.wrapperDataAttrs) ? opts.wrapperDataAttrs : {},
+    wrapperDataAttrs: isObject(opts.wrapperDataAttrs)
+      ? opts.wrapperDataAttrs
+      : {},
 
     inputDataAttrs: {
       ...(isObject(opts.dataAttrs) ? opts.dataAttrs : {}),
@@ -401,7 +419,9 @@ function renderLabel(data) {
       class="${escapeHtml(data.labelClass)}"
       for="${escapeHtml(data.inputId)}"
       data-password-label="true"
-    >${escapeHtml(data.label)}</label>
+    >
+      ${escapeHtml(data.label)}
+    </label>
   `;
 }
 
@@ -419,7 +439,6 @@ function renderInput(data) {
       placeholder="${escapeHtml(data.placeholder)}"
       aria-label="${escapeHtml(data.ariaLabel)}"
       aria-invalid="false"
-      value="${escapeHtml(data.value)}"
       data-password-input="true"
       data-login-password="true"
       data-password-role="${escapeHtml(data.fieldDataName)}"
@@ -433,7 +452,7 @@ function renderInput(data) {
         "login-password",
         "password-role",
       ])}
-    />
+    >
   `;
 }
 
@@ -495,11 +514,16 @@ function renderCapsIndicator(data) {
         class="${escapeHtml(data.capsIconClass)}"
         aria-hidden="true"
         data-password-caps-icon-wrapper="true"
-      >${getCapsIcon()}</span>
+      >
+        ${getCapsIcon()}
+      </span>
+
       <span
         class="${escapeHtml(data.capsLabelClass)}"
         data-password-caps-label="true"
-      >${escapeHtml(data.capsLabel)}</span>
+      >
+        ${escapeHtml(data.capsLabel)}
+      </span>
     </span>
   `;
 }

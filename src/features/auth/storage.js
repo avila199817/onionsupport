@@ -4,8 +4,9 @@
 
    Responsabilidad:
    - Storage mínimo de Auth.
-   - Claves concretas.
-   - Fallback memory.
+   - Persistir token para soportar reload.
+   - Persistir contexto auxiliar mínimo no canónico.
+   - No autenticar por sí mismo.
    - Nunca storage.clear().
    - Sin AppCore.
    - Sin Router.
@@ -14,6 +15,7 @@
    - Sin legacy masivo.
    - Sin 2FA/MFA/OTP.
    - Sin temp token real.
+   - Sin inventar slug.
 ========================================================= */
 
 import {
@@ -21,7 +23,7 @@ import {
   AUTH_CONSTANTS,
 } from "./constants.js";
 
-export const AUTH_STORAGE_VERSION = "simple";
+export const AUTH_STORAGE_VERSION = "auth.storage.v1";
 
 const PREFIX = "onion:auth:";
 
@@ -29,17 +31,21 @@ const memory = new Map();
 
 let lastStorageError = null;
 
+/* =========================================================
+   KEYS
+========================================================= */
+
 const KEYS = Object.freeze({
   token: AUTH_STORAGE_KEYS?.token || "token",
   accessToken: AUTH_STORAGE_KEYS?.accessToken || "access_token",
   refreshToken: AUTH_STORAGE_KEYS?.refreshToken || "refresh_token",
 
-  user: AUTH_STORAGE_KEYS?.user || "user",
   role: AUTH_STORAGE_KEYS?.role || "role",
 
   sessionId: "session_id",
   sessionUserId: "session_user_id",
   userId: "user_id",
+
   userSlug: "user_slug",
   userName: "user_name",
   username: "username",
@@ -56,12 +62,12 @@ const CLEAR_KEYS = Object.freeze([
   KEYS.accessToken,
   KEYS.refreshToken,
 
-  KEYS.user,
   KEYS.role,
 
   KEYS.sessionId,
   KEYS.sessionUserId,
   KEYS.userId,
+
   KEYS.userSlug,
   KEYS.userName,
   KEYS.username,
@@ -119,7 +125,7 @@ function key(name = "") {
   return clean ? `${PREFIX}${clean}` : "";
 }
 
-function local() {
+function localStore() {
   try {
     return isBrowser() ? window.localStorage : null;
   } catch (error) {
@@ -128,7 +134,7 @@ function local() {
   }
 }
 
-function session() {
+function sessionStore() {
   try {
     return isBrowser() ? window.sessionStorage : null;
   } catch (error) {
@@ -136,6 +142,10 @@ function session() {
     return null;
   }
 }
+
+/* =========================================================
+   RAW STORAGE
+========================================================= */
 
 function readFrom(storage, name = "") {
   if (!storage || !name) return "";
@@ -189,8 +199,8 @@ function removeMemory(name = "") {
 
 function readRaw(name = "") {
   return (
-    readFrom(local(), name) ||
-    readFrom(session(), name) ||
+    readFrom(sessionStore(), name) ||
+    readFrom(localStore(), name) ||
     readMemory(name) ||
     ""
   );
@@ -202,11 +212,19 @@ function writeRaw(name = "", value = "", options = {}) {
   if (!name) return false;
   if (!clean) return removeRaw(name);
 
-  const storage = options.session === true ? session() : local();
+  const useSession = options.session === true || options.storage === "session";
 
-  const ok =
-    writeTo(storage, name, clean) ||
-    writeMemory(name, clean);
+  const primary = useSession ? sessionStore() : localStore();
+  const secondary = useSession ? localStore() : sessionStore();
+
+  /*
+    Evita token viejo en localStorage cuando se usa sesión,
+    y evita token viejo en sessionStorage cuando se usa persistente.
+  */
+  removeFrom(secondary, name);
+  removeMemory(name);
+
+  const ok = writeTo(primary, name, clean) || writeMemory(name, clean);
 
   return Boolean(ok);
 }
@@ -214,8 +232,8 @@ function writeRaw(name = "", value = "", options = {}) {
 function removeRaw(name = "") {
   if (!name) return false;
 
-  removeFrom(local(), name);
-  removeFrom(session(), name);
+  removeFrom(localStore(), name);
+  removeFrom(sessionStore(), name);
   removeMemory(name);
 
   return true;
@@ -306,7 +324,17 @@ function normalizeSessionValue(value = null) {
 }
 
 function normalizeRole(value = "") {
-  return String(value).toLowerCase() === "admin" ? "admin" : "user";
+  const role = String(value || "").toLowerCase();
+
+  return role === "admin" || role === "user" ? role : "";
+}
+
+function normalizeSlug(value = "") {
+  const slug = text(value, "").replace(/^@+/, "").trim();
+
+  if (!slug) return "";
+
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
 function normalizeRoute(value = "") {
@@ -320,6 +348,95 @@ function normalizeRoute(value = "") {
   if (/[\r\n\t\\]/.test(route)) return "";
 
   return route;
+}
+
+function extractRealUserSlug(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeSlug(
+    user.slug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      ""
+  );
+}
+
+function extractUsername(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeText(
+    user.username ||
+      user.userName ||
+      user.user_name ||
+      ""
+  );
+}
+
+function extractUserId(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeSessionValue(user.userId || user.id || "");
+}
+
+/* =========================================================
+   PAYLOAD HELPERS
+========================================================= */
+
+function nested(payload = {}) {
+  const source = isObject(payload) ? payload : {};
+
+  return [
+    source,
+    isObject(source.data) ? source.data : null,
+    isObject(source.payload) ? source.payload : null,
+    isObject(source.result) ? source.result : null,
+    isObject(source.auth) ? source.auth : null,
+    isObject(source.session) ? source.session : null,
+    isObject(source.sessionData) ? source.sessionData : null,
+  ].filter(Boolean);
+}
+
+function pick(nodes = [], keys = []) {
+  for (const node of nodes) {
+    for (const name of keys) {
+      const value = node?.[name];
+
+      if (value !== undefined && value !== null && value !== "") {
+        return value;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function readUserFromPayload(payload = {}) {
+  for (const node of nested(payload)) {
+    const user =
+      node.user ||
+      node.usuario ||
+      node.me ||
+      node.account ||
+      node.profile ||
+      null;
+
+    if (isObject(user)) return user;
+  }
+
+  return isObject(payload) ? payload : null;
+}
+
+function readSessionFromPayload(payload = {}) {
+  for (const node of nested(payload)) {
+    const session =
+      node.session ||
+      node.sessionData ||
+      null;
+
+    if (isObject(session)) return session;
+  }
+
+  return null;
 }
 
 /* =========================================================
@@ -349,6 +466,12 @@ export function hasAccessToken() {
   return Boolean(getStoredAccessToken());
 }
 
+export function removeStoredAccessToken() {
+  removeRaw(KEYS.token);
+  removeRaw(KEYS.accessToken);
+  return true;
+}
+
 export function persistRefreshToken(token = null, options = {}) {
   const value = normalizeToken(token);
 
@@ -368,7 +491,14 @@ export function hasRefreshToken() {
   return Boolean(getStoredRefreshToken());
 }
 
-/* Compat: no hay temp token / 2FA / MFA / OTP en el SPA mínimo actual. */
+export function removeStoredRefreshToken() {
+  return removeRaw(KEYS.refreshToken);
+}
+
+/*
+  Compat explícita:
+  No hay temp token / 2FA / MFA / OTP en esta fase.
+*/
 export function persistTempToken() {
   return false;
 }
@@ -397,15 +527,12 @@ export function persistSessionContext(sessionData = null, user = null, options =
       ""
   );
 
-  const sessionUserId = normalizeSessionValue(
+  const userId = normalizeSessionValue(
     data.sessionUserId ||
       data.session_user_id ||
       data.userId ||
       data.user_id ||
-      safeUser.userId ||
-      safeUser.id ||
-      safeUser.email ||
-      safeUser.username ||
+      extractUserId(safeUser) ||
       ""
   );
 
@@ -415,9 +542,9 @@ export function persistSessionContext(sessionData = null, user = null, options =
     removeRaw(KEYS.sessionId);
   }
 
-  if (sessionUserId) {
-    writeRaw(KEYS.sessionUserId, sessionUserId, options);
-    writeRaw(KEYS.userId, sessionUserId, options);
+  if (userId) {
+    writeRaw(KEYS.sessionUserId, userId, options);
+    writeRaw(KEYS.userId, userId, options);
   } else {
     removeRaw(KEYS.sessionUserId);
     removeRaw(KEYS.userId);
@@ -427,20 +554,20 @@ export function persistSessionContext(sessionData = null, user = null, options =
     sessionId: sessionId || null,
     session_id: sessionId || null,
 
-    userId: sessionUserId || null,
-    user_id: sessionUserId || null,
+    userId: userId || null,
+    user_id: userId || null,
 
-    sessionUserId: sessionUserId || null,
-    session_user_id: sessionUserId || null,
+    sessionUserId: userId || null,
+    session_user_id: userId || null,
   };
 }
 
 export function persistAuxSessionData(user = null, options = {}) {
   if (!isObject(user)) return false;
 
-  const userId = normalizeSessionValue(user.userId || user.id || user.email || user.username || "");
-  const username = normalizeText(user.username || user.slug || user.email || user.name || "");
-  const slug = normalizeText(user.slug || user.username || user.email || "");
+  const userId = extractUserId(user);
+  const username = extractUsername(user);
+  const slug = extractRealUserSlug(user);
   const role = normalizeRole(user.role || user.rol || "");
 
   if (userId) {
@@ -454,12 +581,20 @@ export function persistAuxSessionData(user = null, options = {}) {
     writeRaw(KEYS.lastUsername, username, options);
   }
 
+  /*
+    Slug real únicamente.
+    No se usa username/email/name/id como fallback.
+  */
   if (slug) {
     writeRaw(KEYS.userSlug, slug, options);
+  } else {
+    removeRaw(KEYS.userSlug);
   }
 
   if (role) {
     writeRaw(KEYS.role, role, options);
+  } else {
+    removeRaw(KEYS.role);
   }
 
   return true;
@@ -502,11 +637,97 @@ export function hasCompleteRefreshContext() {
 }
 
 /* =========================================================
+   AUTH PAYLOAD STORAGE
+========================================================= */
+
+export function persistAuthStorage(payload = {}, options = {}) {
+  const nodes = nested(payload);
+  const user = readUserFromPayload(payload);
+  const sessionData = readSessionFromPayload(payload);
+
+  const accessToken = normalizeToken(
+    pick(nodes, [
+      "token",
+      "accessToken",
+      "access_token",
+    ])
+  );
+
+  const refreshToken = normalizeToken(
+    pick(nodes, [
+      "refreshToken",
+      "refresh_token",
+    ])
+  );
+
+  const accessStored = persistAccessToken(accessToken, options);
+
+  if (refreshToken) {
+    persistRefreshToken(refreshToken, options);
+  } else if (options.clearMissingRefreshToken === true) {
+    removeStoredRefreshToken();
+  }
+
+  persistSessionContext(sessionData, user, options);
+  persistAuxSessionData(user, options);
+
+  return {
+    ok: accessStored,
+    hasAccessToken: hasAccessToken(),
+    hasRefreshToken: hasRefreshToken(),
+    hasSessionContext: hasSessionContext(),
+    userSlug: getStoredUserSlug() || null,
+    role: getStoredRole() || null,
+  };
+}
+
+export function getStoredAuthPayload() {
+  const token = getStoredAccessToken();
+  const refreshToken = getStoredRefreshToken();
+  const sessionContext = getStoredSessionContext();
+  const userSlug = getStoredUserSlug();
+  const role = getStoredRole();
+
+  return {
+    token: token || null,
+    accessToken: token || null,
+    access_token: token || null,
+
+    refreshToken: refreshToken || null,
+    refresh_token: refreshToken || null,
+
+    userSlug: userSlug || null,
+
+    role: role || null,
+    rol: role || null,
+    roles: role ? [role] : [],
+
+    session: hasSessionContext()
+      ? {
+          ...sessionContext,
+          userSlug: userSlug || null,
+        }
+      : null,
+
+    /*
+      Importante:
+      No devolvemos user fabricado.
+      Restore debe usar token -> /me -> user canónico.
+    */
+    user: null,
+  };
+}
+
+export function hasStoredAuthPayload() {
+  return hasAccessToken();
+}
+
+/* =========================================================
    AUX VALUES
 ========================================================= */
 
 export function getStoredUserSlug() {
-  return normalizeText(readRaw(KEYS.userSlug));
+  return normalizeSlug(readRaw(KEYS.userSlug));
 }
 
 export function getStoredUserName() {
@@ -514,8 +735,7 @@ export function getStoredUserName() {
 }
 
 export function getStoredRole() {
-  const role = normalizeText(readRaw(KEYS.role));
-  return role ? normalizeRole(role) : "";
+  return normalizeRole(readRaw(KEYS.role));
 }
 
 export function getStoredLastUsername() {
@@ -589,6 +809,31 @@ export function repairCorruptedAuthStorage() {
     }
   }
 
+  if (readRaw(KEYS.token) && !getStoredAccessToken()) {
+    removeRaw(KEYS.token);
+    removed += 1;
+  }
+
+  if (readRaw(KEYS.accessToken) && !getStoredAccessToken()) {
+    removeRaw(KEYS.accessToken);
+    removed += 1;
+  }
+
+  if (readRaw(KEYS.refreshToken) && !getStoredRefreshToken()) {
+    removeRaw(KEYS.refreshToken);
+    removed += 1;
+  }
+
+  if (readRaw(KEYS.userSlug) && !getStoredUserSlug()) {
+    removeRaw(KEYS.userSlug);
+    removed += 1;
+  }
+
+  if (readRaw(KEYS.role) && !getStoredRole()) {
+    removeRaw(KEYS.role);
+    removed += 1;
+  }
+
   return {
     ok: true,
     removed,
@@ -615,8 +860,8 @@ export function getAuthStorageSnapshot() {
 
     prefix: PREFIX,
 
-    hasLocalStorage: Boolean(local()),
-    hasSessionStorage: Boolean(session()),
+    hasLocalStorage: Boolean(localStore()),
+    hasSessionStorage: Boolean(sessionStore()),
     memoryFallbackSize: memory.size,
 
     hasAccessToken: Boolean(accessToken),
@@ -638,10 +883,14 @@ export function getAuthStorageSnapshot() {
     hasRefreshContext: hasRefreshContext(),
     hasCompleteRefreshContext: hasCompleteRefreshContext(),
 
+    hasStoredAuthPayload: hasStoredAuthPayload(),
+
     userSlug: getStoredUserSlug() || null,
     userName: getStoredUserName() || null,
     role: getStoredRole() || null,
     lastUsername: getStoredLastUsername() || null,
+
+    redirectAfterLogin: getStoredRedirectAfterLogin() || null,
 
     lastStorageError: lastStorageError
       ? {
@@ -659,6 +908,8 @@ export function getAuthStorageSnapshot() {
       ownSessionLogic: false,
       ownRouter: false,
       ownHttp: false,
+      noFabricatedUser: true,
+      noFabricatedSlug: true,
     },
   };
 }
@@ -673,10 +924,12 @@ export default {
   persistAccessToken,
   getStoredAccessToken,
   hasAccessToken,
+  removeStoredAccessToken,
 
   persistRefreshToken,
   getStoredRefreshToken,
   hasRefreshToken,
+  removeStoredRefreshToken,
 
   persistTempToken,
   getStoredTempToken,
@@ -684,6 +937,10 @@ export default {
 
   persistSessionContext,
   persistAuxSessionData,
+
+  persistAuthStorage,
+  getStoredAuthPayload,
+  hasStoredAuthPayload,
 
   getStoredSessionId,
   getStoredSessionUserId,

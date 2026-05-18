@@ -13,10 +13,12 @@
    - Sin fetch directo.
    - Sin CoreHttp directo.
    - Sin Toast.
-   - Sin password-field compartido.
    - Sin storage.
-   - Sin shell manual complejo.
+   - Sin loader propio.
+   - Sin fallback template.
+   - Sin eventos globales.
    - Sin token real en snapshot.
+   - Sin 2FA/MFA/OTP.
    - Sin magia negra.
 ========================================================= */
 
@@ -25,13 +27,15 @@ import { Auth } from "../../features/auth/index.js";
 
 import * as ActivateTemplate from "./activate-account.template.js";
 
-export const ACTIVATE_ACCOUNT_VIEW_VERSION = "simple";
+export const ACTIVATE_ACCOUNT_VIEW_VERSION = "activate-account.view.v2";
 
 const SOURCE = "activate-account.view";
+
 const ROUTE = "/activate-account";
 const LOGIN_ROUTE = "/login";
+const TOKEN_PARAM = "token";
 
-const INSTANCE_KEY = "__ONION_ACTIVATE_ACCOUNT_VIEW_INSTANCE__";
+const INSTANCES = new WeakMap();
 
 let lastInstance = null;
 
@@ -60,41 +64,42 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function emit(eventName = "", payload = {}) {
-  try {
-    AppCore?.events?.emit?.(eventName, {
-      source: SOURCE,
-      version: ACTIVATE_ACCOUNT_VIEW_VERSION,
-      at: nowIso(),
-      ...payload,
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
+function redact(value = "") {
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 /* =========================================================
    PATH / TOKEN
 ========================================================= */
 
+function normalizeHashPath(path = "/") {
+  const value = text(path, "/");
+
+  if (value.startsWith("#!")) {
+    return value.replace(/^#!\/?/, "/") || "/";
+  }
+
+  if (value.startsWith("#/")) {
+    return value.slice(1) || "/";
+  }
+
+  return value;
+}
+
 function normalizePublicPath(path = "/") {
-  let value = text(path, "/");
+  let value = normalizeHashPath(path);
 
-  if (value.startsWith("#/")) value = value.slice(1);
-  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+  if (value.startsWith("//")) return "/";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return "/";
 
-  if (!value.startsWith("/")) value = `/${value}`;
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
 
-  value = value.replace(/\/{2,}/g, "/");
+  value = value.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
 
   return value || "/";
 }
@@ -103,15 +108,19 @@ function normalizeCanonicalPath(path = "/") {
   let value = normalizePublicPath(path).split("?")[0].split("#")[0] || "/";
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "");
+    value = value.replace(/\/+$/g, "") || "/";
   }
 
   return value || "/";
 }
 
-function currentPath() {
+function currentPublicPath() {
   if (!isBrowser()) {
-    return AppCore?.state?.publicPath || AppCore?.state?.route || ROUTE;
+    return normalizePublicPath(
+      AppCore?.state?.publicPath ||
+        AppCore?.state?.route ||
+        ROUTE
+    );
   }
 
   try {
@@ -129,8 +138,12 @@ function currentPath() {
   }
 }
 
+function currentPath() {
+  return normalizeCanonicalPath(currentPublicPath());
+}
+
 function isActivateRoute() {
-  return normalizeCanonicalPath(currentPath()) === ROUTE;
+  return currentPath() === ROUTE;
 }
 
 function normalizeToken(value = "") {
@@ -138,6 +151,7 @@ function normalizeToken(value = "") {
 
   if (!token) return "";
   if (/\s/.test(token)) return "";
+  if (token.length > 8192) return "";
 
   if (
     ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
@@ -150,34 +164,46 @@ function normalizeToken(value = "") {
   return token;
 }
 
-function tokenFromSearch(search = "") {
-  const raw = text(search, "");
+function tokenFromQuery(query = "") {
+  const raw = text(query, "");
 
   if (!raw) return "";
 
   try {
     const params = new URLSearchParams(raw.startsWith("?") ? raw : `?${raw}`);
-    return normalizeToken(params.get("token"));
+    return normalizeToken(params.get(TOKEN_PARAM));
   } catch {
     return "";
   }
 }
 
-function tokenFromHash(hash = "") {
-  const raw = text(hash, "");
+function tokenFromPath(path = "") {
+  const raw = text(path, "");
 
-  if (!raw || !raw.includes("?")) return "";
+  if (!raw) return "";
 
-  const query = raw.split("?").slice(1).join("?");
+  const query = raw.includes("?")
+    ? raw.split("?").slice(1).join("?").split("#")[0]
+    : "";
 
-  return tokenFromSearch(query ? `?${query}` : "");
+  const hashQuery =
+    raw.includes("#") && raw.split("#").slice(1).join("#").includes("?")
+      ? raw.split("#").slice(1).join("#").split("?").slice(1).join("?")
+      : "";
+
+  return tokenFromQuery(query) || tokenFromQuery(hashQuery);
 }
 
 function getUrlToken() {
-  if (!isBrowser()) return "";
+  if (!isBrowser()) {
+    return tokenFromPath(AppCore?.state?.publicPath || "");
+  }
 
   try {
-    return tokenFromSearch(window.location.search) || tokenFromHash(window.location.hash);
+    return (
+      tokenFromQuery(window.location.search) ||
+      tokenFromQuery((window.location.hash || "").split("?").slice(1).join("?"))
+    );
   } catch {
     return "";
   }
@@ -190,24 +216,29 @@ function getUrlToken() {
 function isSafeInternalPath(path = "") {
   const value = text(path, "");
 
-  if (!value) return false;
-  if (!value.startsWith("/")) return false;
-  if (value.startsWith("//")) return false;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
-  if (/[\r\n\t\\]/.test(value)) return false;
-
-  return true;
+  return Boolean(
+    value &&
+      value.startsWith("/") &&
+      !value.startsWith("//") &&
+      !/^[a-z][a-z0-9+.-]*:/i.test(value) &&
+      !/[\r\n\t\\]/.test(value)
+  );
 }
 
 function safeInternalPath(path = "", fallback = LOGIN_ROUTE) {
   const candidate = normalizePublicPath(path || fallback);
-
   return isSafeInternalPath(candidate) ? candidate : fallback;
 }
 
 function getRouter() {
   try {
-    return AppCore?.Router || AppCore?.router || AppCore?.modules?.get?.("Router") || AppCore?.modules?.get?.("router") || null;
+    return (
+      AppCore?.Router ||
+      AppCore?.router ||
+      AppCore?.modules?.get?.("Router") ||
+      AppCore?.modules?.get?.("router") ||
+      null
+    );
   } catch {
     return null;
   }
@@ -237,17 +268,32 @@ async function navigateTo(path = LOGIN_ROUTE) {
 
       return true;
     }
+
+    if (isFunction(AppCore?.navigate)) {
+      await AppCore.navigate(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
+      });
+
+      return true;
+    }
   } catch {
-    // fallback abajo
+    // fallback navegador abajo
   }
 
   if (!isBrowser()) return false;
 
   try {
-    window.location.assign(target);
+    window.location.replace(target);
     return true;
   } catch {
-    return false;
+    try {
+      window.location.assign(target);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -271,7 +317,7 @@ function getContainer() {
   }
 }
 
-function query(root, selector = "") {
+function query(root = null, selector = "") {
   if (!root || !selector) return null;
 
   try {
@@ -281,39 +327,93 @@ function query(root, selector = "") {
   }
 }
 
-function setHidden(node, hidden = false) {
-  if (!node) return false;
+function setAttr(node = null, name = "", value = null) {
+  if (!node || !name) return false;
 
   try {
-    node.hidden = Boolean(hidden);
-    node.setAttribute("aria-hidden", hidden ? "true" : "false");
+    if (value === null || value === undefined || value === false || value === "") {
+      node.removeAttribute(name);
+    } else {
+      node.setAttribute(name, String(value));
+    }
+
     return true;
   } catch {
     return false;
   }
 }
 
-function setBusy(node, busy = false) {
+function setHidden(node = null, hidden = false) {
   if (!node) return false;
 
+  const value = Boolean(hidden);
+
   try {
-    node.setAttribute("aria-busy", busy ? "true" : "false");
+    node.hidden = value;
+  } catch {
+    // noop
+  }
+
+  setAttr(node, "aria-hidden", value ? "true" : "false");
+
+  return true;
+}
+
+function setBusy(node = null, busy = false) {
+  return setAttr(node, "aria-busy", busy ? "true" : "false");
+}
+
+function setDisabled(node = null, disabled = false) {
+  if (!node) return false;
+
+  const value = Boolean(disabled);
+
+  try {
+    node.disabled = value;
+  } catch {
+    // noop
+  }
+
+  setAttr(node, "aria-disabled", value ? "true" : null);
+
+  return true;
+}
+
+function toggleClass(node = null, className = "", enabled = false) {
+  if (!node || !className) return false;
+
+  try {
+    node.classList.toggle(className, Boolean(enabled));
     return true;
   } catch {
     return false;
   }
 }
 
-function setDisabled(node, disabled = false) {
-  if (!node) return false;
+function bindDom(node = null, eventName = "", handler = null, options = false) {
+  if (!node || !eventName || !isFunction(handler)) return () => false;
+
+  let disposed = false;
 
   try {
-    node.disabled = Boolean(disabled);
-    node.setAttribute("aria-disabled", disabled ? "true" : "false");
-    return true;
+    node.addEventListener(eventName, handler, options);
   } catch {
-    return false;
+    return () => false;
   }
+
+  return () => {
+    if (disposed) return false;
+
+    disposed = true;
+
+    try {
+      node.removeEventListener(eventName, handler, options);
+    } catch {
+      // noop
+    }
+
+    return true;
+  };
 }
 
 function createMessageNode() {
@@ -323,101 +423,81 @@ function createMessageNode() {
 
   node.className = "activate-account-message";
   node.dataset.activateAccountMessage = "true";
+  node.dataset.activateAccountError = "true";
   node.setAttribute("role", "alert");
   node.setAttribute("aria-live", "polite");
+  node.setAttribute("aria-atomic", "true");
   node.hidden = true;
 
   return node;
 }
 
-function getMessageNode(container, form) {
-  return (
+function getMessageNode(container = null, form = null) {
+  const found =
     query(container, "[data-activate-account-message]") ||
     query(container, "[data-activate-message]") ||
     query(container, "[data-activate-account-error]") ||
     query(container, "#activateAccountError") ||
-    query(container, ".activate-account-message") ||
-    (() => {
-      const node = createMessageNode();
+    query(container, ".activate-account-message");
 
-      try {
-        form?.prepend?.(node);
-      } catch {
-        try {
-          container.prepend(node);
-        } catch {
-          // noop
-        }
-      }
+  if (found) return found;
 
-      return node;
-    })()
-  );
-}
+  const node = createMessageNode();
 
-function setMessage(node, message = "", type = "error") {
-  if (!node) return false;
-
-  const clean = text(message, "");
+  if (!node) return null;
 
   try {
-    node.textContent = clean;
-    node.hidden = !clean;
-    node.dataset.messageType = clean ? type : "";
-    node.classList.toggle("is-error", type === "error" && Boolean(clean));
-    node.classList.toggle("is-success", type === "success" && Boolean(clean));
-    node.classList.toggle("is-info", type === "info" && Boolean(clean));
-    return true;
+    form?.prepend?.(node);
   } catch {
-    return false;
-  }
-}
-
-function setFieldError(field, message = "") {
-  if (!field) return false;
-
-  const clean = text(message, "");
-
-  try {
-    field.setAttribute("aria-invalid", clean ? "true" : "false");
-
-    if (clean) {
-      field.dataset.error = clean;
-    } else {
-      delete field.dataset.error;
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function hideLoader() {
-  if (!isBrowser()) return false;
-
-  try {
-    document.documentElement.classList.remove("app-loading", "app-booting", "loading");
-    document.body.classList.remove("app-loading", "app-booting", "loading", "is-loading");
-  } catch {
-    // noop
-  }
-
-  const loader = document.getElementById("app-loader");
-
-  if (loader) {
-    setHidden(loader, true);
-    setBusy(loader, false);
-
     try {
-      loader.classList.remove("is-visible");
+      container?.prepend?.(node);
     } catch {
       // noop
     }
   }
 
+  return node;
+}
+
+function setMessage(node = null, message = "", type = "error") {
+  if (!node) return false;
+
+  const clean = text(message, "");
+  const cleanType = ["error", "success", "info"].includes(type) ? type : "error";
+
   try {
-    AppCore?.setLoading?.(false);
+    node.textContent = clean;
+    setHidden(node, !clean);
+
+    toggleClass(node, "is-error", clean && cleanType === "error");
+    toggleClass(node, "is-success", clean && cleanType === "success");
+    toggleClass(node, "is-info", clean && cleanType === "info");
+
+    if (clean) {
+      node.dataset.messageType = cleanType;
+    } else {
+      delete node.dataset.messageType;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setFieldError(field = null, message = "") {
+  if (!field) return false;
+
+  const clean = text(message, "");
+
+  setAttr(field, "aria-invalid", clean ? "true" : "false");
+
+  try {
+    if (clean) {
+      field.dataset.error = clean;
+    } else {
+      delete field.dataset.error;
+    }
   } catch {
     // noop
   }
@@ -429,136 +509,48 @@ function hideLoader() {
    TEMPLATE
 ========================================================= */
 
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function fallbackTemplate() {
-  return `
-    <section
-      class="activate-account-view"
-      data-view="activate-account"
-      data-activate-account-view="true"
-    >
-      <article class="activate-account-card">
-        <header class="activate-account-header">
-          <h1>Activar cuenta</h1>
-          <p>Define una contraseña para activar tu cuenta.</p>
-        </header>
-
-        <form
-          id="activateAccountForm"
-          class="activate-account-form"
-          data-activate-account-form="true"
-          data-activate-form="true"
-          novalidate
-        >
-          <div
-            class="activate-account-message"
-            id="activateAccountError"
-            data-activate-account-message="true"
-            data-activate-account-error="true"
-            role="alert"
-            aria-live="polite"
-            hidden
-          ></div>
-
-          <div class="activate-account-field">
-            <label for="activateAccountPassword">Contraseña</label>
-            <input
-              id="activateAccountPassword"
-              name="password"
-              type="password"
-              autocomplete="new-password"
-              data-activate-account-password="true"
-              required
-            />
-          </div>
-
-          <div class="activate-account-field">
-            <label for="activateAccountPasswordConfirm">Confirmar contraseña</label>
-            <input
-              id="activateAccountPasswordConfirm"
-              name="confirmPassword"
-              type="password"
-              autocomplete="new-password"
-              data-activate-account-confirm="true"
-              required
-            />
-          </div>
-
-          <button
-            id="activateAccountButton"
-            type="submit"
-            data-activate-account-submit="true"
-          >
-            Activar cuenta
-          </button>
-
-          <p class="activate-account-back">
-            <a href="/login" data-spa data-activate-account-back="true">
-              Volver al acceso
-            </a>
-          </p>
-        </form>
-      </article>
-    </section>
-  `;
-}
-
 function templateHtml(deps = {}) {
   const renderer =
     ActivateTemplate.getActivateAccountTemplate ||
     ActivateTemplate.default;
 
-  if (isFunction(renderer)) {
-    try {
-      const html = renderer({
-        ...deps,
-        appName: text(AppCore?.config?.appName, "Onion Support"),
-        hasToken: Boolean(getUrlToken()),
-        tokenCaptured: Boolean(getUrlToken()),
-        token: "",
-        loginHref: LOGIN_ROUTE,
-        backHref: LOGIN_ROUTE,
-        autoSubmit: false,
-      });
-
-      if (typeof html === "string" && html.includes("<")) {
-        return html;
-      }
-    } catch {
-      // fallback abajo
-    }
+  if (!isFunction(renderer)) {
+    throw new Error("activate-account.template.js no exporta template válido.");
   }
 
-  return fallbackTemplate();
+  const html = renderer({
+    ...deps,
+    appName: text(AppCore?.config?.appName, "Onion Support"),
+    hasToken: Boolean(getUrlToken()),
+    tokenCaptured: Boolean(getUrlToken()),
+    token: "",
+    loginHref: LOGIN_ROUTE,
+    backHref: LOGIN_ROUTE,
+    autoSubmit: false,
+  });
+
+  if (typeof html !== "string" || !html.includes("<")) {
+    throw new Error("Template de activación inválido.");
+  }
+
+  return html;
 }
 
 function renderTemplate(container, deps = {}) {
-  try {
-    container.innerHTML = templateHtml(deps);
-    return true;
-  } catch {
-    try {
-      container.innerHTML = fallbackTemplate();
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  const template = document.createElement("template");
+
+  template.innerHTML = templateHtml(deps);
+
+  container.replaceChildren(template.content.cloneNode(true));
+
+  return true;
 }
 
 /* =========================================================
    REFS / FORM
 ========================================================= */
 
-function getRefs(container) {
+function getRefs(container = null) {
   const form =
     query(container, "[data-activate-account-form]") ||
     query(container, "[data-activate-form]") ||
@@ -583,34 +575,24 @@ function getRefs(container) {
       null,
 
     submit:
-      query(container, "button[type='submit']") ||
       query(container, "[data-activate-account-submit]") ||
       query(container, "#activateAccountButton") ||
+      query(container, "button[type='submit']") ||
       null,
 
     back:
       query(container, "[data-activate-account-back]") ||
+      query(container, ".activate-account-back-link") ||
       query(container, "a[href='/login']") ||
       null,
   };
 }
 
-function refsNeedFallback(refs) {
-  return !refs.form || !refs.password || !refs.confirmPassword || !refs.submit;
+function refsReady(refs = {}) {
+  return Boolean(refs.form && refs.password && refs.confirmPassword && refs.submit);
 }
 
-function ensureTemplateShape(container, deps) {
-  let refs = getRefs(container);
-
-  if (refsNeedFallback(refs)) {
-    container.innerHTML = fallbackTemplate(deps);
-    refs = getRefs(container);
-  }
-
-  return refs;
-}
-
-function readPayload(refs, token) {
+function readPayload(refs = {}, token = "") {
   return {
     token: normalizeToken(token),
     password: String(refs.password?.value || ""),
@@ -622,7 +604,7 @@ function validatePayload(payload = {}) {
   const errors = {};
 
   if (!normalizeToken(payload.token)) {
-    errors.token = "El token de activación no es válido.";
+    errors.token = "El enlace de activación no es válido.";
   }
 
   if (!String(payload.password || "")) {
@@ -648,13 +630,15 @@ function firstError(errors = {}) {
   return Object.values(errors).find(Boolean) || "";
 }
 
-function clearErrors(refs, messageNode) {
+function clearErrors(refs = {}, messageNode = null) {
   setMessage(messageNode, "");
   setFieldError(refs.password, "");
   setFieldError(refs.confirmPassword, "");
+
+  return true;
 }
 
-function applyErrors(refs, messageNode, errors = {}) {
+function applyErrors(refs = {}, messageNode = null, errors = {}) {
   setFieldError(refs.password, errors.password || "");
   setFieldError(refs.confirmPassword, errors.confirmPassword || "");
   setMessage(messageNode, firstError(errors), "error");
@@ -671,12 +655,15 @@ function applyErrors(refs, messageNode, errors = {}) {
   } catch {
     // noop
   }
+
+  return true;
 }
 
-function setLoading(refs, loading = false) {
+function setLoading(refs = {}, loading = false) {
   const active = Boolean(loading);
 
   setBusy(refs.form, active);
+
   setDisabled(refs.password, active);
   setDisabled(refs.confirmPassword, active);
   setDisabled(refs.submit, active);
@@ -694,6 +681,8 @@ function setLoading(refs, loading = false) {
       // noop
     }
   }
+
+  return true;
 }
 
 /* =========================================================
@@ -721,13 +710,15 @@ function resultMessage(result = {}, fallback = "") {
 }
 
 function errorMessage(error = null, fallback = "No se pudo activar la cuenta.") {
-  return text(
-    error?.message ||
-      error?.data?.message ||
-      error?.response?.data?.message ||
-      error?.mensaje ||
-      error?.error,
-    fallback
+  return redact(
+    text(
+      error?.message ||
+        error?.data?.message ||
+        error?.response?.data?.message ||
+        error?.mensaje ||
+        error?.error,
+      fallback
+    )
   );
 }
 
@@ -735,50 +726,29 @@ function errorMessage(error = null, fallback = "No se pudo activar la cuenta.") 
    INSTANCE
 ========================================================= */
 
-function destroyPrevious(container) {
-  try {
-    const previous = container?.[INSTANCE_KEY];
+function destroyPrevious(container = null) {
+  const previous = INSTANCES.get(container);
 
-    if (previous?.destroy) {
-      previous.destroy({ remount: true });
-      return true;
-    }
-  } catch {
-    // noop
+  if (previous?.destroy) {
+    previous.destroy({ remount: true });
+    return true;
   }
 
   return false;
 }
 
-function storeInstance(container, instance) {
+function storeInstance(container = null, instance = null) {
   if (!container || !instance) return false;
 
-  try {
-    Object.defineProperty(container, INSTANCE_KEY, {
-      value: instance,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-    });
-  } catch {
-    try {
-      container[INSTANCE_KEY] = instance;
-    } catch {
-      // noop
-    }
-  }
-
+  INSTANCES.set(container, instance);
   lastInstance = instance;
+
   return true;
 }
 
-function clearInstance(container, instance) {
-  try {
-    if (container?.[INSTANCE_KEY] === instance) {
-      delete container[INSTANCE_KEY];
-    }
-  } catch {
-    // noop
+function clearInstance(container = null, instance = null) {
+  if (INSTANCES.get(container) === instance) {
+    INSTANCES.delete(container);
   }
 
   if (lastInstance === instance) {
@@ -803,12 +773,12 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
   }
 
   const options = isObject(deps) ? deps : {};
-  const token = getUrlToken();
+  const token = normalizeToken(options.token || getUrlToken());
 
   destroyPrevious(container);
   renderTemplate(container, options);
 
-  const refs = ensureTemplateShape(container, options);
+  const refs = getRefs(container);
   const messageNode = getMessageNode(container, refs.form);
 
   let mounted = true;
@@ -832,6 +802,11 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
 
     clearErrors(refs, messageNode);
 
+    if (!refsReady(refs)) {
+      setMessage(messageNode, "No se pudo preparar el formulario de activación.", "error");
+      return false;
+    }
+
     const payload = readPayload(refs, token);
     const errors = validatePayload(payload);
 
@@ -847,8 +822,6 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
 
     setSubmitting(true);
 
-    emit("auth:activate-account:view:submit:start");
-
     try {
       const result = await Auth.activateAccount(
         {
@@ -858,6 +831,9 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
         },
         {
           source: SOURCE,
+          skipNavigation: true,
+          skipRedirect: true,
+          noRedirect: true,
         }
       );
 
@@ -871,27 +847,13 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
         "success"
       );
 
-      emit("auth:activate-account:view:submit:done", {
-        ok: true,
-        sessionApplied: Boolean(result?.sessionApplied),
-      });
-
       if (mounted && isActivateRoute()) {
-        await navigateTo(result?.redirectTo || LOGIN_ROUTE);
+        await navigateTo(LOGIN_ROUTE);
       }
 
       return true;
     } catch (error) {
-      const message = errorMessage(error);
-
-      setMessage(messageNode, message, "error");
-
-      emit("auth:activate-account:view:error", {
-        message,
-        status: error?.status || error?.statusCode || 0,
-        code: error?.code || null,
-      });
-
+      setMessage(messageNode, errorMessage(error), "error");
       return false;
     } finally {
       if (mounted) {
@@ -900,39 +862,25 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
     }
   }
 
-  const disposers = [];
+  const disposers = [
+    bindDom(refs.form, "submit", submit),
+    bindDom(refs.password, "input", () => clearErrors(refs, messageNode)),
+    bindDom(refs.confirmPassword, "input", () => clearErrors(refs, messageNode)),
+    bindDom(refs.back, "click", (event) => {
+      try {
+        event?.preventDefault?.();
+      } catch {
+        // noop
+      }
 
-  try {
-    refs.form?.addEventListener?.("submit", submit);
-    disposers.push(() => refs.form?.removeEventListener?.("submit", submit));
-  } catch {
-    // noop
-  }
-
-  const clearOnInput = () => clearErrors(refs, messageNode);
-
-  for (const field of [refs.password, refs.confirmPassword]) {
-    try {
-      field?.addEventListener?.("input", clearOnInput);
-      disposers.push(() => field?.removeEventListener?.("input", clearOnInput));
-    } catch {
-      // noop
-    }
-  }
-
-  try {
-    refs.back?.addEventListener?.("click", (event) => {
-      event.preventDefault();
       navigateTo(LOGIN_ROUTE);
-    });
-  } catch {
-    // noop
-  }
+    }),
+  ];
 
   if (!token) {
     setMessage(
       messageNode,
-      "No se ha encontrado un token de activación válido.",
+      "No se ha encontrado un enlace de activación válido.",
       "error"
     );
   }
@@ -943,19 +891,19 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
     // noop
   }
 
-  hideLoader();
-
-  emit("auth:activate-account:view:ready", {
-    hasToken: Boolean(token),
-  });
-
   const instance = {
     version: ACTIVATE_ACCOUNT_VIEW_VERSION,
 
     submit,
 
+    unlock() {
+      setSubmitting(false);
+      return true;
+    },
+
     destroy() {
       mounted = false;
+      submitting = false;
 
       while (disposers.length) {
         try {
@@ -965,8 +913,13 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
         }
       }
 
+      try {
+        setLoading(refs, false);
+      } catch {
+        // noop
+      }
+
       clearInstance(container, instance);
-      emit("auth:activate-account:view:destroyed");
 
       return true;
     },
@@ -979,7 +932,7 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
         mounted,
         submitting,
 
-        route: normalizeCanonicalPath(currentPath()),
+        route: currentPath(),
         stillOnActivate: isActivateRoute(),
 
         hasToken: Boolean(token),
@@ -992,7 +945,17 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
           hasMessage: Boolean(messageNode),
         },
 
-        at: nowIso(),
+        policy: {
+          tokenParam: TOKEN_PARAM,
+          noFetchDirect: true,
+          noCoreHttpDirect: true,
+          noToast: true,
+          noStorage: true,
+          noLoaderOwn: true,
+          noEventsGlobal: true,
+          noTokenInSnapshot: true,
+          no2fa: true,
+        },
       };
     },
 
@@ -1039,11 +1002,11 @@ export function mount(arg1 = null, arg2 = {}) {
 }
 
 export function destroy(options = {}) {
-  if (lastInstance?.destroy) {
-    return lastInstance.destroy(options);
+  try {
+    return Boolean(lastInstance?.destroy?.(options));
+  } catch {
+    return false;
   }
-
-  return false;
 }
 
 export function getSnapshot() {
@@ -1055,11 +1018,12 @@ export function getSnapshot() {
     version: ACTIVATE_ACCOUNT_VIEW_VERSION,
     source: SOURCE,
     mounted: false,
-    route: normalizeCanonicalPath(currentPath()),
+    route: currentPath(),
     hasToken: Boolean(getUrlToken()),
-    at: nowIso(),
   };
 }
+
+export const getDebugSnapshot = getSnapshot;
 
 export const ActivateAccountView = {
   version: ACTIVATE_ACCOUNT_VIEW_VERSION,
@@ -1075,7 +1039,7 @@ export const ActivateAccountView = {
 
   getSnapshot,
   getState: getSnapshot,
-  getDebugSnapshot: getSnapshot,
+  getDebugSnapshot,
 };
 
 export default ActivateAccountView;

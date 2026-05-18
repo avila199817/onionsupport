@@ -18,9 +18,10 @@
    - Sin usar clases globales peligrosas como is-hidden.
 ========================================================= */
 
-export const PASSWORD_FIELD_DOM_VERSION = "minimal-6";
+export const PASSWORD_FIELD_DOM_VERSION = "minimal-7";
 
 const FIELD_SELECTOR = "[data-password-field]";
+
 const WRAPPER_SELECTOR =
   "[data-password-wrapper], .password-wrapper, .login-password-wrapper, .password-reset-password-wrapper";
 
@@ -408,8 +409,15 @@ function setCapsState(caps, active = false) {
     caps.hidden = !enabled;
   } catch {}
 
+  if (enabled) {
+    setAttr(caps, "hidden", null);
+  } else {
+    setAttr(caps, "hidden", "hidden");
+  }
+
   setAttr(caps, "aria-hidden", enabled ? "false" : "true");
   setData(caps, CAPS_DATA_KEY, enabled ? "true" : null);
+
   toggleClass(caps, "is-visible", enabled);
   toggleClass(caps, "is-caps-active", enabled);
 

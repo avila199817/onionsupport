@@ -2,26 +2,23 @@
    Onion SPA - Reset Password Confirm Helpers
    Archivo: src/views/password-reset/confirm/confirm.helpers.js
 
-   Responsabilidades:
-   - helpers puros del flujo confirm
-   - lectura robusta de token desde URL normal
-   - lectura robusta de token desde /reset-password/confirm/<token>
-   - lectura robusta de token desde hash-router
-   - lectura robusta desde history.state / URL inicial capturada
-   - normalización de payload
-   - validación de contraseña
-   - normalización de respuesta backend
-   - mensajes UX consistentes
-   - redirects seguros post-success
-   - no exponer token real en logs
-   - compatibilidad total SPA pública
+   Responsabilidad:
+   - Helpers puros mínimos para confirm reset.
+   - Leer token básico desde URL.
+   - Crear payload confirm.
+   - Validar contraseña.
+   - Normalizar resultado/error.
+   - Resolver redirect seguro a /login.
+   - Sin AppCore.
+   - Sin Auth.
+   - Sin HTTP.
+   - Sin Router.
+   - Sin Store.
+   - Sin Toast.
+   - Sin magia negra.
 ========================================================= */
 
-import { AppCore } from "../../../core/index.js";
-
-/* =========================================================
-   CONST
-========================================================= */
+export const CONFIRM_HELPERS_VERSION = "minimal-1";
 
 export const DEFAULT_SUCCESS_MESSAGE =
   "La contraseña se ha actualizado correctamente.";
@@ -34,7 +31,7 @@ export const MIN_PASSWORD_LENGTH = 8;
 const DEFAULT_LOGIN_PATH = "/login";
 const RESET_CONFIRM_PATH = "/reset-password/confirm";
 
-const TOKEN_PARAM_NAMES = Object.freeze([
+const TOKEN_KEYS = Object.freeze([
   "token",
   "resetToken",
   "passwordResetToken",
@@ -43,599 +40,139 @@ const TOKEN_PARAM_NAMES = Object.freeze([
   "t",
 ]);
 
-const PUBLIC_SAFE_REDIRECTS = new Set([
-  "/login",
-  "/",
-]);
-
 /* =========================================================
    BASICS
 ========================================================= */
 
-export function safeText(
-  value,
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text = String(value).trim();
-
-  return text || fallback;
+export function safeText(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
 }
 
 export function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function getBaseOrigin() {
+function normalizeToken(value = "") {
+  const token = safeText(value, "").replace(/^Bearer\s+/i, "");
+
+  if (!token) return "";
+  if (/\s/.test(token)) return "";
+
   if (
-    isBrowser() &&
-    window.location?.origin
+    ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
+      token.toLowerCase()
+    )
   ) {
-    return window.location.origin;
-  }
-
-  return "http://localhost";
-}
-
-function safeDecodeURIComponent(value = "") {
-  const text = safeText(value, "");
-
-  if (!text) {
     return "";
   }
 
-  try {
-    return safeText(
-      decodeURIComponent(text),
-      text
-    );
-  } catch {
-    return text;
-  }
-}
-
-function normalizePathnameOnly(pathname = "/") {
-  let value = String(pathname || "/")
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  if (!value) {
-    value = "/";
-  }
-
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
-
-  if (
-    value.length > 1 &&
-    value.endsWith("/")
-  ) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      "/";
-  }
-
-  return value;
-}
-
-function normalizeSearch(search = "") {
-  const value =
-    String(search || "").trim();
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("?")
-    ? value
-    : `?${value.replace(/^\?+/, "")}`;
-}
-
-function normalizeHash(hash = "") {
-  const value =
-    String(hash || "").trim();
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("#")
-    ? value
-    : `#${value.replace(/^#+/, "")}`;
-}
-
-function isHashRouterPath(value = "") {
-  const raw =
-    String(value || "").trim();
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw =
-    String(value || "").trim();
-
-  if (!raw) {
-    return "/";
-  }
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/");
-  }
-
-  return raw.replace(/^#\/?/, "/");
-}
-
-function splitRawPath(path = "/") {
-  const raw =
-    safeText(path, "/");
-
-  if (!raw) {
-    return {
-      pathname: "/",
-      search: "",
-      hash: "",
-    };
-  }
-
-  if (isHashRouterPath(raw)) {
-    return splitRawPath(
-      normalizeHashRouterPath(raw)
-    );
-  }
-
-  try {
-    if (
-      /^[a-z][a-z\d+.-]*:\/\//i.test(raw)
-    ) {
-      const url = new URL(
-        raw,
-        getBaseOrigin()
-      );
-
-      if (
-        url.hash &&
-        isHashRouterPath(url.hash)
-      ) {
-        return splitRawPath(
-          normalizeHashRouterPath(url.hash)
-        );
-      }
-
-      return {
-        pathname:
-          url.pathname || "/",
-        search:
-          normalizeSearch(url.search || ""),
-        hash:
-          normalizeHash(url.hash || ""),
-      };
-    }
-  } catch {}
-
-  let pathname = raw;
-  let search = "";
-  let hash = "";
-
-  const hashIndex =
-    pathname.indexOf("#");
-
-  if (hashIndex >= 0) {
-    hash = pathname.slice(hashIndex);
-    pathname =
-      pathname.slice(0, hashIndex) ||
-      "/";
-  }
-
-  const searchIndex =
-    pathname.indexOf("?");
-
-  if (searchIndex >= 0) {
-    search = pathname.slice(searchIndex);
-    pathname =
-      pathname.slice(0, searchIndex) ||
-      "/";
-  }
-
-  return {
-    pathname:
-      pathname || "/",
-    search:
-      normalizeSearch(search),
-    hash:
-      normalizeHash(hash),
-  };
-}
-
-export function normalizePath(
-  path = DEFAULT_LOGIN_PATH
-) {
-  const raw =
-    safeText(path, DEFAULT_LOGIN_PATH) ||
-    DEFAULT_LOGIN_PATH;
-
-  if (
-    typeof AppCore?.utils?.normalizePath ===
-    "function"
-  ) {
-    try {
-      const parts = splitRawPath(raw);
-
-      const normalizedPathname =
-        AppCore.utils.normalizePath(
-          parts.pathname || DEFAULT_LOGIN_PATH
-        );
-
-      return `${normalizePathnameOnly(normalizedPathname)}${parts.search}${parts.hash}`;
-    } catch {}
-  }
-
-  if (raw === "/") {
-    return "/";
-  }
-
-  const parts = splitRawPath(raw);
-
-  return (
-    `${normalizePathnameOnly(parts.pathname)}${parts.search}${parts.hash}` ||
-    DEFAULT_LOGIN_PATH
-  );
-}
-
-function normalizeRedirectPath(path = DEFAULT_LOGIN_PATH) {
-  const value = normalizePath(path);
-
-  if (!value || typeof value !== "string") {
-    return DEFAULT_LOGIN_PATH;
-  }
-
-  if (/^(https?:|mailto:|tel:|javascript:|data:|vbscript:)/i.test(value)) {
-    return DEFAULT_LOGIN_PATH;
-  }
-
-  if (!value.startsWith("/")) {
-    return DEFAULT_LOGIN_PATH;
-  }
-
-  if (PUBLIC_SAFE_REDIRECTS.has(value)) {
-    return value;
-  }
-
-  return value;
+  return token;
 }
 
 /* =========================================================
-   TOKEN EXTRACTION
+   PATH / REDIRECT
 ========================================================= */
 
-function getTokenFromSearchParams(search = "") {
+export function normalizePath(path = DEFAULT_LOGIN_PATH) {
+  let value = safeText(path, DEFAULT_LOGIN_PATH);
+
+  if (value.startsWith("#/")) value = value.slice(1);
+  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+
+  value = value.split("?")[0].split("#")[0];
+
+  if (!value.startsWith("/")) value = `/${value}`;
+  if (value.length > 1) value = value.replace(/\/+$/g, "") || "/";
+
+  return value || DEFAULT_LOGIN_PATH;
+}
+
+function isSafeInternalPath(path = "") {
+  const value = safeText(path, "");
+
+  if (!value) return false;
+  if (!value.startsWith("/")) return false;
+  if (value.startsWith("//")) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
+  if (/[\r\n\t\\]/.test(value)) return false;
+
+  return true;
+}
+
+function normalizeRedirectPath(path = DEFAULT_LOGIN_PATH) {
+  const candidate = normalizePath(path || DEFAULT_LOGIN_PATH);
+
+  return isSafeInternalPath(candidate) ? candidate : DEFAULT_LOGIN_PATH;
+}
+
+/* =========================================================
+   TOKEN
+========================================================= */
+
+function tokenFromSearch(search = "") {
+  const raw = safeText(search, "");
+  if (!raw) return "";
+
   try {
-    const params = new URLSearchParams(
-      search || ""
-    );
+    const params = new URLSearchParams(raw.startsWith("?") ? raw : `?${raw}`);
 
-    for (const key of TOKEN_PARAM_NAMES) {
-      const value = safeText(
-        params.get(key),
-        ""
-      );
-
-      if (value) {
-        return value;
-      }
+    for (const key of TOKEN_KEYS) {
+      const token = normalizeToken(params.get(key));
+      if (token) return token;
     }
-
-    /*
-      Fallback defensivo:
-      algunos clientes de correo envuelven la URL real dentro de
-      redirect=, url=, link=, target=, etc.
-    */
-    for (const [, rawValue] of params.entries()) {
-      const value = safeText(rawValue, "");
-
-      if (!value) {
-        continue;
-      }
-
-      const lower = value.toLowerCase();
-
-      if (
-        !lower.includes("token") &&
-        !lower.includes("reset") &&
-        !lower.includes("confirm")
-      ) {
-        continue;
-      }
-
-      const nestedToken =
-        extractTokenFromUrlLike(value);
-
-      if (nestedToken) {
-        return nestedToken;
-      }
-
-      try {
-        const decoded =
-          decodeURIComponent(value);
-
-        const decodedToken =
-          extractTokenFromUrlLike(decoded);
-
-        if (decodedToken) {
-          return decodedToken;
-        }
-      } catch {}
-    }
-  } catch {}
+  } catch {
+    // noop
+  }
 
   return "";
 }
 
-function extractTokenFromRoutePath(pathname = "") {
+function tokenFromHash(hash = "") {
+  const raw = safeText(hash, "");
+  if (!raw) return "";
+
+  if (raw.includes("?")) {
+    return tokenFromSearch(raw.split("?").slice(1).join("?"));
+  }
+
+  return tokenFromPath(raw.replace(/^#\/?/, "/"));
+}
+
+function tokenFromPath(pathname = "") {
+  const path = normalizePath(pathname);
+  const parts = path.split("/").filter(Boolean);
+
+  const index = parts.findIndex((part, position) => (
+    part === "reset-password" &&
+    parts[position + 1] === "confirm"
+  ));
+
+  if (index < 0 || !parts[index + 2]) return "";
+
   try {
-    const normalized =
-      normalizePathnameOnly(pathname);
-
-    const escapedBase =
-      RESET_CONFIRM_PATH.replace(
-        /[.*+?^${}()|[\]\\]/g,
-        "\\$&"
-      );
-
-    const pattern = new RegExp(
-      `^${escapedBase}/([^/?#]+)$`,
-      "i"
-    );
-
-    const match =
-      normalized.match(pattern);
-
-    if (!match?.[1]) {
-      return "";
-    }
-
-    return safeDecodeURIComponent(
-      match[1]
-    );
+    return normalizeToken(decodeURIComponent(parts[index + 2]));
   } catch {
-    return "";
+    return normalizeToken(parts[index + 2]);
   }
 }
 
-function extractTokenFromHash(hash = "") {
-  const rawHash =
-    safeText(hash, "");
-
-  if (!rawHash) {
-    return "";
-  }
-
-  try {
-    const cleanHash =
-      normalizeHashRouterPath(rawHash);
-
-    const query =
-      cleanHash.includes("?")
-        ? cleanHash.split("?").slice(1).join("?")
-        : "";
-
-    const fromQuery =
-      getTokenFromSearchParams(
-        query ? `?${query}` : ""
-      );
-
-    if (fromQuery) {
-      return fromQuery;
-    }
-
-    const pathOnly =
-      cleanHash.split("?")[0] || "";
-
-    return extractTokenFromRoutePath(
-      pathOnly
-    );
-  } catch {
-    return "";
-  }
-}
-
-function extractTokenFromUrlLike(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return "";
-  }
-
-  try {
-    const parsed = new URL(
-      raw,
-      getBaseOrigin()
-    );
-
-    const fromSearch =
-      getTokenFromSearchParams(
-        parsed.search
-      );
-
-    if (fromSearch) {
-      return fromSearch;
-    }
-
-    const fromHash =
-      extractTokenFromHash(
-        parsed.hash
-      );
-
-    if (fromHash) {
-      return fromHash;
-    }
-
-    return extractTokenFromRoutePath(
-      parsed.pathname
-    );
-  } catch {
-    try {
-      if (isHashRouterPath(raw)) {
-        return extractTokenFromHash(raw);
-      }
-
-      const parts = splitRawPath(raw);
-
-      const fromSearch =
-        getTokenFromSearchParams(
-          parts.search
-        );
-
-      if (fromSearch) {
-        return fromSearch;
-      }
-
-      const fromHash =
-        extractTokenFromHash(
-          parts.hash
-        );
-
-      if (fromHash) {
-        return fromHash;
-      }
-
-      return extractTokenFromRoutePath(
-        parts.pathname
-      );
-    } catch {
-      return "";
-    }
-  }
-}
-
-function getHistoryUrlCandidates() {
-  if (!isBrowser()) {
-    return [];
-  }
-
-  try {
-    const historyState =
-      window.history?.state &&
-      typeof window.history.state === "object"
-        ? window.history.state
-        : null;
-
-    if (!historyState) {
-      return [];
-    }
-
-    return [
-      historyState.publicPath,
-      historyState.path,
-      historyState.requestedPath,
-      historyState.url,
-      historyState.href,
-      historyState.redirectedFrom,
-    ]
-      .map((value) => safeText(value, ""))
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function getWindowUrlCandidates() {
-  const urls = [];
-
-  if (!isBrowser()) {
-    return urls;
-  }
-
-  try {
-    urls.push(window.location.href);
-  } catch {}
-
-  try {
-    urls.push(window.__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__);
-  } catch {}
-
-  try {
-    urls.push(window.__ONION_INITIAL_URL__);
-  } catch {}
-
-  try {
-    urls.push(document.referrer);
-  } catch {}
-
-  return urls
-    .map((url) => safeText(url, ""))
-    .filter(Boolean);
-}
-
-function getAppStateUrlCandidates() {
-  return [
-    AppCore?.state?.publicPath,
-    AppCore?.state?.route,
-    AppCore?.state?.lastRoute,
-  ]
-    .map((url) => safeText(url, ""))
-    .filter(Boolean);
-}
-
-function getInitialTokenCandidates() {
-  return [
-    ...getHistoryUrlCandidates(),
-    ...getWindowUrlCandidates(),
-    ...getAppStateUrlCandidates(),
-  ]
-    .map((url) => safeText(url, ""))
-    .filter(Boolean);
-}
-
-/**
- * Lee el token del reset password confirm.
- *
- * Soporta:
- * - /reset-password/confirm?token=abc
- * - /reset-password/confirm/abc
- * - /#/reset-password/confirm?token=abc
- * - /#/reset-password/confirm/abc
- * - history.state.publicPath
- * - window.__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__
- * - window.__ONION_INITIAL_URL__
- */
 export function getUrlToken() {
-  const candidates =
-    getInitialTokenCandidates();
+  if (!isBrowser()) return "";
 
-  for (const candidate of candidates) {
-    const token =
-      extractTokenFromUrlLike(candidate);
-
-    if (token) {
-      return token;
-    }
+  try {
+    return (
+      tokenFromSearch(window.location.search) ||
+      tokenFromHash(window.location.hash) ||
+      tokenFromPath(window.location.pathname)
+    );
+  } catch {
+    return "";
   }
-
-  return "";
 }
 
 /* =========================================================
@@ -645,16 +182,13 @@ export function getUrlToken() {
 export function createConfirmPayload({
   token = "",
   password = "",
+  newPassword = "",
   confirmPassword = "",
+  passwordConfirm = "",
 } = {}) {
-  const cleanToken =
-    safeText(token, "");
-
-  const cleanPassword =
-    String(password || "");
-
-  const cleanConfirmPassword =
-    String(confirmPassword || "");
+  const cleanToken = normalizeToken(token);
+  const cleanPassword = String(password || newPassword || "");
+  const cleanConfirmPassword = String(confirmPassword || passwordConfirm || "");
 
   return {
     token: cleanToken,
@@ -668,8 +202,6 @@ export function createConfirmPayload({
     newPassword: cleanPassword,
     confirmPassword: cleanConfirmPassword,
     passwordConfirm: cleanConfirmPassword,
-    repeatPassword: cleanConfirmPassword,
-    password2: cleanConfirmPassword,
   };
 }
 
@@ -677,104 +209,62 @@ export function createConfirmPayload({
    VALIDATION
 ========================================================= */
 
-export function validateConfirmPayload(
-  payload = {}
-) {
+export function validateConfirmPayload(payload = {}) {
   const errors = {};
 
-  const token = safeText(
+  const token = normalizeToken(
     payload.token ||
       payload.resetToken ||
       payload.passwordResetToken ||
       payload.confirmToken ||
       payload.code ||
-      payload.t,
-    ""
+      payload.t
   );
 
-  const password = String(
-    payload.password ||
-      payload.newPassword ||
+  const password = String(payload.password || payload.newPassword || "");
+  const confirmPassword = String(
+    payload.confirmPassword ||
+      payload.passwordConfirm ||
+      payload.repeatPassword ||
+      payload.password2 ||
       ""
   );
 
-  const confirmPassword =
-    String(
-      payload.confirmPassword ||
-        payload.passwordConfirm ||
-        payload.repeatPassword ||
-        payload.password2 ||
-        ""
-    );
-
   if (!token) {
-    errors.global =
-      "El enlace no es válido o falta el token.";
+    errors.global = "El enlace no es válido o falta el token.";
   }
 
   if (!password.trim()) {
-    errors.password =
-      "Introduce una nueva contraseña.";
-  } else if (
-    password.length <
-    MIN_PASSWORD_LENGTH
-  ) {
-    errors.password =
-      `La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`;
+    errors.password = "Introduce una nueva contraseña.";
+  } else if (password.length < MIN_PASSWORD_LENGTH) {
+    errors.password = `La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`;
   }
 
   if (!confirmPassword.trim()) {
-    errors.confirmPassword =
-      "Repite la contraseña.";
-  } else if (
-    password !==
-    confirmPassword
-  ) {
-    errors.confirmPassword =
-      "Las contraseñas no coinciden.";
+    errors.confirmPassword = "Confirma la nueva contraseña.";
+  } else if (password !== confirmPassword) {
+    errors.confirmPassword = "Las contraseñas no coinciden.";
   }
 
   return errors;
 }
 
-export function getFirstConfirmError(
-  errors = {}
-) {
+export function getFirstConfirmError(errors = {}) {
   return (
-    safeText(
-      errors.global,
-      ""
-    ) ||
-    safeText(
-      errors.password,
-      ""
-    ) ||
-    safeText(
-      errors.confirmPassword,
-      ""
-    ) ||
+    safeText(errors.global, "") ||
+    safeText(errors.password, "") ||
+    safeText(errors.confirmPassword, "") ||
     "Revisa el formulario."
   );
 }
 
 /* =========================================================
-   RESPONSE NORMALIZATION
+   RESULT / ERROR
 ========================================================= */
 
-export function normalizeConfirmResult(
-  result = {}
-) {
-  const raw = isObject(result)
-    ? result
-    : {};
-
-  const data = isObject(raw.data)
-    ? raw.data
-    : {};
-
-  const payload = isObject(raw.payload)
-    ? raw.payload
-    : {};
+export function normalizeConfirmResult(result = {}) {
+  const raw = isObject(result) ? result : {};
+  const data = isObject(raw.data) ? raw.data : {};
 
   const explicitOk =
     typeof raw.ok === "boolean"
@@ -785,39 +275,28 @@ export function normalizeConfirmResult(
           ? data.ok
           : typeof data.success === "boolean"
             ? data.success
-            : typeof payload.ok === "boolean"
-              ? payload.ok
-              : typeof payload.success === "boolean"
-                ? payload.success
-                : null;
+            : null;
 
-  const ok =
-    explicitOk === null
-      ? false
-      : Boolean(explicitOk);
+  const status = Number(raw.status || raw.statusCode || data.status || data.statusCode || 0) || 0;
+  const ok = explicitOk === null
+    ? raw.error !== true && status < 400
+    : Boolean(explicitOk);
 
   const message =
-    raw.message ||
-    raw.mensaje ||
-    raw.detail ||
-    raw.error ||
-    data.message ||
-    data.mensaje ||
-    data.detail ||
-    data.error ||
-    payload.message ||
-    payload.mensaje ||
-    payload.detail ||
-    payload.error ||
-    "";
+    safeText(raw.message, "") ||
+    safeText(raw.mensaje, "") ||
+    safeText(raw.detail, "") ||
+    safeText(raw.error, "") ||
+    safeText(data.message, "") ||
+    safeText(data.mensaje, "") ||
+    safeText(data.detail, "") ||
+    safeText(data.error, "");
 
   const redirectTo =
-    raw.redirectTo ||
-    raw.redirect ||
-    data.redirectTo ||
-    data.redirect ||
-    payload.redirectTo ||
-    payload.redirect ||
+    safeText(raw.redirectTo, "") ||
+    safeText(raw.redirect, "") ||
+    safeText(data.redirectTo, "") ||
+    safeText(data.redirect, "") ||
     DEFAULT_LOGIN_PATH;
 
   return {
@@ -825,48 +304,28 @@ export function normalizeConfirmResult(
     ok,
     success: ok,
     error: !ok,
-
-    message: safeText(
-      message,
-      ok
-        ? DEFAULT_SUCCESS_MESSAGE
-        : DEFAULT_ERROR_MESSAGE
-    ),
-
-    redirectTo:
-      normalizeRedirectPath(
-        redirectTo
-      ),
+    status,
+    message: safeText(message, ok ? DEFAULT_SUCCESS_MESSAGE : DEFAULT_ERROR_MESSAGE),
+    redirectTo: normalizeRedirectPath(redirectTo),
   };
 }
 
-/* =========================================================
-   ERROR MESSAGE
-========================================================= */
-
-function normalizeErrorCode(error = null) {
+function errorCode(error = null) {
   return safeText(
     error?.code ||
       error?.error ||
       error?.data?.code ||
       error?.data?.error ||
       error?.response?.data?.code ||
-      error?.response?.data?.error ||
-      "",
+      error?.response?.data?.error,
     ""
   ).toUpperCase();
 }
 
-export function resolveConfirmErrorMessage(
-  error
-) {
-  const code =
-    normalizeErrorCode(error);
+export function resolveConfirmErrorMessage(error = null) {
+  const code = errorCode(error);
 
-  if (
-    code.includes("TOKEN_EXPIRED") ||
-    code.includes("EXPIRED")
-  ) {
+  if (code.includes("EXPIRED")) {
     return "El enlace de recuperación ha caducado. Solicita uno nuevo.";
   }
 
@@ -879,10 +338,7 @@ export function resolveConfirmErrorMessage(
     return "El enlace de recuperación no es válido o ya no está disponible.";
   }
 
-  if (
-    code.includes("TOKEN_ALREADY_USED") ||
-    code.includes("USED")
-  ) {
+  if (code.includes("USED")) {
     return "Este enlace de recuperación ya ha sido utilizado.";
   }
 
@@ -893,37 +349,16 @@ export function resolveConfirmErrorMessage(
     return "La contraseña no cumple los requisitos de seguridad.";
   }
 
-  if (
-    code.includes("PASSWORD_MISMATCH") ||
-    code.includes("MISMATCH")
-  ) {
+  if (code.includes("MISMATCH")) {
     return "Las contraseñas no coinciden.";
   }
 
-  const backendMessage =
-    safeText(
-      error?.data?.message,
-      ""
-    ) ||
-    safeText(
-      error?.data?.mensaje,
-      ""
-    ) ||
-    safeText(
-      error?.response?.data?.message,
-      ""
-    ) ||
-    safeText(
-      error?.response?.data?.mensaje,
-      ""
-    ) ||
-    safeText(
-      error?.message,
-      ""
-    );
-
   return (
-    backendMessage ||
+    safeText(error?.data?.message, "") ||
+    safeText(error?.data?.mensaje, "") ||
+    safeText(error?.response?.data?.message, "") ||
+    safeText(error?.response?.data?.mensaje, "") ||
+    safeText(error?.message, "") ||
     DEFAULT_ERROR_MESSAGE
   );
 }
@@ -932,19 +367,36 @@ export function resolveConfirmErrorMessage(
    REDIRECT
 ========================================================= */
 
-export function resolveConfirmRedirect(
-  result = {},
-  deps = {}
-) {
+export function resolveConfirmRedirect(result = {}, deps = {}) {
   return normalizeRedirectPath(
-    safeText(
-      deps.redirectTo,
-      ""
-    ) ||
-      safeText(
-        result.redirectTo,
-        ""
-      ) ||
+    safeText(deps.redirectTo, "") ||
+      safeText(result.redirectTo, "") ||
       DEFAULT_LOGIN_PATH
   );
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  CONFIRM_HELPERS_VERSION,
+
+  DEFAULT_SUCCESS_MESSAGE,
+  DEFAULT_ERROR_MESSAGE,
+  MIN_PASSWORD_LENGTH,
+
+  safeText,
+  isObject,
+
+  normalizePath,
+  getUrlToken,
+
+  createConfirmPayload,
+  validateConfirmPayload,
+  getFirstConfirmError,
+
+  normalizeConfirmResult,
+  resolveConfirmErrorMessage,
+  resolveConfirmRedirect,
+};

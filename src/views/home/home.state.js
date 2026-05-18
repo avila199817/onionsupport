@@ -1,83 +1,34 @@
 /* =========================================================
-   Onion SPA - Home State
-   Archivo: src/views/home/home.state.js
+   Onion Support - Home State
+   Archivo: /src/views/home/home.state.js
 
-   HOME STATE · SINGLE SOURCE · MODULAR BACKEND READY · FINAL 11/10
-
-   Responsabilidades:
-   - Mantener estado runtime del Home.
-   - Exponer setters seguros consumidos por home.api.js y HomeView.js.
-   - Preservar dashboard/summary/widgets/collections sin empobrecer datos.
-   - Diferenciar loading / refreshing / hydrated / loaded.
-   - Sincronizar eventos de cambio con AppCore.events o window fallback.
-   - Evitar tormentas de eventos mediante firma comparable.
-   - Mantener shape estable para home.store.js, home.api.js y home.template.js.
-   - Alinear Home con backend modular sin /api/dashboard/*.
-   - Cero CSS.
-   - Cero DOM obligatorio.
-   - Cero dependencia con HomeApi/HomeView/HomeTemplate.
-
-   Regla crítica:
-   - No pisar arrays existentes con arrays vacíos salvo replace explícito.
-   - No pisar summary/dashboard real con objeto vacío salvo replace explícito.
-   - Setters individuales son tolerantes a payload parcial.
-   - syncHomeStateFromDashboard aplica batch único, no cascada de setters.
+   Responsabilidad:
+   - Estado runtime mínimo de Home.
+   - Setters seguros consumidos por homeView.js y home.api.js.
+   - Mantener shape estable para template/selectors.
+   - Preservar datos existentes si llega payload vacío.
+   - Sin AppCore.
+   - Sin eventos.
+   - Sin window globals.
+   - Sin Router.
+   - Sin Auth.
+   - Sin HTTP.
+   - Sin Storage.
+   - Sin CSS.
+   - Sin magia negra.
 ========================================================= */
 
-import { AppCore } from "../../core/index.js";
-
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
-export const HOME_STATE_VERSION = "11.0.0";
-
-export const HOME_STATE_SCOPE = "view:home:state";
-
-export const HOME_STATE_EVENTS = Object.freeze({
-  change: "home:state:change",
-  patch: "home:state:patch",
-  reset: "home:state:reset",
-
-  loading: "home:state:loading",
-  refreshing: "home:state:refreshing",
-  loaded: "home:state:loaded",
-  hydrated: "home:state:hydrated",
-
-  error: "home:state:error",
-
-  dashboard: "home:state:dashboard",
-  summary: "home:state:summary",
-  widgets: "home:state:widgets",
-  tickets: "home:state:tickets",
-  invoices: "home:state:invoices",
-  users: "home:state:users",
-  clients: "home:state:clients",
-  recent: "home:state:recent",
-  health: "home:state:health",
-});
+export const HOME_STATE_VERSION = "home.state.v1";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 5;
-const MAX_RECENT_MUTATIONS = 60;
-
-let lastStateSignature = "";
-let lastEmitAt = 0;
 
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
 
-function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function safeObject(value, fallback = {}) {
@@ -88,76 +39,62 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+function safeText(value = "", fallback = "") {
+  if (value === null || value === undefined) return fallback;
 
-  const text = String(value)
+  const output = String(value)
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  return text || fallback;
+  return output || fallback;
 }
 
-function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") {
-    return fallback;
-  }
+function safeNumber(value = 0, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
 
   if (typeof value === "string") {
-    let normalized = value
+    let clean = value
       .trim()
       .replace(/[€$£¥%]/g, "")
       .replace(/[^\d.,+\-\s]/g, "")
       .replace(/\s/g, "");
 
-    const hasComma = normalized.includes(",");
-    const hasDot = normalized.includes(".");
+    if (!clean || clean === "-" || clean === "+") return fallback;
+
+    const hasComma = clean.includes(",");
+    const hasDot = clean.includes(".");
 
     if (hasComma && hasDot) {
-      const lastComma = normalized.lastIndexOf(",");
-      const lastDot = normalized.lastIndexOf(".");
+      const lastComma = clean.lastIndexOf(",");
+      const lastDot = clean.lastIndexOf(".");
 
-      normalized =
+      clean =
         lastComma > lastDot
-          ? normalized.replace(/\./g, "").replace(/,/g, ".")
-          : normalized.replace(/,/g, "");
+          ? clean.replace(/\./g, "").replace(/,/g, ".")
+          : clean.replace(/,/g, "");
     } else if (hasComma) {
-      normalized = normalized.replace(/,/g, ".");
+      clean = clean.replace(/,/g, ".");
     }
 
-    const parsed = Number(normalized);
-
-    return Number.isFinite(parsed) ? parsed : fallback;
+    const number = Number(clean);
+    return Number.isFinite(number) ? number : fallback;
   }
 
   const number = Number(value);
-
   return Number.isFinite(number) ? number : fallback;
 }
 
-function safeBoolean(value, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
+function safeBoolean(value = false, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (value === 1 || value === "1") return true;
+  if (value === 0 || value === "0") return false;
 
   if (typeof value === "string") {
-    const key = value.trim().toLowerCase();
+    const clean = value.trim().toLowerCase();
 
-    if (["true", "1", "yes", "si", "sí", "on", "ok"].includes(key)) {
-      return true;
-    }
-
-    if (["false", "0", "no", "off"].includes(key)) {
-      return false;
-    }
+    if (["true", "yes", "si", "sí", "on", "ok"].includes(clean)) return true;
+    if (["false", "no", "off"].includes(clean)) return false;
   }
 
   return Boolean(fallback);
@@ -167,31 +104,14 @@ function hasOwnKeys(value = {}) {
   return Boolean(isObject(value) && Object.keys(value).length > 0);
 }
 
-function isMeaningfulValue(value) {
-  if (value === undefined || value === null) {
-    return false;
-  }
-
-  if (typeof value === "string" && value.trim() === "") {
-    return false;
-  }
-
-  if (Array.isArray(value) && value.length === 0) {
-    return false;
-  }
-
-  if (isObject(value) && Object.keys(value).length === 0) {
-    return false;
-  }
-
-  return true;
-}
-
 function first(...values) {
   for (const value of values) {
-    if (isMeaningfulValue(value)) {
-      return value;
-    }
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
+
+    return value;
   }
 
   return null;
@@ -199,20 +119,10 @@ function first(...values) {
 
 function firstArray(...values) {
   for (const value of values) {
-    if (Array.isArray(value)) {
-      return value;
-    }
+    if (Array.isArray(value)) return value;
   }
 
   return null;
-}
-
-function nowMs() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
 }
 
 function nowIso() {
@@ -223,24 +133,24 @@ function nowIso() {
   }
 }
 
-function safeClone(value, fallback = null) {
+function clone(value, fallback = null) {
   try {
     if (typeof structuredClone === "function") {
       return structuredClone(value);
     }
-  } catch {}
+  } catch {
+    // noop
+  }
 
   try {
     return JSON.parse(JSON.stringify(value));
-  } catch {}
-
-  return fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function normalizeError(error = null) {
-  if (!error) {
-    return null;
-  }
+  if (!error) return null;
 
   if (typeof error === "string") {
     return {
@@ -254,7 +164,6 @@ function normalizeError(error = null) {
 
   return {
     name: safeText(object.name, "HomeStateError"),
-
     message: safeText(
       first(
         object.message,
@@ -265,7 +174,6 @@ function normalizeError(error = null) {
       ),
       "Error Home."
     ),
-
     code: safeText(
       first(
         object.code,
@@ -353,75 +261,15 @@ export function createInitialHomeState() {
 
     meta: {},
 
-    modules: {},
-
     partial: false,
     errors: [],
-
-    recentMutations: [],
   };
 }
 
 export const homeState = createInitialHomeState();
 
 /* =========================================================
-   EVENTS
-========================================================= */
-
-function safeWindowDispatch(eventName = "", payload = {}) {
-  if (!isBrowser() || !eventName) {
-    return false;
-  }
-
-  try {
-    window.dispatchEvent(
-      new CustomEvent(eventName, {
-        detail: payload,
-      })
-    );
-
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function emitHomeStateEvent(eventName = "", payload = {}, options = {}) {
-  const name = safeText(eventName, "");
-
-  if (!name) {
-    return false;
-  }
-
-  const opts = safeObject(options);
-
-  const detail = {
-    source: HOME_STATE_SCOPE,
-    version: HOME_STATE_VERSION,
-    at: nowIso(),
-    ...safeObject(payload),
-  };
-
-  let busAvailable = false;
-  let busEmitted = false;
-
-  try {
-    if (isFunction(AppCore?.events?.emit)) {
-      busAvailable = true;
-      AppCore.events.emit(name, detail);
-      busEmitted = true;
-    }
-  } catch {}
-
-  if (opts.window === true || (!busAvailable && isBrowser())) {
-    return safeWindowDispatch(name, detail) || busEmitted;
-  }
-
-  return busEmitted;
-}
-
-/* =========================================================
-   SUMMARY / ALIASES
+   ALIASES / NORMALIZATION
 ========================================================= */
 
 function normalizeSummaryAliases(summary = {}) {
@@ -438,7 +286,7 @@ function normalizeSummaryAliases(summary = {}) {
         raw.ticketsCount,
         raw.incidenciasCount,
         homeState.ticketsRemoteCount,
-        safeArray(homeState.tickets).length
+        homeState.tickets.length
       ),
       0
     )
@@ -499,7 +347,7 @@ function normalizeSummaryAliases(summary = {}) {
         raw.invoicesCount,
         raw.facturasCount,
         homeState.invoicesRemoteCount,
-        safeArray(homeState.invoices).length
+        homeState.invoices.length
       ),
       0
     )
@@ -549,7 +397,7 @@ function normalizeSummaryAliases(summary = {}) {
         raw.activeUsers,
         raw.usuariosActivos,
         homeState.usersRemoteCount,
-        safeArray(homeState.users).length
+        homeState.users.length
       ),
       0
     )
@@ -568,7 +416,7 @@ function normalizeSummaryAliases(summary = {}) {
         raw.activeClients,
         raw.clientesActivos,
         homeState.clientsRemoteCount,
-        safeArray(homeState.clients).length
+        homeState.clients.length
       ),
       0
     )
@@ -585,69 +433,6 @@ function normalizeSummaryAliases(summary = {}) {
       ),
       0
     )
-  );
-
-  const visibleTicketsCount = Math.max(
-    0,
-    safeNumber(
-      first(
-        raw.visibleTickets,
-        raw.visibleTicketsCount,
-        raw.visibleIncidenciasCount,
-        safeArray(homeState.tickets).length
-      ),
-      0
-    )
-  );
-
-  const visibleInvoicesCount = Math.max(
-    0,
-    safeNumber(
-      first(
-        raw.visibleInvoices,
-        raw.visibleInvoicesCount,
-        raw.visibleFacturasCount,
-        safeArray(homeState.invoices).length
-      ),
-      0
-    )
-  );
-
-  const visibleUsersCount = Math.max(
-    0,
-    safeNumber(
-      first(
-        raw.visibleUsers,
-        raw.visibleUsersCount,
-        raw.visibleUsuariosCount,
-        safeArray(homeState.users).length
-      ),
-      0
-    )
-  );
-
-  const visibleClientsCount = Math.max(
-    0,
-    safeNumber(
-      first(
-        raw.visibleClients,
-        raw.visibleClientsCount,
-        raw.visibleClientesCount,
-        raw.visibleCustomersCount,
-        safeArray(homeState.clients).length
-      ),
-      0
-    )
-  );
-
-  const activeUsersRaw = Math.max(
-    0,
-    safeNumber(first(raw.activeUsers, raw.usuariosActivos, 0), 0)
-  );
-
-  const activeClientsRaw = Math.max(
-    0,
-    safeNumber(first(raw.activeClients, raw.clientesActivos, 0), 0)
   );
 
   return {
@@ -700,9 +485,8 @@ function normalizeSummaryAliases(summary = {}) {
     usuariosCount: usersCount,
     totalUsers: usersCount,
     totalUsuarios: usersCount,
-
-    activeUsers: activeUsersRaw || usersCount,
-    usuariosActivos: activeUsersRaw || usersCount,
+    activeUsers: Math.max(usersCount, safeNumber(raw.activeUsers, 0)),
+    usuariosActivos: Math.max(usersCount, safeNumber(raw.usuariosActivos, 0)),
 
     clientsCount,
     clientesCount: clientsCount,
@@ -710,26 +494,8 @@ function normalizeSummaryAliases(summary = {}) {
     totalClients: clientsCount,
     totalClientes: clientsCount,
     totalCustomers: clientsCount,
-
-    activeClients: activeClientsRaw || clientsCount,
-    clientesActivos: activeClientsRaw || clientsCount,
-
-    visibleTickets: visibleTicketsCount,
-    visibleTicketsCount,
-    visibleIncidenciasCount: visibleTicketsCount,
-
-    visibleInvoices: visibleInvoicesCount,
-    visibleInvoicesCount,
-    visibleFacturasCount: visibleInvoicesCount,
-
-    visibleUsers: visibleUsersCount,
-    visibleUsersCount,
-    visibleUsuariosCount: visibleUsersCount,
-
-    visibleClients: visibleClientsCount,
-    visibleClientsCount,
-    visibleClientesCount: visibleClientsCount,
-    visibleCustomersCount: visibleClientsCount,
+    activeClients: Math.max(clientsCount, safeNumber(raw.activeClients, 0)),
+    clientesActivos: Math.max(clientsCount, safeNumber(raw.clientesActivos, 0)),
 
     attachmentsCount,
     filesCount: attachmentsCount,
@@ -737,26 +503,26 @@ function normalizeSummaryAliases(summary = {}) {
   };
 }
 
-function syncAliasesFromCollections() {
-  homeState.incidencias = safeArray(homeState.tickets);
+function syncCollectionAliases() {
+  homeState.incidencias = homeState.tickets;
 
-  homeState.facturas = safeArray(homeState.invoices);
+  homeState.facturas = homeState.invoices;
 
-  homeState.usuarios = safeArray(homeState.users);
+  homeState.usuarios = homeState.users;
 
-  homeState.clientes = safeArray(homeState.clients);
-  homeState.customers = safeArray(homeState.clients);
+  homeState.clientes = homeState.clients;
+  homeState.customers = homeState.clients;
 
-  homeState.activities = safeArray(homeState.activity);
-  homeState.recent = safeArray(homeState.activity);
-  homeState.recentActivity = safeArray(homeState.activity);
+  homeState.activities = homeState.activity;
+  homeState.recent = homeState.activity;
+  homeState.recentActivity = homeState.activity;
 
-  homeState.cards = safeArray(homeState.widgets);
-  homeState.kpis = safeArray(homeState.widgets);
-  homeState.blocks = safeArray(homeState.widgets);
+  homeState.cards = homeState.widgets;
+  homeState.kpis = homeState.widgets;
+  homeState.blocks = homeState.widgets;
 }
 
-function syncAliasesFromSummary() {
+function syncSummaryAliases() {
   homeState.summary = normalizeSummaryAliases(homeState.summary);
 
   homeState.stats = homeState.summary;
@@ -765,14 +531,11 @@ function syncAliasesFromSummary() {
   homeState.counts = homeState.summary;
 }
 
-function syncDashboardAliases() {
+function syncDashboardShape() {
   const dashboard = safeObject(homeState.dashboard);
 
   homeState.dashboard = {
     ...dashboard,
-
-    ok: dashboard.ok !== false,
-    success: dashboard.success !== false,
 
     summary: homeState.summary,
     stats: homeState.summary,
@@ -812,28 +575,22 @@ function syncDashboardAliases() {
       ticketsCount: homeState.summary.totalTickets,
       incidenciasCount: homeState.summary.totalTickets,
       visibleTicketsCount: homeState.tickets.length,
-      visibleIncidenciasCount: homeState.tickets.length,
 
       invoicesCount: homeState.summary.totalInvoices,
       facturasCount: homeState.summary.totalInvoices,
       visibleInvoicesCount: homeState.invoices.length,
-      visibleFacturasCount: homeState.invoices.length,
 
       usersCount: homeState.summary.usersCount,
       usuariosCount: homeState.summary.usuariosCount,
       visibleUsersCount: homeState.users.length,
-      visibleUsuariosCount: homeState.users.length,
 
       clientsCount: homeState.summary.clientsCount,
       clientesCount: homeState.summary.clientesCount,
       customersCount: homeState.summary.customersCount,
       visibleClientsCount: homeState.clients.length,
-      visibleClientesCount: homeState.clients.length,
-      visibleCustomersCount: homeState.clients.length,
 
       activityCount: homeState.activity.length,
       recentCount: homeState.activity.length,
-      visibleActivityCount: homeState.activity.length,
     },
   };
 }
@@ -841,13 +598,10 @@ function syncDashboardAliases() {
 export function normalizeHomeState() {
   homeState.version = HOME_STATE_VERSION;
 
-  homeState.page = Math.max(1, safeNumber(homeState.page, DEFAULT_PAGE));
-  homeState.pageSize = Math.max(1, safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE));
-
-  homeState.loading = Boolean(homeState.loading);
-  homeState.refreshing = Boolean(homeState.refreshing);
   homeState.hydrated = Boolean(homeState.hydrated);
   homeState.loaded = Boolean(homeState.loaded);
+  homeState.loading = Boolean(homeState.loading);
+  homeState.refreshing = Boolean(homeState.refreshing);
   homeState.creating = Boolean(homeState.creating);
 
   homeState.openingTicketId = safeText(homeState.openingTicketId, "");
@@ -857,10 +611,8 @@ export function normalizeHomeState() {
   homeState.error = safeText(homeState.error, "");
   homeState.lastError = homeState.lastError ? normalizeError(homeState.lastError) : null;
 
-  homeState.requestId = safeText(homeState.requestId, "");
-
-  homeState.lastSyncAt = safeText(first(homeState.lastSyncAt, homeState.lastUpdatedAt, ""), "");
-  homeState.lastUpdatedAt = safeText(first(homeState.lastUpdatedAt, homeState.lastSyncAt, ""), "");
+  homeState.page = Math.max(1, safeNumber(homeState.page, DEFAULT_PAGE));
+  homeState.pageSize = Math.max(1, safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE));
 
   homeState.dashboard = safeObject(homeState.dashboard);
   homeState.summary = safeObject(homeState.summary);
@@ -904,10 +656,14 @@ export function normalizeHomeState() {
   );
 
   homeState.totalCount = Math.max(
+    safeNumber(homeState.totalCount, 0),
     homeState.remoteCount,
-    homeState.ticketsRemoteCount,
-    safeNumber(homeState.totalCount, 0)
+    homeState.ticketsRemoteCount
   );
+
+  homeState.requestId = safeText(homeState.requestId, "");
+  homeState.lastSyncAt = safeText(first(homeState.lastSyncAt, homeState.lastUpdatedAt, ""), "");
+  homeState.lastUpdatedAt = safeText(first(homeState.lastUpdatedAt, homeState.lastSyncAt, ""), "");
 
   homeState.health =
     homeState.health === null
@@ -915,172 +671,49 @@ export function normalizeHomeState() {
       : safeObject(homeState.health, homeState.health);
 
   homeState.meta = safeObject(homeState.meta);
-  homeState.modules = safeObject(homeState.modules);
 
   homeState.partial = Boolean(homeState.partial);
   homeState.errors = safeArray(homeState.errors);
 
-  homeState.recentMutations = safeArray(homeState.recentMutations).slice(
-    0,
-    MAX_RECENT_MUTATIONS
-  );
-
-  syncAliasesFromCollections();
-  syncAliasesFromSummary();
-  syncDashboardAliases();
+  syncCollectionAliases();
+  syncSummaryAliases();
+  syncDashboardShape();
 
   return homeState;
 }
 
 /* =========================================================
-   SIGNATURE / MUTATIONS
+   PATCH HELPERS
 ========================================================= */
 
-function getStateSignature() {
-  const data = {
-    hydrated: Boolean(homeState.hydrated),
-    loaded: Boolean(homeState.loaded),
-    loading: Boolean(homeState.loading),
-    refreshing: Boolean(homeState.refreshing),
-    creating: Boolean(homeState.creating),
-
-    openingTicketId: safeText(homeState.openingTicketId, ""),
-    selectedTicketId: safeText(homeState.selectedTicketId, ""),
-    navigatingAction: safeText(homeState.navigatingAction, ""),
-
-    error: safeText(homeState.error, ""),
-
-    page: safeNumber(homeState.page, DEFAULT_PAGE),
-    pageSize: safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE),
-
-    requestId: safeText(homeState.requestId, ""),
-    lastSyncAt: safeText(homeState.lastSyncAt, ""),
-
-    widgets: safeArray(homeState.widgets).length,
-    tickets: safeArray(homeState.tickets).length,
-    invoices: safeArray(homeState.invoices).length,
-    users: safeArray(homeState.users).length,
-    clients: safeArray(homeState.clients).length,
-    activity: safeArray(homeState.activity).length,
-
-    ticketsRemoteCount: safeNumber(homeState.ticketsRemoteCount, 0),
-    invoicesRemoteCount: safeNumber(homeState.invoicesRemoteCount, 0),
-    usersRemoteCount: safeNumber(homeState.usersRemoteCount, 0),
-    clientsRemoteCount: safeNumber(homeState.clientsRemoteCount, 0),
-    activityRemoteCount: safeNumber(homeState.activityRemoteCount, 0),
-
-    summary: {
-      totalTickets: safeNumber(homeState.summary?.totalTickets, 0),
-      openTickets: safeNumber(homeState.summary?.openTickets, 0),
-      urgentTickets: safeNumber(homeState.summary?.urgentTickets, 0),
-      totalInvoices: safeNumber(homeState.summary?.totalInvoices, 0),
-      pendingInvoices: safeNumber(homeState.summary?.pendingInvoices, 0),
-      invoiceAmount: safeNumber(homeState.summary?.invoiceAmount, 0),
-      usersCount: safeNumber(homeState.summary?.usersCount, 0),
-      clientsCount: safeNumber(homeState.summary?.clientsCount, 0),
-    },
-
-    partial: Boolean(homeState.partial),
-    errors: safeArray(homeState.errors).length,
-  };
-
-  try {
-    return JSON.stringify(data);
-  } catch {
-    return String(nowMs());
-  }
-}
-
-function recordMutation(type = "patch", patch = {}) {
-  const item = {
-    type: safeText(type, "patch"),
-    keys: Object.keys(safeObject(patch)),
-    at: nowIso(),
-  };
-
-  homeState.recentMutations.unshift(item);
-
-  if (homeState.recentMutations.length > MAX_RECENT_MUTATIONS) {
-    homeState.recentMutations = homeState.recentMutations.slice(0, MAX_RECENT_MUTATIONS);
-  }
-
-  return item;
-}
-
-function emitStateChanged(type = "patch", patch = {}, options = {}) {
-  normalizeHomeState();
-
-  const signature = getStateSignature();
-  const changed = signature !== lastStateSignature;
-
-  const force =
-    safeBoolean(options?.forceEmit, false) ||
-    safeBoolean(options?.emitUnchanged, false);
-
-  lastStateSignature = signature;
-  lastEmitAt = nowMs();
-
-  const payload = {
-    type: safeText(type, "patch"),
-    changed,
-    patch: safeClone(patch, {}),
-    state: getHomeStateSnapshot(),
-    at: nowIso(),
-  };
-
-  if (changed || force) {
-    emitHomeStateEvent(HOME_STATE_EVENTS.change, payload);
-
-    if (HOME_STATE_EVENTS[type]) {
-      emitHomeStateEvent(HOME_STATE_EVENTS[type], payload);
-    } else if (type !== "change") {
-      emitHomeStateEvent(HOME_STATE_EVENTS.patch, payload);
-    }
-  }
-
-  return payload;
-}
-
-/* =========================================================
-   INTERNAL APPLY HELPERS
-========================================================= */
-
-function shouldPreserveExistingArray(key = "", value = [], options = {}) {
-  if (options?.replace === true) {
-    return false;
-  }
-
-  return Array.isArray(value) &&
+function shouldKeepExistingArray(key = "", value = [], options = {}) {
+  return (
+    options.replace !== true &&
+    Array.isArray(value) &&
     value.length === 0 &&
     Array.isArray(homeState[key]) &&
-    homeState[key].length > 0;
+    homeState[key].length > 0
+  );
 }
 
-function shouldPreserveExistingObject(key = "", value = {}, options = {}) {
-  if (options?.replace === true) {
-    return false;
-  }
-
-  return isObject(value) &&
-    !hasOwnKeys(value) &&
+function shouldKeepExistingObject(key = "", value = {}, options = {}) {
+  return (
+    options.replace !== true &&
+    isObject(value) &&
+    Object.keys(value).length === 0 &&
     isObject(homeState[key]) &&
-    hasOwnKeys(homeState[key]);
+    Object.keys(homeState[key]).length > 0
+  );
 }
 
 function assignIfUseful(key = "", value, options = {}) {
-  if (!key) {
+  if (!key || value === undefined) return false;
+
+  if (Array.isArray(value) && shouldKeepExistingArray(key, value, options)) {
     return false;
   }
 
-  if (Array.isArray(value) && shouldPreserveExistingArray(key, value, options)) {
-    return false;
-  }
-
-  if (isObject(value) && shouldPreserveExistingObject(key, value, options)) {
-    return false;
-  }
-
-  if (value === undefined) {
+  if (isObject(value) && shouldKeepExistingObject(key, value, options)) {
     return false;
   }
 
@@ -1088,107 +721,93 @@ function assignIfUseful(key = "", value, options = {}) {
   return true;
 }
 
-function getRemoteCountFromDashboard(raw = {}, kind = "") {
-  const object = safeObject(raw);
-  const summary = safeObject(first(object.summary, object.stats, object.metrics, object.totals, object.counts, {}));
+function remoteCountFromDashboard(raw = {}, type = "") {
+  const data = safeObject(raw);
+  const summary = safeObject(first(data.summary, data.stats, data.metrics, data.totals, data.counts, {}));
+  const meta = safeObject(data.meta);
 
-  if (kind === "tickets") {
+  if (type === "tickets") {
     return first(
-      object.ticketsTotal,
-      object.incidenciasTotal,
-      object.totalTickets,
-      object.totalIncidencias,
-      object.ticketsCount,
-      object.incidenciasCount,
+      data.ticketsTotal,
+      data.incidenciasTotal,
+      data.totalTickets,
+      data.totalIncidencias,
+      data.ticketsCount,
+      data.incidenciasCount,
       summary.totalTickets,
       summary.ticketsTotal,
       summary.incidenciasTotal,
       summary.totalIncidencias,
       summary.ticketsCount,
       summary.incidenciasCount,
-      object.meta?.ticketsCount,
-      object.meta?.incidenciasCount,
-      object.meta?.totalTickets,
-      object.meta?.totalIncidencias,
+      meta.ticketsCount,
+      meta.incidenciasCount,
       0
     );
   }
 
-  if (kind === "invoices") {
+  if (type === "invoices") {
     return first(
-      object.invoicesTotal,
-      object.facturasTotal,
-      object.totalInvoices,
-      object.totalFacturas,
-      object.invoicesCount,
-      object.facturasCount,
+      data.invoicesTotal,
+      data.facturasTotal,
+      data.totalInvoices,
+      data.totalFacturas,
+      data.invoicesCount,
+      data.facturasCount,
       summary.totalInvoices,
       summary.invoicesTotal,
       summary.facturasTotal,
       summary.totalFacturas,
       summary.invoicesCount,
       summary.facturasCount,
-      object.meta?.invoicesCount,
-      object.meta?.facturasCount,
-      object.meta?.totalInvoices,
-      object.meta?.totalFacturas,
+      meta.invoicesCount,
+      meta.facturasCount,
       0
     );
   }
 
-  if (kind === "users") {
+  if (type === "users") {
     return first(
-      object.usersTotal,
-      object.usuariosTotal,
-      object.totalUsers,
-      object.totalUsuarios,
-      object.usersCount,
-      object.usuariosCount,
+      data.usersTotal,
+      data.usuariosTotal,
+      data.totalUsers,
+      data.totalUsuarios,
+      data.usersCount,
+      data.usuariosCount,
       summary.usersCount,
       summary.usuariosCount,
       summary.totalUsers,
       summary.totalUsuarios,
-      object.meta?.usersCount,
-      object.meta?.usuariosCount,
-      object.meta?.totalUsers,
-      object.meta?.totalUsuarios,
+      meta.usersCount,
+      meta.usuariosCount,
       0
     );
   }
 
-  if (kind === "clients") {
+  if (type === "clients") {
     return first(
-      object.clientsTotal,
-      object.clientesTotal,
-      object.customersTotal,
-      object.totalClients,
-      object.totalClientes,
-      object.totalCustomers,
-      object.clientsCount,
-      object.clientesCount,
-      object.customersCount,
+      data.clientsTotal,
+      data.clientesTotal,
+      data.customersTotal,
+      data.totalClients,
+      data.totalClientes,
+      data.totalCustomers,
+      data.clientsCount,
+      data.clientesCount,
+      data.customersCount,
       summary.clientsCount,
       summary.clientesCount,
       summary.customersCount,
       summary.totalClients,
       summary.totalClientes,
-      summary.totalCustomers,
-      object.meta?.clientsCount,
-      object.meta?.clientesCount,
-      object.meta?.customersCount,
+      meta.clientsCount,
+      meta.clientesCount,
       0
     );
   }
 
-  if (kind === "activity") {
-    return first(
-      object.activityCount,
-      object.recentCount,
-      object.visibleActivityCount,
-      object.meta?.activityCount,
-      object.meta?.recentCount,
-      0
-    );
+  if (type === "activity") {
+    return first(data.activityCount, data.recentCount, meta.activityCount, meta.recentCount, 0);
   }
 
   return 0;
@@ -1196,11 +815,9 @@ function getRemoteCountFromDashboard(raw = {}, kind = "") {
 
 function applyDashboardToState(dashboard = {}, options = {}) {
   const raw = safeObject(dashboard);
-  const replace = options?.replace === true;
+  const replace = options.replace === true;
 
-  if (!hasOwnKeys(raw) && !replace) {
-    return {};
-  }
+  if (!hasOwnKeys(raw) && !replace) return {};
 
   const patch = {};
 
@@ -1214,16 +831,7 @@ function applyDashboardToState(dashboard = {}, options = {}) {
   assignIfUseful("dashboard", nextDashboard, { replace });
   patch.dashboard = homeState.dashboard;
 
-  const summary = safeObject(
-    first(
-      raw.summary,
-      raw.stats,
-      raw.metrics,
-      raw.totals,
-      raw.counts,
-      {}
-    )
-  );
+  const summary = safeObject(first(raw.summary, raw.stats, raw.metrics, raw.totals, raw.counts, {}));
 
   if (hasOwnKeys(summary) || replace) {
     const nextSummary = normalizeSummaryAliases(
@@ -1250,11 +858,16 @@ function applyDashboardToState(dashboard = {}, options = {}) {
 
   if (tickets) {
     assignIfUseful("tickets", tickets, { replace });
+
     homeState.ticketsRemoteCount = Math.max(
-      safeArray(homeState.tickets).length,
-      safeNumber(getRemoteCountFromDashboard(raw, "tickets"), homeState.ticketsRemoteCount)
+      homeState.tickets.length,
+      safeNumber(options.remoteCount, 0),
+      safeNumber(remoteCountFromDashboard(raw, "tickets"), homeState.ticketsRemoteCount),
+      homeState.ticketsRemoteCount
     );
+
     homeState.remoteCount = Math.max(homeState.remoteCount, homeState.ticketsRemoteCount);
+
     patch.tickets = homeState.tickets;
     patch.ticketsRemoteCount = homeState.ticketsRemoteCount;
   }
@@ -1263,10 +876,13 @@ function applyDashboardToState(dashboard = {}, options = {}) {
 
   if (invoices) {
     assignIfUseful("invoices", invoices, { replace });
+
     homeState.invoicesRemoteCount = Math.max(
-      safeArray(homeState.invoices).length,
-      safeNumber(getRemoteCountFromDashboard(raw, "invoices"), homeState.invoicesRemoteCount)
+      homeState.invoices.length,
+      safeNumber(remoteCountFromDashboard(raw, "invoices"), homeState.invoicesRemoteCount),
+      homeState.invoicesRemoteCount
     );
+
     patch.invoices = homeState.invoices;
     patch.invoicesRemoteCount = homeState.invoicesRemoteCount;
   }
@@ -1275,10 +891,13 @@ function applyDashboardToState(dashboard = {}, options = {}) {
 
   if (users) {
     assignIfUseful("users", users, { replace });
+
     homeState.usersRemoteCount = Math.max(
-      safeArray(homeState.users).length,
-      safeNumber(getRemoteCountFromDashboard(raw, "users"), homeState.usersRemoteCount)
+      homeState.users.length,
+      safeNumber(remoteCountFromDashboard(raw, "users"), homeState.usersRemoteCount),
+      homeState.usersRemoteCount
     );
+
     patch.users = homeState.users;
     patch.usersRemoteCount = homeState.usersRemoteCount;
   }
@@ -1287,10 +906,13 @@ function applyDashboardToState(dashboard = {}, options = {}) {
 
   if (clients) {
     assignIfUseful("clients", clients, { replace });
+
     homeState.clientsRemoteCount = Math.max(
-      safeArray(homeState.clients).length,
-      safeNumber(getRemoteCountFromDashboard(raw, "clients"), homeState.clientsRemoteCount)
+      homeState.clients.length,
+      safeNumber(remoteCountFromDashboard(raw, "clients"), homeState.clientsRemoteCount),
+      homeState.clientsRemoteCount
     );
+
     patch.clients = homeState.clients;
     patch.clientsRemoteCount = homeState.clientsRemoteCount;
   }
@@ -1299,15 +921,18 @@ function applyDashboardToState(dashboard = {}, options = {}) {
 
   if (activity) {
     assignIfUseful("activity", activity, { replace });
+
     homeState.activityRemoteCount = Math.max(
-      safeArray(homeState.activity).length,
-      safeNumber(getRemoteCountFromDashboard(raw, "activity"), homeState.activityRemoteCount)
+      homeState.activity.length,
+      safeNumber(remoteCountFromDashboard(raw, "activity"), homeState.activityRemoteCount),
+      homeState.activityRemoteCount
     );
+
     patch.activity = homeState.activity;
     patch.activityRemoteCount = homeState.activityRemoteCount;
   }
 
-  const meta = safeObject(first(raw.meta, {}));
+  const meta = safeObject(raw.meta);
 
   if (hasOwnKeys(meta) || replace) {
     homeState.meta = replace
@@ -1320,17 +945,6 @@ function applyDashboardToState(dashboard = {}, options = {}) {
     patch.meta = homeState.meta;
   }
 
-  if (hasOwnKeys(raw.modules) || replace) {
-    homeState.modules = replace
-      ? safeObject(raw.modules)
-      : {
-          ...safeObject(homeState.modules),
-          ...safeObject(raw.modules),
-        };
-
-    patch.modules = homeState.modules;
-  }
-
   if (Array.isArray(raw.errors) || replace) {
     homeState.errors = safeArray(raw.errors);
     patch.errors = homeState.errors;
@@ -1341,33 +955,11 @@ function applyDashboardToState(dashboard = {}, options = {}) {
     patch.partial = homeState.partial;
   }
 
-  homeState.requestId = safeText(
-    first(
-      options?.requestId,
-      raw.requestId,
-      raw.meta?.requestId,
-      homeState.requestId,
-      ""
-    ),
-    ""
-  );
-
-  patch.requestId = homeState.requestId;
-
-  homeState.lastSyncAt = safeText(
-    first(
-      options?.lastSyncAt,
-      raw.lastSyncAt,
-      raw.updatedAt,
-      raw.generatedAt,
-      raw.meta?.updatedAt,
-      nowIso()
-    ),
-    nowIso()
-  );
-
+  homeState.requestId = safeText(first(options.requestId, raw.requestId, raw.meta?.requestId, homeState.requestId, ""), "");
+  homeState.lastSyncAt = safeText(first(options.lastSyncAt, raw.lastSyncAt, raw.updatedAt, raw.generatedAt, raw.meta?.updatedAt, nowIso()), nowIso());
   homeState.lastUpdatedAt = homeState.lastSyncAt;
 
+  patch.requestId = homeState.requestId;
   patch.lastSyncAt = homeState.lastSyncAt;
   patch.lastUpdatedAt = homeState.lastUpdatedAt;
 
@@ -1385,6 +977,8 @@ function applyDashboardToState(dashboard = {}, options = {}) {
   patch.error = "";
   patch.lastError = null;
 
+  normalizeHomeState();
+
   return patch;
 }
 
@@ -1394,65 +988,39 @@ function applyDashboardToState(dashboard = {}, options = {}) {
 
 export function patchHomeState(patch = {}, options = {}) {
   const data = safeObject(patch);
-  const opts = safeObject(options);
-  const replace = opts.replace === true;
+  const replace = options.replace === true;
 
   for (const [key, value] of Object.entries(data)) {
     assignIfUseful(key, value, { replace });
   }
 
-  recordMutation(safeText(opts.type, "patch"), data);
+  normalizeHomeState();
 
-  return emitStateChanged(
-    safeText(opts.type, "patch"),
-    data,
-    opts
-  );
+  return getHomeStateSnapshot();
 }
 
-export function replaceHomeState(nextState = {}, options = {}) {
-  const initial = createInitialHomeState();
-
+export function replaceHomeState(nextState = {}) {
   Object.keys(homeState).forEach((key) => {
     delete homeState[key];
   });
 
-  Object.assign(homeState, initial, safeObject(nextState));
+  Object.assign(homeState, createInitialHomeState(), safeObject(nextState));
 
-  recordMutation("replace", nextState);
+  normalizeHomeState();
 
-  return emitStateChanged("patch", nextState, {
-    ...safeObject(options),
-    replace: true,
-    forceEmit: options?.forceEmit !== false,
-  });
+  return getHomeStateSnapshot();
 }
 
-export function resetHomeState(options = {}) {
+export function resetHomeState() {
   Object.keys(homeState).forEach((key) => {
     delete homeState[key];
   });
 
   Object.assign(homeState, createInitialHomeState());
 
-  lastStateSignature = "";
+  normalizeHomeState();
 
-  recordMutation("reset", {});
-
-  emitHomeStateEvent(
-    HOME_STATE_EVENTS.reset,
-    {
-      state: getHomeStateSnapshot(),
-    },
-    {
-      window: false,
-    }
-  );
-
-  return emitStateChanged("reset", {}, {
-    ...safeObject(options),
-    forceEmit: true,
-  });
+  return getHomeStateSnapshot();
 }
 
 /* =========================================================
@@ -1460,78 +1028,44 @@ export function resetHomeState(options = {}) {
 ========================================================= */
 
 export function setLoading(value = false) {
-  const loading = safeBoolean(value, false);
-
-  return patchHomeState(
-    {
-      loading,
-      refreshing: loading ? false : homeState.refreshing,
-    },
-    {
-      type: "loading",
-      emitUnchanged: true,
-    }
-  );
+  return patchHomeState({
+    loading: safeBoolean(value, false),
+    refreshing: safeBoolean(value, false) ? false : homeState.refreshing,
+  });
 }
 
 export function setRefreshing(value = false) {
-  const refreshing = safeBoolean(value, false);
-
-  return patchHomeState(
-    {
-      refreshing,
-      loading: refreshing ? false : homeState.loading,
-    },
-    {
-      type: "refreshing",
-      emitUnchanged: true,
-    }
-  );
+  return patchHomeState({
+    refreshing: safeBoolean(value, false),
+    loading: safeBoolean(value, false) ? false : homeState.loading,
+  });
 }
 
 export function setLoaded(value = true) {
   const loaded = safeBoolean(value, true);
 
-  return patchHomeState(
-    {
-      loaded,
-      loading: loaded ? false : homeState.loading,
-      refreshing: loaded ? false : homeState.refreshing,
-    },
-    {
-      type: "loaded",
-      emitUnchanged: true,
-    }
-  );
+  return patchHomeState({
+    loaded,
+    loading: loaded ? false : homeState.loading,
+    refreshing: loaded ? false : homeState.refreshing,
+  });
 }
 
 export function setHydrated(value = true) {
-  return patchHomeState(
-    {
-      hydrated: safeBoolean(value, true),
-    },
-    {
-      type: "hydrated",
-      emitUnchanged: true,
-    }
-  );
+  return patchHomeState({
+    hydrated: safeBoolean(value, true),
+  });
 }
 
 export function setError(error = null) {
   const normalized = normalizeError(error);
 
-  return patchHomeState(
-    {
-      error: normalized ? normalized.message : "",
-      lastError: normalized,
-      loading: normalized ? false : homeState.loading,
-      refreshing: normalized ? false : homeState.refreshing,
-    },
-    {
-      type: "error",
-      emitUnchanged: true,
-    }
-  );
+  return patchHomeState({
+    error: normalized ? normalized.message : "",
+    lastError: normalized,
+    loading: normalized ? false : homeState.loading,
+    refreshing: normalized ? false : homeState.refreshing,
+  });
 }
 
 export function clearHomeError() {
@@ -1539,34 +1073,21 @@ export function clearHomeError() {
 }
 
 export function setDashboard(dashboard = {}, options = {}) {
-  const patch = applyDashboardToState(dashboard, options);
+  const patch = applyDashboardToState(dashboard, safeObject(options));
 
-  if (!hasOwnKeys(patch)) {
-    return emitStateChanged("dashboard", {}, {
-      emitUnchanged: true,
-    });
-  }
-
-  recordMutation("dashboard", patch);
-
-  return emitStateChanged("dashboard", patch, {
-    replace: options?.replace === true,
-    emitUnchanged: true,
-  });
+  return hasOwnKeys(patch) ? getHomeStateSnapshot() : patchHomeState({});
 }
 
 export function setSummary(summary = {}, options = {}) {
   const incoming = safeObject(summary);
+  const replace = options.replace === true;
 
-  if (!hasOwnKeys(incoming) && options?.replace !== true && hasOwnKeys(homeState.summary)) {
-    return emitStateChanged("summary", {}, {
-      emitUnchanged: true,
-      forceEmit: false,
-    });
+  if (!hasOwnKeys(incoming) && !replace && hasOwnKeys(homeState.summary)) {
+    return getHomeStateSnapshot();
   }
 
   const nextSummary = normalizeSummaryAliases(
-    options?.replace === true
+    replace
       ? incoming
       : {
           ...safeObject(homeState.summary),
@@ -1579,48 +1100,27 @@ export function setSummary(summary = {}, options = {}) {
       summary: nextSummary,
     },
     {
-      type: "summary",
-      replace: options?.replace === true,
-      emitUnchanged: true,
+      replace,
     }
   );
 }
 
 export function setWidgets(widgets = [], options = {}) {
-  const items = safeArray(widgets);
-
-  if (!items.length && options?.replace !== true && homeState.widgets.length) {
-    return emitStateChanged("widgets", {}, {
-      emitUnchanged: true,
-      forceEmit: false,
-    });
-  }
-
   return patchHomeState(
     {
-      widgets: items,
+      widgets: safeArray(widgets),
     },
     {
-      type: "widgets",
-      replace: options?.replace === true,
-      emitUnchanged: true,
+      replace: options.replace === true,
     }
   );
 }
 
 export function setTickets(tickets = [], options = {}) {
   const items = safeArray(tickets);
-
-  if (!items.length && options?.replace !== true && homeState.tickets.length) {
-    return emitStateChanged("tickets", {}, {
-      emitUnchanged: true,
-      forceEmit: false,
-    });
-  }
-
   const remoteCount = Math.max(
     items.length,
-    safeNumber(options?.remoteCount, homeState.ticketsRemoteCount)
+    safeNumber(options.remoteCount, homeState.ticketsRemoteCount)
   );
 
   return patchHomeState(
@@ -1628,28 +1128,19 @@ export function setTickets(tickets = [], options = {}) {
       tickets: items,
       ticketsRemoteCount: remoteCount,
       remoteCount: Math.max(homeState.remoteCount, remoteCount),
+      totalCount: Math.max(homeState.totalCount, remoteCount),
     },
     {
-      type: "tickets",
-      replace: options?.replace === true,
-      emitUnchanged: true,
+      replace: options.replace === true,
     }
   );
 }
 
 export function setInvoices(invoices = [], options = {}) {
   const items = safeArray(invoices);
-
-  if (!items.length && options?.replace !== true && homeState.invoices.length) {
-    return emitStateChanged("invoices", {}, {
-      emitUnchanged: true,
-      forceEmit: false,
-    });
-  }
-
   const remoteCount = Math.max(
     items.length,
-    safeNumber(options?.remoteCount, homeState.invoicesRemoteCount)
+    safeNumber(options.remoteCount, homeState.invoicesRemoteCount)
   );
 
   return patchHomeState(
@@ -1658,26 +1149,16 @@ export function setInvoices(invoices = [], options = {}) {
       invoicesRemoteCount: remoteCount,
     },
     {
-      type: "invoices",
-      replace: options?.replace === true,
-      emitUnchanged: true,
+      replace: options.replace === true,
     }
   );
 }
 
 export function setUsers(users = [], options = {}) {
   const items = safeArray(users);
-
-  if (!items.length && options?.replace !== true && homeState.users.length) {
-    return emitStateChanged("users", {}, {
-      emitUnchanged: true,
-      forceEmit: false,
-    });
-  }
-
   const remoteCount = Math.max(
     items.length,
-    safeNumber(options?.remoteCount, homeState.usersRemoteCount)
+    safeNumber(options.remoteCount, homeState.usersRemoteCount)
   );
 
   return patchHomeState(
@@ -1686,26 +1167,16 @@ export function setUsers(users = [], options = {}) {
       usersRemoteCount: remoteCount,
     },
     {
-      type: "users",
-      replace: options?.replace === true,
-      emitUnchanged: true,
+      replace: options.replace === true,
     }
   );
 }
 
 export function setClients(clients = [], options = {}) {
   const items = safeArray(clients);
-
-  if (!items.length && options?.replace !== true && homeState.clients.length) {
-    return emitStateChanged("clients", {}, {
-      emitUnchanged: true,
-      forceEmit: false,
-    });
-  }
-
   const remoteCount = Math.max(
     items.length,
-    safeNumber(options?.remoteCount, homeState.clientsRemoteCount)
+    safeNumber(options.remoteCount, homeState.clientsRemoteCount)
   );
 
   return patchHomeState(
@@ -1714,26 +1185,16 @@ export function setClients(clients = [], options = {}) {
       clientsRemoteCount: remoteCount,
     },
     {
-      type: "clients",
-      replace: options?.replace === true,
-      emitUnchanged: true,
+      replace: options.replace === true,
     }
   );
 }
 
 export function setRecent(recent = [], options = {}) {
   const items = safeArray(recent);
-
-  if (!items.length && options?.replace !== true && homeState.activity.length) {
-    return emitStateChanged("recent", {}, {
-      emitUnchanged: true,
-      forceEmit: false,
-    });
-  }
-
   const remoteCount = Math.max(
     items.length,
-    safeNumber(options?.remoteCount, homeState.activityRemoteCount)
+    safeNumber(options.remoteCount, homeState.activityRemoteCount)
   );
 
   return patchHomeState(
@@ -1742,9 +1203,7 @@ export function setRecent(recent = [], options = {}) {
       activityRemoteCount: remoteCount,
     },
     {
-      type: "recent",
-      replace: options?.replace === true,
-      emitUnchanged: true,
+      replace: options.replace === true,
     }
   );
 }
@@ -1756,114 +1215,62 @@ export function setLastSyncAt(value = null) {
 
   const finalValue = next || nowIso();
 
-  return patchHomeState(
-    {
-      lastSyncAt: finalValue,
-      lastUpdatedAt: finalValue,
-    },
-    {
-      type: "patch",
-      emitUnchanged: true,
-    }
-  );
+  return patchHomeState({
+    lastSyncAt: finalValue,
+    lastUpdatedAt: finalValue,
+  });
 }
 
 export function setRequestId(value = "") {
-  return patchHomeState(
-    {
-      requestId: safeText(value, ""),
-    },
-    {
-      type: "patch",
-      emitUnchanged: true,
-    }
-  );
+  return patchHomeState({
+    requestId: safeText(value, ""),
+  });
 }
 
 export function setHealth(value = null) {
-  return patchHomeState(
-    {
-      health: value === null ? null : safeObject(value, value),
-    },
-    {
-      type: "health",
-      emitUnchanged: true,
-    }
-  );
+  return patchHomeState({
+    health: value === null ? null : safeObject(value, value),
+  });
 }
 
 export function setPage(page = DEFAULT_PAGE) {
-  return patchHomeState(
-    {
-      page: Math.max(1, safeNumber(page, DEFAULT_PAGE)),
-    },
-    {
-      type: "patch",
-    }
-  );
+  return patchHomeState({
+    page: Math.max(1, safeNumber(page, DEFAULT_PAGE)),
+  });
 }
 
 export function setPageSize(pageSize = DEFAULT_PAGE_SIZE) {
-  return patchHomeState(
-    {
-      page: DEFAULT_PAGE,
-      pageSize: Math.max(1, safeNumber(pageSize, DEFAULT_PAGE_SIZE)),
-    },
-    {
-      type: "patch",
-    }
-  );
+  return patchHomeState({
+    page: DEFAULT_PAGE,
+    pageSize: Math.max(1, safeNumber(pageSize, DEFAULT_PAGE_SIZE)),
+  });
 }
 
 export function setOpeningTicketId(ticketId = "") {
   const next = safeText(ticketId, "");
 
-  return patchHomeState(
-    {
-      openingTicketId: next,
-      selectedTicketId: next || homeState.selectedTicketId,
-    },
-    {
-      type: "patch",
-      emitUnchanged: true,
-    }
-  );
+  return patchHomeState({
+    openingTicketId: next,
+    selectedTicketId: next || homeState.selectedTicketId,
+  });
 }
 
 export function setSelectedTicketId(ticketId = "") {
-  return patchHomeState(
-    {
-      selectedTicketId: safeText(ticketId, ""),
-    },
-    {
-      type: "patch",
-      emitUnchanged: true,
-    }
-  );
+  return patchHomeState({
+    selectedTicketId: safeText(ticketId, ""),
+  });
 }
 
 export function setCreating(value = false) {
-  return patchHomeState(
-    {
-      creating: safeBoolean(value, false),
-    },
-    {
-      type: "patch",
-      emitUnchanged: true,
-    }
-  );
+  return patchHomeState({
+    creating: safeBoolean(value, false),
+  });
 }
 
 export function setNavigatingAction(value = "") {
-  return patchHomeState(
-    {
-      navigatingAction: safeText(value, ""),
-    },
-    {
-      type: "patch",
-      emitUnchanged: true,
-    }
-  );
+  return patchHomeState({
+    navigatingAction: safeText(value, ""),
+  });
 }
 
 /* =========================================================
@@ -1874,30 +1281,12 @@ export function syncHomeStateFromDashboard(dashboard = {}, options = {}) {
   const raw = safeObject(dashboard);
 
   if (!hasOwnKeys(raw)) {
-    return patchHomeState(
-      {},
-      {
-        type: "dashboard",
-        emitUnchanged: true,
-      }
-    );
+    return getHomeStateSnapshot();
   }
 
-  const patch = applyDashboardToState(raw, options);
+  applyDashboardToState(raw, safeObject(options));
 
-  recordMutation("dashboard:sync", patch);
-
-  return emitStateChanged(
-    "dashboard",
-    {
-      dashboard: raw,
-      ...patch,
-    },
-    {
-      forceEmit: true,
-      replace: options?.replace === true,
-    }
-  );
+  return getHomeStateSnapshot();
 }
 
 /* =========================================================
@@ -1912,7 +1301,7 @@ export function getHomeState() {
 export function getHomeStateSnapshot() {
   normalizeHomeState();
 
-  return safeClone(
+  return clone(
     {
       version: homeState.version,
 
@@ -1982,8 +1371,6 @@ export function getHomeStateSnapshot() {
 
       meta: homeState.meta,
 
-      modules: homeState.modules,
-
       partial: homeState.partial,
       errors: homeState.errors,
 
@@ -1995,8 +1382,6 @@ export function getHomeStateSnapshot() {
         clients: homeState.clients.length,
         activity: homeState.activity.length,
       },
-
-      recentMutations: homeState.recentMutations,
     },
     {}
   );
@@ -2062,111 +1447,21 @@ export function getHomeActivity() {
   return homeState.activity;
 }
 
-/* =========================================================
-   DEBUG / BRIDGE
-========================================================= */
-
 export function getHomeStateDebugSnapshot() {
-  normalizeHomeState();
-
   return {
     version: HOME_STATE_VERSION,
-    scope: HOME_STATE_SCOPE,
-
-    signature: getStateSignature(),
-    lastStateSignature,
-
-    lastEmitAt,
-    lastEmitAtIso: lastEmitAt ? new Date(lastEmitAt).toISOString() : "",
-
-    hasAppCore: Boolean(AppCore),
-    hasEventBus: Boolean(AppCore?.events?.emit),
-
     state: getHomeStateSnapshot(),
   };
 }
-
-export function exposeHomeStateDebugApi() {
-  const api = {
-    version: HOME_STATE_VERSION,
-
-    state: homeState,
-
-    getState: getHomeState,
-    getSnapshot: getHomeStateSnapshot,
-    getDebugSnapshot: getHomeStateDebugSnapshot,
-
-    patch: patchHomeState,
-    replace: replaceHomeState,
-    reset: resetHomeState,
-
-    syncFromDashboard: syncHomeStateFromDashboard,
-
-    setLoading,
-    setRefreshing,
-    setLoaded,
-    setHydrated,
-
-    setError,
-    clearError: clearHomeError,
-
-    setDashboard,
-    setSummary,
-    setWidgets,
-    setTickets,
-    setInvoices,
-    setUsers,
-    setClients,
-    setRecent,
-
-    setRequestId,
-    setLastSyncAt,
-    setHealth,
-  };
-
-  try {
-    if (AppCore?.modules && isFunction(AppCore.modules.register)) {
-      AppCore.modules.register("HomeState", api, {
-        aliases: ["homeState", "HomeState"],
-        source: HOME_STATE_SCOPE,
-      });
-    } else if (AppCore?.modules && typeof AppCore.modules === "object") {
-      AppCore.modules.HomeState = api;
-      AppCore.modules.homeState = api;
-    }
-
-    if (AppCore && Object.isExtensible(AppCore)) {
-      AppCore.HomeState = api;
-    }
-  } catch {}
-
-  try {
-    if (isBrowser()) {
-      window.OnionHomeState = api;
-    }
-  } catch {}
-
-  return api;
-}
-
-/* =========================================================
-   READY
-========================================================= */
-
-normalizeHomeState();
-
-try {
-  exposeHomeStateDebugApi();
-} catch {}
 
 /* =========================================================
    PUBLIC API
 ========================================================= */
 
+normalizeHomeState();
+
 export const HomeState = Object.freeze({
   version: HOME_STATE_VERSION,
-
-  events: HOME_STATE_EVENTS,
 
   state: homeState,
 
@@ -2227,8 +1522,6 @@ export const HomeState = Object.freeze({
   isLoaded: isHomeLoaded,
   isHydrated: isHomeHydrated,
   hasError: hasHomeError,
-
-  exposeDebugApi: exposeHomeStateDebugApi,
 });
 
 export default HomeState;

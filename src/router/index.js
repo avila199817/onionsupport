@@ -5,7 +5,8 @@
    Responsabilidad:
    - Orquestador mínimo de navegación SPA.
    - Buscar ruta.
-   - Resolver home pública por slug: /@slug -> HomeView.
+   - Resolver /@{user.slug} hacia HomeView.
+   - Validar que /@{slug} coincide con el usuario real.
    - Consultar guard.
    - Renderizar vista.
    - Actualizar history.
@@ -27,7 +28,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.slug-home.v1";
+export const ROUTER_VERSION = "router.index.v2";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -43,9 +44,7 @@ export const Router = (() => {
 
   const HOME_PATH = ROUTE_PATHS.HOME || "/";
   const LOGIN_PATH = ROUTE_PATHS.LOGIN || "/login";
-
-  const USER_HOME_PREFIX = "/@";
-  const USER_HOME_RE = /^\/@([A-Za-z0-9][A-Za-z0-9._-]{0,95})$/;
+  const USER_HOME_PREFIX = Routes.USER_HOME_PREFIX || "/@";
 
   const routes = getImmutableRoutes();
 
@@ -82,6 +81,14 @@ export const Router = (() => {
     return isObject(AppCore?.state) ? AppCore.state : {};
   }
 
+  function safeCall(fn, ...args) {
+    try {
+      return isFunction(fn) ? fn(...args) : null;
+    } catch {
+      return null;
+    }
+  }
+
   function emit(name = "", payload = {}) {
     const eventName = text(name, "");
 
@@ -103,23 +110,21 @@ export const Router = (() => {
     }
   }
 
-  function safeCall(fn, ...args) {
-    try {
-      return isFunction(fn) ? fn(...args) : null;
-    } catch {
-      return null;
-    }
-  }
-
   /* =======================================================
      PATHS
   ======================================================= */
 
-  function normalizePublicPath(path = HOME_PATH) {
-    let value = text(path, HOME_PATH);
+  function normalizeHashPath(value = "") {
+    const raw = text(value, HOME_PATH);
 
-    if (value.startsWith("#/")) value = value.slice(1);
-    if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+    if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || HOME_PATH;
+    if (raw.startsWith("#/")) return raw.slice(1) || HOME_PATH;
+
+    return raw;
+  }
+
+  function normalizePublicPath(path = HOME_PATH) {
+    let value = normalizeHashPath(path);
 
     try {
       if (/^https?:\/\//i.test(value)) {
@@ -130,7 +135,9 @@ export const Router = (() => {
       // noop
     }
 
-    if (!value.startsWith("/")) value = `/${value}`;
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
 
     value = value.replace(/\/{2,}/g, "/");
 
@@ -138,13 +145,21 @@ export const Router = (() => {
   }
 
   function normalizeCanonicalPath(path = HOME_PATH) {
-    let canonical = normalizePublicPath(path).split("?")[0].split("#")[0] || HOME_PATH;
+    let value = normalizePublicPath(path)
+      .split("#")[0]
+      .split("?")[0]
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
 
-    if (canonical.length > 1) {
-      canonical = canonical.replace(/\/+$/g, "") || HOME_PATH;
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
     }
 
-    return canonical || HOME_PATH;
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "") || HOME_PATH;
+    }
+
+    return value || HOME_PATH;
   }
 
   function browserPath() {
@@ -177,19 +192,28 @@ export const Router = (() => {
     );
   }
 
+  function resolveRouteLookupPath(path = HOME_PATH) {
+    const canonical = normalizeCanonicalPath(path);
+
+    if (isFunction(Routes.resolveRouteLookupPath)) {
+      return normalizeCanonicalPath(Routes.resolveRouteLookupPath(canonical));
+    }
+
+    if (isUserHomePath(canonical)) {
+      return HOME_PATH;
+    }
+
+    return canonical;
+  }
+
   function isUnsafeHref(href = "") {
     const value = text(href, "");
 
-    return (
+    return Boolean(
       !value ||
-      value.startsWith("//") ||
-      /^javascript:/i.test(value) ||
-      /^data:/i.test(value) ||
-      /^vbscript:/i.test(value) ||
-      /^file:/i.test(value) ||
-      /^mailto:/i.test(value) ||
-      /^tel:/i.test(value) ||
-      /[\r\n\t\\]/.test(value)
+        value.startsWith("//") ||
+        (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^https?:\/\//i.test(value)) ||
+        /[\r\n\t\\]/.test(value)
     );
   }
 
@@ -212,30 +236,19 @@ export const Router = (() => {
     return value.startsWith("#") && !value.startsWith("#/") && !value.startsWith("#!");
   }
 
-  /* =======================================================
-     USER SLUG
-  ======================================================= */
+  function safeRedirectPath(path = HOME_PATH, fallback = HOME_PATH) {
+    const value = text(path, "");
 
-  function unwrapUser(payload = null) {
-    if (!isObject(payload)) return null;
+    if (isUnsafeHref(value) || isExternalHref(value) || isHashOnlyHref(value)) {
+      return normalizePublicPath(fallback);
+    }
 
-    const candidates = [
-      payload.user,
-      payload.usuario,
-      payload.currentUser,
-      payload.authUser,
-      payload.sessionUser,
-      payload.me,
-      payload.account,
-      payload.profile,
-      payload.session?.user,
-      payload.data?.user,
-      payload.payload?.user,
-      payload,
-    ];
-
-    return candidates.find((candidate) => isObject(candidate)) || null;
+    return normalizePublicPath(value || fallback);
   }
+
+  /* =======================================================
+     AUTH / USER
+  ======================================================= */
 
   function getAuth() {
     try {
@@ -251,48 +264,175 @@ export const Router = (() => {
     }
   }
 
+  function unwrapUser(payload = null) {
+    if (!isObject(payload)) return null;
+
+    const candidates = [
+      payload.user,
+      payload.usuario,
+      payload.currentUser,
+      payload.authUser,
+      payload.sessionUser,
+      payload.session?.user,
+      payload.data?.user,
+      payload.payload?.user,
+      payload.me,
+      payload.account,
+      payload,
+    ];
+
+    return candidates.find(isObject) || null;
+  }
+
+  function isUserDisabled(user = null) {
+    if (!isObject(user)) return true;
+
+    const status = text(user.status || user.estado, "").toLowerCase();
+
+    return Boolean(
+      user.disabled === true ||
+        user.deleted === true ||
+        user.archived === true ||
+        user.active === false ||
+        status === "disabled" ||
+        status === "deleted" ||
+        status === "archived"
+    );
+  }
+
+  function hasUserIdentity(user = null) {
+    if (!isObject(user)) return false;
+
+    return Boolean(
+      text(user.id, "") ||
+        text(user.userId, "") ||
+        text(user.username, "") ||
+        text(user.slug, "") ||
+        text(user.lookup?.slug, "")
+    );
+  }
+
+  function isUsableUser(user = null) {
+    return Boolean(
+      isObject(user) &&
+        !isUserDisabled(user) &&
+        hasUserIdentity(user)
+    );
+  }
+
   function getCurrentUser() {
     const Auth = getAuth();
     const state = readState();
 
-    const candidates = [];
+    const candidates = [
+      safeCall(Auth?.getUser?.bind?.(Auth) || Auth?.getUser),
+      safeCall(Auth?.getCurrentUser?.bind?.(Auth) || Auth?.getCurrentUser),
+      Auth?.user,
+      Auth?.currentUser,
+      Auth?.session?.user,
+      Auth?.state?.user,
 
-    try {
-      if (isFunction(Auth?.getUser)) candidates.push(Auth.getUser());
-      if (isFunction(Auth?.getCurrentUser)) candidates.push(Auth.getCurrentUser());
-
-      candidates.push(Auth?.user);
-      candidates.push(Auth?.currentUser);
-    } catch {
-      // noop
-    }
-
-    candidates.push(
       state.user,
       state.currentUser,
       state.authUser,
       state.sessionUser,
       state.session?.user,
       state.sessionData?.user,
-      state
-    );
+      state.auth?.user,
+      AppCore?.user,
+      AppCore?.currentUser,
+    ];
 
     for (const candidate of candidates) {
       const user = unwrapUser(candidate);
 
-      if (isObject(user)) return user;
+      if (isUsableUser(user)) return user;
     }
 
     return null;
   }
 
+  function normalizeRole(value = "") {
+    if (Array.isArray(value)) {
+      const roles = value.map(normalizeRole).filter(Boolean);
+
+      if (roles.includes("admin")) return "admin";
+      if (roles.includes("user")) return "user";
+
+      return "";
+    }
+
+    const role = text(value, "").toLowerCase();
+
+    if (role === "admin") return "admin";
+    if (role === "user") return "user";
+
+    return "";
+  }
+
+  function getCurrentRole() {
+    const Auth = getAuth();
+    const user = getCurrentUser();
+    const state = readState();
+
+    const candidates = [
+      safeCall(Auth?.getRole?.bind?.(Auth) || Auth?.getRole),
+      safeCall(Auth?.getCurrentRole?.bind?.(Auth) || Auth?.getCurrentRole),
+      Auth?.role,
+      Auth?.currentRole,
+
+      user?.role,
+      user?.rol,
+      user?.roles,
+
+      state.role,
+      state.rol,
+      state.roles,
+      state.user?.role,
+      state.user?.rol,
+      state.user?.roles,
+    ];
+
+    for (const candidate of candidates) {
+      const role = normalizeRole(candidate);
+
+      if (role) return role;
+    }
+
+    return "user";
+  }
+
+  function isAuthenticated() {
+    const Auth = getAuth();
+    const user = getCurrentUser();
+
+    if (!isUsableUser(user)) return false;
+
+    try {
+      if (isFunction(Auth?.isAuthenticated)) {
+        return Auth.isAuthenticated() === true;
+      }
+    } catch {
+      return false;
+    }
+
+    return readState().authenticated === true;
+  }
+
+  /* =======================================================
+     USER HOME
+  ======================================================= */
+
   function normalizeUserSlug(value = "") {
     const slug = text(value, "")
+      .replace(/^\/+/, "")
       .replace(/^@+/, "")
-      .trim();
+      .split(/[/?#]/)[0]
+      .trim()
+      .toLowerCase();
 
     if (!slug) return "";
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(slug)) return "";
+    if (!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug)) return "";
 
     return slug;
   }
@@ -313,15 +453,23 @@ export const Router = (() => {
 
   function buildUserHomePath(slug = getCurrentUserSlug()) {
     const clean = normalizeUserSlug(slug);
-
     return clean ? `${USER_HOME_PREFIX}${clean}` : HOME_PATH;
   }
 
   function extractSlugFromPath(path = HOME_PATH) {
-    const canonical = normalizeCanonicalPath(path);
-    const match = canonical.match(USER_HOME_RE);
+    if (isFunction(Routes.getUserHomeSlugFromPath)) {
+      return normalizeUserSlug(Routes.getUserHomeSlugFromPath(path));
+    }
 
-    return match ? normalizeUserSlug(match[1]) : "";
+    const canonical = normalizeCanonicalPath(path);
+
+    if (!canonical.startsWith(USER_HOME_PREFIX)) return "";
+
+    const slug = canonical.slice(USER_HOME_PREFIX.length);
+
+    if (!slug || slug.includes("/")) return "";
+
+    return normalizeUserSlug(slug);
   }
 
   function isUserHomePath(path = HOME_PATH) {
@@ -332,21 +480,28 @@ export const Router = (() => {
     return buildUserHomePath();
   }
 
-  function publicHomePathForRoute(route = null, requestedPublicPath = HOME_PATH) {
+  function getUserHomeRedirect(data = {}) {
+    const route = data.route || null;
+
     if (!route || route.path !== HOME_PATH || route.public === true) {
-      return normalizePublicPath(requestedPublicPath);
+      return "";
     }
 
-    const current = normalizePublicPath(requestedPublicPath);
-    const currentCanonical = normalizeCanonicalPath(current);
+    const realSlug = getCurrentUserSlug();
 
-    if (isUserHomePath(current)) return current;
+    if (!realSlug) return "";
 
-    if (currentCanonical === HOME_PATH) {
-      return buildUserHomePath();
-    }
+    const expected = buildUserHomePath(realSlug);
+    const visible = normalizeCanonicalPath(data.publicPath || HOME_PATH);
+    const requestedSlug = normalizeUserSlug(
+      data.routeParams?.slug || extractSlugFromPath(visible)
+    );
 
-    return current;
+    if (visible === HOME_PATH) return expected;
+    if (requestedSlug && requestedSlug !== realSlug) return expected;
+    if (requestedSlug === realSlug && visible !== expected) return expected;
+
+    return "";
   }
 
   /* =======================================================
@@ -357,40 +512,26 @@ export const Router = (() => {
     return normalizeCanonicalPath(route?.path || HOME_PATH);
   }
 
-  function getStaticRouteByCanonicalPath(canonicalPath = HOME_PATH) {
-    return routes.find((item) => routePath(item) === canonicalPath) || null;
-  }
-
-  function getHomeRoute() {
-    return getStaticRouteByCanonicalPath(HOME_PATH);
+  function getStaticRouteByPath(path = HOME_PATH) {
+    const lookup = normalizeCanonicalPath(path);
+    return routes.find((route) => routePath(route) === lookup) || null;
   }
 
   function getRouteMatch(path = HOME_PATH) {
-    const requestedPublicPath = normalizePublicPath(path);
-    const requestedCanonicalPath = normalizeCanonicalPath(requestedPublicPath);
-
-    if (isUserHomePath(requestedCanonicalPath)) {
-      const homeRoute = getHomeRoute();
-
-      return {
-        route: homeRoute,
-        publicPath: requestedPublicPath,
-        canonicalPath: HOME_PATH,
-        routeParams: {
-          slug: extractSlugFromPath(requestedCanonicalPath),
-        },
-        matchedBy: "user-home-slug",
-      };
-    }
-
-    const route = getStaticRouteByCanonicalPath(requestedCanonicalPath);
+    const publicPath = normalizePublicPath(path);
+    const visibleCanonicalPath = normalizeCanonicalPath(publicPath);
+    const lookupPath = resolveRouteLookupPath(visibleCanonicalPath);
+    const route = getStaticRouteByPath(lookupPath);
+    const slug = extractSlugFromPath(visibleCanonicalPath);
 
     return {
       route,
-      publicPath: publicHomePathForRoute(route, requestedPublicPath),
-      canonicalPath: requestedCanonicalPath,
-      routeParams: {},
-      matchedBy: route ? "static" : "none",
+      publicPath,
+      canonicalPath: route ? routePath(route) : lookupPath,
+      visibleCanonicalPath,
+      lookupPath,
+      routeParams: slug ? { slug } : {},
+      matchedBy: slug ? "user-home" : route ? "static" : "none",
     };
   }
 
@@ -406,15 +547,16 @@ export const Router = (() => {
     return getRoute(currentPublicPath());
   }
 
-  function canUsePublicSlugForRoute(path = HOME_PATH) {
-    const canonical = normalizeCanonicalPath(path);
-    return canonical === HOME_PATH || isUserHomePath(canonical);
+  function isPublicAuthRoutePath(path = HOME_PATH) {
+    return Routes.isPublicAuthPath?.(path) === true;
   }
 
   function normalizeNavigationTarget(path = HOME_PATH, options = {}) {
     const publicPath = normalizePublicPath(path);
     const canonicalPath = normalizeCanonicalPath(publicPath);
-    const useSlugHome = options.useSlugHome !== false && options.keepCanonicalHome !== true;
+    const useSlugHome =
+      options.useSlugHome !== false &&
+      options.keepCanonicalHome !== true;
 
     if (useSlugHome && canonicalPath === HOME_PATH) {
       return buildUserHomePath();
@@ -423,27 +565,27 @@ export const Router = (() => {
     return publicPath;
   }
 
-  function isPublicAuthRoutePath(path = HOME_PATH) {
-    return Routes.isPublicAuthPath?.(path) === true;
-  }
-
   function isValidPostLoginTarget(path = "") {
     const target = normalizePublicPath(path);
 
     if (!target) return false;
     if (isPublicAuthRoutePath(target)) return false;
 
-    return Boolean(getRoute(target));
+    return routeExists(target);
   }
 
   function normalizePostLoginTarget(path = "", fallback = getDefaultHome()) {
     const target = normalizePublicPath(path || fallback || HOME_PATH);
 
-    if (isValidPostLoginTarget(target)) {
-      return normalizeNavigationTarget(target);
+    if (!isValidPostLoginTarget(target)) {
+      return normalizeNavigationTarget(fallback || HOME_PATH);
     }
 
-    return normalizeNavigationTarget(fallback || HOME_PATH);
+    if (isUserHomePath(target) || normalizeCanonicalPath(target) === HOME_PATH) {
+      return buildUserHomePath();
+    }
+
+    return normalizeNavigationTarget(target);
   }
 
   /* =======================================================
@@ -579,8 +721,14 @@ export const Router = (() => {
   }
 
   /* =======================================================
-     AUTH / GUARDS
+     GUARDS
   ======================================================= */
+
+  function loginRedirectTarget(publicPath = HOME_PATH) {
+    return `${LOGIN_PATH}?redirect=${encodeURIComponent(
+      normalizePublicPath(publicPath || HOME_PATH)
+    )}`;
+  }
 
   function fallbackAllowRoute({ route, requestedPublicPath }) {
     if (!route) {
@@ -591,24 +739,25 @@ export const Router = (() => {
     }
 
     if (route.public === true) {
+      if (route.guestOnly === true && isAuthenticated()) {
+        return {
+          allowed: false,
+          reason: "guest-only",
+          redirectTo: getDefaultHome(),
+        };
+      }
+
       return {
         allowed: true,
         reason: "public",
       };
     }
 
-    const Auth = getAuth();
-    const authenticated =
-      Auth?.isAuthenticated?.() === true ||
-      readState().authenticated === true;
-
-    if (!authenticated) {
+    if (!isAuthenticated()) {
       return {
         allowed: false,
         reason: "not-authenticated",
-        redirectTo: `${LOGIN_PATH}?redirect=${encodeURIComponent(
-          normalizePublicPath(requestedPublicPath || HOME_PATH)
-        )}`,
+        redirectTo: loginRedirectTarget(requestedPublicPath),
       };
     }
 
@@ -621,15 +770,12 @@ export const Router = (() => {
       };
     }
 
-    const currentRole =
-      Auth?.getRole?.() ||
-      Auth?.getCurrentRole?.() ||
-      readState().role ||
-      "";
+    const role = getCurrentRole();
+    const allowed = roles.includes(role);
 
     return {
-      allowed: roles.includes(currentRole),
-      reason: roles.includes(currentRole) ? "role-match" : "insufficient-role",
+      allowed,
+      reason: allowed ? "role-match" : "insufficient-role",
     };
   }
 
@@ -644,17 +790,28 @@ export const Router = (() => {
           route,
           requestedCanonicalPath: canonicalPath,
           requestedPublicPath: publicPath,
+          requestedSlug: extractSlugFromPath(publicPath),
+          currentUser: getCurrentUser(),
+          currentUserSlug: getCurrentUserSlug(),
+          defaultHome: getDefaultHome(),
+          buildUserHomePath,
           getRoute,
+          isAuthenticated,
         });
 
-        return isObject(result)
-          ? {
-              allowed: result.allowed !== false,
-              ...result,
-            }
-          : {
-              allowed: result !== false,
-            };
+        if (isObject(result)) {
+          return {
+            allowed: result.allowed !== false,
+            ...result,
+          };
+        }
+
+        if (typeof result === "boolean") {
+          return {
+            allowed: result,
+            reason: result ? "guard-allow" : "guard-deny",
+          };
+        }
       }
     } catch (error) {
       return {
@@ -697,9 +854,10 @@ export const Router = (() => {
      RENDER HELPERS
   ======================================================= */
 
-  function renderNotFound(data) {
+  function renderNotFound(data, options = {}) {
     destroyActiveView();
     clearChrome();
+    writeHistory(data.publicPath, options);
 
     if (isFunction(Render.renderRouteNotFound)) {
       Render.renderRouteNotFound({
@@ -708,6 +866,7 @@ export const Router = (() => {
         updateHistory: History.updateHistory,
         requestedPath: data.publicPath,
         canonicalPath: data.canonicalPath,
+        publicPath: data.publicPath,
         routeParams: data.routeParams || {},
         setShellMode: (route) => Shell.setShellMode?.(AppCore, route),
         setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
@@ -730,9 +889,10 @@ export const Router = (() => {
     };
   }
 
-  function renderForbidden(route, data, reason = "forbidden") {
+  function renderForbidden(route, data, reason = "forbidden", options = {}) {
     destroyActiveView();
     clearChrome();
+    writeHistory(data.publicPath, options);
 
     if (isFunction(Render.renderRouteForbidden)) {
       Render.renderRouteForbidden({
@@ -742,6 +902,7 @@ export const Router = (() => {
         route,
         requestedPath: data.publicPath,
         canonicalPath: data.canonicalPath,
+        publicPath: data.publicPath,
         routeParams: data.routeParams || {},
         setShellMode: (nextRoute) => Shell.setShellMode?.(AppCore, nextRoute),
         setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
@@ -759,53 +920,6 @@ export const Router = (() => {
       ok: true,
       forbidden: true,
       reason,
-      canonicalPath: state.canonicalPath,
-      publicPath: state.publicPath,
-      routeParams: state.routeParams,
-    };
-  }
-
-  function renderLogin(data, redirectTo = LOGIN_PATH) {
-    destroyActiveView();
-    clearChrome();
-
-    const loginData = getRouteMatch(redirectTo);
-
-    if (isFunction(Render.renderLoginRedirect)) {
-      Render.renderLoginRedirect({
-        AppCore,
-        getRoute,
-        updateHistory: History.updateHistory,
-        canonicalPath: data.canonicalPath,
-        publicPath: data.publicPath,
-        routeParams: data.routeParams || {},
-        redirectTo,
-        clearDynamicContainers: () => clearChrome(),
-        setActiveMenu: (path) => Shell.setActiveMenu?.(AppCore, path),
-        setShellMode: (route) => Shell.setShellMode?.(AppCore, route),
-        setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
-      });
-    } else if (loginData.route?.render) {
-      void loginData.route.render(viewRoot(), {
-        route: loginData.route,
-        requestedPath: loginData.publicPath,
-        canonicalPath: loginData.canonicalPath,
-        publicPath: loginData.publicPath,
-        routeParams: loginData.routeParams || {},
-      });
-    } else {
-      renderFallback("Acceso requerido", "Inicia sesión para continuar.");
-    }
-
-    const state = setRouterState(loginData);
-
-    updateShell(loginData.route, state.canonicalPath);
-    hideLoader();
-
-    return {
-      ok: true,
-      redirected: true,
-      redirectTo,
       canonicalPath: state.canonicalPath,
       publicPath: state.publicPath,
       routeParams: state.routeParams,
@@ -859,11 +973,12 @@ export const Router = (() => {
     };
   }
 
-  async function renderRuntimeError(route, data, error) {
+  async function renderRuntimeError(route, data, error, options = {}) {
     destroyActiveView();
+    writeHistory(data.publicPath, options);
 
     if (isFunction(Render.renderRouteRuntimeError)) {
-      Render.renderRouteRuntimeError({
+      await Render.renderRouteRuntimeError({
         AppCore,
         getRoute,
         route,
@@ -899,6 +1014,29 @@ export const Router = (() => {
     };
   }
 
+  async function redirectTo(path = HOME_PATH, options = {}, reason = "redirect") {
+    const depth = Number(options.__redirectDepth || 0);
+
+    if (depth >= 5) {
+      hideLoader();
+
+      return {
+        ok: false,
+        skipped: true,
+        reason: "redirect-loop",
+        redirectTo: path,
+      };
+    }
+
+    return executeRender(safeRedirectPath(path, HOME_PATH), {
+      ...options,
+      replaceState: true,
+      skipHistory: false,
+      source: reason,
+      __redirectDepth: depth + 1,
+    });
+  }
+
   async function executeRender(path = HOME_PATH, options = {}) {
     const seq = ++renderSeq;
     const data = getRouteMatch(path);
@@ -910,7 +1048,7 @@ export const Router = (() => {
     });
 
     if (!data.route) {
-      return renderNotFound(data);
+      return renderNotFound(data, options);
     }
 
     const access = checkAccess(data.route, data.canonicalPath, data.publicPath);
@@ -925,10 +1063,27 @@ export const Router = (() => {
 
     if (!access.allowed) {
       if (access.redirectTo) {
-        return renderLogin(data, access.redirectTo);
+        return redirectTo(
+          access.redirectTo,
+          options,
+          access.reason || "guard-redirect"
+        );
       }
 
-      return renderForbidden(data.route, data, access.reason || "forbidden");
+      return renderForbidden(
+        data.route,
+        data,
+        access.reason || "forbidden",
+        options
+      );
+    }
+
+    const homeRedirect = options.keepCanonicalHome === true
+      ? ""
+      : getUserHomeRedirect(data);
+
+    if (homeRedirect) {
+      return redirectTo(homeRedirect, options, "user-home");
     }
 
     try {
@@ -943,7 +1098,7 @@ export const Router = (() => {
 
       return result;
     } catch (error) {
-      return renderRuntimeError(data.route, data, error);
+      return renderRuntimeError(data.route, data, error, options);
     }
   }
 
@@ -1043,14 +1198,18 @@ export const Router = (() => {
       return;
     }
 
-    const link = event.target?.closest?.("a[data-spa]");
+    const target = event.target?.nodeType === 3
+      ? event.target.parentElement
+      : event.target;
+
+    const link = target?.closest?.("a[data-spa]");
 
     if (!link || link.hasAttribute("download")) return;
 
     const href = link.getAttribute("href") || "";
-    const target = text(link.getAttribute("target"), "").toLowerCase();
+    const linkTarget = text(link.getAttribute("target"), "").toLowerCase();
 
-    if (!href || target === "_blank") return;
+    if (!href || linkTarget === "_blank") return;
     if (isUnsafeHref(href) || isExternalHref(href) || isHashOnlyHref(href)) return;
 
     event.preventDefault();
@@ -1174,18 +1333,21 @@ export const Router = (() => {
       })),
 
       policy: {
-        ownAuth: false,
+        ownAuthStatic: false,
         ownStorage: false,
         ownTransport: false,
         ownToast: false,
         ownViewLogic: false,
 
-        publicSlugHome: true,
-        homePath: HOME_PATH,
-        homePublicPattern: "/@slug",
+        userSlugHome: true,
+        validatesRealUserSlug: true,
+
+        homeInternalPath: HOME_PATH,
+        homeVisiblePattern: "/@{user.slug}",
+
         noHomeAlias: true,
         noHomeRoute: true,
-
+        no2fa: true,
         repairStorm: false,
       },
     };
@@ -1248,15 +1410,7 @@ export const Router = (() => {
     getDefaultHome,
 
     extractSlugFromPath,
-    extractUsernameFromPath: extractSlugFromPath,
-
-    stripUsernamePrefix: (path = HOME_PATH) => {
-      return isUserHomePath(path) ? HOME_PATH : normalizePublicPath(path);
-    },
-
-    isSlugCandidatePath: isUserHomePath,
     isUserHomePath,
-    canUsePublicSlugForRoute,
 
     isSameCanonicalPath: (a = HOME_PATH, b = HOME_PATH) =>
       normalizeCanonicalPath(a) === normalizeCanonicalPath(b),

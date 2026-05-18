@@ -14,12 +14,13 @@
    - Sin Router.
    - Sin Store.
    - Sin Toast.
+   - Sin navegación.
    - Sin lógica propia de password toggle.
 ========================================================= */
 
 import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
 
-export const LOGIN_DOM_VERSION = "minimal-2";
+export const LOGIN_DOM_VERSION = "login.dom.v2";
 
 const DEFAULT_SUBMIT_LABEL = "Entrar";
 const DEFAULT_LOADING_LABEL = "Accediendo...";
@@ -74,18 +75,30 @@ function doc() {
   return isBrowser() ? document : null;
 }
 
-function qs(root, selector = "") {
+function matches(node = null, selector = "") {
+  if (!node || !selector) return false;
+
+  try {
+    return node.matches?.(selector) === true;
+  } catch {
+    return false;
+  }
+}
+
+function qs(root = null, selector = "") {
   const scope = root || doc();
+
   if (!scope || !selector) return null;
 
   try {
-    return scope.querySelector(selector);
+    if (matches(scope, selector)) return scope;
+    return scope.querySelector?.(selector) || null;
   } catch {
     return null;
   }
 }
 
-function setText(node, value = "") {
+function setText(node = null, value = "") {
   if (!node) return false;
 
   try {
@@ -96,7 +109,7 @@ function setText(node, value = "") {
   }
 }
 
-function setAttr(node, name = "", value = null) {
+function setAttr(node = null, name = "", value = null) {
   if (!node || !name) return false;
 
   try {
@@ -112,18 +125,23 @@ function setAttr(node, name = "", value = null) {
   }
 }
 
-function setHidden(node, hidden = false) {
+function setHidden(node = null, hidden = false) {
   if (!node) return false;
 
-  try {
-    node.hidden = Boolean(hidden);
-  } catch {}
+  const value = Boolean(hidden);
 
-  setAttr(node, "aria-hidden", hidden ? "true" : "false");
+  try {
+    node.hidden = value;
+  } catch {
+    // noop
+  }
+
+  setAttr(node, "aria-hidden", value ? "true" : "false");
+
   return true;
 }
 
-function toggleClass(node, className = "", enabled = false) {
+function toggleClass(node = null, className = "", enabled = false) {
   if (!node || !className) return false;
 
   try {
@@ -134,7 +152,7 @@ function toggleClass(node, className = "", enabled = false) {
   }
 }
 
-function focus(node, selectText = false) {
+function focus(node = null, selectText = false) {
   if (!node || node.disabled) return false;
 
   try {
@@ -150,31 +168,33 @@ function focus(node, selectText = false) {
   if (selectText) {
     try {
       node.select?.();
-    } catch {}
+    } catch {
+      // noop
+    }
   }
 
   return true;
 }
 
-function later(callback) {
-  if (!isFn(callback)) return;
+function later(callback = null) {
+  if (!isFn(callback)) return false;
 
   try {
     queueMicrotask(callback);
-    return;
-  } catch {}
+    return true;
+  } catch {
+    // fallback abajo
+  }
 
   try {
     Promise.resolve().then(callback).catch(noop);
-    return;
-  } catch {}
-
-  try {
-    setTimeout(callback, 0);
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function bindDom(node, eventName = "", handler = null, options = false) {
+function bindDom(node = null, eventName = "", handler = null, options = false) {
   if (!node || !eventName || !isFn(handler)) return noop;
 
   let disposed = false;
@@ -187,11 +207,14 @@ function bindDom(node, eventName = "", handler = null, options = false) {
 
   return () => {
     if (disposed) return;
+
     disposed = true;
 
     try {
       node.removeEventListener(eventName, handler, options);
-    } catch {}
+    } catch {
+      // noop
+    }
   };
 }
 
@@ -200,24 +223,29 @@ function compose(disposers = []) {
 
   return () => {
     if (disposed) return;
+
     disposed = true;
 
     while (disposers.length) {
       try {
         disposers.pop()?.();
-      } catch {}
+      } catch {
+        // noop
+      }
     }
   };
 }
 
-function disposeBinding(binding) {
+function disposeBinding(binding = null) {
   try {
     if (isFn(binding)) binding();
     else if (isFn(binding?.destroy)) binding.destroy();
     else if (isFn(binding?.dispose)) binding.dispose();
     else if (isFn(binding?.unbind)) binding.unbind();
     else if (isFn(binding?.off)) binding.off();
-  } catch {}
+  } catch {
+    // noop
+  }
 }
 
 /* =========================================================
@@ -226,6 +254,7 @@ function disposeBinding(binding) {
 
 export function bindLoginPasswordFields(container = null, options = {}) {
   const root = container || doc();
+
   if (!root) return [];
 
   const previous = PASSWORD_BINDINGS.get(root);
@@ -235,7 +264,10 @@ export function bindLoginPasswordFields(container = null, options = {}) {
   }
 
   if (previous) {
-    for (const binding of previous) disposeBinding(binding);
+    for (const binding of previous) {
+      disposeBinding(binding);
+    }
+
     PASSWORD_BINDINGS.delete(root);
   }
 
@@ -249,11 +281,13 @@ export function bindLoginPasswordFields(container = null, options = {}) {
   }
 
   PASSWORD_BINDINGS.set(root, bindings);
+
   return bindings;
 }
 
 export function destroyLoginPasswordFields(container = null) {
   const root = container || doc();
+
   if (!root) return false;
 
   const bindings = PASSWORD_BINDINGS.get(root) || [];
@@ -263,6 +297,7 @@ export function destroyLoginPasswordFields(container = null) {
   }
 
   PASSWORD_BINDINGS.delete(root);
+
   return true;
 }
 
@@ -284,12 +319,16 @@ export function getLoginRefs(container = null) {
     try {
       form.noValidate = true;
       form.dataset.loginDomVersion = LOGIN_DOM_VERSION;
-    } catch {}
+    } catch {
+      // noop
+    }
   }
 
   if (submitButton) {
     try {
-      if (!submitButton.type) submitButton.type = "submit";
+      if (!submitButton.type) {
+        submitButton.type = "submit";
+      }
 
       if (!submitButton.dataset.originalLabel) {
         submitButton.dataset.originalLabel = text(
@@ -297,7 +336,9 @@ export function getLoginRefs(container = null) {
           DEFAULT_SUBMIT_LABEL
         );
       }
-    } catch {}
+    } catch {
+      // noop
+    }
   }
 
   const refs = {
@@ -336,31 +377,36 @@ export function getLoginRefs(container = null) {
    ERRORS
 ========================================================= */
 
-export function setFieldInvalid(fieldNode, invalid = false) {
+export function setFieldInvalid(fieldNode = null, invalid = false) {
   const active = Boolean(invalid);
 
   toggleClass(fieldNode, "is-invalid", active);
 
   try {
     if (fieldNode) {
-      if (active) fieldNode.dataset.invalid = "true";
-      else delete fieldNode.dataset.invalid;
+      if (active) {
+        fieldNode.dataset.invalid = "true";
+      } else {
+        delete fieldNode.dataset.invalid;
+      }
     }
-  } catch {}
+  } catch {
+    // noop
+  }
 
   return true;
 }
 
-export function setInputInvalid(inputNode, invalid = false) {
+export function setInputInvalid(inputNode = null, invalid = false) {
   const active = Boolean(invalid);
 
   toggleClass(inputNode, "is-invalid", active);
-  setAttr(inputNode, "aria-invalid", active ? "true" : "false");
+  setAttr(inputNode, "aria-invalid", active ? "true" : null);
 
   return true;
 }
 
-export function setFieldError(fieldNode, message = "", errorNode = null) {
+export function setFieldError(fieldNode = null, message = "", errorNode = null) {
   const clean = text(message, "");
 
   setFieldInvalid(fieldNode, Boolean(clean));
@@ -374,11 +420,11 @@ export function setFieldError(fieldNode, message = "", errorNode = null) {
   return true;
 }
 
-export function clearFieldError(fieldNode, errorNode = null) {
+export function clearFieldError(fieldNode = null, errorNode = null) {
   return setFieldError(fieldNode, "", errorNode);
 }
 
-function setGlobalError(errorBox, message = "") {
+function setGlobalError(errorBox = null, message = "") {
   const clean = text(message, "");
 
   if (!errorBox) return clean;
@@ -403,7 +449,9 @@ export function clearLoginErrors(refs = {}) {
 
   try {
     refs.form?.removeAttribute("data-error");
-  } catch {}
+  } catch {
+    // noop
+  }
 
   return true;
 }
@@ -435,15 +483,23 @@ export function applyLoginErrors(refs = {}, errors = {}, options = {}) {
 
   try {
     if (refs.form) {
-      if (firstError) refs.form.dataset.error = "true";
-      else delete refs.form.dataset.error;
+      if (firstError) {
+        refs.form.dataset.error = "true";
+      } else {
+        delete refs.form.dataset.error;
+      }
     }
-  } catch {}
+  } catch {
+    // noop
+  }
 
   if (options.focus !== false) {
     later(() => {
-      if (identifierError) focus(refs.identifierInput || refs.emailInput, true);
-      else if (passwordError) focus(refs.passwordInput);
+      if (identifierError) {
+        focus(refs.identifierInput || refs.emailInput, true);
+      } else if (passwordError) {
+        focus(refs.passwordInput);
+      }
     });
   }
 
@@ -455,10 +511,15 @@ export function setGlobalLoginError(refs = {}, message = "") {
 
   try {
     if (refs.form) {
-      if (clean) refs.form.dataset.error = "true";
-      else delete refs.form.dataset.error;
+      if (clean) {
+        refs.form.dataset.error = "true";
+      } else {
+        delete refs.form.dataset.error;
+      }
     }
-  } catch {}
+  } catch {
+    // noop
+  }
 
   return clean;
 }
@@ -467,25 +528,30 @@ export function setGlobalLoginError(refs = {}, message = "") {
    LOADING
 ========================================================= */
 
-function originalSubmitLabel(button) {
+function originalSubmitLabel(button = null) {
   if (!button) return DEFAULT_SUBMIT_LABEL;
 
   try {
-    return text(button.dataset.originalLabel, "") ||
-      text(button.textContent, DEFAULT_SUBMIT_LABEL);
+    return (
+      text(button.dataset.originalLabel, "") ||
+      text(button.textContent, DEFAULT_SUBMIT_LABEL)
+    );
   } catch {
     return DEFAULT_SUBMIT_LABEL;
   }
 }
 
-function setLoadingDisabled(node, loading = false) {
+function setLoadingDisabled(node = null, loading = false) {
   if (!node) return false;
 
   const active = Boolean(loading);
 
   try {
     if (active) {
-      if (!node.disabled) node.dataset.loginDisabledByLoading = "true";
+      if (!node.disabled) {
+        node.dataset.loginDisabledByLoading = "true";
+      }
+
       node.disabled = true;
       return true;
     }
@@ -509,10 +575,15 @@ export function setLoginLoading(refs = {}, loading = false, options = {}) {
 
   try {
     if (refs.form) {
-      if (active) refs.form.dataset.submitting = "true";
-      else delete refs.form.dataset.submitting;
+      if (active) {
+        refs.form.dataset.submitting = "true";
+      } else {
+        delete refs.form.dataset.submitting;
+      }
     }
-  } catch {}
+  } catch {
+    // noop
+  }
 
   setLoadingDisabled(refs.submitButton, active);
   setLoadingDisabled(refs.identifierInput || refs.emailInput, active);
@@ -526,7 +597,7 @@ export function setLoginLoading(refs = {}, loading = false, options = {}) {
 
     setText(refs.submitButton, active ? loadingLabel : submitLabel);
     setAttr(refs.submitButton, "aria-busy", active ? "true" : "false");
-    setAttr(refs.submitButton, "aria-disabled", active ? "true" : "false");
+    setAttr(refs.submitButton, "aria-disabled", active ? "true" : null);
   }
 
   return true;
@@ -546,15 +617,24 @@ function normalizeIdentifier(value = "") {
     .replace(/\s+/g, " ");
 }
 
+function looksLikeEmail(value = "") {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
+}
+
 export function readLoginFormState(refs = {}) {
   const identifier = normalizeIdentifier(
     refs.identifierInput?.value ?? refs.emailInput?.value ?? ""
   );
 
+  const email = looksLikeEmail(identifier)
+    ? identifier.toLowerCase()
+    : "";
+
   return {
     identifier,
-    email: identifier.toLowerCase(),
-    username: identifier,
+
+    email,
+    username: email ? "" : identifier,
     user: identifier,
     login: identifier,
 
@@ -591,22 +671,30 @@ export function bindLoginInputClearers(refs = {}, handler = null) {
     refs.passwordInput,
   ].filter(Boolean);
 
-  return compose(nodes.map((node) => bindDom(node, "input", handler)));
+  return compose(
+    nodes.map((node) => bindDom(node, "input", handler))
+  );
 }
 
 export function bindLoginSubmit(refs = {}, handler = null) {
   const target = refs.form || refs.submitButton;
+
   if (!target || !isFn(handler)) return noop;
 
   const previous = SUBMIT_BINDINGS.get(target);
-  if (previous) previous();
+
+  if (previous) {
+    previous();
+  }
 
   let locked = false;
 
   const onSubmit = (event) => {
     try {
       event?.preventDefault?.();
-    } catch {}
+    } catch {
+      // noop
+    }
 
     if (locked) return undefined;
 
@@ -630,7 +718,11 @@ export function bindLoginSubmit(refs = {}, handler = null) {
     return result;
   };
 
-  const disposeEvent = bindDom(target, refs.form ? "submit" : "click", onSubmit);
+  const disposeEvent = bindDom(
+    target,
+    refs.form ? "submit" : "click",
+    onSubmit
+  );
 
   const dispose = () => {
     locked = false;
@@ -639,6 +731,7 @@ export function bindLoginSubmit(refs = {}, handler = null) {
   };
 
   SUBMIT_BINDINGS.set(target, dispose);
+
   return dispose;
 }
 
@@ -676,6 +769,7 @@ export function bindPasswordToggle(refs = {}, handler = null) {
   }
 
   bindLoginPasswordFields(refs.root || refs.form || refs.container);
+
   return noop;
 }
 
@@ -685,7 +779,9 @@ export function bindThemeToggle(refs = {}, handler = null) {
   return bindDom(refs.themeToggleButton, "click", (event) => {
     try {
       event?.preventDefault?.();
-    } catch {}
+    } catch {
+      // noop
+    }
 
     handler(event);
   });
@@ -698,12 +794,26 @@ export function bindThemeToggle(refs = {}, handler = null) {
 export function getLoginDomSnapshot(refs = {}) {
   return {
     version: LOGIN_DOM_VERSION,
+
     hasRoot: Boolean(refs.root),
     hasForm: Boolean(refs.form),
     hasIdentifier: Boolean(refs.identifierInput || refs.emailInput),
     hasPassword: Boolean(refs.passwordInput),
     hasSubmit: Boolean(refs.submitButton),
+
     submitting: refs.form?.dataset?.submitting === "true",
+
+    policy: {
+      domOnly: true,
+      noAuth: true,
+      noHttp: true,
+      noRouter: true,
+      noStore: true,
+      noToast: true,
+      noNavigation: true,
+      passwordFieldShared: true,
+      submitIdempotent: true,
+    },
   };
 }
 

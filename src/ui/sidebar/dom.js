@@ -16,6 +16,7 @@
    - Sin eventos.
    - Sin dropdown.
    - Sin tooltips.
+   - Sin fallback DOM.
    - Sin compat legacy innecesaria.
 ========================================================= */
 
@@ -26,7 +27,7 @@ import {
   SIDEBAR_SELECTORS,
 } from "./constants.js";
 
-export const SIDEBAR_DOM_VERSION = "sidebar.dom.v1";
+export const SIDEBAR_DOM_VERSION = "sidebar.dom.v2";
 
 /* =========================================================
    BASICS
@@ -74,6 +75,16 @@ function scopeOf(scope = null) {
   return isElement(scope) ? scope : document;
 }
 
+function matches(node = null, selector = "") {
+  if (!isElement(node) || !selector) return false;
+
+  try {
+    return node.matches?.(selector) === true;
+  } catch {
+    return false;
+  }
+}
+
 /* =========================================================
    QUERY
 ========================================================= */
@@ -84,6 +95,10 @@ export function query(selector = "", scope = null) {
   if (!root || !selector) return null;
 
   try {
+    if (isElement(root) && matches(root, selector)) {
+      return root;
+    }
+
     const node = root.querySelector(selector);
     return isElement(node) ? node : null;
   } catch {
@@ -97,7 +112,13 @@ export function queryAll(selector = "", scope = null) {
   if (!root || !selector) return [];
 
   try {
-    return [...root.querySelectorAll(selector)].filter(isElement);
+    const nodes = [...root.querySelectorAll(selector)].filter(isElement);
+
+    if (isElement(root) && matches(root, selector)) {
+      return [root, ...nodes.filter((node) => node !== root)];
+    }
+
+    return nodes;
   } catch {
     return [];
   }
@@ -119,6 +140,8 @@ export function byId(id = "") {
 ========================================================= */
 
 export function createElement(tag = "div", options = {}) {
+  if (!isBrowser()) return null;
+
   const node = document.createElement(tag);
   const {
     className = "",
@@ -139,14 +162,22 @@ export function createElement(tag = "div", options = {}) {
     if (!key) continue;
     if (value === false || value === null || value === undefined) continue;
 
-    node.setAttribute(key, String(value));
+    try {
+      node.setAttribute(key, String(value));
+    } catch {
+      // noop
+    }
   }
 
   for (const [key, value] of Object.entries(dataset || {})) {
     if (!key) continue;
     if (value === false || value === null || value === undefined) continue;
 
-    node.dataset[key] = String(value);
+    try {
+      node.dataset[key] = String(value);
+    } catch {
+      // noop
+    }
   }
 
   return node;
@@ -224,8 +255,8 @@ export function isSidebarRoot(node = null) {
   return Boolean(
     node.id === SIDEBAR_ROOT_ID ||
       node.dataset?.sidebarRoot === "true" ||
-      node.matches?.(SIDEBAR_SELECTORS.root) ||
-      node.matches?.(`.${SIDEBAR_CLASSES.root}`)
+      matches(node, SIDEBAR_SELECTORS.root) ||
+      matches(node, `.${SIDEBAR_CLASSES.root}`)
   );
 }
 
@@ -300,6 +331,29 @@ export function removeDuplicateSidebarRoots(primary = null) {
    MOUNT OPERATIONS
 ========================================================= */
 
+function prepareSidebarRoot(root = null) {
+  if (!isElement(root)) return null;
+
+  try {
+    root.id = root.id || SIDEBAR_ROOT_ID;
+    root.dataset.sidebarRoot = "true";
+
+    if (SIDEBAR_CLASSES.root) {
+      root.classList.add(SIDEBAR_CLASSES.root);
+    }
+
+    if (SIDEBAR_CLASSES.appRoot) {
+      root.classList.add(SIDEBAR_CLASSES.appRoot);
+    }
+
+    setHidden(root, false);
+
+    return root;
+  } catch {
+    return null;
+  }
+}
+
 export function mountSidebarRoot(nextRoot = null) {
   if (!isBrowser() || !isElement(nextRoot)) return null;
 
@@ -307,28 +361,20 @@ export function mountSidebarRoot(nextRoot = null) {
 
   if (!isElement(mount)) return null;
 
+  const root = prepareSidebarRoot(nextRoot);
+
+  if (!root) return null;
+
   try {
     if (isSidebarRoot(mount)) {
-      mount.replaceWith(nextRoot);
+      mount.replaceWith(root);
     } else {
-      mount.replaceChildren(nextRoot);
+      mount.replaceChildren(root);
     }
 
-    nextRoot.id = nextRoot.id || SIDEBAR_ROOT_ID;
-    nextRoot.dataset.sidebarRoot = "true";
+    removeDuplicateSidebarRoots(root);
 
-    if (SIDEBAR_CLASSES.root) {
-      nextRoot.classList.add(SIDEBAR_CLASSES.root);
-    }
-
-    if (SIDEBAR_CLASSES.appRoot) {
-      nextRoot.classList.add(SIDEBAR_CLASSES.appRoot);
-    }
-
-    setHidden(nextRoot, false);
-    removeDuplicateSidebarRoots(nextRoot);
-
-    return nextRoot;
+    return root;
   } catch {
     return null;
   }
@@ -395,13 +441,16 @@ export function getSidebarRefs(root = getSidebarRoot()) {
 
   return {
     root: sidebar,
+
     header: sidebar ? query(SIDEBAR_SELECTORS.header, sidebar) : null,
     nav: sidebar ? query(SIDEBAR_SELECTORS.nav, sidebar) : null,
     footer: sidebar ? query(SIDEBAR_SELECTORS.footer, sidebar) : null,
     user: sidebar ? query(SIDEBAR_SELECTORS.user, sidebar) : null,
+
     brand: sidebar ? query(SIDEBAR_SELECTORS.brand, sidebar) : null,
     toggle: sidebar ? query(SIDEBAR_SELECTORS.toggle, sidebar) : null,
     logout: sidebar ? query(SIDEBAR_SELECTORS.logout, sidebar) : null,
+
     links: sidebar ? queryAll(SIDEBAR_SELECTORS.link, sidebar) : [],
     navLinks: sidebar ? queryAll(SIDEBAR_SELECTORS.navLink, sidebar) : [],
   };
@@ -457,6 +506,7 @@ export function clearSidebarDomCache(AppCore = null) {
     delete dom.sidebar;
     delete dom.sidebarRoot;
     delete dom.sidebarMount;
+
     delete dom.sidebarHeader;
     delete dom.sidebarNav;
     delete dom.sidebarFooter;
@@ -464,6 +514,7 @@ export function clearSidebarDomCache(AppCore = null) {
     delete dom.sidebarBrand;
     delete dom.sidebarToggle;
     delete dom.sidebarLogout;
+
     delete dom.__sidebarDomVersion;
 
     return true;
@@ -511,7 +562,7 @@ export function clearActiveLinks(root = getSidebarRoot()) {
 }
 
 /* =========================================================
-   FOCUS
+   FOCUS HELPERS
 ========================================================= */
 
 export function blurInside(root = null) {
@@ -545,7 +596,12 @@ export function focusFirst(root = null) {
     target.focus({ preventScroll: true });
     return true;
   } catch {
-    return false;
+    try {
+      target.focus();
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -575,21 +631,39 @@ export function getSidebarDomSnapshot(root = getSidebarRoot()) {
 
   return {
     version: SIDEBAR_DOM_VERSION,
+
     hasDocument: isBrowser(),
     mounted: isConnected(refs.root),
+
     root: nodeSnapshot(refs.root),
     mount: nodeSnapshot(getSidebarMount()),
+
     parts: {
       header: nodeSnapshot(refs.header),
       nav: nodeSnapshot(refs.nav),
       footer: nodeSnapshot(refs.footer),
       user: nodeSnapshot(refs.user),
+      brand: nodeSnapshot(refs.brand),
       toggle: nodeSnapshot(refs.toggle),
       logout: nodeSnapshot(refs.logout),
     },
+
     counts: {
       links: refs.links.length,
       navLinks: refs.navLinks.length,
+    },
+
+    policy: {
+      domOnly: true,
+      noAuth: true,
+      noRouter: true,
+      noHttp: true,
+      noToast: true,
+      noTemplate: true,
+      noEvents: true,
+      noDropdown: true,
+      noTooltips: true,
+      noFallbackDom: true,
     },
   };
 }

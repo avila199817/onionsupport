@@ -2,12 +2,15 @@
    Onion SPA - Shared Password Field Index
    Archivo: src/shared/password-field/index.js
 
-   PASSWORD FIELD FACADE · SIMPLE
-   - fachada pública única del password-field compartido
-   - reexporta renderer + binder DOM
-   - aliases compat para vistas existentes
-   - sin side effects al importar
-   - sin AppCore, sin CSS inline, sin inyección de estilos
+   Responsabilidad:
+   - Fachada pública única del password-field compartido.
+   - Reexportar template + DOM.
+   - Mantener aliases simples de compatibilidad.
+   - Sin side effects al importar.
+   - Sin AppCore.
+   - Sin CSS inline.
+   - Sin inyección de estilos.
+   - Sin lógica duplicada.
 ========================================================= */
 
 import {
@@ -20,28 +23,60 @@ import {
 import {
   bindPasswordField,
   bindPasswordFieldsInScope,
+  unbindPasswordField,
+  unbindPasswordFieldsInScope,
+  isPasswordFieldBound,
+  getPasswordFieldSnapshot,
 } from "./password-field.dom.js";
 
-export const PASSWORD_FIELD_VERSION = "21.0.0-simple";
+export const PASSWORD_FIELD_VERSION = "minimal-1";
+
+/* =========================================================
+   TEMPLATE EXPORTS
+========================================================= */
 
 export {
   renderPasswordField,
   getEyeIcon,
   getEyeOffIcon,
   getCapsIcon,
-  bindPasswordField,
-  bindPasswordFieldsInScope,
 };
 
 export const render = renderPasswordField;
+export const getPasswordFieldTemplate = renderPasswordField;
+
+/* =========================================================
+   DOM EXPORTS
+========================================================= */
+
+export {
+  bindPasswordField,
+  bindPasswordFieldsInScope,
+  unbindPasswordField,
+  unbindPasswordFieldsInScope,
+  isPasswordFieldBound,
+  getPasswordFieldSnapshot,
+};
+
 export const bind = bindPasswordField;
 export const bindAll = bindPasswordFieldsInScope;
+
+export const unbind = unbindPasswordField;
+export const unbindAll = unbindPasswordFieldsInScope;
+
+export const isBound = isPasswordFieldBound;
+export const getSnapshot = getPasswordFieldSnapshot;
+
+/* =========================================================
+   FACADE OBJECT
+========================================================= */
 
 export const PasswordField = Object.freeze({
   version: PASSWORD_FIELD_VERSION,
 
   render,
   renderPasswordField,
+  getPasswordFieldTemplate,
 
   getEyeIcon,
   getEyeOffIcon,
@@ -52,6 +87,18 @@ export const PasswordField = Object.freeze({
 
   bindAll,
   bindPasswordFieldsInScope,
+
+  unbind,
+  unbindPasswordField,
+
+  unbindAll,
+  unbindPasswordFieldsInScope,
+
+  isBound,
+  isPasswordFieldBound,
+
+  getSnapshot,
+  getPasswordFieldSnapshot,
 });
 
 export default PasswordField;

@@ -14,7 +14,8 @@
    - Sin Toast.
    - Sin 2FA/MFA/OTP.
    - Sin custom executors.
-   - Sin eventos DOM globales.
+   - Sin eventos globales.
+   - Sin loader propio.
    - Sin magia negra.
 ========================================================= */
 
@@ -71,24 +72,6 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function emit(eventName = "", payload = {}) {
-  try {
-    AppCore?.events?.emit?.(eventName, {
-      source: SOURCE,
-      version: LOGIN_VIEW_VERSION,
-      at: nowIso(),
-      ...payload,
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /* =========================================================
    PATHS / NAVIGATION
 ========================================================= */
@@ -110,10 +93,10 @@ function normalizeCanonicalPath(path = HOME_ROUTE) {
   let value = normalizePublicPath(path).split("?")[0].split("#")[0] || HOME_ROUTE;
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "");
+    value = value.replace(/\/+$/g, "") || HOME_ROUTE;
   }
 
-  return value || HOME_ROUTE;
+  return value;
 }
 
 function currentPath() {
@@ -171,9 +154,26 @@ function homeTarget() {
   );
 }
 
+function redirectFromUrl() {
+  if (!isBrowser()) return "";
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return safeTarget(params.get("redirect") || "", "");
+  } catch {
+    return "";
+  }
+}
+
 function getRouter() {
   try {
-    return AppCore?.Router || AppCore?.router || AppCore?.modules?.get?.("Router") || AppCore?.modules?.get?.("router") || null;
+    return (
+      AppCore?.Router ||
+      AppCore?.router ||
+      AppCore?.modules?.get?.("Router") ||
+      AppCore?.modules?.get?.("router") ||
+      null
+    );
   } catch {
     return null;
   }
@@ -204,7 +204,7 @@ async function navigateTo(path = HOME_ROUTE) {
       return true;
     }
   } catch {
-    // Fallback abajo.
+    // fallback abajo
   }
 
   if (!isBrowser()) return false;
@@ -228,18 +228,6 @@ function query(root, selector = "") {
     return root.querySelector(selector);
   } catch {
     return null;
-  }
-}
-
-function setHidden(node, hidden = false) {
-  if (!node) return false;
-
-  try {
-    node.hidden = Boolean(hidden);
-    node.setAttribute("aria-hidden", hidden ? "true" : "false");
-    return true;
-  } catch {
-    return false;
   }
 }
 
@@ -312,9 +300,11 @@ function setMessage(node, message = "", type = "error") {
     node.textContent = clean;
     node.hidden = !clean;
     node.dataset.messageType = clean ? type : "";
+
     node.classList.toggle("is-error", type === "error" && Boolean(clean));
     node.classList.toggle("is-success", type === "success" && Boolean(clean));
     node.classList.toggle("is-info", type === "info" && Boolean(clean));
+
     return true;
   } catch {
     return false;
@@ -387,38 +377,6 @@ function focusPrimary(refs) {
   } catch {
     return false;
   }
-}
-
-function hideLoader() {
-  if (!isBrowser()) return false;
-
-  try {
-    document.documentElement.classList.remove("app-loading", "app-booting", "loading");
-    document.body.classList.remove("app-loading", "app-booting", "loading", "is-loading");
-  } catch {
-    // noop
-  }
-
-  const loader = document.getElementById("app-loader");
-
-  if (loader) {
-    setHidden(loader, true);
-    setBusy(loader, false);
-
-    try {
-      loader.classList.remove("is-visible");
-    } catch {
-      // noop
-    }
-  }
-
-  try {
-    AppCore?.setLoading?.(false);
-  } catch {
-    // noop
-  }
-
-  return true;
 }
 
 /* =========================================================
@@ -520,28 +478,21 @@ function applyErrors(refs, messageNode, errors = {}) {
   setFieldError(refs.password, errors.password || "");
   setMessage(messageNode, firstError(errors), "error");
 
-  if (errors.identifier) {
-    try {
-      refs.identifier?.focus?.();
-    } catch {
-      // noop
-    }
+  const focusTarget = errors.identifier
+    ? refs.identifier
+    : errors.password
+      ? refs.password
+      : null;
 
-    return;
-  }
-
-  if (errors.password) {
-    try {
-      refs.password?.focus?.();
-    } catch {
-      // noop
-    }
+  try {
+    focusTarget?.focus?.();
+  } catch {
+    // noop
   }
 }
 
-function setLoading(refs, loading = false, submitLabel = "") {
+function setLoading(refs, loading = false) {
   const active = Boolean(loading);
-  const label = text(submitLabel || refs.submit?.dataset?.defaultLabel || refs.submit?.textContent, "Entrar");
 
   setBusy(refs.form, active);
   setDisabled(refs.identifier, active);
@@ -549,16 +500,18 @@ function setLoading(refs, loading = false, submitLabel = "") {
   setDisabled(refs.remember, active);
   setDisabled(refs.submit, active);
 
-  if (refs.submit) {
-    try {
-      if (!refs.submit.dataset.defaultLabel) {
-        refs.submit.dataset.defaultLabel = label;
-      }
+  if (!refs.submit) return;
 
-      refs.submit.textContent = active ? "Accediendo..." : refs.submit.dataset.defaultLabel;
-    } catch {
-      // noop
+  try {
+    if (!refs.submit.dataset.defaultLabel) {
+      refs.submit.dataset.defaultLabel = text(refs.submit.textContent, "Entrar");
     }
+
+    refs.submit.textContent = active
+      ? "Accediendo..."
+      : refs.submit.dataset.defaultLabel;
+  } catch {
+    // noop
   }
 }
 
@@ -582,32 +535,30 @@ function normalizeLoginResult(result = {}) {
     state.currentUser ||
     null;
 
+  const role =
+    result?.role ||
+    user?.role ||
+    state.role ||
+    null;
+
   return {
     ok: result?.ok !== false && result?.success !== false && authenticated,
     success: result?.success !== false && authenticated,
     authenticated,
 
     user,
-
-    role:
-      result?.role ||
-      user?.role ||
-      state.role ||
-      null,
+    role,
 
     roles:
       Array.isArray(result?.roles)
         ? result.roles
-        : user?.role
-          ? [user.role]
-          : state.role
-            ? [state.role]
-            : [],
+        : role
+          ? [role]
+          : [],
 
     redirectTo:
       result?.redirectTo ||
-      result?.redirect ||
-      state.redirectAfterLogin ||
+      redirectFromUrl() ||
       homeTarget(),
 
     message:
@@ -713,9 +664,7 @@ export function renderLoginView(container, deps = {}) {
       // noop
     }
 
-    if (!mounted || submitting) {
-      return false;
-    }
+    if (!mounted || submitting) return false;
 
     clearErrors(refs, messageNode);
 
@@ -728,7 +677,6 @@ export function renderLoginView(container, deps = {}) {
     }
 
     setSubmitting(true);
-    emit("auth:login:view:submit:start");
 
     try {
       const raw = await Auth.login(
@@ -753,27 +701,13 @@ export function renderLoginView(container, deps = {}) {
 
       setMessage(messageNode, "Sesión iniciada correctamente.", "success");
 
-      emit("auth:login:view:submit:done", {
-        authenticated: true,
-        role: result.role || null,
-      });
-
       if (isLoginRoute()) {
         await navigateTo(result.redirectTo || homeTarget());
       }
 
       return true;
     } catch (error) {
-      const message = errorMessage(error);
-
-      setMessage(messageNode, message, "error");
-
-      emit("auth:login:view:error", {
-        message,
-        status: error?.status || error?.statusCode || 0,
-        code: error?.code || null,
-      });
-
+      setMessage(messageNode, errorMessage(error), "error");
       return false;
     } finally {
       if (mounted) {
@@ -802,12 +736,7 @@ export function renderLoginView(container, deps = {}) {
     }
   }
 
-  hideLoader();
   focusPrimary(refs);
-
-  emit("auth:login:view:ready", {
-    route: LOGIN_ROUTE,
-  });
 
   const instance = {
     version: LOGIN_VIEW_VERSION,
@@ -824,8 +753,6 @@ export function renderLoginView(container, deps = {}) {
       }
 
       clearInstance(container, instance);
-
-      emit("auth:login:view:destroyed");
       return true;
     },
 

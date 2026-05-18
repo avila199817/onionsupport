@@ -34,12 +34,14 @@
        - Declarar mounts reales.
        - Cargar preboot/theme antes del CSS.
        - Cargar /src/main.js como entrypoint único.
+       - Idioma base primario: es.
        - Sin JS inline.
        - Sin CSS inline.
        - Sin auth.
        - Sin router.
        - Sin API.
        - Sin clientes HTTP.
+       - Sin rutas inventadas.
   ========================================================= -->
 
   <meta charset="UTF-8">
@@ -362,7 +364,8 @@
       data-shell-state="booting"
       data-chrome="hidden"
       data-route-mode="boot"
-      aria-hidden="false"
+      hidden
+      aria-hidden="true"
     ></div>
 
     <div
@@ -372,7 +375,8 @@
       data-shell-state="booting"
       data-chrome="hidden"
       data-route-mode="boot"
-      aria-hidden="false"
+      hidden
+      aria-hidden="true"
     ></div>
 
     <main

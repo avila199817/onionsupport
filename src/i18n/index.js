@@ -3,12 +3,14 @@
    Archivo: /src/i18n/index.js
 
    Responsabilidad:
-   - Traducción mínima ca / es / en.
-   - Fallback de idioma: en.
+   - Traducción mínima es / ca / en.
+   - Idioma base primario: es.
+   - Fallback de idioma: es.
    - Traducción por key path.
    - Interpolación básica.
    - Aplicar data-i18n al DOM.
    - Si falta traducción, NO pisa el fallback del template.
+   - Sin detección de navegador por ahora.
    - Sin storage.
    - Sin fetch.
    - Sin eventos globales.
@@ -18,21 +20,22 @@
 ========================================================= */
 
 import es from "./locales/es/index.js";
-import en from "./locales/en/index.js";
 import ca from "./locales/ca/index.js";
+import en from "./locales/en/index.js";
 
-export const I18N_VERSION = "minimal-1";
+export const I18N_VERSION = "i18n.index.v2";
 
-const FALLBACK_LANG = "en";
-const SUPPORTED_LANGS = Object.freeze(["ca", "es", "en"]);
+const BASE_LANG = "es";
+const FALLBACK_LANG = BASE_LANG;
+const SUPPORTED_LANGS = Object.freeze(["es", "ca", "en"]);
 
 const dictionaries = {
-  ca: ca || {},
   es: es || {},
+  ca: ca || {},
   en: en || {},
 };
 
-let currentLang = FALLBACK_LANG;
+let currentLang = BASE_LANG;
 let coreRef = null;
 let booted = false;
 let lastUpdateCount = 0;
@@ -58,7 +61,7 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
-function normalizeLang(value = "") {
+function normalizeLang(value = "", fallback = FALLBACK_LANG) {
   const raw = text(value, "")
     .toLowerCase()
     .replace("_", "-");
@@ -68,34 +71,30 @@ function normalizeLang(value = "") {
   if (SUPPORTED_LANGS.includes(raw)) return raw;
   if (SUPPORTED_LANGS.includes(short)) return short;
 
-  return FALLBACK_LANG;
+  return fallback;
 }
 
-function getBrowserLang() {
-  if (!isBrowser()) return FALLBACK_LANG;
-
-  const langs = Array.isArray(navigator.languages) && navigator.languages.length
-    ? navigator.languages
-    : [navigator.language];
-
-  for (const lang of langs) {
-    const clean = normalizeLang(lang);
-
-    if (SUPPORTED_LANGS.includes(clean)) {
-      return clean;
-    }
-  }
-
-  return FALLBACK_LANG;
-}
-
-function getInitialLang() {
-  if (!isBrowser()) return FALLBACK_LANG;
+function getDocumentLang() {
+  if (!isBrowser()) return "";
 
   return normalizeLang(
     document.documentElement.dataset.locale ||
       document.documentElement.lang ||
-      getBrowserLang()
+      "",
+    ""
+  );
+}
+
+function getInitialLang(options = {}) {
+  return normalizeLang(
+    options.lang ||
+      options.locale ||
+      coreRef?.state?.lang ||
+      coreRef?.state?.language ||
+      coreRef?.state?.locale ||
+      getDocumentLang() ||
+      BASE_LANG,
+    BASE_LANG
   );
 }
 
@@ -163,7 +162,7 @@ function resolveRaw(key = "", lang = currentLang) {
     };
   }
 
-  const selected = normalizeLang(lang);
+  const selected = normalizeLang(lang, BASE_LANG);
   const selectedValue = getNested(dictionaries[selected], cleanKey);
 
   if (selectedValue !== undefined) {
@@ -438,18 +437,27 @@ export function updateDOM(root = null) {
    LANGUAGE
 ========================================================= */
 
-function syncDocument(lang = currentLang) {
+function syncDocument(lang = currentLang, source = "i18n") {
   if (!isBrowser()) return false;
 
-  const clean = normalizeLang(lang);
+  const clean = normalizeLang(lang, BASE_LANG);
 
   try {
     document.documentElement.lang = clean;
     document.documentElement.dir = "ltr";
+
     document.documentElement.dataset.locale = clean;
-    document.documentElement.dataset.localeSource = "i18n";
+    document.documentElement.dataset.localeSource = text(source, "i18n");
     document.documentElement.dataset.localeFallback = FALLBACK_LANG;
     document.documentElement.dataset.localeSupported = SUPPORTED_LANGS.join(" ");
+
+    if (document.body) {
+      document.body.lang = clean;
+      document.body.dir = "ltr";
+      document.body.dataset.locale = clean;
+      document.body.dataset.localeSource = text(source, "i18n");
+    }
+
     return true;
   } catch {
     return false;
@@ -457,7 +465,7 @@ function syncDocument(lang = currentLang) {
 }
 
 function syncCore(lang = currentLang) {
-  const clean = normalizeLang(lang);
+  const clean = normalizeLang(lang, BASE_LANG);
 
   try {
     if (isFn(coreRef?.setState)) {
@@ -499,9 +507,9 @@ export function getLang() {
 }
 
 export function setLang(lang = FALLBACK_LANG, options = {}) {
-  currentLang = normalizeLang(lang);
+  currentLang = normalizeLang(lang, FALLBACK_LANG);
 
-  syncDocument(currentLang);
+  syncDocument(currentLang, options.source || "i18n");
   syncCore(currentLang);
 
   if (options.updateDOM !== false && options.updateUi !== false) {
@@ -512,7 +520,7 @@ export function setLang(lang = FALLBACK_LANG, options = {}) {
 }
 
 export function hasLang(lang = "") {
-  return SUPPORTED_LANGS.includes(normalizeLang(lang));
+  return Boolean(normalizeLang(lang, ""));
 }
 
 export function getAvailable() {
@@ -520,7 +528,9 @@ export function getAvailable() {
 }
 
 export function getDictionary(lang = currentLang) {
-  return dictionaries[normalizeLang(lang)] || dictionaries[FALLBACK_LANG] || {};
+  return dictionaries[normalizeLang(lang, FALLBACK_LANG)] ||
+    dictionaries[FALLBACK_LANG] ||
+    {};
 }
 
 export function exists(key = "", lang = currentLang) {
@@ -528,7 +538,7 @@ export function exists(key = "", lang = currentLang) {
 }
 
 export function register(lang = "", dictionary = {}, options = {}) {
-  const clean = normalizeLang(lang);
+  const clean = normalizeLang(lang, "");
 
   if (!SUPPORTED_LANGS.includes(clean) || !isObject(dictionary)) {
     return false;
@@ -546,7 +556,7 @@ export function register(lang = "", dictionary = {}, options = {}) {
 }
 
 export function set(key = "", value = "", lang = currentLang, options = {}) {
-  const clean = normalizeLang(lang);
+  const clean = normalizeLang(lang, "");
 
   if (!SUPPORTED_LANGS.includes(clean) || !text(key, "")) {
     return false;
@@ -599,17 +609,11 @@ export function init(options = {}) {
   }
 
   if (!booted || options.force === true) {
-    currentLang = normalizeLang(
-      options.lang ||
-        options.locale ||
-        coreRef?.state?.lang ||
-        getInitialLang()
-    );
-
+    currentLang = getInitialLang(options);
     booted = true;
   }
 
-  syncDocument(currentLang);
+  syncDocument(currentLang, "i18n");
   syncCore(currentLang);
 
   if (options.updateDOM !== false && options.updateUi !== false) {
@@ -643,6 +647,8 @@ export function getSnapshot() {
 
     lang: currentLang,
     locale: currentLang,
+
+    baseLang: BASE_LANG,
     fallbackLang: FALLBACK_LANG,
     supportedLangs: getAvailable(),
 
@@ -653,6 +659,19 @@ export function getSnapshot() {
     documentLang: isBrowser()
       ? document.documentElement.lang || ""
       : "",
+
+    policy: {
+      basePrimary: "es",
+      fallbackEs: true,
+      noBrowserDetection: true,
+      noStorage: true,
+      noFetch: true,
+      noGlobalEvents: true,
+      noInnerHTML: true,
+      noRouter: true,
+      noToast: true,
+      noTemplateOverwriteWhenMissing: true,
+    },
   };
 }
 

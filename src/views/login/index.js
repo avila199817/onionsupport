@@ -34,10 +34,9 @@ import {
   readLoginFormState,
   bindLoginInputClearers,
   bindLoginSubmit,
-  getLoginDomSnapshot,
 } from "./login.dom.js";
 
-export const LOGIN_VIEW_VERSION = "minimal-1";
+export const LOGIN_VIEW_VERSION = "minimal-2";
 
 const SOURCE = "login.view";
 const HOME_ROUTE = "/";
@@ -67,7 +66,7 @@ function text(value = "", fallback = "") {
 function noop() {}
 
 /* =========================================================
-   ROUTER
+   NAVIGATION
 ========================================================= */
 
 function safeInternalPath(value = "", fallback = HOME_ROUTE) {
@@ -85,7 +84,6 @@ function homeRoute() {
   return safeInternalPath(
     AppCore?.config?.routes?.home ||
       AppCore?.config?.auth?.homeRoute ||
-      AppCore?.config?.auth?.postLoginFallback ||
       HOME_ROUTE,
     HOME_ROUTE
   );
@@ -105,18 +103,26 @@ function getRouter() {
   }
 }
 
-async function navigateHome() {
+async function goHome() {
   const target = homeRoute();
   const router = getRouter();
 
   try {
     if (isFn(router?.replace)) {
-      await router.replace(target, { source: SOURCE, replaceState: true });
+      await router.replace(target, {
+        source: SOURCE,
+        replaceState: true,
+      });
+
       return true;
     }
 
     if (isFn(router?.navigate)) {
-      await router.navigate(target, { source: SOURCE, replaceState: true });
+      await router.navigate(target, {
+        source: SOURCE,
+        replaceState: true,
+      });
+
       return true;
     }
   } catch {
@@ -138,22 +144,23 @@ async function navigateHome() {
 ========================================================= */
 
 function renderTemplate(container, deps = {}) {
-  const html = getLoginTemplate({
-    appName: text(AppCore?.config?.appName, "Onion Support"),
-    passwordRequestHref: PASSWORD_REQUEST_ROUTE,
-    forgotPasswordHref: PASSWORD_REQUEST_ROUTE,
-    ...deps,
-  });
-
   const template = document.createElement("template");
-  template.innerHTML = String(html || "");
+
+  template.innerHTML = String(
+    getLoginTemplate({
+      appName: text(AppCore?.config?.appName, "Onion Support"),
+      passwordRequestHref: PASSWORD_REQUEST_ROUTE,
+      forgotPasswordHref: PASSWORD_REQUEST_ROUTE,
+      ...deps,
+    }) || ""
+  );
 
   container.replaceChildren(template.content.cloneNode(true));
   return true;
 }
 
 /* =========================================================
-   VALIDATION / AUTH RESULT
+   VALIDATION
 ========================================================= */
 
 function validate(payload = {}) {
@@ -170,45 +177,14 @@ function validate(payload = {}) {
   return errors;
 }
 
-function usableUser(user) {
-  return Boolean(
-    user &&
-      user.disabled !== true &&
-      user.status !== "disabled"
-  );
-}
+function authenticated(result = {}) {
+  if (result?.authenticated === true) return true;
 
-function loginSucceeded(result = {}) {
-  if (result?.ok === false) return false;
-  if (result?.success === false) return false;
-  if (result?.authenticated === false) return false;
-
-  const state = AppCore?.state || {};
-
-  const user =
-    result?.user ||
-    result?.usuario ||
-    result?.me ||
-    state.user ||
-    state.currentUser ||
-    null;
-
-  const authenticated = Boolean(
-    result?.authenticated ||
-      result?.ok ||
-      result?.success ||
-      state.authenticated
-  );
-
-  const hasToken = Boolean(
-    result?.hasToken ||
-      result?.token ||
-      result?.accessToken ||
-      result?.session?.token ||
-      state.hasToken
-  );
-
-  return authenticated && hasToken && usableUser(user);
+  try {
+    return Auth.isAuthenticated?.() === true;
+  } catch {
+    return false;
+  }
 }
 
 function errorMessage(error = null) {
@@ -266,6 +242,7 @@ export function renderLoginView(container, deps = {}) {
   renderTemplate(container, deps);
 
   const refs = getLoginRefs(container);
+
   refs.passwordFieldBindings = bindLoginPasswordFields(refs.root || container, {
     force: true,
   });
@@ -314,11 +291,11 @@ export function renderLoginView(container, deps = {}) {
         }
       );
 
-      if (!loginSucceeded(result)) {
+      if (!authenticated(result)) {
         throw new Error(result?.message || "Login inválido.");
       }
 
-      await navigateHome();
+      await goHome();
       return true;
     } catch (error) {
       setGlobalLoginError(refs, errorMessage(error));
@@ -375,9 +352,7 @@ export function renderLoginView(container, deps = {}) {
         version: LOGIN_VIEW_VERSION,
         mounted,
         submitting,
-        authenticated: Boolean(AppCore?.state?.authenticated),
-        hasToken: Boolean(AppCore?.state?.hasToken),
-        dom: getLoginDomSnapshot(refs),
+        authenticated: Boolean(Auth.isAuthenticated?.()),
       };
     },
 
@@ -418,8 +393,7 @@ export function getSnapshot() {
   return {
     version: LOGIN_VIEW_VERSION,
     mounted: false,
-    authenticated: Boolean(AppCore?.state?.authenticated),
-    hasToken: Boolean(AppCore?.state?.hasToken),
+    authenticated: Boolean(Auth.isAuthenticated?.()),
   };
 }
 

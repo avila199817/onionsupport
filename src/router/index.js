@@ -11,6 +11,10 @@
    - Renderizar vista.
    - Actualizar history.
    - Actualizar estado de ruta.
+   - Ruta privada sin sesión -> /login.
+   - Login con sesión -> /@{user.slug}.
+   - Home interna: /
+   - Home visible: /@{user.slug}
    - Sin Auth estático.
    - Sin fetch.
    - Sin storage.
@@ -28,7 +32,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v2";
+export const ROUTER_VERSION = "router.index.v3";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -89,71 +93,57 @@ export const Router = (() => {
     }
   }
 
-  function emit(name = "", payload = {}) {
-    const eventName = text(name, "");
-
-    if (!eventName) return false;
-
-    try {
-      AppCore?.events?.emit?.(eventName, {
-        source: SOURCE,
-        version: ROUTER_VERSION,
-        ...payload,
-        token: null,
-        accessToken: null,
-        refreshToken: null,
-      });
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   /* =======================================================
      PATHS
   ======================================================= */
 
+  function isHashRouterPath(value = "") {
+    const raw = text(value, "");
+    return raw.startsWith("#/") || raw.startsWith("#!");
+  }
+
   function normalizeHashPath(value = "") {
     const raw = text(value, HOME_PATH);
 
-    if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || HOME_PATH;
-    if (raw.startsWith("#/")) return raw.slice(1) || HOME_PATH;
+    if (raw.startsWith("#!")) {
+      return raw.replace(/^#!\/?/, "/") || HOME_PATH;
+    }
+
+    if (raw.startsWith("#/")) {
+      return raw.slice(1) || HOME_PATH;
+    }
 
     return raw;
   }
 
-  function normalizePublicPath(path = HOME_PATH) {
-    let value = normalizeHashPath(path);
+  function normalizeSearch(search = "") {
+    const value = text(search, "");
 
-    try {
-      if (/^https?:\/\//i.test(value)) {
-        const url = new URL(value);
-        value = `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
-      }
-    } catch {
-      // noop
-    }
+    if (!value || value === "?") return "";
+
+    return value.startsWith("?")
+      ? value
+      : `?${value.replace(/^\?+/, "")}`;
+  }
+
+  function normalizeHash(hash = "") {
+    const value = text(hash, "");
+
+    if (!value || value === "#") return "";
+
+    return value.startsWith("#")
+      ? value
+      : `#${value.replace(/^#+/, "")}`;
+  }
+
+  function normalizePathname(pathname = HOME_PATH) {
+    let value = text(pathname, HOME_PATH).replace(/\\/g, "/");
 
     if (!value.startsWith("/")) {
       value = `/${value}`;
     }
 
     value = value.replace(/\/{2,}/g, "/");
-
-    return value || HOME_PATH;
-  }
-
-  function normalizeCanonicalPath(path = HOME_PATH) {
-    let value = normalizePublicPath(path)
-      .split("#")[0]
-      .split("?")[0]
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
-    if (!value.startsWith("/")) {
-      value = `/${value}`;
-    }
 
     if (value.length > 1) {
       value = value.replace(/\/+$/g, "") || HOME_PATH;
@@ -162,13 +152,93 @@ export const Router = (() => {
     return value || HOME_PATH;
   }
 
+  function pathFromInput(path = HOME_PATH) {
+    const raw = text(path, HOME_PATH);
+
+    if (isHashRouterPath(raw)) {
+      return normalizeHashPath(raw);
+    }
+
+    if (!raw || raw.startsWith("//")) {
+      return HOME_PATH;
+    }
+
+    if (/^https?:\/\//i.test(raw)) {
+      try {
+        const base = isBrowser() ? window.location.origin : "http://localhost";
+        const url = new URL(raw, base);
+
+        if (url.origin !== base) {
+          return HOME_PATH;
+        }
+
+        if (isHashRouterPath(url.hash)) {
+          return normalizeHashPath(url.hash);
+        }
+
+        return `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
+      } catch {
+        return HOME_PATH;
+      }
+    }
+
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+      return HOME_PATH;
+    }
+
+    return raw || HOME_PATH;
+  }
+
+  function splitPath(path = HOME_PATH) {
+    let raw = pathFromInput(path);
+    let pathname = raw;
+    let search = "";
+    let hash = "";
+
+    const hashIndex = pathname.indexOf("#");
+
+    if (hashIndex >= 0) {
+      hash = pathname.slice(hashIndex);
+      pathname = pathname.slice(0, hashIndex) || HOME_PATH;
+    }
+
+    const searchIndex = pathname.indexOf("?");
+
+    if (searchIndex >= 0) {
+      search = pathname.slice(searchIndex);
+      pathname = pathname.slice(0, searchIndex) || HOME_PATH;
+    }
+
+    return {
+      pathname: normalizePathname(pathname),
+      search: normalizeSearch(search),
+      hash: normalizeHash(hash),
+    };
+  }
+
+  function joinPath(parts = {}) {
+    return [
+      normalizePathname(parts.pathname || HOME_PATH),
+      normalizeSearch(parts.search || ""),
+      normalizeHash(parts.hash || ""),
+    ].join("");
+  }
+
+  function normalizePublicPath(path = HOME_PATH) {
+    return joinPath(splitPath(path));
+  }
+
+  function normalizeCanonicalPath(path = HOME_PATH) {
+    return splitPath(path).pathname || HOME_PATH;
+  }
+
   function browserPath() {
     if (!isBrowser()) return HOME_PATH;
 
     try {
       const hash = window.location.hash || "";
 
-      if (hash.startsWith("#/") || hash.startsWith("#!")) {
+      if (isHashRouterPath(hash)) {
         return normalizePublicPath(hash);
       }
 
@@ -225,7 +295,7 @@ export const Router = (() => {
     if (!/^https?:\/\//i.test(value)) return false;
 
     try {
-      return new URL(value).origin !== window.location.origin;
+      return new URL(value, window.location.origin).origin !== window.location.origin;
     } catch {
       return true;
     }
@@ -233,7 +303,7 @@ export const Router = (() => {
 
   function isHashOnlyHref(href = "") {
     const value = text(href, "");
-    return value.startsWith("#") && !value.startsWith("#/") && !value.startsWith("#!");
+    return value.startsWith("#") && !isHashRouterPath(value);
   }
 
   function safeRedirectPath(path = HOME_PATH, fallback = HOME_PATH) {
@@ -274,6 +344,7 @@ export const Router = (() => {
       payload.authUser,
       payload.sessionUser,
       payload.session?.user,
+      payload.sessionData?.user,
       payload.data?.user,
       payload.payload?.user,
       payload.me,
@@ -282,6 +353,40 @@ export const Router = (() => {
     ];
 
     return candidates.find(isObject) || null;
+  }
+
+  function cleanToken(value = "") {
+    const token = text(value, "").replace(/^Bearer\s+/i, "");
+
+    if (!token) return "";
+    if (/\s/.test(token)) return "";
+    if (token.length > 8192) return "";
+
+    if (
+      ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
+        token.toLowerCase()
+      )
+    ) {
+      return "";
+    }
+
+    return token;
+  }
+
+  function getCurrentToken() {
+    const Auth = getAuth();
+    const state = readState();
+
+    return cleanToken(
+      safeCall(Auth?.getToken?.bind?.(Auth) || Auth?.getToken) ||
+        safeCall(Auth?.getAccessToken?.bind?.(Auth) || Auth?.getAccessToken) ||
+        state.token ||
+        state.accessToken ||
+        state.access_token ||
+        state.session?.token ||
+        state.session?.accessToken ||
+        ""
+    );
   }
 
   function isUserDisabled(user = null) {
@@ -404,19 +509,20 @@ export const Router = (() => {
 
   function isAuthenticated() {
     const Auth = getAuth();
+    const token = getCurrentToken();
     const user = getCurrentUser();
 
-    if (!isUsableUser(user)) return false;
+    if (!token || !isUsableUser(user)) return false;
 
     try {
-      if (isFunction(Auth?.isAuthenticated)) {
-        return Auth.isAuthenticated() === true;
+      if (isFunction(Auth?.isAuthenticated) && Auth.isAuthenticated() === false) {
+        return false;
       }
     } catch {
       return false;
     }
 
-    return readState().authenticated === true;
+    return true;
   }
 
   /* =======================================================
@@ -424,17 +530,21 @@ export const Router = (() => {
   ======================================================= */
 
   function normalizeUserSlug(value = "") {
+    if (isFunction(Routes.normalizeUserHomeSlug)) {
+      return Routes.normalizeUserHomeSlug(value);
+    }
+
     const slug = text(value, "")
       .replace(/^\/+/, "")
       .replace(/^@+/, "")
       .split(/[/?#]/)[0]
-      .trim()
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
       .toLowerCase();
 
     if (!slug) return "";
-    if (!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug)) return "";
 
-    return slug;
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
   }
 
   function getCurrentUserSlug() {
@@ -487,19 +597,21 @@ export const Router = (() => {
       return "";
     }
 
+    if (!isAuthenticated()) return "";
+
     const realSlug = getCurrentUserSlug();
 
     if (!realSlug) return "";
 
     const expected = buildUserHomePath(realSlug);
-    const visible = normalizeCanonicalPath(data.publicPath || HOME_PATH);
+    const visibleCanonical = normalizeCanonicalPath(data.publicPath || HOME_PATH);
     const requestedSlug = normalizeUserSlug(
-      data.routeParams?.slug || extractSlugFromPath(visible)
+      data.routeParams?.slug || extractSlugFromPath(visibleCanonical)
     );
 
-    if (visible === HOME_PATH) return expected;
+    if (visibleCanonical === HOME_PATH) return expected;
     if (requestedSlug && requestedSlug !== realSlug) return expected;
-    if (requestedSlug === realSlug && visible !== expected) return expected;
+    if (requestedSlug === realSlug && visibleCanonical !== expected) return expected;
 
     return "";
   }
@@ -771,6 +883,14 @@ export const Router = (() => {
     }
 
     const role = getCurrentRole();
+
+    if (role === "admin") {
+      return {
+        allowed: true,
+        reason: "admin",
+      };
+    }
+
     const allowed = roles.includes(role);
 
     return {
@@ -780,6 +900,26 @@ export const Router = (() => {
   }
 
   function checkAccess(route, canonicalPath, publicPath) {
+    /*
+      Corte duro:
+      una ruta privada nunca puede renderizar sin sesión estricta.
+    */
+    if (route && route.public !== true && !isAuthenticated()) {
+      return {
+        allowed: false,
+        reason: "not-authenticated",
+        redirectTo: loginRedirectTarget(publicPath),
+      };
+    }
+
+    if (route?.public === true && route.guestOnly === true && isAuthenticated()) {
+      return {
+        allowed: false,
+        reason: "guest-only",
+        redirectTo: getDefaultHome(),
+      };
+    }
+
     const shouldAllowRoute = RouteGuards.shouldAllowRoute;
 
     try {
@@ -787,14 +927,18 @@ export const Router = (() => {
         const result = shouldAllowRoute({
           AppCore,
           Auth: getAuth(),
+
           route,
           requestedCanonicalPath: canonicalPath,
           requestedPublicPath: publicPath,
           requestedSlug: extractSlugFromPath(publicPath),
+
           currentUser: getCurrentUser(),
           currentUserSlug: getCurrentUserSlug(),
+
           defaultHome: getDefaultHome(),
           buildUserHomePath,
+
           getRoute,
           isAuthenticated,
         });
@@ -838,7 +982,6 @@ export const Router = (() => {
     return Boolean(
       safeCall(History.updateHistory, {
         AppCore,
-        getRoute,
         pathname: publicPath,
         options,
       })
@@ -862,8 +1005,7 @@ export const Router = (() => {
     if (isFunction(Render.renderRouteNotFound)) {
       Render.renderRouteNotFound({
         AppCore,
-        getRoute,
-        updateHistory: History.updateHistory,
+        route: null,
         requestedPath: data.publicPath,
         canonicalPath: data.canonicalPath,
         publicPath: data.publicPath,
@@ -897,8 +1039,6 @@ export const Router = (() => {
     if (isFunction(Render.renderRouteForbidden)) {
       Render.renderRouteForbidden({
         AppCore,
-        getRoute,
-        updateHistory: History.updateHistory,
         route,
         requestedPath: data.publicPath,
         canonicalPath: data.canonicalPath,
@@ -942,12 +1082,12 @@ export const Router = (() => {
         canonicalPath: data.canonicalPath,
         publicPath: data.publicPath,
         routeParams: data.routeParams || {},
-        getRoute,
         setShellMode: (nextRoute) => Shell.setShellMode?.(AppCore, nextRoute),
         setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
       });
     } else if (isFunction(route?.render)) {
       view = await route.render(viewRoot(), {
+        AppCore,
         route,
         requestedPath: data.publicPath,
         canonicalPath: data.canonicalPath,
@@ -980,7 +1120,6 @@ export const Router = (() => {
     if (isFunction(Render.renderRouteRuntimeError)) {
       await Render.renderRouteRuntimeError({
         AppCore,
-        getRoute,
         route,
         error,
         requestedPath: data.publicPath,
@@ -998,12 +1137,6 @@ export const Router = (() => {
 
     updateShell(route, state.canonicalPath);
     hideLoader();
-
-    emit("router:render:error", {
-      canonicalPath: state.canonicalPath,
-      publicPath: state.publicPath,
-      message: error?.message || "Render error",
-    });
 
     return {
       ok: false,
@@ -1041,13 +1174,15 @@ export const Router = (() => {
     const seq = ++renderSeq;
     const data = getRouteMatch(path);
 
-    emit("router:before-render", {
-      canonicalPath: data.canonicalPath,
-      publicPath: data.publicPath,
-      matchedBy: data.matchedBy,
-    });
-
     if (!data.route) {
+      if (!isAuthenticated()) {
+        return redirectTo(
+          loginRedirectTarget(data.publicPath),
+          options,
+          "not-found-auth-required"
+        );
+      }
+
       return renderNotFound(data, options);
     }
 
@@ -1087,16 +1222,7 @@ export const Router = (() => {
     }
 
     try {
-      const result = await renderSuccess(data.route, data, options);
-
-      emit("router:rendered", {
-        canonicalPath: result.canonicalPath,
-        publicPath: result.publicPath,
-        found: true,
-        matchedBy: data.matchedBy,
-      });
-
-      return result;
+      return await renderSuccess(data.route, data, options);
     } catch (error) {
       return renderRuntimeError(data.route, data, error, options);
     }
@@ -1146,8 +1272,7 @@ export const Router = (() => {
 
   function goAfterLogin(fallback = HOME_PATH, options = {}) {
     const target = normalizePostLoginTarget(
-      readState().redirectAfterLogin ||
-        readState().postLoginTarget ||
+      readState().postLoginTarget ||
         fallback,
       getDefaultHome()
     );
@@ -1186,6 +1311,19 @@ export const Router = (() => {
     };
   }
 
+  function linkHref(link = null) {
+    return text(
+      link?.dataset?.route ||
+        link?.dataset?.href ||
+        link?.dataset?.to ||
+        link?.getAttribute?.("data-route") ||
+        link?.getAttribute?.("data-href") ||
+        link?.getAttribute?.("data-to") ||
+        link?.getAttribute?.("href"),
+      ""
+    );
+  }
+
   function onClick(event) {
     if (
       event.defaultPrevented ||
@@ -1206,7 +1344,7 @@ export const Router = (() => {
 
     if (!link || link.hasAttribute("download")) return;
 
-    const href = link.getAttribute("href") || "";
+    const href = linkHref(link);
     const linkTarget = text(link.getAttribute("target"), "").toLowerCase();
 
     if (!href || linkTarget === "_blank") return;
@@ -1321,6 +1459,8 @@ export const Router = (() => {
       publicPath: currentPublicPath(),
       routeParams: readState().routeParams || {},
 
+      authenticated: isAuthenticated(),
+
       defaultHome: getDefaultHome(),
       currentUserSlug: getCurrentUserSlug() || null,
 
@@ -1338,6 +1478,9 @@ export const Router = (() => {
         ownTransport: false,
         ownToast: false,
         ownViewLogic: false,
+
+        strictAuth: true,
+        privateRouteWithoutSessionRedirectsLogin: true,
 
         userSlugHome: true,
         validatesRealUserSlug: true,
@@ -1403,7 +1546,7 @@ export const Router = (() => {
     repairCurrentRoute: () => renderCurrent({ source: "repair-current-route" }),
     hideLoader,
 
-    buildPublicPath: normalizePublicPath,
+    buildPublicPath: normalizeNavigationTarget,
     resolveSpaHref: normalizeNavigationTarget,
 
     buildUserHomePath,

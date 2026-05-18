@@ -10,6 +10,7 @@
    - canonicalPath limpio.
    - /@{user.slug} conserva URL pública pero canonicaliza a /.
    - Scrub explícito sólo del parámetro token.
+   - Snapshots redacted.
    - Sin imports.
    - Sin Auth.
    - Sin guards.
@@ -19,9 +20,10 @@
    - Sin eventos propios.
    - Sin alias /home.
    - Sin rutas legacy.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const ROUTER_HISTORY_VERSION = "router.history.v2";
+export const ROUTER_HISTORY_VERSION = "router.history.v3";
 
 const HISTORY_STATE_VERSION = 1;
 const DEFAULT_ROUTE = "/";
@@ -66,7 +68,11 @@ function nowMs() {
 }
 
 function nowIso() {
-  return new Date().toISOString();
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function nextHistoryId() {
@@ -104,6 +110,25 @@ function normalizeHashRouterPath(value = "") {
   return raw || DEFAULT_ROUTE;
 }
 
+function sameOriginUrlToPath(raw = "") {
+  try {
+    const base = isBrowser() ? window.location.origin : "http://localhost";
+    const url = new URL(raw, base);
+
+    if (url.origin !== base) {
+      return DEFAULT_ROUTE;
+    }
+
+    if (url.hash && isHashRouterPath(url.hash)) {
+      return normalizeHashRouterPath(url.hash);
+    }
+
+    return `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
+  } catch {
+    return DEFAULT_ROUTE;
+  }
+}
+
 function pathFromInput(path = DEFAULT_ROUTE) {
   const raw = text(path, DEFAULT_ROUTE);
 
@@ -111,8 +136,12 @@ function pathFromInput(path = DEFAULT_ROUTE) {
     return normalizeHashRouterPath(raw);
   }
 
-  if (raw.startsWith("//")) {
+  if (!raw || raw.startsWith("//")) {
     return DEFAULT_ROUTE;
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    return sameOriginUrlToPath(raw);
   }
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
@@ -256,6 +285,31 @@ function browserPath() {
    STATE
 ========================================================= */
 
+function cleanRouteParams(params = {}) {
+  if (!isObject(params)) return {};
+
+  const output = {};
+
+  for (const [key, value] of Object.entries(params)) {
+    const cleanKey = text(key, "");
+
+    if (!cleanKey) continue;
+
+    if (
+      cleanKey.toLowerCase() === TOKEN_PARAM ||
+      cleanKey.toLowerCase() === "access_token" ||
+      cleanKey.toLowerCase() === "refresh_token"
+    ) {
+      output[cleanKey] = "***";
+      continue;
+    }
+
+    output[cleanKey] = value;
+  }
+
+  return output;
+}
+
 export function createHistoryState({
   AppCore = null,
   pathname = DEFAULT_ROUTE,
@@ -283,7 +337,7 @@ export function createHistoryState({
     route: canonicalPath,
 
     routeParams: {
-      ...(isObject(extra.routeParams) ? extra.routeParams : {}),
+      ...cleanRouteParams(extra.routeParams),
       ...(slug ? { slug } : {}),
     },
 
@@ -603,9 +657,7 @@ function serializeState(state = null) {
     canonicalPath: redact(state.canonicalPath || ""),
     route: redact(state.route || ""),
 
-    routeParams: isObject(state.routeParams)
-      ? { ...state.routeParams }
-      : {},
+    routeParams: cleanRouteParams(state.routeParams),
 
     publicSlug: state.publicSlug || null,
     isUserHomePath: state.isUserHomePath === true,
@@ -642,26 +694,32 @@ export function getHistorySnapshot(AppCore = null) {
 
     policy: {
       historyOnly: true,
+
       ownAuth: false,
       ownGuards: false,
       ownRender: false,
       ownStorage: false,
       ownToast: false,
+      ownEvents: false,
 
       userSlugHome: true,
+      preservesUserSlugPublicUrl: true,
       canonicalizesUserHome: true,
 
       noHomeAlias: true,
+      noHomeRoute: true,
       noLegacyRoutes: true,
+      no2fa: true,
 
       tokenParam: TOKEN_PARAM,
       tokenRoutes: [...TOKEN_ROUTES],
       tokenScrubExplicit: true,
+      snapshotRedacted: true,
     },
 
     app: {
       route: AppCore?.state?.route || null,
-      publicPath: AppCore?.state?.publicPath || null,
+      publicPath: redact(AppCore?.state?.publicPath || ""),
       canonicalPath: AppCore?.state?.canonicalPath || null,
     },
   };

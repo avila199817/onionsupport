@@ -10,15 +10,17 @@
    - Iniciar Auth.
    - Restaurar sesión ANTES del primer render Router.
    - Iniciar Router sin render automático.
-   - Renderizar ruta actual.
+   - Renderizar ruta inicial capturada por main.js.
    - Iniciar Sidebar/Topbar después de ruta + auth.
    - Refrescar textos i18n.
    - Ocultar loader.
    - Sin Store.
-   - Sin Services.
+   - Sin Services paralelos.
    - Sin warmup.
    - Sin repair loops.
    - Sin eventos custom.
+   - Sin fetch.
+   - Sin storage.
    - Sin magia negra.
 ========================================================= */
 
@@ -45,6 +47,8 @@ import {
   setShellVisibility,
 } from "./shell.js";
 
+export const APP_INDEX_VERSION = "app.index.v2";
+
 let bootPromise = null;
 let ready = false;
 
@@ -54,6 +58,26 @@ let ready = false;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
+}
+
+function redact(value = "") {
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function currentPath() {
@@ -66,12 +90,13 @@ function currentPath() {
   }
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function isFunction(value) {
-  return typeof value === "function";
+function bootPath(options = {}) {
+  return text(
+    options.bootContext?.initialPath ||
+      options.initialPath ||
+      currentPath(),
+    "/"
+  );
 }
 
 function safeCall(fn = null, ...args) {
@@ -107,12 +132,13 @@ async function callModule(target = null, names = [], payload = {}) {
 function setRootData(element = null, state = "booting") {
   if (!element) return false;
 
-  const booting = state === "booting";
-  const readyState = state === "ready";
-  const fatal = state === "fatal";
+  const value = text(state, "booting");
+  const booting = value === "booting";
+  const readyState = value === "ready";
+  const fatal = value === "fatal";
 
   try {
-    element.dataset.appState = state;
+    element.dataset.appState = value;
     element.dataset.appLoading = booting ? "true" : "false";
     element.dataset.appBooting = booting ? "true" : "false";
     element.dataset.appReady = readyState ? "true" : "false";
@@ -131,7 +157,7 @@ function setRootData(element = null, state = "booting") {
 function setAppState(state = "booting") {
   if (!isBrowser()) return false;
 
-  const value = String(state || "booting");
+  const value = text(state, "booting");
 
   for (const element of [document.documentElement, document.body].filter(Boolean)) {
     setRootData(element, value);
@@ -299,6 +325,12 @@ async function restoreAuth(payload = {}) {
     noRedirect: true,
   });
 
+  await callModule(Auth, ["syncAuthState"], {
+    ...payload,
+    AppCore,
+    core: AppCore,
+  });
+
   return Auth;
 }
 
@@ -317,13 +349,15 @@ async function initRouter(payload = {}) {
   };
 
   const router =
-    await callModule(Router, ["init", "configure"], options) ||
-    await callModule(Router, ["start", "boot"], options);
+    (await callModule(Router, ["init", "configure"], options)) ||
+    (await callModule(Router, ["start", "boot"], options));
 
   return router || Router;
 }
 
-async function renderInitialRoute() {
+async function renderInitialRoute(payload = {}) {
+  const path = bootPath(payload);
+
   const options = {
     source: "app.boot",
     initialRender: true,
@@ -332,16 +366,16 @@ async function renderInitialRoute() {
     skipHistory: true,
   };
 
+  if (isFunction(Router?.render)) {
+    return Router.render(path, options);
+  }
+
   if (isFunction(Router?.renderCurrent)) {
     return Router.renderCurrent(options);
   }
 
-  if (isFunction(Router?.render)) {
-    return Router.render(currentPath(), options);
-  }
-
   if (isFunction(Router?.navigate)) {
-    return Router.navigate(currentPath(), {
+    return Router.navigate(path, {
       source: "app.boot",
       replaceState: true,
     });
@@ -420,7 +454,10 @@ function renderFatal(error = null) {
   root.replaceChildren(section);
 
   try {
-    console.error("[Onion App] Boot error:", error);
+    console.error("[Onion App] Boot error:", {
+      name: error?.name || "Error",
+      message: redact(error?.message || String(error || "")),
+    });
   } catch {
     // noop
   }
@@ -457,7 +494,7 @@ async function runBoot(options = {}) {
     El render inicial lo controla App después del restore.
   */
   await initRouter(payload);
-  await renderInitialRoute();
+  await renderInitialRoute(payload);
 
   /*
     Chrome después de ruta + auth.
@@ -472,6 +509,47 @@ async function runBoot(options = {}) {
   ready = true;
 
   return App;
+}
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
+export function getAppSnapshot() {
+  return {
+    version: APP_INDEX_VERSION,
+
+    ready,
+    booting: Boolean(bootPromise),
+
+    currentPath: redact(currentPath()),
+
+    modules: {
+      core: Boolean(AppCore),
+      auth: Boolean(Auth),
+      router: Boolean(Router),
+      i18n: Boolean(I18n),
+      toast: Boolean(Toast),
+      sidebar: Boolean(SidebarUI),
+      topbar: Boolean(TopbarUI),
+    },
+
+    policy: {
+      singleEntryPoint: true,
+      restoresAuthBeforeRouterRender: true,
+      routerManagedInitialRender: false,
+      chromeAfterRouteAndAuth: true,
+
+      noStore: true,
+      noParallelServices: true,
+      noWarmup: true,
+      noRepairLoops: true,
+      noCustomEvents: true,
+      noFetch: true,
+      noStorage: true,
+      redactedSnapshot: true,
+    },
+  };
 }
 
 /* =========================================================
@@ -503,9 +581,14 @@ export function isReady() {
 }
 
 export const App = {
+  version: APP_INDEX_VERSION,
+
   boot,
   start,
   isReady,
+
+  getSnapshot: getAppSnapshot,
+  getDebugSnapshot: getAppSnapshot,
 };
 
 export const bootApp = boot;

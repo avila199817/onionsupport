@@ -4,7 +4,7 @@
 
    Responsabilidad:
    - Store mínimo de compat.
-   - Estado simple en memoria.
+   - Estado UI/entities/flags en memoria.
    - get / set / patch / update / remove.
    - Suscripciones simples.
    - No duplica Auth.
@@ -14,6 +14,7 @@
    - No sincroniza Core en paralelo.
    - No guarda tokens reales.
    - Sin helpers externos.
+   - Sin storage.
    - Sin magia negra.
 ========================================================= */
 
@@ -26,6 +27,13 @@ const BLOCKED_KEYS = new Set([
   "prototype",
   "constructor",
 ]);
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function nowIso() {
   return new Date().toISOString();
@@ -54,15 +62,46 @@ function clone(value) {
   }
 }
 
-function same(a, b) {
-  if (Object.is(a, b)) return true;
+function same(left, right) {
+  if (Object.is(left, right)) return true;
 
   try {
-    return JSON.stringify(a) === JSON.stringify(b);
+    return JSON.stringify(left) === JSON.stringify(right);
   } catch {
     return false;
   }
 }
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function sanitizeForStore(value, keyHint = "") {
+  if (isSensitiveKey(keyHint)) return null;
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeForStore(item));
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (BLOCKED_KEYS.has(key)) continue;
+      if (isSensitiveKey(key)) continue;
+
+      output[key] = sanitizeForStore(item, key);
+    }
+
+    return output;
+  }
+
+  return clone(value);
+}
+
+/* =========================================================
+   PATH HELPERS
+========================================================= */
 
 function pathParts(path = "") {
   const parts = Array.isArray(path)
@@ -73,6 +112,10 @@ function pathParts(path = "") {
     .map((part) => String(part || "").trim())
     .filter(Boolean)
     .filter((part) => !BLOCKED_KEYS.has(part));
+}
+
+function pathAllowed(path = "") {
+  return !pathParts(path).some(isSensitiveKey);
 }
 
 function getByPath(root, path, fallback = undefined) {
@@ -93,7 +136,7 @@ function getByPath(root, path, fallback = undefined) {
 function setByPath(root, path, value) {
   const parts = pathParts(path);
 
-  if (!parts.length) return false;
+  if (!parts.length || !pathAllowed(parts)) return false;
 
   let current = root;
 
@@ -105,7 +148,7 @@ function setByPath(root, path, value) {
     current = current[part];
   }
 
-  current[parts.at(-1)] = value;
+  current[parts.at(-1)] = sanitizeForStore(value, parts.at(-1));
 
   return true;
 }
@@ -113,7 +156,7 @@ function setByPath(root, path, value) {
 function deleteByPath(root, path) {
   const parts = pathParts(path);
 
-  if (!parts.length) return false;
+  if (!parts.length || !pathAllowed(parts)) return false;
 
   let current = root;
 
@@ -138,33 +181,25 @@ function merge(target = {}, source = {}) {
 
   for (const [key, value] of Object.entries(source)) {
     if (BLOCKED_KEYS.has(key)) continue;
+    if (isSensitiveKey(key)) continue;
 
     output[key] =
       isObject(value) && isObject(output[key])
         ? merge(output[key], value)
-        : clone(value);
+        : sanitizeForStore(value, key);
   }
 
   return output;
 }
 
+/* =========================================================
+   STATE
+========================================================= */
+
 function createInitialState() {
   const now = nowIso();
 
   return {
-    app: {
-      route: "/",
-      publicPath: "/",
-      ready: false,
-    },
-
-    session: {
-      authenticated: false,
-      hasToken: false,
-      user: null,
-      role: null,
-    },
-
     ui: {
       theme: "system",
       lang: "en",
@@ -197,6 +232,10 @@ function matchPath(watched = "", changed = "") {
     changed.startsWith(`${watched}.`)
   );
 }
+
+/* =========================================================
+   STORE
+========================================================= */
 
 export const Store = (() => {
   let initialized = false;
@@ -256,7 +295,7 @@ export const Store = (() => {
         if (!same(nextValue, entry.lastValue)) {
           const previousValue = entry.lastValue;
           entry.lastValue = clone(nextValue);
-          entry.listener(nextValue, previousValue, payload);
+          entry.listener(clone(nextValue), previousValue, payload);
         }
       } catch {
         // Un selector listener no rompe Store.
@@ -307,16 +346,17 @@ export const Store = (() => {
   ======================================================= */
 
   function set(path, value) {
-    if (!path) return get();
+    if (!path || !pathAllowed(path)) return get(path);
 
+    const sanitized = sanitizeForStore(value, pathParts(path).at(-1));
     const current = getRaw(path);
 
-    if (same(current, value)) return get(path);
+    if (same(current, sanitized)) return get(path);
 
     const previous = get();
 
-    setByPath(state, path, clone(value));
-    commit([path], previous);
+    setByPath(state, path, sanitized);
+    commit([String(path)], previous);
 
     return get(path);
   }
@@ -324,8 +364,12 @@ export const Store = (() => {
   function patch(partial = {}) {
     if (!isObject(partial)) return get();
 
+    const sanitized = sanitizeForStore(partial);
+
+    if (!isObject(sanitized)) return get();
+
     const previous = get();
-    const next = merge(state, partial);
+    const next = merge(state, sanitized);
 
     if (same(state, next)) return get();
 
@@ -335,7 +379,7 @@ export const Store = (() => {
 
     Object.assign(state, next);
 
-    commit(Object.keys(partial), previous);
+    commit(Object.keys(sanitized), previous);
 
     return get();
   }
@@ -343,7 +387,9 @@ export const Store = (() => {
   function replace(nextState = {}) {
     if (!isObject(nextState)) return get();
 
-    if (same(state, nextState)) return get();
+    const sanitized = merge(createInitialState(), sanitizeForStore(nextState));
+
+    if (same(state, sanitized)) return get();
 
     const previous = get();
 
@@ -351,7 +397,8 @@ export const Store = (() => {
       delete state[key];
     }
 
-    Object.assign(state, clone(nextState));
+    Object.assign(state, sanitized);
+
     commit(Object.keys(state), previous);
 
     return get();
@@ -359,17 +406,19 @@ export const Store = (() => {
 
   function update(path, updater) {
     if (!isFunction(updater)) return get(path);
+    if (!pathAllowed(path)) return get(path);
 
     return set(path, updater(get(path)));
   }
 
   function remove(path) {
+    if (!pathAllowed(path)) return false;
     if (getRaw(path) === undefined) return false;
 
     const previous = get();
     const ok = deleteByPath(state, path);
 
-    if (ok) commit([path], previous);
+    if (ok) commit([String(path)], previous);
 
     return ok;
   }
@@ -380,7 +429,7 @@ export const Store = (() => {
 
   /* =======================================================
      BATCH COMPAT
-     No batch real. Mantiene API sin meter sistema paralelo.
+     No batch real. Mantiene API sin sistema paralelo.
   ======================================================= */
 
   function beginBatch() {
@@ -406,30 +455,31 @@ export const Store = (() => {
   function push(path, item) {
     return update(path, (current = []) => {
       const list = Array.isArray(current) ? current : [];
-      return [...list, clone(item)];
+      return [...list, sanitizeForStore(item)];
     });
   }
 
   function upsertById(path, item, idKey = "id") {
     return update(path, (current = []) => {
       const list = Array.isArray(current) ? current : [];
-      const id = item?.[idKey];
+      const cleanItem = sanitizeForStore(item);
+      const id = cleanItem?.[idKey];
 
       if (id === undefined || id === null || id === "") {
-        return [...list, clone(item)];
+        return [...list, cleanItem];
       }
 
       const index = list.findIndex((entry) => entry?.[idKey] === id);
 
       if (index < 0) {
-        return [...list, clone(item)];
+        return [...list, cleanItem];
       }
 
       return list.map((entry, entryIndex) =>
         entryIndex === index
           ? {
               ...entry,
-              ...clone(item),
+              ...cleanItem,
             }
           : entry
       );
@@ -552,7 +602,7 @@ export const Store = (() => {
   }
 
   /* =======================================================
-     LIFECYCLE
+     CORE BRIDGE
   ======================================================= */
 
   function attachToCore() {
@@ -567,6 +617,10 @@ export const Store = (() => {
 
     return true;
   }
+
+  /* =======================================================
+     LIFECYCLE
+  ======================================================= */
 
   function init(options = {}) {
     if (initialized && options.force !== true) {
@@ -616,25 +670,43 @@ export const Store = (() => {
   function getDiagnostics() {
     return {
       version: STORE_VERSION,
+
       initialized,
       initializing,
       destroyed,
+
       mutationSeq,
+
       listeners: listeners.size,
       keyListeners: keyListeners.size,
       selectorListeners: selectorListeners.size,
+
       stateChangeCount: state.meta?.changeCount || 0,
+
+      policy: {
+        memoryOnly: true,
+        noAuth: true,
+        noRouter: true,
+        noHttp: true,
+        noCoreSync: true,
+        noStorage: true,
+        noRealTokens: true,
+      },
     };
   }
 
   function getSnapshot(options = {}) {
     return {
       version: STORE_VERSION,
+
       initialized,
       initializing,
       destroyed,
+
       mutationSeq,
+
       diagnostics: getDiagnostics(),
+
       state: options.includeState === true ? get() : null,
     };
   }
@@ -649,12 +721,19 @@ export const Store = (() => {
 
   const selectors = {
     state: () => get(),
-    app: () => get("app"),
-    session: () => get("session"),
+
     ui: () => get("ui"),
     entities: () => get("entities"),
     flags: () => get("flags"),
     meta: () => get("meta"),
+
+    app: () => ({}),
+    session: () => ({
+      authenticated: false,
+      hasToken: false,
+      user: null,
+      role: null,
+    }),
   };
 
   const actions = {

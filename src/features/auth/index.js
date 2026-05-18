@@ -6,11 +6,14 @@
    - Fachada pública mínima de Auth.
    - Delegar login/restore/logout/session/guards.
    - HTTP delegado en CoreHttp/AppCore.
+   - Normalizar usuario autenticado.
+   - Exponer home privada por slug: /@slug.
    - Sin Router.
    - Sin Toast.
    - Sin fetch propio.
    - Sin storage paralelo.
    - Sin rutas inventadas.
+   - Sin /home.
    - Sin 2FA/MFA/OTP.
    - Roles únicos: admin / user.
    - Auth estricta: token usable + user usable.
@@ -27,7 +30,7 @@ import * as GuardsApi from "./guards.js";
 import * as ActivationApi from "./activation.js";
 import * as PasswordResetApi from "./password-reset.js";
 
-export const AUTH_MODULE_VERSION = "minimal-1";
+export const AUTH_MODULE_VERSION = "auth.facade.slug.v1";
 
 export const AUTH_ENDPOINTS = Object.freeze({
   login: "/api/auth/login",
@@ -44,6 +47,11 @@ export const AUTH_ROUTES = Object.freeze({
   passwordRequest: "/password-request",
   passwordReset: "/password-reset",
   activateAccount: "/activate-account",
+});
+
+export const AUTH_HOME = Object.freeze({
+  canonical: "/",
+  userPrefix: "/@",
 });
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
@@ -100,26 +108,6 @@ function tokenOk(value = "") {
   ].includes(token.toLowerCase());
 }
 
-function userDisabled(user = null) {
-  return (
-    !isObject(user) ||
-    user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
-  );
-}
-
-function userOk(user = null) {
-  if (userDisabled(user)) return false;
-
-  return Boolean(
-    user.id ||
-      user.userId ||
-      user.username ||
-      user.slug ||
-      user.email
-  );
-}
-
 function pickFn(moduleApi = {}, ...names) {
   for (const name of names.flat().filter(Boolean)) {
     if (isFn(moduleApi?.[name])) return moduleApi[name];
@@ -134,47 +122,6 @@ function pickFn(moduleApi = {}, ...names) {
   }
 
   return null;
-}
-
-function normalizeUser(user = null) {
-  if (!userOk(user)) return null;
-
-  const id = user.userId || user.id || null;
-  const username = user.username || user.slug || user.email || id || null;
-  const displayName =
-    user.displayName ||
-    user.fullName ||
-    user.name ||
-    user.nombre ||
-    username ||
-    user.email ||
-    id ||
-    "Usuario";
-
-  const role = cleanRole(user.role || user.rol);
-
-  return {
-    ...user,
-
-    id,
-    userId: user.userId || id,
-
-    username,
-    slug: user.slug || username,
-
-    name: user.name || displayName,
-    fullName: user.fullName || displayName,
-    displayName,
-
-    email: user.email || null,
-
-    role,
-    rol: role,
-    roles: [role],
-
-    active: true,
-    disabled: false,
-  };
 }
 
 function state() {
@@ -199,49 +146,132 @@ function emit(eventName = "", payload = {}) {
 }
 
 /* =========================================================
-   DELEGATES
+   SLUG / HOME
 ========================================================= */
 
-const loginCore = pickFn(LoginApi, "login", "default");
-const handleLoginFormSubmitCore = pickFn(LoginApi, "handleLoginFormSubmit");
+function normalizeSlug(value = "") {
+  const slug = text(value, "").replace(/^@+/, "").trim();
 
-const restoreSessionCore = pickFn(RestoreApi, "restoreSession", "restore", "default");
-const logoutCore = pickFn(LogoutApi, "logout", "default");
+  if (!slug) return "";
 
-const sessionApplySession = pickFn(SessionApi, "applySession");
-const sessionClearSession = pickFn(SessionApi, "clearSessionLocal", "clearSession");
-const sessionBuildSnapshot = pickFn(SessionApi, "buildSessionSnapshot");
-const sessionIsAuthenticated = pickFn(SessionApi, "isAuthenticated");
-const sessionGetCurrentUser = pickFn(SessionApi, "getCurrentUser");
-const sessionGetCurrentToken = pickFn(SessionApi, "getCurrentToken");
-const sessionGetCurrentRole = pickFn(SessionApi, "getCurrentRole");
-const sessionGetCurrentRoles = pickFn(SessionApi, "getCurrentRoles");
-const sessionGetAuthHeader = pickFn(SessionApi, "getAuthHeader");
-const sessionDebugSnapshot = pickFn(SessionApi, "getSessionDebugSnapshot");
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
 
-const guardAuthenticatedCore = pickFn(GuardsApi, "guardAuthenticated", "requireAuth");
-const guardGuestCore = pickFn(GuardsApi, "guardGuest", "requireGuest");
-const guardRoleCore = pickFn(GuardsApi, "guardRole", "requireRole");
-const guardAdminCore = pickFn(GuardsApi, "guardAdmin", "requireAdmin");
-const canAccessRouteCore = pickFn(GuardsApi, "canAccessRoute", "canAccess");
-const syncAuthStateCore = pickFn(GuardsApi, "syncAuthState");
-const buildGuardErrorPayloadCore = pickFn(GuardsApi, "buildGuardErrorPayload");
-const getAuthGuardsSnapshotCore = pickFn(GuardsApi, "getAuthGuardsSnapshot");
+function extractUserSlug(user = null) {
+  if (!isObject(user)) return "";
 
-const activateAccountCore = pickFn(ActivationApi, "activateAccount", "activate");
-const validateActivationTokenCore = pickFn(ActivationApi, "validateActivationToken");
+  return normalizeSlug(
+    user.slug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      ""
+  );
+}
 
-const requestPasswordResetCore = pickFn(PasswordResetApi, "requestPasswordReset");
-const confirmResetPasswordCore = pickFn(
-  PasswordResetApi,
-  "confirmResetPassword",
-  "confirmPasswordReset"
-);
-const validateResetPasswordTokenCore = pickFn(PasswordResetApi, "validateResetPasswordToken");
+function buildUserHomePathFromSlug(slug = "") {
+  const clean = normalizeSlug(slug);
+  return clean ? `${AUTH_HOME.userPrefix}${clean}` : AUTH_HOME.canonical;
+}
+
+function buildUserHomePath(user = null) {
+  return buildUserHomePathFromSlug(extractUserSlug(user));
+}
+
+function getUserSlug() {
+  const user = getUser();
+
+  return extractUserSlug(user);
+}
+
+function getDefaultHome() {
+  return buildUserHomePath(getUser());
+}
+
+function getPostLoginTarget() {
+  return getDefaultHome();
+}
+
+function isUserHomePath(path = "") {
+  const value = normalizePath(path);
+  return /^\/@[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(value);
+}
 
 /* =========================================================
-   TOKEN / USER
+   USER / TOKEN
 ========================================================= */
+
+function userDisabled(user = null) {
+  return (
+    !isObject(user) ||
+    user.disabled === true ||
+    user.deleted === true ||
+    String(user.status || user.estado || "").toLowerCase() === "disabled" ||
+    String(user.status || user.estado || "").toLowerCase() === "deleted"
+  );
+}
+
+function userOk(user = null) {
+  if (userDisabled(user)) return false;
+
+  return Boolean(
+    user.id ||
+      user.userId ||
+      user.username ||
+      user.slug ||
+      user.email
+  );
+}
+
+function normalizeUser(user = null) {
+  if (!userOk(user)) return null;
+
+  const id = user.userId || user.id || null;
+  const slug = extractUserSlug(user);
+
+  const username =
+    user.username ||
+    user.userName ||
+    user.user_name ||
+    slug ||
+    user.email ||
+    id ||
+    null;
+
+  const displayName =
+    user.displayName ||
+    user.fullName ||
+    user.name ||
+    user.nombre ||
+    username ||
+    user.email ||
+    id ||
+    "Usuario";
+
+  const role = cleanRole(user.role || user.rol);
+
+  return {
+    ...user,
+
+    id,
+    userId: user.userId || id,
+
+    username,
+    slug: slug || null,
+
+    name: user.name || displayName,
+    fullName: user.fullName || displayName,
+    displayName,
+
+    email: user.email || null,
+
+    role,
+    rol: role,
+    roles: [role],
+
+    active: true,
+    disabled: false,
+  };
+}
 
 function getToken() {
   const value =
@@ -288,7 +318,9 @@ function getRoles() {
   const fromSession = sessionGetCurrentRoles?.();
 
   if (Array.isArray(fromSession) && fromSession.length) {
-    return fromSession.map(cleanRole).filter((role) => VALID_ROLES.includes(role));
+    return fromSession
+      .map(cleanRole)
+      .filter((role) => VALID_ROLES.includes(role));
   }
 
   const role = getRole();
@@ -327,6 +359,47 @@ function requireRole(role = "") {
 function getPermissions() {
   return [];
 }
+
+/* =========================================================
+   DELEGATES
+========================================================= */
+
+const loginCore = pickFn(LoginApi, "login", "default");
+const handleLoginFormSubmitCore = pickFn(LoginApi, "handleLoginFormSubmit");
+
+const restoreSessionCore = pickFn(RestoreApi, "restoreSession", "restore", "default");
+const logoutCore = pickFn(LogoutApi, "logout", "default");
+
+const sessionApplySession = pickFn(SessionApi, "applySession");
+const sessionClearSession = pickFn(SessionApi, "clearSessionLocal", "clearSession");
+const sessionBuildSnapshot = pickFn(SessionApi, "buildSessionSnapshot");
+const sessionIsAuthenticated = pickFn(SessionApi, "isAuthenticated");
+const sessionGetCurrentUser = pickFn(SessionApi, "getCurrentUser");
+const sessionGetCurrentToken = pickFn(SessionApi, "getCurrentToken");
+const sessionGetCurrentRole = pickFn(SessionApi, "getCurrentRole");
+const sessionGetCurrentRoles = pickFn(SessionApi, "getCurrentRoles");
+const sessionGetAuthHeader = pickFn(SessionApi, "getAuthHeader");
+const sessionDebugSnapshot = pickFn(SessionApi, "getSessionDebugSnapshot");
+
+const guardAuthenticatedCore = pickFn(GuardsApi, "guardAuthenticated", "requireAuth");
+const guardGuestCore = pickFn(GuardsApi, "guardGuest", "requireGuest");
+const guardRoleCore = pickFn(GuardsApi, "guardRole", "requireRole");
+const guardAdminCore = pickFn(GuardsApi, "guardAdmin", "requireAdmin");
+const canAccessRouteCore = pickFn(GuardsApi, "canAccessRoute", "canAccess");
+const syncAuthStateCore = pickFn(GuardsApi, "syncAuthState");
+const buildGuardErrorPayloadCore = pickFn(GuardsApi, "buildGuardErrorPayload");
+const getAuthGuardsSnapshotCore = pickFn(GuardsApi, "getAuthGuardsSnapshot");
+
+const activateAccountCore = pickFn(ActivationApi, "activateAccount", "activate");
+const validateActivationTokenCore = pickFn(ActivationApi, "validateActivationToken");
+
+const requestPasswordResetCore = pickFn(PasswordResetApi, "requestPasswordReset");
+const confirmResetPasswordCore = pickFn(
+  PasswordResetApi,
+  "confirmResetPassword",
+  "confirmPasswordReset"
+);
+const validateResetPasswordTokenCore = pickFn(PasswordResetApi, "validateResetPasswordToken");
 
 /* =========================================================
    PAYLOAD
@@ -378,6 +451,8 @@ function normalizeAuthPayload(payload = {}) {
   const token = extractToken(payload) || getToken();
   const cleanToken = tokenOk(token) ? stripBearer(token) : null;
   const user = normalizeUser(extractUser(payload) || getUser());
+  const slug = extractUserSlug(user);
+  const homePath = buildUserHomePath(user);
 
   return {
     ...payload,
@@ -387,6 +462,12 @@ function normalizeAuthPayload(payload = {}) {
     access_token: cleanToken,
 
     user,
+    currentUser: user,
+
+    userSlug: slug || null,
+    homePath,
+    defaultHome: homePath,
+    postLoginTarget: homePath,
 
     role: user?.role || null,
     rol: user?.role || null,
@@ -444,15 +525,27 @@ function clearHttpToken() {
 function syncAuthState() {
   try {
     if (isFn(syncAuthStateCore)) {
-      return syncAuthStateCore();
+      const synced = syncAuthStateCore();
+
+      patchAuthStateFromCurrentSession();
+
+      return synced;
     }
   } catch {
     // fallback abajo
   }
 
+  patchAuthStateFromCurrentSession();
+
+  return true;
+}
+
+function patchAuthStateFromCurrentSession() {
   const user = getUser();
   const token = getToken();
   const role = user ? getRole() : "";
+  const slug = extractUserSlug(user);
+  const homePath = user ? buildUserHomePath(user) : AUTH_HOME.canonical;
 
   try {
     AppCore?.setState?.(
@@ -463,6 +556,10 @@ function syncAuthState() {
 
         user,
         currentUser: user,
+
+        userSlug: slug || null,
+        homePath,
+        defaultHome: homePath,
 
         authenticated: Boolean(token && user),
         hasToken: Boolean(token),
@@ -481,7 +578,27 @@ function syncAuthState() {
       }
     );
   } catch {
-    // noop
+    try {
+      Object.assign(state(), {
+        token,
+        accessToken: token,
+        access_token: token,
+        user,
+        currentUser: user,
+        userSlug: slug || null,
+        homePath,
+        defaultHome: homePath,
+        authenticated: Boolean(token && user),
+        hasToken: Boolean(token),
+        role: role || null,
+        rol: role || null,
+        roles: role ? [role] : [],
+        isAdmin: role === "admin",
+        isUser: role === "user",
+      });
+    } catch {
+      // noop
+    }
   }
 
   return true;
@@ -514,10 +631,18 @@ function applySession(payload = {}, options = {}) {
   syncHttpToken(normalized.token || getToken(), normalized);
   syncAuthState();
 
+  const user = getUser();
+  const homePath = buildUserHomePath(user);
+
   return {
     ...normalized,
     authenticated: isAuthenticated(),
-    user: getUser(),
+    user,
+    currentUser: user,
+    userSlug: extractUserSlug(user) || null,
+    homePath,
+    defaultHome: homePath,
+    postLoginTarget: homePath,
     role: getRole() || null,
     roles: getRoles(),
   };
@@ -540,13 +665,22 @@ function clearSession(options = {}) {
           token: null,
           accessToken: null,
           access_token: null,
+
           user: null,
           currentUser: null,
+
+          userSlug: null,
+          homePath: AUTH_HOME.canonical,
+          defaultHome: AUTH_HOME.canonical,
+          postLoginTarget: null,
+
           authenticated: false,
           hasToken: false,
+
           role: null,
           rol: null,
           roles: [],
+
           isAdmin: false,
           isUser: false,
         },
@@ -655,6 +789,9 @@ async function login(credentials = {}, options = {}) {
           authenticated: true,
           user: result.user,
           role: result.role,
+          userSlug: result.userSlug || null,
+          homePath: result.homePath,
+          postLoginTarget: result.postLoginTarget,
         });
       }
 
@@ -681,12 +818,24 @@ async function login(credentials = {}, options = {}) {
 
 async function handleLoginFormSubmit(form, options = {}) {
   if (isFn(handleLoginFormSubmitCore)) {
-    return handleLoginFormSubmitCore(form, {
+    const raw = await handleLoginFormSubmitCore(form, {
       ...options,
       skipNavigation: true,
       skipRedirect: true,
       noRedirect: true,
     });
+
+    if (isObject(raw)) {
+      const normalized = normalizeAuthPayload(raw);
+
+      if (normalized.authenticated) {
+        return applySession(normalized, {
+          source: "Auth.handleLoginFormSubmit",
+        });
+      }
+    }
+
+    return raw;
   }
 
   if (!isBrowser() || !(form instanceof HTMLFormElement)) {
@@ -886,7 +1035,9 @@ function getCurrentPublicPath() {
 }
 
 function getCurrentCanonicalPath(path = getCurrentPublicPath()) {
-  return normalizePath(path);
+  const normalized = normalizePath(path);
+
+  return isUserHomePath(normalized) ? AUTH_HOME.canonical : normalized;
 }
 
 function isAuthRoute(path = getCurrentPublicPath()) {
@@ -922,6 +1073,9 @@ function getCurrentRouteContext() {
     publicPath,
     canonicalPath,
     route: canonicalPath,
+
+    isUserHomeRoute: isUserHomePath(publicPath),
+
     isAuthRoute: isAuthRoute(canonicalPath),
     isPublicTechnicalRoute: isPublicTechnicalRoute(canonicalPath),
     isActivationRoute: isActivationRoute(canonicalPath),
@@ -955,7 +1109,7 @@ function guardGuest(...args) {
     ? {
         ok: false,
         allowed: false,
-        redirectTo: "/",
+        redirectTo: getDefaultHome(),
         code: "GUEST_ONLY",
       }
     : { ok: true, allowed: true };
@@ -1106,11 +1260,17 @@ function buildSessionSnapshotSafe() {
     // fallback abajo
   }
 
+  const user = getUser();
+  const homePath = buildUserHomePath(user);
+
   return {
     authenticated: isAuthenticated(),
     hasToken: hasValidToken(),
-    hasUser: Boolean(getUser()),
-    user: getUser(),
+    hasUser: Boolean(user),
+    user,
+    userSlug: extractUserSlug(user) || null,
+    homePath,
+    defaultHome: homePath,
     role: getRole(),
     roles: getRoles(),
   };
@@ -1128,6 +1288,8 @@ function getSessionDebugSnapshotSafe() {
 
 function getAuthModuleSnapshot() {
   const user = getUser();
+  const slug = extractUserSlug(user);
+  const homePath = buildUserHomePath(user);
 
   return {
     version: AUTH_MODULE_VERSION,
@@ -1141,10 +1303,16 @@ function getAuthModuleSnapshot() {
           id: user.id || user.userId || null,
           userId: user.userId || user.id || null,
           username: user.username || null,
+          slug: slug || null,
           displayName: user.displayName || user.name || user.username || null,
           role: user.role || user.rol || null,
         }
       : null,
+
+    userSlug: slug || null,
+    homePath,
+    defaultHome: homePath,
+    postLoginTarget: getPostLoginTarget(),
 
     role: getRole() || null,
     roles: getRoles(),
@@ -1197,6 +1365,7 @@ export const Auth = {
 
   AUTH_ENDPOINTS,
   AUTH_ROUTES,
+  AUTH_HOME,
 
   session: {
     loggingIn: false,
@@ -1247,6 +1416,15 @@ export const Auth = {
 
   hasRole,
   requireRole,
+
+  normalizeSlug,
+  extractUserSlug,
+  getUserSlug,
+  buildUserHomePath,
+  buildUserHomePathFromSlug,
+  getDefaultHome,
+  getPostLoginTarget,
+  isUserHomePath,
 
   login,
   logout,

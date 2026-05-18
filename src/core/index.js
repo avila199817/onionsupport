@@ -9,32 +9,32 @@
    - Registry mínimo de módulos.
    - Cleanup mínimo.
    - Hooks mínimos.
-   - HTTP único mínimo.
+   - Instalar HTTP único desde core/http.js.
    - Auth estricta: token + user usable.
-   - User inválido sólo si disabled.
+   - User inválido si disabled/deleted/archived/active=false.
    - Roles únicos: admin / user.
+   - Home visible de usuario: /@{user.slug}.
    - Sin storage.
    - Sin DOM cache complejo.
    - Sin network listeners.
+   - Sin fetch propio.
+   - Sin cliente HTTP paralelo.
    - Sin framework interno.
    - Sin magia negra.
 ========================================================= */
 
 import { config } from "./config.js";
+import Http, { installHttp } from "./http.js";
 
-export const CORE_VERSION = "simple";
-
-const API_BASE =
-  config?.apiBase ||
-  config?.apiBaseUrl ||
-  config?.api?.baseUrl ||
-  config?.api?.baseURL ||
-  "https://api.onionit.net";
+export const CORE_VERSION = "core.index.v2";
 
 const APP_NAME =
   config?.appName ||
   config?.name ||
   "Onion Support";
+
+const HOME_PATH = "/";
+const USER_HOME_PREFIX = "/@";
 
 /* =========================================================
    BASICS
@@ -69,8 +69,34 @@ function clone(value) {
   }
 }
 
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+/* =========================================================
+   AUTH NORMALIZATION
+========================================================= */
+
+function normalizeRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = String(value || "").toLowerCase();
+
+  return role === "admin" || role === "user" ? role : "";
+}
+
 function cleanRole(value = "") {
-  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+  return normalizeRole(value) || "user";
 }
 
 function tokenOk(value = "") {
@@ -78,88 +104,268 @@ function tokenOk(value = "") {
 
   if (!token) return false;
   if (/\s/.test(token)) return false;
+  if (token.length > 8192) return false;
 
-  if (
-    ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
-      token.toLowerCase()
-    )
-  ) {
-    return false;
-  }
-
-  return token.length >= 8;
+  return ![
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "[object object]",
+    "{}",
+    "[]",
+  ].includes(token.toLowerCase());
 }
 
-function userOk(user = null) {
-  if (!isObject(user)) return false;
-  if (user.disabled === true) return false;
+function cleanToken(value = "") {
+  const token = text(value, "").replace(/^Bearer\s+/i, "");
+  return tokenOk(token) ? token : null;
+}
 
-  const status = String(user.status || "").toLowerCase();
+function normalizeSlug(value = "") {
+  const slug = text(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
 
-  if (status === "disabled") return false;
+  if (!slug) return "";
 
-  return Boolean(
-    user.id ||
-      user.userId ||
-      user.username ||
-      user.email
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+function extractUserSlug(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeSlug(
+    user.slug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      ""
   );
 }
 
-function publicUser(user = null) {
-  if (!isObject(user)) return null;
+function buildUserHomePath(user = null) {
+  const slug = extractUserSlug(user);
+  return slug ? `${USER_HOME_PREFIX}${slug}` : HOME_PATH;
+}
 
-  const name =
-    user.name ||
-    user.fullName ||
-    user.displayName ||
-    user.nombre ||
-    user.username ||
-    user.email ||
-    null;
+function removeSensitiveUserFields(user = {}) {
+  const output = { ...user };
+
+  for (const key of [
+    "password",
+    "passwordHash",
+    "hash",
+    "salt",
+
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+
+    "resetToken",
+    "activationToken",
+
+    "otp",
+    "otpCode",
+    "mfa",
+    "twofa_secret",
+    "twofaSecret",
+    "totpSecret",
+    "backupCodes",
+  ]) {
+    try {
+      delete output[key];
+    } catch {
+      // noop
+    }
+  }
+
+  return output;
+}
+
+function userDisabled(user = null) {
+  if (!isObject(user)) return true;
+
+  const status = text(user.status || user.estado, "").toLowerCase();
+
+  return Boolean(
+    user.disabled === true ||
+      user.deleted === true ||
+      user.archived === true ||
+      user.active === false ||
+      status === "disabled" ||
+      status === "deleted" ||
+      status === "archived"
+  );
+}
+
+function hasUserIdentity(user = null) {
+  if (!isObject(user)) return false;
+
+  return Boolean(
+    text(user.id, "") ||
+      text(user.userId, "") ||
+      text(user.username, "") ||
+      text(user.slug, "") ||
+      text(user.lookup?.slug, "")
+  );
+}
+
+function userOk(user = null) {
+  return Boolean(
+    isObject(user) &&
+      !userDisabled(user) &&
+      hasUserIdentity(user)
+  );
+}
+
+function normalizeUser(user = null) {
+  if (!userOk(user)) return null;
+
+  const safeUser = removeSensitiveUserFields(user);
+  const id = text(safeUser.userId || safeUser.id, "");
+  const slug = extractUserSlug(safeUser);
+  const profile = isObject(safeUser.profile) ? safeUser.profile : {};
+
+  const username = text(
+    safeUser.username ||
+      safeUser.userName ||
+      safeUser.user_name ||
+      slug ||
+      id,
+    ""
+  );
+
+  const displayName = text(
+    safeUser.displayName ||
+      safeUser.fullName ||
+      safeUser.name ||
+      safeUser.nombre ||
+      profile.displayName ||
+      profile.fullName ||
+      profile.name ||
+      profile.nombre ||
+      username ||
+      id,
+    "Usuario"
+  );
+
+  const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
 
   return {
-    id: user.id || user.userId || null,
-    userId: user.userId || user.id || null,
-    username: user.username || user.slug || user.email || null,
-    displayName: name,
-    fullName: name,
-    role: cleanRole(user.role || user.rol),
-    hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
+    ...safeUser,
+
+    id: id || null,
+    userId: safeUser.userId || id || null,
+
+    username: username || null,
+    slug: slug || null,
+
+    name: safeUser.name || displayName,
+    fullName: safeUser.fullName || displayName,
+    displayName,
+
+    email: safeUser.email || null,
+
+    role,
+    rol: role,
+    roles: [role],
+
+    active: true,
+    disabled: false,
+
+    isAdmin: role === "admin",
+    isUser: role === "user",
   };
 }
 
-function redact(value = "") {
-  return String(value || "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+function publicUser(user = null) {
+  const normalized = normalizeUser(user);
+
+  if (!normalized) return null;
+
+  return {
+    id: normalized.id || normalized.userId || null,
+    userId: normalized.userId || normalized.id || null,
+    username: normalized.username || null,
+    slug: normalized.slug || null,
+    displayName: normalized.displayName || null,
+    role: normalized.role || null,
+    hasAvatar: Boolean(normalized.avatar || normalized.avatarUrl || normalized.picture),
+  };
 }
 
-function joinUrl(base = "", path = "") {
-  if (/^https?:\/\//i.test(path)) return path;
+/* =========================================================
+   PATHS
+========================================================= */
 
-  const root = String(base || "").replace(/\/+$/g, "");
-  const clean = String(path || "").replace(/^\/+/g, "");
+function normalizeHashPath(path = HOME_PATH) {
+  const value = text(path, HOME_PATH);
 
-  return `${root}/${clean}`;
+  if (value.startsWith("#!")) {
+    return value.replace(/^#!\/?/, "/") || HOME_PATH;
+  }
+
+  if (value.startsWith("#/")) {
+    return value.slice(1) || HOME_PATH;
+  }
+
+  return value;
 }
 
-function isFormData(value) {
-  return typeof FormData !== "undefined" && value instanceof FormData;
+function normalizePublicPath(path = HOME_PATH) {
+  let value = normalizeHashPath(path);
+
+  if (value.startsWith("//")) {
+    return HOME_PATH;
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    return HOME_PATH;
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  value = value.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+
+  return value || HOME_PATH;
 }
 
-function isUrlSearchParams(value) {
-  return typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams;
+function stripQueryHash(path = HOME_PATH) {
+  return normalizePublicPath(path).split("?")[0].split("#")[0] || HOME_PATH;
 }
 
-function buildBody(body, method = "GET") {
-  if (body === undefined || body === null) return undefined;
-  if (method === "GET" || method === "HEAD") return undefined;
-  if (isFormData(body)) return body;
-  if (isUrlSearchParams(body)) return body;
-  if (typeof body === "string") return body;
+function extractUserHomeSlug(path = HOME_PATH) {
+  const value = stripQueryHash(path);
 
-  return JSON.stringify(body);
+  if (!value.startsWith(USER_HOME_PREFIX)) return "";
+
+  const slug = value.slice(USER_HOME_PREFIX.length);
+
+  if (!slug || slug.includes("/")) return "";
+
+  return normalizeSlug(slug);
+}
+
+function isUserHomePath(path = HOME_PATH) {
+  return Boolean(extractUserHomeSlug(path));
+}
+
+function normalizeCanonicalPath(path = HOME_PATH) {
+  let value = stripQueryHash(path);
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || HOME_PATH;
+  }
+
+  return isUserHomePath(value) ? HOME_PATH : value;
 }
 
 /* =========================================================
@@ -442,12 +648,12 @@ const registry = {
 ========================================================= */
 
 const initialLang = isBrowser()
-  ? document.documentElement.lang || "en"
-  : "en";
+  ? document.documentElement.lang || "es"
+  : "es";
 
 const initialLocale = isBrowser()
-  ? document.documentElement.dataset.locale || initialLang
-  : "en";
+  ? document.documentElement.dataset.locale || initialLang || "es"
+  : "es";
 
 const initialTheme = isBrowser()
   ? document.documentElement.dataset.theme || "system"
@@ -459,22 +665,34 @@ const state = {
   booting: false,
   loading: false,
 
-  route: "/",
-  canonicalPath: "/",
-  publicPath: "/",
+  route: HOME_PATH,
+  canonicalPath: HOME_PATH,
+  publicPath: HOME_PATH,
+  routeParams: {},
 
   token: null,
   accessToken: null,
   access_token: null,
 
+  refreshToken: null,
+  refresh_token: null,
+
   user: null,
   currentUser: null,
+  authUser: null,
+  sessionUser: null,
 
   authenticated: false,
   hasToken: false,
 
+  userSlug: null,
+  homePath: HOME_PATH,
+  defaultHome: HOME_PATH,
+  postLoginTarget: null,
+
   role: null,
   rol: null,
+  userRole: null,
   roles: [],
 
   isAdmin: false,
@@ -482,6 +700,12 @@ const state = {
   isSupport: false,
   isManager: false,
   isClient: false,
+
+  shellVisible: true,
+  shellHidden: false,
+  chromeVisible: true,
+  chromeHidden: false,
+  routeMode: "boot",
 
   sidebarOpen: false,
 
@@ -506,41 +730,45 @@ let httpClient = null;
 ========================================================= */
 
 function syncAuth() {
-  const rawToken = state.token || state.accessToken || state.access_token;
-  const token = tokenOk(rawToken)
-    ? String(rawToken).replace(/^Bearer\s+/i, "")
-    : null;
+  const token = cleanToken(state.token || state.accessToken || state.access_token);
 
-  const rawUser = state.user || state.currentUser;
-  const user = userOk(rawUser) ? rawUser : null;
+  const user = normalizeUser(
+    state.user ||
+      state.currentUser ||
+      state.authUser ||
+      state.sessionUser ||
+      state.session?.user ||
+      state.sessionData?.user ||
+      null
+  );
+
+  const authenticated = Boolean(token && user);
+  const role = authenticated ? cleanRole(user.role || user.rol || user.roles || state.role) : null;
+  const slug = authenticated ? extractUserSlug(user) : "";
+  const homePath = authenticated ? buildUserHomePath(user) : HOME_PATH;
 
   state.token = token;
   state.accessToken = token;
   state.access_token = token;
 
-  state.user = user;
-  state.currentUser = user;
+  state.user = authenticated ? user : null;
+  state.currentUser = authenticated ? user : null;
 
   state.hasToken = Boolean(token);
-  state.authenticated = Boolean(token && user);
+  state.authenticated = authenticated;
 
-  if (state.authenticated) {
-    const role = cleanRole(user.role || user.rol || state.role);
+  state.userSlug = authenticated ? slug || null : null;
+  state.homePath = homePath;
+  state.defaultHome = homePath;
+  state.postLoginTarget = authenticated ? homePath : null;
 
-    state.role = role;
-    state.rol = role;
-    state.roles = [role];
+  state.role = role;
+  state.rol = role;
+  state.userRole = role;
+  state.roles = authenticated && role ? [role] : [];
 
-    state.isAdmin = role === "admin";
-    state.isUser = role === "user";
-  } else {
-    state.role = null;
-    state.rol = null;
-    state.roles = [];
-
-    state.isAdmin = false;
-    state.isUser = false;
-  }
+  state.isAdmin = role === "admin";
+  state.isUser = role === "user";
 
   state.isSupport = false;
   state.isManager = false;
@@ -557,14 +785,31 @@ function getState(options = {}) {
 function setState(patch = {}, options = {}) {
   if (isObject(patch)) {
     Object.assign(state, patch);
+
+    if (patch.user === null) {
+      state.currentUser = null;
+      state.authUser = null;
+      state.sessionUser = null;
+    }
+
+    if (patch.currentUser === null) {
+      state.user = null;
+      state.authUser = null;
+      state.sessionUser = null;
+    }
   }
 
   if (options.forceUnauthenticated === true) {
     state.token = null;
     state.accessToken = null;
     state.access_token = null;
+    state.refreshToken = null;
+    state.refresh_token = null;
+
     state.user = null;
     state.currentUser = null;
+    state.authUser = null;
+    state.sessionUser = null;
   }
 
   syncAuth();
@@ -599,8 +844,22 @@ function getCurrentRole() {
 }
 
 function hasRole(roleOrRoles = []) {
-  const roles = Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles];
-  return roles.map(cleanRole).includes(getCurrentRole());
+  syncAuth();
+
+  if (!state.authenticated) return false;
+
+  const requested = Array.isArray(roleOrRoles)
+    ? roleOrRoles.flat(Infinity)
+    : [roleOrRoles];
+
+  if (!requested.length) return true;
+
+  const required = requested.map(normalizeRole).filter(Boolean);
+
+  if (!required.length) return false;
+  if (state.role === "admin") return true;
+
+  return required.includes(state.role);
 }
 
 function getAuthHeader() {
@@ -617,17 +876,8 @@ function getAuthHeader() {
    STATE WRAPPERS
 ========================================================= */
 
-function normalizeRoutePath(route = "/") {
-  let path = String(route || "/").split("?")[0].split("#")[0] || "/";
-
-  if (!path.startsWith("/")) path = `/${path}`;
-  if (path.length > 1) path = path.replace(/\/+$/g, "") || "/";
-
-  return path;
-}
-
-function setRoute(route = "/", options = {}) {
-  const path = normalizeRoutePath(route);
+function setRoute(route = HOME_PATH, options = {}) {
+  const path = normalizeCanonicalPath(route);
 
   setState(
     {
@@ -643,15 +893,15 @@ function setRoute(route = "/", options = {}) {
   return path;
 }
 
-function setPublicPath(path = "/", options = {}) {
-  const publicPath = String(path || "/");
-  const route = normalizeRoutePath(publicPath);
+function setPublicPath(path = HOME_PATH, options = {}) {
+  const publicPath = normalizePublicPath(path);
+  const canonicalPath = normalizeCanonicalPath(publicPath);
 
   setState(
     {
       publicPath,
-      route,
-      canonicalPath: route,
+      route: canonicalPath,
+      canonicalPath,
     },
     {
       source: options.source || "core:setPublicPath",
@@ -663,7 +913,7 @@ function setPublicPath(path = "/", options = {}) {
 }
 
 function setUser(user = null, options = {}) {
-  const cleanUser = userOk(user) ? user : null;
+  const cleanUser = normalizeUser(user);
 
   setState(
     {
@@ -681,20 +931,18 @@ function setUser(user = null, options = {}) {
 }
 
 function setToken(token = null, options = {}) {
-  const cleanToken = tokenOk(token)
-    ? String(token).replace(/^Bearer\s+/i, "")
-    : null;
+  const clean = cleanToken(token);
 
   setState(
     {
-      token: cleanToken,
-      accessToken: cleanToken,
-      access_token: cleanToken,
+      token: clean,
+      accessToken: clean,
+      access_token: clean,
     },
     {
       source: options.source || "core:setToken",
       silent: options.silent,
-      forceUnauthenticated: !cleanToken,
+      forceUnauthenticated: !clean,
     }
   );
 
@@ -706,10 +954,12 @@ function pick(payload = {}, names = []) {
     const value =
       payload?.[name] ??
       payload?.data?.[name] ??
+      payload?.payload?.[name] ??
       payload?.auth?.[name] ??
-      payload?.session?.[name];
+      payload?.session?.[name] ??
+      payload?.sessionData?.[name];
 
-    if (value !== undefined && value !== null) {
+    if (value !== undefined && value !== null && value !== "") {
       return value;
     }
   }
@@ -723,17 +973,14 @@ function applySession(payload = {}, options = {}) {
     pick(payload, ["user", "usuario", "me", "account", "profile"]) ||
     (userOk(payload) ? payload : null);
 
-  const cleanToken = tokenOk(token)
-    ? String(token).replace(/^Bearer\s+/i, "")
-    : state.token;
-
-  const cleanUser = userOk(user) ? user : state.user;
+  const clean = cleanToken(token) || state.token;
+  const cleanUser = normalizeUser(user) || state.user;
 
   setState(
     {
-      token: cleanToken,
-      accessToken: cleanToken,
-      access_token: cleanToken,
+      token: clean,
+      accessToken: clean,
+      access_token: clean,
       user: cleanUser,
       currentUser: cleanUser,
     },
@@ -747,6 +994,9 @@ function applySession(payload = {}, options = {}) {
     token: state.token,
     user: state.user,
     authenticated: state.authenticated,
+    homePath: state.homePath,
+    defaultHome: state.defaultHome,
+    postLoginTarget: state.postLoginTarget,
   };
 }
 
@@ -756,15 +1006,25 @@ function clearSession(options = {}) {
       token: null,
       accessToken: null,
       access_token: null,
+      refreshToken: null,
+      refresh_token: null,
 
       user: null,
       currentUser: null,
+      authUser: null,
+      sessionUser: null,
 
       authenticated: false,
       hasToken: false,
 
+      userSlug: null,
+      homePath: HOME_PATH,
+      defaultHome: HOME_PATH,
+      postLoginTarget: null,
+
       role: null,
       rol: null,
+      userRole: null,
       roles: [],
 
       isAdmin: false,
@@ -798,8 +1058,8 @@ function setTheme(theme = "system") {
   return value;
 }
 
-function setLang(lang = "en") {
-  const value = ["ca", "es", "en"].includes(lang) ? lang : "en";
+function setLang(lang = "es") {
+  const value = ["es", "ca", "en"].includes(lang) ? lang : "es";
 
   state.lang = value;
   state.language = value;
@@ -924,8 +1184,19 @@ function getBridge(name = "") {
    NAVIGATION COMPAT
 ========================================================= */
 
-async function navigate(path = "/", options = {}) {
-  const target = String(path || "/");
+function safeInternalPath(path = HOME_PATH) {
+  const target = normalizePublicPath(path);
+
+  if (!target.startsWith("/")) return HOME_PATH;
+  if (target.startsWith("//")) return HOME_PATH;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return HOME_PATH;
+  if (/[\r\n\t\\]/.test(target)) return HOME_PATH;
+
+  return target;
+}
+
+async function navigate(path = HOME_PATH, options = {}) {
+  const target = safeInternalPath(path || HOME_PATH);
 
   try {
     const router = getBridge("Router");
@@ -935,6 +1206,7 @@ async function navigate(path = "/", options = {}) {
         source: options.source || "core:navigate",
         ...options,
       });
+
       return true;
     }
 
@@ -943,6 +1215,7 @@ async function navigate(path = "/", options = {}) {
         source: options.source || "core:navigate",
         ...options,
       });
+
       return true;
     }
   } catch {
@@ -963,133 +1236,11 @@ async function navigate(path = "/", options = {}) {
    HTTP
 ========================================================= */
 
-async function request(url = "", options = {}) {
-  const fetchFn = isBrowser()
-    ? window.fetch?.bind(window)
-    : typeof globalThis !== "undefined"
-      ? globalThis.fetch?.bind(globalThis)
-      : null;
-
-  if (!isFn(fetchFn)) {
-    throw new Error("Fetch API no disponible.");
-  }
-
-  const method = text(options.method, "GET").toUpperCase();
-  const finalUrl = /^https?:\/\//i.test(url) ? url : joinUrl(API_BASE, url);
-
-  const publicRequest =
-    options.public === true ||
-    options.auth === false ||
-    options.skipAuth === true;
-
-  const body = buildBody(options.body, method);
-
-  const headers = {
-    Accept: "application/json",
-    ...(body && !isFormData(options.body) && !isUrlSearchParams(options.body)
-      ? { "Content-Type": "application/json" }
-      : {}),
-    ...(publicRequest ? {} : getAuthHeader()),
-    ...(options.headers || {}),
-  };
-
-  const response = await fetchFn(finalUrl, {
-    method,
-    headers,
-    credentials: options.credentials || "include",
-    cache: options.cache || "default",
-    body,
-  });
-
-  const contentType = response.headers.get("content-type") || "";
-
-  const data = contentType.includes("application/json")
-    ? await response.json().catch(() => null)
-    : await response.text().catch(() => "");
-
-  if (!response.ok) {
-    const error = new Error(
-      data?.message ||
-        data?.error ||
-        response.statusText ||
-        `HTTP ${response.status}`
-    );
-
-    error.status = response.status;
-    error.statusCode = response.status;
-    error.data = data;
-
-    throw error;
-  }
-
-  return data;
-}
-
-function createHttpClient() {
-  return {
-    request,
-
-    get: (url, options = {}) =>
-      request(url, { ...options, method: "GET" }),
-
-    post: (url, body = undefined, options = {}) =>
-      request(url, { ...options, method: "POST", body }),
-
-    put: (url, body = undefined, options = {}) =>
-      request(url, { ...options, method: "PUT", body }),
-
-    patch: (url, body = undefined, options = {}) =>
-      request(url, { ...options, method: "PATCH", body }),
-
-    delete: (url, options = {}) =>
-      request(url, { ...options, method: "DELETE" }),
-
-    del: (url, options = {}) =>
-      request(url, { ...options, method: "DELETE" }),
-
-    login: (body = {}, options = {}) =>
-      request("/api/auth/login", {
-        ...options,
-        method: "POST",
-        body,
-        public: true,
-        auth: false,
-        skipAuth: true,
-      }),
-
-    refresh: (body = {}, options = {}) =>
-      request("/api/auth/refresh", {
-        ...options,
-        method: "POST",
-        body,
-        public: true,
-        auth: false,
-        skipAuth: true,
-      }),
-
-    me: (options = {}) =>
-      request("/api/auth/me", {
-        ...options,
-        method: "GET",
-      }),
-
-    logout: (body = {}, options = {}) =>
-      request("/api/auth/logout", {
-        ...options,
-        method: "POST",
-        body,
-      }),
-
-    getSnapshot: () => ({
-      version: "simple-http",
-      apiBase: API_BASE,
-    }),
-  };
-}
-
-function installHttpBridge() {
+function installHttpBridge(options = {}) {
   if (!httpClient) {
-    httpClient = createHttpClient();
+    httpClient = isFn(installHttp)
+      ? installHttp(AppCore, options)
+      : Http;
   }
 
   services.http = httpClient;
@@ -1114,6 +1265,10 @@ function getActiveApiClient() {
   return getHttpClient();
 }
 
+function request(...args) {
+  return getHttpClient().request(...args);
+}
+
 /* =========================================================
    LIFECYCLE
 ========================================================= */
@@ -1134,7 +1289,7 @@ function ready(fn) {
   };
 }
 
-async function init() {
+async function init(options = {}) {
   if (initialized) return AppCore;
   if (initPromise) return initPromise;
 
@@ -1143,7 +1298,7 @@ async function init() {
       state.booting = true;
       state.ready = false;
 
-      installHttpBridge();
+      installHttpBridge(options);
 
       initialized = true;
 
@@ -1173,6 +1328,8 @@ function rebootCore() {
 
   cleanup.run();
 
+  httpClient = null;
+
   return init();
 }
 
@@ -1189,17 +1346,40 @@ function getSnapshot() {
     authenticated: Boolean(state.authenticated),
     hasToken: Boolean(state.hasToken),
 
-    user: publicUser(state.user),
-    role: state.role,
+    token: null,
+    accessToken: null,
+    refreshToken: null,
 
-    route: redact(state.route || "/"),
-    publicPath: redact(state.publicPath || "/"),
+    user: publicUser(state.user),
+
+    userSlug: state.userSlug || null,
+    homePath: state.homePath || HOME_PATH,
+    defaultHome: state.defaultHome || state.homePath || HOME_PATH,
+
+    role: state.role,
+    roles: state.roles,
+
+    route: redact(state.route || HOME_PATH),
+    canonicalPath: redact(state.canonicalPath || HOME_PATH),
+    publicPath: redact(state.publicPath || HOME_PATH),
 
     lang: state.lang,
+    locale: state.locale,
     theme: state.theme,
 
     hasHttp: Boolean(httpClient),
     modules: modules.list(),
+
+    policy: {
+      memoryStateOnly: true,
+      noStorage: true,
+      noFetchOwn: true,
+      httpFacadeOnly: true,
+      roles: ["admin", "user"],
+      userSlugHome: true,
+      noEmailIdentity: true,
+      no2fa: true,
+    },
   };
 }
 
@@ -1286,24 +1466,20 @@ export const AppCore = {
   request,
   apiClient: null,
 
+  normalizeUser,
+  normalizeSlug,
+  extractUserSlug,
+  buildUserHomePath,
+
   getSnapshot,
   getDebugSnapshot: getSnapshot,
   snapshot: getSnapshot,
 
-  normalizeUser: (user) => user,
-
   getUserDisplayName: (user) =>
-    user?.name ||
-    user?.fullName ||
-    user?.displayName ||
-    user?.username ||
-    "",
+    normalizeUser(user)?.displayName || "",
 
   getUserUsername: (user) =>
-    user?.username ||
-    user?.slug ||
-    user?.email ||
-    "",
+    normalizeUser(user)?.username || "",
 
   getUserAvatarUrl: (user) =>
     user?.avatarUrl ||

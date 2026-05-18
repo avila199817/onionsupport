@@ -16,32 +16,11 @@
    - Sin rutas inventadas.
    - Sin /403.
    - Sin 2FA/MFA/OTP.
+   - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-
-import {
-  getCurrentCanonicalPath,
-  getCurrentPublicPath,
-  normalizeCanonicalPath,
-  normalizePublicPath,
-  extractMessage,
-  redactTokenInText,
-} from "./helpers.js";
-
-import {
-  AUTH_PUBLIC_TECHNICAL_ROUTES,
-} from "./constants.js";
-
-import {
-  isAuthenticated as sessionIsAuthenticated,
-  getCurrentUser as sessionGetCurrentUser,
-  getCurrentToken as sessionGetCurrentToken,
-  getCurrentRole as sessionGetCurrentRole,
-  getCurrentRoles as sessionGetCurrentRoles,
-  isCurrentUserAdmin as sessionIsCurrentUserAdmin,
-  getAuthHeader as sessionGetAuthHeader,
-} from "./session.js";
+import * as Session from "./session.js";
 
 export const GUARDS_VERSION = "simple";
 
@@ -51,10 +30,9 @@ const HOME_PATH = "/";
 
 const PUBLIC_ROUTES = Object.freeze([
   "/login",
-  "/password-reset",
   "/password-request",
+  "/password-reset",
   "/activate-account",
-  ...AUTH_PUBLIC_TECHNICAL_ROUTES,
 ]);
 
 /* =========================================================
@@ -63,6 +41,10 @@ const PUBLIC_ROUTES = Object.freeze([
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function text(value = "", fallback = "") {
@@ -92,7 +74,7 @@ function commitState(patch = {}) {
       emit: false,
     });
   } catch {
-    // noop
+    // fallback abajo
   }
 
   try {
@@ -105,18 +87,19 @@ function commitState(patch = {}) {
 }
 
 function redact(value = "") {
-  try {
-    return redactTokenInText(value);
-  } catch {
-    return text(value, "").replace(/([?&#]token=)([^&#\s]+)/gi, "$1***");
-  }
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function emit(eventName = "", payload = {}, options = {}) {
   if (options.emitEvents !== true && options.debug !== true) return false;
 
+  const name = text(eventName, "");
+  if (!name) return false;
+
   try {
-    AppCore?.events?.emit?.(eventName, {
+    AppCore?.events?.emit?.(name, {
       source: SOURCE,
       version: GUARDS_VERSION,
       at: nowIso(),
@@ -136,44 +119,49 @@ function emit(eventName = "", payload = {}, options = {}) {
    ROUTES
 ========================================================= */
 
-function canonical(path = "") {
-  try {
-    return normalizeCanonicalPath(path || "/");
-  } catch {
-    return text(path, "/").split("?")[0].split("#")[0] || "/";
-  }
+function normalizePublicPath(path = "/") {
+  let value = text(path, "/");
+
+  if (value.startsWith("#/")) value = value.slice(1);
+  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+
+  if (!value.startsWith("/")) value = `/${value}`;
+
+  return value || "/";
 }
 
-function publicPath(path = "") {
-  try {
-    return normalizePublicPath(path || "/");
-  } catch {
-    return text(path, "/") || "/";
-  }
-}
+function canonical(path = "/") {
+  let value = normalizePublicPath(path).split("?")[0].split("#")[0] || "/";
 
-function currentCanonicalPath() {
-  try {
-    return canonical(getCurrentCanonicalPath());
-  } catch {
-    return canonical(readState().route || "/");
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || "/";
   }
+
+  return value;
 }
 
 function currentPublicPath() {
-  try {
-    return publicPath(getCurrentPublicPath());
-  } catch {
-    return publicPath(readState().publicPath || readState().route || "/");
+  if (typeof window !== "undefined") {
+    return normalizePublicPath(
+      `${window.location.pathname}${window.location.search}${window.location.hash}`
+    );
   }
+
+  const state = readState();
+
+  return normalizePublicPath(state.publicPath || state.route || "/");
+}
+
+function currentCanonicalPath() {
+  const state = readState();
+
+  return canonical(state.canonicalPath || state.route || currentPublicPath());
 }
 
 function isPublicTechnicalPath(path = "") {
-  const clean = canonical(path).toLowerCase();
+  const clean = canonical(path);
 
-  return unique(PUBLIC_ROUTES).some((route) => {
-    return clean === canonical(route).toLowerCase();
-  });
+  return PUBLIC_ROUTES.includes(clean);
 }
 
 function isSafeInternalPath(path = "") {
@@ -189,7 +177,7 @@ function isSafeInternalPath(path = "") {
 }
 
 function safeRedirect(path = "", fallback = HOME_PATH) {
-  const candidate = publicPath(path || fallback);
+  const candidate = normalizePublicPath(path || fallback);
 
   return isSafeInternalPath(candidate) ? candidate : fallback;
 }
@@ -206,26 +194,86 @@ function loginRedirect(path = "") {
    SESSION
 ========================================================= */
 
-function tokenOk() {
-  return Boolean(sessionGetCurrentToken?.());
+function sessionAuthenticated() {
+  try {
+    if (isFunction(Session.isAuthenticated)) {
+      return Session.isAuthenticated() === true;
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  return Boolean(sessionToken() && sessionUser());
+}
+
+function sessionToken() {
+  try {
+    return text(Session.getCurrentToken?.(), "");
+  } catch {
+    return "";
+  }
+}
+
+function sessionUser() {
+  try {
+    return Session.getCurrentUser?.() || null;
+  } catch {
+    return null;
+  }
+}
+
+function cleanRole(role = "") {
+  return String(role || "").toLowerCase() === "admin" ? "admin" : "user";
+}
+
+function validRole(role = "") {
+  return role === "admin" || role === "user";
 }
 
 export function getCurrentUser() {
-  return sessionGetCurrentUser?.() || null;
-}
-
-export function getCurrentRoles() {
-  const roles = sessionGetCurrentRoles?.() || [];
-  return Array.isArray(roles) ? roles.filter((role) => role === "admin" || role === "user") : [];
+  return sessionAuthenticated() ? sessionUser() : null;
 }
 
 export function getCurrentRole() {
-  const role = sessionGetCurrentRole?.() || getCurrentRoles()[0] || "";
-  return role === "admin" || role === "user" ? role : "";
+  if (!sessionAuthenticated()) return "";
+
+  try {
+    const role = Session.getCurrentRole?.();
+    if (role === "admin" || role === "user") return role;
+  } catch {
+    // fallback abajo
+  }
+
+  const user = getCurrentUser();
+  const role = cleanRole(user?.role || user?.rol);
+
+  return validRole(role) ? role : "";
+}
+
+export function getCurrentRoles() {
+  if (!sessionAuthenticated()) return [];
+
+  try {
+    const roles = Session.getCurrentRoles?.();
+
+    if (Array.isArray(roles)) {
+      return unique(
+        roles
+          .map((role) => String(role || "").toLowerCase())
+          .filter(validRole)
+      );
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  const role = getCurrentRole();
+
+  return role ? [role] : [];
 }
 
 export function isCurrentUserAdmin() {
-  return Boolean(sessionIsCurrentUserAdmin?.() || getCurrentRole() === "admin");
+  return sessionAuthenticated() && getCurrentRole() === "admin";
 }
 
 export function isCurrentUserSupport() {
@@ -241,11 +289,11 @@ export function isCurrentUserClient() {
 }
 
 export function syncAuthState() {
-  const authenticated = Boolean(sessionIsAuthenticated?.());
+  const hasToken = Boolean(sessionToken());
+  const authenticated = sessionAuthenticated();
   const user = authenticated ? getCurrentUser() : null;
   const role = authenticated ? getCurrentRole() || "user" : "";
-  const roles = authenticated ? [role] : [];
-  const hasToken = tokenOk();
+  const roles = authenticated ? getCurrentRoles() : [];
 
   commitState({
     authenticated,
@@ -262,6 +310,7 @@ export function syncAuthState() {
     roles,
 
     isAdmin: authenticated && role === "admin",
+    isUser: authenticated && role === "user",
     isSupport: false,
     isManager: false,
     isClient: false,
@@ -280,7 +329,7 @@ function normalizeRequiredRoles(values = []) {
   return unique(
     raw
       .map((role) => String(role || "").toLowerCase())
-      .filter((role) => role === "admin" || role === "user")
+      .filter(validRole)
   );
 }
 
@@ -302,7 +351,11 @@ export function requireRole(...roles) {
 }
 
 export function getAuthHeader() {
-  return sessionGetAuthHeader?.() || {};
+  try {
+    return Session.getAuthHeader?.() || {};
+  } catch {
+    return {};
+  }
 }
 
 /* =========================================================
@@ -344,7 +397,7 @@ function blockedPayload(reason, path, redirectTo = "", extra = {}) {
     publicPath: redact(currentPublicPath()),
     redirectTo,
     authenticated: Boolean(readState().authenticated),
-    hasToken: tokenOk(),
+    hasToken: Boolean(sessionToken()),
     hasUser: Boolean(user),
     currentRole: getCurrentRole() || null,
     currentRoles: getCurrentRoles(),
@@ -365,7 +418,7 @@ export function guardAuthenticated(options = {}) {
     options.allowPublicTechnicalRoutes !== false &&
     (isPublicTechnicalPath(path) || isPublicTechnicalPath(visiblePath))
   ) {
-    emit("auth:guard:allowed", allowedPayload("public-technical-route", path), options);
+    emit("auth:guard:allowed", allowedPayload("public-route", path), options);
     return true;
   }
 
@@ -390,7 +443,7 @@ export function guardRole(roles = [], options = {}) {
     options.allowPublicTechnicalRoutes !== false &&
     (isPublicTechnicalPath(path) || isPublicTechnicalPath(visiblePath))
   ) {
-    emit("auth:guard:allowed", allowedPayload("public-technical-route", path), options);
+    emit("auth:guard:allowed", allowedPayload("public-route", path), options);
     return true;
   }
 
@@ -495,27 +548,30 @@ export function guardManager(options = {}) {
   return false;
 }
 
-export function canAccessRoute({
-  path = "",
-  roles = [],
-  requireAuth = true,
-  allowPublicTechnicalRoutes = true,
-} = {}) {
-  const cleanPath = canonical(path || currentCanonicalPath());
+export function canAccessRoute(route = {}) {
+  const path = canonical(route.path || route.publicPath || currentCanonicalPath());
   const visiblePath = currentPublicPath();
 
   if (
-    allowPublicTechnicalRoutes &&
-    (isPublicTechnicalPath(cleanPath) || isPublicTechnicalPath(visiblePath))
+    route.allowPublicTechnicalRoutes !== false &&
+    (isPublicTechnicalPath(path) || isPublicTechnicalPath(visiblePath))
   ) {
     return true;
   }
 
-  if (requireAuth !== false && !isAuthenticated()) {
+  if (route.public === true) return true;
+  if (route.guestOnly === true) return !isAuthenticated();
+
+  if (route.requiresAuth !== false && !isAuthenticated()) {
     return false;
   }
 
-  const requested = Array.isArray(roles) ? roles.flat(Infinity) : [roles];
+  const requested = Array.isArray(route.roles)
+    ? route.roles.flat(Infinity)
+    : route.roles
+      ? [route.roles]
+      : [];
+
   const requiredRoles = normalizeRequiredRoles(requested);
 
   if (!requested.length) return true;
@@ -528,17 +584,18 @@ export function canAccessRoute({
    ERROR / SNAPSHOT
 ========================================================= */
 
+function extractMessage(error = null) {
+  return (
+    error?.data?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    String(error || "Error")
+  );
+}
+
 export function buildGuardErrorPayload(error) {
-  let message = "";
-
-  try {
-    message = extractMessage(error);
-  } catch {
-    message = error?.message || String(error || "Error");
-  }
-
   return {
-    message: redact(message),
+    message: redact(extractMessage(error)),
     name: error?.name || "Error",
     status: error?.status || error?.statusCode || error?.response?.status || error?.data?.status || 0,
     code: error?.code || error?.data?.code || error?.response?.data?.code || null,
@@ -546,17 +603,17 @@ export function buildGuardErrorPayload(error) {
 }
 
 export function getAuthGuardsSnapshot() {
+  syncAuthState();
+
   const path = currentCanonicalPath();
   const visiblePath = currentPublicPath();
   const user = getCurrentUser();
-
-  syncAuthState();
 
   return {
     version: GUARDS_VERSION,
 
     authenticated: Boolean(readState().authenticated),
-    hasToken: tokenOk(),
+    hasToken: Boolean(sessionToken()),
     hasUser: Boolean(user),
 
     currentRole: getCurrentRole() || null,
@@ -591,6 +648,7 @@ export function getAuthGuardsSnapshot() {
       roles: ["admin", "user"],
       supportManagerClient: false,
       noForbiddenRoute: true,
+      noImportsExceptSession: true,
     },
 
     at: nowIso(),

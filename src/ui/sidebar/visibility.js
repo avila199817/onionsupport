@@ -6,6 +6,8 @@
    - Decidir si el sidebar debe mostrarse.
    - Aplicar visibilidad al root.
    - Aplicar visibilidad básica por rol admin/user.
+   - Rutas públicas ocultan sidebar.
+   - Sesión válida obligatoria.
    - No navegar.
    - No hacer logout.
    - No leer Auth directamente.
@@ -14,6 +16,8 @@
    - No crear DOM.
    - No reparar estructuras legacy.
    - No gestionar dropdown.
+   - Sin /home.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import {
@@ -23,7 +27,7 @@ import {
   canonicalSidebarPath,
   isSidebarAdminFallbackRoute,
   isSidebarPublicRoute,
-  normalizeSidebarRole,
+  sidebarHomeLookupPath,
 } from "./constants.js";
 
 import {
@@ -36,7 +40,7 @@ import {
   getSidebarUserRole,
 } from "./user.js";
 
-export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v1";
+export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v2";
 
 /* =========================================================
    BASICS
@@ -71,6 +75,50 @@ function unique(values = []) {
 }
 
 /* =========================================================
+   ROLES
+========================================================= */
+
+function normalizeRoleStrict(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRoleStrict).filter(Boolean);
+
+    if (roles.includes(SIDEBAR_ROLE_ADMIN)) return SIDEBAR_ROLE_ADMIN;
+    if (roles.includes(SIDEBAR_ROLE_USER)) return SIDEBAR_ROLE_USER;
+
+    return "";
+  }
+
+  const role = String(value || "").toLowerCase();
+
+  if (role === SIDEBAR_ROLE_ADMIN) return SIDEBAR_ROLE_ADMIN;
+  if (role === SIDEBAR_ROLE_USER) return SIDEBAR_ROLE_USER;
+
+  return "";
+}
+
+function splitRoles(value = "") {
+  if (Array.isArray(value)) {
+    return unique(
+      value
+        .flat(Infinity)
+        .map(normalizeRoleStrict)
+        .filter(Boolean)
+    );
+  }
+
+  return unique(
+    text(value, "")
+      .split(/[,\s|;]+/)
+      .map(normalizeRoleStrict)
+      .filter(Boolean)
+  );
+}
+
+function validSidebarRole(role = "") {
+  return role === SIDEBAR_ROLE_ADMIN || role === SIDEBAR_ROLE_USER;
+}
+
+/* =========================================================
    CONTEXT
 ========================================================= */
 
@@ -80,6 +128,7 @@ export function getSidebarVisibilityPath(context = {}) {
   const state = isObject(AppCore?.state) ? AppCore.state : {};
 
   const value = first(
+    context.canonicalPath,
     context.path,
     context.currentPath,
     typeof route === "string" ? route : "",
@@ -87,10 +136,11 @@ export function getSidebarVisibilityPath(context = {}) {
     state.canonicalPath,
     typeof state.route === "string" ? state.route : "",
     isObject(state.route) ? state.route.path : "",
+    state.publicPath,
     isBrowser() ? window.location.pathname : "/"
   );
 
-  return canonicalSidebarPath(value || "/");
+  return sidebarHomeLookupPath(value || "/");
 }
 
 export function isSidebarRoutePublic(context = {}) {
@@ -100,8 +150,12 @@ export function isSidebarRoutePublic(context = {}) {
   return Boolean(
     isSidebarPublicRoute(path) ||
       route?.public === true ||
+      route?.guestOnly === true ||
+      route?.publicOnly === true ||
       route?.hideShell === true ||
-      route?.shell === false
+      route?.shell === false ||
+      route?.layout === "auth" ||
+      route?.authScreen === true
   );
 }
 
@@ -115,6 +169,8 @@ export function isSidebarShellHidden(context = {}) {
       context.chromeHidden === true ||
       route?.hideShell === true ||
       route?.shell === false ||
+      route?.layout === "auth" ||
+      route?.authScreen === true ||
       state.chromeHidden === true ||
       state.shellHidden === true ||
       state.routeShellHidden === true ||
@@ -170,17 +226,6 @@ export function applySidebarVisibility(context = {}) {
 /* =========================================================
    ROLE HELPERS
 ========================================================= */
-
-function splitRoles(value = "") {
-  return text(value, "")
-    .split(/[,\s|;]+/)
-    .map((role) => normalizeSidebarRole(role))
-    .filter(Boolean);
-}
-
-function validSidebarRole(role = "") {
-  return role === SIDEBAR_ROLE_ADMIN || role === SIDEBAR_ROLE_USER;
-}
 
 function attrIsTrue(element = null, name = "") {
   if (!isElement(element) || !name) return false;
@@ -342,11 +387,13 @@ function setElementRoleVisible(element = null, visible = true) {
 export function getSidebarVisibilityRole(context = {}) {
   const explicit = first(
     context.role,
+    context.roles,
     context.user?.role,
+    context.user?.roles,
     getSidebarUserRole(context)
   );
 
-  return normalizeSidebarRole(explicit || SIDEBAR_ROLE_USER);
+  return normalizeRoleStrict(explicit) || SIDEBAR_ROLE_USER;
 }
 
 export function applyRoleVisibility(context = {}) {
@@ -409,16 +456,37 @@ export function getSidebarVisibilitySnapshot(context = {}) {
 
   return {
     version: SIDEBAR_VISIBILITY_VERSION,
+
     hasRoot: isElement(root),
     shouldRender: shouldRenderSidebar(context),
+
     path: getSidebarVisibilityPath(context),
     routePublic: isSidebarRoutePublic(context),
     shellHidden: isSidebarShellHidden(context),
     hasSession: hasRenderableSidebarSession(context),
+
     role,
     isAdmin: role === SIDEBAR_ROLE_ADMIN,
+
     managedCount: elements.length,
     managedItems: elements.map(elementSnapshot).filter(Boolean),
+
+    policy: {
+      visibilityOnly: true,
+      noNavigation: true,
+      noLogout: true,
+      noAuthDirect: true,
+      noRouterDirect: true,
+      noEvents: true,
+      noDomCreate: true,
+      noLegacyRepair: true,
+      noDropdown: true,
+      noHomeRoute: true,
+      no2fa: true,
+      rolesStrict: true,
+      publicRoutesHideSidebar: true,
+      sessionRequired: true,
+    },
   };
 }
 

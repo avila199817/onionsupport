@@ -13,7 +13,7 @@
    - Sin viewport.
    - Sin indicadores.
    - Sin tooltips.
-   - Sin dropdown.
+   - Sin estado de dropdown.
    - Sin Store propio.
    - Sin DOM propio: delega en dom.js.
 ========================================================= */
@@ -25,7 +25,7 @@ import {
   setSidebarOpenState,
 } from "./dom.js";
 
-export const SIDEBAR_STATE_VERSION = "sidebar.state.v2";
+export const SIDEBAR_STATE_VERSION = "sidebar.state.v3";
 
 /* =========================================================
    RUNTIME
@@ -298,6 +298,7 @@ export function getSidebarState() {
     rootHidden: Boolean(root?.hidden),
     rootAriaHidden: root?.getAttribute?.("aria-hidden") || "",
     rootOpen: root?.dataset?.open || "",
+    rootSidebarState: root?.dataset?.sidebarState || "",
 
     policy: {
       runtimeOnly: true,
@@ -309,7 +310,7 @@ export function getSidebarState() {
       noViewport: true,
       noIndicators: true,
       noTooltips: true,
-      noDropdown: true,
+      noDropdownState: true,
       noOwnDom: true,
     },
   };

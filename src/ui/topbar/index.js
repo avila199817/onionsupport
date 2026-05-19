@@ -6,6 +6,7 @@
    - Topbar mínimo del panel.
    - Montar en #topbar-mount / #app-topbar.
    - Pintar título de ruta.
+   - Resolver /@{user.slug} como Home visual.
    - Mostrar usuario básico.
    - SVGs inline mínimos.
    - Botón sidebar móvil.
@@ -26,9 +27,10 @@ import { Router } from "../../router/index.js";
 
 import {
   getImmutableRoutes,
+  resolveRouteLookupPath,
 } from "../../router/routes.js";
 
-export const TOPBAR_UI_VERSION = "simple-svg";
+export const TOPBAR_UI_VERSION = "topbar.ui.v2";
 
 const SOURCE = "topbar.ui";
 const APP_NAME = "Onion Support";
@@ -94,7 +96,11 @@ function text(value = "", fallback = "") {
 }
 
 function nowIso() {
-  return new Date().toISOString();
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function emit(eventName = "", payload = {}) {
@@ -140,6 +146,18 @@ function canonicalPath(path = "/") {
   }
 
   return value || "/";
+}
+
+function routeLookupPath(path = "/") {
+  try {
+    if (isFunction(resolveRouteLookupPath)) {
+      return canonicalPath(resolveRouteLookupPath(path));
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  return canonicalPath(path);
 }
 
 function currentPath() {
@@ -343,6 +361,7 @@ function buildRoot() {
     attrs: {
       type: "button",
       "aria-label": "Abrir menú",
+      "aria-expanded": "false",
       "data-topbar-sidebar-toggle": "true",
     },
   });
@@ -421,10 +440,13 @@ function decodeURIComponentSafe(value = "") {
 }
 
 function resolveRouteTitle(path = currentPath()) {
-  const clean = canonicalPath(path);
+  const clean = routeLookupPath(path);
 
   try {
-    const route = getImmutableRoutes().find((item) => canonicalPath(item.path) === clean);
+    const route = getImmutableRoutes().find((item) => {
+      return canonicalPath(item.path) === clean;
+    });
+
     const title = routeTitle(route);
 
     if (title) return title;
@@ -756,13 +778,20 @@ function sync(options = {}) {
 
   if (!root) return false;
 
-  const path = options.path || options.publicPath || currentPath();
+  const path =
+    options.canonicalPath ||
+    options.path ||
+    options.publicPath ||
+    currentPath();
 
   syncTitle(path);
   renderUser();
   setMobileToggleState();
 
-  setHidden(root, Boolean(AppCore?.state?.chromeHidden || AppCore?.state?.routeMode === "auth"));
+  setHidden(
+    root,
+    Boolean(AppCore?.state?.chromeHidden || AppCore?.state?.routeMode === "auth")
+  );
 
   mounted = true;
 
@@ -898,7 +927,7 @@ function getState() {
     bound,
 
     title: root?.querySelector?.("[data-topbar-title]")?.textContent || "",
-    route: canonicalPath(currentPath()),
+    route: routeLookupPath(currentPath()),
 
     user: (() => {
       const user = getUser();
@@ -928,6 +957,7 @@ function getState() {
       noSubmodules: true,
       noSearchRuntime: true,
       svgIcons: true,
+      canonicalizesUserHomePath: true,
       roles: ["admin", "user"],
     },
   };
@@ -990,6 +1020,7 @@ const api = {
 
   getState,
   getSnapshot,
+  getDebugSnapshot: getSnapshot,
 
   get runtime() {
     return {};
@@ -997,6 +1028,10 @@ const api = {
 
   get initialized() {
     return initialized;
+  },
+
+  get mounted() {
+    return mounted;
   },
 
   get bound() {

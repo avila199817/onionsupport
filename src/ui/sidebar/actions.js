@@ -6,8 +6,9 @@
    - Acciones reales del sidebar.
    - Abrir / cerrar / alternar usando state.js.
    - Navegar usando Router si existe.
-   - Cerrar sidebar tras navegación correcta.
+   - Navegar sin modificar open/collapsed.
    - Logout usando Auth si existe.
+   - Cerrar sidebar durante logout.
    - Redirigir a /login tras logout.
    - Sin DOM manual.
    - Sin eventos propios.
@@ -37,7 +38,7 @@ import {
   toggleSidebar as toggleRuntimeSidebar,
 } from "./state.js";
 
-export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v2";
+export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v3";
 
 /* =========================================================
    BASICS
@@ -268,10 +269,6 @@ export async function navigateFromSidebar(context = {}) {
     ok = navigateWithBrowser(target, payload);
   }
 
-  if (ok) {
-    closeSidebar(payload);
-  }
-
   return ok;
 }
 
@@ -407,6 +404,7 @@ export function getSidebarActionsSnapshot() {
       noRouteAliases: true,
       noHomeRoute: true,
       no2fa: true,
+      navigationKeepsOpenState: true,
       logoutRedirectsToLogin: true,
     },
   };

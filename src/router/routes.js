@@ -15,7 +15,9 @@
      /activate-account
    - Home interna de vista: /
    - Home visible de usuario: /@{user.slug}
-   - Resolver /@{slug} hacia la vista Home sin validar usuario real.
+   - Rutas privadas visibles: /@{user.slug}/{ruta}
+   - Resolver /@{slug} hacia Home.
+   - Resolver /@{slug}/incidencias hacia /incidencias.
    - Sin declarar /@:slug como ruta real.
    - Sin alias /home.
    - Sin aliases legacy.
@@ -29,7 +31,7 @@
    - Sin Toast.
 ========================================================= */
 
-export const ROUTES_VERSION = "routes.v2";
+export const ROUTES_VERSION = "routes.v3";
 
 const ROUTE_SOURCE = "router.routes";
 
@@ -133,12 +135,24 @@ export const TOKEN_ROUTE_PATHS = Object.freeze([
 /*
   Sin aliases.
   /home NO existe.
-  /@{slug} no es alias declarado: sólo resuelve lookup a Home.
+  /@{slug} y /@{slug}/{ruta_privada} no son rutas declaradas:
+  sólo se resuelven como lookup interno hacia rutas estáticas.
 */
 export const ROUTE_ALIASES = Object.freeze({});
 
 const PUBLIC_AUTH_ROUTE_SET = new Set(PUBLIC_AUTH_ROUTES);
 const TOKEN_ROUTE_SET = new Set(TOKEN_ROUTE_PATHS);
+
+const USER_SCOPED_ROUTE_SET = new Set([
+  ROUTE_PATHS.HOME,
+  ROUTE_PATHS.INCIDENCIAS,
+  ROUTE_PATHS.FACTURAS,
+  ROUTE_PATHS.CLIENTES,
+  ROUTE_PATHS.CUENTA,
+  ROUTE_PATHS.AJUSTES,
+  ROUTE_PATHS.USUARIOS,
+  ROUTE_PATHS.SERVIDOR,
+]);
 
 /* =========================================================
    BASICS
@@ -271,7 +285,7 @@ function normalizeRoles(roles = []) {
 }
 
 /* =========================================================
-   USER HOME
+   USER SCOPED ROUTES
 ========================================================= */
 
 export function normalizeRoutePath(path = "/") {
@@ -292,20 +306,76 @@ export function normalizeUserHomeSlug(value = "") {
   return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
-export function getUserHomeSlugFromPath(path = "/") {
+export function getUserScopedRouteInfo(path = "/") {
   const clean = normalizePath(path);
 
-  if (!clean.startsWith(USER_HOME_PREFIX)) return "";
+  if (!clean.startsWith(USER_HOME_PREFIX)) {
+    return freeze({
+      scoped: false,
+      routable: false,
+      home: false,
+      slug: "",
+      restPath: clean,
+      lookupPath: clean,
+    });
+  }
 
-  const slug = clean.slice(USER_HOME_PREFIX.length);
+  const rest = clean.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeUserHomeSlug(slugSegment);
 
-  if (!slug || slug.includes("/")) return "";
+  if (!slug) {
+    return freeze({
+      scoped: false,
+      routable: false,
+      home: false,
+      slug: "",
+      restPath: clean,
+      lookupPath: clean,
+    });
+  }
 
-  return normalizeUserHomeSlug(slug);
+  const restPath = restSegments.length
+    ? normalizePath(`/${restSegments.join("/")}`)
+    : ROUTE_PATHS.HOME;
+
+  const routable = USER_SCOPED_ROUTE_SET.has(restPath);
+
+  return freeze({
+    scoped: true,
+    routable,
+    home: routable && restPath === ROUTE_PATHS.HOME,
+    slug,
+    restPath,
+    lookupPath: routable ? restPath : clean,
+  });
+}
+
+/*
+  Nombre legacy conservado por compatibilidad:
+  devuelve slug para cualquier ruta /@slug o /@slug/ruta_privada.
+*/
+export function getUserHomeSlugFromPath(path = "/") {
+  const info = getUserScopedRouteInfo(path);
+  return info.scoped && info.routable ? info.slug : "";
+}
+
+export function getUserScopedSlugFromPath(path = "/") {
+  return getUserHomeSlugFromPath(path);
+}
+
+export function getUserScopedRestPath(path = "/") {
+  const info = getUserScopedRouteInfo(path);
+  return info.scoped && info.routable ? info.restPath : "";
+}
+
+export function isUserScopedPath(path = "/") {
+  const info = getUserScopedRouteInfo(path);
+  return Boolean(info.scoped && info.routable);
 }
 
 export function isUserHomePath(path = "/") {
-  return Boolean(getUserHomeSlugFromPath(path));
+  return Boolean(getUserScopedRouteInfo(path).home);
 }
 
 export function isHomePath(path = "/") {
@@ -315,9 +385,10 @@ export function isHomePath(path = "/") {
 
 export function resolveRouteLookupPath(path = "/") {
   const clean = normalizePath(path);
+  const scoped = getUserScopedRouteInfo(clean);
 
-  if (isUserHomePath(clean)) {
-    return ROUTE_PATHS.HOME;
+  if (scoped.scoped && scoped.routable) {
+    return scoped.lookupPath;
   }
 
   return clean;
@@ -441,13 +512,10 @@ function createLazyRender(viewKey = "", viewName = "") {
 
     const ctx = {
       ...(isObject(context) ? context : {}),
-
       viewKey: finalViewKey,
       viewName: finalViewName,
-
       routeViewKey: finalViewKey,
       routeViewName: finalViewName,
-
       renderRoot: root || context?.renderRoot || null,
       renderHost: root || context?.renderHost || null,
       viewContainer: context?.viewContainer || root || null,
@@ -527,93 +595,67 @@ function createRoute({
   const meta = freeze({
     version: ROUTES_VERSION,
     source: ROUTE_SOURCE,
-
     path: finalPath,
     canonicalPath: finalPath,
-
     public: finalPublic,
     private: !finalPublic,
     requiresAuth: !finalPublic,
-
     guestOnly: Boolean(guestOnly),
     publicOnly: Boolean(guestOnly),
-
     roles: finalRoles,
-
     admin: adminOnly,
     adminOnly,
     requiresAdmin: adminOnly,
-
     hideShell,
     shell: !hideShell,
     showShell: !hideShell,
     layout: hideShell ? "auth" : "app",
     authScreen: hideShell,
-
     sidebar: !finalPublic,
     showInSidebar: !finalPublic,
-
     viewKey: finalViewKey,
     viewName: finalViewName,
     sidebarKey: finalViewKey,
-
     routeGroup: finalPublic ? "auth" : "app",
-
     tokenRoute: finalTokenRoute,
     preserveSearch: finalPublic || finalTokenRoute,
     preserveHash: finalPublic || finalTokenRoute,
-
     order: number(order, 0),
   });
 
   return freeze({
     id: routeId(finalPath, finalName),
-
     version: ROUTES_VERSION,
     source: ROUTE_SOURCE,
-
     path: finalPath,
     canonicalPath: finalPath,
-
     name: finalName,
     viewKey: finalViewKey,
     viewName: finalViewName,
     sidebarKey: finalViewKey,
-
     title: text(title, finalName),
-
     public: finalPublic,
     private: !finalPublic,
     requiresAuth: !finalPublic,
-
     guestOnly: Boolean(guestOnly),
     publicOnly: Boolean(guestOnly),
-
     roles: finalRoles,
-
     admin: adminOnly,
     adminOnly,
     requiresAdmin: adminOnly,
-
     hideShell,
     shell: !hideShell,
     showShell: !hideShell,
     layout: hideShell ? "auth" : "app",
     authScreen: hideShell,
-
     sidebar: !finalPublic,
     showInSidebar: !finalPublic,
-
     routeGroup: finalPublic ? "auth" : "app",
-
     tokenRoute: finalTokenRoute,
     preserveSearch: finalPublic || finalTokenRoute,
     preserveHash: finalPublic || finalTokenRoute,
-
     order: number(order, 0),
-
     aliases: freeze([]),
-
     meta,
     render: createLazyRender(finalViewKey, finalViewName),
   });
@@ -657,7 +699,6 @@ const ROUTE_DEFINITIONS = Object.freeze([
     title: "Inicio",
     order: 10,
   },
-
   {
     kind: "private",
     path: ROUTE_PATHS.INCIDENCIAS,
@@ -667,7 +708,6 @@ const ROUTE_DEFINITIONS = Object.freeze([
     title: "Incidencias",
     order: 20,
   },
-
   {
     kind: "private",
     path: ROUTE_PATHS.FACTURAS,
@@ -677,7 +717,6 @@ const ROUTE_DEFINITIONS = Object.freeze([
     title: "Facturas",
     order: 30,
   },
-
   {
     kind: "admin",
     path: ROUTE_PATHS.CLIENTES,
@@ -687,7 +726,6 @@ const ROUTE_DEFINITIONS = Object.freeze([
     title: "Clientes",
     order: 40,
   },
-
   {
     kind: "private",
     path: ROUTE_PATHS.CUENTA,
@@ -697,7 +735,6 @@ const ROUTE_DEFINITIONS = Object.freeze([
     title: "Cuenta",
     order: 50,
   },
-
   {
     kind: "private",
     path: ROUTE_PATHS.AJUSTES,
@@ -707,7 +744,6 @@ const ROUTE_DEFINITIONS = Object.freeze([
     title: "Ajustes",
     order: 60,
   },
-
   {
     kind: "admin",
     path: ROUTE_PATHS.USUARIOS,
@@ -717,7 +753,6 @@ const ROUTE_DEFINITIONS = Object.freeze([
     title: "Usuarios",
     order: 70,
   },
-
   {
     kind: "admin",
     path: ROUTE_PATHS.SERVIDOR,
@@ -727,7 +762,6 @@ const ROUTE_DEFINITIONS = Object.freeze([
     title: "Servidor",
     order: 80,
   },
-
   {
     kind: "public",
     path: ROUTE_PATHS.LOGIN,
@@ -738,7 +772,6 @@ const ROUTE_DEFINITIONS = Object.freeze([
     guestOnly: true,
     order: 1000,
   },
-
   {
     kind: "public",
     path: ROUTE_PATHS.PASSWORD_REQUEST,
@@ -748,7 +781,6 @@ const ROUTE_DEFINITIONS = Object.freeze([
     title: "Recuperar acceso",
     order: 1010,
   },
-
   {
     kind: "public",
     path: ROUTE_PATHS.PASSWORD_RESET,
@@ -759,7 +791,6 @@ const ROUTE_DEFINITIONS = Object.freeze([
     tokenRoute: true,
     order: 1020,
   },
-
   {
     kind: "public",
     path: ROUTE_PATHS.ACTIVATE_ACCOUNT,
@@ -777,7 +808,6 @@ export function createRoutes() {
     .map((definition) => {
       if (definition.kind === "admin") return adminRoute(definition);
       if (definition.kind === "public") return publicRoute(definition);
-
       return privateRoute(definition);
     })
     .sort((left, right) => {
@@ -803,7 +833,6 @@ export function getImmutableRoutes() {
 export function resetRoutesCacheForTests() {
   ROUTES_CACHE = null;
   VIEW_CACHE.clear();
-
   return true;
 }
 
@@ -909,19 +938,16 @@ export function resolveRouteAlias(path = "/") {
 
 export function getRouteByPath(path = "/") {
   const lookupPath = resolveRouteLookupPath(path);
-
   return getImmutableRoutes().find((route) => route.path === lookupPath) || null;
 }
 
 export function getRouteByName(name = "") {
   const clean = normalizeName(name);
-
   return getImmutableRoutes().find((route) => route.name === clean) || null;
 }
 
 export function getRouteByViewKey(viewKey = "") {
   const clean = normalizeViewKey(viewKey);
-
   return getImmutableRoutes().find((route) => route.viewKey === clean) || null;
 }
 
@@ -935,7 +961,6 @@ export function isTokenPublicRoutePath(path = "/") {
 
 export function isPrivateRoutePath(path = "/") {
   const route = getRouteByPath(path);
-
   return Boolean(route && route.public === false && route.requiresAuth === true);
 }
 
@@ -946,36 +971,26 @@ export function isPrivateRoutePath(path = "/") {
 function serializeRoute(route) {
   return {
     id: route.id,
-
     path: route.path,
     canonicalPath: route.canonicalPath,
-
     name: route.name,
     viewKey: route.viewKey,
     viewName: route.viewName,
-
     title: route.title,
-
     public: route.public,
     private: route.private,
     requiresAuth: route.requiresAuth,
     guestOnly: route.guestOnly,
-
     roles: route.roles,
-
     adminOnly: route.adminOnly,
-
     hideShell: route.hideShell,
     shell: route.shell,
     layout: route.layout,
-
     sidebar: route.sidebar,
     showInSidebar: route.showInSidebar,
-
     tokenRoute: route.tokenRoute,
     preserveSearch: route.preserveSearch,
     preserveHash: route.preserveHash,
-
     order: route.order,
   };
 }
@@ -986,6 +1001,7 @@ export function getRoutesSnapshot() {
 
 export function getRouteDebug(path = "/") {
   const normalizedPath = normalizePath(path);
+  const scoped = getUserScopedRouteInfo(normalizedPath);
   const lookupPath = resolveRouteLookupPath(normalizedPath);
   const route = getRouteByPath(normalizedPath);
 
@@ -994,8 +1010,11 @@ export function getRouteDebug(path = "/") {
     input: path,
     normalizedPath,
     lookupPath,
-    userHomePath: isUserHomePath(normalizedPath),
-    userHomeSlug: getUserHomeSlugFromPath(normalizedPath) || null,
+    userScopedPath: Boolean(scoped.scoped),
+    userScopedRoutable: Boolean(scoped.routable),
+    userHomePath: Boolean(scoped.home),
+    userHomeSlug: scoped.slug || null,
+    userScopedRestPath: scoped.scoped ? scoped.restPath : null,
     route: route ? serializeRoute(route) : null,
   };
 }
@@ -1031,48 +1050,38 @@ export function getRoutesIntegritySnapshot() {
   return {
     version: ROUTES_VERSION,
     source: ROUTE_SOURCE,
-
     validationOk,
     validationError,
-
     count: routes.length,
     paths: routes.map((route) => route.path),
-
     publicAuthRoutes: [...PUBLIC_AUTH_ROUTES],
     tokenRoutePaths: [...TOKEN_ROUTE_PATHS],
     aliases: ROUTE_ALIASES,
-
     userHome: {
       enabled: true,
       prefix: USER_HOME_PREFIX,
       lookupPath: ROUTE_PATHS.HOME,
+      privateScopedRoutes: [...USER_SCOPED_ROUTE_SET],
       validatesShape: true,
       validatesRealUser: false,
       realUserValidationOwner: "router/index.js",
     },
-
     critical: getCriticalRoutesDebug(),
     loadedViews: [...VIEW_CACHE.keys()],
-
     policy: {
       staticRoutesOnly: true,
       lazyViews: true,
-
       ownAuth: false,
       ownGuards: false,
       ownHistory: false,
       ownStorage: false,
       ownToast: false,
-
       roles: [...VALID_ROLES],
-
       homeInternalPath: ROUTE_PATHS.HOME,
       userHomePrefix: USER_HOME_PREFIX,
-
       noHomeAlias: true,
       noHomeRoute: true,
       noLegacyRoutes: true,
-
       no2fa: true,
       no403: true,
       no404: true,
@@ -1103,7 +1112,11 @@ export default {
 
   normalizeRoutePath,
   normalizeUserHomeSlug,
+  getUserScopedRouteInfo,
   getUserHomeSlugFromPath,
+  getUserScopedSlugFromPath,
+  getUserScopedRestPath,
+  isUserScopedPath,
   isUserHomePath,
   isHomePath,
   resolveRouteLookupPath,

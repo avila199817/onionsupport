@@ -38,7 +38,6 @@ import {
 import {
   normalizeHomeDashboard,
   normalizeHomeWidget,
-  normalizeHomeWidgets,
   getHomeWidgetId,
 } from "./home.model.js";
 
@@ -46,7 +45,7 @@ import {
   showToast,
 } from "./home.utils.js";
 
-export const HOME_ACTIONS_VERSION = "home.actions.v1";
+export const HOME_ACTIONS_VERSION = "home.actions.v2";
 
 const SOURCE = "views.home.actions";
 
@@ -54,16 +53,34 @@ const CSV_FILENAME = "home-export.csv";
 const CSV_MIME_TYPE = "text/csv;charset=utf-8;";
 
 const ROUTES = Object.freeze({
-  home: "/",
-  incidencias: "/incidencias",
-  facturas: "/facturas",
-  clientes: "/clientes",
-  usuarios: "/usuarios",
-  cuenta: "/cuenta",
-  ajustes: "/ajustes",
+  HOME: "/",
+  INCIDENCIAS: "/incidencias",
+  FACTURAS: "/facturas",
+  CLIENTES: "/clientes",
+  USUARIOS: "/usuarios",
+  CUENTA: "/cuenta",
+  AJUSTES: "/ajustes",
 });
 
-const VALID_ROOT_ROUTES = new Set(Object.values(ROUTES));
+const ACTION_ROUTES = Object.freeze({
+  go_incidencias: ROUTES.INCIDENCIAS,
+  go_tickets: ROUTES.INCIDENCIAS,
+
+  go_facturas: ROUTES.FACTURAS,
+  go_invoices: ROUTES.FACTURAS,
+
+  go_clientes: ROUTES.CLIENTES,
+  go_clients: ROUTES.CLIENTES,
+
+  go_usuarios: ROUTES.USUARIOS,
+  go_users: ROUTES.USUARIOS,
+
+  go_cuenta: ROUTES.CUENTA,
+  go_account: ROUTES.CUENTA,
+
+  go_ajustes: ROUTES.AJUSTES,
+  go_settings: ROUTES.AJUSTES,
+});
 
 /* =========================================================
    BASICS
@@ -134,17 +151,17 @@ function nowIso() {
 function notify(message = "", type = "info", options = {}) {
   const text = safeText(message, "");
 
-  if (!text) return null;
+  if (!text) return false;
 
   try {
     return showToast(text, type, safeObject(options));
   } catch {
-    return null;
+    return false;
   }
 }
 
 /* =========================================================
-   STORE READ ACTIONS
+   STORE READ
 ========================================================= */
 
 export function getHomeDashboardFromStoreAction() {
@@ -166,16 +183,11 @@ export async function getHomeDashboardAction({
   silent = true,
 } = {}) {
   try {
-    if (payload) {
-      return normalizeHomeDashboard(payload);
-    }
+    if (payload) return normalizeHomeDashboard(payload);
 
     return getHomeDashboardFromStoreAction();
   } catch {
-    if (!silent) {
-      notify("No se pudo resolver el dashboard de Home.", "error");
-    }
-
+    if (!silent) notify("No se pudo resolver el dashboard de Home.", "error");
     return null;
   }
 }
@@ -185,131 +197,38 @@ export async function refreshHomeDashboardAction(options = {}) {
 }
 
 /* =========================================================
-   WIDGET READ ACTIONS
+   WIDGETS
 ========================================================= */
 
-function getWidgetTitle(item = {}) {
-  const raw = safeObject(item);
+function widgetRoute(widget = {}) {
+  const raw = safeObject(widget);
 
-  return safeText(
-    first(
-      raw.title,
-      raw.name,
-      raw.label,
-      raw.heading
-    ),
-    "Bloque"
-  );
-}
-
-function getWidgetDescription(item = {}) {
-  const raw = safeObject(item);
-
-  return safeText(
-    first(
-      raw.description,
-      raw.descripcion,
-      raw.subtitle,
-      raw.summary,
-      raw.text
-    ),
-    ""
-  );
-}
-
-function getWidgetType(item = {}) {
-  const raw = safeObject(item);
-
-  return safeText(
-    first(
-      raw.type,
-      raw.kind,
-      raw.variant,
-      raw.category
-    ),
-    "widget"
-  );
-}
-
-function getWidgetValue(item = {}) {
-  const raw = safeObject(item);
-
-  return first(
-    raw.value,
-    raw.total,
-    raw.amount,
-    raw.count,
-    raw.metric,
-    "—"
-  );
-}
-
-function getWidgetTrend(item = {}) {
-  const raw = safeObject(item);
-
-  return first(
-    raw.trend,
-    raw.delta,
-    raw.change,
-    raw.variation,
-    ""
-  );
-}
-
-function getWidgetStatus(item = {}) {
-  const raw = safeObject(item);
-
-  return safeText(
-    first(
-      raw.status,
-      raw.estado,
-      raw.state
-    ),
-    "active"
-  );
-}
-
-function getWidgetRoute(item = {}) {
-  const raw = safeObject(item);
-
-  return normalizeSpaRoute(
-    first(
-      raw.route,
-      raw.href,
-      raw.link,
-      raw.to,
-      ""
-    )
-  );
-}
-
-function getWidgetItems(item = {}) {
-  const raw = safeObject(item);
-  const items = first(raw.items, raw.rows, raw.data, raw.list, []);
-
-  return safeArray(items).map(safeObject);
+  return normalizeSpaRoute(first(raw.route, raw.href, raw.link, raw.to, ""));
 }
 
 function normalizeWidgetDetail(widget = {}) {
-  const normalized = normalizeHomeWidget(widget);
-  const widgetId = safeText(getHomeWidgetId(normalized), "");
+  const item = normalizeHomeWidget(widget);
+  const id = safeText(getHomeWidgetId(item), "");
 
   return {
-    ...normalized,
+    ...item,
 
-    widgetId,
-    id: normalized.id || widgetId || null,
-    key: normalized.key || widgetId || null,
+    widgetId: id,
+    id: safeText(first(item.id, id), id),
+    key: safeText(first(item.key, id), id),
 
-    title: getWidgetTitle(normalized),
-    description: getWidgetDescription(normalized),
-    type: getWidgetType(normalized),
-    value: getWidgetValue(normalized),
-    trend: getWidgetTrend(normalized),
-    status: getWidgetStatus(normalized),
-    route: getWidgetRoute(normalized),
-    href: getWidgetRoute(normalized),
-    items: getWidgetItems(normalized),
+    title: safeText(first(item.title, item.name, item.label, item.heading), "Bloque"),
+    description: safeText(first(item.description, item.descripcion, item.subtitle, item.summary, item.text), ""),
+
+    type: safeText(first(item.type, item.kind, item.variant, item.category), "widget"),
+    value: first(item.value, item.total, item.amount, item.count, item.metric, "—"),
+    trend: first(item.trend, item.delta, item.change, item.variation, ""),
+    status: safeText(first(item.status, item.estado, item.state), "active"),
+
+    route: widgetRoute(item),
+    href: widgetRoute(item),
+
+    items: safeArray(first(item.items, item.rows, item.data, item.list, [])),
   };
 }
 
@@ -322,10 +241,7 @@ export function getHomeWidgetDetailFromStoreAction({
 
   try {
     const widget = getHomeWidgetByIdStore?.(id);
-
-    if (!widget) return null;
-
-    return normalizeWidgetDetail(widget);
+    return widget ? normalizeWidgetDetail(widget) : null;
   } catch {
     return null;
   }
@@ -337,18 +253,13 @@ export async function getHomeWidgetDetailAction({
   silent = true,
 } = {}) {
   try {
-    if (payload) {
-      return normalizeWidgetDetail(payload);
-    }
+    if (payload) return normalizeWidgetDetail(payload);
 
     return getHomeWidgetDetailFromStoreAction({
       widgetId,
     });
   } catch {
-    if (!silent) {
-      notify("No se pudo resolver el bloque.", "error");
-    }
-
+    if (!silent) notify("No se pudo resolver el bloque.", "error");
     return null;
   }
 }
@@ -374,18 +285,16 @@ export async function openHomeWidgetAction({
 
   if (!detail) return null;
 
-  if (navigate) {
-    const route = normalizeSpaRoute(detail.route || detail.href || "");
+  const route = normalizeSpaRoute(detail.route || detail.href || "");
 
-    if (route) {
-      await navigateFromHomeAction({
-        route,
-        silent,
-        payload: {
-          widgetId: id || detail.widgetId,
-        },
-      });
-    }
+  if (navigate && route) {
+    await navigateFromHomeAction({
+      route,
+      silent,
+      payload: {
+        widgetId: id || detail.widgetId,
+      },
+    });
   }
 
   return detail;
@@ -492,6 +401,25 @@ function csvCell(value = "") {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+function readValue(row = {}, paths = []) {
+  const source = safeObject(row);
+
+  for (const path of safeArray(paths)) {
+    const keys = safeText(path, "").split(".").filter(Boolean);
+    let value = source;
+
+    for (const key of keys) {
+      value = value?.[key];
+    }
+
+    if (value !== null && value !== undefined && value !== "") {
+      return value;
+    }
+  }
+
+  return "";
+}
+
 function plainCsvValue(value) {
   if (value === null || value === undefined) return "";
 
@@ -503,31 +431,99 @@ function plainCsvValue(value) {
     return value;
   }
 
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+  return "";
 }
 
-function buildCsv(items = [], columns = []) {
+function columnSpecs(mode = "widgets") {
+  const key = normalizeKey(mode);
+
+  if (["ticket", "tickets", "incidencia", "incidencias"].includes(key)) {
+    return [
+      ["ID", ["ticketId", "incidenciaId", "id"]],
+      ["Asunto", ["subject", "title", "asunto"]],
+      ["Estado", ["status", "estado", "statusLabel"]],
+      ["Prioridad", ["priority", "prioridad", "priorityKey"]],
+      ["Categoría", ["category", "categoria", "type"]],
+      ["Cliente/usuario", ["clientName", "clienteNombre", "requesterName", "userName"]],
+      ["Email", ["clientEmail", "clienteEmail", "email"]],
+      ["Creado", ["createdAt", "fechaCreacion"]],
+      ["Actualizado", ["updatedAt", "lastUpdateAt"]],
+    ];
+  }
+
+  if (["invoice", "invoices", "factura", "facturas", "billing"].includes(key)) {
+    return [
+      ["ID", ["facturaId", "invoiceId", "id"]],
+      ["Número", ["numeroFacturaLegal", "numeroFactura", "invoiceNumber", "number"]],
+      ["Importe", ["total", "amount", "importe", "invoiceAmount"]],
+      ["Moneda", ["currency", "moneda"]],
+      ["Estado", ["paymentStatus", "estadoPago", "status", "estado"]],
+      ["Creada", ["createdAt", "fechaFactura", "issueDate"]],
+      ["Actualizada", ["updatedAt", "modifiedAt"]],
+    ];
+  }
+
+  if (["client", "clients", "cliente", "clientes", "customer", "customers"].includes(key)) {
+    return [
+      ["ID", ["clienteId", "clientId", "customerId", "id"]],
+      ["Nombre", ["displayName", "name", "nombre", "razonSocial", "company"]],
+      ["Email", ["email", "mail"]],
+      ["Activo", ["active", "isActive", "enabled"]],
+      ["Creado", ["createdAt"]],
+      ["Actualizado", ["updatedAt", "modifiedAt"]],
+    ];
+  }
+
+  if (["user", "users", "usuario", "usuarios"].includes(key)) {
+    return [
+      ["ID", ["userId", "usuarioId", "id"]],
+      ["Nombre", ["displayName", "fullName", "name", "nombre", "username"]],
+      ["Email", ["email", "mail"]],
+      ["Rol", ["role", "rol"]],
+      ["Activo", ["active", "isActive", "enabled"]],
+      ["Creado", ["createdAt"]],
+      ["Actualizado", ["updatedAt", "modifiedAt", "lastLoginAt"]],
+    ];
+  }
+
+  if (["activity", "activities", "recent", "timeline"].includes(key)) {
+    return [
+      ["Tipo", ["type", "kind", "category"]],
+      ["Título", ["title", "name", "subject"]],
+      ["Texto", ["text", "description", "message", "detail"]],
+      ["Fecha", ["date", "createdAt", "updatedAt", "timestamp"]],
+      ["Entidad", ["entityId", "ticketId", "incidenciaId", "facturaId", "invoiceId", "userId", "clienteId"]],
+    ];
+  }
+
+  return [
+    ["ID", ["widgetId", "widgetKey", "id", "key"]],
+    ["Título", ["title", "name", "label"]],
+    ["Tipo", ["type", "kind", "variant", "category"]],
+    ["Valor", ["value", "total", "amount", "count", "metric"]],
+    ["Estado", ["status", "estado", "state"]],
+    ["Ruta", ["route", "href"]],
+  ];
+}
+
+function buildCsv(items = [], mode = "widgets", columns = []) {
   const rows = safeArray(items)
     .map(safeObject)
     .filter((item) => Object.keys(item).length);
 
-  const finalColumns = safeArray(columns).length
-    ? safeArray(columns).map((item) => safeText(item, "")).filter(Boolean)
-    : Array.from(
-        new Set(rows.flatMap((item) => Object.keys(item)))
-      ).slice(0, 40);
+  const specs = safeArray(columns).length
+    ? safeArray(columns)
+        .map((key) => [safeText(key, ""), [safeText(key, "")]])
+        .filter(([label]) => Boolean(label))
+    : columnSpecs(mode);
 
-  if (!rows.length || !finalColumns.length) return "";
+  if (!rows.length || !specs.length) return "";
 
   return [
-    finalColumns.map(csvCell).join(","),
+    specs.map(([label]) => csvCell(label)).join(","),
     ...rows.map((row) =>
-      finalColumns
-        .map((key) => csvCell(plainCsvValue(row?.[key])))
+      specs
+        .map(([, paths]) => csvCell(plainCsvValue(readValue(row, paths))))
         .join(",")
     ),
   ].join("\n");
@@ -627,7 +623,7 @@ export function exportHomeCsvAction({
     return false;
   }
 
-  const csvBody = buildCsv(list, columns);
+  const csvBody = buildCsv(list, mode, columns);
 
   if (!csvBody) {
     if (!silent) notify("No hay columnas válidas para exportar.", "info");
@@ -654,15 +650,15 @@ export function exportHomeCsvAction({
    NAVIGATION
 ========================================================= */
 
-function normalizePath(pathname = ROUTES.home) {
-  let value = safeText(pathname, ROUTES.home)
+function normalizePath(pathname = ROUTES.HOME) {
+  let value = safeText(pathname, ROUTES.HOME)
     .replace(/\\/g, "/")
     .replace(/\/{2,}/g, "/");
 
   if (!value.startsWith("/")) value = `/${value}`;
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || ROUTES.home;
+    value = value.replace(/\/+$/g, "") || ROUTES.HOME;
   }
 
   return value;
@@ -709,15 +705,15 @@ function normalizeSpaRoute(route = "") {
   const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
   const path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
 
-  const cleanPath = normalizePath(path || ROUTES.home);
+  const cleanPath = normalizePath(path || ROUTES.HOME);
 
-  /*
-    /home no existe en la SPA nueva.
-    Si aparece desde HTML viejo, se rechaza para no perpetuar alias.
-  */
   if (cleanPath === "/home") return "";
 
   return `${cleanPath}${query}${hash}`;
+}
+
+function routeFromAction(action = "") {
+  return ACTION_ROUTES[normalizeKey(action)] || "";
 }
 
 function getRouterCandidates() {
@@ -737,7 +733,7 @@ function getRouterCandidates() {
   return candidates.filter(Boolean);
 }
 
-async function navigateSpa(route = ROUTES.home, options = {}) {
+async function navigateSpa(route = ROUTES.HOME, options = {}) {
   const target = normalizeSpaRoute(route);
 
   if (!target) return false;
@@ -779,43 +775,19 @@ async function navigateSpa(route = ROUTES.home, options = {}) {
       return true;
     }
   } catch {
-    // fallback abajo
+    // noop
   }
 
-  if (!isBrowser()) return false;
-
-  try {
-    const method = opts.replaceState === true ? "replaceState" : "pushState";
-
-    window.history[method](
-      {
-        path: target,
-        publicPath: target,
-        source: SOURCE,
-      },
-      "",
-      target
-    );
-
-    try {
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    } catch {
-      window.dispatchEvent(new Event("popstate"));
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 export async function navigateFromHomeAction({
-  route = ROUTES.home,
+  route = ROUTES.HOME,
   silent = false,
   replaceState = false,
   payload = {},
 } = {}) {
-  const target = normalizeSpaRoute(route || ROUTES.home);
+  const target = normalizeSpaRoute(route || ROUTES.HOME);
 
   if (!target) {
     if (!silent) notify("Ruta inválida.", "error");
@@ -842,7 +814,7 @@ export async function navigateFromHomeAction({
 ========================================================= */
 
 export async function createFromHomeAction({
-  route = ROUTES.incidencias,
+  route = ROUTES.INCIDENCIAS,
   silent = false,
   payload = {},
 } = {}) {
@@ -859,9 +831,11 @@ export async function runHomeQuickAction({
   payload = {},
   silent = false,
 } = {}) {
-  const actionName = normalizeKey(action);
-  const targetRoute = normalizeSpaRoute(route);
   const data = safeObject(payload);
+  const actionName = normalizeKey(action);
+  const targetRoute = normalizeSpaRoute(
+    first(route, data.route, data.href, routeFromAction(actionName), "")
+  );
 
   if (targetRoute) {
     return navigateFromHomeAction({
@@ -898,14 +872,7 @@ export async function runHomeQuickAction({
     ].includes(actionName)
   ) {
     return copyHomeWidgetIdAction({
-      widgetId: first(
-        data.widgetId,
-        data.ticketId,
-        data.incidenciaId,
-        data.entityId,
-        data.id,
-        ""
-      ),
+      widgetId: first(data.widgetId, data.ticketId, data.incidenciaId, data.entityId, data.id, ""),
       silent,
     });
   }
@@ -926,6 +893,7 @@ export async function runHomeQuickAction({
   if (
     [
       "refresh",
+      "retry",
       "reload",
       "actualizar",
     ].includes(actionName)
@@ -975,6 +943,7 @@ export function getHomeActionsSnapshot() {
       noGlobals: true,
       noHomeAlias: true,
       noCreateRoute: true,
+      noManualHistoryFallback: true,
     },
 
     routes: {
@@ -990,15 +959,6 @@ export function getHomeActionsSnapshot() {
 ========================================================= */
 
 export {
-  getWidgetTitle as getHomeWidgetTitleAction,
-  getWidgetDescription as getHomeWidgetDescriptionAction,
-  getWidgetType as getHomeWidgetTypeAction,
-  getWidgetValue as getHomeWidgetValueAction,
-  getWidgetTrend as getHomeWidgetTrendAction,
-  getWidgetStatus as getHomeWidgetStatusAction,
-  getWidgetRoute as getHomeWidgetRouteAction,
-  getWidgetItems as getHomeWidgetItemsAction,
-
   normalizeWidgetDetail as normalizeHomeWidgetDetailAction,
   normalizeSpaRoute as normalizeHomeRouteAction,
 };
@@ -1035,15 +995,6 @@ export const HomeActions = Object.freeze({
   createFromHomeAction,
 
   getHomeWidgetIdAction,
-  getHomeWidgetTitleAction: getWidgetTitle,
-  getHomeWidgetDescriptionAction: getWidgetDescription,
-  getHomeWidgetTypeAction: getWidgetType,
-  getHomeWidgetValueAction: getWidgetValue,
-  getHomeWidgetTrendAction: getWidgetTrend,
-  getHomeWidgetStatusAction: getWidgetStatus,
-  getHomeWidgetRouteAction: getWidgetRoute,
-  getHomeWidgetItemsAction: getWidgetItems,
-
   normalizeHomeWidgetDetailAction: normalizeWidgetDetail,
   normalizeHomeDashboardAction,
   normalizeHomeRouteAction: normalizeSpaRoute,

@@ -5,7 +5,8 @@
    Responsabilidad:
    - Estilo completo del sidebar privado SPA.
    - Alineado con /src/ui/sidebar/template.js.
-   - Header text-only: Onion Support pegado a la izquierda.
+   - Header logo-only: sin texto visible Onion Support.
+   - Logo white para tema dark / logo black para tema light vía tokens.
    - Botón collapse estilo panel ChatGPT.
    - Sidebar visual estilo ChatGPT + Apple Glass.
    - Dropdown visual de cuenta.
@@ -40,7 +41,7 @@
   --sidebar-local-border-strong: var(--border-strong, var(--sidebar-local-border));
 
   --sidebar-local-text: var(--sidebar-text, var(--text-muted));
-  --sidebar-local-text-strong: var(--text-strong);
+  --sidebar-local-text-strong: var(--sidebar-text-active, var(--text-strong));
   --sidebar-local-text-muted: var(--text-muted);
   --sidebar-local-text-dim: var(--text-dim);
   --sidebar-local-text-active: var(--sidebar-text-active, var(--text-strong));
@@ -65,6 +66,12 @@
   --sidebar-local-icon-box: 32px;
   --sidebar-local-avatar-size: var(--sidebar-user-avatar-size, 34px);
   --sidebar-local-toggle-size: 36px;
+
+  --sidebar-local-logo-height: var(--sidebar-logo-height, 34px);
+  --sidebar-local-logo-width: var(--sidebar-logo-width, min(168px, 100%));
+  --sidebar-local-logo-radius: var(--sidebar-logo-radius, 12px);
+  --sidebar-local-logo-filter: var(--sidebar-logo-filter, drop-shadow(0 8px 18px rgba(0,0,0,.28)));
+  --sidebar-local-logo-opacity: var(--sidebar-logo-opacity, .98);
 
   --sidebar-local-font-size: var(--sidebar-item-font-size, var(--font-md));
   --sidebar-local-font-weight: var(--sidebar-item-font-weight, var(--weight-medium));
@@ -98,8 +105,21 @@
   border-radius: var(--sidebar-local-radius);
 
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 30%),
-    radial-gradient(circle at 96% 42%, color-mix(in srgb, var(--accent-3) 8%, transparent), transparent 32%),
+    radial-gradient(
+      circle at 0% 0%,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 31%
+    ),
+    radial-gradient(
+      circle at 96% 42%,
+      color-mix(in srgb, var(--accent-3) 9%, transparent),
+      transparent 33%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong), transparent 96%),
+      transparent 24%
+    ),
     var(--sidebar-local-bg);
 
   color: var(--sidebar-local-text);
@@ -146,9 +166,16 @@
   text-decoration: none;
 }
 
+.sidebar img,
 .sidebar svg {
   display: block;
   flex: 0 0 auto;
+}
+
+.sidebar img {
+  max-inline-size: 100%;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .sidebar :where(button, a, input, select, textarea):focus {
@@ -171,10 +198,10 @@
   z-index: 0;
 
   background:
-    linear-gradient(180deg, rgba(255,255,255,.075), transparent 24%),
-    linear-gradient(90deg, rgba(255,255,255,.030), transparent 42%);
+    linear-gradient(180deg, rgba(255,255,255,.078), transparent 24%),
+    linear-gradient(90deg, rgba(255,255,255,.034), transparent 42%);
 
-  opacity: .75;
+  opacity: .76;
 }
 
 .sidebar::after {
@@ -187,12 +214,12 @@
       180deg,
       transparent,
       color-mix(in srgb, var(--text-strong) 16%, transparent) 16%,
-      color-mix(in srgb, var(--accent) 34%, transparent) 50%,
+      color-mix(in srgb, var(--accent) 36%, transparent) 50%,
       color-mix(in srgb, var(--text-strong) 10%, transparent) 84%,
       transparent
     );
 
-  opacity: .7;
+  opacity: .72;
 }
 
 .sidebar > * {
@@ -221,7 +248,8 @@
 .sidebar .sidebar-link-indicator,
 .sidebar .sidebar-user-surface,
 .sidebar .sidebar-brand-icon,
-.sidebar .sidebar-brand-svg {
+.sidebar .sidebar-brand-svg,
+.sidebar .sidebar-brand-text {
   display: none !important;
 }
 
@@ -250,7 +278,7 @@
 
 
 /* =========================================================
-   HEADER · CHATGPT TEXT-ONLY
+   HEADER · LOGO ONLY
 ========================================================= */
 
 .sidebar .sidebar-header {
@@ -291,6 +319,7 @@
   -webkit-tap-highlight-color: transparent;
 
   transition:
+    opacity var(--duration-fast, .12s) var(--ease-standard, ease),
     color var(--duration-fast, .12s) var(--ease-standard, ease),
     transform var(--duration-fast, .12s) var(--ease-out, ease);
 }
@@ -304,7 +333,8 @@
   transform: scale(.99);
 }
 
-.sidebar .sidebar-brand-content {
+.sidebar .sidebar-brand-content,
+.sidebar .sidebar-brand-content--logo {
   min-inline-size: 0;
 
   display: flex;
@@ -314,19 +344,58 @@
   overflow: hidden;
 }
 
-.sidebar .sidebar-brand-text {
-  min-inline-size: 0;
+.sidebar .sidebar-brand-logo {
+  position: relative;
+
+  inline-size: var(--sidebar-local-logo-width);
+  max-inline-size: 100%;
+  block-size: var(--sidebar-local-logo-height);
+
+  display: inline-grid;
+  align-items: center;
+  justify-items: start;
 
   overflow: hidden;
 
-  color: var(--sidebar-local-text-strong);
+  border-radius: var(--sidebar-local-logo-radius);
 
-  font-size: clamp(16px, calc(18px * var(--ui-scale, 1)), 19px);
-  line-height: 1.08;
-  font-weight: var(--weight-bold, 700);
-  letter-spacing: -.035em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  opacity: var(--sidebar-local-logo-opacity);
+
+  filter: var(--sidebar-local-logo-filter);
+
+  transform: translateZ(0);
+}
+
+.sidebar .sidebar-brand-logo-img {
+  position: absolute;
+  inset: 0;
+
+  inline-size: 100%;
+  block-size: 100%;
+
+  object-fit: contain;
+  object-position: left center;
+
+  opacity: 1;
+
+  transition:
+    opacity var(--duration-normal, .20s) var(--ease-standard, ease),
+    filter var(--duration-normal, .20s) var(--ease-standard, ease),
+    transform var(--duration-normal, .20s) var(--ease-emphasis, cubic-bezier(.16,1,.3,1));
+}
+
+.sidebar .sidebar-brand-logo-img--theme-dark,
+.sidebar .sidebar-brand-logo-img--white {
+  display: var(--sidebar-logo-dark-display, block);
+}
+
+.sidebar .sidebar-brand-logo-img--theme-light,
+.sidebar .sidebar-brand-logo-img--black {
+  display: var(--sidebar-logo-light-display, none);
+}
+
+.sidebar .sidebar-brand:hover .sidebar-brand-logo-img {
+  transform: translateX(1px) scale(1.012);
 }
 
 
@@ -490,7 +559,8 @@
     border-color var(--duration-fast, .12s) var(--ease-standard, ease),
     color var(--duration-fast, .12s) var(--ease-standard, ease),
     opacity var(--duration-fast, .12s) var(--ease-standard, ease),
-    transform var(--duration-fast, .12s) var(--ease-out, ease);
+    transform var(--duration-fast, .12s) var(--ease-out, ease),
+    box-shadow var(--duration-fast, .12s) var(--ease-standard, ease);
 }
 
 .sidebar .sidebar-link:hover {
@@ -522,6 +592,10 @@
     background var(--duration-fast, .12s) var(--ease-standard, ease),
     color var(--duration-fast, .12s) var(--ease-standard, ease),
     transform var(--duration-fast, .12s) var(--ease-out, ease);
+}
+
+.sidebar .sidebar-link:hover .sidebar-link-icon {
+  color: var(--sidebar-local-text-strong);
 }
 
 .sidebar .sidebar-link-svg {
@@ -1107,9 +1181,9 @@
 .sidebar.is-collapsed .sidebar-brand-content,
 .sidebar[data-open="false"] .sidebar-brand-content,
 .sidebar[data-sidebar-state="collapsed"] .sidebar-brand-content,
-.sidebar.is-collapsed .sidebar-brand-text,
-.sidebar[data-open="false"] .sidebar-brand-text,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-brand-text,
+.sidebar.is-collapsed .sidebar-brand-logo,
+.sidebar[data-open="false"] .sidebar-brand-logo,
+.sidebar[data-sidebar-state="collapsed"] .sidebar-brand-logo,
 .sidebar.is-collapsed .sidebar-link-content,
 .sidebar[data-open="false"] .sidebar-link-content,
 .sidebar[data-sidebar-state="collapsed"] .sidebar-link-content,
@@ -1280,9 +1354,9 @@
   .sidebar.is-collapsed .sidebar-brand-content,
   .sidebar[data-open="false"] .sidebar-brand-content,
   .sidebar[data-sidebar-state="collapsed"] .sidebar-brand-content,
-  .sidebar.is-collapsed .sidebar-brand-text,
-  .sidebar[data-open="false"] .sidebar-brand-text,
-  .sidebar[data-sidebar-state="collapsed"] .sidebar-brand-text,
+  .sidebar.is-collapsed .sidebar-brand-logo,
+  .sidebar[data-open="false"] .sidebar-brand-logo,
+  .sidebar[data-sidebar-state="collapsed"] .sidebar-brand-logo,
   .sidebar.is-collapsed .sidebar-link-content,
   .sidebar[data-open="false"] .sidebar-link-content,
   .sidebar[data-sidebar-state="collapsed"] .sidebar-link-content,
@@ -1301,9 +1375,6 @@
     display: flex !important;
   }
 
-  .sidebar.is-collapsed .sidebar-brand-text,
-  .sidebar[data-open="false"] .sidebar-brand-text,
-  .sidebar[data-sidebar-state="collapsed"] .sidebar-brand-text,
   .sidebar.is-collapsed .sidebar-link-label,
   .sidebar[data-open="false"] .sidebar-link-label,
   .sidebar[data-sidebar-state="collapsed"] .sidebar-link-label,
@@ -1386,7 +1457,6 @@
    ACCESSIBILITY / HARDENING
 ========================================================= */
 
-.sidebar .sidebar-brand-text,
 .sidebar .sidebar-link-label,
 .sidebar .sidebar-user-name,
 .sidebar .sidebar-user-role,
@@ -1398,7 +1468,7 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-@supports not (backdrop-filter: blur(1px)) {
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .sidebar,
   .sidebar .sidebar-account-menu {
     backdrop-filter: none;
@@ -1420,12 +1490,15 @@
   .sidebar .sidebar-user,
   .sidebar .sidebar-account-trigger,
   .sidebar .sidebar-account-menu,
-  .sidebar .sidebar-account-menu-item,
-  .sidebar .sidebar-brand-icon {
+  .sidebar .sidebar-account-menu-item {
     border-color: transparent;
     background: Canvas;
     color: CanvasText;
     box-shadow: none;
+  }
+
+  .sidebar .sidebar-brand-logo-img {
+    filter: none;
   }
 
   .sidebar .sidebar-link[aria-current="page"],
@@ -1456,6 +1529,15 @@
   .sidebar *::after {
     transition: none !important;
     animation: none !important;
+  }
+
+  .sidebar .sidebar-brand:hover .sidebar-brand-logo-img,
+  .sidebar .sidebar-link:active,
+  .sidebar .sidebar-user:active,
+  .sidebar .sidebar-account-trigger:active,
+  .sidebar .sidebar-account-menu-item:active,
+  .sidebar .sidebar-toggle:active {
+    transform: none !important;
   }
 }
 

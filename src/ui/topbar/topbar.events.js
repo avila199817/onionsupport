@@ -4,20 +4,19 @@
 
    Responsabilidad:
    - Compat mínima de eventos Topbar.
-   - Botón sidebar.
-   - Logout/search legacy no-op seguro.
-   - Sync visual básico.
-   - Sin imports.
-   - Sin search runtime.
+   - Sin botón sidebar.
+   - Sin logout.
+   - Sin search runtime propio.
    - Sin overlays.
    - Sin app event storms.
    - Sin hard rebind.
    - Sin CustomEvent.
+   - Sin imports.
    - Sin magia negra.
    - El topbar real vive en src/ui/topbar/index.js.
 ========================================================= */
 
-export const TOPBAR_EVENTS_VERSION = "simple";
+export const TOPBAR_EVENTS_VERSION = "topbar.events.v3";
 
 const DEFAULT_SCOPE = "ui:topbar";
 const DEFAULT_SEARCH_SCOPE = "ui:topbar:search";
@@ -137,12 +136,19 @@ function targetOf(event = null) {
   return target || null;
 }
 
-function isPrimaryPointer(event = null) {
-  return !event || !("button" in event) || event.button === 0;
-}
-
-function bind(target = null, eventName = "", handler = null, options = false, scope = DEFAULT_SCOPE) {
-  if (!target || !eventName || !isFunction(handler) || !isFunction(target.addEventListener)) {
+function bind(
+  target = null,
+  eventName = "",
+  handler = null,
+  options = false,
+  scope = DEFAULT_SCOPE
+) {
+  if (
+    !target ||
+    !eventName ||
+    !isFunction(handler) ||
+    !isFunction(target.addEventListener)
+  ) {
     return false;
   }
 
@@ -156,11 +162,49 @@ function bind(target = null, eventName = "", handler = null, options = false, sc
 }
 
 function getDomSafe(getDom = null) {
+  let dom = {};
+
   try {
-    return isFunction(getDom) ? getDom() || {} : {};
+    dom = isFunction(getDom) ? getDom() || {} : {};
   } catch {
-    return {};
+    dom = {};
   }
+
+  if (!isBrowser()) return dom;
+
+  const topbar =
+    dom.topbar ||
+    query("[data-topbar-root]") ||
+    query("#app-topbar") ||
+    query("#topbar") ||
+    null;
+
+  const search =
+    dom.search ||
+    topbar?.querySelector?.("[data-topbar-search]") ||
+    query("[data-topbar-search]") ||
+    null;
+
+  const searchInput =
+    dom.searchInput ||
+    search?.querySelector?.("[data-topbar-search-input]") ||
+    query("[data-topbar-search-input]") ||
+    null;
+
+  const searchResults =
+    dom.searchResults ||
+    query("#topbar-search-results") ||
+    query("[data-topbar-search-results]") ||
+    query(".topbar-search-results") ||
+    null;
+
+  return {
+    ...dom,
+    topbar,
+    search,
+    searchInput,
+    searchResults,
+  };
 }
 
 /* =========================================================
@@ -184,7 +228,9 @@ function currentBrowserPath() {
   if (!isBrowser()) return "/";
 
   try {
-    return normalizePath(`${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`);
+    return normalizePath(
+      `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
+    );
   } catch {
     return "/";
   }
@@ -200,7 +246,11 @@ function clearSearchDebounce(runtime = null) {
   try {
     window.clearTimeout(runtime.searchDebounceTimer);
   } catch {
-    // noop
+    try {
+      clearTimeout(runtime.searchDebounceTimer);
+    } catch {
+      // noop
+    }
   }
 
   runtime.searchDebounceTimer = null;
@@ -220,6 +270,33 @@ function abortSearch(runtime = null) {
   return true;
 }
 
+function setSearchVisualState(getDom = null, active = false) {
+  const { topbar, search, searchResults } = getDomSafe(getDom);
+
+  try {
+    topbar?.classList?.toggle?.("is-search-focused", Boolean(active));
+    topbar?.toggleAttribute?.("data-search-focus", Boolean(active));
+  } catch {
+    // noop
+  }
+
+  try {
+    search?.classList?.toggle?.("is-search-open", Boolean(active));
+    search?.toggleAttribute?.("data-search-open", Boolean(active));
+  } catch {
+    // noop
+  }
+
+  try {
+    searchResults?.classList?.toggle?.("active", Boolean(active));
+    searchResults?.toggleAttribute?.("data-search-open", Boolean(active));
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
 function hideSearch(runtime = null, getDom = null, options = {}) {
   clearSearchDebounce(runtime);
   abortSearch(runtime);
@@ -229,6 +306,8 @@ function hideSearch(runtime = null, getDom = null, options = {}) {
   if (searchResults) {
     try {
       searchResults.hidden = true;
+      searchResults.classList.remove("active");
+      searchResults.removeAttribute("data-search-open");
       searchResults.setAttribute("aria-hidden", "true");
       searchResults.replaceChildren();
     } catch {
@@ -253,6 +332,8 @@ function hideSearch(runtime = null, getDom = null, options = {}) {
     runtime.currentItems = [];
     runtime.currentQuery = "";
   }
+
+  setSearchVisualState(getDom, false);
 
   return true;
 }
@@ -289,11 +370,15 @@ export function createTopbarEventHandlers({
 } = {}) {
   function syncVisual(payload = {}) {
     const detail = eventDetail(payload);
-    const path = detail.publicPath || detail.path || detail.route || detail.canonicalPath || currentBrowserPath();
+    const path =
+      detail.publicPath ||
+      detail.path ||
+      detail.route ||
+      detail.canonicalPath ||
+      currentBrowserPath();
 
     safeCall(syncDomCache);
     safeCall(syncTitle, path);
-    safeCall(setMobileToggleState);
     safeCall(syncFixedTopbarOffset);
 
     return true;
@@ -307,42 +392,18 @@ export function createTopbarEventHandlers({
       // noop
     }
 
-    safeCall(toggleSidebarMobile);
-    safeCall(setMobileToggleState);
-    safeCall(syncFixedTopbarOffset);
-
-    return true;
+    return false;
   }
 
-  function handleOutsideSidebarClick(event = null) {
-    if (!isPrimaryPointer(event)) return false;
-
-    const target = targetOf(event);
-
-    if (
-      target?.closest?.("[data-topbar-sidebar-toggle]") ||
-      target?.closest?.("[data-sidebar-root]") ||
-      target?.closest?.("#app-sidebar") ||
-      target?.closest?.("#sidebar")
-    ) {
-      return false;
-    }
-
-    try {
-      if (document.body?.classList?.contains?.("sidebar-open")) {
-        safeCall(closeSidebarMobile);
-      }
-    } catch {
-      // noop
-    }
-
-    return true;
+  function handleOutsideSidebarClick() {
+    return false;
   }
 
   function handleViewportResize() {
     safeCall(syncDomCache);
-    safeCall(setMobileToggleState);
+    safeCall(syncTitle, currentBrowserPath());
     safeCall(syncFixedTopbarOffset);
+
     return true;
   }
 
@@ -382,6 +443,12 @@ export function createTopbarEventHandlers({
     }
 
     if (key === "Escape") {
+      try {
+        event.preventDefault();
+      } catch {
+        // noop
+      }
+
       hideSearch(runtime, getDom, { blur: true });
       return true;
     }
@@ -426,6 +493,9 @@ export function createTopbarEventHandlers({
 
   void AppCore;
   void Router;
+  void setMobileToggleState;
+  void closeSidebarMobile;
+  void toggleSidebarMobile;
 
   return {
     handleMobileToggleClick,
@@ -466,36 +536,32 @@ export function bindTopbarDomEvents({
   const localScope = scopeKey(scope, "dom");
   runCleanups(localScope);
 
-  const { mobileToggle, topbar } = getDomSafe(getDom);
-  const root = topbar || query("#app-topbar") || query("#topbar") || query("[data-topbar-root]");
-
-  if (mobileToggle) {
-    bind(mobileToggle, "click", handlers.handleMobileToggleClick, false, localScope);
-
-    try {
-      mobileToggle.setAttribute("aria-expanded", "false");
-    } catch {
-      // noop
-    }
-  }
-
-  if (root) {
-    bind(root, "click", (event) => {
-      const target = targetOf(event);
-
-      if (target?.closest?.("[data-topbar-sidebar-toggle]")) {
-        handlers.handleMobileToggleClick?.(event);
-      }
-    }, false, localScope);
-  }
-
-  bind(document, "click", handlers.handleOutsideSidebarClick, false, localScope);
   bind(window, "resize", handlers.handleViewportResize, { passive: true }, localScope);
   bind(window, "orientationchange", handlers.handleViewportResize, { passive: true }, localScope);
 
+  bind(
+    document,
+    "keydown",
+    (event) => {
+      const key = event?.key || "";
+
+      if (!((event?.ctrlKey || event?.metaKey) && key.toLowerCase() === "k")) {
+        return;
+      }
+
+      handlers.handleSearchKeydown?.(event);
+    },
+    false,
+    localScope
+  );
+
   emit(AppCore, "topbar:dom-events:bound", {
     scope: localScope,
+    sidebarToggle: false,
+    logout: false,
   });
+
+  void getDom;
 
   return true;
 }
@@ -510,16 +576,13 @@ export function bindSearchDomEvents({
   const localScope = scopeKey(scope, "search");
   runCleanups(localScope);
 
-  const { searchInput, searchResults } = getDomSafe(getDom);
+  const { searchInput } = getDomSafe(getDom);
 
-  if (!searchInput || !searchResults) return false;
+  if (!searchInput) return false;
 
   bind(searchInput, "keydown", handlers.handleSearchKeydown, false, localScope);
   bind(searchInput, "compositionstart", handlers.handleSearchCompositionStart, false, localScope);
   bind(searchInput, "compositionend", handlers.handleSearchCompositionEnd, false, localScope);
-  bind(searchInput, "input", handlers.handleSearchInput, false, localScope);
-  bind(searchInput, "focus", handlers.handleSearchFocus, false, localScope);
-  bind(searchResults, "click", handlers.handleSearchResultsClick, false, localScope);
 
   return true;
 }
@@ -528,7 +591,13 @@ export function bindSearchDomEvents({
    APP EVENTS
 ========================================================= */
 
-function bindAppEvent(AppCore = null, scope = DEFAULT_SCOPE, eventName = "", handler = null, localScope = scope) {
+function bindAppEvent(
+  AppCore = null,
+  scope = DEFAULT_SCOPE,
+  eventName = "",
+  handler = null,
+  localScope = scope
+) {
   if (!eventName || !isFunction(handler)) return false;
 
   try {
@@ -567,11 +636,15 @@ export function bindTopbarAppEvents({
 
   const sync = (payload = {}) => {
     const detail = eventDetail(payload);
-    const path = detail.publicPath || detail.path || detail.route || detail.canonicalPath || currentBrowserPath();
+    const path =
+      detail.publicPath ||
+      detail.path ||
+      detail.route ||
+      detail.canonicalPath ||
+      currentBrowserPath();
 
     safeCall(syncDomCache);
     safeCall(syncTitle, path);
-    safeCall(setMobileToggleState);
     safeCall(syncFixedTopbarOffset);
 
     return true;
@@ -579,15 +652,23 @@ export function bindTopbarAppEvents({
 
   bindAppEvent(AppCore, scope, "router:rendered", sync, localScope);
   bindAppEvent(AppCore, scope, "app:route:change", sync, localScope);
-  bindAppEvent(AppCore, scope, "router:before-render", () => {
-    safeCall(hideResults);
-  }, localScope);
+
+  bindAppEvent(
+    AppCore,
+    scope,
+    "router:before-render",
+    () => {
+      safeCall(hideResults);
+    },
+    localScope
+  );
 
   bindAppEvent(AppCore, scope, "topbar:search:close", handlers.handleSearchCloseEvent, localScope);
   bindAppEvent(AppCore, scope, "topbar:search:focus", handlers.handleSearchFocusEvent, localScope);
   bindAppEvent(AppCore, scope, "topbar:search:clear", handlers.handleSearchClearEvent, localScope);
 
   void getDom;
+  void setMobileToggleState;
   void closeSidebarMobile;
 
   emit(AppCore, "topbar:app-events:bound", {
@@ -632,6 +713,9 @@ export function getTopbarEventsSnapshot(scope = DEFAULT_SCOPE) {
       noOverlays: true,
       noHardRebind: true,
       noCustomEvent: true,
+      noSidebarToggle: true,
+      noLogout: true,
+      topbarOwnedByIndex: true,
     },
   };
 }

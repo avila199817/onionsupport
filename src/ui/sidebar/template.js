@@ -6,6 +6,7 @@
    - Construir el DOM del sidebar.
    - Exponer estructura estable para CSS SaaS.
    - Preparar header, navegación y cuenta estilo ChatGPT.
+   - Header text-only: sin icono de marca a la izquierda.
    - Preparar markup del dropdown de cuenta.
    - Recibir datos ya normalizados desde index.js/user.js.
    - No navegar.
@@ -38,7 +39,7 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v4";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v5";
 
 /* =========================================================
    ICON PATHS
@@ -46,43 +47,43 @@ export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v4";
 
 const ICON_PATHS = Object.freeze({
   brand:
-    "M12 2.5c4.3 0 7.5 3.1 7.5 7.3 0 5.1-4.5 9.5-7.5 11.7-3-2.2-7.5-6.6-7.5-11.7C4.5 5.6 7.7 2.5 12 2.5Zm0 4.2a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6Z",
+    "M12 2.75 20 6.25v5.55c0 4.75-3.15 8.35-8 9.45-4.85-1.1-8-4.7-8-9.45V6.25L12 2.75Z M12 7.25a3.75 3.75 0 1 0 0 7.5 3.75 3.75 0 0 0 0-7.5Z",
 
   menu:
-    "M4 6h16 M4 12h16 M4 18h16",
+    "M5.75 3.75h12.5A2.75 2.75 0 0 1 21 6.5v11a2.75 2.75 0 0 1-2.75 2.75H5.75A2.75 2.75 0 0 1 3 17.5v-11a2.75 2.75 0 0 1 2.75-2.75Z M9 3.75v16.5 M5.85 8.25h1.35 M5.85 12h1.35 M5.85 15.75h1.35",
 
   chevron:
-    "m9 18 6-6-6-6",
+    "M9.25 5.75 15.5 12l-6.25 6.25",
 
   home:
-    "M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1v-9.5Z",
+    "M3.75 10.75 12 4l8.25 6.75v8.05a1.7 1.7 0 0 1-1.7 1.7h-4.05v-5.7h-5v5.7H5.45a1.7 1.7 0 0 1-1.7-1.7v-8.05Z",
 
   incidencias:
-    "M12 8v4l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+    "M5.25 5.25h13.5A2.25 2.25 0 0 1 21 7.5v7.25A2.25 2.25 0 0 1 18.75 17H11l-5.25 3.25V17h-.5A2.25 2.25 0 0 1 3 14.75V7.5a2.25 2.25 0 0 1 2.25-2.25Z M8 9.25h8 M8 12.25h5.5",
 
   facturas:
-    "M6 2h9l5 5v15H6z M14 2v6h6 M8.5 12h7 M8.5 16h5",
+    "M6.5 2.75h8.25L20.5 8.5v12.75H6.5A2.5 2.5 0 0 1 4 18.75V5.25a2.5 2.5 0 0 1 2.5-2.5Z M14.5 3v5.75h5.75 M8 12.25h8 M8 15.75h6 M8 19.25h4",
 
   clientes:
-    "M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M8 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z M2.5 21c0-3.3 2.8-6 6.2-6s6.2 2.7 6.2 6 M13.5 15.2c.8-.3 1.7-.5 2.7-.5 3 0 5.3 2.3 5.3 5.3",
+    "M8.25 11.25a3.75 3.75 0 1 0 0-7.5 3.75 3.75 0 0 0 0 7.5Z M2.75 21c.45-3.35 2.85-5.65 5.5-5.65s5.05 2.3 5.5 5.65 M16.25 10.75a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M14.75 14.9c.55-.22 1.15-.35 1.85-.35 2.3 0 4.15 1.8 4.65 4.45",
 
   usuarios:
-    "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M4 21c0-4 4-7 8-7s8 3 8 7",
+    "M12 11.5a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5Z M4.25 21c.6-4.1 3.7-6.75 7.75-6.75S19.15 16.9 19.75 21",
 
   cuenta:
-    "M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M5.5 21a6.5 6.5 0 0 1 13 0",
+    "M12 11.25a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M4.75 20.75a7.25 7.25 0 0 1 14.5 0",
 
   ajustes:
-    "M4 6h10 M4 12h6 M4 18h12 M16 4a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z M12 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z M18 16a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z",
+    "M4 7h9.5 M17.5 7H20 M15.5 5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z M4 12h2.5 M10.5 12H20 M8.5 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z M4 17h9.5 M17.5 17H20 M15.5 15a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z",
 
   servidor:
-    "M4 5h16v5H4z M4 14h16v5H4z M8 7.5h.01 M8 16.5h.01 M11 7.5h5 M11 16.5h5",
+    "M5.5 4.25h13A2.5 2.5 0 0 1 21 6.75v2.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 9.25v-2.5a2.5 2.5 0 0 1 2.5-2.5Z M5.5 12.25h13A2.5 2.5 0 0 1 21 14.75v2.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.25v-2.5a2.5 2.5 0 0 1 2.5-2.5Z M7 8h.01 M7 16h.01 M10 8h7 M10 16h7",
 
   help:
-    "M9.1 9a3 3 0 1 1 5.8 1c-.4 1.4-1.9 2-2.6 2.7-.5.5-.7 1-.7 1.8 M12 18h.01 M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+    "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z M9.75 9a2.35 2.35 0 0 1 4.55.8c0 1.55-1.18 2.1-2 2.75-.55.45-.8.9-.8 1.7 M12 17.25h.01",
 
   logout:
-    "M16 17l5-5-5-5 M21 12H9 M4 4h5v16H4z",
+    "M15.75 17.25 21 12l-5.25-5.25 M20.25 12H9.75 M11.75 20.25H5.5A2.5 2.5 0 0 1 3 17.75V6.25a2.5 2.5 0 0 1 2.5-2.5h6.25",
 });
 
 /* =========================================================
@@ -155,16 +156,6 @@ function createSpan(className = "", textContent = "", attrs = {}) {
     className,
     textContent,
     attrs,
-  });
-}
-
-function createSurface(className = "", attrs = {}) {
-  return createElement("span", {
-    className,
-    attrs: {
-      "aria-hidden": "true",
-      ...attrs,
-    },
   });
 }
 
@@ -249,9 +240,10 @@ export function createSidebarIcon(
 
   path.setAttribute("d", pathData);
   path.setAttribute("stroke", "currentColor");
-  path.setAttribute("stroke-width", "1.75");
+  path.setAttribute("stroke-width", "1.8");
   path.setAttribute("stroke-linecap", "round");
   path.setAttribute("stroke-linejoin", "round");
+  path.setAttribute("vector-effect", "non-scaling-stroke");
 
   svg.appendChild(path);
 
@@ -330,11 +322,16 @@ export function createSidebarHeader(options = {}) {
     attrs: {
       [SIDEBAR_ATTRS.header]: "true",
       "data-sidebar-section": "header",
+      "data-sidebar-header-layout": "text-only",
     },
   });
 
   const brand = createElement("a", {
-    className: classNames(SIDEBAR_CLASSES.brand, "sidebar-brand--chatgpt"),
+    className: classNames(
+      SIDEBAR_CLASSES.brand,
+      "sidebar-brand--chatgpt",
+      "sidebar-brand--text-only"
+    ),
     attrs: {
       href: brandHref,
 
@@ -345,6 +342,7 @@ export function createSidebarHeader(options = {}) {
 
       "aria-label": brandLabel,
       "data-sidebar-action": "brand",
+      "data-sidebar-brand-text-only": "true",
     },
   });
 
@@ -357,16 +355,15 @@ export function createSidebarHeader(options = {}) {
   ]);
 
   appendChildren(brand, [
-    createIconSlot(
-      SIDEBAR_CLASSES.brandIcon,
-      SIDEBAR_ICONS.brand,
-      "sidebar-brand-svg"
-    ),
     brandContent,
   ]);
 
   const toggle = createElement("button", {
-    className: classNames(SIDEBAR_CLASSES.toggle, "sidebar-toggle--chatgpt"),
+    className: classNames(
+      SIDEBAR_CLASSES.toggle,
+      "sidebar-toggle--chatgpt",
+      "sidebar-toggle--panel"
+    ),
     attrs: {
       type: "button",
       [SIDEBAR_ATTRS.toggle]: "true",
@@ -374,6 +371,7 @@ export function createSidebarHeader(options = {}) {
       "aria-expanded": open ? "true" : "false",
       "data-sidebar-action": "toggle",
       "data-state": open ? "open" : "collapsed",
+      "data-sidebar-toggle-kind": "panel",
       "data-tooltip": open ? "Cerrar barra lateral" : "Abrir barra lateral",
       title: open ? "Cerrar barra lateral" : "Abrir barra lateral",
     },
@@ -464,6 +462,7 @@ export function createSidebarNavItem(rawItem = {}) {
 
       "data-sidebar-action": "navigate",
       "data-sidebar-label": item.label,
+      "data-sidebar-icon": item.icon,
       "data-admin-only": item.adminOnly ? "true" : null,
       "data-required-role": item.requiredRole || null,
       "data-required-roles": item.requiredRoles || null,
@@ -783,6 +782,9 @@ export function getSidebarTemplateSnapshot() {
       buildsDom: true,
       stableCssStructure: true,
       noHtmlString: true,
+
+      textOnlyHeaderBrand: true,
+      panelCollapseIcon: true,
 
       noNavigation: true,
       noSessionRead: true,

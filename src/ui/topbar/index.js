@@ -11,6 +11,7 @@
    - Conectar buscador local delegado en topbar.search.js.
    - No renderizar saludo, usuario ni salida.
    - No renderizar botón hamburguesa.
+   - No exponer API falsa de sidebar.
    - Sin Store.
    - Sin HTTP.
    - Sin Toast.
@@ -26,11 +27,6 @@ import { AppCore } from "../../core/index.js";
 import { Router } from "../../router/index.js";
 
 import {
-  getImmutableRoutes,
-  resolveRouteLookupPath,
-} from "../../router/routes.js";
-
-import {
   clearSearchDebounce,
   clearSearchState,
   handleSearchKeydown,
@@ -38,13 +34,20 @@ import {
   runSearch,
 } from "./topbar.search.js";
 
-export const TOPBAR_UI_VERSION = "topbar.ui.v4";
+import {
+  TOPBAR_DEFAULT_VIEW_TITLE,
+  TOPBAR_SEARCH_CONFIG,
+  TOPBAR_TITLE_PREFIX,
+  normalizeQuery,
+  resolveTopbarRouteTitle,
+  safeNormalizeCanonicalPath,
+  safeNormalizePath,
+} from "./topbar.helpers.js";
+
+export const TOPBAR_UI_VERSION = "topbar.ui.v5";
 
 const SOURCE = "topbar.ui";
-const APP_NAME = "Onion Support";
-const ONION_PREFIX = "Onion";
-const DEFAULT_VIEW_TITLE = "Home";
-const SEARCH_DEBOUNCE_MS = 110;
+const SEARCH_DEBOUNCE_MS = TOPBAR_SEARCH_CONFIG.debounceMs;
 
 let initialized = false;
 let mounted = false;
@@ -53,6 +56,7 @@ let root = null;
 let boundRoot = null;
 let cleanupEvents = null;
 let searchValue = "";
+let lastRoutePath = "";
 
 const searchRuntime = {
   cache: new Map(),
@@ -64,7 +68,6 @@ const searchRuntime = {
   searchController: null,
   AppCore: null,
   Router: null,
-  closeSidebarMobile: null,
 };
 
 /* =========================================================
@@ -110,10 +113,6 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function isFunction(value) {
-  return typeof value === "function";
-}
-
 function text(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
@@ -149,53 +148,22 @@ function emit(eventName = "", payload = {}) {
    PATHS
 ========================================================= */
 
-function normalizePath(path = "/") {
-  let value = text(path, "/");
+function currentPublicPath() {
+  const candidate =
+    Router?.getCurrentPublicPath?.() ||
+    Router?.getCurrentCanonicalPath?.() ||
+    AppCore?.state?.publicPath ||
+    AppCore?.state?.canonicalPath ||
+    AppCore?.state?.route ||
+    (isBrowser()
+      ? `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
+      : "/");
 
-  if (value.startsWith("#/")) value = value.slice(1);
-  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
-
-  if (!value.startsWith("/")) value = `/${value}`;
-
-  value = value.replace(/\/{2,}/g, "/");
-
-  return value || "/";
-}
-
-function canonicalPath(path = "/") {
-  let value = normalizePath(path).split("?")[0].split("#")[0] || "/";
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "");
-  }
-
-  return value || "/";
-}
-
-function routeLookupPath(path = "/") {
-  try {
-    if (isFunction(resolveRouteLookupPath)) {
-      return canonicalPath(resolveRouteLookupPath(path));
-    }
-  } catch {
-    // fallback abajo
-  }
-
-  return canonicalPath(path);
+  return safeNormalizePath(AppCore, candidate || "/");
 }
 
 function currentPath() {
-  try {
-    return (
-      Router?.getCurrentCanonicalPath?.() ||
-      AppCore?.state?.canonicalPath ||
-      AppCore?.state?.route ||
-      (isBrowser() ? window.location.pathname : "/") ||
-      "/"
-    );
-  } catch {
-    return "/";
-  }
+  return safeNormalizeCanonicalPath(AppCore, currentPublicPath());
 }
 
 /* =========================================================
@@ -279,9 +247,31 @@ function getMount() {
 function cacheRoot(node) {
   try {
     AppCore.dom = isObject(AppCore.dom) ? AppCore.dom : {};
+
     AppCore.dom.topbar = node;
+    AppCore.dom.appTopbar = node;
     AppCore.dom.topbarRoot = node;
-    AppCore.dom.topbarMount = query("#topbar-mount") || node;
+    AppCore.dom.topbarMount =
+      query("#topbar-mount") ||
+      (node?.parentElement?.id === "topbar-mount" ? node.parentElement : node);
+
+    AppCore.dom.topbarTitle =
+      node?.querySelector?.("[data-topbar-title]") || null;
+
+    AppCore.dom.search =
+      node?.querySelector?.("[data-topbar-search]") || null;
+    AppCore.dom.searchForm = AppCore.dom.search;
+    AppCore.dom.searchInput =
+      node?.querySelector?.("[data-topbar-search-input]") || null;
+    AppCore.dom.searchSubmit =
+      node?.querySelector?.("[data-topbar-search-submit]") || null;
+    AppCore.dom.searchResults =
+      query("#topbar-search-results") ||
+      query("[data-topbar-search-results]") ||
+      query(".topbar-search-results");
+
+    AppCore.dom.mobileSidebarToggle = null;
+    AppCore.dom.toggleSidebarMobile = null;
   } catch {
     // noop
   }
@@ -289,24 +279,54 @@ function cacheRoot(node) {
   return node;
 }
 
+function clearDomCache() {
+  try {
+    if (!isObject(AppCore.dom)) return false;
+
+    AppCore.dom.topbar = null;
+    AppCore.dom.appTopbar = null;
+    AppCore.dom.topbarRoot = null;
+    AppCore.dom.topbarTitle = null;
+
+    AppCore.dom.search = null;
+    AppCore.dom.searchForm = null;
+    AppCore.dom.searchInput = null;
+    AppCore.dom.searchSubmit = null;
+    AppCore.dom.searchResults = null;
+
+    AppCore.dom.mobileSidebarToggle = null;
+    AppCore.dom.toggleSidebarMobile = null;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function renderRootContent(header) {
   if (!header) return false;
 
-  header.id = header.id || "app-topbar";
+  header.id = "app-topbar";
   header.className = "topbar app-topbar";
   header.setAttribute("data-topbar-root", "true");
+  header.setAttribute("data-topbar", "root");
+  header.setAttribute("role", "banner");
   header.setAttribute("aria-label", "Barra superior");
 
   clear(header);
 
   const left = create("div", {
     className: "topbar-left",
+    attrs: {
+      "data-topbar-left": "true",
+    },
   });
 
   const title = create("h1", {
     className: "topbar-title",
-    textContent: `${ONION_PREFIX} ${DEFAULT_VIEW_TITLE}`,
+    textContent: `${TOPBAR_TITLE_PREFIX} ${TOPBAR_DEFAULT_VIEW_TITLE}`,
     attrs: {
+      id: "topbar-title",
       "data-topbar-title": "true",
     },
   });
@@ -323,6 +343,7 @@ function renderRootContent(header) {
   const search = create("form", {
     className: "topbar-search",
     attrs: {
+      id: "topbar-search-form",
       role: "search",
       action: "#",
       novalidate: "true",
@@ -335,12 +356,15 @@ function renderRootContent(header) {
   const input = create("input", {
     className: "topbar-search-input",
     attrs: {
+      id: "topbar-search-input",
       type: "search",
       inputmode: "search",
       autocomplete: "off",
       spellcheck: "false",
       placeholder: "Buscar",
       "aria-label": "Buscar",
+      "aria-autocomplete": "list",
+      "aria-expanded": "false",
       "data-topbar-search-input": "true",
     },
   });
@@ -348,6 +372,7 @@ function renderRootContent(header) {
   const button = create("button", {
     className: "topbar-search-submit",
     attrs: {
+      id: "topbar-search-submit",
       type: "submit",
       "aria-label": "Buscar",
       "data-topbar-search-submit": "true",
@@ -366,7 +391,20 @@ function rootHasRequiredStructure(node) {
   return Boolean(
     node?.querySelector?.("[data-topbar-title]") &&
       node?.querySelector?.("[data-topbar-search]") &&
-      node?.querySelector?.("[data-topbar-search-input]")
+      node?.querySelector?.("[data-topbar-search-input]") &&
+      node?.querySelector?.("[data-topbar-search-submit]")
+  );
+}
+
+function rootHasLegacyChrome(node) {
+  return Boolean(
+    node?.querySelector?.("[data-topbar-sidebar-toggle]") ||
+      node?.querySelector?.("[data-topbar-user]") ||
+      node?.querySelector?.("[data-topbar-logout]") ||
+      node?.querySelector?.(".topbar-sidebar-toggle") ||
+      node?.querySelector?.(".topbar-mobile-toggle") ||
+      node?.querySelector?.(".topbar-user") ||
+      node?.querySelector?.(".topbar-logout")
   );
 }
 
@@ -376,6 +414,8 @@ function buildRoot() {
     attrs: {
       id: "app-topbar",
       "data-topbar-root": "true",
+      "data-topbar": "root",
+      role: "banner",
       "aria-label": "Barra superior",
     },
   });
@@ -403,7 +443,7 @@ function ensureRoot() {
     }
   }
 
-  if (!rootHasRequiredStructure(root)) {
+  if (!rootHasRequiredStructure(root) || rootHasLegacyChrome(root)) {
     renderRootContent(root);
   }
 
@@ -432,123 +472,8 @@ function getDom() {
    TITLE
 ========================================================= */
 
-const VIEW_TITLES = Object.freeze({
-  "/": "Home",
-  "/incidencias": "Incidencias",
-  "/tickets": "Incidencias",
-  "/facturas": "Facturas",
-  "/clientes": "Clientes",
-  "/usuarios": "Usuarios",
-  "/cuenta": "Cuenta",
-  "/ajustes": "Ajustes",
-  "/servidor": "Servidor",
-  "/login": "Acceso",
-  "/activate-account": "Activar cuenta",
-  "/password-request": "Recuperar acceso",
-  "/password-reset": "Nueva contraseña",
-});
-
-const SECTION_TITLES = Object.freeze([
-  ["/incidencias", "Incidencias"],
-  ["/tickets", "Incidencias"],
-  ["/facturas", "Facturas"],
-  ["/clientes", "Clientes"],
-  ["/usuarios", "Usuarios"],
-  ["/cuenta", "Cuenta"],
-  ["/ajustes", "Ajustes"],
-  ["/servidor", "Servidor"],
-]);
-
-function routeTitle(route = null) {
-  return text(route?.title || route?.label || route?.name || "", "");
-}
-
-function decodeURIComponentSafe(value = "") {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
-function normalizeViewLabel(value = "") {
-  let output = text(value, "");
-
-  if (!output) return "";
-
-  if (output.toLowerCase() === APP_NAME.toLowerCase()) return "";
-
-  output = output.replace(/^onion\s+/i, "").trim();
-
-  return output || "";
-}
-
-function formatViewTitle(value = DEFAULT_VIEW_TITLE) {
-  const label = normalizeViewLabel(value) || DEFAULT_VIEW_TITLE;
-  return `${ONION_PREFIX} ${label}`;
-}
-
-function startsWithSection(path = "/", section = "/") {
-  return path === section || path.startsWith(`${section}/`);
-}
-
-function sectionTitle(path = "/") {
-  const clean = canonicalPath(path);
-
-  for (const [section, title] of SECTION_TITLES) {
-    if (startsWithSection(clean, section)) return title;
-  }
-
-  return "";
-}
-
-function prettyTitleFromPath(path = "/") {
-  const clean = canonicalPath(path);
-
-  if (clean === "/") return DEFAULT_VIEW_TITLE;
-
-  return clean
-    .replace(/^\/+/, "")
-    .split("/")
-    .filter(Boolean)
-    .map((part) => {
-      const decoded = decodeURIComponentSafe(part).replace(/[-_]+/g, " ").trim();
-      return decoded ? decoded.charAt(0).toUpperCase() + decoded.slice(1) : "";
-    })
-    .filter(Boolean)
-    .join(" · ");
-}
-
 function resolveRouteTitle(path = currentPath()) {
-  const raw = canonicalPath(path);
-
-  if (/^\/@[^/]+/.test(raw)) {
-    return formatViewTitle(DEFAULT_VIEW_TITLE);
-  }
-
-  const clean = routeLookupPath(path);
-
-  const directTitle = VIEW_TITLES[raw] || VIEW_TITLES[clean];
-
-  if (directTitle) return formatViewTitle(directTitle);
-
-  const knownSectionTitle = sectionTitle(raw) || sectionTitle(clean);
-
-  if (knownSectionTitle) return formatViewTitle(knownSectionTitle);
-
-  try {
-    const route = getImmutableRoutes().find((item) => {
-      return canonicalPath(item.path) === clean;
-    });
-
-    const title = normalizeViewLabel(routeTitle(route));
-
-    if (title) return formatViewTitle(title);
-  } catch {
-    // noop
-  }
-
-  return formatViewTitle(prettyTitleFromPath(raw || clean));
+  return resolveTopbarRouteTitle(AppCore, path);
 }
 
 function syncTitle(path = currentPath()) {
@@ -572,7 +497,7 @@ function syncTitle(path = currentPath()) {
 ========================================================= */
 
 function normalizeSearchValue(value = "") {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
+  return normalizeQuery(value);
 }
 
 function getSearchValue() {
@@ -588,7 +513,6 @@ function runCurrentSearch(value = getSearchValue()) {
     Router,
     runtime: searchRuntime,
     getDom,
-    closeSidebarMobile,
     query,
   });
 
@@ -600,7 +524,7 @@ function queueSearch(value = getSearchValue()) {
 
   clearSearchDebounce(searchRuntime);
 
-  if (!query) {
+  if (!query || query.length < TOPBAR_SEARCH_CONFIG.minQueryLength) {
     clearSearchState(searchRuntime, getDom);
     return true;
   }
@@ -649,13 +573,20 @@ function clearSearch() {
   return true;
 }
 
-function focusSearch() {
+function focusSearch(options = {}) {
   const { searchInput } = getDom();
 
   if (!searchInput) return false;
 
   try {
-    searchInput.focus();
+    searchInput.focus({
+      preventScroll: true,
+    });
+
+    if (options.select === true) {
+      searchInput.select?.();
+    }
+
     return true;
   } catch {
     return false;
@@ -709,38 +640,6 @@ function clearSearchCache() {
 }
 
 /* =========================================================
-   API EXISTENTE SIN RENDER ACTIVO
-========================================================= */
-
-function renderUser() {
-  return true;
-}
-
-function openSidebarMobile() {
-  return false;
-}
-
-function closeSidebarMobile() {
-  return false;
-}
-
-function toggleSidebarMobile() {
-  return false;
-}
-
-function setMobileToggleState() {
-  return false;
-}
-
-function syncFixedTopbarOffset() {
-  return true;
-}
-
-function handleViewportResize() {
-  return true;
-}
-
-/* =========================================================
    EVENTS
 ========================================================= */
 
@@ -757,6 +656,9 @@ function onInput(event) {
   if (!event.target?.matches?.("[data-topbar-search-input]")) return;
 
   searchValue = String(event.target.value ?? "");
+
+  if (event.isComposing === true) return;
+
   queueSearch(searchValue);
 }
 
@@ -769,7 +671,6 @@ function onKeydown(event) {
     Router,
     runtime: searchRuntime,
     getDom,
-    closeSidebarMobile,
   });
 }
 
@@ -781,6 +682,22 @@ function onFocusIn(event) {
   if (query) {
     runCurrentSearch(query);
   }
+}
+
+function onDocumentKeydown(event) {
+  const key = String(event?.key || "").toLowerCase();
+
+  if (!((event?.ctrlKey || event?.metaKey) && key === "k")) return;
+
+  try {
+    event.preventDefault();
+  } catch {
+    // noop
+  }
+
+  focusSearch({
+    select: true,
+  });
 }
 
 function onDocumentPointerDown(event) {
@@ -796,7 +713,7 @@ function onDocumentPointerDown(event) {
 }
 
 function bind() {
-  if (!root) return true;
+  if (!root) return false;
 
   if (bound && boundRoot === root) return true;
 
@@ -810,6 +727,7 @@ function bind() {
   root.addEventListener("focusin", onFocusIn);
 
   if (isBrowser()) {
+    document.addEventListener("keydown", onDocumentKeydown, false);
     document.addEventListener("pointerdown", onDocumentPointerDown, true);
   }
 
@@ -827,10 +745,13 @@ function bind() {
       // noop
     }
 
-    try {
-      document?.removeEventListener?.("pointerdown", onDocumentPointerDown, true);
-    } catch {
-      // noop
+    if (isBrowser()) {
+      try {
+        document.removeEventListener("keydown", onDocumentKeydown, false);
+        document.removeEventListener("pointerdown", onDocumentPointerDown, true);
+      } catch {
+        // noop
+      }
     }
 
     boundRoot = null;
@@ -859,16 +780,28 @@ function unbind() {
    LIFECYCLE
 ========================================================= */
 
+function resolveSyncPath(options = {}) {
+  return safeNormalizeCanonicalPath(
+    AppCore,
+    options.canonicalPath ||
+      options.path ||
+      options.publicPath ||
+      currentPath()
+  );
+}
+
 function sync(options = {}) {
   ensureRoot();
 
   if (!root) return false;
 
-  const path =
-    options.canonicalPath ||
-    options.path ||
-    options.publicPath ||
-    currentPath();
+  const path = resolveSyncPath(options);
+
+  if (lastRoutePath && lastRoutePath !== path) {
+    hideSearchResults();
+  }
+
+  lastRoutePath = path;
 
   syncTitle(path);
   syncSearch();
@@ -914,11 +847,19 @@ function destroy(options = {}) {
   clearSearchState(searchRuntime, getDom);
 
   if (options.unmount === true && root) {
-    clear(root);
+    try {
+      root.remove();
+    } catch {
+      clear(root);
+    }
+
+    clearDomCache();
+    root = null;
   }
 
   initialized = false;
   mounted = false;
+  lastRoutePath = "";
 
   unregisterWindowApi();
 
@@ -1010,7 +951,7 @@ function getState() {
     bound,
 
     title: root?.querySelector?.("[data-topbar-title]")?.textContent || "",
-    route: routeLookupPath(currentPath()),
+    route: currentPath(),
 
     search: getSearchSnapshot(),
 
@@ -1028,6 +969,7 @@ function getState() {
       noUserChrome: true,
       noLogout: true,
       noSidebarToggle: true,
+      noSidebarBridge: true,
       searchUi: true,
       searchRuntime: true,
       searchLocalOnly: true,
@@ -1053,17 +995,9 @@ const api = {
   render,
   refresh,
   sync,
-
-  renderUser,
-  refreshUser: renderUser,
-  updateUser: renderUser,
-  syncUser: renderUser,
+  destroy,
 
   bind,
-  rebind: sync,
-  hardRebind: sync,
-  queueRebind: sync,
-  destroy,
 
   mountTopbar: ensureRoot,
 
@@ -1091,13 +1025,6 @@ const api = {
   focusSearch,
   clearSearchCache,
 
-  openSidebarMobile,
-  closeSidebarMobile,
-  toggleSidebarMobile,
-  syncFixedTopbarOffset,
-  setMobileToggleState,
-  handleViewportResize,
-
   getState,
   getSnapshot,
   getDebugSnapshot: getSnapshot,
@@ -1116,14 +1043,6 @@ const api = {
 
   get bound() {
     return bound;
-  },
-
-  get binding() {
-    return false;
-  },
-
-  get rebinding() {
-    return false;
   },
 };
 

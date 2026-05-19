@@ -6,7 +6,8 @@
    - Construir el DOM del sidebar.
    - Exponer estructura estable para CSS SaaS.
    - Preparar header, navegación y cuenta estilo ChatGPT.
-   - Header text-only: sin icono de marca a la izquierda.
+   - Header logo-only: sin texto visible de marca.
+   - Logo white para tema dark / logo black para tema light vía CSS.
    - Preparar markup del dropdown de cuenta.
    - Recibir datos ya normalizados desde index.js/user.js.
    - No navegar.
@@ -39,7 +40,12 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v5";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v6";
+
+export const SIDEBAR_LOGO_ASSETS = Object.freeze({
+  dark: "/src/media/img/favicon_white.png",
+  light: "/src/media/img/favicon_black.png",
+});
 
 /* =========================================================
    ICON PATHS
@@ -77,7 +83,7 @@ const ICON_PATHS = Object.freeze({
     "M4 7h9.5 M17.5 7H20 M15.5 5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z M4 12h2.5 M10.5 12H20 M8.5 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z M4 17h9.5 M17.5 17H20 M15.5 15a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z",
 
   servidor:
-    "M5.5 4.25h13A2.5 2.5 0 0 1 21 6.75v2.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 9.25v-2.5a2.5 2.5 0 0 1 2.5-2.5Z M5.5 12.25h13A2.5 2.5 0 0 1 21 14.75v2.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.25v-2.5a2.5 2.5 0 0 1 2.5-2.5Z M7 8h.01 M7 16h.01 M10 8h7 M10 16h7",
+    "M5.5 4.25h13A2.5 2.5 0 0 1 21 6.75v2.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 9.25v-2.5a2.25 2.25 0 0 1 2.5-2.5Z M5.5 12.25h13A2.5 2.5 0 0 1 21 14.75v2.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.25v-2.5a2.5 2.5 0 0 1 2.5-2.5Z M7 8h.01 M7 16h.01 M10 8h7 M10 16h7",
 
   help:
     "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z M9.75 9a2.35 2.35 0 0 1 4.55.8c0 1.55-1.18 2.1-2 2.75-.55.45-.8.9-.8 1.7 M12 17.25h.01",
@@ -138,6 +144,17 @@ function safeInternalHref(value = "", fallback = "/") {
   if (/[\r\n\t\\]/.test(href)) return fallback;
 
   return href.replace(/\/{2,}/g, "/") || fallback;
+}
+
+function safeAssetSrc(value = "", fallback = "") {
+  const src = text(value, fallback);
+
+  if (!src.startsWith("/")) return fallback;
+  if (src.startsWith("//")) return fallback;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(src)) return fallback;
+  if (/[\r\n\t\\]/.test(src)) return fallback;
+
+  return src.replace(/\/{2,}/g, "/") || fallback;
 }
 
 function roleText(value = "") {
@@ -264,6 +281,65 @@ function createIconSlot(className = "", iconName = SIDEBAR_ICONS.home, svgClass 
 }
 
 /* =========================================================
+   BRAND LOGO
+========================================================= */
+
+export function createSidebarBrandLogo(options = {}) {
+  const darkSrc = safeAssetSrc(
+    options.darkSrc || options.logoDarkSrc,
+    SIDEBAR_LOGO_ASSETS.dark
+  );
+
+  const lightSrc = safeAssetSrc(
+    options.lightSrc || options.logoLightSrc,
+    SIDEBAR_LOGO_ASSETS.light
+  );
+
+  const logo = createElement("span", {
+    className: "sidebar-brand-logo",
+    attrs: {
+      "aria-hidden": "true",
+      "data-sidebar-brand-logo": "true",
+    },
+  });
+
+  const darkLogo = createElement("img", {
+    className:
+      "sidebar-brand-logo-img sidebar-brand-logo-img--theme-dark sidebar-brand-logo-img--white",
+    attrs: {
+      src: darkSrc,
+      alt: "",
+      loading: "eager",
+      decoding: "async",
+      draggable: "false",
+      "data-sidebar-logo-theme": "dark",
+      "data-sidebar-logo-asset": "white",
+    },
+  });
+
+  const lightLogo = createElement("img", {
+    className:
+      "sidebar-brand-logo-img sidebar-brand-logo-img--theme-light sidebar-brand-logo-img--black",
+    attrs: {
+      src: lightSrc,
+      alt: "",
+      loading: "eager",
+      decoding: "async",
+      draggable: "false",
+      "data-sidebar-logo-theme": "light",
+      "data-sidebar-logo-asset": "black",
+    },
+  });
+
+  appendChildren(logo, [
+    darkLogo,
+    lightLogo,
+  ]);
+
+  return logo;
+}
+
+/* =========================================================
    AVATAR
 ========================================================= */
 
@@ -322,7 +398,7 @@ export function createSidebarHeader(options = {}) {
     attrs: {
       [SIDEBAR_ATTRS.header]: "true",
       "data-sidebar-section": "header",
-      "data-sidebar-header-layout": "text-only",
+      "data-sidebar-header-layout": "logo-only",
     },
   });
 
@@ -330,7 +406,7 @@ export function createSidebarHeader(options = {}) {
     className: classNames(
       SIDEBAR_CLASSES.brand,
       "sidebar-brand--chatgpt",
-      "sidebar-brand--text-only"
+      "sidebar-brand--logo-only"
     ),
     attrs: {
       href: brandHref,
@@ -342,21 +418,23 @@ export function createSidebarHeader(options = {}) {
 
       "aria-label": brandLabel,
       "data-sidebar-action": "brand",
-      "data-sidebar-brand-text-only": "true",
+      "data-sidebar-brand-logo-only": "true",
     },
   });
 
   const brandContent = createElement("span", {
-    className: "sidebar-brand-content",
+    className: "sidebar-brand-content sidebar-brand-content--logo",
   });
 
-  appendChildren(brandContent, [
-    createSpan(SIDEBAR_CLASSES.brandText, brandLabel),
-  ]);
-
-  appendChildren(brand, [
+  appendChildren(
     brandContent,
-  ]);
+    createSidebarBrandLogo({
+      logoDarkSrc: options.logoDarkSrc,
+      logoLightSrc: options.logoLightSrc,
+    })
+  );
+
+  appendChildren(brand, brandContent);
 
   const toggle = createElement("button", {
     className: classNames(
@@ -759,6 +837,8 @@ export function createSidebarTemplate(options = {}) {
     createSidebarHeader({
       brandLabel: options.brandLabel,
       brandHref: options.brandHref,
+      logoDarkSrc: options.logoDarkSrc,
+      logoLightSrc: options.logoLightSrc,
       open,
     }),
     createSidebarNav(options.items),
@@ -776,6 +856,10 @@ export function getSidebarTemplateSnapshot() {
   return {
     version: SIDEBAR_TEMPLATE_VERSION,
 
+    logoAssets: {
+      ...SIDEBAR_LOGO_ASSETS,
+    },
+
     icons: Object.keys(ICON_PATHS),
 
     policy: {
@@ -783,7 +867,11 @@ export function getSidebarTemplateSnapshot() {
       stableCssStructure: true,
       noHtmlString: true,
 
-      textOnlyHeaderBrand: true,
+      logoOnlyHeaderBrand: true,
+      themeLogoPair: true,
+      whiteLogoForDarkTheme: true,
+      blackLogoForLightTheme: true,
+      textOnlyHeaderBrand: false,
       panelCollapseIcon: true,
 
       noNavigation: true,
@@ -820,6 +908,7 @@ export const SidebarTemplate = {
   createSidebarNavItem,
   createSidebarFooter,
   createSidebarIcon,
+  createSidebarBrandLogo,
 
   getSidebarTemplateSnapshot,
   getSnapshot: getSidebarTemplateSnapshot,

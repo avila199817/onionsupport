@@ -5,16 +5,17 @@
    Responsabilidad:
    - Topbar mínimo del panel.
    - Montar en #topbar-mount / #app-topbar.
-   - Pintar título de ruta.
-   - Resolver /@{user.slug} como Home visual.
-   - Mostrar usuario básico.
-   - SVGs inline mínimos.
-   - Botón sidebar móvil.
-   - Logout simple.
+   - Pintar título de ruta en formato Onion {Vista}.
+   - Resolver /@{user.slug} como Onion Home visual.
+   - Renderizar search del topbar.
+   - No renderizar saludo, usuario ni salida.
+   - No renderizar botón hamburguesa.
    - Sin Store.
    - Sin HTTP.
    - Sin Toast.
-   - Sin search runtime.
+   - Sin Auth.
+   - Sin logout.
+   - Sin sidebar bridge activo.
    - Sin submódulos.
    - Sin rebind storms.
    - Sin CustomEvent.
@@ -22,7 +23,6 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-import { Auth } from "../../features/auth/index.js";
 import { Router } from "../../router/index.js";
 
 import {
@@ -30,29 +30,30 @@ import {
   resolveRouteLookupPath,
 } from "../../router/routes.js";
 
-export const TOPBAR_UI_VERSION = "topbar.ui.v2";
+export const TOPBAR_UI_VERSION = "topbar.ui.v3";
 
 const SOURCE = "topbar.ui";
 const APP_NAME = "Onion Support";
-const LOGIN_ROUTE = "/login";
+const ONION_PREFIX = "Onion";
+const DEFAULT_VIEW_TITLE = "Home";
 
 let initialized = false;
 let mounted = false;
 let bound = false;
 let root = null;
-let cleanupClick = null;
+let cleanupEvents = null;
+let searchValue = "";
 
 /* =========================================================
    SVG ICONS
 ========================================================= */
 
 const ICONS = Object.freeze({
-  menu: "M4 6h16 M4 12h16 M4 18h16",
-  user: "M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M5.5 21a6.5 6.5 0 0 1 13 0",
-  logout: "M16 17l5-5-5-5 M21 12H9 M4 4h5v16H4z",
+  search:
+    "M21 21l-4.35-4.35 M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z",
 });
 
-function icon(name = "user", className = "topbar-svg") {
+function icon(name = "search", className = "topbar-svg") {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
 
@@ -64,7 +65,7 @@ function icon(name = "user", className = "topbar-svg") {
   svg.setAttribute("focusable", "false");
   svg.setAttribute("aria-hidden", "true");
 
-  path.setAttribute("d", ICONS[name] || ICONS.user);
+  path.setAttribute("d", ICONS[name] || ICONS.search);
   path.setAttribute("stroke", "currentColor");
   path.setAttribute("stroke-width", "1.7");
   path.setAttribute("stroke-linecap", "round");
@@ -175,86 +176,6 @@ function currentPath() {
 }
 
 /* =========================================================
-   USER
-========================================================= */
-
-function userDisabled(user = null) {
-  if (!isObject(user)) return true;
-
-  return (
-    user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
-  );
-}
-
-function usableUser(user = null) {
-  if (!isObject(user)) return false;
-  if (userDisabled(user)) return false;
-
-  return Boolean(
-    user.id ||
-      user.userId ||
-      user.username ||
-      user.slug ||
-      user.email
-  );
-}
-
-function getUser() {
-  try {
-    const user = Auth?.getUser?.() || Auth?.getCurrentUser?.();
-
-    if (usableUser(user)) return user;
-  } catch {
-    // noop
-  }
-
-  const state = isObject(AppCore?.state) ? AppCore.state : {};
-
-  const user =
-    state.user ||
-    state.currentUser ||
-    state.authUser ||
-    state.sessionUser ||
-    state.session?.user ||
-    null;
-
-  return usableUser(user) ? user : null;
-}
-
-function normalizeRole(value = "") {
-  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
-}
-
-function getRole() {
-  try {
-    const role = Auth?.getRole?.() || Auth?.getCurrentRole?.();
-
-    if (role) return normalizeRole(role);
-  } catch {
-    // noop
-  }
-
-  const user = getUser();
-  const state = isObject(AppCore?.state) ? AppCore.state : {};
-
-  return normalizeRole(state.role || user?.role || user?.rol || "user");
-}
-
-function displayName(user = null) {
-  return text(
-    user?.name ||
-      user?.fullName ||
-      user?.displayName ||
-      user?.nombre ||
-      user?.username ||
-      user?.email ||
-      "Usuario",
-    "Usuario"
-  );
-}
-
-/* =========================================================
    DOM
 ========================================================= */
 
@@ -272,7 +193,10 @@ function query(selector = "") {
   }
 }
 
-function create(tag = "div", { className = "", textContent = "", attrs = {}, dataset = {} } = {}) {
+function create(
+  tag = "div",
+  { className = "", textContent = "", attrs = {}, dataset = {} } = {}
+) {
   const node = document.createElement(tag);
 
   if (className) node.className = className;
@@ -342,6 +266,87 @@ function cacheRoot(node) {
   return node;
 }
 
+function renderRootContent(header) {
+  if (!header) return false;
+
+  header.id = header.id || "app-topbar";
+  header.className = "topbar app-topbar";
+  header.setAttribute("data-topbar-root", "true");
+  header.setAttribute("aria-label", "Barra superior");
+
+  clear(header);
+
+  const left = create("div", {
+    className: "topbar-left",
+  });
+
+  const title = create("h1", {
+    className: "topbar-title",
+    textContent: `${ONION_PREFIX} ${DEFAULT_VIEW_TITLE}`,
+    attrs: {
+      "data-topbar-title": "true",
+    },
+  });
+
+  left.appendChild(title);
+
+  const right = create("div", {
+    className: "topbar-right",
+    attrs: {
+      "data-topbar-search-shell": "true",
+    },
+  });
+
+  const search = create("form", {
+    className: "topbar-search",
+    attrs: {
+      role: "search",
+      action: "#",
+      novalidate: "true",
+      autocomplete: "off",
+      "aria-label": "Buscar",
+      "data-topbar-search": "true",
+    },
+  });
+
+  const input = create("input", {
+    className: "topbar-search-input",
+    attrs: {
+      type: "search",
+      inputmode: "search",
+      autocomplete: "off",
+      spellcheck: "false",
+      placeholder: "Buscar",
+      "aria-label": "Buscar",
+      "data-topbar-search-input": "true",
+    },
+  });
+
+  const button = create("button", {
+    className: "topbar-search-submit",
+    attrs: {
+      type: "submit",
+      "aria-label": "Buscar",
+      "data-topbar-search-submit": "true",
+    },
+  });
+
+  button.appendChild(icon("search", "topbar-search-svg"));
+  search.append(input, button);
+  right.appendChild(search);
+  header.append(left, right);
+
+  return true;
+}
+
+function rootHasRequiredStructure(node) {
+  return Boolean(
+    node?.querySelector?.("[data-topbar-title]") &&
+      node?.querySelector?.("[data-topbar-search]") &&
+      node?.querySelector?.("[data-topbar-search-input]")
+  );
+}
+
 function buildRoot() {
   const header = create("header", {
     className: "topbar app-topbar",
@@ -352,41 +357,7 @@ function buildRoot() {
     },
   });
 
-  const left = create("div", {
-    className: "topbar-left",
-  });
-
-  const toggle = create("button", {
-    className: "topbar-sidebar-toggle",
-    attrs: {
-      type: "button",
-      "aria-label": "Abrir menú",
-      "aria-expanded": "false",
-      "data-topbar-sidebar-toggle": "true",
-    },
-  });
-
-  toggle.appendChild(icon("menu", "topbar-sidebar-toggle-svg"));
-
-  const title = create("h1", {
-    className: "topbar-title",
-    textContent: APP_NAME,
-    attrs: {
-      "data-topbar-title": "true",
-    },
-  });
-
-  left.append(toggle, title);
-
-  const right = create("div", {
-    className: "topbar-right",
-    attrs: {
-      "data-topbar-user": "true",
-    },
-  });
-
-  header.append(left, right);
-
+  renderRootContent(header);
   return header;
 }
 
@@ -409,6 +380,10 @@ function ensureRoot() {
     }
   }
 
+  if (!rootHasRequiredStructure(root)) {
+    renderRootContent(root);
+  }
+
   return cacheRoot(root);
 }
 
@@ -418,14 +393,43 @@ function getDom() {
   return {
     topbar: root,
     title: root?.querySelector?.("[data-topbar-title]") || null,
-    user: root?.querySelector?.("[data-topbar-user]") || null,
-    sidebarToggle: root?.querySelector?.("[data-topbar-sidebar-toggle]") || null,
+    search: root?.querySelector?.("[data-topbar-search]") || null,
+    searchInput: root?.querySelector?.("[data-topbar-search-input]") || null,
+    searchSubmit: root?.querySelector?.("[data-topbar-search-submit]") || null,
   };
 }
 
 /* =========================================================
    TITLE
 ========================================================= */
+
+const VIEW_TITLES = Object.freeze({
+  "/": "Home",
+  "/home": "Home",
+  "/incidencias": "Incidencias",
+  "/tickets": "Incidencias",
+  "/facturas": "Facturas",
+  "/clientes": "Clientes",
+  "/usuarios": "Usuarios",
+  "/cuenta": "Cuenta",
+  "/ajustes": "Ajustes",
+  "/servidor": "Servidor",
+  "/login": "Acceso",
+  "/activate-account": "Activar cuenta",
+  "/password-request": "Recuperar acceso",
+  "/password-reset": "Nueva contraseña",
+});
+
+const SECTION_TITLES = Object.freeze([
+  ["/incidencias", "Incidencias"],
+  ["/tickets", "Incidencias"],
+  ["/facturas", "Facturas"],
+  ["/clientes", "Clientes"],
+  ["/usuarios", "Usuarios"],
+  ["/cuenta", "Cuenta"],
+  ["/ajustes", "Ajustes"],
+  ["/servidor", "Servidor"],
+]);
 
 function routeTitle(route = null) {
   return text(route?.title || route?.label || route?.name || "", "");
@@ -439,50 +443,84 @@ function decodeURIComponentSafe(value = "") {
   }
 }
 
+function normalizeViewLabel(value = "") {
+  let output = text(value, "");
+
+  if (!output) return "";
+
+  if (output.toLowerCase() === APP_NAME.toLowerCase()) return "";
+
+  output = output.replace(/^onion\s+/i, "").trim();
+
+  return output || "";
+}
+
+function formatViewTitle(value = DEFAULT_VIEW_TITLE) {
+  const label = normalizeViewLabel(value) || DEFAULT_VIEW_TITLE;
+  return `${ONION_PREFIX} ${label}`;
+}
+
+function startsWithSection(path = "/", section = "/") {
+  return path === section || path.startsWith(`${section}/`);
+}
+
+function sectionTitle(path = "/") {
+  const clean = canonicalPath(path);
+
+  for (const [section, title] of SECTION_TITLES) {
+    if (startsWithSection(clean, section)) return title;
+  }
+
+  return "";
+}
+
+function prettyTitleFromPath(path = "/") {
+  const clean = canonicalPath(path);
+
+  if (clean === "/") return DEFAULT_VIEW_TITLE;
+
+  return clean
+    .replace(/^\/+/, "")
+    .split("/")
+    .filter(Boolean)
+    .map((part) => {
+      const decoded = decodeURIComponentSafe(part).replace(/[-_]+/g, " ").trim();
+      return decoded ? decoded.charAt(0).toUpperCase() + decoded.slice(1) : "";
+    })
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function resolveRouteTitle(path = currentPath()) {
+  const raw = canonicalPath(path);
+
+  if (/^\/@[^/]+/.test(raw)) {
+    return formatViewTitle(DEFAULT_VIEW_TITLE);
+  }
+
   const clean = routeLookupPath(path);
+
+  const directTitle = VIEW_TITLES[raw] || VIEW_TITLES[clean];
+
+  if (directTitle) return formatViewTitle(directTitle);
+
+  const knownSectionTitle = sectionTitle(raw) || sectionTitle(clean);
+
+  if (knownSectionTitle) return formatViewTitle(knownSectionTitle);
 
   try {
     const route = getImmutableRoutes().find((item) => {
       return canonicalPath(item.path) === clean;
     });
 
-    const title = routeTitle(route);
+    const title = normalizeViewLabel(routeTitle(route));
 
-    if (title) return title;
+    if (title) return formatViewTitle(title);
   } catch {
     // noop
   }
 
-  const fallback = {
-    "/": "Inicio",
-    "/incidencias": "Incidencias",
-    "/facturas": "Facturas",
-    "/usuarios": "Usuarios",
-    "/clientes": "Clientes",
-    "/cuenta": "Cuenta",
-    "/ajustes": "Ajustes",
-    "/servidor": "Servidor",
-    "/login": "Acceso",
-    "/activate-account": "Activar cuenta",
-    "/password-request": "Recuperar acceso",
-    "/password-reset": "Nueva contraseña",
-  };
-
-  if (fallback[clean]) return fallback[clean];
-
-  const pretty = clean
-    .replace(/^\/+/, "")
-    .split("/")
-    .filter(Boolean)
-    .map((part) => {
-      const decoded = decodeURIComponentSafe(part).replace(/[-_]+/g, " ");
-      return decoded ? decoded.charAt(0).toUpperCase() + decoded.slice(1) : "";
-    })
-    .filter(Boolean)
-    .join(" · ");
-
-  return pretty || APP_NAME;
+  return formatViewTitle(prettyTitleFromPath(raw || clean));
 }
 
 function syncTitle(path = currentPath()) {
@@ -502,153 +540,113 @@ function syncTitle(path = currentPath()) {
 }
 
 /* =========================================================
-   USER
+   SEARCH
 ========================================================= */
 
-function renderUser() {
-  const { user: userRoot } = getDom();
+function normalizeSearchValue(value = "") {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
 
-  if (!userRoot) return false;
+function getSearchValue() {
+  const { searchInput } = getDom();
+  return normalizeSearchValue(searchInput?.value || searchValue);
+}
 
-  clear(userRoot);
+function setSearchValue(value = "") {
+  const next = String(value ?? "");
+  const { searchInput } = getDom();
 
-  const user = getUser();
-  const role = getRole();
+  searchValue = next;
 
-  const userIcon = create("span", {
-    className: "topbar-user-icon",
-    attrs: {
-      "aria-hidden": "true",
-    },
-  });
-
-  userIcon.appendChild(icon("user", "topbar-user-svg"));
-
-  const info = create("span", {
-    className: "topbar-user-info",
-  });
-
-  const name = create("span", {
-    className: "topbar-user-name",
-    textContent: displayName(user),
-  });
-
-  const meta = create("span", {
-    className: "topbar-user-role",
-    textContent: role === "admin" ? "Admin" : "Usuario",
-  });
-
-  info.append(name, meta);
-
-  const logout = create("button", {
-    className: "topbar-logout",
-    attrs: {
-      type: "button",
-      "data-topbar-logout": "true",
-      "aria-label": "Salir",
-    },
-  });
-
-  logout.appendChild(icon("logout", "topbar-logout-svg"));
-
-  const logoutText = create("span", {
-    className: "topbar-logout-label",
-    textContent: "Salir",
-  });
-
-  logout.appendChild(logoutText);
-
-  userRoot.append(userIcon, info, logout);
+  if (searchInput && searchInput.value !== next) {
+    searchInput.value = next;
+  }
 
   return true;
 }
 
+function clearSearch() {
+  setSearchValue("");
+  emit("topbar:search:clear", {
+    query: null,
+  });
+  return true;
+}
+
+function focusSearch() {
+  const { searchInput } = getDom();
+
+  if (!searchInput) return false;
+
+  try {
+    searchInput.focus();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function submitSearch(value = getSearchValue()) {
+  const query = normalizeSearchValue(value);
+
+  if (!query) {
+    clearSearch();
+    focusSearch();
+    return false;
+  }
+
+  setSearchValue(query);
+
+  emit("topbar:search", {
+    query,
+  });
+
+  return true;
+}
+
+function syncSearch() {
+  const { search, searchInput } = getDom();
+
+  if (!search || !searchInput) return false;
+
+  try {
+    searchInput.value = String(searchValue ?? "");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hideSearchResults() {
+  return true;
+}
+
+function clearSearchCache() {
+  return true;
+}
+
 /* =========================================================
-   SIDEBAR BRIDGE
+   API EXISTENTE SIN RENDER ACTIVO
 ========================================================= */
 
-function getSidebar() {
-  try {
-    return (
-      AppCore?.SidebarUI ||
-      AppCore?.Sidebar ||
-      AppCore?.sidebarUI ||
-      AppCore?.sidebar ||
-      AppCore?.modules?.get?.("SidebarUI") ||
-      AppCore?.modules?.get?.("sidebar") ||
-      null
-    );
-  } catch {
-    return null;
-  }
+function renderUser() {
+  return true;
 }
 
 function openSidebarMobile() {
-  const sidebar = getSidebar();
-
-  try {
-    if (isFunction(sidebar?.openSidebar)) return sidebar.openSidebar();
-    if (isFunction(sidebar?.open)) return sidebar.open();
-  } catch {
-    // noop
-  }
-
-  try {
-    document.body?.classList?.add?.("sidebar-open");
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 function closeSidebarMobile() {
-  const sidebar = getSidebar();
-
-  try {
-    if (isFunction(sidebar?.closeSidebar)) return sidebar.closeSidebar();
-    if (isFunction(sidebar?.close)) return sidebar.close();
-  } catch {
-    // noop
-  }
-
-  try {
-    document.body?.classList?.remove?.("sidebar-open");
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 function toggleSidebarMobile() {
-  const sidebar = getSidebar();
-
-  try {
-    if (isFunction(sidebar?.toggleSidebar)) return sidebar.toggleSidebar();
-    if (isFunction(sidebar?.toggle)) return sidebar.toggle();
-  } catch {
-    // noop
-  }
-
-  try {
-    document.body?.classList?.toggle?.("sidebar-open");
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 function setMobileToggleState() {
-  const { sidebarToggle } = getDom();
-
-  if (!sidebarToggle) return false;
-
-  try {
-    const open = Boolean(AppCore?.state?.sidebarOpen);
-    sidebarToggle.setAttribute("aria-expanded", open ? "true" : "false");
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 function syncFixedTopbarOffset() {
@@ -660,98 +658,39 @@ function handleViewportResize() {
 }
 
 /* =========================================================
-   LOGOUT / NAVIGATION
-========================================================= */
-
-async function navigateTo(path = LOGIN_ROUTE) {
-  const target = normalizePath(path || LOGIN_ROUTE);
-
-  try {
-    if (isFunction(Router?.replace)) {
-      await Router.replace(target, {
-        source: SOURCE,
-        replaceState: true,
-        force: true,
-      });
-      return true;
-    }
-
-    if (isFunction(Router?.navigate)) {
-      await Router.navigate(target, {
-        source: SOURCE,
-        replaceState: true,
-        force: true,
-      });
-      return true;
-    }
-  } catch {
-    // fallback abajo
-  }
-
-  if (!isBrowser()) return false;
-
-  try {
-    window.location.assign(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function handleLogout() {
-  try {
-    if (isFunction(Auth?.logout)) {
-      await Auth.logout({
-        source: SOURCE,
-        skipNavigation: true,
-        skipRedirect: true,
-        noRedirect: true,
-      });
-    } else if (isFunction(Auth?.clearSession)) {
-      Auth.clearSession({
-        source: SOURCE,
-      });
-    }
-  } finally {
-    await navigateTo(LOGIN_ROUTE);
-  }
-
-  return true;
-}
-
-/* =========================================================
    EVENTS
 ========================================================= */
 
-function onClick(event) {
-  const target = event.target;
+function onSubmit(event) {
+  const form = event.target?.closest?.("[data-topbar-search]");
 
-  if (target?.closest?.("[data-topbar-sidebar-toggle]")) {
-    event.preventDefault();
-    toggleSidebarMobile();
-    setMobileToggleState();
-    return;
-  }
+  if (!form) return;
 
-  if (target?.closest?.("[data-topbar-logout]")) {
-    event.preventDefault();
-    handleLogout();
-  }
+  event.preventDefault();
+  submitSearch();
+}
+
+function onInput(event) {
+  if (!event.target?.matches?.("[data-topbar-search-input]")) return;
+
+  searchValue = String(event.target.value ?? "");
 }
 
 function bind() {
   if (!root || bound) return true;
 
-  root.addEventListener("click", onClick);
+  root.addEventListener("submit", onSubmit);
+  root.addEventListener("input", onInput);
 
-  cleanupClick = () => {
+  cleanupEvents = () => {
     try {
-      root?.removeEventListener?.("click", onClick);
+      root?.removeEventListener?.("submit", onSubmit);
+      root?.removeEventListener?.("input", onInput);
     } catch {
       // noop
     }
 
-    cleanupClick = null;
+    cleanupEvents = null;
   };
 
   bound = true;
@@ -760,9 +699,9 @@ function bind() {
 
 function unbind() {
   try {
-    cleanupClick?.();
+    cleanupEvents?.();
   } catch {
-    cleanupClick = null;
+    cleanupEvents = null;
   }
 
   bound = false;
@@ -785,8 +724,7 @@ function sync(options = {}) {
     currentPath();
 
   syncTitle(path);
-  renderUser();
-  setMobileToggleState();
+  syncSearch();
 
   setHidden(
     root,
@@ -837,26 +775,6 @@ function destroy(options = {}) {
   unregisterWindowApi();
 
   emit("topbar:destroyed");
-  return true;
-}
-
-/* =========================================================
-   SEARCH COMPAT NO-OPS
-========================================================= */
-
-function hideSearchResults() {
-  return true;
-}
-
-function clearSearch() {
-  return true;
-}
-
-function focusSearch() {
-  return false;
-}
-
-function clearSearchCache() {
   return true;
 }
 
@@ -913,8 +831,11 @@ function getDomSnapshot() {
   return {
     topbar: Boolean(dom.topbar),
     title: Boolean(dom.title),
-    user: Boolean(dom.user),
-    sidebarToggle: Boolean(dom.sidebarToggle),
+    search: Boolean(dom.search),
+    searchInput: Boolean(dom.searchInput),
+    searchSubmit: Boolean(dom.searchSubmit),
+    sidebarToggle: false,
+    user: false,
   };
 }
 
@@ -929,20 +850,6 @@ function getState() {
     title: root?.querySelector?.("[data-topbar-title]")?.textContent || "",
     route: routeLookupPath(currentPath()),
 
-    user: (() => {
-      const user = getUser();
-
-      return user
-        ? {
-            id: user.id || user.userId || null,
-            userId: user.userId || user.id || null,
-            username: user.username || user.slug || null,
-            displayName: displayName(user),
-            role: getRole(),
-          }
-        : null;
-    })(),
-
     dom: {
       ...getDomSnapshot(),
       hasSvg: Boolean(root?.querySelector?.("svg")),
@@ -955,7 +862,11 @@ function getState() {
       ownStore: false,
       ownToast: false,
       noSubmodules: true,
-      noSearchRuntime: true,
+      noUserChrome: true,
+      noLogout: true,
+      noSidebarToggle: true,
+      searchUi: true,
+      searchRuntime: false,
       svgIcons: true,
       canonicalizesUserHomePath: true,
       roles: ["admin", "user"],
@@ -1006,17 +917,20 @@ const api = {
   syncTitle,
   resolveRouteTitle,
 
+  getSearchValue,
+  setSearchValue,
+  submitSearch,
+  hideSearchResults,
+  clearSearch,
+  focusSearch,
+  clearSearchCache,
+
   openSidebarMobile,
   closeSidebarMobile,
   toggleSidebarMobile,
   syncFixedTopbarOffset,
   setMobileToggleState,
   handleViewportResize,
-
-  hideSearchResults,
-  clearSearch,
-  focusSearch,
-  clearSearchCache,
 
   getState,
   getSnapshot,

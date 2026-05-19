@@ -11,6 +11,8 @@
    - Modelo/normalización delegado en home.model.js.
    - Eventos DOM delegados en home.bindings.js.
    - Acciones delegadas en home.actions.js.
+   - Home distinto para admin/user.
+   - User no arrastra usuarios/clientes de cache admin.
    - Renderiza dentro del host recibido por Router.
    - Devuelve API/controller, no el contenedor padre.
    - Sin validar rutas.
@@ -70,6 +72,7 @@ import {
   buildHomeActivityFromCollections,
   findHomeTicketById,
   paginateHomeItems,
+  buildHomeTemplatePayload,
 } from "./home.model.js";
 
 import {
@@ -98,7 +101,7 @@ import {
   showToast,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v2";
+export const HOME_VIEW_VERSION = "home.view.v3";
 
 export const HomeView = (() => {
   "use strict";
@@ -128,11 +131,7 @@ export const HomeView = (() => {
   }
 
   function isElement(value = null) {
-    return Boolean(
-      value &&
-        typeof value === "object" &&
-        value.nodeType === 1
-    );
+    return Boolean(value && typeof value === "object" && value.nodeType === 1);
   }
 
   function nextRenderSeq() {
@@ -192,6 +191,10 @@ export const HomeView = (() => {
     return role === "admin" ? "admin" : "user";
   }
 
+  function isAdmin() {
+    return getCurrentRole() === "admin";
+  }
+
   function getContainer(candidate = null, context = {}) {
     if (!isBrowser()) return null;
 
@@ -205,8 +208,8 @@ export const HomeView = (() => {
       AppCore?.dom?.routerViewHost ||
       AppCore?.dom?.viewHost ||
       AppCore?.dom?.viewContainer ||
-      document.getElementById("view-container") ||
       document.querySelector("[data-router-view-host='true']") ||
+      document.getElementById("view-container") ||
       document.querySelector("[data-router-view]") ||
       document.querySelector("[data-view-root]") ||
       document.getElementById("app-content") ||
@@ -238,6 +241,15 @@ export const HomeView = (() => {
     );
   }
 
+  function escapeHtml(value = "") {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   function htmlToElement(html = "") {
     if (!isBrowser()) return null;
 
@@ -255,8 +267,28 @@ export const HomeView = (() => {
     return Boolean(isObject(value) && Object.keys(value).length > 0);
   }
 
+  function dashboardRoleMismatch(raw = {}) {
+    const currentRole = getCurrentRole();
+    const data = safeObject(raw);
+
+    const sourceRole = safeText(
+      first(
+        data.role,
+        data.meta?.role,
+        data.dashboard?.role,
+        data.dashboard?.meta?.role,
+        ""
+      ),
+      ""
+    ).toLowerCase();
+
+    if (!sourceRole) return false;
+
+    return sourceRole !== currentRole;
+  }
+
   /* =======================================================
-     STATE NORMALIZATION
+     STATE SHAPE
   ======================================================= */
 
   function ensureBaseState() {
@@ -270,8 +302,10 @@ export const HomeView = (() => {
 
     homeState.tickets = safeArray(homeState.tickets);
     homeState.invoices = safeArray(homeState.invoices);
-    homeState.users = safeArray(homeState.users);
-    homeState.clients = safeArray(homeState.clients);
+
+    homeState.users = isAdmin() ? safeArray(homeState.users) : [];
+    homeState.clients = isAdmin() ? safeArray(homeState.clients) : [];
+
     homeState.activity = safeArray(homeState.activity);
 
     homeState.loading = Boolean(homeState.loading);
@@ -288,31 +322,6 @@ export const HomeView = (() => {
     return homeState;
   }
 
-  function hasDashboardData(dashboard = {}) {
-    const data = safeObject(dashboard);
-
-    return Boolean(
-      hasKeys(data.summary) ||
-        safeArray(data.widgets).length ||
-        safeArray(data.tickets).length ||
-        safeArray(data.incidencias).length ||
-        safeArray(data.invoices).length ||
-        safeArray(data.facturas).length ||
-        safeArray(data.clients).length ||
-        safeArray(data.clientes).length ||
-        safeArray(data.users).length ||
-        safeArray(data.usuarios).length ||
-        safeArray(data.activity).length ||
-        safeArray(data.recent).length ||
-        safeNumber(data.totalTickets, 0) > 0 ||
-        safeNumber(data.incidenciasTotal, 0) > 0 ||
-        safeNumber(data.facturasTotal, 0) > 0 ||
-        safeNumber(data.clientsCount, 0) > 0 ||
-        safeNumber(data.clientesCount, 0) > 0 ||
-        safeNumber(data.usersCount, 0) > 0
-    );
-  }
-
   function normalizeDashboardPayload(payload = {}) {
     const source = safeObject(
       first(
@@ -324,7 +333,19 @@ export const HomeView = (() => {
       )
     );
 
-    const dashboard = normalizeHomeDashboard(source);
+    const role = getCurrentRole();
+    const admin = role === "admin";
+
+    const dashboard = normalizeHomeDashboard({
+      ...source,
+      role,
+      admin,
+      meta: {
+        ...safeObject(source.meta),
+        role,
+        admin,
+      },
+    });
 
     const requestId = safeText(
       first(
@@ -354,11 +375,21 @@ export const HomeView = (() => {
     return {
       dashboard: {
         ...dashboard,
+        role,
+        admin,
         requestId,
         updatedAt: lastSyncAt,
+        meta: {
+          ...safeObject(dashboard.meta),
+          role,
+          admin,
+          requestId,
+          updatedAt: lastSyncAt,
+        },
       },
       requestId,
       lastSyncAt,
+      roleMismatch: dashboardRoleMismatch(source),
     };
   }
 
@@ -366,12 +397,15 @@ export const HomeView = (() => {
     const opts = safeObject(options);
     const normalized = normalizeDashboardPayload(payload);
 
-    if (!hasDashboardData(normalized.dashboard)) {
+    if (!hasKeys(normalized.dashboard)) {
       return null;
     }
 
+    const currentIsUser = !isAdmin();
+    const replace = opts.replace === true || normalized.roleMismatch || currentIsUser;
+
     syncHomeStateFromDashboard(normalized.dashboard, {
-      replace: opts.replace === true,
+      replace,
       requestId: normalized.requestId,
       lastSyncAt: normalized.lastSyncAt,
     });
@@ -383,8 +417,8 @@ export const HomeView = (() => {
         lastSyncAt: normalized.lastSyncAt,
       },
       {
-        preserveExisting: opts.preserveExisting !== false,
-        replace: opts.replace === true,
+        preserveExisting: replace ? false : opts.preserveExisting !== false,
+        replace,
       }
     );
 
@@ -411,7 +445,7 @@ export const HomeView = (() => {
   }
 
   /* =======================================================
-     TEMPLATE PAYLOAD
+     DATA READ
   ======================================================= */
 
   function getTickets() {
@@ -423,19 +457,30 @@ export const HomeView = (() => {
   }
 
   function getUsers() {
-    return normalizeHomeUsers(homeState.users);
+    return isAdmin() ? normalizeHomeUsers(homeState.users) : [];
   }
 
   function getClients() {
-    return normalizeHomeClients(homeState.clients);
+    return isAdmin() ? normalizeHomeClients(homeState.clients) : [];
+  }
+
+  function filterActivityForRole(items = []) {
+    const rows = normalizeHomeActivityList(items);
+
+    if (isAdmin()) return rows;
+
+    return rows.filter((item) => {
+      const type = safeText(first(item.type, item.kind, item.category), "").toLowerCase();
+      return type !== "client" && type !== "cliente" && type !== "user" && type !== "usuario";
+    });
   }
 
   function getActivity() {
-    const current = normalizeHomeActivityList(homeState.activity);
+    const current = filterActivityForRole(homeState.activity);
 
     if (current.length) return current;
 
-    return normalizeHomeActivityList(
+    return filterActivityForRole(
       buildHomeActivityFromCollections({
         tickets: getTickets(),
         invoices: getInvoices(),
@@ -478,23 +523,22 @@ export const HomeView = (() => {
   }
 
   function buildDashboardForTemplate() {
+    const role = getCurrentRole();
+    const admin = role === "admin";
+
     const tickets = getTickets();
     const invoices = getInvoices();
-    const users = getUsers();
-    const clients = getClients();
+    const users = admin ? getUsers() : [];
+    const clients = admin ? getClients() : [];
     const activity = getActivity();
 
-    const summary = safeObject(homeState.summary);
-
-    return {
+    return normalizeHomeDashboard({
       ...safeObject(homeState.dashboard),
 
-      summary,
-      stats: summary,
-      metrics: summary,
-      totals: summary,
-      counts: summary,
+      role,
+      admin,
 
+      summary: safeObject(homeState.summary),
       widgets: safeArray(homeState.widgets),
 
       tickets,
@@ -515,44 +559,41 @@ export const HomeView = (() => {
       recent: activity,
       recentActivity: activity,
 
-      ticketsTotal: Math.max(tickets.length, safeNumber(homeState.ticketsRemoteCount, tickets.length)),
-      incidenciasTotal: Math.max(tickets.length, safeNumber(homeState.ticketsRemoteCount, tickets.length)),
-
-      invoicesTotal: Math.max(invoices.length, safeNumber(homeState.invoicesRemoteCount, invoices.length)),
-      facturasTotal: Math.max(invoices.length, safeNumber(homeState.invoicesRemoteCount, invoices.length)),
-
-      usersTotal: Math.max(users.length, safeNumber(homeState.usersRemoteCount, users.length)),
-      usuariosTotal: Math.max(users.length, safeNumber(homeState.usersRemoteCount, users.length)),
-
-      clientsTotal: Math.max(clients.length, safeNumber(homeState.clientsRemoteCount, clients.length)),
-      clientesTotal: Math.max(clients.length, safeNumber(homeState.clientsRemoteCount, clients.length)),
-
-      updatedAt: homeState.lastSyncAt || "",
       requestId: homeState.requestId || "",
-    };
+      updatedAt: homeState.lastSyncAt || "",
+      lastSyncAt: homeState.lastSyncAt || "",
+
+      meta: {
+        ...safeObject(homeState.meta),
+        role,
+        admin,
+        requestId: homeState.requestId || "",
+        updatedAt: homeState.lastSyncAt || "",
+      },
+    });
   }
 
   function buildTemplatePayload() {
     ensureBaseState();
 
+    const role = getCurrentRole();
+    const admin = role === "admin";
+
     const tickets = getTickets();
     const invoices = getInvoices();
-    const users = getUsers();
-    const clients = getClients();
+    const users = admin ? getUsers() : [];
+    const clients = admin ? getClients() : [];
     const activity = getActivity();
     const dashboard = buildDashboardForTemplate();
     const pagination = getPagination(tickets);
 
-    return {
+    return buildHomeTemplatePayload({
       user: getCurrentUser(),
-      role: getCurrentRole(),
+      role,
 
       dashboard,
-      summary: safeObject(homeState.summary),
-      stats: safeObject(homeState.summary),
-      metrics: safeObject(homeState.summary),
-      totals: safeObject(homeState.summary),
 
+      summary: safeObject(homeState.summary),
       widgets: safeArray(homeState.widgets),
 
       tickets,
@@ -573,15 +614,15 @@ export const HomeView = (() => {
 
       page: pagination.page,
       pageSize: pagination.pageSize,
-      totalPages: pagination.totalPages,
-      totalCount: pagination.totalCount || pagination.total || tickets.length,
-      pageItems: pagination.items || pagination.pageItems || [],
 
       requestId: homeState.requestId || "",
       lastUpdatedAt: homeState.lastSyncAt || "",
 
       state: {
         ...getHomeStateSnapshot(),
+
+        role,
+        admin,
 
         dashboard,
         summary: safeObject(homeState.summary),
@@ -604,7 +645,7 @@ export const HomeView = (() => {
 
         pagination,
       },
-    };
+    });
   }
 
   /* =======================================================
@@ -630,14 +671,16 @@ export const HomeView = (() => {
   function renderError(container = null, error = null) {
     if (!isElement(container)) return null;
 
+    const message = safeErrorMessage(error);
+
     const node =
-      htmlToElement(renderHomeErrorState(safeErrorMessage(error))) ||
+      htmlToElement(renderHomeErrorState(message)) ||
       htmlToElement(`
         <section class="panel-content home-view home-view--error" data-view="home">
           <div class="content-wrapper home-view-wrapper">
             <div class="home-error-fallback" role="alert">
               <h1>No se pudo cargar el Home</h1>
-              <p>${safeErrorMessage(error)}</p>
+              <p>${escapeHtml(message)}</p>
             </div>
           </div>
         </section>
@@ -724,8 +767,8 @@ export const HomeView = (() => {
     return Boolean(
       getTickets().length ||
         getInvoices().length ||
-        getUsers().length ||
-        getClients().length ||
+        (isAdmin() && getUsers().length) ||
+        (isAdmin() && getClients().length) ||
         getActivity().length ||
         hasKeys(homeState.summary) ||
         hasKeys(homeState.dashboard)
@@ -765,14 +808,11 @@ export const HomeView = (() => {
 
         const normalized = applyDashboardPayload(response, {
           source: refresh ? "home.refresh" : "home.load",
-          preserveExisting: true,
+          replace: true,
+          preserveExisting: false,
         });
 
-        if (!normalized) {
-          return false;
-        }
-
-        return true;
+        return Boolean(normalized);
       } catch (error) {
         if (!isCurrentLoad(seq)) return false;
 
@@ -896,7 +936,7 @@ export const HomeView = (() => {
     }
   }
 
-  async function createIncidencia(draft = {}) {
+  async function createIncidencia(draft = {}, options = {}) {
     setCreating(true);
     rerender();
 
@@ -904,7 +944,7 @@ export const HomeView = (() => {
       return await navigateFromHomeAction({
         route: "/incidencias",
         payload: safeObject(draft),
-        silent: false,
+        silent: options.silent === true,
       });
     } finally {
       setCreating(false);
@@ -947,8 +987,7 @@ export const HomeView = (() => {
       exportHomeCsvAction,
 
       navigateFromHomeAction: ({ route = "", payload = {}, silent = false } = {}) =>
-        navigateFromHomeAction({
-          route,
+        navigateTo(route, {
           payload,
           silent,
         }),
@@ -989,7 +1028,6 @@ export const HomeView = (() => {
     destroyed = false;
 
     const container = getContainer(args[0], args[1]);
-
     currentContainer = container;
 
     inflightInit = (async () => {
@@ -1074,6 +1112,7 @@ export const HomeView = (() => {
 
       user: getCurrentUser(),
       role: getCurrentRole(),
+      admin: isAdmin(),
 
       ticketsCount: tickets.length,
       invoicesCount: getInvoices().length,
@@ -1097,6 +1136,9 @@ export const HomeView = (() => {
 
       initialized,
       destroyed,
+
+      role: getCurrentRole(),
+      admin: isAdmin(),
 
       loaded: Boolean(homeState.loaded),
       hydrated: Boolean(homeState.hydrated),
@@ -1174,7 +1216,7 @@ export const HomeView = (() => {
 
     getActivity,
 
-    getDashboard: () => safeObject(homeState.dashboard),
+    getDashboard: () => buildDashboardForTemplate(),
     getSummary: () => safeObject(homeState.summary),
     getWidgets: () => safeArray(homeState.widgets),
 

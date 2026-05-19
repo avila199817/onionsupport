@@ -1,53 +1,17 @@
 /* =========================================================
-   Onion SPA - Incidencias Table Template
-   Archivo: src/views/incidencias/incidencias.table.template.js
+   Onion Support - Incidencias Table Template
+   Archivo: /src/views/incidencias/incidencias.table.template.js
 
-   FINAL PRO SAAS PANEL · INCIDENCIAS TEMPLATE · CSP CLEAN · 13/10 EXTREME
-   PATCH · HEADER ACTIONS 1:1 FACTURAS ORDER
-   PATCH · EXPORT / CREATE / REFRESH BUTTON ORDER
-   PATCH · TECHNICIAN AVATAR CONTRACT HARDENED
-   PATCH · assignment.assignedToName / assignedToEmail READY
-   PATCH · tecnico.avatar / assignedTo.avatar / meta.technicianAvatar READY
-   PATCH · CURRENT USER AVATAR BRIDGE READY
-   PATCH · EXTERNAL CSS ONLY · NO STYLE INJECTION
-   PATCH · NO INLINE STYLE · NO INLINE EVENTS
-   PATCH · NO NATIVE TITLE TOOLTIP · DATA-TOOLTIP ONLY
-   PATCH · REAL TABLE LOCK · NO ::BEFORE ON <TR>
-   PATCH · FILTERS + SEARCH · SINGLE DATA FLOW
-   PATCH · AVATAR TONES VIA DATA ATTRIBUTES
-   PATCH · DATA-CONTRACT READY FOR VIEW.JS
-   PATCH · ROW CLICK READY FOR DETAIL MODAL
-   PATCH · DOM BINDINGS CSP CLEAN
-
-   RESPONSABILIDADES:
-   - Render premium de vista de incidencias.
-   - Consumir CSS externo /src/css/views/incidencias/index.css.
-   - No inyectar <style> desde JS.
-   - No usar style="" dinámico.
-   - No usar eventos inline.
-   - No usar title="" nativo.
-   - Usar data-tooltip + aria-label.
-   - Tabla real blindada.
-   - Filtros visuales: todas / abiertas / cerradas.
-   - Búsqueda por incidencia, cliente, email, asunto, técnico, estado e importe.
-   - Paginación real de 5 items por defecto sobre resultados filtrados.
-   - Acciones compatibles con data-incidencias-action y data-action.
-   - Fila completa preparada para abrir modal de detalle.
-   - Botón "Detalle" compatible con bindings existentes.
-   - Estado loading visual en "Detalle" sin mover tabla.
-   - Refresh overlay sin desplazar columnas.
-   - Avatares fallback con tono estable por cliente/ticket.
-   - Avatar real del técnico por payload backend, AppCore o asset local.
-   - Chips de estado con contraste real dark/light.
-   - Importe de facturas asociadas blindado contra normalizadores intermedios.
-   - Estados loading/error/empty blindados.
-   - HTML endurecido con escape/fallbacks.
-   - DOM binding opcional para fallback de imágenes y fila clicable.
-
-   NOTA CSP:
-   - Para fallback de imagen y fila clicable, llamar a:
-     bindIncidenciasTemplateDom(root)
-     desde incidencias.view.js después de pintar la vista.
+   Responsabilidad:
+   - Renderizar HTML de tabla/listado de incidencias.
+   - Consumir datos ya preparados por incidenciasView.js.
+   - Exponer data-action/data-incidencias-action para bindings.
+   - Mantener CSP limpio: sin estilos inline y sin eventos inline.
+   - No cargar datos.
+   - No filtrar ni paginar por su cuenta.
+   - No abrir modales.
+   - No registrar listeners de acciones.
+   - No leer AppCore, Router, Auth, Store ni globals.
 ========================================================= */
 
 /* =========================================================
@@ -58,39 +22,6 @@ const DEFAULT_PAGE_SIZE = 5;
 const DEFAULT_CURRENCY = "EUR";
 const AVATAR_TONE_COUNT = 10;
 
-const CURRENT_TECHNICIAN_NAME = "Cristian Ávila Luque";
-const CURRENT_TECHNICIAN_EMAIL = "cristian@onionsupport.com";
-const CURRENT_TECHNICIAN_USERNAME = "cristian";
-
-const CURRENT_TECHNICIAN_EMAIL_ALIASES = Object.freeze([
-  "cristian@onionsupport.com",
-  "avila199817@gmail.com",
-]);
-
-/*
-  Orden intencional:
-  1) avatar recibido en ticket/backend
-  2) avatar recibido en state/AppCore
-  3) asset local principal
-  4) alternativas por casing/nombre
-*/
-const CURRENT_TECHNICIAN_AVATAR_FALLBACKS = Object.freeze([
-  "/src/media/img/Usuario.png",
-  "/src/media/img/usuario.png",
-  "/src/media/img/avatar.png",
-  "/src/media/img/user.png",
-]);
-
-const CURRENT_TECHNICIAN_MATCH_VALUES = Object.freeze([
-  CURRENT_TECHNICIAN_NAME,
-  "Cristian Avila Luque",
-  CURRENT_TECHNICIAN_EMAIL,
-  CURRENT_TECHNICIAN_USERNAME,
-  "cristian",
-  "CA",
-  ...CURRENT_TECHNICIAN_EMAIL_ALIASES,
-]);
-
 const FILTERS = Object.freeze([
   { key: "all", label: "Todas" },
   { key: "open", label: "Abiertas" },
@@ -98,13 +29,20 @@ const FILTERS = Object.freeze([
 ]);
 
 /* =========================================================
-   BASE HELPERS
+   SAFE HELPERS
 ========================================================= */
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -120,7 +58,7 @@ function safeNumber(value, fallback = 0) {
       .replace(/£/g, "")
       .replace(/%/g, "")
       .replace(/[^\d.,+\-\s]/g, "")
-      .replace(/\s/g, "");
+      .replace(/\s+/g, "");
 
     const hasComma = normalized.includes(",");
     const hasDot = normalized.includes(".");
@@ -129,22 +67,19 @@ function safeNumber(value, fallback = 0) {
       const lastComma = normalized.lastIndexOf(",");
       const lastDot = normalized.lastIndexOf(".");
 
-      normalized =
-        lastComma > lastDot
-          ? normalized.replace(/\./g, "").replace(/,/g, ".")
-          : normalized.replace(/,/g, "");
+      normalized = lastComma > lastDot
+        ? normalized.replace(/\./g, "").replace(/,/g, ".")
+        : normalized.replace(/,/g, "");
     } else if (hasComma) {
       normalized = normalized.replace(/,/g, ".");
     }
 
-    const n = Number(normalized);
-
-    return Number.isFinite(n) ? n : fallback;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  const n = Number(value);
-
-  return Number.isFinite(n) ? n : fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function safeArray(value) {
@@ -152,9 +87,7 @@ function safeArray(value) {
 }
 
 function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
+  return isObject(value) ? value : {};
 }
 
 function first(...values) {
@@ -196,18 +129,6 @@ function normalizeKey(value = "") {
     .replace(/[\s-]+/g, "_")
     .replace(/[^\w]+/g, "_")
     .replace(/^_+|_+$/g, "");
-}
-
-function bool(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value === 1;
-
-  const key = normalizeText(value);
-
-  if (["true", "1", "yes", "si", "sí", "on"].includes(key)) return true;
-  if (["false", "0", "no", "off"].includes(key)) return false;
-
-  return fallback;
 }
 
 function hashString(value = "") {
@@ -273,6 +194,24 @@ function actionAttrs(action = "", ticketId = "") {
   });
 }
 
+/* =========================================================
+   INPUT NORMALIZATION
+========================================================= */
+
+function getRuntimeState(input = {}) {
+  const data = safeObject(input);
+
+  return safeObject(
+    first(
+      data.state,
+      data.viewState,
+      data.runtime,
+      data.meta?.state,
+      {}
+    )
+  );
+}
+
 function getInputItems(input = {}) {
   const data = safeObject(input);
 
@@ -293,84 +232,249 @@ function getInputItems(input = {}) {
   );
 }
 
-function getRuntimeState(input = {}) {
+function getFilteredItems(input = {}) {
   const data = safeObject(input);
 
-  return safeObject(
+  return safeArray(
     first(
-      data.state,
-      data.viewState,
-      data.runtime,
-      data.meta?.state,
-      {}
+      data.filteredItems,
+      data.visibleItems,
+      data.state?.filteredItems,
+      null
     )
   );
 }
 
-function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
-}
+function getPageItems(input = {}) {
+  const data = safeObject(input);
 
-/* =========================================================
-   GLOBAL STATE HELPERS
-========================================================= */
-
-function getGlobalAppCoreState() {
-  if (!isBrowser()) return {};
-
-  try {
-    const candidates = [
-      window.AppCore?.state,
-      window.App?.state,
-      window.Onion?.state,
-      window.__APP_CORE__?.state,
-      window.__ONION_APP__?.state,
-      window.__ONION_STATE__,
-    ];
-
-    for (const candidate of candidates) {
-      if (candidate && typeof candidate === "object") {
-        return candidate;
-      }
-    }
-  } catch {}
-
-  return {};
-}
-
-function getGlobalCurrentUser() {
-  const state = getGlobalAppCoreState();
-
-  return safeObject(
+  const explicitPageItems = safeArray(
     first(
-      state.user,
-      state.currentUser,
-      state.sessionUser,
-      state.auth?.user,
-      {}
+      data.pageItems,
+      data.itemsPage,
+      data.state?.pageItems,
+      null
+    )
+  );
+
+  if (explicitPageItems.length) return explicitPageItems;
+
+  return getFilteredItems(data).length
+    ? getFilteredItems(data)
+    : getInputItems(data);
+}
+
+function getSearchQuery(input = {}) {
+  const data = safeObject(input);
+  const runtime = getRuntimeState(data);
+
+  return normalizeWhitespace(
+    first(
+      data.search,
+      data.searchQuery,
+      data.filterQuery,
+      data.query,
+      data.q,
+      runtime.search,
+      runtime.searchQuery,
+      runtime.filterQuery,
+      runtime.query,
+      runtime.q,
+      ""
     )
   );
 }
 
+function normalizeFilter(value = "") {
+  const key = normalizeKey(value);
+
+  if (["all", "todo", "todos", "todas", "total", "totales"].includes(key)) return "all";
+
+  if (
+    [
+      "open",
+      "opened",
+      "abierta",
+      "abierto",
+      "abiertas",
+      "abiertos",
+      "active",
+      "activa",
+      "activo",
+      "activas",
+      "activos",
+      "pending",
+      "pendiente",
+      "pendientes",
+      "progress",
+      "in_progress",
+      "inprogress",
+      "en_proceso",
+      "proceso",
+      "working",
+      "trabajando",
+      "assigned",
+      "asignada",
+      "asignado",
+    ].includes(key)
+  ) {
+    return "open";
+  }
+
+  if (
+    [
+      "closed",
+      "close",
+      "cerrada",
+      "cerrado",
+      "cerradas",
+      "cerrados",
+      "resolved",
+      "resuelta",
+      "resuelto",
+      "resueltas",
+      "resueltos",
+      "solved",
+      "cancelled",
+      "canceled",
+      "cancelada",
+      "cancelado",
+      "archived",
+      "archivada",
+      "archivado",
+    ].includes(key)
+  ) {
+    return "closed";
+  }
+
+  return "all";
+}
+
+function getActiveFilter(input = {}) {
+  const data = safeObject(input);
+  const runtime = getRuntimeState(data);
+
+  return normalizeFilter(
+    first(
+      data.filter,
+      data.activeFilter,
+      data.statusFilter,
+      runtime.filter,
+      runtime.activeFilter,
+      runtime.statusFilter,
+      "all"
+    )
+  );
+}
+
+function getPagination(input = {}) {
+  const data = safeObject(input);
+  const runtime = getRuntimeState(data);
+  const allItems = getInputItems(data);
+  const filteredItems = getFilteredItems(data);
+  const pageItems = getPageItems(data);
+
+  const pageSize = clamp(
+    safeNumber(first(data.pageSize, runtime.pageSize, DEFAULT_PAGE_SIZE), DEFAULT_PAGE_SIZE),
+    1,
+    50
+  );
+
+  const currentPage = Math.max(
+    1,
+    safeNumber(first(data.page, data.currentPage, runtime.page, runtime.currentPage, 1), 1)
+  );
+
+  const totalCount = Math.max(
+    0,
+    safeNumber(
+      first(
+        data.totalCount,
+        data.remoteCount,
+        runtime.totalCount,
+        runtime.remoteCount,
+        filteredItems.length || allItems.length
+      ),
+      filteredItems.length || allItems.length
+    )
+  );
+
+  const totalPages = Math.max(
+    1,
+    safeNumber(
+      first(
+        data.totalPages,
+        runtime.totalPages,
+        Math.ceil((totalCount || 1) / pageSize)
+      ),
+      1
+    )
+  );
+
+  const safePage = clamp(currentPage, 1, totalPages);
+  const rangeStart = totalCount && pageItems.length
+    ? (safePage - 1) * pageSize + 1
+    : 0;
+  const rangeEnd = totalCount
+    ? Math.min(rangeStart + pageItems.length - 1, totalCount)
+    : 0;
+
+  return {
+    allItems,
+    filteredItems,
+    pageItems,
+    pageSize,
+    currentPage: safePage,
+    totalPages,
+    totalCount,
+    rangeStart,
+    rangeEnd,
+    hasPrev: safePage > 1,
+    hasNext: safePage < totalPages,
+    activeFilter: getActiveFilter(data),
+    searchQuery: getSearchQuery(data),
+    filtering: getActiveFilter(data) !== "all" || Boolean(getSearchQuery(data)),
+  };
+}
+
 /* =========================================================
-   DATE HELPERS
+   DATE / FORMATTERS
 ========================================================= */
+
+function parseSpanishDate(value = "") {
+  const text = safeText(value, "");
+  if (!text) return 0;
+
+  const match = text.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+
+  if (!match) return 0;
+
+  const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = match;
+
+  const date = new Date(
+    Number(yyyy),
+    Number(mm) - 1,
+    Number(dd),
+    Number(hh),
+    Number(min),
+    Number(ss)
+  );
+
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
 
 function isDateOnlyValue(value = null) {
   const raw = safeText(value, "");
 
-  return (
-    /^\d{4}-\d{2}-\d{2}$/.test(raw) ||
-    /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw)
-  );
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) || /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw);
 }
 
 function toTimestamp(value = null) {
   if (!value) return 0;
 
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? 0 : value.getTime();
-  }
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? 0 : value.getTime();
 
   if (typeof value === "number" && Number.isFinite(value)) {
     return value > 9999999999 ? value : value * 1000;
@@ -380,48 +484,25 @@ function toTimestamp(value = null) {
   if (!raw) return 0;
 
   const numeric = Number(raw);
-
   if (Number.isFinite(numeric) && numeric > 0) {
     return numeric > 9999999999 ? numeric : numeric * 1000;
   }
 
-  const esMatch = raw.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
-  );
-
-  if (esMatch) {
-    const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = esMatch;
-
-    const date = new Date(
-      Number(yyyy),
-      Number(mm) - 1,
-      Number(dd),
-      Number(hh),
-      Number(min),
-      Number(ss)
-    );
-
-    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
-  }
+  const esTimestamp = parseSpanishDate(raw);
+  if (esTimestamp) return esTimestamp;
 
   const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
 
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
-/* =========================================================
-   FORMATTERS
-========================================================= */
-
 const moneyFormatterCache = new Map();
-const dateTimeFormatterCache = new Map();
+const dateFormatterCache = new Map();
 
 function getMoneyFormatter(currency = DEFAULT_CURRENCY) {
   const code = safeText(currency, DEFAULT_CURRENCY).toUpperCase();
 
-  if (moneyFormatterCache.has(code)) {
-    return moneyFormatterCache.get(code);
-  }
+  if (moneyFormatterCache.has(code)) return moneyFormatterCache.get(code);
 
   const formatter = new Intl.NumberFormat("es-ES", {
     style: "currency",
@@ -431,7 +512,6 @@ function getMoneyFormatter(currency = DEFAULT_CURRENCY) {
   });
 
   moneyFormatterCache.set(code, formatter);
-
   return formatter;
 }
 
@@ -449,93 +529,73 @@ function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
   }
 }
 
-function getDateTimeFormatter() {
-  const key = "es-ES:date-time";
+function getDateFormatter(type = "datetime") {
+  const key = `es-ES:${type}`;
 
-  if (dateTimeFormatterCache.has(key)) {
-    return dateTimeFormatterCache.get(key);
-  }
+  if (dateFormatterCache.has(key)) return dateFormatterCache.get(key);
 
-  const formatter = new Intl.DateTimeFormat("es-ES", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const formatter = new Intl.DateTimeFormat(
+    "es-ES",
+    type === "date"
+      ? {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        }
+      : {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }
+  );
 
-  dateTimeFormatterCache.set(key, formatter);
-
-  return formatter;
-}
-
-function getDateFormatter() {
-  const key = "es-ES:date";
-
-  if (dateTimeFormatterCache.has(key)) {
-    return dateTimeFormatterCache.get(key);
-  }
-
-  const formatter = new Intl.DateTimeFormat("es-ES", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-
-  dateTimeFormatterCache.set(key, formatter);
-
+  dateFormatterCache.set(key, formatter);
   return formatter;
 }
 
 function formatDateTime(value = null) {
-  const ts = toTimestamp(value);
-  if (!ts) return "—";
+  const timestamp = toTimestamp(value);
+  if (!timestamp) return "—";
 
   try {
-    return getDateTimeFormatter().format(new Date(ts));
+    return getDateFormatter("datetime").format(new Date(timestamp));
   } catch {
     return "—";
   }
 }
 
 function formatDateShort(value = null) {
-  const ts = toTimestamp(value);
-  if (!ts) return "—";
+  const timestamp = toTimestamp(value);
+  if (!timestamp) return "—";
 
   try {
-    return getDateFormatter().format(new Date(ts));
+    return getDateFormatter("date").format(new Date(timestamp));
   } catch {
     return "—";
   }
 }
 
 function formatDateTooltip(value = null) {
-  if (isDateOnlyValue(value)) return formatDateShort(value);
-  return formatDateTime(value);
+  return isDateOnlyValue(value) ? formatDateShort(value) : formatDateTime(value);
 }
 
 function formatRelativeDate(value = null) {
-  const ts = toTimestamp(value);
-  if (!ts) return "Sin fecha";
+  const timestamp = toTimestamp(value);
+  if (!timestamp) return "Sin fecha";
 
-  const diffMs = ts - Date.now();
+  const diffMs = timestamp - Date.now();
   const diffMin = Math.round(diffMs / 60000);
   const absMin = Math.abs(diffMin);
 
   if (absMin < 1) return "Ahora mismo";
-
-  if (absMin < 60) {
-    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
-  }
+  if (absMin < 60) return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
 
   const diffHours = Math.round(absMin / 60);
-
-  if (diffHours < 24) {
-    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
-  }
+  if (diffHours < 24) return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
 
   const diffDays = Math.round(diffHours / 24);
-
   if (diffDays <= 7) {
     return diffMin > 0
       ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
@@ -546,16 +606,12 @@ function formatRelativeDate(value = null) {
 }
 
 function formatLastUpdate(value = null) {
-  const ts = toTimestamp(value);
-  if (!ts) return "Sin fecha";
+  const timestamp = toTimestamp(value);
+  if (!timestamp) return "Sin fecha";
 
-  const diffHours = Math.abs(Date.now() - ts) / 3600000;
+  const diffHours = Math.abs(Date.now() - timestamp) / 3600000;
 
-  if (diffHours <= 72) {
-    return formatRelativeDate(value);
-  }
-
-  return formatDateTime(value);
+  return diffHours <= 72 ? formatRelativeDate(value) : formatDateTime(value);
 }
 
 /* =========================================================
@@ -563,8 +619,7 @@ function formatLastUpdate(value = null) {
 ========================================================= */
 
 function icon(name = "") {
-  const common =
-    'aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  const common = 'aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
 
   const icons = {
     refresh: `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
@@ -579,7 +634,6 @@ function icon(name = "") {
     euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
     activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
     users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
-    lock: `<svg ${common}><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`,
     filter: `<svg ${common}><path d="M22 3H2l8 9.46V19l4 2v-8.54Z"/></svg>`,
   };
 
@@ -587,7 +641,7 @@ function icon(name = "") {
 }
 
 /* =========================================================
-   DATA PICKERS
+   ITEM PICKERS
 ========================================================= */
 
 function getRaw(item = {}) {
@@ -766,29 +820,18 @@ function getAvatarUrl(item = {}) {
 
 function getInitials(value = "") {
   const text = normalizeWhitespace(value);
-
   if (!text) return "ON";
 
   const parts = text.split(" ").filter(Boolean);
 
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
 
   return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
 }
 
 function getAvatarTone(item = {}) {
-  const ticketId = getTicketId(item);
-  const clientName = getClientName(item);
-  const seed = `${ticketId}|${clientName}`;
-
-  return String(hashString(seed) % AVATAR_TONE_COUNT);
+  return String(hashString(`${getTicketId(item)}|${getClientName(item)}`) % AVATAR_TONE_COUNT);
 }
-
-/* =========================================================
-   STATUS / PRIORITY
-========================================================= */
 
 function getStatusRaw(item = {}) {
   const raw = getRaw(item);
@@ -808,51 +851,14 @@ function getStatusRaw(item = {}) {
 function getStatusKey(value = "") {
   const key = normalizeKey(value);
 
-  if (["pending", "pendiente", "new", "nueva", "nuevo", "created"].includes(key)) {
-    return "pending";
-  }
+  if (["pending", "pendiente", "new", "nueva", "nuevo", "created"].includes(key)) return "pending";
+  if (["open", "abierta", "abierto"].includes(key)) return "open";
 
-  if (["open", "abierta", "abierto"].includes(key)) {
-    return "open";
-  }
+  if (["progress", "in_progress", "inprogress", "en_proceso", "proceso", "working", "trabajando", "assigned", "asignada", "asignado"].includes(key)) return "progress";
 
-  if (
-    [
-      "progress",
-      "in_progress",
-      "inprogress",
-      "en_proceso",
-      "proceso",
-      "working",
-      "trabajando",
-      "assigned",
-      "asignada",
-      "asignado",
-    ].includes(key)
-  ) {
-    return "progress";
-  }
+  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
 
-  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) {
-    return "resolved";
-  }
-
-  if (
-    [
-      "closed",
-      "cerrada",
-      "cerrado",
-      "cancelled",
-      "canceled",
-      "cancelada",
-      "cancelado",
-      "archived",
-      "archivada",
-      "archivado",
-    ].includes(key)
-  ) {
-    return "closed";
-  }
+  if (["closed", "cerrada", "cerrado", "cancelled", "canceled", "cancelada", "cancelado", "archived", "archivada", "archivado"].includes(key)) return "closed";
 
   return "pending";
 }
@@ -890,21 +896,10 @@ function getPriorityRaw(item = {}) {
 function getPriorityKey(item = {}) {
   const key = normalizeKey(getPriorityRaw(item));
 
-  if (["critical", "critica", "crítica", "critico", "crítico", "p0"].includes(key)) {
-    return "critical";
-  }
-
-  if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) {
-    return "urgent";
-  }
-
-  if (["medium", "media", "normal", "p2"].includes(key)) {
-    return "medium";
-  }
-
-  if (["low", "baja", "minor", "p3"].includes(key)) {
-    return "low";
-  }
+  if (["critical", "critica", "crítica", "critico", "crítico", "p0"].includes(key)) return "critical";
+  if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) return "urgent";
+  if (["medium", "media", "normal", "p2"].includes(key)) return "medium";
+  if (["low", "baja", "minor", "p3"].includes(key)) return "low";
 
   return "medium";
 }
@@ -942,10 +937,6 @@ function getCategory(item = {}) {
   );
 }
 
-/* =========================================================
-   ASSIGNMENT / TECHNICIAN AVATAR
-========================================================= */
-
 function getAssignedTo(item = {}) {
   const raw = getRaw(item);
 
@@ -954,60 +945,45 @@ function getAssignedTo(item = {}) {
       item.assignedToName,
       item.technicianName,
       item.tecnicoName,
-
       item.assignment?.assignedToName,
       item.assignment?.agentName,
       item.assignment?.technicianName,
       item.assignment?.displayName,
       item.assignment?.name,
-
       item.tecnico?.name,
       item.tecnico?.nombre,
       item.tecnico?.displayName,
       typeof item.tecnico === "string" ? item.tecnico : "",
-
       item.assignedTo?.name,
       item.assignedTo?.nombre,
       item.assignedTo?.displayName,
       typeof item.assignedTo === "string" ? item.assignedTo : "",
-
       item.agent?.name,
       item.agent?.displayName,
       typeof item.agent === "string" ? item.agent : "",
-
       item.meta?.technicianName,
       item.meta?.lastTechnicianName,
-      item.resolution?.closedBy?.name,
-      item.audit?.by?.name,
-
       raw.assignedToName,
       raw.technicianName,
       raw.tecnicoName,
-
       raw.assignment?.assignedToName,
       raw.assignment?.agentName,
       raw.assignment?.technicianName,
       raw.assignment?.displayName,
       raw.assignment?.name,
-
       raw.tecnico?.name,
       raw.tecnico?.nombre,
       raw.tecnico?.displayName,
       typeof raw.tecnico === "string" ? raw.tecnico : "",
-
       raw.assignedTo?.name,
       raw.assignedTo?.nombre,
       raw.assignedTo?.displayName,
       typeof raw.assignedTo === "string" ? raw.assignedTo : "",
-
       raw.agent?.name,
       raw.agent?.displayName,
       typeof raw.agent === "string" ? raw.agent : "",
-
       raw.meta?.technicianName,
-      raw.meta?.lastTechnicianName,
-      raw.resolution?.closedBy?.name,
-      raw.audit?.by?.name
+      raw.meta?.lastTechnicianName
     ),
     "Sin asignar"
   );
@@ -1021,174 +997,33 @@ function getAssignedEmail(item = {}) {
       item.assignedToEmail,
       item.technicianEmail,
       item.tecnicoEmail,
-
       item.assignment?.assignedToEmail,
       item.assignment?.agentEmail,
       item.assignment?.technicianEmail,
       item.assignment?.email,
-      item.assignment?.mail,
-
       item.tecnico?.email,
-      item.tecnico?.mail,
-
       item.assignedTo?.email,
-      item.assignedTo?.mail,
-
       item.agentEmail,
       item.agent?.email,
-      item.agent?.mail,
-
       item.meta?.technicianEmail,
-      item.meta?.lastTechnicianEmail,
-      item.resolution?.closedBy?.email,
-      item.audit?.by?.email,
-
       raw.assignedToEmail,
       raw.technicianEmail,
       raw.tecnicoEmail,
-
       raw.assignment?.assignedToEmail,
       raw.assignment?.agentEmail,
       raw.assignment?.technicianEmail,
       raw.assignment?.email,
-      raw.assignment?.mail,
-
       raw.tecnico?.email,
-      raw.tecnico?.mail,
-
       raw.assignedTo?.email,
-      raw.assignedTo?.mail,
-
       raw.agentEmail,
       raw.agent?.email,
-      raw.agent?.mail,
-
-      raw.meta?.technicianEmail,
-      raw.meta?.lastTechnicianEmail,
-      raw.resolution?.closedBy?.email,
-      raw.audit?.by?.email
+      raw.meta?.technicianEmail
     ),
     ""
   ).toLowerCase();
 }
 
-function getAssignedId(item = {}) {
-  const raw = getRaw(item);
-
-  return safeText(
-    first(
-      item.assignedToUserId,
-      item.technicianUserId,
-      item.tecnicoUserId,
-
-      item.assignment?.assignedToUserId,
-      item.assignment?.agentId,
-      item.assignment?.userId,
-      item.assignment?.technicianUserId,
-
-      item.tecnico?.id,
-      item.tecnico?.userId,
-      item.tecnico?.username,
-
-      item.assignedTo?.id,
-      item.assignedTo?.userId,
-      item.assignedTo?.username,
-
-      item.agentId,
-      item.agent?.id,
-      item.agent?.userId,
-      item.agent?.username,
-
-      item.meta?.technicianUserId,
-      item.meta?.lastTechnicianUserId,
-
-      raw.assignedToUserId,
-      raw.technicianUserId,
-      raw.tecnicoUserId,
-
-      raw.assignment?.assignedToUserId,
-      raw.assignment?.agentId,
-      raw.assignment?.userId,
-      raw.assignment?.technicianUserId,
-
-      raw.tecnico?.id,
-      raw.tecnico?.userId,
-      raw.tecnico?.username,
-
-      raw.assignedTo?.id,
-      raw.assignedTo?.userId,
-      raw.assignedTo?.username,
-
-      raw.agentId,
-      raw.agent?.id,
-      raw.agent?.userId,
-      raw.agent?.username,
-
-      raw.meta?.technicianUserId,
-      raw.meta?.lastTechnicianUserId
-    ),
-    ""
-  );
-}
-
-function getCurrentUserFromRuntime(state = {}) {
-  const runtime = safeObject(state);
-
-  return safeObject(
-    first(
-      runtime.user,
-      runtime.currentUser,
-      runtime.sessionUser,
-      runtime.auth?.user,
-      getGlobalCurrentUser(),
-      {}
-    )
-  );
-}
-
-function getCurrentUserAvatar(state = {}) {
-  const runtime = safeObject(state);
-  const user = getCurrentUserFromRuntime(runtime);
-  const raw = safeObject(user.raw);
-
-  return safeText(
-    first(
-      runtime.avatar,
-      runtime.avatarUrl,
-      runtime.userAvatar,
-      runtime.userAvatarUrl,
-      runtime.photo,
-      runtime.photoUrl,
-      runtime.picture,
-      runtime.image,
-
-      user.avatar,
-      user.avatarUrl,
-      user.photo,
-      user.photoUrl,
-      user.picture,
-      user.pictureUrl,
-      user.image,
-      user.imageUrl,
-      user.profileImage,
-      user.profileImageUrl,
-
-      raw.avatar,
-      raw.avatarUrl,
-      raw.photo,
-      raw.photoUrl,
-      raw.picture,
-      raw.pictureUrl,
-      raw.image,
-      raw.imageUrl,
-      raw.profileImage,
-      raw.profileImageUrl
-    ),
-    ""
-  );
-}
-
-function getAssignedExplicitAvatar(item = {}) {
+function getAssignedAvatarUrl(item = {}) {
   const raw = getRaw(item);
 
   return safeText(
@@ -1197,227 +1032,68 @@ function getAssignedExplicitAvatar(item = {}) {
       item.tecnicoAvatar,
       item.technicianAvatar,
       item.agentAvatar,
-
       item.assignment?.assignedToAvatar,
       item.assignment?.agentAvatar,
       item.assignment?.technicianAvatar,
       item.assignment?.avatar,
       item.assignment?.avatarUrl,
-      item.assignment?.photo,
-      item.assignment?.photoUrl,
-      item.assignment?.picture,
-      item.assignment?.image,
-
       item.tecnico?.avatar,
       item.tecnico?.avatarUrl,
-      item.tecnico?.photo,
-      item.tecnico?.photoUrl,
-      item.tecnico?.picture,
-      item.tecnico?.image,
-
       item.assignedTo?.avatar,
       item.assignedTo?.avatarUrl,
-      item.assignedTo?.photo,
-      item.assignedTo?.photoUrl,
-      item.assignedTo?.picture,
-      item.assignedTo?.image,
-
       item.agent?.avatar,
       item.agent?.avatarUrl,
-      item.agent?.photo,
-      item.agent?.photoUrl,
-      item.agent?.picture,
-      item.agent?.image,
-
       item.meta?.technicianAvatar,
       item.meta?.technicianAvatarUrl,
-      item.meta?.lastTechnicianAvatar,
-      item.meta?.lastTechnicianAvatarUrl,
-      item.resolution?.closedBy?.avatar,
-      item.resolution?.closedBy?.avatarUrl,
-
       raw.assignedToAvatar,
       raw.tecnicoAvatar,
       raw.technicianAvatar,
       raw.agentAvatar,
-
       raw.assignment?.assignedToAvatar,
       raw.assignment?.agentAvatar,
       raw.assignment?.technicianAvatar,
       raw.assignment?.avatar,
       raw.assignment?.avatarUrl,
-      raw.assignment?.photo,
-      raw.assignment?.photoUrl,
-      raw.assignment?.picture,
-      raw.assignment?.image,
-
       raw.tecnico?.avatar,
       raw.tecnico?.avatarUrl,
-      raw.tecnico?.photo,
-      raw.tecnico?.photoUrl,
-      raw.tecnico?.picture,
-      raw.tecnico?.image,
-
       raw.assignedTo?.avatar,
       raw.assignedTo?.avatarUrl,
-      raw.assignedTo?.photo,
-      raw.assignedTo?.photoUrl,
-      raw.assignedTo?.picture,
-      raw.assignedTo?.image,
-
       raw.agent?.avatar,
       raw.agent?.avatarUrl,
-      raw.agent?.photo,
-      raw.agent?.photoUrl,
-      raw.agent?.picture,
-      raw.agent?.image,
-
       raw.meta?.technicianAvatar,
-      raw.meta?.technicianAvatarUrl,
-      raw.meta?.lastTechnicianAvatar,
-      raw.meta?.lastTechnicianAvatarUrl,
-      raw.resolution?.closedBy?.avatar,
-      raw.resolution?.closedBy?.avatarUrl
+      raw.meta?.technicianAvatarUrl
     ),
     ""
   );
 }
 
-function isCurrentTechnicianAssigned(item = {}, state = {}) {
-  const assigned = normalizeText(getAssignedTo(item));
-  const assignedEmail = normalizeText(getAssignedEmail(item));
-  const assignedId = normalizeText(getAssignedId(item));
-
-  const runtime = safeObject(state);
-  const user = getCurrentUserFromRuntime(runtime);
-  const raw = safeObject(user.raw);
-
-  const runtimeValues = [
-    user.name,
-    user.displayName,
-    user.fullName,
-    user.email,
-    user.emailLower,
-    user.username,
-    user.usernameLower,
-    user.userId,
-    user.id,
-    raw.name,
-    raw.displayName,
-    raw.fullName,
-    raw.email,
-    raw.emailLower,
-    raw.username,
-    raw.usernameLower,
-    raw.userId,
-    raw.id,
-    runtime.username,
-    runtime.email,
-    runtime.emailLower,
-    runtime.userId,
-    runtime.id,
-  ]
-    .map((value) => normalizeText(value))
-    .filter(Boolean);
-
-  const knownValues = CURRENT_TECHNICIAN_MATCH_VALUES
-    .map((value) => normalizeText(value))
-    .filter(Boolean);
-
-  const candidates = [
-    assigned,
-    assignedEmail,
-    assignedId,
-  ].filter(Boolean);
-
-  const matchesKnown = candidates.some((candidate) => {
-    return knownValues.some((known) => {
-      return (
-        candidate === known ||
-        candidate.includes(known) ||
-        known.includes(candidate)
-      );
-    });
-  });
-
-  if (matchesKnown) return true;
-
-  return candidates.some((candidate) => {
-    return runtimeValues.some((runtimeValue) => {
-      return (
-        candidate === runtimeValue ||
-        candidate.includes(runtimeValue) ||
-        runtimeValue.includes(candidate)
-      );
-    });
-  });
-}
-
-function getTechnicianAvatarCandidates(item = {}, state = {}) {
-  const explicitAvatar = getAssignedExplicitAvatar(item);
-  const currentUserAvatar = getCurrentUserAvatar(state);
-  const isCurrent = isCurrentTechnicianAssigned(item, state);
-
-  const candidates = [
-    explicitAvatar,
-    isCurrent ? currentUserAvatar : "",
-    isCurrent ? CURRENT_TECHNICIAN_AVATAR_FALLBACKS[0] : "",
-    ...CURRENT_TECHNICIAN_AVATAR_FALLBACKS,
-  ]
-    .map((value) => safeText(value, ""))
-    .filter(Boolean);
-
-  return Array.from(new Set(candidates));
-}
-
-function getAssignedAvatarUrl(item = {}, state = {}) {
-  const explicitAvatar = getAssignedExplicitAvatar(item);
-
-  if (explicitAvatar) return explicitAvatar;
-
-  if (isCurrentTechnicianAssigned(item, state)) {
-    return safeText(
-      first(
-        getCurrentUserAvatar(state),
-        CURRENT_TECHNICIAN_AVATAR_FALLBACKS[0],
-        ""
-      ),
-      ""
-    );
-  }
-
-  return "";
-}
-
-/* =========================================================
-   INVOICING / DATES / ATTACHMENTS
-========================================================= */
-
 function getImporteAmount(item = {}) {
   const raw = getRaw(item);
 
   return first(
-    item.total,
-    item.amount,
-    item.importe,
-    item.price,
     item.facturasTotal,
     item.invoicesTotal,
     item.importeFacturas,
     item.invoiceTotal,
+    item.facturaTotal,
+    item.facturaImporte,
+    item.importeFactura,
+    item.totalFactura,
+    item.invoiceAmount,
     item.linkedInvoices?.total,
     item.linkedInvoices?.amount,
     item.linkedInvoices?.importe,
     item.meta?.invoicesTotal,
     item.meta?.invoiceTotal,
-    raw.total,
-    raw.amount,
-    raw.importe,
-    raw.price,
     raw.facturasTotal,
     raw.invoicesTotal,
     raw.importeFacturas,
     raw.invoiceTotal,
+    raw.facturaTotal,
+    raw.facturaImporte,
+    raw.importeFactura,
+    raw.totalFactura,
+    raw.invoiceAmount,
     raw.linkedInvoices?.total,
     raw.linkedInvoices?.amount,
     raw.linkedInvoices?.importe,
@@ -1517,6 +1193,7 @@ function getUpdatedAt(item = {}) {
   const raw = getRaw(item);
 
   return first(
+    item.lastActivityAt,
     item.updatedAt,
     item.lastUpdateAt,
     item.ultimaNovedad,
@@ -1526,6 +1203,7 @@ function getUpdatedAt(item = {}) {
     item.lifecycle?.updatedAt,
     item.lifecycle?.lastUpdateAt,
     item.audit?.updatedAt,
+    raw.lastActivityAt,
     raw.updatedAt,
     raw.lastUpdateAt,
     raw.ultimaNovedad,
@@ -1535,21 +1213,6 @@ function getUpdatedAt(item = {}) {
     raw.lifecycle?.updatedAt,
     raw.lifecycle?.lastUpdateAt,
     raw.audit?.updatedAt
-  );
-}
-
-function getSortTimestamp(item = {}) {
-  const raw = getRaw(item);
-
-  return (
-    safeNumber(item?.meta?.updatedAtMs, 0) ||
-    safeNumber(item?.meta?.timestampMs, 0) ||
-    safeNumber(raw?.meta?.updatedAtMs, 0) ||
-    safeNumber(raw?.meta?.timestampMs, 0) ||
-    toTimestamp(getUpdatedAt(item)) ||
-    toTimestamp(getCreatedAt(item)) ||
-    toTimestamp(raw?._ts) ||
-    0
   );
 }
 
@@ -1581,25 +1244,6 @@ function getAttachmentsCount(item = {}) {
   );
 }
 
-/* =========================================================
-   STATUS LOGIC
-========================================================= */
-
-function compareIncidenciasNewestFirst(a = {}, b = {}) {
-  const diff = getSortTimestamp(b) - getSortTimestamp(a);
-
-  if (diff !== 0) return diff;
-
-  return safeText(getTicketId(b), "").localeCompare(safeText(getTicketId(a), ""), "es", {
-    numeric: true,
-    sensitivity: "base",
-  });
-}
-
-function sortIncidenciasNewestFirst(items = []) {
-  return [...safeArray(items)].sort(compareIncidenciasNewestFirst);
-}
-
 function isClosedLike(item = {}) {
   return ["closed", "resolved"].includes(getStatusKey(getStatusRaw(item)));
 }
@@ -1610,135 +1254,6 @@ function isOpenLike(item = {}) {
 
 function isUrgentLike(item = {}) {
   return ["urgent", "critical"].includes(getPriorityKey(item));
-}
-
-/* =========================================================
-   FILTERS / SEARCH
-========================================================= */
-
-function normalizeFilter(value = "") {
-  const key = normalizeKey(value);
-
-  if (!key || key === "todos" || key === "todas") return "all";
-
-  if (["all", "todo", "todos", "todas", "total", "totales"].includes(key)) {
-    return "all";
-  }
-
-  if (
-    [
-      "open",
-      "opened",
-      "abierta",
-      "abierto",
-      "abiertas",
-      "abiertos",
-      "active",
-      "activa",
-      "activo",
-      "activas",
-      "activos",
-      "pending",
-      "pendiente",
-      "pendientes",
-      "progress",
-      "in_progress",
-      "inprogress",
-      "en_proceso",
-      "proceso",
-      "working",
-      "trabajando",
-      "assigned",
-      "asignada",
-      "asignado",
-    ].includes(key)
-  ) {
-    return "open";
-  }
-
-  if (
-    [
-      "closed",
-      "close",
-      "cerrada",
-      "cerrado",
-      "cerradas",
-      "cerrados",
-      "resolved",
-      "resuelta",
-      "resuelto",
-      "resueltas",
-      "resueltos",
-      "solved",
-      "cancelled",
-      "canceled",
-      "cancelada",
-      "cancelado",
-      "archived",
-      "archivada",
-      "archivado",
-    ].includes(key)
-  ) {
-    return "closed";
-  }
-
-  return "all";
-}
-
-function getActiveFilter(input = {}) {
-  const data = safeObject(input);
-  const runtime = getRuntimeState(data);
-
-  return normalizeFilter(
-    first(
-      data.filter,
-      data.statusFilter,
-      data.activeFilter,
-      runtime.filter,
-      runtime.statusFilter,
-      runtime.activeFilter,
-      "all"
-    )
-  );
-}
-
-function getFilterLabel(filter = "all") {
-  const key = normalizeFilter(filter);
-
-  return FILTERS.find((item) => item.key === key)?.label || "Todas";
-}
-
-function getSearchQuery(input = {}) {
-  const data = safeObject(input);
-  const runtime = getRuntimeState(data);
-
-  return normalizeWhitespace(
-    first(
-      data.search,
-      data.searchQuery,
-      data.query,
-      data.q,
-      data.term,
-      data.keyword,
-      runtime.search,
-      runtime.searchQuery,
-      runtime.query,
-      runtime.q,
-      runtime.term,
-      runtime.keyword,
-      ""
-    )
-  );
-}
-
-function itemMatchesFilter(item = {}, filter = "all") {
-  const key = normalizeFilter(filter);
-
-  if (key === "all") return true;
-  if (key === "open") return isOpenLike(item);
-  if (key === "closed") return isClosedLike(item);
-
-  return true;
 }
 
 function getSearchHaystack(item = {}) {
@@ -1753,30 +1268,27 @@ function getSearchHaystack(item = {}) {
     getCategory(item),
     getAssignedTo(item),
     getAssignedEmail(item),
-    getAssignedId(item),
     getStatusLabel(getStatusRaw(item)),
     getPriorityLabel(item),
     getImporteLabel(item),
-
     item.userId,
     item.clienteId,
-    item.requesterId,
-    item.createdBy?.id,
-    item.createdBy?.userId,
-    item.requesterSnapshot?.id,
-    item.requesterSnapshot?.userId,
-
     raw.userId,
     raw.clienteId,
-    raw.requesterId,
-    raw.createdBy?.id,
-    raw.createdBy?.userId,
-    raw.requesterSnapshot?.id,
-    raw.requesterSnapshot?.userId,
   ]
     .map((value) => normalizeText(value))
     .filter(Boolean)
     .join(" · ");
+}
+
+function itemMatchesFilter(item = {}, filter = "all") {
+  const key = normalizeFilter(filter);
+
+  if (key === "all") return true;
+  if (key === "open") return isOpenLike(item);
+  if (key === "closed") return isClosedLike(item);
+
+  return true;
 }
 
 function itemMatchesSearch(item = {}, query = "") {
@@ -1790,46 +1302,22 @@ function itemMatchesSearch(item = {}, query = "") {
   return terms.every((term) => haystack.includes(term));
 }
 
-function filterAndSortIncidencias(items = [], input = {}) {
-  const activeFilter = getActiveFilter(input);
-  const searchQuery = getSearchQuery(input);
-
-  return sortIncidenciasNewestFirst(items).filter((item) => {
-    return itemMatchesFilter(item, activeFilter) && itemMatchesSearch(item, searchQuery);
-  });
-}
-
-function isFilterActive(input = {}) {
-  return getActiveFilter(input) !== "all" || Boolean(getSearchQuery(input));
-}
-
 function computeFilterCounts(items = [], input = {}) {
   const rows = safeArray(items);
   const searchQuery = getSearchQuery(input);
   const searchableRows = rows.filter((item) => itemMatchesSearch(item, searchQuery));
 
   return FILTERS.reduce((acc, filter) => {
-    acc[filter.key] = searchableRows.filter((item) =>
-      itemMatchesFilter(item, filter.key)
-    ).length;
-
+    acc[filter.key] = searchableRows.filter((item) => itemMatchesFilter(item, filter.key)).length;
     return acc;
   }, {});
 }
 
-/* =========================================================
-   STATS / PAGINATION
-========================================================= */
-
 function computeStats(items = []) {
-  const rows = safeArray(items);
-
-  return rows.reduce(
+  return safeArray(items).reduce(
     (acc, item) => {
-      const amount = safeNumber(getImporteAmount(item), 0);
-
       acc.total += 1;
-      acc.totalImporte += amount;
+      acc.totalImporte += safeNumber(getImporteAmount(item), 0);
       acc.attachmentsCount += getAttachmentsCount(item);
 
       if (isOpenLike(item)) acc.openCount += 1;
@@ -1849,117 +1337,21 @@ function computeStats(items = []) {
   );
 }
 
-function normalizePageSize(input = {}) {
-  const data = safeObject(input);
-  const runtime = getRuntimeState(data);
-
-  return clamp(
-    safeNumber(
-      first(
-        data.pageSize,
-        runtime.pageSize,
-        runtime.limit,
-        runtime.incidenciasPageSize,
-        DEFAULT_PAGE_SIZE
-      ),
-      DEFAULT_PAGE_SIZE
-    ),
-    1,
-    50
-  );
-}
-
-function getPagination(items = [], input = {}) {
-  const data = safeObject(input);
-  const runtime = getRuntimeState(data);
-
-  const rawItems = safeArray(items);
-  const allItems = filterAndSortIncidencias(rawItems, data);
-  const pageSize = normalizePageSize(data);
-  const filtering = isFilterActive(data);
-
-  const remoteTotal = Math.max(
-    safeNumber(
-      first(
-        data.totalCount,
-        data.remoteCount,
-        runtime.totalCount,
-        runtime.remoteCount,
-        runtime.total,
-        rawItems.length
-      ),
-      rawItems.length
-    ),
-    rawItems.length
-  );
-
-  const reportedTotal = filtering ? allItems.length : remoteTotal;
-
-  const totalPagesFromProps = filtering
-    ? 0
-    : safeNumber(first(data.totalPages, runtime.totalPages), 0);
-
-  const totalPages = Math.max(
-    1,
-    totalPagesFromProps || Math.ceil((reportedTotal || 1) / pageSize)
-  );
-
-  const currentPage = clamp(
-    safeNumber(
-      first(data.page, runtime.page, runtime.currentPage, runtime.incidenciasPage, 1),
-      1
-    ),
-    1,
-    totalPages
-  );
-
-  const startIndex = (currentPage - 1) * pageSize;
-  const pageItems = allItems.slice(startIndex, startIndex + pageSize);
-
-  const rangeStart = reportedTotal && pageItems.length ? startIndex + 1 : 0;
-  const rangeEnd = reportedTotal
-    ? Math.min(startIndex + pageItems.length, reportedTotal)
-    : 0;
-
-  return {
-    allItems,
-    pageItems,
-    pageSize,
-    currentPage,
-    totalPages,
-    totalCount: reportedTotal,
-    unfilteredCount: rawItems.length,
-    remoteTotal,
-    rangeStart,
-    rangeEnd,
-    hasPrev: currentPage > 1,
-    hasNext: currentPage < totalPages,
-    filtering,
-    activeFilter: getActiveFilter(data),
-    searchQuery: getSearchQuery(data),
-  };
-}
-
-/* =========================================================
-   BUSY STATE
-========================================================= */
-
 function resolveBusyMeta(item = {}, state = {}) {
   const runtime = safeObject(state);
   const ticketId = getTicketId(item);
 
   return {
     ticketId,
-    isOpening:
-      safeText(
-        first(
-          runtime.openingTicketId,
-          runtime.openingIncidenciaId,
-          runtime.detailTicketId,
-          runtime.loadingTicketId
-        ),
-        ""
-      ) === ticketId,
+    isOpening: safeText(
+      first(
+        runtime.openingTicketId,
+        runtime.openingIncidenciaId,
+        runtime.detailTicketId,
+        runtime.loadingTicketId
+      ),
+      ""
+    ) === ticketId,
   };
 }
 
@@ -1971,22 +1363,14 @@ function renderSpinner(label = "") {
   return `
     <span class="incidencias-inline-loading">
       <span class="incidencias-inline-spinner" aria-hidden="true"></span>
-      ${
-        label
-          ? `<span class="incidencias-inline-loading-text">${escapeHtml(label)}</span>`
-          : ""
-      }
+      ${label ? `<span class="incidencias-inline-loading-text">${escapeHtml(label)}</span>` : ""}
     </span>
   `;
 }
 
 function renderLoaderOnly(label = "Cargando") {
   return `
-    <span
-      class="incidencias-loader-only"
-      role="status"
-      ${tooltipAttrs(label, label)}
-    >
+    <span class="incidencias-loader-only" role="status" ${tooltipAttrs(label, label)}>
       <span class="incidencias-inline-spinner" aria-hidden="true"></span>
     </span>
   `;
@@ -2053,31 +1437,23 @@ function renderPriorityBadge(item = {}) {
   const tooltip = `Prioridad ${label}`;
 
   return `
-    <span
-      class="incidencias-mini-badge incidencias-mini-badge--${escapeHtml(key)}"
-      ${tooltipAttrs(tooltip, tooltip)}
-    >
+    <span class="incidencias-mini-badge incidencias-mini-badge--${escapeHtml(key)}" ${tooltipAttrs(tooltip, tooltip)}>
       ${key === "critical" || key === "urgent" ? icon("alert") : icon("activity")}
       ${escapeHtml(label)}
     </span>
   `;
 }
 
-function renderAssignedAvatar(item = {}, state = {}) {
+function renderAssignedAvatar(item = {}) {
   const assigned = getAssignedTo(item);
   const assignedEmail = getAssignedEmail(item);
   const assignedInitials = getInitials(assigned);
-  const avatarUrl = getAssignedAvatarUrl(item, state);
-  const candidates = getTechnicianAvatarCandidates(item, state);
-  const isCurrent = isCurrentTechnicianAssigned(item, state);
+  const avatarUrl = getAssignedAvatarUrl(item);
 
   if (!avatarUrl) {
     return `
-      <span
-        class="incidencias-agent-avatar incidencias-agent-avatar--icon"
-        aria-hidden="true"
-      >
-        ${icon("users")}
+      <span class="incidencias-agent-avatar incidencias-agent-avatar--fallback" aria-hidden="true">
+        <span class="incidencias-agent-avatar-fallback">${escapeHtml(assignedInitials)}</span>
       </span>
     `;
   }
@@ -2087,9 +1463,8 @@ function renderAssignedAvatar(item = {}, state = {}) {
       class="incidencias-agent-avatar incidencias-agent-avatar--image"
       ${tooltipAttrs(assignedEmail || assigned, assignedEmail || assigned)}
       data-technician-avatar="true"
-      data-current-technician="${isCurrent ? "true" : "false"}"
       data-avatar-fallback-index="0"
-      data-avatar-fallback-srcs="${escapeHtml(candidates.join("|"))}"
+      data-avatar-fallback-srcs="${escapeHtml(avatarUrl)}"
       data-fallback="false"
       aria-hidden="true"
     >
@@ -2103,29 +1478,24 @@ function renderAssignedAvatar(item = {}, state = {}) {
         draggable="false"
         data-incidencias-agent-avatar-img="true"
       />
-      <span class="incidencias-agent-avatar-fallback">
-        ${escapeHtml(assignedInitials)}
-      </span>
+      <span class="incidencias-agent-avatar-fallback">${escapeHtml(assignedInitials)}</span>
     </span>
   `;
 }
 
-function renderAssignedBadge(item = {}, state = {}) {
+function renderAssignedBadge(item = {}) {
   const assigned = getAssignedTo(item);
   const assignedEmail = getAssignedEmail(item);
-  const isCurrent = isCurrentTechnicianAssigned(item, state);
-
   const tooltip = `Técnico · ${assigned}${assignedEmail ? ` · ${assignedEmail}` : ""}`;
 
   return `
     <span
-      class="incidencias-mini-badge incidencias-mini-badge--agent${isCurrent ? " incidencias-mini-badge--current-agent" : ""}"
+      class="incidencias-mini-badge incidencias-mini-badge--agent"
       ${tooltipAttrs(tooltip, tooltip)}
       data-assigned-technician="${escapeHtml(assigned)}"
       data-assigned-email="${escapeHtml(assignedEmail)}"
-      data-current-technician="${isCurrent ? "true" : "false"}"
     >
-      ${renderAssignedAvatar(item, state)}
+      ${renderAssignedAvatar(item)}
       ${escapeHtml(assigned)}
     </span>
   `;
@@ -2153,7 +1523,7 @@ function renderImporteChip(item = {}) {
 }
 
 function renderActionButton({
-  action = "detail",
+  action = "open-ticket",
   ticketId = "",
   label = "Detalle",
   loadingLabel = "Cargando detalle",
@@ -2169,7 +1539,7 @@ function renderActionButton({
     <button
       type="button"
       class="incidencias-detail-btn${loading ? " is-loading" : ""}"
-      ${actionAttrs(action === "detail" ? "open-ticket" : action, ticketId)}
+      ${actionAttrs(action, ticketId)}
       ${tooltipAttrs(finalTooltip, finalTooltip)}
       ${disabledAttrs(finalDisabled, loading)}
     >
@@ -2186,13 +1556,12 @@ function renderActionButton({
 }
 
 /* =========================================================
-   ROW / TABLE PARTIALS
+   TABLE PARTIALS
 ========================================================= */
 
 function renderRow(item = {}, state = {}) {
   const runtime = safeObject(state);
   const busy = resolveBusyMeta(item, runtime);
-
   const ticketId = busy.ticketId;
   const subject = getSubject(item);
   const description = getDescription(item);
@@ -2213,9 +1582,6 @@ function renderRow(item = {}, state = {}) {
       data-ticket-row="true"
       data-ticket-id="${escapeHtml(ticketId)}"
       data-incidencia-id="${escapeHtml(ticketId)}"
-      data-incidencias-action="open-ticket"
-      data-action="open-ticket"
-      data-row-action="open-ticket"
       data-detail-target="true"
       data-row-click-disabled="false"
       role="button"
@@ -2243,7 +1609,7 @@ function renderRow(item = {}, state = {}) {
 
             <div class="incidencias-row-badges">
               ${renderPriorityBadge(item)}
-              ${renderAssignedBadge(item, runtime)}
+              ${renderAssignedBadge(item)}
             </div>
           </div>
         </div>
@@ -2254,19 +1620,13 @@ function renderRow(item = {}, state = {}) {
       </td>
 
       <td class="incidencias-cell incidencias-cell--date">
-        <span
-          class="incidencias-date-inline"
-          ${tooltipAttrs(createdAt, `Fecha de creación ${createdAt}`)}
-        >
+        <span class="incidencias-date-inline" ${tooltipAttrs(createdAt, `Fecha de creación ${createdAt}`)}>
           ${escapeHtml(createdAt)}
         </span>
       </td>
 
       <td class="incidencias-cell incidencias-cell--date">
-        <span
-          class="incidencias-date-inline"
-          ${tooltipAttrs(updatedAtFull, `Última novedad ${updatedAtFull}`)}
-        >
+        <span class="incidencias-date-inline" ${tooltipAttrs(updatedAtFull, `Última novedad ${updatedAtFull}`)}>
           ${escapeHtml(updatedAt)}
         </span>
       </td>
@@ -2278,10 +1638,7 @@ function renderRow(item = {}, state = {}) {
       <td class="incidencias-cell incidencias-cell--attachments">
         <span
           class="incidencias-attachments-pill"
-          ${tooltipAttrs(
-            `${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`,
-            `${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`
-          )}
+          ${tooltipAttrs(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`, `${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}
         >
           ${icon("paperclip")}
           ${escapeHtml(String(attachmentsCount))}
@@ -2344,9 +1701,7 @@ function renderSearch(input = {}) {
 
   return `
     <div class="incidencias-search" role="search" aria-label="Buscar incidencias">
-      <span class="incidencias-search-icon" aria-hidden="true">
-        ${icon("search")}
-      </span>
+      <span class="incidencias-search-icon" aria-hidden="true">${icon("search")}</span>
 
       <input
         id="incidencias-search-input"
@@ -2356,9 +1711,9 @@ function renderSearch(input = {}) {
         placeholder="Buscar cliente, email, asunto, ID..."
         autocomplete="off"
         spellcheck="false"
-        data-incidencias-action="search"
-        data-action="search-incidencias"
         data-incidencias-search-input="true"
+        data-incidencias-field="search"
+        data-field="search"
         aria-label="Buscar incidencias por cliente, email, asunto o identificador"
       />
 
@@ -2389,11 +1744,7 @@ function renderFilters(input = {}, pagination = {}) {
 
   return `
     <div class="incidencias-filters" aria-label="Filtros y búsqueda de incidencias">
-      <div
-        class="incidencias-filter-pills"
-        role="group"
-        aria-label="Filtrar incidencias por estado"
-      >
+      <div class="incidencias-filter-pills" role="group" aria-label="Filtrar incidencias por estado">
         ${FILTERS.map((filter) => {
           const isActive = filter.key === activeFilter;
           const count = counts[filter.key] ?? 0;
@@ -2452,24 +1803,14 @@ function renderEmptyState({ hasError = false, filtering = false, searchQuery = "
       ${
         hasError
           ? `
-            <button
-              type="button"
-              class="incidencias-btn incidencias-btn--primary"
-              data-incidencias-action="retry"
-              data-action="retry"
-            >
+            <button type="button" class="incidencias-btn incidencias-btn--primary" data-incidencias-action="retry" data-action="retry">
               ${icon("refresh")}
               <span class="incidencias-btn-text">Reintentar</span>
             </button>
           `
           : filtering
             ? `
-              <button
-                type="button"
-                class="incidencias-btn"
-                data-incidencias-action="clear-filters"
-                data-action="clear-filters"
-              >
+              <button type="button" class="incidencias-btn" data-incidencias-action="clear-filters" data-action="clear-filters">
                 ${icon("close")}
                 <span class="incidencias-btn-text">Limpiar filtros</span>
               </button>
@@ -2483,28 +1824,22 @@ function renderEmptyState({ hasError = false, filtering = false, searchQuery = "
 function renderTableLoading(rows = DEFAULT_PAGE_SIZE) {
   return `
     <div class="incidencias-table-loading" aria-hidden="true">
-      ${Array.from({ length: rows })
-        .map(
-          () => `
-            <div class="incidencias-table-loading-row">
-              <div class="incidencias-skeleton incidencias-skeleton--avatar"></div>
-
-              <div class="incidencias-table-loading-copy">
-                <div class="incidencias-skeleton incidencias-skeleton--xs"></div>
-                <div class="incidencias-skeleton incidencias-skeleton--lg"></div>
-                <div class="incidencias-skeleton incidencias-skeleton--md"></div>
-              </div>
-
-              <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
-              <div class="incidencias-skeleton incidencias-skeleton--date"></div>
-              <div class="incidencias-skeleton incidencias-skeleton--date"></div>
-              <div class="incidencias-skeleton incidencias-skeleton--amount"></div>
-              <div class="incidencias-skeleton incidencias-skeleton--attach"></div>
-              <div class="incidencias-skeleton incidencias-skeleton--btn"></div>
-            </div>
-          `
-        )
-        .join("")}
+      ${Array.from({ length: rows }).map(() => `
+        <div class="incidencias-table-loading-row">
+          <div class="incidencias-skeleton incidencias-skeleton--avatar"></div>
+          <div class="incidencias-table-loading-copy">
+            <div class="incidencias-skeleton incidencias-skeleton--xs"></div>
+            <div class="incidencias-skeleton incidencias-skeleton--lg"></div>
+            <div class="incidencias-skeleton incidencias-skeleton--md"></div>
+          </div>
+          <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
+          <div class="incidencias-skeleton incidencias-skeleton--date"></div>
+          <div class="incidencias-skeleton incidencias-skeleton--date"></div>
+          <div class="incidencias-skeleton incidencias-skeleton--amount"></div>
+          <div class="incidencias-skeleton incidencias-skeleton--attach"></div>
+          <div class="incidencias-skeleton incidencias-skeleton--btn"></div>
+        </div>
+      `).join("")}
     </div>
   `;
 }
@@ -2525,9 +1860,8 @@ function renderRefreshOverlay() {
 
 export function renderHeader(input = {}) {
   const data = safeObject(input);
-  const rows = sortIncidenciasNewestFirst(getInputItems(data));
+  const rows = getInputItems(data);
   const runtime = getRuntimeState(data);
-
   const stats = computeStats(rows);
 
   const remoteCount = Math.max(
@@ -2553,19 +1887,8 @@ export function renderHeader(input = {}) {
     ...rows.map((item) => getUpdatedAt(item))
   );
 
-  const title = safeText(
-    first(data.title, runtime.title, "Tus incidencias y solicitudes"),
-    "Tus incidencias y solicitudes"
-  );
-
-  const subtitle = safeText(
-    first(
-      data.subtitle,
-      runtime.subtitle,
-      "Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, premium y conectada con facturación."
-    ),
-    ""
-  );
+  const title = safeText(first(data.title, runtime.title, "Tus incidencias y solicitudes"), "Tus incidencias y solicitudes");
+  const subtitle = safeText(first(data.subtitle, runtime.subtitle, "Consulta el estado de tus incidencias, revisa actualizaciones y crea nuevas solicitudes."), "");
 
   const creating = Boolean(first(runtime.creating, runtime.creatingIncidencia, data.creating));
   const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
@@ -2600,11 +1923,7 @@ export function renderHeader(input = {}) {
             data-action="create-incidencia"
             ${disabledAttrs(creating, creating)}
           >
-            ${
-              creating
-                ? renderSpinner("Abriendo...")
-                : `${icon("plus")}<span class="incidencias-btn-text">Crear incidencia</span>`
-            }
+            ${creating ? renderSpinner("Abriendo...") : `${icon("plus")}<span class="incidencias-btn-text">Crear incidencia</span>`}
           </button>
 
           <button
@@ -2615,39 +1934,16 @@ export function renderHeader(input = {}) {
             data-action="refresh"
             ${disabledAttrs(refreshing || loading, refreshing)}
           >
-            ${
-              refreshing
-                ? renderSpinner("Actualizando...")
-                : `${icon("refresh")}<span class="incidencias-btn-text">Actualizar</span>`
-            }
+            ${refreshing ? renderSpinner("Actualizando...") : `${icon("refresh")}<span class="incidencias-btn-text">Actualizar</span>`}
           </button>
         </div>
       </div>
 
       <div class="incidencias-hero-meta">
-        <span class="incidencias-meta-pill">
-          ${icon("ticket")}
-          ${escapeHtml(`${remoteCount} solicitudes registradas`)}
-        </span>
-
-        <span class="incidencias-meta-pill">
-          ${icon("refresh")}
-          ${
-            updatedAt
-              ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`)
-              : "Sin actualizaciones recientes"
-          }
-        </span>
-
-        <span class="incidencias-meta-pill">
-          ${icon("paperclip")}
-          ${escapeHtml(`${stats.attachmentsCount} adjuntos`)}
-        </span>
-
-        <span class="incidencias-meta-pill">
-          ${icon("euro")}
-          ${escapeHtml(formatMoney(stats.totalImporte, DEFAULT_CURRENCY))}
-        </span>
+        <span class="incidencias-meta-pill">${icon("ticket")}${escapeHtml(`${remoteCount} solicitudes registradas`)}</span>
+        <span class="incidencias-meta-pill">${icon("refresh")}${updatedAt ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span>
+        <span class="incidencias-meta-pill">${icon("paperclip")}${escapeHtml(`${stats.attachmentsCount} adjuntos`)}</span>
+        <span class="incidencias-meta-pill">${icon("euro")}${escapeHtml(formatMoney(stats.totalImporte, DEFAULT_CURRENCY))}</span>
       </div>
 
       <div class="incidencias-stats">
@@ -2695,9 +1991,7 @@ export function renderErrorState(message = "No se pudieron cargar las incidencia
   return `
     <section class="incidencias-error">
       <h3 class="incidencias-error-title">No se pudo renderizar la vista de incidencias</h3>
-      <p class="incidencias-error-text">${escapeHtml(
-        safeText(message, "Error desconocido al cargar la vista.")
-      )}</p>
+      <p class="incidencias-error-text">${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}</p>
     </section>
   `;
 }
@@ -2708,10 +2002,8 @@ export function renderErrorState(message = "No se pudieron cargar las incidencia
 
 export function renderTable(input = {}) {
   const data = safeObject(input);
-  const items = getInputItems(data);
   const runtime = getRuntimeState(data);
-
-  const pagination = getPagination(items, data);
+  const pagination = getPagination(data);
 
   const loading = Boolean(first(runtime.loading, data.loading));
   const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
@@ -2720,12 +2012,10 @@ export function renderTable(input = {}) {
   const showInitialLoading = loading && !pagination.pageItems.length;
   const showRefreshOverlay = refreshing && pagination.pageItems.length;
 
-  const activeFilterLabel = getFilterLabel(pagination.activeFilter);
-  const searchQuery = pagination.searchQuery;
-
+  const activeFilterLabel = FILTERS.find((item) => item.key === pagination.activeFilter)?.label || "Todas";
   const activeCriteria = [
     pagination.activeFilter !== "all" ? activeFilterLabel : "",
-    searchQuery ? `búsqueda “${searchQuery}”` : "",
+    pagination.searchQuery ? `búsqueda “${pagination.searchQuery}”` : "",
   ].filter(Boolean);
 
   const subtitle = showInitialLoading
@@ -2736,12 +2026,10 @@ export function renderTable(input = {}) {
 
   return `
     <section class="incidencias-history">
-      <div class="incidencias-history-head">
+      <div class="incidencias-history-head" data-incidencias-history-head="true">
         <div class="incidencias-history-copy">
           <h2 class="incidencias-history-title">Historial de incidencias</h2>
-          <p class="incidencias-history-subtitle">
-            ${escapeHtml(subtitle)}
-          </p>
+          <p class="incidencias-history-subtitle">${escapeHtml(subtitle)}</p>
         </div>
 
         ${renderPagination(pagination, runtime)}
@@ -2770,7 +2058,7 @@ export function renderTable(input = {}) {
                           <col class="incidencias-col incidencias-col--actions">
                         </colgroup>
 
-                        <thead>
+                        <thead data-incidencias-table-head="true">
                           <tr>
                             <th scope="col">Incidencia / cliente</th>
                             <th scope="col">Estado</th>
@@ -2791,7 +2079,7 @@ export function renderTable(input = {}) {
                   : renderEmptyState({
                       hasError,
                       filtering: pagination.filtering,
-                      searchQuery,
+                      searchQuery: pagination.searchQuery,
                     })
               }
             </div>
@@ -2800,10 +2088,6 @@ export function renderTable(input = {}) {
     </section>
   `;
 }
-
-/* =========================================================
-   ALIAS PARA COMPATIBILIDAD
-========================================================= */
 
 export const renderCards = renderTable;
 
@@ -2815,11 +2099,12 @@ export function renderIncidenciasTableTemplate(input = {}) {
   const data = safeObject(input);
   const items = getInputItems(data);
   const runtime = getRuntimeState(data);
+  const error = safeText(first(runtime.error, data.error), "");
 
-  if (runtime.error && !items.length) {
+  if (error && !items.length) {
     return `
       <section class="incidencias-view-root" data-incidencias-scope="true">
-        ${renderErrorState(runtime.error)}
+        ${renderErrorState(error)}
       </section>
     `;
   }
@@ -2839,27 +2124,8 @@ export function renderIncidenciasTableTemplate(input = {}) {
 }
 
 /* =========================================================
-   DOM BINDINGS · CSP CLEAN
+   DOM FALLBACKS · CSP CLEAN
 ========================================================= */
-
-function isInteractiveTarget(target = null) {
-  if (!target || typeof target.closest !== "function") return false;
-
-  return Boolean(
-    target.closest(
-      [
-        "button",
-        "a",
-        "input",
-        "select",
-        "textarea",
-        "[role='button']:not(.incidencias-row)",
-        "[data-row-click-stop='true']",
-        "[data-incidencias-action]:not(.incidencias-row)",
-      ].join(",")
-    )
-  );
-}
 
 function bindImageFallback({
   img,
@@ -2898,14 +2164,10 @@ function bindImageFallback({
       const currentSrc = safeText(img.getAttribute("src"), "");
       const currentIndex = safeNumber(container?.dataset?.avatarFallbackIndex, 0);
       const nextIndex = currentIndex + 1;
-
       const nextSource = sources[nextIndex];
 
       if (nextSource && nextSource !== currentSrc) {
-        if (container) {
-          container.dataset.avatarFallbackIndex = String(nextIndex);
-        }
-
+        if (container) container.dataset.avatarFallbackIndex = String(nextIndex);
         img.hidden = false;
         img.setAttribute("src", nextSource);
         return true;
@@ -2962,102 +2224,15 @@ function bindAgentAvatarFallbacks(scope) {
   });
 }
 
-function bindClickableRows(scope) {
-  if (scope.dataset.incidenciasRowsBound === "true") return true;
-
-  scope.dataset.incidenciasRowsBound = "true";
-
-  const openRow = (row) => {
-    if (!row || row.dataset.rowClickDisabled === "true") return false;
-
-    const ticketId = safeText(
-      first(
-        row.dataset.ticketId,
-        row.dataset.incidenciaId
-      ),
-      ""
-    );
-
-    if (!ticketId) return false;
-
-    const detailButton =
-      row.querySelector(
-        "button[data-incidencias-action='open-ticket'], button[data-action='open-ticket'], button[data-incidencias-action='detail']"
-      );
-
-    if (detailButton && typeof detailButton.click === "function") {
-      detailButton.click();
-      return true;
-    }
-
-    try {
-      scope.dispatchEvent(
-        new CustomEvent("incidencias:open-detail", {
-          bubbles: true,
-          detail: {
-            ticketId,
-            incidenciaId: ticketId,
-            source: "row",
-          },
-        })
-      );
-
-      return true;
-    } catch {}
-
-    return false;
-  };
-
-  scope.addEventListener(
-    "click",
-    (event) => {
-      const row = event.target?.closest?.(
-        ".incidencias-row[data-detail-target='true'], .incidencias-row--clickable"
-      );
-
-      if (!row) return;
-      if (isInteractiveTarget(event.target)) return;
-
-      openRow(row);
-    },
-    {
-      passive: true,
-    }
-  );
-
-  scope.addEventListener("keydown", (event) => {
-    const key = event.key;
-
-    if (key !== "Enter" && key !== " ") return;
-
-    const row = event.target?.closest?.(
-      ".incidencias-row[data-detail-target='true'], .incidencias-row--clickable"
-    );
-
-    if (!row) return;
-    if (isInteractiveTarget(event.target) && event.target !== row) return;
-
-    event.preventDefault();
-    openRow(row);
-  });
-
-  return true;
-}
-
 export function bindIncidenciasTemplateDom(root = null) {
-  const scope =
-    root ||
-    (typeof document !== "undefined"
-      ? document.querySelector(".incidencias-view-root, [data-incidencias-scope]")
-      : null);
+  const scope = root || (typeof document !== "undefined"
+    ? document.querySelector(".incidencias-view-root, [data-incidencias-scope]")
+    : null);
 
-  if (!scope || typeof scope.querySelectorAll !== "function") {
-    return false;
-  }
+  if (!scope || typeof scope.querySelectorAll !== "function") return false;
 
   bindClientAvatarFallbacks(scope);
   bindAgentAvatarFallbacks(scope);
-  bindClickableRows(scope);
 
   return true;
 }

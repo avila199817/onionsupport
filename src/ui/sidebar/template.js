@@ -5,6 +5,8 @@
    Responsabilidad:
    - Construir el DOM del sidebar.
    - Exponer estructura estable para CSS SaaS.
+   - Preparar header, navegación y cuenta estilo ChatGPT.
+   - Preparar markup del dropdown de cuenta.
    - Recibir datos ya normalizados desde index.js/user.js.
    - No navegar.
    - No leer sesión.
@@ -12,10 +14,10 @@
    - No hacer logout.
    - No decidir visibilidad.
    - No decidir permisos.
+   - No abrir/cerrar dropdown.
    - No depender de Auth / Router / Core / Store.
    - No usar HTML string.
    - No duplicar lógica de negocio.
-   - Sin dropdown.
    - Sin HTTP.
    - Sin Toast.
 ========================================================= */
@@ -36,7 +38,7 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v3";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v4";
 
 /* =========================================================
    ICON PATHS
@@ -48,6 +50,9 @@ const ICON_PATHS = Object.freeze({
 
   menu:
     "M4 6h16 M4 12h16 M4 18h16",
+
+  chevron:
+    "m9 18 6-6-6-6",
 
   home:
     "M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1v-9.5Z",
@@ -72,6 +77,9 @@ const ICON_PATHS = Object.freeze({
 
   servidor:
     "M4 5h16v5H4z M4 14h16v5H4z M8 7.5h.01 M8 16.5h.01 M11 7.5h5 M11 16.5h5",
+
+  help:
+    "M9.1 9a3 3 0 1 1 5.8 1c-.4 1.4-1.9 2-2.6 2.7-.5.5-.7 1-.7 1.8 M12 18h.01 M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
 
   logout:
     "M16 17l5-5-5-5 M21 12H9 M4 4h5v16H4z",
@@ -197,10 +205,21 @@ function normalizeUser(user = {}) {
     .slice(0, 2)
     .toUpperCase();
 
+  const avatarUrl = text(
+    user.avatarUrl ||
+      user.avatar ||
+      user.photoUrl ||
+      user.picture ||
+      "",
+    ""
+  );
+
   return {
     name,
     initials,
+    avatarUrl,
     roleLabel: text(user.roleLabel, "Usuario"),
+    email: text(user.email, ""),
   };
 }
 
@@ -215,7 +234,7 @@ export function createSidebarIcon(
   if (!isBrowser()) return null;
 
   const iconName = normalizeSidebarIcon(name);
-  const pathData = ICON_PATHS[iconName] || ICON_PATHS.home;
+  const pathData = ICON_PATHS[iconName] || ICON_PATHS[name] || ICON_PATHS.home;
 
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -253,6 +272,51 @@ function createIconSlot(className = "", iconName = SIDEBAR_ICONS.home, svgClass 
 }
 
 /* =========================================================
+   AVATAR
+========================================================= */
+
+function createUserAvatar(user = {}, className = SIDEBAR_CLASSES.userAvatar) {
+  const normalizedUser = normalizeUser(user);
+
+  const avatar = createElement("span", {
+    className: classNames(
+      className,
+      normalizedUser.avatarUrl ? "has-image" : "is-fallback"
+    ),
+    attrs: {
+      "aria-hidden": "true",
+      "data-sidebar-user-avatar": "true",
+      "data-fallback": normalizedUser.avatarUrl ? "false" : "true",
+    },
+  });
+
+  if (normalizedUser.avatarUrl) {
+    appendChildren(
+      avatar,
+      createElement("img", {
+        className: "sidebar-user-avatar-img",
+        attrs: {
+          src: normalizedUser.avatarUrl,
+          alt: "",
+          loading: "lazy",
+          decoding: "async",
+          referrerpolicy: "no-referrer",
+          draggable: "false",
+          "data-sidebar-avatar-img": "true",
+        },
+      })
+    );
+  }
+
+  appendChildren(
+    avatar,
+    createSpan("sidebar-user-avatar-fallback", normalizedUser.initials)
+  );
+
+  return avatar;
+}
+
+/* =========================================================
    HEADER
 ========================================================= */
 
@@ -262,7 +326,7 @@ export function createSidebarHeader(options = {}) {
   const open = options.open !== false;
 
   const header = createElement("header", {
-    className: SIDEBAR_CLASSES.header,
+    className: classNames(SIDEBAR_CLASSES.header, "sidebar-header--chatgpt"),
     attrs: {
       [SIDEBAR_ATTRS.header]: "true",
       "data-sidebar-section": "header",
@@ -270,7 +334,7 @@ export function createSidebarHeader(options = {}) {
   });
 
   const brand = createElement("a", {
-    className: SIDEBAR_CLASSES.brand,
+    className: classNames(SIDEBAR_CLASSES.brand, "sidebar-brand--chatgpt"),
     attrs: {
       href: brandHref,
 
@@ -293,7 +357,6 @@ export function createSidebarHeader(options = {}) {
   ]);
 
   appendChildren(brand, [
-    createSurface("sidebar-brand-glow"),
     createIconSlot(
       SIDEBAR_CLASSES.brandIcon,
       SIDEBAR_ICONS.brand,
@@ -303,14 +366,16 @@ export function createSidebarHeader(options = {}) {
   ]);
 
   const toggle = createElement("button", {
-    className: SIDEBAR_CLASSES.toggle,
+    className: classNames(SIDEBAR_CLASSES.toggle, "sidebar-toggle--chatgpt"),
     attrs: {
       type: "button",
       [SIDEBAR_ATTRS.toggle]: "true",
-      "aria-label": open ? "Cerrar navegación" : "Abrir navegación",
+      "aria-label": open ? "Cerrar barra lateral" : "Abrir barra lateral",
       "aria-expanded": open ? "true" : "false",
       "data-sidebar-action": "toggle",
       "data-state": open ? "open" : "collapsed",
+      "data-tooltip": open ? "Cerrar barra lateral" : "Abrir barra lateral",
+      title: open ? "Cerrar barra lateral" : "Abrir barra lateral",
     },
   });
 
@@ -318,7 +383,7 @@ export function createSidebarHeader(options = {}) {
     createSidebarIcon(SIDEBAR_ICONS.menu, "sidebar-toggle-svg"),
     createSpan(
       "sidebar-toggle-label",
-      open ? "Cerrar navegación" : "Abrir navegación"
+      open ? "Cerrar barra lateral" : "Abrir barra lateral"
     ),
   ]);
 
@@ -333,7 +398,7 @@ export function createSidebarHeader(options = {}) {
 
 export function createSidebarNav(items = []) {
   const nav = createElement("nav", {
-    className: SIDEBAR_CLASSES.nav,
+    className: classNames(SIDEBAR_CLASSES.nav, "sidebar-nav--chatgpt"),
     attrs: {
       [SIDEBAR_ATTRS.nav]: "true",
       "aria-label": "Navegación principal",
@@ -380,6 +445,7 @@ export function createSidebarNavItem(rawItem = {}) {
   const link = createElement("a", {
     className: classNames(
       SIDEBAR_CLASSES.link,
+      "sidebar-link--chatgpt",
       item.active ? SIDEBAR_CLASSES.active : "",
       item.disabled ? SIDEBAR_CLASSES.disabled : ""
     ),
@@ -425,8 +491,6 @@ export function createSidebarNavItem(rawItem = {}) {
   }
 
   appendChildren(link, [
-    createSurface("sidebar-link-surface"),
-    createSurface("sidebar-link-indicator"),
     createIconSlot(
       SIDEBAR_CLASSES.linkIcon,
       item.icon,
@@ -441,82 +505,211 @@ export function createSidebarNavItem(rawItem = {}) {
 }
 
 /* =========================================================
+   ACCOUNT DROPDOWN
+========================================================= */
+
+function createAccountMenuItem({
+  label = "",
+  iconName = SIDEBAR_ICONS.cuenta,
+  action = "",
+  href = "",
+  danger = false,
+  logout = false,
+} = {}) {
+  const finalLabel = text(label, "");
+  const finalAction = text(action, "");
+  const finalHref = href ? safeInternalHref(href, "") : "";
+
+  const attrs = cleanAttrs({
+    type: finalHref ? null : "button",
+    href: finalHref || null,
+
+    [SIDEBAR_ATTRS.spa]: finalHref ? "" : null,
+    [SIDEBAR_ATTRS.link]: finalHref ? "true" : null,
+    [SIDEBAR_ATTRS.route]: finalHref || null,
+    [SIDEBAR_ATTRS.logout]: logout ? "true" : null,
+
+    "data-sidebar-dropdown-item": "true",
+    "data-sidebar-action": finalAction || null,
+    "data-sidebar-menu-action": finalAction || null,
+    "data-danger": danger ? "true" : null,
+    "aria-label": finalLabel,
+  });
+
+  const element = createElement(finalHref ? "a" : "button", {
+    className: classNames(
+      "sidebar-account-menu-item",
+      danger ? "is-danger" : ""
+    ),
+    attrs,
+  });
+
+  appendChildren(element, [
+    createIconSlot(
+      "sidebar-account-menu-icon",
+      iconName,
+      "sidebar-account-menu-svg"
+    ),
+    createSpan("sidebar-account-menu-label", finalLabel),
+  ]);
+
+  return element;
+}
+
+function createAccountDropdown(user = {}) {
+  const normalizedUser = normalizeUser(user);
+  const menuId = `${SIDEBAR_ROOT_ID}-account-menu`;
+
+  const dropdown = createElement("div", {
+    className: "sidebar-account-dropdown",
+    attrs: {
+      "data-sidebar-account-dropdown": "true",
+      "data-sidebar-dropdown": "account",
+    },
+  });
+
+  const trigger = createElement("button", {
+    className: classNames(SIDEBAR_CLASSES.user, "sidebar-account-trigger"),
+    attrs: {
+      type: "button",
+      [SIDEBAR_ATTRS.user]: "true",
+      "data-sidebar-user-card": "true",
+      "data-sidebar-dropdown-trigger": "account",
+      "data-sidebar-action": "account-menu",
+      "aria-haspopup": "menu",
+      "aria-expanded": "false",
+      "aria-controls": menuId,
+    },
+  });
+
+  const info = createElement("span", {
+    className: SIDEBAR_CLASSES.userInfo,
+  });
+
+  appendChildren(info, [
+    createElement("span", {
+      className: SIDEBAR_CLASSES.userName,
+      textContent: normalizedUser.name,
+    }),
+    createElement("span", {
+      className: SIDEBAR_CLASSES.userRole,
+      textContent: normalizedUser.roleLabel,
+    }),
+  ]);
+
+  appendChildren(trigger, [
+    createUserAvatar(normalizedUser),
+    info,
+    createIconSlot(
+      "sidebar-account-chevron",
+      "chevron",
+      "sidebar-account-chevron-svg"
+    ),
+  ]);
+
+  const menu = createElement("div", {
+    className: "sidebar-account-menu",
+    attrs: {
+      id: menuId,
+      role: "menu",
+      hidden: true,
+      "data-sidebar-dropdown-menu": "account",
+      "data-sidebar-account-menu": "true",
+    },
+  });
+
+  const menuHeader = createElement("div", {
+    className: "sidebar-account-menu-header",
+    attrs: {
+      "data-sidebar-account-menu-header": "true",
+    },
+  });
+
+  const menuHeaderInfo = createElement("span", {
+    className: "sidebar-account-menu-user-info",
+  });
+
+  appendChildren(menuHeaderInfo, [
+    createSpan("sidebar-account-menu-user-name", normalizedUser.name),
+    createSpan(
+      "sidebar-account-menu-user-meta",
+      normalizedUser.email || normalizedUser.roleLabel
+    ),
+  ]);
+
+  appendChildren(menuHeader, [
+    createUserAvatar(normalizedUser, "sidebar-account-menu-avatar"),
+    menuHeaderInfo,
+  ]);
+
+  const menuGroup = createElement("div", {
+    className: "sidebar-account-menu-group",
+    attrs: {
+      "data-sidebar-account-menu-group": "primary",
+    },
+  });
+
+  appendChildren(menuGroup, [
+    createAccountMenuItem({
+      label: "Cuenta",
+      iconName: SIDEBAR_ICONS.cuenta,
+      action: "navigate",
+      href: "/cuenta",
+    }),
+    createAccountMenuItem({
+      label: "Ajustes",
+      iconName: SIDEBAR_ICONS.ajustes,
+      action: "navigate",
+      href: "/ajustes",
+    }),
+  ]);
+
+  const menuDangerGroup = createElement("div", {
+    className: "sidebar-account-menu-group sidebar-account-menu-group--danger",
+    attrs: {
+      "data-sidebar-account-menu-group": "session",
+    },
+  });
+
+  appendChildren(menuDangerGroup, [
+    createAccountMenuItem({
+      label: "Salir",
+      iconName: SIDEBAR_ICONS.logout,
+      action: "logout",
+      danger: true,
+      logout: true,
+    }),
+  ]);
+
+  appendChildren(menu, [
+    menuHeader,
+    menuGroup,
+    menuDangerGroup,
+  ]);
+
+  appendChildren(dropdown, [
+    trigger,
+    menu,
+  ]);
+
+  return dropdown;
+}
+
+/* =========================================================
    FOOTER
 ========================================================= */
 
 export function createSidebarFooter(user = {}) {
-  const normalizedUser = normalizeUser(user);
-
   const footer = createElement("footer", {
-    className: SIDEBAR_CLASSES.footer,
+    className: classNames(SIDEBAR_CLASSES.footer, "sidebar-footer--chatgpt"),
     attrs: {
       [SIDEBAR_ATTRS.footer]: "true",
       "data-sidebar-section": "footer",
     },
   });
 
-  const userBox = createElement("div", {
-    className: SIDEBAR_CLASSES.user,
-    attrs: {
-      [SIDEBAR_ATTRS.user]: "true",
-      "data-sidebar-user-card": "true",
-    },
-  });
-
-  const avatar = createElement("div", {
-    className: SIDEBAR_CLASSES.userAvatar,
-    textContent: normalizedUser.initials,
-    attrs: {
-      "aria-hidden": "true",
-    },
-  });
-
-  const info = createElement("div", {
-    className: SIDEBAR_CLASSES.userInfo,
-  });
-
-  appendChildren(info, [
-    createElement("div", {
-      className: SIDEBAR_CLASSES.userName,
-      textContent: normalizedUser.name,
-    }),
-    createElement("div", {
-      className: SIDEBAR_CLASSES.userRole,
-      textContent: normalizedUser.roleLabel,
-    }),
-  ]);
-
-  appendChildren(userBox, [
-    createSurface("sidebar-user-surface"),
-    avatar,
-    info,
-  ]);
-
-  const logout = createElement("button", {
-    className: SIDEBAR_CLASSES.logout,
-    attrs: {
-      type: "button",
-      [SIDEBAR_ATTRS.logout]: "true",
-      "aria-label": "Cerrar sesión",
-      "data-sidebar-action": "logout",
-    },
-  });
-
-  appendChildren(logout, [
-    createIconSlot(
-      SIDEBAR_CLASSES.logoutIcon,
-      SIDEBAR_ICONS.logout,
-      "sidebar-logout-svg"
-    ),
-    createElement("span", {
-      className: SIDEBAR_CLASSES.logoutLabel,
-      textContent: "Salir",
-    }),
-  ]);
-
   appendChildren(footer, [
-    userBox,
-    logout,
+    createAccountDropdown(user),
   ]);
 
   return footer;
@@ -536,6 +729,7 @@ export function createSidebarTemplate(options = {}) {
     className: classNames(
       SIDEBAR_CLASSES.root,
       SIDEBAR_CLASSES.appRoot,
+      "sidebar-root--chatgpt",
       open ? SIDEBAR_CLASSES.open : SIDEBAR_CLASSES.collapsed
     ),
     attrs: {
@@ -552,7 +746,6 @@ export function createSidebarTemplate(options = {}) {
   });
 
   appendChildren(sidebar, [
-    createSurface("sidebar-backdrop"),
     createElement("div", {
       className: "sidebar-inner",
       attrs: {
@@ -602,7 +795,10 @@ export function getSidebarTemplateSnapshot() {
       noStore: true,
       noHttp: true,
       noToast: true,
-      noDropdown: true,
+
+      dropdownMarkupOnly: true,
+      noDropdownBehavior: true,
+
       noPermissionDecision: true,
       noVisibilityDecision: true,
     },

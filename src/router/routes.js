@@ -679,7 +679,7 @@ const ROUTE_DEFINITIONS = Object.freeze([
   },
 
   {
-    kind: "private",
+    kind: "admin",
     path: ROUTE_PATHS.CLIENTES,
     name: ROUTE_NAMES.CLIENTES,
     viewKey: ROUTE_VIEW_KEYS.CLIENTES,

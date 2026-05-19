@@ -8,6 +8,7 @@
    - Aplicar visibilidad básica por rol admin/user.
    - Rutas públicas ocultan sidebar.
    - Sesión válida obligatoria.
+   - Entender rutas visibles /@{slug}/{ruta}.
    - No navegar.
    - No hacer logout.
    - No leer Auth directamente.
@@ -15,7 +16,7 @@
    - No emitir eventos.
    - No crear DOM.
    - No reparar estructuras legacy.
-   - No gestionar dropdown.
+   - No gestionar comportamiento de dropdown.
    - Sin /home.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
@@ -24,7 +25,6 @@ import {
   SIDEBAR_CLASSES,
   SIDEBAR_ROLE_ADMIN,
   SIDEBAR_ROLE_USER,
-  canonicalSidebarPath,
   isSidebarAdminFallbackRoute,
   isSidebarPublicRoute,
   sidebarHomeLookupPath,
@@ -40,7 +40,7 @@ import {
   getSidebarUserRole,
 } from "./user.js";
 
-export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v2";
+export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v3";
 
 /* =========================================================
    BASICS
@@ -131,6 +131,7 @@ export function getSidebarVisibilityPath(context = {}) {
     context.canonicalPath,
     context.path,
     context.currentPath,
+    context.publicPath,
     typeof route === "string" ? route : "",
     isObject(route) ? route.path : "",
     state.canonicalPath,
@@ -248,7 +249,7 @@ function elementPath(element = null) {
     element.getAttribute("href")
   );
 
-  return raw ? canonicalSidebarPath(raw) : "";
+  return raw ? sidebarHomeLookupPath(raw) : "";
 }
 
 function elementRequiredRoles(element = null) {
@@ -480,10 +481,11 @@ export function getSidebarVisibilitySnapshot(context = {}) {
       noEvents: true,
       noDomCreate: true,
       noLegacyRepair: true,
-      noDropdown: true,
+      noDropdownBehavior: true,
       noHomeRoute: true,
       no2fa: true,
       rolesStrict: true,
+      userScopedPrivateRoutes: true,
       publicRoutesHideSidebar: true,
       sessionRequired: true,
     },

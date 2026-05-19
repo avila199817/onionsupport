@@ -7,6 +7,8 @@
    - Consumir datos normalizados desde home.selectors.js.
    - Pintar hero, métricas, acciones, actividad,
      facturas/directorio e incidencias.
+   - Home distinto para admin/user.
+   - User nunca pinta clientes/usuarios.
    - Usar sólo roles reales: admin / user.
    - Sin fetch.
    - Sin Auth.
@@ -51,7 +53,6 @@ import {
   getUser,
   getRole,
   isAdminRole,
-  canSeeUsersModule,
   getDisplayName,
   getAvatarUrl,
 
@@ -94,7 +95,7 @@ import {
   getPagination,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.v2";
+export const TEMPLATE_VERSION = "home.template.v3";
 
 /* =========================================================
    CONSTANTS
@@ -179,7 +180,7 @@ function jsonAttr(value = {}) {
 }
 
 /* =========================================================
-   STATE / META
+   STATE / ROLE / META
 ========================================================= */
 
 function getState(input = {}) {
@@ -229,6 +230,16 @@ function getTemplateMeta(input = {}) {
 
 function isAdmin(input = {}) {
   return isAdminRole(getRole(input));
+}
+
+function filterActivityForRole(input = {}, rows = []) {
+  if (isAdmin(input)) return safeArray(rows);
+
+  return safeArray(rows).filter((item) => {
+    const type = normalizeKey(first(item.type, item.kind, item.category, ""));
+
+    return !["client", "cliente", "customer", "user", "usuario", "member"].includes(type);
+  });
 }
 
 /* =========================================================
@@ -508,7 +519,7 @@ export function renderHomeHeader(input = {}) {
   const title = admin ? "Centro de control Onion" : `Hola, ${displayName}`;
   const subtitle = admin
     ? "Resumen operativo de incidencias, facturación, clientes y usuarios."
-    : "Consulta tus incidencias, actividad reciente y accesos principales.";
+    : "Consulta tus incidencias, facturas y actividad reciente.";
 
   return `
     <section
@@ -576,7 +587,6 @@ export function renderHomeHeader(input = {}) {
             class="${joinClasses("home-btn home-btn--primary", state.creating ? "is-loading" : "")}"
             data-home-action="${ACTIONS.CREATE_INCIDENCIA}"
             data-action="${ACTIONS.CREATE_INCIDENCIA}"
-            data-quick-action="${ACTIONS.CREATE_INCIDENCIA}"
             data-route="${attr(ROUTES.INCIDENCIAS)}"
             data-href="${attr(ROUTES.INCIDENCIAS)}"
             ${boolAttr(state.creating || state.loading || state.refreshing, 'disabled aria-busy="true"')}
@@ -713,7 +723,6 @@ function quickActionCard(action = {}, state = {}) {
       class="${joinClasses("home-action-card", `home-action-card--${item.modifier}`, busy ? "is-loading" : "")}"
       data-home-action="${attr(item.action)}"
       data-action="${attr(item.dataAction)}"
-      data-quick-action="${attr(item.action)}"
       data-route="${attr(item.route)}"
       data-href="${attr(item.route)}"
       data-payload="${jsonAttr({ action: item.action, route: item.route })}"
@@ -759,8 +768,14 @@ export function renderHomeQuickActions(input = {}) {
    ACTIVITY / SIDE PANELS
 ========================================================= */
 
-function activityItem(item = {}) {
+function activityItem(input = {}, item = {}) {
   const type = getActivityType(item);
+  const admin = isAdmin(input);
+
+  if (!admin && ["client", "cliente", "customer", "user", "usuario", "member"].includes(normalizeKey(type))) {
+    return "";
+  }
+
   const route =
     normalizeRoute(first(item.route, item.href, item.link, item.raw?.route, "")) ||
     (type === "invoice"
@@ -797,7 +812,6 @@ function activityItem(item = {}) {
       data-route="${attr(route)}"
       data-href="${attr(route)}"
       data-entity-id="${attr(entityId)}"
-      data-ticket-id="${type === "ticket" ? attr(entityId) : ""}"
       data-payload="${jsonAttr({ type, route, entityId })}"
     >
       <span class="home-activity-icon" aria-hidden="true">
@@ -829,7 +843,7 @@ function activityItem(item = {}) {
 export function renderHomeActivity(input = {}) {
   const data = safeObject(input);
   const state = getLoadingState(data);
-  const activity = getActivity(data).slice(0, LIMITS.activity);
+  const activity = filterActivityForRole(data, getActivity(data)).slice(0, LIMITS.activity);
 
   return `
     <section class="home-panel home-panel--activity" data-home-section="activity">
@@ -858,7 +872,7 @@ export function renderHomeActivity(input = {}) {
         state.loading && !activity.length
           ? loadingCards(3)
           : activity.length
-            ? `<div class="home-activity-list">${activity.map(activityItem).join("")}</div>`
+            ? `<div class="home-activity-list">${activity.map((item) => activityItem(data, item)).join("")}</div>`
             : emptyState({
                 title: "Sin actividad reciente",
                 text: "Cuando haya movimientos aparecerán aquí.",
@@ -909,7 +923,7 @@ export function renderHomeInvoicePreview(input = {}) {
       <div class="home-panel-head">
         <div class="home-panel-copy">
           <span class="home-panel-kicker">Facturación</span>
-          <h2 class="home-panel-title">Facturación rápida</h2>
+          <h2 class="home-panel-title">${isAdmin(data) ? "Facturación rápida" : "Mis facturas"}</h2>
           <p class="home-panel-subtitle">
             ${state.loading && !invoices.length ? "Cargando facturas..." : escapeHtml(`${formatNumber(collections.invoicesRemoteCount || invoices.length)} facturas detectadas`)}
           </p>
@@ -941,6 +955,10 @@ export function renderHomeInvoicePreview(input = {}) {
     </section>
   `;
 }
+
+/* =========================================================
+   ADMIN DIRECTORY
+========================================================= */
 
 function entityName(item = {}, type = "client") {
   return safeText(
@@ -1020,29 +1038,23 @@ export function renderHomeEntitiesPreview(input = {}) {
   const data = safeObject(input);
   const state = getLoadingState(data);
   const collections = getCollections(data);
-  const admin = isAdmin(data);
-  const showUsers = admin && canSeeUsersModule(data);
+
+  if (!isAdmin(data)) return "";
 
   const clients = safeArray(collections.clients).slice(0, LIMITS.entities);
-  const users = showUsers ? safeArray(collections.users).slice(0, LIMITS.entities) : [];
-
-  if (!admin && !clients.length) return "";
+  const users = safeArray(collections.users).slice(0, LIMITS.entities);
 
   return `
     <section class="home-panel home-panel--entities" data-home-section="entities">
       <div class="home-panel-head">
         <div class="home-panel-copy">
           <span class="home-panel-kicker">Directorio</span>
-          <h2 class="home-panel-title">${showUsers ? "Clientes y usuarios" : "Clientes"}</h2>
+          <h2 class="home-panel-title">Clientes y usuarios</h2>
           <p class="home-panel-subtitle">
             ${
               state.loading && !clients.length && !users.length
                 ? "Cargando directorio..."
-                : escapeHtml(
-                    showUsers
-                      ? `${formatNumber(collections.clientsRemoteCount || clients.length)} clientes · ${formatNumber(collections.usersRemoteCount || users.length)} usuarios`
-                      : `${formatNumber(collections.clientsRemoteCount || clients.length)} clientes visibles`
-                  )
+                : escapeHtml(`${formatNumber(collections.clientsRemoteCount || clients.length)} clientes · ${formatNumber(collections.usersRemoteCount || users.length)} usuarios`)
             }
           </p>
         </div>
@@ -1075,7 +1087,7 @@ export function renderHomeEntitiesPreview(input = {}) {
               }
 
               ${
-                showUsers && users.length
+                users.length
                   ? `
                     <div class="home-entities-separator" aria-hidden="true"></div>
                     ${users.map((item) => entityItem(item, "user")).join("")}

@@ -9,6 +9,8 @@
    - Calcular métricas/cards/actions.
    - Formatear números, dinero y fechas.
    - Resolver usuario/rol admin-user.
+   - Home distinto para admin/user.
+   - User nunca expone users/clientes.
    - Sin fetch.
    - Sin Auth.
    - Sin Router.
@@ -29,7 +31,7 @@ import {
   buildHomeActivityFromCollections,
 } from "./home.model.js";
 
-export const HOME_SELECTORS_VERSION = "home.selectors.v2";
+export const HOME_SELECTORS_VERSION = "home.selectors.v3";
 
 /* =========================================================
    CONSTANTS
@@ -54,6 +56,15 @@ const VALID_ROLES = Object.freeze(["admin", "user"]);
 const TICKET_OPEN_KEYS = Object.freeze(["pending", "open", "progress"]);
 const TICKET_CLOSED_KEYS = Object.freeze(["resolved", "closed"]);
 const INVOICE_PENDING_KEYS = Object.freeze(["pending", "overdue", "partial"]);
+
+const ADMIN_ACTIVITY_TYPES = new Set([
+  "client",
+  "cliente",
+  "customer",
+  "user",
+  "usuario",
+  "member",
+]);
 
 /* =========================================================
    SAFE HELPERS
@@ -160,6 +171,7 @@ export function clampNumber(value = 0, min = 0, max = Number.POSITIVE_INFINITY) 
 
 export function roundMoney(value = 0) {
   const number = safeNumber(value, NaN);
+
   return Number.isFinite(number)
     ? Math.round((number + Number.EPSILON) * 100) / 100
     : 0;
@@ -240,15 +252,17 @@ const moneyFormatterCache = new Map();
 const dateFormatterCache = new Map();
 
 export function getNumberFormatter(locale = DEFAULT_LOCALE) {
-  const key = `${safeText(locale, DEFAULT_LOCALE)}:number`;
+  const cleanLocale = safeText(locale, DEFAULT_LOCALE);
+  const key = `${cleanLocale}:number`;
 
   if (numberFormatterCache.has(key)) return numberFormatterCache.get(key);
 
-  const formatter = new Intl.NumberFormat(locale, {
+  const formatter = new Intl.NumberFormat(cleanLocale, {
     maximumFractionDigits: 0,
   });
 
   numberFormatterCache.set(key, formatter);
+
   return formatter;
 }
 
@@ -266,11 +280,12 @@ export function formatNumber(value = 0, locale = DEFAULT_LOCALE) {
 
 export function getMoneyFormatter(currency = DEFAULT_CURRENCY, locale = DEFAULT_LOCALE) {
   const code = safeText(currency, DEFAULT_CURRENCY).toUpperCase();
-  const key = `${safeText(locale, DEFAULT_LOCALE)}:${code}`;
+  const cleanLocale = safeText(locale, DEFAULT_LOCALE);
+  const key = `${cleanLocale}:${code}`;
 
   if (moneyFormatterCache.has(key)) return moneyFormatterCache.get(key);
 
-  const formatter = new Intl.NumberFormat(locale, {
+  const formatter = new Intl.NumberFormat(cleanLocale, {
     style: "currency",
     currency: code,
     minimumFractionDigits: 2,
@@ -278,6 +293,7 @@ export function getMoneyFormatter(currency = DEFAULT_CURRENCY, locale = DEFAULT_
   });
 
   moneyFormatterCache.set(key, formatter);
+
   return formatter;
 }
 
@@ -308,6 +324,7 @@ export function toTimestamp(value = null) {
   }
 
   const raw = safeText(value, "");
+
   if (!raw) return 0;
 
   const numeric = Number(raw);
@@ -322,7 +339,15 @@ export function toTimestamp(value = null) {
 
   if (esDate) {
     const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = esDate;
-    const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(ss));
+    const date = new Date(
+      Number(yyyy),
+      Number(mm) - 1,
+      Number(dd),
+      Number(hh),
+      Number(min),
+      Number(ss)
+    );
+
     const time = date.getTime();
 
     return Number.isNaN(time) ? 0 : time;
@@ -335,11 +360,12 @@ export function toTimestamp(value = null) {
 }
 
 export function getDateTimeFormatter(locale = DEFAULT_LOCALE) {
-  const key = `${safeText(locale, DEFAULT_LOCALE)}:date-time`;
+  const cleanLocale = safeText(locale, DEFAULT_LOCALE);
+  const key = `${cleanLocale}:date-time`;
 
   if (dateFormatterCache.has(key)) return dateFormatterCache.get(key);
 
-  const formatter = new Intl.DateTimeFormat(locale, {
+  const formatter = new Intl.DateTimeFormat(cleanLocale, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -348,21 +374,24 @@ export function getDateTimeFormatter(locale = DEFAULT_LOCALE) {
   });
 
   dateFormatterCache.set(key, formatter);
+
   return formatter;
 }
 
 export function getDateFormatter(locale = DEFAULT_LOCALE) {
-  const key = `${safeText(locale, DEFAULT_LOCALE)}:date`;
+  const cleanLocale = safeText(locale, DEFAULT_LOCALE);
+  const key = `${cleanLocale}:date`;
 
   if (dateFormatterCache.has(key)) return dateFormatterCache.get(key);
 
-  const formatter = new Intl.DateTimeFormat(locale, {
+  const formatter = new Intl.DateTimeFormat(cleanLocale, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
   });
 
   dateFormatterCache.set(key, formatter);
+
   return formatter;
 }
 
@@ -471,6 +500,101 @@ export function getNormalizedDashboard(input = {}) {
   }
 }
 
+export function getUser(input = {}) {
+  const data = safeObject(input);
+  const dashboard = getDashboard(data);
+
+  return safeObject(
+    first(
+      data.user,
+      data.currentUser,
+      data.profile,
+      data.state?.user,
+      data.state?.currentUser,
+      data.state?.session?.user,
+      dashboard.user,
+      dashboard.currentUser,
+      dashboard.profile,
+      {}
+    )
+  );
+}
+
+export function getRole(input = {}) {
+  const data = safeObject(input);
+  const user = getUser(data);
+  const dashboard = getDashboard(data);
+
+  return normalizeRole(
+    first(
+      data.role,
+      data.currentRole,
+      data.state?.role,
+      data.state?.userRole,
+      dashboard.role,
+      dashboard.meta?.role,
+      user.role,
+      user.rol,
+      "user"
+    )
+  );
+}
+
+export function canSeeUsersModule(input = {}) {
+  return isAdminRole(getRole(input));
+}
+
+export function getDisplayName(input = {}) {
+  const user = getUser(input);
+
+  return safeText(
+    first(
+      user.displayName,
+      user.fullName,
+      user.name,
+      user.nombre,
+      user.username,
+      user.email
+    ),
+    "Usuario"
+  );
+}
+
+export function getAvatarUrl(input = {}) {
+  const user = getUser(input);
+
+  return safeText(
+    first(
+      user.avatar,
+      user.avatarUrl,
+      user.avatar_url,
+      user.photo,
+      user.photoUrl,
+      user.photoURL,
+      user.picture
+    ),
+    ""
+  );
+}
+
+export function getInitials(value = "") {
+  const clean = normalizeWhitespace(value);
+
+  if (!clean) return "ON";
+
+  const parts = clean.split(" ").filter(Boolean);
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
+}
+
+/* =========================================================
+   SUMMARY
+========================================================= */
+
 export function getSummary(input = {}) {
   const data = safeObject(input);
   const dashboard = getDashboard(data);
@@ -536,81 +660,6 @@ export function getBestSummaryNumber(input = {}, keys = [], fallback = 0, extraC
   return positive.length ? Math.max(...positive) : Math.max(...numbers);
 }
 
-export function getUser(input = {}) {
-  const data = safeObject(input);
-  const dashboard = getDashboard(data);
-
-  return safeObject(
-    first(
-      data.user,
-      data.currentUser,
-      data.profile,
-      data.state?.user,
-      data.state?.currentUser,
-      data.state?.session?.user,
-      dashboard.user,
-      dashboard.currentUser,
-      dashboard.profile,
-      {}
-    )
-  );
-}
-
-export function getRole(input = {}) {
-  const data = safeObject(input);
-  const user = getUser(data);
-  const dashboard = getDashboard(data);
-
-  return normalizeRole(
-    first(
-      data.role,
-      data.currentRole,
-      data.state?.role,
-      data.state?.userRole,
-      dashboard.role,
-      user.role,
-      user.rol,
-      "user"
-    )
-  );
-}
-
-export function canSeeUsersModule(input = {}) {
-  return isAdminRole(getRole(input));
-}
-
-export function getDisplayName(input = {}) {
-  const user = getUser(input);
-
-  return safeText(
-    first(user.displayName, user.fullName, user.name, user.nombre, user.username, user.email),
-    "Usuario"
-  );
-}
-
-export function getAvatarUrl(input = {}) {
-  const user = getUser(input);
-
-  return safeText(
-    first(user.avatar, user.avatarUrl, user.avatar_url, user.photo, user.photoUrl, user.photoURL, user.picture),
-    ""
-  );
-}
-
-export function getInitials(value = "") {
-  const clean = normalizeWhitespace(value);
-
-  if (!clean) return "ON";
-
-  const parts = clean.split(" ").filter(Boolean);
-
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-
-  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
-}
-
 /* =========================================================
    COLLECTIONS
 ========================================================= */
@@ -624,6 +673,7 @@ function collection(input = {}, names = []) {
     const value = first(data[name], state[name], dashboard[name]);
 
     if (Array.isArray(value)) return value;
+
     if (isObject(value)) {
       const nested = first(value.items, value.rows, value.results, value.data, value.records);
       if (Array.isArray(nested)) return nested;
@@ -642,7 +692,13 @@ function countFrom(input = {}, names = [], fallback = 0) {
   const candidates = [];
 
   for (const name of safeArray(names)) {
-    candidates.push(data[name], state[name], dashboard[name], dashboard.meta?.[name], summary[name]);
+    candidates.push(
+      data[name],
+      state[name],
+      dashboard[name],
+      dashboard.meta?.[name],
+      summary[name]
+    );
   }
 
   return Math.max(
@@ -652,11 +708,26 @@ function countFrom(input = {}, names = [], fallback = 0) {
 }
 
 export function getCollections(input = {}) {
+  const admin = isAdminRole(getRole(input));
+
   const tickets = normalizeHomeTickets(collection(input, ["tickets", "incidencias"]));
   const invoices = normalizeHomeInvoices(collection(input, ["invoices", "facturas"]));
-  const users = normalizeHomeUsers(collection(input, ["users", "usuarios"]));
-  const clients = normalizeHomeClients(collection(input, ["clients", "clientes", "customers"]));
-  const activity = normalizeHomeActivityList(collection(input, ["activity", "activities", "recent", "recentActivity"]));
+
+  const users = admin
+    ? normalizeHomeUsers(collection(input, ["users", "usuarios"]))
+    : [];
+
+  const clients = admin
+    ? normalizeHomeClients(collection(input, ["clients", "clientes", "customers"]))
+    : [];
+
+  const rawActivity = normalizeHomeActivityList(
+    collection(input, ["activity", "activities", "recent", "recentActivity"])
+  );
+
+  const activity = admin
+    ? rawActivity
+    : rawActivity.filter((item) => !ADMIN_ACTIVITY_TYPES.has(normalizeKey(first(item.type, item.kind, item.category, ""))));
 
   return {
     tickets,
@@ -677,17 +748,13 @@ export function getCollections(input = {}) {
       invoices.length
     ),
 
-    usersRemoteCount: countFrom(
-      input,
-      ["usersCount", "usuariosCount", "totalUsers", "totalUsuarios"],
-      users.length
-    ),
+    usersRemoteCount: admin
+      ? countFrom(input, ["usersCount", "usuariosCount", "totalUsers", "totalUsuarios"], users.length)
+      : 0,
 
-    clientsRemoteCount: countFrom(
-      input,
-      ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes"],
-      clients.length
-    ),
+    clientsRemoteCount: admin
+      ? countFrom(input, ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes", "totalCustomers"], clients.length)
+      : 0,
   };
 }
 
@@ -728,7 +795,19 @@ export function resolveCollectionSource(input = {}, aliases = []) {
 ========================================================= */
 
 export function getWidgets(input = {}) {
-  return normalizeHomeWidgets(collection(input, ["widgets", "cards", "kpis", "blocks"]));
+  const admin = isAdminRole(getRole(input));
+
+  return normalizeHomeWidgets(collection(input, ["widgets", "cards", "kpis", "blocks"]))
+    .filter((widget) => {
+      if (admin) return true;
+
+      const type = normalizeKey(first(widget.type, widget.kind, widget.variant, widget.category, ""));
+      const id = normalizeKey(first(widget.widgetId, widget.widgetKey, widget.id, widget.key, widget.slug, ""));
+
+      return !["users", "usuarios", "clientes", "clients", "customers"].some((blocked) =>
+        type.includes(blocked) || id.includes(blocked)
+      );
+    });
 }
 
 export function getWidgetId(widget = {}) {
@@ -1076,8 +1155,8 @@ export function computeHomeStats(input = {}) {
 
   const tickets = collections.tickets;
   const invoices = collections.invoices;
-  const users = collections.users;
-  const clients = collections.clients;
+  const users = admin ? collections.users : [];
+  const clients = admin ? collections.clients : [];
 
   const totalTickets = getBestSummaryNumber(
     input,
@@ -1137,12 +1216,14 @@ export function computeHomeStats(input = {}) {
       )
     : 0;
 
-  const clientsCount = getBestSummaryNumber(
-    input,
-    ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes", "totalCustomers", "activeClients", "clientesActivos"],
-    collections.clientsRemoteCount,
-    [clients.filter(isActiveClient).length]
-  );
+  const clientsCount = admin
+    ? getBestSummaryNumber(
+        input,
+        ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes", "totalCustomers", "activeClients", "clientesActivos"],
+        collections.clientsRemoteCount,
+        [clients.filter(isActiveClient).length]
+      )
+    : 0;
 
   const attachmentsCount = tickets.reduce((sum, item) => sum + getTicketAttachmentsCount(item), 0);
 
@@ -1165,7 +1246,7 @@ export function computeHomeStats(input = {}) {
     activeUsersCount: admin ? users.filter(isActiveUser).length : 0,
 
     clientsCount,
-    activeClientsCount: clients.filter(isActiveClient).length,
+    activeClientsCount: admin ? clients.filter(isActiveClient).length : 0,
 
     attachmentsCount,
     lastTicketUpdate: getLatestDateFromTickets(tickets),
@@ -1314,7 +1395,7 @@ export function getQuickActions(input = {}) {
       modifier: "billing",
     },
     {
-      iconName: "account",
+      iconName: "home",
       title: "Mi cuenta",
       text: "Actualiza tus datos y preferencias.",
       action: "go-cuenta",
@@ -1330,22 +1411,30 @@ export function getQuickActions(input = {}) {
 ========================================================= */
 
 export function buildSyntheticActivity(input = {}) {
+  const collections = getCollections(input);
+  const admin = isAdminRole(getRole(input));
+
   return normalizeHomeActivityList(
     buildHomeActivityFromCollections({
-      tickets: getCollections(input).tickets,
-      invoices: getCollections(input).invoices,
-      users: isAdminRole(getRole(input)) ? getCollections(input).users : [],
-      clients: getCollections(input).clients,
+      tickets: collections.tickets,
+      invoices: collections.invoices,
+      users: admin ? collections.users : [],
+      clients: admin ? collections.clients : [],
     })
   );
 }
 
 export function getActivity(input = {}) {
   const collections = getCollections(input);
+  const admin = isAdminRole(getRole(input));
 
-  return collections.activity.length
+  const activity = collections.activity.length
     ? normalizeHomeActivityList(collections.activity)
     : buildSyntheticActivity(input);
+
+  if (admin) return activity;
+
+  return activity.filter((item) => !ADMIN_ACTIVITY_TYPES.has(normalizeKey(first(item.type, item.kind, item.category, ""))));
 }
 
 export function getActivityTitle(item = {}) {
@@ -1377,7 +1466,11 @@ export function getPagination(items = [], input = {}) {
   const state = safeObject(data.state);
 
   const pageSize = clampNumber(first(data.pageSize, state.pageSize, DEFAULT_PAGE_SIZE), 1, 50);
-  const totalCount = Math.max(rows.length, safeNumber(first(data.totalCount, data.remoteCount, state.totalCount, rows.length), rows.length));
+  const totalCount = Math.max(
+    rows.length,
+    safeNumber(first(data.totalCount, data.remoteCount, state.totalCount, rows.length), rows.length)
+  );
+
   const totalPages = Math.max(1, Math.ceil((totalCount || 1) / pageSize));
   const page = clampNumber(first(data.page, state.page, 1), 1, totalPages);
 
@@ -1388,14 +1481,19 @@ export function getPagination(items = [], input = {}) {
     allItems: rows,
     pageItems,
     items: pageItems,
+
     page,
     currentPage: page,
+
     pageSize,
+
     totalPages,
     totalCount,
     total: totalCount,
+
     rangeStart: totalCount && pageItems.length ? start + 1 : 0,
     rangeEnd: totalCount ? Math.min(start + pageItems.length, totalCount) : 0,
+
     hasPrev: page > 1,
     hasNext: page < totalPages,
   };
@@ -1408,18 +1506,48 @@ export function getPagination(items = [], input = {}) {
 export function buildHomeTemplateData(input = {}) {
   const data = safeObject(input);
   const dashboard = getNormalizedDashboard(data);
-  const summary = getSummary({ ...data, dashboard });
-  const collections = getCollections({ ...data, dashboard, summary });
-  const stats = computeHomeStats({ ...data, dashboard, summary });
-  const widgets = getWidgets({ ...data, dashboard });
-  const activity = getActivity({ ...data, dashboard, summary });
+  const role = getRole({ ...data, dashboard });
+  const admin = isAdminRole(role);
+
+  const summary = getSummary({
+    ...data,
+    dashboard,
+  });
+
+  const collections = getCollections({
+    ...data,
+    dashboard,
+    summary,
+    role,
+  });
+
+  const stats = computeHomeStats({
+    ...data,
+    dashboard,
+    summary,
+    role,
+  });
+
+  const widgets = getWidgets({
+    ...data,
+    dashboard,
+    summary,
+    role,
+  });
+
+  const activity = getActivity({
+    ...data,
+    dashboard,
+    summary,
+    role,
+  });
+
   const pagination = getPagination(collections.tickets, {
     ...data,
     totalCount: collections.ticketsRemoteCount,
   });
 
   const user = getUser(data);
-  const role = getRole(data);
   const displayName = getDisplayName(data);
 
   return {
@@ -1427,6 +1555,8 @@ export function buildHomeTemplateData(input = {}) {
 
     user,
     role,
+    admin,
+
     displayName,
     avatarUrl: getAvatarUrl(data),
     initials: getInitials(displayName),
@@ -1436,8 +1566,8 @@ export function buildHomeTemplateData(input = {}) {
     stats,
 
     widgets,
-    statCards: getStatCards({ ...data, dashboard, summary }),
-    quickActions: getQuickActions({ ...data, dashboard, summary }),
+    statCards: getStatCards({ ...data, dashboard, summary, role }),
+    quickActions: getQuickActions({ ...data, dashboard, summary, role }),
 
     tickets: collections.tickets,
     incidencias: collections.tickets,
@@ -1445,11 +1575,11 @@ export function buildHomeTemplateData(input = {}) {
     invoices: collections.invoices,
     facturas: collections.invoices,
 
-    users: collections.users,
-    usuarios: collections.users,
+    users: admin ? collections.users : [],
+    usuarios: admin ? collections.users : [],
 
-    clients: collections.clients,
-    clientes: collections.clients,
+    clients: admin ? collections.clients : [],
+    clientes: admin ? collections.clients : [],
 
     activity,
     recentActivity: activity,
@@ -1463,12 +1593,16 @@ export function buildHomeTemplateData(input = {}) {
     counts: {
       tickets: collections.tickets.length,
       ticketsRemote: collections.ticketsRemoteCount,
+
       invoices: collections.invoices.length,
       invoicesRemote: collections.invoicesRemoteCount,
-      users: collections.users.length,
-      usersRemote: collections.usersRemoteCount,
-      clients: collections.clients.length,
-      clientsRemote: collections.clientsRemoteCount,
+
+      users: admin ? collections.users.length : 0,
+      usersRemote: admin ? collections.usersRemoteCount : 0,
+
+      clients: admin ? collections.clients.length : 0,
+      clientsRemote: admin ? collections.clientsRemoteCount : 0,
+
       activity: activity.length,
       widgets: widgets.length,
     },
@@ -1478,7 +1612,7 @@ export function buildHomeTemplateData(input = {}) {
       updatedAt: first(dashboard.updatedAt, dashboard.generatedAt, dashboard.meta?.updatedAt, ""),
       partial: Boolean(dashboard.partial),
       errorsCount: safeArray(dashboard.errors).length,
-      canSeeUsers: canSeeUsersModule({ ...data, dashboard, summary }),
+      canSeeUsers: admin,
     },
   };
 }

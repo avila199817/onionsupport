@@ -7,11 +7,13 @@
    - Click en enlace -> navigateFromSidebar().
    - Click en toggle -> toggleSidebar().
    - Click en logout -> handleLogout().
+   - Respetar el dropdown de cuenta sin gestionarlo.
+   - Normalizar target usando Router.buildPublicPath si existe.
    - Sin navegación propia.
    - Sin active menu propio.
    - Sin indicadores.
    - Sin resize.
-   - Sin dropdown.
+   - Sin abrir/cerrar dropdown.
    - Sin keydown custom.
    - Sin core event storms.
    - Sin CustomEvent.
@@ -33,12 +35,16 @@ import {
   toggleSidebar,
 } from "./actions.js";
 
-export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v2";
+export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v3";
 
 const HANDLED_FLAG = "__onionSidebarHandled";
 
+const DROPDOWN_TRIGGER_SELECTOR = "[data-sidebar-dropdown-trigger]";
+const DROPDOWN_MENU_SELECTOR = "[data-sidebar-dropdown-menu]";
+const DROPDOWN_ITEM_SELECTOR = "[data-sidebar-dropdown-item='true']";
+
 let boundRoot = null;
-let boundHandler = null;
+let boundController = null;
 
 /* =========================================================
    BASICS
@@ -160,7 +166,48 @@ function isSafeInternalHref(value = "") {
 }
 
 /* =========================================================
-   LINK TARGET
+   SELECTORS
+========================================================= */
+
+function selectorList(...selectors) {
+  return selectors
+    .flat()
+    .map((selector) => text(selector, ""))
+    .filter(Boolean)
+    .join(",");
+}
+
+function sidebarLinkSelector() {
+  return selectorList(
+    SIDEBAR_SELECTORS.navLink,
+    SIDEBAR_SELECTORS.brand,
+    SIDEBAR_SELECTORS.link,
+    "a[data-spa]",
+    "a[data-sidebar-link='true']",
+    "a[data-sidebar-nav-link='true']",
+    "a[data-sidebar-dropdown-item='true']"
+  );
+}
+
+function sidebarToggleSelector() {
+  return selectorList(
+    SIDEBAR_SELECTORS.toggle,
+    "[data-sidebar-toggle='true']",
+    "[data-sidebar-action='toggle']"
+  );
+}
+
+function sidebarLogoutSelector() {
+  return selectorList(
+    SIDEBAR_SELECTORS.logout,
+    "[data-sidebar-logout='true']",
+    "[data-sidebar-action='logout']",
+    "[data-sidebar-menu-action='logout']"
+  );
+}
+
+/* =========================================================
+   TARGETS
 ========================================================= */
 
 function getLinkTarget(link = null) {
@@ -178,36 +225,25 @@ function getLinkTarget(link = null) {
   );
 }
 
-function sidebarLinkSelector() {
-  return [
-    SIDEBAR_SELECTORS.navLink,
-    SIDEBAR_SELECTORS.brand,
-    SIDEBAR_SELECTORS.link,
-  ]
-    .filter(Boolean)
-    .join(",");
-}
+function normalizeNavigationTarget(target = "", context = {}) {
+  const href = text(target, "");
 
-/* =========================================================
-   OPTIONAL SYNC
-========================================================= */
+  if (!isSafeInternalHref(href)) return "";
 
-function syncAfterAction(context = {}) {
   try {
-    if (isFunction(context.sync)) {
-      context.sync();
-      return true;
-    }
+    if (isFunction(context.Router?.buildPublicPath)) {
+      const publicPath = context.Router.buildPublicPath(href, {
+        useSlugHome: true,
+        useSlugPrivate: true,
+      });
 
-    if (isFunction(context.refresh)) {
-      context.refresh();
-      return true;
+      return isSafeInternalHref(publicPath) ? publicPath : href;
     }
   } catch {
     // noop
   }
 
-  return false;
+  return href;
 }
 
 /* =========================================================
@@ -225,7 +261,17 @@ export function handleSidebarClick(event = null, context = {}) {
     return false;
   }
 
-  const logout = closestInside(root, target, SIDEBAR_SELECTORS.logout);
+  /*
+    El trigger del dropdown lo gestiona dropdown.js.
+    Este módulo no debe abrir/cerrar menús.
+  */
+  const dropdownTrigger = closestInside(root, target, DROPDOWN_TRIGGER_SELECTOR);
+
+  if (dropdownTrigger && !isBlocked(dropdownTrigger)) {
+    return false;
+  }
+
+  const logout = closestInside(root, target, sidebarLogoutSelector());
 
   if (logout && !isBlocked(logout)) {
     prevent(event);
@@ -234,14 +280,12 @@ export function handleSidebarClick(event = null, context = {}) {
     void handleLogout({
       ...ctx,
       root,
-    }).finally(() => {
-      syncAfterAction(ctx);
     });
 
     return true;
   }
 
-  const toggle = closestInside(root, target, SIDEBAR_SELECTORS.toggle);
+  const toggle = closestInside(root, target, sidebarToggleSelector());
 
   if (toggle && !isBlocked(toggle)) {
     prevent(event);
@@ -252,8 +296,6 @@ export function handleSidebarClick(event = null, context = {}) {
       root,
     });
 
-    syncAfterAction(ctx);
-
     return true;
   }
 
@@ -263,7 +305,8 @@ export function handleSidebarClick(event = null, context = {}) {
   if (isBlocked(link)) return false;
   if (browserOwnsClick(link, event)) return false;
 
-  const href = getLinkTarget(link);
+  const rawHref = getLinkTarget(link);
+  const href = normalizeNavigationTarget(rawHref, ctx);
 
   if (!isSafeInternalHref(href)) return false;
 
@@ -274,9 +317,14 @@ export function handleSidebarClick(event = null, context = {}) {
     ...ctx,
     root,
     target: href,
-  }).finally(() => {
-    syncAfterAction(ctx);
   });
+
+  /*
+    Si el click viene desde el menú de cuenta, dropdown.js cerrará el menú
+    con su propio listener. Aquí no se duplica esa responsabilidad.
+  */
+  void closestInside(root, target, DROPDOWN_MENU_SELECTOR);
+  void closestInside(root, target, DROPDOWN_ITEM_SELECTOR);
 
   return true;
 }
@@ -290,42 +338,43 @@ export function bindSidebarEvents(context = {}) {
 
   if (!isElement(root)) return false;
 
-  if (boundRoot === root && boundHandler) {
+  if (boundRoot === root && boundController) {
     return true;
   }
 
   unbindSidebarEvents();
 
-  boundHandler = (event) => {
+  const controller = new AbortController();
+
+  const handler = (event) => {
     handleSidebarClick(event, context);
   };
 
   try {
-    root.addEventListener("click", boundHandler);
+    root.addEventListener("click", handler, {
+      signal: controller.signal,
+    });
+
     boundRoot = root;
+    boundController = controller;
+
     return true;
   } catch {
     boundRoot = null;
-    boundHandler = null;
+    boundController = null;
     return false;
   }
 }
 
 export function unbindSidebarEvents() {
-  if (!boundRoot || !boundHandler) {
-    boundRoot = null;
-    boundHandler = null;
-    return true;
-  }
-
   try {
-    boundRoot.removeEventListener("click", boundHandler);
+    boundController?.abort?.();
   } catch {
     // noop
   }
 
   boundRoot = null;
-  boundHandler = null;
+  boundController = null;
 
   return true;
 }
@@ -338,7 +387,7 @@ export function getSidebarEventsSnapshot() {
   return {
     version: SIDEBAR_EVENTS_VERSION,
 
-    bound: Boolean(boundRoot && boundHandler),
+    bound: Boolean(boundRoot && boundController),
     hasRoot: isElement(boundRoot),
     rootId: boundRoot?.id || "",
 
@@ -349,6 +398,7 @@ export function getSidebarEventsSnapshot() {
       ownIndicators: false,
       ownResize: false,
       ownDropdown: false,
+      dropdownAware: true,
       ownKeydown: false,
       ownCustomEvent: false,
       ownTimers: false,

@@ -9,6 +9,7 @@
    - publicPath conserva query/hash.
    - canonicalPath limpio.
    - /@{user.slug} conserva URL pública pero canonicaliza a /.
+   - /@{user.slug}/{ruta} conserva URL pública pero canonicaliza a /{ruta}.
    - Scrub explícito sólo del parámetro token.
    - Snapshots redacted.
    - Sin imports.
@@ -23,7 +24,7 @@
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const ROUTER_HISTORY_VERSION = "router.history.v3";
+export const ROUTER_HISTORY_VERSION = "router.history.v4";
 
 const HISTORY_STATE_VERSION = 1;
 const DEFAULT_ROUTE = "/";
@@ -231,7 +232,8 @@ function normalizeUserSlug(value = "") {
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
-    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
     .toLowerCase();
 
   if (!slug) return "";
@@ -239,28 +241,63 @@ function normalizeUserSlug(value = "") {
   return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
-function extractSlugFromPath(path = DEFAULT_ROUTE) {
+export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
   const pathname = splitPath(path).pathname;
 
-  if (!pathname.startsWith(USER_HOME_PREFIX)) return "";
+  if (!pathname.startsWith(USER_HOME_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: pathname,
+      lookupPath: pathname,
+    };
+  }
 
-  const slug = pathname.slice(USER_HOME_PREFIX.length);
+  const rest = pathname.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeUserSlug(slugSegment);
 
-  if (!slug || slug.includes("/")) return "";
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: pathname,
+      lookupPath: pathname,
+    };
+  }
 
-  return normalizeUserSlug(slug);
+  const restPath = restSegments.length
+    ? normalizePathname(`/${restSegments.join("/")}`)
+    : DEFAULT_ROUTE;
+
+  return {
+    scoped: true,
+    home: restPath === DEFAULT_ROUTE,
+    slug,
+    restPath,
+    lookupPath: restPath,
+  };
+}
+
+function extractSlugFromPath(path = DEFAULT_ROUTE) {
+  return getUserScopedRouteInfo(path).slug;
 }
 
 function isUserHomePath(path = DEFAULT_ROUTE) {
-  return Boolean(extractSlugFromPath(path));
+  return Boolean(getUserScopedRouteInfo(path).home);
+}
+
+function isUserScopedPath(path = DEFAULT_ROUTE) {
+  return Boolean(getUserScopedRouteInfo(path).scoped);
 }
 
 function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
   const pathname = splitPath(path).pathname || DEFAULT_ROUTE;
+  const scoped = getUserScopedRouteInfo(pathname);
 
-  return isUserHomePath(pathname)
-    ? DEFAULT_ROUTE
-    : pathname;
+  return scoped.scoped ? scoped.lookupPath : pathname;
 }
 
 function browserPath() {
@@ -320,7 +357,7 @@ export function createHistoryState({
   const extra = isObject(extras) ? extras : {};
   const publicPath = normalizePublicPath(extra.publicPath || pathname || DEFAULT_ROUTE);
   const canonicalPath = normalizeCanonicalPath(extra.canonicalPath || publicPath);
-  const slug = extractSlugFromPath(publicPath);
+  const scoped = getUserScopedRouteInfo(publicPath);
 
   return {
     __onionRouterHistory: true,
@@ -338,11 +375,13 @@ export function createHistoryState({
 
     routeParams: {
       ...cleanRouteParams(extra.routeParams),
-      ...(slug ? { slug } : {}),
+      ...(scoped.slug ? { slug: scoped.slug } : {}),
     },
 
-    publicSlug: slug || null,
-    isUserHomePath: Boolean(slug),
+    publicSlug: scoped.slug || null,
+    isUserHomePath: Boolean(scoped.home),
+    isUserScopedPath: Boolean(scoped.scoped),
+    userScopedRestPath: scoped.scoped ? scoped.restPath : null,
 
     source: extra.source || null,
     mode: extra.mode || null,
@@ -661,6 +700,8 @@ function serializeState(state = null) {
 
     publicSlug: state.publicSlug || null,
     isUserHomePath: state.isUserHomePath === true,
+    isUserScopedPath: state.isUserScopedPath === true,
+    userScopedRestPath: state.userScopedRestPath || null,
 
     source: state.source || null,
     mode: state.mode || null,
@@ -674,6 +715,7 @@ export function getHistorySnapshot(AppCore = null) {
   const currentUrl = browserPath();
   const publicPath = normalizePublicPath(currentUrl);
   const canonicalPath = normalizeCanonicalPath(publicPath);
+  const scoped = getUserScopedRouteInfo(publicPath);
 
   return {
     version: ROUTER_HISTORY_VERSION,
@@ -686,7 +728,9 @@ export function getHistorySnapshot(AppCore = null) {
     currentPublicPath: redact(publicPath),
 
     isUserHomePath: isUserHomePath(publicPath),
+    isUserScopedPath: isUserScopedPath(publicPath),
     publicSlug: extractSlugFromPath(publicPath) || null,
+    userScopedRestPath: scoped.scoped ? scoped.restPath : null,
 
     state: serializeState(currentHistoryState()),
 
@@ -703,8 +747,10 @@ export function getHistorySnapshot(AppCore = null) {
       ownEvents: false,
 
       userSlugHome: true,
+      userScopedPrivateRoutes: true,
       preservesUserSlugPublicUrl: true,
       canonicalizesUserHome: true,
+      canonicalizesUserScopedPrivateRoutes: true,
 
       noHomeAlias: true,
       noHomeRoute: true,

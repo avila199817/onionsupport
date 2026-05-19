@@ -11,13 +11,14 @@
    - Usar state.js para estado runtime.
    - Usar actions.js para navegar/logout/open/close.
    - Usar events.js para listener delegado.
+   - Usar dropdown.js para dropdown de cuenta.
    - Home visible: /@{user.slug}.
    - Home interna/canónica: /.
+   - Rutas privadas visibles: /@{user.slug}/{ruta}.
    - Sin HTML duplicado.
    - Sin helpers DOM duplicados.
    - Sin lógica de usuario duplicada.
    - Sin navegación propia duplicada.
-   - Sin dropdown.
    - Sin HTTP.
    - Sin Toast.
    - Sin Store propio.
@@ -39,7 +40,6 @@ import {
   SIDEBAR_ROLE_ADMIN,
   SIDEBAR_ROOT_ID,
   USER_HOME_PREFIX,
-  canonicalSidebarPath,
   getSidebarRouteIcon,
   getSidebarRouteLabel,
   getSidebarRouteOrder,
@@ -94,7 +94,12 @@ import {
   unbindSidebarEvents,
 } from "./events.js";
 
-export const SIDEBAR_UI_VERSION = "sidebar.ui.v3";
+import {
+  bindSidebarDropdown,
+  unbindSidebarDropdown,
+} from "./dropdown.js";
+
+export const SIDEBAR_UI_VERSION = "sidebar.ui.v4";
 
 /* =========================================================
    BASICS
@@ -111,7 +116,6 @@ function isFunction(value) {
 function firstText(...values) {
   for (const value of values) {
     const output = String(value ?? "").trim();
-
     if (output) return output;
   }
 
@@ -119,7 +123,7 @@ function firstText(...values) {
 }
 
 /* =========================================================
-   HOME / SLUG
+   ROUTER HREF
 ========================================================= */
 
 function userHomeHref(context = {}, fallback = SIDEBAR_BRAND_HREF) {
@@ -132,14 +136,35 @@ function userHomeHref(context = {}, fallback = SIDEBAR_BRAND_HREF) {
   return normalizeSidebarPath(fallback || HOME_ROUTE);
 }
 
-function routeHref(path = HOME_ROUTE, context = {}) {
+function routerPublicPath(path = HOME_ROUTE, context = {}) {
   const lookupPath = sidebarHomeLookupPath(path);
+
+  if (isFunction(Router?.buildPublicPath)) {
+    try {
+      return normalizeSidebarPath(
+        Router.buildPublicPath(lookupPath, {
+          useSlugHome: true,
+          useSlugPrivate: true,
+        })
+      );
+    } catch {}
+  }
 
   if (lookupPath === HOME_ROUTE) {
     return userHomeHref(context, HOME_ROUTE);
   }
 
+  const home = userHomeHref(context, HOME_ROUTE);
+
+  if (home.startsWith(USER_HOME_PREFIX)) {
+    return normalizeSidebarPath(`${home}${lookupPath}`);
+  }
+
   return normalizeSidebarPath(lookupPath);
+}
+
+function routeHref(path = HOME_ROUTE, context = {}) {
+  return routerPublicPath(path, context);
 }
 
 /* =========================================================
@@ -409,8 +434,22 @@ function registerModule() {
    RENDER / SYNC
 ========================================================= */
 
+function unbindAllSidebarDom() {
+  const root = getSidebarRoot();
+
+  try {
+    unbindSidebarDropdown(root);
+  } catch {}
+
+  try {
+    unbindSidebarEvents();
+  } catch {}
+
+  return true;
+}
+
 function hideCurrentSidebar() {
-  unbindSidebarEvents();
+  unbindAllSidebarDom();
 
   const root = getSidebarRoot();
 
@@ -424,8 +463,24 @@ function hideCurrentSidebar() {
   return true;
 }
 
+function bindRenderedSidebar(root = null) {
+  if (!isElement(root)) return false;
+
+  bindSidebarEvents({
+    AppCore,
+    Auth,
+    Router,
+    root,
+    sync,
+  });
+
+  bindSidebarDropdown(root);
+
+  return true;
+}
+
 function renderSidebar(context = getContext()) {
-  unbindSidebarEvents();
+  unbindAllSidebarDom();
 
   const nextRoot = createSidebarTemplate({
     id: SIDEBAR_ROOT_ID,
@@ -455,13 +510,7 @@ function renderSidebar(context = getContext()) {
     root: mountedRoot,
   });
 
-  bindSidebarEvents({
-    AppCore,
-    Auth,
-    Router,
-    root: mountedRoot,
-    sync,
-  });
+  bindRenderedSidebar(mountedRoot);
 
   markSidebarMounted(mountedRoot, AppCore);
 
@@ -490,12 +539,14 @@ function sync() {
 ========================================================= */
 
 async function navigateTo(path = HOME_ROUTE, options = {}) {
+  const target = routeHref(path, getContext());
+
   const ok = await navigateFromSidebar({
     AppCore,
     Auth,
     Router,
     root: getSidebarRoot(),
-    target: path,
+    target,
     ...options,
   });
 
@@ -602,7 +653,7 @@ function init() {
 }
 
 function destroy() {
-  unbindSidebarEvents();
+  unbindAllSidebarDom();
 
   const root = getSidebarRoot();
 
@@ -668,8 +719,10 @@ function getSnapshot() {
       usesRuntimeState: true,
       usesActions: true,
       usesDelegatedEvents: true,
+      usesDropdown: true,
 
       userSlugHome: true,
+      userScopedPrivateRoutes: true,
       noHomeRoute: true,
 
       noHtmlDuplicate: true,
@@ -677,7 +730,6 @@ function getSnapshot() {
       noUserLogicDuplicate: true,
       noNavigationDuplicate: true,
 
-      noDropdown: true,
       noHttp: true,
       noToast: true,
       noStoreOwn: true,

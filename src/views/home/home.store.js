@@ -3,18 +3,19 @@
    Archivo: /src/views/home/home.store.js
 
    Responsabilidad:
-   - Snapshot en memoria de datos Home.
-   - Servir a home.api.js / homeView.js como cache runtime.
-   - Normalizar dashboard recibido desde API.
+   - Cache runtime mínima de datos Home.
+   - Recibir dashboard desde home.api.js / homeView.js.
+   - Normalizar usando home.model.js.
    - Mantener aliases mínimos para template/selectors.
    - Preservar datos válidos si llega payload vacío.
+   - Exponer getters usados por Home.
    - Sin DOM.
    - Sin CSS.
    - Sin HTTP.
    - Sin Auth.
    - Sin Router.
    - Sin eventos.
-   - Sin subscribers.
+   - Sin subscribers reales.
    - Sin globals window.
    - Sin índices paralelos.
    - Sin historial interno.
@@ -23,22 +24,21 @@
 
 import {
   normalizeHomeDashboard,
-  normalizeHomeSummary,
   normalizeHomeWidgets,
   normalizeHomeTickets,
   normalizeHomeInvoices,
   normalizeHomeUsers,
   normalizeHomeClients,
   normalizeHomeActivityList,
+
   getHomeWidgetId,
   getHomeTicketId,
   getHomeInvoiceId,
   getHomeUserId,
   getHomeClientId,
-  getHomeActivityId,
 } from "./home.model.js";
 
-export const HOME_STORE_VERSION = "home.store.v1";
+export const HOME_STORE_VERSION = "home.store.v2";
 export const HOME_STORE_SOURCE = "views.home.store";
 
 const DEFAULT_PAGE = 1;
@@ -50,10 +50,6 @@ const DEFAULT_PAGE_SIZE = 5;
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function safeObject(value, fallback = {}) {
@@ -77,6 +73,10 @@ function safeText(value = "", fallback = "") {
 
 function safeNumber(value = 0, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : fallback;
+  }
 
   if (typeof value === "string") {
     let clean = value
@@ -125,7 +125,7 @@ function safeBoolean(value = false, fallback = false) {
   return Boolean(fallback);
 }
 
-function hasOwnKeys(value = {}) {
+function hasKeys(value = {}) {
   return Boolean(isObject(value) && Object.keys(value).length > 0);
 }
 
@@ -164,7 +164,7 @@ function clone(value, fallback = null) {
       return structuredClone(value);
     }
   } catch {
-    // noop
+    // fallback abajo
   }
 
   try {
@@ -179,7 +179,6 @@ function normalizeText(value = "") {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -195,8 +194,8 @@ function uniqueBy(items = [], picker = (item) => item) {
   const output = [];
 
   for (const item of safeArray(items)) {
-    const rawKey = safeText(picker(item), "");
-    const key = rawKey ? normalizeKey(rawKey) : "";
+    const raw = safeText(picker(item), "");
+    const key = raw ? normalizeKey(raw) : "";
 
     if (!key) {
       output.push(item);
@@ -213,7 +212,7 @@ function uniqueBy(items = [], picker = (item) => item) {
 }
 
 /* =========================================================
-   IDENTITY
+   IDS
 ========================================================= */
 
 function widgetId(item = {}) {
@@ -249,10 +248,6 @@ function userId(item = {}) {
 
 function clientId(item = {}) {
   return safeText(getHomeClientId?.(item), "");
-}
-
-function activityId(item = {}) {
-  return safeText(getHomeActivityId?.(item), "");
 }
 
 /* =========================================================
@@ -328,121 +323,29 @@ export function createInitialHomeStore(seed = {}) {
 export const homeStore = createInitialHomeStore();
 
 /* =========================================================
-   SUMMARY / DASHBOARD SHAPE
+   NORMALIZE
 ========================================================= */
 
-function normalizeSummary(summary = {}, fallback = {}) {
-  try {
-    return normalizeHomeSummary(
-      safeObject(summary),
-      {},
-      safeObject(fallback)
-    );
-  } catch {
-    return {
-      ...safeObject(fallback),
-      ...safeObject(summary),
-    };
-  }
-}
-
-function collectionEnvelope(items = [], total = null) {
-  const rows = safeArray(items);
-  const remote = Math.max(rows.length, safeNumber(total, rows.length));
-
-  return {
-    items: rows,
-    rows,
-    data: rows,
-    results: rows,
-
-    total: remote,
-    count: rows.length,
-    totalCount: remote,
-    remoteCount: remote,
-    visibleCount: rows.length,
-  };
-}
-
-function summaryFallback({
-  tickets = [],
-  invoices = [],
-  users = [],
-  clients = [],
-  ticketsRemoteCount = 0,
-  invoicesRemoteCount = 0,
-  usersRemoteCount = 0,
-  clientsRemoteCount = 0,
-} = {}) {
-  return {
-    totalTickets: ticketsRemoteCount,
-    ticketsTotal: ticketsRemoteCount,
-    incidenciasTotal: ticketsRemoteCount,
-    totalIncidencias: ticketsRemoteCount,
-    ticketsCount: ticketsRemoteCount,
-    incidenciasCount: ticketsRemoteCount,
-    visibleTickets: tickets.length,
-    visibleTicketsCount: tickets.length,
-
-    totalInvoices: invoicesRemoteCount,
-    invoicesTotal: invoicesRemoteCount,
-    facturasTotal: invoicesRemoteCount,
-    totalFacturas: invoicesRemoteCount,
-    invoicesCount: invoicesRemoteCount,
-    facturasCount: invoicesRemoteCount,
-    visibleInvoices: invoices.length,
-    visibleInvoicesCount: invoices.length,
-
-    usersCount: usersRemoteCount,
-    usuariosCount: usersRemoteCount,
-    totalUsers: usersRemoteCount,
-    totalUsuarios: usersRemoteCount,
-    visibleUsers: users.length,
-    visibleUsersCount: users.length,
-
-    clientsCount: clientsRemoteCount,
-    clientesCount: clientsRemoteCount,
-    customersCount: clientsRemoteCount,
-    totalClients: clientsRemoteCount,
-    totalClientes: clientsRemoteCount,
-    totalCustomers: clientsRemoteCount,
-    visibleClients: clients.length,
-    visibleClientsCount: clients.length,
-  };
-}
-
-function normalizeDashboardInput(payload = {}, previousDashboard = {}) {
-  const input = safeObject(payload);
+function normalizeDashboard(input = {}, previousDashboard = {}) {
+  const raw = safeObject(input);
 
   try {
-    return normalizeHomeDashboard(input);
+    return normalizeHomeDashboard(raw);
   } catch {
     return {
       ...safeObject(previousDashboard),
-      ...input,
+      ...raw,
     };
   }
 }
 
-function rawSummaryFrom(payload = {}, dashboard = {}) {
-  return safeObject(
-    first(
-      payload.summary,
-      payload.stats,
-      payload.metrics,
-      payload.totals,
-      payload.counts,
-      dashboard.summary,
-      dashboard.stats,
-      dashboard.metrics,
-      dashboard.totals,
-      dashboard.counts,
-      {}
-    )
-  );
-}
-
-function remoteCount({ explicit = null, summary = {}, dashboard = {}, keys = [], fallback = 0 } = {}) {
+function countFrom({
+  explicit = null,
+  summary = {},
+  dashboard = {},
+  keys = [],
+  fallback = 0,
+} = {}) {
   const values = [
     explicit,
     ...safeArray(keys).flatMap((key) => [
@@ -457,6 +360,226 @@ function remoteCount({ explicit = null, summary = {}, dashboard = {}, keys = [],
     safeNumber(fallback, 0),
     ...values.map((value) => safeNumber(value, fallback))
   );
+}
+
+function normalizedPayload(payload = {}, options = {}) {
+  const input = safeObject(payload);
+  const opts = safeObject(options);
+
+  const sourceDashboard = safeObject(first(input.dashboard, input, {}));
+  const dashboard = normalizeDashboard(
+    sourceDashboard,
+    opts.preserveExisting === false ? {} : homeStore.dashboard
+  );
+
+  const summary = safeObject(
+    first(
+      input.summary,
+      input.stats,
+      input.metrics,
+      input.totals,
+      input.counts,
+      dashboard.summary,
+      dashboard.stats,
+      dashboard.metrics,
+      dashboard.totals,
+      dashboard.counts,
+      {}
+    )
+  );
+
+  const widgets = uniqueBy(
+    normalizeHomeWidgets(
+      firstArray(
+        input.widgets,
+        input.cards,
+        input.kpis,
+        input.blocks,
+        dashboard.widgets,
+        dashboard.cards,
+        dashboard.kpis,
+        dashboard.blocks
+      ) || []
+    ),
+    widgetId
+  );
+
+  const tickets = uniqueBy(
+    normalizeHomeTickets(
+      firstArray(input.tickets, input.incidencias, dashboard.tickets, dashboard.incidencias) || []
+    ),
+    ticketId
+  );
+
+  const invoices = uniqueBy(
+    normalizeHomeInvoices(
+      firstArray(input.invoices, input.facturas, dashboard.invoices, dashboard.facturas) || []
+    ),
+    invoiceId
+  );
+
+  const users = uniqueBy(
+    normalizeHomeUsers(
+      firstArray(input.users, input.usuarios, dashboard.users, dashboard.usuarios) || []
+    ),
+    userId
+  );
+
+  const clients = uniqueBy(
+    normalizeHomeClients(
+      firstArray(input.clients, input.clientes, input.customers, dashboard.clients, dashboard.clientes, dashboard.customers) || []
+    ),
+    clientId
+  );
+
+  const activity = normalizeHomeActivityList(
+    firstArray(
+      input.activity,
+      input.activities,
+      input.recent,
+      input.recentActivity,
+      dashboard.activity,
+      dashboard.activities,
+      dashboard.recent,
+      dashboard.recentActivity
+    ) || []
+  );
+
+  const ticketsRemoteCount = countFrom({
+    explicit: first(input.ticketsRemoteCount, input.remoteCount, dashboard.ticketsRemoteCount, dashboard.remoteCount),
+    summary,
+    dashboard,
+    keys: ["totalTickets", "ticketsTotal", "incidenciasTotal", "totalIncidencias", "ticketsCount", "incidenciasCount"],
+    fallback: tickets.length,
+  });
+
+  const invoicesRemoteCount = countFrom({
+    explicit: first(input.invoicesRemoteCount, input.facturasRemoteCount, dashboard.invoicesRemoteCount),
+    summary,
+    dashboard,
+    keys: ["totalInvoices", "invoicesTotal", "facturasTotal", "totalFacturas", "invoicesCount", "facturasCount"],
+    fallback: invoices.length,
+  });
+
+  const usersRemoteCount = countFrom({
+    explicit: first(input.usersRemoteCount, input.usuariosRemoteCount, dashboard.usersRemoteCount),
+    summary,
+    dashboard,
+    keys: ["usersCount", "usuariosCount", "totalUsers", "totalUsuarios"],
+    fallback: users.length,
+  });
+
+  const clientsRemoteCount = countFrom({
+    explicit: first(input.clientsRemoteCount, input.clientesRemoteCount, input.customersRemoteCount, dashboard.clientsRemoteCount),
+    summary,
+    dashboard,
+    keys: ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes", "totalCustomers"],
+    fallback: clients.length,
+  });
+
+  const requestId = safeText(
+    first(input.requestId, dashboard.requestId, dashboard.meta?.requestId, homeStore.requestId, ""),
+    ""
+  );
+
+  const lastSyncAt = safeText(
+    first(input.lastSyncAt, dashboard.lastSyncAt, dashboard.updatedAt, dashboard.generatedAt, homeStore.lastSyncAt, nowIso()),
+    nowIso()
+  );
+
+  const updatedAt = safeText(
+    first(input.updatedAt, dashboard.updatedAt, dashboard.generatedAt, lastSyncAt),
+    lastSyncAt
+  );
+
+  return {
+    dashboard,
+
+    summary,
+    stats: summary,
+    metrics: summary,
+    totals: summary,
+    counts: summary,
+
+    widgets,
+    cards: widgets,
+    kpis: widgets,
+    blocks: widgets,
+
+    tickets,
+    incidencias: tickets,
+    ticketsRemoteCount,
+    remoteCount: ticketsRemoteCount,
+
+    invoices,
+    facturas: invoices,
+    invoicesRemoteCount,
+
+    users,
+    usuarios: users,
+    usersRemoteCount,
+
+    clients,
+    clientes: clients,
+    customers: clients,
+    clientsRemoteCount,
+
+    activity,
+    activities: activity,
+    recent: activity,
+    recentActivity: activity,
+
+    requestId,
+    lastSyncAt,
+    updatedAt,
+
+    modules: {
+      ...safeObject(dashboard.modules),
+      ...safeObject(input.modules),
+    },
+
+    partial: Boolean(first(input.partial, dashboard.partial, false)),
+    errors: safeArray(first(input.errors, dashboard.errors, [])),
+    health: first(input.health, dashboard.health, homeStore.health, null),
+
+    loaded: opts.loaded ?? true,
+    hydrated: opts.hydrated ?? true,
+    loading: false,
+    refreshing: false,
+    error: null,
+    errorMessage: "",
+  };
+}
+
+function preserveExisting(next = {}, options = {}) {
+  const opts = safeObject(options);
+
+  if (opts.replace === true || opts.preserveExisting === false) {
+    return next;
+  }
+
+  const output = {
+    ...next,
+  };
+
+  for (const key of ["widgets", "tickets", "invoices", "users", "clients", "activity"]) {
+    if (!safeArray(output[key]).length && safeArray(homeStore[key]).length) {
+      output[key] = homeStore[key];
+    }
+  }
+
+  if (!hasKeys(output.summary) && hasKeys(homeStore.summary)) {
+    output.summary = homeStore.summary;
+  }
+
+  output.ticketsRemoteCount = Math.max(homeStore.ticketsRemoteCount, output.ticketsRemoteCount || 0, safeArray(output.tickets).length);
+  output.remoteCount = Math.max(homeStore.remoteCount, output.remoteCount || 0, output.ticketsRemoteCount);
+
+  output.invoicesRemoteCount = Math.max(homeStore.invoicesRemoteCount, output.invoicesRemoteCount || 0, safeArray(output.invoices).length);
+  output.usersRemoteCount = Math.max(homeStore.usersRemoteCount, output.usersRemoteCount || 0, safeArray(output.users).length);
+  output.clientsRemoteCount = Math.max(homeStore.clientsRemoteCount, output.clientsRemoteCount || 0, safeArray(output.clients).length);
+
+  return output;
 }
 
 function syncAliases() {
@@ -516,25 +639,16 @@ function syncAliases() {
     incidenciasTotal: homeStore.ticketsRemoteCount,
     totalTickets: homeStore.ticketsRemoteCount,
     totalIncidencias: homeStore.ticketsRemoteCount,
-    ticketsCount: homeStore.ticketsRemoteCount,
-    incidenciasCount: homeStore.ticketsRemoteCount,
-    visibleTicketsCount: homeStore.tickets.length,
 
     invoicesTotal: homeStore.invoicesRemoteCount,
     facturasTotal: homeStore.invoicesRemoteCount,
     totalInvoices: homeStore.invoicesRemoteCount,
     totalFacturas: homeStore.invoicesRemoteCount,
-    invoicesCount: homeStore.invoicesRemoteCount,
-    facturasCount: homeStore.invoicesRemoteCount,
-    visibleInvoicesCount: homeStore.invoices.length,
 
     usersTotal: homeStore.usersRemoteCount,
     usuariosTotal: homeStore.usersRemoteCount,
     totalUsers: homeStore.usersRemoteCount,
     totalUsuarios: homeStore.usersRemoteCount,
-    usersCount: homeStore.usersRemoteCount,
-    usuariosCount: homeStore.usersRemoteCount,
-    visibleUsersCount: homeStore.users.length,
 
     clientsTotal: homeStore.clientsRemoteCount,
     clientesTotal: homeStore.clientsRemoteCount,
@@ -542,14 +656,6 @@ function syncAliases() {
     totalClients: homeStore.clientsRemoteCount,
     totalClientes: homeStore.clientsRemoteCount,
     totalCustomers: homeStore.clientsRemoteCount,
-    clientsCount: homeStore.clientsRemoteCount,
-    clientesCount: homeStore.clientsRemoteCount,
-    customersCount: homeStore.clientsRemoteCount,
-    visibleClientsCount: homeStore.clients.length,
-
-    activityCount: homeStore.activity.length,
-    recentCount: homeStore.activity.length,
-    visibleActivityCount: homeStore.activity.length,
 
     requestId: homeStore.requestId,
     updatedAt: homeStore.updatedAt || homeStore.lastSyncAt,
@@ -561,11 +667,21 @@ function syncAliases() {
 
     meta: {
       ...safeObject(homeStore.dashboard?.meta),
+
       widgetsCount: homeStore.widgets.length,
+
       ticketsCount: homeStore.ticketsRemoteCount,
+      visibleTicketsCount: homeStore.tickets.length,
+
       invoicesCount: homeStore.invoicesRemoteCount,
+      visibleInvoicesCount: homeStore.invoices.length,
+
       usersCount: homeStore.usersRemoteCount,
+      visibleUsersCount: homeStore.users.length,
+
       clientsCount: homeStore.clientsRemoteCount,
+      visibleClientsCount: homeStore.clients.length,
+
       activityCount: homeStore.activity.length,
     },
   };
@@ -573,223 +689,10 @@ function syncAliases() {
   return homeStore;
 }
 
-/* =========================================================
-   NORMALIZE PAYLOAD
-========================================================= */
-
-function normalizePayload(payload = {}, options = {}) {
-  const input = safeObject(payload);
-  const opts = safeObject(options);
-
-  const sourceDashboard = safeObject(first(input.dashboard, input, {}));
-  const dashboard = normalizeDashboardInput(
-    sourceDashboard,
-    opts.preserveExisting === false ? {} : homeStore.dashboard
-  );
-
-  const widgets = normalizeHomeWidgets(
-    firstArray(input.widgets, input.cards, input.kpis, input.blocks, dashboard.widgets, dashboard.cards, dashboard.kpis, dashboard.blocks) || []
-  );
-
-  const tickets = uniqueBy(
-    normalizeHomeTickets(firstArray(input.tickets, input.incidencias, dashboard.tickets, dashboard.incidencias) || []),
-    ticketId
-  );
-
-  const invoices = uniqueBy(
-    normalizeHomeInvoices(firstArray(input.invoices, input.facturas, dashboard.invoices, dashboard.facturas) || []),
-    invoiceId
-  );
-
-  const users = uniqueBy(
-    normalizeHomeUsers(firstArray(input.users, input.usuarios, dashboard.users, dashboard.usuarios) || []),
-    userId
-  );
-
-  const clients = uniqueBy(
-    normalizeHomeClients(firstArray(input.clients, input.clientes, input.customers, dashboard.clients, dashboard.clientes, dashboard.customers) || []),
-    clientId
-  );
-
-  const activity = uniqueBy(
-    normalizeHomeActivityList(firstArray(input.activity, input.activities, input.recent, input.recentActivity, dashboard.activity, dashboard.activities, dashboard.recent, dashboard.recentActivity) || []),
-    activityId
-  );
-
-  const rawSummary = rawSummaryFrom(input, dashboard);
-
-  const ticketsRemoteCount = remoteCount({
-    explicit: first(input.ticketsRemoteCount, input.remoteCount, input.ticketsCount, dashboard.ticketsRemoteCount, dashboard.remoteCount),
-    summary: rawSummary,
-    dashboard,
-    keys: ["totalTickets", "ticketsTotal", "incidenciasTotal", "totalIncidencias", "ticketsCount", "incidenciasCount"],
-    fallback: tickets.length,
-  });
-
-  const invoicesRemoteCount = remoteCount({
-    explicit: first(input.invoicesRemoteCount, input.facturasRemoteCount, input.invoicesCount, dashboard.invoicesRemoteCount),
-    summary: rawSummary,
-    dashboard,
-    keys: ["totalInvoices", "invoicesTotal", "facturasTotal", "totalFacturas", "invoicesCount", "facturasCount"],
-    fallback: invoices.length,
-  });
-
-  const usersRemoteCount = remoteCount({
-    explicit: first(input.usersRemoteCount, input.usuariosRemoteCount, input.usersCount, dashboard.usersRemoteCount),
-    summary: rawSummary,
-    dashboard,
-    keys: ["usersCount", "usuariosCount", "totalUsers", "totalUsuarios", "activeUsers", "usuariosActivos"],
-    fallback: users.length,
-  });
-
-  const clientsRemoteCount = remoteCount({
-    explicit: first(input.clientsRemoteCount, input.clientesRemoteCount, input.customersRemoteCount, input.clientsCount, dashboard.clientsRemoteCount),
-    summary: rawSummary,
-    dashboard,
-    keys: ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes", "totalCustomers", "activeClients", "clientesActivos"],
-    fallback: clients.length,
-  });
-
-  const summary = normalizeSummary(
-    rawSummary,
-    summaryFallback({
-      tickets,
-      invoices,
-      users,
-      clients,
-      ticketsRemoteCount,
-      invoicesRemoteCount,
-      usersRemoteCount,
-      clientsRemoteCount,
-    })
-  );
-
-  const requestId = safeText(first(input.requestId, dashboard.requestId, dashboard.meta?.requestId, homeStore.requestId, ""), "");
-  const lastSyncAt = safeText(first(input.lastSyncAt, dashboard.lastSyncAt, dashboard.updatedAt, dashboard.generatedAt, homeStore.lastSyncAt, nowIso()), nowIso());
-  const updatedAt = safeText(first(input.updatedAt, dashboard.updatedAt, dashboard.generatedAt, lastSyncAt), lastSyncAt);
-
-  return {
-    dashboard,
-
-    summary,
-    stats: summary,
-    metrics: summary,
-    totals: summary,
-    counts: summary,
-
-    widgets,
-    cards: widgets,
-    kpis: widgets,
-    blocks: widgets,
-
-    tickets,
-    incidencias: tickets,
-    ticketsRemoteCount,
-    remoteCount: ticketsRemoteCount,
-
-    invoices,
-    facturas: invoices,
-    invoicesRemoteCount,
-
-    users,
-    usuarios: users,
-    usersRemoteCount,
-
-    clients,
-    clientes: clients,
-    customers: clients,
-    clientsRemoteCount,
-
-    activity,
-    activities: activity,
-    recent: activity,
-    recentActivity: activity,
-
-    requestId,
-    lastSyncAt,
-    updatedAt,
-
-    modules: {
-      ...safeObject(dashboard.modules),
-      ...safeObject(input.modules),
-    },
-
-    partial: Boolean(first(input.partial, dashboard.partial, false)),
-    errors: safeArray(first(input.errors, dashboard.errors, [])),
-
-    health: first(input.health, dashboard.health, homeStore.health, null),
-
-    loaded: opts.loaded ?? true,
-    hydrated: opts.hydrated ?? true,
-    loading: false,
-    refreshing: false,
-    error: null,
-    errorMessage: "",
-  };
-}
-
-function preserveExisting(next = {}, options = {}) {
-  const opts = safeObject(options);
-
-  if (opts.preserveExisting === false || opts.replace === true) {
-    return next;
-  }
-
-  const output = {
-    ...next,
-  };
-
-  const keepArray = (key, previousKey = key) => {
-    if (!safeArray(output[key]).length && safeArray(homeStore[previousKey]).length) {
-      output[key] = homeStore[previousKey];
-    }
-  };
-
-  keepArray("widgets");
-  keepArray("cards", "widgets");
-  keepArray("kpis", "widgets");
-  keepArray("blocks", "widgets");
-
-  keepArray("tickets");
-  keepArray("incidencias", "tickets");
-
-  keepArray("invoices");
-  keepArray("facturas", "invoices");
-
-  keepArray("users");
-  keepArray("usuarios", "users");
-
-  keepArray("clients");
-  keepArray("clientes", "clients");
-  keepArray("customers", "clients");
-
-  keepArray("activity");
-  keepArray("activities", "activity");
-  keepArray("recent", "activity");
-  keepArray("recentActivity", "activity");
-
-  if (!hasOwnKeys(output.summary) && hasOwnKeys(homeStore.summary)) {
-    output.summary = homeStore.summary;
-  }
-
-  output.stats = output.summary;
-  output.metrics = output.summary;
-  output.totals = output.summary;
-  output.counts = output.summary;
-
-  output.ticketsRemoteCount = Math.max(homeStore.ticketsRemoteCount, output.ticketsRemoteCount, output.tickets.length);
-  output.remoteCount = Math.max(homeStore.remoteCount, output.remoteCount, output.ticketsRemoteCount);
-
-  output.invoicesRemoteCount = Math.max(homeStore.invoicesRemoteCount, output.invoicesRemoteCount, output.invoices.length);
-  output.usersRemoteCount = Math.max(homeStore.usersRemoteCount, output.usersRemoteCount, output.users.length);
-  output.clientsRemoteCount = Math.max(homeStore.clientsRemoteCount, output.clientsRemoteCount, output.clients.length);
-
-  return output;
-}
-
 function assignStore(patch = {}) {
   Object.assign(homeStore, safeObject(patch));
   syncAliases();
+
   return homeStore;
 }
 
@@ -797,36 +700,17 @@ function assignStore(patch = {}) {
    WRITE API
 ========================================================= */
 
-export function patchHomeStore(patch = {}, options = {}) {
-  const opts = safeObject(options);
-  const input = safeObject(patch);
-
-  const next = opts.normalize === true
-    ? normalizePayload(input, opts)
-    : input;
-
-  assignStore(
-    opts.preserveExisting === false
-      ? next
-      : preserveExisting(next, opts)
-  );
-
-  return homeStore;
-}
-
 export function replaceHomeStore(payload = {}, options = {}) {
   const opts = safeObject(options);
-  const normalized = preserveExisting(normalizePayload(payload, opts), opts);
+  const next = preserveExisting(normalizedPayload(payload, opts), opts);
 
-  assignStore({
-    ...normalized,
-    hydrated: opts.hydrated ?? normalized.hydrated ?? true,
-    loaded: opts.loaded ?? normalized.loaded ?? true,
+  return assignStore({
+    ...next,
+    hydrated: opts.hydrated ?? next.hydrated ?? true,
+    loaded: opts.loaded ?? next.loaded ?? true,
     loading: false,
     refreshing: false,
   });
-
-  return homeStore;
 }
 
 export function mergeHomeStore(payload = {}, options = {}) {
@@ -834,6 +718,21 @@ export function mergeHomeStore(payload = {}, options = {}) {
     ...safeObject(options),
     preserveExisting: true,
   });
+}
+
+export function patchHomeStore(patch = {}, options = {}) {
+  const opts = safeObject(options);
+  const data = safeObject(patch);
+
+  if (opts.normalize === true || data.dashboard) {
+    return replaceHomeStore(data, opts);
+  }
+
+  return assignStore(
+    opts.preserveExisting === false
+      ? data
+      : preserveExisting(data, opts)
+  );
 }
 
 export function clearHomeStore() {
@@ -856,112 +755,70 @@ export function resetHomeStore() {
 ========================================================= */
 
 export function setHomeWidgetsStore(widgets = [], options = {}) {
-  const rows = normalizeHomeWidgets(uniqueBy(safeArray(widgets), widgetId));
-
-  if (!rows.length && options.replace !== true && homeStore.widgets.length) {
-    return homeStore.widgets;
-  }
-
-  assignStore({
-    widgets: rows,
-  });
-
-  return homeStore.widgets;
+  return patchHomeStore(
+    {
+      widgets: uniqueBy(normalizeHomeWidgets(widgets), widgetId),
+    },
+    options
+  ).widgets;
 }
 
 export function setHomeTicketsStore(tickets = [], options = {}) {
-  const rows = normalizeHomeTickets(uniqueBy(safeArray(tickets), ticketId));
+  const rows = uniqueBy(normalizeHomeTickets(tickets), ticketId);
 
-  if (!rows.length && options.replace !== true && homeStore.tickets.length) {
-    return homeStore.tickets;
-  }
-
-  const total = Math.max(
-    rows.length,
-    safeNumber(options.total, safeNumber(options.remoteCount, homeStore.ticketsRemoteCount))
-  );
-
-  assignStore({
-    tickets: rows,
-    ticketsRemoteCount: total,
-    remoteCount: Math.max(total, homeStore.remoteCount),
-  });
-
-  return homeStore.tickets;
+  return patchHomeStore(
+    {
+      tickets: rows,
+      ticketsRemoteCount: Math.max(rows.length, safeNumber(options.remoteCount, homeStore.ticketsRemoteCount)),
+      remoteCount: Math.max(rows.length, safeNumber(options.remoteCount, homeStore.remoteCount)),
+    },
+    options
+  ).tickets;
 }
 
 export function setHomeInvoicesStore(invoices = [], options = {}) {
-  const rows = normalizeHomeInvoices(uniqueBy(safeArray(invoices), invoiceId));
+  const rows = uniqueBy(normalizeHomeInvoices(invoices), invoiceId);
 
-  if (!rows.length && options.replace !== true && homeStore.invoices.length) {
-    return homeStore.invoices;
-  }
-
-  const total = Math.max(
-    rows.length,
-    safeNumber(options.total, safeNumber(options.remoteCount, homeStore.invoicesRemoteCount))
-  );
-
-  assignStore({
-    invoices: rows,
-    invoicesRemoteCount: total,
-  });
-
-  return homeStore.invoices;
+  return patchHomeStore(
+    {
+      invoices: rows,
+      invoicesRemoteCount: Math.max(rows.length, safeNumber(options.remoteCount, homeStore.invoicesRemoteCount)),
+    },
+    options
+  ).invoices;
 }
 
 export function setHomeUsersStore(users = [], options = {}) {
-  const rows = normalizeHomeUsers(uniqueBy(safeArray(users), userId));
+  const rows = uniqueBy(normalizeHomeUsers(users), userId);
 
-  if (!rows.length && options.replace !== true && homeStore.users.length) {
-    return homeStore.users;
-  }
-
-  const total = Math.max(
-    rows.length,
-    safeNumber(options.total, safeNumber(options.remoteCount, homeStore.usersRemoteCount))
-  );
-
-  assignStore({
-    users: rows,
-    usersRemoteCount: total,
-  });
-
-  return homeStore.users;
+  return patchHomeStore(
+    {
+      users: rows,
+      usersRemoteCount: Math.max(rows.length, safeNumber(options.remoteCount, homeStore.usersRemoteCount)),
+    },
+    options
+  ).users;
 }
 
 export function setHomeClientsStore(clients = [], options = {}) {
-  const rows = normalizeHomeClients(uniqueBy(safeArray(clients), clientId));
+  const rows = uniqueBy(normalizeHomeClients(clients), clientId);
 
-  if (!rows.length && options.replace !== true && homeStore.clients.length) {
-    return homeStore.clients;
-  }
-
-  const total = Math.max(
-    rows.length,
-    safeNumber(options.total, safeNumber(options.remoteCount, homeStore.clientsRemoteCount))
-  );
-
-  assignStore({
-    clients: rows,
-    clientsRemoteCount: total,
-  });
-
-  return homeStore.clients;
+  return patchHomeStore(
+    {
+      clients: rows,
+      clientsRemoteCount: Math.max(rows.length, safeNumber(options.remoteCount, homeStore.clientsRemoteCount)),
+    },
+    options
+  ).clients;
 }
 
 export function setHomeActivityStore(activity = [], options = {}) {
-  const rows = normalizeHomeActivityList(uniqueBy(safeArray(activity), activityId));
-
-  if (!rows.length && options.replace !== true && homeStore.activity.length) {
-    return homeStore.activity;
-  }
-
-  assignStore({
-    activity: rows,
-  });
-
-  return homeStore.activity;
+  return patchHomeStore(
+    {
+      activity: normalizeHomeActivityList(activity),
+    },
+    options
+  ).activity;
 }
 
 export function setHomeCollectionsStore(collections = {}, options = {}) {
@@ -989,7 +846,7 @@ export function setHomeCollectionsStore(collections = {}, options = {}) {
 }
 
 /* =========================================================
-   WIDGET UPSERT
+   WIDGET MUTATION
 ========================================================= */
 
 function widgetKeys(widget = {}) {
@@ -1010,40 +867,33 @@ function widgetKeys(widget = {}) {
     .filter(Boolean);
 }
 
-function findWidgetIndex(widget = {}) {
-  const target = widgetKeys(widget);
-
-  if (!target.length) return -1;
-
-  return homeStore.widgets.findIndex((item) => {
-    const keys = widgetKeys(item);
-    return keys.some((key) => target.includes(key));
-  });
-}
-
 export function upsertHomeWidgetStore(widget = {}) {
-  const item = safeObject(widget);
+  const item = normalizeHomeWidgets([widget])[0] || safeObject(widget);
 
-  if (!hasOwnKeys(item)) return null;
+  if (!hasKeys(item)) return null;
 
-  const normalized = normalizeHomeWidgets([item])[0] || item;
+  const keys = widgetKeys(item);
   const rows = [...homeStore.widgets];
-  const index = findWidgetIndex(normalized);
+
+  const index = rows.findIndex((row) => {
+    const rowKeys = widgetKeys(row);
+    return rowKeys.some((key) => keys.includes(key));
+  });
 
   if (index >= 0) {
     rows[index] = {
       ...safeObject(rows[index]),
-      ...normalized,
+      ...item,
     };
   } else {
-    rows.push(normalized);
+    rows.push(item);
   }
 
   setHomeWidgetsStore(rows, {
     replace: true,
   });
 
-  return normalized;
+  return item;
 }
 
 export function removeHomeWidgetStore(widgetId = "") {
@@ -1151,13 +1001,11 @@ export function getHomeStore() {
 }
 
 export function getHomeDashboardStore() {
-  syncAliases();
-  return safeObject(homeStore.dashboard);
+  return safeObject(getHomeStore().dashboard);
 }
 
 export function getHomeSummaryStore() {
-  syncAliases();
-  return safeObject(homeStore.summary);
+  return safeObject(getHomeStore().summary);
 }
 
 export function getHomeStatsStore() {
@@ -1165,8 +1013,7 @@ export function getHomeStatsStore() {
 }
 
 export function getHomeWidgetsStore() {
-  syncAliases();
-  return safeArray(homeStore.widgets);
+  return safeArray(getHomeStore().widgets);
 }
 
 export function getHomeCardsStore() {
@@ -1178,8 +1025,7 @@ export function getHomeKpisStore() {
 }
 
 export function getHomeTicketsStore() {
-  syncAliases();
-  return safeArray(homeStore.tickets);
+  return safeArray(getHomeStore().tickets);
 }
 
 export function getHomeIncidenciasStore() {
@@ -1187,8 +1033,7 @@ export function getHomeIncidenciasStore() {
 }
 
 export function getHomeInvoicesStore() {
-  syncAliases();
-  return safeArray(homeStore.invoices);
+  return safeArray(getHomeStore().invoices);
 }
 
 export function getHomeFacturasStore() {
@@ -1196,8 +1041,7 @@ export function getHomeFacturasStore() {
 }
 
 export function getHomeUsersStore() {
-  syncAliases();
-  return safeArray(homeStore.users);
+  return safeArray(getHomeStore().users);
 }
 
 export function getHomeUsuariosStore() {
@@ -1205,8 +1049,7 @@ export function getHomeUsuariosStore() {
 }
 
 export function getHomeClientsStore() {
-  syncAliases();
-  return safeArray(homeStore.clients);
+  return safeArray(getHomeStore().clients);
 }
 
 export function getHomeClientesStore() {
@@ -1218,8 +1061,7 @@ export function getHomeCustomersStore() {
 }
 
 export function getHomeActivityStore() {
-  syncAliases();
-  return safeArray(homeStore.activity);
+  return safeArray(getHomeStore().activity);
 }
 
 export function getHomeRecentStore() {
@@ -1234,7 +1076,7 @@ function findById(items = [], id = "", picker = null) {
   return (
     safeArray(items).find((item) => {
       const keys = [
-        isFunction(picker) ? picker(item) : "",
+        picker ? picker(item) : "",
         item?.id,
         item?._id,
         item?.key,
@@ -1288,97 +1130,113 @@ export function getHomeClientByIdStore(id = "") {
    SNAPSHOT
 ========================================================= */
 
-export function getHomeCollectionsEnvelope() {
-  syncAliases();
+function collectionEnvelope(items = [], total = null) {
+  const rows = safeArray(items);
+  const remote = Math.max(rows.length, safeNumber(total, rows.length));
 
   return {
-    widgets: collectionEnvelope(homeStore.widgets, homeStore.widgets.length),
-    cards: collectionEnvelope(homeStore.widgets, homeStore.widgets.length),
-    kpis: collectionEnvelope(homeStore.widgets, homeStore.widgets.length),
-    blocks: collectionEnvelope(homeStore.widgets, homeStore.widgets.length),
+    items: rows,
+    rows,
+    data: rows,
+    results: rows,
+    total: remote,
+    count: rows.length,
+    totalCount: remote,
+    remoteCount: remote,
+    visibleCount: rows.length,
+  };
+}
 
-    tickets: collectionEnvelope(homeStore.tickets, homeStore.ticketsRemoteCount),
-    incidencias: collectionEnvelope(homeStore.tickets, homeStore.ticketsRemoteCount),
+export function getHomeCollectionsEnvelope() {
+  const store = getHomeStore();
 
-    invoices: collectionEnvelope(homeStore.invoices, homeStore.invoicesRemoteCount),
-    facturas: collectionEnvelope(homeStore.invoices, homeStore.invoicesRemoteCount),
+  return {
+    widgets: collectionEnvelope(store.widgets, store.widgets.length),
+    cards: collectionEnvelope(store.widgets, store.widgets.length),
+    kpis: collectionEnvelope(store.widgets, store.widgets.length),
+    blocks: collectionEnvelope(store.widgets, store.widgets.length),
 
-    users: collectionEnvelope(homeStore.users, homeStore.usersRemoteCount),
-    usuarios: collectionEnvelope(homeStore.users, homeStore.usersRemoteCount),
+    tickets: collectionEnvelope(store.tickets, store.ticketsRemoteCount),
+    incidencias: collectionEnvelope(store.tickets, store.ticketsRemoteCount),
 
-    clients: collectionEnvelope(homeStore.clients, homeStore.clientsRemoteCount),
-    clientes: collectionEnvelope(homeStore.clients, homeStore.clientsRemoteCount),
-    customers: collectionEnvelope(homeStore.clients, homeStore.clientsRemoteCount),
+    invoices: collectionEnvelope(store.invoices, store.invoicesRemoteCount),
+    facturas: collectionEnvelope(store.invoices, store.invoicesRemoteCount),
 
-    activity: collectionEnvelope(homeStore.activity, homeStore.activity.length),
-    activities: collectionEnvelope(homeStore.activity, homeStore.activity.length),
-    recent: collectionEnvelope(homeStore.activity, homeStore.activity.length),
-    recentActivity: collectionEnvelope(homeStore.activity, homeStore.activity.length),
+    users: collectionEnvelope(store.users, store.usersRemoteCount),
+    usuarios: collectionEnvelope(store.users, store.usersRemoteCount),
+
+    clients: collectionEnvelope(store.clients, store.clientsRemoteCount),
+    clientes: collectionEnvelope(store.clients, store.clientsRemoteCount),
+    customers: collectionEnvelope(store.clients, store.clientsRemoteCount),
+
+    activity: collectionEnvelope(store.activity, store.activity.length),
+    activities: collectionEnvelope(store.activity, store.activity.length),
+    recent: collectionEnvelope(store.activity, store.activity.length),
+    recentActivity: collectionEnvelope(store.activity, store.activity.length),
   };
 }
 
 export function getHomeStoreSnapshot(options = {}) {
+  const store = getHomeStore();
   const includeCollections = options.includeCollections === true;
-
-  syncAliases();
 
   const snapshot = {
     version: HOME_STORE_VERSION,
     source: HOME_STORE_SOURCE,
 
-    hydrated: Boolean(homeStore.hydrated),
-    loaded: Boolean(homeStore.loaded),
-    loading: Boolean(homeStore.loading),
-    refreshing: Boolean(homeStore.refreshing),
+    hydrated: Boolean(store.hydrated),
+    loaded: Boolean(store.loaded),
+    loading: Boolean(store.loading),
+    refreshing: Boolean(store.refreshing),
 
-    page: safeNumber(homeStore.page, DEFAULT_PAGE),
-    pageSize: safeNumber(homeStore.pageSize, DEFAULT_PAGE_SIZE),
+    page: safeNumber(store.page, DEFAULT_PAGE),
+    pageSize: safeNumber(store.pageSize, DEFAULT_PAGE_SIZE),
 
-    requestId: safeText(homeStore.requestId, ""),
-    lastSyncAt: homeStore.lastSyncAt || null,
-    updatedAt: homeStore.updatedAt || null,
+    requestId: safeText(store.requestId, ""),
+    lastSyncAt: store.lastSyncAt || null,
+    updatedAt: store.updatedAt || null,
 
-    hasDashboard: hasOwnKeys(homeStore.dashboard),
-    hasSummary: hasOwnKeys(homeStore.summary),
+    hasDashboard: hasKeys(store.dashboard),
+    hasSummary: hasKeys(store.summary),
 
-    widgetsCount: homeStore.widgets.length,
+    widgetsCount: store.widgets.length,
 
-    ticketsVisibleCount: homeStore.tickets.length,
-    ticketsRemoteCount: homeStore.ticketsRemoteCount,
+    ticketsVisibleCount: store.tickets.length,
+    ticketsRemoteCount: store.ticketsRemoteCount,
 
-    invoicesVisibleCount: homeStore.invoices.length,
-    invoicesRemoteCount: homeStore.invoicesRemoteCount,
+    invoicesVisibleCount: store.invoices.length,
+    invoicesRemoteCount: store.invoicesRemoteCount,
 
-    usersVisibleCount: homeStore.users.length,
-    usersRemoteCount: homeStore.usersRemoteCount,
+    usersVisibleCount: store.users.length,
+    usersRemoteCount: store.usersRemoteCount,
 
-    clientsVisibleCount: homeStore.clients.length,
-    clientsRemoteCount: homeStore.clientsRemoteCount,
+    clientsVisibleCount: store.clients.length,
+    clientsRemoteCount: store.clientsRemoteCount,
 
-    activityCount: homeStore.activity.length,
+    activityCount: store.activity.length,
 
-    partial: Boolean(homeStore.partial),
-    errorsCount: homeStore.errors.length,
+    partial: Boolean(store.partial),
+    errorsCount: store.errors.length,
 
-    hasHealth: Boolean(homeStore.health),
+    hasHealth: Boolean(store.health),
 
-    hasError: Boolean(homeStore.error || homeStore.errorMessage),
-    errorMessage: safeText(homeStore.errorMessage, ""),
+    hasError: Boolean(store.error || store.errorMessage),
+    errorMessage: safeText(store.errorMessage, ""),
   };
 
   if (includeCollections) {
-    snapshot.dashboard = clone(homeStore.dashboard, {});
-    snapshot.summary = clone(homeStore.summary, {});
+    snapshot.dashboard = clone(store.dashboard, {});
+    snapshot.summary = clone(store.summary, {});
 
-    snapshot.widgets = clone(homeStore.widgets, []);
-    snapshot.tickets = clone(homeStore.tickets, []);
-    snapshot.invoices = clone(homeStore.invoices, []);
-    snapshot.users = clone(homeStore.users, []);
-    snapshot.clients = clone(homeStore.clients, []);
-    snapshot.activity = clone(homeStore.activity, []);
+    snapshot.widgets = clone(store.widgets, []);
+    snapshot.tickets = clone(store.tickets, []);
+    snapshot.invoices = clone(store.invoices, []);
+    snapshot.users = clone(store.users, []);
+    snapshot.clients = clone(store.clients, []);
+    snapshot.activity = clone(store.activity, []);
 
-    snapshot.modules = clone(homeStore.modules, {});
-    snapshot.errors = clone(homeStore.errors, []);
+    snapshot.modules = clone(store.modules, {});
+    snapshot.errors = clone(store.errors, []);
     snapshot.collections = clone(getHomeCollectionsEnvelope(), {});
   }
 
@@ -1386,7 +1244,7 @@ export function getHomeStoreSnapshot(options = {}) {
 }
 
 /* =========================================================
-   COMPAT ALIASES
+   COMPAT MÍNIMA
 ========================================================= */
 
 export function subscribeHomeStore() {

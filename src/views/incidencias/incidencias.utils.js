@@ -1,22 +1,17 @@
 /* =========================================================
-   Onion SPA - Incidencias Utils
-   Archivo: src/views/incidencias/incidencias.utils.js
+   Onion Support - Incidencias Utils
+   Archivo: /src/views/incidencias/incidencias.utils.js
 
-   EXTREME MODE · UTILS CORE · 12/10
-
-   Responsabilidades:
-   - helpers puros reutilizables
-   - sanitización robusta
-   - fechas seguras
-   - números tolerantes a formatos ES/EU
-   - texto / normalización / slug
-   - arrays / objetos / dedupe
-   - money / bytes / formatters cacheados
-   - toast bridge multi-entorno
-   - event bridge AppCore + window
-   - helpers de URL/query/path
-   - cero dependencias frágiles
-   - compatibilidad total con template / actions / api / model / store / modal
+   Responsabilidad:
+   - Helpers comunes y reutilizables del módulo Incidencias.
+   - Sanitización, texto, números, fechas, arrays, objetos, formato y errores.
+   - Toast y eventos mínimos a través de AppCore.
+   - No tocar DOM salvo referencias seguras de entorno.
+   - No llamar APIs.
+   - No leer Router/Auth/Store.
+   - No registrar globals.
+   - No emitir por window.
+   - No duplicar lógica de modelo, vista, bindings ni modales.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -45,17 +40,13 @@ export function isPlainObject(value) {
   if (!isObject(value)) return false;
 
   const proto = Object.getPrototypeOf(value);
-
   return proto === Object.prototype || proto === null;
 }
 
 export function safeString(value, fallback = "") {
-  if (isNil(value)) {
-    return fallback;
-  }
+  if (isNil(value)) return fallback;
 
   const text = String(value).trim();
-
   return text || fallback;
 }
 
@@ -77,24 +68,15 @@ export function safeArray(value, fallback = []) {
 }
 
 export function safeObject(value, fallback = {}) {
-  if (isObject(value)) {
-    return value;
-  }
-
+  if (isObject(value)) return value;
   return isObject(fallback) ? fallback : {};
 }
 
 export function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
@@ -104,9 +86,7 @@ export function first(...values) {
 
 export function firstDefined(...values) {
   for (const value of values) {
-    if (value !== undefined && value !== null) {
-      return value;
-    }
+    if (value !== undefined && value !== null) return value;
   }
 
   return null;
@@ -165,11 +145,9 @@ export function parseLocaleNumber(value, fallback = NaN) {
     .replace(/£/g, "")
     .replace(/%/g, "")
     .replace(/[^\d.,+\-\s]/g, "")
-    .replace(/\s/g, "");
+    .replace(/\s+/g, "");
 
-  if (!normalized) {
-    return fallback;
-  }
+  if (!normalized) return fallback;
 
   const hasComma = normalized.includes(",");
   const hasDot = normalized.includes(".");
@@ -178,46 +156,41 @@ export function parseLocaleNumber(value, fallback = NaN) {
     const lastComma = normalized.lastIndexOf(",");
     const lastDot = normalized.lastIndexOf(".");
 
-    if (lastComma > lastDot) {
-      normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
-    } else {
-      normalized = normalized.replace(/,/g, "");
-    }
+    normalized = lastComma > lastDot
+      ? normalized.replace(/\./g, "").replace(/,/g, ".")
+      : normalized.replace(/,/g, "");
   } else if (hasComma) {
     normalized = normalized.replace(/,/g, ".");
   }
 
-  const n = Number(normalized);
-
-  return Number.isFinite(n) ? n : fallback;
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 export function safeNumber(value, fallback = 0) {
-  const n = parseLocaleNumber(value, NaN);
-
-  return Number.isFinite(n) ? n : fallback;
+  const number = parseLocaleNumber(value, NaN);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 export function safeInteger(value, fallback = 0) {
-  const n = safeNumber(value, NaN);
-
-  return Number.isFinite(n) ? Math.trunc(n) : fallback;
+  const number = safeNumber(value, NaN);
+  return Number.isFinite(number) ? Math.trunc(number) : fallback;
 }
 
 export function clamp(value, min = 0, max = 1) {
-  const n = safeNumber(value, min);
   const lower = safeNumber(min, 0);
   const upper = safeNumber(max, lower);
+  const number = safeNumber(value, lower);
 
-  return Math.min(Math.max(n, lower), upper);
+  return Math.min(Math.max(number, lower), upper);
 }
 
 export function round(value = 0, decimals = 2) {
-  const n = safeNumber(value, 0);
+  const number = safeNumber(value, 0);
   const places = clamp(safeInteger(decimals, 2), 0, 12);
   const factor = 10 ** places;
 
-  return Math.round((n + Number.EPSILON) * factor) / factor;
+  return Math.round((number + Number.EPSILON) * factor) / factor;
 }
 
 /* =========================================================
@@ -226,10 +199,7 @@ export function round(value = 0, decimals = 2) {
 
 export function safeJsonParse(value = "", fallback = null) {
   if (value === null || value === undefined) return fallback;
-
-  if (typeof value === "object") {
-    return value;
-  }
+  if (typeof value === "object") return value;
 
   try {
     return JSON.parse(String(value));
@@ -248,9 +218,7 @@ export function safeJsonStringify(value = null, fallback = "") {
 
 export function safeClone(value) {
   try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
+    if (typeof structuredClone === "function") return structuredClone(value);
   } catch {}
 
   try {
@@ -265,25 +233,7 @@ export function safeClone(value) {
 ========================================================= */
 
 export function escapeHtml(value = "") {
-  const text = String(value ?? "");
-
-  try {
-    const coreEscape = AppCore?.utils?.escapeHtml;
-
-    if (typeof coreEscape === "function") {
-      const result = coreEscape(text);
-
-      if (result !== undefined && result !== null) {
-        const output = String(result);
-
-        if (!text || output) {
-          return output;
-        }
-      }
-    }
-  } catch {}
-
-  return text
+  return String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -305,7 +255,6 @@ export function stripHtml(value = "") {
 
 export function escapeCsvCell(value = "") {
   const text = value === null || value === undefined ? "" : String(value);
-
   return `"${text.replace(/"/g, '""')}"`;
 }
 
@@ -335,26 +284,17 @@ export function normalizeKey(value = "") {
 
 export function truncate(value = "", max = 160) {
   const text = safeString(value, "");
-  const limit = Math.max(0, safeNumber(max, 160));
+  const limit = Math.max(0, safeInteger(max, 160));
 
-  if (!text || limit <= 0) {
-    return "";
-  }
-
-  if (text.length <= limit) {
-    return text;
-  }
-
-  if (limit <= 1) {
-    return "…";
-  }
+  if (!text || limit <= 0) return "";
+  if (text.length <= limit) return text;
+  if (limit <= 1) return "…";
 
   return `${text.slice(0, limit - 1).trim()}…`;
 }
 
 export function capitalize(value = "") {
   const text = safeText(value, "");
-
   if (!text) return "";
 
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
@@ -362,10 +302,7 @@ export function capitalize(value = "") {
 
 export function getInitials(value = "") {
   const text = normalizeWhitespace(value);
-
-  if (!text) {
-    return "ON";
-  }
+  if (!text) return "ON";
 
   const parts = text.split(/\s+/).filter(Boolean);
 
@@ -373,29 +310,22 @@ export function getInitials(value = "") {
     return parts[0].slice(0, 2).toUpperCase() || "ON";
   }
 
-  const initials = parts
+  return parts
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
     .join("")
-    .slice(0, 2);
-
-  return initials || "ON";
+    .slice(0, 2) || "ON";
 }
 
 export function slugify(value = "") {
-  const text = normalizeText(value);
-
-  return (
-    text
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .replace(/-{2,}/g, "-") || ""
-  );
+  return normalizeText(value)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "");
 }
 
 export function hashString(value = "") {
   const text = safeText(value, "onion");
-
   let hash = 2166136261;
 
   for (let index = 0; index < text.length; index += 1) {
@@ -427,6 +357,7 @@ export function uniqueStrings(values = []) {
   return [
     ...new Set(
       safeArray(values)
+        .flatMap((value) => Array.isArray(value) ? value : [value])
         .map((value) => safeText(value, ""))
         .filter(Boolean)
     ),
@@ -436,9 +367,7 @@ export function uniqueStrings(values = []) {
 export function dedupeBy(items = [], keyGetter = identity) {
   const list = safeArray(items);
 
-  if (typeof keyGetter !== "function") {
-    return [...list];
-  }
+  if (typeof keyGetter !== "function") return [...list];
 
   const map = new Map();
   const anonymous = [];
@@ -451,9 +380,7 @@ export function dedupeBy(items = [], keyGetter = identity) {
       return;
     }
 
-    if (!map.has(key)) {
-      map.set(key, item);
-    }
+    if (!map.has(key)) map.set(key, item);
   });
 
   return [...map.values(), ...anonymous];
@@ -461,10 +388,14 @@ export function dedupeBy(items = [], keyGetter = identity) {
 
 export function sortByText(items = [], getter = identity, locale = "es") {
   return [...safeArray(items)].sort((a, b) => {
-    return safeText(getter(a), "").localeCompare(safeText(getter(b), ""), locale, {
-      numeric: true,
-      sensitivity: "base",
-    });
+    return safeText(getter(a), "").localeCompare(
+      safeText(getter(b), ""),
+      locale,
+      {
+        numeric: true,
+        sensitivity: "base",
+      }
+    );
   });
 }
 
@@ -477,13 +408,12 @@ function parseSpanishDate(value = "") {
   if (!text) return null;
 
   const match = text.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
   );
 
   if (!match) return null;
 
   const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = match;
-
   const date = new Date(
     Number(yyyy),
     Number(mm) - 1,
@@ -504,9 +434,8 @@ export function toDate(value = null) {
   }
 
   if (typeof value === "number" && Number.isFinite(value)) {
-    const ms = value > 9999999999 ? value : value * 1000;
-    const date = new Date(ms);
-
+    const milliseconds = value > 9999999999 ? value : value * 1000;
+    const date = new Date(milliseconds);
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
@@ -514,24 +443,15 @@ export function toDate(value = null) {
   if (!raw) return null;
 
   const numeric = Number(raw);
-
   if (Number.isFinite(numeric) && numeric > 0) {
     return toDate(numeric);
   }
 
   const spanishDate = parseSpanishDate(raw);
+  if (spanishDate) return spanishDate;
 
-  if (spanishDate) {
-    return spanishDate;
-  }
-
-  const date = new Date(raw.includes("T") ? raw : raw);
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date;
+  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 export function toMs(value = null) {
@@ -548,9 +468,7 @@ const dateFormatterCache = new Map();
 function getDateFormatter(locale = "es-ES", options = {}) {
   const key = `${locale}:${safeJsonStringify(options, "{}")}`;
 
-  if (dateFormatterCache.has(key)) {
-    return dateFormatterCache.get(key);
-  }
+  if (dateFormatterCache.has(key)) return dateFormatterCache.get(key);
 
   const formatter = new Intl.DateTimeFormat(locale, options);
   dateFormatterCache.set(key, formatter);
@@ -560,10 +478,7 @@ function getDateFormatter(locale = "es-ES", options = {}) {
 
 export function formatDate(value = null) {
   const date = toDate(value);
-
-  if (!date) {
-    return "—";
-  }
+  if (!date) return "—";
 
   try {
     return getDateFormatter("es-ES", {
@@ -580,10 +495,7 @@ export function formatDate(value = null) {
 
 export function formatDateOnly(value = null) {
   const date = toDate(value);
-
-  if (!date) {
-    return "—";
-  }
+  if (!date) return "—";
 
   try {
     return getDateFormatter("es-ES", {
@@ -598,10 +510,7 @@ export function formatDateOnly(value = null) {
 
 export function formatTimeOnly(value = null) {
   const date = toDate(value);
-
-  if (!date) {
-    return "—";
-  }
+  if (!date) return "—";
 
   try {
     return getDateFormatter("es-ES", {
@@ -615,10 +524,7 @@ export function formatTimeOnly(value = null) {
 
 export function formatRelativeDate(value = null) {
   const date = toDate(value);
-
-  if (!date) {
-    return "—";
-  }
+  if (!date) return "—";
 
   const diffMs = Date.now() - date.getTime();
   const future = diffMs < 0;
@@ -628,9 +534,7 @@ export function formatRelativeDate(value = null) {
   const hour = 60 * minute;
   const day = 24 * hour;
 
-  if (absMs < minute) {
-    return future ? "En un momento" : "Hace un momento";
-  }
+  if (absMs < minute) return future ? "En un momento" : "Hace un momento";
 
   if (absMs < hour) {
     const minutes = Math.max(1, Math.floor(absMs / minute));
@@ -651,8 +555,8 @@ export function formatRelativeDate(value = null) {
 }
 
 export function isExpired(value = null) {
-  const ms = toMs(value);
-  return Boolean(ms && ms < Date.now());
+  const milliseconds = toMs(value);
+  return Boolean(milliseconds && milliseconds < Date.now());
 }
 
 /* =========================================================
@@ -665,9 +569,7 @@ const moneyFormatterCache = new Map();
 function getNumberFormatter(locale = "es-ES", options = {}) {
   const key = `${locale}:${safeJsonStringify(options, "{}")}`;
 
-  if (numberFormatterCache.has(key)) {
-    return numberFormatterCache.get(key);
-  }
+  if (numberFormatterCache.has(key)) return numberFormatterCache.get(key);
 
   const formatter = new Intl.NumberFormat(locale, options);
   numberFormatterCache.set(key, formatter);
@@ -688,9 +590,7 @@ export function formatNumber(value = 0, options = {}) {
 function getMoneyFormatter(currency = "EUR") {
   const code = safeText(currency, "EUR").toUpperCase();
 
-  if (moneyFormatterCache.has(code)) {
-    return moneyFormatterCache.get(code);
-  }
+  if (moneyFormatterCache.has(code)) return moneyFormatterCache.get(code);
 
   const formatter = new Intl.NumberFormat("es-ES", {
     style: "currency",
@@ -707,9 +607,7 @@ function getMoneyFormatter(currency = "EUR") {
 export function formatMoney(value = 0, currency = "EUR") {
   const amount = safeNumber(value, NaN);
 
-  if (!Number.isFinite(amount)) {
-    return "—";
-  }
+  if (!Number.isFinite(amount)) return "—";
 
   const code = safeText(currency, "EUR").toUpperCase();
 
@@ -738,13 +636,9 @@ export function formatBytes(bytes = 0, fallback = "") {
   const size = Number(bytes);
 
   if (!Number.isFinite(size) || size <= 0) return fallback;
-
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-
-  if (size < 1024 * 1024 * 1024) {
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  }
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
@@ -793,10 +687,8 @@ export function buildQueryString(params = {}) {
       value.forEach((item) => {
         if (item === undefined || item === null) return;
         if (typeof item === "string" && item.trim() === "") return;
-
         pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`);
       });
-
       return;
     }
 
@@ -823,61 +715,36 @@ export function safeEmit(event = "", payload = {}) {
   const eventName = safeText(event, "");
   if (!eventName) return false;
 
-  let emitted = false;
-
   try {
     AppCore?.events?.emit?.(eventName, payload);
-    emitted = true;
-  } catch {}
-
-  try {
-    BrowserWindow?.dispatchEvent?.(
-      new CustomEvent(eventName, {
-        detail: payload,
-      })
-    );
-    emitted = true;
-  } catch {}
-
-  return emitted;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function safeOn(event = "", handler = null) {
   const eventName = safeText(event, "");
   if (!eventName || typeof handler !== "function") return false;
 
-  let attached = false;
-
   try {
     AppCore?.events?.on?.(eventName, handler);
-    attached = true;
-  } catch {}
-
-  try {
-    BrowserWindow?.addEventListener?.(eventName, handler);
-    attached = true;
-  } catch {}
-
-  return attached;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function safeOff(event = "", handler = null) {
   const eventName = safeText(event, "");
   if (!eventName || typeof handler !== "function") return false;
 
-  let detached = false;
-
   try {
     AppCore?.events?.off?.(eventName, handler);
-    detached = true;
-  } catch {}
-
-  try {
-    BrowserWindow?.removeEventListener?.(eventName, handler);
-    detached = true;
-  } catch {}
-
-  return detached;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -891,8 +758,15 @@ export function sleep(ms = 0) {
 }
 
 export function createTimeoutController(timeoutMs = 15000) {
-  const controller = new AbortController();
+  if (typeof AbortController === "undefined") {
+    return {
+      controller: null,
+      signal: undefined,
+      clear: noop,
+    };
+  }
 
+  const controller = new AbortController();
   const timer = setTimeout(() => {
     try {
       controller.abort();
@@ -918,22 +792,9 @@ export function normalizeToastType(type = "info") {
   if (key === "warn") return "warning";
   if (key === "danger") return "error";
   if (key === "ok") return "success";
-  if (key === "success") return "success";
-  if (key === "error") return "error";
-  if (key === "warning") return "warning";
-  if (key === "info") return "info";
+  if (["success", "error", "warning", "info"].includes(key)) return key;
 
   return key || "info";
-}
-
-function getToastMethodNames(type = "info") {
-  const normalized = normalizeToastType(type);
-
-  if (normalized === "warning") {
-    return ["warning", "warn"];
-  }
-
-  return [normalized];
 }
 
 function callToastCandidate(candidate = null, message = "", type = "info", options = {}) {
@@ -942,7 +803,10 @@ function callToastCandidate(candidate = null, message = "", type = "info", optio
   const text = safeText(message, "");
   const finalType = normalizeToastType(type);
   const finalOptions = safeObject(options);
-  const methodNames = getToastMethodNames(finalType);
+
+  const methodNames = finalType === "warning"
+    ? ["warning", "warn"]
+    : [finalType];
 
   for (const methodName of methodNames) {
     try {
@@ -952,17 +816,6 @@ function callToastCandidate(candidate = null, message = "", type = "info", optio
       }
     } catch {}
   }
-
-  try {
-    if (typeof candidate?.show === "function") {
-      candidate.show({
-        message: text,
-        type: finalType,
-        ...finalOptions,
-      });
-      return true;
-    }
-  } catch {}
 
   try {
     if (typeof candidate?.show === "function") {
@@ -983,52 +836,26 @@ function callToastCandidate(candidate = null, message = "", type = "info", optio
 
 export function showToast(message = "", type = "info", options = {}) {
   const text = safeText(message, "");
-
-  if (!text) {
-    return false;
-  }
+  if (!text) return false;
 
   const finalType = normalizeToastType(type);
   const finalOptions = safeObject(options);
 
-  try {
-    if (typeof AppCore?.modules?.get === "function") {
-      const toastModule =
-        AppCore.modules.get("toast") ||
-        AppCore.modules.get("Toast") ||
-        AppCore.modules.get("ui.toast");
-
-      if (callToastCandidate(toastModule, text, finalType, finalOptions)) {
-        return true;
-      }
-    }
-  } catch {}
-
   const candidates = [
     AppCore?.toast,
-    AppCore?.Toast,
     AppCore?.ui?.toast,
-    AppCore?.ui?.Toast,
-    AppCore?.modules?.Toast,
-    AppCore?.modules?.toast,
-    BrowserWindow?.Toast,
-    BrowserWindow?.toast,
-    BrowserWindow?.AppToast,
   ];
 
   for (const candidate of candidates) {
-    if (callToastCandidate(candidate, text, finalType, finalOptions)) {
-      return true;
-    }
+    if (callToastCandidate(candidate, text, finalType, finalOptions)) return true;
   }
 
   try {
-    const logger =
-      finalType === "error"
-        ? console.error
-        : finalType === "warning"
-          ? console.warn
-          : console.log;
+    const logger = finalType === "error"
+      ? console.error
+      : finalType === "warning"
+        ? console.warn
+        : console.log;
 
     logger(`[IncidenciasToast:${finalType}]`, text);
   } catch {}

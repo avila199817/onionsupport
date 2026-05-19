@@ -1,62 +1,86 @@
 /* =========================================================
-   Onion SPA - Incidencias Bindings
-   Archivo: src/views/incidencias/incidencias.bindings.js
+   Onion Support - Incidencias Bindings
+   Archivo: /src/views/incidencias/incidencias.bindings.js
 
-   CLIENT EXPERIENCE PRO · DOM BINDINGS · EXTREME 12/10
-   PATCH · FILTER PILLS CONNECTED
-   PATCH · DATA-ACTION + DATA-INCIDENCIAS-ACTION
-   PATCH · CREATE BUTTON READY
-   PATCH · CREATE MODAL EVENT BRIDGE FIXED
-   PATCH · PAGINATION READY
-   PATCH · ROW CLICK SAFE
-   PATCH · NO DOUBLE HANDLERS
-   PATCH · MODAL BRIDGE REAL
-   PATCH · MUTATION RELOAD BRIDGE
-
-   Responsabilidades:
-   - bind DOM robusto por delegación
-   - refresh / retry
-   - export CSV
-   - create incidencia
-   - filtros visuales funcionales
-   - pagination prev / next
-   - open ticket modal
-   - copy id
-   - rebind limpio tras rerender
-   - cleanup sólido por scope
-   - compatibilidad con actions antiguas y nuevas
-   - compatibilidad con data-action y data-incidencias-action
-
-   FIX CRÍTICO:
-   - evita doble click handlers
-   - soporta botones dinámicos
-   - soporta openTicket(ticketId) y openTicket({ ticketId })
-   - abre modal si la action solo devuelve el detail
-   - refresca listado tras updates del modal
-   - respeta data-row-click-disabled="true"
-   - conecta filtros con incidenciasState + render/rerender
+   Responsabilidad:
+   - Bind DOM por delegación para la vista Incidencias.
+   - Conectar botones, filas, filtros, búsqueda y paginación.
+   - Delegar TODO a callbacks recibidos desde incidenciasView.js.
+   - No llamar APIs directamente salvo fallback loadIncidencias opcional.
+   - No abrir modales directamente.
+   - No registrar globals.
+   - No leer Router.
+   - No leer Auth.
+   - No tocar AppCore.modules.
+   - No parchear estado fuera de los callbacks de la vista.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-import { incidenciasState } from "./incidencias.state.js";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const DEFAULT_SCOPE = "view:incidencias";
+export const INCIDENCIAS_BINDINGS_VERSION = "incidencias.bindings.v1";
 
-const BrowserWindow = typeof window !== "undefined" ? window : null;
-const BrowserDocument = typeof document !== "undefined" ? document : null;
+const DEFAULT_SCOPE = "view:incidencias";
+const SEARCH_DEBOUNCE_MS = 180;
+const MUTATION_RELOAD_DELAY_MS = 120;
+
+const ACTION_SELECTOR = [
+  "[data-incidencias-action]",
+  "[data-action]",
+].join(",");
+
+const ROW_SELECTOR = [
+  ".incidencias-row",
+  "[data-ticket-row='true']",
+  "[data-ticket-row]",
+  "[data-incidencia-row]",
+  "tr[data-ticket-id]",
+  "article[data-ticket-id]",
+  "[data-ticket-id][role='row']",
+].join(",");
+
+const INTERACTIVE_SELECTOR = [
+  "a",
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "label",
+  "summary",
+  "[role='button']",
+  "[data-action]",
+  "[data-incidencias-action]",
+  "[data-spa]",
+  "[data-no-row-open]",
+].join(",");
+
+const SEARCH_SELECTOR = [
+  "#incidencias-search-input",
+  "#incidencias-filter-search",
+  "[data-incidencias-search-input='true']",
+  "[data-incidencias-field='search']",
+  "[data-field='search']",
+].join(",");
+
+const PAGE_SIZE_SELECTOR = [
+  "[data-incidencias-field='page-size']",
+  "[data-field='page-size']",
+].join(",");
 
 const ACTIONS = Object.freeze({
   refresh: new Set([
     "refresh",
-    "retry",
     "reload",
     "refresh-incidencias",
     "reload-incidencias",
     "incidencias-refresh",
+  ]),
+
+  retry: new Set([
+    "retry",
     "incidencias-retry",
   ]),
 
@@ -69,8 +93,21 @@ const ACTIONS = Object.freeze({
     "incidencias-export-csv",
   ]),
 
+  create: new Set([
+    "create",
+    "new",
+    "new-ticket",
+    "new-incidencia",
+    "create-ticket",
+    "create-incidencia",
+    "incidencias-create",
+    "open-create",
+    "open-create-incidencia",
+  ]),
+
   open: new Set([
     "detail",
+    "open",
     "open-detail",
     "open-ticket",
     "open-incidencia",
@@ -89,16 +126,6 @@ const ACTIONS = Object.freeze({
     "copy-incidencia-id",
     "copy-ticket",
     "copy-incidencia",
-  ]),
-
-  create: new Set([
-    "create",
-    "new",
-    "new-incidencia",
-    "create-incidencia",
-    "incidencias-create",
-    "open-create",
-    "open-create-incidencia",
   ]),
 
   filter: new Set([
@@ -120,98 +147,102 @@ const ACTIONS = Object.freeze({
     "clear-incidencias-filters",
   ]),
 
+  clearSearch: new Set([
+    "clear-search",
+    "clear-filter-search",
+    "reset-search",
+    "search-clear",
+  ]),
+
+  page: new Set([
+    "page",
+    "go-page",
+    "set-page",
+    "change-page",
+  ]),
+
   prevPage: new Set([
     "prev",
     "previous",
     "prev-page",
     "previous-page",
+    "pagination-prev",
     "incidencias-prev-page",
   ]),
 
   nextPage: new Set([
     "next",
     "next-page",
+    "pagination-next",
     "incidencias-next-page",
   ]),
 });
 
-const VALID_FILTERS = new Set([
-  "all",
-  "open",
-  "pending",
-  "progress",
-  "resolved",
-  "closed",
-  "urgent",
-  "attachments",
-  "billed",
+const DEFAULT_MUTATION_EVENTS = Object.freeze([
+  "incidencias:modal:updated",
+  "incidencias:ticket:updated",
+  "incidencias:update:success",
+  "incidencias:upload:success",
+  "incidencias:comment:success",
+  "incidencias:reopen:success",
+  "incidencias:create:success",
+  "incidencias:created",
 ]);
 
-const ACTION_SELECTOR = [
-  "[data-incidencias-action]",
-  "[data-action]",
-].join(",");
-
-const ROW_SELECTOR = [
-  ".incidencias-row",
-  "[data-ticket-row]",
-  "[data-incidencia-row]",
-  "[data-ticket-id][data-row]",
-  "[data-ticket-id][role='row']",
-  "tr[data-ticket-id]",
-  "article[data-ticket-id]",
-].join(",");
-
-const INTERACTIVE_SELECTOR = [
-  "button",
-  "a",
-  "input",
-  "select",
-  "textarea",
-  "label",
-  "summary",
-  "[role='button']",
-  "[data-action]",
-  "[data-incidencias-action]",
-  "[data-spa]",
-  "[data-no-row-open]",
-].join(",");
-
-const fallbackCleanups = new Map();
+const scopeCleanups = new Map();
 const busyKeys = new Set();
 const busyElementMeta = new WeakMap();
-
-let reloadScheduled = false;
 
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
-  const text = String(value).trim();
+function isFn(value) {
+  return typeof value === "function";
+}
+
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return text || fallback;
 }
 
-function safeLower(value, fallback = "") {
-  return safeText(value, fallback).toLowerCase();
-}
-
 function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  const number = Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
 }
 
-function safeObject(value, fallback = {}) {
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
+function safeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
-    : fallback;
+    : {};
 }
 
 function first(...values) {
   for (const value of values) {
-    if (value === null || value === undefined) continue;
+    if (value === null || value === undefined) {
+      continue;
+    }
 
     if (typeof value === "string" && value.trim() === "") {
       continue;
@@ -223,26 +254,16 @@ function first(...values) {
   return null;
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 function normalizeAction(value = "") {
-  return safeLower(value, "")
+  return safeText(value, "")
+    .toLowerCase()
     .replace(/\s+/g, "-")
     .replace(/_+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
 
-function normalizeFilter(value = "") {
-  const key = normalizeAction(value);
-
-  if (!key || key === "todos" || key === "todas") return "all";
-  if (key === "in-progress") return "progress";
-  if (key === "with-attachments" || key === "con-adjuntos") return "attachments";
-  if (key === "with-amount" || key === "with-invoices" || key === "con-importe") return "billed";
-
-  return VALID_FILTERS.has(key) ? key : "all";
+function normalizeScope(scope = DEFAULT_SCOPE) {
+  return safeText(scope, DEFAULT_SCOPE);
 }
 
 function safeWarn(...args) {
@@ -256,202 +277,109 @@ function safeWarn(...args) {
   } catch {}
 }
 
-function showToast(message = "", type = "info") {
-  const text = safeText(message, "");
-  const kind = safeText(type, "info");
+function emit(eventName = "", payload = {}) {
+  const name = safeText(eventName, "");
 
-  if (!text) return;
-
-  try {
-    if (typeof AppCore?.toast?.[kind] === "function") {
-      AppCore.toast[kind](text);
-      return;
-    }
-  } catch {}
-
-  try {
-    AppCore?.toast?.show?.(text, kind);
-    return;
-  } catch {}
-
-  try {
-    AppCore?.ui?.toast?.[kind]?.(text);
-  } catch {}
-}
-
-function safeEmit(event = "", payload = {}) {
-  const eventName = safeText(event, "");
-  if (!eventName) return false;
-
-  let emitted = false;
-
-  try {
-    AppCore?.events?.emit?.(eventName, payload);
-    emitted = true;
-  } catch {}
-
-  try {
-    BrowserWindow?.dispatchEvent?.(
-      new CustomEvent(eventName, {
-        detail: payload,
-      })
-    );
-    emitted = true;
-  } catch {}
-
-  return emitted;
-}
-
-/* =========================================================
-   SCOPE / CLEANUP
-========================================================= */
-
-function resolveScopeName(scope = DEFAULT_SCOPE) {
-  return safeText(scope, DEFAULT_SCOPE);
-}
-
-function addFallbackCleanup(scopeName = DEFAULT_SCOPE, cleanup) {
-  const finalScope = resolveScopeName(scopeName);
-
-  if (typeof cleanup !== "function") return;
-
-  if (!fallbackCleanups.has(finalScope)) {
-    fallbackCleanups.set(finalScope, new Set());
+  if (!name) {
+    return false;
   }
 
-  fallbackCleanups.get(finalScope).add(cleanup);
-}
-
-function runFallbackCleanup(scopeName = DEFAULT_SCOPE) {
-  const finalScope = resolveScopeName(scopeName);
-  const cleanups = fallbackCleanups.get(finalScope);
-
-  if (!cleanups) return;
-
-  cleanups.forEach((cleanup) => {
-    try {
-      cleanup();
-    } catch {}
-  });
-
-  fallbackCleanups.delete(finalScope);
-}
-
-function runScopeCleanup(scopeName = DEFAULT_SCOPE) {
-  const finalScope = resolveScopeName(scopeName);
-
   try {
-    AppCore?.cleanup?.run?.(finalScope);
-  } catch {}
-
-  runFallbackCleanup(finalScope);
-}
-
-function getScope(scopeName = DEFAULT_SCOPE) {
-  const finalScope = resolveScopeName(scopeName);
-
-  runScopeCleanup(finalScope);
-
-  try {
-    return AppCore?.cleanup?.scope?.(finalScope) || finalScope;
-  } catch {
-    return finalScope;
-  }
-}
-
-function bindDomEvent({
-  scopeName = DEFAULT_SCOPE,
-  scopeRef = null,
-  target = null,
-  eventName = "",
-  handler = null,
-  options = undefined,
-} = {}) {
-  if (!target || !eventName || typeof handler !== "function") return false;
-
-  try {
-    if (typeof AppCore?.cleanup?.on === "function") {
-      AppCore.cleanup.on(scopeRef || scopeName, target, eventName, handler, options);
-      return true;
-    }
-  } catch {}
-
-  try {
-    target.addEventListener(eventName, handler, options);
-
-    addFallbackCleanup(scopeName, () => {
-      try {
-        target.removeEventListener(eventName, handler, options);
-      } catch {}
-    });
-
+    AppCore?.events?.emit?.(name, payload);
     return true;
   } catch {
     return false;
   }
 }
 
-function bindBusEvent({
-  scopeName = DEFAULT_SCOPE,
-  eventName = "",
-  handler = null,
-} = {}) {
-  if (!eventName || typeof handler !== "function") return false;
+function showToast(message = "", type = "info") {
+  const text = safeText(message, "");
 
-  let bound = false;
+  if (!text) {
+    return;
+  }
 
   try {
-    if (typeof AppCore?.events?.on === "function") {
-      const off = AppCore.events.on(eventName, handler);
-      bound = true;
-
-      addFallbackCleanup(scopeName, () => {
-        try {
-          if (typeof off === "function") {
-            off();
-            return;
-          }
-
-          AppCore?.events?.off?.(eventName, handler);
-        } catch {}
-      });
+    if (isFn(AppCore?.toast?.[type])) {
+      AppCore.toast[type](text);
+      return;
     }
   } catch {}
 
   try {
-    if (BrowserWindow?.addEventListener) {
-      const windowHandler = (event) => handler(event);
-
-      BrowserWindow.addEventListener(eventName, windowHandler);
-      bound = true;
-
-      addFallbackCleanup(scopeName, () => {
-        try {
-          BrowserWindow.removeEventListener(eventName, windowHandler);
-        } catch {}
-      });
-    }
+    AppCore?.toast?.show?.(text, type);
+    return;
   } catch {}
 
-  return bound;
+  try {
+    AppCore?.ui?.toast?.show?.(text, type);
+  } catch {}
+}
+
+/* =========================================================
+   CLEANUP
+========================================================= */
+
+function runCleanups(cleanups = []) {
+  safeArray(cleanups).forEach((cleanup) => {
+    try {
+      cleanup?.();
+    } catch {}
+  });
+}
+
+function cleanupScope(scope = DEFAULT_SCOPE) {
+  const scopeName = normalizeScope(scope);
+  const cleanups = scopeCleanups.get(scopeName);
+
+  if (!cleanups) {
+    return;
+  }
+
+  scopeCleanups.delete(scopeName);
+  runCleanups([...cleanups]);
+}
+
+function registerScopeCleanup(scope = DEFAULT_SCOPE, cleanup = null) {
+  if (!isFn(cleanup)) {
+    return;
+  }
+
+  const scopeName = normalizeScope(scope);
+
+  if (!scopeCleanups.has(scopeName)) {
+    scopeCleanups.set(scopeName, new Set());
+  }
+
+  scopeCleanups.get(scopeName).add(cleanup);
 }
 
 /* =========================================================
    DOM HELPERS
 ========================================================= */
 
-function getContainer() {
+function getDefaultContainer() {
+  if (!isBrowser()) {
+    return null;
+  }
+
   return (
     AppCore?.dom?.viewContainer ||
-    BrowserDocument?.getElementById?.("view-container") ||
-    BrowserDocument
+    document.getElementById("view-container") ||
+    null
   );
 }
 
-function getEventTargetElement(event) {
+function resolveContainer(container = null) {
+  return container || getDefaultContainer();
+}
+
+function getEventElement(event = null) {
   const target = event?.target || null;
 
-  if (!target) return null;
+  if (!target) {
+    return null;
+  }
 
   if (target.nodeType === 1) {
     return target;
@@ -460,26 +388,27 @@ function getEventTargetElement(event) {
   return target.parentElement || null;
 }
 
-function isElementInsideRoot(root, element) {
+function rootContains(root = null, element = null) {
   try {
-    if (!root || !element) return false;
-    if (root === BrowserDocument) return true;
-    return root.contains(element);
+    return Boolean(root && element && (root === element || root.contains(element)));
   } catch {
-    return true;
+    return false;
   }
 }
 
-function closestInside(root, target, selector = "") {
-  const element = target?.nodeType === 1 ? target : target?.parentElement;
+function closestInside(root = null, target = null, selector = "") {
+  const element =
+    target?.nodeType === 1
+      ? target
+      : target?.parentElement || null;
 
-  if (!element || !selector || typeof element.closest !== "function") {
+  if (!root || !element || !selector || !isFn(element.closest)) {
     return null;
   }
 
   const match = element.closest(selector);
 
-  if (!match || !isElementInsideRoot(root, match)) {
+  if (!match || !rootContains(root, match)) {
     return null;
   }
 
@@ -487,28 +416,35 @@ function closestInside(root, target, selector = "") {
 }
 
 function getActionNames(element = null) {
-  if (!element) return [];
+  if (!element) {
+    return [];
+  }
 
   return [
-    element?.dataset?.incidenciasAction,
-    element?.dataset?.action,
-    element?.getAttribute?.("data-incidencias-action"),
-    element?.getAttribute?.("data-action"),
+    element.dataset?.incidenciasAction,
+    element.dataset?.action,
+    element.getAttribute?.("data-incidencias-action"),
+    element.getAttribute?.("data-action"),
   ]
     .map(normalizeAction)
     .filter(Boolean);
 }
 
-function elementMatchesActionSet(element = null, actionSet = new Set()) {
-  if (!element || !actionSet) return false;
+function elementMatchesActionSet(element = null, actionSet = null) {
+  if (!element || !actionSet) {
+    return false;
+  }
 
   return getActionNames(element).some((action) => actionSet.has(action));
 }
 
-function getActionElement(root, target, actionSet = new Set()) {
-  let element = target?.nodeType === 1 ? target : target?.parentElement;
+function getActionElement(root = null, target = null, actionSet = null) {
+  let element =
+    target?.nodeType === 1
+      ? target
+      : target?.parentElement || null;
 
-  while (element && isElementInsideRoot(root, element)) {
+  while (element && rootContains(root, element)) {
     if (
       element.matches?.(ACTION_SELECTOR) &&
       elementMatchesActionSet(element, actionSet)
@@ -516,7 +452,7 @@ function getActionElement(root, target, actionSet = new Set()) {
       return element;
     }
 
-    if (element === root || element === BrowserDocument?.body) {
+    if (element === root) {
       break;
     }
 
@@ -526,24 +462,25 @@ function getActionElement(root, target, actionSet = new Set()) {
   return null;
 }
 
-function getAnyActionElement(root, target) {
-  return closestInside(root, target, ACTION_SELECTOR);
-}
+function getDataSource(element = null) {
+  if (!element) {
+    return null;
+  }
 
-function getDataSource(element) {
   return (
-    element?.closest?.(
+    element.closest?.(
       [
         "[data-ticket-id]",
         "[data-incidencia-id]",
         "[data-id]",
         "[data-ticket-code]",
       ].join(",")
-    ) || element
+    ) ||
+    element
   );
 }
 
-function getTicketId(element) {
+function getTicketId(element = null) {
   const source = getDataSource(element);
 
   return safeText(
@@ -551,27 +488,28 @@ function getTicketId(element) {
       element?.dataset?.ticketId,
       element?.dataset?.incidenciaId,
       element?.dataset?.id,
+      element?.dataset?.ticketCode,
+
       element?.getAttribute?.("data-ticket-id"),
       element?.getAttribute?.("data-incidencia-id"),
       element?.getAttribute?.("data-id"),
+      element?.getAttribute?.("data-ticket-code"),
 
       source?.dataset?.ticketId,
       source?.dataset?.incidenciaId,
       source?.dataset?.id,
+      source?.dataset?.ticketCode,
+
       source?.getAttribute?.("data-ticket-id"),
       source?.getAttribute?.("data-incidencia-id"),
       source?.getAttribute?.("data-id"),
-
-      element?.dataset?.ticketCode,
-      element?.getAttribute?.("data-ticket-code"),
-      source?.dataset?.ticketCode,
       source?.getAttribute?.("data-ticket-code")
     ),
     ""
   );
 }
 
-function getTicketCode(element) {
+function getTicketCode(element = null) {
   const source = getDataSource(element);
 
   return safeText(
@@ -586,91 +524,94 @@ function getTicketCode(element) {
   );
 }
 
-function getPageFromElement(element = null) {
-  return safeNumber(
-    first(
-      element?.dataset?.page,
-      element?.getAttribute?.("data-page"),
-      element?.dataset?.targetPage,
-      element?.getAttribute?.("data-target-page")
-    ),
-    0
-  );
-}
-
-function getFilterFromElement(element = null) {
-  return normalizeFilter(
+function getFilter(element = null) {
+  return safeText(
     first(
       element?.dataset?.filter,
       element?.dataset?.filterStatus,
       element?.dataset?.statusFilter,
       element?.getAttribute?.("data-filter"),
       element?.getAttribute?.("data-filter-status"),
-      element?.getAttribute?.("data-status-filter")
-    )
-  );
-}
-
-function getRouteFromElement(element = null) {
-  return safeText(
-    first(
-      element?.dataset?.route,
-      element?.getAttribute?.("data-route"),
-      element?.getAttribute?.("href")
+      element?.getAttribute?.("data-status-filter"),
+      "all"
     ),
-    ""
+    "all"
   );
 }
 
-function isRowClickDisabled(row = null) {
-  const value = safeLower(
+function getPage(element = null) {
+  return safeNumber(
+    first(
+      element?.dataset?.page,
+      element?.dataset?.targetPage,
+      element?.getAttribute?.("data-page"),
+      element?.getAttribute?.("data-target-page")
+    ),
+    0
+  );
+}
+
+function getRowClickDisabled(row = null) {
+  const value = normalizeAction(
     first(
       row?.dataset?.rowClickDisabled,
-      row?.getAttribute?.("data-row-click-disabled"),
       row?.dataset?.noRowOpen,
-      row?.getAttribute?.("data-no-row-open")
-    ),
-    ""
+      row?.getAttribute?.("data-row-click-disabled"),
+      row?.getAttribute?.("data-no-row-open"),
+      ""
+    )
   );
 
   return ["true", "1", "yes", "si", "sí", "on"].includes(value);
 }
 
-function shouldOpenRowFromClick(root, event) {
-  const target = getEventTargetElement(event);
-  if (!target) return null;
+function getRowFromClick(root = null, event = null) {
+  const target = getEventElement(event);
+
+  if (!target) {
+    return null;
+  }
 
   const row = closestInside(root, target, ROW_SELECTOR);
-  if (!row) return null;
 
-  if (isRowClickDisabled(row)) {
+  if (!row || getRowClickDisabled(row)) {
     return null;
   }
 
   const interactive = target.closest?.(INTERACTIVE_SELECTOR);
 
-  if (interactive && row.contains(interactive)) {
+  if (interactive && rowContains(row, interactive)) {
     return null;
   }
 
   return row;
 }
 
-function isFormControl(element = null) {
-  const tagName = safeLower(element?.tagName, "");
-
-  return ["button", "input", "select", "textarea"].includes(tagName);
+function rowContains(row = null, element = null) {
+  try {
+    return Boolean(row && element && row.contains(element));
+  } catch {
+    return false;
+  }
 }
 
-function setElementBusy(element, busy = false) {
-  if (!element) return;
+function isFormControl(element = null) {
+  const tag = safeText(element?.tagName, "").toLowerCase();
+
+  return ["button", "input", "select", "textarea"].includes(tag);
+}
+
+function setElementBusy(element = null, busy = false) {
+  if (!element) {
+    return;
+  }
 
   try {
     if (busy && !busyElementMeta.has(element)) {
       busyElementMeta.set(element, {
         disabled: Boolean(element.disabled),
         ariaBusy: element.getAttribute?.("aria-busy"),
-        classLoading: element.classList?.contains?.("is-loading"),
+        loading: element.classList?.contains?.("is-loading"),
       });
     }
 
@@ -693,7 +634,7 @@ function setElementBusy(element, busy = false) {
       element.setAttribute?.("aria-busy", previous.ariaBusy);
     }
 
-    if (!previous.classLoading) {
+    if (!previous.loading) {
       element.classList?.remove?.("is-loading");
     }
 
@@ -706,934 +647,208 @@ function setElementBusy(element, busy = false) {
 }
 
 async function runBusy(key = "", element = null, task = null) {
-  const finalKey = safeText(key, "");
+  const busyKey = safeText(key, "");
 
-  if (!finalKey || typeof task !== "function") return null;
-
-  if (busyKeys.has(finalKey)) {
+  if (!busyKey || !isFn(task)) {
     return null;
   }
 
-  busyKeys.add(finalKey);
+  if (busyKeys.has(busyKey)) {
+    return null;
+  }
+
+  busyKeys.add(busyKey);
   setElementBusy(element, true);
 
   try {
     return await task();
   } finally {
-    busyKeys.delete(finalKey);
+    busyKeys.delete(busyKey);
     setElementBusy(element, false);
   }
 }
 
 /* =========================================================
-   VIEW / STATE BRIDGE
+   CALL HELPERS
 ========================================================= */
 
-function getGlobalActions() {
-  return (
-    BrowserWindow?.OnionIncidenciasActions ||
-    BrowserWindow?.IncidenciasActions ||
-    {}
-  );
-}
-
-function getViewBridge() {
-  return (
-    BrowserWindow?.OnionIncidenciasView ||
-    BrowserWindow?.IncidenciasView ||
-    AppCore?.modules?.IncidenciasView ||
-    AppCore?.modules?.incidenciasView ||
-    null
-  );
-}
-
-function patchLocalFilterState(filter = "all") {
-  const nextFilter = normalizeFilter(filter);
-
-  try {
-    incidenciasState.activeFilter = nextFilter;
-    incidenciasState.filter = nextFilter;
-    incidenciasState.statusFilter = nextFilter;
-
-    incidenciasState.page = 1;
-    incidenciasState.currentPage = 1;
-    incidenciasState.incidenciasPage = 1;
-
-    incidenciasState.filters = {
-      ...safeObject(incidenciasState.filters),
-      active: nextFilter,
-      status: nextFilter,
-    };
-
-    incidenciasState.table = {
-      ...safeObject(incidenciasState.table),
-      activeFilter: nextFilter,
-      filter: nextFilter,
-      statusFilter: nextFilter,
-      page: 1,
-      currentPage: 1,
-    };
-  } catch {}
-
-  return nextFilter;
-}
-
-async function callFlexibleRerender({
-  payload = {},
-  render,
-  rerender,
+async function callReload({
+  reload,
+  loadIncidencias,
+  force = true,
+  asRefresh = true,
+  silent = false,
+  source = "bindings",
 } = {}) {
-  const view = getViewBridge();
-  const globalActions = getGlobalActions();
-
-  const candidates = [
-    rerender,
-    render,
-    view?.rerender,
-    view?.render,
-    view?.refreshView,
-    view?.update,
-    globalActions?.rerender,
-    globalActions?.render,
-  ].filter((candidate) => typeof candidate === "function");
-
-  let handled = false;
-  let lastError = null;
-
-  for (const candidate of candidates) {
-    try {
-      await candidate(payload);
-      handled = true;
-      break;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  safeEmit("incidencias:render:requested", payload);
-  safeEmit("incidencias:rerender:requested", payload);
-
-  if (!handled && lastError) {
-    throw lastError;
-  }
-
-  return handled;
-}
-
-async function callFlexibleFilter({
-  filter = "all",
-  setFilter,
-  changeFilter,
-  applyFilter,
-} = {}) {
-  const finalFilter = normalizeFilter(filter);
-  const view = getViewBridge();
-  const globalActions = getGlobalActions();
-
-  const payload = {
-    filter: finalFilter,
-    activeFilter: finalFilter,
-    statusFilter: finalFilter,
-    page: 1,
-    source: "bindings",
-  };
-
-  const candidates = [
-    setFilter,
-    changeFilter,
-    applyFilter,
-    view?.setFilter,
-    view?.changeFilter,
-    view?.applyFilter,
-    globalActions?.setFilter,
-    globalActions?.changeFilter,
-    globalActions?.applyFilter,
-  ].filter((candidate) => typeof candidate === "function");
-
-  let handled = false;
-  let lastError = null;
-
-  for (const candidate of candidates) {
-    try {
-      await candidate(finalFilter, payload);
-      handled = true;
-      break;
-    } catch (error) {
-      lastError = error;
-    }
-
-    try {
-      await candidate(payload);
-      handled = true;
-      break;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  safeEmit("incidencias:filter:change", payload);
-  safeEmit("incidencias:bindings:filter:change", payload);
-
-  if (!handled && lastError) {
-    throw lastError;
-  }
-
-  return handled;
-}
-
-/* =========================================================
-   CALLBACK COMPAT
-========================================================= */
-
-async function callFlexibleOpen(openTicket, payload = {}) {
-  const ticketId = safeText(payload.ticketId, "");
-  if (!ticketId) return null;
-
-  const candidates = [];
-
-  if (typeof openTicket === "function") {
-    candidates.push(() => openTicket(payload));
-    candidates.push(() => openTicket(ticketId, payload));
-  }
-
-  const globalActions = getGlobalActions();
-  const globalOpen =
-    globalActions.openTicket ||
-    globalActions.getTicketDetail ||
-    globalActions.getTicket ||
-    null;
-
-  if (typeof globalOpen === "function" && globalOpen !== openTicket) {
-    candidates.push(() => globalOpen(payload));
-    candidates.push(() => globalOpen(ticketId, payload));
-  }
-
-  let lastError = null;
-
-  for (const attempt of candidates) {
-    try {
-      const result = await attempt();
-
-      if (result) {
-        return result;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
-  }
-
-  return null;
-}
-
-async function callFlexibleCopy(copyTicketIdAction, payload = {}) {
-  const ticketId = safeText(payload.ticketId || payload.ticketCode, "");
-  if (!ticketId) return false;
-
-  const candidates = [];
-
-  if (typeof copyTicketIdAction === "function") {
-    candidates.push(() => copyTicketIdAction(payload));
-    candidates.push(() => copyTicketIdAction(ticketId, payload));
-  }
-
-  const globalActions = getGlobalActions();
-  const globalCopy = globalActions.copyTicketId || globalActions.copyId || null;
-
-  if (typeof globalCopy === "function" && globalCopy !== copyTicketIdAction) {
-    candidates.push(() => globalCopy(payload));
-    candidates.push(() => globalCopy(ticketId, payload));
-  }
-
-  let lastError = null;
-
-  for (const attempt of candidates) {
-    try {
-      const result = await attempt();
-
-      if (result !== null && result !== undefined) {
-        return result;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
-  }
-
-  return false;
-}
-
-async function callFlexibleExport(exportIncidenciasCsvAction) {
-  const candidates = [];
-
-  if (typeof exportIncidenciasCsvAction === "function") {
-    candidates.push(() => exportIncidenciasCsvAction());
-    candidates.push(() =>
-      exportIncidenciasCsvAction({
-        silent: false,
-      })
-    );
-  }
-
-  const globalActions = getGlobalActions();
-  const globalExport =
-    globalActions.exportCsv ||
-    globalActions.exportIncidenciasCsv ||
-    null;
-
-  if (typeof globalExport === "function" && globalExport !== exportIncidenciasCsvAction) {
-    candidates.push(() => globalExport());
-    candidates.push(() =>
-      globalExport({
-        silent: false,
-      })
-    );
-  }
-
-  let lastError = null;
-
-  for (const attempt of candidates) {
-    try {
-      const result = await attempt();
-
-      if (result !== null && result !== undefined) {
-        return result;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
-  }
-
-  return false;
-}
-
-async function callFlexibleCreate(createIncidenciaAction, payload = {}) {
-  const candidates = [];
-
-  if (typeof createIncidenciaAction === "function") {
-    candidates.push(() => createIncidenciaAction(payload));
-    candidates.push(() => createIncidenciaAction(payload?.draft || {}, payload));
-  }
-
-  const globalActions = getGlobalActions();
-  const globalCreate =
-    globalActions.createIncidencia ||
-    globalActions.openCreate ||
-    globalActions.create ||
-    null;
-
-  if (typeof globalCreate === "function" && globalCreate !== createIncidenciaAction) {
-    candidates.push(() => globalCreate(payload));
-    candidates.push(() => globalCreate(payload?.draft || {}, payload));
-  }
-
-  let lastError = null;
-
-  for (const attempt of candidates) {
-    try {
-      const result = await attempt();
-
-      if (result !== null && result !== undefined) {
-        return result;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
-  }
-
-  return null;
-}
-
-async function callFlexiblePage({
-  page = 0,
-  direction = "",
-  setPage,
-  nextPage,
-  prevPage,
-  changePage,
-  render,
-  rerender,
-} = {}) {
-  const finalPage = safeNumber(page, 0);
-  const finalDirection = safeText(direction, "");
-
-  const payload = {
-    page: finalPage,
-    direction: finalDirection,
-    source: "bindings",
-  };
-
-  const candidates = [];
-
-  if (finalPage > 0 && typeof setPage === "function") {
-    candidates.push(() => setPage(finalPage, payload));
-    candidates.push(() => setPage(payload));
-  }
-
-  if (typeof changePage === "function") {
-    candidates.push(() => changePage(payload));
-
-    if (finalPage > 0) {
-      candidates.push(() => changePage(finalPage, payload));
-    }
-  }
-
-  if (finalDirection === "next" && typeof nextPage === "function") {
-    candidates.push(() => nextPage(payload));
-  }
-
-  if (finalDirection === "prev" && typeof prevPage === "function") {
-    candidates.push(() => prevPage(payload));
-  }
-
-  const view = getViewBridge();
-
-  if (finalPage > 0 && typeof view?.setPage === "function") {
-    candidates.push(() => view.setPage(finalPage, payload));
-  }
-
-  if (typeof view?.changePage === "function") {
-    candidates.push(() => view.changePage(payload));
-  }
-
-  if (finalDirection === "next" && typeof view?.nextPage === "function") {
-    candidates.push(() => view.nextPage(payload));
-  }
-
-  if (finalDirection === "prev" && typeof view?.prevPage === "function") {
-    candidates.push(() => view.prevPage(payload));
-  }
-
-  let handled = false;
-  let lastError = null;
-
-  for (const attempt of candidates) {
-    try {
-      await attempt();
-      handled = true;
-      break;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  safeEmit("incidencias:page:change", payload);
-  safeEmit("incidencias:bindings:page:change", payload);
-
-  try {
-    await callFlexibleRerender({
-      payload,
-      render,
-      rerender,
+  if (isFn(reload)) {
+    return reload({
+      force,
+      asRefresh,
+      silent,
+      source,
     });
-
-    handled = true;
-  } catch (error) {
-    lastError = error;
   }
 
-  if (!handled && lastError) {
-    throw lastError;
+  if (isFn(loadIncidencias)) {
+    return loadIncidencias({
+      force,
+      silent,
+      source,
+    });
   }
 
-  return handled;
-}
-
-/* =========================================================
-   MODAL BRIDGES
-========================================================= */
-
-function pickDetailPayload(response = null) {
-  if (!response) return null;
-
-  if (isObject(response)) {
-    return (
-      response.detail ||
-      response.ticket ||
-      response.item ||
-      response.data ||
-      response.result ||
-      response.payload ||
-      response.incidencia ||
-      response
-    );
-  }
-
+  safeWarn("No hay callback reload/loadIncidencias para refrescar.");
   return null;
 }
 
-function openModalBridge(detail = null, ticketId = "") {
-  const payload = pickDetailPayload(detail);
+async function callOpenTicket(openTicket, ticketId = "", payload = {}) {
+  if (!isFn(openTicket)) {
+    safeWarn("No hay callback openTicket.");
+    return null;
+  }
 
-  if (!payload || !Object.keys(safeObject(payload)).length) {
+  try {
+    return await openTicket(ticketId, payload);
+  } catch (firstError) {
+    try {
+      return await openTicket({
+        ...safeObject(payload),
+        ticketId,
+      });
+    } catch {
+      throw firstError;
+    }
+  }
+}
+
+async function callCopyTicket(copyTicketId, ticketId = "", payload = {}) {
+  if (!isFn(copyTicketId)) {
+    safeWarn("No hay callback copyTicketId.");
     return false;
   }
 
   try {
-    if (typeof BrowserWindow?.OnionIncidenciasModal?.open === "function") {
-      BrowserWindow.OnionIncidenciasModal.open(payload);
-      return true;
+    return await copyTicketId(ticketId, payload);
+  } catch (firstError) {
+    try {
+      return await copyTicketId({
+        ...safeObject(payload),
+        ticketId,
+      });
+    } catch {
+      throw firstError;
     }
-  } catch {}
-
-  try {
-    if (typeof BrowserWindow?.IncidenciasModal?.open === "function") {
-      BrowserWindow.IncidenciasModal.open(payload);
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (typeof BrowserWindow?.renderIncidenciaTicketModal === "function") {
-      BrowserWindow.renderIncidenciaTicketModal(payload);
-      return true;
-    }
-  } catch {}
-
-  safeEmit("incidencias:modal:open", {
-    ticketId,
-    detail: payload,
-  });
-
-  return true;
+  }
 }
 
-function openCreateModalBridge(payload = {}) {
-  try {
-    if (typeof BrowserWindow?.OnionIncidenciasCreateModal?.open === "function") {
-      BrowserWindow.OnionIncidenciasCreateModal.open(payload);
-      return true;
-    }
-  } catch {}
+async function callExport(exportCsv) {
+  if (!isFn(exportCsv)) {
+    safeWarn("No hay callback exportCsv.");
+    return false;
+  }
 
   try {
-    if (typeof BrowserWindow?.OnionIncidencias?.createModal?.open === "function") {
-      BrowserWindow.OnionIncidencias.createModal.open(payload);
-      return true;
+    return await exportCsv({
+      silent: false,
+      source: "bindings",
+    });
+  } catch (firstError) {
+    try {
+      return await exportCsv();
+    } catch {
+      throw firstError;
     }
-  } catch {}
-
-  try {
-    if (typeof BrowserWindow?.renderIncidenciasCreateModal === "function") {
-      BrowserWindow.renderIncidenciasCreateModal(payload);
-      return true;
-    }
-  } catch {}
-
-  safeEmit("incidencias:create-modal:open", payload);
-  safeEmit("incidencias:create:open", payload);
-
-  return true;
+  }
 }
 
-async function navigateToCreate(route = "/incidencias/nueva") {
-  const target = safeText(route, "/incidencias/nueva");
+async function callCreate(createIncidencia, payload = {}) {
+  if (!isFn(createIncidencia)) {
+    safeWarn("No hay callback createIncidencia.");
+    return false;
+  }
 
   try {
-    if (typeof AppCore?.router?.navigate === "function") {
-      await AppCore.router.navigate(target);
-      return true;
+    return await createIncidencia(payload);
+  } catch (firstError) {
+    try {
+      return await createIncidencia(payload.draft || {}, payload);
+    } catch {
+      throw firstError;
     }
-  } catch {}
+  }
+}
 
-  try {
-    if (typeof AppCore?.Router?.navigate === "function") {
-      await AppCore.Router.navigate(target);
-      return true;
-    }
-  } catch {}
+async function callSetFilter(setFilter, filter = "all") {
+  if (!isFn(setFilter)) {
+    safeWarn("No hay callback setFilter.");
+    return false;
+  }
 
-  try {
-    if (typeof AppCore?.modules?.Router?.navigate === "function") {
-      await AppCore.modules.Router.navigate(target);
-      return true;
-    }
-  } catch {}
+  return setFilter(filter);
+}
 
-  try {
-    if (typeof BrowserWindow?.Router?.navigate === "function") {
-      await BrowserWindow.Router.navigate(target);
-      return true;
-    }
-  } catch {}
+async function callSetSearchQuery(setSearchQuery, value = "") {
+  if (!isFn(setSearchQuery)) {
+    safeWarn("No hay callback setSearchQuery.");
+    return false;
+  }
 
-  return false;
+  return setSearchQuery(value);
 }
 
 /* =========================================================
-   RELOAD
+   EVENT BINDERS
 ========================================================= */
 
-async function safeReload(reload, loadIncidencias, meta = {}) {
+function addDomListener(cleanups, target, eventName, handler, options) {
+  if (!target || !eventName || !isFn(handler)) {
+    return false;
+  }
+
   try {
-    safeEmit("incidencias:bindings:reload:start", meta);
+    target.addEventListener(eventName, handler, options);
 
-    if (typeof reload === "function") {
-      const result = await reload({
-        force: true,
-        source: meta.source || "bindings",
-      });
-
-      safeEmit("incidencias:bindings:reload:success", {
-        ...meta,
-        result,
-      });
-
-      return result;
-    }
-
-    if (typeof loadIncidencias === "function") {
-      const result = await loadIncidencias({
-        force: true,
-        source: meta.source || "bindings",
-      });
-
-      safeEmit("incidencias:bindings:reload:success", {
-        ...meta,
-        result,
-      });
-
-      return result;
-    }
-
-    return null;
-  } catch (error) {
-    safeWarn("reload falló", error);
-
-    safeEmit("incidencias:bindings:reload:error", {
-      ...meta,
-      error,
+    cleanups.push(() => {
+      try {
+        target.removeEventListener(eventName, handler, options);
+      } catch {}
     });
 
-    return null;
+    return true;
+  } catch {
+    return false;
   }
 }
 
-function scheduleReload(reload, loadIncidencias, meta = {}) {
-  if (reloadScheduled) return;
+function addAppEventListener(cleanups, eventName = "", handler = null) {
+  const name = safeText(eventName, "");
 
-  reloadScheduled = true;
-
-  setTimeout(async () => {
-    reloadScheduled = false;
-
-    await safeReload(reload, loadIncidencias, {
-      source: "scheduled",
-      ...meta,
-    });
-  }, 80);
-}
-
-/* =========================================================
-   ACTION HANDLERS
-========================================================= */
-
-async function handleRefresh({
-  element = null,
-  reload,
-  loadIncidencias,
-} = {}) {
-  await runBusy("incidencias:refresh", element, async () => {
-    await safeReload(reload, loadIncidencias, {
-      source: "manual",
-    });
-  });
-}
-
-async function handleExport({
-  element = null,
-  exportIncidenciasCsvAction,
-} = {}) {
-  await runBusy("incidencias:export", element, async () => {
-    try {
-      const ok = await callFlexibleExport(exportIncidenciasCsvAction);
-
-      safeEmit("incidencias:bindings:export", {
-        ok: Boolean(ok),
-      });
-    } catch (error) {
-      safeWarn("exportIncidenciasCsvAction falló", error);
-      showToast("No se pudo exportar el historial.", "error");
-    }
-  });
-}
-
-async function handleCreate({
-  element = null,
-  createIncidenciaAction,
-} = {}) {
-  const route = getRouteFromElement(element) || "/incidencias/nueva";
-
-  await runBusy("incidencias:create", element, async () => {
-    try {
-      const payload = {
-        route,
-        source: "bindings",
-        silent: false,
-        draft: {},
-      };
-
-      safeEmit("incidencias:bindings:create:start", payload);
-
-      const actionResult = await callFlexibleCreate(createIncidenciaAction, payload);
-
-      if (actionResult) {
-        safeEmit("incidencias:bindings:create:success", {
-          route,
-          result: actionResult,
-        });
-
-        return actionResult;
-      }
-
-      const opened = openCreateModalBridge(payload);
-
-      if (opened) {
-        safeEmit("incidencias:bindings:create:opened", {
-          route,
-          mode: "modal",
-        });
-
-        return true;
-      }
-
-      const navigated = await navigateToCreate(route);
-
-      safeEmit("incidencias:bindings:create:opened", {
-        route,
-        mode: navigated ? "route" : "event",
-      });
-
-      return navigated;
-    } catch (error) {
-      safeWarn("createIncidenciaAction falló", error);
-
-      safeEmit("incidencias:bindings:create:error", {
-        error,
-      });
-
-      showToast("No se pudo abrir el formulario de nueva incidencia.", "error");
-
-      return false;
-    }
-  });
-}
-
-async function handleFilter({
-  element = null,
-  filter = "",
-  setFilter,
-  changeFilter,
-  applyFilter,
-  render,
-  rerender,
-} = {}) {
-  const nextFilter = normalizeFilter(filter || getFilterFromElement(element));
-
-  await runBusy(`incidencias:filter:${nextFilter}`, element, async () => {
-    try {
-      patchLocalFilterState(nextFilter);
-
-      const payload = {
-        filter: nextFilter,
-        activeFilter: nextFilter,
-        statusFilter: nextFilter,
-        page: 1,
-        source: "bindings",
-      };
-
-      await callFlexibleFilter({
-        filter: nextFilter,
-        setFilter,
-        changeFilter,
-        applyFilter,
-      });
-
-      await callFlexibleRerender({
-        payload,
-        render,
-        rerender,
-      });
-    } catch (error) {
-      safeWarn("filter action falló", error);
-
-      safeEmit("incidencias:bindings:filter:error", {
-        filter: nextFilter,
-        error,
-      });
-    }
-  });
-}
-
-async function handleClearFilters({
-  element = null,
-  setFilter,
-  changeFilter,
-  applyFilter,
-  render,
-  rerender,
-} = {}) {
-  await handleFilter({
-    element,
-    filter: "all",
-    setFilter,
-    changeFilter,
-    applyFilter,
-    render,
-    rerender,
-  });
-}
-
-async function handleOpenTicket({
-  element = null,
-  openTicket,
-} = {}) {
-  const ticketId = getTicketId(element);
-  const ticketCode = getTicketCode(element);
-
-  if (!ticketId) {
-    safeWarn("open-ticket sin id", {
-      element,
-    });
-
-    showToast("No se pudo identificar la incidencia.", "error");
-    return;
+  if (!name || !isFn(handler)) {
+    return false;
   }
 
-  await runBusy(`incidencias:open:${ticketId}`, element, async () => {
-    try {
-      safeEmit("incidencias:bindings:open:start", {
-        ticketId,
-        ticketCode,
+  let attached = false;
+
+  try {
+    if (isFn(AppCore?.events?.on)) {
+      const off = AppCore.events.on(name, handler);
+
+      cleanups.push(() => {
+        try {
+          if (isFn(off)) {
+            off();
+            return;
+          }
+
+          AppCore?.events?.off?.(name, handler);
+        } catch {}
       });
 
-      const detail = await callFlexibleOpen(openTicket, {
-        ticketId,
-        ticketCode,
-        preferFresh: true,
-        silent: false,
-      });
-
-      if (detail) {
-        openModalBridge(detail, ticketId);
-
-        safeEmit("incidencias:bindings:open:success", {
-          ticketId,
-          ticketCode,
-          detail,
-        });
-
-        return;
-      }
-
-      safeWarn("openTicket no devolvió detalle", {
-        ticketId,
-        ticketCode,
-      });
-
-      safeEmit("incidencias:bindings:open:empty", {
-        ticketId,
-        ticketCode,
-      });
-    } catch (error) {
-      safeWarn("openTicket falló", error);
-
-      safeEmit("incidencias:bindings:open:error", {
-        ticketId,
-        ticketCode,
-        error,
-      });
-
-      showToast("No se pudo abrir la incidencia.", "error");
+      attached = true;
     }
-  });
-}
+  } catch {}
 
-async function handleCopyTicket({
-  element = null,
-  copyTicketIdAction,
-} = {}) {
-  const ticketId = getTicketId(element);
-  const ticketCode = getTicketCode(element);
-
-  if (!ticketId && !ticketCode) {
-    safeWarn("copy-ticket-id sin id", {
-      element,
-    });
-
-    showToast("No hay referencia para copiar.", "error");
-    return;
-  }
-
-  const finalId = ticketId || ticketCode;
-
-  await runBusy(`incidencias:copy:${finalId}`, element, async () => {
-    try {
-      await callFlexibleCopy(copyTicketIdAction, {
-        ticketId: finalId,
-        ticketCode,
-      });
-
-      safeEmit("incidencias:bindings:copy", {
-        ticketId: finalId,
-        ticketCode,
-      });
-    } catch (error) {
-      safeWarn("copyTicketIdAction falló", error);
-      showToast("No se pudo copiar la referencia.", "error");
-    }
-  });
-}
-
-async function handlePage({
-  element = null,
-  direction = "",
-  setPage,
-  nextPage,
-  prevPage,
-  changePage,
-  render,
-  rerender,
-} = {}) {
-  const page = getPageFromElement(element);
-  const finalDirection = safeText(direction, "");
-
-  await runBusy(`incidencias:page:${finalDirection}:${page || "auto"}`, element, async () => {
-    try {
-      await callFlexiblePage({
-        page,
-        direction: finalDirection,
-        setPage,
-        nextPage,
-        prevPage,
-        changePage,
-        render,
-        rerender,
-      });
-    } catch (error) {
-      safeWarn("pagination action falló", error);
-
-      safeEmit("incidencias:bindings:page:error", {
-        page,
-        direction: finalDirection,
-        error,
-      });
-    }
-  });
+  return attached;
 }
 
 /* =========================================================
@@ -1641,325 +856,624 @@ async function handlePage({
 ========================================================= */
 
 export function bindIncidenciasEvents({
-  loadIncidencias,
-  openTicket,
-  copyTicketIdAction,
-  exportIncidenciasCsvAction,
-  createIncidenciaAction,
+  container = null,
+  scope = DEFAULT_SCOPE,
 
+  loadIncidencias,
   reload,
 
+  openTicket,
+
+  copyTicketId,
+  copyTicketIdAction,
+
+  exportCsv,
+  exportIncidenciasCsvAction,
+
+  createIncidencia,
+  createIncidenciaAction,
+
   setFilter,
-  changeFilter,
-  applyFilter,
+  setSearchQuery,
+  clearFilters,
+  clearSearchOnly,
 
-  setPage,
-  nextPage,
-  prevPage,
-  changePage,
-  render,
-  rerender,
+  goToPage,
+  goPrevPage,
+  goNextPage,
+  changePageSize,
 
-  scope = DEFAULT_SCOPE,
+  mutationEvents = DEFAULT_MUTATION_EVENTS,
+  bindMutationEvents = true,
 } = {}) {
-  const scopeName = resolveScopeName(scope);
-  const scopeRef = getScope(scopeName);
-  const root = getContainer();
+  const scopeName = normalizeScope(scope);
+
+  cleanupScope(scopeName);
+
+  const root = resolveContainer(container);
 
   if (!root) {
     safeWarn("No se encontró contenedor para bindings.");
     return () => {};
   }
 
-  /* =======================================================
-     DELEGATED ACTIONS
-     Soporta contenido dinámico tras rerender.
-  ======================================================= */
+  const cleanups = [];
 
-  bindDomEvent({
-    scopeName,
-    scopeRef,
-    target: root,
-    eventName: "click",
-    handler: async (event) => {
-      const target = getEventTargetElement(event);
+  let destroyed = false;
+  let searchTimer = 0;
+  let mutationReloadTimer = 0;
 
-      if (!target) return;
+  const resolvedCopyTicketId = copyTicketId || copyTicketIdAction;
+  const resolvedExportCsv = exportCsv || exportIncidenciasCsvAction;
+  const resolvedCreateIncidencia = createIncidencia || createIncidenciaAction;
 
-      const refreshAction = getActionElement(root, target, ACTIONS.refresh);
+  function clearSearchTimer() {
+    if (!searchTimer) {
+      return;
+    }
 
-      if (refreshAction) {
-        event.preventDefault();
-        event.stopPropagation();
+    try {
+      window.clearTimeout(searchTimer);
+    } catch {}
 
-        await handleRefresh({
-          element: refreshAction,
-          reload,
-          loadIncidencias,
+    searchTimer = 0;
+  }
+
+  function clearMutationReloadTimer() {
+    if (!mutationReloadTimer) {
+      return;
+    }
+
+    try {
+      window.clearTimeout(mutationReloadTimer);
+    } catch {}
+
+    mutationReloadTimer = 0;
+  }
+
+  function scheduleMutationReload(payload = {}) {
+    if (!bindMutationEvents) {
+      return;
+    }
+
+    clearMutationReloadTimer();
+
+    mutationReloadTimer = window.setTimeout(async () => {
+      mutationReloadTimer = 0;
+
+      if (destroyed) {
+        return;
+      }
+
+      await callReload({
+        reload,
+        loadIncidencias,
+        force: true,
+        asRefresh: true,
+        silent: true,
+        source: "mutation",
+        payload,
+      });
+    }, MUTATION_RELOAD_DELAY_MS);
+  }
+
+  async function handleRefresh(element = null, retry = false) {
+    await runBusy("incidencias:refresh", element, async () => {
+      await callReload({
+        reload,
+        loadIncidencias,
+        force: true,
+        asRefresh: !retry,
+        silent: false,
+        source: retry ? "retry" : "manual",
+      });
+    });
+  }
+
+  async function handleExport(element = null) {
+    await runBusy("incidencias:export", element, async () => {
+      try {
+        const result = await callExport(resolvedExportCsv);
+
+        emit("incidencias:bindings:export", {
+          ok: Boolean(result),
+          source: scopeName,
         });
 
-        return;
+        return result;
+      } catch (error) {
+        safeWarn("No se pudo exportar incidencias.", error);
+        showToast("No se pudo exportar el historial.", "error");
+        return false;
       }
+    });
+  }
 
-      const exportAction = getActionElement(root, target, ACTIONS.export);
+  async function handleCreate(element = null) {
+    await runBusy("incidencias:create", element, async () => {
+      try {
+        const payload = {
+          source: scopeName,
+          silent: false,
+          draft: {},
+        };
 
-      if (exportAction) {
-        event.preventDefault();
-        event.stopPropagation();
+        const result = await callCreate(resolvedCreateIncidencia, payload);
 
-        await handleExport({
-          element: exportAction,
-          exportIncidenciasCsvAction,
+        emit("incidencias:bindings:create", {
+          ok: Boolean(result),
+          source: scopeName,
         });
 
-        return;
+        return result;
+      } catch (error) {
+        safeWarn("No se pudo abrir creación de incidencia.", error);
+        showToast("No se pudo abrir el formulario de nueva incidencia.", "error");
+        return false;
       }
+    });
+  }
 
-      const createAction = getActionElement(root, target, ACTIONS.create);
+  async function handleOpen(element = null) {
+    const ticketId = getTicketId(element);
+    const ticketCode = getTicketCode(element);
 
-      if (createAction) {
-        event.preventDefault();
-        event.stopPropagation();
+    if (!ticketId) {
+      safeWarn("open-ticket sin id.");
+      showToast("No se pudo identificar la incidencia.", "error");
+      return null;
+    }
 
-        await handleCreate({
-          element: createAction,
-          createIncidenciaAction,
+    await runBusy(`incidencias:open:${ticketId}`, element, async () => {
+      try {
+        const payload = {
+          ticketId,
+          ticketCode,
+          preferFresh: true,
+          silent: false,
+          source: scopeName,
+        };
+
+        const result = await callOpenTicket(openTicket, ticketId, payload);
+
+        emit("incidencias:bindings:open", {
+          ticketId,
+          ticketCode,
+          ok: Boolean(result),
+          source: scopeName,
         });
 
-        return;
+        return result;
+      } catch (error) {
+        safeWarn("No se pudo abrir la incidencia.", error);
+        showToast("No se pudo abrir la incidencia.", "error");
+        return null;
       }
+    });
+  }
 
-      const clearFiltersAction = getActionElement(root, target, ACTIONS.clearFilters);
+  async function handleCopy(element = null) {
+    const ticketId = getTicketId(element);
+    const ticketCode = getTicketCode(element);
+    const finalId = ticketId || ticketCode;
 
-      if (clearFiltersAction) {
-        event.preventDefault();
-        event.stopPropagation();
+    if (!finalId) {
+      safeWarn("copy-ticket-id sin id.");
+      showToast("No hay referencia para copiar.", "error");
+      return false;
+    }
 
-        await handleClearFilters({
-          element: clearFiltersAction,
-          setFilter,
-          changeFilter,
-          applyFilter,
-          render,
-          rerender,
+    await runBusy(`incidencias:copy:${finalId}`, element, async () => {
+      try {
+        const result = await callCopyTicket(resolvedCopyTicketId, finalId, {
+          ticketId: finalId,
+          ticketCode,
+          source: scopeName,
         });
 
-        return;
-      }
-
-      const filterAction = getActionElement(root, target, ACTIONS.filter);
-
-      if (filterAction) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        await handleFilter({
-          element: filterAction,
-          setFilter,
-          changeFilter,
-          applyFilter,
-          render,
-          rerender,
+        emit("incidencias:bindings:copy", {
+          ticketId: finalId,
+          ticketCode,
+          ok: Boolean(result),
+          source: scopeName,
         });
 
-        return;
+        return result;
+      } catch (error) {
+        safeWarn("No se pudo copiar la referencia.", error);
+        showToast("No se pudo copiar la referencia.", "error");
+        return false;
       }
+    });
+  }
 
-      const prevPageAction = getActionElement(root, target, ACTIONS.prevPage);
+  async function handleFilter(element = null) {
+    const filter = getFilter(element);
 
-      if (prevPageAction) {
-        event.preventDefault();
-        event.stopPropagation();
+    await runBusy(`incidencias:filter:${filter}`, element, async () => {
+      try {
+        const result = await callSetFilter(setFilter, filter);
 
-        await handlePage({
-          element: prevPageAction,
-          direction: "prev",
-          setPage,
-          nextPage,
-          prevPage,
-          changePage,
-          render,
-          rerender,
+        emit("incidencias:bindings:filter", {
+          filter,
+          ok: Boolean(result),
+          source: scopeName,
         });
 
+        return result;
+      } catch (error) {
+        safeWarn("No se pudo aplicar filtro.", error);
+        return false;
+      }
+    });
+  }
+
+  async function handleClearFilters(element = null) {
+    await runBusy("incidencias:filters:clear", element, async () => {
+      try {
+        if (isFn(clearFilters)) {
+          return await clearFilters();
+        }
+
+        return await callSetFilter(setFilter, "all");
+      } catch (error) {
+        safeWarn("No se pudieron limpiar filtros.", error);
+        return false;
+      }
+    });
+  }
+
+  async function handleClearSearch(element = null) {
+    await runBusy("incidencias:search:clear", element, async () => {
+      try {
+        if (isFn(clearSearchOnly)) {
+          return await clearSearchOnly();
+        }
+
+        return await callSetSearchQuery(setSearchQuery, "");
+      } catch (error) {
+        safeWarn("No se pudo limpiar búsqueda.", error);
+        return false;
+      }
+    });
+  }
+
+  async function handlePage(element = null) {
+    const page = getPage(element);
+
+    if (!page || !isFn(goToPage)) {
+      return false;
+    }
+
+    return goToPage(page);
+  }
+
+  async function handlePrevPage() {
+    if (isFn(goPrevPage)) {
+      return goPrevPage();
+    }
+
+    return false;
+  }
+
+  async function handleNextPage() {
+    if (isFn(goNextPage)) {
+      return goNextPage();
+    }
+
+    return false;
+  }
+
+  function handleSearchInput(input = null) {
+    if (!input) {
+      return;
+    }
+
+    const value = safeText(input.value, "");
+
+    clearSearchTimer();
+
+    searchTimer = window.setTimeout(async () => {
+      searchTimer = 0;
+
+      if (destroyed) {
         return;
       }
 
-      const nextPageAction = getActionElement(root, target, ACTIONS.nextPage);
-
-      if (nextPageAction) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        await handlePage({
-          element: nextPageAction,
-          direction: "next",
-          setPage,
-          nextPage,
-          prevPage,
-          changePage,
-          render,
-          rerender,
-        });
-
-        return;
+      try {
+        await callSetSearchQuery(setSearchQuery, value);
+      } catch (error) {
+        safeWarn("No se pudo aplicar búsqueda.", error);
       }
+    }, SEARCH_DEBOUNCE_MS);
+  }
 
-      const openAction = getActionElement(root, target, ACTIONS.open);
+  function handleSearchChange(input = null) {
+    if (!input) {
+      return;
+    }
 
-      if (openAction) {
-        event.preventDefault();
-        event.stopPropagation();
+    clearSearchTimer();
 
-        await handleOpenTicket({
-          element: openAction,
-          openTicket,
-        });
+    try {
+      void callSetSearchQuery(setSearchQuery, safeText(input.value, ""));
+    } catch (error) {
+      safeWarn("No se pudo aplicar búsqueda.", error);
+    }
+  }
 
-        return;
-      }
+  function handlePageSizeChange(input = null) {
+    if (!input || !isFn(changePageSize)) {
+      return;
+    }
 
-      const copyAction = getActionElement(root, target, ACTIONS.copy);
+    try {
+      void changePageSize(input.value);
+    } catch (error) {
+      safeWarn("No se pudo cambiar tamaño de página.", error);
+    }
+  }
 
-      if (copyAction) {
-        event.preventDefault();
-        event.stopPropagation();
+  addDomListener(cleanups, root, "click", async (event) => {
+    if (destroyed) {
+      return;
+    }
 
-        await handleCopyTicket({
-          element: copyAction,
-          copyTicketIdAction,
-        });
+    const target = getEventElement(event);
 
-        return;
-      }
+    if (!target) {
+      return;
+    }
 
-      const row = shouldOpenRowFromClick(root, event);
+    const refreshAction = getActionElement(root, target, ACTIONS.refresh);
 
-      if (row) {
-        event.preventDefault();
+    if (refreshAction) {
+      event.preventDefault();
+      event.stopPropagation();
 
-        await handleOpenTicket({
-          element: row,
-          openTicket,
-        });
+      await handleRefresh(refreshAction, false);
+      return;
+    }
 
-        return;
-      }
+    const retryAction = getActionElement(root, target, ACTIONS.retry);
 
-      const unknownAction = getAnyActionElement(root, target);
+    if (retryAction) {
+      event.preventDefault();
+      event.stopPropagation();
 
-      if (unknownAction) {
-        safeEmit("incidencias:bindings:unknown-action", {
-          actions: getActionNames(unknownAction),
-          element: unknownAction,
-        });
-      }
-    },
-  });
+      await handleRefresh(retryAction, true);
+      return;
+    }
 
-  /* =======================================================
-     KEYBOARD ACCESSIBILITY
-  ======================================================= */
+    const exportAction = getActionElement(root, target, ACTIONS.export);
 
-  bindDomEvent({
-    scopeName,
-    scopeRef,
-    target: root,
-    eventName: "keydown",
-    handler: async (event) => {
-      const key = safeText(event.key, "");
-      const target = getEventTargetElement(event);
+    if (exportAction) {
+      event.preventDefault();
+      event.stopPropagation();
 
-      if (!target) return;
+      await handleExport(exportAction);
+      return;
+    }
 
-      if (key !== "Enter" && key !== " ") {
-        return;
-      }
+    const createAction = getActionElement(root, target, ACTIONS.create);
 
-      const actionElement = closestInside(root, target, ACTION_SELECTOR);
+    if (createAction) {
+      event.preventDefault();
+      event.stopPropagation();
 
-      if (actionElement) {
-        return;
-      }
+      await handleCreate(createAction);
+      return;
+    }
 
-      const row = closestInside(root, target, ROW_SELECTOR);
+    const clearFiltersAction = getActionElement(root, target, ACTIONS.clearFilters);
 
-      if (!row || isRowClickDisabled(row)) {
-        return;
-      }
+    if (clearFiltersAction) {
+      event.preventDefault();
+      event.stopPropagation();
 
-      const interactive = target?.closest?.(INTERACTIVE_SELECTOR);
+      await handleClearFilters(clearFiltersAction);
+      return;
+    }
 
-      if (interactive && row.contains(interactive)) {
-        return;
-      }
+    const clearSearchAction = getActionElement(root, target, ACTIONS.clearSearch);
 
+    if (clearSearchAction) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await handleClearSearch(clearSearchAction);
+      return;
+    }
+
+    const filterAction = getActionElement(root, target, ACTIONS.filter);
+
+    if (filterAction) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await handleFilter(filterAction);
+      return;
+    }
+
+    const pageAction = getActionElement(root, target, ACTIONS.page);
+
+    if (pageAction) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await handlePage(pageAction);
+      return;
+    }
+
+    const prevPageAction = getActionElement(root, target, ACTIONS.prevPage);
+
+    if (prevPageAction) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await handlePrevPage();
+      return;
+    }
+
+    const nextPageAction = getActionElement(root, target, ACTIONS.nextPage);
+
+    if (nextPageAction) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await handleNextPage();
+      return;
+    }
+
+    const copyAction = getActionElement(root, target, ACTIONS.copy);
+
+    if (copyAction) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await handleCopy(copyAction);
+      return;
+    }
+
+    const openAction = getActionElement(root, target, ACTIONS.open);
+
+    if (openAction) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await handleOpen(openAction);
+      return;
+    }
+
+    const row = getRowFromClick(root, event);
+
+    if (row) {
       event.preventDefault();
 
-      await handleOpenTicket({
-        element: row,
-        openTicket,
+      await handleOpen(row);
+    }
+  });
+
+  addDomListener(cleanups, root, "keydown", async (event) => {
+    if (destroyed) {
+      return;
+    }
+
+    const key = safeText(event.key, "");
+
+    if (key !== "Enter" && key !== " ") {
+      return;
+    }
+
+    const target = getEventElement(event);
+
+    if (!target) {
+      return;
+    }
+
+    const action = closestInside(root, target, ACTION_SELECTOR);
+
+    if (action) {
+      return;
+    }
+
+    const row = closestInside(root, target, ROW_SELECTOR);
+
+    if (!row || getRowClickDisabled(row)) {
+      return;
+    }
+
+    const interactive = target.closest?.(INTERACTIVE_SELECTOR);
+
+    if (interactive && rowContains(row, interactive)) {
+      return;
+    }
+
+    event.preventDefault();
+
+    await handleOpen(row);
+  });
+
+  addDomListener(cleanups, root, "input", (event) => {
+    if (destroyed) {
+      return;
+    }
+
+    const target = getEventElement(event);
+    const input = closestInside(root, target, SEARCH_SELECTOR);
+
+    if (input) {
+      handleSearchInput(input);
+    }
+  });
+
+  addDomListener(cleanups, root, "change", (event) => {
+    if (destroyed) {
+      return;
+    }
+
+    const target = getEventElement(event);
+
+    const searchInput = closestInside(root, target, SEARCH_SELECTOR);
+
+    if (searchInput) {
+      handleSearchChange(searchInput);
+      return;
+    }
+
+    const pageSizeInput = closestInside(root, target, PAGE_SIZE_SELECTOR);
+
+    if (pageSizeInput) {
+      handlePageSizeChange(pageSizeInput);
+    }
+  });
+
+  if (bindMutationEvents && (isFn(reload) || isFn(loadIncidencias))) {
+    safeArray(mutationEvents).forEach((eventName) => {
+      addAppEventListener(cleanups, eventName, (eventOrPayload = {}) => {
+        const payload = safeObject(eventOrPayload?.detail || eventOrPayload);
+
+        scheduleMutationReload(payload);
       });
-    },
-  });
-
-  /* =======================================================
-     MODAL / MUTATION EVENTS
-     Cuando el modal actualiza, refrescamos tabla/store.
-  ======================================================= */
-
-  const refreshAfterMutation = (event) => {
-    const payload = event?.detail || event || {};
-
-    scheduleReload(reload, loadIncidencias, {
-      source: "mutation-event",
-      payload,
     });
-  };
+  }
 
-  [
-    "incidencias:modal:updated",
-    "incidencias:modal:update",
-    "incidencias:ticket:updated",
-    "incidencias:update:success",
-    "incidencias:upload:success",
-    "incidencias:comment:success",
-    "incidencias:reopen:success",
-    "incidencias:create:success",
-    "incidencias:created",
-  ].forEach((eventName) => {
-    bindBusEvent({
-      scopeName,
-      eventName,
-      handler: refreshAfterMutation,
-    });
-  });
-
-  safeEmit("incidencias:bindings:ready", {
+  emit("incidencias:bindings:ready", {
     scope: scopeName,
+    source: "incidencias.bindings",
   });
 
-  /* =======================================================
-     CLEANUP
-  ======================================================= */
+  const cleanup = () => {
+    if (destroyed) {
+      return;
+    }
 
-  return () => {
-    runScopeCleanup(scopeName);
+    destroyed = true;
 
-    safeEmit("incidencias:bindings:destroyed", {
+    clearSearchTimer();
+    clearMutationReloadTimer();
+    runCleanups(cleanups);
+    scopeCleanups.delete(scopeName);
+
+    emit("incidencias:bindings:destroyed", {
       scope: scopeName,
+      source: "incidencias.bindings",
     });
   };
+
+  registerScopeCleanup(scopeName, cleanup);
+
+  return cleanup;
 }
 
 /* =========================================================
-   ALIAS / DEFAULT EXPORT
+   ALIASES
 ========================================================= */
 
 export const bind = bindIncidenciasEvents;
 
 export function cleanupIncidenciasBindings(scope = DEFAULT_SCOPE) {
-  runScopeCleanup(scope);
+  cleanupScope(scope);
 }
 
 export default {

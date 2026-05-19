@@ -6,14 +6,14 @@
    - Normalizar usuario para el sidebar.
    - Resolver rol admin/user.
    - Resolver slug público real.
+   - Resolver displayName, email y avatarUrl para template/dropdown.
    - Crear view-model mínimo para template.js.
    - No pintar DOM.
    - No hacer eventos.
    - No leer storage.
    - No hacer HTTP.
-   - No tocar dropdown.
-   - No gestionar avatar avanzado.
-   - No inventar permisos.
+   - No gestionar dropdown.
+   - No gestionar permisos.
    - No inventar slug.
    - No usar email como identidad.
 ========================================================= */
@@ -23,7 +23,7 @@ import {
   SIDEBAR_ROLE_USER,
 } from "./constants.js";
 
-export const SIDEBAR_USER_VERSION = "sidebar.user.v2";
+export const SIDEBAR_USER_VERSION = "sidebar.user.v3";
 
 const DEFAULT_NAME = "Usuario";
 const DEFAULT_INITIALS = "U";
@@ -90,10 +90,13 @@ export function getSidebarUserSlug(user = null) {
   if (!isObject(user)) return "";
 
   return normalizeSidebarUserSlug(
-    user.slug ||
-      user.lookup?.slug ||
-      user.profile?.slug ||
+    first(
+      user.slug,
+      user.lookup?.slug,
+      user.profile?.slug,
+      user.publicSlug,
       ""
+    )
   );
 }
 
@@ -120,12 +123,16 @@ export function isSidebarUserDisabled(user = null) {
 export function hasSidebarUserIdentity(user = null) {
   if (!isObject(user)) return false;
 
+  /*
+    Email no cuenta como identidad.
+    La identidad mínima válida debe venir de id/userId/username/slug.
+  */
   return Boolean(
     text(user.id, "") ||
       text(user.userId, "") ||
       text(user.username, "") ||
-      text(user.slug, "") ||
-      text(user.lookup?.slug, "")
+      text(user.userName, "") ||
+      getSidebarUserSlug(user)
   );
 }
 
@@ -151,6 +158,7 @@ export function unwrapSidebarUser(payload = null) {
     payload.authUser,
     payload.sessionUser,
     payload.session?.user,
+    payload.sessionData?.user,
     payload.data?.user,
     payload.payload?.user,
     payload.me,
@@ -242,20 +250,20 @@ function normalizeRoleValue(value = null) {
   return "";
 }
 
-function firstRole(...values) {
+function firstRole(values = [], fallback = "") {
   for (const value of values) {
     const role = normalizeRoleValue(value);
 
     if (role) return role;
   }
 
-  return SIDEBAR_ROLE_USER;
+  return fallback;
 }
 
 function getRoleFromAuth(Auth = null) {
   if (!isObject(Auth)) return "";
 
-  return firstRole(
+  return firstRole([
     safeCall(Auth.getRole?.bind?.(Auth) || Auth.getRole),
     safeCall(Auth.getCurrentRole?.bind?.(Auth) || Auth.getCurrentRole),
     Auth.role,
@@ -265,8 +273,11 @@ function getRoleFromAuth(Auth = null) {
     Auth.user?.roles,
     Auth.currentUser?.role,
     Auth.currentUser?.rol,
-    Auth.currentUser?.roles
-  );
+    Auth.currentUser?.roles,
+    Auth.session?.user?.role,
+    Auth.session?.user?.rol,
+    Auth.session?.user?.roles,
+  ]);
 }
 
 export function getSidebarUserRole(context = {}) {
@@ -279,26 +290,33 @@ export function getSidebarUserRole(context = {}) {
   const state = isObject(AppCore?.state) ? AppCore.state : {};
 
   return firstRole(
-    context.role,
-    context.roles,
+    [
+      context.role,
+      context.roles,
 
-    user?.role,
-    user?.rol,
-    user?.roles,
+      user?.role,
+      user?.rol,
+      user?.roles,
 
-    getRoleFromAuth(context.Auth),
+      getRoleFromAuth(context.Auth),
 
-    state.role,
-    state.rol,
-    state.roles,
+      state.role,
+      state.rol,
+      state.roles,
 
-    state.user?.role,
-    state.user?.rol,
-    state.user?.roles,
+      state.user?.role,
+      state.user?.rol,
+      state.user?.roles,
 
-    state.currentUser?.role,
-    state.currentUser?.rol,
-    state.currentUser?.roles
+      state.currentUser?.role,
+      state.currentUser?.rol,
+      state.currentUser?.roles,
+
+      state.auth?.user?.role,
+      state.auth?.user?.rol,
+      state.auth?.user?.roles,
+    ],
+    SIDEBAR_ROLE_USER
   );
 }
 
@@ -326,6 +344,7 @@ export function getSidebarDisplayName(user = null) {
       profile.name,
       profile.nombre,
       user.username,
+      user.userName,
       getSidebarUserSlug(user)
     ),
     DEFAULT_NAME
@@ -354,6 +373,80 @@ export function getSidebarUsername(user = null) {
     .toLowerCase();
 }
 
+export function getSidebarUserEmail(user = null) {
+  if (!isUsableSidebarUser(user)) return "";
+
+  const profile = isObject(user.profile) ? user.profile : {};
+  const lookup = isObject(user.lookup) ? user.lookup : {};
+
+  const email = text(
+    first(
+      user.email,
+      user.mail,
+      user.emailAddress,
+      profile.email,
+      profile.mail,
+      lookup.email,
+      lookup.emailLower
+    ),
+    ""
+  ).toLowerCase();
+
+  if (!email || email.length > 254 || /\s/.test(email)) return "";
+
+  return email;
+}
+
+export function getSidebarUserAvatarUrl(user = null) {
+  if (!isUsableSidebarUser(user)) return "";
+
+  const profile = isObject(user.profile) ? user.profile : {};
+  const raw = isObject(user.raw) ? user.raw : {};
+
+  const avatar = text(
+    first(
+      user.avatarUrl,
+      user.avatar,
+      user.photoUrl,
+      user.photo,
+      user.pictureUrl,
+      user.picture,
+      user.imageUrl,
+      user.image,
+
+      profile.avatarUrl,
+      profile.avatar,
+      profile.photoUrl,
+      profile.photo,
+      profile.pictureUrl,
+      profile.picture,
+      profile.imageUrl,
+      profile.image,
+
+      raw.avatarUrl,
+      raw.avatar,
+      raw.photoUrl,
+      raw.photo,
+      raw.pictureUrl,
+      raw.picture
+    ),
+    ""
+  );
+
+  if (!avatar) return "";
+
+  /*
+    Permitimos rutas internas, https/http, blob y data:image.
+    Bloqueamos protocolos ejecutables o basura.
+  */
+  if (avatar.startsWith("/") && !avatar.startsWith("//")) return avatar;
+  if (/^https?:\/\//i.test(avatar)) return avatar;
+  if (/^blob:/i.test(avatar)) return avatar;
+  if (/^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,/i.test(avatar)) return avatar;
+
+  return "";
+}
+
 export function getSidebarInitials(value = "") {
   const name = text(value, DEFAULT_NAME);
   const parts = name.split(/\s+/).filter(Boolean);
@@ -361,10 +454,14 @@ export function getSidebarInitials(value = "") {
   if (!parts.length) return DEFAULT_INITIALS;
 
   if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
+    return parts[0].slice(0, 2).toUpperCase() || DEFAULT_INITIALS;
   }
 
-  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase() || DEFAULT_INITIALS;
+}
+
+export function getSidebarRoleLabel(role = SIDEBAR_ROLE_USER) {
+  return role === SIDEBAR_ROLE_ADMIN ? "Administrador" : "Usuario";
 }
 
 /* =========================================================
@@ -390,6 +487,10 @@ export function getSidebarUser(context = {}) {
   const userId = hasUser ? text(user.userId || user.id, "") : "";
   const slug = hasUser ? getSidebarUserSlug(user) : "";
   const username = hasUser ? getSidebarUsername(user) : "";
+  const email = hasUser ? getSidebarUserEmail(user) : "";
+  const avatarUrl = hasUser ? getSidebarUserAvatarUrl(user) : "";
+  const initials = getSidebarInitials(displayName);
+  const roleLabel = getSidebarRoleLabel(role);
 
   return {
     hasUser,
@@ -400,14 +501,21 @@ export function getSidebarUser(context = {}) {
 
     displayName,
     name: displayName,
+    fullName: displayName,
+
     username,
 
-    initials: getSidebarInitials(displayName),
+    email,
+    avatarUrl,
+    avatar: avatarUrl,
+    photoUrl: avatarUrl,
+    picture: avatarUrl,
+
+    initials,
 
     role,
     roles: [role],
-
-    roleLabel: role === SIDEBAR_ROLE_ADMIN ? "Administrador" : "Usuario",
+    roleLabel,
 
     isAdmin: role === SIDEBAR_ROLE_ADMIN,
     isUser: role === SIDEBAR_ROLE_USER,
@@ -432,7 +540,10 @@ export function getSidebarUserSnapshot(context = {}) {
           username: user.username || null,
           slug: user.slug || null,
           displayName: user.displayName,
+          hasEmail: Boolean(user.email),
+          hasAvatar: Boolean(user.avatarUrl),
           role: user.role,
+          roleLabel: user.roleLabel,
         }
       : null,
 
@@ -444,8 +555,7 @@ export function getSidebarUserSnapshot(context = {}) {
       noEvents: true,
       noStorage: true,
       noHttp: true,
-      noDropdown: true,
-      noAdvancedAvatar: true,
+      noDropdownBehavior: true,
       noPermissionsInvented: true,
       noEmailIdentity: true,
       noSlugFabrication: true,
@@ -475,7 +585,10 @@ export default {
 
   getSidebarDisplayName,
   getSidebarUsername,
+  getSidebarUserEmail,
+  getSidebarUserAvatarUrl,
   getSidebarInitials,
+  getSidebarRoleLabel,
 
   getSidebarUser,
   getSidebarUserSnapshot,

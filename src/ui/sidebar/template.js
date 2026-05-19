@@ -10,6 +10,8 @@
    - No leer sesión.
    - No leer rutas.
    - No hacer logout.
+   - No decidir visibilidad.
+   - No decidir permisos.
    - No depender de Auth / Router / Core / Store.
    - No usar HTML string.
    - No duplicar lógica de negocio.
@@ -34,7 +36,7 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v2";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v3";
 
 /* =========================================================
    ICON PATHS
@@ -140,6 +142,24 @@ function roleText(value = "") {
   return text(value, "");
 }
 
+function createSpan(className = "", textContent = "", attrs = {}) {
+  return createElement("span", {
+    className,
+    textContent,
+    attrs,
+  });
+}
+
+function createSurface(className = "", attrs = {}) {
+  return createElement("span", {
+    className,
+    attrs: {
+      "aria-hidden": "true",
+      ...attrs,
+    },
+  });
+}
+
 /* =========================================================
    NORMALIZE
 ========================================================= */
@@ -173,9 +193,13 @@ function normalizeUser(user = {}) {
     "Usuario"
   );
 
+  const initials = text(user.initials, "U")
+    .slice(0, 2)
+    .toUpperCase();
+
   return {
     name,
-    initials: text(user.initials, "U").slice(0, 2).toUpperCase(),
+    initials,
     roleLabel: text(user.roleLabel, "Usuario"),
   };
 }
@@ -241,6 +265,7 @@ export function createSidebarHeader(options = {}) {
     className: SIDEBAR_CLASSES.header,
     attrs: {
       [SIDEBAR_ATTRS.header]: "true",
+      "data-sidebar-section": "header",
     },
   });
 
@@ -255,19 +280,26 @@ export function createSidebarHeader(options = {}) {
       [SIDEBAR_ATTRS.route]: brandHref,
 
       "aria-label": brandLabel,
+      "data-sidebar-action": "brand",
     },
   });
 
+  const brandContent = createElement("span", {
+    className: "sidebar-brand-content",
+  });
+
+  appendChildren(brandContent, [
+    createSpan(SIDEBAR_CLASSES.brandText, brandLabel),
+  ]);
+
   appendChildren(brand, [
+    createSurface("sidebar-brand-glow"),
     createIconSlot(
       SIDEBAR_CLASSES.brandIcon,
       SIDEBAR_ICONS.brand,
       "sidebar-brand-svg"
     ),
-    createElement("span", {
-      className: SIDEBAR_CLASSES.brandText,
-      textContent: brandLabel,
-    }),
+    brandContent,
   ]);
 
   const toggle = createElement("button", {
@@ -277,13 +309,18 @@ export function createSidebarHeader(options = {}) {
       [SIDEBAR_ATTRS.toggle]: "true",
       "aria-label": open ? "Cerrar navegación" : "Abrir navegación",
       "aria-expanded": open ? "true" : "false",
+      "data-sidebar-action": "toggle",
+      "data-state": open ? "open" : "collapsed",
     },
   });
 
-  appendChildren(
-    toggle,
-    createSidebarIcon(SIDEBAR_ICONS.menu, "sidebar-toggle-svg")
-  );
+  appendChildren(toggle, [
+    createSidebarIcon(SIDEBAR_ICONS.menu, "sidebar-toggle-svg"),
+    createSpan(
+      "sidebar-toggle-label",
+      open ? "Cerrar navegación" : "Abrir navegación"
+    ),
+  ]);
 
   appendChildren(header, [brand, toggle]);
 
@@ -300,11 +337,15 @@ export function createSidebarNav(items = []) {
     attrs: {
       [SIDEBAR_ATTRS.nav]: "true",
       "aria-label": "Navegación principal",
+      "data-sidebar-section": "navigation",
     },
   });
 
   const list = createElement("ul", {
     className: SIDEBAR_CLASSES.list,
+    attrs: {
+      "data-sidebar-list": "true",
+    },
   });
 
   for (const rawItem of Array.isArray(items) ? items : []) {
@@ -325,6 +366,15 @@ export function createSidebarNavItem(rawItem = {}) {
 
   const li = createElement("li", {
     className: SIDEBAR_CLASSES.item,
+    attrs: cleanAttrs({
+      "data-sidebar-item": "true",
+      "data-route": item.href,
+      "data-active": item.active ? "true" : "false",
+      "data-disabled": item.disabled ? "true" : "false",
+      "data-admin-only": item.adminOnly ? "true" : null,
+      "data-required-role": item.requiredRole || null,
+      "data-required-roles": item.requiredRoles || null,
+    }),
   });
 
   const link = createElement("a", {
@@ -346,6 +396,8 @@ export function createSidebarNavItem(rawItem = {}) {
       "aria-current": item.active ? "page" : null,
       "aria-disabled": item.disabled ? "true" : null,
 
+      "data-sidebar-action": "navigate",
+      "data-sidebar-label": item.label,
       "data-admin-only": item.adminOnly ? "true" : null,
       "data-required-role": item.requiredRole || null,
       "data-required-roles": item.requiredRoles || null,
@@ -354,27 +406,34 @@ export function createSidebarNavItem(rawItem = {}) {
     }),
   });
 
-  appendChildren(link, [
-    createIconSlot(
-      SIDEBAR_CLASSES.linkIcon,
-      item.icon,
-      "sidebar-link-svg"
-    ),
-    createElement("span", {
-      className: SIDEBAR_CLASSES.linkLabel,
-      textContent: item.label,
-    }),
+  const content = createElement("span", {
+    className: "sidebar-link-content",
+  });
+
+  appendChildren(content, [
+    createSpan(SIDEBAR_CLASSES.linkLabel, item.label),
   ]);
 
   if (item.badge) {
     appendChildren(
-      link,
+      content,
       createElement("span", {
         className: SIDEBAR_CLASSES.linkBadge,
         textContent: item.badge,
       })
     );
   }
+
+  appendChildren(link, [
+    createSurface("sidebar-link-surface"),
+    createSurface("sidebar-link-indicator"),
+    createIconSlot(
+      SIDEBAR_CLASSES.linkIcon,
+      item.icon,
+      "sidebar-link-svg"
+    ),
+    content,
+  ]);
 
   appendChildren(li, link);
 
@@ -392,6 +451,7 @@ export function createSidebarFooter(user = {}) {
     className: SIDEBAR_CLASSES.footer,
     attrs: {
       [SIDEBAR_ATTRS.footer]: "true",
+      "data-sidebar-section": "footer",
     },
   });
 
@@ -399,6 +459,7 @@ export function createSidebarFooter(user = {}) {
     className: SIDEBAR_CLASSES.user,
     attrs: {
       [SIDEBAR_ATTRS.user]: "true",
+      "data-sidebar-user-card": "true",
     },
   });
 
@@ -425,7 +486,11 @@ export function createSidebarFooter(user = {}) {
     }),
   ]);
 
-  appendChildren(userBox, [avatar, info]);
+  appendChildren(userBox, [
+    createSurface("sidebar-user-surface"),
+    avatar,
+    info,
+  ]);
 
   const logout = createElement("button", {
     className: SIDEBAR_CLASSES.logout,
@@ -433,6 +498,7 @@ export function createSidebarFooter(user = {}) {
       type: "button",
       [SIDEBAR_ATTRS.logout]: "true",
       "aria-label": "Cerrar sesión",
+      "data-sidebar-action": "logout",
     },
   });
 
@@ -448,7 +514,10 @@ export function createSidebarFooter(user = {}) {
     }),
   ]);
 
-  appendChildren(footer, [userBox, logout]);
+  appendChildren(footer, [
+    userBox,
+    logout,
+  ]);
 
   return footer;
 }
@@ -461,6 +530,7 @@ export function createSidebarTemplate(options = {}) {
   if (!isBrowser()) return null;
 
   const open = options.open !== false;
+  const state = open ? "open" : "collapsed";
 
   const sidebar = createElement("aside", {
     className: classNames(
@@ -473,6 +543,7 @@ export function createSidebarTemplate(options = {}) {
       [SIDEBAR_ATTRS.root]: "true",
       "aria-label": text(options.ariaLabel, "Panel lateral"),
       "aria-hidden": "false",
+      "data-sidebar-state": state,
     },
     dataset: {
       open: open ? "true" : "false",
@@ -481,6 +552,18 @@ export function createSidebarTemplate(options = {}) {
   });
 
   appendChildren(sidebar, [
+    createSurface("sidebar-backdrop"),
+    createElement("div", {
+      className: "sidebar-inner",
+      attrs: {
+        "data-sidebar-inner": "true",
+      },
+    }),
+  ]);
+
+  const inner = sidebar.querySelector?.("[data-sidebar-inner='true']") || sidebar;
+
+  appendChildren(inner, [
     createSidebarHeader({
       brandLabel: options.brandLabel,
       brandHref: options.brandHref,
@@ -505,11 +588,14 @@ export function getSidebarTemplateSnapshot() {
 
     policy: {
       buildsDom: true,
+      stableCssStructure: true,
       noHtmlString: true,
+
       noNavigation: true,
       noSessionRead: true,
       noRouteRead: true,
       noLogout: true,
+
       noAuth: true,
       noRouter: true,
       noCore: true,
@@ -517,6 +603,8 @@ export function getSidebarTemplateSnapshot() {
       noHttp: true,
       noToast: true,
       noDropdown: true,
+      noPermissionDecision: true,
+      noVisibilityDecision: true,
     },
   };
 }

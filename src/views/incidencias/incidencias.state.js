@@ -1,38 +1,17 @@
 /* =========================================================
-   Onion SPA - Incidencias State
-   Archivo: src/views/incidencias/incidencias.state.js
+   Onion Support - Incidencias State
+   Archivo: /src/views/incidencias/incidencias.state.js
 
-   EXTREME PRO SYSTEM · STATE LAYER · 12/10
-   PATCH · NO INFINITE LOADING
-   PATCH · REQUEST TOKEN GUARD
-   PATCH · CACHE SCHEMA VERSION
-   PATCH · DETAIL / MODAL STATE READY
-   PATCH · CREATE VIEW READY
-   PATCH · FILTERS / PAGINATION READY
-   PATCH · MUTATION FLAGS READY
-
-   RESPONSABILIDADES:
-   - estado local centralizado del módulo incidencias
-   - loading / refresh / create / detail / modal
-   - errores globales y errores por vista
-   - cache temporal con TTL y versión de schema
-   - request inflight + requestId guard
-   - draft de creación
-   - paginación estable
-   - filtros de listado
-   - estado preparado para subida de adjuntos / comentarios / reopen
-   - compatibilidad View / API / Actions / Modal
-
-   HARDENING PRO:
-   - setters robustos
-   - no loading infinito
-   - hydrated coherente tras setItems / setLoaded
-   - estado preparado para paginación
-   - estado preparado para create modal / create view
-   - cache helpers defensivos
-   - snapshot debug
-   - reset selectivo por áreas
-   - no depende de imports externos
+   Responsabilidad:
+   - Estado local del módulo Incidencias.
+   - Flags de carga/refresco/creación/detalle/mutación.
+   - Paginación, filtros, sort y cache temporal.
+   - Helpers de estado usados por View/API/Actions/Modal.
+   - No importar AppCore.
+   - No tocar DOM.
+   - No llamar APIs.
+   - No registrar eventos.
+   - No duplicar lógica de modelo, vista ni bindings.
 ========================================================= */
 
 /* =========================================================
@@ -40,20 +19,36 @@
 ========================================================= */
 
 export const CACHE_KEY = "incidencias.cache";
-export const CACHE_VERSION = 2;
-export const CACHE_TTL = 1000 * 60 * 3; // 3 min
+export const CACHE_VERSION = 3;
+export const CACHE_TTL = 1000 * 60 * 3;
+
 export const DEFAULT_PAGE_SIZE = 5;
 export const MAX_PAGE_SIZE = 50;
-
 export const DEFAULT_SORT = "updated_desc";
+export const DEFAULT_LIST_FILTER = "all";
 
 export const DEFAULT_FILTERS = Object.freeze({
   q: "",
+  search: "",
+  query: "",
+
+  filter: DEFAULT_LIST_FILTER,
+  activeFilter: DEFAULT_LIST_FILTER,
+  statusFilter: DEFAULT_LIST_FILTER,
+
   status: "",
+  estado: "",
+
   priority: "",
+  prioridad: "",
+
   categoria: "",
+  category: "",
+  tipo: "",
+
   assigned: "",
   closed: null,
+
   active: false,
   withAttachments: false,
   withComments: false,
@@ -75,18 +70,20 @@ function safeObject(value, fallback = {}) {
 }
 
 function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") {
-    return fallback;
-  }
+  if (value === null || value === undefined || value === "") return fallback;
 
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -106,26 +103,11 @@ function safeBoolean(value, fallback = false) {
   if (typeof value === "string") {
     const key = value.trim().toLowerCase();
 
-    if (["true", "1", "yes", "y", "si", "sí", "on"].includes(key)) {
-      return true;
-    }
-
-    if (["false", "0", "no", "n", "off"].includes(key)) {
-      return false;
-    }
+    if (["true", "1", "yes", "y", "si", "sí", "on"].includes(key)) return true;
+    if (["false", "0", "no", "n", "off"].includes(key)) return false;
   }
 
   return fallback;
-}
-
-function firstDefined(...values) {
-  for (const value of values) {
-    if (value !== undefined && value !== null) {
-      return value;
-    }
-  }
-
-  return null;
 }
 
 function first(...values) {
@@ -145,7 +127,10 @@ function hasOwn(object = {}, key = "") {
 }
 
 function clamp(value = 0, min = 0, max = Number.MAX_SAFE_INTEGER) {
-  return Math.min(Math.max(safeNumber(value, min), min), max);
+  return Math.min(
+    Math.max(safeNumber(value, min), min),
+    max
+  );
 }
 
 function now() {
@@ -153,9 +138,7 @@ function now() {
 }
 
 function safeTimestamp(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") {
-    return fallback;
-  }
+  if (value === null || value === undefined || value === "") return fallback;
 
   const direct = Number(value);
 
@@ -164,9 +147,9 @@ function safeTimestamp(value, fallback = 0) {
   }
 
   const date = new Date(value);
-  const ts = date.getTime();
+  const timestamp = date.getTime();
 
-  return Number.isFinite(ts) && ts > 0 ? ts : fallback;
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : fallback;
 }
 
 function normalizeTextKey(value = "") {
@@ -179,18 +162,6 @@ function normalizeTextKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function getTotalPages(total = 0, pageSize = DEFAULT_PAGE_SIZE) {
-  const size = clamp(pageSize, 1, MAX_PAGE_SIZE);
-  return Math.max(1, Math.ceil(Math.max(0, safeNumber(total, 0)) / size));
-}
-
-function clampPage(page = 1, total = 0, pageSize = DEFAULT_PAGE_SIZE) {
-  const current = Math.max(1, safeNumber(page, 1));
-  const totalPages = getTotalPages(total, pageSize);
-
-  return Math.min(current, totalPages);
-}
-
 function canUseLocalStorage() {
   try {
     return typeof localStorage !== "undefined" && Boolean(localStorage);
@@ -200,175 +171,54 @@ function canUseLocalStorage() {
 }
 
 /* =========================================================
-   DEFAULTS
+   NORMALIZERS
 ========================================================= */
 
-function createDefaultCreateDraft() {
-  return {
-    subject: "",
-    description: "",
-    message: "",
+function normalizeListFilter(value = DEFAULT_LIST_FILTER) {
+  const key = normalizeTextKey(value || DEFAULT_LIST_FILTER);
 
-    priority: "medium",
-    status: "open",
+  const map = {
+    all: "all",
+    todo: "all",
+    todos: "all",
+    todas: "all",
+    total: "all",
+    totales: "all",
 
-    clientName: "",
-    clientEmail: "",
-    clienteId: "",
-    userId: "",
+    open: "open",
+    opened: "open",
+    active: "open",
+    pending: "open",
+    progress: "open",
+    in_progress: "open",
+    inprogress: "open",
+    pendiente: "open",
+    pendientes: "open",
+    abierta: "open",
+    abiertas: "open",
+    abierto: "open",
+    abiertos: "open",
+    proceso: "open",
+    en_proceso: "open",
 
-    assignedTo: "",
-    category: "",
-    source: "panel",
-    tags: "",
-
-    facturaId: "",
-    invoiceId: "",
-    numeroFacturaLegal: "",
-
-    notifyClient: true,
-    internalOnly: false,
-
-    attachments: [],
+    closed: "closed",
+    close: "closed",
+    resolved: "closed",
+    solved: "closed",
+    archived: "closed",
+    cancelled: "closed",
+    canceled: "closed",
+    cerrada: "closed",
+    cerradas: "closed",
+    cerrado: "closed",
+    cerrados: "closed",
+    resuelta: "closed",
+    resueltas: "closed",
+    resuelto: "closed",
+    resueltos: "closed",
   };
-}
 
-function createDefaultCreateViewState() {
-  return {
-    form: createDefaultCreateDraft(),
-
-    errors: {},
-    touched: {},
-
-    submitting: false,
-    validating: false,
-
-    serverError: "",
-    createdTicketId: "",
-    successMessage: "",
-
-    startedAt: 0,
-    submittedAt: 0,
-    completedAt: 0,
-  };
-}
-
-function createDefaultDetailState() {
-  return {
-    open: false,
-
-    ticketId: "",
-    item: null,
-
-    loading: false,
-    refreshing: false,
-    error: "",
-
-    lastLoadedAt: 0,
-    lastUpdatedAt: 0,
-  };
-}
-
-function createDefaultMutationState() {
-  return {
-    commenting: false,
-    uploading: false,
-    reopening: false,
-    updating: false,
-    exporting: false,
-
-    commentTicketId: "",
-    uploadTicketId: "",
-    reopenTicketId: "",
-    updateTicketId: "",
-
-    lastMutationAt: 0,
-    lastMutationType: "",
-    lastMutationTicketId: "",
-  };
-}
-
-function createDefaultFilters() {
-  return {
-    ...DEFAULT_FILTERS,
-  };
-}
-
-function createInitialIncidenciasState() {
-  return {
-    hydrated: false,
-    loading: false,
-    refreshing: false,
-    loaded: false,
-
-    creating: false,
-    openingTicketId: "",
-
-    error: "",
-    errorAt: 0,
-
-    items: [],
-    remoteCount: 0,
-    lastSyncAt: 0,
-
-    page: 1,
-    pageSize: DEFAULT_PAGE_SIZE,
-
-    sort: DEFAULT_SORT,
-    filters: createDefaultFilters(),
-
-    requestId: 0,
-    activeRequestId: 0,
-    lastRequestStartedAt: 0,
-    lastRequestFinishedAt: 0,
-
-    createDraft: createDefaultCreateDraft(),
-    createView: createDefaultCreateViewState(),
-
-    detail: createDefaultDetailState(),
-    mutations: createDefaultMutationState(),
-
-    cache: {
-      restored: false,
-      restoredAt: 0,
-      savedAt: 0,
-      fresh: false,
-    },
-  };
-}
-
-/* =========================================================
-   STATE
-========================================================= */
-
-export const incidenciasState = createInitialIncidenciasState();
-
-let inflightLoad = null;
-
-/* =========================================================
-   INTERNAL NORMALIZERS
-========================================================= */
-
-function touchRequestId() {
-  incidenciasState.requestId += 1;
-  incidenciasState.activeRequestId = incidenciasState.requestId;
-  incidenciasState.lastRequestStartedAt = now();
-
-  return incidenciasState.requestId;
-}
-
-function finishRequest(requestId = incidenciasState.activeRequestId) {
-  if (
-    requestId &&
-    incidenciasState.activeRequestId &&
-    requestId !== incidenciasState.activeRequestId
-  ) {
-    return false;
-  }
-
-  incidenciasState.lastRequestFinishedAt = now();
-
-  return true;
+  return map[key] || DEFAULT_LIST_FILTER;
 }
 
 function normalizeStatus(value = "open") {
@@ -427,22 +277,109 @@ function normalizePriority(value = "medium") {
   return map[key] || "medium";
 }
 
+function normalizeFilters(value = {}) {
+  const filters = safeObject(value);
+  const query = safeText(first(filters.q, filters.search, filters.query, ""), "");
+  const listFilter = normalizeListFilter(
+    first(filters.activeFilter, filters.filter, filters.statusFilter, DEFAULT_LIST_FILTER)
+  );
+
+  return {
+    ...DEFAULT_FILTERS,
+    ...filters,
+
+    q: query,
+    search: query,
+    query,
+
+    filter: listFilter,
+    activeFilter: listFilter,
+    statusFilter: listFilter,
+
+    status: safeText(filters.status, ""),
+    estado: safeText(first(filters.estado, filters.status, ""), ""),
+
+    priority: safeText(filters.priority, ""),
+    prioridad: safeText(first(filters.prioridad, filters.priority, ""), ""),
+
+    categoria: safeText(first(filters.categoria, filters.category, filters.tipo, ""), ""),
+    category: safeText(first(filters.category, filters.categoria, filters.tipo, ""), ""),
+    tipo: safeText(first(filters.tipo, filters.categoria, filters.category, ""), ""),
+
+    assigned: safeText(filters.assigned, ""),
+    closed: filters.closed === null || filters.closed === undefined
+      ? null
+      : safeBoolean(filters.closed, false),
+
+    active: safeBoolean(filters.active, false),
+    withAttachments: safeBoolean(filters.withAttachments, false),
+    withComments: safeBoolean(filters.withComments, false),
+    withInvoices: safeBoolean(filters.withInvoices, false),
+  };
+}
+
+function normalizeItems(items = []) {
+  return safeArray(items).filter((item) => {
+    return item && typeof item === "object" && !Array.isArray(item);
+  });
+}
+
+/* =========================================================
+   DEFAULTS
+========================================================= */
+
+function createDefaultCreateDraft() {
+  return {
+    subject: "",
+    asunto: "",
+    title: "",
+
+    description: "",
+    descripcion: "",
+    message: "",
+
+    priority: "medium",
+    prioridad: "medium",
+
+    status: "open",
+    estado: "open",
+
+    clientName: "",
+    clientEmail: "",
+    clienteId: "",
+    userId: "",
+
+    assignedTo: "",
+    category: "",
+    categoria: "",
+    source: "panel",
+    origen: "panel",
+    tags: "",
+
+    facturaId: "",
+    invoiceId: "",
+    numeroFacturaLegal: "",
+
+    notifyClient: true,
+    internalOnly: false,
+
+    attachments: [],
+  };
+}
+
 function normalizeCreateDraft(value = {}) {
   const draft = safeObject(value);
   const base = createDefaultCreateDraft();
 
-  const subject = safeText(first(draft.subject, draft.asunto, draft.title), base.subject);
-
+  const subject = safeText(first(draft.subject, draft.asunto, draft.title), "");
   const description = safeText(
-    first(
-      draft.description,
-      draft.descripcion,
-      draft.message,
-      draft.body,
-      draft.preview
-    ),
-    base.description
+    first(draft.description, draft.descripcion, draft.message, draft.body, draft.preview),
+    ""
   );
+  const priority = normalizePriority(first(draft.priority, draft.prioridad, base.priority));
+  const status = normalizeStatus(first(draft.status, draft.estado, base.status));
+  const category = safeText(first(draft.category, draft.categoria, draft.tipo, base.category), "");
+  const source = safeText(first(draft.source, draft.origen, base.source), base.source);
 
   return {
     ...base,
@@ -456,65 +393,64 @@ function normalizeCreateDraft(value = {}) {
     descripcion: description,
     message: safeText(first(draft.message, description), description),
 
-    priority: normalizePriority(first(draft.priority, draft.prioridad, base.priority)),
-    prioridad: normalizePriority(first(draft.priority, draft.prioridad, base.priority)),
+    priority,
+    prioridad: priority,
 
-    status: normalizeStatus(first(draft.status, draft.estado, base.status)),
-    estado: normalizeStatus(first(draft.status, draft.estado, base.status)),
+    status,
+    estado: status,
 
     clientName: safeText(
-      first(
-        draft.clientName,
-        draft.clienteNombre,
-        draft.name,
-        draft.cliente?.name,
-        draft.cliente?.nombre,
-        base.clientName
-      ),
-      base.clientName
+      first(draft.clientName, draft.clienteNombre, draft.name, draft.cliente?.name, draft.cliente?.nombre, ""),
+      ""
     ),
 
     clientEmail: safeText(
-      first(
-        draft.clientEmail,
-        draft.clienteEmail,
-        draft.email,
-        draft.cliente?.email,
-        base.clientEmail
-      ),
-      base.clientEmail
+      first(draft.clientEmail, draft.clienteEmail, draft.email, draft.cliente?.email, ""),
+      ""
     ),
 
-    clienteId: safeText(first(draft.clienteId, draft.cliente?.id, base.clienteId), ""),
-    userId: safeText(first(draft.userId, draft.cliente?.userId, base.userId), ""),
+    clienteId: safeText(first(draft.clienteId, draft.cliente?.id, ""), ""),
+    userId: safeText(first(draft.userId, draft.cliente?.userId, ""), ""),
 
-    assignedTo: safeText(first(draft.assignedTo, draft.tecnico, base.assignedTo), base.assignedTo),
+    assignedTo: safeText(first(draft.assignedTo, draft.tecnico, ""), ""),
 
-    category: safeText(
-      first(draft.category, draft.categoria, draft.tipo, base.category),
-      base.category
-    ),
+    category,
+    categoria: category,
 
-    categoria: safeText(
-      first(draft.categoria, draft.category, draft.tipo, base.category),
-      base.category
-    ),
-
-    source: safeText(first(draft.source, draft.origen, base.source), base.source),
-    origen: safeText(first(draft.origen, draft.source, base.source), base.source),
+    source,
+    origen: source,
 
     tags: Array.isArray(draft.tags)
       ? draft.tags.map((tag) => safeText(tag, "")).filter(Boolean).join(",")
-      : safeText(draft.tags, base.tags),
+      : safeText(draft.tags, ""),
 
-    facturaId: safeText(first(draft.facturaId, draft.invoiceId, base.facturaId), ""),
-    invoiceId: safeText(first(draft.invoiceId, draft.facturaId, base.invoiceId), ""),
+    facturaId: safeText(first(draft.facturaId, draft.invoiceId, ""), ""),
+    invoiceId: safeText(first(draft.invoiceId, draft.facturaId, ""), ""),
     numeroFacturaLegal: safeText(draft.numeroFacturaLegal, ""),
 
-    notifyClient: safeBoolean(draft.notifyClient, base.notifyClient),
-    internalOnly: safeBoolean(draft.internalOnly, base.internalOnly),
+    notifyClient: safeBoolean(draft.notifyClient, true),
+    internalOnly: safeBoolean(draft.internalOnly, false),
 
     attachments: safeArray(draft.attachments),
+  };
+}
+
+function createDefaultCreateViewState() {
+  return {
+    form: createDefaultCreateDraft(),
+    errors: {},
+    touched: {},
+
+    submitting: false,
+    validating: false,
+
+    serverError: "",
+    createdTicketId: "",
+    successMessage: "",
+
+    startedAt: 0,
+    submittedAt: 0,
+    completedAt: 0,
   };
 }
 
@@ -523,105 +459,172 @@ function normalizeCreateViewState(value = {}) {
   const base = createDefaultCreateViewState();
 
   return {
-    form: normalizeCreateDraft(firstDefined(state.form, base.form)),
+    form: normalizeCreateDraft(first(state.form, base.form)),
 
     errors: safeObject(state.errors),
     touched: safeObject(state.touched),
 
-    submitting: safeBoolean(state.submitting, base.submitting),
-    validating: safeBoolean(state.validating, base.validating),
+    submitting: safeBoolean(state.submitting, false),
+    validating: safeBoolean(state.validating, false),
 
-    serverError: safeText(state.serverError, base.serverError),
-    createdTicketId: safeText(state.createdTicketId, base.createdTicketId),
-    successMessage: safeText(state.successMessage, base.successMessage),
+    serverError: safeText(state.serverError, ""),
+    createdTicketId: safeText(state.createdTicketId, ""),
+    successMessage: safeText(state.successMessage, ""),
 
-    startedAt: safeTimestamp(state.startedAt, base.startedAt),
-    submittedAt: safeTimestamp(state.submittedAt, base.submittedAt),
-    completedAt: safeTimestamp(state.completedAt, base.completedAt),
+    startedAt: safeTimestamp(state.startedAt, 0),
+    submittedAt: safeTimestamp(state.submittedAt, 0),
+    completedAt: safeTimestamp(state.completedAt, 0),
+  };
+}
+
+function createDefaultDetailState() {
+  return {
+    open: false,
+    ticketId: "",
+    item: null,
+
+    loading: false,
+    refreshing: false,
+    error: "",
+
+    lastLoadedAt: 0,
+    lastUpdatedAt: 0,
   };
 }
 
 function normalizeDetailState(value = {}) {
   const state = safeObject(value);
-  const base = createDefaultDetailState();
 
   return {
-    open: safeBoolean(state.open, base.open),
-
-    ticketId: safeText(state.ticketId, base.ticketId),
+    open: safeBoolean(state.open, false),
+    ticketId: safeText(state.ticketId, ""),
     item: state.item || null,
 
-    loading: safeBoolean(state.loading, base.loading),
-    refreshing: safeBoolean(state.refreshing, base.refreshing),
-    error: safeText(state.error, base.error),
+    loading: safeBoolean(state.loading, false),
+    refreshing: safeBoolean(state.refreshing, false),
+    error: safeText(state.error, ""),
 
-    lastLoadedAt: safeTimestamp(state.lastLoadedAt, base.lastLoadedAt),
-    lastUpdatedAt: safeTimestamp(state.lastUpdatedAt, base.lastUpdatedAt),
+    lastLoadedAt: safeTimestamp(state.lastLoadedAt, 0),
+    lastUpdatedAt: safeTimestamp(state.lastUpdatedAt, 0),
+  };
+}
+
+function createDefaultMutationState() {
+  return {
+    commenting: false,
+    uploading: false,
+    reopening: false,
+    updating: false,
+    exporting: false,
+
+    commentTicketId: "",
+    uploadTicketId: "",
+    reopenTicketId: "",
+    updateTicketId: "",
+
+    lastMutationAt: 0,
+    lastMutationType: "",
+    lastMutationTicketId: "",
   };
 }
 
 function normalizeMutationState(value = {}) {
   const state = safeObject(value);
-  const base = createDefaultMutationState();
 
   return {
-    commenting: safeBoolean(state.commenting, base.commenting),
-    uploading: safeBoolean(state.uploading, base.uploading),
-    reopening: safeBoolean(state.reopening, base.reopening),
-    updating: safeBoolean(state.updating, base.updating),
-    exporting: safeBoolean(state.exporting, base.exporting),
+    commenting: safeBoolean(state.commenting, false),
+    uploading: safeBoolean(state.uploading, false),
+    reopening: safeBoolean(state.reopening, false),
+    updating: safeBoolean(state.updating, false),
+    exporting: safeBoolean(state.exporting, false),
 
-    commentTicketId: safeText(state.commentTicketId, base.commentTicketId),
-    uploadTicketId: safeText(state.uploadTicketId, base.uploadTicketId),
-    reopenTicketId: safeText(state.reopenTicketId, base.reopenTicketId),
-    updateTicketId: safeText(state.updateTicketId, base.updateTicketId),
+    commentTicketId: safeText(state.commentTicketId, ""),
+    uploadTicketId: safeText(state.uploadTicketId, ""),
+    reopenTicketId: safeText(state.reopenTicketId, ""),
+    updateTicketId: safeText(state.updateTicketId, ""),
 
-    lastMutationAt: safeTimestamp(state.lastMutationAt, base.lastMutationAt),
-    lastMutationType: safeText(state.lastMutationType, base.lastMutationType),
-    lastMutationTicketId: safeText(state.lastMutationTicketId, base.lastMutationTicketId),
+    lastMutationAt: safeTimestamp(state.lastMutationAt, 0),
+    lastMutationType: safeText(state.lastMutationType, ""),
+    lastMutationTicketId: safeText(state.lastMutationTicketId, ""),
   };
 }
 
-function normalizeFilters(value = {}) {
-  const filters = safeObject(value);
-  const base = createDefaultFilters();
-
+function createInitialIncidenciasState() {
   return {
-    ...base,
-    ...filters,
+    hydrated: false,
+    loading: false,
+    refreshing: false,
+    loaded: false,
 
-    q: safeText(first(filters.q, filters.search, filters.query, base.q), ""),
-    search: safeText(first(filters.search, filters.q, filters.query, base.q), ""),
-    query: safeText(first(filters.query, filters.q, filters.search, base.q), ""),
+    creating: false,
+    openingTicketId: "",
+    selectedTicketId: "",
 
-    status: safeText(filters.status, base.status),
-    estado: safeText(first(filters.estado, filters.status, ""), ""),
+    error: "",
+    errorAt: 0,
 
-    priority: safeText(filters.priority, base.priority),
-    prioridad: safeText(first(filters.prioridad, filters.priority, ""), ""),
+    items: [],
+    remoteCount: 0,
+    lastSyncAt: 0,
 
-    categoria: safeText(first(filters.categoria, filters.category, filters.tipo, base.categoria), ""),
-    category: safeText(first(filters.category, filters.categoria, filters.tipo, base.categoria), ""),
-    tipo: safeText(first(filters.tipo, filters.categoria, filters.category, ""), ""),
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
 
-    assigned: safeText(filters.assigned, base.assigned),
+    sort: DEFAULT_SORT,
+    filters: normalizeFilters(DEFAULT_FILTERS),
 
-    closed:
-      filters.closed === null || filters.closed === undefined
-        ? null
-        : safeBoolean(filters.closed, false),
+    filter: DEFAULT_LIST_FILTER,
+    activeFilter: DEFAULT_LIST_FILTER,
+    statusFilter: DEFAULT_LIST_FILTER,
 
-    active: safeBoolean(filters.active, base.active),
-    withAttachments: safeBoolean(filters.withAttachments, base.withAttachments),
-    withComments: safeBoolean(filters.withComments, base.withComments),
-    withInvoices: safeBoolean(filters.withInvoices, base.withInvoices),
+    search: "",
+    searchQuery: "",
+    filterQuery: "",
+    query: "",
+    q: "",
+
+    requestId: 0,
+    activeRequestId: 0,
+    lastRequestStartedAt: 0,
+    lastRequestFinishedAt: 0,
+
+    createDraft: createDefaultCreateDraft(),
+    createView: createDefaultCreateViewState(),
+
+    detail: createDefaultDetailState(),
+    mutations: createDefaultMutationState(),
+
+    cache: {
+      restored: false,
+      restoredAt: 0,
+      savedAt: 0,
+      fresh: false,
+    },
   };
 }
 
-function normalizeItems(items = []) {
-  return safeArray(items).filter((item) => {
-    return item && typeof item === "object" && !Array.isArray(item);
-  });
+/* =========================================================
+   STATE
+========================================================= */
+
+export const incidenciasState = createInitialIncidenciasState();
+
+let inflightLoad = null;
+
+/* =========================================================
+   INTERNAL STATE HELPERS
+========================================================= */
+
+function getTotalPages(total = 0, pageSize = DEFAULT_PAGE_SIZE) {
+  const size = clamp(pageSize, 1, MAX_PAGE_SIZE);
+  return Math.max(1, Math.ceil(Math.max(0, safeNumber(total, 0)) / size));
+}
+
+function clampPage(page = 1, total = 0, pageSize = DEFAULT_PAGE_SIZE) {
+  const current = Math.max(1, safeNumber(page, 1));
+  const totalPages = getTotalPages(total, pageSize);
+
+  return Math.min(current, totalPages);
 }
 
 function normalizePageState() {
@@ -630,17 +633,8 @@ function normalizePageState() {
     safeArray(incidenciasState.items).length
   );
 
-  incidenciasState.pageSize = clamp(
-    incidenciasState.pageSize,
-    1,
-    MAX_PAGE_SIZE
-  );
-
-  incidenciasState.page = clampPage(
-    incidenciasState.page,
-    total,
-    incidenciasState.pageSize
-  );
+  incidenciasState.pageSize = clamp(incidenciasState.pageSize, 1, MAX_PAGE_SIZE);
+  incidenciasState.page = clampPage(incidenciasState.page, total, incidenciasState.pageSize);
 
   return {
     page: incidenciasState.page,
@@ -650,22 +644,70 @@ function normalizePageState() {
   };
 }
 
-function markLoaded() {
-  incidenciasState.loaded = true;
-  incidenciasState.hydrated = true;
-  incidenciasState.loading = false;
-  incidenciasState.refreshing = false;
+function syncRootFilterAliases(value = {}) {
+  const filters = normalizeFilters(value);
 
-  finishRequest();
+  incidenciasState.filters = filters;
 
-  return incidenciasState;
+  incidenciasState.filter = filters.filter;
+  incidenciasState.activeFilter = filters.activeFilter;
+  incidenciasState.statusFilter = filters.statusFilter;
+
+  incidenciasState.search = filters.query;
+  incidenciasState.searchQuery = filters.query;
+  incidenciasState.filterQuery = filters.query;
+  incidenciasState.query = filters.query;
+  incidenciasState.q = filters.query;
+
+  return filters;
+}
+
+function getCurrentFiltersForSnapshot() {
+  return normalizeFilters({
+    ...safeObject(incidenciasState.filters),
+    filter: first(incidenciasState.activeFilter, incidenciasState.filter, incidenciasState.statusFilter),
+    activeFilter: first(incidenciasState.activeFilter, incidenciasState.filter, incidenciasState.statusFilter),
+    statusFilter: first(incidenciasState.statusFilter, incidenciasState.activeFilter, incidenciasState.filter),
+    q: first(incidenciasState.searchQuery, incidenciasState.filterQuery, incidenciasState.query, incidenciasState.q),
+    search: first(incidenciasState.searchQuery, incidenciasState.filterQuery, incidenciasState.query, incidenciasState.q),
+    query: first(incidenciasState.query, incidenciasState.searchQuery, incidenciasState.filterQuery, incidenciasState.q),
+  });
+}
+
+function touchRequestId() {
+  incidenciasState.requestId += 1;
+  incidenciasState.activeRequestId = incidenciasState.requestId;
+  incidenciasState.lastRequestStartedAt = now();
+
+  return incidenciasState.requestId;
+}
+
+function finishRequest(requestId = incidenciasState.activeRequestId) {
+  if (
+    requestId &&
+    incidenciasState.activeRequestId &&
+    requestId !== incidenciasState.activeRequestId
+  ) {
+    return false;
+  }
+
+  incidenciasState.lastRequestFinishedAt = now();
+
+  return true;
 }
 
 function markIdle() {
   incidenciasState.loading = false;
   incidenciasState.refreshing = false;
-
   finishRequest();
+
+  return incidenciasState;
+}
+
+function markLoaded() {
+  incidenciasState.loaded = true;
+  incidenciasState.hydrated = true;
+  markIdle();
 
   return incidenciasState;
 }
@@ -690,6 +732,31 @@ function markMutationDone(type = "", ticketId = "") {
   });
 
   return incidenciasState.mutations;
+}
+
+function getItemIdentity(item = {}) {
+  const source = safeObject(item);
+
+  return safeLower(
+    first(
+      source.ticketId,
+      source.id,
+      source._id,
+      source.code,
+      source.ticketCode,
+      source.incidenciaId,
+      source.entityId,
+      source.raw?.ticketId,
+      source.raw?.id,
+      source.raw?._id,
+      source.raw?.code,
+      source.raw?.ticketCode,
+      source.raw?.incidenciaId,
+      source.raw?.entityId,
+      ""
+    ),
+    ""
+  );
 }
 
 /* =========================================================
@@ -719,10 +786,7 @@ export function hasInflightLoad() {
 ========================================================= */
 
 export function resetIncidenciasState() {
-  const next = createInitialIncidenciasState();
-
-  Object.assign(incidenciasState, next);
-
+  Object.assign(incidenciasState, createInitialIncidenciasState());
   inflightLoad = null;
 
   return incidenciasState;
@@ -733,6 +797,7 @@ export function resetIncidenciasRuntimeState() {
   incidenciasState.refreshing = false;
   incidenciasState.creating = false;
   incidenciasState.openingTicketId = "";
+  incidenciasState.selectedTicketId = "";
   incidenciasState.error = "";
   incidenciasState.errorAt = 0;
   incidenciasState.detail = createDefaultDetailState();
@@ -773,9 +838,7 @@ export function beginRequest({
 export function isActiveRequest(requestId = 0) {
   const id = safeNumber(requestId, 0);
 
-  if (!id) return false;
-
-  return id === incidenciasState.activeRequestId;
+  return Boolean(id && id === incidenciasState.activeRequestId);
 }
 
 export function completeRequest(requestId = 0) {
@@ -865,6 +928,7 @@ export function prevPage() {
 
 export function setPageSize(value = DEFAULT_PAGE_SIZE) {
   incidenciasState.pageSize = clamp(value, 1, MAX_PAGE_SIZE);
+  incidenciasState.page = 1;
   normalizePageState();
 
   return incidenciasState.pageSize;
@@ -883,12 +947,7 @@ export function getPaginationState() {
     safeArray(incidenciasState.items).length
   );
 
-  const pageSize = clamp(
-    incidenciasState.pageSize,
-    1,
-    MAX_PAGE_SIZE
-  );
-
+  const pageSize = clamp(incidenciasState.pageSize, 1, MAX_PAGE_SIZE);
   const totalPages = getTotalPages(total, pageSize);
   const page = clampPage(incidenciasState.page, total, pageSize);
 
@@ -911,32 +970,32 @@ export function getPaginationState() {
 ========================================================= */
 
 export function setFilters(value = {}) {
-  incidenciasState.filters = normalizeFilters(value);
+  const filters = syncRootFilterAliases(value);
   resetPage();
 
-  return incidenciasState.filters;
+  return filters;
 }
 
 export function patchFilters(patch = {}) {
-  incidenciasState.filters = normalizeFilters({
-    ...safeObject(incidenciasState.filters),
+  const filters = syncRootFilterAliases({
+    ...getCurrentFiltersForSnapshot(),
     ...safeObject(patch),
   });
 
   resetPage();
 
-  return incidenciasState.filters;
+  return filters;
 }
 
 export function clearFilters() {
-  incidenciasState.filters = createDefaultFilters();
+  const filters = syncRootFilterAliases(DEFAULT_FILTERS);
   resetPage();
 
-  return incidenciasState.filters;
+  return filters;
 }
 
 export function getFilters() {
-  return normalizeFilters(incidenciasState.filters);
+  return getCurrentFiltersForSnapshot();
 }
 
 export function setSort(value = DEFAULT_SORT) {
@@ -961,20 +1020,11 @@ export function setItems(items = [], options = {}) {
   incidenciasState.errorAt = 0;
 
   if (hasOwn(opts, "remoteCount")) {
-    incidenciasState.remoteCount = Math.max(
-      0,
-      safeNumber(opts.remoteCount, list.length)
-    );
+    incidenciasState.remoteCount = Math.max(0, safeNumber(opts.remoteCount, list.length));
   } else if (hasOwn(opts, "total")) {
-    incidenciasState.remoteCount = Math.max(
-      0,
-      safeNumber(opts.total, list.length)
-    );
+    incidenciasState.remoteCount = Math.max(0, safeNumber(opts.total, list.length));
   } else {
-    incidenciasState.remoteCount = Math.max(
-      safeNumber(incidenciasState.remoteCount, 0),
-      list.length
-    );
+    incidenciasState.remoteCount = Math.max(safeNumber(incidenciasState.remoteCount, 0), list.length);
   }
 
   if (hasOwn(opts, "page")) {
@@ -992,7 +1042,7 @@ export function setItems(items = [], options = {}) {
 }
 
 export function patchItemById(ticketId = "", patch = {}) {
-  const id = safeText(ticketId, "");
+  const id = safeLower(ticketId, "");
   const nextPatch = safeObject(patch);
 
   if (!id) {
@@ -1002,18 +1052,7 @@ export function patchItemById(ticketId = "", patch = {}) {
   let updated = false;
 
   incidenciasState.items = safeArray(incidenciasState.items).map((item) => {
-    const candidateIds = [
-      item?.ticketId,
-      item?.id,
-      item?.code,
-      item?.ticketCode,
-      item?.raw?.ticketId,
-      item?.raw?.id,
-    ]
-      .map((value) => safeLower(value, ""))
-      .filter(Boolean);
-
-    if (!candidateIds.includes(safeLower(id))) {
+    if (getItemIdentity(item) !== id) {
       return item;
     }
 
@@ -1038,44 +1077,29 @@ export function patchItemById(ticketId = "", patch = {}) {
 
 export function upsertItem(item = {}) {
   const row = safeObject(item);
-  const id = safeText(first(row.ticketId, row.id, row.code, row.ticketCode), "");
+  const id = getItemIdentity(row);
 
   if (!id) {
     incidenciasState.items = [row, ...safeArray(incidenciasState.items)];
-    incidenciasState.remoteCount = Math.max(
-      safeNumber(incidenciasState.remoteCount, 0),
-      incidenciasState.items.length
-    );
+    incidenciasState.remoteCount = Math.max(safeNumber(incidenciasState.remoteCount, 0), incidenciasState.items.length);
     normalizePageState();
     return incidenciasState.items;
   }
 
-  const lowerId = safeLower(id);
   let found = false;
 
-  incidenciasState.items = safeArray(incidenciasState.items).map((item) => {
-    const candidateIds = [
-      item?.ticketId,
-      item?.id,
-      item?.code,
-      item?.ticketCode,
-      item?.raw?.ticketId,
-      item?.raw?.id,
-    ]
-      .map((value) => safeLower(value, ""))
-      .filter(Boolean);
-
-    if (!candidateIds.includes(lowerId)) {
-      return item;
+  incidenciasState.items = safeArray(incidenciasState.items).map((current) => {
+    if (getItemIdentity(current) !== id) {
+      return current;
     }
 
     found = true;
 
     return {
-      ...safeObject(item),
+      ...safeObject(current),
       ...row,
       raw: {
-        ...safeObject(item?.raw),
+        ...safeObject(current?.raw),
         ...safeObject(row?.raw),
       },
     };
@@ -1085,11 +1109,7 @@ export function upsertItem(item = {}) {
     incidenciasState.items = [row, ...safeArray(incidenciasState.items)];
   }
 
-  incidenciasState.remoteCount = Math.max(
-    safeNumber(incidenciasState.remoteCount, 0),
-    incidenciasState.items.length
-  );
-
+  incidenciasState.remoteCount = Math.max(safeNumber(incidenciasState.remoteCount, 0), incidenciasState.items.length);
   normalizePageState();
 
   return incidenciasState.items;
@@ -1103,26 +1123,12 @@ export function removeItemById(ticketId = "") {
   }
 
   incidenciasState.items = safeArray(incidenciasState.items).filter((item) => {
-    const candidateIds = [
-      item?.ticketId,
-      item?.id,
-      item?.code,
-      item?.ticketCode,
-      item?.raw?.ticketId,
-      item?.raw?.id,
-    ]
-      .map((value) => safeLower(value, ""))
-      .filter(Boolean);
-
-    return !candidateIds.includes(id);
+    return getItemIdentity(item) !== id;
   });
 
   incidenciasState.remoteCount = Math.max(
     0,
-    Math.min(
-      safeNumber(incidenciasState.remoteCount, incidenciasState.items.length),
-      incidenciasState.items.length
-    )
+    Math.min(safeNumber(incidenciasState.remoteCount, incidenciasState.items.length), incidenciasState.items.length)
   );
 
   normalizePageState();
@@ -1146,7 +1152,6 @@ export function clearItems() {
   incidenciasState.items = [];
   incidenciasState.remoteCount = 0;
   incidenciasState.page = 1;
-
   normalizePageState();
 
   return incidenciasState.items;
@@ -1164,7 +1169,7 @@ export function setRemoteCount(value = 0) {
 ========================================================= */
 
 export function setError(value = null) {
-  incidenciasState.error = value ? String(value).trim() : "";
+  incidenciasState.error = value ? safeText(value, "") : "";
   incidenciasState.errorAt = incidenciasState.error ? now() : 0;
 
   if (incidenciasState.error) {
@@ -1221,6 +1226,7 @@ export function openDetail(ticketId = "", item = null) {
   });
 
   incidenciasState.openingTicketId = id;
+  incidenciasState.selectedTicketId = id;
 
   return incidenciasState.detail;
 }
@@ -1240,28 +1246,31 @@ export function closeDetail() {
 }
 
 export function setDetailLoading(value = false, ticketId = "") {
+  const loading = Boolean(value);
+  const id = safeText(ticketId, incidenciasState.detail.ticketId || "");
+
   incidenciasState.detail = normalizeDetailState({
     ...safeObject(incidenciasState.detail),
-    loading: Boolean(value),
+    loading,
     refreshing: false,
-    ticketId: safeText(ticketId, incidenciasState.detail.ticketId),
-    error: value ? "" : incidenciasState.detail.error,
+    ticketId: id,
+    error: loading ? "" : incidenciasState.detail.error,
   });
 
-  incidenciasState.openingTicketId = value
-    ? safeText(ticketId, incidenciasState.detail.ticketId)
-    : "";
+  incidenciasState.openingTicketId = loading ? id : "";
 
   return incidenciasState.detail.loading;
 }
 
 export function setDetailRefreshing(value = false, ticketId = "") {
+  const refreshing = Boolean(value);
+
   incidenciasState.detail = normalizeDetailState({
     ...safeObject(incidenciasState.detail),
-    refreshing: Boolean(value),
+    refreshing,
     loading: false,
-    ticketId: safeText(ticketId, incidenciasState.detail.ticketId),
-    error: value ? "" : incidenciasState.detail.error,
+    ticketId: safeText(ticketId, incidenciasState.detail.ticketId || ""),
+    error: refreshing ? "" : incidenciasState.detail.error,
   });
 
   return incidenciasState.detail.refreshing;
@@ -1269,14 +1278,7 @@ export function setDetailRefreshing(value = false, ticketId = "") {
 
 export function setDetailItem(item = null, ticketId = "") {
   const finalTicketId = safeText(
-    first(
-      ticketId,
-      item?.ticketId,
-      item?.id,
-      item?.code,
-      item?.ticketCode,
-      incidenciasState.detail.ticketId
-    ),
+    first(ticketId, item?.ticketId, item?.id, item?.code, item?.ticketCode, incidenciasState.detail.ticketId),
     ""
   );
 
@@ -1293,6 +1295,7 @@ export function setDetailItem(item = null, ticketId = "") {
   });
 
   incidenciasState.openingTicketId = "";
+  incidenciasState.selectedTicketId = finalTicketId;
 
   if (item) {
     upsertItem(item);
@@ -1321,6 +1324,7 @@ export function getDetailState() {
 export function clearDetailState() {
   incidenciasState.detail = createDefaultDetailState();
   incidenciasState.openingTicketId = "";
+  incidenciasState.selectedTicketId = "";
 
   return incidenciasState.detail;
 }
@@ -1453,27 +1457,27 @@ export function patchCreateViewState(patch = {}) {
   const current = normalizeCreateViewState(incidenciasState.createView);
   const nextPatch = safeObject(patch);
 
-  const nextForm = hasOwn(nextPatch, "form")
+  const form = hasOwn(nextPatch, "form")
     ? normalizeCreateDraft({
         ...current.form,
         ...safeObject(nextPatch.form),
       })
     : current.form;
 
-  const nextErrors = hasOwn(nextPatch, "errors")
+  const errors = hasOwn(nextPatch, "errors")
     ? safeObject(nextPatch.errors)
     : current.errors;
 
-  const nextTouched = hasOwn(nextPatch, "touched")
+  const touched = hasOwn(nextPatch, "touched")
     ? safeObject(nextPatch.touched)
     : current.touched;
 
   incidenciasState.createView = normalizeCreateViewState({
     ...current,
     ...nextPatch,
-    form: nextForm,
-    errors: nextErrors,
-    touched: nextTouched,
+    form,
+    errors,
+    touched,
   });
 
   return incidenciasState.createView;
@@ -1481,20 +1485,20 @@ export function patchCreateViewState(patch = {}) {
 
 export function setCreateViewForm(form = {}) {
   const current = normalizeCreateViewState(incidenciasState.createView);
+  const nextForm = normalizeCreateDraft(form);
 
   incidenciasState.createView = normalizeCreateViewState({
     ...current,
-    form: normalizeCreateDraft(form),
+    form: nextForm,
   });
 
-  incidenciasState.createDraft = normalizeCreateDraft(form);
+  incidenciasState.createDraft = nextForm;
 
   return incidenciasState.createView.form;
 }
 
 export function patchCreateViewForm(patch = {}) {
   const current = normalizeCreateViewState(incidenciasState.createView);
-
   const form = normalizeCreateDraft({
     ...current.form,
     ...safeObject(patch),
@@ -1653,6 +1657,8 @@ export function getCreateViewState() {
 ========================================================= */
 
 export function getCachePayload() {
+  const filters = getCurrentFiltersForSnapshot();
+
   return {
     version: CACHE_VERSION,
     savedAt: now(),
@@ -1665,18 +1671,23 @@ export function getCachePayload() {
     pageSize: incidenciasState.pageSize,
 
     sort: incidenciasState.sort,
-    filters: normalizeFilters(incidenciasState.filters),
+    filters,
+
+    filter: filters.filter,
+    activeFilter: filters.activeFilter,
+    statusFilter: filters.statusFilter,
+    searchQuery: filters.query,
   };
 }
 
 export function isCacheFresh(savedAt = 0) {
-  const ts = safeTimestamp(savedAt, 0);
+  const timestamp = safeTimestamp(savedAt, 0);
 
-  if (!ts) {
+  if (!timestamp) {
     return false;
   }
 
-  return now() - ts < CACHE_TTL;
+  return now() - timestamp < CACHE_TTL;
 }
 
 export function isCachePayloadValid(payload = {}) {
@@ -1690,11 +1701,7 @@ export function isCachePayloadValid(payload = {}) {
     return false;
   }
 
-  if (!Array.isArray(data.items)) {
-    return false;
-  }
-
-  return true;
+  return Array.isArray(data.items);
 }
 
 export function writeCachePayload(payload = null) {
@@ -1728,10 +1735,12 @@ export function readCachePayload({
 
   try {
     const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
 
-    const parsed = JSON.parse(raw);
-    const payload = safeObject(parsed);
+    if (!raw) {
+      return null;
+    }
+
+    const payload = safeObject(JSON.parse(raw));
 
     if (!isCachePayloadValid(payload)) {
       return null;
@@ -1785,12 +1794,24 @@ export function hydrateStateFromCache({
   );
 
   incidenciasState.lastSyncAt = safeTimestamp(payload.lastSyncAt, 0);
-
   incidenciasState.page = Math.max(1, safeNumber(payload.page, 1));
   incidenciasState.pageSize = clamp(payload.pageSize, 1, MAX_PAGE_SIZE);
-
   incidenciasState.sort = safeText(payload.sort, DEFAULT_SORT);
-  incidenciasState.filters = normalizeFilters(payload.filters);
+
+  syncRootFilterAliases(
+    first(
+      payload.filters,
+      {
+        filter: payload.filter,
+        activeFilter: payload.activeFilter,
+        statusFilter: payload.statusFilter,
+        q: payload.searchQuery,
+        search: payload.searchQuery,
+        query: payload.searchQuery,
+      },
+      DEFAULT_FILTERS
+    )
+  );
 
   incidenciasState.cache = {
     restored: true,
@@ -1807,10 +1828,11 @@ export function hydrateStateFromCache({
 }
 
 /* =========================================================
-   DEBUG
+   SNAPSHOT
 ========================================================= */
 
 export function getIncidenciasStateSnapshot() {
+  const filters = getCurrentFiltersForSnapshot();
   const createView = normalizeCreateViewState(incidenciasState.createView);
   const detail = normalizeDetailState(incidenciasState.detail);
   const mutations = normalizeMutationState(incidenciasState.mutations);
@@ -1823,7 +1845,8 @@ export function getIncidenciasStateSnapshot() {
     loaded: incidenciasState.loaded,
 
     creating: incidenciasState.creating,
-    openingTicketId: incidenciasState.openingTicketId,
+    openingTicketId: safeText(incidenciasState.openingTicketId, ""),
+    selectedTicketId: safeText(incidenciasState.selectedTicketId, ""),
 
     error: incidenciasState.error,
     errorAt: incidenciasState.errorAt,
@@ -1833,6 +1856,7 @@ export function getIncidenciasStateSnapshot() {
     lastSyncAt: incidenciasState.lastSyncAt,
 
     page: pagination.page,
+    currentPage: pagination.currentPage,
     pageSize: pagination.pageSize,
     totalPages: pagination.totalPages,
     from: pagination.from,
@@ -1841,7 +1865,15 @@ export function getIncidenciasStateSnapshot() {
     hasNext: pagination.hasNext,
 
     sort: incidenciasState.sort,
-    filters: normalizeFilters(incidenciasState.filters),
+    filters,
+
+    filter: filters.filter,
+    activeFilter: filters.activeFilter,
+    statusFilter: filters.statusFilter,
+    search: filters.query,
+    searchQuery: filters.query,
+    filterQuery: filters.query,
+    query: filters.query,
 
     requestId: incidenciasState.requestId,
     activeRequestId: incidenciasState.activeRequestId,

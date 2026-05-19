@@ -5,14 +5,18 @@
    FINAL LAYOUT SYSTEM · PRIVATE SPA · PRO SAAS PANEL
    SHELL · STACKING · SCROLL · MOUNTS · RESPONSIVE
 
-   Arquitectura:
-   - variables.css = tokens base / dark.
-   - light.css     = overrides light.
-   - reset.css     = normalización base.
-   - core.css      = tipografía, helpers, accesibilidad, fatal UX.
-   - layout.css    = layout, stacking, scroll, shell y responsive.
-   - sidebar.css   = sidebar.
-   - topbar.css    = topbar + search command palette.
+   Responsabilidad:
+   - Layout, stacking, scroll, shell y responsive.
+   - Sidebar/topbar tienen mounts propios.
+   - Main queda por debajo de sidebar/topbar.
+   - .main-content es el scroll container real.
+   - El scroll NO empieza debajo/por detrás del topbar.
+   - #app-content sólo compensa tablehead dinámico.
+   - Layout controla el offset horizontal del sidebar.
+   - Sidebar.css NO debe desplazar main/topbar/tablehead.
+   - Layout NO controla search.
+   - Layout NO pinta glass de búsqueda.
+   - Todo lo relacionado con search vive en topbar.css.
 
    Reglas:
    - Sin :root.
@@ -20,15 +24,8 @@
    - Sin paletas locales duplicadas.
    - Sin reset global duplicado.
    - Sin z-index plano para todos los hijos.
-   - Sidebar/topbar tienen mounts propios.
-   - Main queda por debajo de sidebar/topbar.
-   - .main-content es el scroll container real.
-   - El scroll NO empieza debajo/por detrás del topbar.
-   - #app-content sólo compensa tablehead dinámico.
-   - Layout NO controla search.
-   - Layout NO pinta glass de búsqueda.
-   - Layout NO toca body::before/body::after para search.
-   - Todo lo relacionado con search vive en topbar.css.
+   - Sin lógica visual de sidebar.
+   - Sin lógica visual de topbar.
 ========================================================= */
 
 
@@ -53,6 +50,8 @@ body {
   --layout-sidebar-tooltip-safe-z: calc(var(--z-tooltip) + 20);
   --layout-loader-z: var(--z-loader);
 
+  --app-sidebar-current-width: var(--sidebar-width, 260px);
+
   overflow: hidden;
 }
 
@@ -61,6 +60,50 @@ body.app-loading,
 body.app-booting {
   overflow: hidden;
   overscroll-behavior: none;
+}
+
+
+/* =========================================================
+   SIDEBAR WIDTH STATE
+   Contract:
+   - JS puede usar body.sidebar-open / body.sidebar-collapsed.
+   - CSS también detecta el root real con :has().
+   - En móvil el offset siempre es 0.
+========================================================= */
+
+body.sidebar-open {
+  --app-sidebar-current-width: var(--sidebar-width, 260px);
+}
+
+body.sidebar-collapsed {
+  --app-sidebar-current-width: var(--sidebar-collapsed, 72px);
+}
+
+body:has(#sidebar-mount .sidebar.is-open),
+body:has(#sidebar-mount .sidebar[data-open="true"]),
+body:has(#sidebar-mount .sidebar[data-sidebar-state="open"]),
+body:has([data-sidebar-mount] .sidebar.is-open),
+body:has([data-sidebar-mount] .sidebar[data-open="true"]),
+body:has([data-sidebar-mount] .sidebar[data-sidebar-state="open"]) {
+  --app-sidebar-current-width: var(--sidebar-width, 260px);
+}
+
+body:has(#sidebar-mount .sidebar.is-collapsed),
+body:has(#sidebar-mount .sidebar[data-open="false"]),
+body:has(#sidebar-mount .sidebar[data-sidebar-state="collapsed"]),
+body:has([data-sidebar-mount] .sidebar.is-collapsed),
+body:has([data-sidebar-mount] .sidebar[data-open="false"]),
+body:has([data-sidebar-mount] .sidebar[data-sidebar-state="collapsed"]) {
+  --app-sidebar-current-width: var(--sidebar-collapsed, 72px);
+}
+
+body:has(#sidebar-mount .sidebar[hidden]),
+body:has(#sidebar-mount .sidebar.is-hidden),
+body:has(#sidebar-mount .sidebar[aria-hidden="true"]),
+body:has([data-sidebar-mount] .sidebar[hidden]),
+body:has([data-sidebar-mount] .sidebar.is-hidden),
+body:has([data-sidebar-mount] .sidebar[aria-hidden="true"]) {
+  --app-sidebar-current-width: 0px;
 }
 
 
@@ -205,14 +248,6 @@ body.app-booting {
 #topbar-mount > *,
 [data-topbar-mount] > * {
   pointer-events: auto;
-}
-
-body.sidebar-collapsed {
-  --app-sidebar-current-width: var(--sidebar-collapsed);
-}
-
-body.sidebar-open {
-  --app-sidebar-current-width: var(--sidebar-width);
 }
 
 
@@ -375,11 +410,6 @@ body[data-route-mode="auth"] #app-content {
 
 /* =========================================================
    MAIN CONTENT AREA
-   Contract:
-   - Scroll container real.
-   - Empieza debajo del topbar.
-   - El scrollbar no queda tapado por topbar.
-   - No contiene lógica de search.
 ========================================================= */
 
 .main-content {
@@ -448,9 +478,6 @@ body[data-route-mode="auth"] #app-content {
 
 /* =========================================================
    APP CONTENT ROOT
-   Contract:
-   - No compensa topbar.
-   - Sólo compensa tablehead dinámico.
 ========================================================= */
 
 #app-content {
@@ -464,6 +491,8 @@ body[data-route-mode="auth"] #app-content {
   inline-size: 100%;
   min-inline-size: 0;
   min-block-size: 100%;
+
+  margin: 0;
 
   padding-block-start: var(--app-offset-tablehead);
   padding-inline-end: var(--app-safe-right);

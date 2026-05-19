@@ -2,16 +2,21 @@
    ONION SUPPORT — INCIDENCIAS VIEW.CSS
    Archivo: /src/css/views/incidencias/index.css
 
-   INCIDENCIAS LIST VIEW · TOKEN PRO SYSTEM · CSP CLEAN
-   PRODUCTIVO · FACTURAS PARITY · NO CSS IN JS
+   INCIDENCIAS LIST VIEW · GRAPHITE GLASS · PRODUCTIVE SPA
+   TOKEN PRO SYSTEM · CSP CLEAN · NO CSS IN JS
 
    OBJETIVO:
-   - Paridad visual con Facturas.
-   - Header con orden de botones tipo Facturas: Exportar · Crear · Actualizar.
-   - Box de filtros en light theme lavanda premium, no gris.
+   - Vista Incidencias sobria, sólida y premium.
+   - Graphite dark: negros/grises definidos, menos look futurista.
+   - Glass controlado: profundidad limpia, sin neón excesivo.
+   - Paridad funcional con Facturas.
+   - Header con orden: Exportar · Crear · Actualizar.
    - Tabla real blindada.
-   - Sin style inline, sin JS CSS, sin pseudo en <tr>.
+   - Sin style inline.
+   - Sin JS CSS.
+   - Sin pseudo en <tr>.
 ========================================================= */
+
 
 /* =========================================================
    ROOT SCOPE
@@ -19,45 +24,97 @@
 
 :where(.incidencias-view, .incidencias-view-root, [data-incidencias-scope]) {
   --inc-row-accent: var(--accent);
-  --inc-row-accent-soft: var(--accent-soft);
-  --inc-row-accent-bg: color-mix(in srgb, var(--inc-row-accent) 10%, transparent);
+  --inc-row-accent-soft: color-mix(in srgb, var(--inc-row-accent) 10%, transparent);
+  --inc-row-accent-bg: color-mix(in srgb, var(--inc-row-accent) 7%, transparent);
 
   --inc-table-min-width: 1080px;
   --inc-actions-width: 116px;
 
-  --inc-avatar-a: var(--accent);
-  --inc-avatar-b: var(--info);
-  --inc-avatar-bg: linear-gradient(135deg, var(--inc-avatar-a), var(--inc-avatar-b));
+  --inc-graphite-bg:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-3) 68%, transparent),
+      color-mix(in srgb, var(--surface-1) 82%, transparent)
+    ),
+    color-mix(in srgb, var(--main-bg) 92%, #000 8%);
+
+  --inc-graphite-bg-soft:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-3) 46%, transparent),
+      color-mix(in srgb, var(--surface-1) 76%, transparent)
+    ),
+    color-mix(in srgb, var(--surface-1) 88%, #000 12%);
+
+  --inc-graphite-bg-strong:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-4) 38%, transparent),
+      color-mix(in srgb, var(--surface-2) 82%, transparent)
+    ),
+    color-mix(in srgb, var(--surface-2) 90%, #000 10%);
+
+  --inc-graphite-border:
+    color-mix(in srgb, var(--border-default) 86%, transparent);
+
+  --inc-graphite-border-strong:
+    color-mix(in srgb, var(--border-strong) 82%, transparent);
+
+  --inc-graphite-highlight:
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 6%, transparent);
+
+  --inc-graphite-shadow:
+    0 18px 48px color-mix(in srgb, #000 34%, transparent),
+    var(--inc-graphite-highlight);
+
+  --inc-graphite-shadow-soft:
+    0 10px 26px color-mix(in srgb, #000 24%, transparent),
+    var(--inc-graphite-highlight);
+
+  --inc-avatar-a: color-mix(in srgb, var(--accent) 84%, var(--surface-5));
+  --inc-avatar-b: color-mix(in srgb, var(--info) 62%, var(--surface-4));
+  --inc-avatar-bg:
+    linear-gradient(135deg, var(--inc-avatar-a), var(--inc-avatar-b));
 
   --inc-agent-avatar-size: 18px;
 
   --inc-ui-control-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
-    0 1px 2px color-mix(in srgb, #000 5%, transparent);
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 5%, transparent),
+    0 1px 2px color-mix(in srgb, #000 14%, transparent);
 
   --inc-ui-control-shadow-hover:
-    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
-    0 10px 22px color-mix(in srgb, #000 7%, transparent);
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 7%, transparent),
+    0 10px 22px color-mix(in srgb, #000 20%, transparent);
 
   --inc-segment-bg:
-    color-mix(in srgb, var(--surface-glass, var(--badge-bg)) 86%, var(--surface-elevated));
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-3) 58%, transparent),
+      color-mix(in srgb, var(--surface-1) 82%, transparent)
+    ),
+    color-mix(in srgb, var(--surface-glass) 56%, #000 44%);
 
   --inc-segment-border:
-    color-mix(in srgb, var(--border-soft, var(--badge-border)) 84%, transparent);
+    color-mix(in srgb, var(--border-soft) 88%, transparent);
 
   --inc-segment-item-bg: transparent;
   --inc-segment-item-text: var(--text-dim);
-  --inc-segment-item-active-bg: var(--accent-soft);
-  --inc-segment-item-active-text: var(--accent-active);
-  --inc-segment-item-active-border: var(--accent-border);
+  --inc-segment-item-active-bg:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 13%, var(--surface-3)),
+      color-mix(in srgb, var(--accent) 7%, var(--surface-2))
+    );
+  --inc-segment-item-active-text: color-mix(in srgb, var(--text-strong) 88%, var(--accent) 12%);
+  --inc-segment-item-active-border: color-mix(in srgb, var(--accent-border) 62%, var(--border-default));
 
   --inc-segment-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
-    0 1px 2px color-mix(in srgb, #000 4%, transparent);
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 5%, transparent),
+    0 1px 2px color-mix(in srgb, #000 12%, transparent);
 
   --inc-segment-active-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 7%, transparent);
 
   display: grid;
   gap: var(--view-section-gap, var(--space-lg));
@@ -103,6 +160,7 @@
   white-space: nowrap !important;
 }
 
+
 /* =========================================================
    BASE INTERACTION ALIGNMENT
 ========================================================= */
@@ -131,39 +189,85 @@
   outline: none;
   box-shadow:
     var(--focus-ring),
-    0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent) !important;
+    0 0 0 5px color-mix(in srgb, var(--accent) 8%, transparent) !important;
 }
 
+
 /* =========================================================
-   HERO · FACTURAS PARITY
+   HERO · GRAPHITE GLASS
 ========================================================= */
 
 .incidencias-hero {
   position: relative;
   overflow: hidden;
   isolation: isolate;
+
   min-inline-size: 0;
+
   padding: var(--space-xl);
-  border: 1px solid var(--view-hero-border);
+
+  border: 1px solid var(--inc-graphite-border-strong);
   border-radius: var(--view-hero-radius);
+
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 38%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 8%, transparent), transparent 34%),
-    var(--glass-shine),
-    var(--view-hero-bg);
-  box-shadow: var(--view-hero-shadow);
+    radial-gradient(
+      circle at 0% 0%,
+      color-mix(in srgb, var(--accent) 6%, transparent),
+      transparent 36%
+    ),
+    radial-gradient(
+      circle at 100% 0%,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent 32%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 5%, transparent),
+      transparent 40%
+    ),
+    var(--inc-graphite-bg);
+
+  box-shadow: var(--inc-graphite-shadow);
+  backdrop-filter: var(--glass-blur-lg);
+  -webkit-backdrop-filter: var(--glass-blur-lg);
+}
+
+.incidencias-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--text-strong) 3%, transparent),
+      transparent 32%
+    );
+
+  opacity: .72;
 }
 
 .incidencias-hero::after {
   content: "";
   position: absolute;
-  inset: auto -8% -38% 48%;
+  inset: auto -8% -46% 54%;
   z-index: 0;
+
   block-size: 220px;
+
   pointer-events: none;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 9%, transparent), transparent 68%);
-  filter: blur(10px);
-  opacity: .8;
+
+  background:
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--accent) 6%, transparent),
+      transparent 70%
+    );
+
+  filter: blur(12px);
+  opacity: .44;
 }
 
 .incidencias-hero > * {
@@ -187,7 +291,9 @@
 .incidencias-page-title {
   margin: 0;
   max-inline-size: 100%;
+
   color: var(--text-strong);
+
   font-size: clamp(var(--font-3xl), 2.6vw, var(--font-5xl));
   font-weight: var(--view-title-weight);
   letter-spacing: var(--view-title-letter);
@@ -198,7 +304,9 @@
 .incidencias-page-subtitle {
   margin: 0;
   max-inline-size: 880px;
-  color: var(--view-subtitle-color);
+
+  color: color-mix(in srgb, var(--view-subtitle-color) 88%, var(--text) 12%);
+
   font-size: var(--font-lg);
   line-height: var(--line-relaxed);
 }
@@ -207,11 +315,13 @@
   display: flex;
   align-items: flex-start;
   justify-content: flex-end;
+
   gap: var(--space-xs);
+
   flex-wrap: wrap;
 }
 
-/* Orden 1:1 Facturas: Exportar · Crear · Actualizar */
+/* Orden 1:1: Exportar · Crear · Actualizar */
 #incidencias-export-btn {
   order: 1;
 }
@@ -228,9 +338,12 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
+
   gap: var(--space-xs);
+
   margin-block-start: var(--space-md);
 }
+
 
 /* =========================================================
    BUTTONS
@@ -238,28 +351,40 @@
 
 .incidencias-btn {
   appearance: none;
+
   min-block-size: var(--btn-height);
+
   padding-inline: var(--space-md);
+
   border: 1px solid var(--btn-secondary-border);
   border-radius: var(--btn-radius);
+
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
+
   box-shadow: var(--btn-secondary-shadow);
+
   cursor: pointer;
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   gap: var(--space-xs);
+
   font-family: var(--font-family);
   font-size: var(--font-md);
   font-weight: var(--weight-bold);
   line-height: 1;
   text-decoration: none;
   white-space: nowrap;
+
   transition:
     transform var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard),
     filter var(--duration-fast) var(--ease-standard);
 }
@@ -272,12 +397,16 @@
 
 .incidencias-btn:hover {
   transform: translateY(-1px);
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
-  border-color: color-mix(in srgb, var(--btn-secondary-border) 68%, var(--accent-border));
+
+  background: var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
+  color: var(--text-strong);
+
+  border-color:
+    color-mix(in srgb, var(--btn-secondary-border) 74%, var(--border-strong));
+
   box-shadow:
     var(--btn-secondary-shadow),
-    0 10px 22px color-mix(in srgb, #000 7%, transparent);
+    0 10px 22px color-mix(in srgb, #000 18%, transparent);
 }
 
 .incidencias-btn:active {
@@ -285,14 +414,7 @@
 }
 
 .incidencias-btn--primary,
-.incidencias-btn--primary:hover {
-  border-color: var(--btn-primary-border);
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-text);
-  box-shadow: var(--btn-primary-shadow);
-}
-
-/* Actualizar en Incidencias queda morado como Facturas */
+.incidencias-btn--primary:hover,
 #incidencias-refresh-btn,
 #incidencias-refresh-btn:hover {
   border-color: var(--btn-primary-border);
@@ -303,11 +425,16 @@
 
 .incidencias-btn--create,
 .incidencias-btn--create:hover {
-  border-color: color-mix(in srgb, var(--success) 36%, var(--btn-primary-border));
-  background: var(--gradient-success);
+  border-color: color-mix(in srgb, var(--success) 30%, var(--btn-primary-border));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--success) 88%, #fff 12%),
+      color-mix(in srgb, var(--success) 72%, #000 28%)
+    );
   color: var(--text-on-accent);
   box-shadow:
-    0 10px 24px color-mix(in srgb, var(--success), transparent 82%),
+    0 10px 24px color-mix(in srgb, var(--success), transparent 84%),
     var(--shadow-inner);
 }
 
@@ -333,20 +460,34 @@
   opacity: .94;
 }
 
+
 /* =========================================================
    META PILLS
 ========================================================= */
 
 .incidencias-meta-pill {
   min-block-size: calc(30px * var(--ui-scale));
+
   padding-inline: var(--space-sm);
+
   border: 1px solid var(--badge-border);
   border-radius: var(--radius-pill);
-  background: var(--badge-bg);
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent
+    ),
+    var(--badge-bg);
+
   color: var(--badge-text);
+
   display: inline-flex;
   align-items: center;
+
   gap: 7px;
+
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
   letter-spacing: var(--letter-wider);
@@ -362,27 +503,28 @@
 
 .incidencias-meta-pill--success {
   color: var(--success);
-  background: var(--success-bg);
+  background: color-mix(in srgb, var(--success-bg) 76%, var(--badge-bg));
   border-color: var(--border-success);
 }
 
 .incidencias-meta-pill--warning {
   color: var(--warning);
-  background: var(--warning-bg);
+  background: color-mix(in srgb, var(--warning-bg) 76%, var(--badge-bg));
   border-color: var(--border-warning);
 }
 
 .incidencias-meta-pill--danger {
   color: var(--error);
-  background: var(--error-bg);
+  background: color-mix(in srgb, var(--error-bg) 76%, var(--badge-bg));
   border-color: var(--border-error);
 }
 
 .incidencias-meta-pill--info {
   color: var(--info);
-  background: var(--info-bg);
+  background: color-mix(in srgb, var(--info-bg) 76%, var(--badge-bg));
   border-color: var(--border-info);
 }
+
 
 /* =========================================================
    STATS
@@ -391,7 +533,9 @@
 .incidencias-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+
   gap: var(--space-sm);
+
   margin-block-start: var(--space-md);
 }
 
@@ -399,57 +543,81 @@
   --inc-stat-color: var(--accent);
 
   position: relative;
+
   display: grid;
   gap: var(--space-xs);
+
   min-block-size: calc(124px * var(--ui-scale));
+
   padding: var(--space-md) var(--space-lg);
+
   overflow: hidden;
+
   border: 1px solid var(--card-border);
   border-radius: var(--card-radius);
+
   background:
-    var(--glass-shine),
+    radial-gradient(
+      circle at 100% 100%,
+      color-mix(in srgb, var(--inc-stat-color) 7%, transparent),
+      transparent 48%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent 40%
+    ),
     var(--card-bg);
+
   box-shadow: var(--shadow-card);
 }
 
 .incidencias-stat-card::after {
   content: "";
+
   position: absolute;
-  inset: auto -20% -44% auto;
-  inline-size: 120px;
-  block-size: 120px;
+  inset: auto -22% -52% auto;
+
+  inline-size: 128px;
+  block-size: 128px;
+
   border-radius: 50%;
+
   pointer-events: none;
-  background: color-mix(in srgb, var(--inc-stat-color) 16%, transparent);
-  filter: blur(8px);
+
+  background: color-mix(in srgb, var(--inc-stat-color) 8%, transparent);
+
+  filter: blur(10px);
+  opacity: .54;
 }
 
 .incidencias-stat-card--open,
 .incidencias-stat-card--accent {
   --inc-stat-color: var(--accent);
-  border-color: var(--accent-border);
+  border-color: color-mix(in srgb, var(--accent-border) 72%, var(--card-border));
 }
 
 .incidencias-stat-card--closed,
 .incidencias-stat-card--success {
   --inc-stat-color: var(--success);
-  border-color: var(--border-success);
+  border-color: color-mix(in srgb, var(--border-success) 68%, var(--card-border));
 }
 
 .incidencias-stat-card--urgent,
 .incidencias-stat-card--danger {
   --inc-stat-color: var(--error);
-  border-color: var(--border-error);
+  border-color: color-mix(in srgb, var(--border-error) 68%, var(--card-border));
 }
 
 .incidencias-stat-card--amount,
 .incidencias-stat-card--info {
   --inc-stat-color: var(--info);
-  border-color: var(--border-info);
+  border-color: color-mix(in srgb, var(--border-info) 68%, var(--card-border));
 }
 
 .incidencias-stat-label {
   color: var(--text-dim);
+
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
   letter-spacing: var(--letter-wider);
@@ -458,6 +626,7 @@
 
 .incidencias-stat-value {
   color: var(--text-strong);
+
   font-size: clamp(28px, 3vw, var(--font-5xl));
   font-weight: var(--weight-black);
   letter-spacing: var(--letter-tight);
@@ -467,9 +636,11 @@
 
 .incidencias-stat-text {
   color: var(--text-muted);
+
   font-size: var(--font-base);
   line-height: var(--line-normal);
 }
+
 
 /* =========================================================
    HISTORY SHELL
@@ -477,21 +648,35 @@
 
 .incidencias-history {
   min-inline-size: 0;
+
   overflow: hidden;
+
   border: 1px solid var(--data-table-border);
   border-radius: var(--data-table-radius);
+
   background:
-    var(--glass-shine),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent 26%
+    ),
     var(--data-table-bg);
+
   box-shadow: var(--data-table-shadow);
+
+  backdrop-filter: var(--glass-blur-md);
+  -webkit-backdrop-filter: var(--glass-blur-md);
 }
 
 .incidencias-history-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+
   gap: var(--space-md);
   align-items: start;
+
   padding: var(--space-md) var(--space-lg) var(--space-sm);
+
   border-bottom: 1px solid var(--data-table-row-border);
 }
 
@@ -503,7 +688,9 @@
 
 .incidencias-history-title {
   margin: 0;
+
   color: var(--section-title-color);
+
   font-size: var(--section-title-size);
   font-weight: var(--section-title-weight);
   line-height: var(--line-snug);
@@ -511,10 +698,13 @@
 
 .incidencias-history-subtitle {
   margin: 0;
+
   color: var(--section-subtitle-color);
+
   font-size: var(--section-subtitle-size);
   line-height: var(--line-normal);
 }
+
 
 /* =========================================================
    FILTERS / SEARCH
@@ -522,28 +712,41 @@
 
 .incidencias-filters {
   grid-column: 1 / -1;
+
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 430px);
+
   gap: var(--space-sm);
   align-items: center;
+
   min-inline-size: 0;
+
   padding-block-start: var(--space-xs);
 }
 
 .incidencias-filter-pills {
   position: relative;
+
   display: inline-flex;
   align-items: center;
+
   gap: 3px;
+
   min-inline-size: 0;
   max-inline-size: 100%;
+
   padding: 4px;
+
   border: 1px solid var(--inc-segment-border);
   border-radius: var(--radius-pill);
+
   background: var(--inc-segment-bg);
+
   box-shadow: var(--inc-segment-shadow);
+
   overflow-x: auto;
   overflow-y: hidden;
+
   scrollbar-width: none;
 }
 
@@ -553,26 +756,38 @@
 
 .incidencias-filter-pill {
   appearance: none;
+
   position: relative;
   isolation: isolate;
+
   flex: 0 0 auto;
+
   min-block-size: calc(34px * var(--ui-scale));
+
   padding-inline: 12px;
+
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
+
   background: var(--inc-segment-item-bg);
   color: var(--inc-segment-item-text);
+
   box-shadow: none;
+
   cursor: pointer;
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   gap: 7px;
+
   font-family: var(--font-family);
   font-size: var(--font-xs);
   font-weight: var(--weight-black);
   line-height: 1;
   white-space: nowrap;
+
   transition:
     transform var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
@@ -585,21 +800,28 @@
 .incidencias-filter-pill strong {
   min-inline-size: 22px;
   min-block-size: 20px;
+
   padding-inline: 6px;
+
   border-radius: var(--radius-pill);
+
   background: color-mix(in srgb, currentColor 10%, transparent);
   color: inherit;
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   font-size: 10px;
   font-weight: 800;
 }
 
 .incidencias-filter-pill:hover {
   transform: translateY(-1px);
+
   background: transparent;
   color: var(--text-strong);
+
   border-color: transparent;
   box-shadow: none;
 }
@@ -608,8 +830,11 @@
 .incidencias-filter-pill[aria-pressed="true"] {
   background: var(--inc-segment-item-active-bg);
   color: var(--inc-segment-item-active-text);
+
   border-color: var(--inc-segment-item-active-border);
+
   box-shadow: var(--inc-segment-active-shadow);
+
   transform: translateY(0);
 }
 
@@ -617,8 +842,11 @@
 .incidencias-filter-pill[aria-pressed="true"]:hover {
   background: var(--inc-segment-item-active-bg);
   color: var(--inc-segment-item-active-text);
+
   border-color: var(--inc-segment-item-active-border);
+
   box-shadow: var(--inc-segment-active-shadow);
+
   transform: translateY(-1px);
 }
 
@@ -629,22 +857,31 @@
 
 .incidencias-filter-reset {
   appearance: none;
+
   min-block-size: calc(34px * var(--ui-scale));
+
   padding-inline: 11px;
+
   border: 1px solid var(--btn-secondary-border);
   border-radius: var(--radius-pill);
+
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
+
   cursor: pointer;
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   gap: 7px;
+
   font-family: var(--font-family);
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
   line-height: 1;
   white-space: nowrap;
+
   transition:
     transform var(--duration-fast) var(--ease-standard),
     background var(--duration-fast) var(--ease-standard),
@@ -654,7 +891,10 @@
 
 .incidencias-filter-reset:hover {
   transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--btn-secondary-border) 66%, var(--accent-border));
+
+  border-color:
+    color-mix(in srgb, var(--btn-secondary-border) 70%, var(--border-strong));
+
   background: var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
   color: var(--text-strong);
 }
@@ -666,8 +906,10 @@
 
 .incidencias-search {
   position: relative;
+
   display: flex;
   align-items: center;
+
   inline-size: 100%;
   min-inline-size: 0;
 }
@@ -676,8 +918,11 @@
   position: absolute;
   inset-inline-start: 12px;
   inset-block: 0;
+
   color: var(--text-dim);
+
   pointer-events: none;
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -690,20 +935,28 @@
 
 .incidencias-search-input {
   appearance: none;
+
   inline-size: 100%;
   min-inline-size: 0;
   min-block-size: calc(36px * var(--ui-scale));
+
   padding: 0 38px 0 36px;
+
   border: 1px solid var(--input-border);
   border-radius: var(--radius-pill);
+
   background: var(--input-bg);
   color: var(--input-text);
+
   box-shadow: var(--input-shadow);
+
   font-family: var(--font-family);
   font-size: var(--font-xs);
   font-weight: var(--weight-semibold);
   line-height: 1;
+
   outline: none;
+
   transition:
     border-color var(--duration-fast) var(--ease-standard),
     background var(--duration-fast) var(--ease-standard),
@@ -729,21 +982,30 @@
 
 .incidencias-search-clear {
   appearance: none;
+
   position: absolute;
   inset-inline-end: 6px;
   inset-block: 50% auto;
+
   transform: translateY(-50%);
+
   inline-size: 26px;
   block-size: 26px;
+
   padding: 0;
+
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
+
   background: transparent;
   color: var(--text-dim);
+
   cursor: pointer;
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   transition:
     background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
@@ -766,6 +1028,7 @@
   display: none !important;
 }
 
+
 /* =========================================================
    PAGINATION
 ========================================================= */
@@ -774,20 +1037,27 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+
   gap: var(--space-xs);
+
   flex-wrap: wrap;
 }
 
 .incidencias-pagination-status {
   min-block-size: calc(34px * var(--ui-scale));
+
   padding-inline: 10px;
+
   border: 1px solid var(--badge-border);
   border-radius: var(--radius-pill);
+
   background: var(--badge-bg);
   color: var(--text-dim);
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
   white-space: nowrap;
@@ -795,40 +1065,54 @@
 
 .incidencias-pagination-btn {
   appearance: none;
+
   min-block-size: calc(38px * var(--ui-scale));
+
   padding-inline: var(--space-sm);
+
   border: 1px solid var(--btn-secondary-border);
   border-radius: var(--radius-md);
+
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
+
   cursor: pointer;
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   font-family: var(--font-family);
   font-size: var(--font-sm);
   font-weight: var(--weight-bold);
   text-decoration: none;
+
   transition:
     transform var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .incidencias-pagination-btn:hover {
   transform: translateY(-1px);
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
-  border-color: color-mix(in srgb, var(--btn-secondary-border) 70%, var(--accent-border));
+
+  background: var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
+  color: var(--text-strong);
+
+  border-color:
+    color-mix(in srgb, var(--btn-secondary-border) 70%, var(--border-strong));
+
   box-shadow: var(--inc-ui-control-shadow-hover);
 }
 
 .incidencias-pagination-btn.is-active,
 .incidencias-pagination-btn[aria-current="page"] {
   border-color: var(--accent-border-strong);
-  background: var(--accent-soft);
-  color: var(--accent-active);
+  background: color-mix(in srgb, var(--accent-soft) 76%, var(--surface-active));
+  color: color-mix(in srgb, var(--text-strong) 82%, var(--accent) 18%);
 }
 
 .incidencias-pagination-btn[disabled],
@@ -839,12 +1123,14 @@
   transform: none;
 }
 
+
 /* =========================================================
    TABLE WRAP
 ========================================================= */
 
 .incidencias-table-wrap {
   position: relative;
+
   min-block-size: 120px;
   min-inline-size: 0;
 }
@@ -857,10 +1143,13 @@
 .incidencias-table-shell {
   inline-size: 100%;
   max-inline-size: 100%;
+
   overflow-x: auto;
   overflow-y: hidden;
+
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
+
   transition:
     opacity var(--duration-fast) var(--ease-standard),
     filter var(--duration-fast) var(--ease-standard);
@@ -877,9 +1166,11 @@
 .incidencias-table-shell::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: var(--radius-pill);
+
   background: var(--scrollbar-thumb);
   background-clip: padding-box;
 }
+
 
 /* =========================================================
    TABLE LOCK · NO COLUMN LINES
@@ -887,13 +1178,18 @@
 
 .incidencias-table {
   display: table !important;
+
   inline-size: 100%;
   min-inline-size: var(--inc-table-min-width);
+
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
+
   margin: 0;
+
   background: var(--table-bg);
+
   border-inline: 0 !important;
 }
 
@@ -956,10 +1252,21 @@
   position: sticky;
   top: 0;
   z-index: 2;
+
   padding: var(--table-cell-padding-y) var(--table-cell-padding-x);
+
   border-bottom: 1px solid var(--table-head-border);
-  background: var(--data-table-head-bg);
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 3%, transparent),
+      transparent
+    ),
+    var(--data-table-head-bg);
+
   color: var(--data-table-head-text);
+
   font-size: var(--data-table-head-font-size);
   font-weight: var(--data-table-head-font-weight);
   letter-spacing: var(--data-table-head-letter);
@@ -982,10 +1289,15 @@
 
 .incidencias-table tbody td {
   padding: calc(12px * var(--ui-scale)) var(--table-cell-padding-x);
+
   border-bottom: 1px solid var(--data-table-row-border);
+
   background: transparent;
+
   box-shadow: none !important;
+
   vertical-align: middle;
+
   transition: background var(--duration-fast) var(--ease-standard);
 }
 
@@ -994,7 +1306,7 @@
 }
 
 .incidencias-table tbody tr:nth-child(even) > td {
-  background: color-mix(in srgb, var(--surface-elevated) 86%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 62%, transparent);
 }
 
 .incidencias-row {
@@ -1009,13 +1321,13 @@
 }
 
 .incidencias-row:hover > td {
-  background: var(--data-table-row-hover);
+  background: color-mix(in srgb, var(--data-table-row-hover) 92%, var(--inc-row-accent) 3%);
   box-shadow: none !important;
 }
 
 .incidencias-row.is-selected > td,
 .incidencias-row[aria-selected="true"] > td {
-  background: color-mix(in srgb, var(--inc-row-accent) 8%, var(--data-table-row-hover));
+  background: color-mix(in srgb, var(--inc-row-accent) 7%, var(--data-table-row-hover));
   box-shadow: none !important;
 }
 
@@ -1056,18 +1368,26 @@
 
 .incidencias-cell--main::before {
   content: "";
+
   position: absolute;
   inset-block: 12px;
   inset-inline-start: 0;
+
   inline-size: 3px;
+
   border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+
   background: var(--inc-row-accent);
-  opacity: .72;
+
+  opacity: .58;
+
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--inc-row-accent) 8%, transparent),
-    0 0 14px color-mix(in srgb, var(--inc-row-accent) 20%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--inc-row-accent) 6%, transparent),
+    0 0 12px color-mix(in srgb, var(--inc-row-accent) 12%, transparent);
+
   transform: scaleY(.76);
   transform-origin: center;
+
   transition:
     opacity var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-standard);
@@ -1076,7 +1396,7 @@
 .incidencias-row:hover .incidencias-cell--main::before,
 .incidencias-row.is-selected .incidencias-cell--main::before,
 .incidencias-row[aria-selected="true"] .incidencias-cell--main::before {
-  opacity: 1;
+  opacity: .92;
   transform: scaleY(1);
 }
 
@@ -1099,6 +1419,7 @@
   white-space: nowrap;
 }
 
+
 /* =========================================================
    MAIN CELL / AVATAR
 ========================================================= */
@@ -1106,35 +1427,48 @@
 .incidencias-main {
   display: grid;
   grid-template-columns: var(--avatar-size-lg) minmax(0, 1fr);
+
   gap: var(--space-sm);
   align-items: center;
+
   min-inline-size: 0;
 }
 
 .incidencias-avatar {
   position: relative;
+
   inline-size: var(--avatar-size-lg);
   block-size: var(--avatar-size-lg);
   flex: 0 0 var(--avatar-size-lg);
+
   overflow: hidden;
+
   border-radius: var(--radius-pill);
+
   background: var(--inc-avatar-bg);
+
   box-shadow:
-    0 10px 22px color-mix(in srgb, var(--inc-avatar-b) 22%, transparent),
-    0 0 0 3px color-mix(in srgb, var(--inc-avatar-a) 24%, transparent),
+    0 10px 22px color-mix(in srgb, var(--inc-avatar-b) 15%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--inc-avatar-a) 18%, transparent),
     var(--shadow-inner);
+
   transform: translateZ(0);
 }
 
 .incidencias-avatar::after {
   content: "";
+
   position: absolute;
   inset: 0;
+
   border-radius: inherit;
+
   pointer-events: none;
+
   background:
-    radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 34%),
-    linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.08));
+    radial-gradient(circle at 30% 22%, rgba(255,255,255,.34), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.08), rgba(0,0,0,.10));
+
   mix-blend-mode: screen;
 }
 
@@ -1142,9 +1476,12 @@
 .incidencias-avatar img {
   position: relative;
   z-index: 1;
+
   display: block;
+
   inline-size: 100%;
   block-size: 100%;
+
   object-fit: cover;
 }
 
@@ -1152,16 +1489,20 @@
   position: absolute;
   inset: 0;
   z-index: 2;
+
   display: none;
   align-items: center;
   justify-content: center;
+
   color: var(--avatar-text);
+
   font-size: var(--font-2xl);
   font-weight: var(--weight-black);
   letter-spacing: -.035em;
+
   text-shadow:
-    0 1px 2px rgba(0,0,0,.22),
-    0 0 16px rgba(255,255,255,.20);
+    0 1px 2px rgba(0,0,0,.24),
+    0 0 14px rgba(255,255,255,.16);
 }
 
 .incidencias-avatar[data-fallback="true"] .incidencias-avatar-fallback,
@@ -1179,16 +1520,16 @@
   display: none !important;
 }
 
-.incidencias-avatar[data-avatar-tone="0"] { --inc-avatar-a: #7c3aed; --inc-avatar-b: #ec4899; --inc-avatar-bg: linear-gradient(135deg, #7c3aed 0%, #ec4899 100%); }
-.incidencias-avatar[data-avatar-tone="1"] { --inc-avatar-a: #2563eb; --inc-avatar-b: #06b6d4; --inc-avatar-bg: linear-gradient(135deg, #2563eb 0%, #06b6d4 100%); }
-.incidencias-avatar[data-avatar-tone="2"] { --inc-avatar-a: #f97316; --inc-avatar-b: #ef4444; --inc-avatar-bg: linear-gradient(135deg, #f97316 0%, #ef4444 100%); }
-.incidencias-avatar[data-avatar-tone="3"] { --inc-avatar-a: #16a34a; --inc-avatar-b: #14b8a6; --inc-avatar-bg: linear-gradient(135deg, #16a34a 0%, #14b8a6 100%); }
-.incidencias-avatar[data-avatar-tone="4"] { --inc-avatar-a: #db2777; --inc-avatar-b: #9333ea; --inc-avatar-bg: linear-gradient(135deg, #db2777 0%, #9333ea 100%); }
-.incidencias-avatar[data-avatar-tone="5"] { --inc-avatar-a: #ca8a04; --inc-avatar-b: #ea580c; --inc-avatar-bg: linear-gradient(135deg, #ca8a04 0%, #ea580c 100%); }
-.incidencias-avatar[data-avatar-tone="6"] { --inc-avatar-a: #0891b2; --inc-avatar-b: #4f46e5; --inc-avatar-bg: linear-gradient(135deg, #0891b2 0%, #4f46e5 100%); }
-.incidencias-avatar[data-avatar-tone="7"] { --inc-avatar-a: #e11d48; --inc-avatar-b: #f59e0b; --inc-avatar-bg: linear-gradient(135deg, #e11d48 0%, #f59e0b 100%); }
-.incidencias-avatar[data-avatar-tone="8"] { --inc-avatar-a: #0f766e; --inc-avatar-b: #84cc16; --inc-avatar-bg: linear-gradient(135deg, #0f766e 0%, #84cc16 100%); }
-.incidencias-avatar[data-avatar-tone="9"] { --inc-avatar-a: #4338ca; --inc-avatar-b: #c026d3; --inc-avatar-bg: linear-gradient(135deg, #4338ca 0%, #c026d3 100%); }
+.incidencias-avatar[data-avatar-tone="0"] { --inc-avatar-a: #475569; --inc-avatar-b: #334155; --inc-avatar-bg: linear-gradient(135deg, #475569 0%, #334155 100%); }
+.incidencias-avatar[data-avatar-tone="1"] { --inc-avatar-a: #3b82f6; --inc-avatar-b: #334155; --inc-avatar-bg: linear-gradient(135deg, #3b82f6 0%, #334155 100%); }
+.incidencias-avatar[data-avatar-tone="2"] { --inc-avatar-a: #64748b; --inc-avatar-b: #27272a; --inc-avatar-bg: linear-gradient(135deg, #64748b 0%, #27272a 100%); }
+.incidencias-avatar[data-avatar-tone="3"] { --inc-avatar-a: #15803d; --inc-avatar-b: #334155; --inc-avatar-bg: linear-gradient(135deg, #15803d 0%, #334155 100%); }
+.incidencias-avatar[data-avatar-tone="4"] { --inc-avatar-a: #6366f1; --inc-avatar-b: #334155; --inc-avatar-bg: linear-gradient(135deg, #6366f1 0%, #334155 100%); }
+.incidencias-avatar[data-avatar-tone="5"] { --inc-avatar-a: #a16207; --inc-avatar-b: #334155; --inc-avatar-bg: linear-gradient(135deg, #a16207 0%, #334155 100%); }
+.incidencias-avatar[data-avatar-tone="6"] { --inc-avatar-a: #0f766e; --inc-avatar-b: #334155; --inc-avatar-bg: linear-gradient(135deg, #0f766e 0%, #334155 100%); }
+.incidencias-avatar[data-avatar-tone="7"] { --inc-avatar-a: #be123c; --inc-avatar-b: #334155; --inc-avatar-bg: linear-gradient(135deg, #be123c 0%, #334155 100%); }
+.incidencias-avatar[data-avatar-tone="8"] { --inc-avatar-a: #4b5563; --inc-avatar-b: #111827; --inc-avatar-bg: linear-gradient(135deg, #4b5563 0%, #111827 100%); }
+.incidencias-avatar[data-avatar-tone="9"] { --inc-avatar-a: #4338ca; --inc-avatar-b: #334155; --inc-avatar-bg: linear-gradient(135deg, #4338ca 0%, #334155 100%); }
 
 .incidencias-main-copy {
   display: grid;
@@ -1199,14 +1540,19 @@
 .incidencias-ticket-line {
   display: flex;
   align-items: center;
+
   gap: 7px;
+
   min-inline-size: 0;
 }
 
 .incidencias-ticket-id {
   min-inline-size: 0;
+
   overflow: hidden;
+
   color: var(--text-dim);
+
   font-size: var(--font-sm);
   font-weight: var(--weight-bold);
   letter-spacing: .055em;
@@ -1218,16 +1564,23 @@
 
 .incidencias-category-pill {
   flex: 0 1 auto;
+
   max-inline-size: 132px;
   min-block-size: 20px;
+
   padding-inline: 7px;
+
   overflow: hidden;
+
   border: 1px solid var(--badge-border);
   border-radius: var(--radius-pill);
+
   background: var(--badge-bg);
   color: var(--text-dim);
+
   display: inline-flex;
   align-items: center;
+
   font-size: 10px;
   font-weight: 800;
   letter-spacing: .045em;
@@ -1238,12 +1591,16 @@
 
 .incidencias-ticket-subject {
   overflow: hidden;
+
   color: var(--text-strong);
+
   display: -webkit-box;
+
   font-size: var(--font-lg);
   font-weight: var(--weight-black);
   letter-spacing: var(--letter-tight);
   line-height: 1.14;
+
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   text-overflow: ellipsis;
@@ -1251,7 +1608,9 @@
 
 .incidencias-ticket-description {
   overflow: hidden;
+
   color: var(--text-muted);
+
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
   line-height: 1.2;
@@ -1262,10 +1621,15 @@
 .incidencias-client-line {
   display: flex;
   align-items: center;
+
   gap: 5px;
+
   min-inline-size: 0;
+
   overflow: hidden;
+
   color: var(--text-dim);
+
   font-size: var(--font-md);
   line-height: 1.3;
 }
@@ -1273,14 +1637,18 @@
 .incidencias-client-name,
 .incidencias-client-email {
   min-inline-size: 0;
+
   overflow: hidden;
+
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .incidencias-client-name {
   flex: 0 1 auto;
+
   color: var(--text-muted);
+
   font-weight: var(--weight-bold);
 }
 
@@ -1296,9 +1664,12 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
+
   gap: 5px;
+
   margin-block-start: 3px;
 }
+
 
 /* =========================================================
    MINI BADGES / TECH AVATAR / CHIPS
@@ -1307,15 +1678,22 @@
 .incidencias-mini-badge {
   min-block-size: 20px;
   max-inline-size: 190px;
+
   padding-inline: 7px;
+
   border: 1px solid var(--badge-border);
   border-radius: var(--radius-pill);
+
   background: var(--badge-bg);
   color: var(--text-dim);
+
   display: inline-flex;
   align-items: center;
+
   gap: 4px;
+
   overflow: hidden;
+
   font-size: 10px;
   font-weight: 800;
   letter-spacing: .035em;
@@ -1351,6 +1729,7 @@
 
 .incidencias-mini-badge--agent {
   gap: 6px;
+
   color: var(--text-dim);
   background: var(--badge-bg);
   border-color: var(--badge-border);
@@ -1359,36 +1738,52 @@
 .incidencias-mini-badge--current-agent {
   color: var(--text-strong);
   font-weight: var(--weight-black);
-  border-color: color-mix(in srgb, var(--accent-border) 76%, var(--badge-border));
+
+  border-color:
+    color-mix(in srgb, var(--accent-border) 62%, var(--badge-border));
+
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 5%, transparent), transparent 52%),
-    color-mix(in srgb, var(--accent-soft) 42%, var(--badge-bg));
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent 52%
+    ),
+    color-mix(in srgb, var(--accent-soft) 34%, var(--badge-bg));
 }
 
 .incidencias-agent-avatar {
   inline-size: var(--inc-agent-avatar-size);
   block-size: var(--inc-agent-avatar-size);
+
   display: inline-grid;
   place-items: center;
+
   flex: 0 0 var(--inc-agent-avatar-size);
+
   border-radius: var(--radius-pill);
+
   overflow: hidden;
 }
 
 .incidencias-agent-avatar--image {
   position: relative;
+
   background: color-mix(in srgb, var(--surface-elevated) 88%, transparent);
+
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--border) 72%, transparent),
-    0 4px 10px color-mix(in srgb, #000 8%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--border-default) 72%, transparent),
+    0 4px 10px color-mix(in srgb, #000 16%, transparent);
 }
 
 .incidencias-agent-avatar-img {
   position: relative;
   z-index: 1;
+
   display: block;
+
   inline-size: 100%;
   block-size: 100%;
+
   object-fit: cover;
   border-radius: inherit;
 }
@@ -1397,13 +1792,17 @@
   position: absolute;
   inset: 0;
   z-index: 0;
+
   display: none;
   place-items: center;
+
   color: var(--avatar-text);
+
   font-size: 9px;
   font-weight: var(--weight-black);
   line-height: 1;
   letter-spacing: -.03em;
+
   background: var(--gradient-accent);
 }
 
@@ -1438,14 +1837,20 @@
 
 .incidencias-chip {
   min-block-size: var(--chip-height);
+
   padding-inline: var(--space-sm);
+
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
+
   box-shadow: var(--shadow-inner);
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   gap: 7px;
+
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
   letter-spacing: .045em;
@@ -1456,35 +1861,39 @@
 .incidencias-chip-dot {
   inline-size: 6px;
   block-size: 6px;
+
   border-radius: var(--radius-pill);
+
   background: currentColor;
-  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 16%, transparent);
+
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
 }
 
 .incidencias-chip--pending {
   color: var(--warning);
-  background: color-mix(in srgb, var(--warning-bg) 78%, var(--surface-active));
+  background: color-mix(in srgb, var(--warning-bg) 72%, var(--surface-active));
   border-color: var(--border-warning);
 }
 
 .incidencias-chip--open {
-  color: var(--accent-active);
-  background: var(--accent-soft);
+  color: color-mix(in srgb, var(--text-strong) 76%, var(--accent) 24%);
+  background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface-active));
   border-color: var(--accent-border);
 }
 
 .incidencias-chip--progress {
   color: var(--info);
-  background: color-mix(in srgb, var(--info-bg) 78%, var(--surface-active));
+  background: color-mix(in srgb, var(--info-bg) 72%, var(--surface-active));
   border-color: var(--border-info);
 }
 
 .incidencias-chip--resolved,
 .incidencias-chip--closed {
   color: var(--success);
-  background: color-mix(in srgb, var(--success-bg) 78%, var(--surface-active));
+  background: color-mix(in srgb, var(--success-bg) 72%, var(--surface-active));
   border-color: var(--border-success);
 }
+
 
 /* =========================================================
    DATE / AMOUNT / ATTACHMENTS
@@ -1492,7 +1901,9 @@
 
 .incidencias-date-inline {
   display: inline-block;
+
   color: var(--data-table-cell-text);
+
   font-size: var(--font-md);
   font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
@@ -1503,13 +1914,18 @@
 .incidencias-importe {
   min-inline-size: 84px;
   min-block-size: calc(30px * var(--ui-scale));
+
   padding-inline: var(--space-sm);
+
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   gap: 5px;
+
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
   line-height: 1;
@@ -1556,15 +1972,21 @@
 .incidencias-attachments-pill {
   min-inline-size: 48px;
   min-block-size: calc(30px * var(--ui-scale));
+
   padding-inline: var(--space-sm);
+
   border: 1px solid var(--chip-border);
   border-radius: var(--radius-pill);
+
   background: var(--chip-bg);
   color: var(--chip-text);
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   gap: 5px;
+
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
   line-height: 1;
@@ -1576,39 +1998,52 @@
   block-size: 13px;
 }
 
+
 /* =========================================================
    ACTION BUTTONS
 ========================================================= */
 
 .incidencias-detail-btn {
   appearance: none;
+
   inline-size: 100%;
   min-inline-size: 0;
   max-inline-size: var(--inc-actions-width);
   min-block-size: var(--btn-height-sm);
   block-size: var(--btn-height-sm);
+
   padding-inline: 7px;
+
   overflow: hidden;
+
   border: 1px solid var(--btn-secondary-border);
   border-radius: var(--radius-md);
+
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
+
   cursor: pointer;
+
   box-shadow: none;
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   gap: 5px;
+
   font-family: var(--font-family);
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
   line-height: 1;
   white-space: nowrap;
+
   transition:
     border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard),
     filter var(--duration-fast) var(--ease-standard);
 }
@@ -1617,6 +2052,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   flex: 0 0 auto;
 }
 
@@ -1627,15 +2063,21 @@
 
 .incidencias-detail-btn .incidencias-btn-text {
   min-inline-size: 0;
+
   overflow: hidden;
+
   text-overflow: ellipsis;
 }
 
 .incidencias-detail-btn:hover {
   transform: translateY(-1px);
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
-  border-color: color-mix(in srgb, var(--btn-secondary-border) 70%, var(--accent-border));
+
+  background: var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
+  color: var(--text-strong);
+
+  border-color:
+    color-mix(in srgb, var(--btn-secondary-border) 70%, var(--border-strong));
+
   box-shadow: var(--inc-ui-control-shadow-hover);
 }
 
@@ -1648,7 +2090,9 @@
 .incidencias-detail-btn[aria-busy="true"] {
   min-block-size: var(--btn-height-sm);
   block-size: var(--btn-height-sm);
+
   justify-content: center;
+
   cursor: wait;
   opacity: .94;
 }
@@ -1661,16 +2105,20 @@
   filter: saturate(.75);
 }
 
+
 /* =========================================================
    LOADERS
 ========================================================= */
 
 .incidencias-loader-only {
   display: inline-flex;
+
   inline-size: 16px;
   block-size: 16px;
+
   align-items: center;
   justify-content: center;
+
   flex: 0 0 auto;
 }
 
@@ -1678,7 +2126,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   gap: var(--space-xs);
+
   white-space: nowrap;
 }
 
@@ -1689,10 +2139,13 @@
 .incidencias-inline-spinner {
   inline-size: 14px;
   block-size: 14px;
+
   border: 2px solid var(--loader-ring);
   border-top-color: currentColor;
   border-radius: var(--radius-pill);
+
   animation: incidenciasSpin .78s linear infinite;
+
   flex: 0 0 auto;
 }
 
@@ -1700,10 +2153,14 @@
   position: absolute;
   inset: 0;
   z-index: 3;
+
   display: grid;
   place-items: center;
+
   pointer-events: none;
+
   background: color-mix(in srgb, var(--backdrop-bg) 72%, transparent);
+
   backdrop-filter: var(--blur-sm);
   -webkit-backdrop-filter: var(--blur-sm);
 }
@@ -1712,16 +2169,23 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   min-block-size: var(--btn-height);
+
   padding-inline: var(--space-md);
+
   border: 1px solid var(--card-border);
   border-radius: var(--radius-md);
+
   background: var(--popover-bg);
   color: var(--text-soft);
+
   box-shadow: var(--shadow-lg);
+
   font-size: var(--font-md);
   font-weight: var(--weight-bold);
 }
+
 
 /* =========================================================
    TABLE LOADING / SKELETON
@@ -1730,6 +2194,7 @@
 .incidencias-table-loading {
   display: grid;
   gap: var(--space-sm);
+
   padding: var(--space-sm) var(--space-lg) var(--space-md);
 }
 
@@ -1744,6 +2209,7 @@
     108px
     54px
     116px;
+
   gap: var(--space-xs);
   align-items: center;
 }
@@ -1755,23 +2221,37 @@
 
 .incidencias-skeleton {
   position: relative;
+
   overflow: hidden;
+
   border-radius: var(--skeleton-radius);
+
   background: var(--skeleton-bg);
 }
 
 .incidencias-skeleton::after {
   content: "";
+
   position: absolute;
   inset: 0;
+
   transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, var(--skeleton-shine), transparent);
+
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      var(--skeleton-shine),
+      transparent
+    );
+
   animation: incidenciasSkeleton 1.2s var(--ease-standard) infinite;
 }
 
 .incidencias-skeleton--avatar {
   inline-size: var(--avatar-size-lg);
   block-size: var(--avatar-size-lg);
+
   border-radius: var(--radius-pill);
 }
 
@@ -1793,6 +2273,7 @@
 .incidencias-skeleton--pill {
   inline-size: 86px;
   block-size: 30px;
+
   border-radius: var(--radius-pill);
 }
 
@@ -1809,14 +2290,17 @@
 .incidencias-skeleton--attach {
   inline-size: 48px;
   block-size: 30px;
+
   border-radius: var(--radius-pill);
 }
 
 .incidencias-skeleton--btn {
   inline-size: 116px;
   block-size: var(--btn-height-sm);
+
   border-radius: var(--radius-md);
 }
+
 
 /* =========================================================
    EMPTY / ERROR
@@ -1825,19 +2309,26 @@
 .incidencias-empty {
   display: grid;
   justify-items: center;
+
   gap: var(--space-xs);
+
   padding: var(--space-4xl) var(--space-lg) var(--space-5xl);
+
   text-align: center;
 }
 
 .incidencias-empty-icon {
   inline-size: 54px;
   block-size: 54px;
+
   border: 1px solid var(--state-empty-border);
   border-radius: var(--radius-xl);
+
   background: var(--state-empty-bg);
   color: var(--state-empty-icon);
+
   box-shadow: var(--shadow-soft);
+
   display: grid;
   place-items: center;
 }
@@ -1849,7 +2340,9 @@
 
 .incidencias-empty-title {
   margin: 0;
+
   color: var(--text-strong);
+
   font-size: var(--font-2xl);
   font-weight: var(--weight-bold);
 }
@@ -1857,7 +2350,9 @@
 .incidencias-empty-text {
   margin: 0;
   max-inline-size: 58ch;
+
   color: var(--text-muted);
+
   font-size: var(--font-md);
   line-height: var(--line-relaxed);
 }
@@ -1865,43 +2360,67 @@
 .incidencias-error {
   display: grid;
   justify-items: start;
+
   gap: var(--space-xs);
+
   padding: var(--space-xl);
+
   border: 1px solid var(--border-error);
   border-radius: var(--card-radius-lg);
+
   background:
-    var(--glass-shine),
-    color-mix(in srgb, var(--error-bg) 46%, var(--card-bg));
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--error-bg) 38%, transparent),
+      transparent 42%
+    ),
+    color-mix(in srgb, var(--error-bg) 34%, var(--card-bg));
+
   box-shadow: var(--shadow-sm);
 }
 
 .incidencias-error-title {
   margin: 0;
+
   color: var(--text-strong);
+
   font-size: var(--font-2xl);
   font-weight: var(--weight-bold);
 }
 
 .incidencias-error-text {
   margin: 0;
+
   color: var(--text-muted);
+
   font-size: var(--font-md);
   line-height: var(--line-relaxed);
 }
 
 .incidencias-error-banner {
   margin: var(--space-sm) 0 0;
+
   padding: var(--space-sm) var(--space-md);
+
   border: 1px solid var(--border-error);
   border-radius: var(--radius-lg);
+
   background:
-    var(--glass-shine),
-    color-mix(in srgb, var(--error-bg) 56%, var(--card-bg));
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--error-bg) 42%, transparent),
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--error-bg) 42%, var(--card-bg));
+
   color: var(--error);
+
   box-shadow: var(--shadow-sm);
+
   font-size: var(--font-sm);
   font-weight: var(--weight-bold);
 }
+
 
 /* =========================================================
    UI.CSS COLLISION GUARD
@@ -1925,51 +2444,53 @@
   border-inline: 0 !important;
 }
 
+
 /* =========================================================
-   LIGHT THEME FIT · NO GREY FILTER BOX
+   LIGHT THEME FIT
 ========================================================= */
 
 [data-theme="light"] :where(.incidencias-view, .incidencias-view-root, [data-incidencias-scope]) {
   --inc-segment-bg:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--accent, #6f59d9) 12%, #ffffff 88%),
-      color-mix(in srgb, var(--accent, #6f59d9) 7%, #ffffff 93%)
+      color-mix(in srgb, var(--accent) 10%, #ffffff 90%),
+      color-mix(in srgb, var(--accent) 6%, #ffffff 94%)
     );
 
   --inc-segment-border:
-    color-mix(in srgb, var(--accent, #6f59d9) 26%, var(--border-soft, #dfe4ee) 74%);
+    color-mix(in srgb, var(--accent) 24%, var(--border-soft) 76%);
 
   --inc-segment-item-text:
-    color-mix(in srgb, var(--text-dim, #667085) 86%, var(--accent, #6f59d9) 14%);
+    color-mix(in srgb, var(--text-dim) 88%, var(--accent) 12%);
 
   --inc-segment-item-active-bg:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--accent, #6f59d9) 20%, #ffffff 80%),
-      color-mix(in srgb, var(--accent, #6f59d9) 13%, #ffffff 87%)
+      color-mix(in srgb, var(--accent) 18%, #ffffff 82%),
+      color-mix(in srgb, var(--accent) 11%, #ffffff 89%)
     );
 
   --inc-segment-item-active-text: var(--accent-active, var(--accent));
+
   --inc-segment-item-active-border:
-    color-mix(in srgb, var(--accent, #6f59d9) 42%, transparent);
+    color-mix(in srgb, var(--accent) 40%, transparent);
 
   --inc-segment-shadow:
-    inset 0 1px 0 rgba(255,255,255,.92),
+    inset 0 1px 0 rgba(255,255,255,.90),
     0 1px 2px rgba(32,43,72,.035),
-    0 10px 28px color-mix(in srgb, var(--accent, #6f59d9) 8%, transparent);
+    0 10px 28px color-mix(in srgb, var(--accent) 7%, transparent);
 
   --inc-segment-active-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent, #6f59d9) 13%, transparent),
-    inset 0 1px 0 rgba(255,255,255,.88),
-    0 8px 18px color-mix(in srgb, var(--accent, #6f59d9) 13%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent),
+    inset 0 1px 0 rgba(255,255,255,.86),
+    0 8px 18px color-mix(in srgb, var(--accent) 11%, transparent);
 }
 
 [data-theme="light"] .incidencias-hero,
 [data-theme="light"] .incidencias-history {
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 38%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 7%, transparent), transparent 34%),
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 38%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 6%, transparent), transparent 34%),
     var(--glass-shine),
     var(--view-hero-bg);
 }
@@ -1991,7 +2512,7 @@
 }
 
 [data-theme="light"] .incidencias-filter-pill:hover {
-  background: color-mix(in srgb, var(--accent, #6f59d9) 6%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
   color: var(--text-strong);
 }
 
@@ -2006,8 +2527,8 @@
 [data-theme="light"] .incidencias-filter-pill.is-active strong,
 [data-theme="light"] .incidencias-filter-pill[aria-pressed="true"] strong {
   color: var(--accent-active, var(--accent));
-  background: color-mix(in srgb, var(--accent, #6f59d9) 14%, #ffffff 86%);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #6f59d9) 16%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, #ffffff 86%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 [data-theme="light"] .incidencias-table tbody tr:nth-child(even) > td {
@@ -2118,13 +2639,19 @@
   color: var(--btn-primary-text);
 }
 
+
 /* =========================================================
    DARK THEME FIT
 ========================================================= */
 
 [data-theme="dark"] .incidencias-filter-pills {
   background:
-    color-mix(in srgb, var(--surface-glass, var(--badge-bg)) 76%, #000);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-3) 50%, transparent),
+      color-mix(in srgb, var(--surface-1) 82%, transparent)
+    ),
+    color-mix(in srgb, var(--surface-glass) 58%, #000);
 }
 
 [data-theme="dark"] .incidencias-filter-pill:hover {
@@ -2134,15 +2661,17 @@
 
 [data-theme="dark"] .incidencias-filter-pill.is-active,
 [data-theme="dark"] .incidencias-filter-pill[aria-pressed="true"] {
-  background: var(--accent-soft);
-  color: var(--accent-active);
-  border-color: var(--accent-border);
+  background: var(--inc-segment-item-active-bg);
+  color: var(--inc-segment-item-active-text);
+  border-color: var(--inc-segment-item-active-border);
 }
 
 [data-theme="dark"] .incidencias-row:hover > td {
-  background: color-mix(in srgb, var(--data-table-row-hover) 88%, var(--inc-row-accent) 4%);
+  background:
+    color-mix(in srgb, var(--data-table-row-hover) 90%, var(--inc-row-accent) 3%);
   box-shadow: none !important;
 }
+
 
 /* =========================================================
    RESPONSIVE
@@ -2278,6 +2807,7 @@
   }
 }
 
+
 /* =========================================================
    CONTAINER QUERIES
 ========================================================= */
@@ -2291,6 +2821,7 @@
     justify-content: flex-start;
   }
 }
+
 
 /* =========================================================
    PRINT
@@ -2321,6 +2852,7 @@
   }
 }
 
+
 /* =========================================================
    MOTION
 ========================================================= */
@@ -2341,6 +2873,7 @@
     transform: none !important;
   }
 }
+
 
 /* =========================================================
    KEYFRAMES

@@ -8,6 +8,7 @@
    - Pintar título de ruta en formato Onion {Vista}.
    - Resolver /@{user.slug} como Onion Home visual.
    - Renderizar search del topbar.
+   - Conectar buscador local delegado en topbar.search.js.
    - No renderizar saludo, usuario ni salida.
    - No renderizar botón hamburguesa.
    - Sin Store.
@@ -16,7 +17,6 @@
    - Sin Auth.
    - Sin logout.
    - Sin sidebar bridge activo.
-   - Sin submódulos.
    - Sin rebind storms.
    - Sin CustomEvent.
    - Sin magia negra.
@@ -30,19 +30,42 @@ import {
   resolveRouteLookupPath,
 } from "../../router/routes.js";
 
-export const TOPBAR_UI_VERSION = "topbar.ui.v3";
+import {
+  clearSearchDebounce,
+  clearSearchState,
+  handleSearchKeydown,
+  hideResultsContainer,
+  runSearch,
+} from "./topbar.search.js";
+
+export const TOPBAR_UI_VERSION = "topbar.ui.v4";
 
 const SOURCE = "topbar.ui";
 const APP_NAME = "Onion Support";
 const ONION_PREFIX = "Onion";
 const DEFAULT_VIEW_TITLE = "Home";
+const SEARCH_DEBOUNCE_MS = 110;
 
 let initialized = false;
 let mounted = false;
 let bound = false;
 let root = null;
+let boundRoot = null;
 let cleanupEvents = null;
 let searchValue = "";
+
+const searchRuntime = {
+  cache: new Map(),
+  activeIndex: -1,
+  currentItems: [],
+  currentQuery: "",
+  searchSeq: 0,
+  searchDebounceTimer: null,
+  searchController: null,
+  AppCore: null,
+  Router: null,
+  closeSidebarMobile: null,
+};
 
 /* =========================================================
    SVG ICONS
@@ -390,12 +413,18 @@ function ensureRoot() {
 function getDom() {
   ensureRoot();
 
+  const searchResults =
+    query("#topbar-search-results") ||
+    query("[data-topbar-search-results]") ||
+    query(".topbar-search-results");
+
   return {
     topbar: root,
     title: root?.querySelector?.("[data-topbar-title]") || null,
     search: root?.querySelector?.("[data-topbar-search]") || null,
     searchInput: root?.querySelector?.("[data-topbar-search-input]") || null,
     searchSubmit: root?.querySelector?.("[data-topbar-search-submit]") || null,
+    searchResults,
   };
 }
 
@@ -405,7 +434,6 @@ function getDom() {
 
 const VIEW_TITLES = Object.freeze({
   "/": "Home",
-  "/home": "Home",
   "/incidencias": "Incidencias",
   "/tickets": "Incidencias",
   "/facturas": "Facturas",
@@ -552,6 +580,51 @@ function getSearchValue() {
   return normalizeSearchValue(searchInput?.value || searchValue);
 }
 
+function runCurrentSearch(value = getSearchValue()) {
+  const query = normalizeSearchValue(value);
+
+  void runSearch({
+    AppCore,
+    Router,
+    runtime: searchRuntime,
+    getDom,
+    closeSidebarMobile,
+    query,
+  });
+
+  return true;
+}
+
+function queueSearch(value = getSearchValue()) {
+  const query = normalizeSearchValue(value);
+
+  clearSearchDebounce(searchRuntime);
+
+  if (!query) {
+    clearSearchState(searchRuntime, getDom);
+    return true;
+  }
+
+  const runner = () => {
+    searchRuntime.searchDebounceTimer = null;
+    runCurrentSearch(query);
+  };
+
+  try {
+    searchRuntime.searchDebounceTimer = window.setTimeout(
+      runner,
+      SEARCH_DEBOUNCE_MS
+    );
+  } catch {
+    searchRuntime.searchDebounceTimer = setTimeout(
+      runner,
+      SEARCH_DEBOUNCE_MS
+    );
+  }
+
+  return true;
+}
+
 function setSearchValue(value = "") {
   const next = String(value ?? "");
   const { searchInput } = getDom();
@@ -567,9 +640,12 @@ function setSearchValue(value = "") {
 
 function clearSearch() {
   setSearchValue("");
+  clearSearchState(searchRuntime, getDom);
+
   emit("topbar:search:clear", {
     query: null,
   });
+
   return true;
 }
 
@@ -601,6 +677,8 @@ function submitSearch(value = getSearchValue()) {
     query,
   });
 
+  runCurrentSearch(query);
+
   return true;
 }
 
@@ -618,11 +696,16 @@ function syncSearch() {
 }
 
 function hideSearchResults() {
-  return true;
+  return hideResultsContainer(searchRuntime, getDom);
 }
 
 function clearSearchCache() {
-  return true;
+  try {
+    searchRuntime.cache?.clear?.();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -674,22 +757,83 @@ function onInput(event) {
   if (!event.target?.matches?.("[data-topbar-search-input]")) return;
 
   searchValue = String(event.target.value ?? "");
+  queueSearch(searchValue);
+}
+
+function onKeydown(event) {
+  if (!event.target?.matches?.("[data-topbar-search-input]")) return;
+
+  handleSearchKeydown({
+    event,
+    AppCore,
+    Router,
+    runtime: searchRuntime,
+    getDom,
+    closeSidebarMobile,
+  });
+}
+
+function onFocusIn(event) {
+  if (!event.target?.matches?.("[data-topbar-search-input]")) return;
+
+  const query = getSearchValue();
+
+  if (query) {
+    runCurrentSearch(query);
+  }
+}
+
+function onDocumentPointerDown(event) {
+  const target = event.target;
+  const dom = getDom();
+
+  if (!target) return;
+
+  if (dom.topbar?.contains?.(target)) return;
+  if (dom.searchResults?.contains?.(target)) return;
+
+  hideSearchResults();
 }
 
 function bind() {
-  if (!root || bound) return true;
+  if (!root) return true;
+
+  if (bound && boundRoot === root) return true;
+
+  if (bound && boundRoot !== root) {
+    unbind();
+  }
 
   root.addEventListener("submit", onSubmit);
   root.addEventListener("input", onInput);
+  root.addEventListener("keydown", onKeydown);
+  root.addEventListener("focusin", onFocusIn);
+
+  if (isBrowser()) {
+    document.addEventListener("pointerdown", onDocumentPointerDown, true);
+  }
+
+  boundRoot = root;
 
   cleanupEvents = () => {
+    const targetRoot = boundRoot;
+
     try {
-      root?.removeEventListener?.("submit", onSubmit);
-      root?.removeEventListener?.("input", onInput);
+      targetRoot?.removeEventListener?.("submit", onSubmit);
+      targetRoot?.removeEventListener?.("input", onInput);
+      targetRoot?.removeEventListener?.("keydown", onKeydown);
+      targetRoot?.removeEventListener?.("focusin", onFocusIn);
     } catch {
       // noop
     }
 
+    try {
+      document?.removeEventListener?.("pointerdown", onDocumentPointerDown, true);
+    } catch {
+      // noop
+    }
+
+    boundRoot = null;
     cleanupEvents = null;
   };
 
@@ -702,9 +846,12 @@ function unbind() {
     cleanupEvents?.();
   } catch {
     cleanupEvents = null;
+    boundRoot = null;
   }
 
+  clearSearchDebounce(searchRuntime);
   bound = false;
+
   return true;
 }
 
@@ -764,6 +911,7 @@ function refresh(options = {}) {
 
 function destroy(options = {}) {
   unbind();
+  clearSearchState(searchRuntime, getDom);
 
   if (options.unmount === true && root) {
     clear(root);
@@ -834,8 +982,22 @@ function getDomSnapshot() {
     search: Boolean(dom.search),
     searchInput: Boolean(dom.searchInput),
     searchSubmit: Boolean(dom.searchSubmit),
+    searchResults: Boolean(dom.searchResults),
     sidebarToggle: false,
     user: false,
+  };
+}
+
+function getSearchSnapshot() {
+  return {
+    activeIndex: Number(searchRuntime.activeIndex || -1),
+    resultCount: Array.isArray(searchRuntime.currentItems)
+      ? searchRuntime.currentItems.length
+      : 0,
+    queryLength: String(searchValue || "").length,
+    currentQueryLength: String(searchRuntime.currentQuery || "").length,
+    cacheSize: searchRuntime.cache instanceof Map ? searchRuntime.cache.size : 0,
+    hasDebounce: Boolean(searchRuntime.searchDebounceTimer),
   };
 }
 
@@ -850,6 +1012,8 @@ function getState() {
     title: root?.querySelector?.("[data-topbar-title]")?.textContent || "",
     route: routeLookupPath(currentPath()),
 
+    search: getSearchSnapshot(),
+
     dom: {
       ...getDomSnapshot(),
       hasSvg: Boolean(root?.querySelector?.("svg")),
@@ -861,12 +1025,12 @@ function getState() {
       ownHttp: false,
       ownStore: false,
       ownToast: false,
-      noSubmodules: true,
       noUserChrome: true,
       noLogout: true,
       noSidebarToggle: true,
       searchUi: true,
-      searchRuntime: false,
+      searchRuntime: true,
+      searchLocalOnly: true,
       svgIcons: true,
       canonicalizesUserHomePath: true,
       roles: ["admin", "user"],
@@ -920,6 +1084,8 @@ const api = {
   getSearchValue,
   setSearchValue,
   submitSearch,
+  runSearch: runCurrentSearch,
+  queueSearch,
   hideSearchResults,
   clearSearch,
   focusSearch,
@@ -937,7 +1103,7 @@ const api = {
   getDebugSnapshot: getSnapshot,
 
   get runtime() {
-    return {};
+    return searchRuntime;
   },
 
   get initialized() {

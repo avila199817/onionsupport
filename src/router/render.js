@@ -4,8 +4,9 @@
 
    Responsabilidad:
    - Render DOM mínimo.
-   - Preparar #view-container.
+   - Resolver contenedor principal de vistas.
    - Crear un host estable por navegación.
+   - Exponer el host activo como AppCore.dom.viewContainer.
    - Ejecutar route.render(host, context).
    - Adoptar resultado de vista sólo si es seguro.
    - Inyectar contexto común: AppCore / I18n / t / Toast.
@@ -25,10 +26,9 @@
    - Sin CustomEvent.
    - Sin /403.
    - Sin /404.
-   - Sin magia negra.
 ========================================================= */
 
-export const ROUTER_RENDER_VERSION = "router.render.v3";
+export const ROUTER_RENDER_VERSION = "router.render.v4";
 
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = "/@";
@@ -208,28 +208,55 @@ function normalizeUserSlug(value = "") {
   return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
-function extractSlugFromPath(path = DEFAULT_ROUTE) {
+function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
   const pathname = splitPath(path).pathname;
 
-  if (!pathname.startsWith(USER_HOME_PREFIX)) return "";
+  if (!pathname.startsWith(USER_HOME_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: pathname,
+      lookupPath: pathname,
+    };
+  }
 
-  const slug = pathname.slice(USER_HOME_PREFIX.length);
+  const rest = pathname.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeUserSlug(slugSegment);
 
-  if (!slug || slug.includes("/")) return "";
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: pathname,
+      lookupPath: pathname,
+    };
+  }
 
-  return normalizeUserSlug(slug);
+  const restPath = restSegments.length
+    ? normalizePathname(`/${restSegments.join("/")}`)
+    : DEFAULT_ROUTE;
+
+  return {
+    scoped: true,
+    home: restPath === DEFAULT_ROUTE,
+    slug,
+    restPath,
+    lookupPath: restPath,
+  };
 }
 
-function isUserHomePath(path = DEFAULT_ROUTE) {
-  return Boolean(extractSlugFromPath(path));
+function extractSlugFromPath(path = DEFAULT_ROUTE) {
+  return getUserScopedRouteInfo(path).slug;
 }
 
 function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
   const pathname = splitPath(path).pathname || DEFAULT_ROUTE;
+  const scoped = getUserScopedRouteInfo(pathname);
 
-  return isUserHomePath(pathname)
-    ? DEFAULT_ROUTE
-    : pathname;
+  return scoped.scoped ? scoped.lookupPath : pathname;
 }
 
 function resolvePaths({
@@ -283,6 +310,24 @@ function query(selector = "") {
     return document.querySelector(selector);
   } catch {
     return null;
+  }
+}
+
+function isConnectedNode(node = null) {
+  if (!isBrowser() || !node) return false;
+
+  try {
+    return document.contains(node);
+  } catch {
+    return false;
+  }
+}
+
+function isRouteHost(node = null) {
+  try {
+    return Boolean(node?.getAttribute?.(HOST_ATTR) === "true");
+  } catch {
+    return false;
   }
 }
 
@@ -345,13 +390,8 @@ function create(
 ) {
   const node = document.createElement(tag);
 
-  if (className) {
-    node.className = className;
-  }
-
-  if (textContent) {
-    node.textContent = textContent;
-  }
+  if (className) node.className = className;
+  if (textContent) node.textContent = textContent;
 
   for (const [key, value] of Object.entries(isObject(attrs) ? attrs : {})) {
     setAttr(node, key, value);
@@ -403,14 +443,10 @@ function canPaintNode(target = null, node = null) {
 function paint(target = null, content = null) {
   if (!target) return null;
 
-  if (content === target) {
-    return target;
-  }
+  if (content === target) return target;
 
   if (isNode(content)) {
-    if (!canPaintNode(target, content)) {
-      return target;
-    }
+    if (!canPaintNode(target, content)) return target;
 
     try {
       target.replaceChildren(content);
@@ -439,13 +475,41 @@ function paint(target = null, content = null) {
   return content || null;
 }
 
+/* =========================================================
+   CONTAINERS
+========================================================= */
+
+function getStoredAppContainer(AppCore = null) {
+  const candidates = [
+    AppCore?.dom?.routerViewContainer,
+    AppCore?.dom?.appViewContainer,
+    AppCore?.dom?.rootViewContainer,
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && isConnectedNode(candidate) && !isRouteHost(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 export function getViewContainer(AppCore = null) {
   if (!isBrowser()) return null;
+
+  const storedAppContainer = getStoredAppContainer(AppCore);
+
+  if (storedAppContainer) return storedAppContainer;
 
   try {
     const cached = AppCore?.dom?.viewContainer;
 
-    if (cached && document.contains(cached)) {
+    if (cached && isConnectedNode(cached)) {
+      if (isRouteHost(cached)) {
+        return cached.parentElement || null;
+      }
+
       return cached;
     }
   } catch {
@@ -462,7 +526,12 @@ export function getViewContainer(AppCore = null) {
 
   try {
     if (view && AppCore?.dom) {
-      AppCore.dom.viewContainer = view;
+      AppCore.dom.routerViewContainer = view;
+      AppCore.dom.appViewContainer = view;
+
+      if (!AppCore.dom.viewContainer || !isRouteHost(AppCore.dom.viewContainer)) {
+        AppCore.dom.viewContainer = view;
+      }
     }
   } catch {
     // noop
@@ -477,9 +546,41 @@ function getCurrentHost(AppCore = null) {
   if (!view) return null;
 
   try {
+    const explicitHost = AppCore?.dom?.routerViewHost;
+
+    if (explicitHost && isConnectedNode(explicitHost) && isRouteHost(explicitHost)) {
+      return explicitHost;
+    }
+  } catch {
+    // noop
+  }
+
+  try {
     return view.querySelector(`[${HOST_ATTR}="true"]`);
   } catch {
     return null;
+  }
+}
+
+function exposeActiveHost(AppCore = null, appContainer = null, host = null) {
+  if (!AppCore?.dom || !host) return false;
+
+  try {
+    AppCore.dom.routerViewContainer = appContainer || null;
+    AppCore.dom.appViewContainer = appContainer || null;
+    AppCore.dom.routerViewHost = host;
+    AppCore.dom.viewHost = host;
+
+    /*
+      Contrato importante:
+      muchas vistas existentes pintan en AppCore.dom.viewContainer.
+      Durante una ruta, ese contenedor activo debe ser el host estable.
+    */
+    AppCore.dom.viewContainer = host;
+
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -559,15 +660,7 @@ function prepareHost({
   });
 
   paint(view, host);
-
-  try {
-    if (AppCore?.dom) {
-      AppCore.dom.routerViewHost = host;
-      AppCore.dom.viewHost = host;
-    }
-  } catch {
-    // noop
-  }
+  exposeActiveHost(AppCore, view, host);
 
   return {
     view,
@@ -580,15 +673,10 @@ function adoptResult(target = null, result = null) {
     return result || null;
   }
 
-  if (result === target) {
-    return target;
-  }
+  if (result === target) return target;
 
   if (isNode(result)) {
-    if (!canPaintNode(target, result)) {
-      return target;
-    }
-
+    if (!canPaintNode(target, result)) return target;
     return paint(target, result);
   }
 
@@ -600,14 +688,8 @@ function adoptResult(target = null, result = null) {
     const candidate = result?.[key];
 
     if (!isNode(candidate)) continue;
-
-    if (candidate === target) {
-      return target;
-    }
-
-    if (!canPaintNode(target, candidate)) {
-      return target;
-    }
+    if (candidate === target) return target;
+    if (!canPaintNode(target, candidate)) return target;
 
     return paint(target, candidate);
   }
@@ -669,6 +751,7 @@ export function buildRouteRenderContext({
   renderId = null,
   renderRoot = null,
   viewContainer = null,
+  appViewContainer = null,
 } = {}) {
   const resolved = resolvePaths({
     route,
@@ -677,8 +760,8 @@ export function buildRouteRenderContext({
     publicPath: publicPath || requestedPath,
   });
 
-  const view = viewContainer || getViewContainer(AppCore);
-  const host = renderRoot || getCurrentHost(AppCore) || view;
+  const appContainer = appViewContainer || getViewContainer(AppCore);
+  const host = renderRoot || getCurrentHost(AppCore) || appContainer;
 
   const I18n = getI18n(AppCore);
   const Toast = getToast(AppCore);
@@ -711,7 +794,10 @@ export function buildRouteRenderContext({
 
     renderId,
 
-    viewContainer: view,
+    appViewContainer: appContainer,
+    rootViewContainer: appContainer,
+
+    viewContainer: viewContainer || host,
     renderRoot: host,
     renderHost: host,
 
@@ -847,7 +933,8 @@ function renderFallbackInto({
     publicPath: resolved.publicPath,
     routeParams,
     renderId,
-    viewContainer: view,
+    appViewContainer: view,
+    viewContainer: target,
     renderRoot: target,
     found: kind !== "not-found",
     forbidden: kind === "forbidden",
@@ -888,11 +975,7 @@ export function renderForbiddenView(AppCore = null, target = null) {
   );
 }
 
-export function renderNotFoundView(
-  AppCore = null,
-  requestedPath = DEFAULT_ROUTE,
-  target = null
-) {
+export function renderNotFoundView(AppCore = null, requestedPath = DEFAULT_ROUTE, target = null) {
   const root = target || getCurrentHost(AppCore) || getViewContainer(AppCore);
 
   if (!root) return null;
@@ -902,9 +985,7 @@ export function renderNotFoundView(
     fallbackView({
       kind: "not-found",
       title: "Ruta no encontrada",
-      message: `No se ha podido resolver la ruta solicitada: ${redact(
-        requestedPath || DEFAULT_ROUTE
-      )}`,
+      message: `No se ha podido resolver la ruta solicitada: ${redact(requestedPath || DEFAULT_ROUTE)}`,
       action: {
         href: DEFAULT_ROUTE,
         text: "Volver al inicio",
@@ -913,11 +994,7 @@ export function renderNotFoundView(
   );
 }
 
-export function renderRuntimeErrorView(
-  AppCore = null,
-  error = null,
-  target = null
-) {
+export function renderRuntimeErrorView(AppCore = null, error = null, target = null) {
   const root = target || getCurrentHost(AppCore) || getViewContainer(AppCore);
 
   if (!root) return null;
@@ -983,7 +1060,8 @@ export async function renderRouteSuccess({
     publicPath: resolved.publicPath,
     routeParams,
     renderId,
-    viewContainer: view,
+    appViewContainer: view,
+    viewContainer: target,
     renderRoot: target,
   });
 
@@ -1145,6 +1223,8 @@ export function getRenderSnapshot(AppCore = null) {
       hasView: Boolean(view),
       hasHost: Boolean(host),
 
+      activeViewContainerIsHost: Boolean(AppCore?.dom?.viewContainer && isRouteHost(AppCore.dom.viewContainer)),
+
       viewStatus: view?.dataset?.routerStatus || null,
       viewRenderId: view?.dataset?.routerRenderId || null,
       viewCanonicalPath: redact(view?.dataset?.routerCanonicalPath || ""),
@@ -1156,6 +1236,8 @@ export function getRenderSnapshot(AppCore = null) {
 
       hostCanonicalPath: redact(host?.dataset?.routerCanonicalPath || ""),
       hostPublicPath: redact(host?.dataset?.routerPublicPath || ""),
+      hostViewKey: host?.dataset?.routerViewKey || null,
+      hostViewName: host?.dataset?.routerViewName || null,
     },
 
     policy: {
@@ -1173,11 +1255,13 @@ export function getRenderSnapshot(AppCore = null) {
       injectsSharedContext: true,
       safeAdoptResult: true,
       singleStableHost: true,
+      exposesActiveHostAsViewContainer: true,
 
       preservesPublicPath: true,
       preservesCanonicalPath: true,
       noTokenInDomDataset: true,
 
+      supportsUserScopedPaths: true,
       validatesRealUserSlug: false,
       realSlugValidationOwner: "router/index.js",
 

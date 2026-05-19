@@ -15,6 +15,7 @@
    - Admin: incidencias + facturas + clientes + usuarios.
    - Calcular métricas en frontend desde listas/meta devueltas.
    - Normalizar respuesta para homeView.js.
+   - Blindar cache admin cuando el rol actual sea user.
    - No tocar DOM.
    - No CSS.
    - No Router.
@@ -25,7 +26,7 @@
    - No /api/dashboard.
    - No endpoints /stats inexistentes.
    - No /home.
-   - No magia negra.
+   - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -53,7 +54,7 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_API_VERSION = "home.api.v2";
+export const HOME_API_VERSION = "home.api.v3";
 
 export const HOME_DASHBOARD_ENDPOINT = "local:home-list-aggregate";
 export const HOME_DASHBOARD_LEGACY_ENDPOINT = "";
@@ -83,6 +84,15 @@ const DEFAULT_LIST_PARAMS = Object.freeze({
   sortBy: "updatedAt",
   sortDir: "DESC",
 });
+
+const ADMIN_ACTIVITY_TYPES = new Set([
+  "client",
+  "cliente",
+  "customer",
+  "user",
+  "usuario",
+  "member",
+]);
 
 let loadSeq = 0;
 
@@ -216,6 +226,10 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
+function normalizeRole(value = "") {
+  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+}
+
 function uniqueBy(items = [], picker = (item) => item) {
   const seen = new Set();
   const output = [];
@@ -296,7 +310,7 @@ function getCurrentRole() {
   const state = safeObject(AppCore?.state);
   const user = getCurrentUser();
 
-  const role = safeText(
+  return normalizeRole(
     first(
       Auth?.getRole?.(),
       Auth?.getCurrentRole?.(),
@@ -306,11 +320,8 @@ function getCurrentRole() {
       user.role,
       user.rol,
       "user"
-    ),
-    "user"
-  ).toLowerCase();
-
-  return role === "admin" ? "admin" : "user";
+    )
+  );
 }
 
 function isAdmin() {
@@ -335,6 +346,191 @@ function canRequestClientsModule(options = {}) {
   }
 
   return isAdmin();
+}
+
+/* =========================================================
+   ROLE SANITIZE
+========================================================= */
+
+function isAdminOnlyActivity(item = {}) {
+  const key = normalizeKey(first(item.type, item.kind, item.category, ""));
+  return ADMIN_ACTIVITY_TYPES.has(key);
+}
+
+function filterActivityForRole(items = [], admin = false) {
+  const rows = safeArray(items);
+  return admin ? rows : rows.filter((item) => !isAdminOnlyActivity(item));
+}
+
+function isAdminOnlyWidget(item = {}) {
+  const raw = safeObject(item);
+
+  const key = normalizeKey(
+    [
+      raw.widgetId,
+      raw.widgetKey,
+      raw.id,
+      raw.key,
+      raw.slug,
+      raw.code,
+      raw.type,
+      raw.kind,
+      raw.variant,
+      raw.category,
+      raw.title,
+      raw.name,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  return ["users", "usuarios", "clientes", "clients", "customers"].some((blocked) =>
+    key.includes(blocked)
+  );
+}
+
+function filterWidgetsForRole(items = [], admin = false) {
+  const rows = safeArray(items);
+  return admin ? rows : rows.filter((item) => !isAdminOnlyWidget(item));
+}
+
+function sanitizeSummaryForRole(summary = {}, admin = false) {
+  const output = {
+    ...safeObject(summary),
+  };
+
+  if (!admin) {
+    output.usersCount = 0;
+    output.usuariosCount = 0;
+    output.totalUsers = 0;
+    output.totalUsuarios = 0;
+    output.usersTotal = 0;
+    output.usuariosTotal = 0;
+    output.visibleUsersCount = 0;
+    output.visibleUsuariosCount = 0;
+
+    output.clientsCount = 0;
+    output.clientesCount = 0;
+    output.customersCount = 0;
+    output.totalClients = 0;
+    output.totalClientes = 0;
+    output.totalCustomers = 0;
+    output.clientsTotal = 0;
+    output.clientesTotal = 0;
+    output.customersTotal = 0;
+    output.visibleClientsCount = 0;
+    output.visibleClientesCount = 0;
+    output.visibleCustomersCount = 0;
+  }
+
+  return output;
+}
+
+function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
+  const cleanRole = normalizeRole(role);
+  const admin = cleanRole === "admin";
+
+  const normalized = normalizeHomeDashboard({
+    ...safeObject(dashboard),
+
+    role: cleanRole,
+    admin,
+
+    users: admin ? dashboard?.users : [],
+    usuarios: admin ? dashboard?.usuarios : [],
+
+    clients: admin ? dashboard?.clients : [],
+    clientes: admin ? dashboard?.clientes : [],
+    customers: admin ? dashboard?.customers : [],
+
+    meta: {
+      ...safeObject(dashboard?.meta),
+      role: cleanRole,
+      admin,
+    },
+  });
+
+  const summary = sanitizeSummaryForRole(normalized.summary, admin);
+  const widgets = filterWidgetsForRole(normalized.widgets, admin);
+  const activity = filterActivityForRole(normalized.activity, admin);
+
+  return {
+    ...normalized,
+
+    role: cleanRole,
+    admin,
+
+    summary,
+    stats: summary,
+    metrics: summary,
+    totals: summary,
+    counts: summary,
+
+    widgets,
+    cards: widgets,
+    kpis: widgets,
+    blocks: widgets,
+
+    users: admin ? safeArray(normalized.users) : [],
+    usuarios: admin ? safeArray(normalized.usuarios) : [],
+
+    clients: admin ? safeArray(normalized.clients) : [],
+    clientes: admin ? safeArray(normalized.clientes) : [],
+    customers: admin ? safeArray(normalized.customers) : [],
+
+    activity,
+    activities: activity,
+    recent: activity,
+    recentActivity: activity,
+
+    usersTotal: admin ? summary.usersCount : 0,
+    usuariosTotal: admin ? summary.usuariosCount : 0,
+    totalUsers: admin ? summary.usersCount : 0,
+    totalUsuarios: admin ? summary.usuariosCount : 0,
+    usersCount: admin ? summary.usersCount : 0,
+    usuariosCount: admin ? summary.usuariosCount : 0,
+    visibleUsersCount: admin ? safeArray(normalized.users).length : 0,
+    visibleUsuariosCount: admin ? safeArray(normalized.users).length : 0,
+
+    clientsTotal: admin ? summary.clientsCount : 0,
+    clientesTotal: admin ? summary.clientesCount : 0,
+    customersTotal: admin ? summary.customersCount : 0,
+    totalClients: admin ? summary.clientsCount : 0,
+    totalClientes: admin ? summary.clientesCount : 0,
+    totalCustomers: admin ? summary.customersCount : 0,
+    clientsCount: admin ? summary.clientsCount : 0,
+    clientesCount: admin ? summary.clientesCount : 0,
+    customersCount: admin ? summary.customersCount : 0,
+    visibleClientsCount: admin ? safeArray(normalized.clients).length : 0,
+    visibleClientesCount: admin ? safeArray(normalized.clients).length : 0,
+    visibleCustomersCount: admin ? safeArray(normalized.clients).length : 0,
+
+    activityCount: activity.length,
+    recentCount: activity.length,
+    visibleActivityCount: activity.length,
+
+    meta: {
+      ...safeObject(normalized.meta),
+
+      role: cleanRole,
+      admin,
+
+      usersCount: admin ? summary.usersCount : 0,
+      usuariosCount: admin ? summary.usuariosCount : 0,
+      visibleUsersCount: admin ? safeArray(normalized.users).length : 0,
+      visibleUsuariosCount: admin ? safeArray(normalized.users).length : 0,
+
+      clientsCount: admin ? summary.clientsCount : 0,
+      clientesCount: admin ? summary.clientesCount : 0,
+      customersCount: admin ? summary.customersCount : 0,
+      visibleClientsCount: admin ? safeArray(normalized.clients).length : 0,
+      visibleClientesCount: admin ? safeArray(normalized.clients).length : 0,
+      visibleCustomersCount: admin ? safeArray(normalized.clients).length : 0,
+
+      activityCount: activity.length,
+      recentCount: activity.length,
+    },
+  };
 }
 
 /* =========================================================
@@ -1106,98 +1302,95 @@ function buildSummaryFromModules({
   const amount = safeNumber(facturaStats.invoiceAmount, 0);
 
   const clientsCount = admin
-    ? Math.max(
-        safeNumber(clienteStats.clientsCount, 0),
-        safeNumber(clientes?.total, 0)
-      )
+    ? Math.max(safeNumber(clienteStats.clientsCount, 0), safeNumber(clientes?.total, 0))
     : 0;
 
   const usersCount = admin
-    ? Math.max(
-        safeNumber(userStats.usersCount, 0),
-        safeNumber(users?.total, 0)
-      )
+    ? Math.max(safeNumber(userStats.usersCount, 0), safeNumber(users?.total, 0))
     : 0;
 
   const filesCount = safeNumber(ticketStats.attachmentsCount, 0);
 
-  return {
-    totalTickets,
-    ticketsTotal: totalTickets,
-    incidenciasTotal: totalTickets,
-    totalIncidencias: totalTickets,
-    ticketsCount: totalTickets,
-    incidenciasCount: totalTickets,
+  return sanitizeSummaryForRole(
+    {
+      totalTickets,
+      ticketsTotal: totalTickets,
+      incidenciasTotal: totalTickets,
+      totalIncidencias: totalTickets,
+      ticketsCount: totalTickets,
+      incidenciasCount: totalTickets,
 
-    openTickets,
-    pendingTickets: openTickets,
-    openIncidencias: openTickets,
-    pendingIncidencias: openTickets,
-    incidenciasAbiertas: openTickets,
+      openTickets,
+      pendingTickets: openTickets,
+      openIncidencias: openTickets,
+      pendingIncidencias: openTickets,
+      incidenciasAbiertas: openTickets,
 
-    closedTickets,
-    resolvedTickets: closedTickets,
-    closedIncidencias: closedTickets,
-    resolvedIncidencias: closedTickets,
-    incidenciasCerradas: closedTickets,
+      closedTickets,
+      resolvedTickets: closedTickets,
+      closedIncidencias: closedTickets,
+      resolvedIncidencias: closedTickets,
+      incidenciasCerradas: closedTickets,
 
-    urgentTickets,
-    urgentIncidencias: urgentTickets,
-    highPriorityTickets: urgentTickets,
+      urgentTickets,
+      urgentIncidencias: urgentTickets,
+      highPriorityTickets: urgentTickets,
 
-    totalInvoices,
-    invoicesTotal: totalInvoices,
-    facturasTotal: totalInvoices,
-    totalFacturas: totalInvoices,
-    invoicesCount: totalInvoices,
-    facturasCount: totalInvoices,
+      totalInvoices,
+      invoicesTotal: totalInvoices,
+      facturasTotal: totalInvoices,
+      totalFacturas: totalInvoices,
+      invoicesCount: totalInvoices,
+      facturasCount: totalInvoices,
 
-    pendingInvoices,
-    pendingFacturas: pendingInvoices,
-    facturasPendientes: pendingInvoices,
-    invoicesPending: pendingInvoices,
+      pendingInvoices,
+      pendingFacturas: pendingInvoices,
+      facturasPendientes: pendingInvoices,
+      invoicesPending: pendingInvoices,
 
-    invoiceAmount: amount,
-    billingTotal: amount,
-    totalBilling: amount,
-    totalFacturado: amount,
-    importeFacturas: amount,
-    facturacionVisible: amount,
+      invoiceAmount: amount,
+      billingTotal: amount,
+      totalBilling: amount,
+      totalFacturado: amount,
+      importeFacturas: amount,
+      facturacionVisible: amount,
 
-    clientsCount,
-    clientesCount: clientsCount,
-    customersCount: clientsCount,
-    totalClients: clientsCount,
-    totalClientes: clientsCount,
-    totalCustomers: clientsCount,
+      clientsCount,
+      clientesCount: clientsCount,
+      customersCount: clientsCount,
+      totalClients: clientsCount,
+      totalClientes: clientsCount,
+      totalCustomers: clientsCount,
 
-    usersCount,
-    usuariosCount: usersCount,
-    totalUsers: usersCount,
-    totalUsuarios: usersCount,
+      usersCount,
+      usuariosCount: usersCount,
+      totalUsers: usersCount,
+      totalUsuarios: usersCount,
 
-    visibleTickets: safeNumber(tickets?.visibleCount, 0),
-    visibleTicketsCount: safeNumber(tickets?.visibleCount, 0),
-    visibleIncidenciasCount: safeNumber(tickets?.visibleCount, 0),
+      visibleTickets: safeNumber(tickets?.visibleCount, 0),
+      visibleTicketsCount: safeNumber(tickets?.visibleCount, 0),
+      visibleIncidenciasCount: safeNumber(tickets?.visibleCount, 0),
 
-    visibleInvoices: safeNumber(facturas?.visibleCount, 0),
-    visibleInvoicesCount: safeNumber(facturas?.visibleCount, 0),
-    visibleFacturasCount: safeNumber(facturas?.visibleCount, 0),
+      visibleInvoices: safeNumber(facturas?.visibleCount, 0),
+      visibleInvoicesCount: safeNumber(facturas?.visibleCount, 0),
+      visibleFacturasCount: safeNumber(facturas?.visibleCount, 0),
 
-    visibleClients: admin ? safeNumber(clientes?.visibleCount, 0) : 0,
-    visibleClientsCount: admin ? safeNumber(clientes?.visibleCount, 0) : 0,
-    visibleClientesCount: admin ? safeNumber(clientes?.visibleCount, 0) : 0,
+      visibleClients: admin ? safeNumber(clientes?.visibleCount, 0) : 0,
+      visibleClientsCount: admin ? safeNumber(clientes?.visibleCount, 0) : 0,
+      visibleClientesCount: admin ? safeNumber(clientes?.visibleCount, 0) : 0,
 
-    visibleUsers: admin ? safeNumber(users?.visibleCount, 0) : 0,
-    visibleUsersCount: admin ? safeNumber(users?.visibleCount, 0) : 0,
-    visibleUsuariosCount: admin ? safeNumber(users?.visibleCount, 0) : 0,
+      visibleUsers: admin ? safeNumber(users?.visibleCount, 0) : 0,
+      visibleUsersCount: admin ? safeNumber(users?.visibleCount, 0) : 0,
+      visibleUsuariosCount: admin ? safeNumber(users?.visibleCount, 0) : 0,
 
-    attachmentsCount: filesCount,
-    filesCount,
-    adjuntosCount: filesCount,
+      attachmentsCount: filesCount,
+      filesCount,
+      adjuntosCount: filesCount,
 
-    updatedAt: nowIso(),
-  };
+      updatedAt: nowIso(),
+    },
+    admin
+  );
 }
 
 function buildWidgets(summary = {}, admin = false) {
@@ -1375,15 +1568,18 @@ function buildActivity({
     }
   }
 
-  return normalizeHomeActivityList(activity)
-    .filter((item) => item.title || item.text)
-    .sort((a, b) => {
-      const left = new Date(first(a.date, a.updatedAt, a.createdAt, 0)).getTime();
-      const right = new Date(first(b.date, b.updatedAt, b.createdAt, 0)).getTime();
+  return filterActivityForRole(
+    normalizeHomeActivityList(activity)
+      .filter((item) => item.title || item.text)
+      .sort((a, b) => {
+        const left = new Date(first(a.date, a.updatedAt, a.createdAt, 0)).getTime();
+        const right = new Date(first(b.date, b.updatedAt, b.createdAt, 0)).getTime();
 
-      return (Number.isFinite(right) ? right : 0) - (Number.isFinite(left) ? left : 0);
-    })
-    .slice(0, 8);
+        return (Number.isFinite(right) ? right : 0) - (Number.isFinite(left) ? left : 0);
+      })
+      .slice(0, 8),
+    admin
+  );
 }
 
 function moduleErrors(modules = {}) {
@@ -1428,13 +1624,13 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
     admin,
   });
 
-  const widgets = buildWidgets(summary, admin);
+  const widgets = filterWidgetsForRole(buildWidgets(summary, admin), admin);
 
   const activity = buildActivity({
     tickets: tickets.items,
     invoices: facturas.items,
-    clients: clientes.items,
-    users: users.items,
+    clients: admin ? clientes.items : [],
+    users: admin ? users.items : [],
     admin,
   });
 
@@ -1442,187 +1638,176 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
   const updatedAt = nowIso();
   const requestId = safeText(meta.requestId, "");
 
-  return {
-    ok: true,
-    success: true,
+  return sanitizeDashboardForRole(
+    {
+      ok: true,
+      success: true,
 
-    source: admin ? "home-admin-list-aggregate" : "home-user-list-aggregate",
-    version: HOME_API_VERSION,
+      source: admin ? "home-admin-list-aggregate" : "home-user-list-aggregate",
+      version: HOME_API_VERSION,
 
-    role,
-    admin,
-
-    summary,
-    stats: summary,
-    metrics: summary,
-    totals: summary,
-    counts: summary,
-
-    widgets,
-    cards: widgets,
-    kpis: widgets,
-    blocks: widgets,
-
-    tickets: tickets.items,
-    incidencias: tickets.items,
-    ticketsTotal: summary.totalTickets,
-    incidenciasTotal: summary.totalTickets,
-    totalTickets: summary.totalTickets,
-    totalIncidencias: summary.totalTickets,
-    ticketsCount: summary.totalTickets,
-    incidenciasCount: summary.totalTickets,
-    visibleTicketsCount: summary.visibleTicketsCount,
-    visibleIncidenciasCount: summary.visibleIncidenciasCount,
-
-    invoices: facturas.items,
-    facturas: facturas.items,
-    invoicesTotal: summary.totalInvoices,
-    facturasTotal: summary.totalInvoices,
-    totalInvoices: summary.totalInvoices,
-    totalFacturas: summary.totalInvoices,
-    invoicesCount: summary.totalInvoices,
-    facturasCount: summary.totalInvoices,
-    visibleInvoicesCount: summary.visibleInvoicesCount,
-    visibleFacturasCount: summary.visibleFacturasCount,
-
-    clients: admin ? clientes.items : [],
-    clientes: admin ? clientes.items : [],
-    customers: admin ? clientes.items : [],
-    clientsTotal: admin ? summary.clientsCount : 0,
-    clientesTotal: admin ? summary.clientesCount : 0,
-    customersTotal: admin ? summary.customersCount : 0,
-    totalClients: admin ? summary.clientsCount : 0,
-    totalClientes: admin ? summary.clientesCount : 0,
-    totalCustomers: admin ? summary.customersCount : 0,
-    clientsCount: admin ? summary.clientsCount : 0,
-    clientesCount: admin ? summary.clientesCount : 0,
-    customersCount: admin ? summary.customersCount : 0,
-    visibleClientsCount: admin ? summary.visibleClientsCount : 0,
-    visibleClientesCount: admin ? summary.visibleClientesCount : 0,
-
-    users: admin ? users.items : [],
-    usuarios: admin ? users.items : [],
-    usersTotal: admin ? summary.usersCount : 0,
-    usuariosTotal: admin ? summary.usuariosCount : 0,
-    totalUsers: admin ? summary.usersCount : 0,
-    totalUsuarios: admin ? summary.usuariosCount : 0,
-    usersCount: admin ? summary.usersCount : 0,
-    usuariosCount: admin ? summary.usuariosCount : 0,
-    visibleUsersCount: admin ? summary.visibleUsersCount : 0,
-    visibleUsuariosCount: admin ? summary.visibleUsuariosCount : 0,
-
-    activity,
-    activities: activity,
-    recent: activity,
-    recentActivity: activity,
-    activityCount: activity.length,
-    recentCount: activity.length,
-
-    modules: {
-      tickets: {
-        listOk: modules.tickets?.ok === true,
-        endpoint: ENDPOINTS.ticketsList,
-      },
-      facturas: {
-        listOk: modules.facturas?.ok === true,
-        endpoint: ENDPOINTS.facturasList,
-      },
-      clientes: {
-        skipped: modules.clientes?.skipped === true,
-        listOk: modules.clientes?.ok === true,
-        endpoint: admin ? ENDPOINTS.clientesList : "",
-      },
-      users: {
-        skipped: modules.users?.skipped === true,
-        listOk: modules.users?.ok === true,
-        endpoint: admin ? ENDPOINTS.usersList : "",
-      },
-    },
-
-    partial: errors.length > 0,
-    errors,
-
-    requestId,
-    updatedAt,
-    generatedAt: updatedAt,
-
-    meta: {
-      requestId,
       role,
       admin,
 
-      updatedAt,
-      generatedAt: updatedAt,
+      summary,
+      stats: summary,
+      metrics: summary,
+      totals: summary,
+      counts: summary,
 
-      usersModuleRequested: admin,
-      clientesModuleRequested: admin,
+      widgets,
+      cards: widgets,
+      kpis: widgets,
+      blocks: widgets,
 
-      widgetsCount: widgets.length,
+      tickets: tickets.items,
+      incidencias: tickets.items,
 
+      ticketsTotal: summary.totalTickets,
+      incidenciasTotal: summary.totalTickets,
+      totalTickets: summary.totalTickets,
+      totalIncidencias: summary.totalTickets,
       ticketsCount: summary.totalTickets,
       incidenciasCount: summary.totalTickets,
       visibleTicketsCount: summary.visibleTicketsCount,
       visibleIncidenciasCount: summary.visibleIncidenciasCount,
 
+      invoices: facturas.items,
+      facturas: facturas.items,
+
+      invoicesTotal: summary.totalInvoices,
+      facturasTotal: summary.totalInvoices,
+      totalInvoices: summary.totalInvoices,
+      totalFacturas: summary.totalInvoices,
       invoicesCount: summary.totalInvoices,
       facturasCount: summary.totalInvoices,
       visibleInvoicesCount: summary.visibleInvoicesCount,
       visibleFacturasCount: summary.visibleFacturasCount,
 
-      clientsCount: admin ? summary.clientsCount : 0,
-      clientesCount: admin ? summary.clientesCount : 0,
-      visibleClientsCount: admin ? summary.visibleClientsCount : 0,
-      visibleClientesCount: admin ? summary.visibleClientesCount : 0,
+      clients: admin ? clientes.items : [],
+      clientes: admin ? clientes.items : [],
+      customers: admin ? clientes.items : [],
 
-      usersCount: admin ? summary.usersCount : 0,
-      usuariosCount: admin ? summary.usuariosCount : 0,
-      visibleUsersCount: admin ? summary.visibleUsersCount : 0,
-      visibleUsuariosCount: admin ? summary.visibleUsuariosCount : 0,
+      users: admin ? users.items : [],
+      usuarios: admin ? users.items : [],
 
-      activityCount: activity.length,
-      errorsCount: errors.length,
+      activity,
+      activities: activity,
+      recent: activity,
+      recentActivity: activity,
+
+      modules: {
+        tickets: {
+          listOk: modules.tickets?.ok === true,
+          endpoint: ENDPOINTS.ticketsList,
+        },
+        facturas: {
+          listOk: modules.facturas?.ok === true,
+          endpoint: ENDPOINTS.facturasList,
+        },
+        clientes: {
+          skipped: modules.clientes?.skipped === true,
+          listOk: modules.clientes?.ok === true,
+          endpoint: admin ? ENDPOINTS.clientesList : "",
+        },
+        users: {
+          skipped: modules.users?.skipped === true,
+          listOk: modules.users?.ok === true,
+          endpoint: admin ? ENDPOINTS.usersList : "",
+        },
+      },
+
       partial: errors.length > 0,
-    },
+      errors,
 
-    raw: {
-      modules,
-      meta,
+      requestId,
+      updatedAt,
+      generatedAt: updatedAt,
+
+      meta: {
+        requestId,
+        role,
+        admin,
+
+        updatedAt,
+        generatedAt: updatedAt,
+
+        usersModuleRequested: admin,
+        clientesModuleRequested: admin,
+
+        widgetsCount: widgets.length,
+
+        ticketsCount: summary.totalTickets,
+        incidenciasCount: summary.totalTickets,
+        visibleTicketsCount: summary.visibleTicketsCount,
+        visibleIncidenciasCount: summary.visibleIncidenciasCount,
+
+        invoicesCount: summary.totalInvoices,
+        facturasCount: summary.totalInvoices,
+        visibleInvoicesCount: summary.visibleInvoicesCount,
+        visibleFacturasCount: summary.visibleFacturasCount,
+
+        clientsCount: admin ? summary.clientsCount : 0,
+        clientesCount: admin ? summary.clientesCount : 0,
+        visibleClientsCount: admin ? summary.visibleClientsCount : 0,
+        visibleClientesCount: admin ? summary.visibleClientesCount : 0,
+
+        usersCount: admin ? summary.usersCount : 0,
+        usuariosCount: admin ? summary.usuariosCount : 0,
+        visibleUsersCount: admin ? summary.visibleUsersCount : 0,
+        visibleUsuariosCount: admin ? summary.visibleUsuariosCount : 0,
+
+        activityCount: activity.length,
+        errorsCount: errors.length,
+        partial: errors.length > 0,
+      },
+
+      raw: {
+        modules,
+        meta,
+      },
     },
-  };
+    role
+  );
 }
 
 /* =========================================================
    PUBLIC NORMALIZATION
 ========================================================= */
 
-export function normalizeDashboard(payload = null) {
+export function normalizeDashboard(payload = null, options = {}) {
+  const role = normalizeRole(options.role || getCurrentRole());
   const unwrapped = unwrapResponse(payload);
   const object = safeObject(unwrapped, {});
 
   if (object.modules) {
-    return buildDashboardFromModules(object.modules, object.meta || object);
+    return sanitizeDashboardForRole(buildDashboardFromModules(object.modules, object.meta || object), role);
   }
 
   if (object.dashboard?.modules) {
-    return buildDashboardFromModules(object.dashboard.modules, object.dashboard.meta || object);
+    return sanitizeDashboardForRole(buildDashboardFromModules(object.dashboard.modules, object.dashboard.meta || object), role);
   }
 
   if (object.dashboard && hasOwnKeys(object.dashboard)) {
-    return {
-      ...normalizeDashboard(object.dashboard),
-      raw: payload,
-    };
+    return sanitizeDashboardForRole(
+      {
+        ...normalizeDashboard(object.dashboard, { role }),
+        raw: payload,
+      },
+      role
+    );
   }
 
   try {
-    return normalizeHomeDashboard(object);
+    return sanitizeDashboardForRole(normalizeHomeDashboard(object), role);
   } catch {
-    return object;
+    return sanitizeDashboardForRole(object, role);
   }
 }
 
 export function normalizeHomeDashboardResponse(payload = null) {
   const dashboard = normalizeDashboard(payload);
+  const admin = dashboard.role === "admin";
 
   return {
     ok: dashboard.ok !== false,
@@ -1645,12 +1830,12 @@ export function normalizeHomeDashboardResponse(payload = null) {
     invoices: dashboard.invoices,
     facturas: dashboard.facturas,
 
-    clients: dashboard.clients,
-    clientes: dashboard.clientes,
-    customers: dashboard.customers,
+    clients: admin ? dashboard.clients : [],
+    clientes: admin ? dashboard.clientes : [],
+    customers: admin ? dashboard.customers : [],
 
-    users: dashboard.users,
-    usuarios: dashboard.usuarios,
+    users: admin ? dashboard.users : [],
+    usuarios: admin ? dashboard.usuarios : [],
 
     activity: dashboard.activity,
     activities: dashboard.activity,
@@ -1697,26 +1882,22 @@ export function resolveHomeWidgetFromDashboard(widgetId = "", dashboard = {}) {
    DASHBOARD REQUEST
 ========================================================= */
 
-function assertAnyRequestedModuleAvailable(modules = {}) {
-  const requested = Object.values(safeObject(modules)).filter((item) => item && item.skipped !== true);
+function assertCoreModulesAvailable(modules = {}) {
+  const tickets = modules.tickets;
+  const facturas = modules.facturas;
 
-  if (!requested.length) return true;
-
-  const ok = requested.some((item) => item.ok === true);
-  const hardErrors = requested.filter((item) => item.ok === false && item.soft !== true);
-
-  if (!ok && hardErrors.length) {
-    const firstError = hardErrors[0];
-
-    const error = new Error(firstError.error?.message || "No se pudo cargar ningún módulo del Home.");
-    error.status = firstError.status || 0;
-    error.code = firstError.error?.code || "HOME_MODULES_UNAVAILABLE";
-    error.modules = modules;
-
-    throw error;
+  if (tickets?.ok === true || facturas?.ok === true) {
+    return true;
   }
 
-  return true;
+  const firstError = [tickets, facturas].find((item) => item && item.skipped !== true && item.error) || null;
+
+  const error = new Error(firstError?.error?.message || "No se pudo cargar tickets ni facturas para Home.");
+  error.status = firstError?.status || 0;
+  error.code = firstError?.error?.code || "HOME_CORE_MODULES_UNAVAILABLE";
+  error.modules = modules;
+
+  throw error;
 }
 
 export async function fetchHomeDashboardRequest({
@@ -1780,7 +1961,7 @@ export async function fetchHomeDashboardRequest({
     users: usersList,
   };
 
-  assertAnyRequestedModuleAvailable(modules);
+  assertCoreModulesAvailable(modules);
 
   const dashboard = buildDashboardFromModules(modules, {
     requestId,
@@ -1840,76 +2021,55 @@ export async function getHomeWidgetByIdRequest(widgetId = "", options = {}) {
    Memoria únicamente. No localStorage.
 ========================================================= */
 
+function hydrateDashboardSource(source = {}) {
+  const raw = safeObject(source);
+
+  if (!hasOwnKeys(raw)) {
+    return null;
+  }
+
+  const dashboard = normalizeDashboard(raw, {
+    role: getCurrentRole(),
+  });
+
+  return {
+    dashboard,
+
+    summary: dashboard.summary,
+    widgets: dashboard.widgets,
+
+    tickets: dashboard.tickets,
+    incidencias: dashboard.incidencias,
+
+    invoices: dashboard.invoices,
+    facturas: dashboard.facturas,
+
+    clients: dashboard.admin ? dashboard.clients : [],
+    clientes: dashboard.admin ? dashboard.clientes : [],
+    customers: dashboard.admin ? dashboard.customers : [],
+
+    users: dashboard.admin ? dashboard.users : [],
+    usuarios: dashboard.admin ? dashboard.usuarios : [],
+
+    activity: dashboard.activity,
+    recent: dashboard.recent,
+    recentActivity: dashboard.recentActivity,
+
+    requestId: dashboard.requestId || dashboard.meta?.requestId || "",
+    lastSyncAt: dashboard.updatedAt || dashboard.generatedAt || null,
+
+    hydrated: true,
+  };
+}
+
 export function hydrateHomeFromCache() {
-  const storeDashboard = safeObject(getHomeDashboardStore?.(), {});
+  const fromStore = hydrateDashboardSource(getHomeDashboardStore?.());
 
-  if (hasOwnKeys(storeDashboard)) {
-    const dashboard = normalizeDashboard(storeDashboard);
+  if (fromStore) return fromStore;
 
-    return {
-      dashboard,
+  const fromState = hydrateDashboardSource(homeState?.dashboard);
 
-      summary: dashboard.summary,
-      widgets: dashboard.widgets,
-
-      tickets: dashboard.tickets,
-      incidencias: dashboard.incidencias,
-
-      invoices: dashboard.invoices,
-      facturas: dashboard.facturas,
-
-      clients: dashboard.clients,
-      clientes: dashboard.clientes,
-      customers: dashboard.customers,
-
-      users: dashboard.users,
-      usuarios: dashboard.usuarios,
-
-      activity: dashboard.activity,
-      recent: dashboard.recent,
-      recentActivity: dashboard.recentActivity,
-
-      requestId: dashboard.requestId || dashboard.meta?.requestId || "",
-      lastSyncAt: dashboard.updatedAt || dashboard.generatedAt || null,
-
-      hydrated: true,
-    };
-  }
-
-  const stateDashboard = safeObject(homeState?.dashboard, {});
-
-  if (hasOwnKeys(stateDashboard)) {
-    const dashboard = normalizeDashboard(stateDashboard);
-
-    return {
-      dashboard,
-
-      summary: dashboard.summary,
-      widgets: dashboard.widgets,
-
-      tickets: dashboard.tickets,
-      incidencias: dashboard.incidencias,
-
-      invoices: dashboard.invoices,
-      facturas: dashboard.facturas,
-
-      clients: dashboard.clients,
-      clientes: dashboard.clientes,
-      customers: dashboard.customers,
-
-      users: dashboard.users,
-      usuarios: dashboard.usuarios,
-
-      activity: dashboard.activity,
-      recent: dashboard.recent,
-      recentActivity: dashboard.recentActivity,
-
-      requestId: dashboard.requestId || dashboard.meta?.requestId || "",
-      lastSyncAt: dashboard.updatedAt || dashboard.generatedAt || null,
-
-      hydrated: true,
-    };
-  }
+  if (fromState) return fromState;
 
   return {
     dashboard: {},
@@ -2062,6 +2222,7 @@ export function getHomeApiClient() {
 
 export function getHomeApiSnapshot() {
   const dashboard = normalizeDashboard(homeState?.dashboard || {});
+  const admin = dashboard.role === "admin";
 
   return {
     version: HOME_API_VERSION,
@@ -2100,7 +2261,7 @@ export function getHomeApiSnapshot() {
 
       source: dashboard.source || null,
       role: dashboard.role || getCurrentRole(),
-      admin: Boolean(dashboard.admin),
+      admin,
 
       widgetsCount: safeArray(dashboard.widgets).length,
 
@@ -2110,11 +2271,11 @@ export function getHomeApiSnapshot() {
       invoicesCount: safeNumber(dashboard.summary?.totalInvoices, 0),
       visibleInvoicesCount: safeNumber(dashboard.visibleInvoicesCount, 0),
 
-      clientsCount: safeNumber(dashboard.summary?.clientsCount, 0),
-      visibleClientsCount: safeNumber(dashboard.visibleClientsCount, 0),
+      clientsCount: admin ? safeNumber(dashboard.summary?.clientsCount, 0) : 0,
+      visibleClientsCount: admin ? safeNumber(dashboard.visibleClientsCount, 0) : 0,
 
-      usersCount: safeNumber(dashboard.summary?.usersCount, 0),
-      visibleUsersCount: safeNumber(dashboard.visibleUsersCount, 0),
+      usersCount: admin ? safeNumber(dashboard.summary?.usersCount, 0) : 0,
+      visibleUsersCount: admin ? safeNumber(dashboard.visibleUsersCount, 0) : 0,
 
       activityCount: safeArray(dashboard.activity).length,
 
@@ -2144,6 +2305,8 @@ export function getHomeApiSnapshot() {
       usersOnlyAdmin: true,
       clientesOnlyAdmin: true,
       distinctUserAdminHome: true,
+      roleAwareCache: true,
+      coreModulesRequired: true,
     },
   };
 }

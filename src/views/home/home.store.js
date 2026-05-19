@@ -7,7 +7,9 @@
    - Recibir dashboard desde home.api.js / homeView.js.
    - Normalizar usando home.model.js.
    - Mantener aliases mínimos para template/selectors.
-   - Preservar datos válidos si llega payload vacío.
+   - Separar Home admin/user desde el propio payload.
+   - User nunca conserva usuarios/clientes de cache admin.
+   - Preservar datos válidos sólo si el rol no cambia.
    - Exponer getters usados por Home.
    - Sin DOM.
    - Sin CSS.
@@ -38,11 +40,20 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_STORE_VERSION = "home.store.v2";
+export const HOME_STORE_VERSION = "home.store.v3";
 export const HOME_STORE_SOURCE = "views.home.store";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 5;
+
+const ADMIN_ACTIVITY_TYPES = new Set([
+  "client",
+  "cliente",
+  "customer",
+  "user",
+  "usuario",
+  "member",
+]);
 
 /* =========================================================
    SAFE HELPERS
@@ -189,6 +200,14 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
+function normalizeRole(value = "") {
+  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+}
+
+function isAdminRole(value = "") {
+  return normalizeRole(value) === "admin";
+}
+
 function uniqueBy(items = [], picker = (item) => item) {
   const seen = new Set();
   const output = [];
@@ -206,6 +225,121 @@ function uniqueBy(items = [], picker = (item) => item) {
 
     seen.add(key);
     output.push(item);
+  }
+
+  return output;
+}
+
+/* =========================================================
+   ROLE HELPERS
+========================================================= */
+
+function roleFromSource(source = {}, fallback = "user") {
+  const raw = safeObject(source);
+  const meta = safeObject(raw.meta);
+  const dashboard = safeObject(raw.dashboard);
+  const dashboardMeta = safeObject(dashboard.meta);
+
+  return normalizeRole(
+    first(
+      raw.role,
+      meta.role,
+      dashboard.role,
+      dashboardMeta.role,
+
+      raw.admin === true ? "admin" : "",
+      meta.admin === true ? "admin" : "",
+      dashboard.admin === true ? "admin" : "",
+      dashboardMeta.admin === true ? "admin" : "",
+
+      raw.admin === false ? "user" : "",
+      meta.admin === false ? "user" : "",
+      dashboard.admin === false ? "user" : "",
+      dashboardMeta.admin === false ? "user" : "",
+
+      fallback,
+      "user"
+    )
+  );
+}
+
+function currentRole() {
+  return normalizeRole(first(homeStore.role, homeStore.dashboard?.role, homeStore.dashboard?.meta?.role, "user"));
+}
+
+function currentIsAdmin() {
+  return isAdminRole(currentRole());
+}
+
+function isAdminOnlyActivity(item = {}) {
+  const key = normalizeKey(first(item.type, item.kind, item.category, ""));
+  return ADMIN_ACTIVITY_TYPES.has(key);
+}
+
+function filterActivityForRole(items = [], admin = false) {
+  const rows = safeArray(items);
+  return admin ? rows : rows.filter((item) => !isAdminOnlyActivity(item));
+}
+
+function isAdminOnlyWidget(item = {}) {
+  const raw = safeObject(item);
+
+  const key = normalizeKey(
+    [
+      raw.widgetId,
+      raw.widgetKey,
+      raw.id,
+      raw.key,
+      raw.slug,
+      raw.code,
+      raw.type,
+      raw.kind,
+      raw.variant,
+      raw.category,
+      raw.title,
+      raw.name,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  return ["users", "usuarios", "clientes", "clients", "customers"].some((blocked) =>
+    key.includes(blocked)
+  );
+}
+
+function filterWidgetsForRole(items = [], admin = false) {
+  const rows = safeArray(items);
+  return admin ? rows : rows.filter((item) => !isAdminOnlyWidget(item));
+}
+
+function sanitizeSummaryForRole(summary = {}, admin = false) {
+  const output = {
+    ...safeObject(summary),
+  };
+
+  if (!admin) {
+    output.usersCount = 0;
+    output.usuariosCount = 0;
+    output.totalUsers = 0;
+    output.totalUsuarios = 0;
+    output.usersTotal = 0;
+    output.usuariosTotal = 0;
+    output.visibleUsersCount = 0;
+    output.visibleUsuariosCount = 0;
+
+    output.clientsCount = 0;
+    output.clientesCount = 0;
+    output.customersCount = 0;
+    output.totalClients = 0;
+    output.totalClientes = 0;
+    output.totalCustomers = 0;
+    output.clientsTotal = 0;
+    output.clientesTotal = 0;
+    output.customersTotal = 0;
+    output.visibleClientsCount = 0;
+    output.visibleClientesCount = 0;
+    output.visibleCustomersCount = 0;
   }
 
   return output;
@@ -255,9 +389,16 @@ function clientId(item = {}) {
 ========================================================= */
 
 export function createInitialHomeStore(seed = {}) {
+  const raw = safeObject(seed);
+  const role = roleFromSource(raw, "user");
+  const admin = isAdminRole(role);
+
   return {
     version: HOME_STORE_VERSION,
     source: HOME_STORE_SOURCE,
+
+    role,
+    admin,
 
     hydrated: false,
     loaded: false,
@@ -316,7 +457,10 @@ export function createInitialHomeStore(seed = {}) {
     errors: [],
     modules: {},
 
-    ...safeObject(seed),
+    ...raw,
+
+    role,
+    admin,
   };
 }
 
@@ -326,15 +470,34 @@ export const homeStore = createInitialHomeStore();
    NORMALIZE
 ========================================================= */
 
-function normalizeDashboard(input = {}, previousDashboard = {}) {
+function normalizeDashboard(input = {}, options = {}) {
   const raw = safeObject(input);
+  const role = normalizeRole(options.role || roleFromSource(raw, currentRole()));
+  const admin = isAdminRole(role);
 
   try {
-    return normalizeHomeDashboard(raw);
+    return normalizeHomeDashboard({
+      ...raw,
+      role,
+      admin,
+      meta: {
+        ...safeObject(raw.meta),
+        role,
+        admin,
+      },
+    });
   } catch {
     return {
-      ...safeObject(previousDashboard),
+      ...safeObject(options.previousDashboard),
       ...raw,
+      role,
+      admin,
+      meta: {
+        ...safeObject(options.previousDashboard?.meta),
+        ...safeObject(raw.meta),
+        role,
+        admin,
+      },
     };
   }
 }
@@ -367,41 +530,63 @@ function normalizedPayload(payload = {}, options = {}) {
   const opts = safeObject(options);
 
   const sourceDashboard = safeObject(first(input.dashboard, input, {}));
-  const dashboard = normalizeDashboard(
-    sourceDashboard,
-    opts.preserveExisting === false ? {} : homeStore.dashboard
+  const role = roleFromSource(
+    {
+      ...sourceDashboard,
+      role: first(input.role, sourceDashboard.role),
+      admin: first(input.admin, sourceDashboard.admin),
+      meta: {
+        ...safeObject(sourceDashboard.meta),
+        role: first(input.meta?.role, sourceDashboard.meta?.role, input.role),
+        admin: first(input.meta?.admin, sourceDashboard.meta?.admin, input.admin),
+      },
+    },
+    currentRole()
   );
 
-  const summary = safeObject(
-    first(
-      input.summary,
-      input.stats,
-      input.metrics,
-      input.totals,
-      input.counts,
-      dashboard.summary,
-      dashboard.stats,
-      dashboard.metrics,
-      dashboard.totals,
-      dashboard.counts,
-      {}
-    )
-  );
+  const admin = isAdminRole(role);
 
-  const widgets = uniqueBy(
-    normalizeHomeWidgets(
-      firstArray(
-        input.widgets,
-        input.cards,
-        input.kpis,
-        input.blocks,
-        dashboard.widgets,
-        dashboard.cards,
-        dashboard.kpis,
-        dashboard.blocks
-      ) || []
+  const dashboard = normalizeDashboard(sourceDashboard, {
+    role,
+    previousDashboard: opts.preserveExisting === false ? {} : homeStore.dashboard,
+  });
+
+  const summary = sanitizeSummaryForRole(
+    safeObject(
+      first(
+        input.summary,
+        input.stats,
+        input.metrics,
+        input.totals,
+        input.counts,
+        dashboard.summary,
+        dashboard.stats,
+        dashboard.metrics,
+        dashboard.totals,
+        dashboard.counts,
+        {}
+      )
     ),
-    widgetId
+    admin
+  );
+
+  const widgets = filterWidgetsForRole(
+    uniqueBy(
+      normalizeHomeWidgets(
+        firstArray(
+          input.widgets,
+          input.cards,
+          input.kpis,
+          input.blocks,
+          dashboard.widgets,
+          dashboard.cards,
+          dashboard.kpis,
+          dashboard.blocks
+        ) || []
+      ),
+      widgetId
+    ),
+    admin
   );
 
   const tickets = uniqueBy(
@@ -418,31 +603,38 @@ function normalizedPayload(payload = {}, options = {}) {
     invoiceId
   );
 
-  const users = uniqueBy(
-    normalizeHomeUsers(
-      firstArray(input.users, input.usuarios, dashboard.users, dashboard.usuarios) || []
-    ),
-    userId
-  );
+  const users = admin
+    ? uniqueBy(
+        normalizeHomeUsers(
+          firstArray(input.users, input.usuarios, dashboard.users, dashboard.usuarios) || []
+        ),
+        userId
+      )
+    : [];
 
-  const clients = uniqueBy(
-    normalizeHomeClients(
-      firstArray(input.clients, input.clientes, input.customers, dashboard.clients, dashboard.clientes, dashboard.customers) || []
-    ),
-    clientId
-  );
+  const clients = admin
+    ? uniqueBy(
+        normalizeHomeClients(
+          firstArray(input.clients, input.clientes, input.customers, dashboard.clients, dashboard.clientes, dashboard.customers) || []
+        ),
+        clientId
+      )
+    : [];
 
-  const activity = normalizeHomeActivityList(
-    firstArray(
-      input.activity,
-      input.activities,
-      input.recent,
-      input.recentActivity,
-      dashboard.activity,
-      dashboard.activities,
-      dashboard.recent,
-      dashboard.recentActivity
-    ) || []
+  const activity = filterActivityForRole(
+    normalizeHomeActivityList(
+      firstArray(
+        input.activity,
+        input.activities,
+        input.recent,
+        input.recentActivity,
+        dashboard.activity,
+        dashboard.activities,
+        dashboard.recent,
+        dashboard.recentActivity
+      ) || []
+    ),
+    admin
   );
 
   const ticketsRemoteCount = countFrom({
@@ -461,21 +653,25 @@ function normalizedPayload(payload = {}, options = {}) {
     fallback: invoices.length,
   });
 
-  const usersRemoteCount = countFrom({
-    explicit: first(input.usersRemoteCount, input.usuariosRemoteCount, dashboard.usersRemoteCount),
-    summary,
-    dashboard,
-    keys: ["usersCount", "usuariosCount", "totalUsers", "totalUsuarios"],
-    fallback: users.length,
-  });
+  const usersRemoteCount = admin
+    ? countFrom({
+        explicit: first(input.usersRemoteCount, input.usuariosRemoteCount, dashboard.usersRemoteCount),
+        summary,
+        dashboard,
+        keys: ["usersCount", "usuariosCount", "totalUsers", "totalUsuarios"],
+        fallback: users.length,
+      })
+    : 0;
 
-  const clientsRemoteCount = countFrom({
-    explicit: first(input.clientsRemoteCount, input.clientesRemoteCount, input.customersRemoteCount, dashboard.clientsRemoteCount),
-    summary,
-    dashboard,
-    keys: ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes", "totalCustomers"],
-    fallback: clients.length,
-  });
+  const clientsRemoteCount = admin
+    ? countFrom({
+        explicit: first(input.clientsRemoteCount, input.clientesRemoteCount, input.customersRemoteCount, dashboard.clientsRemoteCount),
+        summary,
+        dashboard,
+        keys: ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes", "totalCustomers"],
+        fallback: clients.length,
+      })
+    : 0;
 
   const requestId = safeText(
     first(input.requestId, dashboard.requestId, dashboard.meta?.requestId, homeStore.requestId, ""),
@@ -493,7 +689,22 @@ function normalizedPayload(payload = {}, options = {}) {
   );
 
   return {
-    dashboard,
+    version: HOME_STORE_VERSION,
+    source: HOME_STORE_SOURCE,
+
+    role,
+    admin,
+
+    dashboard: {
+      ...dashboard,
+      role,
+      admin,
+      meta: {
+        ...safeObject(dashboard.meta),
+        role,
+        admin,
+      },
+    },
 
     summary,
     stats: summary,
@@ -553,8 +764,11 @@ function normalizedPayload(payload = {}, options = {}) {
 
 function preserveExisting(next = {}, options = {}) {
   const opts = safeObject(options);
+  const role = normalizeRole(first(next.role, "user"));
+  const admin = isAdminRole(role);
+  const sameRole = normalizeRole(homeStore.role) === role;
 
-  if (opts.replace === true || opts.preserveExisting === false) {
+  if (opts.replace === true || opts.preserveExisting === false || !sameRole) {
     return next;
   }
 
@@ -562,27 +776,75 @@ function preserveExisting(next = {}, options = {}) {
     ...next,
   };
 
-  for (const key of ["widgets", "tickets", "invoices", "users", "clients", "activity"]) {
+  for (const key of ["widgets", "tickets", "invoices", "activity"]) {
     if (!safeArray(output[key]).length && safeArray(homeStore[key]).length) {
       output[key] = homeStore[key];
     }
   }
 
-  if (!hasKeys(output.summary) && hasKeys(homeStore.summary)) {
-    output.summary = homeStore.summary;
+  if (admin) {
+    for (const key of ["users", "clients"]) {
+      if (!safeArray(output[key]).length && safeArray(homeStore[key]).length) {
+        output[key] = homeStore[key];
+      }
+    }
+  } else {
+    output.users = [];
+    output.usuarios = [];
+    output.usersRemoteCount = 0;
+
+    output.clients = [];
+    output.clientes = [];
+    output.customers = [];
+    output.clientsRemoteCount = 0;
   }
+
+  if (!hasKeys(output.summary) && hasKeys(homeStore.summary)) {
+    output.summary = sanitizeSummaryForRole(homeStore.summary, admin);
+  }
+
+  output.widgets = filterWidgetsForRole(output.widgets, admin);
+  output.activity = filterActivityForRole(output.activity, admin);
+  output.summary = sanitizeSummaryForRole(output.summary, admin);
 
   output.ticketsRemoteCount = Math.max(homeStore.ticketsRemoteCount, output.ticketsRemoteCount || 0, safeArray(output.tickets).length);
   output.remoteCount = Math.max(homeStore.remoteCount, output.remoteCount || 0, output.ticketsRemoteCount);
 
   output.invoicesRemoteCount = Math.max(homeStore.invoicesRemoteCount, output.invoicesRemoteCount || 0, safeArray(output.invoices).length);
-  output.usersRemoteCount = Math.max(homeStore.usersRemoteCount, output.usersRemoteCount || 0, safeArray(output.users).length);
-  output.clientsRemoteCount = Math.max(homeStore.clientsRemoteCount, output.clientsRemoteCount || 0, safeArray(output.clients).length);
+
+  output.usersRemoteCount = admin
+    ? Math.max(homeStore.usersRemoteCount, output.usersRemoteCount || 0, safeArray(output.users).length)
+    : 0;
+
+  output.clientsRemoteCount = admin
+    ? Math.max(homeStore.clientsRemoteCount, output.clientsRemoteCount || 0, safeArray(output.clients).length)
+    : 0;
 
   return output;
 }
 
 function syncAliases() {
+  const role = normalizeRole(homeStore.role);
+  const admin = isAdminRole(role);
+
+  homeStore.version = HOME_STORE_VERSION;
+  homeStore.source = HOME_STORE_SOURCE;
+
+  homeStore.role = role;
+  homeStore.admin = admin;
+
+  homeStore.widgets = filterWidgetsForRole(safeArray(homeStore.widgets), admin);
+
+  homeStore.tickets = safeArray(homeStore.tickets);
+  homeStore.invoices = safeArray(homeStore.invoices);
+
+  homeStore.users = admin ? safeArray(homeStore.users) : [];
+  homeStore.clients = admin ? safeArray(homeStore.clients) : [];
+
+  homeStore.activity = filterActivityForRole(safeArray(homeStore.activity), admin);
+
+  homeStore.summary = sanitizeSummaryForRole(safeObject(homeStore.summary), admin);
+
   homeStore.stats = homeStore.summary;
   homeStore.metrics = homeStore.summary;
   homeStore.totals = homeStore.summary;
@@ -594,10 +856,13 @@ function syncAliases() {
 
   homeStore.incidencias = homeStore.tickets;
   homeStore.facturas = homeStore.invoices;
-  homeStore.usuarios = homeStore.users;
 
-  homeStore.clientes = homeStore.clients;
-  homeStore.customers = homeStore.clients;
+  homeStore.usuarios = admin ? homeStore.users : [];
+  homeStore.clientes = admin ? homeStore.clients : [];
+  homeStore.customers = admin ? homeStore.clients : [];
+
+  homeStore.usersRemoteCount = admin ? Math.max(homeStore.users.length, safeNumber(homeStore.usersRemoteCount, 0)) : 0;
+  homeStore.clientsRemoteCount = admin ? Math.max(homeStore.clients.length, safeNumber(homeStore.clientsRemoteCount, 0)) : 0;
 
   homeStore.activities = homeStore.activity;
   homeStore.recent = homeStore.activity;
@@ -605,6 +870,9 @@ function syncAliases() {
 
   homeStore.dashboard = {
     ...safeObject(homeStore.dashboard),
+
+    role,
+    admin,
 
     summary: homeStore.summary,
     stats: homeStore.summary,
@@ -623,12 +891,12 @@ function syncAliases() {
     invoices: homeStore.invoices,
     facturas: homeStore.invoices,
 
-    users: homeStore.users,
-    usuarios: homeStore.users,
+    users: admin ? homeStore.users : [],
+    usuarios: admin ? homeStore.users : [],
 
-    clients: homeStore.clients,
-    clientes: homeStore.clients,
-    customers: homeStore.clients,
+    clients: admin ? homeStore.clients : [],
+    clientes: admin ? homeStore.clients : [],
+    customers: admin ? homeStore.clients : [],
 
     activity: homeStore.activity,
     activities: homeStore.activity,
@@ -645,17 +913,17 @@ function syncAliases() {
     totalInvoices: homeStore.invoicesRemoteCount,
     totalFacturas: homeStore.invoicesRemoteCount,
 
-    usersTotal: homeStore.usersRemoteCount,
-    usuariosTotal: homeStore.usersRemoteCount,
-    totalUsers: homeStore.usersRemoteCount,
-    totalUsuarios: homeStore.usersRemoteCount,
+    usersTotal: admin ? homeStore.usersRemoteCount : 0,
+    usuariosTotal: admin ? homeStore.usersRemoteCount : 0,
+    totalUsers: admin ? homeStore.usersRemoteCount : 0,
+    totalUsuarios: admin ? homeStore.usersRemoteCount : 0,
 
-    clientsTotal: homeStore.clientsRemoteCount,
-    clientesTotal: homeStore.clientsRemoteCount,
-    customersTotal: homeStore.clientsRemoteCount,
-    totalClients: homeStore.clientsRemoteCount,
-    totalClientes: homeStore.clientsRemoteCount,
-    totalCustomers: homeStore.clientsRemoteCount,
+    clientsTotal: admin ? homeStore.clientsRemoteCount : 0,
+    clientesTotal: admin ? homeStore.clientsRemoteCount : 0,
+    customersTotal: admin ? homeStore.clientsRemoteCount : 0,
+    totalClients: admin ? homeStore.clientsRemoteCount : 0,
+    totalClientes: admin ? homeStore.clientsRemoteCount : 0,
+    totalCustomers: admin ? homeStore.clientsRemoteCount : 0,
 
     requestId: homeStore.requestId,
     updatedAt: homeStore.updatedAt || homeStore.lastSyncAt,
@@ -668,6 +936,9 @@ function syncAliases() {
     meta: {
       ...safeObject(homeStore.dashboard?.meta),
 
+      role,
+      admin,
+
       widgetsCount: homeStore.widgets.length,
 
       ticketsCount: homeStore.ticketsRemoteCount,
@@ -676,11 +947,11 @@ function syncAliases() {
       invoicesCount: homeStore.invoicesRemoteCount,
       visibleInvoicesCount: homeStore.invoices.length,
 
-      usersCount: homeStore.usersRemoteCount,
-      visibleUsersCount: homeStore.users.length,
+      usersCount: admin ? homeStore.usersRemoteCount : 0,
+      visibleUsersCount: admin ? homeStore.users.length : 0,
 
-      clientsCount: homeStore.clientsRemoteCount,
-      visibleClientsCount: homeStore.clients.length,
+      clientsCount: admin ? homeStore.clientsRemoteCount : 0,
+      visibleClientsCount: admin ? homeStore.clients.length : 0,
 
       activityCount: homeStore.activity.length,
     },
@@ -731,7 +1002,14 @@ export function patchHomeStore(patch = {}, options = {}) {
   return assignStore(
     opts.preserveExisting === false
       ? data
-      : preserveExisting(data, opts)
+      : preserveExisting(
+          {
+            ...data,
+            role: first(data.role, homeStore.role),
+            admin: first(data.admin, homeStore.admin),
+          },
+          opts
+        )
   );
 }
 
@@ -757,7 +1035,10 @@ export function resetHomeStore() {
 export function setHomeWidgetsStore(widgets = [], options = {}) {
   return patchHomeStore(
     {
-      widgets: uniqueBy(normalizeHomeWidgets(widgets), widgetId),
+      widgets: uniqueBy(
+        filterWidgetsForRole(normalizeHomeWidgets(widgets), currentIsAdmin()),
+        widgetId
+      ),
     },
     options
   ).widgets;
@@ -789,6 +1070,20 @@ export function setHomeInvoicesStore(invoices = [], options = {}) {
 }
 
 export function setHomeUsersStore(users = [], options = {}) {
+  if (!currentIsAdmin()) {
+    return patchHomeStore(
+      {
+        users: [],
+        usuarios: [],
+        usersRemoteCount: 0,
+      },
+      {
+        ...safeObject(options),
+        replace: true,
+      }
+    ).users;
+  }
+
   const rows = uniqueBy(normalizeHomeUsers(users), userId);
 
   return patchHomeStore(
@@ -801,6 +1096,21 @@ export function setHomeUsersStore(users = [], options = {}) {
 }
 
 export function setHomeClientsStore(clients = [], options = {}) {
+  if (!currentIsAdmin()) {
+    return patchHomeStore(
+      {
+        clients: [],
+        clientes: [],
+        customers: [],
+        clientsRemoteCount: 0,
+      },
+      {
+        ...safeObject(options),
+        replace: true,
+      }
+    ).clients;
+  }
+
   const rows = uniqueBy(normalizeHomeClients(clients), clientId);
 
   return patchHomeStore(
@@ -815,7 +1125,7 @@ export function setHomeClientsStore(clients = [], options = {}) {
 export function setHomeActivityStore(activity = [], options = {}) {
   return patchHomeStore(
     {
-      activity: normalizeHomeActivityList(activity),
+      activity: filterActivityForRole(normalizeHomeActivityList(activity), currentIsAdmin()),
     },
     options
   ).activity;
@@ -823,24 +1133,38 @@ export function setHomeActivityStore(activity = [], options = {}) {
 
 export function setHomeCollectionsStore(collections = {}, options = {}) {
   const input = safeObject(collections);
+  const role = roleFromSource(input, currentRole());
+  const admin = isAdminRole(role);
 
   return replaceHomeStore(
     {
-      widgets: firstArray(input.widgets, input.cards, input.kpis, input.blocks),
+      role,
+      admin,
+
+      widgets: filterWidgetsForRole(firstArray(input.widgets, input.cards, input.kpis, input.blocks) || [], admin),
       tickets: firstArray(input.tickets, input.incidencias),
       invoices: firstArray(input.invoices, input.facturas),
-      users: firstArray(input.users, input.usuarios),
-      clients: firstArray(input.clients, input.clientes, input.customers),
-      activity: firstArray(input.activity, input.activities, input.recent, input.recentActivity),
+
+      users: admin ? firstArray(input.users, input.usuarios) : [],
+      clients: admin ? firstArray(input.clients, input.clientes, input.customers) : [],
+
+      activity: filterActivityForRole(firstArray(input.activity, input.activities, input.recent, input.recentActivity) || [], admin),
 
       ticketsRemoteCount: first(input.ticketsRemoteCount, input.remoteCount, input.totalTickets, input.incidenciasTotal),
       invoicesRemoteCount: first(input.invoicesRemoteCount, input.facturasRemoteCount, input.totalInvoices, input.totalFacturas),
-      usersRemoteCount: first(input.usersRemoteCount, input.usuariosRemoteCount, input.totalUsers, input.totalUsuarios),
-      clientsRemoteCount: first(input.clientsRemoteCount, input.clientesRemoteCount, input.customersRemoteCount, input.totalClients, input.totalClientes, input.totalCustomers),
+
+      usersRemoteCount: admin
+        ? first(input.usersRemoteCount, input.usuariosRemoteCount, input.totalUsers, input.totalUsuarios)
+        : 0,
+
+      clientsRemoteCount: admin
+        ? first(input.clientsRemoteCount, input.clientesRemoteCount, input.customersRemoteCount, input.totalClients, input.totalClientes, input.totalCustomers)
+        : 0,
     },
     {
       ...safeObject(options),
       preserveExisting: options.preserveExisting !== false,
+      replace: options.replace === true || role !== currentRole() || !admin,
     }
   );
 }
@@ -868,9 +1192,11 @@ function widgetKeys(widget = {}) {
 }
 
 export function upsertHomeWidgetStore(widget = {}) {
+  const admin = currentIsAdmin();
   const item = normalizeHomeWidgets([widget])[0] || safeObject(widget);
 
   if (!hasKeys(item)) return null;
+  if (!admin && isAdminOnlyWidget(item)) return null;
 
   const keys = widgetKeys(item);
   const rows = [...homeStore.widgets];
@@ -1041,7 +1367,7 @@ export function getHomeFacturasStore() {
 }
 
 export function getHomeUsersStore() {
-  return safeArray(getHomeStore().users);
+  return currentIsAdmin() ? safeArray(getHomeStore().users) : [];
 }
 
 export function getHomeUsuariosStore() {
@@ -1049,7 +1375,7 @@ export function getHomeUsuariosStore() {
 }
 
 export function getHomeClientsStore() {
-  return safeArray(getHomeStore().clients);
+  return currentIsAdmin() ? safeArray(getHomeStore().clients) : [];
 }
 
 export function getHomeClientesStore() {
@@ -1107,23 +1433,23 @@ function findById(items = [], id = "", picker = null) {
 }
 
 export function getHomeWidgetByIdStore(id = "") {
-  return findById(homeStore.widgets, id, widgetId);
+  return findById(getHomeStore().widgets, id, widgetId);
 }
 
 export function getHomeTicketByIdStore(id = "") {
-  return findById(homeStore.tickets, id, ticketId);
+  return findById(getHomeStore().tickets, id, ticketId);
 }
 
 export function getHomeInvoiceByIdStore(id = "") {
-  return findById(homeStore.invoices, id, invoiceId);
+  return findById(getHomeStore().invoices, id, invoiceId);
 }
 
 export function getHomeUserByIdStore(id = "") {
-  return findById(homeStore.users, id, userId);
+  return currentIsAdmin() ? findById(getHomeStore().users, id, userId) : null;
 }
 
 export function getHomeClientByIdStore(id = "") {
-  return findById(homeStore.clients, id, clientId);
+  return currentIsAdmin() ? findById(getHomeStore().clients, id, clientId) : null;
 }
 
 /* =========================================================
@@ -1149,6 +1475,7 @@ function collectionEnvelope(items = [], total = null) {
 
 export function getHomeCollectionsEnvelope() {
   const store = getHomeStore();
+  const admin = currentIsAdmin();
 
   return {
     widgets: collectionEnvelope(store.widgets, store.widgets.length),
@@ -1162,12 +1489,12 @@ export function getHomeCollectionsEnvelope() {
     invoices: collectionEnvelope(store.invoices, store.invoicesRemoteCount),
     facturas: collectionEnvelope(store.invoices, store.invoicesRemoteCount),
 
-    users: collectionEnvelope(store.users, store.usersRemoteCount),
-    usuarios: collectionEnvelope(store.users, store.usersRemoteCount),
+    users: collectionEnvelope(admin ? store.users : [], admin ? store.usersRemoteCount : 0),
+    usuarios: collectionEnvelope(admin ? store.users : [], admin ? store.usersRemoteCount : 0),
 
-    clients: collectionEnvelope(store.clients, store.clientsRemoteCount),
-    clientes: collectionEnvelope(store.clients, store.clientsRemoteCount),
-    customers: collectionEnvelope(store.clients, store.clientsRemoteCount),
+    clients: collectionEnvelope(admin ? store.clients : [], admin ? store.clientsRemoteCount : 0),
+    clientes: collectionEnvelope(admin ? store.clients : [], admin ? store.clientsRemoteCount : 0),
+    customers: collectionEnvelope(admin ? store.clients : [], admin ? store.clientsRemoteCount : 0),
 
     activity: collectionEnvelope(store.activity, store.activity.length),
     activities: collectionEnvelope(store.activity, store.activity.length),
@@ -1178,11 +1505,15 @@ export function getHomeCollectionsEnvelope() {
 
 export function getHomeStoreSnapshot(options = {}) {
   const store = getHomeStore();
+  const admin = currentIsAdmin();
   const includeCollections = options.includeCollections === true;
 
   const snapshot = {
     version: HOME_STORE_VERSION,
     source: HOME_STORE_SOURCE,
+
+    role: store.role,
+    admin,
 
     hydrated: Boolean(store.hydrated),
     loaded: Boolean(store.loaded),
@@ -1207,11 +1538,11 @@ export function getHomeStoreSnapshot(options = {}) {
     invoicesVisibleCount: store.invoices.length,
     invoicesRemoteCount: store.invoicesRemoteCount,
 
-    usersVisibleCount: store.users.length,
-    usersRemoteCount: store.usersRemoteCount,
+    usersVisibleCount: admin ? store.users.length : 0,
+    usersRemoteCount: admin ? store.usersRemoteCount : 0,
 
-    clientsVisibleCount: store.clients.length,
-    clientsRemoteCount: store.clientsRemoteCount,
+    clientsVisibleCount: admin ? store.clients.length : 0,
+    clientsRemoteCount: admin ? store.clientsRemoteCount : 0,
 
     activityCount: store.activity.length,
 
@@ -1231,8 +1562,10 @@ export function getHomeStoreSnapshot(options = {}) {
     snapshot.widgets = clone(store.widgets, []);
     snapshot.tickets = clone(store.tickets, []);
     snapshot.invoices = clone(store.invoices, []);
-    snapshot.users = clone(store.users, []);
-    snapshot.clients = clone(store.clients, []);
+
+    snapshot.users = admin ? clone(store.users, []) : [];
+    snapshot.clients = admin ? clone(store.clients, []) : [];
+
     snapshot.activity = clone(store.activity, []);
 
     snapshot.modules = clone(store.modules, {});

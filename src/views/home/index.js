@@ -22,7 +22,7 @@ import HomeViewDefault, {
   HOME_VIEW_VERSION,
 } from "./homeView.js";
 
-export const HOME_INDEX_VERSION = "home.index.v2";
+export const HOME_INDEX_VERSION = "home.index.v3";
 
 const View = HomeView || HomeViewDefault;
 

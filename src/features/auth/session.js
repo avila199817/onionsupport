@@ -10,7 +10,8 @@
    - User inválido si disabled/deleted/archived/active=false.
    - Roles únicos: admin / user.
    - Leer token persistido para soportar reload.
-   - Persistir token/session auxiliar al aplicar sesión.
+   - Leer refresh token persistido para permitir restore vía refresh.
+   - Persistir token/refresh/session auxiliar al aplicar sesión.
    - No fabricar user desde storage.
    - Conservar slug real del usuario si existe.
    - Exponer homePath: /@{user.slug} si el usuario trae slug real.
@@ -29,11 +30,12 @@ import { AppCore } from "../../core/index.js";
 import {
   clearAuthStorage,
   getStoredAccessToken,
+  getStoredRefreshToken,
   getStoredSessionContext,
   persistAuthStorage,
 } from "./storage.js";
 
-export const AUTH_SESSION_VERSION = "auth.session.v2";
+export const AUTH_SESSION_VERSION = "auth.session.v3";
 
 const SOURCE = "auth.session";
 
@@ -393,6 +395,15 @@ function readTokenFromPayload(payload = {}) {
   );
 }
 
+function readRefreshTokenFromPayload(payload = {}) {
+  return cleanToken(
+    pick(nested(payload), [
+      "refreshToken",
+      "refresh_token",
+    ])
+  );
+}
+
 function readUserFromPayload(payload = {}) {
   for (const node of nested(payload)) {
     const user = normalizeUser(
@@ -440,7 +451,9 @@ function readSessionFromPayload(payload = {}, user = null) {
   const expiresAt =
     sessionNode?.expiresAt ||
     sessionNode?.expires_at ||
-    pick(nodes, ["expiresAt", "expires_at"]) ||
+    sessionNode?.refreshExpiresAt ||
+    sessionNode?.refresh_expires_at ||
+    pick(nodes, ["expiresAt", "expires_at", "refreshExpiresAt", "refresh_expires_at"]) ||
     null;
 
   if (!sessionId && !userId && !expiresAt) return null;
@@ -451,6 +464,7 @@ function readSessionFromPayload(payload = {}, user = null) {
     userId: userId || null,
     sessionUserId: userId || null,
     expiresAt,
+    refreshExpiresAt: expiresAt,
   };
 }
 
@@ -466,6 +480,14 @@ function storedToken() {
   }
 }
 
+function storedRefreshToken() {
+  try {
+    return cleanToken(getStoredRefreshToken?.() || "");
+  } catch {
+    return "";
+  }
+}
+
 function storedSession() {
   try {
     const session = getStoredSessionContext?.();
@@ -474,7 +496,7 @@ function storedSession() {
 
     const sessionId = text(session.sessionId || session.session_id || session.id, "");
     const userId = text(session.userId || session.user_id || session.sessionUserId || session.session_user_id, "");
-    const expiresAt = session.expiresAt || session.expires_at || null;
+    const expiresAt = session.expiresAt || session.expires_at || session.refreshExpiresAt || session.refresh_expires_at || null;
 
     if (!sessionId && !userId && !expiresAt) return null;
 
@@ -484,6 +506,7 @@ function storedSession() {
       userId: userId || null,
       sessionUserId: userId || null,
       expiresAt,
+      refreshExpiresAt: expiresAt,
     };
   } catch {
     return null;
@@ -506,6 +529,17 @@ function bestStateToken() {
   );
 }
 
+function bestStateRefreshToken() {
+  const state = readState();
+
+  return cleanToken(
+    state.refreshToken ||
+      state.refresh_token ||
+      storedRefreshToken() ||
+      ""
+  );
+}
+
 function bestStateUser() {
   const state = readState();
 
@@ -513,6 +547,7 @@ function bestStateUser() {
     No se fabrica usuario desde storage.
     El reload se restaura así:
       token persistido -> restore.js -> /me -> user canónico.
+      token caducado -> restore.js -> refresh context -> /refresh -> user canónico.
   */
   return (
     normalizeUser(state.user) ||
@@ -555,11 +590,18 @@ function bestStateSession(user = bestStateUser()) {
    STATE PATCH
 ========================================================= */
 
-function buildStatePatch({ token = "", user = null, session = null } = {}) {
+function buildStatePatch({
+  token = "",
+  refreshToken = "",
+  user = null,
+  session = null,
+} = {}) {
   const safeToken = cleanToken(token);
+  const safeRefreshToken = cleanToken(refreshToken);
   const safeUser = normalizeUser(user);
 
   const hasToken = Boolean(safeToken);
+  const hasRefreshToken = Boolean(safeRefreshToken);
   const authenticated = Boolean(hasToken && safeUser);
   const role = authenticated ? cleanRole(safeUser.role || safeUser.rol || safeUser.roles) : null;
   const slug = authenticated ? extractSessionUserSlug(safeUser) : "";
@@ -584,6 +626,9 @@ function buildStatePatch({ token = "", user = null, session = null } = {}) {
     accessToken: hasToken ? safeToken : null,
     access_token: hasToken ? safeToken : null,
 
+    refreshToken: hasRefreshToken ? safeRefreshToken : null,
+    refresh_token: hasRefreshToken ? safeRefreshToken : null,
+
     user: authenticated ? safeUser : null,
     currentUser: authenticated ? safeUser : null,
     authUser: authenticated ? safeUser : null,
@@ -591,6 +636,7 @@ function buildStatePatch({ token = "", user = null, session = null } = {}) {
 
     authenticated,
     hasToken,
+    hasRefreshToken,
 
     role,
     rol: role,
@@ -618,8 +664,13 @@ function buildStatePatch({ token = "", user = null, session = null } = {}) {
   };
 }
 
-function persistPatch({ token = "", session = null } = {}) {
+function persistPatch({
+  token = "",
+  refreshToken = "",
+  session = null,
+} = {}) {
   const safeToken = cleanToken(token);
+  const safeRefreshToken = cleanToken(refreshToken);
 
   if (!safeToken) return false;
 
@@ -629,6 +680,10 @@ function persistPatch({ token = "", session = null } = {}) {
         token: safeToken,
         accessToken: safeToken,
         access_token: safeToken,
+
+        refreshToken: safeRefreshToken || undefined,
+        refresh_token: safeRefreshToken || undefined,
+
         session,
       },
       {
@@ -648,10 +703,12 @@ function persistPatch({ token = "", session = null } = {}) {
 
 function currentSnapshot(extra = {}) {
   const token = bestStateToken();
+  const refreshToken = bestStateRefreshToken();
   const user = bestStateUser();
   const session = bestStateSession(user);
 
   const hasToken = Boolean(token);
+  const hasRefreshToken = Boolean(refreshToken);
   const authenticated = Boolean(hasToken && user);
   const role = authenticated ? cleanRole(user.role || user.rol || user.roles) : null;
   const slug = authenticated ? extractSessionUserSlug(user) : "";
@@ -664,6 +721,7 @@ function currentSnapshot(extra = {}) {
 
     authenticated,
     hasToken,
+    hasRefreshToken,
 
     user: authenticated ? user : null,
 
@@ -708,6 +766,7 @@ function publicSnapshot(snapshot = {}) {
 
     authenticated: Boolean(snapshot.authenticated),
     hasToken: Boolean(snapshot.hasToken),
+    hasRefreshToken: Boolean(snapshot.hasRefreshToken),
 
     token: null,
     accessToken: null,
@@ -747,6 +806,10 @@ export function applySession(payload = {}, options = {}) {
     readTokenFromPayload(payload) ||
     (options.useCurrentToken === false ? "" : bestStateToken());
 
+  const refreshToken =
+    readRefreshTokenFromPayload(payload) ||
+    (options.useCurrentRefreshToken === false ? "" : bestStateRefreshToken());
+
   const user =
     readUserFromPayload(payload) ||
     (options.useCurrentUser === false ? null : bestStateUser());
@@ -757,6 +820,7 @@ export function applySession(payload = {}, options = {}) {
 
   const patch = buildStatePatch({
     token,
+    refreshToken,
     user,
     session,
   });
@@ -769,12 +833,13 @@ export function applySession(payload = {}, options = {}) {
   });
 
   /*
-    Persistimos token/contexto auxiliar.
+    Persistimos token/refresh/contexto auxiliar.
     No persistimos user como fuente de autenticación.
   */
   if (patch.hasToken) {
     persistPatch({
       token,
+      refreshToken,
       session,
     });
   }
@@ -804,6 +869,7 @@ export function clearSessionLocal(options = {}) {
 
       authenticated: false,
       hasToken: false,
+      hasRefreshToken: false,
 
       role: null,
       rol: null,
@@ -857,6 +923,7 @@ export function syncAuthState(options = {}) {
 
   const patch = buildStatePatch({
     token: bestStateToken(),
+    refreshToken: bestStateRefreshToken(),
     user,
     session: bestStateSession(user),
   });
@@ -895,12 +962,25 @@ export function hasToken() {
   return Boolean(bestStateToken());
 }
 
+export function hasRefreshToken() {
+  return Boolean(bestStateRefreshToken());
+}
+
 export function getCurrentUser() {
   return isAuthenticated() ? bestStateUser() : null;
 }
 
 export function getCurrentToken() {
   return bestStateToken();
+}
+
+export function getCurrentRefreshToken() {
+  return bestStateRefreshToken();
+}
+
+export function getCurrentSessionContext() {
+  const user = bestStateUser();
+  return bestStateSession(user);
 }
 
 export function getCurrentRole() {
@@ -1001,9 +1081,12 @@ export function exposeSessionDebugApi() {
 
     isAuthenticated,
     hasToken,
+    hasRefreshToken,
 
     getCurrentUser,
     getCurrentToken,
+    getCurrentRefreshToken,
+    getCurrentSessionContext,
 
     getCurrentRole,
     getCurrentRoles,
@@ -1041,9 +1124,12 @@ export default {
 
   isAuthenticated,
   hasToken,
+  hasRefreshToken,
 
   getCurrentUser,
   getCurrentToken,
+  getCurrentRefreshToken,
+  getCurrentSessionContext,
 
   getCurrentRole,
   getCurrentRoles,

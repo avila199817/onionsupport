@@ -5,6 +5,8 @@
    Responsabilidad:
    - Estilo completo del sidebar privado SPA.
    - Alineado con /src/ui/sidebar/template.js.
+   - Header text-only: Onion Support pegado a la izquierda.
+   - Botón collapse estilo panel ChatGPT.
    - Sidebar visual estilo ChatGPT + Apple Glass.
    - Dropdown visual de cuenta.
    - Estado open/collapsed/mobile.
@@ -217,8 +219,10 @@
 .sidebar .sidebar-brand-glow,
 .sidebar .sidebar-link-surface,
 .sidebar .sidebar-link-indicator,
-.sidebar .sidebar-user-surface {
-  display: none;
+.sidebar .sidebar-user-surface,
+.sidebar .sidebar-brand-icon,
+.sidebar .sidebar-brand-svg {
+  display: none !important;
 }
 
 
@@ -246,7 +250,7 @@
 
 
 /* =========================================================
-   HEADER
+   HEADER · CHATGPT TEXT-ONLY
 ========================================================= */
 
 .sidebar .sidebar-header {
@@ -256,9 +260,9 @@
   align-items: center;
   justify-content: space-between;
 
-  gap: 6px;
+  gap: 8px;
 
-  padding-block: 0 8px;
+  padding: 0 0 8px;
 
   flex: 0 0 auto;
 }
@@ -269,64 +273,35 @@
 
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
 
-  gap: 10px;
+  gap: 0;
 
   flex: 1 1 auto;
 
-  padding: 4px 6px;
+  padding: 4px 5px 4px 0;
 
+  border: 0;
   border-radius: var(--radius-md);
 
+  background: transparent;
   color: var(--sidebar-local-text-strong);
 
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 
   transition:
-    background var(--duration-fast, .12s) var(--ease-standard, ease),
     color var(--duration-fast, .12s) var(--ease-standard, ease),
     transform var(--duration-fast, .12s) var(--ease-out, ease);
 }
 
 .sidebar .sidebar-brand:hover {
-  background: var(--sidebar-local-hover);
+  background: transparent;
+  color: var(--sidebar-local-text-strong);
 }
 
 .sidebar .sidebar-brand:active {
-  transform: scale(.985);
-}
-
-.sidebar .sidebar-brand-icon {
-  inline-size: 34px;
-  min-inline-size: 34px;
-  block-size: 34px;
-
-  display: inline-grid;
-  place-items: center;
-
-  flex: 0 0 auto;
-
-  overflow: hidden;
-
-  border: 1px solid var(--glass-border-soft);
-  border-radius: 11px;
-
-  background:
-    radial-gradient(circle at 30% 15%, rgba(255,255,255,.18), transparent 34%),
-    var(--glass-bg-soft),
-    color-mix(in srgb, var(--surface-strong) 78%, transparent);
-
-  color: var(--sidebar-local-text-strong);
-
-  box-shadow:
-    var(--glass-highlight),
-    0 10px 24px rgba(0,0,0,.16);
-}
-
-.sidebar .sidebar-brand-svg {
-  inline-size: 19px;
-  block-size: 19px;
+  transform: scale(.99);
 }
 
 .sidebar .sidebar-brand-content {
@@ -334,6 +309,9 @@
 
   display: flex;
   align-items: center;
+  justify-content: flex-start;
+
+  overflow: hidden;
 }
 
 .sidebar .sidebar-brand-text {
@@ -343,13 +321,18 @@
 
   color: var(--sidebar-local-text-strong);
 
-  font-size: var(--font-lg);
-  line-height: 1.18;
-  font-weight: var(--weight-semibold);
-  letter-spacing: -.02em;
+  font-size: clamp(16px, calc(18px * var(--ui-scale, 1)), 19px);
+  line-height: 1.08;
+  font-weight: var(--weight-bold, 700);
+  letter-spacing: -.035em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+
+/* =========================================================
+   HEADER TOGGLE · PANEL COLLAPSE
+========================================================= */
 
 .sidebar .sidebar-toggle {
   appearance: none;
@@ -363,6 +346,8 @@
   place-items: center;
 
   flex: 0 0 auto;
+
+  padding: 0;
 
   border: 0;
   border-radius: var(--radius-md);
@@ -386,12 +371,14 @@
 }
 
 .sidebar .sidebar-toggle:active {
-  transform: scale(.95);
+  transform: scale(.94);
 }
 
 .sidebar .sidebar-toggle-svg {
-  inline-size: 20px;
-  block-size: 20px;
+  inline-size: 21px;
+  block-size: 21px;
+
+  color: currentColor;
 }
 
 .sidebar .sidebar-toggle-label {
@@ -420,7 +407,7 @@
   overflow-y: auto;
   overflow-x: hidden;
 
-  padding-block: 4px 10px;
+  padding-block: 6px 10px;
   padding-inline: 0;
 
   scrollbar-width: thin;
@@ -450,7 +437,7 @@
   display: flex;
   flex-direction: column;
 
-  gap: 2px;
+  gap: 3px;
 
   min-inline-size: 0;
 
@@ -507,7 +494,7 @@
 }
 
 .sidebar .sidebar-link:hover {
-  border-color: color-mix(in srgb, var(--sidebar-local-active-border) 48%, transparent);
+  border-color: color-mix(in srgb, var(--sidebar-local-active-border) 44%, transparent);
   background: var(--sidebar-local-hover);
   color: var(--sidebar-local-text-strong);
 }
@@ -540,6 +527,8 @@
 .sidebar .sidebar-link-svg {
   inline-size: var(--sidebar-local-icon-size);
   block-size: var(--sidebar-local-icon-size);
+
+  color: currentColor;
 }
 
 .sidebar .sidebar-link-content {
@@ -1090,11 +1079,8 @@
 .sidebar[data-open="false"] .sidebar-header,
 .sidebar[data-sidebar-state="collapsed"] .sidebar-header {
   inline-size: 100%;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
 
-  gap: 6px;
+  justify-content: center;
 
   min-block-size: auto;
   padding-block-end: 8px;
@@ -1102,7 +1088,10 @@
 
 .sidebar.is-collapsed .sidebar-brand,
 .sidebar[data-open="false"] .sidebar-brand,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-brand,
+.sidebar[data-sidebar-state="collapsed"] .sidebar-brand {
+  display: none !important;
+}
+
 .sidebar.is-collapsed .sidebar-toggle,
 .sidebar[data-open="false"] .sidebar-toggle,
 .sidebar[data-sidebar-state="collapsed"] .sidebar-toggle {
@@ -1269,13 +1258,15 @@
   .sidebar.is-collapsed .sidebar-brand,
   .sidebar[data-open="false"] .sidebar-brand,
   .sidebar[data-sidebar-state="collapsed"] .sidebar-brand {
+    display: inline-flex !important;
+
     inline-size: auto;
     min-inline-size: 0;
     block-size: auto;
 
     justify-content: flex-start;
 
-    padding: 4px 6px;
+    padding: 4px 6px 4px 0;
   }
 
   .sidebar.is-collapsed .sidebar-toggle,

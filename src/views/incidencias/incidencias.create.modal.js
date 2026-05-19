@@ -1,62 +1,42 @@
 /* =========================================================
-   Onion SPA - Incidencias Create Modal
-   Archivo: src/views/incidencias/incidencias.create.modal.js
+   Onion Support - Incidencias Create Modal
+   Archivo: /src/views/incidencias/incidencias.create.modal.js
 
-   INCIDENCIAS EXPERIENCE PRO · CREATE MODAL · EXTREME SAAS MODE · 13/10
-   PATCH · CSS EXTERNAL ONLY · NO STYLE INJECTION · CSP CLEAN
-   PATCH · NO INLINE CSS · NO INLINE IMG ONERROR · BODY LOCK BY CLASS
-   PATCH · MODAL ALIGNED · BUTTON HOVER READY BY CSS
-   PATCH · USER SEARCH NO FLICKER · SLOT PATCHING
-   PATCH · TARGET USER OPTIONAL FOR ADMINS
-   PATCH · CATEGORY / PRIORITY SELECTS REAL
-   PATCH · MULTIPART CREATE REAL
-   PATCH · EVENTS BRIDGE WITH BINDINGS
-   PATCH · HEADER CLEAN · NO EYEBROW TEXT
-   PATCH · NO CANCEL BUTTON · CLOSE ONLY
-   PATCH · SUBMIT WITHOUT LIGHTNING ICON
-   PATCH · USER SEARCH AVATAR REAL + FALLBACK INITIALS
-
-   RESPONSABILIDADES:
-   - abrir/cerrar modal de creación de incidencia
-   - crear incidencia normal para usuario autenticado
-   - crear incidencia para usuario objetivo si el usuario tiene permisos
-   - buscar usuarios de forma segura y desacoplada
-   - pintar avatar real en resultados de búsqueda de usuarios si backend lo entrega
-   - fallback de avatar con iniciales si no hay imagen
-   - validar campos obligatorios
-   - validar adjuntos iniciales
-   - enviar multipart/form-data real
-   - emitir incidencias:create:success para refrescar la vista
-   - persistir draft mínimo mientras el modal está abierto
-   - evitar doble submit y doble binding
-   - mostrar loader overlay premium al crear incidencia
-   - actualizar búsqueda por slots sin reconstruir el panel completo
-   - no inyectar CSS desde JS
-   - no escribir estilos inline en body
-   - no usar handlers inline en imágenes
+   Responsabilidad:
+   - Modal singleton de creación de incidencia.
+   - Renderizar formulario, validación básica y adjuntos iniciales.
+   - Delegar creación real a incidencias.actions.js.
+   - Sin llamadas HTTP directas.
+   - Sin búsqueda de usuarios directa.
+   - Sin registrar globals.
+   - Sin rutas inventadas.
+   - Sin estilos ni eventos inline.
+   - Sin leer Router/Auth/Store.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-import { incidenciasState } from "./incidencias.state.js";
+
+import {
+  incidenciasState,
+  setCreating,
+  setCreateDraft,
+  clearCreateDraft,
+  patchCreateViewState,
+  resetCreateViewState,
+} from "./incidencias.state.js";
+
+import {
+  createIncidenciaAction,
+} from "./incidencias.actions.js";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
+export const INCIDENCIAS_CREATE_MODAL_VERSION = "incidencias.create.modal.v1";
+
 const MODAL_ID = "incidencias-create-modal-root";
 const PANEL_ID = "incidencias-create-modal-panel";
-
-const TICKETS_CREATE_ENDPOINT = "/api/tickets";
-const TICKETS_ADMIN_CREATE_ENDPOINT = "/api/tickets/admin";
-const INCIDENCIAS_CREATE_ENDPOINT = "/api/incidencias";
-
-const USER_SEARCH_ENDPOINT = "/api/search/users";
-
-const USER_SEARCH_LIMIT = 8;
-const USER_SEARCH_DEBOUNCE = 240;
-
-const CREATE_TIMEOUT_MS = 90000;
-const USER_SEARCH_TIMEOUT_MS = 15000;
 
 const MAX_FILES = 10;
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -64,18 +44,6 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const BODY_CLASS_MODAL_OPEN = "modal-open";
 const BODY_CLASS_INCIDENCIAS_CREATE_OPEN = "incidencias-create-open";
 const BODY_CLASS_INCIDENCIAS_MODAL_OPEN = "incidencias-modal-open";
-
-const BrowserWindow = typeof window !== "undefined" ? window : null;
-const BrowserDocument = typeof document !== "undefined" ? document : null;
-
-const ADMIN_ROLE_KEYS = Object.freeze([
-  "admin",
-  "administrator",
-  "superadmin",
-  "super_admin",
-  "root",
-  "owner",
-]);
 
 const CATEGORY_OPTIONS = Object.freeze([
   { value: "general", label: "General" },
@@ -94,26 +62,38 @@ const PRIORITY_OPTIONS = Object.freeze([
   { value: "urgent", label: "Urgente" },
 ]);
 
+const ALLOWED_EXTENSIONS = Object.freeze([
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "gif",
+  "pdf",
+  "txt",
+  "csv",
+  "zip",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+]);
+
 const ALLOWED_MIME_TYPES = Object.freeze([
   "image/jpeg",
   "image/png",
   "image/webp",
   "image/gif",
-
   "application/pdf",
-
   "text/plain",
   "text/csv",
-
   "application/zip",
   "application/x-zip-compressed",
-
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-
   "application/vnd.ms-powerpoint",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ]);
@@ -142,19 +122,13 @@ const DEFAULT_FORM = Object.freeze({
 const modalState = {
   isOpen: false,
   bindingsAttached: false,
+  rootAbortController: null,
 
   escHandler: null,
   lastActiveElement: null,
 
   submitting: false,
   dragActive: false,
-
-  userSearchQuery: "",
-  userSearchResults: [],
-  userSearchLoading: false,
-  userSearchError: "",
-  userSearchDebounce: null,
-  userSearchSeq: 0,
 
   errors: {},
   serverError: "",
@@ -171,10 +145,29 @@ const modalState = {
    SAFE HELPERS
 ========================================================= */
 
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFile(value) {
+  return typeof File !== "undefined" && value instanceof File;
+}
+
+function isBlob(value) {
+  return typeof Blob !== "undefined" && value instanceof Blob;
+}
+
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -184,9 +177,7 @@ function safeLower(value, fallback = "") {
 }
 
 function safeObject(value, fallback = {}) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
+  return isObject(value) ? value : fallback;
 }
 
 function safeArray(value) {
@@ -194,21 +185,17 @@ function safeArray(value) {
 }
 
 function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  if (value === null || value === undefined || value === "") return fallback;
+
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
@@ -229,100 +216,76 @@ function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
 }
 
-function isAbsoluteUrl(value = "") {
-  return /^https?:\/\//i.test(safeText(value, ""));
+function htmlAttrs(attrs = {}) {
+  return Object.entries(safeObject(attrs))
+    .map(([key, value]) => {
+      if (value === false || value === null || value === undefined) return "";
+      if (value === true) return escapeHtml(key);
+
+      return `${escapeHtml(key)}="${escapeHtml(value)}"`;
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
+function tooltipAttrs(tooltip = "", ariaLabel = "") {
+  const cleanTooltip = safeText(tooltip, "");
+  const cleanAria = safeText(ariaLabel, cleanTooltip);
+
+  return htmlAttrs({
+    "aria-label": cleanAria || false,
+    "data-tooltip": cleanTooltip || false,
+  });
+}
+
+function disabledAttr(disabled = false) {
+  return disabled ? "disabled aria-disabled=\"true\"" : "";
+}
+
+function getDocument() {
+  return isBrowser() ? document : null;
+}
+
+function emit(eventName = "", payload = {}) {
+  const name = safeText(eventName, "");
+
+  if (!name) return false;
+
+  try {
+    AppCore?.events?.emit?.(name, payload);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function showToast(message = "", type = "info") {
   const text = safeText(message, "");
   const kind = safeText(type, "info");
 
-  if (!text) return;
+  if (!text) return false;
 
   try {
     if (typeof AppCore?.toast?.[kind] === "function") {
       AppCore.toast[kind](text);
-      return;
+      return true;
     }
   } catch {}
 
   try {
     AppCore?.toast?.show?.(text, kind);
-    return;
+    return true;
   } catch {}
 
   try {
-    AppCore?.ui?.toast?.[kind]?.(text);
+    AppCore?.ui?.toast?.show?.(text, kind);
+    return true;
   } catch {}
+
+  return false;
 }
 
-function safeEmit(event = "", payload = {}) {
-  const eventName = safeText(event, "");
-  if (!eventName) return false;
-
-  let emitted = false;
-
-  try {
-    AppCore?.events?.emit?.(eventName, payload);
-    emitted = true;
-  } catch {}
-
-  try {
-    BrowserWindow?.dispatchEvent?.(
-      new CustomEvent(eventName, {
-        detail: payload,
-      })
-    );
-    emitted = true;
-  } catch {}
-
-  return emitted;
-}
-
-function safeOn(event = "", handler = null) {
-  const eventName = safeText(event, "");
-  if (!eventName || typeof handler !== "function") return false;
-
-  let attached = false;
-
-  try {
-    AppCore?.events?.on?.(eventName, handler);
-    attached = true;
-  } catch {}
-
-  try {
-    BrowserWindow?.addEventListener?.(eventName, handler);
-    attached = true;
-  } catch {}
-
-  return attached;
-}
-
-function safeOff(event = "", handler = null) {
-  const eventName = safeText(event, "");
-  if (!eventName || typeof handler !== "function") return false;
-
-  let detached = false;
-
-  try {
-    AppCore?.events?.off?.(eventName, handler);
-    detached = true;
-  } catch {}
-
-  try {
-    BrowserWindow?.removeEventListener?.(eventName, handler);
-    detached = true;
-  } catch {}
-
-  return detached;
-}
-
-function safeErrorMessage(
-  error = null,
-  fallback = "No se pudo completar la operación."
-) {
-  if (!error) return fallback;
-
+function getErrorMessage(error = null, fallback = "No se pudo completar la operación.") {
   return safeText(
     first(
       error?.message,
@@ -339,122 +302,9 @@ function safeErrorMessage(
   );
 }
 
-function getHttpStatus(error = null) {
-  return safeNumber(
-    first(
-      error?.status,
-      error?.statusCode,
-      error?.response?.status,
-      error?.data?.status
-    ),
-    0
-  );
-}
-
-function shouldTryNextCandidate(error = null) {
-  const status = getHttpStatus(error);
-
-  if (!status) return true;
-
-  return [404, 405, 409, 415, 422, 500, 502, 503, 504].includes(status);
-}
-
-/* =========================================================
-   URL / AUTH
-========================================================= */
-
-function getApiBase() {
-  const apiBase = safeText(
-    first(
-      AppCore?.config?.apiBase,
-      AppCore?.config?.api?.baseUrl,
-      AppCore?.state?.apiBase,
-      BrowserWindow?.ONION_API_BASE,
-      BrowserWindow?.API_BASE
-    ),
-    ""
-  );
-
-  return apiBase.replace(/\/+$/, "");
-}
-
-function buildFetchUrl(endpoint = "") {
-  const path = safeText(endpoint, "");
-  if (!path) return "";
-
-  if (isAbsoluteUrl(path)) {
-    return path;
-  }
-
-  const apiBase = getApiBase();
-
-  if (!apiBase) {
-    return path.startsWith("/") ? path : `/${path}`;
-  }
-
-  if (apiBase.endsWith("/api") && path.startsWith("/api/")) {
-    return `${apiBase}${path.slice(4)}`;
-  }
-
-  return `${apiBase}${path.startsWith("/") ? path : `/${path}`}`;
-}
-
-function getStorageValue(key = "") {
-  const cleanKey = safeText(key, "");
-  if (!cleanKey) return "";
-
-  try {
-    const localValue = localStorage.getItem(cleanKey);
-    if (localValue) return localValue;
-  } catch {}
-
-  try {
-    const sessionValue = sessionStorage.getItem(cleanKey);
-    if (sessionValue) return sessionValue;
-  } catch {}
-
-  return "";
-}
-
-function getAuthToken() {
-  return safeText(
-    first(
-      AppCore?.state?.token,
-      AppCore?.state?.accessToken,
-      AppCore?.auth?.getToken?.(),
-      AppCore?.Auth?.getToken?.(),
-      BrowserWindow?.Auth?.getToken?.(),
-      getStorageValue("token"),
-      getStorageValue("accessToken")
-    ),
-    ""
-  );
-}
-
-function createTimeoutController(timeoutMs = 15000) {
-  const controller = new AbortController();
-
-  const timer = setTimeout(() => {
-    try {
-      controller.abort();
-    } catch {}
-  }, timeoutMs);
-
-  return {
-    signal: controller.signal,
-    clear() {
-      clearTimeout(timer);
-    },
-  };
-}
-
 /* =========================================================
    FILE HELPERS
 ========================================================= */
-
-function isFile(value) {
-  return typeof File !== "undefined" && value instanceof File;
-}
 
 function getFileListFromInput(target) {
   try {
@@ -470,10 +320,7 @@ function formatFileSize(bytes = 0) {
   if (!Number.isFinite(size) || size <= 0) return "0 B";
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-
-  if (size < 1024 * 1024 * 1024) {
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  }
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
@@ -482,60 +329,37 @@ function getFileExtension(filename = "") {
   const clean = safeLower(filename, "");
   const index = clean.lastIndexOf(".");
 
-  if (index === -1) return "";
-
-  return clean.slice(index + 1);
+  return index === -1 ? "" : clean.slice(index + 1);
 }
 
 function dedupeFiles(files = []) {
-  const input = safeArray(files);
   const map = new Map();
 
-  input.forEach((file) => {
-    if (!isFile(file)) return;
+  safeArray(files).forEach((file, index) => {
+    if (!isFile(file) && !isBlob(file)) return;
 
     const key = [
-      safeText(file.name, ""),
+      safeText(file.name, `blob-${index + 1}`),
       safeNumber(file.size, 0),
       safeNumber(file.lastModified, 0),
       safeText(file.type, ""),
     ].join("::");
 
-    if (!map.has(key)) {
-      map.set(key, file);
-    }
+    if (!map.has(key)) map.set(key, file);
   });
 
   return Array.from(map.values());
 }
 
 function isAllowedFile(file = null) {
-  if (!isFile(file)) return false;
+  if (!isFile(file) && !isBlob(file)) return false;
 
   const mimetype = safeLower(file.type, "");
   const ext = getFileExtension(file.name);
 
-  if (mimetype && ALLOWED_MIME_TYPES.includes(mimetype)) {
-    return true;
-  }
+  if (mimetype && ALLOWED_MIME_TYPES.includes(mimetype)) return true;
 
-  return [
-    "jpg",
-    "jpeg",
-    "png",
-    "webp",
-    "gif",
-    "pdf",
-    "txt",
-    "csv",
-    "zip",
-    "doc",
-    "docx",
-    "xls",
-    "xlsx",
-    "ppt",
-    "pptx",
-  ].includes(ext);
+  return Boolean(ext && ALLOWED_EXTENSIONS.includes(ext));
 }
 
 function validateFiles(files = []) {
@@ -553,9 +377,7 @@ function validateFiles(files = []) {
     }
 
     if (safeNumber(file.size, 0) > MAX_FILE_SIZE) {
-      errors.push(
-        `El archivo ${safeText(file.name, "archivo")} supera el máximo de ${formatFileSize(MAX_FILE_SIZE)}.`
-      );
+      errors.push(`El archivo ${safeText(file.name, "archivo")} supera el máximo de ${formatFileSize(MAX_FILE_SIZE)}.`);
     }
   }
 
@@ -567,339 +389,38 @@ function validateFiles(files = []) {
 }
 
 /* =========================================================
-   PERMISSIONS / TARGET USER
-========================================================= */
-
-function normalizeTokenList(value) {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => safeLower(item, ""))
-      .filter(Boolean);
-  }
-
-  if (value && typeof value === "object") {
-    return Object.entries(value)
-      .filter(([, enabled]) => Boolean(enabled))
-      .map(([key]) => safeLower(key, ""))
-      .filter(Boolean);
-  }
-
-  if (typeof value === "string") {
-    return value
-      .split(/[,\s|;]+/g)
-      .map((item) => safeLower(item, ""))
-      .filter(Boolean);
-  }
-
-  return [];
-}
-
-function getCurrentRole() {
-  return safeLower(
-    first(
-      AppCore?.state?.user?.role,
-      AppCore?.state?.user?.rol,
-      AppCore?.state?.role,
-      AppCore?.state?.rol,
-      AppCore?.auth?.getRole?.(),
-      AppCore?.Auth?.getRole?.()
-    ),
-    ""
-  );
-}
-
-function canSelectTargetUser() {
-  const role = getCurrentRole();
-
-  if (ADMIN_ROLE_KEYS.includes(role)) {
-    return true;
-  }
-
-  const permissions = [
-    ...normalizeTokenList(AppCore?.state?.permissions),
-    ...normalizeTokenList(AppCore?.state?.user?.permissions),
-    ...normalizeTokenList(AppCore?.auth?.getPermissions?.()),
-    ...normalizeTokenList(AppCore?.Auth?.getPermissions?.()),
-  ];
-
-  return permissions.some((permission) =>
-    [
-      "admin",
-      "users:read",
-      "users:search",
-      "tickets:create:any",
-      "tickets:write:any",
-      "incidencias:create:any",
-      "incidencias:write:any",
-    ].includes(permission)
-  );
-}
-
-function getUserInitials(value = "", fallback = "US") {
-  const text = normalizeWhitespace(value);
-
-  if (!text) return fallback;
-
-  const parts = text.split(" ").filter(Boolean);
-
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-
-  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || fallback;
-}
-
-function normalizeUserCandidate(raw = null) {
-  const obj = safeObject(raw);
-  const nestedUser = safeObject(obj.user);
-  const nestedProfile = safeObject(obj.profile);
-  const nestedAvatar = safeObject(obj.avatar);
-  const nestedPhoto = safeObject(obj.photo);
-
-  const id = safeText(
-    first(
-      obj.userId,
-      obj.id,
-      obj.uid,
-      obj._id,
-      obj.code,
-      nestedUser.userId,
-      nestedUser.id,
-      nestedUser.uid,
-      nestedUser._id
-    ),
-    ""
-  );
-
-  if (!id) return null;
-
-  const email = safeText(
-    first(
-      obj.email,
-      nestedUser.email,
-      nestedProfile.email
-    ),
-    ""
-  );
-
-  const username = safeText(
-    first(
-      obj.username,
-      nestedUser.username,
-      nestedProfile.username
-    ),
-    ""
-  );
-
-  const phone = safeText(
-    first(
-      obj.phone,
-      obj.telefono,
-      nestedUser.phone,
-      nestedProfile.phone
-    ),
-    ""
-  );
-
-  const role = safeText(
-    first(
-      obj.role,
-      obj.rol,
-      nestedUser.role,
-      nestedUser.rol
-    ),
-    ""
-  );
-
-  const name = safeText(
-    first(
-      obj.name,
-      obj.nombre,
-      obj.fullName,
-      obj.displayName,
-      nestedUser.name,
-      nestedUser.nombre,
-      nestedUser.fullName,
-      nestedUser.displayName,
-      nestedProfile.name,
-      nestedProfile.nombre,
-      nestedProfile.fullName,
-      nestedProfile.displayName,
-      username,
-      email,
-      obj.label,
-      `Usuario ${id}`
-    ),
-    `Usuario ${id}`
-  );
-
-  const avatarUrl = safeText(
-    first(
-      obj.avatarUrl,
-      obj.avatarURL,
-      obj.avatar_url,
-      obj.avatar,
-      obj.userAvatar,
-      obj.userAvatarUrl,
-      obj.photoUrl,
-      obj.photoURL,
-      obj.photo_url,
-      obj.photo,
-      obj.imageUrl,
-      obj.imageURL,
-      obj.image_url,
-      obj.image,
-      obj.picture,
-      obj.pictureUrl,
-      obj.profilePicture,
-      obj.profilePictureUrl,
-
-      nestedUser.avatarUrl,
-      nestedUser.avatarURL,
-      nestedUser.avatar_url,
-      nestedUser.avatar,
-      nestedUser.photoUrl,
-      nestedUser.photoURL,
-      nestedUser.photo_url,
-      nestedUser.photo,
-      nestedUser.imageUrl,
-      nestedUser.imageURL,
-      nestedUser.image_url,
-      nestedUser.image,
-      nestedUser.picture,
-      nestedUser.pictureUrl,
-      nestedUser.profilePicture,
-      nestedUser.profilePictureUrl,
-
-      nestedProfile.avatarUrl,
-      nestedProfile.avatarURL,
-      nestedProfile.avatar_url,
-      nestedProfile.avatar,
-      nestedProfile.photoUrl,
-      nestedProfile.photoURL,
-      nestedProfile.photo_url,
-      nestedProfile.photo,
-      nestedProfile.imageUrl,
-      nestedProfile.imageURL,
-      nestedProfile.image_url,
-      nestedProfile.image,
-      nestedProfile.picture,
-      nestedProfile.pictureUrl,
-      nestedProfile.profilePicture,
-      nestedProfile.profilePictureUrl,
-
-      nestedAvatar.url,
-      nestedAvatar.src,
-      nestedPhoto.url,
-      nestedPhoto.src
-    ),
-    ""
-  );
-
-  const initials = getUserInitials(
-    first(
-      obj.initials,
-      obj.userInitials,
-      nestedUser.initials,
-      nestedUser.userInitials,
-      nestedProfile.initials,
-      name
-    ),
-    "US"
-  );
-
-  const label = safeText(
-    first(
-      obj.label,
-      `${name}${email ? ` · ${email}` : ""}`
-    ),
-    name
-  );
-
-  const subtitle = safeText(
-    first(
-      obj.subtitle,
-      email,
-      username ? `@${username}` : "",
-      phone,
-      id
-    ),
-    ""
-  );
-
-  return {
-    id,
-    userId: id,
-    name,
-    email,
-    username,
-    phone,
-    role,
-    avatarUrl,
-    avatar: avatarUrl,
-    initials,
-    label,
-    subtitle,
-  };
-}
-
-function dedupeUsers(items = []) {
-  const map = new Map();
-
-  safeArray(items).forEach((item) => {
-    const user = normalizeUserCandidate(item);
-    if (!user?.id) return;
-
-    if (!map.has(user.id)) {
-      map.set(user.id, user);
-    }
-  });
-
-  return Array.from(map.values());
-}
-
-/* =========================================================
    STATE HELPERS
 ========================================================= */
 
-function getInitialForm() {
-  const draft = safeObject(incidenciasState?.createDraft);
+function getInitialForm(draft = {}) {
+  const stateDraft = safeObject(incidenciasState?.createDraft);
+  const input = {
+    ...stateDraft,
+    ...safeObject(draft),
+  };
 
   return {
-    targetUserId: safeText(first(draft.targetUserId, draft.userId), ""),
-    targetUserName: safeText(first(draft.targetUserName, draft.userName), ""),
-    targetUserEmail: safeText(first(draft.targetUserEmail, draft.userEmail), ""),
-    targetUserAvatar: safeText(first(draft.targetUserAvatar, draft.userAvatar), ""),
+    targetUserId: safeText(first(input.targetUserId, input.userId), ""),
+    targetUserName: safeText(first(input.targetUserName, input.userName, input.clientName, input.clienteNombre), ""),
+    targetUserEmail: safeText(first(input.targetUserEmail, input.userEmail, input.clientEmail, input.clienteEmail), ""),
+    targetUserAvatar: safeText(first(input.targetUserAvatar, input.userAvatar, input.clientAvatar, input.avatar, input.avatarUrl), ""),
 
-    subject: safeText(draft.subject, ""),
-    description: safeText(first(draft.description, draft.descripcion, draft.message), ""),
+    subject: safeText(first(input.subject, input.asunto, input.title), ""),
+    description: safeText(first(input.description, input.descripcion, input.message, input.body), ""),
 
-    priority: safeText(first(draft.priority, draft.prioridad, "medium"), "medium"),
-    status: safeText(first(draft.status, draft.estado, "open"), "open"),
-    category: safeText(first(draft.category, draft.categoria, "general"), "general"),
-    source: safeText(first(draft.source, draft.origen, "panel"), "panel"),
+    priority: validateOption(first(input.priority, input.prioridad, "medium"), PRIORITY_OPTIONS, "medium"),
+    status: safeText(first(input.status, input.estado, "open"), "open"),
+    category: validateOption(first(input.category, input.categoria, input.tipo, "general"), CATEGORY_OPTIONS, "general"),
+    source: safeText(first(input.source, input.origen, "panel"), "panel"),
 
     attachments: [],
   };
 }
 
-function syncCreateViewState(patch = {}) {
-  try {
-    incidenciasState.createView = {
-      ...safeObject(incidenciasState.createView),
-      ...safeObject(patch),
-      form: {
-        ...safeObject(incidenciasState.createView?.form),
-        ...safeObject(patch.form),
-      },
-    };
-  } catch {}
-}
-
 function persistDraft() {
   const form = safeObject(modalState.form);
 
-  incidenciasState.createDraft = {
+  const draft = {
     targetUserId: safeText(form.targetUserId, ""),
     targetUserName: safeText(form.targetUserName, ""),
     targetUserEmail: safeText(form.targetUserEmail, ""),
@@ -918,32 +439,36 @@ function persistDraft() {
     source: safeText(form.source, "panel"),
   };
 
-  syncCreateViewState({
-    form: incidenciasState.createDraft,
-  });
+  try {
+    setCreateDraft(draft);
+  } catch {
+    try {
+      incidenciasState.createDraft = draft;
+    } catch {}
+  }
+
+  try {
+    patchCreateViewState({
+      form: draft,
+    });
+  } catch {}
+
+  return draft;
 }
 
 function clearDraft() {
-  incidenciasState.createDraft = {
-    targetUserId: "",
-    targetUserName: "",
-    targetUserEmail: "",
-    targetUserAvatar: "",
-    userId: "",
-    userName: "",
-    userEmail: "",
-    userAvatar: "",
-    subject: "",
-    description: "",
-    priority: "medium",
-    status: "open",
-    category: "general",
-    source: "panel",
-  };
+  try {
+    clearCreateDraft();
+  } catch {}
 
-  syncCreateViewState({
-    form: incidenciasState.createDraft,
-  });
+  try {
+    patchCreateViewState({
+      form: {
+        ...DEFAULT_FORM,
+        attachments: [],
+      },
+    });
+  } catch {}
 }
 
 function setFormPatch(patch = {}) {
@@ -952,6 +477,10 @@ function setFormPatch(patch = {}) {
     ...safeObject(patch),
   };
 
+  modalState.form.priority = validateOption(modalState.form.priority, PRIORITY_OPTIONS, "medium");
+  modalState.form.category = validateOption(modalState.form.category, CATEGORY_OPTIONS, "general");
+  modalState.form.status = safeText(modalState.form.status, "open");
+  modalState.form.source = safeText(modalState.form.source, "panel");
   modalState.form.attachments = dedupeFiles(modalState.form.attachments);
 
   persistDraft();
@@ -965,12 +494,14 @@ function resetFeedbackState() {
   modalState.successMessage = "";
   modalState.createdTicketId = "";
 
-  syncCreateViewState({
-    errors: {},
-    serverError: "",
-    createdTicketId: "",
-    successMessage: "",
-  });
+  try {
+    patchCreateViewState({
+      errors: {},
+      serverError: "",
+      createdTicketId: "",
+      successMessage: "",
+    });
+  } catch {}
 }
 
 function resetFormState() {
@@ -980,44 +511,6 @@ function resetFormState() {
   };
 }
 
-function clearUserSearchTimer() {
-  if (!modalState.userSearchDebounce) return;
-
-  try {
-    clearTimeout(modalState.userSearchDebounce);
-  } catch {}
-
-  modalState.userSearchDebounce = null;
-}
-
-function resetUserSearchState({ preserveQuery = false } = {}) {
-  clearUserSearchTimer();
-
-  modalState.userSearchResults = [];
-  modalState.userSearchLoading = false;
-  modalState.userSearchError = "";
-  modalState.userSearchSeq += 1;
-
-  if (!preserveQuery) {
-    modalState.userSearchQuery = "";
-  }
-}
-
-function clearTargetUserSelection() {
-  setFormPatch({
-    targetUserId: "",
-    targetUserName: "",
-    targetUserEmail: "",
-    targetUserAvatar: "",
-  });
-
-  if (modalState.errors.targetUserId) {
-    const nextErrors = { ...modalState.errors };
-    delete nextErrors.targetUserId;
-    modalState.errors = nextErrors;
-  }
-}
-
 /* =========================================================
    VALIDATION / PAYLOAD
 ========================================================= */
@@ -1025,7 +518,7 @@ function clearTargetUserSelection() {
 function validateOption(value = "", options = [], fallback = "") {
   const key = safeText(value, fallback);
 
-  return options.some((item) => item.value === key)
+  return safeArray(options).some((item) => item.value === key)
     ? key
     : fallback;
 }
@@ -1052,13 +545,8 @@ function validateForm(form = {}) {
   const priority = validateOption(current.priority, PRIORITY_OPTIONS, "medium");
   const category = validateOption(current.category, CATEGORY_OPTIONS, "general");
 
-  if (!priority) {
-    errors.priority = "Selecciona una prioridad válida.";
-  }
-
-  if (!category) {
-    errors.category = "Selecciona una categoría válida.";
-  }
+  if (!priority) errors.priority = "Selecciona una prioridad válida.";
+  if (!category) errors.category = "Selecciona una categoría válida.";
 
   const fileValidation = validateFiles(current.attachments);
 
@@ -1073,520 +561,88 @@ function validateForm(form = {}) {
   };
 }
 
-function appendIfValue(fd, key, value) {
-  const text = safeText(value, "");
-  if (!text) return;
-
-  fd.append(key, text);
-}
-
 function buildPayload(form = {}) {
   const current = safeObject(form);
-  const fd = new FormData();
 
   const subject = normalizeWhitespace(current.subject);
   const description = normalizeWhitespace(current.description);
-
   const priority = validateOption(current.priority, PRIORITY_OPTIONS, "medium");
   const status = safeText(current.status, "open");
   const category = validateOption(current.category, CATEGORY_OPTIONS, "general");
   const source = safeText(current.source, "panel");
+  const targetUserId = safeText(current.targetUserId, "");
+  const targetUserName = safeText(current.targetUserName, "");
+  const targetUserEmail = safeText(current.targetUserEmail, "");
+  const targetUserAvatar = safeText(current.targetUserAvatar, "");
 
-  fd.append("subject", subject);
-  fd.append("asunto", subject);
-  fd.append("title", subject);
+  return {
+    subject,
+    asunto: subject,
+    title: subject,
 
-  fd.append("description", description);
-  fd.append("descripcion", description);
-  fd.append("message", description);
-  fd.append("body", description);
+    description,
+    descripcion: description,
+    message: description,
+    body: description,
 
-  fd.append("priority", priority);
-  fd.append("prioridad", priority);
+    priority,
+    prioridad: priority,
 
-  fd.append("status", status);
-  fd.append("estado", status);
+    status,
+    estado: status,
 
-  fd.append("category", category);
-  fd.append("categoria", category);
-  fd.append("tipo", category);
+    category,
+    categoria: category,
+    tipo: category,
 
-  fd.append("source", source);
-  fd.append("origen", source);
-  fd.append("channel", source);
+    source,
+    origen: source,
+    channel: source,
 
-  if (canSelectTargetUser()) {
-    const targetUserId = safeText(current.targetUserId, "");
-    const targetUserName = safeText(current.targetUserName, "");
-    const targetUserEmail = safeText(current.targetUserEmail, "");
-    const targetUserAvatar = safeText(current.targetUserAvatar, "");
+    ...(targetUserId
+      ? {
+          userId: targetUserId,
+          clienteId: targetUserId,
+          targetUserId,
+          receptorUserId: targetUserId,
+          targetUserName,
+          targetUserEmail,
+          targetUserAvatar,
+          clienteNombre: targetUserName,
+          clienteEmail: targetUserEmail,
+          clienteAvatar: targetUserAvatar,
+          clientName: targetUserName,
+          clientEmail: targetUserEmail,
+          clientAvatar: targetUserAvatar,
+          name: targetUserName,
+          email: targetUserEmail,
+          avatar: targetUserAvatar,
+          avatarUrl: targetUserAvatar,
+        }
+      : {}),
 
-    if (targetUserId) {
-      fd.append("userId", targetUserId);
-      fd.append("clienteId", targetUserId);
-      fd.append("targetUserId", targetUserId);
-      fd.append("receptorUserId", targetUserId);
-    }
-
-    appendIfValue(fd, "targetUserName", targetUserName);
-    appendIfValue(fd, "targetUserEmail", targetUserEmail);
-    appendIfValue(fd, "targetUserAvatar", targetUserAvatar);
-
-    appendIfValue(fd, "clienteNombre", targetUserName);
-    appendIfValue(fd, "clienteEmail", targetUserEmail);
-    appendIfValue(fd, "clienteAvatar", targetUserAvatar);
-
-    appendIfValue(fd, "name", targetUserName);
-    appendIfValue(fd, "email", targetUserEmail);
-    appendIfValue(fd, "avatar", targetUserAvatar);
-    appendIfValue(fd, "avatarUrl", targetUserAvatar);
-  }
-
-  dedupeFiles(current.attachments).forEach((file) => {
-    if (isFile(file)) {
-      fd.append("attachments", file, file.name);
-      fd.append("files", file, file.name);
-      fd.append("adjuntos", file, file.name);
-    }
-  });
-
-  return fd;
+    attachments: dedupeFiles(current.attachments),
+  };
 }
 
-function shouldUseAdminEndpoint() {
-  return canSelectTargetUser() && Boolean(safeText(modalState.form?.targetUserId, ""));
-}
-
-/* =========================================================
-   CREATE ADAPTERS
-========================================================= */
-
-function buildCreateEndpoints() {
-  if (shouldUseAdminEndpoint()) {
-    return [
-      TICKETS_ADMIN_CREATE_ENDPOINT,
-      TICKETS_CREATE_ENDPOINT,
-      INCIDENCIAS_CREATE_ENDPOINT,
-    ];
-  }
-
-  return [
-    TICKETS_CREATE_ENDPOINT,
-    INCIDENCIAS_CREATE_ENDPOINT,
-  ];
-}
-
-async function createViaApiClient(endpoint = "", payload = null) {
-  const client = AppCore?.apiClient || null;
-
-  if (!client) {
-    throw new Error("API_CLIENT_UNAVAILABLE");
-  }
-
-  if (typeof client.post === "function") {
-    return client.post(endpoint, payload, {
-      timeout: CREATE_TIMEOUT_MS,
-      auth: true,
-      headers: {},
-    });
-  }
-
-  if (typeof client.request === "function") {
-    return client.request(endpoint, {
-      method: "POST",
-      timeout: CREATE_TIMEOUT_MS,
-      auth: true,
-      headers: {},
-      body: payload,
-    });
-  }
-
-  throw new Error("API_CLIENT_POST_UNAVAILABLE");
-}
-
-async function createViaAppCoreRequest(endpoint = "", payload = null) {
-  if (typeof AppCore?.request !== "function") {
-    throw new Error("APP_CORE_REQUEST_UNAVAILABLE");
-  }
-
-  return AppCore.request(endpoint, {
-    method: "POST",
-    timeout: CREATE_TIMEOUT_MS,
-    body: payload,
-    headers: {},
-  });
-}
-
-async function createViaHttpModule(endpoint = "", payload = null) {
-  const Http = AppCore?.modules?.Http || AppCore?.Http || BrowserWindow?.Http || null;
-
-  if (!Http) {
-    throw new Error("HTTP_MODULE_UNAVAILABLE");
-  }
-
-  if (typeof Http.post === "function") {
-    return Http.post(endpoint, payload, {
-      timeout: CREATE_TIMEOUT_MS,
-      headers: {},
-    });
-  }
-
-  if (typeof Http.request === "function") {
-    return Http.request(endpoint, {
-      method: "POST",
-      timeout: CREATE_TIMEOUT_MS,
-      body: payload,
-      headers: {},
-    });
-  }
-
-  throw new Error("HTTP_POST_UNAVAILABLE");
-}
-
-async function createViaFetch(endpoint = "", payload = null) {
-  const token = getAuthToken();
-  const url = buildFetchUrl(endpoint);
-  const timeout = createTimeoutController(CREATE_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      credentials: "include",
-      body: payload,
-      signal: timeout.signal,
-    });
-
-    const text = await response.text();
-    let data = null;
-
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = { raw: text };
-    }
-
-    if (!response.ok) {
-      const error = new Error(
-        safeText(
-          first(
-            data?.message,
-            data?.error,
-            `HTTP ${response.status} al crear incidencia.`
-          ),
-          "No se pudo crear la incidencia."
-        )
-      );
-
-      error.response = data;
-      error.status = response.status;
-      error.statusCode = response.status;
-      error.url = url;
-
-      throw error;
-    }
-
-    return data;
-  } finally {
-    timeout.clear();
-  }
-}
-
-function pickCreatedTicket(response = null) {
-  if (!response) return null;
-
-  if (Array.isArray(response)) {
-    return response[0] || null;
-  }
-
-  const obj = safeObject(response);
-
-  return (
-    obj.ticket ||
-    obj.item ||
-    obj.data?.ticket ||
-    obj.data?.item ||
-    obj.data ||
-    obj.result?.ticket ||
-    obj.result?.item ||
-    obj.result ||
-    obj.payload?.ticket ||
-    obj.payload?.item ||
-    obj.payload ||
-    obj.incidencia ||
-    obj.detail ||
-    obj
-  );
-}
-
-function resolveCreatedTicketId(response = null) {
-  const ticket = safeObject(pickCreatedTicket(response));
+function resolveCreatedTicketId(detail = null) {
+  const item = safeObject(detail);
 
   return safeText(
     first(
-      ticket.ticketId,
-      ticket.id,
-      ticket.code,
-      ticket.ticketCode,
-      ticket.incidenciaId,
-      response?.ticketId,
-      response?.id,
-      response?.code,
-      response?.ticketCode,
-      response?.incidenciaId
+      item.ticketId,
+      item.id,
+      item.code,
+      item.ticketCode,
+      item.incidenciaId,
+      item.raw?.ticketId,
+      item.raw?.id,
+      item.raw?.code,
+      item.raw?.ticketCode,
+      item.raw?.incidenciaId
     ),
     ""
   );
-}
-
-async function createIncidenciaRequest(payload = null) {
-  const endpoints = buildCreateEndpoints();
-
-  const adapters = [
-    createViaApiClient,
-    createViaAppCoreRequest,
-    createViaHttpModule,
-    createViaFetch,
-  ];
-
-  let lastError = null;
-
-  for (const endpoint of endpoints) {
-    for (const adapter of adapters) {
-      try {
-        return await adapter(endpoint, payload);
-      } catch (error) {
-        lastError = error;
-
-        if (!shouldTryNextCandidate(error)) {
-          throw error;
-        }
-      }
-    }
-  }
-
-  throw lastError || new Error("CREATE_ADAPTERS_FAILED");
-}
-
-/* =========================================================
-   USER SEARCH ADAPTERS
-========================================================= */
-
-function buildUserSearchUrls(query = "") {
-  const params = new URLSearchParams();
-
-  params.set("q", safeText(query, ""));
-  params.set("mode", "incidencias");
-  params.set("limit", String(USER_SEARCH_LIMIT));
-
-  return [
-    `${USER_SEARCH_ENDPOINT}?${params.toString()}`,
-    `/api/users/search?${params.toString()}`,
-    `/api/usuarios/search?${params.toString()}`,
-    `/search/users?${params.toString()}`,
-  ];
-}
-
-function readUsersCollection(response = null) {
-  if (Array.isArray(response)) {
-    return {
-      recognized: true,
-      items: response,
-    };
-  }
-
-  const obj = safeObject(response);
-  const data = safeObject(obj.data);
-  const payload = safeObject(obj.payload);
-  const result = safeObject(obj.result);
-
-  const candidates = [
-    obj.users,
-    obj.usuarios,
-    obj.items,
-    obj.results,
-    obj.list,
-    obj.rows,
-    obj.records,
-
-    data.users,
-    data.usuarios,
-    data.items,
-    data.results,
-    data.list,
-    data.rows,
-    data.records,
-
-    payload.users,
-    payload.usuarios,
-    payload.items,
-    payload.results,
-    payload.list,
-    payload.rows,
-    payload.records,
-
-    result.users,
-    result.usuarios,
-    result.items,
-    result.results,
-    result.list,
-    result.rows,
-    result.records,
-  ];
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return {
-        recognized: true,
-        items: candidate,
-      };
-    }
-  }
-
-  return {
-    recognized: false,
-    items: [],
-  };
-}
-
-function extractUsersFromSearchResponse(response = null) {
-  const collection = readUsersCollection(response);
-
-  if (!collection.recognized) {
-    return {
-      recognized: false,
-      items: [],
-    };
-  }
-
-  return {
-    recognized: true,
-    items: dedupeUsers(collection.items).slice(0, USER_SEARCH_LIMIT),
-  };
-}
-
-async function searchUsersViaAppCore(url = "") {
-  if (typeof AppCore?.request !== "function") {
-    throw new Error("APP_CORE_REQUEST_UNAVAILABLE");
-  }
-
-  return AppCore.request(url, {
-    method: "GET",
-    timeout: USER_SEARCH_TIMEOUT_MS,
-  });
-}
-
-async function searchUsersViaHttpModule(url = "") {
-  const Http = AppCore?.modules?.Http || AppCore?.Http || BrowserWindow?.Http || null;
-
-  if (!Http) {
-    throw new Error("HTTP_MODULE_UNAVAILABLE");
-  }
-
-  if (typeof Http.get === "function") {
-    return Http.get(url, {
-      timeout: USER_SEARCH_TIMEOUT_MS,
-    });
-  }
-
-  if (typeof Http.request === "function") {
-    return Http.request(url, {
-      method: "GET",
-      timeout: USER_SEARCH_TIMEOUT_MS,
-    });
-  }
-
-  throw new Error("HTTP_GET_UNAVAILABLE");
-}
-
-async function searchUsersViaFetch(url = "") {
-  const token = getAuthToken();
-  const finalUrl = buildFetchUrl(url);
-  const timeout = createTimeoutController(USER_SEARCH_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(finalUrl, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      credentials: "include",
-      signal: timeout.signal,
-    });
-
-    const text = await response.text();
-    let data = null;
-
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = { raw: text };
-    }
-
-    if (!response.ok) {
-      const error = new Error(
-        safeText(
-          first(
-            data?.message,
-            data?.error,
-            `HTTP ${response.status} al buscar usuarios.`
-          ),
-          "No se pudieron cargar usuarios."
-        )
-      );
-
-      error.response = data;
-      error.status = response.status;
-      error.statusCode = response.status;
-
-      throw error;
-    }
-
-    return data;
-  } finally {
-    timeout.clear();
-  }
-}
-
-async function searchUsersRequest(query = "") {
-  const urls = buildUserSearchUrls(query);
-
-  const adapters = [
-    searchUsersViaAppCore,
-    searchUsersViaHttpModule,
-    searchUsersViaFetch,
-  ];
-
-  let lastError = null;
-
-  for (const url of urls) {
-    for (const adapter of adapters) {
-      try {
-        const response = await adapter(url);
-        const parsed = extractUsersFromSearchResponse(response);
-
-        if (parsed.recognized) {
-          return parsed.items;
-        }
-      } catch (error) {
-        lastError = error;
-
-        if (!shouldTryNextCandidate(error)) {
-          throw error;
-        }
-      }
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
-  }
-
-  return [];
 }
 
 /* =========================================================
@@ -1594,12 +650,10 @@ async function searchUsersRequest(query = "") {
 ========================================================= */
 
 function icon(name = "") {
-  const common = `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+  const common = "aria-hidden=\"true\" focusable=\"false\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"";
 
   const icons = {
     close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-    search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`,
-    user: `<svg ${common}><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>`,
     ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
     paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
     alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
@@ -1633,9 +687,7 @@ function renderInput({
 } = {}) {
   return `
     <label class="inc-create-field">
-      <span class="inc-create-label">
-        ${escapeHtml(label)}${required ? " *" : ""}
-      </span>
+      <span class="inc-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
 
       <input
         class="inc-create-input ${error ? "is-error" : ""}"
@@ -1645,7 +697,7 @@ function renderInput({
         value="${escapeHtml(value)}"
         placeholder="${escapeHtml(placeholder)}"
         autocomplete="${escapeHtml(autocomplete)}"
-        ${modalState.submitting ? "disabled" : ""}
+        ${disabledAttr(modalState.submitting)}
       />
 
       ${renderFieldError(error)}
@@ -1664,9 +716,7 @@ function renderTextarea({
 } = {}) {
   return `
     <label class="inc-create-field">
-      <span class="inc-create-label">
-        ${escapeHtml(label)}${required ? " *" : ""}
-      </span>
+      <span class="inc-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
 
       <textarea
         class="inc-create-textarea ${error ? "is-error" : ""}"
@@ -1674,7 +724,7 @@ function renderTextarea({
         name="${escapeHtml(name)}"
         rows="${Number(rows) || 5}"
         placeholder="${escapeHtml(placeholder)}"
-        ${modalState.submitting ? "disabled" : ""}
+        ${disabledAttr(modalState.submitting)}
       >${escapeHtml(value)}</textarea>
 
       ${renderFieldError(error)}
@@ -1692,32 +742,25 @@ function renderSelect({
 } = {}) {
   return `
     <label class="inc-create-field">
-      <span class="inc-create-label">
-        ${escapeHtml(label)}${required ? " *" : ""}
-      </span>
+      <span class="inc-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
 
       <span class="inc-create-select-wrap">
         <select
           class="inc-create-select ${error ? "is-error" : ""}"
           data-field="${escapeHtml(name)}"
           name="${escapeHtml(name)}"
-          ${modalState.submitting ? "disabled" : ""}
+          ${disabledAttr(modalState.submitting)}
         >
-          ${safeArray(options)
-            .map((option) => {
-              const optionValue = safeText(option.value, "");
-              const optionLabel = safeText(option.label, optionValue);
+          ${safeArray(options).map((option) => {
+            const optionValue = safeText(option.value, "");
+            const optionLabel = safeText(option.label, optionValue);
 
-              return `
-                <option
-                  value="${escapeHtml(optionValue)}"
-                  ${optionValue === value ? "selected" : ""}
-                >
-                  ${escapeHtml(optionLabel)}
-                </option>
-              `;
-            })
-            .join("")}
+            return `
+              <option value="${escapeHtml(optionValue)}" ${optionValue === value ? "selected" : ""}>
+                ${escapeHtml(optionLabel)}
+              </option>
+            `;
+          }).join("")}
         </select>
 
         <span class="inc-create-select-chevron" aria-hidden="true">⌄</span>
@@ -1728,40 +771,24 @@ function renderSelect({
   `;
 }
 
-function renderUserAvatar(user = {}, className = "inc-create-search-avatar") {
-  const source = safeObject(user);
-  const name = safeText(first(source.name, source.label, source.email, "Usuario"), "Usuario");
-  const initials = safeText(
-    first(source.initials, getUserInitials(name, "US")),
-    "US"
-  );
-  const avatarUrl = safeText(first(source.avatarUrl, source.avatar, source.photoUrl, source.imageUrl), "");
+function renderTargetUserSummary() {
+  const form = safeObject(modalState.form);
+  const targetUserId = safeText(form.targetUserId, "");
+
+  if (!targetUserId) return "";
+
+  const name = safeText(form.targetUserName, "Usuario seleccionado");
+  const email = safeText(form.targetUserEmail, "");
 
   return `
-    <span
-      class="${escapeHtml(className)}${avatarUrl ? " has-image" : ""}"
-      title="${escapeHtml(name)}"
-      aria-label="${escapeHtml(name)}"
-      data-tooltip="${escapeHtml(name)}"
-    >
-      ${
-        avatarUrl
-          ? `
-            <img
-              src="${escapeHtml(avatarUrl)}"
-              alt="${escapeHtml(name)}"
-              loading="lazy"
-              referrerpolicy="no-referrer"
-              data-inc-create-avatar-img="true"
-            />
-          `
-          : ""
-      }
-
-      <span class="inc-create-search-avatar-fallback">
-        ${escapeHtml(initials)}
-      </span>
-    </span>
+    <section class="inc-create-block inc-create-block--target">
+      <div class="inc-create-block-head">
+        <div>
+          <strong>Usuario afectado</strong>
+          <span>${escapeHtml(email ? `${name} · ${email}` : `${name} · ${targetUserId}`)}</span>
+        </div>
+      </div>
+    </section>
   `;
 }
 
@@ -1772,53 +799,35 @@ function renderFilesSummary(files = []) {
 
   return `
     <div class="inc-create-files-list">
-      ${items
-        .map(
-          (file, index) => `
-            <div class="inc-create-file-row">
-              <div class="inc-create-file-meta">
-                <strong class="inc-create-file-name">
-                  ${escapeHtml(safeText(file?.name, `Adjunto ${index + 1}`))}
-                </strong>
+      ${items.map((file, index) => `
+        <div class="inc-create-file-row">
+          <div class="inc-create-file-meta">
+            <strong class="inc-create-file-name">${escapeHtml(safeText(file?.name, `Adjunto ${index + 1}`))}</strong>
+            <span class="inc-create-file-size">${escapeHtml([safeText(file?.type, ""), formatFileSize(file?.size)].filter(Boolean).join(" · "))}</span>
+          </div>
 
-                <span class="inc-create-file-size">
-                  ${escapeHtml(
-                    [
-                      safeText(file?.type, ""),
-                      formatFileSize(file?.size),
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")
-                  )}
-                </span>
-              </div>
-
-              <button
-                type="button"
-                data-remove-attachment="${index}"
-                class="inc-create-file-remove"
-                ${modalState.submitting ? "disabled" : ""}
-              >
-                ${icon("trash")}
-                <span>Quitar</span>
-              </button>
-            </div>
-          `
-        )
-        .join("")}
+          <button
+            type="button"
+            data-remove-attachment="${index}"
+            class="inc-create-file-remove"
+            ${disabledAttr(modalState.submitting)}
+          >
+            ${icon("trash")}
+            <span>Quitar</span>
+          </button>
+        </div>
+      `).join("")}
     </div>
   `;
 }
 
 function renderFileInput({ files = [], dragActive = false, error = "" } = {}) {
   const items = safeArray(files);
-
-  const countText =
-    items.length === 0
-      ? "Opcional"
-      : items.length === 1
-        ? "1 archivo"
-        : `${items.length} archivos`;
+  const countText = items.length === 0
+    ? "Opcional"
+    : items.length === 1
+      ? "1 archivo"
+      : `${items.length} archivos`;
 
   return `
     <section class="inc-create-files-card">
@@ -1839,7 +848,7 @@ function renderFileInput({ files = [], dragActive = false, error = "" } = {}) {
           multiple
           accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.csv,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
           class="inc-create-hidden-input"
-          ${modalState.submitting ? "disabled" : ""}
+          ${disabledAttr(modalState.submitting)}
         />
 
         <div class="inc-create-dropzone-copy">
@@ -1849,198 +858,7 @@ function renderFileInput({ files = [], dragActive = false, error = "" } = {}) {
       </label>
 
       ${renderFieldError(error)}
-
       ${renderFilesSummary(items)}
-    </section>
-  `;
-}
-
-function renderSelectedUserCard() {
-  const form = safeObject(modalState.form);
-  const targetUserId = safeText(form.targetUserId, "");
-
-  if (!targetUserId) return "";
-
-  const targetUserName = safeText(form.targetUserName, "Usuario seleccionado");
-  const targetUserEmail = safeText(form.targetUserEmail, "");
-  const targetUserAvatar = safeText(form.targetUserAvatar, "");
-
-  return `
-    <div class="inc-create-target-user-card">
-      ${renderUserAvatar(
-        {
-          id: targetUserId,
-          name: targetUserName,
-          email: targetUserEmail,
-          avatarUrl: targetUserAvatar,
-          initials: getUserInitials(targetUserName, "US"),
-        },
-        "inc-create-search-avatar inc-create-target-user-avatar"
-      )}
-
-      <div class="inc-create-target-user-copy">
-        <strong>${escapeHtml(targetUserName)}</strong>
-        <span>
-          ${
-            targetUserEmail
-              ? escapeHtml(targetUserEmail)
-              : `ID ${escapeHtml(targetUserId)}`
-          }
-        </span>
-      </div>
-
-      <button
-        type="button"
-        data-clear-selected-user="true"
-        class="inc-create-target-user-clear"
-        ${modalState.submitting ? "disabled" : ""}
-      >
-        Cambiar
-      </button>
-    </div>
-  `;
-}
-
-function renderUserSearchResults() {
-  const query = safeText(modalState.userSearchQuery, "");
-  const results = safeArray(modalState.userSearchResults);
-  const loading = Boolean(modalState.userSearchLoading);
-  const error = safeText(modalState.userSearchError, "");
-
-  if (!query) return "";
-
-  if (loading) {
-    return `
-      <div class="inc-create-search-state">
-        <span class="inc-create-mini-spinner" aria-hidden="true"></span>
-        Buscando usuarios...
-      </div>
-    `;
-  }
-
-  if (error) {
-    return `
-      <div class="inc-create-search-state is-error">
-        ${icon("alert")}
-        ${escapeHtml(error)}
-      </div>
-    `;
-  }
-
-  if (query.length < 2) {
-    return `
-      <div class="inc-create-search-state">
-        Escribe al menos 2 caracteres.
-      </div>
-    `;
-  }
-
-  if (!results.length) {
-    return `
-      <div class="inc-create-search-state">
-        Sin resultados.
-      </div>
-    `;
-  }
-
-  return `
-    <div class="inc-create-search-results">
-      ${results
-        .map(
-          (user, index) => `
-            <button
-              type="button"
-              data-select-target-user="${index}"
-              class="inc-create-search-item"
-              ${modalState.submitting ? "disabled" : ""}
-            >
-              ${renderUserAvatar(user)}
-
-              <span class="inc-create-search-item-copy">
-                <strong>
-                  ${escapeHtml(safeText(user?.name, `Usuario ${index + 1}`))}
-                </strong>
-
-                <span>
-                  ${escapeHtml(
-                    safeText(
-                      first(
-                        user?.subtitle,
-                        user?.email,
-                        user?.username ? `@${user.username}` : "",
-                        user?.phone,
-                        user?.id
-                      ),
-                      "Sin datos secundarios"
-                    )
-                  )}
-                </span>
-              </span>
-            </button>
-          `
-        )
-        .join("")}
-    </div>
-  `;
-}
-
-function renderTargetUserBlock() {
-  if (!canSelectTargetUser()) return "";
-
-  const targetUserId = safeText(modalState.form?.targetUserId, "");
-  const queryValue = safeText(modalState.userSearchQuery, "");
-  const error = safeText(modalState.errors?.targetUserId, "");
-
-  return `
-    <section class="inc-create-block" data-target-user-block="true">
-      <div class="inc-create-block-head">
-        <div>
-          <strong>${icon("user")} Usuario afectado</strong>
-          <span>Opcional. Si seleccionas usuario, la incidencia quedará vinculada a esa cuenta.</span>
-        </div>
-      </div>
-
-      <label class="inc-create-field">
-        <span class="inc-create-search-input-wrap">
-          <span class="inc-create-search-input-icon">${icon("search")}</span>
-
-          <input
-            class="inc-create-input inc-create-input--with-icon ${error ? "is-error" : ""}"
-            data-field="targetUserSearch"
-            name="targetUserSearch"
-            type="text"
-            value="${escapeHtml(queryValue)}"
-            placeholder="${
-              targetUserId
-                ? "Buscar otro usuario..."
-                : "Buscar por nombre, email, username o teléfono..."
-            }"
-            autocomplete="off"
-            ${modalState.submitting ? "disabled" : ""}
-          />
-        </span>
-
-        <div
-          class="inc-create-target-error-slot"
-          data-target-user-error-slot="true"
-        >
-          ${renderFieldError(error)}
-        </div>
-      </label>
-
-      <div
-        class="inc-create-user-search-slot"
-        data-user-search-results-slot="true"
-      >
-        ${renderUserSearchResults()}
-      </div>
-
-      <div
-        class="inc-create-selected-user-slot"
-        data-selected-user-slot="true"
-      >
-        ${renderSelectedUserCard()}
-      </div>
     </section>
   `;
 }
@@ -2053,10 +871,7 @@ function renderAlert(type = "info", title = "", text = "") {
 
   return `
     <div class="inc-create-alert is-${escapeHtml(type)}">
-      <span class="inc-create-alert-icon">
-        ${type === "success" ? icon("check") : type === "error" ? icon("alert") : icon("ticket")}
-      </span>
-
+      <span class="inc-create-alert-icon">${type === "success" ? icon("check") : type === "error" ? icon("alert") : icon("ticket")}</span>
       <span class="inc-create-alert-copy">
         ${safeTitle ? `<strong>${escapeHtml(safeTitle)}</strong>` : ""}
         ${safeBody ? `<span>${escapeHtml(safeBody)}</span>` : ""}
@@ -2087,13 +902,9 @@ function renderModalInner() {
   const serverError = safeText(modalState.serverError, "");
   const successMessage = safeText(modalState.successMessage, "");
   const createdTicketId = safeText(modalState.createdTicketId, "");
-  const targetMode = canSelectTargetUser();
 
   return `
-    <div
-      data-incidencias-create-modal-overlay="true"
-      class="inc-create-overlay"
-    >
+    <div data-incidencias-create-modal-overlay="true" class="inc-create-overlay">
       <div
         id="${PANEL_ID}"
         data-incidencias-create-modal-panel="true"
@@ -2107,24 +918,15 @@ function renderModalInner() {
 
         <div class="inc-create-header">
           <div class="inc-create-header-copy">
-            <h2 id="incidencias-create-modal-title">
-              Crear incidencia
-            </h2>
-
-            <p>
-              ${
-                targetMode
-                  ? "Selecciona usuario si corresponde, define el asunto, clasifica el caso y adjunta documentos si hace falta."
-                  : "Define el asunto, clasifica el caso y adjunta documentos si hace falta."
-              }
-            </p>
+            <h2 id="incidencias-create-modal-title">Crear incidencia</h2>
+            <p>Define el asunto, clasifica el caso y adjunta documentos si hace falta.</p>
           </div>
 
           <button
             type="button"
             data-modal-close="true"
             aria-label="Cerrar modal"
-            ${submitting ? "disabled" : ""}
+            ${disabledAttr(submitting)}
             class="inc-create-close"
           >
             ${icon("close")}
@@ -2132,28 +934,11 @@ function renderModalInner() {
         </div>
 
         <div class="inc-create-body">
-          ${
-            successMessage
-              ? renderAlert(
-                  "success",
-                  "Incidencia creada.",
-                  createdTicketId ? `Referencia: ${createdTicketId}` : successMessage
-                )
-              : ""
-          }
-
-          ${
-            serverError
-              ? renderAlert(
-                  "error",
-                  "No se pudo crear la incidencia.",
-                  serverError
-                )
-              : ""
-          }
+          ${successMessage ? renderAlert("success", "Incidencia creada.", createdTicketId ? `Referencia: ${createdTicketId}` : successMessage) : ""}
+          ${serverError ? renderAlert("error", "No se pudo crear la incidencia.", serverError) : ""}
 
           <form id="incidencias-create-form" novalidate class="inc-create-form">
-            ${renderTargetUserBlock()}
+            ${renderTargetUserSummary()}
 
             ${renderInput({
               label: "Asunto",
@@ -2204,23 +989,12 @@ function renderModalInner() {
               <button
                 id="incidencias-create-submit-btn"
                 type="submit"
-                ${submitting ? "disabled" : ""}
+                ${disabledAttr(submitting)}
                 class="inc-create-submit"
               >
-                ${
-                  submitting
-                    ? `
-                      <span class="inc-create-submit-inner">
-                        <span class="inc-create-spinner" aria-hidden="true"></span>
-                        Creando...
-                      </span>
-                    `
-                    : `
-                      <span class="inc-create-submit-inner">
-                        Crear incidencia
-                      </span>
-                    `
-                }
+                <span class="inc-create-submit-inner">
+                  ${submitting ? `<span class="inc-create-spinner" aria-hidden="true"></span>Creando...` : "Crear incidencia"}
+                </span>
               </button>
             </div>
           </form>
@@ -2235,47 +1009,73 @@ function renderModalInner() {
 ========================================================= */
 
 function getRoot() {
-  return BrowserDocument?.getElementById?.(MODAL_ID) || null;
+  return getDocument()?.getElementById?.(MODAL_ID) || null;
 }
 
 function ensureRoot() {
-  let root = getRoot();
+  const doc = getDocument();
+  if (!doc) return null;
 
-  if (root) {
-    return root;
-  }
+  const existing = Array.from(doc.querySelectorAll(`#${MODAL_ID}`));
+  let root = existing[0];
 
-  root = BrowserDocument.createElement("div");
+  existing.slice(1).forEach((duplicate) => {
+    try {
+      duplicate.remove();
+    } catch {}
+  });
+
+  if (root) return root;
+
+  root = doc.createElement("div");
   root.id = MODAL_ID;
   root.setAttribute("data-incidencias-create-root", "true");
-  BrowserDocument.body.appendChild(root);
+  doc.body.appendChild(root);
 
   return root;
 }
 
 function lockBody() {
+  const doc = getDocument();
+  if (!doc?.body) return false;
+
   try {
-    BrowserDocument.body.classList.add(BODY_CLASS_MODAL_OPEN);
-    BrowserDocument.body.classList.add(BODY_CLASS_INCIDENCIAS_CREATE_OPEN);
-    BrowserDocument.body.classList.add(BODY_CLASS_INCIDENCIAS_MODAL_OPEN);
-  } catch {}
+    doc.body.classList.add(
+      BODY_CLASS_MODAL_OPEN,
+      BODY_CLASS_INCIDENCIAS_CREATE_OPEN,
+      BODY_CLASS_INCIDENCIAS_MODAL_OPEN
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function unlockBody() {
+  const doc = getDocument();
+  if (!doc?.body) return false;
+
   try {
-    BrowserDocument.body.classList.remove(BODY_CLASS_INCIDENCIAS_CREATE_OPEN);
-    BrowserDocument.body.classList.remove(BODY_CLASS_INCIDENCIAS_MODAL_OPEN);
+    doc.body.classList.remove(
+      BODY_CLASS_INCIDENCIAS_CREATE_OPEN,
+      BODY_CLASS_INCIDENCIAS_MODAL_OPEN
+    );
 
     const hasAnyKnownModal =
-      BrowserDocument.querySelector?.(".inc-create-overlay") ||
-      BrowserDocument.querySelector?.(".facturas-detail-overlay") ||
-      BrowserDocument.querySelector?.(".fac-create-overlay") ||
-      BrowserDocument.querySelector?.("[data-modal-open='true']");
+      doc.querySelector?.(".inc-create-overlay") ||
+      doc.querySelector?.(".incidencias-modal-overlay") ||
+      doc.querySelector?.(".facturas-detail-overlay") ||
+      doc.querySelector?.(".fac-create-overlay") ||
+      doc.querySelector?.("[data-modal-open='true']");
 
     if (!hasAnyKnownModal) {
-      BrowserDocument.body.classList.remove(BODY_CLASS_MODAL_OPEN);
+      doc.body.classList.remove(BODY_CLASS_MODAL_OPEN);
     }
-  } catch {}
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function restoreFocus() {
@@ -2289,18 +1089,21 @@ function restoreFocus() {
 ========================================================= */
 
 function detachEscHandler() {
-  if (!modalState.escHandler) {
-    return;
-  }
+  const doc = getDocument();
+
+  if (!modalState.escHandler || !doc) return;
 
   try {
-    BrowserDocument?.removeEventListener?.("keydown", modalState.escHandler);
+    doc.removeEventListener("keydown", modalState.escHandler);
   } catch {}
 
   modalState.escHandler = null;
 }
 
 function attachEscHandler() {
+  const doc = getDocument();
+  if (!doc) return;
+
   detachEscHandler();
 
   modalState.escHandler = (event) => {
@@ -2310,7 +1113,7 @@ function attachEscHandler() {
   };
 
   try {
-    BrowserDocument?.addEventListener?.("keydown", modalState.escHandler);
+    doc.addEventListener("keydown", modalState.escHandler);
   } catch {}
 }
 
@@ -2320,6 +1123,8 @@ function attachEscHandler() {
 
 function renderModal() {
   const root = ensureRoot();
+
+  if (!root) return null;
 
   if (!modalState.isOpen) {
     detachRootBindings();
@@ -2331,102 +1136,23 @@ function renderModal() {
   root.innerHTML = renderModalInner();
   modalState.bindingsAttached = false;
 
+  attachRootBindings();
+
   return root;
-}
-
-function queryRoot(selector = "") {
-  try {
-    return getRoot()?.querySelector?.(selector) || null;
-  } catch {
-    return null;
-  }
-}
-
-function updateUserSearchResultsSlot() {
-  const slot = queryRoot("[data-user-search-results-slot='true']");
-  if (!slot) return false;
-
-  slot.innerHTML = renderUserSearchResults();
-
-  return true;
-}
-
-function updateSelectedUserSlot() {
-  const slot = queryRoot("[data-selected-user-slot='true']");
-  if (!slot) return false;
-
-  slot.innerHTML = renderSelectedUserCard();
-
-  return true;
-}
-
-function updateTargetUserErrorSlot() {
-  const slot = queryRoot("[data-target-user-error-slot='true']");
-  const input = queryRoot("[data-field='targetUserSearch']");
-  const error = safeText(modalState.errors?.targetUserId, "");
-
-  if (slot) {
-    slot.innerHTML = renderFieldError(error);
-  }
-
-  if (input) {
-    input.classList.toggle("is-error", Boolean(error));
-  }
-
-  return Boolean(slot || input);
-}
-
-function updateTargetUserInputState({ syncValue = false } = {}) {
-  const input = queryRoot("[data-field='targetUserSearch']");
-  if (!input) return false;
-
-  const targetUserId = safeText(modalState.form?.targetUserId, "");
-
-  input.placeholder = targetUserId
-    ? "Buscar otro usuario..."
-    : "Buscar por nombre, email, username o teléfono...";
-
-  if (syncValue) {
-    input.value = safeText(modalState.userSearchQuery, "");
-  }
-
-  return true;
-}
-
-function updateUserSearchUI({ syncInput = false } = {}) {
-  if (!modalState.isOpen) return false;
-
-  const updatedInput = updateTargetUserInputState({ syncValue: syncInput });
-  const updatedError = updateTargetUserErrorSlot();
-  const updatedResults = updateUserSearchResultsSlot();
-  const updatedSelected = updateSelectedUserSlot();
-
-  return Boolean(
-    updatedInput ||
-      updatedError ||
-      updatedResults ||
-      updatedSelected
-  );
 }
 
 function focusPanel() {
   try {
-    const panel = BrowserDocument?.getElementById?.(PANEL_ID);
-    panel?.focus?.();
+    getDocument()?.getElementById?.(PANEL_ID)?.focus?.();
   } catch {}
 }
 
 function focusField(fieldName = "") {
   try {
-    const root = getRoot();
-    const field = root?.querySelector?.(`[data-field="${fieldName}"]`);
+    const field = getRoot()?.querySelector?.(`[data-field="${fieldName}"]`);
     field?.focus?.();
 
-    if (
-      field &&
-      typeof field.setSelectionRange === "function" &&
-      typeof field.value === "string"
-    ) {
+    if (field && typeof field.setSelectionRange === "function" && typeof field.value === "string") {
       const end = field.value.length;
       field.setSelectionRange(end, end);
     }
@@ -2437,142 +1163,23 @@ function focusField(fieldName = "") {
   }
 }
 
-function focusUserSearchInput() {
-  if (!canSelectTargetUser()) return false;
-  return focusField("targetUserSearch");
-}
-
 function focusFirstInvalidField() {
   const errors = safeObject(modalState.errors);
 
-  if (errors.targetUserId) {
-    if (focusUserSearchInput()) return true;
-  }
-
-  if (errors.subject) {
-    if (focusField("subject")) return true;
-  }
-
-  if (errors.category) {
-    if (focusField("category")) return true;
-  }
-
-  if (errors.priority) {
-    if (focusField("priority")) return true;
-  }
-
-  if (errors.description) {
-    if (focusField("description")) return true;
-  }
+  if (errors.subject && focusField("subject")) return true;
+  if (errors.category && focusField("category")) return true;
+  if (errors.priority && focusField("priority")) return true;
+  if (errors.description && focusField("description")) return true;
 
   return false;
 }
 
 function focusPreferredField() {
-  if (canSelectTargetUser() && !safeText(modalState.form?.targetUserId, "")) {
-    if (focusUserSearchInput()) return true;
-  }
-
-  if (!safeText(modalState.form?.subject, "")) {
-    if (focusField("subject")) return true;
-  }
-
-  if (!safeText(modalState.form?.description, "")) {
-    if (focusField("description")) return true;
-  }
+  if (!safeText(modalState.form?.subject, "") && focusField("subject")) return true;
+  if (!safeText(modalState.form?.description, "") && focusField("description")) return true;
 
   focusPanel();
   return true;
-}
-
-/* =========================================================
-   USER SEARCH FLOW · NO FULL RERENDER
-========================================================= */
-
-async function performUserSearch(query = "") {
-  if (!canSelectTargetUser()) {
-    return [];
-  }
-
-  const normalized = normalizeWhitespace(query);
-  const currentSeq = ++modalState.userSearchSeq;
-
-  if (normalized.length < 2) {
-    modalState.userSearchLoading = false;
-    modalState.userSearchError = "";
-    modalState.userSearchResults = [];
-
-    updateUserSearchUI({
-      syncInput: false,
-    });
-
-    return [];
-  }
-
-  modalState.userSearchLoading = true;
-  modalState.userSearchError = "";
-  modalState.userSearchResults = [];
-
-  updateUserSearchUI({
-    syncInput: false,
-  });
-
-  try {
-    const items = await searchUsersRequest(normalized);
-
-    if (currentSeq !== modalState.userSearchSeq) {
-      return [];
-    }
-
-    modalState.userSearchLoading = false;
-    modalState.userSearchError = "";
-    modalState.userSearchResults = safeArray(items);
-
-    updateUserSearchUI({
-      syncInput: false,
-    });
-
-    return items;
-  } catch (error) {
-    if (currentSeq !== modalState.userSearchSeq) {
-      return [];
-    }
-
-    modalState.userSearchLoading = false;
-    modalState.userSearchResults = [];
-    modalState.userSearchError = safeErrorMessage(
-      error,
-      "No se pudieron cargar usuarios."
-    );
-
-    updateUserSearchUI({
-      syncInput: false,
-    });
-
-    return [];
-  }
-}
-
-function scheduleUserSearch(query = "") {
-  clearUserSearchTimer();
-
-  const normalized = normalizeWhitespace(query);
-
-  if (normalized.length < 2) {
-    modalState.userSearchLoading = false;
-    modalState.userSearchError = "";
-    modalState.userSearchResults = [];
-
-    updateUserSearchUI({
-      syncInput: false,
-    });
-
-    return;
-  }
-
-  modalState.userSearchDebounce = setTimeout(() => {
-    performUserSearch(normalized);
-  }, USER_SEARCH_DEBOUNCE);
 }
 
 /* =========================================================
@@ -2580,64 +1187,36 @@ function scheduleUserSearch(query = "") {
 ========================================================= */
 
 export function openIncidenciasCreateModal(draft = {}) {
-  if (!BrowserDocument) return false;
+  const doc = getDocument();
+  if (!doc) return false;
 
-  modalState.lastActiveElement = BrowserDocument.activeElement || null;
+  modalState.lastActiveElement = doc.activeElement || null;
   modalState.isOpen = true;
   modalState.submitting = false;
   modalState.dragActive = false;
 
   resetFeedbackState();
-  resetUserSearchState();
 
-  modalState.form = {
-    ...getInitialForm(),
-    ...safeObject(draft),
-    attachments: [],
-  };
-
-  modalState.form.priority = validateOption(modalState.form.priority, PRIORITY_OPTIONS, "medium");
-  modalState.form.category = validateOption(modalState.form.category, CATEGORY_OPTIONS, "general");
-  modalState.form.status = safeText(modalState.form.status, "open");
-  modalState.form.source = safeText(modalState.form.source, "panel");
-  modalState.form.attachments = [];
-  modalState.form.targetUserAvatar = safeText(
-    first(modalState.form.targetUserAvatar, modalState.form.userAvatar),
-    ""
-  );
-
+  modalState.form = getInitialForm(draft);
   persistDraft();
 
   renderModal();
   lockBody();
   attachEscHandler();
-  attachRootBindings();
 
   setTimeout(() => {
     focusPreferredField();
   }, 0);
 
-  safeEmit("incidencias:create-modal:opened", {
-    draft: {
-      targetUserId: modalState.form.targetUserId,
-      targetUserName: modalState.form.targetUserName,
-      targetUserEmail: modalState.form.targetUserEmail,
-      targetUserAvatar: modalState.form.targetUserAvatar,
-      subject: modalState.form.subject,
-      description: modalState.form.description,
-      priority: modalState.form.priority,
-      category: modalState.form.category,
-    },
-    targetMode: canSelectTargetUser(),
+  emit("incidencias:create-modal:opened", {
+    draft: persistDraft(),
   });
 
   return true;
 }
 
 export function closeIncidenciasCreateModal() {
-  if (modalState.submitting) {
-    return false;
-  }
+  if (modalState.submitting) return false;
 
   const root = getRoot();
 
@@ -2647,19 +1226,16 @@ export function closeIncidenciasCreateModal() {
 
   resetFeedbackState();
   resetFormState();
-  resetUserSearchState();
 
   detachRootBindings();
 
-  if (root) {
-    root.innerHTML = "";
-  }
+  if (root) root.innerHTML = "";
 
   unlockBody();
   detachEscHandler();
   restoreFocus();
 
-  safeEmit("incidencias:create-modal:closed", {});
+  emit("incidencias:create-modal:closed", {});
 
   return true;
 }
@@ -2677,14 +1253,9 @@ export function updateIncidenciasCreateModal(draft = {}) {
 
   modalState.form.priority = validateOption(modalState.form.priority, PRIORITY_OPTIONS, "medium");
   modalState.form.category = validateOption(modalState.form.category, CATEGORY_OPTIONS, "general");
-  modalState.form.targetUserAvatar = safeText(
-    first(modalState.form.targetUserAvatar, modalState.form.userAvatar),
-    ""
-  );
 
   persistDraft();
   renderModal();
-  attachRootBindings();
 
   setTimeout(() => {
     focusPreferredField();
@@ -2698,25 +1269,19 @@ export function updateIncidenciasCreateModal(draft = {}) {
 ========================================================= */
 
 async function handleSubmit() {
-  if (modalState.submitting) {
-    return false;
-  }
+  if (modalState.submitting) return false;
 
   modalState.successMessage = "";
   modalState.createdTicketId = "";
   modalState.serverError = "";
 
   const validation = validateForm(modalState.form);
-
   modalState.errors = validation.errors;
 
   if (!validation.valid) {
     renderModal();
-    attachRootBindings();
     focusFirstInvalidField();
-
     showToast("Revisa los campos obligatorios.", "warning");
-
     return false;
   }
 
@@ -2726,34 +1291,37 @@ async function handleSubmit() {
 
   modalState.submitting = true;
 
-  syncCreateViewState({
-    submitting: true,
-    serverError: "",
-    errors: {},
-  });
+  try {
+    setCreating(true);
+  } catch {}
+
+  try {
+    patchCreateViewState({
+      submitting: true,
+      serverError: "",
+      errors: {},
+      form: payload,
+    });
+  } catch {}
 
   renderModal();
-  attachRootBindings();
   focusPanel();
 
-  safeEmit("incidencias:create:submit", {
-    userId: safeText(modalState.form.targetUserId, ""),
-    userName: safeText(modalState.form.targetUserName, ""),
-    userEmail: safeText(modalState.form.targetUserEmail, ""),
-    userAvatar: safeText(modalState.form.targetUserAvatar, ""),
-    subject: safeText(modalState.form.subject, ""),
-    description: safeText(modalState.form.description, ""),
-    priority: safeText(modalState.form.priority, "medium"),
-    category: safeText(modalState.form.category, "general"),
-    attachmentsCount: safeArray(modalState.form.attachments).length,
-    targetMode: canSelectTargetUser(),
-    adminMode: shouldUseAdminEndpoint(),
+  emit("incidencias:create:submit", {
+    subject: payload.subject,
+    priority: payload.priority,
+    category: payload.category,
+    attachmentsCount: safeArray(payload.attachments).length,
+    targetUserId: safeText(payload.targetUserId, ""),
   });
 
   try {
-    const response = await createIncidenciaRequest(payload);
-    const createdTicketId = resolveCreatedTicketId(response);
-    const detail = pickCreatedTicket(response);
+    const detail = await createIncidenciaAction({
+      payload,
+      silent: true,
+    });
+
+    const createdTicketId = resolveCreatedTicketId(detail);
 
     modalState.submitting = false;
     modalState.errors = {};
@@ -2761,33 +1329,30 @@ async function handleSubmit() {
     modalState.successMessage = "Incidencia creada.";
     modalState.createdTicketId = createdTicketId;
 
-    syncCreateViewState({
-      submitting: false,
-      errors: {},
-      serverError: "",
-      createdTicketId,
-      successMessage: "Incidencia creada.",
-    });
+    try {
+      setCreating(false);
+    } catch {}
+
+    try {
+      patchCreateViewState({
+        submitting: false,
+        errors: {},
+        serverError: "",
+        createdTicketId,
+        successMessage: "Incidencia creada.",
+      });
+    } catch {}
 
     clearDraft();
     resetFormState();
-    resetUserSearchState();
 
     renderModal();
-    attachRootBindings();
     focusPanel();
 
     showToast("Incidencia creada correctamente.", "success");
 
-    safeEmit("incidencias:create:success", {
+    emit("incidencias:create-modal:success", {
       ticketId: createdTicketId,
-      response,
-      detail,
-    });
-
-    safeEmit("incidencias:created", {
-      ticketId: createdTicketId,
-      response,
       detail,
     });
 
@@ -2800,25 +1365,26 @@ async function handleSubmit() {
     return true;
   } catch (error) {
     modalState.submitting = false;
-    modalState.serverError = safeErrorMessage(
-      error,
-      "No se pudo crear la incidencia."
-    );
+    modalState.serverError = getErrorMessage(error, "No se pudo crear la incidencia.");
 
-    syncCreateViewState({
-      submitting: false,
-      serverError: modalState.serverError,
-    });
+    try {
+      setCreating(false);
+    } catch {}
 
-    safeEmit("incidencias:create:error", {
+    try {
+      patchCreateViewState({
+        submitting: false,
+        serverError: modalState.serverError,
+      });
+    } catch {}
+
+    emit("incidencias:create-modal:error", {
       error,
       message: modalState.serverError,
     });
 
     renderModal();
-    attachRootBindings();
     focusPreferredField();
-
     showToast(modalState.serverError, "error");
 
     return false;
@@ -2857,57 +1423,21 @@ function addAttachments(files = []) {
   modalState.createdTicketId = "";
 }
 
-function handleTargetUserSearchInput(target) {
-  const value = safeText(target?.value, "");
-
-  modalState.userSearchQuery = value;
-  modalState.userSearchResults = [];
-  modalState.userSearchLoading = false;
-  modalState.userSearchError = "";
-
-  if (safeText(modalState.form?.targetUserId, "")) {
-    clearTargetUserSelection();
-  }
-
-  if (modalState.errors.targetUserId) {
-    const nextErrors = { ...modalState.errors };
-    delete nextErrors.targetUserId;
-    modalState.errors = nextErrors;
-  }
-
-  if (modalState.serverError) {
-    modalState.serverError = "";
-  }
-
-  if (modalState.successMessage || modalState.createdTicketId) {
-    modalState.successMessage = "";
-    modalState.createdTicketId = "";
-  }
-
-  updateUserSearchUI({
-    syncInput: false,
-  });
-
-  scheduleUserSearch(value);
-}
-
 function handleFieldChange(target) {
   const field = safeText(target?.dataset?.field, "");
+
   if (!field) return;
 
-  if (field === "targetUserSearch") {
-    handleTargetUserSearchInput(target);
+  if (field === "attachments") {
+    addAttachments(getFileListFromInput(target));
+    renderModal();
+    focusPanel();
     return;
   }
 
-  if (field === "attachments") {
-    const files = getFileListFromInput(target);
-    addAttachments(files);
-  } else {
-    setFormPatch({
-      [field]: target?.value,
-    });
-  }
+  setFormPatch({
+    [field]: target?.value,
+  });
 
   if (modalState.errors[field]) {
     const nextErrors = { ...modalState.errors };
@@ -2915,90 +1445,27 @@ function handleFieldChange(target) {
     modalState.errors = nextErrors;
   }
 
-  if (modalState.serverError) {
-    modalState.serverError = "";
-  }
-
+  if (modalState.serverError) modalState.serverError = "";
   if (modalState.successMessage || modalState.createdTicketId) {
     modalState.successMessage = "";
     modalState.createdTicketId = "";
   }
-
-  if (field === "attachments") {
-    renderModal();
-    attachRootBindings();
-    focusPanel();
-  }
-}
-
-function selectTargetUserByIndex(index = -1) {
-  const user = safeArray(modalState.userSearchResults)[Number(index)];
-
-  if (!user?.id) return false;
-
-  setFormPatch({
-    targetUserId: safeText(user.id, ""),
-    targetUserName: safeText(user.name, ""),
-    targetUserEmail: safeText(user.email, ""),
-    targetUserAvatar: safeText(first(user.avatarUrl, user.avatar), ""),
-  });
-
-  modalState.userSearchQuery = "";
-  modalState.userSearchResults = [];
-  modalState.userSearchLoading = false;
-  modalState.userSearchError = "";
-
-  if (modalState.errors.targetUserId) {
-    const nextErrors = { ...modalState.errors };
-    delete nextErrors.targetUserId;
-    modalState.errors = nextErrors;
-  }
-
-  updateUserSearchUI({
-    syncInput: true,
-  });
-
-  focusField("subject");
-
-  return true;
-}
-
-function markImageAsFallback(img = null) {
-  if (!img) return false;
-
-  try {
-    const avatar = img.closest?.(".inc-create-search-avatar");
-    if (!avatar) return false;
-
-    avatar.setAttribute("data-fallback", "true");
-    avatar.classList.remove("has-image");
-    img.setAttribute("aria-hidden", "true");
-
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function attachRootBindings() {
-  if (modalState.bindingsAttached) {
-    return;
-  }
+  if (modalState.bindingsAttached) return;
 
   const root = ensureRoot();
+  if (!root) return;
+
+  detachRootBindings();
+
+  const controller = new AbortController();
+  modalState.rootAbortController = controller;
 
   const onInput = (event) => {
     const field = event.target?.closest?.("[data-field]");
-    if (!field) return;
-
-    const fieldName = safeText(field.dataset.field, "");
-
-    if (fieldName === "targetUserSearch") {
-      handleTargetUserSearchInput(field);
-      return;
-    }
-
-    if (field.type === "file") return;
+    if (!field || field.type === "file") return;
 
     handleFieldChange(field);
   };
@@ -3027,7 +1494,6 @@ function attachRootBindings() {
     if (!modalState.dragActive) {
       modalState.dragActive = true;
       renderModal();
-      attachRootBindings();
     }
   };
 
@@ -3040,7 +1506,6 @@ function attachRootBindings() {
     if (!modalState.dragActive) {
       modalState.dragActive = true;
       renderModal();
-      attachRootBindings();
     }
   };
 
@@ -3049,17 +1514,11 @@ function attachRootBindings() {
     if (!dropzone || modalState.submitting) return;
 
     const related = event.relatedTarget;
-
-    if (related && dropzone.contains(related)) {
-      return;
-    }
+    if (related && dropzone.contains(related)) return;
 
     event.preventDefault();
-
     modalState.dragActive = false;
-
     renderModal();
-    attachRootBindings();
   };
 
   const onDrop = (event) => {
@@ -3067,60 +1526,41 @@ function attachRootBindings() {
     if (!dropzone || modalState.submitting) return;
 
     event.preventDefault();
-
     modalState.dragActive = false;
 
-    const files = Array.from(event.dataTransfer?.files || []);
-    addAttachments(files);
-
+    addAttachments(Array.from(event.dataTransfer?.files || []));
     renderModal();
-    attachRootBindings();
     focusPanel();
   };
 
   const onClick = (event) => {
-    const closeBtn = event.target?.closest?.("[data-modal-close='true']");
+    const closeButton = event.target?.closest?.("[data-modal-close='true']");
 
-    if (closeBtn) {
+    if (closeButton) {
       event.preventDefault();
       closeIncidenciasCreateModal();
       return;
     }
 
-    const overlay = event.target?.closest?.(
-      "[data-incidencias-create-modal-overlay='true']"
-    );
+    const overlay = event.target?.closest?.("[data-incidencias-create-modal-overlay='true']");
+    const panel = event.target?.closest?.("[data-incidencias-create-modal-panel='true']");
 
-    const panel = event.target?.closest?.(
-      "[data-incidencias-create-modal-panel='true']"
-    );
-
-    if (
-      overlay &&
-      !panel &&
-      event.target === overlay &&
-      !modalState.submitting
-    ) {
+    if (overlay && !panel && event.target === overlay && !modalState.submitting) {
       closeIncidenciasCreateModal();
       return;
     }
 
-    const removeAttachmentBtn = event.target?.closest?.("[data-remove-attachment]");
+    const removeAttachmentButton = event.target?.closest?.("[data-remove-attachment]");
 
-    if (removeAttachmentBtn) {
+    if (removeAttachmentButton) {
       event.preventDefault();
 
       if (modalState.submitting) return;
 
-      const index = Number(removeAttachmentBtn.dataset.removeAttachment);
+      const index = Number(removeAttachmentButton.dataset.removeAttachment);
+      const files = safeArray(modalState.form.attachments).filter((_, currentIndex) => currentIndex !== index);
 
-      const files = safeArray(modalState.form.attachments).filter(
-        (_, i) => i !== index
-      );
-
-      setFormPatch({
-        attachments: files,
-      });
+      setFormPatch({ attachments: files });
 
       if (modalState.errors.attachments) {
         const nextErrors = { ...modalState.errors };
@@ -3129,215 +1569,47 @@ function attachRootBindings() {
       }
 
       renderModal();
-      attachRootBindings();
       focusPanel();
-      return;
-    }
-
-    const selectUserBtn = event.target?.closest?.("[data-select-target-user]");
-
-    if (selectUserBtn) {
-      event.preventDefault();
-
-      if (modalState.submitting) return;
-
-      selectTargetUserByIndex(selectUserBtn.dataset.selectTargetUser);
-      return;
-    }
-
-    const clearUserBtn = event.target?.closest?.("[data-clear-selected-user='true']");
-
-    if (clearUserBtn) {
-      event.preventDefault();
-
-      if (modalState.submitting) return;
-
-      clearTargetUserSelection();
-
-      modalState.userSearchQuery = "";
-      modalState.userSearchResults = [];
-      modalState.userSearchLoading = false;
-      modalState.userSearchError = "";
-
-      updateUserSearchUI({
-        syncInput: true,
-      });
-
-      focusUserSearchInput();
     }
   };
 
-  const onImageError = (event) => {
-    const img = event.target?.closest?.("[data-inc-create-avatar-img='true']");
-    if (!img) return;
-
-    markImageAsFallback(img);
-  };
-
-  root.__incidenciasCreateModalInputHandler = onInput;
-  root.__incidenciasCreateModalChangeHandler = onChange;
-  root.__incidenciasCreateModalSubmitHandler = onSubmit;
-  root.__incidenciasCreateModalDragEnterHandler = onDragEnter;
-  root.__incidenciasCreateModalDragOverHandler = onDragOver;
-  root.__incidenciasCreateModalDragLeaveHandler = onDragLeave;
-  root.__incidenciasCreateModalDropHandler = onDrop;
-  root.__incidenciasCreateModalClickHandler = onClick;
-  root.__incidenciasCreateModalImageErrorHandler = onImageError;
-
-  root.addEventListener("input", onInput);
-  root.addEventListener("change", onChange);
-  root.addEventListener("submit", onSubmit);
-  root.addEventListener("dragenter", onDragEnter);
-  root.addEventListener("dragover", onDragOver);
-  root.addEventListener("dragleave", onDragLeave);
-  root.addEventListener("drop", onDrop);
-  root.addEventListener("click", onClick);
-  root.addEventListener("error", onImageError, true);
+  root.addEventListener("input", onInput, { signal: controller.signal });
+  root.addEventListener("change", onChange, { signal: controller.signal });
+  root.addEventListener("submit", onSubmit, { signal: controller.signal });
+  root.addEventListener("dragenter", onDragEnter, { signal: controller.signal });
+  root.addEventListener("dragover", onDragOver, { signal: controller.signal });
+  root.addEventListener("dragleave", onDragLeave, { signal: controller.signal });
+  root.addEventListener("drop", onDrop, { signal: controller.signal });
+  root.addEventListener("click", onClick, { signal: controller.signal });
 
   modalState.bindingsAttached = true;
 }
 
 function detachRootBindings() {
-  const root = getRoot();
+  try {
+    modalState.rootAbortController?.abort?.();
+  } catch {}
 
-  if (!root) {
-    modalState.bindingsAttached = false;
-    return;
-  }
-
-  if (root.__incidenciasCreateModalInputHandler) {
-    try {
-      root.removeEventListener("input", root.__incidenciasCreateModalInputHandler);
-    } catch {}
-
-    delete root.__incidenciasCreateModalInputHandler;
-  }
-
-  if (root.__incidenciasCreateModalChangeHandler) {
-    try {
-      root.removeEventListener("change", root.__incidenciasCreateModalChangeHandler);
-    } catch {}
-
-    delete root.__incidenciasCreateModalChangeHandler;
-  }
-
-  if (root.__incidenciasCreateModalSubmitHandler) {
-    try {
-      root.removeEventListener("submit", root.__incidenciasCreateModalSubmitHandler);
-    } catch {}
-
-    delete root.__incidenciasCreateModalSubmitHandler;
-  }
-
-  if (root.__incidenciasCreateModalDragEnterHandler) {
-    try {
-      root.removeEventListener("dragenter", root.__incidenciasCreateModalDragEnterHandler);
-    } catch {}
-
-    delete root.__incidenciasCreateModalDragEnterHandler;
-  }
-
-  if (root.__incidenciasCreateModalDragOverHandler) {
-    try {
-      root.removeEventListener("dragover", root.__incidenciasCreateModalDragOverHandler);
-    } catch {}
-
-    delete root.__incidenciasCreateModalDragOverHandler;
-  }
-
-  if (root.__incidenciasCreateModalDragLeaveHandler) {
-    try {
-      root.removeEventListener("dragleave", root.__incidenciasCreateModalDragLeaveHandler);
-    } catch {}
-
-    delete root.__incidenciasCreateModalDragLeaveHandler;
-  }
-
-  if (root.__incidenciasCreateModalDropHandler) {
-    try {
-      root.removeEventListener("drop", root.__incidenciasCreateModalDropHandler);
-    } catch {}
-
-    delete root.__incidenciasCreateModalDropHandler;
-  }
-
-  if (root.__incidenciasCreateModalClickHandler) {
-    try {
-      root.removeEventListener("click", root.__incidenciasCreateModalClickHandler);
-    } catch {}
-
-    delete root.__incidenciasCreateModalClickHandler;
-  }
-
-  if (root.__incidenciasCreateModalImageErrorHandler) {
-    try {
-      root.removeEventListener("error", root.__incidenciasCreateModalImageErrorHandler, true);
-    } catch {}
-
-    delete root.__incidenciasCreateModalImageErrorHandler;
-  }
-
+  modalState.rootAbortController = null;
   modalState.bindingsAttached = false;
 }
 
 /* =========================================================
-   EVENT BUS BRIDGE
+   PUBLIC API
 ========================================================= */
 
-function unwrapEventDetail(event) {
-  return event?.detail?.draft || event?.detail || event || {};
-}
+export const OnionIncidenciasCreateModal = Object.freeze({
+  version: INCIDENCIAS_CREATE_MODAL_VERSION,
 
-function handleOpenEvent(event) {
-  const draft = unwrapEventDetail(event);
-  openIncidenciasCreateModal(safeObject(draft));
-}
-
-function handleCloseEvent() {
-  closeIncidenciasCreateModal();
-}
-
-function handleUpdateEvent(event) {
-  const draft = unwrapEventDetail(event);
-  updateIncidenciasCreateModal(safeObject(draft));
-}
-
-let busAttached = false;
-
-function attachBus() {
-  if (busAttached) return;
-
-  safeOn("incidencias:create-modal:open", handleOpenEvent);
-  safeOn("incidencias:create-modal:close", handleCloseEvent);
-  safeOn("incidencias:create-modal:update", handleUpdateEvent);
-
-  safeOn("incidencias:create:open", handleOpenEvent);
-  safeOn("incidencias:create", handleOpenEvent);
-  safeOn("incidencias:open-create", handleOpenEvent);
-
-  busAttached = true;
-}
-
-function detachBus() {
-  if (!busAttached) return;
-
-  safeOff("incidencias:create-modal:open", handleOpenEvent);
-  safeOff("incidencias:create-modal:close", handleCloseEvent);
-  safeOff("incidencias:create-modal:update", handleUpdateEvent);
-
-  safeOff("incidencias:create:open", handleOpenEvent);
-  safeOff("incidencias:create", handleOpenEvent);
-  safeOff("incidencias:open-create", handleOpenEvent);
-
-  busAttached = false;
-}
-
-/* =========================================================
-   GLOBAL BRIDGE
-========================================================= */
-
-export const OnionIncidenciasCreateModal = {
   open(draft = {}) {
+    return openIncidenciasCreateModal(draft);
+  },
+
+  init(draft = {}) {
+    return openIncidenciasCreateModal(draft);
+  },
+
+  mount(draft = {}) {
     return openIncidenciasCreateModal(draft);
   },
 
@@ -3351,9 +1623,13 @@ export const OnionIncidenciasCreateModal = {
 
   getState() {
     return {
-      ...modalState,
+      isOpen: modalState.isOpen,
+      submitting: modalState.submitting,
+      dragActive: modalState.dragActive,
       errors: { ...safeObject(modalState.errors) },
-      userSearchResults: [...safeArray(modalState.userSearchResults)],
+      serverError: modalState.serverError,
+      successMessage: modalState.successMessage,
+      createdTicketId: modalState.createdTicketId,
       form: {
         ...safeObject(modalState.form),
         attachments: [...safeArray(modalState.form.attachments)],
@@ -3362,34 +1638,21 @@ export const OnionIncidenciasCreateModal = {
   },
 
   destroy() {
-    detachRootBindings();
     closeIncidenciasCreateModal();
+    detachRootBindings();
     detachEscHandler();
-    detachBus();
-    clearUserSearchTimer();
-
-    const root = getRoot();
 
     try {
-      root?.remove?.();
+      getRoot()?.remove?.();
+    } catch {}
+
+    try {
+      resetCreateViewState?.();
     } catch {}
 
     return true;
   },
-};
-
-try {
-  BrowserWindow.OnionIncidenciasCreateModal = OnionIncidenciasCreateModal;
-
-  BrowserWindow.renderIncidenciasCreateModal = OnionIncidenciasCreateModal.open;
-  BrowserWindow.renderIncidenciaCreateModal = OnionIncidenciasCreateModal.open;
-} catch {}
-
-/* =========================================================
-   AUTO BOOT
-========================================================= */
-
-attachBus();
+});
 
 /* =========================================================
    DEFAULT EXPORT

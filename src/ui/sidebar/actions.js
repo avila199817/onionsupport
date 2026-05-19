@@ -5,7 +5,9 @@
    Responsabilidad:
    - Acciones reales del sidebar.
    - Abrir / cerrar / alternar usando state.js.
-   - Navegar usando Router si existe.
+   - Navegar usando Router/AppCore si existe.
+   - Normalizar targets públicos con Router.buildPublicPath().
+   - Mantener rutas privadas visibles como /@{slug}/{ruta}.
    - Navegar sin modificar open/collapsed.
    - Logout usando Auth si existe.
    - Cerrar sidebar durante logout.
@@ -14,6 +16,7 @@
    - Sin eventos propios.
    - Sin storage.
    - Sin dropdown.
+   - Sin navegación browser paralela.
    - Sin mobile magic.
    - Sin route aliases.
    - Sin /home.
@@ -38,15 +41,11 @@ import {
   toggleSidebar as toggleRuntimeSidebar,
 } from "./state.js";
 
-export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v3";
+export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v4";
 
 /* =========================================================
    BASICS
 ========================================================= */
-
-function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
-}
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -71,6 +70,13 @@ function safeModuleGet(AppCore = null, name = "") {
   } catch {
     return null;
   }
+}
+
+function navigationOk(result = null) {
+  if (result === false) return false;
+  if (isObject(result) && result.ok === false) return false;
+
+  return true;
 }
 
 /* =========================================================
@@ -145,6 +151,42 @@ export function getSafeSidebarTarget(target = "", fallback = "") {
   return normalized;
 }
 
+function buildPublicTarget(target = "", context = {}) {
+  const safeTarget = getSafeSidebarTarget(target, "");
+
+  if (!safeTarget) return "";
+
+  const router = resolveRouter(context);
+
+  try {
+    if (isFunction(router?.buildPublicPath)) {
+      const publicTarget = router.buildPublicPath(safeTarget, {
+        useSlugHome: true,
+        useSlugPrivate: true,
+      });
+
+      return getSafeSidebarTarget(publicTarget, safeTarget);
+    }
+  } catch {
+    return safeTarget;
+  }
+
+  try {
+    if (isFunction(router?.resolveSpaHref)) {
+      const publicTarget = router.resolveSpaHref(safeTarget, {
+        useSlugHome: true,
+        useSlugPrivate: true,
+      });
+
+      return getSafeSidebarTarget(publicTarget, safeTarget);
+    }
+  } catch {
+    return safeTarget;
+  }
+
+  return safeTarget;
+}
+
 /* =========================================================
    OPEN / CLOSE
 ========================================================= */
@@ -198,78 +240,50 @@ export function expandSidebar(context = {}) {
 ========================================================= */
 
 async function navigateWithRouter(path = "/", context = {}) {
-  const router = resolveRouter(context);
-  const replace = shouldReplace(context);
+  const ctx = options(context);
+  const router = resolveRouter(ctx);
+  const replace = shouldReplace(ctx);
 
   const payload = {
-    source: actionSource(context),
+    source: actionSource(ctx),
     replaceState: replace,
-    force: context.force === true,
+    force: ctx.force === true,
   };
 
   if (replace && isFunction(router?.replace)) {
-    await router.replace(path, payload);
-    return true;
+    return navigationOk(await router.replace(path, payload));
   }
 
   if (isFunction(router?.navigate)) {
-    await router.navigate(path, payload);
-    return true;
+    return navigationOk(await router.navigate(path, payload));
   }
 
   if (!replace && isFunction(router?.push)) {
-    await router.push(path, payload);
-    return true;
+    return navigationOk(await router.push(path, payload));
   }
 
-  if (isFunction(context.AppCore?.navigate)) {
-    await context.AppCore.navigate(path, payload);
-    return true;
+  if (isFunction(ctx.AppCore?.navigate)) {
+    return navigationOk(await ctx.AppCore.navigate(path, payload));
   }
 
   return false;
 }
 
-function navigateWithBrowser(path = "/", context = {}) {
-  if (!isBrowser()) return false;
-
-  try {
-    if (shouldReplace(context)) {
-      window.location.replace(path);
-    } else {
-      window.location.assign(path);
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function navigateFromSidebar(context = {}) {
   const ctx = options(context);
-  const target = getSafeSidebarTarget(ctx.target || ctx.path || "", "");
+  const rawTarget = ctx.target || ctx.path || "";
+  const target = buildPublicTarget(rawTarget, ctx);
 
   if (!target) return false;
 
-  const payload = {
-    ...ctx,
-    source: actionSource(ctx),
-  };
-
-  let ok = false;
-
   try {
-    ok = await navigateWithRouter(target, payload);
+    return await navigateWithRouter(target, {
+      ...ctx,
+      source: actionSource(ctx),
+    });
   } catch {
-    ok = false;
+    return false;
   }
-
-  if (!ok) {
-    ok = navigateWithBrowser(target, payload);
-  }
-
-  return ok;
 }
 
 export async function navigateToLogin(context = {}) {
@@ -366,15 +380,17 @@ export async function handleLogout(context = {}) {
 
     try {
       const authCleared = await clearAuthSession(ctx);
-      const navigationOk = await navigateToLogin(ctx);
+
+      closeSidebar(ctx);
+
+      const navigationOkResult = await navigateToLogin(ctx);
 
       return {
-        ok: navigationOk === true,
+        ok: navigationOkResult === true,
         authCleared,
-        navigationOk,
+        navigationOk: navigationOkResult,
       };
     } finally {
-      closeSidebar(ctx);
       endSidebarLogout(AppCore);
       logoutPromise = null;
     }
@@ -401,10 +417,19 @@ export function getSidebarActionsSnapshot() {
       ownStorage: false,
       ownDropdown: false,
       ownMobileMagic: false,
+      ownBrowserNavigation: false,
+
+      usesRouterNavigation: true,
+      buildsPublicTargetsWithRouter: true,
+
+      userScopedPrivateRoutes: true,
+
       noRouteAliases: true,
       noHomeRoute: true,
       no2fa: true,
+
       navigationKeepsOpenState: true,
+      logoutClosesSidebar: true,
       logoutRedirectsToLogin: true,
     },
   };

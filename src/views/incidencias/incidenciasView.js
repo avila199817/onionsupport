@@ -10,6 +10,7 @@
    - Delegar HTML a incidencias.table.template.js.
    - Delegar acciones remotas a incidencias.actions.js.
    - Delegar modales a incidencias.modal.js e incidencias.create.modal.js.
+   - Delegar eventos DOM a incidencias.bindings.js.
    - No validar rutas.
    - No resolver slug.
    - No registrar globals.
@@ -69,6 +70,10 @@ import {
   refreshTicketDetailAction,
 } from "./incidencias.actions.js";
 
+import {
+  bindIncidenciasEvents,
+} from "./incidencias.bindings.js";
+
 import IncidenciasCreateView from "./incidencias.create.modal.js";
 
 import {
@@ -79,7 +84,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_VIEW_VERSION = "incidencias.view.v1";
+export const INCIDENCIAS_VIEW_VERSION = "incidencias.view.v2";
 
 const SCOPE = "view:incidencias";
 
@@ -87,7 +92,6 @@ const PAGE_SIZE =
   Number(MODEL_DEFAULT_PAGE_SIZE || STATE_DEFAULT_PAGE_SIZE || 5) || 5;
 
 const DEFAULT_FILTER = "all";
-const SEARCH_DEBOUNCE_MS = 180;
 
 const FILTER_ALIASES = Object.freeze({
   all: "all",
@@ -203,7 +207,6 @@ export const IncidenciasView = (() => {
 
   let activeFilter = DEFAULT_FILTER;
   let searchQuery = "";
-  let searchTimer = 0;
 
   let lastApiPayload = null;
   let inflightOpenTicket = null;
@@ -655,18 +658,6 @@ export const IncidenciasView = (() => {
     ));
   }
 
-  function clearSearchTimer() {
-    if (!searchTimer) {
-      return;
-    }
-
-    try {
-      getTimerHost().clearTimeout(searchTimer);
-    } catch {}
-
-    searchTimer = 0;
-  }
-
   function resetPage() {
     try {
       setPage(1);
@@ -715,20 +706,7 @@ export const IncidenciasView = (() => {
     return nextQuery;
   }
 
-  function scheduleSearchQuery(query = "") {
-    clearSearchTimer();
-
-    const value = safeText(query, "");
-
-    searchTimer = getTimerHost().setTimeout(() => {
-      searchTimer = 0;
-      setSearchQuery(value);
-    }, SEARCH_DEBOUNCE_MS);
-  }
-
   function clearFilters() {
-    clearSearchTimer();
-
     syncFilterState({
       filter: DEFAULT_FILTER,
       query: "",
@@ -745,8 +723,6 @@ export const IncidenciasView = (() => {
   }
 
   function clearSearchOnly() {
-    clearSearchTimer();
-
     syncFilterState({
       filter: getCurrentFilter(),
       query: "",
@@ -894,6 +870,7 @@ export const IncidenciasView = (() => {
 
   function mergeTicketDetailWithStoreSnapshot(detail = {}, preferredTicketId = "") {
     const remote = safeObject(detail);
+
     const local = findTicketById(
       first(
         preferredTicketId,
@@ -1782,7 +1759,6 @@ export const IncidenciasView = (() => {
     }
 
     return handleOpenTicket(ticketId, {
-      skipThrottle: true,
       source: safeText(source.source, "external"),
       detail: first(
         source.detail,
@@ -1830,7 +1806,7 @@ export const IncidenciasView = (() => {
   }
 
   async function handleCopyTicketId(ticketId = "") {
-    const id = safeText(ticketId, "");
+    const id = extractTicketId(ticketId) || safeText(ticketId, "");
 
     if (!id) {
       showToast("No hay referencia para copiar.", "error");
@@ -1954,345 +1930,7 @@ export const IncidenciasView = (() => {
      BINDINGS
   ========================================================= */
 
-  function getActionTarget(event, actions = []) {
-    const selectors = safeArray(actions)
-      .map((action) => [
-        `[data-incidencias-action="${action}"]`,
-        `[data-action="${action}"]`,
-      ].join(","))
-      .join(",");
-
-    if (!selectors) {
-      return null;
-    }
-
-    return event.target?.closest?.(selectors) || null;
-  }
-
-  function getTicketIdFromElement(element = null) {
-    if (!element) {
-      return "";
-    }
-
-    const row =
-      element.closest?.("[data-ticket-id]") ||
-      element.closest?.("[data-incidencia-id]") ||
-      element.closest?.("[data-ticket-code]") ||
-      null;
-
-    return safeText(
-      first(
-        element.dataset?.ticketId,
-        element.dataset?.incidenciaId,
-        element.dataset?.ticketCode,
-
-        element.getAttribute?.("data-ticket-id"),
-        element.getAttribute?.("data-incidencia-id"),
-        element.getAttribute?.("data-ticket-code"),
-
-        row?.dataset?.ticketId,
-        row?.dataset?.incidenciaId,
-        row?.dataset?.ticketCode,
-
-        row?.getAttribute?.("data-ticket-id"),
-        row?.getAttribute?.("data-incidencia-id"),
-        row?.getAttribute?.("data-ticket-code")
-      ),
-      ""
-    );
-  }
-
-  function getSearchInput(event) {
-    return (
-      event.target?.closest?.("#incidencias-search-input") ||
-      event.target?.closest?.("#incidencias-filter-search") ||
-      event.target?.closest?.("[data-incidencias-search-input='true']") ||
-      event.target?.closest?.("[data-incidencias-field='search']") ||
-      event.target?.closest?.("[data-field='search']") ||
-      null
-    );
-  }
-
-  function isInteractiveElement(target = null) {
-    return Boolean(
-      target?.closest?.(
-        [
-          "a",
-          "button",
-          "input",
-          "select",
-          "textarea",
-          "label",
-          "[role='button']",
-          "[data-action]",
-          "[data-incidencias-action]",
-        ].join(",")
-      )
-    );
-  }
-
-  function bindNativeActions(container) {
-    if (!container) {
-      return () => {};
-    }
-
-    const onClick = async (event) => {
-      if (destroyed) {
-        return;
-      }
-
-      const createButton =
-        getActionTarget(event, [
-          "create",
-          "new",
-          "new-ticket",
-          "create-ticket",
-          "create-incidencia",
-        ]) ||
-        event.target?.closest?.("#incidencias-create-btn");
-
-      if (createButton) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        await handleCreateIncidencia();
-        return;
-      }
-
-      const refreshButton =
-        getActionTarget(event, [
-          "refresh",
-          "reload",
-        ]) ||
-        event.target?.closest?.("#incidencias-refresh-btn");
-
-      if (refreshButton) {
-        event.preventDefault();
-
-        await reload({
-          force: true,
-          asRefresh: true,
-        });
-
-        return;
-      }
-
-      const retryButton =
-        getActionTarget(event, [
-          "retry",
-        ]) ||
-        event.target?.closest?.("#incidencias-retry-btn");
-
-      if (retryButton) {
-        event.preventDefault();
-
-        await reload({
-          force: true,
-          asRefresh: false,
-        });
-
-        return;
-      }
-
-      const exportButton =
-        getActionTarget(event, [
-          "export",
-          "export-csv",
-        ]) ||
-        event.target?.closest?.("#incidencias-export-btn");
-
-      if (exportButton) {
-        event.preventDefault();
-        handleExportCsv();
-        return;
-      }
-
-      const filterButton = getActionTarget(event, [
-        "filter",
-        "filter-incidencias",
-        "status-filter",
-        "incidencias-filter",
-      ]);
-
-      if (filterButton) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        setFilter(
-          first(
-            filterButton.dataset?.filter,
-            filterButton.dataset?.filterStatus,
-            filterButton.getAttribute?.("data-filter"),
-            filterButton.getAttribute?.("data-filter-status"),
-            DEFAULT_FILTER
-          )
-        );
-
-        return;
-      }
-
-      const clearSearchButton = getActionTarget(event, [
-        "clear-filter-search",
-        "clear-search",
-      ]);
-
-      if (clearSearchButton) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        clearSearchOnly();
-        return;
-      }
-
-      const clearFiltersButton = getActionTarget(event, [
-        "clear-filters",
-        "reset-filters",
-        "filters-clear",
-      ]);
-
-      if (clearFiltersButton) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        clearFilters();
-        return;
-      }
-
-      const pageButton = getActionTarget(event, [
-        "page",
-        "go-page",
-      ]);
-
-      if (pageButton) {
-        event.preventDefault();
-
-        goToPage(
-          safeNumber(
-            first(
-              pageButton.dataset?.page,
-              pageButton.getAttribute?.("data-page")
-            ),
-            incidenciasState.page || 1
-          )
-        );
-
-        return;
-      }
-
-      const prevButton = getActionTarget(event, [
-        "prev-page",
-        "pagination-prev",
-      ]);
-
-      if (prevButton) {
-        event.preventDefault();
-        goPrevPage();
-        return;
-      }
-
-      const nextButton = getActionTarget(event, [
-        "next-page",
-        "pagination-next",
-      ]);
-
-      if (nextButton) {
-        event.preventDefault();
-        goNextPage();
-        return;
-      }
-
-      const copyButton = getActionTarget(event, [
-        "copy",
-        "copy-ticket-id",
-        "copy-id",
-      ]);
-
-      if (copyButton) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        await handleCopyTicketId(getTicketIdFromElement(copyButton));
-        return;
-      }
-
-      const detailButton = getActionTarget(event, [
-        "detail",
-        "open",
-        "open-ticket",
-        "view-ticket",
-      ]);
-
-      if (detailButton) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        await handleOpenTicket(getTicketIdFromElement(detailButton));
-        return;
-      }
-
-      const row =
-        event.target?.closest?.("[data-ticket-row='true']") ||
-        event.target?.closest?.(".incidencias-row") ||
-        null;
-
-      if (row && !isInteractiveElement(event.target)) {
-        event.preventDefault();
-
-        await handleOpenTicket(getTicketIdFromElement(row));
-      }
-    };
-
-    const onInput = (event) => {
-      if (destroyed) {
-        return;
-      }
-
-      const searchInput = getSearchInput(event);
-
-      if (searchInput) {
-        scheduleSearchQuery(searchInput.value);
-      }
-    };
-
-    const onChange = (event) => {
-      if (destroyed) {
-        return;
-      }
-
-      const searchInput = getSearchInput(event);
-
-      if (searchInput) {
-        clearSearchTimer();
-        setSearchQuery(searchInput.value);
-        return;
-      }
-
-      const pageSizeInput =
-        event.target?.closest?.("[data-incidencias-field='page-size']") ||
-        event.target?.closest?.("[data-field='page-size']") ||
-        null;
-
-      if (pageSizeInput) {
-        changePageSize(pageSizeInput.value);
-      }
-    };
-
-    container.addEventListener("click", onClick);
-    container.addEventListener("input", onInput);
-    container.addEventListener("change", onChange);
-
-    return () => {
-      try {
-        container.removeEventListener("click", onClick);
-        container.removeEventListener("input", onInput);
-        container.removeEventListener("change", onChange);
-      } catch {}
-    };
-  }
-
   function cleanupBindings() {
-    clearSearchTimer();
-
     try {
       bindingsCleanup?.();
     } catch {}
@@ -2307,7 +1945,29 @@ export const IncidenciasView = (() => {
       return false;
     }
 
-    bindingsCleanup = bindNativeActions(container);
+    bindingsCleanup = bindIncidenciasEvents({
+      container,
+      scope: SCOPE,
+
+      loadIncidencias,
+      reload,
+
+      openTicket: handleOpenTicket,
+
+      copyTicketId: handleCopyTicketId,
+      exportCsv: handleExportCsv,
+      createIncidencia: handleCreateIncidencia,
+
+      setFilter,
+      setSearchQuery,
+      clearFilters,
+      clearSearchOnly,
+
+      goToPage,
+      goPrevPage,
+      goNextPage,
+      changePageSize,
+    });
 
     return true;
   }

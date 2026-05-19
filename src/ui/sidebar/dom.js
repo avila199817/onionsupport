@@ -8,13 +8,14 @@
    - Montar/reemplazar sidebar.
    - Ocultar/limpiar sidebar.
    - Cachear referencias básicas en AppCore.dom.
+   - Cachear referencias estructurales del dropdown.
    - Sin Auth.
    - Sin Router.
    - Sin HTTP.
    - Sin Toast.
    - Sin template.
    - Sin eventos.
-   - Sin dropdown.
+   - Sin comportamiento de dropdown.
    - Sin tooltips.
    - Sin fallback DOM.
    - Sin compat legacy innecesaria.
@@ -27,7 +28,7 @@ import {
   SIDEBAR_SELECTORS,
 } from "./constants.js";
 
-export const SIDEBAR_DOM_VERSION = "sidebar.dom.v2";
+export const SIDEBAR_DOM_VERSION = "sidebar.dom.v3";
 
 /* =========================================================
    BASICS
@@ -83,6 +84,12 @@ function matches(node = null, selector = "") {
   } catch {
     return false;
   }
+}
+
+function uniqueElements(values = []) {
+  return [
+    ...new Set(values.filter(isElement)),
+  ];
 }
 
 /* =========================================================
@@ -299,13 +306,11 @@ export function getSidebarRootFromMount(mount = null) {
 export function getAllSidebarRoots() {
   if (!isBrowser()) return [];
 
-  return [
-    ...new Set([
-      ...queryAll(SIDEBAR_SELECTORS.root),
-      ...queryAll("[data-sidebar-root]"),
-      byId(SIDEBAR_ROOT_ID),
-    ].filter(isElement)),
-  ];
+  return uniqueElements([
+    ...queryAll(SIDEBAR_SELECTORS.root),
+    ...queryAll("[data-sidebar-root]"),
+    byId(SIDEBAR_ROOT_ID),
+  ]);
 }
 
 export function removeDuplicateSidebarRoots(primary = null) {
@@ -407,6 +412,7 @@ export function setSidebarOpenState(root = getSidebarRoot(), open = true) {
 
   try {
     root.dataset.open = value ? "true" : "false";
+    root.dataset.sidebarState = value ? "open" : "collapsed";
 
     if (SIDEBAR_CLASSES.open) {
       root.classList.toggle(SIDEBAR_CLASSES.open, value);
@@ -422,8 +428,9 @@ export function setSidebarOpenState(root = getSidebarRoot(), open = true) {
       toggle.setAttribute("aria-expanded", value ? "true" : "false");
       toggle.setAttribute(
         "aria-label",
-        value ? "Cerrar navegación" : "Abrir navegación"
+        value ? "Cerrar barra lateral" : "Abrir barra lateral"
       );
+      toggle.dataset.state = value ? "open" : "collapsed";
     }
 
     return true;
@@ -450,6 +457,11 @@ export function getSidebarRefs(root = getSidebarRoot()) {
     brand: sidebar ? query(SIDEBAR_SELECTORS.brand, sidebar) : null,
     toggle: sidebar ? query(SIDEBAR_SELECTORS.toggle, sidebar) : null,
     logout: sidebar ? query(SIDEBAR_SELECTORS.logout, sidebar) : null,
+
+    dropdown: sidebar ? query(SIDEBAR_SELECTORS.accountDropdown, sidebar) : null,
+    dropdownTrigger: sidebar ? query(SIDEBAR_SELECTORS.accountTrigger, sidebar) : null,
+    dropdownMenu: sidebar ? query(SIDEBAR_SELECTORS.accountMenu, sidebar) : null,
+    dropdownItems: sidebar ? queryAll(SIDEBAR_SELECTORS.dropdownItem, sidebar) : [],
 
     links: sidebar ? queryAll(SIDEBAR_SELECTORS.link, sidebar) : [],
     navLinks: sidebar ? queryAll(SIDEBAR_SELECTORS.navLink, sidebar) : [],
@@ -489,6 +501,11 @@ export function cacheSidebarDom(AppCore = null, root = getSidebarRoot()) {
     dom.sidebarToggle = refs.toggle;
     dom.sidebarLogout = refs.logout;
 
+    dom.sidebarDropdown = refs.dropdown;
+    dom.sidebarDropdownTrigger = refs.dropdownTrigger;
+    dom.sidebarDropdownMenu = refs.dropdownMenu;
+    dom.sidebarDropdownItems = refs.dropdownItems;
+
     dom.__sidebarDomVersion = SIDEBAR_DOM_VERSION;
   } catch {
     // noop
@@ -514,6 +531,11 @@ export function clearSidebarDomCache(AppCore = null) {
     delete dom.sidebarBrand;
     delete dom.sidebarToggle;
     delete dom.sidebarLogout;
+
+    delete dom.sidebarDropdown;
+    delete dom.sidebarDropdownTrigger;
+    delete dom.sidebarDropdownMenu;
+    delete dom.sidebarDropdownItems;
 
     delete dom.__sidebarDomVersion;
 
@@ -646,11 +668,16 @@ export function getSidebarDomSnapshot(root = getSidebarRoot()) {
       brand: nodeSnapshot(refs.brand),
       toggle: nodeSnapshot(refs.toggle),
       logout: nodeSnapshot(refs.logout),
+
+      dropdown: nodeSnapshot(refs.dropdown),
+      dropdownTrigger: nodeSnapshot(refs.dropdownTrigger),
+      dropdownMenu: nodeSnapshot(refs.dropdownMenu),
     },
 
     counts: {
       links: refs.links.length,
       navLinks: refs.navLinks.length,
+      dropdownItems: refs.dropdownItems.length,
     },
 
     policy: {
@@ -661,7 +688,7 @@ export function getSidebarDomSnapshot(root = getSidebarRoot()) {
       noToast: true,
       noTemplate: true,
       noEvents: true,
-      noDropdown: true,
+      noDropdownBehavior: true,
       noTooltips: true,
       noFallbackDom: true,
     },

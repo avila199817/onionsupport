@@ -1,36 +1,18 @@
 /* =========================================================
-   Onion SPA - Incidencias Store
-   Archivo: src/views/incidencias/incidencias.store.js
+   Onion Support - Incidencias Store
+   Archivo: /src/views/incidencias/incidencias.store.js
 
-   EXTREME PRO SYSTEM · STORE LAYER · 12/10
-   PATCH · MODEL NORMALIZED STORE
-   PATCH · RICH DETAIL PRESERVATION
-   PATCH · FACTURAS / BILLING / LINKED INVOICES SAFE
-   PATCH · ALIAS INDEX DEDUPE ENGINE
-   PATCH · DETAIL CACHE BY ID
-
-   RESPONSABILIDADES:
-   - encapsular Store global
-   - leer / escribir colección incidencias
-   - helpers para API / View / Actions / Modal
-   - búsquedas robustas por id / ticketId / incidenciaId / code / ticketCode
-   - replace / append / update / upsert / remove
-   - deduplicación segura por aliases de identidad
-   - persistencia estable para detalle modal
-   - conservar payload rico: factura / facturas / linkedInvoices / billing
-   - conservar adjuntos normalizados con URLs SAS cuando existan
-   - ordenar de forma consistente por actividad real
-   - compatibilidad con Store.set / Store.get / Store.actions.setCollection
-
-   HARDENING PRO:
-   - no muta colecciones originales
-   - merge seguro preservando raw/meta/nested objects
-   - lectura tolerante a distintas formas de Store
-   - escritura multi-path defensiva
-   - cache byId defensiva para detalle modal
-   - upsert sin duplicados aunque cambie id/code/ticketId
-   - búsquedas case-insensitive sin romper ids originales
-   - normalización conectada con incidencias.model.js
+   Responsabilidad:
+   - Encapsular acceso al Store global para incidencias.
+   - Leer/escribir colección normalizada.
+   - Mantener índice derivado por id para búsquedas rápidas.
+   - Dedupe básico por ticketId/id/code/ticketCode/incidenciaId.
+   - Delegar normalización principal a incidencias.model.js.
+   - No llamar APIs.
+   - No tocar DOM.
+   - No registrar eventos.
+   - No abrir modales.
+   - No duplicar lógica de View/State/Actions.
 ========================================================= */
 
 import { Store } from "../../store/index.js";
@@ -50,42 +32,104 @@ export const STORE_BY_ID_PATH = "entities.incidenciasById";
 export const STORE_DETAIL_PATH = "entities.incidenciasDetail";
 export const STORE_META_PATH = "entities.incidenciasMeta";
 
-const READ_PATHS = [
+const READ_PATHS = Object.freeze([
   STORE_PATH,
   STORE_COLLECTION_KEY,
   `collections.${STORE_COLLECTION_KEY}`,
+
+  // Lectura legacy, no escritura canónica.
   "entities.tickets",
   "tickets",
   "collections.tickets",
-];
+]);
 
-const DETAIL_READ_PATHS = [
+const WRITE_PATHS = Object.freeze([
+  STORE_PATH,
+  STORE_COLLECTION_KEY,
+  `collections.${STORE_COLLECTION_KEY}`,
+]);
+
+const DETAIL_READ_PATHS = Object.freeze([
   STORE_BY_ID_PATH,
   STORE_DETAIL_PATH,
   "incidenciasById",
   "incidenciasDetail",
+
+  // Lectura legacy.
   "entities.ticketsById",
   "ticketsById",
-];
+]);
+
+const NESTED_OBJECT_KEYS = Object.freeze([
+  "raw",
+  "meta",
+  "cliente",
+  "client",
+  "customer",
+  "tecnico",
+  "assignedTo",
+  "receptor",
+  "createdBy",
+  "requester",
+  "requesterSnapshot",
+  "owner",
+  "usuario",
+  "factura",
+  "invoice",
+  "billing",
+  "linkedInvoices",
+  "assignment",
+  "lifecycle",
+  "sla",
+  "resolution",
+  "relations",
+  "visibility",
+  "privacy",
+  "audit",
+  "search",
+]);
+
+const ARRAY_KEYS = Object.freeze([
+  "attachments",
+  "files",
+  "adjuntos",
+  "history",
+  "comments",
+  "timeline",
+  "facturas",
+  "invoices",
+  "facturasRelacionadas",
+  "linkedFacturas",
+]);
 
 /* =========================================================
-   SAFE CORE
+   SAFE HELPERS
 ========================================================= */
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFn(value) {
+  return typeof value === "function";
+}
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
 function safeObject(value, fallback = {}) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
+  return isObject(value) ? value : fallback;
 }
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return text || fallback;
 }
 
@@ -94,45 +138,45 @@ function safeLower(value, fallback = "") {
 }
 
 function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") {
-    return fallback;
-  }
+  if (value === null || value === undefined || value === "") return fallback;
 
   if (typeof value === "string") {
     let normalized = value
       .trim()
       .replace(/€/g, "")
+      .replace(/\$/g, "")
+      .replace(/£/g, "")
       .replace(/%/g, "")
+      .replace(/[^\d.,+\-\s]/g, "")
       .replace(/\s+/g, "");
 
     const hasComma = normalized.includes(",");
     const hasDot = normalized.includes(".");
 
     if (hasComma && hasDot) {
-      normalized = normalized.replace(/\./g, "").replace(",", ".");
+      const lastComma = normalized.lastIndexOf(",");
+      const lastDot = normalized.lastIndexOf(".");
+
+      normalized = lastComma > lastDot
+        ? normalized.replace(/\./g, "").replace(/,/g, ".")
+        : normalized.replace(/,/g, "");
     } else if (hasComma) {
-      normalized = normalized.replace(",", ".");
+      normalized = normalized.replace(/,/g, ".");
     }
 
-    const num = Number(normalized);
-    return Number.isFinite(num) ? num : fallback;
+    const number = Number(normalized);
+    return Number.isFinite(number) ? number : fallback;
   }
 
-  const num = Number(value);
-  return Number.isFinite(num) ? num : fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
@@ -144,29 +188,15 @@ function uniqueStrings(values = []) {
   return [
     ...new Set(
       safeArray(values)
-        .flatMap((value) => (Array.isArray(value) ? value : [value]))
+        .flatMap((value) => Array.isArray(value) ? value : [value])
         .map((value) => safeText(value, ""))
         .filter(Boolean)
     ),
   ];
 }
 
-function normalizeIdForCompare(value = "") {
+function normalizeCompare(value = "") {
   return safeLower(value, "");
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function cloneObject(value = {}) {
-  return {
-    ...safeObject(value),
-  };
-}
-
-function cloneArray(items = []) {
-  return safeArray(items).map((item) => cloneObject(item));
 }
 
 /* =========================================================
@@ -175,6 +205,7 @@ function cloneArray(items = []) {
 
 function getByPath(source = {}, path = "") {
   const cleanPath = safeText(path, "");
+
   if (!cleanPath) return undefined;
 
   return cleanPath.split(".").reduce((acc, key) => {
@@ -185,10 +216,16 @@ function getByPath(source = {}, path = "") {
 
 function setByPath(source = {}, path = "", value = null) {
   const cleanPath = safeText(path, "");
-  if (!cleanPath || !source || typeof source !== "object") return false;
+
+  if (!cleanPath || !source || typeof source !== "object") {
+    return false;
+  }
 
   const parts = cleanPath.split(".").filter(Boolean);
-  if (!parts.length) return false;
+
+  if (!parts.length) {
+    return false;
+  }
 
   let cursor = source;
 
@@ -213,6 +250,7 @@ function setByPath(source = {}, path = "", value = null) {
 
 function parseSpanishDate(value = "") {
   const text = safeText(value, "");
+
   if (!text) return 0;
 
   const match = text.match(
@@ -232,9 +270,9 @@ function parseSpanishDate(value = "") {
     Number(ss)
   );
 
-  const ts = date.getTime();
+  const timestamp = date.getTime();
 
-  return Number.isFinite(ts) ? ts : 0;
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function safeTimestamp(value, fallback = 0) {
@@ -249,16 +287,16 @@ function safeTimestamp(value, fallback = 0) {
   }
 
   const nativeDate = new Date(value);
-  const nativeTs = nativeDate.getTime();
+  const nativeTimestamp = nativeDate.getTime();
 
-  if (Number.isFinite(nativeTs) && nativeTs > 0) {
-    return nativeTs;
+  if (Number.isFinite(nativeTimestamp) && nativeTimestamp > 0) {
+    return nativeTimestamp;
   }
 
-  const esTs = parseSpanishDate(value);
+  const spanishTimestamp = parseSpanishDate(value);
 
-  if (Number.isFinite(esTs) && esTs > 0) {
-    return esTs;
+  if (Number.isFinite(spanishTimestamp) && spanishTimestamp > 0) {
+    return spanishTimestamp;
   }
 
   return fallback;
@@ -274,6 +312,7 @@ function getUpdatedTimestamp(item = {}) {
       row.updatedAtTs,
       row.meta?.updatedAtMs,
       row.meta?.timestampMs,
+
       row.lastActivityAt,
       row.lastActivityAtES,
       row.updatedAt,
@@ -290,6 +329,7 @@ function getUpdatedTimestamp(item = {}) {
       raw.updatedAtTs,
       raw.meta?.updatedAtMs,
       raw.meta?.timestampMs,
+
       raw.lastActivityAt,
       raw.lastActivityAtES,
       raw.updatedAt,
@@ -352,13 +392,34 @@ export function getItemId(item = {}) {
       row._id,
 
       row.ticket?.ticketId,
+      row.ticket?.incidenciaId,
       row.ticket?.id,
+      row.ticket?.code,
+      row.ticket?.ticketCode,
 
       row.item?.ticketId,
+      row.item?.incidenciaId,
       row.item?.id,
+      row.item?.code,
+      row.item?.ticketCode,
 
       row.data?.ticketId,
+      row.data?.incidenciaId,
       row.data?.id,
+      row.data?.code,
+      row.data?.ticketCode,
+
+      row.detail?.ticketId,
+      row.detail?.incidenciaId,
+      row.detail?.id,
+      row.detail?.code,
+      row.detail?.ticketCode,
+
+      row.incidencia?.ticketId,
+      row.incidencia?.incidenciaId,
+      row.incidencia?.id,
+      row.incidencia?.code,
+      row.incidencia?.ticketCode,
 
       raw.ticketId,
       raw.incidenciaId,
@@ -382,6 +443,7 @@ export function getItemCandidateIds(item = {}) {
     row.code,
     row.ticketCode,
     row._id,
+    row.entityId,
 
     row.ticket?.ticketId,
     row.ticket?.incidenciaId,
@@ -402,10 +464,16 @@ export function getItemCandidateIds(item = {}) {
     row.data?.ticketCode,
 
     row.detail?.ticketId,
+    row.detail?.incidenciaId,
     row.detail?.id,
+    row.detail?.code,
+    row.detail?.ticketCode,
 
     row.incidencia?.ticketId,
+    row.incidencia?.incidenciaId,
     row.incidencia?.id,
+    row.incidencia?.code,
+    row.incidencia?.ticketCode,
 
     raw.ticketId,
     raw.incidenciaId,
@@ -413,16 +481,18 @@ export function getItemCandidateIds(item = {}) {
     raw.code,
     raw.ticketCode,
     raw._id,
+    raw.entityId,
   ]);
 }
 
 function hasCandidateId(item = {}, id = "") {
-  const target = normalizeIdForCompare(id);
+  const target = normalizeCompare(id);
+
   if (!target) return false;
 
-  return getItemCandidateIds(item).some(
-    (candidate) => normalizeIdForCompare(candidate) === target
-  );
+  return getItemCandidateIds(item).some((candidate) => {
+    return normalizeCompare(candidate) === target;
+  });
 }
 
 function isSameItemId(item = {}, id = "") {
@@ -433,7 +503,7 @@ function findExistingKeyForItem(aliasIndex = new Map(), item = {}) {
   const candidates = getItemCandidateIds(item);
 
   for (const candidate of candidates) {
-    const normalized = normalizeIdForCompare(candidate);
+    const normalized = normalizeCompare(candidate);
 
     if (normalized && aliasIndex.has(normalized)) {
       return aliasIndex.get(normalized);
@@ -445,10 +515,11 @@ function findExistingKeyForItem(aliasIndex = new Map(), item = {}) {
 
 function registerAliases(aliasIndex = new Map(), primaryKey = "", item = {}) {
   const cleanPrimary = safeText(primaryKey, "");
+
   if (!cleanPrimary) return;
 
   getItemCandidateIds(item).forEach((candidate) => {
-    const normalized = normalizeIdForCompare(candidate);
+    const normalized = normalizeCompare(candidate);
 
     if (normalized) {
       aliasIndex.set(normalized, cleanPrimary);
@@ -457,7 +528,7 @@ function registerAliases(aliasIndex = new Map(), primaryKey = "", item = {}) {
 }
 
 /* =========================================================
-   NORMALIZATION
+   NORMALIZATION / MERGE
 ========================================================= */
 
 function normalizeStoreItem(item = {}) {
@@ -466,17 +537,17 @@ function normalizeStoreItem(item = {}) {
   try {
     return normalizeIncidenciaModel(source);
   } catch {
-    return source;
+    return {
+      ...source,
+    };
   }
 }
 
 function normalizeStoreItems(items = []) {
-  return safeArray(items).map(normalizeStoreItem);
+  return safeArray(items)
+    .filter(isObject)
+    .map(normalizeStoreItem);
 }
-
-/* =========================================================
-   RICH MERGE HELPERS
-========================================================= */
 
 function mergePlainObject(base = {}, patch = {}) {
   return {
@@ -485,49 +556,35 @@ function mergePlainObject(base = {}, patch = {}) {
   };
 }
 
-function mergeRaw(base = {}, patch = {}) {
-  const baseRaw = safeObject(base.raw);
-  const patchRaw = safeObject(patch.raw);
+function getArrayItemKey(item = {}, fallback = "") {
+  const row = safeObject(item);
 
-  if (!Object.keys(baseRaw).length && !Object.keys(patchRaw).length) {
-    return undefined;
-  }
-
-  return {
-    ...baseRaw,
-    ...patchRaw,
-  };
+  return safeText(
+    first(
+      row.id,
+      row.attachmentId,
+      row.fileId,
+      row.commentId,
+      row.historyId,
+      row.eventId,
+      row.ticketId,
+      row.facturaId,
+      row.invoiceId,
+      row.numeroFacturaLegal,
+      row.numeroFactura,
+      row.invoiceNumber,
+      row.path,
+      row.blobName,
+      row.storageKey,
+      fallback
+    ),
+    fallback
+  );
 }
 
 function mergeArrayById(baseItems = [], patchItems = []) {
   const output = [];
   const index = new Map();
-
-  function getArrayItemKey(item = {}, fallback = "") {
-    const row = safeObject(item);
-
-    return safeText(
-      first(
-        row.id,
-        row.attachmentId,
-        row.fileId,
-        row.commentId,
-        row.historyId,
-        row.eventId,
-        row.ticketId,
-        row.facturaId,
-        row.invoiceId,
-        row.numeroFacturaLegal,
-        row.numeroFactura,
-        row.invoiceNumber,
-        row.path,
-        row.blobName,
-        row.storageKey,
-        fallback
-      ),
-      fallback
-    );
-  }
 
   [...safeArray(baseItems), ...safeArray(patchItems)].forEach((item, position) => {
     const row = safeObject(item);
@@ -540,82 +597,40 @@ function mergeArrayById(baseItems = [], patchItems = []) {
     }
 
     const currentIndex = index.get(key);
-    output[currentIndex] = mergePlainObject(output[currentIndex], row);
+
+    output[currentIndex] = mergePlainObject(
+      output[currentIndex],
+      row
+    );
   });
 
   return output;
 }
 
-function mergeNestedRichObjects(current = {}, incoming = {}) {
+function mergeNestedObjects(current = {}, incoming = {}) {
   const merged = {
-    ...current,
-    ...incoming,
+    ...safeObject(current),
+    ...safeObject(incoming),
   };
 
-  const nestedObjectKeys = [
-    "raw",
-    "meta",
-    "cliente",
-    "client",
-    "customer",
-    "tecnico",
-    "assignedTo",
-    "receptor",
-    "createdBy",
-    "requester",
-    "requesterSnapshot",
-    "owner",
-    "usuario",
-    "factura",
-    "invoice",
-    "billing",
-    "linkedInvoices",
-    "assignment",
-    "lifecycle",
-    "sla",
-    "resolution",
-    "relations",
-    "visibility",
-    "privacy",
-    "audit",
-    "search",
-  ];
-
-  nestedObjectKeys.forEach((key) => {
+  NESTED_OBJECT_KEYS.forEach((key) => {
     if (isObject(current[key]) || isObject(incoming[key])) {
-      merged[key] = mergePlainObject(current[key], incoming[key]);
+      merged[key] = mergePlainObject(
+        current[key],
+        incoming[key]
+      );
     }
   });
 
-  const raw = mergeRaw(current, incoming);
-
-  if (raw) {
-    merged.raw = raw;
-  }
-
-  const arrayKeys = [
-    "attachments",
-    "files",
-    "adjuntos",
-    "history",
-    "comments",
-    "timeline",
-    "facturas",
-    "invoices",
-    "facturasRelacionadas",
-    "linkedFacturas",
-  ];
-
-  arrayKeys.forEach((key) => {
+  ARRAY_KEYS.forEach((key) => {
     if (Array.isArray(current[key]) || Array.isArray(incoming[key])) {
-      merged[key] = mergeArrayById(current[key], incoming[key]);
+      merged[key] = mergeArrayById(
+        current[key],
+        incoming[key]
+      );
     }
   });
 
-  /*
-    Mantener aliases de adjuntos sincronizados si cualquiera llega mejorado
-    desde detalle / upload.
-  */
   const attachments = mergeArrayById(
     first(current.attachments, current.files, current.adjuntos, []),
     first(incoming.attachments, incoming.files, incoming.adjuntos, [])
@@ -626,164 +641,34 @@ function mergeNestedRichObjects(current = {}, incoming = {}) {
     merged.files = attachments;
     merged.adjuntos = attachments;
     merged.attachmentsCount = safeNumber(
-      first(incoming.attachmentsCount, incoming.filesCount, attachments.length),
+      first(incoming.attachmentsCount, incoming.filesCount, current.attachmentsCount, current.filesCount, attachments.length),
       attachments.length
     );
-    merged.filesCount = safeNumber(
-      first(incoming.filesCount, incoming.attachmentsCount, attachments.length),
-      attachments.length
-    );
+    merged.filesCount = merged.attachmentsCount;
   }
 
-  /*
-    Mantener aliases de facturación sincronizados.
-  */
-  const invoiceTotal = safeNumber(
+  const id = safeText(
     first(
-      incoming.facturasTotal,
-      incoming.invoicesTotal,
-      incoming.importeFacturas,
-      incoming.invoiceTotal,
-      incoming.facturaTotal,
-      incoming.facturaImporte,
-      incoming.importeFactura,
-      incoming.totalFactura,
-      incoming.invoiceAmount,
-      incoming.linkedInvoices?.total,
-      incoming.billing?.total,
-      incoming.total,
-      incoming.amount,
-      incoming.importe,
-
-      current.facturasTotal,
-      current.invoicesTotal,
-      current.importeFacturas,
-      current.invoiceTotal,
-      current.facturaTotal,
-      current.facturaImporte,
-      current.importeFactura,
-      current.totalFactura,
-      current.invoiceAmount,
-      current.linkedInvoices?.total,
-      current.billing?.total,
-      current.total,
-      current.amount,
-      current.importe,
-
-      0
-    ),
-    0
-  );
-
-  const invoiceCurrency = safeText(
-    first(
-      incoming.currency,
-      incoming.moneda,
-      incoming.facturaCurrency,
-      incoming.facturaMoneda,
-      incoming.linkedInvoices?.currency,
-      incoming.linkedInvoices?.moneda,
-      incoming.billing?.currency,
-      incoming.billing?.moneda,
-      incoming.meta?.invoiceCurrency,
-
-      current.currency,
-      current.moneda,
-      current.facturaCurrency,
-      current.facturaMoneda,
-      current.linkedInvoices?.currency,
-      current.linkedInvoices?.moneda,
-      current.billing?.currency,
-      current.billing?.moneda,
-      current.meta?.invoiceCurrency,
-
-      "EUR"
-    ),
-    "EUR"
-  ).toUpperCase();
-
-  const invoiceNumber = safeText(
-    first(
-      incoming.numeroFacturaLegal,
-      incoming.numeroFactura,
-      incoming.invoiceNumber,
-      incoming.linkedInvoices?.numeroFacturaLegal,
-      incoming.billing?.numeroFacturaLegal,
-      incoming.factura?.numeroFacturaLegal,
-
-      current.numeroFacturaLegal,
-      current.numeroFactura,
-      current.invoiceNumber,
-      current.linkedInvoices?.numeroFacturaLegal,
-      current.billing?.numeroFacturaLegal,
-      current.factura?.numeroFacturaLegal,
-
-      ""
+      incoming.ticketId,
+      incoming.incidenciaId,
+      incoming.id,
+      incoming.code,
+      incoming.ticketCode,
+      current.ticketId,
+      current.incidenciaId,
+      current.id,
+      current.code,
+      current.ticketCode
     ),
     ""
   );
 
-  if (invoiceTotal || invoiceNumber) {
-    merged.numeroFacturaLegal = invoiceNumber;
-    merged.numeroFactura = invoiceNumber;
-    merged.invoiceNumber = invoiceNumber;
-
-    merged.facturasTotal = invoiceTotal;
-    merged.invoicesTotal = invoiceTotal;
-    merged.importeFacturas = invoiceTotal;
-    merged.invoiceTotal = invoiceTotal;
-
-    merged.facturaTotal = invoiceTotal;
-    merged.facturaImporte = invoiceTotal;
-    merged.importeFactura = invoiceTotal;
-    merged.totalFactura = invoiceTotal;
-    merged.invoiceAmount = invoiceTotal;
-
-    merged.total = invoiceTotal;
-    merged.amount = invoiceTotal;
-    merged.importe = invoiceTotal;
-
-    merged.currency = invoiceCurrency;
-    merged.moneda = invoiceCurrency;
-    merged.facturaCurrency = invoiceCurrency;
-    merged.facturaMoneda = invoiceCurrency;
-
-    merged.linkedInvoices = {
-      ...safeObject(current.linkedInvoices),
-      ...safeObject(incoming.linkedInvoices),
-      numeroFacturaLegal: invoiceNumber,
-      numeroFactura: invoiceNumber,
-      invoiceNumber,
-      total: invoiceTotal,
-      amount: invoiceTotal,
-      importe: invoiceTotal,
-      currency: invoiceCurrency,
-      moneda: invoiceCurrency,
-    };
-
-    merged.billing = {
-      ...safeObject(current.billing),
-      ...safeObject(incoming.billing),
-      numeroFacturaLegal: invoiceNumber,
-      numeroFactura: invoiceNumber,
-      invoiceNumber,
-      total: invoiceTotal,
-      amount: invoiceTotal,
-      importe: invoiceTotal,
-      currency: invoiceCurrency,
-      moneda: invoiceCurrency,
-    };
-
-    merged.meta = {
-      ...safeObject(merged.meta),
-      hasLinkedInvoices: true,
-      hasFactura: true,
-      hasInvoice: true,
-      invoiceTotal,
-      invoicesTotal: invoiceTotal,
-      invoiceCurrency,
-      numeroFacturaLegal: invoiceNumber,
-    };
+  if (id) {
+    merged.id = safeText(first(incoming.id, current.id, id), id);
+    merged.ticketId = safeText(first(incoming.ticketId, current.ticketId, id), id);
+    merged.incidenciaId = safeText(first(incoming.incidenciaId, current.incidenciaId, id), id);
+    merged.code = safeText(first(incoming.code, incoming.ticketCode, current.code, current.ticketCode, id), id);
+    merged.ticketCode = safeText(first(incoming.ticketCode, incoming.code, current.ticketCode, current.code, id), id);
   }
 
   return normalizeStoreItem(merged);
@@ -793,7 +678,7 @@ function mergeIncidencia(base = {}, patch = {}) {
   const current = normalizeStoreItem(base);
   const incoming = normalizeStoreItem(patch);
 
-  return mergeNestedRichObjects(current, incoming);
+  return mergeNestedObjects(current, incoming);
 }
 
 function dedupeIncidencias(items = []) {
@@ -802,13 +687,12 @@ function dedupeIncidencias(items = []) {
   const aliasIndex = new Map();
   const anonymous = [];
 
-  for (const rawItem of list) {
-    const item = safeObject(rawItem);
+  list.forEach((item) => {
     const primaryId = getItemId(item);
 
     if (!primaryId) {
       anonymous.push(item);
-      continue;
+      return;
     }
 
     const existingKey = findExistingKeyForItem(aliasIndex, item);
@@ -817,51 +701,38 @@ function dedupeIncidencias(items = []) {
     if (!map.has(finalKey)) {
       map.set(finalKey, item);
       registerAliases(aliasIndex, finalKey, item);
-      continue;
+      return;
     }
 
-    const current = map.get(finalKey);
-    const merged = mergeIncidencia(current, item);
+    const merged = mergeIncidencia(
+      map.get(finalKey),
+      item
+    );
 
     map.set(finalKey, merged);
     registerAliases(aliasIndex, finalKey, merged);
-  }
+  });
 
-  return [...map.values(), ...anonymous];
+  return [
+    ...map.values(),
+    ...anonymous,
+  ];
 }
 
 function normalizeCollection(items = [], { sort = true } = {}) {
   const deduped = dedupeIncidencias(items);
 
-  if (!sort) {
-    return deduped;
-  }
-
-  return sortIncidenciasByUpdatedDesc(deduped);
+  return sort
+    ? sortIncidenciasByUpdatedDesc(deduped)
+    : deduped;
 }
 
 /* =========================================================
-   STORE LOW LEVEL READ
+   STORE READ
 ========================================================= */
 
-function readViaStoreGet(paths = READ_PATHS) {
-  if (typeof Store?.get !== "function") return null;
-
-  for (const path of paths) {
-    try {
-      const value = Store.get(path);
-
-      if (Array.isArray(value)) {
-        return value;
-      }
-
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        return value;
-      }
-    } catch {}
-  }
-
-  return null;
+function objectMapToArray(value = {}) {
+  return Object.values(safeObject(value)).filter(isObject);
 }
 
 function getStoreStateCandidates() {
@@ -880,7 +751,7 @@ function getStoreStateCandidates() {
   } catch {}
 
   try {
-    if (typeof Store?.getState === "function") {
+    if (isFn(Store?.getState)) {
       output.push(Store.getState());
     }
   } catch {}
@@ -888,29 +759,39 @@ function getStoreStateCandidates() {
   return output;
 }
 
-function readViaStoreState(paths = READ_PATHS) {
-  const stateCandidates = getStoreStateCandidates();
+function readViaStoreGet(paths = READ_PATHS) {
+  if (!isFn(Store?.get)) return null;
 
-  for (const state of stateCandidates) {
-    const obj = safeObject(state);
+  for (const path of paths) {
+    try {
+      const value = Store.get(path);
+
+      if (Array.isArray(value)) return value;
+      if (isObject(value)) return value;
+    } catch {}
+  }
+
+  return null;
+}
+
+function readViaStoreState(paths = READ_PATHS) {
+  const states = getStoreStateCandidates();
+
+  for (const state of states) {
+    const source = safeObject(state);
 
     for (const path of paths) {
-      const value = getByPath(obj, path);
+      const value = getByPath(source, path);
 
-      if (Array.isArray(value)) {
-        return value;
-      }
-
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        return value;
-      }
+      if (Array.isArray(value)) return value;
+      if (isObject(value)) return value;
     }
   }
 
   return null;
 }
 
-function readViaStoreCollections() {
+function readViaStoreDirect() {
   const candidates = [
     Store?.collections?.[STORE_COLLECTION_KEY],
     Store?.entities?.[STORE_COLLECTION_KEY],
@@ -920,35 +801,31 @@ function readViaStoreCollections() {
   ];
 
   for (const value of candidates) {
-    if (Array.isArray(value)) {
-      return value;
-    }
+    if (Array.isArray(value)) return value;
+    if (isObject(value)) return value;
   }
 
   return null;
-}
-
-function objectMapToArray(value = {}) {
-  const obj = safeObject(value);
-
-  return Object.values(obj).filter((item) => isObject(item));
 }
 
 function readStoreCollection() {
   const candidates = [
     readViaStoreGet(READ_PATHS),
     readViaStoreState(READ_PATHS),
-    readViaStoreCollections(),
+    readViaStoreDirect(),
   ];
 
   for (const value of candidates) {
     if (Array.isArray(value)) {
-      return cloneArray(value);
+      return value.map((item) => ({ ...safeObject(item) }));
     }
 
-    if (value && typeof value === "object") {
+    if (isObject(value)) {
       const list = objectMapToArray(value);
-      if (list.length) return cloneArray(list);
+
+      if (list.length) {
+        return list.map((item) => ({ ...safeObject(item) }));
+      }
     }
   }
 
@@ -965,7 +842,7 @@ function readStoreDetailMap() {
   ];
 
   for (const value of candidates) {
-    if (value && typeof value === "object" && !Array.isArray(value)) {
+    if (isObject(value)) {
       return safeObject(value);
     }
   }
@@ -974,12 +851,12 @@ function readStoreDetailMap() {
 }
 
 /* =========================================================
-   STORE LOW LEVEL WRITE
+   STORE WRITE
 ========================================================= */
 
 function writeViaSet(path = "", value = null) {
   try {
-    if (typeof Store?.set === "function") {
+    if (isFn(Store?.set)) {
       Store.set(path, value);
       return true;
     }
@@ -992,34 +869,52 @@ function writeViaActions(list = []) {
   let wrote = false;
 
   try {
-    if (typeof Store?.actions?.setCollection === "function") {
+    if (isFn(Store?.actions?.setCollection)) {
       Store.actions.setCollection(STORE_COLLECTION_KEY, list);
       wrote = true;
     }
   } catch {}
 
   try {
-    if (typeof Store?.actions?.replaceCollection === "function") {
+    if (isFn(Store?.actions?.replaceCollection)) {
       Store.actions.replaceCollection(STORE_COLLECTION_KEY, list);
       wrote = true;
     }
   } catch {}
 
   try {
-    if (typeof Store?.actions?.set === "function") {
+    if (isFn(Store?.actions?.set)) {
       Store.actions.set(STORE_PATH, list);
       wrote = true;
     }
   } catch {}
 
   try {
-    if (typeof Store?.commit === "function") {
+    if (isFn(Store?.commit)) {
       Store.commit(STORE_PATH, list);
       wrote = true;
     }
   } catch {}
 
   return wrote;
+}
+
+function writeDirectFallback(list = []) {
+  try {
+    if (!Store || typeof Store !== "object") {
+      return false;
+    }
+
+    Store.entities = safeObject(Store.entities);
+    Store.collections = safeObject(Store.collections);
+
+    Store.entities.incidencias = list;
+    Store.collections.incidencias = list;
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function buildDetailMap(items = []) {
@@ -1031,11 +926,12 @@ function buildDetailMap(items = []) {
 
     if (!primaryId) return;
 
-    const ids = getItemCandidateIds(row);
+    getItemCandidateIds(row).forEach((id) => {
+      const key = normalizeCompare(id);
 
-    ids.forEach((id) => {
-      const key = normalizeIdForCompare(id);
-      if (key) map[key] = row;
+      if (key) {
+        map[key] = row;
+      }
     });
 
     map[primaryId] = row;
@@ -1081,26 +977,15 @@ function writeMeta(list = []) {
   return meta;
 }
 
-function writeDirectFallback(list = []) {
-  try {
-    if (Store && typeof Store === "object") {
-      Store.entities = safeObject(Store.entities);
-      Store.entities.incidencias = list;
-      return true;
-    }
-  } catch {}
-
-  return false;
-}
-
 function writeStoreCollection(items = []) {
   const list = normalizeCollection(items);
 
   let wrote = false;
 
-  wrote = writeViaSet(STORE_PATH, list) || wrote;
-  wrote = writeViaSet(STORE_COLLECTION_KEY, list) || wrote;
-  wrote = writeViaSet(`collections.${STORE_COLLECTION_KEY}`, list) || wrote;
+  WRITE_PATHS.forEach((path) => {
+    wrote = writeViaSet(path, list) || wrote;
+  });
+
   wrote = writeViaActions(list) || wrote;
   wrote = writeDirectFallback(list) || wrote;
 
@@ -1128,10 +1013,10 @@ export function getSortedIncidenciasStore() {
 
 export function getIncidenciaById(id = "") {
   const target = safeText(id, "");
+
   if (!target) return null;
 
-  const normalizedTarget = normalizeIdForCompare(target);
-
+  const normalizedTarget = normalizeCompare(target);
   const detailMap = readStoreDetailMap();
 
   if (detailMap[normalizedTarget]) {
@@ -1142,9 +1027,10 @@ export function getIncidenciaById(id = "") {
     return normalizeStoreItem(detailMap[target]);
   }
 
-  const items = getIncidencias();
-
-  return items.find((item) => isSameItemId(item, target)) || null;
+  return (
+    getIncidencias().find((item) => isSameItemId(item, target)) ||
+    null
+  );
 }
 
 export function getIncidenciaByIdStore(id = "") {
@@ -1200,11 +1086,10 @@ export function appendIncidenciaStore(item = null) {
     return getIncidencias();
   }
 
-  const current = getIncidencias();
-  const incoming = normalizeStoreItem(item);
-  const next = normalizeCollection([incoming, ...current]);
-
-  return writeStoreCollection(next);
+  return writeStoreCollection([
+    ...getIncidencias(),
+    normalizeStoreItem(item),
+  ]);
 }
 
 export function updateIncidenciaStore(id = "", patch = {}) {
@@ -1226,17 +1111,7 @@ export function updateIncidenciaStore(id = "", patch = {}) {
 
     found = true;
 
-    return mergeIncidencia(item, {
-      ...incomingPatch,
-      id: safeText(
-        first(incomingPatch.id, incomingPatch.ticketId, item.id),
-        item.id
-      ),
-      ticketId: safeText(
-        first(incomingPatch.ticketId, incomingPatch.id, item.ticketId),
-        item.ticketId
-      ),
-    });
+    return mergeIncidencia(item, incomingPatch);
   });
 
   if (!found) {
@@ -1259,74 +1134,23 @@ export function upsertIncidenciaStore(item = null) {
     return getIncidencias();
   }
 
-  const incoming = normalizeStoreItem(item);
-  const current = getIncidencias();
-  const incomingIds = getItemCandidateIds(incoming);
-
-  if (!incomingIds.length) {
-    return writeStoreCollection([incoming, ...current]);
-  }
-
-  let found = false;
-
-  const next = current.map((row) => {
-    const matches = incomingIds.some((id) => hasCandidateId(row, id));
-
-    if (!matches) {
-      return row;
-    }
-
-    found = true;
-    return mergeIncidencia(row, incoming);
-  });
-
-  const finalItems = found
-    ? next
-    : [incoming, ...current];
-
-  return writeStoreCollection(finalItems);
+  return writeStoreCollection([
+    ...getIncidencias(),
+    normalizeStoreItem(item),
+  ]);
 }
 
 export function upsertManyIncidenciasStore(items = []) {
-  const incoming = safeArray(items);
+  const incoming = normalizeStoreItems(items);
 
   if (!incoming.length) {
     return getIncidencias();
   }
 
-  let next = getIncidencias();
-
-  incoming.forEach((item) => {
-    const row = normalizeStoreItem(item);
-    const ids = getItemCandidateIds(row);
-
-    if (!ids.length) {
-      next = [row, ...next];
-      next = normalizeCollection(next);
-      return;
-    }
-
-    let found = false;
-
-    next = next.map((existing) => {
-      const matches = ids.some((id) => hasCandidateId(existing, id));
-
-      if (!matches) {
-        return existing;
-      }
-
-      found = true;
-      return mergeIncidencia(existing, row);
-    });
-
-    if (!found) {
-      next = [row, ...next];
-    }
-
-    next = normalizeCollection(next);
-  });
-
-  return writeStoreCollection(next);
+  return writeStoreCollection([
+    ...getIncidencias(),
+    ...incoming,
+  ]);
 }
 
 /* =========================================================
@@ -1340,11 +1164,9 @@ export function removeIncidenciaStore(id = "") {
     return getIncidencias();
   }
 
-  const next = getIncidencias().filter(
-    (item) => !isSameItemId(item, target)
+  return writeStoreCollection(
+    getIncidencias().filter((item) => !isSameItemId(item, target))
   );
-
-  return writeStoreCollection(next);
 }
 
 /* =========================================================
@@ -1398,31 +1220,25 @@ export function sortIncidenciasByCreatedDesc(items = []) {
 export function filterIncidenciasStore(predicate = null) {
   const items = getIncidencias();
 
-  if (typeof predicate !== "function") {
-    return items;
-  }
-
-  return items.filter(predicate);
+  return isFn(predicate)
+    ? items.filter(predicate)
+    : items;
 }
 
 export function mapIncidenciasStore(mapper = null) {
   const items = getIncidencias();
 
-  if (typeof mapper !== "function") {
-    return items;
-  }
-
-  return items.map(mapper);
+  return isFn(mapper)
+    ? items.map(mapper)
+    : items;
 }
 
 export function findIncidenciaStore(predicate = null) {
   const items = getIncidencias();
 
-  if (typeof predicate !== "function") {
-    return null;
-  }
-
-  return items.find(predicate) || null;
+  return isFn(predicate)
+    ? items.find(predicate) || null
+    : null;
 }
 
 /* =========================================================
@@ -1430,11 +1246,29 @@ export function findIncidenciaStore(predicate = null) {
 ========================================================= */
 
 function getStatus(item = {}) {
-  return safeLower(first(item.status, item.estado, item.raw?.status, item.raw?.estado), "");
+  return safeLower(
+    first(
+      item.status,
+      item.estado,
+      item.lifecycle?.status,
+      item.raw?.status,
+      item.raw?.estado,
+      item.raw?.lifecycle?.status
+    ),
+    ""
+  );
 }
 
 function getPriority(item = {}) {
-  return safeLower(first(item.priority, item.prioridad, item.raw?.priority, item.raw?.prioridad), "");
+  return safeLower(
+    first(
+      item.priority,
+      item.prioridad,
+      item.raw?.priority,
+      item.raw?.prioridad
+    ),
+    ""
+  );
 }
 
 function isClosedLike(item = {}) {
@@ -1447,6 +1281,9 @@ function isClosedLike(item = {}) {
     "resolved",
     "resuelta",
     "resuelto",
+    "cancelled",
+    "canceled",
+    "archived",
   ].includes(status);
 }
 
@@ -1463,6 +1300,8 @@ function isOpenLike(item = {}) {
     "progress",
     "proceso",
     "en_proceso",
+    "working",
+    "assigned",
   ].includes(status);
 }
 
@@ -1483,7 +1322,8 @@ function isUrgentLike(item = {}) {
 function hasAttachments(item = {}) {
   return (
     safeArray(first(item.attachments, item.files, item.adjuntos)).length > 0 ||
-    safeNumber(first(item.attachmentsCount, item.filesCount, item.adjuntosCount), 0) > 0
+    safeNumber(first(item.attachmentsCount, item.filesCount, item.adjuntosCount), 0) > 0 ||
+    Boolean(item.meta?.hasAttachments)
   );
 }
 
@@ -1493,6 +1333,9 @@ function hasInvoices(item = {}) {
       item.invoice ||
       item.billing ||
       item.linkedInvoices ||
+      item.meta?.hasFactura ||
+      item.meta?.hasInvoice ||
+      item.meta?.hasLinkedInvoices ||
       safeArray(item.facturas).length ||
       safeArray(item.invoices).length ||
       safeNumber(
@@ -1501,9 +1344,10 @@ function hasInvoices(item = {}) {
           item.invoicesTotal,
           item.invoiceTotal,
           item.facturaTotal,
-          item.total,
-          item.amount,
-          item.importe
+          item.totalFactura,
+          item.invoiceAmount,
+          item.linkedInvoices?.total,
+          item.billing?.total
         ),
         0
       ) > 0
@@ -1559,7 +1403,6 @@ export function getIncidenciasStoreDebugSnapshot() {
       null,
 
     stats: computeIncidenciasStoreStats(items),
-
     items,
   };
 }

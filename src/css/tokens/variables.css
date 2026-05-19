@@ -2,30 +2,21 @@
    ONION SUPPORT — VARIABLES.CSS
    Archivo: /src/css/tokens/variables.css
 
-   DESIGN TOKENS · DARK BASE · TOKEN PRO SYSTEM
+   DESIGN TOKENS · DARK BASE · APPLE GLASS SYSTEM
    PRIVATE SPA · CSP CLEAN · NO EXTERNAL FONTS
 
-   Contrato:
-   - Este archivo es la fuente de verdad visual base/dark.
-   - No contiene overrides [data-theme="light"].
+   Responsabilidad:
+   - Fuente de verdad visual base/dark.
+   - Sistema global de tokens para SPA.
+   - Estética Apple Glass: depth, translucency, blur, soft borders.
+   - Mantener compatibilidad con tokens existentes.
    - Light theme vive exclusivamente en /src/css/tokens/light.css.
-   - Componentes y vistas consumen tokens; no redefinen sistema global.
+   - Componentes/vistas consumen tokens; no redefinen sistema global.
    - Sin @import.
    - Sin Google Fonts.
    - Sin @font-face remoto.
    - Sin CSS inline.
    - Sin estilos inyectados desde JS.
-
-   Orden lógico:
-   1. Identidad / fuente / escala
-   2. Layout / z-index / spacing / radius
-   3. Color system dark
-   4. Surfaces / borders / text / status
-   5. Components tokens
-   6. Shell / sidebar / topbar
-   7. Tables / views / auth / loader
-   8. Compatibility aliases
-   9. Density / route / responsive / accessibility
 ========================================================= */
 
 
@@ -46,6 +37,8 @@
     system-ui,
     -apple-system,
     BlinkMacSystemFont,
+    "SF Pro Text",
+    "SF Pro Display",
     "Segoe UI",
     Roboto,
     "Helvetica Neue",
@@ -54,6 +47,7 @@
     sans-serif;
 
   --app-font-mono:
+    ui-monospace,
     "SFMono-Regular",
     "SF Mono",
     Consolas,
@@ -69,15 +63,15 @@
   /* =========================================================
      GLOBAL SCALE / DENSITY
   ========================================================= */
-  --ui-scale: .97;
-  --density-factor: .93;
+  --ui-scale: .98;
+  --density-factor: .94;
 
   --density-compact-factor: .90;
-  --density-normal-factor: .93;
+  --density-normal-factor: .94;
   --density-comfortable-factor: 1;
 
-  --density-ui-scale-compact: .95;
-  --density-ui-scale-default: .97;
+  --density-ui-scale-compact: .96;
+  --density-ui-scale-default: .98;
   --density-ui-scale-comfortable: 1.02;
 
 
@@ -92,8 +86,6 @@
 
   /* =========================================================
      BREAKPOINT TOKENS
-     Nota: custom properties no sustituyen directamente media queries,
-     pero documentan el sistema responsive global.
   ========================================================= */
   --breakpoint-xs: 390px;
   --breakpoint-sm: 640px;
@@ -129,26 +121,26 @@
   /* =========================================================
      LAYOUT SYSTEM
   ========================================================= */
-  --content-max: 1340px;
-  --content-narrow: 1140px;
-  --content-wide: 1480px;
+  --content-max: 1360px;
+  --content-narrow: 1120px;
+  --content-wide: 1520px;
 
-  --content-padding: calc(22px * var(--ui-scale));
-  --content-padding-lg: calc(28px * var(--ui-scale));
-  --content-padding-xl: calc(36px * var(--ui-scale));
+  --content-padding: calc(24px * var(--ui-scale));
+  --content-padding-lg: calc(30px * var(--ui-scale));
+  --content-padding-xl: calc(40px * var(--ui-scale));
 
   --content-padding-inline: var(--content-padding);
   --content-padding-block: var(--space-md);
 
   --page-offset: calc(20px * var(--ui-scale));
 
-  --topbar-height: calc(56px * var(--ui-scale));
+  --topbar-height: calc(58px * var(--ui-scale));
   --tablehead-height: calc(42px * var(--ui-scale));
 
-  --sidebar-width: calc(252px * var(--ui-scale));
+  --sidebar-width: calc(260px * var(--ui-scale));
   --sidebar-collapsed: calc(72px * var(--ui-scale));
-  --sidebar-mobile-width: min(86vw, calc(300px * var(--ui-scale)));
-  --sidebar-mobile-width-xs: min(92vw, calc(300px * var(--ui-scale)));
+  --sidebar-mobile-width: min(88vw, calc(320px * var(--ui-scale)));
+  --sidebar-mobile-width-xs: min(92vw, calc(304px * var(--ui-scale)));
 
   --app-sidebar-current-width: var(--sidebar-width);
 
@@ -173,28 +165,28 @@
 
 
   /* =========================================================
-     RADIUS SYSTEM
+     RADIUS SYSTEM · APPLE GLASS
   ========================================================= */
   --radius-2xs: calc(5px * var(--ui-scale));
-  --radius-xs: calc(7px * var(--ui-scale));
-  --radius-sm: calc(10px * var(--ui-scale));
-  --radius-md: calc(13px * var(--ui-scale));
-  --radius-lg: calc(16px * var(--ui-scale));
-  --radius-xl: calc(18px * var(--ui-scale));
-  --radius-2xl: calc(22px * var(--ui-scale));
-  --radius-3xl: calc(28px * var(--ui-scale));
-  --radius-4xl: calc(34px * var(--ui-scale));
+  --radius-xs: calc(8px * var(--ui-scale));
+  --radius-sm: calc(11px * var(--ui-scale));
+  --radius-md: calc(14px * var(--ui-scale));
+  --radius-lg: calc(17px * var(--ui-scale));
+  --radius-xl: calc(20px * var(--ui-scale));
+  --radius-2xl: calc(24px * var(--ui-scale));
+  --radius-3xl: calc(30px * var(--ui-scale));
+  --radius-4xl: calc(38px * var(--ui-scale));
   --radius-pill: 999px;
 
-  --view-radius: calc(20px * var(--ui-scale));
-  --panel-radius: calc(17px * var(--ui-scale));
-  --card-radius: calc(18px * var(--ui-scale));
-  --card-radius-lg: calc(22px * var(--ui-scale));
-  --modal-radius: calc(22px * var(--ui-scale));
-  --drawer-radius: calc(22px * var(--ui-scale));
-  --dropdown-radius: calc(15px * var(--ui-scale));
-  --input-radius: calc(13px * var(--ui-scale));
-  --btn-radius: calc(13px * var(--ui-scale));
+  --view-radius: calc(24px * var(--ui-scale));
+  --panel-radius: calc(20px * var(--ui-scale));
+  --card-radius: calc(22px * var(--ui-scale));
+  --card-radius-lg: calc(28px * var(--ui-scale));
+  --modal-radius: calc(28px * var(--ui-scale));
+  --drawer-radius: calc(28px * var(--ui-scale));
+  --dropdown-radius: calc(18px * var(--ui-scale));
+  --input-radius: calc(15px * var(--ui-scale));
+  --btn-radius: calc(15px * var(--ui-scale));
 
 
   /* =========================================================
@@ -205,12 +197,12 @@
   --space-xs: calc(8px * var(--density-factor) * var(--ui-scale));
   --space-sm: calc(12px * var(--density-factor) * var(--ui-scale));
   --space-md: calc(16px * var(--density-factor) * var(--ui-scale));
-  --space-lg: calc(20px * var(--density-factor) * var(--ui-scale));
-  --space-xl: calc(24px * var(--density-factor) * var(--ui-scale));
-  --space-2xl: calc(28px * var(--density-factor) * var(--ui-scale));
-  --space-3xl: calc(34px * var(--density-factor) * var(--ui-scale));
-  --space-4xl: calc(44px * var(--density-factor) * var(--ui-scale));
-  --space-5xl: calc(56px * var(--density-factor) * var(--ui-scale));
+  --space-lg: calc(22px * var(--density-factor) * var(--ui-scale));
+  --space-xl: calc(26px * var(--density-factor) * var(--ui-scale));
+  --space-2xl: calc(32px * var(--density-factor) * var(--ui-scale));
+  --space-3xl: calc(40px * var(--density-factor) * var(--ui-scale));
+  --space-4xl: calc(52px * var(--density-factor) * var(--ui-scale));
+  --space-5xl: calc(64px * var(--density-factor) * var(--ui-scale));
 
   --space-dynamic-xs: var(--space-xs);
   --space-dynamic-sm: var(--space-sm);
@@ -232,11 +224,11 @@
   --font-md: calc(13px * var(--ui-scale));
   --font-base: calc(14px * var(--ui-scale));
   --font-lg: calc(15px * var(--ui-scale));
-  --font-xl: calc(16px * var(--ui-scale));
-  --font-2xl: calc(19px * var(--ui-scale));
-  --font-3xl: calc(24px * var(--ui-scale));
-  --font-4xl: calc(32px * var(--ui-scale));
-  --font-5xl: calc(40px * var(--ui-scale));
+  --font-xl: calc(17px * var(--ui-scale));
+  --font-2xl: calc(20px * var(--ui-scale));
+  --font-3xl: calc(25px * var(--ui-scale));
+  --font-4xl: calc(34px * var(--ui-scale));
+  --font-5xl: calc(44px * var(--ui-scale));
 
   --weight-regular: 400;
   --weight-medium: 500;
@@ -246,36 +238,106 @@
 
   --line-tight: 1.08;
   --line-snug: 1.22;
-  --line-normal: 1.42;
-  --line-relaxed: 1.62;
+  --line-normal: 1.44;
+  --line-relaxed: 1.64;
 
-  --letter-tight: -0.03em;
+  --letter-tight: -0.032em;
   --letter-normal: 0;
   --letter-wide: 0.02em;
   --letter-wider: 0.08em;
 
 
   /* =========================================================
+     APPLE GLASS PRIMITIVES
+  ========================================================= */
+  --glass-bg:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.090),
+      rgba(255,255,255,.038) 42%,
+      rgba(255,255,255,.022)
+    );
+
+  --glass-bg-soft:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.060),
+      rgba(255,255,255,.026)
+    );
+
+  --glass-bg-strong:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.120),
+      rgba(255,255,255,.052) 48%,
+      rgba(255,255,255,.032)
+    );
+
+  --glass-bg-ultra:
+    radial-gradient(circle at 18% 0%, rgba(255,255,255,.135), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.135), rgba(255,255,255,.042));
+
+  --glass-border: rgba(255,255,255,.105);
+  --glass-border-soft: rgba(255,255,255,.072);
+  --glass-border-strong: rgba(255,255,255,.165);
+
+  --glass-highlight: inset 0 1px 0 rgba(255,255,255,.135);
+  --glass-highlight-strong: inset 0 1px 0 rgba(255,255,255,.190);
+
+  --glass-blur-sm: blur(10px) saturate(1.08);
+  --glass-blur-md: blur(18px) saturate(1.14);
+  --glass-blur-lg: blur(26px) saturate(1.20);
+  --glass-blur-xl: blur(34px) saturate(1.24);
+
+  --glass-shadow-sm:
+    0 10px 26px rgba(0,0,0,.18),
+    0 1px 0 rgba(255,255,255,.035) inset;
+
+  --glass-shadow-md:
+    0 18px 48px rgba(0,0,0,.26),
+    0 1px 0 rgba(255,255,255,.050) inset;
+
+  --glass-shadow-lg:
+    0 28px 80px rgba(0,0,0,.34),
+    0 1px 0 rgba(255,255,255,.060) inset;
+
+  --glass-shadow-xl:
+    0 40px 120px rgba(0,0,0,.44),
+    0 0 0 1px rgba(255,255,255,.035) inset,
+    0 1px 0 rgba(255,255,255,.070) inset;
+
+  --glass-aura-blue: rgba(10,132,255,.18);
+  --glass-aura-cyan: rgba(100,210,255,.12);
+  --glass-aura-purple: rgba(191,90,242,.14);
+  --glass-aura-green: rgba(48,209,88,.10);
+  --glass-aura-white: rgba(255,255,255,.08);
+
+  --glass-noise:
+    radial-gradient(circle at 20% 0%, rgba(255,255,255,.050), transparent 24%),
+    radial-gradient(circle at 80% 14%, rgba(255,255,255,.030), transparent 22%);
+
+
+  /* =========================================================
      BRAND SYSTEM · DARK
   ========================================================= */
-  --accent: #3f3f46;
-  --accent-hover: #4b4b52;
-  --accent-active: #2f2f35;
+  --accent: #0a84ff;
+  --accent-hover: #2997ff;
+  --accent-active: #006edb;
 
-  --accent-2: #52525b;
-  --accent-3: #6b7280;
-  --accent-4: #4b5563;
-  --accent-5: #71717a;
+  --accent-2: #64d2ff;
+  --accent-3: #bf5af2;
+  --accent-4: #30d158;
+  --accent-5: #ffd60a;
 
-  --accent-soft: rgba(63,63,70,.18);
-  --accent-soft-2: rgba(82,82,91,.16);
-  --accent-ghost: rgba(63,63,70,.10);
-  --accent-subtle: rgba(63,63,70,.07);
-  --accent-ring: rgba(99,102,110,.30);
-  --accent-border: rgba(113,113,122,.28);
-  --accent-border-strong: rgba(113,113,122,.42);
-  --accent-glow: rgba(63,63,70,.20);
-  --accent-glow-strong: rgba(63,63,70,.30);
+  --accent-soft: rgba(10,132,255,.18);
+  --accent-soft-2: rgba(100,210,255,.14);
+  --accent-ghost: rgba(10,132,255,.10);
+  --accent-subtle: rgba(10,132,255,.065);
+  --accent-ring: rgba(10,132,255,.34);
+  --accent-border: rgba(10,132,255,.30);
+  --accent-border-strong: rgba(10,132,255,.48);
+  --accent-glow: rgba(10,132,255,.24);
+  --accent-glow-strong: rgba(10,132,255,.38);
   --accent-contrast: #ffffff;
 
   --brand: var(--accent);
@@ -285,133 +347,146 @@
   --brand-ring: var(--accent-ring);
   --brand-border: var(--accent-border);
 
-  --brand-2: #3f3f46;
-  --brand-2-soft: rgba(63,63,70,.14);
+  --brand-2: var(--accent-2);
+  --brand-2-soft: rgba(100,210,255,.14);
 
-  --brand-3: #52525b;
-  --brand-3-soft: rgba(82,82,91,.14);
+  --brand-3: var(--accent-3);
+  --brand-3-soft: rgba(191,90,242,.14);
 
-  --brand-4: #71717a;
-  --brand-4-soft: rgba(113,113,122,.14);
+  --brand-4: var(--accent-4);
+  --brand-4-soft: rgba(48,209,88,.14);
 
-  --brand-5: #a1a1aa;
-  --brand-5-soft: rgba(161,161,170,.14);
+  --brand-5: var(--accent-5);
+  --brand-5-soft: rgba(255,214,10,.14);
 
 
   /* =========================================================
      BACKGROUND / ATMOSPHERE · DARK
   ========================================================= */
-  --main-bg: #1f1f1f;
-  --main-bg-2: #232323;
-  --main-bg-3: #282828;
-  --body-fallback: #1f1f1f;
+  --main-bg: #08090d;
+  --main-bg-2: #0d0f17;
+  --main-bg-3: #131621;
+  --body-fallback: #08090d;
 
   --body-bg:
-    radial-gradient(circle at 0% 0%, rgba(255,255,255,.018), transparent 24%),
-    radial-gradient(circle at 100% 0%, rgba(255,255,255,.012), transparent 20%),
-    radial-gradient(circle at 50% 100%, rgba(255,255,255,.010), transparent 22%),
-    linear-gradient(180deg, #242424 0%, #1f1f1f 100%);
+    radial-gradient(circle at 10% 0%, rgba(10,132,255,.145), transparent 28%),
+    radial-gradient(circle at 88% 2%, rgba(191,90,242,.115), transparent 28%),
+    radial-gradient(circle at 54% 100%, rgba(100,210,255,.070), transparent 30%),
+    linear-gradient(180deg, #11131c 0%, #090a0f 54%, #07080c 100%);
 
   --gradient-main:
-    linear-gradient(180deg, #242424 0%, #1f1f1f 100%);
+    linear-gradient(180deg, #11131c 0%, #08090d 100%);
 
   --gradient-overlay:
-    radial-gradient(circle at 20% 20%, rgba(255,255,255,.018), transparent 28%),
-    radial-gradient(circle at 80% 0%, rgba(255,255,255,.010), transparent 22%);
+    radial-gradient(circle at 20% 12%, rgba(10,132,255,.100), transparent 30%),
+    radial-gradient(circle at 80% 0%, rgba(191,90,242,.080), transparent 26%),
+    linear-gradient(180deg, rgba(255,255,255,.020), transparent 34%);
 
   --gradient-accent:
-    linear-gradient(135deg, #55555d 0%, #3f3f46 55%, #2f2f35 100%);
+    linear-gradient(135deg, #64d2ff 0%, #0a84ff 42%, #bf5af2 100%);
 
   --gradient-accent-soft:
-    linear-gradient(135deg, rgba(82,82,91,.18) 0%, rgba(63,63,70,.14) 100%);
+    linear-gradient(135deg, rgba(100,210,255,.18) 0%, rgba(10,132,255,.13) 52%, rgba(191,90,242,.13) 100%);
 
   --gradient-success:
-    linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
+    linear-gradient(180deg, #30d158 0%, #248a3d 100%);
 
   --gradient-warning:
-    linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+    linear-gradient(180deg, #ffd60a 0%, #ff9f0a 100%);
 
   --gradient-error:
-    linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+    linear-gradient(180deg, #ff453a 0%, #d70015 100%);
 
   --app-noise:
-    radial-gradient(circle at 50% 0%, rgba(255,255,255,.014), transparent 56%);
+    radial-gradient(circle at 50% 0%, rgba(255,255,255,.030), transparent 58%);
 
   --panel-noise:
-    linear-gradient(180deg, rgba(255,255,255,.014), transparent 34%);
+    linear-gradient(180deg, rgba(255,255,255,.044), transparent 36%);
 
   --glass-shine:
-    linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%);
+    linear-gradient(180deg, rgba(255,255,255,.145), rgba(255,255,255,0) 34%);
 
 
   /* =========================================================
      SURFACE SYSTEM · DARK
   ========================================================= */
-  --surface-0: #1f1f1f;
-  --surface-1: #262626;
-  --surface-2: #2b2b2b;
-  --surface-3: #303030;
-  --surface-4: #383838;
-  --surface-5: #424242;
+  --surface-0: #08090d;
+  --surface-1: #10131a;
+  --surface-2: #151923;
+  --surface-3: #1b202c;
+  --surface-4: #252b39;
+  --surface-5: #303848;
 
   --surface: var(--surface-1);
   --surface-soft: var(--surface-2);
   --surface-strong: var(--surface-3);
 
-  --surface-elevated: rgba(39,39,42,.88);
-  --surface-elevated-strong: rgba(44,44,48,.94);
+  --surface-elevated: rgba(21,25,35,.72);
+  --surface-elevated-strong: rgba(27,32,44,.84);
 
   --surface-raised: var(--surface-elevated);
   --surface-raised-strong: var(--surface-elevated-strong);
 
-  --surface-glass: rgba(255,255,255,.030);
-  --surface-glass-strong: rgba(255,255,255,.048);
-  --surface-glass-accent: rgba(82,82,91,.08);
+  --surface-glass: rgba(255,255,255,.060);
+  --surface-glass-strong: rgba(255,255,255,.092);
+  --surface-glass-accent: rgba(10,132,255,.090);
 
-  --surface-hover: rgba(255,255,255,.034);
-  --surface-hover-strong: rgba(255,255,255,.050);
-  --surface-active: rgba(255,255,255,.066);
-  --surface-selected: rgba(113,113,122,.12);
-  --surface-disabled: rgba(255,255,255,.018);
+  --surface-hover: rgba(255,255,255,.078);
+  --surface-hover-strong: rgba(255,255,255,.115);
+  --surface-active: rgba(255,255,255,.145);
+  --surface-selected: rgba(10,132,255,.18);
+  --surface-disabled: rgba(255,255,255,.030);
 
-  --dropdown-bg: rgba(38,38,40,.98);
+  --dropdown-bg:
+    var(--glass-bg-strong),
+    rgba(20,24,33,.92);
+
   --dropdown-bg-legacy: var(--dropdown-bg);
 
-  --popover-bg: rgba(38,38,40,.98);
-  --modal-bg: rgba(32,32,35,.96);
-  --drawer-bg: rgba(32,32,35,.96);
-  --tooltip-bg: #242427;
+  --popover-bg:
+    var(--glass-bg-strong),
+    rgba(20,24,33,.92);
+
+  --modal-bg:
+    var(--glass-bg-ultra),
+    rgba(14,17,24,.90);
+
+  --drawer-bg:
+    var(--glass-bg-strong),
+    rgba(14,17,24,.92);
+
+  --tooltip-bg: rgba(20,24,33,.96);
   --tooltip-text: #ffffff;
-  --backdrop-bg: rgba(10,10,12,.68);
+  --backdrop-bg: rgba(2,4,10,.62);
 
 
   /* =========================================================
      BORDER SYSTEM · DARK
   ========================================================= */
-  --border-soft: rgba(255,255,255,.05);
-  --border-default: rgba(255,255,255,.082);
-  --border-strong: rgba(255,255,255,.12);
-  --border-stronger: rgba(255,255,255,.16);
-  --border-glass: rgba(255,255,255,.07);
+  --border-soft: rgba(255,255,255,.075);
+  --border-default: rgba(255,255,255,.105);
+  --border-strong: rgba(255,255,255,.155);
+  --border-stronger: rgba(255,255,255,.220);
+  --border-glass: var(--glass-border);
 
-  --border-accent: rgba(113,113,122,.30);
-  --border-accent-strong: rgba(113,113,122,.42);
-  --border-success: rgba(34,197,94,.30);
-  --border-warning: rgba(245,158,11,.30);
-  --border-error: rgba(239,68,68,.30);
-  --border-info: rgba(148,163,184,.28);
+  --border-accent: rgba(10,132,255,.34);
+  --border-accent-strong: rgba(10,132,255,.52);
+  --border-success: rgba(48,209,88,.34);
+  --border-warning: rgba(255,214,10,.32);
+  --border-error: rgba(255,69,58,.36);
+  --border-info: rgba(100,210,255,.30);
 
 
   /* =========================================================
      TEXT SYSTEM · DARK
   ========================================================= */
-  --text: #f5f5f5;
+  --text: rgba(255,255,255,.92);
   --text-strong: #ffffff;
-  --text-soft: rgba(245,245,245,.88);
-  --text-muted: rgba(245,245,245,.70);
-  --text-dim: rgba(245,245,245,.50);
-  --text-faint: rgba(245,245,245,.34);
-  --text-disabled: rgba(245,245,245,.22);
+  --text-soft: rgba(255,255,255,.84);
+  --text-muted: rgba(255,255,255,.66);
+  --text-dim: rgba(255,255,255,.47);
+  --text-faint: rgba(255,255,255,.31);
+  --text-disabled: rgba(255,255,255,.22);
 
   --text-primary: var(--text);
   --text-secondary: var(--text-muted);
@@ -419,10 +494,10 @@
   --text-quaternary: var(--text-faint);
 
   --text-on-accent: #ffffff;
-  --text-on-light: #18181b;
+  --text-on-light: #101218;
 
-  --link: #d4d4d8;
-  --link-hover: #f4f4f5;
+  --link: #64d2ff;
+  --link-hover: #a6e7ff;
 
   --muted: var(--text-muted);
   --dim: var(--text-dim);
@@ -431,36 +506,36 @@
   /* =========================================================
      STATUS SYSTEM · DARK
   ========================================================= */
-  --success: #22c55e;
-  --success-hover: #16a34a;
-  --success-soft: rgba(34,197,94,.14);
-  --success-bg: rgba(34,197,94,.10);
-  --success-strong: var(--success);
+  --success: #30d158;
+  --success-hover: #32e66b;
+  --success-soft: rgba(48,209,88,.16);
+  --success-bg: rgba(48,209,88,.105);
+  --success-strong: #32e66b;
 
-  --warning: #f59e0b;
-  --warning-hover: #d97706;
-  --warning-soft: rgba(245,158,11,.14);
-  --warning-bg: rgba(245,158,11,.10);
-  --warning-strong: var(--warning);
+  --warning: #ffd60a;
+  --warning-hover: #ffe45c;
+  --warning-soft: rgba(255,214,10,.16);
+  --warning-bg: rgba(255,214,10,.105);
+  --warning-strong: #ffe45c;
 
-  --error: #ef4444;
-  --error-hover: #dc2626;
-  --error-soft: rgba(239,68,68,.14);
-  --error-bg: rgba(239,68,68,.10);
-  --error-strong: var(--error);
+  --error: #ff453a;
+  --error-hover: #ff6961;
+  --error-soft: rgba(255,69,58,.16);
+  --error-bg: rgba(255,69,58,.105);
+  --error-strong: #ff6961;
 
   --danger: var(--error);
   --danger-hover: var(--error-hover);
   --danger-soft: var(--error-soft);
   --danger-bg: var(--error-bg);
   --danger-border: var(--border-error);
-  --danger-strong: var(--error);
+  --danger-strong: var(--error-strong);
 
-  --info: #94a3b8;
-  --info-hover: #cbd5e1;
-  --info-soft: rgba(148,163,184,.14);
-  --info-bg: rgba(148,163,184,.10);
-  --info-strong: var(--info);
+  --info: #64d2ff;
+  --info-hover: #a6e7ff;
+  --info-soft: rgba(100,210,255,.16);
+  --info-bg: rgba(100,210,255,.105);
+  --info-strong: #a6e7ff;
 
   --positive: var(--success);
   --positive-hover: var(--success-hover);
@@ -468,59 +543,53 @@
   --positive-bg: var(--success-bg);
   --positive-border: var(--border-success);
 
-  --neutral: var(--accent-3);
-  --neutral-soft: rgba(148,163,184,.14);
-  --neutral-bg: rgba(148,163,184,.10);
-  --neutral-border: rgba(148,163,184,.24);
+  --neutral: rgba(255,255,255,.62);
+  --neutral-soft: rgba(255,255,255,.12);
+  --neutral-bg: rgba(255,255,255,.072);
+  --neutral-border: rgba(255,255,255,.16);
 
 
   /* =========================================================
      SHADOW SYSTEM · DARK
   ========================================================= */
-  --shadow-xs: 0 2px 8px rgba(0,0,0,.12);
-  --shadow-sm: 0 6px 14px rgba(0,0,0,.16);
-  --shadow-md: 0 14px 30px rgba(0,0,0,.22);
-  --shadow-lg: 0 20px 46px rgba(0,0,0,.28);
-  --shadow-xl: 0 28px 72px rgba(0,0,0,.36);
+  --shadow-xs: 0 2px 8px rgba(0,0,0,.18);
+  --shadow-sm: 0 8px 20px rgba(0,0,0,.22);
+  --shadow-md: 0 16px 38px rgba(0,0,0,.28);
+  --shadow-lg: 0 26px 64px rgba(0,0,0,.36);
+  --shadow-xl: 0 40px 100px rgba(0,0,0,.48);
 
-  --shadow-soft: 0 8px 18px rgba(0,0,0,.13);
-  --shadow-strong: 0 24px 64px rgba(0,0,0,.38);
+  --shadow-soft: var(--glass-shadow-sm);
+  --shadow-strong: var(--glass-shadow-lg);
 
-  --shadow-card:
-    0 16px 36px rgba(0,0,0,.24);
-
-  --shadow-panel:
-    0 8px 20px rgba(0,0,0,.14);
-
-  --shadow-dropdown:
-    0 22px 54px rgba(0,0,0,.34),
-    0 8px 18px rgba(0,0,0,.20);
-
-  --shadow-modal:
-    0 34px 84px rgba(0,0,0,.40);
+  --shadow-card: var(--glass-shadow-md);
+  --shadow-panel: var(--glass-shadow-sm);
+  --shadow-dropdown: var(--glass-shadow-lg);
+  --shadow-modal: var(--glass-shadow-xl);
 
   --shadow-glow:
-    0 0 0 1px rgba(255,255,255,.025),
-    0 16px 36px rgba(0,0,0,.16);
+    0 0 0 1px rgba(255,255,255,.045),
+    0 18px 44px rgba(0,0,0,.22),
+    0 0 42px rgba(10,132,255,.075);
 
   --shadow-glow-cyan:
-    0 0 0 1px rgba(255,255,255,.02),
-    0 16px 36px rgba(0,0,0,.14);
+    0 0 0 1px rgba(255,255,255,.040),
+    0 18px 44px rgba(0,0,0,.20),
+    0 0 42px rgba(100,210,255,.085);
 
   --shadow-inner:
-    inset 0 1px 0 rgba(255,255,255,.04);
+    inset 0 1px 0 rgba(255,255,255,.060);
 
 
   /* =========================================================
      BLUR / MOTION
   ========================================================= */
-  --blur-sm: blur(8px);
-  --blur-md: blur(12px);
-  --blur-lg: blur(18px);
-  --blur-xl: blur(24px);
+  --blur-sm: blur(10px);
+  --blur-md: blur(18px);
+  --blur-lg: blur(26px);
+  --blur-xl: blur(34px);
 
-  --saturate-soft: saturate(1.04);
-  --saturate-strong: saturate(1.12);
+  --saturate-soft: saturate(1.10);
+  --saturate-strong: saturate(1.22);
 
   --ease-out: cubic-bezier(.22,1,.36,1);
   --ease-in: cubic-bezier(.4,0,1,1);
@@ -536,10 +605,10 @@
   /* =========================================================
      FOCUS / SELECTION
   ========================================================= */
-  --focus-ring: 0 0 0 4px rgba(113,113,122,.16);
-  --focus-ring-strong: 0 0 0 4px rgba(113,113,122,.24);
+  --focus-ring: 0 0 0 4px rgba(10,132,255,.20);
+  --focus-ring-strong: 0 0 0 4px rgba(10,132,255,.32);
 
-  --selection-bg: rgba(113,113,122,.28);
+  --selection-bg: rgba(10,132,255,.38);
   --selection-text: #ffffff;
 
 
@@ -549,41 +618,41 @@
   --scrollbar-size: 10px;
   --scrollbar-size-sm: 6px;
   --scrollbar-track: transparent;
-  --scrollbar-thumb: rgba(255,255,255,.12);
-  --scrollbar-thumb-hover: rgba(255,255,255,.18);
+  --scrollbar-thumb: rgba(255,255,255,.14);
+  --scrollbar-thumb-hover: rgba(255,255,255,.24);
 
 
   /* =========================================================
      CARD / PANEL / BLOCK
   ========================================================= */
   --card-bg:
-    linear-gradient(180deg, rgba(255,255,255,.020) 0%, rgba(255,255,255,.008) 100%),
-    var(--surface-elevated);
+    var(--glass-bg),
+    rgba(18,22,31,.66);
 
   --card-bg-hover:
-    linear-gradient(180deg, rgba(255,255,255,.028) 0%, rgba(255,255,255,.010) 100%),
-    rgba(45,45,48,.92);
+    var(--glass-bg-strong),
+    rgba(24,29,40,.76);
 
-  --card-border: var(--border-default);
-  --card-border-hover: var(--border-strong);
-  --card-highlight: inset 0 1px 0 rgba(255,255,255,.045);
+  --card-border: var(--glass-border);
+  --card-border-hover: var(--glass-border-strong);
+  --card-highlight: var(--glass-highlight);
   --card-shadow: var(--shadow-card);
 
   --panel-bg:
-    linear-gradient(180deg, rgba(255,255,255,.018) 0%, rgba(255,255,255,.008) 100%),
-    var(--surface-2);
+    var(--glass-bg-soft),
+    rgba(16,19,27,.62);
 
   --panel-bg-hover:
-    linear-gradient(180deg, rgba(255,255,255,.026) 0%, rgba(255,255,255,.010) 100%),
-    #303034;
+    var(--glass-bg),
+    rgba(22,27,38,.72);
 
-  --panel-border: var(--border-soft);
-  --panel-border-hover: var(--border-default);
+  --panel-border: var(--glass-border-soft);
+  --panel-border-hover: var(--glass-border);
   --panel-shadow: var(--shadow-panel);
 
-  --block-bg: rgba(255,255,255,.022);
-  --block-bg-hover: rgba(255,255,255,.036);
-  --block-border: rgba(255,255,255,.052);
+  --block-bg: rgba(255,255,255,.054);
+  --block-bg-hover: rgba(255,255,255,.078);
+  --block-border: rgba(255,255,255,.084);
 
 
   /* =========================================================
@@ -593,30 +662,40 @@
   --input-height-sm: calc(36px * var(--ui-scale));
   --input-height-lg: calc(50px * var(--ui-scale));
 
-  --input-bg: rgba(255,255,255,.028);
-  --input-bg-hover: rgba(255,255,255,.040);
-  --input-bg-focus: rgba(255,255,255,.046);
-  --input-disabled-bg: rgba(255,255,255,.016);
+  --input-bg:
+    linear-gradient(180deg, rgba(255,255,255,.064), rgba(255,255,255,.032)),
+    rgba(255,255,255,.030);
 
-  --input-border: rgba(255,255,255,.09);
-  --input-border-hover: rgba(255,255,255,.14);
-  --input-border-focus: rgba(113,113,122,.50);
-  --input-border-error: rgba(239,68,68,.52);
-  --input-border-success: rgba(34,197,94,.48);
+  --input-bg-hover:
+    linear-gradient(180deg, rgba(255,255,255,.078), rgba(255,255,255,.040)),
+    rgba(255,255,255,.040);
+
+  --input-bg-focus:
+    linear-gradient(180deg, rgba(255,255,255,.090), rgba(255,255,255,.050)),
+    rgba(255,255,255,.048);
+
+  --input-disabled-bg: rgba(255,255,255,.020);
+
+  --input-border: rgba(255,255,255,.105);
+  --input-border-hover: rgba(255,255,255,.160);
+  --input-border-focus: rgba(10,132,255,.55);
+  --input-border-error: rgba(255,69,58,.56);
+  --input-border-success: rgba(48,209,88,.52);
 
   --input-text: var(--text);
-  --input-placeholder: rgba(245,245,245,.34);
-  --input-icon: rgba(245,245,245,.50);
+  --input-placeholder: rgba(255,255,255,.38);
+  --input-icon: rgba(255,255,255,.58);
 
   --input-shadow:
-    inset 0 1px 0 rgba(255,255,255,.018);
+    inset 0 1px 0 rgba(255,255,255,.052);
 
   --input-shadow-hover:
-    inset 0 1px 0 rgba(255,255,255,.025);
+    inset 0 1px 0 rgba(255,255,255,.070);
 
   --input-shadow-focus:
-    0 0 0 4px rgba(113,113,122,.14),
-    0 10px 24px rgba(10,10,12,.22);
+    0 0 0 4px rgba(10,132,255,.16),
+    0 16px 34px rgba(0,0,0,.26),
+    inset 0 1px 0 rgba(255,255,255,.090);
 
 
   /* =========================================================
@@ -627,58 +706,68 @@
   --btn-height-lg: calc(48px * var(--ui-scale));
 
   --btn-primary-bg:
-    linear-gradient(180deg, #4a4a51 0%, #3f3f46 100%);
+    linear-gradient(180deg, #2997ff 0%, #0a84ff 48%, #006edb 100%);
 
   --btn-primary-bg-hover:
-    linear-gradient(180deg, #55555d 0%, #48484f 100%);
+    linear-gradient(180deg, #64d2ff 0%, #2997ff 50%, #0a84ff 100%);
 
   --btn-primary-bg-active:
-    linear-gradient(180deg, #3f3f46 0%, #2f2f35 100%);
+    linear-gradient(180deg, #0a84ff 0%, #006edb 100%);
 
   --btn-primary-text: #ffffff;
-  --btn-primary-border: rgba(255,255,255,.05);
+  --btn-primary-border: rgba(255,255,255,.16);
 
   --btn-primary-shadow:
-    0 12px 28px rgba(0,0,0,.22),
-    inset 0 1px 0 rgba(255,255,255,.10);
+    0 16px 36px rgba(10,132,255,.25),
+    0 0 0 1px rgba(255,255,255,.10) inset,
+    inset 0 1px 0 rgba(255,255,255,.20);
 
-  --btn-secondary-bg: rgba(255,255,255,.045);
-  --btn-secondary-bg-hover: rgba(255,255,255,.062);
-  --btn-secondary-bg-active: rgba(255,255,255,.078);
+  --btn-secondary-bg:
+    linear-gradient(180deg, rgba(255,255,255,.088), rgba(255,255,255,.045)),
+    rgba(255,255,255,.040);
+
+  --btn-secondary-bg-hover:
+    linear-gradient(180deg, rgba(255,255,255,.110), rgba(255,255,255,.060)),
+    rgba(255,255,255,.055);
+
+  --btn-secondary-bg-active:
+    linear-gradient(180deg, rgba(255,255,255,.128), rgba(255,255,255,.072)),
+    rgba(255,255,255,.066);
+
   --btn-secondary-text: var(--text);
-  --btn-secondary-border: rgba(255,255,255,.09);
-  --btn-secondary-shadow: 0 6px 16px rgba(0,0,0,.12);
+  --btn-secondary-border: rgba(255,255,255,.115);
+  --btn-secondary-shadow: var(--glass-shadow-sm);
 
-  --btn-ghost-bg: rgba(255,255,255,.022);
-  --btn-ghost-bg-hover: rgba(255,255,255,.046);
-  --btn-ghost-bg-active: rgba(255,255,255,.062);
+  --btn-ghost-bg: rgba(255,255,255,.028);
+  --btn-ghost-bg-hover: rgba(255,255,255,.066);
+  --btn-ghost-bg-active: rgba(255,255,255,.090);
   --btn-ghost-text: var(--text-muted);
-  --btn-ghost-border: rgba(255,255,255,.07);
+  --btn-ghost-border: rgba(255,255,255,.075);
 
   --btn-danger-bg:
-    linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+    linear-gradient(180deg, #ff6961 0%, #ff453a 48%, #d70015 100%);
 
   --btn-danger-bg-hover:
-    linear-gradient(180deg, #f05252 0%, #b91c1c 100%);
+    linear-gradient(180deg, #ff8a83 0%, #ff453a 100%);
 
   --btn-danger-bg-active:
-    linear-gradient(180deg, #dc2626 0%, #991b1b 100%);
+    linear-gradient(180deg, #ff453a 0%, #b00012 100%);
 
   --btn-danger-text: #ffffff;
 
   --btn-danger-shadow:
-    0 10px 24px rgba(239,68,68,.20),
-    inset 0 1px 0 rgba(255,255,255,.10);
+    0 14px 32px rgba(255,69,58,.24),
+    inset 0 1px 0 rgba(255,255,255,.18);
 
 
   /* =========================================================
      SHELL TOKENS
   ========================================================= */
-  --shell-blur: var(--blur-lg);
-  --shell-border: var(--border-soft);
+  --shell-blur: var(--glass-blur-lg);
+  --shell-border: var(--glass-border-soft);
 
   --shell-surface:
-    linear-gradient(180deg, rgba(255,255,255,.016), rgba(255,255,255,.006)),
+    var(--glass-bg-soft),
     transparent;
 
   --shell-transition:
@@ -699,8 +788,9 @@
   --shell-content-max: var(--content-max);
 
   --shell-route-auth-bg:
-    radial-gradient(circle at 18% 14%, color-mix(in srgb, var(--accent), transparent 88%), transparent 30%),
-    radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--info), transparent 90%), transparent 30%),
+    radial-gradient(circle at 18% 14%, rgba(10,132,255,.18), transparent 32%),
+    radial-gradient(circle at 82% 18%, rgba(191,90,242,.15), transparent 32%),
+    radial-gradient(circle at 50% 100%, rgba(100,210,255,.08), transparent 32%),
     var(--body-bg);
 
   --shell-route-app-bg: var(--body-bg);
@@ -713,33 +803,33 @@
      SIDEBAR SYSTEM · DARK BASE
   ========================================================= */
   --sidebar-bg:
-    linear-gradient(180deg, rgba(255,255,255,.018), rgba(255,255,255,.006)),
-    rgba(30,30,32,.94);
+    linear-gradient(180deg, rgba(255,255,255,.070), rgba(255,255,255,.026)),
+    rgba(17,19,26,.86);
 
   --sidebar-bg-strong:
-    linear-gradient(180deg, rgba(255,255,255,.026), rgba(255,255,255,.008)),
-    rgba(26,26,28,.98);
+    linear-gradient(180deg, rgba(255,255,255,.095), rgba(255,255,255,.035)),
+    rgba(15,17,23,.94);
 
-  --sidebar-border: rgba(255,255,255,.055);
+  --sidebar-border: rgba(255,255,255,.090);
 
   --sidebar-shadow:
-    0 20px 48px rgba(0,0,0,.30),
-    inset -1px 0 0 rgba(255,255,255,.020);
+    0 24px 70px rgba(0,0,0,.34),
+    inset -1px 0 0 rgba(255,255,255,.050);
 
   --sidebar-hover:
-    linear-gradient(180deg, rgba(255,255,255,.046), rgba(255,255,255,.030));
+    linear-gradient(180deg, rgba(255,255,255,.092), rgba(255,255,255,.050));
 
   --sidebar-active:
-    linear-gradient(180deg, rgba(255,255,255,.072), rgba(255,255,255,.046));
+    linear-gradient(180deg, rgba(255,255,255,.125), rgba(255,255,255,.070));
 
   --sidebar-active-hover:
-    linear-gradient(180deg, rgba(255,255,255,.092), rgba(255,255,255,.060));
+    linear-gradient(180deg, rgba(255,255,255,.150), rgba(255,255,255,.088));
 
-  --sidebar-active-border: rgba(255,255,255,.10);
+  --sidebar-active-border: rgba(255,255,255,.155);
 
-  --sidebar-text: rgba(245,245,245,.76);
+  --sidebar-text: rgba(255,255,255,.76);
   --sidebar-text-active: #ffffff;
-  --sidebar-icon: rgba(245,245,245,.60);
+  --sidebar-icon: rgba(255,255,255,.60);
   --sidebar-icon-active: #ffffff;
 
   --sidebar-safe-top: var(--app-safe-top);
@@ -757,8 +847,8 @@
   --sidebar-logo-img-size: calc(24px * var(--ui-scale));
   --sidebar-logo-dark-display: block;
   --sidebar-logo-light-display: none;
-  --sidebar-logo-opacity: .96;
-  --sidebar-logo-filter: none;
+  --sidebar-logo-opacity: .98;
+  --sidebar-logo-filter: drop-shadow(0 8px 18px rgba(0,0,0,.28));
 
   --sidebar-item-height: calc(40px * var(--ui-scale));
   --sidebar-item-padding-x: calc(11px * var(--ui-scale));
@@ -781,8 +871,8 @@
   --sidebar-footer-height: calc(68px * var(--ui-scale));
 
   --sidebar-footer-bg:
-    linear-gradient(180deg, rgba(255,255,255,.020), rgba(255,255,255,.010)),
-    rgba(255,255,255,.018);
+    linear-gradient(180deg, rgba(255,255,255,.060), rgba(255,255,255,.025)),
+    rgba(255,255,255,.032);
 
   --sidebar-footer-border: var(--sidebar-border);
 
@@ -813,21 +903,21 @@
   --sidebar-dropdown-radius: calc(var(--dropdown-radius) + 4px);
 
   --sidebar-dropdown-bg:
-    radial-gradient(circle at 14% 0%, rgba(255,255,255,.055), transparent 34%),
-    linear-gradient(180deg, rgba(255,255,255,.070), rgba(255,255,255,.026)),
-    rgba(34,34,37,.985);
+    radial-gradient(circle at 16% 0%, rgba(255,255,255,.145), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.125), rgba(255,255,255,.040)),
+    rgba(18,22,31,.94);
 
-  --sidebar-dropdown-border: rgba(255,255,255,.085);
+  --sidebar-dropdown-border: rgba(255,255,255,.135);
 
   --sidebar-dropdown-shadow:
-    0 22px 54px rgba(0,0,0,.34),
-    0 8px 18px rgba(0,0,0,.20),
-    inset 0 1px 0 rgba(255,255,255,.075);
+    0 24px 72px rgba(0,0,0,.38),
+    0 8px 18px rgba(0,0,0,.22),
+    inset 0 1px 0 rgba(255,255,255,.120);
 
-  --sidebar-dropdown-text: rgba(245,245,245,.86);
+  --sidebar-dropdown-text: rgba(255,255,255,.86);
   --sidebar-dropdown-text-strong: #ffffff;
-  --sidebar-dropdown-text-muted: rgba(245,245,245,.58);
-  --sidebar-dropdown-icon: rgba(245,245,245,.62);
+  --sidebar-dropdown-text-muted: rgba(255,255,255,.58);
+  --sidebar-dropdown-icon: rgba(255,255,255,.62);
 
   --sidebar-dropdown-item-height: calc(42px * var(--ui-scale));
   --sidebar-dropdown-item-radius: calc(12px * var(--ui-scale));
@@ -840,28 +930,28 @@
   --sidebar-dropdown-item-label-padding-end: 2px;
 
   --sidebar-dropdown-item-hover:
-    linear-gradient(180deg, rgba(255,255,255,.070), rgba(255,255,255,.040));
+    linear-gradient(180deg, rgba(255,255,255,.110), rgba(255,255,255,.060));
 
   --sidebar-dropdown-item-active:
-    linear-gradient(180deg, rgba(255,255,255,.095), rgba(255,255,255,.052));
+    linear-gradient(180deg, rgba(255,255,255,.140), rgba(255,255,255,.074));
 
-  --sidebar-dropdown-separator: rgba(255,255,255,.080);
+  --sidebar-dropdown-separator: rgba(255,255,255,.105);
 
-  --sidebar-dropdown-danger: #ff5c6c;
-  --sidebar-dropdown-danger-bg: rgba(255,92,108,.105);
-  --sidebar-dropdown-danger-hover: rgba(255,92,108,.145);
+  --sidebar-dropdown-danger: #ff6961;
+  --sidebar-dropdown-danger-bg: rgba(255,105,97,.110);
+  --sidebar-dropdown-danger-hover: rgba(255,105,97,.155);
 
 
   /* =========================================================
      TOPBAR SYSTEM · DARK BASE
   ========================================================= */
   --topbar-bg:
-    linear-gradient(180deg, rgba(255,255,255,.018), rgba(255,255,255,.006)),
-    rgba(31,31,31,.78);
+    linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.020)),
+    rgba(10,12,18,.70);
 
-  --topbar-border: rgba(255,255,255,.055);
-  --topbar-shadow: 0 10px 24px rgba(0,0,0,.16);
-  --topbar-blur: blur(16px);
+  --topbar-border: rgba(255,255,255,.085);
+  --topbar-shadow: 0 12px 34px rgba(0,0,0,.20);
+  --topbar-blur: blur(22px) saturate(1.16);
 
   --topbar-safe-top: var(--app-safe-top);
   --topbar-safe-right: var(--app-safe-right);
@@ -871,44 +961,45 @@
 
   --topbar-button-size: calc(36px * var(--ui-scale));
   --topbar-button-radius: calc(12px * var(--ui-scale));
-  --topbar-button-bg: rgba(255,255,255,.026);
-  --topbar-button-bg-hover: rgba(255,255,255,.048);
-  --topbar-button-border: rgba(255,255,255,.060);
+  --topbar-button-bg: rgba(255,255,255,.050);
+  --topbar-button-bg-hover: rgba(255,255,255,.085);
+  --topbar-button-border: rgba(255,255,255,.090);
 
   --topbar-title-size: var(--font-lg);
   --topbar-title-weight: var(--weight-bold);
   --topbar-subtitle-size: var(--font-xs);
 
   --topbar-search-height: calc(46px * var(--ui-scale));
-  --topbar-search-max-width: calc(560px * var(--ui-scale));
+  --topbar-search-max-width: calc(580px * var(--ui-scale));
   --topbar-search-radius: var(--radius-pill);
 
-  --topbar-search-bg: rgba(255,255,255,.032);
-  --topbar-search-bg-hover: rgba(255,255,255,.046);
-  --topbar-search-bg-focus: rgba(255,255,255,.054);
-  --topbar-search-border: rgba(255,255,255,.082);
+  --topbar-search-bg:
+    linear-gradient(180deg, rgba(255,255,255,.090), rgba(255,255,255,.035)),
+    rgba(255,255,255,.030);
+
+  --topbar-search-bg-hover:
+    linear-gradient(180deg, rgba(255,255,255,.115), rgba(255,255,255,.048)),
+    rgba(255,255,255,.040);
+
+  --topbar-search-bg-focus:
+    linear-gradient(180deg, rgba(255,255,255,.135), rgba(255,255,255,.060)),
+    rgba(255,255,255,.052);
+
+  --topbar-search-border: rgba(255,255,255,.115);
 
   --topbar-search-results-gap-token: 5px;
   --topbar-search-results-offset: var(--topbar-search-results-gap-token);
-  --topbar-search-results-max-height: calc(380px * var(--ui-scale));
-  --topbar-search-result-bg: var(--dropdown-bg);
-  --topbar-search-result-border: var(--border-default);
-  --topbar-search-result-shadow: var(--shadow-xl);
+  --topbar-search-results-max-height: calc(400px * var(--ui-scale));
+  --topbar-search-result-bg: var(--popover-bg);
+  --topbar-search-result-border: var(--glass-border);
+  --topbar-search-result-shadow: var(--glass-shadow-xl);
 
-  --topbar-overlay-accent: rgba(255,255,255,.018);
-  --topbar-overlay-shine: rgba(255,255,255,.030);
+  --topbar-overlay-accent: rgba(10,132,255,.08);
+  --topbar-overlay-shine: rgba(255,255,255,.070);
 
 
   /* =========================================================
      TOPBAR SEARCH · COMMAND PALETTE TOKENS
-
-     Contrato:
-     - El search no cambia de alto al abrir.
-     - El search no baja al abrir.
-     - El search se centra/alarga desde topbar.css.
-     - El dropdown usa el ancho visual del search.
-     - El glass sólo se pinta sobre .main-content.
-     - Sidebar/topbar quedan nítidos.
   ========================================================= */
   --topbar-search-glass-z: var(--z-search-glass);
   --topbar-search-texture-z: var(--z-search-texture);
@@ -918,30 +1009,18 @@
   --topbar-search-glass-bg:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--main-bg), transparent 18%),
-      color-mix(in srgb, var(--main-bg), transparent 8%)
+      rgba(8,9,13,.72),
+      rgba(8,9,13,.86)
     );
 
   --topbar-search-glass-aura:
-    radial-gradient(
-      circle at 50% 0%,
-      color-mix(in srgb, var(--accent), transparent 84%),
-      transparent 34%
-    ),
-    radial-gradient(
-      circle at 18% 22%,
-      color-mix(in srgb, var(--info), transparent 90%),
-      transparent 28%
-    ),
-    radial-gradient(
-      circle at 82% 22%,
-      color-mix(in srgb, var(--accent-3), transparent 91%),
-      transparent 30%
-    );
+    radial-gradient(circle at 50% 0%, rgba(10,132,255,.17), transparent 36%),
+    radial-gradient(circle at 18% 22%, rgba(100,210,255,.12), transparent 30%),
+    radial-gradient(circle at 82% 22%, rgba(191,90,242,.13), transparent 32%);
 
-  --topbar-search-glass-blur: blur(18px) saturate(1.08);
+  --topbar-search-glass-blur: blur(24px) saturate(1.16);
 
-  --topbar-search-command-width: min(860px, calc(100vw - 56px));
+  --topbar-search-command-width: min(880px, calc(100vw - 56px));
   --topbar-search-command-offset-top:
     calc(
       var(--topbar-safe-top) +
@@ -972,13 +1051,13 @@
      TABLE / DATA UI
   ========================================================= */
   --table-bg: transparent;
-  --table-head-bg: rgba(255,255,255,.020);
+  --table-head-bg: rgba(255,255,255,.050);
   --table-row-bg: transparent;
-  --table-row-hover: rgba(255,255,255,.024);
-  --table-row-selected: rgba(255,255,255,.040);
+  --table-row-hover: rgba(255,255,255,.060);
+  --table-row-selected: rgba(10,132,255,.115);
 
-  --table-border: rgba(255,255,255,.052);
-  --table-head-border: rgba(255,255,255,.075);
+  --table-border: rgba(255,255,255,.074);
+  --table-head-border: rgba(255,255,255,.105);
 
   --table-cell-padding-y: calc(9px * var(--ui-scale));
   --table-cell-padding-x: calc(11px * var(--ui-scale));
@@ -1011,30 +1090,30 @@
   /* =========================================================
      KPI COLORS
   ========================================================= */
-  --color-iva: #eab308;
-  --color-iva-glow: rgba(234,179,8,.22);
+  --color-iva: #ffd60a;
+  --color-iva-glow: rgba(255,214,10,.24);
 
-  --color-irpf: #a1a1aa;
-  --color-irpf-glow: rgba(161,161,170,.20);
+  --color-irpf: #bf5af2;
+  --color-irpf-glow: rgba(191,90,242,.22);
 
-  --color-beneficio: #22c55e;
-  --color-beneficio-glow: rgba(34,197,94,.22);
+  --color-beneficio: #30d158;
+  --color-beneficio-glow: rgba(48,209,88,.24);
 
-  --color-pendiente: #ef4444;
-  --color-pendiente-glow: rgba(239,68,68,.22);
+  --color-pendiente: #ff453a;
+  --color-pendiente-glow: rgba(255,69,58,.24);
 
-  --color-facturacion: #94a3b8;
-  --color-facturacion-glow: rgba(148,163,184,.22);
+  --color-facturacion: #64d2ff;
+  --color-facturacion-glow: rgba(100,210,255,.24);
 
 
   /* =========================================================
      AVATAR / BADGES / CHIPS
   ========================================================= */
   --avatar-bg:
-    linear-gradient(180deg, #52525b 0%, #3f3f46 100%);
+    linear-gradient(135deg, #64d2ff 0%, #0a84ff 48%, #bf5af2 100%);
 
   --avatar-bg-2:
-    linear-gradient(180deg, #71717a 0%, #52525b 100%);
+    linear-gradient(135deg, #30d158 0%, #64d2ff 50%, #0a84ff 100%);
 
   --avatar-text: #ffffff;
 
@@ -1048,12 +1127,12 @@
   --avatar-size-md: calc(36px * var(--ui-scale));
   --avatar-size-lg: calc(44px * var(--ui-scale));
 
-  --badge-bg: rgba(255,255,255,.048);
-  --badge-border: rgba(255,255,255,.07);
+  --badge-bg: rgba(255,255,255,.078);
+  --badge-border: rgba(255,255,255,.105);
   --badge-text: var(--text-muted);
 
-  --chip-bg: rgba(255,255,255,.034);
-  --chip-border: rgba(255,255,255,.07);
+  --chip-bg: rgba(255,255,255,.070);
+  --chip-border: rgba(255,255,255,.105);
   --chip-text: var(--text-soft);
 
   --chip-height: calc(26px * var(--ui-scale));
@@ -1068,12 +1147,13 @@
   --view-section-gap: var(--space-lg);
 
   --view-hero-bg:
-    linear-gradient(180deg, rgba(255,255,255,.024), rgba(255,255,255,.008)),
-    var(--surface-elevated);
+    radial-gradient(circle at 8% 0%, rgba(10,132,255,.11), transparent 30%),
+    var(--glass-bg),
+    rgba(18,22,31,.66);
 
-  --view-hero-border: var(--border-default);
+  --view-hero-border: var(--glass-border);
   --view-hero-radius: var(--card-radius-lg);
-  --view-hero-shadow: var(--shadow-md);
+  --view-hero-shadow: var(--glass-shadow-md);
 
   --view-title-size: var(--font-3xl);
   --view-title-weight: var(--weight-black);
@@ -1094,24 +1174,27 @@
      AUTH / LOGIN TOKENS
   ========================================================= */
   --auth-max-width: 1080px;
-  --auth-card-width: 420px;
+  --auth-card-width: 430px;
 
   --auth-card-bg:
-    linear-gradient(180deg, rgba(255,255,255,.026) 0%, rgba(255,255,255,.010) 100%),
-    rgba(39,39,42,.88);
+    radial-gradient(circle at 16% 0%, rgba(255,255,255,.115), transparent 34%),
+    var(--glass-bg),
+    rgba(18,22,31,.72);
 
-  --auth-card-border: rgba(255,255,255,.08);
+  --auth-card-border: var(--glass-border);
 
   --auth-card-shadow:
-    0 28px 80px rgba(0,0,0,.42),
-    0 0 0 1px rgba(255,255,255,.025),
-    0 18px 48px rgba(0,0,0,.16);
+    0 34px 100px rgba(0,0,0,.46),
+    0 0 0 1px rgba(255,255,255,.04) inset,
+    inset 0 1px 0 rgba(255,255,255,.090);
 
-  --auth-input-bg: rgba(255,255,255,.030);
-  --auth-input-border: rgba(255,255,255,.10);
-  --auth-input-border-focus: rgba(113,113,122,.48);
+  --auth-input-bg: var(--input-bg);
+  --auth-input-border: var(--input-border);
+  --auth-input-border-focus: var(--input-border-focus);
 
-  --auth-logo-glow: 0 0 36px rgba(255,255,255,.04);
+  --auth-logo-glow:
+    0 0 42px rgba(10,132,255,.12),
+    0 0 72px rgba(191,90,242,.08);
 
 
   /* =========================================================
@@ -1129,31 +1212,31 @@
 
   --ui-toast-loading-ring: rgba(255,255,255,.12);
   --ui-toast-loading-active: var(--accent);
-  --ui-toast-loading-active-2: rgba(113,113,122,.42);
+  --ui-toast-loading-active-2: rgba(100,210,255,.42);
 
   --ui-toast-overlay:
-    linear-gradient(180deg, rgba(255,255,255,.026), rgba(255,255,255,.010));
+    linear-gradient(180deg, rgba(255,255,255,.090), rgba(255,255,255,.034));
 
   --ui-toast-shadow:
-    var(--shadow-lg),
-    0 0 0 1px rgba(255,255,255,.03) inset;
+    var(--glass-shadow-lg),
+    0 0 0 1px rgba(255,255,255,.04) inset;
 
 
   /* =========================================================
      LOADER TOKENS
   ========================================================= */
-  --loader-bg: rgba(31,31,31,.96);
+  --loader-bg: rgba(8,9,13,.96);
   --loader-text: var(--text);
   --loader-ring: rgba(255,255,255,.12);
   --loader-ring-active: var(--accent);
 
-  --loader-card-width: min(360px, calc(100vw - 48px));
-  --loader-card-padding: 28px 26px 24px;
-  --loader-card-radius: 28px;
+  --loader-card-width: min(370px, calc(100vw - 48px));
+  --loader-card-padding: 30px 28px 26px;
+  --loader-card-radius: 30px;
 
-  --loader-brand-size: 74px;
-  --loader-logo-size: 52px;
-  --loader-logo-radius: 18px;
+  --loader-brand-size: 76px;
+  --loader-logo-size: 54px;
+  --loader-logo-radius: 20px;
 
   --loader-progress-height: 7px;
   --loader-progress-radius: var(--radius-pill);
@@ -1162,31 +1245,31 @@
   --loader-text-size: 13px;
   --loader-subtext-size: 11px;
 
-  --loader-backdrop-blur: blur(20px);
-  --loader-card-blur: blur(18px);
+  --loader-backdrop-blur: blur(24px) saturate(1.16);
+  --loader-card-blur: blur(22px) saturate(1.18);
 
   --loader-duration-fade: 220ms;
   --loader-duration-bar: 1.08s;
   --loader-duration-orbit: 2.2s;
 
   --loader-dark-bg:
-    radial-gradient(circle at 18% 14%, rgba(99,102,241,.15), transparent 28%),
-    radial-gradient(circle at 82% 20%, rgba(14,165,233,.10), transparent 26%),
-    radial-gradient(circle at 50% 100%, rgba(168,85,247,.08), transparent 28%),
-    linear-gradient(180deg, rgba(2,6,23,.975), rgba(3,7,18,.985));
+    radial-gradient(circle at 18% 14%, rgba(10,132,255,.18), transparent 30%),
+    radial-gradient(circle at 82% 20%, rgba(191,90,242,.13), transparent 28%),
+    radial-gradient(circle at 50% 100%, rgba(100,210,255,.09), transparent 30%),
+    linear-gradient(180deg, rgba(8,9,13,.975), rgba(4,5,9,.985));
 
   --loader-dark-card:
-    linear-gradient(180deg, rgba(255,255,255,.085), rgba(255,255,255,.035)),
-    rgba(15,23,42,.72);
+    var(--glass-bg-strong),
+    rgba(16,19,27,.74);
 
   --loader-dark-card-strong:
-    linear-gradient(180deg, rgba(255,255,255,.11), rgba(255,255,255,.045)),
-    rgba(15,23,42,.82);
+    var(--glass-bg-ultra),
+    rgba(16,19,27,.84);
 
   --loader-light-bg:
-    radial-gradient(circle at 18% 14%, rgba(111,89,217,.12), transparent 28%),
-    radial-gradient(circle at 82% 20%, rgba(59,130,166,.09), transparent 26%),
-    radial-gradient(circle at 50% 100%, rgba(196,90,134,.07), transparent 28%),
+    radial-gradient(circle at 18% 14%, rgba(10,132,255,.12), transparent 28%),
+    radial-gradient(circle at 82% 20%, rgba(191,90,242,.09), transparent 26%),
+    radial-gradient(circle at 50% 100%, rgba(100,210,255,.07), transparent 28%),
     linear-gradient(180deg, rgba(248,250,252,.96), rgba(241,245,249,.98));
 
   --loader-light-card:
@@ -1201,9 +1284,9 @@
   /* =========================================================
      SKELETON / LOADING CONTENT
   ========================================================= */
-  --skeleton-bg: rgba(255,255,255,.050);
-  --skeleton-bg-strong: rgba(255,255,255,.070);
-  --skeleton-shine: rgba(255,255,255,.095);
+  --skeleton-bg: rgba(255,255,255,.070);
+  --skeleton-bg-strong: rgba(255,255,255,.095);
+  --skeleton-shine: rgba(255,255,255,.155);
 
   --skeleton-radius: var(--radius-md);
   --skeleton-height-sm: calc(10px * var(--ui-scale));
@@ -1225,8 +1308,8 @@
   --state-icon-size: calc(42px * var(--ui-scale));
   --state-icon-radius: calc(16px * var(--ui-scale));
 
-  --state-empty-bg: rgba(148,163,184,.10);
-  --state-empty-border: rgba(148,163,184,.20);
+  --state-empty-bg: rgba(100,210,255,.105);
+  --state-empty-border: rgba(100,210,255,.20);
   --state-empty-icon: var(--info);
 
   --state-error-bg: var(--error-bg);
@@ -1246,7 +1329,7 @@
      MODAL / DRAWER / OVERLAY
   ========================================================= */
   --overlay-bg: var(--backdrop-bg);
-  --overlay-blur: blur(10px);
+  --overlay-blur: blur(14px) saturate(1.12);
   --overlay-enter-duration: var(--duration-normal);
   --overlay-exit-duration: var(--duration-fast);
 
@@ -1300,7 +1383,7 @@
   --switch-width: calc(42px * var(--ui-scale));
   --switch-height: calc(24px * var(--ui-scale));
   --switch-thumb: calc(18px * var(--ui-scale));
-  --switch-bg: rgba(255,255,255,.12);
+  --switch-bg: rgba(255,255,255,.14);
   --switch-bg-checked: var(--accent);
   --switch-border: var(--border-default);
 
@@ -1313,7 +1396,7 @@
   --chart-3: var(--success);
   --chart-4: var(--warning);
   --chart-5: var(--error);
-  --chart-6: var(--accent-5);
+  --chart-6: var(--accent-3);
 
   --chart-grid: var(--border-soft);
   --chart-axis: var(--text-faint);
@@ -1338,8 +1421,8 @@
   --status-syncing-border: var(--border-info);
 
   --status-idle: var(--text-faint);
-  --status-idle-bg: rgba(148,163,184,.08);
-  --status-idle-border: rgba(148,163,184,.16);
+  --status-idle-bg: rgba(255,255,255,.070);
+  --status-idle-border: rgba(255,255,255,.120);
 
 
   /* =========================================================
@@ -1357,10 +1440,6 @@
 
   /* =========================================================
      INCIDENCIAS DETAIL / MODAL TOKENS
-     Compatibilidad temporal:
-     - Se mantienen aquí para no romper módulos existentes.
-     - No seguir ampliando tokens de vista en variables.css.
-     - Nuevas especializaciones deben vivir en views/incidencias/*.css.
   ========================================================= */
   --incidencias-modal-width: min(1160px, calc(100vw - 40px));
   --incidencias-modal-max-height: 92vh;
@@ -1368,25 +1447,26 @@
   --incidencias-modal-padding: var(--space-lg);
   --incidencias-modal-body-gap: var(--space-lg);
 
-  --incidencias-modal-overlay-bg: rgba(0,0,0,.64);
-  --incidencias-modal-overlay-blur: blur(8px);
+  --incidencias-modal-overlay-bg: rgba(2,4,10,.68);
+  --incidencias-modal-overlay-blur: blur(14px) saturate(1.12);
 
   --incidencias-modal-bg:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 8%, transparent), transparent 34%),
-    linear-gradient(180deg, var(--surface-2), var(--surface-1));
+    radial-gradient(circle at top left, rgba(10,132,255,.13), transparent 34%),
+    radial-gradient(circle at 100% 0%, rgba(191,90,242,.10), transparent 30%),
+    var(--glass-bg-strong),
+    rgba(15,18,26,.92);
 
-  --incidencias-modal-border: var(--border-soft);
+  --incidencias-modal-border: var(--glass-border);
 
   --incidencias-modal-shadow:
-    0 34px 84px rgba(0,0,0,.40),
-    0 0 0 1px rgba(255,255,255,.025) inset;
+    var(--glass-shadow-xl);
 
   --incidencias-modal-header-padding: 18px 18px 14px;
   --incidencias-modal-header-gap: var(--space-sm);
-  --incidencias-modal-header-border: var(--border-soft);
+  --incidencias-modal-header-border: var(--glass-border-soft);
 
   --incidencias-modal-avatar-size: 66px;
-  --incidencias-modal-avatar-radius: 19px;
+  --incidencias-modal-avatar-radius: 21px;
 
   --incidencias-modal-title-size: clamp(19px, 1.9vw, 27px);
   --incidencias-modal-title-line: 1.14;
@@ -1400,30 +1480,30 @@
 
   --incidencias-modal-meta-grid-gap: 10px;
   --incidencias-modal-meta-card-padding: 12px;
-  --incidencias-modal-meta-card-radius: 14px;
-  --incidencias-modal-meta-card-bg: var(--surface-1);
-  --incidencias-modal-meta-card-border: var(--border-soft);
+  --incidencias-modal-meta-card-radius: 16px;
+  --incidencias-modal-meta-card-bg: rgba(255,255,255,.060);
+  --incidencias-modal-meta-card-border: var(--glass-border-soft);
 
   --incidencias-modal-card-radius: var(--radius-xl);
 
   --incidencias-modal-card-bg:
-    linear-gradient(180deg, rgba(255,255,255,.035), transparent 95%),
-    var(--surface-glass);
+    var(--glass-bg-soft),
+    rgba(255,255,255,.040);
 
-  --incidencias-modal-card-border: var(--border-soft);
+  --incidencias-modal-card-border: var(--glass-border-soft);
 
   --incidencias-modal-card-hover-border:
-    color-mix(in srgb, var(--accent) 24%, var(--border-soft));
+    color-mix(in srgb, var(--accent) 34%, var(--glass-border));
 
   --incidencias-modal-card-hover-bg:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 95%),
-    var(--surface-glass);
+    linear-gradient(180deg, rgba(10,132,255,.090), rgba(255,255,255,.040)),
+    rgba(255,255,255,.052);
 
   --incidencias-modal-lift-transform: translateY(-2px);
 
   --incidencias-modal-lift-shadow:
-    0 16px 34px rgba(15,23,42,.075),
-    0 0 0 1px rgba(255,255,255,.035) inset;
+    0 18px 42px rgba(0,0,0,.22),
+    0 0 0 1px rgba(255,255,255,.050) inset;
 
   --incidencias-modal-description-min-height: 86px;
   --incidencias-modal-description-padding: 16px 18px;
@@ -1435,11 +1515,11 @@
   --incidencias-modal-composer-gap: 12px;
 
   --incidencias-modal-composer-border:
-    color-mix(in srgb, var(--accent) 24%, var(--border-soft));
+    color-mix(in srgb, var(--accent) 30%, var(--glass-border));
 
   --incidencias-modal-composer-bg:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 92%),
-    var(--surface-1);
+    linear-gradient(180deg, rgba(10,132,255,.115), rgba(255,255,255,.040)),
+    rgba(255,255,255,.050);
 
   --incidencias-modal-textarea-min-height: 138px;
   --incidencias-modal-textarea-padding: 15px 16px;
@@ -1451,27 +1531,27 @@
   --incidencias-modal-upload-gap: 10px;
 
   --incidencias-modal-upload-border:
-    color-mix(in srgb, var(--accent) 22%, var(--border-soft));
+    color-mix(in srgb, var(--accent) 28%, var(--glass-border));
 
   --incidencias-modal-upload-bg:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 90%),
-    var(--surface-glass);
+    linear-gradient(180deg, rgba(10,132,255,.080), rgba(255,255,255,.034)),
+    rgba(255,255,255,.045);
 
   --incidencias-modal-thumb-width: 104px;
   --incidencias-modal-thumb-height: 78px;
   --incidencias-modal-thumb-radius: 16px;
 
   --incidencias-modal-thumb-bg:
-    linear-gradient(180deg, rgba(255,255,255,.055), transparent),
-    var(--surface-1);
+    var(--glass-bg-soft),
+    rgba(255,255,255,.040);
 
-  --incidencias-modal-thumb-border: var(--border-soft);
+  --incidencias-modal-thumb-border: var(--glass-border-soft);
 
   --incidencias-modal-thumb-hover-border:
-    color-mix(in srgb, var(--accent) 28%, var(--border-soft));
+    color-mix(in srgb, var(--accent) 34%, var(--glass-border));
 
   --incidencias-modal-thumb-shadow:
-    0 14px 28px rgba(15,23,42,.10);
+    0 16px 34px rgba(0,0,0,.22);
 
   --incidencias-modal-preview-height: min(64vh, 720px);
   --incidencias-modal-preview-min-height: 430px;
@@ -1479,11 +1559,11 @@
   --incidencias-modal-preview-frame-radius: 15px;
 
   --incidencias-modal-preview-border:
-    color-mix(in srgb, var(--accent) 22%, var(--border-soft));
+    color-mix(in srgb, var(--accent) 30%, var(--glass-border));
 
   --incidencias-modal-preview-bg:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 90%),
-    var(--surface-1);
+    linear-gradient(180deg, rgba(10,132,255,.095), rgba(255,255,255,.040)),
+    rgba(255,255,255,.050);
 
   --incidencias-modal-timeline-radius: 18px;
   --incidencias-modal-timeline-padding: 14px 16px 14px 0;
@@ -1503,10 +1583,6 @@
 
 /* =========================================================
    DENSITY PRESETS
-   Scope controlado:
-   - html/body únicamente.
-   - No usar selector genérico [data-density] para evitar contaminación
-     desde componentes/vistas.
 ========================================================= */
 
 :root[data-density="compact"],
@@ -1535,7 +1611,7 @@ html[data-density="comfortable"],
 body[data-density="comfortable"] {
   --ui-scale: var(--density-ui-scale-comfortable);
   --density-factor: var(--density-comfortable-factor);
-  --content-padding: calc(26px * var(--ui-scale));
+  --content-padding: calc(28px * var(--ui-scale));
   --topbar-height: calc(60px * var(--ui-scale));
   --sidebar-item-height: calc(42px * var(--ui-scale));
   --tablehead-height: calc(46px * var(--ui-scale));
@@ -1544,9 +1620,6 @@ body[data-density="comfortable"] {
 
 /* =========================================================
    ROUTE MODE TOKENS
-   Scope controlado:
-   - html/body únicamente.
-   - Las vistas no deben redefinir el modo global.
 ========================================================= */
 
 html[data-route-mode="auth"],
@@ -1694,20 +1767,20 @@ body[data-route-mode="app"] {
 
 @media (prefers-contrast: more) {
   :root {
-    --border-soft: color-mix(in srgb, var(--text), transparent 78%);
-    --border-default: color-mix(in srgb, var(--text), transparent 66%);
-    --border-strong: color-mix(in srgb, var(--text), transparent 54%);
+    --border-soft: color-mix(in srgb, var(--text), transparent 76%);
+    --border-default: color-mix(in srgb, var(--text), transparent 62%);
+    --border-strong: color-mix(in srgb, var(--text), transparent 48%);
 
-    --text-muted: color-mix(in srgb, var(--text), transparent 18%);
-    --text-dim: color-mix(in srgb, var(--text), transparent 30%);
+    --text-muted: color-mix(in srgb, var(--text), transparent 14%);
+    --text-dim: color-mix(in srgb, var(--text), transparent 24%);
 
     --focus-ring:
-      0 0 0 4px color-mix(in srgb, var(--accent), transparent 50%);
+      0 0 0 4px color-mix(in srgb, var(--accent), transparent 46%);
 
     --focus-ring-strong:
-      0 0 0 4px color-mix(in srgb, var(--accent), transparent 34%);
+      0 0 0 4px color-mix(in srgb, var(--accent), transparent 30%);
 
-    --topbar-search-border: color-mix(in srgb, var(--text), transparent 62%);
+    --topbar-search-border: color-mix(in srgb, var(--text), transparent 58%);
     --topbar-search-glass-bg:
       color-mix(in srgb, var(--main-bg), transparent 4%);
   }
@@ -1715,12 +1788,19 @@ body[data-route-mode="app"] {
 
 @media (prefers-reduced-transparency: reduce) {
   :root {
+    --glass-bg: var(--surface-2);
+    --glass-bg-soft: var(--surface-2);
+    --glass-bg-strong: var(--surface-3);
+    --glass-bg-ultra: var(--surface-3);
+
     --surface-glass: var(--surface-2);
     --surface-glass-strong: var(--surface-3);
+
     --dropdown-bg: var(--surface-2);
     --popover-bg: var(--surface-2);
     --modal-bg: var(--surface-2);
     --drawer-bg: var(--surface-2);
+
     --topbar-bg: var(--surface-1);
     --sidebar-bg: var(--surface-1);
 

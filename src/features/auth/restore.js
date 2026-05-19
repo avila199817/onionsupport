@@ -7,11 +7,12 @@
    - Si ya hay token + user usable: mantener sesión.
    - Si hay token sin user: pedir /api/auth/me.
    - Si /me devuelve user válido: aplicar sesión.
-   - Si no hay token: limpiar sesión local.
-   - Si /me falla con 401/403: limpiar sesión local.
+   - Si access token caducó y hay refresh context: renovar por /api/auth/refresh.
+   - Si refresh devuelve sesión válida: aplicar sesión.
+   - Si no hay token ni refresh context: limpiar sesión local.
+   - Si /me o /refresh fallan con 401/403: limpiar sesión local.
    - No inventar slug.
    - No navegar.
-   - Sin refresh automático.
    - Sin fetch propio.
    - Sin apiClient propio.
    - Sin Router.
@@ -29,14 +30,17 @@ import {
   buildSessionSnapshot,
   isAuthenticated,
   getCurrentToken,
+  getCurrentRefreshToken,
+  getCurrentSessionContext,
   getCurrentUser,
   getCurrentUserSlug,
   getCurrentUserHomePath,
 } from "./session.js";
 
-export const RESTORE_VERSION = "auth.restore.v2";
+export const RESTORE_VERSION = "auth.restore.v3";
 
 const ME_ENDPOINT = "/api/auth/me";
+const REFRESH_ENDPOINT = "/api/auth/refresh";
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -47,12 +51,15 @@ const CoreHttp =
 const runtime = {
   restoring: false,
   checking: false,
+  refreshing: false,
 
   restorePromise: null,
   mePromise: null,
+  refreshPromise: null,
 
   lastRestoreAt: 0,
   lastMeAt: 0,
+  lastRefreshAt: 0,
   lastError: null,
 };
 
@@ -82,7 +89,7 @@ function nowIso() {
 }
 
 /* =========================================================
-   TOKEN
+   TOKEN / SESSION CONTEXT
 ========================================================= */
 
 function stripBearer(value = "") {
@@ -114,8 +121,50 @@ function currentToken() {
   return cleanToken(getCurrentToken?.() || "");
 }
 
+function currentRefreshToken() {
+  return cleanToken(getCurrentRefreshToken?.() || "");
+}
+
 function currentUser() {
   return getCurrentUser?.() || null;
+}
+
+function currentSession() {
+  try {
+    return getCurrentSessionContext?.() || null;
+  } catch {
+    return null;
+  }
+}
+
+function refreshContext() {
+  const session = currentSession();
+
+  const refreshToken = currentRefreshToken();
+  const sessionId = text(
+    session?.sessionId ||
+      session?.id ||
+      session?.sid ||
+      "",
+    ""
+  );
+
+  const userId = text(
+    session?.userId ||
+      session?.sessionUserId ||
+      session?.user_id ||
+      session?.session_user_id ||
+      "",
+    ""
+  );
+
+  return {
+    refreshToken,
+    sessionId,
+    userId,
+    session,
+    usable: Boolean(refreshToken && sessionId && userId),
+  };
 }
 
 /* =========================================================
@@ -193,6 +242,22 @@ function isAuthFailure(error = null) {
   return status === 401 || status === 403;
 }
 
+function isRefreshableAuthFailure(error = null) {
+  const finalError = normalizeRestoreError(error);
+  const status = authErrorStatus(finalError);
+  const code = text(authErrorCode(finalError), "").toUpperCase();
+
+  if (status !== 401) return false;
+
+  return [
+    "TOKEN_EXPIRED",
+    "INVALID_TOKEN",
+    "MISSING_TOKEN",
+    "AUTH_RESTORE_FAILED",
+    "REQUEST_ERROR",
+  ].includes(code);
+}
+
 /* =========================================================
    SNAPSHOT / RESULT
 ========================================================= */
@@ -216,6 +281,7 @@ function sessionSnapshot(extra = {}) {
 
     authenticated: Boolean(snapshot.authenticated || isAuthenticated()),
     hasToken: Boolean(currentToken()),
+    hasRefreshToken: Boolean(currentRefreshToken()),
     hasUser: Boolean(currentUser()),
 
     user: snapshot.user || null,
@@ -345,6 +411,66 @@ async function requestMe(token = "", options = {}) {
   });
 }
 
+async function requestRefresh(context = {}, options = {}) {
+  const refreshToken = cleanToken(context.refreshToken || "");
+  const sessionId = text(context.sessionId, "");
+  const userId = text(context.userId, "");
+
+  if (!refreshToken || !sessionId || !userId) {
+    throw createRestoreError("Falta contexto para renovar sesión.", {
+      status: 401,
+      code: "MISSING_REFRESH_CONTEXT",
+    });
+  }
+
+  const body = {
+    refreshToken,
+    refresh_token: refreshToken,
+
+    sessionId,
+    session_id: sessionId,
+
+    userId,
+    user_id: userId,
+
+    session: {
+      sessionId,
+      id: sessionId,
+      userId,
+    },
+  };
+
+  const requestOptions = {
+    ...options,
+    auth: false,
+    public: true,
+    skipAuth: true,
+    noAuthHeader: true,
+    cache: "no-store",
+  };
+
+  if (isFn(CoreHttp?.refreshSession)) {
+    return CoreHttp.refreshSession(body, requestOptions);
+  }
+
+  if (isFn(CoreHttp?.post)) {
+    return CoreHttp.post(REFRESH_ENDPOINT, body, requestOptions);
+  }
+
+  if (isFn(CoreHttp?.request)) {
+    return CoreHttp.request(REFRESH_ENDPOINT, {
+      ...requestOptions,
+      method: "POST",
+      body,
+    });
+  }
+
+  throw createRestoreError("Cliente HTTP no disponible.", {
+    status: 500,
+    code: "HTTP_CLIENT_MISSING",
+  });
+}
+
 /* =========================================================
    SESSION APPLY / CLEAR
 ========================================================= */
@@ -366,7 +492,7 @@ function applyMeResponse(response = {}, token = "", options = {}) {
       access_token: safeToken,
     },
     {
-      source: "auth.restore",
+      source: "auth.restore.me",
       eventMode: "restore",
       silent: options.silent !== false,
       emit: options.emit === true,
@@ -377,6 +503,30 @@ function applyMeResponse(response = {}, token = "", options = {}) {
     throw createRestoreError("No se pudo resolver una sesión válida desde /me.", {
       status: 401,
       code: "ME_SESSION_INVALID",
+    });
+  }
+
+  return snapshot;
+}
+
+function applyRefreshResponse(response = {}, options = {}) {
+  const payload = isObject(response)
+    ? response
+    : {
+        data: response,
+      };
+
+  const snapshot = applySession(payload, {
+    source: "auth.restore.refresh",
+    eventMode: "refresh",
+    silent: options.silent !== false,
+    emit: options.emit === true,
+  });
+
+  if (!snapshot?.authenticated && !isAuthenticated()) {
+    throw createRestoreError("No se pudo renovar una sesión válida.", {
+      status: 401,
+      code: "REFRESH_SESSION_INVALID",
     });
   }
 
@@ -437,6 +587,59 @@ export async function fetchMe(options = {}) {
 }
 
 /* =========================================================
+   /REFRESH
+========================================================= */
+
+export async function refreshSession(options = {}) {
+  if (runtime.refreshPromise) return runtime.refreshPromise;
+
+  runtime.refreshing = true;
+
+  runtime.refreshPromise = (async () => {
+    try {
+      const context = refreshContext();
+
+      if (!context.usable) {
+        throw createRestoreError("No hay contexto suficiente para renovar sesión.", {
+          status: 401,
+          code: "MISSING_REFRESH_CONTEXT",
+        });
+      }
+
+      const response = await requestRefresh(context, options);
+
+      applyRefreshResponse(response, options);
+
+      runtime.lastRefreshAt = Date.now();
+      runtime.lastError = null;
+
+      return restoreResult("refresh");
+    } catch (error) {
+      throw rememberError("refresh", error);
+    } finally {
+      runtime.refreshing = false;
+      runtime.refreshPromise = null;
+    }
+  })();
+
+  return runtime.refreshPromise;
+}
+
+async function tryRefreshAfterAuthFailure(error = null, options = {}) {
+  if (!isRefreshableAuthFailure(error)) {
+    throw normalizeRestoreError(error);
+  }
+
+  const context = refreshContext();
+
+  if (!context.usable) {
+    throw normalizeRestoreError(error);
+  }
+
+  return refreshSession(options);
+}
+
+/* =========================================================
    RESTORE
 ========================================================= */
 
@@ -457,31 +660,64 @@ export async function restoreSession(options = {}) {
       const token = currentToken();
 
       if (!tokenOk(token)) {
-        clearInvalidSession(options);
+        try {
+          const refreshed = await refreshSession(options);
+
+          runtime.lastRestoreAt = Date.now();
+          runtime.lastError = null;
+
+          return {
+            ...refreshed,
+            source: "refresh",
+          };
+        } catch (refreshError) {
+          const finalRefreshError = rememberError("restore.refresh", refreshError);
+
+          if (isAuthFailure(finalRefreshError)) {
+            clearInvalidSession(options);
+          }
+
+          runtime.lastRestoreAt = Date.now();
+
+          return emptyRestoreResult("empty");
+        }
+      }
+
+      try {
+        const result = await fetchMe(options);
 
         runtime.lastRestoreAt = Date.now();
         runtime.lastError = null;
 
-        return emptyRestoreResult("empty");
+        return {
+          ...result,
+          source: "me",
+        };
+      } catch (meError) {
+        const finalMeError = rememberError("restore.me", meError);
+
+        try {
+          const refreshed = await tryRefreshAfterAuthFailure(finalMeError, options);
+
+          runtime.lastRestoreAt = Date.now();
+          runtime.lastError = null;
+
+          return {
+            ...refreshed,
+            source: "refresh",
+          };
+        } catch (refreshError) {
+          const finalRefreshError = rememberError("restore.refresh", refreshError);
+
+          if (isAuthFailure(finalRefreshError)) {
+            clearInvalidSession(options);
+          }
+
+          runtime.lastRestoreAt = Date.now();
+
+          return failedRestoreResult(finalRefreshError, "error");
+        }
       }
-
-      const result = await fetchMe(options);
-
-      runtime.lastRestoreAt = Date.now();
-      runtime.lastError = null;
-
-      return {
-        ...result,
-        source: "me",
-      };
-    } catch (error) {
-      const finalError = rememberError("restore", error);
-
-      if (isAuthFailure(finalError)) {
-        clearInvalidSession(options);
-      }
-
-      return failedRestoreResult(finalError, "error");
     } finally {
       runtime.restoring = false;
       runtime.restorePromise = null;
@@ -501,24 +737,28 @@ export async function restoreUsingMe(options = {}) {
   return fetchMe(options);
 }
 
-export async function refreshSession() {
-  throw createRestoreError("Refresh automático desactivado en restore mínimo.", {
-    status: 400,
-    code: "REFRESH_DISABLED",
-  });
-}
-
 export const restoreUsingRefreshOnly = refreshSession;
 export const restoreUsingRefreshPreferred = refreshSession;
 
 export async function restoreAfterMeFailure(_sessionArg, error, options = {}) {
   const finalError = normalizeRestoreError(error);
 
-  if (isAuthFailure(finalError)) {
-    clearInvalidSession(options);
-  }
+  try {
+    const refreshed = await tryRefreshAfterAuthFailure(finalError, options);
 
-  return failedRestoreResult(finalError, "me-failed");
+    return {
+      ...refreshed,
+      source: "refresh",
+    };
+  } catch (refreshError) {
+    const finalRefreshError = normalizeRestoreError(refreshError);
+
+    if (isAuthFailure(finalRefreshError)) {
+      clearInvalidSession(options);
+    }
+
+    return failedRestoreResult(finalRefreshError, "me-failed");
+  }
 }
 
 /* =========================================================
@@ -531,22 +771,32 @@ export function getRestoreSnapshot() {
     eventMode: "debug",
   });
 
+  const context = refreshContext();
+
   return {
     version: RESTORE_VERSION,
 
     restoring: Boolean(runtime.restoring),
     checking: Boolean(runtime.checking),
+    refreshing: Boolean(runtime.refreshing),
 
     hasRestorePromise: Boolean(runtime.restorePromise),
     hasMePromise: Boolean(runtime.mePromise),
+    hasRefreshPromise: Boolean(runtime.refreshPromise),
 
     lastRestoreAt: runtime.lastRestoreAt || 0,
     lastMeAt: runtime.lastMeAt || 0,
+    lastRefreshAt: runtime.lastRefreshAt || 0,
     lastError: runtime.lastError || null,
 
     authenticated: Boolean(snapshot.authenticated),
     hasToken: Boolean(currentToken()),
+    hasRefreshToken: Boolean(currentRefreshToken()),
     hasUser: Boolean(currentUser()),
+
+    hasRefreshContext: Boolean(context.usable),
+    hasSessionId: Boolean(context.sessionId),
+    hasSessionUserId: Boolean(context.userId),
 
     userSlug: snapshot.userSlug || null,
     homePath: snapshot.homePath || "/",
@@ -554,14 +804,16 @@ export function getRestoreSnapshot() {
     postLoginTarget: snapshot.postLoginTarget || null,
 
     endpoint: ME_ENDPOINT,
+    refreshEndpoint: REFRESH_ENDPOINT,
 
     policy: {
       noRouter: true,
       noToast: true,
-      noRefreshAuto: true,
+      refreshOnAuthFailure: true,
       noFetchOwn: true,
       noStorageDirect: true,
       restoresViaMe: true,
+      refreshesViaCoreHttp: true,
       noSlugFabrication: true,
       no2fa: true,
     },

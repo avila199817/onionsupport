@@ -3,12 +3,16 @@
    Archivo: /src/ui/topbar/topbar.search.js
 
    Responsabilidad:
-   - Compat mínima del antiguo buscador del topbar.
+   - Motor local del buscador del topbar.
+   - Render opcional de resultados locales.
+   - Navegación segura por Router/AppCore/window.
+   - Resolver Home como /@{user.slug} cuando exista.
+   - Respetar rutas adminOnly.
    - Sin imports.
    - Sin API /api/search.
    - Sin HTTP.
    - Sin Toast.
-   - Sin overlays.
+   - Sin overlays globales.
    - Sin focus mode global.
    - Sin runtime complejo.
    - Sin CustomEvent.
@@ -16,7 +20,7 @@
    - El topbar real vive en src/ui/topbar/index.js.
 ========================================================= */
 
-export const TOPBAR_SEARCH_VERSION = "simple";
+export const TOPBAR_SEARCH_VERSION = "topbar.search.v2";
 
 export const SEARCH_ACTIONS = Object.freeze({
   NAVIGATE: "navigate",
@@ -36,6 +40,9 @@ export const ENTITY_TYPES = Object.freeze({
 });
 
 const SOURCE = "topbar.search";
+const RESULTS_ID = "topbar-search-results";
+const MAX_QUERY_LENGTH = 120;
+const MAX_RESULTS = 20;
 
 let searchFocusActive = false;
 
@@ -114,17 +121,31 @@ function normalizeQuery(value = "") {
   return String(value ?? "")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 120);
+    .slice(0, MAX_QUERY_LENGTH);
 }
 
 function normalizeType(value = ENTITY_TYPES.GENERAL) {
   const type = normalizeText(value).replace(/[^a-z0-9_-]/g, "");
 
-  if (["incidencia", "incidencias", "ticket", "tickets"].includes(type)) return ENTITY_TYPES.INCIDENCIA;
-  if (["factura", "facturas", "invoice", "invoices"].includes(type)) return ENTITY_TYPES.FACTURA;
-  if (["cliente", "clientes", "client", "clients"].includes(type)) return ENTITY_TYPES.CLIENTE;
-  if (["usuario", "usuarios", "user", "users"].includes(type)) return ENTITY_TYPES.USUARIO;
-  if (["nav", "route", "ruta", "rutas"].includes(type)) return ENTITY_TYPES.NAV;
+  if (["incidencia", "incidencias", "ticket", "tickets"].includes(type)) {
+    return ENTITY_TYPES.INCIDENCIA;
+  }
+
+  if (["factura", "facturas", "invoice", "invoices"].includes(type)) {
+    return ENTITY_TYPES.FACTURA;
+  }
+
+  if (["cliente", "clientes", "client", "clients"].includes(type)) {
+    return ENTITY_TYPES.CLIENTE;
+  }
+
+  if (["usuario", "usuarios", "user", "users"].includes(type)) {
+    return ENTITY_TYPES.USUARIO;
+  }
+
+  if (["nav", "route", "ruta", "rutas"].includes(type)) {
+    return ENTITY_TYPES.NAV;
+  }
 
   return ENTITY_TYPES.GENERAL;
 }
@@ -139,7 +160,20 @@ function typeLabel(type = ENTITY_TYPES.GENERAL) {
     [ENTITY_TYPES.GENERAL]: "Resultados",
   };
 
-  return labels[normalizeType(type)] || labels.general;
+  return labels[normalizeType(type)] || labels[ENTITY_TYPES.GENERAL];
+}
+
+function typeIcon(type = ENTITY_TYPES.GENERAL) {
+  const icons = {
+    [ENTITY_TYPES.NAV]: "⌘",
+    [ENTITY_TYPES.USUARIO]: "@",
+    [ENTITY_TYPES.CLIENTE]: "C",
+    [ENTITY_TYPES.INCIDENCIA]: "#",
+    [ENTITY_TYPES.FACTURA]: "€",
+    [ENTITY_TYPES.GENERAL]: "•",
+  };
+
+  return icons[normalizeType(type)] || icons[ENTITY_TYPES.GENERAL];
 }
 
 /* =========================================================
@@ -160,7 +194,9 @@ function safePath(path = "/") {
   try {
     if (/^https?:\/\//i.test(value) && isBrowser()) {
       const url = new URL(value, window.location.origin);
+
       if (url.origin !== window.location.origin) return "";
+
       value = `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
     }
   } catch {
@@ -172,6 +208,167 @@ function safePath(path = "/") {
   value = value.replace(/\/{2,}/g, "/");
 
   return value || "/";
+}
+
+function normalizeSlug(value = "") {
+  const slug = String(value ?? "")
+    .trim()
+    .replace(/^@+/, "")
+    .replace(/^\/@+/, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "");
+
+  return slug || "";
+}
+
+function getStateUser(AppCore = null) {
+  const state = isObject(AppCore?.state) ? AppCore.state : {};
+
+  return (
+    state.user ||
+    state.currentUser ||
+    state.authUser ||
+    state.sessionUser ||
+    state.session?.user ||
+    null
+  );
+}
+
+function resolveHomePath(AppCore = null) {
+  const user = getStateUser(AppCore);
+  const slug = normalizeSlug(user?.slug || user?.username || "");
+
+  return slug ? `/@${slug}` : "/";
+}
+
+/* =========================================================
+   ROLE / PERMISSIONS
+========================================================= */
+
+function normalizeRole(value = "") {
+  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+}
+
+function userIsAdmin(AppCore = null) {
+  const state = isObject(AppCore?.state) ? AppCore.state : {};
+  const user = getStateUser(AppCore) || {};
+
+  const roles = [
+    state.role,
+    state.rol,
+    user.role,
+    user.rol,
+    ...asArray(state.roles),
+    ...asArray(user.roles),
+  ];
+
+  return roles.some((role) => normalizeRole(role) === "admin");
+}
+
+/* =========================================================
+   DOM
+========================================================= */
+
+function domFrom(getDom = null) {
+  let dom = {};
+
+  try {
+    dom = isFunction(getDom) ? getDom() || {} : {};
+  } catch {
+    dom = {};
+  }
+
+  if (!isBrowser()) return dom;
+
+  const topbar =
+    dom.topbar ||
+    document.querySelector("[data-topbar-root]") ||
+    document.querySelector("#app-topbar") ||
+    null;
+
+  const search =
+    dom.search ||
+    topbar?.querySelector?.("[data-topbar-search]") ||
+    document.querySelector("[data-topbar-search]") ||
+    null;
+
+  const searchInput =
+    dom.searchInput ||
+    search?.querySelector?.("[data-topbar-search-input]") ||
+    document.querySelector("[data-topbar-search-input]") ||
+    null;
+
+  const searchResults =
+    dom.searchResults ||
+    document.getElementById(RESULTS_ID) ||
+    document.querySelector("[data-topbar-search-results]") ||
+    document.querySelector(".topbar-search-results") ||
+    null;
+
+  return {
+    ...dom,
+    topbar,
+    search,
+    searchInput,
+    searchResults,
+  };
+}
+
+function ensureResultsContainer(getDom = null) {
+  if (!isBrowser()) return null;
+
+  const dom = domFrom(getDom);
+
+  if (dom.searchResults) return dom.searchResults;
+  if (!dom.search && !dom.searchInput && !dom.topbar) return null;
+
+  const results = document.createElement("div");
+
+  results.id = RESULTS_ID;
+  results.className = "topbar-search-results";
+  results.hidden = true;
+  results.dataset.topbarSearchResults = "true";
+  results.setAttribute("role", "listbox");
+  results.setAttribute("aria-label", "Resultados de búsqueda");
+  results.setAttribute("aria-hidden", "true");
+
+  try {
+    document.body.appendChild(results);
+  } catch {
+    return null;
+  }
+
+  if (dom.searchInput) {
+    try {
+      dom.searchInput.setAttribute("aria-controls", RESULTS_ID);
+      dom.searchInput.setAttribute("aria-autocomplete", "list");
+      dom.searchInput.setAttribute("aria-expanded", "false");
+      dom.searchInput.setAttribute("role", "combobox");
+    } catch {
+      // noop
+    }
+  }
+
+  return results;
+}
+
+function setSearchVisualState(getDom = null, active = false) {
+  const { topbar, search } = domFrom(getDom);
+
+  try {
+    topbar?.classList?.toggle?.("is-search-focused", Boolean(active));
+    topbar?.toggleAttribute?.("data-search-focus", Boolean(active));
+  } catch {
+    // noop
+  }
+
+  try {
+    search?.classList?.toggle?.("is-search-open", Boolean(active));
+    search?.toggleAttribute?.("data-search-open", Boolean(active));
+  } catch {
+    // noop
+  }
+
+  return true;
 }
 
 /* =========================================================
@@ -258,29 +455,14 @@ export function setCached(runtime = null, query = "", value = []) {
    LOCAL INDEX
 ========================================================= */
 
-function userIsAdmin(AppCore = null) {
-  const state = isObject(AppCore?.state) ? AppCore.state : {};
-  const user =
-    state.user ||
-    state.currentUser ||
-    state.authUser ||
-    state.sessionUser ||
-    state.session?.user ||
-    {};
-
-  const role = String(state.role || user.role || user.rol || "").toLowerCase();
-
-  return role === "admin";
-}
-
 export function getLocalIndex(AppCore = null) {
   const items = [
     {
-      id: "nav:/",
+      id: "nav:home",
       type: ENTITY_TYPES.NAV,
-      title: "Inicio",
+      title: "Home",
       subtitle: "Panel principal",
-      url: "/",
+      url: resolveHomePath(AppCore),
       action: SEARCH_ACTIONS.NAVIGATE,
     },
     {
@@ -344,7 +526,15 @@ export function getLocalIndex(AppCore = null) {
     },
   ];
 
-  return items.filter((item) => !item.adminOnly || userIsAdmin(AppCore));
+  const isAdmin = userIsAdmin(AppCore);
+
+  return items
+    .filter((item) => !item.adminOnly || isAdmin)
+    .map((item) => ({
+      ...item,
+      url: safePath(item.url),
+    }))
+    .filter((item) => item.url);
 }
 
 function scoreText(value = "", query = "") {
@@ -353,8 +543,8 @@ function scoreText(value = "", query = "") {
 
   if (!haystack || !needle) return 0;
   if (haystack === needle) return 100;
-  if (haystack.startsWith(needle)) return 70;
-  if (haystack.includes(needle)) return 40;
+  if (haystack.startsWith(needle)) return 72;
+  if (haystack.includes(needle)) return 42;
 
   return 0;
 }
@@ -384,13 +574,14 @@ export function searchLocal(query = "", AppCore = null) {
 }
 
 /* =========================================================
-   API COMPAT
+   API COMPAT SIN HTTP
 ========================================================= */
 
 export function normalizeApiItem(AppCore = null, raw = null, index = 0) {
   if (!isObject(raw)) return null;
 
   const type = normalizeType(raw.type || raw.entity || raw.collection || raw.module);
+
   const title = text(
     first(
       raw.title,
@@ -437,7 +628,10 @@ export function normalizeApiItem(AppCore = null, raw = null, index = 0) {
   const url = safePath(raw.url || raw.path || raw.href || raw.route || raw.to || "");
 
   return {
-    id: text(raw.searchId || raw.resultId || raw.id || raw._id || `${type}:${index}`, `${type}:${index}`),
+    id: text(
+      raw.searchId || raw.resultId || raw.id || raw._id || `${type}:${index}`,
+      `${type}:${index}`
+    ),
     entityId,
     type,
     title,
@@ -446,6 +640,7 @@ export function normalizeApiItem(AppCore = null, raw = null, index = 0) {
     action: SEARCH_ACTIONS.NAVIGATE,
     raw,
     source: "api",
+    score: Number(raw.score || 0) || 0,
   };
 }
 
@@ -483,6 +678,8 @@ export function mergeResults(apiResults = [], localResults = [], query = "") {
   const output = [];
 
   for (const item of merged) {
+    if (!item) continue;
+
     const key = [
       item.type || "",
       item.entityId || "",
@@ -496,26 +693,19 @@ export function mergeResults(apiResults = [], localResults = [], query = "") {
 
     output.push({
       ...item,
+      type: normalizeType(item.type),
       score: Number(item.score || 0) || scoreText(item.title, query),
     });
   }
 
   return output
     .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))
-    .slice(0, 20);
+    .slice(0, MAX_RESULTS);
 }
 
 /* =========================================================
    VISUAL COMPAT
 ========================================================= */
-
-function domFrom(getDom = null) {
-  try {
-    return isFunction(getDom) ? getDom() || {} : {};
-  } catch {
-    return {};
-  }
-}
 
 export function setSearchExpanded(input = null, expanded = false) {
   if (!input) return false;
@@ -529,18 +719,23 @@ export function setSearchExpanded(input = null, expanded = false) {
 }
 
 export function showResultsContainer(_runtime = null, getDom = null) {
-  const { searchResults, searchInput } = domFrom(getDom);
+  const searchResults = ensureResultsContainer(getDom);
+  const { searchInput } = domFrom(getDom);
 
   if (!searchResults) return false;
 
   try {
     searchResults.hidden = false;
+    searchResults.classList.add("active");
+    searchResults.dataset.searchOpen = "true";
     searchResults.setAttribute("aria-hidden", "false");
   } catch {
     // noop
   }
 
   setSearchExpanded(searchInput, true);
+  setSearchVisualState(getDom, true);
+
   searchFocusActive = true;
 
   return true;
@@ -552,8 +747,18 @@ export function hideResultsContainer(runtime = null, getDom = null) {
   if (searchResults) {
     try {
       searchResults.hidden = true;
+      searchResults.classList.remove("active");
+      delete searchResults.dataset.searchOpen;
       searchResults.setAttribute("aria-hidden", "true");
       searchResults.replaceChildren();
+    } catch {
+      // noop
+    }
+  }
+
+  if (searchInput) {
+    try {
+      searchInput.removeAttribute("aria-activedescendant");
     } catch {
       // noop
     }
@@ -565,22 +770,24 @@ export function hideResultsContainer(runtime = null, getDom = null) {
   }
 
   setSearchExpanded(searchInput, false);
+  setSearchVisualState(getDom, false);
+
   searchFocusActive = false;
 
   return true;
 }
 
-function renderState(runtime = null, getDom = null, title = "", message = "") {
+function renderState(runtime = null, getDom = null, title = "", message = "", stateClass = "") {
   if (!isBrowser()) return false;
 
-  const { searchResults } = domFrom(getDom);
+  const searchResults = ensureResultsContainer(getDom);
 
   if (!searchResults) return false;
 
   searchResults.replaceChildren();
 
   const wrapper = document.createElement("div");
-  wrapper.className = "search-state";
+  wrapper.className = `search-state ${stateClass}`.trim();
 
   const titleNode = document.createElement("div");
   titleNode.className = "search-state-title";
@@ -597,37 +804,48 @@ function renderState(runtime = null, getDom = null, title = "", message = "") {
 }
 
 export function setLoadingState(_AppCore = null, runtime = null, getDom = null, query = "") {
-  return renderState(runtime, getDom, "Buscando", query ? `Buscando “${query}”...` : "Buscando...");
+  return renderState(
+    runtime,
+    getDom,
+    "Buscando",
+    query ? `Buscando “${query}”...` : "Buscando...",
+    "search-state-loading"
+  );
 }
 
 export function setEmptyState(_AppCore = null, runtime = null, getDom = null, query = "") {
-  return renderState(runtime, getDom, "Sin resultados", query ? `No hay coincidencias para “${query}”.` : "No hay resultados.");
+  return renderState(
+    runtime,
+    getDom,
+    "Sin resultados",
+    query ? `No hay coincidencias para “${query}”.` : "No hay resultados.",
+    "search-state-empty"
+  );
 }
 
 export function setErrorState(runtime = null, getDom = null) {
-  return renderState(runtime, getDom, "Error", "No se pudo completar la búsqueda.");
+  return renderState(
+    runtime,
+    getDom,
+    "Error",
+    "No se pudo completar la búsqueda.",
+    "search-state-error"
+  );
 }
 
 export function updateActiveItem(runtime = null, items = []) {
   const list = asArray(items);
 
-  list.forEach((node) => {
+  list.forEach((node, index) => {
+    const active = index === runtime?.activeIndex;
+
     try {
-      node.classList.remove("active");
-      node.setAttribute("aria-selected", "false");
+      node.classList.toggle("active", active);
+      node.setAttribute("aria-selected", active ? "true" : "false");
     } catch {
       // noop
     }
   });
-
-  if (runtime?.activeIndex >= 0 && list[runtime.activeIndex]) {
-    try {
-      list[runtime.activeIndex].classList.add("active");
-      list[runtime.activeIndex].setAttribute("aria-selected", "true");
-    } catch {
-      // noop
-    }
-  }
 
   return true;
 }
@@ -653,6 +871,28 @@ export function updateActiveVisuals(runtime = null, getDom = null) {
       // noop
     }
   });
+
+  if (runtime?.activeIndex < 0 && searchInput) {
+    try {
+      searchInput.removeAttribute("aria-activedescendant");
+    } catch {
+      // noop
+    }
+  }
+
+  return true;
+}
+
+export function moveActive(runtime = null, getDom = null, direction = 1) {
+  if (!runtime?.currentItems?.length) return false;
+
+  const length = runtime.currentItems.length;
+  const current = Number(runtime.activeIndex || -1);
+  const next = (current + direction + length) % length;
+
+  runtime.activeIndex = next;
+
+  updateActiveVisuals(runtime, getDom);
 
   return true;
 }
@@ -701,7 +941,14 @@ async function navigateTo(AppCore = null, Router = null, path = "/") {
   }
 }
 
-export async function goToResult({ AppCore = null, Router = null, runtime = null, getDom = null, closeSidebarMobile = null, item = null } = {}) {
+export async function goToResult({
+  AppCore = null,
+  Router = null,
+  runtime = null,
+  getDom = null,
+  closeSidebarMobile = null,
+  item = null,
+} = {}) {
   if (!item) return false;
 
   hideResultsContainer(runtime, getDom);
@@ -725,14 +972,111 @@ export async function goToResult({ AppCore = null, Router = null, runtime = null
   return navigateTo(AppCore, Router, target);
 }
 
+export function activateCurrent({
+  AppCore = null,
+  Router = null,
+  runtime = null,
+  getDom = null,
+  closeSidebarMobile = null,
+} = {}) {
+  if (!runtime?.currentItems?.length) return false;
+
+  const index = Math.max(0, Number(runtime.activeIndex || 0));
+  const item = runtime.currentItems[index];
+
+  if (!item) return false;
+
+  goToResult({
+    AppCore,
+    Router,
+    runtime,
+    getDom,
+    closeSidebarMobile,
+    item,
+  });
+
+  return true;
+}
+
 /* =========================================================
    RENDER RESULTS
 ========================================================= */
 
-export function renderResults({ AppCore = null, Router = null, runtime = null, getDom = null, closeSidebarMobile = null, results = [], query = "" } = {}) {
+function createResultNode({
+  AppCore = null,
+  Router = null,
+  runtime = null,
+  getDom = null,
+  closeSidebarMobile = null,
+  item = null,
+  index = 0,
+} = {}) {
+  const button = document.createElement("button");
+
+  button.type = "button";
+  button.className = "search-result";
+  button.id = `topbar-search-result-${index}`;
+  button.dataset.index = String(index);
+  button.dataset.type = item.type || ENTITY_TYPES.GENERAL;
+  button.dataset.url = item.url || "";
+  button.setAttribute("role", "option");
+  button.setAttribute("aria-selected", "false");
+
+  const iconNode = document.createElement("span");
+  iconNode.className = "search-icon";
+  iconNode.setAttribute("aria-hidden", "true");
+  iconNode.textContent = typeIcon(item.type);
+
+  const textNode = document.createElement("span");
+  textNode.className = "search-text";
+
+  const title = document.createElement("span");
+  title.className = "search-title";
+
+  const titleMain = document.createElement("span");
+  titleMain.className = "search-title-main";
+  titleMain.textContent = item.title || "Resultado";
+
+  title.appendChild(titleMain);
+
+  const subtitle = document.createElement("span");
+  subtitle.className = "search-subtitle";
+  subtitle.textContent = item.subtitle || typeLabel(item.type);
+
+  textNode.append(title, subtitle);
+
+  const pill = document.createElement("span");
+  pill.className = "search-action-pill";
+  pill.textContent = typeLabel(item.type);
+
+  button.append(iconNode, textNode, pill);
+
+  button.addEventListener("click", () => {
+    goToResult({
+      AppCore,
+      Router,
+      runtime,
+      getDom,
+      closeSidebarMobile,
+      item,
+    });
+  });
+
+  return button;
+}
+
+export function renderResults({
+  AppCore = null,
+  Router = null,
+  runtime = null,
+  getDom = null,
+  closeSidebarMobile = null,
+  results = [],
+  query = "",
+} = {}) {
   if (!isBrowser()) return false;
 
-  const { searchResults } = domFrom(getDom);
+  const searchResults = ensureResultsContainer(getDom);
 
   if (!searchResults) return false;
 
@@ -740,57 +1084,121 @@ export function renderResults({ AppCore = null, Router = null, runtime = null, g
 
   const list = asArray(results);
 
-  runtime.currentItems = list;
-  runtime.activeIndex = -1;
+  if (runtime) {
+    runtime.currentItems = list;
+    runtime.activeIndex = -1;
+  }
 
   if (!list.length) {
     return setEmptyState(AppCore, runtime, getDom, query);
   }
 
-  list.forEach((item, index) => {
-    const button = document.createElement("button");
+  const groups = new Map();
 
-    button.type = "button";
-    button.className = "search-result";
-    button.id = `topbar-search-result-${index}`;
-    button.dataset.index = String(index);
-    button.dataset.type = item.type || ENTITY_TYPES.GENERAL;
-    button.dataset.url = item.url || "";
-    button.setAttribute("role", "option");
-    button.setAttribute("aria-selected", "false");
+  list.forEach((item) => {
+    const type = normalizeType(item.type);
 
-    const title = document.createElement("span");
-    title.className = "search-title";
-    title.textContent = item.title || "Resultado";
+    if (!groups.has(type)) groups.set(type, []);
+    groups.get(type).push({
+      ...item,
+      type,
+    });
+  });
 
-    const subtitle = document.createElement("span");
-    subtitle.className = "search-subtitle";
-    subtitle.textContent = item.subtitle || typeLabel(item.type);
+  let index = 0;
 
-    button.append(title, subtitle);
+  groups.forEach((items, type) => {
+    const group = document.createElement("div");
+    group.className = "search-group-block";
 
-    button.addEventListener("click", () => {
-      goToResult({
+    const heading = document.createElement("div");
+    heading.className = "search-group";
+    heading.textContent = typeLabel(type);
+
+    group.appendChild(heading);
+
+    items.forEach((item) => {
+      const node = createResultNode({
         AppCore,
         Router,
         runtime,
         getDom,
         closeSidebarMobile,
         item,
+        index,
       });
+
+      group.appendChild(node);
+      index += 1;
     });
 
-    searchResults.appendChild(button);
+    searchResults.appendChild(group);
   });
 
   return showResultsContainer(runtime, getDom);
 }
 
 /* =========================================================
+   KEYBOARD
+========================================================= */
+
+export function handleSearchKeydown({
+  event = null,
+  AppCore = null,
+  Router = null,
+  runtime = null,
+  getDom = null,
+  closeSidebarMobile = null,
+} = {}) {
+  if (!event || !runtime) return false;
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    clearSearchState(runtime, getDom);
+    return true;
+  }
+
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    moveActive(runtime, getDom, 1);
+    return true;
+  }
+
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    moveActive(runtime, getDom, -1);
+    return true;
+  }
+
+  if (event.key === "Enter" && runtime.currentItems?.length) {
+    event.preventDefault();
+
+    activateCurrent({
+      AppCore,
+      Router,
+      runtime,
+      getDom,
+      closeSidebarMobile,
+    });
+
+    return true;
+  }
+
+  return false;
+}
+
+/* =========================================================
    RUN SEARCH
 ========================================================= */
 
-export async function runSearch({ AppCore = null, Router = null, runtime = null, getDom = null, closeSidebarMobile = null, query = "" } = {}) {
+export async function runSearch({
+  AppCore = null,
+  Router = null,
+  runtime = null,
+  getDom = null,
+  closeSidebarMobile = null,
+  query = "",
+} = {}) {
   if (!runtime) return false;
 
   const q = normalizeQuery(query);
@@ -801,12 +1209,14 @@ export async function runSearch({ AppCore = null, Router = null, runtime = null,
   runtime.currentQuery = q;
   runtime.searchSeq = Number(runtime.searchSeq || 0) + 1;
 
-  if (!q || q.length < 1) {
+  if (!q) {
     clearSearchState(runtime, getDom);
     return true;
   }
 
-  const local = searchLocal(q, AppCore);
+  const localResults = searchLocal(q, AppCore);
+  const cachedApiResults = await searchAPI({ runtime, query: q });
+  const results = mergeResults(cachedApiResults, localResults, q);
 
   renderResults({
     AppCore,
@@ -814,8 +1224,13 @@ export async function runSearch({ AppCore = null, Router = null, runtime = null,
     runtime,
     getDom,
     closeSidebarMobile,
-    results: local,
+    results,
     query: q,
+  });
+
+  emit(AppCore, "topbar:search:local", {
+    query: q,
+    count: results.length,
   });
 
   return true;
@@ -858,9 +1273,12 @@ export default {
   setErrorState,
   updateActiveItem,
   updateActiveVisuals,
+  moveActive,
 
   goToResult,
+  activateCurrent,
   renderResults,
+  handleSearchKeydown,
   runSearch,
 
   isSearchFocusActive,

@@ -5,6 +5,7 @@
    Responsabilidad:
    - Constantes compartidas del sidebar.
    - Rutas públicas reales.
+   - Rutas privadas visibles con /@{user.slug}/{ruta}.
    - Selectores comunes.
    - Clases comunes.
    - Metadatos visuales mínimos de rutas.
@@ -17,13 +18,13 @@
    - Sin Router.
    - Sin Store.
    - Sin storage.
-   - Sin dropdown.
+   - Sin comportamiento de dropdown.
    - Sin rutas legacy.
    - Sin /home.
    - Sin compatibilidad fantasma.
 ========================================================= */
 
-export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v2";
+export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v3";
 
 /* =========================================================
    HELPERS INTERNOS
@@ -139,26 +140,43 @@ export const SIDEBAR_PRIVATE_FALLBACK_ROUTES = freeze([
 ]);
 
 export const SIDEBAR_ADMIN_FALLBACK_ROUTES = freeze([
+  CLIENTES_ROUTE,
   USUARIOS_ROUTE,
   SERVER_ROUTE,
 ]);
 
-export function normalizeSidebarPath(path = "/") {
-  let value = text(path, "/").replace(/\\/g, "/");
+const SIDEBAR_USER_SCOPED_ROUTES = freeze([
+  ...SIDEBAR_PRIVATE_FALLBACK_ROUTES,
+]);
 
-  if (value.startsWith("#!")) {
-    value = value.replace(/^#!\/?/, "/");
-  } else if (value.startsWith("#/")) {
-    value = value.slice(1);
-  }
+/* =========================================================
+   PATH NORMALIZATION
+========================================================= */
 
-  if (value.startsWith("//")) {
+function normalizeHashPath(value = "/") {
+  const raw = text(value, "/");
+
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || HOME_ROUTE;
+  if (raw.startsWith("#/")) return raw.slice(1) || HOME_ROUTE;
+
+  return raw;
+}
+
+function pathFromInput(value = "/") {
+  const raw = normalizeHashPath(value);
+
+  if (!raw) return HOME_ROUTE;
+  if (raw.startsWith("//")) return HOME_ROUTE;
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
     return HOME_ROUTE;
   }
 
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
-    return HOME_ROUTE;
-  }
+  return raw;
+}
+
+function normalizePathname(pathname = "/") {
+  let value = text(pathname, HOME_ROUTE).replace(/\\/g, "/");
 
   if (!value.startsWith("/")) {
     value = `/${value}`;
@@ -166,17 +184,74 @@ export function normalizeSidebarPath(path = "/") {
 
   value = value.replace(/\/{2,}/g, "/");
 
-  return value || HOME_ROUTE;
-}
-
-export function canonicalSidebarPath(path = "/") {
-  let value = normalizeSidebarPath(path).split("?")[0].split("#")[0] || HOME_ROUTE;
-
   if (value.length > 1) {
     value = value.replace(/\/+$/g, "") || HOME_ROUTE;
   }
 
   return value || HOME_ROUTE;
+}
+
+function normalizeSearch(search = "") {
+  const value = text(search, "");
+
+  if (!value || value === "?") return "";
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = text(hash, "");
+
+  if (!value || value === "#") return "";
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
+function splitSidebarPath(path = "/") {
+  let raw = pathFromInput(path);
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || HOME_ROUTE;
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || HOME_ROUTE;
+  }
+
+  return {
+    pathname: normalizePathname(pathname),
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
+  };
+}
+
+function joinSidebarPath(parts = {}) {
+  return [
+    normalizePathname(parts.pathname || HOME_ROUTE),
+    normalizeSearch(parts.search || ""),
+    normalizeHash(parts.hash || ""),
+  ].join("");
+}
+
+export function normalizeSidebarPath(path = "/") {
+  return joinSidebarPath(splitSidebarPath(path));
+}
+
+export function canonicalSidebarPath(path = "/") {
+  return splitSidebarPath(path).pathname || HOME_ROUTE;
 }
 
 export function normalizeSidebarSlug(value = "") {
@@ -193,20 +268,73 @@ export function normalizeSidebarSlug(value = "") {
   return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
-export function getSidebarUserHomeSlugFromPath(path = "/") {
+export function getSidebarUserScopedRouteInfo(path = "/") {
   const route = canonicalSidebarPath(path);
 
-  if (!route.startsWith(USER_HOME_PREFIX)) return "";
+  if (!route.startsWith(USER_HOME_PREFIX)) {
+    return freeze({
+      scoped: false,
+      routable: SIDEBAR_USER_SCOPED_ROUTES.includes(route),
+      home: route === HOME_ROUTE,
+      slug: "",
+      restPath: route,
+      lookupPath: route,
+    });
+  }
 
-  const rawSlug = route.slice(USER_HOME_PREFIX.length);
+  const rest = route.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeSidebarSlug(slugSegment);
 
-  if (!rawSlug || rawSlug.includes("/")) return "";
+  if (!slug) {
+    return freeze({
+      scoped: false,
+      routable: false,
+      home: false,
+      slug: "",
+      restPath: route,
+      lookupPath: route,
+    });
+  }
 
-  return normalizeSidebarSlug(rawSlug);
+  const restPath = restSegments.length
+    ? normalizePathname(`/${restSegments.join("/")}`)
+    : HOME_ROUTE;
+
+  const routable = SIDEBAR_USER_SCOPED_ROUTES.includes(restPath);
+
+  return freeze({
+    scoped: true,
+    routable,
+    home: routable && restPath === HOME_ROUTE,
+    slug,
+    restPath,
+    lookupPath: routable ? restPath : route,
+  });
+}
+
+export function getSidebarUserHomeSlugFromPath(path = "/") {
+  const info = getSidebarUserScopedRouteInfo(path);
+  return info.home ? info.slug : "";
+}
+
+export function getSidebarUserScopedSlugFromPath(path = "/") {
+  const info = getSidebarUserScopedRouteInfo(path);
+  return info.scoped && info.routable ? info.slug : "";
+}
+
+export function getSidebarUserScopedRestPath(path = "/") {
+  const info = getSidebarUserScopedRouteInfo(path);
+  return info.scoped && info.routable ? info.restPath : "";
 }
 
 export function isSidebarUserHomeRoute(path = "/") {
-  return Boolean(getSidebarUserHomeSlugFromPath(path));
+  return Boolean(getSidebarUserScopedRouteInfo(path).home);
+}
+
+export function isSidebarUserScopedRoute(path = "/") {
+  const info = getSidebarUserScopedRouteInfo(path);
+  return Boolean(info.scoped && info.routable);
 }
 
 export function isSidebarHomeRoute(path = "/") {
@@ -215,7 +343,13 @@ export function isSidebarHomeRoute(path = "/") {
 }
 
 export function sidebarHomeLookupPath(path = "/") {
-  return isSidebarHomeRoute(path) ? HOME_ROUTE : canonicalSidebarPath(path);
+  const info = getSidebarUserScopedRouteInfo(path);
+
+  if (info.scoped && info.routable) {
+    return info.lookupPath;
+  }
+
+  return info.home ? HOME_ROUTE : canonicalSidebarPath(path);
 }
 
 export function isSidebarPublicRoute(path = "/") {
@@ -223,7 +357,7 @@ export function isSidebarPublicRoute(path = "/") {
 }
 
 export function isSidebarAdminFallbackRoute(path = "/") {
-  return SIDEBAR_ADMIN_FALLBACK_ROUTES.includes(canonicalSidebarPath(path));
+  return SIDEBAR_ADMIN_FALLBACK_ROUTES.includes(sidebarHomeLookupPath(path));
 }
 
 /* =========================================================
@@ -257,6 +391,7 @@ export const SIDEBAR_ROUTE_META = freeze({
     label: "Clientes",
     icon: "clientes",
     order: 40,
+    adminOnly: true,
   }),
 
   [CUENTA_ROUTE]: freeze({
@@ -291,9 +426,9 @@ export const SIDEBAR_ROUTE_META = freeze({
 });
 
 function knownSidebarRouteMeta(path = "/") {
-  const route = canonicalSidebarPath(path);
+  const route = sidebarHomeLookupPath(path);
 
-  if (isSidebarHomeRoute(route)) {
+  if (route === HOME_ROUTE) {
     return SIDEBAR_ROUTE_META[HOME_ROUTE];
   }
 
@@ -301,7 +436,7 @@ function knownSidebarRouteMeta(path = "/") {
 }
 
 function fallbackRouteMeta(path = "/") {
-  const route = canonicalSidebarPath(path);
+  const route = sidebarHomeLookupPath(path);
   const key = route.replace(/^\//, "") || "home";
 
   return freeze({
@@ -338,9 +473,9 @@ export function getSidebarRouteIcon(path = "/", fallback = "") {
 
 export function getSidebarRouteOrder(path = "/", fallback = null) {
   const value = fallback ?? getSidebarRouteMeta(path).order;
-  const number = Number(value);
+  const output = Number(value);
 
-  return Number.isFinite(number) ? number : 999;
+  return Number.isFinite(output) ? output : 999;
 }
 
 /* =========================================================
@@ -363,6 +498,11 @@ export const SIDEBAR_ATTRS = freeze({
   active: "data-active",
   disabled: "data-disabled",
   spa: "data-spa",
+
+  dropdown: "data-sidebar-dropdown",
+  dropdownTrigger: "data-sidebar-dropdown-trigger",
+  dropdownMenu: "data-sidebar-dropdown-menu",
+  dropdownItem: "data-sidebar-dropdown-item",
 });
 
 export const SIDEBAR_SELECTORS = freeze({
@@ -376,7 +516,15 @@ export const SIDEBAR_SELECTORS = freeze({
   navLink: "[data-sidebar-nav-link]",
   brand: "[data-sidebar-brand]",
   toggle: "[data-sidebar-toggle]",
-  logout: "[data-sidebar-logout]",
+  logout: "[data-sidebar-logout], [data-sidebar-action='logout'], [data-sidebar-menu-action='logout']",
+
+  dropdown: "[data-sidebar-dropdown]",
+  dropdownTrigger: "[data-sidebar-dropdown-trigger]",
+  dropdownMenu: "[data-sidebar-dropdown-menu]",
+  dropdownItem: "[data-sidebar-dropdown-item='true']",
+  accountDropdown: "[data-sidebar-dropdown='account']",
+  accountTrigger: "[data-sidebar-dropdown-trigger='account']",
+  accountMenu: "[data-sidebar-dropdown-menu='account']",
 });
 
 /* =========================================================
@@ -415,6 +563,11 @@ export const SIDEBAR_CLASSES = freeze({
   userName: "sidebar-user-name",
   userRole: "sidebar-user-role",
 
+  dropdown: "sidebar-account-dropdown",
+  dropdownTrigger: "sidebar-account-trigger",
+  dropdownMenu: "sidebar-account-menu",
+  dropdownItem: "sidebar-account-menu-item",
+
   logout: "sidebar-logout",
   logoutIcon: "sidebar-logout-icon",
   logoutLabel: "sidebar-logout-label",
@@ -427,6 +580,7 @@ export const SIDEBAR_CLASSES = freeze({
 export const SIDEBAR_ICONS = freeze({
   brand: "brand",
   menu: "menu",
+  chevron: "chevron",
 
   home: "home",
   incidencias: "incidencias",
@@ -436,13 +590,19 @@ export const SIDEBAR_ICONS = freeze({
   cuenta: "cuenta",
   ajustes: "ajustes",
   servidor: "servidor",
+  help: "help",
 
   logout: "logout",
 });
 
 export function normalizeSidebarIcon(value = "") {
-  const icon = text(value, "home").toLowerCase();
-  return SIDEBAR_ICONS[icon] || SIDEBAR_ICONS.home;
+  const icon = text(value, "home")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
+
+  return Object.values(SIDEBAR_ICONS).includes(icon)
+    ? icon
+    : SIDEBAR_ICONS.home;
 }
 
 /* =========================================================
@@ -456,6 +616,7 @@ export const SIDEBAR_ACTIONS = freeze({
   close: "close",
   logout: "logout",
   sync: "sync",
+  accountMenu: "account-menu",
 });
 
 /* =========================================================
@@ -486,6 +647,7 @@ export function getSidebarConstantsSnapshot() {
       public: SIDEBAR_PUBLIC_ROUTES,
       privateFallback: SIDEBAR_PRIVATE_FALLBACK_ROUTES,
       adminFallback: SIDEBAR_ADMIN_FALLBACK_ROUTES,
+      userScoped: SIDEBAR_USER_SCOPED_ROUTES,
     },
 
     roles: SIDEBAR_ROLES,
@@ -503,10 +665,12 @@ export function getSidebarConstantsSnapshot() {
       noRouter: true,
       noStore: true,
       noStorage: true,
-      noDropdown: true,
+      noDropdownBehavior: true,
+      dropdownSelectorsOnly: true,
       noLegacyRoutes: true,
       noHomeRoute: true,
       userSlugHome: true,
+      userScopedPrivateRoutes: true,
       validatesAtSlugShape: true,
       roles: [SIDEBAR_ROLE_ADMIN, SIDEBAR_ROLE_USER],
     },
@@ -559,8 +723,12 @@ export default freeze({
   canonicalSidebarPath,
 
   normalizeSidebarSlug,
+  getSidebarUserScopedRouteInfo,
   getSidebarUserHomeSlugFromPath,
+  getSidebarUserScopedSlugFromPath,
+  getSidebarUserScopedRestPath,
   isSidebarUserHomeRoute,
+  isSidebarUserScopedRoute,
   isSidebarHomeRoute,
   sidebarHomeLookupPath,
 

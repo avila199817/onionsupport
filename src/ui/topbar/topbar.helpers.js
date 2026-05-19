@@ -4,6 +4,9 @@
 
    Responsabilidad:
    - Helpers mínimos de compat para Topbar.
+   - Resolver títulos visuales en formato Onion {Vista}.
+   - Resolver Home como /@{user.slug} cuando exista.
+   - Normalizar resultados de búsqueda local.
    - Sin DOM mutation.
    - Sin overlays.
    - Sin search runtime.
@@ -15,19 +18,22 @@
    - El topbar real vive en src/ui/topbar/index.js.
 ========================================================= */
 
-export const TOPBAR_HELPERS_VERSION = "simple";
+export const TOPBAR_HELPERS_VERSION = "topbar.helpers.v3";
 
 export const TOPBAR_SCOPE = "ui:topbar";
 export const TOPBAR_SEARCH_SCOPE = "ui:topbar:search";
 
+export const TOPBAR_TITLE_PREFIX = "Onion";
+export const TOPBAR_DEFAULT_VIEW_TITLE = "Home";
+
 export const TOPBAR_SEARCH_CONFIG = Object.freeze({
-  debounceMs: 200,
+  debounceMs: 110,
   minQueryLength: 1,
   maxQueryLength: 120,
   maxResultsTotal: 20,
   maxResultsPerGroup: 6,
   cacheTtlMs: 0,
-  timeoutMs: 8000,
+  timeoutMs: 0,
   mobileBreakpoint: 900,
 });
 
@@ -41,6 +47,33 @@ export const TOPBAR_RESULT_TYPES = Object.freeze({
   RECENT: "recent",
   GENERAL: "general",
 });
+
+export const TOPBAR_VIEW_TITLES = Object.freeze({
+  "/": "Home",
+  "/incidencias": "Incidencias",
+  "/tickets": "Incidencias",
+  "/facturas": "Facturas",
+  "/clientes": "Clientes",
+  "/usuarios": "Usuarios",
+  "/cuenta": "Cuenta",
+  "/ajustes": "Ajustes",
+  "/servidor": "Servidor",
+  "/login": "Acceso",
+  "/activate-account": "Activar cuenta",
+  "/password-request": "Recuperar acceso",
+  "/password-reset": "Nueva contraseña",
+});
+
+export const TOPBAR_SECTION_TITLES = Object.freeze([
+  ["/incidencias", "Incidencias"],
+  ["/tickets", "Incidencias"],
+  ["/facturas", "Facturas"],
+  ["/clientes", "Clientes"],
+  ["/usuarios", "Usuarios"],
+  ["/cuenta", "Cuenta"],
+  ["/ajustes", "Ajustes"],
+  ["/servidor", "Servidor"],
+]);
 
 const TYPE_LABELS = Object.freeze({
   incidencia: "Incidencias",
@@ -65,11 +98,11 @@ const TYPE_ICONS = Object.freeze({
 });
 
 const TYPE_ORDER = Object.freeze([
+  "nav",
   "incidencia",
   "factura",
   "cliente",
   "usuario",
-  "nav",
   "settings",
   "recent",
   "general",
@@ -81,6 +114,10 @@ const TYPE_ORDER = Object.freeze([
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 export function safeText(value, fallback = "") {
@@ -96,7 +133,7 @@ export function safeArray(value) {
 }
 
 export function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return isObject(value) ? value : {};
 }
 
 export function first(...values) {
@@ -104,7 +141,7 @@ export function first(...values) {
     if (value === null || value === undefined) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
-    if (safeObject(value) === value && Object.keys(value).length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
 
     return value;
   }
@@ -164,9 +201,10 @@ export function uniqBy(items = [], keyGetter = null) {
   const output = [];
 
   for (const item of safeArray(items)) {
-    const key = typeof keyGetter === "function"
-      ? safeText(keyGetter(item), "")
-      : safeText(item?.id || item?.key || item?.url || item?.title, "");
+    const key =
+      typeof keyGetter === "function"
+        ? safeText(keyGetter(item), "")
+        : safeText(item?.id || item?.key || item?.url || item?.title, "");
 
     if (!key || seen.has(key)) continue;
 
@@ -178,18 +216,69 @@ export function uniqBy(items = [], keyGetter = null) {
 }
 
 /* =========================================================
+   USER / SLUG
+========================================================= */
+
+export function getStateUser(AppCore = null) {
+  const state = safeObject(AppCore?.state);
+
+  return (
+    state.user ||
+    state.currentUser ||
+    state.authUser ||
+    state.sessionUser ||
+    state.session?.user ||
+    null
+  );
+}
+
+export function normalizeSlug(value = "") {
+  const slug = String(value ?? "")
+    .trim()
+    .replace(/^\/@+/, "")
+    .replace(/^@+/, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "");
+
+  return slug || "";
+}
+
+export function resolveHomePath(AppCore = null) {
+  const user = getStateUser(AppCore);
+  const slug = normalizeSlug(user?.slug || user?.username || "");
+
+  return slug ? `/@${slug}` : "/";
+}
+
+/* =========================================================
    TYPES
 ========================================================= */
 
 export function normalizeResultType(type = TOPBAR_RESULT_TYPES.GENERAL) {
   const clean = normalizeCompactText(type || TOPBAR_RESULT_TYPES.GENERAL);
 
-  if (clean === "incidencias" || clean === "ticket" || clean === "tickets") return "incidencia";
-  if (clean === "facturas" || clean === "invoice" || clean === "invoices") return "factura";
-  if (clean === "clientes" || clean === "client" || clean === "clients") return "cliente";
-  if (clean === "usuarios" || clean === "user" || clean === "users") return "usuario";
-  if (clean === "ajustes" || clean === "setting" || clean === "config") return "settings";
-  if (clean === "route" || clean === "ruta") return "nav";
+  if (clean === "incidencias" || clean === "ticket" || clean === "tickets") {
+    return "incidencia";
+  }
+
+  if (clean === "facturas" || clean === "invoice" || clean === "invoices") {
+    return "factura";
+  }
+
+  if (clean === "clientes" || clean === "client" || clean === "clients") {
+    return "cliente";
+  }
+
+  if (clean === "usuarios" || clean === "user" || clean === "users") {
+    return "usuario";
+  }
+
+  if (clean === "ajustes" || clean === "setting" || clean === "config") {
+    return "settings";
+  }
+
+  if (clean === "route" || clean === "ruta") {
+    return "nav";
+  }
 
   return TYPE_LABELS[clean] ? clean : TOPBAR_RESULT_TYPES.GENERAL;
 }
@@ -334,16 +423,97 @@ export function getCurrentPublicPath(AppCore = null) {
   }
 }
 
-export function isMobileViewport(mobileBreakpoint = TOPBAR_SEARCH_CONFIG.mobileBreakpoint) {
+export function isMobileViewport(
+  mobileBreakpoint = TOPBAR_SEARCH_CONFIG.mobileBreakpoint
+) {
   if (!isBrowser()) return false;
 
-  const breakpoint = Number(mobileBreakpoint) || TOPBAR_SEARCH_CONFIG.mobileBreakpoint;
+  const breakpoint =
+    Number(mobileBreakpoint) || TOPBAR_SEARCH_CONFIG.mobileBreakpoint;
 
   try {
     return window.matchMedia(`(max-width: ${breakpoint}px)`).matches;
   } catch {
     return window.innerWidth <= breakpoint;
   }
+}
+
+/* =========================================================
+   TOPBAR TITLE
+========================================================= */
+
+export function normalizeViewLabel(value = "") {
+  let output = safeText(value, "");
+
+  if (!output) return "";
+
+  output = output.replace(/^onion\s+/i, "").trim();
+
+  if (normalizeText(output) === normalizeText("Onion Support")) return "";
+
+  return output || "";
+}
+
+export function formatTopbarTitle(value = TOPBAR_DEFAULT_VIEW_TITLE) {
+  const label = normalizeViewLabel(value) || TOPBAR_DEFAULT_VIEW_TITLE;
+  return `${TOPBAR_TITLE_PREFIX} ${label}`;
+}
+
+function startsWithSection(path = "/", section = "/") {
+  return path === section || path.startsWith(`${section}/`);
+}
+
+export function getSectionTitle(path = "/") {
+  const clean = normalizePathname(path);
+
+  for (const [section, title] of TOPBAR_SECTION_TITLES) {
+    if (startsWithSection(clean, section)) return title;
+  }
+
+  return "";
+}
+
+function decodeURIComponentSafe(value = "") {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+export function prettyTitleFromPath(path = "/") {
+  const clean = normalizePathname(path);
+
+  if (clean === "/") return TOPBAR_DEFAULT_VIEW_TITLE;
+
+  return clean
+    .replace(/^\/+/, "")
+    .split("/")
+    .filter(Boolean)
+    .map((part) => {
+      const decoded = decodeURIComponentSafe(part).replace(/[-_]+/g, " ").trim();
+      return decoded ? decoded.charAt(0).toUpperCase() + decoded.slice(1) : "";
+    })
+    .filter(Boolean)
+    .join(" · ");
+}
+
+export function resolveTopbarRouteTitle(AppCore = null, path = "/") {
+  const clean = safeNormalizeCanonicalPath(AppCore, path);
+
+  if (/^\/@[^/]+/.test(clean)) {
+    return formatTopbarTitle(TOPBAR_DEFAULT_VIEW_TITLE);
+  }
+
+  const directTitle = TOPBAR_VIEW_TITLES[clean];
+
+  if (directTitle) return formatTopbarTitle(directTitle);
+
+  const sectionTitle = getSectionTitle(clean);
+
+  if (sectionTitle) return formatTopbarTitle(sectionTitle);
+
+  return formatTopbarTitle(prettyTitleFromPath(clean));
 }
 
 /* =========================================================
@@ -378,7 +548,10 @@ export function scoreResult(item = {}, query = "") {
   const urlScore = scoreTextMatch(item?.url, q);
   const idScore = scoreTextMatch(item?.id || item?.entityId, q) * 2;
 
-  return Math.max(0, Math.round(titleScore + subtitleScore + urlScore + idScore));
+  return Math.max(
+    0,
+    Math.round(titleScore + subtitleScore + urlScore + idScore)
+  );
 }
 
 /* =========================================================
@@ -427,16 +600,23 @@ export function groupResults(results = []) {
   }
 
   return [...groups.entries()]
-    .sort(([left], [right]) => getTypeGroupOrder(left) - getTypeGroupOrder(right))
+    .sort(
+      ([left], [right]) =>
+        getTypeGroupOrder(left) - getTypeGroupOrder(right)
+    )
     .map(([type, items]) => [
       type,
       items.sort((a, b) => {
         const scoreDiff = Number(b?.score || 0) - Number(a?.score || 0);
         if (scoreDiff) return scoreDiff;
 
-        return String(a?.title || "").localeCompare(String(b?.title || ""), "es", {
-          sensitivity: "base",
-        });
+        return String(a?.title || "").localeCompare(
+          String(b?.title || ""),
+          "es",
+          {
+            sensitivity: "base",
+          }
+        );
       }),
     ]);
 }
@@ -449,8 +629,12 @@ export default {
   TOPBAR_HELPERS_VERSION,
   TOPBAR_SCOPE,
   TOPBAR_SEARCH_SCOPE,
+  TOPBAR_TITLE_PREFIX,
+  TOPBAR_DEFAULT_VIEW_TITLE,
   TOPBAR_SEARCH_CONFIG,
   TOPBAR_RESULT_TYPES,
+  TOPBAR_VIEW_TITLES,
+  TOPBAR_SECTION_TITLES,
 
   safeText,
   safeArray,
@@ -464,6 +648,10 @@ export default {
   normalizeQuery,
   tokenize,
   uniqBy,
+
+  getStateUser,
+  normalizeSlug,
+  resolveHomePath,
 
   normalizeResultType,
   isResultType,
@@ -480,6 +668,12 @@ export default {
   safeNormalizeCanonicalPath,
   getCurrentPublicPath,
   isMobileViewport,
+
+  normalizeViewLabel,
+  formatTopbarTitle,
+  getSectionTitle,
+  prettyTitleFromPath,
+  resolveTopbarRouteTitle,
 
   scoreTextMatch,
   scoreResult,

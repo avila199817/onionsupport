@@ -11,6 +11,7 @@
    - Renderizar vista.
    - Actualizar history.
    - Actualizar estado de ruta.
+   - Sincronizar chrome registrado tras render de ruta.
    - Ruta privada sin sesión -> /login.
    - Login con sesión -> /@{user.slug}.
    - Home interna: /
@@ -32,7 +33,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v3";
+export const ROUTER_VERSION = "router.index.v4";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -701,7 +702,7 @@ export const Router = (() => {
   }
 
   /* =======================================================
-     STATE / SHELL
+     STATE / SHELL / CHROME
   ======================================================= */
 
   function setRouterState({
@@ -750,6 +751,73 @@ export const Router = (() => {
       AppCore,
       route?.title || route?.label || route?.name || "Onion Support"
     );
+
+    return true;
+  }
+
+  function getChromeModule(...names) {
+    for (const name of names.flat().filter(Boolean)) {
+      try {
+        const module =
+          AppCore?.modules?.get?.(name) ||
+          AppCore?.ui?.[name] ||
+          AppCore?.[name] ||
+          null;
+
+        if (module) return module;
+      } catch {
+        // noop
+      }
+    }
+
+    return null;
+  }
+
+  function syncChromeModule(module = null, context = {}) {
+    if (!module) return false;
+
+    for (const method of ["sync", "refresh", "render"]) {
+      try {
+        if (isFunction(module?.[method])) {
+          module[method](context);
+          return true;
+        }
+      } catch {
+        return false;
+      }
+    }
+
+    return false;
+  }
+
+  function syncRouteChrome(route = null, state = {}, options = {}) {
+    const context = {
+      AppCore,
+      core: AppCore,
+
+      route,
+      canonicalPath: state.canonicalPath || HOME_PATH,
+      publicPath: state.publicPath || state.canonicalPath || HOME_PATH,
+      routeParams: state.routeParams || {},
+
+      source: options.source || SOURCE,
+      reason: "route-render",
+    };
+
+    const sidebar = getChromeModule(
+      "SidebarUI",
+      "sidebar",
+      "Sidebar"
+    );
+
+    const topbar = getChromeModule(
+      "TopbarUI",
+      "topbar",
+      "Topbar"
+    );
+
+    syncChromeModule(sidebar, context);
+    syncChromeModule(topbar, context);
 
     return true;
   }
@@ -1020,6 +1088,7 @@ export const Router = (() => {
     const state = setRouterState(data);
 
     updateShell(null, state.canonicalPath);
+    syncRouteChrome(null, state, options);
     hideLoader();
 
     return {
@@ -1054,6 +1123,7 @@ export const Router = (() => {
     const state = setRouterState(data);
 
     updateShell(route, state.canonicalPath);
+    syncRouteChrome(route, state, options);
     hideLoader();
 
     return {
@@ -1101,6 +1171,7 @@ export const Router = (() => {
     const state = setRouterState(data);
 
     updateShell(route, state.canonicalPath);
+    syncRouteChrome(route, state, options);
     hideLoader();
 
     return {
@@ -1136,6 +1207,7 @@ export const Router = (() => {
     const state = setRouterState(data);
 
     updateShell(route, state.canonicalPath);
+    syncRouteChrome(route, state, options);
     hideLoader();
 
     return {
@@ -1487,6 +1559,8 @@ export const Router = (() => {
 
         homeInternalPath: HOME_PATH,
         homeVisiblePattern: "/@{user.slug}",
+
+        syncsRegisteredChromeAfterRender: true,
 
         noHomeAlias: true,
         noHomeRoute: true,

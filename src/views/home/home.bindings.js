@@ -22,7 +22,7 @@
    - Sin /incidencias/nueva.
 ========================================================= */
 
-export const HOME_BINDINGS_VERSION = "home.bindings.v1";
+export const HOME_BINDINGS_VERSION = "home.bindings.v2";
 
 const DEFAULT_SCOPE = "view:home";
 
@@ -32,9 +32,7 @@ const ACTION_SELECTOR = [
   "[data-quick-action]",
   "[data-route]",
   "[data-href]",
-  "[data-widget-id]",
-  "[data-widget-key]",
-  "[data-entity-id]",
+  "a[href]",
 ].join(",");
 
 const KEYBOARD_SELECTOR = [
@@ -51,33 +49,16 @@ const KEYBOARD_SELECTOR = [
 const ACTIONS = Object.freeze({
   refresh: new Set(["refresh", "retry", "reload"]),
   export: new Set(["export", "export_csv", "download_csv"]),
+
   openWidget: new Set(["open_widget", "open_home_widget", "open_block", "open_kpi", "detail"]),
-  copyId: new Set(["copy", "copy_id", "copy_widget_id", "copy_entity_id"]),
+  copyId: new Set(["copy", "copy_id", "copy_widget_id", "copy_entity_id", "copy_ticket_id"]),
+
   navigate: new Set(["navigate", "navigate_home", "go", "open_route"]),
   create: new Set(["create", "new", "create_ticket", "create_incidencia", "new_ticket", "new_incidencia"]),
+
   pagePrev: new Set(["prev_page", "previous_page"]),
   pageNext: new Set(["next_page"]),
   pageGo: new Set(["page", "go_page"]),
-});
-
-const ROUTE_FALLBACKS = Object.freeze({
-  go_incidencias: "/incidencias",
-  go_tickets: "/incidencias",
-
-  go_facturas: "/facturas",
-  go_invoices: "/facturas",
-
-  go_clientes: "/clientes",
-  go_clients: "/clientes",
-
-  go_usuarios: "/usuarios",
-  go_users: "/usuarios",
-
-  go_cuenta: "/cuenta",
-  go_account: "/cuenta",
-
-  go_ajustes: "/ajustes",
-  go_settings: "/ajustes",
 });
 
 const cleanupsByScope = new Map();
@@ -171,18 +152,6 @@ function scopeName(scope = DEFAULT_SCOPE) {
   return DEFAULT_SCOPE;
 }
 
-function addCleanup(scope = DEFAULT_SCOPE, cleanup = null) {
-  if (!isFunction(cleanup)) return false;
-
-  const name = scopeName(scope);
-  const list = cleanupsByScope.get(name) || [];
-
-  list.push(cleanup);
-  cleanupsByScope.set(name, list);
-
-  return true;
-}
-
 function cleanupScope(scope = DEFAULT_SCOPE) {
   const name = scopeName(scope);
   const list = cleanupsByScope.get(name) || [];
@@ -196,6 +165,18 @@ function cleanupScope(scope = DEFAULT_SCOPE) {
   }
 
   cleanupsByScope.delete(name);
+
+  return true;
+}
+
+function addCleanup(scope = DEFAULT_SCOPE, cleanup = null) {
+  if (!isFunction(cleanup)) return false;
+
+  const name = scopeName(scope);
+  const list = cleanupsByScope.get(name) || [];
+
+  list.push(cleanup);
+  cleanupsByScope.set(name, list);
 
   return true;
 }
@@ -230,10 +211,10 @@ function listen(scope, target, eventName = "", handler = null, options = undefin
 
 function getContainer(container = null) {
   if (!isBrowser()) return null;
-
   if (isElement(container)) return container;
 
   return (
+    document.querySelector("[data-router-view-host='true']") ||
     document.getElementById("view-container") ||
     document.querySelector("[data-router-view]") ||
     document.querySelector("[data-view-root]") ||
@@ -318,29 +299,19 @@ function actionName(element = null) {
 function routeFromElement(element = null) {
   if (!element) return "";
 
-  const source = element.closest?.("[data-route], [data-href], [href]") || element;
-
   return safeText(
     first(
       datasetValue(element, "route"),
       datasetValue(element, "href"),
       element.getAttribute?.("href"),
-
-      datasetValue(source, "route"),
-      datasetValue(source, "href"),
-      source.getAttribute?.("href")
+      ""
     ),
     ""
   );
 }
 
-function widgetIdFromElement(element = null) {
+function idFromElement(element = null) {
   if (!element) return "";
-
-  const source =
-    element.closest?.(
-      "[data-widget-id], [data-widget-key], [data-entity-id], [data-ticket-id], [data-incidencia-id], [data-invoice-id], [data-factura-id], [data-key]"
-    ) || element;
 
   return safeText(
     first(
@@ -352,15 +323,7 @@ function widgetIdFromElement(element = null) {
       datasetValue(element, "invoiceId"),
       datasetValue(element, "facturaId"),
       datasetValue(element, "key"),
-
-      datasetValue(source, "widgetId"),
-      datasetValue(source, "widgetKey"),
-      datasetValue(source, "entityId"),
-      datasetValue(source, "ticketId"),
-      datasetValue(source, "incidenciaId"),
-      datasetValue(source, "invoiceId"),
-      datasetValue(source, "facturaId"),
-      datasetValue(source, "key")
+      ""
     ),
     ""
   );
@@ -424,7 +387,7 @@ function pageFromElement(element = null) {
 }
 
 /* =========================================================
-   TARGET GUARDS / BUSY
+   GUARDS / BUSY
 ========================================================= */
 
 function isModifiedClick(event = null) {
@@ -503,7 +466,7 @@ function setBusy(element = null, busy = false) {
   try {
     if (
       "disabled" in element &&
-      ["BUTTON", "INPUT", "SELECT"].includes(element.tagName)
+      ["BUTTON", "INPUT", "SELECT"].includes(String(element.tagName || "").toUpperCase())
     ) {
       element.disabled = value ? true : Boolean(previous.disabled);
     }
@@ -551,10 +514,10 @@ function normalizeInternalRoute(route = "") {
 
   if (
     lower.startsWith("javascript:") ||
-    lower.startsWith("data:") ||
-    lower.startsWith("vbscript:") ||
-    lower.startsWith("mailto:") ||
-    lower.startsWith("tel:")
+      lower.startsWith("data:") ||
+      lower.startsWith("vbscript:") ||
+      lower.startsWith("mailto:") ||
+      lower.startsWith("tel:")
   ) {
     return "";
   }
@@ -593,19 +556,9 @@ function normalizeInternalRoute(route = "") {
     cleanPath = cleanPath.replace(/\/+$/g, "") || "/";
   }
 
-  /*
-    /home no existe en la SPA nueva.
-    Se rechaza para no perpetuar aliases legacy.
-  */
   if (cleanPath === "/home") return "";
 
   return `${cleanPath}${query}${hash}`;
-}
-
-function routeFromAction(action = "") {
-  const key = normalizeKey(action);
-
-  return ROUTE_FALLBACKS[key] || "";
 }
 
 /* =========================================================
@@ -614,6 +567,7 @@ function routeFromAction(action = "") {
 
 function resolveKind(element = null) {
   const action = actionName(element);
+  const route = normalizeInternalRoute(routeFromElement(element));
 
   if (ACTIONS.refresh.has(action)) return "refresh";
   if (ACTIONS.export.has(action)) return "export";
@@ -625,13 +579,7 @@ function resolveKind(element = null) {
   if (ACTIONS.pageGo.has(action)) return "page-go";
   if (ACTIONS.navigate.has(action)) return "navigate";
 
-  if (!action && widgetIdFromElement(element) && !normalizeInternalRoute(routeFromElement(element))) {
-    return "open-widget";
-  }
-
-  if (normalizeInternalRoute(routeFromElement(element)) || routeFromAction(action)) {
-    return "navigate";
-  }
+  if (route) return "navigate";
 
   return "";
 }
@@ -682,8 +630,7 @@ async function handleExport(element, api = {}) {
 }
 
 async function handleNavigate(element, api = {}) {
-  const action = actionName(element);
-  const route = normalizeInternalRoute(routeFromElement(element) || routeFromAction(action));
+  const route = normalizeInternalRoute(routeFromElement(element));
   const payload = payloadFromElement(element);
 
   if (!route || !isFunction(api.navigateFromHomeAction)) return false;
@@ -698,13 +645,8 @@ async function handleNavigate(element, api = {}) {
 }
 
 async function handleOpenWidget(element, api = {}) {
-  const widgetId = widgetIdFromElement(element);
+  const widgetId = idFromElement(element);
   const payload = payloadFromElement(element);
-  const route = normalizeInternalRoute(routeFromElement(element));
-
-  if (!widgetId && route) {
-    return handleNavigate(element, api);
-  }
 
   if (!widgetId || !isFunction(api.openHomeWidgetAction)) return false;
 
@@ -712,20 +654,20 @@ async function handleOpenWidget(element, api = {}) {
     api.openHomeWidgetAction({
       widgetId,
       payload,
-      navigate: Boolean(route),
+      navigate: true,
       silent: false,
     })
   );
 }
 
 async function handleCopyId(element, api = {}) {
-  const widgetId = widgetIdFromElement(element);
+  const id = idFromElement(element);
 
-  if (!widgetId || !isFunction(api.copyHomeWidgetIdAction)) return false;
+  if (!id || !isFunction(api.copyHomeWidgetIdAction)) return false;
 
   return withBusy(element, () =>
     api.copyHomeWidgetIdAction({
-      widgetId,
+      widgetId: id,
       silent: false,
     })
   );
@@ -766,27 +708,6 @@ async function handleCreate(element, api = {}) {
   });
 }
 
-async function handleQuick(element, api = {}) {
-  const action = actionName(element);
-  const payload = payloadFromElement(element);
-  const route = normalizeInternalRoute(routeFromElement(element) || routeFromAction(action));
-
-  if (route && isFunction(api.navigateFromHomeAction)) {
-    return handleNavigate(element, api);
-  }
-
-  if (!isFunction(api.runHomeQuickAction)) return false;
-
-  return withBusy(element, () =>
-    api.runHomeQuickAction({
-      action,
-      route,
-      payload,
-      silent: false,
-    })
-  );
-}
-
 async function handlePage(kind = "", element = null, api = {}) {
   const page = pageFromElement(element);
 
@@ -803,18 +724,23 @@ async function handlePage(kind = "", element = null, api = {}) {
       return api.goToPage(page);
     }
 
-    if (isFunction(api.runHomeQuickAction)) {
-      return api.runHomeQuickAction({
-        action: kind,
-        payload: {
-          page,
-        },
-        silent: true,
-      });
-    }
-
     return false;
   });
+}
+
+async function handleQuick(element, api = {}) {
+  const action = actionName(element);
+  const payload = payloadFromElement(element);
+
+  if (!isFunction(api.runHomeQuickAction)) return false;
+
+  return withBusy(element, () =>
+    api.runHomeQuickAction({
+      action,
+      payload,
+      silent: false,
+    })
+  );
 }
 
 /* =========================================================
@@ -833,17 +759,21 @@ async function dispatchAction(event = null, element = null, api = {}) {
   event?.preventDefault?.();
   event?.stopPropagation?.();
 
-  if (kind === "refresh") return handleRefresh(element, api);
-  if (kind === "export") return handleExport(element, api);
-  if (kind === "navigate") return handleNavigate(element, api);
-  if (kind === "open-widget") return handleOpenWidget(element, api);
-  if (kind === "copy-id") return handleCopyId(element, api);
-  if (kind === "create") return handleCreate(element, api);
-  if (kind === "page-prev") return handlePage(kind, element, api);
-  if (kind === "page-next") return handlePage(kind, element, api);
-  if (kind === "page-go") return handlePage(kind, element, api);
+  try {
+    if (kind === "refresh") return handleRefresh(element, api);
+    if (kind === "export") return handleExport(element, api);
+    if (kind === "navigate") return handleNavigate(element, api);
+    if (kind === "open-widget") return handleOpenWidget(element, api);
+    if (kind === "copy-id") return handleCopyId(element, api);
+    if (kind === "create") return handleCreate(element, api);
+    if (kind === "page-prev") return handlePage(kind, element, api);
+    if (kind === "page-next") return handlePage(kind, element, api);
+    if (kind === "page-go") return handlePage(kind, element, api);
 
-  return handleQuick(element, api);
+    return handleQuick(element, api);
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -955,7 +885,6 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
     browser: isBrowser(),
 
     cleanupCount: cleanupsByScope.get(name)?.length || 0,
-
     hasContainer: Boolean(getContainer()),
 
     actions: {
@@ -979,6 +908,7 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
       noFetch: true,
       noHomeAlias: true,
       noCreateRoute: true,
+      noPassiveRowActions: true,
     },
 
     at: nowIso(),

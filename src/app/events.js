@@ -12,45 +12,50 @@
    - Sin imports.
 ========================================================= */
 
-export const APP_EVENTS_VERSION = "simple";
+export const APP_EVENTS_VERSION = "app.events.v2";
 
-let bound = false;
+/* =========================================================
+   PUBLIC API
+========================================================= */
 
 export function bindAppEvents() {
-  bound = true;
-  return true;
+  return false;
 }
 
 export function unbindAppEvents() {
-  bound = false;
   return true;
 }
 
-export function requestUiRepair(reason = "manual") {
-  return {
-    ok: true,
-    ignored: true,
-    reason,
-  };
-}
+/* =========================================================
+   SNAPSHOT
+========================================================= */
 
 export function getAppEventsSnapshot() {
   return {
     version: APP_EVENTS_VERSION,
-    bound,
+
+    bound: false,
+
+    policy: {
+      noRegisteredEvents: true,
+      noRouterListeners: true,
+      noAuthListeners: true,
+      noUiRepair: true,
+      noEmits: true,
+      noImports: true,
+    },
   };
 }
 
-export function resetAppEventsState() {
-  bound = false;
-  return getAppEventsSnapshot();
-}
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   APP_EVENTS_VERSION,
+
   bindAppEvents,
   unbindAppEvents,
-  requestUiRepair,
+
   getAppEventsSnapshot,
-  resetAppEventsState,
 };

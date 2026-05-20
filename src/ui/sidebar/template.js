@@ -9,6 +9,8 @@
    - Header logo-only: sin texto visible de marca.
    - Logo de empresa real usando favicon_white.png / favicon_black.png.
    - Sin SVG fallback como logo de marca.
+   - Pintar avatar si user.js entrega avatarUrl.
+   - Pintar fallback de iniciales si no hay avatar o falla la imagen.
    - Preparar markup del dropdown de cuenta.
    - Recibir datos ya normalizados desde index.js/user.js.
    - No navegar.
@@ -43,7 +45,7 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v10";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v11";
 
 /* =========================================================
    BRAND ASSETS
@@ -53,6 +55,18 @@ const BRAND_LOGOS = Object.freeze({
   white: new URL("../../media/img/favicon_white.png", import.meta.url).href,
   black: new URL("../../media/img/favicon_black.png", import.meta.url).href,
 });
+
+const ROLE_LABEL_ADMIN = "Administrador";
+const ROLE_LABEL_STANDARD = "Estandar";
+
+const BLOCKED_HREFS = new Set([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
+]);
 
 /* =========================================================
    ICON PATHS
@@ -140,21 +154,41 @@ function appendChildren(parent = null, children = []) {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
     String(value || "")
   );
 }
 
+function normalizeInternalPath(value = "") {
+  let href = text(value, "");
+
+  if (!href) return "";
+  if (!href.startsWith("/")) return "";
+  if (href.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return "";
+  if (/[\r\n\t\\]/.test(href)) return "";
+  if (hasSensitiveQuery(href)) return "";
+
+  href = href.replace(/\/{2,}/g, "/") || "";
+
+  const cleanPath = href.split("?")[0].split("#")[0].replace(/\/+$/g, "") || "/";
+
+  if (BLOCKED_HREFS.has(cleanPath.toLowerCase())) return "";
+  if (cleanPath.toLowerCase().startsWith("/2fa/")) return "";
+  if (cleanPath.toLowerCase().startsWith("/mfa/")) return "";
+  if (cleanPath.toLowerCase().startsWith("/otp/")) return "";
+
+  return href;
+}
+
 function safeInternalHref(value = "", fallback = "/") {
-  const href = text(value, fallback);
+  const normalized = normalizeInternalPath(value);
 
-  if (!href.startsWith("/")) return fallback;
-  if (href.startsWith("//")) return fallback;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return fallback;
-  if (/[\r\n\t\\]/.test(href)) return fallback;
-  if (hasSensitiveQuery(href)) return fallback;
+  if (normalized) return normalized;
 
-  return href.replace(/\/{2,}/g, "/") || fallback;
+  if (fallback === "") return "";
+
+  return normalizeInternalPath(fallback) || "/";
 }
 
 function safeAssetSrc(value = "", fallback = "") {
@@ -172,7 +206,15 @@ function safeAssetSrc(value = "", fallback = "") {
 
   if (/^https?:\/\//i.test(src) && !hasSensitiveQuery(src)) {
     try {
-      return new URL(src).href;
+      const url = new URL(src);
+
+      if (url.protocol === "https:") return url.href;
+
+      if (isBrowser() && url.origin === window.location.origin) {
+        return url.href;
+      }
+
+      return fallback;
     } catch {
       return fallback;
     }
@@ -181,8 +223,27 @@ function safeAssetSrc(value = "", fallback = "") {
   return fallback;
 }
 
-function safeImageSrc(value = "") {
-  return safeAssetSrc(value, "");
+function safeAvatarSrc(value = "") {
+  const src = text(value, "");
+
+  if (!src) return "";
+  if (src.startsWith("//")) return "";
+  if (/[\r\n\t\\]/.test(src)) return "";
+  if (hasSensitiveQuery(src)) return "";
+
+  if (src.startsWith("/")) {
+    return src.replace(/\/{2,}/g, "/") || "";
+  }
+
+  if (/^https:\/\//i.test(src)) {
+    try {
+      return new URL(src).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
 }
 
 function roleText(value = "") {
@@ -204,12 +265,30 @@ function createSpan(className = "", textContent = "", attrs = {}) {
   });
 }
 
+function isAdminUser(user = {}) {
+  const role = String(user.role || user.rol || "").toLowerCase();
+  const roles = Array.isArray(user.roles)
+    ? user.roles.map((item) => String(item || "").toLowerCase())
+    : [];
+
+  return Boolean(
+    user.isAdmin === true ||
+      role === "admin" ||
+      roles.includes("admin")
+  );
+}
+
+function defaultRoleLabel(user = {}) {
+  return isAdminUser(user) ? ROLE_LABEL_ADMIN : ROLE_LABEL_STANDARD;
+}
+
 /* =========================================================
    NORMALIZE
 ========================================================= */
 
 function normalizeItem(item = {}) {
-  const href = safeInternalHref(item.href || item.path, "/");
+  const rawHref = item.href || item.path || "";
+  const href = safeInternalHref(rawHref, "/");
   const label = text(item.label || item.title || item.name, href);
   const icon = normalizeSidebarIcon(item.icon || SIDEBAR_ICONS.home);
 
@@ -220,7 +299,7 @@ function normalizeItem(item = {}) {
 
     active: item.active === true,
     disabled: item.disabled === true,
-    hidden: item.hidden === true,
+    hidden: item.hidden === true || !normalizeInternalPath(rawHref || href),
     adminOnly: item.adminOnly === true,
 
     badge: text(item.badge, ""),
@@ -242,7 +321,7 @@ function normalizeUser(user = {}) {
     .slice(0, 2)
     .toUpperCase();
 
-  const avatarUrl = safeImageSrc(
+  const avatarUrl = safeAvatarSrc(
     user.avatarUrl ||
       user.avatar ||
       user.photoUrl ||
@@ -254,7 +333,7 @@ function normalizeUser(user = {}) {
     name,
     initials,
     avatarUrl,
-    roleLabel: text(user.roleLabel, "Usuario"),
+    roleLabel: text(user.roleLabel, defaultRoleLabel(user)),
   };
 }
 
@@ -312,8 +391,8 @@ function createIconSlot(className = "", iconName = SIDEBAR_ICONS.home, svgClass 
 ========================================================= */
 
 function getPreferredBrandLogoSrc() {
-  const white = safeImageSrc(BRAND_LOGOS.white);
-  const black = safeImageSrc(BRAND_LOGOS.black);
+  const white = safeAssetSrc(BRAND_LOGOS.white);
+  const black = safeAssetSrc(BRAND_LOGOS.black);
 
   if (!isBrowser()) return white || black || "";
 
@@ -339,8 +418,8 @@ function getPreferredBrandLogoSrc() {
 }
 
 export function createSidebarBrandLogo() {
-  const whiteLogo = safeImageSrc(BRAND_LOGOS.white);
-  const blackLogo = safeImageSrc(BRAND_LOGOS.black);
+  const whiteLogo = safeAssetSrc(BRAND_LOGOS.white);
+  const blackLogo = safeAssetSrc(BRAND_LOGOS.black);
   const preferredLogo = getPreferredBrandLogoSrc();
 
   const logo = createElement("span", {
@@ -378,42 +457,77 @@ export function createSidebarBrandLogo() {
    AVATAR
 ========================================================= */
 
+function markAvatarFallback(avatar = null, img = null) {
+  if (!avatar) return false;
+
+  try {
+    avatar.classList.remove("has-image");
+    avatar.classList.add("is-fallback");
+    avatar.dataset.fallback = "true";
+    avatar.dataset.avatarState = "fallback";
+
+    if (img) {
+      img.hidden = true;
+      img.removeAttribute("src");
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function createUserAvatar(user = {}, className = SIDEBAR_CLASSES.userAvatar) {
   const normalizedUser = normalizeUser(user);
+  const hasImage = Boolean(normalizedUser.avatarUrl);
 
   const avatar = createElement("span", {
     className: classNames(
       className,
-      normalizedUser.avatarUrl ? "has-image" : "is-fallback"
+      hasImage ? "has-image" : "is-fallback"
     ),
     attrs: {
       "aria-hidden": "true",
       "data-sidebar-user-avatar": "true",
-      "data-fallback": normalizedUser.avatarUrl ? "false" : "true",
+      "data-fallback": hasImage ? "false" : "true",
+      "data-avatar-state": hasImage ? "image" : "fallback",
     },
   });
 
-  if (normalizedUser.avatarUrl) {
-    appendChildren(
-      avatar,
-      createElement("img", {
-        className: "sidebar-user-avatar-img",
-        attrs: {
-          src: normalizedUser.avatarUrl,
-          alt: "",
-          loading: "lazy",
-          decoding: "async",
-          referrerpolicy: "no-referrer",
-          draggable: "false",
-          "data-sidebar-avatar-img": "true",
+  if (hasImage) {
+    const img = createElement("img", {
+      className: "sidebar-user-avatar-img",
+      attrs: {
+        src: normalizedUser.avatarUrl,
+        alt: "",
+        loading: "lazy",
+        decoding: "async",
+        referrerpolicy: "no-referrer",
+        draggable: "false",
+        "data-sidebar-avatar-img": "true",
+      },
+    });
+
+    try {
+      img.addEventListener(
+        "error",
+        () => {
+          markAvatarFallback(avatar, img);
         },
-      })
-    );
+        { once: true }
+      );
+    } catch {
+      // noop
+    }
+
+    appendChildren(avatar, img);
   }
 
   appendChildren(
     avatar,
-    createSpan("sidebar-user-avatar-fallback", normalizedUser.initials)
+    createSpan("sidebar-user-avatar-fallback", normalizedUser.initials, {
+      "data-sidebar-avatar-fallback": "true",
+    })
   );
 
   return avatar;
@@ -693,6 +807,7 @@ function createAccountDropdown(user = {}) {
       "aria-haspopup": "menu",
       "aria-expanded": "false",
       "aria-controls": menuId,
+      "aria-label": `Cuenta de ${normalizedUser.name}`,
     },
   });
 
@@ -895,6 +1010,12 @@ export function getSidebarTemplateSnapshot() {
       black: BRAND_LOGOS.black,
     },
 
+    roleLabels: {
+      admin: ROLE_LABEL_ADMIN,
+      user: ROLE_LABEL_STANDARD,
+      fallback: ROLE_LABEL_STANDARD,
+    },
+
     policy: {
       buildsDom: true,
       stableCssStructure: true,
@@ -911,11 +1032,20 @@ export function getSidebarTemplateSnapshot() {
       textOnlyHeaderBrand: false,
       panelCollapseIcon: true,
 
+      avatarMarkupOnly: true,
+      avatarSourceComesFromUserViewModel: true,
+      avatarImageWithInitialsFallback: true,
+      avatarInternalOrHttpsOnly: true,
+
+      standardRoleLabelForNonAdmin: true,
+      adminRoleLabelPreserved: true,
+
       legacyBrandClassesKept: true,
 
       safeInternalHref: true,
       safeAssetSrc: true,
       noSensitiveHrefInDom: true,
+      blocksLegacyRoutes: true,
 
       noNavigation: true,
       noSessionRead: true,

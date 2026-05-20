@@ -9,7 +9,7 @@
    - Renderizar ruta inicial capturada por main.js.
    - Sin Auth.
    - Sin AppCore complejo.
-   - Sin eventos.
+   - Sin eventos propios.
    - Sin debug.
    - Sin snapshots grandes.
    - Sin token flow.
@@ -18,7 +18,7 @@
 
 import { Router } from "../router/index.js";
 
-export const ROUTER_BOOTSTRAP_VERSION = "app.router.v2";
+export const ROUTER_BOOTSTRAP_VERSION = "app.router.v3";
 
 let configured = false;
 let bound = false;
@@ -41,6 +41,11 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
+}
+
 function currentPath() {
   if (!isBrowser()) return "/";
 
@@ -52,30 +57,32 @@ function currentPath() {
   }
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
-  return output || fallback;
+function pathCandidate(value = "") {
+  return typeof value === "string" ? cleanText(value, "") : "";
 }
 
 function routeFrom(options = {}) {
-  return cleanText(
-    options.bootContext?.initialPath ||
-      options.initialPath ||
-      options.publicPath ||
-      options.path ||
-      options.route ||
-      currentPath(),
-    "/"
+  const input = isObject(options) ? options : {};
+  const bootContext = isObject(input.bootContext) ? input.bootContext : {};
+
+  return (
+    pathCandidate(bootContext.initialPath) ||
+    pathCandidate(input.initialPath) ||
+    pathCandidate(input.publicPath) ||
+    pathCandidate(input.path) ||
+    pathCandidate(input.route) ||
+    currentPath()
   );
 }
 
 function payload(options = {}, extra = {}) {
   const input = isObject(options) ? options : {};
+  const addition = isObject(extra) ? extra : {};
 
   return {
     ...input,
-    ...extra,
-    source: cleanText(input.source, "app.router"),
+    ...addition,
+    source: cleanText(addition.source || input.source, "app.router"),
   };
 }
 
@@ -127,6 +134,7 @@ export async function bindRouter(options = {}) {
   }
 
   if (!isFunction(Router?.bind)) {
+    bound = true;
     return true;
   }
 
@@ -155,6 +163,7 @@ export function renderInitialRoute(options = {}) {
 
   renderPromise = (async () => {
     await configureRouter(options);
+    await bindRouter(options);
 
     const path = routeFrom(options);
     const render = requireRouterMethod("render");
@@ -164,8 +173,6 @@ export function renderInitialRoute(options = {}) {
       path,
       payload(options, {
         initialRender: true,
-        force: true,
-        preserveUrl: true,
         replaceState: true,
         skipHistory: true,
       })
@@ -176,9 +183,6 @@ export function renderInitialRoute(options = {}) {
     }
 
     rendered = true;
-
-    await bindRouter(options);
-
     return true;
   })()
     .catch((error) => {
@@ -223,6 +227,24 @@ export function getRouterBootstrapState() {
       hasInit: isFunction(Router?.init),
       hasBind: isFunction(Router?.bind),
       hasRender: isFunction(Router?.render),
+    },
+
+    policy: {
+      wrapperOnly: true,
+      appManagedInitialRender: true,
+      bindsBeforeInitialRender: true,
+
+      ownAuth: false,
+      ownStorage: false,
+      ownTransport: false,
+      ownNavigationPolicy: false,
+      ownRouteGuards: false,
+      ownHistory: false,
+
+      noTokenFlow: true,
+      noFetch: true,
+      noEventsOwn: true,
+      noDebugNoise: true,
     },
   };
 }

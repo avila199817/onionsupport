@@ -8,6 +8,8 @@
    - Auth header sólo si toca.
    - /api/auth/me siempre privado.
    - Bloquear endpoints externos.
+   - Preservar Authorization si ya viene preparado por core/http.js.
+   - Parsear respuesta JSON/text/blob/arrayBuffer de forma mínima.
    - Sin hooks.
    - Sin retry real.
    - Sin dedupe real.
@@ -27,7 +29,7 @@ import {
   isPublicApiPath,
 } from "./config.js";
 
-export const REQUEST_VERSION = "core.request.v3";
+export const REQUEST_VERSION = "core.request.v4";
 
 const DEFAULT_API_BASE = getApiBase();
 const API_BASE = normalizeApiBase(
@@ -38,7 +40,7 @@ const API_BASE = normalizeApiBase(
     DEFAULT_API_BASE
 );
 
-const PRIVATE_ME_PATH = AUTH_ENDPOINTS.me;
+const PRIVATE_ME_PATH = AUTH_ENDPOINTS.me || "/api/auth/me";
 
 /* =========================================================
    BASICS
@@ -364,6 +366,10 @@ function buildHeaders({
   if (auth) {
     const token = getToken(state, options);
 
+    /*
+      No pisa Authorization si core/http.js ya lo preparó.
+      Sólo lo añade cuando falta y hay token usable.
+    */
     if (token && !hasHeader(headers, "authorization")) {
       headers.Authorization = `Bearer ${token}`;
     }
@@ -405,6 +411,37 @@ export async function parseResponseBody(response, responseType = "auto") {
   return response.text();
 }
 
+function errorMessageFrom(value = null) {
+  if (!value) return "";
+
+  if (typeof value === "string") return cleanText(value, "");
+
+  if (isObject(value)) {
+    return cleanText(
+      value.message ||
+        value.error ||
+        value.detail ||
+        value.reason ||
+        "",
+      ""
+    );
+  }
+
+  return cleanText(String(value), "");
+}
+
+function errorCodeFrom(value = null) {
+  if (!isObject(value)) return "";
+
+  return cleanText(
+    value.code ||
+      value.errorCode ||
+      value.error_code ||
+      "",
+    ""
+  );
+}
+
 export function buildRequestError({
   response = null,
   data = null,
@@ -416,10 +453,8 @@ export function buildRequestError({
   const status = response?.status || 0;
 
   const message =
-    data?.message ||
-    data?.error ||
-    raw?.message ||
-    raw ||
+    errorMessageFrom(data) ||
+    errorMessageFrom(raw) ||
     response?.statusText ||
     `HTTP ${status || "ERROR"}`;
 
@@ -429,7 +464,7 @@ export function buildRequestError({
   error.status = status;
   error.statusCode = status;
   error.statusText = response?.statusText || "";
-  error.code = code || data?.code || raw?.code || "REQUEST_ERROR";
+  error.code = code || errorCodeFrom(data) || errorCodeFrom(raw) || "REQUEST_ERROR";
   error.url = redact(url);
   error.method = normalizeMethod(method);
   error.data = data;
@@ -480,6 +515,15 @@ export function createRequest({
   let pending = 0;
   let lastError = null;
 
+  function requestState() {
+    try {
+      const value = isFunction(state) ? state() : state;
+      return isObject(value) ? value : {};
+    } catch {
+      return {};
+    }
+  }
+
   async function request(...args) {
     const { path, options } = normalizeArgs(...args);
 
@@ -504,17 +548,15 @@ export function createRequest({
     const serializedBody = serializeBody(method, originalBody);
 
     const headers = buildHeaders({
-      state,
+      state: requestState(),
       options,
       auth,
       originalBody,
       serializedBody,
     });
 
-    const requestId = `req_${++sequence}`;
-    const safeUrl = redact(url);
-
     pending += 1;
+    sequence += 1;
 
     try {
       const runFetch = getFetch();
@@ -566,7 +608,6 @@ export function createRequest({
       return data;
     } catch (error) {
       lastError = error;
-
       throw error;
     } finally {
       pending = Math.max(0, pending - 1);

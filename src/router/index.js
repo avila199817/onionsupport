@@ -34,7 +34,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v6";
+export const ROUTER_VERSION = "router.index.v7";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -952,22 +952,6 @@ export const Router = (() => {
   }
 
   function checkAccess(route, canonicalPath, publicPath) {
-    if (route && route.public !== true && !isAuthenticated()) {
-      return {
-        allowed: false,
-        reason: "not-authenticated",
-        redirectTo: loginRedirectTarget(publicPath),
-      };
-    }
-
-    if (route?.public === true && route.guestOnly === true && isAuthenticated()) {
-      return {
-        allowed: false,
-        reason: "guest-only",
-        redirectTo: getDefaultHome(),
-      };
-    }
-
     const shouldAllowRoute = RouteGuards.shouldAllowRoute;
 
     try {

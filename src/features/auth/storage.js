@@ -17,6 +17,8 @@
    - Sin temp token real.
    - Sin inventar slug.
    - Sin persistir usuario completo.
+   - Sin fabricar usuario desde payload token-only.
+   - Sin arrastrar refresh/session de otro usuario.
 ========================================================= */
 
 import {
@@ -24,7 +26,7 @@ import {
   AUTH_CONSTANTS,
 } from "./constants.js";
 
-export const AUTH_STORAGE_VERSION = "auth.storage.v3";
+export const AUTH_STORAGE_VERSION = "auth.storage.v4";
 
 const PREFIX = "onion:auth:";
 
@@ -68,6 +70,18 @@ const CLEAR_KEYS = Object.freeze([
   KEYS.userSlug,
 
   KEYS.redirectAfterLogin,
+]);
+
+const SESSION_CONTEXT_KEYS = Object.freeze([
+  KEYS.sessionId,
+  KEYS.sessionUserId,
+  KEYS.userId,
+  KEYS.sessionExpiresAt,
+]);
+
+const AUX_USER_KEYS = Object.freeze([
+  KEYS.userSlug,
+  KEYS.role,
 ]);
 
 const BAD_VALUES = new Set([
@@ -380,6 +394,18 @@ function extractUserId(user = null) {
   return normalizeSessionValue(user.userId || user.id || "");
 }
 
+function looksLikeUserObject(value = null) {
+  if (!isObject(value)) return false;
+
+  return Boolean(
+    cleanText(value.userId || value.id, "") ||
+      cleanText(value.username || value.userName || value.user_name, "") ||
+      cleanText(value.slug, "") ||
+      cleanText(value.lookup?.slug, "") ||
+      cleanText(value.profile?.slug, "")
+  );
+}
+
 /* =========================================================
    PAYLOAD HELPERS
 ========================================================= */
@@ -422,10 +448,10 @@ function readUserFromPayload(payload = {}) {
       node.profile ||
       null;
 
-    if (isObject(user)) return user;
+    if (looksLikeUserObject(user)) return user;
   }
 
-  return isObject(payload) ? payload : null;
+  return looksLikeUserObject(payload) ? payload : null;
 }
 
 function readSessionFromPayload(payload = {}) {
@@ -565,8 +591,20 @@ export function persistSessionContext(sessionData = null, user = null, options =
   };
 }
 
+function removeStoredSessionContext() {
+  removeMany(SESSION_CONTEXT_KEYS);
+  return true;
+}
+
+function removeStoredAuxSessionData() {
+  removeMany(AUX_USER_KEYS);
+  return true;
+}
+
 export function persistAuxSessionData(user = null, options = {}) {
   const safeUser = isObject(user) ? user : null;
+
+  if (!safeUser) return false;
 
   const userId = extractUserId(safeUser);
   const slug = extractRealUserSlug(safeUser);
@@ -642,7 +680,7 @@ export function hasSessionContext() {
   );
 }
 
-export function hasRefreshContext() {
+function hasAnyRefreshContext() {
   return Boolean(getStoredRefreshToken() || hasSessionContext());
 }
 
@@ -654,9 +692,22 @@ export function hasCompleteRefreshContext() {
   );
 }
 
+export function hasRefreshContext() {
+  return hasCompleteRefreshContext();
+}
+
 /* =========================================================
    AUTH PAYLOAD STORAGE
 ========================================================= */
+
+function explicitUserMismatch(user = null) {
+  const userId = extractUserId(user);
+  const storedUserId = getStoredSessionUserId();
+
+  if (!userId || !storedUserId) return false;
+
+  return userId !== storedUserId;
+}
 
 export function persistAuthStorage(payload = {}, options = {}) {
   const nodes = nested(payload);
@@ -678,24 +729,43 @@ export function persistAuthStorage(payload = {}, options = {}) {
     ])
   );
 
+  const userChanged = explicitUserMismatch(user);
+
+  if (userChanged) {
+    removeStoredRefreshToken();
+    removeStoredSessionContext();
+    removeStoredAuxSessionData();
+  }
+
   const accessStored = persistAccessToken(accessToken, options);
 
   let refreshStored = false;
 
   if (refreshToken) {
     refreshStored = persistRefreshToken(refreshToken, options);
-  } else if (options.clearMissingRefreshToken === true) {
+  } else if (options.clearMissingRefreshToken === true || userChanged) {
     removeStoredRefreshToken();
   }
 
-  persistSessionContext(sessionData, user, options);
-  persistAuxSessionData(user, options);
+  if (sessionData) {
+    persistSessionContext(sessionData, user, options);
+  } else if (options.clearMissingSessionContext === true || userChanged) {
+    removeStoredSessionContext();
+  }
+
+  if (user) {
+    persistAuxSessionData(user, options);
+  } else if (options.clearMissingUserAux === true) {
+    removeStoredAuxSessionData();
+  }
 
   return {
-    ok: Boolean(accessStored || refreshStored || hasSessionContext()),
+    ok: Boolean(accessStored || refreshStored || hasCompleteRefreshContext()),
     hasAccessToken: hasAccessToken(),
     hasRefreshToken: hasRefreshToken(),
     hasSessionContext: hasSessionContext(),
+    hasRefreshContext: hasRefreshContext(),
+    hasCompleteRefreshContext: hasCompleteRefreshContext(),
     userSlug: getStoredUserSlug() || null,
     role: getStoredRole() || null,
   };
@@ -739,7 +809,7 @@ export function getStoredAuthPayload() {
 }
 
 export function hasStoredAuthPayload() {
-  return hasAccessToken();
+  return Boolean(hasAccessToken() || hasCompleteRefreshContext());
 }
 
 /* =========================================================
@@ -791,47 +861,63 @@ export function repairCorruptedAuthStorage() {
     }
   }
 
-  if (readRaw(KEYS.token) && !getStoredAccessToken()) {
+  const rawToken = readRaw(KEYS.token);
+  const rawAccessToken = readRaw(KEYS.accessToken);
+  const rawRefreshToken = readRaw(KEYS.refreshToken);
+  const rawSessionId = readRaw(KEYS.sessionId);
+  const rawSessionUserId = readRaw(KEYS.sessionUserId);
+  const rawUserId = readRaw(KEYS.userId);
+  const rawSessionExpiresAt = readRaw(KEYS.sessionExpiresAt);
+  const rawUserSlug = readRaw(KEYS.userSlug);
+  const rawRole = readRaw(KEYS.role);
+  const rawRedirect = readRaw(KEYS.redirectAfterLogin);
+
+  if (rawToken && !normalizeToken(rawToken)) {
     removeRaw(KEYS.token);
     removed += 1;
   }
 
-  if (readRaw(KEYS.accessToken) && !getStoredAccessToken()) {
+  if (rawAccessToken && !normalizeToken(rawAccessToken)) {
     removeRaw(KEYS.accessToken);
     removed += 1;
   }
 
-  if (readRaw(KEYS.refreshToken) && !getStoredRefreshToken()) {
+  if (rawRefreshToken && !normalizeToken(rawRefreshToken)) {
     removeRaw(KEYS.refreshToken);
     removed += 1;
   }
 
-  if (readRaw(KEYS.sessionId) && !getStoredSessionId()) {
+  if (rawSessionId && !normalizeSessionValue(rawSessionId)) {
     removeRaw(KEYS.sessionId);
     removed += 1;
   }
 
-  if (readRaw(KEYS.sessionUserId) && !getStoredSessionUserId()) {
+  if (rawSessionUserId && !normalizeSessionValue(rawSessionUserId)) {
     removeRaw(KEYS.sessionUserId);
     removed += 1;
   }
 
-  if (readRaw(KEYS.sessionExpiresAt) && !getStoredSessionExpiresAt()) {
+  if (rawUserId && !normalizeSessionValue(rawUserId)) {
+    removeRaw(KEYS.userId);
+    removed += 1;
+  }
+
+  if (rawSessionExpiresAt && !normalizeSessionValue(rawSessionExpiresAt)) {
     removeRaw(KEYS.sessionExpiresAt);
     removed += 1;
   }
 
-  if (readRaw(KEYS.userSlug) && !getStoredUserSlug()) {
+  if (rawUserSlug && !normalizeSlug(rawUserSlug)) {
     removeRaw(KEYS.userSlug);
     removed += 1;
   }
 
-  if (readRaw(KEYS.role) && !getStoredRole()) {
+  if (rawRole && !normalizeRole(rawRole)) {
     removeRaw(KEYS.role);
     removed += 1;
   }
 
-  if (readRaw(KEYS.redirectAfterLogin) && !getStoredRedirectAfterLogin()) {
+  if (rawRedirect && !normalizeRoute(rawRedirect)) {
     removeRaw(KEYS.redirectAfterLogin);
     removed += 1;
   }
@@ -882,6 +968,7 @@ export function getAuthStorageSnapshot() {
     hasSessionExpiresAt: Boolean(sessionExpiresAt),
 
     hasSessionContext: hasSessionContext(),
+    hasAnyRefreshContext: hasAnyRefreshContext(),
     hasRefreshContext: hasRefreshContext(),
     hasCompleteRefreshContext: hasCompleteRefreshContext(),
 
@@ -908,6 +995,11 @@ export function getAuthStorageSnapshot() {
       persistsAuxContextOnly: true,
       persistsFullUser: false,
       authenticatesByItself: false,
+
+      refreshContextRequiresTokenSessionAndUser: true,
+      tokenOnlyDoesNotFabricateUser: true,
+      preservesSessionContextWhenPayloadOmitsSession: true,
+      clearsStaleContextOnUserMismatch: true,
 
       noTempToken: true,
       no2fa: true,

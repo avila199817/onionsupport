@@ -9,6 +9,7 @@
    - Usar metadatos estáticos de rutas para ocultar rutas admin.
    - Clientes se oculta para user porque /clientes es ruta admin.
    - Rutas públicas ocultan sidebar.
+   - Rutas legacy/sensibles ocultan sidebar.
    - Sesión válida obligatoria.
    - Entender rutas visibles /@{slug}/{ruta}.
    - No navegar.
@@ -19,7 +20,10 @@
    - No crear DOM.
    - No reparar estructuras legacy.
    - No gestionar comportamiento de dropdown.
+   - Sin avatar.
    - Sin /home.
+   - Sin /403.
+   - Sin /404.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
@@ -28,7 +32,9 @@ import {
   SIDEBAR_ROLE_ADMIN,
   SIDEBAR_ROLE_USER,
   isSidebarAdminFallbackRoute,
+  isSidebarBlockedRoute,
   isSidebarPublicRoute,
+  getSidebarUserScopedRouteInfo,
   sidebarHomeLookupPath,
 } from "./constants.js";
 
@@ -47,7 +53,7 @@ import {
   resolveRouteLookupPath,
 } from "../../router/routes.js";
 
-export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v5";
+export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v6";
 
 /* =========================================================
    BASICS
@@ -66,7 +72,11 @@ function isFunction(value) {
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -87,12 +97,15 @@ function unique(values = []) {
 
 function redact(value = "") {
   return text(value, "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
     String(value || "")
   );
 }
@@ -111,7 +124,7 @@ function normalizeRoleStrict(value = "") {
     return "";
   }
 
-  const role = String(value || "").toLowerCase();
+  const role = String(value || "").trim().toLowerCase();
 
   if (role === SIDEBAR_ROLE_ADMIN) return SIDEBAR_ROLE_ADMIN;
   if (role === SIDEBAR_ROLE_USER) return SIDEBAR_ROLE_USER;
@@ -142,11 +155,48 @@ function validSidebarRole(role = "") {
 }
 
 /* =========================================================
+   PATH
+========================================================= */
+
+function routeLookupPath(path = "/") {
+  if (!path || hasSensitiveQuery(path)) return "";
+
+  const scoped = getSidebarUserScopedRouteInfo(path);
+
+  if (scoped?.blocked === true) return "";
+
+  if (scoped?.scoped === true && scoped.restPath) {
+    if (isSidebarBlockedRoute(scoped.restPath)) return "";
+  }
+
+  const lookup = sidebarHomeLookupPath(path);
+
+  if (!lookup || isSidebarBlockedRoute(lookup)) return "";
+
+  return lookup;
+}
+
+function pathIsBlocked(path = "") {
+  if (!path) return true;
+  if (hasSensitiveQuery(path)) return true;
+  if (isSidebarBlockedRoute(path)) return true;
+
+  const scoped = getSidebarUserScopedRouteInfo(path);
+
+  if (scoped?.blocked === true) return true;
+  if (scoped?.scoped === true && scoped.restPath) {
+    return isSidebarBlockedRoute(scoped.restPath);
+  }
+
+  return false;
+}
+
+/* =========================================================
    STATIC ROUTE META
 ========================================================= */
 
 function getStaticRouteByPath(path = "") {
-  const lookupPath = sidebarHomeLookupPath(path || "/");
+  const lookupPath = routeLookupPath(path || "/");
 
   if (!lookupPath) return null;
 
@@ -154,6 +204,8 @@ function getStaticRouteByPath(path = "") {
     const finalPath = isFunction(resolveRouteLookupPath)
       ? resolveRouteLookupPath(lookupPath)
       : lookupPath;
+
+    if (!finalPath || pathIsBlocked(finalPath)) return null;
 
     const routes = isFunction(getImmutableRoutes)
       ? getImmutableRoutes()
@@ -223,21 +275,28 @@ export function getSidebarVisibilityPath(context = {}) {
     context.path,
     context.currentPath,
     context.publicPath,
+
     typeof route === "string" ? route : "",
-    isObject(route) ? route.path : "",
+    isObject(route) ? route.canonicalPath || route.path : "",
+
     state.canonicalPath,
     typeof state.route === "string" ? state.route : "",
-    isObject(state.route) ? state.route.path : "",
+    isObject(state.route) ? state.route.canonicalPath || state.route.path : "",
     state.publicPath,
-    isBrowser() ? window.location.pathname : "/"
+
+    isBrowser()
+      ? `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
+      : "/"
   );
 
-  return sidebarHomeLookupPath(value || "/");
+  return routeLookupPath(value || "/");
 }
 
 export function isSidebarRoutePublic(context = {}) {
   const route = context.route || null;
   const path = getSidebarVisibilityPath(context);
+
+  if (!path) return true;
 
   return Boolean(
     isSidebarPublicRoute(path) ||
@@ -274,21 +333,29 @@ export function hasRenderableSidebarSession(context = {}) {
   const AppCore = context.AppCore || null;
   const state = isObject(AppCore?.state) ? AppCore.state : {};
 
-  return Boolean(
+  const contextSession = Boolean(
     context.hasSession === true ||
       context.sessionValid === true ||
       (
         context.authenticated === true &&
         context.hasUser === true
-      ) ||
-      (
-        state.authenticated === true &&
-        Boolean(state.user || state.currentUser || state.authUser || state.sessionUser)
       )
   );
+
+  const stateSession = Boolean(
+    state.authenticated === true &&
+      state.hasToken !== false &&
+      Boolean(state.user || state.currentUser || state.authUser || state.sessionUser)
+  );
+
+  return Boolean(contextSession || stateSession);
 }
 
 export function shouldRenderSidebar(context = {}) {
+  const path = getSidebarVisibilityPath(context);
+
+  if (!path) return false;
+  if (pathIsBlocked(path)) return false;
   if (!hasRenderableSidebarSession(context)) return false;
   if (isSidebarRoutePublic(context)) return false;
   if (isSidebarShellHidden(context)) return false;
@@ -314,6 +381,7 @@ export function setSidebarRootVisible(root = getSidebarRoot(), visible = true) {
   try {
     root.dataset.visible = show ? "true" : "false";
     root.dataset.sidebarVisible = show ? "true" : "false";
+    root.dataset.sidebarVisibilityState = show ? "visible" : "hidden";
   } catch {
     // noop
   }
@@ -353,7 +421,7 @@ function elementPath(element = null) {
 
   if (!raw || hasSensitiveQuery(raw)) return "";
 
-  return sidebarHomeLookupPath(raw);
+  return routeLookupPath(raw);
 }
 
 function elementRequiredRoles(element = null) {
@@ -471,6 +539,7 @@ function setElementRoleVisible(element = null, visible = true) {
   try {
     element.dataset.roleVisible = show ? "true" : "false";
     target.dataset.roleVisible = show ? "true" : "false";
+    target.dataset.sidebarRoleVisible = show ? "true" : "false";
 
     if (SIDEBAR_CLASSES.hidden) {
       target.classList.toggle(SIDEBAR_CLASSES.hidden, !show);
@@ -587,6 +656,7 @@ export function getSidebarVisibilitySnapshot(context = {}) {
   const root = context.root || getSidebarRoot();
   const role = getSidebarVisibilityRole(context);
   const elements = roleManagedElements(root);
+  const path = getSidebarVisibilityPath(context);
 
   return {
     version: SIDEBAR_VISIBILITY_VERSION,
@@ -594,7 +664,8 @@ export function getSidebarVisibilitySnapshot(context = {}) {
     hasRoot: isElement(root),
     shouldRender: shouldRenderSidebar(context),
 
-    path: redact(getSidebarVisibilityPath(context)),
+    path: redact(path),
+    blockedPath: !path || pathIsBlocked(path),
     routePublic: isSidebarRoutePublic(context),
     shellHidden: isSidebarShellHidden(context),
     hasSession: hasRenderableSidebarSession(context),
@@ -616,11 +687,15 @@ export function getSidebarVisibilitySnapshot(context = {}) {
       noDomCreate: true,
       noLegacyRepair: true,
       noDropdownBehavior: true,
+      noAvatar: true,
 
       staticRoutesAsRoleSource: true,
       hidesAdminRoutesForUser: true,
       clientesAdminOnlyFromRoutes: true,
 
+      blocksHomeAlias: true,
+      blocks403Route: true,
+      blocks404Route: true,
       noHomeRoute: true,
       no2fa: true,
       noMfa: true,

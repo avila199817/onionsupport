@@ -34,7 +34,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v5";
+export const ROUTER_VERSION = "router.index.v6";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -78,7 +78,7 @@ export const Router = (() => {
     return Boolean(value && typeof value === "object" && !Array.isArray(value));
   }
 
-  function text(value = "", fallback = "") {
+  function cleanText(value = "", fallback = "") {
     const output = String(value ?? "").trim();
     return output || fallback;
   }
@@ -95,17 +95,23 @@ export const Router = (() => {
     }
   }
 
+  function redact(value = "") {
+    return cleanText(value, "")
+      .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+  }
+
   /* =======================================================
      PATHS
   ======================================================= */
 
   function isHashRouterPath(value = "") {
-    const raw = text(value, "");
+    const raw = cleanText(value, "");
     return raw.startsWith("#/") || raw.startsWith("#!");
   }
 
   function normalizeHashPath(value = "") {
-    const raw = text(value, HOME_PATH);
+    const raw = cleanText(value, HOME_PATH);
 
     if (raw.startsWith("#!")) {
       return raw.replace(/^#!\/?/, "/") || HOME_PATH;
@@ -115,11 +121,11 @@ export const Router = (() => {
       return raw.slice(1) || HOME_PATH;
     }
 
-    return raw;
+    return raw || HOME_PATH;
   }
 
   function normalizeSearch(search = "") {
-    const value = text(search, "");
+    const value = cleanText(search, "");
 
     if (!value || value === "?") return "";
 
@@ -129,7 +135,7 @@ export const Router = (() => {
   }
 
   function normalizeHash(hash = "") {
-    const value = text(hash, "");
+    const value = cleanText(hash, "");
 
     if (!value || value === "#") return "";
 
@@ -139,7 +145,7 @@ export const Router = (() => {
   }
 
   function normalizePathname(pathname = HOME_PATH) {
-    let value = text(pathname, HOME_PATH).replace(/\\/g, "/");
+    let value = cleanText(pathname, HOME_PATH).replace(/\\/g, "/");
 
     if (!value.startsWith("/")) {
       value = `/${value}`;
@@ -155,7 +161,7 @@ export const Router = (() => {
   }
 
   function pathFromInput(path = HOME_PATH) {
-    const raw = text(path, HOME_PATH);
+    const raw = cleanText(path, HOME_PATH);
 
     if (isHashRouterPath(raw)) {
       return normalizeHashPath(raw);
@@ -274,8 +280,14 @@ export const Router = (() => {
     );
   }
 
+  function hasSensitiveQuery(value = "") {
+    return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+      String(value || "")
+    );
+  }
+
   function isUnsafeHref(href = "") {
-    const value = text(href, "");
+    const value = cleanText(href, "");
 
     return Boolean(
       !value ||
@@ -288,7 +300,7 @@ export const Router = (() => {
   function isExternalHref(href = "") {
     if (!isBrowser()) return false;
 
-    const value = text(href, "");
+    const value = cleanText(href, "");
 
     if (!/^https?:\/\//i.test(value)) return false;
 
@@ -300,14 +312,19 @@ export const Router = (() => {
   }
 
   function isHashOnlyHref(href = "") {
-    const value = text(href, "");
+    const value = cleanText(href, "");
     return value.startsWith("#") && !isHashRouterPath(value);
   }
 
   function safeRedirectPath(path = HOME_PATH, fallback = HOME_PATH) {
-    const value = text(path, "");
+    const value = cleanText(path, "");
 
-    if (isUnsafeHref(value) || isExternalHref(value) || isHashOnlyHref(value)) {
+    if (
+      isUnsafeHref(value) ||
+      isExternalHref(value) ||
+      isHashOnlyHref(value) ||
+      hasSensitiveQuery(value)
+    ) {
       return normalizePublicPath(fallback);
     }
 
@@ -315,16 +332,16 @@ export const Router = (() => {
   }
 
   /* =======================================================
-     AUTH / USER
+     AUTH BRIDGE
   ======================================================= */
 
   function getAuth() {
     try {
       return (
-        AppCore?.Auth ||
         AppCore?.auth ||
-        AppCore?.modules?.get?.("Auth") ||
+        AppCore?.Auth ||
         AppCore?.modules?.get?.("auth") ||
+        AppCore?.modules?.get?.("Auth") ||
         null
       );
     } catch {
@@ -332,118 +349,36 @@ export const Router = (() => {
     }
   }
 
-  function unwrapUser(payload = null) {
-    if (!isObject(payload)) return null;
-
-    const candidates = [
-      payload.user,
-      payload.usuario,
-      payload.currentUser,
-      payload.authUser,
-      payload.sessionUser,
-      payload.session?.user,
-      payload.sessionData?.user,
-      payload.data?.user,
-      payload.payload?.user,
-      payload.me,
-      payload.account,
-      payload,
-    ];
-
-    return candidates.find(isObject) || null;
-  }
-
-  function cleanToken(value = "") {
-    const token = text(value, "").replace(/^Bearer\s+/i, "");
-
-    if (!token) return "";
-    if (/\s/.test(token)) return "";
-    if (token.length > 8192) return "";
-
-    if (["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(token.toLowerCase())) {
-      return "";
-    }
-
-    return token;
-  }
-
-  function getCurrentToken() {
+  function authCall(method = "", fallback = null, ...args) {
     const Auth = getAuth();
-    const state = readState();
+    const fn = Auth?.[method];
 
-    return cleanToken(
-      safeCall(Auth?.getToken?.bind?.(Auth) || Auth?.getToken) ||
-        safeCall(Auth?.getAccessToken?.bind?.(Auth) || Auth?.getAccessToken) ||
-        state.token ||
-        state.accessToken ||
-        state.access_token ||
-        state.session?.token ||
-        state.session?.accessToken ||
-        ""
-    );
-  }
+    if (!isFunction(fn)) return fallback;
 
-  function isUserDisabled(user = null) {
-    if (!isObject(user)) return true;
-
-    const status = text(user.status || user.estado, "").toLowerCase();
-
-    return Boolean(
-      user.disabled === true ||
-        user.deleted === true ||
-        user.archived === true ||
-        user.active === false ||
-        status === "disabled" ||
-        status === "deleted" ||
-        status === "archived"
-    );
-  }
-
-  function hasUserIdentity(user = null) {
-    if (!isObject(user)) return false;
-
-    return Boolean(
-      text(user.id, "") ||
-        text(user.userId, "") ||
-        text(user.username, "") ||
-        text(user.slug, "") ||
-        text(user.lookup?.slug, "")
-    );
-  }
-
-  function isUsableUser(user = null) {
-    return Boolean(isObject(user) && !isUserDisabled(user) && hasUserIdentity(user));
+    try {
+      return fn.call(Auth, ...args);
+    } catch {
+      return fallback;
+    }
   }
 
   function getCurrentUser() {
-    const Auth = getAuth();
-    const state = readState();
+    return (
+      authCall("getUser", null) ||
+      authCall("getCurrentUser", null) ||
+      safeCall(AppCore?.getCurrentUser?.bind?.(AppCore) || AppCore?.getCurrentUser) ||
+      null
+    );
+  }
 
-    const candidates = [
-      safeCall(Auth?.getUser?.bind?.(Auth) || Auth?.getUser),
-      safeCall(Auth?.getCurrentUser?.bind?.(Auth) || Auth?.getCurrentUser),
-      Auth?.user,
-      Auth?.currentUser,
-      Auth?.session?.user,
-      Auth?.state?.user,
+  function isAuthenticated() {
+    const authResult = authCall("isAuthenticated", null);
 
-      state.user,
-      state.currentUser,
-      state.authUser,
-      state.sessionUser,
-      state.session?.user,
-      state.sessionData?.user,
-      state.auth?.user,
-      AppCore?.user,
-      AppCore?.currentUser,
-    ];
-
-    for (const candidate of candidates) {
-      const user = unwrapUser(candidate);
-      if (isUsableUser(user)) return user;
+    if (authResult !== null) {
+      return authResult === true;
     }
 
-    return null;
+    return safeCall(AppCore?.isAuthenticated?.bind?.(AppCore) || AppCore?.isAuthenticated) === true;
   }
 
   function normalizeRole(value = "") {
@@ -456,7 +391,7 @@ export const Router = (() => {
       return "";
     }
 
-    const role = text(value, "").toLowerCase();
+    const role = cleanText(value, "").toLowerCase();
 
     if (role === "admin") return "admin";
     if (role === "user") return "user";
@@ -465,50 +400,22 @@ export const Router = (() => {
   }
 
   function getCurrentRole() {
-    const Auth = getAuth();
+    const fromAuth =
+      authCall("getRole", "") ||
+      authCall("getCurrentRole", "");
+
+    const role = normalizeRole(fromAuth);
+
+    if (role) return role;
+
     const user = getCurrentUser();
     const state = readState();
 
-    const candidates = [
-      safeCall(Auth?.getRole?.bind?.(Auth) || Auth?.getRole),
-      safeCall(Auth?.getCurrentRole?.bind?.(Auth) || Auth?.getCurrentRole),
-      Auth?.role,
-      Auth?.currentRole,
-      user?.role,
-      user?.rol,
-      user?.roles,
-      state.role,
-      state.rol,
-      state.roles,
-      state.user?.role,
-      state.user?.rol,
-      state.user?.roles,
-    ];
-
-    for (const candidate of candidates) {
-      const role = normalizeRole(candidate);
-      if (role) return role;
-    }
-
-    return "user";
-  }
-
-  function isAuthenticated() {
-    const Auth = getAuth();
-    const token = getCurrentToken();
-    const user = getCurrentUser();
-
-    if (!token || !isUsableUser(user)) return false;
-
-    try {
-      if (isFunction(Auth?.isAuthenticated) && Auth.isAuthenticated() === false) {
-        return false;
-      }
-    } catch {
-      return false;
-    }
-
-    return true;
+    return (
+      normalizeRole(user?.role || user?.rol || user?.roles) ||
+      normalizeRole(state.role || state.rol || state.roles) ||
+      "user"
+    );
   }
 
   /* =======================================================
@@ -520,7 +427,7 @@ export const Router = (() => {
       return Routes.normalizeUserHomeSlug(value);
     }
 
-    const slug = text(value, "")
+    const slug = cleanText(value, "")
       .replace(/^\/+/, "")
       .replace(/^@+/, "")
       .split(/[/?#]/)[0]
@@ -534,6 +441,12 @@ export const Router = (() => {
   }
 
   function getCurrentUserSlug() {
+    const fromAuth =
+      authCall("getUserSlug", "") ||
+      authCall("extractUserSlug", "", getCurrentUser());
+
+    if (fromAuth) return normalizeUserSlug(fromAuth);
+
     const user = getCurrentUser();
     const state = readState();
 
@@ -542,7 +455,6 @@ export const Router = (() => {
         user?.lookup?.slug ||
         user?.profile?.slug ||
         state.userSlug ||
-        state.slug ||
         ""
     );
   }
@@ -562,6 +474,7 @@ export const Router = (() => {
     const rest = canonical.slice(USER_HOME_PREFIX.length);
     const [slugSegment = "", ...restSegments] = rest.split("/");
     const slug = normalizeUserSlug(slugSegment);
+
     const restPath = restSegments.length
       ? normalizePathname(`/${restSegments.join("/")}`)
       : HOME_PATH;
@@ -584,6 +497,13 @@ export const Router = (() => {
 
   function isUserScopedPath(path = HOME_PATH) {
     return getUserPathInfo(path).scoped;
+  }
+
+  function isCurrentUserScopedPath(path = HOME_PATH) {
+    const requestedSlug = extractSlugFromPath(path);
+    const realSlug = getCurrentUserSlug();
+
+    return Boolean(requestedSlug && realSlug && requestedSlug === realSlug);
   }
 
   function buildUserScopedPath(canonicalPath = HOME_PATH, slug = getCurrentUserSlug()) {
@@ -637,6 +557,7 @@ export const Router = (() => {
     if (!isAuthenticated()) return "";
 
     const realSlug = getCurrentUserSlug();
+
     if (!realSlug) return "";
 
     const expected = buildScopedPublicPath(data, realSlug);
@@ -645,7 +566,13 @@ export const Router = (() => {
 
     if (visibleCanonical === HOME_PATH) return expected;
     if (requestedSlug && requestedSlug !== realSlug) return expected;
-    if (requestedSlug === realSlug && visibleCanonical !== normalizeCanonicalPath(expected)) return expected;
+
+    if (
+      requestedSlug === realSlug &&
+      visibleCanonical !== normalizeCanonicalPath(expected)
+    ) {
+      return expected;
+    }
 
     return "";
   }
@@ -657,14 +584,25 @@ export const Router = (() => {
     if (!isAuthenticated()) return "";
 
     const realSlug = getCurrentUserSlug();
+
     if (!realSlug) return "";
 
-    const visibleCanonical = normalizeCanonicalPath(data.publicPath || data.canonicalPath || HOME_PATH);
-    const expectedPathname = buildUserScopedPath(data.canonicalPath || HOME_PATH, realSlug);
+    const visibleCanonical = normalizeCanonicalPath(
+      data.publicPath || data.canonicalPath || HOME_PATH
+    );
+
+    const expectedPathname = buildUserScopedPath(
+      data.canonicalPath || HOME_PATH,
+      realSlug
+    );
+
     const requestedSlug = normalizeUserSlug(data.routeParams?.slug || "");
 
     if (visibleCanonical !== expectedPathname || requestedSlug !== realSlug) {
-      return withSearchHashFrom(data.publicPath || data.canonicalPath || HOME_PATH, expectedPathname);
+      return withSearchHashFrom(
+        data.publicPath || data.canonicalPath || HOME_PATH,
+        expectedPathname
+      );
     }
 
     return "";
@@ -714,14 +652,24 @@ export const Router = (() => {
   }
 
   function isPublicAuthRoutePath(path = HOME_PATH) {
-    return Routes.isPublicAuthPath?.(path) === true;
+    if (isFunction(Routes.isPublicAuthPath)) {
+      return Routes.isPublicAuthPath(path) === true;
+    }
+
+    const route = getRoute(path);
+    return Boolean(route?.public === true);
   }
 
   function normalizeNavigationTarget(path = HOME_PATH, options = {}) {
     const publicPath = normalizePublicPath(path);
     const canonicalPath = normalizeCanonicalPath(publicPath);
 
-    if (options.useSlugHome !== false && options.keepCanonicalHome !== true && canonicalPath === HOME_PATH) {
+    if (
+      options.useSlugHome !== false &&
+      options.keepCanonicalHome !== true &&
+      canonicalPath === HOME_PATH &&
+      isAuthenticated()
+    ) {
       return buildUserHomePath();
     }
 
@@ -743,6 +691,7 @@ export const Router = (() => {
     const target = normalizePublicPath(path);
 
     if (!target) return false;
+    if (hasSensitiveQuery(target)) return false;
     if (isPublicAuthRoutePath(target)) return false;
 
     return routeExists(target);
@@ -762,7 +711,11 @@ export const Router = (() => {
      STATE / SHELL / CHROME
   ======================================================= */
 
-  function setRouterState({ canonicalPath = HOME_PATH, publicPath = HOME_PATH, routeParams = {} } = {}) {
+  function setRouterState({
+    canonicalPath = HOME_PATH,
+    publicPath = HOME_PATH,
+    routeParams = {},
+  } = {}) {
     const canonical = normalizeCanonicalPath(canonicalPath);
     const visible = normalizePublicPath(publicPath || canonical);
     const params = isObject(routeParams) ? { ...routeParams } : {};
@@ -799,7 +752,12 @@ export const Router = (() => {
   function updateShell(route = null, canonicalPath = HOME_PATH) {
     safeCall(Shell.setShellMode, AppCore, route);
     safeCall(Shell.setActiveMenu, AppCore, canonicalPath);
-    safeCall(Shell.setDocumentTitle, AppCore, route?.title || route?.label || route?.name || "Onion Support");
+    safeCall(
+      Shell.setDocumentTitle,
+      AppCore,
+      route?.title || route?.label || route?.name || "Onion Support"
+    );
+
     return true;
   }
 
@@ -850,8 +808,8 @@ export const Router = (() => {
       reason: "route-render",
     };
 
-    syncChromeModule(getChromeModule("SidebarUI", "sidebar", "Sidebar"), context);
-    syncChromeModule(getChromeModule("TopbarUI", "topbar", "Topbar"), context);
+    syncChromeModule(getChromeModule("sidebar", "SidebarUI", "Sidebar"), context);
+    syncChromeModule(getChromeModule("topbar", "TopbarUI", "Topbar"), context);
 
     return true;
   }
@@ -859,23 +817,6 @@ export const Router = (() => {
   function clearChrome() {
     safeCall(Shell.clearDynamicContainers, AppCore);
     return true;
-  }
-
-  function hideLoader() {
-    if (!isBrowser()) return false;
-
-    const loader = document.getElementById("app-loader");
-    if (!loader) return false;
-
-    try {
-      loader.hidden = true;
-      loader.classList.remove("is-visible");
-      loader.setAttribute("aria-hidden", "true");
-      loader.setAttribute("aria-busy", "false");
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   function destroyActiveView() {
@@ -910,6 +851,7 @@ export const Router = (() => {
 
   function renderFallback(title = "Onion Support", message = "") {
     const root = viewRoot();
+
     if (!root) return null;
 
     const section = document.createElement("section");
@@ -927,6 +869,7 @@ export const Router = (() => {
     }
 
     root.replaceChildren(section);
+
     return section;
   }
 
@@ -935,7 +878,18 @@ export const Router = (() => {
   ======================================================= */
 
   function loginRedirectTarget(publicPath = HOME_PATH) {
-    return `${LOGIN_PATH}?redirect=${encodeURIComponent(normalizePublicPath(publicPath || HOME_PATH))}`;
+    const target = normalizePublicPath(publicPath || HOME_PATH);
+
+    if (
+      !target ||
+      hasSensitiveQuery(target) ||
+      isPublicAuthRoutePath(target) ||
+      !routeExists(target)
+    ) {
+      return LOGIN_PATH;
+    }
+
+    return `${LOGIN_PATH}?redirect=${encodeURIComponent(target)}`;
   }
 
   function fallbackAllowRoute({ route, requestedPublicPath }) {
@@ -969,7 +923,9 @@ export const Router = (() => {
       };
     }
 
-    const roles = Array.isArray(route.roles) ? route.roles : [];
+    const roles = Array.isArray(route.roles)
+      ? route.roles.map(normalizeRole).filter(Boolean)
+      : [];
 
     if (!roles.length) {
       return {
@@ -1019,16 +975,22 @@ export const Router = (() => {
         const result = shouldAllowRoute({
           AppCore,
           Auth: getAuth(),
+
           route,
+
           requestedCanonicalPath: canonicalPath,
           requestedPublicPath: publicPath,
           requestedSlug: extractSlugFromPath(publicPath),
+
           currentUser: getCurrentUser(),
           currentUserSlug: getCurrentUserSlug(),
+
           defaultHome: getDefaultHome(),
+
           buildUserHomePath,
           buildUserScopedPath,
           getRoute,
+
           isAuthenticated,
         });
 
@@ -1110,7 +1072,6 @@ export const Router = (() => {
 
     updateShell(null, state.canonicalPath);
     syncRouteChrome(null, state, options);
-    hideLoader();
 
     return {
       ok: true,
@@ -1145,7 +1106,6 @@ export const Router = (() => {
 
     updateShell(route, state.canonicalPath);
     syncRouteChrome(route, state, options);
-    hideLoader();
 
     return {
       ok: true,
@@ -1193,7 +1153,6 @@ export const Router = (() => {
 
     updateShell(route, state.canonicalPath);
     syncRouteChrome(route, state, options);
-    hideLoader();
 
     return {
       ok: true,
@@ -1229,7 +1188,6 @@ export const Router = (() => {
 
     updateShell(route, state.canonicalPath);
     syncRouteChrome(route, state, options);
-    hideLoader();
 
     return {
       ok: false,
@@ -1244,8 +1202,6 @@ export const Router = (() => {
     const depth = Number(options.__redirectDepth || 0);
 
     if (depth >= 5) {
-      hideLoader();
-
       return {
         ok: false,
         skipped: true,
@@ -1269,7 +1225,11 @@ export const Router = (() => {
 
     if (!data.route) {
       if (!isAuthenticated()) {
-        return redirectTo(loginRedirectTarget(data.publicPath), options, "not-found-auth-required");
+        return redirectTo(
+          loginRedirectTarget(data.publicPath),
+          options,
+          "not-found-auth-required"
+        );
       }
 
       return renderNotFound(data, options);
@@ -1329,7 +1289,7 @@ export const Router = (() => {
       ...options,
       replaceState: true,
       skipHistory: true,
-      source: "render-current",
+      source: options.source || "render-current",
     });
   }
 
@@ -1338,9 +1298,14 @@ export const Router = (() => {
   ======================================================= */
 
   function navigate(path = HOME_PATH, options = {}) {
-    const href = text(path, HOME_PATH);
+    const href = cleanText(path, HOME_PATH);
 
-    if (isUnsafeHref(href) || isExternalHref(href) || isHashOnlyHref(href)) {
+    if (
+      isUnsafeHref(href) ||
+      isExternalHref(href) ||
+      isHashOnlyHref(href) ||
+      hasSensitiveQuery(href)
+    ) {
       return Promise.resolve({
         ok: true,
         skipped: true,
@@ -1399,7 +1364,7 @@ export const Router = (() => {
   }
 
   function linkHref(link = null) {
-    return text(
+    return cleanText(
       link?.dataset?.route ||
         link?.dataset?.href ||
         link?.dataset?.to ||
@@ -1432,10 +1397,11 @@ export const Router = (() => {
     if (!link || link.hasAttribute("download")) return;
 
     const href = linkHref(link);
-    const linkTarget = text(link.getAttribute("target"), "").toLowerCase();
+    const linkTarget = cleanText(link.getAttribute("target"), "").toLowerCase();
 
     if (!href || linkTarget === "_blank") return;
     if (isUnsafeHref(href) || isExternalHref(href) || isHashOnlyHref(href)) return;
+    if (hasSensitiveQuery(href)) return;
 
     event.preventDefault();
 
@@ -1449,8 +1415,6 @@ export const Router = (() => {
       skipHistory: true,
       replaceState: true,
       source: "popstate",
-      useSlugHome: false,
-      useSlugPrivate: false,
     });
   }
 
@@ -1458,7 +1422,6 @@ export const Router = (() => {
     try {
       AppCore.Router = api;
       AppCore.router = api;
-      AppCore.modules?.register?.("Router", api);
       AppCore.modules?.register?.("router", api);
     } catch {
       // noop
@@ -1467,15 +1430,27 @@ export const Router = (() => {
     return true;
   }
 
+  function init() {
+    if (initialized) return api;
+
+    initialized = true;
+
+    initHistory();
+    attachToCore();
+
+    return api;
+  }
+
   function bind() {
     if (bound) return api;
+
+    init();
 
     if (isBrowser()) {
       disposers.push(onDom(document, "click", onClick));
       disposers.push(onDom(window, "popstate", handlePopState));
     }
 
-    initHistory();
     bound = true;
     attachToCore();
 
@@ -1497,35 +1472,6 @@ export const Router = (() => {
     return api;
   }
 
-  function init() {
-    if (initialized) return api;
-
-    initialized = true;
-    attachToCore();
-    bind();
-
-    return api;
-  }
-
-  function start(options = {}) {
-    init();
-
-    if (
-      options.render === false ||
-      options.skipInitialRender === true ||
-      options.appManagedInitialRender === true
-    ) {
-      return Promise.resolve(api);
-    }
-
-    return renderCurrent({
-      initialRender: true,
-      preserveUrl: true,
-      source: "router.start",
-      ...options,
-    }).then(() => api);
-  }
-
   /* =======================================================
      SNAPSHOT
   ======================================================= */
@@ -1533,14 +1479,15 @@ export const Router = (() => {
   function getSnapshot() {
     return {
       version: ROUTER_VERSION,
+
       initialized,
       bound,
       renderSeq,
       hasActiveView: Boolean(activeView),
 
-      route: readState().route || HOME_PATH,
-      canonicalPath: currentCanonicalPath(),
-      publicPath: currentPublicPath(),
+      route: redact(readState().route || HOME_PATH),
+      canonicalPath: redact(currentCanonicalPath()),
+      publicPath: redact(currentPublicPath()),
       routeParams: readState().routeParams || {},
 
       authenticated: isAuthenticated(),
@@ -1557,33 +1504,40 @@ export const Router = (() => {
 
       policy: {
         ownAuthStatic: false,
+        authDelegated: true,
+
         ownStorage: false,
         ownTransport: false,
         ownToast: false,
-        ownViewLogic: false,
+
         strictAuth: true,
+
         privateRouteWithoutSessionRedirectsLogin: true,
         userSlugHome: true,
         userSlugPrivateRoutes: true,
         validatesRealUserSlug: true,
+
         homeInternalPath: HOME_PATH,
         homeVisiblePattern: "/@{user.slug}",
         privateVisiblePattern: "/@{user.slug}/{route}",
+
         syncsRegisteredChromeAfterRender: true,
+
         noHomeAlias: true,
         noHomeRoute: true,
         no2fa: true,
-        repairStorm: false,
+        noMfa: true,
+        noOtp: true,
       },
     };
   }
 
   function debug(path = "") {
-    const target = text(path, "");
+    const target = cleanText(path, "");
 
     return target
       ? {
-          target,
+          target: redact(target),
           match: getRouteMatch(target),
           snapshot: getSnapshot(),
         }
@@ -1595,8 +1549,6 @@ export const Router = (() => {
     routes,
 
     init,
-    start,
-    configure: init,
 
     bind,
     unbind,
@@ -1613,20 +1565,11 @@ export const Router = (() => {
 
     navigate,
     replace,
+
     render,
     renderCurrent,
 
-    go: navigate,
-    push: navigate,
-    back: (...args) => safeCall(History.back, ...args),
-    handlePopState,
-    bindLinks: bind,
-
     goAfterLogin,
-
-    repairShell: () => true,
-    repairCurrentRoute: () => renderCurrent({ source: "repair-current-route" }),
-    hideLoader,
 
     buildPublicPath: normalizeNavigationTarget,
     resolveSpaHref: normalizeNavigationTarget,
@@ -1638,6 +1581,7 @@ export const Router = (() => {
     extractSlugFromPath,
     isUserHomePath,
     isUserScopedPath,
+    isCurrentUserScopedPath,
 
     isSameCanonicalPath: (a = HOME_PATH, b = HOME_PATH) =>
       normalizeCanonicalPath(a) === normalizeCanonicalPath(b),
@@ -1650,11 +1594,8 @@ export const Router = (() => {
 
     getSnapshot,
     getDebugSnapshot: getSnapshot,
-    getState: getSnapshot,
     debug,
   };
-
-  attachToCore();
 
   return api;
 })();

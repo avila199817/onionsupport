@@ -8,6 +8,7 @@
    - Endpoints auth reales desde core/config.js.
    - /api/auth/me privado siempre.
    - Enviar Authorization cuando hay token válido.
+   - No reutilizar token runtime si AppCore ya marcó sesión sin token.
    - Sin fetch propio.
    - Sin parser propio.
    - Sin retry propio.
@@ -33,7 +34,7 @@ import {
   createApiClient,
 } from "./request.js";
 
-export const HTTP_VERSION = "core.http.v3";
+export const HTTP_VERSION = "core.http.v4";
 
 export const DEFAULT_API_ORIGIN = getApiBase();
 export const DEFAULT_TIMEOUT_MS = config?.api?.timeout || 30000;
@@ -162,16 +163,41 @@ function getState() {
   return isObject(appCore?.state) ? appCore.state : {};
 }
 
-export function getAccessToken() {
-  const state = getState();
-
+function stateAccessToken(state = getState()) {
   return cleanToken(
     state.token ||
       state.accessToken ||
       state.access_token ||
-      runtimeTokens.accessToken ||
       ""
   );
+}
+
+function stateExplicitlyHasNoToken(state = getState()) {
+  return Boolean(
+    state.hasToken === false ||
+      (
+        state.authenticated === false &&
+        !stateAccessToken(state)
+      )
+  );
+}
+
+export function getAccessToken() {
+  const state = getState();
+  const token = stateAccessToken(state);
+
+  if (token) return token;
+
+  /*
+    Si AppCore ya marcó sesión sin token, no se permite recuperar
+    un runtime token antiguo. Esto evita Authorization stale después
+    de clearSessionLocal()/logout/restore fallido.
+  */
+  if (stateExplicitlyHasNoToken(state)) {
+    return "";
+  }
+
+  return cleanToken(runtimeTokens.accessToken || "");
 }
 
 export function setAccessToken(token = "") {
@@ -720,7 +746,8 @@ export function getHttpSnapshot() {
       mePrivate: true,
       blocksExternalEndpoints: true,
 
-      accessTokenMemoryOnly: true,
+      accessTokenRuntimeOnlyAsFallback: true,
+      blocksStaleRuntimeTokenWhenStateCleared: true,
       noRefreshTokenStorage: true,
       snapshotRedacted: true,
     },

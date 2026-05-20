@@ -6,21 +6,28 @@
    - Renderizar password-request / password-reset.
    - Delegar DOM en reset-password.dom.js.
    - Validar campos mínimos.
-   - Leer token único: token.
+   - Leer token único desde core/config.js.
    - Llamar Auth.requestPasswordReset() / Auth.confirmResetPassword().
-   - Redirigir a /login tras confirmación correcta.
+   - Redirigir a /login tras confirmación correcta usando Router.
    - Sin HTTP directo.
    - Sin Store.
    - Sin Toast propio.
    - Sin bridge.
    - Sin loader propio.
    - Sin fallback template.
+   - Sin navegación browser paralela.
+   - Sin AppCore.navigate.
    - Sin 2FA/MFA/OTP.
    - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { Auth } from "../../features/auth/index.js";
+
+import {
+  ROUTES,
+  TOKEN_PARAM,
+} from "../../core/config.js";
 
 import { getResetPasswordTemplate } from "./reset-password.template.js";
 
@@ -40,15 +47,19 @@ import {
   bindResetPasswordBackLink,
 } from "./reset-password.dom.js";
 
-export const RESET_PASSWORD_VIEW_VERSION = "password-reset.view.v2";
+export const RESET_PASSWORD_VIEW_VERSION = "password-reset.view.v3";
 
 const SOURCE = "password-reset.view";
 
-const PASSWORD_REQUEST_ROUTE = "/password-request";
-const PASSWORD_RESET_ROUTE = "/password-reset";
-const LOGIN_ROUTE = "/login";
+const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
+const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest || "/password-request";
+const PASSWORD_RESET_ROUTE = ROUTES.passwordReset || "/password-reset";
+const LOGIN_ROUTE = ROUTES.login || "/login";
 
-const TOKEN_PARAM = "token";
+const TOKEN_MIN_LENGTH = 8;
+const TOKEN_MAX_LENGTH = 8192;
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MAX_LENGTH = 1024;
 
 const INSTANCES = new WeakMap();
 
@@ -80,9 +91,8 @@ function text(value = "", fallback = "") {
 }
 
 function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -90,60 +100,65 @@ function redact(value = "") {
    PATHS / TOKEN
 ========================================================= */
 
-function normalizeHashPath(path = "/") {
-  const value = text(path, "/");
+function normalizeHashPath(path = HOME_ROUTE) {
+  const value = text(path, HOME_ROUTE);
 
   if (value.startsWith("#!")) {
-    return value.replace(/^#!\/?/, "/") || "/";
+    return value.replace(/^#!\/?/, "/") || HOME_ROUTE;
   }
 
   if (value.startsWith("#/")) {
-    return value.slice(1) || "/";
+    return value.slice(1) || HOME_ROUTE;
   }
 
   return value;
 }
 
-function normalizePublicPath(path = "/") {
+function normalizePublicPath(path = HOME_ROUTE) {
   let value = normalizeHashPath(path);
 
-  if (value.startsWith("//")) return "/";
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return "/";
+  if (!value || value.startsWith("//")) return HOME_ROUTE;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return HOME_ROUTE;
 
   if (!value.startsWith("/")) {
     value = `/${value}`;
   }
 
-  value = value.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+  value = value
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  return value || "/";
+  return value || HOME_ROUTE;
 }
 
-function canonicalPath(path = "/") {
-  let value = normalizePublicPath(path).split("?")[0].split("#")[0] || "/";
+function canonicalPath(path = HOME_ROUTE) {
+  let value = normalizePublicPath(path)
+    .split("?")[0]
+    .split("#")[0] || HOME_ROUTE;
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || "/";
+    value = value.replace(/\/+$/g, "") || HOME_ROUTE;
   }
 
-  return value || "/";
+  return value || HOME_ROUTE;
 }
 
 function currentPublicPath() {
   if (!isBrowser()) {
     return normalizePublicPath(
       AppCore?.state?.publicPath ||
+        AppCore?.state?.canonicalPath ||
         AppCore?.state?.route ||
-        "/"
+        HOME_ROUTE
     );
   }
 
   try {
     return normalizePublicPath(
-      `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
+      `${window.location.pathname || HOME_ROUTE}${window.location.search || ""}${window.location.hash || ""}`
     );
   } catch {
-    return "/";
+    return HOME_ROUTE;
   }
 }
 
@@ -156,12 +171,19 @@ function normalizeToken(value = "") {
 
   if (!token) return "";
   if (/\s/.test(token)) return "";
-  if (token.length > 8192) return "";
+  if (token.length < TOKEN_MIN_LENGTH) return "";
+  if (token.length > TOKEN_MAX_LENGTH) return "";
 
   if (
-    ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
-      token.toLowerCase()
-    )
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "[object object]",
+      "{}",
+      "[]",
+    ].includes(token.toLowerCase())
   ) {
     return "";
   }
@@ -191,8 +213,12 @@ function tokenFromPath(path = "") {
     ? raw.split("?").slice(1).join("?").split("#")[0]
     : "";
 
-  const hashQuery = raw.includes("#") && raw.split("#").slice(1).join("#").includes("?")
-    ? raw.split("#").slice(1).join("#").split("?").slice(1).join("?")
+  const hash = raw.includes("#")
+    ? raw.split("#").slice(1).join("#")
+    : "";
+
+  const hashQuery = hash.includes("?")
+    ? hash.split("?").slice(1).join("?")
     : "";
 
   return tokenFromQuery(query) || tokenFromQuery(hashQuery);
@@ -219,12 +245,26 @@ function resolveMode(options = {}) {
   if (options.isConfirm === true || mode === "confirm") return "confirm";
   if (mode === "request") return "request";
 
-  return currentPath() === PASSWORD_RESET_ROUTE ? "confirm" : "request";
+  const path = canonicalPath(
+    options.canonicalPath ||
+      options.path ||
+      options.publicPath ||
+      options.route?.path ||
+      currentPath()
+  );
+
+  return path === PASSWORD_RESET_ROUTE ? "confirm" : "request";
 }
 
 /* =========================================================
    SPA NAVIGATION
 ========================================================= */
+
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
 
 function safeInternalPath(value = "", fallback = LOGIN_ROUTE) {
   const raw = text(value, fallback);
@@ -233,17 +273,22 @@ function safeInternalPath(value = "", fallback = LOGIN_ROUTE) {
   if (raw.startsWith("//")) return fallback;
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
   if (/[\r\n\t\\]/.test(raw)) return fallback;
+  if (hasSensitiveQuery(raw)) return fallback;
 
-  return raw.replace(/\/{2,}/g, "/") || fallback;
+  const normalized = raw.replace(/\/{2,}/g, "/") || fallback;
+
+  if (canonicalPath(normalized) === "/home") return fallback;
+
+  return normalized;
 }
 
 function getRouter() {
   try {
     return (
-      AppCore?.Router ||
       AppCore?.router ||
-      AppCore?.modules?.get?.("Router") ||
+      AppCore?.Router ||
       AppCore?.modules?.get?.("router") ||
+      AppCore?.modules?.get?.("Router") ||
       null
     );
   } catch {
@@ -255,50 +300,33 @@ async function navigateTo(path = LOGIN_ROUTE) {
   const target = safeInternalPath(path, LOGIN_ROUTE);
   const router = getRouter();
 
-  try {
-    if (isFn(router?.replace)) {
-      await router.replace(target, {
-        source: SOURCE,
-        replaceState: true,
-      });
-
-      return true;
-    }
-
-    if (isFn(router?.navigate)) {
-      await router.navigate(target, {
-        source: SOURCE,
-        replaceState: true,
-      });
-
-      return true;
-    }
-
-    if (isFn(AppCore?.navigate)) {
-      await AppCore.navigate(target, {
-        source: SOURCE,
-        replaceState: true,
-      });
-
-      return true;
-    }
-  } catch {
-    // fallback navegador abajo
-  }
-
-  if (!isBrowser()) return false;
+  if (!router) return false;
 
   try {
-    window.location.replace(target);
-    return true;
-  } catch {
-    try {
-      window.location.assign(target);
-      return true;
-    } catch {
-      return false;
+    if (isFn(router.replace)) {
+      const result = await router.replace(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
+      });
+
+      return result !== false && result?.ok !== false;
     }
+
+    if (isFn(router.navigate)) {
+      const result = await router.navigate(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
+      });
+
+      return result !== false && result?.ok !== false;
+    }
+  } catch {
+    return false;
   }
+
+  return false;
 }
 
 /* =========================================================
@@ -330,13 +358,21 @@ function renderTemplate(container, mode = "request", deps = {}) {
 
   template.innerHTML = String(
     getResetPasswordTemplate({
+      ...(isObject(deps) ? deps : {}),
+
       appName: text(AppCore?.config?.appName, "Onion Support"),
+
       backHref: LOGIN_ROUTE,
-      ...deps,
+      loginHref: LOGIN_ROUTE,
+      passwordRequestHref: PASSWORD_REQUEST_ROUTE,
+      passwordResetHref: PASSWORD_RESET_ROUTE,
+
       mode,
       flow: mode,
       isConfirm: mode === "confirm",
+
       token: initialToken,
+      tokenParam: TOKEN_PARAM,
     }) || ""
   );
 
@@ -366,19 +402,22 @@ function validateConfirm(payload = {}) {
     errors.global = "El enlace de recuperación no es válido.";
   }
 
-  if (!String(payload.password || "")) {
+  const password = String(payload.password || "");
+  const confirmPassword = String(payload.confirmPassword || "");
+
+  if (!password) {
     errors.password = "Introduce la nueva contraseña.";
+  } else if (password.length < PASSWORD_MIN_LENGTH) {
+    errors.password = `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`;
+  } else if (password.length > PASSWORD_MAX_LENGTH) {
+    errors.password = "La contraseña es demasiado larga.";
   }
 
-  if (!String(payload.confirmPassword || "")) {
+  if (!confirmPassword) {
     errors.confirmPassword = "Confirma la nueva contraseña.";
   }
 
-  if (
-    payload.password &&
-    payload.confirmPassword &&
-    payload.password !== payload.confirmPassword
-  ) {
+  if (password && confirmPassword && password !== confirmPassword) {
     errors.confirmPassword = "Las contraseñas no coinciden.";
   }
 
@@ -444,8 +483,8 @@ async function confirmReset(payload = {}) {
   return Auth.confirmResetPassword(
     {
       token: normalizeToken(payload.token),
-      password: payload.password,
-      confirmPassword: payload.confirmPassword,
+      password: String(payload.password || "").slice(0, PASSWORD_MAX_LENGTH),
+      confirmPassword: String(payload.confirmPassword || "").slice(0, PASSWORD_MAX_LENGTH),
     },
     {
       source: SOURCE,
@@ -464,7 +503,10 @@ function destroyPrevious(container) {
   const previous = INSTANCES.get(container);
 
   if (previous?.destroy) {
-    previous.destroy({ remount: true });
+    previous.destroy({
+      remount: true,
+    });
+
     return true;
   }
 
@@ -505,11 +547,13 @@ export function renderResetPasswordView(containerArg = null, deps = {}) {
 
   const options = isObject(deps) ? deps : {};
   const mode = resolveMode(options);
+
   const initialToken = mode === "confirm"
     ? normalizeToken(options.token || tokenFromUrl())
     : "";
 
   destroyPrevious(container);
+
   renderTemplate(container, mode, {
     ...options,
     token: initialToken,
@@ -571,7 +615,12 @@ export function renderResetPasswordView(containerArg = null, deps = {}) {
           message: resultMessage(result, "Contraseña actualizada correctamente."),
         });
 
-        await navigateTo(LOGIN_ROUTE);
+        const navigated = await navigateTo(LOGIN_ROUTE);
+
+        if (!navigated) {
+          throw new Error("No se pudo volver a la pantalla de acceso.");
+        }
+
         return true;
       }
 
@@ -612,7 +661,7 @@ export function renderResetPasswordView(containerArg = null, deps = {}) {
         // noop
       }
 
-      navigateTo(LOGIN_ROUTE);
+      void navigateTo(LOGIN_ROUTE);
     }),
     () => destroyResetPasswordFields(refs.root || container),
   ];
@@ -659,15 +708,29 @@ export function renderResetPasswordView(containerArg = null, deps = {}) {
         mounted,
         submitting,
         mode,
-        route: currentPath(),
+
+        route: redact(currentPath()),
         hasToken: mode === "confirm" ? Boolean(initialToken || tokenFromUrl()) : false,
+
         policy: {
           noHttpDirect: true,
           noStore: true,
           noToastOwn: true,
           noLoaderOwn: true,
+
           tokenParam: TOKEN_PARAM,
+          tokenParamUnique: true,
+
+          routesFromConfig: true,
+
+          noBrowserNavigation: true,
+          noAppCoreNavigate: true,
+
           no2fa: true,
+          noMfa: true,
+          noOtp: true,
+
+          snapshotRedacted: true,
         },
       };
     },
@@ -730,7 +793,7 @@ export function getSnapshot() {
   return {
     version: RESET_PASSWORD_VIEW_VERSION,
     mounted: false,
-    route: currentPath(),
+    route: redact(currentPath()),
     mode: resolveMode(),
   };
 }

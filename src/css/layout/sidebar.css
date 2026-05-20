@@ -8,6 +8,7 @@
    - Sidebar sólido Graphite Glass.
    - SVGs claros en reposo, no dependientes del hover.
    - Botón collapse alineado con iconos en collapsed.
+   - Logo limpio: una sola capa visible, sin overlays ni imagen rota encima.
    - Dropdown visual de cuenta.
    - Estado open/collapsed/mobile.
    - Scope estricto bajo .sidebar.
@@ -66,8 +67,9 @@
   --sidebar-local-avatar-size: var(--sidebar-user-avatar-size, 34px);
   --sidebar-local-toggle-size: 36px;
 
-  --sidebar-local-logo-height: var(--sidebar-logo-height, 34px);
-  --sidebar-local-logo-width: var(--sidebar-logo-width, min(168px, 100%));
+  --sidebar-local-logo-size: var(--sidebar-logo-size, 34px);
+  --sidebar-local-logo-height: var(--sidebar-local-logo-size);
+  --sidebar-local-logo-width: var(--sidebar-local-logo-size);
   --sidebar-local-logo-radius: var(--sidebar-logo-radius, 12px);
   --sidebar-local-logo-filter: none;
   --sidebar-local-logo-opacity: var(--sidebar-logo-opacity, .98);
@@ -284,14 +286,15 @@
 }
 
 .sidebar .sidebar-brand-content,
-.sidebar .sidebar-brand-content--logo {
+.sidebar .sidebar-brand-content--logo,
+.sidebar .sidebar-brand-content-logo {
   min-inline-size: 0;
 
   display: flex;
   align-items: center;
   justify-content: flex-start;
 
-  overflow: hidden;
+  overflow: visible;
 }
 
 .sidebar .sidebar-brand-text {
@@ -309,20 +312,35 @@
   white-space: nowrap;
 }
 
+
+/* =========================================================
+   HEADER LOGO · SINGLE CLEAN LAYER
+========================================================= */
+
 .sidebar .sidebar-brand-logo {
   position: relative;
 
   inline-size: var(--sidebar-local-logo-width);
-  max-inline-size: 100%;
+  min-inline-size: var(--sidebar-local-logo-width);
+  max-inline-size: var(--sidebar-local-logo-width);
+
   block-size: var(--sidebar-local-logo-height);
+  min-block-size: var(--sidebar-local-logo-height);
+  max-block-size: var(--sidebar-local-logo-height);
 
   display: inline-grid;
-  align-items: center;
-  justify-items: start;
+  place-items: center;
 
-  overflow: hidden;
+  flex: 0 0 var(--sidebar-local-logo-width);
 
+  overflow: visible;
+  isolation: isolate;
+
+  border: 0;
   border-radius: var(--sidebar-local-logo-radius);
+
+  background: transparent;
+  color: var(--sidebar-local-text-strong);
 
   opacity: var(--sidebar-local-logo-opacity);
   filter: var(--sidebar-local-logo-filter);
@@ -330,27 +348,61 @@
   transform: translateZ(0);
 }
 
-.sidebar .sidebar-brand-logo-img {
-  position: absolute;
-  inset: 0;
+/*
+   Regla clave:
+   El template puede traer fallback SVG + logo dark + logo light.
+   Para evitar cualquier recubrimiento o icono roto encima del logo,
+   en sidebar usamos UNA sola capa visible: el fallback SVG.
+*/
+.sidebar .sidebar-brand-logo-img,
+.sidebar .sidebar-brand-logo-img--theme-dark,
+.sidebar .sidebar-brand-logo-img--theme-light,
+.sidebar .sidebar-brand-logo-img--white,
+.sidebar .sidebar-brand-logo-img--black {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.sidebar .sidebar-brand-logo-fallback {
+  position: relative;
+  z-index: 1;
 
   inline-size: 100%;
   block-size: 100%;
 
-  object-fit: contain;
-  object-position: left center;
+  display: inline-grid !important;
+  place-items: center;
+
+  overflow: visible;
+
+  color: currentColor;
+  background: transparent;
 
   opacity: 1;
+  pointer-events: none;
 }
 
-.sidebar .sidebar-brand-logo-img--theme-dark,
-.sidebar .sidebar-brand-logo-img--white {
-  display: var(--sidebar-logo-dark-display, block);
+.sidebar .sidebar-brand-logo-fallback-svg {
+  inline-size: 100%;
+  block-size: 100%;
+
+  display: block;
+
+  color: currentColor;
+  opacity: 1;
+  filter: none;
+  transform: none;
 }
 
-.sidebar .sidebar-brand-logo-img--theme-light,
-.sidebar .sidebar-brand-logo-img--black {
-  display: var(--sidebar-logo-light-display, none);
+.sidebar .sidebar-brand-logo-fallback-svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
 
@@ -1299,25 +1351,22 @@
   .sidebar.is-collapsed .sidebar-brand-content,
   .sidebar[data-open="false"] .sidebar-brand-content,
   .sidebar[data-sidebar-state="collapsed"] .sidebar-brand-content,
-  .sidebar.is-collapsed .sidebar-brand-logo,
-  .sidebar[data-open="false"] .sidebar-brand-logo,
-  .sidebar[data-sidebar-state="collapsed"] .sidebar-brand-logo,
   .sidebar.is-collapsed .sidebar-link-content,
   .sidebar[data-open="false"] .sidebar-link-content,
   .sidebar[data-sidebar-state="collapsed"] .sidebar-link-content,
-  .sidebar.is-collapsed .sidebar-link-label,
-  .sidebar[data-open="false"] .sidebar-link-label,
-  .sidebar[data-sidebar-state="collapsed"] .sidebar-link-label,
   .sidebar.is-collapsed .sidebar-user-info,
   .sidebar[data-open="false"] .sidebar-user-info,
   .sidebar[data-sidebar-state="collapsed"] .sidebar-user-info,
   .sidebar.is-collapsed .sidebar-account-chevron,
   .sidebar[data-open="false"] .sidebar-account-chevron,
-  .sidebar[data-sidebar-state="collapsed"] .sidebar-account-chevron,
-  .sidebar.is-collapsed .sidebar-logout-label,
-  .sidebar[data-open="false"] .sidebar-logout-label,
-  .sidebar[data-sidebar-state="collapsed"] .sidebar-logout-label {
+  .sidebar[data-sidebar-state="collapsed"] .sidebar-account-chevron {
     display: flex !important;
+  }
+
+  .sidebar.is-collapsed .sidebar-brand-logo,
+  .sidebar[data-open="false"] .sidebar-brand-logo,
+  .sidebar[data-sidebar-state="collapsed"] .sidebar-brand-logo {
+    display: inline-grid !important;
   }
 
   .sidebar.is-collapsed .sidebar-link-label,

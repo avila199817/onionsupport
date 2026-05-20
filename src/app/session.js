@@ -1,4 +1,4 @@
- /* =========================================================
+/* =========================================================
    Onion Support - App Session
    Archivo: /src/app/session.js
 
@@ -16,12 +16,20 @@
    - Sin sync UI.
 ========================================================= */
 
-export const SESSION_VERSION = "simple";
+export const SESSION_VERSION = "app.session.v2";
 
 let restorePromise = null;
 
+/* =========================================================
+   BASICS
+========================================================= */
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
 function isAuthenticated(AppCore = null, Auth = null) {
-  if (typeof Auth?.isAuthenticated === "function") {
+  if (isFunction(Auth?.isAuthenticated)) {
     return Boolean(Auth.isAuthenticated());
   }
 
@@ -29,56 +37,46 @@ function isAuthenticated(AppCore = null, Auth = null) {
 }
 
 function getUser(AppCore = null, Auth = null) {
-  if (typeof Auth?.getUser === "function") {
+  if (isFunction(Auth?.getUser)) {
     return Auth.getUser();
-  }
-
-  if (typeof Auth?.getCurrentUser === "function") {
-    return Auth.getCurrentUser();
   }
 
   return AppCore?.state?.user || null;
 }
 
-function restoreOptions(options = {}) {
+function createRestorePayload(options = {}) {
   return {
+    ...options,
+    source: "app.session",
     silent: true,
     skipNavigation: true,
     skipRedirect: true,
     noRedirect: true,
-    source: "app.session",
-    ...options,
   };
 }
 
-async function callRestore(Auth = null, options = {}) {
-  if (typeof Auth?.restoreSession === "function") {
-    return Auth.restoreSession(options);
+function requireRestore(Auth = null) {
+  if (!isFunction(Auth?.restoreSession)) {
+    throw new Error("Auth.restoreSession() no disponible.");
   }
 
-  if (typeof Auth?.restore === "function") {
-    return Auth.restore(options);
-  }
-
-  if (typeof Auth?.session?.restore === "function") {
-    return Auth.session.restore(options);
-  }
-
-  return null;
+  return Auth.restoreSession.bind(Auth);
 }
 
-export async function restoreAuthSession({
+/* =========================================================
+   RESTORE
+========================================================= */
+
+export function restoreAuthSession({
   AppCore = null,
   Auth = null,
-  skipNavigation = true,
+  ...options
 } = {}) {
   if (restorePromise) return restorePromise;
 
   restorePromise = (async () => {
-    const result = await callRestore(
-      Auth,
-      restoreOptions({ skipNavigation })
-    );
+    const restoreSession = requireRestore(Auth);
+    const result = await restoreSession(createRestorePayload(options));
 
     return {
       ok: Boolean(result?.ok) || isAuthenticated(AppCore, Auth),
@@ -87,30 +85,16 @@ export async function restoreAuthSession({
       user: getUser(AppCore, Auth),
       result,
     };
-  })()
-    .catch(() => {
-      return {
-        ok: false,
-        restored: false,
-        authenticated: isAuthenticated(AppCore, Auth),
-        user: getUser(AppCore, Auth),
-        result: null,
-      };
-    })
-    .finally(() => {
-      restorePromise = null;
-    });
+  })().finally(() => {
+    restorePromise = null;
+  });
 
   return restorePromise;
 }
 
-export function restoreSessionInBackground(options = {}) {
-  return restoreAuthSession(options);
-}
-
-export async function navigateAfterSessionRestore() {
-  return false;
-}
+/* =========================================================
+   SNAPSHOT
+========================================================= */
 
 export function getSessionBootstrapSnapshot({
   AppCore = null,
@@ -124,10 +108,13 @@ export function getSessionBootstrapSnapshot({
   };
 }
 
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
 export default {
   SESSION_VERSION,
+
   restoreAuthSession,
-  restoreSessionInBackground,
-  navigateAfterSessionRestore,
   getSessionBootstrapSnapshot,
 };

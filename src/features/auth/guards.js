@@ -5,11 +5,13 @@
    Responsabilidad:
    - Guards mínimos de frontend.
    - Auth real delegada en session.js.
-   - Autenticado = token usable + user usable.
+   - Autenticado = access token usable + user usable.
    - Roles únicos exactos: admin / user.
-   - Entender /@{user.slug} como Home canónica /.
+   - Entender /@{user.slug} como Home privada canónica.
    - Entender /@{user.slug}/{ruta} como ruta privada scopeada.
    - Validar que /@{slug} pertenece al usuario actual.
+   - Bloquear /home como alias legacy no canónico.
+   - Bloquear rutas fuera de fase: /2fa, /mfa, /otp, /403, /404.
    - Sin fetch.
    - Sin refresh.
    - Sin restore.
@@ -31,15 +33,26 @@ import {
 
 import * as Session from "./session.js";
 
-export const GUARDS_VERSION = "auth.guards.v4";
+export const GUARDS_VERSION = "auth.guards.v5";
 
+const HOME_PATH = "/";
 const LOGIN_PATH = ROUTES.login || "/login";
-const HOME_PATH = ROUTES.home || "/";
 const PASSWORD_REQUEST_PATH = ROUTES.passwordRequest || "/password-request";
 const PASSWORD_RESET_PATH = ROUTES.passwordReset || "/password-reset";
 const ACTIVATE_ACCOUNT_PATH = ROUTES.activateAccount || "/activate-account";
 
+const USER_PREFIX = USER_HOME_PREFIX || "/@";
+
 const VALID_ROLES = Object.freeze(["admin", "user"]);
+
+const BLOCKED_LEGACY_PATHS = new Set([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
+]);
 
 /* =========================================================
    BASICS
@@ -58,7 +71,11 @@ function isObject(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -68,7 +85,10 @@ function unique(values = []) {
 
 function redact(value = "") {
   return cleanText(value, "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -174,8 +194,22 @@ export function normalizePublicPath(path = HOME_PATH) {
   return value || HOME_PATH;
 }
 
+function isBlockedLegacyPath(path = HOME_PATH) {
+  const normalized = normalizePublicPath(path).toLowerCase();
+
+  if (BLOCKED_LEGACY_PATHS.has(normalized)) return true;
+
+  return (
+    normalized.startsWith("/2fa/") ||
+    normalized.startsWith("/mfa/") ||
+    normalized.startsWith("/otp/")
+  );
+}
+
 function normalizeUserSlug(value = "") {
   const slug = cleanText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -191,7 +225,7 @@ function normalizeUserSlug(value = "") {
 export function getUserScopedRouteInfo(path = HOME_PATH) {
   const normalized = normalizePublicPath(path);
 
-  if (!normalized.startsWith(USER_HOME_PREFIX)) {
+  if (!normalized.startsWith(USER_PREFIX)) {
     return {
       scoped: false,
       home: false,
@@ -201,7 +235,7 @@ export function getUserScopedRouteInfo(path = HOME_PATH) {
     };
   }
 
-  const rest = normalized.slice(USER_HOME_PREFIX.length);
+  const rest = normalized.slice(USER_PREFIX.length);
   const [slugSegment = "", ...restSegments] = rest.split("/");
   const slug = normalizeUserSlug(slugSegment);
 
@@ -292,6 +326,7 @@ function publicAuthRoutes() {
     ]
       .map(normalizePublicPath)
       .filter(Boolean)
+      .filter((path) => !isBlockedLegacyPath(path))
   );
 }
 
@@ -363,7 +398,7 @@ export function getCurrentUserHomePath() {
 
   const slug = getCurrentUserSlug();
 
-  return slug ? `${USER_HOME_PREFIX}${slug}` : HOME_PATH;
+  return slug ? `${USER_PREFIX}${slug}` : HOME_PATH;
 }
 
 export function getCurrentRole() {
@@ -445,7 +480,11 @@ export function getAuthHeader() {
 ========================================================= */
 
 export function isPublicTechnicalPath(path = currentPath()) {
-  return publicAuthRoutes().includes(canonicalAuthPath(path));
+  const normalized = normalizePublicPath(path);
+
+  if (isBlockedLegacyPath(normalized)) return false;
+
+  return publicAuthRoutes().includes(canonicalAuthPath(normalized));
 }
 
 export function isAuthRoute(path = currentPath()) {
@@ -472,6 +511,8 @@ export function guardAuthenticated(options = {}) {
   const path = normalizePublicPath(options.path || currentPath());
   const scoped = getUserScopedRouteInfo(path);
 
+  if (isBlockedLegacyPath(path)) return false;
+
   if (!isAuthenticated()) return false;
 
   if (scoped.scoped && !isCurrentUserScopedPath(path)) {
@@ -481,7 +522,11 @@ export function guardAuthenticated(options = {}) {
   return true;
 }
 
-export function guardGuest() {
+export function guardGuest(options = {}) {
+  const path = normalizePublicPath(options.path || currentPath());
+
+  if (isBlockedLegacyPath(path)) return false;
+
   return !isAuthenticated();
 }
 
@@ -512,12 +557,16 @@ export function canAccessRoute(route = {}) {
   const canonicalPath = canonicalAuthPath(publicPath);
   const scoped = getUserScopedRouteInfo(publicPath);
 
+  if (isBlockedLegacyPath(publicPath) || isBlockedLegacyPath(canonicalPath)) {
+    return false;
+  }
+
   if (scoped.scoped && !guardAuthenticated({ path: publicPath })) {
     return false;
   }
 
   if (route.guestOnly === true || route.publicOnly === true) {
-    return guardGuest();
+    return guardGuest({ path: publicPath });
   }
 
   if (
@@ -612,6 +661,8 @@ export function getAuthGuardsSnapshot() {
     userScopedPath: scoped.scoped,
     userScopedRestPath: scoped.scoped ? scoped.restPath : null,
 
+    isBlockedLegacyPath: isBlockedLegacyPath(path),
+
     isUserHomePath: isUserHomePath(path),
     isUserScopedPath: isUserScopedPath(path),
     isCurrentUserHomePath: isCurrentUserHomePath(path),
@@ -638,8 +689,13 @@ export function getAuthGuardsSnapshot() {
       canonicalizesUserScopedRoutes: true,
       validatesCurrentUserSlug: true,
 
+      blocksHomeAlias: true,
+      blocks403Route: true,
+      blocks404Route: true,
+
       noHomeAlias: true,
       no403Route: true,
+      no404Route: true,
       no2fa: true,
       noMfa: true,
       noOtp: true,

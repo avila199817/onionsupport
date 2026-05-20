@@ -46,8 +46,8 @@ import {
 export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v8";
 
 export const SIDEBAR_LOGO_ASSETS = Object.freeze({
-  dark: "/src/media/img/favicon_white_circle.png?v=6",
-  light: "/src/media/img/favicon_black_circle.png?v=6",
+  dark: "/src/media/img/favicon_white.png",
+  light: "/src/media/img/favicon_black.png",
 });
 
 /* =========================================================

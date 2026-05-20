@@ -14,6 +14,7 @@
    - Roles únicos: admin / user.
    - Home interna: /
    - Home visible de usuario: /@{user.slug}
+   - No inventar rutas opcionales.
    - Sin DOM.
    - Sin Auth.
    - Sin Router.
@@ -22,6 +23,9 @@
    - Sin comportamiento de dropdown.
    - Sin rutas legacy.
    - Sin /home.
+   - Sin /403.
+   - Sin /404.
+   - Sin 2FA/MFA/OTP.
    - Sin compatibilidad fantasma.
 ========================================================= */
 
@@ -29,9 +33,10 @@ import {
   ROUTES,
   PUBLIC_ROUTES,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
+  BLOCKED_FRONTEND_ROUTES,
 } from "../../core/config.js";
 
-export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v5";
+export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v6";
 
 /* =========================================================
    HELPERS INTERNOS
@@ -46,8 +51,22 @@ function freeze(value) {
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
+}
+
+function compact(values = []) {
+  return (Array.isArray(values) ? values : [values])
+    .map((value) => text(value, ""))
+    .filter(Boolean);
+}
+
+function unique(values = []) {
+  return [...new Set(compact(values))];
 }
 
 /* =========================================================
@@ -111,7 +130,7 @@ export function normalizeSidebarRole(value = "", fallback = SIDEBAR_ROLE_USER) {
    ROUTES
 ========================================================= */
 
-export const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
+export const HOME_ROUTE = "/";
 export const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
 export const INCIDENCIAS_ROUTE = ROUTES.incidencias || "/incidencias";
@@ -120,41 +139,63 @@ export const CLIENTES_ROUTE = ROUTES.clientes || "/clientes";
 export const CUENTA_ROUTE = ROUTES.cuenta || "/cuenta";
 export const AJUSTES_ROUTE = ROUTES.ajustes || "/ajustes";
 
-export const USUARIOS_ROUTE = ROUTES.usuarios || "/usuarios";
-export const SERVER_ROUTE = ROUTES.servidor || "/servidor";
+/*
+  Admin opcionales.
+  No se inventan por fallback: sólo existen si core/config.js los define.
+*/
+export const USUARIOS_ROUTE = ROUTES.usuarios || "";
+export const SERVER_ROUTE = ROUTES.servidor || "";
 
 export const LOGIN_ROUTE = ROUTES.login || "/login";
 export const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest || "/password-request";
 export const PASSWORD_RESET_ROUTE = ROUTES.passwordReset || "/password-reset";
 export const ACTIVATE_ACCOUNT_ROUTE = ROUTES.activateAccount || "/activate-account";
 
-export const SIDEBAR_PUBLIC_ROUTES = freeze(
-  Array.isArray(PUBLIC_ROUTES) && PUBLIC_ROUTES.length
-    ? [...PUBLIC_ROUTES]
-    : [
-        LOGIN_ROUTE,
-        PASSWORD_REQUEST_ROUTE,
-        PASSWORD_RESET_ROUTE,
-        ACTIVATE_ACCOUNT_ROUTE,
-      ]
+export const SIDEBAR_BLOCKED_ROUTES = freeze(
+  unique([
+    ...(Array.isArray(BLOCKED_FRONTEND_ROUTES) ? BLOCKED_FRONTEND_ROUTES : []),
+    "/home",
+    "/403",
+    "/404",
+    "/2fa",
+    "/mfa",
+    "/otp",
+  ])
 );
 
-export const SIDEBAR_PRIVATE_FALLBACK_ROUTES = freeze([
-  HOME_ROUTE,
-  INCIDENCIAS_ROUTE,
-  FACTURAS_ROUTE,
-  CLIENTES_ROUTE,
-  CUENTA_ROUTE,
-  AJUSTES_ROUTE,
-  USUARIOS_ROUTE,
-  SERVER_ROUTE,
-]);
+export const SIDEBAR_PUBLIC_ROUTES = freeze(
+  unique(
+    Array.isArray(PUBLIC_ROUTES) && PUBLIC_ROUTES.length
+      ? PUBLIC_ROUTES
+      : [
+          LOGIN_ROUTE,
+          PASSWORD_REQUEST_ROUTE,
+          PASSWORD_RESET_ROUTE,
+          ACTIVATE_ACCOUNT_ROUTE,
+        ]
+  )
+);
 
-export const SIDEBAR_ADMIN_FALLBACK_ROUTES = freeze([
-  CLIENTES_ROUTE,
-  USUARIOS_ROUTE,
-  SERVER_ROUTE,
-]);
+export const SIDEBAR_PRIVATE_FALLBACK_ROUTES = freeze(
+  unique([
+    HOME_ROUTE,
+    INCIDENCIAS_ROUTE,
+    FACTURAS_ROUTE,
+    CLIENTES_ROUTE,
+    CUENTA_ROUTE,
+    AJUSTES_ROUTE,
+    USUARIOS_ROUTE,
+    SERVER_ROUTE,
+  ])
+);
+
+export const SIDEBAR_ADMIN_FALLBACK_ROUTES = freeze(
+  unique([
+    CLIENTES_ROUTE,
+    USUARIOS_ROUTE,
+    SERVER_ROUTE,
+  ])
+);
 
 const SIDEBAR_USER_SCOPED_ROUTES = freeze([
   ...SIDEBAR_PRIVATE_FALLBACK_ROUTES,
@@ -265,8 +306,22 @@ export function canonicalSidebarPath(path = "/") {
   return splitSidebarPath(path).pathname || HOME_ROUTE;
 }
 
+export function isSidebarBlockedRoute(path = "/") {
+  const route = canonicalSidebarPath(path).toLowerCase();
+
+  if (SIDEBAR_BLOCKED_ROUTES.includes(route)) return true;
+
+  return (
+    route.startsWith("/2fa/") ||
+    route.startsWith("/mfa/") ||
+    route.startsWith("/otp/")
+  );
+}
+
 export function normalizeSidebarSlug(value = "") {
   const slug = text(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -282,6 +337,18 @@ export function normalizeSidebarSlug(value = "") {
 export function getSidebarUserScopedRouteInfo(path = "/") {
   const route = canonicalSidebarPath(path);
 
+  if (isSidebarBlockedRoute(route)) {
+    return freeze({
+      scoped: false,
+      routable: false,
+      home: false,
+      slug: "",
+      restPath: route,
+      lookupPath: route,
+      blocked: true,
+    });
+  }
+
   if (!route.startsWith(USER_HOME_PREFIX)) {
     return freeze({
       scoped: false,
@@ -290,6 +357,7 @@ export function getSidebarUserScopedRouteInfo(path = "/") {
       slug: "",
       restPath: route,
       lookupPath: route,
+      blocked: false,
     });
   }
 
@@ -305,6 +373,7 @@ export function getSidebarUserScopedRouteInfo(path = "/") {
       slug: "",
       restPath: route,
       lookupPath: route,
+      blocked: false,
     });
   }
 
@@ -312,7 +381,9 @@ export function getSidebarUserScopedRouteInfo(path = "/") {
     ? normalizePathname(`/${restSegments.join("/")}`)
     : HOME_ROUTE;
 
-  const routable = SIDEBAR_USER_SCOPED_ROUTES.includes(restPath);
+  const routable =
+    !isSidebarBlockedRoute(restPath) &&
+    SIDEBAR_USER_SCOPED_ROUTES.includes(restPath);
 
   return freeze({
     scoped: true,
@@ -321,6 +392,7 @@ export function getSidebarUserScopedRouteInfo(path = "/") {
     slug,
     restPath,
     lookupPath: routable ? restPath : route,
+    blocked: false,
   });
 }
 
@@ -356,26 +428,33 @@ export function isSidebarHomeRoute(path = "/") {
 export function sidebarHomeLookupPath(path = "/") {
   const info = getSidebarUserScopedRouteInfo(path);
 
-  if (info.scoped && info.routable) {
-    return info.lookupPath;
-  }
+  if (info.blocked) return "";
+  if (info.scoped && info.routable) return info.lookupPath;
 
   return info.home ? HOME_ROUTE : canonicalSidebarPath(path);
 }
 
 export function isSidebarPublicRoute(path = "/") {
-  return SIDEBAR_PUBLIC_ROUTES.includes(canonicalSidebarPath(path));
+  const route = canonicalSidebarPath(path);
+
+  if (isSidebarBlockedRoute(route)) return false;
+
+  return SIDEBAR_PUBLIC_ROUTES.includes(route);
 }
 
 export function isSidebarAdminFallbackRoute(path = "/") {
-  return SIDEBAR_ADMIN_FALLBACK_ROUTES.includes(sidebarHomeLookupPath(path));
+  const route = sidebarHomeLookupPath(path);
+
+  if (!route || isSidebarBlockedRoute(route)) return false;
+
+  return SIDEBAR_ADMIN_FALLBACK_ROUTES.includes(route);
 }
 
 /* =========================================================
    ROUTE META
 ========================================================= */
 
-export const SIDEBAR_ROUTE_META = freeze({
+const BASE_ROUTE_META = {
   [HOME_ROUTE]: freeze({
     key: "home",
     label: "Inicio",
@@ -418,26 +497,34 @@ export const SIDEBAR_ROUTE_META = freeze({
     icon: "ajustes",
     order: 60,
   }),
+};
 
-  [USUARIOS_ROUTE]: freeze({
+if (USUARIOS_ROUTE) {
+  BASE_ROUTE_META[USUARIOS_ROUTE] = freeze({
     key: "usuarios",
     label: "Usuarios",
     icon: "usuarios",
     order: 70,
     adminOnly: true,
-  }),
+  });
+}
 
-  [SERVER_ROUTE]: freeze({
+if (SERVER_ROUTE) {
+  BASE_ROUTE_META[SERVER_ROUTE] = freeze({
     key: "servidor",
     label: "Servidor",
     icon: "servidor",
     order: 80,
     adminOnly: true,
-  }),
-});
+  });
+}
+
+export const SIDEBAR_ROUTE_META = freeze(BASE_ROUTE_META);
 
 function knownSidebarRouteMeta(path = "/") {
   const route = sidebarHomeLookupPath(path);
+
+  if (!route || isSidebarBlockedRoute(route)) return null;
 
   if (route === HOME_ROUTE) {
     return SIDEBAR_ROUTE_META[HOME_ROUTE];
@@ -448,6 +535,17 @@ function knownSidebarRouteMeta(path = "/") {
 
 function fallbackRouteMeta(path = "/") {
   const route = sidebarHomeLookupPath(path);
+
+  if (!route || isSidebarBlockedRoute(route)) {
+    return freeze({
+      key: "blocked",
+      label: "",
+      icon: "home",
+      order: 999,
+      hidden: true,
+    });
+  }
+
   const key = route.replace(/^\//, "") || "home";
 
   return freeze({
@@ -658,6 +756,12 @@ export function getSidebarConstantsSnapshot() {
       privateFallback: SIDEBAR_PRIVATE_FALLBACK_ROUTES,
       adminFallback: SIDEBAR_ADMIN_FALLBACK_ROUTES,
       userScoped: SIDEBAR_USER_SCOPED_ROUTES,
+      blocked: SIDEBAR_BLOCKED_ROUTES,
+
+      optionalAdmin: {
+        usuarios: Boolean(USUARIOS_ROUTE),
+        servidor: Boolean(SERVER_ROUTE),
+      },
     },
 
     roles: SIDEBAR_ROLES,
@@ -672,6 +776,7 @@ export function getSidebarConstantsSnapshot() {
       configDrivenRoutes: true,
 
       clientesAdminOnly: true,
+      optionalAdminRoutesRequireConfig: true,
 
       noDom: true,
       noAuth: true,
@@ -682,8 +787,14 @@ export function getSidebarConstantsSnapshot() {
       noDropdownBehavior: true,
       dropdownSelectorsOnly: true,
 
+      blocksHomeAlias: true,
+      blocks403Route: true,
+      blocks404Route: true,
       noLegacyRoutes: true,
       noHomeRoute: true,
+      no2fa: true,
+      noMfa: true,
+      noOtp: true,
 
       noSvgBrandIcon: true,
       companyLogoHandledByTemplateAndCss: true,
@@ -735,12 +846,14 @@ export default freeze({
   PASSWORD_RESET_ROUTE,
   ACTIVATE_ACCOUNT_ROUTE,
 
+  SIDEBAR_BLOCKED_ROUTES,
   SIDEBAR_PUBLIC_ROUTES,
   SIDEBAR_PRIVATE_FALLBACK_ROUTES,
   SIDEBAR_ADMIN_FALLBACK_ROUTES,
 
   normalizeSidebarPath,
   canonicalSidebarPath,
+  isSidebarBlockedRoute,
 
   normalizeSidebarSlug,
   getSidebarUserScopedRouteInfo,

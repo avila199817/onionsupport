@@ -4,7 +4,8 @@
 
    Responsabilidad:
    - Storage mínimo de Auth.
-   - Persistir token para soportar reload.
+   - Persistir access token para soportar reload.
+   - Persistir refresh token para restore persistente.
    - Persistir contexto auxiliar mínimo no canónico.
    - No autenticar por sí mismo.
    - Nunca storage.clear().
@@ -19,6 +20,11 @@
    - Sin persistir usuario completo.
    - Sin fabricar usuario desde payload token-only.
    - Sin arrastrar refresh/session de otro usuario.
+
+   CONTRATO RESTORE:
+   - refreshToken es el contexto mínimo para intentar /api/auth/refresh.
+   - sessionId/userId son preferidos si existen.
+   - user completo nunca se usa como fuente canónica desde storage.
 ========================================================= */
 
 import {
@@ -26,7 +32,7 @@ import {
   AUTH_CONSTANTS,
 } from "./constants.js";
 
-export const AUTH_STORAGE_VERSION = "auth.storage.v4";
+export const AUTH_STORAGE_VERSION = "auth.storage.v5";
 
 const PREFIX = "onion:auth:";
 
@@ -112,7 +118,11 @@ function isObject(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -123,7 +133,10 @@ function number(value, fallback = 0) {
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -293,7 +306,6 @@ function unwrap(value = null) {
       value.refreshToken ||
       value.refresh_token ||
       value.value ||
-      value.raw ||
       ""
     );
   }
@@ -374,6 +386,11 @@ function normalizeRoute(value = "") {
   if (/[\r\n\t\\]/.test(route)) return "";
   if (hasSensitiveQuery(route)) return "";
 
+  const clean = route.split("#")[0] || "";
+
+  if (clean === "/home") return "";
+  if (clean.startsWith("/2fa") || clean.startsWith("/mfa") || clean.startsWith("/otp")) return "";
+
   return route;
 }
 
@@ -384,6 +401,7 @@ function extractRealUserSlug(user = null) {
     user.slug ||
       user.lookup?.slug ||
       user.profile?.slug ||
+      user.routing?.slug ||
       ""
   );
 }
@@ -391,14 +409,20 @@ function extractRealUserSlug(user = null) {
 function extractUserId(user = null) {
   if (!isObject(user)) return "";
 
-  return normalizeSessionValue(user.userId || user.id || "");
+  return normalizeSessionValue(
+    user.userId ||
+      user.id ||
+      user.uid ||
+      user.sub ||
+      ""
+  );
 }
 
 function looksLikeUserObject(value = null) {
   if (!isObject(value)) return false;
 
   return Boolean(
-    cleanText(value.userId || value.id, "") ||
+    cleanText(value.userId || value.id || value.uid || value.sub, "") ||
       cleanText(value.username || value.userName || value.user_name, "") ||
       cleanText(value.slug, "") ||
       cleanText(value.lookup?.slug, "") ||
@@ -544,6 +568,7 @@ export function persistSessionContext(sessionData = null, user = null, options =
       data.session_user_id ||
       data.userId ||
       data.user_id ||
+      data.uid ||
       extractUserId(safeUser) ||
       ""
   );
@@ -693,7 +718,11 @@ export function hasCompleteRefreshContext() {
 }
 
 export function hasRefreshContext() {
-  return hasCompleteRefreshContext();
+  /*
+    Backend persistente puede resolver sesión por refreshTokenHash.
+    sessionId/userId son preferidos, pero no obligatorios.
+  */
+  return Boolean(getStoredRefreshToken());
 }
 
 /* =========================================================
@@ -732,14 +761,20 @@ export function persistAuthStorage(payload = {}, options = {}) {
   const userChanged = explicitUserMismatch(user);
 
   if (userChanged) {
+    removeStoredAccessToken();
     removeStoredRefreshToken();
     removeStoredSessionContext();
     removeStoredAuxSessionData();
   }
 
-  const accessStored = persistAccessToken(accessToken, options);
-
+  let accessStored = false;
   let refreshStored = false;
+
+  if (accessToken) {
+    accessStored = persistAccessToken(accessToken, options);
+  } else if (options.clearMissingAccessToken === true || userChanged) {
+    removeStoredAccessToken();
+  }
 
   if (refreshToken) {
     refreshStored = persistRefreshToken(refreshToken, options);
@@ -760,10 +795,11 @@ export function persistAuthStorage(payload = {}, options = {}) {
   }
 
   return {
-    ok: Boolean(accessStored || refreshStored || hasCompleteRefreshContext()),
+    ok: Boolean(accessStored || refreshStored || hasStoredAuthPayload()),
     hasAccessToken: hasAccessToken(),
     hasRefreshToken: hasRefreshToken(),
     hasSessionContext: hasSessionContext(),
+    hasAnyRefreshContext: hasAnyRefreshContext(),
     hasRefreshContext: hasRefreshContext(),
     hasCompleteRefreshContext: hasCompleteRefreshContext(),
     userSlug: getStoredUserSlug() || null,
@@ -802,14 +838,15 @@ export function getStoredAuthPayload() {
     /*
       Importante:
       No devolvemos user fabricado.
-      Restore debe usar token -> /me -> user canónico.
+      Restore debe usar token -> /me -> user canónico,
+      o refreshToken -> /refresh -> user canónico.
     */
     user: null,
   };
 }
 
 export function hasStoredAuthPayload() {
-  return Boolean(hasAccessToken() || hasCompleteRefreshContext());
+  return Boolean(hasAccessToken() || hasRefreshToken());
 }
 
 /* =========================================================
@@ -991,14 +1028,17 @@ export function getAuthStorageSnapshot() {
       noStorageClear: true,
       noLegacyMassive: true,
 
-      persistsToken: true,
+      persistsAccessToken: true,
+      persistsRefreshToken: true,
       persistsAuxContextOnly: true,
       persistsFullUser: false,
       authenticatesByItself: false,
 
-      refreshContextRequiresTokenSessionAndUser: true,
+      refreshTokenIsMinimumContext: true,
+      sessionIdUserIdPreferredButOptional: true,
       tokenOnlyDoesNotFabricateUser: true,
       preservesSessionContextWhenPayloadOmitsSession: true,
+      preservesRefreshTokenWhenPayloadOmitsRefresh: true,
       clearsStaleContextOnUserMismatch: true,
 
       noTempToken: true,

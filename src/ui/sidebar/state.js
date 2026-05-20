@@ -14,6 +14,7 @@
    - Sin indicadores.
    - Sin tooltips.
    - Sin estado de dropdown.
+   - Sin avatar.
    - Sin Store propio.
    - Sin DOM propio: delega en dom.js.
 ========================================================= */
@@ -25,7 +26,10 @@ import {
   setSidebarOpenState,
 } from "./dom.js";
 
-export const SIDEBAR_STATE_VERSION = "sidebar.state.v4";
+export const SIDEBAR_STATE_VERSION = "sidebar.state.v5";
+
+const SOURCE = "sidebar.state";
+const DEFAULT_OPEN = true;
 
 /* =========================================================
    RUNTIME
@@ -34,7 +38,7 @@ export const SIDEBAR_STATE_VERSION = "sidebar.state.v4";
 const runtime = {
   initialized: false,
   mounted: false,
-  open: true,
+  open: DEFAULT_OPEN,
   logoutInFlight: false,
   root: null,
 };
@@ -64,14 +68,32 @@ function visibleRoot(root = null) {
   );
 }
 
+function connectedRoot(root = null) {
+  return Boolean(
+    isElement(root) &&
+      isConnected(root)
+  );
+}
+
 function resolveRoot(root = null) {
   if (isElement(root)) return root;
 
-  if (isElement(runtime.root) && isConnected(runtime.root)) {
+  if (connectedRoot(runtime.root)) {
     return runtime.root;
   }
 
   return getSidebarRoot();
+}
+
+function rootSnapshot(root = null) {
+  return {
+    hasRoot: isElement(root),
+    rootConnected: isConnected(root),
+    rootHidden: Boolean(root?.hidden),
+    rootAriaHidden: root?.getAttribute?.("aria-hidden") || "",
+    rootOpen: root?.dataset?.open || "",
+    rootSidebarState: root?.dataset?.sidebarState || "",
+  };
 }
 
 /* =========================================================
@@ -90,6 +112,8 @@ function ensureCoreState(AppCore = null) {
 }
 
 function createCorePatch(root = runtime.root) {
+  const snapshot = rootSnapshot(root);
+
   return {
     sidebarInitialized: runtime.initialized,
     sidebarMounted: runtime.mounted,
@@ -97,25 +121,25 @@ function createCorePatch(root = runtime.root) {
     sidebarCollapsed: !runtime.open,
     sidebarLogoutInFlight: runtime.logoutInFlight,
 
-    sidebarHasRoot: isElement(root),
-    sidebarRootConnected: isConnected(root),
-    sidebarRootHidden: Boolean(root?.hidden),
-    sidebarRootAriaHidden: root?.getAttribute?.("aria-hidden") || "",
+    sidebarHasRoot: snapshot.hasRoot,
+    sidebarRootConnected: snapshot.rootConnected,
+    sidebarRootHidden: snapshot.rootHidden,
+    sidebarRootAriaHidden: snapshot.rootAriaHidden,
 
     sidebarStateVersion: SIDEBAR_STATE_VERSION,
   };
 }
 
 function syncCoreState(AppCore = null) {
+  if (!isObject(AppCore)) return false;
+
   const root = resolveRoot();
   const patch = createCorePatch(root);
-
-  if (!isObject(AppCore)) return false;
 
   try {
     if (isFunction(AppCore.setState)) {
       AppCore.setState(patch, {
-        source: "sidebar.state",
+        source: SOURCE,
         silent: true,
         emit: false,
       });
@@ -206,7 +230,10 @@ export function setSidebarInitialized(value = true, AppCore = null) {
 }
 
 export function setSidebarMounted(value = true, AppCore = null) {
-  runtime.mounted = Boolean(value) && visibleRoot(resolveRoot());
+  const root = resolveRoot();
+
+  runtime.root = isElement(root) ? root : null;
+  runtime.mounted = Boolean(value) && visibleRoot(runtime.root);
 
   syncCoreState(AppCore);
 
@@ -307,7 +334,7 @@ export function syncSidebarState(context = {}) {
 export function resetSidebarState(AppCore = null) {
   runtime.initialized = false;
   runtime.mounted = false;
-  runtime.open = true;
+  runtime.open = DEFAULT_OPEN;
   runtime.logoutInFlight = false;
   runtime.root = null;
 
@@ -326,6 +353,8 @@ export function getSidebarState() {
   runtime.root = isElement(root) ? root : null;
   runtime.mounted = visibleRoot(runtime.root);
 
+  const snapshot = rootSnapshot(root);
+
   return {
     version: SIDEBAR_STATE_VERSION,
 
@@ -335,12 +364,7 @@ export function getSidebarState() {
     collapsed: !runtime.open,
     logoutInFlight: runtime.logoutInFlight,
 
-    hasRoot: isElement(root),
-    rootConnected: isConnected(root),
-    rootHidden: Boolean(root?.hidden),
-    rootAriaHidden: root?.getAttribute?.("aria-hidden") || "",
-    rootOpen: root?.dataset?.open || "",
-    rootSidebarState: root?.dataset?.sidebarState || "",
+    ...snapshot,
 
     policy: {
       runtimeOnly: true,
@@ -354,10 +378,14 @@ export function getSidebarState() {
       noIndicators: true,
       noTooltips: true,
       noDropdownState: true,
+      noAvatarState: true,
       noStoreOwn: true,
 
       domDelegatedToDomJs: true,
+      openStateDelegatedToDomJs: true,
       noOwnDom: true,
+
+      syncsCoreStateSilently: true,
     },
   };
 }

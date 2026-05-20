@@ -15,7 +15,6 @@
    - User no arrastra usuarios/clientes de cache admin.
    - Renderiza dentro del host recibido por Router.
    - Devuelve API/controller, no el contenedor padre.
-   - Sin validar rutas.
    - Sin resolver slug.
    - Sin Auth guards.
    - Sin Router guards.
@@ -26,14 +25,9 @@
    - Sin modales de otras vistas.
    - Sin Toast directo.
    - Sin /home.
-   - Sin magia negra.
 ========================================================= */
 
-import { AppCore } from "../../core/index.js";
-
-import {
-  ROUTES,
-} from "../../core/config.js";
+import { ROUTES } from "../../core/config.js";
 
 import renderHomeTemplate, {
   renderHomeErrorState,
@@ -105,7 +99,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v4";
+export const HOME_VIEW_VERSION = "home.view.v5";
 
 export const HomeView = (() => {
   "use strict";
@@ -113,19 +107,28 @@ export const HomeView = (() => {
   const SOURCE = "views.home";
   const SCOPE = "view:home";
 
-  const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
-  const INCIDENCIAS_ROUTE = ROUTES.incidencias || "/incidencias";
-
   const DEFAULT_PAGE_SIZE = 5;
+  const BLOCKED_HOME_ROUTE = "/home";
+
+  const SENSITIVE_QUERY_RE =
+    /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i;
+
+  const ADMIN_ENTITY_RE =
+    /(^|[\s._-])(admin|users?|usuarios?|clients?|clientes?|customers?)([\s._-]|$)/i;
+
+  const INCIDENCIAS_ROUTE = safeInternalRoute(
+    ROUTES?.incidencias,
+    "/incidencias"
+  );
 
   let initialized = false;
   let destroyed = false;
 
-  let inflightInit = null;
   let inflightLoad = null;
-
   let bindingsCleanup = null;
+
   let currentContainer = null;
+  let currentContext = {};
 
   let renderSeq = 0;
   let loadSeq = 0;
@@ -140,6 +143,10 @@ export const HomeView = (() => {
 
   function isElement(value = null) {
     return Boolean(value && typeof value === "object" && value.nodeType === 1);
+  }
+
+  function hasKeys(value = {}) {
+    return Boolean(isObject(value) && Object.keys(value).length > 0);
   }
 
   function nextRenderSeq() {
@@ -162,142 +169,11 @@ export const HomeView = (() => {
 
   function redact(value = "") {
     return String(value || "")
-      .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+      .replace(
+        /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+        "$1***"
+      )
       .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
-  }
-
-  function getState() {
-    return isObject(AppCore?.state) ? AppCore.state : {};
-  }
-
-  function getCurrentUser() {
-    const state = getState();
-
-    return safeObject(
-      first(
-        state.user,
-        state.currentUser,
-        state.authUser,
-        state.sessionUser,
-        state.session?.user,
-        state.sessionData?.user,
-        {}
-      )
-    );
-  }
-
-  function normalizeRole(value = "") {
-    if (Array.isArray(value)) {
-      const roles = value
-        .map(normalizeRole)
-        .filter(Boolean);
-
-      if (roles.includes("admin")) return "admin";
-      if (roles.includes("user")) return "user";
-
-      return "";
-    }
-
-    const role = String(value || "").toLowerCase();
-
-    if (role === "admin") return "admin";
-    if (role === "user") return "user";
-
-    return "";
-  }
-
-  function getCurrentRole() {
-    const state = getState();
-    const user = getCurrentUser();
-
-    return (
-      normalizeRole(
-        first(
-          state.role,
-          state.rol,
-          state.userRole,
-          state.roles,
-          user.role,
-          user.rol,
-          user.roles,
-          ""
-        )
-      ) || "user"
-    );
-  }
-
-  function isAdmin() {
-    return getCurrentRole() === "admin";
-  }
-
-  function getPublicUserSnapshot(user = getCurrentUser()) {
-    if (!hasKeys(user)) return null;
-
-    return {
-      hasId: Boolean(user.id || user.userId),
-      username: safeText(user.username || user.userName, "") || null,
-      slug: safeText(user.slug || user.lookup?.slug || user.profile?.slug, "") || null,
-      displayName:
-        safeText(
-          first(
-            user.displayName,
-            user.fullName,
-            user.name,
-            user.nombre,
-            user.profile?.displayName,
-            user.profile?.fullName,
-            user.username
-          ),
-          ""
-        ) || null,
-      role: getCurrentRole(),
-    };
-  }
-
-  function getContainer(candidate = null, context = {}) {
-    if (!isBrowser()) return null;
-
-    if (isElement(candidate)) return candidate;
-
-    if (isElement(context?.renderRoot)) return context.renderRoot;
-    if (isElement(context?.renderHost)) return context.renderHost;
-    if (isElement(context?.viewContainer)) return context.viewContainer;
-
-    return (
-      AppCore?.dom?.routerViewHost ||
-      AppCore?.dom?.viewHost ||
-      AppCore?.dom?.viewContainer ||
-      document.querySelector("[data-router-view-host='true']") ||
-      document.getElementById("view-container") ||
-      document.getElementById("app-content") ||
-      document.getElementById("main-content") ||
-      null
-    );
-  }
-
-  function setViewBusy(container = null, busy = false) {
-    if (!isElement(container)) return false;
-
-    try {
-      container.setAttribute("aria-busy", busy ? "true" : "false");
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function safeErrorMessage(error = null) {
-    return redact(
-      safeText(
-        first(
-          error?.response?.data?.message,
-          error?.data?.message,
-          error?.message,
-          "No se pudo cargar el Home."
-        ),
-        "No se pudo cargar el Home."
-      )
-    );
   }
 
   function escapeHtml(value = "") {
@@ -322,58 +198,376 @@ export const HomeView = (() => {
     }
   }
 
-  function hasKeys(value = {}) {
-    return Boolean(isObject(value) && Object.keys(value).length > 0);
-  }
-
   function hasSensitiveQuery(value = "") {
-    return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
-      String(value || "")
-    );
+    return SENSITIVE_QUERY_RE.test(String(value || ""));
   }
 
-  function safeHomeRoute(route = "", fallback = "") {
+  function safeInternalRoute(route = "", fallback = "") {
     const raw = safeText(route, "");
+    const safeFallback = safeText(fallback, "");
 
-    if (!raw) return fallback;
-    if (!raw.startsWith("/")) return fallback;
-    if (raw.startsWith("//")) return fallback;
-    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
-    if (/[\r\n\t\\]/.test(raw)) return fallback;
-    if (hasSensitiveQuery(raw)) return fallback;
+    if (!raw) return safeFallback;
+    if (!raw.startsWith("/")) return safeFallback;
+    if (raw.startsWith("//")) return safeFallback;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return safeFallback;
+    if (/[\r\n\t\\]/.test(raw)) return safeFallback;
+    if (hasSensitiveQuery(raw)) return safeFallback;
 
-    const normalized = raw.replace(/\/{2,}/g, "/") || fallback;
-    const canonical = normalized.split("?")[0].split("#")[0] || HOME_ROUTE;
+    const normalized = raw.replace(/\/{2,}/g, "/") || safeFallback;
+    const canonical = normalized.split("?")[0].split("#")[0] || safeFallback;
 
-    if (canonical === "/home") return fallback;
+    if (canonical === BLOCKED_HOME_ROUTE) return safeFallback;
 
     return normalized;
   }
 
-  function dashboardRoleMismatch(raw = {}) {
-    const currentRole = getCurrentRole();
-    const data = safeObject(raw);
-
-    const sourceRole = safeText(
-      first(
-        data.role,
-        data.meta?.role,
-        data.dashboard?.role,
-        data.dashboard?.meta?.role,
-        ""
-      ),
-      ""
-    ).toLowerCase();
-
-    if (!sourceRole) return false;
-
-    return sourceRole !== currentRole;
+  function safeErrorMessage(error = null) {
+    return redact(
+      safeText(
+        first(
+          error?.response?.data?.message,
+          error?.data?.message,
+          error?.message,
+          "No se pudo cargar el Home."
+        ),
+        "No se pudo cargar el Home."
+      )
+    );
   }
 
-  function stripAdminCollectionsForUser(dashboard = {}) {
+  function normalizeRenderContext(candidate = null, context = {}) {
+    if (isElement(candidate)) return safeObject(context);
+
+    return {
+      ...safeObject(candidate),
+      ...safeObject(context),
+    };
+  }
+
+  function rememberContext(context = {}) {
+    const next = safeObject(context);
+
+    if (!hasKeys(next)) return currentContext;
+
+    currentContext = {
+      ...currentContext,
+      ...next,
+    };
+
+    return currentContext;
+  }
+
+  function getContainer(candidate = null, context = {}) {
+    if (!isBrowser()) return null;
+    if (isElement(candidate)) return candidate;
+
+    const ctx = normalizeRenderContext(candidate, context);
+
+    if (isElement(ctx.container)) return ctx.container;
+    if (isElement(ctx.host)) return ctx.host;
+    if (isElement(ctx.root)) return ctx.root;
+    if (isElement(ctx.el)) return ctx.el;
+    if (isElement(ctx.renderRoot)) return ctx.renderRoot;
+    if (isElement(ctx.renderHost)) return ctx.renderHost;
+    if (isElement(ctx.viewContainer)) return ctx.viewContainer;
+    if (isElement(ctx.routerViewHost)) return ctx.routerViewHost;
+
+    return (
+      document.querySelector("[data-router-view-host='true']") ||
+      document.getElementById("view-container") ||
+      document.getElementById("app-content") ||
+      document.getElementById("main-content") ||
+      null
+    );
+  }
+
+  function setViewBusy(container = null, busy = false) {
+    if (!isElement(container)) return false;
+
+    try {
+      container.setAttribute("aria-busy", busy ? "true" : "false");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function readSnapshot(read, ...args) {
+    try {
+      return sanitizePayload(read(...args));
+    } catch {
+      return null;
+    }
+  }
+
+  /* =======================================================
+     USER / ROLE CONTEXT
+  ======================================================= */
+
+  function normalizeRole(value = "") {
+    if (Array.isArray(value)) {
+      const roles = value.map(normalizeRole).filter(Boolean);
+
+      if (roles.includes("admin")) return "admin";
+      if (roles.includes("user")) return "user";
+
+      return "";
+    }
+
+    const role = String(value || "").toLowerCase();
+
+    if (role === "admin") return "admin";
+    if (role === "user") return "user";
+
+    return "";
+  }
+
+  function roleFromAdminFlag(value = {}) {
+    const source = safeObject(value);
+
+    if (
+      source.admin === true ||
+      source.isAdmin === true ||
+      source.meta?.admin === true ||
+      source.dashboard?.admin === true ||
+      source.dashboard?.meta?.admin === true
+    ) {
+      return "admin";
+    }
+
+    return "";
+  }
+
+  function extractRoleFromData(value = {}) {
+    const source = safeObject(value);
+
+    return (
+      normalizeRole(
+        first(
+          source.role,
+          source.rol,
+          source.userRole,
+          source.roles,
+          source.meta?.role,
+          source.meta?.rol,
+          source.meta?.roles,
+          source.dashboard?.role,
+          source.dashboard?.rol,
+          source.dashboard?.roles,
+          source.dashboard?.meta?.role,
+          source.dashboard?.meta?.rol,
+          source.dashboard?.meta?.roles,
+          ""
+        )
+      ) ||
+      roleFromAdminFlag(source) ||
+      ""
+    );
+  }
+
+  function getCurrentUser() {
+    const ctx = safeObject(currentContext);
+    const dashboard = safeObject(homeState.dashboard);
+
+    return safeObject(
+      first(
+        ctx.user,
+        ctx.currentUser,
+        ctx.authUser,
+        ctx.sessionUser,
+        ctx.session?.user,
+        ctx.sessionData?.user,
+        homeState.user,
+        dashboard.user,
+        dashboard.currentUser,
+        {}
+      )
+    );
+  }
+
+  function getContextRole() {
+    const ctx = safeObject(currentContext);
+    const user = safeObject(
+      first(
+        ctx.user,
+        ctx.currentUser,
+        ctx.authUser,
+        ctx.sessionUser,
+        ctx.session?.user,
+        ctx.sessionData?.user,
+        {}
+      )
+    );
+
+    return normalizeRole(
+      first(
+        ctx.role,
+        ctx.rol,
+        ctx.userRole,
+        ctx.roles,
+        user.role,
+        user.rol,
+        user.roles,
+        ""
+      )
+    );
+  }
+
+  function getStoredRole() {
+    return (
+      extractRoleFromData(homeState) ||
+      extractRoleFromData(homeState.dashboard) ||
+      ""
+    );
+  }
+
+  function getCurrentRole() {
+    return getContextRole() || getStoredRole() || "user";
+  }
+
+  function isAdmin() {
+    return getCurrentRole() === "admin";
+  }
+
+  function getPayloadRole(payload = {}, source = {}) {
+    return extractRoleFromData(payload) || extractRoleFromData(source);
+  }
+
+  function getPublicUserSnapshot(user = getCurrentUser()) {
+    if (!hasKeys(user)) return null;
+
+    const displayName =
+      safeText(
+        first(
+          user.displayName,
+          user.fullName,
+          user.name,
+          user.nombre,
+          user.profile?.displayName,
+          user.profile?.fullName,
+          user.username,
+          user.userName
+        ),
+        ""
+      ) || null;
+
+    return {
+      hasId: Boolean(user.id || user.userId),
+      username: safeText(user.username || user.userName, "") || null,
+      slug: safeText(user.slug || user.lookup?.slug || user.profile?.slug, "") || null,
+      displayName,
+      name: displayName,
+      role: getCurrentRole(),
+    };
+  }
+
+  function getTemplateUser() {
+    return safeObject(getPublicUserSnapshot());
+  }
+
+  /* =======================================================
+     ROLE SCOPING
+  ======================================================= */
+
+  function isAdminEntityValue(value = "") {
+    return ADMIN_ENTITY_RE.test(String(value || "").toLowerCase());
+  }
+
+  function stripAdminSummaryForUser(summary = {}, admin = isAdmin()) {
+    const source = safeObject(summary);
+
+    if (admin || !hasKeys(source)) return source;
+
+    return Object.fromEntries(
+      Object.entries(source).filter(([key]) => !isAdminEntityValue(key))
+    );
+  }
+
+  function filterWidgetsForRole(widgets = [], admin = isAdmin()) {
+    const rows = safeArray(widgets);
+
+    if (admin) return rows;
+
+    return rows.filter((widget) => {
+      const item = safeObject(widget);
+
+      const requiredRole = normalizeRole(
+        first(
+          item.requiredRole,
+          item.role,
+          item.meta?.requiredRole,
+          item.meta?.role,
+          item.roles,
+          item.meta?.roles,
+          ""
+        )
+      );
+
+      if (requiredRole === "admin") return false;
+
+      const identity = safeText(
+        first(
+          item.entity,
+          item.resource,
+          item.collection,
+          item.type,
+          item.kind,
+          item.widgetId,
+          item.id,
+          item.name,
+          ""
+        ),
+        ""
+      );
+
+      return !isAdminEntityValue(identity);
+    });
+  }
+
+  function filterActivityForRole(items = [], admin = isAdmin()) {
+    const rows = normalizeHomeActivityList(items);
+
+    if (admin) return rows;
+
+    return rows.filter((item) => {
+      const row = safeObject(item);
+
+      const identity = safeText(
+        first(
+          row.type,
+          row.kind,
+          row.category,
+          row.entity,
+          row.resource,
+          row.collection,
+          row.targetType,
+          row.meta?.type,
+          row.meta?.entity,
+          ""
+        ),
+        ""
+      );
+
+      return !isAdminEntityValue(identity);
+    });
+  }
+
+  function stripAdminDashboardForRole(dashboard = {}, admin = isAdmin()) {
     const source = safeObject(dashboard);
 
-    if (isAdmin()) return source;
+    if (!hasKeys(source)) return {};
+    if (admin) return source;
+
+    const activity = filterActivityForRole(
+      first(
+        source.activity,
+        source.activities,
+        source.recent,
+        source.recentActivity,
+        []
+      ),
+      false
+    );
 
     return {
       ...source,
@@ -385,6 +579,14 @@ export const HomeView = (() => {
       clientes: [],
       customers: [],
 
+      summary: stripAdminSummaryForUser(source.summary, false),
+      widgets: filterWidgetsForRole(source.widgets, false),
+
+      activity,
+      activities: activity,
+      recent: activity,
+      recentActivity: activity,
+
       meta: {
         ...safeObject(source.meta),
         role: "user",
@@ -393,26 +595,56 @@ export const HomeView = (() => {
     };
   }
 
+  function dashboardRoleMismatch(payload = {}, source = {}, effectiveRole = getCurrentRole()) {
+    const contextRole = getContextRole();
+    const payloadRole = getPayloadRole(payload, source);
+
+    if (!payloadRole) return false;
+
+    if (contextRole) {
+      return payloadRole !== contextRole;
+    }
+
+    const storedRole = getStoredRole();
+
+    return Boolean(storedRole && payloadRole !== effectiveRole);
+  }
+
   /* =======================================================
      STATE SHAPE
   ======================================================= */
 
   function ensureBaseState() {
+    const admin = isAdmin();
+
     homeState.page = Math.max(1, safeNumber(homeState.page, 1));
-    homeState.pageSize = Math.max(1, safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE));
+    homeState.pageSize = Math.max(
+      1,
+      safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE)
+    );
 
-    homeState.dashboard = safeObject(homeState.dashboard);
-    homeState.summary = safeObject(homeState.summary);
+    homeState.dashboard = stripAdminDashboardForRole(
+      safeObject(homeState.dashboard),
+      admin
+    );
 
-    homeState.widgets = safeArray(homeState.widgets);
+    homeState.summary = stripAdminSummaryForUser(
+      safeObject(homeState.summary),
+      admin
+    );
+
+    homeState.widgets = filterWidgetsForRole(
+      safeArray(homeState.widgets),
+      admin
+    );
 
     homeState.tickets = safeArray(homeState.tickets);
     homeState.invoices = safeArray(homeState.invoices);
 
-    homeState.users = isAdmin() ? safeArray(homeState.users) : [];
-    homeState.clients = isAdmin() ? safeArray(homeState.clients) : [];
+    homeState.users = admin ? safeArray(homeState.users) : [];
+    homeState.clients = admin ? safeArray(homeState.clients) : [];
 
-    homeState.activity = safeArray(homeState.activity);
+    homeState.activity = filterActivityForRole(homeState.activity, admin);
 
     homeState.loading = Boolean(homeState.loading);
     homeState.refreshing = Boolean(homeState.refreshing);
@@ -428,7 +660,9 @@ export const HomeView = (() => {
     return homeState;
   }
 
-  function normalizeDashboardPayload(payload = {}) {
+  function normalizeDashboardPayload(payload = {}, options = {}) {
+    const opts = safeObject(options);
+
     const source = safeObject(
       first(
         payload?.dashboard,
@@ -439,7 +673,14 @@ export const HomeView = (() => {
       )
     );
 
-    const role = getCurrentRole();
+    if (!hasKeys(source)) {
+      return null;
+    }
+
+    const contextRole = getContextRole();
+    const payloadRole = getPayloadRole(payload, source);
+    const trustedPayloadRole = opts.trustPayloadRole === true ? payloadRole : "";
+    const role = contextRole || trustedPayloadRole || getCurrentRole() || "user";
     const admin = role === "admin";
 
     const dashboard = normalizeHomeDashboard({
@@ -478,39 +719,53 @@ export const HomeView = (() => {
       nowIso()
     );
 
-    const roleScopedDashboard = stripAdminCollectionsForUser({
-      ...dashboard,
-      role,
-      admin,
-      requestId,
-      updatedAt: lastSyncAt,
-      meta: {
-        ...safeObject(dashboard.meta),
+    const roleScopedDashboard = stripAdminDashboardForRole(
+      {
+        ...dashboard,
         role,
         admin,
         requestId,
         updatedAt: lastSyncAt,
+        lastSyncAt,
+        meta: {
+          ...safeObject(dashboard.meta),
+          role,
+          admin,
+          requestId,
+          updatedAt: lastSyncAt,
+          lastSyncAt,
+        },
       },
-    });
+      admin
+    );
 
     return {
       dashboard: roleScopedDashboard,
       requestId,
       lastSyncAt,
-      roleMismatch: dashboardRoleMismatch(source),
+      role,
+      admin,
+      roleMismatch: dashboardRoleMismatch(payload, source, role),
     };
   }
 
   function applyDashboardPayload(payload = {}, options = {}) {
     const opts = safeObject(options);
-    const normalized = normalizeDashboardPayload(payload);
 
-    if (!hasKeys(normalized.dashboard)) {
+    const normalized = normalizeDashboardPayload(payload, {
+      trustPayloadRole: opts.trustPayloadRole === true,
+    });
+
+    if (!normalized || !hasKeys(normalized.dashboard)) {
       return null;
     }
 
-    const currentIsUser = !isAdmin();
-    const replace = opts.replace === true || normalized.roleMismatch || currentIsUser;
+    const storedRole = getStoredRole();
+    const replace =
+      opts.replace === true ||
+      normalized.roleMismatch ||
+      !normalized.admin ||
+      Boolean(storedRole && storedRole !== normalized.role);
 
     syncHomeStateFromDashboard(normalized.dashboard, {
       replace,
@@ -538,13 +793,13 @@ export const HomeView = (() => {
 
   function hydrateBestEffort() {
     try {
-      const cached = hydrateHomeFromCache?.();
+      const cached = hydrateHomeFromCache();
 
       if (!cached?.hydrated) return false;
 
       const normalized = applyDashboardPayload(cached.dashboard || cached, {
-        source: "home.cache",
         preserveExisting: true,
+        trustPayloadRole: false,
       });
 
       return Boolean(normalized);
@@ -573,19 +828,24 @@ export const HomeView = (() => {
     return isAdmin() ? normalizeHomeClients(homeState.clients) : [];
   }
 
-  function filterActivityForRole(items = []) {
-    const rows = normalizeHomeActivityList(items);
+  function getSummary() {
+    const summary = hasKeys(homeState.summary)
+      ? homeState.summary
+      : homeState.dashboard?.summary;
 
-    if (isAdmin()) return rows;
+    return stripAdminSummaryForUser(summary, isAdmin());
+  }
 
-    return rows.filter((item) => {
-      const type = safeText(first(item.type, item.kind, item.category), "").toLowerCase();
-      return type !== "client" && type !== "cliente" && type !== "user" && type !== "usuario";
-    });
+  function getWidgets() {
+    const widgets = safeArray(homeState.widgets).length
+      ? homeState.widgets
+      : homeState.dashboard?.widgets;
+
+    return filterWidgetsForRole(widgets, isAdmin());
   }
 
   function getActivity() {
-    const current = filterActivityForRole(homeState.activity);
+    const current = filterActivityForRole(homeState.activity, isAdmin());
 
     if (current.length) return current;
 
@@ -595,7 +855,8 @@ export const HomeView = (() => {
         invoices: getInvoices(),
         users: getUsers(),
         clients: getClients(),
-      })
+      }),
+      isAdmin()
     );
   }
 
@@ -609,10 +870,18 @@ export const HomeView = (() => {
         safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE)
       );
     } catch {
-      const pageSize = Math.max(1, safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE));
+      const pageSize = Math.max(
+        1,
+        safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE)
+      );
+
       const total = rows.length;
       const totalPages = Math.max(1, Math.ceil(total / pageSize));
-      const page = Math.min(Math.max(1, safeNumber(homeState.page, 1)), totalPages);
+      const page = Math.min(
+        Math.max(1, safeNumber(homeState.page, 1)),
+        totalPages
+      );
+
       const start = (page - 1) * pageSize;
       const pageItems = rows.slice(start, start + pageSize);
 
@@ -640,15 +909,17 @@ export const HomeView = (() => {
     const users = admin ? getUsers() : [];
     const clients = admin ? getClients() : [];
     const activity = getActivity();
+    const summary = getSummary();
+    const widgets = getWidgets();
 
     return normalizeHomeDashboard({
-      ...stripAdminCollectionsForUser(homeState.dashboard),
+      ...stripAdminDashboardForRole(homeState.dashboard, admin),
 
       role,
       admin,
 
-      summary: safeObject(homeState.summary),
-      widgets: safeArray(homeState.widgets),
+      summary,
+      widgets,
 
       tickets,
       incidencias: tickets,
@@ -678,6 +949,7 @@ export const HomeView = (() => {
         admin,
         requestId: homeState.requestId || "",
         updatedAt: homeState.lastSyncAt || "",
+        lastSyncAt: homeState.lastSyncAt || "",
       },
     });
   }
@@ -695,15 +967,17 @@ export const HomeView = (() => {
     const activity = getActivity();
     const dashboard = buildDashboardForTemplate();
     const pagination = getPagination(tickets);
+    const summary = getSummary();
+    const widgets = getWidgets();
 
     return buildHomeTemplatePayload({
-      user: getCurrentUser(),
+      user: getTemplateUser(),
       role,
 
       dashboard,
 
-      summary: safeObject(homeState.summary),
-      widgets: safeArray(homeState.widgets),
+      summary,
+      widgets,
 
       tickets,
       incidencias: tickets,
@@ -734,7 +1008,7 @@ export const HomeView = (() => {
         admin,
 
         dashboard,
-        summary: safeObject(homeState.summary),
+        summary,
 
         tickets,
         incidencias: tickets,
@@ -755,6 +1029,19 @@ export const HomeView = (() => {
         pagination,
       },
     });
+  }
+
+  function hasVisibleData() {
+    return Boolean(
+      getTickets().length ||
+        getInvoices().length ||
+        (isAdmin() && getUsers().length) ||
+        (isAdmin() && getClients().length) ||
+        getActivity().length ||
+        getWidgets().length ||
+        hasKeys(getSummary()) ||
+        hasKeys(stripAdminDashboardForRole(homeState.dashboard, isAdmin()))
+    );
   }
 
   /* =======================================================
@@ -799,10 +1086,12 @@ export const HomeView = (() => {
 
     try {
       container.replaceChildren(node);
+      setViewBusy(container, false);
     } catch {
       try {
         container.textContent = "";
         container.appendChild(node);
+        setViewBusy(container, false);
       } catch {
         return null;
       }
@@ -815,11 +1104,12 @@ export const HomeView = (() => {
     if (destroyed || !isElement(container)) return null;
 
     const seq = nextRenderSeq();
+    const busy = Boolean(homeState.loading || homeState.refreshing);
 
     ensureBaseState();
 
     try {
-      setViewBusy(container, Boolean(homeState.loading || homeState.refreshing));
+      setViewBusy(container, busy);
 
       const node = htmlToElement(buildHtml());
 
@@ -828,13 +1118,12 @@ export const HomeView = (() => {
       }
 
       container.replaceChildren(node);
-      setViewBusy(container, false);
-
       currentContainer = container;
+
+      setViewBusy(container, busy);
 
       return isCurrentRender(seq) ? node : null;
     } catch (error) {
-      setViewBusy(container, false);
       return renderError(container, error);
     }
   }
@@ -850,7 +1139,10 @@ export const HomeView = (() => {
   }
 
   function render(...args) {
-    const container = getContainer(args[0], args[1]);
+    const context = normalizeRenderContext(args[0], args[1]);
+    rememberContext(context);
+
+    const container = getContainer(args[0], context);
 
     if (!container) return null;
 
@@ -869,7 +1161,6 @@ export const HomeView = (() => {
     if (!homeState.loaded && !inflightLoad) {
       void loadData({
         force: false,
-        silent: hasVisibleData(),
         asRefresh: false,
       });
     }
@@ -877,21 +1168,13 @@ export const HomeView = (() => {
     return api;
   }
 
+  function rerender() {
+    return renderAndBind(currentContainer);
+  }
+
   /* =======================================================
      DATA
   ======================================================= */
-
-  function hasVisibleData() {
-    return Boolean(
-      getTickets().length ||
-        getInvoices().length ||
-        (isAdmin() && getUsers().length) ||
-        (isAdmin() && getClients().length) ||
-        getActivity().length ||
-        hasKeys(homeState.summary) ||
-        hasKeys(homeState.dashboard)
-    );
-  }
 
   async function loadData(options = {}) {
     if (destroyed) return false;
@@ -901,7 +1184,9 @@ export const HomeView = (() => {
     const opts = safeObject(options);
     const refresh = opts.asRefresh === true;
 
-    inflightLoad = (async () => {
+    let request;
+
+    request = (async () => {
       const hadData = hasVisibleData();
 
       clearHomeError();
@@ -925,18 +1210,16 @@ export const HomeView = (() => {
         if (!isCurrentLoad(seq)) return false;
 
         const normalized = applyDashboardPayload(response, {
-          source: refresh ? "home.refresh" : "home.load",
           replace: true,
           preserveExisting: false,
+          trustPayloadRole: true,
         });
 
         return Boolean(normalized);
       } catch (error) {
         if (!isCurrentLoad(seq)) return false;
 
-        const message = safeErrorMessage(error);
-
-        setError(message);
+        setError(safeErrorMessage(error));
 
         return false;
       } finally {
@@ -947,20 +1230,20 @@ export const HomeView = (() => {
           renderAndBind(currentContainer);
         }
 
-        inflightLoad = null;
+        if (inflightLoad === request) {
+          inflightLoad = null;
+        }
       }
     })();
 
-    return inflightLoad;
+    inflightLoad = request;
+
+    return request;
   }
 
   /* =======================================================
      ACTIONS
   ======================================================= */
-
-  function rerender() {
-    return renderAndBind(currentContainer);
-  }
 
   function goToPage(page = 1) {
     const pagination = getPagination(getTickets());
@@ -992,7 +1275,8 @@ export const HomeView = (() => {
   }
 
   async function navigateTo(route = "", options = {}) {
-    const target = safeHomeRoute(route, "");
+    const opts = safeObject(options);
+    const target = safeInternalRoute(route, "");
 
     if (!target) return false;
 
@@ -1002,8 +1286,8 @@ export const HomeView = (() => {
     try {
       return await navigateFromHomeAction({
         route: target,
-        payload: safeObject(options.payload),
-        silent: options.silent === true,
+        payload: safeObject(opts.payload),
+        silent: opts.silent === true,
       });
     } finally {
       setNavigatingAction("");
@@ -1016,7 +1300,11 @@ export const HomeView = (() => {
   }
 
   async function openTicket(ticketId = "", payload = {}) {
-    const id = safeText(ticketId || payload?.ticketId || payload?.incidenciaId, "");
+    const source = safeObject(payload);
+    const id = safeText(
+      first(ticketId, source.ticketId, source.incidenciaId, ""),
+      ""
+    );
 
     if (!id) return null;
 
@@ -1025,10 +1313,9 @@ export const HomeView = (() => {
     rerender();
 
     try {
-      return await navigateFromHomeAction({
-        route: INCIDENCIAS_ROUTE,
+      return await navigateTo(INCIDENCIAS_ROUTE, {
         payload: {
-          ...safeObject(payload),
+          ...source,
           ticketId: id,
           incidenciaId: id,
         },
@@ -1041,14 +1328,15 @@ export const HomeView = (() => {
   }
 
   async function createIncidencia(draft = {}, options = {}) {
+    const opts = safeObject(options);
+
     setCreating(true);
     rerender();
 
     try {
-      return await navigateFromHomeAction({
-        route: INCIDENCIAS_ROUTE,
+      return await navigateTo(INCIDENCIAS_ROUTE, {
         payload: safeObject(draft),
-        silent: options.silent === true,
+        silent: opts.silent === true,
       });
     } finally {
       setCreating(false);
@@ -1062,7 +1350,14 @@ export const HomeView = (() => {
 
   function cleanupBindings() {
     try {
-      bindingsCleanup?.();
+      if (typeof bindingsCleanup === "function") {
+        bindingsCleanup();
+      } else if (
+        bindingsCleanup &&
+        typeof bindingsCleanup.cleanup === "function"
+      ) {
+        bindingsCleanup.cleanup();
+      }
     } catch {
       // noop
     }
@@ -1075,80 +1370,73 @@ export const HomeView = (() => {
 
     if (destroyed || !isElement(container)) return false;
 
-    bindingsCleanup = bindHomeEvents({
-      scope: SCOPE,
-      container,
+    try {
+      bindingsCleanup = bindHomeEvents({
+        scope: SCOPE,
+        container,
 
-      reload,
-      refresh,
+        reload,
+        refresh,
 
-      loadHomeDashboard: () =>
-        reload({
-          force: true,
-          asRefresh: true,
-        }),
+        loadHomeDashboard: () =>
+          reload({
+            force: true,
+            asRefresh: true,
+          }),
 
-      exportHomeCsvAction,
+        exportHomeCsvAction,
 
-      navigateFromHomeAction: ({ route = "", payload = {}, silent = false } = {}) =>
-        navigateTo(route, {
-          payload,
-          silent,
-        }),
+        navigateFromHomeAction: ({ route = "", payload = {}, silent = false } = {}) =>
+          navigateTo(route, {
+            payload,
+            silent,
+          }),
 
-      runHomeQuickAction: runQuickAction,
+        runHomeQuickAction: runQuickAction,
 
-      openHomeWidgetAction: ({ widgetId = "", payload = {}, navigate = true, silent = false } = {}) =>
-        actionOpenHomeWidget({
-          widgetId,
-          payload,
-          navigate,
-          silent,
-        }),
+        openHomeWidgetAction: ({
+          widgetId = "",
+          payload = {},
+          navigate = true,
+          silent = false,
+        } = {}) =>
+          actionOpenHomeWidget({
+            widgetId,
+            payload,
+            navigate,
+            silent,
+          }),
 
-      copyHomeWidgetIdAction,
+        copyHomeWidgetIdAction,
 
-      createFromHomeAction: ({ draft = {}, payload = {}, silent = false } = {}) =>
-        createIncidencia(first(draft, payload, {}), {
-          silent,
-        }),
+        createFromHomeAction: ({ draft = {}, payload = {}, silent = false } = {}) =>
+          createIncidencia(hasKeys(draft) ? draft : payload, {
+            silent,
+          }),
 
-      goToPage,
-      goPrevPage,
-      goNextPage,
-      changePageSize,
-    });
+        goToPage,
+        goPrevPage,
+        goNextPage,
+        changePageSize,
+      });
 
-    return true;
+      return true;
+    } catch {
+      bindingsCleanup = null;
+      return false;
+    }
   }
 
   /* =======================================================
      LIFECYCLE
   ======================================================= */
 
-  async function init(...args) {
-    if (inflightInit) return inflightInit;
-
+  function init(...args) {
     destroyed = false;
 
-    const container = getContainer(args[0], args[1]);
-    currentContainer = container;
+    const rendered = render(...args);
 
-    inflightInit = (async () => {
-      render(container, args[1]);
-
-      if (inflightLoad) {
-        await inflightLoad;
-      }
-
-      return api;
-    })();
-
-    try {
-      return await inflightInit;
-    } finally {
-      inflightInit = null;
-    }
+    return rendered || api;
   }
 
   function mount(...args) {
@@ -1156,10 +1444,12 @@ export const HomeView = (() => {
   }
 
   async function reload(options = {}) {
+    const opts = safeObject(options);
+
     await loadData({
-      ...safeObject(options),
-      force: options.force === true,
-      asRefresh: options.asRefresh === true,
+      ...opts,
+      force: opts.force === true,
+      asRefresh: opts.asRefresh === true,
     });
 
     return api;
@@ -1189,9 +1479,9 @@ export const HomeView = (() => {
     setSelectedTicketId("");
     setNavigatingAction("");
 
-    inflightInit = null;
     inflightLoad = null;
     currentContainer = null;
+    currentContext = {};
 
     return true;
   }
@@ -1226,10 +1516,10 @@ export const HomeView = (() => {
 
       pagination,
 
-      apiSnapshot: getHomeApiSnapshot?.(),
-      storeSnapshot: getHomeStoreSnapshot?.(),
-      bindingsSnapshot: getHomeBindingsSnapshot?.(SCOPE),
-      actionsSnapshot: getHomeActionsSnapshot?.(),
+      apiSnapshot: readSnapshot(getHomeApiSnapshot),
+      storeSnapshot: readSnapshot(getHomeStoreSnapshot),
+      bindingsSnapshot: readSnapshot(getHomeBindingsSnapshot, SCOPE),
+      actionsSnapshot: readSnapshot(getHomeActionsSnapshot),
     });
   }
 
@@ -1265,13 +1555,10 @@ export const HomeView = (() => {
 
       hasContainer: Boolean(currentContainer),
       hasBindings: Boolean(bindingsCleanup),
-
-      hasInflightInit: Boolean(inflightInit),
       hasInflightLoad: Boolean(inflightLoad),
 
-      policy: {
+      contract: {
         controllerOnly: true,
-
         renderDelegatedToTemplate: true,
         apiDelegated: true,
         stateDelegated: true,
@@ -1279,24 +1566,15 @@ export const HomeView = (() => {
         modelDelegated: true,
         bindingsDelegated: true,
         actionsDelegated: true,
-
-        noRouteValidation: true,
         noSlugResolution: true,
         noAuthGuards: true,
         noRouterGuards: true,
         noGlobalBridge: true,
         noExternalEvents: true,
-        noOwnLocalCache: true,
-        noOptionalImports: true,
         noCrossViewModals: true,
         noToastDirect: true,
-
-        homeInternalPath: HOME_ROUTE,
         noHomeRoute: true,
-
-        userDoesNotCarryAdminUsersClients: true,
-        rebindsAfterEveryRender: true,
-
+        userScopedCollections: true,
         snapshotRedacted: true,
       },
     });
@@ -1314,7 +1592,7 @@ export const HomeView = (() => {
     mount,
 
     render,
-    scheduleRender: render,
+    scheduleRender: rerender,
 
     reload,
     refresh,
@@ -1352,8 +1630,8 @@ export const HomeView = (() => {
     getActivity,
 
     getDashboard: () => buildDashboardForTemplate(),
-    getSummary: () => safeObject(homeState.summary),
-    getWidgets: () => safeArray(homeState.widgets),
+    getSummary,
+    getWidgets,
 
     getPageItems: () => safeArray(getPagination(getTickets()).items),
     getPagination: () => getPagination(getTickets()),

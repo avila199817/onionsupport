@@ -4,12 +4,13 @@
 
    Responsabilidad:
    - Vista mínima de activación.
-   - Ruta: /activate-account?token=...
-   - Token param único: token.
+   - Ruta desde core/config.js.
+   - Token param único desde core/config.js.
    - Pedir contraseña y confirmación.
    - Llamar Auth.activateAccount().
    - Mostrar mensaje en DOM.
-   - Navegar a /login tras éxito.
+   - Navegar a /login tras éxito usando Router.
+   - Delegar password toggle en shared/password-field.
    - Sin fetch directo.
    - Sin CoreHttp directo.
    - Sin Toast.
@@ -17,6 +18,8 @@
    - Sin loader propio.
    - Sin fallback template.
    - Sin eventos globales.
+   - Sin navegación browser paralela.
+   - Sin AppCore.navigate.
    - Sin token real en snapshot.
    - Sin 2FA/MFA/OTP.
    - Sin magia negra.
@@ -25,17 +28,30 @@
 import { AppCore } from "../../core/index.js";
 import { Auth } from "../../features/auth/index.js";
 
+import {
+  ROUTES,
+  TOKEN_PARAM,
+} from "../../core/config.js";
+
+import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
+
 import * as ActivateTemplate from "./activate-account.template.js";
 
-export const ACTIVATE_ACCOUNT_VIEW_VERSION = "activate-account.view.v2";
+export const ACTIVATE_ACCOUNT_VIEW_VERSION = "activate-account.view.v3";
 
 const SOURCE = "activate-account.view";
 
-const ROUTE = "/activate-account";
-const LOGIN_ROUTE = "/login";
-const TOKEN_PARAM = "token";
+const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
+const ROUTE = ROUTES.activateAccount || "/activate-account";
+const LOGIN_ROUTE = ROUTES.login || "/login";
+
+const TOKEN_MIN_LENGTH = 8;
+const TOKEN_MAX_LENGTH = 8192;
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MAX_LENGTH = 1024;
 
 const INSTANCES = new WeakMap();
+const PASSWORD_BINDINGS = new WeakMap();
 
 let lastInstance = null;
 
@@ -64,10 +80,13 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function rawText(value = "", fallback = "") {
+  return value === null || value === undefined ? fallback : String(value);
+}
+
 function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -75,49 +94,54 @@ function redact(value = "") {
    PATH / TOKEN
 ========================================================= */
 
-function normalizeHashPath(path = "/") {
-  const value = text(path, "/");
+function normalizeHashPath(path = HOME_ROUTE) {
+  const value = text(path, HOME_ROUTE);
 
   if (value.startsWith("#!")) {
-    return value.replace(/^#!\/?/, "/") || "/";
+    return value.replace(/^#!\/?/, "/") || HOME_ROUTE;
   }
 
   if (value.startsWith("#/")) {
-    return value.slice(1) || "/";
+    return value.slice(1) || HOME_ROUTE;
   }
 
   return value;
 }
 
-function normalizePublicPath(path = "/") {
+function normalizePublicPath(path = HOME_ROUTE) {
   let value = normalizeHashPath(path);
 
-  if (value.startsWith("//")) return "/";
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return "/";
+  if (!value || value.startsWith("//")) return HOME_ROUTE;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return HOME_ROUTE;
 
   if (!value.startsWith("/")) {
     value = `/${value}`;
   }
 
-  value = value.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+  value = value
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  return value || "/";
+  return value || HOME_ROUTE;
 }
 
-function normalizeCanonicalPath(path = "/") {
-  let value = normalizePublicPath(path).split("?")[0].split("#")[0] || "/";
+function normalizeCanonicalPath(path = HOME_ROUTE) {
+  let value = normalizePublicPath(path)
+    .split("?")[0]
+    .split("#")[0] || HOME_ROUTE;
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || "/";
+    value = value.replace(/\/+$/g, "") || HOME_ROUTE;
   }
 
-  return value || "/";
+  return value || HOME_ROUTE;
 }
 
 function currentPublicPath() {
   if (!isBrowser()) {
     return normalizePublicPath(
       AppCore?.state?.publicPath ||
+        AppCore?.state?.canonicalPath ||
         AppCore?.state?.route ||
         ROUTE
     );
@@ -151,12 +175,19 @@ function normalizeToken(value = "") {
 
   if (!token) return "";
   if (/\s/.test(token)) return "";
-  if (token.length > 8192) return "";
+  if (token.length < TOKEN_MIN_LENGTH) return "";
+  if (token.length > TOKEN_MAX_LENGTH) return "";
 
   if (
-    ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
-      token.toLowerCase()
-    )
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "[object object]",
+      "{}",
+      "[]",
+    ].includes(token.toLowerCase())
   ) {
     return "";
   }
@@ -186,10 +217,13 @@ function tokenFromPath(path = "") {
     ? raw.split("?").slice(1).join("?").split("#")[0]
     : "";
 
-  const hashQuery =
-    raw.includes("#") && raw.split("#").slice(1).join("#").includes("?")
-      ? raw.split("#").slice(1).join("#").split("?").slice(1).join("?")
-      : "";
+  const hash = raw.includes("#")
+    ? raw.split("#").slice(1).join("#")
+    : "";
+
+  const hashQuery = hash.includes("?")
+    ? hash.split("?").slice(1).join("?")
+    : "";
 
   return tokenFromQuery(query) || tokenFromQuery(hashQuery);
 }
@@ -213,6 +247,12 @@ function getUrlToken() {
    NAVIGATION
 ========================================================= */
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
 function isSafeInternalPath(path = "") {
   const value = text(path, "");
 
@@ -221,22 +261,27 @@ function isSafeInternalPath(path = "") {
       value.startsWith("/") &&
       !value.startsWith("//") &&
       !/^[a-z][a-z0-9+.-]*:/i.test(value) &&
-      !/[\r\n\t\\]/.test(value)
+      !/[\r\n\t\\]/.test(value) &&
+      !hasSensitiveQuery(value)
   );
 }
 
 function safeInternalPath(path = "", fallback = LOGIN_ROUTE) {
   const candidate = normalizePublicPath(path || fallback);
-  return isSafeInternalPath(candidate) ? candidate : fallback;
+
+  if (!isSafeInternalPath(candidate)) return fallback;
+  if (normalizeCanonicalPath(candidate) === "/home") return fallback;
+
+  return candidate;
 }
 
 function getRouter() {
   try {
     return (
-      AppCore?.Router ||
       AppCore?.router ||
-      AppCore?.modules?.get?.("Router") ||
+      AppCore?.Router ||
       AppCore?.modules?.get?.("router") ||
+      AppCore?.modules?.get?.("Router") ||
       null
     );
   } catch {
@@ -248,53 +293,33 @@ async function navigateTo(path = LOGIN_ROUTE) {
   const target = safeInternalPath(path, LOGIN_ROUTE);
   const router = getRouter();
 
-  try {
-    if (isFunction(router?.replace)) {
-      await router.replace(target, {
-        source: SOURCE,
-        replaceState: true,
-        force: true,
-      });
-
-      return true;
-    }
-
-    if (isFunction(router?.navigate)) {
-      await router.navigate(target, {
-        source: SOURCE,
-        replaceState: true,
-        force: true,
-      });
-
-      return true;
-    }
-
-    if (isFunction(AppCore?.navigate)) {
-      await AppCore.navigate(target, {
-        source: SOURCE,
-        replaceState: true,
-        force: true,
-      });
-
-      return true;
-    }
-  } catch {
-    // fallback navegador abajo
-  }
-
-  if (!isBrowser()) return false;
+  if (!router) return false;
 
   try {
-    window.location.replace(target);
-    return true;
-  } catch {
-    try {
-      window.location.assign(target);
-      return true;
-    } catch {
-      return false;
+    if (isFunction(router.replace)) {
+      const result = await router.replace(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
+      });
+
+      return result !== false && result?.ok !== false;
     }
+
+    if (isFunction(router.navigate)) {
+      const result = await router.navigate(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
+      });
+
+      return result !== false && result?.ok !== false;
+    }
+  } catch {
+    return false;
   }
+
+  return false;
 }
 
 /* =========================================================
@@ -379,6 +404,40 @@ function setDisabled(node = null, disabled = false) {
   return true;
 }
 
+function setLinkDisabled(link = null, disabled = false) {
+  if (!link) return false;
+
+  const active = Boolean(disabled);
+
+  setAttr(link, "aria-disabled", active ? "true" : null);
+
+  try {
+    link.classList.toggle("is-disabled", active);
+
+    if (active) {
+      if (!link.dataset.previousTabIndex) {
+        link.dataset.previousTabIndex = String(link.tabIndex ?? "");
+      }
+
+      link.tabIndex = -1;
+    } else {
+      const previous = link.dataset.previousTabIndex;
+
+      if (previous !== undefined && previous !== "") {
+        link.tabIndex = Number(previous);
+      } else {
+        link.removeAttribute("tabindex");
+      }
+
+      delete link.dataset.previousTabIndex;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function toggleClass(node = null, className = "", enabled = false) {
   if (!node || !className) return false;
 
@@ -425,7 +484,7 @@ function createMessageNode() {
   node.dataset.activateAccountMessage = "true";
   node.dataset.activateAccountError = "true";
   node.setAttribute("role", "alert");
-  node.setAttribute("aria-live", "polite");
+  node.setAttribute("aria-live", "assertive");
   node.setAttribute("aria-atomic", "true");
   node.hidden = true;
 
@@ -462,16 +521,19 @@ function getMessageNode(container = null, form = null) {
 function setMessage(node = null, message = "", type = "error") {
   if (!node) return false;
 
-  const clean = text(message, "");
+  const clean = redact(text(message, ""));
   const cleanType = ["error", "success", "info"].includes(type) ? type : "error";
 
   try {
     node.textContent = clean;
     setHidden(node, !clean);
 
-    toggleClass(node, "is-error", clean && cleanType === "error");
-    toggleClass(node, "is-success", clean && cleanType === "success");
-    toggleClass(node, "is-info", clean && cleanType === "info");
+    toggleClass(node, "is-error", Boolean(clean) && cleanType === "error");
+    toggleClass(node, "is-success", Boolean(clean) && cleanType === "success");
+    toggleClass(node, "is-info", Boolean(clean) && cleanType === "info");
+
+    setAttr(node, "role", clean ? (cleanType === "error" ? "alert" : "status") : null);
+    setAttr(node, "aria-live", clean ? (cleanType === "error" ? "assertive" : "polite") : null);
 
     if (clean) {
       node.dataset.messageType = cleanType;
@@ -488,7 +550,7 @@ function setMessage(node = null, message = "", type = "error") {
 function setFieldError(field = null, message = "") {
   if (!field) return false;
 
-  const clean = text(message, "");
+  const clean = redact(text(message, ""));
 
   setAttr(field, "aria-invalid", clean ? "true" : "false");
 
@@ -506,6 +568,71 @@ function setFieldError(field = null, message = "") {
 }
 
 /* =========================================================
+   PASSWORD FIELD SHARED
+========================================================= */
+
+function disposeBinding(binding = null) {
+  try {
+    if (isFunction(binding)) binding();
+    else if (isFunction(binding?.destroy)) binding.destroy();
+    else if (isFunction(binding?.dispose)) binding.dispose();
+    else if (isFunction(binding?.unbind)) binding.unbind();
+    else if (isFunction(binding?.off)) binding.off();
+  } catch {
+    // noop
+  }
+}
+
+function bindActivatePasswordFields(container = null, options = {}) {
+  const root = container || document;
+
+  if (!root) return [];
+
+  const previous = PASSWORD_BINDINGS.get(root);
+
+  if (previous && options.force !== true) {
+    return previous;
+  }
+
+  if (previous) {
+    for (const binding of previous) {
+      disposeBinding(binding);
+    }
+
+    PASSWORD_BINDINGS.delete(root);
+  }
+
+  let bindings = [];
+
+  try {
+    const result = bindPasswordFieldsInScope(root);
+    bindings = Array.isArray(result) ? result : result ? [result] : [];
+  } catch {
+    bindings = [];
+  }
+
+  PASSWORD_BINDINGS.set(root, bindings);
+
+  return bindings;
+}
+
+function destroyActivatePasswordFields(container = null) {
+  const root = container || document;
+
+  if (!root) return false;
+
+  const bindings = PASSWORD_BINDINGS.get(root) || [];
+
+  for (const binding of bindings) {
+    disposeBinding(binding);
+  }
+
+  PASSWORD_BINDINGS.delete(root);
+
+  return true;
+}
+
+/* =========================================================
    TEMPLATE
 ========================================================= */
 
@@ -518,14 +645,22 @@ function templateHtml(deps = {}) {
     throw new Error("activate-account.template.js no exporta template válido.");
   }
 
+  const token = normalizeToken(deps.token || getUrlToken());
+
   const html = renderer({
-    ...deps,
+    ...(isObject(deps) ? deps : {}),
+
     appName: text(AppCore?.config?.appName, "Onion Support"),
-    hasToken: Boolean(getUrlToken()),
-    tokenCaptured: Boolean(getUrlToken()),
+
+    hasToken: Boolean(token),
+    tokenCaptured: Boolean(token),
     token: "",
+    tokenParam: TOKEN_PARAM,
+
+    activateHref: ROUTE,
     loginHref: LOGIN_ROUTE,
     backHref: LOGIN_ROUTE,
+
     autoSubmit: false,
   });
 
@@ -583,8 +718,10 @@ function getRefs(container = null) {
     back:
       query(container, "[data-activate-account-back]") ||
       query(container, ".activate-account-back-link") ||
-      query(container, "a[href='/login']") ||
+      query(container, `a[href='${LOGIN_ROUTE}']`) ||
       null,
+
+    passwordFieldBindings: [],
   };
 }
 
@@ -592,11 +729,15 @@ function refsReady(refs = {}) {
   return Boolean(refs.form && refs.password && refs.confirmPassword && refs.submit);
 }
 
+function normalizePassword(value = "") {
+  return rawText(value, "").slice(0, PASSWORD_MAX_LENGTH);
+}
+
 function readPayload(refs = {}, token = "") {
   return {
     token: normalizeToken(token),
-    password: String(refs.password?.value || ""),
-    confirmPassword: String(refs.confirmPassword?.value || ""),
+    password: normalizePassword(refs.password?.value),
+    confirmPassword: normalizePassword(refs.confirmPassword?.value),
   };
 }
 
@@ -609,6 +750,10 @@ function validatePayload(payload = {}) {
 
   if (!String(payload.password || "")) {
     errors.password = "Introduce una contraseña.";
+  } else if (payload.password.length < PASSWORD_MIN_LENGTH) {
+    errors.password = `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`;
+  } else if (payload.password.length > PASSWORD_MAX_LENGTH) {
+    errors.password = "La contraseña es demasiado larga.";
   }
 
   if (!String(payload.confirmPassword || "")) {
@@ -635,6 +780,13 @@ function clearErrors(refs = {}, messageNode = null) {
   setFieldError(refs.password, "");
   setFieldError(refs.confirmPassword, "");
 
+  try {
+    refs.form?.removeAttribute("data-error");
+    refs.form?.removeAttribute("data-success");
+  } catch {
+    // noop
+  }
+
   return true;
 }
 
@@ -642,6 +794,15 @@ function applyErrors(refs = {}, messageNode = null, errors = {}) {
   setFieldError(refs.password, errors.password || "");
   setFieldError(refs.confirmPassword, errors.confirmPassword || "");
   setMessage(messageNode, firstError(errors), "error");
+
+  try {
+    if (refs.form) {
+      refs.form.dataset.error = "true";
+      refs.form.removeAttribute("data-success");
+    }
+  } catch {
+    // noop
+  }
 
   const firstField =
     errors.password
@@ -667,6 +828,7 @@ function setLoading(refs = {}, loading = false) {
   setDisabled(refs.password, active);
   setDisabled(refs.confirmPassword, active);
   setDisabled(refs.submit, active);
+  setLinkDisabled(refs.back, active);
 
   if (refs.submit) {
     try {
@@ -730,7 +892,10 @@ function destroyPrevious(container = null) {
   const previous = INSTANCES.get(container);
 
   if (previous?.destroy) {
-    previous.destroy({ remount: true });
+    previous.destroy({
+      remount: true,
+    });
+
     return true;
   }
 
@@ -776,10 +941,17 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
   const token = normalizeToken(options.token || getUrlToken());
 
   destroyPrevious(container);
-  renderTemplate(container, options);
+  renderTemplate(container, {
+    ...options,
+    token,
+  });
 
   const refs = getRefs(container);
   const messageNode = getMessageNode(container, refs.form);
+
+  refs.passwordFieldBindings = bindActivatePasswordFields(container, {
+    force: true,
+  });
 
   let mounted = true;
   let submitting = false;
@@ -847,6 +1019,13 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
         "success"
       );
 
+      try {
+        refs.form?.setAttribute("data-success", "true");
+        refs.form?.removeAttribute("data-error");
+      } catch {
+        // noop
+      }
+
       if (mounted && isActivateRoute()) {
         await navigateTo(LOGIN_ROUTE);
       }
@@ -854,6 +1033,14 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
       return true;
     } catch (error) {
       setMessage(messageNode, errorMessage(error), "error");
+
+      try {
+        refs.form?.setAttribute("data-error", "true");
+        refs.form?.removeAttribute("data-success");
+      } catch {
+        // noop
+      }
+
       return false;
     } finally {
       if (mounted) {
@@ -873,8 +1060,9 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
         // noop
       }
 
-      navigateTo(LOGIN_ROUTE);
+      void navigateTo(LOGIN_ROUTE);
     }),
+    () => destroyActivatePasswordFields(container),
   ];
 
   if (!token) {
@@ -932,7 +1120,7 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
         mounted,
         submitting,
 
-        route: currentPath(),
+        route: redact(currentPath()),
         stillOnActivate: isActivateRoute(),
 
         hasToken: Boolean(token),
@@ -947,14 +1135,28 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
 
         policy: {
           tokenParam: TOKEN_PARAM,
+          tokenParamFromConfig: true,
+
+          routesFromConfig: true,
+
           noFetchDirect: true,
           noCoreHttpDirect: true,
           noToast: true,
           noStorage: true,
           noLoaderOwn: true,
           noEventsGlobal: true,
+
+          noBrowserNavigation: true,
+          noAppCoreNavigate: true,
+
+          passwordFieldShared: true,
+
           noTokenInSnapshot: true,
+          snapshotRedacted: true,
+
           no2fa: true,
+          noMfa: true,
+          noOtp: true,
         },
       };
     },
@@ -1018,7 +1220,7 @@ export function getSnapshot() {
     version: ACTIVATE_ACCOUNT_VIEW_VERSION,
     source: SOURCE,
     mounted: false,
-    route: currentPath(),
+    route: redact(currentPath()),
     hasToken: Boolean(getUrlToken()),
   };
 }

@@ -11,7 +11,7 @@
    - Sin leer Auth.
    - Sin leer Router.
    - Sin leer rutas.
-   - Sin tocar AppCore directamente.
+   - Sin tocar AppCore directamente salvo pasarlo a state.js.
    - Sin emitir eventos.
    - Sin timers.
    - Sin duplicar lógica de sidebar.
@@ -34,7 +34,7 @@ import {
   openSidebar as openRuntimeSidebar,
 } from "./state.js";
 
-export const SIDEBAR_DROPDOWN_VERSION = "sidebar.dropdown.v3";
+export const SIDEBAR_DROPDOWN_VERSION = "sidebar.dropdown.v4";
 
 const DROPDOWN_KEY = "account";
 
@@ -67,6 +67,7 @@ let documentPointerHandler = null;
 let documentKeyHandler = null;
 
 const boundRoots = new WeakMap();
+const boundRootOptions = new WeakMap();
 
 /* =========================================================
    BASICS
@@ -77,11 +78,15 @@ function isObject(value) {
 }
 
 function isEvent(value) {
-  return Boolean(value && isObject(value) && value.target);
+  return Boolean(value && typeof value === "object" && "target" in value);
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -93,12 +98,17 @@ function contains(parent = null, child = null) {
   }
 }
 
+function eventElement(target = null) {
+  if (!target) return null;
+  return target.nodeType === 3 ? target.parentElement : target;
+}
+
 /* =========================================================
    DOM RESOLUTION
 ========================================================= */
 
 function getTargetElement(value = null) {
-  if (isEvent(value)) return value.target;
+  if (isEvent(value)) return eventElement(value.target);
   if (isElement(value)) return value;
   if (isElement(value?.target)) return value.target;
   if (isElement(value?.root)) return value.root;
@@ -138,33 +148,36 @@ function getMenu(root = null) {
   }
 }
 
+function isDisabledElement(node = null) {
+  if (!isElement(node)) return true;
+
+  return Boolean(
+    node.hidden === true ||
+      node.disabled === true ||
+      node.getAttribute("aria-disabled") === "true" ||
+      node.getAttribute("aria-hidden") === "true" ||
+      node.closest?.("[hidden], [aria-hidden='true'], [aria-disabled='true'], [data-disabled='true']")
+  );
+}
+
 function getFocusableItems(menu = null) {
   try {
     return Array.from(menu?.querySelectorAll?.(FOCUSABLE_SELECTOR) || [])
-      .filter((node) => {
-        if (!isElement(node)) return false;
-        if (node.hidden === true) return false;
-        if (node.disabled === true) return false;
-        if (node.getAttribute("aria-disabled") === "true") return false;
-        if (node.getAttribute("aria-hidden") === "true") return false;
-        return true;
-      });
+      .filter((node) => !isDisabledElement(node));
   } catch {
     return [];
   }
 }
 
-function focusFirstMenuItem(menu = null) {
-  const firstItem = getFocusableItems(menu)[0];
-
-  if (!firstItem) return false;
+function focusNode(node = null) {
+  if (isDisabledElement(node)) return false;
 
   try {
-    firstItem.focus({ preventScroll: true });
+    node.focus({ preventScroll: true });
     return true;
   } catch {
     try {
-      firstItem.focus();
+      node.focus();
       return true;
     } catch {
       return false;
@@ -172,22 +185,12 @@ function focusFirstMenuItem(menu = null) {
   }
 }
 
+function focusFirstMenuItem(menu = null) {
+  return focusNode(getFocusableItems(menu)[0] || null);
+}
+
 function focusTrigger(root = null) {
-  const trigger = getTrigger(root);
-
-  if (!trigger) return false;
-
-  try {
-    trigger.focus({ preventScroll: true });
-    return true;
-  } catch {
-    try {
-      trigger.focus();
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  return focusNode(getTrigger(root));
 }
 
 /* =========================================================
@@ -250,11 +253,27 @@ function setRootDropdownState(root = null, open = false) {
   try {
     if (nextOpen) {
       root.dataset.sidebarDropdownOpen = DROPDOWN_KEY;
+      root.dataset.sidebarAccountDropdown = "open";
     } else {
       delete root.dataset.sidebarDropdownOpen;
+      root.dataset.sidebarAccountDropdown = "closed";
     }
 
     root.classList.toggle(OPEN_CLASS, nextOpen);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setMenuItemsRole(menu = null) {
+  if (!isElement(menu)) return false;
+
+  try {
+    menu.querySelectorAll(ITEM_SELECTOR).forEach((item) => {
+      item.setAttribute("role", "menuitem");
+    });
+
     return true;
   } catch {
     return false;
@@ -291,14 +310,11 @@ function setDomState(root = null, open = false) {
     menu.setAttribute("aria-hidden", nextOpen ? "false" : "true");
     menu.dataset.sidebarDropdownState = nextOpen ? "open" : "closed";
     menu.classList.toggle(MENU_OPEN_CLASS, nextOpen);
-
-    menu.querySelectorAll(ITEM_SELECTOR).forEach((item) => {
-      item.setAttribute("role", "menuitem");
-    });
   } catch {
     // noop
   }
 
+  setMenuItemsRole(menu);
   setRootDropdownState(root, nextOpen);
 
   return true;
@@ -309,7 +325,7 @@ function normalizeOptions(value = null, options = {}) {
     return {
       ...options,
       event: value,
-      target: value.target,
+      target: eventElement(value.target),
     };
   }
 
@@ -383,7 +399,7 @@ function attachGlobalHandlers(root = null) {
   detachGlobalHandlers();
 
   documentPointerHandler = (event) => {
-    const target = event.target;
+    const target = eventElement(event.target);
 
     if (contains(root, target)) return;
 
@@ -532,26 +548,31 @@ export function closeAllDropdowns() {
 ========================================================= */
 
 export function bindSidebarDropdown(value = null) {
-  const root = resolveRoot(value);
+  const opts = normalizeOptions(value);
+  const root = resolveRoot(opts);
 
   if (!isElement(root) || !isBrowser()) {
     return () => false;
   }
+
+  boundRootOptions.set(root, opts);
 
   if (boundRoots.has(root)) {
     return boundRoots.get(root);
   }
 
   const onClick = (event) => {
-    const target = event.target;
+    const target = eventElement(event.target);
     const trigger = target?.closest?.(TRIGGER_SELECTOR);
     const menu = getMenu(root);
+    const rootOptions = boundRootOptions.get(root) || {};
 
-    if (trigger && contains(root, trigger)) {
+    if (trigger && contains(root, trigger) && !isDisabledElement(trigger)) {
       event.preventDefault();
       event.stopPropagation();
 
       toggleDropdown({
+        ...rootOptions,
         root,
         trigger,
         focus: true,
@@ -564,6 +585,7 @@ export function bindSidebarDropdown(value = null) {
 
     if (item && menu && contains(menu, item)) {
       closeDropdown({
+        ...rootOptions,
         root,
         focus: false,
       });
@@ -577,6 +599,7 @@ export function bindSidebarDropdown(value = null) {
       !contains(menu, target)
     ) {
       closeDropdown({
+        ...rootOptions,
         root,
         focus: false,
       });
@@ -586,6 +609,7 @@ export function bindSidebarDropdown(value = null) {
   try {
     root.addEventListener("click", onClick);
   } catch {
+    boundRootOptions.delete(root);
     return () => false;
   }
 
@@ -598,11 +622,18 @@ export function bindSidebarDropdown(value = null) {
       // noop
     }
 
+    try {
+      setDomState(root, false);
+    } catch {
+      // noop
+    }
+
     if (activeRoot === root) {
       detachGlobalHandlers();
     }
 
     boundRoots.delete(root);
+    boundRootOptions.delete(root);
     return true;
   };
 
@@ -653,6 +684,8 @@ export function getDropdownSnapshot(value = null) {
     menuHidden: menu ? menu.hidden === true : null,
     triggerExpanded: trigger ? trigger.getAttribute("aria-expanded") : null,
 
+    focusableItems: getFocusableItems(menu).length,
+
     policy: {
       dropdownOnly: true,
       opensSidebarBeforeDropdown: true,
@@ -670,6 +703,11 @@ export function getDropdownSnapshot(value = null) {
       usesDomRootResolver: true,
       noLegacyRootSelectors: true,
       noRepairApi: true,
+
+      closesOnOutsidePointer: true,
+      closesOnEscape: true,
+      closesWhenMenuItemClicked: true,
+      doesNotHandleNavigationOrLogout: true,
     },
   };
 }

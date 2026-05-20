@@ -5,8 +5,9 @@
    Responsabilidad:
    - Helpers mínimos de path.
    - Compat básica.
+   - Usar constantes app como fuente única.
    - Sólo token param: token.
-   - Sólo rutas técnicas actuales:
+   - Sólo rutas públicas técnicas actuales:
      /activate-account
      /password-reset
    - Sin Auth.
@@ -17,61 +18,51 @@
    - Sin rutas inventadas.
 ========================================================= */
 
-export const HELPERS_VERSION = "simple";
+import {
+  DEFAULT_ROUTE,
+  TOKEN_PARAM,
+  getPublicTokenRouteConfigByPath,
+} from "./constants.js";
 
-const DEFAULT_PATH = "/";
-const TOKEN_PARAM = "token";
-const INITIAL_URL_KEY = "__ONION_INITIAL_URL__";
+export const HELPERS_VERSION = "app.helpers.v2";
 
-export const PROTECTED_PUBLIC_TOKEN_ROUTES = [
-  {
-    key: "activation",
-    path: "/activate-account",
-  },
-  {
-    key: "passwordReset",
-    path: "/password-reset",
-  },
-];
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function text(value = "", fallback = "") {
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
 
-function looksLikeCore(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      (value.state || value.modules || value.setState)
-  );
-}
-
-function pathArg(first = DEFAULT_PATH, second = undefined) {
-  return looksLikeCore(first) ? second || DEFAULT_PATH : first || DEFAULT_PATH;
+function browserOrigin() {
+  return isBrowser() ? window.location.origin : "http://localhost";
 }
 
 function browserPath() {
-  if (!isBrowser()) return DEFAULT_PATH;
+  if (!isBrowser()) return DEFAULT_ROUTE;
 
-  return normalizePublicPath(
-    `${window.location.pathname}${window.location.search}${window.location.hash}`
-  );
+  try {
+    const { pathname = DEFAULT_ROUTE, search = "", hash = "" } = window.location;
+    return normalizePublicPath(`${pathname || DEFAULT_ROUTE}${search || ""}${hash || ""}`);
+  } catch {
+    return DEFAULT_ROUTE;
+  }
 }
 
-function browserHref() {
-  return isBrowser() ? window.location.href || "" : "";
-}
+/* =========================================================
+   PATH PARSING
+========================================================= */
 
-function splitPath(value = DEFAULT_PATH) {
-  const raw = text(value, DEFAULT_PATH);
+function splitPath(value = DEFAULT_ROUTE) {
+  const raw = cleanText(value, DEFAULT_ROUTE);
 
-  const hashIndex = raw.indexOf("#");
   const queryIndex = raw.indexOf("?");
+  const hashIndex = raw.indexOf("#");
 
   let cut = raw.length;
 
@@ -79,62 +70,76 @@ function splitPath(value = DEFAULT_PATH) {
   if (hashIndex >= 0) cut = Math.min(cut, hashIndex);
 
   return {
-    pathname: raw.slice(0, cut) || DEFAULT_PATH,
+    pathname: raw.slice(0, cut) || DEFAULT_ROUTE,
     suffix: raw.slice(cut) || "",
   };
 }
 
-function cleanPathname(value = DEFAULT_PATH) {
-  let path = text(value, DEFAULT_PATH).replace(/\\/g, "/");
+function cleanPathname(value = DEFAULT_ROUTE) {
+  let path = cleanText(value, DEFAULT_ROUTE)
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  if (!path.startsWith("/")) path = `/${path}`;
-
-  path = path.replace(/\/+/g, "/");
+  if (!path.startsWith("/")) {
+    path = `/${path}`;
+  }
 
   if (path.length > 1) {
-    path = path.replace(/\/+$/g, "");
+    path = path.replace(/\/+$/g, "") || DEFAULT_ROUTE;
   }
 
-  return path || DEFAULT_PATH;
+  return path || DEFAULT_ROUTE;
 }
 
-function hasToken(path = "") {
+function normalizeHashPath(value = DEFAULT_ROUTE) {
+  const path = cleanText(value, DEFAULT_ROUTE);
+
+  if (path.startsWith("#!")) {
+    return path.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
+  }
+
+  if (path.startsWith("#/")) {
+    return path.slice(1) || DEFAULT_ROUTE;
+  }
+
+  return path;
+}
+
+function normalizeAbsoluteUrl(value = DEFAULT_ROUTE) {
   try {
-    const query = String(path).split("?")[1]?.split("#")[0] || "";
-    const params = new URLSearchParams(query);
+    const url = new URL(value, browserOrigin());
 
-    return Boolean(params.get(TOKEN_PARAM));
-  } catch {
-    return false;
-  }
-}
-
-function protectedRouteFor(path = "") {
-  const canonical = normalizeCanonicalPath(path);
-
-  return (
-    PROTECTED_PUBLIC_TOKEN_ROUTES.find((route) => {
-      return canonical === route.path;
-    }) || null
-  );
-}
-
-export function normalizePublicPath(first = DEFAULT_PATH, second = undefined) {
-  let value = text(pathArg(first, second), DEFAULT_PATH);
-
-  if (value.startsWith("#/")) {
-    value = value.slice(1);
-  }
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
-    try {
-      const base = isBrowser() ? window.location.origin : "http://localhost";
-      const url = new URL(value, base);
-
-      value = `${url.pathname}${url.search}${url.hash}`;
-    } catch {
-      value = DEFAULT_PATH;
+    if (url.origin !== browserOrigin()) {
+      return DEFAULT_ROUTE;
     }
+
+    return `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
+  } catch {
+    return DEFAULT_ROUTE;
+  }
+}
+
+/* =========================================================
+   NORMALIZE
+========================================================= */
+
+export function normalizePublicPath(path = DEFAULT_ROUTE) {
+  let value = normalizeHashPath(path);
+
+  if (!value || value.startsWith("//")) {
+    return DEFAULT_ROUTE;
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    value = normalizeAbsoluteUrl(value);
+  } else if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    return DEFAULT_ROUTE;
+  }
+
+  value = value.replace(/\\/g, "/");
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
   }
 
   const { pathname, suffix } = splitPath(value);
@@ -142,77 +147,36 @@ export function normalizePublicPath(first = DEFAULT_PATH, second = undefined) {
   return `${cleanPathname(pathname)}${suffix}`;
 }
 
-export function stripSearchAndHash(path = DEFAULT_PATH) {
-  return cleanPathname(splitPath(path).pathname);
+export function stripSearchAndHash(path = DEFAULT_ROUTE) {
+  return cleanPathname(splitPath(normalizePublicPath(path)).pathname);
 }
 
-export function getSearchAndHash(path = DEFAULT_PATH) {
-  return splitPath(path).suffix;
+export function getSearchAndHash(path = DEFAULT_ROUTE) {
+  return splitPath(normalizePublicPath(path)).suffix;
 }
 
-export function stripUsernamePrefix(path = DEFAULT_PATH) {
+export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
   const publicPath = normalizePublicPath(path);
   const { pathname, suffix } = splitPath(publicPath);
-  const parts = pathname.split("/").filter(Boolean);
 
-  if (parts[0]?.startsWith("@")) {
-    return normalizePublicPath(`/${parts.slice(1).join("/")}${suffix}`);
+  const parts = pathname.split("/").filter(Boolean);
+  const first = parts[0] || "";
+
+  if (first.startsWith("@") && first.length > 1) {
+    const rest = parts.slice(1).join("/");
+    return normalizePublicPath(`/${rest}${suffix}`);
   }
 
   return publicPath;
 }
 
-export function normalizeCanonicalPath(first = DEFAULT_PATH, second = undefined) {
-  const publicPath = stripUsernamePrefix(normalizePublicPath(pathArg(first, second)));
-  const pathname = stripSearchAndHash(publicPath);
-
-  return pathname || DEFAULT_PATH;
+export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
+  return stripSearchAndHash(stripUsernamePrefix(path)) || DEFAULT_ROUTE;
 }
 
-export function captureInitialUrl() {
-  if (!isBrowser()) return false;
-
-  if (!window[INITIAL_URL_KEY]) {
-    window[INITIAL_URL_KEY] = browserHref();
-  }
-
-  return true;
-}
-
-export function resolveProtectedInitialContext() {
-  const publicPath = browserPath();
-  const route = protectedRouteFor(publicPath);
-  const valid = Boolean(route && hasToken(publicPath));
-
-  return {
-    key: valid ? route.key : "",
-    path: valid ? publicPath : "",
-    publicPath: valid ? publicPath : "",
-    canonicalPath: valid ? route.path : "",
-    url: valid ? browserHref() : "",
-    hasToken: valid,
-    redactedPath: valid ? redactTokenInText(publicPath) : "",
-    redactedUrl: valid ? redactTokenInText(browserHref()) : "",
-  };
-}
-
-export function getProtectedInitialPublicPath() {
-  const context = resolveProtectedInitialContext();
-  return context.hasToken ? context.publicPath : "";
-}
-
-export function isProtectedPublicTokenPath(path = browserPath()) {
-  return Boolean(protectedRouteFor(path) && hasToken(path));
-}
-
-export function isActivationPath(path = browserPath()) {
-  return normalizeCanonicalPath(path) === "/activate-account";
-}
-
-/* Compat legacy: no existe reset confirm ahora mismo. */
-export function isResetConfirmPath() {
-  return false;
-}
+/* =========================================================
+   CURRENT PATH
+========================================================= */
 
 export function getCurrentPath(_AppCore = null, Router = null) {
   if (typeof Router?.getCurrentPublicPath === "function") {
@@ -238,8 +202,12 @@ export function getCurrentCanonicalPath(AppCore = null, Router = null) {
   return normalizeCanonicalPath(getCurrentPublicPath(AppCore, Router));
 }
 
+/* =========================================================
+   SAFE INTERNAL PATH
+========================================================= */
+
 export function isSafeInternalPath(value = "") {
-  const path = text(value, "");
+  const path = cleanText(value, "");
 
   return Boolean(
     path &&
@@ -250,61 +218,111 @@ export function isSafeInternalPath(value = "") {
   );
 }
 
-export function normalizeInternalPathTarget(value = DEFAULT_PATH, fallback = DEFAULT_PATH) {
+export function normalizeInternalPathTarget(
+  value = DEFAULT_ROUTE,
+  fallback = DEFAULT_ROUTE
+) {
   const path = normalizePublicPath(value);
 
-  return isSafeInternalPath(path) ? path : normalizePublicPath(fallback);
+  return isSafeInternalPath(path)
+    ? path
+    : normalizePublicPath(fallback);
 }
 
-export function redactTokenInText(value = "") {
-  return text(value, "").replace(/([?&#]token=)([^&#\s]+)/gi, "$1***");
-}
+/* =========================================================
+   TOKEN ROUTES
+========================================================= */
 
-export function escapeHtml(first = "", second = undefined) {
-  const value = second === undefined ? first : second;
-
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-export function ensureScope(_AppCore = null, scope = "app") {
-  return {
-    name: scope,
-  };
-}
-
-export function clearScope() {
-  return true;
-}
-
-export function registerModule(AppCore = null, name = "", moduleRef = null, aliases = []) {
-  if (!AppCore || !name || !moduleRef) return false;
-
+function hasTokenParam(path = "") {
   try {
-    AppCore[name] = moduleRef;
+    const query = String(path || "").split("?")[1]?.split("#")[0] || "";
+    const params = new URLSearchParams(query);
 
-    for (const alias of aliases || []) {
-      AppCore[alias] = moduleRef;
-    }
-
-    return true;
+    return Boolean(cleanText(params.get(TOKEN_PARAM), ""));
   } catch {
     return false;
   }
 }
 
-export function getHelpersSnapshot(AppCore = null, Router = null) {
+export function isSensitiveParamName(name = "") {
+  return String(name || "").toLowerCase() === TOKEN_PARAM;
+}
+
+export function getSensitiveParamNames() {
+  return [TOKEN_PARAM];
+}
+
+export function redactTokenInText(value = "") {
+  return String(value || "").replace(/([?&#]token=)([^&#\s]+)/gi, "$1***");
+}
+
+export function isProtectedPublicTokenPath(path = browserPath()) {
+  const publicPath = normalizePublicPath(path);
+
+  return Boolean(
+    getPublicTokenRouteConfigByPath(publicPath) &&
+      hasTokenParam(publicPath)
+  );
+}
+
+export function resolveProtectedInitialContext(path = browserPath()) {
+  const publicPath = normalizePublicPath(path);
+  const config = getPublicTokenRouteConfigByPath(publicPath);
+  const hasToken = Boolean(config && hasTokenParam(publicPath));
+
   return {
-    version: HELPERS_VERSION,
-    publicPath: getCurrentPublicPath(AppCore, Router),
-    canonicalPath: getCurrentCanonicalPath(AppCore, Router),
-    protectedInitial: resolveProtectedInitialContext(),
+    key: hasToken ? config.key : "",
+    path: hasToken ? publicPath : "",
+    publicPath: hasToken ? publicPath : "",
+    canonicalPath: hasToken ? normalizeCanonicalPath(config.path || publicPath) : "",
+    hasToken,
+    redactedPath: hasToken ? redactTokenInText(publicPath) : "",
   };
 }
+
+export function getProtectedInitialPublicPath(path = browserPath()) {
+  const context = resolveProtectedInitialContext(path);
+  return context.hasToken ? context.publicPath : "";
+}
+
+/* =========================================================
+   PUBLIC ROUTE HELPERS
+========================================================= */
+
+export function isActivationPath(path = browserPath()) {
+  return normalizeCanonicalPath(path) === "/activate-account";
+}
+
+export function isPasswordResetPath(path = browserPath()) {
+  return normalizeCanonicalPath(path) === "/password-reset";
+}
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
+export function getHelpersSnapshot(AppCore = null, Router = null) {
+  const publicPath = getCurrentPublicPath(AppCore, Router);
+  const protectedInitial = resolveProtectedInitialContext(publicPath);
+
+  return {
+    version: HELPERS_VERSION,
+
+    publicPath: redactTokenInText(publicPath),
+    canonicalPath: getCurrentCanonicalPath(AppCore, Router),
+
+    protectedInitial: {
+      key: protectedInitial.key,
+      canonicalPath: protectedInitial.canonicalPath,
+      hasToken: protectedInitial.hasToken,
+      redactedPath: protectedInitial.redactedPath,
+    },
+  };
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   HELPERS_VERSION,
@@ -323,20 +341,15 @@ export default {
   normalizeInternalPathTarget,
 
   isActivationPath,
-  isResetConfirmPath,
+  isPasswordResetPath,
+
   isProtectedPublicTokenPath,
   getProtectedInitialPublicPath,
   resolveProtectedInitialContext,
-  captureInitialUrl,
 
+  isSensitiveParamName,
+  getSensitiveParamNames,
   redactTokenInText,
-  escapeHtml,
-
-  ensureScope,
-  clearScope,
-  registerModule,
 
   getHelpersSnapshot,
-
-  PROTECTED_PUBLIC_TOKEN_ROUTES,
 };

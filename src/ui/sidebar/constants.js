@@ -10,6 +10,7 @@
    - Selectores comunes.
    - Clases comunes.
    - Metadatos visuales mínimos de rutas.
+   - Clientes: sólo admin.
    - Roles únicos: admin / user.
    - Home interna: /
    - Home visible de usuario: /@{user.slug}
@@ -30,7 +31,7 @@ import {
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
 } from "../../core/config.js";
 
-export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v4";
+export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v5";
 
 /* =========================================================
    HELPERS INTERNOS
@@ -150,6 +151,7 @@ export const SIDEBAR_PRIVATE_FALLBACK_ROUTES = freeze([
 ]);
 
 export const SIDEBAR_ADMIN_FALLBACK_ROUTES = freeze([
+  CLIENTES_ROUTE,
   USUARIOS_ROUTE,
   SERVER_ROUTE,
 ]);
@@ -400,6 +402,7 @@ export const SIDEBAR_ROUTE_META = freeze({
     label: "Clientes",
     icon: "clientes",
     order: 40,
+    adminOnly: true,
   }),
 
   [CUENTA_ROUTE]: freeze({
@@ -586,7 +589,6 @@ export const SIDEBAR_CLASSES = freeze({
 ========================================================= */
 
 export const SIDEBAR_ICONS = freeze({
-  brand: "brand",
   menu: "menu",
   chevron: "chevron",
 
@@ -669,6 +671,8 @@ export function getSidebarConstantsSnapshot() {
       constantsOnly: true,
       configDrivenRoutes: true,
 
+      clientesAdminOnly: true,
+
       noDom: true,
       noAuth: true,
       noRouter: true,
@@ -680,6 +684,9 @@ export function getSidebarConstantsSnapshot() {
 
       noLegacyRoutes: true,
       noHomeRoute: true,
+
+      noSvgBrandIcon: true,
+      companyLogoHandledByTemplateAndCss: true,
 
       userSlugHome: true,
       userScopedPrivateRoutes: true,

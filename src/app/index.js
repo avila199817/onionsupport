@@ -9,6 +9,7 @@
    - Iniciar Toast.
    - Iniciar Auth.
    - Restaurar sesión ANTES del primer render Router.
+   - Delegar restore compat en /src/app/session.js.
    - Delegar Router en /src/app/router.js.
    - Renderizar ruta inicial capturada por main.js.
    - Iniciar Sidebar/Topbar después de ruta + auth.
@@ -45,11 +46,15 @@ import {
 } from "./shell.js";
 
 import {
+  restoreAuthSession,
+} from "./session.js";
+
+import {
   configureRouter,
   renderInitialRoute as renderRouterInitialRoute,
 } from "./router.js";
 
-export const APP_INDEX_VERSION = "app.index.v4";
+export const APP_INDEX_VERSION = "app.index.v5";
 
 let bootPromise = null;
 let ready = false;
@@ -77,7 +82,7 @@ function cleanText(value = "", fallback = "") {
 
 function redact(value = "") {
   return cleanText(value, "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret)=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -225,6 +230,7 @@ function refreshI18nDom() {
 
 function authPayload(payload = {}) {
   return withCore(payload, {
+    Auth,
     skipNavigation: true,
     skipRedirect: true,
     noRedirect: true,
@@ -237,10 +243,11 @@ async function initAuth(payload = {}) {
 }
 
 async function restoreAuth(payload = {}) {
-  await callRequired(Auth, "restoreSession", "Auth", authPayload(payload));
+  const result = await restoreAuthSession(authPayload(payload));
+
   await callOptional(Auth, "syncAuthState", authPayload(payload));
 
-  return Auth;
+  return result;
 }
 
 /* =========================================================
@@ -350,6 +357,7 @@ export function getAppSnapshot() {
       singleEntryPoint: true,
       bootAppContract: true,
       restoresAuthBeforeRouterRender: true,
+      sessionRestoreDelegated: true,
       routerDelegatedToAppRouter: true,
       routerManagedInitialRender: false,
       chromeAfterRouteAndAuth: true,

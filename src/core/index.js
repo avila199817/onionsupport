@@ -26,15 +26,41 @@
 import { config } from "./config.js";
 import Http, { installHttp } from "./http.js";
 
-export const CORE_VERSION = "core.index.v2";
+export const CORE_VERSION = "core.index.v3";
 
 const APP_NAME =
   config?.appName ||
   config?.name ||
   "Onion Support";
 
-const HOME_PATH = "/";
+const ROOT_PATH = "/";
 const USER_HOME_PREFIX = "/@";
+
+const VALID_ROLES = Object.freeze(["admin", "user"]);
+const INVALID_USER_STATUSES = Object.freeze(["disabled", "deleted", "archived"]);
+
+const DROPPED_STATE_KEYS = Object.freeze([
+  "password",
+  "passwordHash",
+  "hash",
+  "salt",
+
+  "refreshToken",
+  "refresh_token",
+
+  "resetToken",
+  "activationToken",
+
+  "secret",
+  "secrets",
+  "code",
+  "codes",
+  "backupCodes",
+
+  "session",
+  "sessionData",
+  "auth",
+]);
 
 /* =========================================================
    BASICS
@@ -44,7 +70,7 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFn(value) {
+function isFunction(value) {
   return typeof value === "function";
 }
 
@@ -52,32 +78,37 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function text(value = "", fallback = "") {
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
 
 function clone(value) {
+  if (value === undefined) return undefined;
+
   try {
-    return structuredClone(value);
-  } catch {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
     }
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
   }
 }
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 /* =========================================================
-   AUTH NORMALIZATION
+   ROLES
 ========================================================= */
 
 function normalizeRole(value = "") {
@@ -90,17 +121,21 @@ function normalizeRole(value = "") {
     return "";
   }
 
-  const role = String(value || "").toLowerCase();
+  const role = String(value || "").trim().toLowerCase();
 
-  return role === "admin" || role === "user" ? role : "";
+  return VALID_ROLES.includes(role) ? role : "";
 }
 
 function cleanRole(value = "") {
   return normalizeRole(value) || "user";
 }
 
+/* =========================================================
+   TOKEN
+========================================================= */
+
 function tokenOk(value = "") {
-  const token = text(value, "").replace(/^Bearer\s+/i, "");
+  const token = cleanText(value, "").replace(/^Bearer\s+/i, "");
 
   if (!token) return false;
   if (/\s/.test(token)) return false;
@@ -118,12 +153,16 @@ function tokenOk(value = "") {
 }
 
 function cleanToken(value = "") {
-  const token = text(value, "").replace(/^Bearer\s+/i, "");
+  const token = cleanText(value, "").replace(/^Bearer\s+/i, "");
   return tokenOk(token) ? token : null;
 }
 
+/* =========================================================
+   USER NORMALIZATION
+========================================================= */
+
 function normalizeSlug(value = "") {
-  const slug = text(value, "")
+  const slug = cleanText(value, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -149,40 +188,26 @@ function extractUserSlug(user = null) {
 
 function buildUserHomePath(user = null) {
   const slug = extractUserSlug(user);
-  return slug ? `${USER_HOME_PREFIX}${slug}` : HOME_PATH;
+  return slug ? `${USER_HOME_PREFIX}${slug}` : ROOT_PATH;
 }
 
 function removeSensitiveUserFields(user = {}) {
+  if (!isObject(user)) return {};
+
   const output = { ...user };
 
-  for (const key of [
-    "password",
-    "passwordHash",
-    "hash",
-    "salt",
+  for (const key of DROPPED_STATE_KEYS) {
+    delete output[key];
+  }
 
+  for (const key of [
     "token",
     "accessToken",
     "access_token",
     "refreshToken",
     "refresh_token",
-
-    "resetToken",
-    "activationToken",
-
-    "otp",
-    "otpCode",
-    "mfa",
-    "twofa_secret",
-    "twofaSecret",
-    "totpSecret",
-    "backupCodes",
   ]) {
-    try {
-      delete output[key];
-    } catch {
-      // noop
-    }
+    delete output[key];
   }
 
   return output;
@@ -191,16 +216,14 @@ function removeSensitiveUserFields(user = {}) {
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  const status = text(user.status || user.estado, "").toLowerCase();
+  const status = cleanText(user.status || user.estado, "").toLowerCase();
 
   return Boolean(
     user.disabled === true ||
       user.deleted === true ||
       user.archived === true ||
       user.active === false ||
-      status === "disabled" ||
-      status === "deleted" ||
-      status === "archived"
+      INVALID_USER_STATUSES.includes(status)
   );
 }
 
@@ -208,11 +231,11 @@ function hasUserIdentity(user = null) {
   if (!isObject(user)) return false;
 
   return Boolean(
-    text(user.id, "") ||
-      text(user.userId, "") ||
-      text(user.username, "") ||
-      text(user.slug, "") ||
-      text(user.lookup?.slug, "")
+    cleanText(user.id, "") ||
+      cleanText(user.userId, "") ||
+      cleanText(user.username, "") ||
+      cleanText(user.slug, "") ||
+      cleanText(user.lookup?.slug, "")
   );
 }
 
@@ -228,11 +251,12 @@ function normalizeUser(user = null) {
   if (!userOk(user)) return null;
 
   const safeUser = removeSensitiveUserFields(user);
-  const id = text(safeUser.userId || safeUser.id, "");
+
+  const id = cleanText(safeUser.userId || safeUser.id, "");
   const slug = extractUserSlug(safeUser);
   const profile = isObject(safeUser.profile) ? safeUser.profile : {};
 
-  const username = text(
+  const username = cleanText(
     safeUser.username ||
       safeUser.userName ||
       safeUser.user_name ||
@@ -241,7 +265,7 @@ function normalizeUser(user = null) {
     ""
   );
 
-  const displayName = text(
+  const displayName = cleanText(
     safeUser.displayName ||
       safeUser.fullName ||
       safeUser.name ||
@@ -296,7 +320,11 @@ function publicUser(user = null) {
     slug: normalized.slug || null,
     displayName: normalized.displayName || null,
     role: normalized.role || null,
-    hasAvatar: Boolean(normalized.avatar || normalized.avatarUrl || normalized.picture),
+    hasAvatar: Boolean(
+      normalized.avatar ||
+        normalized.avatarUrl ||
+        normalized.picture
+    ),
   };
 }
 
@@ -304,45 +332,49 @@ function publicUser(user = null) {
    PATHS
 ========================================================= */
 
-function normalizeHashPath(path = HOME_PATH) {
-  const value = text(path, HOME_PATH);
+function normalizeHashPath(path = ROOT_PATH) {
+  const value = cleanText(path, ROOT_PATH);
 
   if (value.startsWith("#!")) {
-    return value.replace(/^#!\/?/, "/") || HOME_PATH;
+    return value.replace(/^#!\/?/, "/") || ROOT_PATH;
   }
 
   if (value.startsWith("#/")) {
-    return value.slice(1) || HOME_PATH;
+    return value.slice(1) || ROOT_PATH;
   }
 
   return value;
 }
 
-function normalizePublicPath(path = HOME_PATH) {
+function normalizePublicPath(path = ROOT_PATH) {
   let value = normalizeHashPath(path);
 
-  if (value.startsWith("//")) {
-    return HOME_PATH;
+  if (!value || value.startsWith("//")) {
+    return ROOT_PATH;
   }
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
-    return HOME_PATH;
+    return ROOT_PATH;
   }
 
   if (!value.startsWith("/")) {
     value = `/${value}`;
   }
 
-  value = value.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+  value = value
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  return value || HOME_PATH;
+  return value || ROOT_PATH;
 }
 
-function stripQueryHash(path = HOME_PATH) {
-  return normalizePublicPath(path).split("?")[0].split("#")[0] || HOME_PATH;
+function stripQueryHash(path = ROOT_PATH) {
+  return normalizePublicPath(path)
+    .split("?")[0]
+    .split("#")[0] || ROOT_PATH;
 }
 
-function extractUserHomeSlug(path = HOME_PATH) {
+function extractUserHomeSlug(path = ROOT_PATH) {
   const value = stripQueryHash(path);
 
   if (!value.startsWith(USER_HOME_PREFIX)) return "";
@@ -354,18 +386,29 @@ function extractUserHomeSlug(path = HOME_PATH) {
   return normalizeSlug(slug);
 }
 
-function isUserHomePath(path = HOME_PATH) {
+function isUserHomePath(path = ROOT_PATH) {
   return Boolean(extractUserHomeSlug(path));
 }
 
-function normalizeCanonicalPath(path = HOME_PATH) {
+function normalizeCanonicalPath(path = ROOT_PATH) {
   let value = stripQueryHash(path);
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || HOME_PATH;
+    value = value.replace(/\/+$/g, "") || ROOT_PATH;
   }
 
-  return isUserHomePath(value) ? HOME_PATH : value;
+  return isUserHomePath(value) ? ROOT_PATH : value;
+}
+
+function safeInternalPath(path = ROOT_PATH) {
+  const target = normalizePublicPath(path);
+
+  if (!target.startsWith("/")) return ROOT_PATH;
+  if (target.startsWith("//")) return ROOT_PATH;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return ROOT_PATH;
+  if (/[\r\n\t\\]/.test(target)) return ROOT_PATH;
+
+  return target;
 }
 
 /* =========================================================
@@ -375,8 +418,8 @@ function normalizeCanonicalPath(path = HOME_PATH) {
 function createEvents() {
   const listeners = new Map();
 
-  function on(name, handler) {
-    if (!name || !isFn(handler)) return () => false;
+  function on(name = "", handler = null) {
+    if (!name || !isFunction(handler)) return () => false;
 
     if (!listeners.has(name)) {
       listeners.set(name, new Set());
@@ -387,18 +430,18 @@ function createEvents() {
     return () => off(name, handler);
   }
 
-  function once(name, handler) {
-    if (!isFn(handler)) return () => false;
+  function once(name = "", handler = null) {
+    if (!isFunction(handler)) return () => false;
 
-    const dispose = on(name, (...args) => {
+    const dispose = on(name, (event) => {
       dispose();
-      handler(...args);
+      handler(event);
     });
 
     return dispose;
   }
 
-  function off(name, handler = null) {
+  function off(name = "", handler = null) {
     if (!name) return false;
 
     if (!handler) {
@@ -410,7 +453,7 @@ function createEvents() {
     return true;
   }
 
-  function emit(name, payload = {}) {
+  function emit(name = "", payload = {}) {
     if (!name) return false;
 
     const event = {
@@ -419,7 +462,7 @@ function createEvents() {
       payload,
     };
 
-    for (const handler of listeners.get(name) || []) {
+    for (const handler of [...(listeners.get(name) || [])]) {
       try {
         handler(event);
       } catch {
@@ -435,17 +478,19 @@ function createEvents() {
     return true;
   }
 
+  function getSnapshot() {
+    return {
+      names: [...listeners.keys()],
+    };
+  }
+
   return {
     on,
     once,
     off,
     emit,
-    dispatch: emit,
-    trigger: emit,
     clear,
-    getSnapshot: () => ({
-      names: [...listeners.keys()],
-    }),
+    getSnapshot,
   };
 }
 
@@ -456,35 +501,39 @@ function createEvents() {
 function createModules() {
   const map = new Map();
 
-  function register(name, value) {
+  function register(name = "", value = null) {
     if (!name || !value) return false;
 
     map.set(name, value);
     return value;
   }
 
-  function get(name) {
+  function get(name = "") {
     return map.get(name) || null;
   }
 
-  function remove(name) {
+  function remove(name = "") {
     return map.delete(name);
+  }
+
+  function list() {
+    return [...map.keys()];
+  }
+
+  function getSnapshot() {
+    return {
+      count: map.size,
+      modules: list(),
+    };
   }
 
   return {
     register,
-    set: register,
-    upsert: register,
     get,
-    has: (name) => map.has(name),
+    has: (name = "") => map.has(name),
     remove,
-    delete: remove,
-    list: () => [...map.keys()],
-    names: () => [...map.keys()],
-    getSnapshot: () => ({
-      count: map.size,
-      modules: [...map.keys()],
-    }),
+    list,
+    getSnapshot,
   };
 }
 
@@ -496,7 +545,7 @@ function createCleanup() {
   const scopes = new Map();
 
   function add(scope = "global", disposer = null) {
-    if (!isFn(disposer)) return () => false;
+    if (!isFunction(disposer)) return () => false;
 
     if (!scopes.has(scope)) {
       scopes.set(scope, new Set());
@@ -516,8 +565,10 @@ function createCleanup() {
     };
   }
 
-  function event(scope, target, eventName, handler, options = false) {
-    if (!target || !eventName || !isFn(handler)) return () => false;
+  function event(scope = "global", target = null, eventName = "", handler = null, options = false) {
+    if (!target || !eventName || !isFunction(handler)) {
+      return () => false;
+    }
 
     try {
       target.addEventListener(eventName, handler, options);
@@ -538,7 +589,7 @@ function createCleanup() {
     const names = scope ? [scope] : [...scopes.keys()];
 
     for (const name of names) {
-      for (const disposer of scopes.get(name) || []) {
+      for (const disposer of [...(scopes.get(name) || [])]) {
         try {
           disposer();
         } catch {
@@ -552,18 +603,19 @@ function createCleanup() {
     return true;
   }
 
+  function getSnapshot() {
+    return {
+      scopes: [...scopes.keys()],
+    };
+  }
+
   return {
     add,
     event,
-    on: event,
     run,
     clear: run,
     dispose: run,
-    scope: (name = "global") => ({ name }),
-    ensureScope: (name = "global") => ({ name }),
-    getSnapshot: () => ({
-      scopes: [...scopes.keys()],
-    }),
+    getSnapshot,
   };
 }
 
@@ -574,8 +626,8 @@ function createCleanup() {
 function createHooks() {
   const map = new Map();
 
-  function add(name, handler) {
-    if (!name || !isFn(handler)) return () => false;
+  function add(name = "", handler = null) {
+    if (!name || !isFunction(handler)) return () => false;
 
     if (!map.has(name)) {
       map.set(name, []);
@@ -593,7 +645,7 @@ function createHooks() {
     };
   }
 
-  async function run(name, payload = {}) {
+  async function run(name = "", payload = {}) {
     let current = payload;
 
     for (const handler of map.get(name) || []) {
@@ -604,29 +656,34 @@ function createHooks() {
           current = next;
         }
       } catch {
-        // noop
+        // Un hook no debe romper Core.
       }
     }
 
     return current;
   }
 
+  function clear(name = "") {
+    if (name) {
+      map.delete(name);
+    } else {
+      map.clear();
+    }
+
+    return true;
+  }
+
+  function getSnapshot() {
+    return {
+      hooks: [...map.keys()],
+    };
+  }
+
   return {
     add,
-    on: add,
-    use: add,
-    register: add,
     run,
-    runSeries: run,
-    clear: (name = "") => {
-      if (name) map.delete(name);
-      else map.clear();
-
-      return true;
-    },
-    getSnapshot: () => ({
-      hooks: [...map.keys()],
-    }),
+    clear,
+    getSnapshot,
   };
 }
 
@@ -637,6 +694,7 @@ const hooks = createHooks();
 
 const services = {};
 const dom = {};
+
 const registry = {
   modules,
   hooks,
@@ -665,17 +723,14 @@ const state = {
   booting: false,
   loading: false,
 
-  route: HOME_PATH,
-  canonicalPath: HOME_PATH,
-  publicPath: HOME_PATH,
+  route: ROOT_PATH,
+  canonicalPath: ROOT_PATH,
+  publicPath: ROOT_PATH,
   routeParams: {},
 
   token: null,
   accessToken: null,
   access_token: null,
-
-  refreshToken: null,
-  refresh_token: null,
 
   user: null,
   currentUser: null,
@@ -686,8 +741,8 @@ const state = {
   hasToken: false,
 
   userSlug: null,
-  homePath: HOME_PATH,
-  defaultHome: HOME_PATH,
+  homePath: ROOT_PATH,
+  defaultHome: ROOT_PATH,
   postLoginTarget: null,
 
   role: null,
@@ -697,9 +752,6 @@ const state = {
 
   isAdmin: false,
   isUser: false,
-  isSupport: false,
-  isManager: false,
-  isClient: false,
 
   shellVisible: true,
   shellHidden: false,
@@ -726,26 +778,139 @@ let toastBridge = null;
 let httpClient = null;
 
 /* =========================================================
+   STATE SANITIZE
+========================================================= */
+
+function dropForbiddenStateFields(target = state) {
+  for (const key of DROPPED_STATE_KEYS) {
+    try {
+      delete target[key];
+    } catch {
+      // noop
+    }
+  }
+
+  return target;
+}
+
+function sanitizeStatePatch(patch = {}) {
+  if (!isObject(patch)) return {};
+
+  const output = {};
+
+  for (const [key, value] of Object.entries(patch)) {
+    if (DROPPED_STATE_KEYS.includes(key)) {
+      continue;
+    }
+
+    if (
+      key === "token" ||
+      key === "accessToken" ||
+      key === "access_token"
+    ) {
+      output[key] = cleanToken(value);
+      continue;
+    }
+
+    if (
+      key === "user" ||
+      key === "currentUser" ||
+      key === "authUser" ||
+      key === "sessionUser"
+    ) {
+      output[key] = value ? normalizeUser(value) : null;
+      continue;
+    }
+
+    if (key === "role" || key === "rol" || key === "userRole") {
+      output[key] = normalizeRole(value) || null;
+      continue;
+    }
+
+    if (key === "roles") {
+      output[key] = Array.isArray(value)
+        ? value.map(normalizeRole).filter(Boolean)
+        : [];
+      continue;
+    }
+
+    if (key === "publicPath") {
+      output.publicPath = normalizePublicPath(value);
+      output.canonicalPath = normalizeCanonicalPath(value);
+      output.route = normalizeCanonicalPath(value);
+      continue;
+    }
+
+    if (key === "route" || key === "canonicalPath") {
+      output[key] = normalizeCanonicalPath(value);
+      continue;
+    }
+
+    output[key] = value;
+  }
+
+  return output;
+}
+
+function clearSessionFields() {
+  state.token = null;
+  state.accessToken = null;
+  state.access_token = null;
+
+  state.user = null;
+  state.currentUser = null;
+  state.authUser = null;
+  state.sessionUser = null;
+
+  state.authenticated = false;
+  state.hasToken = false;
+
+  state.userSlug = null;
+  state.homePath = ROOT_PATH;
+  state.defaultHome = ROOT_PATH;
+  state.postLoginTarget = null;
+
+  state.role = null;
+  state.rol = null;
+  state.userRole = null;
+  state.roles = [];
+
+  state.isAdmin = false;
+  state.isUser = false;
+
+  dropForbiddenStateFields(state);
+
+  return state;
+}
+
+/* =========================================================
    AUTH STATE
 ========================================================= */
 
 function syncAuth() {
-  const token = cleanToken(state.token || state.accessToken || state.access_token);
+  dropForbiddenStateFields(state);
 
-  const user = normalizeUser(
+  const rawUser =
     state.user ||
-      state.currentUser ||
-      state.authUser ||
-      state.sessionUser ||
-      state.session?.user ||
-      state.sessionData?.user ||
-      null
-  );
+    state.currentUser ||
+    state.authUser ||
+    state.sessionUser ||
+    null;
+
+  const user = normalizeUser(rawUser);
+  const invalidExplicitUser = Boolean(rawUser) && !user;
+
+  const token = invalidExplicitUser
+    ? null
+    : cleanToken(state.token || state.accessToken || state.access_token);
 
   const authenticated = Boolean(token && user);
-  const role = authenticated ? cleanRole(user.role || user.rol || user.roles || state.role) : null;
+  const role = authenticated
+    ? cleanRole(user.role || user.rol || user.roles || state.role)
+    : null;
+
   const slug = authenticated ? extractUserSlug(user) : "";
-  const homePath = authenticated ? buildUserHomePath(user) : HOME_PATH;
+  const homePath = authenticated ? buildUserHomePath(user) : ROOT_PATH;
 
   state.token = token;
   state.accessToken = token;
@@ -753,6 +918,8 @@ function syncAuth() {
 
   state.user = authenticated ? user : null;
   state.currentUser = authenticated ? user : null;
+  state.authUser = authenticated ? user : null;
+  state.sessionUser = authenticated ? user : null;
 
   state.hasToken = Boolean(token);
   state.authenticated = authenticated;
@@ -770,46 +937,21 @@ function syncAuth() {
   state.isAdmin = role === "admin";
   state.isUser = role === "user";
 
-  state.isSupport = false;
-  state.isManager = false;
-  state.isClient = false;
-
   return state;
 }
 
 function getState(options = {}) {
   syncAuth();
-  return options.raw ? state : clone(state);
+  return options.raw === true ? state : clone(state);
 }
 
 function setState(patch = {}, options = {}) {
-  if (isObject(patch)) {
-    Object.assign(state, patch);
+  const nextPatch = sanitizeStatePatch(patch);
 
-    if (patch.user === null) {
-      state.currentUser = null;
-      state.authUser = null;
-      state.sessionUser = null;
-    }
-
-    if (patch.currentUser === null) {
-      state.user = null;
-      state.authUser = null;
-      state.sessionUser = null;
-    }
-  }
+  Object.assign(state, nextPatch);
 
   if (options.forceUnauthenticated === true) {
-    state.token = null;
-    state.accessToken = null;
-    state.access_token = null;
-    state.refreshToken = null;
-    state.refresh_token = null;
-
-    state.user = null;
-    state.currentUser = null;
-    state.authUser = null;
-    state.sessionUser = null;
+    clearSessionFields();
   }
 
   syncAuth();
@@ -876,7 +1018,7 @@ function getAuthHeader() {
    STATE WRAPPERS
 ========================================================= */
 
-function setRoute(route = HOME_PATH, options = {}) {
+function setRoute(route = ROOT_PATH, options = {}) {
   const path = normalizeCanonicalPath(route);
 
   setState(
@@ -887,13 +1029,14 @@ function setRoute(route = HOME_PATH, options = {}) {
     {
       source: options.source || "core:setRoute",
       silent: options.silent,
+      emit: options.emit,
     }
   );
 
   return path;
 }
 
-function setPublicPath(path = HOME_PATH, options = {}) {
+function setPublicPath(path = ROOT_PATH, options = {}) {
   const publicPath = normalizePublicPath(path);
   const canonicalPath = normalizeCanonicalPath(publicPath);
 
@@ -906,6 +1049,7 @@ function setPublicPath(path = HOME_PATH, options = {}) {
     {
       source: options.source || "core:setPublicPath",
       silent: options.silent,
+      emit: options.emit,
     }
   );
 
@@ -923,7 +1067,8 @@ function setUser(user = null, options = {}) {
     {
       source: options.source || "core:setUser",
       silent: options.silent,
-      forceUnauthenticated: !cleanUser && !state.token,
+      emit: options.emit,
+      forceUnauthenticated: !cleanUser,
     }
   );
 
@@ -942,6 +1087,7 @@ function setToken(token = null, options = {}) {
     {
       source: options.source || "core:setToken",
       silent: options.silent,
+      emit: options.emit,
       forceUnauthenticated: !clean,
     }
   );
@@ -955,7 +1101,6 @@ function pick(payload = {}, names = []) {
       payload?.[name] ??
       payload?.data?.[name] ??
       payload?.payload?.[name] ??
-      payload?.auth?.[name] ??
       payload?.session?.[name] ??
       payload?.sessionData?.[name];
 
@@ -973,8 +1118,8 @@ function applySession(payload = {}, options = {}) {
     pick(payload, ["user", "usuario", "me", "account", "profile"]) ||
     (userOk(payload) ? payload : null);
 
-  const clean = cleanToken(token) || state.token;
-  const cleanUser = normalizeUser(user) || state.user;
+  const clean = cleanToken(token);
+  const cleanUser = normalizeUser(user);
 
   setState(
     {
@@ -987,6 +1132,8 @@ function applySession(payload = {}, options = {}) {
     {
       source: options.source || "core:applySession",
       silent: options.silent,
+      emit: options.emit,
+      forceUnauthenticated: !(clean && cleanUser),
     }
   );
 
@@ -1001,45 +1148,14 @@ function applySession(payload = {}, options = {}) {
 }
 
 function clearSession(options = {}) {
-  setState(
-    {
-      token: null,
-      accessToken: null,
-      access_token: null,
-      refreshToken: null,
-      refresh_token: null,
+  clearSessionFields();
 
-      user: null,
-      currentUser: null,
-      authUser: null,
-      sessionUser: null,
-
-      authenticated: false,
-      hasToken: false,
-
-      userSlug: null,
-      homePath: HOME_PATH,
-      defaultHome: HOME_PATH,
-      postLoginTarget: null,
-
-      role: null,
-      rol: null,
-      userRole: null,
-      roles: [],
-
-      isAdmin: false,
-      isUser: false,
-      isSupport: false,
-      isManager: false,
-      isClient: false,
-    },
-    {
+  if (options.emit !== false && options.silent !== true) {
+    events.emit("app:state:change", {
+      state: getState(),
       source: options.source || "core:clearSession",
-      silent: options.silent,
-      emit: options.emit,
-      forceUnauthenticated: true,
-    }
-  );
+    });
+  }
 
   return true;
 }
@@ -1050,11 +1166,6 @@ function setTheme(theme = "system") {
     : "system";
 
   state.theme = value;
-
-  if (isBrowser()) {
-    document.documentElement.dataset.theme = value;
-  }
-
   return value;
 }
 
@@ -1064,11 +1175,6 @@ function setLang(lang = "es") {
   state.lang = value;
   state.language = value;
   state.locale = value;
-
-  if (isBrowser()) {
-    document.documentElement.lang = value;
-    document.documentElement.dataset.locale = value;
-  }
 
   return value;
 }
@@ -1083,42 +1189,39 @@ function setLoading(value = false) {
   return state.loading;
 }
 
-function setError(error = null) {
-  state.error = error;
-  state.lastError = error;
-  state.hasError = Boolean(error);
+function normalizeError(error = null) {
+  if (!error) return null;
 
-  return error;
+  return {
+    name: cleanText(error?.name, "Error"),
+    message: redact(error?.message || String(error)),
+    code: error?.code || error?.status || error?.statusCode || null,
+  };
+}
+
+function setError(error = null) {
+  const normalized = normalizeError(error);
+
+  state.error = normalized;
+  state.lastError = normalized;
+  state.hasError = Boolean(normalized);
+
+  return normalized;
 }
 
 /* =========================================================
-   UI COMPAT
+   TOAST BRIDGE
 ========================================================= */
 
-function setDocumentTitle(title = APP_NAME) {
-  if (!isBrowser()) return false;
-
-  document.title = text(title, APP_NAME);
-  return document.title;
-}
-
-function clearDynamicContainers() {
-  return true;
-}
-
-function syncUserUI() {
-  return true;
-}
-
-function setShowToast(fn) {
-  if (!isFn(fn)) return false;
+function setShowToast(fn = null) {
+  if (!isFunction(fn)) return false;
 
   toastBridge = fn;
   return true;
 }
 
 function showToast(message = "", type = "info", options = {}) {
-  if (!isFn(toastBridge)) return null;
+  if (!isFunction(toastBridge)) return null;
 
   try {
     return toastBridge(message, type, options);
@@ -1128,108 +1231,15 @@ function showToast(message = "", type = "info", options = {}) {
 }
 
 /* =========================================================
-   MODULES / BRIDGES
+   MODULES
 ========================================================= */
 
 function registerModule(name = "", value = null) {
-  if (!name || !value) return false;
-
-  modules.register(name, value);
-  return value;
+  return modules.register(name, value);
 }
 
 function getModule(name = "") {
   return modules.get(name);
-}
-
-function bridgeAliases(name = "") {
-  return {
-    Router: ["Router", "router"],
-    router: ["Router", "router"],
-
-    Auth: ["Auth", "auth"],
-    auth: ["Auth", "auth"],
-
-    Store: ["Store", "store"],
-    store: ["Store", "store"],
-
-    Http: ["Http", "http", "api", "apiClient"],
-    http: ["Http", "http", "api", "apiClient"],
-    api: ["Http", "http", "api", "apiClient"],
-    apiClient: ["Http", "http", "api", "apiClient"],
-  }[name] || [name];
-}
-
-function registerBridge(name = "", value = null) {
-  if (!name || !value) return false;
-
-  for (const alias of bridgeAliases(name)) {
-    modules.register(alias, value);
-  }
-
-  return value;
-}
-
-function getBridge(name = "") {
-  for (const alias of bridgeAliases(name)) {
-    const value = modules.get(alias);
-
-    if (value) return value;
-  }
-
-  return null;
-}
-
-/* =========================================================
-   NAVIGATION COMPAT
-========================================================= */
-
-function safeInternalPath(path = HOME_PATH) {
-  const target = normalizePublicPath(path);
-
-  if (!target.startsWith("/")) return HOME_PATH;
-  if (target.startsWith("//")) return HOME_PATH;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return HOME_PATH;
-  if (/[\r\n\t\\]/.test(target)) return HOME_PATH;
-
-  return target;
-}
-
-async function navigate(path = HOME_PATH, options = {}) {
-  const target = safeInternalPath(path || HOME_PATH);
-
-  try {
-    const router = getBridge("Router");
-
-    if (isFn(router?.replace) && options.replaceState === true) {
-      await router.replace(target, {
-        source: options.source || "core:navigate",
-        ...options,
-      });
-
-      return true;
-    }
-
-    if (isFn(router?.navigate)) {
-      await router.navigate(target, {
-        source: options.source || "core:navigate",
-        ...options,
-      });
-
-      return true;
-    }
-  } catch {
-    // fallback abajo
-  }
-
-  if (!isBrowser()) return false;
-
-  try {
-    window.location.assign(target);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /* =========================================================
@@ -1237,20 +1247,29 @@ async function navigate(path = HOME_PATH, options = {}) {
 ========================================================= */
 
 function installHttpBridge(options = {}) {
-  if (!httpClient) {
-    httpClient = isFn(installHttp)
-      ? installHttp(AppCore, options)
-      : Http;
+  if (httpClient) {
+    return httpClient;
   }
 
-  services.http = httpClient;
-  services.Http = httpClient;
-  services.api = httpClient;
-  services.apiClient = httpClient;
+  httpClient = isFunction(installHttp)
+    ? installHttp(AppCore, options)
+    : Http;
 
-  registerBridge("Http", httpClient);
+  services.http = httpClient;
+
+  modules.register("http", httpClient);
 
   return httpClient;
+}
+
+function setHttpClient(value = null) {
+  if (!value) return false;
+
+  httpClient = value;
+  services.http = httpClient;
+  modules.register("http", httpClient);
+
+  return true;
 }
 
 function getHttpClient() {
@@ -1258,7 +1277,11 @@ function getHttpClient() {
 }
 
 function getActiveRequest() {
-  return getHttpClient().request;
+  const client = getHttpClient();
+
+  return isFunction(client?.request)
+    ? client.request.bind(client)
+    : null;
 }
 
 function getActiveApiClient() {
@@ -1266,15 +1289,21 @@ function getActiveApiClient() {
 }
 
 function request(...args) {
-  return getHttpClient().request(...args);
+  const activeRequest = getActiveRequest();
+
+  if (!isFunction(activeRequest)) {
+    throw new Error("HTTP request() no disponible.");
+  }
+
+  return activeRequest(...args);
 }
 
 /* =========================================================
    LIFECYCLE
 ========================================================= */
 
-function ready(fn) {
-  if (!isFn(fn)) return () => false;
+function ready(fn = null) {
+  if (!isFunction(fn)) return () => false;
 
   if (!isBrowser() || document.readyState !== "loading") {
     fn();
@@ -1296,6 +1325,7 @@ async function init(options = {}) {
   initPromise = Promise.resolve()
     .then(() => {
       state.booting = true;
+      state.loading = true;
       state.ready = false;
 
       installHttpBridge(options);
@@ -1304,11 +1334,8 @@ async function init(options = {}) {
 
       state.initialized = true;
       state.booting = false;
+      state.loading = false;
       state.ready = true;
-
-      events.emit("app:core:ready", {
-        version: CORE_VERSION,
-      });
 
       return AppCore;
     })
@@ -1319,19 +1346,9 @@ async function init(options = {}) {
   return initPromise;
 }
 
-function rebootCore() {
-  initialized = false;
-
-  state.initialized = false;
-  state.ready = false;
-  state.booting = false;
-
-  cleanup.run();
-
-  httpClient = null;
-
-  return init();
-}
+/* =========================================================
+   SNAPSHOT
+========================================================= */
 
 function getSnapshot() {
   syncAuth();
@@ -1342,6 +1359,7 @@ function getSnapshot() {
     initialized,
     ready: Boolean(state.ready),
     booting: Boolean(state.booting),
+    loading: Boolean(state.loading),
 
     authenticated: Boolean(state.authenticated),
     hasToken: Boolean(state.hasToken),
@@ -1353,15 +1371,15 @@ function getSnapshot() {
     user: publicUser(state.user),
 
     userSlug: state.userSlug || null,
-    homePath: state.homePath || HOME_PATH,
-    defaultHome: state.defaultHome || state.homePath || HOME_PATH,
+    homePath: state.homePath || ROOT_PATH,
+    defaultHome: state.defaultHome || state.homePath || ROOT_PATH,
 
     role: state.role,
-    roles: state.roles,
+    roles: [...state.roles],
 
-    route: redact(state.route || HOME_PATH),
-    canonicalPath: redact(state.canonicalPath || HOME_PATH),
-    publicPath: redact(state.publicPath || HOME_PATH),
+    route: redact(state.route || ROOT_PATH),
+    canonicalPath: redact(state.canonicalPath || ROOT_PATH),
+    publicPath: redact(state.publicPath || ROOT_PATH),
 
     lang: state.lang,
     locale: state.locale,
@@ -1375,10 +1393,11 @@ function getSnapshot() {
       noStorage: true,
       noFetchOwn: true,
       httpFacadeOnly: true,
+      noApiClientParallel: true,
       roles: ["admin", "user"],
+      authRequiresTokenAndUsableUser: true,
       userSlugHome: true,
       noEmailIdentity: true,
-      no2fa: true,
     },
   };
 }
@@ -1397,17 +1416,11 @@ export const AppCore = {
   registry,
 
   utils: {
-    text,
+    text: cleanText,
     clone,
     redact,
-
-    byId: (id) => (isBrowser() ? document.getElementById(id) : null),
-    qs: (selector) => (isBrowser() ? document.querySelector(selector) : null),
-    qsa: (selector) => (isBrowser() ? [...document.querySelectorAll(selector)] : []),
-
-    log: (...args) => console.log("[Onion]", ...args),
-    warn: (...args) => console.warn("[Onion]", ...args),
-    error: (...args) => console.error("[Onion]", ...args),
+    isObject,
+    isFunction,
   },
 
   events,
@@ -1417,7 +1430,6 @@ export const AppCore = {
   services,
 
   init,
-  rebootCore,
   ready,
 
   getState,
@@ -1444,32 +1456,30 @@ export const AppCore = {
   setLoading,
   setError,
 
-  setDocumentTitle,
-  clearDynamicContainers,
-  syncUserUI,
-
   setShowToast,
   showToast,
 
   registerModule,
   getModule,
-  registerBridge,
-  getBridge,
-
-  navigate,
 
   installHttpBridge,
   getHttpClient,
   getActiveRequest,
   getActiveApiClient,
-
   request,
-  apiClient: null,
 
+  normalizeRole,
   normalizeUser,
   normalizeSlug,
   extractUserSlug,
   buildUserHomePath,
+  publicUser,
+
+  normalizePublicPath,
+  normalizeCanonicalPath,
+  extractUserHomeSlug,
+  isUserHomePath,
+  safeInternalPath,
 
   getSnapshot,
   getDebugSnapshot: getSnapshot,
@@ -1494,10 +1504,7 @@ Object.defineProperties(AppCore, {
       return getHttpClient();
     },
     set(value) {
-      if (value) {
-        httpClient = value;
-        registerBridge("Http", httpClient);
-      }
+      setHttpClient(value);
     },
   },
 
@@ -1506,73 +1513,81 @@ Object.defineProperties(AppCore, {
       return getHttpClient();
     },
     set(value) {
-      if (value) {
-        httpClient = value;
-        registerBridge("Http", httpClient);
-      }
+      setHttpClient(value);
     },
   },
 
   Router: {
     get() {
-      return getBridge("Router");
+      return modules.get("router");
     },
     set(value) {
-      registerBridge("Router", value);
+      modules.register("router", value);
     },
   },
 
   router: {
     get() {
-      return getBridge("Router");
+      return modules.get("router");
     },
     set(value) {
-      registerBridge("Router", value);
+      modules.register("router", value);
     },
   },
 
   Auth: {
     get() {
-      return getBridge("Auth");
+      return modules.get("auth");
     },
     set(value) {
-      registerBridge("Auth", value);
+      modules.register("auth", value);
     },
   },
 
   auth: {
     get() {
-      return getBridge("Auth");
+      return modules.get("auth");
     },
     set(value) {
-      registerBridge("Auth", value);
+      modules.register("auth", value);
     },
   },
 
-  Store: {
+  I18n: {
     get() {
-      return getBridge("Store");
+      return modules.get("i18n");
     },
     set(value) {
-      registerBridge("Store", value);
+      modules.register("i18n", value);
     },
   },
 
-  store: {
+  i18n: {
     get() {
-      return getBridge("Store");
+      return modules.get("i18n");
     },
     set(value) {
-      registerBridge("Store", value);
+      modules.register("i18n", value);
+    },
+  },
+
+  Toast: {
+    get() {
+      return modules.get("toast");
+    },
+    set(value) {
+      modules.register("toast", value);
+    },
+  },
+
+  toast: {
+    get() {
+      return modules.get("toast");
+    },
+    set(value) {
+      modules.register("toast", value);
     },
   },
 });
-
-AppCore.apiClient = getHttpClient();
-
-if (isBrowser()) {
-  window.__ONION_CORE__ = AppCore;
-  window.AppCore = AppCore;
-}
 
 export default AppCore;

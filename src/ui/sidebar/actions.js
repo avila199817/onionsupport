@@ -5,7 +5,7 @@
    Responsabilidad:
    - Acciones reales del sidebar.
    - Abrir / cerrar / alternar usando state.js.
-   - Navegar usando Router/AppCore si existe.
+   - Navegar usando Router si existe.
    - Normalizar targets públicos con Router.buildPublicPath().
    - Mantener rutas privadas visibles como /@{slug}/{ruta}.
    - Navegar sin modificar open/collapsed.
@@ -17,6 +17,8 @@
    - Sin storage.
    - Sin dropdown.
    - Sin navegación browser paralela.
+   - Sin AppCore.navigate.
+   - Sin Router.push legacy.
    - Sin mobile magic.
    - Sin route aliases.
    - Sin /home.
@@ -25,6 +27,7 @@
 ========================================================= */
 
 import {
+  HOME_ROUTE,
   LOGIN_ROUTE,
   SIDEBAR_SOURCE,
   normalizeSidebarPath,
@@ -41,7 +44,7 @@ import {
   toggleSidebar as toggleRuntimeSidebar,
 } from "./state.js";
 
-export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v4";
+export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v5";
 
 /* =========================================================
    BASICS
@@ -79,6 +82,23 @@ function navigationOk(result = null) {
   return true;
 }
 
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function publicError(error = null) {
+  if (!error) return null;
+
+  return {
+    name: error.name || "Error",
+    message: redact(error.message || String(error)),
+    status: error.status || error.statusCode || error.response?.status || 0,
+    code: error.code || error.data?.code || error.response?.data?.code || null,
+  };
+}
+
 /* =========================================================
    CONTEXT
 ========================================================= */
@@ -89,10 +109,10 @@ function resolveRouter(context = {}) {
 
   return (
     ctx.Router ||
-    AppCore?.Router ||
     AppCore?.router ||
-    safeModuleGet(AppCore, "Router") ||
+    AppCore?.Router ||
     safeModuleGet(AppCore, "router") ||
+    safeModuleGet(AppCore, "Router") ||
     null
   );
 }
@@ -103,10 +123,10 @@ function resolveAuth(context = {}) {
 
   return (
     ctx.Auth ||
-    AppCore?.Auth ||
     AppCore?.auth ||
-    safeModuleGet(AppCore, "Auth") ||
+    AppCore?.Auth ||
     safeModuleGet(AppCore, "auth") ||
+    safeModuleGet(AppCore, "Auth") ||
     null
   );
 }
@@ -123,6 +143,12 @@ function shouldReplace(context = {}) {
    PATH SAFETY
 ========================================================= */
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
 function isSafeInternalPath(path = "") {
   const value = text(path, "");
 
@@ -131,7 +157,8 @@ function isSafeInternalPath(path = "") {
       value.startsWith("/") &&
       !value.startsWith("//") &&
       !/^[a-z][a-z0-9+.-]*:/i.test(value) &&
-      !/[\r\n\t\\]/.test(value)
+      !/[\r\n\t\\]/.test(value) &&
+      !hasSensitiveQuery(value)
   );
 }
 
@@ -227,22 +254,16 @@ export function toggleSidebar(context = {}) {
   });
 }
 
-export function collapseSidebar(context = {}) {
-  return closeSidebar(context);
-}
-
-export function expandSidebar(context = {}) {
-  return openSidebar(context);
-}
-
 /* =========================================================
    NAVIGATION
 ========================================================= */
 
-async function navigateWithRouter(path = "/", context = {}) {
+async function navigateWithRouter(path = HOME_ROUTE, context = {}) {
   const ctx = options(context);
   const router = resolveRouter(ctx);
   const replace = shouldReplace(ctx);
+
+  if (!router) return false;
 
   const payload = {
     source: actionSource(ctx),
@@ -250,20 +271,12 @@ async function navigateWithRouter(path = "/", context = {}) {
     force: ctx.force === true,
   };
 
-  if (replace && isFunction(router?.replace)) {
+  if (replace && isFunction(router.replace)) {
     return navigationOk(await router.replace(path, payload));
   }
 
-  if (isFunction(router?.navigate)) {
+  if (isFunction(router.navigate)) {
     return navigationOk(await router.navigate(path, payload));
-  }
-
-  if (!replace && isFunction(router?.push)) {
-    return navigationOk(await router.push(path, payload));
-  }
-
-  if (isFunction(ctx.AppCore?.navigate)) {
-    return navigationOk(await ctx.AppCore.navigate(path, payload));
   }
 
   return false;
@@ -303,17 +316,18 @@ export async function navigateToLogin(context = {}) {
 async function clearAuthSession(context = {}) {
   const ctx = options(context);
   const auth = resolveAuth(ctx);
+  const source = actionSource(ctx);
 
   try {
     if (isFunction(auth?.logout)) {
-      await auth.logout({
-        source: SIDEBAR_SOURCE,
+      const result = await auth.logout({
+        source,
         skipNavigation: true,
         skipRedirect: true,
         noRedirect: true,
       });
 
-      return true;
+      return navigationOk(result);
     }
   } catch {
     // fallback abajo
@@ -322,7 +336,9 @@ async function clearAuthSession(context = {}) {
   try {
     if (isFunction(auth?.clearSession)) {
       await auth.clearSession({
-        source: SIDEBAR_SOURCE,
+        source,
+        silent: true,
+        emit: false,
       });
 
       return true;
@@ -334,7 +350,9 @@ async function clearAuthSession(context = {}) {
   try {
     if (isFunction(auth?.clearSessionLocal)) {
       await auth.clearSessionLocal({
-        source: SIDEBAR_SOURCE,
+        source,
+        silent: true,
+        emit: false,
       });
 
       return true;
@@ -346,7 +364,9 @@ async function clearAuthSession(context = {}) {
   try {
     if (isFunction(ctx.AppCore?.clearSession)) {
       await ctx.AppCore.clearSession({
-        source: SIDEBAR_SOURCE,
+        source,
+        silent: true,
+        emit: false,
       });
 
       return true;
@@ -379,7 +399,12 @@ export async function handleLogout(context = {}) {
     beginSidebarLogout(AppCore);
 
     try {
-      const authCleared = await clearAuthSession(ctx);
+      closeSidebar(ctx);
+
+      const authCleared = await clearAuthSession({
+        ...ctx,
+        source: "sidebar.logout",
+      });
 
       closeSidebar(ctx);
 
@@ -387,8 +412,25 @@ export async function handleLogout(context = {}) {
 
       return {
         ok: navigationOkResult === true,
+        authenticated: false,
+
         authCleared,
         navigationOk: navigationOkResult,
+
+        open: getSidebarOpen(),
+        version: SIDEBAR_ACTIONS_VERSION,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        authenticated: false,
+
+        authCleared: false,
+        navigationOk: false,
+        error: publicError(error),
+
+        open: getSidebarOpen(),
+        version: SIDEBAR_ACTIONS_VERSION,
       };
     } finally {
       endSidebarLogout(AppCore);
@@ -413,6 +455,8 @@ export function getSidebarActionsSnapshot() {
     loginRoute: LOGIN_ROUTE,
 
     policy: {
+      actionsOnly: true,
+
       ownEvents: false,
       ownStorage: false,
       ownDropdown: false,
@@ -420,17 +464,25 @@ export function getSidebarActionsSnapshot() {
       ownBrowserNavigation: false,
 
       usesRouterNavigation: true,
+      noAppCoreNavigate: true,
+      noRouterPushLegacy: true,
+
       buildsPublicTargetsWithRouter: true,
+      rejectsSensitiveTargets: true,
 
       userScopedPrivateRoutes: true,
 
       noRouteAliases: true,
       noHomeRoute: true,
+
       no2fa: true,
+      noMfa: true,
+      noOtp: true,
 
       navigationKeepsOpenState: true,
       logoutClosesSidebar: true,
       logoutRedirectsToLogin: true,
+      snapshotRedacted: true,
     },
   };
 }
@@ -446,8 +498,6 @@ export default {
   openSidebar,
   closeSidebar,
   toggleSidebar,
-  collapseSidebar,
-  expandSidebar,
 
   getSafeSidebarTarget,
 

@@ -15,6 +15,8 @@
    - No duplicar lifecycle.
    - No duplicar lógica visual.
    - No bloquear render si Router ya resolvió Home.
+   - Home visible /@{user.slug} lo resuelve Router.
+   - Home interna / la resuelve routes/router.
 ========================================================= */
 
 import HomeViewDefault, {
@@ -22,7 +24,7 @@ import HomeViewDefault, {
   HOME_VIEW_VERSION,
 } from "./homeView.js";
 
-export const HOME_INDEX_VERSION = "home.index.v3";
+export const HOME_INDEX_VERSION = "home.index.v4";
 
 const View = HomeView || HomeViewDefault;
 

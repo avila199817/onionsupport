@@ -10,6 +10,7 @@
    - Limpiar listeners por scope.
    - Evitar doble binding tras rerender.
    - Busy state durante acciones async.
+   - Rutas base desde core/config.js.
    - Sin AppCore.
    - Sin eventos globales.
    - Sin window bridges.
@@ -18,13 +19,19 @@
    - Sin storage.
    - Sin CSS inline.
    - Sin route aliases legacy.
+   - Sin document fallback.
    - Sin /home.
    - Sin /incidencias/nueva.
 ========================================================= */
 
-export const HOME_BINDINGS_VERSION = "home.bindings.v2";
+import {
+  ROUTES,
+} from "../../core/config.js";
+
+export const HOME_BINDINGS_VERSION = "home.bindings.v3";
 
 const DEFAULT_SCOPE = "view:home";
+const INCIDENCIAS_ROUTE = ROUTES.incidencias || "/incidencias";
 
 const ACTION_SELECTOR = [
   "[data-home-action]",
@@ -47,19 +54,29 @@ const KEYBOARD_SELECTOR = [
 ].join(",");
 
 const ACTIONS = Object.freeze({
-  refresh: new Set(["refresh", "retry", "reload"]),
-  export: new Set(["export", "export_csv", "download_csv"]),
+  refresh: new Set(["refresh", "retry"]),
+  export: new Set(["export_csv"]),
 
-  openWidget: new Set(["open_widget", "open_home_widget", "open_block", "open_kpi", "detail"]),
-  copyId: new Set(["copy", "copy_id", "copy_widget_id", "copy_entity_id", "copy_ticket_id"]),
+  openWidget: new Set(["open_widget"]),
+  copyId: new Set(["copy_widget_id"]),
 
-  navigate: new Set(["navigate", "navigate_home", "go", "open_route"]),
-  create: new Set(["create", "new", "create_ticket", "create_incidencia", "new_ticket", "new_incidencia"]),
+  navigate: new Set(["navigate_home"]),
+  create: new Set(["create_incidencia"]),
 
-  pagePrev: new Set(["prev_page", "previous_page"]),
+  pagePrev: new Set(["prev_page"]),
   pageNext: new Set(["next_page"]),
-  pageGo: new Set(["page", "go_page"]),
+  pageGo: new Set(["page"]),
 });
+
+const RAW_KEYS = new Set([
+  "raw",
+  "data",
+  "payloadRaw",
+  "response",
+]);
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
 
 const cleanupsByScope = new Map();
 const busyState = new WeakMap();
@@ -95,7 +112,10 @@ function safeObject(value, fallback = {}) {
 function safeText(value = "", fallback = "") {
   if (value === null || value === undefined) return fallback;
 
-  const output = String(value).trim();
+  const output = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return output || fallback;
 }
@@ -134,6 +154,54 @@ function nowIso() {
   } catch {
     return "";
   }
+}
+
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function sanitizePayloadValue(value, keyHint = "") {
+  if (RAW_KEYS.has(keyHint)) return undefined;
+  if (isSensitiveKey(keyHint)) return undefined;
+
+  if (typeof value === "string") {
+    return redact(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizePayloadValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (RAW_KEYS.has(key)) continue;
+      if (isSensitiveKey(key)) continue;
+
+      const clean = sanitizePayloadValue(item, key);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  return value;
+}
+
+function sanitizePayload(value = {}) {
+  return safeObject(sanitizePayloadValue(value), {});
 }
 
 /* =========================================================
@@ -183,7 +251,7 @@ function addCleanup(scope = DEFAULT_SCOPE, cleanup = null) {
 
 function listen(scope, target, eventName = "", handler = null, options = undefined) {
   if (!target || !eventName || !isFunction(handler)) {
-    return () => {};
+    return () => false;
   }
 
   try {
@@ -195,13 +263,15 @@ function listen(scope, target, eventName = "", handler = null, options = undefin
       } catch {
         // noop
       }
+
+      return true;
     };
 
     addCleanup(scope, cleanup);
 
     return cleanup;
   } catch {
-    return () => {};
+    return () => false;
   }
 }
 
@@ -214,11 +284,10 @@ function getContainer(container = null) {
   if (isElement(container)) return container;
 
   return (
-    document.querySelector("[data-router-view-host='true']") ||
     document.getElementById("view-container") ||
-    document.querySelector("[data-router-view]") ||
-    document.querySelector("[data-view-root]") ||
-    document
+    document.getElementById("app-content") ||
+    document.getElementById("main-content") ||
+    null
   );
 }
 
@@ -226,7 +295,7 @@ function contains(root = null, node = null) {
   if (!root || !node) return false;
 
   try {
-    return root === document || root === node || root.contains(node);
+    return root === node || root.contains(node);
   } catch {
     return false;
   }
@@ -334,7 +403,6 @@ function payloadFromElement(element = null) {
     first(
       datasetValue(element, "payload"),
       datasetValue(element, "json"),
-      datasetValue(element, "data"),
       ""
     ),
     ""
@@ -343,22 +411,28 @@ function payloadFromElement(element = null) {
   if (!raw) return {};
 
   try {
-    return safeObject(JSON.parse(raw));
+    return sanitizePayload(JSON.parse(raw));
   } catch {
     return {};
   }
 }
 
 function filenameFromElement(element = null) {
-  return safeText(
+  const value = safeText(
     first(
       datasetValue(element, "filename"),
       datasetValue(element, "fileName"),
       datasetValue(element, "exportFilename"),
-      ""
+      "home-incidencias.csv"
     ),
-    ""
+    "home-incidencias.csv"
   );
+
+  return value
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 160) || "home-incidencias.csv";
 }
 
 function exportModeFromElement(element = null) {
@@ -367,7 +441,7 @@ function exportModeFromElement(element = null) {
       datasetValue(element, "exportMode"),
       datasetValue(element, "mode"),
       datasetValue(element, "collection"),
-      "widgets"
+      "tickets"
     )
   );
 }
@@ -505,42 +579,76 @@ async function withBusy(element = null, callback = null) {
    ROUTES
 ========================================================= */
 
-function normalizeInternalRoute(route = "") {
-  const raw = safeText(route, "");
+function normalizeHashPath(value = "") {
+  const raw = safeText(value, "");
 
-  if (!raw || raw === "#") return "";
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
+  if (raw.startsWith("#/")) return raw.slice(1) || "/";
 
-  const lower = raw.toLowerCase();
+  return raw;
+}
+
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
+function blockedInternalRoute(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw || raw === "#") return false;
+  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) return false;
+
+  const path = normalizeHashPath(raw);
+  const lower = path.toLowerCase();
+
+  if (path.startsWith("//")) return true;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(path)) return true;
+  if (/[\r\n\t\\]/.test(path)) return true;
+  if (hasSensitiveQuery(path)) return true;
 
   if (
     lower.startsWith("javascript:") ||
       lower.startsWith("data:") ||
       lower.startsWith("vbscript:") ||
       lower.startsWith("mailto:") ||
-      lower.startsWith("tel:")
+      lower.startsWith("tel:") ||
+      lower.startsWith("file:") ||
+      lower.startsWith("blob:") ||
+      /^https?:\/\//i.test(path)
   ) {
-    return "";
+    return true;
   }
 
-  if (/^https?:\/\//i.test(raw)) {
-    try {
-      if (!isBrowser()) return "";
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  const canonical = normalized
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/+$/g, "") || "/";
 
-      const url = new URL(raw, window.location.origin);
+  return (
+    canonical === "/home" ||
+      canonical === "/incidencias/nueva" ||
+      canonical.startsWith("/incidencias/nueva/")
+  );
+}
 
-      if (url.origin !== window.location.origin) return "";
+function normalizeInternalRoute(route = "") {
+  let raw = normalizeHashPath(route);
 
-      return normalizeInternalRoute(`${url.pathname}${url.search || ""}${url.hash || ""}`);
-    } catch {
-      return "";
-    }
+  if (!raw || raw === "#") return "";
+  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) return "";
+  if (blockedInternalRoute(raw)) return "";
+
+  if (!raw.startsWith("/")) {
+    raw = `/${raw}`;
   }
 
-  const normalized = raw.startsWith("/") ? raw : `/${raw}`;
-
-  const hashIndex = normalized.indexOf("#");
-  const hash = hashIndex >= 0 ? normalized.slice(hashIndex) : "";
-  const withoutHash = hashIndex >= 0 ? normalized.slice(0, hashIndex) : normalized;
+  const hashIndex = raw.indexOf("#");
+  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
+  const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
 
   const queryIndex = withoutHash.indexOf("?");
   const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
@@ -557,8 +665,17 @@ function normalizeInternalRoute(route = "") {
   }
 
   if (cleanPath === "/home") return "";
+  if (cleanPath === "/incidencias/nueva") return "";
 
   return `${cleanPath}${query}${hash}`;
+}
+
+function elementHasBlockedRoute(element = null) {
+  const raw = routeFromElement(element);
+
+  if (!raw) return false;
+
+  return blockedInternalRoute(raw);
 }
 
 /* =========================================================
@@ -580,6 +697,7 @@ function resolveKind(element = null) {
   if (ACTIONS.navigate.has(action)) return "navigate";
 
   if (route) return "navigate";
+  if (action) return "quick";
 
   return "";
 }
@@ -622,8 +740,8 @@ async function handleExport(element, api = {}) {
 
   return withBusy(element, () =>
     api.exportHomeCsvAction({
-      filename: filenameFromElement(element) || undefined,
-      mode: exportModeFromElement(element) || "widgets",
+      filename: filenameFromElement(element),
+      mode: exportModeFromElement(element) || "tickets",
       silent: false,
     })
   );
@@ -675,7 +793,7 @@ async function handleCopyId(element, api = {}) {
 
 async function handleCreate(element, api = {}) {
   const payload = payloadFromElement(element);
-  const route = normalizeInternalRoute(routeFromElement(element)) || "/incidencias";
+  const route = normalizeInternalRoute(routeFromElement(element)) || INCIDENCIAS_ROUTE;
 
   return withBusy(element, async () => {
     if (isFunction(api.createFromHomeAction)) {
@@ -730,6 +848,7 @@ async function handlePage(kind = "", element = null, api = {}) {
 
 async function handleQuick(element, api = {}) {
   const action = actionName(element);
+  const route = normalizeInternalRoute(routeFromElement(element));
   const payload = payloadFromElement(element);
 
   if (!isFunction(api.runHomeQuickAction)) return false;
@@ -737,6 +856,7 @@ async function handleQuick(element, api = {}) {
   return withBusy(element, () =>
     api.runHomeQuickAction({
       action,
+      route,
       payload,
       silent: false,
     })
@@ -800,12 +920,16 @@ export function bindHomeEvents({
   goNextPage,
   changePageSize,
 } = {}) {
-  if (!isBrowser()) return () => {};
+  if (!isBrowser()) return () => false;
 
   const name = scopeName(scope);
   const root = getContainer(container);
 
   cleanupScope(name);
+
+  if (!isElement(root)) {
+    return () => false;
+  }
 
   const api = {
     reload,
@@ -832,7 +956,7 @@ export function bindHomeEvents({
 
     if (!element) return;
 
-    if (shouldIgnore(element)) {
+    if (shouldIgnore(element) || elementHasBlockedRoute(element)) {
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -857,6 +981,7 @@ export function bindHomeEvents({
     const element = target.closest?.(KEYBOARD_SELECTOR);
 
     if (!element || !contains(root, element) || shouldIgnore(element)) return;
+    if (elementHasBlockedRoute(element)) return;
 
     event.preventDefault();
 
@@ -899,15 +1024,30 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
       pageGo: [...ACTIONS.pageGo],
     },
 
+    routes: {
+      incidencias: INCIDENCIAS_ROUTE,
+    },
+
     policy: {
-      delegatedOnly: true,
+      delegatedDomEventsOnly: true,
+
       noAppCore: true,
-      noEvents: true,
+      noGlobalEvents: true,
       noWindowBridge: true,
-      noStorage: true,
+      noRouterOwn: true,
       noFetch: true,
+      noStorage: true,
+      noCssInline: true,
+
+      noDocumentFallback: true,
+      noRouteAliasesLegacy: true,
       noHomeAlias: true,
-      noCreateRoute: true,
+      noCreateRouteAlias: true,
+
+      rejectsSensitiveRoutes: true,
+      sanitizesPayload: true,
+      configRoutes: true,
+
       noPassiveRowActions: true,
     },
 

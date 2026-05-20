@@ -23,18 +23,23 @@
 
 import * as CoreHttpModule from "../../core/http.js";
 
-export const LOGIN_VERSION = "auth.login.v2";
+import {
+  AUTH_ENDPOINTS,
+  ROUTES,
+  USER_HOME_PREFIX,
+} from "../../core/config.js";
 
-export const AUTH_ENDPOINTS = Object.freeze({
-  login: "/api/auth/login",
-});
+export const LOGIN_VERSION = "auth.login.v3";
 
-const LOGIN_ROUTE = "/login";
-const HOME_ROUTE = "/";
-const USER_HOME_PREFIX = "/@";
+const LOGIN_ROUTE = ROUTES.login;
+const HOME_ROUTE = ROUTES.home || "/";
+const LOGIN_ENDPOINT = AUTH_ENDPOINTS.login;
 
 const MAX_IDENTIFIER_LENGTH = 160;
 const MAX_PASSWORD_LENGTH = 1024;
+const MAX_TOKEN_LENGTH = 8192;
+
+const VALID_ROLES = Object.freeze(["admin", "user"]);
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -52,7 +57,7 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFn(value) {
+function isFunction(value) {
   return typeof value === "function";
 }
 
@@ -60,7 +65,7 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function text(value = "", fallback = "") {
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
@@ -74,7 +79,7 @@ function bool(value, fallback = false) {
   if (value === true || value === 1 || value === "1") return true;
   if (value === false || value === 0 || value === "0") return false;
 
-  const clean = text(value, "").toLowerCase();
+  const clean = cleanText(value, "").toLowerCase();
 
   if (["true", "yes", "si", "sí", "on"].includes(clean)) return true;
   if (["false", "no", "off"].includes(clean)) return false;
@@ -82,17 +87,23 @@ function bool(value, fallback = false) {
   return Boolean(fallback);
 }
 
-function cleanRole(value = "") {
+function normalizeRole(value = "") {
   if (Array.isArray(value)) {
-    const roles = value.map(cleanRole).filter(Boolean);
+    const roles = value.map(normalizeRole).filter(Boolean);
 
     if (roles.includes("admin")) return "admin";
     if (roles.includes("user")) return "user";
 
-    return "user";
+    return "";
   }
 
-  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+  const role = String(value || "").trim().toLowerCase();
+
+  return VALID_ROLES.includes(role) ? role : "";
+}
+
+function cleanRole(value = "") {
+  return normalizeRole(value) || "user";
 }
 
 /* =========================================================
@@ -100,7 +111,7 @@ function cleanRole(value = "") {
 ========================================================= */
 
 export function normalizeLoginSlug(value = "") {
-  const slug = text(value, "")
+  const slug = cleanText(value, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -139,7 +150,7 @@ export function getPostLoginTarget(user = null) {
 ========================================================= */
 
 function stripBearer(value = "") {
-  return text(value, "").replace(/^Bearer\s+/i, "");
+  return cleanText(value, "").replace(/^Bearer\s+/i, "");
 }
 
 function tokenOk(value = "") {
@@ -147,6 +158,7 @@ function tokenOk(value = "") {
 
   if (!token) return false;
   if (/\s/.test(token)) return false;
+  if (token.length > MAX_TOKEN_LENGTH) return false;
 
   return ![
     "null",
@@ -160,10 +172,13 @@ function tokenOk(value = "") {
 }
 
 function cleanToken(value = "") {
-  return tokenOk(value) ? stripBearer(value) : "";
+  const token = stripBearer(value);
+  return tokenOk(token) ? token : "";
 }
 
 function removeSensitiveUserFields(user = {}) {
+  if (!isObject(user)) return {};
+
   const output = { ...user };
 
   for (const key of [
@@ -181,19 +196,13 @@ function removeSensitiveUserFields(user = {}) {
     "resetToken",
     "activationToken",
 
-    "otp",
-    "otpCode",
-    "mfa",
-    "twofa_secret",
-    "twofaSecret",
-    "totpSecret",
+    "secret",
+    "secrets",
+    "code",
+    "codes",
     "backupCodes",
   ]) {
-    try {
-      delete output[key];
-    } catch {
-      // noop
-    }
+    delete output[key];
   }
 
   return output;
@@ -202,7 +211,7 @@ function removeSensitiveUserFields(user = {}) {
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  const status = text(user.status || user.estado, "").toLowerCase();
+  const status = cleanText(user.status || user.estado, "").toLowerCase();
 
   return Boolean(
     user.disabled === true ||
@@ -219,11 +228,11 @@ function hasUserIdentity(user = null) {
   if (!isObject(user)) return false;
 
   return Boolean(
-    text(user.id, "") ||
-      text(user.userId, "") ||
-      text(user.username, "") ||
-      text(user.slug, "") ||
-      text(user.lookup?.slug, "")
+    cleanText(user.id, "") ||
+      cleanText(user.userId, "") ||
+      cleanText(user.username, "") ||
+      cleanText(user.slug, "") ||
+      cleanText(user.lookup?.slug, "")
   );
 }
 
@@ -240,12 +249,11 @@ function normalizeUser(user = null) {
 
   const safeUser = removeSensitiveUserFields(user);
 
-  const id = text(safeUser.userId || safeUser.id, "");
+  const id = cleanText(safeUser.userId || safeUser.id, "");
   const slug = extractLoginUserSlug(safeUser);
-
   const profile = isObject(safeUser.profile) ? safeUser.profile : {};
 
-  const username = text(
+  const username = cleanText(
     safeUser.username ||
       safeUser.userName ||
       safeUser.user_name ||
@@ -254,7 +262,7 @@ function normalizeUser(user = null) {
     ""
   );
 
-  const displayName = text(
+  const displayName = cleanText(
     safeUser.displayName ||
       safeUser.fullName ||
       safeUser.name ||
@@ -291,11 +299,14 @@ function normalizeUser(user = null) {
 
     active: true,
     disabled: false,
+
+    isAdmin: role === "admin",
+    isUser: role === "user",
   };
 }
 
 /* =========================================================
-   RESPONSE
+   RESPONSE READERS
 ========================================================= */
 
 function nested(payload = {}) {
@@ -377,7 +388,7 @@ function readSession(payload = {}) {
 function readMessage(payload = {}) {
   if (!isObject(payload)) return "";
 
-  return text(
+  return cleanText(
     payload.message ||
       payload.error ||
       payload.data?.message ||
@@ -392,7 +403,7 @@ function readMessage(payload = {}) {
 function readCode(payload = {}) {
   if (!isObject(payload)) return "";
 
-  return text(
+  return cleanText(
     payload.code ||
       payload.errorCode ||
       payload.data?.code ||
@@ -409,10 +420,10 @@ function normalizeLoginResponse(response = {}) {
   const user = readUser(response);
   const session = readSession(response);
 
-  const role = user?.role || null;
-  const slug = extractLoginUserSlug(user);
-  const homePath = buildUserHomePath(user);
   const authenticated = Boolean(token && user);
+  const role = authenticated ? user.role || null : null;
+  const slug = authenticated ? extractLoginUserSlug(user) : "";
+  const homePath = authenticated ? buildUserHomePath(user) : HOME_ROUTE;
 
   return {
     ok: authenticated,
@@ -426,16 +437,16 @@ function normalizeLoginResponse(response = {}) {
     refreshToken: refreshToken || null,
     refresh_token: refreshToken || null,
 
-    user,
-    currentUser: user,
+    user: authenticated ? user : null,
+    currentUser: authenticated ? user : null,
 
-    session,
-    sessionData: session,
+    session: authenticated ? session : null,
+    sessionData: authenticated ? session : null,
 
     userSlug: slug || null,
     homePath,
     defaultHome: homePath,
-    postLoginTarget: homePath,
+    postLoginTarget: authenticated ? homePath : null,
 
     role,
     rol: role,
@@ -450,18 +461,17 @@ function normalizeLoginResponse(response = {}) {
    ERRORS
 ========================================================= */
 
-function safeErrorMessage(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+function redactErrorText(value = "") {
+  return cleanText(value, "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function extractMessage(error = null) {
   return (
-    text(error?.data?.message, "") ||
-    text(error?.response?.data?.message, "") ||
-    text(error?.message, "") ||
+    cleanText(error?.data?.message, "") ||
+    cleanText(error?.response?.data?.message, "") ||
+    cleanText(error?.message, "") ||
     String(error || "")
   );
 }
@@ -488,7 +498,7 @@ function extractStatus(error = null) {
 }
 
 function createLoginError(message = "No se pudo iniciar sesión.", options = {}) {
-  const error = new Error(safeErrorMessage(message));
+  const error = new Error(redactErrorText(message));
 
   error.name = "AuthLoginError";
   error.status = options.status || 401;
@@ -503,10 +513,13 @@ function normalizeLoginError(error = null) {
 
   const status = extractStatus(error);
 
-  return createLoginError(extractMessage(error) || "No se pudo iniciar sesión.", {
-    status: status || 500,
-    code: extractCode(error) || (status === 401 ? "UNAUTHORIZED" : "LOGIN_FAILED"),
-  });
+  return createLoginError(
+    extractMessage(error) || "No se pudo iniciar sesión.",
+    {
+      status: status || 500,
+      code: extractCode(error) || (status === 401 ? "UNAUTHORIZED" : "LOGIN_FAILED"),
+    }
+  );
 }
 
 /* =========================================================
@@ -514,7 +527,7 @@ function normalizeLoginError(error = null) {
 ========================================================= */
 
 function normalizeIdentifier(value = "") {
-  return text(value, "")
+  return cleanText(value, "")
     .normalize("NFKC")
     .slice(0, MAX_IDENTIFIER_LENGTH);
 }
@@ -528,7 +541,7 @@ function looksLikeEmail(value = "") {
 }
 
 function sanitizeUsername(value = "") {
-  return text(value, "")
+  return cleanText(value, "")
     .normalize("NFKC")
     .replace(/^@+/, "")
     .replace(/\s+/g, "")
@@ -537,26 +550,31 @@ function sanitizeUsername(value = "") {
 }
 
 export function resolveLoginIdentifier(credentials = {}) {
-  return text(
-    credentials.identifier ??
-      credentials.email ??
-      credentials.username ??
-      credentials.user ??
-      credentials.login ??
+  const input = isObject(credentials) ? credentials : {};
+
+  return cleanText(
+    input.identifier ??
+      input.email ??
+      input.username ??
+      input.user ??
+      input.login ??
       ""
   );
 }
 
 export function normalizeLoginPayload(credentials = {}) {
+  const input = isObject(credentials) ? credentials : {};
+
   return {
-    identifier: normalizeIdentifier(resolveLoginIdentifier(credentials)),
-    password: normalizePassword(credentials.password ?? credentials.pass ?? ""),
-    remember: bool(credentials.remember, false),
+    identifier: normalizeIdentifier(resolveLoginIdentifier(input)),
+    password: normalizePassword(input.password ?? input.pass ?? ""),
+    remember: bool(input.remember, false),
   };
 }
 
 export function buildLoginRequestBody(credentials = {}) {
   const payload = normalizeLoginPayload(credentials);
+
   const email = looksLikeEmail(payload.identifier)
     ? payload.identifier.toLowerCase()
     : "";
@@ -587,10 +605,12 @@ export function buildLoginRequestBody(credentials = {}) {
 function loginOptions(options = {}) {
   return {
     ...options,
+
     auth: false,
     public: true,
     skipAuth: true,
     noAuthHeader: true,
+
     retries: 0,
     storeError: false,
   };
@@ -599,16 +619,16 @@ function loginOptions(options = {}) {
 async function requestLogin(body = {}, options = {}) {
   const finalOptions = loginOptions(options);
 
-  if (isFn(CoreHttp?.login)) {
+  if (isFunction(CoreHttp?.login)) {
     return CoreHttp.login(body, finalOptions);
   }
 
-  if (isFn(CoreHttp?.post)) {
-    return CoreHttp.post(AUTH_ENDPOINTS.login, body, finalOptions);
+  if (isFunction(CoreHttp?.post)) {
+    return CoreHttp.post(LOGIN_ENDPOINT, body, finalOptions);
   }
 
-  if (isFn(CoreHttp?.request)) {
-    return CoreHttp.request(AUTH_ENDPOINTS.login, {
+  if (isFunction(CoreHttp?.request)) {
+    return CoreHttp.request(LOGIN_ENDPOINT, {
       ...finalOptions,
       method: "POST",
       body,
@@ -619,15 +639,6 @@ async function requestLogin(body = {}, options = {}) {
     status: 500,
     code: "HTTP_CLIENT_MISSING",
   });
-}
-
-/* =========================================================
-   ROUTE HELPERS
-   Compatibilidad pura: login no navega.
-========================================================= */
-
-export function buildLoginRedirectPath() {
-  return LOGIN_ROUTE;
 }
 
 /* =========================================================
@@ -676,7 +687,10 @@ export async function handleLoginFormSubmit(formElement, options = {}) {
   const HTMLForm = isBrowser() ? window.HTMLFormElement : null;
 
   if (!HTMLForm || !(formElement instanceof HTMLForm)) {
-    throw new Error("Se esperaba un formulario HTML válido.");
+    throw createLoginError("Se esperaba un formulario HTML válido.", {
+      status: 400,
+      code: "INVALID_LOGIN_FORM",
+    });
   }
 
   try {
@@ -720,12 +734,17 @@ export async function handleLoginFormSubmit(formElement, options = {}) {
 export function getLoginSnapshot() {
   return {
     version: LOGIN_VERSION,
+
     loginInFlight: Boolean(loginPromise),
-    endpoint: AUTH_ENDPOINTS.login,
+
+    endpoint: LOGIN_ENDPOINT,
     loginRoute: LOGIN_ROUTE,
     homeRoute: HOME_ROUTE,
     userHomePrefix: USER_HOME_PREFIX,
+
     policy: {
+      configDrivenEndpoint: true,
+      validatesTokenAndUser: true,
       noRouter: true,
       noToast: true,
       noStorage: true,
@@ -733,6 +752,9 @@ export function getLoginSnapshot() {
       noSlugFabrication: true,
       noEmailIdentity: true,
       no2fa: true,
+      noMfa: true,
+      noOtp: true,
+      snapshotRedacted: true,
     },
   };
 }
@@ -744,8 +766,6 @@ export function getLoginSnapshot() {
 export default {
   LOGIN_VERSION,
 
-  AUTH_ENDPOINTS,
-
   resolveLoginIdentifier,
   normalizeLoginPayload,
   buildLoginRequestBody,
@@ -753,8 +773,6 @@ export default {
   normalizeLoginSlug,
   extractLoginUserSlug,
   buildUserHomePath,
-
-  buildLoginRedirectPath,
   getPostLoginTarget,
 
   login,

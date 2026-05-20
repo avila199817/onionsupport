@@ -22,11 +22,15 @@
 
 import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
 
-export const RESET_PASSWORD_DOM_VERSION = "reset-password.dom.v2";
+export const RESET_PASSWORD_DOM_VERSION = "reset-password.dom.v3";
 
 const DEFAULT_REQUEST_SUBMIT_LABEL = "Enviar enlace";
 const DEFAULT_CONFIRM_SUBMIT_LABEL = "Cambiar contraseña";
 const DEFAULT_LOADING_LABEL = "Procesando...";
+
+const MAX_IDENTIFIER_LENGTH = 160;
+const MAX_TOKEN_LENGTH = 8192;
+const MAX_PASSWORD_LENGTH = 1024;
 
 const PASSWORD_BINDINGS = new WeakMap();
 const SUBMIT_BINDINGS = new WeakMap();
@@ -69,7 +73,7 @@ const SELECTORS = Object.freeze({
     "[data-password-reset-field='confirm-password'], [data-reset-password-field='confirm-password'], [data-field='confirm-password']",
 
   passwordToggle:
-    "[data-password-toggle], [data-login-password-toggle]",
+    "[data-password-toggle], [data-reset-password-toggle], [data-password-reset-toggle]",
 });
 
 /* =========================================================
@@ -94,6 +98,12 @@ function text(value = "", fallback = "") {
 function rawText(value = "", fallback = "") {
   if (value === null || value === undefined) return fallback;
   return String(value);
+}
+
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function doc() {
@@ -465,7 +475,7 @@ export function setInputInvalid(inputNode = null, invalid = false) {
 }
 
 export function setFieldError(fieldNode = null, message = "", errorNode = null) {
-  const clean = text(message, "");
+  const clean = redact(text(message, ""));
 
   setFieldInvalid(fieldNode, Boolean(clean));
 
@@ -483,7 +493,7 @@ export function clearFieldError(fieldNode = null, errorNode = null) {
 }
 
 function setGlobalMessage(errorBox = null, message = "", type = "error") {
-  const clean = text(message, "");
+  const clean = redact(text(message, ""));
   const cleanType = ["error", "success", "info"].includes(type) ? type : "error";
 
   if (!errorBox) return clean;
@@ -496,8 +506,8 @@ function setGlobalMessage(errorBox = null, message = "", type = "error") {
   toggleClass(errorBox, "is-success", Boolean(clean) && cleanType === "success");
   toggleClass(errorBox, "is-info", Boolean(clean) && cleanType === "info");
 
-  setAttr(errorBox, "role", clean ? "alert" : null);
-  setAttr(errorBox, "aria-live", clean ? "polite" : null);
+  setAttr(errorBox, "role", clean ? (cleanType === "error" ? "alert" : "status") : null);
+  setAttr(errorBox, "aria-live", clean ? (cleanType === "error" ? "assertive" : "polite") : null);
 
   try {
     if (clean) {
@@ -525,6 +535,7 @@ export function clearResetPasswordErrors(refs = {}) {
 
   try {
     refs.form?.removeAttribute("data-error");
+    refs.form?.removeAttribute("data-success");
   } catch {
     // noop
   }
@@ -565,12 +576,13 @@ export function applyResetPasswordErrors(refs = {}, errors = {}, options = {}) {
   setInputInvalid(refs.passwordInput, Boolean(passwordError));
   setInputInvalid(refs.confirmPasswordInput, Boolean(confirmPasswordError));
 
-  setGlobalMessage(refs.errorBox, firstError, "error");
+  const visibleError = setGlobalMessage(refs.errorBox, firstError, "error");
 
   try {
     if (refs.form) {
       if (firstError) {
         refs.form.dataset.error = "true";
+        refs.form.removeAttribute("data-success");
       } else {
         delete refs.form.dataset.error;
       }
@@ -591,7 +603,7 @@ export function applyResetPasswordErrors(refs = {}, errors = {}, options = {}) {
     });
   }
 
-  return firstError;
+  return visibleError;
 }
 
 export function setGlobalResetPasswordError(refs = {}, message = "") {
@@ -601,6 +613,7 @@ export function setGlobalResetPasswordError(refs = {}, message = "") {
     if (refs.form) {
       if (clean) {
         refs.form.dataset.error = "true";
+        refs.form.removeAttribute("data-success");
       } else {
         delete refs.form.dataset.error;
       }
@@ -712,6 +725,7 @@ export function setResetPasswordLoading(refs = {}, loading = false, options = {}
 
   setLoadingDisabled(refs.submitButton, active);
   setLoadingDisabled(refs.identifierInput || refs.emailInput, active);
+  setLoadingDisabled(refs.tokenInput, active);
   setLoadingDisabled(refs.passwordInput, active);
   setLoadingDisabled(refs.confirmPasswordInput, active);
 
@@ -767,21 +781,6 @@ export function setResetPasswordNeutralState(refs = {}, options = {}) {
   return true;
 }
 
-export function shakeResetPasswordCard(refs = {}) {
-  const card = refs.root?.querySelector?.(".auth-card, .password-reset-card");
-
-  if (!card) return false;
-
-  try {
-    card.classList.remove("shake");
-    void card.offsetWidth;
-    card.classList.add("shake");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /* =========================================================
    FORM STATE
 ========================================================= */
@@ -789,7 +788,36 @@ export function shakeResetPasswordCard(refs = {}) {
 function normalizeIdentifier(value = "") {
   return text(value, "")
     .normalize("NFKC")
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    .slice(0, MAX_IDENTIFIER_LENGTH);
+}
+
+function normalizeToken(value = "") {
+  const token = text(value, "").replace(/^Bearer\s+/i, "");
+
+  if (!token) return "";
+  if (/\s/.test(token)) return "";
+  if (token.length > MAX_TOKEN_LENGTH) return "";
+
+  if (
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "[object object]",
+      "{}",
+      "[]",
+    ].includes(token.toLowerCase())
+  ) {
+    return "";
+  }
+
+  return token;
+}
+
+function normalizePassword(value = "") {
+  return rawText(value, "").slice(0, MAX_PASSWORD_LENGTH);
 }
 
 function looksLikeEmail(value = "") {
@@ -811,9 +839,9 @@ export function readResetPasswordFormState(refs = {}) {
     identifier,
     email,
 
-    token: rawText(refs.tokenInput?.value, ""),
-    password: rawText(refs.passwordInput?.value, ""),
-    confirmPassword: rawText(refs.confirmPasswordInput?.value, ""),
+    token: normalizeToken(refs.tokenInput?.value),
+    password: normalizePassword(refs.passwordInput?.value),
+    confirmPassword: normalizePassword(refs.confirmPasswordInput?.value),
   };
 }
 
@@ -908,66 +936,10 @@ export function bindResetPasswordSubmit(refs = {}, handler = null) {
   return dispose;
 }
 
-/* =========================================================
-   COMPAT MÍNIMA SIN TOAST PROPIO
-========================================================= */
-
-export function getResetPasswordToastRefs() {
-  return {
-    toastRoot: null,
-    toastIcon: null,
-    toastTitle: null,
-    toastText: null,
-    toastClose: null,
-    toastProgress: null,
-  };
-}
-
-export function hideResetPasswordToast() {
-  return false;
-}
-
-export function setResetPasswordToastVisibility(_refs = {}, visible = false) {
-  return Boolean(visible);
-}
-
-export function setResetPasswordToastContent() {
-  return false;
-}
-
-export function resetResetPasswordToastProgress() {
-  return false;
-}
-
-export function startResetPasswordToastProgress() {
-  return false;
-}
-
-export function showResetPasswordToast(refs = {}, options = {}) {
-  const message =
-    text(options.message, "") ||
-    text(options.text, "") ||
-    text(options.title, "");
-
-  if (!message) return false;
-
-  setGlobalMessage(refs.errorBox, message, text(options.type, "info"));
-
-  return true;
-}
-
-export function bindResetPasswordToastClose() {
-  return noop;
-}
-
 export function bindResetPasswordBackLink(refs = {}, handler = null) {
   if (!refs.backToLoginLink || !isFn(handler)) return noop;
 
   return bindDom(refs.backToLoginLink, "click", handler);
-}
-
-export function bindResetPasswordThemeToggle() {
-  return noop;
 }
 
 /* =========================================================
@@ -992,15 +964,22 @@ export function getResetPasswordDomSnapshot(refs = {}) {
 
     policy: {
       domOnly: true,
+
       noAuth: true,
       noHttp: true,
       noRouter: true,
       noStore: true,
       noToastOwn: true,
+      noToastCompat: true,
       noThemeToggleOwn: true,
       noInnerHTML: true,
+
       passwordFieldShared: true,
+      noOwnPasswordToggleLogic: true,
+
       submitIdempotent: true,
+      errorsRedacted: true,
+      boundedFieldReads: true,
     },
   };
 }
@@ -1029,25 +1008,13 @@ export default {
   setResetPasswordLoading,
   setResetPasswordSuccessState,
   setResetPasswordNeutralState,
-  shakeResetPasswordCard,
 
   readResetPasswordFormState,
   focusResetPasswordPrimaryField,
 
   bindResetPasswordInputClearers,
   bindResetPasswordSubmit,
-
-  getResetPasswordToastRefs,
-  hideResetPasswordToast,
-  setResetPasswordToastVisibility,
-  setResetPasswordToastContent,
-  resetResetPasswordToastProgress,
-  startResetPasswordToastProgress,
-  showResetPasswordToast,
-  bindResetPasswordToastClose,
-
   bindResetPasswordBackLink,
-  bindResetPasswordThemeToggle,
 
   getResetPasswordDomSnapshot,
 };

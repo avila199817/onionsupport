@@ -4,11 +4,14 @@
 
    Responsabilidad:
    - Gestionar apertura/cierre del dropdown de cuenta del sidebar.
+   - Abrir el sidebar antes de abrir el dropdown si está collapsed.
    - Sin crear DOM.
    - Sin navegar.
    - Sin hacer logout.
    - Sin leer Auth.
-   - Sin tocar AppCore.
+   - Sin leer Router.
+   - Sin leer rutas.
+   - Sin tocar AppCore directamente.
    - Sin emitir eventos.
    - Sin timers.
    - Sin duplicar lógica de sidebar.
@@ -16,7 +19,12 @@
    - Sólo DOM mínimo: aria, hidden, focus, outside click y Escape.
 ========================================================= */
 
-export const SIDEBAR_DROPDOWN_VERSION = "sidebar.dropdown.v1";
+import {
+  getSidebarOpen,
+  openSidebar as openRuntimeSidebar,
+} from "./state.js";
+
+export const SIDEBAR_DROPDOWN_VERSION = "sidebar.dropdown.v2";
 
 const DROPDOWN_KEY = "account";
 
@@ -62,10 +70,6 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function isFunction(value) {
-  return typeof value === "function";
-}
-
 function isElement(value) {
   return Boolean(value && value.nodeType === 1);
 }
@@ -77,14 +81,6 @@ function isEvent(value) {
 function text(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
-}
-
-function safeCall(fn = null, ...args) {
-  try {
-    return isFunction(fn) ? fn(...args) : null;
-  } catch {
-    return null;
-  }
 }
 
 function contains(parent = null, child = null) {
@@ -117,7 +113,6 @@ function resolveRoot(value = null) {
 
   if (target) {
     const root = target.closest?.(ROOT_SELECTOR) || target.closest?.("aside");
-
     if (root) return root;
   }
 
@@ -148,7 +143,13 @@ function getMenu(root = null) {
 function getFocusableItems(menu = null) {
   try {
     return Array.from(menu?.querySelectorAll?.(FOCUSABLE_SELECTOR) || [])
-      .filter((node) => !node.disabled && node.hidden !== true);
+      .filter((node) => {
+        if (!isElement(node)) return false;
+        if (node.hidden === true) return false;
+        if (node.disabled === true) return false;
+        if (node.getAttribute("aria-disabled") === "true") return false;
+        return true;
+      });
   } catch {
     return [];
   }
@@ -158,16 +159,61 @@ function focusFirstMenuItem(menu = null) {
   const firstItem = getFocusableItems(menu)[0];
 
   try {
-    firstItem?.focus?.();
+    firstItem?.focus?.({ preventScroll: true });
     return Boolean(firstItem);
   } catch {
-    return false;
+    try {
+      firstItem?.focus?.();
+      return Boolean(firstItem);
+    } catch {
+      return false;
+    }
   }
 }
 
 function focusTrigger(root = null) {
   try {
-    getTrigger(root)?.focus?.();
+    getTrigger(root)?.focus?.({ preventScroll: true });
+    return true;
+  } catch {
+    try {
+      getTrigger(root)?.focus?.();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/* =========================================================
+   SIDEBAR OPEN STATE
+========================================================= */
+
+function rootIsCollapsed(root = null) {
+  if (!isElement(root)) return false;
+
+  return Boolean(
+    root.classList.contains("is-collapsed") ||
+      root.dataset?.open === "false" ||
+      root.dataset?.sidebarState === "collapsed" ||
+      root.getAttribute("data-open") === "false" ||
+      root.getAttribute("data-sidebar-state") === "collapsed"
+  );
+}
+
+function ensureSidebarOpen(root = null, options = {}) {
+  if (!isElement(root)) return false;
+
+  if (!rootIsCollapsed(root) && getSidebarOpen() === true) {
+    return true;
+  }
+
+  try {
+    openRuntimeSidebar({
+      root,
+      AppCore: options.AppCore || null,
+    });
+
     return true;
   } catch {
     return false;
@@ -175,7 +221,7 @@ function focusTrigger(root = null) {
 }
 
 /* =========================================================
-   STATE
+   DROPDOWN STATE
 ========================================================= */
 
 function isDropdownOpen(root = null) {
@@ -202,19 +248,25 @@ function setDomState(root = null, open = false) {
   try {
     trigger.setAttribute("aria-expanded", nextOpen ? "true" : "false");
     trigger.dataset.sidebarDropdownState = nextOpen ? "open" : "closed";
-  } catch {}
+  } catch {
+    // noop
+  }
 
   try {
     menu.hidden = !nextOpen;
     menu.setAttribute("aria-hidden", nextOpen ? "false" : "true");
     menu.dataset.sidebarDropdownState = nextOpen ? "open" : "closed";
     menu.classList.toggle(MENU_OPEN_CLASS, nextOpen);
-  } catch {}
+  } catch {
+    // noop
+  }
 
   try {
     root.dataset.sidebarDropdownOpen = nextOpen ? DROPDOWN_KEY : "";
     root.classList.toggle(OPEN_CLASS, nextOpen);
-  } catch {}
+  } catch {
+    // noop
+  }
 
   return true;
 }
@@ -253,14 +305,16 @@ function normalizeOptions(value = null, options = {}) {
 function detachGlobalHandlers() {
   try {
     activeController?.abort?.();
-  } catch {}
+  } catch {
+    // noop
+  }
 
   activeController = null;
   activeRoot = null;
 }
 
 function attachGlobalHandlers(root = null) {
-  if (!isBrowser() || !root) return false;
+  if (!isBrowser() || !isElement(root)) return false;
 
   if (activeRoot && activeRoot !== root) {
     closeDropdown({
@@ -313,7 +367,7 @@ function attachGlobalHandlers(root = null) {
 }
 
 /* =========================================================
-   PUBLIC CONTROL
+   A11Y
 ========================================================= */
 
 export function syncDropdownA11y(value = null) {
@@ -341,7 +395,9 @@ export function syncDropdownA11y(value = null) {
     if (menuId) {
       trigger.setAttribute("aria-controls", menuId);
     }
-  } catch {}
+  } catch {
+    // noop
+  }
 
   try {
     menu.setAttribute("role", "menu");
@@ -350,7 +406,9 @@ export function syncDropdownA11y(value = null) {
     menu.querySelectorAll(ITEM_SELECTOR).forEach((item) => {
       item.setAttribute("role", "menuitem");
     });
-  } catch {}
+  } catch {
+    // noop
+  }
 
   return {
     ok: true,
@@ -360,6 +418,10 @@ export function syncDropdownA11y(value = null) {
   };
 }
 
+/* =========================================================
+   PUBLIC CONTROL
+========================================================= */
+
 export function setDropdownOpen(open = false, options = {}) {
   const opts = normalizeOptions(options);
   const root = resolveRoot(opts);
@@ -367,6 +429,10 @@ export function setDropdownOpen(open = false, options = {}) {
   if (!root) return false;
 
   const nextOpen = Boolean(open);
+
+  if (nextOpen) {
+    ensureSidebarOpen(root, opts);
+  }
 
   if (!setDomState(root, nextOpen)) return false;
 
@@ -450,6 +516,10 @@ export function repairDropdown(value = null) {
 
   const open = isDropdownOpen(root);
 
+  if (open) {
+    ensureSidebarOpen(root);
+  }
+
   setDomState(root, open);
 
   if (open) {
@@ -515,7 +585,9 @@ export function bindSidebarDropdown(value = null) {
   const cleanup = () => {
     try {
       controller.abort();
-    } catch {}
+    } catch {
+      // noop
+    }
 
     if (activeRoot === root) {
       detachGlobalHandlers();
@@ -556,15 +628,35 @@ export function getDropdownSnapshot(value = null) {
 
   return {
     version: SIDEBAR_DROPDOWN_VERSION,
+
     enabled: Boolean(root && trigger && menu),
     open,
     bound: Boolean(root && boundRoots.has(root)),
     active: Boolean(root && activeRoot === root),
+
     hasRoot: Boolean(root),
     hasTrigger: Boolean(trigger),
     hasMenu: Boolean(menu),
+
+    rootCollapsed: root ? rootIsCollapsed(root) : null,
+    runtimeSidebarOpen: getSidebarOpen(),
+
     menuHidden: menu ? menu.hidden === true : null,
     triggerExpanded: trigger ? trigger.getAttribute("aria-expanded") : null,
+
+    policy: {
+      dropdownOnly: true,
+      opensSidebarBeforeDropdown: true,
+      ownNavigation: false,
+      ownLogout: false,
+      ownAuth: false,
+      ownRouter: false,
+      ownDomCreate: false,
+      ownPermissions: false,
+      ownVisibility: false,
+      ownTimers: false,
+      ownEventsEmit: false,
+    },
   };
 }
 

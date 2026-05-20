@@ -31,74 +31,50 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
-  return output || fallback;
-}
-
-function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
-}
-
-function currentPath() {
+function getInitialPath() {
   if (!isBrowser()) return "/";
 
   try {
-    return `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
+    const { pathname = "/", search = "", hash = "" } = window.location;
+    return `${pathname || "/"}${search || ""}${hash || ""}`;
   } catch {
     return "/";
   }
 }
 
-function setDataset(element = null, key = "", value = "") {
-  if (!element || !key) return false;
-
-  try {
-    element.dataset[key] = String(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function toggleClass(element = null, className = "", enabled = false) {
-  if (!element || !className) return false;
-
-  try {
-    element.classList.toggle(className, Boolean(enabled));
-    return true;
-  } catch {
-    return false;
-  }
+function redactErrorMessage(value = "") {
+  return String(value ?? "")
+    .trim()
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 /* =========================================================
-   MAIN STATE
+   ROOT STATE
 ========================================================= */
 
 function setMainState(state = "booting") {
   if (!isBrowser()) return false;
 
-  const value = text(state, "booting");
+  const value = String(state || "booting");
   const booting = value === "booting";
   const ready = value === "ready";
   const fatal = value === "fatal";
 
-  for (const element of [document.documentElement, document.body].filter(Boolean)) {
-    setDataset(element, "mainState", value);
-    setDataset(element, "appState", value);
+  const roots = [document.documentElement, document.body].filter(Boolean);
 
-    setDataset(element, "appLoading", booting ? "true" : "false");
-    setDataset(element, "appBooting", booting ? "true" : "false");
-    setDataset(element, "appReady", ready ? "true" : "false");
+  for (const root of roots) {
+    root.dataset.mainState = value;
+    root.dataset.appState = value;
 
-    toggleClass(element, "app-booting", booting);
-    toggleClass(element, "app-loading", booting);
-    toggleClass(element, "app-ready", ready);
-    toggleClass(element, "app-fatal", fatal);
+    root.dataset.appLoading = String(booting);
+    root.dataset.appBooting = String(booting);
+    root.dataset.appReady = String(ready);
+
+    root.classList.toggle("app-booting", booting);
+    root.classList.toggle("app-loading", booting);
+    root.classList.toggle("app-ready", ready);
+    root.classList.toggle("app-fatal", fatal);
   }
 
   return true;
@@ -113,92 +89,48 @@ function createBootContext() {
 
   return {
     source: "main",
-    initialPath: currentPath(),
+    initialPath: getInitialPath(),
   };
 }
 
 /* =========================================================
-   BOOT RESOLUTION
+   FATAL DOM
 ========================================================= */
 
-function resolveBoot(module = {}) {
-  if (typeof module.boot === "function") return module.boot;
-  if (typeof module.bootApp === "function") return module.bootApp;
-  if (typeof module.start === "function") return module.start;
-
-  if (typeof module.App?.boot === "function") {
-    return module.App.boot.bind(module.App);
-  }
-
-  if (typeof module.App?.bootApp === "function") {
-    return module.App.bootApp.bind(module.App);
-  }
-
-  if (typeof module.App?.start === "function") {
-    return module.App.start.bind(module.App);
-  }
-
-  if (typeof module.default?.boot === "function") {
-    return module.default.boot.bind(module.default);
-  }
-
-  if (typeof module.default?.bootApp === "function") {
-    return module.default.bootApp.bind(module.default);
-  }
-
-  if (typeof module.default?.start === "function") {
-    return module.default.start.bind(module.default);
-  }
-
-  if (typeof module.default === "function") {
-    return module.default;
-  }
-
-  return null;
-}
-
-/* =========================================================
-   LOADER / SHELL
-========================================================= */
-
-function hideLoader() {
+function hideLoaderForFatal() {
   if (!isBrowser()) return false;
 
   const loader = document.getElementById("app-loader");
-
   if (!loader) return false;
 
-  try {
-    loader.hidden = true;
-    loader.setAttribute("aria-hidden", "true");
-    loader.setAttribute("aria-busy", "false");
-    loader.classList.remove("is-visible");
-    return true;
-  } catch {
-    return false;
-  }
+  loader.hidden = true;
+  loader.classList.remove("is-visible");
+  loader.dataset.loaderVisible = "false";
+  loader.dataset.loaderState = "fatal";
+  loader.setAttribute("aria-hidden", "true");
+  loader.setAttribute("aria-busy", "false");
+
+  return true;
 }
 
 function showShellForFatal() {
   if (!isBrowser()) return false;
 
   const shell = document.getElementById("app-shell");
-
   if (!shell) return false;
 
-  try {
-    shell.hidden = false;
-    shell.setAttribute("aria-hidden", "false");
-    shell.setAttribute("aria-busy", "false");
-    shell.dataset.shellState = "fatal";
-    shell.dataset.shell = "visible";
-    return true;
-  } catch {
-    return false;
-  }
+  shell.hidden = false;
+  shell.dataset.shell = "visible";
+  shell.dataset.shellState = "fatal";
+  shell.dataset.shellInteractive = "false";
+  shell.dataset.chrome = "hidden";
+  shell.setAttribute("aria-hidden", "false");
+  shell.setAttribute("aria-busy", "false");
+
+  return true;
 }
 
-function fatalRoot() {
+function getFatalRoot() {
   if (!isBrowser()) return null;
 
   return (
@@ -210,20 +142,18 @@ function fatalRoot() {
   );
 }
 
-/* =========================================================
-   FATAL VIEW
-========================================================= */
-
 function showFatalError(error = null) {
   if (!isBrowser()) return false;
 
   setMainState("fatal");
   showShellForFatal();
-  hideLoader();
+  hideLoaderForFatal();
 
-  const root = fatalRoot();
-
+  const root = getFatalRoot();
   if (!root) return false;
+
+  root.setAttribute("aria-busy", "false");
+  root.setAttribute("aria-hidden", "false");
 
   const section = document.createElement("section");
   section.className = "boot-error-view";
@@ -248,7 +178,7 @@ function showFatalError(error = null) {
   try {
     console.error("[Onion Main] Boot error:", {
       name: error?.name || "Error",
-      message: redact(error?.message || String(error || "")),
+      message: redactErrorMessage(error?.message || String(error || "")),
     });
   } catch {
     // noop
@@ -267,13 +197,12 @@ async function runBoot() {
   setMainState("booting");
 
   const module = await import(APP_MODULE);
-  const bootApp = resolveBoot(module);
 
-  if (!bootApp) {
-    throw new Error("src/app/index.js no exporta boot/start/bootApp.");
+  if (typeof module.bootApp !== "function") {
+    throw new Error("/src/app/index.js debe exportar bootApp().");
   }
 
-  const result = await bootApp({
+  const result = await module.bootApp({
     source: "main",
     bootContext,
   });

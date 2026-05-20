@@ -99,7 +99,9 @@ import {
   unbindSidebarDropdown,
 } from "./dropdown.js";
 
-export const SIDEBAR_UI_VERSION = "sidebar.ui.v5";
+export const SIDEBAR_UI_VERSION = "sidebar.ui.v6";
+
+let syncing = false;
 
 /* =========================================================
    BASICS
@@ -128,6 +130,71 @@ function redact(value = "") {
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
+function normalizeHashPath(path = HOME_ROUTE) {
+  const value = String(path || HOME_ROUTE).trim();
+
+  if (value.startsWith("#!")) {
+    return value.replace(/^#!\/?/, "/") || HOME_ROUTE;
+  }
+
+  if (value.startsWith("#/")) {
+    return value.slice(1) || HOME_ROUTE;
+  }
+
+  return value;
+}
+
+function isUnsafePath(path = "") {
+  const raw = String(path || "").trim();
+  const lower = raw.toLowerCase();
+
+  return Boolean(
+    !raw ||
+      raw.startsWith("//") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(raw) ||
+      /[\r\n\t\\]/.test(raw) ||
+      hasSensitiveQuery(raw) ||
+      lower.startsWith("javascript:") ||
+      lower.startsWith("data:") ||
+      lower.startsWith("vbscript:") ||
+      lower.startsWith("mailto:") ||
+      lower.startsWith("tel:") ||
+      lower.startsWith("file:") ||
+      lower.startsWith("blob:")
+  );
+}
+
+function safeSidebarPath(path = HOME_ROUTE, fallback = HOME_ROUTE) {
+  let raw = normalizeHashPath(path || fallback);
+
+  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) {
+    raw = fallback;
+  }
+
+  if (isUnsafePath(raw)) {
+    raw = fallback;
+  }
+
+  if (!raw.startsWith("/")) {
+    raw = `/${raw}`;
+  }
+
+  const normalized = normalizeSidebarPath(raw || fallback);
+  const canonical = normalized.split("?")[0].split("#")[0] || HOME_ROUTE;
+
+  if (canonical === "/home") {
+    return normalizeSidebarPath(fallback === "/home" ? HOME_ROUTE : fallback);
+  }
+
+  return normalized || normalizeSidebarPath(fallback || HOME_ROUTE);
+}
+
 /* =========================================================
    ROUTER HREF
 ========================================================= */
@@ -139,20 +206,25 @@ function userHomeHref(context = {}, fallback = SIDEBAR_BRAND_HREF) {
     return `${USER_HOME_PREFIX}${slug}`;
   }
 
-  return normalizeSidebarPath(fallback || HOME_ROUTE);
+  return safeSidebarPath(fallback || HOME_ROUTE, HOME_ROUTE);
 }
 
 function routerPublicPath(path = HOME_ROUTE, context = {}) {
-  const lookupPath = sidebarHomeLookupPath(path);
+  const lookupPath = sidebarHomeLookupPath(
+    safeSidebarPath(path || HOME_ROUTE, HOME_ROUTE)
+  );
 
   if (isFunction(Router?.buildPublicPath)) {
     try {
-      return normalizeSidebarPath(
+      const built = safeSidebarPath(
         Router.buildPublicPath(lookupPath, {
           useSlugHome: true,
           useSlugPrivate: true,
-        })
+        }),
+        ""
       );
+
+      if (built) return built;
     } catch {
       // fallback abajo
     }
@@ -165,10 +237,10 @@ function routerPublicPath(path = HOME_ROUTE, context = {}) {
   const home = userHomeHref(context, HOME_ROUTE);
 
   if (home.startsWith(USER_HOME_PREFIX)) {
-    return normalizeSidebarPath(`${home}${lookupPath}`);
+    return safeSidebarPath(`${home}${lookupPath}`, lookupPath);
   }
 
-  return normalizeSidebarPath(lookupPath);
+  return safeSidebarPath(lookupPath, HOME_ROUTE);
 }
 
 function routeHref(path = HOME_ROUTE, context = {}) {
@@ -191,14 +263,15 @@ function browserPath() {
 
 function currentPublicPath() {
   try {
-    return normalizeSidebarPath(
+    return safeSidebarPath(
       Router?.getCurrentPublicPath?.() ||
         Router?.getCurrentPath?.() ||
         AppCore?.state?.publicPath ||
-        browserPath()
+        browserPath(),
+      HOME_ROUTE
     );
   } catch {
-    return normalizeSidebarPath(browserPath());
+    return safeSidebarPath(browserPath(), HOME_ROUTE);
   }
 }
 
@@ -347,6 +420,8 @@ function toSidebarItem(route = null, index = 0, context = getContext()) {
 
   const path = sidebarHomeLookupPath(route.path);
 
+  if (!path || path === "/home") return null;
+
   if (isPublicRoute(route, path) || isHiddenRoute(route)) {
     return null;
   }
@@ -384,6 +459,8 @@ function toSidebarItem(route = null, index = 0, context = getContext()) {
 
   const href = routeHref(path, context);
 
+  if (!href || href === "/home") return null;
+
   return {
     key: firstText(route.sidebarKey, route.viewKey, route.name, path),
     order: getSidebarRouteOrder(path, explicitOrder),
@@ -409,7 +486,7 @@ function sidebarItems(context = getContext()) {
     .filter((item) => {
       const lookupPath = sidebarHomeLookupPath(item.href);
 
-      if (seen.has(lookupPath)) return false;
+      if (!lookupPath || seen.has(lookupPath)) return false;
 
       seen.add(lookupPath);
       return true;
@@ -430,7 +507,28 @@ function registerModule() {
     AppCore.ui.sidebar = api;
 
     AppCore.modules?.register?.(SIDEBAR_MODULE_KEY, api);
-    AppCore.modules?.register?.(SIDEBAR_MODULE_NAME, api);
+
+    if (SIDEBAR_MODULE_NAME && SIDEBAR_MODULE_NAME !== SIDEBAR_MODULE_KEY) {
+      AppCore.modules?.register?.(SIDEBAR_MODULE_NAME, api);
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function unregisterModule() {
+  try {
+    if (AppCore.ui?.sidebar === api) {
+      delete AppCore.ui.sidebar;
+    }
+
+    AppCore.modules?.remove?.(SIDEBAR_MODULE_KEY);
+
+    if (SIDEBAR_MODULE_NAME && SIDEBAR_MODULE_NAME !== SIDEBAR_MODULE_KEY) {
+      AppCore.modules?.remove?.(SIDEBAR_MODULE_NAME);
+    }
 
     return true;
   } catch {
@@ -531,19 +629,26 @@ function renderSidebar(context = getContext()) {
 
 function sync() {
   if (!isBrowser()) return api;
+  if (syncing) return api;
 
-  const context = getContext();
+  syncing = true;
 
-  if (!shouldRenderSidebar(context)) {
-    hideCurrentSidebar();
+  try {
+    const context = getContext();
+
+    if (!shouldRenderSidebar(context)) {
+      hideCurrentSidebar();
+      return api;
+    }
+
+    if (!renderSidebar(context)) {
+      markSidebarUnmounted(AppCore);
+    }
+
     return api;
+  } finally {
+    syncing = false;
   }
-
-  if (!renderSidebar(context)) {
-    markSidebarUnmounted(AppCore);
-  }
-
-  return api;
 }
 
 /* =========================================================
@@ -552,6 +657,8 @@ function sync() {
 
 async function navigateTo(path = HOME_ROUTE, options = {}) {
   const target = routeHref(path, getContext());
+
+  if (!target) return false;
 
   const ok = await navigateFromSidebar({
     AppCore,
@@ -675,6 +782,7 @@ function destroy() {
 
   resetSidebarState(AppCore);
   clearSidebarDomCache(AppCore);
+  unregisterModule();
 
   return api;
 }
@@ -736,6 +844,7 @@ function getSnapshot() {
       userSlugHome: true,
       userScopedPrivateRoutes: true,
       noHomeRoute: true,
+      noSensitiveRoutes: true,
 
       noHtmlDuplicate: true,
       noDomHelpersDuplicate: true,

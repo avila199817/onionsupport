@@ -6,7 +6,8 @@
    - Capa mínima Router ↔ Auth.
    - Evaluar route.public / route.guestOnly / route.requiresAuth / route.roles.
    - Auth real delegada en Auth/AppCore.
-   - Auth estricta: token usable + user usable.
+   - Auth estricta: señal Auth válida + token usable + user usable.
+   - Usuario inválido si disabled === true o status === "disabled".
    - Roles únicos exactos: admin / user.
    - Canonicalizar rutas /@{slug} y /@{slug}/{ruta} para evaluación.
    - No validar aquí si el slug coincide con el usuario real.
@@ -30,7 +31,7 @@ import {
   USER_HOME_PREFIX,
 } from "../core/config.js";
 
-export const GUARDS_VERSION = "router.guards.v5";
+export const GUARDS_VERSION = "router.guards.v6";
 
 const LOGIN_PATH = ROUTES.login || "/login";
 const HOME_PATH = ROUTES.home || "/";
@@ -286,36 +287,63 @@ function hasToken(AppCore = null, Auth = null) {
   if (callAuth(AppCore, Auth, "hasValidToken", false) === true) return true;
   if (callAuth(AppCore, Auth, "hasToken", false) === true) return true;
 
+  const state = readState(AppCore);
+
   const token =
     callAuth(AppCore, Auth, "getToken", "") ||
     callAuth(AppCore, Auth, "getAccessToken", "") ||
-    readState(AppCore).token ||
-    readState(AppCore).accessToken ||
-    readState(AppCore).access_token ||
+    state.token ||
+    state.accessToken ||
+    state.access_token ||
     "";
 
   return Boolean(cleanText(token, ""));
 }
 
 function getUser(AppCore = null, Auth = null) {
+  const state = readState(AppCore);
+
   return (
     callAuth(AppCore, Auth, "getUser", null) ||
     callAuth(AppCore, Auth, "getCurrentUser", null) ||
     safeCall(AppCore?.getCurrentUser?.bind?.(AppCore) || AppCore?.getCurrentUser) ||
-    readState(AppCore).user ||
-    readState(AppCore).currentUser ||
+    state.user ||
+    state.currentUser ||
     null
   );
 }
 
+function isUserUsable(user = null) {
+  if (!isObject(user)) return false;
+
+  if (user.disabled === true) return false;
+
+  const status = cleanText(user.status, "").toLowerCase();
+
+  if (status === "disabled") return false;
+
+  return true;
+}
+
+function hasStrictSession(AppCore = null, Auth = null) {
+  const auth = resolveAuth(AppCore, Auth);
+
+  if (!isAuthenticated(AppCore, auth)) return false;
+  if (!hasToken(AppCore, auth)) return false;
+
+  return isUserUsable(getUser(AppCore, auth));
+}
+
 function getUserSlug(AppCore = null, Auth = null) {
+  const auth = resolveAuth(AppCore, Auth);
+
   const fromAuth =
-    callAuth(AppCore, Auth, "getUserSlug", "") ||
-    callAuth(AppCore, Auth, "extractUserSlug", "", getUser(AppCore, Auth));
+    callAuth(AppCore, auth, "getUserSlug", "") ||
+    callAuth(AppCore, auth, "extractUserSlug", "", getUser(AppCore, auth));
 
   if (fromAuth) return normalizeUserSlug(fromAuth);
 
-  const user = getUser(AppCore, Auth);
+  const user = getUser(AppCore, auth);
   const state = readState(AppCore);
 
   return normalizeUserSlug(
@@ -328,16 +356,18 @@ function getUserSlug(AppCore = null, Auth = null) {
 }
 
 function getUserHomePath(AppCore = null, Auth = null) {
+  const auth = resolveAuth(AppCore, Auth);
+
   const fromAuth =
-    callAuth(AppCore, Auth, "getDefaultHome", "") ||
-    callAuth(AppCore, Auth, "getPostLoginTarget", "") ||
-    callAuth(AppCore, Auth, "buildUserHomePath", "", getUser(AppCore, Auth));
+    callAuth(AppCore, auth, "getDefaultHome", "") ||
+    callAuth(AppCore, auth, "getPostLoginTarget", "") ||
+    callAuth(AppCore, auth, "buildUserHomePath", "", getUser(AppCore, auth));
 
   if (fromAuth && isSafeInternalPath(fromAuth)) {
     return normalizePublicPath(fromAuth);
   }
 
-  const slug = getUserSlug(AppCore, Auth);
+  const slug = getUserSlug(AppCore, auth);
 
   return slug ? `${USER_HOME_PREFIX}${slug}` : HOME_PATH;
 }
@@ -401,18 +431,20 @@ function unsupportedRouteRoles(route = null) {
 }
 
 function currentRole(AppCore = null, Auth = null) {
-  if (!isAuthenticated(AppCore, Auth)) return "";
+  const auth = resolveAuth(AppCore, Auth);
+
+  if (!hasStrictSession(AppCore, auth)) return "";
 
   const fromAuth =
-    callAuth(AppCore, Auth, "getRole", "") ||
-    callAuth(AppCore, Auth, "getCurrentRole", "");
+    callAuth(AppCore, auth, "getRole", "") ||
+    callAuth(AppCore, auth, "getCurrentRole", "");
 
   const authRole = normalizeRole(fromAuth);
 
   if (authRole) return authRole;
 
   const state = readState(AppCore);
-  const user = getUser(AppCore, Auth);
+  const user = getUser(AppCore, auth);
 
   return (
     normalizeRole(user?.role || user?.rol || user?.roles) ||
@@ -480,6 +512,7 @@ function publicUser(user = null, AppCore = null, Auth = null) {
     username: user.username || null,
     slug: getUserSlug(AppCore, Auth) || null,
     role: normalizeRole(user.role || user.rol || user.roles) || null,
+    usable: isUserUsable(user),
   };
 }
 
@@ -507,9 +540,11 @@ function buildDetails({
     scopedPath: Boolean(scoped.scoped),
     scopedRestPath: scoped.scoped ? scoped.restPath : null,
 
-    authenticated: isAuthenticated(AppCore, auth),
+    authenticated: hasStrictSession(AppCore, auth),
+    authSignal: isAuthenticated(AppCore, auth),
     hasToken: hasToken(AppCore, auth),
     hasUser: Boolean(user),
+    userUsable: isUserUsable(user),
 
     currentRole: currentRole(AppCore, auth) || null,
     currentRoles: currentRoles(AppCore, auth),
@@ -598,7 +633,7 @@ export function shouldAllowRoute({
     });
   }
 
-  const logged = isAuthenticated(AppCore, auth);
+  const logged = hasStrictSession(AppCore, auth);
   const publicRoute = isPublicRoute(route);
   const guestOnly = isGuestOnlyRoute(route);
   const routeRequiresAuth = requiresAuth(route);
@@ -720,6 +755,7 @@ export function getGuardsSnapshot({
   );
 
   const scoped = getUserScopedRouteInfo(publicPath);
+  const user = getUser(AppCore, auth);
 
   const access = shouldAllowRoute({
     AppCore,
@@ -754,12 +790,14 @@ export function getGuardsSnapshot({
       : null,
 
     auth: {
-      authenticated: isAuthenticated(AppCore, auth),
+      authenticated: hasStrictSession(AppCore, auth),
+      authSignal: isAuthenticated(AppCore, auth),
       hasToken: hasToken(AppCore, auth),
-      hasUser: Boolean(getUser(AppCore, auth)),
+      hasUser: Boolean(user),
+      userUsable: isUserUsable(user),
       currentRole: currentRole(AppCore, auth) || null,
       currentRoles: currentRoles(AppCore, auth),
-      user: publicUser(getUser(AppCore, auth), AppCore, auth),
+      user: publicUser(user, AppCore, auth),
       userHomePath: getUserHomePath(AppCore, auth),
     },
 
@@ -785,6 +823,9 @@ export function getGuardsSnapshot({
 
       strictAuth: true,
       tokenAndUserRequired: true,
+      userUsableRequired: true,
+      invalidUserWhenDisabledTrue: true,
+      invalidUserWhenStatusDisabled: true,
 
       roles: [...VALID_ROLES],
       rolesStrict: true,

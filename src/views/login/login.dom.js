@@ -4,8 +4,9 @@
 
    Responsabilidad:
    - Obtener refs del login.
-   - Leer estado del formulario.
+   - Leer estado mínimo del formulario.
    - Mostrar/limpiar error global.
+   - Marcar campos inválidos.
    - Estado loading mínimo.
    - Binding submit idempotente.
    - Delegar password-field al componente compartido.
@@ -17,11 +18,12 @@
    - Sin navegación.
    - Sin lógica propia de password toggle.
    - Sin theme toggle.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
 
-export const LOGIN_DOM_VERSION = "login.dom.v3";
+export const LOGIN_DOM_VERSION = "login.dom.v4";
 
 const DEFAULT_SUBMIT_LABEL = "Entrar";
 const DEFAULT_LOADING_LABEL = "Accediendo...";
@@ -65,7 +67,11 @@ function isFn(value) {
 function noop() {}
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -76,7 +82,10 @@ function rawText(value = "", fallback = "") {
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -314,6 +323,50 @@ export function destroyLoginPasswordFields(container = null) {
    REFS
 ========================================================= */
 
+function normalizeInputBase(input = null) {
+  if (!input) return false;
+
+  try {
+    input.autocapitalize = "none";
+    input.spellcheck = false;
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+function normalizeIdentifierInput(input = null) {
+  if (!input) return false;
+
+  normalizeInputBase(input);
+
+  try {
+    input.maxLength = MAX_IDENTIFIER_LENGTH;
+    input.setAttribute("autocomplete", "username");
+    input.setAttribute("inputmode", "text");
+    input.setAttribute("aria-invalid", input.getAttribute("aria-invalid") || "false");
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+function normalizePasswordInput(input = null) {
+  if (!input) return false;
+
+  try {
+    input.maxLength = MAX_PASSWORD_LENGTH;
+    input.setAttribute("autocomplete", "current-password");
+    input.setAttribute("aria-invalid", input.getAttribute("aria-invalid") || "false");
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
 export function getLoginRefs(container = null) {
   const safeContainer = container || doc();
   const root = qs(safeContainer, SELECTORS.root) || safeContainer;
@@ -324,10 +377,14 @@ export function getLoginRefs(container = null) {
   const passwordInput = qs(scope, SELECTORS.password);
   const submitButton = qs(scope, SELECTORS.submit);
 
+  normalizeIdentifierInput(identifierInput);
+  normalizePasswordInput(passwordInput);
+
   if (form) {
     try {
       form.noValidate = true;
       form.dataset.loginDomVersion = LOGIN_DOM_VERSION;
+      form.setAttribute("autocomplete", "on");
     } catch {
       // noop
     }
@@ -335,9 +392,7 @@ export function getLoginRefs(container = null) {
 
   if (submitButton) {
     try {
-      if (!submitButton.type) {
-        submitButton.type = "submit";
-      }
+      submitButton.type = "submit";
 
       if (!submitButton.dataset.originalLabel) {
         submitButton.dataset.originalLabel = text(
@@ -345,6 +400,8 @@ export function getLoginRefs(container = null) {
           DEFAULT_SUBMIT_LABEL
         );
       }
+
+      submitButton.setAttribute("aria-busy", "false");
     } catch {
       // noop
     }
@@ -409,7 +466,7 @@ export function setInputInvalid(inputNode = null, invalid = false) {
   const active = Boolean(invalid);
 
   toggleClass(inputNode, "is-invalid", active);
-  setAttr(inputNode, "aria-invalid", active ? "true" : null);
+  setAttr(inputNode, "aria-invalid", active ? "true" : "false");
 
   return true;
 }
@@ -422,7 +479,9 @@ export function setFieldError(fieldNode = null, message = "", errorNode = null) 
   if (errorNode) {
     setText(errorNode, clean);
     setHidden(errorNode, !clean);
+    toggleClass(errorNode, "is-visible", Boolean(clean));
     setAttr(errorNode, "role", clean ? "alert" : null);
+    setAttr(errorNode, "aria-live", clean ? "polite" : null);
   }
 
   return true;
@@ -442,6 +501,7 @@ function setGlobalError(errorBox = null, message = "") {
   toggleClass(errorBox, "is-visible", Boolean(clean));
   setAttr(errorBox, "role", clean ? "alert" : null);
   setAttr(errorBox, "aria-live", clean ? "polite" : null);
+  setAttr(errorBox, "aria-atomic", clean ? "true" : null);
 
   return clean;
 }
@@ -582,6 +642,14 @@ export function setLoginLoading(refs = {}, loading = false, options = {}) {
   setAttr(refs.form, "aria-busy", active ? "true" : "false");
 
   try {
+    if (refs.root) {
+      if (active) {
+        refs.root.dataset.loading = "true";
+      } else {
+        delete refs.root.dataset.loading;
+      }
+    }
+
     if (refs.form) {
       if (active) {
         refs.form.dataset.submitting = "true";
@@ -766,6 +834,7 @@ export function getLoginDomSnapshot(refs = {}) {
 
     policy: {
       domOnly: true,
+
       noAuth: true,
       noHttp: true,
       noRouter: true,
@@ -780,6 +849,12 @@ export function getLoginDomSnapshot(refs = {}) {
       submitIdempotent: true,
       errorsRedacted: true,
       boundedFieldReads: true,
+
+      no2fa: true,
+      noMfa: true,
+      noOtp: true,
+
+      snapshotNoFieldValues: true,
     },
   };
 }

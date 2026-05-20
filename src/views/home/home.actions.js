@@ -4,17 +4,21 @@
 
    Responsabilidad:
    - Acciones operativas mínimas de Home.
-   - Navegación SPA delegada en Router/AppCore.
+   - Navegación SPA delegada en Router si existe.
    - Export CSV desde colecciones del store.
    - Copiar IDs.
    - Ejecutar quick actions simples.
    - Leer dashboard/widget desde store si hace falta.
+   - Rutas base desde core/config.js.
+   - Toast sólo mediante AppCore.showToast si existe.
    - Sin fetch.
    - Sin API calls.
    - Sin storage.
    - Sin eventos globales.
    - Sin window bridges.
    - Sin route aliases legacy.
+   - Sin Router.push/go legacy.
+   - Sin AppCore.navigate.
    - Sin /home.
    - Sin /incidencias/nueva.
    - Sin Auth.
@@ -23,6 +27,10 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+
+import {
+  ROUTES as CORE_ROUTES,
+} from "../../core/config.js";
 
 import {
   getHomeDashboardStore,
@@ -41,11 +49,7 @@ import {
   getHomeWidgetId,
 } from "./home.model.js";
 
-import {
-  showToast,
-} from "./home.utils.js";
-
-export const HOME_ACTIONS_VERSION = "home.actions.v2";
+export const HOME_ACTIONS_VERSION = "home.actions.v3";
 
 const SOURCE = "views.home.actions";
 
@@ -53,34 +57,33 @@ const CSV_FILENAME = "home-export.csv";
 const CSV_MIME_TYPE = "text/csv;charset=utf-8;";
 
 const ROUTES = Object.freeze({
-  HOME: "/",
-  INCIDENCIAS: "/incidencias",
-  FACTURAS: "/facturas",
-  CLIENTES: "/clientes",
-  USUARIOS: "/usuarios",
-  CUENTA: "/cuenta",
-  AJUSTES: "/ajustes",
+  HOME: CORE_ROUTES.home || CORE_ROUTES.root || "/",
+  INCIDENCIAS: CORE_ROUTES.incidencias || "/incidencias",
+  FACTURAS: CORE_ROUTES.facturas || "/facturas",
+  CLIENTES: CORE_ROUTES.clientes || "/clientes",
+  USUARIOS: CORE_ROUTES.usuarios || "/usuarios",
+  CUENTA: CORE_ROUTES.cuenta || "/cuenta",
+  AJUSTES: CORE_ROUTES.ajustes || "/ajustes",
 });
 
 const ACTION_ROUTES = Object.freeze({
   go_incidencias: ROUTES.INCIDENCIAS,
-  go_tickets: ROUTES.INCIDENCIAS,
-
   go_facturas: ROUTES.FACTURAS,
-  go_invoices: ROUTES.FACTURAS,
-
   go_clientes: ROUTES.CLIENTES,
-  go_clients: ROUTES.CLIENTES,
-
   go_usuarios: ROUTES.USUARIOS,
-  go_users: ROUTES.USUARIOS,
-
   go_cuenta: ROUTES.CUENTA,
-  go_account: ROUTES.CUENTA,
-
   go_ajustes: ROUTES.AJUSTES,
-  go_settings: ROUTES.AJUSTES,
 });
+
+const RAW_KEYS = new Set([
+  "raw",
+  "data",
+  "payloadRaw",
+  "response",
+]);
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
 
 /* =========================================================
    BASICS
@@ -148,16 +151,219 @@ function nowIso() {
   }
 }
 
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function sanitizePayloadValue(value, keyHint = "") {
+  if (RAW_KEYS.has(keyHint)) return undefined;
+  if (isSensitiveKey(keyHint)) return undefined;
+
+  if (typeof value === "string") {
+    return redact(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizePayloadValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (RAW_KEYS.has(key)) continue;
+      if (isSensitiveKey(key)) continue;
+
+      const clean = sanitizePayloadValue(item, key);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  return value;
+}
+
+function sanitizePayload(value = {}) {
+  return safeObject(sanitizePayloadValue(value), {});
+}
+
 function notify(message = "", type = "info", options = {}) {
-  const text = safeText(message, "");
+  const text = redact(safeText(message, ""));
 
   if (!text) return false;
 
   try {
-    return showToast(text, type, safeObject(options));
+    if (isFunction(AppCore?.showToast)) {
+      return AppCore.showToast(text, type, safeObject(options)) !== false;
+    }
+
+    const toast =
+      AppCore?.toast ||
+      AppCore?.Toast ||
+      AppCore?.ui?.toast ||
+      AppCore?.modules?.get?.("toast") ||
+      null;
+
+    if (isFunction(toast?.show)) {
+      return toast.show({
+        ...safeObject(options),
+        type,
+        message: text,
+      }) !== false;
+    }
+
+    if (isFunction(toast?.[type])) {
+      return toast[type](text, safeObject(options)) !== false;
+    }
   } catch {
     return false;
   }
+
+  return false;
+}
+
+/* =========================================================
+   ROUTES
+========================================================= */
+
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
+function normalizeHashPath(value = "") {
+  const raw = safeText(value, "");
+
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
+  if (raw.startsWith("#/")) return raw.slice(1) || "/";
+
+  return raw;
+}
+
+function normalizePath(pathname = ROUTES.HOME) {
+  let value = safeText(pathname, ROUTES.HOME)
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!value.startsWith("/")) value = `/${value}`;
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || ROUTES.HOME;
+  }
+
+  return value;
+}
+
+function normalizeSpaRoute(route = "") {
+  let raw = normalizeHashPath(route);
+
+  if (!raw || raw === "#") return "";
+  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) return "";
+
+  const lower = raw.toLowerCase();
+
+  if (
+    raw.startsWith("//") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(raw) ||
+      /[\r\n\t\\]/.test(raw) ||
+      hasSensitiveQuery(raw) ||
+      lower.startsWith("javascript:") ||
+      lower.startsWith("data:") ||
+      lower.startsWith("vbscript:") ||
+      lower.startsWith("mailto:") ||
+      lower.startsWith("tel:") ||
+      lower.startsWith("file:") ||
+      lower.startsWith("blob:") ||
+      /^https?:\/\//i.test(raw)
+  ) {
+    return "";
+  }
+
+  if (!raw.startsWith("/")) {
+    raw = `/${raw}`;
+  }
+
+  const hashIndex = raw.indexOf("#");
+  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
+  const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+
+  const queryIndex = withoutHash.indexOf("?");
+  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
+  const path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+
+  const cleanPath = normalizePath(path || ROUTES.HOME);
+
+  if (cleanPath === "/home") return "";
+  if (cleanPath === "/incidencias/nueva") return "";
+  if (cleanPath.startsWith("/incidencias/nueva/")) return "";
+
+  return `${cleanPath}${query}${hash}`;
+}
+
+function routeFromAction(action = "") {
+  return ACTION_ROUTES[normalizeKey(action)] || "";
+}
+
+function navigationOk(result = null) {
+  if (result === false) return false;
+  if (isObject(result) && result.ok === false) return false;
+
+  return true;
+}
+
+function getRouterCandidates() {
+  const candidates = [];
+
+  try {
+    candidates.push(AppCore?.router);
+    candidates.push(AppCore?.Router);
+    candidates.push(AppCore?.modules?.get?.("router"));
+    candidates.push(AppCore?.modules?.get?.("Router"));
+  } catch {
+    // noop
+  }
+
+  return candidates.filter(Boolean);
+}
+
+async function navigateSpa(route = ROUTES.HOME, options = {}) {
+  const target = normalizeSpaRoute(route);
+
+  if (!target) return false;
+
+  const opts = {
+    source: SOURCE,
+    ...sanitizePayload(options),
+  };
+
+  for (const router of getRouterCandidates()) {
+    try {
+      if (opts.replaceState === true && isFunction(router?.replace)) {
+        return navigationOk(await router.replace(target, opts));
+      }
+
+      if (isFunction(router?.navigate)) {
+        return navigationOk(await router.navigate(target, opts));
+      }
+    } catch {
+      // probar siguiente router
+    }
+  }
+
+  return false;
 }
 
 /* =========================================================
@@ -183,7 +389,7 @@ export async function getHomeDashboardAction({
   silent = true,
 } = {}) {
   try {
-    if (payload) return normalizeHomeDashboard(payload);
+    if (payload) return normalizeHomeDashboard(sanitizePayload(payload));
 
     return getHomeDashboardFromStoreAction();
   } catch {
@@ -202,15 +408,14 @@ export async function refreshHomeDashboardAction(options = {}) {
 
 function widgetRoute(widget = {}) {
   const raw = safeObject(widget);
-
   return normalizeSpaRoute(first(raw.route, raw.href, raw.link, raw.to, ""));
 }
 
 function normalizeWidgetDetail(widget = {}) {
-  const item = normalizeHomeWidget(widget);
+  const item = normalizeHomeWidget(sanitizePayload(widget));
   const id = safeText(getHomeWidgetId(item), "");
 
-  return {
+  return sanitizePayload({
     ...item,
 
     widgetId: id,
@@ -228,8 +433,8 @@ function normalizeWidgetDetail(widget = {}) {
     route: widgetRoute(item),
     href: widgetRoute(item),
 
-    items: safeArray(first(item.items, item.rows, item.data, item.list, [])),
-  };
+    items: safeArray(first(item.items, item.rows, item.list, [])),
+  });
 }
 
 export function getHomeWidgetDetailFromStoreAction({
@@ -270,7 +475,8 @@ export async function openHomeWidgetAction({
   navigate = true,
   silent = true,
 } = {}) {
-  const id = safeText(widgetId || getHomeWidgetId(payload || {}), "");
+  const cleanPayload = sanitizePayload(payload || {});
+  const id = safeText(widgetId || getHomeWidgetId(cleanPayload), "");
 
   if (!id && !payload) {
     if (!silent) notify("Bloque inválido.", "error");
@@ -279,7 +485,7 @@ export async function openHomeWidgetAction({
 
   const detail = await getHomeWidgetDetailAction({
     widgetId: id,
-    payload,
+    payload: cleanPayload,
     silent,
   });
 
@@ -308,8 +514,19 @@ export async function refreshHomeWidgetDetailAction(options = {}) {
    CLIPBOARD
 ========================================================= */
 
-async function writeClipboardText(value = "") {
+function safeCopyText(value = "") {
   const text = safeText(value, "");
+
+  if (!text) return "";
+  if (hasSensitiveQuery(text)) return "";
+  if (/Bearer\s+/i.test(text)) return "";
+  if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
+
+  return text.slice(0, 240);
+}
+
+async function writeClipboardText(value = "") {
+  const text = safeCopyText(value);
 
   if (!text || !isBrowser()) return false;
 
@@ -358,10 +575,10 @@ export async function copyHomeWidgetIdAction({
   widgetId = "",
   silent = false,
 } = {}) {
-  const id = safeText(widgetId, "");
+  const id = safeCopyText(widgetId);
 
   if (!id) {
-    if (!silent) notify("No hay ID para copiar.", "error");
+    if (!silent) notify("No hay ID válido para copiar.", "error");
     return false;
   }
 
@@ -386,7 +603,8 @@ function normalizeFilename(value = "", fallback = CSV_FILENAME) {
     .replace(/[\\/:*?"<>|]+/g, "-")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 160);
 
   if (!name) return fallback;
 
@@ -396,16 +614,28 @@ function normalizeFilename(value = "", fallback = CSV_FILENAME) {
 function csvCell(value = "") {
   const text = value === null || value === undefined
     ? ""
-    : String(value);
+    : redact(String(value));
 
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+function safePathParts(path = "") {
+  return safeText(path, "")
+    .split(".")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => !RAW_KEYS.has(part))
+    .filter((part) => !isSensitiveKey(part));
+}
+
 function readValue(row = {}, paths = []) {
-  const source = safeObject(row);
+  const source = sanitizePayload(row);
 
   for (const path of safeArray(paths)) {
-    const keys = safeText(path, "").split(".").filter(Boolean);
+    const keys = safePathParts(path);
+
+    if (!keys.length) continue;
+
     let value = source;
 
     for (const key of keys) {
@@ -445,7 +675,6 @@ function columnSpecs(mode = "widgets") {
       ["Prioridad", ["priority", "prioridad", "priorityKey"]],
       ["Categoría", ["category", "categoria", "type"]],
       ["Cliente/usuario", ["clientName", "clienteNombre", "requesterName", "userName"]],
-      ["Email", ["clientEmail", "clienteEmail", "email"]],
       ["Creado", ["createdAt", "fechaCreacion"]],
       ["Actualizado", ["updatedAt", "lastUpdateAt"]],
     ];
@@ -467,7 +696,6 @@ function columnSpecs(mode = "widgets") {
     return [
       ["ID", ["clienteId", "clientId", "customerId", "id"]],
       ["Nombre", ["displayName", "name", "nombre", "razonSocial", "company"]],
-      ["Email", ["email", "mail"]],
       ["Activo", ["active", "isActive", "enabled"]],
       ["Creado", ["createdAt"]],
       ["Actualizado", ["updatedAt", "modifiedAt"]],
@@ -478,7 +706,6 @@ function columnSpecs(mode = "widgets") {
     return [
       ["ID", ["userId", "usuarioId", "id"]],
       ["Nombre", ["displayName", "fullName", "name", "nombre", "username"]],
-      ["Email", ["email", "mail"]],
       ["Rol", ["role", "rol"]],
       ["Activo", ["active", "isActive", "enabled"]],
       ["Creado", ["createdAt"]],
@@ -508,13 +735,14 @@ function columnSpecs(mode = "widgets") {
 
 function buildCsv(items = [], mode = "widgets", columns = []) {
   const rows = safeArray(items)
-    .map(safeObject)
+    .map(sanitizePayload)
     .filter((item) => Object.keys(item).length);
 
   const specs = safeArray(columns).length
     ? safeArray(columns)
         .map((key) => [safeText(key, ""), [safeText(key, "")]])
         .filter(([label]) => Boolean(label))
+        .filter(([, paths]) => safePathParts(paths[0]).length)
     : columnSpecs(mode);
 
   if (!rows.length || !specs.length) return "";
@@ -650,137 +878,6 @@ export function exportHomeCsvAction({
    NAVIGATION
 ========================================================= */
 
-function normalizePath(pathname = ROUTES.HOME) {
-  let value = safeText(pathname, ROUTES.HOME)
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  if (!value.startsWith("/")) value = `/${value}`;
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || ROUTES.HOME;
-  }
-
-  return value;
-}
-
-function normalizeSpaRoute(route = "") {
-  const raw = safeText(route, "");
-
-  if (!raw) return "";
-
-  const lower = raw.toLowerCase();
-
-  if (
-    lower.startsWith("javascript:") ||
-    lower.startsWith("data:") ||
-    lower.startsWith("vbscript:") ||
-    lower.startsWith("mailto:") ||
-    lower.startsWith("tel:")
-  ) {
-    return "";
-  }
-
-  if (/^https?:\/\//i.test(raw)) {
-    try {
-      if (!isBrowser()) return "";
-
-      const url = new URL(raw, window.location.origin);
-
-      if (url.origin !== window.location.origin) return "";
-
-      return normalizeSpaRoute(`${url.pathname}${url.search || ""}${url.hash || ""}`);
-    } catch {
-      return "";
-    }
-  }
-
-  const normalized = raw.startsWith("/") ? raw : `/${raw}`;
-
-  const hashIndex = normalized.indexOf("#");
-  const hash = hashIndex >= 0 ? normalized.slice(hashIndex) : "";
-  const withoutHash = hashIndex >= 0 ? normalized.slice(0, hashIndex) : normalized;
-
-  const queryIndex = withoutHash.indexOf("?");
-  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
-  const path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
-
-  const cleanPath = normalizePath(path || ROUTES.HOME);
-
-  if (cleanPath === "/home") return "";
-
-  return `${cleanPath}${query}${hash}`;
-}
-
-function routeFromAction(action = "") {
-  return ACTION_ROUTES[normalizeKey(action)] || "";
-}
-
-function getRouterCandidates() {
-  const candidates = [];
-
-  try {
-    candidates.push(AppCore?.Router);
-    candidates.push(AppCore?.router);
-    candidates.push(AppCore?.modules?.get?.("Router"));
-    candidates.push(AppCore?.modules?.get?.("router"));
-    candidates.push(AppCore?.modules?.Router);
-    candidates.push(AppCore?.modules?.router);
-  } catch {
-    // noop
-  }
-
-  return candidates.filter(Boolean);
-}
-
-async function navigateSpa(route = ROUTES.HOME, options = {}) {
-  const target = normalizeSpaRoute(route);
-
-  if (!target) return false;
-
-  const opts = {
-    source: SOURCE,
-    ...safeObject(options),
-  };
-
-  for (const router of getRouterCandidates()) {
-    try {
-      if (opts.replaceState === true && isFunction(router?.replace)) {
-        await router.replace(target, opts);
-        return true;
-      }
-
-      if (isFunction(router?.navigate)) {
-        await router.navigate(target, opts);
-        return true;
-      }
-
-      if (isFunction(router?.go)) {
-        await router.go(target, opts);
-        return true;
-      }
-
-      if (isFunction(router?.push)) {
-        await router.push(target, opts);
-        return true;
-      }
-    } catch {
-      // probar siguiente candidato
-    }
-  }
-
-  try {
-    if (isFunction(AppCore?.navigate)) {
-      await AppCore.navigate(target, opts);
-      return true;
-    }
-  } catch {
-    // noop
-  }
-
-  return false;
-}
-
 export async function navigateFromHomeAction({
   route = ROUTES.HOME,
   silent = false,
@@ -797,7 +894,7 @@ export async function navigateFromHomeAction({
   try {
     const ok = await navigateSpa(target, {
       replaceState: Boolean(replaceState),
-      payload: safeObject(payload),
+      payload: sanitizePayload(payload),
     });
 
     if (!ok) throw new Error("HOME_NAVIGATION_FAILED");
@@ -819,9 +916,9 @@ export async function createFromHomeAction({
   payload = {},
 } = {}) {
   return navigateFromHomeAction({
-    route,
+    route: normalizeSpaRoute(route) || ROUTES.INCIDENCIAS,
     silent,
-    payload,
+    payload: sanitizePayload(payload),
   });
 }
 
@@ -831,8 +928,9 @@ export async function runHomeQuickAction({
   payload = {},
   silent = false,
 } = {}) {
-  const data = safeObject(payload);
+  const data = sanitizePayload(payload);
   const actionName = normalizeKey(action);
+
   const targetRoute = normalizeSpaRoute(
     first(route, data.route, data.href, routeFromAction(actionName), "")
   );
@@ -845,59 +943,28 @@ export async function runHomeQuickAction({
     });
   }
 
-  if (
-    [
-      "create",
-      "new",
-      "create_ticket",
-      "create_incidencia",
-      "new_ticket",
-      "new_incidencia",
-      "nueva_incidencia",
-    ].includes(actionName)
-  ) {
+  if (actionName === "create_incidencia") {
     return createFromHomeAction({
       silent,
       payload: data,
     });
   }
 
-  if (
-    [
-      "copy",
-      "copy_id",
-      "copy_widget_id",
-      "copy_ticket_id",
-      "copy_entity_id",
-    ].includes(actionName)
-  ) {
+  if (actionName === "copy_widget_id") {
     return copyHomeWidgetIdAction({
       widgetId: first(data.widgetId, data.ticketId, data.incidenciaId, data.entityId, data.id, ""),
       silent,
     });
   }
 
-  if (
-    [
-      "export",
-      "export_csv",
-      "download_csv",
-    ].includes(actionName)
-  ) {
+  if (actionName === "export_csv") {
     return exportHomeCsvAction({
       ...data,
       silent,
     });
   }
 
-  if (
-    [
-      "refresh",
-      "retry",
-      "reload",
-      "actualizar",
-    ].includes(actionName)
-  ) {
+  if (actionName === "refresh" || actionName === "retry") {
     return true;
   }
 
@@ -922,7 +989,11 @@ export function getHomeActionsSnapshot() {
 
     router: {
       hasCandidates: getRouterCandidates().length > 0,
-      hasAppCoreNavigate: isFunction(AppCore?.navigate),
+      usesNavigate: true,
+      usesReplace: true,
+      usesPush: false,
+      usesGo: false,
+      usesAppCoreNavigate: false,
     },
 
     store: {
@@ -936,14 +1007,33 @@ export function getHomeActionsSnapshot() {
     },
 
     policy: {
+      actionsOnly: true,
+
       noFetch: true,
       noApiCalls: true,
       noStorage: true,
       noEvents: true,
       noGlobals: true,
+      noAuth: true,
+      noCss: true,
+
       noHomeAlias: true,
       noCreateRoute: true,
+      noRouteAliasesLegacy: true,
+
+      noRouterPushLegacy: true,
+      noRouterGoLegacy: true,
+      noAppCoreNavigate: true,
       noManualHistoryFallback: true,
+
+      rejectsSensitiveRoutes: true,
+      rejectsSensitiveClipboard: true,
+      sanitizesPayload: true,
+      csvExcludesEmail: true,
+      csvRedacted: true,
+
+      routesFromConfig: true,
+      toastViaAppCoreOnly: true,
     },
 
     routes: {
@@ -968,7 +1058,7 @@ export function getHomeWidgetIdAction(item = {}) {
 }
 
 export function normalizeHomeDashboardAction(payload = {}) {
-  return normalizeHomeDashboard(payload);
+  return normalizeHomeDashboard(sanitizePayload(payload));
 }
 
 /* =========================================================

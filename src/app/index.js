@@ -9,7 +9,7 @@
    - Iniciar Toast.
    - Iniciar Auth.
    - Restaurar sesión ANTES del primer render Router.
-   - Iniciar Router sin render automático.
+   - Delegar Router en /src/app/router.js.
    - Renderizar ruta inicial capturada por main.js.
    - Iniciar Sidebar/Topbar después de ruta + auth.
    - Refrescar textos i18n.
@@ -44,7 +44,12 @@ import {
   markShellBusy,
 } from "./shell.js";
 
-export const APP_INDEX_VERSION = "app.index.v3";
+import {
+  configureRouter,
+  renderInitialRoute as renderRouterInitialRoute,
+} from "./router.js";
+
+export const APP_INDEX_VERSION = "app.index.v4";
 
 let bootPromise = null;
 let ready = false;
@@ -108,8 +113,15 @@ function createBootPayload(options = {}) {
       ...(isObject(input.bootContext) ? input.bootContext : {}),
       initialPath,
     },
+  };
+}
+
+function withCore(payload = {}, extra = {}) {
+  return {
+    ...payload,
     AppCore,
     core: AppCore,
+    ...extra,
   };
 }
 
@@ -138,54 +150,17 @@ async function callOptional(target = null, method = "", payload = {}) {
 }
 
 /* =========================================================
-   APP STATE
-========================================================= */
-
-function setRootState(root = null, state = "booting") {
-  if (!root) return false;
-
-  const value = cleanText(state, "booting");
-  const booting = value === "booting";
-  const readyState = value === "ready";
-  const fatal = value === "fatal";
-
-  root.dataset.appState = value;
-  root.dataset.appLoading = String(booting);
-  root.dataset.appBooting = String(booting);
-  root.dataset.appReady = String(readyState);
-
-  root.classList.toggle("app-booting", booting);
-  root.classList.toggle("app-loading", booting);
-  root.classList.toggle("app-ready", readyState);
-  root.classList.toggle("app-fatal", fatal);
-
-  return true;
-}
-
-function setAppState(state = "booting") {
-  if (!isBrowser()) return false;
-
-  for (const root of [document.documentElement, document.body].filter(Boolean)) {
-    setRootState(root, state);
-  }
-
-  return true;
-}
-
-/* =========================================================
    UI STATE
 ========================================================= */
 
 function setBusy() {
-  setAppState("booting");
   markShellBusy();
-  showLoader();
+  showLoader("booting");
 }
 
 function setReady() {
   markShellReady();
   hideLoader();
-  setAppState("ready");
 }
 
 /* =========================================================
@@ -222,17 +197,16 @@ async function initI18n(payload = {}) {
     I18n.bindCore(AppCore);
   }
 
-  await callRequired(I18n, "init", "I18n", {
-    ...payload,
+  await callRequired(I18n, "init", "I18n", withCore(payload, {
     updateDOM: false,
     updateUi: false,
-  });
+  }));
 
   return I18n;
 }
 
 async function initToast(payload = {}) {
-  await callRequired(Toast, "init", "Toast", payload);
+  await callRequired(Toast, "init", "Toast", withCore(payload));
   return Toast;
 }
 
@@ -249,23 +223,22 @@ function refreshI18nDom() {
    AUTH
 ========================================================= */
 
-function authBootOptions(payload = {}) {
-  return {
-    ...payload,
+function authPayload(payload = {}) {
+  return withCore(payload, {
     skipNavigation: true,
     skipRedirect: true,
     noRedirect: true,
-  };
+  });
 }
 
 async function initAuth(payload = {}) {
-  await callRequired(Auth, "init", "Auth", authBootOptions(payload));
+  await callRequired(Auth, "init", "Auth", authPayload(payload));
   return Auth;
 }
 
 async function restoreAuth(payload = {}) {
-  await callRequired(Auth, "restoreSession", "Auth", authBootOptions(payload));
-  await callOptional(Auth, "syncAuthState", payload);
+  await callRequired(Auth, "restoreSession", "Auth", authPayload(payload));
+  await callOptional(Auth, "syncAuthState", authPayload(payload));
 
   return Auth;
 }
@@ -275,30 +248,19 @@ async function restoreAuth(payload = {}) {
 ========================================================= */
 
 async function initRouter(payload = {}) {
-  await callRequired(Router, "init", "Router", {
-    ...payload,
-    appManagedInitialRender: true,
-    skipInitialRender: true,
-    render: false,
-  });
+  await configureRouter(withCore(payload, {
+    source: "app.router",
+  }));
 
   return Router;
 }
 
 async function renderInitialRoute(payload = {}) {
-  const path = bootPath(payload);
-
-  if (!isFunction(Router?.render)) {
-    throw new Error("Router.render() no disponible.");
-  }
-
-  return Router.render.call(Router, path, {
+  await renderRouterInitialRoute(withCore(payload, {
     source: "app.boot",
-    initialRender: true,
-    preserveUrl: true,
-    replaceState: true,
-    skipHistory: true,
-  });
+  }));
+
+  return Router;
 }
 
 /* =========================================================
@@ -306,15 +268,15 @@ async function renderInitialRoute(payload = {}) {
 ========================================================= */
 
 async function initChrome(payload = {}) {
-  await callRequired(SidebarUI, "init", "SidebarUI", payload);
-  await callRequired(TopbarUI, "init", "TopbarUI", payload);
+  await callRequired(SidebarUI, "init", "SidebarUI", withCore(payload));
+  await callRequired(TopbarUI, "init", "TopbarUI", withCore(payload));
 
   return true;
 }
 
 async function syncChrome(payload = {}) {
-  await callOptional(SidebarUI, "sync", payload);
-  await callOptional(TopbarUI, "sync", payload);
+  await callOptional(SidebarUI, "sync", withCore(payload));
+  await callOptional(TopbarUI, "sync", withCore(payload));
 
   return true;
 }
@@ -341,8 +303,8 @@ async function runBoot(options = {}) {
   await restoreAuth(payload);
 
   /*
-    Router se inicia sin render automático.
-    El render inicial lo controla App después del restore.
+    Router queda delegado en /src/app/router.js.
+    App sólo decide el orden del boot.
   */
   await initRouter(payload);
   await renderInitialRoute(payload);
@@ -369,6 +331,7 @@ async function runBoot(options = {}) {
 export function getAppSnapshot() {
   return {
     version: APP_INDEX_VERSION,
+
     ready,
     booting: Boolean(bootPromise),
     currentPath: redact(currentPath()),
@@ -387,8 +350,10 @@ export function getAppSnapshot() {
       singleEntryPoint: true,
       bootAppContract: true,
       restoresAuthBeforeRouterRender: true,
+      routerDelegatedToAppRouter: true,
       routerManagedInitialRender: false,
       chromeAfterRouteAndAuth: true,
+
       noStore: true,
       noParallelServices: true,
       noWarmup: true,
@@ -423,8 +388,10 @@ export function isReady() {
 
 export const App = {
   version: APP_INDEX_VERSION,
+
   boot: bootApp,
   isReady,
+
   getSnapshot: getAppSnapshot,
 };
 

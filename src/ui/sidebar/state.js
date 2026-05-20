@@ -25,7 +25,7 @@ import {
   setSidebarOpenState,
 } from "./dom.js";
 
-export const SIDEBAR_STATE_VERSION = "sidebar.state.v3";
+export const SIDEBAR_STATE_VERSION = "sidebar.state.v4";
 
 /* =========================================================
    RUNTIME
@@ -45,6 +45,10 @@ const runtime = {
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function contextOf(value = {}) {
@@ -70,6 +74,10 @@ function resolveRoot(root = null) {
   return getSidebarRoot();
 }
 
+/* =========================================================
+   CORE STATE SYNC
+========================================================= */
+
 function ensureCoreState(AppCore = null) {
   if (!isObject(AppCore)) return null;
 
@@ -81,24 +89,58 @@ function ensureCoreState(AppCore = null) {
   }
 }
 
+function createCorePatch(root = runtime.root) {
+  return {
+    sidebarInitialized: runtime.initialized,
+    sidebarMounted: runtime.mounted,
+    sidebarOpen: runtime.open,
+    sidebarCollapsed: !runtime.open,
+    sidebarLogoutInFlight: runtime.logoutInFlight,
+
+    sidebarHasRoot: isElement(root),
+    sidebarRootConnected: isConnected(root),
+    sidebarRootHidden: Boolean(root?.hidden),
+    sidebarRootAriaHidden: root?.getAttribute?.("aria-hidden") || "",
+
+    sidebarStateVersion: SIDEBAR_STATE_VERSION,
+  };
+}
+
 function syncCoreState(AppCore = null) {
+  const root = resolveRoot();
+  const patch = createCorePatch(root);
+
+  if (!isObject(AppCore)) return false;
+
+  try {
+    if (isFunction(AppCore.setState)) {
+      AppCore.setState(patch, {
+        source: "sidebar.state",
+        silent: true,
+        emit: false,
+      });
+
+      return true;
+    }
+  } catch {
+    // fallback abajo
+  }
+
   const state = ensureCoreState(AppCore);
 
   if (!state) return false;
 
   try {
-    state.sidebarInitialized = runtime.initialized;
-    state.sidebarMounted = runtime.mounted;
-    state.sidebarOpen = runtime.open;
-    state.sidebarCollapsed = !runtime.open;
-    state.sidebarLogoutInFlight = runtime.logoutInFlight;
-    state.sidebarStateVersion = SIDEBAR_STATE_VERSION;
-
+    Object.assign(state, patch);
     return true;
   } catch {
     return false;
   }
 }
+
+/* =========================================================
+   ROOT SYNC
+========================================================= */
 
 function syncRootOpen(root = null) {
   const target = resolveRoot(root);
@@ -302,6 +344,7 @@ export function getSidebarState() {
 
     policy: {
       runtimeOnly: true,
+
       noStorage: true,
       noEvents: true,
       noRouter: true,
@@ -311,6 +354,9 @@ export function getSidebarState() {
       noIndicators: true,
       noTooltips: true,
       noDropdownState: true,
+      noStoreOwn: true,
+
+      domDelegatedToDomJs: true,
       noOwnDom: true,
     },
   };

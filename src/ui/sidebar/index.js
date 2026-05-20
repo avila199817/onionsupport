@@ -6,7 +6,7 @@
    - Orquestar el sidebar dentro del SPA.
    - Usar rutas reales desde router/routes.js.
    - Usar template.js para construir DOM.
-   - Usar user.js para normalizar usuario/rol.
+   - Usar user.js para normalizar usuario/rol/avatar view-model.
    - Usar visibility.js para decidir mostrar/ocultar.
    - Usar state.js para estado runtime.
    - Usar actions.js para navegar/logout/open/close.
@@ -15,16 +15,20 @@
    - Home visible: /@{user.slug}.
    - Home interna/canónica: /.
    - Rutas privadas visibles: /@{user.slug}/{ruta}.
+   - Clientes sólo visible para admin.
    - Rebuild limpio del DOM desde template.js en cada sync válido.
    - Sin HTML duplicado.
    - Sin helpers DOM duplicados.
-   - Sin lógica de usuario duplicada.
+   - Sin lógica de usuario/avatar duplicada.
    - Sin navegación propia duplicada.
    - Sin HTTP.
    - Sin Toast.
    - Sin Store propio.
    - Sin /home.
+   - Sin /403.
+   - Sin /404.
    - Sin rutas legacy.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -100,7 +104,16 @@ import {
   unbindSidebarDropdown,
 } from "./dropdown.js";
 
-export const SIDEBAR_UI_VERSION = "sidebar.ui.v7";
+export const SIDEBAR_UI_VERSION = "sidebar.ui.v8";
+
+const BLOCKED_SIDEBAR_PATHS = new Set([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
+]);
 
 let syncing = false;
 
@@ -127,12 +140,15 @@ function firstText(...values) {
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
     String(value || "")
   );
 }
@@ -149,6 +165,22 @@ function normalizeHashPath(path = HOME_ROUTE) {
   }
 
   return value;
+}
+
+function isBlockedSidebarPath(path = "") {
+  const raw = String(path || "").trim();
+
+  if (!raw) return true;
+
+  const normalized = normalizeSidebarPath(raw).split("?")[0].split("#")[0].toLowerCase();
+
+  if (BLOCKED_SIDEBAR_PATHS.has(normalized)) return true;
+
+  return (
+    normalized.startsWith("/2fa/") ||
+    normalized.startsWith("/mfa/") ||
+    normalized.startsWith("/otp/")
+  );
 }
 
 function isUnsafePath(path = "") {
@@ -187,10 +219,13 @@ function safeSidebarPath(path = HOME_ROUTE, fallback = HOME_ROUTE) {
   }
 
   const normalized = normalizeSidebarPath(raw || fallback);
-  const canonical = normalized.split("?")[0].split("#")[0] || HOME_ROUTE;
 
-  if (canonical === "/home") {
-    return normalizeSidebarPath(fallback === "/home" ? HOME_ROUTE : fallback);
+  if (isBlockedSidebarPath(normalized)) {
+    const safeFallback = normalizeSidebarPath(fallback || HOME_ROUTE);
+
+    return isBlockedSidebarPath(safeFallback)
+      ? HOME_ROUTE
+      : safeFallback;
   }
 
   return normalized || normalizeSidebarPath(fallback || HOME_ROUTE);
@@ -215,6 +250,10 @@ function routerPublicPath(path = HOME_ROUTE, context = {}) {
     safeSidebarPath(path || HOME_ROUTE, HOME_ROUTE)
   );
 
+  if (!lookupPath || isBlockedSidebarPath(lookupPath)) {
+    return HOME_ROUTE;
+  }
+
   if (isFunction(Router?.buildPublicPath)) {
     try {
       const built = safeSidebarPath(
@@ -225,7 +264,7 @@ function routerPublicPath(path = HOME_ROUTE, context = {}) {
         ""
       );
 
-      if (built) return built;
+      if (built && !isBlockedSidebarPath(built)) return built;
     } catch {
       // fallback abajo
     }
@@ -278,12 +317,14 @@ function currentPublicPath() {
 
 function currentCanonicalPath() {
   try {
-    return sidebarHomeLookupPath(
+    const path = sidebarHomeLookupPath(
       Router?.getCurrentCanonicalPath?.() ||
         AppCore?.state?.canonicalPath ||
         AppCore?.state?.route ||
         currentPublicPath()
     );
+
+    return isBlockedSidebarPath(path) ? HOME_ROUTE : path;
   } catch {
     return HOME_ROUTE;
   }
@@ -410,6 +451,8 @@ function isActivePath(routePath = HOME_ROUTE, current = currentPublicPath()) {
   const path = sidebarHomeLookupPath(routePath);
   const active = sidebarHomeLookupPath(current);
 
+  if (!path || isBlockedSidebarPath(path)) return false;
+
   if (path === HOME_ROUTE) {
     return active === HOME_ROUTE || isSidebarHomeRoute(current);
   }
@@ -422,7 +465,7 @@ function toSidebarItem(route = null, index = 0, context = getContext()) {
 
   const path = sidebarHomeLookupPath(route.path);
 
-  if (!path || path === "/home") return null;
+  if (!path || isBlockedSidebarPath(path)) return null;
 
   if (isPublicRoute(route, path) || isHiddenRoute(route)) {
     return null;
@@ -461,7 +504,7 @@ function toSidebarItem(route = null, index = 0, context = getContext()) {
 
   const href = routeHref(path, context);
 
-  if (!href || href === "/home") return null;
+  if (!href || isBlockedSidebarPath(href)) return null;
 
   return {
     key: firstText(route.sidebarKey, route.viewKey, route.name, path),
@@ -488,7 +531,9 @@ function sidebarItems(context = getContext()) {
     .filter((item) => {
       const lookupPath = sidebarHomeLookupPath(item.href);
 
-      if (!lookupPath || seen.has(lookupPath)) return false;
+      if (!lookupPath || isBlockedSidebarPath(lookupPath) || seen.has(lookupPath)) {
+        return false;
+      }
 
       seen.add(lookupPath);
       return true;
@@ -667,7 +712,7 @@ function sync() {
 async function navigateTo(path = HOME_ROUTE, options = {}) {
   const target = routeHref(path, getContext());
 
-  if (!target) return false;
+  if (!target || isBlockedSidebarPath(target)) return false;
 
   const ok = await navigateFromSidebar({
     AppCore,
@@ -827,6 +872,16 @@ function getSnapshot() {
           username: context.user.username || null,
           displayName: context.user.displayName,
           role: context.user.role,
+
+          /*
+            Sólo diagnóstico: user.js decide el avatar real.
+          */
+          hasAvatar: Boolean(
+            context.user.avatarUrl ||
+              context.user.avatar ||
+              context.user.picture ||
+              context.user.initials
+          ),
         }
       : null,
 
@@ -847,26 +902,38 @@ function getSnapshot() {
       clearsDomCacheBeforeRender: true,
 
       usesUserViewModel: true,
+      avatarOwnedByUserAndTemplateModules: true,
       usesVisibility: true,
       usesRuntimeState: true,
       usesActions: true,
       usesDelegatedEvents: true,
       usesDropdown: true,
 
+      clientesAdminOnly: true,
+
       userSlugHome: true,
       userScopedPrivateRoutes: true,
+
       noHomeRoute: true,
+      no403Route: true,
+      no404Route: true,
+      no2fa: true,
+      noMfa: true,
+      noOtp: true,
       noSensitiveRoutes: true,
 
       noHtmlDuplicate: true,
       noDomHelpersDuplicate: true,
       noUserLogicDuplicate: true,
+      noAvatarLogicDuplicate: true,
       noNavigationDuplicate: true,
 
       noHttp: true,
       noToast: true,
       noStoreOwn: true,
       noImportSideEffectRegistration: true,
+
+      snapshotRedacted: true,
     },
   };
 }

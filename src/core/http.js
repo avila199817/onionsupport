@@ -5,7 +5,7 @@
    Responsabilidad:
    - Fachada mínima sobre core/request.js.
    - API real única.
-   - Endpoints auth reales.
+   - Endpoints auth reales desde core/config.js.
    - /api/auth/me privado siempre.
    - Enviar Authorization cuando hay token válido.
    - Sin fetch propio.
@@ -19,35 +19,24 @@
    - Sin magia negra.
 ========================================================= */
 
-import { config } from "./config.js";
+import {
+  config,
+  AUTH_ENDPOINTS,
+  PUBLIC_API_PATHS,
+  getApiBase,
+  isCanonicalBackendApiBase,
+  isPublicApiPath,
+} from "./config.js";
 
 import {
   createRequest,
   createApiClient,
 } from "./request.js";
 
-export const HTTP_VERSION = "core.http.v2";
+export const HTTP_VERSION = "core.http.v3";
 
-export const DEFAULT_API_ORIGIN = "https://api.onionit.net";
-export const DEFAULT_TIMEOUT_MS = 30000;
-
-const AUTH_ENDPOINTS = Object.freeze({
-  login: "/api/auth/login",
-  logout: "/api/auth/logout",
-  me: "/api/auth/me",
-  refresh: "/api/auth/refresh",
-  activate: "/api/auth/activate",
-  requestPasswordReset: "/api/auth/reset-password-request",
-  confirmPasswordReset: "/api/auth/reset-password-confirm",
-});
-
-const PUBLIC_ENDPOINTS = Object.freeze([
-  AUTH_ENDPOINTS.login,
-  AUTH_ENDPOINTS.refresh,
-  AUTH_ENDPOINTS.activate,
-  AUTH_ENDPOINTS.requestPasswordReset,
-  AUTH_ENDPOINTS.confirmPasswordReset,
-]);
+export const DEFAULT_API_ORIGIN = getApiBase();
+export const DEFAULT_TIMEOUT_MS = config?.api?.timeout || 30000;
 
 let apiOrigin = normalizeOrigin(
   config?.apiBase ||
@@ -62,7 +51,6 @@ let apiEngine = null;
 
 const runtimeTokens = {
   accessToken: "",
-  refreshToken: "",
 };
 
 const stats = {
@@ -82,13 +70,27 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function text(value = "", fallback = "") {
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
 
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+/* =========================================================
+   ORIGIN
+========================================================= */
+
 function normalizeOrigin(value = "") {
-  const raw = text(value, DEFAULT_API_ORIGIN).replace(/\/+$/g, "");
+  const raw = cleanText(value, DEFAULT_API_ORIGIN).replace(/\/+$/g, "");
 
   try {
     const url = new URL(raw);
@@ -97,8 +99,8 @@ function normalizeOrigin(value = "") {
       return DEFAULT_API_ORIGIN;
     }
 
-    if (url.pathname === "/api") {
-      return url.origin;
+    if (!isCanonicalBackendApiBase(url.origin)) {
+      return DEFAULT_API_ORIGIN;
     }
 
     return url.origin;
@@ -115,15 +117,25 @@ function apiUrlOrigin() {
   }
 }
 
-function redact(value = "") {
-  return String(value || "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+export function getApiOrigin() {
+  return apiOrigin;
 }
 
+export function setApiOrigin(value = "") {
+  apiOrigin = normalizeOrigin(value || DEFAULT_API_ORIGIN);
+
+  requestEngine = null;
+  apiEngine = null;
+
+  return apiOrigin;
+}
+
+/* =========================================================
+   TOKEN
+========================================================= */
+
 function cleanToken(value = "") {
-  const token = text(value, "").replace(/^Bearer\s+/i, "");
+  const token = cleanText(value, "").replace(/^Bearer\s+/i, "");
 
   if (!token) return "";
   if (/\s/.test(token)) return "";
@@ -150,8 +162,77 @@ function getState() {
   return isObject(appCore?.state) ? appCore.state : {};
 }
 
+export function getAccessToken() {
+  const state = getState();
+
+  return cleanToken(
+    state.token ||
+      state.accessToken ||
+      state.access_token ||
+      runtimeTokens.accessToken ||
+      ""
+  );
+}
+
+export function setAccessToken(token = "") {
+  const value = cleanToken(token);
+  const state = getState();
+
+  runtimeTokens.accessToken = value;
+
+  if (!value) {
+    delete state.token;
+    delete state.accessToken;
+    delete state.access_token;
+
+    state.hasToken = false;
+
+    return "";
+  }
+
+  state.token = value;
+  state.accessToken = value;
+  state.access_token = value;
+  state.hasToken = true;
+
+  return value;
+}
+
+export function setAuthTokens(payload = {}) {
+  const token =
+    payload?.token ||
+    payload?.accessToken ||
+    payload?.access_token ||
+    "";
+
+  const access = setAccessToken(token);
+
+  return {
+    token: access || "",
+    accessToken: access || "",
+  };
+}
+
+export function clearAuthTokens() {
+  const state = getState();
+
+  runtimeTokens.accessToken = "";
+
+  delete state.token;
+  delete state.accessToken;
+  delete state.access_token;
+
+  state.hasToken = false;
+
+  return true;
+}
+
+/* =========================================================
+   ENDPOINTS
+========================================================= */
+
 function endpointToPath(endpoint = "/") {
-  const raw = text(endpoint, "/");
+  const raw = cleanText(endpoint, "/");
 
   if (!raw) return "/";
   if (raw.startsWith("//")) return "/";
@@ -180,7 +261,7 @@ function endpointToPath(endpoint = "/") {
   return path.split("#")[0] || "/";
 }
 
-function cleanPath(endpoint = "/") {
+function endpointCleanPath(endpoint = "/") {
   return endpointToPath(endpoint).split("?")[0] || "/";
 }
 
@@ -191,24 +272,36 @@ function appendQuery(url = "", query = null) {
 
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === null || value === "") continue;
+
     parsed.searchParams.set(key, String(value));
   }
 
   return parsed.toString();
 }
 
-function isPublicEndpoint(endpoint = "") {
-  const clean = cleanPath(endpoint);
+export function buildApiUrl(endpoint = "/", options = {}) {
+  const path = endpointToPath(endpoint);
+  return appendQuery(`${apiOrigin}${path}`, options.query || options.params);
+}
+
+export function redactHttpText(value = "") {
+  return redact(value);
+}
+
+function endpointIsMe(endpoint = "") {
+  return endpointCleanPath(endpoint) === AUTH_ENDPOINTS.me;
+}
+
+function endpointIsPublic(endpoint = "") {
+  const clean = endpointCleanPath(endpoint);
 
   if (clean === AUTH_ENDPOINTS.me) return false;
 
-  return PUBLIC_ENDPOINTS.includes(clean);
+  return isPublicApiPath(clean);
 }
 
 function shouldUseAuth(endpoint = "", options = {}) {
-  const clean = cleanPath(endpoint);
-
-  if (clean === AUTH_ENDPOINTS.me) return true;
+  if (endpointIsMe(endpoint)) return true;
 
   if (
     options.auth === false ||
@@ -221,144 +314,7 @@ function shouldUseAuth(endpoint = "", options = {}) {
 
   if (options.auth === true) return true;
 
-  return !isPublicEndpoint(clean);
-}
-
-/* =========================================================
-   ORIGIN / URL
-========================================================= */
-
-export function getApiOrigin() {
-  return apiOrigin;
-}
-
-export function setApiOrigin(value = "") {
-  apiOrigin = normalizeOrigin(value || DEFAULT_API_ORIGIN);
-  requestEngine = null;
-  apiEngine = null;
-
-  return apiOrigin;
-}
-
-export function buildApiUrl(endpoint = "/", options = {}) {
-  const path = endpointToPath(endpoint);
-  return appendQuery(`${apiOrigin}${path}`, options.query || options.params);
-}
-
-export function redactHttpText(value = "") {
-  return redact(value);
-}
-
-/* =========================================================
-   TOKEN
-========================================================= */
-
-export function getAccessToken() {
-  const state = getState();
-
-  return cleanToken(
-    state.token ||
-      state.accessToken ||
-      state.access_token ||
-      runtimeTokens.accessToken ||
-      ""
-  );
-}
-
-export function getRefreshToken() {
-  const state = getState();
-
-  return cleanToken(
-    state.refreshToken ||
-      state.refresh_token ||
-      runtimeTokens.refreshToken ||
-      ""
-  );
-}
-
-export function setAccessToken(token = "") {
-  const value = cleanToken(token);
-  const state = getState();
-
-  runtimeTokens.accessToken = value;
-
-  if (!value) {
-    delete state.token;
-    delete state.accessToken;
-    delete state.access_token;
-    state.hasToken = false;
-    return "";
-  }
-
-  state.token = value;
-  state.accessToken = value;
-  state.access_token = value;
-  state.hasToken = true;
-
-  return value;
-}
-
-export function setAuthTokens(payload = {}) {
-  const token =
-    payload.token ||
-    payload.accessToken ||
-    payload.access_token ||
-    "";
-
-  const refreshToken =
-    payload.refreshToken ||
-    payload.refresh_token ||
-    "";
-
-  const access = setAccessToken(token);
-  const refresh = cleanToken(refreshToken);
-  const state = getState();
-
-  runtimeTokens.refreshToken = refresh;
-
-  if (refresh) {
-    state.refreshToken = refresh;
-    state.refresh_token = refresh;
-  } else {
-    delete state.refreshToken;
-    delete state.refresh_token;
-  }
-
-  return {
-    token: access || "",
-    accessToken: access || "",
-    refreshToken: refresh || "",
-  };
-}
-
-export function clearAuthTokens() {
-  const state = getState();
-
-  runtimeTokens.accessToken = "";
-  runtimeTokens.refreshToken = "";
-
-  delete state.token;
-  delete state.accessToken;
-  delete state.access_token;
-  delete state.refreshToken;
-  delete state.refresh_token;
-
-  state.hasToken = false;
-
-  return true;
-}
-
-/*
-  Compat controlada.
-  La fuente real del token debe venir por AppCore.state,
-  por options.token o por setAuthTokens().
-*/
-export function setTokenProvider() {
-  return true;
-}
-
-export function setAuthPayloadCommitter() {
-  return true;
+  return !endpointIsPublic(endpoint);
 }
 
 /* =========================================================
@@ -389,6 +345,14 @@ function ensureEngines() {
       requestEngine,
       apiEngine,
     };
+  }
+
+  if (!isFunction(createRequest)) {
+    throw new Error("createRequest() no disponible.");
+  }
+
+  if (!isFunction(createApiClient)) {
+    throw new Error("createApiClient() no disponible.");
   }
 
   requestEngine = createRequest({
@@ -436,6 +400,10 @@ function normalizeRequestArgs(first = "/", second = {}, third = {}) {
   };
 }
 
+function requestMethod(options = {}) {
+  return cleanText(options.method, "GET").toUpperCase();
+}
+
 function buildAuthHeaders(options = {}, token = "") {
   const headers = {
     ...(isObject(options.headers) ? options.headers : {}),
@@ -452,9 +420,9 @@ function buildAuthHeaders(options = {}, token = "") {
   return headers;
 }
 
-function requestMethod(options = {}) {
-  return text(options.method, "GET").toUpperCase();
-}
+/* =========================================================
+   REQUEST
+========================================================= */
 
 export async function request(first = "/", second = {}, third = {}) {
   const parsed = normalizeRequestArgs(first, second, third);
@@ -478,6 +446,7 @@ export async function request(first = "/", second = {}, third = {}) {
 
     query: undefined,
     params: undefined,
+    token: undefined,
 
     method,
 
@@ -486,7 +455,6 @@ export async function request(first = "/", second = {}, third = {}) {
     skipAuth: !auth,
     noAuthHeader: !auth,
 
-    token,
     headers,
   };
 
@@ -689,27 +657,11 @@ export function installHttp(AppCore = null, options = {}) {
   apiEngine = null;
 
   if (isObject(appCore)) {
-    try {
-      appCore.http = Http;
-      appCore.Http = Http;
-    } catch {
-      // noop
-    }
-
-    try {
-      appCore.services = isObject(appCore.services) ? appCore.services : {};
+    if (isObject(appCore.services)) {
       appCore.services.http = Http;
-      appCore.services.Http = Http;
-    } catch {
-      // noop
     }
 
-    try {
-      appCore.modules?.register?.("Http", Http);
-      appCore.modules?.register?.("http", Http);
-    } catch {
-      // noop
-    }
+    appCore.modules?.register?.("http", Http);
   }
 
   return Http;
@@ -733,7 +685,6 @@ export function getHttpSnapshot() {
     hasApiEngine: Boolean(apiEngine),
 
     hasAccessToken: Boolean(getAccessToken()),
-    hasRefreshToken: Boolean(getRefreshToken()),
 
     stats: {
       ...stats,
@@ -748,11 +699,13 @@ export function getHttpSnapshot() {
     },
 
     endpoints: AUTH_ENDPOINTS,
-    publicEndpoints: PUBLIC_ENDPOINTS,
+    publicEndpoints: PUBLIC_API_PATHS,
 
     policy: {
       facadeOnly: true,
       singleHttpFacade: true,
+
+      configIsSourceOfEndpoints: true,
 
       noOwnFetch: true,
       noOwnParser: true,
@@ -767,7 +720,8 @@ export function getHttpSnapshot() {
       mePrivate: true,
       blocksExternalEndpoints: true,
 
-      tokenRuntimeOnly: true,
+      accessTokenMemoryOnly: true,
+      noRefreshTokenStorage: true,
       snapshotRedacted: true,
     },
   };
@@ -820,15 +774,11 @@ export const Http = {
   requestPasswordReset,
   confirmPasswordReset,
 
-  setTokenProvider,
-  setAuthPayloadCommitter,
-
   setAccessToken,
   setAuthTokens,
   clearAuthTokens,
 
   getAccessToken,
-  getRefreshToken,
 
   install: installHttp,
 

@@ -11,6 +11,7 @@
    - Resolver usuario/rol admin-user.
    - Home distinto para admin/user.
    - User nunca expone users/clientes.
+   - Rutas base desde core/config.js.
    - Sin fetch.
    - Sin Auth.
    - Sin Router.
@@ -18,7 +19,13 @@
    - Sin CSS inline.
    - Sin rutas inventadas.
    - Sin /home.
+   - Sin emails como identidad.
+   - Sin raw/data/payload/response en salidas normalizadas.
 ========================================================= */
+
+import {
+  ROUTES as CORE_ROUTES,
+} from "../../core/config.js";
 
 import {
   normalizeHomeDashboard,
@@ -31,7 +38,7 @@ import {
   buildHomeActivityFromCollections,
 } from "./home.model.js";
 
-export const HOME_SELECTORS_VERSION = "home.selectors.v3";
+export const HOME_SELECTORS_VERSION = "home.selectors.v4";
 
 /* =========================================================
    CONSTANTS
@@ -42,13 +49,13 @@ export const DEFAULT_CURRENCY = "EUR";
 export const DEFAULT_LOCALE = "es-ES";
 
 export const HOME_ROUTES = Object.freeze({
-  HOME: "/",
-  INCIDENCIAS: "/incidencias",
-  FACTURAS: "/facturas",
-  CLIENTES: "/clientes",
-  USUARIOS: "/usuarios",
-  CUENTA: "/cuenta",
-  AJUSTES: "/ajustes",
+  HOME: CORE_ROUTES.home || CORE_ROUTES.root || "/",
+  INCIDENCIAS: CORE_ROUTES.incidencias || "/incidencias",
+  FACTURAS: CORE_ROUTES.facturas || "/facturas",
+  CLIENTES: CORE_ROUTES.clientes || "/clientes",
+  USUARIOS: CORE_ROUTES.usuarios || "/usuarios",
+  CUENTA: CORE_ROUTES.cuenta || "/cuenta",
+  AJUSTES: CORE_ROUTES.ajustes || "/ajustes",
 });
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
@@ -65,6 +72,16 @@ const ADMIN_ACTIVITY_TYPES = new Set([
   "usuario",
   "member",
 ]);
+
+const RAW_KEYS = new Set([
+  "raw",
+  "data",
+  "payload",
+  "response",
+]);
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
 
 /* =========================================================
    SAFE HELPERS
@@ -221,26 +238,156 @@ export function isSameIdentity(a = "", b = "") {
   return Boolean(left && right && left === right);
 }
 
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function sanitizeValue(value, keyHint = "") {
+  if (RAW_KEYS.has(keyHint)) return undefined;
+  if (isSensitiveKey(keyHint)) return undefined;
+
+  if (typeof value === "string") {
+    return redact(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (RAW_KEYS.has(key)) continue;
+      if (isSensitiveKey(key)) continue;
+
+      const clean = sanitizeValue(item, key);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  return value;
+}
+
+function sanitizeObject(value = {}) {
+  return safeObject(sanitizeValue(value), {});
+}
+
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
+function normalizeHashPath(value = "") {
+  const raw = safeText(value, "");
+
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
+  if (raw.startsWith("#/")) return raw.slice(1) || "/";
+
+  return raw;
+}
+
 export function normalizeRoute(route = "") {
-  const raw = safeText(route, "");
+  let raw = normalizeHashPath(route);
 
   if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (hasSensitiveQuery(raw)) return "";
 
   const lower = raw.toLowerCase();
 
   if (
-    lower === "/home" ||
     lower.startsWith("javascript:") ||
     lower.startsWith("data:") ||
     lower.startsWith("vbscript:") ||
     lower.startsWith("mailto:") ||
     lower.startsWith("tel:") ||
+    lower.startsWith("file:") ||
+    lower.startsWith("blob:") ||
     /^https?:\/\//i.test(raw)
   ) {
     return "";
   }
 
-  return raw.startsWith("/") ? raw : `/${raw}`;
+  if (!raw.startsWith("/")) {
+    raw = `/${raw}`;
+  }
+
+  raw = raw.replace(/\/{2,}/g, "/");
+
+  const canonical = raw.split("?")[0].split("#")[0];
+
+  if (canonical === "/home") return "";
+
+  return raw;
+}
+
+function safeImageSrc(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+
+  if (raw.startsWith("/") && !raw.startsWith("//") && !hasSensitiveQuery(raw)) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (/^https:\/\//i.test(raw) && !hasSensitiveQuery(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
+}
+
+function sanitizeSummaryForRole(summary = {}, admin = false) {
+  const output = {
+    ...safeObject(summary),
+  };
+
+  if (!admin) {
+    output.usersCount = 0;
+    output.usuariosCount = 0;
+    output.totalUsers = 0;
+    output.totalUsuarios = 0;
+    output.usersTotal = 0;
+    output.usuariosTotal = 0;
+    output.visibleUsersCount = 0;
+    output.visibleUsuariosCount = 0;
+
+    output.clientsCount = 0;
+    output.clientesCount = 0;
+    output.customersCount = 0;
+    output.totalClients = 0;
+    output.totalClientes = 0;
+    output.totalCustomers = 0;
+    output.clientsTotal = 0;
+    output.clientesTotal = 0;
+    output.customersTotal = 0;
+    output.visibleClientsCount = 0;
+    output.visibleClientesCount = 0;
+    output.visibleCustomersCount = 0;
+  }
+
+  return output;
 }
 
 /* =========================================================
@@ -465,7 +612,21 @@ export function formatLastUpdate(value = null) {
 ========================================================= */
 
 export function normalizeRole(value = "") {
-  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = String(value || "").toLowerCase();
+
+  if (role === "admin") return "admin";
+  if (role === "user") return "user";
+
+  return "user";
 }
 
 export function isAdminRole(role = "") {
@@ -479,7 +640,7 @@ export function isUserRole(role = "") {
 export function getDashboard(input = {}) {
   const data = safeObject(input);
 
-  return safeObject(
+  return sanitizeObject(
     first(
       data.dashboard,
       data.state?.dashboard,
@@ -500,11 +661,76 @@ export function getNormalizedDashboard(input = {}) {
   }
 }
 
+function publicUser(user = {}) {
+  const raw = sanitizeObject(user);
+
+  const role = normalizeRole(
+    first(
+      raw.role,
+      raw.rol,
+      raw.roles,
+      "user"
+    )
+  );
+
+  const displayName = safeText(
+    first(
+      raw.displayName,
+      raw.fullName,
+      raw.name,
+      raw.nombre,
+      raw.profile?.displayName,
+      raw.profile?.fullName,
+      raw.profile?.name,
+      raw.username,
+      raw.userName,
+      raw.slug,
+      raw.lookup?.slug
+    ),
+    "Usuario"
+  );
+
+  const avatarUrl = safeImageSrc(
+    first(
+      raw.avatar,
+      raw.avatarUrl,
+      raw.avatar_url,
+      raw.photo,
+      raw.photoUrl,
+      raw.photoURL,
+      raw.picture,
+      raw.profile?.avatar,
+      raw.profile?.avatarUrl
+    )
+  );
+
+  return {
+    id: safeText(first(raw.id, raw.userId), ""),
+    userId: safeText(first(raw.userId, raw.id), ""),
+    username: safeText(first(raw.username, raw.userName), ""),
+    userName: safeText(first(raw.userName, raw.username), ""),
+    slug: safeText(first(raw.slug, raw.lookup?.slug, raw.profile?.slug), ""),
+
+    displayName,
+    fullName: safeText(first(raw.fullName, displayName), displayName),
+    name: safeText(first(raw.name, displayName), displayName),
+    nombre: safeText(first(raw.nombre, displayName), displayName),
+
+    avatar: avatarUrl,
+    avatarUrl,
+    picture: avatarUrl,
+
+    role,
+    rol: role,
+    roles: [role],
+  };
+}
+
 export function getUser(input = {}) {
   const data = safeObject(input);
   const dashboard = getDashboard(data);
 
-  return safeObject(
+  return publicUser(
     first(
       data.user,
       data.currentUser,
@@ -531,10 +757,12 @@ export function getRole(input = {}) {
       data.currentRole,
       data.state?.role,
       data.state?.userRole,
+      data.state?.roles,
       dashboard.role,
       dashboard.meta?.role,
       user.role,
       user.rol,
+      user.roles,
       "user"
     )
   );
@@ -554,7 +782,7 @@ export function getDisplayName(input = {}) {
       user.name,
       user.nombre,
       user.username,
-      user.email
+      user.slug
     ),
     "Usuario"
   );
@@ -562,19 +790,7 @@ export function getDisplayName(input = {}) {
 
 export function getAvatarUrl(input = {}) {
   const user = getUser(input);
-
-  return safeText(
-    first(
-      user.avatar,
-      user.avatarUrl,
-      user.avatar_url,
-      user.photo,
-      user.photoUrl,
-      user.photoURL,
-      user.picture
-    ),
-    ""
-  );
+  return safeImageSrc(first(user.avatarUrl, user.avatar, user.picture, ""));
 }
 
 export function getInitials(value = "") {
@@ -598,25 +814,29 @@ export function getInitials(value = "") {
 export function getSummary(input = {}) {
   const data = safeObject(input);
   const dashboard = getDashboard(data);
+  const admin = isAdminRole(getRole(data));
 
-  return safeObject(
-    first(
-      data.summary,
-      data.stats,
-      data.metrics,
-      data.totals,
-      data.counts,
+  return sanitizeSummaryForRole(
+    sanitizeObject(
+      first(
+        data.summary,
+        data.stats,
+        data.metrics,
+        data.totals,
+        data.counts,
 
-      data.state?.summary,
-      data.state?.stats,
+        data.state?.summary,
+        data.state?.stats,
 
-      dashboard.summary,
-      dashboard.stats,
-      dashboard.metrics,
-      dashboard.totals,
-      dashboard.counts,
-      {}
-    )
+        dashboard.summary,
+        dashboard.stats,
+        dashboard.metrics,
+        dashboard.totals,
+        dashboard.counts,
+        {}
+      )
+    ),
+    admin
   );
 }
 
@@ -910,25 +1130,16 @@ export function getTicketOwnerName(item = {}) {
   );
 }
 
-export function getTicketOwnerEmail(item = {}) {
-  return safeText(
-    first(
-      item.clientEmail,
-      item.clienteEmail,
-      item.email,
-      item.emailCliente,
-      item.requesterSnapshot?.email,
-      item.cliente?.email,
-      item.client?.email,
-      item.customer?.email,
-      item.user?.email
-    ),
-    ""
-  ).toLowerCase();
+export function getTicketOwnerEmail() {
+  /*
+    Compat selector.
+    Home no expone emails en UI ni los usa como identidad.
+  */
+  return "";
 }
 
 export function getTicketAvatarUrl(item = {}) {
-  return safeText(
+  return safeImageSrc(
     first(
       item.clientAvatar,
       item.avatar,
@@ -943,8 +1154,7 @@ export function getTicketAvatarUrl(item = {}) {
       item.client?.avatarUrl,
       item.user?.avatar,
       item.user?.avatarUrl
-    ),
-    ""
+    )
   );
 }
 
@@ -1029,7 +1239,7 @@ export function getTicketAssignedTo(item = {}) {
   );
 
   if (isObject(assigned)) {
-    return safeText(first(assigned.name, assigned.nombre, assigned.displayName, assigned.email, assigned.id), "Sin asignar");
+    return safeText(first(assigned.name, assigned.nombre, assigned.displayName, assigned.id), "Sin asignar");
   }
 
   return safeText(assigned, "Sin asignar");
@@ -1104,7 +1314,7 @@ export function isInvoicePendingLike(item = {}) {
 }
 
 export function getUserId(item = {}) {
-  return safeText(first(item.userId, item.usuarioId, item.id, item._id, item.email, item.username), "");
+  return safeText(first(item.userId, item.usuarioId, item.id, item._id, item.username), "");
 }
 
 export function getUserUniqueKey(item = {}, index = 0) {
@@ -1121,7 +1331,7 @@ export function isActiveUser(item = {}) {
 }
 
 export function getClientId(item = {}) {
-  return safeText(first(item.clienteId, item.clientId, item.customerId, item.id, item._id, item.email), "");
+  return safeText(first(item.clienteId, item.clientId, item.customerId, item.id, item._id), "");
 }
 
 export function getClientUniqueKey(item = {}, index = 0) {
@@ -1504,7 +1714,7 @@ export function getPagination(items = [], input = {}) {
 ========================================================= */
 
 export function buildHomeTemplateData(input = {}) {
-  const data = safeObject(input);
+  const data = sanitizeObject(input);
   const dashboard = getNormalizedDashboard(data);
   const role = getRole({ ...data, dashboard });
   const admin = isAdminRole(role);
@@ -1550,7 +1760,7 @@ export function buildHomeTemplateData(input = {}) {
   const user = getUser(data);
   const displayName = getDisplayName(data);
 
-  return {
+  return sanitizeObject({
     version: HOME_SELECTORS_VERSION,
 
     user,
@@ -1614,7 +1824,7 @@ export function buildHomeTemplateData(input = {}) {
       errorsCount: safeArray(dashboard.errors).length,
       canSeeUsers: admin,
     },
-  };
+  });
 }
 
 /* =========================================================

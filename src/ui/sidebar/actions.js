@@ -12,6 +12,7 @@
    - Logout usando Auth si existe.
    - Cerrar sidebar durante logout.
    - Redirigir a /login tras logout.
+   - Rechazar rutas legacy/sensibles.
    - Sin DOM manual.
    - Sin eventos propios.
    - Sin storage.
@@ -22,6 +23,8 @@
    - Sin mobile magic.
    - Sin route aliases.
    - Sin /home.
+   - Sin /403.
+   - Sin /404.
    - Sin 2FA/MFA/OTP.
    - Sin limpieza masiva.
 ========================================================= */
@@ -30,6 +33,8 @@ import {
   HOME_ROUTE,
   LOGIN_ROUTE,
   SIDEBAR_SOURCE,
+  getSidebarUserScopedRouteInfo,
+  isSidebarBlockedRoute,
   normalizeSidebarPath,
 } from "./constants.js";
 
@@ -44,7 +49,7 @@ import {
   toggleSidebar as toggleRuntimeSidebar,
 } from "./state.js";
 
-export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v5";
+export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v6";
 
 /* =========================================================
    BASICS
@@ -59,7 +64,11 @@ function isFunction(value) {
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -84,7 +93,10 @@ function navigationOk(result = null) {
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -144,7 +156,7 @@ function shouldReplace(context = {}) {
 ========================================================= */
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
     String(value || "")
   );
 }
@@ -162,17 +174,44 @@ function isSafeInternalPath(path = "") {
   );
 }
 
+function isBlockedTargetPath(path = "") {
+  const normalized = normalizeSidebarPath(path).split("?")[0].split("#")[0] || HOME_ROUTE;
+
+  if (isSidebarBlockedRoute(normalized)) return true;
+
+  const scoped = getSidebarUserScopedRouteInfo(normalized);
+
+  if (scoped?.blocked === true) return true;
+
+  /*
+    Bloquea /@slug/home, /@slug/2fa, etc.
+    Router no debe recibir aliases legacy disfrazados bajo el scope público.
+  */
+  if (scoped?.scoped === true && scoped.restPath) {
+    return isSidebarBlockedRoute(scoped.restPath);
+  }
+
+  return false;
+}
+
 export function getSafeSidebarTarget(target = "", fallback = "") {
   const raw = text(target, "");
 
   if (!isSafeInternalPath(raw)) {
-    return fallback ? normalizeSidebarPath(fallback) : "";
+    const fallbackTarget = fallback ? normalizeSidebarPath(fallback) : "";
+    return fallbackTarget && !isBlockedTargetPath(fallbackTarget) ? fallbackTarget : "";
   }
 
   const normalized = normalizeSidebarPath(raw);
 
   if (!isSafeInternalPath(normalized)) {
-    return fallback ? normalizeSidebarPath(fallback) : "";
+    const fallbackTarget = fallback ? normalizeSidebarPath(fallback) : "";
+    return fallbackTarget && !isBlockedTargetPath(fallbackTarget) ? fallbackTarget : "";
+  }
+
+  if (isBlockedTargetPath(normalized)) {
+    const fallbackTarget = fallback ? normalizeSidebarPath(fallback) : "";
+    return fallbackTarget && !isBlockedTargetPath(fallbackTarget) ? fallbackTarget : "";
   }
 
   return normalized;
@@ -265,6 +304,10 @@ async function navigateWithRouter(path = HOME_ROUTE, context = {}) {
 
   if (!router) return false;
 
+  const target = getSafeSidebarTarget(path, "");
+
+  if (!target) return false;
+
   const payload = {
     source: actionSource(ctx),
     replaceState: replace,
@@ -272,11 +315,11 @@ async function navigateWithRouter(path = HOME_ROUTE, context = {}) {
   };
 
   if (replace && isFunction(router.replace)) {
-    return navigationOk(await router.replace(path, payload));
+    return navigationOk(await router.replace(target, payload));
   }
 
   if (isFunction(router.navigate)) {
-    return navigationOk(await router.navigate(path, payload));
+    return navigationOk(await router.navigate(target, payload));
   }
 
   return false;
@@ -327,7 +370,9 @@ async function clearAuthSession(context = {}) {
         noRedirect: true,
       });
 
-      return navigationOk(result);
+      if (navigationOk(result)) {
+        return true;
+      }
     }
   } catch {
     // fallback abajo
@@ -469,11 +514,15 @@ export function getSidebarActionsSnapshot() {
 
       buildsPublicTargetsWithRouter: true,
       rejectsSensitiveTargets: true,
+      rejectsLegacyTargets: true,
+      rejectsScopedLegacyTargets: true,
 
       userScopedPrivateRoutes: true,
 
       noRouteAliases: true,
       noHomeRoute: true,
+      no403Route: true,
+      no404Route: true,
 
       no2fa: true,
       noMfa: true,

@@ -31,7 +31,13 @@
    - Sin Toast.
 ========================================================= */
 
-export const ROUTES_VERSION = "routes.v3";
+import {
+  ROUTES,
+  PUBLIC_ROUTES,
+  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
+} from "../core/config.js";
+
+export const ROUTES_VERSION = "routes.v4";
 
 const ROUTE_SOURCE = "router.routes";
 
@@ -40,24 +46,24 @@ const ROUTE_SOURCE = "router.routes";
 ========================================================= */
 
 export const ROUTE_PATHS = Object.freeze({
-  HOME: "/",
+  HOME: ROUTES.home || ROUTES.root || "/",
 
-  INCIDENCIAS: "/incidencias",
-  FACTURAS: "/facturas",
-  CLIENTES: "/clientes",
-  CUENTA: "/cuenta",
-  AJUSTES: "/ajustes",
+  INCIDENCIAS: ROUTES.incidencias || "/incidencias",
+  FACTURAS: ROUTES.facturas || "/facturas",
+  CLIENTES: ROUTES.clientes || "/clientes",
+  CUENTA: ROUTES.cuenta || "/cuenta",
+  AJUSTES: ROUTES.ajustes || "/ajustes",
 
-  USUARIOS: "/usuarios",
-  SERVIDOR: "/servidor",
+  USUARIOS: ROUTES.usuarios || "/usuarios",
+  SERVIDOR: ROUTES.servidor || "/servidor",
 
-  LOGIN: "/login",
-  PASSWORD_REQUEST: "/password-request",
-  PASSWORD_RESET: "/password-reset",
-  ACTIVATE_ACCOUNT: "/activate-account",
+  LOGIN: ROUTES.login || "/login",
+  PASSWORD_REQUEST: ROUTES.passwordRequest || "/password-request",
+  PASSWORD_RESET: ROUTES.passwordReset || "/password-reset",
+  ACTIVATE_ACCOUNT: ROUTES.activateAccount || "/activate-account",
 });
 
-export const USER_HOME_PREFIX = "/@";
+export const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
 export const ROUTE_NAMES = Object.freeze({
   HOME: "home",
@@ -351,10 +357,6 @@ export function getUserScopedRouteInfo(path = "/") {
   });
 }
 
-/*
-  Nombre legacy conservado por compatibilidad:
-  devuelve slug para cualquier ruta /@slug o /@slug/ruta_privada.
-*/
 export function getUserHomeSlugFromPath(path = "/") {
   const info = getUserScopedRouteInfo(path);
   return info.scoped && info.routable ? info.slug : "";
@@ -492,14 +494,14 @@ async function loadView(viewKey = "") {
   return VIEW_CACHE.get(key);
 }
 
-function resolveRenderer(view) {
+function resolveRenderer(view, viewKey = "") {
   if (isFunction(view)) return view;
   if (isFunction(view?.render)) return view.render.bind(view);
   if (isFunction(view?.init)) return view.init.bind(view);
   if (isFunction(view?.mount)) return view.mount.bind(view);
   if (isFunction(view?.bootstrap)) return view.bootstrap.bind(view);
 
-  return () => null;
+  throw new Error(`Router: la vista "${viewKey}" no expone render/init/mount/bootstrap.`);
 }
 
 function createLazyRender(viewKey = "", viewName = "") {
@@ -508,7 +510,7 @@ function createLazyRender(viewKey = "", viewName = "") {
 
   async function render(root = null, context = {}) {
     const view = await loadView(finalViewKey);
-    const renderer = resolveRenderer(view);
+    const renderer = resolveRenderer(view, finalViewKey);
 
     const ctx = {
       ...(isObject(context) ? context : {}),
@@ -595,68 +597,95 @@ function createRoute({
   const meta = freeze({
     version: ROUTES_VERSION,
     source: ROUTE_SOURCE,
+
     path: finalPath,
     canonicalPath: finalPath,
+
     public: finalPublic,
     private: !finalPublic,
     requiresAuth: !finalPublic,
+
     guestOnly: Boolean(guestOnly),
     publicOnly: Boolean(guestOnly),
+
     roles: finalRoles,
+
     admin: adminOnly,
     adminOnly,
     requiresAdmin: adminOnly,
+
     hideShell,
     shell: !hideShell,
     showShell: !hideShell,
     layout: hideShell ? "auth" : "app",
     authScreen: hideShell,
+
     sidebar: !finalPublic,
     showInSidebar: !finalPublic,
+
     viewKey: finalViewKey,
     viewName: finalViewName,
     sidebarKey: finalViewKey,
+
     routeGroup: finalPublic ? "auth" : "app",
+
     tokenRoute: finalTokenRoute,
     preserveSearch: finalPublic || finalTokenRoute,
     preserveHash: finalPublic || finalTokenRoute,
+
     order: number(order, 0),
   });
 
   return freeze({
     id: routeId(finalPath, finalName),
+
     version: ROUTES_VERSION,
     source: ROUTE_SOURCE,
+
     path: finalPath,
     canonicalPath: finalPath,
+
     name: finalName,
+
     viewKey: finalViewKey,
     viewName: finalViewName,
     sidebarKey: finalViewKey,
+
     title: text(title, finalName),
+
     public: finalPublic,
     private: !finalPublic,
     requiresAuth: !finalPublic,
+
     guestOnly: Boolean(guestOnly),
     publicOnly: Boolean(guestOnly),
+
     roles: finalRoles,
+
     admin: adminOnly,
     adminOnly,
     requiresAdmin: adminOnly,
+
     hideShell,
     shell: !hideShell,
     showShell: !hideShell,
     layout: hideShell ? "auth" : "app",
     authScreen: hideShell,
+
     sidebar: !finalPublic,
     showInSidebar: !finalPublic,
+
     routeGroup: finalPublic ? "auth" : "app",
+
     tokenRoute: finalTokenRoute,
     preserveSearch: finalPublic || finalTokenRoute,
     preserveHash: finalPublic || finalTokenRoute,
+
     order: number(order, 0),
+
     aliases: freeze([]),
     meta,
+
     render: createLazyRender(finalViewKey, finalViewName),
   });
 }
@@ -718,7 +747,7 @@ const ROUTE_DEFINITIONS = Object.freeze([
     order: 30,
   },
   {
-    kind: "admin",
+    kind: "private",
     path: ROUTE_PATHS.CLIENTES,
     name: ROUTE_NAMES.CLIENTES,
     viewKey: ROUTE_VIEW_KEYS.CLIENTES,
@@ -1050,13 +1079,17 @@ export function getRoutesIntegritySnapshot() {
   return {
     version: ROUTES_VERSION,
     source: ROUTE_SOURCE,
+
     validationOk,
     validationError,
+
     count: routes.length,
     paths: routes.map((route) => route.path),
+
     publicAuthRoutes: [...PUBLIC_AUTH_ROUTES],
     tokenRoutePaths: [...TOKEN_ROUTE_PATHS],
     aliases: ROUTE_ALIASES,
+
     userHome: {
       enabled: true,
       prefix: USER_HOME_PREFIX,
@@ -1066,23 +1099,32 @@ export function getRoutesIntegritySnapshot() {
       validatesRealUser: false,
       realUserValidationOwner: "router/index.js",
     },
+
     critical: getCriticalRoutesDebug(),
     loadedViews: [...VIEW_CACHE.keys()],
+
     policy: {
       staticRoutesOnly: true,
+      configDrivenPaths: true,
       lazyViews: true,
+
       ownAuth: false,
       ownGuards: false,
       ownHistory: false,
       ownStorage: false,
       ownToast: false,
+
       roles: [...VALID_ROLES],
+
       homeInternalPath: ROUTE_PATHS.HOME,
       userHomePrefix: USER_HOME_PREFIX,
+
       noHomeAlias: true,
       noHomeRoute: true,
       noLegacyRoutes: true,
       no2fa: true,
+      noMfa: true,
+      noOtp: true,
       no403: true,
       no404: true,
     },

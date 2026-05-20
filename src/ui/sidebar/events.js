@@ -8,7 +8,8 @@
    - Click en toggle -> toggleSidebar().
    - Click en logout -> handleLogout().
    - Respetar el dropdown de cuenta sin gestionarlo.
-   - Delegar normalización de navegación en actions.js.
+   - Delegar normalización/validación de navegación en actions.js.
+   - Bloquear href sensibles o legacy antes de que navegue el navegador.
    - Sin navegación propia.
    - Sin active menu propio.
    - Sin indicadores.
@@ -18,6 +19,14 @@
    - Sin core event storms.
    - Sin CustomEvent.
    - Sin timers.
+   - Sin Auth directo.
+   - Sin Router directo.
+   - Sin Store.
+   - Sin Toast.
+   - Sin /home.
+   - Sin /403.
+   - Sin /404.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import {
@@ -30,12 +39,13 @@ import {
 } from "./dom.js";
 
 import {
+  getSafeSidebarTarget,
   handleLogout,
   navigateFromSidebar,
   toggleSidebar,
 } from "./actions.js";
 
-export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v4";
+export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v5";
 
 const HANDLED_FLAG = "__onionSidebarHandled";
 
@@ -53,12 +63,12 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function isFunction(value) {
-  return typeof value === "function";
-}
-
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -157,21 +167,41 @@ function isBlocked(element = null) {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
     String(value || "")
   );
 }
 
-function isSafeInternalHref(value = "") {
+function isDangerousHref(value = "") {
   const href = text(value, "");
+  const lower = href.toLowerCase();
 
   return Boolean(
-    href &&
-      href.startsWith("/") &&
-      !href.startsWith("//") &&
-      !/^[a-z][a-z0-9+.-]*:/i.test(href) &&
-      !/[\r\n\t\\]/.test(href) &&
-      !hasSensitiveQuery(href)
+    !href ||
+      hasSensitiveQuery(href) ||
+      href.startsWith("//") ||
+      /[\r\n\t\\]/.test(href) ||
+      lower.startsWith("javascript:") ||
+      lower.startsWith("data:") ||
+      lower.startsWith("vbscript:") ||
+      lower.startsWith("file:") ||
+      lower.startsWith("blob:") ||
+      lower.startsWith("mailto:") ||
+      lower.startsWith("tel:") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(href)
+  );
+}
+
+function shouldSwallowInvalidSidebarHref(link = null, rawHref = "") {
+  if (!isElement(link)) return false;
+
+  return Boolean(
+    link.hasAttribute("data-spa") ||
+      link.hasAttribute("data-sidebar-link") ||
+      link.hasAttribute("data-sidebar-nav-link") ||
+      link.hasAttribute("data-sidebar-brand") ||
+      link.hasAttribute("data-sidebar-dropdown-item") ||
+      rawHref.startsWith("/")
   );
 }
 
@@ -235,6 +265,19 @@ function getLinkTarget(link = null) {
   );
 }
 
+function getNavigableTarget(rawHref = "") {
+  if (isDangerousHref(rawHref)) return "";
+
+  /*
+    La normalización real se delega en actions.js:
+    - bloquea /home, /403, /404, /2fa, /mfa, /otp;
+    - bloquea /@slug/home y legacy scopeadas;
+    - preserva /@slug/ruta si es válida;
+    - evita queries sensibles.
+  */
+  return getSafeSidebarTarget(rawHref, "");
+}
+
 /* =========================================================
    HANDLER
 ========================================================= */
@@ -293,21 +336,36 @@ export function handleSidebarClick(event = null, context = {}) {
 
   if (!link) return false;
   if (isBlocked(link)) return false;
-  if (browserOwnsClick(link, event)) return false;
 
   const rawHref = getLinkTarget(link);
 
   /*
-    Si aparece un enlace interno con token/código/secret/session, se bloquea.
-    No se deja al navegador navegar con datos sensibles.
+    Nunca permitir que un enlace del sidebar navegue con tokens/códigos
+    o rutas legacy por navegación nativa.
   */
-  if (hasSensitiveQuery(rawHref)) {
-    prevent(event);
-    markHandled(event);
-    return true;
+  if (isDangerousHref(rawHref)) {
+    if (shouldSwallowInvalidSidebarHref(link, rawHref)) {
+      prevent(event);
+      markHandled(event);
+      return true;
+    }
+
+    return false;
   }
 
-  if (!isSafeInternalHref(rawHref)) {
+  if (browserOwnsClick(link, event)) {
+    return false;
+  }
+
+  const targetPath = getNavigableTarget(rawHref);
+
+  if (!targetPath) {
+    if (shouldSwallowInvalidSidebarHref(link, rawHref)) {
+      prevent(event);
+      markHandled(event);
+      return true;
+    }
+
     return false;
   }
 
@@ -317,7 +375,7 @@ export function handleSidebarClick(event = null, context = {}) {
   void navigateFromSidebar({
     ...ctx,
     root,
-    target: rawHref,
+    target: targetPath,
   });
 
   return true;
@@ -333,22 +391,20 @@ export function bindSidebarEvents(context = {}) {
 
   if (!isElement(root)) return false;
 
-  boundContext = {
+  const nextContext = {
     ...ctx,
     root,
   };
 
   if (boundRoot === root && boundHandler) {
+    boundContext = nextContext;
     return true;
   }
 
   unbindSidebarEvents();
 
   boundRoot = root;
-  boundContext = {
-    ...ctx,
-    root,
-  };
+  boundContext = nextContext;
 
   boundHandler = (event) => {
     handleSidebarClick(event, boundContext || {});
@@ -408,12 +464,21 @@ export function getSidebarEventsSnapshot() {
 
       navigationDelegatedToActions: true,
       targetNormalizationDelegatedToActions: true,
+
       rejectsSensitiveHref: true,
+      swallowsInvalidSidebarSpaHref: true,
 
       noRouterDirect: true,
       noAuthDirect: true,
       noStorage: true,
       noToast: true,
+
+      noHomeRoute: true,
+      no403Route: true,
+      no404Route: true,
+      no2fa: true,
+      noMfa: true,
+      noOtp: true,
     },
   };
 }

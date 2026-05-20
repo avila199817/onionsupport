@@ -27,15 +27,12 @@
    - No /api/dashboard.
    - No endpoints /stats inexistentes.
    - No /home.
-   - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import * as CoreHttpModule from "../../core/http.js";
 
-import {
-  ROUTES,
-} from "../../core/config.js";
+import { ROUTES } from "../../core/config.js";
 
 import { homeState } from "./home.state.js";
 
@@ -59,7 +56,7 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_API_VERSION = "home.api.v4";
+export const HOME_API_VERSION = "home.api.v5";
 
 export const HOME_DASHBOARD_ENDPOINT = "local:home-list-aggregate";
 export const HOME_DASHBOARD_LEGACY_ENDPOINT = "";
@@ -67,13 +64,6 @@ export const HOME_DASHBOARD_PING_ENDPOINT = "/api/health/ready";
 
 export const HOME_TIMEOUT = 15000;
 export const HOME_HEALTH_TIMEOUT = 8000;
-
-const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
-const INCIDENCIAS_ROUTE = ROUTES.incidencias || "/incidencias";
-const FACTURAS_ROUTE = ROUTES.facturas || "/facturas";
-const CLIENTES_ROUTE = ROUTES.clientes || "/clientes";
-const USUARIOS_ROUTE = ROUTES.usuarios || "/usuarios";
-const SERVIDOR_ROUTE = ROUTES.servidor || "/servidor";
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -97,6 +87,33 @@ const DEFAULT_LIST_PARAMS = Object.freeze({
   sortDir: "DESC",
 });
 
+const RAW_KEYS = new Set([
+  "raw",
+  "data",
+  "payload",
+  "response",
+  "body",
+]);
+
+const COSMOS_META_KEYS = new Set([
+  "_rid",
+  "_self",
+  "_etag",
+  "_attachments",
+  "_ts",
+  "_lsn",
+  "_metadata",
+  "_id",
+]);
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni/i;
+
+const SENSITIVE_QUERY_RE =
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+
 const ADMIN_ACTIVITY_TYPES = new Set([
   "client",
   "cliente",
@@ -105,6 +122,9 @@ const ADMIN_ACTIVITY_TYPES = new Set([
   "usuario",
   "member",
 ]);
+
+const ADMIN_ENTITY_RE =
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
 
 let loadSeq = 0;
 
@@ -225,7 +245,10 @@ function nowIso() {
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -244,14 +267,16 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function normalizeRole(value = "") {
+function normalizeRole(value = "", fallback = "user") {
   if (Array.isArray(value)) {
-    const roles = value.map(normalizeRole).filter(Boolean);
+    const roles = value
+      .map((item) => normalizeRole(item, ""))
+      .filter(Boolean);
 
     if (roles.includes("admin")) return "admin";
     if (roles.includes("user")) return "user";
 
-    return "";
+    return fallback;
   }
 
   const role = String(value || "").toLowerCase();
@@ -259,7 +284,7 @@ function normalizeRole(value = "") {
   if (role === "admin") return "admin";
   if (role === "user") return "user";
 
-  return "user";
+  return fallback;
 }
 
 function uniqueBy(items = [], picker = (item) => item) {
@@ -298,6 +323,206 @@ function clone(value, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function isEmailLike(value = "") {
+  const text = safeText(value, "");
+  return Boolean(text && EMAIL_RE.test(text));
+}
+
+function visualText(value = "", fallback = "Sin nombre") {
+  const text = redact(safeText(value, ""));
+
+  if (!text) return fallback;
+  if (isEmailLike(text)) return fallback;
+
+  return text;
+}
+
+function firstVisual(values = [], fallback = "Sin nombre") {
+  for (const value of safeArray(values)) {
+    const text = safeText(value, "");
+
+    if (!text || isEmailLike(text)) continue;
+
+    return redact(text);
+  }
+
+  return fallback;
+}
+
+function safePublicId(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) return "";
+  if (isEmailLike(text)) return "";
+  if (hasSensitiveQuery(text)) return "";
+  if (/Bearer\s+/i.test(text)) return "";
+  if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
+
+  return text;
+}
+
+function sanitizeDashboardValue(value, keyHint = "") {
+  if (RAW_KEYS.has(keyHint)) return undefined;
+  if (COSMOS_META_KEYS.has(keyHint)) return undefined;
+  if (isSensitiveKey(keyHint)) return undefined;
+
+  if (typeof value === "string") {
+    return redact(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeDashboardValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (RAW_KEYS.has(key)) continue;
+      if (COSMOS_META_KEYS.has(key)) continue;
+      if (isSensitiveKey(key)) continue;
+
+      const clean = sanitizeDashboardValue(item, key);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  return value;
+}
+
+function sanitizeDashboardObject(value = {}) {
+  return safeObject(sanitizeDashboardValue(value), {});
+}
+
+function sanitizeDashboardList(items = []) {
+  return safeArray(items)
+    .map((item) => sanitizeDashboardObject(item))
+    .filter(hasOwnKeys);
+}
+
+/* =========================================================
+   ROUTES
+========================================================= */
+
+function hasSensitiveQuery(value = "") {
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
+}
+
+function normalizeHashPath(value = "") {
+  const raw = safeText(value, "");
+
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
+  if (raw.startsWith("#/")) return raw.slice(1) || "/";
+
+  return raw;
+}
+
+function normalizePath(pathname = "") {
+  let value = safeText(pathname, "");
+
+  if (!value) return "";
+
+  value = value
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!value.startsWith("/")) value = `/${value}`;
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function normalizeSpaRoute(route = "") {
+  let raw = normalizeHashPath(route);
+
+  if (!raw || raw === "#") return "";
+  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) return "";
+
+  const lower = raw.toLowerCase();
+
+  if (
+    raw.startsWith("//") ||
+    /^[a-z][a-z0-9+.-]*:/i.test(raw) ||
+    /[\r\n\t\\]/.test(raw) ||
+    hasSensitiveQuery(raw) ||
+    lower.startsWith("javascript:") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("vbscript:") ||
+    lower.startsWith("mailto:") ||
+    lower.startsWith("tel:") ||
+    lower.startsWith("file:") ||
+    lower.startsWith("blob:") ||
+    /^https?:\/\//i.test(raw)
+  ) {
+    return "";
+  }
+
+  if (!raw.startsWith("/")) {
+    raw = `/${raw}`;
+  }
+
+  const hashIndex = raw.indexOf("#");
+  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
+  const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+
+  const queryIndex = withoutHash.indexOf("?");
+  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
+  const path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+
+  const cleanPath = normalizePath(path);
+
+  if (!cleanPath) return "";
+  if (cleanPath === "/home") return "";
+  if (cleanPath === "/incidencias/nueva") return "";
+  if (cleanPath.startsWith("/incidencias/nueva/")) return "";
+
+  return `${cleanPath}${query}${hash}`;
+}
+
+function routeFromCore(name = "", fallback = "") {
+  return normalizeSpaRoute(ROUTES?.[name]) || normalizeSpaRoute(fallback);
+}
+
+const INCIDENCIAS_ROUTE = routeFromCore("incidencias", "/incidencias");
+const FACTURAS_ROUTE = routeFromCore("facturas", "/facturas");
+const CLIENTES_ROUTE = routeFromCore("clientes", "/clientes");
+const USUARIOS_ROUTE = routeFromCore("usuarios", "");
+
+function routePath(route = "") {
+  return normalizeSpaRoute(route).split("?")[0].split("#")[0] || "";
+}
+
+function isAdminOnlyRoute(route = "") {
+  const path = routePath(route);
+  const clientes = routePath(CLIENTES_ROUTE);
+  const usuarios = routePath(USUARIOS_ROUTE);
+
+  if (!path) return false;
+
+  return (
+    Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
+  );
+}
+
+function isAdminEntityValue(value = "") {
+  return ADMIN_ENTITY_RE.test(String(value || "").toLowerCase());
 }
 
 /* =========================================================
@@ -353,8 +578,9 @@ function getCurrentRole() {
       user.role,
       user.rol,
       user.roles,
-      "user"
-    )
+      ""
+    ),
+    "user"
   );
 }
 
@@ -387,8 +613,32 @@ function canRequestClientsModule(options = {}) {
 ========================================================= */
 
 function isAdminOnlyActivity(item = {}) {
-  const key = normalizeKey(first(item.type, item.kind, item.category, ""));
-  return ADMIN_ACTIVITY_TYPES.has(key);
+  const raw = safeObject(item);
+
+  const type = normalizeKey(first(raw.type, raw.kind, raw.category, ""));
+  const route = normalizeSpaRoute(first(raw.route, raw.href, raw.link, raw.to, ""));
+
+  const identity = safeText(
+    [
+      raw.entity,
+      raw.resource,
+      raw.collection,
+      raw.targetType,
+      raw.meta?.entity,
+      raw.meta?.type,
+      type,
+      route,
+    ]
+      .filter(Boolean)
+      .join(" "),
+    ""
+  );
+
+  return (
+    ADMIN_ACTIVITY_TYPES.has(type) ||
+    isAdminOnlyRoute(route) ||
+    isAdminEntityValue(identity)
+  );
 }
 
 function filterActivityForRole(items = [], admin = false) {
@@ -398,8 +648,9 @@ function filterActivityForRole(items = [], admin = false) {
 
 function isAdminOnlyWidget(item = {}) {
   const raw = safeObject(item);
+  const route = normalizeSpaRoute(first(raw.route, raw.href, raw.link, raw.to, ""));
 
-  const key = normalizeKey(
+  const identity = safeText(
     [
       raw.widgetId,
       raw.widgetKey,
@@ -413,14 +664,14 @@ function isAdminOnlyWidget(item = {}) {
       raw.category,
       raw.title,
       raw.name,
+      route,
     ]
       .filter(Boolean)
-      .join(" ")
+      .join(" "),
+    ""
   );
 
-  return ["users", "usuarios", "clientes", "clients", "customers"].some((blocked) =>
-    key.includes(blocked)
-  );
+  return isAdminOnlyRoute(route) || isAdminEntityValue(identity);
 }
 
 function filterWidgetsForRole(items = [], admin = false) {
@@ -457,58 +708,81 @@ function sanitizeSummaryForRole(summary = {}, admin = false) {
     output.visibleCustomersCount = 0;
   }
 
-  return output;
-}
-
-function stripRawDashboardFields(dashboard = {}) {
-  const source = safeObject(dashboard);
-  const {
-    raw: _raw,
-    response: _response,
-    payload: _payload,
-    data: _data,
-    ...clean
-  } = source;
-
-  void _raw;
-  void _response;
-  void _payload;
-  void _data;
-
-  return clean;
+  return sanitizeDashboardObject(output);
 }
 
 function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
-  const cleanRole = normalizeRole(role);
+  const cleanRole = normalizeRole(role, "user");
   const admin = cleanRole === "admin";
+  const source = safeObject(dashboard);
 
-  const normalized = stripRawDashboardFields(
-    normalizeHomeDashboard({
-      ...safeObject(dashboard),
+  const normalized = normalizeHomeDashboard({
+    ...source,
 
+    role: cleanRole,
+    admin,
+
+    users: admin ? source.users : [],
+    usuarios: admin ? source.usuarios : [],
+
+    clients: admin ? source.clients : [],
+    clientes: admin ? source.clientes : [],
+    customers: admin ? source.customers : [],
+
+    meta: {
+      ...safeObject(source.meta),
       role: cleanRole,
       admin,
+    },
+  });
 
-      users: admin ? dashboard?.users : [],
-      usuarios: admin ? dashboard?.usuarios : [],
-
-      clients: admin ? dashboard?.clients : [],
-      clientes: admin ? dashboard?.clientes : [],
-      customers: admin ? dashboard?.customers : [],
-
-      meta: {
-        ...safeObject(dashboard?.meta),
-        role: cleanRole,
-        admin,
-      },
-    })
+  const summary = sanitizeSummaryForRole(
+    first(
+      normalized.summary,
+      normalized.stats,
+      normalized.metrics,
+      normalized.totals,
+      normalized.counts,
+      {}
+    ),
+    admin
   );
 
-  const summary = sanitizeSummaryForRole(normalized.summary, admin);
-  const widgets = filterWidgetsForRole(normalized.widgets, admin);
-  const activity = filterActivityForRole(normalized.activity, admin);
+  const widgets = filterWidgetsForRole(
+    sanitizeDashboardList(
+      first(
+        normalized.widgets,
+        normalized.cards,
+        normalized.kpis,
+        normalized.blocks,
+        []
+      )
+    ),
+    admin
+  );
 
-  return {
+  const users = admin
+    ? sanitizeDashboardList(first(normalized.users, normalized.usuarios, []))
+    : [];
+
+  const clients = admin
+    ? sanitizeDashboardList(first(normalized.clients, normalized.clientes, normalized.customers, []))
+    : [];
+
+  const activity = filterActivityForRole(
+    sanitizeDashboardList(
+      first(
+        normalized.activity,
+        normalized.activities,
+        normalized.recent,
+        normalized.recentActivity,
+        []
+      )
+    ),
+    admin
+  );
+
+  return sanitizeDashboardObject({
     ...normalized,
 
     role: cleanRole,
@@ -525,12 +799,12 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
     kpis: widgets,
     blocks: widgets,
 
-    users: admin ? safeArray(normalized.users) : [],
-    usuarios: admin ? safeArray(normalized.usuarios) : [],
+    users,
+    usuarios: users,
 
-    clients: admin ? safeArray(normalized.clients) : [],
-    clientes: admin ? safeArray(normalized.clientes) : [],
-    customers: admin ? safeArray(normalized.customers) : [],
+    clients,
+    clientes: clients,
+    customers: clients,
 
     activity,
     activities: activity,
@@ -543,8 +817,8 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
     totalUsuarios: admin ? summary.usuariosCount : 0,
     usersCount: admin ? summary.usersCount : 0,
     usuariosCount: admin ? summary.usuariosCount : 0,
-    visibleUsersCount: admin ? safeArray(normalized.users).length : 0,
-    visibleUsuariosCount: admin ? safeArray(normalized.users).length : 0,
+    visibleUsersCount: admin ? users.length : 0,
+    visibleUsuariosCount: admin ? users.length : 0,
 
     clientsTotal: admin ? summary.clientsCount : 0,
     clientesTotal: admin ? summary.clientesCount : 0,
@@ -555,9 +829,9 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
     clientsCount: admin ? summary.clientsCount : 0,
     clientesCount: admin ? summary.clientesCount : 0,
     customersCount: admin ? summary.customersCount : 0,
-    visibleClientsCount: admin ? safeArray(normalized.clients).length : 0,
-    visibleClientesCount: admin ? safeArray(normalized.clients).length : 0,
-    visibleCustomersCount: admin ? safeArray(normalized.clients).length : 0,
+    visibleClientsCount: admin ? clients.length : 0,
+    visibleClientesCount: admin ? clients.length : 0,
+    visibleCustomersCount: admin ? clients.length : 0,
 
     activityCount: activity.length,
     recentCount: activity.length,
@@ -571,20 +845,20 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
 
       usersCount: admin ? summary.usersCount : 0,
       usuariosCount: admin ? summary.usuariosCount : 0,
-      visibleUsersCount: admin ? safeArray(normalized.users).length : 0,
-      visibleUsuariosCount: admin ? safeArray(normalized.users).length : 0,
+      visibleUsersCount: admin ? users.length : 0,
+      visibleUsuariosCount: admin ? users.length : 0,
 
       clientsCount: admin ? summary.clientsCount : 0,
       clientesCount: admin ? summary.clientesCount : 0,
       customersCount: admin ? summary.customersCount : 0,
-      visibleClientsCount: admin ? safeArray(normalized.clients).length : 0,
-      visibleClientesCount: admin ? safeArray(normalized.clients).length : 0,
-      visibleCustomersCount: admin ? safeArray(normalized.clients).length : 0,
+      visibleClientsCount: admin ? clients.length : 0,
+      visibleClientesCount: admin ? clients.length : 0,
+      visibleCustomersCount: admin ? clients.length : 0,
 
       activityCount: activity.length,
       recentCount: activity.length,
     },
-  };
+  });
 }
 
 /* =========================================================
@@ -803,6 +1077,10 @@ function unwrapResponse(payload = null, depth = 0) {
     "rows" in object ||
     "records" in object ||
     "results" in object ||
+    "docs" in object ||
+    "documents" in object ||
+    "value" in object ||
+    "list" in object ||
     Array.isArray(object.data)
   ) {
     return object;
@@ -900,7 +1178,6 @@ function extractCollection(payload = null, aliases = []) {
     return {
       items: unwrapped,
       total: unwrapped.length,
-      raw: null,
     };
   }
 
@@ -922,14 +1199,13 @@ function extractCollection(payload = null, aliases = []) {
   ].filter(hasOwnKeys);
 
   for (const source of sources) {
-    for (const alias of aliases) {
+    for (const alias of safeArray(aliases)) {
       const value = source?.[alias];
 
       if (Array.isArray(value)) {
         return {
           items: value,
           total: Math.max(value.length, extractTotal(source, aliases, value.length)),
-          raw: null,
         };
       }
 
@@ -950,14 +1226,17 @@ function extractCollection(payload = null, aliases = []) {
       source.docs,
       source.documents,
       source.value,
-      source.list
+      source.list,
+      Array.isArray(source.data) ? source.data : null,
+      Array.isArray(source.payload) ? source.payload : null,
+      Array.isArray(source.result) ? source.result : null,
+      Array.isArray(source.response) ? source.response : null
     );
 
     if (Array.isArray(direct)) {
       return {
         items: direct,
         total: Math.max(direct.length, extractTotal(source, aliases, direct.length)),
-        raw: null,
       };
     }
   }
@@ -965,7 +1244,6 @@ function extractCollection(payload = null, aliases = []) {
   return {
     items: [],
     total: extractTotal(object, aliases, 0),
-    raw: null,
   };
 }
 
@@ -975,14 +1253,14 @@ function extractCollection(payload = null, aliases = []) {
 
 function modelId(fn, item = {}) {
   try {
-    return safeText(fn?.(item), "");
+    return safePublicId(fn?.(item));
   } catch {
     return "";
   }
 }
 
 function getTicketId(item = {}) {
-  return safeText(
+  return safePublicId(
     first(
       modelId(getHomeTicketId, item),
       item.ticketId,
@@ -991,18 +1269,13 @@ function getTicketId(item = {}) {
       item.numero,
       item.ticketCode,
       item.entityId,
-      item.id,
-      item._id,
-      item.raw?.ticketId,
-      item.raw?.incidenciaId,
-      item.raw?.id
-    ),
-    ""
+      item.id
+    )
   );
 }
 
 function getInvoiceId(item = {}) {
-  return safeText(
+  return safePublicId(
     first(
       modelId(getHomeInvoiceId, item),
       item.invoiceId,
@@ -1013,45 +1286,32 @@ function getInvoiceId(item = {}) {
       item.number,
       item.numero,
       item.code,
-      item.id,
-      item._id,
-      item.raw?.invoiceId,
-      item.raw?.facturaId,
-      item.raw?.id
-    ),
-    ""
+      item.id
+    )
   );
 }
 
 function getUserId(item = {}) {
-  return safeText(
+  return safePublicId(
     first(
       modelId(getHomeUserId, item),
       item.userId,
       item.usuarioId,
       item.id,
-      item._id,
-      item.username,
-      item.raw?.userId,
-      item.raw?.id
-    ),
-    ""
+      item.username
+    )
   );
 }
 
 function getClientId(item = {}) {
-  return safeText(
+  return safePublicId(
     first(
       modelId(getHomeClientId, item),
       item.clienteId,
       item.clientId,
       item.customerId,
-      item.id,
-      item._id,
-      item.raw?.clienteId,
-      item.raw?.id
-    ),
-    ""
+      item.id
+    )
   );
 }
 
@@ -1062,8 +1322,6 @@ function ticketStatusKey(item = {}) {
       item.estado,
       item.state,
       item.lifecycle?.status,
-      item.raw?.status,
-      item.raw?.estado,
       "pending"
     )
   );
@@ -1084,8 +1342,6 @@ function ticketPriorityKey(item = {}) {
       item.severity,
       item.urgency,
       item.sla?.priority,
-      item.raw?.priority,
-      item.raw?.prioridad,
       "medium"
     )
   );
@@ -1104,8 +1360,6 @@ function invoiceStatusKey(item = {}) {
       item.estadoPago,
       item.status,
       item.estado,
-      item.raw?.paymentStatus,
-      item.raw?.estadoPago,
       "pending"
     )
   );
@@ -1132,9 +1386,6 @@ function invoiceAmount(item = {}) {
       item.importeTotal,
       item.facturaTotal,
       item.invoiceAmount,
-      item.raw?.total,
-      item.raw?.amount,
-      item.raw?.importe,
       0
     ),
     0
@@ -1146,9 +1397,7 @@ function attachmentsCount(item = {}) {
     item.attachments,
     item.files,
     item.adjuntos,
-    item.documents,
-    item.raw?.attachments,
-    item.raw?.files
+    item.documents
   );
 
   if (Array.isArray(attachments)) return attachments.length;
@@ -1159,8 +1408,6 @@ function attachmentsCount(item = {}) {
       item.filesCount,
       item.adjuntosCount,
       item.documentsCount,
-      item.raw?.attachmentsCount,
-      item.raw?.filesCount,
       0
     ),
     0
@@ -1175,7 +1422,7 @@ function normalizeTicketsModule(listPayload = null) {
   const collection = extractCollection(listPayload, ["tickets", "incidencias"]);
 
   const items = uniqueBy(
-    normalizeHomeTickets(collection.items),
+    sanitizeDashboardList(normalizeHomeTickets(collection.items)),
     getTicketId
   );
 
@@ -1233,7 +1480,7 @@ function normalizeFacturasModule(listPayload = null) {
   const collection = extractCollection(listPayload, ["facturas", "invoices"]);
 
   const items = uniqueBy(
-    normalizeHomeInvoices(collection.items),
+    sanitizeDashboardList(normalizeHomeInvoices(collection.items)),
     getInvoiceId
   );
 
@@ -1277,7 +1524,7 @@ function normalizeClientesModule(listPayload = null) {
   const collection = extractCollection(listPayload, ["clientes", "clients", "customers"]);
 
   const items = uniqueBy(
-    normalizeHomeClients(collection.items),
+    sanitizeDashboardList(normalizeHomeClients(collection.items)),
     getClientId
   );
 
@@ -1303,7 +1550,7 @@ function normalizeUsersModule(listPayload = null) {
   const collection = extractCollection(listPayload, ["users", "usuarios", "members"]);
 
   const items = uniqueBy(
-    normalizeHomeUsers(collection.items),
+    sanitizeDashboardList(normalizeHomeUsers(collection.items)),
     getUserId
   );
 
@@ -1449,74 +1696,13 @@ function buildSummaryFromModules({
 }
 
 function buildWidgets(summary = {}, admin = false) {
-  if (admin) {
-    return normalizeHomeWidgets([
-      {
-        id: "incidencias",
-        widgetId: "incidencias",
-        key: "incidencias",
-        title: "Incidencias",
-        description: "Tickets visibles en el panel.",
-        value: safeNumber(summary.totalTickets, 0),
-        subtitle: `${safeNumber(summary.openTickets, 0)} abiertas · ${safeNumber(summary.urgentTickets, 0)} urgentes`,
-        type: "tickets",
-        kind: "metric",
-        status: safeNumber(summary.urgentTickets, 0) > 0 ? "warning" : "active",
-        route: INCIDENCIAS_ROUTE,
-        href: INCIDENCIAS_ROUTE,
-      },
-      {
-        id: "facturacion",
-        widgetId: "facturacion",
-        key: "facturacion",
-        title: "Facturación",
-        description: "Facturas visibles y volumen agregado.",
-        value: safeNumber(summary.invoiceAmount, 0),
-        subtitle: `${safeNumber(summary.totalInvoices, 0)} facturas · ${safeNumber(summary.pendingInvoices, 0)} pendientes`,
-        type: "invoices",
-        kind: "metric",
-        status: safeNumber(summary.pendingInvoices, 0) > 0 ? "warning" : "active",
-        route: FACTURAS_ROUTE,
-        href: FACTURAS_ROUTE,
-      },
-      {
-        id: "clientes",
-        widgetId: "clientes",
-        key: "clientes",
-        title: "Clientes",
-        description: "Clientes visibles.",
-        value: safeNumber(summary.clientsCount, 0),
-        subtitle: `${safeNumber(summary.visibleClientsCount, 0)} visibles`,
-        type: "clients",
-        kind: "metric",
-        status: "active",
-        route: CLIENTES_ROUTE,
-        href: CLIENTES_ROUTE,
-      },
-      {
-        id: "usuarios",
-        widgetId: "usuarios",
-        key: "usuarios",
-        title: "Usuarios",
-        description: "Usuarios del sistema.",
-        value: safeNumber(summary.usersCount, 0),
-        subtitle: `${safeNumber(summary.visibleUsersCount, 0)} visibles`,
-        type: "users",
-        kind: "metric",
-        status: "active",
-        route: USUARIOS_ROUTE,
-        href: USUARIOS_ROUTE,
-      },
-    ]);
-  }
-
-  return normalizeHomeWidgets([
+  const common = [
     {
-      id: "mis-incidencias",
-      widgetId: "mis-incidencias",
-      key: "mis-incidencias",
-      title: "Mis incidencias",
-      description: "Tus solicitudes visibles.",
+      id: admin ? "incidencias" : "mis-incidencias",
+      widgetId: admin ? "incidencias" : "mis-incidencias",
+      key: admin ? "incidencias" : "mis-incidencias",
+      title: admin ? "Incidencias" : "Mis incidencias",
+      description: admin ? "Tickets visibles en el panel." : "Tus solicitudes visibles.",
       value: safeNumber(summary.totalTickets, 0),
       subtitle: `${safeNumber(summary.openTickets, 0)} abiertas · ${safeNumber(summary.urgentTickets, 0)} urgentes`,
       type: "tickets",
@@ -1526,32 +1712,72 @@ function buildWidgets(summary = {}, admin = false) {
       href: INCIDENCIAS_ROUTE,
     },
     {
-      id: "mis-facturas",
-      widgetId: "mis-facturas",
-      key: "mis-facturas",
-      title: "Mis facturas",
-      description: "Facturación visible para tu cuenta.",
-      value: safeNumber(summary.totalInvoices, 0),
-      subtitle: `${safeNumber(summary.pendingInvoices, 0)} pendientes`,
+      id: admin ? "facturacion" : "mis-facturas",
+      widgetId: admin ? "facturacion" : "mis-facturas",
+      key: admin ? "facturacion" : "mis-facturas",
+      title: admin ? "Facturación" : "Mis facturas",
+      description: admin ? "Facturas visibles y volumen agregado." : "Facturación visible para tu cuenta.",
+      value: admin ? safeNumber(summary.invoiceAmount, 0) : safeNumber(summary.totalInvoices, 0),
+      subtitle: admin
+        ? `${safeNumber(summary.totalInvoices, 0)} facturas · ${safeNumber(summary.pendingInvoices, 0)} pendientes`
+        : `${safeNumber(summary.pendingInvoices, 0)} pendientes`,
       type: "invoices",
       kind: "metric",
       status: safeNumber(summary.pendingInvoices, 0) > 0 ? "warning" : "active",
       route: FACTURAS_ROUTE,
       href: FACTURAS_ROUTE,
     },
+  ];
+
+  if (!admin) {
+    return normalizeHomeWidgets([
+      ...common,
+      {
+        id: "adjuntos",
+        widgetId: "adjuntos",
+        key: "adjuntos",
+        title: "Adjuntos",
+        description: "Documentos vinculados a tus incidencias.",
+        value: safeNumber(summary.attachmentsCount, 0),
+        subtitle: "Archivos visibles",
+        type: "files",
+        kind: "metric",
+        status: "active",
+        route: INCIDENCIAS_ROUTE,
+        href: INCIDENCIAS_ROUTE,
+      },
+    ]);
+  }
+
+  return normalizeHomeWidgets([
+    ...common,
     {
-      id: "adjuntos",
-      widgetId: "adjuntos",
-      key: "adjuntos",
-      title: "Adjuntos",
-      description: "Documentos vinculados a tus incidencias.",
-      value: safeNumber(summary.attachmentsCount, 0),
-      subtitle: "Archivos visibles",
-      type: "files",
+      id: "clientes",
+      widgetId: "clientes",
+      key: "clientes",
+      title: "Clientes",
+      description: "Clientes visibles.",
+      value: safeNumber(summary.clientsCount, 0),
+      subtitle: `${safeNumber(summary.visibleClientsCount, 0)} visibles`,
+      type: "clients",
       kind: "metric",
       status: "active",
-      route: INCIDENCIAS_ROUTE,
-      href: INCIDENCIAS_ROUTE,
+      route: CLIENTES_ROUTE,
+      href: CLIENTES_ROUTE,
+    },
+    {
+      id: "usuarios",
+      widgetId: "usuarios",
+      key: "usuarios",
+      title: "Usuarios",
+      description: "Usuarios del sistema.",
+      value: safeNumber(summary.usersCount, 0),
+      subtitle: `${safeNumber(summary.visibleUsersCount, 0)} visibles`,
+      type: "users",
+      kind: "metric",
+      status: "active",
+      route: USUARIOS_ROUTE,
+      href: USUARIOS_ROUTE,
     },
   ]);
 }
@@ -1599,7 +1825,7 @@ function buildActivity({
 
       activity.push({
         type: "client",
-        title: safeText(first(client.name, client.nombre, client.razonSocial), "Cliente"),
+        title: firstVisual([client.displayName, client.name, client.nombre, client.razonSocial, client.company], "Cliente"),
         text: "Cliente disponible en el panel.",
         date: first(client.updatedAt, client.createdAt),
         route: CLIENTES_ROUTE,
@@ -1608,31 +1834,35 @@ function buildActivity({
       });
     }
 
-    for (const user of safeArray(users).slice(0, 3)) {
-      const id = getUserId(user);
+    if (USUARIOS_ROUTE) {
+      for (const user of safeArray(users).slice(0, 3)) {
+        const id = getUserId(user);
 
-      activity.push({
-        type: "user",
-        title: safeText(first(user.displayName, user.name, user.username), "Usuario"),
-        text: "Usuario disponible en el sistema.",
-        date: first(user.updatedAt, user.createdAt, user.lastLoginAt),
-        route: USUARIOS_ROUTE,
-        action: "navigate-home",
-        entityId: id,
-      });
+        activity.push({
+          type: "user",
+          title: firstVisual([user.displayName, user.fullName, user.name, user.nombre, user.username], "Usuario"),
+          text: "Usuario disponible en el sistema.",
+          date: first(user.updatedAt, user.createdAt, user.lastLoginAt),
+          route: USUARIOS_ROUTE,
+          action: "navigate-home",
+          entityId: id,
+        });
+      }
     }
   }
 
   return filterActivityForRole(
-    normalizeHomeActivityList(activity)
-      .filter((item) => item.title || item.text)
-      .sort((a, b) => {
-        const left = new Date(first(a.date, a.updatedAt, a.createdAt, 0)).getTime();
-        const right = new Date(first(b.date, b.updatedAt, b.createdAt, 0)).getTime();
+    sanitizeDashboardList(
+      normalizeHomeActivityList(activity)
+        .filter((item) => item.title || item.text)
+        .sort((a, b) => {
+          const left = new Date(first(a.date, a.updatedAt, a.createdAt, 0)).getTime();
+          const right = new Date(first(b.date, b.updatedAt, b.createdAt, 0)).getTime();
 
-        return (Number.isFinite(right) ? right : 0) - (Number.isFinite(left) ? left : 0);
-      })
-      .slice(0, 8),
+          return (Number.isFinite(right) ? right : 0) - (Number.isFinite(left) ? left : 0);
+        })
+        .slice(0, 8)
+    ),
     admin
   );
 }
@@ -1667,7 +1897,7 @@ function moduleStatus(result = null, endpoint = "") {
 }
 
 function buildDashboardFromModules(modules = {}, meta = {}) {
-  const role = getCurrentRole();
+  const role = normalizeRole(first(meta.role, getCurrentRole()), "user");
   const admin = role === "admin";
 
   const tickets = normalizeTicketsModule(modules.tickets?.data);
@@ -1689,7 +1919,10 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
     admin,
   });
 
-  const widgets = filterWidgetsForRole(buildWidgets(summary, admin), admin);
+  const widgets = filterWidgetsForRole(
+    sanitizeDashboardList(buildWidgets(summary, admin)),
+    admin
+  );
 
   const activity = buildActivity({
     tickets: tickets.items,
@@ -1822,16 +2055,49 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
 ========================================================= */
 
 export function normalizeDashboard(payload = null, options = {}) {
-  const role = normalizeRole(options.role || getCurrentRole());
   const unwrapped = unwrapResponse(payload);
   const object = safeObject(unwrapped, {});
 
+  const role =
+    normalizeRole(
+      first(
+        options.role,
+        object.role,
+        object.rol,
+        object.roles,
+        object.meta?.role,
+        object.meta?.rol,
+        object.meta?.roles,
+        object.dashboard?.role,
+        object.dashboard?.rol,
+        object.dashboard?.roles,
+        object.dashboard?.meta?.role,
+        ""
+      ),
+      ""
+    ) || getCurrentRole();
+
   if (object.modules) {
-    return sanitizeDashboardForRole(buildDashboardFromModules(object.modules, object.meta || object), role);
+    return sanitizeDashboardForRole(
+      buildDashboardFromModules(object.modules, {
+        ...safeObject(object.meta),
+        ...safeObject(object),
+        role,
+      }),
+      role
+    );
   }
 
   if (object.dashboard?.modules) {
-    return sanitizeDashboardForRole(buildDashboardFromModules(object.dashboard.modules, object.dashboard.meta || object), role);
+    return sanitizeDashboardForRole(
+      buildDashboardFromModules(object.dashboard.modules, {
+        ...safeObject(object.dashboard.meta),
+        ...safeObject(object.meta),
+        requestId: first(object.dashboard.requestId, object.requestId, ""),
+        role,
+      }),
+      role
+    );
   }
 
   if (object.dashboard && hasOwnKeys(object.dashboard)) {
@@ -1884,8 +2150,8 @@ export function normalizeHomeDashboardResponse(payload = null) {
 
     activity: dashboard.activity,
     activities: dashboard.activity,
-    recent: dashboard.recent,
-    recentActivity: dashboard.recentActivity,
+    recent: dashboard.activity,
+    recentActivity: dashboard.activity,
 
     requestId: dashboard.requestId || dashboard.meta?.requestId || "",
     lastSyncAt: dashboard.updatedAt || dashboard.generatedAt || nowIso(),
@@ -1955,7 +2221,8 @@ export async function fetchHomeDashboardRequest({
   timeout = HOME_TIMEOUT,
 } = {}) {
   const requestId = `home_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const admin = isAdmin();
+  const role = getCurrentRole();
+  const admin = role === "admin";
 
   const includeUsersModule = canRequestUsersModule({
     includeUsers,
@@ -2012,6 +2279,7 @@ export async function fetchHomeDashboardRequest({
 
   const dashboard = buildDashboardFromModules(modules, {
     requestId,
+    role,
   });
 
   runtime.lastResponseAt = nowIso();
@@ -2037,12 +2305,12 @@ export async function fetchHomeDashboardRequest({
 
     meta: {
       requestId,
-      role: getCurrentRole(),
+      role,
       admin,
       includeUsers: includeUsersModule,
       includeClientes: includeClientesModule,
       partial: dashboard.partial,
-      errorsCount: dashboard.errors.length,
+      errorsCount: safeArray(dashboard.errors).length,
     },
   };
 }
@@ -2098,8 +2366,8 @@ function hydrateDashboardSource(source = {}) {
     usuarios: dashboard.admin ? dashboard.usuarios : [],
 
     activity: dashboard.activity,
-    recent: dashboard.recent,
-    recentActivity: dashboard.recentActivity,
+    recent: dashboard.activity,
+    recentActivity: dashboard.activity,
 
     requestId: dashboard.requestId || dashboard.meta?.requestId || "",
     lastSyncAt: dashboard.updatedAt || dashboard.generatedAt || null,
@@ -2157,6 +2425,7 @@ export async function loadHomeDashboard({
   includeClientes = undefined,
   includeClients = undefined,
   params = null,
+  timeout = HOME_TIMEOUT,
 } = {}) {
   const seq = nextLoadSeq();
 
@@ -2169,6 +2438,7 @@ export async function loadHomeDashboard({
       includeClientes,
       includeClients,
       params,
+      timeout,
     });
 
     const normalized = normalizeHomeDashboardResponse(response);
@@ -2195,7 +2465,9 @@ export async function loadHomeDashboard({
       const cached = hydrateHomeFromCache();
 
       if (cached.hydrated && hasOwnKeys(cached.dashboard)) {
-        return normalizeDashboard(cached.dashboard);
+        return normalizeDashboard(cached.dashboard, {
+          role: getCurrentRole(),
+        });
       }
     }
 
@@ -2263,7 +2535,7 @@ export async function loadHomeHealth({
 ========================================================= */
 
 function runtimeSnapshot() {
-  const snap = clone(runtime, {});
+  const snap = sanitizeDashboardObject(clone(runtime, {}));
 
   if (snap?.lastError) {
     snap.lastError = {
@@ -2280,8 +2552,21 @@ export function getHomeApiClient() {
 }
 
 export function getHomeApiSnapshot() {
-  const dashboard = normalizeDashboard(homeState?.dashboard || {});
+  const rawDashboard = safeObject(homeState?.dashboard);
+  const dashboard = normalizeDashboard(rawDashboard, {
+    role: getCurrentRole(),
+  });
+
   const admin = dashboard.role === "admin";
+
+  const routes = Object.fromEntries(
+    Object.entries({
+      incidencias: INCIDENCIAS_ROUTE,
+      facturas: FACTURAS_ROUTE,
+      clientes: CLIENTES_ROUTE,
+      usuarios: USUARIOS_ROUTE,
+    }).filter(([, route]) => Boolean(route))
+  );
 
   return {
     version: HOME_API_VERSION,
@@ -2298,14 +2583,7 @@ export function getHomeApiSnapshot() {
       usersList: ENDPOINTS.usersList,
     },
 
-    routes: {
-      home: HOME_ROUTE,
-      incidencias: INCIDENCIAS_ROUTE,
-      facturas: FACTURAS_ROUTE,
-      clientes: CLIENTES_ROUTE,
-      usuarios: USUARIOS_ROUTE,
-      servidor: SERVIDOR_ROUTE,
-    },
+    routes,
 
     http: {
       hasCoreHttp: Boolean(CoreHttp),
@@ -2325,7 +2603,7 @@ export function getHomeApiSnapshot() {
     loadSeq,
 
     dashboard: {
-      hasDashboard: hasOwnKeys(dashboard),
+      hasDashboard: hasOwnKeys(rawDashboard),
 
       source: dashboard.source || null,
       role: dashboard.role || getCurrentRole(),
@@ -2380,6 +2658,7 @@ export function getHomeApiSnapshot() {
       roleAwareCache: true,
 
       noRawBackendPayloadInDashboard: true,
+      stripsCosmosMetadata: true,
       noEmailAsUserIdentity: true,
       noEmailAsClientIdentity: true,
 

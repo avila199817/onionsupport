@@ -8,6 +8,7 @@
    - Preparar header, navegación y cuenta estilo ChatGPT.
    - Header logo-only: sin texto visible de marca.
    - Logo white para tema dark / logo black para tema light vía CSS.
+   - Fallback SVG visible si los assets no cargan o el CSS oculta imágenes.
    - Preparar markup del dropdown de cuenta.
    - Recibir datos ya normalizados desde index.js/user.js.
    - No navegar.
@@ -42,11 +43,11 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v7";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v8";
 
 export const SIDEBAR_LOGO_ASSETS = Object.freeze({
-  dark: "/src/media/img/favicon_white.png",
-  light: "/src/media/img/favicon_black.png",
+  dark: "/src/media/img/favicon_white_circle.png?v=6",
+  light: "/src/media/img/favicon_black_circle.png?v=6",
 });
 
 /* =========================================================
@@ -162,6 +163,7 @@ function safeAssetSrc(value = "", fallback = "") {
   if (src.startsWith("//")) return fallback;
   if (/^[a-z][a-z0-9+.-]*:/i.test(src)) return fallback;
   if (/[\r\n\t\\]/.test(src)) return fallback;
+  if (hasSensitiveQuery(src)) return fallback;
 
   return src.replace(/\/{2,}/g, "/") || fallback;
 }
@@ -175,7 +177,7 @@ function safeImageSrc(value = "") {
     return safeAssetSrc(src, "");
   }
 
-  if (/^https:\/\//i.test(src)) {
+  if (/^https:\/\//i.test(src) && !hasSensitiveQuery(src)) {
     try {
       const url = new URL(src);
       return url.href;
@@ -235,7 +237,8 @@ function normalizeUser(user = {}) {
   const name = text(
     user.displayName ||
       user.name ||
-      user.fullName,
+      user.fullName ||
+      user.username,
     "Usuario"
   );
 
@@ -256,7 +259,6 @@ function normalizeUser(user = {}) {
     initials,
     avatarUrl,
     roleLabel: text(user.roleLabel, "Usuario"),
-    email: text(user.email, ""),
   };
 }
 
@@ -313,6 +315,23 @@ function createIconSlot(className = "", iconName = SIDEBAR_ICONS.home, svgClass 
    BRAND LOGO
 ========================================================= */
 
+function createSidebarBrandFallbackLogo() {
+  const fallback = createElement("span", {
+    className: "sidebar-brand-logo-fallback",
+    attrs: {
+      "aria-hidden": "true",
+      "data-sidebar-brand-logo-fallback": "true",
+    },
+  });
+
+  appendChildren(
+    fallback,
+    createSidebarIcon("brand", "sidebar-brand-logo-fallback-svg")
+  );
+
+  return fallback;
+}
+
 export function createSidebarBrandLogo(options = {}) {
   const darkSrc = safeAssetSrc(
     options.darkSrc || options.logoDarkSrc,
@@ -332,12 +351,16 @@ export function createSidebarBrandLogo(options = {}) {
     },
   });
 
+  const fallbackLogo = createSidebarBrandFallbackLogo();
+
   const darkLogo = createElement("img", {
     className:
       "sidebar-brand-logo-img sidebar-brand-logo-img--theme-dark sidebar-brand-logo-img--white",
     attrs: {
       src: darkSrc,
       alt: "",
+      width: "28",
+      height: "28",
       loading: "eager",
       decoding: "async",
       draggable: "false",
@@ -352,6 +375,8 @@ export function createSidebarBrandLogo(options = {}) {
     attrs: {
       src: lightSrc,
       alt: "",
+      width: "28",
+      height: "28",
       loading: "eager",
       decoding: "async",
       draggable: "false",
@@ -361,6 +386,7 @@ export function createSidebarBrandLogo(options = {}) {
   });
 
   appendChildren(logo, [
+    fallbackLogo,
     darkLogo,
     lightLogo,
   ]);
@@ -423,7 +449,11 @@ export function createSidebarHeader(options = {}) {
   const open = options.open !== false;
 
   const header = createElement("header", {
-    className: classNames(SIDEBAR_CLASSES.header, "sidebar-header--chatgpt"),
+    className: classNames(
+      SIDEBAR_CLASSES.header,
+      "sidebar-header-chatgpt",
+      "sidebar-header--chatgpt"
+    ),
     attrs: {
       [SIDEBAR_ATTRS.header]: "true",
       "data-sidebar-section": "header",
@@ -434,6 +464,8 @@ export function createSidebarHeader(options = {}) {
   const brand = createElement("a", {
     className: classNames(
       SIDEBAR_CLASSES.brand,
+      "sidebar-brand-chatgpt",
+      "sidebar-brand-logo-only",
       "sidebar-brand--chatgpt",
       "sidebar-brand--logo-only"
     ),
@@ -452,7 +484,10 @@ export function createSidebarHeader(options = {}) {
   });
 
   const brandContent = createElement("span", {
-    className: "sidebar-brand-content sidebar-brand-content--logo",
+    className: "sidebar-brand-content sidebar-brand-content-logo sidebar-brand-content--logo",
+    attrs: {
+      "data-sidebar-brand-content": "true",
+    },
   });
 
   appendChildren(
@@ -468,6 +503,8 @@ export function createSidebarHeader(options = {}) {
   const toggle = createElement("button", {
     className: classNames(
       SIDEBAR_CLASSES.toggle,
+      "sidebar-toggle-chatgpt",
+      "sidebar-toggle-panel",
       "sidebar-toggle--chatgpt",
       "sidebar-toggle--panel"
     ),
@@ -735,10 +772,7 @@ function createAccountDropdown(user = {}) {
 
   appendChildren(menuHeaderInfo, [
     createSpan("sidebar-account-menu-user-name", normalizedUser.name),
-    createSpan(
-      "sidebar-account-menu-user-meta",
-      normalizedUser.email || normalizedUser.roleLabel
-    ),
+    createSpan("sidebar-account-menu-user-meta", normalizedUser.roleLabel),
   ]);
 
   appendChildren(menuHeader, [
@@ -895,11 +929,14 @@ export function getSidebarTemplateSnapshot() {
       noHtmlString: true,
 
       logoOnlyHeaderBrand: true,
+      visibleFallbackLogo: true,
       themeLogoPair: true,
       whiteLogoForDarkTheme: true,
       blackLogoForLightTheme: true,
       textOnlyHeaderBrand: false,
       panelCollapseIcon: true,
+
+      legacyBrandClassesKept: true,
 
       safeInternalHref: true,
       noSensitiveHrefInDom: true,

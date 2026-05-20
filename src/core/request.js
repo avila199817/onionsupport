@@ -18,22 +18,18 @@
    - Sin magia negra.
 ========================================================= */
 
-import { config } from "./config.js";
+import {
+  config,
+  AUTH_ENDPOINTS,
+  PUBLIC_API_PATHS,
+  getApiBase,
+  isCanonicalBackendApiBase,
+  isPublicApiPath,
+} from "./config.js";
 
-export const REQUEST_VERSION = "core.request.v2";
+export const REQUEST_VERSION = "core.request.v3";
 
-export const REQUEST_EVENTS = Object.freeze({
-  start: "app:request:start",
-  success: "app:request:success",
-  error: "app:request:error",
-  retry: "app:request:retry",
-  deduped: "app:request:deduped",
-  abort: "app:request:abort",
-  clearInFlight: "app:request:clear-in-flight",
-});
-
-const DEFAULT_API_BASE = "https://api.onionit.net";
-
+const DEFAULT_API_BASE = getApiBase();
 const API_BASE = normalizeApiBase(
   config?.apiBase ||
     config?.apiOrigin ||
@@ -41,24 +37,6 @@ const API_BASE = normalizeApiBase(
     config?.api?.base ||
     DEFAULT_API_BASE
 );
-
-const AUTH_ENDPOINTS = Object.freeze({
-  login: "/api/auth/login",
-  logout: "/api/auth/logout",
-  refresh: "/api/auth/refresh",
-  activate: "/api/auth/activate",
-  requestPasswordReset: "/api/auth/reset-password-request",
-  confirmPasswordReset: "/api/auth/reset-password-confirm",
-  me: "/api/auth/me",
-});
-
-const PUBLIC_API_PATHS = Object.freeze([
-  AUTH_ENDPOINTS.login,
-  AUTH_ENDPOINTS.refresh,
-  AUTH_ENDPOINTS.activate,
-  AUTH_ENDPOINTS.requestPasswordReset,
-  AUTH_ENDPOINTS.confirmPasswordReset,
-]);
 
 const PRIVATE_ME_PATH = AUTH_ENDPOINTS.me;
 
@@ -74,13 +52,23 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function text(value = "", fallback = "") {
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
 
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+/* =========================================================
+   API BASE
+========================================================= */
+
 function normalizeApiBase(value = "") {
-  const raw = text(value, DEFAULT_API_BASE).replace(/\/+$/g, "");
+  const raw = cleanText(value, DEFAULT_API_BASE).replace(/\/+$/g, "");
 
   try {
     const url = new URL(raw);
@@ -89,8 +77,8 @@ function normalizeApiBase(value = "") {
       return DEFAULT_API_BASE;
     }
 
-    if (url.pathname === "/api") {
-      return url.origin;
+    if (!isCanonicalBackendApiBase(url.origin)) {
+      return DEFAULT_API_BASE;
     }
 
     return url.origin;
@@ -107,7 +95,11 @@ function apiOrigin() {
   }
 }
 
-function fetchFn() {
+/* =========================================================
+   FETCH
+========================================================= */
+
+function getFetch() {
   try {
     if (typeof globalThis !== "undefined" && isFunction(globalThis.fetch)) {
       return globalThis.fetch.bind(globalThis);
@@ -119,6 +111,10 @@ function fetchFn() {
   return null;
 }
 
+/* =========================================================
+   BODY HELPERS
+========================================================= */
+
 function isFormData(value) {
   return typeof FormData !== "undefined" && value instanceof FormData;
 }
@@ -127,23 +123,34 @@ function isUrlSearchParams(value) {
   return typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams;
 }
 
+function isBlob(value) {
+  return typeof Blob !== "undefined" && value instanceof Blob;
+}
+
+function isArrayBuffer(value) {
+  return (
+    typeof ArrayBuffer !== "undefined" &&
+    (
+      value instanceof ArrayBuffer ||
+      ArrayBuffer.isView?.(value)
+    )
+  );
+}
+
+/* =========================================================
+   METHOD / TOKEN
+========================================================= */
+
 function normalizeMethod(method = "GET") {
-  const value = text(method, "GET").toUpperCase();
+  const value = cleanText(method, "GET").toUpperCase();
 
   return ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"].includes(value)
     ? value
     : "GET";
 }
 
-function redact(value = "") {
-  return String(value || "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
-}
-
 function tokenOk(token = "") {
-  const value = text(token, "").replace(/^Bearer\s+/i, "");
+  const value = cleanText(token, "").replace(/^Bearer\s+/i, "");
 
   if (!value) return false;
   if (/\s/.test(value)) return false;
@@ -161,7 +168,7 @@ function tokenOk(token = "") {
 }
 
 function cleanToken(token = "") {
-  const value = text(token, "").replace(/^Bearer\s+/i, "");
+  const value = cleanText(token, "").replace(/^Bearer\s+/i, "");
   return tokenOk(value) ? value : "";
 }
 
@@ -180,7 +187,7 @@ function getToken(state = {}, options = {}) {
 ========================================================= */
 
 function endpointToPath(endpoint = "/") {
-  const raw = text(endpoint, "/");
+  const raw = cleanText(endpoint, "/");
 
   if (!raw) return "";
   if (raw.startsWith("//")) return "";
@@ -209,7 +216,7 @@ function endpointToPath(endpoint = "/") {
   return path.split("#")[0] || "/";
 }
 
-function cleanPath(path = "/") {
+function cleanEndpointPath(path = "/") {
   const clean = endpointToPath(path);
 
   if (!clean) return "";
@@ -218,8 +225,8 @@ function cleanPath(path = "/") {
 }
 
 function joinUrl(base = "", path = "") {
-  const root = text(base, API_BASE).replace(/\/+$/g, "");
-  const clean = text(path, "/").replace(/^\/+/g, "");
+  const root = cleanText(base, API_BASE).replace(/\/+$/g, "");
+  const clean = cleanText(path, "/").replace(/^\/+/g, "");
 
   return `${root}/${clean}`;
 }
@@ -231,23 +238,24 @@ function appendQuery(url = "", query = null) {
 
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === null || value === "") continue;
+
     target.searchParams.set(key, String(value));
   }
 
   return target.toString();
 }
 
-function isPublicApiPath(path = "") {
-  const clean = cleanPath(path);
+function endpointIsPublic(path = "") {
+  const clean = cleanEndpointPath(path);
 
   if (!clean) return false;
   if (clean === PRIVATE_ME_PATH) return false;
 
-  return PUBLIC_API_PATHS.includes(clean);
+  return isPublicApiPath(clean);
 }
 
 function shouldUseAuth(path = "", options = {}) {
-  const clean = cleanPath(path);
+  const clean = cleanEndpointPath(path);
 
   if (clean === PRIVATE_ME_PATH) return true;
 
@@ -262,45 +270,93 @@ function shouldUseAuth(path = "", options = {}) {
 
   if (options.auth === true) return true;
 
-  return !isPublicApiPath(clean);
+  return !endpointIsPublic(clean);
 }
 
 /* =========================================================
    BODY / HEADERS
 ========================================================= */
 
+function shouldSerializeAsJson(body = undefined) {
+  return Boolean(
+    body !== undefined &&
+      body !== null &&
+      !isFormData(body) &&
+      !isUrlSearchParams(body) &&
+      !isBlob(body) &&
+      !isArrayBuffer(body) &&
+      typeof body !== "string"
+  );
+}
+
 function serializeBody(method = "GET", body = undefined) {
   if (["GET", "HEAD", "OPTIONS"].includes(method)) return undefined;
   if (body === undefined || body === null) return undefined;
-  if (isFormData(body)) return body;
-  if (isUrlSearchParams(body)) return body;
-  if (typeof body === "string") return body;
 
-  return JSON.stringify(body);
+  if (shouldSerializeAsJson(body)) {
+    return JSON.stringify(body);
+  }
+
+  return body;
+}
+
+function headersFrom(input = null) {
+  const headers = {};
+
+  if (!input) return headers;
+
+  if (typeof Headers !== "undefined" && input instanceof Headers) {
+    input.forEach((value, key) => {
+      headers[key] = value;
+    });
+
+    return headers;
+  }
+
+  if (isObject(input)) {
+    return {
+      ...input,
+    };
+  }
+
+  return headers;
+}
+
+function hasHeader(headers = {}, name = "") {
+  const target = name.toLowerCase();
+
+  return Object.keys(headers).some((key) => key.toLowerCase() === target);
+}
+
+function removeHeader(headers = {}, name = "") {
+  const target = name.toLowerCase();
+
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === target) {
+      delete headers[key];
+    }
+  }
+
+  return headers;
 }
 
 function buildHeaders({
   state = {},
   options = {},
   auth = false,
-  body = undefined,
+  originalBody = undefined,
+  serializedBody = undefined,
 } = {}) {
-  const headers = {
-    ...(isObject(options.headers) ? options.headers : {}),
-  };
+  const headers = headersFrom(options.headers);
 
-  if (!headers.Accept && !headers.accept) {
+  if (!hasHeader(headers, "accept")) {
     headers.Accept = "application/json";
   }
 
-  const hasBody = body !== undefined && body !== null;
-
   if (
-    hasBody &&
-    !isFormData(body) &&
-    !isUrlSearchParams(body) &&
-    !headers["Content-Type"] &&
-    !headers["content-type"]
+    serializedBody !== undefined &&
+    shouldSerializeAsJson(originalBody) &&
+    !hasHeader(headers, "content-type")
   ) {
     headers["Content-Type"] = "application/json";
   }
@@ -308,12 +364,11 @@ function buildHeaders({
   if (auth) {
     const token = getToken(state, options);
 
-    if (token && !headers.Authorization && !headers.authorization) {
+    if (token && !hasHeader(headers, "authorization")) {
       headers.Authorization = `Bearer ${token}`;
     }
   } else {
-    delete headers.Authorization;
-    delete headers.authorization;
+    removeHeader(headers, "authorization");
   }
 
   return headers;
@@ -383,41 +438,6 @@ export function buildRequestError({
   return error;
 }
 
-export function shouldRetryRequest() {
-  return false;
-}
-
-export async function executeFetchWithRetry(url, fetchFactory) {
-  return fetchFactory(0, url);
-}
-
-/* =========================================================
-   EVENTS
-========================================================= */
-
-function emit(events, name, payload = {}) {
-  try {
-    if (isFunction(events?.emit)) {
-      events.emit(name, payload);
-      return true;
-    }
-
-    if (isFunction(events?.dispatch)) {
-      events.dispatch(name, payload);
-      return true;
-    }
-
-    if (isFunction(events?.trigger)) {
-      events.trigger(name, payload);
-      return true;
-    }
-  } catch {
-    return false;
-  }
-
-  return false;
-}
-
 /* =========================================================
    ARGUMENTS
 ========================================================= */
@@ -453,7 +473,9 @@ function normalizeArgs(arg1, arg2 = {}, arg3 = undefined) {
    REQUEST FACTORY
 ========================================================= */
 
-export function createRequest({ state = {}, events = null, setError = null } = {}) {
+export function createRequest({
+  state = {},
+} = {}) {
   let sequence = 0;
   let pending = 0;
   let lastError = null;
@@ -472,20 +494,21 @@ export function createRequest({ state = {}, events = null, setError = null } = {
       });
     }
 
-    const body = options.body ?? options.data ?? options.payload;
+    const originalBody = options.body ?? options.data ?? options.payload;
     const query = options.query ?? options.params ?? null;
 
     const url = appendQuery(joinUrl(API_BASE, clean), query);
-    const endpointPath = cleanPath(clean);
+    const endpointPath = cleanEndpointPath(clean);
     const auth = shouldUseAuth(endpointPath, options);
 
-    const serializedBody = serializeBody(method, body);
+    const serializedBody = serializeBody(method, originalBody);
 
     const headers = buildHeaders({
       state,
       options,
       auth,
-      body: serializedBody,
+      originalBody,
+      serializedBody,
     });
 
     const requestId = `req_${++sequence}`;
@@ -493,23 +516,8 @@ export function createRequest({ state = {}, events = null, setError = null } = {
 
     pending += 1;
 
-    if (isObject(state)) {
-      state.requestPending = pending;
-      state.lastRequestUrl = safeUrl;
-      state.lastRequestMethod = method;
-    }
-
-    if (options.emitEvents === true) {
-      emit(events, REQUEST_EVENTS.start, {
-        requestId,
-        method,
-        url: safeUrl,
-        auth,
-      });
-    }
-
     try {
-      const runFetch = fetchFn();
+      const runFetch = getFetch();
 
       if (!runFetch) {
         throw buildRequestError({
@@ -529,10 +537,6 @@ export function createRequest({ state = {}, events = null, setError = null } = {
         signal: options.signal || undefined,
       });
 
-      if (isObject(state)) {
-        state.lastRequestStatus = response.status;
-      }
-
       if (options.raw === true) {
         if (!response.ok) {
           const errorData = await parseResponseBody(response, "auto").catch(() => null);
@@ -542,14 +546,6 @@ export function createRequest({ state = {}, events = null, setError = null } = {
             data: errorData,
             url,
             method,
-          });
-        }
-
-        if (options.emitEvents === true) {
-          emit(events, REQUEST_EVENTS.success, {
-            requestId,
-            method,
-            status: response.status,
           });
         }
 
@@ -567,46 +563,13 @@ export function createRequest({ state = {}, events = null, setError = null } = {
         });
       }
 
-      if (options.emitEvents === true) {
-        emit(events, REQUEST_EVENTS.success, {
-          requestId,
-          method,
-          status: response.status,
-        });
-      }
-
       return data;
     } catch (error) {
       lastError = error;
 
-      if (isObject(state)) {
-        state.lastRequestStatus = error.status || error.statusCode || 0;
-      }
-
-      if (isFunction(setError) && options.storeError !== false) {
-        try {
-          setError(error);
-        } catch {
-          // noop
-        }
-      }
-
-      if (options.emitEvents === true) {
-        emit(events, REQUEST_EVENTS.error, {
-          requestId,
-          method,
-          status: error.status || error.statusCode || 0,
-          message: redact(error.message || "Request error"),
-        });
-      }
-
       throw error;
     } finally {
       pending = Math.max(0, pending - 1);
-
-      if (isObject(state)) {
-        state.requestPending = pending;
-      }
     }
   }
 
@@ -626,16 +589,7 @@ export function createRequest({ state = {}, events = null, setError = null } = {
     };
   };
 
-  request.getDebugSnapshot = request.getSnapshot;
   request.snapshot = request.getSnapshot;
-
-  request.clearInFlight = function clearInFlight() {
-    return 0;
-  };
-
-  request.abortInFlight = function abortInFlight() {
-    return 0;
-  };
 
   return request;
 }
@@ -697,17 +651,16 @@ export function createApiClient(request) {
       }),
 
     getSnapshot: () => request.getSnapshot?.() || null,
-    getDebugSnapshot: () => request.getDebugSnapshot?.() || null,
     snapshot: () => request.snapshot?.() || null,
-
-    clearInFlight: () => request.clearInFlight?.() || 0,
-    abortInFlight: () => request.abortInFlight?.() || 0,
   };
 }
 
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
 export default {
   REQUEST_VERSION,
-  REQUEST_EVENTS,
 
   createRequest,
   createApiClient,
@@ -715,6 +668,5 @@ export default {
   parseResponseBody,
   buildRequestError,
 
-  shouldRetryRequest,
-  executeFetchWithRetry,
+  publicApiPaths: PUBLIC_API_PATHS,
 };

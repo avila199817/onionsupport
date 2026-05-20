@@ -23,14 +23,10 @@
    - Sin /incidencias/nueva.
    - Sin Auth.
    - Sin CSS.
-   - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-
-import {
-  ROUTES as CORE_ROUTES,
-} from "../../core/config.js";
+import { ROUTES as CORE_ROUTES } from "../../core/config.js";
 
 import {
   getHomeDashboardStore,
@@ -49,41 +45,28 @@ import {
   getHomeWidgetId,
 } from "./home.model.js";
 
-export const HOME_ACTIONS_VERSION = "home.actions.v3";
+export const HOME_ACTIONS_VERSION = "home.actions.v4";
 
 const SOURCE = "views.home.actions";
 
 const CSV_FILENAME = "home-export.csv";
 const CSV_MIME_TYPE = "text/csv;charset=utf-8;";
 
-const ROUTES = Object.freeze({
-  HOME: CORE_ROUTES.home || CORE_ROUTES.root || "/",
-  INCIDENCIAS: CORE_ROUTES.incidencias || "/incidencias",
-  FACTURAS: CORE_ROUTES.facturas || "/facturas",
-  CLIENTES: CORE_ROUTES.clientes || "/clientes",
-  USUARIOS: CORE_ROUTES.usuarios || "/usuarios",
-  CUENTA: CORE_ROUTES.cuenta || "/cuenta",
-  AJUSTES: CORE_ROUTES.ajustes || "/ajustes",
-});
-
-const ACTION_ROUTES = Object.freeze({
-  go_incidencias: ROUTES.INCIDENCIAS,
-  go_facturas: ROUTES.FACTURAS,
-  go_clientes: ROUTES.CLIENTES,
-  go_usuarios: ROUTES.USUARIOS,
-  go_cuenta: ROUTES.CUENTA,
-  go_ajustes: ROUTES.AJUSTES,
-});
-
 const RAW_KEYS = new Set([
   "raw",
   "data",
+  "payload",
   "payloadRaw",
   "response",
 ]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo/i;
+
+const SENSITIVE_QUERY_RE =
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
 /* =========================================================
    BASICS
@@ -143,6 +126,24 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
+function normalizeRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = String(value || "").toLowerCase();
+
+  if (role === "admin") return "admin";
+  if (role === "user") return "user";
+
+  return "";
+}
+
 function nowIso() {
   try {
     return new Date().toISOString();
@@ -153,12 +154,20 @@ function nowIso() {
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function isSensitiveKey(key = "") {
   return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function isEmailLike(value = "") {
+  const text = safeText(value, "");
+  return Boolean(text && EMAIL_RE.test(text));
 }
 
 function sanitizePayloadValue(value, keyHint = "") {
@@ -208,25 +217,6 @@ function notify(message = "", type = "info", options = {}) {
     if (isFunction(AppCore?.showToast)) {
       return AppCore.showToast(text, type, safeObject(options)) !== false;
     }
-
-    const toast =
-      AppCore?.toast ||
-      AppCore?.Toast ||
-      AppCore?.ui?.toast ||
-      AppCore?.modules?.get?.("toast") ||
-      null;
-
-    if (isFunction(toast?.show)) {
-      return toast.show({
-        ...safeObject(options),
-        type,
-        message: text,
-      }) !== false;
-    }
-
-    if (isFunction(toast?.[type])) {
-      return toast[type](text, safeObject(options)) !== false;
-    }
   } catch {
     return false;
   }
@@ -239,9 +229,7 @@ function notify(message = "", type = "info", options = {}) {
 ========================================================= */
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
-    String(value || "")
-  );
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
 }
 
 function normalizeHashPath(value = "") {
@@ -253,15 +241,19 @@ function normalizeHashPath(value = "") {
   return raw;
 }
 
-function normalizePath(pathname = ROUTES.HOME) {
-  let value = safeText(pathname, ROUTES.HOME)
+function normalizePath(pathname = "") {
+  let value = safeText(pathname, "");
+
+  if (!value) return "";
+
+  value = value
     .replace(/\\/g, "/")
     .replace(/\/{2,}/g, "/");
 
   if (!value.startsWith("/")) value = `/${value}`;
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || ROUTES.HOME;
+    value = value.replace(/\/+$/g, "") || "/";
   }
 
   return value;
@@ -277,17 +269,17 @@ function normalizeSpaRoute(route = "") {
 
   if (
     raw.startsWith("//") ||
-      /^[a-z][a-z0-9+.-]*:/i.test(raw) ||
-      /[\r\n\t\\]/.test(raw) ||
-      hasSensitiveQuery(raw) ||
-      lower.startsWith("javascript:") ||
-      lower.startsWith("data:") ||
-      lower.startsWith("vbscript:") ||
-      lower.startsWith("mailto:") ||
-      lower.startsWith("tel:") ||
-      lower.startsWith("file:") ||
-      lower.startsWith("blob:") ||
-      /^https?:\/\//i.test(raw)
+    /^[a-z][a-z0-9+.-]*:/i.test(raw) ||
+    /[\r\n\t\\]/.test(raw) ||
+    hasSensitiveQuery(raw) ||
+    lower.startsWith("javascript:") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("vbscript:") ||
+    lower.startsWith("mailto:") ||
+    lower.startsWith("tel:") ||
+    lower.startsWith("file:") ||
+    lower.startsWith("blob:") ||
+    /^https?:\/\//i.test(raw)
   ) {
     return "";
   }
@@ -304,8 +296,9 @@ function normalizeSpaRoute(route = "") {
   const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
   const path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
 
-  const cleanPath = normalizePath(path || ROUTES.HOME);
+  const cleanPath = normalizePath(path);
 
+  if (!cleanPath) return "";
   if (cleanPath === "/home") return "";
   if (cleanPath === "/incidencias/nueva") return "";
   if (cleanPath.startsWith("/incidencias/nueva/")) return "";
@@ -313,9 +306,53 @@ function normalizeSpaRoute(route = "") {
   return `${cleanPath}${query}${hash}`;
 }
 
+function routeFromCore(name = "", fallback = "") {
+  return normalizeSpaRoute(CORE_ROUTES?.[name]) || normalizeSpaRoute(fallback);
+}
+
+const ROUTES = Object.freeze({
+  INCIDENCIAS: routeFromCore("incidencias", "/incidencias"),
+  FACTURAS: routeFromCore("facturas", "/facturas"),
+  CLIENTES: routeFromCore("clientes", "/clientes"),
+
+  USUARIOS: routeFromCore("usuarios", ""),
+  CUENTA: routeFromCore("cuenta", ""),
+  AJUSTES: routeFromCore("ajustes", ""),
+});
+
+const ACTION_ROUTES = Object.freeze({
+  go_incidencias: ROUTES.INCIDENCIAS,
+  go_facturas: ROUTES.FACTURAS,
+  go_clientes: ROUTES.CLIENTES,
+  go_usuarios: ROUTES.USUARIOS,
+  go_cuenta: ROUTES.CUENTA,
+  go_ajustes: ROUTES.AJUSTES,
+});
+
+function routePath(route = "") {
+  return normalizeSpaRoute(route).split("?")[0].split("#")[0] || "";
+}
+
+function isAdminOnlyRoute(route = "") {
+  const path = routePath(route);
+  const clientes = routePath(ROUTES.CLIENTES);
+  const usuarios = routePath(ROUTES.USUARIOS);
+
+  if (!path) return false;
+
+  return (
+    Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
+  );
+}
+
 function routeFromAction(action = "") {
   return ACTION_ROUTES[normalizeKey(action)] || "";
 }
+
+/* =========================================================
+   ROUTER
+========================================================= */
 
 function navigationOk(result = null) {
   if (result === false) return false;
@@ -329,9 +366,7 @@ function getRouterCandidates() {
 
   try {
     candidates.push(AppCore?.router);
-    candidates.push(AppCore?.Router);
     candidates.push(AppCore?.modules?.get?.("router"));
-    candidates.push(AppCore?.modules?.get?.("Router"));
   } catch {
     // noop
   }
@@ -339,14 +374,21 @@ function getRouterCandidates() {
   return candidates.filter(Boolean);
 }
 
-async function navigateSpa(route = ROUTES.HOME, options = {}) {
+async function navigateSpa(route = "", options = {}) {
   const target = normalizeSpaRoute(route);
 
   if (!target) return false;
 
+  const rawOptions = safeObject(options);
+  const cleanOptions = sanitizePayload({
+    ...rawOptions,
+    payload: undefined,
+  });
+
   const opts = {
+    ...cleanOptions,
     source: SOURCE,
-    ...sanitizePayload(options),
+    payload: sanitizePayload(rawOptions.payload),
   };
 
   for (const router of getRouterCandidates()) {
@@ -378,10 +420,51 @@ export function getHomeDashboardFromStoreAction() {
       return null;
     }
 
-    return normalizeHomeDashboard(dashboard);
+    return normalizeHomeDashboard(sanitizePayload(dashboard));
   } catch {
     return null;
   }
+}
+
+function getStoredRole() {
+  const dashboard = safeObject(getHomeDashboardFromStoreAction());
+
+  const role = normalizeRole(
+    first(
+      dashboard.role,
+      dashboard.rol,
+      dashboard.roles,
+      dashboard.meta?.role,
+      dashboard.meta?.rol,
+      dashboard.meta?.roles,
+      ""
+    )
+  );
+
+  if (role) return role;
+
+  if (
+    dashboard.admin === true ||
+    dashboard.isAdmin === true ||
+    dashboard.meta?.admin === true
+  ) {
+    return "admin";
+  }
+
+  return "user";
+}
+
+function canUseAdminActions() {
+  return getStoredRole() === "admin";
+}
+
+function canUseRoute(route = "") {
+  const target = normalizeSpaRoute(route);
+
+  if (!target) return false;
+  if (!isAdminOnlyRoute(target)) return true;
+
+  return canUseAdminActions();
 }
 
 export async function getHomeDashboardAction({
@@ -414,6 +497,7 @@ function widgetRoute(widget = {}) {
 function normalizeWidgetDetail(widget = {}) {
   const item = normalizeHomeWidget(sanitizePayload(widget));
   const id = safeText(getHomeWidgetId(item), "");
+  const route = widgetRoute(item);
 
   return sanitizePayload({
     ...item,
@@ -430,10 +514,10 @@ function normalizeWidgetDetail(widget = {}) {
     trend: first(item.trend, item.delta, item.change, item.variation, ""),
     status: safeText(first(item.status, item.estado, item.state), "active"),
 
-    route: widgetRoute(item),
-    href: widgetRoute(item),
+    route,
+    href: route,
 
-    items: safeArray(first(item.items, item.rows, item.list, [])),
+    items: safeArray(first(item.items, item.rows, item.list, [])).map(sanitizePayload),
   });
 }
 
@@ -521,6 +605,7 @@ function safeCopyText(value = "") {
   if (hasSensitiveQuery(text)) return "";
   if (/Bearer\s+/i.test(text)) return "";
   if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
+  if (isEmailLike(text)) return "";
 
   return text.slice(0, 240);
 }
@@ -531,8 +616,8 @@ async function writeClipboardText(value = "") {
   if (!text || !isBrowser()) return false;
 
   try {
-    if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
+    if (window.navigator?.clipboard?.writeText) {
+      await window.navigator.clipboard.writeText(text);
       return true;
     }
   } catch {
@@ -611,11 +696,23 @@ function normalizeFilename(value = "", fallback = CSV_FILENAME) {
   return name.toLowerCase().endsWith(".csv") ? name : `${name}.csv`;
 }
 
-function csvCell(value = "") {
-  const text = value === null || value === undefined
-    ? ""
-    : redact(String(value));
+function safeCsvText(value = "") {
+  const text = redact(safeText(value, ""));
 
+  if (!text) return "";
+  if (isEmailLike(text)) return "";
+  if (hasSensitiveQuery(text)) return "";
+  if (/Bearer\s+/i.test(text)) return "";
+
+  if (/^[=+\-@]/.test(text)) {
+    return `'${text}`;
+  }
+
+  return text;
+}
+
+function csvCell(value = "") {
+  const text = safeCsvText(value);
   return `"${text.replace(/"/g, '""')}"`;
 }
 
@@ -805,10 +902,31 @@ function downloadTextFile({
   }
 }
 
+function isAdminExportMode(mode = "") {
+  const key = normalizeKey(mode);
+
+  return [
+    "user",
+    "users",
+    "usuario",
+    "usuarios",
+    "client",
+    "clients",
+    "cliente",
+    "clientes",
+    "customer",
+    "customers",
+  ].includes(key);
+}
+
 function resolveExportItems(items = null, mode = "widgets") {
   if (Array.isArray(items)) return items;
 
   const key = normalizeKey(mode);
+
+  if (isAdminExportMode(key) && !canUseAdminActions()) {
+    return [];
+  }
 
   try {
     if (["ticket", "tickets", "incidencia", "incidencias"].includes(key)) {
@@ -844,6 +962,11 @@ export function exportHomeCsvAction({
   mode = "widgets",
   silent = false,
 } = {}) {
+  if (isAdminExportMode(mode) && !canUseAdminActions()) {
+    if (!silent) notify("Exportación no disponible.", "error");
+    return false;
+  }
+
   const list = resolveExportItems(items, mode);
 
   if (!list.length) {
@@ -879,15 +1002,20 @@ export function exportHomeCsvAction({
 ========================================================= */
 
 export async function navigateFromHomeAction({
-  route = ROUTES.HOME,
+  route = "",
   silent = false,
   replaceState = false,
   payload = {},
 } = {}) {
-  const target = normalizeSpaRoute(route || ROUTES.HOME);
+  const target = normalizeSpaRoute(route);
 
   if (!target) {
     if (!silent) notify("Ruta inválida.", "error");
+    return false;
+  }
+
+  if (!canUseRoute(target)) {
+    if (!silent) notify("Ruta no disponible.", "error");
     return false;
   }
 
@@ -915,8 +1043,10 @@ export async function createFromHomeAction({
   silent = false,
   payload = {},
 } = {}) {
+  const target = normalizeSpaRoute(route) || ROUTES.INCIDENCIAS;
+
   return navigateFromHomeAction({
-    route: normalizeSpaRoute(route) || ROUTES.INCIDENCIAS,
+    route: target,
     silent,
     payload: sanitizePayload(payload),
   });
@@ -981,11 +1111,18 @@ export async function runHomeQuickAction({
 ========================================================= */
 
 export function getHomeActionsSnapshot() {
+  const routes = Object.fromEntries(
+    Object.entries(ROUTES).filter(([, route]) => Boolean(route))
+  );
+
   return {
     version: HOME_ACTIONS_VERSION,
     source: SOURCE,
 
     browser: isBrowser(),
+
+    role: getStoredRole(),
+    admin: canUseAdminActions(),
 
     router: {
       hasCandidates: getRouterCandidates().length > 0,
@@ -1028,17 +1165,18 @@ export function getHomeActionsSnapshot() {
 
       rejectsSensitiveRoutes: true,
       rejectsSensitiveClipboard: true,
+      blocksAdminRoutesForUser: true,
+      blocksAdminExportsForUser: true,
+
       sanitizesPayload: true,
       csvExcludesEmail: true,
       csvRedacted: true,
 
       routesFromConfig: true,
-      toastViaAppCoreOnly: true,
+      toastViaAppCoreShowToastOnly: true,
     },
 
-    routes: {
-      ...ROUTES,
-    },
+    routes,
 
     at: nowIso(),
   };

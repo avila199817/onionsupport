@@ -36,7 +36,7 @@ const DEFAULT_APP_NAME = "Onion Support";
   Logo corporativo canónico.
   El blanco se reserva para fondos oscuros si la capa visual lo necesita.
 */
-const DEFAULT_LOGO = "/src/media/img/favicon_black.png";
+const DEFAULT_LOGO = "/src/media/img/favicon_black_circle.png";
 
 const DEFAULT_PASSWORD_REQUEST_HREF =
   ROUTES.passwordRequest || "/password-request";

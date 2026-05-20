@@ -8,13 +8,14 @@
    - Resolver rutas privadas con prefijo /@{slug}.
    - Canonicalizar rutas privadas sin slug a /@{slug}/ruta.
    - Validar que /@{slug} coincide con el usuario real.
+   - Esperar restore Auth si ya está en curso antes de decidir guard.
    - Consultar guard.
    - Renderizar vista.
    - Actualizar history.
    - Actualizar estado de ruta.
    - Sincronizar chrome registrado tras render.
-   - Ruta privada sin sesión -> /login.
-   - Login con sesión -> /@{user.slug}.
+   - Ruta privada sin sesión válida -> /login.
+   - Login con sesión válida -> /@{user.slug}.
    - Home interna: /
    - Home visible: /@{user.slug}
    - Sin Auth estático.
@@ -23,6 +24,7 @@
    - Sin Toast.
    - Sin alias /home.
    - Sin rutas inventadas.
+   - Sin /403 ni /404 como rutas.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
@@ -34,7 +36,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v7";
+export const ROUTER_VERSION = "router.index.v8";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -48,11 +50,20 @@ export const Router = (() => {
 
   const SOURCE = "router";
 
-  const HOME_PATH = ROUTE_PATHS.HOME || "/";
+  const HOME_PATH = "/";
   const LOGIN_PATH = ROUTE_PATHS.LOGIN || "/login";
   const USER_HOME_PREFIX = Routes.USER_HOME_PREFIX || "/@";
 
   const routes = getImmutableRoutes();
+
+  const BLOCKED_LEGACY_PATHS = new Set([
+    "/home",
+    "/403",
+    "/404",
+    "/2fa",
+    "/mfa",
+    "/otp",
+  ]);
 
   let initialized = false;
   let bound = false;
@@ -79,7 +90,11 @@ export const Router = (() => {
   }
 
   function cleanText(value = "", fallback = "") {
-    const output = String(value ?? "").trim();
+    const output = String(value ?? "")
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
     return output || fallback;
   }
 
@@ -97,7 +112,10 @@ export const Router = (() => {
 
   function redact(value = "") {
     return cleanText(value, "")
-      .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+      .replace(
+        /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+        "$1***"
+      )
       .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
   }
 
@@ -316,6 +334,18 @@ export const Router = (() => {
     return value.startsWith("#") && !isHashRouterPath(value);
   }
 
+  function isBlockedLegacyPath(path = HOME_PATH) {
+    const normalized = normalizeCanonicalPath(path).toLowerCase();
+
+    if (BLOCKED_LEGACY_PATHS.has(normalized)) return true;
+
+    return (
+      normalized.startsWith("/2fa/") ||
+      normalized.startsWith("/mfa/") ||
+      normalized.startsWith("/otp/")
+    );
+  }
+
   function safeRedirectPath(path = HOME_PATH, fallback = HOME_PATH) {
     const value = cleanText(path, "");
 
@@ -360,6 +390,69 @@ export const Router = (() => {
     } catch {
       return fallback;
     }
+  }
+
+  function getAuthSessionState() {
+    const Auth = getAuth();
+
+    return isObject(Auth?.session) ? Auth.session : {};
+  }
+
+  function getInFlightAuthPromise() {
+    const session = getAuthSessionState();
+
+    const candidate =
+      session.restorePromise ||
+      session.mePromise ||
+      session.refreshPromise ||
+      null;
+
+    return candidate && isFunction(candidate.then) ? candidate : null;
+  }
+
+  function isAuthResolving() {
+    const session = getAuthSessionState();
+    const state = readState();
+
+    return Boolean(
+      session.restoring ||
+        session.checking ||
+        session.refreshing ||
+        session.restorePromise ||
+        session.mePromise ||
+        session.refreshPromise ||
+        state.authRestoring === true ||
+        state.sessionRestoring === true ||
+        state.restoringSession === true
+    );
+  }
+
+  async function waitForAuthIfNeeded(data = {}, options = {}) {
+    if (options.skipAuthWait === true) return false;
+    if (isAuthenticated()) return false;
+
+    const route = data.route || null;
+
+    const shouldWait = Boolean(
+      routeIsPrivate(route) ||
+        route?.guestOnly === true ||
+        route?.publicOnly === true ||
+        isAuthResolving()
+    );
+
+    if (!shouldWait) return false;
+
+    const promise = getInFlightAuthPromise();
+
+    if (!promise) return false;
+
+    try {
+      await promise;
+    } catch {
+      // restore fallido se decide después por guards
+    }
+
+    return true;
   }
 
   function getCurrentUser() {
@@ -428,6 +521,8 @@ export const Router = (() => {
     }
 
     const slug = cleanText(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
       .replace(/^\/+/, "")
       .replace(/^@+/, "")
       .split(/[/?#]/)[0]
@@ -626,7 +721,9 @@ export const Router = (() => {
     const visibleCanonicalPath = normalizeCanonicalPath(publicPath);
     const scoped = getUserPathInfo(visibleCanonicalPath);
     const lookupPath = resolveRouteLookupPath(visibleCanonicalPath);
-    const route = getStaticRouteByPath(lookupPath);
+    const route = isBlockedLegacyPath(visibleCanonicalPath)
+      ? null
+      : getStaticRouteByPath(lookupPath);
 
     return {
       route,
@@ -636,6 +733,7 @@ export const Router = (() => {
       lookupPath,
       routeParams: scoped.slug ? { slug: scoped.slug } : {},
       matchedBy: scoped.slug ? "user-scope" : route ? "static" : "none",
+      blockedLegacy: isBlockedLegacyPath(visibleCanonicalPath),
     };
   }
 
@@ -652,11 +750,15 @@ export const Router = (() => {
   }
 
   function isPublicAuthRoutePath(path = HOME_PATH) {
+    const canonical = canonicalAuthPath(path);
+
+    if (isBlockedLegacyPath(canonical)) return false;
+
     if (isFunction(Routes.isPublicAuthPath)) {
-      return Routes.isPublicAuthPath(path) === true;
+      return Routes.isPublicAuthPath(canonical) === true;
     }
 
-    const route = getRoute(path);
+    const route = getRoute(canonical);
     return Boolean(route?.public === true);
   }
 
@@ -692,6 +794,7 @@ export const Router = (() => {
 
     if (!target) return false;
     if (hasSensitiveQuery(target)) return false;
+    if (isBlockedLegacyPath(target)) return false;
     if (isPublicAuthRoutePath(target)) return false;
 
     return routeExists(target);
@@ -883,6 +986,7 @@ export const Router = (() => {
     if (
       !target ||
       hasSensitiveQuery(target) ||
+      isBlockedLegacyPath(target) ||
       isPublicAuthRoutePath(target) ||
       !routeExists(target)
     ) {
@@ -1205,7 +1309,29 @@ export const Router = (() => {
 
   async function executeRender(path = HOME_PATH, options = {}) {
     const seq = ++renderSeq;
-    const data = getRouteMatch(path);
+    let data = getRouteMatch(path);
+
+    if (data.blockedLegacy) {
+      if (!isAuthenticated()) {
+        return redirectTo(LOGIN_PATH, options, "blocked-legacy-login");
+      }
+
+      return renderNotFound(data, options);
+    }
+
+    const waitedAuth = await waitForAuthIfNeeded(data, options);
+
+    if (waitedAuth) {
+      if (seq !== renderSeq) {
+        return {
+          ok: false,
+          skipped: true,
+          reason: "stale",
+        };
+      }
+
+      data = getRouteMatch(path);
+    }
 
     if (!data.route) {
       if (!isAuthenticated()) {
@@ -1475,6 +1601,9 @@ export const Router = (() => {
       routeParams: readState().routeParams || {},
 
       authenticated: isAuthenticated(),
+      authResolving: isAuthResolving(),
+      hasAuthPromise: Boolean(getInFlightAuthPromise()),
+
       defaultHome: getDefaultHome(),
       currentUserSlug: getCurrentUserSlug() || null,
 
@@ -1489,6 +1618,8 @@ export const Router = (() => {
       policy: {
         ownAuthStatic: false,
         authDelegated: true,
+        waitsForInFlightAuthRestore: true,
+        doesNotStartRestore: true,
 
         ownStorage: false,
         ownTransport: false,
@@ -1509,6 +1640,10 @@ export const Router = (() => {
 
         noHomeAlias: true,
         noHomeRoute: true,
+        blocksHomeAlias: true,
+        blocks403Route: true,
+        blocks404Route: true,
+
         no2fa: true,
         noMfa: true,
         noOtp: true,

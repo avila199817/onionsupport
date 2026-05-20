@@ -23,10 +23,15 @@ import {
   SIDEBAR_ROLE_USER,
 } from "./constants.js";
 
-export const SIDEBAR_USER_VERSION = "sidebar.user.v3";
+export const SIDEBAR_USER_VERSION = "sidebar.user.v4";
 
 const DEFAULT_NAME = "Usuario";
 const DEFAULT_INITIALS = "U";
+
+const MAX_NAME_LENGTH = 120;
+const MAX_USERNAME_LENGTH = 96;
+const MAX_EMAIL_LENGTH = 254;
+const MAX_AVATAR_URL_LENGTH = 2048;
 
 /* =========================================================
    BASICS
@@ -43,6 +48,10 @@ function isFunction(value) {
 function text(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
+}
+
+function limitText(value = "", limit = 120) {
+  return text(value, "").slice(0, limit);
 }
 
 function first(...values) {
@@ -333,7 +342,7 @@ export function getSidebarDisplayName(user = null) {
 
   const profile = isObject(user.profile) ? user.profile : {};
 
-  return text(
+  return limitText(
     first(
       user.displayName,
       user.fullName,
@@ -347,21 +356,21 @@ export function getSidebarDisplayName(user = null) {
       user.userName,
       getSidebarUserSlug(user)
     ),
-    DEFAULT_NAME
-  );
+    MAX_NAME_LENGTH
+  ) || DEFAULT_NAME;
 }
 
 export function getSidebarUsername(user = null) {
   if (!isUsableSidebarUser(user)) return "";
 
-  const raw = text(
+  const raw = limitText(
     first(
       user.username,
       user.userName,
       user.user_name,
       getSidebarUserSlug(user)
     ),
-    ""
+    MAX_USERNAME_LENGTH
   );
 
   return raw
@@ -379,7 +388,7 @@ export function getSidebarUserEmail(user = null) {
   const profile = isObject(user.profile) ? user.profile : {};
   const lookup = isObject(user.lookup) ? user.lookup : {};
 
-  const email = text(
+  const email = limitText(
     first(
       user.email,
       user.mail,
@@ -389,12 +398,32 @@ export function getSidebarUserEmail(user = null) {
       lookup.email,
       lookup.emailLower
     ),
-    ""
+    MAX_EMAIL_LENGTH
   ).toLowerCase();
 
-  if (!email || email.length > 254 || /\s/.test(email)) return "";
+  if (!email || email.length > MAX_EMAIL_LENGTH || /\s/.test(email)) return "";
 
   return email;
+}
+
+function safeAvatarUrl(value = "") {
+  const avatar = limitText(value, MAX_AVATAR_URL_LENGTH);
+
+  if (!avatar) return "";
+
+  if (avatar.startsWith("/") && !avatar.startsWith("//")) {
+    return avatar;
+  }
+
+  if (/^https:\/\//i.test(avatar)) {
+    try {
+      return new URL(avatar).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
 }
 
 export function getSidebarUserAvatarUrl(user = null) {
@@ -403,7 +432,7 @@ export function getSidebarUserAvatarUrl(user = null) {
   const profile = isObject(user.profile) ? user.profile : {};
   const raw = isObject(user.raw) ? user.raw : {};
 
-  const avatar = text(
+  return safeAvatarUrl(
     first(
       user.avatarUrl,
       user.avatar,
@@ -429,22 +458,8 @@ export function getSidebarUserAvatarUrl(user = null) {
       raw.photo,
       raw.pictureUrl,
       raw.picture
-    ),
-    ""
+    )
   );
-
-  if (!avatar) return "";
-
-  /*
-    Permitimos rutas internas, https/http, blob y data:image.
-    Bloqueamos protocolos ejecutables o basura.
-  */
-  if (avatar.startsWith("/") && !avatar.startsWith("//")) return avatar;
-  if (/^https?:\/\//i.test(avatar)) return avatar;
-  if (/^blob:/i.test(avatar)) return avatar;
-  if (/^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,/i.test(avatar)) return avatar;
-
-  return "";
 }
 
 export function getSidebarInitials(value = "") {
@@ -551,14 +566,23 @@ export function getSidebarUserSnapshot(context = {}) {
 
     policy: {
       viewModelOnly: true,
+
       noDom: true,
       noEvents: true,
       noStorage: true,
       noHttp: true,
       noDropdownBehavior: true,
+
       noPermissionsInvented: true,
+
       noEmailIdentity: true,
       noSlugFabrication: true,
+
+      avatarInternalOrHttpsOnly: true,
+      noBlobAvatar: true,
+      noDataImageAvatar: true,
+      noHttpAvatar: true,
+
       roles: [SIDEBAR_ROLE_ADMIN, SIDEBAR_ROLE_USER],
     },
   };

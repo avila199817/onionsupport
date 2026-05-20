@@ -24,9 +24,7 @@
    - Sin emails como identidad visual.
 ========================================================= */
 
-import {
-  ROUTES as CORE_ROUTES,
-} from "../../core/config.js";
+import { ROUTES as CORE_ROUTES } from "../../core/config.js";
 
 import {
   DEFAULT_PAGE_SIZE,
@@ -100,21 +98,11 @@ import {
   getPagination,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.v4";
+export const TEMPLATE_VERSION = "home.template.v5";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
-
-const ROUTES = Object.freeze({
-  HOME: CORE_ROUTES.home || CORE_ROUTES.root || "/",
-  INCIDENCIAS: CORE_ROUTES.incidencias || "/incidencias",
-  FACTURAS: CORE_ROUTES.facturas || "/facturas",
-  CLIENTES: CORE_ROUTES.clientes || "/clientes",
-  USUARIOS: CORE_ROUTES.usuarios || "/usuarios",
-  CUENTA: CORE_ROUTES.cuenta || "/cuenta",
-  AJUSTES: CORE_ROUTES.ajustes || "/ajustes",
-});
 
 const ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -127,7 +115,6 @@ const ACTIONS = Object.freeze({
 
   PREV_PAGE: "prev_page",
   NEXT_PAGE: "next_page",
-  GO_PAGE: "page",
 
   EXPORT_CSV: "export_csv",
 });
@@ -157,13 +144,21 @@ const RAW_KEYS = new Set([
 const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+
+const ADMIN_ENTITY_RE =
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
+
 /* =========================================================
-   SAFE HTML
+   SAFE HTML / ROUTES
 ========================================================= */
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -194,6 +189,20 @@ function boolAttr(condition = false, value = "") {
 
 function isSensitiveKey(key = "") {
   return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function isEmailLike(value = "") {
+  const text = safeText(value, "").trim();
+  return Boolean(text && EMAIL_RE.test(text));
+}
+
+function visualLabel(value = "", fallback = "Usuario") {
+  const text = redact(safeText(value, "")).trim();
+
+  if (!text) return fallback;
+  if (isEmailLike(text)) return fallback;
+
+  return text;
 }
 
 function sanitizePayloadValue(value, keyHint = "") {
@@ -261,6 +270,40 @@ function safeRoute(value = "", fallback = "") {
   return normalized;
 }
 
+function safeStaticRoute(value = "", fallback = "") {
+  return safeRoute(value, fallback) || fallback;
+}
+
+const ROUTES = Object.freeze({
+  INCIDENCIAS: safeStaticRoute(CORE_ROUTES?.incidencias, "/incidencias"),
+  FACTURAS: safeStaticRoute(CORE_ROUTES?.facturas, "/facturas"),
+  CLIENTES: safeStaticRoute(CORE_ROUTES?.clientes, "/clientes"),
+  USUARIOS: safeStaticRoute(CORE_ROUTES?.usuarios, "/usuarios"),
+});
+
+function getRoutePath(value = "") {
+  return safeRoute(value, "").split("?")[0].split("#")[0] || "";
+}
+
+function isAdminOnlyRoute(route = "") {
+  const path = getRoutePath(route);
+  const clientes = getRoutePath(ROUTES.CLIENTES);
+  const usuarios = getRoutePath(ROUTES.USUARIOS);
+
+  if (!path) return false;
+
+  return (
+    path === clientes ||
+    path === usuarios ||
+    path.startsWith(`${clientes}/`) ||
+    path.startsWith(`${usuarios}/`)
+  );
+}
+
+function isAdminEntityValue(value = "") {
+  return ADMIN_ENTITY_RE.test(String(value || "").toLowerCase());
+}
+
 function safeImageSrc(value = "") {
   const raw = safeText(value, "");
 
@@ -323,7 +366,10 @@ function getTemplateMeta(input = {}) {
   );
 
   return {
-    requestId: safeText(first(data.requestId, state.requestId, dashboard.requestId, dashboard.meta?.requestId), ""),
+    requestId: safeText(
+      first(data.requestId, state.requestId, dashboard.requestId, dashboard.meta?.requestId),
+      ""
+    ),
     lastUpdatedAt,
     partial: Boolean(first(dashboard.partial, data.partial, false)),
     errorsCount: safeArray(first(dashboard.errors, data.errors, [])).length,
@@ -334,13 +380,82 @@ function isAdmin(input = {}) {
   return isAdminRole(getRole(input));
 }
 
+function getSafeDisplayName(input = {}) {
+  return visualLabel(getDisplayName(input), "Usuario");
+}
+
 function filterActivityForRole(input = {}, rows = []) {
   if (isAdmin(input)) return safeArray(rows);
 
   return safeArray(rows).filter((item) => {
     const type = normalizeKey(first(item.type, item.kind, item.category, ""));
-
     return !["client", "cliente", "customer", "user", "usuario", "member"].includes(type);
+  });
+}
+
+function filterWidgetsForRole(input = {}, rows = []) {
+  const widgets = safeArray(rows);
+
+  if (isAdmin(input)) return widgets;
+
+  return widgets.filter((widget) => {
+    const item = safeObject(widget);
+
+    const identity = safeText(
+      first(
+        item.entity,
+        item.resource,
+        item.collection,
+        item.type,
+        item.kind,
+        item.widgetId,
+        item.id,
+        item.name,
+        getWidgetId(item),
+        getWidgetType(item),
+        getWidgetRoute(item),
+        ""
+      ),
+      ""
+    );
+
+    if (isAdminEntityValue(identity)) return false;
+
+    const route = safeRoute(getWidgetRoute(item), "");
+
+    return !isAdminOnlyRoute(route);
+  });
+}
+
+function filterQuickActionsForRole(input = {}, rows = []) {
+  const actions = safeArray(rows);
+
+  if (isAdmin(input)) return actions;
+
+  return actions.filter((action) => {
+    const item = safeObject(action);
+
+    const route = safeRoute(first(item.route, item.href, item.to, ""), "");
+    if (isAdminOnlyRoute(route)) return false;
+
+    const identity = safeText(
+      first(
+        item.action,
+        item.dataAction,
+        item.key,
+        item.id,
+        item.type,
+        item.kind,
+        item.title,
+        item.label,
+        item.text,
+        route,
+        ""
+      ),
+      ""
+    );
+
+    return !isAdminEntityValue(identity);
   });
 }
 
@@ -497,14 +612,15 @@ function avatar({
   seed = "",
   className = "home-avatar",
 } = {}) {
-  const label = safeText(name, "Usuario");
+  const label = visualLabel(name, "Usuario");
   const initials = getInitials(label);
   const src = safeImageSrc(image);
   const avatarSeed = getInitials(safeText(seed, label));
+  const fallbackClass = `${safeText(className, "home-avatar")}--fallback`;
 
   return `
     <div
-      class="${joinClasses(className, src ? "" : `${className}--fallback`)}"
+      class="${joinClasses(className, src ? "" : fallbackClass)}"
       aria-label="${attr(label)}"
       data-avatar-root="true"
       data-avatar-kind="${attr(kind)}"
@@ -512,13 +628,13 @@ function avatar({
       data-avatar-initials="${attr(initials)}"
       ${boolAttr(!src, 'data-fallback="true"')}
     >
-      <span class="${className}-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
+      <span class="${attr(className)}-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
 
       ${
         src
           ? `
             <img
-              class="${className}-img"
+              class="${attr(className)}-img"
               src="${attr(src)}"
               alt="${attr(label)}"
               loading="lazy"
@@ -617,7 +733,9 @@ export function renderHomeHeader(input = {}) {
   const meta = getTemplateMeta(data);
   const admin = isAdmin(data);
 
-  const displayName = getDisplayName(data);
+  const displayName = getSafeDisplayName(data);
+  const user = getUser(data);
+
   const title = admin ? "Centro de control Onion" : `Hola, ${displayName}`;
   const subtitle = admin
     ? "Resumen operativo de incidencias, facturación, clientes y usuarios."
@@ -641,7 +759,7 @@ export function renderHomeHeader(input = {}) {
             name: displayName,
             image: getAvatarUrl(data),
             kind: "user",
-            seed: safeText(first(getUser(data).userId, getUser(data).id, getUser(data).username, displayName), displayName),
+            seed: safeText(first(user.userId, user.id, user.username, displayName), displayName),
             className: "home-user-avatar",
           })}
 
@@ -768,7 +886,7 @@ function widgetCard(widget = {}, index = 0) {
 export function renderHomeWidgets(input = {}) {
   const data = safeObject(input);
   const state = getLoadingState(data);
-  const widgets = getWidgets(data).slice(0, LIMITS.widgets);
+  const widgets = filterWidgetsForRole(data, getWidgets(data)).slice(0, LIMITS.widgets);
 
   return `
     <section class="home-widgets" data-home-section="widgets" aria-label="Widgets del dashboard">
@@ -804,7 +922,9 @@ function normalizeQuickAction(action = {}) {
   return {
     ...raw,
     action: isCreate ? ACTIONS.CREATE_INCIDENCIA : actionName || ACTIONS.NAVIGATE,
-    dataAction: isCreate ? ACTIONS.CREATE_INCIDENCIA : safeText(raw.dataAction || ACTIONS.NAVIGATE, ACTIONS.NAVIGATE),
+    dataAction: isCreate
+      ? ACTIONS.CREATE_INCIDENCIA
+      : safeText(raw.dataAction || ACTIONS.NAVIGATE, ACTIONS.NAVIGATE),
     route: isCreate ? ROUTES.INCIDENCIAS : safeRoute(raw.route || raw.href || "", ""),
     modifier: normalizeKey(raw.modifier || actionName || "default"),
     isCreate,
@@ -817,6 +937,7 @@ function quickActionCard(action = {}, state = {}) {
   const busy =
     state.navigatingAction === item.action ||
     state.navigatingAction === item.dataAction ||
+    state.navigatingAction === item.route ||
     (item.isCreate && state.creating);
 
   return `
@@ -843,7 +964,7 @@ export function renderHomeQuickActions(input = {}) {
   const data = safeObject(input);
   const state = getLoadingState(data);
   const admin = isAdmin(data);
-  const actions = getQuickActions(data);
+  const actions = filterQuickActionsForRole(data, getQuickActions(data));
 
   return `
     <section class="home-panel home-panel--actions" data-home-section="quick-actions">
@@ -860,7 +981,12 @@ export function renderHomeQuickActions(input = {}) {
       ${
         state.loading && !actions.length
           ? loadingCards(4)
-          : `<div class="home-actions-grid">${actions.map((item) => quickActionCard(item, state)).join("")}</div>`
+          : actions.length
+            ? `<div class="home-actions-grid">${actions.map((item) => quickActionCard(item, state)).join("")}</div>`
+            : emptyState({
+                title: "Sin acciones disponibles",
+                text: "Cuando haya accesos disponibles aparecerán aquí.",
+              })
       }
     </section>
   `;
@@ -888,6 +1014,8 @@ function activityItem(input = {}, item = {}) {
         : typeKey === "user" || typeKey === "usuario" || typeKey === "member"
           ? ROUTES.USUARIOS
           : ROUTES.INCIDENCIAS);
+
+  if (!admin && isAdminOnlyRoute(route)) return "";
 
   const entityId = safeText(
     first(
@@ -942,6 +1070,7 @@ export function renderHomeActivity(input = {}) {
   const data = safeObject(input);
   const state = getLoadingState(data);
   const activity = filterActivityForRole(data, getActivity(data)).slice(0, LIMITS.activity);
+  const items = activity.map((item) => activityItem(data, item)).filter(Boolean);
 
   return `
     <section class="home-panel home-panel--activity" data-home-section="activity">
@@ -950,7 +1079,7 @@ export function renderHomeActivity(input = {}) {
           <span class="home-panel-kicker">Actividad</span>
           <h2 class="home-panel-title">Actividad reciente</h2>
           <p class="home-panel-subtitle">
-            ${state.loading && !activity.length ? "Cargando actividad..." : escapeHtml(`${formatNumber(activity.length)} movimientos recientes`)}
+            ${state.loading && !items.length ? "Cargando actividad..." : escapeHtml(`${formatNumber(items.length)} movimientos recientes`)}
           </p>
         </div>
 
@@ -967,10 +1096,10 @@ export function renderHomeActivity(input = {}) {
       </div>
 
       ${
-        state.loading && !activity.length
+        state.loading && !items.length
           ? loadingCards(3)
-          : activity.length
-            ? `<div class="home-activity-list">${activity.map((item) => activityItem(data, item)).join("")}</div>`
+          : items.length
+            ? `<div class="home-activity-list">${items.join("")}</div>`
             : emptyState({
                 title: "Sin actividad reciente",
                 text: "Cuando haya movimientos aparecerán aquí.",
@@ -979,6 +1108,21 @@ export function renderHomeActivity(input = {}) {
       }
     </section>
   `;
+}
+
+function invoiceStatusLabel(status = "") {
+  const key = normalizeKey(status);
+
+  const labels = {
+    paid: "Pagada",
+    pending: "Pendiente",
+    overdue: "Vencida",
+    draft: "Borrador",
+    cancelled: "Cancelada",
+    canceled: "Cancelada",
+  };
+
+  return labels[key] || status || "Estado";
 }
 
 function invoiceItem(item = {}) {
@@ -1005,7 +1149,7 @@ function invoiceItem(item = {}) {
         <strong>${escapeHtml(id || "Factura")}</strong>
         <span>${escapeHtml(formatMoney(amount, currency || DEFAULT_CURRENCY))}</span>
       </span>
-      <span class="home-invoice-mini-status">${escapeHtml(status || "estado")}</span>
+      <span class="home-invoice-mini-status">${escapeHtml(invoiceStatusLabel(status))}</span>
     </button>
   `;
 }
@@ -1015,6 +1159,7 @@ export function renderHomeInvoicePreview(input = {}) {
   const state = getLoadingState(data);
   const collections = getCollections(data);
   const invoices = safeArray(collections.invoices).slice(0, LIMITS.invoices);
+  const total = safeNumber(first(collections.invoicesRemoteCount, invoices.length), invoices.length);
 
   return `
     <section class="home-panel home-panel--invoice-preview" data-home-section="invoice-preview">
@@ -1023,7 +1168,7 @@ export function renderHomeInvoicePreview(input = {}) {
           <span class="home-panel-kicker">Facturación</span>
           <h2 class="home-panel-title">${isAdmin(data) ? "Facturación rápida" : "Mis facturas"}</h2>
           <p class="home-panel-subtitle">
-            ${state.loading && !invoices.length ? "Cargando facturas..." : escapeHtml(`${formatNumber(collections.invoicesRemoteCount || invoices.length)} facturas detectadas`)}
+            ${state.loading && !invoices.length ? "Cargando facturas..." : escapeHtml(`${formatNumber(total)} facturas detectadas`)}
           </p>
         </div>
 
@@ -1059,7 +1204,7 @@ export function renderHomeInvoicePreview(input = {}) {
 ========================================================= */
 
 function entityName(item = {}, type = "client") {
-  return safeText(
+  return visualLabel(
     first(
       item.displayName,
       item.fullName,
@@ -1093,8 +1238,7 @@ function entityItem(item = {}, type = "client") {
       item.clienteId,
       item.clientId,
       item.customerId,
-      item.id,
-      item._id
+      item.id
     ),
     ""
   );
@@ -1201,7 +1345,10 @@ function statusSummary(input = {}) {
 
   for (const ticket of tickets) {
     const key = getTicketStatusKey(getTicketStatus(ticket));
-    counts[key] = safeNumber(counts[key], 0) + 1;
+
+    if (Object.prototype.hasOwnProperty.call(counts, key)) {
+      counts[key] = safeNumber(counts[key], 0) + 1;
+    }
   }
 
   return `
@@ -1228,7 +1375,7 @@ function ticketRow(item = {}, state = {}) {
   const createdAt = getTicketCreatedAt(item);
   const updatedAt = getTicketUpdatedAt(item);
 
-  const ownerName = getTicketOwnerName(item);
+  const ownerName = visualLabel(getTicketOwnerName(item), "Usuario");
   const ownerMeta = safeText(first(getTicketAssignedTo(item), getTicketCategory(item)), "Sin asignación");
 
   const isOpening = isSameIdentity(state.openingTicketId, ticketId);
@@ -1358,11 +1505,28 @@ function ticketRow(item = {}, state = {}) {
 }
 
 function normalizePagination(pagination = {}, rows = []) {
-  const pageItems = safeArray(first(pagination.pageItems, pagination.items, rows));
-  const currentPage = safeNumber(first(pagination.currentPage, pagination.page), 1);
-  const pageSize = Math.max(1, safeNumber(first(pagination.pageSize, pagination.limit, DEFAULT_PAGE_SIZE), DEFAULT_PAGE_SIZE));
-  const totalPages = Math.max(1, safeNumber(pagination.totalPages, 1));
-  const totalCount = Math.max(pageItems.length, safeNumber(first(pagination.totalCount, pagination.total), rows.length));
+  const source = safeObject(pagination);
+  const pageItems = safeArray(first(source.pageItems, source.items, rows));
+
+  const pageSize = Math.max(
+    1,
+    safeNumber(first(source.pageSize, source.limit, DEFAULT_PAGE_SIZE), DEFAULT_PAGE_SIZE)
+  );
+
+  const totalCount = Math.max(
+    pageItems.length,
+    safeNumber(first(source.totalCount, source.total, rows.length), rows.length)
+  );
+
+  const totalPages = Math.max(
+    1,
+    safeNumber(source.totalPages, Math.ceil(totalCount / pageSize) || 1)
+  );
+
+  const currentPage = Math.min(
+    totalPages,
+    Math.max(1, safeNumber(first(source.currentPage, source.page), 1))
+  );
 
   const fallbackStart = totalCount && pageItems.length
     ? ((currentPage - 1) * pageSize) + 1
@@ -1373,17 +1537,17 @@ function normalizePagination(pagination = {}, rows = []) {
     : 0;
 
   return {
-    ...pagination,
+    ...source,
     pageItems,
     currentPage,
     page: currentPage,
     pageSize,
     totalPages,
     totalCount,
-    rangeStart: safeNumber(first(pagination.rangeStart, pagination.from), fallbackStart),
-    rangeEnd: safeNumber(first(pagination.rangeEnd, pagination.to), fallbackEnd),
-    hasPrev: Boolean(pagination.hasPrev || currentPage > 1),
-    hasNext: Boolean(pagination.hasNext || currentPage < totalPages),
+    rangeStart: safeNumber(first(source.rangeStart, source.from), fallbackStart),
+    rangeEnd: safeNumber(first(source.rangeEnd, source.to), fallbackEnd),
+    hasPrev: Boolean(source.hasPrev || currentPage > 1),
+    hasNext: Boolean(source.hasNext || currentPage < totalPages),
   };
 }
 

@@ -19,22 +19,20 @@
    - Home interna / la resuelve routes/router.
 ========================================================= */
 
-import HomeViewDefault, {
+import {
   HomeView,
   HOME_VIEW_VERSION,
 } from "./homeView.js";
 
-export const HOME_INDEX_VERSION = "home.index.v4";
-
-const View = HomeView || HomeViewDefault;
+export const HOME_INDEX_VERSION = "home.index.v5";
 
 /* =========================================================
    EXPORTS
 ========================================================= */
 
 export { HOME_VIEW_VERSION };
-export { View as HomeView };
+export { HomeView };
 
-export const HomeIndex = View;
+export const HomeIndex = HomeView;
 
-export default View;
+export default HomeView;

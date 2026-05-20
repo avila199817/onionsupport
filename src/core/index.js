@@ -10,11 +10,15 @@
    - Cleanup mínimo.
    - Hooks mínimos.
    - Instalar HTTP único desde core/http.js.
-   - Auth estricta: token + user usable.
+   - Auth estricta: access token usable + user usable.
    - User inválido si disabled/deleted/archived/active=false.
    - Roles únicos: admin / user.
+   - Home interna: /.
    - Home visible de usuario: /@{user.slug}.
+   - Rutas privadas visibles: /@{user.slug}/{ruta}.
    - Session context mínimo seguro en memoria.
+   - No guardar refresh token en Core.
+   - No guardar secretos.
    - Sin storage.
    - Sin DOM cache complejo.
    - Sin network listeners.
@@ -22,12 +26,19 @@
    - Sin cliente HTTP paralelo.
    - Sin framework interno.
    - Sin magia negra.
+   - Sin /home.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-import { config } from "./config.js";
+import {
+  config,
+  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
+  BLOCKED_FRONTEND_ROUTES,
+} from "./config.js";
+
 import Http, { installHttp } from "./http.js";
 
-export const CORE_VERSION = "core.index.v4";
+export const CORE_VERSION = "core.index.v5";
 
 const APP_NAME =
   config?.appName ||
@@ -35,31 +46,78 @@ const APP_NAME =
   "Onion Support";
 
 const ROOT_PATH = "/";
-const USER_HOME_PREFIX = "/@";
+const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
-const INVALID_USER_STATUSES = Object.freeze(["disabled", "deleted", "archived"]);
 
-const DROPPED_STATE_KEYS = Object.freeze([
+const INVALID_USER_STATUSES = Object.freeze([
+  "disabled",
+  "inactive",
+  "deleted",
+  "archived",
+  "revoked",
+  "blocked",
+  "banned",
+  "suspended",
+  "desactivado",
+  "inactivo",
+  "eliminado",
+  "archivado",
+  "bloqueado",
+  "suspendido",
+]);
+
+const BLOCKED_ROUTES = Object.freeze(
+  Array.isArray(BLOCKED_FRONTEND_ROUTES)
+    ? BLOCKED_FRONTEND_ROUTES
+    : ["/home", "/403", "/404", "/2fa", "/mfa", "/otp"]
+);
+
+const SENSITIVE_STATE_KEYS = new Set([
   "password",
   "passwordHash",
+  "password_hash",
   "hash",
   "salt",
+  "passwordMeta",
 
   "refreshToken",
   "refresh_token",
+  "refreshTokenHash",
+  "refresh_token_hash",
 
   "resetToken",
+  "reset_token",
   "activationToken",
+  "activation_token",
 
   "secret",
   "secrets",
   "code",
   "codes",
   "backupCodes",
+  "backup_codes",
+
+  "otp",
+  "otpCode",
+  "totp",
+  "mfa",
+  "twofa_secret",
+  "twofaSecret",
+  "totpSecret",
 
   "auth",
+
+  "_rid",
+  "_self",
+  "_etag",
+  "_attachments",
+  "_ts",
+  "_lsn",
+  "_metadata",
 ]);
+
+const DROPPED_STATE_KEYS = Object.freeze([...SENSITIVE_STATE_KEYS]);
 
 /* =========================================================
    BASICS
@@ -78,7 +136,11 @@ function isObject(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -102,8 +164,21 @@ function clone(value) {
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    return value;
+  }
+
+  return null;
 }
 
 /* =========================================================
@@ -133,8 +208,12 @@ function cleanRole(value = "") {
    TOKEN
 ========================================================= */
 
+function stripBearer(value = "") {
+  return cleanText(value, "").replace(/^Bearer\s+/i, "");
+}
+
 function tokenOk(value = "") {
-  const token = cleanText(value, "").replace(/^Bearer\s+/i, "");
+  const token = stripBearer(value);
 
   if (!token) return false;
   if (/\s/.test(token)) return false;
@@ -152,7 +231,7 @@ function tokenOk(value = "") {
 }
 
 function cleanToken(value = "") {
-  const token = cleanText(value, "").replace(/^Bearer\s+/i, "");
+  const token = stripBearer(value);
   return tokenOk(token) ? token : null;
 }
 
@@ -162,6 +241,8 @@ function cleanToken(value = "") {
 
 function normalizeSlug(value = "") {
   const slug = cleanText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -181,6 +262,7 @@ function extractUserSlug(user = null) {
     user.slug ||
       user.lookup?.slug ||
       user.profile?.slug ||
+      user.routing?.slug ||
       ""
   );
 }
@@ -190,40 +272,59 @@ function buildUserHomePath(user = null) {
   return slug ? `${USER_HOME_PREFIX}${slug}` : ROOT_PATH;
 }
 
-function removeSensitiveUserFields(user = {}) {
-  if (!isObject(user)) return {};
+function sanitizeObject(value, depth = 0) {
+  if (depth > 8) return null;
 
-  const output = { ...user };
-
-  for (const key of DROPPED_STATE_KEYS) {
-    delete output[key];
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 500)
+      .map((item) => sanitizeObject(item, depth + 1))
+      .filter((item) => item !== undefined);
   }
 
-  for (const key of [
-    "token",
-    "accessToken",
-    "access_token",
-    "refreshToken",
-    "refresh_token",
-    "session",
-    "sessionData",
-  ]) {
-    delete output[key];
+  if (!isObject(value)) return value;
+
+  const output = {};
+
+  for (const [key, child] of Object.entries(value)) {
+    if (SENSITIVE_STATE_KEYS.has(key)) continue;
+
+    const sanitized = sanitizeObject(child, depth + 1);
+
+    if (sanitized !== undefined) {
+      output[key] = sanitized;
+    }
   }
 
   return output;
 }
 
+function removeSensitiveUserFields(user = {}) {
+  return isObject(user) ? sanitizeObject(user) || {} : {};
+}
+
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  const status = cleanText(user.status || user.estado, "").toLowerCase();
+  const status = cleanText(
+    user.status ||
+      user.estado ||
+      user.state ||
+      "",
+    ""
+  ).toLowerCase();
 
   return Boolean(
     user.disabled === true ||
       user.deleted === true ||
       user.archived === true ||
+      user.revoked === true ||
+      user.blocked === true ||
+      user.banned === true ||
+      user.suspended === true ||
       user.active === false ||
+      user.enabled === false ||
+      Boolean(user.deletedAt) ||
       INVALID_USER_STATUSES.includes(status)
   );
 }
@@ -234,6 +335,8 @@ function hasUserIdentity(user = null) {
   return Boolean(
     cleanText(user.id, "") ||
       cleanText(user.userId, "") ||
+      cleanText(user.uid, "") ||
+      cleanText(user.sub, "") ||
       cleanText(user.username, "") ||
       cleanText(user.slug, "") ||
       cleanText(user.lookup?.slug, "")
@@ -253,7 +356,17 @@ function normalizeUser(user = null) {
 
   const safeUser = removeSensitiveUserFields(user);
 
-  const id = cleanText(safeUser.userId || safeUser.id, "");
+  if (!isObject(safeUser)) return null;
+
+  const id = cleanText(
+    safeUser.userId ||
+      safeUser.id ||
+      safeUser.uid ||
+      safeUser.sub ||
+      "",
+    ""
+  );
+
   const slug = extractUserSlug(safeUser);
   const profile = isObject(safeUser.profile) ? safeUser.profile : {};
 
@@ -261,6 +374,8 @@ function normalizeUser(user = null) {
     safeUser.username ||
       safeUser.userName ||
       safeUser.user_name ||
+      safeUser.usernameLower ||
+      safeUser.username_lower ||
       slug ||
       id,
     ""
@@ -287,11 +402,14 @@ function normalizeUser(user = null) {
 
     id: id || null,
     userId: safeUser.userId || id || null,
+    uid: safeUser.uid || id || null,
+    sub: safeUser.sub || id || null,
 
     username: username || null,
     slug: slug || null,
 
     name: safeUser.name || displayName,
+    nombre: safeUser.nombre || displayName,
     fullName: safeUser.fullName || displayName,
     displayName,
 
@@ -299,10 +417,14 @@ function normalizeUser(user = null) {
 
     role,
     rol: role,
+    userRole: role,
     roles: [role],
 
     active: true,
+    enabled: true,
     disabled: false,
+    deleted: false,
+    archived: false,
 
     isAdmin: role === "admin",
     isUser: role === "user",
@@ -350,8 +472,11 @@ function normalizeSessionContext(value = null, user = null) {
       value.session_user_id ||
       value.userId ||
       value.user_id ||
+      value.uid ||
       user?.userId ||
       user?.id ||
+      user?.uid ||
+      user?.sub ||
       "",
     ""
   );
@@ -368,12 +493,22 @@ function normalizeSessionContext(value = null, user = null) {
   return {
     sessionId: sessionId || null,
     id: sessionId || null,
+    sid: sessionId || null,
 
     userId: userId || null,
     sessionUserId: userId || null,
 
     expiresAt,
     refreshExpiresAt: value.refreshExpiresAt || value.refresh_expires_at || expiresAt || null,
+
+    persistent: value.persistent === true,
+    restoreOnBoot: value.restoreOnBoot === true,
+    rollingRefresh: value.rollingRefresh === true,
+    expiryEnforced: value.expiryEnforced === true,
+
+    revoked: value.revoked === true,
+    active: value.active !== false,
+    status: value.status || value.estado || "active",
   };
 }
 
@@ -381,7 +516,14 @@ function sameSessionUser(session = null, user = null) {
   if (!session || !user) return false;
 
   const sessionUserId = cleanText(session.userId || session.sessionUserId, "");
-  const userId = cleanText(user.userId || user.id, "");
+  const userId = cleanText(
+    user.userId ||
+      user.id ||
+      user.uid ||
+      user.sub ||
+      "",
+    ""
+  );
 
   if (!sessionUserId || !userId) return true;
 
@@ -434,30 +576,81 @@ function stripQueryHash(path = ROOT_PATH) {
     .split("#")[0] || ROOT_PATH;
 }
 
-function extractUserHomeSlug(path = ROOT_PATH) {
+function isBlockedRoutePath(path = ROOT_PATH) {
+  const clean = stripQueryHash(path).toLowerCase();
+
+  if (BLOCKED_ROUTES.includes(clean)) return true;
+
+  return (
+    clean.startsWith("/2fa/") ||
+    clean.startsWith("/mfa/") ||
+    clean.startsWith("/otp/")
+  );
+}
+
+function getUserScopedPathInfo(path = ROOT_PATH) {
   const value = stripQueryHash(path);
 
-  if (!value.startsWith(USER_HOME_PREFIX)) return "";
+  if (!value.startsWith(USER_HOME_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: value,
+      canonicalPath: value,
+    };
+  }
 
-  const slug = value.slice(USER_HOME_PREFIX.length);
+  const rest = value.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeSlug(slugSegment);
 
-  if (!slug || slug.includes("/")) return "";
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: value,
+      canonicalPath: value,
+    };
+  }
 
-  return normalizeSlug(slug);
+  const restPath = restSegments.length
+    ? normalizePublicPath(`/${restSegments.join("/")}`).split("?")[0].split("#")[0]
+    : ROOT_PATH;
+
+  return {
+    scoped: true,
+    home: restPath === ROOT_PATH,
+    slug,
+    restPath,
+    canonicalPath: restPath,
+  };
+}
+
+function extractUserHomeSlug(path = ROOT_PATH) {
+  const info = getUserScopedPathInfo(path);
+  return info.home ? info.slug : "";
+}
+
+function extractUserScopedSlug(path = ROOT_PATH) {
+  return getUserScopedPathInfo(path).slug;
 }
 
 function isUserHomePath(path = ROOT_PATH) {
   return Boolean(extractUserHomeSlug(path));
 }
 
+function isUserScopedPath(path = ROOT_PATH) {
+  return Boolean(getUserScopedPathInfo(path).scoped);
+}
+
 function normalizeCanonicalPath(path = ROOT_PATH) {
-  let value = stripQueryHash(path);
+  if (isBlockedRoutePath(path)) return ROOT_PATH;
 
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || ROOT_PATH;
-  }
+  const info = getUserScopedPathInfo(path);
 
-  return isUserHomePath(value) ? ROOT_PATH : value;
+  return info.scoped ? info.canonicalPath : stripQueryHash(path);
 }
 
 function safeInternalPath(path = ROOT_PATH) {
@@ -467,6 +660,7 @@ function safeInternalPath(path = ROOT_PATH) {
   if (target.startsWith("//")) return ROOT_PATH;
   if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return ROOT_PATH;
   if (/[\r\n\t\\]/.test(target)) return ROOT_PATH;
+  if (isBlockedRoutePath(target)) return ROOT_PATH;
 
   return target;
 }
@@ -799,6 +993,7 @@ const state = {
 
   authenticated: false,
   hasToken: false,
+  hasRefreshToken: false,
 
   userSlug: null,
   homePath: ROOT_PATH,
@@ -868,7 +1063,7 @@ function sanitizeStatePatch(patch = {}) {
   const output = {};
 
   for (const [key, value] of Object.entries(patch)) {
-    if (DROPPED_STATE_KEYS.includes(key)) {
+    if (SENSITIVE_STATE_KEYS.has(key)) {
       continue;
     }
 
@@ -878,6 +1073,11 @@ function sanitizeStatePatch(patch = {}) {
       key === "access_token"
     ) {
       output[key] = cleanToken(value);
+      continue;
+    }
+
+    if (key === "hasRefreshToken") {
+      output.hasRefreshToken = value === true;
       continue;
     }
 
@@ -930,7 +1130,7 @@ function sanitizeStatePatch(patch = {}) {
     }
 
     if (key === "publicPath") {
-      output.publicPath = normalizePublicPath(value);
+      output.publicPath = safeInternalPath(value);
       output.canonicalPath = normalizeCanonicalPath(value);
       output.route = normalizeCanonicalPath(value);
       continue;
@@ -959,6 +1159,7 @@ function clearSessionFields() {
 
   state.authenticated = false;
   state.hasToken = false;
+  state.hasRefreshToken = false;
 
   state.userSlug = null;
   state.homePath = ROOT_PATH;
@@ -1170,7 +1371,7 @@ function setRoute(route = ROOT_PATH, options = {}) {
 }
 
 function setPublicPath(path = ROOT_PATH, options = {}) {
-  const publicPath = normalizePublicPath(path);
+  const publicPath = safeInternalPath(path);
   const canonicalPath = normalizeCanonicalPath(publicPath);
 
   setState(
@@ -1228,17 +1429,29 @@ function setToken(token = null, options = {}) {
   return state.token;
 }
 
-function pick(payload = {}, names = []) {
-  for (const name of names) {
-    const value =
-      payload?.[name] ??
-      payload?.data?.[name] ??
-      payload?.payload?.[name] ??
-      payload?.session?.[name] ??
-      payload?.sessionData?.[name];
+function nestedPayloads(payload = {}) {
+  if (!isObject(payload)) return [];
 
-    if (value !== undefined && value !== null && value !== "") {
-      return value;
+  return [
+    payload,
+    isObject(payload.data) ? payload.data : null,
+    isObject(payload.payload) ? payload.payload : null,
+    isObject(payload.result) ? payload.result : null,
+    isObject(payload.auth) ? payload.auth : null,
+  ].filter(Boolean);
+}
+
+function pick(payload = {}, names = []) {
+  for (const node of nestedPayloads(payload)) {
+    for (const name of names) {
+      const value =
+        node?.[name] ??
+        node?.session?.[name] ??
+        node?.sessionData?.[name];
+
+      if (value !== undefined && value !== null && value !== "") {
+        return value;
+      }
     }
   }
 
@@ -1246,21 +1459,20 @@ function pick(payload = {}, names = []) {
 }
 
 function pickSession(payload = {}) {
-  if (!isObject(payload)) return null;
+  for (const node of nestedPayloads(payload)) {
+    const session =
+      (isObject(node.session) ? node.session : null) ||
+      (isObject(node.sessionData) ? node.sessionData : null);
 
-  return (
-    (isObject(payload.session) ? payload.session : null) ||
-    (isObject(payload.sessionData) ? payload.sessionData : null) ||
-    (isObject(payload.data?.session) ? payload.data.session : null) ||
-    (isObject(payload.data?.sessionData) ? payload.data.sessionData : null) ||
-    (isObject(payload.payload?.session) ? payload.payload.session : null) ||
-    (isObject(payload.payload?.sessionData) ? payload.payload.sessionData : null) ||
-    null
-  );
+    if (session) return session;
+  }
+
+  return null;
 }
 
 function applySession(payload = {}, options = {}) {
   const token = pick(payload, ["token", "accessToken", "access_token"]);
+
   const user =
     pick(payload, ["user", "usuario", "me", "account", "profile"]) ||
     (userOk(payload) ? payload : null);
@@ -1274,10 +1486,16 @@ function applySession(payload = {}, options = {}) {
       token: clean,
       accessToken: clean,
       access_token: clean,
+
       user: cleanUser,
       currentUser: cleanUser,
+
       session,
       sessionData: session,
+
+      hasRefreshToken: Boolean(
+        pick(payload, ["refreshToken", "refresh_token"])
+      ),
     },
     {
       source: options.source || "core:applySession",
@@ -1291,6 +1509,8 @@ function applySession(payload = {}, options = {}) {
     token: state.token,
     user: state.user,
     authenticated: state.authenticated,
+    hasToken: state.hasToken,
+    hasRefreshToken: state.hasRefreshToken,
     homePath: state.homePath,
     defaultHome: state.defaultHome,
     postLoginTarget: state.postLoginTarget,
@@ -1514,6 +1734,7 @@ function getSnapshot() {
 
     authenticated: Boolean(state.authenticated),
     hasToken: Boolean(state.hasToken),
+    hasRefreshToken: Boolean(state.hasRefreshToken),
 
     token: null,
     accessToken: null,
@@ -1554,11 +1775,19 @@ function getSnapshot() {
       authRequiresTokenAndUsableUser: true,
 
       userSlugHome: true,
+      userScopedPrivateRoutes: true,
       noEmailIdentity: true,
 
       safeSessionContextOnly: true,
       noSessionSecrets: true,
       noSessionIpUserAgent: true,
+      noRefreshTokenInCoreState: true,
+
+      blocksHomeAlias: true,
+      noHomeRoute: true,
+      no2fa: true,
+      noMfa: true,
+      noOtp: true,
 
       snapshotRedacted: true,
     },
@@ -1643,7 +1872,9 @@ export const AppCore = {
   normalizePublicPath,
   normalizeCanonicalPath,
   extractUserHomeSlug,
+  extractUserScopedSlug,
   isUserHomePath,
+  isUserScopedPath,
   safeInternalPath,
 
   getSnapshot,

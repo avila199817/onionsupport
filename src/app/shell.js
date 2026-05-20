@@ -11,8 +11,9 @@
    - Sin imports.
    - Sin Router interno.
    - Sin Auth.
+   - Sin AppCore.
    - Sin eventos.
-   - Sin debug pesado.
+   - Sin loader.
    - Sin rutas inventadas.
    - Sin /home.
    - Sin magia negra.
@@ -22,19 +23,21 @@
    - Este módulo sólo da soporte base al arranque de la app.
 ========================================================= */
 
-export const SHELL_VERSION = "app.shell.v2";
+export const SHELL_VERSION = "app.shell.v3";
 
-const HOME_PATH = "/";
+const IDS = Object.freeze({
+  shell: "app-shell",
+  sidebarMount: "sidebar-mount",
+  topbarMount: "topbar-mount",
+  main: "main-content",
+  tablehead: "table-head",
+  tableheadContainer: "tablehead-container",
+  appContent: "app-content",
+  viewContainer: "view-container",
+});
 
-const PUBLIC_AUTH_PATHS = Object.freeze([
-  "/login",
-  "/password-request",
-  "/password-reset",
-  "/activate-account",
-]);
-
-const READY_CLASSES = ["app-ready"];
-const LOADING_CLASSES = ["app-loading", "app-booting", "loading"];
+const READY_CLASSES = Object.freeze(["app-ready"]);
+const LOADING_CLASSES = Object.freeze(["app-loading", "app-booting"]);
 
 /* =========================================================
    BASICS
@@ -44,40 +47,9 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
-  return output || fallback;
-}
-
-function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
-}
-
 function byId(id = "") {
   if (!isBrowser() || !id) return null;
-
-  try {
-    return document.getElementById(id);
-  } catch {
-    return null;
-  }
-}
-
-function query(selector = "") {
-  if (!isBrowser() || !selector) return null;
-
-  try {
-    return document.querySelector(selector);
-  } catch {
-    return null;
-  }
+  return document.getElementById(id);
 }
 
 function roots() {
@@ -85,221 +57,57 @@ function roots() {
   return [document.documentElement, document.body].filter(Boolean);
 }
 
-function currentBrowserPath() {
-  if (!isBrowser()) return HOME_PATH;
+function setDataset(element = null, key = "", value = "") {
+  if (!element || !key) return false;
 
-  try {
-    return `${window.location.pathname || HOME_PATH}${window.location.search || ""}${window.location.hash || ""}`;
-  } catch {
-    return HOME_PATH;
-  }
+  element.dataset[key] = String(value);
+  return true;
 }
-
-/* =========================================================
-   PATHS
-========================================================= */
-
-function normalizeHashPath(path = HOME_PATH) {
-  const value = text(path, HOME_PATH);
-
-  if (value.startsWith("#!")) {
-    return value.replace(/^#!\/?/, "/") || HOME_PATH;
-  }
-
-  if (value.startsWith("#/")) {
-    return value.slice(1) || HOME_PATH;
-  }
-
-  return value;
-}
-
-function sameOriginUrlToPath(value = "") {
-  try {
-    const base = isBrowser() ? window.location.origin : "http://localhost";
-    const url = new URL(value, base);
-
-    if (url.origin !== base) {
-      return HOME_PATH;
-    }
-
-    if (url.hash.startsWith("#/") || url.hash.startsWith("#!")) {
-      return normalizeHashPath(url.hash);
-    }
-
-    return `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
-  } catch {
-    return HOME_PATH;
-  }
-}
-
-function normalizePublicPath(path = HOME_PATH) {
-  let value = normalizeHashPath(path);
-
-  if (!value || value.startsWith("//")) {
-    return HOME_PATH;
-  }
-
-  if (/^https?:\/\//i.test(value)) {
-    value = sameOriginUrlToPath(value);
-  } else if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
-    return HOME_PATH;
-  }
-
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
-
-  value = value.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
-
-  return value || HOME_PATH;
-}
-
-function cleanPath(path = HOME_PATH) {
-  let value = normalizePublicPath(path).split("?")[0].split("#")[0] || HOME_PATH;
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || HOME_PATH;
-  }
-
-  return value || HOME_PATH;
-}
-
-function isPublicAuthPath(path = currentBrowserPath()) {
-  return PUBLIC_AUTH_PATHS.includes(cleanPath(path));
-}
-
-function routeFrom(AppCore = null, Router = null, options = {}) {
-  if (options.path) return options.path;
-  if (options.publicPath) return options.publicPath;
-
-  try {
-    if (typeof Router?.getCurrentPublicPath === "function") {
-      return Router.getCurrentPublicPath();
-    }
-
-    if (typeof Router?.getCurrentPath === "function") {
-      return Router.getCurrentPath();
-    }
-  } catch {
-    // noop
-  }
-
-  return (
-    AppCore?.state?.publicPath ||
-    AppCore?.state?.canonicalPath ||
-    AppCore?.state?.route ||
-    currentBrowserPath()
-  );
-}
-
-/* =========================================================
-   DOM HELPERS
-========================================================= */
 
 function setHidden(element = null, hidden = false) {
   if (!element) return false;
 
   const value = Boolean(hidden);
 
-  try {
-    element.hidden = value;
-    element.setAttribute("aria-hidden", value ? "true" : "false");
-    return true;
-  } catch {
-    return false;
-  }
+  element.hidden = value;
+  element.setAttribute("aria-hidden", value ? "true" : "false");
+
+  return true;
 }
 
 function setBusy(element = null, busy = false) {
   if (!element) return false;
 
-  try {
-    element.setAttribute("aria-busy", busy ? "true" : "false");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function setData(element = null, key = "", value = "") {
-  if (!element || !key) return false;
-
-  try {
-    if (value === null || value === undefined || value === "") {
-      delete element.dataset[key];
-    } else {
-      element.dataset[key] = String(value);
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function setAttr(element = null, key = "", value = "") {
-  if (!element || !key) return false;
-
-  try {
-    if (value === null || value === undefined || value === "") {
-      element.removeAttribute(key);
-    } else {
-      element.setAttribute(key, String(value));
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
+  element.setAttribute("aria-busy", busy ? "true" : "false");
+  return true;
 }
 
 function addClasses(element = null, classes = []) {
-  if (!element) return false;
+  if (!element || !classes.length) return false;
 
-  try {
-    element.classList.add(...classes.filter(Boolean));
-    return true;
-  } catch {
-    return false;
-  }
+  element.classList.add(...classes);
+  return true;
 }
 
 function removeClasses(element = null, classes = []) {
-  if (!element) return false;
+  if (!element || !classes.length) return false;
 
-  try {
-    element.classList.remove(...classes.filter(Boolean));
-    return true;
-  } catch {
-    return false;
-  }
+  element.classList.remove(...classes);
+  return true;
 }
 
-function toggleClass(element = null, className = "", enabled = false) {
-  if (!element || !className) return false;
+function setRootClassState(root = null, busy = false) {
+  if (!root) return false;
 
-  try {
-    element.classList.toggle(className, Boolean(enabled));
-    return true;
-  } catch {
-    return false;
+  if (busy) {
+    removeClasses(root, READY_CLASSES);
+    addClasses(root, LOADING_CLASSES);
+  } else {
+    removeClasses(root, LOADING_CLASSES);
+    addClasses(root, READY_CLASSES);
   }
-}
 
-function clearNode(element = null) {
-  if (!element) return false;
-
-  try {
-    element.replaceChildren();
-    return true;
-  } catch {
-    try {
-      element.textContent = "";
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  return true;
 }
 
 function hasContent(element = null) {
@@ -307,9 +115,16 @@ function hasContent(element = null) {
     element &&
       (
         element.childElementCount > 0 ||
-        text(element.textContent, "")
+        String(element.textContent || "").trim()
       )
   );
+}
+
+function clearNode(element = null) {
+  if (!element) return false;
+
+  element.replaceChildren();
+  return true;
 }
 
 /* =========================================================
@@ -325,21 +140,11 @@ export function getShellElements() {
       shell: null,
       appShell: null,
 
-      main: null,
-      mainContent: null,
-
-      appContent: null,
-
-      view: null,
-      viewContainer: null,
-      viewRoot: null,
-      routerView: null,
-
       sidebarMount: null,
       topbarMount: null,
 
-      sidebar: null,
-      topbar: null,
+      main: null,
+      mainContent: null,
 
       tablehead: null,
       tableHead: null,
@@ -347,25 +152,21 @@ export function getShellElements() {
       tableheadContainer: null,
       tableHeadContainer: null,
 
-      mobileToggle: null,
+      appContent: null,
 
-      loader: null,
-      appLoader: null,
+      view: null,
+      viewContainer: null,
+      viewRoot: null,
+      routerView: null,
     };
   }
 
-  const shell = byId("app-shell");
-  const main = byId("main-content");
-  const appContent = byId("app-content");
-  const viewContainer = byId("view-container");
-
-  const sidebarMount = byId("sidebar-mount");
-  const topbarMount = byId("topbar-mount");
-
-  const tablehead = byId("table-head");
-  const tableheadContainer = byId("tablehead-container");
-
-  const loader = byId("app-loader");
+  const shell = byId(IDS.shell);
+  const main = byId(IDS.main);
+  const tablehead = byId(IDS.tablehead);
+  const tableheadContainer = byId(IDS.tableheadContainer);
+  const appContent = byId(IDS.appContent);
+  const viewContainer = byId(IDS.viewContainer);
 
   return {
     html: document.documentElement,
@@ -374,26 +175,11 @@ export function getShellElements() {
     shell,
     appShell: shell,
 
+    sidebarMount: byId(IDS.sidebarMount),
+    topbarMount: byId(IDS.topbarMount),
+
     main,
     mainContent: main,
-
-    appContent,
-
-    view: viewContainer,
-    viewContainer,
-    viewRoot: viewContainer,
-    routerView: viewContainer,
-
-    sidebarMount,
-    topbarMount,
-
-    sidebar:
-      byId("app-sidebar") ||
-      query("[data-sidebar-root]"),
-
-    topbar:
-      byId("app-topbar") ||
-      query("[data-topbar-root]"),
 
     tablehead,
     tableHead: tablehead,
@@ -401,17 +187,17 @@ export function getShellElements() {
     tableheadContainer,
     tableHeadContainer: tableheadContainer,
 
-    mobileToggle:
-      query("[data-topbar-sidebar-toggle]") ||
-      query("[data-sidebar-mobile-toggle]"),
+    appContent,
 
-    loader,
-    appLoader: loader,
+    view: viewContainer,
+    viewContainer,
+    viewRoot: viewContainer,
+    routerView: viewContainer,
   };
 }
 
 export function getViewContainer() {
-  return byId("view-container");
+  return byId(IDS.viewContainer);
 }
 
 function shellNodes(elements = getShellElements()) {
@@ -423,13 +209,10 @@ function shellNodes(elements = getShellElements()) {
   ].filter(Boolean);
 }
 
-function chromeNodes(elements = getShellElements()) {
+function chromeMounts(elements = getShellElements()) {
   return [
     elements.sidebarMount,
     elements.topbarMount,
-    elements.sidebar,
-    elements.topbar,
-    elements.mobileToggle,
   ].filter(Boolean);
 }
 
@@ -437,59 +220,50 @@ function chromeNodes(elements = getShellElements()) {
    STATE SYNC
 ========================================================= */
 
-function syncState(AppCore = null, patch = {}) {
-  if (!isObject(patch)) return patch;
+function syncShellDataset({
+  elements = getShellElements(),
+  state = "ready",
+  chrome = null,
+  busy = false,
+} = {}) {
+  const shellState = String(state || "ready");
+  const shellInteractive = busy ? "false" : "true";
 
-  try {
-    AppCore?.setState?.(patch, {
-      source: "app.shell",
-      silent: true,
-      emit: false,
-    });
-  } catch {
-    try {
-      AppCore.state = isObject(AppCore.state) ? AppCore.state : {};
-      Object.assign(AppCore.state, patch);
-    } catch {
-      // noop
+  for (const element of shellNodes(elements)) {
+    setHidden(element, false);
+    setBusy(element, busy);
+    setDataset(element, "shell", "visible");
+    setDataset(element, "shellState", shellState);
+    setDataset(element, "shellInteractive", shellInteractive);
+
+    if (chrome) {
+      setDataset(element, "chrome", chrome);
     }
   }
 
-  return patch;
-}
+  for (const root of roots()) {
+    setDataset(root, "shell", "visible");
+    setDataset(root, "shellState", shellState);
+    setDataset(root, "shellInteractive", shellInteractive);
 
-/* =========================================================
-   SHELL BASE
-========================================================= */
+    if (chrome) {
+      setDataset(root, "chrome", chrome);
+    }
 
-function exposeShell(elements = getShellElements()) {
-  for (const element of shellNodes(elements)) {
-    setHidden(element, false);
+    root.classList.toggle("shell-visible", true);
+    root.classList.toggle("shell-hidden", false);
   }
 
   return true;
 }
 
-function setShellState(state = "ready") {
-  const value = text(state, "ready");
-  const busy = value === "busy";
-  const elements = getShellElements();
-
-  exposeShell(elements);
-
-  for (const element of shellNodes(elements)) {
-    setBusy(element, busy);
-    setData(element, "shellState", value);
-    setData(element, "shell", "visible");
-    setData(element, "shellInteractive", busy ? "false" : "true");
-  }
-
+function syncRootBootDataset(busy = false) {
   for (const root of roots()) {
-    setData(root, "shellState", value);
-    setData(root, "shell", "visible");
-    setData(root, "shellInteractive", busy ? "false" : "true");
-    toggleClass(root, "shell-hidden", false);
-    toggleClass(root, "shell-visible", true);
+    setDataset(root, "appLoading", busy ? "true" : "false");
+    setDataset(root, "appBooting", busy ? "true" : "false");
+    setDataset(root, "appReady", busy ? "false" : "true");
+
+    setRootClassState(root, busy);
   }
 
   return true;
@@ -499,18 +273,32 @@ function setShellState(state = "ready") {
    CHROME
 ========================================================= */
 
-function setChromeVisible(visible = true) {
+export function readShellVisibility() {
+  if (!isBrowser()) return false;
+
+  const chrome =
+    document.body?.dataset?.chrome ||
+    document.documentElement?.dataset?.chrome ||
+    "hidden";
+
+  return chrome !== "hidden";
+}
+
+export function setShellVisibility(_AppCore = null, visible = true) {
   const chromeVisible = Boolean(visible);
   const chromeState = chromeVisible ? "visible" : "hidden";
   const elements = getShellElements();
 
-  for (const element of chromeNodes(elements)) {
-    setHidden(element, !chromeVisible);
-    setData(element, "chrome", chromeState);
-  }
+  syncShellDataset({
+    elements,
+    state: "ready",
+    chrome: chromeState,
+    busy: false,
+  });
 
-  if (!chromeVisible) {
-    setAttr(elements.mobileToggle, "aria-expanded", "false");
+  for (const element of chromeMounts(elements)) {
+    setHidden(element, !chromeVisible);
+    setDataset(element, "chrome", chromeState);
   }
 
   const showTablehead =
@@ -518,137 +306,48 @@ function setChromeVisible(visible = true) {
     hasContent(elements.tableheadContainer);
 
   setHidden(elements.tablehead, !showTablehead);
-  setHidden(elements.tableheadContainer, !showTablehead);
-  setData(elements.tablehead, "tableheadState", showTablehead ? "visible" : "empty");
+  setDataset(
+    elements.tablehead,
+    "tableheadState",
+    showTablehead ? "visible" : "empty"
+  );
 
   for (const root of roots()) {
-    setData(root, "chrome", chromeState);
-    toggleClass(root, "route-auth", !chromeVisible);
-    toggleClass(root, "route-app", chromeVisible);
-    toggleClass(root, "shell-hidden", false);
-    toggleClass(root, "shell-visible", true);
+    root.classList.toggle("route-app", chromeVisible);
+    root.classList.toggle("route-auth", !chromeVisible);
   }
 
   return chromeVisible;
-}
-
-export function readShellVisibility() {
-  if (!isBrowser()) return false;
-
-  return document.body?.dataset?.chrome !== "hidden";
-}
-
-export function setShellVisibility(AppCore = null, visible = true) {
-  const chromeVisible = Boolean(visible);
-  const mode = chromeVisible ? "app" : "auth";
-
-  setShellState("ready");
-  setChromeVisible(chromeVisible);
-
-  syncState(AppCore, {
-    appShellVisible: true,
-
-    shellVisible: true,
-    shellHidden: false,
-    routeShellHidden: !chromeVisible,
-
-    chromeVisible,
-    chromeHidden: !chromeVisible,
-
-    authScreen: !chromeVisible,
-    routeMode: mode,
-  });
-
-  return chromeVisible;
-}
-
-export function updateShellVisibilityByRoute(AppCore = null, Router = null, options = {}) {
-  const current = routeFrom(AppCore, Router, options);
-  const chromeVisible = !isPublicAuthPath(current);
-  const currentShellRoute = cleanPath(current);
-
-  setShellVisibility(AppCore, chromeVisible);
-
-  syncState(AppCore, {
-    currentShellRoute,
-  });
-
-  return chromeVisible;
-}
-
-/* =========================================================
-   LOADER
-========================================================= */
-
-function hideInternalLoader() {
-  const loader = byId("app-loader");
-
-  if (!loader) return false;
-
-  try {
-    loader.hidden = true;
-    loader.setAttribute("aria-hidden", "true");
-    loader.setAttribute("aria-busy", "false");
-    loader.classList.remove("is-visible");
-    loader.classList.add("is-hidden");
-    loader.dataset.loaderVisible = "false";
-    loader.dataset.loaderState = "hidden";
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function applyPostRenderLoaderPolicy({
-  AppCore = null,
-  Router = null,
-  hideLoader: externalHideLoader = null,
-} = {}) {
-  updateShellVisibilityByRoute(AppCore, Router);
-  markShellReady();
-
-  if (typeof externalHideLoader === "function") {
-    externalHideLoader();
-    return getShellSnapshot(AppCore);
-  }
-
-  if (hasContent(getViewContainer())) {
-    hideInternalLoader();
-  }
-
-  return getShellSnapshot(AppCore);
 }
 
 /* =========================================================
    READY / BUSY
 ========================================================= */
 
-export function markShellReady() {
-  setShellState("ready");
+export function markShellBusy() {
+  const elements = getShellElements();
 
-  for (const root of roots()) {
-    removeClasses(root, LOADING_CLASSES);
-    addClasses(root, READY_CLASSES);
+  syncShellDataset({
+    elements,
+    state: "busy",
+    busy: true,
+  });
 
-    setData(root, "appLoading", "false");
-    setData(root, "appBooting", "false");
-    setData(root, "appReady", "true");
-  }
+  syncRootBootDataset(true);
 
   return true;
 }
 
-export function markShellBusy() {
-  setShellState("busy");
+export function markShellReady() {
+  const elements = getShellElements();
 
-  for (const root of roots()) {
-    removeClasses(root, READY_CLASSES);
-    addClasses(root, LOADING_CLASSES);
+  syncShellDataset({
+    elements,
+    state: "ready",
+    busy: false,
+  });
 
-    setData(root, "appLoading", "true");
-    setData(root, "appBooting", "true");
-    setData(root, "appReady", "false");
-  }
+  syncRootBootDataset(false);
 
   return true;
 }
@@ -668,7 +367,7 @@ export function clearDynamicContainers() {
 
   if (elements.tablehead) {
     setHidden(elements.tablehead, true);
-    setData(elements.tablehead, "tableheadState", "empty");
+    setDataset(elements.tablehead, "tableheadState", "empty");
     changed = true;
   }
 
@@ -676,54 +375,10 @@ export function clearDynamicContainers() {
 }
 
 /* =========================================================
-   ROUTE HELPERS COMPAT
-========================================================= */
-
-export function isLoginPath(_AppCore = null, value = currentBrowserPath()) {
-  return cleanPath(value) === "/login";
-}
-
-export function isPasswordRequestPath(_AppCore = null, value = currentBrowserPath()) {
-  return cleanPath(value) === "/password-request";
-}
-
-export function isPasswordResetPath(_AppCore = null, value = currentBrowserPath()) {
-  return cleanPath(value) === "/password-reset";
-}
-
-export function isActivateAccountPath(_AppCore = null, value = currentBrowserPath()) {
-  return cleanPath(value) === "/activate-account";
-}
-
-export function isAuthLikePath(_AppCore = null, value = currentBrowserPath()) {
-  return isPublicAuthPath(value);
-}
-
-export function isAuthLikeRoute(AppCore = null, Router = null) {
-  return isPublicAuthPath(routeFrom(AppCore, Router));
-}
-
-export const isResetPasswordPath = isPasswordResetPath;
-export const isResetPasswordConfirmPath = isPasswordResetPath;
-
-/* =========================================================
-   MISC COMPAT
-========================================================= */
-
-export function refreshShellElements() {
-  return getShellElements();
-}
-
-export function resetShellRuntimeState() {
-  setShellVisibility(null, true);
-  return getShellSnapshot();
-}
-
-/* =========================================================
    SNAPSHOT
 ========================================================= */
 
-export function getShellSnapshot(AppCore = null) {
+export function getShellSnapshot() {
   const elements = getShellElements();
   const view = elements.viewContainer;
 
@@ -739,9 +394,6 @@ export function getShellSnapshot(AppCore = null) {
 
     shellState: elements.shell?.dataset?.shellState || "",
 
-    routeMode: AppCore?.state?.routeMode || null,
-    currentShellRoute: redact(AppCore?.state?.currentShellRoute || ""),
-
     dom: {
       shell: Boolean(elements.shell),
       main: Boolean(elements.main),
@@ -751,23 +403,23 @@ export function getShellSnapshot(AppCore = null) {
       topbarMount: Boolean(elements.topbarMount),
       tablehead: Boolean(elements.tablehead),
       tableheadContainer: Boolean(elements.tableheadContainer),
-      loader: Boolean(elements.loader),
     },
 
     policy: {
       appBootShellOnly: true,
       shellAlwaysVisible: true,
       chromeToggleOnly: true,
-      publicAuthRoutesHideChrome: true,
-
       finalRouteShellOwner: "router/shell.js",
 
+      noImports: true,
+      noAppCore: true,
       noAuth: true,
       noRouterInternal: true,
       noEvents: true,
+      noLoader: true,
       noStorage: true,
+      noRouteParsing: true,
       noHomeRoute: true,
-      snapshotRedacted: true,
     },
   };
 }
@@ -784,24 +436,11 @@ export default {
 
   readShellVisibility,
   setShellVisibility,
-  updateShellVisibilityByRoute,
-  applyPostRenderLoaderPolicy,
 
   markShellReady,
   markShellBusy,
 
   clearDynamicContainers,
 
-  isLoginPath,
-  isPasswordRequestPath,
-  isPasswordResetPath,
-  isResetPasswordPath,
-  isResetPasswordConfirmPath,
-  isActivateAccountPath,
-  isAuthLikePath,
-  isAuthLikeRoute,
-
-  refreshShellElements,
-  resetShellRuntimeState,
   getShellSnapshot,
 };

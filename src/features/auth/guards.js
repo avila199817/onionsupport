@@ -8,6 +8,7 @@
    - Autenticado = token usable + user usable.
    - Roles únicos exactos: admin / user.
    - Entender /@{user.slug} como Home canónica /.
+   - Entender /@{user.slug}/{ruta} como ruta privada scopeada.
    - Validar que /@{slug} pertenece al usuario actual.
    - Sin fetch.
    - Sin refresh.
@@ -30,11 +31,13 @@ import {
 
 import * as Session from "./session.js";
 
-export const GUARDS_VERSION = "auth.guards.v3";
+export const GUARDS_VERSION = "auth.guards.v4";
 
-const LOGIN_PATH = ROUTES.login;
+const LOGIN_PATH = ROUTES.login || "/login";
 const HOME_PATH = ROUTES.home || "/";
-const PUBLIC_AUTH_ROUTES = Object.freeze([...PUBLIC_ROUTES]);
+const PASSWORD_REQUEST_PATH = ROUTES.passwordRequest || "/password-request";
+const PASSWORD_RESET_PATH = ROUTES.passwordReset || "/password-reset";
+const ACTIVATE_ACCOUNT_PATH = ROUTES.activateAccount || "/activate-account";
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
 
@@ -185,24 +188,65 @@ function normalizeUserSlug(value = "") {
   return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
+export function getUserScopedRouteInfo(path = HOME_PATH) {
+  const normalized = normalizePublicPath(path);
+
+  if (!normalized.startsWith(USER_HOME_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: normalized,
+      canonicalPath: normalized,
+    };
+  }
+
+  const rest = normalized.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeUserSlug(slugSegment);
+
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: normalized,
+      canonicalPath: normalized,
+    };
+  }
+
+  const restPath = restSegments.length
+    ? normalizePublicPath(`/${restSegments.join("/")}`)
+    : HOME_PATH;
+
+  return {
+    scoped: true,
+    home: restPath === HOME_PATH,
+    slug,
+    restPath,
+    canonicalPath: restPath,
+  };
+}
+
+export function extractUserScopedSlug(path = HOME_PATH) {
+  return getUserScopedRouteInfo(path).slug;
+}
+
 function extractUserHomeSlug(path = HOME_PATH) {
-  const value = normalizePublicPath(path);
-
-  if (!value.startsWith(USER_HOME_PREFIX)) return "";
-
-  const slug = value.slice(USER_HOME_PREFIX.length);
-
-  if (!slug || slug.includes("/")) return "";
-
-  return normalizeUserSlug(slug);
+  const info = getUserScopedRouteInfo(path);
+  return info.home ? info.slug : "";
 }
 
 export function isUserHomePath(path = HOME_PATH) {
   return Boolean(extractUserHomeSlug(path));
 }
 
-function isCurrentUserHomePath(path = HOME_PATH) {
-  const routeSlug = extractUserHomeSlug(path);
+export function isUserScopedPath(path = HOME_PATH) {
+  return Boolean(getUserScopedRouteInfo(path).scoped);
+}
+
+function isCurrentUserScopedPath(path = HOME_PATH) {
+  const routeSlug = extractUserScopedSlug(path);
 
   if (!routeSlug) return false;
 
@@ -211,10 +255,16 @@ function isCurrentUserHomePath(path = HOME_PATH) {
   return Boolean(userSlug && routeSlug === userSlug);
 }
 
-export function canonicalAuthPath(path = HOME_PATH) {
-  const normalized = normalizePublicPath(path);
+function isCurrentUserHomePath(path = HOME_PATH) {
+  const info = getUserScopedRouteInfo(path);
 
-  return isUserHomePath(normalized) ? HOME_PATH : normalized;
+  return Boolean(info.home && isCurrentUserScopedPath(path));
+}
+
+export function canonicalAuthPath(path = HOME_PATH) {
+  const info = getUserScopedRouteInfo(path);
+
+  return info.scoped ? info.restPath : normalizePublicPath(path);
 }
 
 function currentPath() {
@@ -227,6 +277,22 @@ function currentPath() {
   } catch {
     return HOME_PATH;
   }
+}
+
+function publicAuthRoutes() {
+  const configured = Array.isArray(PUBLIC_ROUTES) ? PUBLIC_ROUTES : [];
+
+  return unique(
+    [
+      ...configured,
+      LOGIN_PATH,
+      PASSWORD_REQUEST_PATH,
+      PASSWORD_RESET_PATH,
+      ACTIVATE_ACCOUNT_PATH,
+    ]
+      .map(normalizePublicPath)
+      .filter(Boolean)
+  );
 }
 
 /* =========================================================
@@ -288,7 +354,7 @@ export function getCurrentUserHomePath() {
   if (!isAuthenticated()) return HOME_PATH;
 
   try {
-    const home = Session.getCurrentUserHomePath?.();
+    const home = normalizePublicPath(Session.getCurrentUserHomePath?.() || "");
 
     if (home && isCurrentUserHomePath(home)) return home;
   } catch {
@@ -379,7 +445,7 @@ export function getAuthHeader() {
 ========================================================= */
 
 export function isPublicTechnicalPath(path = currentPath()) {
-  return PUBLIC_AUTH_ROUTES.includes(canonicalAuthPath(path));
+  return publicAuthRoutes().includes(canonicalAuthPath(path));
 }
 
 export function isAuthRoute(path = currentPath()) {
@@ -387,15 +453,15 @@ export function isAuthRoute(path = currentPath()) {
 }
 
 export function isPasswordRequestRoute(path = currentPath()) {
-  return canonicalAuthPath(path) === ROUTES.passwordRequest;
+  return canonicalAuthPath(path) === PASSWORD_REQUEST_PATH;
 }
 
 export function isPasswordResetRoute(path = currentPath()) {
-  return canonicalAuthPath(path) === ROUTES.passwordReset;
+  return canonicalAuthPath(path) === PASSWORD_RESET_PATH;
 }
 
 export function isActivationRoute(path = currentPath()) {
-  return canonicalAuthPath(path) === ROUTES.activateAccount;
+  return canonicalAuthPath(path) === ACTIVATE_ACCOUNT_PATH;
 }
 
 /* =========================================================
@@ -404,10 +470,11 @@ export function isActivationRoute(path = currentPath()) {
 
 export function guardAuthenticated(options = {}) {
   const path = normalizePublicPath(options.path || currentPath());
+  const scoped = getUserScopedRouteInfo(path);
 
   if (!isAuthenticated()) return false;
 
-  if (isUserHomePath(path) && !isCurrentUserHomePath(path)) {
+  if (scoped.scoped && !isCurrentUserScopedPath(path)) {
     return false;
   }
 
@@ -443,6 +510,11 @@ export function canAccessRoute(route = {}) {
 
   const publicPath = normalizePublicPath(rawPath);
   const canonicalPath = canonicalAuthPath(publicPath);
+  const scoped = getUserScopedRouteInfo(publicPath);
+
+  if (scoped.scoped && !guardAuthenticated({ path: publicPath })) {
+    return false;
+  }
 
   if (route.guestOnly === true || route.publicOnly === true) {
     return guardGuest();
@@ -516,6 +588,7 @@ export function buildGuardErrorPayload(error = null) {
 export function getAuthGuardsSnapshot() {
   const user = getCurrentUser();
   const path = currentPath();
+  const scoped = getUserScopedRouteInfo(path);
 
   return {
     version: GUARDS_VERSION,
@@ -535,12 +608,19 @@ export function getAuthGuardsSnapshot() {
 
     path: redact(path),
     canonicalPath: canonicalAuthPath(path),
+
+    userScopedPath: scoped.scoped,
+    userScopedRestPath: scoped.scoped ? scoped.restPath : null,
+
     isUserHomePath: isUserHomePath(path),
+    isUserScopedPath: isUserScopedPath(path),
     isCurrentUserHomePath: isCurrentUserHomePath(path),
+    isCurrentUserScopedPath: scoped.scoped ? isCurrentUserScopedPath(path) : false,
+
     publicTechnical: isPublicTechnicalPath(path),
 
     loginPath: LOGIN_PATH,
-    publicRoutes: [...PUBLIC_AUTH_ROUTES],
+    publicRoutes: publicAuthRoutes(),
 
     policy: {
       ownFetch: false,
@@ -553,7 +633,9 @@ export function getAuthGuardsSnapshot() {
       roles: [...VALID_ROLES],
 
       userSlugHome: true,
+      userScopedPrivateRoutes: true,
       canonicalizesUserHome: true,
+      canonicalizesUserScopedRoutes: true,
       validatesCurrentUserSlug: true,
 
       noHomeAlias: true,
@@ -592,7 +674,11 @@ export default {
 
   normalizePublicPath,
   canonicalAuthPath,
+
+  getUserScopedRouteInfo,
+  extractUserScopedSlug,
   isUserHomePath,
+  isUserScopedPath,
 
   isPublicTechnicalPath,
   isAuthRoute,

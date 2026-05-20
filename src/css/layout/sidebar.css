@@ -8,7 +8,9 @@
    - Sidebar sólido Graphite Glass.
    - SVGs claros en reposo, no dependientes del hover.
    - Botón collapse alineado con iconos en collapsed.
-   - Logo limpio: una sola capa visible, sin overlays ni imagen rota encima.
+   - Logo corporativo real: favicon_white.png / favicon_black.png.
+   - Sin SVG fallback como logo de empresa.
+   - Una sola capa visible de logo.
    - Dropdown visual de cuenta.
    - Estado open/collapsed/mobile.
    - Scope estricto bajo .sidebar.
@@ -67,12 +69,13 @@
   --sidebar-local-avatar-size: var(--sidebar-user-avatar-size, 34px);
   --sidebar-local-toggle-size: 36px;
 
-  --sidebar-local-logo-size: var(--sidebar-logo-size, 34px);
-  --sidebar-local-logo-height: var(--sidebar-local-logo-size);
-  --sidebar-local-logo-width: var(--sidebar-local-logo-size);
+  --sidebar-local-logo-size: var(--sidebar-logo-img-size, var(--sidebar-logo-size, 34px));
+  --sidebar-local-logo-height: var(--sidebar-logo-height, var(--sidebar-local-logo-size));
+  --sidebar-local-logo-width: var(--sidebar-logo-img-size, var(--sidebar-logo-size, 34px));
   --sidebar-local-logo-radius: var(--sidebar-logo-radius, 12px);
-  --sidebar-local-logo-filter: none;
+  --sidebar-local-logo-filter: var(--sidebar-logo-filter, drop-shadow(0 8px 18px rgba(0,0,0,.30)));
   --sidebar-local-logo-opacity: var(--sidebar-logo-opacity, .98);
+  --sidebar-local-logo-image: var(--asset-logo-dark, url("/src/media/img/favicon_white.png"));
 
   --sidebar-local-font-size: var(--sidebar-item-font-size, var(--font-md));
   --sidebar-local-font-weight: var(--sidebar-item-font-weight, var(--weight-medium));
@@ -122,6 +125,12 @@
     background var(--duration-normal, .20s) var(--ease-standard, ease),
     border-color var(--duration-normal, .20s) var(--ease-standard, ease),
     box-shadow var(--duration-normal, .20s) var(--ease-standard, ease);
+}
+
+html[data-theme="light"] .sidebar,
+body[data-theme="light"] .sidebar {
+  --sidebar-local-logo-filter: var(--sidebar-logo-filter, none);
+  --sidebar-local-logo-image: var(--asset-logo-light, url("/src/media/img/favicon_black.png"));
 }
 
 .sidebar,
@@ -314,7 +323,7 @@
 
 
 /* =========================================================
-   HEADER LOGO · SINGLE CLEAN LAYER
+   HEADER LOGO · REAL COMPANY IMAGE
 ========================================================= */
 
 .sidebar .sidebar-brand-logo {
@@ -348,61 +357,58 @@
   transform: translateZ(0);
 }
 
-/*
-   Regla clave:
-   El template puede traer fallback SVG + logo dark + logo light.
-   Para evitar cualquier recubrimiento o icono roto encima del logo,
-   en sidebar usamos UNA sola capa visible: el fallback SVG.
-*/
-.sidebar .sidebar-brand-logo-img,
-.sidebar .sidebar-brand-logo-img--theme-dark,
-.sidebar .sidebar-brand-logo-img--theme-light,
-.sidebar .sidebar-brand-logo-img--white,
-.sidebar .sidebar-brand-logo-img--black {
+.sidebar .sidebar-brand-logo-picture {
+  inline-size: 100%;
+  block-size: 100%;
+
+  display: inline-grid;
+  place-items: center;
+
+  overflow: visible;
+}
+
+.sidebar .sidebar-brand-logo-img {
+  inline-size: 100%;
+  block-size: 100%;
+
+  display: block !important;
+
+  object-fit: contain;
+  object-position: center;
+
+  opacity: 1 !important;
+  visibility: visible !important;
+
+  border: 0;
+  border-radius: inherit;
+
+  background: transparent;
+
+  color: transparent;
+
+  filter: none;
+  transform: translateZ(0);
+
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+
+  content: var(--sidebar-local-logo-image);
+}
+
+.sidebar .sidebar-brand-logo-img[src=""],
+.sidebar .sidebar-brand-logo-img:not([src]) {
+  content: var(--sidebar-local-logo-image);
+}
+
+.sidebar .sidebar-brand-logo-fallback,
+.sidebar .sidebar-brand-logo-fallback-svg,
+.sidebar .sidebar-brand-logo-fallback svg,
+.sidebar .sidebar-brand-logo-fallback path {
   display: none !important;
   visibility: hidden !important;
   opacity: 0 !important;
   pointer-events: none !important;
-}
-
-.sidebar .sidebar-brand-logo-fallback {
-  position: relative;
-  z-index: 1;
-
-  inline-size: 100%;
-  block-size: 100%;
-
-  display: inline-grid !important;
-  place-items: center;
-
-  overflow: visible;
-
-  color: currentColor;
-  background: transparent;
-
-  opacity: 1;
-  pointer-events: none;
-}
-
-.sidebar .sidebar-brand-logo-fallback-svg {
-  inline-size: 100%;
-  block-size: 100%;
-
-  display: block;
-
-  color: currentColor;
-  opacity: 1;
-  filter: none;
-  transform: none;
-}
-
-.sidebar .sidebar-brand-logo-fallback-svg path {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
 }
 
 
@@ -1491,6 +1497,7 @@
     box-shadow: none;
   }
 
+  .sidebar .sidebar-brand-logo,
   .sidebar .sidebar-brand-logo-img {
     filter: none;
   }

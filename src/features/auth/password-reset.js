@@ -4,8 +4,8 @@
 
    Responsabilidad:
    - Password reset público mínimo.
-   - Request endpoint: /api/auth/reset-password-request.
-   - Confirm endpoint: /api/auth/reset-password-confirm.
+   - Request endpoint: /api/auth/reset-password-request desde core/config.js.
+   - Confirm endpoint: /api/auth/reset-password-confirm desde core/config.js.
    - Token param único: token.
    - Transporte único vía CoreHttp.
    - No toca sesión salvo token + user explícitos del backend.
@@ -20,27 +20,42 @@
    - Sin magia negra.
 ========================================================= */
 
-import CoreHttp from "../../core/http.js";
+import * as CoreHttpModule from "../../core/http.js";
+
+import {
+  AUTH_ENDPOINTS,
+  ROUTES,
+  TOKEN_PARAM,
+  USER_HOME_PREFIX,
+} from "../../core/config.js";
 
 import {
   applySession,
 } from "./session.js";
 
-export const PASSWORD_RESET_MODULE_VERSION = "simple";
+export const PASSWORD_RESET_MODULE_VERSION = "auth.password-reset.v3";
 
 const SOURCE = "auth.password-reset";
 
-const REQUEST_ENDPOINT = "/api/auth/reset-password-request";
-const CONFIRM_ENDPOINT = "/api/auth/reset-password-confirm";
+const REQUEST_ENDPOINT = AUTH_ENDPOINTS.requestPasswordReset;
+const CONFIRM_ENDPOINT = AUTH_ENDPOINTS.confirmPasswordReset;
 
-const TOKEN_PARAM = "token";
-const DEFAULT_LOGIN_REDIRECT = "/login";
+const DEFAULT_LOGIN_REDIRECT = ROUTES.login || "/login";
+const HOME_ROUTE = ROUTES.home || "/";
 
 const IDENTIFIER_MAX_LENGTH = 160;
 const TOKEN_MIN_LENGTH = 8;
 const TOKEN_MAX_LENGTH = 8192;
 const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_LENGTH = 1024;
+
+const VALID_ROLES = Object.freeze(["admin", "user"]);
+
+const CoreHttp =
+  CoreHttpModule.default ||
+  CoreHttpModule.Http ||
+  CoreHttpModule.http ||
+  CoreHttpModule;
 
 let requestPromise = null;
 let confirmPromise = null;
@@ -61,7 +76,11 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function text(value = "", fallback = "") {
+function isFormData(value) {
+  return typeof FormData !== "undefined" && value instanceof FormData;
+}
+
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
@@ -71,19 +90,51 @@ function rawText(value = "", fallback = "") {
 }
 
 function nowIso() {
-  return new Date().toISOString();
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+  return cleanText(value, "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function stripEmpty(object = {}) {
   return Object.fromEntries(
-    Object.entries(object).filter(([, value]) => value !== undefined && value !== null && value !== "")
+    Object.entries(object).filter(([, value]) => {
+      return value !== undefined && value !== null && value !== "";
+    })
   );
+}
+
+function payloadValue(payload = {}, names = []) {
+  if (isFormData(payload)) {
+    for (const name of names) {
+      const value = payload.get(name);
+
+      if (value !== undefined && value !== null && value !== "") {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  if (!isObject(payload)) return undefined;
+
+  for (const name of names) {
+    const value = payload[name];
+
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+
+  return undefined;
 }
 
 /* =========================================================
@@ -91,20 +142,27 @@ function stripEmpty(object = {}) {
 ========================================================= */
 
 function normalizeTokenValue(value = "") {
-  const token = text(value, "");
+  const token = cleanText(value, "").replace(/^Bearer\s+/i, "");
 
   if (!token) return "";
   if (/\s/.test(token)) return "";
+  if (token.length > TOKEN_MAX_LENGTH) return "";
 
   if (
-    ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
-      token.toLowerCase()
-    )
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "[object object]",
+      "{}",
+      "[]",
+    ].includes(token.toLowerCase())
   ) {
     return "";
   }
 
-  return token.slice(0, TOKEN_MAX_LENGTH);
+  return token;
 }
 
 function readTokenFromLocation() {
@@ -121,7 +179,10 @@ function readTokenFromLocation() {
 
   try {
     const hash = String(window.location.hash || "").replace(/^#/, "");
-    const query = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : hash;
+    const query = hash.includes("?")
+      ? hash.slice(hash.indexOf("?") + 1)
+      : hash;
+
     const params = new URLSearchParams(query);
 
     return normalizeTokenValue(params.get(TOKEN_PARAM) || "");
@@ -131,7 +192,7 @@ function readTokenFromLocation() {
 }
 
 function normalizeIdentifier(value = "") {
-  return text(value, "")
+  return cleanText(value, "")
     .normalize("NFKC")
     .replace(/\s+/g, " ")
     .slice(0, IDENTIFIER_MAX_LENGTH);
@@ -143,18 +204,30 @@ function normalizePassword(value = "") {
 
 export function resolveResetPasswordIdentifier(payload = {}) {
   return normalizeIdentifier(
-    payload?.identifier ??
-      payload?.email ??
-      payload?.username ??
-      payload?.user ??
-      payload?.login ??
-      ""
+    payloadValue(payload, [
+      "identifier",
+      "email",
+      "username",
+      "user",
+      "login",
+    ]) || ""
   );
 }
 
 export function resolveResetPasswordToken(payload = {}) {
+  if (!isObject(payload) && !isFormData(payload)) {
+    return normalizeTokenValue(payload || readTokenFromLocation() || "");
+  }
+
   return normalizeTokenValue(
-    payload?.token ||
+    payloadValue(payload, [
+      "token",
+      "resetToken",
+      "reset_token",
+    ]) ||
+      payload?.data?.token ||
+      payload?.payload?.token ||
+      payload?.result?.token ||
       readTokenFromLocation() ||
       ""
   );
@@ -171,34 +244,26 @@ export function normalizeResetPasswordPayload(payload = {}) {
 }
 
 export function normalizeConfirmResetPasswordPayload(payload = {}) {
-  const source = isObject(payload) ? payload : {};
-
   return {
-    token: resolveResetPasswordToken(source),
+    token: resolveResetPasswordToken(payload),
 
     password: normalizePassword(
-      source.password ||
-        source.newPassword ||
-        source.new_password ||
-        ""
+      payloadValue(payload, [
+        "password",
+        "newPassword",
+        "new_password",
+      ]) || ""
     ),
 
     confirmPassword: normalizePassword(
-      source.confirmPassword ||
-        source.passwordConfirmation ||
-        source.password_confirmation ||
-        ""
+      payloadValue(payload, [
+        "confirmPassword",
+        "passwordConfirmation",
+        "password_confirmation",
+      ]) || ""
     ),
   };
 }
-
-export function normalizeValidateResetTokenPayload(payload = {}) {
-  return {
-    token: resolveResetPasswordToken(payload),
-  };
-}
-
-export const normalizeValidateResetPasswordTokenPayload = normalizeValidateResetTokenPayload;
 
 export function buildResetPasswordRequestBody(payload = {}) {
   const normalized = normalizeResetPasswordPayload(payload);
@@ -217,14 +282,6 @@ export function buildConfirmResetPasswordBody(payload = {}) {
     confirmPassword: normalized.confirmPassword || undefined,
   });
 }
-
-export function buildValidateResetTokenBody(payload = {}) {
-  const token = resolveResetPasswordToken(payload);
-
-  return token ? { token } : {};
-}
-
-export const buildValidateResetPasswordTokenBody = buildValidateResetTokenBody;
 
 /* =========================================================
    VALIDATION
@@ -252,26 +309,22 @@ function validateConfirmPayload(payload = {}) {
   if (normalized.token.length > TOKEN_MAX_LENGTH) return "El token de recuperación no es válido.";
 
   if (!normalized.password) return "La nueva contraseña es obligatoria.";
+
   if (normalized.password.length < PASSWORD_MIN_LENGTH) {
     return `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`;
   }
+
   if (normalized.password.length > PASSWORD_MAX_LENGTH) {
     return "La contraseña es demasiado larga.";
   }
 
-  if (normalized.confirmPassword && normalized.password !== normalized.confirmPassword) {
-    return "Las contraseñas no coinciden.";
+  if (!normalized.confirmPassword) {
+    return "Confirma la contraseña.";
   }
 
-  return "";
-}
-
-function validateTokenPayload(payload = {}) {
-  const token = resolveResetPasswordToken(payload);
-
-  if (!token) return "No se recibió token de recuperación.";
-  if (token.length < TOKEN_MIN_LENGTH) return "El token de recuperación no es válido.";
-  if (token.length > TOKEN_MAX_LENGTH) return "El token de recuperación no es válido.";
+  if (normalized.password !== normalized.confirmPassword) {
+    return "Las contraseñas no coinciden.";
+  }
 
   return "";
 }
@@ -280,81 +333,186 @@ function validateTokenPayload(payload = {}) {
    USER / RESPONSE
 ========================================================= */
 
+function normalizeRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = String(value || "").trim().toLowerCase();
+
+  return VALID_ROLES.includes(role) ? role : "";
+}
+
 function cleanRole(value = "") {
-  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+  return normalizeRole(value) || "user";
+}
+
+function normalizeSlug(value = "") {
+  const slug = cleanText(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+function extractUserSlug(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeSlug(
+    user.slug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      ""
+  );
+}
+
+function buildUserHomePath(user = null) {
+  const slug = extractUserSlug(user);
+  return slug ? `${USER_HOME_PREFIX}${slug}` : HOME_ROUTE;
+}
+
+function removeSensitiveUserFields(user = {}) {
+  if (!isObject(user)) return {};
+
+  const output = { ...user };
+
+  for (const key of [
+    "password",
+    "passwordHash",
+    "hash",
+    "salt",
+
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+
+    "resetToken",
+    "activationToken",
+
+    "secret",
+    "secrets",
+    "code",
+    "codes",
+    "backupCodes",
+  ]) {
+    delete output[key];
+  }
+
+  return output;
 }
 
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  return (
+  const status = cleanText(user.status || user.estado, "").toLowerCase();
+
+  return Boolean(
     user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
+      user.deleted === true ||
+      user.archived === true ||
+      user.active === false ||
+      status === "disabled" ||
+      status === "deleted" ||
+      status === "archived"
+  );
+}
+
+function hasUserIdentity(user = null) {
+  if (!isObject(user)) return false;
+
+  return Boolean(
+    cleanText(user.id, "") ||
+      cleanText(user.userId, "") ||
+      cleanText(user.username, "") ||
+      cleanText(user.slug, "") ||
+      cleanText(user.lookup?.slug, "")
   );
 }
 
 function userOk(user = null) {
-  if (!isObject(user)) return false;
-  if (userDisabled(user)) return false;
-
   return Boolean(
-    user.id ||
-      user.userId ||
-      user.username ||
-      user.slug ||
-      user.email
+    isObject(user) &&
+      !userDisabled(user) &&
+      hasUserIdentity(user)
   );
 }
 
 function normalizeUser(user = null) {
   if (!userOk(user)) return null;
 
-  const id = user.userId || user.id || null;
-  const username = user.username || user.slug || user.email || id || null;
+  const safeUser = removeSensitiveUserFields(user);
 
-  const displayName =
-    user.name ||
-    user.fullName ||
-    user.displayName ||
-    user.nombre ||
-    username ||
-    user.email ||
-    id ||
-    "Usuario";
+  const id = cleanText(safeUser.userId || safeUser.id, "");
+  const slug = extractUserSlug(safeUser);
+  const profile = isObject(safeUser.profile) ? safeUser.profile : {};
 
-  const role = cleanRole(user.role || user.rol);
+  const username = cleanText(
+    safeUser.username ||
+      safeUser.userName ||
+      safeUser.user_name ||
+      slug ||
+      id,
+    ""
+  );
+
+  const displayName = cleanText(
+    safeUser.displayName ||
+      safeUser.fullName ||
+      safeUser.name ||
+      safeUser.nombre ||
+      profile.displayName ||
+      profile.fullName ||
+      profile.name ||
+      profile.nombre ||
+      username ||
+      id,
+    "Usuario"
+  );
+
+  const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
 
   return {
-    ...user,
+    ...safeUser,
 
-    id,
-    userId: user.userId || id,
+    id: id || null,
+    userId: safeUser.userId || id || null,
 
-    username,
-    slug: user.slug || username,
+    username: username || null,
 
-    name: user.name || displayName,
-    fullName: user.fullName || displayName,
+    /*
+      Slug real únicamente.
+      No se inventa desde email/username/id.
+    */
+    slug: slug || null,
+
+    name: safeUser.name || displayName,
+    fullName: safeUser.fullName || displayName,
     displayName,
 
-    email: user.email || null,
+    email: safeUser.email || null,
 
     role,
     rol: role,
     roles: [role],
 
-    isAdmin: role === "admin",
-    isSupport: false,
-    isManager: false,
-    isClient: false,
-
-    avatar: user.avatar || user.avatarUrl || user.picture || null,
-    avatarUrl: user.avatarUrl || user.avatar || user.picture || null,
-    picture: user.picture || user.avatarUrl || user.avatar || null,
-    hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
-
     active: true,
     disabled: false,
+
+    isAdmin: role === "admin",
+    isUser: role === "user",
   };
 }
 
@@ -366,7 +524,8 @@ function publicUser(user = null) {
   return {
     id: clean.id || clean.userId || null,
     userId: clean.userId || clean.id || null,
-    username: clean.username || clean.slug || null,
+    username: clean.username || null,
+    slug: clean.slug || null,
     displayName: clean.displayName || clean.name || clean.username || null,
     role: clean.role || clean.rol || null,
     hasAvatar: Boolean(clean.avatar || clean.avatarUrl || clean.picture),
@@ -404,13 +563,11 @@ function pick(nodes = [], keys = []) {
 function responseNode(input = {}) {
   const source = isObject(input) ? input : {};
 
-  return isObject(source.data)
-    ? source.data
-    : isObject(source.payload)
-      ? source.payload
-      : isObject(source.result)
-        ? source.result
-        : source;
+  if (isObject(source.data)) return source.data;
+  if (isObject(source.payload)) return source.payload;
+  if (isObject(source.result)) return source.result;
+
+  return source;
 }
 
 function readToken(input = {}) {
@@ -419,6 +576,15 @@ function readToken(input = {}) {
       "token",
       "accessToken",
       "access_token",
+    ]) || ""
+  );
+}
+
+function readRefreshToken(input = {}) {
+  return normalizeTokenValue(
+    pick(nested(input), [
+      "refreshToken",
+      "refresh_token",
     ]) || ""
   );
 }
@@ -465,13 +631,13 @@ function responseOk(input = {}) {
 
   if (readToken(input) && readUser(input)) return true;
 
-  return Boolean(source.sent || source.valid || source.completed || source.passwordUpdated);
+  return Boolean(source.sent || source.completed || source.passwordUpdated);
 }
 
 function responseMessage(input = {}, fallback = "") {
   const source = responseNode(input);
 
-  return text(
+  return cleanText(
     source.message ||
       source.mensaje ||
       source.detail ||
@@ -484,7 +650,7 @@ function responseMessage(input = {}, fallback = "") {
 
 function responseCode(input = {}) {
   const source = responseNode(input);
-  return text(source.code || source.errorCode || "", "");
+  return cleanText(source.code || source.errorCode || "", "");
 }
 
 function responseStatus(input = {}) {
@@ -493,28 +659,52 @@ function responseStatus(input = {}) {
   return Number.isFinite(status) ? status : 0;
 }
 
-function responseRedirect(input = {}, fallback = DEFAULT_LOGIN_REDIRECT) {
-  const source = responseNode(input);
-  const target = text(source.redirectTo || source.redirect || source.returnTo || fallback, fallback);
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
+function normalizeRedirectPath(value = "", fallback = DEFAULT_LOGIN_REDIRECT) {
+  const target = cleanText(value, fallback);
 
   if (!target.startsWith("/") || target.startsWith("//")) return fallback;
   if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return fallback;
   if (/[\r\n\t\\]/.test(target)) return fallback;
+  if (hasSensitiveQuery(target)) return fallback;
 
   return target;
 }
 
+function responseRedirect(input = {}, fallback = DEFAULT_LOGIN_REDIRECT) {
+  const source = responseNode(input);
+
+  return normalizeRedirectPath(
+    source.redirectTo ||
+      source.redirect ||
+      source.returnTo ||
+      fallback,
+    fallback
+  );
+}
+
 function normalizeBaseResponse(input = {}, fallbackSuccess = "", fallbackError = "") {
   const ok = responseOk(input);
+
   const token = readToken(input);
+  const refreshToken = readRefreshToken(input);
   const user = readUser(input);
   const session = readSession(input);
 
   const authenticated = Boolean(token && user);
+  const homePath = authenticated ? buildUserHomePath(user) : HOME_ROUTE;
+
+  const redirectTo = responseRedirect(
+    input,
+    authenticated ? homePath : DEFAULT_LOGIN_REDIRECT
+  );
 
   return {
-    raw: input,
-
     ok,
     success: ok,
     error: !ok,
@@ -525,11 +715,19 @@ function normalizeBaseResponse(input = {}, fallbackSuccess = "", fallbackError =
     code: responseCode(input),
 
     message: responseMessage(input, ok ? fallbackSuccess : fallbackError),
-    redirectTo: responseRedirect(input, DEFAULT_LOGIN_REDIRECT),
+
+    redirectTo,
+
+    homePath,
+    defaultHome: homePath,
+    postLoginTarget: authenticated ? homePath : redirectTo,
 
     token: authenticated ? token : null,
     accessToken: authenticated ? token : null,
     access_token: authenticated ? token : null,
+
+    refreshToken: authenticated && refreshToken ? refreshToken : null,
+    refresh_token: authenticated && refreshToken ? refreshToken : null,
 
     user: authenticated ? user : null,
     usuario: authenticated ? user : null,
@@ -544,8 +742,32 @@ function normalizeBaseResponse(input = {}, fallbackSuccess = "", fallbackError =
 }
 
 function sanitizeResult(result = {}) {
+  const authenticated = result.authenticated === true;
+
+  const homePath = normalizeRedirectPath(result.homePath || HOME_ROUTE, HOME_ROUTE);
+  const redirectTo = normalizeRedirectPath(result.redirectTo || DEFAULT_LOGIN_REDIRECT);
+
   return {
-    ...result,
+    ok: result.ok === true,
+    success: result.success === true,
+    error: result.error === true,
+
+    authenticated,
+    sessionApplied: result.sessionApplied === true,
+
+    status: result.status || 0,
+    code: result.code || "",
+
+    message: result.message || "",
+
+    redirectTo,
+
+    homePath,
+    defaultHome: normalizeRedirectPath(result.defaultHome || homePath, HOME_ROUTE),
+    postLoginTarget: normalizeRedirectPath(
+      result.postLoginTarget || redirectTo,
+      redirectTo
+    ),
 
     token: null,
     accessToken: null,
@@ -554,11 +776,14 @@ function sanitizeResult(result = {}) {
     refreshToken: null,
     refresh_token: null,
 
-    user: publicUser(result.user),
-    usuario: publicUser(result.user),
-    me: publicUser(result.user),
+    user: authenticated ? publicUser(result.user) : null,
+    usuario: authenticated ? publicUser(result.user) : null,
+    me: authenticated ? publicUser(result.user) : null,
 
-    raw: undefined,
+    session: null,
+    sessionData: null,
+
+    at: result.at || nowIso(),
   };
 }
 
@@ -571,31 +796,12 @@ export function normalizeResetPasswordResponse(input = {}) {
 }
 
 export function normalizeConfirmResetPasswordResponse(input = {}) {
-  return {
-    ...normalizeBaseResponse(
-      input,
-      "La contraseña se ha actualizado correctamente.",
-      "No se pudo restablecer la contraseña."
-    ),
-    redirectTo: responseRedirect(input, DEFAULT_LOGIN_REDIRECT),
-  };
+  return normalizeBaseResponse(
+    input,
+    "La contraseña se ha actualizado correctamente.",
+    "No se pudo restablecer la contraseña."
+  );
 }
-
-export function normalizeValidateResetTokenResponse(input = {}) {
-  return sanitizeResult({
-    ...normalizeBaseResponse(
-      input,
-      "Token de recuperación válido.",
-      "Token de recuperación no válido."
-    ),
-    authenticated: false,
-    token: null,
-    accessToken: null,
-    refreshToken: null,
-  });
-}
-
-export const normalizeValidateResetPasswordTokenResponse = normalizeValidateResetTokenResponse;
 
 /* =========================================================
    HTTP
@@ -604,22 +810,26 @@ export const normalizeValidateResetPasswordTokenResponse = normalizeValidateRese
 function publicOptions(options = {}) {
   return {
     ...options,
+
     public: true,
     auth: false,
     skipAuth: true,
     noAuthHeader: true,
+
     storeError: false,
   };
 }
 
 async function post(endpoint, body, options = {}) {
+  const requestOptions = publicOptions(options);
+
   if (isFunction(CoreHttp?.post)) {
-    return CoreHttp.post(endpoint, body, publicOptions(options));
+    return CoreHttp.post(endpoint, body, requestOptions);
   }
 
   if (isFunction(CoreHttp?.request)) {
     return CoreHttp.request(endpoint, {
-      ...publicOptions(options),
+      ...requestOptions,
       method: "POST",
       body,
     });
@@ -641,6 +851,9 @@ function maybeApplyReturnedSession(result = {}, source = "password-reset") {
         token: result.token,
         accessToken: result.token,
         access_token: result.token,
+
+        refreshToken: result.refreshToken || undefined,
+        refresh_token: result.refresh_token || undefined,
 
         user: result.user,
         usuario: result.user,
@@ -683,7 +896,12 @@ export async function requestPasswordReset(payload = {}, options = {}) {
 
   requestPromise = (async () => {
     try {
-      const raw = await post(REQUEST_ENDPOINT, buildResetPasswordRequestBody(normalized), options);
+      const raw = await post(
+        REQUEST_ENDPOINT,
+        buildResetPasswordRequestBody(normalized),
+        options
+      );
+
       return sanitizeResult(normalizeResetPasswordResponse(raw));
     } catch (error) {
       return sanitizeResult(
@@ -691,11 +909,12 @@ export async function requestPasswordReset(payload = {}, options = {}) {
           ok: false,
           status: error?.status || error?.statusCode || error?.response?.status || 0,
           code: error?.code || error?.data?.code || error?.response?.data?.code || null,
-          message:
+          message: redact(
             error?.data?.message ||
-            error?.response?.data?.message ||
-            error?.message ||
-            "No se pudo iniciar la recuperación de acceso.",
+              error?.response?.data?.message ||
+              error?.message ||
+              "No se pudo iniciar la recuperación de acceso."
+          ),
           error: true,
         })
       );
@@ -725,11 +944,17 @@ export async function confirmResetPassword(payload = {}, options = {}) {
 
   confirmPromise = (async () => {
     try {
-      const raw = await post(CONFIRM_ENDPOINT, buildConfirmResetPasswordBody(normalized), options);
+      const raw = await post(
+        CONFIRM_ENDPOINT,
+        buildConfirmResetPasswordBody(normalized),
+        options
+      );
+
       const result = normalizeConfirmResetPasswordResponse(raw);
       const snapshot = maybeApplyReturnedSession(result, "password-reset:confirm");
 
       result.sessionApplied = Boolean(snapshot?.authenticated);
+      result.authenticated = Boolean(result.authenticated && result.sessionApplied);
 
       return sanitizeResult(result);
     } catch (error) {
@@ -738,11 +963,12 @@ export async function confirmResetPassword(payload = {}, options = {}) {
           ok: false,
           status: error?.status || error?.statusCode || error?.response?.status || 0,
           code: error?.code || error?.data?.code || error?.response?.data?.code || null,
-          message:
+          message: redact(
             error?.data?.message ||
-            error?.response?.data?.message ||
-            error?.message ||
-            "No se pudo restablecer la contraseña.",
+              error?.response?.data?.message ||
+              error?.message ||
+              "No se pudo restablecer la contraseña."
+          ),
           error: true,
         })
       );
@@ -755,68 +981,6 @@ export async function confirmResetPassword(payload = {}, options = {}) {
 }
 
 /* =========================================================
-   VALIDATE TOKEN
-   No endpoint real. Validación local simple.
-========================================================= */
-
-export async function validateResetPasswordToken(payload = {}) {
-  const validationError = validateTokenPayload(payload);
-  const valid = !validationError;
-
-  return {
-    ok: valid,
-    success: valid,
-    valid,
-    authenticated: false,
-    token: null,
-    message: valid ? "Token de recuperación válido." : validationError,
-  };
-}
-
-/* =========================================================
-   ALIASES COMPAT MÍNIMOS
-========================================================= */
-
-export const resetPasswordRequest = requestPasswordReset;
-export const requestResetPassword = requestPasswordReset;
-
-export const resetPasswordConfirm = confirmResetPassword;
-export const confirmPasswordReset = confirmResetPassword;
-
-export const validateResetToken = validateResetPasswordToken;
-export const validatePasswordReset = validateResetPasswordToken;
-
-/* =========================================================
-   COOLDOWN COMPAT
-========================================================= */
-
-export function clearPasswordResetCooldown() {
-  return true;
-}
-
-/* =========================================================
-   ENDPOINT GETTERS
-========================================================= */
-
-export function getRequestPasswordResetEndpoint() {
-  return REQUEST_ENDPOINT;
-}
-
-export const getResetPasswordRequestEndpoint = getRequestPasswordResetEndpoint;
-
-export function getConfirmResetPasswordEndpoint() {
-  return CONFIRM_ENDPOINT;
-}
-
-export const getConfirmPasswordResetEndpoint = getConfirmResetPasswordEndpoint;
-
-export function getValidateResetPasswordTokenEndpoint() {
-  return "";
-}
-
-export const getValidateResetTokenEndpoint = getValidateResetPasswordTokenEndpoint;
-
-/* =========================================================
    SNAPSHOT
 ========================================================= */
 
@@ -827,6 +991,8 @@ export function getPasswordResetSnapshot() {
     requestEndpoint: REQUEST_ENDPOINT,
     confirmEndpoint: CONFIRM_ENDPOINT,
     validateEndpoint: "",
+
+    tokenParam: TOKEN_PARAM,
 
     inFlight: {
       request: Boolean(requestPromise),
@@ -847,33 +1013,43 @@ export function getPasswordResetSnapshot() {
       ownApiClient: false,
       ownRouter: false,
       ownToast: false,
+      ownStorage: false,
     },
 
     policy: {
-      tokenParam: TOKEN_PARAM,
+      endpointsFromConfig: true,
+      tokenParamFromConfig: true,
+
       noValidateEndpoint: true,
       noRouter: true,
       noToast: true,
       noStorage: true,
+      noRefresh: true,
+
       sessionOnlyIfBackendReturnsTokenAndUser: true,
+
       noLegacyRoutes: true,
+      noAliasesMassive: true,
+      noSlugFabrication: true,
+      noEmailIdentity: true,
+
+      snapshotRedacted: true,
     },
   };
 }
 
 export function getPasswordResetDebugPayload(payload = {}) {
+  const request = buildResetPasswordRequestBody(payload);
   const confirm = buildConfirmResetPasswordBody(payload);
 
   return {
-    request: buildResetPasswordRequestBody(payload),
+    request: {
+      identifier: request.identifier ? "***" : "",
+    },
     confirm: {
-      ...confirm,
       token: confirm.token ? "***" : "",
       password: confirm.password ? "***" : "",
       confirmPassword: confirm.confirmPassword ? "***" : "",
-    },
-    validate: {
-      token: resolveResetPasswordToken(payload) ? "***" : "",
     },
   };
 }
@@ -882,50 +1058,24 @@ export function getPasswordResetDebugPayload(payload = {}) {
    DEFAULT EXPORT
 ========================================================= */
 
-const PasswordReset = Object.assign(requestPasswordReset, {
-  version: PASSWORD_RESET_MODULE_VERSION,
+export default {
+  PASSWORD_RESET_MODULE_VERSION,
 
   requestPasswordReset,
-  resetPasswordRequest,
-  requestResetPassword,
-
   confirmResetPassword,
-  resetPasswordConfirm,
-  confirmPasswordReset,
-
-  validateResetPasswordToken,
-  validateResetToken,
-  validatePasswordReset,
 
   resolveResetPasswordIdentifier,
   resolveResetPasswordToken,
 
   normalizeResetPasswordPayload,
   normalizeConfirmResetPasswordPayload,
-  normalizeValidateResetTokenPayload,
-  normalizeValidateResetPasswordTokenPayload,
 
   buildResetPasswordRequestBody,
   buildConfirmResetPasswordBody,
-  buildValidateResetTokenBody,
-  buildValidateResetPasswordTokenBody,
 
   normalizeResetPasswordResponse,
   normalizeConfirmResetPasswordResponse,
-  normalizeValidateResetTokenResponse,
-  normalizeValidateResetPasswordTokenResponse,
-
-  getRequestPasswordResetEndpoint,
-  getResetPasswordRequestEndpoint,
-  getConfirmResetPasswordEndpoint,
-  getConfirmPasswordResetEndpoint,
-  getValidateResetPasswordTokenEndpoint,
-  getValidateResetTokenEndpoint,
-
-  clearPasswordResetCooldown,
 
   getPasswordResetSnapshot,
   getPasswordResetDebugPayload,
-});
-
-export default PasswordReset;
+};

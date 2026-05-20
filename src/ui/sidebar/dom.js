@@ -9,8 +9,10 @@
    - Montar/reemplazar sidebar dentro de #sidebar-mount.
    - Eliminar roots duplicados/stale tras cada montaje.
    - Ocultar/limpiar sidebar.
+   - Sincronizar estado visual open/collapsed.
    - Cachear referencias básicas en AppCore.dom.
    - Cachear referencias estructurales del dropdown.
+   - Cachear referencias diagnósticas de logo/avatar sin decidir lógica.
    - Sin Auth.
    - Sin Router.
    - Sin HTTP.
@@ -18,6 +20,7 @@
    - Sin template.
    - Sin eventos.
    - Sin comportamiento de dropdown.
+   - Sin avatar logic.
    - Sin tooltips.
    - Sin fallback DOM.
    - Sin compat legacy innecesaria.
@@ -30,7 +33,7 @@ import {
   SIDEBAR_SELECTORS,
 } from "./constants.js";
 
-export const SIDEBAR_DOM_VERSION = "sidebar.dom.v5";
+export const SIDEBAR_DOM_VERSION = "sidebar.dom.v6";
 
 /* =========================================================
    BASICS
@@ -69,7 +72,11 @@ export function isConnected(value = null) {
 }
 
 export function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -440,6 +447,12 @@ export function setSidebarOpenState(root = getSidebarRoot(), open = true) {
         value ? "Cerrar barra lateral" : "Abrir barra lateral"
       );
       toggle.dataset.state = value ? "open" : "collapsed";
+
+      const label = query(".sidebar-toggle-label", toggle);
+
+      if (label) {
+        label.textContent = value ? "Cerrar barra lateral" : "Abrir barra lateral";
+      }
     }
 
     return true;
@@ -455,6 +468,26 @@ export function setSidebarOpenState(root = getSidebarRoot(), open = true) {
 export function getSidebarRefs(root = getSidebarRoot()) {
   const sidebar = isElement(root) ? root : getSidebarRoot();
 
+  const brandLogo = sidebar
+    ? query("[data-sidebar-brand-logo]", sidebar)
+    : null;
+
+  const brandLogoImg = sidebar
+    ? query("[data-sidebar-brand-logo-img]", sidebar)
+    : null;
+
+  const userAvatar = sidebar
+    ? query("[data-sidebar-user-avatar]", sidebar)
+    : null;
+
+  const userAvatarImg = sidebar
+    ? query("[data-sidebar-avatar-img]", sidebar)
+    : null;
+
+  const userAvatarFallback = sidebar
+    ? query("[data-sidebar-avatar-fallback]", sidebar)
+    : null;
+
   return {
     root: sidebar,
 
@@ -464,8 +497,15 @@ export function getSidebarRefs(root = getSidebarRoot()) {
     user: sidebar ? query(SIDEBAR_SELECTORS.user, sidebar) : null,
 
     brand: sidebar ? query(SIDEBAR_SELECTORS.brand, sidebar) : null,
+    brandLogo,
+    brandLogoImg,
+
     toggle: sidebar ? query(SIDEBAR_SELECTORS.toggle, sidebar) : null,
     logout: sidebar ? query(SIDEBAR_SELECTORS.logout, sidebar) : null,
+
+    userAvatar,
+    userAvatarImg,
+    userAvatarFallback,
 
     dropdown: sidebar ? query(SIDEBAR_SELECTORS.accountDropdown, sidebar) : null,
     dropdownTrigger: sidebar ? query(SIDEBAR_SELECTORS.accountTrigger, sidebar) : null,
@@ -507,8 +547,14 @@ export function cacheSidebarDom(AppCore = null, root = getSidebarRoot()) {
     dom.sidebarFooter = refs.footer;
     dom.sidebarUser = refs.user;
     dom.sidebarBrand = refs.brand;
+    dom.sidebarBrandLogo = refs.brandLogo;
+    dom.sidebarBrandLogoImg = refs.brandLogoImg;
     dom.sidebarToggle = refs.toggle;
     dom.sidebarLogout = refs.logout;
+
+    dom.sidebarUserAvatar = refs.userAvatar;
+    dom.sidebarUserAvatarImg = refs.userAvatarImg;
+    dom.sidebarUserAvatarFallback = refs.userAvatarFallback;
 
     dom.sidebarDropdown = refs.dropdown;
     dom.sidebarDropdownTrigger = refs.dropdownTrigger;
@@ -538,8 +584,14 @@ export function clearSidebarDomCache(AppCore = null) {
     delete dom.sidebarFooter;
     delete dom.sidebarUser;
     delete dom.sidebarBrand;
+    delete dom.sidebarBrandLogo;
+    delete dom.sidebarBrandLogoImg;
     delete dom.sidebarToggle;
     delete dom.sidebarLogout;
+
+    delete dom.sidebarUserAvatar;
+    delete dom.sidebarUserAvatarImg;
+    delete dom.sidebarUserAvatarFallback;
 
     delete dom.sidebarDropdown;
     delete dom.sidebarDropdownTrigger;
@@ -658,6 +710,23 @@ function nodeSnapshot(node = null) {
   };
 }
 
+function imageSnapshot(img = null) {
+  if (!isElement(img)) {
+    return {
+      exists: false,
+      hasSrc: false,
+    };
+  }
+
+  return {
+    exists: true,
+    hasSrc: Boolean(img.getAttribute("src")),
+    hidden: Boolean(img.hidden),
+    loading: img.getAttribute("loading") || "",
+    decoding: img.getAttribute("decoding") || "",
+  };
+}
+
 export function getSidebarDomSnapshot(root = getSidebarRoot()) {
   const refs = getSidebarRefs(root);
 
@@ -676,8 +745,14 @@ export function getSidebarDomSnapshot(root = getSidebarRoot()) {
       footer: nodeSnapshot(refs.footer),
       user: nodeSnapshot(refs.user),
       brand: nodeSnapshot(refs.brand),
+      brandLogo: nodeSnapshot(refs.brandLogo),
+      brandLogoImg: imageSnapshot(refs.brandLogoImg),
       toggle: nodeSnapshot(refs.toggle),
       logout: nodeSnapshot(refs.logout),
+
+      userAvatar: nodeSnapshot(refs.userAvatar),
+      userAvatarImg: imageSnapshot(refs.userAvatarImg),
+      userAvatarFallback: nodeSnapshot(refs.userAvatarFallback),
 
       dropdown: nodeSnapshot(refs.dropdown),
       dropdownTrigger: nodeSnapshot(refs.dropdownTrigger),
@@ -696,6 +771,10 @@ export function getSidebarDomSnapshot(root = getSidebarRoot()) {
       prioritizesMountRoot: true,
       replacesMountChildren: true,
       removesDuplicateRoots: true,
+
+      cachesLogoRefs: true,
+      cachesAvatarRefsForDiagnosticsOnly: true,
+      noAvatarLogic: true,
 
       noAuth: true,
       noRouter: true,

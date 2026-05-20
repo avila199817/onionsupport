@@ -10,6 +10,7 @@
    - Home distinto para admin/user.
    - User nunca pinta clientes/usuarios.
    - Usar sólo roles reales: admin / user.
+   - Rutas base desde core/config.js.
    - Sin fetch.
    - Sin Auth.
    - Sin Router.
@@ -17,14 +18,19 @@
    - Sin CSS inline.
    - Sin handlers inline.
    - Sin rutas inventadas.
-   - Sin /home.
    - Sin rutas detalle.
+   - Sin /home.
+   - Sin exponer raw/data/payload/response.
+   - Sin emails como identidad visual.
 ========================================================= */
+
+import {
+  ROUTES as CORE_ROUTES,
+} from "../../core/config.js";
 
 import {
   DEFAULT_PAGE_SIZE,
   DEFAULT_CURRENCY,
-  HOME_ROUTES,
 
   safeText,
   safeNumber,
@@ -60,7 +66,6 @@ import {
   getTicketSubject,
   getTicketDescription,
   getTicketOwnerName,
-  getTicketOwnerEmail,
   getTicketAvatarUrl,
   getTicketStatus,
   getTicketStatusKey,
@@ -95,20 +100,20 @@ import {
   getPagination,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.v3";
+export const TEMPLATE_VERSION = "home.template.v4";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
 const ROUTES = Object.freeze({
-  HOME: HOME_ROUTES?.HOME || "/",
-  INCIDENCIAS: HOME_ROUTES?.INCIDENCIAS || "/incidencias",
-  FACTURAS: HOME_ROUTES?.FACTURAS || "/facturas",
-  CLIENTES: HOME_ROUTES?.CLIENTES || "/clientes",
-  USUARIOS: HOME_ROUTES?.USUARIOS || "/usuarios",
-  CUENTA: HOME_ROUTES?.CUENTA || "/cuenta",
-  AJUSTES: HOME_ROUTES?.AJUSTES || "/ajustes",
+  HOME: CORE_ROUTES.home || CORE_ROUTES.root || "/",
+  INCIDENCIAS: CORE_ROUTES.incidencias || "/incidencias",
+  FACTURAS: CORE_ROUTES.facturas || "/facturas",
+  CLIENTES: CORE_ROUTES.clientes || "/clientes",
+  USUARIOS: CORE_ROUTES.usuarios || "/usuarios",
+  CUENTA: CORE_ROUTES.cuenta || "/cuenta",
+  AJUSTES: CORE_ROUTES.ajustes || "/ajustes",
 });
 
 const ACTIONS = Object.freeze({
@@ -142,9 +147,25 @@ const STATUS_ORDER = Object.freeze([
   "closed",
 ]);
 
+const RAW_KEYS = new Set([
+  "raw",
+  "data",
+  "payload",
+  "response",
+]);
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
+
 /* =========================================================
    SAFE HTML
 ========================================================= */
+
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
 
 function escapeHtml(value = "") {
   return String(value ?? "")
@@ -156,7 +177,7 @@ function escapeHtml(value = "") {
 }
 
 function attr(value = "") {
-  return escapeHtml(safeText(value, ""));
+  return escapeHtml(redact(safeText(value, "")));
 }
 
 function joinClasses(...values) {
@@ -171,12 +192,93 @@ function boolAttr(condition = false, value = "") {
   return condition ? value : "";
 }
 
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function sanitizePayloadValue(value, keyHint = "") {
+  if (RAW_KEYS.has(keyHint)) return undefined;
+  if (isSensitiveKey(keyHint)) return undefined;
+
+  if (typeof value === "string") {
+    return redact(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizePayloadValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (value && typeof value === "object") {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (RAW_KEYS.has(key)) continue;
+      if (isSensitiveKey(key)) continue;
+
+      const clean = sanitizePayloadValue(item, key);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  return value;
+}
+
 function jsonAttr(value = {}) {
   try {
-    return escapeHtml(JSON.stringify(value || {}));
+    return escapeHtml(JSON.stringify(sanitizePayloadValue(value) || {}));
   } catch {
     return "{}";
   }
+}
+
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
+function safeRoute(value = "", fallback = "") {
+  const normalized = normalizeRoute(value || "");
+
+  if (!normalized) return fallback;
+  if (!normalized.startsWith("/")) return fallback;
+  if (normalized.startsWith("//")) return fallback;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(normalized)) return fallback;
+  if (/[\r\n\t\\]/.test(normalized)) return fallback;
+  if (hasSensitiveQuery(normalized)) return fallback;
+
+  const canonical = normalized.split("?")[0].split("#")[0] || "";
+
+  if (canonical === "/home") return fallback;
+
+  return normalized;
+}
+
+function safeImageSrc(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+
+  if (raw.startsWith("/") && !raw.startsWith("//") && !hasSensitiveQuery(raw)) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (/^https:\/\//i.test(raw) && !hasSensitiveQuery(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
 }
 
 /* =========================================================
@@ -197,10 +299,10 @@ function getLoadingState(input = {}) {
     creating: Boolean(state.creating || data.creating),
     loaded: Boolean(state.loaded || data.loaded),
     hydrated: Boolean(state.hydrated || data.hydrated),
-    error: safeText(first(state.error, data.error), ""),
+    error: redact(safeText(first(state.error, data.error), "")),
     openingTicketId: safeText(state.openingTicketId, ""),
     selectedTicketId: safeText(state.selectedTicketId, ""),
-    navigatingAction: safeText(state.navigatingAction, ""),
+    navigatingAction: redact(safeText(state.navigatingAction, "")),
   };
 }
 
@@ -364,7 +466,7 @@ function loadingRows(count = DEFAULT_PAGE_SIZE) {
 }
 
 function errorBanner(message = "") {
-  const text = safeText(message, "");
+  const text = redact(safeText(message, ""));
 
   if (!text) return "";
 
@@ -397,8 +499,8 @@ function avatar({
 } = {}) {
   const label = safeText(name, "Usuario");
   const initials = getInitials(label);
-  const src = safeText(image, "");
-  const avatarSeed = safeText(seed, label);
+  const src = safeImageSrc(image);
+  const avatarSeed = getInitials(safeText(seed, label));
 
   return `
     <div
@@ -622,7 +724,7 @@ export function renderHomeHeader(input = {}) {
 function widgetCard(widget = {}, index = 0) {
   const id = getWidgetId(widget) || `widget-${index + 1}`;
   const type = getWidgetType(widget);
-  const route = normalizeRoute(getWidgetRoute(widget) || "");
+  const route = safeRoute(getWidgetRoute(widget), "");
   const modifier = normalizeKey(type || "widget");
 
   return `
@@ -703,7 +805,7 @@ function normalizeQuickAction(action = {}) {
     ...raw,
     action: isCreate ? ACTIONS.CREATE_INCIDENCIA : actionName || ACTIONS.NAVIGATE,
     dataAction: isCreate ? ACTIONS.CREATE_INCIDENCIA : safeText(raw.dataAction || ACTIONS.NAVIGATE, ACTIONS.NAVIGATE),
-    route: isCreate ? ROUTES.INCIDENCIAS : normalizeRoute(raw.route || raw.href || ""),
+    route: isCreate ? ROUTES.INCIDENCIAS : safeRoute(raw.route || raw.href || "", ""),
     modifier: normalizeKey(raw.modifier || actionName || "default"),
     isCreate,
   };
@@ -770,19 +872,20 @@ export function renderHomeQuickActions(input = {}) {
 
 function activityItem(input = {}, item = {}) {
   const type = getActivityType(item);
+  const typeKey = normalizeKey(type);
   const admin = isAdmin(input);
 
-  if (!admin && ["client", "cliente", "customer", "user", "usuario", "member"].includes(normalizeKey(type))) {
+  if (!admin && ["client", "cliente", "customer", "user", "usuario", "member"].includes(typeKey)) {
     return "";
   }
 
   const route =
-    normalizeRoute(first(item.route, item.href, item.link, item.raw?.route, "")) ||
-    (type === "invoice"
+    safeRoute(first(item.route, item.href, item.link, item.to, ""), "") ||
+    (typeKey === "invoice" || typeKey === "factura"
       ? ROUTES.FACTURAS
-      : type === "client"
+      : typeKey === "client" || typeKey === "cliente" || typeKey === "customer"
         ? ROUTES.CLIENTES
-        : type === "user"
+        : typeKey === "user" || typeKey === "usuario" || typeKey === "member"
           ? ROUTES.USUARIOS
           : ROUTES.INCIDENCIAS);
 
@@ -793,12 +896,7 @@ function activityItem(input = {}, item = {}) {
       item.ticketId,
       item.incidenciaId,
       item.facturaId,
-      item.invoiceId,
-      item.raw?.entityId,
-      item.raw?.ticketId,
-      item.raw?.incidenciaId,
-      item.raw?.facturaId,
-      item.raw?.invoiceId
+      item.invoiceId
     ),
     ""
   );
@@ -816,13 +914,13 @@ function activityItem(input = {}, item = {}) {
     >
       <span class="home-activity-icon" aria-hidden="true">
         ${
-          type === "invoice"
+          typeKey === "invoice" || typeKey === "factura"
             ? icon("invoice")
-            : type === "client"
+            : typeKey === "client" || typeKey === "cliente" || typeKey === "customer"
               ? icon("client")
-              : type === "user"
+              : typeKey === "user" || typeKey === "usuario" || typeKey === "member"
                 ? icon("users")
-                : type === "ticket"
+                : typeKey === "ticket" || typeKey === "incidencia"
                   ? icon("ticket")
                   : icon("activity")
         }
@@ -969,19 +1067,18 @@ function entityName(item = {}, type = "client") {
       item.nombre,
       item.razonSocial,
       item.company,
-      item.username,
-      item.email,
-      item.raw?.displayName,
-      item.raw?.fullName,
-      item.raw?.name,
-      item.raw?.nombre,
-      item.raw?.razonSocial,
-      item.raw?.company,
-      item.raw?.username,
-      item.raw?.email
+      item.username
     ),
     type === "user" ? "Usuario" : "Cliente"
   );
+}
+
+function entityMeta(item = {}, type = "client") {
+  if (type === "user") {
+    return safeText(first(item.role, item.rol, "Usuario"), "Usuario");
+  }
+
+  return safeText(first(item.clientId, item.clienteId, item.customerId, item.id, "Cliente"), "Cliente");
 }
 
 function entityItem(item = {}, type = "client") {
@@ -997,14 +1094,7 @@ function entityItem(item = {}, type = "client") {
       item.clientId,
       item.customerId,
       item.id,
-      item._id,
-      item.raw?.userId,
-      item.raw?.usuarioId,
-      item.raw?.clienteId,
-      item.raw?.clientId,
-      item.raw?.customerId,
-      item.raw?.id,
-      item.raw?._id
+      item._id
     ),
     ""
   );
@@ -1020,13 +1110,13 @@ function entityItem(item = {}, type = "client") {
       data-entity-id="${attr(entityId)}"
       data-payload="${jsonAttr({ type, entityId })}"
     >
-      <span class="home-entity-mini-avatar" data-avatar-seed="${attr(label)}" aria-hidden="true">
+      <span class="home-entity-mini-avatar" data-avatar-seed="${attr(getInitials(label))}" aria-hidden="true">
         ${escapeHtml(getInitials(label))}
       </span>
 
       <span class="home-entity-mini-copy">
         <strong>${escapeHtml(label)}</strong>
-        <span>${escapeHtml(safeText(first(item.email, item.mail, item.raw?.email, item.raw?.mail), "Sin email"))}</span>
+        <span>${escapeHtml(entityMeta(item, type))}</span>
       </span>
 
       <span class="home-entity-mini-arrow" aria-hidden="true">${icon("chevronRight")}</span>
@@ -1138,6 +1228,9 @@ function ticketRow(item = {}, state = {}) {
   const createdAt = getTicketCreatedAt(item);
   const updatedAt = getTicketUpdatedAt(item);
 
+  const ownerName = getTicketOwnerName(item);
+  const ownerMeta = safeText(first(getTicketAssignedTo(item), getTicketCategory(item)), "Sin asignación");
+
   const isOpening = isSameIdentity(state.openingTicketId, ticketId);
   const isSelected = isSameIdentity(state.selectedTicketId, ticketId);
 
@@ -1160,10 +1253,10 @@ function ticketRow(item = {}, state = {}) {
       <td class="home-ticket-cell home-ticket-cell--main">
         <div class="home-ticket-main">
           ${avatar({
-            name: getTicketOwnerName(item),
+            name: ownerName,
             image: getTicketAvatarUrl(item),
             kind: "ticket",
-            seed: `${ticketId}|${getTicketOwnerName(item)}`,
+            seed: `${ticketId}|${ownerName}`,
             className: "home-ticket-avatar",
           })}
 
@@ -1217,8 +1310,8 @@ function ticketRow(item = {}, state = {}) {
 
       <td class="home-ticket-cell home-ticket-cell--owner">
         <span class="home-ticket-owner">
-          <strong>${escapeHtml(getTicketOwnerName(item))}</strong>
-          <span>${escapeHtml(getTicketOwnerEmail(item) || "Sin email")}</span>
+          <strong>${escapeHtml(ownerName)}</strong>
+          <span>${escapeHtml(ownerMeta)}</span>
         </span>
       </td>
 
@@ -1267,18 +1360,28 @@ function ticketRow(item = {}, state = {}) {
 function normalizePagination(pagination = {}, rows = []) {
   const pageItems = safeArray(first(pagination.pageItems, pagination.items, rows));
   const currentPage = safeNumber(first(pagination.currentPage, pagination.page), 1);
+  const pageSize = Math.max(1, safeNumber(first(pagination.pageSize, pagination.limit, DEFAULT_PAGE_SIZE), DEFAULT_PAGE_SIZE));
   const totalPages = Math.max(1, safeNumber(pagination.totalPages, 1));
   const totalCount = Math.max(pageItems.length, safeNumber(first(pagination.totalCount, pagination.total), rows.length));
+
+  const fallbackStart = totalCount && pageItems.length
+    ? ((currentPage - 1) * pageSize) + 1
+    : 0;
+
+  const fallbackEnd = totalCount && pageItems.length
+    ? Math.min(fallbackStart + pageItems.length - 1, totalCount)
+    : 0;
 
   return {
     ...pagination,
     pageItems,
     currentPage,
     page: currentPage,
+    pageSize,
     totalPages,
     totalCount,
-    rangeStart: safeNumber(pagination.rangeStart, totalCount && pageItems.length ? 1 : 0),
-    rangeEnd: safeNumber(pagination.rangeEnd, pageItems.length),
+    rangeStart: safeNumber(first(pagination.rangeStart, pagination.from), fallbackStart),
+    rangeEnd: safeNumber(first(pagination.rangeEnd, pagination.to), fallbackEnd),
     hasPrev: Boolean(pagination.hasPrev || currentPage > 1),
     hasNext: Boolean(pagination.hasNext || currentPage < totalPages),
   };
@@ -1420,7 +1523,7 @@ export function renderHomeErrorState(message = "No se pudo cargar el Home.") {
       <section class="home-panel">
         ${emptyState({
           title: "No se pudo renderizar el Home",
-          text: safeText(message, "Error desconocido al cargar la vista."),
+          text: redact(safeText(message, "Error desconocido al cargar la vista.")),
           action: ACTIONS.RETRY,
           actionLabel: "Reintentar",
           iconName: "alert",

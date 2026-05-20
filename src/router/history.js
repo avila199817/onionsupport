@@ -6,11 +6,13 @@
    - Historial SPA mínimo.
    - pushState / replaceState / back.
    - Estado inicial seguro.
-   - publicPath conserva query/hash.
+   - publicPath conserva query/hash seguros.
    - canonicalPath limpio.
    - /@{user.slug} conserva URL pública pero canonicaliza a /.
    - /@{user.slug}/{ruta} conserva URL pública pero canonicaliza a /{ruta}.
-   - Scrub explícito sólo del parámetro token.
+   - No escribir /home, /403, /404, /2fa, /mfa, /otp en history.
+   - Scrub explícito del TOKEN_PARAM en rutas públicas protegidas.
+   - No guardar access_token/refresh_token/id_token/secret/session en URL normalizada.
    - Constantes base desde core/config.js.
    - Snapshots redacted.
    - Sin Auth.
@@ -26,19 +28,40 @@
 
 import {
   PROTECTED_PUBLIC_TOKEN_ROUTES,
-  ROUTES,
   TOKEN_PARAM,
-  USER_HOME_PREFIX,
+  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
 } from "../core/config.js";
 
-export const ROUTER_HISTORY_VERSION = "router.history.v5";
+export const ROUTER_HISTORY_VERSION = "router.history.v6";
 
 const HISTORY_STATE_VERSION = 1;
-const DEFAULT_ROUTE = ROUTES.home || ROUTES.root || "/";
+const DEFAULT_ROUTE = "/";
+const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
+const TOKEN_PARAM_NAME = TOKEN_PARAM || "token";
+
+const BLOCKED_ROUTE_PATHS = new Set([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
+]);
+
+const SENSITIVE_QUERY_KEYS = new Set([
+  "token",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "secret",
+  "session",
+  "code",
+]);
 
 const TOKEN_ROUTES = new Set(
-  PROTECTED_PUBLIC_TOKEN_ROUTES
-    .flatMap((item) => Array.isArray(item.paths) ? item.paths : [item.path])
+  (Array.isArray(PROTECTED_PUBLIC_TOKEN_ROUTES) ? PROTECTED_PUBLIC_TOKEN_ROUTES : [])
+    .flatMap((item) => Array.isArray(item?.paths) ? item.paths : [item?.path || item])
+    .map(normalizeTokenRoutePath)
     .filter(Boolean)
 );
 
@@ -66,7 +89,11 @@ function isObject(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -89,13 +116,36 @@ function nextHistoryId() {
 
 function redact(value = "") {
   return cleanText(value, "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 /* =========================================================
    PATHS
 ========================================================= */
+
+function normalizeTokenRoutePath(value = "") {
+  let clean = cleanText(value, DEFAULT_ROUTE)
+    .split("#")[0]
+    .split("?")[0]
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!clean.startsWith("/")) {
+    clean = `/${clean}`;
+  }
+
+  if (clean.length > 1) {
+    clean = clean.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+  }
+
+  if (isBlockedPathname(clean)) return "";
+
+  return clean || DEFAULT_ROUTE;
+}
 
 function isHashRouterPath(value = "") {
   const raw = cleanText(value, "");
@@ -173,6 +223,18 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
   return value || DEFAULT_ROUTE;
 }
 
+function isBlockedPathname(pathname = DEFAULT_ROUTE) {
+  const value = normalizePathname(pathname).toLowerCase();
+
+  if (BLOCKED_ROUTE_PATHS.has(value)) return true;
+
+  return (
+    value.startsWith("/2fa/") ||
+    value.startsWith("/mfa/") ||
+    value.startsWith("/otp/")
+  );
+}
+
 function normalizeSearch(search = "") {
   const value = cleanText(search, "");
 
@@ -220,6 +282,48 @@ function splitPath(path = DEFAULT_ROUTE) {
   };
 }
 
+function pathnameIsTokenRoute(pathname = DEFAULT_ROUTE) {
+  return TOKEN_ROUTES.has(normalizeTokenRoutePath(pathname));
+}
+
+function shouldKeepQueryKey(key = "", pathname = DEFAULT_ROUTE) {
+  const lower = cleanText(key, "").toLowerCase();
+
+  if (!lower) return false;
+
+  if (lower === TOKEN_PARAM_NAME.toLowerCase()) {
+    return pathnameIsTokenRoute(pathname);
+  }
+
+  if (SENSITIVE_QUERY_KEYS.has(lower)) {
+    return false;
+  }
+
+  return true;
+}
+
+function sanitizeSearchForPath(pathname = DEFAULT_ROUTE, search = "") {
+  const normalized = normalizeSearch(search);
+
+  if (!normalized) return "";
+
+  try {
+    const params = new URLSearchParams(normalized);
+
+    for (const key of [...params.keys()]) {
+      if (!shouldKeepQueryKey(key, pathname)) {
+        params.delete(key);
+      }
+    }
+
+    const output = params.toString();
+
+    return output ? `?${output}` : "";
+  } catch {
+    return "";
+  }
+}
+
 function joinPath(parts = {}) {
   return [
     normalizePathname(parts.pathname || DEFAULT_ROUTE),
@@ -229,11 +333,23 @@ function joinPath(parts = {}) {
 }
 
 export function normalizePublicPath(path = DEFAULT_ROUTE) {
-  return joinPath(splitPath(path));
+  const parts = splitPath(path);
+
+  if (isBlockedPathname(parts.pathname)) {
+    return DEFAULT_ROUTE;
+  }
+
+  return joinPath({
+    pathname: parts.pathname,
+    search: sanitizeSearchForPath(parts.pathname, parts.search),
+    hash: parts.hash,
+  });
 }
 
 function normalizeUserSlug(value = "") {
   const slug = cleanText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -301,8 +417,9 @@ export function isUserScopedPath(path = DEFAULT_ROUTE) {
 export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
   const pathname = splitPath(path).pathname || DEFAULT_ROUTE;
   const scoped = getUserScopedRouteInfo(pathname);
+  const canonical = scoped.scoped ? scoped.lookupPath : pathname;
 
-  return scoped.scoped ? scoped.lookupPath : pathname;
+  return isBlockedPathname(canonical) ? DEFAULT_ROUTE : canonical;
 }
 
 function browserPath() {
@@ -337,14 +454,16 @@ function cleanRouteParams(params = {}) {
 
     if (!cleanKey) continue;
 
+    const lowerKey = cleanKey.toLowerCase();
+
     if (
-      cleanKey.toLowerCase() === TOKEN_PARAM ||
-      cleanKey.toLowerCase() === "access_token" ||
-      cleanKey.toLowerCase() === "refresh_token" ||
-      cleanKey.toLowerCase() === "id_token" ||
-      cleanKey.toLowerCase() === "code" ||
-      cleanKey.toLowerCase() === "secret" ||
-      cleanKey.toLowerCase() === "session"
+      lowerKey === TOKEN_PARAM_NAME.toLowerCase() ||
+      lowerKey === "access_token" ||
+      lowerKey === "refresh_token" ||
+      lowerKey === "id_token" ||
+      lowerKey === "code" ||
+      lowerKey === "secret" ||
+      lowerKey === "session"
     ) {
       output[cleanKey] = "***";
       continue;
@@ -425,6 +544,8 @@ function writeHistory(_AppCore, method = "replaceState", state = null, url = DEF
 
   const finalUrl = normalizePublicPath(url || DEFAULT_ROUTE);
 
+  if (isBlockedPathname(splitPath(finalUrl).pathname)) return false;
+
   try {
     window.history[method](state, "", finalUrl);
     return true;
@@ -475,6 +596,7 @@ function commitHistory({
   });
 
   if (opts.skipHistory === true) return false;
+  if (isBlockedPathname(splitPath(publicPath).pathname)) return false;
 
   if (sameLocation(currentHistoryState(), state) && opts.forceHistory !== true) {
     return false;
@@ -584,8 +706,13 @@ function removeTokenFromSearch(search = "") {
 
   try {
     const params = new URLSearchParams(normalized);
+    const target = TOKEN_PARAM_NAME.toLowerCase();
 
-    params.delete(TOKEN_PARAM);
+    for (const key of [...params.keys()]) {
+      if (key.toLowerCase() === target) {
+        params.delete(key);
+      }
+    }
 
     const output = params.toString();
 
@@ -761,16 +888,24 @@ export function getHistorySnapshot(AppCore = null) {
       canonicalizesUserHome: true,
       canonicalizesUserScopedPrivateRoutes: true,
 
+      defaultRoute: DEFAULT_ROUTE,
       noHomeAlias: true,
       noHomeRoute: true,
       noLegacyRoutes: true,
+      blocksHomeAlias: true,
+      blocks403Route: true,
+      blocks404Route: true,
+
       no2fa: true,
       noMfa: true,
       noOtp: true,
 
-      tokenParam: TOKEN_PARAM,
+      tokenParam: TOKEN_PARAM_NAME,
       tokenRoutes: [...TOKEN_ROUTES],
       tokenScrubExplicit: true,
+      preservesTokenParamOnlyOnProtectedRoutes: true,
+      stripsSensitiveAuthQueryKeys: true,
+
       snapshotRedacted: true,
     },
 

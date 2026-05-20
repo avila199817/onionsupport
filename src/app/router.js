@@ -7,23 +7,31 @@
    - Inicializar Router sin render automático.
    - Bindear Router si existe.
    - Renderizar ruta inicial capturada por main.js.
-   - Sin Auth.
-   - Sin AppCore complejo.
-   - Sin eventos propios.
-   - Sin debug.
-   - Sin snapshots grandes.
+   - Preservar query/hash de la ruta inicial.
+   - Delegar guards/render/history al Router real.
+   - No iniciar restore.
+   - No tocar Auth.
+   - No tocar storage.
+   - No hacer fetch.
+   - No crear eventos propios.
+   - No aplicar navegación paralela.
+   - No forzar /home.
    - Sin token flow.
-   - Sin lógica rara.
+   - Sin debug pesado.
 ========================================================= */
 
 import { Router } from "../router/index.js";
 
-export const ROUTER_BOOTSTRAP_VERSION = "app.router.v3";
+export const ROUTER_BOOTSTRAP_VERSION = "app.router.v4";
 
 let configured = false;
 let bound = false;
 let rendered = false;
 let renderPromise = null;
+
+let lastInitialPath = "";
+let lastRenderResult = null;
+let lastRenderError = null;
 
 /* =========================================================
    BASICS
@@ -42,8 +50,32 @@ function isFunction(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
+}
+
+function redact(value = "") {
+  return cleanText(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function safeError(error = null) {
+  if (!error) return null;
+
+  return {
+    name: error.name || "Error",
+    message: redact(error.message || String(error)),
+    code: error.code || null,
+    status: error.status || error.statusCode || error.response?.status || null,
+  };
 }
 
 function currentPath() {
@@ -65,6 +97,15 @@ function routeFrom(options = {}) {
   const input = isObject(options) ? options : {};
   const bootContext = isObject(input.bootContext) ? input.bootContext : {};
 
+  /*
+    No normalizamos aquí a /@slug ni a /.
+    El Router real decide:
+    - /@slug
+    - /@slug/ruta
+    - /home bloqueado
+    - redirects auth
+    - rutas públicas con token
+  */
   return (
     pathCandidate(bootContext.initialPath) ||
     pathCandidate(input.initialPath) ||
@@ -141,7 +182,9 @@ export async function bindRouter(options = {}) {
   const result = await Router.bind.call(
     Router,
     payload(options, {
+      appManagedInitialRender: true,
       skipInitialRender: true,
+      render: false,
     })
   );
 
@@ -162,11 +205,15 @@ export function renderInitialRoute(options = {}) {
   if (renderPromise) return renderPromise;
 
   renderPromise = (async () => {
+    lastRenderError = null;
+
     await configureRouter(options);
     await bindRouter(options);
 
     const path = routeFrom(options);
     const render = requireRouterMethod("render");
+
+    lastInitialPath = path;
 
     const result = await render.call(
       Router,
@@ -174,6 +221,11 @@ export function renderInitialRoute(options = {}) {
       payload(options, {
         initialRender: true,
         replaceState: true,
+
+        /*
+          La URL actual ya existe en el navegador.
+          History.ensureInitialHistoryState() pertenece al Router real.
+        */
         skipHistory: true,
       })
     );
@@ -182,11 +234,26 @@ export function renderInitialRoute(options = {}) {
       throw new Error("Router.render() devolvió false en el render inicial.");
     }
 
+    lastRenderResult = isObject(result)
+      ? {
+          ok: result.ok !== false,
+          found: result.found ?? null,
+          forbidden: result.forbidden ?? null,
+          skipped: result.skipped ?? null,
+          reason: result.reason || null,
+          canonicalPath: redact(result.canonicalPath || ""),
+          publicPath: redact(result.publicPath || ""),
+        }
+      : {
+          ok: true,
+        };
+
     rendered = true;
     return true;
   })()
     .catch((error) => {
       rendered = false;
+      lastRenderError = safeError(error);
       throw error;
     })
     .finally(() => {
@@ -206,6 +273,10 @@ export function resetRouterBootstrap() {
   rendered = false;
   renderPromise = null;
 
+  lastInitialPath = "";
+  lastRenderResult = null;
+  lastRenderError = null;
+
   return true;
 }
 
@@ -222,6 +293,10 @@ export function getRouterBootstrapState() {
     rendered,
     rendering: Boolean(renderPromise),
 
+    lastInitialPath: redact(lastInitialPath),
+    lastRenderResult,
+    lastRenderError,
+
     router: {
       exists: Boolean(Router),
       hasInit: isFunction(Router?.init),
@@ -231,8 +306,16 @@ export function getRouterBootstrapState() {
 
     policy: {
       wrapperOnly: true,
+
       appManagedInitialRender: true,
       bindsBeforeInitialRender: true,
+      preservesInitialPath: true,
+      preservesQueryAndHash: true,
+
+      routerOwnsAuthWait: true,
+      routerOwnsGuards: true,
+      routerOwnsHistory: true,
+      routerOwnsSlugCanonicalization: true,
 
       ownAuth: false,
       ownStorage: false,
@@ -245,6 +328,14 @@ export function getRouterBootstrapState() {
       noFetch: true,
       noEventsOwn: true,
       noDebugNoise: true,
+
+      noHomeAlias: true,
+      noHomeRoute: true,
+      no2fa: true,
+      noMfa: true,
+      noOtp: true,
+
+      snapshotRedacted: true,
     },
   };
 }

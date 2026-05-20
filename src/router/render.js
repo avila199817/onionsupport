@@ -13,7 +13,7 @@
    - Pintar fallback simple.
    - Mantener publicPath visible y canonicalPath interno.
    - No exponer token real en DOM/snapshot.
-   - Sin imports.
+   - Constantes base desde core/config.js.
    - Sin Auth.
    - Sin guards.
    - Sin history propio.
@@ -28,10 +28,14 @@
    - Sin /404.
 ========================================================= */
 
-export const ROUTER_RENDER_VERSION = "router.render.v4";
+import {
+  ROUTES,
+  USER_HOME_PREFIX,
+} from "../core/config.js";
 
-const DEFAULT_ROUTE = "/";
-const USER_HOME_PREFIX = "/@";
+export const ROUTER_RENDER_VERSION = "router.render.v5";
+
+const DEFAULT_ROUTE = ROUTES.home || ROUTES.root || "/";
 
 const HOST_ATTR = "data-router-view-host";
 const HOST_CLASS = "router-view-host";
@@ -62,7 +66,7 @@ function isNode(value) {
   }
 }
 
-function text(value = "", fallback = "") {
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
@@ -73,9 +77,8 @@ function nextRenderId() {
 }
 
 function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+  return cleanText(value, "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -92,7 +95,7 @@ function call(fn = null, ...args) {
 ========================================================= */
 
 function normalizeHashPath(path = DEFAULT_ROUTE) {
-  const value = text(path, DEFAULT_ROUTE);
+  const value = cleanText(path, DEFAULT_ROUTE);
 
   if (value.startsWith("#!")) {
     return value.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
@@ -120,7 +123,7 @@ function pathFromInput(path = DEFAULT_ROUTE) {
 }
 
 function normalizePathname(pathname = DEFAULT_ROUTE) {
-  let value = text(pathname, DEFAULT_ROUTE).replace(/\\/g, "/");
+  let value = cleanText(pathname, DEFAULT_ROUTE).replace(/\\/g, "/");
 
   if (!value.startsWith("/")) {
     value = `/${value}`;
@@ -136,7 +139,7 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
 }
 
 function normalizeSearch(search = "") {
-  const value = text(search, "");
+  const value = cleanText(search, "");
 
   if (!value || value === "?") return "";
 
@@ -146,7 +149,7 @@ function normalizeSearch(search = "") {
 }
 
 function normalizeHash(hash = "") {
-  const value = text(hash, "");
+  const value = cleanText(hash, "");
 
   if (!value || value === "#") return "";
 
@@ -190,12 +193,12 @@ function joinPath(parts = {}) {
   ].join("");
 }
 
-function normalizePublicPath(path = DEFAULT_ROUTE) {
+export function normalizePublicPath(path = DEFAULT_ROUTE) {
   return joinPath(splitPath(path));
 }
 
 function normalizeUserSlug(value = "") {
-  const slug = text(value, "")
+  const slug = cleanText(value, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -208,7 +211,7 @@ function normalizeUserSlug(value = "") {
   return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
-function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
+export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
   const pathname = splitPath(path).pathname;
 
   if (!pathname.startsWith(USER_HOME_PREFIX)) {
@@ -248,11 +251,11 @@ function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
   };
 }
 
-function extractSlugFromPath(path = DEFAULT_ROUTE) {
+export function extractSlugFromPath(path = DEFAULT_ROUTE) {
   return getUserScopedRouteInfo(path).slug;
 }
 
-function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
+export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
   const pathname = splitPath(path).pathname || DEFAULT_ROUTE;
   const scoped = getUserScopedRouteInfo(pathname);
 
@@ -289,6 +292,27 @@ function domPath(path = DEFAULT_ROUTE) {
   return redact(normalizePublicPath(path));
 }
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
+function safeActionHref(value = DEFAULT_ROUTE) {
+  const path = normalizePublicPath(value || DEFAULT_ROUTE);
+
+  if (
+    !path.startsWith("/") ||
+    path.startsWith("//") ||
+    /[\r\n\t\\]/.test(path) ||
+    hasSensitiveQuery(path)
+  ) {
+    return DEFAULT_ROUTE;
+  }
+
+  return path;
+}
+
 /* =========================================================
    DOM
 ========================================================= */
@@ -298,16 +322,6 @@ function byId(id = "") {
 
   try {
     return document.getElementById(id);
-  } catch {
-    return null;
-  }
-}
-
-function query(selector = "") {
-  if (!isBrowser() || !selector) return null;
-
-  try {
-    return document.querySelector(selector);
   } catch {
     return null;
   }
@@ -518,7 +532,6 @@ export function getViewContainer(AppCore = null) {
 
   const view =
     byId("view-container") ||
-    query("[data-router-view]") ||
     byId("app-content") ||
     byId("main-content") ||
     document.body ||
@@ -702,11 +715,11 @@ function adoptResult(target = null, result = null) {
 ========================================================= */
 
 function getI18n(AppCore = null) {
-  return AppCore?.I18n || AppCore?.i18n || AppCore?.services?.i18n || null;
+  return AppCore?.i18n || AppCore?.I18n || AppCore?.services?.i18n || null;
 }
 
 function getToast(AppCore = null) {
-  return AppCore?.Toast || AppCore?.toast || AppCore?.services?.toast || null;
+  return AppCore?.toast || AppCore?.Toast || AppCore?.services?.toast || null;
 }
 
 function getTranslator(AppCore = null) {
@@ -717,7 +730,7 @@ function getTranslator(AppCore = null) {
   if (isFunction(I18n?.t)) return I18n.t.bind(I18n);
   if (isFunction(I18n?.translate)) return I18n.translate.bind(I18n);
 
-  return (key = "", _params = {}, fallback = "") => text(fallback || key, "");
+  return (key = "", _params = {}, fallback = "") => cleanText(fallback || key, "");
 }
 
 function getShowToast(AppCore = null) {
@@ -848,15 +861,17 @@ function fallbackView({
   }
 
   if (action?.href && action?.text) {
+    const href = safeActionHref(action.href);
+
     append(
       card,
       create("a", {
         className: "router-fallback__action",
         textContent: action.text,
         attrs: {
-          href: normalizePublicPath(action.href),
+          href,
           "data-spa": "",
-          "data-route": normalizePublicPath(action.href),
+          "data-route": href,
         },
       })
     );
@@ -1223,7 +1238,10 @@ export function getRenderSnapshot(AppCore = null) {
       hasView: Boolean(view),
       hasHost: Boolean(host),
 
-      activeViewContainerIsHost: Boolean(AppCore?.dom?.viewContainer && isRouteHost(AppCore.dom.viewContainer)),
+      activeViewContainerIsHost: Boolean(
+        AppCore?.dom?.viewContainer &&
+          isRouteHost(AppCore.dom.viewContainer)
+      ),
 
       viewStatus: view?.dataset?.routerStatus || null,
       viewRenderId: view?.dataset?.routerRenderId || null,
@@ -1268,6 +1286,7 @@ export function getRenderSnapshot(AppCore = null) {
       noCustomEvent: true,
       no403Route: true,
       no404Route: true,
+      snapshotRedacted: true,
     },
   };
 }
@@ -1278,6 +1297,11 @@ export function getRenderSnapshot(AppCore = null) {
 
 export default {
   ROUTER_RENDER_VERSION,
+
+  normalizePublicPath,
+  normalizeCanonicalPath,
+  getUserScopedRouteInfo,
+  extractSlugFromPath,
 
   getViewContainer,
   buildRouteRenderContext,

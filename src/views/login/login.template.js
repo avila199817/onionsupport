@@ -6,6 +6,7 @@
    - Pintar un login simple y centrado.
    - Consumir el password-field compartido desde su fachada pública.
    - Textos base en castellano.
+   - Rutas base desde core/config.js.
    - Sin Auth.
    - Sin HTTP.
    - Sin Router.
@@ -16,13 +17,22 @@
    - Sin layout visual extra.
 ========================================================= */
 
+import {
+  ROUTES,
+} from "../../core/config.js";
+
 import { renderPasswordField } from "../../shared/password-field/index.js";
 
-export const TEMPLATE_VERSION = "login.template.v2";
+export const TEMPLATE_VERSION = "login.template.v3";
 
 const DEFAULT_APP_NAME = "Onion Support";
 const DEFAULT_LOGO = "/src/media/img/favicon_black_circle.png?v=6";
-const DEFAULT_PASSWORD_REQUEST_HREF = "/password-request";
+
+const DEFAULT_PASSWORD_REQUEST_HREF =
+  ROUTES.passwordRequest || "/password-request";
+
+const MAX_IDENTIFIER_LENGTH = 160;
+const MAX_PASSWORD_LENGTH = 1024;
 
 /* =========================================================
    HELPERS
@@ -46,6 +56,12 @@ function escapeAttr(value = "") {
   return escapeHtml(text(value, ""));
 }
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
 function safeInternalHref(value = "", fallback = DEFAULT_PASSWORD_REQUEST_HREF) {
   const raw = text(value, "");
   const fallbackHref = text(fallback, DEFAULT_PASSWORD_REQUEST_HREF);
@@ -55,6 +71,7 @@ function safeInternalHref(value = "", fallback = DEFAULT_PASSWORD_REQUEST_HREF) 
   if (raw.startsWith("//")) return fallbackHref;
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallbackHref;
   if (/[\r\n\t\\]/.test(raw)) return fallbackHref;
+  if (hasSensitiveQuery(raw)) return fallbackHref;
 
   return raw.replace(/\/{2,}/g, "/") || fallbackHref;
 }
@@ -68,15 +85,16 @@ function safeAssetSrc(value = "", fallback = DEFAULT_LOGO) {
   if (raw.startsWith("//")) return fallbackSrc;
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallbackSrc;
   if (/[\r\n\t\\]/.test(raw)) return fallbackSrc;
+  if (hasSensitiveQuery(raw)) return fallbackSrc;
 
-  return raw;
+  return raw.replace(/\/{2,}/g, "/") || fallbackSrc;
 }
 
 function normalizeIdentifier(value = "") {
   return text(value, "")
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
-    .slice(0, 180);
+    .slice(0, MAX_IDENTIFIER_LENGTH);
 }
 
 function bool(value, fallback = false) {
@@ -106,6 +124,7 @@ function renderLoginPasswordField({ label = "", placeholder = "" } = {}) {
 
     autocomplete: "current-password",
     required: true,
+    maxLength: MAX_PASSWORD_LENGTH,
 
     showToggle: true,
     showCapsIndicator: true,
@@ -148,6 +167,7 @@ export function getLoginTemplate(options = {}) {
 
   const identifier = normalizeIdentifier(options.identifier);
   const identifierLabel = text(options.identifierLabel, "Usuario o email");
+
   const identifierPlaceholder = text(
     options.identifierPlaceholder,
     "Usuario o email"
@@ -184,8 +204,8 @@ export function getLoginTemplate(options = {}) {
       aria-describedby="loginDescription"
     >
       <div class="login-shell" data-login-shell="true">
-        <article class="login-card">
-          <header class="login-header">
+        <article class="login-card" data-login-card="true">
+          <header class="login-header" data-login-header="true">
             <img
               class="login-logo"
               src="${escapeAttr(logoSrc)}"
@@ -196,6 +216,7 @@ export function getLoginTemplate(options = {}) {
               decoding="async"
               draggable="false"
               aria-hidden="true"
+              data-login-logo="true"
             >
 
             <h1
@@ -220,7 +241,6 @@ export function getLoginTemplate(options = {}) {
             id="loginForm"
             data-login-form="true"
             data-auth-form="login"
-            data-toast-scope="auth.login"
             aria-describedby="loginDescription loginMessage"
             autocomplete="on"
             novalidate
@@ -230,7 +250,6 @@ export function getLoginTemplate(options = {}) {
               id="loginMessage"
               data-login-message="true"
               data-login-error="true"
-              data-toast-anchor="login"
               role="alert"
               aria-live="polite"
               aria-atomic="true"
@@ -260,6 +279,7 @@ export function getLoginTemplate(options = {}) {
                 spellcheck="false"
                 placeholder="${escapeAttr(identifierPlaceholder)}"
                 value="${escapeAttr(identifier)}"
+                maxlength="${MAX_IDENTIFIER_LENGTH}"
                 data-login-identifier="true"
                 data-i18n-placeholder="login.identifierPlaceholder"
                 aria-invalid="false"

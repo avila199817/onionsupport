@@ -7,8 +7,9 @@
    - API real única.
    - Endpoints auth reales desde core/config.js.
    - /api/auth/me privado siempre.
-   - Enviar Authorization cuando hay token válido.
+   - Enviar Authorization cuando hay access token válido.
    - No reutilizar token runtime si AppCore ya marcó sesión sin token.
+   - Exponer helpers mínimos para que session.js detecte refresh silencioso.
    - Sin fetch propio.
    - Sin parser propio.
    - Sin retry propio.
@@ -18,6 +19,11 @@
    - Sin Toast.
    - Sin Storage.
    - Sin magia negra.
+
+   NOTA:
+   - TOKEN_EXPIRED no implica logout.
+   - Este archivo sólo clasifica el error.
+   - session.js decide si llama /api/auth/refresh y rehidrata sesión.
 ========================================================= */
 
 import {
@@ -34,7 +40,7 @@ import {
   createApiClient,
 } from "./request.js";
 
-export const HTTP_VERSION = "core.http.v4";
+export const HTTP_VERSION = "core.http.v5";
 
 export const DEFAULT_API_ORIGIN = getApiBase();
 export const DEFAULT_TIMEOUT_MS = config?.api?.timeout || 30000;
@@ -58,10 +64,51 @@ const stats = {
   total: 0,
   success: 0,
   error: 0,
+
   lastUrl: "",
   lastMethod: "",
   lastError: null,
+
+  lastAuthCode: "",
+  lastRefreshable: false,
 };
+
+/* =========================================================
+   AUTH ERROR POLICY
+========================================================= */
+
+const REFRESHABLE_AUTH_CODES = new Set([
+  "TOKEN_EXPIRED",
+  "MISSING_TOKEN",
+  "SESSION_REQUIRED",
+]);
+
+const CLEAR_SESSION_AUTH_CODES = new Set([
+  "INVALID_TOKEN",
+  "INVALID_TOKEN_FORMAT",
+  "INVALID_AUTHORIZATION_HEADER",
+  "TEMP_TOKEN_NOT_ALLOWED",
+  "TEMP_AUTH_DISABLED",
+
+  "SESSION_INVALID",
+  "SESSION_REVOKED",
+  "SESSION_USER_MISMATCH",
+  "SESSION_ID_MISMATCH",
+  "SESSION_TOKEN_VERSION_MISMATCH",
+  "SESSION_TOKEN_MISMATCH",
+
+  "USER_INVALID",
+  "USER_INACTIVE",
+  "USER_DISABLED",
+  "USER_NOT_AVAILABLE",
+  "USER_EMAIL_UNVERIFIED",
+
+  "PASSWORD_CHANGE_REQUIRED",
+  "TOKEN_VERSION_MISMATCH",
+
+  "INVALID_REFRESH_TOKEN",
+  "SESSION_NOT_FOUND",
+]);
 
 /* =========================================================
    BASICS
@@ -76,13 +123,30 @@ function isFunction(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    return value;
+  }
+
+  return null;
 }
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -182,6 +246,28 @@ function stateExplicitlyHasNoToken(state = getState()) {
   );
 }
 
+function accessTokenFromPayload(payload = {}) {
+  const source = isObject(payload) ? payload : {};
+
+  return cleanToken(
+    first(
+      source.token,
+      source.accessToken,
+      source.access_token,
+
+      source.auth?.token,
+      source.auth?.accessToken,
+      source.auth?.access_token,
+
+      source.data?.token,
+      source.data?.accessToken,
+      source.data?.access_token,
+
+      ""
+    )
+  );
+}
+
 export function getAccessToken() {
   const state = getState();
   const token = stateAccessToken(state);
@@ -225,17 +311,14 @@ export function setAccessToken(token = "") {
 }
 
 export function setAuthTokens(payload = {}) {
-  const token =
-    payload?.token ||
-    payload?.accessToken ||
-    payload?.access_token ||
-    "";
-
-  const access = setAccessToken(token);
+  const access = setAccessToken(
+    accessTokenFromPayload(payload)
+  );
 
   return {
     token: access || "",
     accessToken: access || "",
+    access_token: access || "",
   };
 }
 
@@ -318,6 +401,10 @@ function endpointIsMe(endpoint = "") {
   return endpointCleanPath(endpoint) === AUTH_ENDPOINTS.me;
 }
 
+function endpointIsRefresh(endpoint = "") {
+  return endpointCleanPath(endpoint) === AUTH_ENDPOINTS.refresh;
+}
+
 function endpointIsPublic(endpoint = "") {
   const clean = endpointCleanPath(endpoint);
 
@@ -361,6 +448,107 @@ export class HttpError extends Error {
   }
 }
 
+function getErrorPayload(error = null) {
+  if (!error) return {};
+
+  if (isObject(error.data)) return error.data;
+  if (isObject(error.body)) return error.body;
+  if (isObject(error.payload)) return error.payload;
+  if (isObject(error.response)) return error.response;
+  if (isObject(error.responseData)) return error.responseData;
+
+  return {};
+}
+
+export function getHttpErrorCode(error = null) {
+  const payload = getErrorPayload(error);
+
+  return cleanText(
+    first(
+      error?.code,
+      error?.error,
+      payload.code,
+      payload.error,
+      payload.auth?.code,
+      payload.auth?.error,
+      ""
+    ),
+    ""
+  );
+}
+
+export function getHttpStatus(error = null) {
+  return Number(
+    error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      getErrorPayload(error).statusCode ||
+      0
+  ) || 0;
+}
+
+export function isRefreshableAuthError(error = null) {
+  const payload = getErrorPayload(error);
+  const auth = isObject(payload.auth) ? payload.auth : {};
+  const code = getHttpErrorCode(error);
+
+  if (auth.refreshRequired === true || payload.refreshRequired === true) {
+    return true;
+  }
+
+  if (auth.canRefresh === true || payload.canRefresh === true) {
+    return true;
+  }
+
+  return REFRESHABLE_AUTH_CODES.has(code);
+}
+
+export function shouldClearSessionForAuthError(error = null) {
+  const payload = getErrorPayload(error);
+  const auth = isObject(payload.auth) ? payload.auth : {};
+  const code = getHttpErrorCode(error);
+
+  if (auth.clearClientSession === true || payload.clearClientSession === true) {
+    return true;
+  }
+
+  if (auth.shouldLogout === true || payload.shouldLogout === true) {
+    return true;
+  }
+
+  return CLEAR_SESSION_AUTH_CODES.has(code);
+}
+
+export function normalizeHttpError(error = null) {
+  const payload = getErrorPayload(error);
+  const code = getHttpErrorCode(error);
+  const status = getHttpStatus(error);
+
+  return {
+    name: error?.name || "Error",
+    message: redact(
+      cleanText(
+        first(
+          error?.message,
+          payload.message,
+          payload.error_description,
+          code,
+          "HTTP_ERROR"
+        ),
+        "HTTP_ERROR"
+      )
+    ),
+    status,
+    statusCode: status,
+    code: code || "HTTP_ERROR",
+
+    canRefresh: isRefreshableAuthError(error),
+    refreshRequired: isRefreshableAuthError(error),
+    shouldLogout: shouldClearSessionForAuthError(error),
+    clearClientSession: shouldClearSessionForAuthError(error),
+  };
+}
+
 /* =========================================================
    ENGINE
 ========================================================= */
@@ -395,33 +583,33 @@ function ensureEngines() {
   };
 }
 
-function normalizeRequestArgs(first = "/", second = {}, third = {}) {
+function normalizeRequestArgs(firstArg = "/", second = {}, third = {}) {
   if (
-    typeof first === "string" &&
-    /^[A-Z]+$/i.test(first) &&
+    typeof firstArg === "string" &&
+    /^[A-Z]+$/i.test(firstArg) &&
     typeof second === "string"
   ) {
     return {
       endpoint: second,
       options: {
         ...(isObject(third) ? third : {}),
-        method: first.toUpperCase(),
+        method: firstArg.toUpperCase(),
       },
     };
   }
 
-  if (isObject(first)) {
+  if (isObject(firstArg)) {
     return {
-      endpoint: first.url || first.path || first.endpoint || "/",
+      endpoint: firstArg.url || firstArg.path || firstArg.endpoint || "/",
       options: {
-        ...first,
+        ...firstArg,
         ...(isObject(second) ? second : {}),
       },
     };
   }
 
   return {
-    endpoint: first,
+    endpoint: firstArg,
     options: isObject(second) ? second : {},
   };
 }
@@ -450,8 +638,8 @@ function buildAuthHeaders(options = {}, token = "") {
    REQUEST
 ========================================================= */
 
-export async function request(first = "/", second = {}, third = {}) {
-  const parsed = normalizeRequestArgs(first, second, third);
+export async function request(firstArg = "/", second = {}, third = {}) {
+  const parsed = normalizeRequestArgs(firstArg, second, third);
 
   const endpoint = endpointToPath(parsed.endpoint);
   const options = isObject(parsed.options) ? parsed.options : {};
@@ -495,13 +683,20 @@ export async function request(first = "/", second = {}, third = {}) {
 
     return result;
   } catch (error) {
+    const normalized = normalizeHttpError(error);
+
     stats.error += 1;
+    stats.lastAuthCode = normalized.code || "";
+    stats.lastRefreshable = Boolean(normalized.canRefresh);
     stats.lastError = {
-      name: error?.name || "Error",
-      message: redact(error?.message || String(error)),
-      status: error?.status || error?.statusCode || 0,
+      name: normalized.name,
+      message: redact(normalized.message || String(error)),
+      status: normalized.status,
+      code: normalized.code,
       url: redact(url),
       method,
+      canRefresh: normalized.canRefresh,
+      shouldLogout: normalized.shouldLogout,
     };
 
     throw error;
@@ -619,11 +814,17 @@ export function refreshSession(body = {}, options = {}) {
     public: true,
     skipAuth: true,
     noAuthHeader: true,
+    cache: "no-store",
   });
 }
 
 export function refresh(options = {}) {
-  return refreshSession({}, options);
+  const opts = isObject(options) ? { ...options } : {};
+  const body = isObject(opts.body) ? opts.body : {};
+
+  delete opts.body;
+
+  return refreshSession(body, opts);
 }
 
 export function logout(options = {}) {
@@ -739,16 +940,22 @@ export function getHttpSnapshot() {
       noAutoRefresh: true,
       noAuthDiscovery: true,
 
+      authErrorClassificationOnly: true,
+      sessionJsOwnsSilentRefresh: true,
+
       noRouter: true,
       noToast: true,
       noStorage: true,
 
       mePrivate: true,
+      refreshPublicNoAuthHeader: true,
       blocksExternalEndpoints: true,
 
       accessTokenRuntimeOnlyAsFallback: true,
       blocksStaleRuntimeTokenWhenStateCleared: true,
       noRefreshTokenStorage: true,
+
+      tokenExpiredDoesNotMeanLogout: true,
       snapshotRedacted: true,
     },
   };
@@ -806,6 +1013,12 @@ export const Http = {
   clearAuthTokens,
 
   getAccessToken,
+
+  getHttpErrorCode,
+  getHttpStatus,
+  normalizeHttpError,
+  isRefreshableAuthError,
+  shouldClearSessionForAuthError,
 
   install: installHttp,
 

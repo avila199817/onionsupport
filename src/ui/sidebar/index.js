@@ -15,6 +15,7 @@
    - Home visible: /@{user.slug}.
    - Home interna/canónica: /.
    - Rutas privadas visibles: /@{user.slug}/{ruta}.
+   - Rebuild limpio del DOM desde template.js en cada sync válido.
    - Sin HTML duplicado.
    - Sin helpers DOM duplicados.
    - Sin lógica de usuario duplicada.
@@ -99,7 +100,7 @@ import {
   unbindSidebarDropdown,
 } from "./dropdown.js";
 
-export const SIDEBAR_UI_VERSION = "sidebar.ui.v6";
+export const SIDEBAR_UI_VERSION = "sidebar.ui.v7";
 
 let syncing = false;
 
@@ -379,6 +380,7 @@ function isAdminRoute(route = null) {
       route?.requiresAdmin === true ||
       route?.meta?.admin === true ||
       route?.meta?.adminOnly === true ||
+      route?.meta?.requiresAdmin === true ||
       roles.includes(SIDEBAR_ROLE_ADMIN)
   );
 }
@@ -591,6 +593,13 @@ function bindRenderedSidebar(root = null) {
 
 function renderSidebar(context = getContext()) {
   unbindAllSidebarDom();
+
+  /*
+    Importante:
+    template.js es la fuente del DOM. Limpiamos caché antes de montar
+    para no conservar nodos viejos ni una marca SVG antigua.
+  */
+  clearSidebarDomCache(AppCore);
 
   const nextRoot = createSidebarTemplate({
     id: SIDEBAR_ROOT_ID,
@@ -834,6 +843,9 @@ function getSnapshot() {
 
       usesRouterRoutes: true,
       usesTemplate: true,
+      rebuildsTemplateDomOnSync: true,
+      clearsDomCacheBeforeRender: true,
+
       usesUserViewModel: true,
       usesVisibility: true,
       usesRuntimeState: true,

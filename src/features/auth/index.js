@@ -8,6 +8,7 @@
    - HTTP delegado en CoreHttp/AppCore.
    - Normalizar usuario autenticado vía AppCore.
    - Exponer home privada por slug: /@{user.slug}.
+   - Init sólo registra Auth; restoreSession gobierna la restauración.
    - Sin Router.
    - Sin Toast.
    - Sin fetch propio.
@@ -36,7 +37,7 @@ import * as GuardsApi from "./guards.js";
 import * as ActivationApi from "./activation.js";
 import * as PasswordResetApi from "./password-reset.js";
 
-export const AUTH_MODULE_VERSION = "auth.facade.v3";
+export const AUTH_MODULE_VERSION = "auth.facade.v4";
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
 
@@ -123,6 +124,14 @@ function cleanToken(value = "") {
 
 function state() {
   return isObject(AppCore?.state) ? AppCore.state : {};
+}
+
+function safeCall(fn = null, ...args) {
+  try {
+    return isFunction(fn) ? fn(...args) : null;
+  } catch {
+    return null;
+  }
 }
 
 function optionalMethod(moduleApi = {}, name = "") {
@@ -351,8 +360,8 @@ const validateResetPasswordTokenCore = optionalMethod(PasswordResetApi, "validat
 
 function getToken() {
   const value =
-    sessionGetCurrentToken?.() ||
-    CoreHttp?.getAccessToken?.() ||
+    safeCall(sessionGetCurrentToken) ||
+    safeCall(CoreHttp?.getAccessToken?.bind?.(CoreHttp) || CoreHttp?.getAccessToken) ||
     state().token ||
     state().accessToken ||
     state().access_token ||
@@ -371,8 +380,8 @@ function hasValidToken() {
 
 function getUser() {
   const user =
-    sessionGetCurrentUser?.() ||
-    AppCore?.getCurrentUser?.() ||
+    safeCall(sessionGetCurrentUser) ||
+    safeCall(AppCore?.getCurrentUser?.bind?.(AppCore) || AppCore?.getCurrentUser) ||
     state().user ||
     state().currentUser ||
     state().sessionUser ||
@@ -400,7 +409,7 @@ function getRole() {
   if (!user) return "";
 
   return defaultRole(
-    sessionGetCurrentRole?.() ||
+    safeCall(sessionGetCurrentRole) ||
       user.role ||
       user.rol ||
       user.roles
@@ -410,7 +419,7 @@ function getRole() {
 function getRoles() {
   if (!isAuthenticated()) return [];
 
-  const fromSession = sessionGetCurrentRoles?.();
+  const fromSession = safeCall(sessionGetCurrentRoles);
 
   if (Array.isArray(fromSession) && fromSession.length) {
     const roles = fromSession
@@ -431,7 +440,7 @@ function isAuthenticated() {
   if (!strict) return false;
 
   try {
-    return sessionIsAuthenticated?.() === false ? false : strict;
+    return safeCall(sessionIsAuthenticated) === false ? false : strict;
   } catch {
     return strict;
   }
@@ -636,8 +645,6 @@ function applySession(payload = {}, options = {}) {
     ...options,
   });
 
-  syncAuthState();
-
   return {
     ...result,
 
@@ -752,7 +759,7 @@ function syncAuthState() {
 
 function getAuthHeader() {
   try {
-    const header = sessionGetAuthHeader?.();
+    const header = safeCall(sessionGetAuthHeader);
 
     if (header && Object.keys(header).length) return header;
   } catch {
@@ -915,9 +922,15 @@ async function restoreSession(options = {}) {
         : null;
 
       if (raw) {
-        applySession(raw, {
-          source: "Auth.restoreSession",
-        });
+        const normalized = normalizeAuthPayload(raw);
+
+        if (normalized.authenticated) {
+          applySession(normalized, {
+            source: "Auth.restoreSession",
+          });
+        } else {
+          syncAuthState();
+        }
       } else {
         syncAuthState();
       }
@@ -1349,6 +1362,8 @@ function getAuthModuleSnapshot() {
     policy: {
       strictAuth: true,
       requiresTokenAndUsableUser: true,
+      initOnlyAttachesAuth: true,
+      restoreOwnsBootstrapSession: true,
       userSlugHome: true,
       roles: ["admin", "user"],
       noRouter: true,
@@ -1382,8 +1397,6 @@ function attachToCore(api) {
 
 function init() {
   attachToCore(Auth);
-  syncAuthState();
-
   return Auth;
 }
 

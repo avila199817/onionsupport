@@ -7,12 +7,17 @@
    - API base desde config.
    - Auth header sólo si toca.
    - /api/auth/me siempre privado.
+   - /api/auth/refresh público y sin Authorization.
    - Bloquear endpoints externos.
    - Preservar Authorization si ya viene preparado por core/http.js.
    - Parsear respuesta JSON/text/blob/arrayBuffer de forma mínima.
+   - Preservar payload de error backend para core/http.js.
+   - TOKEN_EXPIRED no limpia sesión aquí.
    - Sin hooks.
    - Sin retry real.
    - Sin dedupe real.
+   - Sin refresh automático.
+   - Sin logout automático.
    - Sin UI.
    - Sin Router.
    - Sin Storage.
@@ -29,9 +34,10 @@ import {
   isPublicApiPath,
 } from "./config.js";
 
-export const REQUEST_VERSION = "core.request.v4";
+export const REQUEST_VERSION = "core.request.v5";
 
 const DEFAULT_API_BASE = getApiBase();
+
 const API_BASE = normalizeApiBase(
   config?.apiBase ||
     config?.apiOrigin ||
@@ -55,13 +61,20 @@ function isObject(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -151,8 +164,12 @@ function normalizeMethod(method = "GET") {
     : "GET";
 }
 
+function stripBearer(token = "") {
+  return cleanText(token, "").replace(/^Bearer\s+/i, "");
+}
+
 function tokenOk(token = "") {
-  const value = cleanText(token, "").replace(/^Bearer\s+/i, "");
+  const value = stripBearer(token);
 
   if (!value) return false;
   if (/\s/.test(value)) return false;
@@ -170,7 +187,7 @@ function tokenOk(token = "") {
 }
 
 function cleanToken(token = "") {
-  const value = cleanText(token, "").replace(/^Bearer\s+/i, "");
+  const value = stripBearer(token);
   return tokenOk(value) ? value : "";
 }
 
@@ -374,6 +391,9 @@ function buildHeaders({
       headers.Authorization = `Bearer ${token}`;
     }
   } else {
+    /*
+      Rutas públicas como /api/auth/refresh no deben llevar Authorization stale.
+    */
     removeHeader(headers, "authorization");
   }
 
@@ -389,14 +409,20 @@ export async function parseResponseBody(response, responseType = "auto") {
 
   if (responseType === "raw" || responseType === "response") return response;
   if (responseType === "blob") return response.blob();
+
   if (responseType === "arrayBuffer" || responseType === "arraybuffer") {
     return response.arrayBuffer();
   }
+
   if (responseType === "text") return response.text();
 
   const contentType = response.headers?.get?.("content-type") || "";
 
-  if (responseType === "json" || contentType.includes("application/json")) {
+  if (
+    responseType === "json" ||
+    contentType.includes("application/json") ||
+    contentType.includes("+json")
+  ) {
     const raw = await response.text();
 
     if (!raw) return null;
@@ -419,9 +445,12 @@ function errorMessageFrom(value = null) {
   if (isObject(value)) {
     return cleanText(
       value.message ||
+        value.error_description ||
         value.error ||
         value.detail ||
         value.reason ||
+        value.auth?.message ||
+        value.data?.message ||
         "",
       ""
     );
@@ -437,6 +466,11 @@ function errorCodeFrom(value = null) {
     value.code ||
       value.errorCode ||
       value.error_code ||
+      value.error ||
+      value.auth?.code ||
+      value.auth?.error ||
+      value.data?.code ||
+      value.data?.error ||
       "",
     ""
   );
@@ -458,17 +492,62 @@ export function buildRequestError({
     response?.statusText ||
     `HTTP ${status || "ERROR"}`;
 
+  const finalCode =
+    code ||
+    errorCodeFrom(data) ||
+    errorCodeFrom(raw) ||
+    "REQUEST_ERROR";
+
   const error = new Error(redact(String(message)));
 
   error.name = "RequestError";
   error.status = status;
   error.statusCode = status;
   error.statusText = response?.statusText || "";
-  error.code = code || errorCodeFrom(data) || errorCodeFrom(raw) || "REQUEST_ERROR";
+
+  error.code = finalCode;
+  error.error = finalCode;
+
   error.url = redact(url);
   error.method = normalizeMethod(method);
+
+  /*
+    Importante:
+    No se transforma ni se aplana el payload de error.
+    core/http.js necesita leer:
+      - data.code / data.error
+      - data.auth.refreshRequired
+      - data.auth.canRefresh
+      - data.auth.shouldLogout
+      - data.auth.clearClientSession
+    para decidir refresh silencioso sin logout.
+  */
   error.data = data;
+  error.body = data;
+  error.payload = data;
+  error.responseData = data;
+
   error.raw = raw || null;
+
+  error.auth = isObject(data?.auth) ? data.auth : null;
+
+  error.canRefresh =
+    data?.canRefresh === true ||
+    data?.refreshRequired === true ||
+    data?.auth?.canRefresh === true ||
+    data?.auth?.refreshRequired === true;
+
+  error.refreshRequired =
+    data?.refreshRequired === true ||
+    data?.auth?.refreshRequired === true;
+
+  error.shouldLogout =
+    data?.shouldLogout === true ||
+    data?.auth?.shouldLogout === true;
+
+  error.clearClientSession =
+    data?.clearClientSession === true ||
+    data?.auth?.clearClientSession === true;
 
   return error;
 }
@@ -514,6 +593,7 @@ export function createRequest({
   let sequence = 0;
   let pending = 0;
   let lastError = null;
+  let lastRequest = null;
 
   function requestState() {
     try {
@@ -557,6 +637,14 @@ export function createRequest({
 
     pending += 1;
     sequence += 1;
+
+    lastRequest = {
+      id: sequence,
+      method,
+      url: redact(url),
+      endpointPath,
+      auth,
+    };
 
     try {
       const runFetch = getFetch();
@@ -617,16 +705,53 @@ export function createRequest({
   request.getSnapshot = function getSnapshot() {
     return {
       version: REQUEST_VERSION,
+
+      apiBase: API_BASE,
+
       sequence,
       pending,
+
+      lastRequest,
+
       lastError: lastError
         ? {
             name: lastError.name || "Error",
             message: redact(lastError.message || ""),
             status: lastError.status || lastError.statusCode || 0,
             code: lastError.code || null,
+            canRefresh: lastError.canRefresh === true,
+            refreshRequired: lastError.refreshRequired === true,
+            shouldLogout: lastError.shouldLogout === true,
+            clearClientSession: lastError.clearClientSession === true,
           }
         : null,
+
+      policy: {
+        requestOnly: true,
+
+        noRetry: true,
+        noDedupe: true,
+        noHooks: true,
+
+        noUi: true,
+        noRouter: true,
+        noStorage: true,
+        noToast: true,
+
+        noAutoRefresh: true,
+        noAutoLogout: true,
+        tokenExpiredDoesNotMeanLogout: true,
+
+        preservesBackendErrorPayload: true,
+
+        meAlwaysPrivate: true,
+        refreshPublicWithoutAuthorization: true,
+
+        blocksExternalEndpoints: true,
+        preservesPreparedAuthorization: true,
+
+        snapshotRedacted: true,
+      },
     };
   };
 

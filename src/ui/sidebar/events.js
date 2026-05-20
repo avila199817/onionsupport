@@ -8,7 +8,7 @@
    - Click en toggle -> toggleSidebar().
    - Click en logout -> handleLogout().
    - Respetar el dropdown de cuenta sin gestionarlo.
-   - Normalizar target usando Router.buildPublicPath si existe.
+   - Delegar normalización de navegación en actions.js.
    - Sin navegación propia.
    - Sin active menu propio.
    - Sin indicadores.
@@ -35,16 +35,15 @@ import {
   toggleSidebar,
 } from "./actions.js";
 
-export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v3";
+export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v4";
 
 const HANDLED_FLAG = "__onionSidebarHandled";
 
 const DROPDOWN_TRIGGER_SELECTOR = "[data-sidebar-dropdown-trigger]";
-const DROPDOWN_MENU_SELECTOR = "[data-sidebar-dropdown-menu]";
-const DROPDOWN_ITEM_SELECTOR = "[data-sidebar-dropdown-item='true']";
 
 let boundRoot = null;
-let boundController = null;
+let boundHandler = null;
+let boundContext = null;
 
 /* =========================================================
    BASICS
@@ -61,6 +60,10 @@ function isFunction(value) {
 function text(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
+}
+
+function contextOf(value = {}) {
+  return isObject(value) ? value : {};
 }
 
 function eventTarget(event = null) {
@@ -153,6 +156,12 @@ function isBlocked(element = null) {
   );
 }
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
 function isSafeInternalHref(value = "") {
   const href = text(value, "");
 
@@ -161,7 +170,8 @@ function isSafeInternalHref(value = "") {
       href.startsWith("/") &&
       !href.startsWith("//") &&
       !/^[a-z][a-z0-9+.-]*:/i.test(href) &&
-      !/[\r\n\t\\]/.test(href)
+      !/[\r\n\t\\]/.test(href) &&
+      !hasSensitiveQuery(href)
   );
 }
 
@@ -225,35 +235,15 @@ function getLinkTarget(link = null) {
   );
 }
 
-function normalizeNavigationTarget(target = "", context = {}) {
-  const href = text(target, "");
-
-  if (!isSafeInternalHref(href)) return "";
-
-  try {
-    if (isFunction(context.Router?.buildPublicPath)) {
-      const publicPath = context.Router.buildPublicPath(href, {
-        useSlugHome: true,
-        useSlugPrivate: true,
-      });
-
-      return isSafeInternalHref(publicPath) ? publicPath : href;
-    }
-  } catch {
-    // noop
-  }
-
-  return href;
-}
-
 /* =========================================================
    HANDLER
 ========================================================= */
 
 export function handleSidebarClick(event = null, context = {}) {
   if (wasHandled(event)) return false;
+  if (event?.defaultPrevented === true) return false;
 
-  const ctx = isObject(context) ? context : {};
+  const ctx = contextOf(context);
   const root = resolveRoot(ctx);
   const target = eventTarget(event);
 
@@ -263,7 +253,7 @@ export function handleSidebarClick(event = null, context = {}) {
 
   /*
     El trigger del dropdown lo gestiona dropdown.js.
-    Este módulo no debe abrir/cerrar menús.
+    Este módulo no abre/cierra menús.
   */
   const dropdownTrigger = closestInside(root, target, DROPDOWN_TRIGGER_SELECTOR);
 
@@ -306,9 +296,20 @@ export function handleSidebarClick(event = null, context = {}) {
   if (browserOwnsClick(link, event)) return false;
 
   const rawHref = getLinkTarget(link);
-  const href = normalizeNavigationTarget(rawHref, ctx);
 
-  if (!isSafeInternalHref(href)) return false;
+  /*
+    Si aparece un enlace interno con token/código/secret/session, se bloquea.
+    No se deja al navegador navegar con datos sensibles.
+  */
+  if (hasSensitiveQuery(rawHref)) {
+    prevent(event);
+    markHandled(event);
+    return true;
+  }
+
+  if (!isSafeInternalHref(rawHref)) {
+    return false;
+  }
 
   prevent(event);
   markHandled(event);
@@ -316,15 +317,8 @@ export function handleSidebarClick(event = null, context = {}) {
   void navigateFromSidebar({
     ...ctx,
     root,
-    target: href,
+    target: rawHref,
   });
-
-  /*
-    Si el click viene desde el menú de cuenta, dropdown.js cerrará el menú
-    con su propio listener. Aquí no se duplica esa responsabilidad.
-  */
-  void closestInside(root, target, DROPDOWN_MENU_SELECTOR);
-  void closestInside(root, target, DROPDOWN_ITEM_SELECTOR);
 
   return true;
 }
@@ -334,47 +328,55 @@ export function handleSidebarClick(event = null, context = {}) {
 ========================================================= */
 
 export function bindSidebarEvents(context = {}) {
-  const root = resolveRoot(context);
+  const ctx = contextOf(context);
+  const root = resolveRoot(ctx);
 
   if (!isElement(root)) return false;
 
-  if (boundRoot === root && boundController) {
+  boundContext = {
+    ...ctx,
+    root,
+  };
+
+  if (boundRoot === root && boundHandler) {
     return true;
   }
 
   unbindSidebarEvents();
 
-  const controller = new AbortController();
+  boundRoot = root;
+  boundContext = {
+    ...ctx,
+    root,
+  };
 
-  const handler = (event) => {
-    handleSidebarClick(event, context);
+  boundHandler = (event) => {
+    handleSidebarClick(event, boundContext || {});
   };
 
   try {
-    root.addEventListener("click", handler, {
-      signal: controller.signal,
-    });
-
-    boundRoot = root;
-    boundController = controller;
-
+    root.addEventListener("click", boundHandler);
     return true;
   } catch {
     boundRoot = null;
-    boundController = null;
+    boundHandler = null;
+    boundContext = null;
     return false;
   }
 }
 
 export function unbindSidebarEvents() {
   try {
-    boundController?.abort?.();
+    if (boundRoot && boundHandler) {
+      boundRoot.removeEventListener("click", boundHandler);
+    }
   } catch {
     // noop
   }
 
   boundRoot = null;
-  boundController = null;
+  boundHandler = null;
+  boundContext = null;
 
   return true;
 }
@@ -387,12 +389,13 @@ export function getSidebarEventsSnapshot() {
   return {
     version: SIDEBAR_EVENTS_VERSION,
 
-    bound: Boolean(boundRoot && boundController),
+    bound: Boolean(boundRoot && boundHandler),
     hasRoot: isElement(boundRoot),
     rootId: boundRoot?.id || "",
 
     policy: {
       delegatedOnly: true,
+
       ownNavigation: false,
       ownActiveMenu: false,
       ownIndicators: false,
@@ -402,6 +405,15 @@ export function getSidebarEventsSnapshot() {
       ownKeydown: false,
       ownCustomEvent: false,
       ownTimers: false,
+
+      navigationDelegatedToActions: true,
+      targetNormalizationDelegatedToActions: true,
+      rejectsSensitiveHref: true,
+
+      noRouterDirect: true,
+      noAuthDirect: true,
+      noStorage: true,
+      noToast: true,
     },
   };
 }

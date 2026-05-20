@@ -6,13 +6,15 @@
    - Decidir si el sidebar debe mostrarse.
    - Aplicar visibilidad al root.
    - Aplicar visibilidad básica por rol admin/user.
+   - Usar metadatos estáticos de rutas para ocultar rutas admin.
+   - Clientes se oculta para user porque /clientes es ruta admin.
    - Rutas públicas ocultan sidebar.
    - Sesión válida obligatoria.
    - Entender rutas visibles /@{slug}/{ruta}.
    - No navegar.
    - No hacer logout.
    - No leer Auth directamente.
-   - No leer Router directamente.
+   - No leer Router runtime directamente.
    - No emitir eventos.
    - No crear DOM.
    - No reparar estructuras legacy.
@@ -40,7 +42,12 @@ import {
   getSidebarUserRole,
 } from "./user.js";
 
-export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v4";
+import {
+  getImmutableRoutes,
+  resolveRouteLookupPath,
+} from "../../router/routes.js";
+
+export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v5";
 
 /* =========================================================
    BASICS
@@ -52,6 +59,10 @@ function isBrowser() {
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function text(value = "", fallback = "") {
@@ -131,6 +142,74 @@ function validSidebarRole(role = "") {
 }
 
 /* =========================================================
+   STATIC ROUTE META
+========================================================= */
+
+function getStaticRouteByPath(path = "") {
+  const lookupPath = sidebarHomeLookupPath(path || "/");
+
+  if (!lookupPath) return null;
+
+  try {
+    const finalPath = isFunction(resolveRouteLookupPath)
+      ? resolveRouteLookupPath(lookupPath)
+      : lookupPath;
+
+    const routes = isFunction(getImmutableRoutes)
+      ? getImmutableRoutes()
+      : [];
+
+    return routes.find((route) => {
+      return Boolean(
+        route &&
+          (
+            route.path === finalPath ||
+            route.canonicalPath === finalPath
+          )
+      );
+    }) || null;
+  } catch {
+    return null;
+  }
+}
+
+function staticRouteRoles(route = null) {
+  if (!isObject(route)) return [];
+
+  return unique([
+    ...splitRoles(route.role),
+    ...splitRoles(route.roles),
+    ...splitRoles(route.meta?.role),
+    ...splitRoles(route.meta?.roles),
+  ].filter(validSidebarRole));
+}
+
+function staticRouteRequiredRoles(path = "") {
+  return staticRouteRoles(getStaticRouteByPath(path));
+}
+
+function staticRouteIsAdminOnly(path = "") {
+  const route = getStaticRouteByPath(path);
+
+  if (!route) return false;
+
+  if (
+    route.adminOnly === true ||
+    route.requiresAdmin === true ||
+    route.admin === true ||
+    route.meta?.adminOnly === true ||
+    route.meta?.requiresAdmin === true ||
+    route.meta?.admin === true
+  ) {
+    return true;
+  }
+
+  const roles = staticRouteRoles(route);
+
+  return roles.includes(SIDEBAR_ROLE_ADMIN) && !roles.includes(SIDEBAR_ROLE_USER);
+}
+
+/* =========================================================
    CONTEXT
 ========================================================= */
 
@@ -192,12 +271,19 @@ export function isSidebarShellHidden(context = {}) {
 }
 
 export function hasRenderableSidebarSession(context = {}) {
+  const AppCore = context.AppCore || null;
+  const state = isObject(AppCore?.state) ? AppCore.state : {};
+
   return Boolean(
     context.hasSession === true ||
       context.sessionValid === true ||
       (
         context.authenticated === true &&
         context.hasUser === true
+      ) ||
+      (
+        state.authenticated === true &&
+        Boolean(state.user || state.currentUser || state.authUser || state.sessionUser)
       )
   );
 }
@@ -273,6 +359,8 @@ function elementPath(element = null) {
 function elementRequiredRoles(element = null) {
   if (!isElement(element)) return [];
 
+  const path = elementPath(element);
+
   return unique([
     ...splitRoles(element.getAttribute("data-role")),
     ...splitRoles(element.getAttribute("data-roles")),
@@ -280,6 +368,7 @@ function elementRequiredRoles(element = null) {
     ...splitRoles(element.getAttribute("data-required-roles")),
     ...splitRoles(element.getAttribute("data-requires-role")),
     ...splitRoles(element.getAttribute("data-requires-roles")),
+    ...staticRouteRequiredRoles(path),
   ].filter(validSidebarRole));
 }
 
@@ -295,7 +384,13 @@ function elementIsAdminOnly(element = null) {
 
   const path = elementPath(element);
 
-  if (path && isSidebarAdminFallbackRoute(path)) {
+  if (
+    path &&
+    (
+      isSidebarAdminFallbackRoute(path) ||
+      staticRouteIsAdminOnly(path)
+    )
+  ) {
     return true;
   }
 
@@ -344,14 +439,22 @@ function roleManagedElements(root = getSidebarRoot()) {
     ),
   ];
 
-  const adminFallbackRoutes = [
+  const routeManaged = [
     ...root.querySelectorAll("[data-route], [data-href], [data-to], a[href]"),
   ].filter((element) => {
     const path = elementPath(element);
-    return path && isSidebarAdminFallbackRoute(path);
+
+    return Boolean(
+      path &&
+        (
+          isSidebarAdminFallbackRoute(path) ||
+          staticRouteIsAdminOnly(path) ||
+          staticRouteRequiredRoles(path).length
+        )
+    );
   });
 
-  return unique([...explicit, ...adminFallbackRoutes]);
+  return unique([...explicit, ...routeManaged]);
 }
 
 function setElementRoleVisible(element = null, visible = true) {
@@ -404,11 +507,20 @@ function setElementRoleVisible(element = null, visible = true) {
 ========================================================= */
 
 export function getSidebarVisibilityRole(context = {}) {
+  const AppCore = context.AppCore || null;
+  const state = isObject(AppCore?.state) ? AppCore.state : {};
+
   const explicit = first(
     context.role,
     context.roles,
     context.user?.role,
     context.user?.roles,
+    state.role,
+    state.roles,
+    state.user?.role,
+    state.user?.roles,
+    state.currentUser?.role,
+    state.currentUser?.roles,
     getSidebarUserRole(context)
   );
 
@@ -456,11 +568,15 @@ export function syncSidebarVisibility(context = {}) {
 function elementSnapshot(element = null) {
   if (!isElement(element)) return null;
 
+  const path = elementPath(element);
+
   return {
     tag: element.tagName?.toLowerCase?.() || "",
-    route: redact(elementPath(element)),
+    route: redact(path),
     adminOnly: elementIsAdminOnly(element),
     requiredRoles: elementRequiredRoles(element),
+    staticRouteRoles: staticRouteRequiredRoles(path),
+    staticRouteAdminOnly: staticRouteIsAdminOnly(path),
     roleVisible: element.dataset?.roleVisible || "",
     hidden: Boolean(element.hidden),
     ariaHidden: element.getAttribute("aria-hidden") || "",
@@ -495,11 +611,15 @@ export function getSidebarVisibilitySnapshot(context = {}) {
       noNavigation: true,
       noLogout: true,
       noAuthDirect: true,
-      noRouterDirect: true,
+      noRouterRuntimeDirect: true,
       noEvents: true,
       noDomCreate: true,
       noLegacyRepair: true,
       noDropdownBehavior: true,
+
+      staticRoutesAsRoleSource: true,
+      hidesAdminRoutesForUser: true,
+      clientesAdminOnlyFromRoutes: true,
 
       noHomeRoute: true,
       no2fa: true,

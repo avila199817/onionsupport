@@ -5,10 +5,10 @@
    Responsabilidad:
    - Motor local del buscador del topbar.
    - Render opcional de resultados locales.
-   - Navegación segura por Router/AppCore/window.
-   - Resolver Home como /@{user.slug} cuando exista.
+   - Navegación segura delegada en Router.
+   - Resolver Home como /@{user.slug} sólo cuando exista slug real.
    - Respetar rutas adminOnly.
-   - Sin imports.
+   - Constantes/rutas/helpers desde core/config.js y topbar.helpers.js.
    - Sin API /api/search.
    - Sin HTTP.
    - Sin Toast.
@@ -16,33 +16,52 @@
    - Sin focus mode global.
    - Sin runtime complejo.
    - Sin CustomEvent.
+   - Sin eventos AppCore.
+   - Sin navegación browser paralela.
+   - Sin AppCore.navigate.
    - Sin magia negra.
    - El topbar real vive en src/ui/topbar/index.js.
 ========================================================= */
 
-export const TOPBAR_SEARCH_VERSION = "topbar.search.v2";
+import {
+  ROUTES,
+} from "../../core/config.js";
+
+import {
+  TOPBAR_SEARCH_CONFIG,
+  TOPBAR_RESULT_TYPES,
+  getTypeIcon,
+  getTypeLabel,
+  groupResults,
+  normalizeQuery,
+  normalizeResultType,
+  redactSensitiveText,
+  resolveHomePath,
+  safeNormalizePath,
+  scoreResult,
+} from "./topbar.helpers.js";
+
+export const TOPBAR_SEARCH_VERSION = "topbar.search.v3";
 
 export const SEARCH_ACTIONS = Object.freeze({
   NAVIGATE: "navigate",
-  OPEN_USUARIO: "open_usuario",
-  OPEN_CLIENTE: "open_cliente",
-  OPEN_INCIDENCIA: "open_incidencia",
-  OPEN_FACTURA: "open_factura",
 });
 
-export const ENTITY_TYPES = Object.freeze({
-  NAV: "nav",
-  USUARIO: "usuario",
-  CLIENTE: "cliente",
-  INCIDENCIA: "incidencia",
-  FACTURA: "factura",
-  GENERAL: "general",
-});
+export const ENTITY_TYPES = TOPBAR_RESULT_TYPES;
 
 const SOURCE = "topbar.search";
 const RESULTS_ID = "topbar-search-results";
-const MAX_QUERY_LENGTH = 120;
-const MAX_RESULTS = 20;
+
+const MAX_RESULTS = TOPBAR_SEARCH_CONFIG.maxResultsTotal || 20;
+
+const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
+const INCIDENCIAS_ROUTE = ROUTES.incidencias || "/incidencias";
+const FACTURAS_ROUTE = ROUTES.facturas || "/facturas";
+const CLIENTES_ROUTE = ROUTES.clientes || "/clientes";
+const CUENTA_ROUTE = ROUTES.cuenta || "/cuenta";
+const AJUSTES_ROUTE = ROUTES.ajustes || "/ajustes";
+const USUARIOS_ROUTE = ROUTES.usuarios || "/usuarios";
+const SERVIDOR_ROUTE = ROUTES.servidor || "/servidor";
 
 let searchFocusActive = false;
 
@@ -74,150 +93,76 @@ function asArray(value) {
   return [value];
 }
 
-function first(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (isObject(value) && !Object.keys(value).length) continue;
-
-    return value;
-  }
-
-  return null;
-}
-
-function emit(AppCore = null, eventName = "", payload = {}) {
-  try {
-    AppCore?.events?.emit?.(eventName, {
-      source: SOURCE,
-      version: TOPBAR_SEARCH_VERSION,
-      ...payload,
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /* =========================================================
-   TEXT / TYPE
+   PATH SAFETY
 ========================================================= */
 
-function normalizeText(value = "") {
-  return String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
 }
 
-function normalizeQuery(value = "") {
-  return String(value ?? "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, MAX_QUERY_LENGTH);
+function isUnsafeHref(value = "") {
+  const raw = text(value, "").toLowerCase();
+
+  return Boolean(
+    !raw ||
+      raw.startsWith("//") ||
+      raw.startsWith("javascript:") ||
+      raw.startsWith("data:") ||
+      raw.startsWith("vbscript:") ||
+      raw.startsWith("file:") ||
+      raw.startsWith("blob:") ||
+      raw.startsWith("about:") ||
+      raw.startsWith("mailto:") ||
+      raw.startsWith("tel:") ||
+      /[\r\n\t\\]/.test(raw) ||
+      hasSensitiveQuery(raw)
+  );
 }
 
-function normalizeType(value = ENTITY_TYPES.GENERAL) {
-  const type = normalizeText(value).replace(/[^a-z0-9_-]/g, "");
+function safePath(AppCore = null, path = HOME_ROUTE) {
+  const raw = text(path, "");
 
-  if (["incidencia", "incidencias", "ticket", "tickets"].includes(type)) {
-    return ENTITY_TYPES.INCIDENCIA;
-  }
+  if (isUnsafeHref(raw)) return "";
 
-  if (["factura", "facturas", "invoice", "invoices"].includes(type)) {
-    return ENTITY_TYPES.FACTURA;
-  }
+  const normalized = safeNormalizePath(AppCore, raw);
 
-  if (["cliente", "clientes", "client", "clients"].includes(type)) {
-    return ENTITY_TYPES.CLIENTE;
-  }
-
-  if (["usuario", "usuarios", "user", "users"].includes(type)) {
-    return ENTITY_TYPES.USUARIO;
-  }
-
-  if (["nav", "route", "ruta", "rutas"].includes(type)) {
-    return ENTITY_TYPES.NAV;
-  }
-
-  return ENTITY_TYPES.GENERAL;
-}
-
-function typeLabel(type = ENTITY_TYPES.GENERAL) {
-  const labels = {
-    [ENTITY_TYPES.NAV]: "Navegación",
-    [ENTITY_TYPES.USUARIO]: "Usuarios",
-    [ENTITY_TYPES.CLIENTE]: "Clientes",
-    [ENTITY_TYPES.INCIDENCIA]: "Incidencias",
-    [ENTITY_TYPES.FACTURA]: "Facturas",
-    [ENTITY_TYPES.GENERAL]: "Resultados",
-  };
-
-  return labels[normalizeType(type)] || labels[ENTITY_TYPES.GENERAL];
-}
-
-function typeIcon(type = ENTITY_TYPES.GENERAL) {
-  const icons = {
-    [ENTITY_TYPES.NAV]: "⌘",
-    [ENTITY_TYPES.USUARIO]: "@",
-    [ENTITY_TYPES.CLIENTE]: "C",
-    [ENTITY_TYPES.INCIDENCIA]: "#",
-    [ENTITY_TYPES.FACTURA]: "€",
-    [ENTITY_TYPES.GENERAL]: "•",
-  };
-
-  return icons[normalizeType(type)] || icons[ENTITY_TYPES.GENERAL];
-}
-
-/* =========================================================
-   PATHS
-========================================================= */
-
-function safePath(path = "/") {
-  let value = text(path, "");
-
-  if (!value) return "";
-  if (/^(javascript:|data:|vbscript:|file:|mailto:|tel:)/i.test(value)) return "";
-  if (value.startsWith("//")) return "";
-
-  if (value.startsWith("#/")) value = value.slice(1);
-  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
-  if (value.startsWith("#")) return "";
-
-  try {
-    if (/^https?:\/\//i.test(value) && isBrowser()) {
-      const url = new URL(value, window.location.origin);
-
-      if (url.origin !== window.location.origin) return "";
-
-      value = `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
-    }
-  } catch {
+  if (
+    !normalized ||
+    !normalized.startsWith("/") ||
+    normalized.startsWith("//") ||
+    /^[a-z][a-z0-9+.-]*:/i.test(normalized) ||
+    /[\r\n\t\\]/.test(normalized) ||
+    hasSensitiveQuery(normalized)
+  ) {
     return "";
   }
 
-  if (!value.startsWith("/")) value = `/${value}`;
-
-  value = value.replace(/\/{2,}/g, "/");
-
-  return value || "/";
+  return normalized;
 }
 
-function normalizeSlug(value = "") {
-  const slug = String(value ?? "")
-    .trim()
-    .replace(/^@+/, "")
-    .replace(/^\/@+/, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "");
+/* =========================================================
+   ROLE / VISIBILITY
+========================================================= */
 
-  return slug || "";
+function normalizeRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = String(value || "").toLowerCase();
+
+  if (role === "admin") return "admin";
+  if (role === "user") return "user";
+
+  return "";
 }
 
 function getStateUser(AppCore = null) {
@@ -233,21 +178,6 @@ function getStateUser(AppCore = null) {
   );
 }
 
-function resolveHomePath(AppCore = null) {
-  const user = getStateUser(AppCore);
-  const slug = normalizeSlug(user?.slug || user?.username || "");
-
-  return slug ? `/@${slug}` : "/";
-}
-
-/* =========================================================
-   ROLE / PERMISSIONS
-========================================================= */
-
-function normalizeRole(value = "") {
-  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
-}
-
 function userIsAdmin(AppCore = null) {
   const state = isObject(AppCore?.state) ? AppCore.state : {};
   const user = getStateUser(AppCore) || {};
@@ -257,8 +187,8 @@ function userIsAdmin(AppCore = null) {
     state.rol,
     user.role,
     user.rol,
-    ...asArray(state.roles),
-    ...asArray(user.roles),
+    ...(Array.isArray(state.roles) ? state.roles : []),
+    ...(Array.isArray(user.roles) ? user.roles : []),
   ];
 
   return roles.some((role) => normalizeRole(role) === "admin");
@@ -299,9 +229,10 @@ function domFrom(getDom = null) {
 
   const searchResults =
     dom.searchResults ||
-    document.getElementById(RESULTS_ID) ||
-    document.querySelector("[data-topbar-search-results]") ||
-    document.querySelector(".topbar-search-results") ||
+    search?.querySelector?.(`#${RESULTS_ID}`) ||
+    search?.querySelector?.("[data-topbar-search-results]") ||
+    topbar?.querySelector?.(`#${RESULTS_ID}`) ||
+    topbar?.querySelector?.("[data-topbar-search-results]") ||
     null;
 
   return {
@@ -319,7 +250,7 @@ function ensureResultsContainer(getDom = null) {
   const dom = domFrom(getDom);
 
   if (dom.searchResults) return dom.searchResults;
-  if (!dom.search && !dom.searchInput && !dom.topbar) return null;
+  if (!dom.search && !dom.topbar) return null;
 
   const results = document.createElement("div");
 
@@ -332,7 +263,7 @@ function ensureResultsContainer(getDom = null) {
   results.setAttribute("aria-hidden", "true");
 
   try {
-    document.body.appendChild(results);
+    (dom.search || dom.topbar).appendChild(results);
   } catch {
     return null;
   }
@@ -353,17 +284,28 @@ function ensureResultsContainer(getDom = null) {
 
 function setSearchVisualState(getDom = null, active = false) {
   const { topbar, search } = domFrom(getDom);
+  const value = Boolean(active);
 
   try {
-    topbar?.classList?.toggle?.("is-search-focused", Boolean(active));
-    topbar?.toggleAttribute?.("data-search-focus", Boolean(active));
+    topbar?.classList?.toggle?.("is-search-focused", value);
+
+    if (value) {
+      topbar?.setAttribute?.("data-search-focus", "true");
+    } else {
+      topbar?.removeAttribute?.("data-search-focus");
+    }
   } catch {
     // noop
   }
 
   try {
-    search?.classList?.toggle?.("is-search-open", Boolean(active));
-    search?.toggleAttribute?.("data-search-open", Boolean(active));
+    search?.classList?.toggle?.("is-search-open", value);
+
+    if (value) {
+      search?.setAttribute?.("data-search-open", "true");
+    } else {
+      search?.removeAttribute?.("data-search-open");
+    }
   } catch {
     // noop
   }
@@ -392,29 +334,16 @@ export function clearSearchDebounce(runtime = null) {
   return true;
 }
 
-export function abortSearch(runtime = null) {
-  if (!runtime?.searchController) return false;
-
-  try {
-    runtime.searchController.abort();
-  } catch {
-    // noop
-  }
-
-  runtime.searchController = null;
-  return true;
-}
-
 export function clearSearchState(runtime = null, getDom = null) {
   if (!runtime) return false;
 
   clearSearchDebounce(runtime);
-  abortSearch(runtime);
 
   runtime.activeIndex = -1;
   runtime.currentItems = [];
   runtime.currentQuery = "";
   runtime.searchSeq = Number(runtime.searchSeq || 0) + 1;
+  runtime.searchController = null;
 
   hideResultsContainer(runtime, getDom);
 
@@ -422,7 +351,7 @@ export function clearSearchState(runtime = null, getDom = null) {
 }
 
 export function getCacheKey(query = "") {
-  return normalizeText(query);
+  return normalizeQuery(query).toLowerCase();
 }
 
 export function getCached(runtime = null, query = "") {
@@ -455,75 +384,76 @@ export function setCached(runtime = null, query = "", value = []) {
    LOCAL INDEX
 ========================================================= */
 
+function navItem({
+  id = "",
+  title = "",
+  subtitle = "",
+  url = HOME_ROUTE,
+  adminOnly = false,
+} = {}) {
+  return {
+    id,
+    type: ENTITY_TYPES.NAV,
+    title,
+    subtitle,
+    url,
+    action: SEARCH_ACTIONS.NAVIGATE,
+    adminOnly,
+  };
+}
+
 export function getLocalIndex(AppCore = null) {
   const items = [
-    {
+    navItem({
       id: "nav:home",
-      type: ENTITY_TYPES.NAV,
       title: "Home",
       subtitle: "Panel principal",
       url: resolveHomePath(AppCore),
-      action: SEARCH_ACTIONS.NAVIGATE,
-    },
-    {
-      id: "nav:/incidencias",
-      type: ENTITY_TYPES.NAV,
+    }),
+    navItem({
+      id: "nav:incidencias",
       title: "Incidencias",
       subtitle: "Tickets e incidencias",
-      url: "/incidencias",
-      action: SEARCH_ACTIONS.NAVIGATE,
-    },
-    {
-      id: "nav:/facturas",
-      type: ENTITY_TYPES.NAV,
+      url: INCIDENCIAS_ROUTE,
+    }),
+    navItem({
+      id: "nav:facturas",
       title: "Facturas",
       subtitle: "Facturación",
-      url: "/facturas",
-      action: SEARCH_ACTIONS.NAVIGATE,
-    },
-    {
-      id: "nav:/cuenta",
-      type: ENTITY_TYPES.NAV,
-      title: "Cuenta",
-      subtitle: "Perfil de usuario",
-      url: "/cuenta",
-      action: SEARCH_ACTIONS.NAVIGATE,
-    },
-    {
-      id: "nav:/ajustes",
-      type: ENTITY_TYPES.NAV,
-      title: "Ajustes",
-      subtitle: "Configuración",
-      url: "/ajustes",
-      action: SEARCH_ACTIONS.NAVIGATE,
-    },
-    {
-      id: "nav:/usuarios",
-      type: ENTITY_TYPES.NAV,
-      title: "Usuarios",
-      subtitle: "Gestión de usuarios",
-      url: "/usuarios",
-      action: SEARCH_ACTIONS.NAVIGATE,
-      adminOnly: true,
-    },
-    {
-      id: "nav:/clientes",
-      type: ENTITY_TYPES.NAV,
+      url: FACTURAS_ROUTE,
+    }),
+    navItem({
+      id: "nav:clientes",
       title: "Clientes",
       subtitle: "Gestión de clientes",
-      url: "/clientes",
-      action: SEARCH_ACTIONS.NAVIGATE,
+      url: CLIENTES_ROUTE,
+    }),
+    navItem({
+      id: "nav:cuenta",
+      title: "Cuenta",
+      subtitle: "Perfil de usuario",
+      url: CUENTA_ROUTE,
+    }),
+    navItem({
+      id: "nav:ajustes",
+      title: "Ajustes",
+      subtitle: "Configuración",
+      url: AJUSTES_ROUTE,
+    }),
+    navItem({
+      id: "nav:usuarios",
+      title: "Usuarios",
+      subtitle: "Gestión de usuarios",
+      url: USUARIOS_ROUTE,
       adminOnly: true,
-    },
-    {
-      id: "nav:/servidor",
-      type: ENTITY_TYPES.NAV,
+    }),
+    navItem({
+      id: "nav:servidor",
       title: "Servidor",
       subtitle: "Estado del servidor",
-      url: "/servidor",
-      action: SEARCH_ACTIONS.NAVIGATE,
+      url: SERVIDOR_ROUTE,
       adminOnly: true,
-    },
+    }),
   ];
 
   const isAdmin = userIsAdmin(AppCore);
@@ -532,21 +462,9 @@ export function getLocalIndex(AppCore = null) {
     .filter((item) => !item.adminOnly || isAdmin)
     .map((item) => ({
       ...item,
-      url: safePath(item.url),
+      url: safePath(AppCore, item.url),
     }))
     .filter((item) => item.url);
-}
-
-function scoreText(value = "", query = "") {
-  const haystack = normalizeText(value);
-  const needle = normalizeText(query);
-
-  if (!haystack || !needle) return 0;
-  if (haystack === needle) return 100;
-  if (haystack.startsWith(needle)) return 72;
-  if (haystack.includes(needle)) return 42;
-
-  return 0;
 }
 
 export function searchLocal(query = "", AppCore = null) {
@@ -556,134 +474,37 @@ export function searchLocal(query = "", AppCore = null) {
 
   return getLocalIndex(AppCore)
     .map((item) => {
-      const score =
-        scoreText(item.title, q) +
-        scoreText(item.subtitle, q) +
-        scoreText(item.url, q);
-
       return {
         ...item,
         entityId: "",
-        raw: item,
+        raw: null,
         source: "local",
-        score,
+        score: scoreResult(item, q),
       };
     })
     .filter((item) => item.score > 0)
-    .sort((left, right) => right.score - left.score);
+    .sort((left, right) => {
+      return Number(right.score || 0) - Number(left.score || 0);
+    });
 }
 
-/* =========================================================
-   API COMPAT SIN HTTP
-========================================================= */
-
-export function normalizeApiItem(AppCore = null, raw = null, index = 0) {
-  if (!isObject(raw)) return null;
-
-  const type = normalizeType(raw.type || raw.entity || raw.collection || raw.module);
-
-  const title = text(
-    first(
-      raw.title,
-      raw.name,
-      raw.nombre,
-      raw.displayName,
-      raw.subject,
-      raw.asunto,
-      raw.numeroFactura,
-      raw.numeroFacturaLegal,
-      raw.id
-    ),
-    "Resultado"
-  );
-
-  const subtitle = text(
-    first(
-      raw.subtitle,
-      raw.description,
-      raw.descripcion,
-      raw.email,
-      raw.status,
-      raw.estado,
-      ""
-    ),
-    ""
-  );
-
-  const entityId = text(
-    first(
-      raw.entityId,
-      raw.userId,
-      raw.clienteId,
-      raw.ticketId,
-      raw.incidenciaId,
-      raw.facturaId,
-      raw.invoiceId,
-      raw.id,
-      raw._id
-    ),
-    ""
-  );
-
-  const url = safePath(raw.url || raw.path || raw.href || raw.route || raw.to || "");
-
-  return {
-    id: text(
-      raw.searchId || raw.resultId || raw.id || raw._id || `${type}:${index}`,
-      `${type}:${index}`
-    ),
-    entityId,
-    type,
-    title,
-    subtitle,
-    url: url || null,
-    action: SEARCH_ACTIONS.NAVIGATE,
-    raw,
-    source: "api",
-    score: Number(raw.score || 0) || 0,
-  };
-}
-
-export function normalizeApiPayload(AppCore = null, data = null) {
-  if (!data) return [];
-
-  const direct = Array.isArray(data)
-    ? data
-    : Array.isArray(data.results)
-      ? data.results
-      : Array.isArray(data.items)
-        ? data.items
-        : Array.isArray(data.data)
-          ? data.data
-          : [];
-
-  return direct
-    .map((item, index) => normalizeApiItem(AppCore, item, index))
-    .filter(Boolean);
-}
-
-export async function searchAPI({ runtime = null, query = "" } = {}) {
-  const cached = getCached(runtime, query);
-
-  if (cached) return cached;
-
-  setCached(runtime, query, []);
-
-  return [];
-}
-
-export function mergeResults(apiResults = [], localResults = [], query = "") {
-  const merged = [...asArray(apiResults), ...asArray(localResults)];
+export function mergeResults(localResults = [], query = "") {
   const seen = new Set();
   const output = [];
 
-  for (const item of merged) {
+  for (const item of asArray(localResults)) {
     if (!item) continue;
 
+    const url = safePath(null, item.url || "");
+
+    if (!url) continue;
+
+    const type = normalizeResultType(item.type);
+
     const key = [
-      item.type || "",
+      type,
       item.entityId || "",
-      item.url || "",
+      url,
       item.title || "",
     ].join("|");
 
@@ -693,8 +514,9 @@ export function mergeResults(apiResults = [], localResults = [], query = "") {
 
     output.push({
       ...item,
-      type: normalizeType(item.type),
-      score: Number(item.score || 0) || scoreText(item.title, query),
+      type,
+      url,
+      score: Number(item.score || 0) || scoreResult(item, query),
     });
   }
 
@@ -704,7 +526,7 @@ export function mergeResults(apiResults = [], localResults = [], query = "") {
 }
 
 /* =========================================================
-   VISUAL COMPAT
+   VISUAL STATE
 ========================================================= */
 
 export function setSearchExpanded(input = null, expanded = false) {
@@ -833,6 +655,10 @@ export function setErrorState(runtime = null, getDom = null) {
   );
 }
 
+/* =========================================================
+   ACTIVE ITEM
+========================================================= */
+
 export function updateActiveItem(runtime = null, items = []) {
   const list = asArray(items);
 
@@ -901,44 +727,40 @@ export function moveActive(runtime = null, getDom = null, direction = 1) {
    NAVIGATION
 ========================================================= */
 
-async function navigateTo(AppCore = null, Router = null, path = "/") {
-  const target = safePath(path);
+async function navigateTo(AppCore = null, Router = null, path = HOME_ROUTE) {
+  const target = safePath(AppCore, path);
 
   if (!target) return false;
 
   try {
     if (isFunction(Router?.navigate)) {
-      await Router.navigate(target, {
+      const result = await Router.navigate(target, {
         source: SOURCE,
       });
-      return true;
+
+      return result !== false && result?.ok !== false;
     }
 
     if (isFunction(Router?.replace)) {
-      await Router.replace(target, {
+      const result = await Router.replace(target, {
         source: SOURCE,
       });
-      return true;
+
+      return result !== false && result?.ok !== false;
     }
 
-    if (isFunction(AppCore?.Router?.navigate)) {
-      await AppCore.Router.navigate(target, {
+    if (isFunction(AppCore?.router?.navigate)) {
+      const result = await AppCore.router.navigate(target, {
         source: SOURCE,
       });
-      return true;
+
+      return result !== false && result?.ok !== false;
     }
   } catch {
     return false;
   }
 
-  if (!isBrowser()) return false;
-
-  try {
-    window.location.assign(target);
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 export async function goToResult({
@@ -946,28 +768,15 @@ export async function goToResult({
   Router = null,
   runtime = null,
   getDom = null,
-  closeSidebarMobile = null,
   item = null,
 } = {}) {
   if (!item) return false;
 
   hideResultsContainer(runtime, getDom);
 
-  try {
-    closeSidebarMobile?.();
-  } catch {
-    // noop
-  }
-
-  const target = safePath(item.url || "");
+  const target = safePath(AppCore, item.url || "");
 
   if (!target) return false;
-
-  emit(AppCore, "topbar:search:navigate", {
-    target,
-    type: item.type || ENTITY_TYPES.GENERAL,
-    entityId: item.entityId || "",
-  });
 
   return navigateTo(AppCore, Router, target);
 }
@@ -977,7 +786,6 @@ export function activateCurrent({
   Router = null,
   runtime = null,
   getDom = null,
-  closeSidebarMobile = null,
 } = {}) {
   if (!runtime?.currentItems?.length) return false;
 
@@ -986,12 +794,11 @@ export function activateCurrent({
 
   if (!item) return false;
 
-  goToResult({
+  void goToResult({
     AppCore,
     Router,
     runtime,
     getDom,
-    closeSidebarMobile,
     item,
   });
 
@@ -1007,7 +814,6 @@ function createResultNode({
   Router = null,
   runtime = null,
   getDom = null,
-  closeSidebarMobile = null,
   item = null,
   index = 0,
 } = {}) {
@@ -1017,15 +823,15 @@ function createResultNode({
   button.className = "search-result";
   button.id = `topbar-search-result-${index}`;
   button.dataset.index = String(index);
-  button.dataset.type = item.type || ENTITY_TYPES.GENERAL;
-  button.dataset.url = item.url || "";
+  button.dataset.type = normalizeResultType(item.type);
+  button.dataset.url = safePath(AppCore, item.url || "");
   button.setAttribute("role", "option");
   button.setAttribute("aria-selected", "false");
 
   const iconNode = document.createElement("span");
   iconNode.className = "search-icon";
   iconNode.setAttribute("aria-hidden", "true");
-  iconNode.textContent = typeIcon(item.type);
+  iconNode.textContent = getTypeIcon(item.type);
 
   const textNode = document.createElement("span");
   textNode.className = "search-text";
@@ -1041,23 +847,22 @@ function createResultNode({
 
   const subtitle = document.createElement("span");
   subtitle.className = "search-subtitle";
-  subtitle.textContent = item.subtitle || typeLabel(item.type);
+  subtitle.textContent = item.subtitle || getTypeLabel(item.type);
 
   textNode.append(title, subtitle);
 
   const pill = document.createElement("span");
   pill.className = "search-action-pill";
-  pill.textContent = typeLabel(item.type);
+  pill.textContent = getTypeLabel(item.type);
 
   button.append(iconNode, textNode, pill);
 
   button.addEventListener("click", () => {
-    goToResult({
+    void goToResult({
       AppCore,
       Router,
       runtime,
       getDom,
-      closeSidebarMobile,
       item,
     });
   });
@@ -1070,7 +875,6 @@ export function renderResults({
   Router = null,
   runtime = null,
   getDom = null,
-  closeSidebarMobile = null,
   results = [],
   query = "",
 } = {}) {
@@ -1082,58 +886,55 @@ export function renderResults({
 
   searchResults.replaceChildren();
 
-  const list = asArray(results);
-
-  if (runtime) {
-    runtime.currentItems = list;
-    runtime.activeIndex = -1;
-  }
+  const list = asArray(results).slice(0, MAX_RESULTS);
 
   if (!list.length) {
+    if (runtime) {
+      runtime.currentItems = [];
+      runtime.activeIndex = -1;
+    }
+
     return setEmptyState(AppCore, runtime, getDom, query);
   }
 
-  const groups = new Map();
+  const groups = groupResults(list);
+  const ordered = groups.flatMap(([, items]) => items).slice(0, MAX_RESULTS);
 
-  list.forEach((item) => {
-    const type = normalizeType(item.type);
-
-    if (!groups.has(type)) groups.set(type, []);
-    groups.get(type).push({
-      ...item,
-      type,
-    });
-  });
+  if (runtime) {
+    runtime.currentItems = ordered;
+    runtime.activeIndex = -1;
+  }
 
   let index = 0;
 
-  groups.forEach((items, type) => {
+  for (const [type, items] of groups) {
     const group = document.createElement("div");
     group.className = "search-group-block";
 
     const heading = document.createElement("div");
     heading.className = "search-group";
-    heading.textContent = typeLabel(type);
+    heading.textContent = getTypeLabel(type);
 
     group.appendChild(heading);
 
-    items.forEach((item) => {
+    for (const item of items) {
+      if (index >= ordered.length) break;
+
       const node = createResultNode({
         AppCore,
         Router,
         runtime,
         getDom,
-        closeSidebarMobile,
         item,
         index,
       });
 
       group.appendChild(node);
       index += 1;
-    });
+    }
 
     searchResults.appendChild(group);
-  });
+  }
 
   return showResultsContainer(runtime, getDom);
 }
@@ -1148,7 +949,6 @@ export function handleSearchKeydown({
   Router = null,
   runtime = null,
   getDom = null,
-  closeSidebarMobile = null,
 } = {}) {
   if (!event || !runtime) return false;
 
@@ -1178,7 +978,6 @@ export function handleSearchKeydown({
       Router,
       runtime,
       getDom,
-      closeSidebarMobile,
     });
 
     return true;
@@ -1196,7 +995,6 @@ export async function runSearch({
   Router = null,
   runtime = null,
   getDom = null,
-  closeSidebarMobile = null,
   query = "",
 } = {}) {
   if (!runtime) return false;
@@ -1205,7 +1003,6 @@ export async function runSearch({
 
   runtime.AppCore = AppCore;
   runtime.Router = Router;
-  runtime.closeSidebarMobile = closeSidebarMobile;
   runtime.currentQuery = q;
   runtime.searchSeq = Number(runtime.searchSeq || 0) + 1;
 
@@ -1214,30 +1011,100 @@ export async function runSearch({
     return true;
   }
 
-  const localResults = searchLocal(q, AppCore);
-  const cachedApiResults = await searchAPI({ runtime, query: q });
-  const results = mergeResults(cachedApiResults, localResults, q);
+  const cached = getCached(runtime, q);
+
+  if (cached) {
+    renderResults({
+      AppCore,
+      Router,
+      runtime,
+      getDom,
+      results: cached,
+      query: q,
+    });
+
+    return true;
+  }
+
+  const localResults = mergeResults(searchLocal(q, AppCore), q);
+
+  setCached(runtime, q, localResults);
 
   renderResults({
     AppCore,
     Router,
     runtime,
     getDom,
-    closeSidebarMobile,
-    results,
+    results: localResults,
     query: q,
-  });
-
-  emit(AppCore, "topbar:search:local", {
-    query: q,
-    count: results.length,
   });
 
   return true;
 }
 
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
 export function isSearchFocusActive() {
   return searchFocusActive;
+}
+
+export function getTopbarSearchSnapshot(runtime = null) {
+  return {
+    version: TOPBAR_SEARCH_VERSION,
+
+    focusActive: searchFocusActive,
+
+    activeIndex: Number(runtime?.activeIndex || -1),
+    currentItems: Array.isArray(runtime?.currentItems)
+      ? runtime.currentItems.length
+      : 0,
+
+    currentQueryLength: String(runtime?.currentQuery || "").length,
+
+    cacheSize: runtime?.cache instanceof Map
+      ? runtime.cache.size
+      : 0,
+
+    hasDebounce: Boolean(runtime?.searchDebounceTimer),
+
+    routes: {
+      home: redactSensitiveText(resolveHomePath(runtime?.AppCore || null)),
+      incidencias: INCIDENCIAS_ROUTE,
+      facturas: FACTURAS_ROUTE,
+      clientes: CLIENTES_ROUTE,
+      cuenta: CUENTA_ROUTE,
+      ajustes: AJUSTES_ROUTE,
+      usuarios: USUARIOS_ROUTE,
+      servidor: SERVIDOR_ROUTE,
+    },
+
+    policy: {
+      localSearchOnly: true,
+      noApiSearch: true,
+      noHttp: true,
+      noToast: true,
+      noCustomEvent: true,
+      noAppCoreEvents: true,
+
+      noBrowserNavigation: true,
+      noAppCoreNavigate: true,
+      navigationDelegatedToRouter: true,
+
+      homeUsesRealSlugOnly: true,
+      noUsernameHomeFallback: true,
+
+      clientesNotAdminOnly: true,
+      adminOnlyRoutes: [USUARIOS_ROUTE, SERVIDOR_ROUTE],
+
+      resultsContainerInsideTopbar: true,
+      noGlobalOverlay: true,
+
+      rejectsSensitiveTargets: true,
+      snapshotRedacted: true,
+    },
+  };
 }
 
 /* =========================================================
@@ -1250,7 +1117,6 @@ export default {
   ENTITY_TYPES,
 
   clearSearchDebounce,
-  abortSearch,
   clearSearchState,
 
   getCacheKey,
@@ -1259,10 +1125,6 @@ export default {
 
   getLocalIndex,
   searchLocal,
-
-  normalizeApiItem,
-  normalizeApiPayload,
-  searchAPI,
   mergeResults,
 
   setSearchExpanded,
@@ -1282,4 +1144,5 @@ export default {
   runSearch,
 
   isSearchFocusActive,
+  getTopbarSearchSnapshot,
 };

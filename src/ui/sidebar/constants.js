@@ -4,6 +4,7 @@
 
    Responsabilidad:
    - Constantes compartidas del sidebar.
+   - Rutas base desde core/config.js.
    - Rutas públicas reales.
    - Rutas privadas visibles con /@{user.slug}/{ruta}.
    - Selectores comunes.
@@ -12,7 +13,6 @@
    - Roles únicos: admin / user.
    - Home interna: /
    - Home visible de usuario: /@{user.slug}
-   - Sin imports.
    - Sin DOM.
    - Sin Auth.
    - Sin Router.
@@ -24,7 +24,13 @@
    - Sin compatibilidad fantasma.
 ========================================================= */
 
-export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v3";
+import {
+  ROUTES,
+  PUBLIC_ROUTES,
+  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
+} from "../../core/config.js";
+
+export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v4";
 
 /* =========================================================
    HELPERS INTERNOS
@@ -104,29 +110,33 @@ export function normalizeSidebarRole(value = "", fallback = SIDEBAR_ROLE_USER) {
    ROUTES
 ========================================================= */
 
-export const HOME_ROUTE = "/";
-export const USER_HOME_PREFIX = "/@";
+export const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
+export const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
-export const INCIDENCIAS_ROUTE = "/incidencias";
-export const FACTURAS_ROUTE = "/facturas";
-export const CLIENTES_ROUTE = "/clientes";
-export const CUENTA_ROUTE = "/cuenta";
-export const AJUSTES_ROUTE = "/ajustes";
+export const INCIDENCIAS_ROUTE = ROUTES.incidencias || "/incidencias";
+export const FACTURAS_ROUTE = ROUTES.facturas || "/facturas";
+export const CLIENTES_ROUTE = ROUTES.clientes || "/clientes";
+export const CUENTA_ROUTE = ROUTES.cuenta || "/cuenta";
+export const AJUSTES_ROUTE = ROUTES.ajustes || "/ajustes";
 
-export const USUARIOS_ROUTE = "/usuarios";
-export const SERVER_ROUTE = "/servidor";
+export const USUARIOS_ROUTE = ROUTES.usuarios || "/usuarios";
+export const SERVER_ROUTE = ROUTES.servidor || "/servidor";
 
-export const LOGIN_ROUTE = "/login";
-export const PASSWORD_REQUEST_ROUTE = "/password-request";
-export const PASSWORD_RESET_ROUTE = "/password-reset";
-export const ACTIVATE_ACCOUNT_ROUTE = "/activate-account";
+export const LOGIN_ROUTE = ROUTES.login || "/login";
+export const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest || "/password-request";
+export const PASSWORD_RESET_ROUTE = ROUTES.passwordReset || "/password-reset";
+export const ACTIVATE_ACCOUNT_ROUTE = ROUTES.activateAccount || "/activate-account";
 
-export const SIDEBAR_PUBLIC_ROUTES = freeze([
-  LOGIN_ROUTE,
-  PASSWORD_REQUEST_ROUTE,
-  PASSWORD_RESET_ROUTE,
-  ACTIVATE_ACCOUNT_ROUTE,
-]);
+export const SIDEBAR_PUBLIC_ROUTES = freeze(
+  Array.isArray(PUBLIC_ROUTES) && PUBLIC_ROUTES.length
+    ? [...PUBLIC_ROUTES]
+    : [
+        LOGIN_ROUTE,
+        PASSWORD_REQUEST_ROUTE,
+        PASSWORD_RESET_ROUTE,
+        ACTIVATE_ACCOUNT_ROUTE,
+      ]
+);
 
 export const SIDEBAR_PRIVATE_FALLBACK_ROUTES = freeze([
   HOME_ROUTE,
@@ -140,7 +150,6 @@ export const SIDEBAR_PRIVATE_FALLBACK_ROUTES = freeze([
 ]);
 
 export const SIDEBAR_ADMIN_FALLBACK_ROUTES = freeze([
-  CLIENTES_ROUTE,
   USUARIOS_ROUTE,
   SERVER_ROUTE,
 ]);
@@ -391,7 +400,6 @@ export const SIDEBAR_ROUTE_META = freeze({
     label: "Clientes",
     icon: "clientes",
     order: 40,
-    adminOnly: true,
   }),
 
   [CUENTA_ROUTE]: freeze({
@@ -659,19 +667,24 @@ export function getSidebarConstantsSnapshot() {
 
     policy: {
       constantsOnly: true,
-      noImports: true,
+      configDrivenRoutes: true,
+
       noDom: true,
       noAuth: true,
       noRouter: true,
       noStore: true,
       noStorage: true,
+
       noDropdownBehavior: true,
       dropdownSelectorsOnly: true,
+
       noLegacyRoutes: true,
       noHomeRoute: true,
+
       userSlugHome: true,
       userScopedPrivateRoutes: true,
       validatesAtSlugShape: true,
+
       roles: [SIDEBAR_ROLE_ADMIN, SIDEBAR_ROLE_USER],
     },
   });

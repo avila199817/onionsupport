@@ -8,8 +8,10 @@
    - Aplicar document.title.
    - Marcar menú activo usando canonicalPath.
    - /@{user.slug} marca Home porque canonicalPath = /.
+   - /@{user.slug}/{ruta} marca la ruta canónica /{ruta}.
    - Mostrar/ocultar chrome según route.hideShell/public/auth layout.
    - Mantener app-shell visible.
+   - Constantes base desde core/config.js.
    - Sin Auth.
    - Sin guards.
    - Sin render de vistas.
@@ -22,16 +24,21 @@
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const ROUTER_SHELL_VERSION = "router.shell.v3";
+import {
+  config,
+  ROUTES,
+  USER_HOME_PREFIX,
+} from "../core/config.js";
 
-const APP_NAME = "Onion Support";
-const HOME_PATH = "/";
-const USER_HOME_PREFIX = "/@";
+export const ROUTER_SHELL_VERSION = "router.shell.v4";
+
+const APP_NAME = config?.appName || config?.name || "Onion Support";
+const HOME_PATH = ROUTES.home || ROUTES.root || "/";
 
 const ACTIVE_CLASS = "is-active";
 
-const ROOT_READY_CLASSES = ["app-ready"];
-const ROOT_LOADING_CLASSES = ["app-loading", "app-booting", "loading"];
+const ROOT_READY_CLASSES = Object.freeze(["app-ready"]);
+const ROOT_LOADING_CLASSES = Object.freeze(["app-loading", "app-booting"]);
 
 const MENU_SELECTOR = [
   "a[data-sidebar-link]",
@@ -53,23 +60,29 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function text(value = "", fallback = "") {
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
 
 function appName(AppCore = null) {
-  return text(AppCore?.config?.appName || AppCore?.config?.name, APP_NAME);
+  return cleanText(
+    AppCore?.config?.appName ||
+      AppCore?.config?.name ||
+      APP_NAME,
+    APP_NAME
+  );
 }
 
 function safeTitle(value = "") {
-  return text(value, APP_NAME).replace(/\s+/g, " ").slice(0, 140);
+  return cleanText(value, APP_NAME)
+    .replace(/\s+/g, " ")
+    .slice(0, 140);
 }
 
 function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+  return cleanText(value, "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -78,7 +91,7 @@ function redact(value = "") {
 ========================================================= */
 
 function normalizeHashPath(path = HOME_PATH) {
-  const value = text(path, HOME_PATH);
+  const value = cleanText(path, HOME_PATH);
 
   if (value.startsWith("#!")) {
     return value.replace(/^#!\/?/, "/") || HOME_PATH;
@@ -129,7 +142,10 @@ function pathFromInput(path = HOME_PATH) {
 }
 
 function normalizePath(path = HOME_PATH) {
-  let value = pathFromInput(path).replace(/\\/g, "/");
+  let value = pathFromInput(path)
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/\\/g, "/");
 
   if (!value.startsWith("/")) {
     value = `/${value}`;
@@ -137,15 +153,15 @@ function normalizePath(path = HOME_PATH) {
 
   value = value.replace(/\/{2,}/g, "/");
 
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || HOME_PATH;
+  }
+
   return value || HOME_PATH;
 }
 
-function stripQueryHash(path = HOME_PATH) {
-  return normalizePath(path).split("?")[0].split("#")[0] || HOME_PATH;
-}
-
 function normalizeUserSlug(value = "") {
-  const slug = text(value, "")
+  const slug = cleanText(value, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -158,45 +174,74 @@ function normalizeUserSlug(value = "") {
   return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
+function getUserScopedRouteInfo(path = HOME_PATH) {
+  const clean = normalizePath(path);
+
+  if (!clean.startsWith(USER_HOME_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: clean,
+      lookupPath: clean,
+    };
+  }
+
+  const rest = clean.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeUserSlug(slugSegment);
+
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: clean,
+      lookupPath: clean,
+    };
+  }
+
+  const restPath = restSegments.length
+    ? normalizePath(`/${restSegments.join("/")}`)
+    : HOME_PATH;
+
+  return {
+    scoped: true,
+    home: restPath === HOME_PATH,
+    slug,
+    restPath,
+    lookupPath: restPath,
+  };
+}
+
 function extractUserHomeSlug(path = HOME_PATH) {
-  const value = stripQueryHash(path);
-
-  if (!value.startsWith(USER_HOME_PREFIX)) return "";
-
-  const slug = value.slice(USER_HOME_PREFIX.length);
-
-  if (!slug || slug.includes("/")) return "";
-
-  return normalizeUserSlug(slug);
+  return getUserScopedRouteInfo(path).slug;
 }
 
 function isUserHomePath(path = HOME_PATH) {
-  return Boolean(extractUserHomeSlug(path));
+  return Boolean(getUserScopedRouteInfo(path).home);
+}
+
+function isUserScopedPath(path = HOME_PATH) {
+  return Boolean(getUserScopedRouteInfo(path).scoped);
 }
 
 function canonicalPath(path = HOME_PATH) {
-  let value = stripQueryHash(path);
+  const clean = normalizePath(path);
+  const scoped = getUserScopedRouteInfo(clean);
 
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || HOME_PATH;
-  }
-
-  return isUserHomePath(value) ? HOME_PATH : value;
+  return scoped.scoped ? scoped.lookupPath : clean;
 }
 
 /* =========================================================
    DOM
 ========================================================= */
 
-function query(selector = "") {
-  if (!isBrowser() || !selector) return null;
+function byId(id = "") {
+  if (!isBrowser() || !id) return null;
 
   try {
-    if (selector.startsWith("#")) {
-      return document.getElementById(selector.slice(1));
-    }
-
-    return document.querySelector(selector);
+    return document.getElementById(id);
   } catch {
     return null;
   }
@@ -260,7 +305,7 @@ function setAttr(node = null, key = "", value = "") {
 }
 
 function addClasses(node = null, classes = []) {
-  if (!node) return false;
+  if (!node || !classes.length) return false;
 
   try {
     node.classList.add(...classes.filter(Boolean));
@@ -271,7 +316,7 @@ function addClasses(node = null, classes = []) {
 }
 
 function removeClasses(node = null, classes = []) {
-  if (!node) return false;
+  if (!node || !classes.length) return false;
 
   try {
     node.classList.remove(...classes.filter(Boolean));
@@ -313,7 +358,7 @@ function hasContent(node = null) {
     node &&
       (
         node.childElementCount > 0 ||
-        text(node.textContent, "")
+        cleanText(node.textContent, "")
       )
   );
 }
@@ -349,58 +394,41 @@ export function getShellElements(AppCore = null) {
       sidebarMount: null,
       topbarMount: null,
 
-      sidebar: null,
-      topbar: null,
-
       tablehead: null,
       tableheadContainer: null,
-
-      mobileToggle: null,
-      loader: null,
     };
   }
 
   const html = document.documentElement;
   const body = document.body;
 
-  const shell = query("#app-shell");
-  const main = query("#main-content");
-  const appContent = query("#app-content");
-  const viewContainer = query("#view-container");
+  const shell = byId("app-shell");
+  const main = byId("main-content");
+  const appContent = byId("app-content");
+  const viewContainer = byId("view-container");
 
-  const sidebarMount = query("#sidebar-mount");
-  const topbarMount = query("#topbar-mount");
+  const sidebarMount = byId("sidebar-mount");
+  const topbarMount = byId("topbar-mount");
 
-  const sidebar = query("#app-sidebar") || query("[data-sidebar-root]");
-  const topbar = query("#app-topbar") || query("[data-topbar-root]");
-
-  const tablehead = query("#table-head");
-  const tableheadContainer = query("#tablehead-container");
-
-  const mobileToggle =
-    query("[data-topbar-sidebar-toggle]") ||
-    query("[data-sidebar-mobile-toggle]") ||
-    null;
-
-  const loader = query("#app-loader");
+  const tablehead = byId("table-head");
+  const tableheadContainer = byId("tablehead-container");
 
   cacheDom(AppCore, "html", html);
   cacheDom(AppCore, "body", body);
+
   cacheDom(AppCore, "shell", shell);
   cacheDom(AppCore, "main", main);
   cacheDom(AppCore, "mainContent", main);
   cacheDom(AppCore, "appContent", appContent);
   cacheDom(AppCore, "viewContainer", viewContainer);
+
   cacheDom(AppCore, "sidebarMount", sidebarMount);
   cacheDom(AppCore, "topbarMount", topbarMount);
-  cacheDom(AppCore, "sidebar", sidebar);
-  cacheDom(AppCore, "topbar", topbar);
+
   cacheDom(AppCore, "tablehead", tablehead);
   cacheDom(AppCore, "tableHead", tablehead);
   cacheDom(AppCore, "tableheadContainer", tableheadContainer);
   cacheDom(AppCore, "tableHeadContainer", tableheadContainer);
-  cacheDom(AppCore, "mobileToggle", mobileToggle);
-  cacheDom(AppCore, "loader", loader);
 
   return {
     html,
@@ -414,14 +442,8 @@ export function getShellElements(AppCore = null) {
     sidebarMount,
     topbarMount,
 
-    sidebar,
-    topbar,
-
     tablehead,
     tableheadContainer,
-
-    mobileToggle,
-    loader,
   };
 }
 
@@ -482,7 +504,7 @@ function linkPath(link = null) {
     "data-sidebar-route",
     "href",
   ]) {
-    const value = text(link.getAttribute?.(attr), "");
+    const value = cleanText(link.getAttribute?.(attr), "");
 
     if (value) return value;
   }
@@ -491,7 +513,7 @@ function linkPath(link = null) {
 }
 
 function isIgnoredHref(href = "") {
-  const value = text(href, "");
+  const value = cleanText(href, "");
 
   if (!value) return true;
   if (value.startsWith("#")) return true;
@@ -588,7 +610,7 @@ function applyRootState(
 ) {
   const { html, body, shell } = elements;
 
-  for (const root of [html, body]) {
+  for (const root of [html, body].filter(Boolean)) {
     removeClasses(root, ROOT_LOADING_CLASSES);
     addClasses(root, ROOT_READY_CLASSES);
 
@@ -622,15 +644,9 @@ function applyChrome(elements = {}, hidden = false) {
   for (const node of [
     elements.sidebarMount,
     elements.topbarMount,
-    elements.sidebar,
-    elements.topbar,
-    elements.mobileToggle,
   ]) {
     setHidden(node, hidden);
-  }
-
-  if (hidden) {
-    setAttr(elements.mobileToggle, "aria-expanded", "false");
+    setData(node, "chrome", hidden ? "hidden" : "visible");
   }
 
   const showTablehead =
@@ -640,7 +656,11 @@ function applyChrome(elements = {}, hidden = false) {
   setHidden(elements.tablehead, !showTablehead);
   setHidden(elements.tableheadContainer, hidden || !showTablehead);
 
-  setData(elements.tablehead, "tableheadState", showTablehead ? "visible" : "empty");
+  setData(
+    elements.tablehead,
+    "tableheadState",
+    showTablehead ? "visible" : "empty"
+  );
 }
 
 function syncState(AppCore = null, patch = {}) {
@@ -729,7 +749,8 @@ function elementSnapshot(node = null) {
 
 export function getShellSnapshot(AppCore = null) {
   const elements = getShellElements(AppCore);
-  const publicPath = text(AppCore?.state?.publicPath, "");
+  const publicPath = cleanText(AppCore?.state?.publicPath, "");
+
   const route = canonicalPath(
     AppCore?.state?.route ||
       AppCore?.state?.canonicalPath ||
@@ -745,6 +766,7 @@ export function getShellSnapshot(AppCore = null) {
     publicPath: redact(publicPath),
     publicSlug: extractUserHomeSlug(publicPath) || null,
     isUserHomePath: isUserHomePath(publicPath || HOME_PATH),
+    isUserScopedPath: isUserScopedPath(publicPath || HOME_PATH),
 
     shellVisible: AppCore?.state?.shellVisible ?? null,
     shellHidden: AppCore?.state?.shellHidden ?? null,
@@ -764,16 +786,13 @@ export function getShellSnapshot(AppCore = null) {
       viewContainer: elementSnapshot(elements.viewContainer),
       sidebarMount: elementSnapshot(elements.sidebarMount),
       topbarMount: elementSnapshot(elements.topbarMount),
-      sidebar: elementSnapshot(elements.sidebar),
-      topbar: elementSnapshot(elements.topbar),
       tablehead: elementSnapshot(elements.tablehead),
       tableheadContainer: elementSnapshot(elements.tableheadContainer),
-      mobileToggle: elementSnapshot(elements.mobileToggle),
-      loader: elementSnapshot(elements.loader),
     },
 
     policy: {
       shellOnly: true,
+      configDrivenBase: true,
 
       ownAuth: false,
       ownGuards: false,
@@ -784,13 +803,17 @@ export function getShellSnapshot(AppCore = null) {
       ownEvents: false,
 
       userSlugHome: true,
+      userScopedPrivateRoutes: true,
       canonicalizesUserHome: true,
+      canonicalizesUserScopedRoutes: true,
 
       noHomeAlias: true,
       noHomeRoute: true,
       no2fa: true,
+      noMfa: true,
+      noOtp: true,
 
-      chromeOnlyForAuth: true,
+      chromeByRouteOnly: true,
       keepsAppShellVisible: true,
       snapshotRedacted: true,
     },

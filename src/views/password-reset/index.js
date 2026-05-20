@@ -5,7 +5,8 @@
    Responsabilidad:
    - Entry point mínimo de password-reset.
    - Reexportar la vista real.
-   - Exponer alias para password-request y password-reset.
+   - Exponer nombres de vista usados por router/routes.js.
+   - PasswordRequestView y PasswordResetView comparten vista.
    - Sin lógica.
    - Sin Auth.
    - Sin Router.
@@ -13,12 +14,14 @@
    - Sin Store.
    - Sin Toast.
    - Sin navegación.
+   - Sin rutas.
+   - Sin aliases legacy de flujo.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import PasswordResetView from "./resetPasswordView.js";
 
-export const PASSWORD_RESET_INDEX_VERSION = "password-reset.index.v1";
+export const PASSWORD_RESET_INDEX_VERSION = "password-reset.index.v2";
 
 export { PasswordResetView };
 

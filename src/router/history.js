@@ -11,8 +11,8 @@
    - /@{user.slug} conserva URL pública pero canonicaliza a /.
    - /@{user.slug}/{ruta} conserva URL pública pero canonicaliza a /{ruta}.
    - Scrub explícito sólo del parámetro token.
+   - Constantes base desde core/config.js.
    - Snapshots redacted.
-   - Sin imports.
    - Sin Auth.
    - Sin guards.
    - Sin render.
@@ -24,17 +24,23 @@
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const ROUTER_HISTORY_VERSION = "router.history.v4";
+import {
+  PROTECTED_PUBLIC_TOKEN_ROUTES,
+  ROUTES,
+  TOKEN_PARAM,
+  USER_HOME_PREFIX,
+} from "../core/config.js";
+
+export const ROUTER_HISTORY_VERSION = "router.history.v5";
 
 const HISTORY_STATE_VERSION = 1;
-const DEFAULT_ROUTE = "/";
-const USER_HOME_PREFIX = "/@";
-const TOKEN_PARAM = "token";
+const DEFAULT_ROUTE = ROUTES.home || ROUTES.root || "/";
 
-const TOKEN_ROUTES = new Set([
-  "/activate-account",
-  "/password-reset",
-]);
+const TOKEN_ROUTES = new Set(
+  PROTECTED_PUBLIC_TOKEN_ROUTES
+    .flatMap((item) => Array.isArray(item.paths) ? item.paths : [item.path])
+    .filter(Boolean)
+);
 
 let sequence = 0;
 
@@ -59,7 +65,7 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function text(value = "", fallback = "") {
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
@@ -82,9 +88,8 @@ function nextHistoryId() {
 }
 
 function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+  return cleanText(value, "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -93,12 +98,12 @@ function redact(value = "") {
 ========================================================= */
 
 function isHashRouterPath(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
   return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw = text(value, DEFAULT_ROUTE);
+  const raw = cleanText(value, DEFAULT_ROUTE);
 
   if (raw.startsWith("#!")) {
     return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
@@ -131,7 +136,7 @@ function sameOriginUrlToPath(raw = "") {
 }
 
 function pathFromInput(path = DEFAULT_ROUTE) {
-  const raw = text(path, DEFAULT_ROUTE);
+  const raw = cleanText(path, DEFAULT_ROUTE);
 
   if (isHashRouterPath(raw)) {
     return normalizeHashRouterPath(raw);
@@ -153,7 +158,7 @@ function pathFromInput(path = DEFAULT_ROUTE) {
 }
 
 function normalizePathname(pathname = DEFAULT_ROUTE) {
-  let value = text(pathname, DEFAULT_ROUTE).replace(/\\/g, "/");
+  let value = cleanText(pathname, DEFAULT_ROUTE).replace(/\\/g, "/");
 
   if (!value.startsWith("/")) {
     value = `/${value}`;
@@ -169,7 +174,7 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
 }
 
 function normalizeSearch(search = "") {
-  const value = text(search, "");
+  const value = cleanText(search, "");
 
   if (!value || value === "?") return "";
 
@@ -179,7 +184,7 @@ function normalizeSearch(search = "") {
 }
 
 function normalizeHash(hash = "") {
-  const value = text(hash, "");
+  const value = cleanText(hash, "");
 
   if (!value || value === "#") return "";
 
@@ -223,12 +228,12 @@ function joinPath(parts = {}) {
   ].join("");
 }
 
-function normalizePublicPath(path = DEFAULT_ROUTE) {
+export function normalizePublicPath(path = DEFAULT_ROUTE) {
   return joinPath(splitPath(path));
 }
 
 function normalizeUserSlug(value = "") {
-  const slug = text(value, "")
+  const slug = cleanText(value, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -281,19 +286,19 @@ export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
   };
 }
 
-function extractSlugFromPath(path = DEFAULT_ROUTE) {
+export function extractSlugFromPath(path = DEFAULT_ROUTE) {
   return getUserScopedRouteInfo(path).slug;
 }
 
-function isUserHomePath(path = DEFAULT_ROUTE) {
+export function isUserHomePath(path = DEFAULT_ROUTE) {
   return Boolean(getUserScopedRouteInfo(path).home);
 }
 
-function isUserScopedPath(path = DEFAULT_ROUTE) {
+export function isUserScopedPath(path = DEFAULT_ROUTE) {
   return Boolean(getUserScopedRouteInfo(path).scoped);
 }
 
-function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
+export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
   const pathname = splitPath(path).pathname || DEFAULT_ROUTE;
   const scoped = getUserScopedRouteInfo(pathname);
 
@@ -328,14 +333,18 @@ function cleanRouteParams(params = {}) {
   const output = {};
 
   for (const [key, value] of Object.entries(params)) {
-    const cleanKey = text(key, "");
+    const cleanKey = cleanText(key, "");
 
     if (!cleanKey) continue;
 
     if (
       cleanKey.toLowerCase() === TOKEN_PARAM ||
       cleanKey.toLowerCase() === "access_token" ||
-      cleanKey.toLowerCase() === "refresh_token"
+      cleanKey.toLowerCase() === "refresh_token" ||
+      cleanKey.toLowerCase() === "id_token" ||
+      cleanKey.toLowerCase() === "code" ||
+      cleanKey.toLowerCase() === "secret" ||
+      cleanKey.toLowerCase() === "session"
     ) {
       output[cleanKey] = "***";
       continue;
@@ -436,7 +445,7 @@ function buildHistoryWrite({
     pathname: publicPath,
     extras: {
       ...opts,
-      mode,
+      mode: opts.mode || mode,
       publicPath,
       canonicalPath: opts.canonicalPath || normalizeCanonicalPath(publicPath),
       source: opts.source || null,
@@ -657,7 +666,7 @@ export function scrubProtectedTokenFromHistory({
    NAVIGATION
 ========================================================= */
 
-export function back(_AppCore = null) {
+export function back() {
   if (!canUseHistory()) return false;
 
   try {
@@ -670,7 +679,7 @@ export function back(_AppCore = null) {
 
 export function getPopStatePath(_AppCore = null, eventOrState = null) {
   const state = eventOrState?.state || eventOrState || currentHistoryState() || {};
-  const fromState = text(state.publicPath || state.path || "", "");
+  const fromState = cleanText(state.publicPath || state.path || "", "");
 
   return normalizePublicPath(fromState || browserPath());
 }
@@ -756,6 +765,8 @@ export function getHistorySnapshot(AppCore = null) {
       noHomeRoute: true,
       noLegacyRoutes: true,
       no2fa: true,
+      noMfa: true,
+      noOtp: true,
 
       tokenParam: TOKEN_PARAM,
       tokenRoutes: [...TOKEN_ROUTES],
@@ -777,6 +788,14 @@ export function getHistorySnapshot(AppCore = null) {
 
 export default {
   ROUTER_HISTORY_VERSION,
+
+  normalizePublicPath,
+  normalizeCanonicalPath,
+
+  getUserScopedRouteInfo,
+  extractSlugFromPath,
+  isUserHomePath,
+  isUserScopedPath,
 
   createHistoryState,
 

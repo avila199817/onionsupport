@@ -99,7 +99,7 @@ import {
   unbindSidebarDropdown,
 } from "./dropdown.js";
 
-export const SIDEBAR_UI_VERSION = "sidebar.ui.v4";
+export const SIDEBAR_UI_VERSION = "sidebar.ui.v5";
 
 /* =========================================================
    BASICS
@@ -120,6 +120,12 @@ function firstText(...values) {
   }
 
   return "";
+}
+
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 /* =========================================================
@@ -147,7 +153,9 @@ function routerPublicPath(path = HOME_ROUTE, context = {}) {
           useSlugPrivate: true,
         })
       );
-    } catch {}
+    } catch {
+      // fallback abajo
+    }
   }
 
   if (lookupPath === HOME_ROUTE) {
@@ -439,11 +447,15 @@ function unbindAllSidebarDom() {
 
   try {
     unbindSidebarDropdown(root);
-  } catch {}
+  } catch {
+    // noop
+  }
 
   try {
     unbindSidebarEvents();
-  } catch {}
+  } catch {
+    // noop
+  }
 
   return true;
 }
@@ -685,9 +697,9 @@ function getSnapshot() {
     collapsed: state.collapsed,
     logoutInFlight: getSidebarLogoutInFlight(),
 
-    publicPath: context.publicPath,
-    canonicalPath: context.canonicalPath,
-    homeHref: userHomeHref(context, SIDEBAR_BRAND_HREF),
+    publicPath: redact(context.publicPath),
+    canonicalPath: redact(context.canonicalPath),
+    homeHref: redact(userHomeHref(context, SIDEBAR_BRAND_HREF)),
 
     hasSession: context.hasSession,
     isAdmin: context.user?.isAdmin === true,
@@ -702,7 +714,7 @@ function getSnapshot() {
       : null,
 
     menuItems: items.map((item) => ({
-      href: item.href,
+      href: redact(item.href),
       label: item.label,
       icon: item.icon,
       active: item.active,
@@ -733,7 +745,7 @@ function getSnapshot() {
       noHttp: true,
       noToast: true,
       noStoreOwn: true,
-      noGlobalBridge: true,
+      noImportSideEffectRegistration: true,
     },
   };
 }
@@ -784,8 +796,6 @@ const api = {
     return getSidebarLogoutInFlight();
   },
 };
-
-registerModule();
 
 export const SidebarUI = api;
 

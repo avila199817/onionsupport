@@ -7,6 +7,7 @@
    - Consumir el password-field compartido desde su fachada pública.
    - Textos base en castellano.
    - Rutas base desde core/config.js.
+   - Usar logo corporativo canónico.
    - Sin Auth.
    - Sin HTTP.
    - Sin Router.
@@ -15,6 +16,10 @@
    - Sin navegación.
    - Sin duplicar lógica del password.
    - Sin layout visual extra.
+   - Sin /home.
+   - Sin /403.
+   - Sin /404.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import {
@@ -23,10 +28,15 @@ import {
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
 
-export const TEMPLATE_VERSION = "login.template.v3";
+export const TEMPLATE_VERSION = "login.template.v4";
 
 const DEFAULT_APP_NAME = "Onion Support";
-const DEFAULT_LOGO = "/src/media/img/favicon_black_circle.png?v=6";
+
+/*
+  Logo corporativo canónico.
+  El blanco se reserva para fondos oscuros si la capa visual lo necesita.
+*/
+const DEFAULT_LOGO = "/src/media/img/favicon_black.png";
 
 const DEFAULT_PASSWORD_REQUEST_HREF =
   ROUTES.passwordRequest || "/password-request";
@@ -34,12 +44,25 @@ const DEFAULT_PASSWORD_REQUEST_HREF =
 const MAX_IDENTIFIER_LENGTH = 160;
 const MAX_PASSWORD_LENGTH = 1024;
 
+const BLOCKED_HREFS = new Set([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
+]);
+
 /* =========================================================
    HELPERS
 ========================================================= */
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -57,14 +80,47 @@ function escapeAttr(value = "") {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
     String(value || "")
+  );
+}
+
+function normalizePath(value = "/", fallback = "/") {
+  let path = text(value, fallback)
+    .split("#")[0]
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!path.startsWith("/")) {
+    path = `/${path}`;
+  }
+
+  const cleanPath = path.split("?")[0];
+
+  if (cleanPath.length > 1) {
+    const normalized = cleanPath.replace(/\/+$/g, "") || fallback;
+    const query = path.includes("?") ? `?${path.split("?").slice(1).join("?")}` : "";
+    return `${normalized}${query}`;
+  }
+
+  return path || fallback;
+}
+
+function isBlockedHref(value = "") {
+  const path = normalizePath(value, "/").split("?")[0].toLowerCase();
+
+  if (BLOCKED_HREFS.has(path)) return true;
+
+  return (
+    path.startsWith("/2fa/") ||
+    path.startsWith("/mfa/") ||
+    path.startsWith("/otp/")
   );
 }
 
 function safeInternalHref(value = "", fallback = DEFAULT_PASSWORD_REQUEST_HREF) {
   const raw = text(value, "");
-  const fallbackHref = text(fallback, DEFAULT_PASSWORD_REQUEST_HREF);
+  const fallbackHref = normalizePath(fallback, DEFAULT_PASSWORD_REQUEST_HREF);
 
   if (!raw) return fallbackHref;
   if (!raw.startsWith("/")) return fallbackHref;
@@ -72,8 +128,9 @@ function safeInternalHref(value = "", fallback = DEFAULT_PASSWORD_REQUEST_HREF) 
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallbackHref;
   if (/[\r\n\t\\]/.test(raw)) return fallbackHref;
   if (hasSensitiveQuery(raw)) return fallbackHref;
+  if (isBlockedHref(raw)) return fallbackHref;
 
-  return raw.replace(/\/{2,}/g, "/") || fallbackHref;
+  return normalizePath(raw, fallbackHref) || fallbackHref;
 }
 
 function safeAssetSrc(value = "", fallback = DEFAULT_LOGO) {
@@ -92,6 +149,7 @@ function safeAssetSrc(value = "", fallback = DEFAULT_LOGO) {
 
 function normalizeIdentifier(value = "") {
   return text(value, "")
+    .normalize("NFKC")
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .slice(0, MAX_IDENTIFIER_LENGTH);

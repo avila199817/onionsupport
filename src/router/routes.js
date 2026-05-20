@@ -38,7 +38,7 @@ import {
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.v5";
+export const ROUTES_VERSION = "routes.v6";
 
 const ROUTE_SOURCE = "router.routes";
 
@@ -47,7 +47,7 @@ const ROUTE_SOURCE = "router.routes";
 ========================================================= */
 
 export const ROUTE_PATHS = Object.freeze({
-  HOME: ROUTES.home || ROUTES.root || "/",
+  HOME: "/",
 
   INCIDENCIAS: ROUTES.incidencias || "/incidencias",
   FACTURAS: ROUTES.facturas || "/facturas",
@@ -55,8 +55,12 @@ export const ROUTE_PATHS = Object.freeze({
   CUENTA: ROUTES.cuenta || "/cuenta",
   AJUSTES: ROUTES.ajustes || "/ajustes",
 
-  USUARIOS: ROUTES.usuarios || "/usuarios",
-  SERVIDOR: ROUTES.servidor || "/servidor",
+  /*
+    Admin opcionales:
+    no se inventan por fallback. Sólo se declaran si config los define.
+  */
+  USUARIOS: ROUTES.usuarios || "",
+  SERVIDOR: ROUTES.servidor || "",
 
   LOGIN: ROUTES.login || "/login",
   PASSWORD_REQUEST: ROUTES.passwordRequest || "/password-request",
@@ -139,34 +143,43 @@ export const TOKEN_ROUTE_PATHS = Object.freeze([
   ROUTE_PATHS.ACTIVATE_ACCOUNT,
 ]);
 
-/*
-  Sin aliases.
-  /home NO existe.
-  /@{slug} y /@{slug}/{ruta_privada} no son rutas declaradas:
-  sólo se resuelven como lookup interno hacia rutas estáticas.
-*/
 export const ROUTE_ALIASES = Object.freeze({});
 
-const PUBLIC_AUTH_ROUTE_SET = new Set(PUBLIC_AUTH_ROUTES);
-const TOKEN_ROUTE_SET = new Set(TOKEN_ROUTE_PATHS);
+const PUBLIC_AUTH_ROUTE_SET = new Set(PUBLIC_AUTH_ROUTES.filter(Boolean));
+const TOKEN_ROUTE_SET = new Set(TOKEN_ROUTE_PATHS.filter(Boolean));
 
-const USER_SCOPED_ROUTE_SET = new Set([
-  ROUTE_PATHS.HOME,
-  ROUTE_PATHS.INCIDENCIAS,
-  ROUTE_PATHS.FACTURAS,
-  ROUTE_PATHS.CLIENTES,
-  ROUTE_PATHS.CUENTA,
-  ROUTE_PATHS.AJUSTES,
-  ROUTE_PATHS.USUARIOS,
-  ROUTE_PATHS.SERVIDOR,
+const BLOCKED_ROUTE_PATHS = new Set([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
 ]);
+
+const USER_SCOPED_ROUTE_SET = new Set(
+  [
+    ROUTE_PATHS.HOME,
+    ROUTE_PATHS.INCIDENCIAS,
+    ROUTE_PATHS.FACTURAS,
+    ROUTE_PATHS.CLIENTES,
+    ROUTE_PATHS.CUENTA,
+    ROUTE_PATHS.AJUSTES,
+    ROUTE_PATHS.USUARIOS,
+    ROUTE_PATHS.SERVIDOR,
+  ].filter(Boolean)
+);
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -291,6 +304,18 @@ function normalizeRoles(roles = []) {
     .filter(Boolean);
 }
 
+function isBlockedRoutePath(path = "/") {
+  const clean = normalizePath(path).toLowerCase();
+
+  if (BLOCKED_ROUTE_PATHS.has(clean)) return true;
+
+  return (
+    clean.startsWith("/2fa/") ||
+    clean.startsWith("/mfa/") ||
+    clean.startsWith("/otp/")
+  );
+}
+
 /* =========================================================
    USER SCOPED ROUTES
 ========================================================= */
@@ -301,6 +326,8 @@ export function normalizeRoutePath(path = "/") {
 
 export function normalizeUserHomeSlug(value = "") {
   const slug = text(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -388,6 +415,9 @@ export function isHomePath(path = "/") {
 
 export function resolveRouteLookupPath(path = "/") {
   const clean = normalizePath(path);
+
+  if (isBlockedRoutePath(clean)) return clean;
+
   const scoped = getUserScopedRouteInfo(clean);
 
   if (scoped.scoped && scoped.routable) {
@@ -586,6 +616,11 @@ function createRoute({
   tokenRoute = false,
 } = {}) {
   const finalPath = normalizePath(path);
+
+  if (!finalPath || isBlockedRoutePath(finalPath)) {
+    throw new Error(`Router: ruta no permitida "${path}".`);
+  }
+
   const finalName = normalizeName(name);
   const finalViewKey = normalizeViewKey(viewKey || finalName);
   const finalViewName = normalizeViewName(viewName || finalViewKey);
@@ -775,6 +810,7 @@ const ROUTE_DEFINITIONS = Object.freeze([
     order: 60,
   },
   {
+    enabled: Boolean(ROUTE_PATHS.USUARIOS),
     kind: "admin",
     path: ROUTE_PATHS.USUARIOS,
     name: ROUTE_NAMES.USUARIOS,
@@ -784,6 +820,7 @@ const ROUTE_DEFINITIONS = Object.freeze([
     order: 70,
   },
   {
+    enabled: Boolean(ROUTE_PATHS.SERVIDOR),
     kind: "admin",
     path: ROUTE_PATHS.SERVIDOR,
     name: ROUTE_NAMES.SERVIDOR,
@@ -835,6 +872,7 @@ const ROUTE_DEFINITIONS = Object.freeze([
 
 export function createRoutes() {
   return ROUTE_DEFINITIONS
+    .filter((definition) => definition.enabled !== false)
     .map((definition) => {
       if (definition.kind === "admin") return adminRoute(definition);
       if (definition.kind === "public") return publicRoute(definition);
@@ -885,6 +923,10 @@ function validateRoute(route, seenPaths, seenNames) {
     throw new Error(`Router: ruta con query/hash "${path}".`);
   }
 
+  if (isBlockedRoutePath(path)) {
+    throw new Error(`Router: ruta bloqueada "${path}".`);
+  }
+
   if (seenPaths.has(path)) {
     throw new Error(`Router: ruta duplicada "${path}".`);
   }
@@ -925,10 +967,6 @@ function validateRoute(route, seenPaths, seenNames) {
     throw new Error(`Router: ruta pública con roles en "${path}".`);
   }
 
-  if (path === "/home") {
-    throw new Error("Router: /home no está permitido.");
-  }
-
   seenPaths.add(path);
   seenNames.add(route.name);
 }
@@ -945,14 +983,20 @@ export function validateRoutesTable(_AppCore = null, routes = getImmutableRoutes
     validateRoute(route, seenPaths, seenNames);
   }
 
-  for (const path of Object.values(ROUTE_PATHS)) {
-    if (!seenPaths.has(normalizePath(path))) {
+  const requiredPaths = Object.values(ROUTE_PATHS)
+    .filter(Boolean)
+    .map(normalizePath);
+
+  for (const path of requiredPaths) {
+    if (!seenPaths.has(path)) {
       throw new Error(`Router: falta ruta "${path}".`);
     }
   }
 
-  if (seenPaths.has("/home")) {
-    throw new Error("Router: /home no debe existir.");
+  for (const blockedPath of BLOCKED_ROUTE_PATHS) {
+    if (seenPaths.has(blockedPath)) {
+      throw new Error(`Router: ruta bloqueada declarada "${blockedPath}".`);
+    }
   }
 
   return true;
@@ -968,6 +1012,9 @@ export function resolveRouteAlias(path = "/") {
 
 export function getRouteByPath(path = "/") {
   const lookupPath = resolveRouteLookupPath(path);
+
+  if (isBlockedRoutePath(lookupPath)) return null;
+
   return getImmutableRoutes().find((route) => route.path === lookupPath) || null;
 }
 
@@ -982,11 +1029,19 @@ export function getRouteByViewKey(viewKey = "") {
 }
 
 export function isPublicAuthPath(path = "/") {
-  return PUBLIC_AUTH_ROUTE_SET.has(resolveRouteLookupPath(path));
+  const lookupPath = resolveRouteLookupPath(path);
+
+  if (isBlockedRoutePath(lookupPath)) return false;
+
+  return PUBLIC_AUTH_ROUTE_SET.has(lookupPath);
 }
 
 export function isTokenPublicRoutePath(path = "/") {
-  return TOKEN_ROUTE_SET.has(resolveRouteLookupPath(path));
+  const lookupPath = resolveRouteLookupPath(path);
+
+  if (isBlockedRoutePath(lookupPath)) return false;
+
+  return TOKEN_ROUTE_SET.has(lookupPath);
 }
 
 export function isPrivateRoutePath(path = "/") {
@@ -1040,6 +1095,7 @@ export function getRouteDebug(path = "/") {
     input: path,
     normalizedPath,
     lookupPath,
+    blocked: isBlockedRoutePath(normalizedPath),
     userScopedPath: Boolean(scoped.scoped),
     userScopedRoutable: Boolean(scoped.routable),
     userHomePath: Boolean(scoped.home),
@@ -1050,15 +1106,17 @@ export function getRouteDebug(path = "/") {
 }
 
 export function getCriticalRoutesDebug() {
-  return Object.values(ROUTE_PATHS).map((path) => {
-    const route = getRouteByPath(path);
+  return Object.values(ROUTE_PATHS)
+    .filter(Boolean)
+    .map((path) => {
+      const route = getRouteByPath(path);
 
-    return {
-      path,
-      found: Boolean(route),
-      route: route ? serializeRoute(route) : null,
-    };
-  });
+      return {
+        path,
+        found: Boolean(route),
+        route: route ? serializeRoute(route) : null,
+      };
+    });
 }
 
 export function getRoutesIntegritySnapshot() {
@@ -1091,6 +1149,8 @@ export function getRoutesIntegritySnapshot() {
     tokenRoutePaths: [...TOKEN_ROUTE_PATHS],
     aliases: ROUTE_ALIASES,
 
+    blockedRoutes: [...BLOCKED_ROUTE_PATHS],
+
     userHome: {
       enabled: true,
       prefix: USER_HOME_PREFIX,
@@ -1099,6 +1159,11 @@ export function getRoutesIntegritySnapshot() {
       validatesShape: true,
       validatesRealUser: false,
       realUserValidationOwner: "router/index.js",
+    },
+
+    optionalRoutes: {
+      usuarios: Boolean(ROUTE_PATHS.USUARIOS),
+      servidor: Boolean(ROUTE_PATHS.SERVIDOR),
     },
 
     critical: getCriticalRoutesDebug(),
@@ -1120,7 +1185,10 @@ export function getRoutesIntegritySnapshot() {
       clientesAdminOnly: true,
 
       homeInternalPath: ROUTE_PATHS.HOME,
+      homeVisiblePattern: "/@{user.slug}",
       userHomePrefix: USER_HOME_PREFIX,
+
+      optionalAdminRoutesRequireConfig: true,
 
       noHomeAlias: true,
       noHomeRoute: true,

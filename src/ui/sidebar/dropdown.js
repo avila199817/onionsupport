@@ -20,26 +20,35 @@
 ========================================================= */
 
 import {
+  SIDEBAR_SELECTORS,
+} from "./constants.js";
+
+import {
+  getSidebarRoot,
+  isBrowser,
+  isElement,
+} from "./dom.js";
+
+import {
   getSidebarOpen,
   openSidebar as openRuntimeSidebar,
 } from "./state.js";
 
-export const SIDEBAR_DROPDOWN_VERSION = "sidebar.dropdown.v2";
+export const SIDEBAR_DROPDOWN_VERSION = "sidebar.dropdown.v3";
 
 const DROPDOWN_KEY = "account";
 
-const ROOT_SELECTOR = [
-  "[data-sidebar-root='true']",
-  "[data-sidebar='true']",
-  "#onion-sidebar",
-  "#app-sidebar",
-  ".app-sidebar",
-  ".sidebar-root",
-].join(",");
+const TRIGGER_SELECTOR =
+  SIDEBAR_SELECTORS.accountTrigger ||
+  `[data-sidebar-dropdown-trigger="${DROPDOWN_KEY}"]`;
 
-const TRIGGER_SELECTOR = `[data-sidebar-dropdown-trigger="${DROPDOWN_KEY}"]`;
-const MENU_SELECTOR = `[data-sidebar-dropdown-menu="${DROPDOWN_KEY}"]`;
-const ITEM_SELECTOR = "[data-sidebar-dropdown-item='true']";
+const MENU_SELECTOR =
+  SIDEBAR_SELECTORS.accountMenu ||
+  `[data-sidebar-dropdown-menu="${DROPDOWN_KEY}"]`;
+
+const ITEM_SELECTOR =
+  SIDEBAR_SELECTORS.dropdownItem ||
+  "[data-sidebar-dropdown-item='true']";
 
 const OPEN_CLASS = "is-account-menu-open";
 const MENU_OPEN_CLASS = "is-open";
@@ -54,7 +63,8 @@ const FOCUSABLE_SELECTOR = [
 ].join(",");
 
 let activeRoot = null;
-let activeController = null;
+let documentPointerHandler = null;
+let documentKeyHandler = null;
 
 const boundRoots = new WeakMap();
 
@@ -62,16 +72,8 @@ const boundRoots = new WeakMap();
    BASICS
 ========================================================= */
 
-function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function isElement(value) {
-  return Boolean(value && value.nodeType === 1);
 }
 
 function isEvent(value) {
@@ -112,16 +114,12 @@ function resolveRoot(value = null) {
   const target = getTargetElement(value);
 
   if (target) {
-    const root = target.closest?.(ROOT_SELECTOR) || target.closest?.("aside");
-    if (root) return root;
+    const root = target.closest?.(SIDEBAR_SELECTORS.root);
+
+    if (isElement(root)) return root;
   }
 
-  return (
-    document.querySelector(ROOT_SELECTOR) ||
-    document.querySelector(TRIGGER_SELECTOR)?.closest?.("aside") ||
-    document.querySelector(MENU_SELECTOR)?.closest?.("aside") ||
-    null
-  );
+  return getSidebarRoot();
 }
 
 function getTrigger(root = null) {
@@ -148,6 +146,7 @@ function getFocusableItems(menu = null) {
         if (node.hidden === true) return false;
         if (node.disabled === true) return false;
         if (node.getAttribute("aria-disabled") === "true") return false;
+        if (node.getAttribute("aria-hidden") === "true") return false;
         return true;
       });
   } catch {
@@ -158,13 +157,15 @@ function getFocusableItems(menu = null) {
 function focusFirstMenuItem(menu = null) {
   const firstItem = getFocusableItems(menu)[0];
 
+  if (!firstItem) return false;
+
   try {
-    firstItem?.focus?.({ preventScroll: true });
-    return Boolean(firstItem);
+    firstItem.focus({ preventScroll: true });
+    return true;
   } catch {
     try {
-      firstItem?.focus?.();
-      return Boolean(firstItem);
+      firstItem.focus();
+      return true;
     } catch {
       return false;
     }
@@ -172,12 +173,16 @@ function focusFirstMenuItem(menu = null) {
 }
 
 function focusTrigger(root = null) {
+  const trigger = getTrigger(root);
+
+  if (!trigger) return false;
+
   try {
-    getTrigger(root)?.focus?.({ preventScroll: true });
+    trigger.focus({ preventScroll: true });
     return true;
   } catch {
     try {
-      getTrigger(root)?.focus?.();
+      trigger.focus();
       return true;
     } catch {
       return false;
@@ -237,36 +242,64 @@ function isDropdownOpen(root = null) {
   );
 }
 
-function setDomState(root = null, open = false) {
-  const trigger = getTrigger(root);
-  const menu = getMenu(root);
-
-  if (!root || !trigger || !menu) return false;
+function setRootDropdownState(root = null, open = false) {
+  if (!isElement(root)) return false;
 
   const nextOpen = Boolean(open);
 
   try {
+    if (nextOpen) {
+      root.dataset.sidebarDropdownOpen = DROPDOWN_KEY;
+    } else {
+      delete root.dataset.sidebarDropdownOpen;
+    }
+
+    root.classList.toggle(OPEN_CLASS, nextOpen);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setDomState(root = null, open = false) {
+  const trigger = getTrigger(root);
+  const menu = getMenu(root);
+
+  if (!isElement(root) || !isElement(trigger) || !isElement(menu)) {
+    return false;
+  }
+
+  const nextOpen = Boolean(open);
+
+  try {
+    trigger.setAttribute("aria-haspopup", "menu");
     trigger.setAttribute("aria-expanded", nextOpen ? "true" : "false");
     trigger.dataset.sidebarDropdownState = nextOpen ? "open" : "closed";
+
+    const menuId = text(menu.id, "");
+
+    if (menuId) {
+      trigger.setAttribute("aria-controls", menuId);
+    }
   } catch {
     // noop
   }
 
   try {
     menu.hidden = !nextOpen;
+    menu.setAttribute("role", "menu");
     menu.setAttribute("aria-hidden", nextOpen ? "false" : "true");
     menu.dataset.sidebarDropdownState = nextOpen ? "open" : "closed";
     menu.classList.toggle(MENU_OPEN_CLASS, nextOpen);
+
+    menu.querySelectorAll(ITEM_SELECTOR).forEach((item) => {
+      item.setAttribute("role", "menuitem");
+    });
   } catch {
     // noop
   }
 
-  try {
-    root.dataset.sidebarDropdownOpen = nextOpen ? DROPDOWN_KEY : "";
-    root.classList.toggle(OPEN_CLASS, nextOpen);
-  } catch {
-    // noop
-  }
+  setRootDropdownState(root, nextOpen);
 
   return true;
 }
@@ -303,14 +336,34 @@ function normalizeOptions(value = null, options = {}) {
 ========================================================= */
 
 function detachGlobalHandlers() {
+  if (!isBrowser()) {
+    activeRoot = null;
+    documentPointerHandler = null;
+    documentKeyHandler = null;
+    return true;
+  }
+
   try {
-    activeController?.abort?.();
+    if (documentPointerHandler) {
+      document.removeEventListener("pointerdown", documentPointerHandler, true);
+    }
   } catch {
     // noop
   }
 
-  activeController = null;
+  try {
+    if (documentKeyHandler) {
+      document.removeEventListener("keydown", documentKeyHandler);
+    }
+  } catch {
+    // noop
+  }
+
   activeRoot = null;
+  documentPointerHandler = null;
+  documentKeyHandler = null;
+
+  return true;
 }
 
 function attachGlobalHandlers(root = null) {
@@ -323,13 +376,13 @@ function attachGlobalHandlers(root = null) {
     });
   }
 
-  if (activeRoot === root && activeController) return true;
+  if (activeRoot === root && documentPointerHandler && documentKeyHandler) {
+    return true;
+  }
 
   detachGlobalHandlers();
 
-  const controller = new AbortController();
-
-  const onPointerDown = (event) => {
+  documentPointerHandler = (event) => {
     const target = event.target;
 
     if (contains(root, target)) return;
@@ -340,7 +393,7 @@ function attachGlobalHandlers(root = null) {
     });
   };
 
-  const onKeyDown = (event) => {
+  documentKeyHandler = (event) => {
     if (event.key !== "Escape") return;
 
     event.preventDefault();
@@ -351,17 +404,15 @@ function attachGlobalHandlers(root = null) {
     });
   };
 
-  document.addEventListener("pointerdown", onPointerDown, {
-    capture: true,
-    signal: controller.signal,
-  });
-
-  document.addEventListener("keydown", onKeyDown, {
-    signal: controller.signal,
-  });
+  try {
+    document.addEventListener("pointerdown", documentPointerHandler, true);
+    document.addEventListener("keydown", documentKeyHandler);
+  } catch {
+    detachGlobalHandlers();
+    return false;
+  }
 
   activeRoot = root;
-  activeController = controller;
 
   return true;
 }
@@ -375,7 +426,7 @@ export function syncDropdownA11y(value = null) {
   const trigger = getTrigger(root);
   const menu = getMenu(root);
 
-  if (!root || !trigger || !menu) {
+  if (!isElement(root) || !isElement(trigger) || !isElement(menu)) {
     return {
       ok: false,
       enabled: false,
@@ -386,29 +437,7 @@ export function syncDropdownA11y(value = null) {
 
   const open = isDropdownOpen(root);
 
-  try {
-    trigger.setAttribute("aria-haspopup", "menu");
-    trigger.setAttribute("aria-expanded", open ? "true" : "false");
-
-    const menuId = text(menu.id, "");
-
-    if (menuId) {
-      trigger.setAttribute("aria-controls", menuId);
-    }
-  } catch {
-    // noop
-  }
-
-  try {
-    menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-hidden", open ? "false" : "true");
-
-    menu.querySelectorAll(ITEM_SELECTOR).forEach((item) => {
-      item.setAttribute("role", "menuitem");
-    });
-  } catch {
-    // noop
-  }
+  setDomState(root, open);
 
   return {
     ok: true,
@@ -426,7 +455,7 @@ export function setDropdownOpen(open = false, options = {}) {
   const opts = normalizeOptions(options);
   const root = resolveRoot(opts);
 
-  if (!root) return false;
+  if (!isElement(root)) return false;
 
   const nextOpen = Boolean(open);
 
@@ -463,7 +492,7 @@ export function closeDropdown(options = {}) {
   const opts = normalizeOptions(options);
   const root = resolveRoot(opts) || activeRoot;
 
-  if (!root) {
+  if (!isElement(root)) {
     detachGlobalHandlers();
     return true;
   }
@@ -478,7 +507,7 @@ export function toggleDropdown(options = {}) {
   const opts = normalizeOptions(options);
   const root = resolveRoot(opts);
 
-  if (!root) return false;
+  if (!isElement(root)) return false;
 
   return setDropdownOpen(!isDropdownOpen(root), {
     ...opts,
@@ -498,39 +527,6 @@ export function closeAllDropdowns() {
   return true;
 }
 
-export function repairDropdown(value = null) {
-  const root = resolveRoot(value);
-  const trigger = getTrigger(root);
-  const menu = getMenu(root);
-
-  if (!root || !trigger || !menu) {
-    detachGlobalHandlers();
-
-    return {
-      ok: false,
-      enabled: false,
-      open: false,
-      reason: "dropdown-dom-missing",
-    };
-  }
-
-  const open = isDropdownOpen(root);
-
-  if (open) {
-    ensureSidebarOpen(root);
-  }
-
-  setDomState(root, open);
-
-  if (open) {
-    attachGlobalHandlers(root);
-  } else if (activeRoot === root) {
-    detachGlobalHandlers();
-  }
-
-  return syncDropdownA11y(root);
-}
-
 /* =========================================================
    BINDING
 ========================================================= */
@@ -538,7 +534,7 @@ export function repairDropdown(value = null) {
 export function bindSidebarDropdown(value = null) {
   const root = resolveRoot(value);
 
-  if (!root || !isBrowser()) {
+  if (!isElement(root) || !isBrowser()) {
     return () => false;
   }
 
@@ -546,11 +542,10 @@ export function bindSidebarDropdown(value = null) {
     return boundRoots.get(root);
   }
 
-  const controller = new AbortController();
-
   const onClick = (event) => {
     const target = event.target;
     const trigger = target?.closest?.(TRIGGER_SELECTOR);
+    const menu = getMenu(root);
 
     if (trigger && contains(root, trigger)) {
       event.preventDefault();
@@ -566,9 +561,21 @@ export function bindSidebarDropdown(value = null) {
     }
 
     const item = target?.closest?.(ITEM_SELECTOR);
-    const menu = getMenu(root);
 
     if (item && menu && contains(menu, item)) {
+      closeDropdown({
+        root,
+        focus: false,
+      });
+
+      return;
+    }
+
+    if (
+      isDropdownOpen(root) &&
+      !contains(getTrigger(root), target) &&
+      !contains(menu, target)
+    ) {
       closeDropdown({
         root,
         focus: false,
@@ -576,15 +583,17 @@ export function bindSidebarDropdown(value = null) {
     }
   };
 
-  root.addEventListener("click", onClick, {
-    signal: controller.signal,
-  });
+  try {
+    root.addEventListener("click", onClick);
+  } catch {
+    return () => false;
+  }
 
   syncDropdownA11y(root);
 
   const cleanup = () => {
     try {
-      controller.abort();
+      root.removeEventListener("click", onClick);
     } catch {
       // noop
     }
@@ -607,7 +616,7 @@ export const bind = bindSidebarDropdown;
 export function unbindSidebarDropdown(value = null) {
   const root = resolveRoot(value);
 
-  if (!root) return false;
+  if (!isElement(root)) return false;
 
   const cleanup = boundRoots.get(root);
 
@@ -647,6 +656,7 @@ export function getDropdownSnapshot(value = null) {
     policy: {
       dropdownOnly: true,
       opensSidebarBeforeDropdown: true,
+
       ownNavigation: false,
       ownLogout: false,
       ownAuth: false,
@@ -656,6 +666,10 @@ export function getDropdownSnapshot(value = null) {
       ownVisibility: false,
       ownTimers: false,
       ownEventsEmit: false,
+
+      usesDomRootResolver: true,
+      noLegacyRootSelectors: true,
+      noRepairApi: true,
     },
   };
 }
@@ -674,8 +688,6 @@ export default {
   closeDropdown,
   closeAllDropdowns,
   toggleDropdown,
-
-  repairDropdown,
 
   bindSidebarDropdown,
   bind,

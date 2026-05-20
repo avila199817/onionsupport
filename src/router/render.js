@@ -13,7 +13,6 @@
    - Pintar fallback simple.
    - Mantener publicPath visible y canonicalPath interno.
    - No exponer token real en DOM/snapshot.
-   - Constantes base desde core/config.js.
    - Sin Auth.
    - Sin guards.
    - Sin history propio.
@@ -26,19 +25,30 @@
    - Sin CustomEvent.
    - Sin /403.
    - Sin /404.
+   - Sin /home.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import {
-  ROUTES,
-  USER_HOME_PREFIX,
+  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
 } from "../core/config.js";
 
-export const ROUTER_RENDER_VERSION = "router.render.v5";
+export const ROUTER_RENDER_VERSION = "router.render.v6";
 
-const DEFAULT_ROUTE = ROUTES.home || ROUTES.root || "/";
+const DEFAULT_ROUTE = "/";
+const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
 const HOST_ATTR = "data-router-view-host";
 const HOST_CLASS = "router-view-host";
+
+const BLOCKED_ROUTE_PATHS = new Set([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
+]);
 
 let renderSeq = 0;
 
@@ -67,7 +77,11 @@ function isNode(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -78,7 +92,10 @@ function nextRenderId() {
 
 function redact(value = "") {
   return cleanText(value, "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -199,6 +216,8 @@ export function normalizePublicPath(path = DEFAULT_ROUTE) {
 
 function normalizeUserSlug(value = "") {
   const slug = cleanText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -209,6 +228,18 @@ function normalizeUserSlug(value = "") {
   if (!slug) return "";
 
   return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+function isBlockedRoutePath(path = DEFAULT_ROUTE) {
+  const canonical = splitPath(path).pathname.toLowerCase();
+
+  if (BLOCKED_ROUTE_PATHS.has(canonical)) return true;
+
+  return (
+    canonical.startsWith("/2fa/") ||
+    canonical.startsWith("/mfa/") ||
+    canonical.startsWith("/otp/")
+  );
 }
 
 export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
@@ -305,7 +336,8 @@ function safeActionHref(value = DEFAULT_ROUTE) {
     !path.startsWith("/") ||
     path.startsWith("//") ||
     /[\r\n\t\\]/.test(path) ||
-    hasSensitiveQuery(path)
+    hasSensitiveQuery(path) ||
+    isBlockedRoutePath(path)
   ) {
     return DEFAULT_ROUTE;
   }
@@ -1283,9 +1315,17 @@ export function getRenderSnapshot(AppCore = null) {
       validatesRealUserSlug: false,
       realSlugValidationOwner: "router/index.js",
 
+      blocksHomeAliasInFallbackActions: true,
+      defaultFallbackAction: DEFAULT_ROUTE,
+
       noCustomEvent: true,
+      noHomeRoute: true,
       no403Route: true,
       no404Route: true,
+      no2fa: true,
+      noMfa: true,
+      noOtp: true,
+
       snapshotRedacted: true,
     },
   };

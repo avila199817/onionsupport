@@ -44,7 +44,7 @@ import {
   safeNormalizePath,
 } from "./topbar.helpers.js";
 
-export const TOPBAR_UI_VERSION = "topbar.ui.v5";
+export const TOPBAR_UI_VERSION = "topbar.ui.v6";
 
 const SOURCE = "topbar.ui";
 const SEARCH_DEBOUNCE_MS = TOPBAR_SEARCH_CONFIG.debounceMs;
@@ -52,9 +52,11 @@ const SEARCH_DEBOUNCE_MS = TOPBAR_SEARCH_CONFIG.debounceMs;
 let initialized = false;
 let mounted = false;
 let bound = false;
+
 let root = null;
 let boundRoot = null;
 let cleanupEvents = null;
+
 let searchValue = "";
 let lastRoutePath = "";
 
@@ -93,11 +95,13 @@ function icon(name = "search", className = "topbar-svg") {
 
   path.setAttribute("d", ICONS[name] || ICONS.search);
   path.setAttribute("stroke", "currentColor");
-  path.setAttribute("stroke-width", "1.7");
+  path.setAttribute("stroke-width", "1.8");
   path.setAttribute("stroke-linecap", "round");
   path.setAttribute("stroke-linejoin", "round");
+  path.setAttribute("vector-effect", "non-scaling-stroke");
 
   svg.appendChild(path);
+
   return svg;
 }
 
@@ -113,35 +117,19 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function isFunction(value) {
+  return typeof value === "function";
+}
+
 function text(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
 
-function nowIso() {
-  try {
-    return new Date().toISOString();
-  } catch {
-    return "";
-  }
-}
-
-function emit(eventName = "", payload = {}) {
-  try {
-    AppCore?.events?.emit?.(eventName, {
-      source: SOURCE,
-      version: TOPBAR_UI_VERSION,
-      at: nowIso(),
-      ...payload,
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 /* =========================================================
@@ -186,7 +174,12 @@ function query(selector = "") {
 
 function create(
   tag = "div",
-  { className = "", textContent = "", attrs = {}, dataset = {} } = {}
+  {
+    className = "",
+    textContent = "",
+    attrs = {},
+    dataset = {},
+  } = {}
 ) {
   const node = document.createElement(tag);
 
@@ -194,19 +187,23 @@ function create(
   if (textContent) node.textContent = textContent;
 
   for (const [key, value] of Object.entries(isObject(attrs) ? attrs : {})) {
+    if (!key) continue;
     if (value === false || value === null || value === undefined) continue;
-    node.setAttribute(key, String(value));
+
+    node.setAttribute(key, value === true ? "true" : String(value));
   }
 
   for (const [key, value] of Object.entries(isObject(dataset) ? dataset : {})) {
+    if (!key) continue;
     if (value === false || value === null || value === undefined) continue;
+
     node.dataset[key] = String(value);
   }
 
   return node;
 }
 
-function clear(node) {
+function clear(node = null) {
   if (!node) return false;
 
   try {
@@ -222,12 +219,16 @@ function clear(node) {
   }
 }
 
-function setHidden(node, hidden = false) {
+function setHidden(node = null, hidden = false) {
   if (!node) return false;
 
+  const value = Boolean(hidden);
+
   try {
-    node.hidden = Boolean(hidden);
-    node.setAttribute("aria-hidden", hidden ? "true" : "false");
+    node.hidden = value;
+    node.setAttribute("aria-hidden", value ? "true" : "false");
+    node.setAttribute("aria-busy", "false");
+    node.dataset.topbarVisible = value ? "false" : "true";
     return true;
   } catch {
     return false;
@@ -237,23 +238,29 @@ function setHidden(node, hidden = false) {
 function getMount() {
   return (
     query("#topbar-mount") ||
-    query("#app-topbar") ||
-    query("#topbar") ||
     query("[data-topbar-mount]") ||
+    query("#app-topbar") ||
     query("[data-topbar-root]")
   );
 }
 
-function cacheRoot(node) {
+function cacheRoot(node = null) {
+  if (!node) return node;
+
   try {
     AppCore.dom = isObject(AppCore.dom) ? AppCore.dom : {};
 
     AppCore.dom.topbar = node;
     AppCore.dom.appTopbar = node;
     AppCore.dom.topbarRoot = node;
+
     AppCore.dom.topbarMount =
       query("#topbar-mount") ||
-      (node?.parentElement?.id === "topbar-mount" ? node.parentElement : node);
+      (
+        node?.parentElement?.id === "topbar-mount"
+          ? node.parentElement
+          : null
+      );
 
     AppCore.dom.topbarTitle =
       node?.querySelector?.("[data-topbar-title]") || null;
@@ -265,13 +272,19 @@ function cacheRoot(node) {
       node?.querySelector?.("[data-topbar-search-input]") || null;
     AppCore.dom.searchSubmit =
       node?.querySelector?.("[data-topbar-search-submit]") || null;
+
     AppCore.dom.searchResults =
       query("#topbar-search-results") ||
       query("[data-topbar-search-results]") ||
-      query(".topbar-search-results");
+      query(".topbar-search-results") ||
+      null;
 
-    AppCore.dom.mobileSidebarToggle = null;
-    AppCore.dom.toggleSidebarMobile = null;
+    /*
+      Contrato actual:
+      Topbar no controla sidebar ni mobile toggle.
+    */
+    delete AppCore.dom.mobileSidebarToggle;
+    delete AppCore.dom.toggleSidebarMobile;
   } catch {
     // noop
   }
@@ -283,19 +296,20 @@ function clearDomCache() {
   try {
     if (!isObject(AppCore.dom)) return false;
 
-    AppCore.dom.topbar = null;
-    AppCore.dom.appTopbar = null;
-    AppCore.dom.topbarRoot = null;
-    AppCore.dom.topbarTitle = null;
+    delete AppCore.dom.topbar;
+    delete AppCore.dom.appTopbar;
+    delete AppCore.dom.topbarRoot;
+    delete AppCore.dom.topbarMount;
+    delete AppCore.dom.topbarTitle;
 
-    AppCore.dom.search = null;
-    AppCore.dom.searchForm = null;
-    AppCore.dom.searchInput = null;
-    AppCore.dom.searchSubmit = null;
-    AppCore.dom.searchResults = null;
+    delete AppCore.dom.search;
+    delete AppCore.dom.searchForm;
+    delete AppCore.dom.searchInput;
+    delete AppCore.dom.searchSubmit;
+    delete AppCore.dom.searchResults;
 
-    AppCore.dom.mobileSidebarToggle = null;
-    AppCore.dom.toggleSidebarMobile = null;
+    delete AppCore.dom.mobileSidebarToggle;
+    delete AppCore.dom.toggleSidebarMobile;
 
     return true;
   } catch {
@@ -303,7 +317,7 @@ function clearDomCache() {
   }
 }
 
-function renderRootContent(header) {
+function renderRootContent(header = null) {
   if (!header) return false;
 
   header.id = "app-topbar";
@@ -380,14 +394,16 @@ function renderRootContent(header) {
   });
 
   button.appendChild(icon("search", "topbar-search-svg"));
+
   search.append(input, button);
   right.appendChild(search);
+
   header.append(left, right);
 
   return true;
 }
 
-function rootHasRequiredStructure(node) {
+function rootHasRequiredStructure(node = null) {
   return Boolean(
     node?.querySelector?.("[data-topbar-title]") &&
       node?.querySelector?.("[data-topbar-search]") &&
@@ -396,7 +412,7 @@ function rootHasRequiredStructure(node) {
   );
 }
 
-function rootHasLegacyChrome(node) {
+function rootHasLegacyChrome(node = null) {
   return Boolean(
     node?.querySelector?.("[data-topbar-sidebar-toggle]") ||
       node?.querySelector?.("[data-topbar-user]") ||
@@ -421,6 +437,7 @@ function buildRoot() {
   });
 
   renderRootContent(header);
+
   return header;
 }
 
@@ -431,7 +448,7 @@ function ensureRoot() {
 
   if (!mount) return null;
 
-  if (mount.matches?.("[data-topbar-root], #app-topbar, #topbar")) {
+  if (mount.matches?.("[data-topbar-root], #app-topbar")) {
     root = mount;
   } else {
     root = mount.querySelector("[data-topbar-root]");
@@ -456,7 +473,8 @@ function getDom() {
   const searchResults =
     query("#topbar-search-results") ||
     query("[data-topbar-search-results]") ||
-    query(".topbar-search-results");
+    query(".topbar-search-results") ||
+    null;
 
   return {
     topbar: root,
@@ -566,10 +584,6 @@ function clearSearch() {
   setSearchValue("");
   clearSearchState(searchRuntime, getDom);
 
-  emit("topbar:search:clear", {
-    query: null,
-  });
-
   return true;
 }
 
@@ -603,11 +617,6 @@ function submitSearch(value = getSearchValue()) {
   }
 
   setSearchValue(query);
-
-  emit("topbar:search", {
-    query,
-  });
-
   runCurrentSearch(query);
 
   return true;
@@ -721,14 +730,22 @@ function bind() {
     unbind();
   }
 
-  root.addEventListener("submit", onSubmit);
-  root.addEventListener("input", onInput);
-  root.addEventListener("keydown", onKeydown);
-  root.addEventListener("focusin", onFocusIn);
+  try {
+    root.addEventListener("submit", onSubmit);
+    root.addEventListener("input", onInput);
+    root.addEventListener("keydown", onKeydown);
+    root.addEventListener("focusin", onFocusIn);
+  } catch {
+    return false;
+  }
 
   if (isBrowser()) {
-    document.addEventListener("keydown", onDocumentKeydown, false);
-    document.addEventListener("pointerdown", onDocumentPointerDown, true);
+    try {
+      document.addEventListener("keydown", onDocumentKeydown, false);
+      document.addEventListener("pointerdown", onDocumentPointerDown, true);
+    } catch {
+      // noop
+    }
   }
 
   boundRoot = root;
@@ -759,6 +776,7 @@ function bind() {
   };
 
   bound = true;
+
   return true;
 }
 
@@ -817,19 +835,16 @@ function sync(options = {}) {
 }
 
 function init(options = {}) {
-  registerPublicApi();
+  registerModule();
+
+  searchRuntime.AppCore = AppCore;
+  searchRuntime.Router = Router;
 
   initialized = true;
 
   ensureRoot();
   sync(options);
   bind();
-
-  emit("topbar:ready", {
-    initialized: true,
-    mounted,
-    bound,
-  });
 
   return true;
 }
@@ -845,6 +860,7 @@ function refresh(options = {}) {
 function destroy(options = {}) {
   unbind();
   clearSearchState(searchRuntime, getDom);
+  clearSearchDebounce(searchRuntime);
 
   if (options.unmount === true && root) {
     try {
@@ -861,9 +877,8 @@ function destroy(options = {}) {
   mounted = false;
   lastRoutePath = "";
 
-  unregisterWindowApi();
+  unregisterModule();
 
-  emit("topbar:destroyed");
   return true;
 }
 
@@ -871,39 +886,27 @@ function destroy(options = {}) {
    REGISTRATION
 ========================================================= */
 
-function registerPublicApi() {
+function registerModule() {
   try {
-    AppCore.Topbar = api;
-    AppCore.TopbarUI = api;
-    AppCore.topbar = api;
-    AppCore.topbarUI = api;
+    AppCore.ui = isObject(AppCore.ui) ? AppCore.ui : {};
+    AppCore.ui.topbar = api;
 
-    AppCore.modules?.register?.("Topbar", api);
-    AppCore.modules?.register?.("TopbarUI", api);
     AppCore.modules?.register?.("topbar", api);
-    AppCore.modules?.register?.("topbarUI", api);
+
+    return true;
   } catch {
-    // noop
+    return false;
   }
-
-  if (isBrowser()) {
-    try {
-      window.TopbarUI = api;
-      window.OnionTopbarUI = api;
-    } catch {
-      // noop
-    }
-  }
-
-  return true;
 }
 
-function unregisterWindowApi() {
-  if (!isBrowser()) return false;
-
+function unregisterModule() {
   try {
-    if (window.TopbarUI === api) delete window.TopbarUI;
-    if (window.OnionTopbarUI === api) delete window.OnionTopbarUI;
+    if (AppCore.ui?.topbar === api) {
+      delete AppCore.ui.topbar;
+    }
+
+    AppCore.modules?.remove?.("topbar");
+
     return true;
   } catch {
     return false;
@@ -924,20 +927,28 @@ function getDomSnapshot() {
     searchInput: Boolean(dom.searchInput),
     searchSubmit: Boolean(dom.searchSubmit),
     searchResults: Boolean(dom.searchResults),
+
     sidebarToggle: false,
     user: false,
+    logout: false,
   };
 }
 
 function getSearchSnapshot() {
   return {
     activeIndex: Number(searchRuntime.activeIndex || -1),
+
     resultCount: Array.isArray(searchRuntime.currentItems)
       ? searchRuntime.currentItems.length
       : 0,
+
     queryLength: String(searchValue || "").length,
     currentQueryLength: String(searchRuntime.currentQuery || "").length,
-    cacheSize: searchRuntime.cache instanceof Map ? searchRuntime.cache.size : 0,
+
+    cacheSize: searchRuntime.cache instanceof Map
+      ? searchRuntime.cache.size
+      : 0,
+
     hasDebounce: Boolean(searchRuntime.searchDebounceTimer),
   };
 }
@@ -951,7 +962,7 @@ function getState() {
     bound,
 
     title: root?.querySelector?.("[data-topbar-title]")?.textContent || "",
-    route: currentPath(),
+    route: redact(currentPath()),
 
     search: getSearchSnapshot(),
 
@@ -961,21 +972,33 @@ function getState() {
     },
 
     policy: {
+      topbarOnly: true,
+
       ownAuth: false,
       ownRouter: false,
       ownHttp: false,
       ownStore: false,
       ownToast: false,
+      ownEvents: false,
+
       noUserChrome: true,
       noLogout: true,
       noSidebarToggle: true,
       noSidebarBridge: true,
+
+      noWindowGlobal: true,
+      noImportSideEffectRegistration: true,
+
       searchUi: true,
       searchRuntime: true,
       searchLocalOnly: true,
+
       svgIcons: true,
+
       canonicalizesUserHomePath: true,
+
       roles: ["admin", "user"],
+      snapshotRedacted: true,
     },
   };
 }
@@ -1006,6 +1029,7 @@ const api = {
       ...options,
       unmount: true,
     });
+
     return true;
   },
 
@@ -1045,8 +1069,6 @@ const api = {
     return bound;
   },
 };
-
-registerPublicApi();
 
 export const TopbarUI = api;
 

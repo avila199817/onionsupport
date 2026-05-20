@@ -7,7 +7,8 @@
    - API pública única.
    - Auto-init al primer uso.
    - DOM seguro con textContent.
-   - Registro en AppCore/window.
+   - Registro en AppCore sólo desde init/primer uso.
+   - Sin registro global window.
    - Sin submódulos.
    - Sin Auth.
    - Sin Router.
@@ -16,20 +17,27 @@
    - Sin i18n complejo.
    - Sin CSS runtime.
    - Sin CustomEvent.
+   - Sin eventos AppCore.
    - Sin redeclaraciones.
    - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-export const TOAST_MODULE_VERSION = "simple";
+export const TOAST_MODULE_VERSION = "toast.ui.v2";
 
 const SOURCE = "ui.toast";
-const GLOBAL_KEY = "__ONION_TOAST__";
 const CONTAINER_ID = "toast-container";
 const MAX_TOASTS = 5;
+const MAX_DURATION_MS = 600000;
 
-const VALID_TYPES = new Set(["success", "error", "warning", "info", "loading"]);
+const VALID_TYPES = new Set([
+  "success",
+  "error",
+  "warning",
+  "info",
+  "loading",
+]);
 
 const DEFAULT_DURATIONS = Object.freeze({
   success: 3500,
@@ -45,6 +53,7 @@ let destroyed = false;
 let sequence = 0;
 
 let container = null;
+let boundContainer = null;
 let clickCleanup = null;
 
 const items = new Map();
@@ -62,22 +71,30 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function text(value = "", fallback = "") {
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
 
 function nowIso() {
-  return new Date().toISOString();
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function normalizeType(type = "info") {
-  const clean = text(type, "info").toLowerCase();
+  const clean = cleanText(type, "info").toLowerCase();
   return VALID_TYPES.has(clean) ? clean : "info";
 }
 
 function normalizeId(value = "") {
-  return text(value, "")
+  return cleanText(value, "")
     .replace(/\s+/g, "-")
     .replace(/[^a-zA-Z0-9_.:-]/g, "")
     .slice(0, 120);
@@ -89,27 +106,9 @@ function createId() {
 }
 
 function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+  return cleanText(value, "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
-}
-
-function emit(eventName = "", payload = {}) {
-  try {
-    AppCore?.events?.emit?.(eventName, {
-      source: SOURCE,
-      version: TOAST_MODULE_VERSION,
-      at: nowIso(),
-      ...payload,
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /* =========================================================
@@ -168,7 +167,37 @@ function findToastNode(id = "") {
   }
 }
 
-function createToastNode(item) {
+function patchToastNode(node = null, item = null) {
+  if (!node || !item) return false;
+
+  const type = normalizeType(item.type);
+
+  try {
+    node.className = `toast toast--${type}`;
+    node.dataset.toastId = item.id;
+    node.dataset.toastType = type;
+    node.setAttribute("role", type === "error" ? "alert" : "status");
+    node.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
+
+    const title = node.querySelector("[data-toast-title]");
+    const message = node.querySelector("[data-toast-message]");
+
+    if (title) {
+      title.textContent = redact(item.title || "");
+      title.hidden = !cleanText(item.title, "");
+    }
+
+    if (message) {
+      message.textContent = redact(item.message || "");
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createToastNode(item = {}) {
   const node = document.createElement("article");
 
   node.className = `toast toast--${item.type}`;
@@ -207,36 +236,6 @@ function createToastNode(item) {
   return node;
 }
 
-function patchToastNode(node, item) {
-  if (!node || !item) return false;
-
-  const type = normalizeType(item.type);
-
-  try {
-    node.className = `toast toast--${type}`;
-    node.dataset.toastId = item.id;
-    node.dataset.toastType = type;
-    node.setAttribute("role", type === "error" ? "alert" : "status");
-    node.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
-
-    const title = node.querySelector("[data-toast-title]");
-    const message = node.querySelector("[data-toast-message]");
-
-    if (title) {
-      title.textContent = text(item.title, "");
-      title.hidden = !text(item.title, "");
-    }
-
-    if (message) {
-      message.textContent = text(item.message, "");
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function removeToastNode(id = "") {
   const node = findToastNode(id);
 
@@ -260,12 +259,13 @@ function clearTimer(id = "") {
   if (!timer) return false;
 
   try {
-    window.clearTimeout(timer);
+    globalThis.clearTimeout(timer);
   } catch {
     // noop
   }
 
   timers.delete(id);
+
   return true;
 }
 
@@ -275,7 +275,7 @@ function durationFor(item = {}) {
   const duration = Number(item.duration);
 
   if (Number.isFinite(duration) && duration >= 0) {
-    return duration;
+    return Math.min(duration, MAX_DURATION_MS);
   }
 
   return DEFAULT_DURATIONS[item.type] ?? DEFAULT_DURATIONS.info;
@@ -291,7 +291,9 @@ function armTimer(item = {}) {
   if (!duration) return false;
 
   const timer = window.setTimeout(() => {
-    dismissToast(item.id, { reason: "timeout" });
+    dismissToast(item.id, {
+      reason: "timeout",
+    });
   }, duration);
 
   timers.set(item.id, timer);
@@ -305,7 +307,9 @@ function enforceLimit() {
 
     if (!firstId) break;
 
-    dismissToast(firstId, { reason: "limit" });
+    dismissToast(firstId, {
+      reason: "limit",
+    });
   }
 }
 
@@ -331,7 +335,7 @@ function normalizeShowInput(input = {}, options = {}) {
   ) {
     return {
       ...opts,
-      message: text(input, ""),
+      message: cleanText(input, ""),
     };
   }
 
@@ -355,15 +359,66 @@ function normalizeMessageInput(message = "", options = {}, type = "info") {
       type,
       ...message,
       ...options,
-      message: text(message.message || message.text || "", ""),
+      message: cleanText(message.message || message.text || "", ""),
     };
   }
 
   return {
     ...options,
     type,
-    message: text(message, ""),
+    message: cleanText(message, ""),
   };
+}
+
+/* =========================================================
+   REGISTRATION
+========================================================= */
+
+function bridge(message = "", type = "info", options = {}) {
+  if (isObject(type)) {
+    return showToast(message, type);
+  }
+
+  return showToast({
+    ...options,
+    type,
+    message,
+  });
+}
+
+function registerToast() {
+  try {
+    AppCore.ui = isObject(AppCore.ui) ? AppCore.ui : {};
+    AppCore.ui.toast = api;
+
+    /*
+      Core tiene setters para AppCore.toast/AppCore.Toast.
+      Usamos ambos sólo como fachada del mismo módulo, sin cliente paralelo.
+    */
+    AppCore.toast = api;
+    AppCore.Toast = api;
+
+    AppCore.setShowToast?.(bridge);
+    AppCore.modules?.register?.("toast", api);
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function unregisterToast() {
+  try {
+    if (AppCore.ui?.toast === api) {
+      delete AppCore.ui.toast;
+    }
+
+    AppCore.modules?.remove?.("toast");
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -372,7 +427,10 @@ function normalizeMessageInput(message = "", options = {}, type = "info") {
 
 function ensureReady() {
   if (destroyed) destroyed = false;
-  if (!initialized) initToast();
+
+  if (!initialized) {
+    initToast();
+  }
 
   getToastContainer();
 
@@ -385,15 +443,20 @@ function showToast(input = {}, options = {}) {
   const payload = normalizeShowInput(input, options);
   const type = normalizeType(payload.type || "info");
 
-  const title = text(payload.title || "", "");
-  const message = text(
-    payload.message || payload.text || payload.description || "",
-    type === "loading" ? "Cargando..." : ""
+  const title = redact(cleanText(payload.title || "", ""));
+
+  const message = redact(
+    cleanText(
+      payload.message || payload.text || payload.description || "",
+      type === "loading" ? "Cargando..." : ""
+    )
   );
 
   if (!title && !message) return null;
 
-  const id = normalizeId(payload.id || payload.toastId || payload.key) || createId();
+  const id =
+    normalizeId(payload.id || payload.toastId || payload.key) ||
+    createId();
 
   const item = {
     id,
@@ -423,8 +486,6 @@ function showToast(input = {}, options = {}) {
   armTimer(item);
   enforceLimit();
 
-  emit("toast:show", { id, type });
-
   return id;
 }
 
@@ -440,7 +501,10 @@ function updateToast(idOrPatch = "", patch = {}) {
   const current = items.get(id);
 
   const nextPatch = isObject(idOrPatch)
-    ? { ...idOrPatch, ...patch }
+    ? {
+        ...idOrPatch,
+        ...patch,
+      }
     : isObject(patch)
       ? patch
       : {};
@@ -452,8 +516,8 @@ function updateToast(idOrPatch = "", patch = {}) {
     ...nextPatch,
     id,
     type,
-    title: text(nextPatch.title ?? current.title, ""),
-    message: text(nextPatch.message ?? nextPatch.text ?? current.message, ""),
+    title: redact(cleanText(nextPatch.title ?? current.title, "")),
+    message: redact(cleanText(nextPatch.message ?? nextPatch.text ?? current.message, "")),
     persist: nextPatch.persist !== undefined
       ? nextPatch.persist === true
       : type === "loading",
@@ -464,14 +528,10 @@ function updateToast(idOrPatch = "", patch = {}) {
   patchToastNode(findToastNode(id), next);
   armTimer(next);
 
-  emit("toast:update", { id, type });
-
   return id;
 }
 
 function dismissToast(id = null, options = {}) {
-  ensureReady();
-
   const toastId = normalizeId(id || "");
 
   if (!toastId) {
@@ -482,17 +542,10 @@ function dismissToast(id = null, options = {}) {
   items.delete(toastId);
   removeToastNode(toastId);
 
-  emit("toast:dismiss", {
-    id: toastId,
-    reason: options?.reason || "",
-  });
-
   return true;
 }
 
-function clearToasts(options = {}) {
-  ensureReady();
-
+function clearToasts(_options = {}) {
   for (const id of [...items.keys()]) {
     clearTimer(id);
     removeToastNode(id);
@@ -500,16 +553,13 @@ function clearToasts(options = {}) {
 
   items.clear();
 
-  emit("toast:clear", {
-    reason: options?.reason || "",
-  });
-
   return true;
 }
 
 function resetToasts(options = {}) {
   clearToasts(options);
   sequence = 0;
+
   return true;
 }
 
@@ -565,15 +615,23 @@ function onClick(event) {
 }
 
 function bindToastEvents() {
-  ensureReady();
-
-  if (eventsBound) return true;
-
   const root = getToastContainer();
 
   if (!root) return false;
 
-  root.addEventListener("click", onClick);
+  if (eventsBound && boundContainer === root) {
+    return true;
+  }
+
+  unbindToastEvents();
+
+  try {
+    root.addEventListener("click", onClick);
+  } catch {
+    return false;
+  }
+
+  boundContainer = root;
 
   clickCleanup = () => {
     try {
@@ -583,9 +641,11 @@ function bindToastEvents() {
     }
 
     clickCleanup = null;
+    boundContainer = null;
   };
 
   eventsBound = true;
+
   return true;
 }
 
@@ -597,57 +657,8 @@ function unbindToastEvents() {
   }
 
   clickCleanup = null;
+  boundContainer = null;
   eventsBound = false;
-
-  return true;
-}
-
-/* =========================================================
-   REGISTRATION
-========================================================= */
-
-function bridge(message = "", type = "info", options = {}) {
-  if (isObject(type)) {
-    return showToast(message, type);
-  }
-
-  return showToast({
-    ...options,
-    type,
-    message,
-  });
-}
-
-function registerToast() {
-  try {
-    AppCore.Toast = api;
-    AppCore.toast = api;
-
-    AppCore.services = isObject(AppCore.services) ? AppCore.services : {};
-    AppCore.services.Toast = api;
-    AppCore.services.toast = api;
-
-    AppCore.ui = isObject(AppCore.ui) ? AppCore.ui : {};
-    AppCore.ui.Toast = api;
-    AppCore.ui.toast = api;
-
-    AppCore.setShowToast?.(bridge);
-
-    AppCore.modules?.register?.("Toast", api);
-    AppCore.modules?.register?.("toast", api);
-  } catch {
-    // noop
-  }
-
-  if (isBrowser()) {
-    try {
-      window[GLOBAL_KEY] = api;
-      window.OnionToast = api;
-      window.Toast = window.Toast || api;
-    } catch {
-      // noop
-    }
-  }
 
   return true;
 }
@@ -657,22 +668,19 @@ function registerToast() {
 ========================================================= */
 
 function initToast() {
+  destroyed = false;
+
   if (initialized) {
     registerToast();
     bindToastEvents();
     return api;
   }
 
-  destroyed = false;
   initialized = true;
 
   getToastContainer();
   registerToast();
   bindToastEvents();
-
-  emit("toast:ready", {
-    initialized: true,
-  });
 
   return api;
 }
@@ -681,13 +689,15 @@ function destroyToast(options = {}) {
   unbindToastEvents();
 
   if (options.clear !== false) {
-    clearToasts({ reason: "destroy" });
+    clearToasts({
+      reason: "destroy",
+    });
   }
 
   initialized = false;
   destroyed = true;
 
-  emit("toast:destroy");
+  unregisterToast();
 
   return true;
 }
@@ -706,16 +716,14 @@ function existsToast(id = null) {
   return Boolean(toastId && items.has(toastId));
 }
 
-function refreshLanguage() {
-  return true;
-}
-
 /* =========================================================
    SNAPSHOT
 ========================================================= */
 
 function getSnapshot() {
-  const root = getToastContainer({ create: false });
+  const root = getToastContainer({
+    create: false,
+  });
 
   return {
     version: TOAST_MODULE_VERSION,
@@ -744,15 +752,25 @@ function getSnapshot() {
     },
 
     policy: {
+      toastOnly: true,
+      apiUnique: true,
+      autoInitOnFirstUse: true,
+
       ownAuth: false,
       ownRouter: false,
       ownHttp: false,
       ownStore: false,
       submodules: false,
+
       textContentOnly: true,
       noCssRuntime: true,
       noCustomEvent: true,
-      noRedeclareExports: true,
+      noAppCoreEvents: true,
+      noWindowGlobal: true,
+      noImportSideEffectRegistration: true,
+
+      appCoreRegistrationOnly: true,
+      snapshotRedacted: true,
     },
   };
 }
@@ -776,21 +794,10 @@ const api = {
   unbindEvents: unbindToastEvents,
 
   show: showToast,
-  notify: showToast,
-  toast: showToast,
-  open: showToast,
-  push: showToast,
-
   update: updateToast,
 
   dismiss: dismissToast,
-  hide: dismissToast,
-  close: dismissToast,
-  remove: dismissToast,
-
   clear: clearToasts,
-  dismissAll: clearToasts,
-  clearAll: clearToasts,
   reset: resetToasts,
 
   success: successToast,
@@ -800,17 +807,12 @@ const api = {
   info: infoToast,
   loading: loadingToast,
 
-  refreshLanguage,
-  refreshAllToastsLanguage: refreshLanguage,
-
   exists: existsToast,
   ready,
 
   getSnapshot,
   getDebugSnapshot: getSnapshot,
   getState: getSnapshot,
-
-  bridge,
 
   get initialized() {
     return initialized;
@@ -825,22 +827,11 @@ const api = {
   },
 };
 
-registerToast();
-
 export const Toast = api;
 
 /* =========================================================
    NAMED EXPORTS
-   Sin wrappers duplicados.
 ========================================================= */
-
-export function initToastModule(options = {}) {
-  return Toast.init(options);
-}
-
-export function destroyToastModule(options = {}) {
-  return Toast.destroy(options);
-}
 
 export {
   initToast as init,
@@ -853,22 +844,10 @@ export {
   unbindToastEvents as unbindEvents,
 
   showToast as show,
-  showToast as notify,
-  showToast as toast,
-  showToast as open,
-  showToast as push,
-
   updateToast as update,
 
   dismissToast as dismiss,
-  dismissToast as hide,
-  dismissToast as close,
-  dismissToast as remove,
-
   clearToasts as clear,
-  clearToasts as dismissAll,
-  clearToasts as clearAll,
-
   resetToasts as reset,
 
   successToast as success,
@@ -877,6 +856,11 @@ export {
   warnToast as warn,
   infoToast as info,
   loadingToast as loading,
+
+  existsToast as exists,
+  ready,
+
+  getSnapshot,
 };
 
 export default Toast;

@@ -6,7 +6,7 @@
    - Template simple para recuperar/restablecer contraseña.
    - Modo request: pedir usuario o email.
    - Modo confirm: nueva contraseña + confirmar contraseña.
-   - Token único: token.
+   - Token único desde core/config.js.
    - Consumir shared/password-field.
    - Conectar con CSS auth/login común.
    - Textos base en castellano.
@@ -22,15 +22,22 @@
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
+import {
+  ROUTES,
+  TOKEN_PARAM,
+} from "../../core/config.js";
+
 import { renderPasswordField } from "../../shared/password-field/index.js";
 
-export const TEMPLATE_VERSION = "reset-password.template.v2";
+export const TEMPLATE_VERSION = "reset-password.template.v3";
 
 const DEFAULT_APP_NAME = "Onion Support";
-const DEFAULT_LOGIN_HREF = "/login";
+const DEFAULT_LOGIN_HREF = ROUTES.login || "/login";
 const DEFAULT_LOGO = "/src/media/img/favicon_black_circle.png?v=6";
 
-const TOKEN_PARAM = "token";
+const MAX_IDENTIFIER_LENGTH = 160;
+const MAX_PASSWORD_LENGTH = 1024;
+const MAX_TOKEN_LENGTH = 8192;
 
 /* =========================================================
    HELPERS
@@ -54,6 +61,12 @@ function escapeAttr(value = "") {
   return escapeHtml(text(value, ""));
 }
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
 function safeInternalHref(value = "", fallback = DEFAULT_LOGIN_HREF) {
   const raw = text(value, "");
   const fallbackHref = text(fallback, DEFAULT_LOGIN_HREF);
@@ -63,6 +76,7 @@ function safeInternalHref(value = "", fallback = DEFAULT_LOGIN_HREF) {
   if (raw.startsWith("//")) return fallbackHref;
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallbackHref;
   if (/[\r\n\t\\]/.test(raw)) return fallbackHref;
+  if (hasSensitiveQuery(raw)) return fallbackHref;
 
   return raw.replace(/\/{2,}/g, "/") || fallbackHref;
 }
@@ -76,8 +90,9 @@ function safeAssetSrc(value = "", fallback = DEFAULT_LOGO) {
   if (raw.startsWith("//")) return fallbackSrc;
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallbackSrc;
   if (/[\r\n\t\\]/.test(raw)) return fallbackSrc;
+  if (hasSensitiveQuery(raw)) return fallbackSrc;
 
-  return raw;
+  return raw.replace(/\/{2,}/g, "/") || fallbackSrc;
 }
 
 function normalizeToken(value = "") {
@@ -85,12 +100,18 @@ function normalizeToken(value = "") {
 
   if (!token) return "";
   if (/\s/.test(token)) return "";
-  if (token.length > 8192) return "";
+  if (token.length > MAX_TOKEN_LENGTH) return "";
 
   if (
-    ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
-      token.toLowerCase()
-    )
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "[object object]",
+      "{}",
+      "[]",
+    ].includes(token.toLowerCase())
   ) {
     return "";
   }
@@ -102,7 +123,7 @@ function normalizeIdentifier(value = "") {
   return text(value, "")
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
-    .slice(0, 180);
+    .slice(0, MAX_IDENTIFIER_LENGTH);
 }
 
 function normalizeMode(options = {}) {
@@ -127,7 +148,6 @@ function renderMessage() {
       data-reset-password-message="true"
       data-password-reset-error="true"
       data-reset-password-error="true"
-      data-toast-anchor="password-reset"
       role="alert"
       aria-live="polite"
       aria-atomic="true"
@@ -163,6 +183,7 @@ function renderRequestFields({ identifier = "" } = {}) {
         spellcheck="false"
         placeholder="Usuario o email"
         value="${escapeAttr(normalizeIdentifier(identifier))}"
+        maxlength="${MAX_IDENTIFIER_LENGTH}"
         data-password-reset-identifier="true"
         data-reset-password-identifier="true"
         data-i18n-placeholder="passwordReset.identifierPlaceholder"
@@ -188,10 +209,14 @@ function renderResetPasswordField({
 
     label,
     placeholder,
+
     autocomplete: "new-password",
     required: true,
+    maxLength: MAX_PASSWORD_LENGTH,
+
     showToggle: true,
     showCapsIndicator: true,
+    capsLabel: "Bloq Mayús",
 
     fieldClass: "auth-field password-reset-field",
     wrapperClass: "password-wrapper password-reset-password-wrapper",
@@ -222,6 +247,7 @@ function renderConfirmFields({ token = "" } = {}) {
       type="hidden"
       name="${escapeAttr(TOKEN_PARAM)}"
       value=""
+      autocomplete="off"
       data-password-reset-token="true"
       data-reset-token="true"
       data-token-param="${escapeAttr(TOKEN_PARAM)}"
@@ -302,9 +328,9 @@ export function getResetPasswordTemplate(options = {}) {
       aria-labelledby="passwordResetTitle"
       aria-describedby="passwordResetDescription"
     >
-      <div class="auth-shell password-reset-shell">
-        <article class="auth-card password-reset-card">
-          <header class="auth-header password-reset-header">
+      <div class="auth-shell password-reset-shell" data-password-reset-shell="true">
+        <article class="auth-card password-reset-card" data-password-reset-card="true">
+          <header class="auth-header password-reset-header" data-password-reset-header="true">
             <img
               class="password-reset-logo"
               src="${escapeAttr(logoSrc)}"
@@ -315,6 +341,7 @@ export function getResetPasswordTemplate(options = {}) {
               decoding="async"
               draggable="false"
               aria-hidden="true"
+              data-password-reset-logo="true"
             >
 
             <h1
@@ -341,7 +368,6 @@ export function getResetPasswordTemplate(options = {}) {
             data-reset-password-form="true"
             data-password-reset-flow="${escapeAttr(mode)}"
             data-reset-password-flow="${escapeAttr(mode)}"
-            data-toast-scope="auth.passwordReset"
             aria-describedby="passwordResetDescription passwordResetMessage"
             autocomplete="on"
             novalidate

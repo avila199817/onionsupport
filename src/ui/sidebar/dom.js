@@ -4,8 +4,8 @@
 
    Responsabilidad:
    - Helpers DOM mínimos del sidebar.
-   - Resolver mount/root.
-   - Montar/reemplazar sidebar.
+   - Resolver mount/root real.
+   - Montar/reemplazar sidebar dentro de #sidebar-mount.
    - Ocultar/limpiar sidebar.
    - Cachear referencias básicas en AppCore.dom.
    - Cachear referencias estructurales del dropdown.
@@ -28,7 +28,7 @@ import {
   SIDEBAR_SELECTORS,
 } from "./constants.js";
 
-export const SIDEBAR_DOM_VERSION = "sidebar.dom.v3";
+export const SIDEBAR_DOM_VERSION = "sidebar.dom.v4";
 
 /* =========================================================
    BASICS
@@ -87,9 +87,7 @@ function matches(node = null, selector = "") {
 }
 
 function uniqueElements(values = []) {
-  return [
-    ...new Set(values.filter(isElement)),
-  ];
+  return [...new Set(values.filter(isElement))];
 }
 
 /* =========================================================
@@ -214,6 +212,7 @@ export function setHidden(node = null, hidden = false) {
   try {
     node.hidden = value;
     node.setAttribute("aria-hidden", value ? "true" : "false");
+    node.setAttribute("aria-busy", "false");
 
     if (SIDEBAR_CLASSES.hidden) {
       node.classList.toggle(SIDEBAR_CLASSES.hidden, value);
@@ -274,9 +273,7 @@ export function getSidebarMount() {
     byId(SIDEBAR_MOUNT_ID) ||
     query("[data-sidebar-mount='true']") ||
     query("[data-sidebar-mount]") ||
-    byId(SIDEBAR_ROOT_ID) ||
-    query(SIDEBAR_SELECTORS.root) ||
-    query("[data-sidebar-root]")
+    null
   );
 }
 
@@ -371,12 +368,7 @@ export function mountSidebarRoot(nextRoot = null) {
   if (!root) return null;
 
   try {
-    if (isSidebarRoot(mount)) {
-      mount.replaceWith(root);
-    } else {
-      mount.replaceChildren(root);
-    }
-
+    mount.replaceChildren(root);
     removeDuplicateSidebarRoots(root);
 
     return root;
@@ -644,6 +636,7 @@ function nodeSnapshot(node = null) {
     tag: node.tagName?.toLowerCase?.() || "",
     hidden: Boolean(node.hidden),
     ariaHidden: node.getAttribute("aria-hidden") || "",
+    ariaBusy: node.getAttribute("aria-busy") || "",
     className: text(node.className, ""),
   };
 }
@@ -682,6 +675,8 @@ export function getSidebarDomSnapshot(root = getSidebarRoot()) {
 
     policy: {
       domOnly: true,
+      realMountOnly: true,
+
       noAuth: true,
       noRouter: true,
       noHttp: true,

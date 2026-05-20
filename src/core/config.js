@@ -22,7 +22,7 @@
    - Sin magia negra.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.v2";
+export const CONFIG_VERSION = "core.config.v3";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
@@ -30,12 +30,18 @@ export const CANONICAL_BACKEND_API_ORIGINS = Object.freeze([
   CANONICAL_PRODUCTION_API_BASE,
 ]);
 
-export const FORBIDDEN_FRONTEND_API_ORIGINS = Object.freeze([
+export const CANONICAL_FRONTEND_ORIGINS = Object.freeze([
   "https://onionsupport.com",
   "https://www.onionsupport.com",
   "http://onionsupport.com",
   "http://www.onionsupport.com",
 ]);
+
+/*
+  Compat semántica:
+  Estos orígenes son frontend y nunca deben usarse como API base.
+*/
+export const FORBIDDEN_FRONTEND_API_ORIGINS = CANONICAL_FRONTEND_ORIGINS;
 
 export const TOKEN_PARAM = "token";
 export const USER_HOME_PREFIX = "/@";
@@ -45,6 +51,7 @@ export const USER_HOME_PREFIX = "/@";
 ========================================================= */
 
 export const ROUTES = Object.freeze({
+  root: "/",
   home: "/",
 
   login: "/login",
@@ -69,9 +76,7 @@ export const PUBLIC_ROUTES = Object.freeze([
   ROUTES.activateAccount,
 ]);
 
-export const TECHNICAL_PUBLIC_ROUTES = Object.freeze([
-  ...PUBLIC_ROUTES,
-]);
+export const TECHNICAL_PUBLIC_ROUTES = PUBLIC_ROUTES;
 
 export const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
@@ -80,7 +85,6 @@ export const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
     paths: Object.freeze([ROUTES.activateAccount]),
     tokenParamNames: Object.freeze([TOKEN_PARAM]),
   }),
-
   Object.freeze({
     key: "passwordReset",
     path: ROUTES.passwordReset,
@@ -134,12 +138,35 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
 function cleanOrigin(value = "") {
   try {
     return new URL(value).origin;
   } catch {
     return "";
   }
+}
+
+function isCurrentBrowserOrigin(origin = "") {
+  return Boolean(
+    isBrowser() &&
+      origin &&
+      origin === window.location.origin
+  );
+}
+
+function isAllowedFrontendOrigin(origin = "") {
+  return Boolean(
+    CANONICAL_FRONTEND_ORIGINS.includes(origin) ||
+      isCurrentBrowserOrigin(origin)
+  );
+}
+
+function isAllowedBackendOrigin(origin = "") {
+  return CANONICAL_BACKEND_API_ORIGINS.includes(origin);
 }
 
 function normalizeApiBase(value = "") {
@@ -151,15 +178,19 @@ function normalizeApiBase(value = "") {
 
   const origin = cleanOrigin(raw);
 
+  if (!origin) {
+    return CANONICAL_PRODUCTION_API_BASE;
+  }
+
   if (FORBIDDEN_FRONTEND_API_ORIGINS.includes(origin)) {
     return CANONICAL_PRODUCTION_API_BASE;
   }
 
-  if (raw.endsWith("/api")) {
-    return raw.slice(0, -4);
+  if (!isAllowedBackendOrigin(origin)) {
+    return CANONICAL_PRODUCTION_API_BASE;
   }
 
-  return origin || CANONICAL_PRODUCTION_API_BASE;
+  return origin;
 }
 
 function isHashRouterPath(value = "") {
@@ -181,7 +212,23 @@ function normalizeHashRouterPath(value = "") {
   return raw || "/";
 }
 
-export function pathFromUrlLike(value = "") {
+function normalizePathname(pathname = "/") {
+  let value = text(pathname, "/").replace(/\\/g, "/");
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  value = value.replace(/\/{2,}/g, "/");
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value || "/";
+}
+
+export function routePathFromUrlLike(value = "") {
   const raw = text(value, "");
 
   if (!raw) return "";
@@ -197,6 +244,10 @@ export function pathFromUrlLike(value = "") {
   try {
     if (/^https?:\/\//i.test(raw)) {
       const url = new URL(raw);
+
+      if (!isAllowedFrontendOrigin(url.origin)) {
+        return "/";
+      }
 
       if (url.hash && isHashRouterPath(url.hash)) {
         return normalizeHashRouterPath(url.hash);
@@ -215,24 +266,46 @@ export function pathFromUrlLike(value = "") {
   return raw;
 }
 
-function normalizePathname(pathname = "/") {
-  let value = text(pathname, "/").replace(/\\/g, "/");
+export function endpointPathFromUrlLike(value = "") {
+  const raw = text(value, "");
 
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
+  if (!raw) return "";
+
+  if (raw.startsWith("//")) {
+    return "/";
   }
 
-  value = value.replace(/\/{2,}/g, "/");
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      const url = new URL(raw);
 
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || "/";
+      if (!isAllowedBackendOrigin(url.origin)) {
+        return "/";
+      }
+
+      return `${url.pathname || "/"}${url.search || ""}`;
+    }
+  } catch {
+    return "/";
   }
 
-  return value || "/";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return "/";
+  }
+
+  return raw;
+}
+
+/*
+  Compat de nombre antiguo:
+  Para rutas de la SPA. No convierte URLs externas en rutas internas.
+*/
+export function pathFromUrlLike(value = "") {
+  return routePathFromUrlLike(value);
 }
 
 export function normalizeRoutePath(path = "") {
-  const raw = pathFromUrlLike(path);
+  const raw = routePathFromUrlLike(path);
 
   if (!raw) return "";
 
@@ -240,22 +313,25 @@ export function normalizeRoutePath(path = "") {
 }
 
 export function normalizeEndpointPath(path = "") {
-  return normalizeRoutePath(path);
+  const raw = endpointPathFromUrlLike(path);
+
+  if (!raw) return "";
+
+  return normalizePathname(raw.split("?")[0].split("#")[0] || "/");
 }
 
 function pathMatches(path = "", candidate = "") {
-  return normalizeRoutePath(path) === normalizeRoutePath(candidate);
+  const current = normalizeRoutePath(path);
+  const target = normalizeRoutePath(candidate);
+
+  return Boolean(current && target && current === target);
 }
 
-function endpointInList(path = "", list = []) {
-  const clean = normalizeEndpointPath(path);
+function endpointMatches(path = "", candidate = "") {
+  const current = normalizeEndpointPath(path);
+  const target = normalizeEndpointPath(candidate);
 
-  if (!clean) return false;
-
-  return list.some((item) => {
-    const endpoint = normalizeEndpointPath(item);
-    return clean === endpoint || clean.startsWith(`${endpoint}/`);
-  });
+  return Boolean(current && target && current === target);
 }
 
 /* =========================================================
@@ -325,6 +401,7 @@ export const config = freeze({
 
   canonicalProductionApiBase: CANONICAL_PRODUCTION_API_BASE,
   canonicalBackendApiOrigins: CANONICAL_BACKEND_API_ORIGINS,
+  canonicalFrontendOrigins: CANONICAL_FRONTEND_ORIGINS,
   forbiddenFrontendApiOrigins: FORBIDDEN_FRONTEND_API_ORIGINS,
 
   defaultLang: "es",
@@ -336,7 +413,6 @@ export const config = freeze({
   userHomePrefix: USER_HOME_PREFIX,
 
   routes: ROUTES,
-  routeAliases: freeze({}),
 
   publicRoutes: PUBLIC_ROUTES,
   authLikeRoutes: PUBLIC_ROUTES,
@@ -380,16 +456,6 @@ export const config = freeze({
 
     endpoints: AUTH_ENDPOINTS,
 
-    endpointCandidates: freeze({
-      login: freeze([AUTH_ENDPOINTS.login]),
-      logout: freeze([AUTH_ENDPOINTS.logout]),
-      me: freeze([AUTH_ENDPOINTS.me]),
-      refresh: freeze([AUTH_ENDPOINTS.refresh]),
-      activate: freeze([AUTH_ENDPOINTS.activate]),
-      requestPasswordReset: freeze([AUTH_ENDPOINTS.requestPasswordReset]),
-      confirmPasswordReset: freeze([AUTH_ENDPOINTS.confirmPasswordReset]),
-    }),
-
     endpointGroups: freeze({
       public: PUBLIC_API_PATHS,
       private: PRIVATE_API_PATHS,
@@ -424,7 +490,6 @@ export const config = freeze({
       activation: freeze([TOKEN_PARAM]),
       reset: freeze([TOKEN_PARAM]),
       refresh: freeze([TOKEN_PARAM]),
-      twoFactor: freeze([]),
     }),
 
     session: freeze({
@@ -467,7 +532,6 @@ export const config = freeze({
     userHomePrefix: USER_HOME_PREFIX,
 
     routes: ROUTES,
-    routeAliases: freeze({}),
 
     publicRoutes: PUBLIC_ROUTES,
     authLikeRoutes: PUBLIC_ROUTES,
@@ -485,25 +549,11 @@ export const config = freeze({
     visibleClass: "is-visible",
   }),
 
-  events: freeze({
-    ready: "app:ready",
-    bootStart: "app:boot:start",
-    bootReady: "app:boot:ready",
-    bootComplete: "app:boot:complete",
-    bootError: "app:boot:error",
-    coreReady: "app:core:ready",
-    stateChange: "app:state:change",
-    authChange: "app:auth:change",
-  }),
-
   featureFlags: freeze({
     restoreSessionOnBoot: true,
     requireAuthorizationForMe: true,
     keepMeEndpointPrivate: true,
     userSlugHome: true,
-    twoFactorEnabled: false,
-    mfaEnabled: false,
-    otpEnabled: false,
   }),
 
   diagnostics: freeze({
@@ -521,6 +571,7 @@ export const config = freeze({
 
     canonicalProductionApiBase: CANONICAL_PRODUCTION_API_BASE,
     canonicalBackendApiOrigins: CANONICAL_BACKEND_API_ORIGINS,
+    canonicalFrontendOrigins: CANONICAL_FRONTEND_ORIGINS,
     forbiddenFrontendApiOrigins: FORBIDDEN_FRONTEND_API_ORIGINS,
 
     sensitiveQueryParams: freeze([TOKEN_PARAM]),
@@ -551,56 +602,59 @@ export function isForbiddenFrontendApiOrigin(value = "") {
   return FORBIDDEN_FRONTEND_API_ORIGINS.includes(cleanOrigin(value));
 }
 
+export function isCanonicalFrontendOrigin(value = "") {
+  const origin = cleanOrigin(value);
+  return isAllowedFrontendOrigin(origin);
+}
+
 export function isCanonicalBackendApiBase(value = "") {
-  return CANONICAL_BACKEND_API_ORIGINS.includes(cleanOrigin(value));
+  return isAllowedBackendOrigin(cleanOrigin(value));
 }
 
 export function getRoute(key = "home", fallback = "/") {
   return config.routes[key] || fallback;
 }
 
+/*
+  Compat de nombre antiguo.
+  No declara alias reales.
+*/
 export function getRouteAlias() {
   return "";
-}
-
-/*
-  Compat:
-  Config no gestiona storage real.
-*/
-export function getStorageKey(key = "", fallback = "") {
-  return fallback || key;
-}
-
-export function getNamespacedStorageKey(key = "") {
-  return `onion:${getStorageKey(key, key)}`;
 }
 
 export function isPublicApiPath(path = "") {
   const clean = normalizeEndpointPath(path);
 
+  if (!clean) return false;
   if (clean === AUTH_ENDPOINTS.me) return false;
 
-  return config.publicApiPaths.some((item) => pathMatches(clean, item));
+  return config.publicApiPaths.some((item) => endpointMatches(clean, item));
 }
 
 export function isPrivateApiPath(path = "") {
   const clean = normalizeEndpointPath(path);
 
+  if (!clean) return false;
   if (clean === AUTH_ENDPOINTS.me) return true;
 
-  return config.privateApiPaths.some((item) => pathMatches(clean, item));
+  return config.privateApiPaths.some((item) => endpointMatches(clean, item));
 }
 
 export function isTechnicalPublicRoute(path = "") {
-  return config.technicalPublicRoutes.some((item) => pathMatches(canonicalRoutePath(path), item));
+  const route = canonicalRoutePath(path);
+
+  return config.technicalPublicRoutes.some((item) => pathMatches(route, item));
 }
 
 export function isPublicRoute(path = "") {
-  return config.publicRoutes.some((item) => pathMatches(canonicalRoutePath(path), item));
+  const route = canonicalRoutePath(path);
+
+  return config.publicRoutes.some((item) => pathMatches(route, item));
 }
 
 export function isAuthLikeRoute(path = "") {
-  return config.authLikeRoutes.some((item) => pathMatches(canonicalRoutePath(path), item));
+  return isPublicRoute(path);
 }
 
 export function getProtectedPublicTokenRoutes() {
@@ -612,15 +666,12 @@ export function getAuthEndpoint(key = "") {
 }
 
 export function getAuthEndpointCandidates(key = "") {
-  return [...(config.auth.endpointCandidates[key] || [])];
+  const endpoint = getAuthEndpoint(key);
+  return endpoint ? [endpoint] : [];
 }
 
 export function getAuthEndpointGroup(key = "") {
   return [...(config.auth.endpointGroups[key] || [])];
-}
-
-export function getResourceEndpoint() {
-  return "";
 }
 
 export function getConfigSnapshot() {
@@ -657,8 +708,8 @@ export function getConfigSnapshot() {
       apiUnique: true,
       tokenParamUnique: true,
 
-      noRouteAliases: true,
       noHomeRoute: true,
+      noRouteAliases: true,
 
       roles: ["admin", "user"],
 
@@ -668,6 +719,7 @@ export function getConfigSnapshot() {
       preservesAtSlug: true,
 
       noRuntime: true,
+      noStorage: true,
       no2fa: true,
       noOtp: true,
       noMfa: true,

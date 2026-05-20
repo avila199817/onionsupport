@@ -40,7 +40,7 @@ import {
   getSidebarUserRole,
 } from "./user.js";
 
-export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v3";
+export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v4";
 
 /* =========================================================
    BASICS
@@ -72,6 +72,18 @@ function first(...values) {
 
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function redact(value = "") {
+  return text(value, "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
 }
 
 /* =========================================================
@@ -183,7 +195,10 @@ export function hasRenderableSidebarSession(context = {}) {
   return Boolean(
     context.hasSession === true ||
       context.sessionValid === true ||
-      (context.authenticated === true && context.hasUser === true)
+      (
+        context.authenticated === true &&
+        context.hasUser === true
+      )
   );
 }
 
@@ -212,6 +227,7 @@ export function setSidebarRootVisible(root = getSidebarRoot(), visible = true) {
 
   try {
     root.dataset.visible = show ? "true" : "false";
+    root.dataset.sidebarVisible = show ? "true" : "false";
   } catch {
     // noop
   }
@@ -249,7 +265,9 @@ function elementPath(element = null) {
     element.getAttribute("href")
   );
 
-  return raw ? sidebarHomeLookupPath(raw) : "";
+  if (!raw || hasSensitiveQuery(raw)) return "";
+
+  return sidebarHomeLookupPath(raw);
 }
 
 function elementRequiredRoles(element = null) {
@@ -440,8 +458,7 @@ function elementSnapshot(element = null) {
 
   return {
     tag: element.tagName?.toLowerCase?.() || "",
-    text: text(element.textContent, ""),
-    route: elementPath(element),
+    route: redact(elementPath(element)),
     adminOnly: elementIsAdminOnly(element),
     requiredRoles: elementRequiredRoles(element),
     roleVisible: element.dataset?.roleVisible || "",
@@ -461,7 +478,7 @@ export function getSidebarVisibilitySnapshot(context = {}) {
     hasRoot: isElement(root),
     shouldRender: shouldRenderSidebar(context),
 
-    path: getSidebarVisibilityPath(context),
+    path: redact(getSidebarVisibilityPath(context)),
     routePublic: isSidebarRoutePublic(context),
     shellHidden: isSidebarShellHidden(context),
     hasSession: hasRenderableSidebarSession(context),
@@ -474,6 +491,7 @@ export function getSidebarVisibilitySnapshot(context = {}) {
 
     policy: {
       visibilityOnly: true,
+
       noNavigation: true,
       noLogout: true,
       noAuthDirect: true,
@@ -482,12 +500,19 @@ export function getSidebarVisibilitySnapshot(context = {}) {
       noDomCreate: true,
       noLegacyRepair: true,
       noDropdownBehavior: true,
+
       noHomeRoute: true,
       no2fa: true,
+      noMfa: true,
+      noOtp: true,
+
       rolesStrict: true,
       userScopedPrivateRoutes: true,
       publicRoutesHideSidebar: true,
       sessionRequired: true,
+
+      snapshotRedacted: true,
+      noSensitiveRouteInSnapshot: true,
     },
   };
 }

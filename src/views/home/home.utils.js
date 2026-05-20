@@ -8,8 +8,8 @@
    - Fechas y formateo básico.
    - Sanitización segura para snapshots.
    - Escape HTML.
-   - Toast único delegando en src/ui/toast.
    - Helpers async mínimos.
+   - Compat toast sólo con instancia explícita inyectada.
    - Sin AppCore.
    - Sin Router.
    - Sin Auth.
@@ -20,12 +20,11 @@
    - Sin CSV.
    - Sin clipboard.
    - Sin collection model.
+   - Sin import directo de Toast.
    - Sin magia negra.
 ========================================================= */
 
-import Toast from "../../ui/toast/index.js";
-
-export const HOME_UTILS_VERSION = "home.utils.v1";
+export const HOME_UTILS_VERSION = "home.utils.v2";
 
 export const DEFAULT_LOCALE = "es-ES";
 export const DEFAULT_CURRENCY = "EUR";
@@ -36,6 +35,19 @@ export const DEFAULT_EMPTY_TEXT = "—";
 const NUMBER_FORMATTER_CACHE = new Map();
 const MONEY_FORMATTER_CACHE = new Map();
 const DATE_FORMATTER_CACHE = new Map();
+
+const RAW_KEYS = new Set([
+  "raw",
+  "data",
+  "payload",
+  "response",
+  "request",
+  "headers",
+  "config",
+]);
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni/i;
 
 /* =========================================================
    RUNTIME
@@ -285,6 +297,10 @@ export function stringifyJson(value, fallback = "{}") {
    SANITIZE
 ========================================================= */
 
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
 export function redactTokenInText(value = "") {
   let output = safeText(value, "");
 
@@ -292,7 +308,7 @@ export function redactTokenInText(value = "") {
 
   try {
     output = output.replace(
-      /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|tempToken|temp_token|sas)=)([^&#\s]+)/gi,
       "$1***"
     );
 
@@ -350,8 +366,15 @@ export function sanitizeError(error = null) {
   };
 }
 
-export function sanitizePayload(value, depth = 0) {
+export function sanitizePayload(value, depth = 0, keyHint = "") {
   if (depth > 8) return "[MaxDepth]";
+
+  if (RAW_KEYS.has(keyHint)) return undefined;
+
+  if (isSensitiveKey(keyHint)) {
+    if (value === null || value === undefined || value === "") return null;
+    return "***";
+  }
 
   if (
     value === null ||
@@ -375,19 +398,23 @@ export function sanitizePayload(value, depth = 0) {
   }
 
   if (Array.isArray(value)) {
-    return value.slice(0, 100).map((item) => sanitizePayload(item, depth + 1));
+    return value
+      .slice(0, 100)
+      .map((item) => sanitizePayload(item, depth + 1))
+      .filter((item) => item !== undefined);
   }
 
   if (isAnyObject(value)) {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if (/token|secret|password|authorization|credential|otp|totp|mfa|twofa|backup/i.test(key)) {
-        output[key] = item ? "***" : null;
-        continue;
-      }
+      if (RAW_KEYS.has(key)) continue;
 
-      output[key] = sanitizePayload(item, depth + 1);
+      const clean = sanitizePayload(item, depth + 1, key);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
     }
 
     return output;
@@ -716,7 +743,7 @@ export function formatLastUpdate(value, options = {}) {
 }
 
 /* =========================================================
-   TOAST
+   TOAST COMPAT OPCIONAL
 ========================================================= */
 
 export function normalizeToastType(type = "info") {
@@ -774,15 +801,6 @@ function callToastMethod(toast, type = "info", message = "", payload = {}) {
       return true;
     }
   } catch {
-    // probar notify abajo
-  }
-
-  try {
-    if (isFunction(toast?.notify)) {
-      toast.notify(payload);
-      return true;
-    }
-  } catch {
     // probar función directa abajo
   }
 
@@ -803,16 +821,25 @@ export function showToast(message = "", type = "info", options = {}) {
 
   if (!normalized.message) return false;
 
+  const opts = safeObject(normalized.options);
+  const toast = opts.toast || opts.Toast || opts.target || null;
+
+  if (!toast) return false;
+
   const payload = {
-    ...safeObject(normalized.options),
+    ...opts,
     type: normalized.type,
-    message: normalized.message,
+    message: redactTokenInText(normalized.message),
   };
 
+  delete payload.toast;
+  delete payload.Toast;
+  delete payload.target;
+
   return callToastMethod(
-    Toast,
+    toast,
     normalized.type,
-    normalized.message,
+    payload.message,
     payload
   );
 }
@@ -926,12 +953,21 @@ export function getHomeUtilsSnapshot() {
     },
 
     toast: {
-      hasToast: Boolean(Toast),
-      hasShow: isFunction(Toast?.show),
+      directImport: false,
+      requiresExplicitInstance: true,
+      appCoreBridge: false,
+      windowBridge: false,
+    },
+
+    sanitize: {
+      removesRawPayloads: true,
+      redactsSensitiveText: true,
+      stripsSensitiveKeys: true,
     },
 
     policy: {
       pureHelpers: true,
+
       noAppCore: true,
       noRouter: true,
       noAuth: true,
@@ -939,8 +975,16 @@ export function getHomeUtilsSnapshot() {
       noStorage: true,
       noEvents: true,
       noDomBinding: true,
+
       noCsv: true,
       noClipboard: true,
+      noCollectionModel: true,
+
+      noToastImport: true,
+      noToastAutoInit: true,
+      noWindowGlobals: true,
+
+      snapshotRedacted: true,
     },
 
     at: nowIso(),

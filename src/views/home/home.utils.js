@@ -21,10 +21,9 @@
    - Sin clipboard.
    - Sin collection model.
    - Sin import directo de Toast.
-   - Sin magia negra.
 ========================================================= */
 
-export const HOME_UTILS_VERSION = "home.utils.v2";
+export const HOME_UTILS_VERSION = "home.utils.v3";
 
 export const DEFAULT_LOCALE = "es-ES";
 export const DEFAULT_CURRENCY = "EUR";
@@ -41,13 +40,33 @@ const RAW_KEYS = new Set([
   "data",
   "payload",
   "response",
+  "body",
   "request",
   "headers",
   "config",
 ]);
 
+const COSMOS_META_KEYS = new Set([
+  "_id",
+  "_rid",
+  "_self",
+  "_etag",
+  "_attachments",
+  "_ts",
+  "_lsn",
+  "_metadata",
+]);
+
 const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni/i;
+
+const SENSITIVE_QUERY_RE =
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|tempToken|temp_token|sas)=/i;
+
+const EMAIL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
+
+const JWT_RE =
+  /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
 
 /* =========================================================
    RUNTIME
@@ -297,8 +316,21 @@ export function stringifyJson(value, fallback = "{}") {
    SANITIZE
 ========================================================= */
 
+function isRawKey(key = "") {
+  return RAW_KEYS.has(String(key || ""));
+}
+
+function isCosmosMetaKey(key = "") {
+  return COSMOS_META_KEYS.has(String(key || ""));
+}
+
 function isSensitiveKey(key = "") {
   return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function isEmailLike(value = "") {
+  const text = safeText(value, "");
+  return Boolean(text && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i.test(text));
 }
 
 export function redactTokenInText(value = "") {
@@ -317,10 +349,8 @@ export function redactTokenInText(value = "") {
       "$1***"
     );
 
-    output = output.replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
+    output = output.replace(JWT_RE, "***");
+    output = output.replace(EMAIL_RE, "");
   } catch {
     // noop
   }
@@ -369,12 +399,9 @@ export function sanitizeError(error = null) {
 export function sanitizePayload(value, depth = 0, keyHint = "") {
   if (depth > 8) return "[MaxDepth]";
 
-  if (RAW_KEYS.has(keyHint)) return undefined;
-
-  if (isSensitiveKey(keyHint)) {
-    if (value === null || value === undefined || value === "") return null;
-    return "***";
-  }
+  if (isRawKey(keyHint)) return undefined;
+  if (isCosmosMetaKey(keyHint)) return undefined;
+  if (isSensitiveKey(keyHint)) return undefined;
 
   if (
     value === null ||
@@ -408,7 +435,9 @@ export function sanitizePayload(value, depth = 0, keyHint = "") {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if (RAW_KEYS.has(key)) continue;
+      if (isRawKey(key)) continue;
+      if (isCosmosMetaKey(key)) continue;
+      if (isSensitiveKey(key)) continue;
 
       const clean = sanitizePayload(item, depth + 1, key);
 
@@ -420,7 +449,18 @@ export function sanitizePayload(value, depth = 0, keyHint = "") {
     return output;
   }
 
-  return String(value);
+  return redactTokenInText(String(value));
+}
+
+export function safePublicText(value = "", fallback = "") {
+  const text = redactTokenInText(safeText(value, ""));
+
+  if (!text) return fallback;
+  if (isEmailLike(text)) return fallback;
+  if (SENSITIVE_QUERY_RE.test(text)) return fallback;
+  if (/Bearer\s+/i.test(text)) return fallback;
+
+  return text;
 }
 
 /* =========================================================
@@ -468,7 +508,7 @@ export function truncate(value = "", max = 160, suffix = "…") {
 }
 
 export function getInitials(value = "", fallback = "ON") {
-  const text = normalizeWhitespace(value);
+  const text = normalizeWhitespace(safePublicText(value, ""));
 
   if (!text) return fallback;
 
@@ -759,14 +799,15 @@ export function normalizeToastType(type = "info") {
 
 export function normalizeToastInput(message = "", type = "info", options = {}) {
   if (isObject(message)) {
-    const payload = safeObject(message);
+    const payload = sanitizePayload(message);
+    const cleanPayload = safeObject(payload);
 
     return {
-      message: safeText(first(payload.message, payload.text, payload.title, ""), ""),
-      type: normalizeToastType(first(payload.type, payload.variant, payload.level, type)),
+      message: safeText(first(cleanPayload.message, cleanPayload.text, cleanPayload.title, ""), ""),
+      type: normalizeToastType(first(cleanPayload.type, cleanPayload.variant, cleanPayload.level, type)),
       options: {
         ...safeObject(options),
-        ...payload,
+        ...cleanPayload,
       },
     };
   }
@@ -826,21 +867,23 @@ export function showToast(message = "", type = "info", options = {}) {
 
   if (!toast) return false;
 
-  const payload = {
+  const payload = sanitizePayload({
     ...opts,
     type: normalized.type,
     message: redactTokenInText(normalized.message),
-  };
+  });
 
-  delete payload.toast;
-  delete payload.Toast;
-  delete payload.target;
+  const cleanPayload = safeObject(payload);
+
+  delete cleanPayload.toast;
+  delete cleanPayload.Toast;
+  delete cleanPayload.target;
 
   return callToastMethod(
     toast,
     normalized.type,
-    payload.message,
-    payload
+    cleanPayload.message,
+    cleanPayload
   );
 }
 
@@ -940,7 +983,7 @@ export function withTimeout(promise, ms = 8000, label = "TIMEOUT") {
 ========================================================= */
 
 export function getHomeUtilsSnapshot() {
-  return {
+  return sanitizePayload({
     version: HOME_UTILS_VERSION,
     source: "views.home.utils",
 
@@ -961,8 +1004,10 @@ export function getHomeUtilsSnapshot() {
 
     sanitize: {
       removesRawPayloads: true,
+      stripsCosmosMetadata: true,
       redactsSensitiveText: true,
       stripsSensitiveKeys: true,
+      removesEmailsFromText: true,
     },
 
     policy: {
@@ -988,7 +1033,7 @@ export function getHomeUtilsSnapshot() {
     },
 
     at: nowIso(),
-  };
+  });
 }
 
 /* =========================================================
@@ -1038,6 +1083,7 @@ export default {
   redactTokenInText,
   sanitizeError,
   sanitizePayload,
+  safePublicText,
 
   escapeHtml,
   normalizeText,

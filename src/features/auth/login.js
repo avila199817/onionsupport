@@ -7,6 +7,7 @@
    - Normalizar credenciales.
    - Validar respuesta mínima.
    - Devolver token + user para que Auth/index.js aplique sesión.
+   - Devolver refresh/session si el backend lo entrega.
    - Exponer homePath/postLoginTarget si el user trae slug real.
    - Sin fetch propio.
    - Sin apiClient propio.
@@ -29,9 +30,9 @@ import {
   USER_HOME_PREFIX,
 } from "../../core/config.js";
 
-export const LOGIN_VERSION = "auth.login.v3";
+export const LOGIN_VERSION = "auth.login.v4";
 
-const LOGIN_ROUTE = ROUTES.login;
+const LOGIN_ROUTE = ROUTES.login || "/login";
 const HOME_ROUTE = ROUTES.home || "/";
 const LOGIN_ENDPOINT = AUTH_ENDPOINTS.login;
 
@@ -40,6 +41,35 @@ const MAX_PASSWORD_LENGTH = 1024;
 const MAX_TOKEN_LENGTH = 8192;
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
+
+const SENSITIVE_USER_KEYS = Object.freeze([
+  "password",
+  "passwordHash",
+  "hash",
+  "salt",
+
+  "token",
+  "accessToken",
+  "access_token",
+  "refreshToken",
+  "refresh_token",
+
+  "resetToken",
+  "activationToken",
+
+  "secret",
+  "secrets",
+  "code",
+  "codes",
+  "backupCodes",
+
+  "otp",
+  "otpCode",
+  "mfa",
+  "twofa_secret",
+  "twofaSecret",
+  "totpSecret",
+]);
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -181,27 +211,7 @@ function removeSensitiveUserFields(user = {}) {
 
   const output = { ...user };
 
-  for (const key of [
-    "password",
-    "passwordHash",
-    "hash",
-    "salt",
-
-    "token",
-    "accessToken",
-    "access_token",
-    "refreshToken",
-    "refresh_token",
-
-    "resetToken",
-    "activationToken",
-
-    "secret",
-    "secrets",
-    "code",
-    "codes",
-    "backupCodes",
-  ]) {
+  for (const key of SENSITIVE_USER_KEYS) {
     delete output[key];
   }
 
@@ -234,6 +244,31 @@ function hasUserIdentity(user = null) {
       cleanText(user.slug, "") ||
       cleanText(user.lookup?.slug, "")
   );
+}
+
+function looksLikeLoginUserObject(value = null) {
+  if (!isObject(value)) return false;
+
+  if (cleanText(value.userId, "")) return true;
+  if (cleanText(value.username || value.userName || value.user_name, "")) return true;
+  if (cleanText(value.slug || value.lookup?.slug || value.profile?.slug, "")) return true;
+
+  /*
+    Evita tomar un envelope técnico como usuario por tener sólo "id".
+    Si sólo existe "id", pedimos al menos otra señal de usuario.
+  */
+  if (
+    cleanText(value.id, "") &&
+    (
+      cleanText(value.email, "") ||
+      cleanText(value.displayName || value.fullName || value.name || value.nombre, "") ||
+      normalizeRole(value.role || value.rol || value.roles)
+    )
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function userOk(user = null) {
@@ -358,28 +393,118 @@ function readRefreshToken(payload = {}) {
 
 function readUser(payload = {}) {
   for (const node of nested(payload)) {
-    const user = normalizeUser(
+    const explicit =
       node.user ||
-        node.usuario ||
-        node.me ||
-        node.account ||
-        node.profile
-    );
-
-    if (user) return user;
-  }
-
-  return normalizeUser(payload);
-}
-
-function readSession(payload = {}) {
-  for (const node of nested(payload)) {
-    const session =
-      node.session ||
-      node.sessionData ||
+      node.usuario ||
+      node.me ||
+      node.account ||
+      node.profile ||
       null;
 
-    if (isObject(session)) return session;
+    const explicitUser = normalizeUser(explicit);
+
+    if (explicitUser) return explicitUser;
+
+    if (looksLikeLoginUserObject(node)) {
+      const flatUser = normalizeUser(node);
+
+      if (flatUser) return flatUser;
+    }
+  }
+
+  return looksLikeLoginUserObject(payload) ? normalizeUser(payload) : null;
+}
+
+function normalizeSessionContext(sessionData = null, user = null) {
+  if (!isObject(sessionData)) return null;
+
+  const sessionId = cleanText(
+    sessionData.sessionId ||
+      sessionData.session_id ||
+      sessionData.sid ||
+      sessionData.id ||
+      "",
+    ""
+  );
+
+  const userId = cleanText(
+    sessionData.sessionUserId ||
+      sessionData.session_user_id ||
+      sessionData.userId ||
+      sessionData.user_id ||
+      user?.userId ||
+      user?.id ||
+      "",
+    ""
+  );
+
+  const expiresAt =
+    sessionData.expiresAt ||
+    sessionData.expires_at ||
+    sessionData.refreshExpiresAt ||
+    sessionData.refresh_expires_at ||
+    null;
+
+  if (!sessionId && !userId && !expiresAt) return null;
+
+  return {
+    sessionId: sessionId || null,
+    session_id: sessionId || null,
+    id: sessionId || null,
+
+    userId: userId || null,
+    user_id: userId || null,
+
+    sessionUserId: userId || null,
+    session_user_id: userId || null,
+
+    expiresAt,
+    expires_at: expiresAt,
+    refreshExpiresAt: sessionData.refreshExpiresAt || sessionData.refresh_expires_at || expiresAt,
+    refresh_expires_at: sessionData.refreshExpiresAt || sessionData.refresh_expires_at || expiresAt,
+  };
+}
+
+function readSession(payload = {}, user = null) {
+  const nodes = nested(payload);
+
+  for (const node of nodes) {
+    const session = normalizeSessionContext(
+      node.session ||
+        node.sessionData ||
+        null,
+      user
+    );
+
+    if (session) return session;
+  }
+
+  for (const node of nodes) {
+    const hasTopLevelSessionFields = Boolean(
+      node.sessionId ||
+        node.session_id ||
+        node.sid ||
+        node.sessionUserId ||
+        node.session_user_id ||
+        node.expiresAt ||
+        node.expires_at ||
+        node.refreshExpiresAt ||
+        node.refresh_expires_at
+    );
+
+    if (!hasTopLevelSessionFields) continue;
+
+    const session = normalizeSessionContext(
+      {
+        sessionId: node.sessionId || node.session_id || node.sid || "",
+        sessionUserId: node.sessionUserId || node.session_user_id || node.userId || node.user_id || "",
+        expiresAt: node.expiresAt || node.expires_at || node.refreshExpiresAt || node.refresh_expires_at || null,
+        refreshExpiresAt: node.refreshExpiresAt || node.refresh_expires_at || node.expiresAt || node.expires_at || null,
+      },
+      user
+    );
+
+    if (session) return session;
   }
 
   return null;
@@ -389,13 +514,12 @@ function readMessage(payload = {}) {
   if (!isObject(payload)) return "";
 
   return cleanText(
-    payload.message ||
-      payload.error ||
-      payload.data?.message ||
-      payload.data?.error ||
-      payload.auth?.message ||
-      payload.session?.message ||
-      "",
+    pick(nested(payload), [
+      "message",
+      "error",
+      "detail",
+      "reason",
+    ]) || "",
     ""
   );
 }
@@ -404,12 +528,12 @@ function readCode(payload = {}) {
   if (!isObject(payload)) return "";
 
   return cleanText(
-    payload.code ||
-      payload.errorCode ||
-      payload.data?.code ||
-      payload.auth?.code ||
-      payload.session?.code ||
-      "",
+    pick(nested(payload), [
+      "code",
+      "errorCode",
+      "error_code",
+      "reason",
+    ]) || "",
     ""
   );
 }
@@ -418,7 +542,7 @@ function normalizeLoginResponse(response = {}) {
   const token = readToken(response);
   const refreshToken = readRefreshToken(response);
   const user = readUser(response);
-  const session = readSession(response);
+  const session = readSession(response, user);
 
   const authenticated = Boolean(token && user);
   const role = authenticated ? user.role || null : null;
@@ -745,15 +869,21 @@ export function getLoginSnapshot() {
     policy: {
       configDrivenEndpoint: true,
       validatesTokenAndUser: true,
+      returnsRefreshAndSessionContext: true,
+
       noRouter: true,
       noToast: true,
       noStorage: true,
       noFetchOwn: true,
+
       noSlugFabrication: true,
+      noUserFabricationFromTokenEnvelope: true,
       noEmailIdentity: true,
+
       no2fa: true,
       noMfa: true,
       noOtp: true,
+
       snapshotRedacted: true,
     },
   };

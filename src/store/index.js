@@ -4,7 +4,7 @@
 
    Responsabilidad:
    - Store mínimo de compat.
-   - Estado UI/entities/flags en memoria.
+   - Estado UI/app/entities/flags en memoria.
    - get / set / patch / update / remove.
    - Suscripciones simples.
    - No duplica Auth.
@@ -15,12 +15,14 @@
    - No guarda tokens reales.
    - Sin helpers externos.
    - Sin storage.
+   - Sin batch fake.
+   - Sin sesión fake.
    - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
 
-export const STORE_VERSION = "simple";
+export const STORE_VERSION = "store.index.v2";
 
 const BLOCKED_KEYS = new Set([
   "__proto__",
@@ -29,14 +31,18 @@ const BLOCKED_KEYS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
+  /(^auth$|^session$|^currentUser$|^authUser$|^sessionUser$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id)/i;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 function nowIso() {
-  return new Date().toISOString();
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function isObject(value) {
@@ -52,13 +58,17 @@ function clone(value) {
   if (value === null) return null;
 
   try {
-    return structuredClone(value);
-  } catch {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
     }
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
   }
 }
 
@@ -72,25 +82,37 @@ function same(left, right) {
   }
 }
 
+function isBlockedKey(key = "") {
+  return BLOCKED_KEYS.has(String(key || ""));
+}
+
 function isSensitiveKey(key = "") {
   return SENSITIVE_KEY_RE.test(String(key || ""));
 }
 
 function sanitizeForStore(value, keyHint = "") {
-  if (isSensitiveKey(keyHint)) return null;
+  if (isBlockedKey(keyHint) || isSensitiveKey(keyHint)) {
+    return undefined;
+  }
 
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeForStore(item));
+    return value
+      .map((item) => sanitizeForStore(item))
+      .filter((item) => item !== undefined);
   }
 
   if (isObject(value)) {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if (BLOCKED_KEYS.has(key)) continue;
+      if (isBlockedKey(key)) continue;
       if (isSensitiveKey(key)) continue;
 
-      output[key] = sanitizeForStore(item, key);
+      const clean = sanitizeForStore(item, key);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
     }
 
     return output;
@@ -111,11 +133,19 @@ function pathParts(path = "") {
   return parts
     .map((part) => String(part || "").trim())
     .filter(Boolean)
-    .filter((part) => !BLOCKED_KEYS.has(part));
+    .filter((part) => !isBlockedKey(part));
 }
 
 function pathAllowed(path = "") {
-  return !pathParts(path).some(isSensitiveKey);
+  const parts = pathParts(path);
+
+  if (!parts.length) return false;
+
+  return !parts.some(isSensitiveKey);
+}
+
+function pathKey(path = "") {
+  return pathParts(path).join(".");
 }
 
 function getByPath(root, path, fallback = undefined) {
@@ -148,7 +178,12 @@ function setByPath(root, path, value) {
     current = current[part];
   }
 
-  current[parts.at(-1)] = sanitizeForStore(value, parts.at(-1));
+  const key = parts.at(-1);
+  const clean = sanitizeForStore(value, key);
+
+  if (clean === undefined) return false;
+
+  current[key] = clean;
 
   return true;
 }
@@ -180,13 +215,17 @@ function merge(target = {}, source = {}) {
   if (!isObject(source)) return output;
 
   for (const [key, value] of Object.entries(source)) {
-    if (BLOCKED_KEYS.has(key)) continue;
+    if (isBlockedKey(key)) continue;
     if (isSensitiveKey(key)) continue;
 
+    const clean = sanitizeForStore(value, key);
+
+    if (clean === undefined) continue;
+
     output[key] =
-      isObject(value) && isObject(output[key])
-        ? merge(output[key], value)
-        : sanitizeForStore(value, key);
+      isObject(clean) && isObject(output[key])
+        ? merge(output[key], clean)
+        : clean;
   }
 
   return output;
@@ -202,9 +241,11 @@ function createInitialState() {
   return {
     ui: {
       theme: "system",
-      lang: "en",
+      lang: "es",
       sidebarOpen: true,
     },
+
+    app: {},
 
     entities: {},
     flags: {},
@@ -254,7 +295,13 @@ export const Store = (() => {
   ======================================================= */
 
   function notify(paths = [], previousState = null) {
-    const changedPaths = [...new Set(paths.filter(Boolean))];
+    const changedPaths = [
+      ...new Set(
+        paths
+          .map((path) => pathKey(path))
+          .filter(Boolean)
+      ),
+    ];
 
     if (!changedPaths.length) return false;
 
@@ -316,14 +363,16 @@ export const Store = (() => {
 
   function get(path = null, fallback = undefined) {
     if (!path) return clone(state);
+    if (!pathAllowed(path)) return fallback;
 
     const value = getByPath(state, path, undefined);
 
     return value === undefined ? fallback : clone(value);
   }
 
-  function getRaw(path = null, fallback = undefined) {
+  function getInternal(path = null, fallback = undefined) {
     if (!path) return state;
+    if (!pathAllowed(path)) return fallback;
 
     const value = getByPath(state, path, undefined);
 
@@ -348,15 +397,19 @@ export const Store = (() => {
   function set(path, value) {
     if (!path || !pathAllowed(path)) return get(path);
 
-    const sanitized = sanitizeForStore(value, pathParts(path).at(-1));
-    const current = getRaw(path);
+    const key = pathParts(path).at(-1);
+    const sanitized = sanitizeForStore(value, key);
+
+    if (sanitized === undefined) return get(path);
+
+    const current = getInternal(path);
 
     if (same(current, sanitized)) return get(path);
 
     const previous = get();
 
     setByPath(state, path, sanitized);
-    commit([String(path)], previous);
+    commit([path], previous);
 
     return get(path);
   }
@@ -387,7 +440,10 @@ export const Store = (() => {
   function replace(nextState = {}) {
     if (!isObject(nextState)) return get();
 
-    const sanitized = merge(createInitialState(), sanitizeForStore(nextState));
+    const sanitized = merge(
+      createInitialState(),
+      sanitizeForStore(nextState)
+    );
 
     if (same(state, sanitized)) return get();
 
@@ -413,12 +469,14 @@ export const Store = (() => {
 
   function remove(path) {
     if (!pathAllowed(path)) return false;
-    if (getRaw(path) === undefined) return false;
+    if (getInternal(path) === undefined) return false;
 
     const previous = get();
     const ok = deleteByPath(state, path);
 
-    if (ok) commit([String(path)], previous);
+    if (ok) {
+      commit([path], previous);
+    }
 
     return ok;
   }
@@ -428,34 +486,17 @@ export const Store = (() => {
   }
 
   /* =======================================================
-     BATCH COMPAT
-     No batch real. Mantiene API sin sistema paralelo.
-  ======================================================= */
-
-  function beginBatch() {
-    return 0;
-  }
-
-  function endBatch() {
-    return true;
-  }
-
-  function rollbackBatch() {
-    return false;
-  }
-
-  function withBatch(fn) {
-    return isFunction(fn) ? fn(api) : null;
-  }
-
-  /* =======================================================
      COLLECTION HELPERS
   ======================================================= */
 
   function push(path, item) {
     return update(path, (current = []) => {
       const list = Array.isArray(current) ? current : [];
-      return [...list, sanitizeForStore(item)];
+      const clean = sanitizeForStore(item);
+
+      if (clean === undefined) return list;
+
+      return [...list, clean];
     });
   }
 
@@ -463,13 +504,19 @@ export const Store = (() => {
     return update(path, (current = []) => {
       const list = Array.isArray(current) ? current : [];
       const cleanItem = sanitizeForStore(item);
-      const id = cleanItem?.[idKey];
+      const key = String(idKey || "id");
+
+      if (!isObject(cleanItem) || isSensitiveKey(key)) {
+        return list;
+      }
+
+      const id = cleanItem[key];
 
       if (id === undefined || id === null || id === "") {
         return [...list, cleanItem];
       }
 
-      const index = list.findIndex((entry) => entry?.[idKey] === id);
+      const index = list.findIndex((entry) => entry?.[key] === id);
 
       if (index < 0) {
         return [...list, cleanItem];
@@ -489,7 +536,11 @@ export const Store = (() => {
   function removeById(path, id, idKey = "id") {
     return update(path, (current = []) => {
       const list = Array.isArray(current) ? current : [];
-      return list.filter((entry) => entry?.[idKey] !== id);
+      const key = String(idKey || "id");
+
+      if (isSensitiveKey(key)) return list;
+
+      return list.filter((entry) => entry?.[key] !== id);
     });
   }
 
@@ -527,17 +578,21 @@ export const Store = (() => {
   }
 
   function subscribeKey(path, listener, options = {}) {
-    if (!path || !isFunction(listener)) return () => false;
+    const cleanPath = pathKey(path);
 
-    if (!keyListeners.has(path)) {
-      keyListeners.set(path, new Set());
+    if (!cleanPath || !pathAllowed(cleanPath) || !isFunction(listener)) {
+      return () => false;
     }
 
-    keyListeners.get(path).add(listener);
+    if (!keyListeners.has(cleanPath)) {
+      keyListeners.set(cleanPath, new Set());
+    }
+
+    keyListeners.get(cleanPath).add(listener);
 
     if (options.immediate === true) {
       try {
-        listener(get(path), {
+        listener(get(cleanPath), {
           version: STORE_VERSION,
           seq: mutationSeq,
           changedPaths: [],
@@ -550,10 +605,10 @@ export const Store = (() => {
     }
 
     return () => {
-      keyListeners.get(path)?.delete(listener);
+      keyListeners.get(cleanPath)?.delete(listener);
 
-      if (keyListeners.get(path)?.size === 0) {
-        keyListeners.delete(path);
+      if (keyListeners.get(cleanPath)?.size === 0) {
+        keyListeners.delete(cleanPath);
       }
 
       return true;
@@ -602,20 +657,31 @@ export const Store = (() => {
   }
 
   /* =======================================================
-     CORE BRIDGE
+     CORE REGISTRATION
   ======================================================= */
 
   function attachToCore() {
     try {
-      AppCore.Store = api;
       AppCore.store = api;
-      AppCore.modules?.register?.("Store", api);
       AppCore.modules?.register?.("store", api);
+      return true;
     } catch {
-      // noop
+      return false;
     }
+  }
 
-    return true;
+  function detachFromCore() {
+    try {
+      if (AppCore.store === api) {
+        delete AppCore.store;
+      }
+
+      AppCore.modules?.remove?.("store");
+
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /* =======================================================
@@ -647,6 +713,8 @@ export const Store = (() => {
     if (options.clearState === true) {
       replace(createInitialState());
     }
+
+    detachFromCore();
 
     initialized = false;
     initializing = false;
@@ -685,12 +753,21 @@ export const Store = (() => {
 
       policy: {
         memoryOnly: true,
+
+        uiAppEntitiesFlagsOnly: true,
+
         noAuth: true,
+        noSession: true,
         noRouter: true,
         noHttp: true,
         noCoreSync: true,
         noStorage: true,
+
         noRealTokens: true,
+        noSensitiveKeys: true,
+        noImportSideEffectRegistration: true,
+        noFakeSessionSelector: true,
+        noBatchFake: true,
       },
     };
   }
@@ -716,24 +793,17 @@ export const Store = (() => {
   }
 
   /* =======================================================
-     COMPAT SELECTORS / ACTIONS
+     SELECTORS / ACTIONS
   ======================================================= */
 
   const selectors = {
     state: () => get(),
 
     ui: () => get("ui"),
+    app: () => get("app"),
     entities: () => get("entities"),
     flags: () => get("flags"),
     meta: () => get("meta"),
-
-    app: () => ({}),
-    session: () => ({
-      authenticated: false,
-      hasToken: false,
-      user: null,
-      role: null,
-    }),
   };
 
   const actions = {
@@ -751,7 +821,6 @@ export const Store = (() => {
 
   const api = {
     version: STORE_VERSION,
-    state,
 
     init,
     destroy,
@@ -760,7 +829,6 @@ export const Store = (() => {
     isInitializing,
 
     get,
-    getRaw,
     select,
 
     set,
@@ -768,14 +836,7 @@ export const Store = (() => {
     replace,
     update,
     remove,
-    delete: remove,
-    del: remove,
     reset,
-
-    beginBatch,
-    endBatch,
-    withBatch,
-    rollbackBatch,
 
     push,
     upsertById,
@@ -794,9 +855,11 @@ export const Store = (() => {
 
     selectors,
     actions,
-  };
 
-  attachToCore();
+    get state() {
+      return get();
+    },
+  };
 
   return api;
 })();

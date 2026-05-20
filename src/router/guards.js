@@ -6,10 +6,11 @@
    - Capa mínima Router ↔ Auth.
    - Evaluar route.public / route.guestOnly / route.requiresAuth / route.roles.
    - Auth real delegada en Auth/AppCore.
-   - Auth estricta: señal Auth válida + token usable + user usable.
-   - Usuario inválido si disabled === true o status === "disabled".
+   - Auth estricta: señal Auth válida + access token usable + user usable.
+   - Usuario inválido si disabled/deleted/archived/active=false.
    - Roles únicos exactos: admin / user.
    - Canonicalizar rutas /@{slug} y /@{slug}/{ruta} para evaluación.
+   - Bloquear rutas legacy/fuera de fase.
    - No validar aquí si el slug coincide con el usuario real.
    - La validación real del slug pertenece a router/index.js.
    - No inventar slug.
@@ -22,6 +23,7 @@
    - Sin render.
    - Sin history.
    - Sin /403.
+   - Sin /404.
    - Sin alias /home.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
@@ -31,15 +33,27 @@ import {
   USER_HOME_PREFIX,
 } from "../core/config.js";
 
-export const GUARDS_VERSION = "router.guards.v6";
+export const GUARDS_VERSION = "router.guards.v7";
 
 const LOGIN_PATH = ROUTES.login || "/login";
-const HOME_PATH = ROUTES.home || "/";
+const HOME_PATH = "/";
+const USER_PREFIX = USER_HOME_PREFIX || "/@";
+
 const VALID_ROLES = Object.freeze(["admin", "user"]);
+
+const BLOCKED_LEGACY_PATHS = new Set([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
+]);
 
 export const GUARD_REASONS = Object.freeze({
   allow: "allowed",
   routeNotFound: "route-not-found",
+  blockedLegacy: "blocked-legacy-route",
   publicRoute: "public-route",
   guestOnly: "guest-only",
   alreadyAuthenticated: "already-authenticated",
@@ -61,7 +75,11 @@ function isFunction(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -104,8 +122,37 @@ function resolveAuth(AppCore = null, Auth = null) {
 
 function redact(value = "") {
   return cleanText(value, "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+/* =========================================================
+   TOKEN
+========================================================= */
+
+function stripBearer(value = "") {
+  return cleanText(value, "").replace(/^Bearer\s+/i, "");
+}
+
+function tokenOk(value = "") {
+  const token = stripBearer(value);
+
+  if (!token) return false;
+  if (/\s/.test(token)) return false;
+  if (token.length > 8192) return false;
+
+  return ![
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "[object object]",
+    "{}",
+    "[]",
+  ].includes(token.toLowerCase());
 }
 
 /* =========================================================
@@ -151,8 +198,22 @@ function normalizeCanonicalPath(path = HOME_PATH) {
   return value || HOME_PATH;
 }
 
+function isBlockedLegacyPath(path = HOME_PATH) {
+  const canonical = normalizeCanonicalPath(path).toLowerCase();
+
+  if (BLOCKED_LEGACY_PATHS.has(canonical)) return true;
+
+  return (
+    canonical.startsWith("/2fa/") ||
+    canonical.startsWith("/mfa/") ||
+    canonical.startsWith("/otp/")
+  );
+}
+
 function normalizeUserSlug(value = "") {
   const slug = cleanText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -168,7 +229,7 @@ function normalizeUserSlug(value = "") {
 export function getUserScopedRouteInfo(path = HOME_PATH) {
   const canonical = normalizeCanonicalPath(path);
 
-  if (!canonical.startsWith(USER_HOME_PREFIX)) {
+  if (!canonical.startsWith(USER_PREFIX)) {
     return {
       scoped: false,
       home: false,
@@ -178,7 +239,7 @@ export function getUserScopedRouteInfo(path = HOME_PATH) {
     };
   }
 
-  const rest = canonical.slice(USER_HOME_PREFIX.length);
+  const rest = canonical.slice(USER_PREFIX.length);
   const [slugSegment = "", ...restSegments] = rest.split("/");
   const slug = normalizeUserSlug(slugSegment);
 
@@ -239,7 +300,8 @@ function isSafeInternalPath(path = "") {
       !value.startsWith("//") &&
       !/^[a-z][a-z0-9+.-]*:/i.test(value) &&
       !/[\r\n\t\\]/.test(value) &&
-      !hasSensitiveQuery(value)
+      !hasSensitiveQuery(value) &&
+      !isBlockedLegacyPath(value)
   );
 }
 
@@ -271,7 +333,7 @@ function callAuth(AppCore = null, Auth = null, method = "", fallback = null, ...
   }
 }
 
-function isAuthenticated(AppCore = null, Auth = null) {
+function isAuthenticatedSignal(AppCore = null, Auth = null) {
   const fromAuth = callAuth(AppCore, Auth, "isAuthenticated", null);
 
   if (fromAuth !== null) return fromAuth === true;
@@ -297,7 +359,7 @@ function hasToken(AppCore = null, Auth = null) {
     state.access_token ||
     "";
 
-  return Boolean(cleanText(token, ""));
+  return tokenOk(token);
 }
 
 function getUser(AppCore = null, Auth = null) {
@@ -316,19 +378,42 @@ function getUser(AppCore = null, Auth = null) {
 function isUserUsable(user = null) {
   if (!isObject(user)) return false;
 
-  if (user.disabled === true) return false;
+  const status = cleanText(user.status || user.estado || user.state, "").toLowerCase();
 
-  const status = cleanText(user.status, "").toLowerCase();
-
-  if (status === "disabled") return false;
-
-  return true;
+  return !(
+    user.disabled === true ||
+    user.deleted === true ||
+    user.archived === true ||
+    user.revoked === true ||
+    user.blocked === true ||
+    user.banned === true ||
+    user.suspended === true ||
+    user.active === false ||
+    user.enabled === false ||
+    Boolean(user.deletedAt) ||
+    [
+      "disabled",
+      "inactive",
+      "deleted",
+      "archived",
+      "revoked",
+      "blocked",
+      "banned",
+      "suspended",
+      "desactivado",
+      "inactivo",
+      "eliminado",
+      "archivado",
+      "bloqueado",
+      "suspendido",
+    ].includes(status)
+  );
 }
 
 function hasStrictSession(AppCore = null, Auth = null) {
   const auth = resolveAuth(AppCore, Auth);
 
-  if (!isAuthenticated(AppCore, auth)) return false;
+  if (!isAuthenticatedSignal(AppCore, auth)) return false;
   if (!hasToken(AppCore, auth)) return false;
 
   return isUserUsable(getUser(AppCore, auth));
@@ -369,14 +454,17 @@ function getUserHomePath(AppCore = null, Auth = null) {
 
   const slug = getUserSlug(AppCore, auth);
 
-  return slug ? `${USER_HOME_PREFIX}${slug}` : HOME_PATH;
+  return slug ? `${USER_PREFIX}${slug}` : HOME_PATH;
 }
 
 function buildLoginRedirect(AppCore = null, Auth = null, publicPath = HOME_PATH) {
   const auth = resolveAuth(AppCore, Auth);
-  const target = safeRedirect(publicPath, getUserHomePath(AppCore, auth));
+  const target = safeRedirect(publicPath, HOME_PATH);
 
-  if (canonicalGuardPath(target) === LOGIN_PATH) {
+  if (
+    canonicalGuardPath(target) === LOGIN_PATH ||
+    isBlockedLegacyPath(target)
+  ) {
     return LOGIN_PATH;
   }
 
@@ -508,7 +596,7 @@ function publicUser(user = null, AppCore = null, Auth = null) {
   if (!isObject(user)) return null;
 
   return {
-    hasId: Boolean(user.id || user.userId),
+    hasId: Boolean(user.id || user.userId || user.uid || user.sub),
     username: user.username || null,
     slug: getUserSlug(AppCore, Auth) || null,
     role: normalizeRole(user.role || user.rol || user.roles) || null,
@@ -541,7 +629,7 @@ function buildDetails({
     scopedRestPath: scoped.scoped ? scoped.restPath : null,
 
     authenticated: hasStrictSession(AppCore, auth),
-    authSignal: isAuthenticated(AppCore, auth),
+    authSignal: isAuthenticatedSignal(AppCore, auth),
     hasToken: hasToken(AppCore, auth),
     hasUser: Boolean(user),
     userUsable: isUserUsable(user),
@@ -622,6 +710,21 @@ export function shouldAllowRoute({
     canonicalPath,
     publicPath,
   };
+
+  if (isBlockedLegacyPath(publicPath) || isBlockedLegacyPath(canonicalPath)) {
+    return deny({
+      reason: GUARD_REASONS.blockedLegacy,
+      route,
+      canonicalPath,
+      publicPath,
+      details: buildDetails({
+        ...common,
+        extra: {
+          blockedLegacy: true,
+        },
+      }),
+    });
+  }
 
   if (!route) {
     return deny({
@@ -771,6 +874,8 @@ export function getGuardsSnapshot({
     canonicalPath: redact(canonicalPath),
     publicPath: redact(publicPath),
 
+    blockedLegacy: isBlockedLegacyPath(publicPath) || isBlockedLegacyPath(canonicalPath),
+
     userScopedPath: Boolean(scoped.scoped),
     isUserHomePath: Boolean(scoped.home),
     requestedSlug: scoped.slug || null,
@@ -791,7 +896,7 @@ export function getGuardsSnapshot({
 
     auth: {
       authenticated: hasStrictSession(AppCore, auth),
-      authSignal: isAuthenticated(AppCore, auth),
+      authSignal: isAuthenticatedSignal(AppCore, auth),
       hasToken: hasToken(AppCore, auth),
       hasUser: Boolean(user),
       userUsable: isUserUsable(user),
@@ -824,7 +929,12 @@ export function getGuardsSnapshot({
       strictAuth: true,
       tokenAndUserRequired: true,
       userUsableRequired: true,
+
       invalidUserWhenDisabledTrue: true,
+      invalidUserWhenDeletedTrue: true,
+      invalidUserWhenArchivedTrue: true,
+      invalidUserWhenActiveFalse: true,
+      invalidUserWhenEnabledFalse: true,
       invalidUserWhenStatusDisabled: true,
 
       roles: [...VALID_ROLES],
@@ -837,9 +947,17 @@ export function getGuardsSnapshot({
       validatesRealUserSlug: false,
       realSlugValidationOwner: "router/index.js",
 
+      homeInternalPath: HOME_PATH,
+      homeVisiblePattern: "/@{user.slug}",
+
+      blocksHomeAlias: true,
+      blocks403Route: true,
+      blocks404Route: true,
+
       noHomeAlias: true,
       noAliases: true,
       no403: true,
+      no404: true,
       no2fa: true,
       noMfa: true,
       noOtp: true,

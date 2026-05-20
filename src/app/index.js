@@ -54,10 +54,12 @@ import {
   renderInitialRoute as renderRouterInitialRoute,
 } from "./router.js";
 
-export const APP_INDEX_VERSION = "app.index.v5";
+export const APP_INDEX_VERSION = "app.index.v6";
 
 let bootPromise = null;
 let ready = false;
+let lastBootError = null;
+let lastRestoreResult = null;
 
 /* =========================================================
    BASICS
@@ -76,14 +78,32 @@ function isFunction(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
 function redact(value = "") {
   return cleanText(value, "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function safeError(error = null) {
+  if (!error) return null;
+
+  return {
+    name: error.name || "Error",
+    message: redact(error.message || String(error)),
+    code: error.code || null,
+    status: error.status || error.statusCode || error.response?.status || null,
+  };
 }
 
 function currentPath() {
@@ -159,13 +179,31 @@ async function callOptional(target = null, method = "", payload = {}) {
 ========================================================= */
 
 function setBusy() {
-  markShellBusy();
-  showLoader("booting");
+  try {
+    markShellBusy();
+  } catch {
+    // noop
+  }
+
+  try {
+    showLoader("booting");
+  } catch {
+    // noop
+  }
 }
 
 function setReady() {
-  markShellReady();
-  hideLoader();
+  try {
+    markShellReady();
+  } catch {
+    // noop
+  }
+
+  try {
+    hideLoader();
+  } catch {
+    // noop
+  }
 }
 
 /* =========================================================
@@ -174,14 +212,28 @@ function setReady() {
 
 function exposeCoreModules() {
   AppCore.auth = Auth;
+  AppCore.Auth = Auth;
+
   AppCore.router = Router;
+  AppCore.Router = Router;
+
   AppCore.i18n = I18n;
+  AppCore.I18n = I18n;
+
   AppCore.toast = Toast;
+  AppCore.Toast = Toast;
 
   AppCore.modules?.register?.("auth", Auth);
+  AppCore.modules?.register?.("Auth", Auth);
+
   AppCore.modules?.register?.("router", Router);
+  AppCore.modules?.register?.("Router", Router);
+
   AppCore.modules?.register?.("i18n", I18n);
+  AppCore.modules?.register?.("I18n", I18n);
+
   AppCore.modules?.register?.("toast", Toast);
+  AppCore.modules?.register?.("Toast", Toast);
 
   return true;
 }
@@ -231,6 +283,12 @@ function refreshI18nDom() {
 function authPayload(payload = {}) {
   return withCore(payload, {
     Auth,
+
+    persistent: true,
+    restoreOnBoot: true,
+    allowSilentRefresh: true,
+    silentRefresh: true,
+
     skipNavigation: true,
     skipRedirect: true,
     noRedirect: true,
@@ -239,13 +297,29 @@ function authPayload(payload = {}) {
 
 async function initAuth(payload = {}) {
   await callRequired(Auth, "init", "Auth", authPayload(payload));
+  exposeCoreModules();
+
   return Auth;
 }
 
 async function restoreAuth(payload = {}) {
+  /*
+    No llamar Auth.syncAuthState() aquí.
+    El restore real ya decide si aplica sesión, refresca o limpia.
+    App sólo espera el resultado antes del primer render del Router.
+  */
   const result = await restoreAuthSession(authPayload(payload));
 
-  await callOptional(Auth, "syncAuthState", authPayload(payload));
+  lastRestoreResult = isObject(result)
+    ? {
+        ok: Boolean(result.ok),
+        restored: Boolean(result.restored),
+        authenticated: Boolean(result.authenticated),
+        hasUser: Boolean(result.user),
+        hasSession: Boolean(result.session),
+        source: result.source || result.result?.source || "app.session",
+      }
+    : null;
 
   return result;
 }
@@ -295,40 +369,52 @@ async function syncChrome(payload = {}) {
 async function runBoot(options = {}) {
   const payload = createBootPayload(options);
 
+  lastBootError = null;
+  lastRestoreResult = null;
+
   setBusy();
 
-  await initCore(payload);
-  await initI18n(payload);
-  await initToast(payload);
+  try {
+    await initCore(payload);
+    await initI18n(payload);
+    await initToast(payload);
 
-  /*
-    Orden crítico:
-    Auth debe estar inicializado y restaurado antes del primer render Router.
-    Así /@{user.slug} puede resolver Home si hay sesión válida.
-  */
-  await initAuth(payload);
-  await restoreAuth(payload);
+    /*
+      Orden crítico:
+      Auth debe estar inicializado y restaurado antes del primer render Router.
+      Así /@{user.slug} puede resolver Home si hay sesión válida.
+    */
+    await initAuth(payload);
+    await restoreAuth(payload);
 
-  /*
-    Router queda delegado en /src/app/router.js.
-    App sólo decide el orden del boot.
-  */
-  await initRouter(payload);
-  await renderInitialRoute(payload);
+    /*
+      Router queda delegado en /src/app/router.js.
+      App sólo decide el orden del boot.
+    */
+    await initRouter(payload);
+    await renderInitialRoute(payload);
 
-  /*
-    Chrome después de ruta + auth.
-    Sidebar y Topbar reciben estado real.
-  */
-  await initChrome(payload);
-  await syncChrome(payload);
+    /*
+      Chrome después de ruta + auth.
+      Sidebar y Topbar reciben estado real.
+    */
+    await initChrome(payload);
+    await syncChrome(payload);
 
-  refreshI18nDom();
+    refreshI18nDom();
 
-  setReady();
-  ready = true;
+    ready = true;
+    setReady();
 
-  return App;
+    return App;
+  } catch (error) {
+    ready = false;
+    lastBootError = safeError(error);
+
+    setReady();
+
+    throw error;
+  }
 }
 
 /* =========================================================
@@ -343,6 +429,9 @@ export function getAppSnapshot() {
     booting: Boolean(bootPromise),
     currentPath: redact(currentPath()),
 
+    lastBootError,
+    lastRestoreResult,
+
     modules: {
       core: Boolean(AppCore),
       auth: Boolean(Auth),
@@ -353,13 +442,29 @@ export function getAppSnapshot() {
       topbar: Boolean(TopbarUI),
     },
 
+    state: {
+      authenticated: AppCore?.state?.authenticated === true,
+      hasToken: AppCore?.state?.hasToken === true,
+      hasRefreshToken: AppCore?.state?.hasRefreshToken === true,
+      hasUser: Boolean(AppCore?.state?.user || AppCore?.state?.currentUser),
+      route: redact(AppCore?.state?.route || ""),
+      canonicalPath: redact(AppCore?.state?.canonicalPath || ""),
+      publicPath: redact(AppCore?.state?.publicPath || ""),
+      routeMode: AppCore?.state?.routeMode || null,
+      chromeVisible: AppCore?.state?.chromeVisible ?? null,
+    },
+
     policy: {
       singleEntryPoint: true,
       bootAppContract: true,
+
       restoresAuthBeforeRouterRender: true,
       sessionRestoreDelegated: true,
+      appDoesNotForceAuthSyncAfterRestore: true,
+
       routerDelegatedToAppRouter: true,
       routerManagedInitialRender: false,
+
       chromeAfterRouteAndAuth: true,
 
       noStore: true,
@@ -369,6 +474,12 @@ export function getAppSnapshot() {
       noCustomEvents: true,
       noFetch: true,
       noStorage: true,
+
+      noHomeRoute: true,
+      no2fa: true,
+      noMfa: true,
+      noOtp: true,
+
       redactedSnapshot: true,
     },
   };

@@ -4,7 +4,7 @@
 
    Responsabilidad:
    - Activación pública mínima.
-   - Endpoint real: /api/auth/activate.
+   - Endpoint real: /api/auth/activate desde core/config.js.
    - Token param único: token.
    - Transporte único vía CoreHttp.
    - Aplica sesión sólo si backend devuelve token + user usable.
@@ -14,8 +14,8 @@
    - Sin Router.
    - Sin Toast.
    - Sin refresh.
-   - Sin storage.
-   - Sin first-user real.
+   - Sin storage directo.
+   - Sin first-user.
    - Sin validate endpoint inventado.
    - Sin aliases legacy pesados.
    - Sin 2FA/MFA/OTP.
@@ -25,20 +25,31 @@
 import * as CoreHttpModule from "../../core/http.js";
 
 import {
+  AUTH_ENDPOINTS,
+  ROUTES,
+  TOKEN_PARAM,
+  USER_HOME_PREFIX,
+} from "../../core/config.js";
+
+import {
   applySession,
 } from "./session.js";
 
-export const ACTIVATION_MODULE_VERSION = "auth.activation.v2";
+export const ACTIVATION_MODULE_VERSION = "auth.activation.v3";
 
 const SOURCE = "auth.activation";
-const ENDPOINT = "/api/auth/activate";
-const TOKEN_PARAM = "token";
-const DEFAULT_LOGIN_REDIRECT = "/login";
+
+const ENDPOINT = AUTH_ENDPOINTS.activate;
+const DEFAULT_LOGIN_REDIRECT = ROUTES.login || "/login";
+const HOME_ROUTE = ROUTES.home || "/";
 
 const TOKEN_MIN_LENGTH = 8;
 const TOKEN_MAX_LENGTH = 8192;
+
 const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_LENGTH = 1024;
+
+const VALID_ROLES = Object.freeze(["admin", "user"]);
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -64,7 +75,11 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function text(value = "", fallback = "") {
+function isFormData(value) {
+  return typeof FormData !== "undefined" && value instanceof FormData;
+}
+
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
@@ -82,10 +97,35 @@ function nowIso() {
 }
 
 function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+  return cleanText(value, "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function payloadValue(payload = {}, names = []) {
+  if (isFormData(payload)) {
+    for (const name of names) {
+      const value = payload.get(name);
+
+      if (value !== undefined && value !== null && value !== "") {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  if (!isObject(payload)) return undefined;
+
+  for (const name of names) {
+    const value = payload[name];
+
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+
+  return undefined;
 }
 
 /* =========================================================
@@ -93,16 +133,23 @@ function redact(value = "") {
 ========================================================= */
 
 function normalizeTokenValue(value = "") {
-  const token = text(value, "").replace(/^Bearer\s+/i, "");
+  const token = cleanText(value, "").replace(/^Bearer\s+/i, "");
 
   if (!token) return "";
   if (/\s/.test(token)) return "";
+  if (token.length < TOKEN_MIN_LENGTH) return "";
   if (token.length > TOKEN_MAX_LENGTH) return "";
 
   if (
-    ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
-      token.toLowerCase()
-    )
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "[object object]",
+      "{}",
+      "[]",
+    ].includes(token.toLowerCase())
   ) {
     return "";
   }
@@ -138,17 +185,19 @@ export function extractActivationToken() {
 }
 
 export function resolveActivationToken(payload = {}) {
-  if (!isObject(payload)) {
+  if (!isObject(payload) && !isFormData(payload)) {
     return normalizeTokenValue(payload || extractActivationToken() || "");
   }
 
   return normalizeTokenValue(
-    payload.token ||
-      payload.data?.token ||
-      payload.payload?.token ||
-      payload.result?.token ||
-      payload.activationToken ||
-      payload.activation_token ||
+    payloadValue(payload, [
+      "token",
+      "activationToken",
+      "activation_token",
+    ]) ||
+      payload?.data?.token ||
+      payload?.payload?.token ||
+      payload?.result?.token ||
       extractActivationToken() ||
       ""
   );
@@ -157,8 +206,6 @@ export function resolveActivationToken(payload = {}) {
 export function extractActivationTokenFromPayload(payload = {}) {
   return resolveActivationToken(payload);
 }
-
-export const extractActivationTokenValue = extractActivationTokenFromPayload;
 
 /* =========================================================
    PAYLOAD
@@ -169,28 +216,26 @@ function normalizePassword(value = "") {
 }
 
 export function normalizeActivationPayload(payload = {}) {
-  const source = isObject(payload) ? payload : {};
-
   return {
-    token: resolveActivationToken(source),
+    token: resolveActivationToken(payload),
 
     password: normalizePassword(
-      source.password ||
-        source.newPassword ||
-        source.new_password ||
-        ""
+      payloadValue(payload, [
+        "password",
+        "newPassword",
+        "new_password",
+      ]) || ""
     ),
 
     confirmPassword: normalizePassword(
-      source.confirmPassword ||
-        source.passwordConfirmation ||
-        source.password_confirmation ||
-        ""
+      payloadValue(payload, [
+        "confirmPassword",
+        "passwordConfirmation",
+        "password_confirmation",
+      ]) || ""
     ),
   };
 }
-
-export const normalizeActivateAccountPayload = normalizeActivationPayload;
 
 export function buildActivateAccountBody(payload = {}) {
   const normalized = normalizeActivationPayload(payload);
@@ -202,8 +247,6 @@ export function buildActivateAccountBody(payload = {}) {
   };
 }
 
-export const buildActivationRequestBody = buildActivateAccountBody;
-
 function validateActivationPayload(payload = {}) {
   const normalized = normalizeActivationPayload(payload);
 
@@ -212,9 +255,11 @@ function validateActivationPayload(payload = {}) {
   if (normalized.token.length > TOKEN_MAX_LENGTH) return "El enlace de activación no es válido.";
 
   if (!normalized.password) return "La contraseña es obligatoria.";
+
   if (normalized.password.length < PASSWORD_MIN_LENGTH) {
     return `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`;
   }
+
   if (normalized.password.length > PASSWORD_MAX_LENGTH) {
     return "La contraseña es demasiado larga.";
   }
@@ -231,52 +276,30 @@ function validateActivationPayload(payload = {}) {
 }
 
 /* =========================================================
-   RESPONSE NORMALIZATION
+   USER NORMALIZATION
 ========================================================= */
 
-function nested(payload = {}) {
-  const source = isObject(payload) ? payload : {};
-
-  return [
-    source,
-    isObject(source.data) ? source.data : null,
-    isObject(source.payload) ? source.payload : null,
-    isObject(source.result) ? source.result : null,
-    isObject(source.auth) ? source.auth : null,
-    isObject(source.session) ? source.session : null,
-    isObject(source.sessionData) ? source.sessionData : null,
-  ].filter(Boolean);
-}
-
-function pick(nodes = [], keys = []) {
-  for (const node of nodes) {
-    for (const key of keys) {
-      const value = node?.[key];
-
-      if (value !== undefined && value !== null && value !== "") {
-        return value;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function cleanRole(value = "") {
+function normalizeRole(value = "") {
   if (Array.isArray(value)) {
-    const roles = value.map(cleanRole).filter(Boolean);
+    const roles = value.map(normalizeRole).filter(Boolean);
 
     if (roles.includes("admin")) return "admin";
     if (roles.includes("user")) return "user";
 
-    return "user";
+    return "";
   }
 
-  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+  const role = String(value || "").trim().toLowerCase();
+
+  return VALID_ROLES.includes(role) ? role : "";
+}
+
+function cleanRole(value = "") {
+  return normalizeRole(value) || "user";
 }
 
 function normalizeSlug(value = "") {
-  const slug = text(value, "")
+  const slug = cleanText(value, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -300,7 +323,14 @@ function extractUserSlug(user = null) {
   );
 }
 
+function buildUserHomePath(user = null) {
+  const slug = extractUserSlug(user);
+  return slug ? `${USER_HOME_PREFIX}${slug}` : HOME_ROUTE;
+}
+
 function removeSensitiveUserFields(user = {}) {
+  if (!isObject(user)) return {};
+
   const output = { ...user };
 
   for (const key of [
@@ -318,19 +348,13 @@ function removeSensitiveUserFields(user = {}) {
     "resetToken",
     "activationToken",
 
-    "otp",
-    "otpCode",
-    "mfa",
-    "twofa_secret",
-    "twofaSecret",
-    "totpSecret",
+    "secret",
+    "secrets",
+    "code",
+    "codes",
     "backupCodes",
   ]) {
-    try {
-      delete output[key];
-    } catch {
-      // noop
-    }
+    delete output[key];
   }
 
   return output;
@@ -339,7 +363,7 @@ function removeSensitiveUserFields(user = {}) {
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  const status = text(user.status || user.estado, "").toLowerCase();
+  const status = cleanText(user.status || user.estado, "").toLowerCase();
 
   return Boolean(
     user.disabled === true ||
@@ -356,11 +380,11 @@ function hasUserIdentity(user = null) {
   if (!isObject(user)) return false;
 
   return Boolean(
-    text(user.id, "") ||
-      text(user.userId, "") ||
-      text(user.username, "") ||
-      text(user.slug, "") ||
-      text(user.lookup?.slug, "")
+    cleanText(user.id, "") ||
+      cleanText(user.userId, "") ||
+      cleanText(user.username, "") ||
+      cleanText(user.slug, "") ||
+      cleanText(user.lookup?.slug, "")
   );
 }
 
@@ -377,11 +401,11 @@ function normalizeUser(user = null) {
 
   const safeUser = removeSensitiveUserFields(user);
 
-  const id = text(safeUser.userId || safeUser.id, "");
+  const id = cleanText(safeUser.userId || safeUser.id, "");
   const slug = extractUserSlug(safeUser);
   const profile = isObject(safeUser.profile) ? safeUser.profile : {};
 
-  const username = text(
+  const username = cleanText(
     safeUser.username ||
       safeUser.userName ||
       safeUser.user_name ||
@@ -390,7 +414,7 @@ function normalizeUser(user = null) {
     ""
   );
 
-  const displayName = text(
+  const displayName = cleanText(
     safeUser.displayName ||
       safeUser.fullName ||
       safeUser.name ||
@@ -425,18 +449,11 @@ function normalizeUser(user = null) {
     rol: role,
     roles: [role],
 
-    isAdmin: role === "admin",
-    isSupport: false,
-    isManager: false,
-    isClient: false,
-
-    avatar: safeUser.avatar || safeUser.avatarUrl || safeUser.picture || null,
-    avatarUrl: safeUser.avatarUrl || safeUser.avatar || safeUser.picture || null,
-    picture: safeUser.picture || safeUser.avatarUrl || safeUser.avatar || null,
-    hasAvatar: Boolean(safeUser.avatar || safeUser.avatarUrl || safeUser.picture),
-
     active: true,
     disabled: false,
+
+    isAdmin: role === "admin",
+    isUser: role === "user",
   };
 }
 
@@ -454,6 +471,38 @@ function publicUser(user = null) {
     role: clean.role || clean.rol || null,
     hasAvatar: Boolean(clean.avatar || clean.avatarUrl || clean.picture),
   };
+}
+
+/* =========================================================
+   RESPONSE NORMALIZATION
+========================================================= */
+
+function nested(payload = {}) {
+  const source = isObject(payload) ? payload : {};
+
+  return [
+    source,
+    isObject(source.data) ? source.data : null,
+    isObject(source.payload) ? source.payload : null,
+    isObject(source.result) ? source.result : null,
+    isObject(source.auth) ? source.auth : null,
+    isObject(source.session) ? source.session : null,
+    isObject(source.sessionData) ? source.sessionData : null,
+  ].filter(Boolean);
+}
+
+function pick(nodes = [], keys = []) {
+  for (const node of nodes) {
+    for (const key of keys) {
+      const value = node?.[key];
+
+      if (value !== undefined && value !== null && value !== "") {
+        return value;
+      }
+    }
+  }
+
+  return undefined;
 }
 
 function readToken(payload = {}) {
@@ -507,13 +556,11 @@ function readSession(payload = {}) {
 function responseNode(input = {}) {
   const source = isObject(input) ? input : {};
 
-  return isObject(source.data)
-    ? source.data
-    : isObject(source.payload)
-      ? source.payload
-      : isObject(source.result)
-        ? source.result
-        : source;
+  if (isObject(source.data)) return source.data;
+  if (isObject(source.payload)) return source.payload;
+  if (isObject(source.result)) return source.result;
+
+  return source;
 }
 
 function responseOk(input = {}) {
@@ -529,13 +576,13 @@ function responseOk(input = {}) {
 
   if (readToken(input) && readUser(input)) return true;
 
-  return Boolean(source.activated || source.valid || source.active);
+  return Boolean(source.activated || source.active);
 }
 
 function responseMessage(input = {}, fallback = "") {
   const source = responseNode(input);
 
-  return text(
+  return cleanText(
     source.message ||
       source.mensaje ||
       source.detail ||
@@ -548,7 +595,7 @@ function responseMessage(input = {}, fallback = "") {
 
 function responseCode(input = {}) {
   const source = responseNode(input);
-  return text(source.code || source.errorCode || "", "");
+  return cleanText(source.code || source.errorCode || "", "");
 }
 
 function responseStatus(input = {}) {
@@ -557,15 +604,33 @@ function responseStatus(input = {}) {
   return Number.isFinite(status) ? status : 0;
 }
 
-function responseRedirect(input = {}, fallback = DEFAULT_LOGIN_REDIRECT) {
-  const source = responseNode(input);
-  const target = text(source.redirectTo || source.redirect || source.returnTo || fallback, fallback);
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
+function normalizeRedirectPath(value = "", fallback = DEFAULT_LOGIN_REDIRECT) {
+  const target = cleanText(value, fallback);
 
   if (!target.startsWith("/") || target.startsWith("//")) return fallback;
   if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return fallback;
   if (/[\r\n\t\\]/.test(target)) return fallback;
+  if (hasSensitiveQuery(target)) return fallback;
 
   return target;
+}
+
+function responseRedirect(input = {}, fallback = DEFAULT_LOGIN_REDIRECT) {
+  const source = responseNode(input);
+
+  return normalizeRedirectPath(
+    source.redirectTo ||
+      source.redirect ||
+      source.returnTo ||
+      fallback,
+    fallback
+  );
 }
 
 export function normalizeActivationResponse(input = {}) {
@@ -577,12 +642,17 @@ export function normalizeActivationResponse(input = {}) {
   const session = readSession(input);
 
   const authenticated = Boolean(token && user);
+  const homePath = authenticated ? buildUserHomePath(user) : HOME_ROUTE;
+
+  const redirectTo = responseRedirect(
+    input,
+    authenticated ? homePath : DEFAULT_LOGIN_REDIRECT
+  );
 
   return {
     ok,
     success: ok,
     activated: ok,
-    valid: ok,
     error: !ok,
 
     authenticated,
@@ -595,7 +665,11 @@ export function normalizeActivationResponse(input = {}) {
     code: responseCode(input),
     status: responseStatus(input),
 
-    redirectTo: responseRedirect(input),
+    redirectTo,
+
+    homePath,
+    defaultHome: homePath,
+    postLoginTarget: authenticated ? homePath : redirectTo,
 
     token: authenticated ? token : null,
     accessToken: authenticated ? token : null,
@@ -616,8 +690,6 @@ export function normalizeActivationResponse(input = {}) {
   };
 }
 
-export const normalizeActivateAccountResponse = normalizeActivationResponse;
-
 /* =========================================================
    HTTP
 ========================================================= */
@@ -625,10 +697,12 @@ export const normalizeActivateAccountResponse = normalizeActivationResponse;
 function publicOptions(options = {}) {
   return {
     ...options,
+
     public: true,
     auth: false,
     skipAuth: true,
     noAuthHeader: true,
+
     storeError: false,
   };
 }
@@ -660,11 +734,13 @@ async function postActivation(body = {}, options = {}) {
 ========================================================= */
 
 function sanitizeActivationResult(result = {}) {
+  const homePath = normalizeRedirectPath(result.homePath || HOME_ROUTE, HOME_ROUTE);
+  const redirectTo = normalizeRedirectPath(result.redirectTo || DEFAULT_LOGIN_REDIRECT);
+
   return {
     ok: result.ok === true,
     success: result.success === true,
     activated: result.activated === true,
-    valid: result.valid === true,
     error: result.error === true,
 
     authenticated: result.authenticated === true,
@@ -674,7 +750,14 @@ function sanitizeActivationResult(result = {}) {
     code: result.code || "",
     status: result.status || 0,
 
-    redirectTo: responseRedirect(result),
+    redirectTo,
+
+    homePath,
+    defaultHome: normalizeRedirectPath(result.defaultHome || homePath, HOME_ROUTE),
+    postLoginTarget: normalizeRedirectPath(
+      result.postLoginTarget || redirectTo,
+      redirectTo
+    ),
 
     token: null,
     accessToken: null,
@@ -731,8 +814,8 @@ export async function activateAccount(payload = {}, options = {}) {
               accessToken: result.token,
               access_token: result.token,
 
-              refreshToken: result.refreshToken,
-              refresh_token: result.refresh_token,
+              refreshToken: result.refreshToken || undefined,
+              refresh_token: result.refresh_token || undefined,
 
               user: result.user,
               usuario: result.user,
@@ -750,8 +833,10 @@ export async function activateAccount(payload = {}, options = {}) {
           );
 
           result.sessionApplied = Boolean(snapshot?.authenticated);
+          result.authenticated = result.sessionApplied;
         } catch {
           result.sessionApplied = false;
+          result.authenticated = false;
         }
       }
 
@@ -779,128 +864,8 @@ export async function activateAccount(payload = {}, options = {}) {
   return activatePromise;
 }
 
-export const activate = activateAccount;
-export const activation = activateAccount;
-export const confirmActivation = activateAccount;
-
 /* =========================================================
-   VALIDATE TOKEN
-   No endpoint real. Validación local simple.
-========================================================= */
-
-export async function validateActivationToken(payload = {}) {
-  const token = resolveActivationToken(payload);
-
-  const valid = Boolean(
-    token &&
-      token.length >= TOKEN_MIN_LENGTH &&
-      token.length <= TOKEN_MAX_LENGTH
-  );
-
-  return {
-    ok: valid,
-    success: valid,
-    valid,
-    activated: false,
-    authenticated: false,
-    token: null,
-    message: valid ? "Token de activación válido." : "Token de activación no válido.",
-  };
-}
-
-export const validateActivateAccountToken = validateActivationToken;
-export const validateActivateToken = validateActivationToken;
-export const validateAccountActivationToken = validateActivationToken;
-export const activationValidate = validateActivationToken;
-
-/* =========================================================
-   UNSUPPORTED COMPAT
-========================================================= */
-
-export async function activateFirstUser() {
-  return {
-    ok: false,
-    success: false,
-    activated: false,
-    authenticated: false,
-    code: "UNSUPPORTED_FLOW",
-    message: "La activación de primer usuario no está disponible en el SPA mínimo.",
-  };
-}
-
-export const firstUserActivation = activateFirstUser;
-export const activateInitialUser = activateFirstUser;
-
-export function normalizeFirstUserActivationPayload(payload = {}) {
-  return normalizeActivationPayload(payload);
-}
-
-export function buildActivateFirstUserBody(payload = {}) {
-  return buildActivateAccountBody(payload);
-}
-
-export const buildFirstUserActivationBody = buildActivateFirstUserBody;
-
-export function normalizeFirstUserActivationResponse(input = {}) {
-  return {
-    ...sanitizeActivationResult(normalizeActivationResponse(input)),
-    code: "UNSUPPORTED_FLOW",
-  };
-}
-
-/* =========================================================
-   COMPAT BUILDERS
-========================================================= */
-
-export function normalizeValidateActivationTokenPayload(payload = {}) {
-  return {
-    token: resolveActivationToken(payload),
-  };
-}
-
-export function buildValidateActivationTokenBody(payload = {}) {
-  const token = resolveActivationToken(payload);
-
-  return token ? { token } : {};
-}
-
-export function normalizeValidateActivationTokenResponse(input = {}) {
-  return {
-    ...sanitizeActivationResult(normalizeActivationResponse(input)),
-    authenticated: false,
-    token: null,
-    accessToken: null,
-    refreshToken: null,
-  };
-}
-
-/* =========================================================
-   ENDPOINT GETTERS
-========================================================= */
-
-export function getActivateAccountEndpoint() {
-  return ENDPOINT;
-}
-
-export const getActivationEndpoint = getActivateAccountEndpoint;
-export const getAccountActivationEndpoint = getActivateAccountEndpoint;
-
-export function getActivateFirstUserEndpoint() {
-  return "";
-}
-
-export const getFirstUserActivationEndpoint = getActivateFirstUserEndpoint;
-
-export function getValidateActivationTokenEndpoint() {
-  return "";
-}
-
-export const getValidateActivateAccountTokenEndpoint = getValidateActivationTokenEndpoint;
-export const getValidateActivateTokenEndpoint = getValidateActivationTokenEndpoint;
-export const getValidateAccountActivationTokenEndpoint = getValidateActivationTokenEndpoint;
-
-/* =========================================================
-   SNAPSHOT / DEBUG
+   SNAPSHOT
 ========================================================= */
 
 export function getActivationSnapshot() {
@@ -937,14 +902,14 @@ export function getActivationSnapshot() {
     },
 
     policy: {
-      endpoint: ENDPOINT,
-      tokenParam: TOKEN_PARAM,
+      endpointFromConfig: true,
+      tokenParamFromConfig: true,
 
       publicEndpoint: true,
       noFirstUser: true,
       noValidateEndpoint: true,
 
-      noStorage: true,
+      noStorageDirect: true,
       noRouter: true,
       noToast: true,
       noRefresh: true,
@@ -954,7 +919,10 @@ export function getActivationSnapshot() {
 
       applySessionOnlyWithTokenAndUser: true,
       sanitizedResult: true,
+
       no2fa: true,
+      noMfa: true,
+      noOtp: true,
     },
   };
 }
@@ -963,14 +931,9 @@ export function getActivationDebugPayload(payload = {}) {
   const normalized = normalizeActivationPayload(payload);
 
   return {
-    activate: {
-      token: normalized.token ? "***" : "",
-      password: normalized.password ? "***" : "",
-      confirmPassword: normalized.confirmPassword ? "***" : "",
-    },
-    validate: {
-      token: normalized.token ? "***" : "",
-    },
+    token: normalized.token ? "***" : "",
+    password: normalized.password ? "***" : "",
+    confirmPassword: normalized.confirmPassword ? "***" : "",
   };
 }
 
@@ -978,59 +941,19 @@ export function getActivationDebugPayload(payload = {}) {
    DEFAULT EXPORT
 ========================================================= */
 
-const Activation = Object.assign(activateAccount, {
-  version: ACTIVATION_MODULE_VERSION,
+export default {
+  ACTIVATION_MODULE_VERSION,
 
   activateAccount,
-  activate,
-  activation,
-  confirmActivation,
-
-  activateFirstUser,
-  firstUserActivation,
-  activateInitialUser,
-
-  validateActivationToken,
-  validateActivateAccountToken,
-  validateActivateToken,
-  validateAccountActivationToken,
-  activationValidate,
 
   resolveActivationToken,
   extractActivationToken,
   extractActivationTokenFromPayload,
-  extractActivationTokenValue,
 
   normalizeActivationPayload,
-  normalizeActivateAccountPayload,
-
-  normalizeFirstUserActivationPayload,
-  normalizeValidateActivationTokenPayload,
-
   buildActivateAccountBody,
-  buildActivationRequestBody,
-
-  buildActivateFirstUserBody,
-  buildFirstUserActivationBody,
-  buildValidateActivationTokenBody,
-
   normalizeActivationResponse,
-  normalizeActivateAccountResponse,
-  normalizeFirstUserActivationResponse,
-  normalizeValidateActivationTokenResponse,
-
-  getActivateAccountEndpoint,
-  getActivationEndpoint,
-  getAccountActivationEndpoint,
-  getActivateFirstUserEndpoint,
-  getFirstUserActivationEndpoint,
-  getValidateActivationTokenEndpoint,
-  getValidateActivateAccountTokenEndpoint,
-  getValidateActivateTokenEndpoint,
-  getValidateAccountActivationTokenEndpoint,
 
   getActivationSnapshot,
   getActivationDebugPayload,
-});
-
-export default Activation;
+};

@@ -16,14 +16,18 @@
    - Sin Toast.
    - Sin navegación.
    - Sin lógica propia de password toggle.
+   - Sin theme toggle.
 ========================================================= */
 
 import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
 
-export const LOGIN_DOM_VERSION = "login.dom.v2";
+export const LOGIN_DOM_VERSION = "login.dom.v3";
 
 const DEFAULT_SUBMIT_LABEL = "Entrar";
 const DEFAULT_LOADING_LABEL = "Accediendo...";
+
+const MAX_IDENTIFIER_LENGTH = 160;
+const MAX_PASSWORD_LENGTH = 1024;
 
 const PASSWORD_BINDINGS = new WeakMap();
 const SUBMIT_BINDINGS = new WeakMap();
@@ -44,7 +48,6 @@ const SELECTORS = Object.freeze({
 
   passwordToggle: "[data-password-toggle], [data-login-password-toggle]",
   forgotPasswordLink: "[data-login-password-request], .login-reset-link",
-  themeToggle: "[data-login-theme-toggle], [data-theme-toggle]",
 });
 
 /* =========================================================
@@ -69,6 +72,12 @@ function text(value = "", fallback = "") {
 function rawText(value = "", fallback = "") {
   if (value === null || value === undefined) return fallback;
   return String(value);
+}
+
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function doc() {
@@ -360,7 +369,6 @@ export function getLoginRefs(container = null) {
 
     togglePasswordButton: qs(scope, SELECTORS.passwordToggle),
     forgotPasswordLink: qs(scope, SELECTORS.forgotPasswordLink),
-    themeToggleButton: qs(scope, SELECTORS.themeToggle),
 
     passwordFieldBindings: [],
   };
@@ -407,7 +415,7 @@ export function setInputInvalid(inputNode = null, invalid = false) {
 }
 
 export function setFieldError(fieldNode = null, message = "", errorNode = null) {
-  const clean = text(message, "");
+  const clean = redact(text(message, ""));
 
   setFieldInvalid(fieldNode, Boolean(clean));
 
@@ -425,7 +433,7 @@ export function clearFieldError(fieldNode = null, errorNode = null) {
 }
 
 function setGlobalError(errorBox = null, message = "") {
-  const clean = text(message, "");
+  const clean = redact(text(message, ""));
 
   if (!errorBox) return clean;
 
@@ -614,7 +622,12 @@ export function unlockLoginForm(refs = {}, options = {}) {
 function normalizeIdentifier(value = "") {
   return text(value, "")
     .normalize("NFKC")
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    .slice(0, MAX_IDENTIFIER_LENGTH);
+}
+
+function normalizePassword(value = "") {
+  return rawText(value, "").slice(0, MAX_PASSWORD_LENGTH);
 }
 
 function looksLikeEmail(value = "") {
@@ -638,7 +651,7 @@ export function readLoginFormState(refs = {}) {
     user: identifier,
     login: identifier,
 
-    password: rawText(refs.passwordInput?.value, ""),
+    password: normalizePassword(refs.passwordInput?.value),
     remember: Boolean(refs.rememberInput?.checked),
     rememberMe: Boolean(refs.rememberInput?.checked),
   };
@@ -736,58 +749,6 @@ export function bindLoginSubmit(refs = {}, handler = null) {
 }
 
 /* =========================================================
-   COMPAT MÍNIMA
-========================================================= */
-
-export function getPasswordVisibilityState(refs = {}) {
-  return refs.passwordInput?.type === "text";
-}
-
-export function setPasswordVisibility(refs = {}, visible = false) {
-  const binding = refs.passwordFieldBindings?.[0];
-
-  if (isFn(binding?.setVisible)) {
-    return binding.setVisible(Boolean(visible));
-  }
-
-  return getPasswordVisibilityState(refs);
-}
-
-export function togglePasswordVisibility(refs = {}) {
-  const binding = refs.passwordFieldBindings?.[0];
-
-  if (isFn(binding?.toggleVisibility)) {
-    return binding.toggleVisibility();
-  }
-
-  return getPasswordVisibilityState(refs);
-}
-
-export function bindPasswordToggle(refs = {}, handler = null) {
-  if (isFn(handler) && refs.togglePasswordButton) {
-    return bindDom(refs.togglePasswordButton, "click", handler);
-  }
-
-  bindLoginPasswordFields(refs.root || refs.form || refs.container);
-
-  return noop;
-}
-
-export function bindThemeToggle(refs = {}, handler = null) {
-  if (!refs.themeToggleButton || !isFn(handler)) return noop;
-
-  return bindDom(refs.themeToggleButton, "click", (event) => {
-    try {
-      event?.preventDefault?.();
-    } catch {
-      // noop
-    }
-
-    handler(event);
-  });
-}
-
-/* =========================================================
    SNAPSHOT
 ========================================================= */
 
@@ -811,8 +772,14 @@ export function getLoginDomSnapshot(refs = {}) {
       noStore: true,
       noToast: true,
       noNavigation: true,
+
       passwordFieldShared: true,
+      noOwnPasswordToggleLogic: true,
+      noThemeToggle: true,
+
       submitIdempotent: true,
+      errorsRedacted: true,
+      boundedFieldReads: true,
     },
   };
 }
@@ -846,12 +813,6 @@ export default {
 
   bindLoginInputClearers,
   bindLoginSubmit,
-
-  getPasswordVisibilityState,
-  setPasswordVisibility,
-  togglePasswordVisibility,
-  bindPasswordToggle,
-  bindThemeToggle,
 
   getLoginDomSnapshot,
 };

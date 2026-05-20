@@ -4,13 +4,13 @@
 
    Responsabilidad:
    - Restaurar sesión mínima.
-   - Si ya hay token + user usable: mantener sesión.
-   - Si hay token sin user: pedir /api/auth/me.
-   - Si /me devuelve user válido: aplicar sesión.
-   - Si access token caducó y hay refresh context: renovar por /api/auth/refresh.
+   - Validar sesión contra /api/auth/me cuando hay access token.
+   - Si access token caducó y hay refresh token: renovar por /api/auth/refresh.
+   - Si no hay access token pero hay refresh token: intentar refresh silencioso.
    - Si refresh devuelve sesión válida: aplicar sesión.
+   - Si /me devuelve user válido: aplicar sesión.
    - Si no hay token ni refresh context: limpiar sesión local.
-   - Si /me o /refresh fallan con 401/403: limpiar sesión local.
+   - Si refresh falla con revocación/usuario inválido/tokenVersion: limpiar sesión local.
    - No inventar slug.
    - No navegar.
    - Sin fetch propio.
@@ -20,6 +20,11 @@
    - Sin AppCore directo.
    - Sin storage directo.
    - Sin 2FA/MFA/OTP.
+
+   CONTRATO:
+   - CoreHttp clasifica errores auth.
+   - session.js es el único que aplica/limpia/persiste sesión.
+   - Backend permite refresh con refreshToken y, si existen, sessionId/userId.
 ========================================================= */
 
 import * as CoreHttpModule from "../../core/http.js";
@@ -41,7 +46,7 @@ import {
   getCurrentUserHomePath,
 } from "./session.js";
 
-export const RESTORE_VERSION = "auth.restore.v5";
+export const RESTORE_VERSION = "auth.restore.v6";
 
 const ME_ENDPOINT = AUTH_ENDPOINTS.me;
 const REFRESH_ENDPOINT = AUTH_ENDPOINTS.refresh;
@@ -80,8 +85,22 @@ function isObject(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    return value;
+  }
+
+  return null;
 }
 
 function nowIso() {
@@ -94,7 +113,10 @@ function nowIso() {
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -151,12 +173,14 @@ function currentSession() {
 
 function refreshContext() {
   const session = currentSession();
+  const user = currentUser();
   const refreshToken = currentRefreshToken();
 
   const sessionId = cleanText(
     session?.sessionId ||
       session?.id ||
       session?.sid ||
+      session?.session_id ||
       "",
     ""
   );
@@ -166,50 +190,108 @@ function refreshContext() {
       session?.sessionUserId ||
       session?.user_id ||
       session?.session_user_id ||
+      user?.userId ||
+      user?.id ||
+      user?.uid ||
+      user?.sub ||
       "",
     ""
   );
 
+  /*
+    Backend refresh puede resolver por refreshTokenHash si falta sessionId/userId.
+    Por tanto, el contexto usable mínimo es refreshToken.
+  */
   return {
     refreshToken,
     sessionId,
     userId,
     session,
-    usable: Boolean(refreshToken && sessionId && userId),
+    user,
+    usable: Boolean(refreshToken),
+    hasFullContext: Boolean(refreshToken && sessionId && userId),
   };
+}
+
+function allowSilentRefresh(options = {}) {
+  return !(
+    options.allowSilentRefresh === false ||
+    options.silentRefresh === false ||
+    options.disableRefresh === true ||
+    options.noRefresh === true
+  );
 }
 
 /* =========================================================
    ERRORS
 ========================================================= */
 
+function getErrorPayload(error = null) {
+  if (!error) return {};
+
+  if (isObject(error.data)) return error.data;
+  if (isObject(error.body)) return error.body;
+  if (isObject(error.payload)) return error.payload;
+  if (isObject(error.response?.data)) return error.response.data;
+  if (isObject(error.response)) return error.response;
+
+  return {};
+}
+
 function authErrorStatus(error = null) {
+  const payload = getErrorPayload(error);
+
   return (
     Number(
       error?.status ||
         error?.statusCode ||
         error?.response?.status ||
-        error?.data?.status ||
+        payload.statusCode ||
         0
     ) || 0
   );
 }
 
 function authErrorCode(error = null) {
-  return (
-    error?.code ||
-    error?.data?.code ||
-    error?.response?.data?.code ||
-    null
+  try {
+    if (isFunction(CoreHttp?.getHttpErrorCode)) {
+      const code = CoreHttp.getHttpErrorCode(error);
+      if (code) return code;
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  const payload = getErrorPayload(error);
+
+  return cleanText(
+    first(
+      error?.code,
+      error?.error,
+      payload.code,
+      payload.error,
+      payload.auth?.code,
+      payload.auth?.error,
+      ""
+    ),
+    ""
   );
 }
 
 function extractMessage(error = null) {
+  const payload = getErrorPayload(error);
+
   return redact(
-    cleanText(error?.data?.message, "") ||
-      cleanText(error?.response?.data?.message, "") ||
-      cleanText(error?.message, "") ||
-      String(error || "")
+    cleanText(
+      first(
+        payload.message,
+        payload.error_description,
+        error?.message,
+        authErrorCode(error),
+        "No se pudo restaurar la sesión."
+      ),
+      "No se pudo restaurar la sesión."
+    )
   );
 }
 
@@ -259,6 +341,8 @@ function rememberError(type = "restore", error = null) {
   runtime.lastError = {
     type,
     ...publicError(finalError),
+    refreshable: isRefreshableAuthFailure(finalError),
+    shouldClearSession: shouldClearSessionForAuthError(finalError),
     at: nowIso(),
   };
 
@@ -275,21 +359,74 @@ function isAuthFailure(error = null) {
   return status === 401 || status === 403;
 }
 
-function isRefreshableAuthFailure(error = null) {
-  const finalError = normalizeRestoreError(error);
-  const status = authErrorStatus(finalError);
-  const code = cleanText(authErrorCode(finalError), "").toUpperCase();
+function shouldClearSessionForAuthError(error = null) {
+  try {
+    if (isFunction(CoreHttp?.shouldClearSessionForAuthError)) {
+      return CoreHttp.shouldClearSessionForAuthError(error) === true;
+    }
+  } catch {
+    // fallback abajo
+  }
 
-  if (status !== 401) return false;
+  const code = cleanText(authErrorCode(error), "").toUpperCase();
 
   return [
-    "TOKEN_EXPIRED",
     "INVALID_TOKEN",
-    "MISSING_TOKEN",
-    "TOKEN_MISSING",
-    "AUTH_RESTORE_FAILED",
-    "REQUEST_ERROR",
+    "INVALID_TOKEN_FORMAT",
+    "INVALID_AUTHORIZATION_HEADER",
+    "TEMP_TOKEN_NOT_ALLOWED",
+    "TEMP_AUTH_DISABLED",
+
+    "SESSION_INVALID",
+    "SESSION_REVOKED",
+    "SESSION_USER_MISMATCH",
+    "SESSION_ID_MISMATCH",
+    "SESSION_TOKEN_VERSION_MISMATCH",
+    "SESSION_TOKEN_MISMATCH",
+
+    "USER_INVALID",
+    "USER_INACTIVE",
+    "USER_DISABLED",
+    "USER_NOT_AVAILABLE",
+    "USER_EMAIL_UNVERIFIED",
+
+    "PASSWORD_CHANGE_REQUIRED",
+    "TOKEN_VERSION_MISMATCH",
+
+    "INVALID_REFRESH_TOKEN",
+    "SESSION_NOT_FOUND",
   ].includes(code);
+}
+
+function isRefreshableAuthFailure(error = null, options = {}) {
+  if (!allowSilentRefresh(options)) return false;
+
+  try {
+    if (isFunction(CoreHttp?.isRefreshableAuthError)) {
+      if (CoreHttp.isRefreshableAuthError(error) === true) return true;
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  const status = authErrorStatus(error);
+  const code = cleanText(authErrorCode(error), "").toUpperCase();
+
+  if (status && status !== 401) return false;
+
+  if (code === "TOKEN_EXPIRED") return true;
+
+  if (
+    [
+      "MISSING_TOKEN",
+      "TOKEN_MISSING",
+      "SESSION_REQUIRED",
+    ].includes(code)
+  ) {
+    return Boolean(refreshContext().usable);
+  }
+
+  return false;
 }
 
 /* =========================================================
@@ -341,6 +478,7 @@ function restoreResult(source = "state") {
 
   return {
     ok: Boolean(snapshot.authenticated),
+    restored: Boolean(snapshot.authenticated),
     authenticated: Boolean(snapshot.authenticated),
 
     user: snapshot.user || null,
@@ -358,6 +496,7 @@ function restoreResult(source = "state") {
 function emptyRestoreResult(source = "empty") {
   return {
     ok: false,
+    restored: false,
     authenticated: false,
 
     user: null,
@@ -381,6 +520,7 @@ function failedRestoreResult(error = null, source = "error") {
 
   return {
     ok: false,
+    restored: false,
     authenticated: false,
 
     user: null,
@@ -451,8 +591,8 @@ async function requestRefresh(context = {}, options = {}) {
   const sessionId = cleanText(context.sessionId, "");
   const userId = cleanText(context.userId, "");
 
-  if (!refreshToken || !sessionId || !userId) {
-    throw createRestoreError("Falta contexto para renovar sesión.", {
+  if (!refreshToken) {
+    throw createRestoreError("Falta refresh token para renovar sesión.", {
       status: 401,
       code: "MISSING_REFRESH_CONTEXT",
     });
@@ -461,19 +601,35 @@ async function requestRefresh(context = {}, options = {}) {
   const body = {
     refreshToken,
     refresh_token: refreshToken,
-
-    sessionId,
-    session_id: sessionId,
-
-    userId,
-    user_id: userId,
-
-    session: {
-      sessionId,
-      id: sessionId,
-      userId,
-    },
   };
+
+  if (sessionId) {
+    body.sessionId = sessionId;
+    body.session_id = sessionId;
+  }
+
+  if (userId) {
+    body.userId = userId;
+    body.user_id = userId;
+  }
+
+  if (sessionId || userId) {
+    body.session = {
+      ...(sessionId
+        ? {
+            sessionId,
+            session_id: sessionId,
+            id: sessionId,
+          }
+        : {}),
+      ...(userId
+        ? {
+            userId,
+            user_id: userId,
+          }
+        : {}),
+    };
+  }
 
   const requestOptions = {
     ...options,
@@ -628,6 +784,13 @@ export async function fetchMe(options = {}) {
 export async function refreshSession(options = {}) {
   if (runtime.refreshPromise) return runtime.refreshPromise;
 
+  if (!allowSilentRefresh(options)) {
+    throw createRestoreError("Refresh silencioso desactivado para esta restauración.", {
+      status: 401,
+      code: "SILENT_REFRESH_DISABLED",
+    });
+  }
+
   runtime.refreshing = true;
 
   runtime.refreshPromise = (async () => {
@@ -635,7 +798,7 @@ export async function refreshSession(options = {}) {
       const context = refreshContext();
 
       if (!context.usable) {
-        throw createRestoreError("No hay contexto suficiente para renovar sesión.", {
+        throw createRestoreError("No hay refresh token para renovar sesión.", {
           status: 401,
           code: "MISSING_REFRESH_CONTEXT",
         });
@@ -661,7 +824,7 @@ export async function refreshSession(options = {}) {
 }
 
 async function tryRefreshAfterAuthFailure(error = null, options = {}) {
-  if (!isRefreshableAuthFailure(error)) {
+  if (!isRefreshableAuthFailure(error, options)) {
     throw normalizeRestoreError(error);
   }
 
@@ -685,83 +848,88 @@ export async function restoreSession(options = {}) {
 
   runtime.restorePromise = (async () => {
     try {
-      if (isAuthenticated()) {
-        runtime.lastRestoreAt = Date.now();
-        clearLastError();
-
-        return restoreResult("state");
-      }
-
       const token = currentToken();
       const context = refreshContext();
 
-      if (!tokenOk(token)) {
-        if (!context.usable) {
-          clearInvalidSession(options);
-
-          runtime.lastRestoreAt = Date.now();
-          clearLastError();
-
-          return emptyRestoreResult("empty");
-        }
-
+      /*
+        Aunque exista token+user local, en restore de arranque validamos /me.
+        Si el access token caducó, /me devolverá TOKEN_EXPIRED y se hará refresh.
+      */
+      if (tokenOk(token)) {
         try {
-          const refreshed = await refreshSession(options);
+          const result = await fetchMe(options);
 
           runtime.lastRestoreAt = Date.now();
           clearLastError();
 
           return {
-            ...refreshed,
-            source: "refresh",
+            ...result,
+            source: "me",
           };
-        } catch (refreshError) {
-          const finalRefreshError = rememberError("restore.refresh", refreshError);
+        } catch (meError) {
+          const finalMeError = rememberError("restore.me", meError);
 
-          if (isAuthFailure(finalRefreshError)) {
-            clearInvalidSession(options);
+          try {
+            const refreshed = await tryRefreshAfterAuthFailure(finalMeError, options);
+
+            runtime.lastRestoreAt = Date.now();
+            clearLastError();
+
+            return {
+              ...refreshed,
+              source: "refresh",
+            };
+          } catch (refreshError) {
+            const finalRefreshError = rememberError("restore.refresh", refreshError);
+
+            if (
+              shouldClearSessionForAuthError(finalRefreshError) ||
+              isAuthFailure(finalRefreshError)
+            ) {
+              clearInvalidSession(options);
+              runtime.lastRestoreAt = Date.now();
+              return emptyRestoreResult("empty");
+            }
+
+            runtime.lastRestoreAt = Date.now();
+            return failedRestoreResult(finalRefreshError, "error");
           }
-
-          runtime.lastRestoreAt = Date.now();
-
-          return emptyRestoreResult("empty");
         }
       }
 
+      if (!context.usable) {
+        clearInvalidSession(options);
+
+        runtime.lastRestoreAt = Date.now();
+        clearLastError();
+
+        return emptyRestoreResult("empty");
+      }
+
       try {
-        const result = await fetchMe(options);
+        const refreshed = await refreshSession(options);
 
         runtime.lastRestoreAt = Date.now();
         clearLastError();
 
         return {
-          ...result,
-          source: "me",
+          ...refreshed,
+          source: "refresh",
         };
-      } catch (meError) {
-        const finalMeError = rememberError("restore.me", meError);
+      } catch (refreshError) {
+        const finalRefreshError = rememberError("restore.refresh", refreshError);
 
-        try {
-          const refreshed = await tryRefreshAfterAuthFailure(finalMeError, options);
-
+        if (
+          shouldClearSessionForAuthError(finalRefreshError) ||
+          isAuthFailure(finalRefreshError)
+        ) {
+          clearInvalidSession(options);
           runtime.lastRestoreAt = Date.now();
-          clearLastError();
-
-          return {
-            ...refreshed,
-            source: "refresh",
-          };
-        } catch (refreshError) {
-          const finalRefreshError = rememberError("restore.refresh", refreshError);
-
-          if (isAuthFailure(finalRefreshError)) {
-            clearInvalidSession(options);
-          }
-
-          runtime.lastRestoreAt = Date.now();
-
-          return failedRestoreResult(finalRefreshError, "error");
+          return emptyRestoreResult("empty");
         }
+
+        runtime.lastRestoreAt = Date.now();
+        return failedRestoreResult(finalRefreshError, "error");
       }
     } finally {
       runtime.restoring = false;
@@ -806,6 +974,7 @@ export function getRestoreSnapshot() {
     hasUser: Boolean(currentUser()),
 
     hasRefreshContext: Boolean(context.usable),
+    hasFullRefreshContext: Boolean(context.hasFullContext),
     hasSessionId: Boolean(context.sessionId),
     hasSessionUserId: Boolean(context.userId),
 
@@ -820,15 +989,26 @@ export function getRestoreSnapshot() {
     policy: {
       noRouter: true,
       noToast: true,
-      refreshOnAuthFailure: true,
+
+      validatesMeOnRestore: true,
+      refreshOnTokenExpired: true,
+      tokenExpiredDoesNotMeanLogout: true,
+
       noFetchOwn: true,
       noStorageDirect: true,
+
       restoresViaMe: true,
       refreshesViaCoreHttp: true,
+
+      refreshTokenIsMinimumContext: true,
+      sessionIdUserIdPreferredButOptional: true,
+
       noSlugFabrication: true,
+
       no2fa: true,
       noMfa: true,
       noOtp: true,
+
       snapshotRedacted: true,
     },
   };

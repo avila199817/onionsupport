@@ -41,7 +41,7 @@ import {
   getCurrentUserHomePath,
 } from "./session.js";
 
-export const RESTORE_VERSION = "auth.restore.v4";
+export const RESTORE_VERSION = "auth.restore.v5";
 
 const ME_ENDPOINT = AUTH_ENDPOINTS.me;
 const REFRESH_ENDPOINT = AUTH_ENDPOINTS.refresh;
@@ -151,7 +151,6 @@ function currentSession() {
 
 function refreshContext() {
   const session = currentSession();
-
   const refreshToken = currentRefreshToken();
 
   const sessionId = cleanText(
@@ -264,6 +263,11 @@ function rememberError(type = "restore", error = null) {
   };
 
   return finalError;
+}
+
+function clearLastError() {
+  runtime.lastError = null;
+  return true;
 }
 
 function isAuthFailure(error = null) {
@@ -603,7 +607,7 @@ export async function fetchMe(options = {}) {
       applyMeResponse(response, token, options);
 
       runtime.lastMeAt = Date.now();
-      runtime.lastError = null;
+      clearLastError();
 
       return restoreResult("me");
     } catch (error) {
@@ -642,7 +646,7 @@ export async function refreshSession(options = {}) {
       applyRefreshResponse(response, options);
 
       runtime.lastRefreshAt = Date.now();
-      runtime.lastError = null;
+      clearLastError();
 
       return restoreResult("refresh");
     } catch (error) {
@@ -683,7 +687,7 @@ export async function restoreSession(options = {}) {
     try {
       if (isAuthenticated()) {
         runtime.lastRestoreAt = Date.now();
-        runtime.lastError = null;
+        clearLastError();
 
         return restoreResult("state");
       }
@@ -696,7 +700,7 @@ export async function restoreSession(options = {}) {
           clearInvalidSession(options);
 
           runtime.lastRestoreAt = Date.now();
-          runtime.lastError = null;
+          clearLastError();
 
           return emptyRestoreResult("empty");
         }
@@ -705,7 +709,7 @@ export async function restoreSession(options = {}) {
           const refreshed = await refreshSession(options);
 
           runtime.lastRestoreAt = Date.now();
-          runtime.lastError = null;
+          clearLastError();
 
           return {
             ...refreshed,
@@ -728,7 +732,7 @@ export async function restoreSession(options = {}) {
         const result = await fetchMe(options);
 
         runtime.lastRestoreAt = Date.now();
-        runtime.lastError = null;
+        clearLastError();
 
         return {
           ...result,
@@ -741,7 +745,7 @@ export async function restoreSession(options = {}) {
           const refreshed = await tryRefreshAfterAuthFailure(finalMeError, options);
 
           runtime.lastRestoreAt = Date.now();
-          runtime.lastError = null;
+          clearLastError();
 
           return {
             ...refreshed,

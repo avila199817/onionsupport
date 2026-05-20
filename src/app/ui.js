@@ -16,53 +16,118 @@
    - Sin debug.
 ========================================================= */
 
-export const UI_VERSION = "simple";
+export const UI_VERSION = "app.ui.v2";
 
 let initialized = false;
 
+/* =========================================================
+   BASICS
+========================================================= */
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
+}
+
+/* =========================================================
+   TOAST
+========================================================= */
+
 function getToast(AppCore = null, Toast = null) {
-  return Toast || AppCore?.Toast || AppCore?.toast || null;
+  return Toast || AppCore?.toast || AppCore?.Toast || null;
+}
+
+function normalizeToastInput(message = "", type = "info", options = {}) {
+  if (isObject(message)) {
+    return {
+      message: cleanText(
+        message.message ||
+          message.text ||
+          message.title,
+        ""
+      ),
+      type: cleanText(
+        message.type ||
+          message.variant ||
+          type,
+        "info"
+      ),
+      options: {
+        ...message,
+        ...options,
+      },
+    };
+  }
+
+  return {
+    message: cleanText(message, ""),
+    type: cleanText(type, "info"),
+    options,
+  };
+}
+
+function normalizeToastType(type = "info") {
+  const value = cleanText(type, "info").toLowerCase();
+
+  if (value === "warn") return "warning";
+  if (value === "danger") return "error";
+  if (value === "success") return "success";
+  if (value === "error") return "error";
+  if (value === "warning") return "warning";
+  if (value === "info") return "info";
+
+  return "info";
 }
 
 function showToastWith(Toast = null, message = "", type = "info", options = {}) {
-  if (!Toast || !message) return null;
+  if (!Toast) return null;
 
-  const variant = type === "warn" ? "warning" : type;
+  const payload = normalizeToastInput(message, type, options);
+  const toastMessage = payload.message;
+  const toastType = normalizeToastType(payload.type);
 
-  if (typeof Toast[variant] === "function") {
-    return Toast[variant](message, options);
+  if (!toastMessage) return null;
+
+  if (isFunction(Toast[toastType])) {
+    return Toast[toastType](toastMessage, payload.options);
   }
 
-  if (variant === "warning" && typeof Toast.warn === "function") {
-    return Toast.warn(message, options);
+  if (toastType === "warning" && isFunction(Toast.warn)) {
+    return Toast.warn(toastMessage, payload.options);
   }
 
-  if (typeof Toast.show === "function") {
+  if (isFunction(Toast.show)) {
     return Toast.show({
-      ...options,
-      type: variant,
-      message,
+      ...payload.options,
+      type: toastType,
+      message: toastMessage,
     });
   }
 
   return null;
 }
 
-export function bindToastBridge({ AppCore = null, Toast = null } = {}) {
+/* =========================================================
+   PUBLIC API
+========================================================= */
+
+export function bindToastBridge({
+  AppCore = null,
+  Toast = null,
+} = {}) {
   const toast = getToast(AppCore, Toast);
 
   if (!AppCore || !toast) return false;
 
   AppCore.showToast = (message = "", type = "info", options = {}) => {
-    if (message && typeof message === "object") {
-      return showToastWith(
-        toast,
-        message.message || message.text || message.title || "",
-        message.type || message.variant || type,
-        message
-      );
-    }
-
     return showToastWith(toast, message, type, options);
   };
 
@@ -70,78 +135,42 @@ export function bindToastBridge({ AppCore = null, Toast = null } = {}) {
 }
 
 export function initUISystems(options = {}) {
-  initialized = true;
-  bindToastBridge(options);
-
-  return true;
+  initialized = bindToastBridge(options);
+  return initialized;
 }
 
-export function syncUserUI() {
-  return true;
-}
-
-export function repairUISystems() {
-  return true;
-}
-
-export function unbindUISystems() {
-  initialized = false;
-  return true;
-}
-
-export function bindAppLanguageSync() {
-  return true;
-}
-
-export function bindUIRepairSync() {
-  return true;
-}
-
-export function bindUIRouteSync() {
-  return true;
-}
-
-export function bindUISessionSync() {
-  return true;
-}
-
-export function bindUIThemeSync() {
-  return true;
-}
-
-export function bindUIRuntimeEvents() {
-  return true;
-}
+/* =========================================================
+   SNAPSHOT
+========================================================= */
 
 export function getUISystemsSnapshot() {
   return {
     version: UI_VERSION,
     initialized,
+    policy: {
+      toastBridgeOnly: true,
+      noSidebar: true,
+      noTopbar: true,
+      noRouter: true,
+      noAuth: true,
+      noStore: true,
+      noEvents: true,
+      noRoutes: true,
+      noRepair: true,
+      noDebug: true,
+    },
   };
 }
 
-export function resetUIRuntimeState() {
-  initialized = false;
-  return getUISystemsSnapshot();
-}
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   UI_VERSION,
 
   initUISystems,
-  syncUserUI,
-  repairUISystems,
-  unbindUISystems,
-
   bindToastBridge,
 
-  bindAppLanguageSync,
-  bindUIRepairSync,
-  bindUIRouteSync,
-  bindUISessionSync,
-  bindUIThemeSync,
-  bindUIRuntimeEvents,
-
   getUISystemsSnapshot,
-  resetUIRuntimeState,
 };

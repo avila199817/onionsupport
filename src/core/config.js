@@ -8,6 +8,7 @@
    - Rutas reales actuales.
    - Home interna: /.
    - Home visible de usuario: /@{user.slug}.
+   - Rutas privadas visibles: /@{user.slug}/{ruta}.
    - Auth endpoints mínimos.
    - /api/auth/me siempre privado.
    - Token param único: token.
@@ -22,7 +23,7 @@
    - Sin magia negra.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.v3";
+export const CONFIG_VERSION = "core.config.v4";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
@@ -335,7 +336,7 @@ function endpointMatches(path = "", candidate = "") {
 }
 
 /* =========================================================
-   USER HOME
+   USER SCOPE / HOME
 ========================================================= */
 
 export function normalizeUserSlug(value = "") {
@@ -352,16 +353,57 @@ export function normalizeUserSlug(value = "") {
   return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
-export function extractUserHomeSlugFromRoute(path = "") {
+export function getUserScopedRouteInfo(path = "") {
   const route = normalizeRoutePath(path);
 
-  if (!route.startsWith(USER_HOME_PREFIX)) return "";
+  if (!route.startsWith(USER_HOME_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: route || ROUTES.home,
+      canonicalPath: route || ROUTES.home,
+    };
+  }
 
-  const slug = route.slice(USER_HOME_PREFIX.length);
+  const rest = route.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeUserSlug(slugSegment);
 
-  if (!slug || slug.includes("/")) return "";
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: route,
+      canonicalPath: route,
+    };
+  }
 
-  return normalizeUserSlug(slug);
+  const restPath = restSegments.length
+    ? normalizePathname(`/${restSegments.join("/")}`)
+    : ROUTES.home;
+
+  return {
+    scoped: true,
+    home: restPath === ROUTES.home,
+    slug,
+    restPath,
+    canonicalPath: restPath,
+  };
+}
+
+export function extractUserScopedSlugFromRoute(path = "") {
+  return getUserScopedRouteInfo(path).slug;
+}
+
+export function extractUserHomeSlugFromRoute(path = "") {
+  const info = getUserScopedRouteInfo(path);
+  return info.home ? info.slug : "";
+}
+
+export function isUserScopedRoute(path = "") {
+  return Boolean(getUserScopedRouteInfo(path).scoped);
 }
 
 export function isUserHomeRoute(path = "") {
@@ -373,9 +415,19 @@ export function buildUserHomeRoute(slug = "") {
   return clean ? `${USER_HOME_PREFIX}${clean}` : ROUTES.home;
 }
 
+export function buildUserScopedRoute(slug = "", route = ROUTES.home) {
+  const clean = normalizeUserSlug(slug);
+  const canonical = normalizeRoutePath(route) || ROUTES.home;
+
+  if (!clean) return canonical;
+  if (canonical === ROUTES.home) return `${USER_HOME_PREFIX}${clean}`;
+
+  return `${USER_HOME_PREFIX}${clean}${canonical}`;
+}
+
 export function canonicalRoutePath(path = "") {
-  const route = normalizeRoutePath(path);
-  return isUserHomeRoute(route) ? ROUTES.home : route;
+  const info = getUserScopedRouteInfo(path);
+  return info.scoped ? info.canonicalPath : normalizeRoutePath(path);
 }
 
 /* =========================================================
@@ -530,6 +582,7 @@ export const config = freeze({
 
     homeCanonicalRoute: ROUTES.home,
     userHomePrefix: USER_HOME_PREFIX,
+    userScopedPrivateRoutes: true,
 
     routes: ROUTES,
 
@@ -554,6 +607,7 @@ export const config = freeze({
     requireAuthorizationForMe: true,
     keepMeEndpointPrivate: true,
     userSlugHome: true,
+    userScopedPrivateRoutes: true,
   }),
 
   diagnostics: freeze({
@@ -696,6 +750,12 @@ export function getConfigSnapshot() {
       canonical: ROUTES.home,
     },
 
+    userScopedRoutes: {
+      enabled: true,
+      visiblePattern: "/@{user.slug}/{route}",
+      homePattern: "/@{user.slug}",
+    },
+
     publicApiPaths: config.publicApiPaths,
     privateApiPaths: config.privateApiPaths,
 
@@ -716,6 +776,7 @@ export function getConfigSnapshot() {
       langBase: "es",
 
       userSlugHome: true,
+      userScopedPrivateRoutes: true,
       preservesAtSlug: true,
 
       noRuntime: true,

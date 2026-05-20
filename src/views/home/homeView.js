@@ -24,11 +24,16 @@
    - Sin cache local propia.
    - Sin imports opcionales.
    - Sin modales de otras vistas.
+   - Sin Toast directo.
    - Sin /home.
    - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+
+import {
+  ROUTES,
+} from "../../core/config.js";
 
 import renderHomeTemplate, {
   renderHomeErrorState,
@@ -98,16 +103,19 @@ import {
   first,
   nowIso,
   sanitizePayload,
-  showToast,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v3";
+export const HOME_VIEW_VERSION = "home.view.v4";
 
 export const HomeView = (() => {
   "use strict";
 
   const SOURCE = "views.home";
   const SCOPE = "view:home";
+
+  const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
+  const INCIDENCIAS_ROUTE = ROUTES.incidencias || "/incidencias";
+
   const DEFAULT_PAGE_SIZE = 5;
 
   let initialized = false;
@@ -152,6 +160,12 @@ export const HomeView = (() => {
     return !destroyed && seq === renderSeq;
   }
 
+  function redact(value = "") {
+    return String(value || "")
+      .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+  }
+
   function getState() {
     return isObject(AppCore?.state) ? AppCore.state : {};
   }
@@ -172,27 +186,72 @@ export const HomeView = (() => {
     );
   }
 
+  function normalizeRole(value = "") {
+    if (Array.isArray(value)) {
+      const roles = value
+        .map(normalizeRole)
+        .filter(Boolean);
+
+      if (roles.includes("admin")) return "admin";
+      if (roles.includes("user")) return "user";
+
+      return "";
+    }
+
+    const role = String(value || "").toLowerCase();
+
+    if (role === "admin") return "admin";
+    if (role === "user") return "user";
+
+    return "";
+  }
+
   function getCurrentRole() {
     const state = getState();
     const user = getCurrentUser();
 
-    const role = safeText(
-      first(
-        state.role,
-        state.rol,
-        state.userRole,
-        user.role,
-        user.rol,
-        "user"
-      ),
-      "user"
-    ).toLowerCase();
-
-    return role === "admin" ? "admin" : "user";
+    return (
+      normalizeRole(
+        first(
+          state.role,
+          state.rol,
+          state.userRole,
+          state.roles,
+          user.role,
+          user.rol,
+          user.roles,
+          ""
+        )
+      ) || "user"
+    );
   }
 
   function isAdmin() {
     return getCurrentRole() === "admin";
+  }
+
+  function getPublicUserSnapshot(user = getCurrentUser()) {
+    if (!hasKeys(user)) return null;
+
+    return {
+      hasId: Boolean(user.id || user.userId),
+      username: safeText(user.username || user.userName, "") || null,
+      slug: safeText(user.slug || user.lookup?.slug || user.profile?.slug, "") || null,
+      displayName:
+        safeText(
+          first(
+            user.displayName,
+            user.fullName,
+            user.name,
+            user.nombre,
+            user.profile?.displayName,
+            user.profile?.fullName,
+            user.username
+          ),
+          ""
+        ) || null,
+      role: getCurrentRole(),
+    };
   }
 
   function getContainer(candidate = null, context = {}) {
@@ -210,8 +269,6 @@ export const HomeView = (() => {
       AppCore?.dom?.viewContainer ||
       document.querySelector("[data-router-view-host='true']") ||
       document.getElementById("view-container") ||
-      document.querySelector("[data-router-view]") ||
-      document.querySelector("[data-view-root]") ||
       document.getElementById("app-content") ||
       document.getElementById("main-content") ||
       null
@@ -230,14 +287,16 @@ export const HomeView = (() => {
   }
 
   function safeErrorMessage(error = null) {
-    return safeText(
-      first(
-        error?.response?.data?.message,
-        error?.data?.message,
-        error?.message,
+    return redact(
+      safeText(
+        first(
+          error?.response?.data?.message,
+          error?.data?.message,
+          error?.message,
+          "No se pudo cargar el Home."
+        ),
         "No se pudo cargar el Home."
-      ),
-      "No se pudo cargar el Home."
+      )
     );
   }
 
@@ -267,6 +326,30 @@ export const HomeView = (() => {
     return Boolean(isObject(value) && Object.keys(value).length > 0);
   }
 
+  function hasSensitiveQuery(value = "") {
+    return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+      String(value || "")
+    );
+  }
+
+  function safeHomeRoute(route = "", fallback = "") {
+    const raw = safeText(route, "");
+
+    if (!raw) return fallback;
+    if (!raw.startsWith("/")) return fallback;
+    if (raw.startsWith("//")) return fallback;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
+    if (/[\r\n\t\\]/.test(raw)) return fallback;
+    if (hasSensitiveQuery(raw)) return fallback;
+
+    const normalized = raw.replace(/\/{2,}/g, "/") || fallback;
+    const canonical = normalized.split("?")[0].split("#")[0] || HOME_ROUTE;
+
+    if (canonical === "/home") return fallback;
+
+    return normalized;
+  }
+
   function dashboardRoleMismatch(raw = {}) {
     const currentRole = getCurrentRole();
     const data = safeObject(raw);
@@ -285,6 +368,29 @@ export const HomeView = (() => {
     if (!sourceRole) return false;
 
     return sourceRole !== currentRole;
+  }
+
+  function stripAdminCollectionsForUser(dashboard = {}) {
+    const source = safeObject(dashboard);
+
+    if (isAdmin()) return source;
+
+    return {
+      ...source,
+
+      users: [],
+      usuarios: [],
+
+      clients: [],
+      clientes: [],
+      customers: [],
+
+      meta: {
+        ...safeObject(source.meta),
+        role: "user",
+        admin: false,
+      },
+    };
   }
 
   /* =======================================================
@@ -313,7 +419,7 @@ export const HomeView = (() => {
     homeState.loaded = Boolean(homeState.loaded);
     homeState.hydrated = Boolean(homeState.hydrated);
 
-    homeState.error = safeText(homeState.error, "");
+    homeState.error = redact(safeText(homeState.error, ""));
 
     homeState.openingTicketId = safeText(homeState.openingTicketId, "");
     homeState.selectedTicketId = safeText(homeState.selectedTicketId, "");
@@ -372,21 +478,23 @@ export const HomeView = (() => {
       nowIso()
     );
 
-    return {
-      dashboard: {
-        ...dashboard,
+    const roleScopedDashboard = stripAdminCollectionsForUser({
+      ...dashboard,
+      role,
+      admin,
+      requestId,
+      updatedAt: lastSyncAt,
+      meta: {
+        ...safeObject(dashboard.meta),
         role,
         admin,
         requestId,
         updatedAt: lastSyncAt,
-        meta: {
-          ...safeObject(dashboard.meta),
-          role,
-          admin,
-          requestId,
-          updatedAt: lastSyncAt,
-        },
       },
+    });
+
+    return {
+      dashboard: roleScopedDashboard,
       requestId,
       lastSyncAt,
       roleMismatch: dashboardRoleMismatch(source),
@@ -422,6 +530,7 @@ export const HomeView = (() => {
       }
     );
 
+    ensureBaseState();
     clearHomeError();
 
     return normalized;
@@ -533,7 +642,7 @@ export const HomeView = (() => {
     const activity = getActivity();
 
     return normalizeHomeDashboard({
-      ...safeObject(homeState.dashboard),
+      ...stripAdminCollectionsForUser(homeState.dashboard),
 
       role,
       admin,
@@ -692,7 +801,7 @@ export const HomeView = (() => {
       container.replaceChildren(node);
     } catch {
       try {
-        container.innerHTML = "";
+        container.textContent = "";
         container.appendChild(node);
       } catch {
         return null;
@@ -730,6 +839,16 @@ export const HomeView = (() => {
     }
   }
 
+  function renderAndBind(container = currentContainer) {
+    const node = renderView(container);
+
+    if (node && isElement(container)) {
+      bind(container);
+    }
+
+    return node;
+  }
+
   function render(...args) {
     const container = getContainer(args[0], args[1]);
 
@@ -745,8 +864,7 @@ export const HomeView = (() => {
       hydrateBestEffort();
     }
 
-    renderView(container);
-    bind(container);
+    renderAndBind(container);
 
     if (!homeState.loaded && !inflightLoad) {
       void loadData({
@@ -791,7 +909,7 @@ export const HomeView = (() => {
       setLoading(!hadData && !refresh);
       setRefreshing(refresh);
 
-      renderView(currentContainer);
+      renderAndBind(currentContainer);
 
       try {
         const response = refresh
@@ -820,21 +938,13 @@ export const HomeView = (() => {
 
         setError(message);
 
-        if (opts.silent !== true) {
-          showToast(message, "error");
-        }
-
         return false;
       } finally {
         if (isCurrentLoad(seq)) {
           setLoading(false);
           setRefreshing(false);
 
-          renderView(currentContainer);
-
-          if (!bindingsCleanup && currentContainer) {
-            bind(currentContainer);
-          }
+          renderAndBind(currentContainer);
         }
 
         inflightLoad = null;
@@ -849,13 +959,7 @@ export const HomeView = (() => {
   ======================================================= */
 
   function rerender() {
-    const node = renderView(currentContainer);
-
-    if (!bindingsCleanup && currentContainer) {
-      bind(currentContainer);
-    }
-
-    return node;
+    return renderAndBind(currentContainer);
   }
 
   function goToPage(page = 1) {
@@ -888,7 +992,7 @@ export const HomeView = (() => {
   }
 
   async function navigateTo(route = "", options = {}) {
-    const target = safeText(route, "");
+    const target = safeHomeRoute(route, "");
 
     if (!target) return false;
 
@@ -922,7 +1026,7 @@ export const HomeView = (() => {
 
     try {
       return await navigateFromHomeAction({
-        route: "/incidencias",
+        route: INCIDENCIAS_ROUTE,
         payload: {
           ...safeObject(payload),
           ticketId: id,
@@ -942,7 +1046,7 @@ export const HomeView = (() => {
 
     try {
       return await navigateFromHomeAction({
-        route: "/incidencias",
+        route: INCIDENCIAS_ROUTE,
         payload: safeObject(draft),
         silent: options.silent === true,
       });
@@ -1110,7 +1214,7 @@ export const HomeView = (() => {
       initialized,
       destroyed,
 
-      user: getCurrentUser(),
+      user: getPublicUserSnapshot(),
       role: getCurrentRole(),
       admin: isAdmin(),
 
@@ -1145,7 +1249,7 @@ export const HomeView = (() => {
       loading: Boolean(homeState.loading),
       refreshing: Boolean(homeState.refreshing),
 
-      error: homeState.error || "",
+      error: redact(homeState.error || ""),
 
       ticketsCount: getTickets().length,
       invoicesCount: getInvoices().length,
@@ -1164,6 +1268,37 @@ export const HomeView = (() => {
 
       hasInflightInit: Boolean(inflightInit),
       hasInflightLoad: Boolean(inflightLoad),
+
+      policy: {
+        controllerOnly: true,
+
+        renderDelegatedToTemplate: true,
+        apiDelegated: true,
+        stateDelegated: true,
+        storeDelegated: true,
+        modelDelegated: true,
+        bindingsDelegated: true,
+        actionsDelegated: true,
+
+        noRouteValidation: true,
+        noSlugResolution: true,
+        noAuthGuards: true,
+        noRouterGuards: true,
+        noGlobalBridge: true,
+        noExternalEvents: true,
+        noOwnLocalCache: true,
+        noOptionalImports: true,
+        noCrossViewModals: true,
+        noToastDirect: true,
+
+        homeInternalPath: HOME_ROUTE,
+        noHomeRoute: true,
+
+        userDoesNotCarryAdminUsersClients: true,
+        rebindsAfterEveryRender: true,
+
+        snapshotRedacted: true,
+      },
     });
   }
 

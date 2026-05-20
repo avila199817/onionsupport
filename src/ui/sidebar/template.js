@@ -7,7 +7,8 @@
    - Exponer estructura estable para CSS SaaS.
    - Preparar header, navegación y cuenta estilo ChatGPT.
    - Header logo-only: sin texto visible de marca.
-   - Logo SVG único, visible y sin capas superpuestas.
+   - Logo de empresa real usando favicon_white.png / favicon_black.png.
+   - Sin SVG fallback como logo de marca.
    - Preparar markup del dropdown de cuenta.
    - Recibir datos ya normalizados desde index.js/user.js.
    - No navegar.
@@ -42,16 +43,22 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v9";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v10";
+
+/* =========================================================
+   BRAND ASSETS
+========================================================= */
+
+const BRAND_LOGOS = Object.freeze({
+  white: "/favicon_white.png",
+  black: "/favicon_black.png",
+});
 
 /* =========================================================
    ICON PATHS
 ========================================================= */
 
 const ICON_PATHS = Object.freeze({
-  brand:
-    "M12 2.75 20 6.25v5.55c0 4.75-3.15 8.35-8 9.45-4.85-1.1-8-4.7-8-9.45V6.25L12 2.75Z M12 7.25a3.75 3.75 0 1 0 0 7.5 3.75 3.75 0 0 0 0-7.5Z",
-
   menu:
     "M5.75 3.75h12.5A2.75 2.75 0 0 1 21 6.5v11a2.75 2.75 0 0 1-2.75 2.75H5.75A2.75 2.75 0 0 1 3 17.5v-11a2.75 2.75 0 0 1 2.75-2.75Z M9 3.75v16.5 M5.85 8.25h1.35 M5.85 12h1.35 M5.85 15.75h1.35",
 
@@ -309,30 +316,84 @@ function createIconSlot(className = "", iconName = SIDEBAR_ICONS.home, svgClass 
    BRAND LOGO
 ========================================================= */
 
+function getPreferredBrandLogoSrc() {
+  const white = safeAssetSrc(BRAND_LOGOS.white, "");
+  const black = safeAssetSrc(BRAND_LOGOS.black, "");
+
+  if (!isBrowser()) return white || black || "";
+
+  try {
+    const root = document.documentElement;
+    const theme = text(
+      root?.dataset?.theme ||
+        root?.getAttribute?.("data-theme") ||
+        "",
+      ""
+    ).toLowerCase();
+
+    if (theme === "light") return black || white || "";
+    if (theme === "dark") return white || black || "";
+
+    const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches === true;
+
+    return prefersDark ? white || black || "" : black || white || "";
+  } catch {
+    return white || black || "";
+  }
+}
+
 export function createSidebarBrandLogo() {
+  const whiteLogo = safeAssetSrc(BRAND_LOGOS.white, "");
+  const blackLogo = safeAssetSrc(BRAND_LOGOS.black, "");
+  const preferredLogo = getPreferredBrandLogoSrc();
+
   const logo = createElement("span", {
-    className: "sidebar-brand-logo",
+    className: "sidebar-brand-logo sidebar-brand-logo--image",
     attrs: {
       "aria-hidden": "true",
       "data-sidebar-brand-logo": "true",
-      "data-sidebar-brand-logo-mode": "svg-only",
+      "data-sidebar-brand-logo-mode": "image",
+      "data-sidebar-brand-logo-white": whiteLogo,
+      "data-sidebar-brand-logo-black": blackLogo,
     },
   });
 
-  const fallback = createElement("span", {
-    className: "sidebar-brand-logo-fallback",
+  const picture = createElement("picture", {
+    className: "sidebar-brand-logo-picture",
     attrs: {
-      "aria-hidden": "true",
-      "data-sidebar-brand-logo-fallback": "true",
+      "data-sidebar-brand-logo-picture": "true",
     },
   });
 
   appendChildren(
-    fallback,
-    createSidebarIcon("brand", "sidebar-brand-logo-fallback-svg")
+    picture,
+    createElement("source", {
+      attrs: {
+        srcset: whiteLogo,
+        media: "(prefers-color-scheme: dark)",
+        "data-sidebar-brand-logo-source": "white",
+      },
+    })
   );
 
-  appendChildren(logo, fallback);
+  appendChildren(
+    picture,
+    createElement("img", {
+      className: "sidebar-brand-logo-img",
+      attrs: {
+        src: preferredLogo || blackLogo || whiteLogo,
+        alt: "",
+        loading: "eager",
+        decoding: "async",
+        draggable: "false",
+        "data-sidebar-brand-logo-img": "true",
+        "data-logo-white-src": whiteLogo,
+        "data-logo-black-src": blackLogo,
+      },
+    })
+  );
+
+  appendChildren(logo, picture);
 
   return logo;
 }
@@ -853,15 +914,23 @@ export function getSidebarTemplateSnapshot() {
 
     icons: Object.keys(ICON_PATHS),
 
+    brandLogo: {
+      white: BRAND_LOGOS.white,
+      black: BRAND_LOGOS.black,
+    },
+
     policy: {
       buildsDom: true,
       stableCssStructure: true,
       noHtmlString: true,
 
       logoOnlyHeaderBrand: true,
-      singleLayerLogo: true,
-      visibleSvgLogo: true,
-      noThemeLogoPair: true,
+      companyLogoImage: true,
+      usesCanonicalSpaLogos: true,
+      faviconWhiteLogo: true,
+      faviconBlackLogo: true,
+      noSvgBrandLogo: true,
+      noBrandSvgFallback: true,
       noImageLogoOverlap: true,
       textOnlyHeaderBrand: false,
       panelCollapseIcon: true,
@@ -869,6 +938,7 @@ export function getSidebarTemplateSnapshot() {
       legacyBrandClassesKept: true,
 
       safeInternalHref: true,
+      safeAssetSrc: true,
       noSensitiveHrefInDom: true,
 
       noNavigation: true,

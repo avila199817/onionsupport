@@ -8,6 +8,7 @@
    - Roles reales: admin / user.
    - Rutas privadas: usuario autenticado.
    - Rutas admin: sólo admin.
+   - Clientes: sólo admin.
    - Rutas públicas actuales:
      /login
      /password-request
@@ -18,6 +19,7 @@
    - Rutas privadas visibles: /@{user.slug}/{ruta}
    - Resolver /@{slug} hacia Home.
    - Resolver /@{slug}/incidencias hacia /incidencias.
+   - Resolver /@{slug}/clientes hacia /clientes sólo si admin.
    - Sin declarar /@:slug como ruta real.
    - Sin alias /home.
    - Sin aliases legacy.
@@ -33,11 +35,10 @@
 
 import {
   ROUTES,
-  PUBLIC_ROUTES,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.v4";
+export const ROUTES_VERSION = "routes.v5";
 
 const ROUTE_SOURCE = "router.routes";
 
@@ -747,7 +748,7 @@ const ROUTE_DEFINITIONS = Object.freeze([
     order: 30,
   },
   {
-    kind: "private",
+    kind: "admin",
     path: ROUTE_PATHS.CLIENTES,
     name: ROUTE_NAMES.CLIENTES,
     viewKey: ROUTE_VIEW_KEYS.CLIENTES,
@@ -1115,6 +1116,8 @@ export function getRoutesIntegritySnapshot() {
       ownToast: false,
 
       roles: [...VALID_ROLES],
+
+      clientesAdminOnly: true,
 
       homeInternalPath: ROUTE_PATHS.HOME,
       userHomePrefix: USER_HOME_PREFIX,

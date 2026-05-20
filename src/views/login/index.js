@@ -8,17 +8,25 @@
    - Validar campos mínimos.
    - Llamar Auth.login().
    - Navegar a /@{user.slug} tras login correcto.
+   - Rutas base desde core/config.js.
    - Sin HTTP directo.
    - Sin Store.
    - Sin Toast directo.
    - Sin 2FA/MFA/OTP.
    - Sin eventos globales.
    - Sin loader propio.
+   - Sin navegación browser paralela.
+   - Sin AppCore.navigate.
    - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { Auth } from "../../features/auth/index.js";
+
+import {
+  PUBLIC_ROUTES,
+  ROUTES,
+} from "../../core/config.js";
 
 import getLoginTemplate from "./login.template.js";
 
@@ -36,22 +44,26 @@ import {
   bindLoginSubmit,
 } from "./login.dom.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.v2";
+export const LOGIN_VIEW_VERSION = "login.view.v3";
 
 const SOURCE = "login.view";
 
-const HOME_ROUTE = "/";
-const LOGIN_ROUTE = "/login";
-const PASSWORD_REQUEST_ROUTE = "/password-request";
-const PASSWORD_RESET_ROUTE = "/password-reset";
-const ACTIVATE_ACCOUNT_ROUTE = "/activate-account";
+const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
+const LOGIN_ROUTE = ROUTES.login || "/login";
+const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest || "/password-request";
+const PASSWORD_RESET_ROUTE = ROUTES.passwordReset || "/password-reset";
+const ACTIVATE_ACCOUNT_ROUTE = ROUTES.activateAccount || "/activate-account";
 
-const PUBLIC_AUTH_ROUTES = new Set([
-  LOGIN_ROUTE,
-  PASSWORD_REQUEST_ROUTE,
-  PASSWORD_RESET_ROUTE,
-  ACTIVATE_ACCOUNT_ROUTE,
-]);
+const PUBLIC_AUTH_ROUTES = new Set(
+  Array.isArray(PUBLIC_ROUTES) && PUBLIC_ROUTES.length
+    ? [...PUBLIC_ROUTES]
+    : [
+        LOGIN_ROUTE,
+        PASSWORD_REQUEST_ROUTE,
+        PASSWORD_RESET_ROUTE,
+        ACTIVATE_ACCOUNT_ROUTE,
+      ]
+);
 
 const INSTANCES = new WeakMap();
 
@@ -69,9 +81,19 @@ function isFn(value) {
   return typeof value === "function";
 }
 
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function text(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
+}
+
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 /* =========================================================
@@ -79,19 +101,29 @@ function text(value = "", fallback = "") {
 ========================================================= */
 
 function cleanPath(value = HOME_ROUTE) {
-  let path = text(value, HOME_ROUTE).split("?")[0].split("#")[0];
+  let path = text(value, HOME_ROUTE)
+    .split("?")[0]
+    .split("#")[0];
 
   if (!path.startsWith("/")) {
     path = `/${path}`;
   }
 
-  path = path.replace(/\/{2,}/g, "/");
+  path = path
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
   if (path.length > 1) {
     path = path.replace(/\/+$/g, "") || HOME_ROUTE;
   }
 
   return path || HOME_ROUTE;
+}
+
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
 }
 
 function safeInternalPath(value = "", fallback = HOME_ROUTE) {
@@ -101,8 +133,13 @@ function safeInternalPath(value = "", fallback = HOME_ROUTE) {
   if (raw.startsWith("//")) return fallback;
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
   if (/[\r\n\t\\]/.test(raw)) return fallback;
+  if (hasSensitiveQuery(raw)) return fallback;
 
-  return raw.replace(/\/{2,}/g, "/") || fallback;
+  const normalized = raw.replace(/\/{2,}/g, "/") || fallback;
+
+  if (cleanPath(normalized) === "/home") return fallback;
+
+  return normalized;
 }
 
 function isPublicAuthPath(value = "") {
@@ -116,10 +153,10 @@ function isPublicAuthPath(value = "") {
 function getRouter() {
   try {
     return (
-      AppCore?.Router ||
       AppCore?.router ||
-      AppCore?.modules?.get?.("Router") ||
+      AppCore?.Router ||
       AppCore?.modules?.get?.("router") ||
+      AppCore?.modules?.get?.("Router") ||
       null
     );
   } catch {
@@ -152,63 +189,43 @@ async function goAfterLogin(result = {}) {
   const target = authHomeTarget(result);
   const router = getRouter();
 
-  try {
-    if (isFn(router?.goAfterLogin)) {
-      await router.goAfterLogin(target, {
-        source: SOURCE,
-        replaceState: true,
-        force: true,
-      });
-
-      return true;
-    }
-
-    if (isFn(router?.replace)) {
-      await router.replace(target, {
-        source: SOURCE,
-        replaceState: true,
-        force: true,
-      });
-
-      return true;
-    }
-
-    if (isFn(router?.navigate)) {
-      await router.navigate(target, {
-        source: SOURCE,
-        replaceState: true,
-        force: true,
-      });
-
-      return true;
-    }
-
-    if (isFn(AppCore?.navigate)) {
-      await AppCore.navigate(target, {
-        source: SOURCE,
-        replaceState: true,
-        force: true,
-      });
-
-      return true;
-    }
-  } catch {
-    // Fallback navegador abajo.
-  }
-
-  if (!isBrowser()) return false;
+  if (!router) return false;
 
   try {
-    window.location.replace(target);
-    return true;
-  } catch {
-    try {
-      window.location.assign(target);
-      return true;
-    } catch {
-      return false;
+    if (isFn(router.goAfterLogin)) {
+      const output = await router.goAfterLogin(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
+      });
+
+      return output !== false && output?.ok !== false;
     }
+
+    if (isFn(router.replace)) {
+      const output = await router.replace(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
+      });
+
+      return output !== false && output?.ok !== false;
+    }
+
+    if (isFn(router.navigate)) {
+      const output = await router.navigate(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
+      });
+
+      return output !== false && output?.ok !== false;
+    }
+  } catch {
+    return false;
   }
+
+  return false;
 }
 
 /* =========================================================
@@ -220,10 +237,12 @@ function renderTemplate(container, deps = {}) {
 
   template.innerHTML = String(
     getLoginTemplate({
+      ...(isObject(deps) ? deps : {}),
+
       appName: text(AppCore?.config?.appName, "Onion Support"),
+
       passwordRequestHref: PASSWORD_REQUEST_ROUTE,
       forgotPasswordHref: PASSWORD_REQUEST_ROUTE,
-      ...deps,
     }) || ""
   );
 
@@ -261,15 +280,12 @@ function authenticated(result = {}) {
 }
 
 function errorMessage(error = null) {
-  return (
+  return redact(
     text(error?.message, "") ||
-    text(error?.data?.message, "") ||
-    text(error?.response?.data?.message, "") ||
-    "No se pudo iniciar sesión."
-  )
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+      text(error?.data?.message, "") ||
+      text(error?.response?.data?.message, "") ||
+      "No se pudo iniciar sesión."
+  );
 }
 
 /* =========================================================
@@ -280,7 +296,10 @@ function destroyPrevious(container) {
   const previous = INSTANCES.get(container);
 
   if (previous?.destroy) {
-    previous.destroy({ remount: true });
+    previous.destroy({
+      remount: true,
+    });
+
     return true;
   }
 
@@ -371,7 +390,11 @@ export function renderLoginView(container, deps = {}) {
         throw new Error(result?.message || "Login inválido.");
       }
 
-      await goAfterLogin(result);
+      const navigated = await goAfterLogin(result);
+
+      if (!navigated) {
+        throw new Error("No se pudo completar la navegación tras el login.");
+      }
 
       return true;
     } catch (error) {
@@ -426,12 +449,14 @@ export function renderLoginView(container, deps = {}) {
     },
 
     getSnapshot() {
+      const isAuth = authenticated();
+
       return {
         version: LOGIN_VIEW_VERSION,
         mounted,
         submitting,
-        authenticated: Boolean(Auth.isAuthenticated?.()),
-        target: authenticated() ? authHomeTarget() : null,
+        authenticated: isAuth,
+        target: isAuth ? redact(authHomeTarget()) : null,
       };
     },
 
@@ -473,7 +498,7 @@ export function getSnapshot() {
   return {
     version: LOGIN_VIEW_VERSION,
     mounted: false,
-    authenticated: Boolean(Auth.isAuthenticated?.()),
+    authenticated: authenticated(),
   };
 }
 

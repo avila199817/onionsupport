@@ -14,6 +14,7 @@
    - User inválido si disabled/deleted/archived/active=false.
    - Roles únicos: admin / user.
    - Home visible de usuario: /@{user.slug}.
+   - Session context mínimo seguro en memoria.
    - Sin storage.
    - Sin DOM cache complejo.
    - Sin network listeners.
@@ -26,7 +27,7 @@
 import { config } from "./config.js";
 import Http, { installHttp } from "./http.js";
 
-export const CORE_VERSION = "core.index.v3";
+export const CORE_VERSION = "core.index.v4";
 
 const APP_NAME =
   config?.appName ||
@@ -57,8 +58,6 @@ const DROPPED_STATE_KEYS = Object.freeze([
   "codes",
   "backupCodes",
 
-  "session",
-  "sessionData",
   "auth",
 ]);
 
@@ -206,6 +205,8 @@ function removeSensitiveUserFields(user = {}) {
     "access_token",
     "refreshToken",
     "refresh_token",
+    "session",
+    "sessionData",
   ]) {
     delete output[key];
   }
@@ -326,6 +327,65 @@ function publicUser(user = null) {
         normalized.picture
     ),
   };
+}
+
+/* =========================================================
+   SESSION CONTEXT
+========================================================= */
+
+function normalizeSessionContext(value = null, user = null) {
+  if (!isObject(value)) return null;
+
+  const sessionId = cleanText(
+    value.sessionId ||
+      value.session_id ||
+      value.sid ||
+      value.id ||
+      "",
+    ""
+  );
+
+  const userId = cleanText(
+    value.sessionUserId ||
+      value.session_user_id ||
+      value.userId ||
+      value.user_id ||
+      user?.userId ||
+      user?.id ||
+      "",
+    ""
+  );
+
+  const expiresAt =
+    value.expiresAt ||
+    value.expires_at ||
+    value.refreshExpiresAt ||
+    value.refresh_expires_at ||
+    null;
+
+  if (!sessionId && !userId && !expiresAt) return null;
+
+  return {
+    sessionId: sessionId || null,
+    id: sessionId || null,
+
+    userId: userId || null,
+    sessionUserId: userId || null,
+
+    expiresAt,
+    refreshExpiresAt: value.refreshExpiresAt || value.refresh_expires_at || expiresAt || null,
+  };
+}
+
+function sameSessionUser(session = null, user = null) {
+  if (!session || !user) return false;
+
+  const sessionUserId = cleanText(session.userId || session.sessionUserId, "");
+  const userId = cleanText(user.userId || user.id, "");
+
+  if (!sessionUserId || !userId) return true;
+
+  return sessionUserId === userId;
 }
 
 /* =========================================================
@@ -753,6 +813,15 @@ const state = {
   isAdmin: false,
   isUser: false,
 
+  session: null,
+  sessionData: null,
+  sessionId: null,
+  sessionUserId: null,
+
+  username: null,
+  avatar: null,
+  avatarUrl: null,
+
   shellVisible: true,
   shellHidden: false,
   chromeVisible: true,
@@ -834,6 +903,32 @@ function sanitizeStatePatch(patch = {}) {
       continue;
     }
 
+    if (key === "session" || key === "sessionData") {
+      const currentUser =
+        output.user ||
+        output.currentUser ||
+        state.user ||
+        state.currentUser ||
+        null;
+
+      const session = normalizeSessionContext(value, currentUser);
+      output.session = session;
+      output.sessionData = session;
+      output.sessionId = session?.sessionId || null;
+      output.sessionUserId = session?.sessionUserId || session?.userId || null;
+      continue;
+    }
+
+    if (key === "sessionId") {
+      output.sessionId = cleanText(value, "") || null;
+      continue;
+    }
+
+    if (key === "sessionUserId") {
+      output.sessionUserId = cleanText(value, "") || null;
+      continue;
+    }
+
     if (key === "publicPath") {
       output.publicPath = normalizePublicPath(value);
       output.canonicalPath = normalizeCanonicalPath(value);
@@ -878,6 +973,15 @@ function clearSessionFields() {
   state.isAdmin = false;
   state.isUser = false;
 
+  state.session = null;
+  state.sessionData = null;
+  state.sessionId = null;
+  state.sessionUserId = null;
+
+  state.username = null;
+  state.avatar = null;
+  state.avatarUrl = null;
+
   dropForbiddenStateFields(state);
 
   return state;
@@ -912,6 +1016,26 @@ function syncAuth() {
   const slug = authenticated ? extractUserSlug(user) : "";
   const homePath = authenticated ? buildUserHomePath(user) : ROOT_PATH;
 
+  const sessionSource =
+    state.session ||
+    state.sessionData ||
+    (
+      state.sessionId || state.sessionUserId
+        ? {
+            sessionId: state.sessionId,
+            sessionUserId: state.sessionUserId,
+          }
+        : null
+    );
+
+  const session = authenticated
+    ? normalizeSessionContext(sessionSource, user)
+    : null;
+
+  const validSession = authenticated && session && sameSessionUser(session, user)
+    ? session
+    : null;
+
   state.token = token;
   state.accessToken = token;
   state.access_token = token;
@@ -936,6 +1060,15 @@ function syncAuth() {
 
   state.isAdmin = role === "admin";
   state.isUser = role === "user";
+
+  state.session = validSession;
+  state.sessionData = validSession;
+  state.sessionId = validSession?.sessionId || null;
+  state.sessionUserId = validSession?.sessionUserId || validSession?.userId || null;
+
+  state.username = authenticated ? user.username || null : null;
+  state.avatar = authenticated ? user.avatar || user.avatarUrl || null : null;
+  state.avatarUrl = authenticated ? user.avatarUrl || user.avatar || null : null;
 
   return state;
 }
@@ -1112,6 +1245,20 @@ function pick(payload = {}, names = []) {
   return null;
 }
 
+function pickSession(payload = {}) {
+  if (!isObject(payload)) return null;
+
+  return (
+    (isObject(payload.session) ? payload.session : null) ||
+    (isObject(payload.sessionData) ? payload.sessionData : null) ||
+    (isObject(payload.data?.session) ? payload.data.session : null) ||
+    (isObject(payload.data?.sessionData) ? payload.data.sessionData : null) ||
+    (isObject(payload.payload?.session) ? payload.payload.session : null) ||
+    (isObject(payload.payload?.sessionData) ? payload.payload.sessionData : null) ||
+    null
+  );
+}
+
 function applySession(payload = {}, options = {}) {
   const token = pick(payload, ["token", "accessToken", "access_token"]);
   const user =
@@ -1120,6 +1267,7 @@ function applySession(payload = {}, options = {}) {
 
   const clean = cleanToken(token);
   const cleanUser = normalizeUser(user);
+  const session = normalizeSessionContext(pickSession(payload), cleanUser);
 
   setState(
     {
@@ -1128,6 +1276,8 @@ function applySession(payload = {}, options = {}) {
       access_token: clean,
       user: cleanUser,
       currentUser: cleanUser,
+      session,
+      sessionData: session,
     },
     {
       source: options.source || "core:applySession",
@@ -1144,6 +1294,7 @@ function applySession(payload = {}, options = {}) {
     homePath: state.homePath,
     defaultHome: state.defaultHome,
     postLoginTarget: state.postLoginTarget,
+    session: state.session,
   };
 }
 
@@ -1377,6 +1528,10 @@ function getSnapshot() {
     role: state.role,
     roles: [...state.roles],
 
+    hasSessionContext: Boolean(state.sessionId || state.sessionUserId || state.session),
+    sessionId: state.sessionId ? "***" : null,
+    sessionUserId: state.sessionUserId ? "***" : null,
+
     route: redact(state.route || ROOT_PATH),
     canonicalPath: redact(state.canonicalPath || ROOT_PATH),
     publicPath: redact(state.publicPath || ROOT_PATH),
@@ -1394,10 +1549,18 @@ function getSnapshot() {
       noFetchOwn: true,
       httpFacadeOnly: true,
       noApiClientParallel: true,
+
       roles: ["admin", "user"],
       authRequiresTokenAndUsableUser: true,
+
       userSlugHome: true,
       noEmailIdentity: true,
+
+      safeSessionContextOnly: true,
+      noSessionSecrets: true,
+      noSessionIpUserAgent: true,
+
+      snapshotRedacted: true,
     },
   };
 }
@@ -1474,6 +1637,8 @@ export const AppCore = {
   extractUserSlug,
   buildUserHomePath,
   publicUser,
+
+  normalizeSessionContext,
 
   normalizePublicPath,
   normalizeCanonicalPath,

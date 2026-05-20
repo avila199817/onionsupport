@@ -24,38 +24,15 @@
    - Sin /incidencias/nueva.
 ========================================================= */
 
-import {
-  ROUTES,
-} from "../../core/config.js";
+import { ROUTES } from "../../core/config.js";
 
-export const HOME_BINDINGS_VERSION = "home.bindings.v3";
+export const HOME_BINDINGS_VERSION = "home.bindings.v4";
 
 const DEFAULT_SCOPE = "view:home";
-const INCIDENCIAS_ROUTE = ROUTES.incidencias || "/incidencias";
-
-const ACTION_SELECTOR = [
-  "[data-home-action]",
-  "[data-action]",
-  "[data-quick-action]",
-  "[data-route]",
-  "[data-href]",
-  "a[href]",
-].join(",");
-
-const KEYBOARD_SELECTOR = [
-  "[role='button'][data-home-action]",
-  "[role='button'][data-action]",
-  "[role='button'][data-quick-action]",
-  "[tabindex][data-home-action]",
-  "[tabindex][data-action]",
-  "[tabindex][data-quick-action]",
-  "[tabindex][data-route]",
-  "[tabindex][data-href]",
-].join(",");
 
 const ACTIONS = Object.freeze({
   refresh: new Set(["refresh", "retry"]),
-  export: new Set(["export_csv"]),
+  exportCsv: new Set(["export_csv"]),
 
   openWidget: new Set(["open_widget"]),
   copyId: new Set(["copy_widget_id"]),
@@ -78,7 +55,31 @@ const RAW_KEYS = new Set([
 const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
 
+const SENSITIVE_QUERY_RE =
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i;
+
+const ACTION_SELECTOR = [
+  "[data-home-action]",
+  "[data-action]",
+  "[data-quick-action]",
+  "[data-route]",
+  "[data-href]",
+  "a[href]",
+].join(",");
+
+const KEYBOARD_SELECTOR = [
+  "[role='button'][data-home-action]",
+  "[role='button'][data-action]",
+  "[role='button'][data-quick-action]",
+  "[tabindex][data-home-action]",
+  "[tabindex][data-action]",
+  "[tabindex][data-quick-action]",
+  "[tabindex][data-route]",
+  "[tabindex][data-href]",
+].join(",");
+
 const cleanupsByScope = new Map();
+const rootsByScope = new Map();
 const busyState = new WeakMap();
 
 /* =========================================================
@@ -121,7 +122,13 @@ function safeText(value = "", fallback = "") {
 }
 
 function safeNumber(value = 0, fallback = 0) {
-  const number = Number(value);
+  if (value === null || value === undefined || value === "") return fallback;
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  const number = Number(String(value).replace(",", "."));
   return Number.isFinite(number) ? number : fallback;
 }
 
@@ -158,7 +165,10 @@ function nowIso() {
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -205,6 +215,84 @@ function sanitizePayload(value = {}) {
 }
 
 /* =========================================================
+   ROUTES
+========================================================= */
+
+function normalizeHashPath(value = "") {
+  const raw = safeText(value, "");
+
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
+  if (raw.startsWith("#/")) return raw.slice(1) || "/";
+
+  return raw;
+}
+
+function hasSensitiveQuery(value = "") {
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
+}
+
+function normalizeInternalRoute(route = "") {
+  let raw = normalizeHashPath(route);
+
+  if (!raw || raw === "#") return "";
+  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) return "";
+
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (hasSensitiveQuery(raw)) return "";
+
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.startsWith("javascript:") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("vbscript:") ||
+    lower.startsWith("mailto:") ||
+    lower.startsWith("tel:") ||
+    lower.startsWith("file:") ||
+    lower.startsWith("blob:") ||
+    /^https?:\/\//i.test(raw)
+  ) {
+    return "";
+  }
+
+  if (!raw.startsWith("/")) {
+    raw = `/${raw}`;
+  }
+
+  const hashIndex = raw.indexOf("#");
+  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
+  const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+
+  const queryIndex = withoutHash.indexOf("?");
+  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
+  const path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+
+  let cleanPath = path
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!cleanPath.startsWith("/")) cleanPath = `/${cleanPath}`;
+
+  if (cleanPath.length > 1) {
+    cleanPath = cleanPath.replace(/\/+$/g, "") || "/";
+  }
+
+  if (cleanPath === "/home") return "";
+  if (cleanPath === "/incidencias/nueva") return "";
+  if (cleanPath.startsWith("/incidencias/nueva/")) return "";
+
+  return `${cleanPath}${query}${hash}`;
+}
+
+function configRoute(route = "", fallback = "") {
+  return normalizeInternalRoute(route) || normalizeInternalRoute(fallback);
+}
+
+const INCIDENCIAS_ROUTE = configRoute(ROUTES?.incidencias, "/incidencias");
+
+/* =========================================================
    SCOPE / CLEANUP
 ========================================================= */
 
@@ -233,6 +321,7 @@ function cleanupScope(scope = DEFAULT_SCOPE) {
   }
 
   cleanupsByScope.delete(name);
+  rootsByScope.delete(name);
 
   return true;
 }
@@ -281,14 +370,7 @@ function listen(scope, target, eventName = "", handler = null, options = undefin
 
 function getContainer(container = null) {
   if (!isBrowser()) return null;
-  if (isElement(container)) return container;
-
-  return (
-    document.getElementById("view-container") ||
-    document.getElementById("app-content") ||
-    document.getElementById("main-content") ||
-    null
-  );
+  return isElement(container) ? container : null;
 }
 
 function contains(root = null, node = null) {
@@ -428,11 +510,13 @@ function filenameFromElement(element = null) {
     "home-incidencias.csv"
   );
 
-  return value
-    .replace(/[\\/:*?"<>|]+/g, "-")
-    .replace(/\s+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 160) || "home-incidencias.csv";
+  return (
+    value
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/\s+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 160) || "home-incidencias.csv"
+  );
 }
 
 function exportModeFromElement(element = null) {
@@ -575,107 +659,12 @@ async function withBusy(element = null, callback = null) {
   }
 }
 
-/* =========================================================
-   ROUTES
-========================================================= */
-
-function normalizeHashPath(value = "") {
-  const raw = safeText(value, "");
-
-  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
-  if (raw.startsWith("#/")) return raw.slice(1) || "/";
-
-  return raw;
-}
-
-function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
-    String(value || "")
-  );
-}
-
-function blockedInternalRoute(value = "") {
-  const raw = safeText(value, "");
-
-  if (!raw || raw === "#") return false;
-  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) return false;
-
-  const path = normalizeHashPath(raw);
-  const lower = path.toLowerCase();
-
-  if (path.startsWith("//")) return true;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(path)) return true;
-  if (/[\r\n\t\\]/.test(path)) return true;
-  if (hasSensitiveQuery(path)) return true;
-
-  if (
-    lower.startsWith("javascript:") ||
-      lower.startsWith("data:") ||
-      lower.startsWith("vbscript:") ||
-      lower.startsWith("mailto:") ||
-      lower.startsWith("tel:") ||
-      lower.startsWith("file:") ||
-      lower.startsWith("blob:") ||
-      /^https?:\/\//i.test(path)
-  ) {
-    return true;
-  }
-
-  const normalized = path.startsWith("/") ? path : `/${path}`;
-  const canonical = normalized
-    .split("?")[0]
-    .split("#")[0]
-    .replace(/\/{2,}/g, "/")
-    .replace(/\/+$/g, "") || "/";
-
-  return (
-    canonical === "/home" ||
-      canonical === "/incidencias/nueva" ||
-      canonical.startsWith("/incidencias/nueva/")
-  );
-}
-
-function normalizeInternalRoute(route = "") {
-  let raw = normalizeHashPath(route);
-
-  if (!raw || raw === "#") return "";
-  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) return "";
-  if (blockedInternalRoute(raw)) return "";
-
-  if (!raw.startsWith("/")) {
-    raw = `/${raw}`;
-  }
-
-  const hashIndex = raw.indexOf("#");
-  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-  const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
-
-  const queryIndex = withoutHash.indexOf("?");
-  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
-  const path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
-
-  let cleanPath = path
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  if (!cleanPath.startsWith("/")) cleanPath = `/${cleanPath}`;
-
-  if (cleanPath.length > 1) {
-    cleanPath = cleanPath.replace(/\/+$/g, "") || "/";
-  }
-
-  if (cleanPath === "/home") return "";
-  if (cleanPath === "/incidencias/nueva") return "";
-
-  return `${cleanPath}${query}${hash}`;
-}
-
 function elementHasBlockedRoute(element = null) {
   const raw = routeFromElement(element);
 
   if (!raw) return false;
 
-  return blockedInternalRoute(raw);
+  return !normalizeInternalRoute(raw);
 }
 
 /* =========================================================
@@ -687,7 +676,7 @@ function resolveKind(element = null) {
   const route = normalizeInternalRoute(routeFromElement(element));
 
   if (ACTIONS.refresh.has(action)) return "refresh";
-  if (ACTIONS.export.has(action)) return "export";
+  if (ACTIONS.exportCsv.has(action)) return "export";
   if (ACTIONS.openWidget.has(action)) return "open-widget";
   if (ACTIONS.copyId.has(action)) return "copy-id";
   if (ACTIONS.create.has(action)) return "create";
@@ -794,6 +783,8 @@ async function handleCopyId(element, api = {}) {
 async function handleCreate(element, api = {}) {
   const payload = payloadFromElement(element);
   const route = normalizeInternalRoute(routeFromElement(element)) || INCIDENCIAS_ROUTE;
+
+  if (!route) return false;
 
   return withBusy(element, async () => {
     if (isFunction(api.createFromHomeAction)) {
@@ -931,6 +922,8 @@ export function bindHomeEvents({
     return () => false;
   }
 
+  rootsByScope.set(name, root);
+
   const api = {
     reload,
     refresh,
@@ -1001,6 +994,7 @@ export function bindHomeEvents({
 
 export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
   const name = scopeName(scope);
+  const root = rootsByScope.get(name) || null;
 
   return {
     version: HOME_BINDINGS_VERSION,
@@ -1010,11 +1004,12 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
     browser: isBrowser(),
 
     cleanupCount: cleanupsByScope.get(name)?.length || 0,
-    hasContainer: Boolean(getContainer()),
+    hasContainer: Boolean(root),
+    containerConnected: Boolean(root?.isConnected),
 
     actions: {
       refresh: [...ACTIONS.refresh],
-      export: [...ACTIONS.export],
+      exportCsv: [...ACTIONS.exportCsv],
       openWidget: [...ACTIONS.openWidget],
       copyId: [...ACTIONS.copyId],
       navigate: [...ACTIONS.navigate],

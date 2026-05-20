@@ -27,11 +27,9 @@
    - Sin /home.
 ========================================================= */
 
-import {
-  ROUTES,
-} from "../../core/config.js";
+import { ROUTES } from "../../core/config.js";
 
-export const HOME_MODEL_VERSION = "home.model.v3";
+export const HOME_MODEL_VERSION = "home.model.v4";
 
 export const DEFAULT_HOME_PAGE = 1;
 export const DEFAULT_HOME_PAGE_SIZE = 5;
@@ -63,22 +61,35 @@ export const HOME_INVOICE_STATUS_KEYS = Object.freeze({
   DRAFT: "draft",
 });
 
-const HOME_ROUTES = Object.freeze({
-  INCIDENCIAS: ROUTES.incidencias || "/incidencias",
-  FACTURAS: ROUTES.facturas || "/facturas",
-  CLIENTES: ROUTES.clientes || "/clientes",
-  USUARIOS: ROUTES.usuarios || "/usuarios",
-});
-
 const RAW_KEYS = new Set([
   "raw",
   "response",
   "payload",
   "data",
+  "body",
+]);
+
+const COSMOS_META_KEYS = new Set([
+  "_id",
+  "_rid",
+  "_self",
+  "_etag",
+  "_attachments",
+  "_ts",
+  "_lsn",
+  "_metadata",
 ]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni/i;
+
+const SENSITIVE_QUERY_RE =
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i;
+
+const EMAIL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
+
+const ADMIN_ENTITY_RE =
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
 
 /* =========================================================
    SAFE HELPERS
@@ -173,8 +184,12 @@ function nowIso() {
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(EMAIL_RE, "");
 }
 
 function normalizeText(value = "") {
@@ -192,14 +207,16 @@ export function normalizeHomeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function normalizeRole(value = "") {
+function normalizeRole(value = "", fallback = "user") {
   if (Array.isArray(value)) {
-    const roles = value.map(normalizeRole).filter(Boolean);
+    const roles = value
+      .map((item) => normalizeRole(item, ""))
+      .filter(Boolean);
 
     if (roles.includes("admin")) return "admin";
     if (roles.includes("user")) return "user";
 
-    return "";
+    return fallback;
   }
 
   const role = String(value || "").toLowerCase();
@@ -207,15 +224,54 @@ function normalizeRole(value = "") {
   if (role === "admin") return "admin";
   if (role === "user") return "user";
 
-  return "user";
+  return fallback;
 }
 
 function isSensitiveKey(key = "") {
   return SENSITIVE_KEY_RE.test(String(key || ""));
 }
 
+function isEmailLike(value = "") {
+  const text = safeText(value, "");
+  return Boolean(text && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i.test(text));
+}
+
+function visualText(value = "", fallback = "Sin nombre") {
+  const text = redact(safeText(value, ""));
+
+  if (!text) return fallback;
+  if (isEmailLike(text)) return fallback;
+
+  return text;
+}
+
+function firstVisual(values = [], fallback = "Sin nombre") {
+  for (const value of safeArray(values)) {
+    const text = safeText(value, "");
+
+    if (!text || isEmailLike(text)) continue;
+
+    return redact(text) || fallback;
+  }
+
+  return fallback;
+}
+
+function safePublicId(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) return "";
+  if (isEmailLike(text)) return "";
+  if (hasSensitiveQuery(text)) return "";
+  if (/Bearer\s+/i.test(text)) return "";
+  if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
+
+  return redact(text);
+}
+
 function sanitizeHomeValue(value, keyHint = "") {
   if (RAW_KEYS.has(keyHint)) return undefined;
+  if (COSMOS_META_KEYS.has(keyHint)) return undefined;
   if (isSensitiveKey(keyHint)) return undefined;
 
   if (typeof value === "string") {
@@ -233,6 +289,7 @@ function sanitizeHomeValue(value, keyHint = "") {
 
     for (const [key, item] of Object.entries(value)) {
       if (RAW_KEYS.has(key)) continue;
+      if (COSMOS_META_KEYS.has(key)) continue;
       if (isSensitiveKey(key)) continue;
 
       const clean = sanitizeHomeValue(item, key);
@@ -252,28 +309,108 @@ function sanitizeHomeRecord(value = {}) {
   return safeObject(sanitizeHomeValue(value), {});
 }
 
+function sanitizeHomeList(items = []) {
+  return safeArray(items)
+    .map((item) => sanitizeHomeRecord(item))
+    .filter(hasKeys);
+}
+
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
-    String(value || "")
-  );
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
+}
+
+function normalizeHashPath(value = "") {
+  const raw = safeText(value, "");
+
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
+  if (raw.startsWith("#/")) return raw.slice(1) || "/";
+
+  return raw;
 }
 
 function safeRoute(value = "", fallback = "") {
-  const raw = safeText(value, "");
+  let raw = normalizeHashPath(value || "");
 
   if (!raw) return fallback;
-  if (!raw.startsWith("/")) return fallback;
+  if (raw === "#") return fallback;
+  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) return fallback;
   if (raw.startsWith("//")) return fallback;
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
   if (/[\r\n\t\\]/.test(raw)) return fallback;
   if (hasSensitiveQuery(raw)) return fallback;
 
-  const normalized = raw.replace(/\/{2,}/g, "/") || fallback;
-  const canonical = normalized.split("?")[0].split("#")[0] || "";
+  const lower = raw.toLowerCase();
 
-  if (canonical === "/home") return fallback;
+  if (
+    lower.startsWith("javascript:") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("vbscript:") ||
+    lower.startsWith("mailto:") ||
+    lower.startsWith("tel:") ||
+    lower.startsWith("file:") ||
+    lower.startsWith("blob:") ||
+    /^https?:\/\//i.test(raw)
+  ) {
+    return fallback;
+  }
 
-  return normalized;
+  if (!raw.startsWith("/")) raw = `/${raw}`;
+
+  const hashIndex = raw.indexOf("#");
+  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
+  const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+
+  const queryIndex = withoutHash.indexOf("?");
+  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
+  const path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+
+  let cleanPath = path
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!cleanPath.startsWith("/")) cleanPath = `/${cleanPath}`;
+
+  if (cleanPath.length > 1) {
+    cleanPath = cleanPath.replace(/\/+$/g, "") || "/";
+  }
+
+  if (cleanPath === "/home") return fallback;
+  if (cleanPath === "/incidencias/nueva") return fallback;
+  if (cleanPath.startsWith("/incidencias/nueva/")) return fallback;
+
+  return `${cleanPath}${query}${hash}`;
+}
+
+function routeFromCore(name = "", fallback = "") {
+  return safeRoute(ROUTES?.[name], "") || safeRoute(fallback, "");
+}
+
+const HOME_ROUTES = Object.freeze({
+  INCIDENCIAS: routeFromCore("incidencias", "/incidencias"),
+  FACTURAS: routeFromCore("facturas", "/facturas"),
+  CLIENTES: routeFromCore("clientes", "/clientes"),
+  USUARIOS: routeFromCore("usuarios", ""),
+});
+
+function routePath(route = "") {
+  return safeRoute(route, "").split("?")[0].split("#")[0] || "";
+}
+
+function isAdminOnlyRoute(route = "") {
+  const path = routePath(route);
+  const clientes = routePath(HOME_ROUTES.CLIENTES);
+  const usuarios = routePath(HOME_ROUTES.USUARIOS);
+
+  if (!path) return false;
+
+  return (
+    Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
+  );
+}
+
+function isAdminEntityValue(value = "") {
+  return ADMIN_ENTITY_RE.test(String(value || "").toLowerCase());
 }
 
 function safeImageSrc(value = "") {
@@ -317,6 +454,27 @@ function toTimestamp(value = null) {
     return numeric > 9999999999 ? numeric : numeric * 1000;
   }
 
+  const esDate = raw.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+
+  if (esDate) {
+    const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = esDate;
+
+    const date = new Date(
+      Number(yyyy),
+      Number(mm) - 1,
+      Number(dd),
+      Number(hh),
+      Number(min),
+      Number(ss)
+    );
+
+    const time = date.getTime();
+
+    return Number.isNaN(time) ? 0 : time;
+  }
+
   const date = new Date(raw.includes("T") || raw.includes("Z") ? raw : `${raw}T00:00:00`);
   const time = date.getTime();
 
@@ -328,7 +486,7 @@ function uniqueStrings(values = []) {
     ...new Set(
       safeArray(values)
         .flatMap((value) => (Array.isArray(value) ? value : [value]))
-        .map((value) => safeText(value, ""))
+        .map((value) => safePublicId(value))
         .filter(Boolean)
     ),
   ];
@@ -339,7 +497,7 @@ export function uniqueHomeBy(items = [], picker = (item) => item) {
   const output = [];
 
   for (const item of safeArray(items)) {
-    const raw = safeText(picker(item), "");
+    const raw = safePublicId(picker(item));
     const key = raw ? normalizeHomeKey(raw) : "";
 
     if (!key) {
@@ -415,7 +573,73 @@ function sanitizeSummaryForRole(summary = {}, admin = false) {
     output.visibleCustomersCount = 0;
   }
 
-  return output;
+  return sanitizeHomeRecord(output);
+}
+
+function isAdminOnlyActivity(item = {}) {
+  const raw = safeObject(item);
+  const type = normalizeHomeKey(first(raw.type, raw.kind, raw.category, ""));
+  const route = safeRoute(first(raw.route, raw.href, raw.link, raw.to, ""), "");
+
+  const identity = safeText(
+    [
+      raw.entity,
+      raw.resource,
+      raw.collection,
+      raw.targetType,
+      raw.meta?.entity,
+      raw.meta?.type,
+      type,
+      route,
+    ]
+      .filter(Boolean)
+      .join(" "),
+    ""
+  );
+
+  return (
+    ["client", "cliente", "customer", "user", "usuario", "member"].includes(type) ||
+    isAdminOnlyRoute(route) ||
+    isAdminEntityValue(identity)
+  );
+}
+
+function filterActivityForRole(items = [], admin = false) {
+  const rows = safeArray(items);
+  return admin ? rows : rows.filter((item) => !isAdminOnlyActivity(item));
+}
+
+function isAdminOnlyWidget(item = {}) {
+  const raw = safeObject(item);
+  const route = safeRoute(first(raw.route, raw.href, raw.link, raw.to, ""), "");
+
+  const identity = safeText(
+    [
+      raw.widgetId,
+      raw.widgetKey,
+      raw.id,
+      raw.key,
+      raw.slug,
+      raw.code,
+      raw.type,
+      raw.kind,
+      raw.variant,
+      raw.category,
+      raw.title,
+      raw.name,
+      route,
+    ]
+      .filter(Boolean)
+      .join(" "),
+    ""
+  );
+
+  return isAdminOnlyRoute(route) || isAdminEntityValue(identity);
+}
+
+function filterWidgetsForRole(items = [], admin = false) {
+  const rows = safeArray(items);
+  return admin ? rows : rows.filter((item) => !isAdminOnlyWidget(item));
 }
 
 /* =========================================================
@@ -508,11 +732,14 @@ export function normalizeHomeCollectionSource(value = null, aliases = []) {
       object.rows,
       object.records,
       object.results,
-      object.data,
       object.docs,
       object.documents,
       object.value,
       object.list,
+      Array.isArray(object.data) ? object.data : null,
+      Array.isArray(object.payload) ? object.payload : null,
+      Array.isArray(object.result) ? object.result : null,
+      Array.isArray(object.response) ? object.response : null,
       []
     )
   );
@@ -578,6 +805,7 @@ export function pickHomeCollectionBlock(source = {}, aliases = []) {
     raw.data,
     raw.payload,
     raw.result,
+    raw.response,
   ].filter(hasKeys);
 
   for (const candidate of sources) {
@@ -613,13 +841,12 @@ export function pickHomeCollectionBlock(source = {}, aliases = []) {
 
 export function getHomeTicketId(item = {}) {
   if (typeof item === "string" || typeof item === "number") {
-    return safeText(item, "");
+    return safePublicId(item);
   }
 
   const raw = safeObject(item);
-  const base = safeObject(raw.raw);
 
-  return safeText(
+  return safePublicId(
     first(
       raw.ticketId,
       raw.incidenciaId,
@@ -627,24 +854,13 @@ export function getHomeTicketId(item = {}) {
       raw.numero,
       raw.ticketCode,
       raw.entityId,
-      raw.id,
-      raw._id,
-      base.ticketId,
-      base.incidenciaId,
-      base.code,
-      base.numero,
-      base.ticketCode,
-      base.entityId,
-      base.id,
-      base._id
-    ),
-    ""
+      raw.id
+    )
   );
 }
 
 export function getHomeTicketIdentities(item = {}) {
   const raw = safeObject(item);
-  const base = safeObject(raw.raw);
 
   return uniqueStrings([
     raw.ticketId,
@@ -654,21 +870,11 @@ export function getHomeTicketIdentities(item = {}) {
     raw.ticketCode,
     raw.entityId,
     raw.id,
-    raw._id,
-    base.ticketId,
-    base.incidenciaId,
-    base.code,
-    base.numero,
-    base.ticketCode,
-    base.entityId,
-    base.id,
-    base._id,
   ]);
 }
 
 export function getHomeTicketSubject(item = {}) {
   const raw = safeObject(item);
-  const base = safeObject(raw.raw);
 
   return safeText(
     first(
@@ -676,12 +882,7 @@ export function getHomeTicketSubject(item = {}) {
       raw.title,
       raw.asunto,
       raw.name,
-      raw.preview,
-      base.subject,
-      base.title,
-      base.asunto,
-      base.name,
-      base.preview
+      raw.preview
     ),
     "Incidencia sin asunto"
   );
@@ -689,7 +890,6 @@ export function getHomeTicketSubject(item = {}) {
 
 export function getHomeTicketDescription(item = {}) {
   const raw = safeObject(item);
-  const base = safeObject(raw.raw);
 
   return safeText(
     first(
@@ -698,13 +898,7 @@ export function getHomeTicketDescription(item = {}) {
       raw.preview,
       raw.message,
       raw.body,
-      raw.text,
-      base.description,
-      base.descripcion,
-      base.preview,
-      base.message,
-      base.body,
-      base.text
+      raw.text
     ),
     "Sin descripción."
   );
@@ -712,7 +906,6 @@ export function getHomeTicketDescription(item = {}) {
 
 export function getHomeTicketStatus(item = {}) {
   const raw = safeObject(item);
-  const base = safeObject(raw.raw);
 
   return safeText(
     first(
@@ -720,10 +913,6 @@ export function getHomeTicketStatus(item = {}) {
       raw.estado,
       raw.state,
       raw.lifecycle?.status,
-      base.status,
-      base.estado,
-      base.state,
-      base.lifecycle?.status,
       "pending"
     ),
     "pending"
@@ -758,7 +947,6 @@ export function getHomeTicketStatusLabel(itemOrStatus = {}) {
 
 export function getHomeTicketPriority(item = {}) {
   const raw = safeObject(item);
-  const base = safeObject(raw.raw);
 
   return safeText(
     first(
@@ -767,11 +955,6 @@ export function getHomeTicketPriority(item = {}) {
       raw.severity,
       raw.urgency,
       raw.sla?.priority,
-      base.priority,
-      base.prioridad,
-      base.severity,
-      base.urgency,
-      base.sla?.priority,
       "medium"
     ),
     "medium"
@@ -802,7 +985,6 @@ export function isHomeTicketUrgent(item = {}) {
 
 export function getHomeTicketCreatedAt(item = {}) {
   const raw = safeObject(item);
-  const base = safeObject(raw.raw);
 
   return first(
     raw.createdAt,
@@ -810,19 +992,12 @@ export function getHomeTicketCreatedAt(item = {}) {
     raw.createdAtES,
     raw.date,
     raw.fecha,
-    raw.lifecycle?.createdAt,
-    base.createdAt,
-    base.fechaCreacion,
-    base.createdAtES,
-    base.date,
-    base.fecha,
-    base.lifecycle?.createdAt
+    raw.lifecycle?.createdAt
   );
 }
 
 export function getHomeTicketUpdatedAt(item = {}) {
   const raw = safeObject(item);
-  const base = safeObject(raw.raw);
 
   return first(
     raw.updatedAt,
@@ -833,32 +1008,18 @@ export function getHomeTicketUpdatedAt(item = {}) {
     raw.createdAt,
     raw.lifecycle?.updatedAt,
     raw.lifecycle?.lastUpdateAt,
-    raw.audit?.updatedAt,
-    base.updatedAt,
-    base.lastUpdateAt,
-    base.ultimaNovedad,
-    base.modifiedAt,
-    base.closedAt,
-    base.createdAt,
-    base.lifecycle?.updatedAt,
-    base.lifecycle?.lastUpdateAt,
-    base.audit?.updatedAt
+    raw.audit?.updatedAt
   );
 }
 
 export function getHomeTicketAttachmentsCount(item = {}) {
   const raw = safeObject(item);
-  const base = safeObject(raw.raw);
 
   const attachments = first(
     raw.attachments,
     raw.files,
     raw.adjuntos,
-    raw.documents,
-    base.attachments,
-    base.files,
-    base.adjuntos,
-    base.documents
+    raw.documents
   );
 
   if (Array.isArray(attachments)) return attachments.length;
@@ -869,10 +1030,6 @@ export function getHomeTicketAttachmentsCount(item = {}) {
       raw.filesCount,
       raw.adjuntosCount,
       raw.documentsCount,
-      base.attachmentsCount,
-      base.filesCount,
-      base.adjuntosCount,
-      base.documentsCount,
       0
     ),
     0
@@ -889,8 +1046,8 @@ export function normalizeHomeTicket(item = {}) {
   const status = getHomeTicketStatus(source);
   const priority = getHomeTicketPriority(source);
 
-  const clientName = safeText(
-    first(
+  const clientName = firstVisual(
+    [
       source.clientName,
       source.clienteNombre,
       source.customerName,
@@ -905,13 +1062,7 @@ export function normalizeHomeTicket(item = {}) {
       source.client?.name,
       source.customer?.name,
       source.user?.name,
-      source.raw?.clientName,
-      source.raw?.clienteNombre,
-      source.raw?.customerName,
-      source.raw?.requesterSnapshot?.name,
-      source.raw?.cliente?.nombreContacto,
-      source.raw?.cliente?.nombre
-    ),
+    ],
     subject
   );
 
@@ -929,18 +1080,14 @@ export function normalizeHomeTicket(item = {}) {
       source.client?.avatar,
       source.client?.avatarUrl,
       source.user?.avatar,
-      source.user?.avatarUrl,
-      source.raw?.clientAvatar,
-      source.raw?.avatar,
-      source.raw?.avatarUrl
+      source.user?.avatarUrl
     )
   );
 
-  return {
+  return sanitizeHomeRecord({
     ...raw,
 
     id: safeText(first(raw.id, id), id),
-    _id: safeText(first(raw._id, raw.id, id), id),
 
     ticketId: safeText(first(raw.ticketId, id), id),
     incidenciaId: safeText(first(raw.incidenciaId, id), id),
@@ -987,7 +1134,7 @@ export function normalizeHomeTicket(item = {}) {
     attachmentsCount: getHomeTicketAttachmentsCount(source),
     filesCount: getHomeTicketAttachmentsCount(source),
     adjuntosCount: getHomeTicketAttachmentsCount(source),
-  };
+  });
 }
 
 export function normalizeHomeTickets(items = []) {
@@ -1006,9 +1153,8 @@ export function normalizeHomeTickets(items = []) {
 
 export function getHomeInvoiceId(item = {}) {
   const raw = safeObject(item);
-  const base = safeObject(raw.raw);
 
-  return safeText(
+  return safePublicId(
     first(
       raw.invoiceId,
       raw.facturaId,
@@ -1018,26 +1164,13 @@ export function getHomeInvoiceId(item = {}) {
       raw.numero,
       raw.invoiceNumber,
       raw.code,
-      raw.id,
-      raw._id,
-      base.invoiceId,
-      base.facturaId,
-      base.number,
-      base.numeroFacturaLegal,
-      base.numeroFactura,
-      base.numero,
-      base.invoiceNumber,
-      base.code,
-      base.id,
-      base._id
-    ),
-    ""
+      raw.id
+    )
   );
 }
 
 export function getHomeInvoiceAmount(item = {}) {
   const raw = safeObject(item);
-  const base = safeObject(raw.raw);
 
   return safeNumber(
     first(
@@ -1052,17 +1185,6 @@ export function getHomeInvoiceAmount(item = {}) {
       raw.facturaTotal,
       raw.facturaImporte,
       raw.invoiceAmount,
-      base.total,
-      base.amount,
-      base.importe,
-      base.price,
-      base.subtotal,
-      base.base,
-      base.totalFactura,
-      base.importeTotal,
-      base.facturaTotal,
-      base.facturaImporte,
-      base.invoiceAmount,
       0
     ),
     0
@@ -1078,10 +1200,6 @@ export function getHomeInvoiceStatusKey(item = {}) {
       raw.estadoPago,
       raw.status,
       raw.estado,
-      raw.raw?.paymentStatus,
-      raw.raw?.estadoPago,
-      raw.raw?.status,
-      raw.raw?.estado,
       "pending"
     )
   );
@@ -1109,31 +1227,27 @@ export function normalizeHomeInvoice(item = {}) {
 
   const id = getHomeInvoiceId(source);
   const amount = getHomeInvoiceAmount(source);
+
   const status = safeText(
     first(
       source.paymentStatus,
       source.estadoPago,
       source.status,
       source.estado,
-      source.raw?.paymentStatus,
-      source.raw?.estadoPago,
-      source.raw?.status,
-      source.raw?.estado,
       "pending"
     ),
     "pending"
   );
 
   const currency = safeText(
-    first(source.currency, source.moneda, source.raw?.currency, source.raw?.moneda, "EUR"),
+    first(source.currency, source.moneda, "EUR"),
     "EUR"
   ).toUpperCase();
 
-  return {
+  return sanitizeHomeRecord({
     ...raw,
 
     id: safeText(first(raw.id, id), id),
-    _id: safeText(first(raw._id, raw.id, id), id),
 
     invoiceId: safeText(first(raw.invoiceId, id), id),
     facturaId: safeText(first(raw.facturaId, id), id),
@@ -1164,9 +1278,9 @@ export function normalizeHomeInvoice(item = {}) {
 
     statusKey: getHomeInvoiceStatusKey(source),
 
-    createdAt: first(source.createdAt, source.fechaCreacion, source.fechaFactura, source.issueDate, source.issuedAt, source.date, source.raw?.createdAt, source.raw?.fechaCreacion, source.raw?.fechaFactura, source.raw?.issueDate, source.raw?.issuedAt, source.raw?.date),
-    updatedAt: first(source.updatedAt, source.modifiedAt, source.fechaPago, source.fechaEnvio, source.sentAt, source.date, source.raw?.updatedAt, source.raw?.modifiedAt, source.raw?.date),
-  };
+    createdAt: first(source.createdAt, source.fechaCreacion, source.fechaFactura, source.issueDate, source.issuedAt, source.date),
+    updatedAt: first(source.updatedAt, source.modifiedAt, source.fechaPago, source.fechaEnvio, source.sentAt, source.date),
+  });
 }
 
 export function normalizeHomeInvoices(items = []) {
@@ -1186,20 +1300,13 @@ export function normalizeHomeInvoices(items = []) {
 export function getHomeUserId(item = {}) {
   const raw = safeObject(item);
 
-  return safeText(
+  return safePublicId(
     first(
       raw.userId,
       raw.usuarioId,
       raw.id,
-      raw._id,
-      raw.username,
-      raw.raw?.userId,
-      raw.raw?.usuarioId,
-      raw.raw?.id,
-      raw.raw?._id,
-      raw.raw?.username
-    ),
-    ""
+      raw.username
+    )
   );
 }
 
@@ -1208,19 +1315,15 @@ export function normalizeHomeUser(item = {}) {
   const raw = sanitizeHomeRecord(source);
   const id = getHomeUserId(source);
 
-  const displayName = safeText(
-    first(
+  const displayName = firstVisual(
+    [
       source.displayName,
       source.fullName,
       source.name,
       source.nombre,
       source.username,
-      source.raw?.displayName,
-      source.raw?.fullName,
-      source.raw?.name,
-      source.raw?.nombre,
-      source.raw?.username
-    ),
+      source.slug,
+    ],
     "Usuario"
   );
 
@@ -1230,8 +1333,6 @@ export function normalizeHomeUser(item = {}) {
       source.rol,
       source.type,
       source.roles,
-      source.raw?.role,
-      source.raw?.rol,
       "user"
     )
   );
@@ -1244,28 +1345,22 @@ export function normalizeHomeUser(item = {}) {
       source.photoURL,
       source.picture,
       source.profile?.avatar,
-      source.profile?.avatarUrl,
-      source.raw?.avatar,
-      source.raw?.avatarUrl,
-      source.raw?.avatar_url,
-      source.raw?.photoURL,
-      source.raw?.picture
+      source.profile?.avatarUrl
     )
   );
 
-  return {
+  return sanitizeHomeRecord({
     ...raw,
 
     id: safeText(first(raw.id, id), id),
-    _id: safeText(first(raw._id, raw.id, id), id),
 
     userId: safeText(first(raw.userId, id), id),
     usuarioId: safeText(first(raw.usuarioId, id), id),
 
     displayName,
-    fullName: safeText(first(raw.fullName, displayName), displayName),
-    name: safeText(first(raw.name, displayName), displayName),
-    nombre: safeText(first(raw.nombre, displayName), displayName),
+    fullName: displayName,
+    name: displayName,
+    nombre: displayName,
 
     username: safeText(first(raw.username, id), id),
 
@@ -1273,15 +1368,15 @@ export function normalizeHomeUser(item = {}) {
     rol: role,
     roles: [role],
 
-    active: first(raw.active, raw.isActive, raw.enabled, source.raw?.active, source.raw?.isActive, source.raw?.enabled, true),
-    isActive: first(raw.active, raw.isActive, raw.enabled, source.raw?.active, source.raw?.isActive, source.raw?.enabled, true),
+    active: first(raw.active, raw.isActive, raw.enabled, true),
+    isActive: first(raw.active, raw.isActive, raw.enabled, true),
 
     avatar,
     avatarUrl: avatar,
 
-    createdAt: first(source.createdAt, source.raw?.createdAt),
-    updatedAt: first(source.updatedAt, source.modifiedAt, source.lastLoginAt, source.raw?.updatedAt),
-  };
+    createdAt: source.createdAt,
+    updatedAt: first(source.updatedAt, source.modifiedAt, source.lastLoginAt),
+  });
 }
 
 export function normalizeHomeUsers(items = []) {
@@ -1297,20 +1392,13 @@ export function normalizeHomeUsers(items = []) {
 export function getHomeClientId(item = {}) {
   const raw = safeObject(item);
 
-  return safeText(
+  return safePublicId(
     first(
       raw.clientId,
       raw.clienteId,
       raw.customerId,
-      raw.id,
-      raw._id,
-      raw.raw?.clientId,
-      raw.raw?.clienteId,
-      raw.raw?.customerId,
-      raw.raw?.id,
-      raw.raw?._id
-    ),
-    ""
+      raw.id
+    )
   );
 }
 
@@ -1319,27 +1407,22 @@ export function normalizeHomeClient(item = {}) {
   const raw = sanitizeHomeRecord(source);
   const id = getHomeClientId(source);
 
-  const name = safeText(
-    first(
+  const name = firstVisual(
+    [
       source.name,
       source.nombre,
+      source.displayName,
       source.razonSocial,
       source.company,
       source.nombreContacto,
-      source.raw?.name,
-      source.raw?.nombre,
-      source.raw?.razonSocial,
-      source.raw?.company,
-      source.raw?.nombreContacto
-    ),
+    ],
     "Cliente"
   );
 
-  return {
+  return sanitizeHomeRecord({
     ...raw,
 
     id: safeText(first(raw.id, id), id),
-    _id: safeText(first(raw._id, raw.id, id), id),
 
     clientId: safeText(first(raw.clientId, id), id),
     clienteId: safeText(first(raw.clienteId, id), id),
@@ -1350,12 +1433,12 @@ export function normalizeHomeClient(item = {}) {
     displayName: safeText(first(raw.displayName, name), name),
     razonSocial: safeText(first(raw.razonSocial, name), name),
 
-    active: first(raw.active, raw.isActive, raw.enabled, source.raw?.active, source.raw?.isActive, source.raw?.enabled, true),
-    isActive: first(raw.active, raw.isActive, raw.enabled, source.raw?.active, source.raw?.isActive, source.raw?.enabled, true),
+    active: first(raw.active, raw.isActive, raw.enabled, true),
+    isActive: first(raw.active, raw.isActive, raw.enabled, true),
 
-    createdAt: first(source.createdAt, source.raw?.createdAt),
-    updatedAt: first(source.updatedAt, source.modifiedAt, source.raw?.updatedAt),
-  };
+    createdAt: source.createdAt,
+    updatedAt: first(source.updatedAt, source.modifiedAt),
+  });
 }
 
 export function normalizeHomeClients(items = []) {
@@ -1375,7 +1458,7 @@ export function normalizeHomeClients(items = []) {
 export function getHomeActivityId(item = {}) {
   const raw = safeObject(item);
 
-  return safeText(
+  return safePublicId(
     first(
       raw.activityId,
       raw.eventId,
@@ -1386,13 +1469,8 @@ export function getHomeActivityId(item = {}) {
       raw.facturaId,
       raw.invoiceId,
       raw.userId,
-      raw.clienteId,
-      raw.raw?.activityId,
-      raw.raw?.eventId,
-      raw.raw?.entityId,
-      raw.raw?.id
-    ),
-    ""
+      raw.clienteId
+    )
   );
 }
 
@@ -1401,16 +1479,16 @@ export function normalizeHomeActivity(item = {}) {
   const raw = sanitizeHomeRecord(source);
 
   const type = safeText(
-    first(source.type, source.kind, source.category, source.raw?.type, source.raw?.kind, source.raw?.category, HOME_ENTITY_TYPES.ACTIVITY),
+    first(source.type, source.kind, source.category, HOME_ENTITY_TYPES.ACTIVITY),
     HOME_ENTITY_TYPES.ACTIVITY
   );
 
-  const title = safeText(
-    first(source.title, source.name, source.subject, source.label, source.raw?.title, source.raw?.name, source.raw?.subject, source.raw?.label),
+  const title = firstVisual(
+    [source.title, source.name, source.subject, source.label],
     "Actividad registrada"
   );
 
-  const entityId = safeText(
+  const entityId = safePublicId(
     first(
       source.entityId,
       source.id,
@@ -1419,16 +1497,13 @@ export function normalizeHomeActivity(item = {}) {
       source.facturaId,
       source.invoiceId,
       source.userId,
-      source.clienteId,
-      source.raw?.entityId,
-      source.raw?.id
-    ),
-    ""
+      source.clienteId
+    )
   );
 
-  const route = safeRoute(first(source.route, source.href, source.link, source.to, source.raw?.route), "");
+  const route = safeRoute(first(source.route, source.href, source.link, source.to, ""), "");
 
-  return {
+  return sanitizeHomeRecord({
     ...raw,
 
     type,
@@ -1438,20 +1513,20 @@ export function normalizeHomeActivity(item = {}) {
     title,
 
     text: safeText(
-      first(source.text, source.description, source.message, source.detail, source.preview, source.raw?.text, source.raw?.description, source.raw?.message, source.raw?.detail, source.raw?.preview),
+      first(source.text, source.description, source.message, source.detail, source.preview),
       "Sin detalle adicional."
     ),
 
-    date: first(source.date, source.createdAt, source.updatedAt, source.timestamp, source.raw?.date, source.raw?.createdAt, source.raw?.updatedAt, source.raw?.timestamp, nowIso()),
+    date: first(source.date, source.createdAt, source.updatedAt, source.timestamp, nowIso()),
 
     route,
-    href: safeRoute(first(source.href, source.route, source.link, source.to, source.raw?.href), route),
+    href: safeRoute(first(source.href, source.route, source.link, source.to), route),
 
-    action: safeText(first(source.action, source.raw?.action, "open-activity"), "open-activity"),
+    action: normalizeHomeKey(first(source.action, "open_activity")),
 
     entityId,
     id: safeText(first(raw.id, entityId), entityId),
-  };
+  });
 }
 
 export function normalizeHomeActivityList(items = []) {
@@ -1483,7 +1558,7 @@ export function buildHomeActivityFromCollections({
         date: getHomeTicketUpdatedAt(item) || getHomeTicketCreatedAt(item),
         route: HOME_ROUTES.INCIDENCIAS,
         href: HOME_ROUTES.INCIDENCIAS,
-        action: "open-ticket",
+        action: "open_ticket",
         entityId: ticketId,
       });
     });
@@ -1500,7 +1575,7 @@ export function buildHomeActivityFromCollections({
         date: first(item.updatedAt, item.modifiedAt, item.createdAt, item.date),
         route: HOME_ROUTES.FACTURAS,
         href: HOME_ROUTES.FACTURAS,
-        action: "open-invoice",
+        action: "open_invoice",
         entityId: invoiceId,
       });
     });
@@ -1512,32 +1587,34 @@ export function buildHomeActivityFromCollections({
 
       return normalizeHomeActivity({
         type: HOME_ENTITY_TYPES.CLIENT,
-        title: safeText(first(item.name, item.nombre, item.razonSocial, item.company), "Cliente"),
+        title: firstVisual([item.name, item.nombre, item.razonSocial, item.company], "Cliente"),
         text: "Cliente sincronizado en el panel.",
         date: first(item.updatedAt, item.createdAt),
         route: HOME_ROUTES.CLIENTES,
         href: HOME_ROUTES.CLIENTES,
-        action: "open-client",
+        action: "open_client",
         entityId: clientId,
       });
     });
 
-  const userActivity = normalizeHomeUsers(users)
-    .slice(0, 3)
-    .map((item) => {
-      const userId = getHomeUserId(item);
+  const userActivity = HOME_ROUTES.USUARIOS
+    ? normalizeHomeUsers(users)
+        .slice(0, 3)
+        .map((item) => {
+          const userId = getHomeUserId(item);
 
-      return normalizeHomeActivity({
-        type: HOME_ENTITY_TYPES.USER,
-        title: safeText(first(item.name, item.nombre, item.displayName, item.fullName, item.username), "Usuario"),
-        text: "Usuario disponible en el sistema.",
-        date: first(item.lastLoginAt, item.updatedAt, item.createdAt),
-        route: HOME_ROUTES.USUARIOS,
-        href: HOME_ROUTES.USUARIOS,
-        action: "open-user",
-        entityId: userId,
-      });
-    });
+          return normalizeHomeActivity({
+            type: HOME_ENTITY_TYPES.USER,
+            title: firstVisual([item.name, item.nombre, item.displayName, item.fullName, item.username], "Usuario"),
+            text: "Usuario disponible en el sistema.",
+            date: first(item.lastLoginAt, item.updatedAt, item.createdAt),
+            route: HOME_ROUTES.USUARIOS,
+            href: HOME_ROUTES.USUARIOS,
+            action: "open_user",
+            entityId: userId,
+          });
+        })
+    : [];
 
   return normalizeHomeActivityList([
     ...ticketActivity,
@@ -1554,7 +1631,7 @@ export function buildHomeActivityFromCollections({
 export function getHomeWidgetId(item = {}) {
   const raw = safeObject(item);
 
-  return safeText(first(raw.widgetId, raw.widgetKey, raw.id, raw.key, raw.slug, raw.code), "");
+  return safePublicId(first(raw.widgetId, raw.widgetKey, raw.id, raw.key, raw.slug, raw.code));
 }
 
 export function getHomeWidgetTitle(item = {}) {
@@ -1572,7 +1649,7 @@ export function normalizeHomeWidget(item = {}) {
 
   const route = safeRoute(first(source.route, source.href, source.link, source.to), "");
 
-  return {
+  return sanitizeHomeRecord({
     ...raw,
 
     widgetId: id,
@@ -1600,7 +1677,7 @@ export function normalizeHomeWidget(item = {}) {
     href: safeRoute(first(source.href, source.route, source.link, source.to), route),
 
     updatedAt: first(raw.updatedAt, raw.lastUpdate, raw.modifiedAt, raw.createdAt, nowIso()),
-  };
+  });
 }
 
 export function normalizeHomeWidgets(items = []) {
@@ -1650,22 +1727,23 @@ export function buildHomeWidgetsFromSummary(summary = {}, options = {}) {
   ];
 
   if (admin) {
-    base.push(
-      {
-        id: "clientes",
-        widgetId: "clientes",
-        key: "clientes",
-        title: "Clientes",
-        description: "Clientes visibles.",
-        value: safeNumber(data.clientsCount, 0),
-        subtitle: `${safeNumber(data.visibleClientsCount, 0)} visibles`,
-        type: "clients",
-        kind: "metric",
-        status: "active",
-        route: HOME_ROUTES.CLIENTES,
-        href: HOME_ROUTES.CLIENTES,
-      },
-      {
+    base.push({
+      id: "clientes",
+      widgetId: "clientes",
+      key: "clientes",
+      title: "Clientes",
+      description: "Clientes visibles.",
+      value: safeNumber(data.clientsCount, 0),
+      subtitle: `${safeNumber(data.visibleClientsCount, 0)} visibles`,
+      type: "clients",
+      kind: "metric",
+      status: "active",
+      route: HOME_ROUTES.CLIENTES,
+      href: HOME_ROUTES.CLIENTES,
+    });
+
+    if (HOME_ROUTES.USUARIOS) {
+      base.push({
         id: "usuarios",
         widgetId: "usuarios",
         key: "usuarios",
@@ -1678,8 +1756,8 @@ export function buildHomeWidgetsFromSummary(summary = {}, options = {}) {
         status: "active",
         route: HOME_ROUTES.USUARIOS,
         href: HOME_ROUTES.USUARIOS,
-      }
-    );
+      });
+    }
   } else {
     base.push({
       id: "adjuntos",
@@ -1814,9 +1892,9 @@ export function buildHomeDerivedSummary({
 }
 
 export function normalizeHomeSummary(rawSummary = {}, widgetSummary = {}, derivedSummary = {}, options = {}) {
-  const raw = safeObject(rawSummary);
-  const widget = safeObject(widgetSummary);
-  const derived = safeObject(derivedSummary);
+  const raw = sanitizeHomeRecord(rawSummary);
+  const widget = sanitizeHomeRecord(widgetSummary);
+  const derived = sanitizeHomeRecord(derivedSummary);
   const admin = Boolean(options.admin);
 
   const totalTickets = maxNumber(raw.totalTickets, raw.ticketsTotal, raw.incidenciasTotal, widget.totalTickets, derived.totalTickets);
@@ -1946,7 +2024,19 @@ function widgetsBlock(raw = {}) {
 
 function inferAdmin(raw = {}) {
   const object = safeObject(raw);
-  const role = normalizeRole(first(object.role, object.meta?.role, ""));
+
+  const role = normalizeRole(
+    first(
+      object.role,
+      object.rol,
+      object.roles,
+      object.meta?.role,
+      object.meta?.rol,
+      object.meta?.roles,
+      ""
+    ),
+    ""
+  );
 
   if (typeof object.admin === "boolean") return object.admin;
   if (typeof object.meta?.admin === "boolean") return object.meta.admin;
@@ -1985,17 +2075,24 @@ export function normalizeHomeDashboard(payload = null) {
   const users = admin ? normalizeHomeUsers(usersBlock.items) : [];
   const clients = admin ? normalizeHomeClients(clientsBlock.items) : [];
 
-  const explicitActivity = normalizeHomeActivityList(activityBlock.items);
+  const explicitActivity = filterActivityForRole(
+    normalizeHomeActivityList(activityBlock.items),
+    admin
+  );
+
   const activity = explicitActivity.length
     ? explicitActivity
-    : buildHomeActivityFromCollections({
-        tickets,
-        invoices,
-        users: admin ? users : [],
-        clients: admin ? clients : [],
-      });
+    : filterActivityForRole(
+        buildHomeActivityFromCollections({
+          tickets,
+          invoices,
+          users: admin ? users : [],
+          clients: admin ? clients : [],
+        }),
+        admin
+      );
 
-  const rawWidgets = widgetsBlock(source);
+  const rawWidgets = filterWidgetsForRole(widgetsBlock(source), admin);
   const rawSummary = summaryBlock(source);
 
   const derivedSummary = buildHomeDerivedSummary({
@@ -2019,7 +2116,9 @@ export function normalizeHomeDashboard(payload = null) {
   });
 
   const summary = normalizeHomeSummary(rawSummary, {}, derivedSummary, { admin });
-  const widgets = rawWidgets.length ? rawWidgets : buildHomeWidgetsFromSummary(summary, { admin });
+  const widgets = rawWidgets.length
+    ? rawWidgets
+    : buildHomeWidgetsFromSummary(summary, { admin });
 
   const updatedAt = first(
     raw.updatedAt,
@@ -2189,7 +2288,6 @@ export function paginateHomeItems(
     items: pageItems,
     pageItems,
     rows: pageItems,
-    data: pageItems,
 
     page: currentPage,
     currentPage,
@@ -2208,6 +2306,8 @@ export function paginateHomeItems(
 
     from: total ? start + 1 : 0,
     to: Math.min(start + size, total),
+    rangeStart: total ? start + 1 : 0,
+    rangeEnd: Math.min(start + size, total),
   };
 }
 
@@ -2237,7 +2337,6 @@ export function findHomeInvoiceById(items = [], invoiceId = "") {
         item.invoiceId,
         item.facturaId,
         item.id,
-        item._id,
         item.numeroFacturaLegal,
         item.numeroFactura,
         item.invoiceNumber,
@@ -2307,7 +2406,7 @@ export function buildHomeTemplatePayload(input = {}) {
     ? normalizeHomeClients(first(source.clients, source.clientes, source.customers, []))
     : dashboard.clients;
 
-  const activity = source.activity || source.recent || source.recentActivity
+  const rawActivity = source.activity || source.recent || source.recentActivity
     ? normalizeHomeActivityList(first(source.activity, source.recent, source.recentActivity, []))
     : dashboard.activity.length
       ? dashboard.activity
@@ -2346,9 +2445,14 @@ export function buildHomeTemplatePayload(input = {}) {
     }
   );
 
-  const widgets = dashboard.widgets?.length
-    ? dashboard.widgets
-    : buildHomeWidgetsFromSummary(summary, { admin: dashboard.admin });
+  const widgets = filterWidgetsForRole(
+    dashboard.widgets?.length
+      ? dashboard.widgets
+      : buildHomeWidgetsFromSummary(summary, { admin: dashboard.admin }),
+    dashboard.admin
+  );
+
+  const activity = filterActivityForRole(rawActivity, dashboard.admin);
 
   const finalDashboard = normalizeHomeDashboard({
     ...dashboard,
@@ -2379,19 +2483,19 @@ export function buildHomeTemplatePayload(input = {}) {
 
     dashboard: finalDashboard,
 
-    summary,
-    stats: summary,
-    metrics: summary,
-    totals: summary,
-    counts: summary,
+    summary: finalDashboard.summary,
+    stats: finalDashboard.summary,
+    metrics: finalDashboard.summary,
+    totals: finalDashboard.summary,
+    counts: finalDashboard.summary,
 
-    widgets,
+    widgets: finalDashboard.widgets,
 
-    tickets,
-    incidencias: tickets,
+    tickets: finalDashboard.tickets,
+    incidencias: finalDashboard.incidencias,
 
-    invoices,
-    facturas: invoices,
+    invoices: finalDashboard.invoices,
+    facturas: finalDashboard.facturas,
 
     users: finalDashboard.users,
     usuarios: finalDashboard.usuarios,
@@ -2399,10 +2503,10 @@ export function buildHomeTemplatePayload(input = {}) {
     clients: finalDashboard.clients,
     clientes: finalDashboard.clientes,
 
-    activity,
-    activities: activity,
-    recent: activity,
-    recentActivity: activity,
+    activity: finalDashboard.activity,
+    activities: finalDashboard.activity,
+    recent: finalDashboard.activity,
+    recentActivity: finalDashboard.activity,
 
     page: pagination.page,
     pageSize: pagination.pageSize,
@@ -2410,8 +2514,8 @@ export function buildHomeTemplatePayload(input = {}) {
     pagination,
     pageItems: pagination.items,
 
-    totalCount: summary.totalTickets,
-    remoteCount: summary.totalTickets,
+    totalCount: finalDashboard.summary.totalTickets,
+    remoteCount: finalDashboard.summary.totalTickets,
 
     lastUpdatedAt: first(
       source.lastUpdatedAt,

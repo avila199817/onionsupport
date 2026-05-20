@@ -23,7 +23,6 @@
    - Sin globals window.
    - Sin índices paralelos.
    - Sin historial interno.
-   - Sin magia negra.
 ========================================================= */
 
 import {
@@ -42,30 +41,38 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_STORE_VERSION = "home.store.v4";
+export const HOME_STORE_VERSION = "home.store.v5";
 export const HOME_STORE_SOURCE = "views.home.store";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 5;
-
-const ADMIN_ACTIVITY_TYPES = new Set([
-  "client",
-  "cliente",
-  "customer",
-  "user",
-  "usuario",
-  "member",
-]);
 
 const RAW_KEYS = new Set([
   "raw",
   "response",
   "payload",
   "data",
+  "body",
+]);
+
+const COSMOS_META_KEYS = new Set([
+  "_id",
+  "_rid",
+  "_self",
+  "_etag",
+  "_attachments",
+  "_ts",
+  "_lsn",
+  "_metadata",
 ]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni/i;
+
+const EMAIL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
+
+const ADMIN_ENTITY_RE =
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
 
 /* =========================================================
    SAFE HELPERS
@@ -181,26 +188,14 @@ function nowIso() {
   }
 }
 
-function clone(value, fallback = null) {
-  try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
-  } catch {
-    // fallback abajo
-  }
-
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch {
-    return fallback;
-  }
-}
-
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(EMAIL_RE, "");
 }
 
 function normalizeText(value = "") {
@@ -218,14 +213,16 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function normalizeRole(value = "") {
+function normalizeRole(value = "", fallback = "user") {
   if (Array.isArray(value)) {
-    const roles = value.map(normalizeRole).filter(Boolean);
+    const roles = value
+      .map((item) => normalizeRole(item, ""))
+      .filter(Boolean);
 
     if (roles.includes("admin")) return "admin";
     if (roles.includes("user")) return "user";
 
-    return "";
+    return fallback;
   }
 
   const role = String(value || "").toLowerCase();
@@ -233,7 +230,7 @@ function normalizeRole(value = "") {
   if (role === "admin") return "admin";
   if (role === "user") return "user";
 
-  return "user";
+  return fallback;
 }
 
 function isAdminRole(value = "") {
@@ -244,23 +241,9 @@ function isSensitiveKey(key = "") {
   return SENSITIVE_KEY_RE.test(String(key || ""));
 }
 
-function stripUnsafeObject(value = {}) {
-  if (!isObject(value)) return {};
-
-  const output = {};
-
-  for (const [key, item] of Object.entries(value)) {
-    if (RAW_KEYS.has(key)) continue;
-    if (isSensitiveKey(key)) continue;
-
-    output[key] = item;
-  }
-
-  return output;
-}
-
-function sanitizeSnapshotValue(value, keyHint = "") {
+function sanitizeStoreValue(value, keyHint = "") {
   if (RAW_KEYS.has(keyHint)) return undefined;
+  if (COSMOS_META_KEYS.has(keyHint)) return undefined;
   if (isSensitiveKey(keyHint)) return undefined;
 
   if (typeof value === "string") {
@@ -269,7 +252,7 @@ function sanitizeSnapshotValue(value, keyHint = "") {
 
   if (Array.isArray(value)) {
     return value
-      .map((item) => sanitizeSnapshotValue(item))
+      .map((item) => sanitizeStoreValue(item))
       .filter((item) => item !== undefined);
   }
 
@@ -278,9 +261,10 @@ function sanitizeSnapshotValue(value, keyHint = "") {
 
     for (const [key, item] of Object.entries(value)) {
       if (RAW_KEYS.has(key)) continue;
+      if (COSMOS_META_KEYS.has(key)) continue;
       if (isSensitiveKey(key)) continue;
 
-      const clean = sanitizeSnapshotValue(item, key);
+      const clean = sanitizeStoreValue(item, key);
 
       if (clean !== undefined) {
         output[key] = clean;
@@ -291,6 +275,27 @@ function sanitizeSnapshotValue(value, keyHint = "") {
   }
 
   return value;
+}
+
+function sanitizeStoreObject(value = {}) {
+  return safeObject(sanitizeStoreValue(value), {});
+}
+
+function sanitizeStoreList(items = []) {
+  return safeArray(items)
+    .map((item) => sanitizeStoreObject(item))
+    .filter(hasKeys);
+}
+
+function safePublicId(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) return "";
+  if (/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i.test(text)) return "";
+  if (/[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(text)) return "";
+  if (/Bearer\s+/i.test(text)) return "";
+
+  return redact(text);
 }
 
 function normalizeError(error = null) {
@@ -345,7 +350,7 @@ function uniqueBy(items = [], picker = (item) => item) {
   const output = [];
 
   for (const item of safeArray(items)) {
-    const raw = safeText(picker(item), "");
+    const raw = safePublicId(picker(item));
     const key = raw ? normalizeKey(raw) : "";
 
     if (!key) {
@@ -363,7 +368,7 @@ function uniqueBy(items = [], picker = (item) => item) {
 }
 
 /* =========================================================
-   ROLE HELPERS
+   ROLE / ADMIN FILTERS
 ========================================================= */
 
 function roleFromSource(source = {}, fallback = "user") {
@@ -372,27 +377,50 @@ function roleFromSource(source = {}, fallback = "user") {
   const dashboard = safeObject(raw.dashboard);
   const dashboardMeta = safeObject(dashboard.meta);
 
-  return normalizeRole(
+  const role = normalizeRole(
     first(
       raw.role,
+      raw.rol,
+      raw.roles,
+
       meta.role,
+      meta.rol,
+      meta.roles,
+
       dashboard.role,
+      dashboard.rol,
+      dashboard.roles,
+
       dashboardMeta.role,
+      dashboardMeta.rol,
+      dashboardMeta.roles,
 
-      raw.admin === true ? "admin" : "",
-      meta.admin === true ? "admin" : "",
-      dashboard.admin === true ? "admin" : "",
-      dashboardMeta.admin === true ? "admin" : "",
-
-      raw.admin === false ? "user" : "",
-      meta.admin === false ? "user" : "",
-      dashboard.admin === false ? "user" : "",
-      dashboardMeta.admin === false ? "user" : "",
-
-      fallback,
-      "user"
-    )
+      ""
+    ),
+    ""
   );
+
+  if (role) return role;
+
+  if (
+    raw.admin === true ||
+    meta.admin === true ||
+    dashboard.admin === true ||
+    dashboardMeta.admin === true
+  ) {
+    return "admin";
+  }
+
+  if (
+    raw.admin === false ||
+    meta.admin === false ||
+    dashboard.admin === false ||
+    dashboardMeta.admin === false
+  ) {
+    return "user";
+  }
+
+  return normalizeRole(fallback, "user");
 }
 
 function currentRole() {
@@ -410,9 +438,35 @@ function currentIsAdmin() {
   return isAdminRole(currentRole());
 }
 
+function isAdminEntityValue(value = "") {
+  return ADMIN_ENTITY_RE.test(String(value || "").toLowerCase());
+}
+
 function isAdminOnlyActivity(item = {}) {
-  const key = normalizeKey(first(item.type, item.kind, item.category, ""));
-  return ADMIN_ACTIVITY_TYPES.has(key);
+  const raw = safeObject(item);
+
+  const identity = safeText(
+    [
+      raw.type,
+      raw.kind,
+      raw.category,
+      raw.entity,
+      raw.resource,
+      raw.collection,
+      raw.targetType,
+      raw.meta?.type,
+      raw.meta?.entity,
+      raw.route,
+      raw.href,
+      raw.link,
+      raw.to,
+    ]
+      .filter(Boolean)
+      .join(" "),
+    ""
+  );
+
+  return isAdminEntityValue(identity);
 }
 
 function filterActivityForRole(items = [], admin = false) {
@@ -423,7 +477,7 @@ function filterActivityForRole(items = [], admin = false) {
 function isAdminOnlyWidget(item = {}) {
   const raw = safeObject(item);
 
-  const key = normalizeKey(
+  const identity = safeText(
     [
       raw.widgetId,
       raw.widgetKey,
@@ -437,14 +491,17 @@ function isAdminOnlyWidget(item = {}) {
       raw.category,
       raw.title,
       raw.name,
+      raw.route,
+      raw.href,
+      raw.link,
+      raw.to,
     ]
       .filter(Boolean)
-      .join(" ")
+      .join(" "),
+    ""
   );
 
-  return ["users", "usuarios", "clientes", "clients", "customers"].some((blocked) =>
-    key.includes(blocked)
-  );
+  return isAdminEntityValue(identity);
 }
 
 function filterWidgetsForRole(items = [], admin = false) {
@@ -453,9 +510,7 @@ function filterWidgetsForRole(items = [], admin = false) {
 }
 
 function sanitizeSummaryForRole(summary = {}, admin = false) {
-  const output = {
-    ...safeObject(summary),
-  };
+  const output = sanitizeStoreObject(summary);
 
   if (!admin) {
     output.usersCount = 0;
@@ -491,7 +546,7 @@ function sanitizeSummaryForRole(summary = {}, admin = false) {
 function widgetId(item = {}) {
   const raw = safeObject(item);
 
-  return safeText(
+  return safePublicId(
     first(
       getHomeWidgetId?.(raw),
       raw.widgetId,
@@ -502,25 +557,24 @@ function widgetId(item = {}) {
       raw.code,
       raw.title,
       raw.name
-    ),
-    ""
+    )
   );
 }
 
 function ticketId(item = {}) {
-  return safeText(getHomeTicketId?.(item), "");
+  return safePublicId(getHomeTicketId?.(item));
 }
 
 function invoiceId(item = {}) {
-  return safeText(getHomeInvoiceId?.(item), "");
+  return safePublicId(getHomeInvoiceId?.(item));
 }
 
 function userId(item = {}) {
-  return safeText(getHomeUserId?.(item), "");
+  return safePublicId(getHomeUserId?.(item));
 }
 
 function clientId(item = {}) {
-  return safeText(getHomeClientId?.(item), "");
+  return safePublicId(getHomeClientId?.(item));
 }
 
 /* =========================================================
@@ -528,7 +582,7 @@ function clientId(item = {}) {
 ========================================================= */
 
 export function createInitialHomeStore(seed = {}) {
-  const raw = stripUnsafeObject(safeObject(seed));
+  const raw = sanitizeStoreObject(seed);
   const role = roleFromSource(raw, "user");
   const admin = isAdminRole(role);
 
@@ -551,10 +605,10 @@ export function createInitialHomeStore(seed = {}) {
     lastSyncAt: "",
     updatedAt: "",
 
-    dashboard: stripUnsafeObject(safeObject(raw.dashboard)),
+    dashboard: sanitizeStoreObject(raw.dashboard),
 
     summary: sanitizeSummaryForRole(
-      safeObject(first(raw.summary, raw.stats, raw.metrics, raw.totals, raw.counts, {})),
+      first(raw.summary, raw.stats, raw.metrics, raw.totals, raw.counts, {}),
       admin
     ),
     stats: {},
@@ -616,12 +670,12 @@ export const homeStore = createInitialHomeStore();
 ========================================================= */
 
 function normalizeDashboard(input = {}, options = {}) {
-  const raw = stripUnsafeObject(safeObject(input));
+  const raw = sanitizeStoreObject(input);
   const role = normalizeRole(options.role || roleFromSource(raw, currentRole()));
   const admin = isAdminRole(role);
 
   try {
-    return stripUnsafeObject(
+    return sanitizeStoreObject(
       normalizeHomeDashboard({
         ...raw,
         role,
@@ -634,7 +688,7 @@ function normalizeDashboard(input = {}, options = {}) {
       })
     );
   } catch {
-    return stripUnsafeObject({
+    return sanitizeStoreObject({
       ...safeObject(options.previousDashboard),
       ...raw,
       role,
@@ -689,25 +743,28 @@ function sanitizeModules(modules = {}) {
     };
   }
 
-  return output;
+  return sanitizeStoreObject(output);
+}
+
+function selectDashboardPayload(rawInput = {}) {
+  return safeObject(
+    first(
+      rawInput.dashboard,
+      rawInput.data?.dashboard,
+      rawInput.payload?.dashboard,
+      rawInput.result?.dashboard,
+      rawInput.response?.dashboard,
+      rawInput
+    )
+  );
 }
 
 function normalizedPayload(payload = {}, options = {}) {
   const rawInput = safeObject(payload);
-  const input = stripUnsafeObject(rawInput);
+  const input = sanitizeStoreObject(rawInput);
   const opts = safeObject(options);
 
-  const sourceDashboard = stripUnsafeObject(
-    safeObject(
-      first(
-        rawInput.dashboard,
-        rawInput.data?.dashboard,
-        rawInput.payload?.dashboard,
-        rawInput.result?.dashboard,
-        rawInput
-      )
-    )
-  );
+  const sourceDashboard = sanitizeStoreObject(selectDashboardPayload(rawInput));
 
   const role = roleFromSource(
     {
@@ -720,7 +777,7 @@ function normalizedPayload(payload = {}, options = {}) {
         admin: first(input.meta?.admin, rawInput.meta?.admin, sourceDashboard.meta?.admin, input.admin),
       },
     },
-    currentRole()
+    opts.role || currentRole()
   );
 
   const admin = isAdminRole(role);
@@ -731,20 +788,18 @@ function normalizedPayload(payload = {}, options = {}) {
   });
 
   const summary = sanitizeSummaryForRole(
-    safeObject(
-      first(
-        input.summary,
-        input.stats,
-        input.metrics,
-        input.totals,
-        input.counts,
-        dashboard.summary,
-        dashboard.stats,
-        dashboard.metrics,
-        dashboard.totals,
-        dashboard.counts,
-        {}
-      )
+    first(
+      input.summary,
+      input.stats,
+      input.metrics,
+      input.totals,
+      input.counts,
+      dashboard.summary,
+      dashboard.stats,
+      dashboard.metrics,
+      dashboard.totals,
+      dashboard.counts,
+      {}
     ),
     admin
   );
@@ -794,7 +849,14 @@ function normalizedPayload(payload = {}, options = {}) {
   const clients = admin
     ? uniqueBy(
         normalizeHomeClients(
-          firstArray(input.clients, input.clientes, input.customers, dashboard.clients, dashboard.clientes, dashboard.customers) || []
+          firstArray(
+            input.clients,
+            input.clientes,
+            input.customers,
+            dashboard.clients,
+            dashboard.clientes,
+            dashboard.customers
+          ) || []
         ),
         clientId
       )
@@ -867,7 +929,7 @@ function normalizedPayload(payload = {}, options = {}) {
     lastSyncAt
   );
 
-  return {
+  return sanitizeStoreObject({
     version: HOME_STORE_VERSION,
     source: HOME_STORE_SOURCE,
 
@@ -938,7 +1000,7 @@ function normalizedPayload(payload = {}, options = {}) {
     refreshing: false,
     error: null,
     errorMessage: "",
-  };
+  });
 }
 
 function preserveExisting(next = {}, options = {}) {
@@ -948,12 +1010,10 @@ function preserveExisting(next = {}, options = {}) {
   const sameRole = normalizeRole(homeStore.role) === role;
 
   if (opts.replace === true || opts.preserveExisting === false || !sameRole) {
-    return next;
+    return sanitizeStoreObject(next);
   }
 
-  const output = {
-    ...next,
-  };
+  const output = sanitizeStoreObject(next);
 
   for (const key of ["widgets", "tickets", "invoices", "activity"]) {
     if (!safeArray(output[key]).length && safeArray(homeStore[key]).length) {
@@ -999,7 +1059,7 @@ function preserveExisting(next = {}, options = {}) {
     ? Math.max(homeStore.clientsRemoteCount, output.clientsRemoteCount || 0, safeArray(output.clients).length)
     : 0;
 
-  return output;
+  return sanitizeStoreObject(output);
 }
 
 function syncAliases() {
@@ -1012,19 +1072,30 @@ function syncAliases() {
   homeStore.role = role;
   homeStore.admin = admin;
 
-  homeStore.dashboard = stripUnsafeObject(safeObject(homeStore.dashboard));
+  homeStore.dashboard = sanitizeStoreObject(homeStore.dashboard);
 
-  homeStore.widgets = filterWidgetsForRole(safeArray(homeStore.widgets), admin);
+  homeStore.widgets = filterWidgetsForRole(
+    uniqueBy(normalizeHomeWidgets(homeStore.widgets), widgetId),
+    admin
+  );
 
-  homeStore.tickets = safeArray(homeStore.tickets);
-  homeStore.invoices = safeArray(homeStore.invoices);
+  homeStore.tickets = uniqueBy(normalizeHomeTickets(homeStore.tickets), ticketId);
+  homeStore.invoices = uniqueBy(normalizeHomeInvoices(homeStore.invoices), invoiceId);
 
-  homeStore.users = admin ? safeArray(homeStore.users) : [];
-  homeStore.clients = admin ? safeArray(homeStore.clients) : [];
+  homeStore.users = admin
+    ? uniqueBy(normalizeHomeUsers(homeStore.users), userId)
+    : [];
 
-  homeStore.activity = filterActivityForRole(safeArray(homeStore.activity), admin);
+  homeStore.clients = admin
+    ? uniqueBy(normalizeHomeClients(homeStore.clients), clientId)
+    : [];
 
-  homeStore.summary = sanitizeSummaryForRole(safeObject(homeStore.summary), admin);
+  homeStore.activity = filterActivityForRole(
+    normalizeHomeActivityList(homeStore.activity),
+    admin
+  );
+
+  homeStore.summary = sanitizeSummaryForRole(homeStore.summary, admin);
 
   homeStore.stats = homeStore.summary;
   homeStore.metrics = homeStore.summary;
@@ -1042,8 +1113,18 @@ function syncAliases() {
   homeStore.clientes = admin ? homeStore.clients : [];
   homeStore.customers = admin ? homeStore.clients : [];
 
-  homeStore.usersRemoteCount = admin ? Math.max(homeStore.users.length, safeNumber(homeStore.usersRemoteCount, 0)) : 0;
-  homeStore.clientsRemoteCount = admin ? Math.max(homeStore.clients.length, safeNumber(homeStore.clientsRemoteCount, 0)) : 0;
+  homeStore.ticketsRemoteCount = Math.max(homeStore.tickets.length, safeNumber(homeStore.ticketsRemoteCount, 0));
+  homeStore.remoteCount = Math.max(homeStore.ticketsRemoteCount, safeNumber(homeStore.remoteCount, 0));
+
+  homeStore.invoicesRemoteCount = Math.max(homeStore.invoices.length, safeNumber(homeStore.invoicesRemoteCount, 0));
+
+  homeStore.usersRemoteCount = admin
+    ? Math.max(homeStore.users.length, safeNumber(homeStore.usersRemoteCount, 0))
+    : 0;
+
+  homeStore.clientsRemoteCount = admin
+    ? Math.max(homeStore.clients.length, safeNumber(homeStore.clientsRemoteCount, 0))
+    : 0;
 
   homeStore.activities = homeStore.activity;
   homeStore.recent = homeStore.activity;
@@ -1054,7 +1135,10 @@ function syncAliases() {
   homeStore.error = homeStore.error ? normalizeError(homeStore.error) : null;
   homeStore.errorMessage = redact(safeText(homeStore.errorMessage, ""));
 
-  homeStore.dashboard = {
+  homeStore.page = Math.max(1, safeNumber(homeStore.page, DEFAULT_PAGE));
+  homeStore.pageSize = Math.max(1, safeNumber(homeStore.pageSize, DEFAULT_PAGE_SIZE));
+
+  homeStore.dashboard = sanitizeStoreObject({
     ...homeStore.dashboard,
 
     role,
@@ -1093,16 +1177,22 @@ function syncAliases() {
     incidenciasTotal: homeStore.ticketsRemoteCount,
     totalTickets: homeStore.ticketsRemoteCount,
     totalIncidencias: homeStore.ticketsRemoteCount,
+    ticketsCount: homeStore.ticketsRemoteCount,
+    incidenciasCount: homeStore.ticketsRemoteCount,
 
     invoicesTotal: homeStore.invoicesRemoteCount,
     facturasTotal: homeStore.invoicesRemoteCount,
     totalInvoices: homeStore.invoicesRemoteCount,
     totalFacturas: homeStore.invoicesRemoteCount,
+    invoicesCount: homeStore.invoicesRemoteCount,
+    facturasCount: homeStore.invoicesRemoteCount,
 
     usersTotal: admin ? homeStore.usersRemoteCount : 0,
     usuariosTotal: admin ? homeStore.usersRemoteCount : 0,
     totalUsers: admin ? homeStore.usersRemoteCount : 0,
     totalUsuarios: admin ? homeStore.usersRemoteCount : 0,
+    usersCount: admin ? homeStore.usersRemoteCount : 0,
+    usuariosCount: admin ? homeStore.usersRemoteCount : 0,
 
     clientsTotal: admin ? homeStore.clientsRemoteCount : 0,
     clientesTotal: admin ? homeStore.clientsRemoteCount : 0,
@@ -1110,13 +1200,16 @@ function syncAliases() {
     totalClients: admin ? homeStore.clientsRemoteCount : 0,
     totalClientes: admin ? homeStore.clientsRemoteCount : 0,
     totalCustomers: admin ? homeStore.clientsRemoteCount : 0,
+    clientsCount: admin ? homeStore.clientsRemoteCount : 0,
+    clientesCount: admin ? homeStore.clientsRemoteCount : 0,
+    customersCount: admin ? homeStore.clientsRemoteCount : 0,
 
     requestId: homeStore.requestId,
     updatedAt: homeStore.updatedAt || homeStore.lastSyncAt,
     lastSyncAt: homeStore.lastSyncAt,
 
     modules: homeStore.modules,
-    partial: homeStore.partial,
+    partial: Boolean(homeStore.partial),
     errors: homeStore.errors,
 
     meta: {
@@ -1141,15 +1234,13 @@ function syncAliases() {
 
       activityCount: homeStore.activity.length,
     },
-  };
-
-  homeStore.dashboard = stripUnsafeObject(homeStore.dashboard);
+  });
 
   return homeStore;
 }
 
 function assignStore(patch = {}) {
-  Object.assign(homeStore, stripUnsafeObject(safeObject(patch)));
+  Object.assign(homeStore, sanitizeStoreObject(patch));
   syncAliases();
 
   return homeStore;
@@ -1181,7 +1272,7 @@ export function mergeHomeStore(payload = {}, options = {}) {
 
 export function patchHomeStore(patch = {}, options = {}) {
   const opts = safeObject(options);
-  const data = stripUnsafeObject(safeObject(patch));
+  const data = sanitizeStoreObject(patch);
 
   if (opts.normalize === true || data.dashboard) {
     return replaceHomeStore(data, opts);
@@ -1234,12 +1325,13 @@ export function setHomeWidgetsStore(widgets = [], options = {}) {
 
 export function setHomeTicketsStore(tickets = [], options = {}) {
   const rows = uniqueBy(normalizeHomeTickets(tickets), ticketId);
+  const remoteCount = Math.max(rows.length, safeNumber(options.remoteCount, homeStore.ticketsRemoteCount));
 
   return patchHomeStore(
     {
       tickets: rows,
-      ticketsRemoteCount: Math.max(rows.length, safeNumber(options.remoteCount, homeStore.ticketsRemoteCount)),
-      remoteCount: Math.max(rows.length, safeNumber(options.remoteCount, homeStore.remoteCount)),
+      ticketsRemoteCount: remoteCount,
+      remoteCount,
     },
     options
   ).tickets;
@@ -1320,7 +1412,7 @@ export function setHomeActivityStore(activity = [], options = {}) {
 }
 
 export function setHomeCollectionsStore(collections = {}, options = {}) {
-  const input = stripUnsafeObject(safeObject(collections));
+  const input = sanitizeStoreObject(collections);
   const role = roleFromSource(input, currentRole());
   const admin = isAdminRole(role);
 
@@ -1330,11 +1422,11 @@ export function setHomeCollectionsStore(collections = {}, options = {}) {
       admin,
 
       widgets: filterWidgetsForRole(firstArray(input.widgets, input.cards, input.kpis, input.blocks) || [], admin),
-      tickets: firstArray(input.tickets, input.incidencias),
-      invoices: firstArray(input.invoices, input.facturas),
+      tickets: firstArray(input.tickets, input.incidencias) || [],
+      invoices: firstArray(input.invoices, input.facturas) || [],
 
-      users: admin ? firstArray(input.users, input.usuarios) : [],
-      clients: admin ? firstArray(input.clients, input.clientes, input.customers) : [],
+      users: admin ? firstArray(input.users, input.usuarios) || [] : [],
+      clients: admin ? firstArray(input.clients, input.clientes, input.customers) || [] : [],
 
       activity: filterActivityForRole(firstArray(input.activity, input.activities, input.recent, input.recentActivity) || [], admin),
 
@@ -1375,13 +1467,14 @@ function widgetKeys(widget = {}) {
     raw.title,
     raw.name,
   ]
+    .map(safePublicId)
     .map(normalizeKey)
     .filter(Boolean);
 }
 
 export function upsertHomeWidgetStore(widget = {}) {
   const admin = currentIsAdmin();
-  const item = normalizeHomeWidgets([widget])[0] || safeObject(widget);
+  const item = normalizeHomeWidgets([widget])[0] || sanitizeStoreObject(widget);
 
   if (!hasKeys(item)) return null;
   if (!admin && isAdminOnlyWidget(item)) return null;
@@ -1395,10 +1488,10 @@ export function upsertHomeWidgetStore(widget = {}) {
   });
 
   if (index >= 0) {
-    rows[index] = {
+    rows[index] = sanitizeStoreObject({
       ...safeObject(rows[index]),
       ...item,
-    };
+    });
   } else {
     rows.push(item);
   }
@@ -1411,7 +1504,7 @@ export function upsertHomeWidgetStore(widget = {}) {
 }
 
 export function removeHomeWidgetStore(widgetId = "") {
-  const id = normalizeKey(widgetId);
+  const id = normalizeKey(safePublicId(widgetId));
 
   if (!id) return false;
 
@@ -1488,7 +1581,7 @@ export function setHomeStoreLastSyncAt(value = null) {
 
 export function setHomeStoreHealth(health = null) {
   return patchHomeStore({
-    health: health === null ? null : stripUnsafeObject(safeObject(health, health)),
+    health: health === null ? null : sanitizeStoreObject(health),
   });
 }
 
@@ -1583,7 +1676,7 @@ export function getHomeRecentStore() {
 }
 
 function findById(items = [], id = "", picker = null) {
-  const target = normalizeKey(id);
+  const target = normalizeKey(safePublicId(id));
 
   if (!target) return null;
 
@@ -1592,7 +1685,6 @@ function findById(items = [], id = "", picker = null) {
       const keys = [
         picker ? picker(item) : "",
         item?.id,
-        item?._id,
         item?.key,
         item?.code,
         item?.slug,
@@ -1611,6 +1703,7 @@ function findById(items = [], id = "", picker = null) {
         item?.title,
         item?.name,
       ]
+        .map(safePublicId)
         .map(normalizeKey)
         .filter(Boolean);
 
@@ -1647,24 +1740,23 @@ function collectionEnvelope(items = [], total = null) {
   const rows = safeArray(items);
   const remote = Math.max(rows.length, safeNumber(total, rows.length));
 
-  return {
+  return sanitizeStoreObject({
     items: rows,
     rows,
-    data: rows,
     results: rows,
     total: remote,
     count: rows.length,
     totalCount: remote,
     remoteCount: remote,
     visibleCount: rows.length,
-  };
+  });
 }
 
 export function getHomeCollectionsEnvelope() {
   const store = getHomeStore();
   const admin = currentIsAdmin();
 
-  return {
+  return sanitizeStoreObject({
     widgets: collectionEnvelope(store.widgets, store.widgets.length),
     cards: collectionEnvelope(store.widgets, store.widgets.length),
     kpis: collectionEnvelope(store.widgets, store.widgets.length),
@@ -1687,7 +1779,7 @@ export function getHomeCollectionsEnvelope() {
     activities: collectionEnvelope(store.activity, store.activity.length),
     recent: collectionEnvelope(store.activity, store.activity.length),
     recentActivity: collectionEnvelope(store.activity, store.activity.length),
-  };
+  });
 }
 
 export function getHomeStoreSnapshot(options = {}) {
@@ -1759,31 +1851,33 @@ export function getHomeStoreSnapshot(options = {}) {
       userNeverKeepsAdminUsersClients: true,
 
       noRawBackendPayload: true,
+      stripsCosmosMetadata: true,
       noEmailAsIdentity: true,
 
+      noDataAliasInSnapshot: true,
       snapshotRedacted: true,
     },
   };
 
   if (includeCollections) {
-    snapshot.dashboard = sanitizeSnapshotValue(store.dashboard);
-    snapshot.summary = sanitizeSnapshotValue(store.summary);
+    snapshot.dashboard = sanitizeStoreValue(store.dashboard);
+    snapshot.summary = sanitizeStoreValue(store.summary);
 
-    snapshot.widgets = sanitizeSnapshotValue(store.widgets);
-    snapshot.tickets = sanitizeSnapshotValue(store.tickets);
-    snapshot.invoices = sanitizeSnapshotValue(store.invoices);
+    snapshot.widgets = sanitizeStoreValue(store.widgets);
+    snapshot.tickets = sanitizeStoreValue(store.tickets);
+    snapshot.invoices = sanitizeStoreValue(store.invoices);
 
-    snapshot.users = admin ? sanitizeSnapshotValue(store.users) : [];
-    snapshot.clients = admin ? sanitizeSnapshotValue(store.clients) : [];
+    snapshot.users = admin ? sanitizeStoreValue(store.users) : [];
+    snapshot.clients = admin ? sanitizeStoreValue(store.clients) : [];
 
-    snapshot.activity = sanitizeSnapshotValue(store.activity);
+    snapshot.activity = sanitizeStoreValue(store.activity);
 
-    snapshot.modules = sanitizeSnapshotValue(store.modules);
-    snapshot.errors = sanitizeSnapshotValue(store.errors);
-    snapshot.collections = sanitizeSnapshotValue(getHomeCollectionsEnvelope());
+    snapshot.modules = sanitizeStoreValue(store.modules);
+    snapshot.errors = sanitizeStoreValue(store.errors);
+    snapshot.collections = sanitizeStoreValue(getHomeCollectionsEnvelope());
   }
 
-  return snapshot;
+  return sanitizeStoreObject(snapshot);
 }
 
 /* =========================================================
@@ -1795,6 +1889,10 @@ export function subscribeHomeStore() {
 }
 
 export function exposeHomeStoreBridge() {
+  /*
+    Compat histórico.
+    No publica globals ni toca window.
+  */
   return HomeStore;
 }
 

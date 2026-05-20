@@ -5,7 +5,9 @@
    Responsabilidad:
    - Helpers DOM mínimos del sidebar.
    - Resolver mount/root real.
+   - Priorizar root dentro de #sidebar-mount.
    - Montar/reemplazar sidebar dentro de #sidebar-mount.
+   - Eliminar roots duplicados/stale tras cada montaje.
    - Ocultar/limpiar sidebar.
    - Cachear referencias básicas en AppCore.dom.
    - Cachear referencias estructurales del dropdown.
@@ -28,7 +30,7 @@ import {
   SIDEBAR_SELECTORS,
 } from "./constants.js";
 
-export const SIDEBAR_DOM_VERSION = "sidebar.dom.v4";
+export const SIDEBAR_DOM_VERSION = "sidebar.dom.v5";
 
 /* =========================================================
    BASICS
@@ -277,27 +279,39 @@ export function getSidebarMount() {
   );
 }
 
+export function getSidebarRootFromMount(mount = null) {
+  if (!isElement(mount)) return null;
+  if (isSidebarRoot(mount)) return mount;
+
+  return (
+    query(SIDEBAR_SELECTORS.root, mount) ||
+    query("[data-sidebar-root]", mount) ||
+    null
+  );
+}
+
 export function getSidebarRoot(scope = null) {
   if (!isBrowser()) return null;
 
-  const scopedRoot = isElement(scope)
-    ? query(SIDEBAR_SELECTORS.root, scope)
-    : null;
+  if (isElement(scope)) {
+    return (
+      getSidebarRootFromMount(scope) ||
+      query(SIDEBAR_SELECTORS.root, scope) ||
+      query("[data-sidebar-root]", scope) ||
+      null
+    );
+  }
+
+  const mount = getSidebarMount();
+  const mountedRoot = getSidebarRootFromMount(mount);
 
   return (
-    scopedRoot ||
+    mountedRoot ||
     byId(SIDEBAR_ROOT_ID) ||
     query(SIDEBAR_SELECTORS.root) ||
     query("[data-sidebar-root]") ||
     null
   );
-}
-
-export function getSidebarRootFromMount(mount = null) {
-  if (!isElement(mount)) return null;
-  if (isSidebarRoot(mount)) return mount;
-
-  return query(SIDEBAR_SELECTORS.root, mount);
 }
 
 export function getAllSidebarRoots() {
@@ -337,7 +351,7 @@ function prepareSidebarRoot(root = null) {
   if (!isElement(root)) return null;
 
   try {
-    root.id = root.id || SIDEBAR_ROOT_ID;
+    root.id = SIDEBAR_ROOT_ID;
     root.dataset.sidebarRoot = "true";
 
     if (SIDEBAR_CLASSES.root) {
@@ -368,7 +382,10 @@ export function mountSidebarRoot(nextRoot = null) {
   if (!root) return null;
 
   try {
+    removeDuplicateSidebarRoots(root);
+
     mount.replaceChildren(root);
+
     removeDuplicateSidebarRoots(root);
 
     return root;
@@ -676,6 +693,9 @@ export function getSidebarDomSnapshot(root = getSidebarRoot()) {
     policy: {
       domOnly: true,
       realMountOnly: true,
+      prioritizesMountRoot: true,
+      replacesMountChildren: true,
+      removesDuplicateRoots: true,
 
       noAuth: true,
       noRouter: true,

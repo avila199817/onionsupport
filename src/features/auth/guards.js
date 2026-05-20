@@ -8,6 +8,7 @@
    - Autenticado = token usable + user usable.
    - Roles únicos exactos: admin / user.
    - Entender /@{user.slug} como Home canónica /.
+   - Validar que /@{slug} pertenece al usuario actual.
    - Sin fetch.
    - Sin refresh.
    - Sin restore.
@@ -21,20 +22,19 @@
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
+import {
+  PUBLIC_ROUTES,
+  ROUTES,
+  USER_HOME_PREFIX,
+} from "../../core/config.js";
+
 import * as Session from "./session.js";
 
-export const GUARDS_VERSION = "auth.guards.v2";
+export const GUARDS_VERSION = "auth.guards.v3";
 
-const LOGIN_PATH = "/login";
-const HOME_PATH = "/";
-const USER_HOME_PREFIX = "/@";
-
-const PUBLIC_ROUTES = Object.freeze([
-  "/login",
-  "/password-request",
-  "/password-reset",
-  "/activate-account",
-]);
+const LOGIN_PATH = ROUTES.login;
+const HOME_PATH = ROUTES.home || "/";
+const PUBLIC_AUTH_ROUTES = Object.freeze([...PUBLIC_ROUTES]);
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
 
@@ -46,7 +46,7 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFn(value) {
+function isFunction(value) {
   return typeof value === "function";
 }
 
@@ -54,7 +54,7 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function text(value = "", fallback = "") {
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
@@ -64,9 +64,8 @@ function unique(values = []) {
 }
 
 function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+  return cleanText(value, "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -86,7 +85,7 @@ function normalizeRole(value = "") {
     return "";
   }
 
-  const role = String(value || "").toLowerCase();
+  const role = String(value || "").trim().toLowerCase();
 
   return VALID_ROLES.includes(role) ? role : "";
 }
@@ -117,7 +116,7 @@ function routeRequestedRoles(route = {}) {
 ========================================================= */
 
 function normalizeHashPath(path = HOME_PATH) {
-  const value = text(path, HOME_PATH);
+  const value = cleanText(path, HOME_PATH);
 
   if (value.startsWith("#!")) {
     return value.replace(/^#!\/?/, "/") || HOME_PATH;
@@ -130,10 +129,10 @@ function normalizeHashPath(path = HOME_PATH) {
   return value;
 }
 
-function normalizePublicPath(path = HOME_PATH) {
+export function normalizePublicPath(path = HOME_PATH) {
   let value = normalizeHashPath(path);
 
-  if (value.startsWith("//")) {
+  if (!value || value.startsWith("//")) {
     return HOME_PATH;
   }
 
@@ -161,7 +160,9 @@ function normalizePublicPath(path = HOME_PATH) {
     value = `/${value}`;
   }
 
-  value = value.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+  value = value
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
   if (value.length > 1) {
     value = value.replace(/\/+$/g, "") || HOME_PATH;
@@ -171,11 +172,12 @@ function normalizePublicPath(path = HOME_PATH) {
 }
 
 function normalizeUserSlug(value = "") {
-  const slug = text(value, "")
+  const slug = cleanText(value, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
-    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
     .toLowerCase();
 
   if (!slug) return "";
@@ -197,6 +199,16 @@ function extractUserHomeSlug(path = HOME_PATH) {
 
 export function isUserHomePath(path = HOME_PATH) {
   return Boolean(extractUserHomeSlug(path));
+}
+
+function isCurrentUserHomePath(path = HOME_PATH) {
+  const routeSlug = extractUserHomeSlug(path);
+
+  if (!routeSlug) return false;
+
+  const userSlug = getCurrentUserSlug();
+
+  return Boolean(userSlug && routeSlug === userSlug);
 }
 
 export function canonicalAuthPath(path = HOME_PATH) {
@@ -223,7 +235,7 @@ function currentPath() {
 
 export function syncAuthState(options = {}) {
   try {
-    if (isFn(Session.syncAuthState)) {
+    if (isFunction(Session.syncAuthState)) {
       Session.syncAuthState({
         source: options.source || "auth.guards",
       });
@@ -278,7 +290,7 @@ export function getCurrentUserHomePath() {
   try {
     const home = Session.getCurrentUserHomePath?.();
 
-    if (home && isUserHomePath(home)) return home;
+    if (home && isCurrentUserHomePath(home)) return home;
   } catch {
     // fallback abajo
   }
@@ -329,18 +341,6 @@ export function isCurrentUserAdmin() {
   return getCurrentRole() === "admin";
 }
 
-export function isCurrentUserSupport() {
-  return false;
-}
-
-export function isCurrentUserManager() {
-  return false;
-}
-
-export function isCurrentUserClient() {
-  return false;
-}
-
 export function hasRole(...roles) {
   if (!isAuthenticated()) return false;
   if (!roles.length) return true;
@@ -357,7 +357,13 @@ export function hasRole(...roles) {
 }
 
 export function requireRole(...roles) {
-  return hasRole(...roles);
+  if (hasRole(...roles)) return true;
+
+  const error = new Error("No tienes permisos para acceder a este recurso.");
+  error.code = "AUTH_FORBIDDEN";
+  error.status = 403;
+
+  throw error;
 }
 
 export function getAuthHeader() {
@@ -373,7 +379,7 @@ export function getAuthHeader() {
 ========================================================= */
 
 export function isPublicTechnicalPath(path = currentPath()) {
-  return PUBLIC_ROUTES.includes(canonicalAuthPath(path));
+  return PUBLIC_AUTH_ROUTES.includes(canonicalAuthPath(path));
 }
 
 export function isAuthRoute(path = currentPath()) {
@@ -381,15 +387,15 @@ export function isAuthRoute(path = currentPath()) {
 }
 
 export function isPasswordRequestRoute(path = currentPath()) {
-  return canonicalAuthPath(path) === "/password-request";
+  return canonicalAuthPath(path) === ROUTES.passwordRequest;
 }
 
 export function isPasswordResetRoute(path = currentPath()) {
-  return canonicalAuthPath(path) === "/password-reset";
+  return canonicalAuthPath(path) === ROUTES.passwordReset;
 }
 
 export function isActivationRoute(path = currentPath()) {
-  return canonicalAuthPath(path) === "/activate-account";
+  return canonicalAuthPath(path) === ROUTES.activateAccount;
 }
 
 /* =========================================================
@@ -397,42 +403,23 @@ export function isActivationRoute(path = currentPath()) {
 ========================================================= */
 
 export function guardAuthenticated(options = {}) {
-  const path = canonicalAuthPath(options.path || currentPath());
+  const path = normalizePublicPath(options.path || currentPath());
 
-  if (
-    options.allowPublicTechnicalRoutes !== false &&
-    isPublicTechnicalPath(path)
-  ) {
-    return true;
+  if (!isAuthenticated()) return false;
+
+  if (isUserHomePath(path) && !isCurrentUserHomePath(path)) {
+    return false;
   }
 
-  return isAuthenticated();
+  return true;
 }
 
-export function guardGuest(options = {}) {
-  const path = canonicalAuthPath(options.path || currentPath());
-
-  if (
-    options.allowPublicTechnicalRoutes !== false &&
-    isPublicTechnicalPath(path)
-  ) {
-    return !isAuthenticated();
-  }
-
+export function guardGuest() {
   return !isAuthenticated();
 }
 
 export function guardRole(roles = [], options = {}) {
-  const path = canonicalAuthPath(options.path || currentPath());
-
-  if (
-    options.allowPublicTechnicalRoutes !== false &&
-    isPublicTechnicalPath(path)
-  ) {
-    return true;
-  }
-
-  if (!isAuthenticated()) return false;
+  if (!guardAuthenticated(options)) return false;
 
   const requested = Array.isArray(roles) ? roles.flat(Infinity) : [roles];
   const required = normalizeRequiredRoles(requested);
@@ -447,39 +434,29 @@ export function guardAdmin(options = {}) {
   return guardRole(["admin"], options);
 }
 
-export function guardSupport() {
-  return false;
-}
-
-export function guardManager() {
-  return false;
-}
-
 export function canAccessRoute(route = {}) {
   const rawPath =
-    route.path ||
     route.publicPath ||
+    route.path ||
     route.canonicalPath ||
     currentPath();
 
-  const path = canonicalAuthPath(rawPath);
+  const publicPath = normalizePublicPath(rawPath);
+  const canonicalPath = canonicalAuthPath(publicPath);
+
+  if (route.guestOnly === true || route.publicOnly === true) {
+    return guardGuest();
+  }
 
   if (
-    route.allowPublicTechnicalRoutes !== false &&
-    isPublicTechnicalPath(path)
+    route.public === true ||
+    route.requiresAuth === false ||
+    isPublicTechnicalPath(canonicalPath)
   ) {
     return true;
   }
 
-  if (route.guestOnly === true || route.publicOnly === true) {
-    return !isAuthenticated();
-  }
-
-  if (route.public === true || route.requiresAuth === false) {
-    return true;
-  }
-
-  if (!isAuthenticated()) {
+  if (!guardAuthenticated({ path: publicPath })) {
     return false;
   }
 
@@ -511,9 +488,9 @@ function publicUser(user = null) {
 
 function extractMessage(error = null) {
   return (
-    text(error?.data?.message, "") ||
-    text(error?.response?.data?.message, "") ||
-    text(error?.message, "") ||
+    cleanText(error?.data?.message, "") ||
+    cleanText(error?.response?.data?.message, "") ||
+    cleanText(error?.message, "") ||
     String(error || "Error")
   );
 }
@@ -550,9 +527,6 @@ export function getAuthGuardsSnapshot() {
     currentRoles: getCurrentRoles(),
 
     isAdmin: isCurrentUserAdmin(),
-    isSupport: false,
-    isManager: false,
-    isClient: false,
 
     user: publicUser(user),
 
@@ -562,10 +536,11 @@ export function getAuthGuardsSnapshot() {
     path: redact(path),
     canonicalPath: canonicalAuthPath(path),
     isUserHomePath: isUserHomePath(path),
+    isCurrentUserHomePath: isCurrentUserHomePath(path),
     publicTechnical: isPublicTechnicalPath(path),
 
     loginPath: LOGIN_PATH,
-    publicRoutes: [...PUBLIC_ROUTES],
+    publicRoutes: [...PUBLIC_AUTH_ROUTES],
 
     policy: {
       ownFetch: false,
@@ -574,13 +549,19 @@ export function getAuthGuardsSnapshot() {
       ownStorage: false,
       ownToast: false,
       ownNavigation: false,
+
       roles: [...VALID_ROLES],
+
       userSlugHome: true,
       canonicalizesUserHome: true,
-      validatesRealUserSlug: false,
+      validatesCurrentUserSlug: true,
+
       noHomeAlias: true,
       no403Route: true,
       no2fa: true,
+      noMfa: true,
+      noOtp: true,
+      snapshotRedacted: true,
     },
   };
 }
@@ -604,9 +585,6 @@ export default {
   getCurrentRoles,
 
   isCurrentUserAdmin,
-  isCurrentUserSupport,
-  isCurrentUserManager,
-  isCurrentUserClient,
 
   hasRole,
   requireRole,
@@ -626,8 +604,6 @@ export default {
   guardRole,
   guardGuest,
   guardAdmin,
-  guardSupport,
-  guardManager,
 
   canAccessRoute,
 
@@ -635,8 +611,6 @@ export default {
   ensureAuthenticated: guardAuthenticated,
   requireGuest: guardGuest,
   requireAdmin: guardAdmin,
-  requireSupport: guardSupport,
-  requireManager: guardManager,
 
   can: hasRole,
   canAccess: canAccessRoute,

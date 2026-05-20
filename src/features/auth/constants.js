@@ -4,7 +4,7 @@
 
    Responsabilidad:
    - Contrato estático mínimo de Auth.
-   - Backend real bajo /api/auth.
+   - Backend real bajo /api/auth desde core/config.js.
    - /api/auth/me siempre privado.
    - Token param único: token.
    - Rutas públicas reales actuales:
@@ -23,13 +23,21 @@
    - Sin aliases legacy masivos.
 ========================================================= */
 
-export const AUTH_CONSTANTS_VERSION = "auth.constants.v2";
+import {
+  AUTH_ENDPOINTS as CORE_AUTH_ENDPOINTS,
+  PUBLIC_API_PATHS,
+  PRIVATE_API_PATHS,
+  PUBLIC_ROUTES,
+  ROUTES,
+  TOKEN_PARAM,
+  USER_HOME_PREFIX,
+} from "../../core/config.js";
+
+export const AUTH_CONSTANTS_VERSION = "auth.constants.v3";
 export const AUTH_MODULE_VERSION = AUTH_CONSTANTS_VERSION;
 
-const DEFAULT_ROUTE = "/";
+const DEFAULT_ROUTE = ROUTES.home || "/";
 const LOCAL_ORIGIN = "http://localhost";
-const TOKEN_PARAM = "token";
-const USER_HOME_PREFIX = "/@";
 
 function freeze(value) {
   try {
@@ -181,14 +189,6 @@ function splitPath(path = DEFAULT_ROUTE) {
   };
 }
 
-function joinPath(parts = {}) {
-  return [
-    normalizePathname(parts.pathname || DEFAULT_ROUTE),
-    normalizeSearch(parts.search || ""),
-    normalizeHash(parts.hash || ""),
-  ].join("");
-}
-
 function sameOriginUrlToPath(raw = "") {
   try {
     const url = new URL(raw, LOCAL_ORIGIN);
@@ -250,7 +250,7 @@ function endpointInList(path = "", list = []) {
 
   return list.some((item) => {
     const endpoint = normalizeEndpointPath(item);
-    return clean === endpoint || clean.startsWith(`${endpoint}/`);
+    return clean === endpoint;
   });
 }
 
@@ -302,14 +302,14 @@ export function canonicalAuthRoutePath(path = "") {
    API ENDPOINTS
 ========================================================= */
 
-export const LOGIN_ENDPOINT = "/api/auth/login";
-export const LOGOUT_ENDPOINT = "/api/auth/logout";
-export const ME_ENDPOINT = "/api/auth/me";
-export const REFRESH_ENDPOINT = "/api/auth/refresh";
+export const LOGIN_ENDPOINT = CORE_AUTH_ENDPOINTS.login;
+export const LOGOUT_ENDPOINT = CORE_AUTH_ENDPOINTS.logout;
+export const ME_ENDPOINT = CORE_AUTH_ENDPOINTS.me;
+export const REFRESH_ENDPOINT = CORE_AUTH_ENDPOINTS.refresh;
 
-export const ACTIVATE_ACCOUNT_ENDPOINT = "/api/auth/activate";
-export const REQUEST_RESET_ENDPOINT = "/api/auth/reset-password-request";
-export const CONFIRM_RESET_ENDPOINT = "/api/auth/reset-password-confirm";
+export const ACTIVATE_ACCOUNT_ENDPOINT = CORE_AUTH_ENDPOINTS.activate;
+export const REQUEST_RESET_ENDPOINT = CORE_AUTH_ENDPOINTS.requestPasswordReset;
+export const CONFIRM_RESET_ENDPOINT = CORE_AUTH_ENDPOINTS.confirmPasswordReset;
 
 export const AUTH_ENDPOINTS = freeze({
   login: LOGIN_ENDPOINT,
@@ -317,36 +317,16 @@ export const AUTH_ENDPOINTS = freeze({
   me: ME_ENDPOINT,
   refresh: REFRESH_ENDPOINT,
 
-  activateAccount: ACTIVATE_ACCOUNT_ENDPOINT,
   activate: ACTIVATE_ACCOUNT_ENDPOINT,
+  activateAccount: ACTIVATE_ACCOUNT_ENDPOINT,
 
   requestPasswordReset: REQUEST_RESET_ENDPOINT,
   confirmPasswordReset: CONFIRM_RESET_ENDPOINT,
 });
 
-export const AUTH_ENDPOINT_CANDIDATES = freeze({
-  login: freeze([LOGIN_ENDPOINT]),
-  logout: freeze([LOGOUT_ENDPOINT]),
-  me: freeze([ME_ENDPOINT]),
-  refresh: freeze([REFRESH_ENDPOINT]),
-  activateAccount: freeze([ACTIVATE_ACCOUNT_ENDPOINT]),
-  requestPasswordReset: freeze([REQUEST_RESET_ENDPOINT]),
-  confirmPasswordReset: freeze([CONFIRM_RESET_ENDPOINT]),
-});
-
 export const AUTH_ENDPOINT_GROUPS = freeze({
-  public: freeze([
-    LOGIN_ENDPOINT,
-    REFRESH_ENDPOINT,
-    ACTIVATE_ACCOUNT_ENDPOINT,
-    REQUEST_RESET_ENDPOINT,
-    CONFIRM_RESET_ENDPOINT,
-  ]),
-
-  private: freeze([
-    LOGOUT_ENDPOINT,
-    ME_ENDPOINT,
-  ]),
+  public: freeze([...PUBLIC_API_PATHS]),
+  private: freeze([...PRIVATE_API_PATHS]),
 
   session: freeze([
     LOGIN_ENDPOINT,
@@ -365,27 +345,19 @@ export const AUTH_ENDPOINT_GROUPS = freeze({
   ]),
 });
 
-export const AUTH_PUBLIC_API_PATHS = freeze([...AUTH_ENDPOINT_GROUPS.public]);
-export const AUTH_PRIVATE_API_PATHS = freeze([...AUTH_ENDPOINT_GROUPS.private]);
-export const AUTH_CONTROL_SKIP_REFRESH_PATHS = freeze([...AUTH_ENDPOINT_GROUPS.public]);
+export const AUTH_PUBLIC_API_PATHS = freeze([...PUBLIC_API_PATHS]);
+export const AUTH_PRIVATE_API_PATHS = freeze([...PRIVATE_API_PATHS]);
 
 /* =========================================================
    SPA ROUTES
 ========================================================= */
 
-export const LOGIN_ROUTE = "/login";
-export const PASSWORD_REQUEST_ROUTE = "/password-request";
-export const PASSWORD_RESET_ROUTE = "/password-reset";
-export const ACTIVATE_ACCOUNT_ROUTE = "/activate-account";
+export const LOGIN_ROUTE = ROUTES.login;
+export const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest;
+export const PASSWORD_RESET_ROUTE = ROUTES.passwordReset;
+export const ACTIVATE_ACCOUNT_ROUTE = ROUTES.activateAccount;
 
-export const AUTH_PUBLIC_TECHNICAL_ROUTES = freeze([
-  LOGIN_ROUTE,
-  PASSWORD_REQUEST_ROUTE,
-  PASSWORD_RESET_ROUTE,
-  ACTIVATE_ACCOUNT_ROUTE,
-]);
-
-export const AUTH_TECHNICAL_ROUTE_ALIASES = freeze({});
+export const AUTH_PUBLIC_TECHNICAL_ROUTES = freeze([...PUBLIC_ROUTES]);
 
 /* =========================================================
    TOKEN PARAMS
@@ -397,8 +369,6 @@ export const AUTH_TOKEN_PARAM_NAMES = freeze({
   activation: freeze([TOKEN_PARAM]),
   reset: freeze([TOKEN_PARAM]),
   refresh: freeze([TOKEN_PARAM]),
-
-  twoFactor: freeze([]),
 });
 
 /* =========================================================
@@ -458,8 +428,6 @@ export const AUTH_STORAGE_KEYS = freeze({
   role: "role",
 });
 
-export const AUTH_LEGACY_STORAGE_KEYS = freeze({});
-
 /* =========================================================
    LIMITS / ROLES / STATUS
 ========================================================= */
@@ -511,7 +479,6 @@ export const AUTH_SUCCESS_STATUSES = freeze([
   "refreshed",
 ]);
 
-export const AUTH_2FA_STATUSES = freeze([]);
 export const AUTH_ROLES = freeze(["admin", "user"]);
 
 /* =========================================================
@@ -521,7 +488,7 @@ export const AUTH_ROLES = freeze(["admin", "user"]);
 function resolveEndpointKey(key = "") {
   const clean = safeText(key, "");
 
-  if (clean === "activate") return "activateAccount";
+  if (clean === "activateAccount") return "activate";
   if (clean === "resetPasswordRequest") return "requestPasswordReset";
   if (clean === "confirmResetPassword") return "confirmPasswordReset";
   if (clean === "resetPasswordConfirm") return "confirmPasswordReset";
@@ -537,14 +504,7 @@ export function getAuthEndpoint(key = "", fallback = "") {
 }
 
 export function getAuthEndpointCandidates(key = "", fallback = "") {
-  const clean = resolveEndpointKey(key);
-  const candidates = AUTH_ENDPOINT_CANDIDATES[clean];
-
-  if (Array.isArray(candidates) && candidates.length) {
-    return [...candidates];
-  }
-
-  const endpoint = getAuthEndpoint(clean, fallback);
+  const endpoint = getAuthEndpoint(key, fallback);
   return endpoint ? [endpoint] : [];
 }
 
@@ -556,10 +516,6 @@ export function getAuthEndpointGroup(key = "") {
 export function getAuthStorageKey(key = "", fallback = "") {
   const value = AUTH_STORAGE_KEYS[safeText(key, "")];
   return typeof value === "string" && value ? value : safeText(fallback, "");
-}
-
-export function getAuthLegacyStorageKey(_key = "", fallback = "") {
-  return safeText(fallback, "");
 }
 
 export function getAuthConstant(key = "", fallback = null) {
@@ -584,29 +540,11 @@ export const getAccountActivationEndpoint = getActivateAccountEndpoint;
 export const getActivateAccountEndpointCandidates = () => [ACTIVATE_ACCOUNT_ENDPOINT];
 
 export const getRequestPasswordResetEndpoint = () => REQUEST_RESET_ENDPOINT;
-export const getForgotPasswordEndpoint = getRequestPasswordResetEndpoint;
-export const getRecoverPasswordEndpoint = getRequestPasswordResetEndpoint;
 export const getRequestPasswordResetEndpointCandidates = () => [REQUEST_RESET_ENDPOINT];
 
 export const getConfirmPasswordResetEndpoint = () => CONFIRM_RESET_ENDPOINT;
 export const getConfirmResetPasswordEndpoint = getConfirmPasswordResetEndpoint;
 export const getConfirmPasswordResetEndpointCandidates = () => [CONFIRM_RESET_ENDPOINT];
-
-export const getValidateActivationTokenEndpoint = () => "";
-export const getValidateActivateAccountTokenEndpoint = () => "";
-export const getValidateActivationTokenEndpointCandidates = () => [];
-export const getValidateResetTokenEndpoint = () => "";
-export const getValidateResetPasswordTokenEndpoint = () => "";
-export const getValidateResetTokenEndpointCandidates = () => [];
-
-export const getTwoFactorLoginEndpoint = () => "";
-export const getTwoFactorRequestEndpoint = () => "";
-export const getTwoFactorResendEndpoint = () => "";
-export const getTwoFactorLoginEndpointCandidates = () => [];
-export const getTwoFactorRequestEndpointCandidates = () => [];
-export const getTwoFactorResendEndpointCandidates = () => [];
-
-export const getAuthHealthEndpoint = () => "";
 
 /* =========================================================
    LIMIT GETTERS
@@ -639,9 +577,6 @@ export const getActivationTokenMaxLength = getTokenMaxLength;
 export const getResetTokenMinLength = getTokenMinLength;
 export const getResetTokenMaxLength = getTokenMaxLength;
 
-export const getTempTokenMinLength = () => 0;
-export const getTempTokenMaxLength = () => 0;
-
 export const getSessionValueMaxLength = () =>
   clampNumber(getAuthConstant("sessionValueMaxLength", 200), 1, 1000);
 
@@ -656,14 +591,6 @@ export const getLoginTimeoutMs = () =>
 
 export const getAuthPublicTimeoutMs = () =>
   clampNumber(getAuthConstant("authPublicTimeoutMs", 30000), 1000, 120000);
-
-export const getRefreshRetryCooldownMs = () => 30000;
-export const getMaxSequentialRefreshFailures = () => 3;
-export const getLoginCooldownMs = () => 30000;
-export const getLoginMaxAttemptsBeforeCooldown = () => 5;
-
-export const getTwoFactorCodeMinLength = () => 0;
-export const getTwoFactorCodeMaxLength = () => 0;
 
 /* =========================================================
    MATCH HELPERS
@@ -682,30 +609,31 @@ export function isPasswordRequestRoute(path = "") {
   return canonicalAuthRoutePath(path) === PASSWORD_REQUEST_ROUTE;
 }
 
-export function isResetPasswordRoute(path = "") {
-  const clean = canonicalAuthRoutePath(path);
-  return clean === PASSWORD_RESET_ROUTE || clean === PASSWORD_REQUEST_ROUTE;
-}
-
-export function isResetPasswordConfirmRoute(path = "") {
+export function isPasswordResetRoute(path = "") {
   return canonicalAuthRoutePath(path) === PASSWORD_RESET_ROUTE;
 }
 
-export function isTwoFactorRoute() {
-  return false;
-}
+/* Compat de nombre antiguo, sin declarar ruta nueva. */
+export const isResetPasswordRoute = isPasswordResetRoute;
+export const isResetPasswordConfirmRoute = isPasswordResetRoute;
 
-export const isMeEndpoint = (path = "") => normalizeEndpointPath(path) === ME_ENDPOINT;
-export const isEndpointInGroup = (path = "", group = []) => endpointInList(path, group);
-export const isPublicAuthEndpoint = (path = "") => !isMeEndpoint(path) && endpointInList(path, AUTH_PUBLIC_API_PATHS);
-export const isPrivateAuthEndpoint = (path = "") => isMeEndpoint(path) || endpointInList(path, AUTH_PRIVATE_API_PATHS);
-export const isAuthControlSkipRefreshEndpoint = (path = "") => !isMeEndpoint(path) && endpointInList(path, AUTH_CONTROL_SKIP_REFRESH_PATHS);
-export const isPasswordResetEndpoint = (path = "") => endpointInList(path, AUTH_ENDPOINT_GROUPS.passwordReset);
-export const isActivationEndpoint = (path = "") => endpointInList(path, AUTH_ENDPOINT_GROUPS.activation);
+export const isMeEndpoint = (path = "") =>
+  normalizeEndpointPath(path) === ME_ENDPOINT;
 
-export function isTwoFactorEndpoint() {
-  return false;
-}
+export const isEndpointInGroup = (path = "", group = []) =>
+  endpointInList(path, group);
+
+export const isPublicAuthEndpoint = (path = "") =>
+  !isMeEndpoint(path) && endpointInList(path, AUTH_PUBLIC_API_PATHS);
+
+export const isPrivateAuthEndpoint = (path = "") =>
+  isMeEndpoint(path) || endpointInList(path, AUTH_PRIVATE_API_PATHS);
+
+export const isPasswordResetEndpoint = (path = "") =>
+  endpointInList(path, AUTH_ENDPOINT_GROUPS.passwordReset);
+
+export const isActivationEndpoint = (path = "") =>
+  endpointInList(path, AUTH_ENDPOINT_GROUPS.activation);
 
 export function isAuthEndpoint(path = "") {
   return (
@@ -718,8 +646,6 @@ export function isAuthEndpoint(path = "") {
 
 export const isAuthFailureCode = (code = "") =>
   AUTH_FAILURE_CODES.includes(safeText(code, "").toUpperCase());
-
-export const isAuth2FAStatus = () => false;
 
 export const isAuthSuccessStatus = (status = "") =>
   AUTH_SUCCESS_STATUSES.includes(safeText(status, "").toLowerCase());
@@ -735,10 +661,6 @@ export function getAuthTokenParamNames(type = "generic") {
 
 export function getAllAuthTokenParamNames() {
   return [TOKEN_PARAM];
-}
-
-export function getTechnicalRouteAlias(_key = "", fallback = "") {
-  return safeText(fallback, "");
 }
 
 export function hasTokenParam(search = "") {
@@ -777,11 +699,7 @@ export function hasActivationToken(value = "") {
 }
 
 export function hasResetToken(value = "") {
-  return isResetPasswordRoute(value) && hasTokenInUrl(value);
-}
-
-export function hasTwoFactorToken() {
-  return false;
+  return isPasswordResetRoute(value) && hasTokenInUrl(value);
 }
 
 /* =========================================================
@@ -793,27 +711,24 @@ export function getAuthConstantsSnapshot() {
     version: AUTH_CONSTANTS_VERSION,
 
     endpoints: AUTH_ENDPOINTS,
-    endpointCandidates: AUTH_ENDPOINT_CANDIDATES,
     endpointGroups: AUTH_ENDPOINT_GROUPS,
 
     publicApiPaths: AUTH_PUBLIC_API_PATHS,
     privateApiPaths: AUTH_PRIVATE_API_PATHS,
-    controlSkipRefreshPaths: AUTH_CONTROL_SKIP_REFRESH_PATHS,
 
     storageKeys: AUTH_STORAGE_KEYS,
-    legacyStorageKeys: AUTH_LEGACY_STORAGE_KEYS,
 
     constants: AUTH_CONSTANTS,
     roles: AUTH_ROLES,
 
     publicTechnicalRoutes: AUTH_PUBLIC_TECHNICAL_ROUTES,
-    technicalRouteAliases: AUTH_TECHNICAL_ROUTE_ALIASES,
 
     userHome: {
       prefix: USER_HOME_PREFIX,
       canonical: DEFAULT_ROUTE,
     },
 
+    tokenParam: TOKEN_PARAM,
     tokenParamNames: AUTH_TOKEN_PARAM_NAMES,
 
     requestOptions: {
@@ -824,9 +739,10 @@ export function getAuthConstantsSnapshot() {
 
     failureCodes: AUTH_FAILURE_CODES,
     successStatuses: AUTH_SUCCESS_STATUSES,
-    twoFactorStatuses: AUTH_2FA_STATUSES,
 
     policy: {
+      sourceOfTruth: "core/config.js",
+
       tokenParam: TOKEN_PARAM,
       roles: ["admin", "user"],
 
@@ -839,10 +755,12 @@ export function getAuthConstantsSnapshot() {
 
       userSlugHome: true,
       preservesAtSlug: true,
-      noUsernameStrip: true,
 
       no2fa: true,
-      noLegacyAliases: true,
+      noMfa: true,
+      noOtp: true,
+
+      noLegacyAliasesMassive: true,
     },
   };
 }
@@ -854,6 +772,8 @@ export function getAuthConstantsSnapshot() {
 export default freeze({
   AUTH_CONSTANTS_VERSION,
   AUTH_MODULE_VERSION,
+
+  TOKEN_PARAM,
 
   LOGIN_ENDPOINT,
   LOGOUT_ENDPOINT,
@@ -872,22 +792,17 @@ export default freeze({
   USER_HOME_PREFIX,
 
   AUTH_ENDPOINTS,
-  AUTH_ENDPOINT_CANDIDATES,
   AUTH_ENDPOINT_GROUPS,
   AUTH_PUBLIC_API_PATHS,
   AUTH_PRIVATE_API_PATHS,
-  AUTH_CONTROL_SKIP_REFRESH_PATHS,
 
   AUTH_STORAGE_KEYS,
-  AUTH_LEGACY_STORAGE_KEYS,
   AUTH_CONSTANTS,
   AUTH_FAILURE_CODES,
   AUTH_SUCCESS_STATUSES,
-  AUTH_2FA_STATUSES,
   AUTH_ROLES,
 
   AUTH_PUBLIC_TECHNICAL_ROUTES,
-  AUTH_TECHNICAL_ROUTE_ALIASES,
   AUTH_TOKEN_PARAM_NAMES,
 
   AUTH_PUBLIC_REQUEST_OPTIONS,
@@ -918,7 +833,6 @@ export default freeze({
   getAuthEndpointCandidates,
   getAuthEndpointGroup,
   getAuthStorageKey,
-  getAuthLegacyStorageKey,
   getAuthConstant,
 
   getLoginEndpoint,
@@ -933,30 +847,11 @@ export default freeze({
   getActivateAccountEndpointCandidates,
 
   getRequestPasswordResetEndpoint,
-  getForgotPasswordEndpoint,
-  getRecoverPasswordEndpoint,
   getRequestPasswordResetEndpointCandidates,
 
   getConfirmPasswordResetEndpoint,
   getConfirmResetPasswordEndpoint,
   getConfirmPasswordResetEndpointCandidates,
-
-  getValidateActivationTokenEndpoint,
-  getValidateActivateAccountTokenEndpoint,
-  getValidateActivationTokenEndpointCandidates,
-
-  getValidateResetTokenEndpoint,
-  getValidateResetPasswordTokenEndpoint,
-  getValidateResetTokenEndpointCandidates,
-
-  getTwoFactorLoginEndpoint,
-  getTwoFactorRequestEndpoint,
-  getTwoFactorResendEndpoint,
-  getTwoFactorLoginEndpointCandidates,
-  getTwoFactorRequestEndpointCandidates,
-  getTwoFactorResendEndpointCandidates,
-
-  getAuthHealthEndpoint,
 
   getIdentifierMaxLength,
   getPasswordMinLength,
@@ -971,50 +866,37 @@ export default freeze({
   getActivationTokenMaxLength,
   getResetTokenMinLength,
   getResetTokenMaxLength,
-  getTempTokenMinLength,
-  getTempTokenMaxLength,
   getSessionValueMaxLength,
   getTextValueMaxLength,
   getRequestTimeout,
   getLoginTimeoutMs,
   getAuthPublicTimeoutMs,
-  getRefreshRetryCooldownMs,
-  getMaxSequentialRefreshFailures,
-  getLoginCooldownMs,
-  getLoginMaxAttemptsBeforeCooldown,
-  getTwoFactorCodeMinLength,
-  getTwoFactorCodeMaxLength,
 
   isPublicTechnicalRoute,
   isActivationRoute,
   isPasswordRequestRoute,
+  isPasswordResetRoute,
   isResetPasswordRoute,
   isResetPasswordConfirmRoute,
-  isTwoFactorRoute,
 
   isAuthEndpoint,
   isEndpointInGroup,
   isMeEndpoint,
   isPublicAuthEndpoint,
   isPrivateAuthEndpoint,
-  isAuthControlSkipRefreshEndpoint,
   isPasswordResetEndpoint,
   isActivationEndpoint,
-  isTwoFactorEndpoint,
 
   isAuthFailureCode,
-  isAuth2FAStatus,
   isAuthSuccessStatus,
 
   getAuthTokenParamNames,
   getAllAuthTokenParamNames,
-  getTechnicalRouteAlias,
 
   hasTokenParam,
   hasTokenInUrl,
   hasActivationToken,
   hasResetToken,
-  hasTwoFactorToken,
 
   getAuthConstantsSnapshot,
 });

@@ -8,6 +8,7 @@
    - Resolver label visible de rol.
    - Resolver slug público real.
    - Resolver displayName, email y avatarUrl para template/dropdown.
+   - Leer avatar canónico desde avatar/avatarUrl/hasAvatar.
    - Crear view-model mínimo para template.js.
    - No pintar DOM.
    - No hacer eventos.
@@ -25,7 +26,7 @@ import {
   SIDEBAR_ROLE_USER,
 } from "./constants.js";
 
-export const SIDEBAR_USER_VERSION = "sidebar.user.v5";
+export const SIDEBAR_USER_VERSION = "sidebar.user.v6";
 
 const DEFAULT_NAME = "Usuario";
 const DEFAULT_INITIALS = "U";
@@ -101,6 +102,12 @@ function safeCall(fn = null) {
   } catch {
     return null;
   }
+}
+
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+    String(value || "")
+  );
 }
 
 /* =========================================================
@@ -389,6 +396,7 @@ export function getSidebarDisplayName(user = null) {
   if (!isUsableSidebarUser(user)) return DEFAULT_NAME;
 
   const profile = isObject(user.profile) ? user.profile : {};
+  const contacto = isObject(user.contacto) ? user.contacto : {};
 
   return limitText(
     first(
@@ -396,10 +404,17 @@ export function getSidebarDisplayName(user = null) {
       user.fullName,
       user.name,
       user.nombre,
+
+      profile.publicName,
       profile.displayName,
       profile.fullName,
       profile.name,
       profile.nombre,
+
+      contacto.displayName,
+      contacto.name,
+      contacto.nombre,
+
       user.username,
       user.userName,
       getSidebarUserSlug(user)
@@ -437,6 +452,7 @@ export function getSidebarUserEmail(user = null) {
 
   const profile = isObject(user.profile) ? user.profile : {};
   const lookup = isObject(user.lookup) ? user.lookup : {};
+  const contacto = isObject(user.contacto) ? user.contacto : {};
 
   const email = limitText(
     first(
@@ -445,8 +461,13 @@ export function getSidebarUserEmail(user = null) {
       user.emailAddress,
       user.emailLower,
       user.email_lower,
+
       profile.email,
       profile.mail,
+
+      contacto.email,
+      contacto.emailLower,
+
       lookup.email,
       lookup.emailLower,
       lookup.email_lower
@@ -463,12 +484,28 @@ export function getSidebarUserEmail(user = null) {
    AVATAR
 ========================================================= */
 
+function avatarObjectValue(value = null) {
+  if (!isObject(value)) return "";
+
+  return first(
+    value.url,
+    value.href,
+    value.src,
+    value.path,
+    value.publicUrl,
+    value.publicURL,
+    value.public_url,
+    ""
+  );
+}
+
 function safeAvatarUrl(value = "") {
   const avatar = limitText(value, MAX_AVATAR_URL_LENGTH);
 
   if (!avatar) return "";
   if (/[\r\n\t]/.test(avatar)) return "";
   if (avatar.startsWith("//")) return "";
+  if (hasSensitiveQuery(avatar)) return "";
 
   /*
     Permitimos assets internos y URLs HTTPS.
@@ -497,13 +534,24 @@ export function getSidebarUserAvatarUrl(user = null) {
   const preferences = isObject(user.preferences) ? user.preferences : {};
   const media = isObject(user.media) ? user.media : {};
   const picture = isObject(user.picture) ? user.picture : {};
+  const avatarObject = isObject(user.avatar) ? user.avatar : {};
+  const profileAvatarObject = isObject(profile.avatar) ? profile.avatar : {};
 
+  /*
+    Contrato observado en JSON:
+      avatar: "https://..."
+      avatarUrl: "https://..."
+      hasAvatar: true
+    hasAvatar no se usa como fuente de URL; sólo como señal diagnóstica.
+    La URL real debe venir en avatar/avatarUrl o variantes seguras.
+  */
   return safeAvatarUrl(
     first(
       user.avatarUrl,
       user.avatarURL,
       user.avatar_url,
-      user.avatar,
+      typeof user.avatar === "string" ? user.avatar : "",
+      avatarObjectValue(avatarObject),
 
       user.photoUrl,
       user.photoURL,
@@ -514,9 +562,7 @@ export function getSidebarUserAvatarUrl(user = null) {
       user.pictureURL,
       user.picture_url,
       typeof user.picture === "string" ? user.picture : "",
-      picture.url,
-      picture.href,
-      picture.src,
+      avatarObjectValue(picture),
 
       user.imageUrl,
       user.imageURL,
@@ -530,7 +576,8 @@ export function getSidebarUserAvatarUrl(user = null) {
       profile.avatarUrl,
       profile.avatarURL,
       profile.avatar_url,
-      profile.avatar,
+      typeof profile.avatar === "string" ? profile.avatar : "",
+      avatarObjectValue(profileAvatarObject),
 
       profile.photoUrl,
       profile.photoURL,
@@ -642,6 +689,8 @@ export function getSidebarUser(context = {}) {
     username,
 
     email,
+
+    hasAvatar: Boolean(avatarUrl),
     avatarUrl,
     avatar: avatarUrl,
     photoUrl: avatarUrl,
@@ -705,7 +754,14 @@ export function getSidebarUserSnapshot(context = {}) {
         user: ROLE_LABEL_STANDARD,
       },
 
+      avatarContract: {
+        rootAvatar: true,
+        rootAvatarUrl: true,
+        rootHasAvatarSignal: true,
+      },
+
       avatarInternalOrHttpsOnly: true,
+      noSensitiveAvatarQuery: true,
       noBlobAvatar: true,
       noDataImageAvatar: true,
       noHttpAvatar: true,

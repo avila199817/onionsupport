@@ -7,7 +7,7 @@
    - Delegar DOM en login.dom.js.
    - Validar campos mínimos.
    - Llamar Auth.login().
-   - Navegar a /@{user.slug} tras login correcto.
+   - Navegar vía Router a /@{user.slug} tras login correcto.
    - Rutas base desde core/config.js.
    - Sin HTTP directo.
    - Sin Store.
@@ -18,6 +18,7 @@
    - Sin navegación browser paralela.
    - Sin AppCore.navigate.
    - Sin magia negra.
+   - Sin /home.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -26,6 +27,7 @@ import { Auth } from "../../features/auth/index.js";
 import {
   PUBLIC_ROUTES,
   ROUTES,
+  USER_HOME_PREFIX,
 } from "../../core/config.js";
 
 import getLoginTemplate from "./login.template.js";
@@ -44,25 +46,40 @@ import {
   bindLoginSubmit,
 } from "./login.dom.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.v3";
+export const LOGIN_VIEW_VERSION = "login.view.v4";
 
 const SOURCE = "login.view";
 
-const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
+const HOME_ROUTE = "/";
 const LOGIN_ROUTE = ROUTES.login || "/login";
 const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest || "/password-request";
 const PASSWORD_RESET_ROUTE = ROUTES.passwordReset || "/password-reset";
 const ACTIVATE_ACCOUNT_ROUTE = ROUTES.activateAccount || "/activate-account";
 
+const USER_PREFIX = USER_HOME_PREFIX || "/@";
+
+const BLOCKED_LEGACY_PATHS = new Set([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
+]);
+
 const PUBLIC_AUTH_ROUTES = new Set(
-  Array.isArray(PUBLIC_ROUTES) && PUBLIC_ROUTES.length
-    ? [...PUBLIC_ROUTES]
-    : [
-        LOGIN_ROUTE,
-        PASSWORD_REQUEST_ROUTE,
-        PASSWORD_RESET_ROUTE,
-        ACTIVATE_ACCOUNT_ROUTE,
-      ]
+  (
+    Array.isArray(PUBLIC_ROUTES) && PUBLIC_ROUTES.length
+      ? [...PUBLIC_ROUTES]
+      : [
+          LOGIN_ROUTE,
+          PASSWORD_REQUEST_ROUTE,
+          PASSWORD_RESET_ROUTE,
+          ACTIVATE_ACCOUNT_ROUTE,
+        ]
+  )
+    .map(cleanPath)
+    .filter(Boolean)
 );
 
 const INSTANCES = new WeakMap();
@@ -86,13 +103,20 @@ function isObject(value) {
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -100,8 +124,22 @@ function redact(value = "") {
    PATHS
 ========================================================= */
 
+function normalizeHashPath(path = HOME_ROUTE) {
+  const value = text(path, HOME_ROUTE);
+
+  if (value.startsWith("#!")) {
+    return value.replace(/^#!\/?/, "/") || HOME_ROUTE;
+  }
+
+  if (value.startsWith("#/")) {
+    return value.slice(1) || HOME_ROUTE;
+  }
+
+  return value;
+}
+
 function cleanPath(value = HOME_ROUTE) {
-  let path = text(value, HOME_ROUTE)
+  let path = normalizeHashPath(value)
     .split("?")[0]
     .split("#")[0];
 
@@ -121,9 +159,31 @@ function cleanPath(value = HOME_ROUTE) {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
     String(value || "")
   );
+}
+
+function isBlockedLegacyPath(value = "") {
+  const path = cleanPath(value).toLowerCase();
+
+  if (BLOCKED_LEGACY_PATHS.has(path)) return true;
+
+  return (
+    path.startsWith("/2fa/") ||
+    path.startsWith("/mfa/") ||
+    path.startsWith("/otp/")
+  );
+}
+
+function isUserHomePath(value = "") {
+  const path = cleanPath(value);
+
+  if (!path.startsWith(USER_PREFIX)) return false;
+
+  const slug = path.slice(USER_PREFIX.length);
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/i.test(slug);
 }
 
 function safeInternalPath(value = "", fallback = HOME_ROUTE) {
@@ -134,10 +194,9 @@ function safeInternalPath(value = "", fallback = HOME_ROUTE) {
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
   if (/[\r\n\t\\]/.test(raw)) return fallback;
   if (hasSensitiveQuery(raw)) return fallback;
+  if (isBlockedLegacyPath(raw)) return fallback;
 
   const normalized = raw.replace(/\/{2,}/g, "/") || fallback;
-
-  if (cleanPath(normalized) === "/home") return fallback;
 
   return normalized;
 }
@@ -169,6 +228,7 @@ function authHomeTarget(result = {}) {
     result?.postLoginTarget ||
       result?.homePath ||
       result?.defaultHome ||
+      result?.redirectTo ||
       Auth?.getPostLoginTarget?.() ||
       Auth?.getDefaultHome?.() ||
       AppCore?.state?.postLoginTarget ||
@@ -182,7 +242,12 @@ function authHomeTarget(result = {}) {
     return HOME_ROUTE;
   }
 
-  return target;
+  /*
+    Si Auth ya resolvió /@slug, lo respetamos.
+    Si sólo tenemos "/", el Router real se encargará de canonicalizar
+    a /@{slug} cuando la sesión esté aplicada.
+  */
+  return isUserHomePath(target) ? cleanPath(target) : target;
 }
 
 async function goAfterLogin(result = {}) {
@@ -241,8 +306,11 @@ function renderTemplate(container, deps = {}) {
 
       appName: text(AppCore?.config?.appName, "Onion Support"),
 
+      loginHref: LOGIN_ROUTE,
       passwordRequestHref: PASSWORD_REQUEST_ROUTE,
       forgotPasswordHref: PASSWORD_REQUEST_ROUTE,
+      passwordResetHref: PASSWORD_RESET_ROUTE,
+      activateAccountHref: ACTIVATE_ACCOUNT_ROUTE,
     }) || ""
   );
 
@@ -281,9 +349,9 @@ function authenticated(result = {}) {
 
 function errorMessage(error = null) {
   return redact(
-    text(error?.message, "") ||
-      text(error?.data?.message, "") ||
+    text(error?.data?.message, "") ||
       text(error?.response?.data?.message, "") ||
+      text(error?.message, "") ||
       "No se pudo iniciar sesión."
   );
 }
@@ -329,6 +397,8 @@ function clearInstance(container, instance) {
 ========================================================= */
 
 export function renderLoginView(container, deps = {}) {
+  if (!isBrowser()) return null;
+
   if (!container) {
     throw new Error("[LoginView] container requerido.");
   }
@@ -457,6 +527,25 @@ export function renderLoginView(container, deps = {}) {
         submitting,
         authenticated: isAuth,
         target: isAuth ? redact(authHomeTarget()) : null,
+        policy: {
+          viewOnly: true,
+          delegatesDom: true,
+          authLoginOnly: true,
+          routerNavigationOnly: true,
+
+          noHttpDirect: true,
+          noStore: true,
+          noToastDirect: true,
+          noBrowserNavigation: true,
+          noAppCoreNavigate: true,
+
+          noHomeRoute: true,
+          no2fa: true,
+          noMfa: true,
+          noOtp: true,
+
+          snapshotRedacted: true,
+        },
       };
     },
 

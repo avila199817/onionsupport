@@ -5,12 +5,14 @@
    Responsabilidad:
    - Fachada mínima de compat.
    - Delegar siempre en src/core/http.js.
-   - Registrar Http en AppCore.services.
+   - Registrar HTTP canónico en AppCore.services sólo desde init/install.
+   - Endpoints/política desde core/config.js.
    - Sin fetch propio.
    - Sin parser propio.
    - Sin retry propio.
    - Sin refresh propio.
-   - Sin interceptors reales.
+   - Sin interceptors fake.
+   - Sin apiClient paralelo.
    - Sin storage.
    - Sin Router.
    - Sin Toast.
@@ -20,10 +22,17 @@
 import { AppCore } from "../core/index.js";
 import CoreHttp from "../core/http.js";
 
-export const HTTP_SERVICE_VERSION = "simple";
+import {
+  AUTH_ENDPOINTS,
+  getApiBase,
+  isPrivateApiPath,
+  isPublicApiPath,
+  normalizeEndpointPath,
+} from "../core/config.js";
+
+export const HTTP_SERVICE_VERSION = "services.http.v2";
 
 const SERVICE_NAME = "http";
-const DEFAULT_API_BASE = "https://api.onionit.net";
 
 let activeAppCore = AppCore || null;
 let initialized = false;
@@ -40,25 +49,14 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function text(value = "", fallback = "") {
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
 
-function normalizeOrigin(value = "") {
-  const raw = text(value, DEFAULT_API_BASE).replace(/\/+$/g, "");
-
-  try {
-    const url = new URL(raw);
-    return url.origin || DEFAULT_API_BASE;
-  } catch {
-    return DEFAULT_API_BASE;
-  }
-}
-
 export function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -67,11 +65,21 @@ function coreOrigin() {
     return (
       CoreHttp?.getApiOrigin?.() ||
       CoreHttp?.origin ||
-      DEFAULT_API_BASE
+      getApiBase()
     );
   } catch {
-    return DEFAULT_API_BASE;
+    return getApiBase();
   }
+}
+
+function coreMethod(name = "") {
+  const fn = CoreHttp?.[name];
+
+  if (!isFunction(fn)) {
+    throw new Error(`CoreHttp.${name}() no disponible.`);
+  }
+
+  return fn.bind(CoreHttp);
 }
 
 /* =========================================================
@@ -81,25 +89,28 @@ function coreOrigin() {
 export function configure(patch = {}) {
   const source = isObject(patch) ? patch : {};
 
-  const origin = normalizeOrigin(
+  const origin = cleanText(
     source.apiBase ||
       source.apiOrigin ||
       source.apiUrl ||
       source.baseUrl ||
       source.baseURL ||
-      coreOrigin()
+      "",
+    ""
   );
 
-  try {
-    CoreHttp?.setApiOrigin?.(origin);
-  } catch {
-    // noop
-  }
+  if (origin) {
+    try {
+      CoreHttp?.setApiOrigin?.(origin);
+    } catch {
+      // noop
+    }
 
-  try {
-    CoreHttp?.setOrigin?.(origin);
-  } catch {
-    // noop
+    try {
+      CoreHttp?.setOrigin?.(origin);
+    } catch {
+      // noop
+    }
   }
 
   return getConfig();
@@ -125,7 +136,7 @@ export function buildUrl(path = "/", query = null) {
     return CoreHttp.buildUrl(path, { query });
   }
 
-  return text(path, "/");
+  return cleanText(path, "/");
 }
 
 /* =========================================================
@@ -133,7 +144,7 @@ export function buildUrl(path = "/", query = null) {
 ========================================================= */
 
 export function request(...args) {
-  return CoreHttp.request(...args);
+  return coreMethod("request")(...args);
 }
 
 /* =========================================================
@@ -141,69 +152,88 @@ export function request(...args) {
 ========================================================= */
 
 export function get(path, options = {}) {
-  return CoreHttp.get(path, options);
+  return coreMethod("get")(path, options);
 }
 
 export function head(path, options = {}) {
-  return CoreHttp.head(path, options);
+  return coreMethod("head")(path, options);
 }
 
 export function options(path, requestOptions = {}) {
-  return CoreHttp.options(path, requestOptions);
+  return coreMethod("options")(path, requestOptions);
 }
 
 export function post(path, body = undefined, requestOptions = {}) {
-  return CoreHttp.post(path, body, requestOptions);
+  return coreMethod("post")(path, body, requestOptions);
 }
 
 export function put(path, body = undefined, requestOptions = {}) {
-  return CoreHttp.put(path, body, requestOptions);
+  return coreMethod("put")(path, body, requestOptions);
 }
 
 export function patch(path, body = undefined, requestOptions = {}) {
-  return CoreHttp.patch(path, body, requestOptions);
+  return coreMethod("patch")(path, body, requestOptions);
 }
 
 export function del(path, requestOptions = {}) {
-  return CoreHttp.del(path, requestOptions);
+  return coreMethod("del")(path, requestOptions);
 }
 
 export const deleteRequest = del;
 
 export function raw(path, requestOptions = {}) {
-  return CoreHttp.raw(path, requestOptions);
+  return coreMethod("raw")(path, requestOptions);
 }
 
 export function upload(path, body, requestOptions = {}) {
-  return CoreHttp.upload(path, body, requestOptions);
+  return coreMethod("upload")(path, body, requestOptions);
 }
 
 export function download(path, requestOptions = {}) {
-  return CoreHttp.download(path, requestOptions);
+  return coreMethod("download")(path, requestOptions);
 }
 
 /* =========================================================
-   AUTH
+   AUTH HELPERS
 ========================================================= */
 
 export function login(body = {}, requestOptions = {}) {
-  return CoreHttp.login(body, requestOptions);
+  return coreMethod("login")(body, requestOptions);
 }
 
 export function me(requestOptions = {}) {
-  return CoreHttp.me(requestOptions);
+  return coreMethod("me")(requestOptions);
 }
 
 export function refresh(requestOptions = {}) {
-  return CoreHttp.refresh(requestOptions);
+  return coreMethod("refresh")(requestOptions);
 }
 
-export function refreshSession(requestOptions = {}) {
-  return CoreHttp.refreshSession(requestOptions);
+export function refreshSession(bodyOrOptions = {}, maybeOptions = null) {
+  if (maybeOptions !== null && maybeOptions !== undefined) {
+    return coreMethod("refreshSession")(bodyOrOptions, maybeOptions);
+  }
+
+  return coreMethod("refreshSession")(
+    {},
+    isObject(bodyOrOptions) ? bodyOrOptions : {}
+  );
 }
 
 export function logout(requestOptions = {}) {
-  return CoreHttp.logout(requestOptions);
+  return coreMethod("logout")(requestOptions);
+}
+
+export function activate(body = {}, requestOptions = {}) {
+  return coreMethod("activate")(body, requestOptions);
+}
+
+export function requestPasswordReset(body = {}, requestOptions = {}) {
+  return coreMethod("requestPasswordReset")(body, requestOptions);
+}
+
+export function confirmPasswordReset(body = {}, requestOptions = {}) {
+  return coreMethod("confirmPasswordReset")(body, requestOptions);
 }
 
 export function logoutLocal() {
@@ -212,113 +242,93 @@ export function logoutLocal() {
 }
 
 /* =========================================================
-   TOKEN COMPAT
+   TOKEN COMPAT MÍNIMA
    La fuente real es CoreHttp/AppCore.state.
 ========================================================= */
 
-export function setTokenProvider(provider = null) {
-  void provider;
-  return CoreHttp.setTokenProvider?.() ?? true;
-}
-
 export function getAccessToken() {
-  return CoreHttp.getAccessToken?.() || "";
-}
-
-export function getRefreshToken() {
-  return CoreHttp.getRefreshToken?.() || "";
+  return CoreHttp?.getAccessToken?.() || "";
 }
 
 export function setAuthTokens(payload = {}) {
-  return CoreHttp.setAuthTokens?.(payload) || {};
+  return CoreHttp?.setAuthTokens?.(payload) || {};
 }
 
 export function clearAuthTokens() {
-  return CoreHttp.clearAuthTokens?.() !== false;
+  return CoreHttp?.clearAuthTokens?.() !== false;
 }
 
 /* =========================================================
    POLICY HELPERS
 ========================================================= */
 
-function cleanPath(path = "") {
-  return text(path, "")
-    .split("?")[0]
-    .split("#")[0]
-    .replace(/^\/+/, "");
+function endpointPath(path = "") {
+  try {
+    return normalizeEndpointPath(path);
+  } catch {
+    return cleanText(path, "")
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/^\/+/, "/") || "";
+  }
 }
 
 export function isAuthMeRequest(path = "") {
-  const clean = cleanPath(path);
-
-  return clean === "api/auth/me" || clean === "auth/me";
+  return endpointPath(path) === AUTH_ENDPOINTS.me;
 }
 
 export function isPublicRequest(path = "", requestOptions = {}) {
-  if (isAuthMeRequest(path)) return false;
+  const clean = endpointPath(path);
+
+  if (!clean) return false;
+  if (clean === AUTH_ENDPOINTS.me) return false;
 
   if (
     requestOptions.public === true ||
     requestOptions.auth === false ||
-    requestOptions.skipAuth === true
+    requestOptions.skipAuth === true ||
+    requestOptions.noAuthHeader === true
   ) {
     return true;
   }
 
-  if (requestOptions.auth === true || requestOptions.public === false) {
+  if (
+    requestOptions.auth === true ||
+    requestOptions.public === false ||
+    requestOptions.skipAuth === false ||
+    requestOptions.noAuthHeader === false
+  ) {
     return false;
   }
 
-  return [
-    "api/auth/login",
-    "api/auth/refresh",
-    "api/auth/activate",
-    "api/auth/reset-password-request",
-    "api/auth/reset-password-confirm",
-  ].includes(cleanPath(path));
+  return isPublicApiPath(clean);
 }
 
 export function isPrivateRequest(path = "", requestOptions = {}) {
-  return !isPublicRequest(path, requestOptions);
-}
+  const clean = endpointPath(path);
 
-/* =========================================================
-   INTERCEPTOR COMPAT
-   No ejecutan nada. Sólo evitan imports rotos.
-========================================================= */
+  if (!clean) return false;
+  if (clean === AUTH_ENDPOINTS.me) return true;
 
-export const interceptors = Object.freeze({
-  request: Object.freeze([]),
-  response: Object.freeze([]),
-  error: Object.freeze([]),
-});
+  if (
+    requestOptions.auth === true ||
+    requestOptions.public === false ||
+    requestOptions.skipAuth === false ||
+    requestOptions.noAuthHeader === false
+  ) {
+    return true;
+  }
 
-export function useRequest() {
-  return null;
-}
+  if (
+    requestOptions.public === true ||
+    requestOptions.auth === false ||
+    requestOptions.skipAuth === true ||
+    requestOptions.noAuthHeader === true
+  ) {
+    return false;
+  }
 
-export function useResponse() {
-  return null;
-}
-
-export function useError() {
-  return null;
-}
-
-export function ejectInterceptor() {
-  return false;
-}
-
-export function enableInterceptor() {
-  return false;
-}
-
-export function disableInterceptor() {
-  return false;
-}
-
-export function clearInterceptors() {
-  return 0;
+  return isPrivateApiPath(clean) || !isPublicRequest(clean, requestOptions);
 }
 
 /* =========================================================
@@ -335,19 +345,11 @@ export function attachToAppCore(AppCoreRef = activeAppCore) {
   try {
     App.services = isObject(App.services) ? App.services : {};
 
-    App.services.http = Http;
-    App.services.Http = Http;
-    App.services.api = Http;
-    App.services.apiClient = Http;
-
-    App.http = App.http || Http;
-    App.Http = App.Http || Http;
-    App.api = App.api || Http;
-    App.apiClient = App.apiClient || Http;
-
-    App.modules?.register?.("Services", Http);
-    App.modules?.register?.("services", Http);
-    App.modules?.register?.("HttpService", Http);
+    /*
+      Fuente canónica: CoreHttp.
+      Este archivo sólo es fachada de importación.
+    */
+    App.services.http = CoreHttp;
 
     return true;
   } catch {
@@ -356,11 +358,14 @@ export function attachToAppCore(AppCoreRef = activeAppCore) {
 }
 
 export function init(options = {}) {
+  activeAppCore = options.AppCore || options.core || activeAppCore || AppCore;
+
   configure(options);
 
   try {
-    CoreHttp.install?.(activeAppCore, {
-      apiBase: coreOrigin(),
+    CoreHttp?.install?.(activeAppCore, {
+      ...options,
+      apiBase: options.apiBase || options.apiOrigin || coreOrigin(),
     });
   } catch {
     // noop
@@ -375,15 +380,21 @@ export function init(options = {}) {
 
 export function install(AppCoreRef = AppCore, options = {}) {
   activeAppCore = AppCoreRef || activeAppCore || AppCore;
-  return init(options);
+
+  return init({
+    ...options,
+    AppCore: activeAppCore,
+  });
 }
 
 export function resetRuntime() {
+  initialized = false;
+  activeAppCore = AppCore || null;
   return true;
 }
 
 /* =========================================================
-   ABORT COMPAT
+   ABORT HELPERS
 ========================================================= */
 
 export function createAbortController() {
@@ -419,15 +430,15 @@ export function getSnapshot() {
     initialized,
 
     apiBase: coreOrigin(),
-    delegatesToCoreHttp: true,
 
     auth: {
       hasAccessToken: Boolean(getAccessToken()),
-      hasRefreshToken: Boolean(getRefreshToken()),
       authMePrivate: true,
+      exposesRefreshToken: false,
     },
 
     transport: {
+      delegatesToCoreHttp: true,
       hasCoreHttp: Boolean(CoreHttp),
       hasRequest: isFunction(CoreHttp?.request),
       hasGet: isFunction(CoreHttp?.get),
@@ -436,14 +447,25 @@ export function getSnapshot() {
 
     policy: {
       facadeOnly: true,
+      coreHttpIsSourceOfTruth: true,
+
       noOwnFetch: true,
       noOwnParser: true,
       noRetry: true,
       noRefreshOwn: true,
-      noInterceptorsReal: true,
+
+      noInterceptors: true,
+      noApiClientAlias: true,
+      noAppApiAlias: true,
+      noTokenProviderCompat: true,
+      noRefreshTokenFacade: true,
+
       noStorage: true,
       noRouter: true,
       noToast: true,
+
+      noImportSideEffectRegistration: true,
+      snapshotRedacted: true,
     },
   };
 }
@@ -480,6 +502,7 @@ export const Http = {
   patch,
   delete: del,
   del,
+  deleteRequest,
   raw,
 
   upload,
@@ -492,11 +515,13 @@ export const Http = {
   logout,
   logoutLocal,
 
-  setTokenProvider,
+  activate,
+  requestPasswordReset,
+  confirmPasswordReset,
+
   setAuthTokens,
   clearAuthTokens,
   getAccessToken,
-  getRefreshToken,
 
   isPublicEndpoint: isPublicRequest,
   isPublicRequest,
@@ -510,18 +535,7 @@ export const Http = {
   createAbortController,
   abort,
 
-  interceptors,
-  useRequest,
-  useResponse,
-  useError,
-  ejectInterceptor,
-  enableInterceptor,
-  disableInterceptor,
-  clearInterceptors,
-
   resetRuntime,
 };
-
-attachToAppCore();
 
 export default Http;

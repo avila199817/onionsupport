@@ -9,13 +9,12 @@
    - Sin AppCore.
    - Sin eventos.
    - Sin timers.
-   - Sin snapshots complejos.
    - Sin fallback DOM.
    - Sin mutar textos.
    - Sin magia negra.
 ========================================================= */
 
-export const LOADER_VERSION = "app.loader.v2";
+export const LOADER_VERSION = "app.loader.v3";
 
 const LOADER_ID = "app-loader";
 
@@ -27,124 +26,55 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
-  return output || fallback;
-}
-
 function roots() {
   if (!isBrowser()) return [];
-
   return [document.documentElement, document.body].filter(Boolean);
 }
 
-function normalizeState(state = "ready") {
-  const value = text(state, "ready").toLowerCase();
+function normalizeState(state = "booting") {
+  const value = String(state || "").trim().toLowerCase();
 
   if (value === "loading") return "booting";
   if (value === "booting") return "booting";
-  if (value === "fatal") return "fatal";
   if (value === "ready") return "ready";
-  if (value === "hidden") return "hidden";
+  if (value === "fatal") return "fatal";
 
-  return "ready";
-}
-
-function getStateFlags(state = "ready") {
-  const value = normalizeState(state);
-
-  return {
-    value,
-    booting: value === "booting",
-    ready: value === "ready",
-    fatal: value === "fatal",
-  };
-}
-
-function setDataset(element = null, key = "", value = "") {
-  if (!element || !key) return false;
-
-  try {
-    element.dataset[key] = String(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function toggleClass(element = null, className = "", enabled = false) {
-  if (!element || !className) return false;
-
-  try {
-    element.classList.toggle(className, Boolean(enabled));
-    return true;
-  } catch {
-    return false;
-  }
+  return "booting";
 }
 
 /* =========================================================
    ROOT STATE
 ========================================================= */
 
-function setRootState(state = "ready") {
-  const flags = getStateFlags(state);
+function setRootState(state = "booting") {
+  const value = normalizeState(state);
 
-  for (const element of roots()) {
-    toggleClass(element, "app-loading", flags.booting);
-    toggleClass(element, "app-booting", flags.booting);
-    toggleClass(element, "app-ready", flags.ready);
-    toggleClass(element, "app-fatal", flags.fatal);
+  const booting = value === "booting";
+  const ready = value === "ready";
+  const fatal = value === "fatal";
 
-    setDataset(element, "appLoading", flags.booting ? "true" : "false");
-    setDataset(element, "appBooting", flags.booting ? "true" : "false");
-    setDataset(element, "appReady", flags.ready ? "true" : "false");
-    setDataset(element, "appState", flags.value);
+  for (const root of roots()) {
+    root.dataset.appState = value;
+    root.dataset.appLoading = String(booting);
+    root.dataset.appBooting = String(booting);
+    root.dataset.appReady = String(ready);
+
+    root.classList.toggle("app-loading", booting);
+    root.classList.toggle("app-booting", booting);
+    root.classList.toggle("app-ready", ready);
+    root.classList.toggle("app-fatal", fatal);
   }
 
   return true;
 }
 
 /* =========================================================
-   LOADER STATE
-========================================================= */
-
-function setLoaderState(loader = null, visible = false, state = "hidden") {
-  if (!loader) return false;
-
-  const show = Boolean(visible);
-  const status = show ? normalizeState(state || "booting") : "hidden";
-
-  try {
-    loader.hidden = !show;
-
-    loader.setAttribute("aria-hidden", show ? "false" : "true");
-    loader.setAttribute("aria-busy", show ? "true" : "false");
-
-    loader.classList.toggle("is-visible", show);
-    loader.classList.toggle("is-hidden", !show);
-
-    loader.dataset.loaderVisible = show ? "true" : "false";
-    loader.dataset.loaderState = status;
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* =========================================================
-   PUBLIC API
+   LOADER ELEMENT
 ========================================================= */
 
 export function getLoaderElement() {
   if (!isBrowser()) return null;
-
-  try {
-    return document.getElementById(LOADER_ID);
-  } catch {
-    return null;
-  }
+  return document.getElementById(LOADER_ID);
 }
 
 export function isLoaderVisible() {
@@ -157,55 +87,52 @@ export function isLoaderVisible() {
   );
 }
 
-export function showLoader(state = "booting") {
-  const loader = getLoaderElement();
-  const status = normalizeState(state || "booting");
+/* =========================================================
+   LOADER STATE
+========================================================= */
 
-  setRootState(status);
-
-  return setLoaderState(loader, true, status);
-}
-
-export function hideLoader() {
+function setLoaderVisibility(visible = false, state = "booting") {
   const loader = getLoaderElement();
 
-  setRootState("ready");
+  if (!loader) return false;
 
-  return setLoaderState(loader, false, "hidden");
-}
+  const show = Boolean(visible);
+  const status = show ? normalizeState(state) : "hidden";
 
-export function forceHideLoader() {
-  const loader = getLoaderElement();
+  loader.hidden = !show;
 
-  return setLoaderState(loader, false, "hidden");
+  loader.classList.toggle("is-visible", show);
+  loader.classList.toggle("is-hidden", !show);
+
+  loader.dataset.loaderVisible = String(show);
+  loader.dataset.loaderState = status;
+
+  loader.setAttribute("aria-hidden", show ? "false" : "true");
+  loader.setAttribute("aria-busy", show ? "true" : "false");
+
+  return true;
 }
 
 /* =========================================================
-   COMPAT NO-OP
+   PUBLIC API
 ========================================================= */
 
-export function takeOverStaticLoader() {
-  return showLoader("booting");
+export function showLoader(state = "booting") {
+  const status = normalizeState(state);
+
+  setRootState(status);
+
+  return setLoaderVisibility(true, status);
 }
 
-export function prepareBootLoader() {
-  return showLoader("booting");
+export function hideLoader() {
+  setRootState("ready");
+
+  return setLoaderVisibility(false, "hidden");
 }
 
-export function restoreLoaderInlineStyles() {
-  return true;
-}
-
-export function clearBootFailsafeTimer() {
-  return true;
-}
-
-export function armBootFailsafeLoader() {
-  return null;
-}
-
-export function installLoaderDebugApi() {
-  return null;
+export function forceHideLoader() {
+  return setLoaderVisibility(false, "hidden");
 }
 
 /* =========================================================
@@ -217,28 +144,9 @@ export function getLoaderSnapshot() {
 
   return {
     version: LOADER_VERSION,
-
     exists: Boolean(loader),
     visible: isLoaderVisible(),
-
     state: loader?.dataset?.loaderState || "missing",
-
-    rootState: isBrowser()
-      ? document.body?.dataset?.appState ||
-        document.documentElement?.dataset?.appState ||
-        ""
-      : "",
-
-    policy: {
-      noImports: true,
-      noAppCore: true,
-      noEvents: true,
-      noTimers: true,
-      noFallbackDom: true,
-      noInlineTextMutation: true,
-      noTextRendering: true,
-      forceHideDoesNotSetReady: true,
-    },
   };
 }
 
@@ -255,14 +163,6 @@ export default {
   showLoader,
   hideLoader,
   forceHideLoader,
-
-  takeOverStaticLoader,
-  prepareBootLoader,
-  restoreLoaderInlineStyles,
-
-  clearBootFailsafeTimer,
-  armBootFailsafeLoader,
-  installLoaderDebugApi,
 
   getLoaderSnapshot,
 };

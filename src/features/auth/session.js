@@ -13,6 +13,7 @@
    - Leer refresh token persistido para permitir restore vía refresh.
    - Persistir token/refresh/session auxiliar al aplicar sesión.
    - No fabricar user desde storage.
+   - No arrastrar refresh/session de otro usuario.
    - Conservar slug real del usuario si existe.
    - Exponer homePath: /@{user.slug} si el usuario trae slug real.
    - Sin fetch.
@@ -40,7 +41,7 @@ import {
   persistAuthStorage,
 } from "./storage.js";
 
-export const AUTH_SESSION_VERSION = "auth.session.v4";
+export const AUTH_SESSION_VERSION = "auth.session.v5";
 
 const SOURCE = "auth.session";
 
@@ -628,6 +629,23 @@ function bestStateSession(user = bestStateUser()) {
   return sameSessionUser(session, user) ? session : null;
 }
 
+function shouldKeepCurrentRefreshContext({
+  explicitUser = null,
+  user = null,
+  session = null,
+} = {}) {
+  /*
+    Si el payload trae usuario explícito, sólo conservamos contexto auxiliar
+    si la sesión actual pertenece al mismo usuario. Así no se arrastra refresh
+    de un login anterior.
+  */
+  if (!explicitUser) return true;
+  if (!user) return false;
+  if (!session) return false;
+
+  return sameSessionUser(session, user);
+}
+
 /* =========================================================
    STATE PATCH
 ========================================================= */
@@ -860,21 +878,45 @@ export function applySession(payload = {}, options = {}) {
   const source = options.source || SOURCE;
   const eventMode = options.eventMode || "apply";
 
+  const explicitToken = readTokenFromPayload(payload);
+  const explicitRefreshToken = readRefreshTokenFromPayload(payload);
+  const explicitUser = readUserFromPayload(payload);
+
   const token =
-    readTokenFromPayload(payload) ||
+    explicitToken ||
     (options.useCurrentToken === false ? "" : bestStateToken());
 
-  const refreshToken =
-    readRefreshTokenFromPayload(payload) ||
-    (options.useCurrentRefreshToken === false ? "" : bestStateRefreshToken());
-
   const user =
-    readUserFromPayload(payload) ||
+    explicitUser ||
     (options.useCurrentUser === false ? null : bestStateUser());
 
+  const currentSession = options.keepCurrentSession === false
+    ? null
+    : bestStateSession(user);
+
+  const explicitSession = readSessionFromPayload(payload, user);
+
+  const canKeepCurrentRefreshContext = shouldKeepCurrentRefreshContext({
+    explicitUser,
+    user,
+    session: explicitSession || currentSession,
+  });
+
+  const refreshToken =
+    explicitRefreshToken ||
+    (
+      options.useCurrentRefreshToken === false || !canKeepCurrentRefreshContext
+        ? ""
+        : bestStateRefreshToken()
+    );
+
   const session =
-    readSessionFromPayload(payload, user) ||
-    (options.keepCurrentSession === false ? null : bestStateSession(user));
+    explicitSession ||
+    (
+      canKeepCurrentRefreshContext
+        ? currentSession
+        : null
+    );
 
   const patch = buildStatePatch({
     token,
@@ -884,7 +926,7 @@ export function applySession(payload = {}, options = {}) {
   });
 
   commitState(patch, {
-    source: `${SOURCE}:apply`,
+    source,
     silent: true,
     emit: false,
 
@@ -956,7 +998,7 @@ export function clearSessionLocal(options = {}) {
       lastAuthSyncAt: nowIso(),
     },
     {
-      source: `${SOURCE}:clear`,
+      source: options.source || `${SOURCE}:clear`,
       silent: true,
       emit: false,
       forceUnauthenticated: true,

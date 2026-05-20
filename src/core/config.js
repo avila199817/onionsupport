@@ -9,7 +9,7 @@
    - Home interna: /.
    - Home visible de usuario: /@{user.slug}.
    - Rutas privadas visibles: /@{user.slug}/{ruta}.
-   - Auth endpoints mínimos.
+   - Auth endpoints mínimos alineados con backend.
    - /api/auth/me siempre privado.
    - Token param único: token.
    - Roles únicos: admin / user.
@@ -23,7 +23,7 @@
    - Sin magia negra.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.v4";
+export const CONFIG_VERSION = "core.config.v5";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
@@ -47,6 +47,17 @@ export const FORBIDDEN_FRONTEND_API_ORIGINS = CANONICAL_FRONTEND_ORIGINS;
 export const TOKEN_PARAM = "token";
 export const USER_HOME_PREFIX = "/@";
 
+export const ALLOWED_ROLES = Object.freeze(["admin", "user"]);
+
+export const BLOCKED_FRONTEND_ROUTES = Object.freeze([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
+]);
+
 /* =========================================================
    ROUTES
 ========================================================= */
@@ -66,8 +77,12 @@ export const ROUTES = Object.freeze({
   cuenta: "/cuenta",
   ajustes: "/ajustes",
 
-  usuarios: "/usuarios",
-  servidor: "/servidor",
+  /*
+    Rutas admin opcionales.
+    No se activan por fallback para evitar vistas inexistentes.
+  */
+  usuarios: "",
+  servidor: "",
 });
 
 export const PUBLIC_ROUTES = Object.freeze([
@@ -100,19 +115,27 @@ export const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
 
 export const AUTH_ENDPOINTS = Object.freeze({
   login: "/api/auth/login",
+
   logout: "/api/auth/logout",
+  logoutAll: "/api/auth/logout-all",
+
   me: "/api/auth/me",
   refresh: "/api/auth/refresh",
 
-  activate: "/api/auth/activate",
-  requestPasswordReset: "/api/auth/reset-password-request",
-  confirmPasswordReset: "/api/auth/reset-password-confirm",
+  activate: "/api/auth/activate-account",
+  activateAccount: "/api/auth/activate-account",
+
+  requestPasswordReset: "/api/auth/password-request",
+  confirmPasswordReset: "/api/auth/password-reset",
+
+  passwordRequest: "/api/auth/password-request",
+  passwordReset: "/api/auth/password-reset",
 });
 
 export const PUBLIC_API_PATHS = Object.freeze([
   AUTH_ENDPOINTS.login,
   AUTH_ENDPOINTS.refresh,
-  AUTH_ENDPOINTS.activate,
+  AUTH_ENDPOINTS.activateAccount,
   AUTH_ENDPOINTS.requestPasswordReset,
   AUTH_ENDPOINTS.confirmPasswordReset,
 ]);
@@ -120,6 +143,7 @@ export const PUBLIC_API_PATHS = Object.freeze([
 export const PRIVATE_API_PATHS = Object.freeze([
   AUTH_ENDPOINTS.me,
   AUTH_ENDPOINTS.logout,
+  AUTH_ENDPOINTS.logoutAll,
 ]);
 
 /* =========================================================
@@ -135,8 +159,16 @@ function freeze(value) {
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
+}
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(Object(obj), key);
 }
 
 function isBrowser() {
@@ -228,6 +260,22 @@ function normalizePathname(pathname = "/") {
 
   return value || "/";
 }
+
+export function isBlockedRoutePath(path = "") {
+  const clean = normalizePathname(
+    routePathFromUrlLike(path) || path || "/"
+  ).toLowerCase();
+
+  if (BLOCKED_FRONTEND_ROUTES.includes(clean)) return true;
+
+  return (
+    clean.startsWith("/2fa/") ||
+    clean.startsWith("/mfa/") ||
+    clean.startsWith("/otp/")
+  );
+}
+
+export const isLegacyBlockedRoute = isBlockedRoutePath;
 
 export function routePathFromUrlLike(value = "") {
   const raw = text(value, "");
@@ -341,6 +389,8 @@ function endpointMatches(path = "", candidate = "") {
 
 export function normalizeUserSlug(value = "") {
   const slug = text(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -426,6 +476,8 @@ export function buildUserScopedRoute(slug = "", route = ROUTES.home) {
 }
 
 export function canonicalRoutePath(path = "") {
+  if (isBlockedRoutePath(path)) return "";
+
   const info = getUserScopedRouteInfo(path);
   return info.scoped ? info.canonicalPath : normalizeRoutePath(path);
 }
@@ -471,6 +523,8 @@ export const config = freeze({
   technicalPublicRoutes: TECHNICAL_PUBLIC_ROUTES,
   protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
 
+  blockedFrontendRoutes: BLOCKED_FRONTEND_ROUTES,
+
   tokenParam: TOKEN_PARAM,
 
   publicApiPaths: PUBLIC_API_PATHS,
@@ -504,7 +558,7 @@ export const config = freeze({
     userHomePrefix: USER_HOME_PREFIX,
     postLoginFallback: ROUTES.home,
 
-    allowedRoles: freeze(["admin", "user"]),
+    allowedRoles: ALLOWED_ROLES,
 
     endpoints: AUTH_ENDPOINTS,
 
@@ -515,12 +569,13 @@ export const config = freeze({
       session: freeze([
         AUTH_ENDPOINTS.login,
         AUTH_ENDPOINTS.logout,
+        AUTH_ENDPOINTS.logoutAll,
         AUTH_ENDPOINTS.me,
         AUTH_ENDPOINTS.refresh,
       ]),
 
       activation: freeze([
-        AUTH_ENDPOINTS.activate,
+        AUTH_ENDPOINTS.activateAccount,
       ]),
 
       passwordReset: freeze([
@@ -541,11 +596,12 @@ export const config = freeze({
       generic: freeze([TOKEN_PARAM]),
       activation: freeze([TOKEN_PARAM]),
       reset: freeze([TOKEN_PARAM]),
-      refresh: freeze([TOKEN_PARAM]),
     }),
 
     session: freeze({
+      persistent: true,
       restoreOnBoot: true,
+      silentRefresh: true,
       requireTokenForAuthenticated: true,
       clearGhostUserWithoutToken: true,
       userHomePrefix: USER_HOME_PREFIX,
@@ -590,6 +646,7 @@ export const config = freeze({
     authLikeRoutes: PUBLIC_ROUTES,
     technicalPublicRoutes: TECHNICAL_PUBLIC_ROUTES,
     protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
+    blockedFrontendRoutes: BLOCKED_FRONTEND_ROUTES,
   }),
 
   loader: freeze({
@@ -604,8 +661,12 @@ export const config = freeze({
 
   featureFlags: freeze({
     restoreSessionOnBoot: true,
+    silentRefresh: true,
+    persistentSession: true,
+
     requireAuthorizationForMe: true,
     keepMeEndpointPrivate: true,
+
     userSlugHome: true,
     userScopedPrivateRoutes: true,
   }),
@@ -628,7 +689,20 @@ export const config = freeze({
     canonicalFrontendOrigins: CANONICAL_FRONTEND_ORIGINS,
     forbiddenFrontendApiOrigins: FORBIDDEN_FRONTEND_API_ORIGINS,
 
-    sensitiveQueryParams: freeze([TOKEN_PARAM]),
+    sensitiveQueryParams: freeze([
+      TOKEN_PARAM,
+      "access_token",
+      "refresh_token",
+      "id_token",
+      "secret",
+      "session",
+      "code",
+      "password",
+      "pwd",
+      "key",
+      "sig",
+      "signature",
+    ]),
   }),
 });
 
@@ -666,7 +740,11 @@ export function isCanonicalBackendApiBase(value = "") {
 }
 
 export function getRoute(key = "home", fallback = "/") {
-  return config.routes[key] || fallback;
+  if (hasOwn(config.routes, key)) {
+    return config.routes[key];
+  }
+
+  return fallback;
 }
 
 /*
@@ -696,12 +774,16 @@ export function isPrivateApiPath(path = "") {
 }
 
 export function isTechnicalPublicRoute(path = "") {
+  if (isBlockedRoutePath(path)) return false;
+
   const route = canonicalRoutePath(path);
 
   return config.technicalPublicRoutes.some((item) => pathMatches(route, item));
 }
 
 export function isPublicRoute(path = "") {
+  if (isBlockedRoutePath(path)) return false;
+
   const route = canonicalRoutePath(path);
 
   return config.publicRoutes.some((item) => pathMatches(route, item));
@@ -744,6 +826,7 @@ export function getConfigSnapshot() {
     routes: config.routes,
     publicRoutes: config.publicRoutes,
     technicalPublicRoutes: config.technicalPublicRoutes,
+    blockedFrontendRoutes: config.blockedFrontendRoutes,
 
     userHome: {
       prefix: USER_HOME_PREFIX,
@@ -756,6 +839,8 @@ export function getConfigSnapshot() {
       homePattern: "/@{user.slug}",
     },
 
+    authEndpoints: config.auth.endpoints,
+
     publicApiPaths: config.publicApiPaths,
     privateApiPaths: config.privateApiPaths,
 
@@ -764,6 +849,16 @@ export function getConfigSnapshot() {
     meIsPublic: isPublicApiPath(AUTH_ENDPOINTS.me),
     meIsPrivate: isPrivateApiPath(AUTH_ENDPOINTS.me),
 
+    endpointsAligned: {
+      login: AUTH_ENDPOINTS.login,
+      refresh: AUTH_ENDPOINTS.refresh,
+      me: AUTH_ENDPOINTS.me,
+      logout: AUTH_ENDPOINTS.logout,
+      activateAccount: AUTH_ENDPOINTS.activateAccount,
+      passwordRequest: AUTH_ENDPOINTS.requestPasswordReset,
+      passwordReset: AUTH_ENDPOINTS.confirmPasswordReset,
+    },
+
     policy: {
       apiUnique: true,
       tokenParamUnique: true,
@@ -771,9 +866,17 @@ export function getConfigSnapshot() {
       noHomeRoute: true,
       noRouteAliases: true,
 
-      roles: ["admin", "user"],
+      blockedHomeAlias: true,
+      blocked403: true,
+      blocked404: true,
+
+      roles: [...ALLOWED_ROLES],
 
       langBase: "es",
+
+      sessionPersistent: true,
+      restoreSessionOnBoot: true,
+      silentRefresh: true,
 
       userSlugHome: true,
       userScopedPrivateRoutes: true,

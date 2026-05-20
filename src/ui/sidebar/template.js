@@ -50,8 +50,8 @@ export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v10";
 ========================================================= */
 
 const BRAND_LOGOS = Object.freeze({
-  white: "/favicon_white.png",
-  black: "/favicon_black.png",
+  white: new URL("../../media/img/favicon_white.png", import.meta.url).href,
+  black: new URL("../../media/img/favicon_black.png", import.meta.url).href,
 });
 
 /* =========================================================
@@ -160,34 +160,29 @@ function safeInternalHref(value = "", fallback = "/") {
 function safeAssetSrc(value = "", fallback = "") {
   const src = text(value, fallback);
 
-  if (!src.startsWith("/")) return fallback;
-  if (src.startsWith("//")) return fallback;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(src)) return fallback;
-  if (/[\r\n\t\\]/.test(src)) return fallback;
-  if (hasSensitiveQuery(src)) return fallback;
-
-  return src.replace(/\/{2,}/g, "/") || fallback;
-}
-
-function safeImageSrc(value = "") {
-  const src = text(value, "");
-
-  if (!src) return "";
+  if (!src) return fallback;
 
   if (src.startsWith("/")) {
-    return safeAssetSrc(src, "");
+    if (src.startsWith("//")) return fallback;
+    if (/[\r\n\t\\]/.test(src)) return fallback;
+    if (hasSensitiveQuery(src)) return fallback;
+
+    return src.replace(/\/{2,}/g, "/") || fallback;
   }
 
-  if (/^https:\/\//i.test(src) && !hasSensitiveQuery(src)) {
+  if (/^https?:\/\//i.test(src) && !hasSensitiveQuery(src)) {
     try {
-      const url = new URL(src);
-      return url.href;
+      return new URL(src).href;
     } catch {
-      return "";
+      return fallback;
     }
   }
 
-  return "";
+  return fallback;
+}
+
+function safeImageSrc(value = "") {
+  return safeAssetSrc(value, "");
 }
 
 function roleText(value = "") {
@@ -317,16 +312,19 @@ function createIconSlot(className = "", iconName = SIDEBAR_ICONS.home, svgClass 
 ========================================================= */
 
 function getPreferredBrandLogoSrc() {
-  const white = safeAssetSrc(BRAND_LOGOS.white, "");
-  const black = safeAssetSrc(BRAND_LOGOS.black, "");
+  const white = safeImageSrc(BRAND_LOGOS.white);
+  const black = safeImageSrc(BRAND_LOGOS.black);
 
   if (!isBrowser()) return white || black || "";
 
   try {
     const root = document.documentElement;
+
     const theme = text(
       root?.dataset?.theme ||
         root?.getAttribute?.("data-theme") ||
+        root?.dataset?.appearance ||
+        root?.getAttribute?.("data-appearance") ||
         "",
       ""
     ).toLowerCase();
@@ -334,17 +332,15 @@ function getPreferredBrandLogoSrc() {
     if (theme === "light") return black || white || "";
     if (theme === "dark") return white || black || "";
 
-    const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches === true;
-
-    return prefersDark ? white || black || "" : black || white || "";
+    return white || black || "";
   } catch {
     return white || black || "";
   }
 }
 
 export function createSidebarBrandLogo() {
-  const whiteLogo = safeAssetSrc(BRAND_LOGOS.white, "");
-  const blackLogo = safeAssetSrc(BRAND_LOGOS.black, "");
+  const whiteLogo = safeImageSrc(BRAND_LOGOS.white);
+  const blackLogo = safeImageSrc(BRAND_LOGOS.black);
   const preferredLogo = getPreferredBrandLogoSrc();
 
   const logo = createElement("span", {
@@ -358,30 +354,12 @@ export function createSidebarBrandLogo() {
     },
   });
 
-  const picture = createElement("picture", {
-    className: "sidebar-brand-logo-picture",
-    attrs: {
-      "data-sidebar-brand-logo-picture": "true",
-    },
-  });
-
   appendChildren(
-    picture,
-    createElement("source", {
-      attrs: {
-        srcset: whiteLogo,
-        media: "(prefers-color-scheme: dark)",
-        "data-sidebar-brand-logo-source": "white",
-      },
-    })
-  );
-
-  appendChildren(
-    picture,
+    logo,
     createElement("img", {
       className: "sidebar-brand-logo-img",
       attrs: {
-        src: preferredLogo || blackLogo || whiteLogo,
+        src: preferredLogo,
         alt: "",
         loading: "eager",
         decoding: "async",
@@ -392,8 +370,6 @@ export function createSidebarBrandLogo() {
       },
     })
   );
-
-  appendChildren(logo, picture);
 
   return logo;
 }

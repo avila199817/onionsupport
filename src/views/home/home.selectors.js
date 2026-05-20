@@ -23,9 +23,7 @@
    - Sin raw/data/payload/response en salidas normalizadas.
 ========================================================= */
 
-import {
-  ROUTES as CORE_ROUTES,
-} from "../../core/config.js";
+import { ROUTES as CORE_ROUTES } from "../../core/config.js";
 
 import {
   normalizeHomeDashboard,
@@ -38,7 +36,7 @@ import {
   buildHomeActivityFromCollections,
 } from "./home.model.js";
 
-export const HOME_SELECTORS_VERSION = "home.selectors.v4";
+export const HOME_SELECTORS_VERSION = "home.selectors.v5";
 
 /* =========================================================
    CONSTANTS
@@ -48,21 +46,29 @@ export const DEFAULT_PAGE_SIZE = 5;
 export const DEFAULT_CURRENCY = "EUR";
 export const DEFAULT_LOCALE = "es-ES";
 
-export const HOME_ROUTES = Object.freeze({
-  HOME: CORE_ROUTES.home || CORE_ROUTES.root || "/",
-  INCIDENCIAS: CORE_ROUTES.incidencias || "/incidencias",
-  FACTURAS: CORE_ROUTES.facturas || "/facturas",
-  CLIENTES: CORE_ROUTES.clientes || "/clientes",
-  USUARIOS: CORE_ROUTES.usuarios || "/usuarios",
-  CUENTA: CORE_ROUTES.cuenta || "/cuenta",
-  AJUSTES: CORE_ROUTES.ajustes || "/ajustes",
+const ACTIONS = Object.freeze({
+  NAVIGATE: "navigate_home",
+  CREATE_INCIDENCIA: "create_incidencia",
 });
 
-const VALID_ROLES = Object.freeze(["admin", "user"]);
+const VALID_ROUTE_FALLBACKS = Object.freeze({
+  incidencias: "/incidencias",
+  facturas: "/facturas",
+  clientes: "/clientes",
+});
 
-const TICKET_OPEN_KEYS = Object.freeze(["pending", "open", "progress"]);
-const TICKET_CLOSED_KEYS = Object.freeze(["resolved", "closed"]);
-const INVOICE_PENDING_KEYS = Object.freeze(["pending", "overdue", "partial"]);
+const VALID_OPTIONAL_ROUTES = Object.freeze([
+  "usuarios",
+  "cuenta",
+  "ajustes",
+  "search",
+]);
+
+export const VALID_ROLES = Object.freeze(["admin", "user"]);
+
+export const TICKET_OPEN_KEYS = Object.freeze(["pending", "open", "progress"]);
+export const TICKET_CLOSED_KEYS = Object.freeze(["resolved", "closed"]);
+export const INVOICE_PENDING_KEYS = Object.freeze(["pending", "overdue", "partial"]);
 
 const ADMIN_ACTIVITY_TYPES = new Set([
   "client",
@@ -83,12 +89,24 @@ const RAW_KEYS = new Set([
 const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
 
+const SENSITIVE_QUERY_RE =
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+
+const ADMIN_ENTITY_RE =
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
+
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
 
 export function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+export function hasKeys(value = {}) {
+  return Boolean(isObject(value) && Object.keys(value).length > 0);
 }
 
 export function safeText(value, fallback = "") {
@@ -240,7 +258,10 @@ export function isSameIdentity(a = "", b = "") {
 
 function redact(value = "") {
   return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -287,9 +308,7 @@ function sanitizeObject(value = {}) {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
-    String(value || "")
-  );
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
 }
 
 function normalizeHashPath(value = "") {
@@ -336,6 +355,72 @@ export function normalizeRoute(route = "") {
   if (canonical === "/home") return "";
 
   return raw;
+}
+
+function routeFromCore(name = "", fallback = "") {
+  const route = normalizeRoute(CORE_ROUTES?.[name]);
+
+  if (route) return route;
+
+  return fallback ? normalizeRoute(fallback) : "";
+}
+
+export const HOME_ROUTES = Object.freeze({
+  INCIDENCIAS: routeFromCore("incidencias", VALID_ROUTE_FALLBACKS.incidencias),
+  FACTURAS: routeFromCore("facturas", VALID_ROUTE_FALLBACKS.facturas),
+  CLIENTES: routeFromCore("clientes", VALID_ROUTE_FALLBACKS.clientes),
+
+  USUARIOS: routeFromCore("usuarios", ""),
+  CUENTA: routeFromCore("cuenta", ""),
+  AJUSTES: routeFromCore("ajustes", ""),
+  SEARCH: routeFromCore("search", ""),
+});
+
+function getRoutePath(route = "") {
+  return normalizeRoute(route).split("?")[0].split("#")[0] || "";
+}
+
+function isAdminOnlyRoute(route = "") {
+  const path = getRoutePath(route);
+  const clientes = getRoutePath(HOME_ROUTES.CLIENTES);
+  const usuarios = getRoutePath(HOME_ROUTES.USUARIOS);
+
+  if (!path) return false;
+
+  return (
+    Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
+  );
+}
+
+function isAdminEntityValue(value = "") {
+  return ADMIN_ENTITY_RE.test(String(value || "").toLowerCase());
+}
+
+function isEmailLike(value = "") {
+  const text = safeText(value, "");
+  return Boolean(text && EMAIL_RE.test(text));
+}
+
+function visualText(value = "", fallback = "Usuario") {
+  const text = redact(safeText(value, ""));
+
+  if (!text) return fallback;
+  if (isEmailLike(text)) return fallback;
+
+  return text;
+}
+
+function firstVisual(values = [], fallback = "Usuario") {
+  for (const value of safeArray(values)) {
+    const text = safeText(value, "");
+
+    if (!text || isEmailLike(text)) continue;
+
+    return redact(text);
+  }
+
+  return fallback;
 }
 
 function safeImageSrc(value = "") {
@@ -486,6 +571,7 @@ export function toTimestamp(value = null) {
 
   if (esDate) {
     const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = esDate;
+
     const date = new Date(
       Number(yyyy),
       Number(mm) - 1,
@@ -637,6 +723,22 @@ export function isUserRole(role = "") {
   return normalizeRole(role) === "user";
 }
 
+function roleFromAdminFlag(value = {}) {
+  const source = safeObject(value);
+
+  if (
+    source.admin === true ||
+    source.isAdmin === true ||
+    source.meta?.admin === true ||
+    source.dashboard?.admin === true ||
+    source.dashboard?.meta?.admin === true
+  ) {
+    return "admin";
+  }
+
+  return "";
+}
+
 export function getDashboard(input = {}) {
   const data = safeObject(input);
 
@@ -654,27 +756,33 @@ export function getDashboard(input = {}) {
 }
 
 export function getNormalizedDashboard(input = {}) {
+  const data = safeObject(input);
+  const dashboard = getDashboard(data);
+
   try {
-    return normalizeHomeDashboard(getDashboard(input) || input);
+    return normalizeHomeDashboard(hasKeys(dashboard) ? dashboard : data);
   } catch {
-    return getDashboard(input);
+    return dashboard;
   }
 }
 
 function publicUser(user = {}) {
   const raw = sanitizeObject(user);
 
-  const role = normalizeRole(
-    first(
-      raw.role,
-      raw.rol,
-      raw.roles,
-      "user"
-    )
-  );
+  const role =
+    normalizeRole(
+      first(
+        raw.role,
+        raw.rol,
+        raw.roles,
+        ""
+      )
+    ) ||
+    roleFromAdminFlag(raw) ||
+    "user";
 
-  const displayName = safeText(
-    first(
+  const displayName = firstVisual(
+    [
       raw.displayName,
       raw.fullName,
       raw.name,
@@ -685,8 +793,8 @@ function publicUser(user = {}) {
       raw.username,
       raw.userName,
       raw.slug,
-      raw.lookup?.slug
-    ),
+      raw.lookup?.slug,
+    ],
     "Usuario"
   );
 
@@ -712,9 +820,9 @@ function publicUser(user = {}) {
     slug: safeText(first(raw.slug, raw.lookup?.slug, raw.profile?.slug), ""),
 
     displayName,
-    fullName: safeText(first(raw.fullName, displayName), displayName),
-    name: safeText(first(raw.name, displayName), displayName),
-    nombre: safeText(first(raw.nombre, displayName), displayName),
+    fullName: displayName,
+    name: displayName,
+    nombre: displayName,
 
     avatar: avatarUrl,
     avatarUrl,
@@ -751,20 +859,29 @@ export function getRole(input = {}) {
   const user = getUser(data);
   const dashboard = getDashboard(data);
 
-  return normalizeRole(
-    first(
-      data.role,
-      data.currentRole,
-      data.state?.role,
-      data.state?.userRole,
-      data.state?.roles,
-      dashboard.role,
-      dashboard.meta?.role,
-      user.role,
-      user.rol,
-      user.roles,
-      "user"
-    )
+  return (
+    normalizeRole(
+      first(
+        data.role,
+        data.currentRole,
+        data.state?.role,
+        data.state?.userRole,
+        data.state?.roles,
+        dashboard.role,
+        dashboard.rol,
+        dashboard.roles,
+        dashboard.meta?.role,
+        dashboard.meta?.rol,
+        dashboard.meta?.roles,
+        user.role,
+        user.rol,
+        user.roles,
+        ""
+      )
+    ) ||
+    roleFromAdminFlag(data) ||
+    roleFromAdminFlag(dashboard) ||
+    "user"
   );
 }
 
@@ -775,15 +892,15 @@ export function canSeeUsersModule(input = {}) {
 export function getDisplayName(input = {}) {
   const user = getUser(input);
 
-  return safeText(
-    first(
+  return firstVisual(
+    [
       user.displayName,
       user.fullName,
       user.name,
       user.nombre,
       user.username,
-      user.slug
-    ),
+      user.slug,
+    ],
     "Usuario"
   );
 }
@@ -794,7 +911,7 @@ export function getAvatarUrl(input = {}) {
 }
 
 export function getInitials(value = "") {
-  const clean = normalizeWhitespace(value);
+  const clean = visualText(value, "ON");
 
   if (!clean) return "ON";
 
@@ -895,7 +1012,7 @@ function collection(input = {}, names = []) {
     if (Array.isArray(value)) return value;
 
     if (isObject(value)) {
-      const nested = first(value.items, value.rows, value.results, value.data, value.records);
+      const nested = first(value.items, value.rows, value.results, value.records);
       if (Array.isArray(nested)) return nested;
     }
   }
@@ -927,6 +1044,33 @@ function countFrom(input = {}, names = [], fallback = 0) {
   );
 }
 
+function activityVisibleForRole(input = {}, item = {}) {
+  if (isAdminRole(getRole(input))) return true;
+
+  const type = normalizeKey(first(item.type, item.kind, item.category, ""));
+  const route = normalizeRoute(first(item.route, item.href, item.link, item.to, ""));
+  const identity = safeText(
+    first(
+      item.entity,
+      item.resource,
+      item.collection,
+      item.targetType,
+      item.meta?.entity,
+      item.meta?.type,
+      type,
+      route,
+      ""
+    ),
+    ""
+  );
+
+  if (ADMIN_ACTIVITY_TYPES.has(type)) return false;
+  if (isAdminOnlyRoute(route)) return false;
+  if (isAdminEntityValue(identity)) return false;
+
+  return true;
+}
+
 export function getCollections(input = {}) {
   const admin = isAdminRole(getRole(input));
 
@@ -945,9 +1089,7 @@ export function getCollections(input = {}) {
     collection(input, ["activity", "activities", "recent", "recentActivity"])
   );
 
-  const activity = admin
-    ? rawActivity
-    : rawActivity.filter((item) => !ADMIN_ACTIVITY_TYPES.has(normalizeKey(first(item.type, item.kind, item.category, ""))));
+  const activity = rawActivity.filter((item) => activityVisibleForRole(input, item));
 
   return {
     tickets,
@@ -994,7 +1136,7 @@ export function normalizeCollection(value = null) {
   if (Array.isArray(value)) return value;
 
   const object = safeObject(value);
-  return safeArray(first(object.items, object.rows, object.results, object.data, object.records, []));
+  return safeArray(first(object.items, object.rows, object.results, object.records, []));
 }
 
 export function getRemoteCountFromCollection(value = null, fallback = 0) {
@@ -1014,20 +1156,42 @@ export function resolveCollectionSource(input = {}, aliases = []) {
    WIDGETS
 ========================================================= */
 
+function widgetVisibleForRole(input = {}, widget = {}) {
+  if (isAdminRole(getRole(input))) return true;
+
+  const route = getWidgetRoute(widget);
+
+  if (isAdminOnlyRoute(route)) return false;
+
+  const identity = safeText(
+    first(
+      widget.entity,
+      widget.resource,
+      widget.collection,
+      widget.type,
+      widget.kind,
+      widget.variant,
+      widget.category,
+      widget.widgetId,
+      widget.widgetKey,
+      widget.id,
+      widget.key,
+      widget.slug,
+      getWidgetId(widget),
+      getWidgetType(widget),
+      getWidgetTitle(widget),
+      route,
+      ""
+    ),
+    ""
+  );
+
+  return !isAdminEntityValue(identity);
+}
+
 export function getWidgets(input = {}) {
-  const admin = isAdminRole(getRole(input));
-
   return normalizeHomeWidgets(collection(input, ["widgets", "cards", "kpis", "blocks"]))
-    .filter((widget) => {
-      if (admin) return true;
-
-      const type = normalizeKey(first(widget.type, widget.kind, widget.variant, widget.category, ""));
-      const id = normalizeKey(first(widget.widgetId, widget.widgetKey, widget.id, widget.key, widget.slug, ""));
-
-      return !["users", "usuarios", "clientes", "clients", "customers"].some((blocked) =>
-        type.includes(blocked) || id.includes(blocked)
-      );
-    });
+    .filter((widget) => widgetVisibleForRole(input, widget));
 }
 
 export function getWidgetId(widget = {}) {
@@ -1090,7 +1254,18 @@ export function getWidgetNumericValue(input = {}, matchers = [], fallback = null
 ========================================================= */
 
 export function getTicketIdentity(item = {}) {
-  return safeText(first(item.ticketId, item.incidenciaId, item.code, item.numero, item.ticketCode, item.entityId, item.id, item._id), "");
+  return safeText(
+    first(
+      item.ticketId,
+      item.incidenciaId,
+      item.code,
+      item.numero,
+      item.ticketCode,
+      item.entityId,
+      item.id
+    ),
+    ""
+  );
 }
 
 export function getTicketId(item = {}) {
@@ -1110,8 +1285,8 @@ export function getTicketDescription(item = {}) {
 }
 
 export function getTicketOwnerName(item = {}) {
-  return safeText(
-    first(
+  return firstVisual(
+    [
       item.clientName,
       item.clienteNombre,
       item.customerName,
@@ -1124,8 +1299,8 @@ export function getTicketOwnerName(item = {}) {
       item.cliente?.nombre,
       item.client?.name,
       item.customer?.name,
-      item.user?.name
-    ),
+      item.user?.name,
+    ],
     getTicketSubject(item)
   );
 }
@@ -1239,10 +1414,10 @@ export function getTicketAssignedTo(item = {}) {
   );
 
   if (isObject(assigned)) {
-    return safeText(first(assigned.name, assigned.nombre, assigned.displayName, assigned.id), "Sin asignar");
+    return firstVisual([assigned.name, assigned.nombre, assigned.displayName, assigned.id], "Sin asignar");
   }
 
-  return safeText(assigned, "Sin asignar");
+  return visualText(assigned, "Sin asignar");
 }
 
 export function getTicketCreatedAt(item = {}) {
@@ -1250,7 +1425,16 @@ export function getTicketCreatedAt(item = {}) {
 }
 
 export function getTicketUpdatedAt(item = {}) {
-  return first(item.updatedAt, item.lastUpdateAt, item.ultimaNovedad, item.modifiedAt, item.closedAt, item.createdAt, item.lifecycle?.updatedAt, item.audit?.updatedAt);
+  return first(
+    item.updatedAt,
+    item.lastUpdateAt,
+    item.ultimaNovedad,
+    item.modifiedAt,
+    item.closedAt,
+    item.createdAt,
+    item.lifecycle?.updatedAt,
+    item.audit?.updatedAt
+  );
 }
 
 export function getTicketAttachmentsCount(item = {}) {
@@ -1262,7 +1446,7 @@ export function getTicketAttachmentsCount(item = {}) {
 }
 
 export function getTicketSortTimestamp(item = {}) {
-  return toTimestamp(getTicketUpdatedAt(item)) || toTimestamp(getTicketCreatedAt(item)) || safeNumber(item?._ts, 0);
+  return toTimestamp(getTicketUpdatedAt(item)) || toTimestamp(getTicketCreatedAt(item));
 }
 
 export function compareTicketsNewestFirst(a = {}, b = {}) {
@@ -1278,7 +1462,20 @@ export function sortTicketsNewestFirst(items = []) {
 ========================================================= */
 
 export function getInvoiceIdentity(item = {}) {
-  return safeText(first(item.invoiceId, item.facturaId, item.numeroFacturaLegal, item.numeroFactura, item.invoiceNumber, item.number, item.numero, item.code, item.id, item._id), "");
+  return safeText(
+    first(
+      item.invoiceId,
+      item.facturaId,
+      item.numeroFacturaLegal,
+      item.numeroFactura,
+      item.invoiceNumber,
+      item.number,
+      item.numero,
+      item.code,
+      item.id
+    ),
+    ""
+  );
 }
 
 export function getInvoiceId(item = {}) {
@@ -1290,7 +1487,21 @@ export function getInvoiceUniqueKey(item = {}, index = 0) {
 }
 
 export function getInvoiceAmount(item = {}) {
-  return safeNumber(first(item.total, item.amount, item.importe, item.price, item.subtotal, item.totalFactura, item.importeTotal, item.invoiceAmount, item.facturaTotal, 0), 0);
+  return safeNumber(
+    first(
+      item.total,
+      item.amount,
+      item.importe,
+      item.price,
+      item.subtotal,
+      item.totalFactura,
+      item.importeTotal,
+      item.invoiceAmount,
+      item.facturaTotal,
+      0
+    ),
+    0
+  );
 }
 
 export function getInvoiceCurrency(item = {}) {
@@ -1314,7 +1525,7 @@ export function isInvoicePendingLike(item = {}) {
 }
 
 export function getUserId(item = {}) {
-  return safeText(first(item.userId, item.usuarioId, item.id, item._id, item.username), "");
+  return safeText(first(item.userId, item.usuarioId, item.id, item.username), "");
 }
 
 export function getUserUniqueKey(item = {}, index = 0) {
@@ -1331,7 +1542,7 @@ export function isActiveUser(item = {}) {
 }
 
 export function getClientId(item = {}) {
-  return safeText(first(item.clienteId, item.clientId, item.customerId, item.id, item._id), "");
+  return safeText(first(item.clienteId, item.clientId, item.customerId, item.id), "");
 }
 
 export function getClientUniqueKey(item = {}, index = 0) {
@@ -1534,86 +1745,98 @@ export function getStatCards(input = {}) {
   ];
 }
 
+function quickAction({
+  iconName = "activity",
+  title = "Acción",
+  text = "",
+  action = ACTIONS.NAVIGATE,
+  dataAction = ACTIONS.NAVIGATE,
+  route = "",
+  modifier = "default",
+} = {}) {
+  const normalizedRoute = normalizeRoute(route);
+
+  if (!normalizedRoute) return null;
+
+  return {
+    iconName,
+    title,
+    text,
+    action,
+    dataAction,
+    route: normalizedRoute,
+    modifier,
+  };
+}
+
 export function getQuickActions(input = {}) {
-  if (isAdminRole(getRole(input))) {
+  const admin = isAdminRole(getRole(input));
+
+  if (admin) {
     return [
-      {
+      quickAction({
         iconName: "ticket",
         title: "Incidencias",
         text: "Revisar solicitudes, estados y prioridades.",
-        action: "go-incidencias",
-        dataAction: "navigate-home",
         route: HOME_ROUTES.INCIDENCIAS,
         modifier: "primary",
-      },
-      {
+      }),
+      quickAction({
         iconName: "invoice",
         title: "Facturación",
         text: "Consultar importes, estados y vencimientos.",
-        action: "go-facturas",
-        dataAction: "navigate-home",
         route: HOME_ROUTES.FACTURAS,
         modifier: "billing",
-      },
-      {
+      }),
+      quickAction({
         iconName: "client",
         title: "Clientes",
         text: "Abrir el listado de clientes.",
-        action: "go-clientes",
-        dataAction: "navigate-home",
         route: HOME_ROUTES.CLIENTES,
         modifier: "clients",
-      },
-      {
+      }),
+      quickAction({
         iconName: "users",
         title: "Usuarios",
         text: "Gestionar usuarios y acceso al panel.",
-        action: "go-usuarios",
-        dataAction: "navigate-home",
         route: HOME_ROUTES.USUARIOS,
         modifier: "users",
-      },
-    ];
+      }),
+    ].filter(Boolean);
   }
 
   return [
-    {
+    quickAction({
       iconName: "plus",
       title: "Crear incidencia",
       text: "Abre una solicitud para soporte.",
-      action: "create-incidencia",
-      dataAction: "create-incidencia",
+      action: ACTIONS.CREATE_INCIDENCIA,
+      dataAction: ACTIONS.CREATE_INCIDENCIA,
       route: HOME_ROUTES.INCIDENCIAS,
       modifier: "primary",
-    },
-    {
+    }),
+    quickAction({
       iconName: "ticket",
       title: "Mis incidencias",
       text: "Consulta el estado y las últimas novedades.",
-      action: "go-incidencias",
-      dataAction: "navigate-home",
       route: HOME_ROUTES.INCIDENCIAS,
       modifier: "tickets",
-    },
-    {
+    }),
+    quickAction({
       iconName: "invoice",
       title: "Mis facturas",
       text: "Revisa facturas, importes y estados.",
-      action: "go-facturas",
-      dataAction: "navigate-home",
       route: HOME_ROUTES.FACTURAS,
       modifier: "billing",
-    },
-    {
+    }),
+    quickAction({
       iconName: "home",
       title: "Mi cuenta",
       text: "Actualiza tus datos y preferencias.",
-      action: "go-cuenta",
-      dataAction: "navigate-home",
       route: HOME_ROUTES.CUENTA,
       modifier: "account",
-    },
-  ];
+    }),
+  ].filter(Boolean);
 }
 
 /* =========================================================
@@ -1631,20 +1854,17 @@ export function buildSyntheticActivity(input = {}) {
       users: admin ? collections.users : [],
       clients: admin ? collections.clients : [],
     })
-  );
+  ).filter((item) => activityVisibleForRole(input, item));
 }
 
 export function getActivity(input = {}) {
   const collections = getCollections(input);
-  const admin = isAdminRole(getRole(input));
 
   const activity = collections.activity.length
     ? normalizeHomeActivityList(collections.activity)
     : buildSyntheticActivity(input);
 
-  if (admin) return activity;
-
-  return activity.filter((item) => !ADMIN_ACTIVITY_TYPES.has(normalizeKey(first(item.type, item.kind, item.category, ""))));
+  return activity.filter((item) => activityVisibleForRole(input, item));
 }
 
 export function getActivityTitle(item = {}) {
@@ -1676,6 +1896,7 @@ export function getPagination(items = [], input = {}) {
   const state = safeObject(data.state);
 
   const pageSize = clampNumber(first(data.pageSize, state.pageSize, DEFAULT_PAGE_SIZE), 1, 50);
+
   const totalCount = Math.max(
     rows.length,
     safeNumber(first(data.totalCount, data.remoteCount, state.totalCount, rows.length), rows.length)
@@ -1714,51 +1935,52 @@ export function getPagination(items = [], input = {}) {
 ========================================================= */
 
 export function buildHomeTemplateData(input = {}) {
-  const data = sanitizeObject(input);
-  const dashboard = getNormalizedDashboard(data);
-  const role = getRole({ ...data, dashboard });
+  const source = safeObject(input);
+  const dashboard = getNormalizedDashboard(source);
+  const role = getRole({ ...source, dashboard });
   const admin = isAdminRole(role);
 
   const summary = getSummary({
-    ...data,
+    ...source,
     dashboard,
+    role,
   });
 
   const collections = getCollections({
-    ...data,
+    ...source,
     dashboard,
     summary,
     role,
   });
 
   const stats = computeHomeStats({
-    ...data,
+    ...source,
     dashboard,
     summary,
     role,
   });
 
   const widgets = getWidgets({
-    ...data,
+    ...source,
     dashboard,
     summary,
     role,
   });
 
   const activity = getActivity({
-    ...data,
+    ...source,
     dashboard,
     summary,
     role,
   });
 
   const pagination = getPagination(collections.tickets, {
-    ...data,
+    ...source,
     totalCount: collections.ticketsRemoteCount,
   });
 
-  const user = getUser(data);
-  const displayName = getDisplayName(data);
+  const user = getUser(source);
+  const displayName = getDisplayName(source);
 
   return sanitizeObject({
     version: HOME_SELECTORS_VERSION,
@@ -1768,7 +1990,7 @@ export function buildHomeTemplateData(input = {}) {
     admin,
 
     displayName,
-    avatarUrl: getAvatarUrl(data),
+    avatarUrl: getAvatarUrl(source),
     initials: getInitials(displayName),
 
     dashboard,
@@ -1776,8 +1998,8 @@ export function buildHomeTemplateData(input = {}) {
     stats,
 
     widgets,
-    statCards: getStatCards({ ...data, dashboard, summary, role }),
-    quickActions: getQuickActions({ ...data, dashboard, summary, role }),
+    statCards: getStatCards({ ...source, dashboard, summary, role }),
+    quickActions: getQuickActions({ ...source, dashboard, summary, role }),
 
     tickets: collections.tickets,
     incidencias: collections.tickets,
@@ -1818,11 +2040,12 @@ export function buildHomeTemplateData(input = {}) {
     },
 
     meta: {
-      requestId: first(dashboard.requestId, dashboard.meta?.requestId, data.requestId, ""),
+      requestId: first(dashboard.requestId, dashboard.meta?.requestId, source.requestId, ""),
       updatedAt: first(dashboard.updatedAt, dashboard.generatedAt, dashboard.meta?.updatedAt, ""),
       partial: Boolean(dashboard.partial),
       errorsCount: safeArray(dashboard.errors).length,
       canSeeUsers: admin,
+      optionalRoutes: VALID_OPTIONAL_ROUTES.filter((name) => Boolean(HOME_ROUTES[name.toUpperCase()])),
     },
   });
 }
@@ -1848,6 +2071,7 @@ export default {
   safeArray,
   safeObject,
   isObject,
+  hasKeys,
   first,
   normalizeWhitespace,
   normalizeText,

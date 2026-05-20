@@ -5,8 +5,9 @@
    Responsabilidad:
    - Helpers mínimos de compat para Topbar.
    - Resolver títulos visuales en formato Onion {Vista}.
-   - Resolver Home como /@{user.slug} cuando exista.
+   - Resolver Home como /@{user.slug} sólo cuando exista slug real.
    - Normalizar resultados de búsqueda local.
+   - Rutas base desde core/config.js.
    - Sin DOM mutation.
    - Sin overlays.
    - Sin search runtime.
@@ -18,13 +19,42 @@
    - El topbar real vive en src/ui/topbar/index.js.
 ========================================================= */
 
-export const TOPBAR_HELPERS_VERSION = "topbar.helpers.v3";
+import {
+  ROUTES,
+  USER_HOME_PREFIX,
+} from "../../core/config.js";
+
+export const TOPBAR_HELPERS_VERSION = "topbar.helpers.v4";
 
 export const TOPBAR_SCOPE = "ui:topbar";
 export const TOPBAR_SEARCH_SCOPE = "ui:topbar:search";
 
 export const TOPBAR_TITLE_PREFIX = "Onion";
 export const TOPBAR_DEFAULT_VIEW_TITLE = "Home";
+
+const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
+const INCIDENCIAS_ROUTE = ROUTES.incidencias || "/incidencias";
+const FACTURAS_ROUTE = ROUTES.facturas || "/facturas";
+const CLIENTES_ROUTE = ROUTES.clientes || "/clientes";
+const USUARIOS_ROUTE = ROUTES.usuarios || "/usuarios";
+const CUENTA_ROUTE = ROUTES.cuenta || "/cuenta";
+const AJUSTES_ROUTE = ROUTES.ajustes || "/ajustes";
+const SERVIDOR_ROUTE = ROUTES.servidor || "/servidor";
+
+const LOGIN_ROUTE = ROUTES.login || "/login";
+const ACTIVATE_ACCOUNT_ROUTE = ROUTES.activateAccount || "/activate-account";
+const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest || "/password-request";
+const PASSWORD_RESET_ROUTE = ROUTES.passwordReset || "/password-reset";
+
+const SENSITIVE_QUERY_PARAMS = Object.freeze([
+  "token",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "code",
+  "secret",
+  "session",
+]);
 
 export const TOPBAR_SEARCH_CONFIG = Object.freeze({
   debounceMs: 110,
@@ -49,30 +79,29 @@ export const TOPBAR_RESULT_TYPES = Object.freeze({
 });
 
 export const TOPBAR_VIEW_TITLES = Object.freeze({
-  "/": "Home",
-  "/incidencias": "Incidencias",
-  "/tickets": "Incidencias",
-  "/facturas": "Facturas",
-  "/clientes": "Clientes",
-  "/usuarios": "Usuarios",
-  "/cuenta": "Cuenta",
-  "/ajustes": "Ajustes",
-  "/servidor": "Servidor",
-  "/login": "Acceso",
-  "/activate-account": "Activar cuenta",
-  "/password-request": "Recuperar acceso",
-  "/password-reset": "Nueva contraseña",
+  [HOME_ROUTE]: "Home",
+  [INCIDENCIAS_ROUTE]: "Incidencias",
+  [FACTURAS_ROUTE]: "Facturas",
+  [CLIENTES_ROUTE]: "Clientes",
+  [USUARIOS_ROUTE]: "Usuarios",
+  [CUENTA_ROUTE]: "Cuenta",
+  [AJUSTES_ROUTE]: "Ajustes",
+  [SERVIDOR_ROUTE]: "Servidor",
+
+  [LOGIN_ROUTE]: "Acceso",
+  [ACTIVATE_ACCOUNT_ROUTE]: "Activar cuenta",
+  [PASSWORD_REQUEST_ROUTE]: "Recuperar acceso",
+  [PASSWORD_RESET_ROUTE]: "Nueva contraseña",
 });
 
 export const TOPBAR_SECTION_TITLES = Object.freeze([
-  ["/incidencias", "Incidencias"],
-  ["/tickets", "Incidencias"],
-  ["/facturas", "Facturas"],
-  ["/clientes", "Clientes"],
-  ["/usuarios", "Usuarios"],
-  ["/cuenta", "Cuenta"],
-  ["/ajustes", "Ajustes"],
-  ["/servidor", "Servidor"],
+  [INCIDENCIAS_ROUTE, "Incidencias"],
+  [FACTURAS_ROUTE, "Facturas"],
+  [CLIENTES_ROUTE, "Clientes"],
+  [USUARIOS_ROUTE, "Usuarios"],
+  [CUENTA_ROUTE, "Cuenta"],
+  [AJUSTES_ROUTE, "Ajustes"],
+  [SERVIDOR_ROUTE, "Servidor"],
 ]);
 
 const TYPE_LABELS = Object.freeze({
@@ -158,6 +187,12 @@ export function escapeHtml(_AppCore, value = "") {
     .replace(/'/g, "&#039;");
 }
 
+export function redactSensitiveText(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
 /* =========================================================
    TEXT
 ========================================================= */
@@ -235,18 +270,34 @@ export function getStateUser(AppCore = null) {
 export function normalizeSlug(value = "") {
   const slug = String(value ?? "")
     .trim()
-    .replace(/^\/@+/, "")
+    .replace(/^\/+/, "")
     .replace(/^@+/, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "");
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
 
-  return slug || "";
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+export function getRealUserSlug(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeSlug(
+    user.slug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      ""
+  );
 }
 
 export function resolveHomePath(AppCore = null) {
   const user = getStateUser(AppCore);
-  const slug = normalizeSlug(user?.slug || user?.username || "");
+  const slug = getRealUserSlug(user);
 
-  return slug ? `/@${slug}` : "/";
+  return slug ? `${USER_HOME_PREFIX}${slug}` : HOME_ROUTE;
 }
 
 /* =========================================================
@@ -272,7 +323,7 @@ export function normalizeResultType(type = TOPBAR_RESULT_TYPES.GENERAL) {
     return "usuario";
   }
 
-  if (clean === "ajustes" || clean === "setting" || clean === "config") {
+  if (clean === "ajustes" || clean === "setting" || clean === "settings" || clean === "config") {
     return "settings";
   }
 
@@ -317,7 +368,9 @@ export function isUnsafeHref(value = "") {
     raw.startsWith("javascript:") ||
     raw.startsWith("data:") ||
     raw.startsWith("vbscript:") ||
-    raw.startsWith("file:")
+    raw.startsWith("file:") ||
+    raw.startsWith("blob:") ||
+    raw.startsWith("about:")
   );
 }
 
@@ -371,23 +424,63 @@ function normalizePathname(pathname = "/") {
   return value || "/";
 }
 
-export function safeNormalizePath(_AppCore, path = "/") {
-  let raw = safeText(path, "/");
+function normalizeSearch(search = "") {
+  const value = safeText(search, "");
 
-  if (!raw || isUnsafeHref(raw) || isExternalHref(raw)) return "/";
-  if (isHashRouterPath(raw)) raw = normalizeHashRouterPath(raw);
-  if (isHashOnlyHref(raw)) return raw;
+  if (!value || value === "?") return "";
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = safeText(hash, "");
+
+  if (!value || value === "#") return "";
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
+function stripSensitiveParamsFromSearch(search = "") {
+  const normalized = normalizeSearch(search);
+
+  if (!normalized) return "";
 
   try {
-    if (/^https?:\/\//i.test(raw)) {
-      const url = new URL(raw, baseOrigin());
-      raw = `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
+    const params = new URLSearchParams(normalized);
+
+    for (const name of SENSITIVE_QUERY_PARAMS) {
+      params.delete(name);
     }
+
+    const output = params.toString();
+
+    return output ? `?${output}` : "";
   } catch {
-    return "/";
+    return "";
+  }
+}
+
+function stripSensitiveParamsFromHash(hash = "") {
+  const normalized = normalizeHash(hash);
+
+  if (!normalized || !normalized.includes("?")) {
+    return normalized;
   }
 
-  if (!raw.startsWith("/")) raw = `/${raw}`;
+  const index = normalized.indexOf("?");
+  const hashPath = normalized.slice(0, index);
+  const query = normalized.slice(index + 1);
+  const cleanQuery = stripSensitiveParamsFromSearch(`?${query}`);
+
+  return cleanQuery ? `${hashPath}${cleanQuery}` : hashPath;
+}
+
+function splitPath(path = "/") {
+  const raw = safeText(path, "/");
 
   const hashIndex = raw.indexOf("#");
   const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
@@ -397,15 +490,95 @@ export function safeNormalizePath(_AppCore, path = "/") {
   const search = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
   const pathname = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
 
-  return `${normalizePathname(pathname)}${search}${hash}`;
+  return {
+    pathname: normalizePathname(pathname),
+    search: stripSensitiveParamsFromSearch(search),
+    hash: stripSensitiveParamsFromHash(hash),
+  };
+}
+
+function joinPath(parts = {}) {
+  return [
+    normalizePathname(parts.pathname || "/"),
+    normalizeSearch(parts.search || ""),
+    normalizeHash(parts.hash || ""),
+  ].join("");
+}
+
+export function getUserScopedPathInfo(path = "/") {
+  const canonical = safeNormalizePath(null, path).split("?")[0].split("#")[0] || HOME_ROUTE;
+
+  if (!canonical.startsWith(USER_HOME_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: canonical,
+      lookupPath: canonical,
+    };
+  }
+
+  const rest = canonical.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeSlug(slugSegment);
+
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: canonical,
+      lookupPath: canonical,
+    };
+  }
+
+  const restPath = restSegments.length
+    ? normalizePathname(`/${restSegments.join("/")}`)
+    : HOME_ROUTE;
+
+  return {
+    scoped: true,
+    home: restPath === HOME_ROUTE,
+    slug,
+    restPath,
+    lookupPath: restPath,
+  };
+}
+
+export function safeNormalizePath(_AppCore, path = "/") {
+  let raw = safeText(path, "/");
+
+  if (!raw || isUnsafeHref(raw) || isExternalHref(raw)) return HOME_ROUTE;
+  if (isHashRouterPath(raw)) raw = normalizeHashRouterPath(raw);
+  if (isHashOnlyHref(raw)) return HOME_ROUTE;
+
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      const url = new URL(raw, baseOrigin());
+      raw = `${url.pathname || HOME_ROUTE}${url.search || ""}${url.hash || ""}`;
+    }
+  } catch {
+    return HOME_ROUTE;
+  }
+
+  if (raw.startsWith("//")) return HOME_ROUTE;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return HOME_ROUTE;
+  if (!raw.startsWith("/")) raw = `/${raw}`;
+
+  const parts = splitPath(raw);
+
+  return joinPath(parts);
 }
 
 export function safeNormalizeCanonicalPath(AppCore, path = "/") {
-  return safeNormalizePath(AppCore, path).split("?")[0].split("#")[0] || "/";
+  const clean = safeNormalizePath(AppCore, path).split("?")[0].split("#")[0] || HOME_ROUTE;
+  const scoped = getUserScopedPathInfo(clean);
+
+  return scoped.scoped ? scoped.lookupPath : clean;
 }
 
 export function getCurrentPublicPath(AppCore = null) {
-  if (!isBrowser()) return "/";
+  if (!isBrowser()) return HOME_ROUTE;
 
   try {
     const hash = window.location.hash || "";
@@ -416,10 +589,10 @@ export function getCurrentPublicPath(AppCore = null) {
 
     return safeNormalizePath(
       AppCore,
-      `${window.location.pathname || "/"}${window.location.search || ""}${hash}`
+      `${window.location.pathname || HOME_ROUTE}${window.location.search || ""}${hash}`
     );
   } catch {
-    return "/";
+    return HOME_ROUTE;
   }
 }
 
@@ -484,7 +657,7 @@ function decodeURIComponentSafe(value = "") {
 export function prettyTitleFromPath(path = "/") {
   const clean = normalizePathname(path);
 
-  if (clean === "/") return TOPBAR_DEFAULT_VIEW_TITLE;
+  if (clean === HOME_ROUTE) return TOPBAR_DEFAULT_VIEW_TITLE;
 
   return clean
     .replace(/^\/+/, "")
@@ -500,11 +673,6 @@ export function prettyTitleFromPath(path = "/") {
 
 export function resolveTopbarRouteTitle(AppCore = null, path = "/") {
   const clean = safeNormalizeCanonicalPath(AppCore, path);
-
-  if (/^\/@[^/]+/.test(clean)) {
-    return formatTopbarTitle(TOPBAR_DEFAULT_VIEW_TITLE);
-  }
-
   const directTitle = TOPBAR_VIEW_TITLES[clean];
 
   if (directTitle) return formatTopbarTitle(directTitle);
@@ -622,6 +790,66 @@ export function groupResults(results = []) {
 }
 
 /* =========================================================
+   SNAPSHOT
+========================================================= */
+
+export function getTopbarHelpersSnapshot() {
+  return {
+    version: TOPBAR_HELPERS_VERSION,
+
+    titlePrefix: TOPBAR_TITLE_PREFIX,
+    defaultViewTitle: TOPBAR_DEFAULT_VIEW_TITLE,
+
+    routes: {
+      home: HOME_ROUTE,
+      incidencias: INCIDENCIAS_ROUTE,
+      facturas: FACTURAS_ROUTE,
+      clientes: CLIENTES_ROUTE,
+      usuarios: USUARIOS_ROUTE,
+      cuenta: CUENTA_ROUTE,
+      ajustes: AJUSTES_ROUTE,
+      servidor: SERVIDOR_ROUTE,
+      login: LOGIN_ROUTE,
+      activateAccount: ACTIVATE_ACCOUNT_ROUTE,
+      passwordRequest: PASSWORD_REQUEST_ROUTE,
+      passwordReset: PASSWORD_RESET_ROUTE,
+    },
+
+    userHomePrefix: USER_HOME_PREFIX,
+
+    search: {
+      ...TOPBAR_SEARCH_CONFIG,
+    },
+
+    resultTypes: {
+      ...TOPBAR_RESULT_TYPES,
+    },
+
+    sensitiveQueryParams: [...SENSITIVE_QUERY_PARAMS],
+
+    policy: {
+      helpersOnly: true,
+      configDrivenRoutes: true,
+
+      noDomMutation: true,
+      noSearchRuntime: true,
+      noHttp: true,
+      noStore: true,
+      noRouterReal: true,
+
+      noTicketsRouteAlias: true,
+      noHomeRoute: true,
+      noSlugFabrication: true,
+      noUsernameHomeFallback: true,
+      noEmailIdentity: true,
+
+      userScopedPathCanonicalization: true,
+      stripsSensitiveQueryParams: true,
+    },
+  };
+}
+
+/* =========================================================
    DEFAULT EXPORT
 ========================================================= */
 
@@ -641,6 +869,7 @@ export default {
   safeObject,
   first,
   escapeHtml,
+  redactSensitiveText,
 
   normalizeText,
   normalizeLooseText,
@@ -651,6 +880,7 @@ export default {
 
   getStateUser,
   normalizeSlug,
+  getRealUserSlug,
   resolveHomePath,
 
   normalizeResultType,
@@ -664,6 +894,7 @@ export default {
   isHashRouterPath,
   normalizeHashRouterPath,
   isHashOnlyHref,
+  getUserScopedPathInfo,
   safeNormalizePath,
   safeNormalizeCanonicalPath,
   getCurrentPublicPath,
@@ -680,4 +911,6 @@ export default {
 
   highlight,
   groupResults,
+
+  getTopbarHelpersSnapshot,
 };

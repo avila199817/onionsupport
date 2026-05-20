@@ -7,8 +7,7 @@
    - Exponer estructura estable para CSS SaaS.
    - Preparar header, navegación y cuenta estilo ChatGPT.
    - Header logo-only: sin texto visible de marca.
-   - Logo white para tema dark / logo black para tema light vía CSS.
-   - Fallback SVG visible si los assets no cargan o el CSS oculta imágenes.
+   - Logo SVG único, visible y sin capas superpuestas.
    - Preparar markup del dropdown de cuenta.
    - Recibir datos ya normalizados desde index.js/user.js.
    - No navegar.
@@ -43,12 +42,7 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v8";
-
-export const SIDEBAR_LOGO_ASSETS = Object.freeze({
-  dark: "/src/media/img/favicon_white.png",
-  light: "/src/media/img/favicon_black.png",
-});
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v9";
 
 /* =========================================================
    ICON PATHS
@@ -315,7 +309,16 @@ function createIconSlot(className = "", iconName = SIDEBAR_ICONS.home, svgClass 
    BRAND LOGO
 ========================================================= */
 
-function createSidebarBrandFallbackLogo() {
+export function createSidebarBrandLogo() {
+  const logo = createElement("span", {
+    className: "sidebar-brand-logo",
+    attrs: {
+      "aria-hidden": "true",
+      "data-sidebar-brand-logo": "true",
+      "data-sidebar-brand-logo-mode": "svg-only",
+    },
+  });
+
   const fallback = createElement("span", {
     className: "sidebar-brand-logo-fallback",
     attrs: {
@@ -329,67 +332,7 @@ function createSidebarBrandFallbackLogo() {
     createSidebarIcon("brand", "sidebar-brand-logo-fallback-svg")
   );
 
-  return fallback;
-}
-
-export function createSidebarBrandLogo(options = {}) {
-  const darkSrc = safeAssetSrc(
-    options.darkSrc || options.logoDarkSrc,
-    SIDEBAR_LOGO_ASSETS.dark
-  );
-
-  const lightSrc = safeAssetSrc(
-    options.lightSrc || options.logoLightSrc,
-    SIDEBAR_LOGO_ASSETS.light
-  );
-
-  const logo = createElement("span", {
-    className: "sidebar-brand-logo",
-    attrs: {
-      "aria-hidden": "true",
-      "data-sidebar-brand-logo": "true",
-    },
-  });
-
-  const fallbackLogo = createSidebarBrandFallbackLogo();
-
-  const darkLogo = createElement("img", {
-    className:
-      "sidebar-brand-logo-img sidebar-brand-logo-img--theme-dark sidebar-brand-logo-img--white",
-    attrs: {
-      src: darkSrc,
-      alt: "",
-      width: "28",
-      height: "28",
-      loading: "eager",
-      decoding: "async",
-      draggable: "false",
-      "data-sidebar-logo-theme": "dark",
-      "data-sidebar-logo-asset": "white",
-    },
-  });
-
-  const lightLogo = createElement("img", {
-    className:
-      "sidebar-brand-logo-img sidebar-brand-logo-img--theme-light sidebar-brand-logo-img--black",
-    attrs: {
-      src: lightSrc,
-      alt: "",
-      width: "28",
-      height: "28",
-      loading: "eager",
-      decoding: "async",
-      draggable: "false",
-      "data-sidebar-logo-theme": "light",
-      "data-sidebar-logo-asset": "black",
-    },
-  });
-
-  appendChildren(logo, [
-    fallbackLogo,
-    darkLogo,
-    lightLogo,
-  ]);
+  appendChildren(logo, fallback);
 
   return logo;
 }
@@ -490,14 +433,7 @@ export function createSidebarHeader(options = {}) {
     },
   });
 
-  appendChildren(
-    brandContent,
-    createSidebarBrandLogo({
-      logoDarkSrc: options.logoDarkSrc,
-      logoLightSrc: options.logoLightSrc,
-    })
-  );
-
+  appendChildren(brandContent, createSidebarBrandLogo());
   appendChildren(brand, brandContent);
 
   const toggle = createElement("button", {
@@ -898,8 +834,6 @@ export function createSidebarTemplate(options = {}) {
     createSidebarHeader({
       brandLabel: options.brandLabel,
       brandHref: options.brandHref,
-      logoDarkSrc: options.logoDarkSrc,
-      logoLightSrc: options.logoLightSrc,
       open,
     }),
     createSidebarNav(options.items),
@@ -917,10 +851,6 @@ export function getSidebarTemplateSnapshot() {
   return {
     version: SIDEBAR_TEMPLATE_VERSION,
 
-    logoAssets: {
-      ...SIDEBAR_LOGO_ASSETS,
-    },
-
     icons: Object.keys(ICON_PATHS),
 
     policy: {
@@ -929,10 +859,10 @@ export function getSidebarTemplateSnapshot() {
       noHtmlString: true,
 
       logoOnlyHeaderBrand: true,
-      visibleFallbackLogo: true,
-      themeLogoPair: true,
-      whiteLogoForDarkTheme: true,
-      blackLogoForLightTheme: true,
+      singleLayerLogo: true,
+      visibleSvgLogo: true,
+      noThemeLogoPair: true,
+      noImageLogoOverlap: true,
       textOnlyHeaderBrand: false,
       panelCollapseIcon: true,
 

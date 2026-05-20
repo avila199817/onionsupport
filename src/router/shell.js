@@ -11,7 +11,7 @@
    - /@{user.slug}/{ruta} marca la ruta canónica /{ruta}.
    - Mostrar/ocultar chrome según route.hideShell/public/auth layout.
    - Mantener app-shell visible.
-   - Constantes base desde core/config.js.
+   - No pisar el host activo de router/render.js.
    - Sin Auth.
    - Sin guards.
    - Sin render de vistas.
@@ -21,24 +21,37 @@
    - Sin eventos.
    - Sin rutas inventadas.
    - Sin alias /home.
+   - Sin /403.
+   - Sin /404.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import {
   config,
-  ROUTES,
-  USER_HOME_PREFIX,
+  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
 } from "../core/config.js";
 
-export const ROUTER_SHELL_VERSION = "router.shell.v4";
+export const ROUTER_SHELL_VERSION = "router.shell.v5";
 
 const APP_NAME = config?.appName || config?.name || "Onion Support";
-const HOME_PATH = ROUTES.home || ROUTES.root || "/";
+
+const HOME_PATH = "/";
+const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
 const ACTIVE_CLASS = "is-active";
+const ROUTER_VIEW_HOST_ATTR = "data-router-view-host";
 
 const ROOT_READY_CLASSES = Object.freeze(["app-ready"]);
 const ROOT_LOADING_CLASSES = Object.freeze(["app-loading", "app-booting"]);
+
+const BLOCKED_LEGACY_PATHS = new Set([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
+]);
 
 const MENU_SELECTOR = [
   "a[data-sidebar-link]",
@@ -61,7 +74,11 @@ function isObject(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -82,7 +99,10 @@ function safeTitle(value = "") {
 
 function redact(value = "") {
   return cleanText(value, "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -160,8 +180,22 @@ function normalizePath(path = HOME_PATH) {
   return value || HOME_PATH;
 }
 
+function isBlockedLegacyPath(path = HOME_PATH) {
+  const clean = normalizePath(path).toLowerCase();
+
+  if (BLOCKED_LEGACY_PATHS.has(clean)) return true;
+
+  return (
+    clean.startsWith("/2fa/") ||
+    clean.startsWith("/mfa/") ||
+    clean.startsWith("/otp/")
+  );
+}
+
 function normalizeUserSlug(value = "") {
   const slug = cleanText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -254,6 +288,14 @@ function queryAll(selector = "") {
     return [...document.querySelectorAll(selector)];
   } catch {
     return [];
+  }
+}
+
+function isRouteHost(node = null) {
+  try {
+    return node?.getAttribute?.(ROUTER_VIEW_HOST_ATTR) === "true";
+  } catch {
+    return false;
   }
 }
 
@@ -376,6 +418,31 @@ function cacheDom(AppCore = null, key = "", node = null) {
   return node;
 }
 
+function cacheViewRoot(AppCore = null, node = null) {
+  if (!AppCore || !node) return node;
+
+  try {
+    AppCore.dom = isObject(AppCore.dom) ? AppCore.dom : {};
+
+    AppCore.dom.routerViewContainer = node;
+    AppCore.dom.appViewContainer = node;
+    AppCore.dom.rootViewContainer = node;
+
+    /*
+      No pisar el host activo creado por router/render.js.
+      Durante una ruta, AppCore.dom.viewContainer debe poder apuntar
+      al host estable donde pintan las vistas existentes.
+    */
+    if (!AppCore.dom.viewContainer || !isRouteHost(AppCore.dom.viewContainer)) {
+      AppCore.dom.viewContainer = node;
+    }
+  } catch {
+    // noop
+  }
+
+  return node;
+}
+
 /* =========================================================
    ELEMENTS
 ========================================================= */
@@ -420,7 +487,8 @@ export function getShellElements(AppCore = null) {
   cacheDom(AppCore, "main", main);
   cacheDom(AppCore, "mainContent", main);
   cacheDom(AppCore, "appContent", appContent);
-  cacheDom(AppCore, "viewContainer", viewContainer);
+
+  cacheViewRoot(AppCore, viewContainer);
 
   cacheDom(AppCore, "sidebarMount", sidebarMount);
   cacheDom(AppCore, "topbarMount", topbarMount);
@@ -519,6 +587,7 @@ function isIgnoredHref(href = "") {
   if (value.startsWith("#")) return true;
   if (value.startsWith("mailto:") || value.startsWith("tel:")) return true;
   if (value.startsWith("//")) return true;
+  if (isBlockedLegacyPath(value)) return true;
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^https?:\/\//i.test(value)) {
     return true;
@@ -549,11 +618,14 @@ export function setActiveMenu(_AppCore = null, pathname = HOME_PATH) {
   if (!isBrowser()) return false;
 
   const current = canonicalPath(pathname || HOME_PATH);
+  const currentBlocked = isBlockedLegacyPath(current);
   const links = queryAll(MENU_SELECTOR);
 
   for (const link of links) {
     setActive(link, false);
   }
+
+  if (currentBlocked) return true;
 
   for (const link of links) {
     const href = linkPath(link);
@@ -562,7 +634,7 @@ export function setActiveMenu(_AppCore = null, pathname = HOME_PATH) {
 
     const candidate = canonicalPath(href);
 
-    if (candidate === current) {
+    if (!isBlockedLegacyPath(candidate) && candidate === current) {
       setActive(link, true);
     }
   }
@@ -744,6 +816,7 @@ function elementSnapshot(node = null) {
     hidden: Boolean(node.hidden),
     ariaHidden: node.getAttribute?.("aria-hidden") || "",
     ariaBusy: node.getAttribute?.("aria-busy") || "",
+    isRouteHost: isRouteHost(node),
   };
 }
 
@@ -767,6 +840,7 @@ export function getShellSnapshot(AppCore = null) {
     publicSlug: extractUserHomeSlug(publicPath) || null,
     isUserHomePath: isUserHomePath(publicPath || HOME_PATH),
     isUserScopedPath: isUserScopedPath(publicPath || HOME_PATH),
+    blockedLegacyPath: isBlockedLegacyPath(publicPath || route || HOME_PATH),
 
     shellVisible: AppCore?.state?.shellVisible ?? null,
     shellHidden: AppCore?.state?.shellHidden ?? null,
@@ -784,6 +858,8 @@ export function getShellSnapshot(AppCore = null) {
       main: elementSnapshot(elements.main),
       appContent: elementSnapshot(elements.appContent),
       viewContainer: elementSnapshot(elements.viewContainer),
+      activeViewContainer: elementSnapshot(AppCore?.dom?.viewContainer || null),
+      routerViewHost: elementSnapshot(AppCore?.dom?.routerViewHost || null),
       sidebarMount: elementSnapshot(elements.sidebarMount),
       topbarMount: elementSnapshot(elements.topbarMount),
       tablehead: elementSnapshot(elements.tablehead),
@@ -807,8 +883,15 @@ export function getShellSnapshot(AppCore = null) {
       canonicalizesUserHome: true,
       canonicalizesUserScopedRoutes: true,
 
+      doesNotClobberActiveRouteHost: true,
+
+      homeInternalPath: HOME_PATH,
+      homeVisiblePattern: "/@{user.slug}",
+
       noHomeAlias: true,
       noHomeRoute: true,
+      no403: true,
+      no404: true,
       no2fa: true,
       noMfa: true,
       noOtp: true,

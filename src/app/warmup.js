@@ -14,76 +14,58 @@
    - Sin snapshots grandes.
 ========================================================= */
 
-export const WARMUP_VERSION = "simple";
+export const WARMUP_VERSION = "app.warmup.v2";
 
-let count = 0;
-let lastSnapshot = null;
+let runs = 0;
 
-function getState(AppCore = null) {
-  return AppCore?.state && typeof AppCore.state === "object"
-    ? AppCore.state
-    : {};
+/* =========================================================
+   BASICS
+========================================================= */
+
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
 }
 
-export function createWarmupSnapshot(options = {}) {
-  const { AppCore = null, reason = "warmup" } = options;
-  const state = getState(AppCore);
+/* =========================================================
+   SNAPSHOT
+========================================================= */
 
+export function createWarmupSnapshot({
+  reason = "warmup",
+} = {}) {
   return {
     version: WARMUP_VERSION,
     ok: true,
-    reason,
-    count,
-    route: state.route || state.publicPath || "/",
-    ready: Boolean(state.ready || state.appReady),
-    authenticated: Boolean(state.authenticated),
-  };
-}
-
-export function getWarmupSummary(snapshot = lastSnapshot) {
-  return {
-    ok: Boolean(snapshot?.ok),
-    version: WARMUP_VERSION,
-    route: snapshot?.route || "/",
-    ready: Boolean(snapshot?.ready),
-    authenticated: Boolean(snapshot?.authenticated),
+    skipped: true,
+    reason: cleanText(reason, "warmup"),
+    runs,
   };
 }
 
 export function getWarmupRuntimeSnapshot() {
   return {
     version: WARMUP_VERSION,
-    count,
-    lastSnapshot,
+    runs,
   };
 }
 
 export function resetWarmupRuntimeState() {
-  count = 0;
-  lastSnapshot = null;
-
+  runs = 0;
   return getWarmupRuntimeSnapshot();
 }
 
-export function exposeWarmupDebugApi() {
-  return {
-    version: WARMUP_VERSION,
-    run: warmup,
-    getLastSnapshot: () => lastSnapshot,
-    getRuntimeSnapshot: getWarmupRuntimeSnapshot,
-    reset: resetWarmupRuntimeState,
-  };
-}
-
-export function printWarmupSummary(snapshot = lastSnapshot) {
-  return getWarmupSummary(snapshot);
-}
+/* =========================================================
+   PUBLIC API
+========================================================= */
 
 export async function warmup(options = {}) {
-  count += 1;
-  lastSnapshot = createWarmupSnapshot(options);
-
-  return lastSnapshot;
+  runs += 1;
+  return createWarmupSnapshot(options);
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default warmup;

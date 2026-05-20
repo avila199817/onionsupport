@@ -10,6 +10,8 @@
    - User nunca conserva usuarios/clientes de cache admin.
    - Preservar datos existentes sólo si el rol no cambia.
    - Exponer setters usados por homeView.js.
+   - Redactar errores/snapshots.
+   - No conservar raw/payload/response/data backend en dashboard.
    - Sin AppCore.
    - Sin eventos.
    - Sin window globals.
@@ -21,7 +23,7 @@
    - Sin magia negra.
 ========================================================= */
 
-export const HOME_STATE_VERSION = "home.state.v3";
+export const HOME_STATE_VERSION = "home.state.v4";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 5;
@@ -34,6 +36,16 @@ const ADMIN_ACTIVITY_TYPES = new Set([
   "usuario",
   "member",
 ]);
+
+const RAW_DASHBOARD_KEYS = new Set([
+  "raw",
+  "response",
+  "payload",
+  "data",
+]);
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
 
 /* =========================================================
    SAFE HELPERS
@@ -165,6 +177,12 @@ function clone(value, fallback = null) {
   }
 }
 
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
 function normalizeKey(value = "") {
   return safeText(value, "")
     .toLowerCase()
@@ -176,11 +194,78 @@ function normalizeKey(value = "") {
 }
 
 function normalizeRole(value = "") {
-  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+  if (Array.isArray(value)) {
+    const roles = value
+      .map(normalizeRole)
+      .filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = String(value || "").toLowerCase();
+
+  if (role === "admin") return "admin";
+  if (role === "user") return "user";
+
+  return "user";
 }
 
 function isAdminRole(value = "") {
   return normalizeRole(value) === "admin";
+}
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function stripRawDashboardFields(dashboard = {}) {
+  const source = safeObject(dashboard);
+  const output = {};
+
+  for (const [key, value] of Object.entries(source)) {
+    if (RAW_DASHBOARD_KEYS.has(key)) continue;
+    if (isSensitiveKey(key)) continue;
+
+    output[key] = value;
+  }
+
+  return output;
+}
+
+function sanitizeSnapshotValue(value, keyHint = "") {
+  if (isSensitiveKey(keyHint)) return undefined;
+
+  if (typeof value === "string") {
+    return redact(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeSnapshotValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (RAW_DASHBOARD_KEYS.has(key)) continue;
+      if (isSensitiveKey(key)) continue;
+
+      const clean = sanitizeSnapshotValue(item, key);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  return value;
 }
 
 function normalizeError(error = null) {
@@ -189,7 +274,7 @@ function normalizeError(error = null) {
   if (typeof error === "string") {
     return {
       name: "HomeStateError",
-      message: safeText(error, "Error Home."),
+      message: redact(safeText(error, "Error Home.")),
       code: "HOME_STATE_ERROR",
     };
   }
@@ -198,16 +283,18 @@ function normalizeError(error = null) {
 
   return {
     name: safeText(value.name, "HomeStateError"),
-    message: safeText(
-      first(
-        value.response?.data?.message,
-        value.data?.message,
-        value.message,
-        value.detail,
-        value.error,
+    message: redact(
+      safeText(
+        first(
+          value.response?.data?.message,
+          value.data?.message,
+          value.message,
+          value.detail,
+          value.error,
+          "Error Home."
+        ),
         "Error Home."
-      ),
-      "Error Home."
+      )
     ),
     code: safeText(
       first(
@@ -220,6 +307,12 @@ function normalizeError(error = null) {
       "HOME_STATE_ERROR"
     ),
   };
+}
+
+function normalizeErrorList(errors = []) {
+  return safeArray(errors)
+    .map((error) => normalizeError(error))
+    .filter(Boolean);
 }
 
 /* =========================================================
@@ -583,7 +676,7 @@ function syncAliases() {
   homeState.counts = homeState.summary;
 
   homeState.dashboard = {
-    ...safeObject(homeState.dashboard),
+    ...stripRawDashboardFields(homeState.dashboard),
 
     role: homeState.role,
     admin: homeState.admin,
@@ -673,15 +766,15 @@ export function normalizeHomeState() {
 
   homeState.openingTicketId = safeText(homeState.openingTicketId, "");
   homeState.selectedTicketId = safeText(homeState.selectedTicketId, "");
-  homeState.navigatingAction = safeText(homeState.navigatingAction, "");
+  homeState.navigatingAction = redact(safeText(homeState.navigatingAction, ""));
 
-  homeState.error = safeText(homeState.error, "");
+  homeState.error = redact(safeText(homeState.error, ""));
   homeState.lastError = homeState.lastError ? normalizeError(homeState.lastError) : null;
 
   homeState.page = Math.max(1, safeNumber(homeState.page, DEFAULT_PAGE));
   homeState.pageSize = Math.max(1, safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE));
 
-  homeState.dashboard = safeObject(homeState.dashboard);
+  homeState.dashboard = stripRawDashboardFields(safeObject(homeState.dashboard));
   homeState.summary = safeObject(homeState.summary);
 
   homeState.widgets = filterWidgetsForRole(safeArray(homeState.widgets), admin);
@@ -723,7 +816,7 @@ export function normalizeHomeState() {
   };
 
   homeState.partial = Boolean(homeState.partial);
-  homeState.errors = safeArray(homeState.errors);
+  homeState.errors = normalizeErrorList(homeState.errors);
 
   syncAliases();
 
@@ -752,11 +845,32 @@ function shouldKeepExisting(key = "", value, replace = false) {
   return false;
 }
 
+function sanitizeStateValue(key = "", value) {
+  if (value === undefined) return undefined;
+  if (isSensitiveKey(key)) return undefined;
+
+  if (key === "dashboard") return stripRawDashboardFields(value);
+  if (key === "error") return redact(safeText(value, ""));
+  if (key === "lastError") return normalizeError(value);
+  if (key === "errors") return normalizeErrorList(value);
+  if (key === "navigatingAction") return redact(safeText(value, ""));
+
+  if (["users", "usuarios", "clients", "clientes", "customers"].includes(key) && !currentIsAdmin()) {
+    return [];
+  }
+
+  return value;
+}
+
 function assign(key = "", value, { replace = false } = {}) {
   if (!key || value === undefined) return false;
-  if (shouldKeepExisting(key, value, replace)) return false;
 
-  homeState[key] = value;
+  const clean = sanitizeStateValue(key, value);
+
+  if (clean === undefined) return false;
+  if (shouldKeepExisting(key, clean, replace)) return false;
+
+  homeState[key] = clean;
   return true;
 }
 
@@ -865,7 +979,7 @@ export function resetHomeState() {
 ========================================================= */
 
 export function syncHomeStateFromDashboard(dashboard = {}, options = {}) {
-  const raw = safeObject(dashboard);
+  const raw = stripRawDashboardFields(safeObject(dashboard));
 
   if (!hasKeys(raw) && options.replace !== true) {
     return getHomeStateSnapshot();
@@ -884,7 +998,7 @@ export function syncHomeStateFromDashboard(dashboard = {}, options = {}) {
     replace
       ? raw
       : {
-          ...safeObject(homeState.dashboard),
+          ...stripRawDashboardFields(homeState.dashboard),
           ...raw,
         },
     { replace }
@@ -979,7 +1093,7 @@ export function syncHomeStateFromDashboard(dashboard = {}, options = {}) {
         admin,
       };
 
-  homeState.errors = safeArray(raw.errors);
+  homeState.errors = normalizeErrorList(raw.errors);
   homeState.partial = Boolean(raw.partial);
 
   homeState.requestId = safeText(first(options.requestId, raw.requestId, raw.meta?.requestId, homeState.requestId, ""), "");
@@ -1220,7 +1334,7 @@ export function setCreating(value = false) {
 
 export function setNavigatingAction(value = "") {
   return patchHomeState({
-    navigatingAction: safeText(value, ""),
+    navigatingAction: redact(safeText(value, "")),
   });
 }
 
@@ -1237,7 +1351,7 @@ export function getHomeStateSnapshot() {
   normalizeHomeState();
 
   return clone(
-    {
+    sanitizeSnapshotValue({
       version: homeState.version,
 
       role: homeState.role,
@@ -1291,12 +1405,12 @@ export function getHomeStateSnapshot() {
       invoices: homeState.invoices,
       facturas: homeState.facturas,
 
-      users: homeState.users,
-      usuarios: homeState.usuarios,
+      users: homeState.admin ? homeState.users : [],
+      usuarios: homeState.admin ? homeState.usuarios : [],
 
-      clients: homeState.clients,
-      clientes: homeState.clientes,
-      customers: homeState.customers,
+      clients: homeState.admin ? homeState.clients : [],
+      clientes: homeState.admin ? homeState.clientes : [],
+      customers: homeState.admin ? homeState.customers : [],
 
       activity: homeState.activity,
       activities: homeState.activities,
@@ -1317,7 +1431,26 @@ export function getHomeStateSnapshot() {
         clients: homeState.admin ? homeState.clients.length : 0,
         activity: homeState.activity.length,
       },
-    },
+
+      policy: {
+        runtimeOnly: true,
+        noAppCore: true,
+        noEvents: true,
+        noWindowGlobals: true,
+        noRouter: true,
+        noAuth: true,
+        noHttp: true,
+        noStorage: true,
+        noCss: true,
+
+        roleAware: true,
+        userNeverKeepsAdminUsersClients: true,
+        noRawBackendPayloadInDashboard: true,
+
+        errorsRedacted: true,
+        snapshotRedacted: true,
+      },
+    }),
     {}
   );
 }
@@ -1398,7 +1531,9 @@ normalizeHomeState();
 export const HomeState = Object.freeze({
   version: HOME_STATE_VERSION,
 
-  state: homeState,
+  get state() {
+    return homeState;
+  },
 
   createInitialState: createInitialHomeState,
 

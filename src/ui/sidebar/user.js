@@ -5,6 +5,7 @@
    Responsabilidad:
    - Normalizar usuario para el sidebar.
    - Resolver rol admin/user.
+   - Resolver label visible de rol.
    - Resolver slug público real.
    - Resolver displayName, email y avatarUrl para template/dropdown.
    - Crear view-model mínimo para template.js.
@@ -16,6 +17,7 @@
    - No gestionar permisos.
    - No inventar slug.
    - No usar email como identidad.
+   - No duplicar lógica visual del avatar.
 ========================================================= */
 
 import {
@@ -23,15 +25,35 @@ import {
   SIDEBAR_ROLE_USER,
 } from "./constants.js";
 
-export const SIDEBAR_USER_VERSION = "sidebar.user.v4";
+export const SIDEBAR_USER_VERSION = "sidebar.user.v5";
 
 const DEFAULT_NAME = "Usuario";
 const DEFAULT_INITIALS = "U";
+
+const ROLE_LABEL_ADMIN = "Administrador";
+const ROLE_LABEL_STANDARD = "Estandar";
 
 const MAX_NAME_LENGTH = 120;
 const MAX_USERNAME_LENGTH = 96;
 const MAX_EMAIL_LENGTH = 254;
 const MAX_AVATAR_URL_LENGTH = 2048;
+
+const INVALID_USER_STATUSES = Object.freeze([
+  "disabled",
+  "inactive",
+  "deleted",
+  "archived",
+  "revoked",
+  "blocked",
+  "banned",
+  "suspended",
+  "desactivado",
+  "inactivo",
+  "eliminado",
+  "archivado",
+  "bloqueado",
+  "suspendido",
+]);
 
 /* =========================================================
    BASICS
@@ -46,7 +68,11 @@ function isFunction(value) {
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -83,6 +109,8 @@ function safeCall(fn = null) {
 
 export function normalizeSidebarUserSlug(value = "") {
   const slug = text(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -103,6 +131,7 @@ export function getSidebarUserSlug(user = null) {
       user.slug,
       user.lookup?.slug,
       user.profile?.slug,
+      user.routing?.slug,
       user.publicSlug,
       ""
     )
@@ -116,16 +145,26 @@ export function getSidebarUserSlug(user = null) {
 export function isSidebarUserDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  const status = text(user.status || user.estado, "").toLowerCase();
+  const status = text(
+    user.status ||
+      user.estado ||
+      user.state ||
+      "",
+    ""
+  ).toLowerCase();
 
   return Boolean(
     user.disabled === true ||
       user.deleted === true ||
       user.archived === true ||
+      user.revoked === true ||
+      user.blocked === true ||
+      user.banned === true ||
+      user.suspended === true ||
       user.active === false ||
-      status === "disabled" ||
-      status === "deleted" ||
-      status === "archived"
+      user.enabled === false ||
+      Boolean(user.deletedAt) ||
+      INVALID_USER_STATUSES.includes(status)
   );
 }
 
@@ -134,11 +173,13 @@ export function hasSidebarUserIdentity(user = null) {
 
   /*
     Email no cuenta como identidad.
-    La identidad mínima válida debe venir de id/userId/username/slug.
+    La identidad mínima válida debe venir de id/userId/uid/sub/username/slug.
   */
   return Boolean(
     text(user.id, "") ||
       text(user.userId, "") ||
+      text(user.uid, "") ||
+      text(user.sub, "") ||
       text(user.username, "") ||
       text(user.userName, "") ||
       getSidebarUserSlug(user)
@@ -169,9 +210,15 @@ export function unwrapSidebarUser(payload = null) {
     payload.session?.user,
     payload.sessionData?.user,
     payload.data?.user,
+    payload.data?.currentUser,
+    payload.data?.me,
     payload.payload?.user,
+    payload.payload?.me,
+    payload.result?.user,
+    payload.auth?.user,
     payload.me,
-    payload.account
+    payload.account,
+    payload.profile
   );
 
   if (isUsableSidebarUser(direct)) return direct;
@@ -190,6 +237,7 @@ function getUserFromAuth(Auth = null) {
   const candidates = [
     safeCall(Auth.getUser?.bind?.(Auth) || Auth.getUser),
     safeCall(Auth.getCurrentUser?.bind?.(Auth) || Auth.getCurrentUser),
+    safeCall(Auth.getProfile?.bind?.(Auth) || Auth.getProfile),
     Auth.user,
     Auth.currentUser,
     Auth.session?.user,
@@ -251,7 +299,7 @@ function normalizeRoleValue(value = null) {
     return "";
   }
 
-  const role = String(value || "").toLowerCase();
+  const role = String(value || "").trim().toLowerCase();
 
   if (role === SIDEBAR_ROLE_ADMIN) return SIDEBAR_ROLE_ADMIN;
   if (role === SIDEBAR_ROLE_USER) return SIDEBAR_ROLE_USER;
@@ -368,6 +416,8 @@ export function getSidebarUsername(user = null) {
       user.username,
       user.userName,
       user.user_name,
+      user.usernameLower,
+      user.username_lower,
       getSidebarUserSlug(user)
     ),
     MAX_USERNAME_LENGTH
@@ -393,10 +443,13 @@ export function getSidebarUserEmail(user = null) {
       user.email,
       user.mail,
       user.emailAddress,
+      user.emailLower,
+      user.email_lower,
       profile.email,
       profile.mail,
       lookup.email,
-      lookup.emailLower
+      lookup.emailLower,
+      lookup.email_lower
     ),
     MAX_EMAIL_LENGTH
   ).toLowerCase();
@@ -406,13 +459,23 @@ export function getSidebarUserEmail(user = null) {
   return email;
 }
 
+/* =========================================================
+   AVATAR
+========================================================= */
+
 function safeAvatarUrl(value = "") {
   const avatar = limitText(value, MAX_AVATAR_URL_LENGTH);
 
   if (!avatar) return "";
+  if (/[\r\n\t]/.test(avatar)) return "";
+  if (avatar.startsWith("//")) return "";
 
-  if (avatar.startsWith("/") && !avatar.startsWith("//")) {
-    return avatar;
+  /*
+    Permitimos assets internos y URLs HTTPS.
+    No permitimos data:, blob:, javascript:, http: ni file:.
+  */
+  if (avatar.startsWith("/")) {
+    return avatar.replace(/\/{2,}/g, "/");
   }
 
   if (/^https:\/\//i.test(avatar)) {
@@ -431,32 +494,84 @@ export function getSidebarUserAvatarUrl(user = null) {
 
   const profile = isObject(user.profile) ? user.profile : {};
   const raw = isObject(user.raw) ? user.raw : {};
+  const preferences = isObject(user.preferences) ? user.preferences : {};
+  const media = isObject(user.media) ? user.media : {};
+  const picture = isObject(user.picture) ? user.picture : {};
 
   return safeAvatarUrl(
     first(
       user.avatarUrl,
+      user.avatarURL,
+      user.avatar_url,
       user.avatar,
+
       user.photoUrl,
+      user.photoURL,
+      user.photo_url,
       user.photo,
+
       user.pictureUrl,
-      user.picture,
+      user.pictureURL,
+      user.picture_url,
+      typeof user.picture === "string" ? user.picture : "",
+      picture.url,
+      picture.href,
+      picture.src,
+
       user.imageUrl,
+      user.imageURL,
+      user.image_url,
       user.image,
 
+      user.img,
+      user.imgUrl,
+      user.imgURL,
+
       profile.avatarUrl,
+      profile.avatarURL,
+      profile.avatar_url,
       profile.avatar,
+
       profile.photoUrl,
+      profile.photoURL,
+      profile.photo_url,
       profile.photo,
+
       profile.pictureUrl,
+      profile.pictureURL,
+      profile.picture_url,
       profile.picture,
+
       profile.imageUrl,
+      profile.imageURL,
+      profile.image_url,
       profile.image,
 
+      media.avatarUrl,
+      media.avatar,
+      media.photoUrl,
+      media.photo,
+      media.pictureUrl,
+      media.picture,
+      media.imageUrl,
+      media.image,
+
+      preferences.avatarUrl,
+      preferences.avatar,
+
       raw.avatarUrl,
+      raw.avatarURL,
+      raw.avatar_url,
       raw.avatar,
+
       raw.photoUrl,
+      raw.photoURL,
+      raw.photo_url,
       raw.photo,
+
       raw.pictureUrl,
+      raw.pictureURL,
+      raw.picture_url,
       raw.picture
     )
   );
@@ -476,7 +591,7 @@ export function getSidebarInitials(value = "") {
 }
 
 export function getSidebarRoleLabel(role = SIDEBAR_ROLE_USER) {
-  return role === SIDEBAR_ROLE_ADMIN ? "Administrador" : "Usuario";
+  return role === SIDEBAR_ROLE_ADMIN ? ROLE_LABEL_ADMIN : ROLE_LABEL_STANDARD;
 }
 
 /* =========================================================
@@ -498,8 +613,14 @@ export function getSidebarUser(context = {}) {
       })
     : SIDEBAR_ROLE_USER;
 
-  const id = hasUser ? text(user.id || user.userId, "") : "";
-  const userId = hasUser ? text(user.userId || user.id, "") : "";
+  const id = hasUser
+    ? text(first(user.id, user.userId, user.uid, user.sub, ""), "")
+    : "";
+
+  const userId = hasUser
+    ? text(first(user.userId, user.id, user.uid, user.sub, ""), "")
+    : "";
+
   const slug = hasUser ? getSidebarUserSlug(user) : "";
   const username = hasUser ? getSidebarUsername(user) : "";
   const email = hasUser ? getSidebarUserEmail(user) : "";
@@ -557,6 +678,7 @@ export function getSidebarUserSnapshot(context = {}) {
           displayName: user.displayName,
           hasEmail: Boolean(user.email),
           hasAvatar: Boolean(user.avatarUrl),
+          initials: user.initials,
           role: user.role,
           roleLabel: user.roleLabel,
         }
@@ -577,6 +699,11 @@ export function getSidebarUserSnapshot(context = {}) {
 
       noEmailIdentity: true,
       noSlugFabrication: true,
+
+      roleLabels: {
+        admin: ROLE_LABEL_ADMIN,
+        user: ROLE_LABEL_STANDARD,
+      },
 
       avatarInternalOrHttpsOnly: true,
       noBlobAvatar: true,

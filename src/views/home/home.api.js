@@ -16,6 +16,7 @@
    - Calcular métricas en frontend desde listas/meta devueltas.
    - Normalizar respuesta para homeView.js.
    - Blindar cache admin cuando el rol actual sea user.
+   - No conservar raw backend sensible en dashboard/cache.
    - No tocar DOM.
    - No CSS.
    - No Router.
@@ -31,6 +32,10 @@
 
 import { AppCore } from "../../core/index.js";
 import * as CoreHttpModule from "../../core/http.js";
+
+import {
+  ROUTES,
+} from "../../core/config.js";
 
 import { homeState } from "./home.state.js";
 
@@ -54,7 +59,7 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_API_VERSION = "home.api.v3";
+export const HOME_API_VERSION = "home.api.v4";
 
 export const HOME_DASHBOARD_ENDPOINT = "local:home-list-aggregate";
 export const HOME_DASHBOARD_LEGACY_ENDPOINT = "";
@@ -62,6 +67,13 @@ export const HOME_DASHBOARD_PING_ENDPOINT = "/api/health/ready";
 
 export const HOME_TIMEOUT = 15000;
 export const HOME_HEALTH_TIMEOUT = 8000;
+
+const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
+const INCIDENCIAS_ROUTE = ROUTES.incidencias || "/incidencias";
+const FACTURAS_ROUTE = ROUTES.facturas || "/facturas";
+const CLIENTES_ROUTE = ROUTES.clientes || "/clientes";
+const USUARIOS_ROUTE = ROUTES.usuarios || "/usuarios";
+const SERVIDOR_ROUTE = ROUTES.servidor || "/servidor";
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -211,6 +223,12 @@ function nowIso() {
   }
 }
 
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
 function normalizeText(value = "") {
   return safeText(value, "")
     .toLowerCase()
@@ -227,7 +245,21 @@ function normalizeKey(value = "") {
 }
 
 function normalizeRole(value = "") {
-  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = String(value || "").toLowerCase();
+
+  if (role === "admin") return "admin";
+  if (role === "user") return "user";
+
+  return "user";
 }
 
 function uniqueBy(items = [], picker = (item) => item) {
@@ -275,10 +307,10 @@ function clone(value, fallback = null) {
 function getAuth() {
   try {
     return (
-      AppCore?.Auth ||
       AppCore?.auth ||
-      AppCore?.modules?.get?.("Auth") ||
+      AppCore?.Auth ||
       AppCore?.modules?.get?.("auth") ||
+      AppCore?.modules?.get?.("Auth") ||
       null
     );
   } catch {
@@ -317,8 +349,10 @@ function getCurrentRole() {
       state.role,
       state.rol,
       state.userRole,
+      state.roles,
       user.role,
       user.rol,
+      user.roles,
       "user"
     )
   );
@@ -426,29 +460,49 @@ function sanitizeSummaryForRole(summary = {}, admin = false) {
   return output;
 }
 
+function stripRawDashboardFields(dashboard = {}) {
+  const source = safeObject(dashboard);
+  const {
+    raw: _raw,
+    response: _response,
+    payload: _payload,
+    data: _data,
+    ...clean
+  } = source;
+
+  void _raw;
+  void _response;
+  void _payload;
+  void _data;
+
+  return clean;
+}
+
 function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
   const cleanRole = normalizeRole(role);
   const admin = cleanRole === "admin";
 
-  const normalized = normalizeHomeDashboard({
-    ...safeObject(dashboard),
+  const normalized = stripRawDashboardFields(
+    normalizeHomeDashboard({
+      ...safeObject(dashboard),
 
-    role: cleanRole,
-    admin,
-
-    users: admin ? dashboard?.users : [],
-    usuarios: admin ? dashboard?.usuarios : [],
-
-    clients: admin ? dashboard?.clients : [],
-    clientes: admin ? dashboard?.clientes : [],
-    customers: admin ? dashboard?.customers : [],
-
-    meta: {
-      ...safeObject(dashboard?.meta),
       role: cleanRole,
       admin,
-    },
-  });
+
+      users: admin ? dashboard?.users : [],
+      usuarios: admin ? dashboard?.usuarios : [],
+
+      clients: admin ? dashboard?.clients : [],
+      clientes: admin ? dashboard?.clientes : [],
+      customers: admin ? dashboard?.customers : [],
+
+      meta: {
+        ...safeObject(dashboard?.meta),
+        role: cleanRole,
+        admin,
+      },
+    })
+  );
 
   const summary = sanitizeSummaryForRole(normalized.summary, admin);
   const widgets = filterWidgetsForRole(normalized.widgets, admin);
@@ -574,10 +628,12 @@ async function requestGet(endpoint = "", options = {}) {
     auth: true,
     public: false,
     skipAuth: false,
+    noAuthHeader: false,
     cache: "no-store",
     timeout: safeNumber(options.timeout, HOME_TIMEOUT),
     params: options.params || options.query || undefined,
     query: options.query || options.params || undefined,
+    storeError: false,
   };
 
   if (isFunction(CoreHttp?.get)) {
@@ -643,14 +699,16 @@ function normalizeErrorMessage(error = null, fallback = "No se pudo cargar el Ho
     return "El backend devolvió un error interno.";
   }
 
-  return safeText(
-    first(
-      error?.response?.data?.message,
-      error?.data?.message,
-      error?.message,
+  return redact(
+    safeText(
+      first(
+        error?.response?.data?.message,
+        error?.data?.message,
+        error?.message,
+        fallback
+      ),
       fallback
-    ),
-    fallback
+    )
   );
 }
 
@@ -664,8 +722,25 @@ function normalizeRequestError(error = null) {
 
 function isSoftModuleError(error = null) {
   const status = getErrorStatus(error);
-
   return status === 403 || status === 404;
+}
+
+function skippedResult(name = "", code = "HOME_MODULE_SKIPPED") {
+  return {
+    ok: false,
+    skipped: true,
+    name,
+    endpoint: "",
+    status: 0,
+    durationMs: 0,
+    data: null,
+    error: {
+      status: 0,
+      code,
+      message: "Módulo omitido para esta vista Home.",
+    },
+    soft: true,
+  };
 }
 
 async function requestOptional(name = "", endpoint = "", options = {}) {
@@ -702,24 +777,6 @@ async function requestOptional(name = "", endpoint = "", options = {}) {
       soft: isSoftModuleError(error),
     };
   }
-}
-
-function skippedResult(name = "", code = "HOME_MODULE_SKIPPED") {
-  return {
-    ok: false,
-    skipped: true,
-    name,
-    endpoint: "",
-    status: 0,
-    durationMs: 0,
-    data: null,
-    error: {
-      status: 0,
-      code,
-      message: "Módulo omitido para esta vista Home.",
-    },
-    soft: true,
-  };
 }
 
 /* =========================================================
@@ -843,7 +900,7 @@ function extractCollection(payload = null, aliases = []) {
     return {
       items: unwrapped,
       total: unwrapped.length,
-      raw: payload,
+      raw: null,
     };
   }
 
@@ -872,7 +929,7 @@ function extractCollection(payload = null, aliases = []) {
         return {
           items: value,
           total: Math.max(value.length, extractTotal(source, aliases, value.length)),
-          raw: payload,
+          raw: null,
         };
       }
 
@@ -900,7 +957,7 @@ function extractCollection(payload = null, aliases = []) {
       return {
         items: direct,
         total: Math.max(direct.length, extractTotal(source, aliases, direct.length)),
-        raw: payload,
+        raw: null,
       };
     }
   }
@@ -908,7 +965,7 @@ function extractCollection(payload = null, aliases = []) {
   return {
     items: [],
     total: extractTotal(object, aliases, 0),
-    raw: payload,
+    raw: null,
   };
 }
 
@@ -974,7 +1031,6 @@ function getUserId(item = {}) {
       item.usuarioId,
       item.id,
       item._id,
-      item.email,
       item.username,
       item.raw?.userId,
       item.raw?.id
@@ -992,7 +1048,6 @@ function getClientId(item = {}) {
       item.customerId,
       item.id,
       item._id,
-      item.email,
       item.raw?.clienteId,
       item.raw?.id
     ),
@@ -1407,8 +1462,8 @@ function buildWidgets(summary = {}, admin = false) {
         type: "tickets",
         kind: "metric",
         status: safeNumber(summary.urgentTickets, 0) > 0 ? "warning" : "active",
-        route: "/incidencias",
-        href: "/incidencias",
+        route: INCIDENCIAS_ROUTE,
+        href: INCIDENCIAS_ROUTE,
       },
       {
         id: "facturacion",
@@ -1421,8 +1476,8 @@ function buildWidgets(summary = {}, admin = false) {
         type: "invoices",
         kind: "metric",
         status: safeNumber(summary.pendingInvoices, 0) > 0 ? "warning" : "active",
-        route: "/facturas",
-        href: "/facturas",
+        route: FACTURAS_ROUTE,
+        href: FACTURAS_ROUTE,
       },
       {
         id: "clientes",
@@ -1435,8 +1490,8 @@ function buildWidgets(summary = {}, admin = false) {
         type: "clients",
         kind: "metric",
         status: "active",
-        route: "/clientes",
-        href: "/clientes",
+        route: CLIENTES_ROUTE,
+        href: CLIENTES_ROUTE,
       },
       {
         id: "usuarios",
@@ -1449,8 +1504,8 @@ function buildWidgets(summary = {}, admin = false) {
         type: "users",
         kind: "metric",
         status: "active",
-        route: "/usuarios",
-        href: "/usuarios",
+        route: USUARIOS_ROUTE,
+        href: USUARIOS_ROUTE,
       },
     ]);
   }
@@ -1467,8 +1522,8 @@ function buildWidgets(summary = {}, admin = false) {
       type: "tickets",
       kind: "metric",
       status: safeNumber(summary.urgentTickets, 0) > 0 ? "warning" : "active",
-      route: "/incidencias",
-      href: "/incidencias",
+      route: INCIDENCIAS_ROUTE,
+      href: INCIDENCIAS_ROUTE,
     },
     {
       id: "mis-facturas",
@@ -1481,8 +1536,8 @@ function buildWidgets(summary = {}, admin = false) {
       type: "invoices",
       kind: "metric",
       status: safeNumber(summary.pendingInvoices, 0) > 0 ? "warning" : "active",
-      route: "/facturas",
-      href: "/facturas",
+      route: FACTURAS_ROUTE,
+      href: FACTURAS_ROUTE,
     },
     {
       id: "adjuntos",
@@ -1495,8 +1550,8 @@ function buildWidgets(summary = {}, admin = false) {
       type: "files",
       kind: "metric",
       status: "active",
-      route: "/incidencias",
-      href: "/incidencias",
+      route: INCIDENCIAS_ROUTE,
+      href: INCIDENCIAS_ROUTE,
     },
   ]);
 }
@@ -1518,7 +1573,7 @@ function buildActivity({
       title: safeText(first(ticket.subject, ticket.title, ticket.asunto), "Incidencia"),
       text: id ? `Incidencia ${id}` : "Incidencia actualizada.",
       date: first(ticket.updatedAt, ticket.lastUpdateAt, ticket.createdAt),
-      route: "/incidencias",
+      route: INCIDENCIAS_ROUTE,
       action: "open-ticket",
       entityId: id,
     });
@@ -1532,7 +1587,7 @@ function buildActivity({
       title: id ? `Factura ${id}` : "Factura",
       text: "Factura registrada o actualizada.",
       date: first(invoice.updatedAt, invoice.createdAt, invoice.date),
-      route: "/facturas",
+      route: FACTURAS_ROUTE,
       action: "navigate-home",
       entityId: id,
     });
@@ -1544,10 +1599,10 @@ function buildActivity({
 
       activity.push({
         type: "client",
-        title: safeText(first(client.name, client.nombre, client.razonSocial, client.email), "Cliente"),
+        title: safeText(first(client.name, client.nombre, client.razonSocial), "Cliente"),
         text: "Cliente disponible en el panel.",
         date: first(client.updatedAt, client.createdAt),
-        route: "/clientes",
+        route: CLIENTES_ROUTE,
         action: "navigate-home",
         entityId: id,
       });
@@ -1558,10 +1613,10 @@ function buildActivity({
 
       activity.push({
         type: "user",
-        title: safeText(first(user.displayName, user.name, user.username, user.email), "Usuario"),
+        title: safeText(first(user.displayName, user.name, user.username), "Usuario"),
         text: "Usuario disponible en el sistema.",
         date: first(user.updatedAt, user.createdAt, user.lastLoginAt),
-        route: "/usuarios",
+        route: USUARIOS_ROUTE,
         action: "navigate-home",
         entityId: id,
       });
@@ -1593,12 +1648,22 @@ function moduleErrors(modules = {}) {
       kind: "list",
       status: result.status || 0,
       code: result.error?.code || "",
-      message: result.error?.message || "Módulo no disponible.",
+      message: redact(result.error?.message || "Módulo no disponible."),
       soft: Boolean(result.soft),
     });
   }
 
   return errors;
+}
+
+function moduleStatus(result = null, endpoint = "") {
+  return {
+    skipped: result?.skipped === true,
+    listOk: result?.ok === true,
+    status: result?.status || 0,
+    endpoint: result?.skipped === true ? "" : endpoint,
+    soft: result?.soft === true,
+  };
 }
 
 function buildDashboardFromModules(modules = {}, meta = {}) {
@@ -1697,24 +1762,10 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
       recentActivity: activity,
 
       modules: {
-        tickets: {
-          listOk: modules.tickets?.ok === true,
-          endpoint: ENDPOINTS.ticketsList,
-        },
-        facturas: {
-          listOk: modules.facturas?.ok === true,
-          endpoint: ENDPOINTS.facturasList,
-        },
-        clientes: {
-          skipped: modules.clientes?.skipped === true,
-          listOk: modules.clientes?.ok === true,
-          endpoint: admin ? ENDPOINTS.clientesList : "",
-        },
-        users: {
-          skipped: modules.users?.skipped === true,
-          listOk: modules.users?.ok === true,
-          endpoint: admin ? ENDPOINTS.usersList : "",
-        },
+        tickets: moduleStatus(modules.tickets, ENDPOINTS.ticketsList),
+        facturas: moduleStatus(modules.facturas, ENDPOINTS.facturasList),
+        clientes: moduleStatus(modules.clientes, admin ? ENDPOINTS.clientesList : ""),
+        users: moduleStatus(modules.users, admin ? ENDPOINTS.usersList : ""),
       },
 
       partial: errors.length > 0,
@@ -1761,11 +1812,6 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
         errorsCount: errors.length,
         partial: errors.length > 0,
       },
-
-      raw: {
-        modules,
-        meta,
-      },
     },
     role
   );
@@ -1790,10 +1836,9 @@ export function normalizeDashboard(payload = null, options = {}) {
 
   if (object.dashboard && hasOwnKeys(object.dashboard)) {
     return sanitizeDashboardForRole(
-      {
-        ...normalizeDashboard(object.dashboard, { role }),
-        raw: payload,
-      },
+      normalizeDashboard(object.dashboard, {
+        role,
+      }),
       role
     );
   }
@@ -1846,7 +1891,6 @@ export function normalizeHomeDashboardResponse(payload = null) {
     lastSyncAt: dashboard.updatedAt || dashboard.generatedAt || nowIso(),
 
     meta: dashboard.meta,
-    raw: payload,
   };
 }
 
@@ -1895,7 +1939,10 @@ function assertCoreModulesAvailable(modules = {}) {
   const error = new Error(firstError?.error?.message || "No se pudo cargar tickets ni facturas para Home.");
   error.status = firstError?.status || 0;
   error.code = firstError?.error?.code || "HOME_CORE_MODULES_UNAVAILABLE";
-  error.modules = modules;
+  error.modules = {
+    tickets: moduleStatus(tickets, ENDPOINTS.ticketsList),
+    facturas: moduleStatus(facturas, ENDPOINTS.facturasList),
+  };
 
   throw error;
 }
@@ -1987,7 +2034,6 @@ export async function fetchHomeDashboardRequest({
     generatedAt: nowIso(),
 
     dashboard,
-    modules,
 
     meta: {
       requestId,
@@ -2216,6 +2262,19 @@ export async function loadHomeHealth({
    SNAPSHOT
 ========================================================= */
 
+function runtimeSnapshot() {
+  const snap = clone(runtime, {});
+
+  if (snap?.lastError) {
+    snap.lastError = {
+      ...snap.lastError,
+      message: redact(snap.lastError.message || ""),
+    };
+  }
+
+  return snap;
+}
+
 export function getHomeApiClient() {
   return CoreHttp || null;
 }
@@ -2239,6 +2298,15 @@ export function getHomeApiSnapshot() {
       usersList: ENDPOINTS.usersList,
     },
 
+    routes: {
+      home: HOME_ROUTE,
+      incidencias: INCIDENCIAS_ROUTE,
+      facturas: FACTURAS_ROUTE,
+      clientes: CLIENTES_ROUTE,
+      usuarios: USUARIOS_ROUTE,
+      servidor: SERVIDOR_ROUTE,
+    },
+
     http: {
       hasCoreHttp: Boolean(CoreHttp),
       hasGet: isFunction(CoreHttp?.get),
@@ -2252,7 +2320,7 @@ export function getHomeApiSnapshot() {
       clientesModuleAllowed: canRequestClientsModule(),
     },
 
-    runtime: clone(runtime, {}),
+    runtime: runtimeSnapshot(),
 
     loadSeq,
 
@@ -2291,22 +2359,34 @@ export function getHomeApiSnapshot() {
 
       requestId: safeText(homeState?.requestId, ""),
       lastSyncAt: homeState?.lastSyncAt || null,
-      error: homeState?.error || null,
+      error: redact(homeState?.error || ""),
     },
 
     policy: {
+      apiOnly: true,
+
       singleHttpLayer: true,
       noFetch: true,
       noStorage: true,
       noEvents: true,
       noRouter: true,
+
       noDashboardEndpoint: true,
       noStatsEndpoints: true,
+
       usersOnlyAdmin: true,
       clientesOnlyAdmin: true,
       distinctUserAdminHome: true,
       roleAwareCache: true,
+
+      noRawBackendPayloadInDashboard: true,
+      noEmailAsUserIdentity: true,
+      noEmailAsClientIdentity: true,
+
       coreModulesRequired: true,
+
+      noHomeRoute: true,
+      snapshotRedacted: true,
     },
   };
 }

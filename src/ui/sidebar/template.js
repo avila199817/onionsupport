@@ -25,6 +25,8 @@
 ========================================================= */
 
 import {
+  AJUSTES_ROUTE,
+  CUENTA_ROUTE,
   SIDEBAR_ATTRS,
   SIDEBAR_BRAND_HREF,
   SIDEBAR_BRAND_LABEL,
@@ -40,7 +42,7 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v6";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v7";
 
 export const SIDEBAR_LOGO_ASSETS = Object.freeze({
   dark: "/src/media/img/favicon_white.png",
@@ -135,6 +137,12 @@ function appendChildren(parent = null, children = []) {
   return parent;
 }
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
 function safeInternalHref(value = "", fallback = "/") {
   const href = text(value, fallback);
 
@@ -142,6 +150,7 @@ function safeInternalHref(value = "", fallback = "/") {
   if (href.startsWith("//")) return fallback;
   if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return fallback;
   if (/[\r\n\t\\]/.test(href)) return fallback;
+  if (hasSensitiveQuery(href)) return fallback;
 
   return href.replace(/\/{2,}/g, "/") || fallback;
 }
@@ -155,6 +164,27 @@ function safeAssetSrc(value = "", fallback = "") {
   if (/[\r\n\t\\]/.test(src)) return fallback;
 
   return src.replace(/\/{2,}/g, "/") || fallback;
+}
+
+function safeImageSrc(value = "") {
+  const src = text(value, "");
+
+  if (!src) return "";
+
+  if (src.startsWith("/")) {
+    return safeAssetSrc(src, "");
+  }
+
+  if (/^https:\/\//i.test(src)) {
+    try {
+      const url = new URL(src);
+      return url.href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
 }
 
 function roleText(value = "") {
@@ -213,13 +243,12 @@ function normalizeUser(user = {}) {
     .slice(0, 2)
     .toUpperCase();
 
-  const avatarUrl = text(
+  const avatarUrl = safeImageSrc(
     user.avatarUrl ||
       user.avatar ||
       user.photoUrl ||
       user.picture ||
-      "",
-    ""
+      ""
   );
 
   return {
@@ -257,7 +286,7 @@ export function createSidebarIcon(
 
   path.setAttribute("d", pathData);
   path.setAttribute("stroke", "currentColor");
-  path.setAttribute("stroke-width", "1.8");
+  path.setAttribute("stroke-width", "1.9");
   path.setAttribute("stroke-linecap", "round");
   path.setAttribute("stroke-linejoin", "round");
   path.setAttribute("vector-effect", "non-scaling-stroke");
@@ -450,8 +479,6 @@ export function createSidebarHeader(options = {}) {
       "data-sidebar-action": "toggle",
       "data-state": open ? "open" : "collapsed",
       "data-sidebar-toggle-kind": "panel",
-      "data-tooltip": open ? "Cerrar barra lateral" : "Abrir barra lateral",
-      title: open ? "Cerrar barra lateral" : "Abrir barra lateral",
     },
   });
 
@@ -606,7 +633,7 @@ function createAccountMenuItem({
     [SIDEBAR_ATTRS.route]: finalHref || null,
     [SIDEBAR_ATTRS.logout]: logout ? "true" : null,
 
-    "data-sidebar-dropdown-item": "true",
+    [SIDEBAR_ATTRS.dropdownItem]: "true",
     "data-sidebar-action": finalAction || null,
     "data-sidebar-menu-action": finalAction || null,
     "data-danger": danger ? "true" : null,
@@ -641,7 +668,7 @@ function createAccountDropdown(user = {}) {
     className: "sidebar-account-dropdown",
     attrs: {
       "data-sidebar-account-dropdown": "true",
-      "data-sidebar-dropdown": "account",
+      [SIDEBAR_ATTRS.dropdown]: "account",
     },
   });
 
@@ -651,7 +678,7 @@ function createAccountDropdown(user = {}) {
       type: "button",
       [SIDEBAR_ATTRS.user]: "true",
       "data-sidebar-user-card": "true",
-      "data-sidebar-dropdown-trigger": "account",
+      [SIDEBAR_ATTRS.dropdownTrigger]: "account",
       "data-sidebar-action": "account-menu",
       "aria-haspopup": "menu",
       "aria-expanded": "false",
@@ -690,7 +717,7 @@ function createAccountDropdown(user = {}) {
       id: menuId,
       role: "menu",
       hidden: true,
-      "data-sidebar-dropdown-menu": "account",
+      [SIDEBAR_ATTRS.dropdownMenu]: "account",
       "data-sidebar-account-menu": "true",
     },
   });
@@ -731,13 +758,13 @@ function createAccountDropdown(user = {}) {
       label: "Cuenta",
       iconName: SIDEBAR_ICONS.cuenta,
       action: "navigate",
-      href: "/cuenta",
+      href: CUENTA_ROUTE,
     }),
     createAccountMenuItem({
       label: "Ajustes",
       iconName: SIDEBAR_ICONS.ajustes,
       action: "navigate",
-      href: "/ajustes",
+      href: AJUSTES_ROUTE,
     }),
   ]);
 
@@ -873,6 +900,9 @@ export function getSidebarTemplateSnapshot() {
       blackLogoForLightTheme: true,
       textOnlyHeaderBrand: false,
       panelCollapseIcon: true,
+
+      safeInternalHref: true,
+      noSensitiveHrefInDom: true,
 
       noNavigation: true,
       noSessionRead: true,

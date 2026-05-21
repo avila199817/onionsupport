@@ -11,6 +11,7 @@
    - Evitar doble binding tras rerender.
    - Busy state durante acciones async.
    - Rutas base desde core/config.js.
+   - Bloqueos de rutas desde core/config.js.
    - Sin AppCore.
    - Sin eventos globales.
    - Sin window bridges.
@@ -24,9 +25,14 @@
    - Sin /incidencias/nueva.
 ========================================================= */
 
-import { ROUTES } from "../../core/config.js";
+import {
+  ROUTES as CORE_ROUTES,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
+} from "../../core/config.js";
 
-export const HOME_BINDINGS_VERSION = "home.bindings.v4";
+export const HOME_BINDINGS_VERSION = "home.bindings.v5";
 
 const DEFAULT_SCOPE = "view:home";
 
@@ -56,7 +62,7 @@ const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
 
 const SENSITIVE_QUERY_RE =
-  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i;
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
 
 const ACTION_SELECTOR = [
   "[data-home-action]",
@@ -166,7 +172,7 @@ function nowIso() {
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -218,79 +224,126 @@ function sanitizePayload(value = {}) {
    ROUTES
 ========================================================= */
 
-function normalizeHashPath(value = "") {
-  const raw = safeText(value, "");
-
-  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
-  if (raw.startsWith("#/")) return raw.slice(1) || "/";
-
-  return raw;
-}
-
 function hasSensitiveQuery(value = "") {
   return SENSITIVE_QUERY_RE.test(String(value || ""));
 }
 
-function normalizeInternalRoute(route = "") {
-  let raw = normalizeHashPath(route);
+function routeInput(value = "") {
+  const raw = safeText(value, "");
 
-  if (!raw || raw === "#") return "";
-  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) return "";
-
+  if (!raw) return "";
   if (raw.startsWith("//")) return "";
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (hasSensitiveQuery(raw)) return "";
 
-  const lower = raw.toLowerCase();
-
-  if (
-    lower.startsWith("javascript:") ||
-    lower.startsWith("data:") ||
-    lower.startsWith("vbscript:") ||
-    lower.startsWith("mailto:") ||
-    lower.startsWith("tel:") ||
-    lower.startsWith("file:") ||
-    lower.startsWith("blob:") ||
-    /^https?:\/\//i.test(raw)
-  ) {
-    return "";
+  try {
+    return configRoutePathFromUrlLike(raw) || "";
+  } catch {
+    if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
+    if (raw.startsWith("#/")) return raw.slice(1) || "/";
+    return raw;
   }
+}
 
-  if (!raw.startsWith("/")) {
-    raw = `/${raw}`;
-  }
+function routeSuffix(value = "") {
+  const raw = safeText(value, "");
 
   const hashIndex = raw.indexOf("#");
+  const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
   const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-  const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
 
-  const queryIndex = withoutHash.indexOf("?");
-  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
-  const path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+  const queryIndex = beforeHash.indexOf("?");
+  const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
 
-  let cleanPath = path
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
+  if (hasSensitiveQuery(search) || hasSensitiveQuery(hash)) return "";
 
-  if (!cleanPath.startsWith("/")) cleanPath = `/${cleanPath}`;
+  return `${search}${hash}`;
+}
 
-  if (cleanPath.length > 1) {
-    cleanPath = cleanPath.replace(/\/+$/g, "") || "/";
+function routePathOnly(value = "") {
+  const input = routeInput(value);
+
+  if (!input) return "";
+  if (!input.startsWith("/")) return "";
+  if (input.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(input)) return "";
+  if (/[\r\n\t\\]/.test(input)) return "";
+  if (hasSensitiveQuery(input)) return "";
+
+  const pathOnly = input.split("?")[0].split("#")[0] || "";
+
+  try {
+    return configNormalizeRoutePath(pathOnly) || "";
+  } catch {
+    let path = pathOnly.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+
+    if (!path.startsWith("/")) {
+      path = `/${path}`;
+    }
+
+    if (path.length > 1) {
+      path = path.replace(/\/+$/g, "") || "/";
+    }
+
+    return path || "";
+  }
+}
+
+function isBlockedRoute(value = "") {
+  const path = routePathOnly(value);
+  const lower = path.toLowerCase();
+
+  if (!path) return true;
+
+  if (
+    lower === "/incidencias/nueva" ||
+    lower.startsWith("/incidencias/nueva/")
+  ) {
+    return true;
   }
 
-  if (cleanPath === "/home") return "";
-  if (cleanPath === "/incidencias/nueva") return "";
-  if (cleanPath.startsWith("/incidencias/nueva/")) return "";
+  try {
+    return configIsBlockedRoutePath(path) === true;
+  } catch {
+    return Boolean(
+      lower === "/home" ||
+        lower === "/403" ||
+        lower === "/404" ||
+        lower === "/2fa" ||
+        lower === "/mfa" ||
+        lower === "/otp" ||
+        lower.startsWith("/2fa/") ||
+        lower.startsWith("/mfa/") ||
+        lower.startsWith("/otp/")
+    );
+  }
+}
 
-  return `${cleanPath}${query}${hash}`;
+function normalizeInternalRoute(route = "") {
+  const input = routeInput(route);
+
+  if (!input) return "";
+  if (!input.startsWith("/")) return "";
+  if (input.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(input)) return "";
+  if (/[\r\n\t\\]/.test(input)) return "";
+  if (hasSensitiveQuery(input)) return "";
+
+  const pathOnly = routePathOnly(input);
+
+  if (!pathOnly) return "";
+  if (isBlockedRoute(pathOnly)) return "";
+
+  return `${pathOnly}${routeSuffix(input)}`;
 }
 
 function configRoute(route = "", fallback = "") {
   return normalizeInternalRoute(route) || normalizeInternalRoute(fallback);
 }
 
-const INCIDENCIAS_ROUTE = configRoute(ROUTES?.incidencias, "/incidencias");
+const INCIDENCIAS_ROUTE = configRoute(CORE_ROUTES?.incidencias, "/incidencias");
+const SERVIDOR_ROUTE = configRoute(CORE_ROUTES?.servidor, "/servidor");
 
 /* =========================================================
    SCOPE / CLEANUP
@@ -473,6 +526,8 @@ function idFromElement(element = null) {
       datasetValue(element, "incidenciaId"),
       datasetValue(element, "invoiceId"),
       datasetValue(element, "facturaId"),
+      datasetValue(element, "serverId"),
+      datasetValue(element, "servidorId"),
       datasetValue(element, "key"),
       ""
     ),
@@ -1021,6 +1076,7 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
 
     routes: {
       incidencias: INCIDENCIAS_ROUTE,
+      servidor: SERVIDOR_ROUTE,
     },
 
     policy: {
@@ -1041,7 +1097,9 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
 
       rejectsSensitiveRoutes: true,
       sanitizesPayload: true,
+
       configRoutes: true,
+      configBlockedRoutes: true,
 
       noPassiveRowActions: true,
     },

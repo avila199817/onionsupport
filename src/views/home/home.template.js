@@ -8,9 +8,11 @@
    - Pintar hero, métricas, acciones, actividad,
      facturas/directorio e incidencias.
    - Home distinto para admin/user.
-   - User nunca pinta clientes/usuarios.
+   - User nunca pinta clientes/usuarios/servidor.
    - Usar sólo roles reales: admin / user.
    - Rutas base desde core/config.js.
+   - Admin routes reales desde core/config.js.
+   - Bloqueo de rutas legacy desde core/config.js.
    - Sin fetch.
    - Sin Auth.
    - Sin Router.
@@ -24,7 +26,13 @@
    - Sin emails como identidad visual.
 ========================================================= */
 
-import { ROUTES as CORE_ROUTES } from "../../core/config.js";
+import {
+  ROUTES as CORE_ROUTES,
+  isAdminRoute as configIsAdminRoute,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
+} from "../../core/config.js";
 
 import {
   DEFAULT_PAGE_SIZE,
@@ -36,7 +44,6 @@ import {
   safeObject,
   first,
   isSameIdentity,
-  normalizeRoute,
   normalizeKey,
 
   formatNumber,
@@ -98,7 +105,7 @@ import {
   getPagination,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.v5";
+export const TEMPLATE_VERSION = "home.template.v6";
 
 /* =========================================================
    CONSTANTS
@@ -147,7 +154,7 @@ const SENSITIVE_KEY_RE =
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
 const ADMIN_ENTITY_RE =
-  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory|servidores?|servidor|servers?)([\s._/-]|$)/i;
 
 /* =========================================================
    SAFE HTML / ROUTES
@@ -156,7 +163,7 @@ const ADMIN_ENTITY_RE =
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -248,26 +255,100 @@ function jsonAttr(value = {}) {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
     String(value || "")
   );
 }
 
+function routeInput(value = "") {
+  try {
+    return configRoutePathFromUrlLike(value) || "";
+  } catch {
+    return safeText(value, "");
+  }
+}
+
+function routeSuffix(value = "") {
+  const raw = safeText(value, "");
+
+  const hashIndex = raw.indexOf("#");
+  const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
+
+  const queryIndex = beforeHash.indexOf("?");
+  const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
+
+  if (hasSensitiveQuery(search) || hasSensitiveQuery(hash)) return "";
+
+  return `${search}${hash}`;
+}
+
+function routePathOnly(value = "") {
+  const raw = routeInput(value);
+
+  if (!raw) return "";
+  if (!raw.startsWith("/")) return "";
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (hasSensitiveQuery(raw)) return "";
+
+  const pathOnly = raw.split("?")[0].split("#")[0] || "";
+
+  try {
+    return configNormalizeRoutePath(pathOnly) || "";
+  } catch {
+    let path = pathOnly.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+
+    if (!path.startsWith("/")) {
+      path = `/${path}`;
+    }
+
+    if (path.length > 1) {
+      path = path.replace(/\/+$/g, "") || "/";
+    }
+
+    return path || "";
+  }
+}
+
+function isBlockedRoute(value = "") {
+  try {
+    return configIsBlockedRoutePath(value) === true;
+  } catch {
+    const path = routePathOnly(value).toLowerCase();
+
+    return Boolean(
+      path === "/home" ||
+        path === "/403" ||
+        path === "/404" ||
+        path === "/2fa" ||
+        path === "/mfa" ||
+        path === "/otp" ||
+        path.startsWith("/2fa/") ||
+        path.startsWith("/mfa/") ||
+        path.startsWith("/otp/")
+    );
+  }
+}
+
 function safeRoute(value = "", fallback = "") {
-  const normalized = normalizeRoute(value || "");
+  const raw = routeInput(value);
+  const safeFallback = safeText(fallback, "");
 
-  if (!normalized) return fallback;
-  if (!normalized.startsWith("/")) return fallback;
-  if (normalized.startsWith("//")) return fallback;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(normalized)) return fallback;
-  if (/[\r\n\t\\]/.test(normalized)) return fallback;
-  if (hasSensitiveQuery(normalized)) return fallback;
+  if (!raw) return safeFallback;
+  if (!raw.startsWith("/")) return safeFallback;
+  if (raw.startsWith("//")) return safeFallback;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return safeFallback;
+  if (/[\r\n\t\\]/.test(raw)) return safeFallback;
+  if (hasSensitiveQuery(raw)) return safeFallback;
 
-  const canonical = normalized.split("?")[0].split("#")[0] || "";
+  const canonical = routePathOnly(raw);
 
-  if (canonical === "/home") return fallback;
+  if (!canonical) return safeFallback;
+  if (isBlockedRoute(canonical)) return safeFallback;
 
-  return normalized;
+  return `${canonical}${routeSuffix(raw)}`;
 }
 
 function safeStaticRoute(value = "", fallback = "") {
@@ -279,6 +360,7 @@ const ROUTES = Object.freeze({
   FACTURAS: safeStaticRoute(CORE_ROUTES?.facturas, "/facturas"),
   CLIENTES: safeStaticRoute(CORE_ROUTES?.clientes, "/clientes"),
   USUARIOS: safeStaticRoute(CORE_ROUTES?.usuarios, "/usuarios"),
+  SERVIDOR: safeStaticRoute(CORE_ROUTES?.servidor, "/servidor"),
 });
 
 function getRoutePath(value = "") {
@@ -289,14 +371,20 @@ function isAdminOnlyRoute(route = "") {
   const path = getRoutePath(route);
   const clientes = getRoutePath(ROUTES.CLIENTES);
   const usuarios = getRoutePath(ROUTES.USUARIOS);
+  const servidor = getRoutePath(ROUTES.SERVIDOR);
 
   if (!path) return false;
 
+  try {
+    if (configIsAdminRoute(path) === true) return true;
+  } catch {
+    // fallback abajo
+  }
+
   return (
-    path === clientes ||
-    path === usuarios ||
-    path.startsWith(`${clientes}/`) ||
-    path.startsWith(`${usuarios}/`)
+    Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
+    Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
   );
 }
 
@@ -389,7 +477,17 @@ function filterActivityForRole(input = {}, rows = []) {
 
   return safeArray(rows).filter((item) => {
     const type = normalizeKey(first(item.type, item.kind, item.category, ""));
-    return !["client", "cliente", "customer", "user", "usuario", "member"].includes(type);
+
+    return ![
+      "client",
+      "cliente",
+      "customer",
+      "user",
+      "usuario",
+      "member",
+      "server",
+      "servidor",
+    ].includes(type);
   });
 }
 
@@ -1001,7 +1099,10 @@ function activityItem(input = {}, item = {}) {
   const typeKey = normalizeKey(type);
   const admin = isAdmin(input);
 
-  if (!admin && ["client", "cliente", "customer", "user", "usuario", "member"].includes(typeKey)) {
+  if (
+    !admin &&
+    ["client", "cliente", "customer", "user", "usuario", "member", "server", "servidor"].includes(typeKey)
+  ) {
     return "";
   }
 
@@ -1013,7 +1114,9 @@ function activityItem(input = {}, item = {}) {
         ? ROUTES.CLIENTES
         : typeKey === "user" || typeKey === "usuario" || typeKey === "member"
           ? ROUTES.USUARIOS
-          : ROUTES.INCIDENCIAS);
+          : typeKey === "server" || typeKey === "servidor"
+            ? ROUTES.SERVIDOR
+            : ROUTES.INCIDENCIAS);
 
   if (!admin && isAdminOnlyRoute(route)) return "";
 

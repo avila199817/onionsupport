@@ -2,22 +2,21 @@
    Onion Support - Sidebar
    Archivo: /src/css/layout/sidebar.css
 
-   Responsabilidad:
-   - Estilo completo del sidebar privado SPA.
-   - Background principal sólido: #525252.
-   - Modal/dropdown de cuenta sólido: #3B3B3B.
+   CIERRE DEFINITIVO DE COLOR / LAYOUT:
+   - Sidebar background: #242424.
+   - Dropdown/account modal: #3B3B3B.
+   - Hover items: #3B3B3B.
+   - Active/selector: #525252.
    - Sin gradientes.
    - Sin luces.
+   - Sin blur.
    - Sin glow.
-   - Sin blur/glass.
-   - Texto blanco permanente.
-   - SVGs blancos permanentes.
+   - Texto blanco fijo.
+   - SVGs blancos fijos.
+   - Botón collapse más pequeño.
+   - SVG del collapse igualado al tamaño del resto de SVGs.
    - Iconos centrados en open/collapsed/mobile.
-   - Logo corporativo real reducido.
    - Scope estricto bajo .sidebar.
-   - Sin JS.
-   - Sin offsets externos.
-   - Sin tocar topbar / main-content / app-content.
 ========================================================= */
 
 
@@ -32,14 +31,14 @@
   --sidebar-local-mobile-width: var(--sidebar-mobile-width, min(320px, 88vw));
 
   /* Solid palette */
-  --sidebar-color-bg: #525252;
+  --sidebar-color-bg: #242424;
   --sidebar-color-modal: #3B3B3B;
-  --sidebar-color-hover: #696969;
-  --sidebar-color-active: #3B3B3B;
-  --sidebar-color-active-hover: #3B3B3B;
+  --sidebar-color-hover: #3B3B3B;
+  --sidebar-color-active: #525252;
+  --sidebar-color-active-hover: #525252;
 
-  --sidebar-color-line: rgba(255,255,255,.13);
-  --sidebar-color-line-soft: rgba(255,255,255,.09);
+  --sidebar-color-line: rgba(255,255,255,.12);
+  --sidebar-color-line-soft: rgba(255,255,255,.08);
   --sidebar-color-line-strong: rgba(255,255,255,.18);
 
   --sidebar-color-text: #ffffff;
@@ -108,10 +107,14 @@
   --sidebar-local-icon-box: 36px;
   --sidebar-local-collapsed-slot: 44px;
 
-  --sidebar-local-avatar-size: 34px;
-  --sidebar-local-toggle-size: 36px;
+  /* Collapse button: más pequeño, SVG igual que los demás */
+  --sidebar-local-toggle-size: 32px;
+  --sidebar-local-toggle-icon-size: 20px;
+  --sidebar-local-collapsed-toggle-slot: 36px;
 
-  /* Logo pequeño */
+  --sidebar-local-avatar-size: 34px;
+
+  /* Logo reducido */
   --sidebar-local-logo-width: 24px;
   --sidebar-local-logo-height: 24px;
   --sidebar-local-logo-radius: 7px;
@@ -119,7 +122,7 @@
   --sidebar-local-logo-filter: none;
   --sidebar-local-logo-image: var(--asset-logo-dark, url("/src/media/img/favicon_white.png"));
 
-  /* Tipografía estilo sidebar ChatGPT */
+  /* Tipografía estilo ChatGPT/sidebar */
   --sidebar-local-font-family:
     ui-sans-serif,
     system-ui,
@@ -140,7 +143,7 @@
   --sidebar-local-line-height-sm: 16px;
 
   --sidebar-local-shadow: none;
-  --sidebar-local-focus: 0 0 0 2px #ffffff;
+  --sidebar-local-focus: 0 0 0 2px rgba(255,255,255,.82);
   --sidebar-local-letter-shadow: none;
 
   position: fixed;
@@ -168,8 +171,8 @@
   border-inline-end: 1px solid var(--sidebar-local-border);
   border-radius: var(--sidebar-local-radius);
 
-  background: #525252 !important;
-  background-color: #525252 !important;
+  background: #242424 !important;
+  background-color: #242424 !important;
   background-image: none !important;
 
   color: #ffffff !important;
@@ -207,8 +210,27 @@
 #sidebar-mount .sidebar,
 html body .sidebar,
 body .sidebar {
-  background: #525252 !important;
-  background-color: #525252 !important;
+  --sidebar-bg: #242424 !important;
+  --sidebar-bg-strong: #242424 !important;
+
+  --sidebar-hover: #3B3B3B !important;
+  --sidebar-active: #525252 !important;
+  --sidebar-active-hover: #525252 !important;
+
+  --sidebar-text: #ffffff !important;
+  --sidebar-text-active: #ffffff !important;
+  --sidebar-icon: #ffffff !important;
+  --sidebar-icon-active: #ffffff !important;
+
+  --sidebar-dropdown-bg: #3B3B3B !important;
+  --sidebar-dropdown-text: #ffffff !important;
+  --sidebar-dropdown-text-strong: #ffffff !important;
+  --sidebar-dropdown-text-muted: #ffffff !important;
+  --sidebar-dropdown-icon: #ffffff !important;
+  --sidebar-dropdown-shadow: none !important;
+
+  background: #242424 !important;
+  background-color: #242424 !important;
   background-image: none !important;
 
   color: #ffffff !important;
@@ -279,8 +301,6 @@ body .sidebar::after {
 }
 
 .sidebar svg {
-  inline-size: auto;
-  block-size: auto;
   color: currentColor;
   overflow: visible;
 }
@@ -466,7 +486,7 @@ body .sidebar::after {
 
 
 /* =========================================================
-   HEADER LOGO · REAL COMPANY IMAGE
+   HEADER LOGO
 ========================================================= */
 
 .sidebar .sidebar-brand-logo {
@@ -563,7 +583,8 @@ body .sidebar::after {
 
 
 /* =========================================================
-   HEADER TOGGLE
+   HEADER TOGGLE / COLLAPSE BUTTON
+   Más pequeño, SVG igualado al resto: 20px.
 ========================================================= */
 
 .sidebar .sidebar-toggle {
@@ -572,12 +593,17 @@ body .sidebar::after {
 
   inline-size: var(--sidebar-local-toggle-size);
   min-inline-size: var(--sidebar-local-toggle-size);
+  max-inline-size: var(--sidebar-local-toggle-size);
+
   block-size: var(--sidebar-local-toggle-size);
+  min-block-size: var(--sidebar-local-toggle-size);
+  max-block-size: var(--sidebar-local-toggle-size);
 
-  display: inline-grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 
-  flex: 0 0 auto;
+  flex: 0 0 var(--sidebar-local-toggle-size);
 
   padding: 0;
 
@@ -603,20 +629,29 @@ body .sidebar::after {
 }
 
 .sidebar .sidebar-toggle:hover {
-  background: #696969 !important;
-  background-color: #696969 !important;
+  background: #3B3B3B !important;
+  background-color: #3B3B3B !important;
   background-image: none !important;
 
   color: #ffffff !important;
 }
 
 .sidebar .sidebar-toggle:active {
+  background: #525252 !important;
+  background-color: #525252 !important;
+  background-image: none !important;
+
   transform: scale(.96);
 }
 
 .sidebar .sidebar-toggle-svg {
-  inline-size: 22px;
-  block-size: 22px;
+  inline-size: var(--sidebar-local-toggle-icon-size);
+  min-inline-size: var(--sidebar-local-toggle-icon-size);
+  max-inline-size: var(--sidebar-local-toggle-icon-size);
+
+  block-size: var(--sidebar-local-toggle-icon-size);
+  min-block-size: var(--sidebar-local-toggle-icon-size);
+  max-block-size: var(--sidebar-local-toggle-icon-size);
 
   display: block;
 
@@ -658,7 +693,7 @@ body .sidebar::after {
 
   scrollbar-width: thin;
   scrollbar-gutter: stable;
-  scrollbar-color: rgba(255,255,255,.30) transparent;
+  scrollbar-color: rgba(255,255,255,.26) transparent;
 }
 
 .sidebar .sidebar-nav::-webkit-scrollbar {
@@ -672,11 +707,11 @@ body .sidebar::after {
 .sidebar .sidebar-nav::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 999px;
-  background: rgba(255,255,255,.30) padding-box;
+  background: rgba(255,255,255,.26) padding-box;
 }
 
 .sidebar .sidebar-nav::-webkit-scrollbar-thumb:hover {
-  background: rgba(255,255,255,.42) padding-box;
+  background: rgba(255,255,255,.38) padding-box;
 }
 
 .sidebar .sidebar-list {
@@ -758,16 +793,16 @@ body .sidebar::after {
 .sidebar .sidebar-link:hover {
   border-color: transparent;
 
-  background: #696969 !important;
-  background-color: #696969 !important;
+  background: #3B3B3B !important;
+  background-color: #3B3B3B !important;
   background-image: none !important;
 
   color: #ffffff !important;
 }
 
 .sidebar .sidebar-link:active {
-  background: #3B3B3B !important;
-  background-color: #3B3B3B !important;
+  background: #525252 !important;
+  background-color: #525252 !important;
   background-image: none !important;
 
   transform: scale(.992);
@@ -866,8 +901,8 @@ body .sidebar::after {
   border: 1px solid rgba(255,255,255,.16);
   border-radius: 999px;
 
-  background: #3B3B3B !important;
-  background-color: #3B3B3B !important;
+  background: #525252 !important;
+  background-color: #525252 !important;
   background-image: none !important;
 
   color: #ffffff !important;
@@ -881,7 +916,7 @@ body .sidebar::after {
 
 
 /* =========================================================
-   ACTIVE / DISABLED
+   ACTIVE / SELECTOR / DISABLED
 ========================================================= */
 
 .sidebar .sidebar-link[aria-current="page"],
@@ -889,8 +924,8 @@ body .sidebar::after {
 .sidebar .sidebar-link.is-active {
   border-color: rgba(255,255,255,.16) !important;
 
-  background: #3B3B3B !important;
-  background-color: #3B3B3B !important;
+  background: #525252 !important;
+  background-color: #525252 !important;
   background-image: none !important;
 
   color: #ffffff !important;
@@ -903,8 +938,8 @@ body .sidebar::after {
 .sidebar .sidebar-link.is-active:hover {
   border-color: rgba(255,255,255,.16) !important;
 
-  background: #3B3B3B !important;
-  background-color: #3B3B3B !important;
+  background: #525252 !important;
+  background-color: #525252 !important;
   background-image: none !important;
 
   color: #ffffff !important;
@@ -1003,8 +1038,8 @@ body .sidebar::after {
 .sidebar.is-account-menu-open .sidebar-account-trigger {
   border-color: transparent;
 
-  background: #696969 !important;
-  background-color: #696969 !important;
+  background: #3B3B3B !important;
+  background-color: #3B3B3B !important;
   background-image: none !important;
 
   color: #ffffff !important;
@@ -1012,6 +1047,10 @@ body .sidebar::after {
 
 .sidebar .sidebar-user:active,
 .sidebar .sidebar-account-trigger:active {
+  background: #525252 !important;
+  background-color: #525252 !important;
+  background-image: none !important;
+
   transform: scale(.992);
 }
 
@@ -1179,8 +1218,8 @@ body .sidebar::after {
 
 
 /* =========================================================
-   ACCOUNT MENU / MODAL
-   Fondo requerido: #3B3B3B
+   ACCOUNT MENU / DROPDOWN
+   Fondo correcto: #3B3B3B
 ========================================================= */
 
 .sidebar .sidebar-account-menu {
@@ -1534,16 +1573,17 @@ body .sidebar::after {
   display: none !important;
 }
 
+/* Collapse en modo collapsed: caja más pequeña que los nav items */
 .sidebar.is-collapsed .sidebar-toggle,
 .sidebar[data-open="false"] .sidebar-toggle,
 .sidebar[data-sidebar-state="collapsed"] .sidebar-toggle {
-  inline-size: var(--sidebar-local-collapsed-slot);
-  min-inline-size: var(--sidebar-local-collapsed-slot);
-  max-inline-size: var(--sidebar-local-collapsed-slot);
+  inline-size: var(--sidebar-local-collapsed-toggle-slot);
+  min-inline-size: var(--sidebar-local-collapsed-toggle-slot);
+  max-inline-size: var(--sidebar-local-collapsed-toggle-slot);
 
-  block-size: var(--sidebar-local-collapsed-slot);
-  min-block-size: var(--sidebar-local-collapsed-slot);
-  max-block-size: var(--sidebar-local-collapsed-slot);
+  block-size: var(--sidebar-local-collapsed-toggle-slot);
+  min-block-size: var(--sidebar-local-collapsed-toggle-slot);
+  max-block-size: var(--sidebar-local-collapsed-toggle-slot);
 
   display: inline-flex;
   align-items: center;
@@ -1552,7 +1592,19 @@ body .sidebar::after {
   padding: 0;
   margin-inline: auto;
 
-  border-radius: 12px;
+  border-radius: 10px;
+}
+
+.sidebar.is-collapsed .sidebar-toggle-svg,
+.sidebar[data-open="false"] .sidebar-toggle-svg,
+.sidebar[data-sidebar-state="collapsed"] .sidebar-toggle-svg {
+  inline-size: var(--sidebar-local-toggle-icon-size);
+  min-inline-size: var(--sidebar-local-toggle-icon-size);
+  max-inline-size: var(--sidebar-local-toggle-icon-size);
+
+  block-size: var(--sidebar-local-toggle-icon-size);
+  min-block-size: var(--sidebar-local-toggle-icon-size);
+  max-block-size: var(--sidebar-local-toggle-icon-size);
 }
 
 .sidebar.is-collapsed .sidebar-brand-content,
@@ -1719,8 +1771,8 @@ body .sidebar::after {
 
     transform: translateX(-104%);
 
-    background: #525252 !important;
-    background-color: #525252 !important;
+    background: #242424 !important;
+    background-color: #242424 !important;
     background-image: none !important;
 
     box-shadow: none !important;
@@ -1899,7 +1951,7 @@ body .sidebar::after {
 
 
 /* =========================================================
-   HARD COLOR OVERRIDES
+   HARD COLOR / SVG OVERRIDES
 ========================================================= */
 
 .sidebar,

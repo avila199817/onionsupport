@@ -5,10 +5,12 @@
    Responsabilidad:
    - Capa mínima Router ↔ Auth.
    - Evaluar route.public / route.guestOnly / route.requiresAuth / route.roles.
+   - Evaluar route.adminOnly / route.requiresAdmin / rutas admin de core/config.js.
    - Auth real delegada en Auth/AppCore.
    - Auth estricta: señal Auth válida + access token usable + user usable.
    - Usuario inválido si disabled/deleted/archived/active=false.
    - Roles únicos exactos: admin / user.
+   - Rutas admin: sólo admin.
    - Canonicalizar rutas /@{slug} y /@{slug}/{ruta} para evaluación.
    - Bloquear rutas legacy/fuera de fase.
    - No validar aquí si el slug coincide con el usuario real.
@@ -31,9 +33,13 @@
 import {
   ROUTES,
   USER_HOME_PREFIX,
+  ADMIN_ROUTES as CONFIG_ADMIN_ROUTES,
+  BLOCKED_FRONTEND_ROUTES as CONFIG_BLOCKED_FRONTEND_ROUTES,
+  isAdminRoute as isConfigAdminRoute,
+  isBlockedRoutePath as isConfigBlockedRoutePath,
 } from "../core/config.js";
 
-export const GUARDS_VERSION = "router.guards.v7";
+export const GUARDS_VERSION = "router.guards.v8";
 
 const LOGIN_PATH = ROUTES.login || "/login";
 const HOME_PATH = "/";
@@ -41,14 +47,24 @@ const USER_PREFIX = USER_HOME_PREFIX || "/@";
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
 
-const BLOCKED_LEGACY_PATHS = new Set([
-  "/home",
-  "/403",
-  "/404",
-  "/2fa",
-  "/mfa",
-  "/otp",
-]);
+const BLOCKED_LEGACY_PATHS = new Set(
+  Array.isArray(CONFIG_BLOCKED_FRONTEND_ROUTES) &&
+    CONFIG_BLOCKED_FRONTEND_ROUTES.length
+    ? CONFIG_BLOCKED_FRONTEND_ROUTES
+    : [
+        "/home",
+        "/403",
+        "/404",
+        "/2fa",
+        "/mfa",
+        "/otp",
+      ]
+);
+
+const CONFIG_ADMIN_ROUTE_SET = new Set(
+  (Array.isArray(CONFIG_ADMIN_ROUTES) ? CONFIG_ADMIN_ROUTES : [])
+    .filter(Boolean)
+);
 
 export const GUARD_REASONS = Object.freeze({
   allow: "allowed",
@@ -58,6 +74,7 @@ export const GUARD_REASONS = Object.freeze({
   guestOnly: "guest-only",
   alreadyAuthenticated: "already-authenticated",
   notAuthenticated: "not-authenticated",
+  adminRequired: "admin-required",
   insufficientRole: "insufficient-role",
   unsupportedRole: "unsupported-role",
 });
@@ -200,6 +217,12 @@ function normalizeCanonicalPath(path = HOME_PATH) {
 
 function isBlockedLegacyPath(path = HOME_PATH) {
   const canonical = normalizeCanonicalPath(path).toLowerCase();
+
+  try {
+    if (isConfigBlockedRoutePath(canonical) === true) return true;
+  } catch {
+    // fallback local
+  }
 
   if (BLOCKED_LEGACY_PATHS.has(canonical)) return true;
 
@@ -588,6 +611,44 @@ function routePath(route = null) {
   return canonicalGuardPath(route?.path || route?.canonicalPath || HOME_PATH);
 }
 
+function isConfiguredAdminPath(path = HOME_PATH) {
+  const canonical = canonicalGuardPath(path);
+
+  if (CONFIG_ADMIN_ROUTE_SET.has(canonical)) return true;
+
+  try {
+    return isConfigAdminRoute(canonical) === true;
+  } catch {
+    return false;
+  }
+}
+
+export function isAdminGuardPath(path = HOME_PATH) {
+  const canonical = canonicalGuardPath(path);
+
+  if (isBlockedLegacyPath(canonical)) return false;
+
+  return isConfiguredAdminPath(canonical);
+}
+
+function routeRequiresAdmin(route = null, canonicalPath = HOME_PATH) {
+  if (!route || isPublicRoute(route)) return false;
+
+  const path = canonicalGuardPath(canonicalPath || routePath(route));
+  const roles = routeRoles(route);
+
+  return Boolean(
+    route.adminOnly === true ||
+      route.requiresAdmin === true ||
+      route.admin === true ||
+      route.meta?.adminOnly === true ||
+      route.meta?.requiresAdmin === true ||
+      route.meta?.admin === true ||
+      isConfiguredAdminPath(path) ||
+      (roles.includes("admin") && !roles.includes("user"))
+  );
+}
+
 /* =========================================================
    RESULTS
 ========================================================= */
@@ -615,6 +676,7 @@ function buildDetails({
   const auth = resolveAuth(AppCore, Auth);
   const user = getUser(AppCore, auth);
   const scoped = getUserScopedRouteInfo(publicPath);
+  const adminOnly = routeRequiresAdmin(route, canonicalPath);
 
   return {
     version: GUARDS_VERSION,
@@ -636,6 +698,9 @@ function buildDetails({
 
     currentRole: currentRole(AppCore, auth) || null,
     currentRoles: currentRoles(AppCore, auth),
+
+    routeAdminOnly: adminOnly,
+    routeRequiresAdmin: adminOnly,
 
     user: publicUser(user, AppCore, auth),
 
@@ -692,6 +757,8 @@ export function shouldAllowRoute({
   route = null,
   requestedCanonicalPath = HOME_PATH,
   requestedPublicPath = null,
+  requiresAdmin: contextRequiresAdmin = false,
+  adminOnly: contextAdminOnly = false,
 } = {}) {
   const auth = resolveAuth(AppCore, Auth);
 
@@ -742,6 +809,11 @@ export function shouldAllowRoute({
   const routeRequiresAuth = requiresAuth(route);
   const roles = routeRoles(route);
   const unsupportedRoles = unsupportedRouteRoles(route);
+  const adminOnlyRoute = Boolean(
+    contextRequiresAdmin ||
+      contextAdminOnly ||
+      routeRequiresAdmin(route, canonicalPath)
+  );
 
   if (unsupportedRoles.length) {
     return deny({
@@ -770,7 +842,7 @@ export function shouldAllowRoute({
     });
   }
 
-  if (publicRoute && !routeRequiresAuth) {
+  if (publicRoute && !routeRequiresAuth && !adminOnlyRoute) {
     return allow({
       reason: guestOnly ? GUARD_REASONS.guestOnly : GUARD_REASONS.publicRoute,
       route,
@@ -786,7 +858,7 @@ export function shouldAllowRoute({
     });
   }
 
-  if ((routeRequiresAuth || roles.length) && !logged) {
+  if ((routeRequiresAuth || roles.length || adminOnlyRoute) && !logged) {
     return deny({
       reason: GUARD_REASONS.notAuthenticated,
       route,
@@ -798,6 +870,24 @@ export function shouldAllowRoute({
         extra: {
           requiresAuth: routeRequiresAuth,
           roles,
+          adminOnly: adminOnlyRoute,
+        },
+      }),
+    });
+  }
+
+  if (adminOnlyRoute && currentRole(AppCore, auth) !== "admin") {
+    return deny({
+      reason: GUARD_REASONS.adminRequired,
+      route,
+      canonicalPath,
+      publicPath,
+      details: buildDetails({
+        ...common,
+        extra: {
+          adminOnly: true,
+          roles,
+          currentRoles: currentRoles(AppCore, auth),
         },
       }),
     });
@@ -831,6 +921,7 @@ export function shouldAllowRoute({
         guestOnly,
         requiresAuth: routeRequiresAuth,
         roles,
+        adminOnly: adminOnlyRoute,
       },
     }),
   });
@@ -859,6 +950,7 @@ export function getGuardsSnapshot({
 
   const scoped = getUserScopedRouteInfo(publicPath);
   const user = getUser(AppCore, auth);
+  const adminOnly = routeRequiresAdmin(route, canonicalPath);
 
   const access = shouldAllowRoute({
     AppCore,
@@ -866,6 +958,8 @@ export function getGuardsSnapshot({
     route,
     requestedCanonicalPath: canonicalPath,
     requestedPublicPath: publicPath,
+    requiresAdmin: adminOnly,
+    adminOnly,
   });
 
   return {
@@ -891,6 +985,8 @@ export function getGuardsSnapshot({
           requiresAuth: route.requiresAuth,
           guestOnly: route.guestOnly,
           roles: Array.isArray(route.roles) ? route.roles : [],
+          adminOnly: Boolean(route.adminOnly),
+          requiresAdmin: Boolean(route.requiresAdmin),
         }
       : null,
 
@@ -912,6 +1008,9 @@ export function getGuardsSnapshot({
       requiresAuth: route ? requiresAuth(route) : false,
       roles: route ? routeRoles(route) : [],
       unsupportedRoles: route ? unsupportedRouteRoles(route) : [],
+      adminOnly,
+      requiresAdmin: adminOnly,
+      configuredAdminPath: isConfiguredAdminPath(canonicalPath),
     },
 
     access,
@@ -939,6 +1038,12 @@ export function getGuardsSnapshot({
 
       roles: [...VALID_ROLES],
       rolesStrict: true,
+
+      adminRoutesFromConfig: true,
+      adminRoutesRequireAdmin: true,
+      clientesAdminOnly: true,
+      usuariosAdminOnly: true,
+      servidorAdminOnly: true,
 
       userSlugHome: true,
       userScopedPrivateRoutes: true,
@@ -984,6 +1089,7 @@ export default {
   getUserScopedRouteInfo,
   isUserHomePath,
   isUserScopedPath,
+  isAdminGuardPath,
   extractSlugFromPath,
 
   getGuardsSnapshot,

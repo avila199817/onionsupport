@@ -12,6 +12,7 @@
    - Inyectar contexto común: AppCore / I18n / t / Toast.
    - Pintar fallback simple.
    - Mantener publicPath visible y canonicalPath interno.
+   - Delegar normalización de rutas/user-scope/bloqueos en core/config.js.
    - No exponer token real en DOM/snapshot.
    - Sin Auth.
    - Sin guards.
@@ -30,10 +31,16 @@
 ========================================================= */
 
 import {
+  BLOCKED_FRONTEND_ROUTES,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
+  canonicalRoutePath as configCanonicalRoutePath,
+  getUserScopedRouteInfo as getConfigUserScopedRouteInfo,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_RENDER_VERSION = "router.render.v6";
+export const ROUTER_RENDER_VERSION = "router.render.v7";
 
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
@@ -41,14 +48,18 @@ const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 const HOST_ATTR = "data-router-view-host";
 const HOST_CLASS = "router-view-host";
 
-const BLOCKED_ROUTE_PATHS = new Set([
-  "/home",
-  "/403",
-  "/404",
-  "/2fa",
-  "/mfa",
-  "/otp",
-]);
+const BLOCKED_ROUTE_PATHS = new Set(
+  Array.isArray(BLOCKED_FRONTEND_ROUTES) && BLOCKED_FRONTEND_ROUTES.length
+    ? BLOCKED_FRONTEND_ROUTES
+    : [
+        "/home",
+        "/403",
+        "/404",
+        "/2fa",
+        "/mfa",
+        "/otp",
+      ]
+);
 
 let renderSeq = 0;
 
@@ -111,48 +122,32 @@ function call(fn = null, ...args) {
    PATHS
 ========================================================= */
 
-function normalizeHashPath(path = DEFAULT_ROUTE) {
-  const value = cleanText(path, DEFAULT_ROUTE);
-
-  if (value.startsWith("#!")) {
-    return value.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
-  }
-
-  if (value.startsWith("#/")) {
-    return value.slice(1) || DEFAULT_ROUTE;
-  }
-
-  return value;
-}
-
 function pathFromInput(path = DEFAULT_ROUTE) {
-  const value = normalizeHashPath(path);
-
-  if (!value || value.startsWith("//")) {
+  try {
+    return configRoutePathFromUrlLike(path) || DEFAULT_ROUTE;
+  } catch {
     return DEFAULT_ROUTE;
   }
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
-    return DEFAULT_ROUTE;
-  }
-
-  return value;
 }
 
 function normalizePathname(pathname = DEFAULT_ROUTE) {
-  let value = cleanText(pathname, DEFAULT_ROUTE).replace(/\\/g, "/");
+  try {
+    return configNormalizeRoutePath(pathname) || DEFAULT_ROUTE;
+  } catch {
+    let value = cleanText(pathname, DEFAULT_ROUTE).replace(/\\/g, "/");
 
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    value = value.replace(/\/{2,}/g, "/");
+
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+    }
+
+    return value || DEFAULT_ROUTE;
   }
-
-  value = value.replace(/\/{2,}/g, "/");
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
-  }
-
-  return value || DEFAULT_ROUTE;
 }
 
 function normalizeSearch(search = "") {
@@ -214,23 +209,13 @@ export function normalizePublicPath(path = DEFAULT_ROUTE) {
   return joinPath(splitPath(path));
 }
 
-function normalizeUserSlug(value = "") {
-  const slug = cleanText(value, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
-
-  if (!slug) return "";
-
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
-}
-
 function isBlockedRoutePath(path = DEFAULT_ROUTE) {
+  try {
+    if (configIsBlockedRoutePath(path) === true) return true;
+  } catch {
+    // fallback local
+  }
+
   const canonical = splitPath(path).pathname.toLowerCase();
 
   if (BLOCKED_ROUTE_PATHS.has(canonical)) return true;
@@ -243,42 +228,33 @@ function isBlockedRoutePath(path = DEFAULT_ROUTE) {
 }
 
 export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
+  try {
+    const info = getConfigUserScopedRouteInfo(path);
+
+    if (isObject(info)) {
+      const restPath = info.restPath || info.canonicalPath || splitPath(path).pathname;
+      const lookupPath = info.canonicalPath || info.lookupPath || restPath;
+
+      return {
+        scoped: Boolean(info.scoped),
+        home: Boolean(info.home),
+        slug: cleanText(info.slug, ""),
+        restPath,
+        lookupPath,
+      };
+    }
+  } catch {
+    // fallback abajo
+  }
+
   const pathname = splitPath(path).pathname;
 
-  if (!pathname.startsWith(USER_HOME_PREFIX)) {
-    return {
-      scoped: false,
-      home: false,
-      slug: "",
-      restPath: pathname,
-      lookupPath: pathname,
-    };
-  }
-
-  const rest = pathname.slice(USER_HOME_PREFIX.length);
-  const [slugSegment = "", ...restSegments] = rest.split("/");
-  const slug = normalizeUserSlug(slugSegment);
-
-  if (!slug) {
-    return {
-      scoped: false,
-      home: false,
-      slug: "",
-      restPath: pathname,
-      lookupPath: pathname,
-    };
-  }
-
-  const restPath = restSegments.length
-    ? normalizePathname(`/${restSegments.join("/")}`)
-    : DEFAULT_ROUTE;
-
   return {
-    scoped: true,
-    home: restPath === DEFAULT_ROUTE,
-    slug,
-    restPath,
-    lookupPath: restPath,
+    scoped: false,
+    home: false,
+    slug: "",
+    restPath: pathname,
+    lookupPath: pathname,
   };
 }
 
@@ -287,10 +263,14 @@ export function extractSlugFromPath(path = DEFAULT_ROUTE) {
 }
 
 export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
-  const pathname = splitPath(path).pathname || DEFAULT_ROUTE;
-  const scoped = getUserScopedRouteInfo(pathname);
+  try {
+    return configCanonicalRoutePath(path) || splitPath(path).pathname || DEFAULT_ROUTE;
+  } catch {
+    const pathname = splitPath(path).pathname || DEFAULT_ROUTE;
+    const scoped = getUserScopedRouteInfo(pathname);
 
-  return scoped.scoped ? scoped.lookupPath : pathname;
+    return scoped.scoped ? scoped.lookupPath : pathname;
+  }
 }
 
 function resolvePaths({
@@ -1292,6 +1272,9 @@ export function getRenderSnapshot(AppCore = null) {
 
     policy: {
       renderOnly: true,
+      configOwnsPathNormalization: true,
+      configOwnsUserScopeParsing: true,
+      configOwnsBlockedRoutes: true,
 
       ownAuth: false,
       ownGuards: false,

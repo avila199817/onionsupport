@@ -9,6 +9,8 @@
    - Exigir access token + refresh token + user usable.
    - Devolver token + user para que Auth/index.js aplique sesión.
    - Devolver refresh/session si el backend lo entrega.
+   - Delegar normalización de usuario/sesión en session.js.
+   - Delegar slug/home/rutas en core/config.js/session.js.
    - Exponer homePath/postLoginTarget si el user trae slug real.
    - No inventar slug.
    - No navegar.
@@ -31,9 +33,16 @@ import {
   AUTH_ENDPOINTS,
   ROUTES,
   USER_HOME_PREFIX,
+  buildUserHomeRoute as configBuildUserHomeRoute,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  isUserHomeRoute as configIsUserHomeRoute,
+  normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
 } from "../../core/config.js";
 
-export const LOGIN_VERSION = "auth.login.v5";
+import * as SessionApi from "./session.js";
+
+export const LOGIN_VERSION = "auth.login.v6";
 
 const LOGIN_ROUTE = ROUTES.login || "/login";
 const HOME_ROUTE = "/";
@@ -44,51 +53,6 @@ const MAX_PASSWORD_LENGTH = 1024;
 const MAX_TOKEN_LENGTH = 8192;
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
-
-const SENSITIVE_USER_KEYS = new Set([
-  "password",
-  "passwordHash",
-  "password_hash",
-  "hash",
-  "salt",
-  "passwordMeta",
-
-  "token",
-  "accessToken",
-  "access_token",
-  "refreshToken",
-  "refresh_token",
-  "refreshTokenHash",
-  "refresh_token_hash",
-
-  "resetToken",
-  "reset_token",
-  "activationToken",
-  "activation_token",
-
-  "secret",
-  "secrets",
-  "code",
-  "codes",
-  "backupCodes",
-  "backup_codes",
-
-  "otp",
-  "otpCode",
-  "totp",
-  "mfa",
-  "twofa_secret",
-  "twofaSecret",
-  "totpSecret",
-
-  "_rid",
-  "_self",
-  "_etag",
-  "_attachments",
-  "_ts",
-  "_lsn",
-  "_metadata",
-]);
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -151,6 +115,24 @@ function first(...values) {
   return null;
 }
 
+function sessionMethod(name = "") {
+  const direct = SessionApi?.[name];
+
+  if (isFunction(direct)) return direct;
+
+  const fromDefault = SessionApi?.default?.[name];
+
+  if (isFunction(fromDefault)) {
+    return fromDefault.bind(SessionApi.default);
+  }
+
+  return null;
+}
+
+/* =========================================================
+   ROLES
+========================================================= */
+
 function normalizeRole(value = "") {
   if (Array.isArray(value)) {
     const roles = value.map(normalizeRole).filter(Boolean);
@@ -175,38 +157,65 @@ function cleanRole(value = "") {
 ========================================================= */
 
 export function normalizeLoginSlug(value = "") {
-  const slug = cleanText(value, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
+  try {
+    return configNormalizeUserSlug(value) || "";
+  } catch {
+    const slug = cleanText(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/^\/+/, "")
+      .replace(/^@+/, "")
+      .split(/[/?#]/)[0]
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase();
 
-  if (!slug) return "";
+    if (!slug) return "";
 
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  }
 }
 
 function normalizeSpaPath(path = "") {
   const raw = cleanText(path, "");
 
   if (!raw) return "";
-  if (!raw.startsWith("/")) return "";
-  if (raw.startsWith("//")) return "";
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
-  if (/[\r\n\t\\]/.test(raw)) return "";
 
-  const clean = raw.split("?")[0].split("#")[0].replace(/\/+$/g, "") || "/";
+  try {
+    const clean = configNormalizeRoutePath(raw) || "";
 
-  if (clean === "/home") return "";
-  if (clean.startsWith("/2fa") || clean.startsWith("/mfa") || clean.startsWith("/otp")) return "";
+    if (!clean || configIsBlockedRoutePath(clean)) return "";
 
-  return clean;
+    return clean;
+  } catch {
+    if (!raw.startsWith("/")) return "";
+    if (raw.startsWith("//")) return "";
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+    if (/[\r\n\t\\]/.test(raw)) return "";
+
+    const clean = raw
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/\/+$/g, "") || "/";
+
+    if (clean === "/home") return "";
+    if (clean.startsWith("/2fa")) return "";
+    if (clean.startsWith("/mfa")) return "";
+    if (clean.startsWith("/otp")) return "";
+
+    return clean;
+  }
 }
 
 export function extractLoginUserSlug(user = null) {
   if (!isObject(user)) return "";
+
+  const extract = sessionMethod("extractSessionUserSlug");
+
+  if (isFunction(extract)) {
+    const slug = normalizeLoginSlug(extract(user));
+    if (slug) return slug;
+  }
 
   return normalizeLoginSlug(
     user.slug ||
@@ -218,13 +227,29 @@ export function extractLoginUserSlug(user = null) {
 }
 
 export function buildUserHomePath(user = null) {
+  const build = sessionMethod("buildSessionUserHomePath");
+
+  if (isFunction(build)) {
+    const path = normalizeSpaPath(build(user));
+
+    if (isUserHomePath(path)) return path;
+  }
+
   const slug = extractLoginUserSlug(user);
 
-  return slug ? `${USER_HOME_PREFIX || "/@"}${slug}` : HOME_ROUTE;
+  try {
+    return configBuildUserHomeRoute(slug) || HOME_ROUTE;
+  } catch {
+    return slug ? `${USER_HOME_PREFIX || "/@"}${slug}` : HOME_ROUTE;
+  }
 }
 
 function isUserHomePath(path = "") {
-  return /^\/@[a-z0-9][a-z0-9._-]{0,95}$/i.test(normalizeSpaPath(path));
+  try {
+    return configIsUserHomeRoute(path) === true;
+  } catch {
+    return /^\/@[a-z0-9][a-z0-9._-]{0,95}$/i.test(normalizeSpaPath(path));
+  }
 }
 
 function extractRouting(payload = {}) {
@@ -277,7 +302,7 @@ export function getPostLoginTarget(user = null, payload = {}) {
 }
 
 /* =========================================================
-   TOKEN / USER
+   TOKEN / USER / SESSION
 ========================================================= */
 
 function stripBearer(value = "") {
@@ -307,81 +332,28 @@ function cleanToken(value = "") {
   return tokenOk(token) ? token : "";
 }
 
-function removeSensitiveUserFields(value, keyHint = "") {
-  if (SENSITIVE_USER_KEYS.has(String(keyHint || ""))) return undefined;
+function normalizeUser(user = null) {
+  if (!isObject(user)) return null;
 
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => removeSensitiveUserFields(item))
-      .filter((item) => item !== undefined);
+  const normalize = sessionMethod("normalizeUser");
+
+  if (isFunction(normalize)) {
+    return normalize(user) || null;
   }
 
-  if (isObject(value)) {
-    const output = {};
+  return null;
+}
 
-    for (const [key, item] of Object.entries(value)) {
-      if (SENSITIVE_USER_KEYS.has(key)) continue;
+function normalizeSessionContext(sessionData = null, user = null) {
+  if (!isObject(sessionData)) return null;
 
-      const clean = removeSensitiveUserFields(item, key);
+  const normalize = sessionMethod("normalizeSessionContext");
 
-      if (clean !== undefined) {
-        output[key] = clean;
-      }
-    }
-
-    return output;
+  if (isFunction(normalize)) {
+    return normalize(sessionData, user) || null;
   }
 
-  return value;
-}
-
-function userDisabled(user = null) {
-  if (!isObject(user)) return true;
-
-  const status = cleanText(user.status || user.estado || user.state, "").toLowerCase();
-
-  return Boolean(
-    user.disabled === true ||
-      user.deleted === true ||
-      user.archived === true ||
-      user.revoked === true ||
-      user.blocked === true ||
-      user.banned === true ||
-      user.suspended === true ||
-      user.active === false ||
-      user.enabled === false ||
-      Boolean(user.deletedAt) ||
-      [
-        "disabled",
-        "inactive",
-        "deleted",
-        "archived",
-        "revoked",
-        "blocked",
-        "banned",
-        "suspended",
-        "desactivado",
-        "inactivo",
-        "eliminado",
-        "archivado",
-        "bloqueado",
-        "suspendido",
-      ].includes(status)
-  );
-}
-
-function hasUserIdentity(user = null) {
-  if (!isObject(user)) return false;
-
-  return Boolean(
-    cleanText(user.id, "") ||
-      cleanText(user.userId, "") ||
-      cleanText(user.uid, "") ||
-      cleanText(user.sub, "") ||
-      cleanText(user.username, "") ||
-      cleanText(user.slug, "") ||
-      cleanText(user.lookup?.slug, "")
-  );
+  return null;
 }
 
 function looksLikeLoginUserObject(value = null) {
@@ -407,92 +379,6 @@ function looksLikeLoginUserObject(value = null) {
   }
 
   return false;
-}
-
-function userOk(user = null) {
-  return Boolean(
-    isObject(user) &&
-      !userDisabled(user) &&
-      hasUserIdentity(user)
-  );
-}
-
-function normalizeUser(user = null) {
-  if (!userOk(user)) return null;
-
-  const safeUser = removeSensitiveUserFields(user);
-
-  if (!isObject(safeUser)) return null;
-
-  const id = cleanText(
-    safeUser.userId ||
-      safeUser.id ||
-      safeUser.uid ||
-      safeUser.sub,
-    ""
-  );
-
-  const slug = extractLoginUserSlug(safeUser);
-  const profile = isObject(safeUser.profile) ? safeUser.profile : {};
-
-  const username = cleanText(
-    safeUser.username ||
-      safeUser.userName ||
-      safeUser.user_name ||
-      safeUser.usernameLower ||
-      safeUser.username_lower ||
-      slug ||
-      id,
-    ""
-  );
-
-  const displayName = cleanText(
-    safeUser.displayName ||
-      safeUser.fullName ||
-      safeUser.name ||
-      safeUser.nombre ||
-      profile.displayName ||
-      profile.fullName ||
-      profile.name ||
-      profile.nombre ||
-      username ||
-      id,
-    "Usuario"
-  );
-
-  const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
-
-  return {
-    ...safeUser,
-
-    id: id || null,
-    userId: safeUser.userId || id || null,
-    uid: safeUser.uid || id || null,
-    sub: safeUser.sub || id || null,
-
-    username: username || null,
-    slug: slug || null,
-
-    name: safeUser.name || displayName,
-    nombre: safeUser.nombre || displayName,
-    fullName: safeUser.fullName || displayName,
-    displayName,
-
-    email: safeUser.email || null,
-
-    role,
-    rol: role,
-    roles: [role],
-
-    active: true,
-    enabled: true,
-    disabled: false,
-    deleted: false,
-    archived: false,
-
-    isAdmin: role === "admin",
-    isUser: role === "user",
-  };
 }
 
 /* =========================================================
@@ -568,65 +454,6 @@ function readUser(payload = {}) {
   }
 
   return looksLikeLoginUserObject(payload) ? normalizeUser(payload) : null;
-}
-
-function normalizeSessionContext(sessionData = null, user = null) {
-  if (!isObject(sessionData)) return null;
-
-  const sessionId = cleanText(
-    sessionData.sessionId ||
-      sessionData.session_id ||
-      sessionData.sid ||
-      sessionData.id ||
-      "",
-    ""
-  );
-
-  const userId = cleanText(
-    sessionData.sessionUserId ||
-      sessionData.session_user_id ||
-      sessionData.userId ||
-      sessionData.user_id ||
-      sessionData.uid ||
-      user?.userId ||
-      user?.id ||
-      user?.uid ||
-      user?.sub ||
-      "",
-    ""
-  );
-
-  const expiresAt =
-    sessionData.expiresAt ||
-    sessionData.expires_at ||
-    sessionData.refreshExpiresAt ||
-    sessionData.refresh_expires_at ||
-    null;
-
-  if (!sessionId && !userId && !expiresAt) return null;
-
-  return {
-    sessionId: sessionId || null,
-    session_id: sessionId || null,
-    id: sessionId || null,
-    sid: sessionId || null,
-
-    userId: userId || null,
-    user_id: userId || null,
-
-    sessionUserId: userId || null,
-    session_user_id: userId || null,
-
-    expiresAt,
-    expires_at: expiresAt,
-    refreshExpiresAt: sessionData.refreshExpiresAt || sessionData.refresh_expires_at || expiresAt,
-    refresh_expires_at: sessionData.refreshExpiresAt || sessionData.refresh_expires_at || expiresAt,
-
-    persistent: sessionData.persistent === true,
-    restoreOnBoot: sessionData.restoreOnBoot === true,
-    rollingRefresh: sessionData.rollingRefresh === true,
-    expiryEnforced: sessionData.expiryEnforced === true,
-  };
 }
 
 function readSession(payload = {}, user = null) {
@@ -1077,6 +904,9 @@ export function getLoginSnapshot() {
 
     policy: {
       configDrivenEndpoint: true,
+      sessionOwnsUserNormalization: true,
+      sessionOwnsSessionContextNormalization: true,
+      configOwnsSlugAndHomeRoute: true,
 
       requiresAccessToken: true,
       requiresRefreshToken: true,

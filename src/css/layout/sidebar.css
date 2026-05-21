@@ -5,9 +5,9 @@
    Responsabilidad:
    - Estilo completo del sidebar privado SPA.
    - Alineado con /src/ui/sidebar/template.js.
-   - Sidebar sólido Graphite Glass.
-   - SVGs claros en reposo, no dependientes del hover.
-   - Texto limpio, brillante y legible en reposo.
+   - Sidebar Graphite Glass más claro, premium y legible.
+   - SVGs blancos extremos en reposo, no dependientes del hover.
+   - Texto blanco extremo y legible en reposo.
    - Botón collapse alineado con iconos en collapsed.
    - Logo corporativo real: favicon_white.png / favicon_black.png.
    - Sin SVG fallback como logo de empresa.
@@ -19,7 +19,7 @@
    - Sin JS.
    - Sin offsets de layout.
    - Sin tocar .main-content / #app-content / topbar.
-   - Sin iluminación decorativa.
+   - Contraste alto sin depender de estados hover.
 ========================================================= */
 
 
@@ -32,15 +32,37 @@
   --sidebar-local-collapsed-width: var(--sidebar-collapsed, 72px);
   --sidebar-local-mobile-width: var(--sidebar-mobile-width, min(320px, 88vw));
 
-  --sidebar-local-bg: var(--sidebar-bg);
-  --sidebar-local-bg-strong: var(--sidebar-bg-strong, var(--sidebar-bg));
-  --sidebar-local-hover: var(--sidebar-hover, var(--surface-hover));
-  --sidebar-local-active: var(--sidebar-active, var(--surface-active));
-  --sidebar-local-active-hover: var(--sidebar-active-hover, var(--sidebar-active));
-  --sidebar-local-active-border: var(--sidebar-active-border, var(--border-accent));
+  /*
+    Sidebar dark premium más claro:
+    - fondo graphite/charcoal, no negro puro
+    - contraste extremo permanente
+    - mantiene el sistema sin tocar layout externo
+  */
+  --sidebar-local-bg:
+    radial-gradient(circle at 22% 0%, rgba(255,255,255,.070), transparent 34%),
+    radial-gradient(circle at 88% 12%, rgba(255,255,255,.040), transparent 30%),
+    linear-gradient(180deg, rgba(48,52,58,.985) 0%, rgba(38,42,48,.988) 46%, rgba(29,32,37,.992) 100%);
 
-  --sidebar-local-border: var(--sidebar-border, var(--border-soft));
-  --sidebar-local-border-strong: var(--border-strong, var(--sidebar-local-border));
+  --sidebar-local-bg-strong:
+    radial-gradient(circle at 22% 0%, rgba(255,255,255,.080), transparent 34%),
+    radial-gradient(circle at 88% 12%, rgba(255,255,255,.048), transparent 30%),
+    linear-gradient(180deg, rgba(54,58,64,.990) 0%, rgba(42,46,52,.992) 48%, rgba(31,34,39,.995) 100%);
+
+  --sidebar-local-hover:
+    linear-gradient(180deg, rgba(255,255,255,.105), rgba(255,255,255,.058));
+
+  --sidebar-local-active:
+    radial-gradient(circle at 18% 0%, rgba(255,255,255,.130), transparent 42%),
+    linear-gradient(180deg, rgba(115,122,132,.34), rgba(68,74,82,.24));
+
+  --sidebar-local-active-hover:
+    radial-gradient(circle at 18% 0%, rgba(255,255,255,.155), transparent 42%),
+    linear-gradient(180deg, rgba(130,138,150,.40), rgba(76,83,92,.30));
+
+  --sidebar-local-active-border: rgba(255,255,255,.285);
+
+  --sidebar-local-border: rgba(255,255,255,.125);
+  --sidebar-local-border-strong: rgba(255,255,255,.210);
 
   /*
     Contraste reforzado:
@@ -48,39 +70,20 @@
     - labels no dependen del hover
     - iconos visibles en reposo
   */
-  --sidebar-local-text: var(
-    --sidebar-text,
-    color-mix(in srgb, var(--text-strong) 82%, var(--text-muted))
-  );
-  --sidebar-local-text-strong: var(
-    --sidebar-text-strong,
-    color-mix(in srgb, var(--text-strong) 96%, #ffffff)
-  );
-  --sidebar-local-text-muted: var(
-    --sidebar-text-muted,
-    color-mix(in srgb, var(--text-strong) 74%, var(--text-muted))
-  );
-  --sidebar-local-text-dim: var(
-    --sidebar-text-dim,
-    color-mix(in srgb, var(--text-strong) 62%, var(--text-dim))
-  );
-  --sidebar-local-text-active: var(
-    --sidebar-text-active,
-    color-mix(in srgb, var(--text-strong) 98%, #ffffff)
-  );
+  --sidebar-local-text: #ffffff;
+  --sidebar-local-text-strong: #ffffff;
+  --sidebar-local-text-muted: rgba(255,255,255,.90);
+  --sidebar-local-text-dim: rgba(255,255,255,.78);
+  --sidebar-local-text-active: #ffffff;
 
-  --sidebar-local-icon: var(
-    --sidebar-icon,
-    color-mix(in srgb, var(--text-strong) 88%, #ffffff)
-  );
-  --sidebar-local-icon-muted: var(
-    --sidebar-icon-muted,
-    color-mix(in srgb, var(--text-strong) 74%, var(--text-muted))
-  );
-  --sidebar-local-icon-active: var(
-    --sidebar-icon-active,
-    color-mix(in srgb, var(--text-strong) 100%, #ffffff)
-  );
+  --sidebar-local-icon: #ffffff;
+  --sidebar-local-icon-muted: rgba(255,255,255,.92);
+  --sidebar-local-icon-active: #ffffff;
+
+  --sidebar-dropdown-text: #ffffff;
+  --sidebar-dropdown-text-strong: #ffffff;
+  --sidebar-dropdown-text-muted: rgba(255,255,255,.82);
+  --sidebar-dropdown-icon: #ffffff;
 
   --sidebar-local-danger: var(--danger, var(--error));
   --sidebar-local-danger-bg: var(--danger-bg, rgba(255, 69, 58, .12));
@@ -101,21 +104,28 @@
   --sidebar-local-avatar-size: var(--sidebar-user-avatar-size, 34px);
   --sidebar-local-toggle-size: 36px;
 
-  --sidebar-local-logo-size: var(--sidebar-logo-img-size, var(--sidebar-logo-size, 34px));
-  --sidebar-local-logo-height: var(--sidebar-logo-height, var(--sidebar-local-logo-size));
-  --sidebar-local-logo-width: var(--sidebar-logo-img-size, var(--sidebar-logo-size, 34px));
-  --sidebar-local-logo-radius: var(--sidebar-logo-radius, 12px);
-  --sidebar-local-logo-filter: var(--sidebar-logo-filter, drop-shadow(0 8px 18px rgba(0,0,0,.30)));
-  --sidebar-local-logo-opacity: var(--sidebar-logo-opacity, .98);
+  --sidebar-local-logo-size: calc(25px * var(--ui-scale, 1));
+  --sidebar-local-logo-height: var(--sidebar-local-logo-size);
+  --sidebar-local-logo-width: var(--sidebar-local-logo-size);
+  --sidebar-local-logo-radius: calc(9px * var(--ui-scale, 1));
+  --sidebar-local-logo-filter:
+    drop-shadow(0 5px 12px rgba(0,0,0,.28))
+    drop-shadow(0 0 8px rgba(255,255,255,.10));
+  --sidebar-local-logo-opacity: 1;
   --sidebar-local-logo-image: var(--asset-logo-dark, url("/src/media/img/favicon_white.png"));
 
-  --sidebar-local-font-size: var(--sidebar-item-font-size, var(--font-md));
-  --sidebar-local-font-weight: var(--sidebar-item-font-weight, var(--weight-semibold, 600));
+  --sidebar-local-font-size: clamp(14px, calc(14.25px * var(--ui-scale, 1)), 15px);
+  --sidebar-local-font-weight: var(--weight-bold, 700);
 
-  --sidebar-local-shadow: var(--sidebar-shadow, var(--shadow-md));
+  --sidebar-local-shadow:
+    14px 0 42px rgba(0,0,0,.34),
+    inset -1px 0 0 rgba(255,255,255,.045),
+    inset 0 1px 0 rgba(255,255,255,.035);
   --sidebar-local-focus: var(--focus-ring);
 
-  --sidebar-local-letter-shadow: 0 1px 0 rgba(0,0,0,.30);
+  --sidebar-local-letter-shadow:
+    0 1px 1px rgba(0,0,0,.36),
+    0 0 12px rgba(255,255,255,.055);
 
   position: fixed;
   inset-block: 0;
@@ -143,6 +153,8 @@
   border-radius: var(--sidebar-local-radius);
 
   background: var(--sidebar-local-bg);
+  background-color: rgb(38, 42, 48);
+  background-clip: padding-box;
   color: var(--sidebar-local-text);
 
   box-shadow: var(--sidebar-local-shadow);
@@ -224,7 +236,7 @@ body[data-theme="light"] .sidebar {
 }
 
 .sidebar svg path {
-  stroke-width: 2.15;
+  stroke-width: 2.28;
   vector-effect: non-scaling-stroke;
 }
 
@@ -514,6 +526,12 @@ body[data-theme="light"] .sidebar {
   block-size: 22px;
 
   color: currentColor;
+
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.26)) drop-shadow(0 0 8px rgba(255,255,255,.10));
+}
+
+.sidebar .sidebar-toggle-svg :where(path, circle, line, polyline, polygon, rect) {
+  stroke: currentColor;
 }
 
 .sidebar .sidebar-toggle-label {
@@ -666,6 +684,12 @@ body[data-theme="light"] .sidebar {
   block-size: var(--sidebar-local-icon-size);
 
   color: currentColor;
+
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.26)) drop-shadow(0 0 8px rgba(255,255,255,.10));
+}
+
+.sidebar .sidebar-link-svg :where(path, circle, line, polyline, polygon, rect) {
+  stroke: currentColor;
 }
 
 .sidebar .sidebar-link-content {
@@ -725,8 +749,10 @@ body[data-theme="light"] .sidebar {
   color: var(--sidebar-local-text-active);
 
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.08),
-    0 8px 18px rgba(0,0,0,.12);
+    inset 0 1px 0 rgba(255,255,255,.18),
+    inset 0 0 0 1px rgba(255,255,255,.035),
+    0 12px 28px rgba(0,0,0,.22),
+    0 0 24px rgba(255,255,255,.045);
 }
 
 .sidebar .sidebar-link[aria-current="page"] .sidebar-link-icon,
@@ -756,7 +782,9 @@ body[data-theme="light"] .sidebar {
 
   min-inline-size: 0;
 
-  padding-block-start: 8px;
+  padding-block-start: 10px;
+
+  border-block-start: 1px solid rgba(255,255,255,.080);
 }
 
 .sidebar .sidebar-account-dropdown {
@@ -941,6 +969,8 @@ body[data-theme="light"] .sidebar {
   place-items: center;
 
   color: var(--sidebar-local-icon);
+
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.24)) drop-shadow(0 0 8px rgba(255,255,255,.08));
 
   transition:
     transform var(--duration-fast, .12s) var(--ease-standard, ease),

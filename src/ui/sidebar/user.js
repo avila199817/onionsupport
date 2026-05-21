@@ -8,7 +8,8 @@
    - Resolver label visible de rol.
    - Resolver slug público real.
    - Resolver displayName, email y avatarUrl para template/dropdown.
-   - Leer avatar canónico desde avatar/avatarUrl/hasAvatar.
+   - Leer avatar canónico desde avatar/avatarUrl/photo/picture/image.
+   - Tratar hasAvatar sólo como señal diagnóstica, no como URL.
    - Crear view-model mínimo para template.js.
    - No pintar DOM.
    - No hacer eventos.
@@ -26,13 +27,13 @@ import {
   SIDEBAR_ROLE_USER,
 } from "./constants.js";
 
-export const SIDEBAR_USER_VERSION = "sidebar.user.v6";
+export const SIDEBAR_USER_VERSION = "sidebar.user.v7";
 
 const DEFAULT_NAME = "Usuario";
 const DEFAULT_INITIALS = "U";
 
 const ROLE_LABEL_ADMIN = "Administrador";
-const ROLE_LABEL_STANDARD = "Estandar";
+const ROLE_LABEL_STANDARD = "Estándar";
 
 const MAX_NAME_LENGTH = 120;
 const MAX_USERNAME_LENGTH = 96;
@@ -77,6 +78,14 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function stringText(value = "", fallback = "") {
+  if (typeof value !== "string" && typeof value !== "number") {
+    return fallback;
+  }
+
+  return text(value, fallback);
+}
+
 function limitText(value = "", limit = 120) {
   return text(value, "").slice(0, limit);
 }
@@ -94,11 +103,11 @@ function first(...values) {
   return null;
 }
 
-function safeCall(fn = null) {
+function safeCall(fn = null, ...args) {
   if (!isFunction(fn)) return null;
 
   try {
-    return fn();
+    return fn(...args);
   } catch {
     return null;
   }
@@ -500,7 +509,7 @@ function avatarObjectValue(value = null) {
 }
 
 function safeAvatarUrl(value = "") {
-  const avatar = limitText(value, MAX_AVATAR_URL_LENGTH);
+  const avatar = limitText(stringText(value, ""), MAX_AVATAR_URL_LENGTH);
 
   if (!avatar) return "";
   if (/[\r\n\t]/.test(avatar)) return "";
@@ -533,17 +542,36 @@ export function getSidebarUserAvatarUrl(user = null) {
   const raw = isObject(user.raw) ? user.raw : {};
   const preferences = isObject(user.preferences) ? user.preferences : {};
   const media = isObject(user.media) ? user.media : {};
-  const picture = isObject(user.picture) ? user.picture : {};
-  const avatarObject = isObject(user.avatar) ? user.avatar : {};
+
+  const userAvatarObject = isObject(user.avatar) ? user.avatar : {};
+  const userPhotoObject = isObject(user.photo) ? user.photo : {};
+  const userPictureObject = isObject(user.picture) ? user.picture : {};
+  const userImageObject = isObject(user.image) ? user.image : {};
+
   const profileAvatarObject = isObject(profile.avatar) ? profile.avatar : {};
+  const profilePhotoObject = isObject(profile.photo) ? profile.photo : {};
+  const profilePictureObject = isObject(profile.picture) ? profile.picture : {};
+  const profileImageObject = isObject(profile.image) ? profile.image : {};
+
+  const mediaAvatarObject = isObject(media.avatar) ? media.avatar : {};
+  const mediaPhotoObject = isObject(media.photo) ? media.photo : {};
+  const mediaPictureObject = isObject(media.picture) ? media.picture : {};
+  const mediaImageObject = isObject(media.image) ? media.image : {};
+
+  const preferencesAvatarObject = isObject(preferences.avatar) ? preferences.avatar : {};
+
+  const rawAvatarObject = isObject(raw.avatar) ? raw.avatar : {};
+  const rawPhotoObject = isObject(raw.photo) ? raw.photo : {};
+  const rawPictureObject = isObject(raw.picture) ? raw.picture : {};
 
   /*
     Contrato observado en JSON:
       avatar: "https://..."
       avatarUrl: "https://..."
       hasAvatar: true
-    hasAvatar no se usa como fuente de URL; sólo como señal diagnóstica.
-    La URL real debe venir en avatar/avatarUrl o variantes seguras.
+
+    hasAvatar no se usa como fuente de URL.
+    La URL real debe venir en avatar/avatarUrl/photo/picture/image o variantes seguras.
   */
   return safeAvatarUrl(
     first(
@@ -551,23 +579,25 @@ export function getSidebarUserAvatarUrl(user = null) {
       user.avatarURL,
       user.avatar_url,
       typeof user.avatar === "string" ? user.avatar : "",
-      avatarObjectValue(avatarObject),
+      avatarObjectValue(userAvatarObject),
 
       user.photoUrl,
       user.photoURL,
       user.photo_url,
-      user.photo,
+      typeof user.photo === "string" ? user.photo : "",
+      avatarObjectValue(userPhotoObject),
 
       user.pictureUrl,
       user.pictureURL,
       user.picture_url,
       typeof user.picture === "string" ? user.picture : "",
-      avatarObjectValue(picture),
+      avatarObjectValue(userPictureObject),
 
       user.imageUrl,
       user.imageURL,
       user.image_url,
-      user.image,
+      typeof user.image === "string" ? user.image : "",
+      avatarObjectValue(userImageObject),
 
       user.img,
       user.imgUrl,
@@ -582,44 +612,68 @@ export function getSidebarUserAvatarUrl(user = null) {
       profile.photoUrl,
       profile.photoURL,
       profile.photo_url,
-      profile.photo,
+      typeof profile.photo === "string" ? profile.photo : "",
+      avatarObjectValue(profilePhotoObject),
 
       profile.pictureUrl,
       profile.pictureURL,
       profile.picture_url,
-      profile.picture,
+      typeof profile.picture === "string" ? profile.picture : "",
+      avatarObjectValue(profilePictureObject),
 
       profile.imageUrl,
       profile.imageURL,
       profile.image_url,
-      profile.image,
+      typeof profile.image === "string" ? profile.image : "",
+      avatarObjectValue(profileImageObject),
 
       media.avatarUrl,
-      media.avatar,
+      media.avatarURL,
+      media.avatar_url,
+      typeof media.avatar === "string" ? media.avatar : "",
+      avatarObjectValue(mediaAvatarObject),
+
       media.photoUrl,
-      media.photo,
+      media.photoURL,
+      media.photo_url,
+      typeof media.photo === "string" ? media.photo : "",
+      avatarObjectValue(mediaPhotoObject),
+
       media.pictureUrl,
-      media.picture,
+      media.pictureURL,
+      media.picture_url,
+      typeof media.picture === "string" ? media.picture : "",
+      avatarObjectValue(mediaPictureObject),
+
       media.imageUrl,
-      media.image,
+      media.imageURL,
+      media.image_url,
+      typeof media.image === "string" ? media.image : "",
+      avatarObjectValue(mediaImageObject),
 
       preferences.avatarUrl,
-      preferences.avatar,
+      preferences.avatarURL,
+      preferences.avatar_url,
+      typeof preferences.avatar === "string" ? preferences.avatar : "",
+      avatarObjectValue(preferencesAvatarObject),
 
       raw.avatarUrl,
       raw.avatarURL,
       raw.avatar_url,
-      raw.avatar,
+      typeof raw.avatar === "string" ? raw.avatar : "",
+      avatarObjectValue(rawAvatarObject),
 
       raw.photoUrl,
       raw.photoURL,
       raw.photo_url,
-      raw.photo,
+      typeof raw.photo === "string" ? raw.photo : "",
+      avatarObjectValue(rawPhotoObject),
 
       raw.pictureUrl,
       raw.pictureURL,
       raw.picture_url,
-      raw.picture
+      typeof raw.picture === "string" ? raw.picture : "",
+      avatarObjectValue(rawPictureObject)
     )
   );
 }
@@ -634,7 +688,10 @@ export function getSidebarInitials(value = "") {
     return parts[0].slice(0, 2).toUpperCase() || DEFAULT_INITIALS;
   }
 
-  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase() || DEFAULT_INITIALS;
+  const firstInitial = parts[0]?.[0] || "";
+  const lastInitial = parts[parts.length - 1]?.[0] || "";
+
+  return `${firstInitial}${lastInitial}`.toUpperCase() || DEFAULT_INITIALS;
 }
 
 export function getSidebarRoleLabel(role = SIDEBAR_ROLE_USER) {
@@ -694,11 +751,14 @@ export function getSidebarUser(context = {}) {
     avatarUrl,
     avatar: avatarUrl,
     photoUrl: avatarUrl,
+    photoURL: avatarUrl,
     picture: avatarUrl,
+    pictureUrl: avatarUrl,
 
     initials,
 
     role,
+    rol: role,
     roles: [role],
     roleLabel,
 
@@ -757,10 +817,12 @@ export function getSidebarUserSnapshot(context = {}) {
       avatarContract: {
         rootAvatar: true,
         rootAvatarUrl: true,
-        rootHasAvatarSignal: true,
+        rootHasAvatarSignalOnly: true,
+        hasAvatarDoesNotCreateUrl: true,
       },
 
       avatarInternalOrHttpsOnly: true,
+      avatarObjectUrlSupported: true,
       noSensitiveAvatarQuery: true,
       noBlobAvatar: true,
       noDataImageAvatar: true,

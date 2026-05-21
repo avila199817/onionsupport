@@ -11,6 +11,9 @@
    - Clases comunes.
    - Metadatos visuales mínimos de rutas.
    - Clientes: sólo admin.
+   - Usuarios: sólo admin si core/config.js define ROUTES.usuarios.
+   - Servidor: sólo admin si core/config.js define ROUTES.servidor.
+   - Avatar: sólo constantes visuales; datos reales resueltos en user/template.
    - Roles únicos: admin / user.
    - Home interna: /
    - Home visible de usuario: /@{user.slug}
@@ -36,7 +39,7 @@ import {
   BLOCKED_FRONTEND_ROUTES,
 } from "../../core/config.js";
 
-export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v6";
+export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v7";
 
 /* =========================================================
    HELPERS INTERNOS
@@ -144,7 +147,8 @@ export const AJUSTES_ROUTE = ROUTES.ajustes || "/ajustes";
   No se inventan por fallback: sólo existen si core/config.js los define.
 */
 export const USUARIOS_ROUTE = ROUTES.usuarios || "";
-export const SERVER_ROUTE = ROUTES.servidor || "";
+export const SERVIDOR_ROUTE = ROUTES.servidor || "";
+export const SERVER_ROUTE = SERVIDOR_ROUTE;
 
 export const LOGIN_ROUTE = ROUTES.login || "/login";
 export const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest || "/password-request";
@@ -185,7 +189,7 @@ export const SIDEBAR_PRIVATE_FALLBACK_ROUTES = freeze(
     CUENTA_ROUTE,
     AJUSTES_ROUTE,
     USUARIOS_ROUTE,
-    SERVER_ROUTE,
+    SERVIDOR_ROUTE,
   ])
 );
 
@@ -193,7 +197,7 @@ export const SIDEBAR_ADMIN_FALLBACK_ROUTES = freeze(
   unique([
     CLIENTES_ROUTE,
     USUARIOS_ROUTE,
-    SERVER_ROUTE,
+    SERVIDOR_ROUTE,
   ])
 );
 
@@ -509,8 +513,8 @@ if (USUARIOS_ROUTE) {
   });
 }
 
-if (SERVER_ROUTE) {
-  BASE_ROUTE_META[SERVER_ROUTE] = freeze({
+if (SERVIDOR_ROUTE) {
+  BASE_ROUTE_META[SERVIDOR_ROUTE] = freeze({
     key: "servidor",
     label: "Servidor",
     icon: "servidor",
@@ -598,6 +602,9 @@ export const SIDEBAR_ATTRS = freeze({
   nav: "data-sidebar-nav",
   footer: "data-sidebar-footer",
   user: "data-sidebar-user",
+  userAvatar: "data-sidebar-user-avatar",
+  userName: "data-sidebar-user-name",
+  userRole: "data-sidebar-user-role",
   link: "data-sidebar-link",
   navLink: "data-sidebar-nav-link",
   brand: "data-sidebar-brand",
@@ -621,6 +628,9 @@ export const SIDEBAR_SELECTORS = freeze({
   nav: "[data-sidebar-nav]",
   footer: "[data-sidebar-footer]",
   user: "[data-sidebar-user]",
+  userAvatar: "[data-sidebar-user-avatar]",
+  userName: "[data-sidebar-user-name]",
+  userRole: "[data-sidebar-user-role]",
   link: "[data-sidebar-link]",
   navLink: "[data-sidebar-nav-link]",
   brand: "[data-sidebar-brand]",
@@ -668,6 +678,8 @@ export const SIDEBAR_CLASSES = freeze({
   footer: "sidebar-footer",
   user: "sidebar-user",
   userAvatar: "sidebar-user-avatar",
+  userAvatarImage: "sidebar-user-avatar-image",
+  userAvatarFallback: "sidebar-user-avatar-fallback",
   userInfo: "sidebar-user-info",
   userName: "sidebar-user-name",
   userRole: "sidebar-user-role",
@@ -760,7 +772,7 @@ export function getSidebarConstantsSnapshot() {
 
       optionalAdmin: {
         usuarios: Boolean(USUARIOS_ROUTE),
-        servidor: Boolean(SERVER_ROUTE),
+        servidor: Boolean(SERVIDOR_ROUTE),
       },
     },
 
@@ -777,6 +789,8 @@ export function getSidebarConstantsSnapshot() {
 
       clientesAdminOnly: true,
       optionalAdminRoutesRequireConfig: true,
+      usuariosAdminOnly: true,
+      servidorAdminOnly: true,
 
       noDom: true,
       noAuth: true,
@@ -798,6 +812,8 @@ export function getSidebarConstantsSnapshot() {
 
       noSvgBrandIcon: true,
       companyLogoHandledByTemplateAndCss: true,
+      avatarConstantsOnly: true,
+      avatarHandledByUserAndTemplate: true,
 
       userSlugHome: true,
       userScopedPrivateRoutes: true,
@@ -839,6 +855,7 @@ export default freeze({
   CUENTA_ROUTE,
   AJUSTES_ROUTE,
   USUARIOS_ROUTE,
+  SERVIDOR_ROUTE,
   SERVER_ROUTE,
 
   LOGIN_ROUTE,

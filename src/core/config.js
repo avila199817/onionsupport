@@ -9,6 +9,7 @@
    - Home interna: /.
    - Home visible de usuario: /@{user.slug}.
    - Rutas privadas visibles: /@{user.slug}/{ruta}.
+   - Rutas admin reales: clientes, usuarios, servidor.
    - Auth endpoints mínimos alineados con backend.
    - /api/auth/me siempre privado.
    - Token param único: token.
@@ -23,7 +24,7 @@
    - Sin magia negra.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.v5";
+export const CONFIG_VERSION = "core.config.v6";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
@@ -77,12 +78,8 @@ export const ROUTES = Object.freeze({
   cuenta: "/cuenta",
   ajustes: "/ajustes",
 
-  /*
-    Rutas admin opcionales.
-    No se activan por fallback para evitar vistas inexistentes.
-  */
-  usuarios: "",
-  servidor: "",
+  usuarios: "/usuarios",
+  servidor: "/servidor",
 });
 
 export const PUBLIC_ROUTES = Object.freeze([
@@ -90,6 +87,12 @@ export const PUBLIC_ROUTES = Object.freeze([
   ROUTES.passwordRequest,
   ROUTES.passwordReset,
   ROUTES.activateAccount,
+]);
+
+export const ADMIN_ROUTES = Object.freeze([
+  ROUTES.clientes,
+  ROUTES.usuarios,
+  ROUTES.servidor,
 ]);
 
 export const TECHNICAL_PUBLIC_ROUTES = PUBLIC_ROUTES;
@@ -521,6 +524,7 @@ export const config = freeze({
   publicRoutes: PUBLIC_ROUTES,
   authLikeRoutes: PUBLIC_ROUTES,
   technicalPublicRoutes: TECHNICAL_PUBLIC_ROUTES,
+  adminRoutes: ADMIN_ROUTES,
   protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
 
   blockedFrontendRoutes: BLOCKED_FRONTEND_ROUTES,
@@ -645,6 +649,7 @@ export const config = freeze({
     publicRoutes: PUBLIC_ROUTES,
     authLikeRoutes: PUBLIC_ROUTES,
     technicalPublicRoutes: TECHNICAL_PUBLIC_ROUTES,
+    adminRoutes: ADMIN_ROUTES,
     protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
     blockedFrontendRoutes: BLOCKED_FRONTEND_ROUTES,
   }),
@@ -793,6 +798,14 @@ export function isAuthLikeRoute(path = "") {
   return isPublicRoute(path);
 }
 
+export function isAdminRoute(path = "") {
+  if (isBlockedRoutePath(path)) return false;
+
+  const route = canonicalRoutePath(path);
+
+  return config.adminRoutes.some((item) => pathMatches(route, item));
+}
+
 export function getProtectedPublicTokenRoutes() {
   return config.protectedPublicTokenRoutes;
 }
@@ -826,6 +839,7 @@ export function getConfigSnapshot() {
     routes: config.routes,
     publicRoutes: config.publicRoutes,
     technicalPublicRoutes: config.technicalPublicRoutes,
+    adminRoutes: config.adminRoutes,
     blockedFrontendRoutes: config.blockedFrontendRoutes,
 
     userHome: {
@@ -871,6 +885,10 @@ export function getConfigSnapshot() {
       blocked404: true,
 
       roles: [...ALLOWED_ROLES],
+
+      clientesAdminOnly: true,
+      usuariosAdminOnly: true,
+      servidorAdminOnly: true,
 
       langBase: "es",
 

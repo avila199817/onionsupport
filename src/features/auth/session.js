@@ -12,6 +12,7 @@
    - Leer access token persistido para soportar reload.
    - Leer refresh token persistido para permitir restore vía refresh.
    - Persistir access/refresh/session auxiliar al aplicar sesión.
+   - Preservar campos públicos visuales del usuario: avatar/avatarUrl/picture/photoUrl/hasAvatar.
    - No fabricar user desde storage.
    - No arrastrar refresh/session de otro usuario.
    - Conservar slug real del usuario si existe.
@@ -40,7 +41,7 @@ import {
   persistAuthStorage,
 } from "./storage.js";
 
-export const AUTH_SESSION_VERSION = "auth.session.v6";
+export const AUTH_SESSION_VERSION = "auth.session.v7";
 
 const SOURCE = "auth.session";
 
@@ -96,6 +97,55 @@ const SENSITIVE_USER_KEYS = new Set([
   "_metadata",
 ]);
 
+const USER_AVATAR_FIELDS = Object.freeze([
+  "avatarUrl",
+  "avatarURL",
+  "avatar_url",
+  "avatar",
+
+  "photoUrl",
+  "photoURL",
+  "photo_url",
+  "photo",
+
+  "pictureUrl",
+  "pictureURL",
+  "picture_url",
+  "picture",
+
+  "imageUrl",
+  "imageURL",
+  "image_url",
+  "image",
+
+  "profileImage",
+  "profile_image",
+
+  "img",
+  "imgUrl",
+  "imgURL",
+
+  "foto",
+  "fotoUrl",
+  "fotoURL",
+  "foto_url",
+
+  "imagen",
+  "imagenUrl",
+  "imagenURL",
+  "imagen_url",
+]);
+
+const USER_AVATAR_OBJECTS = Object.freeze([
+  "profile",
+  "media",
+  "preferences",
+  "account",
+  "me",
+  "raw",
+  "contacto",
+]);
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -115,6 +165,16 @@ function cleanText(value = "", fallback = "") {
     .trim();
 
   return output || fallback;
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    const output = cleanText(value, "");
+
+    if (output) return output;
+  }
+
+  return "";
 }
 
 function nowIso() {
@@ -296,6 +356,163 @@ export function getCurrentUserHomePath() {
 }
 
 /* =========================================================
+   USER VISUALS
+========================================================= */
+
+function avatarObjectValue(value = null) {
+  if (!isObject(value)) return "";
+
+  return firstText(
+    value.url,
+    value.href,
+    value.src,
+    value.path,
+    value.publicUrl,
+    value.publicURL,
+    value.public_url,
+    value.secureUrl,
+    value.secureURL,
+    value.secure_url,
+    value.thumbnailUrl,
+    value.thumbnailURL,
+    value.thumbnail_url
+  );
+}
+
+function avatarValueFromObject(source = null) {
+  if (!isObject(source)) return "";
+
+  for (const field of USER_AVATAR_FIELDS) {
+    const value = source[field];
+
+    if (typeof value === "string" || typeof value === "number") {
+      const output = cleanText(value, "");
+
+      if (output) return output;
+    }
+
+    if (isObject(value)) {
+      const output = avatarObjectValue(value);
+
+      if (output) return output;
+    }
+  }
+
+  return "";
+}
+
+function resolveUserAvatar(...sources) {
+  for (const source of sources) {
+    if (!isObject(source)) continue;
+
+    const direct = avatarValueFromObject(source);
+
+    if (direct) return direct;
+
+    for (const key of USER_AVATAR_OBJECTS) {
+      const nested = source[key];
+
+      if (!isObject(nested)) continue;
+
+      const nestedAvatar = avatarValueFromObject(nested);
+
+      if (nestedAvatar) return nestedAvatar;
+    }
+  }
+
+  return "";
+}
+
+function resolveUserHasAvatar(...sources) {
+  for (const source of sources) {
+    if (!isObject(source)) continue;
+
+    if (
+      source.hasAvatar === true ||
+      source.has_avatar === true ||
+      source.avatarEnabled === true ||
+      source.avatar_enabled === true ||
+      source.profile?.avatarEnabled === true ||
+      source.integrity?.hasAvatar === true ||
+      source.meta?.hasAvatar === true
+    ) {
+      return true;
+    }
+  }
+
+  return Boolean(resolveUserAvatar(...sources));
+}
+
+function mergeUserVisualFields(source = {}, normalized = {}) {
+  if (!isObject(normalized)) return null;
+
+  const avatar = resolveUserAvatar(normalized, source);
+  const hasAvatar = resolveUserHasAvatar(normalized, source);
+  const avatarUpdatedAt = firstText(
+    normalized.avatarUpdatedAt,
+    normalized.avatar_updated_at,
+    source.avatarUpdatedAt,
+    source.avatar_updated_at
+  );
+
+  return {
+    ...normalized,
+
+    hasAvatar: Boolean(hasAvatar || avatar),
+
+    ...(avatar
+      ? {
+          avatar,
+          avatarUrl: avatar,
+          photoUrl: normalized.photoUrl || source.photoUrl || avatar,
+          photoURL: normalized.photoURL || source.photoURL || avatar,
+          picture: normalized.picture || source.picture || avatar,
+          pictureUrl: normalized.pictureUrl || source.pictureUrl || avatar,
+          image: normalized.image || source.image || avatar,
+          imageUrl: normalized.imageUrl || source.imageUrl || avatar,
+        }
+      : {}),
+
+    avatarUpdatedAt: avatarUpdatedAt || normalized.avatarUpdatedAt || source.avatarUpdatedAt || null,
+  };
+}
+
+function userCandidateScore(user = null) {
+  if (!isObject(user)) return -1;
+  if (userDisabled(user)) return -1;
+
+  let score = 0;
+
+  if (cleanText(user.id || user.userId || user.uid || user.sub, "")) score += 20;
+  if (cleanText(user.username || user.userName || user.user_name, "")) score += 10;
+  if (extractSessionUserSlug(user)) score += 10;
+  if (resolveUserAvatar(user)) score += 100;
+  if (resolveUserHasAvatar(user)) score += 20;
+  if (normalizeRole(user.role || user.rol || user.roles)) score += 10;
+  if (cleanText(user.displayName || user.fullName || user.name || user.nombre, "")) score += 5;
+
+  return score;
+}
+
+function selectBestUserCandidate(candidates = []) {
+  let best = null;
+  let bestScore = -1;
+
+  for (const candidate of candidates) {
+    if (!isObject(candidate)) continue;
+
+    const score = userCandidateScore(candidate);
+
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+
+  return best;
+}
+
+/* =========================================================
    USER
 ========================================================= */
 
@@ -381,16 +598,20 @@ function hasUserIdentity(user = null) {
 }
 
 export function normalizeUser(user = null) {
+  if (!isObject(user)) return null;
+  if (userDisabled(user)) return null;
+
   if (isFunction(AppCore?.normalizeUser)) {
     const normalized = AppCore.normalizeUser(user);
 
     if (!normalized || userDisabled(normalized)) return null;
 
-    return removeSensitiveUserFields(normalized);
-  }
+    const clean = removeSensitiveUserFields(normalized);
 
-  if (!isObject(user)) return null;
-  if (userDisabled(user)) return null;
+    if (!hasUserIdentity(clean)) return null;
+
+    return mergeUserVisualFields(user, clean);
+  }
 
   const safeUser = removeSensitiveUserFields(user);
 
@@ -435,7 +656,7 @@ export function normalizeUser(user = null) {
 
   const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
 
-  return {
+  return mergeUserVisualFields(safeUser, {
     ...safeUser,
 
     id: id || safeUser.id || safeUser.userId || null,
@@ -471,7 +692,7 @@ export function normalizeUser(user = null) {
 
     isAdmin: role === "admin",
     isUser: role === "user",
-  };
+  });
 }
 
 /* =========================================================
@@ -526,19 +747,35 @@ function readRefreshTokenFromPayload(payload = {}) {
 }
 
 function readUserFromPayload(payload = {}) {
-  for (const node of nested(payload)) {
-    const user = normalizeUser(
-      node.user ||
-        node.usuario ||
-        node.me ||
-        node.account ||
-        node.profile
-    );
+  const nodes = nested(payload);
 
-    if (user) return user;
+  const candidates = [];
+
+  for (const node of nodes) {
+    const rawUser =
+      node.user ||
+      node.usuario ||
+      node.me ||
+      node.account ||
+      node.profile ||
+      null;
+
+    if (!isObject(rawUser)) continue;
+
+    /*
+      Si el payload trae avatar en raíz y user reducido dentro,
+      se conserva como fuente visual sin convertirlo en fuente de identidad.
+    */
+    candidates.push(
+      mergeUserVisualFields(node, {
+        ...rawUser,
+      })
+    );
   }
 
-  return normalizeUser(payload);
+  const best = selectBestUserCandidate(candidates);
+
+  return normalizeUser(best || payload);
 }
 
 function sanitizeSessionContext(session = {}) {
@@ -699,16 +936,20 @@ function bestStateUser() {
     El reload se restaura así:
       token persistido -> restore.js -> /me -> user canónico.
       token caducado -> restore.js -> refresh context -> /refresh -> user canónico.
+
+    Si hay varias copias del usuario en estado, se usa la más completa.
+    Esto evita que una copia reducida sin avatar gane sobre otra con avatar.
   */
-  return (
-    normalizeUser(state.user) ||
-    normalizeUser(state.currentUser) ||
-    normalizeUser(state.authUser) ||
-    normalizeUser(state.sessionUser) ||
-    normalizeUser(state.session?.user) ||
-    normalizeUser(state.sessionData?.user) ||
-    null
-  );
+  const best = selectBestUserCandidate([
+    state.user,
+    state.currentUser,
+    state.authUser,
+    state.sessionUser,
+    state.session?.user,
+    state.sessionData?.user,
+  ]);
+
+  return normalizeUser(best);
 }
 
 function userIdentity(user = null) {
@@ -808,6 +1049,9 @@ function buildStatePatch({
     ? buildSessionUserHomePath(safeUser)
     : AUTH_HOME.canonical;
 
+  const avatar = authenticated ? resolveUserAvatar(safeUser) : "";
+  const hasAvatar = authenticated ? resolveUserHasAvatar(safeUser) : false;
+
   const sessionData = authenticated && safeSession
     ? {
         ...safeSession,
@@ -863,8 +1107,13 @@ function buildStatePatch({
     sessionUserId: authenticated ? sessionData?.sessionUserId || null : null,
 
     username: authenticated ? safeUser.username || null : null,
-    avatar: authenticated ? safeUser.avatar || safeUser.avatarUrl || safeUser.picture || null : null,
-    avatarUrl: authenticated ? safeUser.avatarUrl || safeUser.avatar || safeUser.picture || null : null,
+
+    hasAvatar: authenticated ? Boolean(hasAvatar || avatar) : false,
+    avatar: authenticated ? avatar || null : null,
+    avatarUrl: authenticated ? avatar || null : null,
+    photoUrl: authenticated ? safeUser.photoUrl || avatar || null : null,
+    picture: authenticated ? safeUser.picture || avatar || null : null,
+    avatarUpdatedAt: authenticated ? safeUser.avatarUpdatedAt || null : null,
 
     lastAuthSyncAt: nowIso(),
   };
@@ -970,6 +1219,8 @@ function publicUser(user = null) {
 
   if (!normalized) return null;
 
+  const avatar = resolveUserAvatar(normalized);
+
   return {
     id: normalized.id || normalized.userId || null,
     userId: normalized.userId || normalized.id || null,
@@ -977,7 +1228,13 @@ function publicUser(user = null) {
     slug: extractSessionUserSlug(normalized) || null,
     displayName: normalized.displayName || normalized.name || normalized.username || null,
     role: normalized.role || normalized.rol || null,
-    hasAvatar: Boolean(normalized.avatar || normalized.avatarUrl || normalized.picture),
+
+    hasAvatar: Boolean(normalized.hasAvatar || avatar),
+    avatar: avatar || null,
+    avatarUrl: avatar || null,
+    picture: normalized.picture || avatar || null,
+    photoUrl: normalized.photoUrl || avatar || null,
+    avatarUpdatedAt: normalized.avatarUpdatedAt || null,
   };
 }
 
@@ -1140,8 +1397,12 @@ export function clearSessionLocal(options = {}) {
       sessionUserId: null,
 
       username: null,
+      hasAvatar: false,
       avatar: null,
       avatarUrl: null,
+      photoUrl: null,
+      picture: null,
+      avatarUpdatedAt: null,
 
       lastAuthSyncAt: nowIso(),
     },

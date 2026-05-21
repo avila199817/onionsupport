@@ -11,6 +11,8 @@
    - Si /me devuelve user válido: aplicar sesión.
    - Si no hay token ni refresh context: limpiar sesión local.
    - Si refresh falla con revocación/usuario inválido/tokenVersion: limpiar sesión local.
+   - CoreHttp clasifica errores auth refreshable/clear-session.
+   - session.js aplica/limpia/persiste sesión.
    - No inventar slug.
    - No navegar.
    - Sin fetch propio.
@@ -46,7 +48,7 @@ import {
   getCurrentUserHomePath,
 } from "./session.js";
 
-export const RESTORE_VERSION = "auth.restore.v6";
+export const RESTORE_VERSION = "auth.restore.v7";
 
 const ME_ENDPOINT = AUTH_ENDPOINTS.me;
 const REFRESH_ENDPOINT = AUTH_ENDPOINTS.refresh;
@@ -335,23 +337,46 @@ function publicError(error = null) {
   };
 }
 
-function rememberError(type = "restore", error = null) {
-  const finalError = normalizeRestoreError(error);
-
-  runtime.lastError = {
-    type,
-    ...publicError(finalError),
-    refreshable: isRefreshableAuthFailure(finalError),
-    shouldClearSession: shouldClearSessionForAuthError(finalError),
-    at: nowIso(),
-  };
-
-  return finalError;
+function coreHttpSaysRefreshable(error = null) {
+  try {
+    return isFunction(CoreHttp?.isRefreshableAuthError) &&
+      CoreHttp.isRefreshableAuthError(error) === true;
+  } catch {
+    return false;
+  }
 }
 
-function clearLastError() {
-  runtime.lastError = null;
-  return true;
+function coreHttpSaysClearSession(error = null) {
+  try {
+    return isFunction(CoreHttp?.shouldClearSessionForAuthError) &&
+      CoreHttp.shouldClearSessionForAuthError(error) === true;
+  } catch {
+    return false;
+  }
+}
+
+function payloadSaysRefreshable(error = null) {
+  const payload = getErrorPayload(error);
+  const auth = isObject(payload.auth) ? payload.auth : {};
+
+  return Boolean(
+    auth.refreshRequired === true ||
+      payload.refreshRequired === true ||
+      auth.canRefresh === true ||
+      payload.canRefresh === true
+  );
+}
+
+function payloadSaysClearSession(error = null) {
+  const payload = getErrorPayload(error);
+  const auth = isObject(payload.auth) ? payload.auth : {};
+
+  return Boolean(
+    auth.clearClientSession === true ||
+      payload.clearClientSession === true ||
+      auth.shouldLogout === true ||
+      payload.shouldLogout === true
+  );
 }
 
 function isAuthFailure(error = null) {
@@ -360,54 +385,15 @@ function isAuthFailure(error = null) {
 }
 
 function shouldClearSessionForAuthError(error = null) {
-  try {
-    if (isFunction(CoreHttp?.shouldClearSessionForAuthError)) {
-      return CoreHttp.shouldClearSessionForAuthError(error) === true;
-    }
-  } catch {
-    // fallback abajo
-  }
-
-  const code = cleanText(authErrorCode(error), "").toUpperCase();
-
-  return [
-    "INVALID_TOKEN",
-    "INVALID_TOKEN_FORMAT",
-    "INVALID_AUTHORIZATION_HEADER",
-    "TEMP_TOKEN_NOT_ALLOWED",
-    "TEMP_AUTH_DISABLED",
-
-    "SESSION_INVALID",
-    "SESSION_REVOKED",
-    "SESSION_USER_MISMATCH",
-    "SESSION_ID_MISMATCH",
-    "SESSION_TOKEN_VERSION_MISMATCH",
-    "SESSION_TOKEN_MISMATCH",
-
-    "USER_INVALID",
-    "USER_INACTIVE",
-    "USER_DISABLED",
-    "USER_NOT_AVAILABLE",
-    "USER_EMAIL_UNVERIFIED",
-
-    "PASSWORD_CHANGE_REQUIRED",
-    "TOKEN_VERSION_MISMATCH",
-
-    "INVALID_REFRESH_TOKEN",
-    "SESSION_NOT_FOUND",
-  ].includes(code);
+  if (coreHttpSaysClearSession(error)) return true;
+  return payloadSaysClearSession(error);
 }
 
 function isRefreshableAuthFailure(error = null, options = {}) {
   if (!allowSilentRefresh(options)) return false;
 
-  try {
-    if (isFunction(CoreHttp?.isRefreshableAuthError)) {
-      if (CoreHttp.isRefreshableAuthError(error) === true) return true;
-    }
-  } catch {
-    // fallback abajo
-  }
+  if (coreHttpSaysRefreshable(error)) return true;
+  if (payloadSaysRefreshable(error)) return true;
 
   const status = authErrorStatus(error);
   const code = cleanText(authErrorCode(error), "").toUpperCase();
@@ -427,6 +413,25 @@ function isRefreshableAuthFailure(error = null, options = {}) {
   }
 
   return false;
+}
+
+function rememberError(type = "restore", error = null) {
+  const finalError = normalizeRestoreError(error);
+
+  runtime.lastError = {
+    type,
+    ...publicError(finalError),
+    refreshable: isRefreshableAuthFailure(finalError),
+    shouldClearSession: shouldClearSessionForAuthError(finalError),
+    at: nowIso(),
+  };
+
+  return finalError;
+}
+
+function clearLastError() {
+  runtime.lastError = null;
+  return true;
 }
 
 /* =========================================================
@@ -987,6 +992,11 @@ export function getRestoreSnapshot() {
     refreshEndpoint: REFRESH_ENDPOINT,
 
     policy: {
+      restoreOnly: true,
+
+      coreHttpOwnsAuthErrorClassification: true,
+      sessionOwnsApplyAndClear: true,
+
       noRouter: true,
       noToast: true,
 

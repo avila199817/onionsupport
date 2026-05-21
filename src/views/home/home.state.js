@@ -7,7 +7,7 @@
    - Mantener shape estable para template/selectors.
    - Recibir dashboard ya normalizado.
    - Separar Home admin/user desde el propio payload.
-   - User nunca conserva usuarios/clientes de cache admin.
+   - User nunca conserva usuarios/clientes/servidor de cache admin.
    - Preservar datos existentes sólo si el rol no cambia.
    - Exponer setters usados por homeView.js.
    - Redactar errores/snapshots.
@@ -22,7 +22,7 @@
    - Sin CSS.
 ========================================================= */
 
-export const HOME_STATE_VERSION = "home.state.v5";
+export const HOME_STATE_VERSION = "home.state.v6";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 5;
@@ -52,7 +52,22 @@ const SENSITIVE_KEY_RE =
 const EMAIL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
 
 const ADMIN_ENTITY_RE =
-  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory|servidores?|servidor|servers?)([\s._/-]|$)/i;
+
+const ADMIN_COLLECTION_KEYS = new Set([
+  "users",
+  "usuarios",
+  "clients",
+  "clientes",
+  "customers",
+  "servers",
+  "servidores",
+]);
+
+const ADMIN_OBJECT_KEYS = new Set([
+  "server",
+  "servidor",
+]);
 
 /* =========================================================
    SAFE HELPERS
@@ -216,7 +231,7 @@ function normalizeRole(value = "", fallback = "user") {
     return fallback;
   }
 
-  const role = String(value || "").toLowerCase();
+  const role = String(value || "").trim().toLowerCase();
 
   if (role === "admin") return "admin";
   if (role === "user") return "user";
@@ -514,6 +529,7 @@ export function createInitialHomeState() {
     invoicesRemoteCount: 0,
     usersRemoteCount: 0,
     clientsRemoteCount: 0,
+    serversRemoteCount: 0,
     activityRemoteCount: 0,
 
     requestId: "",
@@ -545,6 +561,12 @@ export function createInitialHomeState() {
     clients: [],
     clientes: [],
     customers: [],
+
+    servers: [],
+    servidores: [],
+
+    server: {},
+    servidor: {},
 
     activity: [],
     activities: [],
@@ -660,6 +682,19 @@ function normalizeSummary(summary = {}, admin = false) {
       )
     : 0;
 
+  const serversCount = admin
+    ? numberFrom(
+        raw.serversCount,
+        raw.serverCount,
+        raw.servidoresCount,
+        raw.servidorCount,
+        raw.totalServers,
+        raw.totalServidores,
+        homeState.serversRemoteCount,
+        homeState.servers.length
+      )
+    : 0;
+
   const attachmentsCount = numberFrom(
     raw.attachmentsCount,
     raw.filesCount,
@@ -724,6 +759,13 @@ function normalizeSummary(summary = {}, admin = false) {
     totalClientes: clientsCount,
     totalCustomers: clientsCount,
 
+    serversCount,
+    serverCount: serversCount,
+    servidoresCount: serversCount,
+    servidorCount: serversCount,
+    totalServers: serversCount,
+    totalServidores: serversCount,
+
     attachmentsCount,
     filesCount: attachmentsCount,
     adjuntosCount: attachmentsCount,
@@ -741,6 +783,9 @@ function syncAliases() {
 
   homeState.users = admin ? safeArray(homeState.users) : [];
   homeState.clients = admin ? safeArray(homeState.clients) : [];
+  homeState.servers = admin ? safeArray(homeState.servers) : [];
+
+  homeState.server = admin ? safeObject(homeState.server) : {};
 
   homeState.incidencias = homeState.tickets;
   homeState.facturas = homeState.invoices;
@@ -748,6 +793,9 @@ function syncAliases() {
   homeState.usuarios = admin ? homeState.users : [];
   homeState.clientes = admin ? homeState.clients : [];
   homeState.customers = admin ? homeState.clients : [];
+
+  homeState.servidores = admin ? homeState.servers : [];
+  homeState.servidor = admin ? homeState.server : {};
 
   homeState.activities = homeState.activity;
   homeState.recent = homeState.activity;
@@ -793,6 +841,12 @@ function syncAliases() {
     clientes: admin ? homeState.clients : [],
     customers: admin ? homeState.clients : [],
 
+    servers: admin ? homeState.servers : [],
+    servidores: admin ? homeState.servers : [],
+
+    server: admin ? homeState.server : {},
+    servidor: admin ? homeState.server : {},
+
     activity: homeState.activity,
     activities: homeState.activity,
     recent: homeState.activity,
@@ -830,6 +884,10 @@ function syncAliases() {
       clientesCount: admin ? homeState.summary.clientesCount : 0,
       customersCount: admin ? homeState.summary.customersCount : 0,
       visibleClientsCount: admin ? homeState.clients.length : 0,
+
+      serversCount: admin ? homeState.summary.serversCount : 0,
+      servidoresCount: admin ? homeState.summary.servidoresCount : 0,
+      visibleServersCount: admin ? homeState.servers.length : 0,
 
       activityCount: homeState.activity.length,
       recentCount: homeState.activity.length,
@@ -872,6 +930,8 @@ export function normalizeHomeState() {
 
   homeState.users = admin ? safeArray(homeState.users) : [];
   homeState.clients = admin ? safeArray(homeState.clients) : [];
+  homeState.servers = admin ? safeArray(homeState.servers) : [];
+  homeState.server = admin ? safeObject(homeState.server) : {};
 
   homeState.activity = filterActivityForRole(safeArray(homeState.activity), admin);
 
@@ -884,6 +944,10 @@ export function normalizeHomeState() {
 
   homeState.clientsRemoteCount = admin
     ? Math.max(homeState.clients.length, safeNumber(homeState.clientsRemoteCount, 0))
+    : 0;
+
+  homeState.serversRemoteCount = admin
+    ? Math.max(homeState.servers.length, safeNumber(homeState.serversRemoteCount, 0))
     : 0;
 
   homeState.activityRemoteCount = Math.max(homeState.activity.length, safeNumber(homeState.activityRemoteCount, 0));
@@ -920,7 +984,7 @@ export function normalizeHomeState() {
 function shouldKeepExisting(key = "", value, replace = false) {
   if (replace) return false;
 
-  if (["users", "usuarios", "clients", "clientes", "customers"].includes(key) && !currentIsAdmin()) {
+  if ((ADMIN_COLLECTION_KEYS.has(key) || ADMIN_OBJECT_KEYS.has(key)) && !currentIsAdmin()) {
     return false;
   }
 
@@ -950,8 +1014,12 @@ function sanitizeStateValue(key = "", value) {
   if (key === "openingTicketId" || key === "selectedTicketId") return safePublicId(value);
   if (key === "health") return value === null ? null : sanitizeStateDeep(value);
 
-  if (["users", "usuarios", "clients", "clientes", "customers"].includes(key) && !currentIsAdmin()) {
+  if (ADMIN_COLLECTION_KEYS.has(key) && !currentIsAdmin()) {
     return [];
+  }
+
+  if (ADMIN_OBJECT_KEYS.has(key) && !currentIsAdmin()) {
+    return {};
   }
 
   return sanitizeStateDeep(value, key);
@@ -1028,6 +1096,22 @@ function remoteCountFrom(dashboard = {}, key = "") {
       summary.customersCount,
       meta.clientsCount,
       meta.clientesCount,
+    ],
+    servers: [
+      data.serversTotal,
+      data.servidoresTotal,
+      data.totalServers,
+      data.totalServidores,
+      data.serversCount,
+      data.serverCount,
+      data.servidoresCount,
+      data.servidorCount,
+      summary.serversCount,
+      summary.serverCount,
+      summary.servidoresCount,
+      summary.servidorCount,
+      meta.serversCount,
+      meta.servidoresCount,
     ],
     activity: [
       data.activityCount,
@@ -1119,6 +1203,8 @@ export function syncHomeStateFromDashboard(dashboard = {}, options = {}) {
   const invoices = firstArray(raw.invoices, raw.facturas);
   const users = admin ? firstArray(raw.users, raw.usuarios) : [];
   const clients = admin ? firstArray(raw.clients, raw.clientes, raw.customers) : [];
+  const servers = admin ? firstArray(raw.servers, raw.servidores) : [];
+  const server = admin ? first(raw.server, raw.servidor, {}) : {};
   const activity = firstArray(raw.activity, raw.activities, raw.recent, raw.recentActivity);
 
   if (widgets || replace) assign("widgets", filterWidgetsForRole(widgets || [], admin), { replace });
@@ -1164,6 +1250,24 @@ export function syncHomeStateFromDashboard(dashboard = {}, options = {}) {
   } else {
     homeState.clients = [];
     homeState.clientsRemoteCount = 0;
+  }
+
+  if (admin && (servers || replace)) {
+    assign("servers", servers || [], { replace });
+    homeState.serversRemoteCount = Math.max(
+      homeState.servers.length,
+      remoteCountFrom(raw, "servers"),
+      replace ? 0 : homeState.serversRemoteCount
+    );
+  } else {
+    homeState.servers = [];
+    homeState.serversRemoteCount = 0;
+  }
+
+  if (admin && (hasKeys(server) || replace)) {
+    assign("server", server || {}, { replace });
+  } else {
+    homeState.server = {};
   }
 
   if (activity || replace) {
@@ -1475,6 +1579,7 @@ export function getHomeStateSnapshot() {
       invoicesRemoteCount: homeState.invoicesRemoteCount,
       usersRemoteCount: homeState.usersRemoteCount,
       clientsRemoteCount: homeState.clientsRemoteCount,
+      serversRemoteCount: homeState.serversRemoteCount,
       activityRemoteCount: homeState.activityRemoteCount,
 
       requestId: homeState.requestId,
@@ -1507,6 +1612,12 @@ export function getHomeStateSnapshot() {
       clientes: homeState.admin ? homeState.clientes : [],
       customers: homeState.admin ? homeState.customers : [],
 
+      servers: homeState.admin ? homeState.servers : [],
+      servidores: homeState.admin ? homeState.servidores : [],
+
+      server: homeState.admin ? homeState.server : {},
+      servidor: homeState.admin ? homeState.servidor : {},
+
       activity: homeState.activity,
       activities: homeState.activities,
       recent: homeState.recent,
@@ -1524,6 +1635,7 @@ export function getHomeStateSnapshot() {
         invoices: homeState.invoices.length,
         users: homeState.admin ? homeState.users.length : 0,
         clients: homeState.admin ? homeState.clients.length : 0,
+        servers: homeState.admin ? homeState.servers.length : 0,
         activity: homeState.activity.length,
       },
 
@@ -1539,7 +1651,7 @@ export function getHomeStateSnapshot() {
         noCss: true,
 
         roleAware: true,
-        userNeverKeepsAdminUsersClients: true,
+        userNeverKeepsAdminUsersClientsServers: true,
         noRawBackendPayloadInDashboard: true,
         stripsCosmosMetadata: true,
         noEmailAsIdentity: true,

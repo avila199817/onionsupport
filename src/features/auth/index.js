@@ -7,6 +7,7 @@
    - Delegar login/restore/logout/session/guards.
    - HTTP delegado en CoreHttp/AppCore.
    - Normalizar usuario autenticado vía AppCore/session.
+   - Preservar campos públicos visuales del usuario: avatar/avatarUrl/picture/photoUrl/hasAvatar.
    - Exponer Home privada por slug: /@{user.slug}.
    - Pedir restore persistente/silent refresh a restore.js.
    - Init sólo registra Auth; restoreSession gobierna la restauración.
@@ -38,7 +39,7 @@ import * as GuardsApi from "./guards.js";
 import * as ActivationApi from "./activation.js";
 import * as PasswordResetApi from "./password-reset.js";
 
-export const AUTH_MODULE_VERSION = "auth.facade.v5";
+export const AUTH_MODULE_VERSION = "auth.facade.v6";
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
 
@@ -53,6 +54,55 @@ const AUTH_HOME = Object.freeze({
   canonical: "/",
   userPrefix: USER_HOME_PREFIX || "/@",
 });
+
+const USER_AVATAR_FIELDS = Object.freeze([
+  "avatarUrl",
+  "avatarURL",
+  "avatar_url",
+  "avatar",
+
+  "photoUrl",
+  "photoURL",
+  "photo_url",
+  "photo",
+
+  "pictureUrl",
+  "pictureURL",
+  "picture_url",
+  "picture",
+
+  "imageUrl",
+  "imageURL",
+  "image_url",
+  "image",
+
+  "profileImage",
+  "profile_image",
+
+  "img",
+  "imgUrl",
+  "imgURL",
+
+  "foto",
+  "fotoUrl",
+  "fotoURL",
+  "foto_url",
+
+  "imagen",
+  "imagenUrl",
+  "imagenURL",
+  "imagen_url",
+]);
+
+const USER_AVATAR_OBJECTS = Object.freeze([
+  "profile",
+  "media",
+  "preferences",
+  "account",
+  "me",
+  "raw",
+  "contacto",
+]);
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -79,6 +129,16 @@ function cleanText(value = "", fallback = "") {
     .trim();
 
   return output || fallback;
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    const output = cleanText(value, "");
+
+    if (output) return output;
+  }
+
+  return "";
 }
 
 function cleanRole(value = "") {
@@ -168,6 +228,163 @@ function emit(eventName = "", payload = {}) {
   } catch {
     return false;
   }
+}
+
+/* =========================================================
+   PUBLIC USER VISUALS
+========================================================= */
+
+function avatarObjectValue(value = null) {
+  if (!isObject(value)) return "";
+
+  return firstText(
+    value.url,
+    value.href,
+    value.src,
+    value.path,
+    value.publicUrl,
+    value.publicURL,
+    value.public_url,
+    value.secureUrl,
+    value.secureURL,
+    value.secure_url,
+    value.thumbnailUrl,
+    value.thumbnailURL,
+    value.thumbnail_url
+  );
+}
+
+function avatarValueFromObject(source = null) {
+  if (!isObject(source)) return "";
+
+  for (const field of USER_AVATAR_FIELDS) {
+    const value = source[field];
+
+    if (typeof value === "string" || typeof value === "number") {
+      const output = cleanText(value, "");
+
+      if (output) return output;
+    }
+
+    if (isObject(value)) {
+      const output = avatarObjectValue(value);
+
+      if (output) return output;
+    }
+  }
+
+  return "";
+}
+
+function resolveUserAvatar(...sources) {
+  for (const source of sources) {
+    if (!isObject(source)) continue;
+
+    const direct = avatarValueFromObject(source);
+
+    if (direct) return direct;
+
+    for (const key of USER_AVATAR_OBJECTS) {
+      const nested = source[key];
+
+      if (!isObject(nested)) continue;
+
+      const nestedAvatar = avatarValueFromObject(nested);
+
+      if (nestedAvatar) return nestedAvatar;
+    }
+  }
+
+  return "";
+}
+
+function resolveUserHasAvatar(...sources) {
+  for (const source of sources) {
+    if (!isObject(source)) continue;
+
+    if (
+      source.hasAvatar === true ||
+      source.has_avatar === true ||
+      source.avatarEnabled === true ||
+      source.avatar_enabled === true ||
+      source.profile?.avatarEnabled === true ||
+      source.integrity?.hasAvatar === true ||
+      source.meta?.hasAvatar === true
+    ) {
+      return true;
+    }
+  }
+
+  return Boolean(resolveUserAvatar(...sources));
+}
+
+function mergeUserVisualFields(source = {}, normalized = {}) {
+  if (!isObject(normalized)) return null;
+
+  const avatar = resolveUserAvatar(normalized, source);
+  const hasAvatar = resolveUserHasAvatar(normalized, source);
+  const avatarUpdatedAt = firstText(
+    normalized.avatarUpdatedAt,
+    normalized.avatar_updated_at,
+    source.avatarUpdatedAt,
+    source.avatar_updated_at
+  );
+
+  return {
+    ...normalized,
+
+    hasAvatar: Boolean(hasAvatar || avatar),
+
+    ...(avatar
+      ? {
+          avatar,
+          avatarUrl: avatar,
+          photoUrl: normalized.photoUrl || source.photoUrl || avatar,
+          photoURL: normalized.photoURL || source.photoURL || avatar,
+          picture: normalized.picture || source.picture || avatar,
+          pictureUrl: normalized.pictureUrl || source.pictureUrl || avatar,
+          image: normalized.image || source.image || avatar,
+          imageUrl: normalized.imageUrl || source.imageUrl || avatar,
+        }
+      : {}),
+
+    avatarUpdatedAt: avatarUpdatedAt || normalized.avatarUpdatedAt || source.avatarUpdatedAt || null,
+  };
+}
+
+function userCandidateScore(user = null) {
+  if (!isObject(user)) return -1;
+  if (isUserDisabled(user)) return -1;
+
+  let score = 0;
+
+  if (cleanText(user.id || user.userId || user.uid || user.sub, "")) score += 20;
+  if (cleanText(user.username || user.userName || user.user_name, "")) score += 10;
+  if (extractUserSlug(user)) score += 10;
+  if (resolveUserAvatar(user)) score += 100;
+  if (resolveUserHasAvatar(user)) score += 20;
+  if (cleanRole(user.role || user.rol || user.roles)) score += 10;
+  if (cleanText(user.displayName || user.fullName || user.name || user.nombre, "")) score += 5;
+
+  return score;
+}
+
+function selectBestUserCandidate(candidates = []) {
+  let best = null;
+  let bestScore = -1;
+
+  for (const candidate of candidates) {
+    if (!isObject(candidate)) continue;
+
+    const score = userCandidateScore(candidate);
+
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+
+  return best;
 }
 
 /* =========================================================
@@ -276,13 +493,16 @@ function isUserHomePath(path = "") {
 }
 
 function normalizeUser(user = null) {
-  if (isFunction(AppCore?.normalizeUser)) {
-    const normalized = AppCore.normalizeUser(user);
-    return normalized && !isUserDisabled(normalized) ? normalized : null;
-  }
-
   if (!isObject(user)) return null;
   if (isUserDisabled(user)) return null;
+
+  if (isFunction(AppCore?.normalizeUser)) {
+    const normalized = AppCore.normalizeUser(user);
+
+    if (!normalized || isUserDisabled(normalized)) return null;
+
+    return mergeUserVisualFields(user, normalized);
+  }
 
   const id = cleanText(user.userId || user.id || user.uid || user.sub, "");
   const slug = extractUserSlug(user);
@@ -319,7 +539,7 @@ function normalizeUser(user = null) {
 
   const role = defaultRole(user.role || user.rol || user.roles);
 
-  return {
+  return mergeUserVisualFields(user, {
     ...user,
 
     id: id || null,
@@ -349,17 +569,24 @@ function normalizeUser(user = null) {
 
     isAdmin: role === "admin",
     isUser: role === "user",
-  };
+  });
 }
 
 function publicUser(user = null) {
   if (isFunction(AppCore?.publicUser)) {
-    return AppCore.publicUser(user);
+    const normalized = normalizeUser(user);
+    const appPublic = AppCore.publicUser(user);
+
+    if (!normalized || !appPublic) return appPublic || null;
+
+    return mergeUserVisualFields(normalized, appPublic);
   }
 
   const normalized = normalizeUser(user);
 
   if (!normalized) return null;
+
+  const avatar = resolveUserAvatar(normalized);
 
   return {
     id: normalized.id || normalized.userId || null,
@@ -368,6 +595,13 @@ function publicUser(user = null) {
     slug: normalized.slug || null,
     displayName: normalized.displayName || null,
     role: normalized.role || null,
+
+    hasAvatar: Boolean(normalized.hasAvatar || avatar),
+    avatar: avatar || null,
+    avatarUrl: avatar || null,
+    picture: normalized.picture || avatar || null,
+    photoUrl: normalized.photoUrl || avatar || null,
+    avatarUpdatedAt: normalized.avatarUpdatedAt || null,
   };
 }
 
@@ -436,14 +670,24 @@ function hasValidToken() {
 }
 
 function getUser() {
-  const user =
-    safeCall(sessionGetCurrentUser) ||
-    safeCall(AppCore?.getCurrentUser?.bind?.(AppCore) || AppCore?.getCurrentUser) ||
-    state().user ||
-    state().currentUser ||
-    state().sessionUser ||
-    state().authUser ||
-    null;
+  const currentState = state();
+
+  const user = selectBestUserCandidate([
+    safeCall(sessionGetCurrentUser),
+    safeCall(AppCore?.getCurrentUser?.bind?.(AppCore) || AppCore?.getCurrentUser),
+
+    currentState.user,
+    currentState.currentUser,
+    currentState.sessionUser,
+    currentState.authUser,
+
+    currentState.session?.user,
+    currentState.sessionData?.user,
+    currentState.auth?.user,
+
+    AppCore?.user,
+    AppCore?.currentUser,
+  ]);
 
   return normalizeUser(user);
 }
@@ -1591,6 +1835,9 @@ function getAuthModuleSnapshot() {
     policy: {
       strictAuth: true,
       requiresTokenAndUsableUser: true,
+
+      preservesUserAvatarFields: true,
+      choosesRichestUserCandidate: true,
 
       persistentSession: true,
       restoreRequestsSilentRefresh: true,

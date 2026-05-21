@@ -15,19 +15,25 @@
    - User no arrastra usuarios/clientes de cache admin.
    - Renderiza dentro del host recibido por Router.
    - Devuelve API/controller, no el contenedor padre.
-   - Sin resolver slug.
-   - Sin Auth guards.
-   - Sin Router guards.
-   - Sin bridges globales.
-   - Sin eventos externos.
-   - Sin cache local propia.
-   - Sin imports opcionales.
-   - Sin modales de otras vistas.
-   - Sin Toast directo.
-   - Sin /home.
+   - Lee usuario/rol sólo desde contexto/AppCore/state ya resuelto.
+   - No resuelve slug.
+   - No ejecuta Auth guards.
+   - No ejecuta Router guards.
+   - No crea bridges globales.
+   - No emite eventos externos.
+   - No crea cache local propia.
+   - No usa imports opcionales.
+   - No abre modales de otras vistas.
+   - No usa Toast directo.
+   - No usa /home.
 ========================================================= */
 
-import { ROUTES } from "../../core/config.js";
+import {
+  ROUTES,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
+} from "../../core/config.js";
 
 import renderHomeTemplate, {
   renderHomeErrorState,
@@ -99,7 +105,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v5";
+export const HOME_VIEW_VERSION = "home.view.v6";
 
 export const HomeView = (() => {
   "use strict";
@@ -108,10 +114,9 @@ export const HomeView = (() => {
   const SCOPE = "view:home";
 
   const DEFAULT_PAGE_SIZE = 5;
-  const BLOCKED_HOME_ROUTE = "/home";
 
   const SENSITIVE_QUERY_RE =
-    /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i;
+    /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
 
   const ADMIN_ENTITY_RE =
     /(^|[\s._-])(admin|users?|usuarios?|clients?|clientes?|customers?)([\s._-]|$)/i;
@@ -145,6 +150,10 @@ export const HomeView = (() => {
     return Boolean(value && typeof value === "object" && value.nodeType === 1);
   }
 
+  function isFunction(value) {
+    return typeof value === "function";
+  }
+
   function hasKeys(value = {}) {
     return Boolean(isObject(value) && Object.keys(value).length > 0);
   }
@@ -170,7 +179,7 @@ export const HomeView = (() => {
   function redact(value = "") {
     return String(value || "")
       .replace(
-        /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+        /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
         "$1***"
       )
       .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -202,6 +211,56 @@ export const HomeView = (() => {
     return SENSITIVE_QUERY_RE.test(String(value || ""));
   }
 
+  function pathFromInput(value = "/") {
+    try {
+      return configRoutePathFromUrlLike(value) || "/";
+    } catch {
+      return "/";
+    }
+  }
+
+  function normalizePathname(value = "/") {
+    try {
+      return configNormalizeRoutePath(value) || "/";
+    } catch {
+      let path = safeText(value, "/")
+        .split("?")[0]
+        .split("#")[0]
+        .replace(/\\/g, "/")
+        .replace(/\/{2,}/g, "/");
+
+      if (!path.startsWith("/")) {
+        path = `/${path}`;
+      }
+
+      if (path.length > 1) {
+        path = path.replace(/\/+$/g, "") || "/";
+      }
+
+      return path || "/";
+    }
+  }
+
+  function isBlockedRoute(value = "") {
+    try {
+      return configIsBlockedRoutePath(value) === true;
+    } catch {
+      const path = normalizePathname(value).toLowerCase();
+
+      return Boolean(
+        path === "/home" ||
+          path === "/403" ||
+          path === "/404" ||
+          path === "/2fa" ||
+          path === "/mfa" ||
+          path === "/otp" ||
+          path.startsWith("/2fa/") ||
+          path.startsWith("/mfa/") ||
+          path.startsWith("/otp/")
+      );
+    }
+  }
+
   function safeInternalRoute(route = "", fallback = "") {
     const raw = safeText(route, "");
     const safeFallback = safeText(fallback, "");
@@ -213,12 +272,41 @@ export const HomeView = (() => {
     if (/[\r\n\t\\]/.test(raw)) return safeFallback;
     if (hasSensitiveQuery(raw)) return safeFallback;
 
-    const normalized = raw.replace(/\/{2,}/g, "/") || safeFallback;
-    const canonical = normalized.split("?")[0].split("#")[0] || safeFallback;
+    const normalizedInput = pathFromInput(raw);
 
-    if (canonical === BLOCKED_HOME_ROUTE) return safeFallback;
+    if (!normalizedInput || !normalizedInput.startsWith("/")) {
+      return safeFallback;
+    }
 
-    return normalized;
+    if (normalizedInput.startsWith("//")) {
+      return safeFallback;
+    }
+
+    const hashIndex = normalizedInput.indexOf("#");
+    const beforeHash = hashIndex >= 0
+      ? normalizedInput.slice(0, hashIndex)
+      : normalizedInput;
+
+    const searchIndex = beforeHash.indexOf("?");
+    const pathnameRaw = searchIndex >= 0
+      ? beforeHash.slice(0, searchIndex)
+      : beforeHash;
+
+    const search = searchIndex >= 0
+      ? beforeHash.slice(searchIndex)
+      : "";
+
+    const pathname = normalizePathname(pathnameRaw);
+
+    if (!pathname || isBlockedRoute(pathname)) {
+      return safeFallback;
+    }
+
+    if (search && hasSensitiveQuery(search)) {
+      return safeFallback;
+    }
+
+    return `${pathname}${search}`;
   }
 
   function safeErrorMessage(error = null) {
@@ -294,7 +382,15 @@ export const HomeView = (() => {
 
   function readSnapshot(read, ...args) {
     try {
-      return sanitizePayload(read(...args));
+      return isFunction(read) ? sanitizePayload(read(...args)) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function safeCall(fn = null, ...args) {
+    try {
+      return isFunction(fn) ? fn(...args) : null;
     } catch {
       return null;
     }
@@ -314,7 +410,7 @@ export const HomeView = (() => {
       return "";
     }
 
-    const role = String(value || "").toLowerCase();
+    const role = String(value || "").trim().toLowerCase();
 
     if (role === "admin") return "admin";
     if (role === "user") return "user";
@@ -365,9 +461,27 @@ export const HomeView = (() => {
     );
   }
 
+  function getContextCore() {
+    const ctx = safeObject(currentContext);
+
+    return first(
+      ctx.AppCore,
+      ctx.appCore,
+      ctx.core,
+      null
+    );
+  }
+
+  function getCoreState() {
+    const core = getContextCore();
+    return safeObject(core?.state);
+  }
+
   function getCurrentUser() {
     const ctx = safeObject(currentContext);
     const dashboard = safeObject(homeState.dashboard);
+    const core = getContextCore();
+    const coreState = getCoreState();
 
     return safeObject(
       first(
@@ -377,6 +491,15 @@ export const HomeView = (() => {
         ctx.sessionUser,
         ctx.session?.user,
         ctx.sessionData?.user,
+
+        safeCall(core?.getCurrentUser?.bind?.(core) || core?.getCurrentUser),
+        coreState.user,
+        coreState.currentUser,
+        coreState.authUser,
+        coreState.sessionUser,
+        coreState.session?.user,
+        coreState.sessionData?.user,
+
         homeState.user,
         dashboard.user,
         dashboard.currentUser,
@@ -387,17 +510,8 @@ export const HomeView = (() => {
 
   function getContextRole() {
     const ctx = safeObject(currentContext);
-    const user = safeObject(
-      first(
-        ctx.user,
-        ctx.currentUser,
-        ctx.authUser,
-        ctx.sessionUser,
-        ctx.session?.user,
-        ctx.sessionData?.user,
-        {}
-      )
-    );
+    const coreState = getCoreState();
+    const user = getCurrentUser();
 
     return normalizeRole(
       first(
@@ -405,9 +519,16 @@ export const HomeView = (() => {
         ctx.rol,
         ctx.userRole,
         ctx.roles,
+
         user.role,
         user.rol,
         user.roles,
+
+        coreState.role,
+        coreState.rol,
+        coreState.userRole,
+        coreState.roles,
+
         ""
       )
     );
@@ -1566,6 +1687,9 @@ export const HomeView = (() => {
         modelDelegated: true,
         bindingsDelegated: true,
         actionsDelegated: true,
+
+        readsUserFromResolvedContext: true,
+
         noSlugResolution: true,
         noAuthGuards: true,
         noRouterGuards: true,
@@ -1574,7 +1698,9 @@ export const HomeView = (() => {
         noCrossViewModals: true,
         noToastDirect: true,
         noHomeRoute: true,
+
         userScopedCollections: true,
+        stripsAdminDataForUser: true,
         snapshotRedacted: true,
       },
     });

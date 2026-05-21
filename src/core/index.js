@@ -10,12 +10,12 @@
    - Cleanup mínimo.
    - Hooks mínimos.
    - Instalar HTTP único desde core/http.js.
-   - Auth estricta: access token usable + user usable.
+   - Auth estricta base: access token usable + user usable.
    - User inválido si disabled/deleted/archived/active=false.
    - Roles únicos: admin / user.
    - Home interna: /.
    - Home visible de usuario: /@{user.slug}.
-   - Rutas privadas visibles: /@{user.slug}/{ruta}.
+   - Delegar rutas, user-scope y bloqueos en core/config.js.
    - Session context mínimo seguro en memoria.
    - No guardar refresh token en Core.
    - No guardar secretos.
@@ -34,11 +34,18 @@ import {
   config,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
   BLOCKED_FRONTEND_ROUTES,
+  buildUserHomeRoute as configBuildUserHomeRoute,
+  canonicalRoutePath as configCanonicalRoutePath,
+  getUserScopedRouteInfo as configGetUserScopedRouteInfo,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "./config.js";
 
 import Http, { installHttp } from "./http.js";
 
-export const CORE_VERSION = "core.index.v5";
+export const CORE_VERSION = "core.index.v6";
 
 const APP_NAME =
   config?.appName ||
@@ -236,23 +243,217 @@ function cleanToken(value = "") {
 }
 
 /* =========================================================
+   PATHS
+========================================================= */
+
+function pathFromInput(path = ROOT_PATH) {
+  try {
+    return configRoutePathFromUrlLike(path) || ROOT_PATH;
+  } catch {
+    return ROOT_PATH;
+  }
+}
+
+function normalizePathname(pathname = ROOT_PATH) {
+  try {
+    return configNormalizeRoutePath(pathname) || ROOT_PATH;
+  } catch {
+    let value = cleanText(pathname, ROOT_PATH).replace(/\\/g, "/");
+
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    value = value.replace(/\/{2,}/g, "/");
+
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "") || ROOT_PATH;
+    }
+
+    return value || ROOT_PATH;
+  }
+}
+
+function normalizeSearch(search = "") {
+  const value = cleanText(search, "");
+
+  if (!value || value === "?") return "";
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = cleanText(hash, "");
+
+  if (!value || value === "#") return "";
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
+function splitPath(path = ROOT_PATH) {
+  let raw = pathFromInput(path);
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || ROOT_PATH;
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || ROOT_PATH;
+  }
+
+  return {
+    pathname: normalizePathname(pathname),
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
+  };
+}
+
+function joinPath(parts = {}) {
+  return [
+    normalizePathname(parts.pathname || ROOT_PATH),
+    normalizeSearch(parts.search || ""),
+    normalizeHash(parts.hash || ""),
+  ].join("");
+}
+
+function normalizePublicPath(path = ROOT_PATH) {
+  const parts = splitPath(path);
+
+  return joinPath({
+    pathname: parts.pathname,
+    search: parts.search,
+    hash: parts.hash,
+  });
+}
+
+function stripQueryHash(path = ROOT_PATH) {
+  return splitPath(path).pathname || ROOT_PATH;
+}
+
+function isBlockedRoutePath(path = ROOT_PATH) {
+  try {
+    if (configIsBlockedRoutePath(path) === true) return true;
+  } catch {
+    // fallback local
+  }
+
+  const clean = stripQueryHash(path).toLowerCase();
+
+  if (BLOCKED_ROUTES.includes(clean)) return true;
+
+  return (
+    clean.startsWith("/2fa/") ||
+    clean.startsWith("/mfa/") ||
+    clean.startsWith("/otp/")
+  );
+}
+
+function getUserScopedPathInfo(path = ROOT_PATH) {
+  try {
+    const info = configGetUserScopedRouteInfo(path);
+
+    if (isObject(info)) {
+      const restPath = info.restPath || info.canonicalPath || stripQueryHash(path);
+      const canonicalPath = info.canonicalPath || info.lookupPath || restPath;
+
+      return {
+        scoped: Boolean(info.scoped),
+        home: Boolean(info.home),
+        slug: cleanText(info.slug, ""),
+        restPath,
+        canonicalPath,
+      };
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  const value = stripQueryHash(path);
+
+  return {
+    scoped: false,
+    home: false,
+    slug: "",
+    restPath: value,
+    canonicalPath: value,
+  };
+}
+
+function extractUserHomeSlug(path = ROOT_PATH) {
+  const info = getUserScopedPathInfo(path);
+  return info.home ? info.slug : "";
+}
+
+function extractUserScopedSlug(path = ROOT_PATH) {
+  return getUserScopedPathInfo(path).slug;
+}
+
+function isUserHomePath(path = ROOT_PATH) {
+  return Boolean(extractUserHomeSlug(path));
+}
+
+function isUserScopedPath(path = ROOT_PATH) {
+  return Boolean(getUserScopedPathInfo(path).scoped);
+}
+
+function normalizeCanonicalPath(path = ROOT_PATH) {
+  if (isBlockedRoutePath(path)) return ROOT_PATH;
+
+  try {
+    return configCanonicalRoutePath(path) || ROOT_PATH;
+  } catch {
+    const info = getUserScopedPathInfo(path);
+    return info.scoped ? info.canonicalPath : stripQueryHash(path);
+  }
+}
+
+function safeInternalPath(path = ROOT_PATH) {
+  const target = normalizePublicPath(path);
+
+  if (!target.startsWith("/")) return ROOT_PATH;
+  if (target.startsWith("//")) return ROOT_PATH;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return ROOT_PATH;
+  if (/[\r\n\t\\]/.test(target)) return ROOT_PATH;
+  if (isBlockedRoutePath(target)) return ROOT_PATH;
+
+  return target;
+}
+
+/* =========================================================
    USER NORMALIZATION
 ========================================================= */
 
 function normalizeSlug(value = "") {
-  const slug = cleanText(value, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
+  try {
+    return configNormalizeUserSlug(value) || "";
+  } catch {
+    const slug = cleanText(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/^\/+/, "")
+      .replace(/^@+/, "")
+      .split(/[/?#]/)[0]
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase();
 
-  if (!slug) return "";
+    if (!slug) return "";
 
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  }
 }
 
 function extractUserSlug(user = null) {
@@ -269,7 +470,12 @@ function extractUserSlug(user = null) {
 
 function buildUserHomePath(user = null) {
   const slug = extractUserSlug(user);
-  return slug ? `${USER_HOME_PREFIX}${slug}` : ROOT_PATH;
+
+  try {
+    return configBuildUserHomeRoute(slug) || ROOT_PATH;
+  } catch {
+    return slug ? `${USER_HOME_PREFIX}${slug}` : ROOT_PATH;
+  }
 }
 
 function sanitizeObject(value, depth = 0) {
@@ -351,6 +557,26 @@ function userOk(user = null) {
   );
 }
 
+function userAvatarUrl(user = null) {
+  if (!isObject(user)) return "";
+
+  return cleanText(
+    user.avatarUrl ||
+      user.avatar ||
+      user.picture ||
+      user.pictureUrl ||
+      user.photoUrl ||
+      user.photoURL ||
+      user.imageUrl ||
+      user.image ||
+      user.profile?.avatarUrl ||
+      user.profile?.avatar ||
+      user.profile?.picture ||
+      "",
+    ""
+  );
+}
+
 function normalizeUser(user = null) {
   if (!userOk(user)) return null;
 
@@ -396,6 +622,7 @@ function normalizeUser(user = null) {
   );
 
   const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
+  const avatar = userAvatarUrl(safeUser);
 
   return {
     ...safeUser,
@@ -420,6 +647,13 @@ function normalizeUser(user = null) {
     userRole: role,
     roles: [role],
 
+    hasAvatar: Boolean(safeUser.hasAvatar || avatar),
+    avatar: avatar || safeUser.avatar || null,
+    avatarUrl: avatar || safeUser.avatarUrl || null,
+    photoUrl: safeUser.photoUrl || safeUser.photoURL || avatar || null,
+    picture: safeUser.picture || safeUser.pictureUrl || avatar || null,
+    avatarUpdatedAt: safeUser.avatarUpdatedAt || null,
+
     active: true,
     enabled: true,
     disabled: false,
@@ -436,6 +670,8 @@ function publicUser(user = null) {
 
   if (!normalized) return null;
 
+  const avatar = userAvatarUrl(normalized);
+
   return {
     id: normalized.id || normalized.userId || null,
     userId: normalized.userId || normalized.id || null,
@@ -443,11 +679,7 @@ function publicUser(user = null) {
     slug: normalized.slug || null,
     displayName: normalized.displayName || null,
     role: normalized.role || null,
-    hasAvatar: Boolean(
-      normalized.avatar ||
-        normalized.avatarUrl ||
-        normalized.picture
-    ),
+    hasAvatar: Boolean(normalized.hasAvatar || avatar),
   };
 }
 
@@ -528,141 +760,6 @@ function sameSessionUser(session = null, user = null) {
   if (!sessionUserId || !userId) return true;
 
   return sessionUserId === userId;
-}
-
-/* =========================================================
-   PATHS
-========================================================= */
-
-function normalizeHashPath(path = ROOT_PATH) {
-  const value = cleanText(path, ROOT_PATH);
-
-  if (value.startsWith("#!")) {
-    return value.replace(/^#!\/?/, "/") || ROOT_PATH;
-  }
-
-  if (value.startsWith("#/")) {
-    return value.slice(1) || ROOT_PATH;
-  }
-
-  return value;
-}
-
-function normalizePublicPath(path = ROOT_PATH) {
-  let value = normalizeHashPath(path);
-
-  if (!value || value.startsWith("//")) {
-    return ROOT_PATH;
-  }
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
-    return ROOT_PATH;
-  }
-
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
-
-  value = value
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  return value || ROOT_PATH;
-}
-
-function stripQueryHash(path = ROOT_PATH) {
-  return normalizePublicPath(path)
-    .split("?")[0]
-    .split("#")[0] || ROOT_PATH;
-}
-
-function isBlockedRoutePath(path = ROOT_PATH) {
-  const clean = stripQueryHash(path).toLowerCase();
-
-  if (BLOCKED_ROUTES.includes(clean)) return true;
-
-  return (
-    clean.startsWith("/2fa/") ||
-    clean.startsWith("/mfa/") ||
-    clean.startsWith("/otp/")
-  );
-}
-
-function getUserScopedPathInfo(path = ROOT_PATH) {
-  const value = stripQueryHash(path);
-
-  if (!value.startsWith(USER_HOME_PREFIX)) {
-    return {
-      scoped: false,
-      home: false,
-      slug: "",
-      restPath: value,
-      canonicalPath: value,
-    };
-  }
-
-  const rest = value.slice(USER_HOME_PREFIX.length);
-  const [slugSegment = "", ...restSegments] = rest.split("/");
-  const slug = normalizeSlug(slugSegment);
-
-  if (!slug) {
-    return {
-      scoped: false,
-      home: false,
-      slug: "",
-      restPath: value,
-      canonicalPath: value,
-    };
-  }
-
-  const restPath = restSegments.length
-    ? normalizePublicPath(`/${restSegments.join("/")}`).split("?")[0].split("#")[0]
-    : ROOT_PATH;
-
-  return {
-    scoped: true,
-    home: restPath === ROOT_PATH,
-    slug,
-    restPath,
-    canonicalPath: restPath,
-  };
-}
-
-function extractUserHomeSlug(path = ROOT_PATH) {
-  const info = getUserScopedPathInfo(path);
-  return info.home ? info.slug : "";
-}
-
-function extractUserScopedSlug(path = ROOT_PATH) {
-  return getUserScopedPathInfo(path).slug;
-}
-
-function isUserHomePath(path = ROOT_PATH) {
-  return Boolean(extractUserHomeSlug(path));
-}
-
-function isUserScopedPath(path = ROOT_PATH) {
-  return Boolean(getUserScopedPathInfo(path).scoped);
-}
-
-function normalizeCanonicalPath(path = ROOT_PATH) {
-  if (isBlockedRoutePath(path)) return ROOT_PATH;
-
-  const info = getUserScopedPathInfo(path);
-
-  return info.scoped ? info.canonicalPath : stripQueryHash(path);
-}
-
-function safeInternalPath(path = ROOT_PATH) {
-  const target = normalizePublicPath(path);
-
-  if (!target.startsWith("/")) return ROOT_PATH;
-  if (target.startsWith("//")) return ROOT_PATH;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return ROOT_PATH;
-  if (/[\r\n\t\\]/.test(target)) return ROOT_PATH;
-  if (isBlockedRoutePath(target)) return ROOT_PATH;
-
-  return target;
 }
 
 /* =========================================================
@@ -1014,8 +1111,12 @@ const state = {
   sessionUserId: null,
 
   username: null,
+  hasAvatar: false,
   avatar: null,
   avatarUrl: null,
+  photoUrl: null,
+  picture: null,
+  avatarUpdatedAt: null,
 
   shellVisible: true,
   shellHidden: false,
@@ -1180,8 +1281,12 @@ function clearSessionFields() {
   state.sessionUserId = null;
 
   state.username = null;
+  state.hasAvatar = false;
   state.avatar = null;
   state.avatarUrl = null;
+  state.photoUrl = null;
+  state.picture = null;
+  state.avatarUpdatedAt = null;
 
   dropForbiddenStateFields(state);
 
@@ -1237,6 +1342,8 @@ function syncAuth() {
     ? session
     : null;
 
+  const avatar = authenticated ? userAvatarUrl(user) : "";
+
   state.token = token;
   state.accessToken = token;
   state.access_token = token;
@@ -1268,8 +1375,12 @@ function syncAuth() {
   state.sessionUserId = validSession?.sessionUserId || validSession?.userId || null;
 
   state.username = authenticated ? user.username || null : null;
-  state.avatar = authenticated ? user.avatar || user.avatarUrl || null : null;
-  state.avatarUrl = authenticated ? user.avatarUrl || user.avatar || null : null;
+  state.hasAvatar = authenticated ? Boolean(user.hasAvatar || avatar) : false;
+  state.avatar = authenticated ? avatar || null : null;
+  state.avatarUrl = authenticated ? avatar || null : null;
+  state.photoUrl = authenticated ? user.photoUrl || avatar || null : null;
+  state.picture = authenticated ? user.picture || avatar || null : null;
+  state.avatarUpdatedAt = authenticated ? user.avatarUpdatedAt || null : null;
 
   return state;
 }
@@ -1771,6 +1882,10 @@ function getSnapshot() {
       httpFacadeOnly: true,
       noApiClientParallel: true,
 
+      configOwnsRouteNormalization: true,
+      configOwnsUserScope: true,
+      configOwnsBlockedRoutes: true,
+
       roles: ["admin", "user"],
       authRequiresTokenAndUsableUser: true,
 
@@ -1888,10 +2003,7 @@ export const AppCore = {
     normalizeUser(user)?.username || "",
 
   getUserAvatarUrl: (user) =>
-    user?.avatarUrl ||
-    user?.avatar ||
-    user?.picture ||
-    "",
+    userAvatarUrl(user),
 };
 
 Object.defineProperties(AppCore, {

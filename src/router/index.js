@@ -16,6 +16,7 @@
    - Sincronizar chrome registrado tras render.
    - Ruta privada sin sesión válida -> /login.
    - Login con sesión válida -> /@{user.slug}.
+   - Rutas admin definidas en core/config.js requieren rol admin.
    - Home interna: /
    - Home visible: /@{user.slug}
    - Sin Auth estático.
@@ -29,6 +30,11 @@
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
+import {
+  BLOCKED_FRONTEND_ROUTES as CONFIG_BLOCKED_FRONTEND_ROUTES,
+  isAdminRoute as isConfigAdminRoute,
+  isBlockedRoutePath as isConfigBlockedRoutePath,
+} from "../core/config.js";
 
 import * as Routes from "./routes.js";
 import * as RouteGuards from "./guards.js";
@@ -36,7 +42,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v8";
+export const ROUTER_VERSION = "router.index.v10";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -56,14 +62,19 @@ export const Router = (() => {
 
   const routes = getImmutableRoutes();
 
-  const BLOCKED_LEGACY_PATHS = new Set([
-    "/home",
-    "/403",
-    "/404",
-    "/2fa",
-    "/mfa",
-    "/otp",
-  ]);
+  const BLOCKED_LEGACY_PATHS = new Set(
+    Array.isArray(CONFIG_BLOCKED_FRONTEND_ROUTES) &&
+      CONFIG_BLOCKED_FRONTEND_ROUTES.length
+      ? CONFIG_BLOCKED_FRONTEND_ROUTES
+      : [
+          "/home",
+          "/403",
+          "/404",
+          "/2fa",
+          "/mfa",
+          "/otp",
+        ]
+  );
 
   let initialized = false;
   let bound = false;
@@ -258,6 +269,10 @@ export const Router = (() => {
     return splitPath(path).pathname || HOME_PATH;
   }
 
+  function canonicalAuthPath(path = HOME_PATH) {
+    return normalizeCanonicalPath(path);
+  }
+
   function withSearchHashFrom(sourcePath = HOME_PATH, targetPathname = HOME_PATH) {
     const parts = splitPath(sourcePath);
 
@@ -336,6 +351,12 @@ export const Router = (() => {
 
   function isBlockedLegacyPath(path = HOME_PATH) {
     const normalized = normalizeCanonicalPath(path).toLowerCase();
+
+    try {
+      if (isConfigBlockedRoutePath(normalized) === true) return true;
+    } catch {
+      // fallback local
+    }
 
     if (BLOCKED_LEGACY_PATHS.has(normalized)) return true;
 
@@ -996,7 +1017,65 @@ export const Router = (() => {
     return `${LOGIN_PATH}?redirect=${encodeURIComponent(target)}`;
   }
 
-  function fallbackAllowRoute({ route, requestedPublicPath }) {
+  function routeRoles(route = null) {
+    const values = Array.isArray(route?.roles)
+      ? route.roles
+      : route?.roles
+        ? [route.roles]
+        : [];
+
+    return values.map(normalizeRole).filter(Boolean);
+  }
+
+  function routeRequiresAdmin(route = null, canonicalPath = HOME_PATH) {
+    if (!route || route.public === true) return false;
+    if (route.adminOnly === true || route.requiresAdmin === true) return true;
+
+    const roles = routeRoles(route);
+
+    if (roles.includes("admin") && !roles.includes("user")) return true;
+
+    try {
+      return isConfigAdminRoute(canonicalPath || routePath(route)) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  function adminRouteAccessResult(route, canonicalPath, publicPath) {
+    if (!routeRequiresAdmin(route, canonicalPath)) return null;
+
+    if (!isAuthenticated()) {
+      return {
+        allowed: false,
+        reason: "not-authenticated",
+        redirectTo: loginRedirectTarget(publicPath),
+      };
+    }
+
+    if (getCurrentRole() === "admin") {
+      return {
+        allowed: true,
+        reason: "admin",
+      };
+    }
+
+    return {
+      allowed: false,
+      reason: "admin-required",
+    };
+  }
+
+  function enforceAdminRouteAccess(result, route, canonicalPath, publicPath) {
+    const adminResult = adminRouteAccessResult(route, canonicalPath, publicPath);
+
+    if (!adminResult) return result;
+    if (!adminResult.allowed) return adminResult;
+
+    return result;
+  }
+
+  function fallbackAllowRoute({ route, requestedCanonicalPath, requestedPublicPath }) {
     if (!route) {
       return {
         allowed: false,
@@ -1027,9 +1106,15 @@ export const Router = (() => {
       };
     }
 
-    const roles = Array.isArray(route.roles)
-      ? route.roles.map(normalizeRole).filter(Boolean)
-      : [];
+    const adminAccess = adminRouteAccessResult(
+      route,
+      requestedCanonicalPath || routePath(route),
+      requestedPublicPath
+    );
+
+    if (adminAccess && !adminAccess.allowed) return adminAccess;
+
+    const roles = routeRoles(route);
 
     if (!roles.length) {
       return {
@@ -1057,6 +1142,7 @@ export const Router = (() => {
 
   function checkAccess(route, canonicalPath, publicPath) {
     const shouldAllowRoute = RouteGuards.shouldAllowRoute;
+    const requiresAdmin = routeRequiresAdmin(route, canonicalPath);
 
     try {
       if (isFunction(shouldAllowRoute)) {
@@ -1073,6 +1159,11 @@ export const Router = (() => {
           currentUser: getCurrentUser(),
           currentUserSlug: getCurrentUserSlug(),
 
+          currentRole: getCurrentRole(),
+          requiresAdmin,
+          adminOnly: requiresAdmin,
+          isAdminRoute: isConfigAdminRoute,
+
           defaultHome: getDefaultHome(),
 
           buildUserHomePath,
@@ -1083,17 +1174,27 @@ export const Router = (() => {
         });
 
         if (isObject(result)) {
-          return {
-            allowed: result.allowed !== false,
-            ...result,
-          };
+          return enforceAdminRouteAccess(
+            {
+              allowed: result.allowed !== false,
+              ...result,
+            },
+            route,
+            canonicalPath,
+            publicPath
+          );
         }
 
         if (typeof result === "boolean") {
-          return {
-            allowed: result,
-            reason: result ? "guard-allow" : "guard-deny",
-          };
+          return enforceAdminRouteAccess(
+            {
+              allowed: result,
+              reason: result ? "guard-allow" : "guard-deny",
+            },
+            route,
+            canonicalPath,
+            publicPath
+          );
         }
       }
     } catch (error) {
@@ -1606,6 +1707,7 @@ export const Router = (() => {
 
       defaultHome: getDefaultHome(),
       currentUserSlug: getCurrentUserSlug() || null,
+      currentRole: getCurrentRole(),
 
       routes: routes.map((route) => ({
         path: route.path,
@@ -1613,6 +1715,7 @@ export const Router = (() => {
         title: route.title || route.label || "",
         public: Boolean(route.public),
         roles: Array.isArray(route.roles) ? route.roles : [],
+        adminOnly: routeRequiresAdmin(route, route.path),
       })),
 
       policy: {
@@ -1626,6 +1729,8 @@ export const Router = (() => {
         ownToast: false,
 
         strictAuth: true,
+        adminRoutesDelegatedToConfig: true,
+        adminRoutesRequireAdmin: true,
 
         privateRouteWithoutSessionRedirectsLogin: true,
         userSlugHome: true,

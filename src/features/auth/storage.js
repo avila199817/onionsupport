@@ -9,6 +9,7 @@
    - Persistir contexto auxiliar mínimo no canónico.
    - No autenticar por sí mismo.
    - Nunca storage.clear().
+   - Delegar slug/rutas bloqueadas en core/config.js.
    - Sin AppCore.
    - Sin Router.
    - Sin HTTP.
@@ -28,11 +29,18 @@
 ========================================================= */
 
 import {
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
+} from "../../core/config.js";
+
+import {
   AUTH_STORAGE_KEYS,
   AUTH_CONSTANTS,
 } from "./constants.js";
 
-export const AUTH_STORAGE_VERSION = "auth.storage.v5";
+export const AUTH_STORAGE_VERSION = "auth.storage.v6";
 
 const PREFIX = "onion:auth:";
 
@@ -134,7 +142,7 @@ function number(value, fallback = 0) {
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -356,42 +364,107 @@ function normalizeRole(value = "") {
 }
 
 function normalizeSlug(value = "") {
-  const slug = cleanText(value, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
+  try {
+    return configNormalizeUserSlug(value) || "";
+  } catch {
+    const slug = cleanText(value, "")
+      .replace(/^\/+/, "")
+      .replace(/^@+/, "")
+      .split(/[/?#]/)[0]
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase();
 
-  if (!slug) return "";
+    if (!slug) return "";
 
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  }
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
     String(value || "")
   );
 }
 
+function normalizeRoutePathOnly(value = "") {
+  try {
+    return configNormalizeRoutePath(value) || "";
+  } catch {
+    let path = cleanText(value, "")
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+    if (!path) return "";
+
+    if (!path.startsWith("/")) {
+      path = `/${path}`;
+    }
+
+    if (path.length > 1) {
+      path = path.replace(/\/+$/g, "") || "/";
+    }
+
+    return path || "";
+  }
+}
+
+function isBlockedRoute(path = "") {
+  try {
+    return configIsBlockedRoutePath(path) === true;
+  } catch {
+    const clean = normalizeRoutePathOnly(path).toLowerCase();
+
+    return Boolean(
+      clean === "/home" ||
+        clean === "/403" ||
+        clean === "/404" ||
+        clean === "/2fa" ||
+        clean === "/mfa" ||
+        clean === "/otp" ||
+        clean.startsWith("/2fa/") ||
+        clean.startsWith("/mfa/") ||
+        clean.startsWith("/otp/")
+    );
+  }
+}
+
 function normalizeRoute(value = "") {
-  const route = cleanText(value, "");
+  let route = cleanText(value, "");
 
   if (!route) return "";
   if (route.length > 1000) return "";
+  if (route.startsWith("//")) return "";
+  if (/[\r\n\t\\]/.test(route)) return "";
+  if (hasSensitiveQuery(route)) return "";
+
+  try {
+    route = configRoutePathFromUrlLike(route) || "";
+  } catch {
+    // fallback abajo
+  }
+
+  if (!route) return "";
   if (!route.startsWith("/")) return "";
   if (route.startsWith("//")) return "";
   if (/^[a-z][a-z0-9+.-]*:/i.test(route)) return "";
   if (/[\r\n\t\\]/.test(route)) return "";
   if (hasSensitiveQuery(route)) return "";
 
-  const clean = route.split("#")[0] || "";
+  const hashIndex = route.indexOf("#");
+  const beforeHash = hashIndex >= 0 ? route.slice(0, hashIndex) : route;
+  const hash = hashIndex >= 0 ? route.slice(hashIndex) : "";
 
-  if (clean === "/home") return "";
-  if (clean.startsWith("/2fa") || clean.startsWith("/mfa") || clean.startsWith("/otp")) return "";
+  const queryIndex = beforeHash.indexOf("?");
+  const pathnameRaw = queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash;
+  const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
 
-  return route;
+  const pathname = normalizeRoutePathOnly(pathnameRaw);
+
+  if (!pathname) return "";
+  if (isBlockedRoute(pathname)) return "";
+
+  return `${pathname}${search}${hash}`;
 }
 
 function extractRealUserSlug(user = null) {
@@ -1027,6 +1100,10 @@ export function getAuthStorageSnapshot() {
       concreteKeysOnly: true,
       noStorageClear: true,
       noLegacyMassive: true,
+
+      configOwnsSlugNormalization: true,
+      configOwnsRouteNormalization: true,
+      configOwnsBlockedRoutes: true,
 
       persistsAccessToken: true,
       persistsRefreshToken: true,

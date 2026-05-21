@@ -12,6 +12,7 @@
    - Mostrar/ocultar chrome según route.hideShell/public/auth layout.
    - Mantener app-shell visible.
    - No pisar el host activo de router/render.js.
+   - Delegar normalización de rutas/user-scope/bloqueos en core/config.js.
    - Sin Auth.
    - Sin guards.
    - Sin render de vistas.
@@ -28,10 +29,18 @@
 
 import {
   config,
+  BLOCKED_FRONTEND_ROUTES,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
+  canonicalRoutePath as configCanonicalRoutePath,
+  getUserScopedRouteInfo as getConfigUserScopedRouteInfo,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  isUserHomeRoute as configIsUserHomeRoute,
+  isUserScopedRoute as configIsUserScopedRoute,
+  normalizeRoutePath as configNormalizeRoutePath,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_SHELL_VERSION = "router.shell.v5";
+export const ROUTER_SHELL_VERSION = "router.shell.v6";
 
 const APP_NAME = config?.appName || config?.name || "Onion Support";
 
@@ -44,14 +53,18 @@ const ROUTER_VIEW_HOST_ATTR = "data-router-view-host";
 const ROOT_READY_CLASSES = Object.freeze(["app-ready"]);
 const ROOT_LOADING_CLASSES = Object.freeze(["app-loading", "app-booting"]);
 
-const BLOCKED_LEGACY_PATHS = new Set([
-  "/home",
-  "/403",
-  "/404",
-  "/2fa",
-  "/mfa",
-  "/otp",
-]);
+const BLOCKED_LEGACY_PATHS = new Set(
+  Array.isArray(BLOCKED_FRONTEND_ROUTES) && BLOCKED_FRONTEND_ROUTES.length
+    ? BLOCKED_FRONTEND_ROUTES
+    : [
+        "/home",
+        "/403",
+        "/404",
+        "/2fa",
+        "/mfa",
+        "/otp",
+      ]
+);
 
 const MENU_SELECTOR = [
   "a[data-sidebar-link]",
@@ -106,81 +119,39 @@ function redact(value = "") {
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    String(value || "")
+  );
+}
+
 /* =========================================================
    PATHS
 ========================================================= */
 
-function normalizeHashPath(path = HOME_PATH) {
-  const value = cleanText(path, HOME_PATH);
-
-  if (value.startsWith("#!")) {
-    return value.replace(/^#!\/?/, "/") || HOME_PATH;
-  }
-
-  if (value.startsWith("#/")) {
-    return value.slice(1) || HOME_PATH;
-  }
-
-  return value;
-}
-
-function sameOriginUrlToPath(value = "") {
+function pathFromInput(path = HOME_PATH) {
   try {
-    const base = isBrowser() ? window.location.origin : "http://localhost";
-    const url = new URL(value, base);
-
-    if (url.origin !== base) {
-      return HOME_PATH;
-    }
-
-    if (url.hash.startsWith("#/") || url.hash.startsWith("#!")) {
-      return normalizeHashPath(url.hash);
-    }
-
-    return `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
+    return configRoutePathFromUrlLike(path) || HOME_PATH;
   } catch {
     return HOME_PATH;
   }
 }
 
-function pathFromInput(path = HOME_PATH) {
-  let value = normalizeHashPath(path);
-
-  if (!value || value.startsWith("//")) {
-    return HOME_PATH;
-  }
-
-  if (/^https?:\/\//i.test(value)) {
-    return sameOriginUrlToPath(value);
-  }
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
-    return HOME_PATH;
-  }
-
-  return value;
-}
-
 function normalizePath(path = HOME_PATH) {
-  let value = pathFromInput(path)
-    .split("?")[0]
-    .split("#")[0]
-    .replace(/\\/g, "/");
-
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
+  try {
+    return configNormalizeRoutePath(pathFromInput(path)) || HOME_PATH;
+  } catch {
+    return HOME_PATH;
   }
-
-  value = value.replace(/\/{2,}/g, "/");
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || HOME_PATH;
-  }
-
-  return value || HOME_PATH;
 }
 
 function isBlockedLegacyPath(path = HOME_PATH) {
+  try {
+    if (configIsBlockedRoutePath(path) === true) return true;
+  } catch {
+    // fallback local
+  }
+
   const clean = normalizePath(path).toLowerCase();
 
   if (BLOCKED_LEGACY_PATHS.has(clean)) return true;
@@ -192,59 +163,32 @@ function isBlockedLegacyPath(path = HOME_PATH) {
   );
 }
 
-function normalizeUserSlug(value = "") {
-  const slug = cleanText(value, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
-
-  if (!slug) return "";
-
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
-}
-
 function getUserScopedRouteInfo(path = HOME_PATH) {
-  const clean = normalizePath(path);
+  try {
+    const info = getConfigUserScopedRouteInfo(path);
 
-  if (!clean.startsWith(USER_HOME_PREFIX)) {
-    return {
-      scoped: false,
-      home: false,
-      slug: "",
-      restPath: clean,
-      lookupPath: clean,
-    };
+    if (isObject(info)) {
+      const restPath = info.restPath || info.canonicalPath || normalizePath(path);
+      const lookupPath = info.canonicalPath || info.lookupPath || restPath;
+
+      return {
+        scoped: Boolean(info.scoped),
+        home: Boolean(info.home),
+        slug: cleanText(info.slug, ""),
+        restPath,
+        lookupPath,
+      };
+    }
+  } catch {
+    // fallback abajo
   }
-
-  const rest = clean.slice(USER_HOME_PREFIX.length);
-  const [slugSegment = "", ...restSegments] = rest.split("/");
-  const slug = normalizeUserSlug(slugSegment);
-
-  if (!slug) {
-    return {
-      scoped: false,
-      home: false,
-      slug: "",
-      restPath: clean,
-      lookupPath: clean,
-    };
-  }
-
-  const restPath = restSegments.length
-    ? normalizePath(`/${restSegments.join("/")}`)
-    : HOME_PATH;
 
   return {
-    scoped: true,
-    home: restPath === HOME_PATH,
-    slug,
-    restPath,
-    lookupPath: restPath,
+    scoped: false,
+    home: false,
+    slug: "",
+    restPath: normalizePath(path),
+    lookupPath: normalizePath(path),
   };
 }
 
@@ -253,18 +197,27 @@ function extractUserHomeSlug(path = HOME_PATH) {
 }
 
 function isUserHomePath(path = HOME_PATH) {
-  return Boolean(getUserScopedRouteInfo(path).home);
+  try {
+    return configIsUserHomeRoute(path) === true;
+  } catch {
+    return Boolean(getUserScopedRouteInfo(path).home);
+  }
 }
 
 function isUserScopedPath(path = HOME_PATH) {
-  return Boolean(getUserScopedRouteInfo(path).scoped);
+  try {
+    return configIsUserScopedRoute(path) === true;
+  } catch {
+    return Boolean(getUserScopedRouteInfo(path).scoped);
+  }
 }
 
 function canonicalPath(path = HOME_PATH) {
-  const clean = normalizePath(path);
-  const scoped = getUserScopedRouteInfo(clean);
-
-  return scoped.scoped ? scoped.lookupPath : clean;
+  try {
+    return configCanonicalRoutePath(path) || normalizePath(path);
+  } catch {
+    return getUserScopedRouteInfo(path).lookupPath || normalizePath(path);
+  }
 }
 
 /* =========================================================
@@ -587,6 +540,7 @@ function isIgnoredHref(href = "") {
   if (value.startsWith("#")) return true;
   if (value.startsWith("mailto:") || value.startsWith("tel:")) return true;
   if (value.startsWith("//")) return true;
+  if (hasSensitiveQuery(value)) return true;
   if (isBlockedLegacyPath(value)) return true;
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^https?:\/\//i.test(value)) {
@@ -618,7 +572,7 @@ export function setActiveMenu(_AppCore = null, pathname = HOME_PATH) {
   if (!isBrowser()) return false;
 
   const current = canonicalPath(pathname || HOME_PATH);
-  const currentBlocked = isBlockedLegacyPath(current);
+  const currentBlocked = isBlockedLegacyPath(pathname || current || HOME_PATH);
   const links = queryAll(MENU_SELECTOR);
 
   for (const link of links) {
@@ -869,6 +823,9 @@ export function getShellSnapshot(AppCore = null) {
     policy: {
       shellOnly: true,
       configDrivenBase: true,
+      configOwnsPathNormalization: true,
+      configOwnsUserScopeParsing: true,
+      configOwnsBlockedRoutes: true,
 
       ownAuth: false,
       ownGuards: false,
@@ -886,7 +843,7 @@ export function getShellSnapshot(AppCore = null) {
       doesNotClobberActiveRouteHost: true,
 
       homeInternalPath: HOME_PATH,
-      homeVisiblePattern: "/@{user.slug}",
+      homeVisiblePattern: `${USER_HOME_PREFIX}{user.slug}`,
 
       noHomeAlias: true,
       noHomeRoute: true,

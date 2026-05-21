@@ -13,6 +13,8 @@
    - Paginar filas.
    - Buscar entidades por id.
    - Rutas base desde core/config.js.
+   - Rutas admin reales desde core/config.js.
+   - Bloqueos legacy desde core/config.js.
    - No conservar raw/payload/response/data backend.
    - No usar email como identidad de user/cliente.
    - User nunca conserva métricas/colecciones admin.
@@ -27,9 +29,15 @@
    - Sin /home.
 ========================================================= */
 
-import { ROUTES } from "../../core/config.js";
+import {
+  ROUTES,
+  isAdminRoute as configIsAdminRoute,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
+} from "../../core/config.js";
 
-export const HOME_MODEL_VERSION = "home.model.v4";
+export const HOME_MODEL_VERSION = "home.model.v5";
 
 export const DEFAULT_HOME_PAGE = 1;
 export const DEFAULT_HOME_PAGE_SIZE = 5;
@@ -41,6 +49,7 @@ export const HOME_ENTITY_TYPES = Object.freeze({
   INVOICE: "invoice",
   USER: "user",
   CLIENT: "client",
+  SERVER: "server",
   ACTIVITY: "activity",
 });
 
@@ -84,12 +93,12 @@ const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni/i;
 
 const SENSITIVE_QUERY_RE =
-  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i;
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
 
 const EMAIL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
 
 const ADMIN_ENTITY_RE =
-  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory|servidores?|servidor|servers?)([\s._/-]|$)/i;
 
 /* =========================================================
    SAFE HELPERS
@@ -185,7 +194,7 @@ function nowIso() {
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
@@ -207,7 +216,7 @@ export function normalizeHomeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function normalizeRole(value = "", fallback = "user") {
+function normalizeRole(value = "", fallback = "") {
   if (Array.isArray(value)) {
     const roles = value
       .map((item) => normalizeRole(item, ""))
@@ -219,7 +228,7 @@ function normalizeRole(value = "", fallback = "user") {
     return fallback;
   }
 
-  const role = String(value || "").toLowerCase();
+  const role = String(value || "").trim().toLowerCase();
 
   if (role === "admin") return "admin";
   if (role === "user") return "user";
@@ -319,77 +328,125 @@ function hasSensitiveQuery(value = "") {
   return SENSITIVE_QUERY_RE.test(String(value || ""));
 }
 
-function normalizeHashPath(value = "") {
+function routeInput(value = "") {
   const raw = safeText(value, "");
 
-  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
-  if (raw.startsWith("#/")) return raw.slice(1) || "/";
+  if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (hasSensitiveQuery(raw)) return "";
 
-  return raw;
+  try {
+    return configRoutePathFromUrlLike(raw) || "";
+  } catch {
+    if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
+    if (raw.startsWith("#/")) return raw.slice(1) || "/";
+    return raw;
+  }
+}
+
+function routeSuffix(value = "") {
+  const raw = safeText(value, "");
+
+  const hashIndex = raw.indexOf("#");
+  const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
+
+  const queryIndex = beforeHash.indexOf("?");
+  const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
+
+  if (hasSensitiveQuery(search) || hasSensitiveQuery(hash)) return "";
+
+  return `${search}${hash}`;
+}
+
+function routePathOnly(value = "") {
+  const input = routeInput(value);
+
+  if (!input) return "";
+  if (!input.startsWith("/")) return "";
+  if (input.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(input)) return "";
+  if (/[\r\n\t\\]/.test(input)) return "";
+  if (hasSensitiveQuery(input)) return "";
+
+  const pathOnly = input.split("?")[0].split("#")[0] || "";
+
+  try {
+    return configNormalizeRoutePath(pathOnly) || "";
+  } catch {
+    let path = pathOnly.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+
+    if (!path.startsWith("/")) {
+      path = `/${path}`;
+    }
+
+    if (path.length > 1) {
+      path = path.replace(/\/+$/g, "") || "/";
+    }
+
+    return path || "";
+  }
+}
+
+function isBlockedRoute(value = "") {
+  try {
+    return configIsBlockedRoutePath(value) === true;
+  } catch {
+    const path = routePathOnly(value).toLowerCase();
+
+    return Boolean(
+      path === "/home" ||
+        path === "/403" ||
+        path === "/404" ||
+        path === "/2fa" ||
+        path === "/mfa" ||
+        path === "/otp" ||
+        path.startsWith("/2fa/") ||
+        path.startsWith("/mfa/") ||
+        path.startsWith("/otp/")
+    );
+  }
 }
 
 function safeRoute(value = "", fallback = "") {
-  let raw = normalizeHashPath(value || "");
+  const input = routeInput(value);
+  const safeFallback = safeText(fallback, "");
 
-  if (!raw) return fallback;
-  if (raw === "#") return fallback;
-  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) return fallback;
-  if (raw.startsWith("//")) return fallback;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
-  if (/[\r\n\t\\]/.test(raw)) return fallback;
-  if (hasSensitiveQuery(raw)) return fallback;
+  if (!input) return safeFallback;
+  if (!input.startsWith("/")) return safeFallback;
+  if (input.startsWith("//")) return safeFallback;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(input)) return safeFallback;
+  if (/[\r\n\t\\]/.test(input)) return safeFallback;
+  if (hasSensitiveQuery(input)) return safeFallback;
 
-  const lower = raw.toLowerCase();
+  const pathOnly = routePathOnly(input);
 
-  if (
-    lower.startsWith("javascript:") ||
-    lower.startsWith("data:") ||
-    lower.startsWith("vbscript:") ||
-    lower.startsWith("mailto:") ||
-    lower.startsWith("tel:") ||
-    lower.startsWith("file:") ||
-    lower.startsWith("blob:") ||
-    /^https?:\/\//i.test(raw)
-  ) {
-    return fallback;
-  }
+  if (!pathOnly) return safeFallback;
+  if (isBlockedRoute(pathOnly)) return safeFallback;
 
-  if (!raw.startsWith("/")) raw = `/${raw}`;
-
-  const hashIndex = raw.indexOf("#");
-  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-  const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
-
-  const queryIndex = withoutHash.indexOf("?");
-  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
-  const path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
-
-  let cleanPath = path
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  if (!cleanPath.startsWith("/")) cleanPath = `/${cleanPath}`;
-
-  if (cleanPath.length > 1) {
-    cleanPath = cleanPath.replace(/\/+$/g, "") || "/";
-  }
-
-  if (cleanPath === "/home") return fallback;
-  if (cleanPath === "/incidencias/nueva") return fallback;
-  if (cleanPath.startsWith("/incidencias/nueva/")) return fallback;
-
-  return `${cleanPath}${query}${hash}`;
+  return `${pathOnly}${routeSuffix(input)}`;
 }
 
 function routeFromCore(name = "", fallback = "") {
   return safeRoute(ROUTES?.[name], "") || safeRoute(fallback, "");
 }
 
+const EMPTY_COLLECTION = Object.freeze({
+  items: [],
+  visibleCount: 0,
+  total: 0,
+  totalCount: 0,
+  remoteCount: 0,
+});
+
 const HOME_ROUTES = Object.freeze({
   INCIDENCIAS: routeFromCore("incidencias", "/incidencias"),
   FACTURAS: routeFromCore("facturas", "/facturas"),
   CLIENTES: routeFromCore("clientes", "/clientes"),
-  USUARIOS: routeFromCore("usuarios", ""),
+  USUARIOS: routeFromCore("usuarios", "/usuarios"),
+  SERVIDOR: routeFromCore("servidor", "/servidor"),
 });
 
 function routePath(route = "") {
@@ -400,12 +457,20 @@ function isAdminOnlyRoute(route = "") {
   const path = routePath(route);
   const clientes = routePath(HOME_ROUTES.CLIENTES);
   const usuarios = routePath(HOME_ROUTES.USUARIOS);
+  const servidor = routePath(HOME_ROUTES.SERVIDOR);
 
   if (!path) return false;
 
+  try {
+    if (configIsAdminRoute(path) === true) return true;
+  } catch {
+    // fallback abajo
+  }
+
   return (
     Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
-    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
+    Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
   );
 }
 
@@ -544,6 +609,13 @@ function maxNumber(...values) {
    ROLE SANITIZE
 ========================================================= */
 
+function emptyCollection() {
+  return {
+    ...EMPTY_COLLECTION,
+    items: [],
+  };
+}
+
 function sanitizeSummaryForRole(summary = {}, admin = false) {
   const output = {
     ...safeObject(summary),
@@ -571,6 +643,13 @@ function sanitizeSummaryForRole(summary = {}, admin = false) {
     output.visibleClientsCount = 0;
     output.visibleClientesCount = 0;
     output.visibleCustomersCount = 0;
+
+    output.serversCount = 0;
+    output.serverCount = 0;
+    output.servidoresCount = 0;
+    output.servidorCount = 0;
+    output.totalServers = 0;
+    output.totalServidores = 0;
   }
 
   return sanitizeHomeRecord(output);
@@ -598,7 +677,7 @@ function isAdminOnlyActivity(item = {}) {
   );
 
   return (
-    ["client", "cliente", "customer", "user", "usuario", "member"].includes(type) ||
+    ["client", "cliente", "customer", "user", "usuario", "member", "server", "servidor"].includes(type) ||
     isAdminOnlyRoute(route) ||
     isAdminEntityValue(identity)
   );
@@ -716,15 +795,7 @@ export function normalizeHomeCollectionSource(value = null, aliases = []) {
 
   const object = safeObject(value, null);
 
-  if (!object) {
-    return {
-      items: [],
-      visibleCount: 0,
-      total: 0,
-      totalCount: 0,
-      remoteCount: 0,
-    };
-  }
+  if (!object) return emptyCollection();
 
   let items = safeArray(
     first(
@@ -754,10 +825,10 @@ export function normalizeHomeCollectionSource(value = null, aliases = []) {
       }
 
       if (isObject(candidate)) {
-        const nested = normalizeHomeCollectionSource(candidate, aliases);
+        const normalized = normalizeHomeCollectionSource(candidate, aliases);
 
-        if (nested.items.length || nested.remoteCount > 0) {
-          items = nested.items;
+        if (normalized.items.length || normalized.remoteCount > 0) {
+          items = normalized.items;
           break;
         }
       }
@@ -826,13 +897,7 @@ export function pickHomeCollectionBlock(source = {}, aliases = []) {
     }
   }
 
-  return {
-    items: [],
-    visibleCount: 0,
-    total: 0,
-    totalCount: 0,
-    remoteCount: 0,
-  };
+  return emptyCollection();
 }
 
 /* =========================================================
@@ -1327,15 +1392,17 @@ export function normalizeHomeUser(item = {}) {
     "Usuario"
   );
 
-  const role = normalizeRole(
-    first(
-      source.role,
-      source.rol,
-      source.type,
-      source.roles,
-      "user"
-    )
-  );
+  const role =
+    normalizeRole(
+      first(
+        source.role,
+        source.rol,
+        source.type,
+        source.roles,
+        ""
+      ),
+      ""
+    ) || "user";
 
   const avatar = safeImageSrc(
     first(
@@ -1597,24 +1664,22 @@ export function buildHomeActivityFromCollections({
       });
     });
 
-  const userActivity = HOME_ROUTES.USUARIOS
-    ? normalizeHomeUsers(users)
-        .slice(0, 3)
-        .map((item) => {
-          const userId = getHomeUserId(item);
+  const userActivity = normalizeHomeUsers(users)
+    .slice(0, 3)
+    .map((item) => {
+      const userId = getHomeUserId(item);
 
-          return normalizeHomeActivity({
-            type: HOME_ENTITY_TYPES.USER,
-            title: firstVisual([item.name, item.nombre, item.displayName, item.fullName, item.username], "Usuario"),
-            text: "Usuario disponible en el sistema.",
-            date: first(item.lastLoginAt, item.updatedAt, item.createdAt),
-            route: HOME_ROUTES.USUARIOS,
-            href: HOME_ROUTES.USUARIOS,
-            action: "open_user",
-            entityId: userId,
-          });
-        })
-    : [];
+      return normalizeHomeActivity({
+        type: HOME_ENTITY_TYPES.USER,
+        title: firstVisual([item.name, item.nombre, item.displayName, item.fullName, item.username], "Usuario"),
+        text: "Usuario disponible en el sistema.",
+        date: first(item.lastLoginAt, item.updatedAt, item.createdAt),
+        route: HOME_ROUTES.USUARIOS,
+        href: HOME_ROUTES.USUARIOS,
+        action: "open_user",
+        entityId: userId,
+      });
+    });
 
   return normalizeHomeActivityList([
     ...ticketActivity,
@@ -1742,22 +1807,20 @@ export function buildHomeWidgetsFromSummary(summary = {}, options = {}) {
       href: HOME_ROUTES.CLIENTES,
     });
 
-    if (HOME_ROUTES.USUARIOS) {
-      base.push({
-        id: "usuarios",
-        widgetId: "usuarios",
-        key: "usuarios",
-        title: "Usuarios",
-        description: "Usuarios del sistema.",
-        value: safeNumber(data.usersCount, 0),
-        subtitle: `${safeNumber(data.visibleUsersCount, 0)} visibles`,
-        type: "users",
-        kind: "metric",
-        status: "active",
-        route: HOME_ROUTES.USUARIOS,
-        href: HOME_ROUTES.USUARIOS,
-      });
-    }
+    base.push({
+      id: "usuarios",
+      widgetId: "usuarios",
+      key: "usuarios",
+      title: "Usuarios",
+      description: "Usuarios del sistema.",
+      value: safeNumber(data.usersCount, 0),
+      subtitle: `${safeNumber(data.visibleUsersCount, 0)} visibles`,
+      type: "users",
+      kind: "metric",
+      status: "active",
+      route: HOME_ROUTES.USUARIOS,
+      href: HOME_ROUTES.USUARIOS,
+    });
   } else {
     base.push({
       id: "adjuntos",
@@ -2062,11 +2125,11 @@ export function normalizeHomeDashboard(payload = null) {
 
   const usersBlock = admin
     ? pickHomeCollectionBlock(source, ["users", "usuarios"])
-    : { items: [], visibleCount: 0, total: 0, totalCount: 0, remoteCount: 0 };
+    : emptyCollection();
 
   const clientsBlock = admin
     ? pickHomeCollectionBlock(source, ["clients", "clientes", "customers"])
-    : { items: [], visibleCount: 0, total: 0, totalCount: 0, remoteCount: 0 };
+    : emptyCollection();
 
   const activityBlock = pickHomeCollectionBlock(source, ["activity", "activities", "recent", "recentActivity"]);
 

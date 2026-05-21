@@ -10,6 +10,7 @@
    - Ejecutar quick actions simples.
    - Leer dashboard/widget desde store si hace falta.
    - Rutas base desde core/config.js.
+   - Admin routes reales desde core/config.js.
    - Toast sólo mediante AppCore.showToast si existe.
    - Sin fetch.
    - Sin API calls.
@@ -19,6 +20,7 @@
    - Sin route aliases legacy.
    - Sin Router.push/go legacy.
    - Sin AppCore.navigate.
+   - Sin fallback manual de history.
    - Sin /home.
    - Sin /incidencias/nueva.
    - Sin Auth.
@@ -26,7 +28,14 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-import { ROUTES as CORE_ROUTES } from "../../core/config.js";
+
+import {
+  ROUTES as CORE_ROUTES,
+  isAdminRoute as configIsAdminRoute,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
+} from "../../core/config.js";
 
 import {
   getHomeDashboardStore,
@@ -36,6 +45,7 @@ import {
   getHomeInvoicesStore,
   getHomeUsersStore,
   getHomeClientsStore,
+  getHomeServersStore,
   getHomeActivityStore,
 } from "./home.store.js";
 
@@ -45,7 +55,7 @@ import {
   getHomeWidgetId,
 } from "./home.model.js";
 
-export const HOME_ACTIONS_VERSION = "home.actions.v4";
+export const HOME_ACTIONS_VERSION = "home.actions.v5";
 
 const SOURCE = "views.home.actions";
 
@@ -64,7 +74,7 @@ const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo/i;
 
 const SENSITIVE_QUERY_RE =
-  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i;
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
@@ -136,7 +146,7 @@ function normalizeRole(value = "") {
     return "";
   }
 
-  const role = String(value || "").toLowerCase();
+  const role = String(value || "").trim().toLowerCase();
 
   if (role === "admin") return "admin";
   if (role === "user") return "user";
@@ -155,7 +165,7 @@ function nowIso() {
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -232,78 +242,104 @@ function hasSensitiveQuery(value = "") {
   return SENSITIVE_QUERY_RE.test(String(value || ""));
 }
 
-function normalizeHashPath(value = "") {
+function routeInput(value = "") {
   const raw = safeText(value, "");
 
-  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
-  if (raw.startsWith("#/")) return raw.slice(1) || "/";
+  if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (hasSensitiveQuery(raw)) return "";
 
-  return raw;
+  try {
+    return configRoutePathFromUrlLike(raw) || "";
+  } catch {
+    if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
+    if (raw.startsWith("#/")) return raw.slice(1) || "/";
+    return raw;
+  }
 }
 
-function normalizePath(pathname = "") {
-  let value = safeText(pathname, "");
+function routeSuffix(value = "") {
+  const raw = safeText(value, "");
 
-  if (!value) return "";
+  const hashIndex = raw.indexOf("#");
+  const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
 
-  value = value
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
+  const queryIndex = beforeHash.indexOf("?");
+  const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
 
-  if (!value.startsWith("/")) value = `/${value}`;
+  if (hasSensitiveQuery(search) || hasSensitiveQuery(hash)) return "";
 
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || "/";
+  return `${search}${hash}`;
+}
+
+function routePathOnly(value = "") {
+  const input = routeInput(value);
+
+  if (!input) return "";
+  if (!input.startsWith("/")) return "";
+  if (input.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(input)) return "";
+  if (/[\r\n\t\\]/.test(input)) return "";
+  if (hasSensitiveQuery(input)) return "";
+
+  const pathOnly = input.split("?")[0].split("#")[0] || "";
+
+  try {
+    return configNormalizeRoutePath(pathOnly) || "";
+  } catch {
+    let path = pathOnly.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+
+    if (!path.startsWith("/")) {
+      path = `/${path}`;
+    }
+
+    if (path.length > 1) {
+      path = path.replace(/\/+$/g, "") || "/";
+    }
+
+    return path || "";
   }
+}
 
-  return value;
+function isBlockedRoute(value = "") {
+  try {
+    return configIsBlockedRoutePath(value) === true;
+  } catch {
+    const path = routePathOnly(value).toLowerCase();
+
+    return Boolean(
+      path === "/home" ||
+        path === "/403" ||
+        path === "/404" ||
+        path === "/2fa" ||
+        path === "/mfa" ||
+        path === "/otp" ||
+        path.startsWith("/2fa/") ||
+        path.startsWith("/mfa/") ||
+        path.startsWith("/otp/")
+    );
+  }
 }
 
 function normalizeSpaRoute(route = "") {
-  let raw = normalizeHashPath(route);
+  const input = routeInput(route);
 
-  if (!raw || raw === "#") return "";
-  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) return "";
+  if (!input) return "";
+  if (!input.startsWith("/")) return "";
+  if (input.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(input)) return "";
+  if (/[\r\n\t\\]/.test(input)) return "";
+  if (hasSensitiveQuery(input)) return "";
 
-  const lower = raw.toLowerCase();
+  const pathOnly = routePathOnly(input);
 
-  if (
-    raw.startsWith("//") ||
-    /^[a-z][a-z0-9+.-]*:/i.test(raw) ||
-    /[\r\n\t\\]/.test(raw) ||
-    hasSensitiveQuery(raw) ||
-    lower.startsWith("javascript:") ||
-    lower.startsWith("data:") ||
-    lower.startsWith("vbscript:") ||
-    lower.startsWith("mailto:") ||
-    lower.startsWith("tel:") ||
-    lower.startsWith("file:") ||
-    lower.startsWith("blob:") ||
-    /^https?:\/\//i.test(raw)
-  ) {
-    return "";
-  }
+  if (!pathOnly) return "";
+  if (isBlockedRoute(pathOnly)) return "";
 
-  if (!raw.startsWith("/")) {
-    raw = `/${raw}`;
-  }
-
-  const hashIndex = raw.indexOf("#");
-  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-  const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
-
-  const queryIndex = withoutHash.indexOf("?");
-  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
-  const path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
-
-  const cleanPath = normalizePath(path);
-
-  if (!cleanPath) return "";
-  if (cleanPath === "/home") return "";
-  if (cleanPath === "/incidencias/nueva") return "";
-  if (cleanPath.startsWith("/incidencias/nueva/")) return "";
-
-  return `${cleanPath}${query}${hash}`;
+  return `${pathOnly}${routeSuffix(input)}`;
 }
 
 function routeFromCore(name = "", fallback = "") {
@@ -314,8 +350,9 @@ const ROUTES = Object.freeze({
   INCIDENCIAS: routeFromCore("incidencias", "/incidencias"),
   FACTURAS: routeFromCore("facturas", "/facturas"),
   CLIENTES: routeFromCore("clientes", "/clientes"),
+  USUARIOS: routeFromCore("usuarios", "/usuarios"),
+  SERVIDOR: routeFromCore("servidor", "/servidor"),
 
-  USUARIOS: routeFromCore("usuarios", ""),
   CUENTA: routeFromCore("cuenta", ""),
   AJUSTES: routeFromCore("ajustes", ""),
 });
@@ -325,6 +362,8 @@ const ACTION_ROUTES = Object.freeze({
   go_facturas: ROUTES.FACTURAS,
   go_clientes: ROUTES.CLIENTES,
   go_usuarios: ROUTES.USUARIOS,
+  go_servidor: ROUTES.SERVIDOR,
+  go_server: ROUTES.SERVIDOR,
   go_cuenta: ROUTES.CUENTA,
   go_ajustes: ROUTES.AJUSTES,
 });
@@ -337,12 +376,20 @@ function isAdminOnlyRoute(route = "") {
   const path = routePath(route);
   const clientes = routePath(ROUTES.CLIENTES);
   const usuarios = routePath(ROUTES.USUARIOS);
+  const servidor = routePath(ROUTES.SERVIDOR);
 
   if (!path) return false;
 
+  try {
+    if (configIsAdminRoute(path) === true) return true;
+  } catch {
+    // fallback abajo
+  }
+
   return (
     Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
-    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
+    Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
   );
 }
 
@@ -810,13 +857,23 @@ function columnSpecs(mode = "widgets") {
     ];
   }
 
+  if (["server", "servers", "servidor", "servidores"].includes(key)) {
+    return [
+      ["ID", ["serverId", "servidorId", "id"]],
+      ["Nombre", ["displayName", "name", "nombre", "hostname", "host"]],
+      ["Estado", ["status", "estado", "state", "healthStatus"]],
+      ["Tipo", ["type", "kind", "category"]],
+      ["Actualizado", ["updatedAt", "modifiedAt", "lastSyncAt"]],
+    ];
+  }
+
   if (["activity", "activities", "recent", "timeline"].includes(key)) {
     return [
       ["Tipo", ["type", "kind", "category"]],
       ["Título", ["title", "name", "subject"]],
       ["Texto", ["text", "description", "message", "detail"]],
       ["Fecha", ["date", "createdAt", "updatedAt", "timestamp"]],
-      ["Entidad", ["entityId", "ticketId", "incidenciaId", "facturaId", "invoiceId", "userId", "clienteId"]],
+      ["Entidad", ["entityId", "ticketId", "incidenciaId", "facturaId", "invoiceId", "userId", "clienteId", "serverId", "servidorId"]],
     ];
   }
 
@@ -916,6 +973,10 @@ function isAdminExportMode(mode = "") {
     "clientes",
     "customer",
     "customers",
+    "server",
+    "servers",
+    "servidor",
+    "servidores",
   ].includes(key);
 }
 
@@ -943,6 +1004,10 @@ function resolveExportItems(items = null, mode = "widgets") {
 
     if (["client", "clients", "cliente", "clientes", "customer", "customers"].includes(key)) {
       return safeArray(getHomeClientsStore?.());
+    }
+
+    if (["server", "servers", "servidor", "servidores"].includes(key)) {
+      return safeArray(getHomeServersStore?.());
     }
 
     if (["activity", "activities", "recent", "timeline"].includes(key)) {
@@ -1140,6 +1205,7 @@ export function getHomeActionsSnapshot() {
       hasInvoices: isFunction(getHomeInvoicesStore),
       hasUsers: isFunction(getHomeUsersStore),
       hasClients: isFunction(getHomeClientsStore),
+      hasServers: isFunction(getHomeServersStore),
       hasActivity: isFunction(getHomeActivityStore),
     },
 
@@ -1167,12 +1233,15 @@ export function getHomeActionsSnapshot() {
       rejectsSensitiveClipboard: true,
       blocksAdminRoutesForUser: true,
       blocksAdminExportsForUser: true,
+      servidorOnlyAdmin: true,
 
       sanitizesPayload: true,
       csvExcludesEmail: true,
       csvRedacted: true,
 
       routesFromConfig: true,
+      adminRoutesFromConfig: true,
+      blockedRoutesFromConfig: true,
       toastViaAppCoreShowToastOnly: true,
     },
 

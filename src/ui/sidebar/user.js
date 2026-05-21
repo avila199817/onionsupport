@@ -8,7 +8,8 @@
    - Resolver label visible de rol.
    - Resolver slug público real.
    - Resolver displayName, email y avatarUrl para template/dropdown.
-   - Leer avatar canónico desde avatar/avatarUrl/photo/picture/image.
+   - Leer avatar canónico desde avatar/avatarUrl/photo/picture/image/foto/imagen.
+   - Fusionar usuario base con profile/media/account/me si la foto viene separada.
    - Tratar hasAvatar sólo como señal diagnóstica, no como URL.
    - Crear view-model mínimo para template.js.
    - No pintar DOM.
@@ -27,7 +28,7 @@ import {
   SIDEBAR_ROLE_USER,
 } from "./constants.js";
 
-export const SIDEBAR_USER_VERSION = "sidebar.user.v8";
+export const SIDEBAR_USER_VERSION = "sidebar.user.v9";
 
 const DEFAULT_NAME = "Usuario";
 const DEFAULT_INITIALS = "U";
@@ -55,6 +56,51 @@ const INVALID_USER_STATUSES = Object.freeze([
   "archivado",
   "bloqueado",
   "suspendido",
+]);
+
+const AVATAR_FIELD_NAMES = Object.freeze([
+  "avatarUrl",
+  "avatarURL",
+  "avatar_url",
+  "avatar",
+
+  "photoUrl",
+  "photoURL",
+  "photo_url",
+  "photo",
+
+  "pictureUrl",
+  "pictureURL",
+  "picture_url",
+  "picture",
+
+  "imageUrl",
+  "imageURL",
+  "image_url",
+  "image",
+
+  "img",
+  "imgUrl",
+  "imgURL",
+
+  "foto",
+  "fotoUrl",
+  "fotoURL",
+  "foto_url",
+
+  "imagen",
+  "imagenUrl",
+  "imagenURL",
+  "imagen_url",
+]);
+
+const DECORATION_OBJECT_NAMES = Object.freeze([
+  "profile",
+  "media",
+  "preferences",
+  "lookup",
+  "routing",
+  "contacto",
 ]);
 
 /* =========================================================
@@ -129,6 +175,17 @@ function isLocalDevHost(hostname = "") {
   return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
+function shallowMergeObjects(base = {}, addition = {}) {
+  if (!isObject(base) && !isObject(addition)) return {};
+  if (!isObject(base)) return { ...addition };
+  if (!isObject(addition)) return { ...base };
+
+  return {
+    ...base,
+    ...addition,
+  };
+}
+
 function normalizeInternalAssetPath(value = "") {
   const raw = stringText(value, "");
 
@@ -151,6 +208,125 @@ function normalizeInternalAssetPath(value = "") {
   const finalPath = `/${cleanPath}`;
 
   return `${finalPath}${query ? `?${query}` : ""}${hashPart ? `#${hashPart}` : ""}`;
+}
+
+/* =========================================================
+   USER DECORATION MERGE
+========================================================= */
+
+function copyMissingValue(target = {}, source = {}, key = "") {
+  if (!isObject(target) || !isObject(source) || !key) return false;
+
+  const current = target[key];
+  const next = source[key];
+
+  if (current !== undefined && current !== null && current !== "") return false;
+  if (next === undefined || next === null || next === "") return false;
+
+  target[key] = next;
+
+  return true;
+}
+
+function mergeUserDecorations(base = null, ...decorators) {
+  if (!isObject(base)) return null;
+
+  const output = { ...base };
+
+  for (const decorator of decorators) {
+    if (!isObject(decorator)) continue;
+
+    for (const field of AVATAR_FIELD_NAMES) {
+      copyMissingValue(output, decorator, field);
+    }
+
+    for (const objectName of DECORATION_OBJECT_NAMES) {
+      if (!isObject(decorator[objectName])) continue;
+
+      output[objectName] = shallowMergeObjects(
+        output[objectName],
+        decorator[objectName]
+      );
+    }
+
+    /*
+      Caso frecuente:
+      payload.profile.avatarUrl existe, pero payload.user.profile no.
+      Además de fusionar profile, copiamos campos visuales directos del profile
+      al usuario sólo si faltan, para que getSidebarUserAvatarUrl pueda verlos.
+    */
+    if (isObject(decorator.profile)) {
+      for (const field of AVATAR_FIELD_NAMES) {
+        copyMissingValue(output, decorator.profile, field);
+      }
+    }
+
+    if (isObject(decorator.media)) {
+      for (const field of AVATAR_FIELD_NAMES) {
+        copyMissingValue(output, decorator.media, field);
+      }
+    }
+
+    if (isObject(decorator.account)) {
+      for (const field of AVATAR_FIELD_NAMES) {
+        copyMissingValue(output, decorator.account, field);
+      }
+
+      if (isObject(decorator.account.profile)) {
+        output.profile = shallowMergeObjects(
+          output.profile,
+          decorator.account.profile
+        );
+
+        for (const field of AVATAR_FIELD_NAMES) {
+          copyMissingValue(output, decorator.account.profile, field);
+        }
+      }
+    }
+  }
+
+  return output;
+}
+
+function payloadDecorators(payload = null) {
+  if (!isObject(payload)) return [];
+
+  return [
+    payload,
+
+    payload.profile,
+    payload.media,
+    payload.preferences,
+    payload.account,
+    payload.account?.profile,
+
+    payload.me,
+    payload.me?.profile,
+
+    payload.data,
+    payload.data?.profile,
+    payload.data?.media,
+    payload.data?.account,
+    payload.data?.account?.profile,
+
+    payload.payload,
+    payload.payload?.profile,
+    payload.payload?.media,
+
+    payload.result,
+    payload.result?.profile,
+    payload.result?.media,
+
+    payload.auth,
+    payload.auth?.profile,
+    payload.auth?.user,
+    payload.auth?.user?.profile,
+
+    payload.session,
+    payload.session?.profile,
+    payload.session?.user,
+    payload.session?.user?.profile,
+  ].filter(isObject);
 }
 
 /* =========================================================
@@ -251,7 +427,9 @@ export function isUsableSidebarUser(user = null) {
 export function unwrapSidebarUser(payload = null) {
   if (!isObject(payload)) return null;
 
-  const direct = first(
+  const decorators = payloadDecorators(payload);
+
+  const directCandidates = [
     payload.user,
     payload.usuario,
     payload.currentUser,
@@ -268,11 +446,17 @@ export function unwrapSidebarUser(payload = null) {
     payload.auth?.user,
     payload.me,
     payload.account,
-    payload.profile
-  );
+  ].filter(isObject);
 
-  if (isUsableSidebarUser(direct)) return direct;
-  if (isUsableSidebarUser(payload)) return payload;
+  for (const candidate of directCandidates) {
+    const merged = mergeUserDecorations(candidate, ...decorators);
+
+    if (isUsableSidebarUser(merged)) return merged;
+  }
+
+  const mergedPayload = mergeUserDecorations(payload, ...decorators);
+
+  if (isUsableSidebarUser(mergedPayload)) return mergedPayload;
 
   return null;
 }
@@ -284,23 +468,61 @@ export function unwrapSidebarUser(payload = null) {
 function getUserFromAuth(Auth = null) {
   if (!isObject(Auth)) return null;
 
+  const profile = safeCall(Auth.getProfile?.bind?.(Auth) || Auth.getProfile);
+  const session = safeCall(Auth.getSession?.bind?.(Auth) || Auth.getSession);
+
+  const decorators = [
+    profile,
+    session,
+    Auth.profile,
+    Auth.account,
+    Auth.me,
+    Auth.session,
+    Auth.state,
+    Auth.state?.profile,
+    Auth.state?.user,
+  ].filter(isObject);
+
   const candidates = [
     safeCall(Auth.getUser?.bind?.(Auth) || Auth.getUser),
     safeCall(Auth.getCurrentUser?.bind?.(Auth) || Auth.getCurrentUser),
-    safeCall(Auth.getProfile?.bind?.(Auth) || Auth.getProfile),
     Auth.user,
     Auth.currentUser,
     Auth.session?.user,
     Auth.state?.user,
   ];
 
-  return candidates.map(unwrapSidebarUser).find(isUsableSidebarUser) || null;
+  for (const candidate of candidates) {
+    const user = unwrapSidebarUser(candidate);
+
+    if (isUsableSidebarUser(user)) {
+      return mergeUserDecorations(user, ...decorators);
+    }
+  }
+
+  return null;
 }
 
 function getUserFromCore(AppCore = null) {
   if (!isObject(AppCore)) return null;
 
   const state = isObject(AppCore.state) ? AppCore.state : {};
+
+  const decorators = [
+    state.profile,
+    state.account,
+    state.me,
+    state.media,
+    state.auth,
+    state.auth?.profile,
+    state.session,
+    state.session?.profile,
+    state.sessionData,
+    state.sessionData?.profile,
+    AppCore.profile,
+    AppCore.account,
+    AppCore.me,
+  ].filter(isObject);
 
   const candidates = [
     state.user,
@@ -314,13 +536,30 @@ function getUserFromCore(AppCore = null) {
     AppCore.currentUser,
   ];
 
-  return candidates.map(unwrapSidebarUser).find(isUsableSidebarUser) || null;
+  for (const candidate of candidates) {
+    const user = unwrapSidebarUser(candidate);
+
+    if (isUsableSidebarUser(user)) {
+      return mergeUserDecorations(user, ...decorators);
+    }
+  }
+
+  return null;
 }
 
 export function getSidebarUserSource(context = {}) {
   const explicit = unwrapSidebarUser(context.user);
 
-  if (isUsableSidebarUser(explicit)) return explicit;
+  if (isUsableSidebarUser(explicit)) {
+    return mergeUserDecorations(
+      explicit,
+      ...payloadDecorators(context),
+      context.profile,
+      context.media,
+      context.account,
+      context.me
+    );
+  }
 
   const authUser = getUserFromAuth(context.Auth);
 
@@ -538,6 +777,12 @@ function avatarObjectValue(value = null) {
     value.publicUrl,
     value.publicURL,
     value.public_url,
+    value.secureUrl,
+    value.secureURL,
+    value.secure_url,
+    value.thumbnailUrl,
+    value.thumbnailURL,
+    value.thumbnail_url,
     ""
   );
 }
@@ -561,7 +806,7 @@ function safeAvatarUrl(value = "") {
   /*
     Caso 2: URL absoluta.
     - https externa: se permite
-    - same-origin/local dev: se convierte a path interno para que template.js la pinte
+    - same-origin/local dev: se convierte a path interno
     - http externa: se bloquea
   */
   if (/^https?:\/\//i.test(avatar)) {
@@ -609,6 +854,27 @@ function safeAvatarUrl(value = "") {
   return "";
 }
 
+function collectAvatarCandidatesFromObject(source = null) {
+  if (!isObject(source)) return [];
+
+  const output = [];
+
+  for (const field of AVATAR_FIELD_NAMES) {
+    const value = source[field];
+
+    if (typeof value === "string" || typeof value === "number") {
+      output.push(value);
+      continue;
+    }
+
+    if (isObject(value)) {
+      output.push(avatarObjectValue(value));
+    }
+  }
+
+  return output;
+}
+
 export function getSidebarUserAvatarUrl(user = null) {
   if (!isUsableSidebarUser(user)) return "";
 
@@ -616,140 +882,25 @@ export function getSidebarUserAvatarUrl(user = null) {
   const raw = isObject(user.raw) ? user.raw : {};
   const preferences = isObject(user.preferences) ? user.preferences : {};
   const media = isObject(user.media) ? user.media : {};
-
-  const userAvatarObject = isObject(user.avatar) ? user.avatar : {};
-  const userPhotoObject = isObject(user.photo) ? user.photo : {};
-  const userPictureObject = isObject(user.picture) ? user.picture : {};
-  const userImageObject = isObject(user.image) ? user.image : {};
-
-  const profileAvatarObject = isObject(profile.avatar) ? profile.avatar : {};
-  const profilePhotoObject = isObject(profile.photo) ? profile.photo : {};
-  const profilePictureObject = isObject(profile.picture) ? profile.picture : {};
-  const profileImageObject = isObject(profile.image) ? profile.image : {};
-
-  const mediaAvatarObject = isObject(media.avatar) ? media.avatar : {};
-  const mediaPhotoObject = isObject(media.photo) ? media.photo : {};
-  const mediaPictureObject = isObject(media.picture) ? media.picture : {};
-  const mediaImageObject = isObject(media.image) ? media.image : {};
-
-  const preferencesAvatarObject = isObject(preferences.avatar) ? preferences.avatar : {};
-
-  const rawAvatarObject = isObject(raw.avatar) ? raw.avatar : {};
-  const rawPhotoObject = isObject(raw.photo) ? raw.photo : {};
-  const rawPictureObject = isObject(raw.picture) ? raw.picture : {};
-  const rawImageObject = isObject(raw.image) ? raw.image : {};
+  const contacto = isObject(user.contacto) ? user.contacto : {};
+  const account = isObject(user.account) ? user.account : {};
+  const me = isObject(user.me) ? user.me : {};
 
   /*
     hasAvatar es sólo una señal.
-    La URL real debe venir en avatar/avatarUrl/photo/picture/image o variantes seguras.
+    La URL real debe venir en avatar/avatarUrl/photo/picture/image/foto/imagen
+    o variantes seguras.
   */
   return safeAvatarUrl(
     first(
-      user.avatarUrl,
-      user.avatarURL,
-      user.avatar_url,
-      typeof user.avatar === "string" ? user.avatar : "",
-      avatarObjectValue(userAvatarObject),
-
-      user.photoUrl,
-      user.photoURL,
-      user.photo_url,
-      typeof user.photo === "string" ? user.photo : "",
-      avatarObjectValue(userPhotoObject),
-
-      user.pictureUrl,
-      user.pictureURL,
-      user.picture_url,
-      typeof user.picture === "string" ? user.picture : "",
-      avatarObjectValue(userPictureObject),
-
-      user.imageUrl,
-      user.imageURL,
-      user.image_url,
-      typeof user.image === "string" ? user.image : "",
-      avatarObjectValue(userImageObject),
-
-      user.img,
-      user.imgUrl,
-      user.imgURL,
-
-      profile.avatarUrl,
-      profile.avatarURL,
-      profile.avatar_url,
-      typeof profile.avatar === "string" ? profile.avatar : "",
-      avatarObjectValue(profileAvatarObject),
-
-      profile.photoUrl,
-      profile.photoURL,
-      profile.photo_url,
-      typeof profile.photo === "string" ? profile.photo : "",
-      avatarObjectValue(profilePhotoObject),
-
-      profile.pictureUrl,
-      profile.pictureURL,
-      profile.picture_url,
-      typeof profile.picture === "string" ? profile.picture : "",
-      avatarObjectValue(profilePictureObject),
-
-      profile.imageUrl,
-      profile.imageURL,
-      profile.image_url,
-      typeof profile.image === "string" ? profile.image : "",
-      avatarObjectValue(profileImageObject),
-
-      media.avatarUrl,
-      media.avatarURL,
-      media.avatar_url,
-      typeof media.avatar === "string" ? media.avatar : "",
-      avatarObjectValue(mediaAvatarObject),
-
-      media.photoUrl,
-      media.photoURL,
-      media.photo_url,
-      typeof media.photo === "string" ? media.photo : "",
-      avatarObjectValue(mediaPhotoObject),
-
-      media.pictureUrl,
-      media.pictureURL,
-      media.picture_url,
-      typeof media.picture === "string" ? media.picture : "",
-      avatarObjectValue(mediaPictureObject),
-
-      media.imageUrl,
-      media.imageURL,
-      media.image_url,
-      typeof media.image === "string" ? media.image : "",
-      avatarObjectValue(mediaImageObject),
-
-      preferences.avatarUrl,
-      preferences.avatarURL,
-      preferences.avatar_url,
-      typeof preferences.avatar === "string" ? preferences.avatar : "",
-      avatarObjectValue(preferencesAvatarObject),
-
-      raw.avatarUrl,
-      raw.avatarURL,
-      raw.avatar_url,
-      typeof raw.avatar === "string" ? raw.avatar : "",
-      avatarObjectValue(rawAvatarObject),
-
-      raw.photoUrl,
-      raw.photoURL,
-      raw.photo_url,
-      typeof raw.photo === "string" ? raw.photo : "",
-      avatarObjectValue(rawPhotoObject),
-
-      raw.pictureUrl,
-      raw.pictureURL,
-      raw.picture_url,
-      typeof raw.picture === "string" ? raw.picture : "",
-      avatarObjectValue(rawPictureObject),
-
-      raw.imageUrl,
-      raw.imageURL,
-      raw.image_url,
-      typeof raw.image === "string" ? raw.image : "",
-      avatarObjectValue(rawImageObject)
+      ...collectAvatarCandidatesFromObject(user),
+      ...collectAvatarCandidatesFromObject(profile),
+      ...collectAvatarCandidatesFromObject(media),
+      ...collectAvatarCandidatesFromObject(preferences),
+      ...collectAvatarCandidatesFromObject(contacto),
+      ...collectAvatarCandidatesFromObject(account),
+      ...collectAvatarCandidatesFromObject(me),
+      ...collectAvatarCandidatesFromObject(raw)
     )
   );
 }
@@ -830,6 +981,12 @@ export function getSidebarUser(context = {}) {
     photoURL: avatarUrl,
     picture: avatarUrl,
     pictureUrl: avatarUrl,
+    image: avatarUrl,
+    imageUrl: avatarUrl,
+    foto: avatarUrl,
+    fotoUrl: avatarUrl,
+    imagen: avatarUrl,
+    imagenUrl: avatarUrl,
 
     initials,
 
@@ -886,6 +1043,9 @@ export function getSidebarUserSnapshot(context = {}) {
       noEmailIdentity: true,
       noSlugFabrication: true,
 
+      mergesUserDecorations: true,
+      supportsProfileAvatarOutsideUserObject: true,
+
       roleLabels: {
         admin: ROLE_LABEL_ADMIN,
         user: ROLE_LABEL_STANDARD,
@@ -903,6 +1063,7 @@ export function getSidebarUserSnapshot(context = {}) {
       avatarLocalhostAbsoluteSupported: true,
       avatarRelativePathSupported: true,
       avatarObjectUrlSupported: true,
+      avatarSpanishAliasesSupported: true,
       noSensitiveAvatarQuery: true,
       noBlobAvatar: true,
       noDataImageAvatar: true,

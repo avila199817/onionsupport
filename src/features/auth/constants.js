@@ -6,14 +6,11 @@
    - Contrato estático mínimo de Auth.
    - Backend real bajo /api/auth desde core/config.js.
    - /api/auth/me siempre privado.
-   - Token param único: token.
-   - Rutas públicas reales actuales:
-     /login
-     /password-request
-     /password-reset
-     /activate-account
+   - Token param único desde core/config.js.
+   - Rutas públicas reales actuales desde core/config.js.
    - Home visible de usuario: /@{user.slug}.
    - Roles únicos: admin / user.
+   - Delegar rutas, user-scope y slug en core/config.js.
    - Sin AppCore.
    - Sin CoreHttp.
    - Sin Router.
@@ -31,13 +28,20 @@ import {
   ROUTES,
   TOKEN_PARAM,
   USER_HOME_PREFIX,
+
+  buildUserHomeRoute as coreBuildUserHomeRoute,
+  canonicalRoutePath as coreCanonicalRoutePath,
+  getUserScopedRouteInfo as coreGetUserScopedRouteInfo,
+  isUserHomeRoute as coreIsUserHomeRoute,
+  normalizeRoutePath as coreNormalizeRoutePath,
+  normalizeUserSlug as coreNormalizeUserSlug,
+  routePathFromUrlLike as coreRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const AUTH_CONSTANTS_VERSION = "auth.constants.v3";
+export const AUTH_CONSTANTS_VERSION = "auth.constants.v4";
 export const AUTH_MODULE_VERSION = AUTH_CONSTANTS_VERSION;
 
-const DEFAULT_ROUTE = ROUTES.home || "/";
-const LOCAL_ORIGIN = "http://localhost";
+const DEFAULT_ROUTE = ROUTES.home || ROUTES.root || "/";
 
 function freeze(value) {
   try {
@@ -52,7 +56,11 @@ function freeze(value) {
 ========================================================= */
 
 export function safeText(value, fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -86,55 +94,39 @@ export function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
    PATH HELPERS
 ========================================================= */
 
-function isHashRouterPath(value = "") {
-  const raw = safeText(value, "");
-  return raw.startsWith("#/") || raw.startsWith("#!");
-}
+function fallbackNormalizeRoutePath(path = "") {
+  let value = safeText(path, "");
 
-function normalizeHashRouterPath(value = "") {
-  const raw = safeText(value, "");
+  if (!value) return "";
 
-  if (!raw) return DEFAULT_ROUTE;
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
+  if (value.startsWith("#!")) {
+    value = value.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
+  } else if (value.startsWith("#/")) {
+    value = value.slice(1) || DEFAULT_ROUTE;
   }
 
-  if (raw.startsWith("#/")) {
-    return raw.slice(1) || DEFAULT_ROUTE;
+  if (value.startsWith("//")) return DEFAULT_ROUTE;
+
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const url = new URL(value, "http://localhost");
+      value = `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
+    } catch {
+      return DEFAULT_ROUTE;
+    }
+  } else if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    return DEFAULT_ROUTE;
   }
 
-  return raw || DEFAULT_ROUTE;
-}
-
-function normalizeSearch(search = "") {
-  const value = safeText(search, "");
-
-  if (!value || value === "?") return "";
-
-  return value.startsWith("?")
-    ? value
-    : `?${value.replace(/^\?+/, "")}`;
-}
-
-function normalizeHash(hash = "") {
-  const value = safeText(hash, "");
-
-  if (!value || value === "#") return "";
-
-  return value.startsWith("#")
-    ? value
-    : `#${value.replace(/^#+/, "")}`;
-}
-
-function normalizePathname(pathname = DEFAULT_ROUTE) {
-  let value = safeText(pathname, DEFAULT_ROUTE).replace(/\\/g, "/");
+  value = value
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
   if (!value.startsWith("/")) {
     value = `/${value}`;
   }
-
-  value = value.replace(/\/{2,}/g, "/");
 
   const parts = [];
 
@@ -157,78 +149,34 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
   return value || DEFAULT_ROUTE;
 }
 
-function splitPath(path = DEFAULT_ROUTE) {
-  let raw = safeText(path, DEFAULT_ROUTE);
-
-  if (isHashRouterPath(raw)) {
-    raw = normalizeHashRouterPath(raw);
-  }
-
-  let pathname = raw;
-  let search = "";
-  let hash = "";
-
-  const hashIndex = pathname.indexOf("#");
-
-  if (hashIndex >= 0) {
-    hash = pathname.slice(hashIndex);
-    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
-  }
-
-  const searchIndex = pathname.indexOf("?");
-
-  if (searchIndex >= 0) {
-    search = pathname.slice(searchIndex);
-    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
-  }
-
-  return {
-    pathname: normalizePathname(pathname),
-    search: normalizeSearch(search),
-    hash: normalizeHash(hash),
-  };
-}
-
-function sameOriginUrlToPath(raw = "") {
-  try {
-    const url = new URL(raw, LOCAL_ORIGIN);
-
-    if (url.origin !== LOCAL_ORIGIN) {
-      return "";
-    }
-
-    if (url.hash && isHashRouterPath(url.hash)) {
-      return normalizeHashRouterPath(url.hash);
-    }
-
-    return `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
-  } catch {
-    return "";
-  }
-}
-
-export function pathFromUrlLike(value = "") {
+function fallbackPathFromUrlLike(value = "") {
   const raw = safeText(value, "");
 
   if (!raw) return "";
-
-  if (isHashRouterPath(raw)) {
-    return normalizeHashRouterPath(raw);
-  }
-
-  if (raw.startsWith("//")) {
-    return DEFAULT_ROUTE;
-  }
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
+  if (raw.startsWith("#/")) return raw.slice(1) || DEFAULT_ROUTE;
+  if (raw.startsWith("//")) return DEFAULT_ROUTE;
 
   if (/^https?:\/\//i.test(raw)) {
-    return sameOriginUrlToPath(raw) || DEFAULT_ROUTE;
+    try {
+      const url = new URL(raw, "http://localhost");
+      return `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
+    } catch {
+      return DEFAULT_ROUTE;
+    }
   }
 
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    return DEFAULT_ROUTE;
-  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return DEFAULT_ROUTE;
 
   return raw;
+}
+
+export function pathFromUrlLike(value = "") {
+  try {
+    return coreRoutePathFromUrlLike(value) || "";
+  } catch {
+    return fallbackPathFromUrlLike(value);
+  }
 }
 
 export function normalizeEndpointPath(path = "") {
@@ -236,7 +184,11 @@ export function normalizeEndpointPath(path = "") {
 
   if (!raw) return "";
 
-  return splitPath(raw).pathname;
+  try {
+    return coreNormalizeRoutePath(raw) || "";
+  } catch {
+    return fallbackNormalizeRoutePath(raw);
+  }
 }
 
 export function normalizeRoutePath(path = "") {
@@ -259,20 +211,36 @@ function endpointInList(path = "", list = []) {
 ========================================================= */
 
 export function normalizeUserSlug(value = "") {
-  const slug = safeText(value, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
+  try {
+    return coreNormalizeUserSlug(value) || "";
+  } catch {
+    const slug = safeText(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/^\/+/, "")
+      .replace(/^@+/, "")
+      .split(/[/?#]/)[0]
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase();
 
-  if (!slug) return "";
+    if (!slug) return "";
 
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  }
 }
 
 export function extractUserHomeSlugFromRoute(path = "") {
+  try {
+    const info = coreGetUserScopedRouteInfo(path);
+
+    if (info?.home === true && info.slug) {
+      return normalizeUserSlug(info.slug);
+    }
+  } catch {
+    // fallback abajo
+  }
+
   const route = normalizeRoutePath(path);
 
   if (!route.startsWith(USER_HOME_PREFIX)) return "";
@@ -285,17 +253,29 @@ export function extractUserHomeSlugFromRoute(path = "") {
 }
 
 export function isUserHomeRoute(path = "") {
-  return Boolean(extractUserHomeSlugFromRoute(path));
+  try {
+    return coreIsUserHomeRoute(path) === true;
+  } catch {
+    return Boolean(extractUserHomeSlugFromRoute(path));
+  }
 }
 
 export function buildUserHomeRoute(slug = "") {
-  const clean = normalizeUserSlug(slug);
-  return clean ? `${USER_HOME_PREFIX}${clean}` : DEFAULT_ROUTE;
+  try {
+    return coreBuildUserHomeRoute(slug) || DEFAULT_ROUTE;
+  } catch {
+    const clean = normalizeUserSlug(slug);
+    return clean ? `${USER_HOME_PREFIX}${clean}` : DEFAULT_ROUTE;
+  }
 }
 
 export function canonicalAuthRoutePath(path = "") {
-  const route = normalizeRoutePath(path);
-  return isUserHomeRoute(route) ? DEFAULT_ROUTE : route;
+  try {
+    return coreCanonicalRoutePath(path) || DEFAULT_ROUTE;
+  } catch {
+    const route = normalizeRoutePath(path);
+    return isUserHomeRoute(route) ? DEFAULT_ROUTE : route;
+  }
 }
 
 /* =========================================================
@@ -676,13 +656,40 @@ export function hasTokenParam(search = "") {
   }
 }
 
+function splitUrlForToken(value = "") {
+  const raw = pathFromUrlLike(value) || safeText(value, "");
+
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex);
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex);
+  }
+
+  return {
+    pathname: normalizeRoutePath(pathname),
+    search,
+    hash,
+  };
+}
+
 export function hasTokenInUrl(value = "") {
   const raw = safeText(value, "");
 
   if (!raw) return false;
 
-  const path = pathFromUrlLike(raw) || raw;
-  const { search, hash } = splitPath(path);
+  const { search, hash } = splitUrlForToken(raw);
 
   if (search && hasTokenParam(search)) return true;
 
@@ -755,6 +762,8 @@ export function getAuthConstantsSnapshot() {
 
       userSlugHome: true,
       preservesAtSlug: true,
+      configOwnsRouteParsing: true,
+      configOwnsUserSlug: true,
 
       no2fa: true,
       noMfa: true,

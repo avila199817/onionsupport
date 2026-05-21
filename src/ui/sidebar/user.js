@@ -27,7 +27,7 @@ import {
   SIDEBAR_ROLE_USER,
 } from "./constants.js";
 
-export const SIDEBAR_USER_VERSION = "sidebar.user.v7";
+export const SIDEBAR_USER_VERSION = "sidebar.user.v8";
 
 const DEFAULT_NAME = "Usuario";
 const DEFAULT_INITIALS = "U";
@@ -60,6 +60,10 @@ const INVALID_USER_STATUSES = Object.freeze([
 /* =========================================================
    BASICS
 ========================================================= */
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof window.location !== "undefined";
+}
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -117,6 +121,36 @@ function hasSensitiveQuery(value = "") {
   return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
     String(value || "")
   );
+}
+
+function isLocalDevHost(hostname = "") {
+  const host = String(hostname || "").toLowerCase();
+
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+function normalizeInternalAssetPath(value = "") {
+  const raw = stringText(value, "");
+
+  if (!raw) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (hasSensitiveQuery(raw)) return "";
+  if (/^(?:data|blob|javascript|vbscript|file):/i.test(raw)) return "";
+  if (/^\/\//.test(raw)) return "";
+
+  const [pathPart = "", hashPart = ""] = raw.split("#");
+  const [pathname = "", query = ""] = pathPart.split("?");
+
+  const cleanPath = String(pathname || "")
+    .trim()
+    .replace(/^\.?\//, "")
+    .replace(/\/{2,}/g, "/");
+
+  if (!cleanPath) return "";
+
+  const finalPath = `/${cleanPath}`;
+
+  return `${finalPath}${query ? `?${query}` : ""}${hashPart ? `#${hashPart}` : ""}`;
 }
 
 /* =========================================================
@@ -513,23 +547,63 @@ function safeAvatarUrl(value = "") {
 
   if (!avatar) return "";
   if (/[\r\n\t]/.test(avatar)) return "";
-  if (avatar.startsWith("//")) return "";
+  if (/^\/\//.test(avatar)) return "";
   if (hasSensitiveQuery(avatar)) return "";
+  if (/^(?:data|blob|javascript|vbscript|file):/i.test(avatar)) return "";
 
   /*
-    Permitimos assets internos y URLs HTTPS.
-    No permitimos data:, blob:, javascript:, http: ni file:.
+    Caso 1: path interno canónico.
   */
   if (avatar.startsWith("/")) {
     return avatar.replace(/\/{2,}/g, "/");
   }
 
-  if (/^https:\/\//i.test(avatar)) {
+  /*
+    Caso 2: URL absoluta.
+    - https externa: se permite
+    - same-origin/local dev: se convierte a path interno para que template.js la pinte
+    - http externa: se bloquea
+  */
+  if (/^https?:\/\//i.test(avatar)) {
     try {
-      return new URL(avatar).href;
+      const url = new URL(avatar);
+      const pathOnly = `${url.pathname || ""}${url.search || ""}${url.hash || ""}` || "/";
+      const sameOrigin = isBrowser() && url.origin === window.location.origin;
+      const localDev = isLocalDevHost(url.hostname);
+
+      if (url.protocol === "https:") {
+        if (sameOrigin || localDev) {
+          return pathOnly.replace(/\/{2,}/g, "/");
+        }
+
+        return url.href;
+      }
+
+      if (url.protocol === "http:") {
+        if (sameOrigin || localDev) {
+          return pathOnly.replace(/\/{2,}/g, "/");
+        }
+
+        return "";
+      }
+
+      return "";
     } catch {
       return "";
     }
+  }
+
+  /*
+    Caso 3: ruta relativa tipo:
+      uploads/avatar.jpg
+      media/img/users/a.png
+      ./uploads/avatar.webp
+  */
+  if (
+    avatar.includes("/") ||
+    /\.(?:png|jpe?g|gif|webp|svg|avif|bmp)(?:[?#].*)?$/i.test(avatar)
+  ) {
+    return normalizeInternalAssetPath(avatar);
   }
 
   return "";
@@ -563,14 +637,10 @@ export function getSidebarUserAvatarUrl(user = null) {
   const rawAvatarObject = isObject(raw.avatar) ? raw.avatar : {};
   const rawPhotoObject = isObject(raw.photo) ? raw.photo : {};
   const rawPictureObject = isObject(raw.picture) ? raw.picture : {};
+  const rawImageObject = isObject(raw.image) ? raw.image : {};
 
   /*
-    Contrato observado en JSON:
-      avatar: "https://..."
-      avatarUrl: "https://..."
-      hasAvatar: true
-
-    hasAvatar no se usa como fuente de URL.
+    hasAvatar es sólo una señal.
     La URL real debe venir en avatar/avatarUrl/photo/picture/image o variantes seguras.
   */
   return safeAvatarUrl(
@@ -673,7 +743,13 @@ export function getSidebarUserAvatarUrl(user = null) {
       raw.pictureURL,
       raw.picture_url,
       typeof raw.picture === "string" ? raw.picture : "",
-      avatarObjectValue(rawPictureObject)
+      avatarObjectValue(rawPictureObject),
+
+      raw.imageUrl,
+      raw.imageURL,
+      raw.image_url,
+      typeof raw.image === "string" ? raw.image : "",
+      avatarObjectValue(rawImageObject)
     )
   );
 }
@@ -787,6 +863,7 @@ export function getSidebarUserSnapshot(context = {}) {
           displayName: user.displayName,
           hasEmail: Boolean(user.email),
           hasAvatar: Boolean(user.avatarUrl),
+          avatarUrl: user.avatarUrl || null,
           initials: user.initials,
           role: user.role,
           roleLabel: user.roleLabel,
@@ -822,11 +899,14 @@ export function getSidebarUserSnapshot(context = {}) {
       },
 
       avatarInternalOrHttpsOnly: true,
+      avatarSameOriginAbsoluteSupported: true,
+      avatarLocalhostAbsoluteSupported: true,
+      avatarRelativePathSupported: true,
       avatarObjectUrlSupported: true,
       noSensitiveAvatarQuery: true,
       noBlobAvatar: true,
       noDataImageAvatar: true,
-      noHttpAvatar: true,
+      noExternalHttpAvatar: true,
 
       roles: [SIDEBAR_ROLE_ADMIN, SIDEBAR_ROLE_USER],
     },

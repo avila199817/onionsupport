@@ -10,8 +10,10 @@
    - Formatear números, dinero y fechas.
    - Resolver usuario/rol admin-user.
    - Home distinto para admin/user.
-   - User nunca expone users/clientes.
+   - User nunca expone users/clientes/servidor.
    - Rutas base desde core/config.js.
+   - Rutas admin reales desde core/config.js.
+   - Bloqueos legacy desde core/config.js.
    - Sin fetch.
    - Sin Auth.
    - Sin Router.
@@ -23,7 +25,13 @@
    - Sin raw/data/payload/response en salidas normalizadas.
 ========================================================= */
 
-import { ROUTES as CORE_ROUTES } from "../../core/config.js";
+import {
+  ROUTES as CORE_ROUTES,
+  isAdminRoute as configIsAdminRoute,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
+} from "../../core/config.js";
 
 import {
   normalizeHomeDashboard,
@@ -36,7 +44,7 @@ import {
   buildHomeActivityFromCollections,
 } from "./home.model.js";
 
-export const HOME_SELECTORS_VERSION = "home.selectors.v5";
+export const HOME_SELECTORS_VERSION = "home.selectors.v6";
 
 /* =========================================================
    CONSTANTS
@@ -55,10 +63,13 @@ const VALID_ROUTE_FALLBACKS = Object.freeze({
   incidencias: "/incidencias",
   facturas: "/facturas",
   clientes: "/clientes",
+  usuarios: "/usuarios",
+  servidor: "/servidor",
 });
 
 const VALID_OPTIONAL_ROUTES = Object.freeze([
   "usuarios",
+  "servidor",
   "cuenta",
   "ajustes",
   "search",
@@ -77,6 +88,8 @@ const ADMIN_ACTIVITY_TYPES = new Set([
   "user",
   "usuario",
   "member",
+  "server",
+  "servidor",
 ]);
 
 const RAW_KEYS = new Set([
@@ -90,12 +103,12 @@ const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
 
 const SENSITIVE_QUERY_RE =
-  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i;
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
 const ADMIN_ENTITY_RE =
-  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory|servidores?|servidor|servers?)([\s._/-]|$)/i;
 
 /* =========================================================
    SAFE HELPERS
@@ -259,7 +272,7 @@ export function isSameIdentity(a = "", b = "") {
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -311,17 +324,8 @@ function hasSensitiveQuery(value = "") {
   return SENSITIVE_QUERY_RE.test(String(value || ""));
 }
 
-function normalizeHashPath(value = "") {
+function routeInput(value = "") {
   const raw = safeText(value, "");
-
-  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
-  if (raw.startsWith("#/")) return raw.slice(1) || "/";
-
-  return raw;
-}
-
-export function normalizeRoute(route = "") {
-  let raw = normalizeHashPath(route);
 
   if (!raw) return "";
   if (raw.startsWith("//")) return "";
@@ -329,32 +333,95 @@ export function normalizeRoute(route = "") {
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (hasSensitiveQuery(raw)) return "";
 
-  const lower = raw.toLowerCase();
-
-  if (
-    lower.startsWith("javascript:") ||
-    lower.startsWith("data:") ||
-    lower.startsWith("vbscript:") ||
-    lower.startsWith("mailto:") ||
-    lower.startsWith("tel:") ||
-    lower.startsWith("file:") ||
-    lower.startsWith("blob:") ||
-    /^https?:\/\//i.test(raw)
-  ) {
-    return "";
+  try {
+    return configRoutePathFromUrlLike(raw) || "";
+  } catch {
+    if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
+    if (raw.startsWith("#/")) return raw.slice(1) || "/";
+    return raw;
   }
+}
 
-  if (!raw.startsWith("/")) {
-    raw = `/${raw}`;
+function routeSuffix(value = "") {
+  const raw = safeText(value, "");
+
+  const hashIndex = raw.indexOf("#");
+  const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
+
+  const queryIndex = beforeHash.indexOf("?");
+  const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
+
+  if (hasSensitiveQuery(search) || hasSensitiveQuery(hash)) return "";
+
+  return `${search}${hash}`;
+}
+
+function routePathOnly(value = "") {
+  const input = routeInput(value);
+
+  if (!input) return "";
+  if (!input.startsWith("/")) return "";
+  if (input.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(input)) return "";
+  if (/[\r\n\t\\]/.test(input)) return "";
+  if (hasSensitiveQuery(input)) return "";
+
+  const pathOnly = input.split("?")[0].split("#")[0] || "";
+
+  try {
+    return configNormalizeRoutePath(pathOnly) || "";
+  } catch {
+    let path = pathOnly.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+
+    if (!path.startsWith("/")) {
+      path = `/${path}`;
+    }
+
+    if (path.length > 1) {
+      path = path.replace(/\/+$/g, "") || "/";
+    }
+
+    return path || "";
   }
+}
 
-  raw = raw.replace(/\/{2,}/g, "/");
+function isBlockedRoute(value = "") {
+  try {
+    return configIsBlockedRoutePath(value) === true;
+  } catch {
+    const path = routePathOnly(value).toLowerCase();
 
-  const canonical = raw.split("?")[0].split("#")[0];
+    return Boolean(
+      path === "/home" ||
+        path === "/403" ||
+        path === "/404" ||
+        path === "/2fa" ||
+        path === "/mfa" ||
+        path === "/otp" ||
+        path.startsWith("/2fa/") ||
+        path.startsWith("/mfa/") ||
+        path.startsWith("/otp/")
+    );
+  }
+}
 
-  if (canonical === "/home") return "";
+export function normalizeRoute(route = "") {
+  const input = routeInput(route);
 
-  return raw;
+  if (!input) return "";
+  if (!input.startsWith("/")) return "";
+  if (input.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(input)) return "";
+  if (/[\r\n\t\\]/.test(input)) return "";
+  if (hasSensitiveQuery(input)) return "";
+
+  const pathOnly = routePathOnly(input);
+
+  if (!pathOnly) return "";
+  if (isBlockedRoute(pathOnly)) return "";
+
+  return `${pathOnly}${routeSuffix(input)}`;
 }
 
 function routeFromCore(name = "", fallback = "") {
@@ -369,8 +436,9 @@ export const HOME_ROUTES = Object.freeze({
   INCIDENCIAS: routeFromCore("incidencias", VALID_ROUTE_FALLBACKS.incidencias),
   FACTURAS: routeFromCore("facturas", VALID_ROUTE_FALLBACKS.facturas),
   CLIENTES: routeFromCore("clientes", VALID_ROUTE_FALLBACKS.clientes),
+  USUARIOS: routeFromCore("usuarios", VALID_ROUTE_FALLBACKS.usuarios),
+  SERVIDOR: routeFromCore("servidor", VALID_ROUTE_FALLBACKS.servidor),
 
-  USUARIOS: routeFromCore("usuarios", ""),
   CUENTA: routeFromCore("cuenta", ""),
   AJUSTES: routeFromCore("ajustes", ""),
   SEARCH: routeFromCore("search", ""),
@@ -384,12 +452,20 @@ function isAdminOnlyRoute(route = "") {
   const path = getRoutePath(route);
   const clientes = getRoutePath(HOME_ROUTES.CLIENTES);
   const usuarios = getRoutePath(HOME_ROUTES.USUARIOS);
+  const servidor = getRoutePath(HOME_ROUTES.SERVIDOR);
 
   if (!path) return false;
 
+  try {
+    if (configIsAdminRoute(path) === true) return true;
+  } catch {
+    // fallback abajo
+  }
+
   return (
     Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
-    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
+    Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
   );
 }
 
@@ -470,6 +546,13 @@ function sanitizeSummaryForRole(summary = {}, admin = false) {
     output.visibleClientsCount = 0;
     output.visibleClientesCount = 0;
     output.visibleCustomersCount = 0;
+
+    output.serversCount = 0;
+    output.serverCount = 0;
+    output.servidoresCount = 0;
+    output.servidorCount = 0;
+    output.totalServers = 0;
+    output.totalServidores = 0;
   }
 
   return output;
@@ -707,12 +790,12 @@ export function normalizeRole(value = "") {
     return "";
   }
 
-  const role = String(value || "").toLowerCase();
+  const role = String(value || "").trim().toLowerCase();
 
   if (role === "admin") return "admin";
   if (role === "user") return "user";
 
-  return "user";
+  return "";
 }
 
 export function isAdminRole(role = "") {
@@ -1802,6 +1885,13 @@ export function getQuickActions(input = {}) {
         route: HOME_ROUTES.USUARIOS,
         modifier: "users",
       }),
+      quickAction({
+        iconName: "shield",
+        title: "Servidor",
+        text: "Revisar estado y datos técnicos del servidor.",
+        route: HOME_ROUTES.SERVIDOR,
+        modifier: "server",
+      }),
     ].filter(Boolean);
   }
 
@@ -1886,6 +1976,7 @@ export function getActivityType(item = {}) {
   if (["ticket", "incidencia", "support", "issue"].includes(key)) return "ticket";
   if (["cliente", "client", "customer"].includes(key)) return "client";
   if (["usuario", "user", "member"].includes(key)) return "user";
+  if (["server", "servidor", "servidores"].includes(key)) return "server";
 
   return key || "activity";
 }

@@ -8,6 +8,8 @@
    - Aplicar visibilidad básica por rol admin/user.
    - Usar metadatos estáticos de rutas para ocultar rutas admin.
    - Clientes se oculta para user porque /clientes es ruta admin.
+   - Usuarios se oculta para user porque /usuarios es ruta admin.
+   - Servidor se oculta para user porque /servidor es ruta admin.
    - Rutas públicas ocultan sidebar.
    - Rutas legacy/sensibles ocultan sidebar.
    - Sesión válida obligatoria.
@@ -51,9 +53,10 @@ import {
 import {
   getImmutableRoutes,
   resolveRouteLookupPath,
+  isAdminRoutePath,
 } from "../../router/routes.js";
 
-export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v6";
+export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v7";
 
 /* =========================================================
    BASICS
@@ -225,6 +228,18 @@ function getStaticRouteByPath(path = "") {
   }
 }
 
+function staticRouteIsAdminPath(path = "") {
+  const lookupPath = routeLookupPath(path || "/");
+
+  if (!lookupPath || pathIsBlocked(lookupPath)) return false;
+
+  try {
+    return isFunction(isAdminRoutePath) && isAdminRoutePath(lookupPath) === true;
+  } catch {
+    return false;
+  }
+}
+
 function staticRouteRoles(route = null) {
   if (!isObject(route)) return [];
 
@@ -237,11 +252,25 @@ function staticRouteRoles(route = null) {
 }
 
 function staticRouteRequiredRoles(path = "") {
-  return staticRouteRoles(getStaticRouteByPath(path));
+  const lookupPath = routeLookupPath(path || "");
+  const route = getStaticRouteByPath(lookupPath);
+
+  return unique([
+    ...staticRouteRoles(route),
+    ...(staticRouteIsAdminPath(lookupPath) || isSidebarAdminFallbackRoute(lookupPath)
+      ? [SIDEBAR_ROLE_ADMIN]
+      : []),
+  ].filter(validSidebarRole));
 }
 
 function staticRouteIsAdminOnly(path = "") {
-  const route = getStaticRouteByPath(path);
+  const lookupPath = routeLookupPath(path || "");
+
+  if (!lookupPath) return false;
+  if (isSidebarAdminFallbackRoute(lookupPath)) return true;
+  if (staticRouteIsAdminPath(lookupPath)) return true;
+
+  const route = getStaticRouteByPath(lookupPath);
 
   if (!route) return false;
 
@@ -646,6 +675,7 @@ function elementSnapshot(element = null) {
     requiredRoles: elementRequiredRoles(element),
     staticRouteRoles: staticRouteRequiredRoles(path),
     staticRouteAdminOnly: staticRouteIsAdminOnly(path),
+    staticRouteAdminPath: staticRouteIsAdminPath(path),
     roleVisible: element.dataset?.roleVisible || "",
     hidden: Boolean(element.hidden),
     ariaHidden: element.getAttribute("aria-hidden") || "",
@@ -692,6 +722,8 @@ export function getSidebarVisibilitySnapshot(context = {}) {
       staticRoutesAsRoleSource: true,
       hidesAdminRoutesForUser: true,
       clientesAdminOnlyFromRoutes: true,
+      usuariosAdminOnlyFromRoutes: true,
+      servidorAdminOnlyFromRoutes: true,
 
       blocksHomeAlias: true,
       blocks403Route: true,

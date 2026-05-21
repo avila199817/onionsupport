@@ -15,7 +15,9 @@
    - Home visible: /@{user.slug}.
    - Home interna/canónica: /.
    - Rutas privadas visibles: /@{user.slug}/{ruta}.
-   - Clientes sólo visible para admin.
+   - Clientes / Usuarios / Servidor pasan como adminOnly desde rutas.
+   - visibility.js oculta items admin para rol user.
+   - Router/guards bloquean acceso directo a rutas admin.
    - Rebuild limpio del DOM desde template.js en cada sync válido.
    - Sin HTML duplicado.
    - Sin helpers DOM duplicados.
@@ -43,6 +45,7 @@ import {
   SIDEBAR_MODULE_KEY,
   SIDEBAR_MODULE_NAME,
   SIDEBAR_ROLE_ADMIN,
+  SIDEBAR_ROLE_USER,
   SIDEBAR_ROOT_ID,
   USER_HOME_PREFIX,
   getSidebarRouteIcon,
@@ -104,7 +107,7 @@ import {
   unbindSidebarDropdown,
 } from "./dropdown.js";
 
-export const SIDEBAR_UI_VERSION = "sidebar.ui.v8";
+export const SIDEBAR_UI_VERSION = "sidebar.ui.v9";
 
 const BLOCKED_SIDEBAR_PATHS = new Set([
   "/home",
@@ -136,6 +139,10 @@ function firstText(...values) {
   }
 
   return "";
+}
+
+function unique(values = []) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function redact(value = "") {
@@ -206,12 +213,20 @@ function isUnsafePath(path = "") {
 function safeSidebarPath(path = HOME_ROUTE, fallback = HOME_ROUTE) {
   let raw = normalizeHashPath(path || fallback);
 
+  if (!raw && fallback === "") {
+    return "";
+  }
+
   if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) {
     raw = fallback;
   }
 
   if (isUnsafePath(raw)) {
     raw = fallback;
+  }
+
+  if (!raw && fallback === "") {
+    return "";
   }
 
   if (!raw.startsWith("/")) {
@@ -221,6 +236,8 @@ function safeSidebarPath(path = HOME_ROUTE, fallback = HOME_ROUTE) {
   const normalized = normalizeSidebarPath(raw || fallback);
 
   if (isBlockedSidebarPath(normalized)) {
+    if (fallback === "") return "";
+
     const safeFallback = normalizeSidebarPath(fallback || HOME_ROUTE);
 
     return isBlockedSidebarPath(safeFallback)
@@ -400,29 +417,45 @@ function getContext() {
    MENU ITEMS
 ========================================================= */
 
+function normalizeSidebarRole(value = "") {
+  const role = String(value || "").trim().toLowerCase();
+
+  if (role === SIDEBAR_ROLE_ADMIN) return SIDEBAR_ROLE_ADMIN;
+  if (role === SIDEBAR_ROLE_USER) return SIDEBAR_ROLE_USER;
+
+  return "";
+}
+
 function routeRoles(route = null) {
-  return [
-    route?.role,
-    route?.roles,
-    route?.meta?.role,
-    route?.meta?.roles,
-  ]
-    .flat(Infinity)
-    .filter(Boolean)
-    .map((role) => String(role).toLowerCase());
+  return unique(
+    [
+      route?.role,
+      route?.roles,
+      route?.meta?.role,
+      route?.meta?.roles,
+    ]
+      .flat(Infinity)
+      .map(normalizeSidebarRole)
+      .filter(Boolean)
+  );
 }
 
 function isAdminRoute(route = null) {
   const roles = routeRoles(route);
 
   return Boolean(
-    route?.admin === true ||
+    route?.routeGroup === "admin" ||
+      route?.meta?.routeGroup === "admin" ||
+      route?.admin === true ||
       route?.adminOnly === true ||
       route?.requiresAdmin === true ||
       route?.meta?.admin === true ||
       route?.meta?.adminOnly === true ||
       route?.meta?.requiresAdmin === true ||
-      roles.includes(SIDEBAR_ROLE_ADMIN)
+      (
+        roles.includes(SIDEBAR_ROLE_ADMIN) &&
+        !roles.includes(SIDEBAR_ROLE_USER)
+      )
   );
 }
 
@@ -472,10 +505,6 @@ function toSidebarItem(route = null, index = 0, context = getContext()) {
   }
 
   const adminOnly = isAdminRoute(route);
-
-  if (adminOnly && context.user?.isAdmin !== true) {
-    return null;
-  }
 
   const explicitOrder =
     route.sidebarOrder ??
@@ -879,6 +908,8 @@ function getSnapshot() {
           hasAvatar: Boolean(
             context.user.avatarUrl ||
               context.user.avatar ||
+              context.user.photoUrl ||
+              context.user.photoURL ||
               context.user.picture ||
               context.user.initials
           ),
@@ -891,6 +922,8 @@ function getSnapshot() {
       icon: item.icon,
       active: item.active,
       adminOnly: item.adminOnly === true,
+      visibleForCurrentRole:
+        item.adminOnly !== true || context.user?.isAdmin === true,
     })),
 
     policy: {
@@ -903,13 +936,20 @@ function getSnapshot() {
 
       usesUserViewModel: true,
       avatarOwnedByUserAndTemplateModules: true,
+      passesUserAvatarViewModelToTemplate: true,
+
       usesVisibility: true,
+      adminItemVisibilityDelegatedToVisibility: true,
+      passesAdminMetadataToTemplate: true,
+
       usesRuntimeState: true,
       usesActions: true,
       usesDelegatedEvents: true,
       usesDropdown: true,
 
       clientesAdminOnly: true,
+      usuariosAdminOnly: true,
+      servidorAdminOnly: true,
 
       userSlugHome: true,
       userScopedPrivateRoutes: true,

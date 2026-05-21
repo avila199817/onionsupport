@@ -10,6 +10,7 @@
    - canonicalPath limpio.
    - /@{user.slug} conserva URL pública pero canonicaliza a /.
    - /@{user.slug}/{ruta} conserva URL pública pero canonicaliza a /{ruta}.
+   - Delegar normalización de rutas/user-scope/bloqueos en core/config.js.
    - No escribir /home, /403, /404, /2fa, /mfa, /otp en history.
    - Scrub explícito del TOKEN_PARAM en rutas públicas protegidas.
    - No guardar access_token/refresh_token/id_token/secret/session en URL normalizada.
@@ -27,26 +28,38 @@
 ========================================================= */
 
 import {
+  BLOCKED_FRONTEND_ROUTES,
   PROTECTED_PUBLIC_TOKEN_ROUTES,
   TOKEN_PARAM,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
+  canonicalRoutePath as configCanonicalRoutePath,
+  getUserScopedRouteInfo as getConfigUserScopedRouteInfo,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  isUserHomeRoute as configIsUserHomeRoute,
+  isUserScopedRoute as configIsUserScopedRoute,
+  normalizeRoutePath as configNormalizeRoutePath,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_HISTORY_VERSION = "router.history.v6";
+export const ROUTER_HISTORY_VERSION = "router.history.v7";
 
 const HISTORY_STATE_VERSION = 1;
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 const TOKEN_PARAM_NAME = TOKEN_PARAM || "token";
 
-const BLOCKED_ROUTE_PATHS = new Set([
-  "/home",
-  "/403",
-  "/404",
-  "/2fa",
-  "/mfa",
-  "/otp",
-]);
+const BLOCKED_ROUTE_PATHS = new Set(
+  Array.isArray(BLOCKED_FRONTEND_ROUTES) && BLOCKED_FRONTEND_ROUTES.length
+    ? BLOCKED_FRONTEND_ROUTES
+    : [
+        "/home",
+        "/403",
+        "/404",
+        "/2fa",
+        "/mfa",
+        "/otp",
+      ]
+);
 
 const SENSITIVE_QUERY_KEYS = new Set([
   "token",
@@ -56,6 +69,11 @@ const SENSITIVE_QUERY_KEYS = new Set([
   "secret",
   "session",
   "code",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
 ]);
 
 const TOKEN_ROUTES = new Set(
@@ -117,7 +135,7 @@ function nextHistoryId() {
 function redact(value = "") {
   return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -127,103 +145,41 @@ function redact(value = "") {
    PATHS
 ========================================================= */
 
-function normalizeTokenRoutePath(value = "") {
-  let clean = cleanText(value, DEFAULT_ROUTE)
-    .split("#")[0]
-    .split("?")[0]
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  if (!clean.startsWith("/")) {
-    clean = `/${clean}`;
-  }
-
-  if (clean.length > 1) {
-    clean = clean.replace(/\/+$/g, "") || DEFAULT_ROUTE;
-  }
-
-  if (isBlockedPathname(clean)) return "";
-
-  return clean || DEFAULT_ROUTE;
-}
-
-function isHashRouterPath(value = "") {
-  const raw = cleanText(value, "");
-  return raw.startsWith("#/") || raw.startsWith("#!");
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw = cleanText(value, DEFAULT_ROUTE);
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
-  }
-
-  if (raw.startsWith("#/")) {
-    return raw.slice(1) || DEFAULT_ROUTE;
-  }
-
-  return raw || DEFAULT_ROUTE;
-}
-
-function sameOriginUrlToPath(raw = "") {
+function pathFromInput(path = DEFAULT_ROUTE) {
   try {
-    const base = isBrowser() ? window.location.origin : "http://localhost";
-    const url = new URL(raw, base);
-
-    if (url.origin !== base) {
-      return DEFAULT_ROUTE;
-    }
-
-    if (url.hash && isHashRouterPath(url.hash)) {
-      return normalizeHashRouterPath(url.hash);
-    }
-
-    return `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
+    return configRoutePathFromUrlLike(path) || DEFAULT_ROUTE;
   } catch {
     return DEFAULT_ROUTE;
   }
 }
 
-function pathFromInput(path = DEFAULT_ROUTE) {
-  const raw = cleanText(path, DEFAULT_ROUTE);
-
-  if (isHashRouterPath(raw)) {
-    return normalizeHashRouterPath(raw);
-  }
-
-  if (!raw || raw.startsWith("//")) {
-    return DEFAULT_ROUTE;
-  }
-
-  if (/^https?:\/\//i.test(raw)) {
-    return sameOriginUrlToPath(raw);
-  }
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    return DEFAULT_ROUTE;
-  }
-
-  return raw;
-}
-
 function normalizePathname(pathname = DEFAULT_ROUTE) {
-  let value = cleanText(pathname, DEFAULT_ROUTE).replace(/\\/g, "/");
+  try {
+    return configNormalizeRoutePath(pathname) || DEFAULT_ROUTE;
+  } catch {
+    let value = cleanText(pathname, DEFAULT_ROUTE).replace(/\\/g, "/");
 
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    value = value.replace(/\/{2,}/g, "/");
+
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+    }
+
+    return value || DEFAULT_ROUTE;
   }
-
-  value = value.replace(/\/{2,}/g, "/");
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
-  }
-
-  return value || DEFAULT_ROUTE;
 }
 
 function isBlockedPathname(pathname = DEFAULT_ROUTE) {
+  try {
+    if (configIsBlockedRoutePath(pathname) === true) return true;
+  } catch {
+    // fallback local
+  }
+
   const value = normalizePathname(pathname).toLowerCase();
 
   if (BLOCKED_ROUTE_PATHS.has(value)) return true;
@@ -233,6 +189,18 @@ function isBlockedPathname(pathname = DEFAULT_ROUTE) {
     value.startsWith("/mfa/") ||
     value.startsWith("/otp/")
   );
+}
+
+function normalizeTokenRoutePath(value = "") {
+  const clean = normalizePathname(
+    cleanText(value, DEFAULT_ROUTE)
+      .split("#")[0]
+      .split("?")[0]
+  );
+
+  if (isBlockedPathname(clean)) return "";
+
+  return clean || DEFAULT_ROUTE;
 }
 
 function normalizeSearch(search = "") {
@@ -346,59 +314,34 @@ export function normalizePublicPath(path = DEFAULT_ROUTE) {
   });
 }
 
-function normalizeUserSlug(value = "") {
-  const slug = cleanText(value, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
-
-  if (!slug) return "";
-
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
-}
-
 export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
+  try {
+    const info = getConfigUserScopedRouteInfo(path);
+
+    if (isObject(info)) {
+      const restPath = info.restPath || info.canonicalPath || splitPath(path).pathname;
+      const lookupPath = info.canonicalPath || info.lookupPath || restPath;
+
+      return {
+        scoped: Boolean(info.scoped),
+        home: Boolean(info.home),
+        slug: cleanText(info.slug, ""),
+        restPath,
+        lookupPath,
+      };
+    }
+  } catch {
+    // fallback abajo
+  }
+
   const pathname = splitPath(path).pathname;
 
-  if (!pathname.startsWith(USER_HOME_PREFIX)) {
-    return {
-      scoped: false,
-      home: false,
-      slug: "",
-      restPath: pathname,
-      lookupPath: pathname,
-    };
-  }
-
-  const rest = pathname.slice(USER_HOME_PREFIX.length);
-  const [slugSegment = "", ...restSegments] = rest.split("/");
-  const slug = normalizeUserSlug(slugSegment);
-
-  if (!slug) {
-    return {
-      scoped: false,
-      home: false,
-      slug: "",
-      restPath: pathname,
-      lookupPath: pathname,
-    };
-  }
-
-  const restPath = restSegments.length
-    ? normalizePathname(`/${restSegments.join("/")}`)
-    : DEFAULT_ROUTE;
-
   return {
-    scoped: true,
-    home: restPath === DEFAULT_ROUTE,
-    slug,
-    restPath,
-    lookupPath: restPath,
+    scoped: false,
+    home: false,
+    slug: "",
+    restPath: pathname,
+    lookupPath: pathname,
   };
 }
 
@@ -407,34 +350,43 @@ export function extractSlugFromPath(path = DEFAULT_ROUTE) {
 }
 
 export function isUserHomePath(path = DEFAULT_ROUTE) {
-  return Boolean(getUserScopedRouteInfo(path).home);
+  try {
+    return configIsUserHomeRoute(path) === true;
+  } catch {
+    return Boolean(getUserScopedRouteInfo(path).home);
+  }
 }
 
 export function isUserScopedPath(path = DEFAULT_ROUTE) {
-  return Boolean(getUserScopedRouteInfo(path).scoped);
+  try {
+    return configIsUserScopedRoute(path) === true;
+  } catch {
+    return Boolean(getUserScopedRouteInfo(path).scoped);
+  }
 }
 
 export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
-  const pathname = splitPath(path).pathname || DEFAULT_ROUTE;
-  const scoped = getUserScopedRouteInfo(pathname);
-  const canonical = scoped.scoped ? scoped.lookupPath : pathname;
+  if (isBlockedPathname(splitPath(path).pathname)) {
+    return DEFAULT_ROUTE;
+  }
 
-  return isBlockedPathname(canonical) ? DEFAULT_ROUTE : canonical;
+  try {
+    return configCanonicalRoutePath(path) || DEFAULT_ROUTE;
+  } catch {
+    const pathname = splitPath(path).pathname || DEFAULT_ROUTE;
+    const scoped = getUserScopedRouteInfo(pathname);
+    const canonical = scoped.scoped ? scoped.lookupPath : pathname;
+
+    return isBlockedPathname(canonical) ? DEFAULT_ROUTE : canonical;
+  }
 }
 
 function browserPath() {
   if (!isBrowser()) return DEFAULT_ROUTE;
 
   try {
-    const hash = window.location.hash || "";
-
-    if (isHashRouterPath(hash)) {
-      return normalizePublicPath(hash);
-    }
-
-    return normalizePublicPath(
-      `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${hash}`
-    );
+    const { pathname = DEFAULT_ROUTE, search = "", hash = "" } = window.location;
+    return normalizePublicPath(`${pathname || DEFAULT_ROUTE}${search || ""}${hash || ""}`);
   } catch {
     return DEFAULT_ROUTE;
   }
@@ -458,12 +410,7 @@ function cleanRouteParams(params = {}) {
 
     if (
       lowerKey === TOKEN_PARAM_NAME.toLowerCase() ||
-      lowerKey === "access_token" ||
-      lowerKey === "refresh_token" ||
-      lowerKey === "id_token" ||
-      lowerKey === "code" ||
-      lowerKey === "secret" ||
-      lowerKey === "session"
+      SENSITIVE_QUERY_KEYS.has(lowerKey)
     ) {
       output[cleanKey] = "***";
       continue;
@@ -874,6 +821,9 @@ export function getHistorySnapshot(AppCore = null) {
 
     policy: {
       historyOnly: true,
+      configOwnsPathNormalization: true,
+      configOwnsUserScopeParsing: true,
+      configOwnsBlockedRoutes: true,
 
       ownAuth: false,
       ownGuards: false,

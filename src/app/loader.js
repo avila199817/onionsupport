@@ -4,7 +4,8 @@
 
    Responsabilidad:
    - Controlar #app-loader.
-   - Marcar estado básico en html/body.
+   - No controlar estado global de html/body.
+   - No controlar shell.
    - Sin imports.
    - Sin AppCore.
    - Sin eventos.
@@ -14,7 +15,7 @@
    - Sin magia negra.
 ========================================================= */
 
-export const LOADER_VERSION = "app.loader.v3";
+export const LOADER_VERSION = "app.loader.v4";
 
 const LOADER_ID = "app-loader";
 
@@ -26,11 +27,6 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function roots() {
-  if (!isBrowser()) return [];
-  return [document.documentElement, document.body].filter(Boolean);
-}
-
 function normalizeState(state = "booting") {
   const value = String(state || "").trim().toLowerCase();
 
@@ -38,34 +34,9 @@ function normalizeState(state = "booting") {
   if (value === "booting") return "booting";
   if (value === "ready") return "ready";
   if (value === "fatal") return "fatal";
+  if (value === "hidden") return "hidden";
 
   return "booting";
-}
-
-/* =========================================================
-   ROOT STATE
-========================================================= */
-
-function setRootState(state = "booting") {
-  const value = normalizeState(state);
-
-  const booting = value === "booting";
-  const ready = value === "ready";
-  const fatal = value === "fatal";
-
-  for (const root of roots()) {
-    root.dataset.appState = value;
-    root.dataset.appLoading = String(booting);
-    root.dataset.appBooting = String(booting);
-    root.dataset.appReady = String(ready);
-
-    root.classList.toggle("app-loading", booting);
-    root.classList.toggle("app-booting", booting);
-    root.classList.toggle("app-ready", ready);
-    root.classList.toggle("app-fatal", fatal);
-  }
-
-  return true;
 }
 
 /* =========================================================
@@ -99,18 +70,22 @@ function setLoaderVisibility(visible = false, state = "booting") {
   const show = Boolean(visible);
   const status = show ? normalizeState(state) : "hidden";
 
-  loader.hidden = !show;
+  try {
+    loader.hidden = !show;
 
-  loader.classList.toggle("is-visible", show);
-  loader.classList.toggle("is-hidden", !show);
+    loader.classList.toggle("is-visible", show);
+    loader.classList.toggle("is-hidden", !show);
 
-  loader.dataset.loaderVisible = String(show);
-  loader.dataset.loaderState = status;
+    loader.dataset.loaderVisible = String(show);
+    loader.dataset.loaderState = status;
 
-  loader.setAttribute("aria-hidden", show ? "false" : "true");
-  loader.setAttribute("aria-busy", show ? "true" : "false");
+    loader.setAttribute("aria-hidden", show ? "false" : "true");
+    loader.setAttribute("aria-busy", show ? "true" : "false");
 
-  return true;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -118,16 +93,10 @@ function setLoaderVisibility(visible = false, state = "booting") {
 ========================================================= */
 
 export function showLoader(state = "booting") {
-  const status = normalizeState(state);
-
-  setRootState(status);
-
-  return setLoaderVisibility(true, status);
+  return setLoaderVisibility(true, normalizeState(state));
 }
 
 export function hideLoader() {
-  setRootState("ready");
-
   return setLoaderVisibility(false, "hidden");
 }
 
@@ -144,9 +113,25 @@ export function getLoaderSnapshot() {
 
   return {
     version: LOADER_VERSION,
+
     exists: Boolean(loader),
     visible: isLoaderVisible(),
     state: loader?.dataset?.loaderState || "missing",
+
+    policy: {
+      loaderOnly: true,
+      controlsOnlyAppLoader: true,
+
+      noRootStateMutation: true,
+      rootStateOwner: "main.js/app.shell.js",
+
+      noImports: true,
+      noAppCore: true,
+      noEvents: true,
+      noTimers: true,
+      noFallbackDom: true,
+      noTextMutation: true,
+    },
   };
 }
 

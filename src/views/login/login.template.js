@@ -7,7 +7,8 @@
    - Consumir el password-field compartido desde su fachada pública.
    - Textos base en castellano.
    - Rutas base desde core/config.js.
-   - Usar logo corporativo canónico.
+   - Delegar normalización/bloqueo de rutas en core/config.js.
+   - Usar logo corporativo canónico favicon_black.png / favicon_white.png.
    - Sin Auth.
    - Sin HTTP.
    - Sin Router.
@@ -24,19 +25,23 @@
 
 import {
   ROUTES,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
 
-export const TEMPLATE_VERSION = "login.template.v4";
+export const TEMPLATE_VERSION = "login.template.v5";
 
 const DEFAULT_APP_NAME = "Onion Support";
 
-/*
-  Logo corporativo canónico.
-  El blanco se reserva para fondos oscuros si la capa visual lo necesita.
-*/
-const DEFAULT_LOGO = "/src/media/img/favicon_black_circle.png";
+const BRAND_LOGOS = Object.freeze({
+  black: new URL("../../media/img/favicon_black.png", import.meta.url).href,
+  white: new URL("../../media/img/favicon_white.png", import.meta.url).href,
+});
+
+const DEFAULT_LOGO = BRAND_LOGOS.black;
 
 const DEFAULT_PASSWORD_REQUEST_HREF =
   ROUTES.passwordRequest || "/password-request";
@@ -44,18 +49,13 @@ const DEFAULT_PASSWORD_REQUEST_HREF =
 const MAX_IDENTIFIER_LENGTH = 160;
 const MAX_PASSWORD_LENGTH = 1024;
 
-const BLOCKED_HREFS = new Set([
-  "/home",
-  "/403",
-  "/404",
-  "/2fa",
-  "/mfa",
-  "/otp",
-]);
-
 /* =========================================================
    HELPERS
 ========================================================= */
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
 function text(value = "", fallback = "") {
   const output = String(value ?? "")
@@ -85,42 +85,111 @@ function hasSensitiveQuery(value = "") {
   );
 }
 
-function normalizePath(value = "/", fallback = "/") {
-  let path = text(value, fallback)
-    .split("#")[0]
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
+function pathFromInput(value = "/") {
+  try {
+    return configRoutePathFromUrlLike(value) || "/";
+  } catch {
+    const raw = text(value, "/");
 
-  if (!path.startsWith("/")) {
-    path = `/${path}`;
+    if (raw.startsWith("#!")) {
+      return raw.replace(/^#!\/?/, "/") || "/";
+    }
+
+    if (raw.startsWith("#/")) {
+      return raw.slice(1) || "/";
+    }
+
+    if (raw.startsWith("//")) return "/";
+
+    if (/^https?:\/\//i.test(raw) && isBrowser()) {
+      try {
+        const url = new URL(raw, window.location.origin);
+
+        if (url.origin !== window.location.origin) return "/";
+
+        return `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
+      } catch {
+        return "/";
+      }
+    }
+
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "/";
+
+    return raw || "/";
   }
-
-  const cleanPath = path.split("?")[0];
-
-  if (cleanPath.length > 1) {
-    const normalized = cleanPath.replace(/\/+$/g, "") || fallback;
-    const query = path.includes("?") ? `?${path.split("?").slice(1).join("?")}` : "";
-    return `${normalized}${query}`;
-  }
-
-  return path || fallback;
 }
 
-function isBlockedHref(value = "") {
-  const path = normalizePath(value, "/").split("?")[0].toLowerCase();
+function normalizePath(value = "/", fallback = "/") {
+  const fallbackPath = text(fallback, "");
+  let raw = text(value, fallbackPath);
 
-  if (BLOCKED_HREFS.has(path)) return true;
+  if (!raw) return fallbackPath;
+  if (raw.startsWith("//")) return fallbackPath;
+  if (/[\r\n\t\\]/.test(raw)) return fallbackPath;
+  if (hasSensitiveQuery(raw)) return fallbackPath;
 
-  return (
-    path.startsWith("/2fa/") ||
-    path.startsWith("/mfa/") ||
-    path.startsWith("/otp/")
-  );
+  raw = pathFromInput(raw);
+
+  if (!raw) return fallbackPath;
+  if (!raw.startsWith("/")) raw = `/${raw}`;
+  if (raw.startsWith("//")) return fallbackPath;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallbackPath;
+  if (/[\r\n\t\\]/.test(raw)) return fallbackPath;
+  if (hasSensitiveQuery(raw)) return fallbackPath;
+
+  const hashIndex = raw.indexOf("#");
+  const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+
+  const queryIndex = beforeHash.indexOf("?");
+  const pathnameRaw = queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash;
+  const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
+
+  let pathname = "";
+
+  try {
+    pathname = configNormalizeRoutePath(pathnameRaw) || fallbackPath;
+  } catch {
+    pathname = pathnameRaw
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+    if (!pathname.startsWith("/")) {
+      pathname = `/${pathname}`;
+    }
+
+    if (pathname.length > 1) {
+      pathname = pathname.replace(/\/+$/g, "") || fallbackPath;
+    }
+  }
+
+  if (!pathname) return fallbackPath;
+
+  try {
+    if (configIsBlockedRoutePath(pathname)) return fallbackPath;
+  } catch {
+    const clean = pathname.toLowerCase();
+
+    if (
+      clean === "/home" ||
+      clean === "/403" ||
+      clean === "/404" ||
+      clean === "/2fa" ||
+      clean === "/mfa" ||
+      clean === "/otp" ||
+      clean.startsWith("/2fa/") ||
+      clean.startsWith("/mfa/") ||
+      clean.startsWith("/otp/")
+    ) {
+      return fallbackPath;
+    }
+  }
+
+  return `${pathname}${search}`;
 }
 
 function safeInternalHref(value = "", fallback = DEFAULT_PASSWORD_REQUEST_HREF) {
-  const raw = text(value, "");
   const fallbackHref = normalizePath(fallback, DEFAULT_PASSWORD_REQUEST_HREF);
+  const raw = text(value, "");
 
   if (!raw) return fallbackHref;
   if (!raw.startsWith("/")) return fallbackHref;
@@ -128,7 +197,6 @@ function safeInternalHref(value = "", fallback = DEFAULT_PASSWORD_REQUEST_HREF) 
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallbackHref;
   if (/[\r\n\t\\]/.test(raw)) return fallbackHref;
   if (hasSensitiveQuery(raw)) return fallbackHref;
-  if (isBlockedHref(raw)) return fallbackHref;
 
   return normalizePath(raw, fallbackHref) || fallbackHref;
 }
@@ -138,13 +206,30 @@ function safeAssetSrc(value = "", fallback = DEFAULT_LOGO) {
   const fallbackSrc = text(fallback, DEFAULT_LOGO);
 
   if (!raw) return fallbackSrc;
-  if (!raw.startsWith("/")) return fallbackSrc;
   if (raw.startsWith("//")) return fallbackSrc;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallbackSrc;
   if (/[\r\n\t\\]/.test(raw)) return fallbackSrc;
   if (hasSensitiveQuery(raw)) return fallbackSrc;
+  if (/^(?:data|blob|javascript|vbscript|file):/i.test(raw)) return fallbackSrc;
 
-  return raw.replace(/\/{2,}/g, "/") || fallbackSrc;
+  if (raw.startsWith("/")) {
+    return raw.replace(/\/{2,}/g, "/") || fallbackSrc;
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw);
+
+      if (isBrowser() && url.origin === window.location.origin) {
+        return url.href;
+      }
+
+      return fallbackSrc;
+    } catch {
+      return fallbackSrc;
+    }
+  }
+
+  return fallbackSrc;
 }
 
 function normalizeIdentifier(value = "") {
@@ -275,6 +360,8 @@ export function getLoginTemplate(options = {}) {
               draggable="false"
               aria-hidden="true"
               data-login-logo="true"
+              data-logo-black-src="${escapeAttr(BRAND_LOGOS.black)}"
+              data-logo-white-src="${escapeAttr(BRAND_LOGOS.white)}"
             >
 
             <h1

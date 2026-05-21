@@ -17,6 +17,7 @@
    - No arrastrar refresh/session de otro usuario.
    - Conservar slug real del usuario si existe.
    - Exponer homePath: /@{user.slug} si el usuario trae slug real.
+   - Exportar normalizeSessionContext como API pública mínima para módulos Auth.
    - Sin fetch.
    - Sin login HTTP.
    - Sin refresh HTTP.
@@ -41,7 +42,7 @@ import {
   persistAuthStorage,
 } from "./storage.js";
 
-export const AUTH_SESSION_VERSION = "auth.session.v7";
+export const AUTH_SESSION_VERSION = "auth.session.v8";
 
 const SOURCE = "auth.session";
 
@@ -835,6 +836,10 @@ function sanitizeSessionContext(session = {}) {
   };
 }
 
+export function normalizeSessionContext(value = null, _user = null) {
+  return sanitizeSessionContext(value);
+}
+
 function readSessionFromPayload(payload = {}, user = null) {
   const nodes = nested(payload);
 
@@ -1615,6 +1620,7 @@ export default {
   buildSessionUserHomePath,
 
   normalizeUser,
+  normalizeSessionContext,
 
   getSessionDebugSnapshot,
   buildAuthErrorPayload,

@@ -4,11 +4,14 @@
 
    Responsabilidad:
    - Password reset público mínimo.
-   - Request endpoint: /api/auth/reset-password-request desde core/config.js.
-   - Confirm endpoint: /api/auth/reset-password-confirm desde core/config.js.
-   - Token param único: token.
+   - Request endpoint desde core/config.js.
+   - Confirm endpoint desde core/config.js.
+   - Token param único desde core/config.js.
    - Transporte único vía CoreHttp.
+   - Validar identifier/token/password/confirmPassword.
    - No toca sesión salvo token + user explícitos del backend.
+   - Delegar normalización de usuario/sesión en session.js.
+   - Delegar slug/home/rutas en core/config.js/session.js.
    - Sin fetch propio.
    - Sin apiClient propio.
    - Sin Router.
@@ -27,13 +30,16 @@ import {
   ROUTES,
   TOKEN_PARAM,
   USER_HOME_PREFIX,
+  buildUserHomeRoute as configBuildUserHomeRoute,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  isUserHomeRoute as configIsUserHomeRoute,
+  normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
 } from "../../core/config.js";
 
-import {
-  applySession,
-} from "./session.js";
+import * as SessionApi from "./session.js";
 
-export const PASSWORD_RESET_MODULE_VERSION = "auth.password-reset.v3";
+export const PASSWORD_RESET_MODULE_VERSION = "auth.password-reset.v4";
 
 const SOURCE = "auth.password-reset";
 
@@ -42,14 +48,13 @@ const CONFIRM_ENDPOINT = AUTH_ENDPOINTS.confirmPasswordReset;
 
 const DEFAULT_LOGIN_REDIRECT = ROUTES.login || "/login";
 const HOME_ROUTE = ROUTES.home || "/";
+const USER_HOME_PREFIX_VALUE = USER_HOME_PREFIX || "/@";
 
 const IDENTIFIER_MAX_LENGTH = 160;
 const TOKEN_MIN_LENGTH = 8;
 const TOKEN_MAX_LENGTH = 8192;
 const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_LENGTH = 1024;
-
-const VALID_ROLES = Object.freeze(["admin", "user"]);
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -81,12 +86,27 @@ function isFormData(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
 function rawText(value = "", fallback = "") {
   return value === null || value === undefined ? fallback : String(value);
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+
+    return value;
+  }
+
+  return null;
 }
 
 function nowIso() {
@@ -99,7 +119,10 @@ function nowIso() {
 
 function redact(value = "") {
   return cleanText(value, "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -135,6 +158,20 @@ function payloadValue(payload = {}, names = []) {
   }
 
   return undefined;
+}
+
+function sessionMethod(name = "") {
+  const direct = SessionApi?.[name];
+
+  if (isFunction(direct)) return direct;
+
+  const fromDefault = SessionApi?.default?.[name];
+
+  if (isFunction(fromDefault)) {
+    return fromDefault.bind(SessionApi.default);
+  }
+
+  return null;
 }
 
 /* =========================================================
@@ -330,196 +367,120 @@ function validateConfirmPayload(payload = {}) {
 }
 
 /* =========================================================
-   USER / RESPONSE
+   USER / SESSION DELEGATES
 ========================================================= */
 
-function normalizeRole(value = "") {
-  if (Array.isArray(value)) {
-    const roles = value.map(normalizeRole).filter(Boolean);
+function normalizeUser(user = null) {
+  if (!isObject(user)) return null;
 
-    if (roles.includes("admin")) return "admin";
-    if (roles.includes("user")) return "user";
+  const normalize = sessionMethod("normalizeUser");
 
-    return "";
+  if (isFunction(normalize)) {
+    return normalize(user) || null;
   }
 
-  const role = String(value || "").trim().toLowerCase();
-
-  return VALID_ROLES.includes(role) ? role : "";
+  return null;
 }
 
-function cleanRole(value = "") {
-  return normalizeRole(value) || "user";
-}
+function normalizeSession(value = null, user = null) {
+  if (!isObject(value)) return null;
 
-function normalizeSlug(value = "") {
-  const slug = cleanText(value, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
+  const normalize = sessionMethod("normalizeSessionContext");
 
-  if (!slug) return "";
+  if (isFunction(normalize)) {
+    return normalize(value, user) || null;
+  }
 
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  return null;
 }
 
 function extractUserSlug(user = null) {
   if (!isObject(user)) return "";
 
-  return normalizeSlug(
-    user.slug ||
-      user.lookup?.slug ||
-      user.profile?.slug ||
-      ""
-  );
+  const extract = sessionMethod("extractSessionUserSlug");
+
+  if (isFunction(extract)) {
+    const slug = cleanText(extract(user), "");
+
+    if (slug) return slug;
+  }
+
+  try {
+    return configNormalizeUserSlug(
+      user.slug ||
+        user.lookup?.slug ||
+        user.profile?.slug ||
+        user.routing?.slug ||
+        ""
+    ) || "";
+  } catch {
+    return "";
+  }
+}
+
+function normalizeSpaPath(value = "") {
+  const raw = cleanText(value, "");
+
+  if (!raw) return "";
+
+  try {
+    const path = configNormalizeRoutePath(raw);
+
+    if (!path || configIsBlockedRoutePath(path)) return "";
+
+    return path;
+  } catch {
+    if (!raw.startsWith("/")) return "";
+    if (raw.startsWith("//")) return "";
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+    if (/[\r\n\t\\]/.test(raw)) return "";
+
+    const clean = raw
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/\/+$/g, "") || "/";
+
+    if (clean === "/home") return "";
+    if (clean.startsWith("/2fa")) return "";
+    if (clean.startsWith("/mfa")) return "";
+    if (clean.startsWith("/otp")) return "";
+
+    return clean;
+  }
+}
+
+function isUserHomePath(path = "") {
+  try {
+    return configIsUserHomeRoute(path) === true;
+  } catch {
+    return /^\/@[a-z0-9][a-z0-9._-]{0,95}$/i.test(normalizeSpaPath(path));
+  }
 }
 
 function buildUserHomePath(user = null) {
-  const slug = extractUserSlug(user);
-  return slug ? `${USER_HOME_PREFIX}${slug}` : HOME_ROUTE;
-}
+  const build = sessionMethod("buildSessionUserHomePath");
 
-function removeSensitiveUserFields(user = {}) {
-  if (!isObject(user)) return {};
+  if (isFunction(build)) {
+    const path = normalizeSpaPath(build(user));
 
-  const output = { ...user };
-
-  for (const key of [
-    "password",
-    "passwordHash",
-    "hash",
-    "salt",
-
-    "token",
-    "accessToken",
-    "access_token",
-    "refreshToken",
-    "refresh_token",
-
-    "resetToken",
-    "activationToken",
-
-    "secret",
-    "secrets",
-    "code",
-    "codes",
-    "backupCodes",
-  ]) {
-    delete output[key];
+    if (isUserHomePath(path)) return path;
   }
 
-  return output;
-}
+  const slug = extractUserSlug(user);
 
-function userDisabled(user = null) {
-  if (!isObject(user)) return true;
-
-  const status = cleanText(user.status || user.estado, "").toLowerCase();
-
-  return Boolean(
-    user.disabled === true ||
-      user.deleted === true ||
-      user.archived === true ||
-      user.active === false ||
-      status === "disabled" ||
-      status === "deleted" ||
-      status === "archived"
-  );
-}
-
-function hasUserIdentity(user = null) {
-  if (!isObject(user)) return false;
-
-  return Boolean(
-    cleanText(user.id, "") ||
-      cleanText(user.userId, "") ||
-      cleanText(user.username, "") ||
-      cleanText(user.slug, "") ||
-      cleanText(user.lookup?.slug, "")
-  );
-}
-
-function userOk(user = null) {
-  return Boolean(
-    isObject(user) &&
-      !userDisabled(user) &&
-      hasUserIdentity(user)
-  );
-}
-
-function normalizeUser(user = null) {
-  if (!userOk(user)) return null;
-
-  const safeUser = removeSensitiveUserFields(user);
-
-  const id = cleanText(safeUser.userId || safeUser.id, "");
-  const slug = extractUserSlug(safeUser);
-  const profile = isObject(safeUser.profile) ? safeUser.profile : {};
-
-  const username = cleanText(
-    safeUser.username ||
-      safeUser.userName ||
-      safeUser.user_name ||
-      slug ||
-      id,
-    ""
-  );
-
-  const displayName = cleanText(
-    safeUser.displayName ||
-      safeUser.fullName ||
-      safeUser.name ||
-      safeUser.nombre ||
-      profile.displayName ||
-      profile.fullName ||
-      profile.name ||
-      profile.nombre ||
-      username ||
-      id,
-    "Usuario"
-  );
-
-  const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
-
-  return {
-    ...safeUser,
-
-    id: id || null,
-    userId: safeUser.userId || id || null,
-
-    username: username || null,
-
-    /*
-      Slug real únicamente.
-      No se inventa desde email/username/id.
-    */
-    slug: slug || null,
-
-    name: safeUser.name || displayName,
-    fullName: safeUser.fullName || displayName,
-    displayName,
-
-    email: safeUser.email || null,
-
-    role,
-    rol: role,
-    roles: [role],
-
-    active: true,
-    disabled: false,
-
-    isAdmin: role === "admin",
-    isUser: role === "user",
-  };
+  try {
+    return configBuildUserHomeRoute(slug) || HOME_ROUTE;
+  } catch {
+    return slug ? `${USER_HOME_PREFIX_VALUE}${slug}` : HOME_ROUTE;
+  }
 }
 
 function publicUser(user = null) {
   const clean = normalizeUser(user);
 
   if (!clean) return null;
+
+  const avatar = clean.avatarUrl || clean.avatar || clean.picture || clean.photoUrl || "";
 
   return {
     id: clean.id || clean.userId || null,
@@ -528,9 +489,16 @@ function publicUser(user = null) {
     slug: clean.slug || null,
     displayName: clean.displayName || clean.name || clean.username || null,
     role: clean.role || clean.rol || null,
-    hasAvatar: Boolean(clean.avatar || clean.avatarUrl || clean.picture),
+
+    hasAvatar: Boolean(clean.hasAvatar || avatar),
+    avatar: avatar || null,
+    avatarUrl: avatar || null,
   };
 }
+
+/* =========================================================
+   RESPONSE
+========================================================= */
 
 function nested(payload = {}) {
   const source = isObject(payload) ? payload : {};
@@ -605,14 +573,16 @@ function readUser(input = {}) {
   return normalizeUser(input);
 }
 
-function readSession(input = {}) {
+function readSession(input = {}, user = null) {
   for (const node of nested(input)) {
-    const session =
+    const session = normalizeSession(
       node.session ||
-      node.sessionData ||
-      null;
+        node.sessionData ||
+        null,
+      user
+    );
 
-    if (isObject(session)) return session;
+    if (session) return session;
   }
 
   return null;
@@ -660,7 +630,7 @@ function responseStatus(input = {}) {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
     String(value || "")
   );
 }
@@ -672,6 +642,12 @@ function normalizeRedirectPath(value = "", fallback = DEFAULT_LOGIN_REDIRECT) {
   if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return fallback;
   if (/[\r\n\t\\]/.test(target)) return fallback;
   if (hasSensitiveQuery(target)) return fallback;
+
+  try {
+    if (configIsBlockedRoutePath(target)) return fallback;
+  } catch {
+    // noop
+  }
 
   return target;
 }
@@ -694,7 +670,7 @@ function normalizeBaseResponse(input = {}, fallbackSuccess = "", fallbackError =
   const token = readToken(input);
   const refreshToken = readRefreshToken(input);
   const user = readUser(input);
-  const session = readSession(input);
+  const session = readSession(input, user);
 
   const authenticated = Boolean(token && user);
   const homePath = authenticated ? buildUserHomePath(user) : HOME_ROUTE;
@@ -820,15 +796,41 @@ function publicOptions(options = {}) {
   };
 }
 
-async function post(endpoint, body, options = {}) {
+async function postResetRequest(body = {}, options = {}) {
   const requestOptions = publicOptions(options);
 
+  if (isFunction(CoreHttp?.requestPasswordReset)) {
+    return CoreHttp.requestPasswordReset(body, requestOptions);
+  }
+
   if (isFunction(CoreHttp?.post)) {
-    return CoreHttp.post(endpoint, body, requestOptions);
+    return CoreHttp.post(REQUEST_ENDPOINT, body, requestOptions);
   }
 
   if (isFunction(CoreHttp?.request)) {
-    return CoreHttp.request(endpoint, {
+    return CoreHttp.request(REQUEST_ENDPOINT, {
+      ...requestOptions,
+      method: "POST",
+      body,
+    });
+  }
+
+  throw new Error("Cliente HTTP no disponible.");
+}
+
+async function postResetConfirm(body = {}, options = {}) {
+  const requestOptions = publicOptions(options);
+
+  if (isFunction(CoreHttp?.confirmPasswordReset)) {
+    return CoreHttp.confirmPasswordReset(body, requestOptions);
+  }
+
+  if (isFunction(CoreHttp?.post)) {
+    return CoreHttp.post(CONFIRM_ENDPOINT, body, requestOptions);
+  }
+
+  if (isFunction(CoreHttp?.request)) {
+    return CoreHttp.request(CONFIRM_ENDPOINT, {
       ...requestOptions,
       method: "POST",
       body,
@@ -845,8 +847,12 @@ async function post(endpoint, body, options = {}) {
 function maybeApplyReturnedSession(result = {}, source = "password-reset") {
   if (!result?.authenticated || !result?.token || !result?.user) return null;
 
+  const apply = sessionMethod("applySession");
+
+  if (!isFunction(apply)) return null;
+
   try {
-    return applySession(
+    return apply(
       {
         token: result.token,
         accessToken: result.token,
@@ -896,8 +902,7 @@ export async function requestPasswordReset(payload = {}, options = {}) {
 
   requestPromise = (async () => {
     try {
-      const raw = await post(
-        REQUEST_ENDPOINT,
+      const raw = await postResetRequest(
         buildResetPasswordRequestBody(normalized),
         options
       );
@@ -944,8 +949,7 @@ export async function confirmResetPassword(payload = {}, options = {}) {
 
   confirmPromise = (async () => {
     try {
-      const raw = await post(
-        CONFIRM_ENDPOINT,
+      const raw = await postResetConfirm(
         buildConfirmResetPasswordBody(normalized),
         options
       );
@@ -1008,7 +1012,12 @@ export function getPasswordResetSnapshot() {
     },
 
     transport: {
-      hasCoreHttp: Boolean(CoreHttp?.post || CoreHttp?.request),
+      hasCoreHttp: Boolean(
+        CoreHttp?.requestPasswordReset ||
+          CoreHttp?.confirmPasswordReset ||
+          CoreHttp?.post ||
+          CoreHttp?.request
+      ),
       ownFetch: false,
       ownApiClient: false,
       ownRouter: false,
@@ -1025,6 +1034,10 @@ export function getPasswordResetSnapshot() {
       noToast: true,
       noStorage: true,
       noRefresh: true,
+
+      sessionOwnsUserNormalization: true,
+      sessionOwnsSessionNormalization: true,
+      configOwnsSlugAndHomeRoute: true,
 
       sessionOnlyIfBackendReturnsTokenAndUser: true,
 

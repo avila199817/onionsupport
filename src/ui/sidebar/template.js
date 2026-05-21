@@ -11,6 +11,7 @@
    - Sin SVG fallback como logo de marca.
    - Pintar avatar si user.js entrega avatarUrl.
    - Pintar fallback de iniciales si no hay avatar o falla la imagen.
+   - Pintar metadata admin/roles si index.js/rutas la entregan.
    - Preparar markup del dropdown de cuenta.
    - Recibir datos ya normalizados desde index.js/user.js.
    - No navegar.
@@ -36,6 +37,8 @@ import {
   SIDEBAR_CLASSES,
   SIDEBAR_ICONS,
   SIDEBAR_ROOT_ID,
+  SIDEBAR_ROLE_ADMIN,
+  SIDEBAR_ROLE_USER,
   normalizeSidebarIcon,
 } from "./constants.js";
 
@@ -45,7 +48,7 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v11";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v12";
 
 /* =========================================================
    BRAND ASSETS
@@ -57,7 +60,11 @@ const BRAND_LOGOS = Object.freeze({
 });
 
 const ROLE_LABEL_ADMIN = "Administrador";
-const ROLE_LABEL_STANDARD = "Estandar";
+const ROLE_LABEL_STANDARD = "Estándar";
+
+const ATTR_USER_AVATAR = SIDEBAR_ATTRS.userAvatar || "data-sidebar-user-avatar";
+const ATTR_USER_NAME = SIDEBAR_ATTRS.userName || "data-sidebar-user-name";
+const ATTR_USER_ROLE = SIDEBAR_ATTRS.userRole || "data-sidebar-user-role";
 
 const BLOCKED_HREFS = new Set([
   "/home",
@@ -246,6 +253,46 @@ function safeAvatarSrc(value = "") {
   return "";
 }
 
+function createSpan(className = "", textContent = "", attrs = {}) {
+  return createElement("span", {
+    className,
+    textContent,
+    attrs,
+  });
+}
+
+function normalizeRole(value = "") {
+  const role = text(value, "").toLowerCase();
+
+  if (role === SIDEBAR_ROLE_ADMIN) return SIDEBAR_ROLE_ADMIN;
+  if (role === SIDEBAR_ROLE_USER) return SIDEBAR_ROLE_USER;
+
+  return "";
+}
+
+function normalizeRoleList(value = []) {
+  const raw = Array.isArray(value)
+    ? value.flat(Infinity)
+    : text(value, "").split(/[,\s|;]+/);
+
+  return [
+    ...new Set(
+      raw
+        .map(normalizeRole)
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function itemRoles(item = {}) {
+  return [
+    ...normalizeRoleList(item.role),
+    ...normalizeRoleList(item.roles),
+    ...normalizeRoleList(item.requiredRole),
+    ...normalizeRoleList(item.requiredRoles),
+  ];
+}
+
 function roleText(value = "") {
   if (Array.isArray(value)) {
     return value
@@ -257,29 +304,35 @@ function roleText(value = "") {
   return text(value, "");
 }
 
-function createSpan(className = "", textContent = "", attrs = {}) {
-  return createElement("span", {
-    className,
-    textContent,
-    attrs,
-  });
-}
-
 function isAdminUser(user = {}) {
-  const role = String(user.role || user.rol || "").toLowerCase();
-  const roles = Array.isArray(user.roles)
-    ? user.roles.map((item) => String(item || "").toLowerCase())
-    : [];
+  const roles = normalizeRoleList([
+    user.role,
+    user.rol,
+    user.roles,
+  ]);
 
   return Boolean(
     user.isAdmin === true ||
-      role === "admin" ||
-      roles.includes("admin")
+      roles.includes(SIDEBAR_ROLE_ADMIN)
   );
 }
 
 function defaultRoleLabel(user = {}) {
   return isAdminUser(user) ? ROLE_LABEL_ADMIN : ROLE_LABEL_STANDARD;
+}
+
+function initialsFromName(value = "") {
+  const parts = text(value, "")
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!parts.length) return "";
+
+  const first = parts[0]?.[0] || "";
+  const second = parts.length > 1 ? parts[parts.length - 1]?.[0] || "" : "";
+
+  return `${first}${second}`.toUpperCase();
 }
 
 /* =========================================================
@@ -288,9 +341,19 @@ function defaultRoleLabel(user = {}) {
 
 function normalizeItem(item = {}) {
   const rawHref = item.href || item.path || "";
-  const href = safeInternalHref(rawHref, "/");
+  const href = safeInternalHref(rawHref, "");
   const label = text(item.label || item.title || item.name, href);
   const icon = normalizeSidebarIcon(item.icon || SIDEBAR_ICONS.home);
+  const roles = itemRoles(item);
+  const adminOnly = Boolean(
+    item.adminOnly === true ||
+      item.requiresAdmin === true ||
+      item.admin === true ||
+      (
+        roles.includes(SIDEBAR_ROLE_ADMIN) &&
+        !roles.includes(SIDEBAR_ROLE_USER)
+      )
+  );
 
   return {
     href,
@@ -299,12 +362,12 @@ function normalizeItem(item = {}) {
 
     active: item.active === true,
     disabled: item.disabled === true,
-    hidden: item.hidden === true || !normalizeInternalPath(rawHref || href),
-    adminOnly: item.adminOnly === true,
+    hidden: item.hidden === true || !href,
+    adminOnly,
 
     badge: text(item.badge, ""),
-    requiredRole: text(item.requiredRole, ""),
-    requiredRoles: roleText(item.requiredRoles),
+    requiredRole: text(item.requiredRole || item.role, ""),
+    requiredRoles: roleText(roles.length ? roles : item.requiredRoles),
   };
 }
 
@@ -317,7 +380,10 @@ function normalizeUser(user = {}) {
     "Usuario"
   );
 
-  const initials = text(user.initials, "U")
+  const initials = text(
+    user.initials,
+    initialsFromName(name) || "U"
+  )
     .slice(0, 2)
     .toUpperCase();
 
@@ -325,7 +391,14 @@ function normalizeUser(user = {}) {
     user.avatarUrl ||
       user.avatar ||
       user.photoUrl ||
+      user.photoURL ||
       user.picture ||
+      user.image ||
+      user.profile?.avatarUrl ||
+      user.profile?.avatar ||
+      user.profile?.photoUrl ||
+      user.profile?.photoURL ||
+      user.profile?.picture ||
       ""
   );
 
@@ -488,7 +561,7 @@ function createUserAvatar(user = {}, className = SIDEBAR_CLASSES.userAvatar) {
     ),
     attrs: {
       "aria-hidden": "true",
-      "data-sidebar-user-avatar": "true",
+      [ATTR_USER_AVATAR]: "true",
       "data-fallback": hasImage ? "false" : "true",
       "data-avatar-state": hasImage ? "image" : "fallback",
     },
@@ -496,7 +569,7 @@ function createUserAvatar(user = {}, className = SIDEBAR_CLASSES.userAvatar) {
 
   if (hasImage) {
     const img = createElement("img", {
-      className: "sidebar-user-avatar-img",
+      className: SIDEBAR_CLASSES.userAvatarImage || "sidebar-user-avatar-img",
       attrs: {
         src: normalizedUser.avatarUrl,
         alt: "",
@@ -525,9 +598,13 @@ function createUserAvatar(user = {}, className = SIDEBAR_CLASSES.userAvatar) {
 
   appendChildren(
     avatar,
-    createSpan("sidebar-user-avatar-fallback", normalizedUser.initials, {
-      "data-sidebar-avatar-fallback": "true",
-    })
+    createSpan(
+      SIDEBAR_CLASSES.userAvatarFallback || "sidebar-user-avatar-fallback",
+      normalizedUser.initials,
+      {
+        "data-sidebar-avatar-fallback": "true",
+      }
+    )
   );
 
   return avatar;
@@ -664,6 +741,7 @@ export function createSidebarNavItem(rawItem = {}) {
       "data-active": item.active ? "true" : "false",
       "data-disabled": item.disabled ? "true" : "false",
       "data-admin-only": item.adminOnly ? "true" : null,
+      "data-sidebar-admin-only": item.adminOnly ? "true" : null,
       "data-required-role": item.requiredRole || null,
       "data-required-roles": item.requiredRoles || null,
     }),
@@ -693,6 +771,7 @@ export function createSidebarNavItem(rawItem = {}) {
       "data-sidebar-label": item.label,
       "data-sidebar-icon": item.icon,
       "data-admin-only": item.adminOnly ? "true" : null,
+      "data-sidebar-admin-only": item.adminOnly ? "true" : null,
       "data-required-role": item.requiredRole || null,
       "data-required-roles": item.requiredRoles || null,
 
@@ -819,10 +898,16 @@ function createAccountDropdown(user = {}) {
     createElement("span", {
       className: SIDEBAR_CLASSES.userName,
       textContent: normalizedUser.name,
+      attrs: {
+        [ATTR_USER_NAME]: "true",
+      },
     }),
     createElement("span", {
       className: SIDEBAR_CLASSES.userRole,
       textContent: normalizedUser.roleLabel,
+      attrs: {
+        [ATTR_USER_ROLE]: "true",
+      },
     }),
   ]);
 
@@ -859,8 +944,12 @@ function createAccountDropdown(user = {}) {
   });
 
   appendChildren(menuHeaderInfo, [
-    createSpan("sidebar-account-menu-user-name", normalizedUser.name),
-    createSpan("sidebar-account-menu-user-meta", normalizedUser.roleLabel),
+    createSpan("sidebar-account-menu-user-name", normalizedUser.name, {
+      [ATTR_USER_NAME]: "true",
+    }),
+    createSpan("sidebar-account-menu-user-meta", normalizedUser.roleLabel, {
+      [ATTR_USER_ROLE]: "true",
+    }),
   ]);
 
   appendChildren(menuHeader, [
@@ -1036,6 +1125,9 @@ export function getSidebarTemplateSnapshot() {
       avatarSourceComesFromUserViewModel: true,
       avatarImageWithInitialsFallback: true,
       avatarInternalOrHttpsOnly: true,
+
+      navItemRoleMetadataOnly: true,
+      adminOnlyMetadataFromInput: true,
 
       standardRoleLabelForNonAdmin: true,
       adminRoleLabelPreserved: true,

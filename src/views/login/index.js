@@ -8,7 +8,7 @@
    - Validar campos mínimos.
    - Llamar Auth.login().
    - Navegar vía Router a /@{user.slug} tras login correcto.
-   - Rutas base desde core/config.js.
+   - Rutas/base/path helpers desde core/config.js.
    - Sin HTTP directo.
    - Sin Store.
    - Sin Toast directo.
@@ -28,6 +28,11 @@ import {
   PUBLIC_ROUTES,
   ROUTES,
   USER_HOME_PREFIX,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  isPublicRoute as configIsPublicRoute,
+  isUserHomeRoute as configIsUserHomeRoute,
+  normalizeRoutePath as configNormalizeRoutePath,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
 import getLoginTemplate from "./login.template.js";
@@ -46,7 +51,7 @@ import {
   bindLoginSubmit,
 } from "./login.dom.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.v4";
+export const LOGIN_VIEW_VERSION = "login.view.v5";
 
 const SOURCE = "login.view";
 
@@ -58,7 +63,7 @@ const ACTIVATE_ACCOUNT_ROUTE = ROUTES.activateAccount || "/activate-account";
 
 const USER_PREFIX = USER_HOME_PREFIX || "/@";
 
-const BLOCKED_LEGACY_PATHS = new Set([
+const FALLBACK_BLOCKED_PATHS = new Set([
   "/home",
   "/403",
   "/404",
@@ -124,38 +129,36 @@ function redact(value = "") {
    PATHS
 ========================================================= */
 
-function normalizeHashPath(path = HOME_ROUTE) {
-  const value = text(path, HOME_ROUTE);
-
-  if (value.startsWith("#!")) {
-    return value.replace(/^#!\/?/, "/") || HOME_ROUTE;
+function pathFromInput(value = HOME_ROUTE) {
+  try {
+    return configRoutePathFromUrlLike(value) || HOME_ROUTE;
+  } catch {
+    return HOME_ROUTE;
   }
-
-  if (value.startsWith("#/")) {
-    return value.slice(1) || HOME_ROUTE;
-  }
-
-  return value;
 }
 
 function cleanPath(value = HOME_ROUTE) {
-  let path = normalizeHashPath(value)
-    .split("?")[0]
-    .split("#")[0];
+  try {
+    return configNormalizeRoutePath(pathFromInput(value)) || HOME_ROUTE;
+  } catch {
+    let path = text(value, HOME_ROUTE)
+      .split("?")[0]
+      .split("#")[0];
 
-  if (!path.startsWith("/")) {
-    path = `/${path}`;
+    if (!path.startsWith("/")) {
+      path = `/${path}`;
+    }
+
+    path = path
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+    if (path.length > 1) {
+      path = path.replace(/\/+$/g, "") || HOME_ROUTE;
+    }
+
+    return path || HOME_ROUTE;
   }
-
-  path = path
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  if (path.length > 1) {
-    path = path.replace(/\/+$/g, "") || HOME_ROUTE;
-  }
-
-  return path || HOME_ROUTE;
 }
 
 function hasSensitiveQuery(value = "") {
@@ -165,25 +168,33 @@ function hasSensitiveQuery(value = "") {
 }
 
 function isBlockedLegacyPath(value = "") {
-  const path = cleanPath(value).toLowerCase();
+  try {
+    return configIsBlockedRoutePath(value) === true;
+  } catch {
+    const path = cleanPath(value).toLowerCase();
 
-  if (BLOCKED_LEGACY_PATHS.has(path)) return true;
+    if (FALLBACK_BLOCKED_PATHS.has(path)) return true;
 
-  return (
-    path.startsWith("/2fa/") ||
-    path.startsWith("/mfa/") ||
-    path.startsWith("/otp/")
-  );
+    return (
+      path.startsWith("/2fa/") ||
+      path.startsWith("/mfa/") ||
+      path.startsWith("/otp/")
+    );
+  }
 }
 
 function isUserHomePath(value = "") {
-  const path = cleanPath(value);
+  try {
+    return configIsUserHomeRoute(value) === true;
+  } catch {
+    const path = cleanPath(value);
 
-  if (!path.startsWith(USER_PREFIX)) return false;
+    if (!path.startsWith(USER_PREFIX)) return false;
 
-  const slug = path.slice(USER_PREFIX.length);
+    const slug = path.slice(USER_PREFIX.length);
 
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/i.test(slug);
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/i.test(slug);
+  }
 }
 
 function safeInternalPath(value = "", fallback = HOME_ROUTE) {
@@ -196,13 +207,21 @@ function safeInternalPath(value = "", fallback = HOME_ROUTE) {
   if (hasSensitiveQuery(raw)) return fallback;
   if (isBlockedLegacyPath(raw)) return fallback;
 
-  const normalized = raw.replace(/\/{2,}/g, "/") || fallback;
+  const normalized = cleanPath(raw);
 
-  return normalized;
+  return normalized || fallback;
 }
 
 function isPublicAuthPath(value = "") {
-  return PUBLIC_AUTH_ROUTES.has(cleanPath(value));
+  const path = cleanPath(value);
+
+  try {
+    if (configIsPublicRoute(path) === true) return true;
+  } catch {
+    // fallback abajo
+  }
+
+  return PUBLIC_AUTH_ROUTES.has(path);
 }
 
 /* =========================================================
@@ -532,6 +551,10 @@ export function renderLoginView(container, deps = {}) {
           delegatesDom: true,
           authLoginOnly: true,
           routerNavigationOnly: true,
+
+          configOwnsRoutes: true,
+          configOwnsBlockedRoutes: true,
+          configOwnsUserHomeRoute: true,
 
           noHttpDirect: true,
           noStore: true,

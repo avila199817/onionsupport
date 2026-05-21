@@ -9,6 +9,8 @@
    - Rutas privadas: usuario autenticado.
    - Rutas admin: sólo admin.
    - Clientes: sólo admin.
+   - Usuarios: sólo admin si core/config.js define ROUTES.usuarios.
+   - Servidor: sólo admin si core/config.js define ROUTES.servidor.
    - Rutas públicas actuales:
      /login
      /password-request
@@ -20,6 +22,8 @@
    - Resolver /@{slug} hacia Home.
    - Resolver /@{slug}/incidencias hacia /incidencias.
    - Resolver /@{slug}/clientes hacia /clientes sólo si admin.
+   - Resolver /@{slug}/usuarios hacia /usuarios sólo si admin.
+   - Resolver /@{slug}/servidor hacia /servidor sólo si admin.
    - Sin declarar /@:slug como ruta real.
    - Sin alias /home.
    - Sin aliases legacy.
@@ -35,10 +39,14 @@
 
 import {
   ROUTES,
+  ADMIN_ROUTES as CONFIG_ADMIN_ROUTES,
+  BLOCKED_FRONTEND_ROUTES as CONFIG_BLOCKED_FRONTEND_ROUTES,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
+  isAdminRoute as isConfigAdminRoute,
+  isBlockedRoutePath as isConfigBlockedRoutePath,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.v6";
+export const ROUTES_VERSION = "routes.v7";
 
 const ROUTE_SOURCE = "router.routes";
 
@@ -148,14 +156,24 @@ export const ROUTE_ALIASES = Object.freeze({});
 const PUBLIC_AUTH_ROUTE_SET = new Set(PUBLIC_AUTH_ROUTES.filter(Boolean));
 const TOKEN_ROUTE_SET = new Set(TOKEN_ROUTE_PATHS.filter(Boolean));
 
-const BLOCKED_ROUTE_PATHS = new Set([
-  "/home",
-  "/403",
-  "/404",
-  "/2fa",
-  "/mfa",
-  "/otp",
-]);
+const BLOCKED_ROUTE_PATHS = new Set(
+  Array.isArray(CONFIG_BLOCKED_FRONTEND_ROUTES) &&
+    CONFIG_BLOCKED_FRONTEND_ROUTES.length
+    ? CONFIG_BLOCKED_FRONTEND_ROUTES
+    : [
+        "/home",
+        "/403",
+        "/404",
+        "/2fa",
+        "/mfa",
+        "/otp",
+      ]
+);
+
+const CONFIG_ADMIN_ROUTE_SET = new Set(
+  (Array.isArray(CONFIG_ADMIN_ROUTES) ? CONFIG_ADMIN_ROUTES : [])
+    .filter(Boolean)
+);
 
 const USER_SCOPED_ROUTE_SET = new Set(
   [
@@ -293,7 +311,7 @@ function normalizeRole(value = "") {
     return "";
   }
 
-  const role = String(value || "").toLowerCase();
+  const role = text(value, "").toLowerCase();
 
   return VALID_ROLES.includes(role) ? role : "";
 }
@@ -307,6 +325,12 @@ function normalizeRoles(roles = []) {
 function isBlockedRoutePath(path = "/") {
   const clean = normalizePath(path).toLowerCase();
 
+  try {
+    if (isConfigBlockedRoutePath(clean) === true) return true;
+  } catch {
+    // fallback local
+  }
+
   if (BLOCKED_ROUTE_PATHS.has(clean)) return true;
 
   return (
@@ -314,6 +338,18 @@ function isBlockedRoutePath(path = "/") {
     clean.startsWith("/mfa/") ||
     clean.startsWith("/otp/")
   );
+}
+
+function isConfiguredAdminPath(path = "/") {
+  const clean = normalizePath(path);
+
+  if (CONFIG_ADMIN_ROUTE_SET.has(clean)) return true;
+
+  try {
+    return isConfigAdminRoute(clean) === true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -387,11 +423,12 @@ export function getUserScopedRouteInfo(path = "/") {
 
 export function getUserHomeSlugFromPath(path = "/") {
   const info = getUserScopedRouteInfo(path);
-  return info.scoped && info.routable ? info.slug : "";
+  return info.home ? info.slug : "";
 }
 
 export function getUserScopedSlugFromPath(path = "/") {
-  return getUserHomeSlugFromPath(path);
+  const info = getUserScopedRouteInfo(path);
+  return info.scoped && info.routable ? info.slug : "";
 }
 
 export function getUserScopedRestPath(path = "/") {
@@ -477,7 +514,7 @@ const VIEW_LOADERS = Object.freeze({
 
   [ROUTE_VIEW_KEYS.SERVIDOR]: () =>
     import("../views/server/index.js").then((module) =>
-      pickView(module, ["ServerView"])
+      pickView(module, ["ServerView", "ServidorView"])
     ),
 
   [ROUTE_VIEW_KEYS.LOGIN]: () =>
@@ -624,11 +661,14 @@ function createRoute({
   const finalName = normalizeName(name);
   const finalViewKey = normalizeViewKey(viewKey || finalName);
   const finalViewName = normalizeViewName(viewName || finalViewKey);
-  const finalRoles = freeze(normalizeRoles(roles));
+  const inputRoles = freeze(normalizeRoles(roles));
   const finalPublic = Boolean(isPublic);
+  const configuredAdmin = !finalPublic && isConfiguredAdminPath(finalPath);
+  const roleAdminOnly = inputRoles.includes("admin") && !inputRoles.includes("user");
+  const adminOnly = configuredAdmin || roleAdminOnly;
+  const finalRoles = freeze(adminOnly ? ADMIN_ROLES : inputRoles);
   const finalTokenRoute = Boolean(tokenRoute || TOKEN_ROUTE_SET.has(finalPath));
   const hideShell = finalPublic;
-  const adminOnly = finalRoles.includes("admin") && !finalRoles.includes("user");
 
   const meta = freeze({
     version: ROUTES_VERSION,
@@ -663,7 +703,7 @@ function createRoute({
     viewName: finalViewName,
     sidebarKey: finalViewKey,
 
-    routeGroup: finalPublic ? "auth" : "app",
+    routeGroup: finalPublic ? "auth" : adminOnly ? "admin" : "app",
 
     tokenRoute: finalTokenRoute,
     preserveSearch: finalPublic || finalTokenRoute,
@@ -711,7 +751,7 @@ function createRoute({
     sidebar: !finalPublic,
     showInSidebar: !finalPublic,
 
-    routeGroup: finalPublic ? "auth" : "app",
+    routeGroup: finalPublic ? "auth" : adminOnly ? "admin" : "app",
 
     tokenRoute: finalTokenRoute,
     preserveSearch: finalPublic || finalTokenRoute,
@@ -967,6 +1007,18 @@ function validateRoute(route, seenPaths, seenNames) {
     throw new Error(`Router: ruta pública con roles en "${path}".`);
   }
 
+  if (isConfiguredAdminPath(path) && !route.adminOnly) {
+    throw new Error(`Router: ruta admin de config sin adminOnly en "${path}".`);
+  }
+
+  if (route.adminOnly && !route.roles.includes("admin")) {
+    throw new Error(`Router: ruta admin sin rol admin en "${path}".`);
+  }
+
+  if (route.adminOnly && route.roles.includes("user")) {
+    throw new Error(`Router: ruta admin permite rol user en "${path}".`);
+  }
+
   seenPaths.add(path);
   seenNames.add(route.name);
 }
@@ -1049,6 +1101,17 @@ export function isPrivateRoutePath(path = "/") {
   return Boolean(route && route.public === false && route.requiresAuth === true);
 }
 
+export function isAdminRoutePath(path = "/") {
+  const lookupPath = resolveRouteLookupPath(path);
+
+  if (isBlockedRoutePath(lookupPath)) return false;
+  if (isConfiguredAdminPath(lookupPath)) return true;
+
+  const route = getRouteByPath(lookupPath);
+
+  return Boolean(route?.adminOnly || route?.requiresAdmin);
+}
+
 /* =========================================================
    SNAPSHOTS
 ========================================================= */
@@ -1068,11 +1131,13 @@ function serializeRoute(route) {
     guestOnly: route.guestOnly,
     roles: route.roles,
     adminOnly: route.adminOnly,
+    requiresAdmin: route.requiresAdmin,
     hideShell: route.hideShell,
     shell: route.shell,
     layout: route.layout,
     sidebar: route.sidebar,
     showInSidebar: route.showInSidebar,
+    routeGroup: route.routeGroup,
     tokenRoute: route.tokenRoute,
     preserveSearch: route.preserveSearch,
     preserveHash: route.preserveHash,
@@ -1096,10 +1161,12 @@ export function getRouteDebug(path = "/") {
     normalizedPath,
     lookupPath,
     blocked: isBlockedRoutePath(normalizedPath),
+    adminRoute: isAdminRoutePath(normalizedPath),
     userScopedPath: Boolean(scoped.scoped),
     userScopedRoutable: Boolean(scoped.routable),
     userHomePath: Boolean(scoped.home),
-    userHomeSlug: scoped.slug || null,
+    userHomeSlug: scoped.home ? scoped.slug || null : null,
+    userScopedSlug: scoped.scoped && scoped.routable ? scoped.slug || null : null,
     userScopedRestPath: scoped.scoped ? scoped.restPath : null,
     route: route ? serializeRoute(route) : null,
   };
@@ -1114,6 +1181,7 @@ export function getCriticalRoutesDebug() {
       return {
         path,
         found: Boolean(route),
+        adminRoute: isAdminRoutePath(path),
         route: route ? serializeRoute(route) : null,
       };
     });
@@ -1149,6 +1217,7 @@ export function getRoutesIntegritySnapshot() {
     tokenRoutePaths: [...TOKEN_ROUTE_PATHS],
     aliases: ROUTE_ALIASES,
 
+    adminRoutes: [...CONFIG_ADMIN_ROUTE_SET],
     blockedRoutes: [...BLOCKED_ROUTE_PATHS],
 
     userHome: {
@@ -1172,6 +1241,7 @@ export function getRoutesIntegritySnapshot() {
     policy: {
       staticRoutesOnly: true,
       configDrivenPaths: true,
+      adminRoutesAlignedWithConfig: true,
       lazyViews: true,
 
       ownAuth: false,
@@ -1183,6 +1253,8 @@ export function getRoutesIntegritySnapshot() {
       roles: [...VALID_ROLES],
 
       clientesAdminOnly: true,
+      usuariosAdminOnly: Boolean(ROUTE_PATHS.USUARIOS),
+      servidorAdminOnly: Boolean(ROUTE_PATHS.SERVIDOR),
 
       homeInternalPath: ROUTE_PATHS.HOME,
       homeVisiblePattern: "/@{user.slug}",
@@ -1247,6 +1319,7 @@ export default {
   isPublicAuthPath,
   isTokenPublicRoutePath,
   isPrivateRoutePath,
+  isAdminRoutePath,
 
   getRoutesSnapshot,
   getRouteDebug,

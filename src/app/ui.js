@@ -5,6 +5,7 @@
    Responsabilidad:
    - Compat mínima de UI.
    - Bridge simple de Toast si existe.
+   - No pisar AppCore.showToast si ya existe.
    - Sin Sidebar.
    - Sin Topbar.
    - Sin Router.
@@ -16,9 +17,10 @@
    - Sin debug.
 ========================================================= */
 
-export const UI_VERSION = "app.ui.v2";
+export const UI_VERSION = "app.ui.v3";
 
 let initialized = false;
+let bridged = false;
 
 /* =========================================================
    BASICS
@@ -33,7 +35,11 @@ function isObject(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -47,6 +53,11 @@ function getToast(AppCore = null, Toast = null) {
 
 function normalizeToastInput(message = "", type = "info", options = {}) {
   if (isObject(message)) {
+    const cleanOptions = {
+      ...message,
+      ...options,
+    };
+
     return {
       message: cleanText(
         message.message ||
@@ -60,17 +71,14 @@ function normalizeToastInput(message = "", type = "info", options = {}) {
           type,
         "info"
       ),
-      options: {
-        ...message,
-        ...options,
-      },
+      options: cleanOptions,
     };
   }
 
   return {
     message: cleanText(message, ""),
     type: cleanText(type, "info"),
-    options,
+    options: isObject(options) ? options : {},
   };
 }
 
@@ -115,6 +123,33 @@ function showToastWith(Toast = null, message = "", type = "info", options = {}) 
   return null;
 }
 
+function createToastBridge(Toast = null) {
+  const bridge = function showToast(message = "", type = "info", options = {}) {
+    return showToastWith(Toast, message, type, options);
+  };
+
+  try {
+    Object.defineProperties(bridge, {
+      __onionToastBridge: {
+        value: true,
+        enumerable: false,
+      },
+      __onionSource: {
+        value: "app.ui",
+        enumerable: false,
+      },
+      __onionVersion: {
+        value: UI_VERSION,
+        enumerable: false,
+      },
+    });
+  } catch {
+    // noop
+  }
+
+  return bridge;
+}
+
 /* =========================================================
    PUBLIC API
 ========================================================= */
@@ -125,18 +160,32 @@ export function bindToastBridge({
 } = {}) {
   const toast = getToast(AppCore, Toast);
 
-  if (!AppCore || !toast) return false;
+  if (!AppCore || !toast) {
+    initialized = false;
+    bridged = false;
+    return false;
+  }
 
-  AppCore.showToast = (message = "", type = "info", options = {}) => {
-    return showToastWith(toast, message, type, options);
-  };
+  /*
+    No pisar una implementación existente.
+    Si AppCore.showToast ya existe, este módulo queda como compat pasiva.
+  */
+  if (isFunction(AppCore.showToast)) {
+    initialized = true;
+    bridged = AppCore.showToast.__onionToastBridge === true;
+    return true;
+  }
+
+  AppCore.showToast = createToastBridge(toast);
+
+  initialized = true;
+  bridged = true;
 
   return true;
 }
 
 export function initUISystems(options = {}) {
-  initialized = bindToastBridge(options);
-  return initialized;
+  return bindToastBridge(options);
 }
 
 /* =========================================================
@@ -146,9 +195,15 @@ export function initUISystems(options = {}) {
 export function getUISystemsSnapshot() {
   return {
     version: UI_VERSION,
+
     initialized,
+    bridged,
+
     policy: {
       toastBridgeOnly: true,
+      idempotentBridge: true,
+      doesNotOverrideExistingShowToast: true,
+
       noSidebar: true,
       noTopbar: true,
       noRouter: true,

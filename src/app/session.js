@@ -6,9 +6,12 @@
    - Compat mínima entre App y Auth.
    - Auth hace el restore real.
    - Auth hace refresh silencioso si corresponde.
+   - Auth decide si la sesión es válida.
+   - Auth decide si el usuario es usable.
    - Resolver Auth desde parámetro o AppCore.
    - Coordinar una única restauración concurrente.
    - Normalizar resultado de restauración para boot.
+   - No validar usuarios.
    - No validar rutas.
    - No navegar.
    - Sin imports.
@@ -21,7 +24,7 @@
    - Sin sync UI.
 ========================================================= */
 
-export const SESSION_VERSION = "app.session.v4";
+export const SESSION_VERSION = "app.session.v5";
 
 let restorePromise = null;
 
@@ -35,21 +38,6 @@ function isFunction(value) {
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeText(value = "", fallback = "") {
-  if (value === null || value === undefined) return fallback;
-
-  const output = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
-
-function normalizeStatus(value = "") {
-  return safeText(value, "").toLowerCase();
 }
 
 function safeCall(fn = null, ...args) {
@@ -80,60 +68,25 @@ function readState(AppCore = null) {
 }
 
 /* =========================================================
-   USER / AUTH STATE
+   AUTH READ
 ========================================================= */
-
-function isUsableUser(user = null) {
-  if (!isObject(user)) return false;
-
-  const status = normalizeStatus(user.status || user.estado || user.state || "");
-
-  if (
-    user.disabled === true ||
-    user.deleted === true ||
-    user.archived === true ||
-    user.revoked === true ||
-    user.active === false ||
-    user.enabled === false ||
-    Boolean(user.deletedAt)
-  ) {
-    return false;
-  }
-
-  if (
-    [
-      "disabled",
-      "inactive",
-      "deleted",
-      "archived",
-      "revoked",
-      "blocked",
-      "banned",
-      "suspended",
-      "desactivado",
-      "inactivo",
-      "eliminado",
-      "archivado",
-      "bloqueado",
-      "suspendido",
-    ].includes(status)
-  ) {
-    return false;
-  }
-
-  return Boolean(user.id || user.userId || user.uid || user.sub || user.username || user.slug);
-}
 
 function isAuthenticated(AppCore = null, Auth = null) {
   const auth = resolveAuth(AppCore, Auth);
 
-  if (isFunction(auth?.isAuthenticated)) {
-    return auth.isAuthenticated() === true;
-  }
+  const fromAuth = safeCall(
+    auth?.isAuthenticated?.bind?.(auth) ||
+      auth?.isAuthenticated
+  );
 
-  if (isFunction(AppCore?.isAuthenticated)) {
-    return AppCore.isAuthenticated() === true;
-  }
+  if (fromAuth !== null) return fromAuth === true;
+
+  const fromCore = safeCall(
+    AppCore?.isAuthenticated?.bind?.(AppCore) ||
+      AppCore?.isAuthenticated
+  );
+
+  if (fromCore !== null) return fromCore === true;
 
   return readState(AppCore).authenticated === true;
 }
@@ -145,6 +98,7 @@ function getUser(AppCore = null, Auth = null) {
   return (
     safeCall(auth?.getUser?.bind?.(auth) || auth?.getUser) ||
     safeCall(auth?.getCurrentUser?.bind?.(auth) || auth?.getCurrentUser) ||
+    safeCall(auth?.getProfile?.bind?.(auth) || auth?.getProfile) ||
     safeCall(AppCore?.getCurrentUser?.bind?.(AppCore) || AppCore?.getCurrentUser) ||
     state.user ||
     state.currentUser ||
@@ -162,6 +116,27 @@ function getSession(AppCore = null, Auth = null) {
     state.session ||
     state.sessionData ||
     null
+  );
+}
+
+function getAuthSnapshot(AppCore = null, Auth = null) {
+  const auth = resolveAuth(AppCore, Auth);
+
+  return (
+    safeCall(auth?.getSnapshot?.bind?.(auth) || auth?.getSnapshot) ||
+    safeCall(auth?.getAuthModuleSnapshot?.bind?.(auth) || auth?.getAuthModuleSnapshot) ||
+    safeCall(auth?.buildSessionSnapshot?.bind?.(auth) || auth?.buildSessionSnapshot) ||
+    safeCall(auth?.getSessionDebugSnapshot?.bind?.(auth) || auth?.getSessionDebugSnapshot) ||
+    null
+  );
+}
+
+function hasAuthenticatedUser(AppCore = null, Auth = null) {
+  const auth = resolveAuth(AppCore, Auth);
+
+  return Boolean(
+    isAuthenticated(AppCore, auth) &&
+      getUser(AppCore, auth)
   );
 }
 
@@ -209,27 +184,29 @@ function normalizeRestoreResult(result = null, AppCore = null, Auth = null) {
   const auth = resolveAuth(AppCore, Auth);
   const user = getUser(AppCore, auth);
   const session = getSession(AppCore, auth);
+  const snapshot = getAuthSnapshot(AppCore, auth);
 
-  const authenticated =
-    result?.authenticated === true ||
-    isAuthenticated(AppCore, auth);
+  const authenticated = hasAuthenticatedUser(AppCore, auth);
 
-  const usableUser = isUsableUser(user);
-
-  const ok =
-    result?.ok === true ||
+  const restored = Boolean(
     result?.restored === true ||
-    (authenticated && usableUser);
+      result?.ok === true ||
+      result?.authenticated === true ||
+      snapshot?.restored === true ||
+      snapshot?.authenticated === true ||
+      authenticated
+  );
 
   return {
-    ok: Boolean(ok && usableUser),
-    restored: Boolean(result?.restored || result?.ok || (authenticated && usableUser)),
-    authenticated: Boolean(authenticated && usableUser),
+    ok: Boolean(restored && authenticated),
+    restored,
+    authenticated,
 
-    user: usableUser ? user : null,
-    session: isObject(session) ? session : null,
+    user: authenticated ? user : null,
+    session: authenticated && isObject(session) ? session : null,
 
     result: isObject(result) ? result : null,
+    snapshot: isObject(snapshot) ? snapshot : null,
 
     source: "app.session",
     version: SESSION_VERSION,
@@ -275,6 +252,8 @@ export function getSessionBootstrapSnapshot({
   const auth = resolveAuth(AppCore, Auth);
   const user = getUser(AppCore, auth);
   const session = getSession(AppCore, auth);
+  const snapshot = getAuthSnapshot(AppCore, auth);
+  const authenticated = hasAuthenticatedUser(AppCore, auth);
 
   return {
     version: SESSION_VERSION,
@@ -284,16 +263,30 @@ export function getSessionBootstrapSnapshot({
     hasAuth: Boolean(auth),
     hasRestore: isFunction(auth?.restoreSession),
 
-    authenticated: isAuthenticated(AppCore, auth),
+    authenticated,
     hasUser: Boolean(user),
-    hasUsableUser: isUsableUser(user),
+    hasAuthenticatedUser: authenticated,
 
     hasSession: Boolean(session),
+
+    authSnapshot: isObject(snapshot)
+      ? {
+          authenticated: snapshot.authenticated === true,
+          hasToken: snapshot.hasToken === true,
+          hasUser: snapshot.hasUser === true,
+          hasSession: snapshot.hasSession === true,
+          role: snapshot.role || null,
+          userSlug: snapshot.userSlug || null,
+          homePath: snapshot.homePath || snapshot.defaultHome || null,
+        }
+      : null,
 
     policy: {
       bridgeOnly: true,
       authOwnsRestore: true,
       authOwnsSilentRefresh: true,
+      authOwnsUserValidity: true,
+      doesNotValidateUserStatus: true,
 
       noImports: true,
       noRouter: true,

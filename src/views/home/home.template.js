@@ -5,7 +5,7 @@
    Responsabilidad:
    - Render HTML puro de Home.
    - Consumir datos normalizados desde home.selectors.js.
-   - Pintar hero, métricas, acciones, actividad,
+   - Pintar hero, métricas, widgets, actividad,
      facturas/directorio e incidencias.
    - Home distinto para admin/user.
    - User nunca pinta clientes/usuarios/servidor.
@@ -59,7 +59,6 @@ import {
   getCollections,
   computeHomeStats,
   getStatCards,
-  getQuickActions,
 
   getUser,
   getRole,
@@ -105,7 +104,7 @@ import {
   getPagination,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.v6";
+export const TEMPLATE_VERSION = "home.template.v7";
 
 /* =========================================================
    CONSTANTS
@@ -412,6 +411,109 @@ function safeImageSrc(value = "") {
   return "";
 }
 
+function inferHomeRouteFromIdentity(...values) {
+  const identity = normalizeKey(
+    values
+      .flat(Infinity)
+      .map((value) => safeText(value, ""))
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  if (!identity) return "";
+
+  if (
+    identity.includes("factur") ||
+    identity.includes("invoice") ||
+    identity.includes("billing") ||
+    identity.includes("bill") ||
+    identity.includes("euro")
+  ) {
+    return ROUTES.FACTURAS;
+  }
+
+  if (
+    identity.includes("client") ||
+    identity.includes("cliente") ||
+    identity.includes("customer") ||
+    identity.includes("directorio")
+  ) {
+    return ROUTES.CLIENTES;
+  }
+
+  if (
+    identity.includes("usuario") ||
+    identity.includes("user") ||
+    identity.includes("member") ||
+    identity.includes("miembro")
+  ) {
+    return ROUTES.USUARIOS;
+  }
+
+  if (
+    identity.includes("servidor") ||
+    identity.includes("server") ||
+    identity.includes("salud") ||
+    identity.includes("health") ||
+    identity.includes("uptime") ||
+    identity.includes("infra")
+  ) {
+    return ROUTES.SERVIDOR;
+  }
+
+  if (
+    identity.includes("incid") ||
+    identity.includes("ticket") ||
+    identity.includes("solicitud") ||
+    identity.includes("urgent") ||
+    identity.includes("urgente") ||
+    identity.includes("open") ||
+    identity.includes("abiert") ||
+    identity.includes("closed") ||
+    identity.includes("cerrad")
+  ) {
+    return ROUTES.INCIDENCIAS;
+  }
+
+  return "";
+}
+
+function resolveStatRoute(card = {}) {
+  const explicitRoute = safeRoute(first(card.route, card.href, card.to, ""), "");
+
+  if (explicitRoute) return explicitRoute;
+
+  return (
+    inferHomeRouteFromIdentity(
+      card.id,
+      card.key,
+      card.type,
+      card.kind,
+      card.modifier,
+      card.iconName,
+      card.label,
+      card.title,
+      card.text,
+      card.badge
+    ) || ROUTES.INCIDENCIAS
+  );
+}
+
+function resolveWidgetRoute(widget = {}) {
+  const explicitRoute = safeRoute(getWidgetRoute(widget), "");
+
+  if (explicitRoute) return explicitRoute;
+
+  return (
+    inferHomeRouteFromIdentity(
+      getWidgetId(widget),
+      getWidgetType(widget),
+      getWidgetTitle(widget),
+      getWidgetText(widget)
+    ) || ROUTES.INCIDENCIAS
+  );
+}
+
 /* =========================================================
    STATE / ROLE / META
 ========================================================= */
@@ -519,41 +621,9 @@ function filterWidgetsForRole(input = {}, rows = []) {
 
     if (isAdminEntityValue(identity)) return false;
 
-    const route = safeRoute(getWidgetRoute(item), "");
+    const route = resolveWidgetRoute(item);
 
     return !isAdminOnlyRoute(route);
-  });
-}
-
-function filterQuickActionsForRole(input = {}, rows = []) {
-  const actions = safeArray(rows);
-
-  if (isAdmin(input)) return actions;
-
-  return actions.filter((action) => {
-    const item = safeObject(action);
-
-    const route = safeRoute(first(item.route, item.href, item.to, ""), "");
-    if (isAdminOnlyRoute(route)) return false;
-
-    const identity = safeText(
-      first(
-        item.action,
-        item.dataAction,
-        item.key,
-        item.id,
-        item.type,
-        item.kind,
-        item.title,
-        item.label,
-        item.text,
-        route,
-        ""
-      ),
-      ""
-    );
-
-    return !isAdminEntityValue(identity);
   });
 }
 
@@ -802,25 +872,34 @@ function heroMetrics(stats = {}) {
 
 function statCard(card = {}, index = 0) {
   const value = safeText(card.value, "0");
+  const label = safeText(card.label, "Métrica");
   const iconName = safeText(card.iconName, "activity");
   const modifier = normalizeKey(card.modifier || iconName || `stat-${index + 1}`);
+  const route = resolveStatRoute(card);
 
   return `
-    <article
-      class="home-stat-card home-stat-card--${attr(modifier)}"
+    <button
+      type="button"
+      class="home-stat-card home-stat-card--clickable home-stat-card--${attr(modifier)}"
+      data-home-action="${ACTIONS.NAVIGATE}"
+      data-action="${ACTIONS.NAVIGATE}"
+      data-route="${attr(route)}"
+      data-href="${attr(route)}"
       data-home-stat-card="true"
       data-stat-index="${attr(index + 1)}"
       data-stat-modifier="${attr(modifier)}"
+      data-payload="${jsonAttr({ stat: modifier, route })}"
+      aria-label="Abrir ${attr(label)}"
     >
-      <div class="home-stat-topline">
-        <div class="home-stat-icon" aria-hidden="true">${icon(iconName)}</div>
+      <span class="home-stat-topline">
+        <span class="home-stat-icon" aria-hidden="true">${icon(iconName)}</span>
         ${card.badge ? `<span class="home-stat-badge">${escapeHtml(card.badge)}</span>` : ""}
-      </div>
+      </span>
 
-      <div class="home-stat-label">${escapeHtml(safeText(card.label, "Métrica"))}</div>
-      <div class="home-stat-value" data-stat-value="${attr(value)}">${escapeHtml(value)}</div>
-      ${card.text ? `<div class="home-stat-text">${escapeHtml(card.text)}</div>` : ""}
-    </article>
+      <span class="home-stat-label">${escapeHtml(label)}</span>
+      <strong class="home-stat-value" data-stat-value="${attr(value)}">${escapeHtml(value)}</strong>
+      ${card.text ? `<span class="home-stat-text">${escapeHtml(card.text)}</span>` : ""}
+    </button>
   `;
 }
 
@@ -841,16 +920,10 @@ export function renderHomeHeader(input = {}) {
 
   return `
     <section
-      class="home-hero home-hero--${admin ? "admin" : "user"}"
+      class="home-hero home-hero--frameless home-hero--${admin ? "admin" : "user"}"
       data-home-section="hero"
       data-home-role="${admin ? "admin" : "user"}"
     >
-      <div class="home-hero-bg" aria-hidden="true">
-        <span class="home-hero-orb home-hero-orb--one"></span>
-        <span class="home-hero-orb home-hero-orb--two"></span>
-        <span class="home-hero-orb home-hero-orb--three"></span>
-      </div>
-
       <div class="home-hero-top">
         <div class="home-hero-main">
           ${avatar({
@@ -934,14 +1007,34 @@ export function renderHomeHeader(input = {}) {
 }
 
 /* =========================================================
-   WIDGETS / QUICK ACTIONS
+   WIDGETS
 ========================================================= */
+
+function widgetIconName(modifier = "") {
+  if (modifier.includes("factur") || modifier.includes("invoice") || modifier.includes("billing")) {
+    return "invoice";
+  }
+
+  if (modifier.includes("user") || modifier.includes("usuario")) {
+    return "users";
+  }
+
+  if (modifier.includes("client") || modifier.includes("cliente")) {
+    return "client";
+  }
+
+  if (modifier.includes("server") || modifier.includes("servidor") || modifier.includes("salud")) {
+    return "shield";
+  }
+
+  return "activity";
+}
 
 function widgetCard(widget = {}, index = 0) {
   const id = getWidgetId(widget) || `widget-${index + 1}`;
   const type = getWidgetType(widget);
-  const route = safeRoute(getWidgetRoute(widget), "");
-  const modifier = normalizeKey(type || "widget");
+  const route = resolveWidgetRoute(widget);
+  const modifier = normalizeKey(type || getWidgetTitle(widget) || "widget");
 
   return `
     <button
@@ -955,21 +1048,14 @@ function widgetCard(widget = {}, index = 0) {
       data-route="${attr(route)}"
       data-href="${attr(route)}"
       data-payload="${jsonAttr({ widgetId: id, type, route })}"
+      aria-label="Abrir ${attr(getWidgetTitle(widget) || type || "widget")}"
     >
       <span class="home-widget-glow" aria-hidden="true"></span>
 
       <span class="home-widget-head">
         <span class="home-widget-kicker">${escapeHtml(type || "widget")}</span>
         <span class="home-widget-icon" aria-hidden="true">
-          ${
-            modifier.includes("factur") || modifier.includes("invoice")
-              ? icon("invoice")
-              : modifier.includes("user") || modifier.includes("usuario")
-                ? icon("users")
-                : modifier.includes("client") || modifier.includes("cliente")
-                  ? icon("client")
-                  : icon("activity")
-          }
+          ${icon(widgetIconName(modifier))}
         </span>
       </span>
 
@@ -1002,92 +1088,14 @@ export function renderHomeWidgets(input = {}) {
   `;
 }
 
-function normalizeQuickAction(action = {}) {
-  const raw = safeObject(action);
-  const actionName = safeText(raw.action, "");
-  const key = normalizeKey(actionName);
-
-  const isCreate = [
-    ACTIONS.CREATE_INCIDENCIA,
-    "create",
-    "new",
-    "new_ticket",
-    "create_ticket",
-    "create_incidencia",
-    "new_incidencia",
-  ].includes(key);
-
-  return {
-    ...raw,
-    action: isCreate ? ACTIONS.CREATE_INCIDENCIA : actionName || ACTIONS.NAVIGATE,
-    dataAction: isCreate
-      ? ACTIONS.CREATE_INCIDENCIA
-      : safeText(raw.dataAction || ACTIONS.NAVIGATE, ACTIONS.NAVIGATE),
-    route: isCreate ? ROUTES.INCIDENCIAS : safeRoute(raw.route || raw.href || "", ""),
-    modifier: normalizeKey(raw.modifier || actionName || "default"),
-    isCreate,
-  };
-}
-
-function quickActionCard(action = {}, state = {}) {
-  const item = normalizeQuickAction(action);
-
-  const busy =
-    state.navigatingAction === item.action ||
-    state.navigatingAction === item.dataAction ||
-    state.navigatingAction === item.route ||
-    (item.isCreate && state.creating);
-
-  return `
-    <button
-      type="button"
-      class="${joinClasses("home-action-card", `home-action-card--${item.modifier}`, busy ? "is-loading" : "")}"
-      data-home-action="${attr(item.action)}"
-      data-action="${attr(item.dataAction)}"
-      data-route="${attr(item.route)}"
-      data-href="${attr(item.route)}"
-      data-payload="${jsonAttr({ action: item.action, route: item.route })}"
-      ${boolAttr(busy || state.loading || state.refreshing, 'disabled aria-busy="true"')}
-    >
-      <span class="home-action-card-icon" aria-hidden="true">${icon(item.iconName || (item.isCreate ? "plus" : "arrowRight"))}</span>
-      <span class="home-action-card-kicker">${escapeHtml(item.route || "Onion Support")}</span>
-      <strong class="home-action-card-title">${busy ? spinner(item.isCreate ? "Abriendo..." : "Navegando...") : escapeHtml(item.title || "Acción")}</strong>
-      <span class="home-action-card-text">${escapeHtml(item.text || "")}</span>
-      <span class="home-action-card-arrow" aria-hidden="true">${icon(item.isCreate ? "plus" : "arrowRight")}</span>
-    </button>
-  `;
-}
-
-export function renderHomeQuickActions(input = {}) {
-  const data = safeObject(input);
-  const state = getLoadingState(data);
-  const admin = isAdmin(data);
-  const actions = filterQuickActionsForRole(data, getQuickActions(data));
-
-  return `
-    <section class="home-panel home-panel--actions" data-home-section="quick-actions">
-      <div class="home-panel-head">
-        <div class="home-panel-copy">
-          <span class="home-panel-kicker">${admin ? "Operación admin" : "Acciones"}</span>
-          <h2 class="home-panel-title">Accesos rápidos</h2>
-          <p class="home-panel-subtitle">
-            ${escapeHtml(admin ? "Atajos principales para operar el panel." : "Acciones principales para moverte por tu cuenta.")}
-          </p>
-        </div>
-      </div>
-
-      ${
-        state.loading && !actions.length
-          ? loadingCards(4)
-          : actions.length
-            ? `<div class="home-actions-grid">${actions.map((item) => quickActionCard(item, state)).join("")}</div>`
-            : emptyState({
-                title: "Sin acciones disponibles",
-                text: "Cuando haya accesos disponibles aparecerán aquí.",
-              })
-      }
-    </section>
-  `;
+/**
+ * Compatibilidad pública:
+ * - La función se mantiene exportada para no romper imports externos.
+ * - No pinta nada: los accesos rápidos se eliminan del Home.
+ * - La navegación queda en widgets/stat cards/paneles reales.
+ */
+export function renderHomeQuickActions() {
+  return "";
 }
 
 /* =========================================================
@@ -1773,7 +1781,7 @@ export function renderHomeTicketsTable(input = {}) {
 export function renderHomeLoadingState() {
   return `
     <section class="home-view-root home-view-root--loading" data-home-scope="true">
-      <section class="home-hero home-hero--loading">
+      <section class="home-hero home-hero--frameless home-hero--loading">
         ${loadingCards(4)}
       </section>
 
@@ -1848,7 +1856,6 @@ export function renderHomeTemplate(input = {}) {
       ${renderHomeWidgets(payload)}
 
       <section class="home-grid" data-home-section="main-grid">
-        ${renderHomeQuickActions(payload)}
         ${renderHomeActivity(payload)}
         ${renderHomeInvoicePreview(payload)}
         ${renderHomeEntitiesPreview(payload)}

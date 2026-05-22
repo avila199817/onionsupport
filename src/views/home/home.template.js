@@ -2,28 +2,15 @@
    Onion Support - Home Template
    Archivo: /src/views/home/home.template.js
 
-   Responsabilidad:
-   - Render HTML puro de Home.
-   - Consumir datos normalizados desde home.selectors.js.
-   - Pintar hero, métricas, widgets, actividad,
-     facturas/directorio e incidencias.
-   - Home distinto para admin/user.
-   - User nunca pinta clientes/usuarios/servidor.
-   - Usar sólo roles reales: admin / user.
-   - Rutas base desde core/config.js.
-   - Admin routes reales desde core/config.js.
-   - Bloqueo de rutas legacy desde core/config.js.
-   - Sin fetch.
-   - Sin Auth.
-   - Sin Router.
-   - Sin storage.
-   - Sin CSS inline.
-   - Sin handlers inline.
-   - Sin rutas inventadas.
-   - Sin rutas detalle.
-   - Sin /home.
-   - Sin exponer raw/data/payload/response.
-   - Sin emails como identidad visual.
+   Final:
+   - Home simple, visual y directo.
+   - Sin card grande envolvente.
+   - Sin accesos rápidos.
+   - Sin widgets duplicados.
+   - Sin Urgentes, Salud, Última actividad ni Adjuntos.
+   - Con Facturas totales + importe total.
+   - Avatar visible con tono dinámico.
+   - Textos visibles en español.
 ========================================================= */
 
 import {
@@ -55,7 +42,6 @@ import {
   getInitials,
 
   getDashboard,
-  getWidgets,
   getCollections,
   computeHomeStats,
   getStatCards,
@@ -73,27 +59,16 @@ import {
   getTicketAvatarUrl,
   getTicketStatus,
   getTicketStatusKey,
-  getTicketStatusLabel,
   getTicketPriorityKey,
-  getTicketPriorityLabel,
   getTicketCategory,
   getTicketAssignedTo,
   getTicketCreatedAt,
   getTicketUpdatedAt,
-  getTicketAttachmentsCount,
 
   getInvoiceId,
   getInvoiceAmount,
   getInvoiceCurrency,
   getInvoiceStatusKey,
-
-  getWidgetId,
-  getWidgetTitle,
-  getWidgetText,
-  getWidgetValue,
-  getWidgetTrend,
-  getWidgetType,
-  getWidgetRoute,
 
   getActivity,
   getActivityTitle,
@@ -104,29 +79,20 @@ import {
   getPagination,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.v7";
-
-/* =========================================================
-   CONSTANTS
-========================================================= */
+export const TEMPLATE_VERSION = "home.template.final.10";
 
 const ACTIONS = Object.freeze({
   REFRESH: "refresh",
   RETRY: "retry",
   CREATE_INCIDENCIA: "create_incidencia",
-
   NAVIGATE: "navigate_home",
-  OPEN_WIDGET: "open_widget",
   COPY_ID: "copy_widget_id",
-
   PREV_PAGE: "prev_page",
   NEXT_PAGE: "next_page",
-
   EXPORT_CSV: "export_csv",
 });
 
 const LIMITS = Object.freeze({
-  widgets: 4,
   activity: 6,
   invoices: 4,
   entities: 5,
@@ -140,23 +106,24 @@ const STATUS_ORDER = Object.freeze([
   "closed",
 ]);
 
-const RAW_KEYS = new Set([
-  "raw",
-  "data",
-  "payload",
-  "response",
-]);
+const RAW_KEYS = new Set(["raw", "data", "payload", "response"]);
 
 const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
-const ADMIN_ENTITY_RE =
-  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory|servidores?|servidor|servers?)([\s._/-]|$)/i;
+const AVATAR_TONES = Object.freeze([
+  "violet",
+  "green",
+  "cyan",
+  "amber",
+  "rose",
+  "slate",
+]);
 
 /* =========================================================
-   SAFE HTML / ROUTES
+   Seguridad HTML / rutas
 ========================================================= */
 
 function redact(value = "") {
@@ -193,10 +160,6 @@ function boolAttr(condition = false, value = "") {
   return condition ? value : "";
 }
 
-function isSensitiveKey(key = "") {
-  return SENSITIVE_KEY_RE.test(String(key || ""));
-}
-
 function isEmailLike(value = "") {
   const text = safeText(value, "").trim();
   return Boolean(text && EMAIL_RE.test(text));
@@ -213,11 +176,9 @@ function visualLabel(value = "", fallback = "Usuario") {
 
 function sanitizePayloadValue(value, keyHint = "") {
   if (RAW_KEYS.has(keyHint)) return undefined;
-  if (isSensitiveKey(keyHint)) return undefined;
+  if (SENSITIVE_KEY_RE.test(String(keyHint || ""))) return undefined;
 
-  if (typeof value === "string") {
-    return redact(value);
-  }
+  if (typeof value === "string") return redact(value);
 
   if (Array.isArray(value)) {
     return value
@@ -230,13 +191,10 @@ function sanitizePayloadValue(value, keyHint = "") {
 
     for (const [key, item] of Object.entries(value)) {
       if (RAW_KEYS.has(key)) continue;
-      if (isSensitiveKey(key)) continue;
+      if (SENSITIVE_KEY_RE.test(String(key || ""))) continue;
 
       const clean = sanitizePayloadValue(item, key);
-
-      if (clean !== undefined) {
-        output[key] = clean;
-      }
+      if (clean !== undefined) output[key] = clean;
     }
 
     return output;
@@ -299,13 +257,8 @@ function routePathOnly(value = "") {
   } catch {
     let path = pathOnly.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
 
-    if (!path.startsWith("/")) {
-      path = `/${path}`;
-    }
-
-    if (path.length > 1) {
-      path = path.replace(/\/+$/g, "") || "/";
-    }
+    if (!path.startsWith("/")) path = `/${path}`;
+    if (path.length > 1) path = path.replace(/\/+$/g, "") || "/";
 
     return path || "";
   }
@@ -377,7 +330,7 @@ function isAdminOnlyRoute(route = "") {
   try {
     if (configIsAdminRoute(path) === true) return true;
   } catch {
-    // fallback abajo
+    // Fallback local.
   }
 
   return (
@@ -385,10 +338,6 @@ function isAdminOnlyRoute(route = "") {
     Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
     Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
   );
-}
-
-function isAdminEntityValue(value = "") {
-  return ADMIN_ENTITY_RE.test(String(value || "").toLowerCase());
 }
 
 function safeImageSrc(value = "") {
@@ -411,14 +360,293 @@ function safeImageSrc(value = "") {
   return "";
 }
 
-function inferHomeRouteFromIdentity(...values) {
-  const identity = normalizeKey(
-    values
-      .flat(Infinity)
-      .map((value) => safeText(value, ""))
-      .filter(Boolean)
-      .join(" ")
+/* =========================================================
+   Filtros visuales / totales / avatar
+========================================================= */
+
+function firstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+
+  return undefined;
+}
+
+function hashString(value = "") {
+  const text = safeText(value, "");
+  let hash = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return Math.abs(hash);
+}
+
+function getAvatarTone(seed = "") {
+  const safeSeed = safeText(seed, "avatar");
+  const index = hashString(safeSeed) % AVATAR_TONES.length;
+
+  return AVATAR_TONES[index] || "violet";
+}
+
+function homeIdentity(...values) {
+  return values
+    .flat(Infinity)
+    .map((value) => safeText(value, ""))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function isBlockedHomeIdentity(...values) {
+  const raw = homeIdentity(...values).toLowerCase();
+  const identity = normalizeKey(raw);
+
+  if (!identity && !raw) return false;
+
+  return Boolean(
+    identity.includes("urgent") ||
+      identity.includes("urgente") ||
+      identity.includes("salud") ||
+      identity.includes("health") ||
+      identity.includes("adjunto") ||
+      identity.includes("adjuntos") ||
+      identity.includes("archivo") ||
+      identity.includes("archivos") ||
+      identity.includes("documento") ||
+      identity.includes("documentos") ||
+      identity.includes("file") ||
+      identity.includes("files") ||
+      identity.includes("attachment") ||
+      identity.includes("attachments") ||
+      identity.includes("paperclip") ||
+      (
+        (identity.includes("ultima") || identity.includes("last") || raw.includes("última")) &&
+        (identity.includes("actividad") || identity.includes("activity"))
+      )
   );
+}
+
+function isInvoiceTotalsCard(card = {}) {
+  const raw = homeIdentity(
+    card.id,
+    card.key,
+    card.type,
+    card.kind,
+    card.modifier,
+    card.iconName,
+    card.label,
+    card.title,
+    card.text
+  ).toLowerCase();
+
+  const identity = normalizeKey(raw);
+
+  return Boolean(
+    raw.includes("facturas totales") ||
+      raw.includes("total facturas") ||
+      raw.includes("total de facturas") ||
+      raw.includes("invoices total") ||
+      raw.includes("total invoices") ||
+      (identity.includes("factur") && (identity.includes("total") || identity.includes("totales"))) ||
+      (identity.includes("invoice") && identity.includes("total"))
+  );
+}
+
+function parseAmount(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : Number.NaN;
+
+  const text = safeText(value, "").trim();
+  if (!text) return Number.NaN;
+
+  const clean = text.replace(/[^\d,.-]/g, "");
+  if (!clean) return Number.NaN;
+
+  const lastComma = clean.lastIndexOf(",");
+  const lastDot = clean.lastIndexOf(".");
+  const normalized = lastComma > lastDot
+    ? clean.replace(/\./g, "").replace(",", ".")
+    : clean.replace(/,/g, "");
+
+  const amount = Number(normalized);
+
+  return Number.isFinite(amount) ? amount : Number.NaN;
+}
+
+function getInvoicesTotalAmount(input = {}) {
+  const data = safeObject(input);
+  const dashboard = getDashboard(data);
+  const collections = getCollections(data);
+  const invoices = safeArray(collections.invoices);
+
+  const candidate = firstDefined(
+    collections.invoicesTotalAmount,
+    collections.totalInvoicesAmount,
+    collections.totalInvoiceAmount,
+    collections.totalAmount,
+    collections.facturasTotalAmount,
+    collections.facturacionTotal,
+    collections.billingTotal,
+    dashboard.invoicesTotalAmount,
+    dashboard.totalInvoicesAmount,
+    dashboard.totalInvoiceAmount,
+    dashboard.facturasTotalAmount,
+    dashboard.facturacionTotal,
+    dashboard.billingTotal,
+    data.invoicesTotalAmount,
+    data.totalInvoicesAmount,
+    data.totalInvoiceAmount,
+    data.facturasTotalAmount,
+    data.facturacionTotal,
+    data.billingTotal
+  );
+
+  const candidateAmount = parseAmount(candidate);
+
+  if (Number.isFinite(candidateAmount)) return candidateAmount;
+
+  return invoices.reduce((total, invoice) => total + safeNumber(getInvoiceAmount(invoice), 0), 0);
+}
+
+function getInvoicesTotalCount(input = {}) {
+  const data = safeObject(input);
+  const dashboard = getDashboard(data);
+  const collections = getCollections(data);
+  const invoices = safeArray(collections.invoices);
+
+  return safeNumber(
+    firstDefined(
+      collections.invoicesRemoteCount,
+      collections.invoicesTotalCount,
+      collections.totalInvoicesCount,
+      collections.facturasTotalCount,
+      dashboard.invoicesRemoteCount,
+      dashboard.invoicesTotalCount,
+      dashboard.totalInvoicesCount,
+      dashboard.facturasTotalCount,
+      data.invoicesRemoteCount,
+      data.invoicesTotalCount,
+      data.totalInvoicesCount,
+      data.facturasTotalCount
+    ),
+    invoices.length
+  );
+}
+
+function getInvoicesTotalCurrency(input = {}) {
+  const data = safeObject(input);
+  const dashboard = getDashboard(data);
+  const collections = getCollections(data);
+  const invoices = safeArray(collections.invoices);
+  const firstInvoice = safeObject(invoices[0]);
+
+  return safeText(
+    firstDefined(
+      collections.invoicesCurrency,
+      collections.currency,
+      dashboard.invoicesCurrency,
+      dashboard.currency,
+      data.invoicesCurrency,
+      data.currency,
+      getInvoiceCurrency(firstInvoice)
+    ),
+    DEFAULT_CURRENCY
+  );
+}
+
+function buildInvoicesTotalCard(input = {}) {
+  const amount = getInvoicesTotalAmount(input);
+  const currency = getInvoicesTotalCurrency(input);
+  const count = getInvoicesTotalCount(input);
+
+  return {
+    id: "facturas-totales",
+    key: "facturas-totales",
+    label: "Facturas totales",
+    value: formatNumber(count),
+    text: `Importe total: ${formatMoney(amount, currency)}`,
+    iconName: "euro",
+    modifier: "invoice-total",
+    route: ROUTES.FACTURAS,
+  };
+}
+
+function translateCard(card = {}, input = {}) {
+  const admin = isAdmin(input);
+  const identity = normalizeKey(homeIdentity(
+    card.id,
+    card.key,
+    card.type,
+    card.kind,
+    card.modifier,
+    card.iconName,
+    card.label,
+    card.title,
+    card.text
+  ));
+
+  if (identity.includes("ticket")) {
+    return {
+      ...card,
+      label: admin ? "Incidencias" : "Mis incidencias",
+      text: card.text || (admin ? "Incidencias visibles en el panel." : "Tus solicitudes visibles."),
+    };
+  }
+
+  if (identity.includes("invoice")) {
+    return {
+      ...card,
+      label: card.label && !String(card.label).toLowerCase().includes("invoice") ? card.label : "Facturas pendientes",
+      text: card.text || "Facturación visible.",
+    };
+  }
+
+  if (identity.includes("client") || identity.includes("customer")) {
+    return {
+      ...card,
+      label: "Clientes",
+      text: card.text || "Clientes visibles.",
+    };
+  }
+
+  if (identity.includes("user") || identity.includes("member")) {
+    return {
+      ...card,
+      label: "Usuarios",
+      text: card.text || "Usuarios visibles.",
+    };
+  }
+
+  return card;
+}
+
+function getVisibleHomeStatCards(input = {}) {
+  const cards = getStatCards(input)
+    .map((card) => translateCard(card, input))
+    .filter((card) => !isBlockedHomeIdentity(
+      card.id,
+      card.key,
+      card.type,
+      card.kind,
+      card.modifier,
+      card.iconName,
+      card.label,
+      card.title,
+      card.text,
+      card.badge,
+      card.value
+    ))
+    .filter((card) => !isInvoiceTotalsCard(card));
+
+  return [
+    ...cards,
+    buildInvoicesTotalCard(input),
+  ];
+}
+
+function inferHomeRouteFromIdentity(...values) {
+  const identity = normalizeKey(homeIdentity(...values));
 
   if (!identity) return "";
 
@@ -453,9 +681,6 @@ function inferHomeRouteFromIdentity(...values) {
   if (
     identity.includes("servidor") ||
     identity.includes("server") ||
-    identity.includes("salud") ||
-    identity.includes("health") ||
-    identity.includes("uptime") ||
     identity.includes("infra")
   ) {
     return ROUTES.SERVIDOR;
@@ -465,8 +690,6 @@ function inferHomeRouteFromIdentity(...values) {
     identity.includes("incid") ||
     identity.includes("ticket") ||
     identity.includes("solicitud") ||
-    identity.includes("urgent") ||
-    identity.includes("urgente") ||
     identity.includes("open") ||
     identity.includes("abiert") ||
     identity.includes("closed") ||
@@ -483,39 +706,22 @@ function resolveStatRoute(card = {}) {
 
   if (explicitRoute) return explicitRoute;
 
-  return (
-    inferHomeRouteFromIdentity(
-      card.id,
-      card.key,
-      card.type,
-      card.kind,
-      card.modifier,
-      card.iconName,
-      card.label,
-      card.title,
-      card.text,
-      card.badge
-    ) || ROUTES.INCIDENCIAS
-  );
-}
-
-function resolveWidgetRoute(widget = {}) {
-  const explicitRoute = safeRoute(getWidgetRoute(widget), "");
-
-  if (explicitRoute) return explicitRoute;
-
-  return (
-    inferHomeRouteFromIdentity(
-      getWidgetId(widget),
-      getWidgetType(widget),
-      getWidgetTitle(widget),
-      getWidgetText(widget)
-    ) || ROUTES.INCIDENCIAS
-  );
+  return inferHomeRouteFromIdentity(
+    card.id,
+    card.key,
+    card.type,
+    card.kind,
+    card.modifier,
+    card.iconName,
+    card.label,
+    card.title,
+    card.text,
+    card.badge
+  ) || ROUTES.INCIDENCIAS;
 }
 
 /* =========================================================
-   STATE / ROLE / META
+   Estado / rol / meta
 ========================================================= */
 
 function getState(input = {}) {
@@ -556,10 +762,7 @@ function getTemplateMeta(input = {}) {
   );
 
   return {
-    requestId: safeText(
-      first(data.requestId, state.requestId, dashboard.requestId, dashboard.meta?.requestId),
-      ""
-    ),
+    requestId: safeText(first(data.requestId, state.requestId, dashboard.requestId, dashboard.meta?.requestId), ""),
     lastUpdatedAt,
     partial: Boolean(first(dashboard.partial, data.partial, false)),
     errorsCount: safeArray(first(dashboard.errors, data.errors, [])).length,
@@ -575,9 +778,20 @@ function getSafeDisplayName(input = {}) {
 }
 
 function filterActivityForRole(input = {}, rows = []) {
-  if (isAdmin(input)) return safeArray(rows);
+  const activity = safeArray(rows).filter((item) => !isBlockedHomeIdentity(
+    item.type,
+    item.kind,
+    item.category,
+    item.title,
+    item.text,
+    getActivityType(item),
+    getActivityTitle(item),
+    getActivityText(item)
+  ));
 
-  return safeArray(rows).filter((item) => {
+  if (isAdmin(input)) return activity;
+
+  return activity.filter((item) => {
     const type = normalizeKey(first(item.type, item.kind, item.category, ""));
 
     return ![
@@ -593,42 +807,8 @@ function filterActivityForRole(input = {}, rows = []) {
   });
 }
 
-function filterWidgetsForRole(input = {}, rows = []) {
-  const widgets = safeArray(rows);
-
-  if (isAdmin(input)) return widgets;
-
-  return widgets.filter((widget) => {
-    const item = safeObject(widget);
-
-    const identity = safeText(
-      first(
-        item.entity,
-        item.resource,
-        item.collection,
-        item.type,
-        item.kind,
-        item.widgetId,
-        item.id,
-        item.name,
-        getWidgetId(item),
-        getWidgetType(item),
-        getWidgetRoute(item),
-        ""
-      ),
-      ""
-    );
-
-    if (isAdminEntityValue(identity)) return false;
-
-    const route = resolveWidgetRoute(item);
-
-    return !isAdminOnlyRoute(route);
-  });
-}
-
 /* =========================================================
-   ICONS
+   Iconos
 ========================================================= */
 
 function icon(name = "activity") {
@@ -655,14 +835,13 @@ function icon(name = "activity") {
     chevronLeft: `<svg ${common}><path d="m15 18-6-6 6-6"/></svg>`,
     chevronRight: `<svg ${common}><path d="m9 18 6-6-6-6"/></svg>`,
     arrowRight: `<svg ${common}><path d="M5 12h14"/><path d="m13 5 7 7-7 7"/></svg>`,
-    paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
   };
 
   return icons[name] || icons.activity;
 }
 
 /* =========================================================
-   SMALL UI
+   UI pequeña
 ========================================================= */
 
 function spinner(label = "Cargando") {
@@ -686,21 +865,11 @@ function emptyState({
       <div class="home-empty-icon" aria-hidden="true">${icon(iconName)}</div>
       <h3 class="home-empty-title">${escapeHtml(title)}</h3>
       <p class="home-empty-text">${escapeHtml(text)}</p>
-
-      ${
-        action
-          ? `
-            <button
-              type="button"
-              class="home-btn home-btn--primary"
-              data-home-action="${attr(action)}"
-              data-action="${attr(action)}"
-            >
-              ${escapeHtml(actionLabel)}
-            </button>
-          `
-          : ""
-      }
+      ${action ? `
+        <button type="button" class="home-btn home-btn--primary" data-home-action="${attr(action)}" data-action="${attr(action)}">
+          ${escapeHtml(actionLabel)}
+        </button>
+      ` : ""}
     </div>
   `;
 }
@@ -709,16 +878,14 @@ function loadingCards(count = 4) {
   return `
     <div class="home-cards-loading" aria-hidden="true">
       ${Array.from({ length: Math.max(1, safeNumber(count, 4)) })
-        .map(
-          () => `
-            <div class="home-card-skeleton">
-              <div class="home-skeleton home-skeleton--icon"></div>
-              <div class="home-skeleton home-skeleton--xs"></div>
-              <div class="home-skeleton home-skeleton--xl"></div>
-              <div class="home-skeleton home-skeleton--md"></div>
-            </div>
-          `
-        )
+        .map(() => `
+          <div class="home-card-skeleton">
+            <div class="home-skeleton home-skeleton--icon"></div>
+            <div class="home-skeleton home-skeleton--xs"></div>
+            <div class="home-skeleton home-skeleton--xl"></div>
+            <div class="home-skeleton home-skeleton--md"></div>
+          </div>
+        `)
         .join("")}
     </div>
   `;
@@ -728,21 +895,19 @@ function loadingRows(count = DEFAULT_PAGE_SIZE) {
   return `
     <div class="home-table-loading" aria-hidden="true">
       ${Array.from({ length: Math.max(1, safeNumber(count, DEFAULT_PAGE_SIZE)) })
-        .map(
-          () => `
-            <div class="home-table-loading-row">
-              <div class="home-skeleton home-skeleton--avatar"></div>
-              <div class="home-table-loading-copy">
-                <div class="home-skeleton home-skeleton--xs"></div>
-                <div class="home-skeleton home-skeleton--lg"></div>
-                <div class="home-skeleton home-skeleton--md"></div>
-              </div>
-              <div class="home-skeleton home-skeleton--pill"></div>
-              <div class="home-skeleton home-skeleton--date"></div>
-              <div class="home-skeleton home-skeleton--btn"></div>
+        .map(() => `
+          <div class="home-table-loading-row">
+            <div class="home-skeleton home-skeleton--avatar"></div>
+            <div class="home-table-loading-copy">
+              <div class="home-skeleton home-skeleton--xs"></div>
+              <div class="home-skeleton home-skeleton--lg"></div>
+              <div class="home-skeleton home-skeleton--md"></div>
             </div>
-          `
-        )
+            <div class="home-skeleton home-skeleton--pill"></div>
+            <div class="home-skeleton home-skeleton--date"></div>
+            <div class="home-skeleton home-skeleton--btn"></div>
+          </div>
+        `)
         .join("")}
     </div>
   `;
@@ -757,21 +922,12 @@ function errorBanner(message = "") {
     <div class="home-error-banner" role="status" data-home-error-banner="true">
       <span class="home-error-banner-icon" aria-hidden="true">${icon("alert")}</span>
       <span class="home-error-banner-text">${escapeHtml(text)}</span>
-      <button
-        type="button"
-        class="home-error-banner-action"
-        data-home-action="${ACTIONS.RETRY}"
-        data-action="${ACTIONS.RETRY}"
-      >
+      <button type="button" class="home-error-banner-action" data-home-action="${ACTIONS.RETRY}" data-action="${ACTIONS.RETRY}">
         Reintentar
       </button>
     </div>
   `;
 }
-
-/* =========================================================
-   AVATARS / BADGES
-========================================================= */
 
 function avatar({
   name = "Usuario",
@@ -783,56 +939,85 @@ function avatar({
   const label = visualLabel(name, "Usuario");
   const initials = getInitials(label);
   const src = safeImageSrc(image);
-  const avatarSeed = getInitials(safeText(seed, label));
+  const avatarSeedBase = safeText(first(seed, label, initials, kind), label);
+  const avatarSeed = getInitials(avatarSeedBase);
+  const tone = getAvatarTone(`${kind}|${avatarSeedBase}|${label}`);
+  const toneIndex = Math.max(1, AVATAR_TONES.indexOf(tone) + 1);
   const fallbackClass = `${safeText(className, "home-avatar")}--fallback`;
 
   return `
     <div
-      class="${joinClasses(className, src ? "" : fallbackClass)}"
+      class="${joinClasses(className, src ? "" : fallbackClass, `home-avatar-tone-${tone}`)}"
       aria-label="${attr(label)}"
       data-avatar-root="true"
       data-avatar-kind="${attr(kind)}"
       data-avatar-seed="${attr(avatarSeed)}"
       data-avatar-initials="${attr(initials)}"
+      data-avatar-tone="${attr(tone)}"
+      data-avatar-color-index="${attr(String(toneIndex))}"
       ${boolAttr(!src, 'data-fallback="true"')}
     >
       <span class="${attr(className)}-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
-
-      ${
-        src
-          ? `
-            <img
-              class="${attr(className)}-img"
-              src="${attr(src)}"
-              alt="${attr(label)}"
-              loading="lazy"
-              decoding="async"
-              referrerpolicy="no-referrer"
-              draggable="false"
-            >
-          `
-          : ""
-      }
+      ${src ? `
+        <img
+          class="${attr(className)}-img"
+          src="${attr(src)}"
+          alt="${attr(label)}"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+          draggable="false"
+        >
+      ` : ""}
     </div>
   `;
 }
 
+/* =========================================================
+   Estados visuales
+========================================================= */
+
+function ticketStatusLabel(item = {}) {
+  const key = getTicketStatusKey(getTicketStatus(item));
+
+  const labels = {
+    pending: "Pendiente",
+    open: "Abierta",
+    progress: "En curso",
+    in_progress: "En curso",
+    resolved: "Resuelta",
+    closed: "Cerrada",
+    cancelled: "Cancelada",
+    canceled: "Cancelada",
+  };
+
+  return labels[key] || "Estado";
+}
+
 function statusChip(item = {}) {
-  const rawStatus = getTicketStatus(item);
-  const key = getTicketStatusKey(rawStatus);
-  const label = getTicketStatusLabel(rawStatus);
+  const key = getTicketStatusKey(getTicketStatus(item));
 
   return `
     <span class="home-chip home-chip--${attr(key)}" data-status-key="${attr(key)}">
       <span class="home-chip-dot" aria-hidden="true"></span>
-      ${escapeHtml(label)}
+      ${escapeHtml(ticketStatusLabel(item))}
     </span>
   `;
 }
 
 function priorityBadge(item = {}) {
   const key = getTicketPriorityKey(item);
-  const label = getTicketPriorityLabel(item);
+
+  const labels = {
+    low: "Baja",
+    medium: "Media",
+    normal: "Normal",
+    high: "Alta",
+    urgent: "Urgente",
+    critical: "Crítica",
+  };
+
+  const label = labels[key] || "Prioridad";
 
   return `
     <span class="home-mini-badge home-mini-badge--${attr(key)}" data-priority-key="${attr(key)}">
@@ -843,28 +1028,24 @@ function priorityBadge(item = {}) {
 }
 
 /* =========================================================
-   HEADER / STATS
+   Cabecera / métricas
 ========================================================= */
 
 function heroMetrics(stats = {}) {
   const items = [
     ["Abiertas", stats.openTickets, "open"],
     ["Cerradas", stats.closedTickets, "closed"],
-    ["Urgentes", stats.urgentTickets, "urgent"],
-    ["Salud", `${Math.round(safeNumber(stats.healthRatio, 100))}%`, "health"],
   ];
 
   return `
-    <div class="home-hero-minimetrics" aria-label="Métricas rápidas">
+    <div class="home-hero-minimetrics home-hero-minimetrics--compact" aria-label="Métricas rápidas">
       ${items
-        .map(
-          ([label, value, key]) => `
-            <span class="home-minimetric home-minimetric--${attr(key)}">
-              <strong>${escapeHtml(String(value ?? 0))}</strong>
-              <span>${escapeHtml(label)}</span>
-            </span>
-          `
-        )
+        .map(([label, value, key]) => `
+          <span class="home-minimetric home-minimetric--${attr(key)}">
+            <strong>${escapeHtml(String(value ?? 0))}</strong>
+            <span>${escapeHtml(label)}</span>
+          </span>
+        `)
         .join("")}
     </div>
   `;
@@ -895,7 +1076,6 @@ function statCard(card = {}, index = 0) {
         <span class="home-stat-icon" aria-hidden="true">${icon(iconName)}</span>
         ${card.badge ? `<span class="home-stat-badge">${escapeHtml(card.badge)}</span>` : ""}
       </span>
-
       <span class="home-stat-label">${escapeHtml(label)}</span>
       <strong class="home-stat-value" data-stat-value="${attr(value)}">${escapeHtml(value)}</strong>
       ${card.text ? `<span class="home-stat-text">${escapeHtml(card.text)}</span>` : ""}
@@ -909,14 +1089,13 @@ export function renderHomeHeader(input = {}) {
   const stats = computeHomeStats(data);
   const meta = getTemplateMeta(data);
   const admin = isAdmin(data);
-
   const displayName = getSafeDisplayName(data);
   const user = getUser(data);
 
   const title = admin ? "Centro de control Onion" : `Hola, ${displayName}`;
   const subtitle = admin
-    ? "Resumen operativo de incidencias, facturación, clientes y usuarios."
-    : "Consulta tus incidencias, facturas y actividad reciente.";
+    ? "Vista clara de incidencias, facturación, clientes y usuarios."
+    : "Tus incidencias, facturas y actividad principal de un vistazo.";
 
   return `
     <section
@@ -935,11 +1114,6 @@ export function renderHomeHeader(input = {}) {
           })}
 
           <div class="home-hero-copy">
-            <span class="home-page-kicker">
-              ${icon(admin ? "shield" : "home")}
-              Onion Support · ${admin ? "Admin" : "Usuario"}
-            </span>
-
             <h1 class="home-page-title">${escapeHtml(title)}</h1>
             <p class="home-page-subtitle">${escapeHtml(subtitle)}</p>
           </div>
@@ -990,7 +1164,6 @@ export function renderHomeHeader(input = {}) {
       <div class="home-hero-meta">
         <span class="home-meta-pill">${icon("ticket")}${escapeHtml(`${formatNumber(stats.totalTickets)} incidencias`)}</span>
         <span class="home-meta-pill">${icon("invoice")}${escapeHtml(`${formatNumber(stats.pendingInvoices)} facturas pendientes`)}</span>
-        <span class="home-meta-pill">${icon("activity")}${escapeHtml(`Salud · ${Math.round(safeNumber(stats.healthRatio, 100))}%`)}</span>
         <span class="home-meta-pill">
           ${icon("refresh")}
           ${meta.lastUpdatedAt ? escapeHtml(`Actualizado · ${formatRelativeDate(meta.lastUpdatedAt)}`) : "Sin sincronización reciente"}
@@ -1000,107 +1173,45 @@ export function renderHomeHeader(input = {}) {
       ${heroMetrics(stats)}
 
       <div class="home-stats" data-home-section="stats">
-        ${getStatCards(data).map(statCard).join("")}
+        ${getVisibleHomeStatCards(data).map(statCard).join("")}
       </div>
     </section>
   `;
 }
 
 /* =========================================================
-   WIDGETS
+   Widgets y accesos rápidos anulados
 ========================================================= */
 
-function widgetIconName(modifier = "") {
-  if (modifier.includes("factur") || modifier.includes("invoice") || modifier.includes("billing")) {
-    return "invoice";
-  }
-
-  if (modifier.includes("user") || modifier.includes("usuario")) {
-    return "users";
-  }
-
-  if (modifier.includes("client") || modifier.includes("cliente")) {
-    return "client";
-  }
-
-  if (modifier.includes("server") || modifier.includes("servidor") || modifier.includes("salud")) {
-    return "shield";
-  }
-
-  return "activity";
+export function renderHomeWidgets() {
+  return "";
 }
 
-function widgetCard(widget = {}, index = 0) {
-  const id = getWidgetId(widget) || `widget-${index + 1}`;
-  const type = getWidgetType(widget);
-  const route = resolveWidgetRoute(widget);
-  const modifier = normalizeKey(type || getWidgetTitle(widget) || "widget");
-
-  return `
-    <button
-      type="button"
-      class="home-widget-card home-widget-card--${attr(modifier)}"
-      data-home-action="${attr(route ? ACTIONS.NAVIGATE : ACTIONS.OPEN_WIDGET)}"
-      data-action="${attr(route ? ACTIONS.NAVIGATE : ACTIONS.OPEN_WIDGET)}"
-      data-widget-id="${attr(id)}"
-      data-widget-key="${attr(id)}"
-      data-widget-type="${attr(type)}"
-      data-route="${attr(route)}"
-      data-href="${attr(route)}"
-      data-payload="${jsonAttr({ widgetId: id, type, route })}"
-      aria-label="Abrir ${attr(getWidgetTitle(widget) || type || "widget")}"
-    >
-      <span class="home-widget-glow" aria-hidden="true"></span>
-
-      <span class="home-widget-head">
-        <span class="home-widget-kicker">${escapeHtml(type || "widget")}</span>
-        <span class="home-widget-icon" aria-hidden="true">
-          ${icon(widgetIconName(modifier))}
-        </span>
-      </span>
-
-      <strong class="home-widget-value">${escapeHtml(String(getWidgetValue(widget) ?? "—"))}</strong>
-      <span class="home-widget-title">${escapeHtml(getWidgetTitle(widget))}</span>
-      ${getWidgetText(widget) ? `<span class="home-widget-text">${escapeHtml(getWidgetText(widget))}</span>` : ""}
-      ${getWidgetTrend(widget) ? `<span class="home-widget-trend">${escapeHtml(String(getWidgetTrend(widget)))}</span>` : ""}
-    </button>
-  `;
-}
-
-export function renderHomeWidgets(input = {}) {
-  const data = safeObject(input);
-  const state = getLoadingState(data);
-  const widgets = filterWidgetsForRole(data, getWidgets(data)).slice(0, LIMITS.widgets);
-
-  return `
-    <section class="home-widgets" data-home-section="widgets" aria-label="Widgets del dashboard">
-      ${
-        state.loading && !widgets.length
-          ? loadingCards(LIMITS.widgets)
-          : widgets.length
-            ? widgets.map(widgetCard).join("")
-            : emptyState({
-                title: "Sin widgets disponibles",
-                text: "El resumen se actualizará cuando haya métricas disponibles.",
-              })
-      }
-    </section>
-  `;
-}
-
-/**
- * Compatibilidad pública:
- * - La función se mantiene exportada para no romper imports externos.
- * - No pinta nada: los accesos rápidos se eliminan del Home.
- * - La navegación queda en widgets/stat cards/paneles reales.
- */
 export function renderHomeQuickActions() {
   return "";
 }
 
 /* =========================================================
-   ACTIVITY / SIDE PANELS
+   Actividad / facturación / entidades
 ========================================================= */
+
+function routeForActivityType(typeKey = "") {
+  if (typeKey === "invoice" || typeKey === "factura") return ROUTES.FACTURAS;
+  if (typeKey === "client" || typeKey === "cliente" || typeKey === "customer") return ROUTES.CLIENTES;
+  if (typeKey === "user" || typeKey === "usuario" || typeKey === "member") return ROUTES.USUARIOS;
+  if (typeKey === "server" || typeKey === "servidor") return ROUTES.SERVIDOR;
+
+  return ROUTES.INCIDENCIAS;
+}
+
+function activityIcon(typeKey = "") {
+  if (typeKey === "invoice" || typeKey === "factura") return "invoice";
+  if (typeKey === "client" || typeKey === "cliente" || typeKey === "customer") return "client";
+  if (typeKey === "user" || typeKey === "usuario" || typeKey === "member") return "users";
+  if (typeKey === "ticket" || typeKey === "incidencia") return "ticket";
+
+  return "activity";
+}
 
 function activityItem(input = {}, item = {}) {
   const type = getActivityType(item);
@@ -1114,31 +1225,11 @@ function activityItem(input = {}, item = {}) {
     return "";
   }
 
-  const route =
-    safeRoute(first(item.route, item.href, item.link, item.to, ""), "") ||
-    (typeKey === "invoice" || typeKey === "factura"
-      ? ROUTES.FACTURAS
-      : typeKey === "client" || typeKey === "cliente" || typeKey === "customer"
-        ? ROUTES.CLIENTES
-        : typeKey === "user" || typeKey === "usuario" || typeKey === "member"
-          ? ROUTES.USUARIOS
-          : typeKey === "server" || typeKey === "servidor"
-            ? ROUTES.SERVIDOR
-            : ROUTES.INCIDENCIAS);
+  const route = safeRoute(first(item.route, item.href, item.link, item.to, ""), "") || routeForActivityType(typeKey);
 
   if (!admin && isAdminOnlyRoute(route)) return "";
 
-  const entityId = safeText(
-    first(
-      item.entityId,
-      item.id,
-      item.ticketId,
-      item.incidenciaId,
-      item.facturaId,
-      item.invoiceId
-    ),
-    ""
-  );
+  const entityId = safeText(first(item.entityId, item.id, item.ticketId, item.incidenciaId, item.facturaId, item.invoiceId), "");
 
   return `
     <button
@@ -1151,25 +1242,11 @@ function activityItem(input = {}, item = {}) {
       data-entity-id="${attr(entityId)}"
       data-payload="${jsonAttr({ type, route, entityId })}"
     >
-      <span class="home-activity-icon" aria-hidden="true">
-        ${
-          typeKey === "invoice" || typeKey === "factura"
-            ? icon("invoice")
-            : typeKey === "client" || typeKey === "cliente" || typeKey === "customer"
-              ? icon("client")
-              : typeKey === "user" || typeKey === "usuario" || typeKey === "member"
-                ? icon("users")
-                : typeKey === "ticket" || typeKey === "incidencia"
-                  ? icon("ticket")
-                  : icon("activity")
-        }
-      </span>
-
+      <span class="home-activity-icon" aria-hidden="true">${icon(activityIcon(typeKey))}</span>
       <span class="home-activity-copy">
         <strong class="home-activity-title">${escapeHtml(getActivityTitle(item))}</strong>
         <span class="home-activity-text">${escapeHtml(getActivityText(item))}</span>
       </span>
-
       <span class="home-activity-time" title="${attr(formatDateTime(getActivityDate(item)))}">
         ${escapeHtml(formatRelativeDate(getActivityDate(item)))}
       </span>
@@ -1206,16 +1283,15 @@ export function renderHomeActivity(input = {}) {
         </button>
       </div>
 
-      ${
-        state.loading && !items.length
-          ? loadingCards(3)
-          : items.length
-            ? `<div class="home-activity-list">${items.join("")}</div>`
-            : emptyState({
-                title: "Sin actividad reciente",
-                text: "Cuando haya movimientos aparecerán aquí.",
-                iconName: "clock",
-              })
+      ${state.loading && !items.length
+        ? loadingCards(3)
+        : items.length
+          ? `<div class="home-activity-list">${items.join("")}</div>`
+          : emptyState({
+              title: "Sin actividad reciente",
+              text: "Cuando haya movimientos aparecerán aquí.",
+              iconName: "clock",
+            })
       }
     </section>
   `;
@@ -1233,7 +1309,7 @@ function invoiceStatusLabel(status = "") {
     canceled: "Cancelada",
   };
 
-  return labels[key] || status || "Estado";
+  return labels[key] || "Estado";
 }
 
 function invoiceItem(item = {}) {
@@ -1295,44 +1371,29 @@ export function renderHomeInvoicePreview(input = {}) {
         </button>
       </div>
 
-      ${
-        state.loading && !invoices.length
-          ? loadingCards(3)
-          : invoices.length
-            ? `<div class="home-invoice-mini-list">${invoices.map(invoiceItem).join("")}</div>`
-            : emptyState({
-                title: "Sin facturas visibles",
-                text: "Cuando haya facturas disponibles aparecerán aquí.",
-                iconName: "invoice",
-              })
+      ${state.loading && !invoices.length
+        ? loadingCards(3)
+        : invoices.length
+          ? `<div class="home-invoice-mini-list">${invoices.map(invoiceItem).join("")}</div>`
+          : emptyState({
+              title: "Sin facturas visibles",
+              text: "Cuando haya facturas disponibles aparecerán aquí.",
+              iconName: "invoice",
+            })
       }
     </section>
   `;
 }
 
-/* =========================================================
-   ADMIN DIRECTORY
-========================================================= */
-
 function entityName(item = {}, type = "client") {
   return visualLabel(
-    first(
-      item.displayName,
-      item.fullName,
-      item.name,
-      item.nombre,
-      item.razonSocial,
-      item.company,
-      item.username
-    ),
+    first(item.displayName, item.fullName, item.name, item.nombre, item.razonSocial, item.company, item.username),
     type === "user" ? "Usuario" : "Cliente"
   );
 }
 
 function entityMeta(item = {}, type = "client") {
-  if (type === "user") {
-    return safeText(first(item.role, item.rol, "Usuario"), "Usuario");
-  }
+  if (type === "user") return safeText(first(item.role, item.rol, "Usuario"), "Usuario");
 
   return safeText(first(item.clientId, item.clienteId, item.customerId, item.id, "Cliente"), "Cliente");
 }
@@ -1341,18 +1402,7 @@ function entityItem(item = {}, type = "client") {
   const isUser = type === "user";
   const label = entityName(item, type);
   const route = isUser ? ROUTES.USUARIOS : ROUTES.CLIENTES;
-
-  const entityId = safeText(
-    first(
-      item.userId,
-      item.usuarioId,
-      item.clienteId,
-      item.clientId,
-      item.customerId,
-      item.id
-    ),
-    ""
-  );
+  const entityId = safeText(first(item.userId, item.usuarioId, item.clienteId, item.clientId, item.customerId, item.id), "");
 
   return `
     <button
@@ -1368,12 +1418,10 @@ function entityItem(item = {}, type = "client") {
       <span class="home-entity-mini-avatar" data-avatar-seed="${attr(getInitials(label))}" aria-hidden="true">
         ${escapeHtml(getInitials(label))}
       </span>
-
       <span class="home-entity-mini-copy">
         <strong>${escapeHtml(label)}</strong>
         <span>${escapeHtml(entityMeta(item, type))}</span>
       </span>
-
       <span class="home-entity-mini-arrow" aria-hidden="true">${icon("chevronRight")}</span>
     </button>
   `;
@@ -1396,10 +1444,9 @@ export function renderHomeEntitiesPreview(input = {}) {
           <span class="home-panel-kicker">Directorio</span>
           <h2 class="home-panel-title">Clientes y usuarios</h2>
           <p class="home-panel-subtitle">
-            ${
-              state.loading && !clients.length && !users.length
-                ? "Cargando directorio..."
-                : escapeHtml(`${formatNumber(collections.clientsRemoteCount || clients.length)} clientes · ${formatNumber(collections.usersRemoteCount || users.length)} usuarios`)
+            ${state.loading && !clients.length && !users.length
+              ? "Cargando directorio..."
+              : escapeHtml(`${formatNumber(collections.clientsRemoteCount || clients.length)} clientes · ${formatNumber(collections.usersRemoteCount || users.length)} usuarios`)
             }
           </p>
         </div>
@@ -1416,38 +1463,31 @@ export function renderHomeEntitiesPreview(input = {}) {
         </button>
       </div>
 
-      ${
-        state.loading && !clients.length && !users.length
-          ? loadingCards(3)
-          : `
-            <div class="home-entities-list">
-              ${
-                clients.length
-                  ? clients.map((item) => entityItem(item, "client")).join("")
-                  : emptyState({
-                      title: "Sin clientes visibles",
-                      text: "Cuando haya clientes disponibles aparecerán aquí.",
-                      iconName: "client",
-                    })
-              }
-
-              ${
-                users.length
-                  ? `
-                    <div class="home-entities-separator" aria-hidden="true"></div>
-                    ${users.map((item) => entityItem(item, "user")).join("")}
-                  `
-                  : ""
-              }
-            </div>
-          `
+      ${state.loading && !clients.length && !users.length
+        ? loadingCards(3)
+        : `
+          <div class="home-entities-list">
+            ${clients.length
+              ? clients.map((item) => entityItem(item, "client")).join("")
+              : emptyState({
+                  title: "Sin clientes visibles",
+                  text: "Cuando haya clientes disponibles aparecerán aquí.",
+                  iconName: "client",
+                })
+            }
+            ${users.length ? `
+              <div class="home-entities-separator" aria-hidden="true"></div>
+              ${users.map((item) => entityItem(item, "user")).join("")}
+            ` : ""}
+          </div>
+        `
       }
     </section>
   `;
 }
 
 /* =========================================================
-   TICKETS
+   Tabla de incidencias
 ========================================================= */
 
 function statusSummary(input = {}) {
@@ -1462,17 +1502,23 @@ function statusSummary(input = {}) {
     }
   }
 
+  const labels = {
+    pending: "Pendientes",
+    open: "Abiertas",
+    progress: "En curso",
+    resolved: "Resueltas",
+    closed: "Cerradas",
+  };
+
   return `
     <div class="home-status-summary" aria-label="Resumen de estados">
-      ${STATUS_ORDER.map(
-        (status) => `
-          <span class="home-status-summary-item home-status-summary-item--${attr(status)}">
-            <span class="home-status-summary-dot" aria-hidden="true"></span>
-            <strong>${escapeHtml(String(counts[status] || 0))}</strong>
-            <span>${escapeHtml(getTicketStatusLabel(status))}</span>
-          </span>
-        `
-      ).join("")}
+      ${STATUS_ORDER.map((status) => `
+        <span class="home-status-summary-item home-status-summary-item--${attr(status)}">
+          <span class="home-status-summary-dot" aria-hidden="true"></span>
+          <strong>${escapeHtml(String(counts[status] || 0))}</strong>
+          <span>${escapeHtml(labels[status] || "Estado")}</span>
+        </span>
+      `).join("")}
     </div>
   `;
 }
@@ -1485,10 +1531,8 @@ function ticketRow(item = {}, state = {}) {
   const priorityKey = getTicketPriorityKey(item);
   const createdAt = getTicketCreatedAt(item);
   const updatedAt = getTicketUpdatedAt(item);
-
   const ownerName = visualLabel(getTicketOwnerName(item), "Usuario");
   const ownerMeta = safeText(first(getTicketAssignedTo(item), getTicketCategory(item)), "Sin asignación");
-
   const isOpening = isSameIdentity(state.openingTicketId, ticketId);
   const isSelected = isSameIdentity(state.selectedTicketId, ticketId);
 
@@ -1532,10 +1576,7 @@ function ticketRow(item = {}, state = {}) {
               >
                 ${escapeHtml(ticketId)}
               </button>
-
-              <span class="home-mini-badge home-mini-badge--category">
-                ${escapeHtml(getTicketCategory(item))}
-              </span>
+              <span class="home-mini-badge home-mini-badge--category">${escapeHtml(getTicketCategory(item))}</span>
             </div>
 
             <button
@@ -1554,7 +1595,6 @@ function ticketRow(item = {}, state = {}) {
             </button>
 
             <div class="home-ticket-description">${escapeHtml(description)}</div>
-
             <div class="home-ticket-badges">
               ${priorityBadge(item)}
               <span class="home-mini-badge home-mini-badge--agent">
@@ -1584,13 +1624,6 @@ function ticketRow(item = {}, state = {}) {
       <td class="home-ticket-cell home-ticket-cell--date">
         <span class="home-date-inline" title="${attr(formatDateTime(updatedAt))}">
           ${escapeHtml(formatLastUpdate(updatedAt))}
-        </span>
-      </td>
-
-      <td class="home-ticket-cell home-ticket-cell--attachments">
-        <span class="home-attachments-pill">
-          ${icon("paperclip")}
-          ${escapeHtml(String(getTicketAttachmentsCount(item)))}
         </span>
       </td>
 
@@ -1686,14 +1719,13 @@ export function renderHomeTicketsTable(input = {}) {
           <span class="home-panel-kicker">Incidencias</span>
           <h2 class="home-panel-title">${isAdmin(data) ? "Incidencias recientes" : "Tus últimas incidencias"}</h2>
           <p class="home-panel-subtitle">
-            ${
-              initialLoading
-                ? "Cargando incidencias..."
-                : escapeHtml(
-                    pagination.totalCount
-                      ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`
-                      : "Sin incidencias visibles"
-                  )
+            ${initialLoading
+              ? "Cargando incidencias..."
+              : escapeHtml(
+                  pagination.totalCount
+                    ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`
+                    : "Sin incidencias visibles"
+                )
             }
           </p>
         </div>
@@ -1731,51 +1763,47 @@ export function renderHomeTicketsTable(input = {}) {
         </div>
       </div>
 
-      ${
-        initialLoading
-          ? loadingRows(Math.max(3, pagination.pageSize || DEFAULT_PAGE_SIZE))
-          : `
-            <div class="${joinClasses("home-table-wrap", state.refreshing ? "is-refreshing" : "")}">
-              ${
-                pagination.pageItems.length
-                  ? `
-                    <div class="home-table-shell">
-                      <table class="home-table" role="table" aria-label="Resumen de incidencias del Home">
-                        <thead>
-                          <tr>
-                            <th scope="col">Incidencia</th>
-                            <th scope="col">Usuario / cliente</th>
-                            <th scope="col">Estado</th>
-                            <th scope="col">Creación</th>
-                            <th scope="col">Última novedad</th>
-                            <th scope="col">Adj.</th>
-                            <th scope="col">Acciones</th>
-                          </tr>
-                        </thead>
-
-                        <tbody>
-                          ${pagination.pageItems.map((item) => ticketRow(item, state)).join("")}
-                        </tbody>
-                      </table>
-                    </div>
-                  `
-                  : emptyState({
-                      title: state.error ? "No se pudieron cargar las incidencias" : "No hay incidencias para mostrar",
-                      text: state.error ? "Puedes reintentar la carga desde el botón de actualizar." : "Cuando haya solicitudes registradas aparecerán aquí.",
-                      action: state.error ? ACTIONS.RETRY : "",
-                      actionLabel: "Reintentar",
-                      iconName: state.error ? "alert" : "ticket",
-                    })
-              }
-            </div>
-          `
+      ${initialLoading
+        ? loadingRows(Math.max(3, pagination.pageSize || DEFAULT_PAGE_SIZE))
+        : `
+          <div class="${joinClasses("home-table-wrap", state.refreshing ? "is-refreshing" : "")}">
+            ${pagination.pageItems.length
+              ? `
+                <div class="home-table-shell">
+                  <table class="home-table" role="table" aria-label="Resumen de incidencias del Home">
+                    <thead>
+                      <tr>
+                        <th scope="col">Incidencia</th>
+                        <th scope="col">Usuario / cliente</th>
+                        <th scope="col">Estado</th>
+                        <th scope="col">Creación</th>
+                        <th scope="col">Última novedad</th>
+                        <th scope="col">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${pagination.pageItems.map((item) => ticketRow(item, state)).join("")}
+                    </tbody>
+                  </table>
+                </div>
+              `
+              : emptyState({
+                  title: state.error ? "No se pudieron cargar las incidencias" : "No hay incidencias para mostrar",
+                  text: state.error ? "Puedes reintentar la carga desde el botón de actualizar." : "Cuando haya solicitudes registradas aparecerán aquí.",
+                  action: state.error ? ACTIONS.RETRY : "",
+                  actionLabel: "Reintentar",
+                  iconName: state.error ? "alert" : "ticket",
+                })
+            }
+          </div>
+        `
       }
     </section>
   `;
 }
 
 /* =========================================================
-   FALLBACK STATES
+   Estados fallback
 ========================================================= */
 
 export function renderHomeLoadingState() {
@@ -1784,7 +1812,6 @@ export function renderHomeLoadingState() {
       <section class="home-hero home-hero--frameless home-hero--loading">
         ${loadingCards(4)}
       </section>
-
       <section class="home-panel">
         ${loadingRows(DEFAULT_PAGE_SIZE)}
       </section>
@@ -1809,7 +1836,7 @@ export function renderHomeErrorState(message = "No se pudo cargar el Home.") {
 }
 
 /* =========================================================
-   FULL TEMPLATE
+   Template completo
 ========================================================= */
 
 export function renderHomeTemplate(input = {}) {
@@ -1851,9 +1878,7 @@ export function renderHomeTemplate(input = {}) {
       aria-busy="${state.loading || state.refreshing ? "true" : "false"}"
     >
       ${errorBanner(state.error)}
-
       ${renderHomeHeader(payload)}
-      ${renderHomeWidgets(payload)}
 
       <section class="home-grid" data-home-section="main-grid">
         ${renderHomeActivity(payload)}

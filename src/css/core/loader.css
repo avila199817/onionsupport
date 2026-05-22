@@ -2,11 +2,11 @@
    Onion SPA — Loader CSS
    Archivo: /src/css/core/loader.css
 
-   ONION SUPPORT · BOOT LOADER
-   REFRESH SAFE · APPLE STYLE · PRO SAAS · TOKEN FIRST
+   ONION SUPPORT · BOOT LOADER · EXTREME 10/10
+   REFRESH SAFE · SOLID GRAPHITE · TOKEN FIRST · CSP CLEAN
 
    Arquitectura:
-   - variables.css = Token Pro System / dark base.
+   - variables.css = tokens base / dark.
    - light.css     = overrides light.
    - layout.css    = shell / mounts / main scroll.
    - loader.css    = loader, estados y animaciones.
@@ -50,30 +50,42 @@
 
 html.app-booting,
 html.app-loading,
+html[data-app-state="booting"],
+html[data-app-state="loading"],
 body.app-booting,
 body.app-loading,
-body.loading {
+body.loading,
+body[data-app-state="booting"],
+body[data-app-state="loading"],
+body[data-app-loading="true"] {
   min-block-size: 100%;
+  cursor: wait;
 }
 
 body.app-booting,
 body.app-loading,
-body.loading {
+body.loading,
+body[data-app-state="booting"],
+body[data-app-state="loading"],
+body[data-app-loading="true"] {
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: none;
 }
 
 html.app-ready,
-body.app-ready,
 html[data-app-state="ready"],
+body.app-ready,
+body[data-app-state="ready"],
 body[data-app-loading="false"] {
   min-block-size: 100%;
+  cursor: auto;
 }
 
 html.app-ready body,
-body.app-ready,
 html[data-app-state="ready"] body,
+body.app-ready,
+body[data-app-state="ready"],
 body[data-app-loading="false"] {
   overscroll-behavior: auto;
   touch-action: auto;
@@ -82,16 +94,20 @@ body[data-app-loading="false"] {
 
 /* =========================================================
    SHELL ANTI FLICKER BRIDGE
-   Layout.css es la fuente de verdad del shell.
+   layout.css es la fuente de verdad del shell.
    Aquí sólo se refuerzan estados de boot/ready para evitar flash.
 ========================================================= */
 
 html.app-booting #app-shell,
 html.app-loading #app-shell,
+html[data-app-state="booting"] #app-shell,
+html[data-app-state="loading"] #app-shell,
 body.app-booting #app-shell,
 body.app-loading #app-shell,
-html[data-app-state="booting"] #app-shell,
+body[data-app-state="booting"] #app-shell,
+body[data-app-state="loading"] #app-shell,
 body[data-app-loading="true"] #app-shell,
+#app-shell[aria-hidden="true"],
 #app-shell[data-shell="booting"],
 #app-shell[data-shell-state="booting"],
 #app-shell[data-shell-interactive="false"][aria-busy="true"] {
@@ -100,12 +116,15 @@ body[data-app-loading="true"] #app-shell,
   pointer-events: none;
 }
 
-html.app-ready #app-shell[data-shell-interactive="true"],
-body.app-ready #app-shell[data-shell-interactive="true"],
-html[data-app-state="ready"] #app-shell[data-shell-interactive="true"],
-body[data-app-loading="false"] #app-shell[data-shell-interactive="true"],
-#app-shell[data-shell="ready"][data-shell-interactive="true"],
-#app-shell[data-shell-state="ready"][data-shell-interactive="true"] {
+html.app-ready #app-shell,
+html[data-app-state="ready"] #app-shell,
+body.app-ready #app-shell,
+body[data-app-state="ready"] #app-shell,
+body[data-app-loading="false"] #app-shell,
+#app-shell[aria-hidden="false"],
+#app-shell[data-shell="ready"],
+#app-shell[data-shell-state="ready"],
+#app-shell[data-shell-interactive="true"] {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -120,61 +139,63 @@ body[data-app-loading="false"] #app-shell[data-shell-interactive="true"],
 .app-loader {
   --loader-z: var(--z-loader, 2147483000);
 
+  --loader-solid-bg: var(--loader-bg, var(--main-bg, #0D0D0D));
+  --loader-solid-card: var(--loader-dark-card, var(--card-bg, #242424));
+  --loader-solid-card-strong: var(--loader-dark-card-strong, var(--surface-strong, #3B3B3B));
+
   --loader-overlay-bg:
-    var(
-      --gradient-overlay,
-      linear-gradient(180deg, rgba(10,12,17,.96), rgba(10,12,17,.98))
-    ),
-    var(--app-noise, none),
-    var(--body-bg, var(--main-bg, #0a0c11));
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--graphite-400, #242424), var(--loader-solid-bg) 72%) 0%,
+      var(--loader-solid-bg) 100%
+    );
 
   --loader-overlay-aura:
     radial-gradient(
       circle at 50% 0%,
-      color-mix(in srgb, var(--accent, #7c5cff), transparent 90%),
+      color-mix(in srgb, var(--graphite-100, #696969), transparent 86%),
       transparent 38%
     ),
     radial-gradient(
       circle at 18% 18%,
-      color-mix(in srgb, var(--accent-3, #9b7cff), transparent 92%),
-      transparent 30%
+      color-mix(in srgb, var(--graphite-300, #3B3B3B), transparent 82%),
+      transparent 32%
     ),
     radial-gradient(
-      circle at 82% 28%,
-      color-mix(in srgb, var(--accent-2, #4ea7ff), transparent 92%),
-      transparent 32%
+      circle at 82% 24%,
+      color-mix(in srgb, var(--graphite-200, #525252), transparent 86%),
+      transparent 34%
     );
 
   --loader-card-surface:
-    var(
-      --glass-shine,
-      linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02))
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong, #fff), transparent 96%),
+      transparent 42%
     ),
-    var(--card-bg, var(--surface-elevated, rgba(18,22,32,.88)));
+    var(--loader-solid-card);
 
   --loader-card-surface-strong:
-    var(--panel-noise, none),
-    var(--surface-elevated-strong, var(--card-bg, rgba(18,22,32,.96)));
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong, #fff), transparent 95%),
+      transparent 48%
+    ),
+    var(--loader-solid-card-strong);
 
   --loader-card-border:
-    var(
-      --card-border,
-      color-mix(in srgb, var(--text-strong, #fff), transparent 88%)
-    );
+    color-mix(in srgb, var(--text-strong, #ffffff), transparent 88%);
 
   --loader-card-border-strong:
-    var(
-      --border-strong,
-      color-mix(in srgb, var(--text-strong, #fff), transparent 78%)
-    );
+    color-mix(in srgb, var(--text-strong, #ffffff), transparent 78%);
 
   --loader-card-shadow:
-    var(--shadow-xl, 0 28px 90px rgba(0,0,0,.42)),
-    var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.08));
+    var(--shadow-xl, 0 36px 100px rgba(0,0,0,.52)),
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong, #fff), transparent 94%);
 
   --loader-brand-shadow:
     var(--shadow-md, 0 16px 44px rgba(0,0,0,.34)),
-    var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.08));
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong, #fff), transparent 92%);
 
   --loader-brand-surface:
     linear-gradient(
@@ -184,34 +205,35 @@ body[data-app-loading="false"] #app-shell[data-shell-interactive="true"],
     ),
     var(--surface-glass-strong, rgba(255,255,255,.08));
 
-  --loader-brand-core-surface: var(--loader-card-surface-strong);
+  --loader-brand-core-surface:
+    var(--loader-card-surface-strong);
 
   --loader-card-shine:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--text-strong, #fff), transparent 94%),
+      color-mix(in srgb, var(--text-strong, #ffffff), transparent 94%),
       transparent 42%
     ),
     radial-gradient(
       circle at 50% 0%,
-      color-mix(in srgb, var(--text-strong, #fff), transparent 94%),
+      color-mix(in srgb, var(--text-strong, #ffffff), transparent 94%),
       transparent 34%
     );
 
   --loader-progress-track:
-    color-mix(in srgb, var(--text, #d8dee9), transparent 90%);
+    color-mix(in srgb, var(--text, #ffffff), transparent 90%);
 
   --loader-progress-active:
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--accent, #7c5cff), transparent 84%),
-      var(--accent, #7c5cff),
-      var(--accent-3, #9b7cff)
+      var(--graphite-300, #3B3B3B),
+      var(--graphite-200, #525252),
+      var(--graphite-100, #696969)
     );
 
   --loader-text-main: var(--text-strong, #ffffff);
-  --loader-text-muted: var(--text-muted, #aeb7c6);
-  --loader-text-soft: var(--text-dim, #7f8a99);
+  --loader-text-muted: var(--text-muted, rgba(255,255,255,.72));
+  --loader-text-soft: var(--text-dim, rgba(255,255,255,.50));
 
   --loader-brand-size-final: var(--loader-brand-size, 74px);
   --loader-logo-size-final: var(--loader-logo-size, 52px);
@@ -224,7 +246,7 @@ body[data-app-loading="false"] #app-shell[data-shell-interactive="true"],
   --loader-ring-size: 3px;
   --loader-spin-speed: 1s;
   --loader-orbit-speed-final: var(--loader-duration-orbit, 2.2s);
-  --loader-pulse-speed: 1.6s;
+  --loader-pulse-speed: 1.55s;
   --loader-bar-speed-final: var(--loader-duration-bar, 1.08s);
   --loader-fade-speed: var(--loader-duration-fade, var(--duration-normal, 220ms));
 
@@ -255,7 +277,6 @@ body[data-app-loading="false"] #app-shell[data-shell-interactive="true"],
   overflow: hidden;
 
   background: var(--loader-overlay-bg);
-
   color: var(--loader-text-main);
 
   opacity: 1;
@@ -265,8 +286,8 @@ body[data-app-loading="false"] #app-shell[data-shell-interactive="true"],
   isolation: isolate;
   contain: layout paint style;
 
-  backdrop-filter: var(--loader-backdrop-blur, blur(20px));
-  -webkit-backdrop-filter: var(--loader-backdrop-blur, blur(20px));
+  backdrop-filter: var(--loader-backdrop-blur, blur(18px) saturate(1.02));
+  -webkit-backdrop-filter: var(--loader-backdrop-blur, blur(18px) saturate(1.02));
 
   transition:
     opacity var(--loader-fade-speed) var(--ease-standard, ease),
@@ -284,10 +305,17 @@ body[data-app-loading="false"] #app-shell[data-shell-interactive="true"],
 .app-loader[data-loader-visible="true"],
 #app-loader[data-loader-state="booting"],
 .app-loader[data-loader-state="booting"],
+#app-loader[data-loader-state="visible"],
+.app-loader[data-loader-state="visible"],
 html.app-booting #app-loader,
 html.app-loading #app-loader,
+html[data-app-state="booting"] #app-loader,
+html[data-app-state="loading"] #app-loader,
 body.app-booting #app-loader,
-body.app-loading #app-loader {
+body.app-loading #app-loader,
+body[data-app-state="booting"] #app-loader,
+body[data-app-state="loading"] #app-loader,
+body[data-app-loading="true"] #app-loader {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -296,7 +324,9 @@ body.app-loading #app-loader {
 #app-loader.is-leaving,
 .app-loader.is-leaving,
 #app-loader[data-loader-state="leaving"],
-.app-loader[data-loader-state="leaving"] {
+.app-loader[data-loader-state="leaving"],
+#app-loader[data-loader-state="closing"],
+.app-loader[data-loader-state="closing"] {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -321,12 +351,14 @@ body.app-loading #app-loader {
    por un atributo legacy olvidado.
 */
 html.app-ready #app-loader:not([data-loader-force="true"]),
-body.app-ready #app-loader:not([data-loader-force="true"]),
 html[data-app-state="ready"] #app-loader:not([data-loader-force="true"]),
+body.app-ready #app-loader:not([data-loader-force="true"]),
+body[data-app-state="ready"] #app-loader:not([data-loader-force="true"]),
 body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]),
 html.app-ready .app-loader:not([data-loader-force="true"]),
-body.app-ready .app-loader:not([data-loader-force="true"]),
 html[data-app-state="ready"] .app-loader:not([data-loader-force="true"]),
+body.app-ready .app-loader:not([data-loader-force="true"]),
+body[data-app-state="ready"] .app-loader:not([data-loader-force="true"]),
 body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   opacity: 0;
   visibility: hidden;
@@ -340,7 +372,9 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
 #app-loader.has-hidden,
 .app-loader.has-hidden,
 #app-loader[data-loader-state="removed"],
-.app-loader[data-loader-state="removed"] {
+.app-loader[data-loader-state="removed"],
+#app-loader[data-loader-state="destroyed"],
+.app-loader[data-loader-state="destroyed"] {
   display: none !important;
 }
 
@@ -374,11 +408,11 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   background:
     radial-gradient(
       circle at 50% 50%,
-      color-mix(in srgb, var(--accent, #7c5cff), transparent 94%),
+      color-mix(in srgb, var(--graphite-100, #696969), transparent 90%),
       transparent 42%
     );
 
-  opacity: .72;
+  opacity: .68;
   pointer-events: none;
 
   animation:
@@ -426,8 +460,8 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   isolation: isolate;
   contain: layout paint style;
 
-  backdrop-filter: var(--loader-card-blur, blur(18px));
-  -webkit-backdrop-filter: var(--loader-card-blur, blur(18px));
+  backdrop-filter: var(--loader-card-blur, blur(16px) saturate(1.02));
+  -webkit-backdrop-filter: var(--loader-card-blur, blur(16px) saturate(1.02));
 
   transform: translateZ(0);
 
@@ -452,7 +486,7 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
 
   background: var(--loader-card-shine);
 
-  opacity: .84;
+  opacity: .82;
 }
 
 #app-loader .app-loader__card::after,
@@ -472,12 +506,12 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
     linear-gradient(
       90deg,
       transparent,
-      color-mix(in srgb, var(--accent, #7c5cff), transparent 58%),
-      color-mix(in srgb, var(--accent-3, #9b7cff), transparent 68%),
+      color-mix(in srgb, var(--text-strong, #fff), transparent 74%),
+      color-mix(in srgb, var(--graphite-100, #696969), transparent 64%),
       transparent
     );
 
-  opacity: .82;
+  opacity: .74;
 }
 
 #app-loader .app-loader__card > *,
@@ -505,7 +539,7 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
 
   overflow: hidden;
 
-  border: 1px solid color-mix(in srgb, var(--text-strong, #fff), transparent 94%);
+  border: 1px solid color-mix(in srgb, var(--text-strong, #fff), transparent 92%);
   border-radius: var(--loader-logo-radius-final);
 
   background: var(--loader-brand-surface);
@@ -526,13 +560,13 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
     conic-gradient(
       from 180deg,
       transparent,
-      color-mix(in srgb, var(--accent, #7c5cff), transparent 50%),
-      color-mix(in srgb, var(--accent-3, #9b7cff), transparent 56%),
-      color-mix(in srgb, var(--accent-2, #4ea7ff), transparent 68%),
+      color-mix(in srgb, var(--graphite-100, #696969), transparent 54%),
+      color-mix(in srgb, var(--graphite-200, #525252), transparent 58%),
+      color-mix(in srgb, var(--graphite-300, #3B3B3B), transparent 66%),
       transparent
     );
 
-  opacity: .58;
+  opacity: .56;
 
   animation:
     loaderSpin
@@ -575,10 +609,11 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   display: block;
 
   object-fit: contain;
+  object-position: center;
 
   filter:
     drop-shadow(
-      0 8px 18px color-mix(in srgb, var(--text, #d8dee9), transparent 82%)
+      0 8px 18px color-mix(in srgb, var(--text, #ffffff), transparent 84%)
     );
 
   user-select: none;
@@ -634,7 +669,7 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 #app-loader .app-loader__logo-fallback,
 .app-loader .app-loader__logo-fallback {
   position: relative;
-  z-index: 2;
+  z-index: 3;
 
   inline-size: var(--loader-logo-size-final);
   block-size: var(--loader-logo-size-final);
@@ -645,9 +680,11 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   border-radius: var(--radius-lg, 14px);
 
   background:
-    var(
-      --gradient-accent,
-      linear-gradient(135deg, var(--accent, #7c5cff), var(--accent-3, #9b7cff))
+    linear-gradient(
+      135deg,
+      var(--graphite-100, #696969),
+      var(--graphite-200, #525252) 52%,
+      var(--graphite-300, #3B3B3B)
     );
 
   color: var(--text-on-accent, #ffffff);
@@ -657,7 +694,7 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   line-height: 1;
   letter-spacing: -.05em;
 
-  opacity: .94;
+  opacity: .96;
 }
 
 #app-loader.has-logo-error .app-loader__logo,
@@ -687,6 +724,8 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   block-size: var(--loader-brand-size-final);
 
   margin: 0 auto 18px;
+
+  color: var(--loader-text-main);
 }
 
 #app-loader .loader-spinner::before,
@@ -706,14 +745,18 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   border:
     var(--loader-ring-size)
     solid
-    color-mix(in srgb, var(--text, #d8dee9), transparent 90%);
+    color-mix(in srgb, var(--text, #ffffff), transparent 90%);
 }
 
 #app-loader .loader-spinner::after,
 .app-loader .loader-spinner::after {
-  border: var(--loader-ring-size) solid transparent;
-  border-block-start-color: var(--accent, #7c5cff);
-  border-inline-end-color: var(--accent-3, #9b7cff);
+  border:
+    var(--loader-ring-size)
+    solid
+    transparent;
+
+  border-block-start-color: var(--graphite-100, #696969);
+  border-inline-end-color: var(--graphite-200, #525252);
 
   animation:
     loaderSpin
@@ -735,14 +778,16 @@ html.theme-dark .app-loader .app-loader__logo--dark {
       color-mix(in srgb, var(--text-on-accent, #fff), transparent 78%),
       transparent 62%
     ),
-    var(
-      --gradient-accent,
-      linear-gradient(135deg, var(--accent, #7c5cff), var(--accent-3, #9b7cff))
+    linear-gradient(
+      135deg,
+      var(--graphite-100, #696969),
+      var(--graphite-200, #525252),
+      var(--graphite-300, #3B3B3B)
     );
 
   box-shadow:
-    0 0 22px color-mix(in srgb, var(--text, #d8dee9), transparent 94%),
-    0 0 28px color-mix(in srgb, var(--accent, #7c5cff), transparent 74%);
+    0 0 20px color-mix(in srgb, var(--text, #fff), transparent 94%),
+    0 0 26px color-mix(in srgb, var(--graphite-100, #696969), transparent 74%);
 
   animation:
     loaderPulse
@@ -779,6 +824,7 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   line-height: 1.15;
   font-weight: var(--weight-black, 900);
   letter-spacing: -.035em;
+  text-wrap: balance;
 }
 
 #app-loader .loader-title,
@@ -802,92 +848,261 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 }
 
 #app-loader .app-loader__subtext,
-.app-loader .app-loader__subtext {
+.app-loader .app-loader__subtext,
+#app-loader .loader-subtext,
+.app-loader .loader-subtext {
   margin: 0;
 
   color: var(--loader-text-soft);
 
   font-size: var(--loader-subtext-size, 11px);
-  line-height: 1.35;
+  line-height: 1.45;
   font-weight: var(--weight-medium, 500);
 }
 
+#app-loader .app-loader__dots,
+.app-loader .app-loader__dots,
+#app-loader .loader-dots,
+.app-loader .loader-dots {
+  display: inline-block;
+
+  min-inline-size: 1.5em;
+
+  text-align: start;
+}
+
+#app-loader .app-loader__dots::after,
+.app-loader .app-loader__dots::after,
 #app-loader .loader-dots::after,
 .app-loader .loader-dots::after {
   content: "";
 
-  display: inline-block;
-
-  inline-size: 1.2em;
-
-  text-align: start;
-
   animation:
     loaderDots
-    1.4s
-    steps(4, end)
+    1.18s
+    steps(1, end)
     infinite;
 }
 
 
 /* =========================================================
-   PROGRESS BAR · NEW + LEGACY
+   PROGRESS BAR
 ========================================================= */
 
+#app-loader .app-loader__progress,
+.app-loader .app-loader__progress,
 #app-loader .app-loader__bar,
 #app-loader .loader-progress,
 .app-loader .app-loader__bar,
 .app-loader .loader-progress {
   position: relative;
-  z-index: 2;
 
   inline-size: 100%;
-  block-size: var(--loader-progress-height-final);
+  max-inline-size: 250px;
 
-  margin-block-start: 2px;
+  block-size: var(--loader-progress-height-final);
 
   overflow: hidden;
 
+  border: 1px solid color-mix(in srgb, var(--text-strong, #fff), transparent 92%);
   border-radius: var(--radius-pill, 999px);
 
   background: var(--loader-progress-track);
 
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong, #fff), transparent 96%);
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong, #fff), transparent 94%);
 }
 
 #app-loader .app-loader__bar-fill,
 #app-loader .loader-progress > span,
 .app-loader .app-loader__bar-fill,
 .app-loader .loader-progress > span {
-  display: block;
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
 
-  inline-size: 42%;
-  block-size: 100%;
+  inline-size: 46%;
+  min-inline-size: 46%;
 
   border-radius: inherit;
 
   background: var(--loader-progress-active);
 
   box-shadow:
-    0 0 18px color-mix(in srgb, var(--accent, #7c5cff), transparent 68%);
+    0 0 14px color-mix(in srgb, var(--graphite-100, #696969), transparent 72%);
+
+  transform: translateX(-120%);
 
   animation:
     loaderBar
     var(--loader-bar-speed-final)
-    var(--ease-standard, ease-in-out)
+    var(--ease-standard, ease)
+    infinite;
+}
+
+#app-loader .app-loader__bar:not(:has(.app-loader__bar-fill))::before,
+#app-loader .loader-progress:not(:has(span))::before,
+.app-loader .app-loader__bar:not(:has(.app-loader__bar-fill))::before,
+.app-loader .loader-progress:not(:has(span))::before {
+  content: "";
+
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+
+  inline-size: 46%;
+
+  border-radius: inherit;
+
+  background: var(--loader-progress-active);
+
+  box-shadow:
+    0 0 14px color-mix(in srgb, var(--graphite-100, #696969), transparent 72%);
+
+  transform: translateX(-120%);
+
+  animation:
+    loaderBar
+    var(--loader-bar-speed-final)
+    var(--ease-standard, ease)
     infinite;
 }
 
 
 /* =========================================================
-   ACCESSIBILITY / BUSY STATES
+   STATUS / META
 ========================================================= */
 
-#app-loader[aria-busy="true"],
-.app-loader[aria-busy="true"] {
-  cursor: wait;
+#app-loader .app-loader__status,
+.app-loader .app-loader__status,
+#app-loader .loader-status,
+.app-loader .loader-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  gap: 7px;
+
+  max-inline-size: 100%;
+
+  color: var(--loader-text-soft);
+
+  font-size: var(--font-xs, 11px);
+  line-height: 1.3;
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: .035em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
+
+#app-loader .app-loader__status::before,
+.app-loader .app-loader__status::before,
+#app-loader .loader-status::before,
+.app-loader .loader-status::before {
+  content: "";
+
+  inline-size: 6px;
+  block-size: 6px;
+
+  flex: 0 0 auto;
+
+  border-radius: 50%;
+
+  background: currentColor;
+
+  opacity: .72;
+
+  animation:
+    loaderPulse
+    var(--loader-pulse-speed)
+    var(--ease-standard, ease-in-out)
+    infinite;
+}
+
+#app-loader .app-loader__meta,
+.app-loader .app-loader__meta,
+#app-loader .loader-meta,
+.app-loader .loader-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  gap: 8px;
+  flex-wrap: wrap;
+
+  max-inline-size: 100%;
+
+  color: var(--loader-text-soft);
+
+  font-size: var(--font-xs, 11px);
+  line-height: 1.3;
+}
+
+#app-loader .app-loader__meta-item,
+.app-loader .app-loader__meta-item,
+#app-loader .loader-meta-item,
+.app-loader .loader-meta-item {
+  display: inline-flex;
+  align-items: center;
+
+  gap: 5px;
+
+  min-inline-size: 0;
+}
+
+#app-loader .app-loader__meta-item strong,
+.app-loader .app-loader__meta-item strong,
+#app-loader .loader-meta-item strong,
+.app-loader .loader-meta-item strong {
+  color: var(--loader-text-muted);
+  font-weight: var(--weight-semibold, 600);
+}
+
+
+/* =========================================================
+   ERROR / DEGRADED STATE
+========================================================= */
+
+#app-loader.is-error,
+.app-loader.is-error,
+#app-loader[data-loader-state="error"],
+.app-loader[data-loader-state="error"],
+#app-loader[data-loader-error="true"],
+.app-loader[data-loader-error="true"] {
+  --loader-progress-active:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--error, #ef4444), transparent 28%),
+      var(--error, #ef4444)
+    );
+}
+
+#app-loader.is-error .app-loader__card,
+#app-loader.is-error .loader-card,
+.app-loader.is-error .app-loader__card,
+.app-loader.is-error .loader-card,
+#app-loader[data-loader-state="error"] .app-loader__card,
+#app-loader[data-loader-state="error"] .loader-card,
+.app-loader[data-loader-state="error"] .app-loader__card,
+.app-loader[data-loader-state="error"] .loader-card {
+  border-color: color-mix(in srgb, var(--error, #ef4444), transparent 62%);
+}
+
+#app-loader.is-error .app-loader__status,
+.app-loader.is-error .app-loader__status,
+#app-loader.is-error .loader-status,
+.app-loader.is-error .loader-status,
+#app-loader[data-loader-state="error"] .app-loader__status,
+#app-loader[data-loader-state="error"] .loader-status,
+.app-loader[data-loader-state="error"] .app-loader__status,
+.app-loader[data-loader-state="error"] .loader-status {
+  color: var(--error, #ef4444);
+}
+
+
+/* =========================================================
+   BUSY CURSOR BRIDGE
+========================================================= */
 
 #view-container[aria-busy="true"],
 #main-content[aria-busy="true"],
@@ -896,14 +1111,17 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 }
 
 html.app-ready #view-container,
-body.app-ready #view-container,
 html.app-ready #main-content,
-body.app-ready #main-content,
 html.app-ready #app-shell,
-body.app-ready #app-shell,
 html[data-app-state="ready"] #view-container,
 html[data-app-state="ready"] #main-content,
-html[data-app-state="ready"] #app-shell {
+html[data-app-state="ready"] #app-shell,
+body.app-ready #view-container,
+body.app-ready #main-content,
+body.app-ready #app-shell,
+body[data-app-state="ready"] #view-container,
+body[data-app-state="ready"] #main-content,
+body[data-app-state="ready"] #app-shell {
   cursor: auto;
 }
 
@@ -1014,6 +1232,7 @@ html[data-app-state="ready"] #app-shell {
   .app-loader .loader-card {
     min-inline-size: min(92vw, 272px);
     padding: 24px 18px 20px;
+    gap: 16px;
   }
 
   #app-loader .app-loader__title,
@@ -1031,6 +1250,15 @@ html[data-app-state="ready"] #app-shell {
   .app-loader .app-loader__text,
   .app-loader .loader-subtitle {
     font-size: 12px;
+  }
+
+  #app-loader .app-loader__progress,
+  #app-loader .app-loader__bar,
+  #app-loader .loader-progress,
+  .app-loader .app-loader__progress,
+  .app-loader .app-loader__bar,
+  .app-loader .loader-progress {
+    max-inline-size: 220px;
   }
 }
 
@@ -1055,7 +1283,9 @@ html[data-app-state="ready"] #app-shell {
   }
 
   #app-loader .app-loader__subtext,
-  .app-loader .app-loader__subtext {
+  #app-loader .loader-subtext,
+  .app-loader .app-loader__subtext,
+  .app-loader .loader-subtext {
     display: none;
   }
 }
@@ -1068,14 +1298,14 @@ html[data-app-state="ready"] #app-shell {
 @supports not ((backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px))) {
   #app-loader,
   .app-loader {
-    background: var(--body-bg, var(--main-bg, #0a0c11));
+    background: var(--body-bg, var(--main-bg, #0D0D0D));
   }
 
   #app-loader .app-loader__card,
   #app-loader .loader-card,
   .app-loader .app-loader__card,
   .app-loader .loader-card {
-    background: var(--card-bg, var(--surface-elevated, #121620));
+    background: var(--card-bg, var(--surface-elevated, #242424));
   }
 }
 
@@ -1099,8 +1329,10 @@ html[data-app-state="ready"] #app-shell {
   #app-loader .app-loader__brand,
   .app-loader .app-loader__brand,
   #app-loader .app-loader__bar,
+  #app-loader .app-loader__progress,
   #app-loader .loader-progress,
   .app-loader .app-loader__bar,
+  .app-loader .app-loader__progress,
   .app-loader .loader-progress {
     border: 1px solid CanvasText;
     background: Canvas;
@@ -1114,8 +1346,12 @@ html[data-app-state="ready"] #app-shell {
   .app-loader .app-loader__brand::after,
   #app-loader .app-loader__card::before,
   #app-loader .app-loader__card::after,
+  #app-loader .loader-card::before,
+  #app-loader .loader-card::after,
   .app-loader .app-loader__card::before,
   .app-loader .app-loader__card::after,
+  .app-loader .loader-card::before,
+  .app-loader .loader-card::after,
   #app-loader .app-loader__backdrop,
   .app-loader .app-loader__backdrop {
     display: none;
@@ -1189,6 +1425,11 @@ html[data-app-state="ready"] #app-shell {
   .app-loader .loader-card {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+
+  #app-loader .app-loader__backdrop::before,
+  .app-loader .app-loader__backdrop::before {
+    opacity: .28;
   }
 }
 

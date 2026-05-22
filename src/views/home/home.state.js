@@ -9,6 +9,8 @@
    - Separar Home admin/user desde el propio payload.
    - User nunca conserva usuarios/clientes/servidor de cache admin.
    - Preservar datos existentes sólo si el rol no cambia.
+   - Leer colecciones desde dashboard raíz y dashboard.collections.
+   - Evitar machacar dashboard con arrays vacíos.
    - Exponer setters usados por homeView.js.
    - Redactar errores/snapshots.
    - No conservar raw/payload/response/data backend en dashboard.
@@ -22,7 +24,7 @@
    - Sin CSS.
 ========================================================= */
 
-export const HOME_STATE_VERSION = "home.state.v6";
+export const HOME_STATE_VERSION = "home.state.v7";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 5;
@@ -168,11 +170,21 @@ function first(...values) {
 }
 
 function firstArray(...values) {
+  let empty = null;
+
   for (const value of values) {
-    if (Array.isArray(value)) return value;
+    if (!Array.isArray(value)) continue;
+
+    if (value.length) {
+      return value;
+    }
+
+    if (!empty) {
+      empty = value;
+    }
   }
 
-  return null;
+  return empty;
 }
 
 function nowIso() {
@@ -772,6 +784,117 @@ function normalizeSummary(summary = {}, admin = false) {
   });
 }
 
+function fillCollectionsFromDashboard() {
+  const admin = currentIsAdmin();
+  const dashboard = safeObject(homeState.dashboard);
+  const collections = safeObject(dashboard.collections);
+
+  if (!homeState.tickets.length) {
+    homeState.tickets = safeArray(
+      firstArray(
+        dashboard.tickets,
+        dashboard.incidencias,
+        collections.tickets,
+        collections.incidencias
+      )
+    );
+  }
+
+  if (!homeState.invoices.length) {
+    homeState.invoices = safeArray(
+      firstArray(
+        dashboard.invoices,
+        dashboard.facturas,
+        collections.invoices,
+        collections.facturas
+      )
+    );
+  }
+
+  if (admin && !homeState.users.length) {
+    homeState.users = safeArray(
+      firstArray(
+        dashboard.users,
+        dashboard.usuarios,
+        collections.users,
+        collections.usuarios
+      )
+    );
+  }
+
+  if (admin && !homeState.clients.length) {
+    homeState.clients = safeArray(
+      firstArray(
+        dashboard.clients,
+        dashboard.clientes,
+        dashboard.customers,
+        collections.clients,
+        collections.clientes,
+        collections.customers
+      )
+    );
+  }
+
+  if (admin && !homeState.servers.length) {
+    homeState.servers = safeArray(
+      firstArray(
+        dashboard.servers,
+        dashboard.servidores,
+        collections.servers,
+        collections.servidores
+      )
+    );
+  }
+
+  if (admin && !hasKeys(homeState.server)) {
+    homeState.server = safeObject(
+      first(
+        dashboard.server,
+        dashboard.servidor,
+        collections.server,
+        collections.servidor,
+        {}
+      )
+    );
+  }
+
+  if (!homeState.widgets.length) {
+    homeState.widgets = filterWidgetsForRole(
+      safeArray(
+        firstArray(
+          dashboard.widgets,
+          dashboard.cards,
+          dashboard.kpis,
+          dashboard.blocks,
+          collections.widgets,
+          collections.cards,
+          collections.kpis,
+          collections.blocks
+        )
+      ),
+      admin
+    );
+  }
+
+  if (!homeState.activity.length) {
+    homeState.activity = filterActivityForRole(
+      safeArray(
+        firstArray(
+          dashboard.activity,
+          dashboard.activities,
+          dashboard.recent,
+          dashboard.recentActivity,
+          collections.activity,
+          collections.activities,
+          collections.recent,
+          collections.recentActivity
+        )
+      ),
+      admin
+    );
+  }
+}
+
 function syncAliases() {
   const admin = currentIsAdmin();
 
@@ -934,6 +1057,8 @@ export function normalizeHomeState() {
   homeState.server = admin ? safeObject(homeState.server) : {};
 
   homeState.activity = filterActivityForRole(safeArray(homeState.activity), admin);
+
+  fillCollectionsFromDashboard();
 
   homeState.ticketsRemoteCount = Math.max(homeState.tickets.length, safeNumber(homeState.ticketsRemoteCount, 0));
   homeState.invoicesRemoteCount = Math.max(homeState.invoices.length, safeNumber(homeState.invoicesRemoteCount, 0));
@@ -1198,14 +1323,76 @@ export function syncHomeStateFromDashboard(dashboard = {}, options = {}) {
     );
   }
 
-  const widgets = firstArray(raw.widgets, raw.cards, raw.kpis, raw.blocks);
-  const tickets = firstArray(raw.tickets, raw.incidencias);
-  const invoices = firstArray(raw.invoices, raw.facturas);
-  const users = admin ? firstArray(raw.users, raw.usuarios) : [];
-  const clients = admin ? firstArray(raw.clients, raw.clientes, raw.customers) : [];
-  const servers = admin ? firstArray(raw.servers, raw.servidores) : [];
-  const server = admin ? first(raw.server, raw.servidor, {}) : {};
-  const activity = firstArray(raw.activity, raw.activities, raw.recent, raw.recentActivity);
+  const rawCollections = safeObject(raw.collections);
+
+  const widgets = firstArray(
+    raw.widgets,
+    raw.cards,
+    raw.kpis,
+    raw.blocks,
+    rawCollections.widgets,
+    rawCollections.cards,
+    rawCollections.kpis,
+    rawCollections.blocks
+  );
+
+  const tickets = firstArray(
+    raw.tickets,
+    raw.incidencias,
+    rawCollections.tickets,
+    rawCollections.incidencias
+  );
+
+  const invoices = firstArray(
+    raw.invoices,
+    raw.facturas,
+    rawCollections.invoices,
+    rawCollections.facturas
+  );
+
+  const users = admin
+    ? firstArray(
+        raw.users,
+        raw.usuarios,
+        rawCollections.users,
+        rawCollections.usuarios
+      )
+    : [];
+
+  const clients = admin
+    ? firstArray(
+        raw.clients,
+        raw.clientes,
+        raw.customers,
+        rawCollections.clients,
+        rawCollections.clientes,
+        rawCollections.customers
+      )
+    : [];
+
+  const servers = admin
+    ? firstArray(
+        raw.servers,
+        raw.servidores,
+        rawCollections.servers,
+        rawCollections.servidores
+      )
+    : [];
+
+  const server = admin
+    ? first(raw.server, raw.servidor, rawCollections.server, rawCollections.servidor, {})
+    : {};
+
+  const activity = firstArray(
+    raw.activity,
+    raw.activities,
+    raw.recent,
+    raw.recentActivity,
+    rawCollections.activity,
+    rawCollections.activities,
+    rawCollections.recent,
+    rawCollections.recentActivity
+  );
 
   if (widgets || replace) assign("widgets", filterWidgetsForRole(widgets || [], admin), { replace });
 
@@ -1652,6 +1839,7 @@ export function getHomeStateSnapshot() {
 
         roleAware: true,
         userNeverKeepsAdminUsersClientsServers: true,
+        readsCollectionsFromDashboardFallback: true,
         noRawBackendPayloadInDashboard: true,
         stripsCosmosMetadata: true,
         noEmailAsIdentity: true,

@@ -16,6 +16,7 @@
    - Renderiza dentro del host recibido por Router.
    - Devuelve API/controller, no el contenedor padre.
    - Lee usuario/rol sólo desde contexto/AppCore/state ya resuelto.
+   - Lee colecciones desde homeState raíz y fallback dashboard.
    - No resuelve slug.
    - No ejecuta Auth guards.
    - No ejecuta Router guards.
@@ -105,7 +106,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v6";
+export const HOME_VIEW_VERSION = "home.view.v7";
 
 export const HomeView = (() => {
   "use strict";
@@ -394,6 +395,16 @@ export const HomeView = (() => {
     } catch {
       return null;
     }
+  }
+
+  function firstArray(...values) {
+    for (const value of values) {
+      if (Array.isArray(value) && value.length) {
+        return value;
+      }
+    }
+
+    return [];
   }
 
   /* =======================================================
@@ -760,12 +771,22 @@ export const HomeView = (() => {
     );
 
     homeState.tickets = safeArray(homeState.tickets);
+    homeState.incidencias = safeArray(homeState.incidencias);
+
     homeState.invoices = safeArray(homeState.invoices);
+    homeState.facturas = safeArray(homeState.facturas);
 
     homeState.users = admin ? safeArray(homeState.users) : [];
+    homeState.usuarios = admin ? safeArray(homeState.usuarios) : [];
+
     homeState.clients = admin ? safeArray(homeState.clients) : [];
+    homeState.clientes = admin ? safeArray(homeState.clientes) : [];
+    homeState.customers = admin ? safeArray(homeState.customers) : [];
 
     homeState.activity = filterActivityForRole(homeState.activity, admin);
+    homeState.activities = filterActivityForRole(homeState.activities, admin);
+    homeState.recent = filterActivityForRole(homeState.recent, admin);
+    homeState.recentActivity = filterActivityForRole(homeState.recentActivity, admin);
 
     homeState.loading = Boolean(homeState.loading);
     homeState.refreshing = Boolean(homeState.refreshing);
@@ -934,19 +955,70 @@ export const HomeView = (() => {
   ======================================================= */
 
   function getTickets() {
-    return normalizeHomeTickets(homeState.tickets);
+    return normalizeHomeTickets(
+      firstArray(
+        homeState.tickets,
+        homeState.incidencias,
+
+        homeState.dashboard?.tickets,
+        homeState.dashboard?.incidencias,
+
+        homeState.dashboard?.collections?.tickets,
+        homeState.dashboard?.collections?.incidencias
+      )
+    );
   }
 
   function getInvoices() {
-    return normalizeHomeInvoices(homeState.invoices);
+    return normalizeHomeInvoices(
+      firstArray(
+        homeState.invoices,
+        homeState.facturas,
+
+        homeState.dashboard?.invoices,
+        homeState.dashboard?.facturas,
+
+        homeState.dashboard?.collections?.invoices,
+        homeState.dashboard?.collections?.facturas
+      )
+    );
   }
 
   function getUsers() {
-    return isAdmin() ? normalizeHomeUsers(homeState.users) : [];
+    if (!isAdmin()) return [];
+
+    return normalizeHomeUsers(
+      firstArray(
+        homeState.users,
+        homeState.usuarios,
+
+        homeState.dashboard?.users,
+        homeState.dashboard?.usuarios,
+
+        homeState.dashboard?.collections?.users,
+        homeState.dashboard?.collections?.usuarios
+      )
+    );
   }
 
   function getClients() {
-    return isAdmin() ? normalizeHomeClients(homeState.clients) : [];
+    if (!isAdmin()) return [];
+
+    return normalizeHomeClients(
+      firstArray(
+        homeState.clients,
+        homeState.clientes,
+        homeState.customers,
+
+        homeState.dashboard?.clients,
+        homeState.dashboard?.clientes,
+        homeState.dashboard?.customers,
+
+        homeState.dashboard?.collections?.clients,
+        homeState.dashboard?.collections?.clientes,
+        homeState.dashboard?.collections?.customers
+      )
+    );
   }
 
   function getSummary() {
@@ -958,15 +1030,36 @@ export const HomeView = (() => {
   }
 
   function getWidgets() {
-    const widgets = safeArray(homeState.widgets).length
-      ? homeState.widgets
-      : homeState.dashboard?.widgets;
+    const widgets = firstArray(
+      homeState.widgets,
+      homeState.cards,
+      homeState.kpis,
+      homeState.blocks,
+
+      homeState.dashboard?.widgets,
+      homeState.dashboard?.cards,
+      homeState.dashboard?.kpis,
+      homeState.dashboard?.blocks
+    );
 
     return filterWidgetsForRole(widgets, isAdmin());
   }
 
   function getActivity() {
-    const current = filterActivityForRole(homeState.activity, isAdmin());
+    const current = filterActivityForRole(
+      firstArray(
+        homeState.activity,
+        homeState.activities,
+        homeState.recent,
+        homeState.recentActivity,
+
+        homeState.dashboard?.activity,
+        homeState.dashboard?.activities,
+        homeState.dashboard?.recent,
+        homeState.dashboard?.recentActivity
+      ),
+      isAdmin()
+    );
 
     if (current.length) return current;
 
@@ -1689,6 +1782,7 @@ export const HomeView = (() => {
         actionsDelegated: true,
 
         readsUserFromResolvedContext: true,
+        readsCollectionsFromDashboardFallback: true,
 
         noSlugResolution: true,
         noAuthGuards: true,

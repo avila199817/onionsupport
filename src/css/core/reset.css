@@ -2,15 +2,15 @@
    ONION SUPPORT — RESET
    Archivo: /src/css/core/reset.css
 
-   CLEAN FOUNDATION · PRIVATE SPA · PRO SAAS PANEL
+   CLEAN FOUNDATION · PRIVATE SPA · EXTREME 10/10
    NON VISUAL RESET · TABLE SAFE · CSP CLEAN
 
    Arquitectura:
-   - reset.css     = normalización base no visual
-   - variables.css = tokens
-   - core.css      = tipografía, helpers, accesibilidad visual
-   - layout.css    = shell, scroll, stacking, mounts
-   - ui.css        = componentes
+   - reset.css     = normalización base no visual.
+   - variables.css = tokens.
+   - core.css      = tipografía, helpers, accesibilidad visual.
+   - layout.css    = shell, scroll, stacking, mounts.
+   - ui.css        = componentes.
 
    Reglas:
    - Sin :root.
@@ -23,6 +23,10 @@
    - Sin estilos de componentes.
    - Sin convertir table/tr/td en block.
    - Sin romper tablas reales.
+   - Sin transiciones globales.
+   - Sin Google Fonts.
+   - Sin @import.
+   - Sin CSS inline.
 ========================================================= */
 
 
@@ -98,7 +102,8 @@ dd {
 }
 
 ul,
-ol {
+ol,
+menu {
   margin: 0;
   padding: 0;
 }
@@ -189,6 +194,14 @@ sup {
   top: -.5em;
 }
 
+dfn {
+  font-style: italic;
+}
+
+cite {
+  font-style: normal;
+}
+
 
 /* =========================================================
    LINKS
@@ -200,8 +213,25 @@ a {
   background-color: transparent;
 }
 
+a[href] {
+  cursor: pointer;
+}
+
 a:not([href]) {
   cursor: default;
+}
+
+a,
+area,
+button,
+input,
+label,
+select,
+summary,
+textarea,
+[role="button"],
+[tabindex] {
+  -webkit-tap-highlight-color: transparent;
 }
 
 
@@ -219,7 +249,6 @@ svg {
 }
 
 img,
-picture,
 video,
 canvas {
   block-size: auto;
@@ -229,8 +258,16 @@ img {
   border-style: none;
 }
 
+picture {
+  display: block;
+}
+
 svg {
   overflow: visible;
+}
+
+svg:not([fill]) {
+  fill: none;
 }
 
 audio,
@@ -254,6 +291,14 @@ iframe {
   border: 0;
 }
 
+figure {
+  margin: 0;
+}
+
+figcaption {
+  display: block;
+}
+
 
 /* =========================================================
    TABLES
@@ -274,6 +319,15 @@ table {
 
 caption {
   text-align: start;
+}
+
+thead,
+tbody,
+tfoot,
+tr,
+td,
+th {
+  border-color: inherit;
 }
 
 th {
@@ -346,6 +400,11 @@ select {
   background: transparent;
 }
 
+input,
+textarea {
+  min-inline-size: 0;
+}
+
 textarea {
   overflow: auto;
   resize: vertical;
@@ -409,6 +468,7 @@ meter {
 [type="search"]::-webkit-search-cancel-button,
 [type="search"]::-webkit-search-results-button,
 [type="search"]::-webkit-search-results-decoration {
+  display: none;
   -webkit-appearance: none;
 }
 
@@ -417,9 +477,17 @@ meter {
    NUMBER INPUT
 ========================================================= */
 
+[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
 [type="number"]::-webkit-outer-spin-button,
 [type="number"]::-webkit-inner-spin-button {
   block-size: auto;
+  margin: 0;
+
+  -webkit-appearance: none;
 }
 
 
@@ -448,6 +516,27 @@ meter {
 
 
 /* =========================================================
+   DATE / TIME INPUT
+========================================================= */
+
+::-webkit-date-and-time-value {
+  min-block-size: 1.5em;
+}
+
+::-webkit-datetime-edit {
+  display: inline-flex;
+}
+
+::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+}
+
+
+/* =========================================================
    DISABLED / READONLY
 ========================================================= */
 
@@ -463,6 +552,10 @@ textarea:disabled,
   user-select: none;
 }
 
+[readonly] {
+  cursor: default;
+}
+
 
 /* =========================================================
    DETAILS / SUMMARY
@@ -475,6 +568,10 @@ details {
 summary {
   display: list-item;
   cursor: pointer;
+}
+
+summary::-webkit-details-marker {
+  display: list-item;
 }
 
 
@@ -519,6 +616,7 @@ pre {
   font-family:
     ui-monospace,
     SFMono-Regular,
+    "SF Mono",
     Menlo,
     Monaco,
     Consolas,
@@ -542,6 +640,9 @@ pre {
 ========================================================= */
 
 dialog {
+  max-inline-size: none;
+  max-block-size: none;
+
   padding: 0;
 
   border: 0;
@@ -550,142 +651,164 @@ dialog {
 }
 
 dialog:not([open]) {
-  display: none;
+  display: none !important;
+}
+
+dialog::backdrop {
+  background: transparent;
 }
 
 
 /* =========================================================
-   INTERACTIVE CONSISTENCY
+   POPOVER
+   Reset estructural mínimo. Estilo visual vive en UI/topbar.
 ========================================================= */
 
-[role="button"] {
+[popover] {
+  margin: 0;
+  padding: 0;
+
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+
+/* =========================================================
+   INTERACTIVE / CURSOR NORMALIZATION
+========================================================= */
+
+[role="button"],
+[role="menuitem"],
+[role="option"],
+summary {
   cursor: pointer;
 }
 
-[aria-busy="true"] {
-  cursor: progress;
-}
-
-button,
-a,
-[role="button"],
-input,
-label,
-select,
-textarea,
-summary {
-  -webkit-tap-highlight-color: transparent;
-}
-
-button,
-a,
-[role="button"],
-summary {
-  touch-action: manipulation;
+[role="button"][aria-disabled="true"],
+[role="menuitem"][aria-disabled="true"],
+[role="option"][aria-disabled="true"] {
+  cursor: not-allowed;
 }
 
 
 /* =========================================================
-   FOCUS BASE
-   El foco visual real vive en core.css.
+   FOCUS
+   No se elimina outline global.
+   core.css/ui.css definen focus visual tokenizado.
 ========================================================= */
-
-:focus {
-  outline-offset: 2px;
-}
 
 :focus:not(:focus-visible) {
   outline: none;
 }
 
-
-/* =========================================================
-   APP ROOT MIN-SIZE SAFETY
-   Sin posicionamiento. El layout real vive en layout.css.
-========================================================= */
-
-#app,
-#app-shell,
-#app-content,
-#view-container,
-#main-content {
-  min-inline-size: 0;
+:focus-visible {
+  outline-offset: 2px;
 }
 
 
 /* =========================================================
-   FLEX / GRID CHILD SAFETY
-   Previene overflow accidental sin imponer layout visual.
+   INERT
 ========================================================= */
 
-:where(
-  .layout,
-  .app-shell,
-  .main-content,
-  .panel-content,
-  .content-wrapper,
-  .container,
-  .container-fluid,
-  .container-narrow,
-  .grid,
-  .section,
-  .page-header,
-  .section-header
-) > * {
-  min-inline-size: 0;
+[inert] {
+  cursor: default;
+}
+
+[inert],
+[inert] * {
+  pointer-events: none;
+  user-select: none;
 }
 
 
 /* =========================================================
-   FORM AUTOFILL NORMALIZE
-   Neutraliza autofill sin definir paleta propia.
+   DRAG / SELECTION SAFETY
+========================================================= */
+
+[draggable="false"] {
+  -webkit-user-drag: none;
+}
+
+img,
+svg {
+  -webkit-user-drag: none;
+}
+
+
+/* =========================================================
+   CONTENTEDITABLE
+========================================================= */
+
+[contenteditable="true"] {
+  outline: none;
+}
+
+[contenteditable="true"]:empty::before {
+  content: attr(data-placeholder);
+
+  pointer-events: none;
+}
+
+
+/* =========================================================
+   AUTOFILL BASE
+   El color real lo gestionan core/ui/tokens.
 ========================================================= */
 
 input:-webkit-autofill,
-input:-webkit-autofill:hover,
-input:-webkit-autofill:focus,
 textarea:-webkit-autofill,
-textarea:-webkit-autofill:hover,
-textarea:-webkit-autofill:focus,
-select:-webkit-autofill,
-select:-webkit-autofill:hover,
-select:-webkit-autofill:focus {
-  -webkit-text-fill-color: inherit;
-
-  box-shadow: 0 0 0 1000px transparent inset;
-
-  transition:
-    background-color 9999s ease-in-out 0s,
-    color 9999s ease-in-out 0s;
-
-  font: inherit;
+select:-webkit-autofill {
+  background-clip: text;
 }
 
 
 /* =========================================================
-   MOBILE TEXT SIZE / TAP POLISH
-   Evita zoom automático en iOS sin imponer diseño desktop.
+   TAP / TOUCH
 ========================================================= */
 
-@media (hover: none) and (pointer: coarse) {
-  input,
-  textarea,
-  select,
-  button {
-    font-size: max(16px, 1em);
+button,
+input,
+select,
+textarea,
+summary,
+a {
+  touch-action: manipulation;
+}
+
+
+/* =========================================================
+   REDUCED MOTION
+   Reset mínimo: evita comportamiento de scroll animado impuesto.
+========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
   }
 }
 
 
 /* =========================================================
-   REDUCED MOTION BASE
-   Reset mínimo. La política visual completa vive en core.css.
+   FORCED COLORS
 ========================================================= */
 
-@media (prefers-reduced-motion: reduce) {
-  html,
-  html:focus-within {
-    scroll-behavior: auto;
+@media (forced-colors: active) {
+  svg {
+    forced-color-adjust: auto;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    forced-color-adjust: auto;
   }
 }
 
@@ -705,9 +828,13 @@ select:-webkit-autofill:focus {
 
   html,
   body {
-    block-size: auto;
+    min-inline-size: 0;
     min-block-size: 0;
-    overflow: visible;
+  }
+
+  body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 
   a,
@@ -716,19 +843,33 @@ select:-webkit-autofill:focus {
   }
 
   img,
-  svg {
+  svg,
+  video,
+  canvas {
+    max-inline-size: 100% !important;
+  }
+
+  pre,
+  blockquote {
+    break-inside: avoid;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr,
+  img {
     break-inside: avoid;
   }
 
   p,
-  h1,
   h2,
   h3 {
     orphans: 3;
     widows: 3;
   }
 
-  h1,
   h2,
   h3 {
     break-after: avoid;

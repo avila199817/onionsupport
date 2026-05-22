@@ -2,13 +2,28 @@
    Onion Support - Home Template
    Archivo: /src/views/home/home.template.js
 
-   Home v8:
-   - Hero limpio, sin kicker/píldora Onion Support.
-   - Sin bloques Urgentes, Salud ni Última actividad.
-   - Sin accesos rápidos.
-   - Avatar visible con tono variable por usuario.
-   - Navegación directa desde cards/widgets/paneles.
-   - Sin fetch/Auth/Router/storage/CSS inline/handlers inline.
+   Responsabilidad:
+   - Render HTML puro de Home.
+   - Consumir datos normalizados desde home.selectors.js.
+   - Pintar hero, métricas, widgets, actividad,
+     facturas/directorio e incidencias.
+   - Home distinto para admin/user.
+   - User nunca pinta clientes/usuarios/servidor.
+   - Usar sólo roles reales: admin / user.
+   - Rutas base desde core/config.js.
+   - Admin routes reales desde core/config.js.
+   - Bloqueo de rutas legacy desde core/config.js.
+   - Sin fetch.
+   - Sin Auth.
+   - Sin Router.
+   - Sin storage.
+   - Sin CSS inline.
+   - Sin handlers inline.
+   - Sin rutas inventadas.
+   - Sin rutas detalle.
+   - Sin /home.
+   - Sin exponer raw/data/payload/response.
+   - Sin emails como identidad visual.
 ========================================================= */
 
 import {
@@ -89,7 +104,7 @@ import {
   getPagination,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.v8";
+export const TEMPLATE_VERSION = "home.template.v7";
 
 /* =========================================================
    CONSTANTS
@@ -140,15 +155,6 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const ADMIN_ENTITY_RE =
   /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory|servidores?|servidor|servers?)([\s._/-]|$)/i;
 
-const AVATAR_TONES = Object.freeze([
-  "violet",
-  "green",
-  "cyan",
-  "amber",
-  "rose",
-  "slate",
-]);
-
 /* =========================================================
    SAFE HTML / ROUTES
 ========================================================= */
@@ -187,6 +193,10 @@ function boolAttr(condition = false, value = "") {
   return condition ? value : "";
 }
 
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
 function isEmailLike(value = "") {
   const text = safeText(value, "").trim();
   return Boolean(text && EMAIL_RE.test(text));
@@ -203,7 +213,7 @@ function visualLabel(value = "", fallback = "Usuario") {
 
 function sanitizePayloadValue(value, keyHint = "") {
   if (RAW_KEYS.has(keyHint)) return undefined;
-  if (SENSITIVE_KEY_RE.test(String(keyHint || ""))) return undefined;
+  if (isSensitiveKey(keyHint)) return undefined;
 
   if (typeof value === "string") {
     return redact(value);
@@ -220,7 +230,7 @@ function sanitizePayloadValue(value, keyHint = "") {
 
     for (const [key, item] of Object.entries(value)) {
       if (RAW_KEYS.has(key)) continue;
-      if (SENSITIVE_KEY_RE.test(String(key || ""))) continue;
+      if (isSensitiveKey(key)) continue;
 
       const clean = sanitizePayloadValue(item, key);
 
@@ -401,75 +411,14 @@ function safeImageSrc(value = "") {
   return "";
 }
 
-/* =========================================================
-   HOME FILTERS / ROUTE INFERENCE
-========================================================= */
-
-function hashString(value = "") {
-  const text = safeText(value, "");
-  let hash = 0;
-
-  for (let index = 0; index < text.length; index += 1) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(index);
-    hash |= 0;
-  }
-
-  return Math.abs(hash);
-}
-
-function getAvatarTone(seed = "") {
-  const safeSeed = safeText(seed, "avatar");
-  const index = hashString(safeSeed) % AVATAR_TONES.length;
-
-  return AVATAR_TONES[index] || "violet";
-}
-
-function identityText(...values) {
-  return values
-    .flat(Infinity)
-    .map((value) => safeText(value, ""))
-    .filter(Boolean)
-    .join(" ");
-}
-
-function isBlockedHomeSummaryIdentity(...values) {
-  const raw = identityText(values).toLowerCase();
-  const identity = normalizeKey(raw);
-
-  if (!identity && !raw) return false;
-
-  if (identity.includes("urgent") || identity.includes("urgente")) {
-    return true;
-  }
-
-  if (identity.includes("salud") || identity.includes("health")) {
-    return true;
-  }
-
-  return Boolean(
-    (identity.includes("ultima") || identity.includes("last") || raw.includes("última")) &&
-      (identity.includes("actividad") || identity.includes("activity"))
-  );
-}
-
-function shouldShowHomeStatCard(card = {}) {
-  return !isBlockedHomeSummaryIdentity(
-    card.id,
-    card.key,
-    card.type,
-    card.kind,
-    card.modifier,
-    card.iconName,
-    card.label,
-    card.title,
-    card.text,
-    card.badge,
-    card.value
-  );
-}
-
 function inferHomeRouteFromIdentity(...values) {
-  const identity = normalizeKey(identityText(values));
+  const identity = normalizeKey(
+    values
+      .flat(Infinity)
+      .map((value) => safeText(value, ""))
+      .filter(Boolean)
+      .join(" ")
+  );
 
   if (!identity) return "";
 
@@ -504,6 +453,9 @@ function inferHomeRouteFromIdentity(...values) {
   if (
     identity.includes("servidor") ||
     identity.includes("server") ||
+    identity.includes("salud") ||
+    identity.includes("health") ||
+    identity.includes("uptime") ||
     identity.includes("infra")
   ) {
     return ROUTES.SERVIDOR;
@@ -513,6 +465,8 @@ function inferHomeRouteFromIdentity(...values) {
     identity.includes("incid") ||
     identity.includes("ticket") ||
     identity.includes("solicitud") ||
+    identity.includes("urgent") ||
+    identity.includes("urgente") ||
     identity.includes("open") ||
     identity.includes("abiert") ||
     identity.includes("closed") ||
@@ -640,25 +594,7 @@ function filterActivityForRole(input = {}, rows = []) {
 }
 
 function filterWidgetsForRole(input = {}, rows = []) {
-  const widgets = safeArray(rows).filter((widget) => {
-    const item = safeObject(widget);
-
-    return !isBlockedHomeSummaryIdentity(
-      item.entity,
-      item.resource,
-      item.collection,
-      item.type,
-      item.kind,
-      item.widgetId,
-      item.id,
-      item.name,
-      getWidgetId(item),
-      getWidgetType(item),
-      getWidgetTitle(item),
-      getWidgetText(item),
-      getWidgetRoute(item)
-    );
-  });
+  const widgets = safeArray(rows);
 
   if (isAdmin(input)) return widgets;
 
@@ -847,22 +783,17 @@ function avatar({
   const label = visualLabel(name, "Usuario");
   const initials = getInitials(label);
   const src = safeImageSrc(image);
-  const avatarHashSeed = safeText(first(seed, label, initials, kind), label);
-  const avatarSeed = getInitials(avatarHashSeed);
-  const tone = getAvatarTone(`${kind}|${avatarHashSeed}|${label}`);
-  const toneIndex = Math.max(1, AVATAR_TONES.indexOf(tone) + 1);
+  const avatarSeed = getInitials(safeText(seed, label));
   const fallbackClass = `${safeText(className, "home-avatar")}--fallback`;
 
   return `
     <div
-      class="${joinClasses(className, src ? "" : fallbackClass, `home-avatar-tone-${tone}`)}"
+      class="${joinClasses(className, src ? "" : fallbackClass)}"
       aria-label="${attr(label)}"
       data-avatar-root="true"
       data-avatar-kind="${attr(kind)}"
       data-avatar-seed="${attr(avatarSeed)}"
       data-avatar-initials="${attr(initials)}"
-      data-avatar-tone="${attr(tone)}"
-      data-avatar-color-index="${attr(String(toneIndex))}"
       ${boolAttr(!src, 'data-fallback="true"')}
     >
       <span class="${attr(className)}-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
@@ -919,10 +850,12 @@ function heroMetrics(stats = {}) {
   const items = [
     ["Abiertas", stats.openTickets, "open"],
     ["Cerradas", stats.closedTickets, "closed"],
+    ["Urgentes", stats.urgentTickets, "urgent"],
+    ["Salud", `${Math.round(safeNumber(stats.healthRatio, 100))}%`, "health"],
   ];
 
   return `
-    <div class="home-hero-minimetrics home-hero-minimetrics--compact" aria-label="Métricas rápidas">
+    <div class="home-hero-minimetrics" aria-label="Métricas rápidas">
       ${items
         .map(
           ([label, value, key]) => `
@@ -982,8 +915,8 @@ export function renderHomeHeader(input = {}) {
 
   const title = admin ? "Centro de control Onion" : `Hola, ${displayName}`;
   const subtitle = admin
-    ? "Vista clara de incidencias, facturación, clientes y usuarios."
-    : "Tus incidencias, facturas y actividad principal de un vistazo.";
+    ? "Resumen operativo de incidencias, facturación, clientes y usuarios."
+    : "Consulta tus incidencias, facturas y actividad reciente.";
 
   return `
     <section
@@ -1002,6 +935,11 @@ export function renderHomeHeader(input = {}) {
           })}
 
           <div class="home-hero-copy">
+            <span class="home-page-kicker">
+              ${icon(admin ? "shield" : "home")}
+              Onion Support · ${admin ? "Admin" : "Usuario"}
+            </span>
+
             <h1 class="home-page-title">${escapeHtml(title)}</h1>
             <p class="home-page-subtitle">${escapeHtml(subtitle)}</p>
           </div>
@@ -1052,6 +990,7 @@ export function renderHomeHeader(input = {}) {
       <div class="home-hero-meta">
         <span class="home-meta-pill">${icon("ticket")}${escapeHtml(`${formatNumber(stats.totalTickets)} incidencias`)}</span>
         <span class="home-meta-pill">${icon("invoice")}${escapeHtml(`${formatNumber(stats.pendingInvoices)} facturas pendientes`)}</span>
+        <span class="home-meta-pill">${icon("activity")}${escapeHtml(`Salud · ${Math.round(safeNumber(stats.healthRatio, 100))}%`)}</span>
         <span class="home-meta-pill">
           ${icon("refresh")}
           ${meta.lastUpdatedAt ? escapeHtml(`Actualizado · ${formatRelativeDate(meta.lastUpdatedAt)}`) : "Sin sincronización reciente"}
@@ -1061,7 +1000,7 @@ export function renderHomeHeader(input = {}) {
       ${heroMetrics(stats)}
 
       <div class="home-stats" data-home-section="stats">
-        ${getStatCards(data).filter(shouldShowHomeStatCard).map(statCard).join("")}
+        ${getStatCards(data).map(statCard).join("")}
       </div>
     </section>
   `;
@@ -1084,7 +1023,7 @@ function widgetIconName(modifier = "") {
     return "client";
   }
 
-  if (modifier.includes("server") || modifier.includes("servidor")) {
+  if (modifier.includes("server") || modifier.includes("servidor") || modifier.includes("salud")) {
     return "shield";
   }
 
@@ -1095,8 +1034,7 @@ function widgetCard(widget = {}, index = 0) {
   const id = getWidgetId(widget) || `widget-${index + 1}`;
   const type = getWidgetType(widget);
   const route = resolveWidgetRoute(widget);
-  const title = getWidgetTitle(widget);
-  const modifier = normalizeKey(type || title || "widget");
+  const modifier = normalizeKey(type || getWidgetTitle(widget) || "widget");
 
   return `
     <button
@@ -1110,17 +1048,19 @@ function widgetCard(widget = {}, index = 0) {
       data-route="${attr(route)}"
       data-href="${attr(route)}"
       data-payload="${jsonAttr({ widgetId: id, type, route })}"
-      aria-label="Abrir ${attr(title || type || "widget")}"
+      aria-label="Abrir ${attr(getWidgetTitle(widget) || type || "widget")}"
     >
       <span class="home-widget-glow" aria-hidden="true"></span>
 
       <span class="home-widget-head">
         <span class="home-widget-kicker">${escapeHtml(type || "widget")}</span>
-        <span class="home-widget-icon" aria-hidden="true">${icon(widgetIconName(modifier))}</span>
+        <span class="home-widget-icon" aria-hidden="true">
+          ${icon(widgetIconName(modifier))}
+        </span>
       </span>
 
       <strong class="home-widget-value">${escapeHtml(String(getWidgetValue(widget) ?? "—"))}</strong>
-      <span class="home-widget-title">${escapeHtml(title)}</span>
+      <span class="home-widget-title">${escapeHtml(getWidgetTitle(widget))}</span>
       ${getWidgetText(widget) ? `<span class="home-widget-text">${escapeHtml(getWidgetText(widget))}</span>` : ""}
       ${getWidgetTrend(widget) ? `<span class="home-widget-trend">${escapeHtml(String(getWidgetTrend(widget)))}</span>` : ""}
     </button>
@@ -1148,6 +1088,12 @@ export function renderHomeWidgets(input = {}) {
   `;
 }
 
+/**
+ * Compatibilidad pública:
+ * - La función se mantiene exportada para no romper imports externos.
+ * - No pinta nada: los accesos rápidos se eliminan del Home.
+ * - La navegación queda en widgets/stat cards/paneles reales.
+ */
 export function renderHomeQuickActions() {
   return "";
 }
@@ -1155,24 +1101,6 @@ export function renderHomeQuickActions() {
 /* =========================================================
    ACTIVITY / SIDE PANELS
 ========================================================= */
-
-function routeForActivityType(typeKey = "") {
-  if (typeKey === "invoice" || typeKey === "factura") return ROUTES.FACTURAS;
-  if (typeKey === "client" || typeKey === "cliente" || typeKey === "customer") return ROUTES.CLIENTES;
-  if (typeKey === "user" || typeKey === "usuario" || typeKey === "member") return ROUTES.USUARIOS;
-  if (typeKey === "server" || typeKey === "servidor") return ROUTES.SERVIDOR;
-
-  return ROUTES.INCIDENCIAS;
-}
-
-function activityIcon(typeKey = "") {
-  if (typeKey === "invoice" || typeKey === "factura") return "invoice";
-  if (typeKey === "client" || typeKey === "cliente" || typeKey === "customer") return "client";
-  if (typeKey === "user" || typeKey === "usuario" || typeKey === "member") return "users";
-  if (typeKey === "ticket" || typeKey === "incidencia") return "ticket";
-
-  return "activity";
-}
 
 function activityItem(input = {}, item = {}) {
   const type = getActivityType(item);
@@ -1186,12 +1114,29 @@ function activityItem(input = {}, item = {}) {
     return "";
   }
 
-  const route = safeRoute(first(item.route, item.href, item.link, item.to, ""), "") || routeForActivityType(typeKey);
+  const route =
+    safeRoute(first(item.route, item.href, item.link, item.to, ""), "") ||
+    (typeKey === "invoice" || typeKey === "factura"
+      ? ROUTES.FACTURAS
+      : typeKey === "client" || typeKey === "cliente" || typeKey === "customer"
+        ? ROUTES.CLIENTES
+        : typeKey === "user" || typeKey === "usuario" || typeKey === "member"
+          ? ROUTES.USUARIOS
+          : typeKey === "server" || typeKey === "servidor"
+            ? ROUTES.SERVIDOR
+            : ROUTES.INCIDENCIAS);
 
   if (!admin && isAdminOnlyRoute(route)) return "";
 
   const entityId = safeText(
-    first(item.entityId, item.id, item.ticketId, item.incidenciaId, item.facturaId, item.invoiceId),
+    first(
+      item.entityId,
+      item.id,
+      item.ticketId,
+      item.incidenciaId,
+      item.facturaId,
+      item.invoiceId
+    ),
     ""
   );
 
@@ -1206,7 +1151,19 @@ function activityItem(input = {}, item = {}) {
       data-entity-id="${attr(entityId)}"
       data-payload="${jsonAttr({ type, route, entityId })}"
     >
-      <span class="home-activity-icon" aria-hidden="true">${icon(activityIcon(typeKey))}</span>
+      <span class="home-activity-icon" aria-hidden="true">
+        ${
+          typeKey === "invoice" || typeKey === "factura"
+            ? icon("invoice")
+            : typeKey === "client" || typeKey === "cliente" || typeKey === "customer"
+              ? icon("client")
+              : typeKey === "user" || typeKey === "usuario" || typeKey === "member"
+                ? icon("users")
+                : typeKey === "ticket" || typeKey === "incidencia"
+                  ? icon("ticket")
+                  : icon("activity")
+        }
+      </span>
 
       <span class="home-activity-copy">
         <strong class="home-activity-title">${escapeHtml(getActivityTitle(item))}</strong>

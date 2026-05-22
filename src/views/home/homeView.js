@@ -17,6 +17,7 @@
    - Devuelve API/controller, no el contenedor padre.
    - Lee usuario/rol sólo desde contexto/AppCore/state ya resuelto.
    - Lee colecciones desde homeState raíz y fallback dashboard.
+   - Fuerza render inmediato tras sincronizar datos reales.
    - No resuelve slug.
    - No ejecuta Auth guards.
    - No ejecuta Router guards.
@@ -106,7 +107,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v7";
+export const HOME_VIEW_VERSION = "home.view.v8";
 
 export const HomeView = (() => {
   "use strict";
@@ -1429,6 +1430,10 @@ export const HomeView = (() => {
           trustPayloadRole: true,
         });
 
+        if (normalized && isCurrentLoad(seq)) {
+          renderAndBind(currentContainer);
+        }
+
         return Boolean(normalized);
       } catch (error) {
         if (!isCurrentLoad(seq)) return false;
@@ -1783,6 +1788,7 @@ export const HomeView = (() => {
 
         readsUserFromResolvedContext: true,
         readsCollectionsFromDashboardFallback: true,
+        immediateRenderAfterDashboardSync: true,
 
         noSlugResolution: true,
         noAuthGuards: true,

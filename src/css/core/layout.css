@@ -4,6 +4,7 @@
 
    FINAL LAYOUT SYSTEM · PRIVATE SPA · EXTREME 10/10
    SHELL · STACKING · SCROLL · MOUNTS · RESPONSIVE
+   REVISION: fixed shell specificity / no horizontal escape
 
    Responsabilidad:
    - Layout, stacking, scroll, shell y responsive.
@@ -44,6 +45,7 @@ body {
   block-size: 100%;
 
   margin: 0;
+  box-sizing: border-box;
 }
 
 html {
@@ -190,6 +192,7 @@ body[data-sidebar-hidden="true"] {
 .app-shell,
 #app-shell {
   position: relative;
+  box-sizing: border-box;
   isolation: isolate;
 
   display: flex;
@@ -253,9 +256,23 @@ body[data-sidebar-hidden="true"] {
   -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,.16), transparent 82%);
 }
 
-.layout > *,
-.app-shell > *,
-#app-shell > * {
+/*
+   Importante:
+   No usar `.layout > *` / `#app-shell > *` con `position: relative`.
+   Ese selector tiene demasiada especificidad cuando incluye #app-shell y rompe
+   `.main-content { position: fixed; }`, desplazando el main el ancho del sidebar.
+*/
+:where(.layout, .app-shell, #app-shell)
+  > :where(:not(
+    .main-content,
+    .table-head,
+    #sidebar-mount,
+    [data-sidebar-mount],
+    #topbar-mount,
+    [data-topbar-mount],
+    #app-loader,
+    [data-app-loader]
+  )) {
   position: relative;
 }
 
@@ -267,6 +284,7 @@ body[data-sidebar-hidden="true"] {
 #sidebar-mount,
 [data-sidebar-mount] {
   position: fixed;
+  box-sizing: border-box;
   inset-block: 0;
   inset-inline-start: 0;
 
@@ -303,11 +321,15 @@ body[data-sidebar-hidden="true"] {
 #topbar-mount,
 [data-topbar-mount] {
   position: fixed;
+  box-sizing: border-box;
   inset-block-start: 0;
-  inset-inline-start: var(--app-sidebar-current-width);
+  inset-inline-start: var(--layout-main-inset-left);
   inset-inline-end: 0;
 
   inline-size: auto;
+  width: auto;
+  max-inline-size: none;
+  max-width: none;
   block-size: 0;
 
   z-index: var(--layout-topbar-mount-z);
@@ -380,6 +402,7 @@ body.app-ready #app-shell {
 #app-loader,
 [data-app-loader] {
   position: fixed;
+  box-sizing: border-box;
   inset: 0;
   z-index: var(--layout-loader-z);
 
@@ -458,8 +481,10 @@ body[data-route-mode="auth"] .main-content {
 
   margin: 0;
 
-  inline-size: 100%;
-  max-inline-size: 100%;
+  inline-size: auto;
+  width: auto;
+  max-inline-size: none;
+  max-width: none;
 
   block-size: 100vh;
   block-size: 100svh;
@@ -497,9 +522,11 @@ body[data-route-mode="auth"] #app-content {
 .container-narrow,
 .container-wide {
   position: relative;
+  box-sizing: border-box;
 
   inline-size: 100%;
   min-inline-size: 0;
+  max-inline-size: 100%;
 }
 
 .container {
@@ -531,21 +558,27 @@ body[data-route-mode="auth"] #app-content {
    MAIN CONTENT AREA
 ========================================================= */
 
+#app-shell > .main-content,
+.app-shell > .main-content,
+.layout > .main-content,
 .main-content {
   position: fixed;
+  box-sizing: border-box;
   z-index: var(--layout-main-z);
   isolation: isolate;
 
   inset-block-start: var(--layout-main-inset-top);
   inset-block-end: 0;
-  inset-inline-start: var(--app-sidebar-current-width);
+  inset-inline-start: var(--layout-main-inset-left);
   inset-inline-end: 0;
 
   display: flex;
   flex-direction: column;
 
   inline-size: auto;
+  width: auto;
   max-inline-size: none;
+  max-width: none;
 
   min-inline-size: 0;
   min-block-size: 0;
@@ -601,6 +634,7 @@ body[data-route-mode="auth"] #app-content {
 
 #app-content {
   position: relative;
+  box-sizing: border-box;
   isolation: isolate;
 
   display: flex;
@@ -609,6 +643,7 @@ body[data-route-mode="auth"] #app-content {
 
   inline-size: 100%;
   min-inline-size: 0;
+  max-inline-size: 100%;
   min-block-size: 100%;
 
   margin: 0;
@@ -645,7 +680,11 @@ body[data-route-mode="auth"] #app-content {
   opacity: .70;
 }
 
-#app-content > * {
+#app-content > :where(:not(
+  .table-head,
+  #app-loader,
+  [data-app-loader]
+)) {
   position: relative;
   z-index: 1;
 }
@@ -655,12 +694,20 @@ body[data-route-mode="auth"] #app-content {
    TABLE HEAD / SECONDARY FIXED BAR
 ========================================================= */
 
+#app-shell > .table-head,
+.app-shell > .table-head,
+.layout > .table-head,
 .table-head {
   position: fixed;
+  box-sizing: border-box;
 
   inset-block-start: var(--layout-main-inset-top);
-  inset-inline-start: var(--app-sidebar-current-width);
+  inset-inline-start: var(--layout-main-inset-left);
   inset-inline-end: 0;
+  inline-size: auto;
+  width: auto;
+  max-inline-size: none;
+  max-width: none;
 
   block-size: var(--tablehead-height);
   min-block-size: var(--tablehead-height);
@@ -782,12 +829,14 @@ body[data-tablehead-active="false"] .main-content {
 
 #view-container {
   position: relative;
+  box-sizing: border-box;
   isolation: auto;
 
   display: block;
 
   inline-size: 100%;
   min-inline-size: 0;
+  max-inline-size: 100%;
   min-block-size: 0;
 
   overflow: visible;
@@ -809,6 +858,7 @@ body.app-ready #view-container {
 
 .content-wrapper {
   position: relative;
+  box-sizing: border-box;
 
   display: flex;
   flex-direction: column;
@@ -816,6 +866,7 @@ body.app-ready #view-container {
 
   inline-size: 100%;
   min-inline-size: 0;
+  max-inline-size: 100%;
   min-block-size: 0;
 
   padding: var(--content-padding-block) var(--content-padding-inline);
@@ -840,17 +891,20 @@ body.app-ready #view-container {
 
 .content-wrapper.centered > * {
   inline-size: 100%;
+  min-inline-size: 0;
   max-inline-size: var(--layout-content-narrow);
 }
 
 .content-wrapper.narrow > * {
   inline-size: 100%;
+  min-inline-size: 0;
   max-inline-size: var(--layout-content-narrow);
   margin-inline: auto;
 }
 
 .content-wrapper.wide > * {
   inline-size: 100%;
+  min-inline-size: 0;
   max-inline-size: var(--layout-content-wide);
   margin-inline: auto;
 }
@@ -862,6 +916,7 @@ body.app-ready #view-container {
 
 .panel-content {
   position: relative;
+  box-sizing: border-box;
   z-index: 1;
 
   display: flex;
@@ -870,6 +925,7 @@ body.app-ready #view-container {
 
   inline-size: 100%;
   min-inline-size: 0;
+  max-inline-size: 100%;
   min-block-size: 0;
 
   opacity: 1;
@@ -936,6 +992,9 @@ body.app-ready #view-container {
 
   min-block-size: 0;
   min-inline-size: 0;
+  max-inline-size: 100%;
+
+  box-sizing: border-box;
 }
 
 .panel-content.form-mode {
@@ -961,6 +1020,10 @@ body.app-ready #view-container {
   scrollbar-width: thin;
   scrollbar-gutter: stable;
   scrollbar-color: var(--layout-scrollbar-thumb) var(--layout-scrollbar-track);
+
+  box-sizing: border-box;
+
+  max-inline-size: 100%;
 }
 
 .panel-content.table-mode .table-container {
@@ -1539,8 +1602,36 @@ body[data-route-mode="auth"] .content-wrapper {
   body[data-sidebar-state="open"],
   body[data-sidebar-state="collapsed"],
   body[data-sidebar-open="true"],
-  body[data-sidebar-open="false"] {
-    --app-sidebar-current-width: 0px;
+  body[data-sidebar-open="false"],
+  body.sidebar-hidden,
+  body[data-sidebar-state="hidden"],
+  body[data-sidebar-hidden="true"] {
+    --app-sidebar-current-width: 0px !important;
+  }
+
+  @supports selector(body:has(.sidebar)) {
+    body:has(#sidebar-mount .sidebar),
+    body:has(#sidebar-mount .sidebar.is-open),
+    body:has(#sidebar-mount .sidebar.is-collapsed),
+    body:has(#sidebar-mount .sidebar[data-open="true"]),
+    body:has(#sidebar-mount .sidebar[data-open="false"]),
+    body:has(#sidebar-mount .sidebar[data-sidebar-state="open"]),
+    body:has(#sidebar-mount .sidebar[data-sidebar-state="collapsed"]),
+    body:has(#sidebar-mount .sidebar[hidden]),
+    body:has(#sidebar-mount .sidebar.is-hidden),
+    body:has(#sidebar-mount .sidebar[aria-hidden="true"]),
+    body:has([data-sidebar-mount] .sidebar),
+    body:has([data-sidebar-mount] .sidebar.is-open),
+    body:has([data-sidebar-mount] .sidebar.is-collapsed),
+    body:has([data-sidebar-mount] .sidebar[data-open="true"]),
+    body:has([data-sidebar-mount] .sidebar[data-open="false"]),
+    body:has([data-sidebar-mount] .sidebar[data-sidebar-state="open"]),
+    body:has([data-sidebar-mount] .sidebar[data-sidebar-state="collapsed"]),
+    body:has([data-sidebar-mount] .sidebar[hidden]),
+    body:has([data-sidebar-mount] .sidebar.is-hidden),
+    body:has([data-sidebar-mount] .sidebar[aria-hidden="true"]) {
+      --app-sidebar-current-width: 0px !important;
+    }
   }
 
   #topbar-mount,
@@ -1561,7 +1652,9 @@ body[data-route-mode="auth"] .content-wrapper {
     margin: 0;
 
     inline-size: auto;
+    width: auto;
     max-inline-size: none;
+    max-width: none;
   }
 
   .table-head,

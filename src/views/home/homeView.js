@@ -115,7 +115,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v15";
+export const HOME_VIEW_VERSION = "home.view.v16";
 
 export const HomeView = (() => {
   "use strict";
@@ -1665,6 +1665,11 @@ export const HomeView = (() => {
     ) || "user";
 
     const admin = role === "admin";
+    const displayName = templateUser.displayName || templateUser.name || "Usuario";
+    const name = templateUser.name || displayName;
+    const fullName = templateUser.fullName || displayName;
+    const avatarUrl = templateUser.avatarUrl || "";
+    const initials = templateUser.initials || initialsFromName(displayName);
 
     const tickets = getTickets();
     const invoices = getInvoices();
@@ -1694,7 +1699,7 @@ export const HomeView = (() => {
       pagination,
     });
 
-    return buildHomeTemplatePayload({
+    const basePayload = {
       user: templateUser,
       currentUser: templateUser,
       sidebarUser: templateUser,
@@ -1713,6 +1718,13 @@ export const HomeView = (() => {
       },
 
       role,
+      admin,
+
+      displayName,
+      name,
+      fullName,
+      avatarUrl,
+      initials,
 
       dashboard,
 
@@ -1754,8 +1766,75 @@ export const HomeView = (() => {
         sidebar: {
           user: templateUser,
         },
+
+        role,
+        admin,
+
+        displayName,
+        name,
+        fullName,
+        avatarUrl,
+        initials,
       },
-    });
+    };
+
+    const modelPayload = safeObject(buildHomeTemplatePayload(basePayload));
+
+    return {
+      ...modelPayload,
+
+      user: templateUser,
+      currentUser: templateUser,
+      sidebarUser: templateUser,
+
+      sidebar: {
+        ...safeObject(modelPayload.sidebar),
+        user: templateUser,
+      },
+
+      layout: {
+        ...safeObject(modelPayload.layout),
+        sidebarUser: templateUser,
+      },
+
+      context: {
+        ...safeObject(modelPayload.context),
+        user: templateUser,
+        sidebarUser: templateUser,
+      },
+
+      role,
+      admin,
+
+      displayName,
+      name,
+      fullName,
+      avatarUrl,
+      initials,
+
+      state: {
+        ...safeObject(modelPayload.state),
+        ...runtimeState,
+
+        user: templateUser,
+        currentUser: templateUser,
+        sidebarUser: templateUser,
+
+        sidebar: {
+          ...safeObject(modelPayload.state?.sidebar),
+          user: templateUser,
+        },
+
+        role,
+        admin,
+
+        displayName,
+        name,
+        fullName,
+        avatarUrl,
+        initials,
+      },
+    };
   }
 
   function hasCollectionData() {
@@ -2339,6 +2418,7 @@ export const HomeView = (() => {
 
         readsUserFromSidebarViewModel: true,
         passesSidebarUserToTemplate: true,
+        preservesUserAfterModelPayloadNormalization: true,
         readsCollectionsFromDashboardFallback: true,
         reloadsWhenLoadedButEmpty: true,
         optimizedSingleRenderAfterLoad: true,

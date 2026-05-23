@@ -5,9 +5,9 @@
    Responsabilidad:
    - Acciones operativas mínimas de Home.
    - Navegación SPA delegada en Router si existe.
-   - Export CSV desde colecciones del store.
+   - Export CSV desde colecciones reales del store.
    - Copiar IDs.
-   - Ejecutar quick actions simples.
+   - Ejecutar acciones simples.
    - Leer dashboard/widget desde store si hace falta.
    - Rutas base desde core/config.js.
    - Admin routes reales desde core/config.js.
@@ -23,6 +23,8 @@
    - Sin fallback manual de history.
    - Sin /home.
    - Sin /incidencias/nueva.
+   - Sin rutas opcionales inventadas.
+   - Sin export servidor mientras no exista endpoint real.
    - Sin Auth.
    - Sin CSS.
 ========================================================= */
@@ -45,7 +47,6 @@ import {
   getHomeInvoicesStore,
   getHomeUsersStore,
   getHomeClientsStore,
-  getHomeServersStore,
   getHomeActivityStore,
 } from "./home.store.js";
 
@@ -55,7 +56,7 @@ import {
   getHomeWidgetId,
 } from "./home.model.js";
 
-export const HOME_ACTIONS_VERSION = "home.actions.v5";
+export const HOME_ACTIONS_VERSION = "home.actions.v6";
 
 const SOURCE = "views.home.actions";
 
@@ -68,6 +69,7 @@ const RAW_KEYS = new Set([
   "payload",
   "payloadRaw",
   "response",
+  "body",
 ]);
 
 const SENSITIVE_KEY_RE =
@@ -305,21 +307,31 @@ function routePathOnly(value = "") {
 }
 
 function isBlockedRoute(value = "") {
-  try {
-    return configIsBlockedRoutePath(value) === true;
-  } catch {
-    const path = routePathOnly(value).toLowerCase();
+  const path = routePathOnly(value);
+  const lower = path.toLowerCase();
 
+  if (!path) return true;
+
+  if (
+    lower === "/incidencias/nueva" ||
+    lower.startsWith("/incidencias/nueva/")
+  ) {
+    return true;
+  }
+
+  try {
+    return configIsBlockedRoutePath(path) === true;
+  } catch {
     return Boolean(
-      path === "/home" ||
-        path === "/403" ||
-        path === "/404" ||
-        path === "/2fa" ||
-        path === "/mfa" ||
-        path === "/otp" ||
-        path.startsWith("/2fa/") ||
-        path.startsWith("/mfa/") ||
-        path.startsWith("/otp/")
+      lower === "/home" ||
+        lower === "/403" ||
+        lower === "/404" ||
+        lower === "/2fa" ||
+        lower === "/mfa" ||
+        lower === "/otp" ||
+        lower.startsWith("/2fa/") ||
+        lower.startsWith("/mfa/") ||
+        lower.startsWith("/otp/")
     );
   }
 }
@@ -343,15 +355,20 @@ function normalizeSpaRoute(route = "") {
 }
 
 function routeFromCore(name = "", fallback = "") {
-  return normalizeSpaRoute(CORE_ROUTES?.[name]) || normalizeSpaRoute(fallback);
+  const configured = normalizeSpaRoute(CORE_ROUTES?.[name]);
+
+  if (configured) return configured;
+
+  return fallback ? normalizeSpaRoute(fallback) : "";
 }
 
 const ROUTES = Object.freeze({
   INCIDENCIAS: routeFromCore("incidencias", "/incidencias"),
   FACTURAS: routeFromCore("facturas", "/facturas"),
   CLIENTES: routeFromCore("clientes", "/clientes"),
-  USUARIOS: routeFromCore("usuarios", "/usuarios"),
-  SERVIDOR: routeFromCore("servidor", "/servidor"),
+
+  USUARIOS: routeFromCore("usuarios", ""),
+  SERVIDOR: routeFromCore("servidor", ""),
 
   CUENTA: routeFromCore("cuenta", ""),
   AJUSTES: routeFromCore("ajustes", ""),
@@ -361,9 +378,11 @@ const ACTION_ROUTES = Object.freeze({
   go_incidencias: ROUTES.INCIDENCIAS,
   go_facturas: ROUTES.FACTURAS,
   go_clientes: ROUTES.CLIENTES,
+
   go_usuarios: ROUTES.USUARIOS,
   go_servidor: ROUTES.SERVIDOR,
   go_server: ROUTES.SERVIDOR,
+
   go_cuenta: ROUTES.CUENTA,
   go_ajustes: ROUTES.AJUSTES,
 });
@@ -383,7 +402,7 @@ function isAdminOnlyRoute(route = "") {
   try {
     if (configIsAdminRoute(path) === true) return true;
   } catch {
-    // fallback abajo
+    // fallback local
   }
 
   return (
@@ -474,7 +493,13 @@ export function getHomeDashboardFromStoreAction() {
 }
 
 function getStoredRole() {
-  const dashboard = safeObject(getHomeDashboardFromStoreAction());
+  let dashboard = {};
+
+  try {
+    dashboard = safeObject(getHomeDashboardStore?.());
+  } catch {
+    dashboard = {};
+  }
 
   const role = normalizeRole(
     first(
@@ -533,7 +558,7 @@ export async function refreshHomeDashboardAction(options = {}) {
 }
 
 /* =========================================================
-   WIDGETS
+   WIDGETS / COMPAT
 ========================================================= */
 
 function widgetRoute(widget = {}) {
@@ -600,6 +625,11 @@ export async function getHomeWidgetDetailAction({
   }
 }
 
+/*
+  Compat mínima: el template/bindings actuales ya no generan open_widget.
+  Se mantiene exportado para no romper imports antiguos, pero no introduce
+  rutas ni acciones nuevas.
+*/
 export async function openHomeWidgetAction({
   widgetId = "",
   payload = null,
@@ -857,23 +887,13 @@ function columnSpecs(mode = "widgets") {
     ];
   }
 
-  if (["server", "servers", "servidor", "servidores"].includes(key)) {
-    return [
-      ["ID", ["serverId", "servidorId", "id"]],
-      ["Nombre", ["displayName", "name", "nombre", "hostname", "host"]],
-      ["Estado", ["status", "estado", "state", "healthStatus"]],
-      ["Tipo", ["type", "kind", "category"]],
-      ["Actualizado", ["updatedAt", "modifiedAt", "lastSyncAt"]],
-    ];
-  }
-
   if (["activity", "activities", "recent", "timeline"].includes(key)) {
     return [
       ["Tipo", ["type", "kind", "category"]],
       ["Título", ["title", "name", "subject"]],
       ["Texto", ["text", "description", "message", "detail"]],
       ["Fecha", ["date", "createdAt", "updatedAt", "timestamp"]],
-      ["Entidad", ["entityId", "ticketId", "incidenciaId", "facturaId", "invoiceId", "userId", "clienteId", "serverId", "servidorId"]],
+      ["Entidad", ["entityId", "ticketId", "incidenciaId", "facturaId", "invoiceId", "userId", "clienteId"]],
     ];
   }
 
@@ -973,10 +993,6 @@ function isAdminExportMode(mode = "") {
     "clientes",
     "customer",
     "customers",
-    "server",
-    "servers",
-    "servidor",
-    "servidores",
   ].includes(key);
 }
 
@@ -1006,10 +1022,6 @@ function resolveExportItems(items = null, mode = "widgets") {
       return safeArray(getHomeClientsStore?.());
     }
 
-    if (["server", "servers", "servidor", "servidores"].includes(key)) {
-      return safeArray(getHomeServersStore?.());
-    }
-
     if (["activity", "activities", "recent", "timeline"].includes(key)) {
       return safeArray(getHomeActivityStore?.());
     }
@@ -1029,6 +1041,13 @@ export function exportHomeCsvAction({
 } = {}) {
   if (isAdminExportMode(mode) && !canUseAdminActions()) {
     if (!silent) notify("Exportación no disponible.", "error");
+    return false;
+  }
+
+  const key = normalizeKey(mode);
+
+  if (["server", "servers", "servidor", "servidores"].includes(key)) {
+    if (!silent) notify("Exportación de servidor no disponible.", "info");
     return false;
   }
 
@@ -1126,18 +1145,6 @@ export async function runHomeQuickAction({
   const data = sanitizePayload(payload);
   const actionName = normalizeKey(action);
 
-  const targetRoute = normalizeSpaRoute(
-    first(route, data.route, data.href, routeFromAction(actionName), "")
-  );
-
-  if (targetRoute) {
-    return navigateFromHomeAction({
-      route: targetRoute,
-      silent,
-      payload: data,
-    });
-  }
-
   if (actionName === "create_incidencia") {
     return createFromHomeAction({
       silent,
@@ -1161,6 +1168,18 @@ export async function runHomeQuickAction({
 
   if (actionName === "refresh" || actionName === "retry") {
     return true;
+  }
+
+  const targetRoute = normalizeSpaRoute(
+    first(route, data.route, data.href, routeFromAction(actionName), "")
+  );
+
+  if (targetRoute) {
+    return navigateFromHomeAction({
+      route: targetRoute,
+      silent,
+      payload: data,
+    });
   }
 
   if (!actionName) {
@@ -1205,8 +1224,8 @@ export function getHomeActionsSnapshot() {
       hasInvoices: isFunction(getHomeInvoicesStore),
       hasUsers: isFunction(getHomeUsersStore),
       hasClients: isFunction(getHomeClientsStore),
-      hasServers: isFunction(getHomeServersStore),
       hasActivity: isFunction(getHomeActivityStore),
+      hasServers: false,
     },
 
     policy: {
@@ -1223,6 +1242,7 @@ export function getHomeActionsSnapshot() {
       noHomeAlias: true,
       noCreateRoute: true,
       noRouteAliasesLegacy: true,
+      noInventedOptionalRoutes: true,
 
       noRouterPushLegacy: true,
       noRouterGoLegacy: true,
@@ -1233,7 +1253,7 @@ export function getHomeActionsSnapshot() {
       rejectsSensitiveClipboard: true,
       blocksAdminRoutesForUser: true,
       blocksAdminExportsForUser: true,
-      servidorOnlyAdmin: true,
+      serverExportDisabledUntilEndpointExists: true,
 
       sanitizesPayload: true,
       csvExcludesEmail: true,

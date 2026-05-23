@@ -8,7 +8,7 @@
    - Leer colecciones para template.js.
    - Calcular métricas/cards/actions ligeras.
    - Formatear números, dinero y fechas.
-   - Resolver usuario/rol admin-user.
+   - Consumir usuario/rol ya resuelto desde sidebarUser cuando exista.
    - Construir filas visibles de Home sin duplicar lógica de modelo.
    - Limitar sólo vistas/listas recientes a 5 elementos.
    - Mantener contadores sobre el total completo disponible.
@@ -64,7 +64,7 @@ import {
   getHomeInvoicePendingAmount as modelGetInvoicePendingAmount,
 } from "./home.model.js";
 
-export const HOME_SELECTORS_VERSION = "home.selectors.v8";
+export const HOME_SELECTORS_VERSION = "home.selectors.v9";
 
 /* =========================================================
    CONSTANTS
@@ -902,6 +902,44 @@ export function getNormalizedDashboard(input = {}) {
   }
 }
 
+function getUserSource(input = {}) {
+  const data = safeObject(input);
+  const state = safeObject(data.state);
+  const dashboard = getDashboard(data);
+
+  return safeObject(
+    first(
+      data.sidebarUser,
+      data.sidebar?.user,
+      data.layout?.sidebarUser,
+      data.context?.sidebarUser,
+      data.context?.user,
+
+      state.sidebarUser,
+      state.sidebar?.user,
+      state.user,
+      state.currentUser,
+      state.session?.user,
+
+      data.user,
+      data.currentUser,
+      data.authUser,
+      data.sessionUser,
+      data.session?.user,
+      data.auth?.user,
+
+      dashboard.sidebarUser,
+      dashboard.sidebar?.user,
+      dashboard.user,
+      dashboard.currentUser,
+
+      data.profile,
+      dashboard.profile,
+      {}
+    )
+  );
+}
+
 function publicUser(user = {}) {
   const raw = safeObject(user);
 
@@ -916,10 +954,13 @@ function publicUser(user = {}) {
       raw.fullName,
       raw.name,
       raw.nombre,
+
       raw.profile?.displayName,
       raw.profile?.fullName,
       raw.profile?.name,
       raw.profile?.nombre,
+      raw.profile?.publicName,
+
       raw.username,
       raw.userName,
       raw.slug,
@@ -930,24 +971,74 @@ function publicUser(user = {}) {
 
   const avatarUrl = safeImageSrc(
     first(
-      raw.avatar,
       raw.avatarUrl,
+      raw.avatarURL,
       raw.avatar_url,
-      raw.photo,
+      raw.avatar,
+
       raw.photoUrl,
       raw.photoURL,
-      raw.picture,
+      raw.photo_url,
+      raw.photo,
+
       raw.pictureUrl,
-      raw.profile?.avatar,
+      raw.pictureURL,
+      raw.picture_url,
+      raw.picture,
+
+      raw.imageUrl,
+      raw.imageURL,
+      raw.image_url,
+      raw.image,
+
+      raw.fotoUrl,
+      raw.fotoURL,
+      raw.foto_url,
+      raw.foto,
+
+      raw.imagenUrl,
+      raw.imagenURL,
+      raw.imagen_url,
+      raw.imagen,
+
       raw.profile?.avatarUrl,
+      raw.profile?.avatar,
       raw.profile?.photoUrl,
+      raw.profile?.photoURL,
+      raw.profile?.picture,
+      raw.profile?.pictureUrl,
+      raw.profile?.image,
+      raw.profile?.imageUrl,
+
+      raw.media?.avatarUrl,
+      raw.media?.avatar,
+      raw.media?.photoUrl,
+      raw.media?.photoURL,
+      raw.media?.picture,
+      raw.media?.pictureUrl,
+      raw.media?.image,
+      raw.media?.imageUrl,
       ""
     )
   );
 
+  const initials = safeText(
+    first(
+      raw.initials,
+      raw.iniciales,
+      getInitials(displayName)
+    ),
+    getInitials(displayName)
+  )
+    .slice(0, 3)
+    .toUpperCase();
+
   return sanitizeObject({
+    hasUser: raw.hasUser !== false,
+
     id: safeText(first(raw.id, raw.userId, raw.uid, raw.sub), ""),
     userId: safeText(first(raw.userId, raw.id, raw.uid, raw.sub), ""),
+
     username: safeText(first(raw.username, raw.userName), ""),
     userName: safeText(first(raw.userName, raw.username), ""),
     slug: safeText(first(raw.slug, raw.lookup?.slug, raw.profile?.slug), ""),
@@ -957,38 +1048,40 @@ function publicUser(user = {}) {
     name: displayName,
     nombre: displayName,
 
+    hasAvatar: Boolean(avatarUrl),
     avatar: avatarUrl,
     avatarUrl,
+    photoUrl: avatarUrl,
+    photoURL: avatarUrl,
     picture: avatarUrl,
+    pictureUrl: avatarUrl,
+    image: avatarUrl,
+    imageUrl: avatarUrl,
+    foto: avatarUrl,
+    fotoUrl: avatarUrl,
+    imagen: avatarUrl,
+    imagenUrl: avatarUrl,
+
+    initials,
+    iniciales: initials,
 
     role,
     rol: role,
     roles: [role],
+    roleLabel: safeText(first(raw.roleLabel, role === "admin" ? "Administrador" : "Estándar"), role === "admin" ? "Administrador" : "Estándar"),
+
+    isAdmin: role === "admin",
+    isUser: role === "user",
   });
 }
 
 export function getUser(input = {}) {
-  const data = safeObject(input);
-  const dashboard = getDashboard(data);
-
-  return publicUser(
-    first(
-      data.user,
-      data.currentUser,
-      data.profile,
-      data.state?.user,
-      data.state?.currentUser,
-      data.state?.session?.user,
-      dashboard.user,
-      dashboard.currentUser,
-      dashboard.profile,
-      {}
-    )
-  );
+  return publicUser(getUserSource(input));
 }
 
 export function getRole(input = {}) {
   const data = safeObject(input);
+  const state = safeObject(data.state);
   const dashboard = getDashboard(data);
   const user = getUser(data);
 
@@ -996,23 +1089,32 @@ export function getRole(input = {}) {
     normalizeRole(
       first(
         data.role,
+        data.rol,
         data.currentRole,
-        data.state?.role,
-        data.state?.userRole,
-        data.state?.roles,
+        data.userRole,
+        data.roles,
+
+        state.role,
+        state.rol,
+        state.userRole,
+        state.roles,
+
+        user.role,
+        user.rol,
+        user.roles,
+
         dashboard.role,
         dashboard.rol,
         dashboard.roles,
         dashboard.meta?.role,
         dashboard.meta?.rol,
         dashboard.meta?.roles,
-        user.role,
-        user.rol,
-        user.roles,
         ""
       )
     ) ||
     roleFromAdminFlag(data) ||
+    roleFromAdminFlag(state) ||
+    roleFromAdminFlag(user) ||
     roleFromAdminFlag(dashboard) ||
     "user"
   );
@@ -1044,7 +1146,22 @@ export function getDisplayName(input = {}) {
 
 export function getAvatarUrl(input = {}) {
   const user = getUser(input);
-  return safeImageSrc(first(user.avatarUrl, user.avatar, user.picture, ""));
+
+  return safeImageSrc(
+    first(
+      user.avatarUrl,
+      user.avatar,
+      user.photoUrl,
+      user.photoURL,
+      user.picture,
+      user.pictureUrl,
+      user.image,
+      user.imageUrl,
+      user.fotoUrl,
+      user.imagenUrl,
+      ""
+    )
+  );
 }
 
 export function getInitials(value = "") {
@@ -1299,7 +1416,6 @@ function widgetVisibleForRole(input = {}, widget = {}) {
       widget.variant,
       widget.category,
       widget.widgetId,
-      widget.widgetKey,
       widget.id,
       widget.key,
       widget.slug,
@@ -2540,20 +2656,86 @@ export function getPagination(items = [], input = {}) {
 export function buildHomeTemplateData(input = {}) {
   const source = safeObject(input);
   const dashboard = getNormalizedDashboard(source);
-  const role = getRole({ ...source, dashboard });
+
+  const baseUser = getUser(source);
+  const role = getRole({
+    ...source,
+    dashboard,
+    user: baseUser,
+    sidebarUser: baseUser,
+  });
+
   const admin = isAdminRole(role);
+
+  const user = publicUser({
+    ...baseUser,
+    role,
+    rol: role,
+    roles: [role],
+    isAdmin: admin,
+    isUser: !admin,
+  });
+
+  const state = {
+    ...safeObject(source.state),
+
+    role,
+    admin,
+
+    user,
+    currentUser: user,
+    sidebarUser: user,
+
+    sidebar: {
+      ...safeObject(source.state?.sidebar),
+      user,
+    },
+  };
 
   const summary = getSummary({
     ...source,
     dashboard,
+    state,
+    user,
+    currentUser: user,
+    sidebarUser: user,
+    sidebar: {
+      ...safeObject(source.sidebar),
+      user,
+    },
     role,
   });
 
   const scopedInput = {
     ...source,
+
     dashboard,
     summary,
+
     role,
+    admin,
+
+    user,
+    currentUser: user,
+    sidebarUser: user,
+
+    sidebar: {
+      ...safeObject(source.sidebar),
+      user,
+    },
+
+    layout: {
+      ...safeObject(source.layout),
+      sidebarUser: user,
+    },
+
+    context: {
+      ...safeObject(source.context),
+      user,
+      sidebarUser: user,
+    },
+
+    state,
   };
 
   const collections = getCollections(scopedInput);
@@ -2568,6 +2750,7 @@ export function buildHomeTemplateData(input = {}) {
 
   const pagination = getPagination(recentTickets, {
     ...source,
+    state,
     totalCount: collections.ticketsRemoteCount,
     pageSize: DEFAULT_PAGE_SIZE,
   });
@@ -2576,19 +2759,38 @@ export function buildHomeTemplateData(input = {}) {
   const selectedTicket = selectedTicketId ? getSelectedTicket(scopedInput) : null;
   const ticketModal = buildTicketModalData(scopedInput);
 
-  const user = getUser(source);
-  const displayName = getDisplayName(source);
+  const displayName = getDisplayName(scopedInput);
+  const avatarUrl = getAvatarUrl(scopedInput);
+  const initials = safeText(first(user.initials, getInitials(displayName)), getInitials(displayName))
+    .slice(0, 3)
+    .toUpperCase();
 
   return sanitizeObject({
     version: HOME_SELECTORS_VERSION,
 
     user,
+    currentUser: user,
+    sidebarUser: user,
+
+    sidebar: {
+      user,
+    },
+
+    layout: {
+      sidebarUser: user,
+    },
+
+    context: {
+      user,
+      sidebarUser: user,
+    },
+
     role,
     admin,
 
     displayName,
-    avatarUrl: getAvatarUrl(source),
-    initials: getInitials(displayName),
+    avatarUrl,
+    initials,
 
     dashboard,
     summary,

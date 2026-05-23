@@ -64,7 +64,7 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_API_VERSION = "home.api.v6";
+export const HOME_API_VERSION = "home.api.v7";
 
 export const HOME_DASHBOARD_ENDPOINT = "local:home-list-aggregate";
 export const HOME_DASHBOARD_LEGACY_ENDPOINT = "";
@@ -822,6 +822,22 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
     admin
   );
 
+  const tickets = sanitizeDashboardList(
+    first(
+      normalized.tickets,
+      normalized.incidencias,
+      []
+    )
+  );
+
+  const invoices = sanitizeDashboardList(
+    first(
+      normalized.invoices,
+      normalized.facturas,
+      []
+    )
+  );
+
   const users = admin
     ? sanitizeDashboardList(first(normalized.users, normalized.usuarios, []))
     : [];
@@ -868,6 +884,12 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
     kpis: widgets,
     blocks: widgets,
 
+    tickets,
+    incidencias: tickets,
+
+    invoices,
+    facturas: invoices,
+
     users,
     usuarios: users,
 
@@ -884,6 +906,24 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
     activities: activity,
     recent: activity,
     recentActivity: activity,
+
+    ticketsTotal: safeNumber(summary.totalTickets, tickets.length),
+    incidenciasTotal: safeNumber(summary.totalTickets, tickets.length),
+    totalTickets: safeNumber(summary.totalTickets, tickets.length),
+    totalIncidencias: safeNumber(summary.totalTickets, tickets.length),
+    ticketsCount: safeNumber(summary.totalTickets, tickets.length),
+    incidenciasCount: safeNumber(summary.totalTickets, tickets.length),
+    visibleTicketsCount: tickets.length,
+    visibleIncidenciasCount: tickets.length,
+
+    invoicesTotal: safeNumber(summary.totalInvoices, invoices.length),
+    facturasTotal: safeNumber(summary.totalInvoices, invoices.length),
+    totalInvoices: safeNumber(summary.totalInvoices, invoices.length),
+    totalFacturas: safeNumber(summary.totalInvoices, invoices.length),
+    invoicesCount: safeNumber(summary.totalInvoices, invoices.length),
+    facturasCount: safeNumber(summary.totalInvoices, invoices.length),
+    visibleInvoicesCount: invoices.length,
+    visibleFacturasCount: invoices.length,
 
     usersTotal: admin ? summary.usersCount : 0,
     usuariosTotal: admin ? summary.usuariosCount : 0,
@@ -921,6 +961,16 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
 
       role: cleanRole,
       admin,
+
+      ticketsCount: safeNumber(summary.totalTickets, tickets.length),
+      incidenciasCount: safeNumber(summary.totalTickets, tickets.length),
+      visibleTicketsCount: tickets.length,
+      visibleIncidenciasCount: tickets.length,
+
+      invoicesCount: safeNumber(summary.totalInvoices, invoices.length),
+      facturasCount: safeNumber(summary.totalInvoices, invoices.length),
+      visibleInvoicesCount: invoices.length,
+      visibleFacturasCount: invoices.length,
 
       usersCount: admin ? summary.usersCount : 0,
       usuariosCount: admin ? summary.usuariosCount : 0,
@@ -2145,6 +2195,29 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
    PUBLIC NORMALIZATION
 ========================================================= */
 
+function moduleHasPayload(module = null) {
+  if (!isObject(module)) return false;
+
+  return (
+    Object.prototype.hasOwnProperty.call(module, "data") ||
+    Object.prototype.hasOwnProperty.call(module, "payload") ||
+    Object.prototype.hasOwnProperty.call(module, "result") ||
+    Object.prototype.hasOwnProperty.call(module, "response") ||
+    Object.prototype.hasOwnProperty.call(module, "body")
+  );
+}
+
+function modulesHavePayload(modules = {}) {
+  const source = safeObject(modules);
+
+  return Boolean(
+    moduleHasPayload(source.tickets) ||
+      moduleHasPayload(source.facturas) ||
+      moduleHasPayload(source.clientes) ||
+      moduleHasPayload(source.users)
+  );
+}
+
 export function normalizeDashboard(payload = null, options = {}) {
   const unwrapped = unwrapResponse(payload);
   const object = safeObject(unwrapped, {});
@@ -2168,7 +2241,65 @@ export function normalizeDashboard(payload = null, options = {}) {
       ""
     ) || getCurrentRole();
 
-  if (object.modules) {
+  /*
+    Respuesta completa de fetchHomeDashboardRequest():
+    {
+      ok,
+      dashboard: {
+        tickets,
+        facturas,
+        summary,
+        modules: { listOk/status/endpoint }
+      }
+    }
+
+    dashboard.modules ya NO contiene data cruda.
+    Sólo reconstruimos desde módulos si esos módulos traen payload real.
+  */
+  if (object.dashboard && hasOwnKeys(object.dashboard)) {
+    const dashboard = safeObject(object.dashboard);
+
+    if (dashboard.modules && modulesHavePayload(dashboard.modules)) {
+      return sanitizeDashboardForRole(
+        buildDashboardFromModules(dashboard.modules, {
+          ...safeObject(dashboard.meta),
+          ...safeObject(object.meta),
+          requestId: first(dashboard.requestId, object.requestId, ""),
+          role,
+        }),
+        role
+      );
+    }
+
+    try {
+      return sanitizeDashboardForRole(
+        normalizeHomeDashboard({
+          ...dashboard,
+          role,
+          admin: role === "admin",
+          meta: {
+            ...safeObject(dashboard.meta),
+            role,
+            admin: role === "admin",
+          },
+        }),
+        role
+      );
+    } catch {
+      return sanitizeDashboardForRole(dashboard, role);
+    }
+  }
+
+  /*
+    Payload interno con módulos crudos:
+    {
+      modules: {
+        tickets: { data: ... },
+        facturas: { data: ... }
+      }
+    }
+  */
+  if (object.modules && modulesHavePayload(object.modules)) {
     return sanitizeDashboardForRole(
       buildDashboardFromModules(object.modules, {
         ...safeObject(object.meta),
@@ -2179,29 +2310,20 @@ export function normalizeDashboard(payload = null, options = {}) {
     );
   }
 
-  if (object.dashboard?.modules) {
-    return sanitizeDashboardForRole(
-      buildDashboardFromModules(object.dashboard.modules, {
-        ...safeObject(object.dashboard.meta),
-        ...safeObject(object.meta),
-        requestId: first(object.dashboard.requestId, object.requestId, ""),
-        role,
-      }),
-      role
-    );
-  }
-
-  if (object.dashboard && hasOwnKeys(object.dashboard)) {
-    return sanitizeDashboardForRole(
-      normalizeDashboard(object.dashboard, {
-        role,
-      }),
-      role
-    );
-  }
-
   try {
-    return sanitizeDashboardForRole(normalizeHomeDashboard(object), role);
+    return sanitizeDashboardForRole(
+      normalizeHomeDashboard({
+        ...object,
+        role,
+        admin: role === "admin",
+        meta: {
+          ...safeObject(object.meta),
+          role,
+          admin: role === "admin",
+        },
+      }),
+      role
+    );
   } catch {
     return sanitizeDashboardForRole(object, role);
   }

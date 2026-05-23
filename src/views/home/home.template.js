@@ -5,10 +5,18 @@
    Final:
    - Home simple, visual y directo.
    - Sin card grande envolvente.
-   - Sin accesos rápidos.
+   - Sin accesos rápidos duplicados.
    - Sin widgets duplicados.
-   - Sin Urgentes, Salud, Última actividad ni Adjuntos como cards.
-   - Con Facturas totales + importe total en Home user.
+   - Sin health/server/ready/ping.
+   - Sólo Home sobre usuarios, clientes, incidencias y facturas.
+   - Con Facturas totales + importe total pagado.
+   - Si una factura no está pagada, no se muestra importe como cobrado.
+   - Listas Home limitadas a 5 últimos elementos.
+   - Contadores sobre totales completos.
+   - Tabla de incidencias sin columna Usuario / Cliente.
+   - ID de incidencia completo visible.
+   - Detalle de incidencia abre modal.
+   - Modal con técnico asignado, avatar/iniciales y facturas vinculadas.
    - Avatar visible con tono dinámico.
    - Textos visibles en español.
    - Modelo calculado una sola vez por render.
@@ -25,6 +33,7 @@ import {
 
 import {
   DEFAULT_PAGE_SIZE,
+  DEFAULT_RECENT_LIMIT,
   DEFAULT_CURRENCY,
 
   safeText,
@@ -38,6 +47,7 @@ import {
   formatNumber,
   formatMoney,
   formatDateTime,
+  formatDateShort,
   formatRelativeDate,
   formatLastUpdate,
 
@@ -49,20 +59,21 @@ import {
   getTicketId,
   getTicketSubject,
   getTicketDescription,
-  getTicketOwnerName,
-  getTicketAvatarUrl,
   getTicketStatus,
   getTicketStatusKey,
+  getTicketStatusLabel,
   getTicketPriorityKey,
   getTicketCategory,
-  getTicketAssignedTo,
   getTicketCreatedAt,
   getTicketUpdatedAt,
 
   getInvoiceId,
   getInvoiceAmount,
+  getInvoicePaidAmount,
   getInvoiceCurrency,
   getInvoiceStatusKey,
+  getInvoiceStatusLabel,
+  isInvoicePaid,
 
   getActivityTitle,
   getActivityText,
@@ -70,7 +81,7 @@ import {
   getActivityType,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.final.11";
+export const TEMPLATE_VERSION = "home.template.final.12";
 
 const ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -78,15 +89,16 @@ const ACTIONS = Object.freeze({
   CREATE_INCIDENCIA: "create_incidencia",
   NAVIGATE: "navigate_home",
   COPY_ID: "copy_widget_id",
-  PREV_PAGE: "prev_page",
-  NEXT_PAGE: "next_page",
   EXPORT_CSV: "export_csv",
+  OPEN_TICKET_DETAIL: "open_ticket_detail",
+  CLOSE_TICKET_DETAIL: "close_ticket_detail",
 });
 
 const LIMITS = Object.freeze({
-  activity: 6,
-  invoices: 4,
+  activity: 5,
+  invoices: 5,
   entities: 5,
+  tickets: 5,
 });
 
 const STATUS_ORDER = Object.freeze([
@@ -99,10 +111,21 @@ const STATUS_ORDER = Object.freeze([
 
 const RAW_KEYS = new Set(["raw", "data", "payload", "response", "body"]);
 
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
+const COSMOS_META_KEYS = new Set([
+  "_id",
+  "_rid",
+  "_self",
+  "_etag",
+  "_attachments",
+  "_ts",
+  "_lsn",
+  "_metadata",
+]);
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni|ipRaw|userAgent/i;
+
+const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
 
 const AVATAR_TONES = Object.freeze([
   "violet",
@@ -167,6 +190,7 @@ function visualLabel(value = "", fallback = "Usuario") {
 
 function sanitizePayloadValue(value, keyHint = "") {
   if (RAW_KEYS.has(keyHint)) return undefined;
+  if (COSMOS_META_KEYS.has(keyHint)) return undefined;
   if (SENSITIVE_KEY_RE.test(String(keyHint || ""))) return undefined;
 
   if (typeof value === "string") return redact(value);
@@ -182,6 +206,7 @@ function sanitizePayloadValue(value, keyHint = "") {
 
     for (const [key, item] of Object.entries(value)) {
       if (RAW_KEYS.has(key)) continue;
+      if (COSMOS_META_KEYS.has(key)) continue;
       if (SENSITIVE_KEY_RE.test(String(key || ""))) continue;
 
       const clean = sanitizePayloadValue(item, key);
@@ -218,11 +243,9 @@ function routeInput(value = "") {
 
 function routeSuffix(value = "") {
   const raw = safeText(value, "");
-
   const hashIndex = raw.indexOf("#");
   const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
   const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-
   const queryIndex = beforeHash.indexOf("?");
   const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
 
@@ -302,13 +325,7 @@ const ROUTES = Object.freeze({
   INCIDENCIAS: safeStaticRoute(CORE_ROUTES?.incidencias, "/incidencias"),
   FACTURAS: safeStaticRoute(CORE_ROUTES?.facturas, "/facturas"),
   CLIENTES: safeStaticRoute(CORE_ROUTES?.clientes, "/clientes"),
-
-  /*
-    Opcionales: no se inventan.
-    Sólo existen si core/config.js los define.
-  */
   USUARIOS: safeStaticRoute(CORE_ROUTES?.usuarios, ""),
-  SERVIDOR: safeStaticRoute(CORE_ROUTES?.servidor, ""),
 });
 
 function getRoutePath(value = "") {
@@ -319,7 +336,6 @@ function isAdminOnlyRoute(route = "") {
   const path = getRoutePath(route);
   const clientes = getRoutePath(ROUTES.CLIENTES);
   const usuarios = getRoutePath(ROUTES.USUARIOS);
-  const servidor = getRoutePath(ROUTES.SERVIDOR);
 
   if (!path) return false;
 
@@ -331,8 +347,7 @@ function isAdminOnlyRoute(route = "") {
 
   return (
     Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
-    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
-    Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
   );
 }
 
@@ -340,17 +355,33 @@ function safeImageSrc(value = "") {
   const raw = safeText(value, "");
 
   if (!raw) return "";
+  if (hasSensitiveQuery(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (/^(?:data|blob|javascript|vbscript|file):/i.test(raw)) return "";
+  if (raw.startsWith("//")) return "";
 
-  if (raw.startsWith("/") && !raw.startsWith("//") && !hasSensitiveQuery(raw)) {
+  if (raw.startsWith("/")) {
     return raw.replace(/\/{2,}/g, "/");
   }
 
-  if (/^https:\/\//i.test(raw) && !hasSensitiveQuery(raw)) {
+  if (/^https:\/\//i.test(raw)) {
     try {
       return new URL(raw).href;
     } catch {
       return "";
     }
+  }
+
+  if (
+    raw.includes("/") ||
+    /\.(?:png|jpe?g|gif|webp|svg|avif|bmp)(?:[?#].*)?$/i.test(raw)
+  ) {
+    const clean = raw
+      .replace(/^\.\//, "")
+      .replace(/^\/+/, "")
+      .replace(/\/{2,}/g, "/");
+
+    return clean ? `/${clean}` : "";
   }
 
   return "";
@@ -376,7 +407,7 @@ function getLoadingState(input = {}) {
     hydrated: Boolean(state.hydrated || data.hydrated),
     error: redact(safeText(first(state.error, data.error), "")),
     openingTicketId: safeText(state.openingTicketId, ""),
-    selectedTicketId: safeText(state.selectedTicketId, ""),
+    selectedTicketId: safeText(first(state.selectedTicketId, data.selectedTicketId, data.selectedIncidenciaId), ""),
     navigatingAction: redact(safeText(state.navigatingAction, "")),
   };
 }
@@ -412,6 +443,11 @@ function buildTemplateViewModel(input = {}) {
   const admin = Boolean(view.admin || isAdminRole(view.role));
   const meta = getTemplateMetaFromView(data, view);
 
+  const ticketRows = safeArray(first(view.ticketRows, view.incidenceRows, view.tableRows, view.pageItems, []));
+  const invoiceRows = safeArray(first(view.invoiceRows, view.facturaRows, []));
+  const recentTickets = safeArray(first(view.recentTickets, view.recentIncidencias, view.latestTickets, view.latestIncidencias, []));
+  const recentInvoices = safeArray(first(view.recentInvoices, view.recentFacturas, view.latestInvoices, view.latestFacturas, []));
+
   return {
     __homeTemplateVm: true,
 
@@ -432,17 +468,42 @@ function buildTemplateViewModel(input = {}) {
     stats: safeObject(view.stats),
 
     statCards: safeArray(view.statCards),
+    statusPills: safeArray(view.statusPills),
     widgets: safeArray(view.widgets),
 
     tickets: safeArray(view.tickets),
+    incidencias: safeArray(first(view.incidencias, view.tickets, [])),
+    recentTickets,
+    recentIncidencias: recentTickets,
+    ticketRows,
+
     invoices: safeArray(view.invoices),
+    facturas: safeArray(first(view.facturas, view.invoices, [])),
+    recentInvoices,
+    recentFacturas: recentInvoices,
+    invoiceRows,
+
     users: admin ? safeArray(view.users) : [],
+    usuarios: admin ? safeArray(first(view.usuarios, view.users, [])) : [],
+
     clients: admin ? safeArray(view.clients) : [],
+    clientes: admin ? safeArray(first(view.clientes, view.clients, [])) : [],
+
     activity: safeArray(view.activity),
+    recentActivity: safeArray(first(view.recentActivity, view.activity, [])),
+
+    selectedTicketId: safeText(first(view.selectedTicketId, view.selectedIncidenciaId, state.selectedTicketId), ""),
+    selectedIncidenciaId: safeText(first(view.selectedIncidenciaId, view.selectedTicketId, state.selectedTicketId), ""),
+    selectedTicket: safeObject(first(view.selectedTicket, view.selectedIncidencia, {}), null),
+    ticketModal: safeObject(first(view.ticketModal, view.incidenciaModal, {})),
 
     collections: safeObject(view.collections),
-    pagination: safeObject(view.pagination),
-    pageItems: safeArray(view.pageItems),
+    pagination: {
+      ...safeObject(view.pagination),
+      pageItems: ticketRows,
+      pageSize: LIMITS.tickets,
+    },
+    pageItems: ticketRows,
   };
 }
 
@@ -502,6 +563,11 @@ function isBlockedHomeIdentity(...values) {
       identity.includes("urgente") ||
       identity.includes("salud") ||
       identity.includes("health") ||
+      identity.includes("ready") ||
+      identity.includes("ping") ||
+      identity.includes("server") ||
+      identity.includes("servidor") ||
+      identity.includes("infra") ||
       identity.includes("adjunto") ||
       identity.includes("adjuntos") ||
       identity.includes("archivo") ||
@@ -571,10 +637,13 @@ function getInvoicesTotalAmount(vm = {}) {
 
   const candidate = firstDefined(
     vm.stats.invoiceAmount,
+    vm.stats.paidInvoiceAmount,
     vm.summary.invoiceAmount,
+    vm.summary.paidInvoiceAmount,
     vm.summary.billingTotal,
     vm.summary.totalFacturado,
     vm.dashboard.invoiceAmount,
+    vm.dashboard.paidInvoiceAmount,
     vm.dashboard.billingTotal,
     vm.dashboard.totalFacturado,
     vm.dashboard.facturacionTotal
@@ -584,7 +653,10 @@ function getInvoicesTotalAmount(vm = {}) {
 
   if (Number.isFinite(candidateAmount)) return candidateAmount;
 
-  return invoices.reduce((total, invoice) => total + safeNumber(getInvoiceAmount(invoice), 0), 0);
+  return invoices.reduce((total, invoice) => {
+    if (!isInvoicePaid(invoice)) return total;
+    return total + safeNumber(getInvoicePaidAmount(invoice), 0);
+  }, 0);
 }
 
 function getInvoicesTotalCount(vm = {}) {
@@ -651,7 +723,7 @@ function translateCard(card = {}, vm = {}) {
     card.text
   ));
 
-  if (identity.includes("ticket")) {
+  if (identity.includes("ticket") || identity.includes("incid")) {
     return {
       ...card,
       label: admin ? "Incidencias" : "Mis incidencias",
@@ -659,15 +731,17 @@ function translateCard(card = {}, vm = {}) {
     };
   }
 
-  if (identity.includes("invoice")) {
+  if (identity.includes("invoice") || identity.includes("factur")) {
     return {
       ...card,
-      label: card.label && !String(card.label).toLowerCase().includes("invoice") ? card.label : "Facturas pendientes",
+      label: card.label && !String(card.label).toLowerCase().includes("invoice")
+        ? card.label
+        : "Facturas",
       text: card.text || "Facturación visible.",
     };
   }
 
-  if (identity.includes("client") || identity.includes("customer")) {
+  if (identity.includes("client") || identity.includes("cliente") || identity.includes("customer")) {
     return {
       ...card,
       label: "Clientes",
@@ -675,7 +749,7 @@ function translateCard(card = {}, vm = {}) {
     };
   }
 
-  if (identity.includes("user") || identity.includes("member")) {
+  if (identity.includes("user") || identity.includes("usuario") || identity.includes("member")) {
     return {
       ...card,
       label: "Usuarios",
@@ -701,12 +775,11 @@ function getVisibleHomeStatCards(vm = {}) {
       card.text,
       card.badge,
       card.value
-    ))
-    .filter((card) => !isInvoiceTotalsCard(card));
+    ));
 
-  if (vm.admin) {
-    return cards;
-  }
+  const hasInvoiceTotals = cards.some(isInvoiceTotalsCard);
+
+  if (hasInvoiceTotals) return cards;
 
   return [
     ...cards,
@@ -745,14 +818,6 @@ function inferHomeRouteFromIdentity(...values) {
     identity.includes("miembro")
   ) {
     return ROUTES.USUARIOS;
-  }
-
-  if (
-    identity.includes("servidor") ||
-    identity.includes("server") ||
-    identity.includes("infra")
-  ) {
-    return ROUTES.SERVIDOR;
   }
 
   if (
@@ -844,6 +909,7 @@ function icon(name = "activity") {
     eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
     copy: `<svg ${common}><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
     download: `<svg ${common}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>`,
+    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
     chevronLeft: `<svg ${common}><path d="m15 18-6-6 6-6"/></svg>`,
     chevronRight: `<svg ${common}><path d="m9 18 6-6-6-6"/></svg>`,
     arrowRight: `<svg ${common}><path d="M5 12h14"/><path d="m13 5 7 7-7 7"/></svg>`,
@@ -990,7 +1056,7 @@ function avatar({
 ========================================================= */
 
 function ticketStatusLabel(item = {}) {
-  const key = getTicketStatusKey(getTicketStatus(item));
+  const key = safeText(first(item.statusKey, getTicketStatusKey(getTicketStatus(item))), "pending");
 
   const labels = {
     pending: "Pendiente",
@@ -1003,22 +1069,23 @@ function ticketStatusLabel(item = {}) {
     canceled: "Cancelada",
   };
 
-  return labels[key] || "Estado";
+  return safeText(first(item.statusLabel, labels[key], getTicketStatusLabel(item)), "Pendiente");
 }
 
 function statusChip(item = {}) {
-  const key = getTicketStatusKey(getTicketStatus(item));
+  const key = safeText(first(item.statusKey, getTicketStatusKey(item)), "pending");
+  const label = ticketStatusLabel(item);
 
   return `
     <span class="home-chip home-chip--${attr(key)}" data-status-key="${attr(key)}">
       <span class="home-chip-dot" aria-hidden="true"></span>
-      ${escapeHtml(ticketStatusLabel(item))}
+      ${escapeHtml(label)}
     </span>
   `;
 }
 
 function priorityBadge(item = {}) {
-  const key = getTicketPriorityKey(item);
+  const key = safeText(first(item.priorityKey, getTicketPriorityKey(item)), "medium");
 
   const labels = {
     low: "Baja",
@@ -1029,7 +1096,7 @@ function priorityBadge(item = {}) {
     critical: "Crítica",
   };
 
-  const label = labels[key] || "Prioridad";
+  const label = safeText(first(item.priorityLabel, labels[key]), "Media");
 
   return `
     <span class="home-mini-badge home-mini-badge--${attr(key)}" data-priority-key="${attr(key)}">
@@ -1045,8 +1112,8 @@ function priorityBadge(item = {}) {
 
 function heroMetrics(stats = {}) {
   const items = [
-    ["Abiertas", stats.openTickets, "open"],
-    ["Cerradas", stats.closedTickets, "closed"],
+    ["Abiertas", stats.activeTickets ?? stats.openTickets ?? 0, "open"],
+    ["Cerradas", stats.closedTickets ?? 0, "closed"],
   ];
 
   return `
@@ -1106,7 +1173,7 @@ export function renderHomeHeader(input = {}) {
 
   const title = admin ? "Centro de control Onion" : `Hola, ${displayName}`;
   const subtitle = admin
-    ? "Vista clara de incidencias, facturación, clientes y usuarios."
+    ? "Vista clara de usuarios, clientes, incidencias y facturas."
     : "Tus incidencias, facturas y actividad principal de un vistazo.";
 
   return `
@@ -1211,7 +1278,6 @@ function routeForActivityType(typeKey = "") {
   if (typeKey === "invoice" || typeKey === "factura") return ROUTES.FACTURAS;
   if (typeKey === "client" || typeKey === "cliente" || typeKey === "customer") return ROUTES.CLIENTES;
   if (typeKey === "user" || typeKey === "usuario" || typeKey === "member") return ROUTES.USUARIOS;
-  if (typeKey === "server" || typeKey === "servidor") return ROUTES.SERVIDOR;
 
   return ROUTES.INCIDENCIAS;
 }
@@ -1232,8 +1298,12 @@ function activityItem(vm = {}, item = {}) {
 
   if (
     !admin &&
-    ["client", "cliente", "customer", "user", "usuario", "member", "server", "servidor"].includes(typeKey)
+    ["client", "cliente", "customer", "user", "usuario", "member"].includes(typeKey)
   ) {
+    return "";
+  }
+
+  if (isBlockedHomeIdentity(type, getActivityTitle(item), getActivityText(item))) {
     return "";
   }
 
@@ -1278,9 +1348,9 @@ export function renderHomeActivity(input = {}) {
       <div class="home-panel-head">
         <div class="home-panel-copy">
           <span class="home-panel-kicker">Actividad</span>
-          <h2 class="home-panel-title">Actividad reciente</h2>
+          <h2 class="home-panel-title">Últimas acciones</h2>
           <p class="home-panel-subtitle">
-            ${state.loading && !items.length ? "Cargando actividad..." : escapeHtml(`${formatNumber(items.length)} movimientos recientes`)}
+            ${state.loading && !items.length ? "Cargando actividad..." : escapeHtml(`${formatNumber(items.length)} últimas acciones`)}
           </p>
         </div>
 
@@ -1310,26 +1380,16 @@ export function renderHomeActivity(input = {}) {
   `;
 }
 
-function invoiceStatusLabel(status = "") {
-  const key = normalizeKey(status);
-
-  const labels = {
-    paid: "Pagada",
-    pending: "Pendiente",
-    overdue: "Vencida",
-    draft: "Borrador",
-    cancelled: "Cancelada",
-    canceled: "Cancelada",
-  };
-
-  return labels[key] || "Estado";
-}
-
 function invoiceItem(item = {}) {
-  const id = getInvoiceId(item);
-  const amount = getInvoiceAmount(item);
-  const currency = getInvoiceCurrency(item);
-  const status = getInvoiceStatusKey(item);
+  const id = safeText(first(item.fullId, item.displayId, item.invoiceId, item.facturaId, getInvoiceId(item)), "FAC-SIN-ID");
+  const rawInvoice = safeObject(item);
+  const currency = getInvoiceCurrency(rawInvoice);
+  const status = safeText(first(rawInvoice.statusKey, getInvoiceStatusKey(rawInvoice)), "pending");
+  const statusLabel = safeText(first(rawInvoice.statusLabel, getInvoiceStatusLabel(rawInvoice)), "Pendiente");
+  const paid = Boolean(first(rawInvoice.isPaid, rawInvoice.paid, isInvoicePaid(rawInvoice)));
+  const amount = paid
+    ? safeNumber(first(rawInvoice.paidAmount, rawInvoice.amount, getInvoicePaidAmount(rawInvoice)), 0)
+    : 0;
 
   return `
     <button
@@ -1347,9 +1407,9 @@ function invoiceItem(item = {}) {
       <span class="home-invoice-mini-icon" aria-hidden="true">${icon("invoice")}</span>
       <span class="home-invoice-mini-copy">
         <strong>${escapeHtml(id || "Factura")}</strong>
-        <span>${escapeHtml(formatMoney(amount, currency || DEFAULT_CURRENCY))}</span>
+        ${paid ? `<span>${escapeHtml(formatMoney(amount, currency || DEFAULT_CURRENCY))}</span>` : ""}
       </span>
-      <span class="home-invoice-mini-status">${escapeHtml(invoiceStatusLabel(status))}</span>
+      <span class="home-invoice-mini-status">${escapeHtml(statusLabel)}</span>
     </button>
   `;
 }
@@ -1357,17 +1417,17 @@ function invoiceItem(item = {}) {
 export function renderHomeInvoicePreview(input = {}) {
   const vm = asViewModel(input);
   const state = vm.state;
-  const invoices = safeArray(vm.invoices).slice(0, LIMITS.invoices);
-  const total = safeNumber(first(vm.collections.invoicesRemoteCount, invoices.length), invoices.length);
+  const invoices = safeArray(first(vm.invoiceRows, vm.recentInvoices, vm.invoices, [])).slice(0, LIMITS.invoices);
+  const total = safeNumber(first(vm.collections.invoicesRemoteCount, vm.stats.totalInvoices, vm.invoices.length), vm.invoices.length);
 
   return `
     <section class="home-panel home-panel--invoice-preview" data-home-section="invoice-preview">
       <div class="home-panel-head">
         <div class="home-panel-copy">
           <span class="home-panel-kicker">Facturación</span>
-          <h2 class="home-panel-title">${vm.admin ? "Facturación rápida" : "Mis facturas"}</h2>
+          <h2 class="home-panel-title">${vm.admin ? "Últimas facturas" : "Mis últimas facturas"}</h2>
           <p class="home-panel-subtitle">
-            ${state.loading && !invoices.length ? "Cargando facturas..." : escapeHtml(`${formatNumber(total)} facturas detectadas`)}
+            ${state.loading && !invoices.length ? "Cargando facturas..." : escapeHtml(`Mostrando ${formatNumber(invoices.length)} de ${formatNumber(total)} facturas`)}
           </p>
         </div>
 
@@ -1508,15 +1568,25 @@ export function renderHomeEntitiesPreview(input = {}) {
 
 function statusSummary(vm = {}) {
   const tickets = safeArray(vm.tickets);
-  const counts = Object.fromEntries(STATUS_ORDER.map((status) => [status, 0]));
+  const fallbackCounts = Object.fromEntries(STATUS_ORDER.map((status) => [status, 0]));
 
   for (const ticket of tickets) {
-    const key = getTicketStatusKey(getTicketStatus(ticket));
+    const key = getTicketStatusKey(ticket);
 
-    if (Object.prototype.hasOwnProperty.call(counts, key)) {
-      counts[key] = safeNumber(counts[key], 0) + 1;
+    if (Object.prototype.hasOwnProperty.call(fallbackCounts, key)) {
+      fallbackCounts[key] = safeNumber(fallbackCounts[key], 0) + 1;
     }
   }
+
+  const stats = safeObject(vm.stats);
+
+  const counts = {
+    pending: safeNumber(first(stats.pendingTickets, fallbackCounts.pending), fallbackCounts.pending),
+    open: safeNumber(first(stats.openTickets, fallbackCounts.open), fallbackCounts.open),
+    progress: safeNumber(first(stats.progressTickets, fallbackCounts.progress), fallbackCounts.progress),
+    resolved: safeNumber(first(stats.resolvedTickets, fallbackCounts.resolved), fallbackCounts.resolved),
+    closed: safeNumber(first(stats.closedTickets, fallbackCounts.closed), fallbackCounts.closed),
+  };
 
   const labels = {
     pending: "Pendientes",
@@ -1531,7 +1601,7 @@ function statusSummary(vm = {}) {
       ${STATUS_ORDER.map((status) => `
         <span class="home-status-summary-item home-status-summary-item--${attr(status)}">
           <span class="home-status-summary-dot" aria-hidden="true"></span>
-          <strong>${escapeHtml(String(counts[status] || 0))}</strong>
+          <strong>${escapeHtml(formatNumber(counts[status] || 0))}</strong>
           <span>${escapeHtml(labels[status] || "Estado")}</span>
         </span>
       `).join("")}
@@ -1539,16 +1609,84 @@ function statusSummary(vm = {}) {
   `;
 }
 
+function getRowTicketId(item = {}) {
+  return safeText(
+    first(
+      item.fullId,
+      item.displayId,
+      item.ticketId,
+      item.incidenciaId,
+      item.id,
+      getTicketId(item)
+    ),
+    "INC-SIN-ID"
+  );
+}
+
+function getRowTechnician(item = {}) {
+  const technician = safeObject(first(item.technician, item.tecnico, {}));
+  const name = visualLabel(
+    first(
+      technician.displayName,
+      technician.name,
+      item.technicianName,
+      item.assignedToName,
+      item.assignedTo
+    ),
+    "Sin asignar"
+  );
+
+  const avatarUrl = safeImageSrc(
+    first(
+      technician.avatarUrl,
+      technician.avatar,
+      item.technicianAvatarUrl,
+      item.technicianAvatar,
+      ""
+    )
+  );
+
+  return {
+    ...technician,
+    name,
+    displayName: name,
+    avatarUrl,
+    avatar: avatarUrl,
+    initials: safeText(first(technician.initials, item.technicianInitials, getInitials(name)), getInitials(name)),
+  };
+}
+
+function technicianCell(item = {}) {
+  const technician = getRowTechnician(item);
+
+  return `
+    <div class="home-ticket-technician">
+      ${avatar({
+        name: technician.name,
+        image: technician.avatarUrl,
+        kind: "technician",
+        seed: safeText(first(technician.userId, technician.id, technician.name), technician.name),
+        className: "home-technician-avatar",
+      })}
+      <span class="home-ticket-technician-copy">
+        <strong>${escapeHtml(technician.name)}</strong>
+        <span>${technician.avatarUrl ? "Técnico asignado" : "Iniciales"}</span>
+      </span>
+    </div>
+  `;
+}
+
 function ticketRow(item = {}, state = {}) {
-  const ticketId = getTicketId(item);
-  const subject = getTicketSubject(item);
-  const description = getTicketDescription(item);
-  const statusKey = getTicketStatusKey(getTicketStatus(item));
-  const priorityKey = getTicketPriorityKey(item);
-  const createdAt = getTicketCreatedAt(item);
-  const updatedAt = getTicketUpdatedAt(item);
-  const ownerName = visualLabel(getTicketOwnerName(item), "Usuario");
-  const ownerMeta = safeText(first(getTicketAssignedTo(item), getTicketCategory(item)), "Sin asignación");
+  const ticketId = getRowTicketId(item);
+  const subject = safeText(first(item.subject, item.title, getTicketSubject(item)), "Incidencia sin asunto");
+  const description = safeText(first(item.description, item.preview, getTicketDescription(item)), "Sin descripción.");
+  const category = safeText(first(item.category, item.categoria, getTicketCategory(item)), "Soporte");
+  const statusKey = safeText(first(item.statusKey, getTicketStatusKey(item)), "pending");
+  const priorityKey = safeText(first(item.priorityKey, getTicketPriorityKey(item)), "medium");
+  const createdAt = first(item.createdAt, getTicketCreatedAt(item));
+  const updatedAt = first(item.lastActivityAt, item.updatedAt, getTicketUpdatedAt(item));
+  const createdLabel = safeText(first(item.createdAtLabel, formatDateTime(createdAt)), "—");
+  const updatedLabel = safeText(first(item.lastActivityLabel, item.updatedAtLabel, formatLastUpdate(updatedAt)), "Sin fecha");
   const isOpening = isSameIdentity(state.openingTicketId, ticketId);
   const isSelected = isSameIdentity(state.selectedTicketId, ticketId);
 
@@ -1570,13 +1708,7 @@ function ticketRow(item = {}, state = {}) {
     >
       <td class="home-ticket-cell home-ticket-cell--main">
         <div class="home-ticket-main">
-          ${avatar({
-            name: ownerName,
-            image: getTicketAvatarUrl(item),
-            kind: "ticket",
-            seed: `${ticketId}|${ownerName}`,
-            className: "home-ticket-avatar",
-          })}
+          <span class="home-ticket-type-icon" aria-hidden="true">${icon("ticket")}</span>
 
           <div class="home-ticket-copy">
             <div class="home-ticket-line">
@@ -1592,19 +1724,17 @@ function ticketRow(item = {}, state = {}) {
               >
                 ${escapeHtml(ticketId)}
               </button>
-              <span class="home-mini-badge home-mini-badge--category">${escapeHtml(getTicketCategory(item))}</span>
+              <span class="home-mini-badge home-mini-badge--category">${escapeHtml(category)}</span>
             </div>
 
             <button
               type="button"
               class="home-ticket-subject"
-              data-home-action="${ACTIONS.NAVIGATE}"
-              data-action="${ACTIONS.NAVIGATE}"
+              data-home-action="${ACTIONS.OPEN_TICKET_DETAIL}"
+              data-action="${ACTIONS.OPEN_TICKET_DETAIL}"
               data-ticket-id="${attr(ticketId)}"
               data-incidencia-id="${attr(ticketId)}"
               data-entity-id="${attr(ticketId)}"
-              data-route="${attr(ROUTES.INCIDENCIAS)}"
-              data-href="${attr(ROUTES.INCIDENCIAS)}"
               data-payload="${jsonAttr({ ticketId, incidenciaId: ticketId })}"
             >
               ${escapeHtml(subject)}
@@ -1613,33 +1743,30 @@ function ticketRow(item = {}, state = {}) {
             <div class="home-ticket-description">${escapeHtml(description)}</div>
             <div class="home-ticket-badges">
               ${priorityBadge(item)}
-              <span class="home-mini-badge home-mini-badge--agent">
-                ${icon("users")}
-                ${escapeHtml(getTicketAssignedTo(item))}
-              </span>
+              ${safeNumber(first(item.linkedInvoiceCount, item.invoicesCount, item.facturasCount, 0), 0) > 0
+                ? `<span class="home-mini-badge home-mini-badge--invoice">${icon("invoice")}${escapeHtml(`${safeNumber(first(item.linkedInvoiceCount, item.invoicesCount, item.facturasCount, 0), 0)} fact.`)}</span>`
+                : ""
+              }
             </div>
           </div>
         </div>
       </td>
 
-      <td class="home-ticket-cell home-ticket-cell--owner">
-        <span class="home-ticket-owner">
-          <strong>${escapeHtml(ownerName)}</strong>
-          <span>${escapeHtml(ownerMeta)}</span>
-        </span>
-      </td>
-
       <td class="home-ticket-cell home-ticket-cell--status">${statusChip(item)}</td>
+
+      <td class="home-ticket-cell home-ticket-cell--technician">
+        ${technicianCell(item)}
+      </td>
 
       <td class="home-ticket-cell home-ticket-cell--date">
         <span class="home-date-inline" title="${attr(formatDateTime(createdAt))}">
-          ${escapeHtml(formatDateTime(createdAt))}
+          ${escapeHtml(createdLabel)}
         </span>
       </td>
 
       <td class="home-ticket-cell home-ticket-cell--date">
         <span class="home-date-inline" title="${attr(formatDateTime(updatedAt))}">
-          ${escapeHtml(formatLastUpdate(updatedAt))}
+          ${escapeHtml(updatedLabel)}
         </span>
       </td>
 
@@ -1647,13 +1774,11 @@ function ticketRow(item = {}, state = {}) {
         <button
           type="button"
           class="${joinClasses("home-detail-btn", isOpening ? "is-loading" : "")}"
-          data-home-action="${ACTIONS.NAVIGATE}"
-          data-action="${ACTIONS.NAVIGATE}"
+          data-home-action="${ACTIONS.OPEN_TICKET_DETAIL}"
+          data-action="${ACTIONS.OPEN_TICKET_DETAIL}"
           data-ticket-id="${attr(ticketId)}"
           data-incidencia-id="${attr(ticketId)}"
           data-entity-id="${attr(ticketId)}"
-          data-route="${attr(ROUTES.INCIDENCIAS)}"
-          data-href="${attr(ROUTES.INCIDENCIAS)}"
           data-payload="${jsonAttr({ ticketId, incidenciaId: ticketId })}"
           ${boolAttr(isOpening, 'disabled aria-busy="true"')}
         >
@@ -1664,72 +1789,34 @@ function ticketRow(item = {}, state = {}) {
   `;
 }
 
-function normalizePagination(pagination = {}, rows = []) {
-  const source = safeObject(pagination);
-  const pageItems = safeArray(first(source.pageItems, source.items, rows));
+function getTicketRowsForHome(vm = {}) {
+  const rows = safeArray(first(vm.ticketRows, vm.pageItems, vm.recentTickets, []));
 
-  const pageSize = Math.max(
-    1,
-    safeNumber(first(source.pageSize, source.limit, DEFAULT_PAGE_SIZE), DEFAULT_PAGE_SIZE)
-  );
+  if (rows.length) return rows.slice(0, LIMITS.tickets);
 
-  const totalCount = Math.max(
-    pageItems.length,
-    safeNumber(first(source.totalCount, source.total, rows.length), rows.length)
-  );
-
-  const totalPages = Math.max(
-    1,
-    safeNumber(source.totalPages, Math.ceil(totalCount / pageSize) || 1)
-  );
-
-  const currentPage = Math.min(
-    totalPages,
-    Math.max(1, safeNumber(first(source.currentPage, source.page), 1))
-  );
-
-  const fallbackStart = totalCount && pageItems.length
-    ? ((currentPage - 1) * pageSize) + 1
-    : 0;
-
-  const fallbackEnd = totalCount && pageItems.length
-    ? Math.min(fallbackStart + pageItems.length - 1, totalCount)
-    : 0;
-
-  return {
-    ...source,
-    pageItems,
-    currentPage,
-    page: currentPage,
-    pageSize,
-    totalPages,
-    totalCount,
-    rangeStart: safeNumber(first(source.rangeStart, source.from), fallbackStart),
-    rangeEnd: safeNumber(first(source.rangeEnd, source.to), fallbackEnd),
-    hasPrev: Boolean(source.hasPrev || currentPage > 1),
-    hasNext: Boolean(source.hasNext || currentPage < totalPages),
-  };
+  return safeArray(vm.tickets).slice(0, LIMITS.tickets);
 }
 
 export function renderHomeTicketsTable(input = {}) {
   const vm = asViewModel(input);
   const state = vm.state;
   const tickets = safeArray(vm.tickets);
-  const pagination = normalizePagination(vm.pagination, tickets);
-  const initialLoading = state.loading && !pagination.pageItems.length;
+  const rows = getTicketRowsForHome(vm);
+  const totalCount = safeNumber(first(vm.collections.ticketsRemoteCount, vm.stats.totalTickets, tickets.length), tickets.length);
+  const initialLoading = state.loading && !rows.length;
 
   return `
     <section class="home-tickets" data-home-section="tickets">
       <div class="home-panel-head">
         <div class="home-panel-copy">
           <span class="home-panel-kicker">Incidencias</span>
-          <h2 class="home-panel-title">${vm.admin ? "Incidencias recientes" : "Tus últimas incidencias"}</h2>
+          <h2 class="home-panel-title">${vm.admin ? "Últimas incidencias" : "Tus últimas incidencias"}</h2>
           <p class="home-panel-subtitle">
             ${initialLoading
               ? "Cargando incidencias..."
               : escapeHtml(
-                  pagination.totalCount
-                    ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`
+                  totalCount
+                    ? `Mostrando ${formatNumber(rows.length)} últimas de ${formatNumber(totalCount)}`
                     : "Sin incidencias visibles"
                 )
             }
@@ -1739,56 +1826,39 @@ export function renderHomeTicketsTable(input = {}) {
         <div class="home-panel-head-actions">
           ${statusSummary(vm)}
 
-          <div class="home-pagination" aria-label="Paginación del Home">
-            <button
-              type="button"
-              class="home-pagination-btn"
-              data-home-action="${ACTIONS.PREV_PAGE}"
-              data-action="${ACTIONS.PREV_PAGE}"
-              data-page="${attr(String(Math.max(1, pagination.currentPage - 1)))}"
-              ${boolAttr(!pagination.hasPrev || state.loading || state.refreshing, 'disabled aria-disabled="true"')}
-            >
-              ${icon("chevronLeft")}
-              <span>Anterior</span>
-            </button>
-
-            <span class="home-pagination-status">${escapeHtml(`${pagination.currentPage}/${pagination.totalPages}`)}</span>
-
-            <button
-              type="button"
-              class="home-pagination-btn home-pagination-btn--next"
-              data-home-action="${ACTIONS.NEXT_PAGE}"
-              data-action="${ACTIONS.NEXT_PAGE}"
-              data-page="${attr(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
-              ${boolAttr(!pagination.hasNext || state.loading || state.refreshing, 'disabled aria-disabled="true"')}
-            >
-              <span>Siguiente</span>
-              ${icon("chevronRight")}
-            </button>
-          </div>
+          <button
+            type="button"
+            class="home-panel-link"
+            data-home-action="${ACTIONS.NAVIGATE}"
+            data-action="${ACTIONS.NAVIGATE}"
+            data-route="${attr(ROUTES.INCIDENCIAS)}"
+            data-href="${attr(ROUTES.INCIDENCIAS)}"
+          >
+            Ver todas ${icon("arrowRight")}
+          </button>
         </div>
       </div>
 
       ${initialLoading
-        ? loadingRows(Math.max(3, pagination.pageSize || DEFAULT_PAGE_SIZE))
+        ? loadingRows(Math.max(3, DEFAULT_PAGE_SIZE))
         : `
           <div class="${joinClasses("home-table-wrap", state.refreshing ? "is-refreshing" : "")}">
-            ${pagination.pageItems.length
+            ${rows.length
               ? `
                 <div class="home-table-shell">
-                  <table class="home-table" role="table" aria-label="Resumen de incidencias del Home">
+                  <table class="home-table" role="table" aria-label="Últimas incidencias del Home">
                     <thead>
                       <tr>
                         <th scope="col">Incidencia</th>
-                        <th scope="col">Usuario / cliente</th>
                         <th scope="col">Estado</th>
+                        <th scope="col">Técnico</th>
                         <th scope="col">Creación</th>
                         <th scope="col">Última novedad</th>
                         <th scope="col">Acciones</th>
                       </tr>
                     </thead>
                     <tbody>
-                      ${pagination.pageItems.map((item) => ticketRow(item, state)).join("")}
+                      ${rows.map((item) => ticketRow(item, state)).join("")}
                     </tbody>
                   </table>
                 </div>
@@ -1804,6 +1874,184 @@ export function renderHomeTicketsTable(input = {}) {
           </div>
         `
       }
+    </section>
+  `;
+}
+
+/* =========================================================
+   Modal incidencia
+========================================================= */
+
+function modalInvoiceItem(item = {}) {
+  const id = safeText(first(item.fullId, item.displayId, item.invoiceId, item.facturaId, getInvoiceId(item)), "FAC-SIN-ID");
+  const statusKey = safeText(first(item.statusKey, getInvoiceStatusKey(item)), "pending");
+  const statusLabel = safeText(first(item.statusLabel, getInvoiceStatusLabel(item)), "Pendiente");
+  const currency = getInvoiceCurrency(item);
+  const paid = Boolean(first(item.isPaid, item.paid, isInvoicePaid(item)));
+  const amount = paid
+    ? safeNumber(first(item.paidAmount, item.amount, getInvoicePaidAmount(item)), 0)
+    : 0;
+
+  return `
+    <li class="home-modal-invoice home-modal-invoice--${attr(statusKey)}">
+      <span class="home-modal-invoice-icon" aria-hidden="true">${icon("invoice")}</span>
+      <span class="home-modal-invoice-copy">
+        <strong>${escapeHtml(id)}</strong>
+        <span>${escapeHtml(statusLabel)}</span>
+      </span>
+      ${paid ? `<span class="home-modal-invoice-amount">${escapeHtml(formatMoney(amount, currency))}</span>` : ""}
+    </li>
+  `;
+}
+
+function renderTicketModal(input = {}) {
+  const vm = asViewModel(input);
+  const modal = safeObject(vm.ticketModal);
+
+  if (!modal.open || !modal.ticket) return "";
+
+  const ticketId = safeText(first(modal.fullId, modal.displayId, modal.ticketId, modal.incidenciaId, modal.id), "INC-SIN-ID");
+  const title = safeText(first(modal.title, modal.subject), "Incidencia sin asunto");
+  const description = safeText(first(modal.description, modal.preview), "Sin descripción.");
+  const technician = safeObject(first(modal.technician, modal.tecnico, {}));
+  const technicianName = visualLabel(first(technician.displayName, technician.name, modal.technicianName), "Sin asignar");
+  const technicianAvatar = safeImageSrc(first(technician.avatarUrl, technician.avatar, modal.technicianAvatarUrl, ""));
+  const invoices = safeArray(first(modal.invoiceRows, modal.invoices, modal.facturas, [])).slice(0, LIMITS.invoices);
+  const statusKey = safeText(first(modal.statusKey, getTicketStatusKey(modal.ticket)), "pending");
+  const statusLabel = safeText(first(modal.statusLabel, getTicketStatusLabel(modal.ticket)), "Pendiente");
+  const priorityKey = safeText(first(modal.priorityKey, getTicketPriorityKey(modal.ticket)), "medium");
+  const priorityLabel = safeText(first(modal.priorityLabel), "Media");
+  const createdAt = first(modal.createdAt, getTicketCreatedAt(modal.ticket));
+  const updatedAt = first(modal.lastActivityAt, modal.updatedAt, getTicketUpdatedAt(modal.ticket));
+
+  return `
+    <section
+      class="home-modal"
+      data-home-modal="ticket-detail"
+      data-ticket-id="${attr(ticketId)}"
+      data-incidencia-id="${attr(ticketId)}"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="home-ticket-modal-title"
+    >
+      <button
+        type="button"
+        class="home-modal-backdrop"
+        data-home-action="${ACTIONS.CLOSE_TICKET_DETAIL}"
+        data-action="${ACTIONS.CLOSE_TICKET_DETAIL}"
+        aria-label="Cerrar detalle de incidencia"
+      ></button>
+
+      <div class="home-modal-dialog" role="document">
+        <div class="home-modal-head">
+          <div class="home-modal-title-block">
+            <span class="home-panel-kicker">Detalle de incidencia</span>
+            <h2 id="home-ticket-modal-title" class="home-modal-title">${escapeHtml(ticketId)}</h2>
+            <p class="home-modal-subtitle">${escapeHtml(title)}</p>
+          </div>
+
+          <button
+            type="button"
+            class="home-modal-close"
+            data-home-action="${ACTIONS.CLOSE_TICKET_DETAIL}"
+            data-action="${ACTIONS.CLOSE_TICKET_DETAIL}"
+            aria-label="Cerrar"
+          >
+            ${icon("close")}
+          </button>
+        </div>
+
+        <div class="home-modal-body">
+          <div class="home-modal-main">
+            <div class="home-modal-section">
+              <h3>Resumen</h3>
+              <p>${escapeHtml(description)}</p>
+
+              <div class="home-modal-tags">
+                <span class="home-chip home-chip--${attr(statusKey)}">
+                  <span class="home-chip-dot" aria-hidden="true"></span>
+                  ${escapeHtml(statusLabel)}
+                </span>
+                <span class="home-mini-badge home-mini-badge--${attr(priorityKey)}">
+                  ${icon(priorityKey === "critical" || priorityKey === "urgent" ? "alert" : "activity")}
+                  ${escapeHtml(priorityLabel)}
+                </span>
+                <span class="home-mini-badge home-mini-badge--category">
+                  ${escapeHtml(safeText(first(modal.category, modal.categoria, getTicketCategory(modal.ticket)), "Soporte"))}
+                </span>
+              </div>
+            </div>
+
+            <div class="home-modal-section">
+              <h3>Facturas vinculadas</h3>
+              ${invoices.length
+                ? `<ul class="home-modal-invoice-list">${invoices.map(modalInvoiceItem).join("")}</ul>`
+                : `<p class="home-modal-muted">Esta incidencia no tiene facturas vinculadas.</p>`
+              }
+            </div>
+          </div>
+
+          <aside class="home-modal-side">
+            <div class="home-modal-technician">
+              ${avatar({
+                name: technicianName,
+                image: technicianAvatar,
+                kind: "technician",
+                seed: safeText(first(technician.userId, technician.id, technicianName), technicianName),
+                className: "home-modal-technician-avatar",
+              })}
+              <div>
+                <span class="home-panel-kicker">Técnico asignado</span>
+                <strong>${escapeHtml(technicianName)}</strong>
+                <p>${technicianAvatar ? "Avatar real del usuario." : "Mostrando iniciales."}</p>
+              </div>
+            </div>
+
+            <dl class="home-modal-facts">
+              <div>
+                <dt>Creación</dt>
+                <dd>${escapeHtml(formatDateTime(createdAt))}</dd>
+              </div>
+              <div>
+                <dt>Última novedad</dt>
+                <dd>${escapeHtml(formatLastUpdate(updatedAt))}</dd>
+              </div>
+              <div>
+                <dt>Facturas</dt>
+                <dd>${escapeHtml(formatNumber(invoices.length))}</dd>
+              </div>
+              <div>
+                <dt>Adjuntos</dt>
+                <dd>${escapeHtml(formatNumber(safeNumber(first(modal.attachmentsCount, 0), 0)))}</dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+
+        <div class="home-modal-footer">
+          <button
+            type="button"
+            class="home-btn"
+            data-home-action="${ACTIONS.CLOSE_TICKET_DETAIL}"
+            data-action="${ACTIONS.CLOSE_TICKET_DETAIL}"
+          >
+            Cerrar
+          </button>
+
+          <button
+            type="button"
+            class="home-btn home-btn--primary"
+            data-home-action="${ACTIONS.NAVIGATE}"
+            data-action="${ACTIONS.NAVIGATE}"
+            data-route="${attr(ROUTES.INCIDENCIAS)}"
+            data-href="${attr(ROUTES.INCIDENCIAS)}"
+            data-ticket-id="${attr(ticketId)}"
+            data-incidencia-id="${attr(ticketId)}"
+          >
+            Abrir incidencias ${icon("arrowRight")}
+          </button>
+        </div>
+      </div>
     </section>
   `;
 }
@@ -1883,6 +2131,7 @@ export function renderHomeTemplate(input = {}) {
       </section>
 
       ${renderHomeTicketsTable(vm)}
+      ${renderTicketModal(vm)}
     </section>
   `;
 }

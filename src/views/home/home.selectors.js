@@ -6,7 +6,7 @@
    - Selectores puros para Home.
    - Leer dashboard normalizado.
    - Leer colecciones para template.js.
-   - Calcular métricas/cards/actions.
+   - Calcular métricas/cards/actions ligeras.
    - Formatear números, dinero y fechas.
    - Resolver usuario/rol admin-user.
    - Home distinto para admin/user.
@@ -44,7 +44,7 @@ import {
   buildHomeActivityFromCollections,
 } from "./home.model.js";
 
-export const HOME_SELECTORS_VERSION = "home.selectors.v6";
+export const HOME_SELECTORS_VERSION = "home.selectors.v7";
 
 /* =========================================================
    CONSTANTS
@@ -59,15 +59,13 @@ const ACTIONS = Object.freeze({
   CREATE_INCIDENCIA: "create_incidencia",
 });
 
-const VALID_ROUTE_FALLBACKS = Object.freeze({
+const REQUIRED_ROUTE_FALLBACKS = Object.freeze({
   incidencias: "/incidencias",
   facturas: "/facturas",
   clientes: "/clientes",
-  usuarios: "/usuarios",
-  servidor: "/servidor",
 });
 
-const VALID_OPTIONAL_ROUTES = Object.freeze([
+const OPTIONAL_ROUTE_NAMES = Object.freeze([
   "usuarios",
   "servidor",
   "cuenta",
@@ -97,6 +95,7 @@ const RAW_KEYS = new Set([
   "data",
   "payload",
   "response",
+  "body",
 ]);
 
 const SENSITIVE_KEY_RE =
@@ -324,6 +323,56 @@ function hasSensitiveQuery(value = "") {
   return SENSITIVE_QUERY_RE.test(String(value || ""));
 }
 
+function isEmailLike(value = "") {
+  const text = safeText(value, "");
+  return Boolean(text && EMAIL_RE.test(text));
+}
+
+function visualText(value = "", fallback = "Usuario") {
+  const text = redact(safeText(value, ""));
+
+  if (!text) return fallback;
+  if (isEmailLike(text)) return fallback;
+
+  return text;
+}
+
+function firstVisual(values = [], fallback = "Usuario") {
+  for (const value of safeArray(values)) {
+    const text = safeText(value, "");
+
+    if (!text || isEmailLike(text)) continue;
+
+    return redact(text);
+  }
+
+  return fallback;
+}
+
+function safeImageSrc(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+
+  if (raw.startsWith("/") && !raw.startsWith("//") && !hasSensitiveQuery(raw)) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (/^https:\/\//i.test(raw) && !hasSensitiveQuery(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
+}
+
+/* =========================================================
+   ROUTES
+========================================================= */
+
 function routeInput(value = "") {
   const raw = safeText(value, "");
 
@@ -425,19 +474,20 @@ export function normalizeRoute(route = "") {
 }
 
 function routeFromCore(name = "", fallback = "") {
-  const route = normalizeRoute(CORE_ROUTES?.[name]);
+  const configured = normalizeRoute(CORE_ROUTES?.[name]);
 
-  if (route) return route;
+  if (configured) return configured;
 
   return fallback ? normalizeRoute(fallback) : "";
 }
 
 export const HOME_ROUTES = Object.freeze({
-  INCIDENCIAS: routeFromCore("incidencias", VALID_ROUTE_FALLBACKS.incidencias),
-  FACTURAS: routeFromCore("facturas", VALID_ROUTE_FALLBACKS.facturas),
-  CLIENTES: routeFromCore("clientes", VALID_ROUTE_FALLBACKS.clientes),
-  USUARIOS: routeFromCore("usuarios", VALID_ROUTE_FALLBACKS.usuarios),
-  SERVIDOR: routeFromCore("servidor", VALID_ROUTE_FALLBACKS.servidor),
+  INCIDENCIAS: routeFromCore("incidencias", REQUIRED_ROUTE_FALLBACKS.incidencias),
+  FACTURAS: routeFromCore("facturas", REQUIRED_ROUTE_FALLBACKS.facturas),
+  CLIENTES: routeFromCore("clientes", REQUIRED_ROUTE_FALLBACKS.clientes),
+
+  USUARIOS: routeFromCore("usuarios", ""),
+  SERVIDOR: routeFromCore("servidor", ""),
 
   CUENTA: routeFromCore("cuenta", ""),
   AJUSTES: routeFromCore("ajustes", ""),
@@ -459,7 +509,7 @@ function isAdminOnlyRoute(route = "") {
   try {
     if (configIsAdminRoute(path) === true) return true;
   } catch {
-    // fallback abajo
+    // fallback local
   }
 
   return (
@@ -471,52 +521,6 @@ function isAdminOnlyRoute(route = "") {
 
 function isAdminEntityValue(value = "") {
   return ADMIN_ENTITY_RE.test(String(value || "").toLowerCase());
-}
-
-function isEmailLike(value = "") {
-  const text = safeText(value, "");
-  return Boolean(text && EMAIL_RE.test(text));
-}
-
-function visualText(value = "", fallback = "Usuario") {
-  const text = redact(safeText(value, ""));
-
-  if (!text) return fallback;
-  if (isEmailLike(text)) return fallback;
-
-  return text;
-}
-
-function firstVisual(values = [], fallback = "Usuario") {
-  for (const value of safeArray(values)) {
-    const text = safeText(value, "");
-
-    if (!text || isEmailLike(text)) continue;
-
-    return redact(text);
-  }
-
-  return fallback;
-}
-
-function safeImageSrc(value = "") {
-  const raw = safeText(value, "");
-
-  if (!raw) return "";
-
-  if (raw.startsWith("/") && !raw.startsWith("//") && !hasSensitiveQuery(raw)) {
-    return raw.replace(/\/{2,}/g, "/");
-  }
-
-  if (/^https:\/\//i.test(raw) && !hasSensitiveQuery(raw)) {
-    try {
-      return new URL(raw).href;
-    } catch {
-      return "";
-    }
-  }
-
-  return "";
 }
 
 function sanitizeSummaryForRole(summary = {}, admin = false) {
@@ -825,7 +829,7 @@ function roleFromAdminFlag(value = {}) {
 export function getDashboard(input = {}) {
   const data = safeObject(input);
 
-  return sanitizeObject(
+  return safeObject(
     first(
       data.dashboard,
       data.state?.dashboard,
@@ -850,7 +854,7 @@ export function getNormalizedDashboard(input = {}) {
 }
 
 function publicUser(user = {}) {
-  const raw = sanitizeObject(user);
+  const raw = safeObject(user);
 
   const role =
     normalizeRole(
@@ -939,8 +943,8 @@ export function getUser(input = {}) {
 
 export function getRole(input = {}) {
   const data = safeObject(input);
-  const user = getUser(data);
   const dashboard = getDashboard(data);
+  const user = getUser(data);
 
   return (
     normalizeRole(
@@ -1017,7 +1021,7 @@ export function getSummary(input = {}) {
   const admin = isAdminRole(getRole(data));
 
   return sanitizeSummaryForRole(
-    sanitizeObject(
+    safeObject(
       first(
         data.summary,
         data.stats,
@@ -1389,10 +1393,6 @@ export function getTicketOwnerName(item = {}) {
 }
 
 export function getTicketOwnerEmail() {
-  /*
-    Compat selector.
-    Home no expone emails en UI ni los usa como identidad.
-  */
   return "";
 }
 
@@ -1511,6 +1511,7 @@ export function getTicketUpdatedAt(item = {}) {
   return first(
     item.updatedAt,
     item.lastUpdateAt,
+    item.lastActivityAt,
     item.ultimaNovedad,
     item.modifiedAt,
     item.closedAt,
@@ -1704,10 +1705,7 @@ export function computeHomeStats(input = {}) {
     getBestSummaryNumber(
       input,
       ["invoiceAmount", "billingTotal", "totalBilling", "totalFacturado", "importeFacturas", "facturacionVisible", "facturacionTotal"],
-      invoices.reduce((sum, item) => sum + getInvoiceAmount(item), 0),
-      [
-        getWidgetNumericValue(input, ["facturacion", "facturas", "billing", "invoice", "total_facturado"], null),
-      ]
+      invoices.reduce((sum, item) => sum + getInvoiceAmount(item), 0)
     )
   );
 
@@ -1812,18 +1810,11 @@ export function getStatCards(input = {}) {
       modifier: "billing",
     },
     {
-      iconName: "paperclip",
-      label: "Adjuntos",
-      value: formatNumber(stats.attachmentsCount),
-      text: "Documentos vinculados a tus incidencias.",
-      modifier: "files",
-    },
-    {
-      iconName: "clock",
-      label: "Última actividad",
-      value: stats.lastTicketUpdate ? formatRelativeDate(stats.lastTicketUpdate) : "Sin fecha",
-      text: "Movimiento más reciente.",
-      modifier: "activity",
+      iconName: "invoice",
+      label: "Facturas totales",
+      value: formatNumber(stats.totalInvoices),
+      text: `Importe total: ${formatMoney(stats.invoiceAmount)}.`,
+      modifier: "invoices",
     },
   ];
 }
@@ -2073,7 +2064,7 @@ export function buildHomeTemplateData(input = {}) {
   const user = getUser(source);
   const displayName = getDisplayName(source);
 
-  return sanitizeObject({
+  return {
     version: HOME_SELECTORS_VERSION,
 
     user,
@@ -2136,9 +2127,9 @@ export function buildHomeTemplateData(input = {}) {
       partial: Boolean(dashboard.partial),
       errorsCount: safeArray(dashboard.errors).length,
       canSeeUsers: admin,
-      optionalRoutes: VALID_OPTIONAL_ROUTES.filter((name) => Boolean(HOME_ROUTES[name.toUpperCase()])),
+      optionalRoutes: OPTIONAL_ROUTE_NAMES.filter((name) => Boolean(HOME_ROUTES[name.toUpperCase()])),
     },
-  });
+  };
 }
 
 /* =========================================================

@@ -9,8 +9,13 @@
    - Calcular métricas/cards/actions ligeras.
    - Formatear números, dinero y fechas.
    - Resolver usuario/rol admin-user.
+   - Construir filas visibles de Home sin duplicar lógica de modelo.
+   - Limitar sólo vistas/listas recientes a 5 elementos.
+   - Mantener contadores sobre el total completo disponible.
+   - Preparar datos del modal de incidencia.
+   - Preparar técnico asignado y facturas vinculadas desde home.model.js.
    - Home distinto para admin/user.
-   - User nunca expone users/clientes/servidor.
+   - User nunca expone users/clientes.
    - Rutas base desde core/config.js.
    - Rutas admin reales desde core/config.js.
    - Bloqueos legacy desde core/config.js.
@@ -21,6 +26,7 @@
    - Sin CSS inline.
    - Sin rutas inventadas.
    - Sin /home.
+   - Sin health/server/ready/ping.
    - Sin emails como identidad.
    - Sin raw/data/payload/response en salidas normalizadas.
 ========================================================= */
@@ -34,6 +40,7 @@ import {
 } from "../../core/config.js";
 
 import {
+  DEFAULT_HOME_RECENT_LIMIT,
   normalizeHomeDashboard,
   normalizeHomeWidgets,
   normalizeHomeTickets,
@@ -42,32 +49,48 @@ import {
   normalizeHomeClients,
   normalizeHomeActivityList,
   buildHomeActivityFromCollections,
+  findHomeTicketById,
+  resolveHomeTicketInvoices,
+  resolveHomeTicketTechnician,
+  getHomeTicketStatusKey as modelTicketStatusKey,
+  getHomeTicketStatusLabel as modelTicketStatusLabel,
+  getHomeTicketPriorityKey as modelTicketPriorityKey,
+  getHomeInvoiceStatusKey as modelInvoiceStatusKey,
+  getHomeInvoiceStatusLabel as modelInvoiceStatusLabel,
+  isHomeInvoicePaid as modelIsInvoicePaid,
+  isHomeInvoicePendingLike as modelIsInvoicePendingLike,
+  getHomeInvoiceAmount as modelGetInvoiceAmount,
+  getHomeInvoicePaidAmount as modelGetInvoicePaidAmount,
+  getHomeInvoicePendingAmount as modelGetInvoicePendingAmount,
 } from "./home.model.js";
 
-export const HOME_SELECTORS_VERSION = "home.selectors.v7";
+export const HOME_SELECTORS_VERSION = "home.selectors.v8";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
 export const DEFAULT_PAGE_SIZE = 5;
+export const DEFAULT_RECENT_LIMIT = DEFAULT_HOME_RECENT_LIMIT || 5;
 export const DEFAULT_CURRENCY = "EUR";
 export const DEFAULT_LOCALE = "es-ES";
 
 const ACTIONS = Object.freeze({
   NAVIGATE: "navigate_home",
   CREATE_INCIDENCIA: "create_incidencia",
+  OPEN_TICKET_DETAIL: "open_ticket_detail",
+  CLOSE_TICKET_DETAIL: "close_ticket_detail",
 });
 
 const REQUIRED_ROUTE_FALLBACKS = Object.freeze({
   incidencias: "/incidencias",
   facturas: "/facturas",
   clientes: "/clientes",
+  usuarios: "/usuarios",
 });
 
 const OPTIONAL_ROUTE_NAMES = Object.freeze([
   "usuarios",
-  "servidor",
   "cuenta",
   "ajustes",
   "search",
@@ -75,9 +98,39 @@ const OPTIONAL_ROUTE_NAMES = Object.freeze([
 
 export const VALID_ROLES = Object.freeze(["admin", "user"]);
 
-export const TICKET_OPEN_KEYS = Object.freeze(["pending", "open", "progress"]);
-export const TICKET_CLOSED_KEYS = Object.freeze(["resolved", "closed"]);
-export const INVOICE_PENDING_KEYS = Object.freeze(["pending", "overdue", "partial"]);
+export const TICKET_STATUS_KEYS = Object.freeze({
+  PENDING: "pending",
+  OPEN: "open",
+  PROGRESS: "progress",
+  RESOLVED: "resolved",
+  CLOSED: "closed",
+});
+
+export const TICKET_OPEN_KEYS = Object.freeze([
+  TICKET_STATUS_KEYS.PENDING,
+  TICKET_STATUS_KEYS.OPEN,
+  TICKET_STATUS_KEYS.PROGRESS,
+]);
+
+export const TICKET_CLOSED_KEYS = Object.freeze([
+  TICKET_STATUS_KEYS.RESOLVED,
+  TICKET_STATUS_KEYS.CLOSED,
+]);
+
+export const INVOICE_STATUS_KEYS = Object.freeze({
+  PAID: "paid",
+  PENDING: "pending",
+  OVERDUE: "overdue",
+  PARTIAL: "partial",
+  CANCELLED: "cancelled",
+  DRAFT: "draft",
+});
+
+export const INVOICE_PENDING_KEYS = Object.freeze([
+  INVOICE_STATUS_KEYS.PENDING,
+  INVOICE_STATUS_KEYS.OVERDUE,
+  INVOICE_STATUS_KEYS.PARTIAL,
+]);
 
 const ADMIN_ACTIVITY_TYPES = new Set([
   "client",
@@ -86,8 +139,6 @@ const ADMIN_ACTIVITY_TYPES = new Set([
   "user",
   "usuario",
   "member",
-  "server",
-  "servidor",
 ]);
 
 const RAW_KEYS = new Set([
@@ -98,16 +149,27 @@ const RAW_KEYS = new Set([
   "body",
 ]);
 
+const COSMOS_META_KEYS = new Set([
+  "_id",
+  "_rid",
+  "_self",
+  "_etag",
+  "_attachments",
+  "_ts",
+  "_lsn",
+  "_metadata",
+]);
+
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni|ipRaw|userAgent/i;
 
 const SENSITIVE_QUERY_RE =
   /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
 
 const ADMIN_ENTITY_RE =
-  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory|servidores?|servidor|servers?)([\s._/-]|$)/i;
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
 
 /* =========================================================
    SAFE HELPERS
@@ -283,11 +345,10 @@ function isSensitiveKey(key = "") {
 
 function sanitizeValue(value, keyHint = "") {
   if (RAW_KEYS.has(keyHint)) return undefined;
+  if (COSMOS_META_KEYS.has(keyHint)) return undefined;
   if (isSensitiveKey(keyHint)) return undefined;
 
-  if (typeof value === "string") {
-    return redact(value);
-  }
+  if (typeof value === "string") return redact(value);
 
   if (Array.isArray(value)) {
     return value
@@ -300,13 +361,12 @@ function sanitizeValue(value, keyHint = "") {
 
     for (const [key, item] of Object.entries(value)) {
       if (RAW_KEYS.has(key)) continue;
+      if (COSMOS_META_KEYS.has(key)) continue;
       if (isSensitiveKey(key)) continue;
 
       const clean = sanitizeValue(item, key);
 
-      if (clean !== undefined) {
-        output[key] = clean;
-      }
+      if (clean !== undefined) output[key] = clean;
     }
 
     return output;
@@ -339,6 +399,8 @@ function visualText(value = "", fallback = "Usuario") {
 
 function firstVisual(values = [], fallback = "Usuario") {
   for (const value of safeArray(values)) {
+    if (isObject(value)) continue;
+
     const text = safeText(value, "");
 
     if (!text || isEmailLike(text)) continue;
@@ -353,17 +415,31 @@ function safeImageSrc(value = "") {
   const raw = safeText(value, "");
 
   if (!raw) return "";
+  if (hasSensitiveQuery(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (/^(?:data|blob|javascript|vbscript|file):/i.test(raw)) return "";
+  if (raw.startsWith("//")) return "";
 
-  if (raw.startsWith("/") && !raw.startsWith("//") && !hasSensitiveQuery(raw)) {
-    return raw.replace(/\/{2,}/g, "/");
-  }
+  if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
 
-  if (/^https:\/\//i.test(raw) && !hasSensitiveQuery(raw)) {
+  if (/^https:\/\//i.test(raw)) {
     try {
       return new URL(raw).href;
     } catch {
       return "";
     }
+  }
+
+  if (
+    raw.includes("/") ||
+    /\.(?:png|jpe?g|gif|webp|svg|avif|bmp)(?:[?#].*)?$/i.test(raw)
+  ) {
+    const clean = raw
+      .replace(/^\.\//, "")
+      .replace(/^\/+/, "")
+      .replace(/\/{2,}/g, "/");
+
+    return clean ? `/${clean}` : "";
   }
 
   return "";
@@ -393,11 +469,9 @@ function routeInput(value = "") {
 
 function routeSuffix(value = "") {
   const raw = safeText(value, "");
-
   const hashIndex = raw.indexOf("#");
   const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
   const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-
   const queryIndex = beforeHash.indexOf("?");
   const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
 
@@ -423,13 +497,8 @@ function routePathOnly(value = "") {
   } catch {
     let path = pathOnly.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
 
-    if (!path.startsWith("/")) {
-      path = `/${path}`;
-    }
-
-    if (path.length > 1) {
-      path = path.replace(/\/+$/g, "") || "/";
-    }
+    if (!path.startsWith("/")) path = `/${path}`;
+    if (path.length > 1) path = path.replace(/\/+$/g, "") || "/";
 
     return path || "";
   }
@@ -475,9 +544,7 @@ export function normalizeRoute(route = "") {
 
 function routeFromCore(name = "", fallback = "") {
   const configured = normalizeRoute(CORE_ROUTES?.[name]);
-
   if (configured) return configured;
-
   return fallback ? normalizeRoute(fallback) : "";
 }
 
@@ -485,10 +552,7 @@ export const HOME_ROUTES = Object.freeze({
   INCIDENCIAS: routeFromCore("incidencias", REQUIRED_ROUTE_FALLBACKS.incidencias),
   FACTURAS: routeFromCore("facturas", REQUIRED_ROUTE_FALLBACKS.facturas),
   CLIENTES: routeFromCore("clientes", REQUIRED_ROUTE_FALLBACKS.clientes),
-
-  USUARIOS: routeFromCore("usuarios", ""),
-  SERVIDOR: routeFromCore("servidor", ""),
-
+  USUARIOS: routeFromCore("usuarios", REQUIRED_ROUTE_FALLBACKS.usuarios),
   CUENTA: routeFromCore("cuenta", ""),
   AJUSTES: routeFromCore("ajustes", ""),
   SEARCH: routeFromCore("search", ""),
@@ -502,7 +566,6 @@ function isAdminOnlyRoute(route = "") {
   const path = getRoutePath(route);
   const clientes = getRoutePath(HOME_ROUTES.CLIENTES);
   const usuarios = getRoutePath(HOME_ROUTES.USUARIOS);
-  const servidor = getRoutePath(HOME_ROUTES.SERVIDOR);
 
   if (!path) return false;
 
@@ -514,8 +577,7 @@ function isAdminOnlyRoute(route = "") {
 
   return (
     Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
-    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
-    Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
   );
 }
 
@@ -524,9 +586,7 @@ function isAdminEntityValue(value = "") {
 }
 
 function sanitizeSummaryForRole(summary = {}, admin = false) {
-  const output = {
-    ...safeObject(summary),
-  };
+  const output = { ...safeObject(summary) };
 
   if (!admin) {
     output.usersCount = 0;
@@ -550,16 +610,9 @@ function sanitizeSummaryForRole(summary = {}, admin = false) {
     output.visibleClientsCount = 0;
     output.visibleClientesCount = 0;
     output.visibleCustomersCount = 0;
-
-    output.serversCount = 0;
-    output.serverCount = 0;
-    output.servidoresCount = 0;
-    output.servidorCount = 0;
-    output.totalServers = 0;
-    output.totalServidores = 0;
   }
 
-  return output;
+  return sanitizeObject(output);
 }
 
 /* =========================================================
@@ -643,7 +696,6 @@ export function toTimestamp(value = null) {
   }
 
   const raw = safeText(value, "");
-
   if (!raw) return 0;
 
   const numeric = Number(raw);
@@ -653,12 +705,11 @@ export function toTimestamp(value = null) {
   }
 
   const esDate = raw.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+-\s+|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
   );
 
   if (esDate) {
     const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = esDate;
-
     const date = new Date(
       Number(yyyy),
       Number(mm) - 1,
@@ -667,9 +718,7 @@ export function toTimestamp(value = null) {
       Number(min),
       Number(ss)
     );
-
     const time = date.getTime();
-
     return Number.isNaN(time) ? 0 : time;
   }
 
@@ -849,7 +898,7 @@ export function getNormalizedDashboard(input = {}) {
   try {
     return normalizeHomeDashboard(hasKeys(dashboard) ? dashboard : data);
   } catch {
-    return dashboard;
+    return sanitizeObject(dashboard);
   }
 }
 
@@ -857,14 +906,7 @@ function publicUser(user = {}) {
   const raw = safeObject(user);
 
   const role =
-    normalizeRole(
-      first(
-        raw.role,
-        raw.rol,
-        raw.roles,
-        ""
-      )
-    ) ||
+    normalizeRole(first(raw.role, raw.rol, raw.roles, "")) ||
     roleFromAdminFlag(raw) ||
     "user";
 
@@ -877,6 +919,7 @@ function publicUser(user = {}) {
       raw.profile?.displayName,
       raw.profile?.fullName,
       raw.profile?.name,
+      raw.profile?.nombre,
       raw.username,
       raw.userName,
       raw.slug,
@@ -894,14 +937,17 @@ function publicUser(user = {}) {
       raw.photoUrl,
       raw.photoURL,
       raw.picture,
+      raw.pictureUrl,
       raw.profile?.avatar,
-      raw.profile?.avatarUrl
+      raw.profile?.avatarUrl,
+      raw.profile?.photoUrl,
+      ""
     )
   );
 
-  return {
-    id: safeText(first(raw.id, raw.userId), ""),
-    userId: safeText(first(raw.userId, raw.id), ""),
+  return sanitizeObject({
+    id: safeText(first(raw.id, raw.userId, raw.uid, raw.sub), ""),
+    userId: safeText(first(raw.userId, raw.id, raw.uid, raw.sub), ""),
     username: safeText(first(raw.username, raw.userName), ""),
     userName: safeText(first(raw.userName, raw.username), ""),
     slug: safeText(first(raw.slug, raw.lookup?.slug, raw.profile?.slug), ""),
@@ -918,7 +964,7 @@ function publicUser(user = {}) {
     role,
     rol: role,
     roles: [role],
-  };
+  });
 }
 
 export function getUser(input = {}) {
@@ -976,6 +1022,10 @@ export function canSeeUsersModule(input = {}) {
   return isAdminRole(getRole(input));
 }
 
+export function canSeeClientsModule(input = {}) {
+  return isAdminRole(getRole(input));
+}
+
 export function getDisplayName(input = {}) {
   const user = getUser(input);
 
@@ -999,16 +1049,12 @@ export function getAvatarUrl(input = {}) {
 
 export function getInitials(value = "") {
   const clean = visualText(value, "ON");
-
-  if (!clean) return "ON";
-
   const parts = clean.split(" ").filter(Boolean);
 
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
+  if (!parts.length) return "ON";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
 
-  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
+  return `${parts[0]?.[0] || ""}${parts[parts.length - 1]?.[0] || ""}`.toUpperCase() || "ON";
 }
 
 /* =========================================================
@@ -1028,10 +1074,8 @@ export function getSummary(input = {}) {
         data.metrics,
         data.totals,
         data.counts,
-
         data.state?.summary,
         data.state?.stats,
-
         dashboard.summary,
         dashboard.stats,
         dashboard.metrics,
@@ -1048,18 +1092,13 @@ export function getSummaryValue(input = {}, keys = [], fallback = null) {
   const data = safeObject(input);
   const summary = getSummary(data);
   const dashboard = getDashboard(data);
-
   const sources = [summary, dashboard, data.state, data];
 
   for (const key of safeArray(keys)) {
     for (const source of sources) {
-      const value = String(key).includes(".")
-        ? getPath(source, key)
-        : source?.[key];
+      const value = String(key).includes(".") ? getPath(source, key) : source?.[key];
 
-      if (value !== null && value !== undefined && value !== "") {
-        return value;
-      }
+      if (value !== null && value !== undefined && value !== "") return value;
     }
   }
 
@@ -1080,7 +1119,6 @@ export function getBestSummaryNumber(input = {}, keys = [], fallback = 0, extraC
   if (!numbers.length) return safeNumber(fallback, 0);
 
   const positive = numbers.filter((value) => value > 0);
-
   return positive.length ? Math.max(...positive) : Math.max(...numbers);
 }
 
@@ -1112,7 +1150,6 @@ function countFrom(input = {}, names = [], fallback = 0) {
   const dashboard = getDashboard(data);
   const summary = getSummary(data);
   const state = safeObject(data.state);
-
   const candidates = [];
 
   for (const name of safeArray(names)) {
@@ -1160,17 +1197,16 @@ function activityVisibleForRole(input = {}, item = {}) {
 
 export function getCollections(input = {}) {
   const admin = isAdminRole(getRole(input));
+  const rawInvoices = collection(input, ["invoices", "facturas"]);
+  const invoices = normalizeHomeInvoices(rawInvoices);
 
-  const tickets = normalizeHomeTickets(collection(input, ["tickets", "incidencias"]));
-  const invoices = normalizeHomeInvoices(collection(input, ["invoices", "facturas"]));
+  const users = admin ? normalizeHomeUsers(collection(input, ["users", "usuarios"])) : [];
+  const clients = admin ? normalizeHomeClients(collection(input, ["clients", "clientes", "customers"])) : [];
 
-  const users = admin
-    ? normalizeHomeUsers(collection(input, ["users", "usuarios"]))
-    : [];
-
-  const clients = admin
-    ? normalizeHomeClients(collection(input, ["clients", "clientes", "customers"]))
-    : [];
+  const tickets = normalizeHomeTickets(collection(input, ["tickets", "incidencias"]), {
+    invoices,
+    users: admin ? users : [],
+  });
 
   const rawActivity = normalizeHomeActivityList(
     collection(input, ["activity", "activities", "recent", "recentActivity"])
@@ -1180,9 +1216,13 @@ export function getCollections(input = {}) {
 
   return {
     tickets,
+    incidencias: tickets,
     invoices,
+    facturas: invoices,
     users,
+    usuarios: users,
     clients,
+    clientes: clients,
     activity,
 
     ticketsRemoteCount: countFrom(
@@ -1247,7 +1287,6 @@ function widgetVisibleForRole(input = {}, widget = {}) {
   if (isAdminRole(getRole(input))) return true;
 
   const route = getWidgetRoute(widget);
-
   if (isAdminOnlyRoute(route)) return false;
 
   const identity = safeText(
@@ -1329,7 +1368,6 @@ export function getWidgetNumericValue(input = {}, matchers = [], fallback = null
     if (!aliases.some((alias) => text.includes(alias))) continue;
 
     const value = safeNumber(getWidgetValue(widget), NaN);
-
     if (Number.isFinite(value)) return value;
   }
 
@@ -1397,23 +1435,7 @@ export function getTicketOwnerEmail() {
 }
 
 export function getTicketAvatarUrl(item = {}) {
-  return safeImageSrc(
-    first(
-      item.clientAvatar,
-      item.avatar,
-      item.avatarUrl,
-      item.avatar_url,
-      item.userAvatar,
-      item.requesterSnapshot?.avatar,
-      item.requesterSnapshot?.avatarUrl,
-      item.cliente?.avatar,
-      item.cliente?.avatarUrl,
-      item.client?.avatar,
-      item.client?.avatarUrl,
-      item.user?.avatar,
-      item.user?.avatarUrl
-    )
-  );
+  return safeImageSrc(first(item.clientAvatar, item.avatar, item.avatarUrl, item.avatar_url, item.userAvatar, ""));
 }
 
 export function getTicketStatus(item = {}) {
@@ -1421,26 +1443,34 @@ export function getTicketStatus(item = {}) {
 }
 
 export function getTicketStatusKey(value = "") {
-  const raw = isObject(value) ? getTicketStatus(value) : value;
-  const key = normalizeKey(raw);
+  try {
+    return modelTicketStatusKey(value);
+  } catch {
+    const raw = isObject(value) ? getTicketStatus(value) : value;
+    const key = normalizeKey(raw);
 
-  if (["open", "opened", "abierta", "abierto"].includes(key)) return "open";
-  if (["progress", "in_progress", "inprogress", "en_proceso", "working", "assigned"].includes(key)) return "progress";
-  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
-  if (["closed", "close", "cerrada", "cerrado", "cancelled", "canceled", "archived"].includes(key)) return "closed";
+    if (["open", "opened", "abierta", "abierto"].includes(key)) return "open";
+    if (["progress", "in_progress", "inprogress", "en_proceso", "working", "assigned"].includes(key)) return "progress";
+    if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
+    if (["closed", "close", "cerrada", "cerrado", "cancelled", "canceled", "archived"].includes(key)) return "closed";
 
-  return "pending";
+    return "pending";
+  }
 }
 
 export function getTicketStatusLabel(value = "") {
-  const key = getTicketStatusKey(value);
+  try {
+    return modelTicketStatusLabel(value);
+  } catch {
+    const key = getTicketStatusKey(value);
 
-  if (key === "open") return "Abierta";
-  if (key === "progress") return "En proceso";
-  if (key === "resolved") return "Resuelta";
-  if (key === "closed") return "Cerrada";
+    if (key === "open") return "Abierta";
+    if (key === "progress") return "En curso";
+    if (key === "resolved") return "Resuelta";
+    if (key === "closed") return "Cerrada";
 
-  return "Pendiente";
+    return "Pendiente";
+  }
 }
 
 export function getTicketPriorityRaw(item = {}) {
@@ -1448,13 +1478,17 @@ export function getTicketPriorityRaw(item = {}) {
 }
 
 export function getTicketPriorityKey(item = {}) {
-  const key = normalizeKey(getTicketPriorityRaw(item));
+  try {
+    return modelTicketPriorityKey(item);
+  } catch {
+    const key = normalizeKey(getTicketPriorityRaw(item));
 
-  if (["critical", "critica", "critico", "p0", "blocker"].includes(key)) return "critical";
-  if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) return "urgent";
-  if (["low", "baja", "minor", "p3"].includes(key)) return "low";
+    if (["critical", "critica", "critico", "p0", "blocker"].includes(key)) return "critical";
+    if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) return "urgent";
+    if (["low", "baja", "minor", "p3"].includes(key)) return "low";
 
-  return "medium";
+    return "medium";
+  }
 }
 
 export function getTicketPriorityLabel(item = {}) {
@@ -1472,35 +1506,69 @@ export function isTicketUrgent(item = {}) {
 }
 
 export function isTicketClosedLike(item = {}) {
-  return TICKET_CLOSED_KEYS.includes(getTicketStatusKey(getTicketStatus(item)));
+  return TICKET_CLOSED_KEYS.includes(getTicketStatusKey(item));
 }
 
 export function isTicketOpenLike(item = {}) {
-  return TICKET_OPEN_KEYS.includes(getTicketStatusKey(getTicketStatus(item)));
+  return TICKET_OPEN_KEYS.includes(getTicketStatusKey(item));
 }
 
 export function getTicketCategory(item = {}) {
   return safeText(first(item.category, item.categoria, item.type, item.tipo, item.subcategory), "Soporte");
 }
 
-export function getTicketAssignedTo(item = {}) {
-  const assigned = first(
-    item.assignedTo?.name,
-    item.assignedTo?.displayName,
-    item.assignment?.assignedToName,
-    item.assignment?.agentName,
-    item.assignment?.technician?.name,
-    item.tecnico?.name,
-    item.tecnico?.nombre,
-    item.tecnico,
-    item.agent
-  );
+export function getTicketTechnician(item = {}, users = []) {
+  const source = safeObject(item);
+  const embedded = safeObject(first(source.technician, source.tecnico, {}), {});
 
-  if (isObject(assigned)) {
-    return firstVisual([assigned.name, assigned.nombre, assigned.displayName, assigned.id], "Sin asignar");
+  let resolved = embedded;
+
+  try {
+    resolved = resolveHomeTicketTechnician(source, users);
+  } catch {
+    resolved = embedded;
   }
 
-  return visualText(assigned, "Sin asignar");
+  const name = firstVisual(
+    [
+      resolved.displayName,
+      resolved.name,
+      source.technicianName,
+      source.assignedToName,
+      source.assignedTo,
+      source.assignment?.assignedToName,
+      source.tecnico?.name,
+      source.assignedTo?.name,
+    ],
+    "Sin asignar"
+  );
+
+  const avatarUrl = safeImageSrc(
+    first(
+      resolved.avatarUrl,
+      resolved.avatar,
+      source.technicianAvatarUrl,
+      source.technicianAvatar,
+      source.assignedTo?.avatarUrl,
+      source.tecnico?.avatarUrl,
+      ""
+    )
+  );
+
+  return sanitizeObject({
+    id: safeText(first(resolved.id, resolved.userId, source.assignedToUserId, source.assignment?.assignedToUserId), ""),
+    userId: safeText(first(resolved.userId, resolved.id, source.assignedToUserId, source.assignment?.assignedToUserId), ""),
+    name,
+    displayName: name,
+    avatarUrl,
+    avatar: avatarUrl,
+    initials: safeText(first(resolved.initials, getInitials(name)), getInitials(name)),
+    assigned: Boolean(name && name !== "Sin asignar"),
+  });
+}
+
+export function getTicketAssignedTo(item = {}) {
+  return getTicketTechnician(item).name;
 }
 
 export function getTicketCreatedAt(item = {}) {
@@ -1515,9 +1583,10 @@ export function getTicketUpdatedAt(item = {}) {
     item.ultimaNovedad,
     item.modifiedAt,
     item.closedAt,
-    item.createdAt,
     item.lifecycle?.updatedAt,
-    item.audit?.updatedAt
+    item.lifecycle?.lastActivityAt,
+    item.audit?.updatedAt,
+    item.createdAt
   );
 }
 
@@ -1534,11 +1603,36 @@ export function getTicketSortTimestamp(item = {}) {
 }
 
 export function compareTicketsNewestFirst(a = {}, b = {}) {
-  return getTicketSortTimestamp(b) - getTicketSortTimestamp(a);
+  const diff = getTicketSortTimestamp(b) - getTicketSortTimestamp(a);
+  if (diff !== 0) return diff;
+
+  return getTicketId(b).localeCompare(getTicketId(a), "es-ES", {
+    numeric: true,
+    sensitivity: "base",
+  });
 }
 
 export function sortTicketsNewestFirst(items = []) {
   return [...safeArray(items)].sort(compareTicketsNewestFirst);
+}
+
+export function getRecentTickets(input = {}, limit = DEFAULT_RECENT_LIMIT) {
+  const collections = getCollections(input);
+  const max = clampNumber(limit, 1, 50);
+
+  return sortTicketsNewestFirst(collections.tickets).slice(0, max);
+}
+
+export function getTicketLinkedInvoices(ticket = {}, invoices = []) {
+  const embedded = safeArray(first(ticket.invoices, ticket.facturas, ticket.relatedInvoices, ticket.linkedInvoices, []));
+
+  if (embedded.length) return normalizeHomeInvoices(embedded);
+
+  try {
+    return resolveHomeTicketInvoices(ticket, invoices);
+  } catch {
+    return [];
+  }
 }
 
 /* =========================================================
@@ -1571,21 +1665,41 @@ export function getInvoiceUniqueKey(item = {}, index = 0) {
 }
 
 export function getInvoiceAmount(item = {}) {
-  return safeNumber(
-    first(
-      item.total,
-      item.amount,
-      item.importe,
-      item.price,
-      item.subtotal,
-      item.totalFactura,
-      item.importeTotal,
-      item.invoiceAmount,
-      item.facturaTotal,
+  try {
+    return modelGetInvoiceAmount(item);
+  } catch {
+    return safeNumber(
+      first(
+        item.total,
+        item.amount,
+        item.importe,
+        item.price,
+        item.subtotal,
+        item.totalFactura,
+        item.importeTotal,
+        item.invoiceAmount,
+        item.facturaTotal,
+        0
+      ),
       0
-    ),
-    0
-  );
+    );
+  }
+}
+
+export function getInvoicePaidAmount(item = {}) {
+  try {
+    return modelGetInvoicePaidAmount(item);
+  } catch {
+    return isInvoicePaid(item) ? getInvoiceAmount(item) : 0;
+  }
+}
+
+export function getInvoicePendingAmount(item = {}) {
+  try {
+    return modelGetInvoicePendingAmount(item);
+  } catch {
+    return isInvoicePendingLike(item) ? Math.max(0, getInvoiceAmount(item) - getInvoicePaidAmount(item)) : 0;
+  }
 }
 
 export function getInvoiceCurrency(item = {}) {
@@ -1593,19 +1707,82 @@ export function getInvoiceCurrency(item = {}) {
 }
 
 export function getInvoiceStatusKey(item = {}) {
-  const key = normalizeKey(first(item.paymentStatus, item.estadoPago, item.status, item.estado, "pending"));
+  try {
+    return modelInvoiceStatusKey(item);
+  } catch {
+    const key = normalizeKey(first(item.paymentStatus, item.estadoPago, item.status, item.estado, "pending"));
 
-  if (["paid", "pagada", "pagado", "cobrada", "cobrado"].includes(key)) return "paid";
-  if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
-  if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
-  if (["cancelled", "canceled", "cancelada", "cancelado"].includes(key)) return "cancelled";
-  if (["draft", "borrador"].includes(key)) return "draft";
+    if (["paid", "pagada", "pagado", "cobrada", "cobrado"].includes(key)) return "paid";
+    if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
+    if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
+    if (["cancelled", "canceled", "cancelada", "cancelado"].includes(key)) return "cancelled";
+    if (["draft", "borrador"].includes(key)) return "draft";
 
-  return "pending";
+    return "pending";
+  }
+}
+
+export function getInvoiceStatusLabel(item = {}) {
+  try {
+    return modelInvoiceStatusLabel(item);
+  } catch {
+    const key = getInvoiceStatusKey(item);
+
+    if (key === "paid") return "Pagada";
+    if (key === "overdue") return "Vencida";
+    if (key === "partial") return "Parcial";
+    if (key === "cancelled") return "Cancelada";
+    if (key === "draft") return "Borrador";
+
+    return "Pendiente";
+  }
+}
+
+export function isInvoicePaid(item = {}) {
+  try {
+    return modelIsInvoicePaid(item);
+  } catch {
+    return getInvoiceStatusKey(item) === "paid";
+  }
 }
 
 export function isInvoicePendingLike(item = {}) {
-  return INVOICE_PENDING_KEYS.includes(getInvoiceStatusKey(item));
+  try {
+    return modelIsInvoicePendingLike(item);
+  } catch {
+    return INVOICE_PENDING_KEYS.includes(getInvoiceStatusKey(item));
+  }
+}
+
+export function getInvoiceDate(item = {}) {
+  return first(item.date, item.fechaFactura, item.fechaFacturaISO, item.createdAt, item.updatedAt);
+}
+
+export function getInvoiceUpdatedAt(item = {}) {
+  return first(item.updatedAt, item.modifiedAt, item.fechaPago, item.fechaEnvio, item.sentAt, item.date, item.createdAt);
+}
+
+export function compareInvoicesNewestFirst(a = {}, b = {}) {
+  const diff = (toTimestamp(getInvoiceUpdatedAt(b)) || toTimestamp(getInvoiceDate(b))) -
+    (toTimestamp(getInvoiceUpdatedAt(a)) || toTimestamp(getInvoiceDate(a)));
+
+  if (diff !== 0) return diff;
+
+  return getInvoiceId(b).localeCompare(getInvoiceId(a), "es-ES", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+export function sortInvoicesNewestFirst(items = []) {
+  return [...safeArray(items)].sort(compareInvoicesNewestFirst);
+}
+
+export function getRecentInvoices(input = {}, limit = DEFAULT_RECENT_LIMIT) {
+  const collections = getCollections(input);
+  const max = clampNumber(limit, 1, 50);
+
+  return sortInvoicesNewestFirst(collections.invoices).slice(0, max);
 }
 
 export function getUserId(item = {}) {
@@ -1622,11 +1799,11 @@ export function isActiveUser(item = {}) {
 
   if (active === false || active === 0) return false;
 
-  return !["false", "disabled", "inactive", "inactivo", "blocked", "deleted"].includes(key);
+  return !["false", "disabled", "inactive", "inactivo", "blocked", "deleted", "archived"].includes(key);
 }
 
 export function getClientId(item = {}) {
-  return safeText(first(item.clienteId, item.clientId, item.customerId, item.id), "");
+  return safeText(first(item.clienteId, item.clientId, item.customerId, item.userId, item.id), "");
 }
 
 export function getClientUniqueKey(item = {}, index = 0) {
@@ -1639,7 +1816,260 @@ export function isActiveClient(item = {}) {
 
   if (active === false || active === 0) return false;
 
-  return !["false", "disabled", "inactive", "inactivo", "blocked", "deleted"].includes(key);
+  return !["false", "disabled", "inactive", "inactivo", "blocked", "deleted", "archived"].includes(key);
+}
+
+/* =========================================================
+   TABLE ROWS / MODAL
+========================================================= */
+
+export function buildTicketTableRow(ticket = {}, index = 0, context = {}) {
+  const users = safeArray(context.users);
+  const invoices = safeArray(context.invoices);
+  const id = getTicketId(ticket);
+  const statusKey = getTicketStatusKey(ticket);
+  const priorityKey = getTicketPriorityKey(ticket);
+  const technician = getTicketTechnician(ticket, users);
+  const linkedInvoices = getTicketLinkedInvoices(ticket, invoices);
+  const createdAt = getTicketCreatedAt(ticket);
+  const updatedAt = getTicketUpdatedAt(ticket);
+
+  return sanitizeObject({
+    key: getTicketUniqueKey(ticket, index),
+    index,
+
+    id,
+    ticketId: id,
+    incidenciaId: id,
+    fullId: id,
+    displayId: id,
+
+    subject: getTicketSubject(ticket),
+    title: getTicketSubject(ticket),
+    description: getTicketDescription(ticket),
+    preview: getTicketDescription(ticket),
+
+    category: getTicketCategory(ticket),
+    categoria: getTicketCategory(ticket),
+
+    statusKey,
+    status: getTicketStatus(ticket),
+    statusLabel: getTicketStatusLabel(ticket),
+
+    priorityKey,
+    priority: getTicketPriorityRaw(ticket),
+    priorityLabel: getTicketPriorityLabel(ticket),
+    urgent: isTicketUrgent(ticket),
+    isUrgent: isTicketUrgent(ticket),
+
+    technician,
+    tecnico: technician,
+    technicianName: technician.name,
+    technicianAvatarUrl: technician.avatarUrl,
+    technicianInitials: technician.initials,
+
+    createdAt,
+    updatedAt,
+    lastActivityAt: first(ticket.lastActivityAt, updatedAt),
+    createdAtLabel: formatDateTime(createdAt),
+    updatedAtLabel: formatDateTime(updatedAt),
+    lastActivityLabel: formatLastUpdate(first(ticket.lastActivityAt, updatedAt)),
+
+    attachmentsCount: getTicketAttachmentsCount(ticket),
+
+    invoicesCount: linkedInvoices.length,
+    facturasCount: linkedInvoices.length,
+    linkedInvoiceCount: linkedInvoices.length,
+    hasLinkedInvoices: linkedInvoices.length > 0,
+
+    action: ACTIONS.OPEN_TICKET_DETAIL,
+    dataAction: ACTIONS.OPEN_TICKET_DETAIL,
+    route: HOME_ROUTES.INCIDENCIAS,
+  });
+}
+
+export function getTicketTableRows(input = {}, limit = DEFAULT_PAGE_SIZE) {
+  const collections = getCollections(input);
+  const max = clampNumber(limit, 1, 50);
+  const rows = sortTicketsNewestFirst(collections.tickets).slice(0, max);
+
+  return rows.map((ticket, index) =>
+    buildTicketTableRow(ticket, index, {
+      users: collections.users,
+      invoices: collections.invoices,
+    })
+  );
+}
+
+export function buildInvoiceRow(invoice = {}, index = 0) {
+  const id = getInvoiceId(invoice);
+  const currency = getInvoiceCurrency(invoice);
+  const paid = isInvoicePaid(invoice);
+  const amount = paid ? getInvoicePaidAmount(invoice) : 0;
+  const pendingAmount = getInvoicePendingAmount(invoice);
+  const statusKey = getInvoiceStatusKey(invoice);
+  const date = getInvoiceDate(invoice);
+
+  return sanitizeObject({
+    key: getInvoiceUniqueKey(invoice, index),
+    index,
+
+    id,
+    invoiceId: id,
+    facturaId: id,
+    fullId: id,
+    displayId: id,
+
+    title: safeText(first(invoice.title, invoice.concepto, id ? `Factura ${id}` : "Factura"), id ? `Factura ${id}` : "Factura"),
+    number: safeText(first(invoice.numeroFacturaLegal, invoice.numeroFactura, invoice.invoiceNumber, invoice.number, invoice.numero, id), id),
+
+    statusKey,
+    status: first(invoice.status, invoice.estado, invoice.paymentStatus, invoice.estadoPago, statusKey),
+    statusLabel: getInvoiceStatusLabel(invoice),
+
+    paid,
+    isPaid: paid,
+    pending: isInvoicePendingLike(invoice),
+    isPending: isInvoicePendingLike(invoice),
+
+    amount,
+    paidAmount: amount,
+    pendingAmount,
+    rawAmount: getInvoiceAmount(invoice),
+    currency,
+
+    amountLabel: paid ? formatMoney(amount, currency) : "",
+    paidAmountLabel: paid ? formatMoney(amount, currency) : "",
+    pendingAmountLabel: pendingAmount > 0 ? formatMoney(pendingAmount, currency) : "",
+
+    date,
+    updatedAt: getInvoiceUpdatedAt(invoice),
+    dateLabel: formatDateShort(date),
+    updatedAtLabel: formatDateTime(getInvoiceUpdatedAt(invoice)),
+
+    ticketId: safeText(first(invoice.ticketId, invoice.incidenciaId), ""),
+    incidenciaId: safeText(first(invoice.incidenciaId, invoice.ticketId), ""),
+
+    route: HOME_ROUTES.FACTURAS,
+    action: ACTIONS.NAVIGATE,
+    dataAction: ACTIONS.NAVIGATE,
+  });
+}
+
+export function getInvoiceRows(input = {}, limit = DEFAULT_RECENT_LIMIT) {
+  const rows = getRecentInvoices(input, limit);
+
+  return rows.map((invoice, index) => buildInvoiceRow(invoice, index));
+}
+
+export function getSelectedTicketId(input = {}) {
+  const data = safeObject(input);
+  const state = safeObject(data.state);
+  const dashboard = getDashboard(data);
+
+  return safeText(
+    first(
+      data.selectedTicketId,
+      data.selectedIncidenciaId,
+      data.ticketId,
+      data.incidenciaId,
+      state.selectedTicketId,
+      state.selectedIncidenciaId,
+      state.ticketId,
+      state.incidenciaId,
+      dashboard.selectedTicketId,
+      dashboard.selectedIncidenciaId,
+      ""
+    ),
+    ""
+  );
+}
+
+export function getSelectedTicket(input = {}) {
+  const selectedTicketId = getSelectedTicketId(input);
+
+  if (!selectedTicketId) return null;
+
+  const collections = getCollections(input);
+
+  try {
+    return findHomeTicketById(collections.tickets, selectedTicketId);
+  } catch {
+    return collections.tickets.find((ticket) => isSameIdentity(getTicketId(ticket), selectedTicketId)) || null;
+  }
+}
+
+export function buildTicketModalData(input = {}) {
+  const collections = getCollections(input);
+  const selectedTicket = getSelectedTicket(input);
+
+  if (!selectedTicket) {
+    return {
+      open: false,
+      ticket: null,
+      invoices: [],
+      facturas: [],
+      technician: null,
+    };
+  }
+
+  const linkedInvoices = getTicketLinkedInvoices(selectedTicket, collections.invoices);
+  const technician = getTicketTechnician(selectedTicket, collections.users);
+  const createdAt = getTicketCreatedAt(selectedTicket);
+  const updatedAt = getTicketUpdatedAt(selectedTicket);
+
+  return sanitizeObject({
+    open: true,
+
+    ticket: selectedTicket,
+    id: getTicketId(selectedTicket),
+    ticketId: getTicketId(selectedTicket),
+    incidenciaId: getTicketId(selectedTicket),
+    fullId: getTicketId(selectedTicket),
+    displayId: getTicketId(selectedTicket),
+
+    title: getTicketSubject(selectedTicket),
+    subject: getTicketSubject(selectedTicket),
+    description: getTicketDescription(selectedTicket),
+    preview: getTicketDescription(selectedTicket),
+
+    category: getTicketCategory(selectedTicket),
+    categoria: getTicketCategory(selectedTicket),
+
+    statusKey: getTicketStatusKey(selectedTicket),
+    status: getTicketStatus(selectedTicket),
+    statusLabel: getTicketStatusLabel(selectedTicket),
+
+    priorityKey: getTicketPriorityKey(selectedTicket),
+    priority: getTicketPriorityRaw(selectedTicket),
+    priorityLabel: getTicketPriorityLabel(selectedTicket),
+    urgent: isTicketUrgent(selectedTicket),
+
+    technician,
+    tecnico: technician,
+    technicianName: technician.name,
+    technicianAvatarUrl: technician.avatarUrl,
+    technicianInitials: technician.initials,
+
+    invoices: linkedInvoices,
+    facturas: linkedInvoices,
+    invoiceRows: linkedInvoices.map((invoice, index) => buildInvoiceRow(invoice, index)),
+    invoicesCount: linkedInvoices.length,
+    facturasCount: linkedInvoices.length,
+    linkedInvoiceCount: linkedInvoices.length,
+    hasLinkedInvoices: linkedInvoices.length > 0,
+
+    createdAt,
+    updatedAt,
+    lastActivityAt: first(selectedTicket.lastActivityAt, updatedAt),
+    createdAtLabel: formatDateTime(createdAt),
+    updatedAtLabel: formatDateTime(updatedAt),
+    lastActivityLabel: formatLastUpdate(first(selectedTicket.lastActivityAt, updatedAt)),
+
+    attachmentsCount: getTicketAttachmentsCount(selectedTicket),
+
+    closeAction: ACTIONS.CLOSE_TICKET_DETAIL,
+  });
 }
 
 /* =========================================================
@@ -1657,11 +2087,20 @@ export function getLatestDateFromTickets(tickets = []) {
 export function computeHomeStats(input = {}) {
   const collections = getCollections(input);
   const admin = isAdminRole(getRole(input));
-
   const tickets = collections.tickets;
   const invoices = collections.invoices;
   const users = admin ? collections.users : [];
   const clients = admin ? collections.clients : [];
+
+  const computedPendingTickets = tickets.filter((item) => getTicketStatusKey(item) === "pending").length;
+  const computedOpenTickets = tickets.filter((item) => getTicketStatusKey(item) === "open").length;
+  const computedProgressTickets = tickets.filter((item) => getTicketStatusKey(item) === "progress").length;
+  const computedResolvedTickets = tickets.filter((item) => getTicketStatusKey(item) === "resolved").length;
+  const computedClosedTickets = tickets.filter((item) => getTicketStatusKey(item) === "closed").length;
+  const computedActiveTickets = computedPendingTickets + computedOpenTickets + computedProgressTickets;
+
+  const paidInvoices = invoices.filter(isInvoicePaid);
+  const pendingInvoiceRows = invoices.filter(isInvoicePendingLike);
 
   const totalTickets = getBestSummaryNumber(
     input,
@@ -1670,16 +2109,41 @@ export function computeHomeStats(input = {}) {
     [tickets.length]
   );
 
+  const pendingTickets = getBestSummaryNumber(
+    input,
+    ["pendingTickets", "pendingIncidencias", "incidenciasPendientes"],
+    computedPendingTickets
+  );
+
   const openTickets = getBestSummaryNumber(
     input,
-    ["openTickets", "pendingTickets", "openIncidencias", "pendingIncidencias", "incidenciasAbiertas"],
-    tickets.filter(isTicketOpenLike).length
+    ["openTickets", "openIncidencias", "incidenciasAbiertas"],
+    computedOpenTickets
+  );
+
+  const progressTickets = getBestSummaryNumber(
+    input,
+    ["progressTickets", "progressIncidencias", "incidenciasEnCurso"],
+    computedProgressTickets
+  );
+
+  const resolvedTickets = getBestSummaryNumber(
+    input,
+    ["resolvedTickets", "resolvedIncidencias", "incidenciasResueltas"],
+    computedResolvedTickets
   );
 
   const closedTickets = getBestSummaryNumber(
     input,
-    ["closedTickets", "resolvedTickets", "closedIncidencias", "resolvedIncidencias", "incidenciasCerradas"],
-    tickets.filter(isTicketClosedLike).length
+    ["closedTickets", "closedIncidencias", "incidenciasCerradas"],
+    computedClosedTickets
+  );
+
+  const activeTickets = getBestSummaryNumber(
+    input,
+    ["activeTickets", "activeIncidencias"],
+    computedActiveTickets,
+    [pendingTickets + openTickets + progressTickets]
   );
 
   const urgentTickets = getBestSummaryNumber(
@@ -1695,17 +2159,31 @@ export function computeHomeStats(input = {}) {
     [invoices.length]
   );
 
+  const paidInvoicesCount = getBestSummaryNumber(
+    input,
+    ["paidInvoices", "paidFacturas", "facturasPagadas"],
+    paidInvoices.length
+  );
+
   const pendingInvoices = getBestSummaryNumber(
     input,
-    ["pendingInvoices", "pendingFacturas", "facturasPendientes", "invoicesPending", "facturasVencidas", "overdueInvoices"],
-    invoices.filter(isInvoicePendingLike).length
+    ["pendingInvoices", "pendingFacturas", "facturasPendientes", "invoicesPending"],
+    pendingInvoiceRows.length
   );
 
   const invoiceAmount = roundMoney(
     getBestSummaryNumber(
       input,
-      ["invoiceAmount", "billingTotal", "totalBilling", "totalFacturado", "importeFacturas", "facturacionVisible", "facturacionTotal"],
-      invoices.reduce((sum, item) => sum + getInvoiceAmount(item), 0)
+      ["invoiceAmount", "paidInvoiceAmount", "billingTotal", "totalBilling", "totalFacturado", "importeFacturas", "facturacionVisible", "facturacionTotal"],
+      paidInvoices.reduce((sum, item) => sum + getInvoicePaidAmount(item), 0)
+    )
+  );
+
+  const pendingInvoiceAmount = roundMoney(
+    getBestSummaryNumber(
+      input,
+      ["pendingInvoiceAmount", "importePendiente", "facturacionPendiente"],
+      pendingInvoiceRows.reduce((sum, item) => sum + getInvoicePendingAmount(item), 0)
     )
   );
 
@@ -1714,7 +2192,7 @@ export function computeHomeStats(input = {}) {
         input,
         ["usersCount", "usuariosCount", "totalUsers", "totalUsuarios", "activeUsers", "usuariosActivos"],
         collections.usersRemoteCount,
-        [users.filter(isActiveUser).length]
+        [users.length]
       )
     : 0;
 
@@ -1723,26 +2201,33 @@ export function computeHomeStats(input = {}) {
         input,
         ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes", "totalCustomers", "activeClients", "clientesActivos"],
         collections.clientsRemoteCount,
-        [clients.filter(isActiveClient).length]
+        [clients.length]
       )
     : 0;
 
   const attachmentsCount = tickets.reduce((sum, item) => sum + getTicketAttachmentsCount(item), 0);
 
-  return {
+  return sanitizeObject({
     role: getRole(input),
     admin,
 
     totalTickets,
     visibleTickets: tickets.length,
+    pendingTickets,
     openTickets,
+    progressTickets,
+    resolvedTickets,
     closedTickets,
+    activeTickets,
     urgentTickets,
 
     totalInvoices,
     visibleInvoices: invoices.length,
+    paidInvoices: paidInvoicesCount,
     pendingInvoices,
     invoiceAmount,
+    paidInvoiceAmount: invoiceAmount,
+    pendingInvoiceAmount,
 
     usersCount,
     activeUsersCount: admin ? users.filter(isActiveUser).length : 0,
@@ -1752,8 +2237,49 @@ export function computeHomeStats(input = {}) {
 
     attachmentsCount,
     lastTicketUpdate: getLatestDateFromTickets(tickets),
-    healthRatio: totalTickets ? clampNumber(((totalTickets - openTickets) / totalTickets) * 100, 0, 100) : 100,
-  };
+  });
+}
+
+export function getStatusPills(input = {}) {
+  const stats = computeHomeStats(input);
+
+  return [
+    {
+      key: "pending",
+      label: "Pendientes",
+      value: stats.pendingTickets,
+      valueLabel: formatNumber(stats.pendingTickets),
+      modifier: "pending",
+    },
+    {
+      key: "open",
+      label: "Abiertas",
+      value: stats.openTickets,
+      valueLabel: formatNumber(stats.openTickets),
+      modifier: "open",
+    },
+    {
+      key: "progress",
+      label: "En curso",
+      value: stats.progressTickets,
+      valueLabel: formatNumber(stats.progressTickets),
+      modifier: "progress",
+    },
+    {
+      key: "resolved",
+      label: "Resueltas",
+      value: stats.resolvedTickets,
+      valueLabel: formatNumber(stats.resolvedTickets),
+      modifier: "resolved",
+    },
+    {
+      key: "closed",
+      label: "Cerradas",
+      value: stats.closedTickets,
+      valueLabel: formatNumber(stats.closedTickets),
+      modifier: "closed",
+    },
+  ];
 }
 
 export function getStatCards(input = {}) {
@@ -1763,31 +2289,38 @@ export function getStatCards(input = {}) {
     return [
       {
         iconName: "ticket",
-        label: "Incidencias abiertas",
-        value: formatNumber(stats.openTickets),
-        text: `${formatNumber(stats.totalTickets)} solicitudes totales.`,
+        label: "Incidencias",
+        value: formatNumber(stats.totalTickets),
+        text: `${formatNumber(stats.activeTickets)} abiertas o en seguimiento.`,
         modifier: "open",
         badge: stats.urgentTickets ? `${formatNumber(stats.urgentTickets)} urg.` : "",
       },
       {
         iconName: "euro",
-        label: "Facturación visible",
-        value: formatMoney(stats.invoiceAmount),
-        text: `${formatNumber(stats.pendingInvoices)} facturas pendientes o vencidas.`,
+        label: "Facturas totales",
+        value: formatNumber(stats.totalInvoices),
+        text: `Importe pagado: ${formatMoney(stats.invoiceAmount)}.`,
         modifier: "billing",
+      },
+      {
+        iconName: "invoice",
+        label: "Facturas pendientes",
+        value: formatNumber(stats.pendingInvoices),
+        text: "Facturas emitidas pendientes o vencidas.",
+        modifier: "invoices",
       },
       {
         iconName: "client",
         label: "Clientes",
         value: formatNumber(stats.clientsCount),
-        text: "Clientes sincronizados en el panel.",
+        text: "Clientes visibles en el panel.",
         modifier: "clients",
       },
       {
         iconName: "users",
         label: "Usuarios",
         value: formatNumber(stats.usersCount),
-        text: "Usuarios activos o sincronizados.",
+        text: "Usuarios sincronizados.",
         modifier: "users",
       },
     ];
@@ -1798,7 +2331,7 @@ export function getStatCards(input = {}) {
       iconName: "ticket",
       label: "Mis incidencias",
       value: formatNumber(stats.totalTickets),
-      text: `${formatNumber(stats.openTickets)} solicitudes abiertas o en seguimiento.`,
+      text: `${formatNumber(stats.activeTickets)} solicitudes abiertas o en seguimiento.`,
       modifier: "open",
       badge: stats.urgentTickets ? `${formatNumber(stats.urgentTickets)} urg.` : "",
     },
@@ -1806,14 +2339,14 @@ export function getStatCards(input = {}) {
       iconName: "euro",
       label: "Facturas pendientes",
       value: formatNumber(stats.pendingInvoices),
-      text: `${formatMoney(stats.invoiceAmount)} en facturación visible.`,
+      text: "Facturas visibles pendientes o vencidas.",
       modifier: "billing",
     },
     {
       iconName: "invoice",
       label: "Facturas totales",
       value: formatNumber(stats.totalInvoices),
-      text: `Importe total: ${formatMoney(stats.invoiceAmount)}.`,
+      text: `Importe pagado: ${formatMoney(stats.invoiceAmount)}.`,
       modifier: "invoices",
     },
   ];
@@ -1829,10 +2362,9 @@ function quickAction({
   modifier = "default",
 } = {}) {
   const normalizedRoute = normalizeRoute(route);
-
   if (!normalizedRoute) return null;
 
-  return {
+  return sanitizeObject({
     iconName,
     title,
     text,
@@ -1840,7 +2372,7 @@ function quickAction({
     dataAction,
     route: normalizedRoute,
     modifier,
-  };
+  });
 }
 
 export function getQuickActions(input = {}) {
@@ -1857,8 +2389,8 @@ export function getQuickActions(input = {}) {
       }),
       quickAction({
         iconName: "invoice",
-        title: "Facturación",
-        text: "Consultar importes, estados y vencimientos.",
+        title: "Facturas",
+        text: "Consultar facturas, estados e importes.",
         route: HOME_ROUTES.FACTURAS,
         modifier: "billing",
       }),
@@ -1872,16 +2404,9 @@ export function getQuickActions(input = {}) {
       quickAction({
         iconName: "users",
         title: "Usuarios",
-        text: "Gestionar usuarios y acceso al panel.",
+        text: "Gestionar usuarios del panel.",
         route: HOME_ROUTES.USUARIOS,
         modifier: "users",
-      }),
-      quickAction({
-        iconName: "shield",
-        title: "Servidor",
-        text: "Revisar estado y datos técnicos del servidor.",
-        route: HOME_ROUTES.SERVIDOR,
-        modifier: "server",
       }),
     ].filter(Boolean);
   }
@@ -1924,7 +2449,7 @@ export function getQuickActions(input = {}) {
    ACTIVITY / PAGINATION
 ========================================================= */
 
-export function buildSyntheticActivity(input = {}) {
+export function buildSyntheticActivity(input = {}, limit = DEFAULT_RECENT_LIMIT) {
   const collections = getCollections(input);
   const admin = isAdminRole(getRole(input));
 
@@ -1934,18 +2459,24 @@ export function buildSyntheticActivity(input = {}) {
       invoices: collections.invoices,
       users: admin ? collections.users : [],
       clients: admin ? collections.clients : [],
+      limit,
     })
-  ).filter((item) => activityVisibleForRole(input, item));
+  )
+    .filter((item) => activityVisibleForRole(input, item))
+    .slice(0, clampNumber(limit, 1, 50));
 }
 
-export function getActivity(input = {}) {
+export function getActivity(input = {}, limit = DEFAULT_RECENT_LIMIT) {
   const collections = getCollections(input);
+  const max = clampNumber(limit, 1, 50);
 
   const activity = collections.activity.length
     ? normalizeHomeActivityList(collections.activity)
-    : buildSyntheticActivity(input);
+    : buildSyntheticActivity(input, max);
 
-  return activity.filter((item) => activityVisibleForRole(input, item));
+  return activity
+    .filter((item) => activityVisibleForRole(input, item))
+    .slice(0, max);
 }
 
 export function getActivityTitle(item = {}) {
@@ -1967,7 +2498,6 @@ export function getActivityType(item = {}) {
   if (["ticket", "incidencia", "support", "issue"].includes(key)) return "ticket";
   if (["cliente", "client", "customer"].includes(key)) return "client";
   if (["usuario", "user", "member"].includes(key)) return "user";
-  if (["server", "servidor", "servidores"].includes(key)) return "server";
 
   return key || "activity";
 }
@@ -1976,17 +2506,13 @@ export function getPagination(items = [], input = {}) {
   const rows = safeArray(items);
   const data = safeObject(input);
   const state = safeObject(data.state);
-
   const pageSize = clampNumber(first(data.pageSize, state.pageSize, DEFAULT_PAGE_SIZE), 1, 50);
-
   const totalCount = Math.max(
     rows.length,
     safeNumber(first(data.totalCount, data.remoteCount, state.totalCount, rows.length), rows.length)
   );
-
   const totalPages = Math.max(1, Math.ceil((totalCount || 1) / pageSize));
   const page = clampNumber(first(data.page, state.page, 1), 1, totalPages);
-
   const start = (page - 1) * pageSize;
   const pageItems = rows.slice(start, start + pageSize);
 
@@ -1994,19 +2520,14 @@ export function getPagination(items = [], input = {}) {
     allItems: rows,
     pageItems,
     items: pageItems,
-
     page,
     currentPage: page,
-
     pageSize,
-
     totalPages,
     totalCount,
     total: totalCount,
-
     rangeStart: totalCount && pageItems.length ? start + 1 : 0,
     rangeEnd: totalCount ? Math.min(start + pageItems.length, totalCount) : 0,
-
     hasPrev: page > 1,
     hasNext: page < totalPages,
   };
@@ -2028,43 +2549,37 @@ export function buildHomeTemplateData(input = {}) {
     role,
   });
 
-  const collections = getCollections({
+  const scopedInput = {
     ...source,
     dashboard,
     summary,
     role,
-  });
+  };
 
-  const stats = computeHomeStats({
-    ...source,
-    dashboard,
-    summary,
-    role,
-  });
+  const collections = getCollections(scopedInput);
+  const stats = computeHomeStats(scopedInput);
+  const widgets = getWidgets(scopedInput);
+  const activity = getActivity(scopedInput, DEFAULT_RECENT_LIMIT);
+  const ticketRows = getTicketTableRows(scopedInput, DEFAULT_PAGE_SIZE);
+  const invoiceRows = getInvoiceRows(scopedInput, DEFAULT_RECENT_LIMIT);
 
-  const widgets = getWidgets({
-    ...source,
-    dashboard,
-    summary,
-    role,
-  });
+  const recentTickets = getRecentTickets(scopedInput, DEFAULT_RECENT_LIMIT);
+  const recentInvoices = getRecentInvoices(scopedInput, DEFAULT_RECENT_LIMIT);
 
-  const activity = getActivity({
-    ...source,
-    dashboard,
-    summary,
-    role,
-  });
-
-  const pagination = getPagination(collections.tickets, {
+  const pagination = getPagination(recentTickets, {
     ...source,
     totalCount: collections.ticketsRemoteCount,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
+
+  const selectedTicketId = getSelectedTicketId(scopedInput);
+  const selectedTicket = selectedTicketId ? getSelectedTicket(scopedInput) : null;
+  const ticketModal = buildTicketModalData(scopedInput);
 
   const user = getUser(source);
   const displayName = getDisplayName(source);
 
-  return {
+  return sanitizeObject({
     version: HOME_SELECTORS_VERSION,
 
     user,
@@ -2080,14 +2595,28 @@ export function buildHomeTemplateData(input = {}) {
     stats,
 
     widgets,
-    statCards: getStatCards({ ...source, dashboard, summary, role }),
-    quickActions: getQuickActions({ ...source, dashboard, summary, role }),
+    statCards: getStatCards(scopedInput),
+    statusPills: getStatusPills(scopedInput),
+    quickActions: getQuickActions(scopedInput),
 
     tickets: collections.tickets,
     incidencias: collections.tickets,
+    recentTickets,
+    recentIncidencias: recentTickets,
+    latestTickets: recentTickets,
+    latestIncidencias: recentTickets,
+    ticketRows,
+    incidenceRows: ticketRows,
+    tableRows: ticketRows,
 
     invoices: collections.invoices,
     facturas: collections.invoices,
+    recentInvoices,
+    recentFacturas: recentInvoices,
+    latestInvoices: recentInvoices,
+    latestFacturas: recentInvoices,
+    invoiceRows,
+    facturaRows: invoiceRows,
 
     users: admin ? collections.users : [],
     usuarios: admin ? collections.users : [],
@@ -2099,10 +2628,17 @@ export function buildHomeTemplateData(input = {}) {
     recentActivity: activity,
     recent: activity,
 
+    selectedTicketId,
+    selectedIncidenciaId: selectedTicketId,
+    selectedTicket,
+    selectedIncidencia: selectedTicket,
+    ticketModal,
+    incidenciaModal: ticketModal,
+
     collections,
 
     pagination,
-    pageItems: pagination.pageItems,
+    pageItems: ticketRows,
 
     counts: {
       tickets: collections.tickets.length,
@@ -2127,9 +2663,12 @@ export function buildHomeTemplateData(input = {}) {
       partial: Boolean(dashboard.partial),
       errorsCount: safeArray(dashboard.errors).length,
       canSeeUsers: admin,
+      canSeeClients: admin,
+      recentLimit: DEFAULT_RECENT_LIMIT,
+      tableLimit: DEFAULT_PAGE_SIZE,
       optionalRoutes: OPTIONAL_ROUTE_NAMES.filter((name) => Boolean(HOME_ROUTES[name.toUpperCase()])),
     },
-  };
+  });
 }
 
 /* =========================================================
@@ -2140,12 +2679,15 @@ export default {
   HOME_SELECTORS_VERSION,
 
   DEFAULT_PAGE_SIZE,
+  DEFAULT_RECENT_LIMIT,
   DEFAULT_CURRENCY,
   DEFAULT_LOCALE,
   HOME_ROUTES,
   VALID_ROLES,
+  TICKET_STATUS_KEYS,
   TICKET_OPEN_KEYS,
   TICKET_CLOSED_KEYS,
+  INVOICE_STATUS_KEYS,
   INVOICE_PENDING_KEYS,
 
   safeText,
@@ -2207,6 +2749,7 @@ export default {
   isAdminRole,
   isUserRole,
   canSeeUsersModule,
+  canSeeClientsModule,
   getDisplayName,
   getAvatarUrl,
 
@@ -2228,6 +2771,7 @@ export default {
   isTicketClosedLike,
   isTicketOpenLike,
   getTicketCategory,
+  getTicketTechnician,
   getTicketAssignedTo,
   getTicketCreatedAt,
   getTicketUpdatedAt,
@@ -2235,14 +2779,32 @@ export default {
   getTicketSortTimestamp,
   compareTicketsNewestFirst,
   sortTicketsNewestFirst,
+  getRecentTickets,
+  getTicketLinkedInvoices,
+  buildTicketTableRow,
+  getTicketTableRows,
+  getSelectedTicketId,
+  getSelectedTicket,
+  buildTicketModalData,
 
   getInvoiceIdentity,
   getInvoiceId,
   getInvoiceUniqueKey,
   getInvoiceAmount,
+  getInvoicePaidAmount,
+  getInvoicePendingAmount,
   getInvoiceCurrency,
   getInvoiceStatusKey,
+  getInvoiceStatusLabel,
+  isInvoicePaid,
   isInvoicePendingLike,
+  getInvoiceDate,
+  getInvoiceUpdatedAt,
+  compareInvoicesNewestFirst,
+  sortInvoicesNewestFirst,
+  getRecentInvoices,
+  buildInvoiceRow,
+  getInvoiceRows,
 
   getUserId,
   getUserUniqueKey,
@@ -2255,6 +2817,7 @@ export default {
   getCollections,
   getLatestDateFromTickets,
   computeHomeStats,
+  getStatusPills,
   getStatCards,
   getQuickActions,
 

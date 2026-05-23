@@ -18,6 +18,7 @@
    - Normalizar respuesta para homeView.js.
    - Blindar cache admin cuando el rol actual sea user.
    - Rutas/admin-routes/bloqueos delegados en core/config.js.
+   - Health desactivado si no hay endpoint real configurado.
    - Servidor tratado como ruta admin-only, sin endpoint inventado.
    - No conservar raw backend sensible en dashboard/cache.
    - No tocar DOM.
@@ -29,6 +30,7 @@
    - No apiClient paralelo.
    - No /api/dashboard.
    - No endpoints /stats inexistentes.
+   - No endpoint health inventado.
    - No /home.
 ========================================================= */
 
@@ -50,7 +52,6 @@ import {
 } from "./home.store.js";
 
 import {
-  normalizeHomeDashboard,
   normalizeHomeWidgets,
   normalizeHomeActivityList,
 
@@ -61,11 +62,16 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_API_VERSION = "home.api.v8";
+export const HOME_API_VERSION = "home.api.v9";
 
 export const HOME_DASHBOARD_ENDPOINT = "local:home-list-aggregate";
 export const HOME_DASHBOARD_LEGACY_ENDPOINT = "";
-export const HOME_DASHBOARD_PING_ENDPOINT = "/api/health/ready";
+
+/*
+  No se declara endpoint de health porque /api/health/ready no existe
+  en el backend actual. Health queda como módulo opcional desactivado.
+*/
+export const HOME_DASHBOARD_PING_ENDPOINT = "";
 
 export const HOME_TIMEOUT = 15000;
 export const HOME_HEALTH_TIMEOUT = 8000;
@@ -82,7 +88,7 @@ const ENDPOINTS = Object.freeze({
   clientesList: "/api/clientes",
   usersList: "/api/users",
 
-  healthReady: "/api/health/ready",
+  healthReady: HOME_DASHBOARD_PING_ENDPOINT,
 });
 
 const DEFAULT_LIST_PARAMS = Object.freeze({
@@ -156,7 +162,12 @@ const runtime = {
     facturas: null,
     clientes: null,
     users: null,
-    health: null,
+    health: {
+      ok: false,
+      skipped: true,
+      status: 0,
+      configured: false,
+    },
   },
 };
 
@@ -195,7 +206,6 @@ function compactText(value = "", fallback = "", max = HOME_TEXT_LIMIT) {
   const text = safeText(value, fallback);
 
   if (!text) return fallback;
-
   if (text.length <= max) return text;
 
   return `${text.slice(0, max).trim()}…`;
@@ -267,31 +277,6 @@ function getPath(object = {}, path = "") {
     if (acc === null || acc === undefined) return undefined;
     return acc?.[key];
   }, root);
-}
-
-function pickValue(object = {}, paths = []) {
-  const root = safeObject(object, null);
-
-  if (!root) return null;
-
-  for (const path of safeArray(paths)) {
-    const key = safeText(path, "");
-
-    if (!key) continue;
-
-    const value = key.includes(".")
-      ? getPath(root, key)
-      : root?.[key];
-
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
-
-    return value;
-  }
-
-  return null;
 }
 
 function nowIso() {
@@ -489,12 +474,6 @@ function sanitizeDashboardValue(value, keyHint = "") {
 
 function sanitizeDashboardObject(value = {}) {
   return safeObject(sanitizeDashboardValue(value), {});
-}
-
-function sanitizeDashboardList(items = []) {
-  return safeArray(items)
-    .map((item) => sanitizeDashboardObject(item))
-    .filter(hasOwnKeys);
 }
 
 /* =========================================================
@@ -2023,39 +2002,13 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
   const admin = cleanRole === "admin";
   const source = safeObject(dashboard);
 
-  const normalized = normalizeHomeDashboard({
-    ...source,
-
-    role: cleanRole,
-    admin,
-
-    users: admin ? source.users : [],
-    usuarios: admin ? source.usuarios : [],
-
-    clients: admin ? source.clients : [],
-    clientes: admin ? source.clientes : [],
-    customers: admin ? source.customers : [],
-
-    servers: admin ? source.servers : [],
-    servidores: admin ? source.servidores : [],
-
-    server: admin ? source.server : {},
-    servidor: admin ? source.servidor : {},
-
-    meta: {
-      ...safeObject(source.meta),
-      role: cleanRole,
-      admin,
-    },
-  });
-
   const summary = sanitizeSummaryForRole(
     first(
-      normalized.summary,
-      normalized.stats,
-      normalized.metrics,
-      normalized.totals,
-      normalized.counts,
+      source.summary,
+      source.stats,
+      source.metrics,
+      source.totals,
+      source.counts,
       {}
     ),
     admin
@@ -2064,10 +2017,10 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
   const widgets = filterWidgetsForRole(
     normalizeHomeWidgets(
       first(
-        normalized.widgets,
-        normalized.cards,
-        normalized.kpis,
-        normalized.blocks,
+        source.widgets,
+        source.cards,
+        source.kpis,
+        source.blocks,
         []
       )
     ),
@@ -2075,43 +2028,47 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
   );
 
   const tickets = projectList(
-    first(normalized.tickets, normalized.incidencias, []),
+    first(source.tickets, source.incidencias, []),
     ticketPreview,
     (item) => item.ticketId || item.incidenciaId || item.id
   );
 
   const invoices = projectList(
-    first(normalized.invoices, normalized.facturas, []),
+    first(source.invoices, source.facturas, []),
     invoicePreview,
     (item) => item.facturaId || item.invoiceId || item.id
   );
 
   const users = admin
-    ? projectList(first(normalized.users, normalized.usuarios, []), userPreview, (item) => item.userId || item.id)
+    ? projectList(first(source.users, source.usuarios, []), userPreview, (item) => item.userId || item.id)
     : [];
 
   const clients = admin
-    ? projectList(first(normalized.clients, normalized.clientes, normalized.customers, []), clientPreview, (item) => item.clienteId || item.id)
+    ? projectList(first(source.clients, source.clientes, source.customers, []), clientPreview, (item) => item.clienteId || item.id)
     : [];
 
   const activity = filterActivityForRole(
     normalizeHomeActivityList(
       first(
-        normalized.activity,
-        normalized.activities,
-        normalized.recent,
-        normalized.recentActivity,
+        source.activity,
+        source.activities,
+        source.recent,
+        source.recentActivity,
         []
       )
     ).slice(0, HOME_ACTIVITY_LIMIT),
     admin
   );
 
-  const servers = [];
-  const server = {};
+  const updatedAt = safeText(first(source.updatedAt, source.generatedAt, source.meta?.updatedAt, nowIso()), nowIso());
+  const requestId = safeText(first(source.requestId, source.meta?.requestId, ""), "");
 
   return sanitizeDashboardObject({
-    ...normalized,
+    ok: source.ok !== false,
+    success: source.success !== false,
+
+    source: safeText(source.source, admin ? "home-admin-list-aggregate" : "home-user-list-aggregate"),
+    version: HOME_API_VERSION,
 
     role: cleanRole,
     admin,
@@ -2140,15 +2097,31 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
     clientes: clients,
     customers: clients,
 
-    servers,
-    servidores: servers,
-    server,
-    servidor: server,
+    servers: [],
+    servidores: [],
+    server: {},
+    servidor: {},
 
     activity,
     activities: activity,
     recent: activity,
     recentActivity: activity,
+
+    modules: safeObject(source.modules),
+
+    partial: Boolean(source.partial),
+    errors: safeArray(source.errors).map((error) => ({
+      module: safeText(error?.module, ""),
+      kind: safeText(error?.kind, ""),
+      status: safeNumber(error?.status, 0),
+      code: safeText(error?.code, ""),
+      message: redact(error?.message || ""),
+      soft: Boolean(error?.soft),
+    })),
+
+    requestId,
+    updatedAt,
+    generatedAt: updatedAt,
 
     ticketsTotal: safeNumber(summary.totalTickets, tickets.length),
     incidenciasTotal: safeNumber(summary.totalTickets, tickets.length),
@@ -2200,10 +2173,16 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
     visibleActivityCount: activity.length,
 
     meta: {
-      ...safeObject(normalized.meta),
+      ...safeObject(source.meta),
 
+      requestId,
       role: cleanRole,
       admin,
+
+      updatedAt,
+      generatedAt: updatedAt,
+
+      widgetsCount: widgets.length,
 
       ticketsCount: safeNumber(summary.totalTickets, tickets.length),
       incidenciasCount: safeNumber(summary.totalTickets, tickets.length),
@@ -2234,6 +2213,8 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
 
       activityCount: activity.length,
       recentCount: activity.length,
+
+      healthEndpointConfigured: Boolean(ENDPOINTS.healthReady),
     },
   });
 }
@@ -2344,6 +2325,14 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
         facturas: moduleStatus(modules.facturas, ENDPOINTS.facturasList),
         clientes: moduleStatus(modules.clientes, admin ? ENDPOINTS.clientesList : ""),
         users: moduleStatus(modules.users, admin ? ENDPOINTS.usersList : ""),
+        health: {
+          skipped: true,
+          listOk: false,
+          status: 0,
+          endpoint: "",
+          soft: true,
+          configured: false,
+        },
       },
 
       partial: errors.length > 0,
@@ -2364,6 +2353,7 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
         usersModuleRequested: admin,
         clientesModuleRequested: admin,
         servidorModuleRequested: false,
+        healthEndpointConfigured: false,
 
         widgetsCount: widgets.length,
 
@@ -2659,6 +2649,7 @@ export async function fetchHomeDashboardRequest({
     facturas: dashboard.modules.facturas,
     clientes: dashboard.modules.clientes,
     users: dashboard.modules.users,
+    health: dashboard.modules.health,
   };
 
   return {
@@ -2680,6 +2671,7 @@ export async function fetchHomeDashboardRequest({
       includeUsers: includeUsersModule,
       includeClientes: includeClientesModule,
       includeServidor: false,
+      includeHealth: false,
       partial: dashboard.partial,
       errorsCount: safeArray(dashboard.errors).length,
     },
@@ -2868,42 +2860,20 @@ export async function refreshHomeDashboard(options = {}) {
    HEALTH
 ========================================================= */
 
-export async function fetchHomeHealthRequest({
-  timeout = HOME_HEALTH_TIMEOUT,
-  params = null,
-} = {}) {
-  const result = await requestOptional("health.ready", ENDPOINTS.healthReady, {
-    timeout,
-    params,
-  });
+export async function fetchHomeHealthRequest() {
+  const result = skippedResult("health.ready", "HEALTH_ENDPOINT_NOT_CONFIGURED");
 
   runtime.modules.health = {
-    ok: result.ok,
-    status: result.status,
+    ok: false,
+    skipped: true,
+    status: 0,
+    configured: false,
   };
 
   return result;
 }
 
-export async function loadHomeHealth({
-  silent = true,
-  params = null,
-} = {}) {
-  const result = await fetchHomeHealthRequest({
-    params,
-  });
-
-  if (result.ok) {
-    return unwrapResponse(result.data);
-  }
-
-  if (!silent) {
-    const error = new Error(result.error?.message || "Health no disponible.");
-    error.status = result.status || 0;
-    error.code = result.error?.code || "HEALTH_UNAVAILABLE";
-    throw error;
-  }
-
+export async function loadHomeHealth() {
   return null;
 }
 
@@ -3226,6 +3196,8 @@ export function getHomeApiSnapshot() {
       noDashboardEndpoint: true,
       noStatsEndpoints: true,
       noServidorEndpointInvented: true,
+      noHealthEndpointInvented: true,
+      healthEndpointConfigured: Boolean(HOME_DASHBOARD_PING_ENDPOINT),
 
       usersOnlyAdmin: true,
       clientesOnlyAdmin: true,

@@ -10,6 +10,7 @@
      /api/facturas
      /api/clientes sólo admin
      /api/users sólo admin
+   - Proyectar respuestas grandes a DTOs ligeros para Home.
    - Vista Home distinta para admin y user.
    - User: incidencias + facturas propias según scope backend.
    - Admin: incidencias + facturas + clientes + usuarios.
@@ -51,10 +52,6 @@ import {
 import {
   normalizeHomeDashboard,
   normalizeHomeWidgets,
-  normalizeHomeTickets,
-  normalizeHomeInvoices,
-  normalizeHomeUsers,
-  normalizeHomeClients,
   normalizeHomeActivityList,
 
   getHomeWidgetId,
@@ -64,7 +61,7 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_API_VERSION = "home.api.v7";
+export const HOME_API_VERSION = "home.api.v8";
 
 export const HOME_DASHBOARD_ENDPOINT = "local:home-list-aggregate";
 export const HOME_DASHBOARD_LEGACY_ENDPOINT = "";
@@ -94,6 +91,11 @@ const DEFAULT_LIST_PARAMS = Object.freeze({
   sortBy: "updatedAt",
   sortDir: "DESC",
 });
+
+const HOME_MAX_ITEMS = 24;
+const HOME_ACTIVITY_LIMIT = 8;
+const HOME_TEXT_LIMIT = 180;
+const HOME_TITLE_LIMIT = 120;
 
 const RAW_KEYS = new Set([
   "raw",
@@ -189,6 +191,16 @@ function safeText(value = "", fallback = "") {
   return output || fallback;
 }
 
+function compactText(value = "", fallback = "", max = HOME_TEXT_LIMIT) {
+  const text = safeText(value, fallback);
+
+  if (!text) return fallback;
+
+  if (text.length <= max) return text;
+
+  return `${text.slice(0, max).trim()}…`;
+}
+
 function safeNumber(value = 0, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
 
@@ -234,6 +246,43 @@ function hasOwnKeys(value = {}) {
 
 function first(...values) {
   for (const value of values) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
+
+    return value;
+  }
+
+  return null;
+}
+
+function getPath(object = {}, path = "") {
+  const root = safeObject(object, null);
+  const cleanPath = safeText(path, "");
+
+  if (!root || !cleanPath) return undefined;
+
+  return cleanPath.split(".").reduce((acc, key) => {
+    if (acc === null || acc === undefined) return undefined;
+    return acc?.[key];
+  }, root);
+}
+
+function pickValue(object = {}, paths = []) {
+  const root = safeObject(object, null);
+
+  if (!root) return null;
+
+  for (const path of safeArray(paths)) {
+    const key = safeText(path, "");
+
+    if (!key) continue;
+
+    const value = key.includes(".")
+      ? getPath(root, key)
+      : root?.[key];
+
     if (value === null || value === undefined) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
@@ -358,10 +407,14 @@ function firstVisual(values = [], fallback = "Sin nombre") {
 
     if (!text || isEmailLike(text)) continue;
 
-    return redact(text);
+    return compactText(redact(text), fallback, HOME_TITLE_LIMIT);
   }
 
   return fallback;
+}
+
+function hasSensitiveQuery(value = "") {
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
 }
 
 function safePublicId(value = "") {
@@ -373,7 +426,29 @@ function safePublicId(value = "") {
   if (/Bearer\s+/i.test(text)) return "";
   if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
 
-  return text;
+  return compactText(text, "", 96);
+}
+
+function safePublicUrl(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+  if (hasSensitiveQuery(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+
+  if (raw.startsWith("/") && !raw.startsWith("//")) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
 }
 
 function sanitizeDashboardValue(value, keyHint = "") {
@@ -425,10 +500,6 @@ function sanitizeDashboardList(items = []) {
 /* =========================================================
    ROUTES
 ========================================================= */
-
-function hasSensitiveQuery(value = "") {
-  return SENSITIVE_QUERY_RE.test(String(value || ""));
-}
 
 function routeInput(value = "") {
   const raw = safeText(value, "");
@@ -766,425 +837,537 @@ function sanitizeSummaryForRole(summary = {}, admin = false) {
   return sanitizeDashboardObject(output);
 }
 
-function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
-  const cleanRole = normalizeRole(role, "") || "user";
-  const admin = cleanRole === "admin";
-  const source = safeObject(dashboard);
-
-  const normalized = normalizeHomeDashboard({
-    ...source,
-
-    role: cleanRole,
-    admin,
-
-    users: admin ? source.users : [],
-    usuarios: admin ? source.usuarios : [],
-
-    clients: admin ? source.clients : [],
-    clientes: admin ? source.clientes : [],
-    customers: admin ? source.customers : [],
-
-    servers: admin ? source.servers : [],
-    servidores: admin ? source.servidores : [],
-
-    server: admin ? source.server : {},
-    servidor: admin ? source.servidor : {},
-
-    meta: {
-      ...safeObject(source.meta),
-      role: cleanRole,
-      admin,
-    },
-  });
-
-  const summary = sanitizeSummaryForRole(
-    first(
-      normalized.summary,
-      normalized.stats,
-      normalized.metrics,
-      normalized.totals,
-      normalized.counts,
-      {}
-    ),
-    admin
-  );
-
-  const widgets = filterWidgetsForRole(
-    sanitizeDashboardList(
-      first(
-        normalized.widgets,
-        normalized.cards,
-        normalized.kpis,
-        normalized.blocks,
-        []
-      )
-    ),
-    admin
-  );
-
-  const tickets = sanitizeDashboardList(
-    first(
-      normalized.tickets,
-      normalized.incidencias,
-      []
-    )
-  );
-
-  const invoices = sanitizeDashboardList(
-    first(
-      normalized.invoices,
-      normalized.facturas,
-      []
-    )
-  );
-
-  const users = admin
-    ? sanitizeDashboardList(first(normalized.users, normalized.usuarios, []))
-    : [];
-
-  const clients = admin
-    ? sanitizeDashboardList(first(normalized.clients, normalized.clientes, normalized.customers, []))
-    : [];
-
-  const activity = filterActivityForRole(
-    sanitizeDashboardList(
-      first(
-        normalized.activity,
-        normalized.activities,
-        normalized.recent,
-        normalized.recentActivity,
-        []
-      )
-    ),
-    admin
-  );
-
-  const servers = admin
-    ? sanitizeDashboardList(first(normalized.servers, normalized.servidores, []))
-    : [];
-
-  const server = admin
-    ? sanitizeDashboardObject(first(normalized.server, normalized.servidor, {}))
-    : {};
-
-  return sanitizeDashboardObject({
-    ...normalized,
-
-    role: cleanRole,
-    admin,
-
-    summary,
-    stats: summary,
-    metrics: summary,
-    totals: summary,
-    counts: summary,
-
-    widgets,
-    cards: widgets,
-    kpis: widgets,
-    blocks: widgets,
-
-    tickets,
-    incidencias: tickets,
-
-    invoices,
-    facturas: invoices,
-
-    users,
-    usuarios: users,
-
-    clients,
-    clientes: clients,
-    customers: clients,
-
-    servers,
-    servidores: servers,
-    server,
-    servidor: server,
-
-    activity,
-    activities: activity,
-    recent: activity,
-    recentActivity: activity,
-
-    ticketsTotal: safeNumber(summary.totalTickets, tickets.length),
-    incidenciasTotal: safeNumber(summary.totalTickets, tickets.length),
-    totalTickets: safeNumber(summary.totalTickets, tickets.length),
-    totalIncidencias: safeNumber(summary.totalTickets, tickets.length),
-    ticketsCount: safeNumber(summary.totalTickets, tickets.length),
-    incidenciasCount: safeNumber(summary.totalTickets, tickets.length),
-    visibleTicketsCount: tickets.length,
-    visibleIncidenciasCount: tickets.length,
-
-    invoicesTotal: safeNumber(summary.totalInvoices, invoices.length),
-    facturasTotal: safeNumber(summary.totalInvoices, invoices.length),
-    totalInvoices: safeNumber(summary.totalInvoices, invoices.length),
-    totalFacturas: safeNumber(summary.totalInvoices, invoices.length),
-    invoicesCount: safeNumber(summary.totalInvoices, invoices.length),
-    facturasCount: safeNumber(summary.totalInvoices, invoices.length),
-    visibleInvoicesCount: invoices.length,
-    visibleFacturasCount: invoices.length,
-
-    usersTotal: admin ? summary.usersCount : 0,
-    usuariosTotal: admin ? summary.usuariosCount : 0,
-    totalUsers: admin ? summary.usersCount : 0,
-    totalUsuarios: admin ? summary.usuariosCount : 0,
-    usersCount: admin ? summary.usersCount : 0,
-    usuariosCount: admin ? summary.usuariosCount : 0,
-    visibleUsersCount: admin ? users.length : 0,
-    visibleUsuariosCount: admin ? users.length : 0,
-
-    clientsTotal: admin ? summary.clientsCount : 0,
-    clientesTotal: admin ? summary.clientesCount : 0,
-    customersTotal: admin ? summary.customersCount : 0,
-    totalClients: admin ? summary.clientsCount : 0,
-    totalClientes: admin ? summary.clientesCount : 0,
-    totalCustomers: admin ? summary.customersCount : 0,
-    clientsCount: admin ? summary.clientsCount : 0,
-    clientesCount: admin ? summary.clientesCount : 0,
-    customersCount: admin ? summary.customersCount : 0,
-    visibleClientsCount: admin ? clients.length : 0,
-    visibleClientesCount: admin ? clients.length : 0,
-    visibleCustomersCount: admin ? clients.length : 0,
-
-    serversCount: admin ? safeNumber(summary.serversCount, servers.length) : 0,
-    servidoresCount: admin ? safeNumber(summary.servidoresCount, servers.length) : 0,
-    visibleServersCount: admin ? servers.length : 0,
-    visibleServidoresCount: admin ? servers.length : 0,
-
-    activityCount: activity.length,
-    recentCount: activity.length,
-    visibleActivityCount: activity.length,
-
-    meta: {
-      ...safeObject(normalized.meta),
-
-      role: cleanRole,
-      admin,
-
-      ticketsCount: safeNumber(summary.totalTickets, tickets.length),
-      incidenciasCount: safeNumber(summary.totalTickets, tickets.length),
-      visibleTicketsCount: tickets.length,
-      visibleIncidenciasCount: tickets.length,
-
-      invoicesCount: safeNumber(summary.totalInvoices, invoices.length),
-      facturasCount: safeNumber(summary.totalInvoices, invoices.length),
-      visibleInvoicesCount: invoices.length,
-      visibleFacturasCount: invoices.length,
-
-      usersCount: admin ? summary.usersCount : 0,
-      usuariosCount: admin ? summary.usuariosCount : 0,
-      visibleUsersCount: admin ? users.length : 0,
-      visibleUsuariosCount: admin ? users.length : 0,
-
-      clientsCount: admin ? summary.clientsCount : 0,
-      clientesCount: admin ? summary.clientesCount : 0,
-      customersCount: admin ? summary.customersCount : 0,
-      visibleClientsCount: admin ? clients.length : 0,
-      visibleClientesCount: admin ? clients.length : 0,
-      visibleCustomersCount: admin ? clients.length : 0,
-
-      serversCount: admin ? safeNumber(summary.serversCount, servers.length) : 0,
-      servidoresCount: admin ? safeNumber(summary.servidoresCount, servers.length) : 0,
-      visibleServersCount: admin ? servers.length : 0,
-      visibleServidoresCount: admin ? servers.length : 0,
-
-      activityCount: activity.length,
-      recentCount: activity.length,
-    },
-  });
-}
-
 /* =========================================================
-   REQUEST
+   LIGHT DTO PROJECTION
 ========================================================= */
 
-function nextLoadSeq() {
-  loadSeq += 1;
-  return loadSeq;
+function ticketStatusKey(item = {}) {
+  const key = normalizeKey(
+    first(
+      item.status,
+      item.estado,
+      item.state,
+      item.lifecycle?.status,
+      "pending"
+    )
+  );
+
+  if (["open", "opened", "abierta", "abierto"].includes(key)) return "open";
+  if (["progress", "in_progress", "inprogress", "en_proceso", "working", "assigned"].includes(key)) return "progress";
+  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
+  if (["closed", "cerrada", "cerrado", "cancelled", "archived"].includes(key)) return "closed";
+
+  return "pending";
 }
 
-function isActiveLoadSeq(seq = 0) {
-  return seq === loadSeq;
+function ticketPriorityKey(item = {}) {
+  const key = normalizeKey(
+    first(
+      item.priority,
+      item.prioridad,
+      item.severity,
+      item.urgency,
+      item.sla?.priority,
+      "medium"
+    )
+  );
+
+  if (["critical", "critica", "critico", "p0", "blocker"].includes(key)) return "critical";
+  if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) return "urgent";
+  if (["low", "baja", "minor", "p3"].includes(key)) return "low";
+
+  return "medium";
 }
 
-function mergeParams(...sources) {
-  const output = {};
+function invoiceStatusKey(item = {}) {
+  const key = normalizeKey(
+    first(
+      item.paymentStatus,
+      item.estadoPago,
+      item.status,
+      item.estado,
+      "pending"
+    )
+  );
 
-  for (const source of sources) {
-    const object = safeObject(source, null);
+  if (["paid", "pagada", "pagado", "cobrada"].includes(key)) return "paid";
+  if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
+  if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
+  if (["cancelled", "cancelada", "cancelado"].includes(key)) return "cancelled";
+  if (["draft", "borrador"].includes(key)) return "draft";
 
-    if (!object) continue;
-
-    for (const [key, value] of Object.entries(object)) {
-      if (value === undefined || value === null || value === "") continue;
-      output[key] = value;
-    }
-  }
-
-  return output;
+  return "pending";
 }
 
-async function requestGet(endpoint = "", options = {}) {
-  const path = safeText(endpoint, "");
-
-  if (!path) {
-    throw new Error("HOME_API_ENDPOINT_MISSING");
-  }
-
-  const requestOptions = {
-    auth: true,
-    public: false,
-    skipAuth: false,
-    noAuthHeader: false,
-    cache: "no-store",
-    timeout: safeNumber(options.timeout, HOME_TIMEOUT),
-    params: options.params || options.query || undefined,
-    query: options.query || options.params || undefined,
-    storeError: false,
-  };
-
-  if (isFunction(CoreHttp?.get)) {
-    return CoreHttp.get(path, requestOptions);
-  }
-
-  if (isFunction(CoreHttp?.request)) {
-    return CoreHttp.request(path, {
-      ...requestOptions,
-      method: "GET",
-    });
-  }
-
-  throw new Error("HOME_HTTP_UNAVAILABLE");
-}
-
-function getErrorStatus(error = null) {
+function invoiceAmount(item = {}) {
   return safeNumber(
     first(
-      error?.status,
-      error?.statusCode,
-      error?.response?.status,
-      error?.response?.statusCode,
-      error?.data?.status,
-      error?.data?.statusCode
+      item.total,
+      item.amount,
+      item.importe,
+      item.price,
+      item.subtotal,
+      item.base,
+      item.totalFactura,
+      item.importeTotal,
+      item.facturaTotal,
+      item.invoiceAmount,
+      item.totalAmount,
+      0
     ),
     0
   );
 }
 
-function getErrorCode(error = null) {
-  return safeText(
+function attachmentsCount(item = {}) {
+  const attachments = first(
+    item.attachments,
+    item.files,
+    item.adjuntos,
+    item.documents
+  );
+
+  if (Array.isArray(attachments)) return attachments.length;
+
+  return safeNumber(
     first(
-      error?.code,
-      error?.errorCode,
-      error?.response?.data?.code,
-      error?.response?.data?.error,
-      error?.data?.code,
-      error?.data?.error,
-      error?.error
+      item.attachmentsCount,
+      item.filesCount,
+      item.adjuntosCount,
+      item.documentsCount,
+      0
     ),
-    ""
+    0
   );
 }
 
-function normalizeErrorMessage(error = null, fallback = "No se pudo cargar el Home.") {
-  const status = getErrorStatus(error);
-  const code = normalizeKey(getErrorCode(error));
-
-  if (status === 401 || code === "unauthorized") {
-    return "No autorizado. Inicia sesión de nuevo.";
+function modelId(fn, item = {}) {
+  try {
+    return safePublicId(fn?.(item));
+  } catch {
+    return "";
   }
+}
 
-  if (status === 403 || code === "forbidden") {
-    return "No tienes permisos para consultar este módulo.";
-  }
-
-  if (status === 404 || code === "not_found") {
-    return "El módulo solicitado no está disponible.";
-  }
-
-  if (status >= 500) {
-    return "El backend devolvió un error interno.";
-  }
-
-  return redact(
-    safeText(
-      first(
-        error?.response?.data?.message,
-        error?.data?.message,
-        error?.message,
-        fallback
-      ),
-      fallback
+function getTicketId(item = {}) {
+  return safePublicId(
+    first(
+      modelId(getHomeTicketId, item),
+      item.ticketId,
+      item.incidenciaId,
+      item.code,
+      item.numero,
+      item.ticketCode,
+      item.entityId,
+      item.id
     )
   );
 }
 
-function normalizeRequestError(error = null) {
-  return {
-    status: getErrorStatus(error),
-    code: safeText(getErrorCode(error), ""),
-    message: normalizeErrorMessage(error),
-  };
+function getInvoiceId(item = {}) {
+  return safePublicId(
+    first(
+      modelId(getHomeInvoiceId, item),
+      item.invoiceId,
+      item.facturaId,
+      item.numeroFacturaLegal,
+      item.numeroFactura,
+      item.invoiceNumber,
+      item.number,
+      item.numero,
+      item.code,
+      item.id
+    )
+  );
 }
 
-function isSoftModuleError(error = null) {
-  const status = getErrorStatus(error);
-  return status === 403 || status === 404;
+function getUserId(item = {}) {
+  return safePublicId(
+    first(
+      modelId(getHomeUserId, item),
+      item.userId,
+      item.usuarioId,
+      item.id,
+      item.username
+    )
+  );
 }
 
-function skippedResult(name = "", code = "HOME_MODULE_SKIPPED") {
+function getClientId(item = {}) {
+  return safePublicId(
+    first(
+      modelId(getHomeClientId, item),
+      item.clienteId,
+      item.clientId,
+      item.customerId,
+      item.id
+    )
+  );
+}
+
+function ticketOwnerName(item = {}) {
+  return firstVisual(
+    [
+      item.ownerName,
+      item.requesterName,
+      item.clientName,
+      item.clienteName,
+      item.userName,
+      item.usuarioName,
+      item.requesterSnapshot?.displayName,
+      item.requesterSnapshot?.name,
+      item.requesterSnapshot?.nombre,
+      item.clienteSnapshot?.displayName,
+      item.clienteSnapshot?.name,
+      item.clienteSnapshot?.nombre,
+      item.userSnapshot?.displayName,
+      item.userSnapshot?.name,
+      item.userSnapshot?.nombre,
+      item.user?.displayName,
+      item.user?.name,
+      item.cliente?.displayName,
+      item.cliente?.name,
+      item.cliente?.nombre,
+      item.createdByName,
+      item.createdBy?.displayName,
+      item.createdBy?.name,
+    ],
+    "Usuario"
+  );
+}
+
+function ticketAvatarUrl(item = {}) {
+  return safePublicUrl(
+    first(
+      item.avatarUrl,
+      item.requesterAvatarUrl,
+      item.userAvatarUrl,
+      item.photoUrl,
+      item.photoURL,
+      item.requesterSnapshot?.avatarUrl,
+      item.requesterSnapshot?.photoUrl,
+      item.userSnapshot?.avatarUrl,
+      item.user?.avatarUrl,
+      item.user?.photoUrl,
+      item.profile?.avatarUrl
+    )
+  );
+}
+
+function ticketPreview(item = {}) {
+  const source = safeObject(item);
+  const ticketId = getTicketId(source);
+  const status = ticketStatusKey(source);
+  const priority = ticketPriorityKey(source);
+  const ownerName = ticketOwnerName(source);
+  const avatarUrl = ticketAvatarUrl(source);
+  const files = attachmentsCount(source);
+
+  const subject = compactText(
+    first(
+      source.subject,
+      source.asunto,
+      source.title,
+      source.titulo,
+      source.name,
+      ticketId ? `Incidencia ${ticketId}` : "Incidencia"
+    ),
+    ticketId ? `Incidencia ${ticketId}` : "Incidencia",
+    HOME_TITLE_LIMIT
+  );
+
+  const description = compactText(
+    first(
+      source.preview,
+      source.message,
+      source.description,
+      source.descripcion,
+      source.summary,
+      source.resumen,
+      source.body,
+      ""
+    ),
+    "",
+    HOME_TEXT_LIMIT
+  );
+
+  const category = compactText(
+    first(
+      source.category,
+      source.categoria,
+      source.type,
+      source.tipo,
+      "General"
+    ),
+    "General",
+    64
+  );
+
+  const assignedTo = firstVisual(
+    [
+      source.assignedTo,
+      source.tecnico,
+      source.agent,
+      source.assignee,
+      source.assignment?.displayName,
+      source.assignment?.name,
+      source.assignment?.username,
+      source.tecnicoSnapshot?.displayName,
+      source.tecnicoSnapshot?.name,
+    ],
+    "Sin asignación"
+  );
+
+  const createdAt = safeText(
+    first(
+      source.createdAt,
+      source.fechaCreacion,
+      source.created_at,
+      source.lifecycle?.createdAt,
+      ""
+    ),
+    ""
+  );
+
+  const updatedAt = safeText(
+    first(
+      source.updatedAt,
+      source.lastActivityAt,
+      source.lastUpdateAt,
+      source.updated_at,
+      source.lifecycle?.updatedAt,
+      source.lifecycle?.lastActivityAt,
+      createdAt
+    ),
+    createdAt
+  );
+
   return {
-    ok: false,
-    skipped: true,
-    name,
-    endpoint: "",
-    status: 0,
-    durationMs: 0,
-    data: null,
-    error: {
-      status: 0,
-      code,
-      message: "Módulo omitido para esta vista Home.",
+    id: ticketId,
+    ticketId,
+    incidenciaId: ticketId,
+
+    subject,
+    asunto: subject,
+    title: subject,
+
+    message: description,
+    description,
+    descripcion: description,
+    preview: description,
+
+    status,
+    estado: status,
+
+    priority,
+    prioridad: priority,
+
+    category,
+    categoria: category,
+
+    assignedTo,
+    tecnico: assignedTo,
+
+    ownerName,
+    requesterName: ownerName,
+    clientName: ownerName,
+    userName: ownerName,
+
+    avatarUrl,
+    requesterAvatarUrl: avatarUrl,
+    requesterSnapshot: {
+      displayName: ownerName,
+      name: ownerName,
+      avatarUrl,
     },
-    soft: true,
+
+    createdAt,
+    updatedAt,
+    lastUpdateAt: updatedAt,
+    lastActivityAt: updatedAt,
+
+    attachmentsCount: files,
+    filesCount: files,
+    adjuntosCount: files,
+    hasAttachments: files > 0,
   };
 }
 
-async function requestOptional(name = "", endpoint = "", options = {}) {
-  const startedAt = Date.now();
+function invoicePreview(item = {}) {
+  const source = safeObject(item);
+  const invoiceId = getInvoiceId(source);
+  const status = invoiceStatusKey(source);
+  const amount = invoiceAmount(source);
 
-  if (!endpoint) {
-    return skippedResult(name, "HOME_MODULE_SKIPPED");
-  }
+  const currency = safeText(
+    first(
+      source.currency,
+      source.moneda,
+      source.divisa,
+      source.invoiceCurrency,
+      "EUR"
+    ),
+    "EUR"
+  );
 
-  try {
-    const data = await requestGet(endpoint, options);
+  const createdAt = safeText(
+    first(
+      source.createdAt,
+      source.fecha,
+      source.date,
+      source.issuedAt,
+      source.created_at,
+      ""
+    ),
+    ""
+  );
 
-    return {
-      ok: true,
-      skipped: false,
-      name,
-      endpoint,
-      status: 200,
-      durationMs: Date.now() - startedAt,
-      data,
-      error: null,
-      soft: false,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      skipped: false,
-      name,
-      endpoint,
-      status: getErrorStatus(error),
-      durationMs: Date.now() - startedAt,
-      data: null,
-      error: normalizeRequestError(error),
-      soft: isSoftModuleError(error),
-    };
-  }
+  const updatedAt = safeText(
+    first(
+      source.updatedAt,
+      source.updated_at,
+      source.paidAt,
+      source.dueAt,
+      createdAt
+    ),
+    createdAt
+  );
+
+  const title = compactText(
+    first(
+      source.title,
+      source.name,
+      source.concepto,
+      invoiceId ? `Factura ${invoiceId}` : "Factura"
+    ),
+    invoiceId ? `Factura ${invoiceId}` : "Factura",
+    HOME_TITLE_LIMIT
+  );
+
+  return {
+    id: invoiceId,
+    invoiceId,
+    facturaId: invoiceId,
+
+    number: invoiceId,
+    numero: invoiceId,
+    numeroFactura: invoiceId,
+    invoiceNumber: invoiceId,
+
+    title,
+    concepto: title,
+
+    status,
+    estado: status,
+    paymentStatus: status,
+    estadoPago: status,
+
+    total: amount,
+    amount,
+    importe: amount,
+    importeTotal: amount,
+    totalFactura: amount,
+    invoiceAmount: amount,
+
+    currency,
+    moneda: currency,
+
+    createdAt,
+    updatedAt,
+    date: createdAt,
+  };
+}
+
+function clientPreview(item = {}) {
+  const source = safeObject(item);
+  const clientId = getClientId(source);
+
+  const name = firstVisual(
+    [
+      source.displayName,
+      source.fullName,
+      source.name,
+      source.nombre,
+      source.razonSocial,
+      source.company,
+      source.slug,
+      clientId ? `Cliente ${clientId}` : "Cliente",
+    ],
+    "Cliente"
+  );
+
+  return {
+    id: clientId,
+    clientId,
+    clienteId: clientId,
+    customerId: clientId,
+
+    displayName: name,
+    fullName: name,
+    name,
+    nombre: name,
+    razonSocial: name,
+    company: name,
+
+    createdAt: safeText(first(source.createdAt, source.created_at, ""), ""),
+    updatedAt: safeText(first(source.updatedAt, source.updated_at, source.createdAt, ""), ""),
+  };
+}
+
+function userPreview(item = {}) {
+  const source = safeObject(item);
+  const userId = getUserId(source);
+
+  const name = firstVisual(
+    [
+      source.displayName,
+      source.fullName,
+      source.name,
+      source.nombre,
+      source.profile?.displayName,
+      source.profile?.fullName,
+      source.username,
+      userId ? `Usuario ${userId}` : "Usuario",
+    ],
+    "Usuario"
+  );
+
+  const role = normalizeRole(
+    first(
+      source.role,
+      source.rol,
+      source.roles,
+      "user"
+    ),
+    "user"
+  );
+
+  return {
+    id: userId,
+    userId,
+    usuarioId: userId,
+
+    displayName: name,
+    fullName: name,
+    name,
+    nombre: name,
+    username: safePublicId(source.username),
+
+    role,
+    rol: role,
+
+    createdAt: safeText(first(source.createdAt, source.created_at, ""), ""),
+    updatedAt: safeText(first(source.updatedAt, source.updated_at, source.lastLoginAt, source.createdAt, ""), ""),
+  };
+}
+
+function projectList(items = [], mapper = (item) => item, picker = (item) => item.id) {
+  const rows = safeArray(items)
+    .slice(0, HOME_MAX_ITEMS)
+    .map((item) => mapper(item))
+    .filter(hasOwnKeys);
+
+  return uniqueBy(rows, picker);
 }
 
 /* =========================================================
@@ -1233,18 +1416,6 @@ function unwrapResponse(payload = null, depth = 0) {
   }
 
   return object;
-}
-
-function getPath(object = {}, path = "") {
-  const root = safeObject(object, null);
-  const cleanPath = safeText(path, "");
-
-  if (!root || !cleanPath) return undefined;
-
-  return cleanPath.split(".").reduce((acc, key) => {
-    if (acc === null || acc === undefined) return undefined;
-    return acc?.[key];
-  }, root);
 }
 
 function pickMax(keys = [], sources = [], fallback = 0) {
@@ -1382,182 +1553,16 @@ function extractCollection(payload = null, aliases = []) {
 }
 
 /* =========================================================
-   ITEM HELPERS
-========================================================= */
-
-function modelId(fn, item = {}) {
-  try {
-    return safePublicId(fn?.(item));
-  } catch {
-    return "";
-  }
-}
-
-function getTicketId(item = {}) {
-  return safePublicId(
-    first(
-      modelId(getHomeTicketId, item),
-      item.ticketId,
-      item.incidenciaId,
-      item.code,
-      item.numero,
-      item.ticketCode,
-      item.entityId,
-      item.id
-    )
-  );
-}
-
-function getInvoiceId(item = {}) {
-  return safePublicId(
-    first(
-      modelId(getHomeInvoiceId, item),
-      item.invoiceId,
-      item.facturaId,
-      item.numeroFacturaLegal,
-      item.numeroFactura,
-      item.invoiceNumber,
-      item.number,
-      item.numero,
-      item.code,
-      item.id
-    )
-  );
-}
-
-function getUserId(item = {}) {
-  return safePublicId(
-    first(
-      modelId(getHomeUserId, item),
-      item.userId,
-      item.usuarioId,
-      item.id,
-      item.username
-    )
-  );
-}
-
-function getClientId(item = {}) {
-  return safePublicId(
-    first(
-      modelId(getHomeClientId, item),
-      item.clienteId,
-      item.clientId,
-      item.customerId,
-      item.id
-    )
-  );
-}
-
-function ticketStatusKey(item = {}) {
-  const key = normalizeKey(
-    first(
-      item.status,
-      item.estado,
-      item.state,
-      item.lifecycle?.status,
-      "pending"
-    )
-  );
-
-  if (["open", "opened", "abierta", "abierto"].includes(key)) return "open";
-  if (["progress", "in_progress", "inprogress", "en_proceso", "working", "assigned"].includes(key)) return "progress";
-  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
-  if (["closed", "cerrada", "cerrado", "cancelled", "archived"].includes(key)) return "closed";
-
-  return "pending";
-}
-
-function ticketPriorityKey(item = {}) {
-  const key = normalizeKey(
-    first(
-      item.priority,
-      item.prioridad,
-      item.severity,
-      item.urgency,
-      item.sla?.priority,
-      "medium"
-    )
-  );
-
-  if (["critical", "critica", "critico", "p0", "blocker"].includes(key)) return "critical";
-  if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) return "urgent";
-  if (["low", "baja", "minor", "p3"].includes(key)) return "low";
-
-  return "medium";
-}
-
-function invoiceStatusKey(item = {}) {
-  const key = normalizeKey(
-    first(
-      item.paymentStatus,
-      item.estadoPago,
-      item.status,
-      item.estado,
-      "pending"
-    )
-  );
-
-  if (["paid", "pagada", "pagado", "cobrada"].includes(key)) return "paid";
-  if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
-  if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
-  if (["cancelled", "cancelada", "cancelado"].includes(key)) return "cancelled";
-  if (["draft", "borrador"].includes(key)) return "draft";
-
-  return "pending";
-}
-
-function invoiceAmount(item = {}) {
-  return safeNumber(
-    first(
-      item.total,
-      item.amount,
-      item.importe,
-      item.price,
-      item.subtotal,
-      item.base,
-      item.totalFactura,
-      item.importeTotal,
-      item.facturaTotal,
-      item.invoiceAmount,
-      0
-    ),
-    0
-  );
-}
-
-function attachmentsCount(item = {}) {
-  const attachments = first(
-    item.attachments,
-    item.files,
-    item.adjuntos,
-    item.documents
-  );
-
-  if (Array.isArray(attachments)) return attachments.length;
-
-  return safeNumber(
-    first(
-      item.attachmentsCount,
-      item.filesCount,
-      item.adjuntosCount,
-      item.documentsCount,
-      0
-    ),
-    0
-  );
-}
-
-/* =========================================================
    MODULE NORMALIZATION FROM LISTS ONLY
 ========================================================= */
 
 function normalizeTicketsModule(listPayload = null) {
   const collection = extractCollection(listPayload, ["tickets", "incidencias"]);
 
-  const items = uniqueBy(
-    sanitizeDashboardList(normalizeHomeTickets(collection.items)),
-    getTicketId
+  const items = projectList(
+    collection.items,
+    ticketPreview,
+    (item) => item.ticketId || item.incidenciaId || item.id
   );
 
   const total = Math.max(items.length, collection.total);
@@ -1574,7 +1579,7 @@ function normalizeTicketsModule(listPayload = null) {
     ["urgent", "critical"].includes(ticketPriorityKey(item))
   ).length;
 
-  const filesCount = items.reduce((sum, item) => sum + attachmentsCount(item), 0);
+  const filesCount = items.reduce((sum, item) => sum + safeNumber(item.attachmentsCount, 0), 0);
 
   return {
     items,
@@ -1613,9 +1618,10 @@ function normalizeTicketsModule(listPayload = null) {
 function normalizeFacturasModule(listPayload = null) {
   const collection = extractCollection(listPayload, ["facturas", "invoices"]);
 
-  const items = uniqueBy(
-    sanitizeDashboardList(normalizeHomeInvoices(collection.items)),
-    getInvoiceId
+  const items = projectList(
+    collection.items,
+    invoicePreview,
+    (item) => item.facturaId || item.invoiceId || item.id
   );
 
   const total = Math.max(items.length, collection.total);
@@ -1624,7 +1630,7 @@ function normalizeFacturasModule(listPayload = null) {
     ["pending", "overdue", "partial"].includes(invoiceStatusKey(item))
   ).length;
 
-  const invoiceTotal = items.reduce((sum, item) => sum + invoiceAmount(item), 0);
+  const invoiceTotal = items.reduce((sum, item) => sum + safeNumber(item.total, 0), 0);
 
   return {
     items,
@@ -1657,9 +1663,10 @@ function normalizeFacturasModule(listPayload = null) {
 function normalizeClientesModule(listPayload = null) {
   const collection = extractCollection(listPayload, ["clientes", "clients", "customers"]);
 
-  const items = uniqueBy(
-    sanitizeDashboardList(normalizeHomeClients(collection.items)),
-    getClientId
+  const items = projectList(
+    collection.items,
+    clientPreview,
+    (item) => item.clienteId || item.clientId || item.customerId || item.id
   );
 
   const total = Math.max(items.length, collection.total);
@@ -1683,9 +1690,10 @@ function normalizeClientesModule(listPayload = null) {
 function normalizeUsersModule(listPayload = null) {
   const collection = extractCollection(listPayload, ["users", "usuarios", "members"]);
 
-  const items = uniqueBy(
-    sanitizeDashboardList(normalizeHomeUsers(collection.items)),
-    getUserId
+  const items = projectList(
+    collection.items,
+    userPreview,
+    (item) => item.userId || item.usuarioId || item.id
   );
 
   const total = Math.max(items.length, collection.total);
@@ -1838,10 +1846,10 @@ function buildWidgets(summary = {}, admin = false) {
       title: admin ? "Incidencias" : "Mis incidencias",
       description: admin ? "Tickets visibles en el panel." : "Tus solicitudes visibles.",
       value: safeNumber(summary.totalTickets, 0),
-      subtitle: `${safeNumber(summary.openTickets, 0)} abiertas · ${safeNumber(summary.urgentTickets, 0)} urgentes`,
+      subtitle: `${safeNumber(summary.openTickets, 0)} abiertas`,
       type: "tickets",
       kind: "metric",
-      status: safeNumber(summary.urgentTickets, 0) > 0 ? "warning" : "active",
+      status: "active",
       route: INCIDENCIAS_ROUTE,
       href: INCIDENCIAS_ROUTE,
     },
@@ -1864,23 +1872,7 @@ function buildWidgets(summary = {}, admin = false) {
   ];
 
   if (!admin) {
-    return normalizeHomeWidgets([
-      ...common,
-      {
-        id: "adjuntos",
-        widgetId: "adjuntos",
-        key: "adjuntos",
-        title: "Adjuntos",
-        description: "Documentos vinculados a tus incidencias.",
-        value: safeNumber(summary.attachmentsCount, 0),
-        subtitle: "Archivos visibles",
-        type: "files",
-        kind: "metric",
-        status: "active",
-        route: INCIDENCIAS_ROUTE,
-        href: INCIDENCIAS_ROUTE,
-      },
-    ]);
+    return normalizeHomeWidgets(common);
   }
 
   return normalizeHomeWidgets([
@@ -1925,7 +1917,7 @@ function buildActivity({
 } = {}) {
   const activity = [];
 
-  for (const ticket of safeArray(tickets).slice(0, 8)) {
+  for (const ticket of safeArray(tickets).slice(0, HOME_ACTIVITY_LIMIT)) {
     const id = getTicketId(ticket);
 
     activity.push({
@@ -1984,17 +1976,15 @@ function buildActivity({
   }
 
   return filterActivityForRole(
-    sanitizeDashboardList(
-      normalizeHomeActivityList(activity)
-        .filter((item) => item.title || item.text)
-        .sort((a, b) => {
-          const left = new Date(first(a.date, a.updatedAt, a.createdAt, 0)).getTime();
-          const right = new Date(first(b.date, b.updatedAt, b.createdAt, 0)).getTime();
+    normalizeHomeActivityList(activity)
+      .filter((item) => item.title || item.text)
+      .sort((a, b) => {
+        const left = new Date(first(a.date, a.updatedAt, a.createdAt, 0)).getTime();
+        const right = new Date(first(b.date, b.updatedAt, b.createdAt, 0)).getTime();
 
-          return (Number.isFinite(right) ? right : 0) - (Number.isFinite(left) ? left : 0);
-        })
-        .slice(0, 8)
-    ),
+        return (Number.isFinite(right) ? right : 0) - (Number.isFinite(left) ? left : 0);
+      })
+      .slice(0, HOME_ACTIVITY_LIMIT),
     admin
   );
 }
@@ -2028,6 +2018,226 @@ function moduleStatus(result = null, endpoint = "") {
   };
 }
 
+function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
+  const cleanRole = normalizeRole(role, "") || "user";
+  const admin = cleanRole === "admin";
+  const source = safeObject(dashboard);
+
+  const normalized = normalizeHomeDashboard({
+    ...source,
+
+    role: cleanRole,
+    admin,
+
+    users: admin ? source.users : [],
+    usuarios: admin ? source.usuarios : [],
+
+    clients: admin ? source.clients : [],
+    clientes: admin ? source.clientes : [],
+    customers: admin ? source.customers : [],
+
+    servers: admin ? source.servers : [],
+    servidores: admin ? source.servidores : [],
+
+    server: admin ? source.server : {},
+    servidor: admin ? source.servidor : {},
+
+    meta: {
+      ...safeObject(source.meta),
+      role: cleanRole,
+      admin,
+    },
+  });
+
+  const summary = sanitizeSummaryForRole(
+    first(
+      normalized.summary,
+      normalized.stats,
+      normalized.metrics,
+      normalized.totals,
+      normalized.counts,
+      {}
+    ),
+    admin
+  );
+
+  const widgets = filterWidgetsForRole(
+    normalizeHomeWidgets(
+      first(
+        normalized.widgets,
+        normalized.cards,
+        normalized.kpis,
+        normalized.blocks,
+        []
+      )
+    ),
+    admin
+  );
+
+  const tickets = projectList(
+    first(normalized.tickets, normalized.incidencias, []),
+    ticketPreview,
+    (item) => item.ticketId || item.incidenciaId || item.id
+  );
+
+  const invoices = projectList(
+    first(normalized.invoices, normalized.facturas, []),
+    invoicePreview,
+    (item) => item.facturaId || item.invoiceId || item.id
+  );
+
+  const users = admin
+    ? projectList(first(normalized.users, normalized.usuarios, []), userPreview, (item) => item.userId || item.id)
+    : [];
+
+  const clients = admin
+    ? projectList(first(normalized.clients, normalized.clientes, normalized.customers, []), clientPreview, (item) => item.clienteId || item.id)
+    : [];
+
+  const activity = filterActivityForRole(
+    normalizeHomeActivityList(
+      first(
+        normalized.activity,
+        normalized.activities,
+        normalized.recent,
+        normalized.recentActivity,
+        []
+      )
+    ).slice(0, HOME_ACTIVITY_LIMIT),
+    admin
+  );
+
+  const servers = [];
+  const server = {};
+
+  return sanitizeDashboardObject({
+    ...normalized,
+
+    role: cleanRole,
+    admin,
+
+    summary,
+    stats: summary,
+    metrics: summary,
+    totals: summary,
+    counts: summary,
+
+    widgets,
+    cards: widgets,
+    kpis: widgets,
+    blocks: widgets,
+
+    tickets,
+    incidencias: tickets,
+
+    invoices,
+    facturas: invoices,
+
+    users,
+    usuarios: users,
+
+    clients,
+    clientes: clients,
+    customers: clients,
+
+    servers,
+    servidores: servers,
+    server,
+    servidor: server,
+
+    activity,
+    activities: activity,
+    recent: activity,
+    recentActivity: activity,
+
+    ticketsTotal: safeNumber(summary.totalTickets, tickets.length),
+    incidenciasTotal: safeNumber(summary.totalTickets, tickets.length),
+    totalTickets: safeNumber(summary.totalTickets, tickets.length),
+    totalIncidencias: safeNumber(summary.totalTickets, tickets.length),
+    ticketsCount: safeNumber(summary.totalTickets, tickets.length),
+    incidenciasCount: safeNumber(summary.totalTickets, tickets.length),
+    visibleTicketsCount: tickets.length,
+    visibleIncidenciasCount: tickets.length,
+
+    invoicesTotal: safeNumber(summary.totalInvoices, invoices.length),
+    facturasTotal: safeNumber(summary.totalInvoices, invoices.length),
+    totalInvoices: safeNumber(summary.totalInvoices, invoices.length),
+    totalFacturas: safeNumber(summary.totalInvoices, invoices.length),
+    invoicesCount: safeNumber(summary.totalInvoices, invoices.length),
+    facturasCount: safeNumber(summary.totalInvoices, invoices.length),
+    visibleInvoicesCount: invoices.length,
+    visibleFacturasCount: invoices.length,
+
+    usersTotal: admin ? summary.usersCount : 0,
+    usuariosTotal: admin ? summary.usuariosCount : 0,
+    totalUsers: admin ? summary.usersCount : 0,
+    totalUsuarios: admin ? summary.usuariosCount : 0,
+    usersCount: admin ? summary.usersCount : 0,
+    usuariosCount: admin ? summary.usuariosCount : 0,
+    visibleUsersCount: admin ? users.length : 0,
+    visibleUsuariosCount: admin ? users.length : 0,
+
+    clientsTotal: admin ? summary.clientsCount : 0,
+    clientesTotal: admin ? summary.clientesCount : 0,
+    customersTotal: admin ? summary.customersCount : 0,
+    totalClients: admin ? summary.clientsCount : 0,
+    totalClientes: admin ? summary.clientesCount : 0,
+    totalCustomers: admin ? summary.customersCount : 0,
+    clientsCount: admin ? summary.clientsCount : 0,
+    clientesCount: admin ? summary.clientesCount : 0,
+    customersCount: admin ? summary.customersCount : 0,
+    visibleClientsCount: admin ? clients.length : 0,
+    visibleClientesCount: admin ? clients.length : 0,
+    visibleCustomersCount: admin ? clients.length : 0,
+
+    serversCount: 0,
+    servidoresCount: 0,
+    visibleServersCount: 0,
+    visibleServidoresCount: 0,
+
+    activityCount: activity.length,
+    recentCount: activity.length,
+    visibleActivityCount: activity.length,
+
+    meta: {
+      ...safeObject(normalized.meta),
+
+      role: cleanRole,
+      admin,
+
+      ticketsCount: safeNumber(summary.totalTickets, tickets.length),
+      incidenciasCount: safeNumber(summary.totalTickets, tickets.length),
+      visibleTicketsCount: tickets.length,
+      visibleIncidenciasCount: tickets.length,
+
+      invoicesCount: safeNumber(summary.totalInvoices, invoices.length),
+      facturasCount: safeNumber(summary.totalInvoices, invoices.length),
+      visibleInvoicesCount: invoices.length,
+      visibleFacturasCount: invoices.length,
+
+      usersCount: admin ? summary.usersCount : 0,
+      usuariosCount: admin ? summary.usuariosCount : 0,
+      visibleUsersCount: admin ? users.length : 0,
+      visibleUsuariosCount: admin ? users.length : 0,
+
+      clientsCount: admin ? summary.clientsCount : 0,
+      clientesCount: admin ? summary.clientesCount : 0,
+      customersCount: admin ? summary.customersCount : 0,
+      visibleClientsCount: admin ? clients.length : 0,
+      visibleClientesCount: admin ? clients.length : 0,
+      visibleCustomersCount: admin ? clients.length : 0,
+
+      serversCount: 0,
+      servidoresCount: 0,
+      visibleServersCount: 0,
+      visibleServidoresCount: 0,
+
+      activityCount: activity.length,
+      recentCount: activity.length,
+    },
+  });
+}
+
 function buildDashboardFromModules(modules = {}, meta = {}) {
   const role = normalizeRole(first(meta.role, getCurrentRole()), "") || "user";
   const admin = role === "admin";
@@ -2052,7 +2262,7 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
   });
 
   const widgets = filterWidgetsForRole(
-    sanitizeDashboardList(buildWidgets(summary, admin)),
+    buildWidgets(summary, admin),
     admin
   );
 
@@ -2241,21 +2451,6 @@ export function normalizeDashboard(payload = null, options = {}) {
       ""
     ) || getCurrentRole();
 
-  /*
-    Respuesta completa de fetchHomeDashboardRequest():
-    {
-      ok,
-      dashboard: {
-        tickets,
-        facturas,
-        summary,
-        modules: { listOk/status/endpoint }
-      }
-    }
-
-    dashboard.modules ya NO contiene data cruda.
-    Sólo reconstruimos desde módulos si esos módulos traen payload real.
-  */
   if (object.dashboard && hasOwnKeys(object.dashboard)) {
     const dashboard = safeObject(object.dashboard);
 
@@ -2271,34 +2466,9 @@ export function normalizeDashboard(payload = null, options = {}) {
       );
     }
 
-    try {
-      return sanitizeDashboardForRole(
-        normalizeHomeDashboard({
-          ...dashboard,
-          role,
-          admin: role === "admin",
-          meta: {
-            ...safeObject(dashboard.meta),
-            role,
-            admin: role === "admin",
-          },
-        }),
-        role
-      );
-    } catch {
-      return sanitizeDashboardForRole(dashboard, role);
-    }
+    return sanitizeDashboardForRole(dashboard, role);
   }
 
-  /*
-    Payload interno con módulos crudos:
-    {
-      modules: {
-        tickets: { data: ... },
-        facturas: { data: ... }
-      }
-    }
-  */
   if (object.modules && modulesHavePayload(object.modules)) {
     return sanitizeDashboardForRole(
       buildDashboardFromModules(object.modules, {
@@ -2310,23 +2480,7 @@ export function normalizeDashboard(payload = null, options = {}) {
     );
   }
 
-  try {
-    return sanitizeDashboardForRole(
-      normalizeHomeDashboard({
-        ...object,
-        role,
-        admin: role === "admin",
-        meta: {
-          ...safeObject(object.meta),
-          role,
-          admin: role === "admin",
-        },
-      }),
-      role
-    );
-  } catch {
-    return sanitizeDashboardForRole(object, role);
-  }
+  return sanitizeDashboardForRole(object, role);
 }
 
 export function normalizeHomeDashboardResponse(payload = null) {
@@ -2754,6 +2908,198 @@ export async function loadHomeHealth({
 }
 
 /* =========================================================
+   REQUEST
+========================================================= */
+
+function nextLoadSeq() {
+  loadSeq += 1;
+  return loadSeq;
+}
+
+function isActiveLoadSeq(seq = 0) {
+  return seq === loadSeq;
+}
+
+function mergeParams(...sources) {
+  const output = {};
+
+  for (const source of sources) {
+    const object = safeObject(source, null);
+
+    if (!object) continue;
+
+    for (const [key, value] of Object.entries(object)) {
+      if (value === undefined || value === null || value === "") continue;
+      output[key] = value;
+    }
+  }
+
+  return output;
+}
+
+async function requestGet(endpoint = "", options = {}) {
+  const path = safeText(endpoint, "");
+
+  if (!path) {
+    throw new Error("HOME_API_ENDPOINT_MISSING");
+  }
+
+  const requestOptions = {
+    auth: true,
+    public: false,
+    skipAuth: false,
+    noAuthHeader: false,
+    cache: "no-store",
+    timeout: safeNumber(options.timeout, HOME_TIMEOUT),
+    params: options.params || options.query || undefined,
+    query: options.query || options.params || undefined,
+    storeError: false,
+  };
+
+  if (isFunction(CoreHttp?.get)) {
+    return CoreHttp.get(path, requestOptions);
+  }
+
+  if (isFunction(CoreHttp?.request)) {
+    return CoreHttp.request(path, {
+      ...requestOptions,
+      method: "GET",
+    });
+  }
+
+  throw new Error("HOME_HTTP_UNAVAILABLE");
+}
+
+function getErrorStatus(error = null) {
+  return safeNumber(
+    first(
+      error?.status,
+      error?.statusCode,
+      error?.response?.status,
+      error?.response?.statusCode,
+      error?.data?.status,
+      error?.data?.statusCode
+    ),
+    0
+  );
+}
+
+function getErrorCode(error = null) {
+  return safeText(
+    first(
+      error?.code,
+      error?.errorCode,
+      error?.response?.data?.code,
+      error?.response?.data?.error,
+      error?.data?.code,
+      error?.data?.error,
+      error?.error
+    ),
+    ""
+  );
+}
+
+function normalizeErrorMessage(error = null, fallback = "No se pudo cargar el Home.") {
+  const status = getErrorStatus(error);
+  const code = normalizeKey(getErrorCode(error));
+
+  if (status === 401 || code === "unauthorized") {
+    return "No autorizado. Inicia sesión de nuevo.";
+  }
+
+  if (status === 403 || code === "forbidden") {
+    return "No tienes permisos para consultar este módulo.";
+  }
+
+  if (status === 404 || code === "not_found") {
+    return "El módulo solicitado no está disponible.";
+  }
+
+  if (status >= 500) {
+    return "El backend devolvió un error interno.";
+  }
+
+  return redact(
+    safeText(
+      first(
+        error?.response?.data?.message,
+        error?.data?.message,
+        error?.message,
+        fallback
+      ),
+      fallback
+    )
+  );
+}
+
+function normalizeRequestError(error = null) {
+  return {
+    status: getErrorStatus(error),
+    code: safeText(getErrorCode(error), ""),
+    message: normalizeErrorMessage(error),
+  };
+}
+
+function isSoftModuleError(error = null) {
+  const status = getErrorStatus(error);
+  return status === 403 || status === 404;
+}
+
+function skippedResult(name = "", code = "HOME_MODULE_SKIPPED") {
+  return {
+    ok: false,
+    skipped: true,
+    name,
+    endpoint: "",
+    status: 0,
+    durationMs: 0,
+    data: null,
+    error: {
+      status: 0,
+      code,
+      message: "Módulo omitido para esta vista Home.",
+    },
+    soft: true,
+  };
+}
+
+async function requestOptional(name = "", endpoint = "", options = {}) {
+  const startedAt = Date.now();
+
+  if (!endpoint) {
+    return skippedResult(name, "HOME_MODULE_SKIPPED");
+  }
+
+  try {
+    const data = await requestGet(endpoint, options);
+
+    return {
+      ok: true,
+      skipped: false,
+      name,
+      endpoint,
+      status: 200,
+      durationMs: Date.now() - startedAt,
+      data,
+      error: null,
+      soft: false,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      skipped: false,
+      name,
+      endpoint,
+      status: getErrorStatus(error),
+      durationMs: Date.now() - startedAt,
+      data: null,
+      error: normalizeRequestError(error),
+      soft: isSoftModuleError(error),
+    };
+  }
+}
+
+/* =========================================================
    SNAPSHOT
 ========================================================= */
 
@@ -2890,6 +3236,8 @@ export function getHomeApiSnapshot() {
       routesFromConfig: true,
       adminRoutesFromConfig: true,
       blockedRoutesFromConfig: true,
+
+      projectsLargeBackendObjectsToLightHomeDTO: true,
 
       noRawBackendPayloadInDashboard: true,
       stripsCosmosMetadata: true,

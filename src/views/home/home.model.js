@@ -6,6 +6,7 @@
    - Modelo puro de datos para Home.
    - Normalizar DTOs ligeros ya preparados por home.api.js.
    - Mantener contrato estable para homeView.js, selectors y template.
+   - Preservar user/sidebarUser/displayName/avatar/initials en payload final.
    - Generar summary estable desde colecciones completas.
    - Limitar únicamente listas recientes/tabla a 5 elementos.
    - Calcular facturación total sólo con facturas pagadas.
@@ -33,7 +34,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const HOME_MODEL_VERSION = "home.model.v7";
+export const HOME_MODEL_VERSION = "home.model.v9";
 
 export const DEFAULT_HOME_PAGE = 1;
 export const DEFAULT_HOME_PAGE_SIZE = 5;
@@ -2226,6 +2227,241 @@ export function normalizeHomeSummary(rawSummary = {}, widgetSummary = {}, derive
 }
 
 /* =========================================================
+   TEMPLATE USER
+========================================================= */
+
+function getHomeTemplateUserSource(input = {}) {
+  const source = safeObject(input);
+  const state = safeObject(source.state);
+  const dashboard = safeObject(source.dashboard);
+
+  return safeObject(
+    first(
+      source.sidebarUser,
+      source.sidebar?.user,
+      source.layout?.sidebarUser,
+      source.context?.sidebarUser,
+      source.context?.user,
+
+      state.sidebarUser,
+      state.sidebar?.user,
+      state.user,
+      state.currentUser,
+      state.session?.user,
+
+      source.user,
+      source.currentUser,
+      source.authUser,
+      source.sessionUser,
+      source.session?.user,
+      source.auth?.user,
+
+      dashboard.sidebarUser,
+      dashboard.sidebar?.user,
+      dashboard.user,
+      dashboard.currentUser,
+
+      source.profile,
+      dashboard.profile,
+      {}
+    )
+  );
+}
+
+export function normalizeHomeTemplateUser(input = {}, fallbackRole = "user") {
+  const source = safeObject(input);
+
+  const displayName = firstVisual(
+    [
+      source.displayName,
+      source.fullName,
+      source.name,
+      source.nombre,
+
+      source.profile?.displayName,
+      source.profile?.fullName,
+      source.profile?.name,
+      source.profile?.nombre,
+
+      source.username,
+      source.userName,
+      source.slug,
+      source.lookup?.slug,
+    ],
+    "Usuario"
+  );
+
+  const role = normalizeRole(
+    first(
+      source.role,
+      source.rol,
+      source.roles,
+      fallbackRole,
+      "user"
+    ),
+    "user"
+  );
+
+  const avatarUrl = first(
+    avatarFromObject(source),
+    avatarFromObject(source.profile),
+    avatarFromObject(source.media),
+
+    safeImageSrc(source.avatarUrl),
+    safeImageSrc(source.avatar),
+    safeImageSrc(source.photoUrl),
+    safeImageSrc(source.photoURL),
+    safeImageSrc(source.picture),
+    safeImageSrc(source.pictureUrl),
+    safeImageSrc(source.image),
+    safeImageSrc(source.imageUrl),
+    safeImageSrc(source.fotoUrl),
+    safeImageSrc(source.imagenUrl),
+
+    ""
+  );
+
+  const id = safePublicId(first(source.id, source.userId, source.uid, source.sub, ""));
+  const userId = safePublicId(first(source.userId, source.id, source.uid, source.sub, ""));
+  const username = safePublicId(first(source.username, source.userName, ""));
+  const slug = safePublicId(first(source.slug, source.lookup?.slug, source.profile?.slug, ""));
+
+  const initials = safeText(
+    first(source.initials, source.iniciales, initialsFromName(displayName)),
+    initialsFromName(displayName)
+  )
+    .slice(0, 3)
+    .toUpperCase();
+
+  const hasIdentity = Boolean(
+    source.hasUser === true ||
+      id ||
+      userId ||
+      username ||
+      slug ||
+      displayName !== "Usuario"
+  );
+
+  return sanitizeHomeRecord({
+    hasUser: hasIdentity,
+
+    id: id || null,
+    userId: userId || id || null,
+
+    username: username || null,
+    userName: username || null,
+    slug: slug || null,
+
+    displayName,
+    fullName: displayName,
+    name: displayName,
+    nombre: displayName,
+
+    hasAvatar: Boolean(avatarUrl),
+    avatarUrl,
+    avatar: avatarUrl,
+    photoUrl: avatarUrl,
+    photoURL: avatarUrl,
+    picture: avatarUrl,
+    pictureUrl: avatarUrl,
+    image: avatarUrl,
+    imageUrl: avatarUrl,
+    foto: avatarUrl,
+    fotoUrl: avatarUrl,
+    imagen: avatarUrl,
+    imagenUrl: avatarUrl,
+
+    initials,
+    iniciales: initials,
+
+    role,
+    rol: role,
+    roles: [role],
+    roleLabel: safeText(
+      first(source.roleLabel, role === "admin" ? "Administrador" : "Estándar"),
+      role === "admin" ? "Administrador" : "Estándar"
+    ),
+
+    isAdmin: role === "admin",
+    isUser: role === "user",
+  });
+}
+
+function withHomeTemplateUser(payload = {}, user = {}, options = {}) {
+  const output = safeObject(payload);
+
+  const templateUser = normalizeHomeTemplateUser(
+    hasKeys(user) ? user : getHomeTemplateUserSource(output),
+    first(options.role, output.role, output.dashboard?.role, "user")
+  );
+
+  const role = normalizeRole(
+    first(options.role, templateUser.role, output.role, "user"),
+    "user"
+  );
+
+  const admin = Boolean(options.admin ?? role === "admin");
+  const displayName = templateUser.displayName || "Usuario";
+  const avatarUrl = templateUser.avatarUrl || "";
+  const initials = templateUser.initials || initialsFromName(displayName);
+
+  return sanitizeHomeRecord({
+    ...output,
+
+    user: templateUser,
+    currentUser: templateUser,
+    sidebarUser: templateUser,
+
+    sidebar: {
+      ...safeObject(output.sidebar),
+      user: templateUser,
+    },
+
+    layout: {
+      ...safeObject(output.layout),
+      sidebarUser: templateUser,
+    },
+
+    context: {
+      ...safeObject(output.context),
+      user: templateUser,
+      sidebarUser: templateUser,
+    },
+
+    role,
+    admin,
+
+    displayName,
+    name: displayName,
+    fullName: displayName,
+    avatarUrl,
+    initials,
+
+    state: {
+      ...safeObject(output.state),
+
+      user: templateUser,
+      currentUser: templateUser,
+      sidebarUser: templateUser,
+
+      sidebar: {
+        ...safeObject(output.state?.sidebar),
+        user: templateUser,
+      },
+
+      role,
+      admin,
+
+      displayName,
+      name: displayName,
+      fullName: displayName,
+      avatarUrl,
+      initials,
+    },
+  });
+}
+
+/* =========================================================
    DASHBOARD
 ========================================================= */
 
@@ -2327,131 +2563,80 @@ export function normalizeHomeDashboard(payload = null) {
     nowIso()
   );
 
-  return sanitizeHomeRecord({
-    ok: source.ok !== false && source.success !== false,
-    success: source.ok !== false && source.success !== false,
-    source: safeText(first(source.source, admin ? "home-admin-normalized" : "home-user-normalized"), "home-normalized"),
-    version: HOME_MODEL_VERSION,
-    requestId: safePublicId(first(source.requestId, source.meta?.requestId, "")),
+  return withHomeTemplateUser(
+    sanitizeHomeRecord({
+      ok: source.ok !== false && source.success !== false,
+      success: source.ok !== false && source.success !== false,
+      source: safeText(first(source.source, admin ? "home-admin-normalized" : "home-user-normalized"), "home-normalized"),
+      version: HOME_MODEL_VERSION,
+      requestId: safePublicId(first(source.requestId, source.meta?.requestId, "")),
 
-    role,
-    admin,
-
-    summary,
-    stats: summary,
-    metrics: summary,
-    totals: summary,
-    counts: summary,
-
-    widgets,
-    cards: widgets,
-    kpis: widgets,
-    blocks: widgets,
-
-    tickets,
-    incidencias: tickets,
-    recentTickets: tickets.slice(0, DEFAULT_HOME_RECENT_LIMIT),
-    recentIncidencias: tickets.slice(0, DEFAULT_HOME_RECENT_LIMIT),
-    latestTickets: tickets.slice(0, DEFAULT_HOME_RECENT_LIMIT),
-    latestIncidencias: tickets.slice(0, DEFAULT_HOME_RECENT_LIMIT),
-
-    ticketsTotal: summary.totalTickets,
-    incidenciasTotal: summary.totalTickets,
-    totalTickets: summary.totalTickets,
-    totalIncidencias: summary.totalTickets,
-    ticketsCount: summary.totalTickets,
-    incidenciasCount: summary.totalTickets,
-    visibleTicketsCount: tickets.length,
-    visibleIncidenciasCount: tickets.length,
-
-    invoices,
-    facturas: invoices,
-    recentInvoices: invoices.slice(0, DEFAULT_HOME_RECENT_LIMIT),
-    recentFacturas: invoices.slice(0, DEFAULT_HOME_RECENT_LIMIT),
-    latestInvoices: invoices.slice(0, DEFAULT_HOME_RECENT_LIMIT),
-    latestFacturas: invoices.slice(0, DEFAULT_HOME_RECENT_LIMIT),
-
-    invoicesTotal: summary.totalInvoices,
-    facturasTotal: summary.totalInvoices,
-    totalInvoices: summary.totalInvoices,
-    totalFacturas: summary.totalInvoices,
-    invoicesCount: summary.totalInvoices,
-    facturasCount: summary.totalInvoices,
-    visibleInvoicesCount: invoices.length,
-    visibleFacturasCount: invoices.length,
-
-    users: admin ? users : [],
-    usuarios: admin ? users : [],
-    usersTotal: admin ? summary.usersCount : 0,
-    usuariosTotal: admin ? summary.usuariosCount : 0,
-    totalUsers: admin ? summary.usersCount : 0,
-    totalUsuarios: admin ? summary.usuariosCount : 0,
-    usersCount: admin ? summary.usersCount : 0,
-    usuariosCount: admin ? summary.usuariosCount : 0,
-    visibleUsersCount: admin ? users.length : 0,
-    visibleUsuariosCount: admin ? users.length : 0,
-
-    clients: admin ? clients : [],
-    clientes: admin ? clients : [],
-    customers: admin ? clients : [],
-    clientsTotal: admin ? summary.clientsCount : 0,
-    clientesTotal: admin ? summary.clientesCount : 0,
-    customersTotal: admin ? summary.customersCount : 0,
-    totalClients: admin ? summary.clientsCount : 0,
-    totalClientes: admin ? summary.clientesCount : 0,
-    totalCustomers: admin ? summary.customersCount : 0,
-    clientsCount: admin ? summary.clientsCount : 0,
-    clientesCount: admin ? summary.clientesCount : 0,
-    customersCount: admin ? summary.customersCount : 0,
-    visibleClientsCount: admin ? clients.length : 0,
-    visibleClientesCount: admin ? clients.length : 0,
-    visibleCustomersCount: admin ? clients.length : 0,
-
-    activity,
-    activities: activity,
-    recent: activity,
-    recentActivity: activity,
-    activityCount: activity.length,
-    recentCount: activity.length,
-    visibleActivityCount: activity.length,
-
-    partial: Boolean(source.partial),
-    errors: safeArray(source.errors).map((error) => ({
-      module: safeText(error?.module, ""),
-      kind: safeText(error?.kind, ""),
-      status: safeNumber(error?.status, 0),
-      code: safeText(error?.code, ""),
-      message: redact(error?.message || ""),
-      soft: Boolean(error?.soft),
-    })),
-
-    modules: sanitizeHomeRecord(source.modules || {}),
-    updatedAt,
-    generatedAt: first(source.generatedAt, updatedAt),
-
-    meta: {
-      ...safeObject(source.meta),
       role,
       admin,
-      updatedAt,
-      generatedAt: first(source.generatedAt, updatedAt),
-      widgetsCount: widgets.length,
 
+      summary,
+      stats: summary,
+      metrics: summary,
+      totals: summary,
+      counts: summary,
+
+      widgets,
+      cards: widgets,
+      kpis: widgets,
+      blocks: widgets,
+
+      tickets,
+      incidencias: tickets,
+      recentTickets: tickets.slice(0, DEFAULT_HOME_RECENT_LIMIT),
+      recentIncidencias: tickets.slice(0, DEFAULT_HOME_RECENT_LIMIT),
+      latestTickets: tickets.slice(0, DEFAULT_HOME_RECENT_LIMIT),
+      latestIncidencias: tickets.slice(0, DEFAULT_HOME_RECENT_LIMIT),
+
+      ticketsTotal: summary.totalTickets,
+      incidenciasTotal: summary.totalTickets,
+      totalTickets: summary.totalTickets,
+      totalIncidencias: summary.totalTickets,
       ticketsCount: summary.totalTickets,
       incidenciasCount: summary.totalTickets,
       visibleTicketsCount: tickets.length,
       visibleIncidenciasCount: tickets.length,
 
+      invoices,
+      facturas: invoices,
+      recentInvoices: invoices.slice(0, DEFAULT_HOME_RECENT_LIMIT),
+      recentFacturas: invoices.slice(0, DEFAULT_HOME_RECENT_LIMIT),
+      latestInvoices: invoices.slice(0, DEFAULT_HOME_RECENT_LIMIT),
+      latestFacturas: invoices.slice(0, DEFAULT_HOME_RECENT_LIMIT),
+
+      invoicesTotal: summary.totalInvoices,
+      facturasTotal: summary.totalInvoices,
+      totalInvoices: summary.totalInvoices,
+      totalFacturas: summary.totalInvoices,
       invoicesCount: summary.totalInvoices,
       facturasCount: summary.totalInvoices,
       visibleInvoicesCount: invoices.length,
       visibleFacturasCount: invoices.length,
 
+      users: admin ? users : [],
+      usuarios: admin ? users : [],
+      usersTotal: admin ? summary.usersCount : 0,
+      usuariosTotal: admin ? summary.usuariosCount : 0,
+      totalUsers: admin ? summary.usersCount : 0,
+      totalUsuarios: admin ? summary.usuariosCount : 0,
       usersCount: admin ? summary.usersCount : 0,
       usuariosCount: admin ? summary.usuariosCount : 0,
       visibleUsersCount: admin ? users.length : 0,
       visibleUsuariosCount: admin ? users.length : 0,
 
+      clients: admin ? clients : [],
+      clientes: admin ? clients : [],
+      customers: admin ? clients : [],
+      clientsTotal: admin ? summary.clientsCount : 0,
+      clientesTotal: admin ? summary.clientesCount : 0,
+      customersTotal: admin ? summary.customersCount : 0,
+      totalClients: admin ? summary.clientsCount : 0,
+      totalClientes: admin ? summary.clientesCount : 0,
+      totalCustomers: admin ? summary.customersCount : 0,
       clientsCount: admin ? summary.clientsCount : 0,
       clientesCount: admin ? summary.clientesCount : 0,
       customersCount: admin ? summary.customersCount : 0,
@@ -2459,11 +2644,66 @@ export function normalizeHomeDashboard(payload = null) {
       visibleClientesCount: admin ? clients.length : 0,
       visibleCustomersCount: admin ? clients.length : 0,
 
+      activity,
+      activities: activity,
+      recent: activity,
+      recentActivity: activity,
       activityCount: activity.length,
       recentCount: activity.length,
       visibleActivityCount: activity.length,
-    },
-  });
+
+      partial: Boolean(source.partial),
+      errors: safeArray(source.errors).map((error) => ({
+        module: safeText(error?.module, ""),
+        kind: safeText(error?.kind, ""),
+        status: safeNumber(error?.status, 0),
+        code: safeText(error?.code, ""),
+        message: redact(error?.message || ""),
+        soft: Boolean(error?.soft),
+      })),
+
+      modules: sanitizeHomeRecord(source.modules || {}),
+      updatedAt,
+      generatedAt: first(source.generatedAt, updatedAt),
+
+      meta: {
+        ...safeObject(source.meta),
+        role,
+        admin,
+        updatedAt,
+        generatedAt: first(source.generatedAt, updatedAt),
+        widgetsCount: widgets.length,
+
+        ticketsCount: summary.totalTickets,
+        incidenciasCount: summary.totalTickets,
+        visibleTicketsCount: tickets.length,
+        visibleIncidenciasCount: tickets.length,
+
+        invoicesCount: summary.totalInvoices,
+        facturasCount: summary.totalInvoices,
+        visibleInvoicesCount: invoices.length,
+        visibleFacturasCount: invoices.length,
+
+        usersCount: admin ? summary.usersCount : 0,
+        usuariosCount: admin ? summary.usuariosCount : 0,
+        visibleUsersCount: admin ? users.length : 0,
+        visibleUsuariosCount: admin ? users.length : 0,
+
+        clientsCount: admin ? summary.clientsCount : 0,
+        clientesCount: admin ? summary.clientesCount : 0,
+        customersCount: admin ? summary.customersCount : 0,
+        visibleClientsCount: admin ? clients.length : 0,
+        visibleClientesCount: admin ? clients.length : 0,
+        visibleCustomersCount: admin ? clients.length : 0,
+
+        activityCount: activity.length,
+        recentCount: activity.length,
+        visibleActivityCount: activity.length,
+      },
+    }),
+    getHomeTemplateUserSource(source),
+    { role, admin }
+  );
 }
 
 /* =========================================================
@@ -2577,26 +2817,58 @@ export function buildHomeTemplatePayload(input = {}) {
   const source = safeObject(input);
   const dashboard = normalizeHomeDashboard(first(source.dashboard, source, {}));
 
+  const explicitRole = normalizeRole(
+    first(
+      source.role,
+      source.rol,
+      source.roles,
+      source.state?.role,
+      source.state?.rol,
+      source.state?.roles,
+      ""
+    ),
+    ""
+  );
+
+  const explicitAdmin =
+    typeof source.admin === "boolean"
+      ? source.admin
+      : typeof source.state?.admin === "boolean"
+        ? source.state.admin
+        : null;
+
+  const role = explicitRole || dashboard.role || (dashboard.admin ? "admin" : "user");
+  const admin = explicitAdmin !== null ? explicitAdmin : role === "admin";
+
+  const templateUser = normalizeHomeTemplateUser(
+    getHomeTemplateUserSource(source),
+    role
+  );
+
   const invoices = source.invoices || source.facturas
     ? normalizeHomeInvoices(first(source.invoices, source.facturas, []))
     : dashboard.invoices;
 
-  const users = dashboard.admin && (source.users || source.usuarios)
+  const users = admin && (source.users || source.usuarios)
     ? normalizeHomeUsers(first(source.users, source.usuarios, []))
-    : dashboard.users;
+    : admin
+      ? dashboard.users
+      : [];
 
-  const clients = dashboard.admin && (source.clients || source.clientes || source.customers)
+  const clients = admin && (source.clients || source.clientes || source.customers)
     ? normalizeHomeClients(first(source.clients, source.clientes, source.customers, []))
-    : dashboard.clients;
+    : admin
+      ? dashboard.clients
+      : [];
 
   const tickets = source.tickets || source.incidencias
     ? normalizeHomeTickets(first(source.tickets, source.incidencias, []), {
         invoices,
-        users: dashboard.admin ? users : [],
+        users: admin ? users : [],
       })
     : normalizeHomeTickets(dashboard.tickets, {
         invoices,
-        users: dashboard.admin ? users : [],
+        users: admin ? users : [],
       });
 
   const rawActivity = source.activity || source.recent || source.recentActivity
@@ -2606,14 +2878,14 @@ export function buildHomeTemplatePayload(input = {}) {
       : buildHomeActivityFromCollections({
           tickets,
           invoices,
-          users: dashboard.admin ? users : [],
-          clients: dashboard.admin ? clients : [],
+          users: admin ? users : [],
+          clients: admin ? clients : [],
           limit: DEFAULT_HOME_RECENT_LIMIT,
         });
 
-  const activity = filterActivityForRole(rawActivity, dashboard.admin).slice(0, DEFAULT_HOME_RECENT_LIMIT);
-  const page = safeNumber(first(source.page, DEFAULT_HOME_PAGE), DEFAULT_HOME_PAGE);
-  const pageSize = safeNumber(first(source.pageSize, DEFAULT_HOME_PAGE_SIZE), DEFAULT_HOME_PAGE_SIZE);
+  const activity = filterActivityForRole(rawActivity, admin).slice(0, DEFAULT_HOME_RECENT_LIMIT);
+  const page = safeNumber(first(source.page, source.state?.page, DEFAULT_HOME_PAGE), DEFAULT_HOME_PAGE);
+  const pageSize = safeNumber(first(source.pageSize, source.state?.pageSize, DEFAULT_HOME_PAGE_SIZE), DEFAULT_HOME_PAGE_SIZE);
   const pagination = paginateHomeItems(tickets, page, pageSize);
 
   const summary = normalizeHomeSummary(
@@ -2624,45 +2896,98 @@ export function buildHomeTemplatePayload(input = {}) {
       ticketsTotal: dashboard.summary.totalTickets,
       invoices,
       invoicesTotal: dashboard.summary.totalInvoices,
-      users: dashboard.admin ? users : [],
-      usersTotal: dashboard.admin ? dashboard.summary.usersCount : 0,
-      clients: dashboard.admin ? clients : [],
-      clientsTotal: dashboard.admin ? dashboard.summary.clientsCount : 0,
-      admin: dashboard.admin,
+      users: admin ? users : [],
+      usersTotal: admin ? dashboard.summary.usersCount : 0,
+      clients: admin ? clients : [],
+      clientsTotal: admin ? dashboard.summary.clientsCount : 0,
+      admin,
     }),
-    { admin: dashboard.admin }
+    { admin }
   );
 
   const widgets = filterWidgetsForRole(
-    dashboard.widgets?.length ? dashboard.widgets : buildHomeWidgetsFromSummary(summary, { admin: dashboard.admin }),
-    dashboard.admin
+    dashboard.widgets?.length ? dashboard.widgets : buildHomeWidgetsFromSummary(summary, { admin }),
+    admin
+  );
+
+  const selectedTicketId = safePublicId(
+    first(
+      source.selectedTicketId,
+      source.selectedIncidenciaId,
+      source.state?.selectedTicketId,
+      source.state?.selectedIncidenciaId,
+      ""
+    )
   );
 
   const finalDashboard = normalizeHomeDashboard({
     ...dashboard,
+
+    role,
+    admin,
+
     summary,
     widgets,
+
     tickets,
     incidencias: tickets,
+
     invoices,
     facturas: invoices,
-    users: dashboard.admin ? users : [],
-    usuarios: dashboard.admin ? users : [],
-    clients: dashboard.admin ? clients : [],
-    clientes: dashboard.admin ? clients : [],
-    customers: dashboard.admin ? clients : [],
+
+    users: admin ? users : [],
+    usuarios: admin ? users : [],
+
+    clients: admin ? clients : [],
+    clientes: admin ? clients : [],
+    customers: admin ? clients : [],
+
     activity,
     recent: activity,
     recentActivity: activity,
+
+    meta: {
+      ...safeObject(dashboard.meta),
+      role,
+      admin,
+    },
   });
 
-  return sanitizeHomeRecord({
+  const displayName = templateUser.displayName || "Usuario";
+  const avatarUrl = templateUser.avatarUrl || "";
+  const initials = templateUser.initials || initialsFromName(displayName);
+
+  const payload = {
     ok: finalDashboard.ok,
     success: finalDashboard.success,
     source: finalDashboard.source,
     version: finalDashboard.version,
-    role: finalDashboard.role,
-    admin: finalDashboard.admin,
+
+    role,
+    admin,
+
+    user: templateUser,
+    currentUser: templateUser,
+    sidebarUser: templateUser,
+
+    sidebar: {
+      user: templateUser,
+    },
+
+    layout: {
+      sidebarUser: templateUser,
+    },
+
+    context: {
+      user: templateUser,
+      sidebarUser: templateUser,
+    },
+
+    displayName,
+    name: displayName,
+    fullName: displayName,
+    avatarUrl,
+    initials,
 
     dashboard: finalDashboard,
 
@@ -2705,11 +3030,46 @@ export function buildHomeTemplatePayload(input = {}) {
     pagination,
     pageItems: pagination.items,
 
+    selectedTicketId,
+    selectedIncidenciaId: selectedTicketId,
+
     totalCount: finalDashboard.summary.totalTickets,
     remoteCount: finalDashboard.summary.totalTickets,
 
     lastUpdatedAt: first(source.lastUpdatedAt, source.lastSyncAt, finalDashboard.updatedAt, finalDashboard.generatedAt, ""),
     requestId: safeText(first(source.requestId, finalDashboard.requestId, finalDashboard.meta?.requestId, ""), ""),
+
+    state: {
+      ...safeObject(source.state),
+
+      role,
+      admin,
+
+      user: templateUser,
+      currentUser: templateUser,
+      sidebarUser: templateUser,
+
+      sidebar: {
+        ...safeObject(source.state?.sidebar),
+        user: templateUser,
+      },
+
+      displayName,
+      name: displayName,
+      fullName: displayName,
+      avatarUrl,
+      initials,
+
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+      selectedTicketId,
+      selectedIncidenciaId: selectedTicketId,
+    },
+  };
+
+  return withHomeTemplateUser(payload, templateUser, {
+    role,
+    admin,
   });
 }
 
@@ -2730,6 +3090,8 @@ export const HomeModel = Object.freeze({
   pickCollectionBlock: pickHomeCollectionBlock,
 
   normalizeDashboard: normalizeHomeDashboard,
+
+  normalizeTemplateUser: normalizeHomeTemplateUser,
 
   normalizeSummary: normalizeHomeSummary,
   buildDerivedSummary: buildHomeDerivedSummary,

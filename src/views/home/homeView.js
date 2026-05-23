@@ -17,7 +17,8 @@
    - Devuelve API/controller, no el contenedor padre.
    - Lee usuario/rol sólo desde contexto/AppCore/state ya resuelto.
    - Lee colecciones desde homeState raíz y fallback dashboard.
-   - Fuerza render inmediato tras sincronizar datos reales.
+   - Recarga si Home está marcado como loaded pero no hay datos visibles.
+   - Render inmediato tras sincronizar datos reales.
    - No resuelve slug.
    - No ejecuta Auth guards.
    - No ejecuta Router guards.
@@ -107,7 +108,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v8";
+export const HOME_VIEW_VERSION = "home.view.v9";
 
 export const HomeView = (() => {
   "use strict";
@@ -1373,9 +1374,11 @@ export const HomeView = (() => {
 
     renderAndBind(container);
 
-    if (!homeState.loaded && !inflightLoad) {
+    const needsDataLoad = !homeState.loaded || !hasVisibleData();
+
+    if (needsDataLoad && !inflightLoad) {
       void loadData({
-        force: false,
+        force: homeState.loaded === true,
         asRefresh: false,
       });
     }
@@ -1393,10 +1396,13 @@ export const HomeView = (() => {
 
   async function loadData(options = {}) {
     if (destroyed) return false;
-    if (inflightLoad) return inflightLoad;
+
+    const opts = safeObject(options);
+    const forceLoad = opts.force === true || opts.asRefresh === true;
+
+    if (inflightLoad && !forceLoad) return inflightLoad;
 
     const seq = nextLoadSeq();
-    const opts = safeObject(options);
     const refresh = opts.asRefresh === true;
 
     let request;
@@ -1431,6 +1437,8 @@ export const HomeView = (() => {
         });
 
         if (normalized && isCurrentLoad(seq)) {
+          setLoading(false);
+          setRefreshing(false);
           renderAndBind(currentContainer);
         }
 
@@ -1788,6 +1796,7 @@ export const HomeView = (() => {
 
         readsUserFromResolvedContext: true,
         readsCollectionsFromDashboardFallback: true,
+        reloadsWhenLoadedButEmpty: true,
         immediateRenderAfterDashboardSync: true,
 
         noSlugResolution: true,

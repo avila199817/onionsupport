@@ -17,7 +17,7 @@
    - Devuelve API/controller, no el contenedor padre.
    - Lee usuario/rol sólo desde contexto/AppCore/state ya resuelto.
    - Lee colecciones desde homeState raíz y fallback dashboard.
-   - Recarga si Home está marcado como loaded pero no hay datos visibles.
+   - Recarga si Home está marcado como loaded pero no hay datos reales.
    - Render inmediato tras sincronizar datos reales.
    - No resuelve slug.
    - No ejecuta Auth guards.
@@ -108,7 +108,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v9";
+export const HOME_VIEW_VERSION = "home.view.v10";
 
 export const HomeView = (() => {
   "use strict";
@@ -131,6 +131,7 @@ export const HomeView = (() => {
 
   let initialized = false;
   let destroyed = false;
+  let bootLoadRequested = false;
 
   let inflightLoad = null;
   let bindingsCleanup = null;
@@ -1260,6 +1261,15 @@ export const HomeView = (() => {
     );
   }
 
+  function hasCollectionData() {
+    return Boolean(
+      getTickets().length ||
+        getInvoices().length ||
+        (isAdmin() && getUsers().length) ||
+        (isAdmin() && getClients().length)
+    );
+  }
+
   /* =======================================================
      RENDER
   ======================================================= */
@@ -1368,17 +1378,20 @@ export const HomeView = (() => {
 
     ensureBaseState();
 
-    if (!homeState.hydrated && !hasVisibleData()) {
+    if (!homeState.hydrated && !hasCollectionData()) {
       hydrateBestEffort();
     }
 
     renderAndBind(container);
 
-    const needsDataLoad = !homeState.loaded || !hasVisibleData();
+    const needsBootLoad = !bootLoadRequested;
+    const needsDataLoad = !homeState.loaded || !hasCollectionData();
 
-    if (needsDataLoad && !inflightLoad) {
+    if ((needsBootLoad || needsDataLoad) && !inflightLoad) {
+      bootLoadRequested = true;
+
       void loadData({
-        force: homeState.loaded === true,
+        force: homeState.loaded === true || needsBootLoad,
         asRefresh: false,
       });
     }
@@ -1693,6 +1706,7 @@ export const HomeView = (() => {
   function destroy() {
     destroyed = true;
     initialized = false;
+    bootLoadRequested = false;
 
     nextRenderSeq();
     nextLoadSeq();
@@ -1783,6 +1797,7 @@ export const HomeView = (() => {
       hasContainer: Boolean(currentContainer),
       hasBindings: Boolean(bindingsCleanup),
       hasInflightLoad: Boolean(inflightLoad),
+      bootLoadRequested,
 
       contract: {
         controllerOnly: true,

@@ -14,12 +14,10 @@
    - Vista Home distinta para admin y user.
    - User: incidencias + facturas propias según scope backend.
    - Admin: incidencias + facturas + clientes + usuarios.
-   - Calcular métricas en frontend desde listas/meta devueltas.
+   - Calcular métricas desde listas/meta devueltas.
    - Normalizar respuesta para homeView.js.
    - Blindar cache admin cuando el rol actual sea user.
    - Rutas/admin-routes/bloqueos delegados en core/config.js.
-   - Health desactivado si no hay endpoint real configurado.
-   - Servidor tratado como ruta admin-only, sin endpoint inventado.
    - No conservar raw backend sensible en dashboard/cache.
    - No tocar DOM.
    - No CSS.
@@ -30,7 +28,6 @@
    - No apiClient paralelo.
    - No /api/dashboard.
    - No endpoints /stats inexistentes.
-   - No endpoint health inventado.
    - No /home.
 ========================================================= */
 
@@ -52,6 +49,7 @@ import {
 } from "./home.store.js";
 
 import {
+  normalizeHomeDashboard,
   normalizeHomeWidgets,
   normalizeHomeActivityList,
 
@@ -62,19 +60,12 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_API_VERSION = "home.api.v9";
+export const HOME_API_VERSION = "home.api.v10";
 
 export const HOME_DASHBOARD_ENDPOINT = "local:home-list-aggregate";
 export const HOME_DASHBOARD_LEGACY_ENDPOINT = "";
 
-/*
-  No se declara endpoint de health porque /api/health/ready no existe
-  en el backend actual. Health queda como módulo opcional desactivado.
-*/
-export const HOME_DASHBOARD_PING_ENDPOINT = "";
-
 export const HOME_TIMEOUT = 15000;
-export const HOME_HEALTH_TIMEOUT = 8000;
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -87,19 +78,17 @@ const ENDPOINTS = Object.freeze({
   facturasList: "/api/facturas",
   clientesList: "/api/clientes",
   usersList: "/api/users",
-
-  healthReady: HOME_DASHBOARD_PING_ENDPOINT,
 });
 
 const DEFAULT_LIST_PARAMS = Object.freeze({
-  limit: 8,
+  limit: 24,
   includeTotal: true,
   sortBy: "updatedAt",
   sortDir: "DESC",
 });
 
 const HOME_MAX_ITEMS = 24;
-const HOME_ACTIVITY_LIMIT = 8;
+const HOME_ACTIVITY_LIMIT = 5;
 const HOME_TEXT_LIMIT = 180;
 const HOME_TITLE_LIMIT = 120;
 
@@ -123,12 +112,12 @@ const COSMOS_META_KEYS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni/i;
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|cuenta|bank|account|ipRaw|ip|userAgent/i;
 
 const SENSITIVE_QUERY_RE =
   /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
 
 const ADMIN_ACTIVITY_TYPES = new Set([
   "client",
@@ -137,12 +126,10 @@ const ADMIN_ACTIVITY_TYPES = new Set([
   "user",
   "usuario",
   "member",
-  "server",
-  "servidor",
 ]);
 
 const ADMIN_ENTITY_RE =
-  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory|servidores?|servidor|servers?)([\s._/-]|$)/i;
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
 
 let loadSeq = 0;
 
@@ -162,12 +149,6 @@ const runtime = {
     facturas: null,
     clientes: null,
     users: null,
-    health: {
-      ok: false,
-      skipped: true,
-      status: 0,
-      configured: false,
-    },
   },
 };
 
@@ -411,7 +392,7 @@ function safePublicId(value = "") {
   if (/Bearer\s+/i.test(text)) return "";
   if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
 
-  return compactText(text, "", 96);
+  return compactText(text, "", 160);
 }
 
 function safePublicUrl(value = "") {
@@ -420,8 +401,10 @@ function safePublicUrl(value = "") {
   if (!raw) return "";
   if (hasSensitiveQuery(raw)) return "";
   if (/[\r\n\t\\]/.test(raw)) return "";
+  if (/^(?:data|blob|javascript|vbscript|file):/i.test(raw)) return "";
+  if (raw.startsWith("//")) return "";
 
-  if (raw.startsWith("/") && !raw.startsWith("//")) {
+  if (raw.startsWith("/")) {
     return raw.replace(/\/{2,}/g, "/");
   }
 
@@ -431,6 +414,18 @@ function safePublicUrl(value = "") {
     } catch {
       return "";
     }
+  }
+
+  if (
+    raw.includes("/") ||
+    /\.(?:png|jpe?g|gif|webp|svg|avif|bmp)(?:[?#].*)?$/i.test(raw)
+  ) {
+    const clean = raw
+      .replace(/^\.\//, "")
+      .replace(/^\/+/, "")
+      .replace(/\/{2,}/g, "/");
+
+    return clean ? `/${clean}` : "";
   }
 
   return "";
@@ -500,11 +495,9 @@ function routeInput(value = "") {
 
 function routeSuffix(value = "") {
   const raw = safeText(value, "");
-
   const hashIndex = raw.indexOf("#");
   const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
   const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-
   const queryIndex = beforeHash.indexOf("?");
   const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
 
@@ -588,7 +581,6 @@ const INCIDENCIAS_ROUTE = routeFromCore("incidencias", "/incidencias");
 const FACTURAS_ROUTE = routeFromCore("facturas", "/facturas");
 const CLIENTES_ROUTE = routeFromCore("clientes", "/clientes");
 const USUARIOS_ROUTE = routeFromCore("usuarios", "/usuarios");
-const SERVIDOR_ROUTE = routeFromCore("servidor", "/servidor");
 
 function routePath(route = "") {
   return normalizeSpaRoute(route).split("?")[0].split("#")[0] || "";
@@ -598,7 +590,6 @@ function isAdminOnlyRoute(route = "") {
   const path = routePath(route);
   const clientes = routePath(CLIENTES_ROUTE);
   const usuarios = routePath(USUARIOS_ROUTE);
-  const servidor = routePath(SERVIDOR_ROUTE);
 
   if (!path) return false;
 
@@ -610,8 +601,7 @@ function isAdminOnlyRoute(route = "") {
 
   return (
     Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
-    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
-    Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
   );
 }
 
@@ -712,7 +702,6 @@ function canRequestClientsModule(options = {}) {
 
 function isAdminOnlyActivity(item = {}) {
   const raw = safeObject(item);
-
   const type = normalizeKey(first(raw.type, raw.kind, raw.category, ""));
   const route = normalizeSpaRoute(first(raw.route, raw.href, raw.link, raw.to, ""));
 
@@ -804,13 +793,6 @@ function sanitizeSummaryForRole(summary = {}, admin = false) {
     output.visibleClientsCount = 0;
     output.visibleClientesCount = 0;
     output.visibleCustomersCount = 0;
-
-    output.serversCount = 0;
-    output.serverCount = 0;
-    output.servidoresCount = 0;
-    output.servidorCount = 0;
-    output.totalServers = 0;
-    output.totalServidores = 0;
   }
 
   return sanitizeDashboardObject(output);
@@ -863,16 +845,17 @@ function invoiceStatusKey(item = {}) {
     first(
       item.paymentStatus,
       item.estadoPago,
+      item.payment?.status,
       item.status,
       item.estado,
       "pending"
     )
   );
 
-  if (["paid", "pagada", "pagado", "cobrada"].includes(key)) return "paid";
+  if (["paid", "pagada", "pagado", "cobrada", "cobrado", "abonada", "abonado"].includes(key)) return "paid";
   if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
-  if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
-  if (["cancelled", "cancelada", "cancelado"].includes(key)) return "cancelled";
+  if (["partial", "parcial", "pago_parcial", "partially_paid"].includes(key)) return "partial";
+  if (["cancelled", "cancelada", "cancelado", "canceled", "void"].includes(key)) return "cancelled";
   if (["draft", "borrador"].includes(key)) return "draft";
 
   return "pending";
@@ -881,6 +864,8 @@ function invoiceStatusKey(item = {}) {
 function invoiceAmount(item = {}) {
   return safeNumber(
     first(
+      item.totales?.total,
+      item.payment?.amount,
       item.total,
       item.amount,
       item.importe,
@@ -890,12 +875,49 @@ function invoiceAmount(item = {}) {
       item.totalFactura,
       item.importeTotal,
       item.facturaTotal,
+      item.facturaImporte,
+      item.importeFactura,
       item.invoiceAmount,
       item.totalAmount,
       0
     ),
     0
   );
+}
+
+function invoicePaidAmount(item = {}) {
+  if (invoiceStatusKey(item) !== "paid") return 0;
+
+  return safeNumber(
+    first(
+      item.payment?.paidAmount,
+      item.totales?.pagado,
+      item.paidAmount,
+      item.amountPaid,
+      item.pagado,
+      invoiceAmount(item)
+    ),
+    0
+  );
+}
+
+function invoicePendingAmount(item = {}) {
+  if (!["pending", "overdue", "partial"].includes(invoiceStatusKey(item))) return 0;
+
+  const explicit = first(
+    item.payment?.pendingAmount,
+    item.totales?.pendiente,
+    item.pendingAmount,
+    item.amountPending,
+    item.pendiente,
+    null
+  );
+
+  if (explicit !== null && explicit !== undefined) {
+    return Math.max(0, safeNumber(explicit, 0));
+  }
+
+  return Math.max(0, invoiceAmount(item) - invoicePaidAmount(item));
 }
 
 function attachmentsCount(item = {}) {
@@ -966,6 +988,8 @@ function getUserId(item = {}) {
       modelId(getHomeUserId, item),
       item.userId,
       item.usuarioId,
+      item.uid,
+      item.sub,
       item.id,
       item.username
     )
@@ -979,6 +1003,7 @@ function getClientId(item = {}) {
       item.clienteId,
       item.clientId,
       item.customerId,
+      item.userId,
       item.id
     )
   );
@@ -991,8 +1016,10 @@ function ticketOwnerName(item = {}) {
       item.requesterName,
       item.clientName,
       item.clienteName,
+      item.clienteNombre,
       item.userName,
       item.usuarioName,
+      item.name,
       item.requesterSnapshot?.displayName,
       item.requesterSnapshot?.name,
       item.requesterSnapshot?.nombre,
@@ -1019,18 +1046,101 @@ function ticketAvatarUrl(item = {}) {
   return safePublicUrl(
     first(
       item.avatarUrl,
+      item.avatar,
       item.requesterAvatarUrl,
       item.userAvatarUrl,
       item.photoUrl,
       item.photoURL,
       item.requesterSnapshot?.avatarUrl,
+      item.requesterSnapshot?.avatar,
       item.requesterSnapshot?.photoUrl,
       item.userSnapshot?.avatarUrl,
       item.user?.avatarUrl,
+      item.user?.avatar,
       item.user?.photoUrl,
+      item.cliente?.avatarUrl,
+      item.cliente?.avatar,
       item.profile?.avatarUrl
     )
   );
+}
+
+function technicianId(item = {}) {
+  return safePublicId(
+    first(
+      item.assignment?.assignedToUserId,
+      item.assignment?.userId,
+      item.assignedTo?.userId,
+      item.assignedTo?.id,
+      item.tecnico?.userId,
+      item.tecnico?.id,
+      item.technician?.userId,
+      item.technician?.id,
+      item.meta?.technicianUserId,
+      item.meta?.assignedToUserId,
+      ""
+    )
+  );
+}
+
+function technicianName(item = {}) {
+  return firstVisual(
+    [
+      item.assignment?.assignedToName,
+      item.assignment?.displayName,
+      item.assignment?.name,
+      item.assignedTo?.displayName,
+      item.assignedTo?.name,
+      item.tecnico?.displayName,
+      item.tecnico?.name,
+      item.technician?.displayName,
+      item.technician?.name,
+      item.meta?.technicianName,
+      item.meta?.lastTechnicianName,
+      typeof item.assignedTo === "string" ? item.assignedTo : "",
+      typeof item.tecnico === "string" ? item.tecnico : "",
+      item.agent,
+      item.assignee,
+    ],
+    "Sin asignar"
+  );
+}
+
+function technicianAvatarUrl(item = {}) {
+  return safePublicUrl(
+    first(
+      item.technician?.avatarUrl,
+      item.technician?.avatar,
+      item.assignedTo?.avatarUrl,
+      item.assignedTo?.avatar,
+      item.tecnico?.avatarUrl,
+      item.tecnico?.avatar,
+      item.assignment?.avatarUrl,
+      item.assignment?.avatar,
+      item.technicianAvatarUrl,
+      item.technicianAvatar,
+      ""
+    )
+  );
+}
+
+function ticketInvoiceIds(item = {}) {
+  return [
+    item.facturaId,
+    item.invoiceId,
+    item.factura?.facturaId,
+    item.factura?.invoiceId,
+    item.billing?.primaryInvoiceId,
+    item.linkedInvoices?.primaryInvoiceId,
+    item.billing?.invoiceIds,
+    item.linkedInvoices?.ids,
+    item.facturaIds,
+    item.invoiceIds,
+    item.facturasRelacionadas,
+  ]
+    .flat(Infinity)
+    .map(safePublicId)
+    .filter(Boolean);
 }
 
 function ticketPreview(item = {}) {
@@ -1041,6 +1151,10 @@ function ticketPreview(item = {}) {
   const ownerName = ticketOwnerName(source);
   const avatarUrl = ticketAvatarUrl(source);
   const files = attachmentsCount(source);
+  const assignedToUserId = technicianId(source);
+  const assignedToName = technicianName(source);
+  const assignedAvatarUrl = technicianAvatarUrl(source);
+  const invoiceIds = ticketInvoiceIds(source);
 
   const subject = compactText(
     first(
@@ -1082,21 +1196,6 @@ function ticketPreview(item = {}) {
     64
   );
 
-  const assignedTo = firstVisual(
-    [
-      source.assignedTo,
-      source.tecnico,
-      source.agent,
-      source.assignee,
-      source.assignment?.displayName,
-      source.assignment?.name,
-      source.assignment?.username,
-      source.tecnicoSnapshot?.displayName,
-      source.tecnicoSnapshot?.name,
-    ],
-    "Sin asignación"
-  );
-
   const createdAt = safeText(
     first(
       source.createdAt,
@@ -1126,6 +1225,9 @@ function ticketPreview(item = {}) {
     ticketId,
     incidenciaId: ticketId,
 
+    userId: safePublicId(first(source.userId, source.userRef?.userId, source.requesterSnapshot?.userId, source.cliente?.userId, "")),
+    clienteId: safePublicId(first(source.clienteId, source.clienteRef?.clienteId, source.cliente?.clienteId, source.requesterSnapshot?.clienteId, "")),
+
     subject,
     asunto: subject,
     title: subject,
@@ -1137,15 +1239,16 @@ function ticketPreview(item = {}) {
 
     status,
     estado: status,
+    statusKey: status,
 
     priority,
     prioridad: priority,
+    priorityKey: priority,
 
     category,
     categoria: category,
-
-    assignedTo,
-    tecnico: assignedTo,
+    type: category,
+    tipo: category,
 
     ownerName,
     requesterName: ownerName,
@@ -1160,6 +1263,48 @@ function ticketPreview(item = {}) {
       avatarUrl,
     },
 
+    assignment: {
+      assignedToUserId,
+      assignedToName,
+      assignedAt: safeText(first(source.assignment?.assignedAt, source.assignedAt, ""), ""),
+      team: safeText(first(source.assignment?.team, source.team, "support"), "support"),
+      avatarUrl: assignedAvatarUrl,
+    },
+
+    assignedTo: {
+      userId: assignedToUserId,
+      id: assignedToUserId,
+      name: assignedToName,
+      displayName: assignedToName,
+      avatarUrl: assignedAvatarUrl,
+    },
+
+    tecnico: {
+      userId: assignedToUserId,
+      id: assignedToUserId,
+      name: assignedToName,
+      displayName: assignedToName,
+      avatarUrl: assignedAvatarUrl,
+    },
+
+    technician: {
+      userId: assignedToUserId,
+      id: assignedToUserId,
+      name: assignedToName,
+      displayName: assignedToName,
+      avatarUrl: assignedAvatarUrl,
+    },
+
+    technicianName: assignedToName,
+    technicianAvatarUrl: assignedAvatarUrl,
+    assignedToUserId,
+    assignedToName,
+
+    facturaId: safePublicId(first(source.facturaId, source.invoiceId, "")),
+    invoiceId: safePublicId(first(source.invoiceId, source.facturaId, "")),
+    facturaIds: invoiceIds,
+    invoiceIds,
+
     createdAt,
     updatedAt,
     lastUpdateAt: updatedAt,
@@ -1172,30 +1317,59 @@ function ticketPreview(item = {}) {
   };
 }
 
+function invoiceTicketIds(item = {}) {
+  return [
+    item.ticketId,
+    item.incidenciaId,
+    item.ticket?.id,
+    item.ticket?.ticketId,
+    item.incidencia?.id,
+    item.incidencia?.ticketId,
+    item.incidencia?.incidenciaId,
+    item.relations?.ticket?.id,
+    item.relations?.ticket?.ticketId,
+    item.relations?.ticket?.partitionKey,
+    item.ticketRef?.id,
+    item.ticketRef?.ticketId,
+    item.ticketRef?.partitionKey,
+  ]
+    .flat(Infinity)
+    .map(safePublicId)
+    .filter(Boolean);
+}
+
 function invoicePreview(item = {}) {
   const source = safeObject(item);
   const invoiceId = getInvoiceId(source);
   const status = invoiceStatusKey(source);
   const amount = invoiceAmount(source);
+  const paidAmount = invoicePaidAmount(source);
+  const pendingAmount = invoicePendingAmount(source);
+  const ticketIds = invoiceTicketIds(source);
+  const primaryTicketId = first(ticketIds, "");
 
   const currency = safeText(
     first(
       source.currency,
       source.moneda,
       source.divisa,
+      source.totales?.currency,
       source.invoiceCurrency,
       "EUR"
     ),
     "EUR"
-  );
+  ).toUpperCase();
 
   const createdAt = safeText(
     first(
       source.createdAt,
+      source.fechaFactura,
+      source.fechaFacturaISO,
       source.fecha,
       source.date,
       source.issuedAt,
       source.created_at,
+      source.lifecycle?.createdAt,
       ""
     ),
     ""
@@ -1205,8 +1379,13 @@ function invoicePreview(item = {}) {
     first(
       source.updatedAt,
       source.updated_at,
+      source.fechaPago,
+      source.fechaEnvio,
       source.paidAt,
+      source.sentAt,
       source.dueAt,
+      source.lifecycle?.updatedAt,
+      source.lifecycle?.lastActivityAt,
       createdAt
     ),
     createdAt
@@ -1216,7 +1395,9 @@ function invoicePreview(item = {}) {
     first(
       source.title,
       source.name,
+      source.conceptoPrincipal,
       source.concepto,
+      source.descripcionPrincipal,
       invoiceId ? `Factura ${invoiceId}` : "Factura"
     ),
     invoiceId ? `Factura ${invoiceId}` : "Factura",
@@ -1228,10 +1409,11 @@ function invoicePreview(item = {}) {
     invoiceId,
     facturaId: invoiceId,
 
-    number: invoiceId,
-    numero: invoiceId,
-    numeroFactura: invoiceId,
-    invoiceNumber: invoiceId,
+    number: safeText(first(source.numeroFacturaLegal, source.numeroFactura, source.invoiceNumber, source.number, source.numero, invoiceId), invoiceId),
+    numero: safeText(first(source.numero, source.number, source.numeroFacturaLegal, source.numeroFactura, invoiceId), invoiceId),
+    numeroFactura: safeText(first(source.numeroFactura, source.numeroFacturaLegal, source.invoiceNumber, source.number, invoiceId), invoiceId),
+    numeroFacturaLegal: safeText(first(source.numeroFacturaLegal, source.numeroFactura, source.invoiceNumber, invoiceId), invoiceId),
+    invoiceNumber: safeText(first(source.invoiceNumber, source.numeroFacturaLegal, source.numeroFactura, source.number, invoiceId), invoiceId),
 
     title,
     concepto: title,
@@ -1240,16 +1422,49 @@ function invoicePreview(item = {}) {
     estado: status,
     paymentStatus: status,
     estadoPago: status,
+    statusKey: status,
 
     total: amount,
     amount,
     importe: amount,
     importeTotal: amount,
     totalFactura: amount,
+    facturaTotal: amount,
+    facturaImporte: amount,
+    importeFactura: amount,
     invoiceAmount: amount,
+
+    paidAmount,
+    pendingAmount,
+    pagado: paidAmount,
+    pendiente: pendingAmount,
 
     currency,
     moneda: currency,
+
+    ticketId: primaryTicketId,
+    incidenciaId: primaryTicketId,
+    ticketIds,
+    incidenciaIds: ticketIds,
+    hasLinkedTicket: Boolean(primaryTicketId),
+
+    incidencia: primaryTicketId
+      ? {
+          id: primaryTicketId,
+          ticketId: primaryTicketId,
+          incidenciaId: primaryTicketId,
+        }
+      : null,
+
+    relations: primaryTicketId
+      ? {
+          ticket: {
+            id: primaryTicketId,
+            ticketId: primaryTicketId,
+            partitionKey: primaryTicketId,
+          },
+        }
+      : {},
 
     createdAt,
     updatedAt,
@@ -1269,6 +1484,8 @@ function clientPreview(item = {}) {
       source.nombre,
       source.razonSocial,
       source.company,
+      source.companyName,
+      source.nombreContacto,
       source.slug,
       clientId ? `Cliente ${clientId}` : "Cliente",
     ],
@@ -1280,6 +1497,7 @@ function clientPreview(item = {}) {
     clientId,
     clienteId: clientId,
     customerId: clientId,
+    userId: safePublicId(source.userId),
 
     displayName: name,
     fullName: name,
@@ -1287,6 +1505,7 @@ function clientPreview(item = {}) {
     nombre: name,
     razonSocial: name,
     company: name,
+    companyName: name,
 
     createdAt: safeText(first(source.createdAt, source.created_at, ""), ""),
     updatedAt: safeText(first(source.updatedAt, source.updated_at, source.createdAt, ""), ""),
@@ -1305,6 +1524,7 @@ function userPreview(item = {}) {
       source.nombre,
       source.profile?.displayName,
       source.profile?.fullName,
+      source.profile?.name,
       source.username,
       userId ? `Usuario ${userId}` : "Usuario",
     ],
@@ -1321,6 +1541,23 @@ function userPreview(item = {}) {
     "user"
   );
 
+  const avatarUrl = safePublicUrl(
+    first(
+      source.avatarUrl,
+      source.avatar,
+      source.photoUrl,
+      source.photoURL,
+      source.picture,
+      source.pictureUrl,
+      source.profile?.avatarUrl,
+      source.profile?.avatar,
+      source.profile?.photoUrl,
+      source.media?.avatarUrl,
+      source.media?.avatar,
+      ""
+    )
+  );
+
   return {
     id: userId,
     userId,
@@ -1331,12 +1568,20 @@ function userPreview(item = {}) {
     name,
     nombre: name,
     username: safePublicId(source.username),
+    slug: safePublicId(first(source.slug, source.lookup?.slug, source.profile?.slug, "")),
 
     role,
     rol: role,
+    roles: [role],
+
+    avatarUrl,
+    avatar: avatarUrl,
+    photoUrl: avatarUrl,
+    pictureUrl: avatarUrl,
 
     createdAt: safeText(first(source.createdAt, source.created_at, ""), ""),
     updatedAt: safeText(first(source.updatedAt, source.updated_at, source.lastLoginAt, source.createdAt, ""), ""),
+    lastLoginAt: safeText(source.lastLoginAt, ""),
   };
 }
 
@@ -1435,16 +1680,13 @@ function extractTotal(payload = null, aliases = [], fallback = 0) {
       "totalCount",
       "remoteCount",
       "documentsCounted",
-
       "meta.total",
       "meta.count",
       "meta.totalCount",
       "meta.remoteCount",
-
       "pagination.total",
       "pagination.count",
       "pagination.totalCount",
-
       ...safeArray(aliases).flatMap((alias) => [
         `${alias}Total`,
         `${alias}Count`,
@@ -1462,6 +1704,7 @@ function extractCollection(payload = null, aliases = []) {
     return {
       items: unwrapped,
       total: unwrapped.length,
+      source: {},
     };
   }
 
@@ -1490,6 +1733,7 @@ function extractCollection(payload = null, aliases = []) {
         return {
           items: value,
           total: Math.max(value.length, extractTotal(source, aliases, value.length)),
+          source,
         };
       }
 
@@ -1521,6 +1765,7 @@ function extractCollection(payload = null, aliases = []) {
       return {
         items: direct,
         total: Math.max(direct.length, extractTotal(source, aliases, direct.length)),
+        source,
       };
     }
   }
@@ -1528,7 +1773,29 @@ function extractCollection(payload = null, aliases = []) {
   return {
     items: [],
     total: extractTotal(object, aliases, 0),
+    source: object,
   };
+}
+
+function summarySources(payload = null) {
+  const object = safeObject(unwrapResponse(payload), {});
+
+  return [
+    object.summary,
+    object.stats,
+    object.metrics,
+    object.totals,
+    object.counts,
+    object.data?.summary,
+    object.payload?.summary,
+    object.result?.summary,
+    object.meta,
+    object,
+  ].filter(hasOwnKeys);
+}
+
+function pickSummaryNumber(payload = null, keys = [], fallback = 0) {
+  return pickMax(keys, summarySources(payload), fallback);
 }
 
 /* =========================================================
@@ -1537,6 +1804,7 @@ function extractCollection(payload = null, aliases = []) {
 
 function normalizeTicketsModule(listPayload = null) {
   const collection = extractCollection(listPayload, ["tickets", "incidencias"]);
+  const summarySource = listPayload || collection.source || {};
 
   const items = projectList(
     collection.items,
@@ -1546,17 +1814,23 @@ function normalizeTicketsModule(listPayload = null) {
 
   const total = Math.max(items.length, collection.total);
 
-  const openTickets = items.filter((item) =>
-    ["pending", "open", "progress"].includes(ticketStatusKey(item))
-  ).length;
+  const pendingVisible = items.filter((item) => ticketStatusKey(item) === "pending").length;
+  const openVisible = items.filter((item) => ticketStatusKey(item) === "open").length;
+  const progressVisible = items.filter((item) => ticketStatusKey(item) === "progress").length;
+  const resolvedVisible = items.filter((item) => ticketStatusKey(item) === "resolved").length;
+  const closedVisible = items.filter((item) => ticketStatusKey(item) === "closed").length;
 
-  const closedTickets = items.filter((item) =>
-    ["closed", "resolved"].includes(ticketStatusKey(item))
-  ).length;
+  const pendingTickets = pickSummaryNumber(summarySource, ["pendingTickets", "pendingIncidencias", "incidenciasPendientes"], pendingVisible);
+  const openTickets = pickSummaryNumber(summarySource, ["openTickets", "openIncidencias", "incidenciasAbiertas"], openVisible);
+  const progressTickets = pickSummaryNumber(summarySource, ["progressTickets", "progressIncidencias", "incidenciasEnCurso"], progressVisible);
+  const resolvedTickets = pickSummaryNumber(summarySource, ["resolvedTickets", "resolvedIncidencias", "incidenciasResueltas"], resolvedVisible);
+  const closedTickets = pickSummaryNumber(summarySource, ["closedTickets", "closedIncidencias", "incidenciasCerradas"], closedVisible);
 
-  const urgentTickets = items.filter((item) =>
-    ["urgent", "critical"].includes(ticketPriorityKey(item))
-  ).length;
+  const urgentTickets = pickSummaryNumber(
+    summarySource,
+    ["urgentTickets", "urgentIncidencias", "highPriorityTickets", "incidenciasUrgentes"],
+    items.filter((item) => ["urgent", "critical"].includes(ticketPriorityKey(item))).length
+  );
 
   const filesCount = items.reduce((sum, item) => sum + safeNumber(item.attachmentsCount, 0), 0);
 
@@ -1573,15 +1847,28 @@ function normalizeTicketsModule(listPayload = null) {
       ticketsCount: total,
       incidenciasCount: total,
 
+      pendingTickets,
+      pendingIncidencias: pendingTickets,
+      incidenciasPendientes: pendingTickets,
+
       openTickets,
-      pendingTickets: openTickets,
       openIncidencias: openTickets,
-      pendingIncidencias: openTickets,
+      incidenciasAbiertas: openTickets,
+
+      progressTickets,
+      progressIncidencias: progressTickets,
+      incidenciasEnCurso: progressTickets,
+
+      resolvedTickets,
+      resolvedIncidencias: resolvedTickets,
+      incidenciasResueltas: resolvedTickets,
 
       closedTickets,
-      resolvedTickets: closedTickets,
       closedIncidencias: closedTickets,
-      resolvedIncidencias: closedTickets,
+      incidenciasCerradas: closedTickets,
+
+      activeTickets: pendingTickets + openTickets + progressTickets,
+      activeIncidencias: pendingTickets + openTickets + progressTickets,
 
       urgentTickets,
       urgentIncidencias: urgentTickets,
@@ -1596,6 +1883,7 @@ function normalizeTicketsModule(listPayload = null) {
 
 function normalizeFacturasModule(listPayload = null) {
   const collection = extractCollection(listPayload, ["facturas", "invoices"]);
+  const summarySource = listPayload || collection.source || {};
 
   const items = projectList(
     collection.items,
@@ -1605,11 +1893,35 @@ function normalizeFacturasModule(listPayload = null) {
 
   const total = Math.max(items.length, collection.total);
 
-  const pendingInvoices = items.filter((item) =>
-    ["pending", "overdue", "partial"].includes(invoiceStatusKey(item))
-  ).length;
+  const paidVisible = items.filter((item) => invoiceStatusKey(item) === "paid").length;
+  const pendingVisible = items.filter((item) => ["pending", "overdue", "partial"].includes(invoiceStatusKey(item))).length;
+  const overdueVisible = items.filter((item) => invoiceStatusKey(item) === "overdue").length;
 
-  const invoiceTotal = items.reduce((sum, item) => sum + safeNumber(item.total, 0), 0);
+  const paidInvoices = pickSummaryNumber(summarySource, ["paidInvoices", "paidFacturas", "facturasPagadas"], paidVisible);
+  const pendingInvoices = pickSummaryNumber(summarySource, ["pendingInvoices", "pendingFacturas", "facturasPendientes", "invoicesPending"], pendingVisible);
+  const overdueInvoices = pickSummaryNumber(summarySource, ["overdueInvoices", "overdueFacturas", "facturasVencidas"], overdueVisible);
+
+  const computedPaidAmount = items.reduce((sum, item) => sum + invoicePaidAmount(item), 0);
+  const computedPendingAmount = items.reduce((sum, item) => sum + invoicePendingAmount(item), 0);
+  const computedGrossAmount = items.reduce((sum, item) => sum + invoiceAmount(item), 0);
+
+  const invoiceTotal = pickSummaryNumber(
+    summarySource,
+    ["paidInvoiceAmount", "invoicePaidAmount", "paidAmountTotal", "pagadoTotal"],
+    computedPaidAmount
+  );
+
+  const pendingInvoiceAmount = pickSummaryNumber(
+    summarySource,
+    ["pendingInvoiceAmount", "importePendiente", "facturacionPendiente"],
+    computedPendingAmount
+  );
+
+  const grossInvoiceAmount = pickSummaryNumber(
+    summarySource,
+    ["grossInvoiceAmount", "invoiceGrossAmount"],
+    computedGrossAmount
+  );
 
   return {
     items,
@@ -1624,12 +1936,24 @@ function normalizeFacturasModule(listPayload = null) {
       invoicesCount: total,
       facturasCount: total,
 
+      paidInvoices,
+      paidFacturas: paidInvoices,
+      facturasPagadas: paidInvoices,
+
       pendingInvoices,
       pendingFacturas: pendingInvoices,
       facturasPendientes: pendingInvoices,
       invoicesPending: pendingInvoices,
 
+      overdueInvoices,
+      overdueFacturas: overdueInvoices,
+      facturasVencidas: overdueInvoices,
+
       invoiceAmount: invoiceTotal,
+      paidInvoiceAmount: invoiceTotal,
+      pendingInvoiceAmount,
+      grossInvoiceAmount,
+
       billingTotal: invoiceTotal,
       totalBilling: invoiceTotal,
       totalFacturado: invoiceTotal,
@@ -1707,22 +2031,8 @@ function buildSummaryFromModules({
   const clienteStats = safeObject(clientes?.stats);
   const userStats = safeObject(users?.stats);
 
-  const totalTickets = Math.max(
-    safeNumber(ticketStats.totalTickets, 0),
-    safeNumber(tickets?.total, 0)
-  );
-
-  const openTickets = safeNumber(ticketStats.openTickets, 0);
-  const closedTickets = safeNumber(ticketStats.closedTickets, 0);
-  const urgentTickets = safeNumber(ticketStats.urgentTickets, 0);
-
-  const totalInvoices = Math.max(
-    safeNumber(facturaStats.totalInvoices, 0),
-    safeNumber(facturas?.total, 0)
-  );
-
-  const pendingInvoices = safeNumber(facturaStats.pendingInvoices, 0);
-  const amount = safeNumber(facturaStats.invoiceAmount, 0);
+  const totalTickets = Math.max(safeNumber(ticketStats.totalTickets, 0), safeNumber(tickets?.total, 0));
+  const totalInvoices = Math.max(safeNumber(facturaStats.totalInvoices, 0), safeNumber(facturas?.total, 0));
 
   const clientsCount = admin
     ? Math.max(safeNumber(clienteStats.clientsCount, 0), safeNumber(clientes?.total, 0))
@@ -1731,8 +2041,6 @@ function buildSummaryFromModules({
   const usersCount = admin
     ? Math.max(safeNumber(userStats.usersCount, 0), safeNumber(users?.total, 0))
     : 0;
-
-  const filesCount = safeNumber(ticketStats.attachmentsCount, 0);
 
   return sanitizeSummaryForRole(
     {
@@ -1743,21 +2051,32 @@ function buildSummaryFromModules({
       ticketsCount: totalTickets,
       incidenciasCount: totalTickets,
 
-      openTickets,
-      pendingTickets: openTickets,
-      openIncidencias: openTickets,
-      pendingIncidencias: openTickets,
-      incidenciasAbiertas: openTickets,
+      pendingTickets: safeNumber(ticketStats.pendingTickets, 0),
+      pendingIncidencias: safeNumber(ticketStats.pendingTickets, 0),
+      incidenciasPendientes: safeNumber(ticketStats.pendingTickets, 0),
 
-      closedTickets,
-      resolvedTickets: closedTickets,
-      closedIncidencias: closedTickets,
-      resolvedIncidencias: closedTickets,
-      incidenciasCerradas: closedTickets,
+      openTickets: safeNumber(ticketStats.openTickets, 0),
+      openIncidencias: safeNumber(ticketStats.openTickets, 0),
+      incidenciasAbiertas: safeNumber(ticketStats.openTickets, 0),
 
-      urgentTickets,
-      urgentIncidencias: urgentTickets,
-      highPriorityTickets: urgentTickets,
+      progressTickets: safeNumber(ticketStats.progressTickets, 0),
+      progressIncidencias: safeNumber(ticketStats.progressTickets, 0),
+      incidenciasEnCurso: safeNumber(ticketStats.progressTickets, 0),
+
+      resolvedTickets: safeNumber(ticketStats.resolvedTickets, 0),
+      resolvedIncidencias: safeNumber(ticketStats.resolvedTickets, 0),
+      incidenciasResueltas: safeNumber(ticketStats.resolvedTickets, 0),
+
+      closedTickets: safeNumber(ticketStats.closedTickets, 0),
+      closedIncidencias: safeNumber(ticketStats.closedTickets, 0),
+      incidenciasCerradas: safeNumber(ticketStats.closedTickets, 0),
+
+      activeTickets: safeNumber(ticketStats.activeTickets, 0),
+      activeIncidencias: safeNumber(ticketStats.activeTickets, 0),
+
+      urgentTickets: safeNumber(ticketStats.urgentTickets, 0),
+      urgentIncidencias: safeNumber(ticketStats.urgentTickets, 0),
+      highPriorityTickets: safeNumber(ticketStats.urgentTickets, 0),
 
       totalInvoices,
       invoicesTotal: totalInvoices,
@@ -1766,17 +2085,29 @@ function buildSummaryFromModules({
       invoicesCount: totalInvoices,
       facturasCount: totalInvoices,
 
-      pendingInvoices,
-      pendingFacturas: pendingInvoices,
-      facturasPendientes: pendingInvoices,
-      invoicesPending: pendingInvoices,
+      paidInvoices: safeNumber(facturaStats.paidInvoices, 0),
+      paidFacturas: safeNumber(facturaStats.paidInvoices, 0),
+      facturasPagadas: safeNumber(facturaStats.paidInvoices, 0),
 
-      invoiceAmount: amount,
-      billingTotal: amount,
-      totalBilling: amount,
-      totalFacturado: amount,
-      importeFacturas: amount,
-      facturacionVisible: amount,
+      pendingInvoices: safeNumber(facturaStats.pendingInvoices, 0),
+      pendingFacturas: safeNumber(facturaStats.pendingInvoices, 0),
+      facturasPendientes: safeNumber(facturaStats.pendingInvoices, 0),
+      invoicesPending: safeNumber(facturaStats.pendingInvoices, 0),
+
+      overdueInvoices: safeNumber(facturaStats.overdueInvoices, 0),
+      overdueFacturas: safeNumber(facturaStats.overdueInvoices, 0),
+      facturasVencidas: safeNumber(facturaStats.overdueInvoices, 0),
+
+      invoiceAmount: safeNumber(facturaStats.invoiceAmount, 0),
+      paidInvoiceAmount: safeNumber(facturaStats.paidInvoiceAmount, facturaStats.invoiceAmount),
+      pendingInvoiceAmount: safeNumber(facturaStats.pendingInvoiceAmount, 0),
+      grossInvoiceAmount: safeNumber(facturaStats.grossInvoiceAmount, facturaStats.invoiceAmount),
+
+      billingTotal: safeNumber(facturaStats.invoiceAmount, 0),
+      totalBilling: safeNumber(facturaStats.invoiceAmount, 0),
+      totalFacturado: safeNumber(facturaStats.invoiceAmount, 0),
+      importeFacturas: safeNumber(facturaStats.invoiceAmount, 0),
+      facturacionVisible: safeNumber(facturaStats.invoiceAmount, 0),
 
       clientsCount,
       clientesCount: clientsCount,
@@ -1806,9 +2137,9 @@ function buildSummaryFromModules({
       visibleUsersCount: admin ? safeNumber(users?.visibleCount, 0) : 0,
       visibleUsuariosCount: admin ? safeNumber(users?.visibleCount, 0) : 0,
 
-      attachmentsCount: filesCount,
-      filesCount,
-      adjuntosCount: filesCount,
+      attachmentsCount: safeNumber(ticketStats.attachmentsCount, 0),
+      filesCount: safeNumber(ticketStats.filesCount, 0),
+      adjuntosCount: safeNumber(ticketStats.adjuntosCount, 0),
 
       updatedAt: nowIso(),
     },
@@ -1825,7 +2156,7 @@ function buildWidgets(summary = {}, admin = false) {
       title: admin ? "Incidencias" : "Mis incidencias",
       description: admin ? "Tickets visibles en el panel." : "Tus solicitudes visibles.",
       value: safeNumber(summary.totalTickets, 0),
-      subtitle: `${safeNumber(summary.openTickets, 0)} abiertas`,
+      subtitle: `${safeNumber(summary.activeTickets, 0)} abiertas o en seguimiento`,
       type: "tickets",
       kind: "metric",
       status: "active",
@@ -1833,18 +2164,30 @@ function buildWidgets(summary = {}, admin = false) {
       href: INCIDENCIAS_ROUTE,
     },
     {
-      id: admin ? "facturacion" : "mis-facturas",
-      widgetId: admin ? "facturacion" : "mis-facturas",
-      key: admin ? "facturacion" : "mis-facturas",
-      title: admin ? "Facturación" : "Mis facturas",
-      description: admin ? "Facturas visibles y volumen agregado." : "Facturación visible para tu cuenta.",
-      value: admin ? safeNumber(summary.invoiceAmount, 0) : safeNumber(summary.totalInvoices, 0),
-      subtitle: admin
-        ? `${safeNumber(summary.totalInvoices, 0)} facturas · ${safeNumber(summary.pendingInvoices, 0)} pendientes`
-        : `${safeNumber(summary.pendingInvoices, 0)} pendientes`,
+      id: admin ? "facturas" : "mis-facturas",
+      widgetId: admin ? "facturas" : "mis-facturas",
+      key: admin ? "facturas" : "mis-facturas",
+      title: admin ? "Facturas" : "Mis facturas",
+      description: admin ? "Facturas visibles y volumen pagado." : "Facturación visible para tu cuenta.",
+      value: safeNumber(summary.totalInvoices, 0),
+      subtitle: `${safeNumber(summary.pendingInvoices, 0)} pendientes`,
       type: "invoices",
       kind: "metric",
       status: safeNumber(summary.pendingInvoices, 0) > 0 ? "warning" : "active",
+      route: FACTURAS_ROUTE,
+      href: FACTURAS_ROUTE,
+    },
+    {
+      id: "facturas-totales",
+      widgetId: "facturas-totales",
+      key: "facturas-totales",
+      title: "Facturas totales",
+      description: "Importe total pagado.",
+      value: safeNumber(summary.invoiceAmount, 0),
+      subtitle: `${safeNumber(summary.paidInvoices, 0)} pagadas`,
+      type: "invoices",
+      kind: "metric",
+      status: "active",
       route: FACTURAS_ROUTE,
       href: FACTURAS_ROUTE,
     },
@@ -1903,14 +2246,16 @@ function buildActivity({
       type: "ticket",
       title: safeText(first(ticket.subject, ticket.title, ticket.asunto), "Incidencia"),
       text: id ? `Incidencia ${id}` : "Incidencia actualizada.",
-      date: first(ticket.updatedAt, ticket.lastUpdateAt, ticket.createdAt),
+      date: first(ticket.updatedAt, ticket.lastUpdateAt, ticket.lastActivityAt, ticket.createdAt),
       route: INCIDENCIAS_ROUTE,
-      action: "open-ticket",
+      action: "open_ticket_detail",
       entityId: id,
+      ticketId: id,
+      incidenciaId: id,
     });
   }
 
-  for (const invoice of safeArray(invoices).slice(0, 4)) {
+  for (const invoice of safeArray(invoices).slice(0, HOME_ACTIVITY_LIMIT)) {
     const id = getInvoiceId(invoice);
 
     activity.push({
@@ -1919,13 +2264,15 @@ function buildActivity({
       text: "Factura registrada o actualizada.",
       date: first(invoice.updatedAt, invoice.createdAt, invoice.date),
       route: FACTURAS_ROUTE,
-      action: "navigate-home",
+      action: "navigate_home",
       entityId: id,
+      invoiceId: id,
+      facturaId: id,
     });
   }
 
   if (admin) {
-    for (const client of safeArray(clients).slice(0, 3)) {
+    for (const client of safeArray(clients).slice(0, HOME_ACTIVITY_LIMIT)) {
       const id = getClientId(client);
 
       activity.push({
@@ -1934,12 +2281,12 @@ function buildActivity({
         text: "Cliente disponible en el panel.",
         date: first(client.updatedAt, client.createdAt),
         route: CLIENTES_ROUTE,
-        action: "navigate-home",
+        action: "navigate_home",
         entityId: id,
       });
     }
 
-    for (const user of safeArray(users).slice(0, 3)) {
+    for (const user of safeArray(users).slice(0, HOME_ACTIVITY_LIMIT)) {
       const id = getUserId(user);
 
       activity.push({
@@ -1948,7 +2295,7 @@ function buildActivity({
         text: "Usuario disponible en el sistema.",
         date: first(user.updatedAt, user.createdAt, user.lastLoginAt),
         route: USUARIOS_ROUTE,
-        action: "navigate-home",
+        action: "navigate_home",
         entityId: id,
       });
     }
@@ -2027,12 +2374,6 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
     admin
   );
 
-  const tickets = projectList(
-    first(source.tickets, source.incidencias, []),
-    ticketPreview,
-    (item) => item.ticketId || item.incidenciaId || item.id
-  );
-
   const invoices = projectList(
     first(source.invoices, source.facturas, []),
     invoicePreview,
@@ -2046,6 +2387,12 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
   const clients = admin
     ? projectList(first(source.clients, source.clientes, source.customers, []), clientPreview, (item) => item.clienteId || item.id)
     : [];
+
+  const tickets = projectList(
+    first(source.tickets, source.incidencias, []),
+    ticketPreview,
+    (item) => item.ticketId || item.incidenciaId || item.id
+  );
 
   const activity = filterActivityForRole(
     normalizeHomeActivityList(
@@ -2096,11 +2443,6 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
     clients,
     clientes: clients,
     customers: clients,
-
-    servers: [],
-    servidores: [],
-    server: {},
-    servidor: {},
 
     activity,
     activities: activity,
@@ -2163,11 +2505,6 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
     visibleClientesCount: admin ? clients.length : 0,
     visibleCustomersCount: admin ? clients.length : 0,
 
-    serversCount: 0,
-    servidoresCount: 0,
-    visibleServersCount: 0,
-    visibleServidoresCount: 0,
-
     activityCount: activity.length,
     recentCount: activity.length,
     visibleActivityCount: activity.length,
@@ -2206,15 +2543,8 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
       visibleClientesCount: admin ? clients.length : 0,
       visibleCustomersCount: admin ? clients.length : 0,
 
-      serversCount: 0,
-      servidoresCount: 0,
-      visibleServersCount: 0,
-      visibleServidoresCount: 0,
-
       activityCount: activity.length,
       recentCount: activity.length,
-
-      healthEndpointConfigured: Boolean(ENDPOINTS.healthReady),
     },
   });
 }
@@ -2223,16 +2553,17 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
   const role = normalizeRole(first(meta.role, getCurrentRole()), "") || "user";
   const admin = role === "admin";
 
-  const tickets = normalizeTicketsModule(modules.tickets?.data);
   const facturas = normalizeFacturasModule(modules.facturas?.data);
+
+  const users = admin
+    ? normalizeUsersModule(modules.users?.data)
+    : normalizeUsersModule(null);
 
   const clientes = admin
     ? normalizeClientesModule(modules.clientes?.data)
     : normalizeClientesModule(null);
 
-  const users = admin
-    ? normalizeUsersModule(modules.users?.data)
-    : normalizeUsersModule(null);
+  const tickets = normalizeTicketsModule(modules.tickets?.data);
 
   const summary = buildSummaryFromModules({
     tickets,
@@ -2312,9 +2643,6 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
       users: admin ? users.items : [],
       usuarios: admin ? users.items : [],
 
-      servers: [],
-      servidores: [],
-
       activity,
       activities: activity,
       recent: activity,
@@ -2325,14 +2653,6 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
         facturas: moduleStatus(modules.facturas, ENDPOINTS.facturasList),
         clientes: moduleStatus(modules.clientes, admin ? ENDPOINTS.clientesList : ""),
         users: moduleStatus(modules.users, admin ? ENDPOINTS.usersList : ""),
-        health: {
-          skipped: true,
-          listOk: false,
-          status: 0,
-          endpoint: "",
-          soft: true,
-          configured: false,
-        },
       },
 
       partial: errors.length > 0,
@@ -2352,8 +2672,6 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
 
         usersModuleRequested: admin,
         clientesModuleRequested: admin,
-        servidorModuleRequested: false,
-        healthEndpointConfigured: false,
 
         widgetsCount: widgets.length,
 
@@ -2376,11 +2694,6 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
         usuariosCount: admin ? summary.usuariosCount : 0,
         visibleUsersCount: admin ? summary.visibleUsersCount : 0,
         visibleUsuariosCount: admin ? summary.visibleUsuariosCount : 0,
-
-        serversCount: 0,
-        servidoresCount: 0,
-        visibleServersCount: 0,
-        visibleServidoresCount: 0,
 
         activityCount: activity.length,
         errorsCount: errors.length,
@@ -2505,9 +2818,6 @@ export function normalizeHomeDashboardResponse(payload = null) {
     users: admin ? dashboard.users : [],
     usuarios: admin ? dashboard.usuarios : [],
 
-    servers: admin ? dashboard.servers || [] : [],
-    servidores: admin ? dashboard.servidores || [] : [],
-
     activity: dashboard.activity,
     activities: dashboard.activity,
     recent: dashboard.activity,
@@ -2584,25 +2894,13 @@ export async function fetchHomeDashboardRequest({
   const role = getCurrentRole();
   const admin = role === "admin";
 
-  const includeUsersModule = canRequestUsersModule({
-    includeUsers,
-  });
-
-  const includeClientesModule = canRequestClientsModule({
-    includeClientes,
-    includeClients,
-  });
-
+  const includeUsersModule = canRequestUsersModule({ includeUsers });
+  const includeClientesModule = canRequestClientsModule({ includeClientes, includeClients });
   const listParams = mergeParams(DEFAULT_LIST_PARAMS, params);
 
   runtime.lastRequestAt = nowIso();
 
-  const [
-    ticketsList,
-    facturasList,
-    clientesList,
-    usersList,
-  ] = await Promise.all([
+  const [ticketsList, facturasList, clientesList, usersList] = await Promise.all([
     requestOptional("tickets.list", ENDPOINTS.ticketsList, {
       timeout,
       params: listParams,
@@ -2643,13 +2941,11 @@ export async function fetchHomeDashboardRequest({
   });
 
   runtime.lastResponseAt = nowIso();
-
   runtime.modules = {
     tickets: dashboard.modules.tickets,
     facturas: dashboard.modules.facturas,
     clientes: dashboard.modules.clientes,
     users: dashboard.modules.users,
-    health: dashboard.modules.health,
   };
 
   return {
@@ -2670,8 +2966,6 @@ export async function fetchHomeDashboardRequest({
       admin,
       includeUsers: includeUsersModule,
       includeClientes: includeClientesModule,
-      includeServidor: false,
-      includeHealth: false,
       partial: dashboard.partial,
       errorsCount: safeArray(dashboard.errors).length,
     },
@@ -2701,9 +2995,7 @@ export async function getHomeWidgetByIdRequest(widgetId = "", options = {}) {
 function hydrateDashboardSource(source = {}) {
   const raw = safeObject(source);
 
-  if (!hasOwnKeys(raw)) {
-    return null;
-  }
+  if (!hasOwnKeys(raw)) return null;
 
   const dashboard = normalizeDashboard(raw, {
     role: getCurrentRole(),
@@ -2727,9 +3019,6 @@ function hydrateDashboardSource(source = {}) {
 
     users: dashboard.admin ? dashboard.users : [],
     usuarios: dashboard.admin ? dashboard.usuarios : [],
-
-    servers: dashboard.admin ? dashboard.servers || [] : [],
-    servidores: dashboard.admin ? dashboard.servidores || [] : [],
 
     activity: dashboard.activity,
     recent: dashboard.activity,
@@ -2768,9 +3057,6 @@ export function hydrateHomeFromCache() {
 
     users: [],
     usuarios: [],
-
-    servers: [],
-    servidores: [],
 
     activity: [],
     recent: [],
@@ -2854,27 +3140,6 @@ export async function refreshHomeDashboard(options = {}) {
     ...safeObject(options),
     force: true,
   });
-}
-
-/* =========================================================
-   HEALTH
-========================================================= */
-
-export async function fetchHomeHealthRequest() {
-  const result = skippedResult("health.ready", "HEALTH_ENDPOINT_NOT_CONFIGURED");
-
-  runtime.modules.health = {
-    ok: false,
-    skipped: true,
-    status: 0,
-    configured: false,
-  };
-
-  return result;
-}
-
-export async function loadHomeHealth() {
-  return null;
 }
 
 /* =========================================================
@@ -3104,7 +3369,6 @@ export function getHomeApiSnapshot() {
       facturas: FACTURAS_ROUTE,
       clientes: CLIENTES_ROUTE,
       usuarios: USUARIOS_ROUTE,
-      servidor: SERVIDOR_ROUTE,
     }).filter(([, route]) => Boolean(route))
   );
 
@@ -3115,8 +3379,6 @@ export function getHomeApiSnapshot() {
     endpoints: {
       dashboard: HOME_DASHBOARD_ENDPOINT,
       legacyDashboard: HOME_DASHBOARD_LEGACY_ENDPOINT,
-      health: HOME_DASHBOARD_PING_ENDPOINT,
-
       ticketsList: ENDPOINTS.ticketsList,
       facturasList: ENDPOINTS.facturasList,
       clientesList: ENDPOINTS.clientesList,
@@ -3136,16 +3398,13 @@ export function getHomeApiSnapshot() {
       admin: isAdmin(),
       usersModuleAllowed: canRequestUsersModule(),
       clientesModuleAllowed: canRequestClientsModule(),
-      servidorRouteAdminOnly: isAdminOnlyRoute(SERVIDOR_ROUTE),
     },
 
     runtime: runtimeSnapshot(),
-
     loadSeq,
 
     dashboard: {
       hasDashboard: hasOwnKeys(rawDashboard),
-
       source: dashboard.source || null,
       role: dashboard.role || getCurrentRole(),
       admin,
@@ -3163,9 +3422,6 @@ export function getHomeApiSnapshot() {
 
       usersCount: admin ? safeNumber(dashboard.summary?.usersCount, 0) : 0,
       visibleUsersCount: admin ? safeNumber(dashboard.visibleUsersCount, 0) : 0,
-
-      serversCount: admin ? safeNumber(dashboard.summary?.serversCount, 0) : 0,
-      visibleServersCount: admin ? safeNumber(dashboard.visibleServersCount, 0) : 0,
 
       activityCount: safeArray(dashboard.activity).length,
 
@@ -3186,7 +3442,6 @@ export function getHomeApiSnapshot() {
 
     policy: {
       apiOnly: true,
-
       singleHttpLayer: true,
       noFetch: true,
       noStoragePersistent: true,
@@ -3195,13 +3450,9 @@ export function getHomeApiSnapshot() {
 
       noDashboardEndpoint: true,
       noStatsEndpoints: true,
-      noServidorEndpointInvented: true,
-      noHealthEndpointInvented: true,
-      healthEndpointConfigured: Boolean(HOME_DASHBOARD_PING_ENDPOINT),
 
       usersOnlyAdmin: true,
       clientesOnlyAdmin: true,
-      servidorOnlyAdmin: true,
       distinctUserAdminHome: true,
       roleAwareCache: true,
 
@@ -3210,6 +3461,9 @@ export function getHomeApiSnapshot() {
       blockedRoutesFromConfig: true,
 
       projectsLargeBackendObjectsToLightHomeDTO: true,
+      preservesTicketInvoiceRelations: true,
+      preservesTicketTechnicianData: true,
+      paidInvoiceAmountOnly: true,
 
       noRawBackendPayloadInDashboard: true,
       stripsCosmosMetadata: true,
@@ -3217,7 +3471,6 @@ export function getHomeApiSnapshot() {
       noEmailAsClientIdentity: true,
 
       coreModulesRequired: true,
-
       noHomeRoute: true,
       snapshotRedacted: true,
     },
@@ -3234,8 +3487,6 @@ export const HomeApi = Object.freeze({
   endpoints: Object.freeze({
     dashboard: HOME_DASHBOARD_ENDPOINT,
     legacyDashboard: HOME_DASHBOARD_LEGACY_ENDPOINT,
-    health: HOME_DASHBOARD_PING_ENDPOINT,
-
     ticketsList: ENDPOINTS.ticketsList,
     facturasList: ENDPOINTS.facturasList,
     clientesList: ENDPOINTS.clientesList,
@@ -3251,8 +3502,6 @@ export const HomeApi = Object.freeze({
   resolveHomeWidgetFromDashboard,
 
   fetchHomeDashboardRequest,
-  fetchHomeHealthRequest,
-
   getHomeDashboardRequest,
   getHomeWidgetByIdRequest,
 
@@ -3260,8 +3509,6 @@ export const HomeApi = Object.freeze({
 
   loadHomeDashboard,
   refreshHomeDashboard,
-
-  loadHomeHealth,
 
   getHomeApiSnapshot,
 });

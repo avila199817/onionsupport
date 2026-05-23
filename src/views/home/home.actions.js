@@ -5,10 +5,12 @@
    Responsabilidad:
    - Acciones operativas mínimas de Home.
    - Navegación SPA delegada en Router si existe.
+   - Abrir/cerrar detalle de incidencia sin navegar.
+   - Devolver statePatch para que bindings/homeView actualicen selectedTicketId.
    - Export CSV desde colecciones reales del store.
    - Copiar IDs.
    - Ejecutar acciones simples.
-   - Leer dashboard/widget desde store si hace falta.
+   - Leer dashboard/widget/ticket desde store si hace falta.
    - Rutas base desde core/config.js.
    - Admin routes reales desde core/config.js.
    - Toast sólo mediante AppCore.showToast si existe.
@@ -24,7 +26,6 @@
    - Sin /home.
    - Sin /incidencias/nueva.
    - Sin rutas opcionales inventadas.
-   - Sin export servidor mientras no exista endpoint real.
    - Sin Auth.
    - Sin CSS.
 ========================================================= */
@@ -53,15 +54,30 @@ import {
 import {
   normalizeHomeDashboard,
   normalizeHomeWidget,
+  normalizeHomeTickets,
+  normalizeHomeInvoices,
+  normalizeHomeUsers,
   getHomeWidgetId,
+  getHomeTicketId,
+  findHomeTicketById,
+  resolveHomeTicketInvoices,
+  resolveHomeTicketTechnician,
 } from "./home.model.js";
 
-export const HOME_ACTIONS_VERSION = "home.actions.v6";
+export const HOME_ACTIONS_VERSION = "home.actions.v7";
 
 const SOURCE = "views.home.actions";
 
 const CSV_FILENAME = "home-export.csv";
 const CSV_MIME_TYPE = "text/csv;charset=utf-8;";
+
+const HOME_ACTION_RESULT_TYPES = Object.freeze({
+  STATE_PATCH: "home_state_patch",
+  NAVIGATION: "home_navigation",
+  EXPORT: "home_export",
+  COPY: "home_copy",
+  READ: "home_read",
+});
 
 const RAW_KEYS = new Set([
   "raw",
@@ -72,13 +88,24 @@ const RAW_KEYS = new Set([
   "body",
 ]);
 
+const COSMOS_META_KEYS = new Set([
+  "_id",
+  "_rid",
+  "_self",
+  "_etag",
+  "_attachments",
+  "_ts",
+  "_lsn",
+  "_metadata",
+]);
+
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo/i;
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni|ipRaw|ip|userAgent/i;
 
 const SENSITIVE_QUERY_RE =
   /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
 
 /* =========================================================
    BASICS
@@ -184,6 +211,7 @@ function isEmailLike(value = "") {
 
 function sanitizePayloadValue(value, keyHint = "") {
   if (RAW_KEYS.has(keyHint)) return undefined;
+  if (COSMOS_META_KEYS.has(keyHint)) return undefined;
   if (isSensitiveKey(keyHint)) return undefined;
 
   if (typeof value === "string") {
@@ -201,6 +229,7 @@ function sanitizePayloadValue(value, keyHint = "") {
 
     for (const [key, item] of Object.entries(value)) {
       if (RAW_KEYS.has(key)) continue;
+      if (COSMOS_META_KEYS.has(key)) continue;
       if (isSensitiveKey(key)) continue;
 
       const clean = sanitizePayloadValue(item, key);
@@ -264,11 +293,9 @@ function routeInput(value = "") {
 
 function routeSuffix(value = "") {
   const raw = safeText(value, "");
-
   const hashIndex = raw.indexOf("#");
   const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
   const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-
   const queryIndex = beforeHash.indexOf("?");
   const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
 
@@ -366,10 +393,7 @@ const ROUTES = Object.freeze({
   INCIDENCIAS: routeFromCore("incidencias", "/incidencias"),
   FACTURAS: routeFromCore("facturas", "/facturas"),
   CLIENTES: routeFromCore("clientes", "/clientes"),
-
   USUARIOS: routeFromCore("usuarios", ""),
-  SERVIDOR: routeFromCore("servidor", ""),
-
   CUENTA: routeFromCore("cuenta", ""),
   AJUSTES: routeFromCore("ajustes", ""),
 });
@@ -378,11 +402,7 @@ const ACTION_ROUTES = Object.freeze({
   go_incidencias: ROUTES.INCIDENCIAS,
   go_facturas: ROUTES.FACTURAS,
   go_clientes: ROUTES.CLIENTES,
-
   go_usuarios: ROUTES.USUARIOS,
-  go_servidor: ROUTES.SERVIDOR,
-  go_server: ROUTES.SERVIDOR,
-
   go_cuenta: ROUTES.CUENTA,
   go_ajustes: ROUTES.AJUSTES,
 });
@@ -395,7 +415,6 @@ function isAdminOnlyRoute(route = "") {
   const path = routePath(route);
   const clientes = routePath(ROUTES.CLIENTES);
   const usuarios = routePath(ROUTES.USUARIOS);
-  const servidor = routePath(ROUTES.SERVIDOR);
 
   if (!path) return false;
 
@@ -407,8 +426,7 @@ function isAdminOnlyRoute(route = "") {
 
   return (
     Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
-    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
-    Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
   );
 }
 
@@ -558,6 +576,299 @@ export async function refreshHomeDashboardAction(options = {}) {
 }
 
 /* =========================================================
+   TICKET DETAIL
+========================================================= */
+
+function getTicketIdFromPayload(payload = {}) {
+  const data = safeObject(payload);
+
+  return safeCopyText(
+    first(
+      data.ticketId,
+      data.incidenciaId,
+      data.entityId,
+      data.id,
+      data.widgetId,
+      data.widgetKey,
+      data.code,
+      data.numero,
+      ""
+    )
+  );
+}
+
+function getHomeTicketsForDetail() {
+  try {
+    return safeArray(getHomeTicketsStore?.());
+  } catch {
+    return [];
+  }
+}
+
+function getHomeInvoicesForDetail() {
+  try {
+    return normalizeHomeInvoices(safeArray(getHomeInvoicesStore?.()));
+  } catch {
+    return [];
+  }
+}
+
+function getHomeUsersForDetail() {
+  if (!canUseAdminActions()) return [];
+
+  try {
+    return normalizeHomeUsers(safeArray(getHomeUsersStore?.()));
+  } catch {
+    return [];
+  }
+}
+
+function normalizeTicketDetail({
+  ticket = null,
+  ticketId = "",
+  invoices = [],
+  users = [],
+  found = true,
+} = {}) {
+  const id = safeCopyText(ticketId || getHomeTicketId(ticket || {}));
+
+  if (!id) return null;
+
+  const normalizedTickets = ticket
+    ? normalizeHomeTickets([ticket], {
+        invoices,
+        users,
+      })
+    : [];
+
+  const normalizedTicket = normalizedTickets[0] || {
+    id,
+    ticketId: id,
+    incidenciaId: id,
+    subject: "Incidencia",
+    title: "Incidencia",
+  };
+
+  let linkedInvoices = [];
+
+  try {
+    linkedInvoices = resolveHomeTicketInvoices(normalizedTicket, invoices);
+  } catch {
+    linkedInvoices = safeArray(first(normalizedTicket.invoices, normalizedTicket.facturas, []));
+  }
+
+  let technician = {};
+
+  try {
+    technician = resolveHomeTicketTechnician(normalizedTicket, users);
+  } catch {
+    technician = safeObject(first(normalizedTicket.technician, normalizedTicket.tecnico, {}));
+  }
+
+  const selectedTicketId = safeCopyText(
+    first(
+      getHomeTicketId(normalizedTicket),
+      normalizedTicket.ticketId,
+      normalizedTicket.incidenciaId,
+      id
+    )
+  );
+
+  return sanitizePayload({
+    ok: true,
+    type: HOME_ACTION_RESULT_TYPES.STATE_PATCH,
+    action: "open_ticket_detail",
+    source: SOURCE,
+
+    found: Boolean(found && ticket),
+
+    selectedTicketId,
+    selectedIncidenciaId: selectedTicketId,
+    ticketId: selectedTicketId,
+    incidenciaId: selectedTicketId,
+
+    statePatch: {
+      selectedTicketId,
+      selectedIncidenciaId: selectedTicketId,
+      openingTicketId: "",
+    },
+
+    modal: {
+      open: true,
+      ticketId: selectedTicketId,
+      incidenciaId: selectedTicketId,
+    },
+
+    ticket: normalizedTicket,
+    incidencia: normalizedTicket,
+
+    invoices: linkedInvoices,
+    facturas: linkedInvoices,
+    invoiceIds: linkedInvoices
+      .map((invoice) => safeCopyText(first(invoice.invoiceId, invoice.facturaId, invoice.id, "")))
+      .filter(Boolean),
+    facturaIds: linkedInvoices
+      .map((invoice) => safeCopyText(first(invoice.facturaId, invoice.invoiceId, invoice.id, "")))
+      .filter(Boolean),
+
+    technician,
+    tecnico: technician,
+
+    at: nowIso(),
+  });
+}
+
+export function getHomeTicketDetailFromStoreAction({
+  ticketId = "",
+  incidenciaId = "",
+  payload = null,
+} = {}) {
+  const data = sanitizePayload(payload || {});
+  const id = getTicketIdFromPayload({
+    ...data,
+    ticketId,
+    incidenciaId,
+  });
+
+  if (!id) return null;
+
+  const invoices = getHomeInvoicesForDetail();
+  const users = getHomeUsersForDetail();
+  const rawTickets = getHomeTicketsForDetail();
+
+  const tickets = normalizeHomeTickets(rawTickets, {
+    invoices,
+    users,
+  });
+
+  let ticket = null;
+
+  try {
+    ticket = findHomeTicketById(tickets, id);
+  } catch {
+    ticket = tickets.find((item) => normalizeKey(getHomeTicketId(item)) === normalizeKey(id)) || null;
+  }
+
+  if (!ticket && Object.keys(data).length) {
+    const payloadTicketId = getTicketIdFromPayload(data);
+
+    if (payloadTicketId && normalizeKey(payloadTicketId) === normalizeKey(id)) {
+      ticket = data;
+    }
+  }
+
+  return normalizeTicketDetail({
+    ticket,
+    ticketId: id,
+    invoices,
+    users,
+    found: Boolean(ticket),
+  });
+}
+
+export async function openHomeTicketDetailAction({
+  ticketId = "",
+  incidenciaId = "",
+  entityId = "",
+  payload = null,
+  silent = false,
+} = {}) {
+  const data = sanitizePayload(payload || {});
+  const id = getTicketIdFromPayload({
+    ...data,
+    ticketId,
+    incidenciaId,
+    entityId,
+  });
+
+  if (!id) {
+    if (!silent) notify("Incidencia inválida.", "error");
+    return false;
+  }
+
+  const detail = getHomeTicketDetailFromStoreAction({
+    ticketId: id,
+    payload: data,
+  });
+
+  if (!detail) {
+    if (!silent) notify("No se pudo abrir la incidencia.", "error");
+    return false;
+  }
+
+  return detail;
+}
+
+export async function closeHomeTicketDetailAction() {
+  return {
+    ok: true,
+    type: HOME_ACTION_RESULT_TYPES.STATE_PATCH,
+    action: "close_ticket_detail",
+    source: SOURCE,
+
+    selectedTicketId: "",
+    selectedIncidenciaId: "",
+
+    statePatch: {
+      selectedTicketId: "",
+      selectedIncidenciaId: "",
+      openingTicketId: "",
+    },
+
+    modal: {
+      open: false,
+      ticketId: "",
+      incidenciaId: "",
+    },
+
+    at: nowIso(),
+  };
+}
+
+export function reduceHomeActionState(state = {}, result = {}) {
+  const current = safeObject(state);
+  const output = {
+    ...current,
+  };
+
+  const data = safeObject(result);
+  const patch = safeObject(data.statePatch);
+
+  if (Object.keys(patch).length) {
+    return {
+      ...output,
+      ...patch,
+    };
+  }
+
+  const action = normalizeKey(data.action);
+
+  if (action === "open_ticket_detail") {
+    const selectedTicketId = safeCopyText(
+      first(data.selectedTicketId, data.selectedIncidenciaId, data.ticketId, data.incidenciaId, "")
+    );
+
+    return {
+      ...output,
+      selectedTicketId,
+      selectedIncidenciaId: selectedTicketId,
+      openingTicketId: "",
+    };
+  }
+
+  if (action === "close_ticket_detail") {
+    return {
+      ...output,
+      selectedTicketId: "",
+      selectedIncidenciaId: "",
+      openingTicketId: "",
+    };
+  }
+
+  return output;
+}
+
+/* =========================================================
    WIDGETS / COMPAT
 ========================================================= */
 
@@ -626,7 +937,7 @@ export async function getHomeWidgetDetailAction({
 }
 
 /*
-  Compat mínima: el template/bindings actuales ya no generan open_widget.
+  Compat mínima: el template/bindings actuales ya no deberían generar open_widget.
   Se mantiene exportado para no romper imports antiguos, pero no introduce
   rutas ni acciones nuevas.
 */
@@ -753,7 +1064,13 @@ export async function copyHomeWidgetIdAction({
 
   if (!silent) notify("ID copiado", "success");
 
-  return true;
+  return {
+    ok: true,
+    type: HOME_ACTION_RESULT_TYPES.COPY,
+    action: "copy_widget_id",
+    copied: true,
+    value: id,
+  };
 }
 
 /* =========================================================
@@ -799,6 +1116,7 @@ function safePathParts(path = "") {
     .map((part) => part.trim())
     .filter(Boolean)
     .filter((part) => !RAW_KEYS.has(part))
+    .filter((part) => !COSMOS_META_KEYS.has(part))
     .filter((part) => !isSensitiveKey(part));
 }
 
@@ -845,12 +1163,13 @@ function columnSpecs(mode = "widgets") {
     return [
       ["ID", ["ticketId", "incidenciaId", "id"]],
       ["Asunto", ["subject", "title", "asunto"]],
-      ["Estado", ["status", "estado", "statusLabel"]],
-      ["Prioridad", ["priority", "prioridad", "priorityKey"]],
+      ["Estado", ["statusLabel", "status", "estado"]],
+      ["Prioridad", ["priorityLabel", "priority", "prioridad", "priorityKey"]],
       ["Categoría", ["category", "categoria", "type"]],
-      ["Cliente/usuario", ["clientName", "clienteNombre", "requesterName", "userName"]],
+      ["Técnico", ["technicianName", "assignedToName", "assignedTo", "tecnico.name", "assignment.assignedToName", "meta.technicianName"]],
+      ["Facturas", ["linkedInvoiceCount", "facturasCount", "invoicesCount"]],
       ["Creado", ["createdAt", "fechaCreacion"]],
-      ["Actualizado", ["updatedAt", "lastUpdateAt"]],
+      ["Actualizado", ["updatedAt", "lastActivityAt", "lastUpdateAt"]],
     ];
   }
 
@@ -858,9 +1177,10 @@ function columnSpecs(mode = "widgets") {
     return [
       ["ID", ["facturaId", "invoiceId", "id"]],
       ["Número", ["numeroFacturaLegal", "numeroFactura", "invoiceNumber", "number"]],
-      ["Importe", ["total", "amount", "importe", "invoiceAmount"]],
+      ["Importe", ["paidAmount", "total", "amount", "importe", "invoiceAmount"]],
       ["Moneda", ["currency", "moneda"]],
-      ["Estado", ["paymentStatus", "estadoPago", "status", "estado"]],
+      ["Estado", ["statusLabel", "paymentStatus", "estadoPago", "status", "estado"]],
+      ["Incidencia", ["ticketId", "incidenciaId"]],
       ["Creada", ["createdAt", "fechaFactura", "issueDate"]],
       ["Actualizada", ["updatedAt", "modifiedAt"]],
     ];
@@ -1044,13 +1364,6 @@ export function exportHomeCsvAction({
     return false;
   }
 
-  const key = normalizeKey(mode);
-
-  if (["server", "servers", "servidor", "servidores"].includes(key)) {
-    if (!silent) notify("Exportación de servidor no disponible.", "info");
-    return false;
-  }
-
   const list = resolveExportItems(items, mode);
 
   if (!list.length) {
@@ -1065,8 +1378,9 @@ export function exportHomeCsvAction({
     return false;
   }
 
+  const finalFilename = normalizeFilename(filename);
   const downloaded = downloadTextFile({
-    filename: normalizeFilename(filename),
+    filename: finalFilename,
     content: `\uFEFF${csvBody}`,
     mimeType: CSV_MIME_TYPE,
   });
@@ -1078,7 +1392,14 @@ export function exportHomeCsvAction({
 
   if (!silent) notify("CSV exportado", "success");
 
-  return true;
+  return {
+    ok: true,
+    type: HOME_ACTION_RESULT_TYPES.EXPORT,
+    action: "export_csv",
+    filename: finalFilename,
+    mode: normalizeKey(mode),
+    count: list.length,
+  };
 }
 
 /* =========================================================
@@ -1111,7 +1432,13 @@ export async function navigateFromHomeAction({
 
     if (!ok) throw new Error("HOME_NAVIGATION_FAILED");
 
-    return true;
+    return {
+      ok: true,
+      type: HOME_ACTION_RESULT_TYPES.NAVIGATION,
+      action: "navigate_home",
+      route: target,
+      href: target,
+    };
   } catch {
     if (!silent) notify("No se pudo navegar desde Home.", "error");
     return false;
@@ -1145,6 +1472,29 @@ export async function runHomeQuickAction({
   const data = sanitizePayload(payload);
   const actionName = normalizeKey(action);
 
+  if (
+    actionName === "open_ticket_detail" ||
+    actionName === "open_incidencia_detail" ||
+    actionName === "ticket_detail" ||
+    actionName === "incidencia_detail" ||
+    actionName === "detail_ticket" ||
+    actionName === "detail_incidencia"
+  ) {
+    return openHomeTicketDetailAction({
+      ticketId: first(data.ticketId, data.incidenciaId, data.entityId, data.id, data.widgetId, ""),
+      payload: data,
+      silent,
+    });
+  }
+
+  if (
+    actionName === "close_ticket_detail" ||
+    actionName === "close_incidencia_detail" ||
+    actionName === "close_detail"
+  ) {
+    return closeHomeTicketDetailAction();
+  }
+
   if (actionName === "create_incidencia") {
     return createFromHomeAction({
       silent,
@@ -1167,7 +1517,12 @@ export async function runHomeQuickAction({
   }
 
   if (actionName === "refresh" || actionName === "retry") {
-    return true;
+    return {
+      ok: true,
+      type: HOME_ACTION_RESULT_TYPES.READ,
+      action: actionName,
+      at: nowIso(),
+    };
   }
 
   const targetRoute = normalizeSpaRoute(
@@ -1187,7 +1542,12 @@ export async function runHomeQuickAction({
     return false;
   }
 
-  return true;
+  return {
+    ok: true,
+    type: HOME_ACTION_RESULT_TYPES.READ,
+    action: actionName,
+    at: nowIso(),
+  };
 }
 
 /* =========================================================
@@ -1225,7 +1585,6 @@ export function getHomeActionsSnapshot() {
       hasUsers: isFunction(getHomeUsersStore),
       hasClients: isFunction(getHomeClientsStore),
       hasActivity: isFunction(getHomeActivityStore),
-      hasServers: false,
     },
 
     policy: {
@@ -1249,11 +1608,14 @@ export function getHomeActionsSnapshot() {
       noAppCoreNavigate: true,
       noManualHistoryFallback: true,
 
+      ticketDetailDoesNotNavigate: true,
+      ticketDetailReturnsStatePatch: true,
+      closeDetailClearsSelection: true,
+
       rejectsSensitiveRoutes: true,
       rejectsSensitiveClipboard: true,
       blocksAdminRoutesForUser: true,
       blocksAdminExportsForUser: true,
-      serverExportDisabledUntilEndpointExists: true,
 
       sanitizesPayload: true,
       csvExcludesEmail: true,
@@ -1303,6 +1665,11 @@ export const HomeActions = Object.freeze({
   getHomeWidgetDetailAction,
   openHomeWidgetAction,
   refreshHomeWidgetDetailAction,
+
+  getHomeTicketDetailFromStoreAction,
+  openHomeTicketDetailAction,
+  closeHomeTicketDetailAction,
+  reduceHomeActionState,
 
   copyHomeWidgetIdAction,
   exportHomeCsvAction,

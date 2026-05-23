@@ -14,6 +14,9 @@
    - Listas Home limitadas a 5 últimos elementos.
    - Contadores sobre totales completos.
    - Tabla de incidencias sin columna Usuario / Cliente.
+   - Tabla de incidencias sin columna Técnico separada.
+   - Técnico integrado en primera columna con avatar real/iniciales.
+   - Usuario/avatar del Home hidratable desde el mismo view-model del sidebar.
    - ID de incidencia completo visible.
    - Detalle de incidencia abre modal.
    - Modal con técnico asignado, avatar/iniciales y facturas vinculadas.
@@ -81,7 +84,7 @@ import {
   getActivityType,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.final.12";
+export const TEMPLATE_VERSION = "home.template.final.13";
 
 const ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -436,11 +439,166 @@ function getTemplateMetaFromView(data = {}, view = {}) {
   };
 }
 
+function getHydratedHomeUser(data = {}, view = {}) {
+  const sidebarUser = safeObject(
+    first(
+      data.sidebarUser,
+      data.sidebar?.user,
+      data.layout?.sidebarUser,
+      data.context?.sidebarUser,
+      data.context?.user,
+      view.sidebarUser,
+      view.sidebar?.user,
+      {}
+    )
+  );
+
+  const viewUser = safeObject(
+    first(
+      view.user,
+      data.user,
+      data.currentUser,
+      data.authUser,
+      data.sessionUser,
+      data.session?.user,
+      data.auth?.user,
+      data.account,
+      {}
+    )
+  );
+
+  const user = {
+    ...viewUser,
+    ...sidebarUser,
+  };
+
+  const displayName = visualLabel(
+    first(
+      sidebarUser.displayName,
+      sidebarUser.name,
+      sidebarUser.fullName,
+      sidebarUser.username,
+
+      view.displayName,
+      view.name,
+      view.fullName,
+
+      viewUser.displayName,
+      viewUser.name,
+      viewUser.fullName,
+      viewUser.username,
+      viewUser.userName
+    ),
+    "Usuario"
+  );
+
+  const avatarUrl = safeImageSrc(
+    first(
+      sidebarUser.avatarUrl,
+      sidebarUser.avatar,
+      sidebarUser.photoUrl,
+      sidebarUser.photoURL,
+      sidebarUser.picture,
+      sidebarUser.pictureUrl,
+      sidebarUser.image,
+      sidebarUser.imageUrl,
+      sidebarUser.foto,
+      sidebarUser.fotoUrl,
+      sidebarUser.imagen,
+      sidebarUser.imagenUrl,
+
+      sidebarUser.profile?.avatarUrl,
+      sidebarUser.profile?.avatar,
+      sidebarUser.profile?.photoUrl,
+      sidebarUser.profile?.photoURL,
+      sidebarUser.profile?.picture,
+      sidebarUser.profile?.pictureUrl,
+      sidebarUser.profile?.image,
+      sidebarUser.profile?.imageUrl,
+      sidebarUser.media?.avatarUrl,
+      sidebarUser.media?.avatar,
+      sidebarUser.media?.photoUrl,
+      sidebarUser.media?.picture,
+
+      view.avatarUrl,
+      view.avatar,
+      view.photoUrl,
+      view.photoURL,
+      view.picture,
+      view.image,
+
+      viewUser.avatarUrl,
+      viewUser.avatar,
+      viewUser.photoUrl,
+      viewUser.photoURL,
+      viewUser.picture,
+      viewUser.pictureUrl,
+      viewUser.image,
+      viewUser.imageUrl,
+      viewUser.foto,
+      viewUser.fotoUrl,
+      viewUser.imagen,
+      viewUser.imagenUrl,
+
+      viewUser.profile?.avatarUrl,
+      viewUser.profile?.avatar,
+      viewUser.profile?.photoUrl,
+      viewUser.profile?.photoURL,
+      viewUser.profile?.picture,
+      viewUser.profile?.pictureUrl,
+      viewUser.media?.avatarUrl,
+      viewUser.media?.avatar,
+      viewUser.media?.photoUrl,
+      viewUser.media?.picture
+    )
+  );
+
+  const initials = safeText(
+    first(
+      sidebarUser.initials,
+      sidebarUser.iniciales,
+      view.initials,
+      view.iniciales,
+      viewUser.initials,
+      viewUser.iniciales,
+      getInitials(displayName)
+    ),
+    "ON"
+  )
+    .slice(0, 3)
+    .toUpperCase();
+
+  const rawRole = first(
+    sidebarUser.role,
+    sidebarUser.rol,
+    Array.isArray(sidebarUser.roles) ? sidebarUser.roles[0] : "",
+    view.role,
+    view.rol,
+    Array.isArray(view.roles) ? view.roles[0] : "",
+    viewUser.role,
+    viewUser.rol,
+    Array.isArray(viewUser.roles) ? viewUser.roles[0] : ""
+  );
+
+  const role = safeText(rawRole, "user").toLowerCase() === "admin" ? "admin" : "user";
+  const isAdmin = Boolean(sidebarUser.isAdmin === true || view.admin === true || isAdminRole(role));
+
+  return {
+    user,
+    displayName,
+    avatarUrl,
+    initials,
+    role: isAdmin ? "admin" : "user",
+    isAdmin,
+  };
+}
+
 function buildTemplateViewModel(input = {}) {
   const data = safeObject(input);
   const view = buildHomeTemplateData(data);
   const state = getLoadingState(data);
-  const admin = Boolean(view.admin || isAdminRole(view.role));
+  const hydratedUser = getHydratedHomeUser(data, view);
+  const admin = hydratedUser.isAdmin;
   const meta = getTemplateMetaFromView(data, view);
 
   const ticketRows = safeArray(first(view.ticketRows, view.incidenceRows, view.tableRows, view.pageItems, []));
@@ -457,11 +615,11 @@ function buildTemplateViewModel(input = {}) {
     meta,
     admin,
 
-    role: admin ? "admin" : "user",
-    user: safeObject(view.user),
-    displayName: visualLabel(view.displayName, "Usuario"),
-    avatarUrl: safeImageSrc(view.avatarUrl),
-    initials: safeText(view.initials, "ON"),
+    role: hydratedUser.role,
+    user: hydratedUser.user,
+    displayName: hydratedUser.displayName,
+    avatarUrl: hydratedUser.avatarUrl,
+    initials: hydratedUser.initials,
 
     dashboard: safeObject(view.dashboard),
     summary: safeObject(view.summary),
@@ -1012,12 +1170,15 @@ function avatar({
   image = "",
   kind = "user",
   seed = "",
+  initials = "",
   className = "home-avatar",
 } = {}) {
   const label = visualLabel(name, "Usuario");
-  const initials = getInitials(label);
+  const fallbackInitials = safeText(first(initials, getInitials(label)), "U")
+    .slice(0, 3)
+    .toUpperCase();
   const src = safeImageSrc(image);
-  const avatarSeedBase = safeText(first(seed, label, initials, kind), label);
+  const avatarSeedBase = safeText(first(seed, label, fallbackInitials, kind), label);
   const avatarSeed = getInitials(avatarSeedBase);
   const tone = getAvatarTone(`${kind}|${avatarSeedBase}|${label}`);
   const toneIndex = Math.max(1, AVATAR_TONES.indexOf(tone) + 1);
@@ -1025,17 +1186,18 @@ function avatar({
 
   return `
     <div
-      class="${joinClasses(className, src ? "" : fallbackClass, `home-avatar-tone-${tone}`)}"
+      class="${joinClasses(className, src ? "has-image" : fallbackClass, src ? "" : "is-fallback", `home-avatar-tone-${tone}`)}"
       aria-label="${attr(label)}"
       data-avatar-root="true"
       data-avatar-kind="${attr(kind)}"
       data-avatar-seed="${attr(avatarSeed)}"
-      data-avatar-initials="${attr(initials)}"
+      data-avatar-initials="${attr(fallbackInitials)}"
       data-avatar-tone="${attr(tone)}"
       data-avatar-color-index="${attr(String(toneIndex))}"
-      ${boolAttr(!src, 'data-fallback="true"')}
+      data-avatar-state="${src ? "image" : "fallback"}"
+      data-fallback="${src ? "false" : "true"}"
     >
-      <span class="${attr(className)}-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
+      <span class="${attr(className)}-fallback" aria-hidden="true">${escapeHtml(fallbackInitials)}</span>
       ${src ? `
         <img
           class="${attr(className)}-img"
@@ -1189,6 +1351,7 @@ export function renderHomeHeader(input = {}) {
             image: vm.avatarUrl,
             kind: "user",
             seed: safeText(first(user.userId, user.id, user.username, displayName), displayName),
+            initials: vm.initials,
             className: "home-user-avatar",
           })}
 
@@ -1624,14 +1787,33 @@ function getRowTicketId(item = {}) {
 }
 
 function getRowTechnician(item = {}) {
-  const technician = safeObject(first(item.technician, item.tecnico, {}));
+  const assignedToObject = safeObject(typeof item.assignedTo === "object" ? item.assignedTo : {});
+  const technician = safeObject(
+    first(
+      item.technician,
+      item.tecnico,
+      item.assignedTechnician,
+      item.assignedUser,
+      assignedToObject,
+      {}
+    )
+  );
+
   const name = visualLabel(
     first(
       technician.displayName,
+      technician.fullName,
       technician.name,
+      technician.nombre,
+      technician.username,
+      technician.userName,
+
       item.technicianName,
+      item.tecnicoNombre,
       item.assignedToName,
-      item.assignedTo
+      item.assignedName,
+      typeof item.assignedTo === "string" ? item.assignedTo : "",
+      ""
     ),
     "Sin asignar"
   );
@@ -1639,12 +1821,82 @@ function getRowTechnician(item = {}) {
   const avatarUrl = safeImageSrc(
     first(
       technician.avatarUrl,
+      technician.avatarURL,
+      technician.avatar_url,
       technician.avatar,
+
+      technician.photoUrl,
+      technician.photoURL,
+      technician.photo_url,
+      technician.photo,
+
+      technician.pictureUrl,
+      technician.pictureURL,
+      technician.picture_url,
+      technician.picture,
+
+      technician.imageUrl,
+      technician.imageURL,
+      technician.image_url,
+      technician.image,
+
+      technician.fotoUrl,
+      technician.fotoURL,
+      technician.foto_url,
+      technician.foto,
+
+      technician.imagenUrl,
+      technician.imagenURL,
+      technician.imagen_url,
+      technician.imagen,
+
+      technician.profile?.avatarUrl,
+      technician.profile?.avatar,
+      technician.profile?.photoUrl,
+      technician.profile?.photoURL,
+      technician.profile?.picture,
+      technician.profile?.pictureUrl,
+      technician.profile?.image,
+      technician.profile?.imageUrl,
+
+      technician.media?.avatarUrl,
+      technician.media?.avatar,
+      technician.media?.photoUrl,
+      technician.media?.photoURL,
+      technician.media?.picture,
+      technician.media?.pictureUrl,
+      technician.media?.image,
+      technician.media?.imageUrl,
+
       item.technicianAvatarUrl,
       item.technicianAvatar,
+      item.tecnicoAvatarUrl,
+      item.tecnicoAvatar,
+      item.assignedToAvatarUrl,
+      item.assignedAvatarUrl,
+      assignedToObject.avatarUrl,
+      assignedToObject.avatar,
+      assignedToObject.photoUrl,
+      assignedToObject.photoURL,
+      assignedToObject.picture,
+      assignedToObject.image,
       ""
     )
   );
+
+  const initials = safeText(
+    first(
+      technician.initials,
+      technician.iniciales,
+      item.technicianInitials,
+      item.tecnicoInitials,
+      assignedToObject.initials,
+      getInitials(name)
+    ),
+    getInitials(name)
+  )
+    .slice(0, 3)
+    .toUpperCase();
 
   return {
     ...technician,
@@ -1652,25 +1904,32 @@ function getRowTechnician(item = {}) {
     displayName: name,
     avatarUrl,
     avatar: avatarUrl,
-    initials: safeText(first(technician.initials, item.technicianInitials, getInitials(name)), getInitials(name)),
+    initials,
   };
 }
 
-function technicianCell(item = {}) {
+function technicianInline(item = {}) {
   const technician = getRowTechnician(item);
 
   return `
-    <div class="home-ticket-technician">
+    <div
+      class="home-ticket-technician home-ticket-technician--inline"
+      data-ticket-technician="true"
+      data-has-technician-avatar="${technician.avatarUrl ? "true" : "false"}"
+      aria-label="Técnico asignado: ${attr(technician.name)}"
+    >
       ${avatar({
         name: technician.name,
         image: technician.avatarUrl,
         kind: "technician",
-        seed: safeText(first(technician.userId, technician.id, technician.name), technician.name),
+        seed: safeText(first(technician.userId, technician.id, technician.username, technician.name), technician.name),
+        initials: technician.initials,
         className: "home-technician-avatar",
       })}
+
       <span class="home-ticket-technician-copy">
+        <span class="home-ticket-technician-label">Técnico</span>
         <strong>${escapeHtml(technician.name)}</strong>
-        <span>${technician.avatarUrl ? "Técnico asignado" : "Iniciales"}</span>
       </span>
     </div>
   `;
@@ -1687,6 +1946,7 @@ function ticketRow(item = {}, state = {}) {
   const updatedAt = first(item.lastActivityAt, item.updatedAt, getTicketUpdatedAt(item));
   const createdLabel = safeText(first(item.createdAtLabel, formatDateTime(createdAt)), "—");
   const updatedLabel = safeText(first(item.lastActivityLabel, item.updatedAtLabel, formatLastUpdate(updatedAt)), "Sin fecha");
+  const linkedInvoiceCount = safeNumber(first(item.linkedInvoiceCount, item.invoicesCount, item.facturasCount, 0), 0);
   const isOpening = isSameIdentity(state.openingTicketId, ticketId);
   const isSelected = isSameIdentity(state.selectedTicketId, ticketId);
 
@@ -1707,8 +1967,8 @@ function ticketRow(item = {}, state = {}) {
       data-priority-key="${attr(priorityKey)}"
     >
       <td class="home-ticket-cell home-ticket-cell--main">
-        <div class="home-ticket-main">
-          <span class="home-ticket-type-icon" aria-hidden="true">${icon("ticket")}</span>
+        <div class="home-ticket-main home-ticket-main--with-technician">
+          ${technicianInline(item)}
 
           <div class="home-ticket-copy">
             <div class="home-ticket-line">
@@ -1724,7 +1984,10 @@ function ticketRow(item = {}, state = {}) {
               >
                 ${escapeHtml(ticketId)}
               </button>
-              <span class="home-mini-badge home-mini-badge--category">${escapeHtml(category)}</span>
+
+              <span class="home-mini-badge home-mini-badge--category">
+                ${escapeHtml(category)}
+              </span>
             </div>
 
             <button
@@ -1740,11 +2003,14 @@ function ticketRow(item = {}, state = {}) {
               ${escapeHtml(subject)}
             </button>
 
-            <div class="home-ticket-description">${escapeHtml(description)}</div>
+            <div class="home-ticket-description">
+              ${escapeHtml(description)}
+            </div>
+
             <div class="home-ticket-badges">
               ${priorityBadge(item)}
-              ${safeNumber(first(item.linkedInvoiceCount, item.invoicesCount, item.facturasCount, 0), 0) > 0
-                ? `<span class="home-mini-badge home-mini-badge--invoice">${icon("invoice")}${escapeHtml(`${safeNumber(first(item.linkedInvoiceCount, item.invoicesCount, item.facturasCount, 0), 0)} fact.`)}</span>`
+              ${linkedInvoiceCount > 0
+                ? `<span class="home-mini-badge home-mini-badge--invoice">${icon("invoice")}${escapeHtml(`${linkedInvoiceCount} fact.`)}</span>`
                 : ""
               }
             </div>
@@ -1752,10 +2018,8 @@ function ticketRow(item = {}, state = {}) {
         </div>
       </td>
 
-      <td class="home-ticket-cell home-ticket-cell--status">${statusChip(item)}</td>
-
-      <td class="home-ticket-cell home-ticket-cell--technician">
-        ${technicianCell(item)}
+      <td class="home-ticket-cell home-ticket-cell--status">
+        ${statusChip(item)}
       </td>
 
       <td class="home-ticket-cell home-ticket-cell--date">
@@ -1851,7 +2115,6 @@ export function renderHomeTicketsTable(input = {}) {
                       <tr>
                         <th scope="col">Incidencia</th>
                         <th scope="col">Estado</th>
-                        <th scope="col">Técnico</th>
                         <th scope="col">Creación</th>
                         <th scope="col">Última novedad</th>
                         <th scope="col">Acciones</th>
@@ -1913,9 +2176,9 @@ function renderTicketModal(input = {}) {
   const ticketId = safeText(first(modal.fullId, modal.displayId, modal.ticketId, modal.incidenciaId, modal.id), "INC-SIN-ID");
   const title = safeText(first(modal.title, modal.subject), "Incidencia sin asunto");
   const description = safeText(first(modal.description, modal.preview), "Sin descripción.");
-  const technician = safeObject(first(modal.technician, modal.tecnico, {}));
-  const technicianName = visualLabel(first(technician.displayName, technician.name, modal.technicianName), "Sin asignar");
-  const technicianAvatar = safeImageSrc(first(technician.avatarUrl, technician.avatar, modal.technicianAvatarUrl, ""));
+  const technician = getRowTechnician(modal);
+  const technicianName = technician.name;
+  const technicianAvatar = technician.avatarUrl;
   const invoices = safeArray(first(modal.invoiceRows, modal.invoices, modal.facturas, [])).slice(0, LIMITS.invoices);
   const statusKey = safeText(first(modal.statusKey, getTicketStatusKey(modal.ticket)), "pending");
   const statusLabel = safeText(first(modal.statusLabel, getTicketStatusLabel(modal.ticket)), "Pendiente");
@@ -1997,7 +2260,8 @@ function renderTicketModal(input = {}) {
                 name: technicianName,
                 image: technicianAvatar,
                 kind: "technician",
-                seed: safeText(first(technician.userId, technician.id, technicianName), technicianName),
+                seed: safeText(first(technician.userId, technician.id, technician.username, technicianName), technicianName),
+                initials: technician.initials,
                 className: "home-modal-technician-avatar",
               })}
               <div>

@@ -11,8 +11,10 @@
    - Restaurar sesión ANTES del primer render Router.
    - Delegar restore compat en /src/app/session.js.
    - Delegar Router en /src/app/router.js.
+   - Configurar Router antes del primer render.
+   - Registrar Sidebar/Topbar después de Auth + Router config.
    - Renderizar ruta inicial capturada por main.js.
-   - Iniciar Sidebar/Topbar después de ruta + auth.
+   - Sincronizar Sidebar/Topbar después del primer render.
    - Refrescar textos i18n.
    - Ocultar loader.
    - Sin Store.
@@ -54,7 +56,7 @@ import {
   renderInitialRoute as renderRouterInitialRoute,
 } from "./router.js";
 
-export const APP_INDEX_VERSION = "app.index.v6";
+export const APP_INDEX_VERSION = "app.index.v7";
 
 let bootPromise = null;
 let ready = false;
@@ -388,17 +390,28 @@ async function runBoot(options = {}) {
     await restoreAuth(payload);
 
     /*
-      Router queda delegado en /src/app/router.js.
-      App sólo decide el orden del boot.
+      Router queda configurado antes de registrar chrome.
+      Sidebar/Topbar necesitan rutas reales y Auth restaurado.
     */
     await initRouter(payload);
+
+    /*
+      Chrome se registra ANTES del primer render de ruta.
+      Esto permite que Home pueda consumir AppCore.ui.sidebar.getSnapshot()
+      durante su primer render sin caer a "Usuario".
+    */
+    await initChrome(payload);
+
+    /*
+      Primer render real de la SPA.
+      A partir de aquí la vista Home ya puede recibir usuario/chrome/contexto.
+    */
     await renderInitialRoute(payload);
 
     /*
-      Chrome después de ruta + auth.
-      Sidebar y Topbar reciben estado real.
+      Re-sincronización final de chrome con la ruta ya renderizada.
+      Mantiene visibilidad, active item, route mode y mounts correctos.
     */
-    await initChrome(payload);
     await syncChrome(payload);
 
     refreshI18nDom();
@@ -463,9 +476,11 @@ export function getAppSnapshot() {
       appDoesNotForceAuthSyncAfterRestore: true,
 
       routerDelegatedToAppRouter: true,
+      routerConfiguredBeforeChrome: true,
       routerManagedInitialRender: false,
 
-      chromeAfterRouteAndAuth: true,
+      chromeRegisteredBeforeInitialRoute: true,
+      chromeSyncedAfterInitialRoute: true,
 
       noStore: true,
       noParallelServices: true,

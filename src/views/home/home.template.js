@@ -16,7 +16,7 @@
    - Tabla de incidencias sin columna Usuario / Cliente.
    - Tabla de incidencias sin columna Técnico separada.
    - Técnico integrado en primera columna con avatar real/iniciales.
-   - Usuario/avatar del Home hidratable desde el mismo view-model del sidebar.
+   - Usuario/avatar del Home consumido desde el view-model canónico del sidebar.
    - ID de incidencia completo visible.
    - Detalle de incidencia abre modal.
    - Modal con técnico asignado, avatar/iniciales y facturas vinculadas.
@@ -36,7 +36,6 @@ import {
 
 import {
   DEFAULT_PAGE_SIZE,
-  DEFAULT_RECENT_LIMIT,
   DEFAULT_CURRENCY,
 
   safeText,
@@ -50,13 +49,11 @@ import {
   formatNumber,
   formatMoney,
   formatDateTime,
-  formatDateShort,
   formatRelativeDate,
   formatLastUpdate,
 
   getInitials,
 
-  isAdminRole,
   buildHomeTemplateData,
 
   getTicketId,
@@ -71,7 +68,6 @@ import {
   getTicketUpdatedAt,
 
   getInvoiceId,
-  getInvoiceAmount,
   getInvoicePaidAmount,
   getInvoiceCurrency,
   getInvoiceStatusKey,
@@ -84,7 +80,7 @@ import {
   getActivityType,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.final.13";
+export const TEMPLATE_VERSION = "home.template.final.14";
 
 const ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -439,156 +435,170 @@ function getTemplateMetaFromView(data = {}, view = {}) {
   };
 }
 
-function getHydratedHomeUser(data = {}, view = {}) {
-  const sidebarUser = safeObject(
+function getHomeUserViewModel(data = {}, view = {}) {
+  const state = getState(data);
+
+  const source = safeObject(
     first(
       data.sidebarUser,
       data.sidebar?.user,
       data.layout?.sidebarUser,
       data.context?.sidebarUser,
       data.context?.user,
+
+      state.sidebarUser,
+      state.sidebar?.user,
+      state.user,
+      state.currentUser,
+
       view.sidebarUser,
       view.sidebar?.user,
-      {}
-    )
-  );
 
-  const viewUser = safeObject(
-    first(
-      view.user,
       data.user,
       data.currentUser,
       data.authUser,
       data.sessionUser,
       data.session?.user,
       data.auth?.user,
-      data.account,
+
+      view.user,
       {}
     )
   );
 
-  const user = {
-    ...viewUser,
-    ...sidebarUser,
-  };
-
   const displayName = visualLabel(
     first(
-      sidebarUser.displayName,
-      sidebarUser.name,
-      sidebarUser.fullName,
-      sidebarUser.username,
-
-      view.displayName,
-      view.name,
-      view.fullName,
-
-      viewUser.displayName,
-      viewUser.name,
-      viewUser.fullName,
-      viewUser.username,
-      viewUser.userName
+      source.displayName,
+      source.name,
+      source.fullName,
+      source.username,
+      source.userName,
+      source.slug
     ),
     "Usuario"
   );
 
   const avatarUrl = safeImageSrc(
     first(
-      sidebarUser.avatarUrl,
-      sidebarUser.avatar,
-      sidebarUser.photoUrl,
-      sidebarUser.photoURL,
-      sidebarUser.picture,
-      sidebarUser.pictureUrl,
-      sidebarUser.image,
-      sidebarUser.imageUrl,
-      sidebarUser.foto,
-      sidebarUser.fotoUrl,
-      sidebarUser.imagen,
-      sidebarUser.imagenUrl,
+      source.avatarUrl,
+      source.avatar,
+      source.photoUrl,
+      source.photoURL,
+      source.picture,
+      source.pictureUrl,
+      source.image,
+      source.imageUrl,
+      source.foto,
+      source.fotoUrl,
+      source.imagen,
+      source.imagenUrl,
 
-      sidebarUser.profile?.avatarUrl,
-      sidebarUser.profile?.avatar,
-      sidebarUser.profile?.photoUrl,
-      sidebarUser.profile?.photoURL,
-      sidebarUser.profile?.picture,
-      sidebarUser.profile?.pictureUrl,
-      sidebarUser.profile?.image,
-      sidebarUser.profile?.imageUrl,
-      sidebarUser.media?.avatarUrl,
-      sidebarUser.media?.avatar,
-      sidebarUser.media?.photoUrl,
-      sidebarUser.media?.picture,
+      source.profile?.avatarUrl,
+      source.profile?.avatar,
+      source.profile?.photoUrl,
+      source.profile?.photoURL,
+      source.profile?.picture,
+      source.profile?.pictureUrl,
+      source.profile?.image,
+      source.profile?.imageUrl,
 
-      view.avatarUrl,
-      view.avatar,
-      view.photoUrl,
-      view.photoURL,
-      view.picture,
-      view.image,
-
-      viewUser.avatarUrl,
-      viewUser.avatar,
-      viewUser.photoUrl,
-      viewUser.photoURL,
-      viewUser.picture,
-      viewUser.pictureUrl,
-      viewUser.image,
-      viewUser.imageUrl,
-      viewUser.foto,
-      viewUser.fotoUrl,
-      viewUser.imagen,
-      viewUser.imagenUrl,
-
-      viewUser.profile?.avatarUrl,
-      viewUser.profile?.avatar,
-      viewUser.profile?.photoUrl,
-      viewUser.profile?.photoURL,
-      viewUser.profile?.picture,
-      viewUser.profile?.pictureUrl,
-      viewUser.media?.avatarUrl,
-      viewUser.media?.avatar,
-      viewUser.media?.photoUrl,
-      viewUser.media?.picture
+      source.media?.avatarUrl,
+      source.media?.avatar,
+      source.media?.photoUrl,
+      source.media?.photoURL,
+      source.media?.picture,
+      source.media?.pictureUrl,
+      source.media?.image,
+      source.media?.imageUrl
     )
   );
 
   const initials = safeText(
     first(
-      sidebarUser.initials,
-      sidebarUser.iniciales,
-      view.initials,
-      view.iniciales,
-      viewUser.initials,
-      viewUser.iniciales,
+      source.initials,
+      source.iniciales,
       getInitials(displayName)
     ),
-    "ON"
+    "U"
   )
     .slice(0, 3)
     .toUpperCase();
 
   const rawRole = first(
-    sidebarUser.role,
-    sidebarUser.rol,
-    Array.isArray(sidebarUser.roles) ? sidebarUser.roles[0] : "",
+    source.role,
+    source.rol,
+    Array.isArray(source.roles) ? source.roles[0] : "",
+
+    data.role,
+    data.rol,
+    Array.isArray(data.roles) ? data.roles[0] : "",
+
+    state.role,
+    state.rol,
+    Array.isArray(state.roles) ? state.roles[0] : "",
+
     view.role,
     view.rol,
-    Array.isArray(view.roles) ? view.roles[0] : "",
-    viewUser.role,
-    viewUser.rol,
-    Array.isArray(viewUser.roles) ? viewUser.roles[0] : ""
+    Array.isArray(view.roles) ? view.roles[0] : ""
   );
 
-  const role = safeText(rawRole, "user").toLowerCase() === "admin" ? "admin" : "user";
-  const isAdmin = Boolean(sidebarUser.isAdmin === true || view.admin === true || isAdminRole(role));
+  const role = safeText(rawRole, "user").toLowerCase() === "admin"
+    ? "admin"
+    : "user";
+
+  const isAdmin = Boolean(
+    source.isAdmin === true ||
+      data.admin === true ||
+      state.admin === true ||
+      view.admin === true ||
+      role === "admin"
+  );
+
+  const finalRole = isAdmin ? "admin" : "user";
+
+  const user = {
+    ...source,
+
+    hasUser: source.hasUser !== false,
+
+    displayName,
+    name: displayName,
+    fullName: displayName,
+
+    avatarUrl,
+    avatar: avatarUrl,
+    photoUrl: avatarUrl,
+    photoURL: avatarUrl,
+    picture: avatarUrl,
+    pictureUrl: avatarUrl,
+    image: avatarUrl,
+    imageUrl: avatarUrl,
+    foto: avatarUrl,
+    fotoUrl: avatarUrl,
+    imagen: avatarUrl,
+    imagenUrl: avatarUrl,
+
+    initials,
+
+    role: finalRole,
+    rol: finalRole,
+    roles: [finalRole],
+
+    roleLabel: safeText(
+      first(source.roleLabel, isAdmin ? "Administrador" : "Estándar"),
+      isAdmin ? "Administrador" : "Estándar"
+    ),
+
+    isAdmin,
+    isUser: !isAdmin,
+  };
 
   return {
     user,
     displayName,
     avatarUrl,
     initials,
-    role: isAdmin ? "admin" : "user",
+    role: finalRole,
     isAdmin,
   };
 }
@@ -597,8 +607,8 @@ function buildTemplateViewModel(input = {}) {
   const data = safeObject(input);
   const view = buildHomeTemplateData(data);
   const state = getLoadingState(data);
-  const hydratedUser = getHydratedHomeUser(data, view);
-  const admin = hydratedUser.isAdmin;
+  const sidebarUser = getHomeUserViewModel(data, view);
+  const admin = sidebarUser.isAdmin;
   const meta = getTemplateMetaFromView(data, view);
 
   const ticketRows = safeArray(first(view.ticketRows, view.incidenceRows, view.tableRows, view.pageItems, []));
@@ -615,11 +625,11 @@ function buildTemplateViewModel(input = {}) {
     meta,
     admin,
 
-    role: hydratedUser.role,
-    user: hydratedUser.user,
-    displayName: hydratedUser.displayName,
-    avatarUrl: hydratedUser.avatarUrl,
-    initials: hydratedUser.initials,
+    role: sidebarUser.role,
+    user: sidebarUser.user,
+    displayName: sidebarUser.displayName,
+    avatarUrl: sidebarUser.avatarUrl,
+    initials: sidebarUser.initials,
 
     dashboard: safeObject(view.dashboard),
     summary: safeObject(view.summary),

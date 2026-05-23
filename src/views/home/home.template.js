@@ -7,10 +7,12 @@
    - Sin card grande envolvente.
    - Sin accesos rápidos.
    - Sin widgets duplicados.
-   - Sin Urgentes, Salud, Última actividad ni Adjuntos.
-   - Con Facturas totales + importe total.
+   - Sin Urgentes, Salud, Última actividad ni Adjuntos como cards.
+   - Con Facturas totales + importe total en Home user.
    - Avatar visible con tono dinámico.
    - Textos visibles en español.
+   - Modelo calculado una sola vez por render.
+   - Sin rutas opcionales inventadas.
 ========================================================= */
 
 import {
@@ -41,16 +43,8 @@ import {
 
   getInitials,
 
-  getDashboard,
-  getCollections,
-  computeHomeStats,
-  getStatCards,
-
-  getUser,
-  getRole,
   isAdminRole,
-  getDisplayName,
-  getAvatarUrl,
+  buildHomeTemplateData,
 
   getTicketId,
   getTicketSubject,
@@ -70,16 +64,13 @@ import {
   getInvoiceCurrency,
   getInvoiceStatusKey,
 
-  getActivity,
   getActivityTitle,
   getActivityText,
   getActivityDate,
   getActivityType,
-
-  getPagination,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.final.10";
+export const TEMPLATE_VERSION = "home.template.final.11";
 
 const ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -106,7 +97,7 @@ const STATUS_ORDER = Object.freeze([
   "closed",
 ]);
 
-const RAW_KEYS = new Set(["raw", "data", "payload", "response"]);
+const RAW_KEYS = new Set(["raw", "data", "payload", "response", "body"]);
 
 const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
@@ -311,8 +302,13 @@ const ROUTES = Object.freeze({
   INCIDENCIAS: safeStaticRoute(CORE_ROUTES?.incidencias, "/incidencias"),
   FACTURAS: safeStaticRoute(CORE_ROUTES?.facturas, "/facturas"),
   CLIENTES: safeStaticRoute(CORE_ROUTES?.clientes, "/clientes"),
-  USUARIOS: safeStaticRoute(CORE_ROUTES?.usuarios, "/usuarios"),
-  SERVIDOR: safeStaticRoute(CORE_ROUTES?.servidor, "/servidor"),
+
+  /*
+    Opcionales: no se inventan.
+    Sólo existen si core/config.js los define.
+  */
+  USUARIOS: safeStaticRoute(CORE_ROUTES?.usuarios, ""),
+  SERVIDOR: safeStaticRoute(CORE_ROUTES?.servidor, ""),
 });
 
 function getRoutePath(value = "") {
@@ -358,6 +354,102 @@ function safeImageSrc(value = "") {
   }
 
   return "";
+}
+
+/* =========================================================
+   View model único
+========================================================= */
+
+function getState(input = {}) {
+  return safeObject(input.state);
+}
+
+function getLoadingState(input = {}) {
+  const data = safeObject(input);
+  const state = getState(data);
+
+  return {
+    loading: Boolean(state.loading || data.loading),
+    refreshing: Boolean(state.refreshing || data.refreshing),
+    creating: Boolean(state.creating || data.creating),
+    loaded: Boolean(state.loaded || data.loaded),
+    hydrated: Boolean(state.hydrated || data.hydrated),
+    error: redact(safeText(first(state.error, data.error), "")),
+    openingTicketId: safeText(state.openingTicketId, ""),
+    selectedTicketId: safeText(state.selectedTicketId, ""),
+    navigatingAction: redact(safeText(state.navigatingAction, "")),
+  };
+}
+
+function getTemplateMetaFromView(data = {}, view = {}) {
+  const state = getState(data);
+  const dashboard = safeObject(view.dashboard);
+
+  const lastUpdatedAt = first(
+    data.lastUpdatedAt,
+    data.lastSyncAt,
+    state.lastUpdatedAt,
+    state.lastSyncAt,
+    view.lastUpdatedAt,
+    dashboard.updatedAt,
+    dashboard.generatedAt,
+    dashboard.lastSyncAt,
+    dashboard.meta?.updatedAt
+  );
+
+  return {
+    requestId: safeText(first(data.requestId, state.requestId, view.requestId, dashboard.requestId, dashboard.meta?.requestId), ""),
+    lastUpdatedAt,
+    partial: Boolean(first(dashboard.partial, data.partial, false)),
+    errorsCount: safeArray(first(dashboard.errors, data.errors, [])).length,
+  };
+}
+
+function buildTemplateViewModel(input = {}) {
+  const data = safeObject(input);
+  const view = buildHomeTemplateData(data);
+  const state = getLoadingState(data);
+  const admin = Boolean(view.admin || isAdminRole(view.role));
+  const meta = getTemplateMetaFromView(data, view);
+
+  return {
+    __homeTemplateVm: true,
+
+    data,
+    view,
+    state,
+    meta,
+    admin,
+
+    role: admin ? "admin" : "user",
+    user: safeObject(view.user),
+    displayName: visualLabel(view.displayName, "Usuario"),
+    avatarUrl: safeImageSrc(view.avatarUrl),
+    initials: safeText(view.initials, "ON"),
+
+    dashboard: safeObject(view.dashboard),
+    summary: safeObject(view.summary),
+    stats: safeObject(view.stats),
+
+    statCards: safeArray(view.statCards),
+    widgets: safeArray(view.widgets),
+
+    tickets: safeArray(view.tickets),
+    invoices: safeArray(view.invoices),
+    users: admin ? safeArray(view.users) : [],
+    clients: admin ? safeArray(view.clients) : [],
+    activity: safeArray(view.activity),
+
+    collections: safeObject(view.collections),
+    pagination: safeObject(view.pagination),
+    pageItems: safeArray(view.pageItems),
+  };
+}
+
+function asViewModel(input = {}) {
+  return input && input.__homeTemplateVm === true
+    ? input
+    : buildTemplateViewModel(input);
 }
 
 /* =========================================================
@@ -474,32 +566,18 @@ function parseAmount(value) {
   return Number.isFinite(amount) ? amount : Number.NaN;
 }
 
-function getInvoicesTotalAmount(input = {}) {
-  const data = safeObject(input);
-  const dashboard = getDashboard(data);
-  const collections = getCollections(data);
-  const invoices = safeArray(collections.invoices);
+function getInvoicesTotalAmount(vm = {}) {
+  const invoices = safeArray(vm.invoices);
 
   const candidate = firstDefined(
-    collections.invoicesTotalAmount,
-    collections.totalInvoicesAmount,
-    collections.totalInvoiceAmount,
-    collections.totalAmount,
-    collections.facturasTotalAmount,
-    collections.facturacionTotal,
-    collections.billingTotal,
-    dashboard.invoicesTotalAmount,
-    dashboard.totalInvoicesAmount,
-    dashboard.totalInvoiceAmount,
-    dashboard.facturasTotalAmount,
-    dashboard.facturacionTotal,
-    dashboard.billingTotal,
-    data.invoicesTotalAmount,
-    data.totalInvoicesAmount,
-    data.totalInvoiceAmount,
-    data.facturasTotalAmount,
-    data.facturacionTotal,
-    data.billingTotal
+    vm.stats.invoiceAmount,
+    vm.summary.invoiceAmount,
+    vm.summary.billingTotal,
+    vm.summary.totalFacturado,
+    vm.dashboard.invoiceAmount,
+    vm.dashboard.billingTotal,
+    vm.dashboard.totalFacturado,
+    vm.dashboard.facturacionTotal
   );
 
   const candidateAmount = parseAmount(candidate);
@@ -509,56 +587,43 @@ function getInvoicesTotalAmount(input = {}) {
   return invoices.reduce((total, invoice) => total + safeNumber(getInvoiceAmount(invoice), 0), 0);
 }
 
-function getInvoicesTotalCount(input = {}) {
-  const data = safeObject(input);
-  const dashboard = getDashboard(data);
-  const collections = getCollections(data);
-  const invoices = safeArray(collections.invoices);
+function getInvoicesTotalCount(vm = {}) {
+  const invoices = safeArray(vm.invoices);
 
   return safeNumber(
     firstDefined(
-      collections.invoicesRemoteCount,
-      collections.invoicesTotalCount,
-      collections.totalInvoicesCount,
-      collections.facturasTotalCount,
-      dashboard.invoicesRemoteCount,
-      dashboard.invoicesTotalCount,
-      dashboard.totalInvoicesCount,
-      dashboard.facturasTotalCount,
-      data.invoicesRemoteCount,
-      data.invoicesTotalCount,
-      data.totalInvoicesCount,
-      data.facturasTotalCount
+      vm.stats.totalInvoices,
+      vm.summary.totalInvoices,
+      vm.summary.invoicesTotal,
+      vm.summary.facturasTotal,
+      vm.collections.invoicesRemoteCount,
+      vm.dashboard.totalInvoices,
+      vm.dashboard.invoicesTotal,
+      vm.dashboard.facturasTotal
     ),
     invoices.length
   );
 }
 
-function getInvoicesTotalCurrency(input = {}) {
-  const data = safeObject(input);
-  const dashboard = getDashboard(data);
-  const collections = getCollections(data);
-  const invoices = safeArray(collections.invoices);
+function getInvoicesTotalCurrency(vm = {}) {
+  const invoices = safeArray(vm.invoices);
   const firstInvoice = safeObject(invoices[0]);
 
   return safeText(
     firstDefined(
-      collections.invoicesCurrency,
-      collections.currency,
-      dashboard.invoicesCurrency,
-      dashboard.currency,
-      data.invoicesCurrency,
-      data.currency,
+      vm.collections.invoicesCurrency,
+      vm.dashboard.invoicesCurrency,
+      vm.dashboard.currency,
       getInvoiceCurrency(firstInvoice)
     ),
     DEFAULT_CURRENCY
   );
 }
 
-function buildInvoicesTotalCard(input = {}) {
-  const amount = getInvoicesTotalAmount(input);
-  const currency = getInvoicesTotalCurrency(input);
-  const count = getInvoicesTotalCount(input);
+function buildInvoicesTotalCard(vm = {}) {
+  const amount = getInvoicesTotalAmount(vm);
+  const currency = getInvoicesTotalCurrency(vm);
+  const count = getInvoicesTotalCount(vm);
 
   return {
     id: "facturas-totales",
@@ -572,8 +637,8 @@ function buildInvoicesTotalCard(input = {}) {
   };
 }
 
-function translateCard(card = {}, input = {}) {
-  const admin = isAdmin(input);
+function translateCard(card = {}, vm = {}) {
+  const admin = Boolean(vm.admin);
   const identity = normalizeKey(homeIdentity(
     card.id,
     card.key,
@@ -621,9 +686,9 @@ function translateCard(card = {}, input = {}) {
   return card;
 }
 
-function getVisibleHomeStatCards(input = {}) {
-  const cards = getStatCards(input)
-    .map((card) => translateCard(card, input))
+function getVisibleHomeStatCards(vm = {}) {
+  const cards = safeArray(vm.statCards)
+    .map((card) => translateCard(card, vm))
     .filter((card) => !isBlockedHomeIdentity(
       card.id,
       card.key,
@@ -639,9 +704,13 @@ function getVisibleHomeStatCards(input = {}) {
     ))
     .filter((card) => !isInvoiceTotalsCard(card));
 
+  if (vm.admin) {
+    return cards;
+  }
+
   return [
     ...cards,
-    buildInvoicesTotalCard(input),
+    buildInvoicesTotalCard(vm),
   ];
 }
 
@@ -720,64 +789,7 @@ function resolveStatRoute(card = {}) {
   ) || ROUTES.INCIDENCIAS;
 }
 
-/* =========================================================
-   Estado / rol / meta
-========================================================= */
-
-function getState(input = {}) {
-  return safeObject(input.state);
-}
-
-function getLoadingState(input = {}) {
-  const data = safeObject(input);
-  const state = getState(data);
-
-  return {
-    loading: Boolean(state.loading || data.loading),
-    refreshing: Boolean(state.refreshing || data.refreshing),
-    creating: Boolean(state.creating || data.creating),
-    loaded: Boolean(state.loaded || data.loaded),
-    hydrated: Boolean(state.hydrated || data.hydrated),
-    error: redact(safeText(first(state.error, data.error), "")),
-    openingTicketId: safeText(state.openingTicketId, ""),
-    selectedTicketId: safeText(state.selectedTicketId, ""),
-    navigatingAction: redact(safeText(state.navigatingAction, "")),
-  };
-}
-
-function getTemplateMeta(input = {}) {
-  const data = safeObject(input);
-  const state = getState(data);
-  const dashboard = getDashboard(data);
-
-  const lastUpdatedAt = first(
-    data.lastUpdatedAt,
-    data.lastSyncAt,
-    state.lastUpdatedAt,
-    state.lastSyncAt,
-    dashboard.updatedAt,
-    dashboard.generatedAt,
-    dashboard.lastSyncAt,
-    dashboard.meta?.updatedAt
-  );
-
-  return {
-    requestId: safeText(first(data.requestId, state.requestId, dashboard.requestId, dashboard.meta?.requestId), ""),
-    lastUpdatedAt,
-    partial: Boolean(first(dashboard.partial, data.partial, false)),
-    errorsCount: safeArray(first(dashboard.errors, data.errors, [])).length,
-  };
-}
-
-function isAdmin(input = {}) {
-  return isAdminRole(getRole(input));
-}
-
-function getSafeDisplayName(input = {}) {
-  return visualLabel(getDisplayName(input), "Usuario");
-}
-
-function filterActivityForRole(input = {}, rows = []) {
+function filterActivityForRole(vm = {}, rows = []) {
   const activity = safeArray(rows).filter((item) => !isBlockedHomeIdentity(
     item.type,
     item.kind,
@@ -789,7 +801,7 @@ function filterActivityForRole(input = {}, rows = []) {
     getActivityText(item)
   ));
 
-  if (isAdmin(input)) return activity;
+  if (vm.admin) return activity;
 
   return activity.filter((item) => {
     const type = normalizeKey(first(item.type, item.kind, item.category, ""));
@@ -1084,13 +1096,13 @@ function statCard(card = {}, index = 0) {
 }
 
 export function renderHomeHeader(input = {}) {
-  const data = safeObject(input);
-  const state = getLoadingState(data);
-  const stats = computeHomeStats(data);
-  const meta = getTemplateMeta(data);
-  const admin = isAdmin(data);
-  const displayName = getSafeDisplayName(data);
-  const user = getUser(data);
+  const vm = asViewModel(input);
+  const state = vm.state;
+  const stats = vm.stats;
+  const meta = vm.meta;
+  const admin = vm.admin;
+  const displayName = vm.displayName;
+  const user = vm.user;
 
   const title = admin ? "Centro de control Onion" : `Hola, ${displayName}`;
   const subtitle = admin
@@ -1107,7 +1119,7 @@ export function renderHomeHeader(input = {}) {
         <div class="home-hero-main">
           ${avatar({
             name: displayName,
-            image: getAvatarUrl(data),
+            image: vm.avatarUrl,
             kind: "user",
             seed: safeText(first(user.userId, user.id, user.username, displayName), displayName),
             className: "home-user-avatar",
@@ -1173,7 +1185,7 @@ export function renderHomeHeader(input = {}) {
       ${heroMetrics(stats)}
 
       <div class="home-stats" data-home-section="stats">
-        ${getVisibleHomeStatCards(data).map(statCard).join("")}
+        ${getVisibleHomeStatCards(vm).map(statCard).join("")}
       </div>
     </section>
   `;
@@ -1213,10 +1225,10 @@ function activityIcon(typeKey = "") {
   return "activity";
 }
 
-function activityItem(input = {}, item = {}) {
+function activityItem(vm = {}, item = {}) {
   const type = getActivityType(item);
   const typeKey = normalizeKey(type);
-  const admin = isAdmin(input);
+  const admin = vm.admin;
 
   if (
     !admin &&
@@ -1227,6 +1239,7 @@ function activityItem(input = {}, item = {}) {
 
   const route = safeRoute(first(item.route, item.href, item.link, item.to, ""), "") || routeForActivityType(typeKey);
 
+  if (!route) return "";
   if (!admin && isAdminOnlyRoute(route)) return "";
 
   const entityId = safeText(first(item.entityId, item.id, item.ticketId, item.incidenciaId, item.facturaId, item.invoiceId), "");
@@ -1255,10 +1268,10 @@ function activityItem(input = {}, item = {}) {
 }
 
 export function renderHomeActivity(input = {}) {
-  const data = safeObject(input);
-  const state = getLoadingState(data);
-  const activity = filterActivityForRole(data, getActivity(data)).slice(0, LIMITS.activity);
-  const items = activity.map((item) => activityItem(data, item)).filter(Boolean);
+  const vm = asViewModel(input);
+  const state = vm.state;
+  const activity = filterActivityForRole(vm, vm.activity).slice(0, LIMITS.activity);
+  const items = activity.map((item) => activityItem(vm, item)).filter(Boolean);
 
   return `
     <section class="home-panel home-panel--activity" data-home-section="activity">
@@ -1342,18 +1355,17 @@ function invoiceItem(item = {}) {
 }
 
 export function renderHomeInvoicePreview(input = {}) {
-  const data = safeObject(input);
-  const state = getLoadingState(data);
-  const collections = getCollections(data);
-  const invoices = safeArray(collections.invoices).slice(0, LIMITS.invoices);
-  const total = safeNumber(first(collections.invoicesRemoteCount, invoices.length), invoices.length);
+  const vm = asViewModel(input);
+  const state = vm.state;
+  const invoices = safeArray(vm.invoices).slice(0, LIMITS.invoices);
+  const total = safeNumber(first(vm.collections.invoicesRemoteCount, invoices.length), invoices.length);
 
   return `
     <section class="home-panel home-panel--invoice-preview" data-home-section="invoice-preview">
       <div class="home-panel-head">
         <div class="home-panel-copy">
           <span class="home-panel-kicker">Facturación</span>
-          <h2 class="home-panel-title">${isAdmin(data) ? "Facturación rápida" : "Mis facturas"}</h2>
+          <h2 class="home-panel-title">${vm.admin ? "Facturación rápida" : "Mis facturas"}</h2>
           <p class="home-panel-subtitle">
             ${state.loading && !invoices.length ? "Cargando facturas..." : escapeHtml(`${formatNumber(total)} facturas detectadas`)}
           </p>
@@ -1404,6 +1416,8 @@ function entityItem(item = {}, type = "client") {
   const route = isUser ? ROUTES.USUARIOS : ROUTES.CLIENTES;
   const entityId = safeText(first(item.userId, item.usuarioId, item.clienteId, item.clientId, item.customerId, item.id), "");
 
+  if (!route) return "";
+
   return `
     <button
       type="button"
@@ -1428,14 +1442,16 @@ function entityItem(item = {}, type = "client") {
 }
 
 export function renderHomeEntitiesPreview(input = {}) {
-  const data = safeObject(input);
-  const state = getLoadingState(data);
-  const collections = getCollections(data);
+  const vm = asViewModel(input);
+  const state = vm.state;
 
-  if (!isAdmin(data)) return "";
+  if (!vm.admin) return "";
 
-  const clients = safeArray(collections.clients).slice(0, LIMITS.entities);
-  const users = safeArray(collections.users).slice(0, LIMITS.entities);
+  const clients = safeArray(vm.clients).slice(0, LIMITS.entities);
+  const users = safeArray(vm.users).slice(0, LIMITS.entities);
+
+  const clientItems = clients.map((item) => entityItem(item, "client")).filter(Boolean);
+  const userItems = users.map((item) => entityItem(item, "user")).filter(Boolean);
 
   return `
     <section class="home-panel home-panel--entities" data-home-section="entities">
@@ -1444,9 +1460,9 @@ export function renderHomeEntitiesPreview(input = {}) {
           <span class="home-panel-kicker">Directorio</span>
           <h2 class="home-panel-title">Clientes y usuarios</h2>
           <p class="home-panel-subtitle">
-            ${state.loading && !clients.length && !users.length
+            ${state.loading && !clientItems.length && !userItems.length
               ? "Cargando directorio..."
-              : escapeHtml(`${formatNumber(collections.clientsRemoteCount || clients.length)} clientes · ${formatNumber(collections.usersRemoteCount || users.length)} usuarios`)
+              : escapeHtml(`${formatNumber(vm.collections.clientsRemoteCount || clients.length)} clientes · ${formatNumber(vm.collections.usersRemoteCount || users.length)} usuarios`)
             }
           </p>
         </div>
@@ -1463,21 +1479,21 @@ export function renderHomeEntitiesPreview(input = {}) {
         </button>
       </div>
 
-      ${state.loading && !clients.length && !users.length
+      ${state.loading && !clientItems.length && !userItems.length
         ? loadingCards(3)
         : `
           <div class="home-entities-list">
-            ${clients.length
-              ? clients.map((item) => entityItem(item, "client")).join("")
+            ${clientItems.length
+              ? clientItems.join("")
               : emptyState({
                   title: "Sin clientes visibles",
                   text: "Cuando haya clientes disponibles aparecerán aquí.",
                   iconName: "client",
                 })
             }
-            ${users.length ? `
+            ${userItems.length ? `
               <div class="home-entities-separator" aria-hidden="true"></div>
-              ${users.map((item) => entityItem(item, "user")).join("")}
+              ${userItems.join("")}
             ` : ""}
           </div>
         `
@@ -1490,8 +1506,8 @@ export function renderHomeEntitiesPreview(input = {}) {
    Tabla de incidencias
 ========================================================= */
 
-function statusSummary(input = {}) {
-  const tickets = safeArray(getCollections(input).tickets);
+function statusSummary(vm = {}) {
+  const tickets = safeArray(vm.tickets);
   const counts = Object.fromEntries(STATUS_ORDER.map((status) => [status, 0]));
 
   for (const ticket of tickets) {
@@ -1696,20 +1712,10 @@ function normalizePagination(pagination = {}, rows = []) {
 }
 
 export function renderHomeTicketsTable(input = {}) {
-  const data = safeObject(input);
-  const state = getLoadingState(data);
-  const collections = getCollections(data);
-  const tickets = safeArray(collections.tickets);
-
-  const pagination = normalizePagination(
-    getPagination(tickets, {
-      ...data,
-      remoteCount: collections.ticketsRemoteCount,
-      totalCount: collections.ticketsRemoteCount,
-    }),
-    tickets
-  );
-
+  const vm = asViewModel(input);
+  const state = vm.state;
+  const tickets = safeArray(vm.tickets);
+  const pagination = normalizePagination(vm.pagination, tickets);
   const initialLoading = state.loading && !pagination.pageItems.length;
 
   return `
@@ -1717,7 +1723,7 @@ export function renderHomeTicketsTable(input = {}) {
       <div class="home-panel-head">
         <div class="home-panel-copy">
           <span class="home-panel-kicker">Incidencias</span>
-          <h2 class="home-panel-title">${isAdmin(data) ? "Incidencias recientes" : "Tus últimas incidencias"}</h2>
+          <h2 class="home-panel-title">${vm.admin ? "Incidencias recientes" : "Tus últimas incidencias"}</h2>
           <p class="home-panel-subtitle">
             ${initialLoading
               ? "Cargando incidencias..."
@@ -1731,7 +1737,7 @@ export function renderHomeTicketsTable(input = {}) {
         </div>
 
         <div class="home-panel-head-actions">
-          ${statusSummary(data)}
+          ${statusSummary(vm)}
 
           <div class="home-pagination" aria-label="Paginación del Home">
             <button
@@ -1840,20 +1846,10 @@ export function renderHomeErrorState(message = "No se pudo cargar el Home.") {
 ========================================================= */
 
 export function renderHomeTemplate(input = {}) {
-  const data = safeObject(input);
-  const state = getLoadingState(data);
-  const meta = getTemplateMeta(data);
-  const admin = isAdmin(data);
-  const dashboard = getDashboard(data);
-
-  const payload = {
-    ...data,
-    dashboard,
-    state: {
-      ...safeObject(data.state),
-      ...state,
-    },
-  };
+  const vm = buildTemplateViewModel(input);
+  const state = vm.state;
+  const meta = vm.meta;
+  const admin = vm.admin;
 
   return `
     <section
@@ -1878,15 +1874,15 @@ export function renderHomeTemplate(input = {}) {
       aria-busy="${state.loading || state.refreshing ? "true" : "false"}"
     >
       ${errorBanner(state.error)}
-      ${renderHomeHeader(payload)}
+      ${renderHomeHeader(vm)}
 
       <section class="home-grid" data-home-section="main-grid">
-        ${renderHomeActivity(payload)}
-        ${renderHomeInvoicePreview(payload)}
-        ${renderHomeEntitiesPreview(payload)}
+        ${renderHomeActivity(vm)}
+        ${renderHomeInvoicePreview(vm)}
+        ${renderHomeEntitiesPreview(vm)}
       </section>
 
-      ${renderHomeTicketsTable(payload)}
+      ${renderHomeTicketsTable(vm)}
     </section>
   `;
 }

@@ -8,10 +8,12 @@
    - Normalizar usando home.model.js sólo en escrituras.
    - Mantener aliases mínimos para template/selectors.
    - Separar Home admin/user desde el propio payload.
-   - User nunca conserva usuarios/clientes/servidor de cache admin.
+   - User nunca conserva usuarios/clientes de cache admin.
    - Preservar datos válidos sólo si el rol no cambia y se solicita.
    - Exponer getters usados por Home.
+   - Normalizar incidencias con facturas + usuarios para detalle/modal.
    - No conservar raw/payload/response/data backend.
+   - No conservar metadatos Cosmos.
    - Redactar errores/snapshots.
    - Sin DOM.
    - Sin CSS.
@@ -41,7 +43,7 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_STORE_VERSION = "home.store.v7";
+export const HOME_STORE_VERSION = "home.store.v8";
 export const HOME_STORE_SOURCE = "views.home.store";
 
 const DEFAULT_PAGE = 1;
@@ -67,12 +69,12 @@ const COSMOS_META_KEYS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni/i;
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|cuenta|bank|account|ipRaw|ip|userAgent/i;
 
 const EMAIL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
 
 const ADMIN_ENTITY_RE =
-  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory|servidores?|servidor|servers?)([\s._/-]|$)/i;
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
 
 /* =========================================================
    SAFE HELPERS
@@ -191,7 +193,7 @@ function nowIso() {
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
@@ -281,21 +283,15 @@ function sanitizeStoreObject(value = {}) {
   return safeObject(sanitizeStoreValue(value), {});
 }
 
-function sanitizeStoreList(items = []) {
-  return safeArray(items)
-    .map((item) => sanitizeStoreObject(item))
-    .filter(hasKeys);
-}
-
 function safePublicId(value = "") {
   const text = safeText(value, "");
 
   if (!text) return "";
   if (/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i.test(text)) return "";
-  if (/[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(text)) return "";
+  if (/[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(text)) return "";
   if (/Bearer\s+/i.test(text)) return "";
 
-  return redact(text);
+  return redact(text).slice(0, 240);
 }
 
 function normalizeError(error = null) {
@@ -519,15 +515,6 @@ function sanitizeSummaryForRole(summary = {}, admin = false) {
     output.visibleClientsCount = 0;
     output.visibleClientesCount = 0;
     output.visibleCustomersCount = 0;
-
-    output.serversCount = 0;
-    output.serverCount = 0;
-    output.servidoresCount = 0;
-    output.servidorCount = 0;
-    output.totalServers = 0;
-    output.totalServidores = 0;
-    output.visibleServersCount = 0;
-    output.visibleServidoresCount = 0;
   }
 
   return output;
@@ -572,6 +559,69 @@ function clientId(item = {}) {
 }
 
 /* =========================================================
+   NORMALIZE COLLECTIONS
+========================================================= */
+
+function normalizeInvoicesForStore(items = []) {
+  return uniqueBy(
+    normalizeHomeInvoices(items),
+    invoiceId
+  );
+}
+
+function normalizeUsersForStore(items = [], admin = currentIsAdmin()) {
+  if (!admin) return [];
+
+  return uniqueBy(
+    normalizeHomeUsers(items),
+    userId
+  );
+}
+
+function normalizeClientsForStore(items = [], admin = currentIsAdmin()) {
+  if (!admin) return [];
+
+  return uniqueBy(
+    normalizeHomeClients(items),
+    clientId
+  );
+}
+
+function normalizeTicketsForStore(items = [], {
+  invoices = [],
+  users = [],
+  admin = currentIsAdmin(),
+} = {}) {
+  const normalizedInvoices = normalizeInvoicesForStore(invoices);
+  const normalizedUsers = admin ? normalizeUsersForStore(users, admin) : [];
+
+  return uniqueBy(
+    normalizeHomeTickets(items, {
+      invoices: normalizedInvoices,
+      users: normalizedUsers,
+    }),
+    ticketId
+  );
+}
+
+function normalizeWidgetsForStore(items = [], admin = currentIsAdmin()) {
+  return filterWidgetsForRole(
+    uniqueBy(
+      normalizeHomeWidgets(items),
+      widgetId
+    ),
+    admin
+  );
+}
+
+function normalizeActivityForStore(items = [], admin = currentIsAdmin()) {
+  return filterActivityForRole(
+    normalizeHomeActivityList(items),
+    admin
+  );
+}
+
+/* =========================================================
    INITIAL STORE
 ========================================================= */
 
@@ -585,24 +635,23 @@ export function createInitialHomeStore(seed = {}) {
     admin
   );
 
-  const widgets = filterWidgetsForRole(
-    normalizeHomeWidgets(firstArray(raw.widgets, raw.cards, raw.kpis, raw.blocks) || []),
+  const invoices = normalizeInvoicesForStore(firstArray(raw.invoices, raw.facturas) || []);
+  const users = normalizeUsersForStore(firstArray(raw.users, raw.usuarios) || [], admin);
+  const clients = normalizeClientsForStore(firstArray(raw.clients, raw.clientes, raw.customers) || [], admin);
+
+  const tickets = normalizeTicketsForStore(firstArray(raw.tickets, raw.incidencias) || [], {
+    invoices,
+    users,
+    admin,
+  });
+
+  const widgets = normalizeWidgetsForStore(
+    firstArray(raw.widgets, raw.cards, raw.kpis, raw.blocks) || [],
     admin
   );
 
-  const tickets = normalizeHomeTickets(firstArray(raw.tickets, raw.incidencias) || []);
-  const invoices = normalizeHomeInvoices(firstArray(raw.invoices, raw.facturas) || []);
-
-  const users = admin
-    ? normalizeHomeUsers(firstArray(raw.users, raw.usuarios) || [])
-    : [];
-
-  const clients = admin
-    ? normalizeHomeClients(firstArray(raw.clients, raw.clientes, raw.customers) || [])
-    : [];
-
-  const activity = filterActivityForRole(
-    normalizeHomeActivityList(firstArray(raw.activity, raw.activities, raw.recent, raw.recentActivity) || []),
+  const activity = normalizeActivityForStore(
+    firstArray(raw.activity, raw.activities, raw.recent, raw.recentActivity) || [],
     admin
   );
 
@@ -656,19 +705,10 @@ export function createInitialHomeStore(seed = {}) {
     customers: clients,
     clientsRemoteCount: admin ? Math.max(clients.length, safeNumber(raw.clientsRemoteCount, 0)) : 0,
 
-    servers: [],
-    servidores: [],
-    serversRemoteCount: 0,
-
-    server: {},
-    servidor: {},
-
     activity,
     activities: activity,
     recent: activity,
     recentActivity: activity,
-
-    health: null,
 
     error: null,
     errorMessage: "",
@@ -748,6 +788,7 @@ function selectDashboardPayload(rawInput = {}) {
   return safeObject(
     first(
       rawInput.dashboard,
+      rawInput.home,
       rawInput.data?.dashboard,
       rawInput.payload?.dashboard,
       rawInput.result?.dashboard,
@@ -777,11 +818,6 @@ function normalizeDashboard(input = {}, options = {}) {
         clientes: admin ? raw.clientes : [],
         customers: admin ? raw.customers : [],
 
-        servers: [],
-        servidores: [],
-        server: {},
-        servidor: {},
-
         meta: {
           ...safeObject(raw.meta),
           role,
@@ -803,11 +839,6 @@ function normalizeDashboard(input = {}, options = {}) {
       clients: admin ? raw.clients : [],
       clientes: admin ? raw.clientes : [],
       customers: admin ? raw.customers : [],
-
-      servers: [],
-      servidores: [],
-      server: {},
-      servidor: {},
 
       meta: {
         ...safeObject(options.previousDashboard?.meta),
@@ -847,94 +878,99 @@ function normalizedPayload(payload = {}, options = {}) {
     previousDashboard: opts.preserveExisting === false ? {} : homeStore.dashboard,
   });
 
-  const summary = sanitizeSummaryForRole(
+  const rawSummary = sanitizeStoreObject(
     first(
       input.summary,
       input.stats,
       input.metrics,
       input.totals,
       input.counts,
-      dashboard.summary,
-      dashboard.stats,
-      dashboard.metrics,
-      dashboard.totals,
-      dashboard.counts,
       {}
-    ),
+    )
+  );
+
+  const summary = sanitizeSummaryForRole(
+    {
+      ...rawSummary,
+      ...safeObject(dashboard.summary),
+      ...safeObject(dashboard.stats),
+      ...safeObject(dashboard.metrics),
+      ...safeObject(dashboard.totals),
+      ...safeObject(dashboard.counts),
+    },
     admin
   );
 
-  const widgets = filterWidgetsForRole(
-    uniqueBy(
-      normalizeHomeWidgets(
-        firstArray(
-          input.widgets,
-          input.cards,
-          input.kpis,
-          input.blocks,
-          dashboard.widgets,
-          dashboard.cards,
-          dashboard.kpis,
-          dashboard.blocks
-        ) || []
-      ),
-      widgetId
-    ),
+  const widgets = normalizeWidgetsForStore(
+    firstArray(
+      input.widgets,
+      input.cards,
+      input.kpis,
+      input.blocks,
+      dashboard.widgets,
+      dashboard.cards,
+      dashboard.kpis,
+      dashboard.blocks
+    ) || [],
     admin
   );
 
-  const tickets = uniqueBy(
-    normalizeHomeTickets(
-      firstArray(input.tickets, input.incidencias, dashboard.tickets, dashboard.incidencias) || []
-    ),
-    ticketId
+  const invoices = normalizeInvoicesForStore(
+    firstArray(
+      input.invoices,
+      input.facturas,
+      dashboard.invoices,
+      dashboard.facturas
+    ) || []
   );
 
-  const invoices = uniqueBy(
-    normalizeHomeInvoices(
-      firstArray(input.invoices, input.facturas, dashboard.invoices, dashboard.facturas) || []
-    ),
-    invoiceId
+  const users = normalizeUsersForStore(
+    firstArray(
+      input.users,
+      input.usuarios,
+      dashboard.users,
+      dashboard.usuarios
+    ) || [],
+    admin
   );
 
-  const users = admin
-    ? uniqueBy(
-        normalizeHomeUsers(
-          firstArray(input.users, input.usuarios, dashboard.users, dashboard.usuarios) || []
-        ),
-        userId
-      )
-    : [];
+  const clients = normalizeClientsForStore(
+    firstArray(
+      input.clients,
+      input.clientes,
+      input.customers,
+      dashboard.clients,
+      dashboard.clientes,
+      dashboard.customers
+    ) || [],
+    admin
+  );
 
-  const clients = admin
-    ? uniqueBy(
-        normalizeHomeClients(
-          firstArray(
-            input.clients,
-            input.clientes,
-            input.customers,
-            dashboard.clients,
-            dashboard.clientes,
-            dashboard.customers
-          ) || []
-        ),
-        clientId
-      )
-    : [];
+  const tickets = normalizeTicketsForStore(
+    firstArray(
+      input.tickets,
+      input.incidencias,
+      dashboard.tickets,
+      dashboard.incidencias
+    ) || [],
+    {
+      invoices,
+      users,
+      admin,
+    }
+  );
 
-  const activity = filterActivityForRole(
-    normalizeHomeActivityList(
-      firstArray(
-        input.activity,
-        input.activities,
-        input.recent,
-        input.recentActivity,
-        dashboard.activity,
-        dashboard.activities,
-        dashboard.recent,
-        dashboard.recentActivity
-      ) || []
-    ),
+  const activity = normalizeActivityForStore(
+    firstArray(
+      input.activity,
+      input.activities,
+      input.recent,
+      input.recentActivity,
+      dashboard.activity,
+      dashboard.activities,
+      dashboard.recent,
+      dashboard.recentActivity
+    ) || [],
     admin
   );
 
@@ -1033,11 +1069,6 @@ function normalizedPayload(payload = {}, options = {}) {
       clientes: admin ? clients : [],
       customers: admin ? clients : [],
 
-      servers: [],
-      servidores: [],
-      server: {},
-      servidor: {},
-
       activity,
       activities: activity,
       recent: activity,
@@ -1064,19 +1095,26 @@ function normalizedPayload(payload = {}, options = {}) {
         widgetsCount: widgets.length,
 
         ticketsCount: ticketsRemoteCount,
+        incidenciasCount: ticketsRemoteCount,
         visibleTicketsCount: tickets.length,
+        visibleIncidenciasCount: tickets.length,
 
         invoicesCount: invoicesRemoteCount,
+        facturasCount: invoicesRemoteCount,
         visibleInvoicesCount: invoices.length,
+        visibleFacturasCount: invoices.length,
 
         usersCount: admin ? usersRemoteCount : 0,
+        usuariosCount: admin ? usersRemoteCount : 0,
         visibleUsersCount: admin ? users.length : 0,
+        visibleUsuariosCount: admin ? users.length : 0,
 
         clientsCount: admin ? clientsRemoteCount : 0,
+        clientesCount: admin ? clientsRemoteCount : 0,
+        customersCount: admin ? clientsRemoteCount : 0,
         visibleClientsCount: admin ? clients.length : 0,
-
-        serversCount: 0,
-        visibleServersCount: 0,
+        visibleClientesCount: admin ? clients.length : 0,
+        visibleCustomersCount: admin ? clients.length : 0,
 
         activityCount: activity.length,
       },
@@ -1111,13 +1149,6 @@ function normalizedPayload(payload = {}, options = {}) {
     customers: admin ? clients : [],
     clientsRemoteCount: admin ? clientsRemoteCount : 0,
 
-    servers: [],
-    servidores: [],
-    serversRemoteCount: 0,
-
-    server: {},
-    servidor: {},
-
     activity,
     activities: activity,
     recent: activity,
@@ -1130,8 +1161,6 @@ function normalizedPayload(payload = {}, options = {}) {
     modules,
     partial: Boolean(first(input.partial, dashboard.partial, false)),
     errors,
-
-    health: null,
 
     loaded: opts.loaded ?? true,
     hydrated: opts.hydrated ?? true,
@@ -1177,18 +1206,21 @@ function preserveExisting(next = {}, options = {}) {
     output.clientsRemoteCount = 0;
   }
 
-  output.servers = [];
-  output.servidores = [];
-  output.serversRemoteCount = 0;
-  output.server = {};
-  output.servidor = {};
-
   if (!hasKeys(output.summary) && hasKeys(homeStore.summary)) {
     output.summary = sanitizeSummaryForRole(homeStore.summary, admin);
   }
 
-  output.widgets = filterWidgetsForRole(output.widgets, admin);
-  output.activity = filterActivityForRole(output.activity, admin);
+  output.widgets = normalizeWidgetsForStore(output.widgets, admin);
+  output.invoices = normalizeInvoicesForStore(output.invoices);
+  output.users = normalizeUsersForStore(output.users, admin);
+  output.clients = normalizeClientsForStore(output.clients, admin);
+  output.tickets = normalizeTicketsForStore(output.tickets, {
+    invoices: output.invoices,
+    users: output.users,
+    admin,
+  });
+  output.activity = normalizeActivityForStore(output.activity, admin);
+
   output.summary = sanitizeSummaryForRole(output.summary, admin);
 
   output.ticketsRemoteCount = Math.max(homeStore.ticketsRemoteCount, output.ticketsRemoteCount || 0, safeArray(output.tickets).length);
@@ -1245,11 +1277,6 @@ function buildDashboardFromStore() {
     clientes: admin ? homeStore.clients : [],
     customers: admin ? homeStore.clients : [],
 
-    servers: [],
-    servidores: [],
-    server: {},
-    servidor: {},
-
     activity: homeStore.activity,
     activities: homeStore.activity,
     recent: homeStore.activity,
@@ -1286,13 +1313,6 @@ function buildDashboardFromStore() {
     clientesCount: admin ? homeStore.clientsRemoteCount : 0,
     customersCount: admin ? homeStore.clientsRemoteCount : 0,
 
-    serversTotal: 0,
-    servidoresTotal: 0,
-    totalServers: 0,
-    totalServidores: 0,
-    serversCount: 0,
-    servidoresCount: 0,
-
     requestId: homeStore.requestId,
     updatedAt: homeStore.updatedAt || homeStore.lastSyncAt,
     lastSyncAt: homeStore.lastSyncAt,
@@ -1314,19 +1334,26 @@ function buildDashboardFromStore() {
       widgetsCount: homeStore.widgets.length,
 
       ticketsCount: homeStore.ticketsRemoteCount,
+      incidenciasCount: homeStore.ticketsRemoteCount,
       visibleTicketsCount: homeStore.tickets.length,
+      visibleIncidenciasCount: homeStore.tickets.length,
 
       invoicesCount: homeStore.invoicesRemoteCount,
+      facturasCount: homeStore.invoicesRemoteCount,
       visibleInvoicesCount: homeStore.invoices.length,
+      visibleFacturasCount: homeStore.invoices.length,
 
       usersCount: admin ? homeStore.usersRemoteCount : 0,
+      usuariosCount: admin ? homeStore.usersRemoteCount : 0,
       visibleUsersCount: admin ? homeStore.users.length : 0,
+      visibleUsuariosCount: admin ? homeStore.users.length : 0,
 
       clientsCount: admin ? homeStore.clientsRemoteCount : 0,
+      clientesCount: admin ? homeStore.clientsRemoteCount : 0,
+      customersCount: admin ? homeStore.clientsRemoteCount : 0,
       visibleClientsCount: admin ? homeStore.clients.length : 0,
-
-      serversCount: 0,
-      visibleServersCount: 0,
+      visibleClientesCount: admin ? homeStore.clients.length : 0,
+      visibleCustomersCount: admin ? homeStore.clients.length : 0,
 
       activityCount: homeStore.activity.length,
     },
@@ -1343,30 +1370,18 @@ function syncAliases() {
   homeStore.role = role;
   homeStore.admin = admin;
 
-  homeStore.widgets = filterWidgetsForRole(
-    uniqueBy(normalizeHomeWidgets(homeStore.widgets), widgetId),
-    admin
-  );
+  homeStore.invoices = normalizeInvoicesForStore(homeStore.invoices);
+  homeStore.users = normalizeUsersForStore(homeStore.users, admin);
+  homeStore.clients = normalizeClientsForStore(homeStore.clients, admin);
 
-  homeStore.tickets = uniqueBy(normalizeHomeTickets(homeStore.tickets), ticketId);
-  homeStore.invoices = uniqueBy(normalizeHomeInvoices(homeStore.invoices), invoiceId);
+  homeStore.tickets = normalizeTicketsForStore(homeStore.tickets, {
+    invoices: homeStore.invoices,
+    users: homeStore.users,
+    admin,
+  });
 
-  homeStore.users = admin
-    ? uniqueBy(normalizeHomeUsers(homeStore.users), userId)
-    : [];
-
-  homeStore.clients = admin
-    ? uniqueBy(normalizeHomeClients(homeStore.clients), clientId)
-    : [];
-
-  homeStore.servers = [];
-  homeStore.server = {};
-
-  homeStore.activity = filterActivityForRole(
-    normalizeHomeActivityList(homeStore.activity),
-    admin
-  );
-
+  homeStore.widgets = normalizeWidgetsForStore(homeStore.widgets, admin);
+  homeStore.activity = normalizeActivityForStore(homeStore.activity, admin);
   homeStore.summary = sanitizeSummaryForRole(homeStore.summary, admin);
 
   homeStore.stats = homeStore.summary;
@@ -1385,9 +1400,6 @@ function syncAliases() {
   homeStore.clientes = admin ? homeStore.clients : [];
   homeStore.customers = admin ? homeStore.clients : [];
 
-  homeStore.servidores = [];
-  homeStore.servidor = {};
-
   homeStore.ticketsRemoteCount = Math.max(homeStore.tickets.length, safeNumber(homeStore.ticketsRemoteCount, 0));
   homeStore.remoteCount = Math.max(homeStore.ticketsRemoteCount, safeNumber(homeStore.remoteCount, 0));
 
@@ -1400,8 +1412,6 @@ function syncAliases() {
   homeStore.clientsRemoteCount = admin
     ? Math.max(homeStore.clients.length, safeNumber(homeStore.clientsRemoteCount, 0))
     : 0;
-
-  homeStore.serversRemoteCount = 0;
 
   homeStore.activities = homeStore.activity;
   homeStore.recent = homeStore.activity;
@@ -1535,7 +1545,15 @@ export function setHomeWidgetsStore(widgets = [], options = {}) {
 }
 
 export function setHomeTicketsStore(tickets = [], options = {}) {
-  const rows = uniqueBy(normalizeHomeTickets(tickets), ticketId);
+  const admin = currentIsAdmin();
+  const invoices = getHomeInvoicesStore();
+  const users = admin ? getHomeUsersStore() : [];
+  const rows = normalizeTicketsForStore(tickets, {
+    invoices,
+    users,
+    admin,
+  });
+
   const remoteCount = Math.max(rows.length, safeNumber(options.remoteCount, homeStore.ticketsRemoteCount));
 
   return replaceHomeStore(
@@ -1552,7 +1570,7 @@ export function setHomeTicketsStore(tickets = [], options = {}) {
 }
 
 export function setHomeInvoicesStore(invoices = [], options = {}) {
-  const rows = uniqueBy(normalizeHomeInvoices(invoices), invoiceId);
+  const rows = normalizeInvoicesForStore(invoices);
 
   return replaceHomeStore(
     {
@@ -1581,7 +1599,7 @@ export function setHomeUsersStore(users = [], options = {}) {
     ).users;
   }
 
-  const rows = uniqueBy(normalizeHomeUsers(users), userId);
+  const rows = normalizeUsersForStore(users, true);
 
   return replaceHomeStore(
     {
@@ -1611,7 +1629,7 @@ export function setHomeClientsStore(clients = [], options = {}) {
     ).clients;
   }
 
-  const rows = uniqueBy(normalizeHomeClients(clients), clientId);
+  const rows = normalizeClientsForStore(clients, true);
 
   return replaceHomeStore(
     {
@@ -1623,31 +1641,6 @@ export function setHomeClientsStore(clients = [], options = {}) {
       preserveExisting: true,
     }
   ).clients;
-}
-
-export function setHomeServersStore() {
-  return replaceHomeStore(
-    {
-      servers: [],
-      servidores: [],
-      serversRemoteCount: 0,
-    },
-    {
-      replace: true,
-    }
-  ).servers;
-}
-
-export function setHomeServerStore() {
-  return replaceHomeStore(
-    {
-      server: {},
-      servidor: {},
-    },
-    {
-      replace: true,
-    }
-  ).server;
 }
 
 export function setHomeActivityStore(activity = [], options = {}) {
@@ -1679,9 +1672,6 @@ export function setHomeCollectionsStore(collections = {}, options = {}) {
       users: admin ? firstArray(input.users, input.usuarios) || [] : [],
       clients: admin ? firstArray(input.clients, input.clientes, input.customers) || [] : [],
 
-      servers: [],
-      server: {},
-
       activity: filterActivityForRole(firstArray(input.activity, input.activities, input.recent, input.recentActivity) || [], admin),
 
       ticketsRemoteCount: first(input.ticketsRemoteCount, input.remoteCount, input.totalTickets, input.incidenciasTotal),
@@ -1694,8 +1684,6 @@ export function setHomeCollectionsStore(collections = {}, options = {}) {
       clientsRemoteCount: admin
         ? first(input.clientsRemoteCount, input.clientesRemoteCount, input.customersRemoteCount, input.totalClients, input.totalClientes, input.totalCustomers)
         : 0,
-
-      serversRemoteCount: 0,
     },
     {
       ...safeObject(options),
@@ -1839,12 +1827,6 @@ export function setHomeStoreLastSyncAt(value = null) {
   });
 }
 
-export function setHomeStoreHealth() {
-  return assignFlags({
-    health: null,
-  });
-}
-
 export function setHomeStorePage(page = DEFAULT_PAGE) {
   return assignFlags({
     page: Math.max(1, safeNumber(page, DEFAULT_PAGE)),
@@ -1926,22 +1908,6 @@ export function getHomeCustomersStore() {
   return getHomeClientsStore();
 }
 
-export function getHomeServersStore() {
-  return [];
-}
-
-export function getHomeServidoresStore() {
-  return [];
-}
-
-export function getHomeServerStore() {
-  return {};
-}
-
-export function getHomeServidorStore() {
-  return {};
-}
-
 export function getHomeActivityStore() {
   return safeArray(homeStore.activity);
 }
@@ -2008,10 +1974,6 @@ export function getHomeClientByIdStore(id = "") {
   return currentIsAdmin() ? findById(homeStore.clients, id, clientId) : null;
 }
 
-export function getHomeServerByIdStore() {
-  return null;
-}
-
 /* =========================================================
    SNAPSHOT
 ========================================================= */
@@ -2053,9 +2015,6 @@ export function getHomeCollectionsEnvelope() {
     clients: collectionEnvelope(admin ? homeStore.clients : [], admin ? homeStore.clientsRemoteCount : 0),
     clientes: collectionEnvelope(admin ? homeStore.clients : [], admin ? homeStore.clientsRemoteCount : 0),
     customers: collectionEnvelope(admin ? homeStore.clients : [], admin ? homeStore.clientsRemoteCount : 0),
-
-    servers: collectionEnvelope([], 0),
-    servidores: collectionEnvelope([], 0),
 
     activity: collectionEnvelope(homeStore.activity, homeStore.activity.length),
     activities: collectionEnvelope(homeStore.activity, homeStore.activity.length),
@@ -2104,15 +2063,10 @@ export function getHomeStoreSnapshot(options = {}) {
     clientsVisibleCount: admin ? homeStore.clients.length : 0,
     clientsRemoteCount: admin ? homeStore.clientsRemoteCount : 0,
 
-    serversVisibleCount: 0,
-    serversRemoteCount: 0,
-
     activityCount: homeStore.activity.length,
 
     partial: Boolean(homeStore.partial),
     errorsCount: homeStore.errors.length,
-
-    hasHealth: false,
 
     hasError: Boolean(homeStore.error || homeStore.errorMessage),
     errorMessage: redact(safeText(homeStore.errorMessage, "")),
@@ -2132,17 +2086,17 @@ export function getHomeStoreSnapshot(options = {}) {
       noInternalHistory: true,
 
       roleAware: true,
-      userNeverKeepsAdminUsersClientsServers: true,
+      userNeverKeepsAdminUsersClients: true,
 
       noRawBackendPayload: true,
       stripsCosmosMetadata: true,
       noEmailAsIdentity: true,
 
-      serverCacheDisabledUntilEndpointExists: true,
-      healthCacheDisabledUntilEndpointExists: true,
-
       gettersDoNotRenormalize: true,
       normalizeOnlyOnWrites: true,
+
+      ticketsNormalizedWithInvoicesAndUsers: true,
+      modalDataReadyFromStore: true,
 
       noDataAliasInSnapshot: true,
       snapshotRedacted: true,
@@ -2159,9 +2113,6 @@ export function getHomeStoreSnapshot(options = {}) {
 
     snapshot.users = admin ? sanitizeStoreValue(homeStore.users) : [];
     snapshot.clients = admin ? sanitizeStoreValue(homeStore.clients) : [];
-
-    snapshot.servers = [];
-    snapshot.server = {};
 
     snapshot.activity = sanitizeStoreValue(homeStore.activity);
 
@@ -2207,11 +2158,6 @@ export const getClientsStore = getHomeClientsStore;
 export const getClientesStore = getHomeClientesStore;
 export const getCustomersStore = getHomeCustomersStore;
 
-export const getServersStore = getHomeServersStore;
-export const getServidoresStore = getHomeServidoresStore;
-export const getServerStore = getHomeServerStore;
-export const getServidorStore = getHomeServidorStore;
-
 export const getRecentStore = getHomeRecentStore;
 export const getActivityStore = getHomeActivityStore;
 
@@ -2220,7 +2166,6 @@ export const getTicketByIdStore = getHomeTicketByIdStore;
 export const getInvoiceByIdStore = getHomeInvoiceByIdStore;
 export const getUserByIdStore = getHomeUserByIdStore;
 export const getClientByIdStore = getHomeClientByIdStore;
-export const getServerByIdStore = getHomeServerByIdStore;
 
 /* =========================================================
    PUBLIC API
@@ -2262,8 +2207,6 @@ export const HomeStore = Object.freeze({
   setHomeInvoicesStore,
   setHomeUsersStore,
   setHomeClientsStore,
-  setHomeServersStore,
-  setHomeServerStore,
   setHomeActivityStore,
   setHomeCollectionsStore,
 
@@ -2274,7 +2217,6 @@ export const HomeStore = Object.freeze({
   setHomeStoreHydrated,
   setHomeStoreRequestId,
   setHomeStoreLastSyncAt,
-  setHomeStoreHealth,
   setHomeStorePage,
   setHomeStorePageSize,
 
@@ -2300,11 +2242,6 @@ export const HomeStore = Object.freeze({
   getHomeClientesStore,
   getHomeCustomersStore,
 
-  getHomeServersStore,
-  getHomeServidoresStore,
-  getHomeServerStore,
-  getHomeServidorStore,
-
   getHomeActivityStore,
   getHomeRecentStore,
 
@@ -2313,7 +2250,6 @@ export const HomeStore = Object.freeze({
   getHomeInvoiceByIdStore,
   getHomeUserByIdStore,
   getHomeClientByIdStore,
-  getHomeServerByIdStore,
 
   getHomeCollectionsEnvelope,
   getHomeStoreSnapshot,

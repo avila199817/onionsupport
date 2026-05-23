@@ -6,7 +6,7 @@
    - Bind DOM mínimo de Home.
    - Delegar clicks por data-home-action / data-action.
    - Soportar refresh, retry, export, navigate, create,
-     open widget, copy id y paginación.
+     copy id y paginación.
    - Limpiar listeners por scope.
    - Evitar doble binding tras rerender.
    - Busy state durante acciones async.
@@ -21,6 +21,7 @@
    - Sin CSS inline.
    - Sin route aliases legacy.
    - Sin document fallback.
+   - Sin rutas opcionales inventadas.
    - Sin /home.
    - Sin /incidencias/nueva.
 ========================================================= */
@@ -32,7 +33,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const HOME_BINDINGS_VERSION = "home.bindings.v5";
+export const HOME_BINDINGS_VERSION = "home.bindings.v6";
 
 const DEFAULT_SCOPE = "view:home";
 
@@ -40,7 +41,6 @@ const ACTIONS = Object.freeze({
   refresh: new Set(["refresh", "retry"]),
   exportCsv: new Set(["export_csv"]),
 
-  openWidget: new Set(["open_widget"]),
   copyId: new Set(["copy_widget_id"]),
 
   navigate: new Set(["navigate_home"]),
@@ -56,6 +56,7 @@ const RAW_KEYS = new Set([
   "data",
   "payloadRaw",
   "response",
+  "body",
 ]);
 
 const SENSITIVE_KEY_RE =
@@ -343,7 +344,6 @@ function configRoute(route = "", fallback = "") {
 }
 
 const INCIDENCIAS_ROUTE = configRoute(CORE_ROUTES?.incidencias, "/incidencias");
-const SERVIDOR_ROUTE = configRoute(CORE_ROUTES?.servidor, "/servidor");
 
 /* =========================================================
    SCOPE / CLEANUP
@@ -526,8 +526,6 @@ function idFromElement(element = null) {
       datasetValue(element, "incidenciaId"),
       datasetValue(element, "invoiceId"),
       datasetValue(element, "facturaId"),
-      datasetValue(element, "serverId"),
-      datasetValue(element, "servidorId"),
       datasetValue(element, "key"),
       ""
     ),
@@ -732,7 +730,6 @@ function resolveKind(element = null) {
 
   if (ACTIONS.refresh.has(action)) return "refresh";
   if (ACTIONS.exportCsv.has(action)) return "export";
-  if (ACTIONS.openWidget.has(action)) return "open-widget";
   if (ACTIONS.copyId.has(action)) return "copy-id";
   if (ACTIONS.create.has(action)) return "create";
   if (ACTIONS.pagePrev.has(action)) return "page-prev";
@@ -801,22 +798,6 @@ async function handleNavigate(element, api = {}) {
     api.navigateFromHomeAction({
       route,
       payload,
-      silent: false,
-    })
-  );
-}
-
-async function handleOpenWidget(element, api = {}) {
-  const widgetId = idFromElement(element);
-  const payload = payloadFromElement(element);
-
-  if (!widgetId || !isFunction(api.openHomeWidgetAction)) return false;
-
-  return withBusy(element, () =>
-    api.openHomeWidgetAction({
-      widgetId,
-      payload,
-      navigate: true,
       silent: false,
     })
   );
@@ -929,7 +910,6 @@ async function dispatchAction(event = null, element = null, api = {}) {
     if (kind === "refresh") return handleRefresh(element, api);
     if (kind === "export") return handleExport(element, api);
     if (kind === "navigate") return handleNavigate(element, api);
-    if (kind === "open-widget") return handleOpenWidget(element, api);
     if (kind === "copy-id") return handleCopyId(element, api);
     if (kind === "create") return handleCreate(element, api);
     if (kind === "page-prev") return handlePage(kind, element, api);
@@ -957,7 +937,6 @@ export function bindHomeEvents({
   exportHomeCsvAction,
   navigateFromHomeAction,
   runHomeQuickAction,
-  openHomeWidgetAction,
   copyHomeWidgetIdAction,
   createFromHomeAction,
 
@@ -987,7 +966,6 @@ export function bindHomeEvents({
     exportHomeCsvAction,
     navigateFromHomeAction,
     runHomeQuickAction,
-    openHomeWidgetAction,
     copyHomeWidgetIdAction,
     createFromHomeAction,
 
@@ -1065,7 +1043,6 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
     actions: {
       refresh: [...ACTIONS.refresh],
       exportCsv: [...ACTIONS.exportCsv],
-      openWidget: [...ACTIONS.openWidget],
       copyId: [...ACTIONS.copyId],
       navigate: [...ACTIONS.navigate],
       create: [...ACTIONS.create],
@@ -1076,7 +1053,6 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
 
     routes: {
       incidencias: INCIDENCIAS_ROUTE,
-      servidor: SERVIDOR_ROUTE,
     },
 
     policy: {
@@ -1094,6 +1070,7 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
       noRouteAliasesLegacy: true,
       noHomeAlias: true,
       noCreateRouteAlias: true,
+      noInventedOptionalRoutes: true,
 
       rejectsSensitiveRoutes: true,
       sanitizesPayload: true,

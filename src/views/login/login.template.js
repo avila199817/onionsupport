@@ -8,7 +8,7 @@
    - Textos base en castellano.
    - Rutas base desde core/config.js.
    - Delegar normalización/bloqueo de rutas en core/config.js.
-   - Usar logo corporativo canónico favicon_black.png / favicon_white.png.
+   - Usar el logo público/auth canónico único favicon_black_circle.png.
    - Sin Auth.
    - Sin HTTP.
    - Sin Router.
@@ -17,6 +17,8 @@
    - Sin navegación.
    - Sin duplicar lógica del password.
    - Sin layout visual extra.
+   - Sin logos legacy favicon_black.png / favicon_white.png.
+   - Sin lógica de logo por tema.
    - Sin /home.
    - Sin /403.
    - Sin /404.
@@ -32,16 +34,14 @@ import {
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
 
-export const TEMPLATE_VERSION = "login.template.v5";
+export const TEMPLATE_VERSION = "login.template.v6";
 
 const DEFAULT_APP_NAME = "Onion Support";
 
-const BRAND_LOGOS = Object.freeze({
-  black: new URL("../../media/img/favicon_black.png", import.meta.url).href,
-  white: new URL("../../media/img/favicon_white.png", import.meta.url).href,
-});
-
-const DEFAULT_LOGO = BRAND_LOGOS.black;
+const PUBLIC_AUTH_LOGO = new URL(
+  "../../media/img/favicon_black_circle.png",
+  import.meta.url
+).href;
 
 const DEFAULT_PASSWORD_REQUEST_HREF =
   ROUTES.passwordRequest || "/password-request";
@@ -141,7 +141,9 @@ function normalizePath(value = "/", fallback = "/") {
   const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
 
   const queryIndex = beforeHash.indexOf("?");
-  const pathnameRaw = queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash;
+  const pathnameRaw =
+    queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash;
+
   const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
 
   let pathname = "";
@@ -149,9 +151,7 @@ function normalizePath(value = "/", fallback = "/") {
   try {
     pathname = configNormalizeRoutePath(pathnameRaw) || fallbackPath;
   } catch {
-    pathname = pathnameRaw
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
+    pathname = pathnameRaw.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
 
     if (!pathname.startsWith("/")) {
       pathname = `/${pathname}`;
@@ -199,37 +199,6 @@ function safeInternalHref(value = "", fallback = DEFAULT_PASSWORD_REQUEST_HREF) 
   if (hasSensitiveQuery(raw)) return fallbackHref;
 
   return normalizePath(raw, fallbackHref) || fallbackHref;
-}
-
-function safeAssetSrc(value = "", fallback = DEFAULT_LOGO) {
-  const raw = text(value, "");
-  const fallbackSrc = text(fallback, DEFAULT_LOGO);
-
-  if (!raw) return fallbackSrc;
-  if (raw.startsWith("//")) return fallbackSrc;
-  if (/[\r\n\t\\]/.test(raw)) return fallbackSrc;
-  if (hasSensitiveQuery(raw)) return fallbackSrc;
-  if (/^(?:data|blob|javascript|vbscript|file):/i.test(raw)) return fallbackSrc;
-
-  if (raw.startsWith("/")) {
-    return raw.replace(/\/{2,}/g, "/") || fallbackSrc;
-  }
-
-  if (/^https?:\/\//i.test(raw)) {
-    try {
-      const url = new URL(raw);
-
-      if (isBrowser() && url.origin === window.location.origin) {
-        return url.href;
-      }
-
-      return fallbackSrc;
-    } catch {
-      return fallbackSrc;
-    }
-  }
-
-  return fallbackSrc;
 }
 
 function normalizeIdentifier(value = "") {
@@ -303,7 +272,6 @@ function renderLoginPasswordField({ label = "", placeholder = "" } = {}) {
 
 export function getLoginTemplate(options = {}) {
   const appName = text(options.appName, DEFAULT_APP_NAME);
-  const logoSrc = safeAssetSrc(options.logoSrc, DEFAULT_LOGO);
 
   const title = text(options.title, "Iniciar sesión");
   const subtitle = text(options.subtitle, `Accede a ${appName}`);
@@ -351,7 +319,7 @@ export function getLoginTemplate(options = {}) {
           <header class="login-header" data-login-header="true">
             <img
               class="login-logo"
-              src="${escapeAttr(logoSrc)}"
+              src="${escapeAttr(PUBLIC_AUTH_LOGO)}"
               alt=""
               width="52"
               height="52"
@@ -360,8 +328,7 @@ export function getLoginTemplate(options = {}) {
               draggable="false"
               aria-hidden="true"
               data-login-logo="true"
-              data-logo-black-src="${escapeAttr(BRAND_LOGOS.black)}"
-              data-logo-white-src="${escapeAttr(BRAND_LOGOS.white)}"
+              data-auth-logo="public"
             >
 
             <h1

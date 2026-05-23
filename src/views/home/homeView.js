@@ -11,6 +11,7 @@
    - Modelo/normalización delegado en home.model.js.
    - Eventos DOM delegados en home.bindings.js.
    - Acciones delegadas en home.actions.js.
+   - Detalle de incidencia abre modal sin navegar.
    - Home distinto para admin/user.
    - User no arrastra usuarios/clientes de cache admin.
    - Renderiza dentro del host recibido por Router.
@@ -29,6 +30,7 @@
    - No abre modales de otras vistas.
    - No usa Toast directo.
    - No usa /home.
+   - No expone health/server/ready/ping.
 ========================================================= */
 
 import {
@@ -91,8 +93,10 @@ import {
 import {
   exportHomeCsvAction,
   navigateFromHomeAction,
-  runHomeQuickAction,
-  openHomeWidgetAction as actionOpenHomeWidget,
+  runHomeQuickAction as actionRunHomeQuickAction,
+  openHomeTicketDetailAction as actionOpenHomeTicketDetail,
+  closeHomeTicketDetailAction as actionCloseHomeTicketDetail,
+  reduceHomeActionState as actionReduceHomeActionState,
   copyHomeWidgetIdAction,
   getHomeActionsSnapshot,
 } from "./home.actions.js";
@@ -107,14 +111,13 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v11";
+export const HOME_VIEW_VERSION = "home.view.v12";
 
 export const HomeView = (() => {
   "use strict";
 
   const SOURCE = "views.home";
   const SCOPE = "view:home";
-
   const DEFAULT_PAGE_SIZE = 5;
 
   const SENSITIVE_QUERY_RE =
@@ -232,13 +235,8 @@ export const HomeView = (() => {
         .replace(/\\/g, "/")
         .replace(/\/{2,}/g, "/");
 
-      if (!path.startsWith("/")) {
-        path = `/${path}`;
-      }
-
-      if (path.length > 1) {
-        path = path.replace(/\/+$/g, "") || "/";
-      }
+      if (!path.startsWith("/")) path = `/${path}`;
+      if (path.length > 1) path = path.replace(/\/+$/g, "") || "/";
 
       return path || "/";
     }
@@ -277,13 +275,8 @@ export const HomeView = (() => {
 
     const normalizedInput = pathFromInput(raw);
 
-    if (!normalizedInput || !normalizedInput.startsWith("/")) {
-      return safeFallback;
-    }
-
-    if (normalizedInput.startsWith("//")) {
-      return safeFallback;
-    }
+    if (!normalizedInput || !normalizedInput.startsWith("/")) return safeFallback;
+    if (normalizedInput.startsWith("//")) return safeFallback;
 
     const hashIndex = normalizedInput.indexOf("#");
     const beforeHash = hashIndex >= 0
@@ -301,13 +294,8 @@ export const HomeView = (() => {
 
     const pathname = normalizePathname(pathnameRaw);
 
-    if (!pathname || isBlockedRoute(pathname)) {
-      return safeFallback;
-    }
-
-    if (search && hasSensitiveQuery(search)) {
-      return safeFallback;
-    }
+    if (!pathname || isBlockedRoute(pathname)) return safeFallback;
+    if (search && hasSensitiveQuery(search)) return safeFallback;
 
     return `${pathname}${search}`;
   }
@@ -401,12 +389,14 @@ export const HomeView = (() => {
 
   function firstArray(...values) {
     for (const value of values) {
-      if (Array.isArray(value) && value.length) {
-        return value;
-      }
+      if (Array.isArray(value) && value.length) return value;
     }
 
     return [];
+  }
+
+  function hasOwn(value = {}, key = "") {
+    return Object.prototype.hasOwnProperty.call(safeObject(value), key);
   }
 
   /* =======================================================
@@ -735,9 +725,7 @@ export const HomeView = (() => {
 
     if (!payloadRole) return false;
 
-    if (contextRole) {
-      return payloadRole !== contextRole;
-    }
+    if (contextRole) return payloadRole !== contextRole;
 
     const storedRole = getStoredRole();
 
@@ -797,12 +785,118 @@ export const HomeView = (() => {
 
     homeState.error = redact(safeText(homeState.error, ""));
 
+    const selectedTicketId = safeText(
+      first(homeState.selectedTicketId, homeState.selectedIncidenciaId, ""),
+      ""
+    );
+
     homeState.openingTicketId = safeText(homeState.openingTicketId, "");
-    homeState.selectedTicketId = safeText(homeState.selectedTicketId, "");
+    homeState.selectedTicketId = selectedTicketId;
+    homeState.selectedIncidenciaId = selectedTicketId;
     homeState.navigatingAction = safeText(homeState.navigatingAction, "");
 
     return homeState;
   }
+
+  function getRawRuntimeState() {
+    return {
+      ...homeState,
+      selectedTicketId: safeText(first(homeState.selectedTicketId, homeState.selectedIncidenciaId, ""), ""),
+      selectedIncidenciaId: safeText(first(homeState.selectedIncidenciaId, homeState.selectedTicketId, ""), ""),
+    };
+  }
+
+  function patchRuntimeState(patch = {}, result = {}) {
+    const data = safeObject(patch);
+
+    if (!hasKeys(data)) return false;
+
+    if (hasOwn(data, "loading")) setLoading(Boolean(data.loading));
+    if (hasOwn(data, "refreshing")) setRefreshing(Boolean(data.refreshing));
+    if (hasOwn(data, "creating")) setCreating(Boolean(data.creating));
+
+    if (hasOwn(data, "error")) {
+      const error = redact(safeText(data.error, ""));
+
+      if (error) {
+        setError(error);
+      } else {
+        clearHomeError();
+      }
+    }
+
+    if (hasOwn(data, "page")) {
+      setPage(Math.max(1, safeNumber(data.page, 1)));
+    }
+
+    if (hasOwn(data, "pageSize")) {
+      setPageSize(Math.max(1, safeNumber(data.pageSize, DEFAULT_PAGE_SIZE)));
+    }
+
+    if (
+      hasOwn(data, "selectedTicketId") ||
+      hasOwn(data, "selectedIncidenciaId") ||
+      hasOwn(data, "ticketId") ||
+      hasOwn(data, "incidenciaId")
+    ) {
+      const selectedTicketId = safeText(
+        first(data.selectedTicketId, data.selectedIncidenciaId, data.ticketId, data.incidenciaId, ""),
+        ""
+      );
+
+      setSelectedTicketId(selectedTicketId);
+      homeState.selectedIncidenciaId = selectedTicketId;
+    }
+
+    if (hasOwn(data, "openingTicketId")) {
+      setOpeningTicketId(safeText(data.openingTicketId, ""));
+    }
+
+    if (hasOwn(data, "navigatingAction")) {
+      setNavigatingAction(redact(safeText(data.navigatingAction, "")));
+    }
+
+    ensureBaseState();
+
+    return {
+      ok: true,
+      source: SOURCE,
+      result: sanitizePayload(result),
+      state: getRawRuntimeState(),
+    };
+  }
+
+  function setRuntimeState(nextState = {}, result = {}) {
+    return patchRuntimeState(nextState, result);
+  }
+
+  function applyHomeActionResult(result = null, options = {}) {
+    if (!isObject(result)) return result;
+
+    const opts = safeObject(options);
+    const patch = safeObject(result.statePatch);
+    let applied = false;
+
+    if (hasKeys(patch)) {
+      applied = Boolean(patchRuntimeState(patch, result));
+    } else {
+      const nextState = safeCall(actionReduceHomeActionState, homeState, result);
+
+      if (hasKeys(nextState)) {
+        applied = Boolean(patchRuntimeState(nextState, result));
+      }
+    }
+
+    if (applied && opts.render !== false) {
+      rerender();
+    }
+
+    return result;
+  }
+
+  /* =======================================================
+     DASHBOARD APPLY
+  ======================================================= */
 
   function normalizeDashboardPayload(payload = {}, options = {}) {
     const opts = safeObject(options);
@@ -817,9 +911,7 @@ export const HomeView = (() => {
       )
     );
 
-    if (!hasKeys(source)) {
-      return null;
-    }
+    if (!hasKeys(source)) return null;
 
     const contextRole = getContextRole();
     const payloadRole = getPayloadRole(payload, source);
@@ -900,9 +992,7 @@ export const HomeView = (() => {
       trustPayloadRole: opts.trustPayloadRole === true,
     });
 
-    if (!normalized || !hasKeys(normalized.dashboard)) {
-      return null;
-    }
+    if (!normalized || !hasKeys(normalized.dashboard)) return null;
 
     const storedRole = getStoredRole();
     const replace =
@@ -956,21 +1046,6 @@ export const HomeView = (() => {
      DATA READ
   ======================================================= */
 
-  function getTickets() {
-    return normalizeHomeTickets(
-      firstArray(
-        homeState.tickets,
-        homeState.incidencias,
-
-        homeState.dashboard?.tickets,
-        homeState.dashboard?.incidencias,
-
-        homeState.dashboard?.collections?.tickets,
-        homeState.dashboard?.collections?.incidencias
-      )
-    );
-  }
-
   function getInvoices() {
     return normalizeHomeInvoices(
       firstArray(
@@ -1021,6 +1096,24 @@ export const HomeView = (() => {
         homeState.dashboard?.collections?.customers
       )
     );
+  }
+
+  function getTickets() {
+    const rawTickets = firstArray(
+      homeState.tickets,
+      homeState.incidencias,
+
+      homeState.dashboard?.tickets,
+      homeState.dashboard?.incidencias,
+
+      homeState.dashboard?.collections?.tickets,
+      homeState.dashboard?.collections?.incidencias
+    );
+
+    return normalizeHomeTickets(rawTickets, {
+      invoices: getInvoices(),
+      users: isAdmin() ? getUsers() : [],
+    });
   }
 
   function getSummary() {
@@ -1182,6 +1275,11 @@ export const HomeView = (() => {
     activity,
     pagination,
   }) {
+    const selectedTicketId = safeText(
+      first(homeState.selectedTicketId, homeState.selectedIncidenciaId, ""),
+      ""
+    );
+
     return {
       role,
       admin,
@@ -1194,7 +1292,8 @@ export const HomeView = (() => {
 
       error: redact(homeState.error || ""),
       openingTicketId: safeText(homeState.openingTicketId, ""),
-      selectedTicketId: safeText(homeState.selectedTicketId, ""),
+      selectedTicketId,
+      selectedIncidenciaId: selectedTicketId,
       navigatingAction: redact(homeState.navigatingAction || ""),
 
       page: pagination.page,
@@ -1243,6 +1342,11 @@ export const HomeView = (() => {
     const summary = getSummary();
     const widgets = getWidgets();
 
+    const selectedTicketId = safeText(
+      first(homeState.selectedTicketId, homeState.selectedIncidenciaId, ""),
+      ""
+    );
+
     return buildHomeTemplatePayload({
       user: getTemplateUser(),
       role,
@@ -1270,6 +1374,9 @@ export const HomeView = (() => {
 
       page: pagination.page,
       pageSize: pagination.pageSize,
+
+      selectedTicketId,
+      selectedIncidenciaId: selectedTicketId,
 
       requestId: homeState.requestId || "",
       lastUpdatedAt: homeState.lastSyncAt || "",
@@ -1380,9 +1487,7 @@ export const HomeView = (() => {
 
       const node = htmlToElement(buildHtml());
 
-      if (!node) {
-        throw new Error("HOME_VIEW_NODE_EMPTY");
-      }
+      if (!node) throw new Error("HOME_VIEW_NODE_EMPTY");
 
       container.replaceChildren(node);
       currentContainer = container;
@@ -1398,9 +1503,7 @@ export const HomeView = (() => {
   function renderAndBind(container = currentContainer) {
     const node = renderView(container);
 
-    if (node && isElement(container)) {
-      bind(container);
-    }
+    if (node && isElement(container)) bind(container);
 
     return node;
   }
@@ -1558,10 +1661,14 @@ export const HomeView = (() => {
     rerender();
 
     try {
-      return await navigateFromHomeAction({
+      const result = await navigateFromHomeAction({
         route: target,
         payload: safeObject(opts.payload),
         silent: opts.silent === true,
+      });
+
+      return applyHomeActionResult(result, {
+        render: false,
       });
     } finally {
       setNavigatingAction("");
@@ -1570,24 +1677,30 @@ export const HomeView = (() => {
   }
 
   async function runQuickAction(payload = {}) {
-    return runHomeQuickAction(safeObject(payload));
+    const result = await actionRunHomeQuickAction(safeObject(payload));
+
+    return applyHomeActionResult(result, {
+      render: true,
+    });
   }
 
   async function openTicket(ticketId = "", payload = {}) {
     const source = safeObject(payload);
     const id = safeText(
-      first(ticketId, source.ticketId, source.incidenciaId, ""),
+      first(ticketId, source.ticketId, source.incidenciaId, source.entityId, source.id, ""),
       ""
     );
 
     if (!id) return null;
 
     setOpeningTicketId(id);
-    setSelectedTicketId(id);
     rerender();
 
     try {
-      return await navigateTo(INCIDENCIAS_ROUTE, {
+      const result = await actionOpenHomeTicketDetail({
+        ticketId: id,
+        incidenciaId: id,
+        entityId: id,
         payload: {
           ...source,
           ticketId: id,
@@ -1595,10 +1708,24 @@ export const HomeView = (() => {
         },
         silent: false,
       });
+
+      return applyHomeActionResult(result, {
+        render: true,
+      });
     } finally {
-      setOpeningTicketId("");
-      rerender();
+      if (homeState.openingTicketId) {
+        setOpeningTicketId("");
+        rerender();
+      }
     }
+  }
+
+  async function closeTicket() {
+    const result = await actionCloseHomeTicketDetail();
+
+    return applyHomeActionResult(result, {
+      render: true,
+    });
   }
 
   async function createIncidencia(draft = {}, options = {}) {
@@ -1666,20 +1793,21 @@ export const HomeView = (() => {
             silent,
           }),
 
-        runHomeQuickAction: runQuickAction,
+        runHomeQuickAction: actionRunHomeQuickAction,
 
-        openHomeWidgetAction: ({
-          widgetId = "",
-          payload = {},
-          navigate = true,
-          silent = false,
-        } = {}) =>
-          actionOpenHomeWidget({
-            widgetId,
-            payload,
-            navigate,
-            silent,
-          }),
+        openHomeTicketDetailAction: actionOpenHomeTicketDetail,
+        closeHomeTicketDetailAction: actionCloseHomeTicketDetail,
+        reduceHomeActionState: actionReduceHomeActionState,
+
+        getState: getRawRuntimeState,
+        setState: setRuntimeState,
+        patchState: patchRuntimeState,
+        updateState: patchRuntimeState,
+
+        requestRender: rerender,
+        requestRerender: rerender,
+        rerender,
+        render: rerender,
 
         copyHomeWidgetIdAction,
 
@@ -1752,6 +1880,7 @@ export const HomeView = (() => {
     setCreating(false);
     setOpeningTicketId("");
     setSelectedTicketId("");
+    homeState.selectedIncidenciaId = "";
     setNavigatingAction("");
 
     inflightLoad = null;
@@ -1772,6 +1901,10 @@ export const HomeView = (() => {
   function getStateSnapshot() {
     const tickets = getTickets();
     const pagination = getPagination(tickets);
+    const selectedTicketId = safeText(
+      first(homeState.selectedTicketId, homeState.selectedIncidenciaId, ""),
+      ""
+    );
 
     return sanitizePayload({
       ...getHomeStateSnapshot(),
@@ -1782,6 +1915,9 @@ export const HomeView = (() => {
       user: getPublicUserSnapshot(),
       role: getCurrentRole(),
       admin: isAdmin(),
+
+      selectedTicketId,
+      selectedIncidenciaId: selectedTicketId,
 
       ticketsCount: tickets.length,
       invoicesCount: getInvoices().length,
@@ -1799,6 +1935,11 @@ export const HomeView = (() => {
   }
 
   function getSnapshot() {
+    const selectedTicketId = safeText(
+      first(homeState.selectedTicketId, homeState.selectedIncidenciaId, ""),
+      ""
+    );
+
     return sanitizePayload({
       version: HOME_VIEW_VERSION,
       source: SOURCE,
@@ -1815,6 +1956,9 @@ export const HomeView = (() => {
       refreshing: Boolean(homeState.refreshing),
 
       error: redact(homeState.error || ""),
+
+      selectedTicketId,
+      selectedIncidenciaId: selectedTicketId,
 
       ticketsCount: getTickets().length,
       invoicesCount: getInvoices().length,
@@ -1848,6 +1992,10 @@ export const HomeView = (() => {
         reloadsWhenLoadedButEmpty: true,
         optimizedSingleRenderAfterLoad: true,
 
+        ticketDetailModalState: true,
+        ticketDetailDoesNotNavigate: true,
+        ticketDetailUsesStatePatch: true,
+
         noSlugResolution: true,
         noAuthGuards: true,
         noRouterGuards: true,
@@ -1856,6 +2004,7 @@ export const HomeView = (() => {
         noCrossViewModals: true,
         noToastDirect: true,
         noHomeRoute: true,
+        noHealthServer: true,
 
         userScopedCollections: true,
         stripsAdminDataForUser: true,
@@ -1877,6 +2026,7 @@ export const HomeView = (() => {
 
     render,
     scheduleRender: rerender,
+    rerender,
 
     reload,
     refresh,
@@ -1892,6 +2042,19 @@ export const HomeView = (() => {
 
     openTicket,
     openIncidencia: openTicket,
+    openTicketDetail: openTicket,
+    openIncidenciaDetail: openTicket,
+
+    closeTicket,
+    closeIncidencia: closeTicket,
+    closeTicketDetail: closeTicket,
+    closeIncidenciaDetail: closeTicket,
+
+    applyHomeActionResult,
+    patchRuntimeState,
+    setRuntimeState,
+    runQuickAction,
+
     createIncidencia,
 
     goToPage,

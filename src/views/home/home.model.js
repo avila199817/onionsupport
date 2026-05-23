@@ -4,12 +4,11 @@
 
    Responsabilidad:
    - Modelo puro de datos para Home.
-   - Normalizar dashboard construido desde listas reales.
-   - Normalizar widgets, tickets, facturas, usuarios,
-     clientes y actividad.
+   - Normalizar DTOs ligeros ya preparados por home.api.js.
+   - Mantener contrato estable para homeView.js, selectors y template.
    - Generar summary estable desde colecciones.
-   - Generar widgets fallback desde summary.
-   - Generar actividad desde colecciones.
+   - Generar widgets fallback mínimos desde summary.
+   - Generar actividad ligera desde colecciones.
    - Paginar filas.
    - Buscar entidades por id.
    - Rutas base desde core/config.js.
@@ -37,7 +36,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const HOME_MODEL_VERSION = "home.model.v5";
+export const HOME_MODEL_VERSION = "home.model.v6";
 
 export const DEFAULT_HOME_PAGE = 1;
 export const DEFAULT_HOME_PAGE_SIZE = 5;
@@ -95,10 +94,21 @@ const SENSITIVE_KEY_RE =
 const SENSITIVE_QUERY_RE =
   /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
 
-const EMAIL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
+const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
 
 const ADMIN_ENTITY_RE =
   /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory|servidores?|servidor|servers?)([\s._/-]|$)/i;
+
+const HOME_TEXT_LIMIT = 180;
+const HOME_TITLE_LIMIT = 120;
+
+const EMPTY_COLLECTION = Object.freeze({
+  items: [],
+  visibleCount: 0,
+  total: 0,
+  totalCount: 0,
+  remoteCount: 0,
+});
 
 /* =========================================================
    SAFE HELPERS
@@ -125,6 +135,15 @@ function safeText(value, fallback = "") {
     .trim();
 
   return output || fallback;
+}
+
+function compactText(value = "", fallback = "", max = HOME_TEXT_LIMIT) {
+  const text = safeText(value, fallback);
+
+  if (!text) return fallback;
+  if (text.length <= max) return text;
+
+  return `${text.slice(0, max).trim()}…`;
 }
 
 function safeNumber(value, fallback = 0) {
@@ -191,14 +210,17 @@ function nowIso() {
   }
 }
 
+function hasSensitiveQuery(value = "") {
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
+}
+
 function redact(value = "") {
   return String(value || "")
     .replace(
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(EMAIL_RE, "");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function normalizeText(value = "") {
@@ -242,16 +264,7 @@ function isSensitiveKey(key = "") {
 
 function isEmailLike(value = "") {
   const text = safeText(value, "");
-  return Boolean(text && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i.test(text));
-}
-
-function visualText(value = "", fallback = "Sin nombre") {
-  const text = redact(safeText(value, ""));
-
-  if (!text) return fallback;
-  if (isEmailLike(text)) return fallback;
-
-  return text;
+  return Boolean(text && EMAIL_RE.test(text));
 }
 
 function firstVisual(values = [], fallback = "Sin nombre") {
@@ -260,7 +273,7 @@ function firstVisual(values = [], fallback = "Sin nombre") {
 
     if (!text || isEmailLike(text)) continue;
 
-    return redact(text) || fallback;
+    return compactText(redact(text), fallback, HOME_TITLE_LIMIT);
   }
 
   return fallback;
@@ -275,7 +288,7 @@ function safePublicId(value = "") {
   if (/Bearer\s+/i.test(text)) return "";
   if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
 
-  return redact(text);
+  return compactText(redact(text), "", 96);
 }
 
 function sanitizeHomeValue(value, keyHint = "") {
@@ -318,176 +331,18 @@ function sanitizeHomeRecord(value = {}) {
   return safeObject(sanitizeHomeValue(value), {});
 }
 
-function sanitizeHomeList(items = []) {
-  return safeArray(items)
-    .map((item) => sanitizeHomeRecord(item))
-    .filter(hasKeys);
-}
-
-function hasSensitiveQuery(value = "") {
-  return SENSITIVE_QUERY_RE.test(String(value || ""));
-}
-
-function routeInput(value = "") {
-  const raw = safeText(value, "");
-
-  if (!raw) return "";
-  if (raw.startsWith("//")) return "";
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
-  if (/[\r\n\t\\]/.test(raw)) return "";
-  if (hasSensitiveQuery(raw)) return "";
-
-  try {
-    return configRoutePathFromUrlLike(raw) || "";
-  } catch {
-    if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
-    if (raw.startsWith("#/")) return raw.slice(1) || "/";
-    return raw;
-  }
-}
-
-function routeSuffix(value = "") {
-  const raw = safeText(value, "");
-
-  const hashIndex = raw.indexOf("#");
-  const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
-  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-
-  const queryIndex = beforeHash.indexOf("?");
-  const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
-
-  if (hasSensitiveQuery(search) || hasSensitiveQuery(hash)) return "";
-
-  return `${search}${hash}`;
-}
-
-function routePathOnly(value = "") {
-  const input = routeInput(value);
-
-  if (!input) return "";
-  if (!input.startsWith("/")) return "";
-  if (input.startsWith("//")) return "";
-  if (/^[a-z][a-z0-9+.-]*:/i.test(input)) return "";
-  if (/[\r\n\t\\]/.test(input)) return "";
-  if (hasSensitiveQuery(input)) return "";
-
-  const pathOnly = input.split("?")[0].split("#")[0] || "";
-
-  try {
-    return configNormalizeRoutePath(pathOnly) || "";
-  } catch {
-    let path = pathOnly.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
-
-    if (!path.startsWith("/")) {
-      path = `/${path}`;
-    }
-
-    if (path.length > 1) {
-      path = path.replace(/\/+$/g, "") || "/";
-    }
-
-    return path || "";
-  }
-}
-
-function isBlockedRoute(value = "") {
-  try {
-    return configIsBlockedRoutePath(value) === true;
-  } catch {
-    const path = routePathOnly(value).toLowerCase();
-
-    return Boolean(
-      path === "/home" ||
-        path === "/403" ||
-        path === "/404" ||
-        path === "/2fa" ||
-        path === "/mfa" ||
-        path === "/otp" ||
-        path.startsWith("/2fa/") ||
-        path.startsWith("/mfa/") ||
-        path.startsWith("/otp/")
-    );
-  }
-}
-
-function safeRoute(value = "", fallback = "") {
-  const input = routeInput(value);
-  const safeFallback = safeText(fallback, "");
-
-  if (!input) return safeFallback;
-  if (!input.startsWith("/")) return safeFallback;
-  if (input.startsWith("//")) return safeFallback;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(input)) return safeFallback;
-  if (/[\r\n\t\\]/.test(input)) return safeFallback;
-  if (hasSensitiveQuery(input)) return safeFallback;
-
-  const pathOnly = routePathOnly(input);
-
-  if (!pathOnly) return safeFallback;
-  if (isBlockedRoute(pathOnly)) return safeFallback;
-
-  return `${pathOnly}${routeSuffix(input)}`;
-}
-
-function routeFromCore(name = "", fallback = "") {
-  return safeRoute(ROUTES?.[name], "") || safeRoute(fallback, "");
-}
-
-const EMPTY_COLLECTION = Object.freeze({
-  items: [],
-  visibleCount: 0,
-  total: 0,
-  totalCount: 0,
-  remoteCount: 0,
-});
-
-const HOME_ROUTES = Object.freeze({
-  INCIDENCIAS: routeFromCore("incidencias", "/incidencias"),
-  FACTURAS: routeFromCore("facturas", "/facturas"),
-  CLIENTES: routeFromCore("clientes", "/clientes"),
-  USUARIOS: routeFromCore("usuarios", "/usuarios"),
-  SERVIDOR: routeFromCore("servidor", "/servidor"),
-});
-
-function routePath(route = "") {
-  return safeRoute(route, "").split("?")[0].split("#")[0] || "";
-}
-
-function isAdminOnlyRoute(route = "") {
-  const path = routePath(route);
-  const clientes = routePath(HOME_ROUTES.CLIENTES);
-  const usuarios = routePath(HOME_ROUTES.USUARIOS);
-  const servidor = routePath(HOME_ROUTES.SERVIDOR);
-
-  if (!path) return false;
-
-  try {
-    if (configIsAdminRoute(path) === true) return true;
-  } catch {
-    // fallback abajo
-  }
-
-  return (
-    Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
-    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
-    Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
-  );
-}
-
-function isAdminEntityValue(value = "") {
-  return ADMIN_ENTITY_RE.test(String(value || "").toLowerCase());
-}
-
 function safeImageSrc(value = "") {
   const raw = safeText(value, "");
 
   if (!raw) return "";
+  if (hasSensitiveQuery(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
 
-  if (raw.startsWith("/") && !raw.startsWith("//") && !hasSensitiveQuery(raw)) {
+  if (raw.startsWith("/") && !raw.startsWith("//")) {
     return raw.replace(/\/{2,}/g, "/");
   }
 
-  if (/^https:\/\//i.test(raw) && !hasSensitiveQuery(raw)) {
+  if (/^https:\/\//i.test(raw)) {
     try {
       return new URL(raw).href;
     } catch {
@@ -496,6 +351,18 @@ function safeImageSrc(value = "") {
   }
 
   return "";
+}
+
+function getPath(object = {}, path = "") {
+  const root = safeObject(object, null);
+  const cleanPath = safeText(path, "");
+
+  if (!root || !cleanPath) return undefined;
+
+  return cleanPath.split(".").reduce((acc, key) => {
+    if (acc === null || acc === undefined) return undefined;
+    return acc?.[key];
+  }, root);
 }
 
 function toTimestamp(value = null) {
@@ -603,6 +470,152 @@ function maxNumber(...values) {
     .filter(Number.isFinite);
 
   return numbers.length ? Math.max(...numbers) : 0;
+}
+
+/* =========================================================
+   ROUTES
+========================================================= */
+
+function routeInput(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (hasSensitiveQuery(raw)) return "";
+
+  try {
+    return configRoutePathFromUrlLike(raw) || "";
+  } catch {
+    if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
+    if (raw.startsWith("#/")) return raw.slice(1) || "/";
+    return raw;
+  }
+}
+
+function routeSuffix(value = "") {
+  const raw = safeText(value, "");
+
+  const hashIndex = raw.indexOf("#");
+  const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
+
+  const queryIndex = beforeHash.indexOf("?");
+  const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
+
+  if (hasSensitiveQuery(search) || hasSensitiveQuery(hash)) return "";
+
+  return `${search}${hash}`;
+}
+
+function routePathOnly(value = "") {
+  const input = routeInput(value);
+
+  if (!input) return "";
+  if (!input.startsWith("/")) return "";
+  if (input.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(input)) return "";
+  if (/[\r\n\t\\]/.test(input)) return "";
+  if (hasSensitiveQuery(input)) return "";
+
+  const pathOnly = input.split("?")[0].split("#")[0] || "";
+
+  try {
+    return configNormalizeRoutePath(pathOnly) || "";
+  } catch {
+    let path = pathOnly.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+
+    if (!path.startsWith("/")) {
+      path = `/${path}`;
+    }
+
+    if (path.length > 1) {
+      path = path.replace(/\/+$/g, "") || "/";
+    }
+
+    return path || "";
+  }
+}
+
+function isBlockedRoute(value = "") {
+  try {
+    return configIsBlockedRoutePath(value) === true;
+  } catch {
+    const path = routePathOnly(value).toLowerCase();
+
+    return Boolean(
+      path === "/home" ||
+        path === "/403" ||
+        path === "/404" ||
+        path === "/2fa" ||
+        path === "/mfa" ||
+        path === "/otp" ||
+        path.startsWith("/2fa/") ||
+        path.startsWith("/mfa/") ||
+        path.startsWith("/otp/")
+    );
+  }
+}
+
+function safeRoute(value = "", fallback = "") {
+  const input = routeInput(value);
+  const safeFallback = safeText(fallback, "");
+
+  if (!input) return safeFallback;
+  if (!input.startsWith("/")) return safeFallback;
+  if (input.startsWith("//")) return safeFallback;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(input)) return safeFallback;
+  if (/[\r\n\t\\]/.test(input)) return safeFallback;
+  if (hasSensitiveQuery(input)) return safeFallback;
+
+  const pathOnly = routePathOnly(input);
+
+  if (!pathOnly) return safeFallback;
+  if (isBlockedRoute(pathOnly)) return safeFallback;
+
+  return `${pathOnly}${routeSuffix(input)}`;
+}
+
+function routeFromCore(name = "", fallback = "") {
+  return safeRoute(ROUTES?.[name], "") || safeRoute(fallback, "");
+}
+
+const HOME_ROUTES = Object.freeze({
+  INCIDENCIAS: routeFromCore("incidencias", "/incidencias"),
+  FACTURAS: routeFromCore("facturas", "/facturas"),
+  CLIENTES: routeFromCore("clientes", "/clientes"),
+  USUARIOS: routeFromCore("usuarios", "/usuarios"),
+  SERVIDOR: routeFromCore("servidor", "/servidor"),
+});
+
+function routePath(route = "") {
+  return safeRoute(route, "").split("?")[0].split("#")[0] || "";
+}
+
+function isAdminOnlyRoute(route = "") {
+  const path = routePath(route);
+  const clientes = routePath(HOME_ROUTES.CLIENTES);
+  const usuarios = routePath(HOME_ROUTES.USUARIOS);
+  const servidor = routePath(HOME_ROUTES.SERVIDOR);
+
+  if (!path) return false;
+
+  try {
+    if (configIsAdminRoute(path) === true) return true;
+  } catch {
+    // fallback local
+  }
+
+  return (
+    Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
+    Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
+  );
+}
+
+function isAdminEntityValue(value = "") {
+  return ADMIN_ENTITY_RE.test(String(value || "").toLowerCase());
 }
 
 /* =========================================================
@@ -941,7 +954,7 @@ export function getHomeTicketIdentities(item = {}) {
 export function getHomeTicketSubject(item = {}) {
   const raw = safeObject(item);
 
-  return safeText(
+  return compactText(
     first(
       raw.subject,
       raw.title,
@@ -949,14 +962,15 @@ export function getHomeTicketSubject(item = {}) {
       raw.name,
       raw.preview
     ),
-    "Incidencia sin asunto"
+    "Incidencia sin asunto",
+    HOME_TITLE_LIMIT
   );
 }
 
 export function getHomeTicketDescription(item = {}) {
   const raw = safeObject(item);
 
-  return safeText(
+  return compactText(
     first(
       raw.description,
       raw.descripcion,
@@ -965,7 +979,8 @@ export function getHomeTicketDescription(item = {}) {
       raw.body,
       raw.text
     ),
-    "Sin descripción."
+    "Sin descripción.",
+    HOME_TEXT_LIMIT
   );
 }
 
@@ -1067,6 +1082,7 @@ export function getHomeTicketUpdatedAt(item = {}) {
   return first(
     raw.updatedAt,
     raw.lastUpdateAt,
+    raw.lastActivityAt,
     raw.ultimaNovedad,
     raw.modifiedAt,
     raw.closedAt,
@@ -1103,13 +1119,15 @@ export function getHomeTicketAttachmentsCount(item = {}) {
 
 export function normalizeHomeTicket(item = {}) {
   const source = safeObject(item);
-  const raw = sanitizeHomeRecord(source);
 
   const id = getHomeTicketId(source);
   const subject = getHomeTicketSubject(source);
   const description = getHomeTicketDescription(source);
   const status = getHomeTicketStatus(source);
   const priority = getHomeTicketPriority(source);
+  const statusKey = getHomeTicketStatusKey(source);
+  const priorityKey = getHomeTicketPriorityKey(source);
+  const attachments = getHomeTicketAttachmentsCount(source);
 
   const clientName = firstVisual(
     [
@@ -1149,56 +1167,82 @@ export function normalizeHomeTicket(item = {}) {
     )
   );
 
+  const category = compactText(
+    first(
+      source.category,
+      source.categoria,
+      source.type,
+      source.tipo,
+      "Soporte"
+    ),
+    "Soporte",
+    64
+  );
+
   return sanitizeHomeRecord({
-    ...raw,
+    id,
 
-    id: safeText(first(raw.id, id), id),
+    ticketId: id,
+    incidenciaId: id,
 
-    ticketId: safeText(first(raw.ticketId, id), id),
-    incidenciaId: safeText(first(raw.incidenciaId, id), id),
-
-    code: safeText(first(raw.code, raw.ticketCode, id), id),
-    ticketCode: safeText(first(raw.ticketCode, raw.code, id), id),
+    code: safeText(first(source.code, source.ticketCode, id), id),
+    ticketCode: safeText(first(source.ticketCode, source.code, id), id),
 
     subject,
-    title: safeText(first(raw.title, raw.subject, subject), subject),
-    asunto: safeText(first(raw.asunto, raw.subject, raw.title, subject), subject),
+    title: subject,
+    asunto: subject,
 
     description,
-    descripcion: safeText(first(raw.descripcion, raw.description, description), description),
-    message: safeText(first(raw.message, raw.description, raw.descripcion, description), description),
+    descripcion: description,
+    message: description,
+    preview: description,
 
     status,
-    estado: safeText(first(raw.estado, raw.status, status), status),
-    state: safeText(first(raw.state, raw.status, status), status),
+    estado: status,
+    state: status,
 
-    statusKey: getHomeTicketStatusKey(status),
+    statusKey,
     statusLabel: getHomeTicketStatusLabel(status),
 
     priority,
-    prioridad: safeText(first(raw.prioridad, raw.priority, priority), priority),
-    priorityKey: getHomeTicketPriorityKey(source),
+    prioridad: priority,
+    priorityKey,
 
     clientName,
-    clienteNombre: safeText(first(raw.clienteNombre, clientName), clientName),
-    requesterName: safeText(first(raw.requesterName, clientName), clientName),
+    clienteNombre: clientName,
+    requesterName: clientName,
+    ownerName: firstVisual([source.ownerName, source.requesterName, clientName], clientName),
 
     clientAvatar: avatar,
     avatar,
     avatarUrl: avatar,
 
-    category: safeText(first(raw.category, raw.categoria, raw.type, raw.tipo), "Soporte"),
-    categoria: safeText(first(raw.categoria, raw.category, raw.type, raw.tipo), "Soporte"),
-    type: safeText(first(raw.type, raw.tipo, raw.category, raw.categoria), "Soporte"),
-    tipo: safeText(first(raw.tipo, raw.type, raw.category, raw.categoria), "Soporte"),
+    category,
+    categoria: category,
+    type: category,
+    tipo: category,
+
+    assignedTo: firstVisual(
+      [
+        source.assignedTo,
+        source.tecnico,
+        source.agent,
+        source.assignee,
+        source.assignment?.displayName,
+        source.assignment?.name,
+      ],
+      "Sin asignación"
+    ),
 
     createdAt: getHomeTicketCreatedAt(source),
     updatedAt: getHomeTicketUpdatedAt(source),
-    lastUpdateAt: first(raw.lastUpdateAt, raw.updatedAt, getHomeTicketUpdatedAt(source)),
+    lastUpdateAt: first(source.lastUpdateAt, source.updatedAt, getHomeTicketUpdatedAt(source)),
+    lastActivityAt: first(source.lastActivityAt, source.updatedAt, getHomeTicketUpdatedAt(source)),
 
-    attachmentsCount: getHomeTicketAttachmentsCount(source),
-    filesCount: getHomeTicketAttachmentsCount(source),
-    adjuntosCount: getHomeTicketAttachmentsCount(source),
+    attachmentsCount: attachments,
+    filesCount: attachments,
+    adjuntosCount: attachments,
+    hasAttachments: attachments > 0,
   });
 }
 
@@ -1288,7 +1332,6 @@ export function isHomeInvoicePendingLike(item = {}) {
 
 export function normalizeHomeInvoice(item = {}) {
   const source = safeObject(item);
-  const raw = sanitizeHomeRecord(source);
 
   const id = getHomeInvoiceId(source);
   const amount = getHomeInvoiceAmount(source);
@@ -1309,20 +1352,32 @@ export function normalizeHomeInvoice(item = {}) {
     "EUR"
   ).toUpperCase();
 
+  const title = compactText(
+    first(
+      source.title,
+      source.name,
+      source.concepto,
+      id ? `Factura ${id}` : "Factura"
+    ),
+    id ? `Factura ${id}` : "Factura",
+    HOME_TITLE_LIMIT
+  );
+
   return sanitizeHomeRecord({
-    ...raw,
+    id,
 
-    id: safeText(first(raw.id, id), id),
+    invoiceId: id,
+    facturaId: id,
 
-    invoiceId: safeText(first(raw.invoiceId, id), id),
-    facturaId: safeText(first(raw.facturaId, id), id),
+    numeroFacturaLegal: safeText(first(source.numeroFacturaLegal, source.numeroFactura, source.invoiceNumber, source.number, source.numero, source.code, id), id),
+    numeroFactura: safeText(first(source.numeroFactura, source.numeroFacturaLegal, source.number, source.numero, id), id),
+    invoiceNumber: safeText(first(source.invoiceNumber, source.numeroFacturaLegal, source.number, source.numero, id), id),
+    number: safeText(first(source.number, source.numero, source.code, id), id),
+    numero: safeText(first(source.numero, source.number, source.code, id), id),
+    code: safeText(first(source.code, source.numero, source.number, id), id),
 
-    numeroFacturaLegal: safeText(first(raw.numeroFacturaLegal, raw.numeroFactura, raw.invoiceNumber, raw.number, raw.numero, raw.code, id), id),
-    numeroFactura: safeText(first(raw.numeroFactura, raw.numeroFacturaLegal, raw.number, raw.numero, id), id),
-    invoiceNumber: safeText(first(raw.invoiceNumber, raw.numeroFacturaLegal, raw.number, raw.numero, id), id),
-    number: safeText(first(raw.number, raw.numero, raw.code, id), id),
-    numero: safeText(first(raw.numero, raw.number, raw.code, id), id),
-    code: safeText(first(raw.code, raw.numero, raw.number, id), id),
+    title,
+    concepto: title,
 
     total: amount,
     amount,
@@ -1337,14 +1392,14 @@ export function normalizeHomeInvoice(item = {}) {
     moneda: currency,
 
     paymentStatus: status,
-    estadoPago: safeText(first(raw.estadoPago, raw.paymentStatus, status), status),
-    status: safeText(first(raw.status, status), status),
-    estado: safeText(first(raw.estado, raw.status, status), status),
-
+    estadoPago: status,
+    status,
+    estado: status,
     statusKey: getHomeInvoiceStatusKey(source),
 
     createdAt: first(source.createdAt, source.fechaCreacion, source.fechaFactura, source.issueDate, source.issuedAt, source.date),
     updatedAt: first(source.updatedAt, source.modifiedAt, source.fechaPago, source.fechaEnvio, source.sentAt, source.date),
+    date: first(source.date, source.createdAt, source.fechaFactura),
   });
 }
 
@@ -1377,7 +1432,6 @@ export function getHomeUserId(item = {}) {
 
 export function normalizeHomeUser(item = {}) {
   const source = safeObject(item);
-  const raw = sanitizeHomeRecord(source);
   const id = getHomeUserId(source);
 
   const displayName = firstVisual(
@@ -1417,26 +1471,24 @@ export function normalizeHomeUser(item = {}) {
   );
 
   return sanitizeHomeRecord({
-    ...raw,
+    id,
 
-    id: safeText(first(raw.id, id), id),
-
-    userId: safeText(first(raw.userId, id), id),
-    usuarioId: safeText(first(raw.usuarioId, id), id),
+    userId: id,
+    usuarioId: id,
 
     displayName,
     fullName: displayName,
     name: displayName,
     nombre: displayName,
 
-    username: safeText(first(raw.username, id), id),
+    username: safeText(first(source.username, id), id),
 
     role,
     rol: role,
     roles: [role],
 
-    active: first(raw.active, raw.isActive, raw.enabled, true),
-    isActive: first(raw.active, raw.isActive, raw.enabled, true),
+    active: first(source.active, source.isActive, source.enabled, true),
+    isActive: first(source.active, source.isActive, source.enabled, true),
 
     avatar,
     avatarUrl: avatar,
@@ -1471,7 +1523,6 @@ export function getHomeClientId(item = {}) {
 
 export function normalizeHomeClient(item = {}) {
   const source = safeObject(item);
-  const raw = sanitizeHomeRecord(source);
   const id = getHomeClientId(source);
 
   const name = firstVisual(
@@ -1487,21 +1538,19 @@ export function normalizeHomeClient(item = {}) {
   );
 
   return sanitizeHomeRecord({
-    ...raw,
+    id,
 
-    id: safeText(first(raw.id, id), id),
-
-    clientId: safeText(first(raw.clientId, id), id),
-    clienteId: safeText(first(raw.clienteId, id), id),
-    customerId: safeText(first(raw.customerId, id), id),
+    clientId: id,
+    clienteId: id,
+    customerId: id,
 
     name,
-    nombre: safeText(first(raw.nombre, name), name),
-    displayName: safeText(first(raw.displayName, name), name),
-    razonSocial: safeText(first(raw.razonSocial, name), name),
+    nombre: name,
+    displayName: name,
+    razonSocial: name,
 
-    active: first(raw.active, raw.isActive, raw.enabled, true),
-    isActive: first(raw.active, raw.isActive, raw.enabled, true),
+    active: first(source.active, source.isActive, source.enabled, true),
+    isActive: first(source.active, source.isActive, source.enabled, true),
 
     createdAt: source.createdAt,
     updatedAt: first(source.updatedAt, source.modifiedAt),
@@ -1543,7 +1592,6 @@ export function getHomeActivityId(item = {}) {
 
 export function normalizeHomeActivity(item = {}) {
   const source = safeObject(item);
-  const raw = sanitizeHomeRecord(source);
 
   const type = safeText(
     first(source.type, source.kind, source.category, HOME_ENTITY_TYPES.ACTIVITY),
@@ -1571,17 +1619,16 @@ export function normalizeHomeActivity(item = {}) {
   const route = safeRoute(first(source.route, source.href, source.link, source.to, ""), "");
 
   return sanitizeHomeRecord({
-    ...raw,
-
     type,
-    kind: safeText(first(raw.kind, type), type),
-    category: safeText(first(raw.category, type), type),
+    kind: type,
+    category: type,
 
     title,
 
-    text: safeText(
+    text: compactText(
       first(source.text, source.description, source.message, source.detail, source.preview),
-      "Sin detalle adicional."
+      "Sin detalle adicional.",
+      HOME_TEXT_LIMIT
     ),
 
     date: first(source.date, source.createdAt, source.updatedAt, source.timestamp, nowIso()),
@@ -1592,7 +1639,7 @@ export function normalizeHomeActivity(item = {}) {
     action: normalizeHomeKey(first(source.action, "open_activity")),
 
     entityId,
-    id: safeText(first(raw.id, entityId), entityId),
+    id: safeText(first(source.id, entityId), entityId),
   });
 }
 
@@ -1707,41 +1754,36 @@ export function getHomeWidgetTitle(item = {}) {
 
 export function normalizeHomeWidget(item = {}) {
   const source = safeObject(item);
-  const raw = sanitizeHomeRecord(source);
-
   const id = getHomeWidgetId(source);
   const title = getHomeWidgetTitle(source);
-
   const route = safeRoute(first(source.route, source.href, source.link, source.to), "");
 
   return sanitizeHomeRecord({
-    ...raw,
-
     widgetId: id,
-    widgetKey: safeText(first(raw.widgetKey, raw.key, id), id),
+    widgetKey: safeText(first(source.widgetKey, source.key, id), id),
 
-    id: safeText(first(raw.id, id), id),
-    key: safeText(first(raw.key, id), id),
+    id,
+    key: safeText(first(source.key, id), id),
 
     title,
 
-    description: safeText(first(raw.description, raw.descripcion, raw.subtitle, raw.summary, raw.text), ""),
-    subtitle: safeText(first(raw.subtitle, raw.description, raw.text), ""),
-    text: safeText(first(raw.text, raw.description, raw.subtitle), ""),
+    description: compactText(first(source.description, source.descripcion, source.subtitle, source.summary, source.text), "", HOME_TEXT_LIMIT),
+    subtitle: compactText(first(source.subtitle, source.description, source.text), "", HOME_TEXT_LIMIT),
+    text: compactText(first(source.text, source.description, source.subtitle), "", HOME_TEXT_LIMIT),
 
-    type: safeText(first(raw.type, raw.kind, raw.variant, raw.category), HOME_ENTITY_TYPES.WIDGET),
-    kind: safeText(first(raw.kind, raw.type, raw.variant, raw.category), HOME_ENTITY_TYPES.WIDGET),
-    variant: safeText(first(raw.variant, raw.type, raw.kind, raw.category), HOME_ENTITY_TYPES.WIDGET),
+    type: safeText(first(source.type, source.kind, source.variant, source.category), HOME_ENTITY_TYPES.WIDGET),
+    kind: safeText(first(source.kind, source.type, source.variant, source.category), HOME_ENTITY_TYPES.WIDGET),
+    variant: safeText(first(source.variant, source.type, source.kind, source.category), HOME_ENTITY_TYPES.WIDGET),
 
-    value: first(raw.value, raw.total, raw.amount, raw.count, raw.metric, "—"),
+    value: first(source.value, source.total, source.amount, source.count, source.metric, "—"),
 
-    trend: first(raw.trend, raw.delta, raw.change, raw.variation, ""),
-    status: safeText(first(raw.status, raw.estado, raw.state), "active"),
+    trend: first(source.trend, source.delta, source.change, source.variation, ""),
+    status: safeText(first(source.status, source.estado, source.state), "active"),
 
     route,
     href: safeRoute(first(source.href, source.route, source.link, source.to), route),
 
-    updatedAt: first(raw.updatedAt, raw.lastUpdate, raw.modifiedAt, raw.createdAt, nowIso()),
+    updatedAt: first(source.updatedAt, source.lastUpdate, source.modifiedAt, source.createdAt, nowIso()),
   });
 }
 
@@ -1766,10 +1808,10 @@ export function buildHomeWidgetsFromSummary(summary = {}, options = {}) {
       title: admin ? "Incidencias" : "Mis incidencias",
       description: admin ? "Tickets visibles en el panel." : "Tus solicitudes visibles.",
       value: safeNumber(data.totalTickets, 0),
-      subtitle: `${safeNumber(data.openTickets, 0)} abiertas · ${safeNumber(data.urgentTickets, 0)} urgentes`,
+      subtitle: `${safeNumber(data.openTickets, 0)} abiertas`,
       type: "tickets",
       kind: "metric",
-      status: safeNumber(data.urgentTickets, 0) > 0 ? "warning" : "active",
+      status: "active",
       route: HOME_ROUTES.INCIDENCIAS,
       href: HOME_ROUTES.INCIDENCIAS,
     },
@@ -1820,21 +1862,6 @@ export function buildHomeWidgetsFromSummary(summary = {}, options = {}) {
       status: "active",
       route: HOME_ROUTES.USUARIOS,
       href: HOME_ROUTES.USUARIOS,
-    });
-  } else {
-    base.push({
-      id: "adjuntos",
-      widgetId: "adjuntos",
-      key: "adjuntos",
-      title: "Adjuntos",
-      description: "Documentos vinculados a tus incidencias.",
-      value: safeNumber(data.attachmentsCount, 0),
-      subtitle: "Archivos visibles",
-      type: "files",
-      kind: "metric",
-      status: "active",
-      route: HOME_ROUTES.INCIDENCIAS,
-      href: HOME_ROUTES.INCIDENCIAS,
     });
   }
 
@@ -2115,8 +2142,6 @@ export function normalizeHomeDashboard(payload = null) {
     source = safeObject(source.dashboard);
   }
 
-  const raw = sanitizeHomeRecord(source);
-
   const admin = inferAdmin(source);
   const role = admin ? "admin" : "user";
 
@@ -2184,23 +2209,23 @@ export function normalizeHomeDashboard(payload = null) {
     : buildHomeWidgetsFromSummary(summary, { admin });
 
   const updatedAt = first(
-    raw.updatedAt,
-    raw.lastUpdate,
-    raw.generatedAt,
-    raw.createdAt,
+    source.updatedAt,
+    source.lastUpdate,
+    source.generatedAt,
+    source.createdAt,
     summary.updatedAt,
     summary.lastUpdate,
     nowIso()
   );
 
   return sanitizeHomeRecord({
-    ...raw,
+    ok: source.ok !== false && source.success !== false,
+    success: source.ok !== false && source.success !== false,
 
-    ok: raw.ok !== false && raw.success !== false,
-    success: raw.ok !== false && raw.success !== false,
-
-    source: safeText(first(raw.source, admin ? "home-admin-normalized" : "home-user-normalized"), "home-normalized"),
+    source: safeText(first(source.source, admin ? "home-admin-normalized" : "home-user-normalized"), "home-normalized"),
     version: HOME_MODEL_VERSION,
+
+    requestId: safePublicId(first(source.requestId, source.meta?.requestId, "")),
 
     role,
     admin,
@@ -2273,6 +2298,11 @@ export function normalizeHomeDashboard(payload = null) {
     visibleClientesCount: admin ? clients.length : 0,
     visibleCustomersCount: admin ? clients.length : 0,
 
+    servers: [],
+    servidores: [],
+    server: {},
+    servidor: {},
+
     activity,
     activities: activity,
     recent: activity,
@@ -2282,17 +2312,29 @@ export function normalizeHomeDashboard(payload = null) {
     recentCount: activity.length,
     visibleActivityCount: activity.length,
 
+    partial: Boolean(source.partial),
+    errors: safeArray(source.errors).map((error) => ({
+      module: safeText(error?.module, ""),
+      kind: safeText(error?.kind, ""),
+      status: safeNumber(error?.status, 0),
+      code: safeText(error?.code, ""),
+      message: redact(error?.message || ""),
+      soft: Boolean(error?.soft),
+    })),
+
+    modules: sanitizeHomeRecord(source.modules || {}),
+
     updatedAt,
-    generatedAt: first(raw.generatedAt, updatedAt),
+    generatedAt: first(source.generatedAt, updatedAt),
 
     meta: {
-      ...safeObject(raw.meta),
+      ...safeObject(source.meta),
 
       role,
       admin,
 
       updatedAt,
-      generatedAt: first(raw.generatedAt, updatedAt),
+      generatedAt: first(source.generatedAt, updatedAt),
 
       widgetsCount: widgets.length,
 
@@ -2317,6 +2359,11 @@ export function normalizeHomeDashboard(payload = null) {
       visibleClientsCount: admin ? clients.length : 0,
       visibleClientesCount: admin ? clients.length : 0,
       visibleCustomersCount: admin ? clients.length : 0,
+
+      serversCount: 0,
+      servidoresCount: 0,
+      visibleServersCount: 0,
+      visibleServidoresCount: 0,
 
       activityCount: activity.length,
       recentCount: activity.length,
@@ -2450,7 +2497,7 @@ export function getLatestHomeTicketUpdate(tickets = []) {
 ========================================================= */
 
 export function buildHomeTemplatePayload(input = {}) {
-  const source = sanitizeHomeRecord(input);
+  const source = safeObject(input);
   const dashboard = normalizeHomeDashboard(first(source.dashboard, source, {}));
 
   const tickets = source.tickets || source.incidencias

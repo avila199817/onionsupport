@@ -18,7 +18,7 @@
    - Lee usuario/rol sólo desde contexto/AppCore/state ya resuelto.
    - Lee colecciones desde homeState raíz y fallback dashboard.
    - Recarga si Home está marcado como loaded pero no hay datos reales.
-   - Render inmediato tras sincronizar datos reales.
+   - Render único y estable tras sincronizar datos reales.
    - No resuelve slug.
    - No ejecuta Auth guards.
    - No ejecuta Router guards.
@@ -104,11 +104,10 @@ import {
   safeObject,
   isObject,
   first,
-  nowIso,
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v10";
+export const HOME_VIEW_VERSION = "home.view.v11";
 
 export const HomeView = (() => {
   "use strict";
@@ -859,9 +858,9 @@ export const HomeView = (() => {
         dashboard.updatedAt,
         dashboard.generatedAt,
         dashboard.meta?.updatedAt,
-        nowIso()
+        ""
       ),
-      nowIso()
+      ""
     );
 
     const roleScopedDashboard = stripAdminDashboardForRole(
@@ -1171,6 +1170,63 @@ export const HomeView = (() => {
     });
   }
 
+  function buildRuntimeStateForTemplate({
+    role,
+    admin,
+    dashboard,
+    summary,
+    tickets,
+    invoices,
+    users,
+    clients,
+    activity,
+    pagination,
+  }) {
+    return {
+      role,
+      admin,
+
+      loading: Boolean(homeState.loading),
+      refreshing: Boolean(homeState.refreshing),
+      loaded: Boolean(homeState.loaded),
+      hydrated: Boolean(homeState.hydrated),
+      creating: Boolean(homeState.creating),
+
+      error: redact(homeState.error || ""),
+      openingTicketId: safeText(homeState.openingTicketId, ""),
+      selectedTicketId: safeText(homeState.selectedTicketId, ""),
+      navigatingAction: redact(homeState.navigatingAction || ""),
+
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+
+      requestId: homeState.requestId || "",
+      lastUpdatedAt: homeState.lastSyncAt || "",
+      lastSyncAt: homeState.lastSyncAt || "",
+
+      dashboard,
+      summary,
+
+      tickets,
+      incidencias: tickets,
+
+      invoices,
+      facturas: invoices,
+
+      users,
+      usuarios: users,
+
+      clients,
+      clientes: clients,
+
+      activity,
+      recent: activity,
+      recentActivity: activity,
+
+      pagination,
+    };
+  }
+
   function buildTemplatePayload() {
     ensureBaseState();
 
@@ -1218,33 +1274,18 @@ export const HomeView = (() => {
       requestId: homeState.requestId || "",
       lastUpdatedAt: homeState.lastSyncAt || "",
 
-      state: {
-        ...getHomeStateSnapshot(),
-
+      state: buildRuntimeStateForTemplate({
         role,
         admin,
-
         dashboard,
         summary,
-
         tickets,
-        incidencias: tickets,
-
         invoices,
-        facturas: invoices,
-
         users,
-        usuarios: users,
-
         clients,
-        clientes: clients,
-
         activity,
-        recent: activity,
-        recentActivity: activity,
-
         pagination,
-      },
+      }),
     });
   }
 
@@ -1254,10 +1295,10 @@ export const HomeView = (() => {
         getInvoices().length ||
         (isAdmin() && getUsers().length) ||
         (isAdmin() && getClients().length) ||
-        getActivity().length ||
-        getWidgets().length ||
-        hasKeys(getSummary()) ||
-        hasKeys(stripAdminDashboardForRole(homeState.dashboard, isAdmin()))
+        safeArray(homeState.activity).length ||
+        safeArray(homeState.widgets).length ||
+        hasKeys(homeState.summary) ||
+        hasKeys(homeState.dashboard)
     );
   }
 
@@ -1421,14 +1462,13 @@ export const HomeView = (() => {
     let request;
 
     request = (async () => {
-      const hadData = hasVisibleData();
+      const hadData = hasCollectionData();
 
       clearHomeError();
 
       setLoading(!hadData && !refresh);
       setRefreshing(refresh);
-
-      renderAndBind(currentContainer);
+      setViewBusy(currentContainer, !hadData || refresh);
 
       try {
         const response = refresh
@@ -1449,12 +1489,6 @@ export const HomeView = (() => {
           trustPayloadRole: true,
         });
 
-        if (normalized && isCurrentLoad(seq)) {
-          setLoading(false);
-          setRefreshing(false);
-          renderAndBind(currentContainer);
-        }
-
         return Boolean(normalized);
       } catch (error) {
         if (!isCurrentLoad(seq)) return false;
@@ -1466,7 +1500,7 @@ export const HomeView = (() => {
         if (isCurrentLoad(seq)) {
           setLoading(false);
           setRefreshing(false);
-
+          setViewBusy(currentContainer, false);
           renderAndBind(currentContainer);
         }
 
@@ -1812,7 +1846,7 @@ export const HomeView = (() => {
         readsUserFromResolvedContext: true,
         readsCollectionsFromDashboardFallback: true,
         reloadsWhenLoadedButEmpty: true,
-        immediateRenderAfterDashboardSync: true,
+        optimizedSingleRenderAfterLoad: true,
 
         noSlugResolution: true,
         noAuthGuards: true,

@@ -26,7 +26,6 @@
    - No crea bridges globales.
    - No emite eventos externos.
    - No crea cache local propia.
-   - No usa imports opcionales.
    - No abre modales de otras vistas.
    - No usa Toast directo.
    - No usa /home.
@@ -116,7 +115,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v13";
+export const HOME_VIEW_VERSION = "home.view.v15";
 
 export const HomeView = (() => {
   "use strict";
@@ -216,6 +215,26 @@ export const HomeView = (() => {
     } catch {
       return null;
     }
+  }
+
+  function safeCall(fn = null, ...args) {
+    try {
+      return isFunction(fn) ? fn(...args) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function hasOwn(value = {}, key = "") {
+    return Object.prototype.hasOwnProperty.call(safeObject(value), key);
+  }
+
+  function firstArray(...values) {
+    for (const value of values) {
+      if (Array.isArray(value) && value.length) return value;
+    }
+
+    return [];
   }
 
   function hasSensitiveQuery(value = "") {
@@ -384,26 +403,6 @@ export const HomeView = (() => {
     }
   }
 
-  function safeCall(fn = null, ...args) {
-    try {
-      return isFunction(fn) ? fn(...args) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function firstArray(...values) {
-    for (const value of values) {
-      if (Array.isArray(value) && value.length) return value;
-    }
-
-    return [];
-  }
-
-  function hasOwn(value = {}, key = "") {
-    return Object.prototype.hasOwnProperty.call(safeObject(value), key);
-  }
-
   /* =======================================================
      USER / ROLE CONTEXT
   ======================================================= */
@@ -503,12 +502,197 @@ export const HomeView = (() => {
     return safeObject(core?.state);
   }
 
+  function getSidebarController() {
+    const ctx = safeObject(currentContext);
+    const core = getContextCore();
+
+    return first(
+      ctx.Sidebar,
+      ctx.sidebarController,
+      ctx.ui?.sidebar,
+
+      core?.ui?.sidebar,
+      core?.sidebar,
+
+      CoreModule.AppCore?.ui?.sidebar,
+      CoreModule.AppCore?.sidebar,
+      CoreModule.default?.ui?.sidebar,
+      CoreModule.default?.sidebar,
+
+      null
+    );
+  }
+
+  function initialsFromName(value = "Usuario") {
+    const name = safeText(value, "Usuario");
+    const parts = name.split(/\s+/).filter(Boolean);
+
+    if (!parts.length) return "U";
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase() || "U";
+
+    return `${parts[0]?.[0] || ""}${parts[parts.length - 1]?.[0] || ""}`.toUpperCase() || "U";
+  }
+
+  function normalizeHomeUserViewModel(user = null, fallbackRole = "user") {
+    const source = safeObject(user);
+
+    const displayName = safeText(
+      first(
+        source.displayName,
+        source.fullName,
+        source.name,
+        source.nombre,
+        source.profile?.displayName,
+        source.profile?.fullName,
+        source.profile?.name,
+        source.profile?.nombre,
+        source.username,
+        source.userName,
+        source.slug,
+        ""
+      ),
+      ""
+    );
+
+    if (!displayName) return null;
+
+    const role = normalizeRole(
+      first(
+        source.role,
+        source.rol,
+        source.roles,
+        fallbackRole,
+        ""
+      )
+    ) || "user";
+
+    const avatarUrl = safeText(
+      first(
+        source.avatarUrl,
+        source.avatar,
+        source.photoUrl,
+        source.photoURL,
+        source.picture,
+        source.pictureUrl,
+        source.image,
+        source.imageUrl,
+        source.foto,
+        source.fotoUrl,
+        source.imagen,
+        source.imagenUrl,
+        ""
+      ),
+      ""
+    );
+
+    const initials = safeText(
+      first(
+        source.initials,
+        source.iniciales,
+        initialsFromName(displayName)
+      ),
+      "U"
+    )
+      .slice(0, 3)
+      .toUpperCase();
+
+    return {
+      hasUser: source.hasUser !== false,
+
+      id: safeText(source.id, "") || null,
+      userId: safeText(source.userId || source.id, "") || null,
+
+      slug: safeText(source.slug || source.lookup?.slug || source.profile?.slug, "") || null,
+      username: safeText(source.username || source.userName, "") || null,
+
+      displayName,
+      name: displayName,
+      fullName: displayName,
+
+      hasAvatar: Boolean(avatarUrl || source.hasAvatar),
+      avatarUrl,
+      avatar: avatarUrl,
+      photoUrl: avatarUrl,
+      photoURL: avatarUrl,
+      picture: avatarUrl,
+      pictureUrl: avatarUrl,
+      image: avatarUrl,
+      imageUrl: avatarUrl,
+      foto: avatarUrl,
+      fotoUrl: avatarUrl,
+      imagen: avatarUrl,
+      imagenUrl: avatarUrl,
+
+      initials,
+
+      role,
+      rol: role,
+      roles: [role],
+      roleLabel: safeText(
+        first(
+          source.roleLabel,
+          role === "admin" ? "Administrador" : "Estándar"
+        ),
+        role === "admin" ? "Administrador" : "Estándar"
+      ),
+
+      isAdmin: role === "admin",
+      isUser: role === "user",
+    };
+  }
+
+  function hasRealUserName(user = null) {
+    const source = safeObject(user);
+    const displayName = safeText(
+      first(source.displayName, source.name, source.fullName, ""),
+      ""
+    );
+
+    return Boolean(source.hasUser === true && displayName && displayName !== "Usuario");
+  }
+
+  function getSidebarSnapshotUser() {
+    const sidebar = getSidebarController();
+
+    const snapshot = safeObject(
+      safeCall(sidebar?.getSnapshot?.bind?.(sidebar) || sidebar?.getSnapshot)
+    );
+
+    const user = safeObject(
+      first(
+        snapshot.user,
+        snapshot.sidebarUser,
+        snapshot.data?.user,
+        snapshot.state?.user,
+        {}
+      )
+    );
+
+    const role = normalizeRole(
+      first(
+        user.role,
+        user.rol,
+        user.roles,
+        snapshot.role,
+        snapshot.rol,
+        snapshot.roles,
+        snapshot.isAdmin === true ? "admin" : "",
+        ""
+      )
+    ) || "user";
+
+    const normalized = normalizeHomeUserViewModel(user, role);
+
+    return hasRealUserName(normalized) ? normalized : null;
+  }
+
   function getResolvedSidebarUser() {
     const ctx = safeObject(currentContext);
     const core = getContextCore();
     const auth = getContextAuth();
     const coreState = getCoreState();
     const dashboard = safeObject(homeState.dashboard);
+    const sidebarSnapshotUser = getSidebarSnapshotUser();
 
     const directUser = first(
       ctx.sidebarUser,
@@ -516,6 +700,8 @@ export const HomeView = (() => {
       ctx.layout?.sidebarUser,
       ctx.context?.sidebarUser,
       ctx.context?.user,
+
+      sidebarSnapshotUser,
 
       ctx.user,
       ctx.currentUser,
@@ -538,13 +724,14 @@ export const HomeView = (() => {
       homeState.user,
 
       dashboard.sidebarUser,
+      dashboard.sidebar?.user,
       dashboard.user,
       dashboard.currentUser,
 
       null
     );
 
-    return safeObject(
+    const resolved = safeObject(
       safeCall(getSidebarUser, {
         ...ctx,
 
@@ -597,6 +784,7 @@ export const HomeView = (() => {
           ctx.userRole,
           directUser?.role,
           directUser?.rol,
+          sidebarSnapshotUser?.role,
           coreState.role,
           coreState.rol,
           dashboard.role,
@@ -607,12 +795,19 @@ export const HomeView = (() => {
         roles: first(
           ctx.roles,
           directUser?.roles,
+          sidebarSnapshotUser?.roles,
           coreState.roles,
           dashboard.roles,
           null
         ),
       })
     );
+
+    if (hasRealUserName(resolved)) return resolved;
+    if (hasRealUserName(sidebarSnapshotUser)) return sidebarSnapshotUser;
+    if (resolved.hasUser === true) return resolved;
+
+    return safeObject(sidebarSnapshotUser || resolved);
   }
 
   function getCurrentUser() {
@@ -711,127 +906,7 @@ export const HomeView = (() => {
 
     if (!hasKeys(source)) return null;
 
-    const displayName =
-      safeText(
-        first(
-          source.displayName,
-          source.fullName,
-          source.name,
-          source.nombre,
-          source.profile?.displayName,
-          source.profile?.fullName,
-          source.username,
-          source.userName
-        ),
-        ""
-      ) || null;
-
-    const role = normalizeRole(
-      first(
-        source.role,
-        source.rol,
-        source.roles,
-        getCurrentRole()
-      )
-    ) || "user";
-
-    const avatarUrl = safeText(
-      first(
-        source.avatarUrl,
-        source.avatar,
-        source.photoUrl,
-        source.photoURL,
-        source.picture,
-        source.pictureUrl,
-        source.image,
-        source.imageUrl,
-        source.foto,
-        source.fotoUrl,
-        source.imagen,
-        source.imagenUrl,
-        ""
-      ),
-      ""
-    );
-
-    const initials = safeText(
-      first(
-        source.initials,
-        source.iniciales,
-        displayName
-          ? displayName
-              .split(/\s+/)
-              .filter(Boolean)
-              .map((part, index, parts) =>
-                index === 0 || index === parts.length - 1 ? part[0] : ""
-              )
-              .join("")
-              .slice(0, 2)
-              .toUpperCase()
-          : ""
-      ),
-      "U"
-    )
-      .slice(0, 3)
-      .toUpperCase();
-
-    const roleLabel = safeText(
-      first(
-        source.roleLabel,
-        role === "admin" ? "Administrador" : "Estándar"
-      ),
-      role === "admin" ? "Administrador" : "Estándar"
-    );
-
-    return {
-      hasUser: Boolean(
-        source.hasUser === true ||
-          source.id ||
-          source.userId ||
-          source.uid ||
-          source.sub ||
-          source.username ||
-          source.userName ||
-          source.slug ||
-          displayName
-      ),
-
-      hasId: Boolean(source.id || source.userId),
-
-      id: safeText(source.id, "") || null,
-      userId: safeText(source.userId || source.id, "") || null,
-
-      username: safeText(source.username || source.userName, "") || null,
-      slug: safeText(source.slug || source.lookup?.slug || source.profile?.slug, "") || null,
-
-      displayName,
-      name: displayName,
-      fullName: displayName,
-
-      hasAvatar: Boolean(avatarUrl),
-      avatarUrl,
-      avatar: avatarUrl,
-      photoUrl: avatarUrl,
-      photoURL: avatarUrl,
-      picture: avatarUrl,
-      pictureUrl: avatarUrl,
-      image: avatarUrl,
-      imageUrl: avatarUrl,
-      foto: avatarUrl,
-      fotoUrl: avatarUrl,
-      imagen: avatarUrl,
-      imagenUrl: avatarUrl,
-
-      initials,
-
-      role,
-      rol: role,
-      roles: [role],
-      roleLabel,
-
-      isAdmin: role === "admin",
-      isUser: role === "user",
-    };
+    return normalizeHomeUserViewModel(source, getCurrentRole());
   }
 
   function getTemplateUser() {

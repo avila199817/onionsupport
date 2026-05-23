@@ -6,7 +6,9 @@
    - Bind DOM mínimo de Home.
    - Delegar clicks por data-home-action / data-action.
    - Soportar refresh, retry, export, navigate, create,
-     copy id y paginación.
+     copy id, detalle de incidencia y cierre de modal.
+   - Conectar open_ticket_detail / close_ticket_detail con statePatch.
+   - Solicitar rerender tras cambios de estado si HomeView pasa callback.
    - Limpiar listeners por scope.
    - Evitar doble binding tras rerender.
    - Busy state durante acciones async.
@@ -24,6 +26,7 @@
    - Sin rutas opcionales inventadas.
    - Sin /home.
    - Sin /incidencias/nueva.
+   - Sin health/server/ready/ping.
 ========================================================= */
 
 import {
@@ -33,7 +36,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const HOME_BINDINGS_VERSION = "home.bindings.v6";
+export const HOME_BINDINGS_VERSION = "home.bindings.v7";
 
 const DEFAULT_SCOPE = "view:home";
 
@@ -46,9 +49,28 @@ const ACTIONS = Object.freeze({
   navigate: new Set(["navigate_home"]),
   create: new Set(["create_incidencia"]),
 
+  ticketOpen: new Set([
+    "open_ticket_detail",
+    "open_incidencia_detail",
+    "ticket_detail",
+    "incidencia_detail",
+    "detail_ticket",
+    "detail_incidencia",
+  ]),
+
+  ticketClose: new Set([
+    "close_ticket_detail",
+    "close_incidencia_detail",
+    "close_detail",
+  ]),
+
   pagePrev: new Set(["prev_page"]),
   pageNext: new Set(["next_page"]),
   pageGo: new Set(["page"]),
+});
+
+const ACTION_RESULT_TYPES = Object.freeze({
+  STATE_PATCH: "home_state_patch",
 });
 
 const RAW_KEYS = new Set([
@@ -59,11 +81,24 @@ const RAW_KEYS = new Set([
   "body",
 ]);
 
+const COSMOS_META_KEYS = new Set([
+  "_id",
+  "_rid",
+  "_self",
+  "_etag",
+  "_attachments",
+  "_ts",
+  "_lsn",
+  "_metadata",
+]);
+
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id/i;
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni|ipRaw|ip|userAgent/i;
 
 const SENSITIVE_QUERY_RE =
   /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
+
+const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
 
 const ACTION_SELECTOR = [
   "[data-home-action]",
@@ -84,6 +119,9 @@ const KEYBOARD_SELECTOR = [
   "[tabindex][data-route]",
   "[tabindex][data-href]",
 ].join(",");
+
+const TICKET_ROW_SELECTOR = "[data-ticket-row], [data-ticket-id], [data-incidencia-id]";
+const TICKET_MODAL_SELECTOR = "[data-home-modal='ticket-detail']";
 
 const cleanupsByScope = new Map();
 const rootsByScope = new Map();
@@ -115,6 +153,10 @@ function isElement(value) {
 
 function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function safeText(value = "", fallback = "") {
@@ -183,8 +225,14 @@ function isSensitiveKey(key = "") {
   return SENSITIVE_KEY_RE.test(String(key || ""));
 }
 
+function isEmailLike(value = "") {
+  const text = safeText(value, "");
+  return Boolean(text && EMAIL_RE.test(text));
+}
+
 function sanitizePayloadValue(value, keyHint = "") {
   if (RAW_KEYS.has(keyHint)) return undefined;
+  if (COSMOS_META_KEYS.has(keyHint)) return undefined;
   if (isSensitiveKey(keyHint)) return undefined;
 
   if (typeof value === "string") {
@@ -202,6 +250,7 @@ function sanitizePayloadValue(value, keyHint = "") {
 
     for (const [key, item] of Object.entries(value)) {
       if (RAW_KEYS.has(key)) continue;
+      if (COSMOS_META_KEYS.has(key)) continue;
       if (isSensitiveKey(key)) continue;
 
       const clean = sanitizePayloadValue(item, key);
@@ -219,6 +268,22 @@ function sanitizePayloadValue(value, keyHint = "") {
 
 function sanitizePayload(value = {}) {
   return safeObject(sanitizePayloadValue(value), {});
+}
+
+/* =========================================================
+   SAFE IDS
+========================================================= */
+
+function safePublicId(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) return "";
+  if (isEmailLike(text)) return "";
+  if (hasSensitiveQuery(text)) return "";
+  if (/Bearer\s+/i.test(text)) return "";
+  if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
+
+  return redact(text).slice(0, 240);
 }
 
 /* =========================================================
@@ -249,11 +314,9 @@ function routeInput(value = "") {
 
 function routeSuffix(value = "") {
   const raw = safeText(value, "");
-
   const hashIndex = raw.indexOf("#");
   const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
   const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-
   const queryIndex = beforeHash.indexOf("?");
   const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
 
@@ -455,6 +518,23 @@ function closest(event = null, selector = "", root = null) {
   return element;
 }
 
+function closestElement(element = null, selector = "", root = null) {
+  if (!isElement(element) || !selector) return null;
+
+  let found = null;
+
+  try {
+    found = element.closest(selector);
+  } catch {
+    found = null;
+  }
+
+  if (!found) return null;
+  if (root && !contains(root, found)) return null;
+
+  return found;
+}
+
 function datasetValue(element = null, ...names) {
   if (!element) return "";
 
@@ -514,26 +594,46 @@ function routeFromElement(element = null) {
   );
 }
 
-function idFromElement(element = null) {
+function ticketIdFromElement(element = null, root = null) {
   if (!element) return "";
 
-  return safeText(
+  const row = closestElement(element, TICKET_ROW_SELECTOR, root);
+
+  return safePublicId(
+    first(
+      datasetValue(element, "ticketId"),
+      datasetValue(element, "incidenciaId"),
+      datasetValue(row, "ticketId"),
+      datasetValue(row, "incidenciaId"),
+      ""
+    )
+  );
+}
+
+function idFromElement(element = null, root = null) {
+  if (!element) return "";
+
+  const row = closestElement(element, TICKET_ROW_SELECTOR, root);
+
+  return safePublicId(
     first(
       datasetValue(element, "widgetId"),
       datasetValue(element, "widgetKey"),
-      datasetValue(element, "entityId"),
       datasetValue(element, "ticketId"),
       datasetValue(element, "incidenciaId"),
       datasetValue(element, "invoiceId"),
       datasetValue(element, "facturaId"),
+      datasetValue(element, "entityId"),
       datasetValue(element, "key"),
+      datasetValue(row, "ticketId"),
+      datasetValue(row, "incidenciaId"),
+      datasetValue(row, "entityId"),
       ""
-    ),
-    ""
+    )
   );
 }
 
-function payloadFromElement(element = null) {
+function payloadFromElement(element = null, root = null) {
   const raw = safeText(
     first(
       datasetValue(element, "payload"),
@@ -543,13 +643,34 @@ function payloadFromElement(element = null) {
     ""
   );
 
-  if (!raw) return {};
+  let parsed = {};
 
-  try {
-    return sanitizePayload(JSON.parse(raw));
-  } catch {
-    return {};
+  if (raw) {
+    try {
+      parsed = sanitizePayload(JSON.parse(raw));
+    } catch {
+      parsed = {};
+    }
   }
+
+  const ticketId = ticketIdFromElement(element, root);
+  const id = idFromElement(element, root);
+
+  return sanitizePayload({
+    ...parsed,
+
+    widgetId: first(parsed.widgetId, datasetValue(element, "widgetId"), ""),
+    widgetKey: first(parsed.widgetKey, datasetValue(element, "widgetKey"), ""),
+
+    ticketId: first(parsed.ticketId, ticketId, ""),
+    incidenciaId: first(parsed.incidenciaId, ticketId, ""),
+
+    invoiceId: first(parsed.invoiceId, datasetValue(element, "invoiceId"), ""),
+    facturaId: first(parsed.facturaId, datasetValue(element, "facturaId"), ""),
+
+    entityId: first(parsed.entityId, datasetValue(element, "entityId"), id, ""),
+    id: first(parsed.id, id, ""),
+  });
 }
 
 function filenameFromElement(element = null) {
@@ -595,6 +716,16 @@ function pageFromElement(element = null) {
       1
     )
   );
+}
+
+function hasTicketModal(root = null) {
+  if (!isElement(root)) return false;
+
+  try {
+    return Boolean(root.querySelector(TICKET_MODAL_SELECTOR));
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -721,16 +852,193 @@ function elementHasBlockedRoute(element = null) {
 }
 
 /* =========================================================
+   STATE PATCH / RENDER CALLBACKS
+========================================================= */
+
+async function callFirstAvailable(callbacks = [], ...args) {
+  for (const callback of callbacks) {
+    if (!isFunction(callback)) continue;
+
+    try {
+      const result = await callback(...args);
+
+      if (result !== false) return true;
+    } catch {
+      // probar siguiente callback
+    }
+  }
+
+  return false;
+}
+
+async function requestHomeRender(api = {}, result = {}) {
+  return callFirstAvailable(
+    [
+      api.requestRender,
+      api.requestRerender,
+      api.rerender,
+      api.render,
+      api.onRenderRequest,
+      api.onRenderRequested,
+    ],
+    result
+  );
+}
+
+async function applyStatePatch(patch = {}, result = {}, api = {}) {
+  const cleanPatch = sanitizePayload(patch);
+
+  if (!Object.keys(cleanPatch).length) return false;
+
+  const currentState = isFunction(api.getState)
+    ? safeObject(await api.getState(), {})
+    : {};
+
+  const appliedBySpecificPatchHandler = await callFirstAvailable(
+    [
+      api.onStatePatch,
+      api.patchState,
+      api.updateState,
+    ],
+    cleanPatch,
+    result
+  );
+
+  if (appliedBySpecificPatchHandler) {
+    await requestHomeRender(api, result);
+    return true;
+  }
+
+  if (
+    isFunction(api.reduceHomeActionState) &&
+    isFunction(api.setState)
+  ) {
+    try {
+      const nextState = api.reduceHomeActionState(currentState, result);
+      const applied = await api.setState(nextState, result);
+
+      if (applied !== false) {
+        await requestHomeRender(api, result);
+        return true;
+      }
+    } catch {
+      // fallback abajo
+    }
+  }
+
+  if (isFunction(api.setState)) {
+    try {
+      const applied = await api.setState(
+        Object.keys(currentState).length
+          ? {
+              ...currentState,
+              ...cleanPatch,
+            }
+          : cleanPatch,
+        result
+      );
+
+      if (applied !== false) {
+        await requestHomeRender(api, result);
+        return true;
+      }
+    } catch {
+      // noop
+    }
+  }
+
+  return false;
+}
+
+async function notifyActionResult(result = {}, api = {}, element = null) {
+  const cleanResult = sanitizePayload(result);
+
+  await callFirstAvailable(
+    [
+      api.onActionResult,
+      api.onHomeActionResult,
+    ],
+    cleanResult,
+    element
+  );
+
+  const action = normalizeKey(cleanResult.action);
+
+  if (action === "open_ticket_detail") {
+    await callFirstAvailable(
+      [
+        api.onTicketDetailOpen,
+        api.onIncidenciaDetailOpen,
+      ],
+      cleanResult,
+      element
+    );
+  }
+
+  if (action === "close_ticket_detail") {
+    await callFirstAvailable(
+      [
+        api.onTicketDetailClose,
+        api.onIncidenciaDetailClose,
+      ],
+      cleanResult,
+      element
+    );
+  }
+
+  return cleanResult;
+}
+
+async function applyActionResult(result = null, api = {}, element = null) {
+  if (result === false || result === null || result === undefined) {
+    return result;
+  }
+
+  if (!isObject(result)) {
+    return result;
+  }
+
+  const cleanResult = await notifyActionResult(result, api, element);
+
+  if (isObject(cleanResult.statePatch) && Object.keys(cleanResult.statePatch).length) {
+    await applyStatePatch(cleanResult.statePatch, cleanResult, api);
+  }
+
+  return cleanResult;
+}
+
+/* =========================================================
    ACTION RESOLUTION
 ========================================================= */
 
-function resolveKind(element = null) {
+function isTicketDetailElement(element = null, root = null) {
+  if (!element) return false;
+
+  const action = actionName(element);
+
+  if (ACTIONS.ticketOpen.has(action)) return true;
+
+  const ticketId = ticketIdFromElement(element, root);
+
+  if (!ticketId) return false;
+
+  /*
+    Compat con templates antiguos:
+    si un elemento de una fila trae navigate_home + ticketId, se abre modal.
+    Las cards generales no tienen ticketId, así que siguen navegando.
+  */
+  return ACTIONS.navigate.has(action);
+}
+
+function resolveKind(element = null, root = null) {
   const action = actionName(element);
   const route = normalizeInternalRoute(routeFromElement(element));
 
   if (ACTIONS.refresh.has(action)) return "refresh";
   if (ACTIONS.exportCsv.has(action)) return "export";
   if (ACTIONS.copyId.has(action)) return "copy-id";
+  if (ACTIONS.ticketClose.has(action)) return "ticket-close";
+  if (isTicketDetailElement(element, root)) return "ticket-open";
   if (ACTIONS.create.has(action)) return "create";
   if (ACTIONS.pagePrev.has(action)) return "page-prev";
   if (ACTIONS.pageNext.has(action)) return "page-next";
@@ -779,77 +1087,190 @@ async function handleRefresh(element, api = {}) {
 async function handleExport(element, api = {}) {
   if (!isFunction(api.exportHomeCsvAction)) return false;
 
-  return withBusy(element, () =>
-    api.exportHomeCsvAction({
+  return withBusy(element, async () => {
+    const result = await api.exportHomeCsvAction({
       filename: filenameFromElement(element),
       mode: exportModeFromElement(element) || "tickets",
       silent: false,
-    })
-  );
+    });
+
+    return applyActionResult(result, api, element);
+  });
 }
 
-async function handleNavigate(element, api = {}) {
+async function handleNavigate(element, api = {}, root = null) {
   const route = normalizeInternalRoute(routeFromElement(element));
-  const payload = payloadFromElement(element);
+  const payload = payloadFromElement(element, root);
 
   if (!route || !isFunction(api.navigateFromHomeAction)) return false;
 
-  return withBusy(element, () =>
-    api.navigateFromHomeAction({
+  return withBusy(element, async () => {
+    const result = await api.navigateFromHomeAction({
       route,
       payload,
       silent: false,
-    })
-  );
+    });
+
+    return applyActionResult(result, api, element);
+  });
 }
 
-async function handleCopyId(element, api = {}) {
-  const id = idFromElement(element);
+async function handleCopyId(element, api = {}, root = null) {
+  const id = idFromElement(element, root);
 
   if (!id || !isFunction(api.copyHomeWidgetIdAction)) return false;
 
-  return withBusy(element, () =>
-    api.copyHomeWidgetIdAction({
+  return withBusy(element, async () => {
+    const result = await api.copyHomeWidgetIdAction({
       widgetId: id,
       silent: false,
-    })
-  );
+    });
+
+    return applyActionResult(result, api, element);
+  });
 }
 
-async function handleCreate(element, api = {}) {
-  const payload = payloadFromElement(element);
+async function handleCreate(element, api = {}, root = null) {
+  const payload = payloadFromElement(element, root);
   const route = normalizeInternalRoute(routeFromElement(element)) || INCIDENCIAS_ROUTE;
 
   if (!route) return false;
 
   return withBusy(element, async () => {
     if (isFunction(api.createFromHomeAction)) {
-      return api.createFromHomeAction({
+      const result = await api.createFromHomeAction({
         route,
         payload,
         draft: payload,
         silent: false,
       });
+
+      return applyActionResult(result, api, element);
     }
 
     if (isFunction(api.runHomeQuickAction)) {
-      return api.runHomeQuickAction({
+      const result = await api.runHomeQuickAction({
         action: "create_incidencia",
         route,
         payload,
         silent: false,
       });
+
+      return applyActionResult(result, api, element);
     }
 
     if (isFunction(api.navigateFromHomeAction)) {
-      return api.navigateFromHomeAction({
+      const result = await api.navigateFromHomeAction({
         route,
         payload,
         silent: false,
       });
+
+      return applyActionResult(result, api, element);
     }
 
     return false;
+  });
+}
+
+async function handleOpenTicketDetail(element, api = {}, root = null) {
+  const payload = payloadFromElement(element, root);
+  const ticketId = safePublicId(
+    first(
+      payload.ticketId,
+      payload.incidenciaId,
+      ticketIdFromElement(element, root),
+      payload.entityId,
+      payload.id,
+      ""
+    )
+  );
+
+  if (!ticketId) return false;
+
+  return withBusy(element, async () => {
+    let result = false;
+
+    if (isFunction(api.openHomeTicketDetailAction)) {
+      result = await api.openHomeTicketDetailAction({
+        ticketId,
+        incidenciaId: ticketId,
+        entityId: ticketId,
+        payload,
+        silent: false,
+      });
+    } else if (isFunction(api.runHomeQuickAction)) {
+      result = await api.runHomeQuickAction({
+        action: "open_ticket_detail",
+        route: "",
+        payload: {
+          ...payload,
+          ticketId,
+          incidenciaId: ticketId,
+          entityId: ticketId,
+        },
+        silent: false,
+      });
+    } else {
+      result = {
+        ok: true,
+        type: ACTION_RESULT_TYPES.STATE_PATCH,
+        action: "open_ticket_detail",
+        selectedTicketId: ticketId,
+        selectedIncidenciaId: ticketId,
+        statePatch: {
+          selectedTicketId: ticketId,
+          selectedIncidenciaId: ticketId,
+          openingTicketId: "",
+        },
+        modal: {
+          open: true,
+          ticketId,
+          incidenciaId: ticketId,
+        },
+        at: nowIso(),
+      };
+    }
+
+    return applyActionResult(result, api, element);
+  });
+}
+
+async function handleCloseTicketDetail(element, api = {}) {
+  return withBusy(element, async () => {
+    let result = false;
+
+    if (isFunction(api.closeHomeTicketDetailAction)) {
+      result = await api.closeHomeTicketDetailAction();
+    } else if (isFunction(api.runHomeQuickAction)) {
+      result = await api.runHomeQuickAction({
+        action: "close_ticket_detail",
+        route: "",
+        payload: {},
+        silent: false,
+      });
+    } else {
+      result = {
+        ok: true,
+        type: ACTION_RESULT_TYPES.STATE_PATCH,
+        action: "close_ticket_detail",
+        selectedTicketId: "",
+        selectedIncidenciaId: "",
+        statePatch: {
+          selectedTicketId: "",
+          selectedIncidenciaId: "",
+          openingTicketId: "",
+        },
+        modal: {
+          open: false,
+          ticketId: "",
+          incidenciaId: "",
+        },
+        at: nowIso(),
+      };
+    }
+
+    return applyActionResult(result, api, element);
   });
 }
 
@@ -873,29 +1294,31 @@ async function handlePage(kind = "", element = null, api = {}) {
   });
 }
 
-async function handleQuick(element, api = {}) {
+async function handleQuick(element, api = {}, root = null) {
   const action = actionName(element);
   const route = normalizeInternalRoute(routeFromElement(element));
-  const payload = payloadFromElement(element);
+  const payload = payloadFromElement(element, root);
 
   if (!isFunction(api.runHomeQuickAction)) return false;
 
-  return withBusy(element, () =>
-    api.runHomeQuickAction({
+  return withBusy(element, async () => {
+    const result = await api.runHomeQuickAction({
       action,
       route,
       payload,
       silent: false,
-    })
-  );
+    });
+
+    return applyActionResult(result, api, element);
+  });
 }
 
 /* =========================================================
    MAIN DISPATCH
 ========================================================= */
 
-async function dispatchAction(event = null, element = null, api = {}) {
-  const kind = resolveKind(element);
+async function dispatchAction(event = null, element = null, api = {}, root = null) {
+  const kind = resolveKind(element, root);
 
   if (!kind) return false;
 
@@ -909,14 +1332,16 @@ async function dispatchAction(event = null, element = null, api = {}) {
   try {
     if (kind === "refresh") return handleRefresh(element, api);
     if (kind === "export") return handleExport(element, api);
-    if (kind === "navigate") return handleNavigate(element, api);
-    if (kind === "copy-id") return handleCopyId(element, api);
-    if (kind === "create") return handleCreate(element, api);
+    if (kind === "navigate") return handleNavigate(element, api, root);
+    if (kind === "copy-id") return handleCopyId(element, api, root);
+    if (kind === "create") return handleCreate(element, api, root);
+    if (kind === "ticket-open") return handleOpenTicketDetail(element, api, root);
+    if (kind === "ticket-close") return handleCloseTicketDetail(element, api);
     if (kind === "page-prev") return handlePage(kind, element, api);
     if (kind === "page-next") return handlePage(kind, element, api);
     if (kind === "page-go") return handlePage(kind, element, api);
 
-    return handleQuick(element, api);
+    return handleQuick(element, api, root);
   } catch {
     return false;
   }
@@ -939,6 +1364,30 @@ export function bindHomeEvents({
   runHomeQuickAction,
   copyHomeWidgetIdAction,
   createFromHomeAction,
+
+  openHomeTicketDetailAction,
+  closeHomeTicketDetailAction,
+  reduceHomeActionState,
+
+  getState,
+  setState,
+  patchState,
+  updateState,
+
+  requestRender,
+  requestRerender,
+  rerender,
+  render,
+  onRenderRequest,
+  onRenderRequested,
+
+  onStatePatch,
+  onActionResult,
+  onHomeActionResult,
+  onTicketDetailOpen,
+  onIncidenciaDetailOpen,
+  onTicketDetailClose,
+  onIncidenciaDetailClose,
 
   goToPage,
   goPrevPage,
@@ -969,6 +1418,30 @@ export function bindHomeEvents({
     copyHomeWidgetIdAction,
     createFromHomeAction,
 
+    openHomeTicketDetailAction,
+    closeHomeTicketDetailAction,
+    reduceHomeActionState,
+
+    getState,
+    setState,
+    patchState,
+    updateState,
+
+    requestRender,
+    requestRerender,
+    rerender,
+    render,
+    onRenderRequest,
+    onRenderRequested,
+
+    onStatePatch,
+    onActionResult,
+    onHomeActionResult,
+    onTicketDetailOpen,
+    onIncidenciaDetailOpen,
+    onTicketDetailClose,
+    onIncidenciaDetailClose,
+
     goToPage,
     goPrevPage,
     goNextPage,
@@ -988,10 +1461,18 @@ export function bindHomeEvents({
       return;
     }
 
-    await dispatchAction(event, element, api);
+    await dispatchAction(event, element, api, root);
   });
 
-  listen(name, root, "keydown", (event) => {
+  listen(name, root, "keydown", async (event) => {
+    if (event.key === "Escape" && hasTicketModal(root)) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await handleCloseTicketDetail(root, api);
+      return;
+    }
+
     if (event.key !== "Enter" && event.key !== " ") return;
 
     const target = event.target;
@@ -1046,6 +1527,8 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
       copyId: [...ACTIONS.copyId],
       navigate: [...ACTIONS.navigate],
       create: [...ACTIONS.create],
+      ticketOpen: [...ACTIONS.ticketOpen],
+      ticketClose: [...ACTIONS.ticketClose],
       pagePrev: [...ACTIONS.pagePrev],
       pageNext: [...ACTIONS.pageNext],
       pageGo: [...ACTIONS.pageGo],
@@ -1072,11 +1555,19 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
       noCreateRouteAlias: true,
       noInventedOptionalRoutes: true,
 
+      noHealthServerActions: true,
+
       rejectsSensitiveRoutes: true,
       sanitizesPayload: true,
 
       configRoutes: true,
       configBlockedRoutes: true,
+
+      ticketDetailDoesNotNavigate: true,
+      ticketDetailReturnsStatePatch: true,
+      ticketDetailSupportsCallbacks: true,
+      closeDetailClearsSelection: true,
+      escapeClosesTicketModalInsideScope: true,
 
       noPassiveRowActions: true,
     },

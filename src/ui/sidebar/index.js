@@ -19,6 +19,7 @@
    - visibility.js oculta items admin para rol user.
    - Router/guards bloquean acceso directo a rutas admin.
    - Rebuild limpio del DOM desde template.js en cada sync válido.
+   - Snapshot de usuario completo para consumo interno de Home.
    - Sin HTML duplicado.
    - Sin helpers DOM duplicados.
    - Sin lógica de usuario/avatar duplicada.
@@ -107,7 +108,7 @@ import {
   unbindSidebarDropdown,
 } from "./dropdown.js";
 
-export const SIDEBAR_UI_VERSION = "sidebar.ui.v9";
+export const SIDEBAR_UI_VERSION = "sidebar.ui.v10";
 
 const BLOCKED_SIDEBAR_PATHS = new Set([
   "/home",
@@ -878,6 +879,7 @@ function getSnapshot() {
   const context = getContext();
   const state = getSidebarState();
   const items = sidebarItems(context);
+  const user = context.user?.hasUser === true ? context.user : null;
 
   return {
     version: SIDEBAR_UI_VERSION,
@@ -893,26 +895,52 @@ function getSnapshot() {
     homeHref: redact(userHomeHref(context, SIDEBAR_BRAND_HREF)),
 
     hasSession: context.hasSession,
-    isAdmin: context.user?.isAdmin === true,
+    isAdmin: user?.isAdmin === true,
 
-    user: context.user?.hasUser
+    user: user
       ? {
-          slug: context.user.slug || null,
-          username: context.user.username || null,
-          displayName: context.user.displayName,
-          role: context.user.role,
+          hasUser: true,
 
-          /*
-            Sólo diagnóstico: user.js decide el avatar real.
-          */
-          hasAvatar: Boolean(
-            context.user.avatarUrl ||
-              context.user.avatar ||
-              context.user.photoUrl ||
-              context.user.photoURL ||
-              context.user.picture ||
-              context.user.initials
+          id: user.id || null,
+          userId: user.userId || user.id || null,
+
+          slug: user.slug || null,
+          username: user.username || null,
+
+          displayName: user.displayName,
+          name: user.displayName,
+          fullName: user.displayName,
+
+          role: user.role,
+          rol: user.role,
+          roles: Array.isArray(user.roles)
+            ? user.roles
+            : [user.role || SIDEBAR_ROLE_USER],
+          roleLabel: user.roleLabel || (
+            user.role === SIDEBAR_ROLE_ADMIN
+              ? "Administrador"
+              : "Estándar"
           ),
+
+          isAdmin: user.isAdmin === true,
+          isUser: user.isUser === true,
+
+          avatarUrl: user.avatarUrl || "",
+          avatar: user.avatarUrl || "",
+          photoUrl: user.avatarUrl || "",
+          photoURL: user.avatarUrl || "",
+          picture: user.avatarUrl || "",
+          pictureUrl: user.avatarUrl || "",
+          image: user.avatarUrl || "",
+          imageUrl: user.avatarUrl || "",
+          foto: user.avatarUrl || "",
+          fotoUrl: user.avatarUrl || "",
+          imagen: user.avatarUrl || "",
+          imagenUrl: user.avatarUrl || "",
+
+          initials: user.initials || "",
+
+          hasAvatar: Boolean(user.avatarUrl),
         }
       : null,
 
@@ -923,7 +951,7 @@ function getSnapshot() {
       active: item.active,
       adminOnly: item.adminOnly === true,
       visibleForCurrentRole:
-        item.adminOnly !== true || context.user?.isAdmin === true,
+        item.adminOnly !== true || user?.isAdmin === true,
     })),
 
     policy: {
@@ -937,6 +965,7 @@ function getSnapshot() {
       usesUserViewModel: true,
       avatarOwnedByUserAndTemplateModules: true,
       passesUserAvatarViewModelToTemplate: true,
+      exposesCompleteUserSnapshotForHome: true,
 
       usesVisibility: true,
       adminItemVisibilityDelegatedToVisibility: true,

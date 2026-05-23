@@ -440,7 +440,10 @@ body.auth-screen,
 html[data-route-mode="auth"],
 body[data-route-mode="auth"] {
   --app-sidebar-current-width: 0px;
+  --app-offset-topbar: 0px;
   --app-offset-tablehead: 0px;
+  --layout-main-inset-top: 0px;
+  --layout-main-inset-left: 0px;
 }
 
 body.route-shell-hidden #sidebar-mount,
@@ -470,6 +473,18 @@ body[data-route-mode="auth"] .topbar {
   display: none !important;
 }
 
+body.route-shell-hidden #app-shell > .main-content,
+body.auth-screen #app-shell > .main-content,
+html[data-route-mode="auth"] #app-shell > .main-content,
+body[data-route-mode="auth"] #app-shell > .main-content,
+body.route-shell-hidden .app-shell > .main-content,
+body.auth-screen .app-shell > .main-content,
+html[data-route-mode="auth"] .app-shell > .main-content,
+body[data-route-mode="auth"] .app-shell > .main-content,
+body.route-shell-hidden .layout > .main-content,
+body.auth-screen .layout > .main-content,
+html[data-route-mode="auth"] .layout > .main-content,
+body[data-route-mode="auth"] .layout > .main-content,
 body.route-shell-hidden .main-content,
 body.auth-screen .main-content,
 html[data-route-mode="auth"] .main-content,
@@ -499,9 +514,21 @@ body[data-route-mode="auth"] .main-content {
 }
 
 body.route-shell-hidden .table-head,
+body.route-shell-hidden #table-head,
+body.route-shell-hidden [data-tablehead],
+body.route-shell-hidden [data-tablehead-container],
 body.auth-screen .table-head,
+body.auth-screen #table-head,
+body.auth-screen [data-tablehead],
+body.auth-screen [data-tablehead-container],
 html[data-route-mode="auth"] .table-head,
-body[data-route-mode="auth"] .table-head {
+html[data-route-mode="auth"] #table-head,
+html[data-route-mode="auth"] [data-tablehead],
+html[data-route-mode="auth"] [data-tablehead-container],
+body[data-route-mode="auth"] .table-head,
+body[data-route-mode="auth"] #table-head,
+body[data-route-mode="auth"] [data-tablehead],
+body[data-route-mode="auth"] [data-tablehead-container] {
   display: none !important;
 }
 

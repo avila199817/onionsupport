@@ -7,15 +7,15 @@
    - Mantener shape estable para template/selectors.
    - Recibir dashboard ya normalizado.
    - Separar Home admin/user desde el propio payload.
-   - User nunca conserva usuarios/clientes/servidor de cache admin.
+   - User nunca conserva usuarios/clientes de cache admin.
    - Preservar datos existentes sólo si el rol no cambia.
    - Leer colecciones desde dashboard raíz y dashboard.collections.
    - Evitar machacar dashboard con arrays vacíos.
    - Exponer setters usados por homeView.js.
+   - Mantener selectedTicketId y selectedIncidenciaId sincronizados.
+   - openingTicketId sólo representa carga visual, no selección persistente.
    - Redactar errores/snapshots.
    - No conservar raw/payload/response/data backend en dashboard.
-   - Health/servidor desactivados hasta endpoint real.
-   - Normalizar sólo en escrituras o snapshot explícito.
    - Sin AppCore.
    - Sin eventos.
    - Sin window globals.
@@ -26,7 +26,7 @@
    - Sin CSS.
 ========================================================= */
 
-export const HOME_STATE_VERSION = "home.state.v8";
+export const HOME_STATE_VERSION = "home.state.v9";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 5;
@@ -51,12 +51,12 @@ const COSMOS_META_KEYS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni/i;
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni|ipRaw|ip|userAgent/i;
 
 const EMAIL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
 
 const ADMIN_ENTITY_RE =
-  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory|servidores?|servidor|servers?)([\s._/-]|$)/i;
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
 
 const ADMIN_COLLECTION_KEYS = new Set([
   "users",
@@ -64,11 +64,6 @@ const ADMIN_COLLECTION_KEYS = new Set([
   "clients",
   "clientes",
   "customers",
-]);
-
-const ADMIN_OBJECT_KEYS = new Set([
-  "server",
-  "servidor",
 ]);
 
 /* =========================================================
@@ -175,13 +170,9 @@ function firstArray(...values) {
   for (const value of values) {
     if (!Array.isArray(value)) continue;
 
-    if (value.length) {
-      return value;
-    }
+    if (value.length) return value;
 
-    if (!empty) {
-      empty = value;
-    }
+    if (!empty) empty = value;
   }
 
   return empty;
@@ -214,7 +205,7 @@ function clone(value, fallback = null) {
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
@@ -273,7 +264,7 @@ function isEmailLike(value = "") {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
     String(value || "")
   );
 }
@@ -285,8 +276,9 @@ function safePublicId(value = "") {
   if (isEmailLike(text)) return "";
   if (hasSensitiveQuery(text)) return "";
   if (/Bearer\s+/i.test(text)) return "";
+  if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
 
-  return redact(text);
+  return redact(text).slice(0, 240);
 }
 
 function sanitizeStateDeep(value, keyHint = "") {
@@ -397,11 +389,9 @@ function roleFromDashboard(dashboard = {}, fallback = "user") {
       raw.role,
       raw.rol,
       raw.roles,
-
       meta.role,
       meta.rol,
       meta.roles,
-
       ""
     ),
     ""
@@ -526,6 +516,7 @@ export function createInitialHomeState() {
 
     openingTicketId: "",
     selectedTicketId: "",
+    selectedIncidenciaId: "",
     navigatingAction: "",
 
     error: "",
@@ -541,7 +532,6 @@ export function createInitialHomeState() {
     invoicesRemoteCount: 0,
     usersRemoteCount: 0,
     clientsRemoteCount: 0,
-    serversRemoteCount: 0,
     activityRemoteCount: 0,
 
     requestId: "",
@@ -574,18 +564,10 @@ export function createInitialHomeState() {
     clientes: [],
     customers: [],
 
-    servers: [],
-    servidores: [],
-
-    server: {},
-    servidor: {},
-
     activity: [],
     activities: [],
     recent: [],
     recentActivity: [],
-
-    health: null,
 
     meta: {},
     partial: false,
@@ -596,15 +578,192 @@ export function createInitialHomeState() {
 export const homeState = createInitialHomeState();
 
 /* =========================================================
-   NORMALIZATION
+   DERIVED NORMALIZATION HELPERS
 ========================================================= */
 
 function numberFrom(...values) {
   return Math.max(0, ...values.map((value) => safeNumber(value, 0)));
 }
 
+function getTicketStatusKey(item = {}) {
+  const raw = safeObject(item);
+  const key = normalizeKey(
+    first(
+      raw.status,
+      raw.estado,
+      raw.state,
+      raw.lifecycle?.status,
+      "pending"
+    )
+  );
+
+  if (["open", "opened", "abierta", "abierto"].includes(key)) return "open";
+  if (["progress", "in_progress", "inprogress", "en_proceso", "working", "assigned"].includes(key)) return "progress";
+  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
+  if (["closed", "close", "cerrada", "cerrado", "cancelled", "canceled", "archived"].includes(key)) return "closed";
+
+  return "pending";
+}
+
+function getInvoiceStatusKey(item = {}) {
+  const raw = safeObject(item);
+  const key = normalizeKey(
+    first(
+      raw.paymentStatus,
+      raw.estadoPago,
+      raw.payment?.status,
+      raw.status,
+      raw.estado,
+      "pending"
+    )
+  );
+
+  if (["paid", "pagada", "pagado", "cobrada", "cobrado", "abonada", "abonado"].includes(key)) return "paid";
+  if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
+  if (["partial", "parcial", "pago_parcial", "partially_paid"].includes(key)) return "partial";
+  if (["cancelled", "canceled", "cancelada", "cancelado", "void"].includes(key)) return "cancelled";
+  if (["draft", "borrador"].includes(key)) return "draft";
+
+  return "pending";
+}
+
+function isInvoicePaid(item = {}) {
+  return getInvoiceStatusKey(item) === "paid";
+}
+
+function isInvoicePendingLike(item = {}) {
+  return ["pending", "overdue", "partial"].includes(getInvoiceStatusKey(item));
+}
+
+function getInvoiceAmount(item = {}) {
+  const raw = safeObject(item);
+
+  return safeNumber(
+    first(
+      raw.totales?.total,
+      raw.payment?.amount,
+      raw.total,
+      raw.amount,
+      raw.importe,
+      raw.totalFactura,
+      raw.facturaTotal,
+      raw.facturaImporte,
+      raw.importeFactura,
+      raw.invoiceAmount,
+      raw.price,
+      raw.subtotal,
+      raw.base,
+      0
+    ),
+    0
+  );
+}
+
+function getInvoicePaidAmount(item = {}) {
+  const raw = safeObject(item);
+
+  if (!isInvoicePaid(raw)) return 0;
+
+  return safeNumber(
+    first(
+      raw.payment?.paidAmount,
+      raw.totales?.pagado,
+      raw.paidAmount,
+      raw.amountPaid,
+      raw.pagado,
+      getInvoiceAmount(raw)
+    ),
+    0
+  );
+}
+
+function getInvoicePendingAmount(item = {}) {
+  const raw = safeObject(item);
+
+  if (!isInvoicePendingLike(raw)) return 0;
+
+  const explicit = first(
+    raw.payment?.pendingAmount,
+    raw.totales?.pendiente,
+    raw.pendingAmount,
+    raw.amountPending,
+    raw.pendiente,
+    null
+  );
+
+  if (explicit !== null && explicit !== undefined) {
+    return Math.max(0, safeNumber(explicit, 0));
+  }
+
+  return Math.max(0, getInvoiceAmount(raw) - getInvoicePaidAmount(raw));
+}
+
+function computedTicketStatusCounts() {
+  const counts = {
+    pending: 0,
+    open: 0,
+    progress: 0,
+    resolved: 0,
+    closed: 0,
+  };
+
+  for (const ticket of safeArray(homeState.tickets)) {
+    const key = getTicketStatusKey(ticket);
+
+    if (Object.prototype.hasOwnProperty.call(counts, key)) {
+      counts[key] += 1;
+    }
+  }
+
+  return counts;
+}
+
+function computedInvoiceCountsAndAmounts() {
+  const invoices = safeArray(homeState.invoices);
+
+  return invoices.reduce(
+    (acc, invoice) => {
+      const statusKey = getInvoiceStatusKey(invoice);
+
+      acc.grossInvoiceAmount += getInvoiceAmount(invoice);
+
+      if (statusKey === "paid") {
+        acc.paidInvoices += 1;
+        acc.invoiceAmount += getInvoicePaidAmount(invoice);
+        acc.paidInvoiceAmount = acc.invoiceAmount;
+      }
+
+      if (["pending", "overdue", "partial"].includes(statusKey)) {
+        acc.pendingInvoices += 1;
+        acc.pendingInvoiceAmount += getInvoicePendingAmount(invoice);
+      }
+
+      if (statusKey === "overdue") {
+        acc.overdueInvoices += 1;
+      }
+
+      return acc;
+    },
+    {
+      paidInvoices: 0,
+      pendingInvoices: 0,
+      overdueInvoices: 0,
+      invoiceAmount: 0,
+      paidInvoiceAmount: 0,
+      pendingInvoiceAmount: 0,
+      grossInvoiceAmount: 0,
+    }
+  );
+}
+
+/* =========================================================
+   SUMMARY
+========================================================= */
+
 function normalizeSummary(summary = {}, admin = false) {
   const raw = sanitizeStateObject(summary);
+  const ticketCounts = computedTicketStatusCounts();
+  const invoiceData = computedInvoiceCountsAndAmounts();
 
   const totalTickets = numberFrom(
     raw.totalTickets,
@@ -617,20 +776,45 @@ function normalizeSummary(summary = {}, admin = false) {
     homeState.tickets.length
   );
 
+  const pendingTickets = numberFrom(
+    raw.pendingTickets,
+    raw.pendingIncidencias,
+    raw.incidenciasPendientes,
+    ticketCounts.pending
+  );
+
   const openTickets = numberFrom(
     raw.openTickets,
-    raw.pendingTickets,
     raw.openIncidencias,
-    raw.pendingIncidencias,
-    raw.incidenciasAbiertas
+    raw.incidenciasAbiertas,
+    ticketCounts.open
+  );
+
+  const progressTickets = numberFrom(
+    raw.progressTickets,
+    raw.progressIncidencias,
+    raw.incidenciasEnCurso,
+    ticketCounts.progress
+  );
+
+  const resolvedTickets = numberFrom(
+    raw.resolvedTickets,
+    raw.resolvedIncidencias,
+    raw.incidenciasResueltas,
+    ticketCounts.resolved
   );
 
   const closedTickets = numberFrom(
     raw.closedTickets,
-    raw.resolvedTickets,
     raw.closedIncidencias,
-    raw.resolvedIncidencias,
-    raw.incidenciasCerradas
+    raw.incidenciasCerradas,
+    ticketCounts.closed
+  );
+
+  const activeTickets = numberFrom(
+    raw.activeTickets,
+    raw.activeIncidencias,
+    pendingTickets + openTickets + progressTickets
   );
 
   const urgentTickets = numberFrom(
@@ -651,23 +835,56 @@ function normalizeSummary(summary = {}, admin = false) {
     homeState.invoices.length
   );
 
+  const paidInvoices = numberFrom(
+    raw.paidInvoices,
+    raw.paidFacturas,
+    raw.facturasPagadas,
+    invoiceData.paidInvoices
+  );
+
   const pendingInvoices = numberFrom(
     raw.pendingInvoices,
     raw.pendingFacturas,
     raw.facturasPendientes,
     raw.invoicesPending,
+    invoiceData.pendingInvoices
+  );
+
+  const overdueInvoices = numberFrom(
+    raw.overdueInvoices,
+    raw.overdueFacturas,
     raw.facturasVencidas,
-    raw.overdueInvoices
+    invoiceData.overdueInvoices
   );
 
   const invoiceAmount = numberFrom(
     raw.invoiceAmount,
+    raw.paidInvoiceAmount,
     raw.billingTotal,
     raw.totalBilling,
     raw.totalFacturado,
     raw.importeFacturas,
     raw.facturacionVisible,
-    raw.facturacionTotal
+    raw.facturacionTotal,
+    invoiceData.invoiceAmount
+  );
+
+  const paidInvoiceAmount = numberFrom(
+    raw.paidInvoiceAmount,
+    invoiceAmount
+  );
+
+  const pendingInvoiceAmount = numberFrom(
+    raw.pendingInvoiceAmount,
+    raw.importePendiente,
+    raw.facturacionPendiente,
+    invoiceData.pendingInvoiceAmount
+  );
+
+  const grossInvoiceAmount = numberFrom(
+    raw.grossInvoiceAmount,
+    invoiceData.grossInvoiceAmount,
+    invoiceAmount + pendingInvoiceAmount
   );
 
   const usersCount = admin
@@ -710,17 +927,28 @@ function normalizeSummary(summary = {}, admin = false) {
     ticketsCount: totalTickets,
     incidenciasCount: totalTickets,
 
+    pendingTickets,
+    pendingIncidencias: pendingTickets,
+    incidenciasPendientes: pendingTickets,
+
     openTickets,
-    pendingTickets: openTickets,
     openIncidencias: openTickets,
-    pendingIncidencias: openTickets,
     incidenciasAbiertas: openTickets,
 
+    progressTickets,
+    progressIncidencias: progressTickets,
+    incidenciasEnCurso: progressTickets,
+
+    resolvedTickets,
+    resolvedIncidencias: resolvedTickets,
+    incidenciasResueltas: resolvedTickets,
+
     closedTickets,
-    resolvedTickets: closedTickets,
     closedIncidencias: closedTickets,
-    resolvedIncidencias: closedTickets,
     incidenciasCerradas: closedTickets,
+
+    activeTickets,
+    activeIncidencias: activeTickets,
 
     urgentTickets,
     urgentIncidencias: urgentTickets,
@@ -733,12 +961,24 @@ function normalizeSummary(summary = {}, admin = false) {
     invoicesCount: totalInvoices,
     facturasCount: totalInvoices,
 
+    paidInvoices,
+    paidFacturas: paidInvoices,
+    facturasPagadas: paidInvoices,
+
     pendingInvoices,
     pendingFacturas: pendingInvoices,
     facturasPendientes: pendingInvoices,
     invoicesPending: pendingInvoices,
 
+    overdueInvoices,
+    overdueFacturas: overdueInvoices,
+    facturasVencidas: overdueInvoices,
+
     invoiceAmount,
+    paidInvoiceAmount,
+    pendingInvoiceAmount,
+    grossInvoiceAmount,
+
     billingTotal: invoiceAmount,
     totalBilling: invoiceAmount,
     totalFacturado: invoiceAmount,
@@ -757,13 +997,6 @@ function normalizeSummary(summary = {}, admin = false) {
     totalClients: clientsCount,
     totalClientes: clientsCount,
     totalCustomers: clientsCount,
-
-    serversCount: 0,
-    serverCount: 0,
-    servidoresCount: 0,
-    servidorCount: 0,
-    totalServers: 0,
-    totalServidores: 0,
 
     attachmentsCount,
     filesCount: attachmentsCount,
@@ -963,11 +1196,6 @@ function buildDashboardFromState() {
     clientes: admin ? homeState.clients : [],
     customers: admin ? homeState.clients : [],
 
-    servers: [],
-    servidores: [],
-    server: {},
-    servidor: {},
-
     activity: homeState.activity,
     activities: homeState.activity,
     recent: homeState.activity,
@@ -1006,17 +1234,29 @@ function buildDashboardFromState() {
       customersCount: admin ? homeState.summary.customersCount : 0,
       visibleClientsCount: admin ? homeState.clients.length : 0,
 
-      serversCount: 0,
-      servidoresCount: 0,
-      visibleServersCount: 0,
-
       activityCount: homeState.activity.length,
       recentCount: homeState.activity.length,
 
-      healthEndpointConfigured: false,
-      serverEndpointConfigured: false,
+      selectedTicketId: homeState.selectedTicketId || "",
+      selectedIncidenciaId: homeState.selectedIncidenciaId || "",
     },
   });
+}
+
+function syncSelectedAliases() {
+  const selected = safePublicId(
+    first(
+      homeState.selectedTicketId,
+      homeState.selectedIncidenciaId,
+      ""
+    )
+  );
+
+  homeState.selectedTicketId = selected;
+  homeState.selectedIncidenciaId = selected;
+  homeState.openingTicketId = safePublicId(homeState.openingTicketId);
+
+  return selected;
 }
 
 function syncAliases() {
@@ -1025,14 +1265,13 @@ function syncAliases() {
   homeState.role = normalizeRole(homeState.role);
   homeState.admin = admin;
 
+  syncSelectedAliases();
+
   homeState.widgets = filterWidgetsForRole(safeArray(homeState.widgets), admin);
   homeState.activity = filterActivityForRole(safeArray(homeState.activity), admin);
 
   homeState.users = admin ? safeArray(homeState.users) : [];
   homeState.clients = admin ? safeArray(homeState.clients) : [];
-
-  homeState.servers = [];
-  homeState.server = {};
 
   homeState.incidencias = homeState.tickets;
   homeState.facturas = homeState.invoices;
@@ -1040,9 +1279,6 @@ function syncAliases() {
   homeState.usuarios = admin ? homeState.users : [];
   homeState.clientes = admin ? homeState.clients : [];
   homeState.customers = admin ? homeState.clients : [];
-
-  homeState.servidores = [];
-  homeState.servidor = {};
 
   homeState.activities = homeState.activity;
   homeState.recent = homeState.activity;
@@ -1063,7 +1299,6 @@ function syncAliases() {
     ? Math.max(homeState.clients.length, safeNumber(homeState.clientsRemoteCount, 0))
     : 0;
 
-  homeState.serversRemoteCount = 0;
   homeState.activityRemoteCount = Math.max(homeState.activity.length, safeNumber(homeState.activityRemoteCount, 0));
 
   homeState.remoteCount = Math.max(homeState.ticketsRemoteCount, safeNumber(homeState.remoteCount, 0));
@@ -1074,8 +1309,6 @@ function syncAliases() {
   homeState.metrics = homeState.summary;
   homeState.totals = homeState.summary;
   homeState.counts = homeState.summary;
-
-  homeState.health = null;
 
   homeState.dashboard = buildDashboardFromState();
 
@@ -1097,8 +1330,8 @@ export function normalizeHomeState() {
   homeState.refreshing = Boolean(homeState.refreshing);
   homeState.creating = Boolean(homeState.creating);
 
-  homeState.openingTicketId = safePublicId(homeState.openingTicketId);
-  homeState.selectedTicketId = safePublicId(homeState.selectedTicketId);
+  syncSelectedAliases();
+
   homeState.navigatingAction = redact(safeText(homeState.navigatingAction, ""));
 
   homeState.error = redact(safeText(homeState.error, ""));
@@ -1118,9 +1351,6 @@ export function normalizeHomeState() {
   homeState.users = admin ? safeArray(homeState.users) : [];
   homeState.clients = admin ? safeArray(homeState.clients) : [];
 
-  homeState.servers = [];
-  homeState.server = {};
-
   homeState.activity = filterActivityForRole(safeArray(homeState.activity), admin);
 
   fillCollectionsFromDashboard();
@@ -1133,8 +1363,8 @@ export function normalizeHomeState() {
     ...safeObject(homeState.meta),
     role,
     admin,
-    healthEndpointConfigured: false,
-    serverEndpointConfigured: false,
+    selectedTicketId: homeState.selectedTicketId || "",
+    selectedIncidenciaId: homeState.selectedIncidenciaId || "",
   });
 
   homeState.partial = Boolean(homeState.partial);
@@ -1152,7 +1382,7 @@ export function normalizeHomeState() {
 function shouldKeepExisting(key = "", value, replace = false) {
   if (replace) return false;
 
-  if ((ADMIN_COLLECTION_KEYS.has(key) || ADMIN_OBJECT_KEYS.has(key)) && !currentIsAdmin()) {
+  if (ADMIN_COLLECTION_KEYS.has(key) && !currentIsAdmin()) {
     return false;
   }
 
@@ -1179,18 +1409,19 @@ function sanitizeStateValue(key = "", value) {
   if (key === "lastError") return normalizeError(value);
   if (key === "errors") return normalizeErrorList(value);
   if (key === "navigatingAction") return redact(safeText(value, ""));
-  if (key === "openingTicketId" || key === "selectedTicketId") return safePublicId(value);
-  if (key === "health") return null;
 
-  if (key === "servers" || key === "servidores") return [];
-  if (key === "server" || key === "servidor") return {};
+  if (
+    key === "openingTicketId" ||
+    key === "selectedTicketId" ||
+    key === "selectedIncidenciaId" ||
+    key === "ticketId" ||
+    key === "incidenciaId"
+  ) {
+    return safePublicId(value);
+  }
 
   if (ADMIN_COLLECTION_KEYS.has(key) && !currentIsAdmin()) {
     return [];
-  }
-
-  if (ADMIN_OBJECT_KEYS.has(key) && !currentIsAdmin()) {
-    return {};
   }
 
   return sanitizeStateDeep(value, key);
@@ -1204,6 +1435,12 @@ function assign(key = "", value, { replace = false } = {}) {
   if (clean === undefined) return false;
   if (shouldKeepExisting(key, clean, replace)) return false;
 
+  if (key === "ticketId" || key === "incidenciaId") {
+    homeState.selectedTicketId = clean;
+    homeState.selectedIncidenciaId = clean;
+    return true;
+  }
+
   homeState[key] = clean;
   return true;
 }
@@ -1214,10 +1451,18 @@ function assignRuntime(patch = {}) {
   for (const [key, value] of Object.entries(data)) {
     const clean = sanitizeStateValue(key, value);
 
-    if (clean !== undefined) {
-      homeState[key] = clean;
+    if (clean === undefined) continue;
+
+    if (key === "ticketId" || key === "incidenciaId") {
+      homeState.selectedTicketId = clean;
+      homeState.selectedIncidenciaId = clean;
+      continue;
     }
+
+    homeState[key] = clean;
   }
+
+  syncSelectedAliases();
 
   homeState.error = redact(safeText(homeState.error, ""));
   homeState.lastError = homeState.lastError ? normalizeError(homeState.lastError) : null;
@@ -1272,6 +1517,14 @@ export function syncHomeStateFromDashboard(dashboard = {}, options = {}) {
   const nextRole = roleFromDashboard(raw, first(options.role, previousRole));
   const admin = isAdminRole(nextRole);
   const replace = options.replace === true || previousRole !== nextRole || !admin;
+
+  const selectedBeforeReplace = safePublicId(
+    first(
+      homeState.selectedTicketId,
+      homeState.selectedIncidenciaId,
+      ""
+    )
+  );
 
   homeState.role = nextRole;
   homeState.admin = admin;
@@ -1405,13 +1658,6 @@ export function syncHomeStateFromDashboard(dashboard = {}, options = {}) {
     homeState.clientsRemoteCount = 0;
   }
 
-  homeState.servers = [];
-  homeState.servidores = [];
-  homeState.serversRemoteCount = 0;
-  homeState.server = {};
-  homeState.servidor = {};
-  homeState.health = null;
-
   if (activity || replace) {
     assign("activity", filterActivityForRole(activity || [], admin), { replace });
     homeState.activityRemoteCount = Math.max(
@@ -1426,16 +1672,12 @@ export function syncHomeStateFromDashboard(dashboard = {}, options = {}) {
         ...safeObject(raw.meta),
         role: nextRole,
         admin,
-        healthEndpointConfigured: false,
-        serverEndpointConfigured: false,
       })
     : sanitizeStateObject({
         ...safeObject(homeState.meta),
         ...safeObject(raw.meta),
         role: nextRole,
         admin,
-        healthEndpointConfigured: false,
-        serverEndpointConfigured: false,
       });
 
   homeState.errors = normalizeErrorList(raw.errors);
@@ -1444,6 +1686,11 @@ export function syncHomeStateFromDashboard(dashboard = {}, options = {}) {
   homeState.requestId = safeText(first(options.requestId, raw.requestId, raw.meta?.requestId, homeState.requestId, ""), "");
   homeState.lastSyncAt = safeText(first(options.lastSyncAt, raw.lastSyncAt, raw.updatedAt, raw.generatedAt, raw.meta?.updatedAt, nowIso()), nowIso());
   homeState.lastUpdatedAt = homeState.lastSyncAt;
+
+  if (selectedBeforeReplace) {
+    homeState.selectedTicketId = selectedBeforeReplace;
+    homeState.selectedIncidenciaId = selectedBeforeReplace;
+  }
 
   homeState.loaded = true;
   homeState.hydrated = true;
@@ -1641,12 +1888,6 @@ export function setRequestId(value = "") {
   });
 }
 
-export function setHealth() {
-  return assignRuntime({
-    health: null,
-  });
-}
-
 export function setPage(page = DEFAULT_PAGE) {
   return assignRuntime({
     page: Math.max(1, safeNumber(page, DEFAULT_PAGE)),
@@ -1661,18 +1902,26 @@ export function setPageSize(pageSize = DEFAULT_PAGE_SIZE) {
 }
 
 export function setOpeningTicketId(ticketId = "") {
-  const next = safePublicId(ticketId);
-
   return assignRuntime({
-    openingTicketId: next,
-    selectedTicketId: next || homeState.selectedTicketId,
+    openingTicketId: safePublicId(ticketId),
   });
 }
 
 export function setSelectedTicketId(ticketId = "") {
+  const selected = safePublicId(ticketId);
+
   return assignRuntime({
-    selectedTicketId: safePublicId(ticketId),
+    selectedTicketId: selected,
+    selectedIncidenciaId: selected,
   });
+}
+
+export function setSelectedIncidenciaId(incidenciaId = "") {
+  return setSelectedTicketId(incidenciaId);
+}
+
+export function clearSelectedTicketId() {
+  return setSelectedTicketId("");
 }
 
 export function setCreating(value = false) {
@@ -1713,6 +1962,7 @@ export function getHomeStateSnapshot() {
 
       openingTicketId: homeState.openingTicketId,
       selectedTicketId: homeState.selectedTicketId,
+      selectedIncidenciaId: homeState.selectedIncidenciaId,
       navigatingAction: homeState.navigatingAction,
 
       error: homeState.error,
@@ -1728,7 +1978,6 @@ export function getHomeStateSnapshot() {
       invoicesRemoteCount: homeState.invoicesRemoteCount,
       usersRemoteCount: homeState.usersRemoteCount,
       clientsRemoteCount: homeState.clientsRemoteCount,
-      serversRemoteCount: 0,
       activityRemoteCount: homeState.activityRemoteCount,
 
       requestId: homeState.requestId,
@@ -1761,18 +2010,11 @@ export function getHomeStateSnapshot() {
       clientes: homeState.admin ? homeState.clientes : [],
       customers: homeState.admin ? homeState.customers : [],
 
-      servers: [],
-      servidores: [],
-
-      server: {},
-      servidor: {},
-
       activity: homeState.activity,
       activities: homeState.activities,
       recent: homeState.recent,
       recentActivity: homeState.recentActivity,
 
-      health: null,
       meta: homeState.meta,
 
       partial: homeState.partial,
@@ -1784,7 +2026,6 @@ export function getHomeStateSnapshot() {
         invoices: homeState.invoices.length,
         users: homeState.admin ? homeState.users.length : 0,
         clients: homeState.admin ? homeState.clients.length : 0,
-        servers: 0,
         activity: homeState.activity.length,
       },
 
@@ -1800,12 +2041,12 @@ export function getHomeStateSnapshot() {
         noCss: true,
 
         roleAware: true,
-        userNeverKeepsAdminUsersClientsServers: true,
+        userNeverKeepsAdminUsersClients: true,
         readsCollectionsFromDashboardFallback: true,
         normalizeOnlyOnWritesOrExplicitSnapshot: true,
 
-        serverStateDisabledUntilEndpointExists: true,
-        healthStateDisabledUntilEndpointExists: true,
+        selectedTicketSyncedWithSelectedIncidencia: true,
+        openingTicketDoesNotSelectTicket: true,
 
         noRawBackendPayloadInDashboard: true,
         stripsCosmosMetadata: true,
@@ -1871,6 +2112,14 @@ export function getHomeActivity() {
   return homeState.activity;
 }
 
+export function getSelectedTicketId() {
+  return homeState.selectedTicketId || homeState.selectedIncidenciaId || "";
+}
+
+export function getSelectedIncidenciaId() {
+  return getSelectedTicketId();
+}
+
 export function getHomeStateDebugSnapshot() {
   return {
     version: HOME_STATE_VERSION,
@@ -1920,13 +2169,15 @@ export const HomeState = Object.freeze({
 
   setLastSyncAt,
   setRequestId,
-  setHealth,
 
   setPage,
   setPageSize,
 
   setOpeningTicketId,
   setSelectedTicketId,
+  setSelectedIncidenciaId,
+  clearSelectedTicketId,
+
   setCreating,
   setNavigatingAction,
 
@@ -1942,6 +2193,9 @@ export const HomeState = Object.freeze({
   getUsers: getHomeUsers,
   getClients: getHomeClients,
   getActivity: getHomeActivity,
+
+  getSelectedTicketId,
+  getSelectedIncidenciaId,
 
   isLoading: isHomeLoading,
   isRefreshing: isHomeRefreshing,

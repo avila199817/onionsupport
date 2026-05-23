@@ -16,7 +16,7 @@
    - User no arrastra usuarios/clientes de cache admin.
    - Renderiza dentro del host recibido por Router.
    - Devuelve API/controller, no el contenedor padre.
-   - Lee usuario/rol sólo desde contexto/AppCore/state ya resuelto.
+   - Usuario/rol/avatar salen del mismo view-model canónico del sidebar.
    - Lee colecciones desde homeState raíz y fallback dashboard.
    - Recarga si Home está marcado como loaded pero no hay datos reales.
    - Render único y estable tras sincronizar datos reales.
@@ -39,6 +39,11 @@ import {
   normalizeRoutePath as configNormalizeRoutePath,
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
+
+import * as CoreModule from "../../core/index.js";
+import * as AuthModule from "../../features/auth/index.js";
+
+import { getSidebarUser } from "../../ui/sidebar/user.js";
 
 import renderHomeTemplate, {
   renderHomeErrorState,
@@ -111,7 +116,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v12";
+export const HOME_VIEW_VERSION = "home.view.v13";
 
 export const HomeView = (() => {
   "use strict";
@@ -471,6 +476,24 @@ export const HomeView = (() => {
       ctx.AppCore,
       ctx.appCore,
       ctx.core,
+      CoreModule.AppCore,
+      CoreModule.appCore,
+      CoreModule.Core,
+      CoreModule.core,
+      CoreModule.default,
+      null
+    );
+  }
+
+  function getContextAuth() {
+    const ctx = safeObject(currentContext);
+
+    return first(
+      ctx.Auth,
+      ctx.auth,
+      AuthModule.Auth,
+      AuthModule.auth,
+      AuthModule.default,
       null
     );
   }
@@ -480,7 +503,125 @@ export const HomeView = (() => {
     return safeObject(core?.state);
   }
 
+  function getResolvedSidebarUser() {
+    const ctx = safeObject(currentContext);
+    const core = getContextCore();
+    const auth = getContextAuth();
+    const coreState = getCoreState();
+    const dashboard = safeObject(homeState.dashboard);
+
+    const directUser = first(
+      ctx.sidebarUser,
+      ctx.sidebar?.user,
+      ctx.layout?.sidebarUser,
+      ctx.context?.sidebarUser,
+      ctx.context?.user,
+
+      ctx.user,
+      ctx.currentUser,
+      ctx.authUser,
+      ctx.sessionUser,
+      ctx.session?.user,
+      ctx.sessionData?.user,
+
+      safeCall(core?.getCurrentUser?.bind?.(core) || core?.getCurrentUser),
+
+      coreState.user,
+      coreState.currentUser,
+      coreState.authUser,
+      coreState.sessionUser,
+      coreState.session?.user,
+      coreState.sessionData?.user,
+      coreState.auth?.user,
+
+      homeState.sidebarUser,
+      homeState.user,
+
+      dashboard.sidebarUser,
+      dashboard.user,
+      dashboard.currentUser,
+
+      null
+    );
+
+    return safeObject(
+      safeCall(getSidebarUser, {
+        ...ctx,
+
+        AppCore: core,
+        Auth: auth,
+
+        user: directUser,
+        currentUser: directUser,
+
+        profile: first(
+          ctx.profile,
+          directUser?.profile,
+          coreState.profile,
+          coreState.user?.profile,
+          coreState.currentUser?.profile,
+          dashboard.profile,
+          dashboard.user?.profile,
+          null
+        ),
+
+        media: first(
+          ctx.media,
+          directUser?.media,
+          coreState.media,
+          coreState.user?.media,
+          coreState.currentUser?.media,
+          dashboard.media,
+          dashboard.user?.media,
+          null
+        ),
+
+        account: first(
+          ctx.account,
+          directUser?.account,
+          coreState.account,
+          dashboard.account,
+          null
+        ),
+
+        me: first(
+          ctx.me,
+          coreState.me,
+          dashboard.me,
+          null
+        ),
+
+        role: first(
+          ctx.role,
+          ctx.rol,
+          ctx.userRole,
+          directUser?.role,
+          directUser?.rol,
+          coreState.role,
+          coreState.rol,
+          dashboard.role,
+          dashboard.rol,
+          null
+        ),
+
+        roles: first(
+          ctx.roles,
+          directUser?.roles,
+          coreState.roles,
+          dashboard.roles,
+          null
+        ),
+      })
+    );
+  }
+
   function getCurrentUser() {
+    const sidebarUser = getResolvedSidebarUser();
+
+    if (sidebarUser.hasUser === true) {
+      return sidebarUser;
+    }
+
     const ctx = safeObject(currentContext);
     const dashboard = safeObject(homeState.dashboard);
     const core = getContextCore();
@@ -514,6 +655,7 @@ export const HomeView = (() => {
   function getContextRole() {
     const ctx = safeObject(currentContext);
     const coreState = getCoreState();
+    const sidebarUser = getResolvedSidebarUser();
     const user = getCurrentUser();
 
     return normalizeRole(
@@ -522,6 +664,10 @@ export const HomeView = (() => {
         ctx.rol,
         ctx.userRole,
         ctx.roles,
+
+        sidebarUser.role,
+        sidebarUser.rol,
+        sidebarUser.roles,
 
         user.role,
         user.rol,
@@ -558,30 +704,133 @@ export const HomeView = (() => {
   }
 
   function getPublicUserSnapshot(user = getCurrentUser()) {
-    if (!hasKeys(user)) return null;
+    const sidebarUser = getResolvedSidebarUser();
+    const source = sidebarUser.hasUser === true
+      ? sidebarUser
+      : safeObject(user);
+
+    if (!hasKeys(source)) return null;
 
     const displayName =
       safeText(
         first(
-          user.displayName,
-          user.fullName,
-          user.name,
-          user.nombre,
-          user.profile?.displayName,
-          user.profile?.fullName,
-          user.username,
-          user.userName
+          source.displayName,
+          source.fullName,
+          source.name,
+          source.nombre,
+          source.profile?.displayName,
+          source.profile?.fullName,
+          source.username,
+          source.userName
         ),
         ""
       ) || null;
 
+    const role = normalizeRole(
+      first(
+        source.role,
+        source.rol,
+        source.roles,
+        getCurrentRole()
+      )
+    ) || "user";
+
+    const avatarUrl = safeText(
+      first(
+        source.avatarUrl,
+        source.avatar,
+        source.photoUrl,
+        source.photoURL,
+        source.picture,
+        source.pictureUrl,
+        source.image,
+        source.imageUrl,
+        source.foto,
+        source.fotoUrl,
+        source.imagen,
+        source.imagenUrl,
+        ""
+      ),
+      ""
+    );
+
+    const initials = safeText(
+      first(
+        source.initials,
+        source.iniciales,
+        displayName
+          ? displayName
+              .split(/\s+/)
+              .filter(Boolean)
+              .map((part, index, parts) =>
+                index === 0 || index === parts.length - 1 ? part[0] : ""
+              )
+              .join("")
+              .slice(0, 2)
+              .toUpperCase()
+          : ""
+      ),
+      "U"
+    )
+      .slice(0, 3)
+      .toUpperCase();
+
+    const roleLabel = safeText(
+      first(
+        source.roleLabel,
+        role === "admin" ? "Administrador" : "Estándar"
+      ),
+      role === "admin" ? "Administrador" : "Estándar"
+    );
+
     return {
-      hasId: Boolean(user.id || user.userId),
-      username: safeText(user.username || user.userName, "") || null,
-      slug: safeText(user.slug || user.lookup?.slug || user.profile?.slug, "") || null,
+      hasUser: Boolean(
+        source.hasUser === true ||
+          source.id ||
+          source.userId ||
+          source.uid ||
+          source.sub ||
+          source.username ||
+          source.userName ||
+          source.slug ||
+          displayName
+      ),
+
+      hasId: Boolean(source.id || source.userId),
+
+      id: safeText(source.id, "") || null,
+      userId: safeText(source.userId || source.id, "") || null,
+
+      username: safeText(source.username || source.userName, "") || null,
+      slug: safeText(source.slug || source.lookup?.slug || source.profile?.slug, "") || null,
+
       displayName,
       name: displayName,
-      role: getCurrentRole(),
+      fullName: displayName,
+
+      hasAvatar: Boolean(avatarUrl),
+      avatarUrl,
+      avatar: avatarUrl,
+      photoUrl: avatarUrl,
+      photoURL: avatarUrl,
+      picture: avatarUrl,
+      pictureUrl: avatarUrl,
+      image: avatarUrl,
+      imageUrl: avatarUrl,
+      foto: avatarUrl,
+      fotoUrl: avatarUrl,
+      imagen: avatarUrl,
+      imagenUrl: avatarUrl,
+
+      initials,
+
+      role,
+      rol: role,
+      roles: [role],
+      roleLabel,
+
+      isAdmin: role === "admin",
+      isUser: role === "user",
     };
   }
 
@@ -1329,7 +1578,17 @@ export const HomeView = (() => {
   function buildTemplatePayload() {
     ensureBaseState();
 
-    const role = getCurrentRole();
+    const templateUser = getTemplateUser();
+
+    const role = normalizeRole(
+      first(
+        templateUser.role,
+        templateUser.rol,
+        templateUser.roles,
+        getCurrentRole()
+      )
+    ) || "user";
+
     const admin = role === "admin";
 
     const tickets = getTickets();
@@ -1347,8 +1606,37 @@ export const HomeView = (() => {
       ""
     );
 
+    const runtimeState = buildRuntimeStateForTemplate({
+      role,
+      admin,
+      dashboard,
+      summary,
+      tickets,
+      invoices,
+      users,
+      clients,
+      activity,
+      pagination,
+    });
+
     return buildHomeTemplatePayload({
-      user: getTemplateUser(),
+      user: templateUser,
+      currentUser: templateUser,
+      sidebarUser: templateUser,
+
+      sidebar: {
+        user: templateUser,
+      },
+
+      layout: {
+        sidebarUser: templateUser,
+      },
+
+      context: {
+        user: templateUser,
+        sidebarUser: templateUser,
+      },
+
       role,
 
       dashboard,
@@ -1381,32 +1669,18 @@ export const HomeView = (() => {
       requestId: homeState.requestId || "",
       lastUpdatedAt: homeState.lastSyncAt || "",
 
-      state: buildRuntimeStateForTemplate({
-        role,
-        admin,
-        dashboard,
-        summary,
-        tickets,
-        invoices,
-        users,
-        clients,
-        activity,
-        pagination,
-      }),
-    });
-  }
+      state: {
+        ...runtimeState,
 
-  function hasVisibleData() {
-    return Boolean(
-      getTickets().length ||
-        getInvoices().length ||
-        (isAdmin() && getUsers().length) ||
-        (isAdmin() && getClients().length) ||
-        safeArray(homeState.activity).length ||
-        safeArray(homeState.widgets).length ||
-        hasKeys(homeState.summary) ||
-        hasKeys(homeState.dashboard)
-    );
+        user: templateUser,
+        currentUser: templateUser,
+        sidebarUser: templateUser,
+
+        sidebar: {
+          user: templateUser,
+        },
+      },
+    });
   }
 
   function hasCollectionData() {
@@ -1947,6 +2221,7 @@ export const HomeView = (() => {
       initialized,
       destroyed,
 
+      user: getPublicUserSnapshot(),
       role: getCurrentRole(),
       admin: isAdmin(),
 
@@ -1987,7 +2262,8 @@ export const HomeView = (() => {
         bindingsDelegated: true,
         actionsDelegated: true,
 
-        readsUserFromResolvedContext: true,
+        readsUserFromSidebarViewModel: true,
+        passesSidebarUserToTemplate: true,
         readsCollectionsFromDashboardFallback: true,
         reloadsWhenLoadedButEmpty: true,
         optimizedSingleRenderAfterLoad: true,

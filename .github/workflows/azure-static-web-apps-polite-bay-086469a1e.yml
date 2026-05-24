@@ -20,7 +20,7 @@ on:
 
 concurrency:
   group: swa-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -31,12 +31,14 @@ env:
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
   PRODUCTION_BRANCH: "main"
+  DEPLOY_COOLDOWN_SECONDS: "75"
+  DEPLOY_RETRY_SECONDS: "90"
 
 jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     if: >-
       (
@@ -92,7 +94,7 @@ jobs:
 
           for file in "${required_files[@]}"; do
             if [[ ! -f "$file" ]]; then
-              echo "::error title=Archivo obligatorio no encontrado::No existe: $file"
+              echo "::error file=$file,title=Archivo obligatorio no encontrado::No existe: $file"
               exit 1
             fi
           done
@@ -104,7 +106,7 @@ jobs:
 
           for file in "${removed_files[@]}"; do
             if [[ -e "$file" ]]; then
-              echo "::error title=Archivo eliminado reaparecido::Debe eliminarse del repo: $file"
+              echo "::error file=$file,title=Archivo eliminado reaparecido::Debe eliminarse del repo: $file"
               exit 1
             fi
           done
@@ -147,7 +149,16 @@ jobs:
 
           echo "Onion SPA static package OK."
 
-      - name: Deploy static SPA
+      - name: Deployment cooldown
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Esperando ${DEPLOY_COOLDOWN_SECONDS}s para evitar solapar despliegues en Azure SWA..."
+          sleep "${DEPLOY_COOLDOWN_SECONDS}"
+
+      - name: Deploy static SPA attempt 1
+        id: deploy_1
+        continue-on-error: true
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
@@ -163,10 +174,85 @@ jobs:
           skip_app_build: true
           skip_api_build: true
 
+      - name: Wait before retry 2
+        if: steps.deploy_1.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Deploy attempt 1 falló. Esperando ${DEPLOY_RETRY_SECONDS}s antes del segundo intento..."
+          sleep "${DEPLOY_RETRY_SECONDS}"
+
+      - name: Deploy static SPA attempt 2
+        id: deploy_2
+        if: steps.deploy_1.outcome == 'failure'
+        continue-on-error: true
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+
+          production_branch: ${{ env.PRODUCTION_BRANCH }}
+
+          app_location: ${{ env.APP_LOCATION }}
+          api_location: ${{ env.API_LOCATION }}
+          output_location: ${{ env.OUTPUT_LOCATION }}
+
+          skip_app_build: true
+          skip_api_build: true
+
+      - name: Wait before retry 3
+        if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Deploy attempt 2 falló. Esperando ${DEPLOY_RETRY_SECONDS}s antes del tercer intento..."
+          sleep "${DEPLOY_RETRY_SECONDS}"
+
+      - name: Deploy static SPA attempt 3
+        id: deploy_3
+        if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure'
+        continue-on-error: true
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+
+          production_branch: ${{ env.PRODUCTION_BRANCH }}
+
+          app_location: ${{ env.APP_LOCATION }}
+          api_location: ${{ env.API_LOCATION }}
+          output_location: ${{ env.OUTPUT_LOCATION }}
+
+          skip_app_build: true
+          skip_api_build: true
+
+      - name: Verify deployment result
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          deploy_1="${{ steps.deploy_1.outcome }}"
+          deploy_2="${{ steps.deploy_2.outcome }}"
+          deploy_3="${{ steps.deploy_3.outcome }}"
+
+          echo "Deploy attempt 1: ${deploy_1}"
+          echo "Deploy attempt 2: ${deploy_2:-skipped}"
+          echo "Deploy attempt 3: ${deploy_3:-skipped}"
+
+          if [[ "${deploy_1}" == "success" || "${deploy_2}" == "success" || "${deploy_3}" == "success" ]]; then
+            echo "Azure SWA deploy OK."
+            exit 0
+          fi
+
+          echo "::error title=Deploy fallido::Azure SWA rechazó el despliegue tras 3 intentos."
+          exit 1
+
   close_preview:
     name: Close PR Preview
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     if: >-
       github.event_name == 'pull_request' &&
@@ -189,8 +275,47 @@ jobs:
           fi
 
       - name: Close PR preview
+        id: close_preview_1
+        continue-on-error: true
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: close
+
+      - name: Wait before close preview retry
+        if: steps.close_preview_1.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Close preview falló. Esperando ${DEPLOY_RETRY_SECONDS}s antes de reintentar..."
+          sleep "${DEPLOY_RETRY_SECONDS}"
+
+      - name: Close PR preview retry
+        id: close_preview_2
+        if: steps.close_preview_1.outcome == 'failure'
+        continue-on-error: true
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: close
+
+      - name: Verify close preview result
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          close_1="${{ steps.close_preview_1.outcome }}"
+          close_2="${{ steps.close_preview_2.outcome }}"
+
+          echo "Close preview attempt 1: ${close_1}"
+          echo "Close preview attempt 2: ${close_2:-skipped}"
+
+          if [[ "${close_1}" == "success" || "${close_2}" == "success" ]]; then
+            echo "Azure SWA preview close OK."
+            exit 0
+          fi
+
+          echo "::error title=Close preview fallido::Azure SWA rechazó el cierre del preview tras 2 intentos."
+          exit 1

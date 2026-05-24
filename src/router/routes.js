@@ -46,9 +46,10 @@ import {
   isBlockedRoutePath as isConfigBlockedRoutePath,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.v7";
+export const ROUTES_VERSION = "routes.v8";
 
 const ROUTE_SOURCE = "router.routes";
+const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
 
 /* =========================================================
    PATHS
@@ -57,23 +58,23 @@ const ROUTE_SOURCE = "router.routes";
 export const ROUTE_PATHS = Object.freeze({
   HOME: "/",
 
-  INCIDENCIAS: ROUTES.incidencias || "/incidencias",
-  FACTURAS: ROUTES.facturas || "/facturas",
-  CLIENTES: ROUTES.clientes || "/clientes",
-  CUENTA: ROUTES.cuenta || "/cuenta",
-  AJUSTES: ROUTES.ajustes || "/ajustes",
+  INCIDENCIAS: CONFIG_ROUTES.incidencias || "/incidencias",
+  FACTURAS: CONFIG_ROUTES.facturas || "/facturas",
+  CLIENTES: CONFIG_ROUTES.clientes || "/clientes",
+  CUENTA: CONFIG_ROUTES.cuenta || "/cuenta",
+  AJUSTES: CONFIG_ROUTES.ajustes || "/ajustes",
 
   /*
     Admin opcionales:
     no se inventan por fallback. Sólo se declaran si config los define.
   */
-  USUARIOS: ROUTES.usuarios || "",
-  SERVIDOR: ROUTES.servidor || "",
+  USUARIOS: CONFIG_ROUTES.usuarios || "",
+  SERVIDOR: CONFIG_ROUTES.servidor || "",
 
-  LOGIN: ROUTES.login || "/login",
-  PASSWORD_REQUEST: ROUTES.passwordRequest || "/password-request",
-  PASSWORD_RESET: ROUTES.passwordReset || "/password-reset",
-  ACTIVATE_ACCOUNT: ROUTES.activateAccount || "/activate-account",
+  LOGIN: CONFIG_ROUTES.login || "/login",
+  PASSWORD_REQUEST: CONFIG_ROUTES.passwordRequest || "/password-request",
+  PASSWORD_RESET: CONFIG_ROUTES.passwordReset || "/password-reset",
+  ACTIVATE_ACCOUNT: CONFIG_ROUTES.activateAccount || "/activate-account",
 });
 
 export const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
@@ -233,6 +234,15 @@ function unique(values = []) {
   ];
 }
 
+function redact(value = "") {
+  return text(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
 /* =========================================================
    NORMALIZATION
 ========================================================= */
@@ -350,6 +360,11 @@ function isConfiguredAdminPath(path = "/") {
   } catch {
     return false;
   }
+}
+
+function isReservedUserScopeDeclaration(path = "/") {
+  const clean = normalizePath(path);
+  return clean === USER_HOME_PREFIX || clean.startsWith(USER_HOME_PREFIX);
 }
 
 /* =========================================================
@@ -656,6 +671,10 @@ function createRoute({
 
   if (!finalPath || isBlockedRoutePath(finalPath)) {
     throw new Error(`Router: ruta no permitida "${path}".`);
+  }
+
+  if (isReservedUserScopeDeclaration(finalPath)) {
+    throw new Error(`Router: no declarar rutas reales bajo "${USER_HOME_PREFIX}".`);
   }
 
   const finalName = normalizeName(name);
@@ -967,6 +986,10 @@ function validateRoute(route, seenPaths, seenNames) {
     throw new Error(`Router: ruta bloqueada "${path}".`);
   }
 
+  if (isReservedUserScopeDeclaration(path)) {
+    throw new Error(`Router: ruta real reservada para user scope "${path}".`);
+  }
+
   if (seenPaths.has(path)) {
     throw new Error(`Router: ruta duplicada "${path}".`);
   }
@@ -977,6 +1000,10 @@ function validateRoute(route, seenPaths, seenNames) {
 
   if (!route.viewKey || !route.viewName) {
     throw new Error(`Router: viewKey/viewName inválido en "${path}".`);
+  }
+
+  if (!isFunction(VIEW_LOADERS[normalizeViewKey(route.viewKey)])) {
+    throw new Error(`Router: loader de vista no definido en "${path}".`);
   }
 
   if (!isFunction(route.render)) {
@@ -1157,10 +1184,11 @@ export function getRouteDebug(path = "/") {
 
   return {
     found: Boolean(route),
-    input: path,
-    normalizedPath,
-    lookupPath,
+    input: redact(path),
+    normalizedPath: redact(normalizedPath),
+    lookupPath: redact(lookupPath),
     blocked: isBlockedRoutePath(normalizedPath),
+    reservedUserScopeDeclaration: isReservedUserScopeDeclaration(normalizedPath),
     adminRoute: isAdminRoutePath(normalizedPath),
     userScopedPath: Boolean(scoped.scoped),
     userScopedRoutable: Boolean(scoped.routable),
@@ -1260,6 +1288,8 @@ export function getRoutesIntegritySnapshot() {
       homeVisiblePattern: "/@{user.slug}",
       userHomePrefix: USER_HOME_PREFIX,
 
+      noScopedStaticRoutes: true,
+      noPublicRoutesInsideUserScope: true,
       optionalAdminRoutesRequireConfig: true,
 
       noHomeAlias: true,
@@ -1270,6 +1300,8 @@ export function getRoutesIntegritySnapshot() {
       noOtp: true,
       no403: true,
       no404: true,
+
+      snapshotRedacted: true,
     },
   };
 }

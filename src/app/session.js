@@ -24,7 +24,7 @@
    - Sin sync UI.
 ========================================================= */
 
-export const SESSION_VERSION = "app.session.v5";
+export const SESSION_VERSION = "app.session.v6";
 
 let restorePromise = null;
 
@@ -40,6 +40,24 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return output || fallback;
+}
+
+function redact(value = "") {
+  return cleanText(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
 function safeCall(fn = null, ...args) {
   try {
     return isFunction(fn) ? fn(...args) : null;
@@ -48,14 +66,27 @@ function safeCall(fn = null, ...args) {
   }
 }
 
+function callMethod(target = null, method = "", ...args) {
+  if (!target || !method || !isFunction(target[method])) {
+    return null;
+  }
+
+  return safeCall(target[method].bind(target), ...args);
+}
+
 function resolveAuth(AppCore = null, Auth = null) {
   try {
+    const modules = AppCore?.modules || null;
+    const getModule = isFunction(modules?.get)
+      ? modules.get.bind(modules)
+      : null;
+
     return (
       Auth ||
       AppCore?.auth ||
       AppCore?.Auth ||
-      AppCore?.modules?.get?.("auth") ||
-      AppCore?.modules?.get?.("Auth") ||
+      safeCall(getModule, "auth") ||
+      safeCall(getModule, "Auth") ||
       null
     );
   } catch {
@@ -74,17 +105,11 @@ function readState(AppCore = null) {
 function isAuthenticated(AppCore = null, Auth = null) {
   const auth = resolveAuth(AppCore, Auth);
 
-  const fromAuth = safeCall(
-    auth?.isAuthenticated?.bind?.(auth) ||
-      auth?.isAuthenticated
-  );
+  const fromAuth = callMethod(auth, "isAuthenticated");
 
   if (fromAuth !== null) return fromAuth === true;
 
-  const fromCore = safeCall(
-    AppCore?.isAuthenticated?.bind?.(AppCore) ||
-      AppCore?.isAuthenticated
-  );
+  const fromCore = callMethod(AppCore, "isAuthenticated");
 
   if (fromCore !== null) return fromCore === true;
 
@@ -96,10 +121,13 @@ function getUser(AppCore = null, Auth = null) {
   const state = readState(AppCore);
 
   return (
-    safeCall(auth?.getUser?.bind?.(auth) || auth?.getUser) ||
-    safeCall(auth?.getCurrentUser?.bind?.(auth) || auth?.getCurrentUser) ||
-    safeCall(auth?.getProfile?.bind?.(auth) || auth?.getProfile) ||
-    safeCall(AppCore?.getCurrentUser?.bind?.(AppCore) || AppCore?.getCurrentUser) ||
+    callMethod(auth, "getUser") ||
+    callMethod(auth, "getCurrentUser") ||
+    callMethod(auth, "getProfile") ||
+    callMethod(AppCore, "getCurrentUser") ||
+    auth?.user ||
+    auth?.currentUser ||
+    auth?.profile ||
     state.user ||
     state.currentUser ||
     null
@@ -111,8 +139,10 @@ function getSession(AppCore = null, Auth = null) {
   const state = readState(AppCore);
 
   return (
-    safeCall(auth?.getSession?.bind?.(auth) || auth?.getSession) ||
-    safeCall(auth?.getCurrentSession?.bind?.(auth) || auth?.getCurrentSession) ||
+    callMethod(auth, "getSession") ||
+    callMethod(auth, "getCurrentSession") ||
+    auth?.session ||
+    auth?.currentSession ||
     state.session ||
     state.sessionData ||
     null
@@ -123,10 +153,10 @@ function getAuthSnapshot(AppCore = null, Auth = null) {
   const auth = resolveAuth(AppCore, Auth);
 
   return (
-    safeCall(auth?.getSnapshot?.bind?.(auth) || auth?.getSnapshot) ||
-    safeCall(auth?.getAuthModuleSnapshot?.bind?.(auth) || auth?.getAuthModuleSnapshot) ||
-    safeCall(auth?.buildSessionSnapshot?.bind?.(auth) || auth?.buildSessionSnapshot) ||
-    safeCall(auth?.getSessionDebugSnapshot?.bind?.(auth) || auth?.getSessionDebugSnapshot) ||
+    callMethod(auth, "getSnapshot") ||
+    callMethod(auth, "getAuthModuleSnapshot") ||
+    callMethod(auth, "buildSessionSnapshot") ||
+    callMethod(auth, "getSessionDebugSnapshot") ||
     null
   );
 }
@@ -148,6 +178,101 @@ function requireRestore(AppCore = null, Auth = null) {
   }
 
   return auth.restoreSession.bind(auth);
+}
+
+/* =========================================================
+   RESULT READ
+========================================================= */
+
+function getNestedResult(result = null) {
+  return isObject(result?.result) ? result.result : {};
+}
+
+function getResultUser(result = null) {
+  if (!isObject(result)) return null;
+
+  const nested = getNestedResult(result);
+
+  return (
+    result.user ||
+    result.currentUser ||
+    result.profile ||
+    nested.user ||
+    nested.currentUser ||
+    nested.profile ||
+    null
+  );
+}
+
+function getResultSession(result = null) {
+  if (!isObject(result)) return null;
+
+  const nested = getNestedResult(result);
+
+  return (
+    result.session ||
+    result.currentSession ||
+    nested.session ||
+    nested.currentSession ||
+    null
+  );
+}
+
+function getResultFlags(result = null) {
+  if (!isObject(result)) {
+    return {
+      ok: false,
+      restored: false,
+      authenticated: false,
+    };
+  }
+
+  const nested = getNestedResult(result);
+
+  return {
+    ok: result.ok === true || nested.ok === true,
+    restored: result.restored === true || nested.restored === true,
+    authenticated: result.authenticated === true || nested.authenticated === true,
+  };
+}
+
+function buildRestoreMeta(result = null) {
+  if (!isObject(result)) return null;
+
+  const nested = getNestedResult(result);
+  const flags = getResultFlags(result);
+
+  return {
+    ok: flags.ok,
+    restored: flags.restored,
+    authenticated: flags.authenticated,
+
+    hasUser: Boolean(getResultUser(result)),
+    hasSession: Boolean(getResultSession(result)),
+
+    source: cleanText(result.source || nested.source, null),
+    code: result.code || nested.code || null,
+    status: result.status || result.statusCode || nested.status || nested.statusCode || null,
+  };
+}
+
+function buildSnapshotMeta(snapshot = null) {
+  if (!isObject(snapshot)) return null;
+
+  return {
+    authenticated: snapshot.authenticated === true,
+    restored: snapshot.restored === true,
+
+    hasToken: snapshot.hasToken === true,
+    hasRefreshToken: snapshot.hasRefreshToken === true,
+    hasUser: snapshot.hasUser === true,
+    hasSession: snapshot.hasSession === true,
+
+    role: cleanText(snapshot.role, null),
+    userSlug: cleanText(snapshot.userSlug, null),
+    homePath: redact(snapshot.homePath || snapshot.defaultHome || ""),
+    source: cleanText(snapshot.source, null),
+  };
 }
 
 /* =========================================================
@@ -182,16 +307,28 @@ function createRestorePayload(options = {}) {
 
 function normalizeRestoreResult(result = null, AppCore = null, Auth = null) {
   const auth = resolveAuth(AppCore, Auth);
-  const user = getUser(AppCore, auth);
-  const session = getSession(AppCore, auth);
+
+  const authUser = getUser(AppCore, auth);
+  const authSession = getSession(AppCore, auth);
   const snapshot = getAuthSnapshot(AppCore, auth);
 
-  const authenticated = hasAuthenticatedUser(AppCore, auth);
+  const resultUser = getResultUser(result);
+  const resultSession = getResultSession(result);
+  const resultFlags = getResultFlags(result);
+
+  const user = authUser || resultUser || null;
+  const session = authSession || resultSession || null;
+
+  const authenticated = Boolean(
+    hasAuthenticatedUser(AppCore, auth) ||
+      (resultFlags.authenticated && user) ||
+      (snapshot?.authenticated === true && user)
+  );
 
   const restored = Boolean(
-    result?.restored === true ||
-      result?.ok === true ||
-      result?.authenticated === true ||
+    resultFlags.restored ||
+      resultFlags.ok ||
+      resultFlags.authenticated ||
       snapshot?.restored === true ||
       snapshot?.authenticated === true ||
       authenticated
@@ -202,13 +339,22 @@ function normalizeRestoreResult(result = null, AppCore = null, Auth = null) {
     restored,
     authenticated,
 
+    hasUser: Boolean(user),
+    hasSession: Boolean(session),
+
     user: authenticated ? user : null,
     session: authenticated && isObject(session) ? session : null,
 
-    result: isObject(result) ? result : null,
-    snapshot: isObject(snapshot) ? snapshot : null,
+    result: buildRestoreMeta(result),
+    snapshot: buildSnapshotMeta(snapshot),
 
-    source: "app.session",
+    source: cleanText(
+      result?.source ||
+        result?.result?.source ||
+        snapshot?.source,
+      "app.session"
+    ),
+
     version: SESSION_VERSION,
   };
 }
@@ -253,6 +399,7 @@ export function getSessionBootstrapSnapshot({
   const user = getUser(AppCore, auth);
   const session = getSession(AppCore, auth);
   const snapshot = getAuthSnapshot(AppCore, auth);
+  const snapshotMeta = buildSnapshotMeta(snapshot);
   const authenticated = hasAuthenticatedUser(AppCore, auth);
 
   return {
@@ -269,15 +416,17 @@ export function getSessionBootstrapSnapshot({
 
     hasSession: Boolean(session),
 
-    authSnapshot: isObject(snapshot)
+    authSnapshot: snapshotMeta
       ? {
-          authenticated: snapshot.authenticated === true,
-          hasToken: snapshot.hasToken === true,
-          hasUser: snapshot.hasUser === true,
-          hasSession: snapshot.hasSession === true,
-          role: snapshot.role || null,
-          userSlug: snapshot.userSlug || null,
-          homePath: snapshot.homePath || snapshot.defaultHome || null,
+          authenticated: snapshotMeta.authenticated,
+          restored: snapshotMeta.restored,
+          hasToken: snapshotMeta.hasToken,
+          hasRefreshToken: snapshotMeta.hasRefreshToken,
+          hasUser: snapshotMeta.hasUser,
+          hasSession: snapshotMeta.hasSession,
+          role: snapshotMeta.role,
+          userSlug: snapshotMeta.userSlug,
+          homePath: snapshotMeta.homePath,
         }
       : null,
 
@@ -301,6 +450,8 @@ export function getSessionBootstrapSnapshot({
       persistentSession: true,
       restoreOnBoot: true,
       silentRefreshRequested: true,
+
+      redactedSnapshot: true,
     },
   };
 }

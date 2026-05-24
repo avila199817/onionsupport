@@ -16,7 +16,7 @@
    - Renderizar ruta inicial capturada por main.js.
    - Sincronizar Sidebar/Topbar después del primer render.
    - Refrescar textos i18n.
-   - Ocultar loader.
+   - Ocultar loader sólo cuando el boot termina correctamente.
    - Sin Store.
    - Sin Services paralelos.
    - Sin warmup.
@@ -24,7 +24,7 @@
    - Sin eventos custom.
    - Sin fetch.
    - Sin storage.
-   - Sin magia negra.
+   - Sin lógica de dominio.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -56,7 +56,7 @@ import {
   renderInitialRoute as renderRouterInitialRoute,
 } from "./router.js";
 
-export const APP_INDEX_VERSION = "app.index.v7";
+export const APP_INDEX_VERSION = "app.index.v8";
 
 let bootPromise = null;
 let ready = false;
@@ -91,7 +91,7 @@ function cleanText(value = "", fallback = "") {
 function redact(value = "") {
   return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -212,30 +212,30 @@ function setReady() {
    CORE REGISTRY
 ========================================================= */
 
+function registerCoreModule(name = "", module = null) {
+  if (!name || !module || !isFunction(AppCore?.modules?.register)) {
+    return false;
+  }
+
+  AppCore.modules.register(name, module);
+  return true;
+}
+
 function exposeCoreModules() {
-  AppCore.auth = Auth;
-  AppCore.Auth = Auth;
+  const modules = [
+    ["auth", "Auth", Auth],
+    ["router", "Router", Router],
+    ["i18n", "I18n", I18n],
+    ["toast", "Toast", Toast],
+  ];
 
-  AppCore.router = Router;
-  AppCore.Router = Router;
+  for (const [lowerName, upperName, module] of modules) {
+    AppCore[lowerName] = module;
+    AppCore[upperName] = module;
 
-  AppCore.i18n = I18n;
-  AppCore.I18n = I18n;
-
-  AppCore.toast = Toast;
-  AppCore.Toast = Toast;
-
-  AppCore.modules?.register?.("auth", Auth);
-  AppCore.modules?.register?.("Auth", Auth);
-
-  AppCore.modules?.register?.("router", Router);
-  AppCore.modules?.register?.("Router", Router);
-
-  AppCore.modules?.register?.("i18n", I18n);
-  AppCore.modules?.register?.("I18n", I18n);
-
-  AppCore.modules?.register?.("toast", Toast);
-  AppCore.modules?.register?.("Toast", Toast);
+    registerCoreModule(lowerName, module);
+    registerCoreModule(upperName, module);
+  }
 
   return true;
 }
@@ -317,9 +317,17 @@ async function restoreAuth(payload = {}) {
         ok: Boolean(result.ok),
         restored: Boolean(result.restored),
         authenticated: Boolean(result.authenticated),
-        hasUser: Boolean(result.user),
-        hasSession: Boolean(result.session),
-        source: result.source || result.result?.source || "app.session",
+        hasUser: Boolean(
+          result.user ||
+            result.currentUser ||
+            result.result?.user ||
+            result.result?.currentUser
+        ),
+        hasSession: Boolean(result.session || result.result?.session),
+        source: cleanText(
+          result.source || result.result?.source,
+          "app.session"
+        ),
       }
     : null;
 
@@ -424,8 +432,10 @@ async function runBoot(options = {}) {
     ready = false;
     lastBootError = safeError(error);
 
-    setReady();
-
+    /*
+      No marcar shell ready ni ocultar loader aquí.
+      El fatal UI lo gestiona /src/main.js, que es el entrypoint real.
+    */
     throw error;
   }
 }
@@ -477,7 +487,7 @@ export function getAppSnapshot() {
 
       routerDelegatedToAppRouter: true,
       routerConfiguredBeforeChrome: true,
-      routerManagedInitialRender: false,
+      initialRouteDelegatedToAppRouter: true,
 
       chromeRegisteredBeforeInitialRoute: true,
       chromeSyncedAfterInitialRoute: true,
@@ -489,11 +499,7 @@ export function getAppSnapshot() {
       noCustomEvents: true,
       noFetch: true,
       noStorage: true,
-
-      noHomeRoute: true,
-      no2fa: true,
-      noMfa: true,
-      noOtp: true,
+      noDomainLogic: true,
 
       redactedSnapshot: true,
     },

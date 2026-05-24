@@ -30,6 +30,7 @@ import {
   config,
   AUTH_ENDPOINTS,
   PUBLIC_API_PATHS,
+  PRIVATE_API_PATHS,
   getApiBase,
   isCanonicalBackendApiBase,
   isPublicApiPath,
@@ -40,7 +41,7 @@ import {
   createApiClient,
 } from "./request.js";
 
-export const HTTP_VERSION = "core.http.v5";
+export const HTTP_VERSION = "core.http.v6";
 
 export const DEFAULT_API_ORIGIN = getApiBase();
 export const DEFAULT_TIMEOUT_MS = config?.api?.timeout || 30000;
@@ -110,6 +111,25 @@ const CLEAR_SESSION_AUTH_CODES = new Set([
   "SESSION_NOT_FOUND",
 ]);
 
+const SENSITIVE_QUERY_KEYS = new Set([
+  "token",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "secret",
+  "session",
+  "code",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
+  "jwt",
+  "authorization",
+  "reset_token",
+  "activation_token",
+]);
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -142,12 +162,16 @@ function first(...values) {
 }
 
 function redact(value = "") {
-  return String(value || "")
+  return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function keyIsSensitive(value = "") {
+  return SENSITIVE_QUERY_KEYS.has(cleanText(value, "").toLowerCase());
 }
 
 /* =========================================================
@@ -246,42 +270,51 @@ function stateExplicitlyHasNoToken(state = getState()) {
   );
 }
 
+function nestedPayloads(payload = {}) {
+  if (!isObject(payload)) return [];
+
+  return [
+    payload,
+    isObject(payload.data) ? payload.data : null,
+    isObject(payload.payload) ? payload.payload : null,
+    isObject(payload.result) ? payload.result : null,
+    isObject(payload.auth) ? payload.auth : null,
+    isObject(payload.session) ? payload.session : null,
+    isObject(payload.sessionData) ? payload.sessionData : null,
+  ].filter(Boolean);
+}
+
 function accessTokenFromPayload(payload = {}) {
-  const source = isObject(payload) ? payload : {};
+  for (const source of nestedPayloads(payload)) {
+    const token = cleanToken(
+      first(
+        source.token,
+        source.accessToken,
+        source.access_token,
+        ""
+      )
+    );
 
-  return cleanToken(
-    first(
-      source.token,
-      source.accessToken,
-      source.access_token,
+    if (token) return token;
+  }
 
-      source.auth?.token,
-      source.auth?.accessToken,
-      source.auth?.access_token,
-
-      source.data?.token,
-      source.data?.accessToken,
-      source.data?.access_token,
-
-      ""
-    )
-  );
+  return "";
 }
 
 export function getAccessToken() {
   const state = getState();
-  const token = stateAccessToken(state);
-
-  if (token) return token;
 
   /*
-    Si AppCore ya marcó sesión sin token, no se permite recuperar
-    un runtime token antiguo. Esto evita Authorization stale después
-    de clearSessionLocal()/logout/restore fallido.
+    Si AppCore ya declaró que no hay token, no recuperamos un token runtime
+    ni un token stale que haya quedado en state por compat.
   */
   if (stateExplicitlyHasNoToken(state)) {
     return "";
   }
+
+  const token = stateAccessToken(state);
+
+  if (token) return token;
 
   return cleanToken(runtimeTokens.accessToken || "");
 }
@@ -298,6 +331,7 @@ export function setAccessToken(token = "") {
     delete state.access_token;
 
     state.hasToken = false;
+    state.authenticated = false;
 
     return "";
   }
@@ -332,6 +366,7 @@ export function clearAuthTokens() {
   delete state.access_token;
 
   state.hasToken = false;
+  state.authenticated = false;
 
   return true;
 }
@@ -434,6 +469,33 @@ function shouldUseAuth(endpoint = "", options = {}) {
    ERROR
 ========================================================= */
 
+function sanitizeErrorData(value = null, depth = 0) {
+  if (depth > 5) return null;
+
+  if (typeof value === "string") {
+    return redact(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 100).map((item) => sanitizeErrorData(item, depth + 1));
+  }
+
+  if (!isObject(value)) return value;
+
+  const output = {};
+
+  for (const [key, child] of Object.entries(value)) {
+    if (keyIsSensitive(key)) {
+      output[key] = "***";
+      continue;
+    }
+
+    output[key] = sanitizeErrorData(child, depth + 1);
+  }
+
+  return output;
+}
+
 export class HttpError extends Error {
   constructor(message = "HTTP_ERROR", options = {}) {
     super(redact(message));
@@ -444,7 +506,7 @@ export class HttpError extends Error {
     this.code = options.code || "HTTP_ERROR";
     this.method = options.method || "";
     this.url = redact(options.url || "");
-    this.data = options.data || null;
+    this.data = sanitizeErrorData(options.data || null);
   }
 }
 
@@ -454,8 +516,8 @@ function getErrorPayload(error = null) {
   if (isObject(error.data)) return error.data;
   if (isObject(error.body)) return error.body;
   if (isObject(error.payload)) return error.payload;
-  if (isObject(error.response)) return error.response;
   if (isObject(error.responseData)) return error.responseData;
+  if (isObject(error.response) && !isFunction(error.response.blob)) return error.response;
 
   return {};
 }
@@ -523,6 +585,8 @@ export function normalizeHttpError(error = null) {
   const payload = getErrorPayload(error);
   const code = getHttpErrorCode(error);
   const status = getHttpStatus(error);
+  const canRefresh = isRefreshableAuthError(error);
+  const shouldLogout = shouldClearSessionForAuthError(error);
 
   return {
     name: error?.name || "Error",
@@ -542,10 +606,10 @@ export function normalizeHttpError(error = null) {
     statusCode: status,
     code: code || "HTTP_ERROR",
 
-    canRefresh: isRefreshableAuthError(error),
-    refreshRequired: isRefreshableAuthError(error),
-    shouldLogout: shouldClearSessionForAuthError(error),
-    clearClientSession: shouldClearSessionForAuthError(error),
+    canRefresh,
+    refreshRequired: canRefresh,
+    shouldLogout,
+    clearClientSession: shouldLogout,
   };
 }
 
@@ -927,6 +991,14 @@ export function getHttpSnapshot() {
 
     endpoints: AUTH_ENDPOINTS,
     publicEndpoints: PUBLIC_API_PATHS,
+    privateEndpoints: PRIVATE_API_PATHS,
+
+    authPolicy: {
+      mePrivate: !isPublicApiPath(AUTH_ENDPOINTS.me),
+      refreshPublic: isPublicApiPath(AUTH_ENDPOINTS.refresh),
+      refreshUsesAuthHeader: shouldUseAuth(AUTH_ENDPOINTS.refresh, {}),
+      meUsesAuthHeader: shouldUseAuth(AUTH_ENDPOINTS.me, {}),
+    },
 
     policy: {
       facadeOnly: true,

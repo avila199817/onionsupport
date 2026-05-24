@@ -19,15 +19,19 @@ import {
   UI_CONSTANTS,
 } from "./constants.js";
 
-export const I18N_VERSION = "app.i18n.v2";
+export const I18N_VERSION = "app.i18n.v3";
+
+const DEFAULT_SUPPORTED_LANGS = Object.freeze(["es", "ca", "en"]);
+const BASE_FALLBACK_LANG = "es";
 
 const SUPPORTED_LANGS = Object.freeze(
-  Array.isArray(UI_CONSTANTS.supportedLangs)
-    ? [...UI_CONSTANTS.supportedLangs]
-    : ["es", "ca", "en"]
+  normalizeSupportedLangs(UI_CONSTANTS?.supportedLangs)
 );
 
-const FALLBACK_LANG = UI_CONSTANTS.fallbackLang || "es";
+const FALLBACK_LANG = normalizeLang(
+  UI_CONSTANTS?.fallbackLang || UI_CONSTANTS?.defaultLang || BASE_FALLBACK_LANG,
+  BASE_FALLBACK_LANG
+);
 
 let currentLang = "";
 
@@ -48,25 +52,86 @@ function isFunction(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
-function normalizeLang(value = "", fallback = FALLBACK_LANG) {
+function safeCall(fn = null, context = null, ...args) {
+  try {
+    return isFunction(fn) ? fn.apply(context, args) : null;
+  } catch {
+    return null;
+  }
+}
+
+function redact(value = "") {
+  return cleanText(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+/* =========================================================
+   LANG NORMALIZATION
+========================================================= */
+
+function normalizeLangToken(value = "") {
   const raw = cleanText(value, "")
     .toLowerCase()
-    .replace("_", "-");
+    .replace(/_/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
 
+  if (!raw) return "";
+
+  return raw.split("-").filter(Boolean).join("-");
+}
+
+function normalizeSupportedLangs(values = []) {
+  const input = Array.isArray(values) && values.length
+    ? values
+    : DEFAULT_SUPPORTED_LANGS;
+
+  const langs = [
+    ...new Set(
+      input
+        .map(normalizeLangToken)
+        .map((lang) => lang.split("-")[0] || lang)
+        .filter(Boolean)
+    ),
+  ];
+
+  if (!langs.includes(BASE_FALLBACK_LANG)) {
+    langs.unshift(BASE_FALLBACK_LANG);
+  }
+
+  return langs.length ? langs : [...DEFAULT_SUPPORTED_LANGS];
+}
+
+function normalizeLang(value = "", fallback = FALLBACK_LANG || BASE_FALLBACK_LANG) {
+  const raw = normalizeLangToken(value);
+  const cleanFallback = normalizeLangToken(fallback) || BASE_FALLBACK_LANG;
   const short = raw.split("-")[0];
 
   if (SUPPORTED_LANGS.includes(raw)) return raw;
   if (SUPPORTED_LANGS.includes(short)) return short;
 
-  return fallback;
+  if (SUPPORTED_LANGS.includes(cleanFallback)) return cleanFallback;
+
+  const fallbackShort = cleanFallback.split("-")[0];
+
+  if (SUPPORTED_LANGS.includes(fallbackShort)) return fallbackShort;
+
+  return BASE_FALLBACK_LANG;
 }
 
 function interpolate(value = "", params = {}) {
-  const source = String(value ?? "");
+  const source = redact(value);
   const data = isObject(params) ? params : {};
 
   return source.replace(
@@ -77,7 +142,7 @@ function interpolate(value = "", params = {}) {
 
       return replacement === undefined || replacement === null
         ? match
-        : String(replacement);
+        : redact(replacement);
     }
   );
 }
@@ -101,10 +166,15 @@ function setDocumentLang(lang = FALLBACK_LANG) {
 
   if (!isBrowser()) return clean;
 
-  document.documentElement.lang = clean;
-  document.documentElement.dir = "ltr";
-  document.documentElement.dataset.locale = clean;
-  document.documentElement.dataset.localeSource = "app";
+  try {
+    document.documentElement.lang = clean;
+    document.documentElement.dir = "ltr";
+    document.documentElement.dataset.locale = clean;
+    document.documentElement.dataset.localeSource = "app";
+    document.documentElement.dataset.localeFallback = FALLBACK_LANG;
+  } catch {
+    // noop
+  }
 
   return clean;
 }
@@ -133,7 +203,9 @@ function setCoreLang(AppCore = null, lang = FALLBACK_LANG) {
   }
 
   if (isFunction(AppCore?.setState)) {
-    AppCore.setState(
+    safeCall(
+      AppCore.setState,
+      AppCore,
       {
         lang: clean,
         language: clean,
@@ -155,19 +227,15 @@ function setCoreLang(AppCore = null, lang = FALLBACK_LANG) {
 ========================================================= */
 
 function getI18nLang(I18n = null) {
-  if (isFunction(I18n?.getLang)) {
-    return normalizeLang(I18n.getLang(), "");
-  }
+  if (!I18n || I18n === api) return "";
 
-  if (isFunction(I18n?.getLocale)) {
-    return normalizeLang(I18n.getLocale(), "");
-  }
-
-  if (isFunction(I18n?.getLanguage)) {
-    return normalizeLang(I18n.getLanguage(), "");
-  }
-
-  return "";
+  return normalizeLang(
+    safeCall(I18n.getLang, I18n) ||
+      safeCall(I18n.getLocale, I18n) ||
+      safeCall(I18n.getLanguage, I18n) ||
+      "",
+    ""
+  );
 }
 
 function setI18nLang(I18n = null, lang = FALLBACK_LANG, options = {}) {
@@ -175,23 +243,25 @@ function setI18nLang(I18n = null, lang = FALLBACK_LANG, options = {}) {
 
   if (!I18n || I18n === api) return clean;
 
+  const payload = isObject(options) ? options : {};
+
   if (isFunction(I18n.setLang)) {
-    I18n.setLang(clean, options);
+    safeCall(I18n.setLang, I18n, clean, payload);
     return clean;
   }
 
   if (isFunction(I18n.setLocale)) {
-    I18n.setLocale(clean, options);
+    safeCall(I18n.setLocale, I18n, clean, payload);
     return clean;
   }
 
   if (isFunction(I18n.setLanguage)) {
-    I18n.setLanguage(clean, options);
+    safeCall(I18n.setLanguage, I18n, clean, payload);
     return clean;
   }
 
   if (isFunction(I18n.changeLanguage)) {
-    I18n.changeLanguage(clean, options);
+    safeCall(I18n.changeLanguage, I18n, clean, payload);
     return clean;
   }
 
@@ -222,17 +292,18 @@ function resolveLang({
 }
 
 function applyLang(options = {}) {
-  const AppCore = options.AppCore || options.core || null;
-  const I18n = options.I18n || null;
-  const clean = resolveLang(options);
+  const payload = isObject(options) ? options : {};
+  const AppCore = payload.AppCore || payload.core || null;
+  const I18n = payload.I18n || null;
+  const clean = resolveLang(payload);
 
   currentLang = clean;
 
   setDocumentLang(clean);
   setCoreLang(AppCore, clean);
   setI18nLang(I18n, clean, {
-    updateDOM: options.updateDOM === true,
-    updateUi: options.updateUi === true,
+    updateDOM: payload.updateDOM === true,
+    updateUi: payload.updateUi === true,
   });
 
   return clean;
@@ -247,26 +318,28 @@ export function syncLangState(options = {}) {
 }
 
 export async function initI18n(options = {}) {
-  const I18n = options.I18n || null;
-  const lang = applyLang(options);
+  const payload = isObject(options) ? options : {};
+  const I18n = payload.I18n || null;
+  const AppCore = payload.AppCore || payload.core || null;
+  const lang = applyLang(payload);
 
   if (I18n && I18n !== api && isFunction(I18n.bindCore)) {
-    I18n.bindCore(options.AppCore || options.core || null);
+    safeCall(I18n.bindCore, I18n, AppCore);
   }
 
   if (I18n && I18n !== api && isFunction(I18n.init)) {
     await I18n.init({
-      ...options,
+      ...payload,
       lang,
       locale: lang,
       language: lang,
-      updateDOM: options.updateDOM === true,
-      updateUi: options.updateUi === true,
+      updateDOM: payload.updateDOM === true,
+      updateUi: payload.updateUi === true,
     });
   }
 
   applyLang({
-    ...options,
+    ...payload,
     lang,
   });
 
@@ -279,7 +352,7 @@ export function changeLanguage(options = {}, second = "") {
         lang: options,
       }
     : {
-        ...options,
+        ...(isObject(options) ? options : {}),
         lang: options.lang || options.locale || options.language || second,
       };
 
@@ -290,23 +363,24 @@ export function t(input = "", fallback = "", params = {}) {
   if (isObject(input)) {
     const payload = input;
     const I18n = payload.I18n || null;
+    const key = cleanText(payload.key, "");
+    const finalFallback = payload.fallback || key || "";
 
     if (I18n && I18n !== api && isFunction(I18n.t)) {
-      const value = I18n.t(
-        payload.key,
+      const value = safeCall(
+        I18n.t,
+        I18n,
+        key,
         payload.params || {},
-        payload.fallback || ""
+        finalFallback
       );
 
-      if (value && value !== payload.key) {
-        return String(value);
+      if (value && value !== key) {
+        return redact(value);
       }
     }
 
-    return interpolate(
-      payload.fallback || payload.key || "",
-      payload.params || {}
-    );
+    return interpolate(finalFallback, payload.params || {});
   }
 
   return interpolate(fallback || input || "", params);
@@ -317,18 +391,40 @@ export function t(input = "", fallback = "", params = {}) {
 ========================================================= */
 
 export function getI18nSnapshot(options = {}) {
+  const payload = isObject(options) ? options : {};
   const lang = resolveLang({
-    ...options,
-    lang: currentLang || options.lang || options.locale || options.language || "",
+    ...payload,
+    lang: currentLang || payload.lang || payload.locale || payload.language || "",
   });
 
   return {
     version: I18N_VERSION,
+
     lang,
     language: lang,
     locale: lang,
+
     fallbackLang: FALLBACK_LANG,
     supportedLangs: [...SUPPORTED_LANGS],
+
+    documentLang: getDocumentLang(),
+    coreLang: getCoreLang(payload.AppCore || payload.core || null) || null,
+    i18nLang: getI18nLang(payload.I18n || null) || null,
+
+    policy: {
+      bridgeOnly: true,
+      noOwnDictionaries: true,
+      doesNotDuplicateSrcI18n: true,
+      noStorage: true,
+      noEvents: true,
+      noRouter: true,
+      noToast: true,
+      noFetch: true,
+      noOwnRerender: true,
+      noInnerHTML: true,
+      baseFallbackEs: true,
+      redactedSnapshot: true,
+    },
   };
 }
 

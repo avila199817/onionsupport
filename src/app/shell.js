@@ -23,7 +23,7 @@
    - Este módulo sólo da soporte base al arranque de la app.
 ========================================================= */
 
-export const SHELL_VERSION = "app.shell.v3";
+export const SHELL_VERSION = "app.shell.v4";
 
 const IDS = Object.freeze({
   shell: "app-shell",
@@ -38,6 +38,7 @@ const IDS = Object.freeze({
 
 const READY_CLASSES = Object.freeze(["app-ready"]);
 const LOADING_CLASSES = Object.freeze(["app-loading", "app-booting"]);
+const ROUTER_VIEW_HOST_ATTR = "data-router-view-host";
 
 /* =========================================================
    BASICS
@@ -47,21 +48,60 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return output || fallback;
+}
+
 function byId(id = "") {
   if (!isBrowser() || !id) return null;
-  return document.getElementById(id);
+
+  try {
+    return document.getElementById(id);
+  } catch {
+    return null;
+  }
 }
 
 function roots() {
   if (!isBrowser()) return [];
-  return [document.documentElement, document.body].filter(Boolean);
+
+  return [
+    document.documentElement,
+    document.body,
+  ].filter(Boolean);
+}
+
+function isRouteHost(element = null) {
+  try {
+    return element?.getAttribute?.(ROUTER_VIEW_HOST_ATTR) === "true";
+  } catch {
+    return false;
+  }
 }
 
 function setDataset(element = null, key = "", value = "") {
   if (!element || !key) return false;
 
-  element.dataset[key] = String(value);
-  return true;
+  try {
+    if (value === null || value === undefined || value === "") {
+      delete element.dataset[key];
+    } else {
+      element.dataset[key] = String(value);
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function setHidden(element = null, hidden = false) {
@@ -69,31 +109,57 @@ function setHidden(element = null, hidden = false) {
 
   const value = Boolean(hidden);
 
-  element.hidden = value;
-  element.setAttribute("aria-hidden", value ? "true" : "false");
-
-  return true;
+  try {
+    element.hidden = value;
+    element.setAttribute("aria-hidden", value ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function setBusy(element = null, busy = false) {
   if (!element) return false;
 
-  element.setAttribute("aria-busy", busy ? "true" : "false");
-  return true;
+  try {
+    element.setAttribute("aria-busy", busy ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function addClasses(element = null, classes = []) {
   if (!element || !classes.length) return false;
 
-  element.classList.add(...classes);
-  return true;
+  try {
+    element.classList.add(...classes.filter(Boolean));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function removeClasses(element = null, classes = []) {
   if (!element || !classes.length) return false;
 
-  element.classList.remove(...classes);
-  return true;
+  try {
+    element.classList.remove(...classes.filter(Boolean));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function toggleClass(element = null, className = "", active = false) {
+  if (!element || !className) return false;
+
+  try {
+    element.classList.toggle(className, Boolean(active));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function setRootClassState(root = null, busy = false) {
@@ -111,20 +177,33 @@ function setRootClassState(root = null, busy = false) {
 }
 
 function hasContent(element = null) {
-  return Boolean(
-    element &&
-      (
-        element.childElementCount > 0 ||
-        String(element.textContent || "").trim()
-      )
-  );
+  try {
+    return Boolean(
+      element &&
+        (
+          element.childElementCount > 0 ||
+          cleanText(element.textContent, "")
+        )
+    );
+  } catch {
+    return false;
+  }
 }
 
 function clearNode(element = null) {
   if (!element) return false;
 
-  element.replaceChildren();
-  return true;
+  try {
+    element.replaceChildren();
+    return true;
+  } catch {
+    try {
+      element.textContent = "";
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 /* =========================================================
@@ -166,7 +245,7 @@ export function getShellElements() {
   const tablehead = byId(IDS.tablehead);
   const tableheadContainer = byId(IDS.tableheadContainer);
   const appContent = byId(IDS.appContent);
-  const viewContainer = byId(IDS.viewContainer);
+  const viewContainer = byId(IDS.viewContainer) || appContent || main || null;
 
   return {
     html: document.documentElement,
@@ -197,7 +276,14 @@ export function getShellElements() {
 }
 
 export function getViewContainer() {
-  return byId(IDS.viewContainer);
+  if (!isBrowser()) return null;
+
+  return (
+    byId(IDS.viewContainer) ||
+    byId(IDS.appContent) ||
+    byId(IDS.main) ||
+    null
+  );
 }
 
 function shellNodes(elements = getShellElements()) {
@@ -226,8 +312,9 @@ function syncShellDataset({
   chrome = null,
   busy = false,
 } = {}) {
-  const shellState = String(state || "ready");
+  const shellState = cleanText(state, "ready");
   const shellInteractive = busy ? "false" : "true";
+  const chromeState = cleanText(chrome, "");
 
   for (const element of shellNodes(elements)) {
     setHidden(element, false);
@@ -236,8 +323,8 @@ function syncShellDataset({
     setDataset(element, "shellState", shellState);
     setDataset(element, "shellInteractive", shellInteractive);
 
-    if (chrome) {
-      setDataset(element, "chrome", chrome);
+    if (chromeState) {
+      setDataset(element, "chrome", chromeState);
     }
   }
 
@@ -246,12 +333,12 @@ function syncShellDataset({
     setDataset(root, "shellState", shellState);
     setDataset(root, "shellInteractive", shellInteractive);
 
-    if (chrome) {
-      setDataset(root, "chrome", chrome);
+    if (chromeState) {
+      setDataset(root, "chrome", chromeState);
     }
 
-    root.classList.toggle("shell-visible", true);
-    root.classList.toggle("shell-hidden", false);
+    toggleClass(root, "shell-visible", true);
+    toggleClass(root, "shell-hidden", false);
   }
 
   return true;
@@ -285,6 +372,8 @@ export function readShellVisibility() {
 }
 
 export function setShellVisibility(_AppCore = null, visible = true) {
+  void _AppCore;
+
   const chromeVisible = Boolean(visible);
   const chromeState = chromeVisible ? "visible" : "hidden";
   const elements = getShellElements();
@@ -298,6 +387,7 @@ export function setShellVisibility(_AppCore = null, visible = true) {
 
   for (const element of chromeMounts(elements)) {
     setHidden(element, !chromeVisible);
+    setBusy(element, false);
     setDataset(element, "chrome", chromeState);
   }
 
@@ -306,15 +396,19 @@ export function setShellVisibility(_AppCore = null, visible = true) {
     hasContent(elements.tableheadContainer);
 
   setHidden(elements.tablehead, !showTablehead);
+  setBusy(elements.tablehead, false);
   setDataset(
     elements.tablehead,
     "tableheadState",
     showTablehead ? "visible" : "empty"
   );
 
+  setHidden(elements.tableheadContainer, !showTablehead);
+  setBusy(elements.tableheadContainer, false);
+
   for (const root of roots()) {
-    root.classList.toggle("route-app", chromeVisible);
-    root.classList.toggle("route-auth", !chromeVisible);
+    toggleClass(root, "route-app", chromeVisible);
+    toggleClass(root, "route-auth", !chromeVisible);
   }
 
   return chromeVisible;
@@ -363,10 +457,13 @@ export function clearDynamicContainers() {
 
   if (elements.tableheadContainer) {
     changed = clearNode(elements.tableheadContainer) || changed;
+    setHidden(elements.tableheadContainer, true);
+    setBusy(elements.tableheadContainer, false);
   }
 
   if (elements.tablehead) {
     setHidden(elements.tablehead, true);
+    setBusy(elements.tablehead, false);
     setDataset(elements.tablehead, "tableheadState", "empty");
     changed = true;
   }
@@ -377,6 +474,26 @@ export function clearDynamicContainers() {
 /* =========================================================
    SNAPSHOT
 ========================================================= */
+
+function elementSnapshot(element = null) {
+  if (!element) {
+    return {
+      exists: false,
+    };
+  }
+
+  return {
+    exists: true,
+    id: element.id || "",
+    tag: element.tagName?.toLowerCase?.() || "",
+    hidden: Boolean(element.hidden),
+    ariaHidden: element.getAttribute?.("aria-hidden") || "",
+    ariaBusy: element.getAttribute?.("aria-busy") || "",
+    shellState: element.dataset?.shellState || "",
+    chrome: element.dataset?.chrome || "",
+    isRouteHost: isRouteHost(element),
+  };
+}
 
 export function getShellSnapshot() {
   const elements = getShellElements();
@@ -394,15 +511,32 @@ export function getShellSnapshot() {
 
     shellState: elements.shell?.dataset?.shellState || "",
 
+    roots: {
+      html: {
+        appLoading: elements.html?.dataset?.appLoading || "",
+        appBooting: elements.html?.dataset?.appBooting || "",
+        appReady: elements.html?.dataset?.appReady || "",
+        shellState: elements.html?.dataset?.shellState || "",
+        chrome: elements.html?.dataset?.chrome || "",
+      },
+      body: {
+        appLoading: elements.body?.dataset?.appLoading || "",
+        appBooting: elements.body?.dataset?.appBooting || "",
+        appReady: elements.body?.dataset?.appReady || "",
+        shellState: elements.body?.dataset?.shellState || "",
+        chrome: elements.body?.dataset?.chrome || "",
+      },
+    },
+
     dom: {
-      shell: Boolean(elements.shell),
-      main: Boolean(elements.main),
-      appContent: Boolean(elements.appContent),
-      viewContainer: Boolean(elements.viewContainer),
-      sidebarMount: Boolean(elements.sidebarMount),
-      topbarMount: Boolean(elements.topbarMount),
-      tablehead: Boolean(elements.tablehead),
-      tableheadContainer: Boolean(elements.tableheadContainer),
+      shell: elementSnapshot(elements.shell),
+      main: elementSnapshot(elements.main),
+      appContent: elementSnapshot(elements.appContent),
+      viewContainer: elementSnapshot(elements.viewContainer),
+      sidebarMount: elementSnapshot(elements.sidebarMount),
+      topbarMount: elementSnapshot(elements.topbarMount),
+      tablehead: elementSnapshot(elements.tablehead),
+      tableheadContainer: elementSnapshot(elements.tableheadContainer),
     },
 
     policy: {
@@ -420,6 +554,9 @@ export function getShellSnapshot() {
       noStorage: true,
       noRouteParsing: true,
       noHomeRoute: true,
+
+      doesNotOwnFinalRouteChrome: true,
+      doesNotClobberRouterHost: true,
     },
   };
 }

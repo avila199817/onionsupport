@@ -45,7 +45,7 @@ import {
 
 import Http, { installHttp } from "./http.js";
 
-export const CORE_VERSION = "core.index.v6";
+export const CORE_VERSION = "core.index.v7";
 
 const APP_NAME =
   config?.appName ||
@@ -80,38 +80,50 @@ const BLOCKED_ROUTES = Object.freeze(
     : ["/home", "/403", "/404", "/2fa", "/mfa", "/otp"]
 );
 
+const TOKEN_STATE_KEYS = new Set([
+  "token",
+  "accesstoken",
+  "access_token",
+]);
+
 const SENSITIVE_STATE_KEYS = new Set([
   "password",
-  "passwordHash",
+  "passwordhash",
   "password_hash",
   "hash",
   "salt",
-  "passwordMeta",
+  "passwordmeta",
 
-  "refreshToken",
+  "refreshtoken",
   "refresh_token",
-  "refreshTokenHash",
+  "refreshtokenhash",
   "refresh_token_hash",
 
-  "resetToken",
+  "idtoken",
+  "id_token",
+
+  "resettoken",
   "reset_token",
-  "activationToken",
+  "activationtoken",
   "activation_token",
+
+  "authorization",
+  "authheader",
 
   "secret",
   "secrets",
   "code",
   "codes",
-  "backupCodes",
+  "backupcodes",
   "backup_codes",
 
   "otp",
-  "otpCode",
+  "otpcode",
   "totp",
   "mfa",
   "twofa_secret",
-  "twofaSecret",
-  "totpSecret",
+  "twofasecret",
+  "totpsecret",
 
   "auth",
 
@@ -122,6 +134,38 @@ const SENSITIVE_STATE_KEYS = new Set([
   "_ts",
   "_lsn",
   "_metadata",
+]);
+
+const SENSITIVE_OBJECT_KEYS = new Set([
+  ...SENSITIVE_STATE_KEYS,
+  "token",
+  "accesstoken",
+  "access_token",
+  "jwt",
+  "apikey",
+  "api_key",
+  "sas",
+  "connectionstring",
+  "connection_string",
+]);
+
+const SENSITIVE_QUERY_KEYS = new Set([
+  "token",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "secret",
+  "session",
+  "code",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
+  "jwt",
+  "authorization",
+  "reset_token",
+  "activation_token",
 ]);
 
 const DROPPED_STATE_KEYS = Object.freeze([...SENSITIVE_STATE_KEYS]);
@@ -151,6 +195,10 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
+function normalizeKey(value = "") {
+  return cleanText(value, "").toLowerCase();
+}
+
 function clone(value) {
   if (value === undefined) return undefined;
 
@@ -170,9 +218,9 @@ function clone(value) {
 }
 
 function redact(value = "") {
-  return String(value || "")
+  return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -186,6 +234,14 @@ function first(...values) {
   }
 
   return null;
+}
+
+function safeCall(fn = null, context = null, ...args) {
+  try {
+    return isFunction(fn) ? fn.apply(context, args) : null;
+  } catch {
+    return null;
+  }
 }
 
 /* =========================================================
@@ -202,7 +258,7 @@ function normalizeRole(value = "") {
     return "";
   }
 
-  const role = String(value || "").trim().toLowerCase();
+  const role = cleanText(value, "").toLowerCase();
 
   return VALID_ROLES.includes(role) ? role : "";
 }
@@ -258,7 +314,10 @@ function normalizePathname(pathname = ROOT_PATH) {
   try {
     return configNormalizeRoutePath(pathname) || ROOT_PATH;
   } catch {
-    let value = cleanText(pathname, ROOT_PATH).replace(/\\/g, "/");
+    let value = cleanText(pathname, ROOT_PATH)
+      .split("#")[0]
+      .split("?")[0]
+      .replace(/\\/g, "/");
 
     if (!value.startsWith("/")) {
       value = `/${value}`;
@@ -321,6 +380,59 @@ function splitPath(path = ROOT_PATH) {
   };
 }
 
+function keyIsSensitiveQueryParam(key = "") {
+  return SENSITIVE_QUERY_KEYS.has(cleanText(key, "").toLowerCase());
+}
+
+function sanitizeSearch(search = "") {
+  const normalized = normalizeSearch(search);
+
+  if (!normalized) return "";
+
+  try {
+    const params = new URLSearchParams(normalized);
+
+    for (const key of [...params.keys()]) {
+      if (keyIsSensitiveQueryParam(key)) {
+        params.delete(key);
+      }
+    }
+
+    const output = params.toString();
+
+    return output ? `?${output}` : "";
+  } catch {
+    return "";
+  }
+}
+
+function sanitizeHash(hash = "") {
+  const normalized = normalizeHash(hash);
+
+  if (!normalized) return "";
+
+  const body = normalized.slice(1);
+
+  if (!body || /[\r\n\t\\]/.test(body)) return "";
+
+  const queryIndex = body.indexOf("?");
+
+  if (queryIndex >= 0) {
+    const hashPath = body.slice(0, queryIndex);
+    const query = body.slice(queryIndex + 1);
+    const cleanQuery = sanitizeSearch(`?${query}`);
+
+    return cleanQuery ? `#${hashPath}${cleanQuery}` : `#${hashPath}`;
+  }
+
+  if (/^[^/?#=&]+=/i.test(body)) {
+    const cleanQuery = sanitizeSearch(`?${body}`);
+    return cleanQuery ? `#${cleanQuery.slice(1)}` : "";
+  }
+
+  return redact(normalized);
+}
+
 function joinPath(parts = {}) {
   return [
     normalizePathname(parts.pathname || ROOT_PATH),
@@ -332,10 +444,14 @@ function joinPath(parts = {}) {
 function normalizePublicPath(path = ROOT_PATH) {
   const parts = splitPath(path);
 
+  if (isBlockedRoutePath(parts.pathname)) {
+    return ROOT_PATH;
+  }
+
   return joinPath({
     pathname: parts.pathname,
-    search: parts.search,
-    hash: parts.hash,
+    search: sanitizeSearch(parts.search),
+    hash: sanitizeHash(parts.hash),
   });
 }
 
@@ -343,16 +459,17 @@ function stripQueryHash(path = ROOT_PATH) {
   return splitPath(path).pathname || ROOT_PATH;
 }
 
-function isBlockedRoutePath(path = ROOT_PATH) {
-  try {
-    if (configIsBlockedRoutePath(path) === true) return true;
-  } catch {
-    // fallback local
+function locallyBlockedRoutePath(path = ROOT_PATH) {
+  const clean = normalizePathname(stripQueryHash(path)).toLowerCase();
+
+  if (
+    BLOCKED_ROUTES.some((blocked) => {
+      const target = normalizePathname(blocked).toLowerCase();
+      return clean === target || clean.startsWith(`${target}/`);
+    })
+  ) {
+    return true;
   }
-
-  const clean = stripQueryHash(path).toLowerCase();
-
-  if (BLOCKED_ROUTES.includes(clean)) return true;
 
   return (
     clean.startsWith("/2fa/") ||
@@ -366,15 +483,21 @@ function getUserScopedPathInfo(path = ROOT_PATH) {
     const info = configGetUserScopedRouteInfo(path);
 
     if (isObject(info)) {
-      const restPath = info.restPath || info.canonicalPath || stripQueryHash(path);
-      const canonicalPath = info.canonicalPath || info.lookupPath || restPath;
+      const restPath = normalizePathname(
+        info.restPath || info.canonicalPath || stripQueryHash(path)
+      );
+
+      const canonicalPath = normalizePathname(
+        info.canonicalPath || info.lookupPath || restPath
+      );
 
       return {
         scoped: Boolean(info.scoped),
         home: Boolean(info.home),
-        slug: cleanText(info.slug, ""),
+        slug: normalizeSlug(info.slug || ""),
         restPath,
         canonicalPath,
+        lookupPath: canonicalPath,
       };
     }
   } catch {
@@ -383,13 +506,62 @@ function getUserScopedPathInfo(path = ROOT_PATH) {
 
   const value = stripQueryHash(path);
 
+  if (!value.startsWith(USER_HOME_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: value,
+      canonicalPath: value,
+      lookupPath: value,
+    };
+  }
+
+  const rest = value.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeSlug(slugSegment);
+
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: value,
+      canonicalPath: value,
+      lookupPath: value,
+    };
+  }
+
+  const restPath = restSegments.length
+    ? normalizePathname(`/${restSegments.join("/")}`)
+    : ROOT_PATH;
+
   return {
-    scoped: false,
-    home: false,
-    slug: "",
-    restPath: value,
-    canonicalPath: value,
+    scoped: true,
+    home: restPath === ROOT_PATH,
+    slug,
+    restPath,
+    canonicalPath: restPath,
+    lookupPath: restPath,
   };
+}
+
+function isBlockedRoutePath(path = ROOT_PATH) {
+  try {
+    if (configIsBlockedRoutePath(path) === true) return true;
+  } catch {
+    // fallback local
+  }
+
+  if (locallyBlockedRoutePath(path)) return true;
+
+  const scoped = getUserScopedPathInfo(path);
+
+  if (scoped.scoped && locallyBlockedRoutePath(scoped.restPath)) {
+    return true;
+  }
+
+  return false;
 }
 
 function extractUserHomeSlug(path = ROOT_PATH) {
@@ -413,21 +585,47 @@ function normalizeCanonicalPath(path = ROOT_PATH) {
   if (isBlockedRoutePath(path)) return ROOT_PATH;
 
   try {
-    return configCanonicalRoutePath(path) || ROOT_PATH;
+    const canonical = configCanonicalRoutePath(path) || ROOT_PATH;
+    return isBlockedRoutePath(canonical) ? ROOT_PATH : normalizePathname(canonical);
   } catch {
     const info = getUserScopedPathInfo(path);
-    return info.scoped ? info.canonicalPath : stripQueryHash(path);
+    const canonical = info.scoped ? info.canonicalPath : stripQueryHash(path);
+
+    return isBlockedRoutePath(canonical)
+      ? ROOT_PATH
+      : normalizePathname(canonical || ROOT_PATH);
   }
 }
 
+function rawPathHasSensitiveQuery(path = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
+    String(path || "")
+  );
+}
+
 function safeInternalPath(path = ROOT_PATH) {
-  const target = normalizePublicPath(path);
+  const raw = cleanText(path, ROOT_PATH);
+
+  if (!raw) return ROOT_PATH;
+  if (raw.startsWith("//")) return ROOT_PATH;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^https?:\/\//i.test(raw)) return ROOT_PATH;
+  if (/[\r\n\t\\]/.test(raw)) return ROOT_PATH;
+
+  const target = normalizePublicPath(raw);
 
   if (!target.startsWith("/")) return ROOT_PATH;
   if (target.startsWith("//")) return ROOT_PATH;
   if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return ROOT_PATH;
   if (/[\r\n\t\\]/.test(target)) return ROOT_PATH;
   if (isBlockedRoutePath(target)) return ROOT_PATH;
+
+  /*
+    Core no debe conservar tokens/secrets en rutas de estado.
+    normalizePublicPath() ya limpia la query/hash; esto sólo documenta la frontera.
+  */
+  if (rawPathHasSensitiveQuery(raw)) {
+    return target;
+  }
 
   return target;
 }
@@ -478,8 +676,24 @@ function buildUserHomePath(user = null) {
   }
 }
 
+function isSensitiveObjectKey(key = "") {
+  return SENSITIVE_OBJECT_KEYS.has(normalizeKey(key));
+}
+
+function isDroppedStateKey(key = "") {
+  return SENSITIVE_STATE_KEYS.has(normalizeKey(key));
+}
+
+function isTokenStateKey(key = "") {
+  return TOKEN_STATE_KEYS.has(normalizeKey(key));
+}
+
 function sanitizeObject(value, depth = 0) {
   if (depth > 8) return null;
+
+  if (typeof value === "string") {
+    return redact(value);
+  }
 
   if (Array.isArray(value)) {
     return value
@@ -493,7 +707,7 @@ function sanitizeObject(value, depth = 0) {
   const output = {};
 
   for (const [key, child] of Object.entries(value)) {
-    if (SENSITIVE_STATE_KEYS.has(key)) continue;
+    if (isSensitiveObjectKey(key)) continue;
 
     const sanitized = sanitizeObject(child, depth + 1);
 
@@ -1147,11 +1361,15 @@ let httpClient = null;
 ========================================================= */
 
 function dropForbiddenStateFields(target = state) {
-  for (const key of DROPPED_STATE_KEYS) {
-    try {
-      delete target[key];
-    } catch {
-      // noop
+  if (!isObject(target)) return target;
+
+  for (const key of Object.keys(target)) {
+    if (isDroppedStateKey(key)) {
+      try {
+        delete target[key];
+      } catch {
+        // noop
+      }
     }
   }
 
@@ -1164,16 +1382,12 @@ function sanitizeStatePatch(patch = {}) {
   const output = {};
 
   for (const [key, value] of Object.entries(patch)) {
-    if (SENSITIVE_STATE_KEYS.has(key)) {
+    if (isTokenStateKey(key)) {
+      output[key] = cleanToken(value);
       continue;
     }
 
-    if (
-      key === "token" ||
-      key === "accessToken" ||
-      key === "access_token"
-    ) {
-      output[key] = cleanToken(value);
+    if (isDroppedStateKey(key)) {
       continue;
     }
 
@@ -1239,6 +1453,11 @@ function sanitizeStatePatch(patch = {}) {
 
     if (key === "route" || key === "canonicalPath") {
       output[key] = normalizeCanonicalPath(value);
+      continue;
+    }
+
+    if (typeof value === "string") {
+      output[key] = redact(value);
       continue;
     }
 
@@ -1677,7 +1896,7 @@ function normalizeError(error = null) {
   return {
     name: cleanText(error?.name, "Error"),
     message: redact(error?.message || String(error)),
-    code: error?.code || error?.status || error?.statusCode || null,
+    code: error?.code || error?.status || error?.statusCode || error?.response?.status || null,
   };
 }
 
@@ -1695,6 +1914,61 @@ function setError(error = null) {
    TOAST BRIDGE
 ========================================================= */
 
+function normalizeToastType(type = "info") {
+  const value = cleanText(type, "info").toLowerCase();
+
+  if (value === "warn") return "warning";
+  if (value === "danger") return "error";
+
+  if (value === "success") return "success";
+  if (value === "error") return "error";
+  if (value === "warning") return "warning";
+  if (value === "info") return "info";
+
+  return "info";
+}
+
+function getRegisteredToast() {
+  return (
+    toastBridge ||
+    modules.get("toast") ||
+    modules.get("Toast") ||
+    services.toast ||
+    null
+  );
+}
+
+function callToastModule(toast = null, message = "", type = "info", options = {}) {
+  if (!toast) return null;
+
+  const toastType = normalizeToastType(type);
+  const textValue = redact(message);
+
+  if (!textValue) return null;
+
+  if (isFunction(toast?.[toastType])) {
+    return safeCall(toast[toastType], toast, textValue, options);
+  }
+
+  if (toastType === "warning" && isFunction(toast?.warn)) {
+    return safeCall(toast.warn, toast, textValue, options);
+  }
+
+  if (isFunction(toast?.show)) {
+    return safeCall(toast.show, toast, {
+      ...(isObject(options) ? options : {}),
+      type: toastType,
+      message: textValue,
+    });
+  }
+
+  if (isFunction(toast)) {
+    return safeCall(toast, null, textValue, toastType, options);
+  }
+
+  return null;
+}
+
 function setShowToast(fn = null) {
   if (!isFunction(fn)) return false;
 
@@ -1703,13 +1977,23 @@ function setShowToast(fn = null) {
 }
 
 function showToast(message = "", type = "info", options = {}) {
-  if (!isFunction(toastBridge)) return null;
+  const toast = getRegisteredToast();
 
-  try {
-    return toastBridge(message, type, options);
-  } catch {
-    return null;
-  }
+  return callToastModule(
+    toast,
+    isObject(message)
+      ? first(message.message, message.text, message.title, "")
+      : message,
+    isObject(message)
+      ? first(message.type, message.variant, type, "info")
+      : type,
+    isObject(message)
+      ? {
+          ...message,
+          ...(isObject(options) ? options : {}),
+        }
+      : options
+  );
 }
 
 /* =========================================================
@@ -1733,12 +2017,19 @@ function installHttpBridge(options = {}) {
     return httpClient;
   }
 
-  httpClient = isFunction(installHttp)
-    ? installHttp(AppCore, options)
-    : Http;
+  try {
+    httpClient = isFunction(installHttp)
+      ? installHttp(AppCore, options)
+      : Http;
+  } catch {
+    httpClient = Http;
+  }
+
+  if (!httpClient) {
+    httpClient = Http;
+  }
 
   services.http = httpClient;
-
   modules.register("http", httpClient);
 
   return httpClient;
@@ -1788,14 +2079,28 @@ function ready(fn = null) {
   if (!isFunction(fn)) return () => false;
 
   if (!isBrowser() || document.readyState !== "loading") {
-    fn();
+    try {
+      fn();
+    } catch {
+      // noop
+    }
+
     return () => true;
   }
 
-  document.addEventListener("DOMContentLoaded", fn, { once: true });
+  try {
+    document.addEventListener("DOMContentLoaded", fn, { once: true });
+  } catch {
+    return () => false;
+  }
 
   return () => {
-    document.removeEventListener("DOMContentLoaded", fn);
+    try {
+      document.removeEventListener("DOMContentLoaded", fn);
+    } catch {
+      // noop
+    }
+
     return true;
   };
 }
@@ -2085,6 +2390,7 @@ Object.defineProperties(AppCore, {
     },
     set(value) {
       modules.register("toast", value);
+      services.toast = value;
     },
   },
 
@@ -2094,6 +2400,7 @@ Object.defineProperties(AppCore, {
     },
     set(value) {
       modules.register("toast", value);
+      services.toast = value;
     },
   },
 });

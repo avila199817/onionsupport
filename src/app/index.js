@@ -7,6 +7,7 @@
    - Iniciar Core.
    - Iniciar I18n.
    - Iniciar Toast.
+   - Registrar bridge UI mínimo de Toast.
    - Iniciar Auth.
    - Restaurar sesión ANTES del primer render Router.
    - Delegar restore compat en /src/app/session.js.
@@ -56,7 +57,12 @@ import {
   renderInitialRoute as renderRouterInitialRoute,
 } from "./router.js";
 
-export const APP_INDEX_VERSION = "app.index.v8";
+import {
+  initUISystems,
+  getUISystemsSnapshot,
+} from "./ui.js";
+
+export const APP_INDEX_VERSION = "app.index.v9";
 
 let bootPromise = null;
 let ready = false;
@@ -212,13 +218,28 @@ function setReady() {
    CORE REGISTRY
 ========================================================= */
 
+function setCoreModuleProperty(name = "", module = null) {
+  if (!name || !module) return false;
+
+  try {
+    AppCore[name] = module;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function registerCoreModule(name = "", module = null) {
   if (!name || !module || !isFunction(AppCore?.modules?.register)) {
     return false;
   }
 
-  AppCore.modules.register(name, module);
-  return true;
+  try {
+    AppCore.modules.register(name, module);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function exposeCoreModules() {
@@ -230,8 +251,8 @@ function exposeCoreModules() {
   ];
 
   for (const [lowerName, upperName, module] of modules) {
-    AppCore[lowerName] = module;
-    AppCore[upperName] = module;
+    setCoreModuleProperty(lowerName, module);
+    setCoreModuleProperty(upperName, module);
 
     registerCoreModule(lowerName, module);
     registerCoreModule(upperName, module);
@@ -241,7 +262,7 @@ function exposeCoreModules() {
 }
 
 /* =========================================================
-   CORE / I18N / TOAST
+   CORE / I18N / TOAST / UI COMPAT
 ========================================================= */
 
 async function initCore(payload = {}) {
@@ -253,7 +274,11 @@ async function initCore(payload = {}) {
 
 async function initI18n(payload = {}) {
   if (isFunction(I18n?.bindCore)) {
-    I18n.bindCore(AppCore);
+    try {
+      I18n.bindCore(AppCore);
+    } catch {
+      // noop
+    }
   }
 
   await callRequired(I18n, "init", "I18n", withCore(payload, {
@@ -266,6 +291,20 @@ async function initI18n(payload = {}) {
 
 async function initToast(payload = {}) {
   await callRequired(Toast, "init", "Toast", withCore(payload));
+
+  /*
+    Bridge mínimo: expone AppCore.showToast si no existe.
+    No crea sistema UI paralelo y no pisa implementaciones existentes.
+  */
+  try {
+    initUISystems({
+      ...withCore(payload),
+      Toast,
+    });
+  } catch {
+    // compat pasiva, no debe romper boot
+  }
+
   return Toast;
 }
 
@@ -274,8 +313,12 @@ function refreshI18nDom() {
     return false;
   }
 
-  I18n.updateDOM();
-  return true;
+  try {
+    I18n.updateDOM();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -465,6 +508,11 @@ export function getAppSnapshot() {
       topbar: Boolean(TopbarUI),
     },
 
+    ui: getUISystemsSnapshot({
+      AppCore,
+      Toast,
+    }),
+
     state: {
       authenticated: AppCore?.state?.authenticated === true,
       hasToken: AppCore?.state?.hasToken === true,
@@ -491,6 +539,8 @@ export function getAppSnapshot() {
 
       chromeRegisteredBeforeInitialRoute: true,
       chromeSyncedAfterInitialRoute: true,
+
+      toastBridgeRegisteredAfterToastInit: true,
 
       noStore: true,
       noParallelServices: true,

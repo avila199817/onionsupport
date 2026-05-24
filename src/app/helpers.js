@@ -20,6 +20,8 @@ import {
   ROUTES,
   TOKEN_PARAM,
   PROTECTED_PUBLIC_TOKEN_ROUTES,
+  BLOCKED_FRONTEND_ROUTES,
+  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
   canonicalRoutePath as configCanonicalRoutePath,
   getUserScopedRouteInfo as getConfigUserScopedRouteInfo,
   isBlockedRoutePath as configIsBlockedRoutePath,
@@ -29,13 +31,62 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const HELPERS_VERSION = "app.helpers.v3";
+export const HELPERS_VERSION = "app.helpers.v4";
 
-const DEFAULT_ROUTE = ROUTES?.home || ROUTES?.root || "/";
-const TOKEN_PARAM_NAME = TOKEN_PARAM || "token";
+const CORE_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
 
-const ACTIVATION_ROUTE = ROUTES?.activateAccount || "/activate-account";
-const PASSWORD_RESET_ROUTE = ROUTES?.passwordReset || "/password-reset";
+const DEFAULT_ROUTE = "/";
+const USER_HOME_PREFIX = cleanText(CONFIG_USER_HOME_PREFIX, "/@");
+const TOKEN_PARAM_NAME = cleanText(TOKEN_PARAM, "token");
+
+const BLOCKED_ROUTE_PATHS = new Set(
+  (
+    Array.isArray(BLOCKED_FRONTEND_ROUTES) && BLOCKED_FRONTEND_ROUTES.length
+      ? BLOCKED_FRONTEND_ROUTES
+      : [
+          "/home",
+          "/403",
+          "/404",
+          "/2fa",
+          "/mfa",
+          "/otp",
+        ]
+  )
+    .map(normalizePathForSet)
+    .filter(Boolean)
+);
+
+const ACTIVATION_ROUTE = safeConfigRoute(
+  CORE_ROUTES.activateAccount || "/activate-account",
+  "/activate-account"
+);
+
+const PASSWORD_RESET_ROUTE = safeConfigRoute(
+  CORE_ROUTES.passwordReset || "/password-reset",
+  "/password-reset"
+);
+
+const SENSITIVE_PARAM_NAMES = Object.freeze(
+  unique([
+    TOKEN_PARAM_NAME,
+    "token",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "secret",
+    "session",
+    "code",
+    "password",
+    "pwd",
+    "key",
+    "sig",
+    "signature",
+    "jwt",
+    "authorization",
+    "reset_token",
+    "activation_token",
+  ]).map((name) => name.toLowerCase())
+);
 
 /* =========================================================
    BASICS
@@ -58,6 +109,21 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
+function unique(values = []) {
+  return [
+    ...new Set(
+      (Array.isArray(values) ? values : [values])
+        .flat(Infinity)
+        .map((item) => cleanText(item, ""))
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function escapeRegExp(value = "") {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function browserPath() {
   if (!isBrowser()) return DEFAULT_ROUTE;
 
@@ -69,15 +135,66 @@ function browserPath() {
   }
 }
 
+function normalizePathForSet(path = DEFAULT_ROUTE) {
+  let value = cleanText(path, DEFAULT_ROUTE)
+    .split("#")[0]
+    .split("?")[0]
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+  }
+
+  return value || DEFAULT_ROUTE;
+}
+
 /* =========================================================
    PATH PARSING
 ========================================================= */
+
+function fallbackPathFromInput(value = DEFAULT_ROUTE) {
+  const raw = cleanText(value, DEFAULT_ROUTE);
+
+  if (!raw || raw.startsWith("//")) return DEFAULT_ROUTE;
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
+  }
+
+  if (raw.startsWith("#/")) {
+    return raw.slice(1) || DEFAULT_ROUTE;
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const base = isBrowser() ? window.location.origin : "http://localhost";
+      const url = new URL(raw, base);
+
+      if (url.origin !== base) return DEFAULT_ROUTE;
+
+      return `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
+    } catch {
+      return DEFAULT_ROUTE;
+    }
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return DEFAULT_ROUTE;
+  }
+
+  return raw;
+}
 
 function pathFromInput(value = DEFAULT_ROUTE) {
   try {
     return configRoutePathFromUrlLike(value) || DEFAULT_ROUTE;
   } catch {
-    return DEFAULT_ROUTE;
+    return fallbackPathFromInput(value);
   }
 }
 
@@ -86,6 +203,8 @@ function normalizePathname(value = DEFAULT_ROUTE) {
     return configNormalizeRoutePath(value) || DEFAULT_ROUTE;
   } catch {
     let path = cleanText(value, DEFAULT_ROUTE)
+      .split("#")[0]
+      .split("?")[0]
       .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/");
 
@@ -141,11 +260,14 @@ function splitPath(value = DEFAULT_ROUTE) {
     pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
   }
 
+  const normalizedSearch = normalizeSearch(search);
+  const normalizedHash = normalizeHash(hash);
+
   return {
     pathname: normalizePathname(pathname),
-    search: normalizeSearch(search),
-    hash: normalizeHash(hash),
-    suffix: `${normalizeSearch(search)}${normalizeHash(hash)}`,
+    search: normalizedSearch,
+    hash: normalizedHash,
+    suffix: `${normalizedSearch}${normalizedHash}`,
   };
 }
 
@@ -159,10 +281,112 @@ function joinPath(parts = {}) {
 
 function isBlockedPath(path = DEFAULT_ROUTE) {
   try {
-    return configIsBlockedRoutePath(path) === true;
+    if (configIsBlockedRoutePath(path) === true) return true;
   } catch {
-    return false;
+    // fallback local
   }
+
+  const clean = normalizePathname(path).toLowerCase();
+
+  if (BLOCKED_ROUTE_PATHS.has(clean)) return true;
+
+  return (
+    clean.startsWith("/2fa/") ||
+    clean.startsWith("/mfa/") ||
+    clean.startsWith("/otp/")
+  );
+}
+
+function safeConfigRoute(path = "", fallback = DEFAULT_ROUTE) {
+  const clean = normalizePathname(path || fallback || DEFAULT_ROUTE);
+
+  return isBlockedPath(clean)
+    ? normalizePathname(fallback || DEFAULT_ROUTE)
+    : clean;
+}
+
+/* =========================================================
+   USER SCOPE
+========================================================= */
+
+function normalizeUserSlug(value = "") {
+  const slug = cleanText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
+  try {
+    const info = getConfigUserScopedRouteInfo(path);
+
+    if (isObject(info)) {
+      const restPath = normalizePathname(
+        info.restPath || info.canonicalPath || splitPath(path).pathname
+      );
+
+      const lookupPath = normalizePathname(
+        info.canonicalPath || info.lookupPath || restPath
+      );
+
+      return {
+        scoped: Boolean(info.scoped),
+        home: Boolean(info.home),
+        slug: normalizeUserSlug(info.slug || ""),
+        restPath,
+        lookupPath,
+      };
+    }
+  } catch {
+    // fallback local
+  }
+
+  const pathname = splitPath(path).pathname;
+
+  if (!pathname.startsWith(USER_HOME_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: pathname,
+      lookupPath: pathname,
+    };
+  }
+
+  const rest = pathname.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeUserSlug(slugSegment);
+
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: pathname,
+      lookupPath: pathname,
+    };
+  }
+
+  const restPath = restSegments.length
+    ? normalizePathname(`/${restSegments.join("/")}`)
+    : DEFAULT_ROUTE;
+
+  return {
+    scoped: true,
+    home: restPath === DEFAULT_ROUTE,
+    slug,
+    restPath,
+    lookupPath: restPath,
+  };
 }
 
 /* =========================================================
@@ -191,27 +415,32 @@ export function getSearchAndHash(path = DEFAULT_ROUTE) {
 export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
   const publicPath = normalizePublicPath(path);
   const parts = splitPath(publicPath);
+  const scoped = getUserScopedRouteInfo(publicPath);
 
-  try {
-    const scoped = getConfigUserScopedRouteInfo(publicPath);
-
-    if (scoped?.scoped === true && scoped.restPath) {
-      return normalizePublicPath(`${scoped.restPath}${parts.suffix}`);
-    }
-  } catch {
-    // fallback abajo
+  if (scoped.scoped && scoped.restPath) {
+    return normalizePublicPath(`${scoped.restPath}${parts.suffix}`);
   }
 
   return publicPath;
 }
 
 export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
-  if (isBlockedPath(path)) return DEFAULT_ROUTE;
+  const publicPath = normalizePublicPath(path);
+
+  if (isBlockedPath(publicPath)) return DEFAULT_ROUTE;
 
   try {
-    return configCanonicalRoutePath(path) || DEFAULT_ROUTE;
+    const canonical = configCanonicalRoutePath(publicPath) || DEFAULT_ROUTE;
+    return isBlockedPath(canonical) ? DEFAULT_ROUTE : normalizePathname(canonical);
   } catch {
-    return stripSearchAndHash(stripUsernamePrefix(path)) || DEFAULT_ROUTE;
+    const scoped = getUserScopedRouteInfo(publicPath);
+    const canonical = scoped.scoped
+      ? scoped.lookupPath
+      : stripSearchAndHash(publicPath);
+
+    return isBlockedPath(canonical)
+      ? DEFAULT_ROUTE
+      : normalizePathname(canonical || DEFAULT_ROUTE);
   }
 }
 
@@ -247,6 +476,12 @@ export function getCurrentCanonicalPath(AppCore = null, Router = null) {
    SAFE INTERNAL PATH
 ========================================================= */
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
+    String(value || "")
+  );
+}
+
 export function isSafeInternalPath(value = "") {
   const path = cleanText(value, "");
 
@@ -256,6 +491,7 @@ export function isSafeInternalPath(value = "") {
       !path.startsWith("//") &&
       !/^[a-z][a-z0-9+.-]*:/i.test(path) &&
       !/[\r\n\t\\]/.test(path) &&
+      !hasSensitiveQuery(path) &&
       !isBlockedPath(path)
   );
 }
@@ -283,14 +519,8 @@ function normalizeProtectedRoutePath(value = "") {
   return path;
 }
 
-function getTokenParamNames(config = null) {
-  const names = Array.isArray(config?.tokenParamNames)
-    ? config.tokenParamNames
-    : [TOKEN_PARAM_NAME];
-
-  return names
-    .map((name) => cleanText(name, ""))
-    .filter(Boolean);
+function getTokenParamNames(_config = null) {
+  return [TOKEN_PARAM_NAME];
 }
 
 function getProtectedTokenRoutePaths(config = null) {
@@ -332,33 +562,76 @@ function getPublicTokenRouteConfigByPath(path = DEFAULT_ROUTE) {
   }) || null;
 }
 
-function hasTokenParam(path = "", config = null) {
-  try {
-    const search = splitPath(path).search;
-    const params = new URLSearchParams(search);
-    const names = getTokenParamNames(config);
+function readParamsFromSearch(search = "") {
+  const normalized = normalizeSearch(search);
 
-    return names.some((name) => {
-      return Boolean(cleanText(params.get(name), ""));
-    });
+  if (!normalized) return new URLSearchParams();
+
+  try {
+    return new URLSearchParams(normalized);
   } catch {
-    return false;
+    return new URLSearchParams();
   }
 }
 
+function readParamsFromHash(hash = "") {
+  const normalized = normalizeHash(hash);
+
+  if (!normalized) return new URLSearchParams();
+
+  const body = normalized.slice(1);
+  const queryIndex = body.indexOf("?");
+
+  if (queryIndex >= 0) {
+    return readParamsFromSearch(`?${body.slice(queryIndex + 1)}`);
+  }
+
+  if (/^[^/?#=&]+=/i.test(body)) {
+    return readParamsFromSearch(`?${body}`);
+  }
+
+  return new URLSearchParams();
+}
+
+function hasTokenParam(path = "", config = null) {
+  const parts = splitPath(path);
+  const names = getTokenParamNames(config);
+  const searchParams = readParamsFromSearch(parts.search);
+  const hashParams = readParamsFromHash(parts.hash);
+
+  return names.some((name) => {
+    return Boolean(
+      cleanText(searchParams.get(name), "") ||
+        cleanText(hashParams.get(name), "")
+    );
+  });
+}
+
 export function isSensitiveParamName(name = "") {
-  return String(name || "").toLowerCase() === TOKEN_PARAM_NAME.toLowerCase();
+  return SENSITIVE_PARAM_NAMES.includes(
+    cleanText(name, "").toLowerCase()
+  );
 }
 
 export function getSensitiveParamNames() {
-  return [TOKEN_PARAM_NAME];
+  return [...SENSITIVE_PARAM_NAMES];
 }
 
 export function redactTokenInText(value = "") {
-  const token = TOKEN_PARAM_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(`([?&#]${token}=)([^&#\\s]+)`, "gi");
+  let output = String(value || "");
 
-  return String(value || "").replace(pattern, "$1***");
+  for (const name of SENSITIVE_PARAM_NAMES) {
+    const token = escapeRegExp(name);
+    const pattern = new RegExp(`([?&#]${token}=)([^&#\\s]+)`, "gi");
+    output = output.replace(pattern, "$1***");
+  }
+
+  output = output.replace(
+    /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+    "$1***"
+  );
+
+  return output;
 }
 
 export function isProtectedPublicTokenPath(path = browserPath()) {
@@ -404,7 +677,7 @@ export function isUserHomePath(path = browserPath()) {
   try {
     return configIsUserHomeRoute(path) === true;
   } catch {
-    return false;
+    return Boolean(getUserScopedRouteInfo(path).home);
   }
 }
 
@@ -412,7 +685,7 @@ export function isUserScopedPath(path = browserPath()) {
   try {
     return configIsUserScopedRoute(path) === true;
   } catch {
-    return false;
+    return Boolean(getUserScopedRouteInfo(path).scoped);
   }
 }
 
@@ -428,7 +701,7 @@ export function getHelpersSnapshot(AppCore = null, Router = null) {
     version: HELPERS_VERSION,
 
     publicPath: redactTokenInText(publicPath),
-    canonicalPath: getCurrentCanonicalPath(AppCore, Router),
+    canonicalPath: redactTokenInText(getCurrentCanonicalPath(AppCore, Router)),
 
     protectedInitial: {
       key: protectedInitial.key,
@@ -437,11 +710,33 @@ export function getHelpersSnapshot(AppCore = null, Router = null) {
       redactedPath: protectedInitial.redactedPath,
     },
 
+    userScope: {
+      userHomePrefix: USER_HOME_PREFIX,
+      userHomePath: isUserHomePath(publicPath),
+      userScopedPath: isUserScopedPath(publicPath),
+      publicSlug: getUserScopedRouteInfo(publicPath).slug || null,
+    },
+
+    tokens: {
+      tokenParam: TOKEN_PARAM_NAME,
+      sensitiveParamNames: getSensitiveParamNames(),
+      protectedPublicTokenRoutes: PUBLIC_TOKEN_ROUTE_CONFIGS.map((config) => ({
+        key: config.key,
+        path: config.path,
+        paths: [...config.paths],
+        tokenParamNames: [...config.tokenParamNames],
+      })),
+    },
+
     policy: {
       helpersOnly: true,
       configOwnsRoutes: true,
       configOwnsUserScope: true,
       configOwnsBlockedRoutes: true,
+
+      internalHomeIsRoot: true,
+      visibleHomeOwnedByRouter: true,
+      visibleHomePattern: `${USER_HOME_PREFIX}{slug}`,
 
       noAuth: true,
       noRouterReal: true,
@@ -449,9 +744,11 @@ export function getHelpersSnapshot(AppCore = null, Router = null) {
       noStorage: true,
       noHistoryComplex: true,
       noInventedRoutes: true,
+      noHomeRoute: true,
 
       tokenParam: TOKEN_PARAM_NAME,
       protectedPublicTokenRoutesFromConfig: true,
+      canonicalTokenParamOnly: true,
       snapshotRedacted: true,
     },
   };

@@ -23,7 +23,7 @@
 
 import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
 
-export const LOGIN_DOM_VERSION = "login.dom.v4";
+export const LOGIN_DOM_VERSION = "login.dom.v5";
 
 const DEFAULT_SUBMIT_LABEL = "Entrar";
 const DEFAULT_LOADING_LABEL = "Accediendo...";
@@ -48,6 +48,9 @@ const SELECTORS = Object.freeze({
   fieldIdentifier: "[data-login-field='identifier'], [data-field='identifier']",
   fieldPassword: "[data-login-field='password'], [data-field='password'], [data-password-field]",
 
+  identifierError: "[data-login-error-for='identifier'], [data-error-for='identifier'], #loginIdentifierError",
+  passwordError: "[data-login-error-for='password'], [data-error-for='password'], #loginPasswordError",
+
   passwordToggle: "[data-password-toggle], [data-login-password-toggle]",
   forgotPasswordLink: "[data-login-password-request], .login-reset-link",
 });
@@ -66,6 +69,10 @@ function isFn(value) {
 
 function noop() {}
 
+function isNode(value = null) {
+  return Boolean(value && typeof value.nodeType === "number");
+}
+
 function text(value = "", fallback = "") {
   const output = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
@@ -81,9 +88,9 @@ function rawText(value = "", fallback = "") {
 }
 
 function redact(value = "") {
-  return String(value || "")
+  return text(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -91,6 +98,10 @@ function redact(value = "") {
 
 function doc() {
   return isBrowser() ? document : null;
+}
+
+function safeRoot(root = null) {
+  return isNode(root) ? root : doc();
 }
 
 function matches(node = null, selector = "") {
@@ -104,7 +115,7 @@ function matches(node = null, selector = "") {
 }
 
 function qs(root = null, selector = "") {
-  const scope = root || doc();
+  const scope = safeRoot(root);
 
   if (!scope || !selector) return null;
 
@@ -135,6 +146,22 @@ function setAttr(node = null, name = "", value = null) {
       node.removeAttribute(name);
     } else {
       node.setAttribute(name, String(value));
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setDataset(node = null, key = "", value = "") {
+  if (!node || !key) return false;
+
+  try {
+    if (value === null || value === undefined || value === false || value === "") {
+      delete node.dataset[key];
+    } else {
+      node.dataset[key] = String(value);
     }
 
     return true;
@@ -197,15 +224,23 @@ function focus(node = null, selectText = false) {
 function later(callback = null) {
   if (!isFn(callback)) return false;
 
+  const run = () => {
+    try {
+      callback();
+    } catch {
+      // noop
+    }
+  };
+
   try {
-    queueMicrotask(callback);
+    queueMicrotask(run);
     return true;
   } catch {
     // fallback abajo
   }
 
   try {
-    Promise.resolve().then(callback).catch(noop);
+    Promise.resolve().then(run).catch(noop);
     return true;
   } catch {
     return false;
@@ -271,7 +306,7 @@ function disposeBinding(binding = null) {
 ========================================================= */
 
 export function bindLoginPasswordFields(container = null, options = {}) {
-  const root = container || doc();
+  const root = safeRoot(container);
 
   if (!root) return [];
 
@@ -304,7 +339,7 @@ export function bindLoginPasswordFields(container = null, options = {}) {
 }
 
 export function destroyLoginPasswordFields(container = null) {
-  const root = container || doc();
+  const root = safeRoot(container);
 
   if (!root) return false;
 
@@ -367,8 +402,27 @@ function normalizePasswordInput(input = null) {
   return true;
 }
 
+function rememberSubmitOriginalLabel(button = null) {
+  if (!button) return false;
+
+  try {
+    if (!button.dataset.originalLabel) {
+      button.dataset.originalLabel = text(
+        button.textContent,
+        DEFAULT_SUBMIT_LABEL
+      );
+    }
+
+    button.type = "submit";
+    button.setAttribute("aria-busy", "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function getLoginRefs(container = null) {
-  const safeContainer = container || doc();
+  const safeContainer = safeRoot(container);
   const root = qs(safeContainer, SELECTORS.root) || safeContainer;
   const form = qs(root, SELECTORS.form);
   const scope = form || root || safeContainer;
@@ -390,22 +444,7 @@ export function getLoginRefs(container = null) {
     }
   }
 
-  if (submitButton) {
-    try {
-      submitButton.type = "submit";
-
-      if (!submitButton.dataset.originalLabel) {
-        submitButton.dataset.originalLabel = text(
-          submitButton.textContent,
-          DEFAULT_SUBMIT_LABEL
-        );
-      }
-
-      submitButton.setAttribute("aria-busy", "false");
-    } catch {
-      // noop
-    }
-  }
+  rememberSubmitOriginalLabel(submitButton);
 
   const refs = {
     container: safeContainer,
@@ -423,6 +462,10 @@ export function getLoginRefs(container = null) {
     fieldIdentifier: qs(scope, SELECTORS.fieldIdentifier),
     fieldEmail: qs(scope, SELECTORS.fieldIdentifier),
     fieldPassword: qs(scope, SELECTORS.fieldPassword),
+
+    identifierError: qs(scope, SELECTORS.identifierError),
+    emailError: qs(scope, SELECTORS.identifierError),
+    passwordError: qs(scope, SELECTORS.passwordError),
 
     togglePasswordButton: qs(scope, SELECTORS.passwordToggle),
     forgotPasswordLink: qs(scope, SELECTORS.forgotPasswordLink),
@@ -446,18 +489,7 @@ export function setFieldInvalid(fieldNode = null, invalid = false) {
   const active = Boolean(invalid);
 
   toggleClass(fieldNode, "is-invalid", active);
-
-  try {
-    if (fieldNode) {
-      if (active) {
-        fieldNode.dataset.invalid = "true";
-      } else {
-        delete fieldNode.dataset.invalid;
-      }
-    }
-  } catch {
-    // noop
-  }
+  setDataset(fieldNode, "invalid", active ? "true" : "");
 
   return true;
 }
@@ -507,8 +539,8 @@ function setGlobalError(errorBox = null, message = "") {
 }
 
 export function clearLoginErrors(refs = {}) {
-  setFieldInvalid(refs.fieldIdentifier || refs.fieldEmail, false);
-  setFieldInvalid(refs.fieldPassword, false);
+  clearFieldError(refs.fieldIdentifier || refs.fieldEmail, refs.identifierError || refs.emailError);
+  clearFieldError(refs.fieldPassword, refs.passwordError);
 
   setInputInvalid(refs.identifierInput || refs.emailInput, false);
   setInputInvalid(refs.passwordInput, false);
@@ -541,8 +573,17 @@ export function applyLoginErrors(refs = {}, errors = {}, options = {}) {
 
   const firstError = identifierError || passwordError || globalError;
 
-  setFieldInvalid(refs.fieldIdentifier || refs.fieldEmail, Boolean(identifierError));
-  setFieldInvalid(refs.fieldPassword, Boolean(passwordError));
+  setFieldError(
+    refs.fieldIdentifier || refs.fieldEmail,
+    identifierError,
+    refs.identifierError || refs.emailError
+  );
+
+  setFieldError(
+    refs.fieldPassword,
+    passwordError,
+    refs.passwordError
+  );
 
   setInputInvalid(refs.identifierInput || refs.emailInput, Boolean(identifierError));
   setInputInvalid(refs.passwordInput, Boolean(passwordError));
@@ -641,25 +682,8 @@ export function setLoginLoading(refs = {}, loading = false, options = {}) {
   toggleClass(refs.root, "is-loading", active);
   setAttr(refs.form, "aria-busy", active ? "true" : "false");
 
-  try {
-    if (refs.root) {
-      if (active) {
-        refs.root.dataset.loading = "true";
-      } else {
-        delete refs.root.dataset.loading;
-      }
-    }
-
-    if (refs.form) {
-      if (active) {
-        refs.form.dataset.submitting = "true";
-      } else {
-        delete refs.form.dataset.submitting;
-      }
-    }
-  } catch {
-    // noop
-  }
+  setDataset(refs.root, "loading", active ? "true" : "");
+  setDataset(refs.form, "submitting", active ? "true" : "");
 
   setLoadingDisabled(refs.submitButton, active);
   setLoadingDisabled(refs.identifierInput || refs.emailInput, active);
@@ -829,6 +853,10 @@ export function getLoginDomSnapshot(refs = {}) {
     hasIdentifier: Boolean(refs.identifierInput || refs.emailInput),
     hasPassword: Boolean(refs.passwordInput),
     hasSubmit: Boolean(refs.submitButton),
+
+    hasGlobalErrorBox: Boolean(refs.errorBox),
+    hasIdentifierErrorNode: Boolean(refs.identifierError || refs.emailError),
+    hasPasswordErrorNode: Boolean(refs.passwordError),
 
     submitting: refs.form?.dataset?.submitting === "true",
 

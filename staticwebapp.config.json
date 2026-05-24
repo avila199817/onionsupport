@@ -5,6 +5,7 @@
     "exclude": [
       "/api/*",
       "/.auth/*",
+      "/.well-known/*",
       "/robots.txt",
       "/sitemap.xml",
       "/BingSiteAuth.xml",
@@ -15,22 +16,21 @@
       "/sw.js",
       "/src/*",
       "/assets/*",
-      "/media/*",
-      "/fonts/*",
-      "/img/*",
-      "/css/*",
-      "/js/*",
-      "/.well-known/*",
+      "/docs/*",
       "/*.{js,mjs,css,png,jpg,jpeg,gif,svg,webp,avif,bmp,ico,json,txt,xml,webmanifest,map,woff,woff2,ttf,eot,otf,pdf,mp4,webm,mp3,wav,ogg,wasm}"
     ]
   },
   "routes": [
     {
-      "route": "/staticwebapp.config.json",
+      "route": "/api/*",
       "statusCode": 404
     },
     {
-      "route": "/sitemap.xml",
+      "route": "/.auth/*",
+      "statusCode": 404
+    },
+    {
+      "route": "/staticwebapp.config.json",
       "statusCode": 404
     },
     {
@@ -43,6 +43,18 @@
     },
     {
       "route": "/.github/*",
+      "statusCode": 404
+    },
+    {
+      "route": "/.vscode/*",
+      "statusCode": 404
+    },
+    {
+      "route": "/.idea/*",
+      "statusCode": 404
+    },
+    {
+      "route": "/docs/*",
       "statusCode": 404
     },
     {
@@ -59,6 +71,38 @@
     },
     {
       "route": "/package-lock.json",
+      "statusCode": 404
+    },
+    {
+      "route": "/pnpm-lock.yaml",
+      "statusCode": 404
+    },
+    {
+      "route": "/yarn.lock",
+      "statusCode": 404
+    },
+    {
+      "route": "/vite.config.*",
+      "statusCode": 404
+    },
+    {
+      "route": "/webpack.config.*",
+      "statusCode": 404
+    },
+    {
+      "route": "/README*",
+      "statusCode": 404
+    },
+    {
+      "route": "/CHANGELOG*",
+      "statusCode": 404
+    },
+    {
+      "route": "/LICENSE*",
+      "statusCode": 404
+    },
+    {
+      "route": "/sitemap.xml",
       "statusCode": 404
     },
     {
@@ -115,7 +159,7 @@
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Robots-Tag": "noindex, nofollow",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
-    "Content-Security-Policy": "upgrade-insecure-requests; default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data: blob: https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net; media-src 'self' data: blob: https://*.blob.core.windows.net; connect-src 'self' https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net wss://api.onionit.net wss://*.onionit.net; manifest-src 'self';"
+    "Content-Security-Policy": "upgrade-insecure-requests; default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self'; font-src 'self' data:; img-src 'self' data: blob: https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net; media-src 'self' data: blob: https://*.blob.core.windows.net; connect-src 'self' https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net wss://api.onionit.net wss://*.onionit.net; manifest-src 'self'; worker-src 'self';"
   },
   "mimeTypes": {
     ".mjs": "application/javascript",

@@ -40,7 +40,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_RENDER_VERSION = "router.render.v7";
+export const ROUTER_RENDER_VERSION = "router.render.v8";
 
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
@@ -104,7 +104,7 @@ function nextRenderId() {
 function redact(value = "") {
   return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -206,7 +206,13 @@ function joinPath(parts = {}) {
 }
 
 export function normalizePublicPath(path = DEFAULT_ROUTE) {
-  return joinPath(splitPath(path));
+  const parts = splitPath(path);
+
+  if (isBlockedRoutePath(parts.pathname)) {
+    return DEFAULT_ROUTE;
+  }
+
+  return joinPath(parts);
 }
 
 function isBlockedRoutePath(path = DEFAULT_ROUTE) {
@@ -227,18 +233,39 @@ function isBlockedRoutePath(path = DEFAULT_ROUTE) {
   );
 }
 
+function normalizeUserSlug(value = "") {
+  const slug = cleanText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
 export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
   try {
     const info = getConfigUserScopedRouteInfo(path);
 
     if (isObject(info)) {
-      const restPath = info.restPath || info.canonicalPath || splitPath(path).pathname;
-      const lookupPath = info.canonicalPath || info.lookupPath || restPath;
+      const restPath = normalizePathname(
+        info.restPath || info.canonicalPath || splitPath(path).pathname
+      );
+
+      const lookupPath = normalizePathname(
+        info.canonicalPath || info.lookupPath || restPath
+      );
 
       return {
         scoped: Boolean(info.scoped),
         home: Boolean(info.home),
-        slug: cleanText(info.slug, ""),
+        slug: normalizeUserSlug(info.slug || ""),
         restPath,
         lookupPath,
       };
@@ -249,12 +276,40 @@ export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
 
   const pathname = splitPath(path).pathname;
 
+  if (!pathname.startsWith(USER_HOME_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: pathname,
+      lookupPath: pathname,
+    };
+  }
+
+  const rest = pathname.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeUserSlug(slugSegment);
+
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: pathname,
+      lookupPath: pathname,
+    };
+  }
+
+  const restPath = restSegments.length
+    ? normalizePathname(`/${restSegments.join("/")}`)
+    : DEFAULT_ROUTE;
+
   return {
-    scoped: false,
-    home: false,
-    slug: "",
-    restPath: pathname,
-    lookupPath: pathname,
+    scoped: true,
+    home: restPath === DEFAULT_ROUTE,
+    slug,
+    restPath,
+    lookupPath: restPath,
   };
 }
 
@@ -263,13 +318,23 @@ export function extractSlugFromPath(path = DEFAULT_ROUTE) {
 }
 
 export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
-  try {
-    return configCanonicalRoutePath(path) || splitPath(path).pathname || DEFAULT_ROUTE;
-  } catch {
-    const pathname = splitPath(path).pathname || DEFAULT_ROUTE;
-    const scoped = getUserScopedRouteInfo(pathname);
+  const pathname = splitPath(path).pathname;
 
-    return scoped.scoped ? scoped.lookupPath : pathname;
+  if (isBlockedRoutePath(pathname)) {
+    return DEFAULT_ROUTE;
+  }
+
+  try {
+    const canonical = normalizePathname(
+      configCanonicalRoutePath(path) || pathname || DEFAULT_ROUTE
+    );
+
+    return isBlockedRoutePath(canonical) ? DEFAULT_ROUTE : canonical;
+  } catch {
+    const scoped = getUserScopedRouteInfo(pathname);
+    const canonical = scoped.scoped ? scoped.lookupPath : pathname;
+
+    return isBlockedRoutePath(canonical) ? DEFAULT_ROUTE : canonical;
   }
 }
 
@@ -304,20 +369,34 @@ function domPath(path = DEFAULT_ROUTE) {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
     String(value || "")
   );
 }
 
+function isUnsafeActionInput(value = "") {
+  const raw = cleanText(value, "");
+
+  return Boolean(
+    !raw ||
+      !raw.startsWith("/") ||
+      raw.startsWith("//") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(raw) ||
+      /[\r\n\t\\]/.test(raw) ||
+      hasSensitiveQuery(raw)
+  );
+}
+
 function safeActionHref(value = DEFAULT_ROUTE) {
+  if (isUnsafeActionInput(value)) {
+    return DEFAULT_ROUTE;
+  }
+
   const path = normalizePublicPath(value || DEFAULT_ROUTE);
 
   if (
-    !path.startsWith("/") ||
-    path.startsWith("//") ||
-    /[\r\n\t\\]/.test(path) ||
-    hasSensitiveQuery(path) ||
-    isBlockedRoutePath(path)
+    isUnsafeActionInput(path) ||
+      isBlockedRoutePath(path)
   ) {
     return DEFAULT_ROUTE;
   }

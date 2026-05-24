@@ -8,13 +8,13 @@ on:
       - main
 
   pull_request:
+    branches:
+      - main
     types:
       - opened
       - synchronize
       - reopened
       - closed
-    branches:
-      - main
 
   workflow_dispatch:
 
@@ -31,7 +31,6 @@ env:
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
   PRODUCTION_BRANCH: "main"
-  AZURE_STATIC_WEB_APPS_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
 
 jobs:
   deploy:
@@ -40,13 +39,23 @@ jobs:
     timeout-minutes: 15
 
     if: >-
-      github.event_name == 'push' ||
-      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'push' &&
+        github.ref_name == 'main'
+      ) ||
+      (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref_name == 'main'
+      ) ||
       (
         github.event_name == 'pull_request' &&
         github.event.action != 'closed' &&
+        github.base_ref == 'main' &&
         github.event.pull_request.head.repo.full_name == github.repository
       )
+
+    env:
+      SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
 
     steps:
       - name: Checkout
@@ -57,12 +66,12 @@ jobs:
           lfs: false
           persist-credentials: false
 
-      - name: Validate package
+      - name: Validate static SPA package
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ -z "${AZURE_STATIC_WEB_APPS_API_TOKEN:-}" ]; then
+          if [[ -z "${SWA_API_TOKEN:-}" ]]; then
             echo "::error::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
             exit 1
           fi
@@ -72,25 +81,42 @@ jobs:
             "staticwebapp.config.json"
             "site.webmanifest"
             "robots.txt"
+            "sitemap.xml"
+            "favicon.ico"
             "src/main.js"
             "src/preboot/theme.js"
             "src/css/app.css"
           )
 
           for file in "${required_files[@]}"; do
-            if [ ! -f "$file" ]; then
+            if [[ ! -f "$file" ]]; then
               echo "::error file=$file::Archivo obligatorio no encontrado."
               exit 1
             fi
           done
 
-          echo "Onion SPA package OK."
+          python3 -m json.tool staticwebapp.config.json >/dev/null
+          python3 -m json.tool site.webmanifest >/dev/null
 
-      - name: Deploy
-        id: deploy
+          required_index_refs=(
+            "/src/preboot/theme.js"
+            "/src/css/app.css"
+            "/src/main.js"
+          )
+
+          for ref in "${required_index_refs[@]}"; do
+            if ! grep -Fq "$ref" index.html; then
+              echo "::error file=index.html::Referencia obligatoria no encontrada: $ref"
+              exit 1
+            fi
+          done
+
+          echo "Onion SPA static package OK."
+
+      - name: Deploy static SPA
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ env.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
 
@@ -111,22 +137,26 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       github.event.action == 'closed' &&
+      github.base_ref == 'main' &&
       github.event.pull_request.head.repo.full_name == github.repository
 
+    env:
+      SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
+
     steps:
-      - name: Validate token
+      - name: Validate deployment token
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ -z "${AZURE_STATIC_WEB_APPS_API_TOKEN:-}" ]; then
+          if [[ -z "${SWA_API_TOKEN:-}" ]]; then
             echo "::error::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
             exit 1
           fi
 
-      - name: Close preview
+      - name: Close PR preview
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ env.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: close

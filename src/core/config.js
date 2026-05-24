@@ -24,7 +24,7 @@
    - Sin magia negra.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.v6";
+export const CONFIG_VERSION = "core.config.v7";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
@@ -35,15 +35,20 @@ export const CANONICAL_BACKEND_API_ORIGINS = Object.freeze([
 export const CANONICAL_FRONTEND_ORIGINS = Object.freeze([
   "https://onionsupport.com",
   "https://www.onionsupport.com",
+]);
+
+/*
+  Compat defensiva:
+  Estos orígenes son frontend y nunca deben usarse como API base.
+  Incluimos variantes http sólo para bloquearlas como API, no como canónicas.
+*/
+export const KNOWN_FRONTEND_ORIGINS = Object.freeze([
+  ...CANONICAL_FRONTEND_ORIGINS,
   "http://onionsupport.com",
   "http://www.onionsupport.com",
 ]);
 
-/*
-  Compat semántica:
-  Estos orígenes son frontend y nunca deben usarse como API base.
-*/
-export const FORBIDDEN_FRONTEND_API_ORIGINS = CANONICAL_FRONTEND_ORIGINS;
+export const FORBIDDEN_FRONTEND_API_ORIGINS = KNOWN_FRONTEND_ORIGINS;
 
 export const TOKEN_PARAM = "token";
 export const USER_HOME_PREFIX = "/@";
@@ -57,6 +62,25 @@ export const BLOCKED_FRONTEND_ROUTES = Object.freeze([
   "/2fa",
   "/mfa",
   "/otp",
+]);
+
+export const SENSITIVE_QUERY_PARAMS = Object.freeze([
+  TOKEN_PARAM,
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "secret",
+  "session",
+  "code",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
+  "jwt",
+  "authorization",
+  "reset_token",
+  "activation_token",
 ]);
 
 /* =========================================================
@@ -249,7 +273,10 @@ function normalizeHashRouterPath(value = "") {
 }
 
 function normalizePathname(pathname = "/") {
-  let value = text(pathname, "/").replace(/\\/g, "/");
+  let value = text(pathname, "/")
+    .split("#")[0]
+    .split("?")[0]
+    .replace(/\\/g, "/");
 
   if (!value.startsWith("/")) {
     value = `/${value}`;
@@ -264,12 +291,26 @@ function normalizePathname(pathname = "/") {
   return value || "/";
 }
 
-export function isBlockedRoutePath(path = "") {
-  const clean = normalizePathname(
-    routePathFromUrlLike(path) || path || "/"
-  ).toLowerCase();
+function pathIsOrStartsWith(path = "", blocked = "") {
+  const current = normalizePathname(path).toLowerCase();
+  const target = normalizePathname(blocked).toLowerCase();
 
-  if (BLOCKED_FRONTEND_ROUTES.includes(clean)) return true;
+  return Boolean(
+    current === target ||
+      current.startsWith(`${target}/`)
+  );
+}
+
+function isBlockedNormalizedPath(path = "") {
+  const clean = normalizePathname(path).toLowerCase();
+
+  if (
+    BLOCKED_FRONTEND_ROUTES.some((blocked) =>
+      pathIsOrStartsWith(clean, blocked)
+    )
+  ) {
+    return true;
+  }
 
   return (
     clean.startsWith("/2fa/") ||
@@ -277,8 +318,6 @@ export function isBlockedRoutePath(path = "") {
     clean.startsWith("/otp/")
   );
 }
-
-export const isLegacyBlockedRoute = isBlockedRoutePath;
 
 export function routePathFromUrlLike(value = "") {
   const raw = text(value, "");
@@ -361,7 +400,7 @@ export function normalizeRoutePath(path = "") {
 
   if (!raw) return "";
 
-  return normalizePathname(raw.split("?")[0].split("#")[0] || "/");
+  return normalizePathname(raw);
 }
 
 export function normalizeEndpointPath(path = "") {
@@ -369,7 +408,7 @@ export function normalizeEndpointPath(path = "") {
 
   if (!raw) return "";
 
-  return normalizePathname(raw.split("?")[0].split("#")[0] || "/");
+  return normalizePathname(raw);
 }
 
 function pathMatches(path = "", candidate = "") {
@@ -416,6 +455,7 @@ export function getUserScopedRouteInfo(path = "") {
       slug: "",
       restPath: route || ROUTES.home,
       canonicalPath: route || ROUTES.home,
+      lookupPath: route || ROUTES.home,
     };
   }
 
@@ -430,6 +470,7 @@ export function getUserScopedRouteInfo(path = "") {
       slug: "",
       restPath: route,
       canonicalPath: route,
+      lookupPath: route,
     };
   }
 
@@ -443,6 +484,7 @@ export function getUserScopedRouteInfo(path = "") {
     slug,
     restPath,
     canonicalPath: restPath,
+    lookupPath: restPath,
   };
 }
 
@@ -478,6 +520,21 @@ export function buildUserScopedRoute(slug = "", route = ROUTES.home) {
   return `${USER_HOME_PREFIX}${clean}${canonical}`;
 }
 
+export function isBlockedRoutePath(path = "") {
+  const route = normalizeRoutePath(path) || "/";
+  const scoped = getUserScopedRouteInfo(route);
+
+  if (isBlockedNormalizedPath(route)) return true;
+
+  if (scoped.scoped && isBlockedNormalizedPath(scoped.restPath)) {
+    return true;
+  }
+
+  return false;
+}
+
+export const isLegacyBlockedRoute = isBlockedRoutePath;
+
 export function canonicalRoutePath(path = "") {
   if (isBlockedRoutePath(path)) return "";
 
@@ -509,6 +566,7 @@ export const config = freeze({
   canonicalProductionApiBase: CANONICAL_PRODUCTION_API_BASE,
   canonicalBackendApiOrigins: CANONICAL_BACKEND_API_ORIGINS,
   canonicalFrontendOrigins: CANONICAL_FRONTEND_ORIGINS,
+  knownFrontendOrigins: KNOWN_FRONTEND_ORIGINS,
   forbiddenFrontendApiOrigins: FORBIDDEN_FRONTEND_API_ORIGINS,
 
   defaultLang: "es",
@@ -530,6 +588,7 @@ export const config = freeze({
   blockedFrontendRoutes: BLOCKED_FRONTEND_ROUTES,
 
   tokenParam: TOKEN_PARAM,
+  sensitiveQueryParams: SENSITIVE_QUERY_PARAMS,
 
   publicApiPaths: PUBLIC_API_PATHS,
   privateApiPaths: PRIVATE_API_PATHS,
@@ -557,6 +616,11 @@ export const config = freeze({
     tokenHeader: "Authorization",
 
     loginRoute: ROUTES.login,
+
+    /*
+      Home interna canónica.
+      La home visible autenticada la construyen Auth/Router como /@{slug}.
+    */
     homeRoute: ROUTES.home,
     homeCanonicalRoute: ROUTES.home,
     userHomePrefix: USER_HOME_PREFIX,
@@ -688,26 +752,13 @@ export const config = freeze({
     redactTokens: true,
 
     tokenParam: TOKEN_PARAM,
+    sensitiveQueryParams: SENSITIVE_QUERY_PARAMS,
 
     canonicalProductionApiBase: CANONICAL_PRODUCTION_API_BASE,
     canonicalBackendApiOrigins: CANONICAL_BACKEND_API_ORIGINS,
     canonicalFrontendOrigins: CANONICAL_FRONTEND_ORIGINS,
+    knownFrontendOrigins: KNOWN_FRONTEND_ORIGINS,
     forbiddenFrontendApiOrigins: FORBIDDEN_FRONTEND_API_ORIGINS,
-
-    sensitiveQueryParams: freeze([
-      TOKEN_PARAM,
-      "access_token",
-      "refresh_token",
-      "id_token",
-      "secret",
-      "session",
-      "code",
-      "password",
-      "pwd",
-      "key",
-      "sig",
-      "signature",
-    ]),
   }),
 });
 
@@ -737,7 +788,7 @@ export function isForbiddenFrontendApiOrigin(value = "") {
 
 export function isCanonicalFrontendOrigin(value = "") {
   const origin = cleanOrigin(value);
-  return isAllowedFrontendOrigin(origin);
+  return CANONICAL_FRONTEND_ORIGINS.includes(origin);
 }
 
 export function isCanonicalBackendApiBase(value = "") {
@@ -781,6 +832,10 @@ export function isPrivateApiPath(path = "") {
 export function isTechnicalPublicRoute(path = "") {
   if (isBlockedRoutePath(path)) return false;
 
+  const scoped = getUserScopedRouteInfo(path);
+
+  if (scoped.scoped) return false;
+
   const route = canonicalRoutePath(path);
 
   return config.technicalPublicRoutes.some((item) => pathMatches(route, item));
@@ -788,6 +843,10 @@ export function isTechnicalPublicRoute(path = "") {
 
 export function isPublicRoute(path = "") {
   if (isBlockedRoutePath(path)) return false;
+
+  const scoped = getUserScopedRouteInfo(path);
+
+  if (scoped.scoped) return false;
 
   const route = canonicalRoutePath(path);
 
@@ -859,6 +918,7 @@ export function getConfigSnapshot() {
     privateApiPaths: config.privateApiPaths,
 
     tokenParam: config.tokenParam,
+    sensitiveQueryParams: config.sensitiveQueryParams,
 
     meIsPublic: isPublicApiPath(AUTH_ENDPOINTS.me),
     meIsPrivate: isPrivateApiPath(AUTH_ENDPOINTS.me),
@@ -873,8 +933,17 @@ export function getConfigSnapshot() {
       passwordReset: AUTH_ENDPOINTS.confirmPasswordReset,
     },
 
+    origins: {
+      api: CANONICAL_PRODUCTION_API_BASE,
+      backend: [...CANONICAL_BACKEND_API_ORIGINS],
+      frontendCanonical: [...CANONICAL_FRONTEND_ORIGINS],
+      frontendKnown: [...KNOWN_FRONTEND_ORIGINS],
+    },
+
     policy: {
+      configOnly: true,
       apiUnique: true,
+      apiBaseCannotBeFrontend: true,
       tokenParamUnique: true,
 
       noHomeRoute: true,
@@ -883,6 +952,10 @@ export function getConfigSnapshot() {
       blockedHomeAlias: true,
       blocked403: true,
       blocked404: true,
+
+      blocksNestedLegacyRoutes: true,
+      blocksUserScopedLegacyRoutes: true,
+      publicRoutesCannotLiveUnderUserScope: true,
 
       roles: [...ALLOWED_ROLES],
 

@@ -2,16 +2,27 @@
    ONION SUPPORT — SIDEBAR FINAL
    Archivo recomendado: /src/css/layout/sidebar.css
 
-   Objetivos cerrados:
-   - Modo dark sólido: #242424 / #3B3B3B / #525252.
-   - Modo light real: #ffffff, texto/iconos #111111.
-   - Sin hard-lock oscuro que rompa data-theme="light".
-   - Mobile responsive estilo Twitch: collapsed rail visible.
-   - En mobile NO se oculta con translateX(-104%).
-   - En mobile collapsed NO se expanden etiquetas.
-   - Open mobile funciona como drawer overlay.
-   - Iconos centrados en open, collapsed y mobile.
-   - Scope estricto bajo .sidebar.
+   FINAL SIDEBAR SYSTEM · PRIVATE SPA · EXTREME 10/10
+   SOLID GRAPHITE · DESKTOP · COLLAPSED · MOBILE RAIL
+
+   Responsabilidad:
+   - Pintar y organizar visualmente el sidebar.
+   - Gestionar layout interno del sidebar.
+   - Gestionar open/collapsed visual del rail.
+   - Gestionar drawer mobile visual.
+   - Gestionar avatar/account menu visual.
+   - Centrar iconos en collapsed real.
+   - Mantener scope estricto bajo .sidebar.
+
+   Reglas:
+   - No desplazar main.
+   - No desplazar topbar.
+   - No desplazar tablehead.
+   - No crear layout externo.
+   - No duplicar router.
+   - No duplicar auth.
+   - No duplicar store.
+   - No controlar search.
 ========================================================= */
 
 
@@ -29,7 +40,7 @@
     min(320px, calc(100vw - var(--sidebar-local-mobile-collapsed-width) - 8px))
   );
 
-  /* Palette: dark defaults, overridden by theme blocks below */
+  /* Palette */
   --sidebar-local-bg: var(--sidebar-bg, #242424);
   --sidebar-local-bg-strong: var(--sidebar-bg-strong, #242424);
   --sidebar-local-border: var(--sidebar-border, rgba(255,255,255,.12));
@@ -74,29 +85,30 @@
 
   /* Geometry */
   --sidebar-local-radius: var(--sidebar-radius, 0);
-  --sidebar-local-item-radius: 12px;
-  --sidebar-local-menu-radius: 20px;
+  --sidebar-local-item-radius: var(--sidebar-item-radius, 12px);
+  --sidebar-local-menu-radius: var(--sidebar-dropdown-radius, 20px);
 
-  --sidebar-local-pad-x: 8px;
+  --sidebar-local-pad-x: var(--sidebar-inline-padding, 8px);
   --sidebar-local-pad-y: 8px;
 
-  --sidebar-local-header-height: 58px;
-  --sidebar-local-item-height: 42px;
+  --sidebar-local-header-height: var(--sidebar-top-height, 58px);
+  --sidebar-local-item-height: var(--sidebar-item-height, 42px);
 
-  --sidebar-local-icon-size: 20px;
-  --sidebar-local-icon-box: 36px;
-  --sidebar-local-collapsed-slot: 44px;
+  --sidebar-local-icon-size: var(--sidebar-icon-size, 20px);
+  --sidebar-local-icon-box: var(--sidebar-icon-box, 36px);
+  --sidebar-local-collapsed-slot: var(--sidebar-collapsed-slot, 44px);
 
-  --sidebar-local-toggle-size: 32px;
-  --sidebar-local-toggle-icon-size: 20px;
-  --sidebar-local-collapsed-toggle-slot: 36px;
+  --sidebar-local-toggle-size: var(--sidebar-toggle-size, 32px);
+  --sidebar-local-toggle-icon-size: var(--sidebar-toggle-icon-size, 20px);
+  --sidebar-local-collapsed-toggle-slot: var(--sidebar-collapsed-toggle-slot, 36px);
 
-  --sidebar-local-avatar-size: 34px;
+  --sidebar-local-avatar-size: var(--sidebar-user-avatar-size, 34px);
+  --sidebar-local-avatar-collapsed-size: 32px;
 
-  --sidebar-local-logo-width: 24px;
-  --sidebar-local-logo-height: 24px;
-  --sidebar-local-logo-radius: 7px;
-  --sidebar-local-logo-opacity: 1;
+  --sidebar-local-logo-width: var(--sidebar-logo-width, 24px);
+  --sidebar-local-logo-height: var(--sidebar-logo-height, 24px);
+  --sidebar-local-logo-radius: var(--sidebar-logo-radius, 7px);
+  --sidebar-local-logo-opacity: var(--sidebar-logo-opacity, 1);
   --sidebar-local-logo-image: var(--asset-logo-dark, url("/src/media/img/favicon_white.png"));
 
   /* Typography */
@@ -142,7 +154,6 @@
     var(--sidebar-local-pad-x)
     max(var(--sidebar-local-pad-y), env(safe-area-inset-bottom, 0px));
 
-  /* overflow visible evita que el account menu se recorte en collapsed */
   overflow: visible;
 
   border: 0;
@@ -185,7 +196,6 @@
 
 /* =========================================================
    THEME LOCKS — DARK / LIGHT
-   No se pisan tokens globales; sólo variables locales.
 ========================================================= */
 
 html[data-theme="dark"] .sidebar,
@@ -233,6 +243,8 @@ body[data-theme="dark"] .sidebar,
 
   --sidebar-local-scroll-thumb: rgba(255,255,255,.26);
   --sidebar-local-scroll-thumb-hover: rgba(255,255,255,.38);
+
+  color-scheme: dark;
 }
 
 html[data-theme="light"] .sidebar,
@@ -300,7 +312,11 @@ body[data-theme="light"] .sidebar,
   box-sizing: border-box;
 }
 
-.sidebar[hidden] {
+.sidebar[hidden],
+.sidebar.is-hidden,
+body.sidebar-hidden .sidebar,
+body[data-sidebar-state="hidden"] .sidebar,
+body[data-sidebar-hidden="true"] .sidebar {
   display: none !important;
 }
 
@@ -404,14 +420,20 @@ body[data-theme="light"] .sidebar,
 
 .sidebar.is-open,
 .sidebar[data-open="true"],
-.sidebar[data-sidebar-state="open"] {
+.sidebar[data-sidebar-state="open"],
+body.sidebar-open .sidebar,
+body[data-sidebar-state="open"] .sidebar,
+body[data-sidebar-open="true"] .sidebar {
   inline-size: var(--sidebar-local-width);
   transform: translate3d(0, 0, 0);
 }
 
 .sidebar.is-collapsed,
 .sidebar[data-open="false"],
-.sidebar[data-sidebar-state="collapsed"] {
+.sidebar[data-sidebar-state="collapsed"],
+body.sidebar-collapsed .sidebar,
+body[data-sidebar-state="collapsed"] .sidebar,
+body[data-sidebar-open="false"] .sidebar {
   inline-size: var(--sidebar-local-collapsed-width);
   transform: translate3d(0, 0, 0);
 }
@@ -1576,26 +1598,42 @@ body[data-theme="light"] .sidebar,
 
 
 /* =========================================================
-   COLLAPSED — DESKTOP + MOBILE RAIL
+   COLLAPSED — DESKTOP RAIL
 ========================================================= */
 
 .sidebar.is-collapsed,
 .sidebar[data-open="false"],
-.sidebar[data-sidebar-state="collapsed"] {
-  --sidebar-local-pad-x: 8px;
+.sidebar[data-sidebar-state="collapsed"],
+body.sidebar-collapsed .sidebar,
+body[data-sidebar-state="collapsed"] .sidebar,
+body[data-sidebar-open="false"] .sidebar {
+  --sidebar-local-pad-x: var(--sidebar-inline-padding, 8px);
 }
 
-.sidebar.is-collapsed .sidebar-inner,
-.sidebar[data-open="false"] .sidebar-inner,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-inner {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-inner {
   inline-size: 100%;
   min-inline-size: 0;
-  align-items: center;
+
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
 }
 
-.sidebar.is-collapsed .sidebar-header,
-.sidebar[data-open="false"] .sidebar-header,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-header {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-header {
   inline-size: 100%;
   min-block-size: var(--sidebar-local-header-height);
 
@@ -1606,15 +1644,89 @@ body[data-theme="light"] .sidebar,
   padding: 0 0 8px;
 }
 
-.sidebar.is-collapsed .sidebar-brand,
-.sidebar[data-open="false"] .sidebar-brand,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-brand {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-brand,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-brand-content,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-brand-logo,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link-content,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link-label,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link-badge,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-user-info,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-account-chevron,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-logout-label {
   display: none !important;
 }
 
-.sidebar.is-collapsed .sidebar-toggle,
-.sidebar[data-open="false"] .sidebar-toggle,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-toggle {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-toggle {
   inline-size: var(--sidebar-local-collapsed-toggle-slot);
   min-inline-size: var(--sidebar-local-collapsed-toggle-slot);
   max-inline-size: var(--sidebar-local-collapsed-toggle-slot);
@@ -1633,9 +1745,14 @@ body[data-theme="light"] .sidebar,
   border-radius: 10px;
 }
 
-.sidebar.is-collapsed .sidebar-toggle-svg,
-.sidebar[data-open="false"] .sidebar-toggle-svg,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-toggle-svg {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-toggle-svg {
   inline-size: var(--sidebar-local-toggle-icon-size);
   min-inline-size: var(--sidebar-local-toggle-icon-size);
   max-inline-size: var(--sidebar-local-toggle-icon-size);
@@ -1645,78 +1762,81 @@ body[data-theme="light"] .sidebar,
   max-block-size: var(--sidebar-local-toggle-icon-size);
 }
 
-.sidebar.is-collapsed .sidebar-brand-content,
-.sidebar[data-open="false"] .sidebar-brand-content,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-brand-content,
-.sidebar.is-collapsed .sidebar-brand-logo,
-.sidebar[data-open="false"] .sidebar-brand-logo,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-brand-logo,
-.sidebar.is-collapsed .sidebar-link-content,
-.sidebar[data-open="false"] .sidebar-link-content,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-link-content,
-.sidebar.is-collapsed .sidebar-link-label,
-.sidebar[data-open="false"] .sidebar-link-label,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-link-label,
-.sidebar.is-collapsed .sidebar-link-badge,
-.sidebar[data-open="false"] .sidebar-link-badge,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-link-badge,
-.sidebar.is-collapsed .sidebar-user-info,
-.sidebar[data-open="false"] .sidebar-user-info,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-user-info,
-.sidebar.is-collapsed .sidebar-account-chevron,
-.sidebar[data-open="false"] .sidebar-account-chevron,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-account-chevron,
-.sidebar.is-collapsed .sidebar-logout-label,
-.sidebar[data-open="false"] .sidebar-logout-label,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-logout-label {
-  display: none !important;
-}
-
-.sidebar.is-collapsed .sidebar-nav,
-.sidebar[data-open="false"] .sidebar-nav,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-nav {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-nav {
   inline-size: 100%;
   min-inline-size: 0;
 
+  padding-inline: 0;
   padding-block-start: 2px;
+
+  overflow-y: auto;
+  overflow-x: hidden;
 
   scrollbar-width: none;
   scrollbar-gutter: auto;
 }
 
-.sidebar.is-collapsed .sidebar-nav::-webkit-scrollbar,
-.sidebar[data-open="false"] .sidebar-nav::-webkit-scrollbar,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-nav::-webkit-scrollbar {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-nav::-webkit-scrollbar {
   inline-size: 0;
   block-size: 0;
+  display: none;
 }
 
-.sidebar.is-collapsed .sidebar-list,
-.sidebar[data-open="false"] .sidebar-list,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-list {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-list {
+  inline-size: 100%;
+  min-inline-size: 0;
+
+  display: flex;
+  flex-direction: column;
   align-items: center;
+
   gap: 6px;
 }
 
-.sidebar.is-collapsed .sidebar-list,
-.sidebar[data-open="false"] .sidebar-list,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-list,
-.sidebar.is-collapsed .sidebar-item,
-.sidebar[data-open="false"] .sidebar-item,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-item,
-.sidebar.is-collapsed .sidebar-footer,
-.sidebar[data-open="false"] .sidebar-footer,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-footer,
-.sidebar.is-collapsed .sidebar-account-dropdown,
-.sidebar[data-open="false"] .sidebar-account-dropdown,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-account-dropdown {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-item {
   inline-size: 100%;
   min-inline-size: 0;
+
+  display: flex;
+  justify-content: center;
 }
 
-.sidebar.is-collapsed .sidebar-link,
-.sidebar[data-open="false"] .sidebar-link,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-link {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link {
   inline-size: var(--sidebar-local-collapsed-slot);
   min-inline-size: var(--sidebar-local-collapsed-slot);
   max-inline-size: var(--sidebar-local-collapsed-slot);
@@ -1728,6 +1848,8 @@ body[data-theme="light"] .sidebar,
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
+  gap: 0;
 
   padding: 0;
   margin-inline: auto;
@@ -1735,51 +1857,103 @@ body[data-theme="light"] .sidebar,
   border-radius: 12px;
 }
 
-.sidebar.is-collapsed .sidebar-link-icon,
-.sidebar[data-open="false"] .sidebar-link-icon,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-link-icon,
-.sidebar.is-collapsed .sidebar-logout-icon,
-.sidebar[data-open="false"] .sidebar-logout-icon,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-logout-icon {
-  inline-size: var(--sidebar-local-collapsed-slot);
-  min-inline-size: var(--sidebar-local-collapsed-slot);
-  max-inline-size: var(--sidebar-local-collapsed-slot);
-
-  block-size: var(--sidebar-local-collapsed-slot);
-  min-block-size: var(--sidebar-local-collapsed-slot);
-  max-block-size: var(--sidebar-local-collapsed-slot);
-
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  flex: 0 0 var(--sidebar-local-collapsed-slot);
-}
-
-.sidebar.is-collapsed .sidebar-link-svg,
-.sidebar[data-open="false"] .sidebar-link-svg,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-link-svg {
-  inline-size: 20px;
-  min-inline-size: 20px;
-  max-inline-size: 20px;
-
-  block-size: 20px;
-  min-block-size: 20px;
-  max-block-size: 20px;
-}
-
-.sidebar.is-collapsed .sidebar-footer,
-.sidebar[data-open="false"] .sidebar-footer,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-footer {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link-icon,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-logout-icon {
   inline-size: 100%;
+  min-inline-size: 100%;
+  max-inline-size: 100%;
+
+  block-size: 100%;
+  min-block-size: 100%;
+  max-block-size: 100%;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  flex: 0 0 100%;
+
+  margin: 0;
+  padding: 0;
 }
 
-.sidebar.is-collapsed .sidebar-user,
-.sidebar[data-open="false"] .sidebar-user,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-user,
-.sidebar.is-collapsed .sidebar-account-trigger,
-.sidebar[data-open="false"] .sidebar-account-trigger,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-account-trigger {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link-svg {
+  inline-size: var(--sidebar-local-icon-size);
+  min-inline-size: var(--sidebar-local-icon-size);
+  max-inline-size: var(--sidebar-local-icon-size);
+
+  block-size: var(--sidebar-local-icon-size);
+  min-block-size: var(--sidebar-local-icon-size);
+  max-block-size: var(--sidebar-local-icon-size);
+}
+
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-footer {
+  inline-size: 100%;
+  min-inline-size: 0;
+
+  display: flex;
+  justify-content: center;
+}
+
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-account-dropdown {
+  inline-size: 100%;
+  min-inline-size: 0;
+
+  display: flex;
+  justify-content: center;
+}
+
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-user,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-account-trigger {
   inline-size: var(--sidebar-local-collapsed-slot);
   min-inline-size: var(--sidebar-local-collapsed-slot);
   max-inline-size: var(--sidebar-local-collapsed-slot);
@@ -1792,29 +1966,42 @@ body[data-theme="light"] .sidebar,
   align-items: center;
   justify-content: center;
 
+  gap: 0;
+
   padding: 0;
   margin-inline: auto;
 
   border-radius: 12px;
 }
 
-.sidebar.is-collapsed .sidebar-user-avatar,
-.sidebar[data-open="false"] .sidebar-user-avatar,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-user-avatar {
-  inline-size: 32px;
-  min-inline-size: 32px;
-  max-inline-size: 32px;
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-user-avatar {
+  inline-size: var(--sidebar-local-avatar-collapsed-size);
+  min-inline-size: var(--sidebar-local-avatar-collapsed-size);
+  max-inline-size: var(--sidebar-local-avatar-collapsed-size);
 
-  block-size: 32px;
-  min-block-size: 32px;
-  max-block-size: 32px;
+  block-size: var(--sidebar-local-avatar-collapsed-size);
+  min-block-size: var(--sidebar-local-avatar-collapsed-size);
+  max-block-size: var(--sidebar-local-avatar-collapsed-size);
 
-  flex: 0 0 32px;
+  flex: 0 0 var(--sidebar-local-avatar-collapsed-size);
+  margin: 0;
 }
 
-.sidebar.is-collapsed .sidebar-account-menu,
-.sidebar[data-open="false"] .sidebar-account-menu,
-.sidebar[data-sidebar-state="collapsed"] .sidebar-account-menu {
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-account-menu {
   inset-inline-start: calc(100% + 8px);
   inset-inline-end: auto;
   inset-block-end: 0;
@@ -1826,8 +2013,7 @@ body[data-theme="light"] .sidebar,
 
 
 /* =========================================================
-   MOBILE — TWITCH STYLE
-   Rail collapsed siempre visible. Open = drawer overlay.
+   MOBILE — RAIL + DRAWER
 ========================================================= */
 
 @media (max-width: 900px) {
@@ -1845,28 +2031,38 @@ body[data-theme="light"] .sidebar,
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
   .sidebar.is-collapsed,
   .sidebar[data-open="false"],
-  .sidebar[data-sidebar-state="collapsed"] {
+  .sidebar[data-sidebar-state="collapsed"],
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar {
     inline-size: var(--sidebar-local-mobile-collapsed-width);
     max-inline-size: var(--sidebar-local-mobile-collapsed-width);
+
     transform: translate3d(0, 0, 0) !important;
+
     z-index: var(--z-sidebar, 60);
   }
 
   .sidebar.is-open,
   .sidebar[data-open="true"],
-  .sidebar[data-sidebar-state="open"] {
+  .sidebar[data-sidebar-state="open"],
+  body.sidebar-open .sidebar,
+  body[data-sidebar-state="open"] .sidebar,
+  body[data-sidebar-open="true"] .sidebar {
     inline-size: var(--sidebar-local-mobile-width);
     max-inline-size: calc(100vw - 8px);
+
     transform: translate3d(0, 0, 0) !important;
+
     z-index: var(--z-overlay, 80);
     box-shadow: var(--sidebar-local-open-shadow) !important;
   }
 
-  /* Estado collapsed implícito cuando no hay estado open */
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-inner {
     inline-size: 100%;
     min-inline-size: 0;
-    align-items: center;
+
+    align-items: stretch;
   }
 
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-header {
@@ -1884,7 +2080,11 @@ body[data-theme="light"] .sidebar,
     inline-size: 100%;
     min-inline-size: 0;
 
+    padding-inline: 0;
     padding-block-start: 2px;
+
+    overflow-y: auto;
+    overflow-x: hidden;
 
     scrollbar-width: none;
     scrollbar-gutter: auto;
@@ -1893,14 +2093,7 @@ body[data-theme="light"] .sidebar,
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-nav::-webkit-scrollbar {
     inline-size: 0;
     block-size: 0;
-  }
-
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-list,
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-item,
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-footer,
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-account-dropdown {
-    inline-size: 100%;
-    min-inline-size: 0;
+    display: none;
   }
 
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-brand,
@@ -1916,8 +2109,24 @@ body[data-theme="light"] .sidebar,
   }
 
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-list {
+    inline-size: 100%;
+    min-inline-size: 0;
+
+    display: flex;
+    flex-direction: column;
     align-items: center;
+
     gap: 6px;
+  }
+
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-item,
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-footer,
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-account-dropdown {
+    inline-size: 100%;
+    min-inline-size: 0;
+
+    display: flex;
+    justify-content: center;
   }
 
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-link {
@@ -1933,25 +2142,30 @@ body[data-theme="light"] .sidebar,
     align-items: center;
     justify-content: center;
 
+    gap: 0;
+
     padding: 0;
     margin-inline: auto;
   }
 
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-link-icon,
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-logout-icon {
-    inline-size: var(--sidebar-local-collapsed-slot);
-    min-inline-size: var(--sidebar-local-collapsed-slot);
-    max-inline-size: var(--sidebar-local-collapsed-slot);
+    inline-size: 100%;
+    min-inline-size: 100%;
+    max-inline-size: 100%;
 
-    block-size: var(--sidebar-local-collapsed-slot);
-    min-block-size: var(--sidebar-local-collapsed-slot);
-    max-block-size: var(--sidebar-local-collapsed-slot);
+    block-size: 100%;
+    min-block-size: 100%;
+    max-block-size: 100%;
 
     display: inline-flex;
     align-items: center;
     justify-content: center;
 
-    flex: 0 0 var(--sidebar-local-collapsed-slot);
+    flex: 0 0 100%;
+
+    margin: 0;
+    padding: 0;
   }
 
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-user,
@@ -1968,26 +2182,31 @@ body[data-theme="light"] .sidebar,
     align-items: center;
     justify-content: center;
 
+    gap: 0;
+
     padding: 0;
     margin-inline: auto;
   }
 
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-user-avatar {
-    inline-size: 32px;
-    min-inline-size: 32px;
-    max-inline-size: 32px;
+    inline-size: var(--sidebar-local-avatar-collapsed-size);
+    min-inline-size: var(--sidebar-local-avatar-collapsed-size);
+    max-inline-size: var(--sidebar-local-avatar-collapsed-size);
 
-    block-size: 32px;
-    min-block-size: 32px;
-    max-block-size: 32px;
+    block-size: var(--sidebar-local-avatar-collapsed-size);
+    min-block-size: var(--sidebar-local-avatar-collapsed-size);
+    max-block-size: var(--sidebar-local-avatar-collapsed-size);
 
-    flex: 0 0 32px;
+    flex: 0 0 var(--sidebar-local-avatar-collapsed-size);
   }
 
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-account-menu,
   .sidebar.is-collapsed .sidebar-account-menu,
   .sidebar[data-open="false"] .sidebar-account-menu,
-  .sidebar[data-sidebar-state="collapsed"] .sidebar-account-menu {
+  .sidebar[data-sidebar-state="collapsed"] .sidebar-account-menu,
+  body.sidebar-collapsed .sidebar .sidebar-account-menu,
+  body[data-sidebar-state="collapsed"] .sidebar .sidebar-account-menu,
+  body[data-sidebar-open="false"] .sidebar .sidebar-account-menu {
     inset-inline-start: calc(100% + 8px);
     inset-inline-end: auto;
     inset-block-end: 0;
@@ -1995,17 +2214,26 @@ body[data-theme="light"] .sidebar,
     inline-size: min(248px, calc(100vw - var(--sidebar-local-mobile-collapsed-width) - 16px));
   }
 
-  /* Open mobile vuelve al layout completo */
   .sidebar.is-open .sidebar-inner,
   .sidebar[data-open="true"] .sidebar-inner,
-  .sidebar[data-sidebar-state="open"] .sidebar-inner {
+  .sidebar[data-sidebar-state="open"] .sidebar-inner,
+  body.sidebar-open .sidebar .sidebar-inner,
+  body[data-sidebar-state="open"] .sidebar .sidebar-inner,
+  body[data-sidebar-open="true"] .sidebar .sidebar-inner {
+    inline-size: 100%;
+    min-inline-size: 0;
+
     align-items: stretch;
   }
 
   .sidebar.is-open .sidebar-header,
   .sidebar[data-open="true"] .sidebar-header,
-  .sidebar[data-sidebar-state="open"] .sidebar-header {
+  .sidebar[data-sidebar-state="open"] .sidebar-header,
+  body.sidebar-open .sidebar .sidebar-header,
+  body[data-sidebar-state="open"] .sidebar .sidebar-header,
+  body[data-sidebar-open="true"] .sidebar .sidebar-header {
     inline-size: 100%;
+
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2013,46 +2241,70 @@ body[data-theme="light"] .sidebar,
 
   .sidebar.is-open .sidebar-brand,
   .sidebar[data-open="true"] .sidebar-brand,
-  .sidebar[data-sidebar-state="open"] .sidebar-brand {
+  .sidebar[data-sidebar-state="open"] .sidebar-brand,
+  body.sidebar-open .sidebar .sidebar-brand,
+  body[data-sidebar-state="open"] .sidebar .sidebar-brand,
+  body[data-sidebar-open="true"] .sidebar .sidebar-brand {
     display: inline-flex !important;
   }
 
   .sidebar.is-open .sidebar-brand-content,
   .sidebar[data-open="true"] .sidebar-brand-content,
   .sidebar[data-sidebar-state="open"] .sidebar-brand-content,
-  .sidebar.is-open .sidebar-brand-logo,
-  .sidebar[data-open="true"] .sidebar-brand-logo,
-  .sidebar[data-sidebar-state="open"] .sidebar-brand-logo,
+  body.sidebar-open .sidebar .sidebar-brand-content,
+  body[data-sidebar-state="open"] .sidebar .sidebar-brand-content,
+  body[data-sidebar-open="true"] .sidebar .sidebar-brand-content,
   .sidebar.is-open .sidebar-link-content,
   .sidebar[data-open="true"] .sidebar-link-content,
   .sidebar[data-sidebar-state="open"] .sidebar-link-content,
+  body.sidebar-open .sidebar .sidebar-link-content,
+  body[data-sidebar-state="open"] .sidebar .sidebar-link-content,
+  body[data-sidebar-open="true"] .sidebar .sidebar-link-content,
   .sidebar.is-open .sidebar-user-info,
   .sidebar[data-open="true"] .sidebar-user-info,
   .sidebar[data-sidebar-state="open"] .sidebar-user-info,
+  body.sidebar-open .sidebar .sidebar-user-info,
+  body[data-sidebar-state="open"] .sidebar .sidebar-user-info,
+  body[data-sidebar-open="true"] .sidebar .sidebar-user-info,
   .sidebar.is-open .sidebar-account-chevron,
   .sidebar[data-open="true"] .sidebar-account-chevron,
-  .sidebar[data-sidebar-state="open"] .sidebar-account-chevron {
+  .sidebar[data-sidebar-state="open"] .sidebar-account-chevron,
+  body.sidebar-open .sidebar .sidebar-account-chevron,
+  body[data-sidebar-state="open"] .sidebar .sidebar-account-chevron,
+  body[data-sidebar-open="true"] .sidebar .sidebar-account-chevron {
     display: flex !important;
   }
 
   .sidebar.is-open .sidebar-brand-logo,
   .sidebar[data-open="true"] .sidebar-brand-logo,
-  .sidebar[data-sidebar-state="open"] .sidebar-brand-logo {
+  .sidebar[data-sidebar-state="open"] .sidebar-brand-logo,
+  body.sidebar-open .sidebar .sidebar-brand-logo,
+  body[data-sidebar-state="open"] .sidebar .sidebar-brand-logo,
+  body[data-sidebar-open="true"] .sidebar .sidebar-brand-logo {
     display: inline-grid !important;
   }
 
   .sidebar.is-open .sidebar-link-label,
   .sidebar[data-open="true"] .sidebar-link-label,
   .sidebar[data-sidebar-state="open"] .sidebar-link-label,
+  body.sidebar-open .sidebar .sidebar-link-label,
+  body[data-sidebar-state="open"] .sidebar .sidebar-link-label,
+  body[data-sidebar-open="true"] .sidebar .sidebar-link-label,
   .sidebar.is-open .sidebar-logout-label,
   .sidebar[data-open="true"] .sidebar-logout-label,
-  .sidebar[data-sidebar-state="open"] .sidebar-logout-label {
+  .sidebar[data-sidebar-state="open"] .sidebar-logout-label,
+  body.sidebar-open .sidebar .sidebar-logout-label,
+  body[data-sidebar-state="open"] .sidebar .sidebar-logout-label,
+  body[data-sidebar-open="true"] .sidebar .sidebar-logout-label {
     display: block !important;
   }
 
   .sidebar.is-open .sidebar-list,
   .sidebar[data-open="true"] .sidebar-list,
-  .sidebar[data-sidebar-state="open"] .sidebar-list {
+  .sidebar[data-sidebar-state="open"] .sidebar-list,
+  body.sidebar-open .sidebar .sidebar-list,
+  body[data-sidebar-state="open"] .sidebar .sidebar-list,
+  body[data-sidebar-open="true"] .sidebar .sidebar-list {
     align-items: stretch;
     gap: 3px;
   }
@@ -2060,12 +2312,21 @@ body[data-theme="light"] .sidebar,
   .sidebar.is-open .sidebar-link,
   .sidebar[data-open="true"] .sidebar-link,
   .sidebar[data-sidebar-state="open"] .sidebar-link,
+  body.sidebar-open .sidebar .sidebar-link,
+  body[data-sidebar-state="open"] .sidebar .sidebar-link,
+  body[data-sidebar-open="true"] .sidebar .sidebar-link,
   .sidebar.is-open .sidebar-user,
   .sidebar[data-open="true"] .sidebar-user,
   .sidebar[data-sidebar-state="open"] .sidebar-user,
+  body.sidebar-open .sidebar .sidebar-user,
+  body[data-sidebar-state="open"] .sidebar .sidebar-user,
+  body[data-sidebar-open="true"] .sidebar .sidebar-user,
   .sidebar.is-open .sidebar-account-trigger,
   .sidebar[data-open="true"] .sidebar-account-trigger,
-  .sidebar[data-sidebar-state="open"] .sidebar-account-trigger {
+  .sidebar[data-sidebar-state="open"] .sidebar-account-trigger,
+  body.sidebar-open .sidebar .sidebar-account-trigger,
+  body[data-sidebar-state="open"] .sidebar .sidebar-account-trigger,
+  body[data-sidebar-open="true"] .sidebar .sidebar-account-trigger {
     inline-size: auto;
     min-inline-size: 0;
     max-inline-size: none;
@@ -2076,6 +2337,8 @@ body[data-theme="light"] .sidebar,
 
     justify-content: flex-start;
 
+    gap: 8px;
+
     padding: 4px 8px;
     margin-inline: 0;
   }
@@ -2083,9 +2346,15 @@ body[data-theme="light"] .sidebar,
   .sidebar.is-open .sidebar-link-icon,
   .sidebar[data-open="true"] .sidebar-link-icon,
   .sidebar[data-sidebar-state="open"] .sidebar-link-icon,
+  body.sidebar-open .sidebar .sidebar-link-icon,
+  body[data-sidebar-state="open"] .sidebar .sidebar-link-icon,
+  body[data-sidebar-open="true"] .sidebar .sidebar-link-icon,
   .sidebar.is-open .sidebar-logout-icon,
   .sidebar[data-open="true"] .sidebar-logout-icon,
-  .sidebar[data-sidebar-state="open"] .sidebar-logout-icon {
+  .sidebar[data-sidebar-state="open"] .sidebar-logout-icon,
+  body.sidebar-open .sidebar .sidebar-logout-icon,
+  body[data-sidebar-state="open"] .sidebar .sidebar-logout-icon,
+  body[data-sidebar-open="true"] .sidebar .sidebar-logout-icon {
     inline-size: var(--sidebar-local-icon-box);
     min-inline-size: var(--sidebar-local-icon-box);
     max-inline-size: var(--sidebar-local-icon-box);
@@ -2099,7 +2368,10 @@ body[data-theme="light"] .sidebar,
 
   .sidebar.is-open .sidebar-user-avatar,
   .sidebar[data-open="true"] .sidebar-user-avatar,
-  .sidebar[data-sidebar-state="open"] .sidebar-user-avatar {
+  .sidebar[data-sidebar-state="open"] .sidebar-user-avatar,
+  body.sidebar-open .sidebar .sidebar-user-avatar,
+  body[data-sidebar-state="open"] .sidebar .sidebar-user-avatar,
+  body[data-sidebar-open="true"] .sidebar .sidebar-user-avatar {
     inline-size: var(--sidebar-local-avatar-size);
     min-inline-size: var(--sidebar-local-avatar-size);
     max-inline-size: var(--sidebar-local-avatar-size);
@@ -2113,7 +2385,10 @@ body[data-theme="light"] .sidebar,
 
   .sidebar.is-open .sidebar-account-menu,
   .sidebar[data-open="true"] .sidebar-account-menu,
-  .sidebar[data-sidebar-state="open"] .sidebar-account-menu {
+  .sidebar[data-sidebar-state="open"] .sidebar-account-menu,
+  body.sidebar-open .sidebar .sidebar-account-menu,
+  body[data-sidebar-state="open"] .sidebar .sidebar-account-menu,
+  body[data-sidebar-open="true"] .sidebar .sidebar-account-menu {
     inset-inline: 0;
     inset-block-end: calc(100% + 8px);
     inline-size: auto;
@@ -2134,6 +2409,7 @@ body[data-theme="light"] .sidebar,
   .sidebar {
     --sidebar-local-mobile-collapsed-width: var(--sidebar-mobile-collapsed-width, 56px);
     --sidebar-local-collapsed-slot: 40px;
+    --sidebar-local-avatar-collapsed-size: 30px;
   }
 }
 
@@ -2203,37 +2479,6 @@ body[data-theme="light"] .sidebar,
 
 
 /* =========================================================
-   OPTIONAL LAYOUT CONTRACT
-   Si tu main layout usa estas variables, quedan sincronizadas.
-========================================================= */
-
-body:has(.sidebar) {
-  --sidebar-current-width: var(--sidebar-width, 260px);
-}
-
-body:has(.sidebar.is-collapsed),
-body:has(.sidebar[data-open="false"]),
-body:has(.sidebar[data-sidebar-state="collapsed"]) {
-  --sidebar-current-width: var(--sidebar-collapsed, 72px);
-}
-
-@media (max-width: 900px) {
-  body:has(.sidebar) {
-    --sidebar-current-width: var(--sidebar-mobile-collapsed-width, 60px);
-  }
-
-  body:has(.sidebar.is-open),
-  body:has(.sidebar[data-open="true"]),
-  body:has(.sidebar[data-sidebar-state="open"]) {
-    --sidebar-current-width: var(
-      --sidebar-mobile-width,
-      min(320px, calc(100vw - var(--sidebar-mobile-collapsed-width, 60px) - 8px))
-    );
-  }
-}
-
-
-/* =========================================================
    ACCESSIBILITY / HARDENING
 ========================================================= */
 
@@ -2255,18 +2500,6 @@ body:has(.sidebar[data-sidebar-state="collapsed"]) {
   .sidebar .sidebar-account-menu {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
-  }
-}
-
-@supports not selector(:has(*)) {
-  body {
-    --sidebar-current-width: var(--sidebar-width, 260px);
-  }
-
-  @media (max-width: 900px) {
-    body {
-      --sidebar-current-width: var(--sidebar-mobile-collapsed-width, 60px);
-    }
   }
 }
 

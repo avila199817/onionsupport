@@ -381,6 +381,9 @@ body[data-theme="light"] .sidebar,
   min-block-size: 0;
   block-size: 100%;
 
+  inline-size: 100%;
+  min-inline-size: 0;
+
   display: flex;
   flex-direction: column;
 
@@ -1585,6 +1588,8 @@ body[data-theme="light"] .sidebar,
 .sidebar.is-collapsed .sidebar-inner,
 .sidebar[data-open="false"] .sidebar-inner,
 .sidebar[data-sidebar-state="collapsed"] .sidebar-inner {
+  inline-size: 100%;
+  min-inline-size: 0;
   align-items: center;
 }
 
@@ -1671,7 +1676,19 @@ body[data-theme="light"] .sidebar,
 .sidebar[data-open="false"] .sidebar-nav,
 .sidebar[data-sidebar-state="collapsed"] .sidebar-nav {
   inline-size: 100%;
+  min-inline-size: 0;
+
   padding-block-start: 2px;
+
+  scrollbar-width: none;
+  scrollbar-gutter: auto;
+}
+
+.sidebar.is-collapsed .sidebar-nav::-webkit-scrollbar,
+.sidebar[data-open="false"] .sidebar-nav::-webkit-scrollbar,
+.sidebar[data-sidebar-state="collapsed"] .sidebar-nav::-webkit-scrollbar {
+  inline-size: 0;
+  block-size: 0;
 }
 
 .sidebar.is-collapsed .sidebar-list,
@@ -1679,6 +1696,22 @@ body[data-theme="light"] .sidebar,
 .sidebar[data-sidebar-state="collapsed"] .sidebar-list {
   align-items: center;
   gap: 6px;
+}
+
+.sidebar.is-collapsed .sidebar-list,
+.sidebar[data-open="false"] .sidebar-list,
+.sidebar[data-sidebar-state="collapsed"] .sidebar-list,
+.sidebar.is-collapsed .sidebar-item,
+.sidebar[data-open="false"] .sidebar-item,
+.sidebar[data-sidebar-state="collapsed"] .sidebar-item,
+.sidebar.is-collapsed .sidebar-footer,
+.sidebar[data-open="false"] .sidebar-footer,
+.sidebar[data-sidebar-state="collapsed"] .sidebar-footer,
+.sidebar.is-collapsed .sidebar-account-dropdown,
+.sidebar[data-open="false"] .sidebar-account-dropdown,
+.sidebar[data-sidebar-state="collapsed"] .sidebar-account-dropdown {
+  inline-size: 100%;
+  min-inline-size: 0;
 }
 
 .sidebar.is-collapsed .sidebar-link,
@@ -1831,6 +1864,8 @@ body[data-theme="light"] .sidebar,
 
   /* Estado collapsed implícito cuando no hay estado open */
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-inner {
+    inline-size: 100%;
+    min-inline-size: 0;
     align-items: center;
   }
 
@@ -1843,6 +1878,29 @@ body[data-theme="light"] .sidebar,
     justify-content: center;
 
     padding: 0 0 8px;
+  }
+
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-nav {
+    inline-size: 100%;
+    min-inline-size: 0;
+
+    padding-block-start: 2px;
+
+    scrollbar-width: none;
+    scrollbar-gutter: auto;
+  }
+
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-nav::-webkit-scrollbar {
+    inline-size: 0;
+    block-size: 0;
+  }
+
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-list,
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-item,
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-footer,
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-account-dropdown {
+    inline-size: 100%;
+    min-inline-size: 0;
   }
 
   .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]) .sidebar-brand,

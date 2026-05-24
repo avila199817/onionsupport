@@ -32,6 +32,7 @@ import {
   isPublicRoute as configIsPublicRoute,
   isUserHomeRoute as configIsUserHomeRoute,
   normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
@@ -51,7 +52,7 @@ import {
   bindLoginSubmit,
 } from "./login.dom.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.v5";
+export const LOGIN_VIEW_VERSION = "login.view.v6";
 
 const SOURCE = "login.view";
 
@@ -117,12 +118,25 @@ function text(value = "", fallback = "") {
 }
 
 function redact(value = "") {
-  return String(value || "")
+  return text(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function errorPayload(error = null) {
+  if (!error) return {};
+
+  if (isObject(error.data)) return error.data;
+  if (isObject(error.body)) return error.body;
+  if (isObject(error.payload)) return error.payload;
+  if (isObject(error.responseData)) return error.responseData;
+  if (isObject(error.response?.data)) return error.response.data;
+  if (isObject(error.response) && !isFn(error.response.blob)) return error.response;
+
+  return {};
 }
 
 /* =========================================================
@@ -161,39 +175,103 @@ function cleanPath(value = HOME_ROUTE) {
   }
 }
 
+function normalizeSlug(value = "") {
+  try {
+    return configNormalizeUserSlug(value) || "";
+  } catch {
+    const slug = text(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/^\/+/, "")
+      .replace(/^@+/, "")
+      .split(/[/?#]/)[0]
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase();
+
+    if (!slug) return "";
+
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  }
+}
+
+function getUserScopedPathInfo(value = HOME_ROUTE) {
+  const path = cleanPath(value);
+
+  if (!path.startsWith(USER_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: path,
+    };
+  }
+
+  const rest = path.slice(USER_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeSlug(slugSegment);
+
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: path,
+    };
+  }
+
+  const restPath = restSegments.length
+    ? cleanPath(`/${restSegments.join("/")}`)
+    : HOME_ROUTE;
+
+  return {
+    scoped: true,
+    home: restPath === HOME_ROUTE,
+    slug,
+    restPath,
+  };
+}
+
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
     String(value || "")
+  );
+}
+
+function isLocallyBlockedPath(value = "") {
+  const path = cleanPath(value).toLowerCase();
+
+  if (FALLBACK_BLOCKED_PATHS.has(path)) return true;
+
+  return (
+    path.startsWith("/home/") ||
+    path.startsWith("/403/") ||
+    path.startsWith("/404/") ||
+    path.startsWith("/2fa/") ||
+    path.startsWith("/mfa/") ||
+    path.startsWith("/otp/")
   );
 }
 
 function isBlockedLegacyPath(value = "") {
   try {
-    return configIsBlockedRoutePath(value) === true;
+    if (configIsBlockedRoutePath(value) === true) return true;
   } catch {
-    const path = cleanPath(value).toLowerCase();
-
-    if (FALLBACK_BLOCKED_PATHS.has(path)) return true;
-
-    return (
-      path.startsWith("/2fa/") ||
-      path.startsWith("/mfa/") ||
-      path.startsWith("/otp/")
-    );
+    // fallback abajo
   }
+
+  if (isLocallyBlockedPath(value)) return true;
+
+  const scoped = getUserScopedPathInfo(value);
+
+  return Boolean(scoped.scoped && isLocallyBlockedPath(scoped.restPath));
 }
 
 function isUserHomePath(value = "") {
   try {
     return configIsUserHomeRoute(value) === true;
   } catch {
-    const path = cleanPath(value);
-
-    if (!path.startsWith(USER_PREFIX)) return false;
-
-    const slug = path.slice(USER_PREFIX.length);
-
-    return /^[a-z0-9][a-z0-9._-]{0,95}$/i.test(slug);
+    return Boolean(getUserScopedPathInfo(value).home);
   }
 }
 
@@ -214,6 +292,8 @@ function safeInternalPath(value = "", fallback = HOME_ROUTE) {
 
 function isPublicAuthPath(value = "") {
   const path = cleanPath(value);
+
+  if (getUserScopedPathInfo(path).scoped) return false;
 
   try {
     if (configIsPublicRoute(path) === true) return true;
@@ -263,7 +343,7 @@ function authHomeTarget(result = {}) {
 
   /*
     Si Auth ya resolvió /@slug, lo respetamos.
-    Si sólo tenemos "/", el Router real se encargará de canonicalizar
+    Si sólo tenemos "/", Router real se encargará de canonicalizar
     a /@{slug} cuando la sesión esté aplicada.
   */
   return isUserHomePath(target) ? cleanPath(target) : target;
@@ -367,9 +447,13 @@ function authenticated(result = {}) {
 }
 
 function errorMessage(error = null) {
+  const payload = errorPayload(error);
+
   return redact(
-    text(error?.data?.message, "") ||
-      text(error?.response?.data?.message, "") ||
+    text(payload.message, "") ||
+      text(payload.error_description, "") ||
+      text(payload.error, "") ||
+      text(payload.detail, "") ||
       text(error?.message, "") ||
       "No se pudo iniciar sesión."
   );
@@ -561,6 +645,10 @@ export function renderLoginView(container, deps = {}) {
           noToastDirect: true,
           noBrowserNavigation: true,
           noAppCoreNavigate: true,
+
+          blocksLegacyRoutes: true,
+          blocksSensitiveRedirects: true,
+          publicRoutesCannotLiveUnderUserScope: true,
 
           noHomeRoute: true,
           no2fa: true,

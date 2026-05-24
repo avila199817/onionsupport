@@ -8,7 +8,6 @@
       "/.well-known/*",
       "/robots.txt",
       "/sitemap.xml",
-      "/BingSiteAuth.xml",
       "/site.webmanifest",
       "/manifest.json",
       "/favicon.ico",
@@ -141,12 +140,6 @@
     },
     {
       "route": "/robots.txt",
-      "headers": {
-        "Cache-Control": "public, max-age=3600"
-      }
-    },
-    {
-      "route": "/BingSiteAuth.xml",
       "headers": {
         "Cache-Control": "public, max-age=3600"
       }

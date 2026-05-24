@@ -15,14 +15,13 @@
    - No hacer fetch.
    - No crear eventos propios.
    - No aplicar navegación paralela.
-   - No forzar /home.
    - Sin token flow.
    - Sin debug pesado.
 ========================================================= */
 
 import { Router } from "../router/index.js";
 
-export const ROUTER_BOOTSTRAP_VERSION = "app.router.v4";
+export const ROUTER_BOOTSTRAP_VERSION = "app.router.v5";
 
 let configured = false;
 let bound = false;
@@ -61,7 +60,7 @@ function cleanText(value = "", fallback = "") {
 function redact(value = "") {
   return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -98,13 +97,8 @@ function routeFrom(options = {}) {
   const bootContext = isObject(input.bootContext) ? input.bootContext : {};
 
   /*
-    No normalizamos aquí a /@slug ni a /.
-    El Router real decide:
-    - /@slug
-    - /@slug/ruta
-    - /home bloqueado
-    - redirects auth
-    - rutas públicas con token
+    No normalizar aquí.
+    El Router real decide canonicalización, guards, redirects y render.
   */
   return (
     pathCandidate(bootContext.initialPath) ||
@@ -224,7 +218,7 @@ export function renderInitialRoute(options = {}) {
 
         /*
           La URL actual ya existe en el navegador.
-          History.ensureInitialHistoryState() pertenece al Router real.
+          La gestión real de history pertenece a /src/router.
         */
         skipHistory: true,
       })
@@ -240,9 +234,11 @@ export function renderInitialRoute(options = {}) {
           found: result.found ?? null,
           forbidden: result.forbidden ?? null,
           skipped: result.skipped ?? null,
+          redirected: result.redirected ?? null,
           reason: result.reason || null,
           canonicalPath: redact(result.canonicalPath || ""),
           publicPath: redact(result.publicPath || ""),
+          routeMode: result.routeMode || null,
         }
       : {
           ok: true,
@@ -315,7 +311,8 @@ export function getRouterBootstrapState() {
       routerOwnsAuthWait: true,
       routerOwnsGuards: true,
       routerOwnsHistory: true,
-      routerOwnsSlugCanonicalization: true,
+      routerOwnsCanonicalization: true,
+      routerOwnsRedirects: true,
 
       ownAuth: false,
       ownStorage: false,
@@ -328,12 +325,6 @@ export function getRouterBootstrapState() {
       noFetch: true,
       noEventsOwn: true,
       noDebugNoise: true,
-
-      noHomeAlias: true,
-      noHomeRoute: true,
-      no2fa: true,
-      noMfa: true,
-      noOtp: true,
 
       snapshotRedacted: true,
     },

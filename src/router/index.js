@@ -13,6 +13,7 @@
    - Renderizar vista.
    - Actualizar history.
    - Actualizar estado de ruta.
+   - Actualizar shell.
    - Sincronizar chrome registrado tras render.
    - Ruta privada sin sesión válida -> /login.
    - Login con sesión válida -> /@{user.slug}.
@@ -42,7 +43,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v10";
+export const ROUTER_VERSION = "router.index.v11";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -124,10 +125,21 @@ export const Router = (() => {
   function redact(value = "") {
     return cleanText(value, "")
       .replace(
-        /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+        /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
         "$1***"
       )
       .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+  }
+
+  function safeRouteParams(params = {}) {
+    if (!isObject(params)) return {};
+
+    return Object.fromEntries(
+      Object.entries(params).map(([key, value]) => [
+        key,
+        typeof value === "string" ? redact(value) : value,
+      ])
+    );
   }
 
   /* =======================================================
@@ -314,7 +326,7 @@ export const Router = (() => {
   }
 
   function hasSensitiveQuery(value = "") {
-    return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+    return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
       String(value || "")
     );
   }
@@ -742,9 +754,19 @@ export const Router = (() => {
     const visibleCanonicalPath = normalizeCanonicalPath(publicPath);
     const scoped = getUserPathInfo(visibleCanonicalPath);
     const lookupPath = resolveRouteLookupPath(visibleCanonicalPath);
-    const route = isBlockedLegacyPath(visibleCanonicalPath)
+    const blockedLegacy = isBlockedLegacyPath(visibleCanonicalPath);
+
+    let route = blockedLegacy
       ? null
       : getStaticRouteByPath(lookupPath);
+
+    /*
+      Sólo las rutas privadas pueden vivir bajo /@{slug}.
+      Las rutas públicas/auth no deben renderizarse como /@slug/login, etc.
+    */
+    if (scoped.scoped && route?.public === true) {
+      route = null;
+    }
 
     return {
       route,
@@ -753,8 +775,12 @@ export const Router = (() => {
       visibleCanonicalPath,
       lookupPath,
       routeParams: scoped.slug ? { slug: scoped.slug } : {},
-      matchedBy: scoped.slug ? "user-scope" : route ? "static" : "none",
-      blockedLegacy: isBlockedLegacyPath(visibleCanonicalPath),
+      matchedBy: route
+        ? scoped.slug
+          ? "user-scope"
+          : "static"
+        : "none",
+      blockedLegacy,
     };
   }
 
@@ -793,7 +819,7 @@ export const Router = (() => {
       canonicalPath === HOME_PATH &&
       isAuthenticated()
     ) {
-      return buildUserHomePath();
+      return withSearchHashFrom(publicPath, buildUserHomePath());
     }
 
     const match = getRouteMatch(publicPath);
@@ -1355,6 +1381,7 @@ export const Router = (() => {
 
   async function renderRuntimeError(route, data, error, options = {}) {
     destroyActiveView();
+    clearChrome();
     writeHistory(data.publicPath, options);
 
     if (isFunction(Render.renderRouteRuntimeError)) {
@@ -1699,13 +1726,13 @@ export const Router = (() => {
       route: redact(readState().route || HOME_PATH),
       canonicalPath: redact(currentCanonicalPath()),
       publicPath: redact(currentPublicPath()),
-      routeParams: readState().routeParams || {},
+      routeParams: safeRouteParams(readState().routeParams || {}),
 
       authenticated: isAuthenticated(),
       authResolving: isAuthResolving(),
       hasAuthPromise: Boolean(getInFlightAuthPromise()),
 
-      defaultHome: getDefaultHome(),
+      defaultHome: redact(getDefaultHome()),
       currentUserSlug: getCurrentUserSlug() || null,
       currentRole: getCurrentRole(),
 
@@ -1752,6 +1779,8 @@ export const Router = (() => {
         no2fa: true,
         noMfa: true,
         noOtp: true,
+
+        snapshotRedacted: true,
       },
     };
   }

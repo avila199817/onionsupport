@@ -46,9 +46,11 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const GUARDS_VERSION = "router.guards.v9";
+export const GUARDS_VERSION = "router.guards.v10";
 
-const LOGIN_PATH = ROUTES.login || "/login";
+const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
+
+const LOGIN_PATH = CONFIG_ROUTES.login || "/login";
 const HOME_PATH = "/";
 const USER_PREFIX = USER_HOME_PREFIX || "/@";
 
@@ -131,12 +133,17 @@ function readState(AppCore = null) {
 
 function resolveAuth(AppCore = null, Auth = null) {
   try {
+    const modules = AppCore?.modules || null;
+    const getModule = isFunction(modules?.get)
+      ? modules.get.bind(modules)
+      : null;
+
     return (
       Auth ||
       AppCore?.auth ||
       AppCore?.Auth ||
-      AppCore?.modules?.get?.("auth") ||
-      AppCore?.modules?.get?.("Auth") ||
+      safeCall(getModule, "auth") ||
+      safeCall(getModule, "Auth") ||
       null
     );
   } catch {
@@ -147,7 +154,7 @@ function resolveAuth(AppCore = null, Auth = null) {
 function redact(value = "") {
   return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -276,6 +283,12 @@ export function normalizePublicPath(path = HOME_PATH) {
   });
 }
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
+    String(value || "")
+  );
+}
+
 function isBlockedLegacyPath(path = HOME_PATH) {
   try {
     if (isConfigBlockedRoutePath(path) === true) return true;
@@ -402,12 +415,6 @@ export function canonicalGuardPath(path = HOME_PATH) {
 
     return scoped.scoped ? scoped.lookupPath : pathname;
   }
-}
-
-function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
-    String(value || "")
-  );
 }
 
 function isSafeInternalPath(path = "") {
@@ -561,27 +568,38 @@ function getUserSlug(AppCore = null, Auth = null) {
 
 function getUserHomePath(AppCore = null, Auth = null) {
   const auth = resolveAuth(AppCore, Auth);
+  const slug = getUserSlug(AppCore, auth);
 
   const fromAuth =
     callAuth(AppCore, auth, "getDefaultHome", "") ||
-    callAuth(AppCore, auth, "getPostLoginTarget", "") ||
     callAuth(AppCore, auth, "buildUserHomePath", "", getUser(AppCore, auth));
 
   if (fromAuth && isSafeInternalPath(fromAuth)) {
-    return normalizePublicPath(fromAuth);
-  }
+    const normalized = normalizePublicPath(fromAuth);
 
-  const slug = getUserSlug(AppCore, auth);
+    /*
+      La home autenticada visible debe ser /@{slug}.
+      Si Auth devuelve "/" como fallback genérico, Guards construye la home visible real.
+    */
+    if (normalized !== HOME_PATH || !slug) {
+      return normalized;
+    }
+  }
 
   try {
-    return configBuildUserHomeRoute(slug) || HOME_PATH;
+    const configured = configBuildUserHomeRoute(slug);
+
+    if (configured && isSafeInternalPath(configured)) {
+      return normalizePublicPath(configured);
+    }
   } catch {
-    return slug ? `${USER_PREFIX}${slug}` : HOME_PATH;
+    // fallback local
   }
+
+  return slug ? `${USER_PREFIX}${slug}` : HOME_PATH;
 }
 
 function buildLoginRedirect(AppCore = null, Auth = null, publicPath = HOME_PATH) {
-  const auth = resolveAuth(AppCore, Auth);
   const target = safeRedirect(publicPath, HOME_PATH);
 
   if (
@@ -758,7 +776,7 @@ function publicUser(user = null, AppCore = null, Auth = null) {
 
   return {
     hasId: Boolean(user.id || user.userId || user.uid || user.sub),
-    username: user.username || null,
+    hasUsername: Boolean(user.username),
     slug: getUserSlug(AppCore, Auth) || null,
     role: normalizeRole(user.role || user.rol || user.roles) || null,
     usable: isUserUsable(user),
@@ -804,7 +822,7 @@ function buildDetails({
 
     user: publicUser(user, AppCore, auth),
 
-    userHomePath: getUserHomePath(AppCore, auth),
+    userHomePath: redact(getUserHomePath(AppCore, auth)),
 
     ...extra,
   };
@@ -942,7 +960,7 @@ export function shouldAllowRoute({
     });
   }
 
-  if (publicRoute && !routeRequiresAuth && !adminOnlyRoute) {
+  if (publicRoute && !routeRequiresAuth && !adminOnlyRoute && !roles.length) {
     return allow({
       reason: guestOnly ? GUARD_REASONS.guestOnly : GUARD_REASONS.publicRoute,
       route,
@@ -1099,7 +1117,7 @@ export function getGuardsSnapshot({
       currentRole: currentRole(AppCore, auth) || null,
       currentRoles: currentRoles(AppCore, auth),
       user: publicUser(user, AppCore, auth),
-      userHomePath: getUserHomePath(AppCore, auth),
+      userHomePath: redact(getUserHomePath(AppCore, auth)),
     },
 
     routeAccess: {

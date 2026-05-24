@@ -42,7 +42,7 @@ import {
 
 import * as SessionApi from "./session.js";
 
-export const LOGIN_VERSION = "auth.login.v6";
+export const LOGIN_VERSION = "auth.login.v7";
 
 const LOGIN_ROUTE = ROUTES.login || "/login";
 const HOME_ROUTE = "/";
@@ -115,6 +115,15 @@ function first(...values) {
   return null;
 }
 
+function redact(value = "") {
+  return cleanText(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
 function sessionMethod(name = "") {
   const direct = SessionApi?.[name];
 
@@ -143,13 +152,9 @@ function normalizeRole(value = "") {
     return "";
   }
 
-  const role = String(value || "").trim().toLowerCase();
+  const role = cleanText(value, "").toLowerCase();
 
   return VALID_ROLES.includes(role) ? role : "";
-}
-
-function cleanRole(value = "") {
-  return normalizeRole(value) || "user";
 }
 
 /* =========================================================
@@ -176,15 +181,47 @@ export function normalizeLoginSlug(value = "") {
   }
 }
 
+function isBlockedSpaPath(path = "") {
+  try {
+    if (configIsBlockedRoutePath(path) === true) return true;
+  } catch {
+    // fallback local
+  }
+
+  const clean = cleanText(path, "")
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/\/+$/g, "")
+    .toLowerCase() || "/";
+
+  return Boolean(
+    clean === "/home" ||
+      clean.startsWith("/home/") ||
+      clean === "/403" ||
+      clean.startsWith("/403/") ||
+      clean === "/404" ||
+      clean.startsWith("/404/") ||
+      clean === "/2fa" ||
+      clean.startsWith("/2fa/") ||
+      clean === "/mfa" ||
+      clean.startsWith("/mfa/") ||
+      clean === "/otp" ||
+      clean.startsWith("/otp/")
+  );
+}
+
 function normalizeSpaPath(path = "") {
   const raw = cleanText(path, "");
 
   if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
 
   try {
     const clean = configNormalizeRoutePath(raw) || "";
 
-    if (!clean || configIsBlockedRoutePath(clean)) return "";
+    if (!clean || isBlockedSpaPath(clean)) return "";
 
     return clean;
   } catch {
@@ -196,12 +233,10 @@ function normalizeSpaPath(path = "") {
     const clean = raw
       .split("?")[0]
       .split("#")[0]
+      .replace(/\/{2,}/g, "/")
       .replace(/\/+$/g, "") || "/";
 
-    if (clean === "/home") return "";
-    if (clean.startsWith("/2fa")) return "";
-    if (clean.startsWith("/mfa")) return "";
-    if (clean.startsWith("/otp")) return "";
+    if (isBlockedSpaPath(clean)) return "";
 
     return clean;
   }
@@ -226,6 +261,14 @@ export function extractLoginUserSlug(user = null) {
   );
 }
 
+function isUserHomePath(path = "") {
+  try {
+    return configIsUserHomeRoute(path) === true;
+  } catch {
+    return /^\/@[a-z0-9][a-z0-9._-]{0,95}$/i.test(normalizeSpaPath(path));
+  }
+}
+
 export function buildUserHomePath(user = null) {
   const build = sessionMethod("buildSessionUserHomePath");
 
@@ -238,18 +281,14 @@ export function buildUserHomePath(user = null) {
   const slug = extractLoginUserSlug(user);
 
   try {
-    return configBuildUserHomeRoute(slug) || HOME_ROUTE;
-  } catch {
-    return slug ? `${USER_HOME_PREFIX || "/@"}${slug}` : HOME_ROUTE;
-  }
-}
+    const configured = normalizeSpaPath(configBuildUserHomeRoute(slug));
 
-function isUserHomePath(path = "") {
-  try {
-    return configIsUserHomeRoute(path) === true;
+    if (isUserHomePath(configured)) return configured;
   } catch {
-    return /^\/@[a-z0-9][a-z0-9._-]{0,95}$/i.test(normalizeSpaPath(path));
+    // fallback abajo
   }
+
+  return slug ? `${USER_HOME_PREFIX || "/@"}${slug}` : HOME_ROUTE;
 }
 
 function extractRouting(payload = {}) {
@@ -356,7 +395,31 @@ function normalizeSessionContext(sessionData = null, user = null) {
   return null;
 }
 
-function looksLikeLoginUserObject(value = null) {
+function hasAuthEnvelopeSignals(value = null) {
+  if (!isObject(value)) return false;
+
+  return Boolean(
+    value.token ||
+      value.accessToken ||
+      value.access_token ||
+      value.refreshToken ||
+      value.refresh_token ||
+      value.session ||
+      value.sessionData ||
+      value.sessionId ||
+      value.session_id ||
+      value.sid ||
+      value.sessionUserId ||
+      value.session_user_id ||
+      value.expiresAt ||
+      value.expires_at ||
+      value.auth ||
+      value.payload ||
+      value.result
+  );
+}
+
+function looksLikeExplicitLoginUserObject(value = null) {
   if (!isObject(value)) return false;
 
   if (cleanText(value.userId || value.uid || value.sub, "")) return true;
@@ -379,6 +442,12 @@ function looksLikeLoginUserObject(value = null) {
   }
 
   return false;
+}
+
+function looksLikeStandaloneLoginUserObject(value = null) {
+  if (!looksLikeExplicitLoginUserObject(value)) return false;
+
+  return !hasAuthEnvelopeSignals(value);
 }
 
 /* =========================================================
@@ -442,18 +511,22 @@ function readUser(payload = {}) {
       node.profile ||
       null;
 
-    const explicitUser = normalizeUser(explicit);
+    const explicitUser = looksLikeExplicitLoginUserObject(explicit)
+      ? normalizeUser(explicit)
+      : null;
 
     if (explicitUser) return explicitUser;
-
-    if (looksLikeLoginUserObject(node)) {
-      const flatUser = normalizeUser(node);
-
-      if (flatUser) return flatUser;
-    }
   }
 
-  return looksLikeLoginUserObject(payload) ? normalizeUser(payload) : null;
+  for (const node of nested(payload)) {
+    if (!looksLikeStandaloneLoginUserObject(node)) continue;
+
+    const flatUser = normalizeUser(node);
+
+    if (flatUser) return flatUser;
+  }
+
+  return looksLikeStandaloneLoginUserObject(payload) ? normalizeUser(payload) : null;
 }
 
 function readSession(payload = {}, user = null) {
@@ -508,14 +581,16 @@ function readSession(payload = {}, user = null) {
 function readMessage(payload = {}) {
   if (!isObject(payload)) return "";
 
-  return cleanText(
-    pick(nested(payload), [
-      "message",
-      "error",
-      "detail",
-      "reason",
-    ]) || "",
-    ""
+  return redact(
+    cleanText(
+      pick(nested(payload), [
+        "message",
+        "error",
+        "detail",
+        "reason",
+      ]) || "",
+      ""
+    )
   );
 }
 
@@ -587,47 +662,61 @@ function normalizeLoginResponse(response = {}) {
    ERRORS
 ========================================================= */
 
-function redactErrorText(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+function extractErrorPayload(error = null) {
+  if (!error) return {};
+
+  if (isObject(error.data)) return error.data;
+  if (isObject(error.body)) return error.body;
+  if (isObject(error.payload)) return error.payload;
+  if (isObject(error.responseData)) return error.responseData;
+  if (isObject(error.response?.data)) return error.response.data;
+  if (isObject(error.response) && !isFunction(error.response.blob)) return error.response;
+
+  return {};
 }
 
 function extractMessage(error = null) {
+  const payload = extractErrorPayload(error);
+
   return (
-    cleanText(error?.data?.message, "") ||
-    cleanText(error?.response?.data?.message, "") ||
+    cleanText(payload.message, "") ||
+    cleanText(payload.error_description, "") ||
+    cleanText(payload.error, "") ||
     cleanText(error?.message, "") ||
     String(error || "")
   );
 }
 
 function extractCode(error = null) {
+  const payload = extractErrorPayload(error);
+
   return (
     error?.code ||
-    error?.data?.code ||
-    error?.response?.data?.code ||
+    payload.code ||
+    payload.errorCode ||
+    payload.error_code ||
+    payload.error ||
     ""
   );
 }
 
 function extractStatus(error = null) {
+  const payload = extractErrorPayload(error);
+
   return (
     Number(
       error?.status ||
         error?.statusCode ||
         error?.response?.status ||
-        error?.data?.status ||
+        payload.status ||
+        payload.statusCode ||
         0
     ) || 0
   );
 }
 
 function createLoginError(message = "No se pudo iniciar sesión.", options = {}) {
-  const error = new Error(redactErrorText(message));
+  const error = new Error(redact(message));
 
   error.name = "AuthLoginError";
   error.status = options.status || 401;
@@ -913,6 +1002,8 @@ export function getLoginSnapshot() {
       validatesUser: true,
       returnsRefreshAndSessionContext: true,
       persistentSessionRequired: true,
+
+      avoidsSessionEnvelopeAsUser: true,
 
       noRouter: true,
       noToast: true,

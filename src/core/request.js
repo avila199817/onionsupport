@@ -29,12 +29,13 @@ import {
   config,
   AUTH_ENDPOINTS,
   PUBLIC_API_PATHS,
+  PRIVATE_API_PATHS,
   getApiBase,
   isCanonicalBackendApiBase,
   isPublicApiPath,
 } from "./config.js";
 
-export const REQUEST_VERSION = "core.request.v5";
+export const REQUEST_VERSION = "core.request.v6";
 
 const DEFAULT_API_BASE = getApiBase();
 
@@ -70,13 +71,36 @@ function cleanText(value = "", fallback = "") {
 }
 
 function redact(value = "") {
-  return String(value || "")
+  return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
+
+function safeKey(value = "") {
+  return cleanText(value, "").toLowerCase();
+}
+
+const SENSITIVE_KEYS = new Set([
+  "token",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "secret",
+  "session",
+  "code",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
+  "jwt",
+  "authorization",
+  "reset_token",
+  "activation_token",
+]);
 
 /* =========================================================
    API BASE
@@ -400,6 +424,16 @@ function buildHeaders({
   return headers;
 }
 
+function normalizeCredentials(value = "") {
+  const clean = cleanText(value, "");
+
+  if (clean === "omit") return "omit";
+  if (clean === "same-origin") return "same-origin";
+  if (clean === "include") return "include";
+
+  return config?.api?.withCredentials === false ? "same-origin" : "include";
+}
+
 /* =========================================================
    RESPONSE / ERROR
 ========================================================= */
@@ -476,6 +510,31 @@ function errorCodeFrom(value = null) {
   );
 }
 
+function sanitizeForSnapshot(value = null, depth = 0) {
+  if (depth > 5) return null;
+
+  if (typeof value === "string") return redact(value);
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 100).map((item) => sanitizeForSnapshot(item, depth + 1));
+  }
+
+  if (!isObject(value)) return value;
+
+  const output = {};
+
+  for (const [key, child] of Object.entries(value)) {
+    if (SENSITIVE_KEYS.has(safeKey(key))) {
+      output[key] = "***";
+      continue;
+    }
+
+    output[key] = sanitizeForSnapshot(child, depth + 1);
+  }
+
+  return output;
+}
+
 export function buildRequestError({
   response = null,
   data = null,
@@ -527,7 +586,9 @@ export function buildRequestError({
   error.payload = data;
   error.responseData = data;
 
-  error.raw = raw || null;
+  error.safeData = sanitizeForSnapshot(data);
+
+  error.raw = typeof raw === "string" ? redact(raw) : sanitizeForSnapshot(raw) || null;
 
   error.auth = isObject(data?.auth) ? data.auth : null;
 
@@ -635,6 +696,15 @@ export function createRequest({
       serializedBody,
     });
 
+    const finalRequestOptions = {
+      method,
+      headers,
+      credentials: normalizeCredentials(options.credentials),
+      cache: options.cache || "default",
+      body: serializedBody,
+      signal: options.signal || undefined,
+    };
+
     pending += 1;
     sequence += 1;
 
@@ -658,14 +728,7 @@ export function createRequest({
         });
       }
 
-      const response = await runFetch(url, {
-        method,
-        headers,
-        credentials: options.credentials || "include",
-        cache: options.cache || "default",
-        body: serializedBody,
-        signal: options.signal || undefined,
-      });
+      const response = await runFetch(url, finalRequestOptions);
 
       if (options.raw === true) {
         if (!response.ok) {
@@ -723,6 +786,7 @@ export function createRequest({
             refreshRequired: lastError.refreshRequired === true,
             shouldLogout: lastError.shouldLogout === true,
             clearClientSession: lastError.clearClientSession === true,
+            safeData: sanitizeForSnapshot(lastError.safeData || null),
           }
         : null,
 
@@ -743,6 +807,7 @@ export function createRequest({
         tokenExpiredDoesNotMeanLogout: true,
 
         preservesBackendErrorPayload: true,
+        exposesOnlySafeErrorDataInSnapshot: true,
 
         meAlwaysPrivate: true,
         refreshPublicWithoutAuthorization: true,
@@ -835,4 +900,5 @@ export default {
   buildRequestError,
 
   publicApiPaths: PUBLIC_API_PATHS,
+  privateApiPaths: PRIVATE_API_PATHS,
 };

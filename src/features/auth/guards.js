@@ -23,6 +23,7 @@
    - Sin rutas inventadas.
    - Sin alias /home.
    - Sin /403.
+   - Sin /404.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
@@ -45,7 +46,7 @@ import {
 
 import * as Session from "./session.js";
 
-export const GUARDS_VERSION = "auth.guards.v6";
+export const GUARDS_VERSION = "auth.guards.v7";
 
 const HOME_PATH = "/";
 const LOGIN_PATH = ROUTES.login || "/login";
@@ -65,10 +66,6 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFunction(value) {
-  return typeof value === "function";
-}
-
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -83,13 +80,19 @@ function cleanText(value = "", fallback = "") {
 }
 
 function unique(values = []) {
-  return [...new Set(values.filter(Boolean))];
+  return [
+    ...new Set(
+      (Array.isArray(values) ? values : [values])
+        .flat(Infinity)
+        .filter(Boolean)
+    ),
+  ];
 }
 
 function redact(value = "") {
   return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -111,7 +114,7 @@ function normalizeRole(value = "") {
     return "";
   }
 
-  const role = String(value || "").trim().toLowerCase();
+  const role = cleanText(value, "").toLowerCase();
 
   return VALID_ROLES.includes(role) ? role : "";
 }
@@ -128,10 +131,10 @@ function normalizeRequiredRoles(values = []) {
 
 function routeRequestedRoles(route = {}) {
   return [
-    route.role,
-    route.roles,
-    route.meta?.role,
-    route.meta?.roles,
+    route?.role,
+    route?.roles,
+    route?.meta?.role,
+    route?.meta?.roles,
   ]
     .flat(Infinity)
     .filter((role) => role !== undefined && role !== null && role !== "");
@@ -141,6 +144,7 @@ function routeRequiresAdmin(route = {}) {
   if (!isObject(route)) return false;
 
   const roles = normalizeRequiredRoles(routeRequestedRoles(route));
+  const path = canonicalAuthPath(route.canonicalPath || route.path || "");
 
   if (
     route.admin === true ||
@@ -158,7 +162,7 @@ function routeRequiresAdmin(route = {}) {
   }
 
   try {
-    return configIsAdminRoute(route.canonicalPath || route.path || "") === true;
+    return configIsAdminRoute(path) === true;
   } catch {
     return false;
   }
@@ -207,26 +211,6 @@ export function normalizePublicPath(path = HOME_PATH) {
   }
 }
 
-function isBlockedLegacyPath(path = HOME_PATH) {
-  try {
-    return configIsBlockedRoutePath(path) === true;
-  } catch {
-    const normalized = normalizePublicPath(path).toLowerCase();
-
-    return (
-      normalized === "/home" ||
-      normalized === "/403" ||
-      normalized === "/404" ||
-      normalized === "/2fa" ||
-      normalized === "/mfa" ||
-      normalized === "/otp" ||
-      normalized.startsWith("/2fa/") ||
-      normalized.startsWith("/mfa/") ||
-      normalized.startsWith("/otp/")
-    );
-  }
-}
-
 function normalizeUserSlug(value = "") {
   try {
     return configNormalizeUserSlug(value) || "";
@@ -247,35 +231,80 @@ function normalizeUserSlug(value = "") {
   }
 }
 
+function localUserScopedRouteInfo(path = HOME_PATH) {
+  const normalized = normalizePublicPath(path);
+
+  if (!normalized.startsWith(USER_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: normalized,
+      canonicalPath: normalized,
+      lookupPath: normalized,
+    };
+  }
+
+  const rest = normalized.slice(USER_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeUserSlug(slugSegment);
+
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: normalized,
+      canonicalPath: normalized,
+      lookupPath: normalized,
+    };
+  }
+
+  const restPath = restSegments.length
+    ? normalizePublicPath(`/${restSegments.join("/")}`)
+    : HOME_PATH;
+
+  return {
+    scoped: true,
+    home: restPath === HOME_PATH,
+    slug,
+    restPath,
+    canonicalPath: restPath,
+    lookupPath: restPath,
+  };
+}
+
 export function getUserScopedRouteInfo(path = HOME_PATH) {
   try {
     const info = getConfigUserScopedRouteInfo(path);
 
     if (isObject(info)) {
-      const restPath = info.restPath || info.canonicalPath || normalizePublicPath(path);
-      const canonicalPath = info.canonicalPath || info.lookupPath || restPath;
+      const restPath = normalizePublicPath(
+        info.restPath ||
+          info.canonicalPath ||
+          normalizePublicPath(path)
+      );
+
+      const canonicalPath = normalizePublicPath(
+        info.canonicalPath ||
+          info.lookupPath ||
+          restPath
+      );
 
       return {
         scoped: Boolean(info.scoped),
         home: Boolean(info.home),
-        slug: cleanText(info.slug, ""),
+        slug: normalizeUserSlug(info.slug || ""),
         restPath,
         canonicalPath,
+        lookupPath: canonicalPath,
       };
     }
   } catch {
     // fallback abajo
   }
 
-  const normalized = normalizePublicPath(path);
-
-  return {
-    scoped: false,
-    home: false,
-    slug: "",
-    restPath: normalized,
-    canonicalPath: normalized,
-  };
+  return localUserScopedRouteInfo(path);
 }
 
 export function extractUserScopedSlug(path = HOME_PATH) {
@@ -303,6 +332,39 @@ export function isUserScopedPath(path = HOME_PATH) {
   }
 }
 
+function localBlockedPath(path = HOME_PATH) {
+  const normalized = normalizePublicPath(path).toLowerCase();
+
+  return Boolean(
+    normalized === "/home" ||
+      normalized.startsWith("/home/") ||
+      normalized === "/403" ||
+      normalized.startsWith("/403/") ||
+      normalized === "/404" ||
+      normalized.startsWith("/404/") ||
+      normalized === "/2fa" ||
+      normalized.startsWith("/2fa/") ||
+      normalized === "/mfa" ||
+      normalized.startsWith("/mfa/") ||
+      normalized === "/otp" ||
+      normalized.startsWith("/otp/")
+  );
+}
+
+function isBlockedLegacyPath(path = HOME_PATH) {
+  try {
+    if (configIsBlockedRoutePath(path) === true) return true;
+  } catch {
+    // fallback local
+  }
+
+  if (localBlockedPath(path)) return true;
+
+  const scoped = getUserScopedRouteInfo(path);
+
+  return Boolean(scoped.scoped && localBlockedPath(scoped.restPath));
+}
+
 function isCurrentUserScopedPath(path = HOME_PATH) {
   const routeSlug = extractUserScopedSlug(path);
 
@@ -320,6 +382,8 @@ function isCurrentUserHomePath(path = HOME_PATH) {
 }
 
 export function canonicalAuthPath(path = HOME_PATH) {
+  if (isBlockedLegacyPath(path)) return "";
+
   try {
     return configCanonicalRoutePath(path) || HOME_PATH;
   } catch {
@@ -363,7 +427,7 @@ function publicAuthRoutes() {
 
 export function syncAuthState(options = {}) {
   try {
-    if (isFunction(Session.syncAuthState)) {
+    if (typeof Session.syncAuthState === "function") {
       Session.syncAuthState({
         source: options.source || "auth.guards",
       });
@@ -516,6 +580,11 @@ export function isPublicTechnicalPath(path = currentPath()) {
 
   if (isBlockedLegacyPath(normalized)) return false;
 
+  /*
+    Las rutas públicas/auth no deben vivir dentro de /@{slug}.
+  */
+  if (getUserScopedRouteInfo(normalized).scoped) return false;
+
   try {
     if (configIsPublicRoute(normalized) === true) return true;
   } catch {
@@ -571,6 +640,11 @@ export function guardGuest(options = {}) {
 
   if (isBlockedLegacyPath(path)) return false;
 
+  /*
+    Una ruta pública dentro de /@{slug} no es válida.
+  */
+  if (getUserScopedRouteInfo(path).scoped) return false;
+
   return !isAuthenticated();
 }
 
@@ -602,6 +676,14 @@ export function canAccessRoute(route = {}) {
   const scoped = getUserScopedRouteInfo(publicPath);
 
   if (isBlockedLegacyPath(publicPath) || isBlockedLegacyPath(canonicalPath)) {
+    return false;
+  }
+
+  /*
+    Las rutas públicas/auth no se aceptan bajo user scope.
+    Router/index.js también protege esto; aquí se replica sólo para compat.
+  */
+  if (scoped.scoped && route.public === true) {
     return false;
   }
 
@@ -704,7 +786,7 @@ export function getAuthGuardsSnapshot() {
     homePath: getCurrentUserHomePath(),
 
     path: redact(path),
-    canonicalPath: canonicalAuthPath(path),
+    canonicalPath: redact(canonicalAuthPath(path)),
 
     userScopedPath: scoped.scoped,
     userScopedRestPath: scoped.scoped ? scoped.restPath : null,
@@ -746,6 +828,7 @@ export function getAuthGuardsSnapshot() {
       canonicalizesUserScopedRoutes: true,
 
       validatesCurrentUserSlugForCompat: true,
+      blocksPublicRoutesInsideUserScope: true,
 
       blocksHomeAlias: true,
       blocks403Route: true,

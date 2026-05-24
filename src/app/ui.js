@@ -17,10 +17,11 @@
    - Sin debug.
 ========================================================= */
 
-export const UI_VERSION = "app.ui.v3";
+export const UI_VERSION = "app.ui.v4";
 
 let initialized = false;
 let bridged = false;
+let lastBridgeReason = "idle";
 
 /* =========================================================
    BASICS
@@ -43,43 +44,91 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
+function redact(value = "") {
+  return cleanText(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function safeCall(fn = null, context = null, ...args) {
+  try {
+    return isFunction(fn) ? fn.apply(context, args) : null;
+  } catch {
+    return null;
+  }
+}
+
 /* =========================================================
    TOAST
 ========================================================= */
 
+const SENSITIVE_OPTION_KEYS = new Set([
+  "token",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "secret",
+  "session",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
+  "jwt",
+  "authorization",
+  "reset_token",
+  "activation_token",
+]);
+
+const TEXT_OPTION_KEYS = new Set([
+  "message",
+  "text",
+  "title",
+  "description",
+  "detail",
+  "details",
+]);
+
 function getToast(AppCore = null, Toast = null) {
-  return Toast || AppCore?.toast || AppCore?.Toast || null;
+  return (
+    Toast ||
+    AppCore?.toast ||
+    AppCore?.Toast ||
+    AppCore?.ui?.toast ||
+    AppCore?.ui?.Toast ||
+    null
+  );
 }
 
-function normalizeToastInput(message = "", type = "info", options = {}) {
-  if (isObject(message)) {
-    const cleanOptions = {
-      ...message,
-      ...options,
-    };
+function sanitizeToastOptions(options = {}) {
+  if (!isObject(options)) return {};
 
-    return {
-      message: cleanText(
-        message.message ||
-          message.text ||
-          message.title,
-        ""
-      ),
-      type: cleanText(
-        message.type ||
-          message.variant ||
-          type,
-        "info"
-      ),
-      options: cleanOptions,
-    };
+  const output = {};
+
+  for (const [key, value] of Object.entries(options)) {
+    const cleanKey = cleanText(key, "");
+
+    if (!cleanKey) continue;
+
+    const lowerKey = cleanKey.toLowerCase();
+
+    if (SENSITIVE_OPTION_KEYS.has(lowerKey)) {
+      output[cleanKey] = "***";
+      continue;
+    }
+
+    if (TEXT_OPTION_KEYS.has(lowerKey) && typeof value === "string") {
+      output[cleanKey] = redact(value);
+      continue;
+    }
+
+    output[cleanKey] = value;
   }
 
-  return {
-    message: cleanText(message, ""),
-    type: cleanText(type, "info"),
-    options: isObject(options) ? options : {},
-  };
+  return output;
 }
 
 function normalizeToastType(type = "info") {
@@ -87,6 +136,7 @@ function normalizeToastType(type = "info") {
 
   if (value === "warn") return "warning";
   if (value === "danger") return "error";
+
   if (value === "success") return "success";
   if (value === "error") return "error";
   if (value === "warning") return "warning";
@@ -95,29 +145,63 @@ function normalizeToastType(type = "info") {
   return "info";
 }
 
+function normalizeToastInput(message = "", type = "info", options = {}) {
+  if (isObject(message)) {
+    const mergedOptions = sanitizeToastOptions({
+      ...message,
+      ...(isObject(options) ? options : {}),
+    });
+
+    return {
+      message: redact(
+        message.message ||
+          message.text ||
+          message.title ||
+          ""
+      ),
+      type: normalizeToastType(
+        message.type ||
+          message.variant ||
+          type
+      ),
+      options: mergedOptions,
+    };
+  }
+
+  return {
+    message: redact(message),
+    type: normalizeToastType(type),
+    options: sanitizeToastOptions(options),
+  };
+}
+
 function showToastWith(Toast = null, message = "", type = "info", options = {}) {
   if (!Toast) return null;
 
   const payload = normalizeToastInput(message, type, options);
   const toastMessage = payload.message;
-  const toastType = normalizeToastType(payload.type);
+  const toastType = payload.type;
 
   if (!toastMessage) return null;
 
   if (isFunction(Toast[toastType])) {
-    return Toast[toastType](toastMessage, payload.options);
+    return safeCall(Toast[toastType], Toast, toastMessage, payload.options);
   }
 
   if (toastType === "warning" && isFunction(Toast.warn)) {
-    return Toast.warn(toastMessage, payload.options);
+    return safeCall(Toast.warn, Toast, toastMessage, payload.options);
   }
 
   if (isFunction(Toast.show)) {
-    return Toast.show({
+    return safeCall(Toast.show, Toast, {
       ...payload.options,
       type: toastType,
       message: toastMessage,
     });
+  }
+
+  if (isFunction(Toast)) {
+    return safeCall(Toast, null, toastMessage, toastType, payload.options);
   }
 
   return null;
@@ -150,6 +234,10 @@ function createToastBridge(Toast = null) {
   return bridge;
 }
 
+function isToastBridge(value = null) {
+  return Boolean(isFunction(value) && value.__onionToastBridge === true);
+}
+
 /* =========================================================
    PUBLIC API
 ========================================================= */
@@ -160,9 +248,17 @@ export function bindToastBridge({
 } = {}) {
   const toast = getToast(AppCore, Toast);
 
-  if (!AppCore || !toast) {
+  if (!AppCore) {
     initialized = false;
     bridged = false;
+    lastBridgeReason = "missing-app-core";
+    return false;
+  }
+
+  if (!toast) {
+    initialized = false;
+    bridged = false;
+    lastBridgeReason = "missing-toast";
     return false;
   }
 
@@ -172,14 +268,23 @@ export function bindToastBridge({
   */
   if (isFunction(AppCore.showToast)) {
     initialized = true;
-    bridged = AppCore.showToast.__onionToastBridge === true;
+    bridged = isToastBridge(AppCore.showToast);
+    lastBridgeReason = bridged ? "already-bridged" : "existing-showToast";
     return true;
   }
 
-  AppCore.showToast = createToastBridge(toast);
+  try {
+    AppCore.showToast = createToastBridge(toast);
+  } catch {
+    initialized = false;
+    bridged = false;
+    lastBridgeReason = "assign-failed";
+    return false;
+  }
 
   initialized = true;
   bridged = true;
+  lastBridgeReason = "bridge-created";
 
   return true;
 }
@@ -192,17 +297,38 @@ export function initUISystems(options = {}) {
    SNAPSHOT
 ========================================================= */
 
-export function getUISystemsSnapshot() {
+export function getUISystemsSnapshot({
+  AppCore = null,
+  Toast = null,
+} = {}) {
+  const toast = getToast(AppCore, Toast);
+  const showToast = AppCore?.showToast || null;
+
   return {
     version: UI_VERSION,
 
     initialized,
     bridged,
+    lastBridgeReason,
+
+    hasToast: Boolean(toast),
+    hasShowToast: isFunction(showToast),
+    showToastIsBridge: isToastBridge(showToast),
+
+    toastCapabilities: {
+      callable: isFunction(toast),
+      hasShow: isFunction(toast?.show),
+      hasInfo: isFunction(toast?.info),
+      hasSuccess: isFunction(toast?.success),
+      hasWarning: isFunction(toast?.warning) || isFunction(toast?.warn),
+      hasError: isFunction(toast?.error),
+    },
 
     policy: {
       toastBridgeOnly: true,
       idempotentBridge: true,
       doesNotOverrideExistingShowToast: true,
+      redactsToastText: true,
 
       noSidebar: true,
       noTopbar: true,

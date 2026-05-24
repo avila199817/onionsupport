@@ -10,7 +10,7 @@
    - Rutas públicas reales actuales desde core/config.js.
    - Home visible de usuario: /@{user.slug}.
    - Roles únicos: admin / user.
-   - Delegar rutas, user-scope y slug en core/config.js.
+   - Delegar rutas, user-scope, bloqueos y slug en core/config.js.
    - Sin AppCore.
    - Sin CoreHttp.
    - Sin Router.
@@ -32,16 +32,18 @@ import {
   buildUserHomeRoute as coreBuildUserHomeRoute,
   canonicalRoutePath as coreCanonicalRoutePath,
   getUserScopedRouteInfo as coreGetUserScopedRouteInfo,
+  isBlockedRoutePath as coreIsBlockedRoutePath,
   isUserHomeRoute as coreIsUserHomeRoute,
   normalizeRoutePath as coreNormalizeRoutePath,
   normalizeUserSlug as coreNormalizeUserSlug,
   routePathFromUrlLike as coreRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const AUTH_CONSTANTS_VERSION = "auth.constants.v4";
+export const AUTH_CONSTANTS_VERSION = "auth.constants.v5";
 export const AUTH_MODULE_VERSION = AUTH_CONSTANTS_VERSION;
 
 const DEFAULT_ROUTE = ROUTES.home || ROUTES.root || "/";
+const USER_PREFIX = USER_HOME_PREFIX || "/@";
 
 function freeze(value) {
   try {
@@ -93,6 +95,30 @@ export function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
 /* =========================================================
    PATH HELPERS
 ========================================================= */
+
+function fallbackPathFromUrlLike(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
+  if (raw.startsWith("#/")) return raw.slice(1) || DEFAULT_ROUTE;
+
+  if (raw.startsWith("//")) return DEFAULT_ROUTE;
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw, "http://localhost");
+      return `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
+    } catch {
+      return DEFAULT_ROUTE;
+    }
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return DEFAULT_ROUTE;
+
+  return raw;
+}
 
 function fallbackNormalizeRoutePath(path = "") {
   let value = safeText(path, "");
@@ -149,28 +175,6 @@ function fallbackNormalizeRoutePath(path = "") {
   return value || DEFAULT_ROUTE;
 }
 
-function fallbackPathFromUrlLike(value = "") {
-  const raw = safeText(value, "");
-
-  if (!raw) return "";
-  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
-  if (raw.startsWith("#/")) return raw.slice(1) || DEFAULT_ROUTE;
-  if (raw.startsWith("//")) return DEFAULT_ROUTE;
-
-  if (/^https?:\/\//i.test(raw)) {
-    try {
-      const url = new URL(raw, "http://localhost");
-      return `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
-    } catch {
-      return DEFAULT_ROUTE;
-    }
-  }
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return DEFAULT_ROUTE;
-
-  return raw;
-}
-
 export function pathFromUrlLike(value = "") {
   try {
     return coreRoutePathFromUrlLike(value) || "";
@@ -195,6 +199,37 @@ export function normalizeRoutePath(path = "") {
   return normalizeEndpointPath(path);
 }
 
+function isBlockedAuthRoute(path = "") {
+  try {
+    if (coreIsBlockedRoutePath(path) === true) return true;
+  } catch {
+    // fallback abajo
+  }
+
+  const clean = normalizeRoutePath(path).toLowerCase();
+
+  if (
+    clean === "/home" ||
+    clean.startsWith("/home/") ||
+    clean === "/403" ||
+    clean.startsWith("/403/") ||
+    clean === "/404" ||
+    clean.startsWith("/404/") ||
+    clean === "/2fa" ||
+    clean.startsWith("/2fa/") ||
+    clean === "/mfa" ||
+    clean.startsWith("/mfa/") ||
+    clean === "/otp" ||
+    clean.startsWith("/otp/")
+  ) {
+    return true;
+  }
+
+  const scoped = getUserScopedRouteInfo(clean);
+
+  return Boolean(scoped.scoped && isBlockedAuthRoute(scoped.restPath));
+}
+
 function endpointInList(path = "", list = []) {
   const clean = normalizeEndpointPath(path);
 
@@ -207,7 +242,7 @@ function endpointInList(path = "", list = []) {
 }
 
 /* =========================================================
-   USER HOME
+   USER HOME / USER SCOPE
 ========================================================= */
 
 export function normalizeUserSlug(value = "") {
@@ -230,12 +265,33 @@ export function normalizeUserSlug(value = "") {
   }
 }
 
-export function extractUserHomeSlugFromRoute(path = "") {
+export function getUserScopedRouteInfo(path = "") {
   try {
     const info = coreGetUserScopedRouteInfo(path);
 
-    if (info?.home === true && info.slug) {
-      return normalizeUserSlug(info.slug);
+    if (info && typeof info === "object") {
+      const restPath = normalizeRoutePath(
+        info.restPath ||
+          info.canonicalPath ||
+          path ||
+          DEFAULT_ROUTE
+      );
+
+      const canonicalPath = normalizeRoutePath(
+        info.canonicalPath ||
+          info.lookupPath ||
+          restPath ||
+          DEFAULT_ROUTE
+      );
+
+      return {
+        scoped: Boolean(info.scoped),
+        home: Boolean(info.home),
+        slug: normalizeUserSlug(info.slug || ""),
+        restPath,
+        canonicalPath,
+        lookupPath: canonicalPath,
+      };
     }
   } catch {
     // fallback abajo
@@ -243,13 +299,49 @@ export function extractUserHomeSlugFromRoute(path = "") {
 
   const route = normalizeRoutePath(path);
 
-  if (!route.startsWith(USER_HOME_PREFIX)) return "";
+  if (!route.startsWith(USER_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: route || DEFAULT_ROUTE,
+      canonicalPath: route || DEFAULT_ROUTE,
+      lookupPath: route || DEFAULT_ROUTE,
+    };
+  }
 
-  const slug = route.slice(USER_HOME_PREFIX.length);
+  const rest = route.slice(USER_PREFIX.length);
+  const [slugSegment = "", ...segments] = rest.split("/");
+  const slug = normalizeUserSlug(slugSegment);
 
-  if (!slug || slug.includes("/")) return "";
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: route,
+      canonicalPath: route,
+      lookupPath: route,
+    };
+  }
 
-  return normalizeUserSlug(slug);
+  const restPath = segments.length
+    ? normalizeRoutePath(`/${segments.join("/")}`)
+    : DEFAULT_ROUTE;
+
+  return {
+    scoped: true,
+    home: restPath === DEFAULT_ROUTE,
+    slug,
+    restPath,
+    canonicalPath: restPath,
+    lookupPath: restPath,
+  };
+}
+
+export function extractUserHomeSlugFromRoute(path = "") {
+  const info = getUserScopedRouteInfo(path);
+  return info.home ? normalizeUserSlug(info.slug) : "";
 }
 
 export function isUserHomeRoute(path = "") {
@@ -265,16 +357,18 @@ export function buildUserHomeRoute(slug = "") {
     return coreBuildUserHomeRoute(slug) || DEFAULT_ROUTE;
   } catch {
     const clean = normalizeUserSlug(slug);
-    return clean ? `${USER_HOME_PREFIX}${clean}` : DEFAULT_ROUTE;
+    return clean ? `${USER_PREFIX}${clean}` : DEFAULT_ROUTE;
   }
 }
 
 export function canonicalAuthRoutePath(path = "") {
+  if (isBlockedAuthRoute(path)) return "";
+
   try {
     return coreCanonicalRoutePath(path) || DEFAULT_ROUTE;
   } catch {
-    const route = normalizeRoutePath(path);
-    return isUserHomeRoute(route) ? DEFAULT_ROUTE : route;
+    const info = getUserScopedRouteInfo(path);
+    return info.scoped ? info.canonicalPath : normalizeRoutePath(path);
   }
 }
 
@@ -284,16 +378,23 @@ export function canonicalAuthRoutePath(path = "") {
 
 export const LOGIN_ENDPOINT = CORE_AUTH_ENDPOINTS.login;
 export const LOGOUT_ENDPOINT = CORE_AUTH_ENDPOINTS.logout;
+export const LOGOUT_ALL_ENDPOINT = CORE_AUTH_ENDPOINTS.logoutAll;
 export const ME_ENDPOINT = CORE_AUTH_ENDPOINTS.me;
 export const REFRESH_ENDPOINT = CORE_AUTH_ENDPOINTS.refresh;
 
-export const ACTIVATE_ACCOUNT_ENDPOINT = CORE_AUTH_ENDPOINTS.activate;
+export const ACTIVATE_ACCOUNT_ENDPOINT =
+  CORE_AUTH_ENDPOINTS.activateAccount ||
+  CORE_AUTH_ENDPOINTS.activate;
+
 export const REQUEST_RESET_ENDPOINT = CORE_AUTH_ENDPOINTS.requestPasswordReset;
 export const CONFIRM_RESET_ENDPOINT = CORE_AUTH_ENDPOINTS.confirmPasswordReset;
 
 export const AUTH_ENDPOINTS = freeze({
   login: LOGIN_ENDPOINT,
+
   logout: LOGOUT_ENDPOINT,
+  logoutAll: LOGOUT_ALL_ENDPOINT,
+
   me: ME_ENDPOINT,
   refresh: REFRESH_ENDPOINT,
 
@@ -311,18 +412,19 @@ export const AUTH_ENDPOINT_GROUPS = freeze({
   session: freeze([
     LOGIN_ENDPOINT,
     LOGOUT_ENDPOINT,
+    LOGOUT_ALL_ENDPOINT,
     ME_ENDPOINT,
     REFRESH_ENDPOINT,
-  ]),
+  ].filter(Boolean)),
 
   activation: freeze([
     ACTIVATE_ACCOUNT_ENDPOINT,
-  ]),
+  ].filter(Boolean)),
 
   passwordReset: freeze([
     REQUEST_RESET_ENDPOINT,
     CONFIRM_RESET_ENDPOINT,
-  ]),
+  ].filter(Boolean)),
 });
 
 export const AUTH_PUBLIC_API_PATHS = freeze([...PUBLIC_API_PATHS]);
@@ -348,7 +450,6 @@ export const AUTH_TOKEN_PARAM_NAMES = freeze({
   auth: freeze([TOKEN_PARAM]),
   activation: freeze([TOKEN_PARAM]),
   reset: freeze([TOKEN_PARAM]),
-  refresh: freeze([TOKEN_PARAM]),
 });
 
 /* =========================================================
@@ -438,12 +539,20 @@ export const AUTH_FAILURE_CODES = freeze([
   "USER_DISABLED",
   "UNAUTHORIZED",
   "FORBIDDEN",
+
   "TOKEN_INVALID",
   "INVALID_TOKEN",
   "TOKEN_EXPIRED",
+  "TOKEN_MISSING",
+  "MISSING_TOKEN",
+
+  "SESSION_REQUIRED",
   "SESSION_EXPIRED",
   "SESSION_REVOKED",
+  "SESSION_INVALID",
   "SESSION_NOT_FOUND",
+  "SESSION_USER_MISMATCH",
+
   "LOGIN_FAILED",
   "AUTH_FAILED",
   "AUTH_RESTORE_FAILED",
@@ -469,6 +578,7 @@ function resolveEndpointKey(key = "") {
   const clean = safeText(key, "");
 
   if (clean === "activateAccount") return "activate";
+  if (clean === "accountActivation") return "activate";
   if (clean === "resetPasswordRequest") return "requestPasswordReset";
   if (clean === "confirmResetPassword") return "confirmPasswordReset";
   if (clean === "resetPasswordConfirm") return "confirmPasswordReset";
@@ -510,6 +620,7 @@ export function getAuthConstant(key = "", fallback = null) {
 
 export const getLoginEndpoint = () => LOGIN_ENDPOINT;
 export const getLogoutEndpoint = () => LOGOUT_ENDPOINT;
+export const getLogoutAllEndpoint = () => LOGOUT_ALL_ENDPOINT;
 export const getMeEndpoint = () => ME_ENDPOINT;
 export const getRefreshEndpoint = () => REFRESH_ENDPOINT;
 export const getRefreshEndpointCandidates = () => [REFRESH_ENDPOINT];
@@ -577,8 +688,22 @@ export const getAuthPublicTimeoutMs = () =>
 ========================================================= */
 
 export function isPublicTechnicalRoute(path = "") {
+  if (isBlockedAuthRoute(path)) return false;
+
+  const info = getUserScopedRouteInfo(path);
+
+  /*
+    Rutas públicas/auth no viven bajo /@{slug}.
+  */
+  if (info.scoped) return false;
+
   const clean = canonicalAuthRoutePath(path);
-  return AUTH_PUBLIC_TECHNICAL_ROUTES.includes(clean);
+
+  if (!clean) return false;
+
+  return AUTH_PUBLIC_TECHNICAL_ROUTES.some((route) => {
+    return canonicalAuthRoutePath(route) === clean;
+  });
 }
 
 export function isActivationRoute(path = "") {
@@ -684,6 +809,22 @@ function splitUrlForToken(value = "") {
   };
 }
 
+function hashTokenQuery(hash = "") {
+  const clean = safeText(hash, "").replace(/^#/, "");
+
+  if (!clean) return "";
+
+  if (clean.includes("?")) {
+    return clean.slice(clean.indexOf("?") + 1);
+  }
+
+  if (/^[^/?#=&]+=/i.test(clean)) {
+    return clean;
+  }
+
+  return "";
+}
+
 export function hasTokenInUrl(value = "") {
   const raw = safeText(value, "");
 
@@ -693,12 +834,9 @@ export function hasTokenInUrl(value = "") {
 
   if (search && hasTokenParam(search)) return true;
 
-  if (hash && hash.includes("?")) {
-    const query = hash.split("?").slice(1).join("?");
-    return hasTokenParam(query);
-  }
+  const hashQuery = hashTokenQuery(hash);
 
-  return false;
+  return hashQuery ? hasTokenParam(hashQuery) : false;
 }
 
 export function hasActivationToken(value = "") {
@@ -731,8 +869,9 @@ export function getAuthConstantsSnapshot() {
     publicTechnicalRoutes: AUTH_PUBLIC_TECHNICAL_ROUTES,
 
     userHome: {
-      prefix: USER_HOME_PREFIX,
+      prefix: USER_PREFIX,
       canonical: DEFAULT_ROUTE,
+      visiblePattern: `${USER_PREFIX}{user.slug}`,
     },
 
     tokenParam: TOKEN_PARAM,
@@ -754,8 +893,11 @@ export function getAuthConstantsSnapshot() {
       roles: ["admin", "user"],
 
       meAlwaysPrivate: true,
+      refreshPublicNoAuthHeader: true,
       staticContractOnly: true,
 
+      noAppCore: true,
+      noCoreHttp: true,
       noRouter: true,
       noToast: true,
       noRuntimeStorage: true,
@@ -764,7 +906,11 @@ export function getAuthConstantsSnapshot() {
       preservesAtSlug: true,
       configOwnsRouteParsing: true,
       configOwnsUserSlug: true,
+      configOwnsBlockedRoutes: true,
 
+      publicRoutesCannotLiveUnderUserScope: true,
+
+      noHomeAlias: true,
       no2fa: true,
       noMfa: true,
       noOtp: true,
@@ -786,6 +932,7 @@ export default freeze({
 
   LOGIN_ENDPOINT,
   LOGOUT_ENDPOINT,
+  LOGOUT_ALL_ENDPOINT,
   ME_ENDPOINT,
   REFRESH_ENDPOINT,
 
@@ -829,6 +976,7 @@ export default freeze({
   normalizeRoutePath,
 
   normalizeUserSlug,
+  getUserScopedRouteInfo,
   extractUserHomeSlugFromRoute,
   isUserHomeRoute,
   buildUserHomeRoute,
@@ -846,6 +994,7 @@ export default freeze({
 
   getLoginEndpoint,
   getLogoutEndpoint,
+  getLogoutAllEndpoint,
   getMeEndpoint,
   getRefreshEndpoint,
   getRefreshEndpointCandidates,

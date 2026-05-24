@@ -72,7 +72,7 @@ jobs:
           set -euo pipefail
 
           if [[ -z "${SWA_API_TOKEN:-}" ]]; then
-            echo "::error::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
+            echo "::error title=Secret no configurado::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
             exit 1
           fi
 
@@ -81,16 +81,30 @@ jobs:
             "staticwebapp.config.json"
             "site.webmanifest"
             "robots.txt"
-            "sitemap.xml"
             "favicon.ico"
             "src/main.js"
             "src/preboot/theme.js"
             "src/css/app.css"
+            "src/media/img/favicon_black_circle.png"
+            "src/media/img/favicon_white.png"
+            "src/media/img/favicon_black.png"
           )
 
           for file in "${required_files[@]}"; do
             if [[ ! -f "$file" ]]; then
-              echo "::error file=$file::Archivo obligatorio no encontrado."
+              echo "::error title=Archivo obligatorio no encontrado::No existe: $file"
+              exit 1
+            fi
+          done
+
+          removed_files=(
+            "sitemap.xml"
+            "BingSiteAuth.xml"
+          )
+
+          for file in "${removed_files[@]}"; do
+            if [[ -e "$file" ]]; then
+              echo "::error title=Archivo eliminado reaparecido::Debe eliminarse del repo: $file"
               exit 1
             fi
           done
@@ -102,14 +116,34 @@ jobs:
             "/src/preboot/theme.js"
             "/src/css/app.css"
             "/src/main.js"
+            "/site.webmanifest"
+            "/favicon.ico"
+            "/src/media/img/favicon_black_circle.png"
+            "/src/media/img/favicon_white.png"
+            "/src/media/img/favicon_black.png"
           )
 
           for ref in "${required_index_refs[@]}"; do
             if ! grep -Fq "$ref" index.html; then
-              echo "::error file=index.html::Referencia obligatoria no encontrada: $ref"
+              echo "::error file=index.html,title=Referencia obligatoria no encontrada::Falta referencia: $ref"
               exit 1
             fi
           done
+
+          if grep -Fq "sitemap.xml" index.html; then
+            echo "::error file=index.html,title=Referencia obsoleta::index.html no debe referenciar sitemap.xml."
+            exit 1
+          fi
+
+          if grep -Fq "BingSiteAuth.xml" index.html staticwebapp.config.json robots.txt site.webmanifest 2>/dev/null; then
+            echo "::error title=Referencia obsoleta::No debe quedar ninguna referencia a BingSiteAuth.xml."
+            exit 1
+          fi
+
+          if grep -Fq "?v=" index.html site.webmanifest; then
+            echo "::error title=Versionado manual detectado::No usar parámetros ?v= en index.html ni site.webmanifest."
+            exit 1
+          fi
 
           echo "Onion SPA static package OK."
 
@@ -150,7 +184,7 @@ jobs:
           set -euo pipefail
 
           if [[ -z "${SWA_API_TOKEN:-}" ]]; then
-            echo "::error::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
+            echo "::error title=Secret no configurado::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
             exit 1
           fi
 

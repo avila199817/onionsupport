@@ -39,7 +39,7 @@ import {
 
 import * as SessionApi from "./session.js";
 
-export const PASSWORD_RESET_MODULE_VERSION = "auth.password-reset.v4";
+export const PASSWORD_RESET_MODULE_VERSION = "auth.password-reset.v5";
 
 const SOURCE = "auth.password-reset";
 
@@ -120,7 +120,7 @@ function nowIso() {
 function redact(value = "") {
   return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -418,6 +418,35 @@ function extractUserSlug(user = null) {
   }
 }
 
+function isBlockedSpaPath(path = "") {
+  try {
+    if (configIsBlockedRoutePath(path) === true) return true;
+  } catch {
+    // fallback local
+  }
+
+  const clean = cleanText(path, "")
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/\/+$/g, "")
+    .toLowerCase() || "/";
+
+  return Boolean(
+    clean === "/home" ||
+      clean.startsWith("/home/") ||
+      clean === "/403" ||
+      clean.startsWith("/403/") ||
+      clean === "/404" ||
+      clean.startsWith("/404/") ||
+      clean === "/2fa" ||
+      clean.startsWith("/2fa/") ||
+      clean === "/mfa" ||
+      clean.startsWith("/mfa/") ||
+      clean === "/otp" ||
+      clean.startsWith("/otp/")
+  );
+}
+
 function normalizeSpaPath(value = "") {
   const raw = cleanText(value, "");
 
@@ -426,7 +455,7 @@ function normalizeSpaPath(value = "") {
   try {
     const path = configNormalizeRoutePath(raw);
 
-    if (!path || configIsBlockedRoutePath(path)) return "";
+    if (!path || isBlockedSpaPath(path)) return "";
 
     return path;
   } catch {
@@ -438,12 +467,10 @@ function normalizeSpaPath(value = "") {
     const clean = raw
       .split("?")[0]
       .split("#")[0]
+      .replace(/\/{2,}/g, "/")
       .replace(/\/+$/g, "") || "/";
 
-    if (clean === "/home") return "";
-    if (clean.startsWith("/2fa")) return "";
-    if (clean.startsWith("/mfa")) return "";
-    if (clean.startsWith("/otp")) return "";
+    if (isBlockedSpaPath(clean)) return "";
 
     return clean;
   }
@@ -469,10 +496,14 @@ function buildUserHomePath(user = null) {
   const slug = extractUserSlug(user);
 
   try {
-    return configBuildUserHomeRoute(slug) || HOME_ROUTE;
+    const configured = normalizeSpaPath(configBuildUserHomeRoute(slug));
+
+    if (isUserHomePath(configured)) return configured;
   } catch {
-    return slug ? `${USER_HOME_PREFIX_VALUE}${slug}` : HOME_ROUTE;
+    // fallback abajo
   }
+
+  return slug ? `${USER_HOME_PREFIX_VALUE}${slug}` : HOME_ROUTE;
 }
 
 function publicUser(user = null) {
@@ -493,6 +524,9 @@ function publicUser(user = null) {
     hasAvatar: Boolean(clean.hasAvatar || avatar),
     avatar: avatar || null,
     avatarUrl: avatar || null,
+    picture: clean.picture || avatar || null,
+    photoUrl: clean.photoUrl || avatar || null,
+    avatarUpdatedAt: clean.avatarUpdatedAt || null,
   };
 }
 
@@ -557,20 +591,105 @@ function readRefreshToken(input = {}) {
   );
 }
 
+function hasAuthEnvelopeSignals(value = null) {
+  if (!isObject(value)) return false;
+
+  return Boolean(
+    value.token ||
+      value.accessToken ||
+      value.access_token ||
+      value.refreshToken ||
+      value.refresh_token ||
+      value.session ||
+      value.sessionData ||
+      value.sessionId ||
+      value.session_id ||
+      value.sid ||
+      value.sessionUserId ||
+      value.session_user_id ||
+      value.expiresAt ||
+      value.expires_at ||
+      value.auth ||
+      value.payload ||
+      value.result
+  );
+}
+
+function looksLikeExplicitResetUserObject(value = null) {
+  if (!isObject(value)) return false;
+
+  if (cleanText(value.userId || value.uid || value.sub, "")) return true;
+  if (cleanText(value.username || value.userName || value.user_name, "")) return true;
+  if (cleanText(value.slug || value.lookup?.slug || value.profile?.slug, "")) return true;
+
+  if (
+    cleanText(value.id, "") &&
+    (
+      cleanText(value.email, "") ||
+      cleanText(value.displayName || value.fullName || value.name || value.nombre, "") ||
+      cleanText(value.role || value.rol || value.roles, "")
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function looksLikeStandaloneResetUserObject(value = null) {
+  return Boolean(
+    looksLikeExplicitResetUserObject(value) &&
+      !hasAuthEnvelopeSignals(value)
+  );
+}
+
+function looksLikeFlatResetUserObject(value = null) {
+  if (!looksLikeExplicitResetUserObject(value)) return false;
+
+  return Boolean(
+    cleanText(value.userId || value.id || value.uid || value.sub, "") &&
+      (
+        cleanText(value.username || value.userName || value.user_name, "") ||
+        cleanText(value.slug || value.lookup?.slug || value.profile?.slug, "") ||
+        cleanText(value.displayName || value.fullName || value.name || value.nombre, "") ||
+        cleanText(value.role || value.rol || value.roles, "")
+      )
+  );
+}
+
 function readUser(input = {}) {
   for (const node of nested(input)) {
-    const user = normalizeUser(
+    const explicit =
       node.user ||
-        node.usuario ||
-        node.me ||
-        node.account ||
-        node.profile
-    );
+      node.usuario ||
+      node.me ||
+      node.account ||
+      node.profile ||
+      null;
+
+    const user = looksLikeExplicitResetUserObject(explicit)
+      ? normalizeUser(explicit)
+      : null;
 
     if (user) return user;
   }
 
-  return normalizeUser(input);
+  for (const node of nested(input)) {
+    if (
+      !looksLikeStandaloneResetUserObject(node) &&
+      !looksLikeFlatResetUserObject(node)
+    ) {
+      continue;
+    }
+
+    const user = normalizeUser(node);
+
+    if (user) return user;
+  }
+
+  return looksLikeStandaloneResetUserObject(input)
+    ? normalizeUser(input)
+    : null;
 }
 
 function readSession(input = {}, user = null) {
@@ -607,14 +726,16 @@ function responseOk(input = {}) {
 function responseMessage(input = {}, fallback = "") {
   const source = responseNode(input);
 
-  return cleanText(
-    source.message ||
-      source.mensaje ||
-      source.detail ||
-      source.description ||
-      source.error ||
-      fallback,
-    fallback
+  return redact(
+    cleanText(
+      source.message ||
+        source.mensaje ||
+        source.detail ||
+        source.description ||
+        source.error ||
+        fallback,
+      fallback
+    )
   );
 }
 
@@ -630,26 +751,23 @@ function responseStatus(input = {}) {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
     String(value || "")
   );
 }
 
 function normalizeRedirectPath(value = "", fallback = DEFAULT_LOGIN_REDIRECT) {
-  const target = cleanText(value, fallback);
+  const fallbackPath = normalizeSpaPath(fallback) || DEFAULT_LOGIN_REDIRECT;
+  const target = cleanText(value, fallbackPath);
 
-  if (!target.startsWith("/") || target.startsWith("//")) return fallback;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return fallback;
-  if (/[\r\n\t\\]/.test(target)) return fallback;
-  if (hasSensitiveQuery(target)) return fallback;
+  if (!target.startsWith("/") || target.startsWith("//")) return fallbackPath;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return fallbackPath;
+  if (/[\r\n\t\\]/.test(target)) return fallbackPath;
+  if (hasSensitiveQuery(target)) return fallbackPath;
 
-  try {
-    if (configIsBlockedRoutePath(target)) return fallback;
-  } catch {
-    // noop
-  }
+  const normalized = normalizeSpaPath(target);
 
-  return target;
+  return normalized || fallbackPath;
 }
 
 function responseRedirect(input = {}, fallback = DEFAULT_LOGIN_REDIRECT) {
@@ -672,13 +790,12 @@ function normalizeBaseResponse(input = {}, fallbackSuccess = "", fallbackError =
   const user = readUser(input);
   const session = readSession(input, user);
 
-  const authenticated = Boolean(token && user);
+  const authenticated = Boolean(ok && token && user);
   const homePath = authenticated ? buildUserHomePath(user) : HOME_ROUTE;
 
-  const redirectTo = responseRedirect(
-    input,
-    authenticated ? homePath : DEFAULT_LOGIN_REDIRECT
-  );
+  const redirectTo = authenticated
+    ? homePath
+    : responseRedirect(input, DEFAULT_LOGIN_REDIRECT);
 
   return {
     ok,
@@ -721,7 +838,9 @@ function sanitizeResult(result = {}) {
   const authenticated = result.authenticated === true;
 
   const homePath = normalizeRedirectPath(result.homePath || HOME_ROUTE, HOME_ROUTE);
-  const redirectTo = normalizeRedirectPath(result.redirectTo || DEFAULT_LOGIN_REDIRECT);
+  const redirectTo = authenticated
+    ? homePath
+    : normalizeRedirectPath(result.redirectTo || DEFAULT_LOGIN_REDIRECT);
 
   return {
     ok: result.ok === true,
@@ -734,16 +853,15 @@ function sanitizeResult(result = {}) {
     status: result.status || 0,
     code: result.code || "",
 
-    message: result.message || "",
+    message: redact(result.message || ""),
 
     redirectTo,
 
     homePath,
     defaultHome: normalizeRedirectPath(result.defaultHome || homePath, HOME_ROUTE),
-    postLoginTarget: normalizeRedirectPath(
-      result.postLoginTarget || redirectTo,
-      redirectTo
-    ),
+    postLoginTarget: authenticated
+      ? homePath
+      : normalizeRedirectPath(result.postLoginTarget || redirectTo, redirectTo),
 
     token: null,
     accessToken: null,
@@ -881,6 +999,62 @@ function maybeApplyReturnedSession(result = {}, source = "password-reset") {
 }
 
 /* =========================================================
+   ERRORS
+========================================================= */
+
+function errorPayload(error = null) {
+  if (!error) return {};
+
+  if (isObject(error.data)) return error.data;
+  if (isObject(error.body)) return error.body;
+  if (isObject(error.payload)) return error.payload;
+  if (isObject(error.responseData)) return error.responseData;
+  if (isObject(error.response?.data)) return error.response.data;
+  if (isObject(error.response) && !isFunction(error.response.blob)) return error.response;
+
+  return {};
+}
+
+function errorStatus(error = null) {
+  const payload = errorPayload(error);
+
+  return Number(
+    error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      payload.status ||
+      payload.statusCode ||
+      0
+  ) || 0;
+}
+
+function errorCode(error = null) {
+  const payload = errorPayload(error);
+
+  return (
+    error?.code ||
+    payload.code ||
+    payload.errorCode ||
+    payload.error_code ||
+    payload.error ||
+    null
+  );
+}
+
+function errorMessage(error = null, fallback = "") {
+  const payload = errorPayload(error);
+
+  return redact(
+    payload.message ||
+      payload.error_description ||
+      payload.error ||
+      payload.detail ||
+      error?.message ||
+      fallback
+  );
+}
+
+/* =========================================================
    ACTIONS
 ========================================================= */
 
@@ -912,14 +1086,9 @@ export async function requestPasswordReset(payload = {}, options = {}) {
       return sanitizeResult(
         normalizeResetPasswordResponse({
           ok: false,
-          status: error?.status || error?.statusCode || error?.response?.status || 0,
-          code: error?.code || error?.data?.code || error?.response?.data?.code || null,
-          message: redact(
-            error?.data?.message ||
-              error?.response?.data?.message ||
-              error?.message ||
-              "No se pudo iniciar la recuperación de acceso."
-          ),
+          status: errorStatus(error),
+          code: errorCode(error),
+          message: errorMessage(error, "No se pudo iniciar la recuperación de acceso."),
           error: true,
         })
       );
@@ -965,14 +1134,9 @@ export async function confirmResetPassword(payload = {}, options = {}) {
       return sanitizeResult(
         normalizeConfirmResetPasswordResponse({
           ok: false,
-          status: error?.status || error?.statusCode || error?.response?.status || 0,
-          code: error?.code || error?.data?.code || error?.response?.data?.code || null,
-          message: redact(
-            error?.data?.message ||
-              error?.response?.data?.message ||
-              error?.message ||
-              "No se pudo restablecer la contraseña."
-          ),
+          status: errorStatus(error),
+          code: errorCode(error),
+          message: errorMessage(error, "No se pudo restablecer la contraseña."),
           error: true,
         })
       );
@@ -1040,11 +1204,16 @@ export function getPasswordResetSnapshot() {
       configOwnsSlugAndHomeRoute: true,
 
       sessionOnlyIfBackendReturnsTokenAndUser: true,
+      avoidsSessionEnvelopeAsUser: true,
 
       noLegacyRoutes: true,
       noAliasesMassive: true,
       noSlugFabrication: true,
       noEmailIdentity: true,
+
+      no2fa: true,
+      noMfa: true,
+      noOtp: true,
 
       snapshotRedacted: true,
     },

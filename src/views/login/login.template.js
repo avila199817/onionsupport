@@ -27,14 +27,17 @@
 
 import {
   ROUTES,
+  USER_HOME_PREFIX,
+  getUserScopedRouteInfo as configGetUserScopedRouteInfo,
   isBlockedRoutePath as configIsBlockedRoutePath,
   normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
 
-export const TEMPLATE_VERSION = "login.template.v6";
+export const TEMPLATE_VERSION = "login.template.v7";
 
 const DEFAULT_APP_NAME = "Onion Support";
 
@@ -43,8 +46,15 @@ const PUBLIC_AUTH_LOGO = new URL(
   import.meta.url
 ).href;
 
+const DEFAULT_LOGIN_HREF = ROUTES.login || "/login";
 const DEFAULT_PASSWORD_REQUEST_HREF =
   ROUTES.passwordRequest || "/password-request";
+const DEFAULT_PASSWORD_RESET_HREF =
+  ROUTES.passwordReset || "/password-reset";
+const DEFAULT_ACTIVATE_ACCOUNT_HREF =
+  ROUTES.activateAccount || "/activate-account";
+
+const USER_PREFIX = USER_HOME_PREFIX || "/@";
 
 const MAX_IDENTIFIER_LENGTH = 160;
 const MAX_PASSWORD_LENGTH = 1024;
@@ -55,6 +65,10 @@ const MAX_PASSWORD_LENGTH = 1024;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function text(value = "", fallback = "") {
@@ -80,9 +94,29 @@ function escapeAttr(value = "") {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
     String(value || "")
   );
+}
+
+function normalizeSlug(value = "") {
+  try {
+    return configNormalizeUserSlug(value) || "";
+  } catch {
+    const slug = text(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/^\/+/, "")
+      .replace(/^@+/, "")
+      .split(/[/?#]/)[0]
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase();
+
+    if (!slug) return "";
+
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  }
 }
 
 function pathFromInput(value = "/") {
@@ -119,8 +153,120 @@ function pathFromInput(value = "/") {
   }
 }
 
+function normalizePathname(value = "/", fallback = "/") {
+  let pathname = text(value, fallback);
+
+  if (!pathname) return fallback;
+
+  try {
+    pathname = configNormalizeRoutePath(pathname) || fallback;
+  } catch {
+    pathname = pathname
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+    if (!pathname.startsWith("/")) {
+      pathname = `/${pathname}`;
+    }
+
+    if (pathname.length > 1) {
+      pathname = pathname.replace(/\/+$/g, "") || fallback;
+    }
+  }
+
+  return pathname || fallback;
+}
+
+function getUserScopedInfo(pathname = "/") {
+  try {
+    const info = configGetUserScopedRouteInfo(pathname);
+
+    if (isObject(info)) {
+      return {
+        scoped: Boolean(info.scoped),
+        home: Boolean(info.home),
+        slug: normalizeSlug(info.slug || ""),
+        restPath: normalizePathname(
+          info.restPath || info.canonicalPath || pathname,
+          "/"
+        ),
+      };
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  const clean = normalizePathname(pathname, "/");
+
+  if (!clean.startsWith(USER_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: clean,
+    };
+  }
+
+  const rest = clean.slice(USER_PREFIX.length);
+  const [slugSegment = "", ...segments] = rest.split("/");
+  const slug = normalizeSlug(slugSegment);
+
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: clean,
+    };
+  }
+
+  return {
+    scoped: true,
+    home: segments.length === 0,
+    slug,
+    restPath: segments.length
+      ? normalizePathname(`/${segments.join("/")}`, "/")
+      : "/",
+  };
+}
+
+function fallbackBlockedPath(pathname = "") {
+  const clean = normalizePathname(pathname, "/").toLowerCase();
+
+  return Boolean(
+    clean === "/home" ||
+      clean.startsWith("/home/") ||
+      clean === "/403" ||
+      clean.startsWith("/403/") ||
+      clean === "/404" ||
+      clean.startsWith("/404/") ||
+      clean === "/2fa" ||
+      clean.startsWith("/2fa/") ||
+      clean === "/mfa" ||
+      clean.startsWith("/mfa/") ||
+      clean === "/otp" ||
+      clean.startsWith("/otp/")
+  );
+}
+
+function isBlockedPath(pathname = "") {
+  try {
+    if (configIsBlockedRoutePath(pathname) === true) return true;
+  } catch {
+    // fallback abajo
+  }
+
+  if (fallbackBlockedPath(pathname)) return true;
+
+  const scoped = getUserScopedInfo(pathname);
+
+  return Boolean(scoped.scoped && fallbackBlockedPath(scoped.restPath));
+}
+
 function normalizePath(value = "/", fallback = "/") {
-  const fallbackPath = text(fallback, "");
+  const fallbackPath = text(fallback, "/");
   let raw = text(value, fallbackPath);
 
   if (!raw) return fallbackPath;
@@ -146,45 +292,39 @@ function normalizePath(value = "/", fallback = "/") {
 
   const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
 
-  let pathname = "";
-
-  try {
-    pathname = configNormalizeRoutePath(pathnameRaw) || fallbackPath;
-  } catch {
-    pathname = pathnameRaw.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
-
-    if (!pathname.startsWith("/")) {
-      pathname = `/${pathname}`;
-    }
-
-    if (pathname.length > 1) {
-      pathname = pathname.replace(/\/+$/g, "") || fallbackPath;
-    }
-  }
+  const pathname = normalizePathname(pathnameRaw, fallbackPath);
 
   if (!pathname) return fallbackPath;
-
-  try {
-    if (configIsBlockedRoutePath(pathname)) return fallbackPath;
-  } catch {
-    const clean = pathname.toLowerCase();
-
-    if (
-      clean === "/home" ||
-      clean === "/403" ||
-      clean === "/404" ||
-      clean === "/2fa" ||
-      clean === "/mfa" ||
-      clean === "/otp" ||
-      clean.startsWith("/2fa/") ||
-      clean.startsWith("/mfa/") ||
-      clean.startsWith("/otp/")
-    ) {
-      return fallbackPath;
-    }
-  }
+  if (isBlockedPath(pathname)) return fallbackPath;
 
   return `${pathname}${search}`;
+}
+
+function pathnameOnly(value = "/") {
+  return normalizePath(value, "/").split("?")[0].split("#")[0] || "/";
+}
+
+function publicAuthPathnames() {
+  return new Set(
+    [
+      DEFAULT_LOGIN_HREF,
+      DEFAULT_PASSWORD_REQUEST_HREF,
+      DEFAULT_PASSWORD_RESET_HREF,
+      DEFAULT_ACTIVATE_ACCOUNT_HREF,
+    ]
+      .map((path) => pathnameOnly(path))
+      .filter(Boolean)
+  );
+}
+
+function isPublicAuthHref(value = "") {
+  const pathname = pathnameOnly(value);
+
+  if (!pathname) return false;
+  if (getUserScopedInfo(pathname).scoped) return false;
+  if (isBlockedPath(pathname)) return false;
+
+  return publicAuthPathnames().has(pathname);
 }
 
 function safeInternalHref(value = "", fallback = DEFAULT_PASSWORD_REQUEST_HREF) {
@@ -198,7 +338,11 @@ function safeInternalHref(value = "", fallback = DEFAULT_PASSWORD_REQUEST_HREF) 
   if (/[\r\n\t\\]/.test(raw)) return fallbackHref;
   if (hasSensitiveQuery(raw)) return fallbackHref;
 
-  return normalizePath(raw, fallbackHref) || fallbackHref;
+  const normalized = normalizePath(raw, fallbackHref) || fallbackHref;
+
+  if (!isPublicAuthHref(normalized)) return fallbackHref;
+
+  return normalized;
 }
 
 function normalizeIdentifier(value = "") {
@@ -395,14 +539,31 @@ export function getLoginTemplate(options = {}) {
                 data-login-identifier="true"
                 data-i18n-placeholder="login.identifierPlaceholder"
                 aria-invalid="false"
+                aria-describedby="loginIdentifierError"
                 required
               >
+
+              <p
+                class="login-field-error"
+                id="loginIdentifierError"
+                data-login-error-for="identifier"
+                aria-live="polite"
+                hidden
+              ></p>
             </div>
 
             ${renderLoginPasswordField({
               label: passwordLabel,
               placeholder: passwordPlaceholder,
             })}
+
+            <p
+              class="login-field-error login-field-error--password"
+              id="loginPasswordError"
+              data-login-error-for="password"
+              aria-live="polite"
+              hidden
+            ></p>
 
             <div class="login-options">
               <label

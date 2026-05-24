@@ -48,7 +48,7 @@ import {
   getCurrentUserHomePath,
 } from "./session.js";
 
-export const RESTORE_VERSION = "auth.restore.v7";
+export const RESTORE_VERSION = "auth.restore.v8";
 
 const ME_ENDPOINT = AUTH_ENDPOINTS.me;
 const REFRESH_ENDPOINT = AUTH_ENDPOINTS.refresh;
@@ -114,9 +114,9 @@ function nowIso() {
 }
 
 function redact(value = "") {
-  return String(value || "")
+  return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -234,8 +234,9 @@ function getErrorPayload(error = null) {
   if (isObject(error.data)) return error.data;
   if (isObject(error.body)) return error.body;
   if (isObject(error.payload)) return error.payload;
+  if (isObject(error.responseData)) return error.responseData;
   if (isObject(error.response?.data)) return error.response.data;
-  if (isObject(error.response)) return error.response;
+  if (isObject(error.response) && !isFunction(error.response.blob)) return error.response;
 
   return {};
 }
@@ -415,14 +416,14 @@ function isRefreshableAuthFailure(error = null, options = {}) {
   return false;
 }
 
-function rememberError(type = "restore", error = null) {
+function rememberError(type = "restore", error = null, options = {}) {
   const finalError = normalizeRestoreError(error);
 
   runtime.lastError = {
     type,
     ...publicError(finalError),
-    refreshable: isRefreshableAuthFailure(finalError),
-    shouldClearSession: shouldClearSessionForAuthError(finalError),
+    refreshable: isRefreshableAuthFailure(error, options),
+    shouldClearSession: shouldClearSessionForAuthError(error),
     at: nowIso(),
   };
 
@@ -460,6 +461,12 @@ function sessionSnapshot(extra = {}) {
     hasRefreshToken: Boolean(currentRefreshToken()),
     hasUser: Boolean(currentUser()),
 
+    token: null,
+    accessToken: null,
+    access_token: null,
+    refreshToken: null,
+    refresh_token: null,
+
     user: snapshot.user || null,
 
     userSlug: snapshot.userSlug || getCurrentUserSlug?.() || null,
@@ -486,6 +493,12 @@ function restoreResult(source = "state") {
     restored: Boolean(snapshot.authenticated),
     authenticated: Boolean(snapshot.authenticated),
 
+    token: null,
+    accessToken: null,
+    access_token: null,
+    refreshToken: null,
+    refresh_token: null,
+
     user: snapshot.user || null,
 
     userSlug: snapshot.userSlug || null,
@@ -503,6 +516,12 @@ function emptyRestoreResult(source = "empty") {
     ok: false,
     restored: false,
     authenticated: false,
+
+    token: null,
+    accessToken: null,
+    access_token: null,
+    refreshToken: null,
+    refresh_token: null,
 
     user: null,
     userSlug: null,
@@ -527,6 +546,12 @@ function failedRestoreResult(error = null, source = "error") {
     ok: false,
     restored: false,
     authenticated: false,
+
+    token: null,
+    accessToken: null,
+    access_token: null,
+    refreshToken: null,
+    refresh_token: null,
 
     user: null,
     userSlug: null,
@@ -772,7 +797,7 @@ export async function fetchMe(options = {}) {
 
       return restoreResult("me");
     } catch (error) {
-      throw rememberError("me", error);
+      throw rememberError("me", error, options);
     } finally {
       runtime.checking = false;
       runtime.mePromise = null;
@@ -818,7 +843,7 @@ export async function refreshSession(options = {}) {
 
       return restoreResult("refresh");
     } catch (error) {
-      throw rememberError("refresh", error);
+      throw rememberError("refresh", error, options);
     } finally {
       runtime.refreshing = false;
       runtime.refreshPromise = null;
@@ -872,10 +897,10 @@ export async function restoreSession(options = {}) {
             source: "me",
           };
         } catch (meError) {
-          const finalMeError = rememberError("restore.me", meError);
+          rememberError("restore.me", meError, options);
 
           try {
-            const refreshed = await tryRefreshAfterAuthFailure(finalMeError, options);
+            const refreshed = await tryRefreshAfterAuthFailure(meError, options);
 
             runtime.lastRestoreAt = Date.now();
             clearLastError();
@@ -885,11 +910,11 @@ export async function restoreSession(options = {}) {
               source: "refresh",
             };
           } catch (refreshError) {
-            const finalRefreshError = rememberError("restore.refresh", refreshError);
+            rememberError("restore.refresh", refreshError, options);
 
             if (
-              shouldClearSessionForAuthError(finalRefreshError) ||
-              isAuthFailure(finalRefreshError)
+              shouldClearSessionForAuthError(refreshError) ||
+              isAuthFailure(refreshError)
             ) {
               clearInvalidSession(options);
               runtime.lastRestoreAt = Date.now();
@@ -897,7 +922,7 @@ export async function restoreSession(options = {}) {
             }
 
             runtime.lastRestoreAt = Date.now();
-            return failedRestoreResult(finalRefreshError, "error");
+            return failedRestoreResult(refreshError, "error");
           }
         }
       }
@@ -922,11 +947,11 @@ export async function restoreSession(options = {}) {
           source: "refresh",
         };
       } catch (refreshError) {
-        const finalRefreshError = rememberError("restore.refresh", refreshError);
+        rememberError("restore.refresh", refreshError, options);
 
         if (
-          shouldClearSessionForAuthError(finalRefreshError) ||
-          isAuthFailure(finalRefreshError)
+          shouldClearSessionForAuthError(refreshError) ||
+          isAuthFailure(refreshError)
         ) {
           clearInvalidSession(options);
           runtime.lastRestoreAt = Date.now();
@@ -934,7 +959,7 @@ export async function restoreSession(options = {}) {
         }
 
         runtime.lastRestoreAt = Date.now();
-        return failedRestoreResult(finalRefreshError, "error");
+        return failedRestoreResult(refreshError, "error");
       }
     } finally {
       runtime.restoring = false;
@@ -977,6 +1002,12 @@ export function getRestoreSnapshot() {
     hasToken: Boolean(currentToken()),
     hasRefreshToken: Boolean(currentRefreshToken()),
     hasUser: Boolean(currentUser()),
+
+    token: null,
+    accessToken: null,
+    access_token: null,
+    refreshToken: null,
+    refresh_token: null,
 
     hasRefreshContext: Boolean(context.usable),
     hasFullRefreshContext: Boolean(context.hasFullContext),

@@ -31,19 +31,28 @@ import { Auth } from "../../features/auth/index.js";
 import {
   ROUTES,
   TOKEN_PARAM,
+  USER_HOME_PREFIX,
+  canonicalRoutePath as configCanonicalRoutePath,
+  getUserScopedRouteInfo as configGetUserScopedRouteInfo,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
 import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
 
 import * as ActivateTemplate from "./activate-account.template.js";
 
-export const ACTIVATE_ACCOUNT_VIEW_VERSION = "activate-account.view.v3";
+export const ACTIVATE_ACCOUNT_VIEW_VERSION = "activate-account.view.v4";
 
 const SOURCE = "activate-account.view";
 
 const HOME_ROUTE = ROUTES.home || ROUTES.root || "/";
 const ROUTE = ROUTES.activateAccount || "/activate-account";
 const LOGIN_ROUTE = ROUTES.login || "/login";
+
+const USER_PREFIX = USER_HOME_PREFIX || "/@";
 
 const TOKEN_MIN_LENGTH = 8;
 const TOKEN_MAX_LENGTH = 8192;
@@ -75,8 +84,16 @@ function isContainer(value) {
   return Boolean(value && typeof value.querySelector === "function");
 }
 
+function isNode(value = null) {
+  return Boolean(value && typeof value.nodeType === "number");
+}
+
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -85,56 +102,301 @@ function rawText(value = "", fallback = "") {
 }
 
 function redact(value = "") {
-  return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+  return text(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function later(callback = null) {
+  if (!isFunction(callback)) return false;
+
+  const run = () => {
+    try {
+      callback();
+    } catch {
+      // noop
+    }
+  };
+
+  try {
+    queueMicrotask(run);
+    return true;
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    Promise.resolve().then(run).catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeRoot(root = null) {
+  return isNode(root) ? root : isBrowser() ? document : null;
 }
 
 /* =========================================================
    PATH / TOKEN
 ========================================================= */
 
-function normalizeHashPath(path = HOME_ROUTE) {
-  const value = text(path, HOME_ROUTE);
+function normalizeSlug(value = "") {
+  try {
+    return configNormalizeUserSlug(value) || "";
+  } catch {
+    const slug = text(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/^\/+/, "")
+      .replace(/^@+/, "")
+      .split(/[/?#]/)[0]
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase();
 
-  if (value.startsWith("#!")) {
-    return value.replace(/^#!\/?/, "/") || HOME_ROUTE;
+    if (!slug) return "";
+
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  }
+}
+
+function pathFromInput(path = HOME_ROUTE) {
+  try {
+    return configRoutePathFromUrlLike(path) || HOME_ROUTE;
+  } catch {
+    const raw = text(path, HOME_ROUTE);
+
+    if (raw.startsWith("#!")) {
+      return raw.replace(/^#!\/?/, "/") || HOME_ROUTE;
+    }
+
+    if (raw.startsWith("#/")) {
+      return raw.slice(1) || HOME_ROUTE;
+    }
+
+    if (raw.startsWith("//")) return HOME_ROUTE;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return HOME_ROUTE;
+
+    return raw || HOME_ROUTE;
+  }
+}
+
+function normalizePathname(pathname = HOME_ROUTE) {
+  try {
+    return configNormalizeRoutePath(pathname) || HOME_ROUTE;
+  } catch {
+    let value = text(pathname, HOME_ROUTE)
+      .split("#")[0]
+      .split("?")[0]
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "") || HOME_ROUTE;
+    }
+
+    return value || HOME_ROUTE;
+  }
+}
+
+function normalizeSearch(search = "") {
+  const value = text(search, "");
+
+  if (!value || value === "?") return "";
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = text(hash, "");
+
+  if (!value || value === "#") return "";
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
+function splitPath(path = HOME_ROUTE) {
+  let raw = pathFromInput(path);
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || HOME_ROUTE;
   }
 
-  if (value.startsWith("#/")) {
-    return value.slice(1) || HOME_ROUTE;
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || HOME_ROUTE;
   }
 
-  return value;
+  return {
+    pathname: normalizePathname(pathname),
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
+  };
+}
+
+function joinPath(parts = {}) {
+  return [
+    normalizePathname(parts.pathname || HOME_ROUTE),
+    normalizeSearch(parts.search || ""),
+    normalizeHash(parts.hash || ""),
+  ].join("");
+}
+
+function getUserScopedInfo(pathname = HOME_ROUTE) {
+  try {
+    const info = configGetUserScopedRouteInfo(pathname);
+
+    if (isObject(info)) {
+      const restPath = normalizePathname(
+        info.restPath ||
+          info.canonicalPath ||
+          pathname ||
+          HOME_ROUTE
+      );
+
+      const canonicalPath = normalizePathname(
+        info.canonicalPath ||
+          info.lookupPath ||
+          restPath ||
+          HOME_ROUTE
+      );
+
+      return {
+        scoped: Boolean(info.scoped),
+        home: Boolean(info.home),
+        slug: normalizeSlug(info.slug || ""),
+        restPath,
+        canonicalPath,
+        lookupPath: canonicalPath,
+      };
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  const clean = normalizePathname(pathname);
+
+  if (!clean.startsWith(USER_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: clean,
+      canonicalPath: clean,
+      lookupPath: clean,
+    };
+  }
+
+  const rest = clean.slice(USER_PREFIX.length);
+  const [slugSegment = "", ...segments] = rest.split("/");
+  const slug = normalizeSlug(slugSegment);
+
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: clean,
+      canonicalPath: clean,
+      lookupPath: clean,
+    };
+  }
+
+  const restPath = segments.length
+    ? normalizePathname(`/${segments.join("/")}`)
+    : HOME_ROUTE;
+
+  return {
+    scoped: true,
+    home: restPath === HOME_ROUTE,
+    slug,
+    restPath,
+    canonicalPath: restPath,
+    lookupPath: restPath,
+  };
+}
+
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
+    String(value || "")
+  );
+}
+
+function fallbackBlockedPath(pathname = HOME_ROUTE) {
+  const clean = normalizePathname(pathname).toLowerCase();
+
+  return Boolean(
+    clean === "/home" ||
+      clean.startsWith("/home/") ||
+      clean === "/403" ||
+      clean.startsWith("/403/") ||
+      clean === "/404" ||
+      clean.startsWith("/404/") ||
+      clean === "/2fa" ||
+      clean.startsWith("/2fa/") ||
+      clean === "/mfa" ||
+      clean.startsWith("/mfa/") ||
+      clean === "/otp" ||
+      clean.startsWith("/otp/")
+  );
+}
+
+function isBlockedPath(path = HOME_ROUTE) {
+  try {
+    if (configIsBlockedRoutePath(path) === true) return true;
+  } catch {
+    // fallback abajo
+  }
+
+  if (fallbackBlockedPath(path)) return true;
+
+  const scoped = getUserScopedInfo(path);
+
+  return Boolean(scoped.scoped && fallbackBlockedPath(scoped.restPath));
 }
 
 function normalizePublicPath(path = HOME_ROUTE) {
-  let value = normalizeHashPath(path);
+  const parts = splitPath(path);
 
-  if (!value || value.startsWith("//")) return HOME_ROUTE;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return HOME_ROUTE;
-
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
+  if (isBlockedPath(parts.pathname)) {
+    return HOME_ROUTE;
   }
 
-  value = value
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  return value || HOME_ROUTE;
+  return joinPath(parts);
 }
 
 function normalizeCanonicalPath(path = HOME_ROUTE) {
-  let value = normalizePublicPath(path)
-    .split("?")[0]
-    .split("#")[0] || HOME_ROUTE;
+  if (isBlockedPath(path)) return HOME_ROUTE;
 
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || HOME_ROUTE;
+  try {
+    const canonical = configCanonicalRoutePath(path) || HOME_ROUTE;
+    return canonical ? normalizePathname(canonical) : HOME_ROUTE;
+  } catch {
+    const parts = splitPath(path);
+    const scoped = getUserScopedInfo(parts.pathname);
+
+    return scoped.scoped ? scoped.canonicalPath : parts.pathname;
   }
-
-  return value || HOME_ROUTE;
 }
 
 function currentPublicPath() {
@@ -148,14 +410,8 @@ function currentPublicPath() {
   }
 
   try {
-    const hash = window.location.hash || "";
-
-    if (hash.startsWith("#/") || hash.startsWith("#!")) {
-      return normalizePublicPath(hash);
-    }
-
     return normalizePublicPath(
-      `${window.location.pathname || ROUTE}${window.location.search || ""}${hash}`
+      `${window.location.pathname || ROUTE}${window.location.search || ""}${window.location.hash || ""}`
     );
   } catch {
     return ROUTE;
@@ -208,24 +464,30 @@ function tokenFromQuery(query = "") {
   }
 }
 
+function tokenFromHash(hash = "") {
+  const raw = text(hash, "").replace(/^#/, "");
+
+  if (!raw) return "";
+
+  if (raw.includes("?")) {
+    return tokenFromQuery(raw.slice(raw.indexOf("?") + 1));
+  }
+
+  if (/^[^/?#=&]+=/i.test(raw)) {
+    return tokenFromQuery(raw);
+  }
+
+  return "";
+}
+
 function tokenFromPath(path = "") {
   const raw = text(path, "");
 
   if (!raw) return "";
 
-  const query = raw.includes("?")
-    ? raw.split("?").slice(1).join("?").split("#")[0]
-    : "";
+  const parts = splitPath(raw);
 
-  const hash = raw.includes("#")
-    ? raw.split("#").slice(1).join("#")
-    : "";
-
-  const hashQuery = hash.includes("?")
-    ? hash.split("?").slice(1).join("?")
-    : "";
-
-  return tokenFromQuery(query) || tokenFromQuery(hashQuery);
+  return tokenFromQuery(parts.search) || tokenFromHash(parts.hash);
 }
 
 function getUrlToken() {
@@ -234,10 +496,8 @@ function getUrlToken() {
   }
 
   try {
-    return (
-      tokenFromQuery(window.location.search) ||
-      tokenFromQuery((window.location.hash || "").split("?").slice(1).join("?"))
-    );
+    return tokenFromQuery(window.location.search) ||
+      tokenFromHash(window.location.hash);
   } catch {
     return "";
   }
@@ -246,12 +506,6 @@ function getUrlToken() {
 /* =========================================================
    NAVIGATION
 ========================================================= */
-
-function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
-    String(value || "")
-  );
-}
 
 function isSafeInternalPath(path = "") {
   const value = text(path, "");
@@ -262,15 +516,17 @@ function isSafeInternalPath(path = "") {
       !value.startsWith("//") &&
       !/^[a-z][a-z0-9+.-]*:/i.test(value) &&
       !/[\r\n\t\\]/.test(value) &&
-      !hasSensitiveQuery(value)
+      !hasSensitiveQuery(value) &&
+      !isBlockedPath(value) &&
+      !getUserScopedInfo(value).scoped
   );
 }
 
 function safeInternalPath(path = "", fallback = LOGIN_ROUTE) {
-  const candidate = normalizePublicPath(path || fallback);
+  const fallbackPath = normalizePathname(fallback || LOGIN_ROUTE);
+  const candidate = normalizePublicPath(path || fallbackPath);
 
-  if (!isSafeInternalPath(candidate)) return fallback;
-  if (normalizeCanonicalPath(candidate) === "/home") return fallback;
+  if (!isSafeInternalPath(candidate)) return fallbackPath;
 
   return candidate;
 }
@@ -360,6 +616,22 @@ function setAttr(node = null, name = "", value = null) {
       node.removeAttribute(name);
     } else {
       node.setAttribute(name, String(value));
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setDataset(node = null, key = "", value = "") {
+  if (!node || !key) return false;
+
+  try {
+    if (value === null || value === undefined || value === false || value === "") {
+      delete node.dataset[key];
+    } else {
+      node.dataset[key] = String(value);
     }
 
     return true;
@@ -528,18 +800,16 @@ function setMessage(node = null, message = "", type = "error") {
     node.textContent = clean;
     setHidden(node, !clean);
 
+    toggleClass(node, "is-visible", Boolean(clean));
     toggleClass(node, "is-error", Boolean(clean) && cleanType === "error");
     toggleClass(node, "is-success", Boolean(clean) && cleanType === "success");
     toggleClass(node, "is-info", Boolean(clean) && cleanType === "info");
 
     setAttr(node, "role", clean ? (cleanType === "error" ? "alert" : "status") : null);
     setAttr(node, "aria-live", clean ? (cleanType === "error" ? "assertive" : "polite") : null);
+    setAttr(node, "aria-atomic", clean ? "true" : null);
 
-    if (clean) {
-      node.dataset.messageType = cleanType;
-    } else {
-      delete node.dataset.messageType;
-    }
+    setDataset(node, "messageType", clean ? cleanType : "");
 
     return true;
   } catch {
@@ -547,21 +817,48 @@ function setMessage(node = null, message = "", type = "error") {
   }
 }
 
-function setFieldError(field = null, message = "") {
-  if (!field) return false;
+function fieldWrapperFor(container = null, name = "") {
+  if (!container || !name) return null;
 
+  return (
+    query(container, `[data-activate-account-field='${name}']`) ||
+    query(container, `[data-activate-field='${name}']`) ||
+    query(container, `[data-field='${name}']`) ||
+    null
+  );
+}
+
+function errorNodeFor(container = null, name = "") {
+  if (!container || !name) return null;
+
+  return (
+    query(container, `[data-activate-account-error-for='${name}']`) ||
+    query(container, `[data-activate-error-for='${name}']`) ||
+    query(container, `[data-error-for='${name}']`) ||
+    query(container, `#activateAccount${name.charAt(0).toUpperCase()}${name.slice(1)}Error`) ||
+    null
+  );
+}
+
+function setFieldError(input = null, field = null, errorNode = null, message = "") {
   const clean = redact(text(message, ""));
 
-  setAttr(field, "aria-invalid", clean ? "true" : "false");
+  toggleClass(field, "is-invalid", Boolean(clean));
+  setDataset(field, "invalid", clean ? "true" : "");
 
-  try {
-    if (clean) {
-      field.dataset.error = clean;
-    } else {
-      delete field.dataset.error;
+  toggleClass(input, "is-invalid", Boolean(clean));
+  setAttr(input, "aria-invalid", clean ? "true" : "false");
+
+  if (errorNode) {
+    try {
+      errorNode.textContent = clean;
+      setHidden(errorNode, !clean);
+      toggleClass(errorNode, "is-visible", Boolean(clean));
+      setAttr(errorNode, "role", clean ? "alert" : null);
+      setAttr(errorNode, "aria-live", clean ? "polite" : null);
+    } catch {
+      // noop
     }
-  } catch {
-    // noop
   }
 
   return true;
@@ -584,7 +881,7 @@ function disposeBinding(binding = null) {
 }
 
 function bindActivatePasswordFields(container = null, options = {}) {
-  const root = container || document;
+  const root = safeRoot(container);
 
   if (!root) return [];
 
@@ -617,7 +914,7 @@ function bindActivatePasswordFields(container = null, options = {}) {
 }
 
 function destroyActivatePasswordFields(container = null) {
-  const root = container || document;
+  const root = safeRoot(container);
 
   if (!root) return false;
 
@@ -693,33 +990,70 @@ function getRefs(container = null) {
     query(container, "form") ||
     null;
 
+  const password =
+    query(container, "[name='password']") ||
+    query(container, "[data-activate-account-password]") ||
+    query(container, "#activateAccountPassword") ||
+    null;
+
+  const confirmPassword =
+    query(container, "[name='confirmPassword']") ||
+    query(container, "[name='passwordConfirmation']") ||
+    query(container, "[data-activate-account-confirm]") ||
+    query(container, "#activateAccountPasswordConfirm") ||
+    null;
+
+  const submit =
+    query(container, "[data-activate-account-submit]") ||
+    query(container, "#activateAccountButton") ||
+    query(container, "button[type='submit']") ||
+    null;
+
+  if (form) {
+    try {
+      form.noValidate = true;
+      form.dataset.activateAccountViewVersion = ACTIVATE_ACCOUNT_VIEW_VERSION;
+    } catch {
+      // noop
+    }
+  }
+
+  if (submit) {
+    try {
+      submit.type = "submit";
+
+      if (!submit.dataset.defaultLabel) {
+        submit.dataset.defaultLabel = text(submit.textContent, "Activar cuenta");
+      }
+
+      submit.setAttribute("aria-busy", "false");
+    } catch {
+      // noop
+    }
+  }
+
   return {
     form,
 
-    password:
-      query(container, "[name='password']") ||
-      query(container, "[data-activate-account-password]") ||
-      query(container, "#activateAccountPassword") ||
-      null,
+    password,
+    confirmPassword,
 
-    confirmPassword:
-      query(container, "[name='confirmPassword']") ||
-      query(container, "[name='passwordConfirmation']") ||
-      query(container, "[data-activate-account-confirm]") ||
-      query(container, "#activateAccountPasswordConfirm") ||
-      null,
-
-    submit:
-      query(container, "[data-activate-account-submit]") ||
-      query(container, "#activateAccountButton") ||
-      query(container, "button[type='submit']") ||
-      null,
-
+    submit,
     back:
       query(container, "[data-activate-account-back]") ||
       query(container, ".activate-account-back-link") ||
       query(container, `a[href='${LOGIN_ROUTE}']`) ||
       null,
+
+    fieldPassword: fieldWrapperFor(container, "password"),
+    fieldConfirmPassword:
+      fieldWrapperFor(container, "confirm-password") ||
+      fieldWrapperFor(container, "confirmPassword"),
+
+    passwordError: errorNodeFor(container, "password"),
+    confirmPasswordError:
+      errorNodeFor(container, "confirm-password") ||
+      errorNodeFor(container, "confirmPassword"),
 
     passwordFieldBindings: [],
   };
@@ -777,8 +1111,9 @@ function firstError(errors = {}) {
 
 function clearErrors(refs = {}, messageNode = null) {
   setMessage(messageNode, "");
-  setFieldError(refs.password, "");
-  setFieldError(refs.confirmPassword, "");
+
+  setFieldError(refs.password, refs.fieldPassword, refs.passwordError, "");
+  setFieldError(refs.confirmPassword, refs.fieldConfirmPassword, refs.confirmPasswordError, "");
 
   try {
     refs.form?.removeAttribute("data-error");
@@ -791,8 +1126,14 @@ function clearErrors(refs = {}, messageNode = null) {
 }
 
 function applyErrors(refs = {}, messageNode = null, errors = {}) {
-  setFieldError(refs.password, errors.password || "");
-  setFieldError(refs.confirmPassword, errors.confirmPassword || "");
+  setFieldError(refs.password, refs.fieldPassword, refs.passwordError, errors.password || "");
+  setFieldError(
+    refs.confirmPassword,
+    refs.fieldConfirmPassword,
+    refs.confirmPasswordError,
+    errors.confirmPassword || ""
+  );
+
   setMessage(messageNode, firstError(errors), "error");
 
   try {
@@ -811,11 +1152,13 @@ function applyErrors(refs = {}, messageNode = null, errors = {}) {
         ? refs.confirmPassword
         : null;
 
-  try {
-    firstField?.focus?.();
-  } catch {
-    // noop
-  }
+  later(() => {
+    try {
+      firstField?.focus?.();
+    } catch {
+      // noop
+    }
+  });
 
   return true;
 }
@@ -825,6 +1168,8 @@ function setLoading(refs = {}, loading = false) {
 
   setBusy(refs.form, active);
 
+  setDataset(refs.form, "submitting", active ? "true" : "");
+
   setDisabled(refs.password, active);
   setDisabled(refs.confirmPassword, active);
   setDisabled(refs.submit, active);
@@ -832,13 +1177,11 @@ function setLoading(refs = {}, loading = false) {
 
   if (refs.submit) {
     try {
-      if (!refs.submit.dataset.defaultLabel) {
-        refs.submit.dataset.defaultLabel = refs.submit.textContent;
-      }
-
       refs.submit.textContent = active
         ? "Activando..."
-        : refs.submit.dataset.defaultLabel;
+        : text(refs.submit.dataset.defaultLabel, "Activar cuenta");
+
+      setAttr(refs.submit, "aria-busy", active ? "true" : "false");
     } catch {
       // noop
     }
@@ -871,16 +1214,30 @@ function resultMessage(result = {}, fallback = "") {
   );
 }
 
+function errorPayload(error = null) {
+  if (!error) return {};
+
+  if (isObject(error.data)) return error.data;
+  if (isObject(error.body)) return error.body;
+  if (isObject(error.payload)) return error.payload;
+  if (isObject(error.responseData)) return error.responseData;
+  if (isObject(error.response?.data)) return error.response.data;
+  if (isObject(error.response) && !isFunction(error.response.blob)) return error.response;
+  if (isObject(error) && !isFunction(error.blob)) return error;
+
+  return {};
+}
+
 function errorMessage(error = null, fallback = "No se pudo activar la cuenta.") {
+  const payload = errorPayload(error);
+
   return redact(
-    text(
-      error?.message ||
-        error?.data?.message ||
-        error?.response?.data?.message ||
-        error?.mensaje ||
-        error?.error,
+    text(payload.message, "") ||
+      text(payload.error_description, "") ||
+      text(payload.error, "") ||
+      text(payload.detail, "") ||
+      text(error?.message, "") ||
       fallback
-    )
   );
 }
 
@@ -1073,11 +1430,13 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
     );
   }
 
-  try {
-    refs.password?.focus?.();
-  } catch {
-    // noop
-  }
+  later(() => {
+    try {
+      refs.password?.focus?.();
+    } catch {
+      // noop
+    }
+  });
 
   const instance = {
     version: ACTIVATE_ACCOUNT_VIEW_VERSION,
@@ -1125,6 +1484,10 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
 
         hasToken: Boolean(token),
 
+        token: null,
+        accessToken: null,
+        refreshToken: null,
+
         dom: {
           hasForm: Boolean(refs.form),
           hasPassword: Boolean(refs.password),
@@ -1138,6 +1501,9 @@ export function renderActivateAccountView(containerArg = null, deps = {}) {
           tokenParamFromConfig: true,
 
           routesFromConfig: true,
+          configOwnsBlockedRoutes: true,
+          blocksLegacyRoutes: true,
+          blocksSensitiveRedirects: true,
 
           noFetchDirect: true,
           noCoreHttpDirect: true,
@@ -1222,6 +1588,7 @@ export function getSnapshot() {
     mounted: false,
     route: redact(currentPath()),
     hasToken: Boolean(getUrlToken()),
+    token: null,
   };
 }
 

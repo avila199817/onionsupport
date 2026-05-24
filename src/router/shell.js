@@ -40,7 +40,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_SHELL_VERSION = "router.shell.v6";
+export const ROUTER_SHELL_VERSION = "router.shell.v7";
 
 const APP_NAME = config?.appName || config?.name || "Onion Support";
 
@@ -113,14 +113,14 @@ function safeTitle(value = "") {
 function redact(value = "") {
   return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
     String(value || "")
   );
 }
@@ -141,8 +141,39 @@ function normalizePath(path = HOME_PATH) {
   try {
     return configNormalizeRoutePath(pathFromInput(path)) || HOME_PATH;
   } catch {
-    return HOME_PATH;
+    let value = cleanText(path, HOME_PATH).replace(/\\/g, "/");
+
+    if (value.includes("#")) value = value.split("#")[0] || HOME_PATH;
+    if (value.includes("?")) value = value.split("?")[0] || HOME_PATH;
+
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    value = value.replace(/\/{2,}/g, "/");
+
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "") || HOME_PATH;
+    }
+
+    return value || HOME_PATH;
   }
+}
+
+function normalizeUserSlug(value = "") {
+  const slug = cleanText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
 function isBlockedLegacyPath(path = HOME_PATH) {
@@ -168,13 +199,18 @@ function getUserScopedRouteInfo(path = HOME_PATH) {
     const info = getConfigUserScopedRouteInfo(path);
 
     if (isObject(info)) {
-      const restPath = info.restPath || info.canonicalPath || normalizePath(path);
-      const lookupPath = info.canonicalPath || info.lookupPath || restPath;
+      const restPath = normalizePath(
+        info.restPath || info.canonicalPath || normalizePath(path)
+      );
+
+      const lookupPath = normalizePath(
+        info.canonicalPath || info.lookupPath || restPath
+      );
 
       return {
         scoped: Boolean(info.scoped),
         home: Boolean(info.home),
-        slug: cleanText(info.slug, ""),
+        slug: normalizeUserSlug(info.slug || ""),
         restPath,
         lookupPath,
       };
@@ -183,12 +219,42 @@ function getUserScopedRouteInfo(path = HOME_PATH) {
     // fallback abajo
   }
 
+  const clean = normalizePath(path);
+
+  if (!clean.startsWith(USER_HOME_PREFIX)) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: clean,
+      lookupPath: clean,
+    };
+  }
+
+  const rest = clean.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const slug = normalizeUserSlug(slugSegment);
+
+  if (!slug) {
+    return {
+      scoped: false,
+      home: false,
+      slug: "",
+      restPath: clean,
+      lookupPath: clean,
+    };
+  }
+
+  const restPath = restSegments.length
+    ? normalizePath(`/${restSegments.join("/")}`)
+    : HOME_PATH;
+
   return {
-    scoped: false,
-    home: false,
-    slug: "",
-    restPath: normalizePath(path),
-    lookupPath: normalizePath(path),
+    scoped: true,
+    home: restPath === HOME_PATH,
+    slug,
+    restPath,
+    lookupPath: restPath,
   };
 }
 
@@ -213,10 +279,18 @@ function isUserScopedPath(path = HOME_PATH) {
 }
 
 function canonicalPath(path = HOME_PATH) {
+  if (isBlockedLegacyPath(path)) {
+    return HOME_PATH;
+  }
+
   try {
-    return configCanonicalRoutePath(path) || normalizePath(path);
+    const canonical = configCanonicalRoutePath(path) || normalizePath(path);
+    return isBlockedLegacyPath(canonical) ? HOME_PATH : canonical;
   } catch {
-    return getUserScopedRouteInfo(path).lookupPath || normalizePath(path);
+    const scoped = getUserScopedRouteInfo(path);
+    const canonical = scoped.scoped ? scoped.lookupPath : normalizePath(path);
+
+    return isBlockedLegacyPath(canonical) ? HOME_PATH : canonical;
   }
 }
 
@@ -425,7 +499,7 @@ export function getShellElements(AppCore = null) {
   const shell = byId("app-shell");
   const main = byId("main-content");
   const appContent = byId("app-content");
-  const viewContainer = byId("view-container");
+  const viewContainer = byId("view-container") || appContent || main;
 
   const sidebarMount = byId("sidebar-mount");
   const topbarMount = byId("topbar-mount");
@@ -542,6 +616,8 @@ function isIgnoredHref(href = "") {
   if (value.startsWith("//")) return true;
   if (hasSensitiveQuery(value)) return true;
   if (isBlockedLegacyPath(value)) return true;
+
+  if (/[\r\n\t\\]/.test(value)) return true;
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^https?:\/\//i.test(value)) {
     return true;
@@ -789,7 +865,7 @@ export function getShellSnapshot(AppCore = null) {
     version: ROUTER_SHELL_VERSION,
     source: "router.shell",
 
-    route,
+    route: redact(route),
     publicPath: redact(publicPath),
     publicSlug: extractUserHomeSlug(publicPath) || null,
     isUserHomePath: isUserHomePath(publicPath || HOME_PATH),

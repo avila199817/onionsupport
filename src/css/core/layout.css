@@ -4,7 +4,7 @@
 
    FINAL LAYOUT SYSTEM · PRIVATE SPA · EXTREME 10/10
    SHELL · STACKING · SCROLL · MOUNTS · RESPONSIVE
-   REVISION: fixed shell specificity / no horizontal escape
+   REVISION: fixed shell specificity / mobile rail offset / no horizontal escape
 
    Responsabilidad:
    - Layout, stacking, scroll, shell y responsive.
@@ -133,7 +133,7 @@ body[data-layout-resizing="true"] * {
    Contract:
    - JS puede usar body.sidebar-open / body.sidebar-collapsed.
    - CSS también detecta el root real con :has().
-   - En móvil el offset siempre es 0.
+   - En móvil el rail collapsed visible reserva su ancho.
 ========================================================= */
 
 body.sidebar-open,
@@ -438,6 +438,7 @@ body.app-ready #app-shell {
 body.route-shell-hidden,
 body.auth-screen,
 html[data-route-mode="auth"],
+html[data-route-mode="auth"] body,
 body[data-route-mode="auth"] {
   --app-sidebar-current-width: 0px;
   --app-offset-topbar: 0px;
@@ -1623,17 +1624,29 @@ body[data-route-mode="auth"] .content-wrapper {
 ========================================================= */
 
 @media (max-width: 900px) {
+  body {
+    --layout-mobile-rail-width: var(--sidebar-mobile-collapsed-width, 60px);
+  }
+
   body,
   body.sidebar-collapsed,
   body.sidebar-open,
   body[data-sidebar-state="open"],
   body[data-sidebar-state="collapsed"],
   body[data-sidebar-open="true"],
-  body[data-sidebar-open="false"],
+  body[data-sidebar-open="false"] {
+    --app-sidebar-current-width: var(--layout-mobile-rail-width) !important;
+  }
+
   body.sidebar-hidden,
   body[data-sidebar-state="hidden"],
-  body[data-sidebar-hidden="true"] {
+  body[data-sidebar-hidden="true"],
+  body.route-shell-hidden,
+  body.auth-screen,
+  html[data-route-mode="auth"] body,
+  body[data-route-mode="auth"] {
     --app-sidebar-current-width: 0px !important;
+    --layout-main-inset-left: 0px;
   }
 
   @supports selector(body:has(.sidebar)) {
@@ -1644,20 +1657,32 @@ body[data-route-mode="auth"] .content-wrapper {
     body:has(#sidebar-mount .sidebar[data-open="false"]),
     body:has(#sidebar-mount .sidebar[data-sidebar-state="open"]),
     body:has(#sidebar-mount .sidebar[data-sidebar-state="collapsed"]),
-    body:has(#sidebar-mount .sidebar[hidden]),
-    body:has(#sidebar-mount .sidebar.is-hidden),
-    body:has(#sidebar-mount .sidebar[aria-hidden="true"]),
     body:has([data-sidebar-mount] .sidebar),
     body:has([data-sidebar-mount] .sidebar.is-open),
     body:has([data-sidebar-mount] .sidebar.is-collapsed),
     body:has([data-sidebar-mount] .sidebar[data-open="true"]),
     body:has([data-sidebar-mount] .sidebar[data-open="false"]),
     body:has([data-sidebar-mount] .sidebar[data-sidebar-state="open"]),
-    body:has([data-sidebar-mount] .sidebar[data-sidebar-state="collapsed"]),
+    body:has([data-sidebar-mount] .sidebar[data-sidebar-state="collapsed"]) {
+      --app-sidebar-current-width: var(--layout-mobile-rail-width) !important;
+    }
+
+    body:has(#sidebar-mount .sidebar[hidden]),
+    body:has(#sidebar-mount .sidebar.is-hidden),
+    body:has(#sidebar-mount .sidebar[aria-hidden="true"]),
     body:has([data-sidebar-mount] .sidebar[hidden]),
     body:has([data-sidebar-mount] .sidebar.is-hidden),
     body:has([data-sidebar-mount] .sidebar[aria-hidden="true"]) {
       --app-sidebar-current-width: 0px !important;
+      --layout-main-inset-left: 0px;
+    }
+
+    body.route-shell-hidden,
+    body.auth-screen,
+    html[data-route-mode="auth"] body,
+    body[data-route-mode="auth"] {
+      --app-sidebar-current-width: 0px !important;
+      --layout-main-inset-left: 0px;
     }
   }
 
@@ -1666,14 +1691,26 @@ body[data-route-mode="auth"] .content-wrapper {
   body.sidebar-collapsed #topbar-mount,
   body.sidebar-collapsed [data-topbar-mount],
   body.sidebar-open #topbar-mount,
-  body.sidebar-open [data-topbar-mount] {
-    inset-inline-start: 0;
+  body.sidebar-open [data-topbar-mount],
+  body[data-sidebar-state="collapsed"] #topbar-mount,
+  body[data-sidebar-state="collapsed"] [data-topbar-mount],
+  body[data-sidebar-state="open"] #topbar-mount,
+  body[data-sidebar-state="open"] [data-topbar-mount],
+  body[data-sidebar-open="false"] #topbar-mount,
+  body[data-sidebar-open="false"] [data-topbar-mount],
+  body[data-sidebar-open="true"] #topbar-mount,
+  body[data-sidebar-open="true"] [data-topbar-mount] {
+    inset-inline-start: var(--layout-main-inset-left);
   }
 
   .main-content,
   body.sidebar-collapsed .main-content,
-  body.sidebar-open .main-content {
-    inset-inline-start: 0;
+  body.sidebar-open .main-content,
+  body[data-sidebar-state="collapsed"] .main-content,
+  body[data-sidebar-state="open"] .main-content,
+  body[data-sidebar-open="false"] .main-content,
+  body[data-sidebar-open="true"] .main-content {
+    inset-inline-start: var(--layout-main-inset-left);
     inset-inline-end: 0;
 
     margin: 0;
@@ -1686,8 +1723,12 @@ body[data-route-mode="auth"] .content-wrapper {
 
   .table-head,
   body.sidebar-collapsed .table-head,
-  body.sidebar-open .table-head {
-    inset-inline-start: 0;
+  body.sidebar-open .table-head,
+  body[data-sidebar-state="collapsed"] .table-head,
+  body[data-sidebar-state="open"] .table-head,
+  body[data-sidebar-open="false"] .table-head,
+  body[data-sidebar-open="true"] .table-head {
+    inset-inline-start: var(--layout-main-inset-left);
   }
 
   .container,
@@ -1849,6 +1890,12 @@ body[data-route-mode="auth"] .content-wrapper {
   .empty-state {
     min-block-size: 160px;
     padding: var(--space-md);
+  }
+}
+
+@media (max-width: 380px) {
+  body {
+    --layout-mobile-rail-width: var(--sidebar-mobile-collapsed-width, 56px);
   }
 }
 

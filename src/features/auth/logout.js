@@ -31,7 +31,7 @@ import {
   buildSessionSnapshot,
 } from "./session.js";
 
-export const AUTH_LOGOUT_VERSION = "auth.logout.v3";
+export const AUTH_LOGOUT_VERSION = "auth.logout.v4";
 
 const SOURCE = "auth.logout";
 const LOGOUT_ENDPOINT = AUTH_ENDPOINTS.logout;
@@ -58,7 +58,11 @@ function isObject(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -72,26 +76,62 @@ function nowIso() {
 
 function redact(value = "") {
   return cleanText(value, "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function statusOf(value = null) {
+  const payload = errorPayload(value);
+
   return Number(
     value?.status ||
       value?.statusCode ||
       value?.response?.status ||
-      value?.data?.status ||
+      payload.status ||
+      payload.statusCode ||
       0
   ) || 0;
 }
 
+function errorPayload(error = null) {
+  if (!error) return {};
+
+  if (isObject(error.data)) return error.data;
+  if (isObject(error.body)) return error.body;
+  if (isObject(error.payload)) return error.payload;
+  if (isObject(error.responseData)) return error.responseData;
+  if (isObject(error.response?.data)) return error.response.data;
+  if (isObject(error.response) && !isFunction(error.response.blob)) return error.response;
+
+  return {};
+}
+
 function extractMessage(error = null) {
+  const payload = errorPayload(error);
+
   return (
-    cleanText(error?.data?.message, "") ||
-    cleanText(error?.response?.data?.message, "") ||
+    cleanText(payload.message, "") ||
+    cleanText(payload.error_description, "") ||
+    cleanText(payload.error, "") ||
+    cleanText(payload.detail, "") ||
     cleanText(error?.message, "") ||
     String(error || "")
+  );
+}
+
+function extractCode(error = null) {
+  const payload = errorPayload(error);
+
+  return (
+    error?.code ||
+    payload.code ||
+    payload.errorCode ||
+    payload.error_code ||
+    payload.error ||
+    null
   );
 }
 
@@ -102,7 +142,7 @@ function publicError(error = null) {
     name: error.name || "Error",
     message: redact(extractMessage(error)),
     status: statusOf(error),
-    code: error.code || error.data?.code || error.response?.data?.code || null,
+    code: extractCode(error),
   };
 }
 
@@ -127,10 +167,13 @@ function sessionSnapshot(extra = {}) {
 
     authenticated: Boolean(snapshot.authenticated),
     hasToken: Boolean(snapshot.hasToken),
+    hasRefreshToken: Boolean(snapshot.hasRefreshToken),
 
     token: null,
     accessToken: null,
+    access_token: null,
     refreshToken: null,
+    refresh_token: null,
 
     user: snapshot.user || null,
 
@@ -142,7 +185,10 @@ function sessionSnapshot(extra = {}) {
     role: snapshot.role || null,
     roles: Array.isArray(snapshot.roles) ? snapshot.roles : [],
 
-    cause: extra.cause || "",
+    sessionId: snapshot.sessionId ? "***" : null,
+    sessionUserId: snapshot.sessionUserId ? "***" : null,
+
+    cause: cleanText(extra.cause, ""),
     at: nowIso(),
   };
 }
@@ -155,12 +201,16 @@ function alreadyLoggedOutStatus(status = 0) {
   return status === 401 || status === 403 || status === 404;
 }
 
-async function remoteLogout(options = {}) {
-  if (
+function shouldSkipRemote(options = {}) {
+  return Boolean(
     options.remote === false ||
-    options.skipRemote === true ||
-    options.localOnly === true
-  ) {
+      options.skipRemote === true ||
+      options.localOnly === true
+  );
+}
+
+async function remoteLogout(options = {}) {
+  if (shouldSkipRemote(options)) {
     return {
       ok: true,
       skipped: true,
@@ -327,6 +377,12 @@ export async function logout(options = {}) {
       ok: true,
       authenticated: false,
 
+      token: null,
+      accessToken: null,
+      access_token: null,
+      refreshToken: null,
+      refresh_token: null,
+
       localCleared: Boolean(local.ok),
       sessionCleared: Boolean(local.sessionCleared),
       httpCleared: Boolean(local.httpCleared),
@@ -356,6 +412,12 @@ export async function logout(options = {}) {
         ok: true,
         recovered: true,
         authenticated: false,
+
+        token: null,
+        accessToken: null,
+        access_token: null,
+        refreshToken: null,
+        refresh_token: null,
 
         localCleared: Boolean(local.ok),
         sessionCleared: Boolean(local.sessionCleared),
@@ -397,10 +459,13 @@ export function getLogoutSnapshot() {
 
     authenticated: Boolean(snapshot.authenticated),
     hasToken: Boolean(snapshot.hasToken),
+    hasRefreshToken: Boolean(snapshot.hasRefreshToken),
 
     token: null,
     accessToken: null,
+    access_token: null,
     refreshToken: null,
+    refresh_token: null,
 
     transport: {
       hasCoreHttp: Boolean(CoreHttp?.request || CoreHttp?.post || CoreHttp?.logout),
@@ -416,6 +481,7 @@ export function getLogoutSnapshot() {
       endpointFromConfig: true,
 
       ownFetch: false,
+      ownApiClient: false,
       ownRouter: false,
       ownToast: false,
       ownDom: false,
@@ -423,7 +489,10 @@ export function getLogoutSnapshot() {
       ownEvents: false,
       directAppCore: false,
 
+      noRefresh: true,
       navigation: false,
+
+      tokensNeverExposed: true,
       snapshotRedacted: true,
     },
 

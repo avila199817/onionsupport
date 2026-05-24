@@ -4,23 +4,22 @@
 
    Responsabilidad:
    - Entry point único de la SPA.
-   - Bloquear auto-boot legacy.
+   - Bloquear auto-boot legacy antes de cargar app.
    - Capturar path inicial para el boot.
    - Cargar /src/app/index.js.
    - Ejecutar boot una sola vez.
-   - Mostrar error mínimo si falla.
+   - Mostrar error mínimo si falla el arranque.
+   - Exponer snapshot técnico redacted.
    - Sin Auth.
    - Sin Router.
    - Sin Store.
    - Sin Services.
    - Sin fetch.
    - Sin storage.
-   - Sin magia negra.
-   - Sin /home.
-   - Sin 2FA/MFA/OTP.
+   - Sin lógica de dominio.
 ========================================================= */
 
-export const MAIN_VERSION = "main.v2";
+export const MAIN_VERSION = "main.v3";
 
 const APP_MODULE = "./app/index.js";
 
@@ -48,7 +47,7 @@ function cleanText(value = "", fallback = "") {
 function redactText(value = "") {
   return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -134,6 +133,7 @@ function createBootContext() {
     version: MAIN_VERSION,
     source: "main",
     initialPath,
+    initialPathRedacted: redactText(initialPath),
   });
 
   try {
@@ -180,6 +180,7 @@ function showShellForFatal() {
     shell.dataset.shellState = "fatal";
     shell.dataset.shellInteractive = "false";
     shell.dataset.chrome = "hidden";
+    shell.dataset.routeMode = "fatal";
     shell.setAttribute("aria-hidden", "false");
     shell.setAttribute("aria-busy", "false");
     return true;
@@ -213,6 +214,10 @@ function showFatalError(error = null) {
   try {
     root.setAttribute("aria-busy", "false");
     root.setAttribute("aria-hidden", "false");
+
+    if (root.dataset) {
+      root.dataset.routeMode = "fatal";
+    }
 
     const section = document.createElement("section");
     section.className = "boot-error-view";
@@ -301,6 +306,7 @@ export function getMainSnapshot() {
 
   return {
     version: MAIN_VERSION,
+    browser: true,
 
     booting: Boolean(window[BOOT_PROMISE_KEY]),
     disableAutoBoot: window[DISABLE_AUTO_BOOT_KEY] === true,
@@ -310,6 +316,8 @@ export function getMainSnapshot() {
     state: {
       mainState: document.documentElement?.dataset?.mainState || null,
       appState: document.documentElement?.dataset?.appState || null,
+      appLoading: document.documentElement?.dataset?.appLoading || null,
+      appBooting: document.documentElement?.dataset?.appBooting || null,
       appReady: document.documentElement?.dataset?.appReady || null,
       appFatal: document.documentElement?.dataset?.appFatal || null,
     },
@@ -319,6 +327,7 @@ export function getMainSnapshot() {
       disablesLegacyAutoBoot: true,
       capturesInitialPathBeforeAppImport: true,
       delegatesBootToAppIndex: true,
+      snapshotRedacted: true,
 
       noAuth: true,
       noRouter: true,
@@ -326,13 +335,7 @@ export function getMainSnapshot() {
       noServices: true,
       noFetch: true,
       noStorage: true,
-
-      noHomeRoute: true,
-      no2fa: true,
-      noMfa: true,
-      noOtp: true,
-
-      snapshotRedacted: true,
+      noDomainLogic: true,
     },
   };
 }

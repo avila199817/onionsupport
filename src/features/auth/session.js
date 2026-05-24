@@ -42,7 +42,7 @@ import {
   persistAuthStorage,
 } from "./storage.js";
 
-export const AUTH_SESSION_VERSION = "auth.session.v8";
+export const AUTH_SESSION_VERSION = "auth.session.v9";
 
 const SOURCE = "auth.session";
 
@@ -55,39 +55,48 @@ const VALID_ROLES = Object.freeze(["admin", "user"]);
 
 const SENSITIVE_USER_KEYS = new Set([
   "password",
-  "passwordHash",
+  "passwordhash",
   "password_hash",
   "hash",
   "salt",
-  "passwordMeta",
+  "passwordmeta",
 
   "token",
-  "accessToken",
+  "accesstoken",
   "access_token",
-  "refreshToken",
+  "refreshtoken",
   "refresh_token",
-  "refreshTokenHash",
+  "refreshtokenhash",
   "refresh_token_hash",
+  "idtoken",
+  "id_token",
 
-  "resetToken",
+  "resettoken",
   "reset_token",
-  "activationToken",
+  "activationtoken",
   "activation_token",
+
+  "authorization",
+  "authheader",
 
   "secret",
   "secrets",
   "code",
   "codes",
-  "backupCodes",
+  "backupcodes",
   "backup_codes",
 
   "otp",
-  "otpCode",
+  "otpcode",
   "totp",
   "mfa",
   "twofa_secret",
-  "twofaSecret",
-  "totpSecret",
+  "twofasecret",
+  "totpsecret",
+
+  "sas",
+  "connectionstring",
+  "connection_string",
 
   "_rid",
   "_self",
@@ -168,6 +177,10 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
+function normalizeKey(value = "") {
+  return cleanText(value, "").toLowerCase();
+}
+
 function firstText(...values) {
   for (const value of values) {
     const output = cleanText(value, "");
@@ -187,9 +200,9 @@ function nowIso() {
 }
 
 function redact(value = "") {
-  return String(value || "")
+  return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -209,7 +222,7 @@ function normalizeRole(value = "") {
     return "";
   }
 
-  const role = String(value || "").trim().toLowerCase();
+  const role = cleanText(value, "").toLowerCase();
 
   return VALID_ROLES.includes(role) ? role : "";
 }
@@ -309,6 +322,8 @@ export function normalizeSessionSlug(value = "") {
   }
 
   const slug = cleanText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
@@ -517,8 +532,12 @@ function selectBestUserCandidate(candidates = []) {
    USER
 ========================================================= */
 
+function isSensitiveUserKey(key = "") {
+  return SENSITIVE_USER_KEYS.has(normalizeKey(key));
+}
+
 function sanitizeUserValue(value, keyHint = "") {
-  if (SENSITIVE_USER_KEYS.has(String(keyHint || ""))) return undefined;
+  if (isSensitiveUserKey(keyHint)) return undefined;
 
   if (Array.isArray(value)) {
     return value
@@ -530,7 +549,7 @@ function sanitizeUserValue(value, keyHint = "") {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if (SENSITIVE_USER_KEYS.has(key)) continue;
+      if (isSensitiveUserKey(key)) continue;
 
       const clean = sanitizeUserValue(item, key);
 
@@ -747,6 +766,24 @@ function readRefreshTokenFromPayload(payload = {}) {
   );
 }
 
+function payloadHasExplicitUser(payload = {}) {
+  const nodes = nested(payload);
+
+  for (const node of nodes) {
+    if (
+      isObject(node.user) ||
+      isObject(node.usuario) ||
+      isObject(node.me) ||
+      isObject(node.account) ||
+      isObject(node.profile)
+    ) {
+      return true;
+    }
+  }
+
+  return hasUserIdentity(payload);
+}
+
 function readUserFromPayload(payload = {}) {
   const nodes = nested(payload);
 
@@ -923,14 +960,11 @@ function bestStateToken() {
 }
 
 function bestStateRefreshToken() {
-  const state = readState();
-
-  return cleanToken(
-    state.refreshToken ||
-      state.refresh_token ||
-      storedRefreshToken() ||
-      ""
-  );
+  /*
+    El refresh token no debe vivir en AppCore.state.
+    Se lee únicamente desde storage.js como contexto auxiliar de restore.
+  */
+  return cleanToken(storedRefreshToken() || "");
 }
 
 function bestStateUser() {
@@ -965,6 +999,7 @@ function userIdentity(user = null) {
       user.id ||
       user.uid ||
       user.sub ||
+      extractSessionUserSlug(user) ||
       "",
     ""
   );
@@ -1006,6 +1041,7 @@ function bestStateSession(user = bestStateUser()) {
 }
 
 function shouldKeepCurrentRefreshContext({
+  explicitUserProvided = false,
   explicitUser = null,
   user = null,
   session = null,
@@ -1013,11 +1049,12 @@ function shouldKeepCurrentRefreshContext({
   /*
     Si el payload no trae usuario explícito, puede conservarse el contexto.
     Si trae usuario explícito, sólo se conserva si:
+      - el usuario explícito es usable;
       - el user actual es el mismo; o
       - la sesión actual pertenece a ese usuario.
   */
-  if (!explicitUser) return true;
-  if (!user) return false;
+  if (!explicitUserProvided) return true;
+  if (!explicitUser || !user) return false;
 
   if (sameUser(explicitUser, user)) return true;
   if (session && sameSessionUser(session, explicitUser)) return true;
@@ -1038,7 +1075,10 @@ function buildStatePatch({
   const safeToken = cleanToken(token);
   const safeRefreshToken = cleanToken(refreshToken);
   const safeUser = normalizeUser(user);
-  const safeSession = sanitizeSessionContext(session);
+  const rawSession = sanitizeSessionContext(session);
+  const safeSession = safeUser && rawSession && sameSessionUser(rawSession, safeUser)
+    ? rawSession
+    : null;
 
   const hasToken = Boolean(safeToken);
   const hasRefreshToken = Boolean(safeRefreshToken);
@@ -1253,6 +1293,7 @@ function publicSnapshot(snapshot = {}) {
 
     token: null,
     accessToken: null,
+    access_token: null,
     refreshToken: null,
     refresh_token: null,
 
@@ -1275,6 +1316,23 @@ function publicSnapshot(snapshot = {}) {
     source: snapshot.source || "",
     eventMode: snapshot.eventMode || "",
     at: snapshot.at || nowIso(),
+
+    policy: {
+      sessionOnly: true,
+      strictAuth: true,
+      tokenWithoutUserIsNotAuthenticated: true,
+      userWithoutTokenIsNotAuthenticated: true,
+      doesNotFabricateUserFromStorage: true,
+      refreshTokenStoredOnlyInStorage: true,
+      noRefreshTokenInSnapshot: true,
+      noRouter: true,
+      noToast: true,
+      noFetch: true,
+      noOtp: true,
+      noMfa: true,
+      no2fa: true,
+      snapshotRedacted: true,
+    },
   };
 }
 
@@ -1288,7 +1346,21 @@ export function applySession(payload = {}, options = {}) {
 
   const explicitToken = readTokenFromPayload(payload);
   const explicitRefreshToken = readRefreshTokenFromPayload(payload);
+
+  const explicitUserProvided = payloadHasExplicitUser(payload);
   const explicitUser = readUserFromPayload(payload);
+
+  if (explicitUserProvided && !explicitUser) {
+    clearSessionLocal({
+      source: `${source}:invalid-user`,
+      keepStorage: false,
+    });
+
+    return buildSessionSnapshot({
+      source,
+      eventMode: "invalid-user",
+    });
+  }
 
   const token =
     explicitToken ||
@@ -1307,6 +1379,7 @@ export function applySession(payload = {}, options = {}) {
   const explicitSession = readSessionFromPayload(payload, user);
 
   const canKeepCurrentRefreshContext = shouldKeepCurrentRefreshContext({
+    explicitUserProvided,
     explicitUser,
     user: user || currentUser,
     session: explicitSession || currentSession,
@@ -1356,7 +1429,7 @@ export function applySession(payload = {}, options = {}) {
     persistPatch({
       token,
       refreshToken,
-      session,
+      session: patch.session,
     });
   }
 

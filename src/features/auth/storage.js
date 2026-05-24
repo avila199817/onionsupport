@@ -29,6 +29,7 @@
 ========================================================= */
 
 import {
+  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
   isBlockedRoutePath as configIsBlockedRoutePath,
   normalizeRoutePath as configNormalizeRoutePath,
   normalizeUserSlug as configNormalizeUserSlug,
@@ -40,9 +41,10 @@ import {
   AUTH_CONSTANTS,
 } from "./constants.js";
 
-export const AUTH_STORAGE_VERSION = "auth.storage.v6";
+export const AUTH_STORAGE_VERSION = "auth.storage.v7";
 
 const PREFIX = "onion:auth:";
+const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
 const memory = new Map();
 
@@ -113,6 +115,38 @@ const BAD_VALUES = new Set([
   "''",
 ]);
 
+const ACCESS_TOKEN_FIELDS = Object.freeze([
+  "token",
+  "accessToken",
+  "access_token",
+  "value",
+]);
+
+const REFRESH_TOKEN_FIELDS = Object.freeze([
+  "refreshToken",
+  "refresh_token",
+  "value",
+]);
+
+const SENSITIVE_QUERY_KEYS = Object.freeze([
+  "token",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "secret",
+  "session",
+  "code",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
+  "jwt",
+  "authorization",
+  "reset_token",
+  "activation_token",
+]);
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -139,10 +173,14 @@ function number(value, fallback = 0) {
   return Number.isFinite(output) ? output : fallback;
 }
 
+function escapeRegExp(value = "") {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function redact(value = "") {
-  return String(value || "")
+  return cleanText(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -303,26 +341,26 @@ function maxSessionLength() {
   return number(AUTH_CONSTANTS?.sessionValueMaxLength, 200) || 200;
 }
 
-function unwrap(value = null) {
+function unwrapTokenValue(value = null, fields = ACCESS_TOKEN_FIELDS) {
   if (value === null || value === undefined) return "";
 
   if (isObject(value)) {
-    return (
-      value.token ||
-      value.accessToken ||
-      value.access_token ||
-      value.refreshToken ||
-      value.refresh_token ||
-      value.value ||
-      ""
-    );
+    for (const field of fields) {
+      const output = value[field];
+
+      if (output !== undefined && output !== null && output !== "") {
+        return output;
+      }
+    }
+
+    return "";
   }
 
   return value;
 }
 
-function normalizeToken(value = null) {
-  let token = cleanText(unwrap(value), "");
+function normalizeToken(value = null, fields = ACCESS_TOKEN_FIELDS) {
+  let token = cleanText(unwrapTokenValue(value, fields), "");
 
   token = token.replace(/^Bearer\s+/i, "").trim();
 
@@ -334,8 +372,19 @@ function normalizeToken(value = null) {
   return token;
 }
 
+function normalizeAccessToken(value = null) {
+  return normalizeToken(value, ACCESS_TOKEN_FIELDS);
+}
+
+function normalizeRefreshToken(value = null) {
+  return normalizeToken(value, REFRESH_TOKEN_FIELDS);
+}
+
 function normalizeText(value = null, limit = maxTextLength()) {
-  const output = cleanText(unwrap(value), "");
+  const output = cleanText(
+    isObject(value) ? value.value : value,
+    ""
+  );
 
   if (!output) return "";
   if (isBad(output)) return "";
@@ -358,7 +407,7 @@ function normalizeRole(value = "") {
     return "";
   }
 
-  const role = String(value || "").trim().toLowerCase();
+  const role = cleanText(value, "").toLowerCase();
 
   return role === "admin" || role === "user" ? role : "";
 }
@@ -368,6 +417,8 @@ function normalizeSlug(value = "") {
     return configNormalizeUserSlug(value) || "";
   } catch {
     const slug = cleanText(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
       .replace(/^\/+/, "")
       .replace(/^@+/, "")
       .split(/[/?#]/)[0]
@@ -382,7 +433,7 @@ function normalizeSlug(value = "") {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
     String(value || "")
   );
 }
@@ -392,6 +443,8 @@ function normalizeRoutePathOnly(value = "") {
     return configNormalizeRoutePath(value) || "";
   } catch {
     let path = cleanText(value, "")
+      .split("#")[0]
+      .split("?")[0]
       .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/");
 
@@ -409,24 +462,53 @@ function normalizeRoutePathOnly(value = "") {
   }
 }
 
+function userScopedRestPath(path = "") {
+  const clean = normalizeRoutePathOnly(path);
+
+  if (!clean.startsWith(USER_HOME_PREFIX)) return "";
+
+  const rest = clean.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...segments] = rest.split("/");
+  const slug = normalizeSlug(slugSegment);
+
+  if (!slug) return "";
+
+  return segments.length
+    ? normalizeRoutePathOnly(`/${segments.join("/")}`)
+    : "/";
+}
+
+function isBlockedFallbackRoute(path = "") {
+  const clean = normalizeRoutePathOnly(path).toLowerCase();
+
+  return Boolean(
+    clean === "/home" ||
+      clean.startsWith("/home/") ||
+      clean === "/403" ||
+      clean.startsWith("/403/") ||
+      clean === "/404" ||
+      clean.startsWith("/404/") ||
+      clean === "/2fa" ||
+      clean.startsWith("/2fa/") ||
+      clean === "/mfa" ||
+      clean.startsWith("/mfa/") ||
+      clean === "/otp" ||
+      clean.startsWith("/otp/")
+  );
+}
+
 function isBlockedRoute(path = "") {
   try {
-    return configIsBlockedRoutePath(path) === true;
+    if (configIsBlockedRoutePath(path) === true) return true;
   } catch {
-    const clean = normalizeRoutePathOnly(path).toLowerCase();
-
-    return Boolean(
-      clean === "/home" ||
-        clean === "/403" ||
-        clean === "/404" ||
-        clean === "/2fa" ||
-        clean === "/mfa" ||
-        clean === "/otp" ||
-        clean.startsWith("/2fa/") ||
-        clean.startsWith("/mfa/") ||
-        clean.startsWith("/otp/")
-    );
+    // fallback abajo
   }
+
+  if (isBlockedFallbackRoute(path)) return true;
+
+  const scopedRest = userScopedRestPath(path);
+
+  return Boolean(scopedRest && isBlockedFallbackRoute(scopedRest));
 }
 
 function normalizeRoute(value = "") {
@@ -491,7 +573,7 @@ function extractUserId(user = null) {
   );
 }
 
-function looksLikeUserObject(value = null) {
+function looksLikeNestedUserObject(value = null) {
   if (!isObject(value)) return false;
 
   return Boolean(
@@ -501,6 +583,32 @@ function looksLikeUserObject(value = null) {
       cleanText(value.lookup?.slug, "") ||
       cleanText(value.profile?.slug, "")
   );
+}
+
+function looksLikeStandaloneUserObject(value = null) {
+  if (!isObject(value)) return false;
+
+  const hasUserSignal = Boolean(
+    cleanText(value.username || value.userName || value.user_name, "") ||
+      cleanText(value.slug, "") ||
+      cleanText(value.lookup?.slug, "") ||
+      cleanText(value.profile?.slug, "") ||
+      cleanText(value.displayName || value.fullName || value.name || value.nombre, "")
+  );
+
+  const hasSessionOnlySignal = Boolean(
+    value.token ||
+      value.accessToken ||
+      value.access_token ||
+      value.refreshToken ||
+      value.refresh_token ||
+      value.sessionId ||
+      value.session_id ||
+      value.session ||
+      value.sessionData
+  );
+
+  return Boolean(hasUserSignal && !hasSessionOnlySignal);
 }
 
 /* =========================================================
@@ -545,10 +653,10 @@ function readUserFromPayload(payload = {}) {
       node.profile ||
       null;
 
-    if (looksLikeUserObject(user)) return user;
+    if (looksLikeNestedUserObject(user)) return user;
   }
 
-  return looksLikeUserObject(payload) ? payload : null;
+  return looksLikeStandaloneUserObject(payload) ? payload : null;
 }
 
 function readSessionFromPayload(payload = {}) {
@@ -569,7 +677,7 @@ function readSessionFromPayload(payload = {}) {
 ========================================================= */
 
 export function persistAccessToken(token = null, options = {}) {
-  const value = normalizeToken(token);
+  const value = normalizeAccessToken(token);
 
   if (!value) {
     removeRaw(KEYS.token);
@@ -584,7 +692,7 @@ export function persistAccessToken(token = null, options = {}) {
 }
 
 export function getStoredAccessToken() {
-  return normalizeToken(readFirst([KEYS.accessToken, KEYS.token]));
+  return normalizeAccessToken(readFirst([KEYS.accessToken, KEYS.token]));
 }
 
 export function hasAccessToken() {
@@ -598,7 +706,7 @@ export function removeStoredAccessToken() {
 }
 
 export function persistRefreshToken(token = null, options = {}) {
-  const value = normalizeToken(token);
+  const value = normalizeRefreshToken(token);
 
   if (!value) {
     removeRaw(KEYS.refreshToken);
@@ -609,7 +717,7 @@ export function persistRefreshToken(token = null, options = {}) {
 }
 
 export function getStoredRefreshToken() {
-  return normalizeToken(readRaw(KEYS.refreshToken));
+  return normalizeRefreshToken(readRaw(KEYS.refreshToken));
 }
 
 export function hasRefreshToken() {
@@ -636,15 +744,36 @@ export function persistSessionContext(sessionData = null, user = null, options =
       ""
   );
 
-  const userId = normalizeSessionValue(
+  const sessionUserId = normalizeSessionValue(
     data.sessionUserId ||
       data.session_user_id ||
       data.userId ||
       data.user_id ||
       data.uid ||
-      extractUserId(safeUser) ||
       ""
   );
+
+  const explicitUserId = extractUserId(safeUser);
+
+  if (sessionUserId && explicitUserId && sessionUserId !== explicitUserId) {
+    removeStoredSessionContext();
+
+    return {
+      sessionId: null,
+      session_id: null,
+
+      userId: null,
+      user_id: null,
+
+      sessionUserId: null,
+      session_user_id: null,
+
+      expiresAt: null,
+      expires_at: null,
+    };
+  }
+
+  const userId = sessionUserId || explicitUserId;
 
   const expiresAt = normalizeSessionValue(
     data.expiresAt ||
@@ -802,13 +931,45 @@ export function hasRefreshContext() {
    AUTH PAYLOAD STORAGE
 ========================================================= */
 
-function explicitUserMismatch(user = null) {
-  const userId = extractUserId(user);
+function extractSessionUserIdFromPayloadSession(session = null) {
+  if (!isObject(session)) return "";
+
+  return normalizeSessionValue(
+    session.sessionUserId ||
+      session.session_user_id ||
+      session.userId ||
+      session.user_id ||
+      session.uid ||
+      ""
+  );
+}
+
+function explicitIdentityMismatch({
+  user = null,
+  sessionData = null,
+} = {}) {
   const storedUserId = getStoredSessionUserId();
+  const storedSlug = getStoredUserSlug();
 
-  if (!userId || !storedUserId) return false;
+  const userId = extractUserId(user);
+  const slug = extractRealUserSlug(user);
+  const sessionUserId = extractSessionUserIdFromPayloadSession(sessionData);
 
-  return userId !== storedUserId;
+  if (userId && storedUserId && userId !== storedUserId) return true;
+  if (slug && storedSlug && slug !== storedSlug) return true;
+
+  if (sessionUserId && storedUserId && sessionUserId !== storedUserId) return true;
+  if (sessionUserId && userId && sessionUserId !== userId) return true;
+
+  /*
+    Si llega usuario explícito pero no podemos comprobarlo contra el
+    userId persistido, preferimos limpiar contexto auxiliar antiguo.
+  */
+  if (user && storedUserId && !userId && (!slug || !storedSlug || slug !== storedSlug)) {
+    return true;
+  }
+
+  return false;
 }
 
 export function persistAuthStorage(payload = {}, options = {}) {
@@ -816,7 +977,7 @@ export function persistAuthStorage(payload = {}, options = {}) {
   const user = readUserFromPayload(payload);
   const sessionData = readSessionFromPayload(payload);
 
-  const accessToken = normalizeToken(
+  const accessToken = normalizeAccessToken(
     pick(nodes, [
       "token",
       "accessToken",
@@ -824,14 +985,17 @@ export function persistAuthStorage(payload = {}, options = {}) {
     ])
   );
 
-  const refreshToken = normalizeToken(
+  const refreshToken = normalizeRefreshToken(
     pick(nodes, [
       "refreshToken",
       "refresh_token",
     ])
   );
 
-  const userChanged = explicitUserMismatch(user);
+  const userChanged = explicitIdentityMismatch({
+    user,
+    sessionData,
+  });
 
   if (userChanged) {
     removeStoredAccessToken();
@@ -863,7 +1027,7 @@ export function persistAuthStorage(payload = {}, options = {}) {
 
   if (user) {
     persistAuxSessionData(user, options);
-  } else if (options.clearMissingUserAux === true) {
+  } else if (options.clearMissingUserAux === true || userChanged) {
     removeStoredAuxSessionData();
   }
 
@@ -982,17 +1146,17 @@ export function repairCorruptedAuthStorage() {
   const rawRole = readRaw(KEYS.role);
   const rawRedirect = readRaw(KEYS.redirectAfterLogin);
 
-  if (rawToken && !normalizeToken(rawToken)) {
+  if (rawToken && !normalizeAccessToken(rawToken)) {
     removeRaw(KEYS.token);
     removed += 1;
   }
 
-  if (rawAccessToken && !normalizeToken(rawAccessToken)) {
+  if (rawAccessToken && !normalizeAccessToken(rawAccessToken)) {
     removeRaw(KEYS.accessToken);
     removed += 1;
   }
 
-  if (rawRefreshToken && !normalizeToken(rawRefreshToken)) {
+  if (rawRefreshToken && !normalizeRefreshToken(rawRefreshToken)) {
     removeRaw(KEYS.refreshToken);
     removed += 1;
   }
@@ -1087,7 +1251,7 @@ export function getAuthStorageSnapshot() {
     userSlug: getStoredUserSlug() || null,
     role: getStoredRole() || null,
 
-    redirectAfterLogin: getStoredRedirectAfterLogin() || null,
+    redirectAfterLogin: redact(getStoredRedirectAfterLogin() || ""),
 
     lastStorageError: lastStorageError
       ? {
@@ -1117,6 +1281,7 @@ export function getAuthStorageSnapshot() {
       preservesSessionContextWhenPayloadOmitsSession: true,
       preservesRefreshTokenWhenPayloadOmitsRefresh: true,
       clearsStaleContextOnUserMismatch: true,
+      clearsStaleContextOnSessionUserMismatch: true,
 
       noTempToken: true,
       no2fa: true,
@@ -1131,6 +1296,8 @@ export function getAuthStorageSnapshot() {
       noFabricatedSlug: true,
       noUsernamePublicSlug: true,
       noStoredUsername: true,
+
+      snapshotRedacted: true,
     },
   };
 }

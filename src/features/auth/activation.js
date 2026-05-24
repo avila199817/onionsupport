@@ -104,7 +104,7 @@ function rawText(value = "", fallback = "") {
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-    if (typeof value === "string && value.trim() === "") continue;
+    if (typeof value === "string" && value.trim() === "") continue;
 
     return value;
   }

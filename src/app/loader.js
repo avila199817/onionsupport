@@ -15,7 +15,7 @@
    - Sin magia negra.
 ========================================================= */
 
-export const LOADER_VERSION = "app.loader.v4";
+export const LOADER_VERSION = "app.loader.v5";
 
 const LOADER_ID = "app-loader";
 
@@ -27,13 +27,28 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return output || fallback;
+}
+
 function normalizeState(state = "booting") {
-  const value = String(state || "").trim().toLowerCase();
+  const value = cleanText(state, "booting").toLowerCase();
 
   if (value === "loading") return "booting";
+  if (value === "boot") return "booting";
   if (value === "booting") return "booting";
+
   if (value === "ready") return "ready";
+
+  if (value === "error") return "fatal";
   if (value === "fatal") return "fatal";
+
+  if (value === "hide") return "hidden";
   if (value === "hidden") return "hidden";
 
   return "booting";
@@ -45,7 +60,12 @@ function normalizeState(state = "booting") {
 
 export function getLoaderElement() {
   if (!isBrowser()) return null;
-  return document.getElementById(LOADER_ID);
+
+  try {
+    return document.getElementById(LOADER_ID);
+  } catch {
+    return null;
+  }
 }
 
 export function isLoaderVisible() {
@@ -62,6 +82,40 @@ export function isLoaderVisible() {
    LOADER STATE
 ========================================================= */
 
+function setLoaderDataset(loader = null, key = "", value = "") {
+  if (!loader || !key) return false;
+
+  try {
+    loader.dataset[key] = String(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setLoaderAttribute(loader = null, key = "", value = "") {
+  if (!loader || !key) return false;
+
+  try {
+    loader.setAttribute(key, String(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setLoaderClasses(loader = null, visible = false) {
+  if (!loader) return false;
+
+  try {
+    loader.classList.toggle("is-visible", visible);
+    loader.classList.toggle("is-hidden", !visible);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function setLoaderVisibility(visible = false, state = "booting") {
   const loader = getLoaderElement();
 
@@ -69,23 +123,23 @@ function setLoaderVisibility(visible = false, state = "booting") {
 
   const show = Boolean(visible);
   const status = show ? normalizeState(state) : "hidden";
+  const busy = show && status === "booting";
 
   try {
     loader.hidden = !show;
-
-    loader.classList.toggle("is-visible", show);
-    loader.classList.toggle("is-hidden", !show);
-
-    loader.dataset.loaderVisible = String(show);
-    loader.dataset.loaderState = status;
-
-    loader.setAttribute("aria-hidden", show ? "false" : "true");
-    loader.setAttribute("aria-busy", show ? "true" : "false");
-
-    return true;
   } catch {
     return false;
   }
+
+  setLoaderClasses(loader, show);
+
+  setLoaderDataset(loader, "loaderVisible", show ? "true" : "false");
+  setLoaderDataset(loader, "loaderState", status);
+
+  setLoaderAttribute(loader, "aria-hidden", show ? "false" : "true");
+  setLoaderAttribute(loader, "aria-busy", busy ? "true" : "false");
+
+  return true;
 }
 
 /* =========================================================
@@ -101,7 +155,7 @@ export function hideLoader() {
 }
 
 export function forceHideLoader() {
-  return setLoaderVisibility(false, "hidden");
+  return hideLoader();
 }
 
 /* =========================================================
@@ -117,6 +171,14 @@ export function getLoaderSnapshot() {
     exists: Boolean(loader),
     visible: isLoaderVisible(),
     state: loader?.dataset?.loaderState || "missing",
+
+    dom: {
+      id: loader?.id || null,
+      hidden: loader?.hidden ?? null,
+      ariaHidden: loader?.getAttribute?.("aria-hidden") || null,
+      ariaBusy: loader?.getAttribute?.("aria-busy") || null,
+      loaderVisible: loader?.dataset?.loaderVisible || null,
+    },
 
     policy: {
       loaderOnly: true,

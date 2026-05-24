@@ -13,9 +13,9 @@
    - Si una factura no está pagada, no se muestra importe como cobrado.
    - Listas Home limitadas a 5 últimos elementos.
    - Contadores sobre totales completos.
-   - Tabla de incidencias sin columna Usuario / Cliente.
-   - Tabla de incidencias sin columna Técnico separada.
-   - Técnico integrado en primera columna con avatar real/iniciales.
+   - Tabla de incidencias del Home alineada 1:1 con el template de Incidencias.
+   - Primera columna con avatar/cliente, ID completo, asunto, descripción, prioridad y técnico.
+   - Sin columna Técnico separada.
    - Usuario/avatar del Home consumido desde el view-model canónico del sidebar.
    - ID de incidencia completo visible.
    - Detalle de incidencia abre modal.
@@ -80,7 +80,7 @@ import {
   getActivityType,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.final.14";
+export const TEMPLATE_VERSION = "home.template.final.15";
 
 const ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -1739,12 +1739,42 @@ export function renderHomeEntitiesPreview(input = {}) {
    Tabla de incidencias
 ========================================================= */
 
+function getRawItem(item = {}) {
+  return safeObject(first(item.raw, item.data, item.payload, {}));
+}
+
+function tooltipAttrs(tooltip = "", ariaLabel = "") {
+  const cleanTooltip = safeText(tooltip, "");
+  const cleanAria = safeText(ariaLabel, cleanTooltip);
+
+  return [
+    cleanAria ? `aria-label="${attr(cleanAria)}"` : "",
+    cleanTooltip ? `data-tooltip="${attr(cleanTooltip)}"` : "",
+  ].filter(Boolean).join(" ");
+}
+
+function disabledTableAttrs(disabled = false, busy = false) {
+  return [
+    disabled ? "disabled" : "",
+    disabled ? 'aria-disabled="true"' : "",
+    busy ? 'aria-busy="true"' : "",
+  ].filter(Boolean).join(" ");
+}
+
+function tableIcon(name = "") {
+  if (name === "paperclip") {
+    return '<svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>';
+  }
+
+  return icon(name);
+}
+
 function statusSummary(vm = {}) {
   const tickets = safeArray(vm.tickets);
   const fallbackCounts = Object.fromEntries(STATUS_ORDER.map((status) => [status, 0]));
 
   for (const ticket of tickets) {
-    const key = getTicketStatusKey(ticket);
+    const key = getTicketStatusKeyForRow(ticket);
 
     if (Object.prototype.hasOwnProperty.call(fallbackCounts, key)) {
       fallbackCounts[key] = safeNumber(fallbackCounts[key], 0) + 1;
@@ -1783,28 +1813,278 @@ function statusSummary(vm = {}) {
 }
 
 function getRowTicketId(item = {}) {
+  const raw = getRawItem(item);
+
   return safeText(
     first(
       item.fullId,
       item.displayId,
       item.ticketId,
       item.incidenciaId,
+      item.code,
+      item.numero,
+      item.ticketCode,
       item.id,
+      raw.fullId,
+      raw.displayId,
+      raw.ticketId,
+      raw.incidenciaId,
+      raw.code,
+      raw.numero,
+      raw.ticketCode,
+      raw.id,
       getTicketId(item)
     ),
     "INC-SIN-ID"
   );
 }
 
+function getTicketClientNameForRow(item = {}) {
+  const raw = getRawItem(item);
+
+  return visualLabel(
+    first(
+      item.clientName,
+      item.clienteNombre,
+      item.requesterName,
+      item.requesterDisplayName,
+      item.customerName,
+      item.userName,
+      item.createdByName,
+
+      item.requesterSnapshot?.name,
+      item.requesterSnapshot?.displayName,
+      item.createdBy?.name,
+      item.createdBy?.displayName,
+
+      item.cliente?.nombreContacto,
+      item.cliente?.nombre,
+      item.cliente?.name,
+      item.cliente?.displayName,
+      item.client?.name,
+      item.client?.displayName,
+      item.customer?.name,
+      item.customer?.displayName,
+      item.receptor?.name,
+
+      raw.clientName,
+      raw.clienteNombre,
+      raw.requesterName,
+      raw.requesterDisplayName,
+      raw.customerName,
+      raw.userName,
+      raw.createdByName,
+
+      raw.requesterSnapshot?.name,
+      raw.requesterSnapshot?.displayName,
+      raw.createdBy?.name,
+      raw.createdBy?.displayName,
+
+      raw.cliente?.nombreContacto,
+      raw.cliente?.nombre,
+      raw.cliente?.name,
+      raw.cliente?.displayName,
+      raw.client?.name,
+      raw.client?.displayName,
+      raw.customer?.name,
+      raw.customer?.displayName,
+      raw.receptor?.name,
+      ""
+    ),
+    "Cliente"
+  );
+}
+
+function getTicketClientEmailForRow(item = {}) {
+  const raw = getRawItem(item);
+
+  return safeText(
+    first(
+      item.clientEmail,
+      item.clienteEmail,
+      item.emailCliente,
+      item.requesterEmail,
+      item.customerEmail,
+      item.createdByEmail,
+
+      item.requesterSnapshot?.email,
+      item.createdBy?.email,
+
+      item.cliente?.email,
+      item.cliente?.emailLower,
+      item.client?.email,
+      item.customer?.email,
+      item.receptor?.email,
+
+      raw.clientEmail,
+      raw.clienteEmail,
+      raw.emailCliente,
+      raw.requesterEmail,
+      raw.customerEmail,
+      raw.createdByEmail,
+
+      raw.requesterSnapshot?.email,
+      raw.createdBy?.email,
+
+      raw.cliente?.email,
+      raw.cliente?.emailLower,
+      raw.client?.email,
+      raw.customer?.email,
+      raw.receptor?.email,
+      ""
+    ),
+    ""
+  ).toLowerCase();
+}
+
+function getTicketClientAvatarForRow(item = {}) {
+  const raw = getRawItem(item);
+
+  return safeImageSrc(
+    first(
+      item.clientAvatar,
+      item.clientAvatarUrl,
+      item.clienteAvatar,
+      item.clienteAvatarUrl,
+      item.requesterAvatar,
+      item.requesterAvatarUrl,
+      item.customerAvatar,
+      item.customerAvatarUrl,
+      item.avatar,
+      item.avatarUrl,
+
+      item.requesterSnapshot?.avatar,
+      item.requesterSnapshot?.avatarUrl,
+      item.createdBy?.avatar,
+      item.createdBy?.avatarUrl,
+
+      item.cliente?.avatar,
+      item.cliente?.avatarUrl,
+      item.client?.avatar,
+      item.client?.avatarUrl,
+      item.customer?.avatar,
+      item.customer?.avatarUrl,
+
+      raw.clientAvatar,
+      raw.clientAvatarUrl,
+      raw.clienteAvatar,
+      raw.clienteAvatarUrl,
+      raw.requesterAvatar,
+      raw.requesterAvatarUrl,
+      raw.customerAvatar,
+      raw.customerAvatarUrl,
+      raw.avatar,
+      raw.avatarUrl,
+
+      raw.requesterSnapshot?.avatar,
+      raw.requesterSnapshot?.avatarUrl,
+      raw.createdBy?.avatar,
+      raw.createdBy?.avatarUrl,
+
+      raw.cliente?.avatar,
+      raw.cliente?.avatarUrl,
+      raw.client?.avatar,
+      raw.client?.avatarUrl,
+      raw.customer?.avatar,
+      raw.customer?.avatarUrl,
+      ""
+    )
+  );
+}
+
+function getTicketStatusKeyForRow(item = {}) {
+  const raw = getRawItem(item);
+  const key = normalizeKey(
+    first(
+      item.statusKey,
+      item.estadoKey,
+      item.lifecycle?.statusKey,
+      raw.statusKey,
+      raw.estadoKey,
+      raw.lifecycle?.statusKey,
+      getTicketStatusKey(item),
+      getTicketStatusKey(getTicketStatus(item)),
+      "pending"
+    )
+  );
+
+  if (["pending", "pendiente", "new", "nueva", "nuevo", "created"].includes(key)) return "pending";
+  if (["open", "abierta", "abierto"].includes(key)) return "open";
+  if (["progress", "in_progress", "inprogress", "en_proceso", "proceso", "working", "trabajando", "assigned", "asignada", "asignado"].includes(key)) return "progress";
+  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
+  if (["closed", "cerrada", "cerrado", "cancelled", "canceled", "cancelada", "cancelado", "archived", "archivada", "archivado"].includes(key)) return "closed";
+
+  return "pending";
+}
+
+function getTicketPriorityKeyForRow(item = {}) {
+  const raw = getRawItem(item);
+  const key = normalizeKey(
+    first(
+      item.priorityKey,
+      item.prioridadKey,
+      item.priority,
+      item.prioridad,
+      item.severity,
+      item.urgency,
+      item.sla?.priority,
+      raw.priorityKey,
+      raw.prioridadKey,
+      raw.priority,
+      raw.prioridad,
+      raw.severity,
+      raw.urgency,
+      raw.sla?.priority,
+      getTicketPriorityKey(item),
+      "medium"
+    )
+  );
+
+  if (["critical", "critica", "crítica", "critico", "crítico", "p0"].includes(key)) return "critical";
+  if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) return "urgent";
+  if (["medium", "media", "normal", "p2"].includes(key)) return "medium";
+  if (["low", "baja", "minor", "p3"].includes(key)) return "low";
+
+  return "medium";
+}
+
+function getTicketPriorityLabelForRow(item = {}) {
+  const key = getTicketPriorityKeyForRow(item);
+
+  const labels = {
+    critical: "Crítica",
+    urgent: "Urgente",
+    medium: "Media",
+    low: "Baja",
+  };
+
+  return safeText(first(item.priorityLabel, item.prioridadLabel, labels[key]), "Media");
+}
+
 function getRowTechnician(item = {}) {
+  const raw = getRawItem(item);
   const assignedToObject = safeObject(typeof item.assignedTo === "object" ? item.assignedTo : {});
+  const rawAssignedToObject = safeObject(typeof raw.assignedTo === "object" ? raw.assignedTo : {});
+
   const technician = safeObject(
     first(
       item.technician,
       item.tecnico,
       item.assignedTechnician,
       item.assignedUser,
+      item.assignment?.technician,
+      item.assignment?.assignedTo,
+      item.assignment?.agent,
       assignedToObject,
+
+      raw.technician,
+      raw.tecnico,
+      raw.assignedTechnician,
+      raw.assignedUser,
+      raw.assignment?.technician,
+      raw.assignment?.assignedTo,
+      raw.assignment?.agent,
+      rawAssignedToObject,
       {}
     )
   );
@@ -1819,14 +2099,65 @@ function getRowTechnician(item = {}) {
       technician.userName,
 
       item.technicianName,
+      item.tecnicoName,
       item.tecnicoNombre,
       item.assignedToName,
       item.assignedName,
+      item.assignment?.assignedToName,
+      item.assignment?.agentName,
+      item.assignment?.technicianName,
+      item.assignment?.displayName,
+      item.assignment?.name,
+      item.meta?.technicianName,
+      item.meta?.lastTechnicianName,
+      typeof item.tecnico === "string" ? item.tecnico : "",
       typeof item.assignedTo === "string" ? item.assignedTo : "",
+      typeof item.agent === "string" ? item.agent : "",
+
+      raw.technicianName,
+      raw.tecnicoName,
+      raw.tecnicoNombre,
+      raw.assignedToName,
+      raw.assignedName,
+      raw.assignment?.assignedToName,
+      raw.assignment?.agentName,
+      raw.assignment?.technicianName,
+      raw.assignment?.displayName,
+      raw.assignment?.name,
+      raw.meta?.technicianName,
+      raw.meta?.lastTechnicianName,
+      typeof raw.tecnico === "string" ? raw.tecnico : "",
+      typeof raw.assignedTo === "string" ? raw.assignedTo : "",
+      typeof raw.agent === "string" ? raw.agent : "",
       ""
     ),
     "Sin asignar"
   );
+
+  const email = safeText(
+    first(
+      technician.email,
+      item.assignedToEmail,
+      item.technicianEmail,
+      item.tecnicoEmail,
+      item.assignment?.assignedToEmail,
+      item.assignment?.agentEmail,
+      item.assignment?.technicianEmail,
+      item.assignment?.email,
+      item.meta?.technicianEmail,
+
+      raw.assignedToEmail,
+      raw.technicianEmail,
+      raw.tecnicoEmail,
+      raw.assignment?.assignedToEmail,
+      raw.assignment?.agentEmail,
+      raw.assignment?.technicianEmail,
+      raw.assignment?.email,
+      raw.meta?.technicianEmail,
+      ""
+    ),
+    ""
+  ).toLowerCase();
 
   const avatarUrl = safeImageSrc(
     first(
@@ -1883,13 +2214,46 @@ function getRowTechnician(item = {}) {
       item.tecnicoAvatarUrl,
       item.tecnicoAvatar,
       item.assignedToAvatarUrl,
+      item.assignedToAvatar,
       item.assignedAvatarUrl,
+      item.agentAvatar,
+      item.assignment?.assignedToAvatar,
+      item.assignment?.agentAvatar,
+      item.assignment?.technicianAvatar,
+      item.assignment?.avatar,
+      item.assignment?.avatarUrl,
+      item.meta?.technicianAvatar,
+      item.meta?.technicianAvatarUrl,
+
       assignedToObject.avatarUrl,
       assignedToObject.avatar,
       assignedToObject.photoUrl,
       assignedToObject.photoURL,
       assignedToObject.picture,
       assignedToObject.image,
+
+      raw.technicianAvatarUrl,
+      raw.technicianAvatar,
+      raw.tecnicoAvatarUrl,
+      raw.tecnicoAvatar,
+      raw.assignedToAvatarUrl,
+      raw.assignedToAvatar,
+      raw.assignedAvatarUrl,
+      raw.agentAvatar,
+      raw.assignment?.assignedToAvatar,
+      raw.assignment?.agentAvatar,
+      raw.assignment?.technicianAvatar,
+      raw.assignment?.avatar,
+      raw.assignment?.avatarUrl,
+      raw.meta?.technicianAvatar,
+      raw.meta?.technicianAvatarUrl,
+
+      rawAssignedToObject.avatarUrl,
+      rawAssignedToObject.avatar,
+      rawAssignedToObject.photoUrl,
+      rawAssignedToObject.photoURL,
+      rawAssignedToObject.picture,
+      rawAssignedToObject.image,
       ""
     )
   );
@@ -1901,6 +2265,9 @@ function getRowTechnician(item = {}) {
       item.technicianInitials,
       item.tecnicoInitials,
       assignedToObject.initials,
+      raw.technicianInitials,
+      raw.tecnicoInitials,
+      rawAssignedToObject.initials,
       getInitials(name)
     ),
     getInitials(name)
@@ -1912,51 +2279,424 @@ function getRowTechnician(item = {}) {
     ...technician,
     name,
     displayName: name,
+    email,
     avatarUrl,
     avatar: avatarUrl,
     initials,
   };
 }
 
-function technicianInline(item = {}) {
-  const technician = getRowTechnician(item);
+function getTicketLinkedInvoices(item = {}) {
+  const raw = getRawItem(item);
+
+  return safeArray(
+    first(
+      item.invoiceRows,
+      item.invoices,
+      item.facturas,
+      item.linkedInvoices?.items,
+      item.linkedInvoices?.rows,
+      item.relations?.facturas,
+      item.relations?.invoices,
+      raw.invoiceRows,
+      raw.invoices,
+      raw.facturas,
+      raw.linkedInvoices?.items,
+      raw.linkedInvoices?.rows,
+      raw.relations?.facturas,
+      raw.relations?.invoices,
+      []
+    )
+  );
+}
+
+function getTicketLinkedInvoiceCount(item = {}) {
+  const raw = getRawItem(item);
+  const invoices = getTicketLinkedInvoices(item);
+
+  if (invoices.length) return invoices.length;
+
+  return safeNumber(
+    first(
+      item.linkedInvoiceCount,
+      item.invoicesCount,
+      item.facturasCount,
+      item.invoiceCount,
+      item.facturaCount,
+      item.linkedInvoices?.count,
+      item.linkedInvoices?.totalCount,
+      raw.linkedInvoiceCount,
+      raw.invoicesCount,
+      raw.facturasCount,
+      raw.invoiceCount,
+      raw.facturaCount,
+      raw.linkedInvoices?.count,
+      raw.linkedInvoices?.totalCount,
+      0
+    ),
+    0
+  );
+}
+
+function getTicketImporteAmount(item = {}) {
+  const raw = getRawItem(item);
+
+  const explicit = first(
+    item.facturasTotal,
+    item.invoicesTotal,
+    item.importeFacturas,
+    item.invoiceTotal,
+    item.facturaTotal,
+    item.facturaImporte,
+    item.importeFactura,
+    item.totalFactura,
+    item.invoiceAmount,
+    item.linkedInvoices?.total,
+    item.linkedInvoices?.amount,
+    item.linkedInvoices?.importe,
+    item.meta?.invoicesTotal,
+    item.meta?.invoiceTotal,
+
+    raw.facturasTotal,
+    raw.invoicesTotal,
+    raw.importeFacturas,
+    raw.invoiceTotal,
+    raw.facturaTotal,
+    raw.facturaImporte,
+    raw.importeFactura,
+    raw.totalFactura,
+    raw.invoiceAmount,
+    raw.linkedInvoices?.total,
+    raw.linkedInvoices?.amount,
+    raw.linkedInvoices?.importe,
+    raw.meta?.invoicesTotal,
+    raw.meta?.invoiceTotal
+  );
+
+  if (explicit !== undefined && explicit !== null && explicit !== "") return explicit;
+
+  const invoices = getTicketLinkedInvoices(item);
+
+  if (!invoices.length) return undefined;
+
+  return invoices.reduce((total, invoice) => {
+    if (!isInvoicePaid(invoice)) return total;
+    return total + safeNumber(getInvoicePaidAmount(invoice), 0);
+  }, 0);
+}
+
+function getTicketImporteCurrency(item = {}) {
+  const raw = getRawItem(item);
+  const firstInvoice = safeObject(getTicketLinkedInvoices(item)[0]);
+
+  return safeText(
+    first(
+      item.currency,
+      item.moneda,
+      item.linkedInvoices?.currency,
+      item.linkedInvoices?.moneda,
+      item.meta?.invoiceCurrency,
+      item.meta?.currency,
+      item.meta?.moneda,
+
+      raw.currency,
+      raw.moneda,
+      raw.linkedInvoices?.currency,
+      raw.linkedInvoices?.moneda,
+      raw.meta?.invoiceCurrency,
+      raw.meta?.currency,
+      raw.meta?.moneda,
+
+      getInvoiceCurrency(firstInvoice),
+      DEFAULT_CURRENCY
+    ),
+    DEFAULT_CURRENCY
+  );
+}
+
+function getTicketPaymentStatusKey(item = {}) {
+  const raw = getRawItem(item);
+  const key = normalizeKey(
+    first(
+      item.paymentStatus,
+      item.estadoPago,
+      item.linkedInvoices?.paymentStatus,
+      item.linkedInvoices?.estadoPago,
+      raw.paymentStatus,
+      raw.estadoPago,
+      raw.linkedInvoices?.paymentStatus,
+      raw.linkedInvoices?.estadoPago,
+      ""
+    )
+  );
+
+  if (["paid", "pagada", "pagado", "cobrada", "cobrado"].includes(key)) return "paid";
+  if (["pending", "pendiente", "unpaid"].includes(key)) return "pending";
+  if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
+  if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
+
+  return "";
+}
+
+function getTicketImporteLabel(item = {}) {
+  const amount = getTicketImporteAmount(item);
+
+  if (amount !== undefined && amount !== null && amount !== "") {
+    const numericAmount = safeNumber(amount, NaN);
+
+    if (Number.isFinite(numericAmount)) {
+      return formatMoney(numericAmount, getTicketImporteCurrency(item));
+    }
+  }
+
+  const paymentKey = getTicketPaymentStatusKey(item);
+
+  if (paymentKey === "paid") return "Pagado";
+  if (paymentKey === "pending") return "Pendiente";
+  if (paymentKey === "partial") return "Parcial";
+  if (paymentKey === "overdue") return "Vencido";
+
+  return "—";
+}
+
+function getTicketAttachmentsCountForRow(item = {}) {
+  const raw = getRawItem(item);
+
+  const attachments = first(
+    item.attachments,
+    item.files,
+    item.adjuntos,
+    item.relations?.attachments,
+    item.relations?.files,
+    raw.attachments,
+    raw.files,
+    raw.adjuntos,
+    raw.relations?.attachments,
+    raw.relations?.files
+  );
+
+  if (Array.isArray(attachments)) return attachments.length;
+
+  return safeNumber(
+    first(
+      item.attachmentsCount,
+      item.filesCount,
+      item.adjuntosCount,
+      item.relations?.attachmentsCount,
+      raw.attachmentsCount,
+      raw.filesCount,
+      raw.adjuntosCount,
+      raw.relations?.attachmentsCount,
+      0
+    ),
+    0
+  );
+}
+
+function renderIncidenciasLoaderOnly(label = "Cargando") {
+  return `
+    <span class="incidencias-loader-only" role="status" ${tooltipAttrs(label, label)}>
+      <span class="incidencias-inline-spinner" aria-hidden="true"></span>
+    </span>
+  `;
+}
+
+function renderIncidenciasInlineSpinner(label = "") {
+  return `
+    <span class="incidencias-inline-loading">
+      <span class="incidencias-inline-spinner" aria-hidden="true"></span>
+      ${label ? `<span class="incidencias-inline-loading-text">${escapeHtml(label)}</span>` : ""}
+    </span>
+  `;
+}
+
+function renderTicketClientAvatar(item = {}) {
+  const ticketId = getRowTicketId(item);
+  const fullName = getTicketClientNameForRow(item);
+  const initials = safeText(getInitials(fullName), "ON").slice(0, 3).toUpperCase();
+  const avatarUrl = getTicketClientAvatarForRow(item);
+  const tone = String(hashString(`${ticketId}|${fullName}`) % 10);
+
+  if (avatarUrl) {
+    return `
+      <div
+        class="incidencias-avatar"
+        ${tooltipAttrs(fullName, fullName)}
+        data-avatar-tone="${attr(tone)}"
+        data-has-avatar="true"
+        data-fallback="false"
+        data-incidencias-avatar="true"
+      >
+        <img
+          class="incidencias-avatar-img"
+          src="${attr(avatarUrl)}"
+          alt="${attr(fullName)}"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+          draggable="false"
+          data-incidencias-avatar-img="true"
+        >
+        <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
+      </div>
+    `;
+  }
 
   return `
     <div
-      class="home-ticket-technician home-ticket-technician--inline"
-      data-ticket-technician="true"
-      data-has-technician-avatar="${technician.avatarUrl ? "true" : "false"}"
-      aria-label="Técnico asignado: ${attr(technician.name)}"
+      class="incidencias-avatar incidencias-avatar--fallback"
+      ${tooltipAttrs(fullName, fullName)}
+      data-avatar-tone="${attr(tone)}"
+      data-fallback="true"
+      data-incidencias-avatar="true"
     >
-      ${avatar({
-        name: technician.name,
-        image: technician.avatarUrl,
-        kind: "technician",
-        seed: safeText(first(technician.userId, technician.id, technician.username, technician.name), technician.name),
-        initials: technician.initials,
-        className: "home-technician-avatar",
-      })}
-
-      <span class="home-ticket-technician-copy">
-        <span class="home-ticket-technician-label">Técnico</span>
-        <strong>${escapeHtml(technician.name)}</strong>
-      </span>
+      <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
     </div>
+  `;
+}
+
+function renderTicketStatusChip(item = {}) {
+  const key = getTicketStatusKeyForRow(item);
+  const label = ticketStatusLabel({ ...item, statusKey: key });
+
+  return `
+    <span class="incidencias-chip incidencias-chip--${attr(key)}">
+      <span class="incidencias-chip-dot" aria-hidden="true"></span>
+      ${escapeHtml(label)}
+    </span>
+  `;
+}
+
+function renderTicketPriorityBadge(item = {}) {
+  const key = getTicketPriorityKeyForRow(item);
+  const label = getTicketPriorityLabelForRow(item);
+  const tooltip = `Prioridad ${label}`;
+
+  return `
+    <span class="incidencias-mini-badge incidencias-mini-badge--${attr(key)}" ${tooltipAttrs(tooltip, tooltip)}>
+      ${key === "critical" || key === "urgent" ? icon("alert") : icon("activity")}
+      ${escapeHtml(label)}
+    </span>
+  `;
+}
+
+function renderAssignedAgentAvatar(item = {}) {
+  const technician = getRowTechnician(item);
+  const initials = safeText(first(technician.initials, getInitials(technician.name)), "SA")
+    .slice(0, 3)
+    .toUpperCase();
+
+  if (!technician.avatarUrl) {
+    return `
+      <span class="incidencias-agent-avatar incidencias-agent-avatar--fallback" aria-hidden="true">
+        <span class="incidencias-agent-avatar-fallback">${escapeHtml(initials)}</span>
+      </span>
+    `;
+  }
+
+  return `
+    <span
+      class="incidencias-agent-avatar incidencias-agent-avatar--image"
+      ${tooltipAttrs(technician.email || technician.name, technician.email || technician.name)}
+      data-technician-avatar="true"
+      data-avatar-fallback-index="0"
+      data-avatar-fallback-srcs="${attr(technician.avatarUrl)}"
+      data-fallback="false"
+      aria-hidden="true"
+    >
+      <img
+        class="incidencias-agent-avatar-img"
+        src="${attr(technician.avatarUrl)}"
+        alt=""
+        loading="lazy"
+        decoding="async"
+        referrerpolicy="no-referrer"
+        draggable="false"
+        data-incidencias-agent-avatar-img="true"
+      >
+      <span class="incidencias-agent-avatar-fallback">${escapeHtml(initials)}</span>
+    </span>
+  `;
+}
+
+function renderAssignedBadge(item = {}) {
+  const technician = getRowTechnician(item);
+  const tooltip = `Técnico · ${technician.name}${technician.email ? ` · ${technician.email}` : ""}`;
+
+  return `
+    <span
+      class="incidencias-mini-badge incidencias-mini-badge--agent"
+      ${tooltipAttrs(tooltip, tooltip)}
+      data-assigned-technician="${attr(technician.name)}"
+      data-assigned-email="${attr(technician.email)}"
+    >
+      ${renderAssignedAgentAvatar(item)}
+      ${escapeHtml(technician.name)}
+    </span>
+  `;
+}
+
+function renderTicketImporteChip(item = {}) {
+  const label = getTicketImporteLabel(item);
+  const isMoney = /€|EUR|\$|USD|£|GBP/i.test(label);
+  const paymentKey = getTicketPaymentStatusKey(item) || "idle";
+
+  if (isMoney) {
+    return `
+      <span class="incidencias-importe incidencias-importe--money incidencias-importe--${attr(paymentKey)}">
+        ${icon("euro")}
+        ${escapeHtml(label)}
+      </span>
+    `;
+  }
+
+  return `
+    <span class="incidencias-importe incidencias-importe--status incidencias-importe--${attr(paymentKey)}">
+      ${escapeHtml(label)}
+    </span>
+  `;
+}
+
+function renderTicketDetailButton(ticketId = "", isOpening = false) {
+  return `
+    <button
+      type="button"
+      class="${joinClasses("incidencias-detail-btn", "home-detail-btn", isOpening ? "is-loading" : "")}"
+      data-home-action="${ACTIONS.OPEN_TICKET_DETAIL}"
+      data-action="${ACTIONS.OPEN_TICKET_DETAIL}"
+      data-incidencias-action="open-ticket"
+      data-ticket-id="${attr(ticketId)}"
+      data-incidencia-id="${attr(ticketId)}"
+      data-entity-id="${attr(ticketId)}"
+      data-payload="${jsonAttr({ ticketId, incidenciaId: ticketId })}"
+      ${tooltipAttrs("Abrir detalle de incidencia", "Abrir detalle de incidencia")}
+      ${disabledTableAttrs(isOpening, isOpening)}
+    >
+      ${isOpening
+        ? renderIncidenciasLoaderOnly("Cargando detalle")
+        : `
+          <span class="incidencias-action-icon">${icon("eye")}</span>
+          <span class="incidencias-btn-text home-btn-text">Detalle</span>
+        `
+      }
+    </button>
   `;
 }
 
 function ticketRow(item = {}, state = {}) {
   const ticketId = getRowTicketId(item);
-  const subject = safeText(first(item.subject, item.title, getTicketSubject(item)), "Incidencia sin asunto");
-  const description = safeText(first(item.description, item.preview, getTicketDescription(item)), "Sin descripción.");
-  const category = safeText(first(item.category, item.categoria, getTicketCategory(item)), "Soporte");
-  const statusKey = safeText(first(item.statusKey, getTicketStatusKey(item)), "pending");
-  const priorityKey = safeText(first(item.priorityKey, getTicketPriorityKey(item)), "medium");
-  const createdAt = first(item.createdAt, getTicketCreatedAt(item));
-  const updatedAt = first(item.lastActivityAt, item.updatedAt, getTicketUpdatedAt(item));
-  const createdLabel = safeText(first(item.createdAtLabel, formatDateTime(createdAt)), "—");
-  const updatedLabel = safeText(first(item.lastActivityLabel, item.updatedAtLabel, formatLastUpdate(updatedAt)), "Sin fecha");
-  const linkedInvoiceCount = safeNumber(first(item.linkedInvoiceCount, item.invoicesCount, item.facturasCount, 0), 0);
+  const subject = safeText(first(item.subject, item.title, item.asunto, getTicketSubject(item)), "Incidencia sin asunto");
+  const description = safeText(first(item.description, item.descripcion, item.message, item.preview, getTicketDescription(item)), "Sin descripción.");
+  const category = safeText(first(item.category, item.categoria, item.type, item.tipo, getTicketCategory(item)), "Soporte");
+  const statusKey = getTicketStatusKeyForRow(item);
+  const priorityKey = getTicketPriorityKeyForRow(item);
+  const clientName = getTicketClientNameForRow(item);
+  const clientEmail = getTicketClientEmailForRow(item) || "Sin email";
+  const createdAt = first(item.createdAt, item.fechaCreacion, item.createdAtES, getTicketCreatedAt(item));
+  const updatedAt = first(item.lastActivityAt, item.updatedAt, item.lastUpdateAt, item.ultimaNovedad, getTicketUpdatedAt(item));
+  const createdLabel = safeText(first(item.createdAtLabel, item.fechaCreacionLabel, formatDateTime(createdAt)), "—");
+  const updatedLabel = safeText(first(item.lastActivityLabel, item.updatedAtLabel, item.ultimaNovedadLabel, formatLastUpdate(updatedAt)), "Sin fecha");
+  const attachmentsCount = getTicketAttachmentsCountForRow(item);
   const isOpening = isSameIdentity(state.openingTicketId, ticketId);
   const isSelected = isSameIdentity(state.selectedTicketId, ticketId);
 
@@ -1964,102 +2704,126 @@ function ticketRow(item = {}, state = {}) {
     <tr
       class="${joinClasses(
         "home-ticket-row",
+        "incidencias-row",
+        `incidencias-row--${statusKey}`,
         `home-ticket-row--${statusKey}`,
         `home-ticket-row--priority-${priorityKey}`,
+        "incidencias-row--clickable",
         isOpening ? "is-opening" : "",
         isSelected ? "is-selected" : ""
       )}"
+      data-home-action="${ACTIONS.OPEN_TICKET_DETAIL}"
+      data-action="${ACTIONS.OPEN_TICKET_DETAIL}"
+      data-incidencias-action="open-ticket"
       data-ticket-row="true"
       data-ticket-id="${attr(ticketId)}"
       data-incidencia-id="${attr(ticketId)}"
       data-entity-id="${attr(ticketId)}"
       data-status-key="${attr(statusKey)}"
       data-priority-key="${attr(priorityKey)}"
+      data-detail-target="true"
+      data-row-click-disabled="false"
+      data-payload="${jsonAttr({ ticketId, incidenciaId: ticketId })}"
+      role="button"
+      tabindex="0"
+      ${tooltipAttrs(`Abrir detalle de incidencia ${ticketId}`, `Abrir detalle de incidencia ${ticketId}`)}
+      ${boolAttr(isOpening, 'aria-busy="true"')}
+      ${boolAttr(isSelected, 'aria-current="true"')}
     >
-      <td class="home-ticket-cell home-ticket-cell--main">
-        <div class="home-ticket-main home-ticket-main--with-technician">
-          ${technicianInline(item)}
+      <td class="incidencias-cell incidencias-cell--main home-ticket-cell home-ticket-cell--main">
+        <div class="incidencias-main">
+          ${renderTicketClientAvatar(item)}
 
-          <div class="home-ticket-copy">
-            <div class="home-ticket-line">
-              <button
-                type="button"
-                class="home-ticket-id"
-                data-home-action="${ACTIONS.COPY_ID}"
-                data-action="${ACTIONS.COPY_ID}"
-                data-widget-id="${attr(ticketId)}"
-                data-widget-key="${attr(ticketId)}"
-                data-entity-id="${attr(ticketId)}"
-                aria-label="Copiar ID de incidencia ${attr(ticketId)}"
-              >
-                ${escapeHtml(ticketId)}
-              </button>
-
-              <span class="home-mini-badge home-mini-badge--category">
-                ${escapeHtml(category)}
-              </span>
+          <div class="incidencias-main-copy">
+            <div class="incidencias-ticket-line">
+              <span class="incidencias-ticket-id">${escapeHtml(ticketId)}</span>
+              <span class="incidencias-category-pill">${escapeHtml(category)}</span>
             </div>
 
-            <button
-              type="button"
-              class="home-ticket-subject"
-              data-home-action="${ACTIONS.OPEN_TICKET_DETAIL}"
-              data-action="${ACTIONS.OPEN_TICKET_DETAIL}"
-              data-ticket-id="${attr(ticketId)}"
-              data-incidencia-id="${attr(ticketId)}"
-              data-entity-id="${attr(ticketId)}"
-              data-payload="${jsonAttr({ ticketId, incidenciaId: ticketId })}"
-            >
-              ${escapeHtml(subject)}
-            </button>
+            <div class="incidencias-ticket-subject">${escapeHtml(subject)}</div>
+            <div class="incidencias-ticket-description">${escapeHtml(description)}</div>
 
-            <div class="home-ticket-description">
-              ${escapeHtml(description)}
+            <div class="incidencias-client-line">
+              <span class="incidencias-client-name">${escapeHtml(clientName)}</span>
+              <span class="incidencias-client-separator">·</span>
+              <span class="incidencias-client-email">${escapeHtml(clientEmail)}</span>
             </div>
 
-            <div class="home-ticket-badges">
-              ${priorityBadge(item)}
-              ${linkedInvoiceCount > 0
-                ? `<span class="home-mini-badge home-mini-badge--invoice">${icon("invoice")}${escapeHtml(`${linkedInvoiceCount} fact.`)}</span>`
-                : ""
-              }
+            <div class="incidencias-row-badges">
+              ${renderTicketPriorityBadge(item)}
+              ${renderAssignedBadge(item)}
             </div>
           </div>
         </div>
       </td>
 
-      <td class="home-ticket-cell home-ticket-cell--status">
-        ${statusChip(item)}
+      <td class="incidencias-cell incidencias-cell--status home-ticket-cell home-ticket-cell--status">
+        ${renderTicketStatusChip(item)}
       </td>
 
-      <td class="home-ticket-cell home-ticket-cell--date">
-        <span class="home-date-inline" title="${attr(formatDateTime(createdAt))}">
+      <td class="incidencias-cell incidencias-cell--date home-ticket-cell home-ticket-cell--date">
+        <span class="incidencias-date-inline home-date-inline" ${tooltipAttrs(formatDateTime(createdAt), `Fecha de creación ${formatDateTime(createdAt)}`)}>
           ${escapeHtml(createdLabel)}
         </span>
       </td>
 
-      <td class="home-ticket-cell home-ticket-cell--date">
-        <span class="home-date-inline" title="${attr(formatDateTime(updatedAt))}">
+      <td class="incidencias-cell incidencias-cell--date home-ticket-cell home-ticket-cell--date">
+        <span class="incidencias-date-inline home-date-inline" ${tooltipAttrs(formatDateTime(updatedAt), `Última novedad ${formatDateTime(updatedAt)}`)}>
           ${escapeHtml(updatedLabel)}
         </span>
       </td>
 
-      <td class="home-ticket-cell home-ticket-cell--actions">
-        <button
-          type="button"
-          class="${joinClasses("home-detail-btn", isOpening ? "is-loading" : "")}"
-          data-home-action="${ACTIONS.OPEN_TICKET_DETAIL}"
-          data-action="${ACTIONS.OPEN_TICKET_DETAIL}"
-          data-ticket-id="${attr(ticketId)}"
-          data-incidencia-id="${attr(ticketId)}"
-          data-entity-id="${attr(ticketId)}"
-          data-payload="${jsonAttr({ ticketId, incidenciaId: ticketId })}"
-          ${boolAttr(isOpening, 'disabled aria-busy="true"')}
+      <td class="incidencias-cell incidencias-cell--importe">
+        ${renderTicketImporteChip(item)}
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--attachments">
+        <span
+          class="incidencias-attachments-pill"
+          ${tooltipAttrs(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`, `${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}
         >
-          ${isOpening ? spinner("Cargando...") : `${icon("eye")}<span class="home-btn-text">Detalle</span>`}
-        </button>
+          ${tableIcon("paperclip")}
+          ${escapeHtml(String(attachmentsCount))}
+        </span>
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--actions home-ticket-cell home-ticket-cell--actions">
+        ${renderTicketDetailButton(ticketId, isOpening)}
       </td>
     </tr>
+  `;
+}
+
+function renderHomeIncidenciasLoadingRows(rows = DEFAULT_PAGE_SIZE) {
+  return `
+    <div class="incidencias-table-loading home-table-loading" aria-hidden="true">
+      ${Array.from({ length: Math.max(1, safeNumber(rows, DEFAULT_PAGE_SIZE)) }).map(() => `
+        <div class="incidencias-table-loading-row home-table-loading-row">
+          <div class="incidencias-skeleton incidencias-skeleton--avatar home-skeleton home-skeleton--avatar"></div>
+          <div class="incidencias-table-loading-copy home-table-loading-copy">
+            <div class="incidencias-skeleton incidencias-skeleton--xs home-skeleton home-skeleton--xs"></div>
+            <div class="incidencias-skeleton incidencias-skeleton--lg home-skeleton home-skeleton--lg"></div>
+            <div class="incidencias-skeleton incidencias-skeleton--md home-skeleton home-skeleton--md"></div>
+          </div>
+          <div class="incidencias-skeleton incidencias-skeleton--pill home-skeleton home-skeleton--pill"></div>
+          <div class="incidencias-skeleton incidencias-skeleton--date home-skeleton home-skeleton--date"></div>
+          <div class="incidencias-skeleton incidencias-skeleton--date home-skeleton home-skeleton--date"></div>
+          <div class="incidencias-skeleton incidencias-skeleton--amount home-skeleton"></div>
+          <div class="incidencias-skeleton incidencias-skeleton--attach home-skeleton"></div>
+          <div class="incidencias-skeleton incidencias-skeleton--btn home-skeleton home-skeleton--btn"></div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderHomeIncidenciasRefreshOverlay() {
+  return `
+    <div class="incidencias-refresh-overlay" aria-live="polite">
+      <div class="incidencias-refresh-card">
+        ${renderIncidenciasInlineSpinner("Actualizando historial...")}
+      </div>
+    </div>
   `;
 }
 
@@ -2080,7 +2844,7 @@ export function renderHomeTicketsTable(input = {}) {
   const initialLoading = state.loading && !rows.length;
 
   return `
-    <section class="home-tickets" data-home-section="tickets">
+    <section class="home-tickets home-tickets--incidencias-table" data-home-section="tickets">
       <div class="home-panel-head">
         <div class="home-panel-copy">
           <span class="home-panel-kicker">Incidencias</span>
@@ -2114,22 +2878,37 @@ export function renderHomeTicketsTable(input = {}) {
       </div>
 
       ${initialLoading
-        ? loadingRows(Math.max(3, DEFAULT_PAGE_SIZE))
+        ? renderHomeIncidenciasLoadingRows(Math.max(3, DEFAULT_PAGE_SIZE))
         : `
-          <div class="${joinClasses("home-table-wrap", state.refreshing ? "is-refreshing" : "")}">
+          <div class="${joinClasses("home-table-wrap", "incidencias-table-wrap", state.refreshing ? "is-refreshing" : "")}">
+            ${state.refreshing && rows.length ? renderHomeIncidenciasRefreshOverlay() : ""}
+
             ${rows.length
               ? `
-                <div class="home-table-shell">
-                  <table class="home-table" role="table" aria-label="Últimas incidencias del Home">
-                    <thead>
+                <div class="home-table-shell incidencias-table-shell">
+                  <table class="home-table home-table--incidencias incidencias-table" role="table" aria-label="Últimas incidencias del Home">
+                    <colgroup>
+                      <col class="incidencias-col incidencias-col--main">
+                      <col class="incidencias-col incidencias-col--status">
+                      <col class="incidencias-col incidencias-col--created">
+                      <col class="incidencias-col incidencias-col--updated">
+                      <col class="incidencias-col incidencias-col--importe">
+                      <col class="incidencias-col incidencias-col--attachments">
+                      <col class="incidencias-col incidencias-col--actions">
+                    </colgroup>
+
+                    <thead data-incidencias-table-head="true">
                       <tr>
-                        <th scope="col">Incidencia</th>
+                        <th scope="col">Incidencia / cliente</th>
                         <th scope="col">Estado</th>
                         <th scope="col">Creación</th>
                         <th scope="col">Última novedad</th>
+                        <th scope="col">Importe</th>
+                        <th scope="col">Adj.</th>
                         <th scope="col">Acciones</th>
                       </tr>
                     </thead>
+
                     <tbody>
                       ${rows.map((item) => ticketRow(item, state)).join("")}
                     </tbody>

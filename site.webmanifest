@@ -12,7 +12,7 @@
   "dir": "ltr",
   "icons": [
     {
-      "src": "/src/media/img/favicon_black_circle.png?v=6",
+      "src": "/src/media/img/favicon_black_circle.png",
       "sizes": "128x128",
       "type": "image/png",
       "purpose": "any"

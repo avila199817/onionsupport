@@ -18,12 +18,40 @@ import {
   PUBLIC_ROUTES as CORE_PUBLIC_ROUTES,
   PROTECTED_PUBLIC_TOKEN_ROUTES as CORE_PROTECTED_PUBLIC_TOKEN_ROUTES,
   TOKEN_PARAM as CORE_TOKEN_PARAM,
+  USER_HOME_PREFIX as CORE_USER_HOME_PREFIX,
+  BLOCKED_FRONTEND_ROUTES as CORE_BLOCKED_FRONTEND_ROUTES,
   normalizeRoutePath as coreNormalizeRoutePath,
   isPublicRoute as coreIsPublicRoute,
   routePathFromUrlLike as coreRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const APP_CONSTANTS_VERSION = "app.constants.v3";
+export const APP_CONSTANTS_VERSION = "app.constants.v4";
+
+const FALLBACK_APP_NAME = "Onion Support";
+const FALLBACK_ROOT_PATH = "/";
+const FALLBACK_LANG = "es";
+const DEFAULT_SUPPORTED_LANGS = Object.freeze(["es", "ca", "en"]);
+
+const CORE_CONFIG = copyObject(config);
+const CORE_ROUTE_MAP = copyObject(CORE_ROUTES);
+
+const BLOCKED_FRONTEND_ROUTE_SET = new Set(
+  (
+    Array.isArray(CORE_BLOCKED_FRONTEND_ROUTES) &&
+    CORE_BLOCKED_FRONTEND_ROUTES.length
+      ? CORE_BLOCKED_FRONTEND_ROUTES
+      : [
+          "/home",
+          "/403",
+          "/404",
+          "/2fa",
+          "/mfa",
+          "/otp",
+        ]
+  )
+    .map((path) => normalizeCanonicalRoutePath(path))
+    .filter(Boolean)
+);
 
 /* =========================================================
    BASICS
@@ -62,11 +90,148 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
+function unique(values = []) {
+  return [
+    ...new Set(
+      (Array.isArray(values) ? values : [values])
+        .flat(Infinity)
+        .map((item) => cleanText(item, ""))
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function normalizeLangToken(value = "") {
+  const raw = cleanText(value, "")
+    .toLowerCase()
+    .replace(/_/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+
+  if (!raw) return "";
+
+  return raw.split("-").filter(Boolean).join("-");
+}
+
+function normalizeSupportedLangs(values = []) {
+  const input = Array.isArray(values) && values.length
+    ? values
+    : DEFAULT_SUPPORTED_LANGS;
+
+  const langs = unique(
+    input
+      .map(normalizeLangToken)
+      .map((lang) => lang.split("-")[0] || lang)
+      .filter(Boolean)
+  );
+
+  if (!langs.includes(FALLBACK_LANG)) {
+    langs.unshift(FALLBACK_LANG);
+  }
+
+  return langs.length ? langs : [...DEFAULT_SUPPORTED_LANGS];
+}
+
+function normalizeLang(value = "", fallback = FALLBACK_LANG) {
+  const supported = normalizeSupportedLangs(
+    CORE_CONFIG.supportedLangs ||
+      CORE_CONFIG.i18n?.supported ||
+      DEFAULT_SUPPORTED_LANGS
+  );
+
+  const raw = normalizeLangToken(value);
+  const short = raw.split("-")[0];
+  const cleanFallback = normalizeLangToken(fallback) || FALLBACK_LANG;
+  const fallbackShort = cleanFallback.split("-")[0];
+
+  if (supported.includes(raw)) return raw;
+  if (supported.includes(short)) return short;
+  if (supported.includes(cleanFallback)) return cleanFallback;
+  if (supported.includes(fallbackShort)) return fallbackShort;
+
+  return FALLBACK_LANG;
+}
+
+function escapeRegExp(value = "") {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/* =========================================================
+   ROUTE NORMALIZATION
+========================================================= */
+
+function fallbackPublicRoutePath(path = FALLBACK_ROOT_PATH) {
+  const raw = cleanText(path, FALLBACK_ROOT_PATH);
+
+  if (!raw || raw.startsWith("//")) return FALLBACK_ROOT_PATH;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return FALLBACK_ROOT_PATH;
+  if (/[\r\n\t\\]/.test(raw)) return FALLBACK_ROOT_PATH;
+
+  return raw.startsWith("/") ? raw : `/${raw}`;
+}
+
+export function normalizePublicRoutePath(path = FALLBACK_ROOT_PATH) {
+  try {
+    const raw = coreRoutePathFromUrlLike(path) || FALLBACK_ROOT_PATH;
+    return fallbackPublicRoutePath(raw);
+  } catch {
+    return fallbackPublicRoutePath(path);
+  }
+}
+
+export function normalizeCanonicalRoutePath(path = FALLBACK_ROOT_PATH) {
+  try {
+    const normalized = coreNormalizeRoutePath(path) || FALLBACK_ROOT_PATH;
+    return fallbackPublicRoutePath(normalized)
+      .split("?")[0]
+      .split("#")[0];
+  } catch {
+    let value = normalizePublicRoutePath(path)
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "") || FALLBACK_ROOT_PATH;
+    }
+
+    return value || FALLBACK_ROOT_PATH;
+  }
+}
+
+function isBlockedFrontendRoute(path = "") {
+  const clean = normalizeCanonicalRoutePath(path).toLowerCase();
+
+  if (BLOCKED_FRONTEND_ROUTE_SET.has(clean)) return true;
+
+  return (
+    clean.startsWith("/2fa/") ||
+    clean.startsWith("/mfa/") ||
+    clean.startsWith("/otp/")
+  );
+}
+
+function safeConfigRoute(path = "", fallback = FALLBACK_ROOT_PATH) {
+  const clean = normalizeCanonicalRoutePath(path || fallback || FALLBACK_ROOT_PATH);
+
+  return isBlockedFrontendRoute(clean)
+    ? normalizeCanonicalRoutePath(fallback || FALLBACK_ROOT_PATH)
+    : clean;
+}
+
+function sameRoute(path = "", route = "") {
+  return normalizeCanonicalRoutePath(path) === normalizeCanonicalRoutePath(route);
+}
+
 /* =========================================================
    APP
 ========================================================= */
 
-export const APP_NAME = config.appName || config.name || "Onion Support";
+export const APP_NAME = cleanText(
+  CORE_CONFIG.appName || CORE_CONFIG.name,
+  FALLBACK_APP_NAME
+);
+
 export const APP_SCOPE = "app";
 
 export const APP_SCOPES = freeze({
@@ -85,13 +250,19 @@ export const APP_SCOPES = freeze({
 ========================================================= */
 
 export const APP_ROUTES = freeze({
-  root: CORE_ROUTES.root || "/",
-  home: CORE_ROUTES.home || CORE_ROUTES.root || "/",
+  root: safeConfigRoute(CORE_ROUTE_MAP.root || FALLBACK_ROOT_PATH, FALLBACK_ROOT_PATH),
 
-  login: CORE_ROUTES.login || "/login",
-  passwordRequest: CORE_ROUTES.passwordRequest || "/password-request",
-  passwordReset: CORE_ROUTES.passwordReset || "/password-reset",
-  activateAccount: CORE_ROUTES.activateAccount || "/activate-account",
+  /*
+    Compat:
+    home interno de app nunca debe convertirse en /home.
+    La home visible autenticada pertenece al Router/Auth: /@{slug}.
+  */
+  home: safeConfigRoute(CORE_ROUTE_MAP.root || FALLBACK_ROOT_PATH, FALLBACK_ROOT_PATH),
+
+  login: safeConfigRoute(CORE_ROUTE_MAP.login || "/login", "/login"),
+  passwordRequest: safeConfigRoute(CORE_ROUTE_MAP.passwordRequest || "/password-request", "/password-request"),
+  passwordReset: safeConfigRoute(CORE_ROUTE_MAP.passwordReset || "/password-reset", "/password-reset"),
+  activateAccount: safeConfigRoute(CORE_ROUTE_MAP.activateAccount || "/activate-account", "/activate-account"),
 });
 
 export const ROOT_PATH = APP_ROUTES.root;
@@ -106,14 +277,18 @@ export const ACTIVATION_PATH = APP_ROUTES.activateAccount;
 export const RESET_CONFIRM_PATH = APP_ROUTES.passwordReset;
 
 export const PUBLIC_AUTH_ROUTES = freeze(
-  Array.isArray(CORE_PUBLIC_ROUTES) && CORE_PUBLIC_ROUTES.length
-    ? [...CORE_PUBLIC_ROUTES]
-    : [
-        APP_ROUTES.login,
-        APP_ROUTES.passwordRequest,
-        APP_ROUTES.passwordReset,
-        APP_ROUTES.activateAccount,
-      ]
+  unique(
+    Array.isArray(CORE_PUBLIC_ROUTES) && CORE_PUBLIC_ROUTES.length
+      ? CORE_PUBLIC_ROUTES
+      : [
+          APP_ROUTES.login,
+          APP_ROUTES.passwordRequest,
+          APP_ROUTES.passwordReset,
+          APP_ROUTES.activateAccount,
+        ]
+  )
+    .map((path) => safeConfigRoute(path, ""))
+    .filter(Boolean)
 );
 
 /* Compat de nombre antiguo. No declara rutas nuevas. */
@@ -128,11 +303,33 @@ export const PUBLIC_TOKEN_ROUTE_KEYS = freeze({
    TOKENS
 ========================================================= */
 
-export const TOKEN_PARAM = CORE_TOKEN_PARAM || "token";
+export const TOKEN_PARAM = cleanText(CORE_TOKEN_PARAM, "token");
+
+const SENSITIVE_PARAM_NAMES = freeze(
+  unique([
+    TOKEN_PARAM,
+    "token",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "secret",
+    "session",
+    "code",
+    "password",
+    "pwd",
+    "key",
+    "sig",
+    "signature",
+    "jwt",
+    "authorization",
+    "reset_token",
+    "activation_token",
+  ]).map((name) => name.toLowerCase())
+);
 
 export const ACTIVATION_TOKEN_PARAM_NAMES = freeze([TOKEN_PARAM]);
 export const RESET_TOKEN_PARAM_NAMES = freeze([TOKEN_PARAM]);
-export const GENERIC_SENSITIVE_PARAM_NAMES = freeze([TOKEN_PARAM]);
+export const GENERIC_SENSITIVE_PARAM_NAMES = SENSITIVE_PARAM_NAMES;
 
 function normalizeTokenRouteConfig(configItem = null, index = 0) {
   const item = configItem && typeof configItem === "object"
@@ -148,8 +345,8 @@ function normalizeTokenRouteConfig(configItem = null, index = 0) {
     ? item.paths
     : [item.path];
 
-  const cleanPaths = paths
-    .map((path) => normalizeCanonicalRoutePath(path))
+  const cleanPaths = unique(paths)
+    .map((path) => safeConfigRoute(path, ""))
     .filter(Boolean);
 
   if (!cleanPaths.length) return null;
@@ -160,10 +357,10 @@ function normalizeTokenRouteConfig(configItem = null, index = 0) {
 
   return freeze({
     key: cleanText(item.key, `token-route-${index}`),
-    path: normalizeCanonicalRoutePath(item.path || cleanPaths[0]),
+    path: safeConfigRoute(item.path || cleanPaths[0], cleanPaths[0]),
     paths: freeze(cleanPaths),
     tokenParamNames: freeze(
-      tokenParamNames
+      unique(tokenParamNames)
         .map((name) => cleanText(name, ""))
         .filter(Boolean)
     ),
@@ -183,41 +380,49 @@ export const PROTECTED_PUBLIC_TOKEN_ROUTES = freeze(
    UI / DOM
 ========================================================= */
 
+const SUPPORTED_LANGS = freeze(
+  normalizeSupportedLangs(
+    CORE_CONFIG.supportedLangs ||
+      CORE_CONFIG.i18n?.supported ||
+      DEFAULT_SUPPORTED_LANGS
+  )
+);
+
 export const UI_CONSTANTS = freeze({
   appName: APP_NAME,
 
-  defaultThemeMode: config.defaultTheme || config.ui?.defaultTheme || "system",
+  defaultThemeMode: CORE_CONFIG.defaultTheme || CORE_CONFIG.ui?.defaultTheme || "system",
 
-  defaultLang: config.defaultLang || config.i18n?.defaultLang || "es",
-  fallbackLang: config.fallbackLang || config.i18n?.fallbackLang || "es",
-  supportedLangs: freeze(copyArray(config.supportedLangs || config.i18n?.supported || ["es", "ca", "en"])),
+  defaultLang: normalizeLang(CORE_CONFIG.defaultLang || CORE_CONFIG.i18n?.defaultLang || FALLBACK_LANG),
+  fallbackLang: normalizeLang(CORE_CONFIG.fallbackLang || CORE_CONFIG.i18n?.fallbackLang || FALLBACK_LANG),
+  supportedLangs: SUPPORTED_LANGS,
 
-  bootingClass: config.loader?.bootClass || "app-booting",
-  loadingClass: config.loader?.loadingClass || "app-loading",
-  readyClass: config.loader?.readyClass || "app-ready",
-  fatalClass: config.loader?.fatalClass || "app-fatal",
+  bootingClass: CORE_CONFIG.loader?.bootClass || "app-booting",
+  loadingClass: CORE_CONFIG.loader?.loadingClass || "app-loading",
+  readyClass: CORE_CONFIG.loader?.readyClass || "app-ready",
+  fatalClass: CORE_CONFIG.loader?.fatalClass || "app-fatal",
 });
 
 export const APP_DOM_IDS = freeze({
-  shell: config.ui?.shellId || "app-shell",
-  loader: config.ui?.loaderId || "app-loader",
+  shell: CORE_CONFIG.ui?.shellId || "app-shell",
+  loader: CORE_CONFIG.ui?.loaderId || "app-loader",
 
-  main: config.ui?.mainContentId || "main-content",
-  mainContent: config.ui?.mainContentId || "main-content",
+  main: CORE_CONFIG.ui?.mainContentId || "main-content",
+  mainContent: CORE_CONFIG.ui?.mainContentId || "main-content",
 
-  appContent: config.ui?.appContentId || "app-content",
+  appContent: CORE_CONFIG.ui?.appContentId || "app-content",
 
-  view: config.ui?.viewContainerId || "view-container",
-  viewContainer: config.ui?.viewContainerId || "view-container",
+  view: CORE_CONFIG.ui?.viewContainerId || "view-container",
+  viewContainer: CORE_CONFIG.ui?.viewContainerId || "view-container",
 
-  sidebarMount: config.ui?.sidebarMountId || "sidebar-mount",
-  topbarMount: config.ui?.topbarMountId || "topbar-mount",
+  sidebarMount: CORE_CONFIG.ui?.sidebarMountId || "sidebar-mount",
+  topbarMount: CORE_CONFIG.ui?.topbarMountId || "topbar-mount",
 
-  tablehead: config.ui?.tableheadId || "table-head",
-  tableHead: config.ui?.tableheadId || "table-head",
+  tablehead: CORE_CONFIG.ui?.tableheadId || "table-head",
+  tableHead: CORE_CONFIG.ui?.tableheadId || "table-head",
 
-  tableheadContainer: config.ui?.tableheadContainerId || "tablehead-container",
-  tableHeadContainer: config.ui?.tableheadContainerId || "tablehead-container",
+  tableheadContainer: CORE_CONFIG.ui?.tableheadContainerId || "tablehead-container",
+  tableHeadContainer: CORE_CONFIG.ui?.tableheadContainerId || "tablehead-container",
 });
 
 export const APP_SELECTORS = freeze({
@@ -252,6 +457,8 @@ export const APP_MODULES = freeze({
   shell: "Shell",
   errors: "Errors",
 });
+
+export const USER_HOME_PREFIX = cleanText(CORE_USER_HOME_PREFIX, "/@");
 
 /* =========================================================
    GETTERS
@@ -292,38 +499,6 @@ export function getAppModuleName(key = "", fallback = "") {
 /* =========================================================
    ROUTE HELPERS
 ========================================================= */
-
-export function normalizePublicRoutePath(path = DEFAULT_ROUTE) {
-  try {
-    const raw = coreRoutePathFromUrlLike(path) || DEFAULT_ROUTE;
-    return raw.startsWith("/") ? raw : `/${raw}`;
-  } catch {
-    const value = cleanText(path, DEFAULT_ROUTE);
-    return value.startsWith("/") ? value : `/${value}`;
-  }
-}
-
-export function normalizeCanonicalRoutePath(path = DEFAULT_ROUTE) {
-  try {
-    return coreNormalizeRoutePath(path) || DEFAULT_ROUTE;
-  } catch {
-    let value = normalizePublicRoutePath(path)
-      .split("?")[0]
-      .split("#")[0]
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
-    if (value.length > 1) {
-      value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
-    }
-
-    return value || DEFAULT_ROUTE;
-  }
-}
-
-function sameRoute(path = "", route = "") {
-  return normalizeCanonicalRoutePath(path) === normalizeCanonicalRoutePath(route);
-}
 
 export function isPublicAuthRoute(path = "") {
   try {
@@ -393,18 +568,30 @@ export function isProtectedPublicTokenRoute(path = "") {
 ========================================================= */
 
 export function isSensitiveParamName(name = "") {
-  return String(name || "").toLowerCase() === TOKEN_PARAM.toLowerCase();
+  return SENSITIVE_PARAM_NAMES.includes(
+    cleanText(name, "").toLowerCase()
+  );
 }
 
 export function getSensitiveParamNames() {
-  return [TOKEN_PARAM];
+  return copyArray(SENSITIVE_PARAM_NAMES);
 }
 
 export function redactSensitiveText(value = "") {
-  const token = TOKEN_PARAM.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(`([?&#]${token}=)([^&#\\s]+)`, "gi");
+  let output = String(value || "");
 
-  return String(value || "").replace(pattern, "$1***");
+  for (const name of SENSITIVE_PARAM_NAMES) {
+    const token = escapeRegExp(name);
+    const pattern = new RegExp(`([?&#]${token}=)([^&#\\s]+)`, "gi");
+    output = output.replace(pattern, "$1***");
+  }
+
+  output = output.replace(
+    /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+    "$1***"
+  );
+
+  return output;
 }
 
 /* =========================================================
@@ -415,10 +602,16 @@ export function getAppConstantsSnapshot() {
   return {
     version: APP_CONSTANTS_VERSION,
 
+    appName: APP_NAME,
+
     routes: copyObject(APP_ROUTES),
     publicAuthRoutes: getPublicAuthRoutes(),
     publicTokenRoutePaths: getPublicTokenRoutePaths(),
+
     tokenParam: TOKEN_PARAM,
+    sensitiveParamNames: getSensitiveParamNames(),
+
+    userHomePrefix: USER_HOME_PREFIX,
 
     domIds: copyObject(APP_DOM_IDS),
 
@@ -426,16 +619,30 @@ export function getAppConstantsSnapshot() {
       defaultLang: UI_CONSTANTS.defaultLang,
       fallbackLang: UI_CONSTANTS.fallbackLang,
       supportedLangs: copyArray(UI_CONSTANTS.supportedLangs),
+      defaultThemeMode: UI_CONSTANTS.defaultThemeMode,
     },
 
     policy: {
       constantsOnly: true,
       compatibilityLayer: true,
+
       coreConfigOwnsRoutes: true,
       coreConfigOwnsTokenRoutes: true,
       coreConfigOwnsUiDefaults: true,
+
+      doesNotOwnRouter: true,
+      doesNotOwnAuth: true,
+      doesNotOwnBoot: true,
+
       noInventedRoutes: true,
+      noHomeRoute: true,
+      internalHomeIsRoot: true,
+      visibleHomeOwnedByRouter: true,
+      visibleHomePattern: `${USER_HOME_PREFIX}{slug}`,
+
+      baseFallbackEs: true,
       noBootLogic: true,
+      redactedSnapshot: true,
     },
   };
 }
@@ -470,6 +677,8 @@ export default freeze({
 
   PUBLIC_TOKEN_ROUTE_KEYS,
   PROTECTED_PUBLIC_TOKEN_ROUTES,
+
+  USER_HOME_PREFIX,
 
   UI_CONSTANTS,
   APP_DOM_IDS,

@@ -6,6 +6,7 @@
    - Obtener refs de password reset.
    - Leer estado del formulario.
    - Mostrar/limpiar error global.
+   - Marcar campos inválidos.
    - Estado loading mínimo.
    - Binding submit idempotente.
    - Delegar password-field al componente compartido.
@@ -22,7 +23,7 @@
 
 import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
 
-export const RESET_PASSWORD_DOM_VERSION = "reset-password.dom.v3";
+export const RESET_PASSWORD_DOM_VERSION = "reset-password.dom.v4";
 
 const DEFAULT_REQUEST_SUBMIT_LABEL = "Enviar enlace";
 const DEFAULT_CONFIRM_SUBMIT_LABEL = "Cambiar contraseña";
@@ -72,6 +73,18 @@ const SELECTORS = Object.freeze({
   fieldConfirm:
     "[data-password-reset-field='confirm-password'], [data-reset-password-field='confirm-password'], [data-field='confirm-password']",
 
+  identifierError:
+    "[data-password-reset-error-for='identifier'], [data-reset-password-error-for='identifier'], [data-error-for='identifier'], #passwordResetIdentifierError",
+
+  tokenError:
+    "[data-password-reset-error-for='token'], [data-reset-password-error-for='token'], [data-error-for='token'], #passwordResetTokenError",
+
+  passwordError:
+    "[data-password-reset-error-for='password'], [data-reset-password-error-for='password'], [data-error-for='password'], #passwordResetPasswordError",
+
+  confirmPasswordError:
+    "[data-password-reset-error-for='confirm-password'], [data-reset-password-error-for='confirm-password'], [data-error-for='confirm-password'], #passwordResetConfirmPasswordError",
+
   passwordToggle:
     "[data-password-toggle], [data-reset-password-toggle], [data-password-reset-toggle]",
 });
@@ -90,8 +103,16 @@ function isFn(value) {
 
 function noop() {}
 
+function isNode(value = null) {
+  return Boolean(value && typeof value.nodeType === "number");
+}
+
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -101,13 +122,20 @@ function rawText(value = "", fallback = "") {
 }
 
 function redact(value = "") {
-  return String(value || "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
+  return text(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function doc() {
   return isBrowser() ? document : null;
+}
+
+function safeRoot(root = null) {
+  return isNode(root) ? root : doc();
 }
 
 function matches(node = null, selector = "") {
@@ -121,7 +149,7 @@ function matches(node = null, selector = "") {
 }
 
 function qs(root = null, selector = "") {
-  const scope = root || doc();
+  const scope = safeRoot(root);
 
   if (!scope || !selector) return null;
 
@@ -134,7 +162,7 @@ function qs(root = null, selector = "") {
 }
 
 function qsa(root = null, selector = "") {
-  const scope = root || doc();
+  const scope = safeRoot(root);
 
   if (!scope || !selector) return [];
 
@@ -164,6 +192,22 @@ function setAttr(node = null, name = "", value = null) {
       node.removeAttribute(name);
     } else {
       node.setAttribute(name, String(value));
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setDataset(node = null, key = "", value = "") {
+  if (!node || !key) return false;
+
+  try {
+    if (value === null || value === undefined || value === false || value === "") {
+      delete node.dataset[key];
+    } else {
+      node.dataset[key] = String(value);
     }
 
     return true;
@@ -226,15 +270,23 @@ function focus(node = null, selectText = false) {
 function later(callback = null) {
   if (!isFn(callback)) return false;
 
+  const run = () => {
+    try {
+      callback();
+    } catch {
+      // noop
+    }
+  };
+
   try {
-    queueMicrotask(callback);
+    queueMicrotask(run);
     return true;
   } catch {
     // fallback abajo
   }
 
   try {
-    Promise.resolve().then(callback).catch(noop);
+    Promise.resolve().then(run).catch(noop);
     return true;
   } catch {
     return false;
@@ -319,7 +371,7 @@ function submitDefaultLabel(refs = {}) {
 ========================================================= */
 
 export function bindResetPasswordFields(container = null, options = {}) {
-  const root = container || doc();
+  const root = safeRoot(container);
 
   if (!root) return [];
 
@@ -352,7 +404,7 @@ export function bindResetPasswordFields(container = null, options = {}) {
 }
 
 export function destroyResetPasswordFields(container = null) {
-  const root = container || doc();
+  const root = safeRoot(container);
 
   if (!root) return false;
 
@@ -371,13 +423,104 @@ export function destroyResetPasswordFields(container = null) {
    REFS
 ========================================================= */
 
+function normalizeTextInput(input = null, maxLength = 160) {
+  if (!input) return false;
+
+  try {
+    input.maxLength = maxLength;
+    input.autocapitalize = "none";
+    input.spellcheck = false;
+    input.setAttribute("aria-invalid", input.getAttribute("aria-invalid") || "false");
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+function normalizeIdentifierInput(input = null) {
+  if (!normalizeTextInput(input, MAX_IDENTIFIER_LENGTH)) return false;
+
+  try {
+    input.setAttribute("autocomplete", "username");
+    input.setAttribute("inputmode", "text");
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+function normalizeTokenInput(input = null) {
+  if (!normalizeTextInput(input, MAX_TOKEN_LENGTH)) return false;
+
+  try {
+    input.setAttribute("autocomplete", "off");
+    input.setAttribute("inputmode", "text");
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+function normalizePasswordInput(input = null, autocomplete = "new-password") {
+  if (!input) return false;
+
+  try {
+    input.maxLength = MAX_PASSWORD_LENGTH;
+    input.setAttribute("autocomplete", autocomplete);
+    input.setAttribute("aria-invalid", input.getAttribute("aria-invalid") || "false");
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+function rememberSubmitOriginalLabel(button = null, refs = {}) {
+  if (!button) return false;
+
+  try {
+    if (!button.type) {
+      button.type = "submit";
+    }
+
+    if (!button.dataset.originalLabel) {
+      button.dataset.originalLabel = text(
+        button.textContent,
+        submitDefaultLabel(refs)
+      );
+    }
+
+    button.setAttribute("aria-busy", "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function getResetPasswordRefs(container = null) {
-  const safeContainer = container || doc();
+  const safeContainer = safeRoot(container);
   const root = qs(safeContainer, SELECTORS.root) || safeContainer;
   const form = qs(root, SELECTORS.form);
   const scope = form || root || safeContainer;
 
+  const identifierInput = qs(scope, SELECTORS.identifier);
+  const tokenInput = qs(scope, SELECTORS.token);
+  const passwordInput = qs(scope, SELECTORS.password);
+  const confirmPasswordInput = qs(scope, SELECTORS.confirmPassword);
   const submitButton = qs(scope, SELECTORS.submit);
+
+  const refsForMode = {
+    root,
+    form,
+  };
+
+  normalizeIdentifierInput(identifierInput);
+  normalizeTokenInput(tokenInput);
+  normalizePasswordInput(passwordInput);
+  normalizePasswordInput(confirmPasswordInput);
 
   if (form) {
     try {
@@ -388,26 +531,7 @@ export function getResetPasswordRefs(container = null) {
     }
   }
 
-  if (submitButton) {
-    try {
-      if (!submitButton.type) {
-        submitButton.type = "submit";
-      }
-
-      if (!submitButton.dataset.originalLabel) {
-        submitButton.dataset.originalLabel = text(
-          submitButton.textContent,
-          submitDefaultLabel({ root, form })
-        );
-      }
-    } catch {
-      // noop
-    }
-  }
-
-  const identifierInput = qs(scope, SELECTORS.identifier);
-  const passwordInput = qs(scope, SELECTORS.password);
-  const confirmPasswordInput = qs(scope, SELECTORS.confirmPassword);
+  rememberSubmitOriginalLabel(submitButton, refsForMode);
 
   const refs = {
     container: safeContainer,
@@ -417,7 +541,7 @@ export function getResetPasswordRefs(container = null) {
     identifierInput,
     emailInput: identifierInput,
 
-    tokenInput: qs(scope, SELECTORS.token),
+    tokenInput,
 
     passwordInput,
     confirmPasswordInput,
@@ -431,6 +555,12 @@ export function getResetPasswordRefs(container = null) {
     fieldEmail: qs(scope, SELECTORS.fieldIdentifier),
     fieldPassword: qs(scope, SELECTORS.fieldPassword),
     fieldConfirmPassword: qs(scope, SELECTORS.fieldConfirm),
+
+    identifierError: qs(scope, SELECTORS.identifierError),
+    emailError: qs(scope, SELECTORS.identifierError),
+    tokenError: qs(scope, SELECTORS.tokenError),
+    passwordError: qs(scope, SELECTORS.passwordError),
+    confirmPasswordError: qs(scope, SELECTORS.confirmPasswordError),
 
     passwordToggleButtons: qsa(scope, SELECTORS.passwordToggle),
     passwordFieldBindings: [],
@@ -449,18 +579,7 @@ export function setFieldInvalid(fieldNode = null, invalid = false) {
   const active = Boolean(invalid);
 
   toggleClass(fieldNode, "is-invalid", active);
-
-  try {
-    if (fieldNode) {
-      if (active) {
-        fieldNode.dataset.invalid = "true";
-      } else {
-        delete fieldNode.dataset.invalid;
-      }
-    }
-  } catch {
-    // noop
-  }
+  setDataset(fieldNode, "invalid", active ? "true" : "");
 
   return true;
 }
@@ -469,7 +588,7 @@ export function setInputInvalid(inputNode = null, invalid = false) {
   const active = Boolean(invalid);
 
   toggleClass(inputNode, "is-invalid", active);
-  setAttr(inputNode, "aria-invalid", active ? "true" : null);
+  setAttr(inputNode, "aria-invalid", active ? "true" : "false");
 
   return true;
 }
@@ -482,7 +601,9 @@ export function setFieldError(fieldNode = null, message = "", errorNode = null) 
   if (errorNode) {
     setText(errorNode, clean);
     setHidden(errorNode, !clean);
+    toggleClass(errorNode, "is-visible", Boolean(clean));
     setAttr(errorNode, "role", clean ? "alert" : null);
+    setAttr(errorNode, "aria-live", clean ? "polite" : null);
   }
 
   return true;
@@ -508,26 +629,21 @@ function setGlobalMessage(errorBox = null, message = "", type = "error") {
 
   setAttr(errorBox, "role", clean ? (cleanType === "error" ? "alert" : "status") : null);
   setAttr(errorBox, "aria-live", clean ? (cleanType === "error" ? "assertive" : "polite") : null);
+  setAttr(errorBox, "aria-atomic", clean ? "true" : null);
 
-  try {
-    if (clean) {
-      errorBox.dataset.messageType = cleanType;
-    } else {
-      delete errorBox.dataset.messageType;
-    }
-  } catch {
-    // noop
-  }
+  setDataset(errorBox, "messageType", clean ? cleanType : "");
 
   return clean;
 }
 
 export function clearResetPasswordErrors(refs = {}) {
-  setFieldInvalid(refs.fieldIdentifier || refs.fieldEmail, false);
-  setFieldInvalid(refs.fieldPassword, false);
-  setFieldInvalid(refs.fieldConfirmPassword, false);
+  clearFieldError(refs.fieldIdentifier || refs.fieldEmail, refs.identifierError || refs.emailError);
+  clearFieldError(null, refs.tokenError);
+  clearFieldError(refs.fieldPassword, refs.passwordError);
+  clearFieldError(refs.fieldConfirmPassword, refs.confirmPasswordError);
 
   setInputInvalid(refs.identifierInput || refs.emailInput, false);
+  setInputInvalid(refs.tokenInput, false);
   setInputInvalid(refs.passwordInput, false);
   setInputInvalid(refs.confirmPasswordInput, false);
 
@@ -550,6 +666,8 @@ export function applyResetPasswordErrors(refs = {}, errors = {}, options = {}) {
     text(errors.username, "") ||
     text(errors.login, "");
 
+  const tokenError = text(errors.token, "");
+
   const passwordError = text(errors.password, "");
 
   const confirmPasswordError =
@@ -564,15 +682,37 @@ export function applyResetPasswordErrors(refs = {}, errors = {}, options = {}) {
 
   const firstError =
     identifierError ||
+    tokenError ||
     passwordError ||
     confirmPasswordError ||
     globalError;
 
-  setFieldInvalid(refs.fieldIdentifier || refs.fieldEmail, Boolean(identifierError));
-  setFieldInvalid(refs.fieldPassword, Boolean(passwordError));
-  setFieldInvalid(refs.fieldConfirmPassword, Boolean(confirmPasswordError));
+  setFieldError(
+    refs.fieldIdentifier || refs.fieldEmail,
+    identifierError,
+    refs.identifierError || refs.emailError
+  );
+
+  setFieldError(
+    null,
+    tokenError,
+    refs.tokenError
+  );
+
+  setFieldError(
+    refs.fieldPassword,
+    passwordError,
+    refs.passwordError
+  );
+
+  setFieldError(
+    refs.fieldConfirmPassword,
+    confirmPasswordError,
+    refs.confirmPasswordError
+  );
 
   setInputInvalid(refs.identifierInput || refs.emailInput, Boolean(identifierError));
+  setInputInvalid(refs.tokenInput, Boolean(tokenError));
   setInputInvalid(refs.passwordInput, Boolean(passwordError));
   setInputInvalid(refs.confirmPasswordInput, Boolean(confirmPasswordError));
 
@@ -595,6 +735,8 @@ export function applyResetPasswordErrors(refs = {}, errors = {}, options = {}) {
     later(() => {
       if (identifierError) {
         focus(refs.identifierInput || refs.emailInput, true);
+      } else if (tokenError) {
+        focus(refs.tokenInput, true);
       } else if (passwordError) {
         focus(refs.passwordInput);
       } else if (confirmPasswordError) {
@@ -711,17 +853,8 @@ export function setResetPasswordLoading(refs = {}, loading = false, options = {}
 
   setAttr(refs.form, "aria-busy", active ? "true" : "false");
 
-  try {
-    if (refs.form) {
-      if (active) {
-        refs.form.dataset.submitting = "true";
-      } else {
-        delete refs.form.dataset.submitting;
-      }
-    }
-  } catch {
-    // noop
-  }
+  setDataset(refs.root, "loading", active ? "true" : "");
+  setDataset(refs.form, "submitting", active ? "true" : "");
 
   setLoadingDisabled(refs.submitButton, active);
   setLoadingDisabled(refs.identifierInput || refs.emailInput, active);
@@ -868,6 +1001,7 @@ export function bindResetPasswordInputClearers(refs = {}, handler = null) {
 
   const nodes = [
     refs.identifierInput || refs.emailInput,
+    refs.tokenInput,
     refs.passwordInput,
     refs.confirmPasswordInput,
   ].filter(Boolean);
@@ -960,6 +1094,12 @@ export function getResetPasswordDomSnapshot(refs = {}) {
     hasConfirmPassword: Boolean(refs.confirmPasswordInput),
     hasSubmit: Boolean(refs.submitButton),
 
+    hasGlobalMessage: Boolean(refs.errorBox),
+    hasIdentifierErrorNode: Boolean(refs.identifierError || refs.emailError),
+    hasTokenErrorNode: Boolean(refs.tokenError),
+    hasPasswordErrorNode: Boolean(refs.passwordError),
+    hasConfirmPasswordErrorNode: Boolean(refs.confirmPasswordError),
+
     submitting: refs.form?.dataset?.submitting === "true",
 
     policy: {
@@ -973,6 +1113,7 @@ export function getResetPasswordDomSnapshot(refs = {}) {
       noToastCompat: true,
       noThemeToggleOwn: true,
       noInnerHTML: true,
+      noNavigation: true,
 
       passwordFieldShared: true,
       noOwnPasswordToggleLogic: true,
@@ -980,6 +1121,8 @@ export function getResetPasswordDomSnapshot(refs = {}) {
       submitIdempotent: true,
       errorsRedacted: true,
       boundedFieldReads: true,
+
+      snapshotNoFieldValues: true,
     },
   };
 }

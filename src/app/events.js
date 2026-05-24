@@ -12,7 +12,7 @@
    - Sin imports.
 ========================================================= */
 
-export const APP_EVENTS_VERSION = "app.events.v2";
+export const APP_EVENTS_VERSION = "app.events.v3";
 
 /* =========================================================
    PUBLIC API
@@ -26,6 +26,10 @@ export function unbindAppEvents() {
   return true;
 }
 
+export function isAppEventsBound() {
+  return false;
+}
+
 /* =========================================================
    SNAPSHOT
 ========================================================= */
@@ -37,12 +41,20 @@ export function getAppEventsSnapshot() {
     bound: false,
 
     policy: {
+      compatibilityOnly: true,
+      noopModule: true,
+
       noRegisteredEvents: true,
       noRouterListeners: true,
       noAuthListeners: true,
       noUiRepair: true,
       noEmits: true,
       noImports: true,
+
+      noStorage: true,
+      noFetch: true,
+      noTimers: true,
+      noGlobalBus: true,
     },
   };
 }
@@ -56,6 +68,7 @@ export default {
 
   bindAppEvents,
   unbindAppEvents,
+  isAppEventsBound,
 
   getAppEventsSnapshot,
 };

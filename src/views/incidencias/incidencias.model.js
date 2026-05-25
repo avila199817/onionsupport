@@ -6,7 +6,7 @@
    - Normalizar payloads heterogéneos de tickets/incidencias.
    - Exponer un modelo estable para API, Store, View, tabla y modal.
    - Preservar datos relevantes: cliente, técnico, adjuntos, historial y facturas.
-   - Calcular etiquetas, flags, fechas, stats y ordenación.
+   - Calcular etiquetas, flags, fechas, stats, búsqueda, filtros y ordenación.
    - Mantener compatibilidad legacy con paginateIncidencias sin paginación visual real.
    - Orden canónico de lista: más nueva → más antigua.
    - No limitar la colección normalizada.
@@ -20,6 +20,8 @@
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+export const INCIDENCIAS_MODEL_VERSION = "incidencias.model.v2.optimized";
 
 export const DEFAULT_PAGE_SIZE = 20;
 export const DEFAULT_VISIBLE_COUNT = 20;
@@ -42,6 +44,139 @@ export const PRIORITY = Object.freeze({
   HIGH: "high",
   URGENT: "urgent",
 });
+
+export const FILTER = Object.freeze({
+  ALL: "all",
+  OPEN: "open",
+  CLOSED: "closed",
+});
+
+const STATUS_ALIAS_MAP = Object.freeze({
+  open: STATUS.OPEN,
+  opened: STATUS.OPEN,
+  active: STATUS.OPEN,
+  abierta: STATUS.OPEN,
+  abiertas: STATUS.OPEN,
+  abierto: STATUS.OPEN,
+  abiertos: STATUS.OPEN,
+
+  new: STATUS.PENDING,
+  nuevo: STATUS.PENDING,
+  nueva: STATUS.PENDING,
+  created: STATUS.PENDING,
+  pending: STATUS.PENDING,
+  pendiente: STATUS.PENDING,
+  pendientes: STATUS.PENDING,
+
+  progress: STATUS.IN_PROGRESS,
+  in_progress: STATUS.IN_PROGRESS,
+  inprogress: STATUS.IN_PROGRESS,
+  en_proceso: STATUS.IN_PROGRESS,
+  en_curso: STATUS.IN_PROGRESS,
+  proceso: STATUS.IN_PROGRESS,
+  working: STATUS.IN_PROGRESS,
+  trabajando: STATUS.IN_PROGRESS,
+  assigned: STATUS.IN_PROGRESS,
+  asignada: STATUS.IN_PROGRESS,
+  asignado: STATUS.IN_PROGRESS,
+
+  resolved: STATUS.RESOLVED,
+  resuelta: STATUS.RESOLVED,
+  resueltas: STATUS.RESOLVED,
+  resuelto: STATUS.RESOLVED,
+  resueltos: STATUS.RESOLVED,
+  solved: STATUS.RESOLVED,
+
+  closed: STATUS.CLOSED,
+  close: STATUS.CLOSED,
+  archived: STATUS.CLOSED,
+  archivada: STATUS.CLOSED,
+  archivado: STATUS.CLOSED,
+  cancelled: STATUS.CLOSED,
+  canceled: STATUS.CLOSED,
+  cancelada: STATUS.CLOSED,
+  cancelado: STATUS.CLOSED,
+  cerrada: STATUS.CLOSED,
+  cerradas: STATUS.CLOSED,
+  cerrado: STATUS.CLOSED,
+  cerrados: STATUS.CLOSED,
+});
+
+const PRIORITY_ALIAS_MAP = Object.freeze({
+  low: PRIORITY.LOW,
+  baja: PRIORITY.LOW,
+  minor: PRIORITY.LOW,
+  menor: PRIORITY.LOW,
+  p3: PRIORITY.LOW,
+
+  medium: PRIORITY.MEDIUM,
+  media: PRIORITY.MEDIUM,
+  normal: PRIORITY.MEDIUM,
+  p2: PRIORITY.MEDIUM,
+
+  high: PRIORITY.HIGH,
+  alta: PRIORITY.HIGH,
+  p1: PRIORITY.HIGH,
+
+  urgent: PRIORITY.URGENT,
+  urgente: PRIORITY.URGENT,
+  critical: PRIORITY.URGENT,
+  critica: PRIORITY.URGENT,
+  crítica: PRIORITY.URGENT,
+  critico: PRIORITY.URGENT,
+  crítico: PRIORITY.URGENT,
+  p0: PRIORITY.URGENT,
+});
+
+const FILTER_ALIAS_MAP = Object.freeze({
+  all: FILTER.ALL,
+  todo: FILTER.ALL,
+  todos: FILTER.ALL,
+  todas: FILTER.ALL,
+
+  open: FILTER.OPEN,
+  opened: FILTER.OPEN,
+  active: FILTER.OPEN,
+  pending: FILTER.OPEN,
+  progress: FILTER.OPEN,
+  in_progress: FILTER.OPEN,
+  inprogress: FILTER.OPEN,
+  pendiente: FILTER.OPEN,
+  pendientes: FILTER.OPEN,
+  abierta: FILTER.OPEN,
+  abiertas: FILTER.OPEN,
+  abierto: FILTER.OPEN,
+  abiertos: FILTER.OPEN,
+  proceso: FILTER.OPEN,
+  en_proceso: FILTER.OPEN,
+
+  closed: FILTER.CLOSED,
+  close: FILTER.CLOSED,
+  resolved: FILTER.CLOSED,
+  solved: FILTER.CLOSED,
+  archived: FILTER.CLOSED,
+  cancelled: FILTER.CLOSED,
+  canceled: FILTER.CLOSED,
+  cerrada: FILTER.CLOSED,
+  cerradas: FILTER.CLOSED,
+  cerrado: FILTER.CLOSED,
+  cerrados: FILTER.CLOSED,
+  resuelta: FILTER.CLOSED,
+  resueltas: FILTER.CLOSED,
+  resuelto: FILTER.CLOSED,
+  resueltos: FILTER.CLOSED,
+});
+
+const OPEN_STATUS_KEYS = new Set([
+  STATUS.OPEN,
+  STATUS.PENDING,
+  STATUS.IN_PROGRESS,
+]);
+
+const CLOSED_STATUS_KEYS = new Set([
+  STATUS.RESOLVED,
+  STATUS.CLOSED,
+]);
 
 /* =========================================================
    SAFE HELPERS
@@ -130,7 +265,7 @@ function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
 }
 
-function normalizeText(value = "") {
+export function normalizeText(value = "") {
   return safeText(value, "")
     .toLowerCase()
     .normalize("NFD")
@@ -139,7 +274,7 @@ function normalizeText(value = "") {
     .trim();
 }
 
-function normalizeKey(value = "") {
+export function normalizeKey(value = "") {
   return normalizeText(value)
     .replace(/[\s-]+/g, "_")
     .replace(/[^\w]+/g, "_")
@@ -322,87 +457,30 @@ export function getAvatarTheme(seed = "") {
 }
 
 /* =========================================================
-   LABELS
+   LABELS / FILTERS
 ========================================================= */
 
 export function normalizeStatus(value = "") {
   const key = normalizeKey(value || STATUS.OPEN);
-
-  const map = {
-    open: STATUS.OPEN,
-    opened: STATUS.OPEN,
-    abierta: STATUS.OPEN,
-    abierto: STATUS.OPEN,
-
-    new: STATUS.PENDING,
-    nuevo: STATUS.PENDING,
-    nueva: STATUS.PENDING,
-    created: STATUS.PENDING,
-    pending: STATUS.PENDING,
-    pendiente: STATUS.PENDING,
-    pendientes: STATUS.PENDING,
-
-    progress: STATUS.IN_PROGRESS,
-    in_progress: STATUS.IN_PROGRESS,
-    inprogress: STATUS.IN_PROGRESS,
-    en_proceso: STATUS.IN_PROGRESS,
-    en_curso: STATUS.IN_PROGRESS,
-    proceso: STATUS.IN_PROGRESS,
-    working: STATUS.IN_PROGRESS,
-    trabajando: STATUS.IN_PROGRESS,
-    assigned: STATUS.IN_PROGRESS,
-    asignada: STATUS.IN_PROGRESS,
-    asignado: STATUS.IN_PROGRESS,
-
-    resolved: STATUS.RESOLVED,
-    resuelta: STATUS.RESOLVED,
-    resuelto: STATUS.RESOLVED,
-    solved: STATUS.RESOLVED,
-
-    closed: STATUS.CLOSED,
-    cerrada: STATUS.CLOSED,
-    cerrado: STATUS.CLOSED,
-    cancelled: STATUS.CLOSED,
-    canceled: STATUS.CLOSED,
-    cancelada: STATUS.CLOSED,
-    cancelado: STATUS.CLOSED,
-    archived: STATUS.CLOSED,
-    archivada: STATUS.CLOSED,
-    archivado: STATUS.CLOSED,
-  };
-
-  return map[key] || STATUS.OPEN;
+  return STATUS_ALIAS_MAP[key] || STATUS.OPEN;
 }
 
 export function normalizePriority(value = "") {
   const key = normalizeKey(value || PRIORITY.MEDIUM);
+  return PRIORITY_ALIAS_MAP[key] || PRIORITY.MEDIUM;
+}
 
-  const map = {
-    low: PRIORITY.LOW,
-    baja: PRIORITY.LOW,
-    minor: PRIORITY.LOW,
-    p3: PRIORITY.LOW,
+export function normalizeFilter(value = FILTER.ALL) {
+  const key = normalizeKey(value || FILTER.ALL);
+  return FILTER_ALIAS_MAP[key] || FILTER.ALL;
+}
 
-    medium: PRIORITY.MEDIUM,
-    media: PRIORITY.MEDIUM,
-    normal: PRIORITY.MEDIUM,
-    p2: PRIORITY.MEDIUM,
+export function isOpenStatus(value = "") {
+  return OPEN_STATUS_KEYS.has(normalizeStatus(value));
+}
 
-    high: PRIORITY.HIGH,
-    alta: PRIORITY.HIGH,
-    p1: PRIORITY.HIGH,
-
-    urgent: PRIORITY.URGENT,
-    urgente: PRIORITY.URGENT,
-    critical: PRIORITY.URGENT,
-    critica: PRIORITY.URGENT,
-    crítica: PRIORITY.URGENT,
-    critico: PRIORITY.URGENT,
-    crítico: PRIORITY.URGENT,
-    p0: PRIORITY.URGENT,
-  };
-
-  return map[key] || PRIORITY.MEDIUM;
+export function isClosedStatus(value = "") {
+  return CLOSED_STATUS_KEYS.has(normalizeStatus(value));
 }
 
 export function getStatusLabel(value = "") {
@@ -1003,15 +1081,15 @@ function normalizeInvoiceArray(source = {}, raw = {}) {
     .map(normalizeInvoiceLite)
     .filter(Boolean)
     .forEach((invoice) => {
-      const key = safeText(
+      const key = normalizeText(
         first(
           invoice.id,
           invoice.facturaId,
           invoice.invoiceId,
           invoice.numeroFacturaLegal,
-          invoice.invoiceNumber
-        ),
-        `invoice-${output.length + 1}`
+          invoice.invoiceNumber,
+          `invoice-${output.length + 1}`
+        )
       );
 
       if (seen.has(key)) return;
@@ -2402,6 +2480,8 @@ export function normalizeIncidenciaModel(payload = {}) {
     },
   };
 
+  normalized.searchText = getIncidenciaSearchText(normalized);
+
   return normalized;
 }
 
@@ -2439,10 +2519,191 @@ export function unwrapIncidenciasPayload(payload = null) {
   return [];
 }
 
-export function normalizeIncidenciasCollection(payload = []) {
-  return unwrapIncidenciasPayload(payload)
+export function getIncidenciaIdentity(item = {}) {
+  const source = safeObject(item);
+  const raw = safeObject(source.raw);
+
+  return safeText(
+    first(
+      source.ticketId,
+      source.incidenciaId,
+      source.id,
+      source._id,
+      source.ticketCode,
+      source.code,
+      raw.ticketId,
+      raw.incidenciaId,
+      raw.id,
+      raw._id,
+      raw.ticketCode,
+      raw.code
+    ),
+    ""
+  );
+}
+
+export function dedupeIncidenciasById(items = []) {
+  const byId = new Map();
+  const anonymous = [];
+
+  for (const item of safeArray(items)) {
+    const id = normalizeText(getIncidenciaIdentity(item));
+
+    if (!id) {
+      anonymous.push(item);
+      continue;
+    }
+
+    const previous = byId.get(id);
+
+    if (!previous) {
+      byId.set(id, item);
+      continue;
+    }
+
+    const previousTs = readTimestampFromItem(previous);
+    const currentTs = readTimestampFromItem(item);
+
+    byId.set(id, currentTs >= previousTs ? item : previous);
+  }
+
+  return [...byId.values(), ...anonymous];
+}
+
+export function normalizeIncidenciasCollection(payload = [], options = {}) {
+  const opts = safeObject(options);
+
+  const normalized = unwrapIncidenciasPayload(payload)
     .map(normalizeIncidenciaModel)
     .filter((item) => Boolean(item?.ticketId || item?.id));
+
+  const deduped = opts.dedupe ? dedupeIncidenciasById(normalized) : normalized;
+
+  return opts.sort ? sortIncidenciasByUpdatedDesc(deduped) : deduped;
+}
+
+/* =========================================================
+   SEARCH / FILTER
+========================================================= */
+
+export function getIncidenciaSearchText(item = {}) {
+  const source = safeObject(item);
+  const raw = safeObject(source.raw);
+
+  return normalizeText(
+    [
+      source.searchText,
+      raw.search?.text,
+
+      source.ticketId,
+      source.id,
+      source._id,
+      source.code,
+      source.ticketCode,
+      source.incidenciaId,
+
+      source.subject,
+      source.title,
+      source.asunto,
+      source.description,
+      source.descripcion,
+      source.message,
+      source.preview,
+
+      source.clientName,
+      source.clienteNombre,
+      source.requesterName,
+      source.name,
+      source.email,
+      source.clientEmail,
+      source.clienteEmail,
+
+      source.requesterSnapshot?.name,
+      source.requesterSnapshot?.email,
+      source.cliente?.nombre,
+      source.cliente?.name,
+      source.cliente?.email,
+      source.client?.name,
+      source.client?.email,
+
+      source.assignedTo?.name,
+      source.assignedTo?.email,
+      source.assignment?.assignedToName,
+      source.assignment?.assignedToEmail,
+      source.tecnico?.name,
+      source.tecnico?.email,
+      source.technician?.name,
+      source.technician?.email,
+
+      source.category,
+      source.categoria,
+      source.subcategory,
+      source.subcategoria,
+      source.type,
+      source.tipo,
+      source.tags,
+
+      source.status,
+      source.estado,
+      source.statusLabel,
+      source.priority,
+      source.prioridad,
+      source.priorityLabel,
+
+      source.numeroFacturaLegal,
+      source.numeroFactura,
+      source.invoiceNumber,
+      source.facturaId,
+      source.invoiceId,
+      source.linkedInvoices?.numeroFacturaLegal,
+      source.linkedInvoices?.invoiceNumber,
+    ]
+      .flatMap((value) => Array.isArray(value) ? value : [value])
+      .map((value) => safeText(value, ""))
+      .filter(Boolean)
+      .join(" ")
+  );
+}
+
+export function incidenciaMatchesFilter(item = {}, filter = FILTER.ALL) {
+  const currentFilter = normalizeFilter(filter);
+
+  if (currentFilter === FILTER.ALL) return true;
+
+  const status = normalizeStatus(first(item?.status, item?.estado, item?.state, item?.raw?.status, item?.raw?.estado));
+
+  if (currentFilter === FILTER.OPEN) return OPEN_STATUS_KEYS.has(status);
+  if (currentFilter === FILTER.CLOSED) return CLOSED_STATUS_KEYS.has(status);
+
+  return true;
+}
+
+export function incidenciaMatchesSearch(item = {}, query = "") {
+  const normalizedQuery = normalizeText(query);
+
+  if (!normalizedQuery) return true;
+
+  const terms = normalizedQuery
+    .split(" ")
+    .map((term) => term.trim())
+    .filter(Boolean);
+
+  if (!terms.length) return true;
+
+  const haystack = normalizeText(item?.searchText || getIncidenciaSearchText(item));
+
+  return terms.every((term) => haystack.includes(term));
+}
+
+export function filterIncidencias(items = [], options = {}) {
+  const opts = safeObject(options);
+  const filter = normalizeFilter(first(opts.filter, opts.statusFilter, opts.activeFilter, FILTER.ALL));
+  const query = safeText(first(opts.query, opts.searchQuery, opts.search, opts.q, ""), "");
+
+  return safeArray(items).filter((item) => (
+    incidenciaMatchesFilter(item, filter) &&
+    incidenciaMatchesSearch(item, query)
+  ));
 }
 
 /* =========================================================
@@ -2553,110 +2814,127 @@ export function paginateIncidencias(
    STATS
 ========================================================= */
 
-export function computeIncidenciasStats(items = []) {
-  const list = safeArray(items);
-  const total = list.length;
-
-  const open = list.filter((item) => normalizeStatus(item?.status || item?.estado) === STATUS.OPEN).length;
-  const pending = list.filter((item) => normalizeStatus(item?.status || item?.estado) === STATUS.PENDING).length;
-  const inProgress = list.filter((item) => normalizeStatus(item?.status || item?.estado) === STATUS.IN_PROGRESS).length;
-  const resolved = list.filter((item) => normalizeStatus(item?.status || item?.estado) === STATUS.RESOLVED).length;
-  const closed = list.filter((item) => normalizeStatus(item?.status || item?.estado) === STATUS.CLOSED).length;
-  const urgent = list.filter((item) => normalizePriority(item?.priority || item?.prioridad) === PRIORITY.URGENT).length;
-  const high = list.filter((item) => normalizePriority(item?.priority || item?.prioridad) === PRIORITY.HIGH).length;
-
-  const assigned = list.filter((item) => {
-    const assignedValue = safeLower(
-      first(
-        item?.assignedToName,
-        item?.technicianName,
-        item?.tecnico?.name,
-        item?.tecnico?.nombre,
-        item?.technician?.name,
-        item?.assignedTo?.name,
-        typeof item?.assignedTo === "string" ? item.assignedTo : "",
-        ""
-      )
-    );
-
-    return Boolean(assignedValue && assignedValue !== "no asignado" && assignedValue !== "sin asignar");
-  }).length;
-
-  const withAttachments = list.filter((item) => {
-    return (
-      safeArray(item?.attachments).length > 0 ||
-      safeArray(item?.files).length > 0 ||
-      safeArray(item?.adjuntos).length > 0 ||
-      safeNumber(item?.attachmentsCount, 0) > 0 ||
-      safeNumber(item?.filesCount, 0) > 0
-    );
-  }).length;
-
-  const withInvoices = list.filter((item) => {
-    return Boolean(
-      item?.hasLinkedInvoices ||
-        item?.hasInvoice ||
-        item?.hasFactura ||
-        item?.meta?.hasLinkedInvoices ||
-        item?.meta?.hasInvoice ||
-        item?.meta?.hasFactura ||
-        safeNumber(item?.facturasCount, 0) > 0 ||
-        safeNumber(item?.invoicesCount, 0) > 0 ||
-        safeArray(item?.facturas).length > 0 ||
-        safeArray(item?.invoices).length > 0 ||
-        safeArray(item?.facturasRelacionadas).length > 0 ||
-        safeText(item?.numeroFacturaLegal, "") ||
-        safeText(item?.facturaId, "") ||
-        safeText(item?.invoiceId, "")
-    );
-  }).length;
-
-  const totalImporte = list.reduce((acc, item) => {
-    const amount = roundMoney(
-      first(
-        item?.facturasTotal,
-        item?.invoicesTotal,
-        item?.importeFacturas,
-        item?.invoiceTotal,
-        item?.facturaTotal,
-        item?.facturaImporte,
-        item?.importeFactura,
-        item?.totalFactura,
-        item?.invoiceAmount,
-        item?.linkedInvoices?.total,
-        item?.linkedInvoices?.amount,
-        item?.linkedInvoices?.importe,
-        item?.meta?.invoiceTotal,
-        item?.meta?.invoicesTotal,
-        item?.total,
-        item?.amount,
-        item?.importe,
-        0
-      ),
+function getInvoiceAmountForStats(item = {}) {
+  return roundMoney(
+    first(
+      item?.facturasTotal,
+      item?.invoicesTotal,
+      item?.importeFacturas,
+      item?.invoiceTotal,
+      item?.facturaTotal,
+      item?.facturaImporte,
+      item?.importeFactura,
+      item?.totalFactura,
+      item?.invoiceAmount,
+      item?.linkedInvoices?.total,
+      item?.linkedInvoices?.amount,
+      item?.linkedInvoices?.importe,
+      item?.meta?.invoiceTotal,
+      item?.meta?.invoicesTotal,
+      item?.total,
+      item?.amount,
+      item?.importe,
       0
-    );
+    ),
+    0
+  );
+}
 
-    return acc + safeNumber(amount, 0);
-  }, 0);
+function hasInvoicesForStats(item = {}) {
+  return Boolean(
+    item?.hasLinkedInvoices ||
+      item?.hasInvoice ||
+      item?.hasFactura ||
+      item?.meta?.hasLinkedInvoices ||
+      item?.meta?.hasInvoice ||
+      item?.meta?.hasFactura ||
+      safeNumber(item?.facturasCount, 0) > 0 ||
+      safeNumber(item?.invoicesCount, 0) > 0 ||
+      safeArray(item?.facturas).length > 0 ||
+      safeArray(item?.invoices).length > 0 ||
+      safeArray(item?.facturasRelacionadas).length > 0 ||
+      safeText(item?.numeroFacturaLegal, "") ||
+      safeText(item?.facturaId, "") ||
+      safeText(item?.invoiceId, "")
+  );
+}
 
-  return {
-    total,
-    active: Math.max(total - closed, 0),
-    open,
-    pending,
-    inProgress,
-    resolved,
-    closed,
-    urgent,
-    high,
-    assigned,
-    unassigned: Math.max(total - assigned, 0),
-    withAttachments,
-    withInvoices,
-    totalImporte: roundMoney(totalImporte, 0),
-    invoiceTotal: roundMoney(totalImporte, 0),
-    invoicesTotal: roundMoney(totalImporte, 0),
+function hasAttachmentsForStats(item = {}) {
+  return (
+    safeArray(item?.attachments).length > 0 ||
+    safeArray(item?.files).length > 0 ||
+    safeArray(item?.adjuntos).length > 0 ||
+    safeNumber(item?.attachmentsCount, 0) > 0 ||
+    safeNumber(item?.filesCount, 0) > 0
+  );
+}
+
+function isAssignedForStats(item = {}) {
+  const assignedValue = safeLower(
+    first(
+      item?.assignedToName,
+      item?.technicianName,
+      item?.tecnico?.name,
+      item?.tecnico?.nombre,
+      item?.technician?.name,
+      item?.assignedTo?.name,
+      typeof item?.assignedTo === "string" ? item.assignedTo : "",
+      ""
+    )
+  );
+
+  return Boolean(assignedValue && assignedValue !== "no asignado" && assignedValue !== "sin asignar");
+}
+
+export function computeIncidenciasStats(items = []) {
+  const stats = {
+    total: 0,
+    active: 0,
+    open: 0,
+    pending: 0,
+    inProgress: 0,
+    resolved: 0,
+    closed: 0,
+    urgent: 0,
+    high: 0,
+    assigned: 0,
+    unassigned: 0,
+    withAttachments: 0,
+    withInvoices: 0,
+    totalImporte: 0,
+    invoiceTotal: 0,
+    invoicesTotal: 0,
   };
+
+  for (const item of safeArray(items)) {
+    stats.total += 1;
+
+    const status = normalizeStatus(item?.status || item?.estado);
+    const priority = normalizePriority(item?.priority || item?.prioridad);
+
+    if (status === STATUS.OPEN) stats.open += 1;
+    if (status === STATUS.PENDING) stats.pending += 1;
+    if (status === STATUS.IN_PROGRESS) stats.inProgress += 1;
+    if (status === STATUS.RESOLVED) stats.resolved += 1;
+    if (status === STATUS.CLOSED) stats.closed += 1;
+
+    if (priority === PRIORITY.URGENT) stats.urgent += 1;
+    if (priority === PRIORITY.HIGH) stats.high += 1;
+
+    if (isAssignedForStats(item)) stats.assigned += 1;
+    if (hasAttachmentsForStats(item)) stats.withAttachments += 1;
+    if (hasInvoicesForStats(item)) stats.withInvoices += 1;
+
+    stats.totalImporte += safeNumber(getInvoiceAmountForStats(item), 0);
+  }
+
+  stats.active = Math.max(stats.total - stats.closed, 0);
+  stats.unassigned = Math.max(stats.total - stats.assigned, 0);
+  stats.totalImporte = roundMoney(stats.totalImporte, 0);
+  stats.invoiceTotal = stats.totalImporte;
+  stats.invoicesTotal = stats.totalImporte;
+
+  return stats;
 }
 
 /* =========================================================
@@ -2695,6 +2973,8 @@ export function findIncidenciaById(items = [], ticketId = "") {
 ========================================================= */
 
 export default {
+  INCIDENCIAS_MODEL_VERSION,
+
   DEFAULT_PAGE_SIZE,
   DEFAULT_VISIBLE_COUNT,
   DEFAULT_LOAD_MORE_BATCH,
@@ -2702,10 +2982,13 @@ export default {
   DEFAULT_CURRENCY,
   STATUS,
   PRIORITY,
+  FILTER,
 
   normalizeIncidenciaModel,
   normalizeIncidenciasCollection,
   unwrapIncidenciasPayload,
+  dedupeIncidenciasById,
+  getIncidenciaIdentity,
 
   sortIncidenciasByUpdatedDesc,
   sortIncidenciasByPriorityDesc,
@@ -2715,10 +2998,20 @@ export default {
   computeIncidenciasStats,
   findIncidenciaById,
 
+  normalizeText,
+  normalizeKey,
+  normalizeFilter,
+  getIncidenciaSearchText,
+  incidenciaMatchesFilter,
+  incidenciaMatchesSearch,
+  filterIncidencias,
+
   getStatusLabel,
   getPriorityLabel,
   normalizeStatus,
   normalizePriority,
+  isOpenStatus,
+  isClosedStatus,
 
   toDate,
   toTimestamp,

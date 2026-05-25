@@ -5,8 +5,8 @@
    Responsabilidad:
    - Centralizar llamadas HTTP del módulo Incidencias.
    - Adaptar contrato backend /api/tickets al frontend.
-   - Hidratar state/store tras cargas y mutaciones.
-   - Delegar normalización de datos a incidencias.model.js.
+   - Hidratar State/Store tras cargas y mutaciones.
+   - Delegar normalización de incidencias a incidencias.model.js.
    - Delegar cache a incidencias.state.js.
    - No tocar DOM.
    - No registrar globals.
@@ -29,6 +29,7 @@ import {
   setLoaded,
   clearError,
   getItems as getStateItems,
+  upsertItem as upsertStateItem,
   hydrateStateFromCache,
   writeCachePayload,
 } from "./incidencias.state.js";
@@ -41,11 +42,14 @@ import {
 import {
   normalizeIncidenciaModel,
   normalizeIncidenciasCollection,
+  normalizeStatus as normalizeModelStatus,
 } from "./incidencias.model.js";
 
 /* =========================================================
    CONFIG
 ========================================================= */
+
+export const INCIDENCIAS_API_VERSION = "incidencias.api.v2.optimized";
 
 export const INCIDENCIAS_RESOURCE = "tickets";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
@@ -56,6 +60,8 @@ export const INCIDENCIAS_DETAIL_TIMEOUT = 25000;
 export const INCIDENCIAS_UPLOAD_TIMEOUT = 90000;
 
 let lastLoadToken = 0;
+let inflightListPromise = null;
+let inflightListKey = "";
 
 /* =========================================================
    SAFE HELPERS
@@ -100,6 +106,7 @@ function first(...values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
     return value;
   }
 
@@ -156,6 +163,17 @@ function safeWarn(...args) {
   } catch {}
 }
 
+function stableStringify(value = null) {
+  if (value === null || value === undefined) return "null";
+  if (typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+    .join(",")}}`;
+}
+
 /* =========================================================
    LOAD TOKEN
 ========================================================= */
@@ -167,6 +185,13 @@ function nextLoadToken() {
 
 function isActiveLoadToken(token) {
   return token === lastLoadToken;
+}
+
+function clearInflightList(promise = null) {
+  if (!promise || inflightListPromise === promise) {
+    inflightListPromise = null;
+    inflightListKey = "";
+  }
 }
 
 /* =========================================================
@@ -185,6 +210,10 @@ export function normalizeIncidenciaId(id = "") {
 
 export function getIncidenciasStatsEndpoint() {
   return `${INCIDENCIAS_ENDPOINT}/stats`;
+}
+
+export function getIncidenciasAltStatsEndpoint() {
+  return `${INCIDENCIAS_ALT_ENDPOINT}/stats`;
 }
 
 export function getIncidenciaEndpoint(id = "") {
@@ -279,41 +308,45 @@ function shouldTryNextEndpoint(error = null) {
 }
 
 function normalizeStatus(value = "open") {
-  const key = normalizeKey(value || "open");
+  try {
+    return normalizeModelStatus(value || "open");
+  } catch {
+    const key = normalizeKey(value || "open");
 
-  const map = {
-    open: "open",
-    opened: "open",
-    abierta: "open",
-    abierto: "open",
-    pending: "pending",
-    pendiente: "pending",
-    new: "pending",
-    nueva: "pending",
-    nuevo: "pending",
-    in_progress: "in_progress",
-    inprogress: "in_progress",
-    progress: "in_progress",
-    proceso: "in_progress",
-    en_proceso: "in_progress",
-    working: "in_progress",
-    assigned: "in_progress",
-    asignada: "in_progress",
-    asignado: "in_progress",
-    resolved: "resolved",
-    resuelta: "resolved",
-    resuelto: "resolved",
-    solved: "resolved",
-    closed: "closed",
-    cerrada: "closed",
-    cerrado: "closed",
-    cancelled: "closed",
-    cancelada: "closed",
-    cancelado: "closed",
-    archived: "closed",
-  };
+    const fallbackMap = {
+      open: "open",
+      opened: "open",
+      abierta: "open",
+      abierto: "open",
+      pending: "pending",
+      pendiente: "pending",
+      new: "pending",
+      nueva: "pending",
+      nuevo: "pending",
+      in_progress: "in_progress",
+      inprogress: "in_progress",
+      progress: "in_progress",
+      proceso: "in_progress",
+      en_proceso: "in_progress",
+      working: "in_progress",
+      assigned: "in_progress",
+      asignada: "in_progress",
+      asignado: "in_progress",
+      resolved: "resolved",
+      resuelta: "resolved",
+      resuelto: "resolved",
+      solved: "resolved",
+      closed: "closed",
+      cerrada: "closed",
+      cerrado: "closed",
+      cancelled: "closed",
+      cancelada: "closed",
+      cancelado: "closed",
+      archived: "closed",
+    };
 
-  return map[key] || key || "open";
+    return fallbackMap[key] || key || "open";
+  }
 }
 
 /* =========================================================
@@ -323,6 +356,7 @@ function normalizeStatus(value = "open") {
 function unwrapResponseEnvelope(payload = null) {
   if (payload === null || payload === undefined) return null;
   if (Array.isArray(payload)) return payload;
+  if (isBlob(payload)) return payload;
 
   const obj = safeObject(payload);
   if (!Object.keys(obj).length) return payload;
@@ -341,7 +375,7 @@ function unwrapResponseEnvelope(payload = null) {
   if (obj.incidencia) return obj.incidencia;
   if (obj.result) return obj.result;
   if (obj.payload) return unwrapResponseEnvelope(obj.payload);
-  if (obj.data && typeof obj.data === "object") return unwrapResponseEnvelope(obj.data);
+  if (isObject(obj.data)) return unwrapResponseEnvelope(obj.data);
 
   return obj;
 }
@@ -392,17 +426,23 @@ function pickTotal(payload = null, fallback = 0) {
     obj.meta?.count,
     obj.data?.total,
     obj.data?.count,
+    obj.data?.pagination?.total,
+    obj.data?.meta?.total,
     obj.payload?.total,
     obj.payload?.count,
+    obj.payload?.pagination?.total,
+    obj.payload?.meta?.total,
+    obj.result?.total,
+    obj.result?.count,
     fallback,
   ];
 
   for (const value of candidates) {
     const number = Number(value);
-    if (Number.isFinite(number)) return number;
+    if (Number.isFinite(number)) return Math.max(0, number);
   }
 
-  return fallback;
+  return Math.max(0, fallback);
 }
 
 function looksLikeTicket(value = null) {
@@ -439,13 +479,21 @@ function pickDetail(payload = null) {
   if (looksLikeTicket(obj.payload)) return obj.payload;
   if (looksLikeTicket(obj.data)) return obj.data;
 
-  if (obj.data && typeof obj.data === "object") return pickDetail(obj.data);
-  if (obj.payload && typeof obj.payload === "object") return pickDetail(obj.payload);
+  if (isObject(obj.data)) return pickDetail(obj.data);
+  if (isObject(obj.payload)) return pickDetail(obj.payload);
 
   return Object.keys(obj).length ? obj : null;
 }
 
 function pickFile(payload = null) {
+  if (isBlob(payload)) {
+    return {
+      blob: payload,
+      size: payload.size,
+      contentType: payload.type,
+    };
+  }
+
   const obj = safeObject(payload);
 
   return safeObject(
@@ -479,7 +527,10 @@ export function normalizeIncidencia(item = {}) {
 
 function normalizeList(items = []) {
   try {
-    return normalizeIncidenciasCollection(items);
+    return normalizeIncidenciasCollection(items, {
+      sort: true,
+      dedupe: true,
+    });
   } catch {
     return safeArray(items).map(normalizeIncidencia);
   }
@@ -510,7 +561,7 @@ function normalizeIncidenciaDetailResponse(response = null) {
 }
 
 function normalizeIncidenciaStatsResponse(response = null) {
-  const obj = safeObject(response);
+  const obj = safeObject(unwrapResponseEnvelope(response));
 
   return {
     ok: obj.ok !== false,
@@ -525,6 +576,7 @@ function normalizeIncidenciaStatsResponse(response = null) {
     assigned: safeNumber(obj.assigned, 0),
     unassigned: safeNumber(obj.unassigned, 0),
     withAttachments: safeNumber(obj.withAttachments, 0),
+    withInvoices: safeNumber(obj.withInvoices, 0),
     scope: safeText(obj.scope, ""),
     raw: response,
   };
@@ -623,29 +675,38 @@ async function callRequestObject(client, method = "GET", path = "", options = {}
   if (verb === "patch" && isFn(client?.patch)) return client.patch(path, options.body, options);
   if (verb === "put" && isFn(client?.put)) return client.put(path, options.body, options);
   if (verb === "delete" && isFn(client?.delete)) return client.delete(path, options);
+  if (verb === "delete" && isFn(client?.del)) return client.del(path, options);
 
   throw new Error("INCIDENCIAS_HTTP_METHOD_UNAVAILABLE");
 }
 
 async function request(method = "GET", path = "", options = {}) {
+  const cleanPath = safeText(path, "");
+
+  if (!cleanPath) {
+    throw new Error("INCIDENCIAS_REQUEST_PATH_REQUIRED");
+  }
+
   const client = getHttpModule();
   const requestOptions = normalizeRequestOptions(method, options);
 
   if (isFn(client)) {
-    return client(path, requestOptions);
+    return client(cleanPath, requestOptions);
   }
 
   if (client && typeof client === "object") {
-    return callRequestObject(client, method, path, requestOptions);
+    return callRequestObject(client, method, cleanPath, requestOptions);
   }
 
   throw new Error("INCIDENCIAS_HTTP_CLIENT_UNAVAILABLE");
 }
 
 async function requestFirst(method = "GET", paths = [], options = {}) {
-  const candidates = safeArray(paths)
-    .map((path) => safeText(path, ""))
-    .filter(Boolean);
+  const candidates = [...new Set(
+    safeArray(paths)
+      .map((path) => safeText(path, ""))
+      .filter(Boolean)
+  )];
 
   let lastError = null;
 
@@ -734,18 +795,32 @@ export async function fetchIncidenciasRequest({
   timeout = INCIDENCIAS_TIMEOUT,
   query = {},
 } = {}) {
-  return request("GET", INCIDENCIAS_ENDPOINT, {
-    timeout,
-    query,
-  });
+  return requestFirst(
+    "GET",
+    [
+      INCIDENCIAS_ENDPOINT,
+      INCIDENCIAS_ALT_ENDPOINT,
+    ],
+    {
+      timeout,
+      query,
+    }
+  );
 }
 
 export async function fetchIncidenciasStatsRequest({
   timeout = INCIDENCIAS_TIMEOUT,
 } = {}) {
-  const response = await request("GET", getIncidenciasStatsEndpoint(), {
-    timeout,
-  });
+  const response = await requestFirst(
+    "GET",
+    [
+      getIncidenciasStatsEndpoint(),
+      getIncidenciasAltStatsEndpoint(),
+    ],
+    {
+      timeout,
+    }
+  );
 
   return normalizeIncidenciaStatsResponse(response);
 }
@@ -782,11 +857,18 @@ export async function createIncidenciaRequest(
   const files = extractFilesFromPayload(source);
   const body = files.length ? buildFormDataFromPayload(source) : source;
 
-  const response = await request("POST", INCIDENCIAS_ENDPOINT, {
-    timeout: files.length ? INCIDENCIAS_UPLOAD_TIMEOUT : timeout,
-    body,
-    headers: files.length ? {} : undefined,
-  });
+  const response = await requestFirst(
+    "POST",
+    [
+      INCIDENCIAS_ENDPOINT,
+      INCIDENCIAS_ALT_ENDPOINT,
+    ],
+    {
+      timeout: files.length ? INCIDENCIAS_UPLOAD_TIMEOUT : timeout,
+      body,
+      headers: files.length ? {} : undefined,
+    }
+  );
 
   const created = pickDetail(response);
 
@@ -1033,7 +1115,12 @@ export async function getIncidenciaAttachmentFileRequest(
     timeout,
   });
 
-  return normalizeIncidenciaFileResponse(response);
+  return normalizeIncidenciaFileResponse(response, {
+    ticketId: id,
+    attachmentId: attId,
+    mode: safeMode,
+    kind,
+  });
 }
 
 /* =========================================================
@@ -1045,23 +1132,21 @@ export function hydrateFromCache() {
     freshOnly: true,
   });
 
-  const items = safeArray(getStateItems?.()).map(normalizeIncidencia);
-
-  if (restored && items.length) {
-    callSafe(replaceIncidenciasStore, items);
-    return items;
-  }
+  const items = normalizeList(safeArray(getStateItems?.()));
 
   if (items.length) {
     callSafe(replaceIncidenciasStore, items);
   }
 
-  return items;
+  return restored || items.length ? items : [];
 }
 
 function applyLoadedListToState(normalized = { items: [], total: 0 }) {
   const items = safeArray(normalized?.items);
-  const total = safeNumber(normalized?.total, items.length);
+  const total = Math.max(
+    items.length,
+    safeNumber(normalized?.total, items.length)
+  );
 
   callSafe(replaceIncidenciasStore, items);
   callSafe(setItems, items, {
@@ -1079,9 +1164,19 @@ function applyLoadedListToState(normalized = { items: [], total: 0 }) {
 function upsertLoadedDetail(detail = null) {
   if (!detail) return null;
 
-  callSafe(upsertIncidenciaStore, detail);
+  const normalized = normalizeIncidencia(detail);
 
-  return detail;
+  callSafe(upsertIncidenciaStore, normalized);
+  callSafe(upsertStateItem, normalized);
+  callSafe(setLastSyncAt, Date.now());
+  callSafe(clearError);
+  callSafe(writeCachePayload);
+
+  return normalized;
+}
+
+function getCurrentStateItems() {
+  return normalizeList(safeArray(getStateItems?.() || incidenciasState?.items));
 }
 
 /* =========================================================
@@ -1093,50 +1188,65 @@ export async function loadIncidencias({
   query = {},
   silent = false,
 } = {}) {
+  const queryKey = stableStringify(query || {});
+
+  if (!force && inflightListPromise && inflightListKey === queryKey) {
+    return inflightListPromise;
+  }
+
   const loadToken = nextLoadToken();
   const hydratedItems = safeArray(incidenciasState?.items);
   const firstLoad = !hydratedItems.length && !Boolean(incidenciasState?.hydrated);
-  const shouldShowLoading = firstLoad && !force && !silent;
+  const shouldShowLoading = firstLoad && !silent;
 
-  try {
-    callSafe(clearError);
+  const task = (async () => {
+    try {
+      callSafe(clearError);
 
-    if (shouldShowLoading) {
-      callSafe(setLoading, true);
-    } else if (!silent) {
-      callSafe(setRefreshing, true);
+      if (shouldShowLoading) {
+        callSafe(setLoading, true);
+      } else if (!silent) {
+        callSafe(setRefreshing, true);
+      }
+
+      const response = await fetchIncidenciasRequest({
+        timeout: INCIDENCIAS_TIMEOUT,
+        query,
+      });
+
+      const normalized = normalizeIncidenciasListResponse(response);
+
+      if (!isActiveLoadToken(loadToken)) {
+        return getCurrentStateItems();
+      }
+
+      return applyLoadedListToState(normalized);
+    } catch (error) {
+      const message = normalizeErrorMessage(error, "No se pudieron cargar las incidencias.");
+
+      if (!isActiveLoadToken(loadToken)) {
+        return getCurrentStateItems();
+      }
+
+      safeWarn("loadIncidencias falló.", error);
+      callSafe(setError, message);
+      callSafe(setLoaded, true);
+
+      throw error;
+    } finally {
+      if (isActiveLoadToken(loadToken)) {
+        callSafe(setLoading, false);
+        callSafe(setRefreshing, false);
+      }
+
+      clearInflightList(task);
     }
+  })();
 
-    const response = await fetchIncidenciasRequest({
-      timeout: INCIDENCIAS_TIMEOUT,
-      query,
-    });
+  inflightListPromise = task;
+  inflightListKey = queryKey;
 
-    const normalized = normalizeIncidenciasListResponse(response);
-
-    if (!isActiveLoadToken(loadToken)) {
-      return safeArray(incidenciasState?.items);
-    }
-
-    return applyLoadedListToState(normalized);
-  } catch (error) {
-    const message = normalizeErrorMessage(error, "No se pudieron cargar las incidencias.");
-
-    if (!isActiveLoadToken(loadToken)) {
-      return safeArray(incidenciasState?.items);
-    }
-
-    safeWarn("loadIncidencias falló.", error);
-    callSafe(setError, message);
-    callSafe(setLoaded, true);
-
-    throw error;
-  } finally {
-    if (isActiveLoadToken(loadToken)) {
-      callSafe(setLoading, false);
-      callSafe(setRefreshing, false);
-    }
-  }
+  return task;
 }
 
 /* =========================================================
@@ -1186,6 +1296,8 @@ export async function loadIncidenciasStats(options = {}) {
 ========================================================= */
 
 export const IncidenciasApi = Object.freeze({
+  version: INCIDENCIAS_API_VERSION,
+
   resource: INCIDENCIAS_RESOURCE,
   endpoint: INCIDENCIAS_ENDPOINT,
   altEndpoint: INCIDENCIAS_ALT_ENDPOINT,
@@ -1196,6 +1308,7 @@ export const IncidenciasApi = Object.freeze({
   normalizeIncidenciaId,
 
   getIncidenciasStatsEndpoint,
+  getIncidenciasAltStatsEndpoint,
   getIncidenciaEndpoint,
   getIncidenciaAltEndpoint,
   getIncidenciaAttachmentsEndpoint,

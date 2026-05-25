@@ -5,7 +5,8 @@
    Responsabilidad:
    - Estado local del módulo Incidencias.
    - Flags de carga/refresco/creación/detalle/mutación.
-   - Paginación, filtros, sort y cache temporal.
+   - Filtros, sort, scroll incremental y cache temporal.
+   - Compatibilidad legacy con page/pageSize sin paginación visual real.
    - Helpers de estado usados por View/API/Actions/Modal.
    - No importar AppCore.
    - No tocar DOM.
@@ -19,11 +20,16 @@
 ========================================================= */
 
 export const CACHE_KEY = "incidencias.cache";
-export const CACHE_VERSION = 3;
+export const CACHE_VERSION = 4;
 export const CACHE_TTL = 1000 * 60 * 3;
 
-export const DEFAULT_PAGE_SIZE = 5;
-export const MAX_PAGE_SIZE = 50;
+export const DEFAULT_PAGE_SIZE = 20;
+export const MAX_PAGE_SIZE = 500;
+
+export const DEFAULT_INITIAL_VISIBLE_COUNT = 20;
+export const DEFAULT_LOAD_MORE_BATCH = 20;
+export const MAX_VISIBLE_COUNT = 10000;
+
 export const DEFAULT_SORT = "updated_desc";
 export const DEFAULT_LIST_FILTER = "all";
 
@@ -324,6 +330,16 @@ function normalizeItems(items = []) {
   });
 }
 
+function normalizeScrollMode(value = "infinite") {
+  const key = normalizeTextKey(value || "infinite");
+
+  if (["infinite", "scroll", "feed", "continuous", "continuo"].includes(key)) {
+    return "infinite";
+  }
+
+  return "infinite";
+}
+
 /* =========================================================
    DEFAULTS
 ========================================================= */
@@ -567,8 +583,47 @@ function createInitialIncidenciasState() {
     remoteCount: 0,
     lastSyncAt: 0,
 
+    /*
+      Compatibilidad legacy:
+      - page siempre se mantiene en 1.
+      - totalPages siempre se expone como 1.
+      - pageSize se usa como tamaño visible actual/batch, no como paginación real.
+    */
     page: 1,
+    currentPage: 1,
     pageSize: DEFAULT_PAGE_SIZE,
+    totalPages: 1,
+    pages: 1,
+    hasPrev: false,
+    hasNext: false,
+
+    /*
+      Estado canónico nuevo:
+      - La tabla pinta una ventana visible inicial.
+      - Al hacer scroll se amplía visibleCount.
+      - El orden lo decide el modelo: nuevo → antiguo.
+    */
+    infiniteScroll: true,
+    scrollMode: "infinite",
+    paginationDisabled: true,
+
+    initialVisibleCount: DEFAULT_INITIAL_VISIBLE_COUNT,
+    visibleInitialCount: DEFAULT_INITIAL_VISIBLE_COUNT,
+
+    loadMoreBatch: DEFAULT_LOAD_MORE_BATCH,
+    batchSize: DEFAULT_LOAD_MORE_BATCH,
+
+    visibleCount: 0,
+    visibleItemsCount: 0,
+    loadedCount: 0,
+    remainingCount: 0,
+
+    hasMoreItems: false,
+    hasMore: false,
+    canLoadMore: false,
+
+    loadingMore: false,
+    isLoadingMore: false,
 
     sort: DEFAULT_SORT,
     filters: normalizeFilters(DEFAULT_FILTERS),
@@ -615,32 +670,133 @@ let inflightLoad = null;
    INTERNAL STATE HELPERS
 ========================================================= */
 
-function getTotalPages(total = 0, pageSize = DEFAULT_PAGE_SIZE) {
-  const size = clamp(pageSize, 1, MAX_PAGE_SIZE);
-  return Math.max(1, Math.ceil(Math.max(0, safeNumber(total, 0)) / size));
-}
-
-function clampPage(page = 1, total = 0, pageSize = DEFAULT_PAGE_SIZE) {
-  const current = Math.max(1, safeNumber(page, 1));
-  const totalPages = getTotalPages(total, pageSize);
-
-  return Math.min(current, totalPages);
-}
-
-function normalizePageState() {
-  const total = Math.max(
+function getListTotal() {
+  return Math.max(
     safeNumber(incidenciasState.remoteCount, 0),
     safeArray(incidenciasState.items).length
   );
+}
 
-  incidenciasState.pageSize = clamp(incidenciasState.pageSize, 1, MAX_PAGE_SIZE);
-  incidenciasState.page = clampPage(incidenciasState.page, total, incidenciasState.pageSize);
+function getSafeInitialVisibleCount(total = getListTotal()) {
+  const totalCount = Math.max(0, safeNumber(total, 0));
+
+  if (!totalCount) return 0;
+
+  return Math.min(
+    totalCount,
+    clamp(
+      first(
+        incidenciasState.initialVisibleCount,
+        incidenciasState.visibleInitialCount,
+        DEFAULT_INITIAL_VISIBLE_COUNT
+      ),
+      1,
+      MAX_VISIBLE_COUNT
+    )
+  );
+}
+
+function getSafeLoadMoreBatch() {
+  return clamp(
+    first(
+      incidenciasState.loadMoreBatch,
+      incidenciasState.batchSize,
+      DEFAULT_LOAD_MORE_BATCH
+    ),
+    1,
+    MAX_VISIBLE_COUNT
+  );
+}
+
+function getSafeVisibleCount(total = getListTotal()) {
+  const totalCount = Math.max(0, safeNumber(total, 0));
+
+  if (!totalCount) return 0;
+
+  const current = safeNumber(incidenciasState.visibleCount, 0);
+
+  if (current > 0) {
+    return Math.min(current, totalCount, MAX_VISIBLE_COUNT);
+  }
+
+  return getSafeInitialVisibleCount(totalCount);
+}
+
+function syncInfiniteAliases(total = getListTotal()) {
+  const totalCount = Math.max(0, safeNumber(total, 0));
+  const visibleCount = getSafeVisibleCount(totalCount);
+  const remainingCount = Math.max(0, totalCount - visibleCount);
+  const hasMore = remainingCount > 0;
+
+  incidenciasState.page = 1;
+  incidenciasState.currentPage = 1;
+  incidenciasState.totalPages = 1;
+  incidenciasState.pages = 1;
+  incidenciasState.hasPrev = false;
+  incidenciasState.hasNext = false;
+
+  incidenciasState.pageSize = Math.max(1, visibleCount || getSafeLoadMoreBatch());
+
+  incidenciasState.infiniteScroll = true;
+  incidenciasState.scrollMode = "infinite";
+  incidenciasState.paginationDisabled = true;
+
+  incidenciasState.visibleCount = visibleCount;
+  incidenciasState.visibleItemsCount = visibleCount;
+  incidenciasState.loadedCount = visibleCount;
+  incidenciasState.remainingCount = remainingCount;
+
+  incidenciasState.hasMoreItems = hasMore;
+  incidenciasState.hasMore = hasMore;
+  incidenciasState.canLoadMore = hasMore;
+
+  incidenciasState.loadingMore = Boolean(incidenciasState.loadingMore);
+  incidenciasState.isLoadingMore = Boolean(incidenciasState.loadingMore);
+
+  incidenciasState.initialVisibleCount = clamp(
+    incidenciasState.initialVisibleCount,
+    1,
+    MAX_VISIBLE_COUNT
+  );
+
+  incidenciasState.visibleInitialCount = incidenciasState.initialVisibleCount;
+
+  incidenciasState.loadMoreBatch = getSafeLoadMoreBatch();
+  incidenciasState.batchSize = incidenciasState.loadMoreBatch;
 
   return {
-    page: incidenciasState.page,
+    total: totalCount,
+    visibleCount,
+    remainingCount,
+    hasMore,
+  };
+}
+
+function normalizePageState() {
+  const total = getListTotal();
+  const meta = syncInfiniteAliases(total);
+
+  return {
+    page: 1,
+    currentPage: 1,
     pageSize: incidenciasState.pageSize,
-    total,
-    totalPages: getTotalPages(total, incidenciasState.pageSize),
+    total: meta.total,
+    totalCount: meta.total,
+    totalPages: 1,
+    pages: 1,
+    from: meta.visibleCount ? 1 : 0,
+    to: meta.visibleCount,
+    hasPrev: false,
+    hasNext: false,
+    hasMore: meta.hasMore,
+    canLoadMore: meta.hasMore,
+    remainingCount: meta.remainingCount,
+    visibleCount: meta.visibleCount,
+    visibleItemsCount: meta.visibleCount,
+    loadedCount: meta.visibleCount,
+    infiniteScroll: true,
+    scrollMode: "infinite",
+    paginationDisabled: true,
   };
 }
 
@@ -708,6 +864,7 @@ function markLoaded() {
   incidenciasState.loaded = true;
   incidenciasState.hydrated = true;
   markIdle();
+  normalizePageState();
 
   return incidenciasState;
 }
@@ -795,6 +952,9 @@ export function resetIncidenciasState() {
 export function resetIncidenciasRuntimeState() {
   incidenciasState.loading = false;
   incidenciasState.refreshing = false;
+  incidenciasState.loadingMore = false;
+  incidenciasState.isLoadingMore = false;
+
   incidenciasState.creating = false;
   incidenciasState.openingTicketId = "";
   incidenciasState.selectedTicketId = "";
@@ -804,6 +964,8 @@ export function resetIncidenciasRuntimeState() {
   incidenciasState.mutations = createDefaultMutationState();
 
   inflightLoad = null;
+
+  normalizePageState();
 
   return incidenciasState;
 }
@@ -882,6 +1044,12 @@ export function setRefreshing(value) {
   return incidenciasState.refreshing;
 }
 
+export function setLoadingMore(value) {
+  incidenciasState.loadingMore = Boolean(value);
+  incidenciasState.isLoadingMore = Boolean(value);
+  return incidenciasState.loadingMore;
+}
+
 export function setLoaded(value) {
   incidenciasState.loaded = Boolean(value);
 
@@ -908,27 +1076,139 @@ export function setOpeningTicketId(value = "") {
 }
 
 /* =========================================================
-   PAGINATION
+   INFINITE SCROLL / LEGACY PAGINATION COMPAT
 ========================================================= */
 
-export function setPage(value = 1) {
-  incidenciasState.page = Math.max(1, safeNumber(value, 1));
+export function setInfiniteScrollMeta(value = {}) {
+  const meta = safeObject(value);
+
+  if (hasOwn(meta, "initialVisibleCount")) {
+    incidenciasState.initialVisibleCount = clamp(meta.initialVisibleCount, 1, MAX_VISIBLE_COUNT);
+    incidenciasState.visibleInitialCount = incidenciasState.initialVisibleCount;
+  }
+
+  if (hasOwn(meta, "visibleInitialCount")) {
+    incidenciasState.initialVisibleCount = clamp(meta.visibleInitialCount, 1, MAX_VISIBLE_COUNT);
+    incidenciasState.visibleInitialCount = incidenciasState.initialVisibleCount;
+  }
+
+  if (hasOwn(meta, "loadMoreBatch")) {
+    incidenciasState.loadMoreBatch = clamp(meta.loadMoreBatch, 1, MAX_VISIBLE_COUNT);
+    incidenciasState.batchSize = incidenciasState.loadMoreBatch;
+  }
+
+  if (hasOwn(meta, "batchSize")) {
+    incidenciasState.loadMoreBatch = clamp(meta.batchSize, 1, MAX_VISIBLE_COUNT);
+    incidenciasState.batchSize = incidenciasState.loadMoreBatch;
+  }
+
+  if (hasOwn(meta, "visibleCount")) {
+    setVisibleCount(meta.visibleCount);
+  } else {
+    normalizePageState();
+  }
+
+  incidenciasState.infiniteScroll = true;
+  incidenciasState.scrollMode = normalizeScrollMode(meta.scrollMode || "infinite");
+  incidenciasState.paginationDisabled = true;
+
+  return getInfiniteScrollState();
+}
+
+export function setVisibleCount(value = 0) {
+  const total = getListTotal();
+  const next = total
+    ? Math.min(clamp(value, 1, MAX_VISIBLE_COUNT), total)
+    : 0;
+
+  incidenciasState.visibleCount = next;
+  incidenciasState.visibleItemsCount = next;
+  incidenciasState.loadedCount = next;
+
+  normalizePageState();
+
+  return incidenciasState.visibleCount;
+}
+
+export function increaseVisibleCount(amount = DEFAULT_LOAD_MORE_BATCH) {
+  const total = getListTotal();
+  const current = getSafeVisibleCount(total);
+  const increment = clamp(amount, 1, MAX_VISIBLE_COUNT);
+  const next = total
+    ? Math.min(total, current + increment)
+    : 0;
+
+  return setVisibleCount(next);
+}
+
+export function resetVisibleCount() {
+  return setVisibleCount(getSafeInitialVisibleCount(getListTotal()));
+}
+
+export function setHasMoreItems(value = false) {
+  incidenciasState.hasMoreItems = Boolean(value);
+  incidenciasState.hasMore = Boolean(value);
+  incidenciasState.canLoadMore = Boolean(value);
+
+  return incidenciasState.hasMoreItems;
+}
+
+export function getInfiniteScrollState() {
+  const pagination = normalizePageState();
+
+  return {
+    mode: "infinite",
+    infiniteScroll: true,
+    scrollMode: "infinite",
+    paginationDisabled: true,
+
+    initialVisibleCount: incidenciasState.initialVisibleCount,
+    visibleInitialCount: incidenciasState.visibleInitialCount,
+
+    loadMoreBatch: incidenciasState.loadMoreBatch,
+    batchSize: incidenciasState.batchSize,
+
+    visibleCount: pagination.visibleCount,
+    visibleItemsCount: pagination.visibleItemsCount,
+    loadedCount: pagination.loadedCount,
+    remainingCount: pagination.remainingCount,
+
+    hasMoreItems: pagination.hasMore,
+    hasMore: pagination.hasMore,
+    canLoadMore: pagination.canLoadMore,
+
+    loadingMore: Boolean(incidenciasState.loadingMore),
+    isLoadingMore: Boolean(incidenciasState.loadingMore),
+  };
+}
+
+export function setPage(_value = 1) {
+  incidenciasState.page = 1;
+  incidenciasState.currentPage = 1;
   normalizePageState();
 
   return incidenciasState.page;
 }
 
 export function nextPage() {
-  return setPage(incidenciasState.page + 1);
+  increaseVisibleCount(getSafeLoadMoreBatch());
+  return incidenciasState.page;
 }
 
 export function prevPage() {
-  return setPage(incidenciasState.page - 1);
+  resetVisibleCount();
+  return incidenciasState.page;
 }
 
 export function setPageSize(value = DEFAULT_PAGE_SIZE) {
-  incidenciasState.pageSize = clamp(value, 1, MAX_PAGE_SIZE);
+  const size = clamp(value, 1, MAX_PAGE_SIZE);
+
+  incidenciasState.pageSize = size;
+  incidenciasState.loadMoreBatch = size;
+  incidenciasState.batchSize = size;
   incidenciasState.page = 1;
+  incidenciasState.currentPage = 1;
+
   normalizePageState();
 
   return incidenciasState.pageSize;
@@ -936,33 +1216,15 @@ export function setPageSize(value = DEFAULT_PAGE_SIZE) {
 
 export function resetPage() {
   incidenciasState.page = 1;
+  incidenciasState.currentPage = 1;
+  resetVisibleCount();
   normalizePageState();
 
   return incidenciasState.page;
 }
 
 export function getPaginationState() {
-  const total = Math.max(
-    safeNumber(incidenciasState.remoteCount, 0),
-    safeArray(incidenciasState.items).length
-  );
-
-  const pageSize = clamp(incidenciasState.pageSize, 1, MAX_PAGE_SIZE);
-  const totalPages = getTotalPages(total, pageSize);
-  const page = clampPage(incidenciasState.page, total, pageSize);
-
-  return {
-    page,
-    currentPage: page,
-    pageSize,
-    total,
-    totalCount: total,
-    totalPages,
-    from: total === 0 ? 0 : (page - 1) * pageSize + 1,
-    to: Math.min(page * pageSize, total),
-    hasPrev: page > 1,
-    hasNext: page < totalPages,
-  };
+  return normalizePageState();
 }
 
 /* =========================================================
@@ -1027,13 +1289,21 @@ export function setItems(items = [], options = {}) {
     incidenciasState.remoteCount = Math.max(safeNumber(incidenciasState.remoteCount, 0), list.length);
   }
 
-  if (hasOwn(opts, "page")) {
-    incidenciasState.page = Math.max(1, safeNumber(opts.page, incidenciasState.page));
+  if (hasOwn(opts, "visibleCount")) {
+    incidenciasState.visibleCount = clamp(opts.visibleCount, 0, MAX_VISIBLE_COUNT);
+  } else if (!safeNumber(incidenciasState.visibleCount, 0)) {
+    incidenciasState.visibleCount = getSafeInitialVisibleCount(Math.max(list.length, incidenciasState.remoteCount));
   }
 
   if (hasOwn(opts, "pageSize")) {
-    incidenciasState.pageSize = clamp(opts.pageSize, 1, MAX_PAGE_SIZE);
+    const size = clamp(opts.pageSize, 1, MAX_PAGE_SIZE);
+    incidenciasState.pageSize = size;
+    incidenciasState.loadMoreBatch = size;
+    incidenciasState.batchSize = size;
   }
+
+  incidenciasState.page = 1;
+  incidenciasState.currentPage = 1;
 
   markLoaded();
   normalizePageState();
@@ -1152,6 +1422,15 @@ export function clearItems() {
   incidenciasState.items = [];
   incidenciasState.remoteCount = 0;
   incidenciasState.page = 1;
+  incidenciasState.currentPage = 1;
+  incidenciasState.visibleCount = 0;
+  incidenciasState.visibleItemsCount = 0;
+  incidenciasState.loadedCount = 0;
+  incidenciasState.remainingCount = 0;
+  incidenciasState.hasMoreItems = false;
+  incidenciasState.hasMore = false;
+  incidenciasState.canLoadMore = false;
+
   normalizePageState();
 
   return incidenciasState.items;
@@ -1659,6 +1938,8 @@ export function getCreateViewState() {
 export function getCachePayload() {
   const filters = getCurrentFiltersForSnapshot();
 
+  normalizePageState();
+
   return {
     version: CACHE_VERSION,
     savedAt: now(),
@@ -1667,8 +1948,22 @@ export function getCachePayload() {
     remoteCount: incidenciasState.remoteCount,
     lastSyncAt: incidenciasState.lastSyncAt,
 
-    page: incidenciasState.page,
+    page: 1,
     pageSize: incidenciasState.pageSize,
+
+    infiniteScroll: true,
+    scrollMode: "infinite",
+    paginationDisabled: true,
+
+    initialVisibleCount: incidenciasState.initialVisibleCount,
+    visibleInitialCount: incidenciasState.visibleInitialCount,
+
+    loadMoreBatch: incidenciasState.loadMoreBatch,
+    batchSize: incidenciasState.batchSize,
+
+    visibleCount: incidenciasState.visibleCount,
+    visibleItemsCount: incidenciasState.visibleItemsCount,
+    loadedCount: incidenciasState.loadedCount,
 
     sort: incidenciasState.sort,
     filters,
@@ -1794,9 +2089,39 @@ export function hydrateStateFromCache({
   );
 
   incidenciasState.lastSyncAt = safeTimestamp(payload.lastSyncAt, 0);
-  incidenciasState.page = Math.max(1, safeNumber(payload.page, 1));
-  incidenciasState.pageSize = clamp(payload.pageSize, 1, MAX_PAGE_SIZE);
+  incidenciasState.page = 1;
+  incidenciasState.currentPage = 1;
+
+  const restoredPageSize = safeNumber(
+    first(payload.pageSize, payload.loadMoreBatch, payload.batchSize, DEFAULT_PAGE_SIZE),
+    DEFAULT_PAGE_SIZE
+  );
+
+  incidenciasState.pageSize = clamp(restoredPageSize, 1, MAX_PAGE_SIZE);
+  incidenciasState.loadMoreBatch = clamp(first(payload.loadMoreBatch, payload.batchSize, restoredPageSize), 1, MAX_VISIBLE_COUNT);
+  incidenciasState.batchSize = incidenciasState.loadMoreBatch;
+
+  incidenciasState.initialVisibleCount = clamp(
+    first(payload.initialVisibleCount, payload.visibleInitialCount, DEFAULT_INITIAL_VISIBLE_COUNT),
+    1,
+    MAX_VISIBLE_COUNT
+  );
+
+  incidenciasState.visibleInitialCount = incidenciasState.initialVisibleCount;
+
+  const total = Math.max(incidenciasState.remoteCount, incidenciasState.items.length);
+
+  incidenciasState.visibleCount = clamp(
+    first(payload.visibleCount, payload.visibleItemsCount, payload.loadedCount, getSafeInitialVisibleCount(total)),
+    0,
+    total || MAX_VISIBLE_COUNT
+  );
+
   incidenciasState.sort = safeText(payload.sort, DEFAULT_SORT);
+
+  incidenciasState.infiniteScroll = true;
+  incidenciasState.scrollMode = "infinite";
+  incidenciasState.paginationDisabled = true;
 
   syncRootFilterAliases(
     first(
@@ -1837,6 +2162,7 @@ export function getIncidenciasStateSnapshot() {
   const detail = normalizeDetailState(incidenciasState.detail);
   const mutations = normalizeMutationState(incidenciasState.mutations);
   const pagination = getPaginationState();
+  const infinite = getInfiniteScrollState();
 
   return {
     hydrated: incidenciasState.hydrated,
@@ -1855,14 +2181,35 @@ export function getIncidenciasStateSnapshot() {
     remoteCount: incidenciasState.remoteCount,
     lastSyncAt: incidenciasState.lastSyncAt,
 
-    page: pagination.page,
-    currentPage: pagination.currentPage,
+    page: 1,
+    currentPage: 1,
     pageSize: pagination.pageSize,
-    totalPages: pagination.totalPages,
+    totalPages: 1,
+    pages: 1,
     from: pagination.from,
     to: pagination.to,
-    hasPrev: pagination.hasPrev,
-    hasNext: pagination.hasNext,
+    hasPrev: false,
+    hasNext: false,
+
+    infiniteScroll: true,
+    scrollMode: "infinite",
+    paginationDisabled: true,
+
+    initialVisibleCount: infinite.initialVisibleCount,
+    visibleInitialCount: infinite.visibleInitialCount,
+    loadMoreBatch: infinite.loadMoreBatch,
+    batchSize: infinite.batchSize,
+
+    visibleCount: infinite.visibleCount,
+    visibleItemsCount: infinite.visibleItemsCount,
+    loadedCount: infinite.loadedCount,
+    remainingCount: infinite.remainingCount,
+
+    hasMoreItems: infinite.hasMoreItems,
+    hasMore: infinite.hasMore,
+    canLoadMore: infinite.canLoadMore,
+    loadingMore: infinite.loadingMore,
+    isLoadingMore: infinite.isLoadingMore,
 
     sort: incidenciasState.sort,
     filters,
@@ -1927,8 +2274,13 @@ export default {
   CACHE_KEY,
   CACHE_VERSION,
   CACHE_TTL,
+
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
+  DEFAULT_INITIAL_VISIBLE_COUNT,
+  DEFAULT_LOAD_MORE_BATCH,
+  MAX_VISIBLE_COUNT,
+
   DEFAULT_SORT,
   DEFAULT_FILTERS,
 
@@ -1948,10 +2300,18 @@ export default {
 
   setLoading,
   setRefreshing,
+  setLoadingMore,
   setLoaded,
   setHydrated,
   setCreating,
   setOpeningTicketId,
+
+  setInfiniteScrollMeta,
+  setVisibleCount,
+  increaseVisibleCount,
+  resetVisibleCount,
+  setHasMoreItems,
+  getInfiniteScrollState,
 
   setPage,
   nextPage,

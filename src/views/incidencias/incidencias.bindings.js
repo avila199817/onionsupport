@@ -4,8 +4,9 @@
 
    Responsabilidad:
    - Bind DOM por delegación para la vista Incidencias.
-   - Conectar botones, filas, filtros, búsqueda y paginación.
+   - Conectar botones, filas, filtros, búsqueda y load-more.
    - Delegar TODO a callbacks recibidos desde incidenciasView.js.
+   - Compatibilidad legacy con acciones page/prev/next sin paginación visual.
    - No llamar APIs directamente salvo fallback loadIncidencias opcional.
    - No abrir modales directamente.
    - No registrar globals.
@@ -21,7 +22,7 @@ import { AppCore } from "../../core/index.js";
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_BINDINGS_VERSION = "incidencias.bindings.v1";
+export const INCIDENCIAS_BINDINGS_VERSION = "incidencias.bindings.v2.infinite";
 
 const DEFAULT_SCOPE = "view:incidencias";
 const SEARCH_DEBOUNCE_MS = 180;
@@ -40,6 +41,7 @@ const ROW_SELECTOR = [
   "tr[data-ticket-id]",
   "article[data-ticket-id]",
   "[data-ticket-id][role='row']",
+  "[data-ticket-id][role='button']",
 ].join(",");
 
 const INTERACTIVE_SELECTOR = [
@@ -154,6 +156,18 @@ const ACTIONS = Object.freeze({
     "search-clear",
   ]),
 
+  loadMore: new Set([
+    "load-more",
+    "show-more",
+    "more",
+    "next-batch",
+    "load-next",
+    "load-more-incidencias",
+    "show-more-incidencias",
+    "incidencias-load-more",
+    "incidencias-show-more",
+  ]),
+
   page: new Set([
     "page",
     "go-page",
@@ -201,6 +215,11 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
+function getTimerHost() {
+  if (typeof window !== "undefined") return window;
+  return globalThis;
+}
+
 function isFn(value) {
   return typeof value === "function";
 }
@@ -219,6 +238,10 @@ function safeText(value, fallback = "") {
 }
 
 function safeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
+
   const number = Number(value);
 
   return Number.isFinite(number)
@@ -245,6 +268,10 @@ function first(...values) {
     }
 
     if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+
+    if (Array.isArray(value) && value.length === 0) {
       continue;
     }
 
@@ -565,6 +592,14 @@ function getRowClickDisabled(row = null) {
   return ["true", "1", "yes", "si", "sí", "on"].includes(value);
 }
 
+function rowContains(row = null, element = null) {
+  try {
+    return Boolean(row && element && row.contains(element));
+  } catch {
+    return false;
+  }
+}
+
 function getRowFromClick(root = null, event = null) {
   const target = getEventElement(event);
 
@@ -580,19 +615,16 @@ function getRowFromClick(root = null, event = null) {
 
   const interactive = target.closest?.(INTERACTIVE_SELECTOR);
 
-  if (interactive && rowContains(row, interactive)) {
+  /*
+    Las filas pueden tener role="button".
+    Si interactive === row, NO debe bloquear la apertura de la fila.
+    Sólo bloquean los controles internos: button, input, data-action, etc.
+  */
+  if (interactive && interactive !== row && rowContains(row, interactive)) {
     return null;
   }
 
   return row;
-}
-
-function rowContains(row = null, element = null) {
-  try {
-    return Boolean(row && element && row.contains(element));
-  } catch {
-    return false;
-  }
 }
 
 function isFormControl(element = null) {
@@ -796,6 +828,39 @@ async function callSetSearchQuery(setSearchQuery, value = "") {
   return setSearchQuery(value);
 }
 
+async function callLoadMore({
+  loadMore,
+  showMore,
+  goNextPage,
+  source = "bindings",
+  reason = "manual",
+} = {}) {
+  if (isFn(loadMore)) {
+    return loadMore({
+      source,
+      reason,
+    });
+  }
+
+  if (isFn(showMore)) {
+    return showMore({
+      source,
+      reason,
+    });
+  }
+
+  /*
+    Compatibilidad: en el View nuevo goNextPage delega en loadMore.
+    Sólo se usa si loadMore/showMore no están disponibles.
+  */
+  if (isFn(goNextPage)) {
+    return goNextPage();
+  }
+
+  safeWarn("No hay callback loadMore/showMore/goNextPage.");
+  return null;
+}
+
 /* =========================================================
    EVENT BINDERS
 ========================================================= */
@@ -878,6 +943,10 @@ export function bindIncidenciasEvents({
   clearFilters,
   clearSearchOnly,
 
+  loadMore,
+  showMore,
+  infiniteScroll = true,
+
   goToPage,
   goPrevPage,
   goNextPage,
@@ -903,6 +972,8 @@ export function bindIncidenciasEvents({
   let searchTimer = 0;
   let mutationReloadTimer = 0;
 
+  const timerHost = getTimerHost();
+
   const resolvedCopyTicketId = copyTicketId || copyTicketIdAction;
   const resolvedExportCsv = exportCsv || exportIncidenciasCsvAction;
   const resolvedCreateIncidencia = createIncidencia || createIncidenciaAction;
@@ -913,7 +984,7 @@ export function bindIncidenciasEvents({
     }
 
     try {
-      window.clearTimeout(searchTimer);
+      timerHost.clearTimeout(searchTimer);
     } catch {}
 
     searchTimer = 0;
@@ -925,7 +996,7 @@ export function bindIncidenciasEvents({
     }
 
     try {
-      window.clearTimeout(mutationReloadTimer);
+      timerHost.clearTimeout(mutationReloadTimer);
     } catch {}
 
     mutationReloadTimer = 0;
@@ -938,7 +1009,7 @@ export function bindIncidenciasEvents({
 
     clearMutationReloadTimer();
 
-    mutationReloadTimer = window.setTimeout(async () => {
+    mutationReloadTimer = timerHost.setTimeout(async () => {
       mutationReloadTimer = 0;
 
       if (destroyed) {
@@ -1138,6 +1209,35 @@ export function bindIncidenciasEvents({
     });
   }
 
+  async function handleLoadMore(element = null, reason = "manual") {
+    if (!infiniteScroll) {
+      return false;
+    }
+
+    await runBusy("incidencias:load-more", element, async () => {
+      try {
+        const result = await callLoadMore({
+          loadMore,
+          showMore,
+          goNextPage,
+          source: scopeName,
+          reason,
+        });
+
+        emit("incidencias:bindings:load-more", {
+          ok: Boolean(result),
+          source: scopeName,
+          reason,
+        });
+
+        return result;
+      } catch (error) {
+        safeWarn("No se pudieron cargar más incidencias.", error);
+        return false;
+      }
+    });
+  }
+
   async function handlePage(element = null) {
     const page = getPage(element);
 
@@ -1157,6 +1257,16 @@ export function bindIncidenciasEvents({
   }
 
   async function handleNextPage() {
+    if (infiniteScroll && (isFn(loadMore) || isFn(showMore) || isFn(goNextPage))) {
+      return callLoadMore({
+        loadMore,
+        showMore,
+        goNextPage,
+        source: scopeName,
+        reason: "legacy_next_page",
+      });
+    }
+
     if (isFn(goNextPage)) {
       return goNextPage();
     }
@@ -1173,7 +1283,7 @@ export function bindIncidenciasEvents({
 
     clearSearchTimer();
 
-    searchTimer = window.setTimeout(async () => {
+    searchTimer = timerHost.setTimeout(async () => {
       searchTimer = 0;
 
       if (destroyed) {
@@ -1295,6 +1405,16 @@ export function bindIncidenciasEvents({
       return;
     }
 
+    const loadMoreAction = getActionElement(root, target, ACTIONS.loadMore);
+
+    if (loadMoreAction) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await handleLoadMore(loadMoreAction, "button");
+      return;
+    }
+
     const pageAction = getActionElement(root, target, ACTIONS.page);
 
     if (pageAction) {
@@ -1385,7 +1505,7 @@ export function bindIncidenciasEvents({
 
     const interactive = target.closest?.(INTERACTIVE_SELECTOR);
 
-    if (interactive && rowContains(row, interactive)) {
+    if (interactive && interactive !== row && rowContains(row, interactive)) {
       return;
     }
 
@@ -1441,6 +1561,7 @@ export function bindIncidenciasEvents({
   emit("incidencias:bindings:ready", {
     scope: scopeName,
     source: "incidencias.bindings",
+    mode: infiniteScroll ? "infinite" : "legacy",
   });
 
   const cleanup = () => {

@@ -10,6 +10,7 @@
    - Delegar HTTP a incidencias.api.js.
    - Delegar normalización a incidencias.model.js.
    - Delegar persistencia a incidencias.store.js.
+   - Exportar siempre la colección completa ordenada nuevo→antiguo.
    - No tocar Router.
    - No registrar globals.
    - No crear bridges.
@@ -36,6 +37,7 @@ import {
 
 import {
   normalizeIncidenciaModel,
+  sortIncidenciasByUpdatedDesc,
 } from "./incidencias.model.js";
 
 import {
@@ -46,9 +48,10 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_ACTIONS_VERSION = "incidencias.actions.v1";
+export const INCIDENCIAS_ACTIONS_VERSION = "incidencias.actions.v2.infinite";
 
 const CSV_FILENAME = "incidencias.csv";
+const CSV_BOM = "\uFEFF";
 
 /* =========================================================
    SAFE HELPERS
@@ -121,6 +124,7 @@ function first(...values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
     return value;
   }
 
@@ -150,6 +154,31 @@ function normalizeTicketId(value = "") {
         value.id,
         value.code,
         value.ticketCode,
+
+        value.detail?.ticketId,
+        value.detail?.incidenciaId,
+        value.detail?.id,
+        value.detail?.code,
+        value.detail?.ticketCode,
+
+        value.ticket?.ticketId,
+        value.ticket?.incidenciaId,
+        value.ticket?.id,
+        value.ticket?.code,
+        value.ticket?.ticketCode,
+
+        value.incidencia?.ticketId,
+        value.incidencia?.incidenciaId,
+        value.incidencia?.id,
+        value.incidencia?.code,
+        value.incidencia?.ticketCode,
+
+        value.item?.ticketId,
+        value.item?.incidenciaId,
+        value.item?.id,
+        value.item?.code,
+        value.item?.ticketCode,
+
         value.raw?.ticketId,
         value.raw?.incidenciaId,
         value.raw?.id,
@@ -207,6 +236,60 @@ function getErrorMessage(error = null, fallback = "No se pudo completar la acci�
   );
 }
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+    String(value || "")
+  );
+}
+
+function safeExternalUrl(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (/^(?:javascript|vbscript|file):/i.test(raw)) return "";
+  if (raw.startsWith("//")) return "";
+
+  if (raw.startsWith("/")) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
+}
+
+function safeFilename(value = "", fallback = "archivo") {
+  const name = safeText(value, fallback)
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return name || fallback;
+}
+
+function buildDatedFilename(base = CSV_FILENAME) {
+  const clean = safeFilename(base, CSV_FILENAME);
+
+  if (/\d{4}-\d{2}-\d{2}/.test(clean)) {
+    return clean;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const extension = clean.includes(".") ? clean.split(".").pop() : "csv";
+  const name = clean.endsWith(`.${extension}`)
+    ? clean.slice(0, -(extension.length + 1))
+    : clean;
+
+  return `${name}_${today}.${extension}`;
+}
+
 /* =========================================================
    MODEL / STORE HELPERS
 ========================================================= */
@@ -246,6 +329,18 @@ function persistDetail(detail = null) {
   }
 
   return normalized;
+}
+
+function getAllStoreItems() {
+  try {
+    return sortIncidenciasByUpdatedDesc(getSortedIncidenciasStore());
+  } catch {
+    try {
+      return safeArray(getSortedIncidenciasStore());
+    } catch {
+      return [];
+    }
+  }
 }
 
 /* =========================================================
@@ -308,10 +403,14 @@ function getClient(item = {}) {
     item.cliente,
     item.customer,
     item.receptor,
+    item.requester,
+    item.requesterSnapshot,
     item.raw?.client,
     item.raw?.cliente,
     item.raw?.customer,
-    item.raw?.receptor
+    item.raw?.receptor,
+    item.raw?.requester,
+    item.raw?.requesterSnapshot
   );
 
   if (isObject(clientObject)) {
@@ -321,7 +420,8 @@ function getClient(item = {}) {
         clientObject.nombre,
         clientObject.company,
         clientObject.empresa,
-        clientObject.displayName
+        clientObject.displayName,
+        clientObject.fullName
       ),
       "Cliente"
     );
@@ -346,16 +446,20 @@ function getEmail(item = {}) {
     item.cliente,
     item.customer,
     item.receptor,
+    item.requester,
+    item.requesterSnapshot,
     item.createdBy,
     item.raw?.client,
     item.raw?.cliente,
     item.raw?.customer,
     item.raw?.receptor,
+    item.raw?.requester,
+    item.raw?.requesterSnapshot,
     item.raw?.createdBy
   );
 
   if (isObject(clientObject)) {
-    return safeText(first(clientObject.email, clientObject.mail), "");
+    return safeText(first(clientObject.email, clientObject.emailLower, clientObject.mail), "");
   }
 
   return safeText(
@@ -372,13 +476,18 @@ function getEmail(item = {}) {
 }
 
 function getAssigned(item = {}) {
+  const assignment = safeObject(first(item.assignment, item.raw?.assignment));
   const assignedObject = first(
+    item.technician,
     item.assignedTo,
     item.assignee,
     item.tecnico,
+    item.agent,
+    item.raw?.technician,
     item.raw?.assignedTo,
     item.raw?.assignee,
-    item.raw?.tecnico
+    item.raw?.tecnico,
+    item.raw?.agent
   );
 
   if (isObject(assignedObject)) {
@@ -386,13 +495,62 @@ function getAssigned(item = {}) {
       first(
         assignedObject.name,
         assignedObject.nombre,
-        assignedObject.displayName
+        assignedObject.displayName,
+        assignedObject.fullName
       ),
       "Equipo de soporte"
     );
   }
 
-  return safeText(assignedObject, "Equipo de soporte");
+  return safeText(
+    first(
+      item.assignedToName,
+      item.technicianName,
+      item.tecnicoName,
+      assignment.assignedToName,
+      assignment.technicianName,
+      assignment.name,
+      assignedObject
+    ),
+    "Equipo de soporte"
+  );
+}
+
+function getAssignedEmail(item = {}) {
+  const assignment = safeObject(first(item.assignment, item.raw?.assignment));
+  const assignedObject = first(
+    item.technician,
+    item.assignedTo,
+    item.assignee,
+    item.tecnico,
+    item.agent,
+    item.raw?.technician,
+    item.raw?.assignedTo,
+    item.raw?.assignee,
+    item.raw?.tecnico,
+    item.raw?.agent
+  );
+
+  if (isObject(assignedObject)) {
+    return safeText(first(assignedObject.email, assignedObject.emailLower), "");
+  }
+
+  return safeText(
+    first(
+      item.assignedToEmail,
+      item.technicianEmail,
+      item.tecnicoEmail,
+      assignment.assignedToEmail,
+      assignment.technicianEmail,
+      assignment.email,
+      item.meta?.technicianEmail,
+      item.raw?.assignedToEmail,
+      item.raw?.technicianEmail,
+      item.raw?.tecnicoEmail,
+      item.raw?.meta?.technicianEmail
+    ),
+    ""
+  );
 }
 
 function getStatus(item = {}) {
@@ -706,6 +864,7 @@ function buildCsvRows(items = []) {
     "client",
     "email",
     "assignedTo",
+    "assignedToEmail",
     "createdAt",
     "updatedAt",
     "numeroFacturaLegal",
@@ -727,6 +886,7 @@ function buildCsvRows(items = []) {
       getClient(normalized),
       getEmail(normalized),
       getAssigned(normalized),
+      getAssignedEmail(normalized),
       getCreatedAt(normalized) || "",
       getUpdatedAt(normalized) || "",
       getInvoiceNumber(normalized),
@@ -757,9 +917,9 @@ async function writeClipboardText(text = "") {
   try {
     const textarea = document.createElement("textarea");
     textarea.value = value;
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    textarea.style.pointerEvents = "none";
+    textarea.setAttribute("readonly", "readonly");
+    textarea.setAttribute("aria-hidden", "true");
+    textarea.className = "sr-only";
 
     document.body.appendChild(textarea);
     textarea.select();
@@ -789,9 +949,9 @@ function downloadTextFile({
   const anchor = document.createElement("a");
 
   anchor.href = url;
-  anchor.download = filename;
+  anchor.download = safeFilename(filename, CSV_FILENAME);
   anchor.rel = "noopener";
-  anchor.style.display = "none";
+  anchor.className = "sr-only";
 
   document.body.appendChild(anchor);
   anchor.click();
@@ -807,7 +967,7 @@ function downloadTextFile({
 }
 
 function openExternalUrl(url = "") {
-  const target = safeText(url, "");
+  const target = safeExternalUrl(url);
 
   if (!target || typeof window === "undefined") return false;
 
@@ -820,7 +980,7 @@ function openExternalUrl(url = "") {
 }
 
 function downloadExternalUrl(url = "", filename = "") {
-  const target = safeText(url, "");
+  const target = safeExternalUrl(url);
 
   if (!target || !isBrowser()) return false;
 
@@ -831,10 +991,10 @@ function downloadExternalUrl(url = "", filename = "") {
     anchor.target = "_blank";
 
     if (filename) {
-      anchor.download = filename;
+      anchor.download = safeFilename(filename, "archivo");
     }
 
-    anchor.style.display = "none";
+    anchor.className = "sr-only";
 
     document.body.appendChild(anchor);
     anchor.click();
@@ -1000,12 +1160,19 @@ export async function refreshTicketDetailAction({
    CREATE / COMMENT / REOPEN
 ========================================================= */
 
-export async function createIncidenciaAction({
-  payload = null,
-  draft = null,
-  silent = false,
-} = {}) {
-  const data = safeObject(first(payload, draft), null);
+export async function createIncidenciaAction(options = {}) {
+  const input = safeObject(options);
+  const data = safeObject(
+    first(
+      input.payload,
+      input.draft,
+      input.form,
+      input
+    ),
+    null
+  );
+
+  const silent = Boolean(input.silent);
 
   if (!hasOwnKeys(data)) {
     if (!silent) {
@@ -1310,7 +1477,7 @@ function getAttachmentName(attachment = {}) {
   const item = safeObject(attachment);
   const raw = safeObject(item.raw);
 
-  return safeText(
+  return safeFilename(
     first(
       item.name,
       item.filename,
@@ -1332,7 +1499,7 @@ function getDirectAttachmentUrl(attachment = {}, mode = "view") {
   const raw = safeObject(item.raw);
 
   if (mode === "download") {
-    return safeText(
+    return safeExternalUrl(
       first(
         item.downloadUrl,
         item.signedUrl,
@@ -1348,12 +1515,11 @@ function getDirectAttachmentUrl(attachment = {}, mode = "view") {
         raw.openUrl,
         raw.blobUrl,
         raw.publicUrl
-      ),
-      ""
+      )
     );
   }
 
-  return safeText(
+  return safeExternalUrl(
     first(
       item.viewUrl,
       item.openUrl,
@@ -1369,8 +1535,7 @@ function getDirectAttachmentUrl(attachment = {}, mode = "view") {
       raw.downloadUrl,
       raw.blobUrl,
       raw.publicUrl
-    ),
-    ""
+    )
   );
 }
 
@@ -1396,7 +1561,7 @@ function normalizeAttachmentFileResponse(payload = {}, fallback = {}) {
     )
   );
 
-  const url = safeText(
+  const url = safeExternalUrl(
     first(
       file.url,
       file.viewUrl,
@@ -1412,21 +1577,20 @@ function normalizeAttachmentFileResponse(payload = {}, fallback = {}) {
       fallbackObj.signedUrl,
       fallbackObj.blobUrl,
       fallbackObj.publicUrl
-    ),
-    ""
+    )
   );
 
   return {
     ...fallbackObj,
     ...file,
     url,
-    viewUrl: safeText(first(file.viewUrl, file.openUrl, url), url),
-    openUrl: safeText(first(file.openUrl, file.viewUrl, url), url),
-    downloadUrl: safeText(first(file.downloadUrl, url), url),
-    signedUrl: safeText(first(file.signedUrl, url), url),
-    filename: safeText(first(file.filename, file.fileName, file.name, fallbackObj.filename, fallbackObj.fileName, fallbackObj.name), getAttachmentName(fallbackObj)),
-    fileName: safeText(first(file.fileName, file.filename, file.name, fallbackObj.fileName, fallbackObj.filename, fallbackObj.name), getAttachmentName(fallbackObj)),
-    name: safeText(first(file.name, file.filename, file.fileName, fallbackObj.name, fallbackObj.filename, fallbackObj.fileName), getAttachmentName(fallbackObj)),
+    viewUrl: safeExternalUrl(first(file.viewUrl, file.openUrl, url)),
+    openUrl: safeExternalUrl(first(file.openUrl, file.viewUrl, url)),
+    downloadUrl: safeExternalUrl(first(file.downloadUrl, url)),
+    signedUrl: safeExternalUrl(first(file.signedUrl, url)),
+    filename: safeFilename(first(file.filename, file.fileName, file.name, fallbackObj.filename, fallbackObj.fileName, fallbackObj.name), getAttachmentName(fallbackObj)),
+    fileName: safeFilename(first(file.fileName, file.filename, file.name, fallbackObj.fileName, fallbackObj.filename, fallbackObj.name), getAttachmentName(fallbackObj)),
+    name: safeFilename(first(file.name, file.filename, file.fileName, fallbackObj.name, fallbackObj.filename, fallbackObj.fileName), getAttachmentName(fallbackObj)),
     contentType: safeText(first(file.contentType, file.mimeType, file.mimetype, fallbackObj.contentType, fallbackObj.mimeType, fallbackObj.mimetype), ""),
     raw: payload,
   };
@@ -1566,11 +1730,15 @@ export async function downloadTicketAttachmentAction({
    COPY ID
 ========================================================= */
 
-export async function copyTicketIdAction({
-  ticketId = "",
-  silent = false,
-} = {}) {
-  const id = normalizeTicketId(ticketId);
+export async function copyTicketIdAction(options = {}) {
+  const input = isObject(options)
+    ? options
+    : {
+        ticketId: options,
+      };
+
+  const id = normalizeTicketId(input.ticketId || input);
+  const silent = Boolean(input.silent);
 
   if (!id) {
     if (!silent) showToast("No hay referencia para copiar.", "error");
@@ -1604,9 +1772,11 @@ export function exportIncidenciasCsvAction({
 } = {}) {
   const sourceItems = Array.isArray(items)
     ? items
-    : getSortedIncidenciasStore();
+    : getAllStoreItems();
 
-  const list = safeArray(sourceItems);
+  const list = sortIncidenciasByUpdatedDesc(
+    safeArray(sourceItems).map(normalizeTicketDetail)
+  );
 
   if (!list.length) {
     if (!silent) showToast("No hay incidencias para exportar.", "info");
@@ -1614,10 +1784,10 @@ export function exportIncidenciasCsvAction({
   }
 
   try {
-    const csv = buildCsvRows(list);
+    const csv = `${CSV_BOM}${buildCsvRows(list)}`;
 
     const downloaded = downloadTextFile({
-      filename: safeText(filename, CSV_FILENAME),
+      filename: buildDatedFilename(filename),
       content: csv,
       mimeType: "text/csv;charset=utf-8;",
     });
@@ -1626,7 +1796,8 @@ export function exportIncidenciasCsvAction({
 
     emit("incidencias:export:csv", {
       total: list.length,
-      filename: safeText(filename, CSV_FILENAME),
+      filename: buildDatedFilename(filename),
+      order: "updated_desc",
     });
 
     if (!silent) showToast("Historial exportado", "success");
@@ -1682,6 +1853,7 @@ export {
   getClient as getIncidenciaClientAction,
   getEmail as getIncidenciaEmailAction,
   getAssigned as getIncidenciaAssignedAction,
+  getAssignedEmail as getIncidenciaAssignedEmailAction,
   getStatus as getIncidenciaStatusAction,
   getPriority as getIncidenciaPriorityAction,
   getCreatedAt as getIncidenciaCreatedAtAction,

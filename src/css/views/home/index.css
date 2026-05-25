@@ -2,16 +2,21 @@
    Onion SPA - Home View CSS
    Archivo: /src/css/views/home/index.css
 
-   HOME EXTREME PRO 10/10
+   HOME EXTREME PRO 10/10 · FINAL.16
    - Home 100% ancho.
    - Hero frameless premium.
-   - Cards Abiertas/Cerradas ocupan todo el ancho.
+   - Cards Abiertas/Cerradas a todo el ancho.
    - Cards principales sin huecos muertos.
-   - Tabla de incidencias del Home alineada con Incidencias.
+   - Tabla de incidencias compacta y alineada al template final.16.
    - 7 columnas reales:
-     Incidencia / cliente / Estado / Creación / Última novedad / Importe / Adj. / Acciones.
-   - Primera columna completa:
-     avatar, ID, categoría, asunto, descripción, cliente/email, prioridad y técnico.
+     Incidencia / Estado / Creación / Última novedad / Importe / Adj. / Acciones.
+   - Distribución exacta tabla: 41 / 10 / 11 / 12 / 8 / 5 / 13.
+   - Primera columna:
+     avatar usuario compacto, ID completo, categoría, asunto, descripción,
+     prioridad y técnico.
+   - Sin línea redundante Cliente · Sin email.
+   - Avatar usuario 52px con data-tooltip.
+   - Avatar técnico 22px visible con data-tooltip.
    - Sin convertir table/tr/td en block.
    - Sin health/server/ready/ping.
    - Modal de detalle de incidencia.
@@ -57,7 +62,20 @@
   --home-panel-pad-x: clamp(16px, 1.5vw, 22px);
   --home-panel-pad-y: clamp(14px, 1.25vw, 18px);
 
-  --home-table-row-height: calc(108px * var(--ui-scale, 1));
+  --home-table-min-width: 1100px;
+  --home-table-row-height: calc(104px * var(--ui-scale, 1));
+
+  --home-col-main: 41%;
+  --home-col-status: 10%;
+  --home-col-created: 11%;
+  --home-col-updated: 12%;
+  --home-col-importe: 8%;
+  --home-col-attachments: 5%;
+  --home-col-actions: 13%;
+
+  --home-avatar-user-size: 52px;
+  --home-avatar-agent-size: 22px;
+
   --home-card-min-h: calc(138px * var(--ui-scale, 1));
 
   --home-card-bg:
@@ -127,7 +145,8 @@
 }
 
 :where(.home-view-root, [data-home-scope]) button:focus-visible,
-:where(.home-view-root, [data-home-scope]) a:focus-visible {
+:where(.home-view-root, [data-home-scope]) a:focus-visible,
+:where(.home-view-root, [data-home-scope]) [tabindex]:focus-visible {
   outline: none;
   box-shadow: var(--home-focus);
 }
@@ -198,13 +217,17 @@
 .home-activity-item--servidor,
 .home-activity-item--health,
 .home-activity-item--ready,
-.home-activity-item--ping {
+.home-activity-item--ping,
+.home-table--incidencias .incidencias-client-line,
+.home-table--incidencias .incidencias-client-name,
+.home-table--incidencias .incidencias-client-email,
+.home-table--incidencias .incidencias-client-separator {
   display: none !important;
 }
 
 
 /* =========================================================
-   BOTONES BASE
+   BASE INTERACTIVOS
 ========================================================= */
 
 .home-btn,
@@ -231,6 +254,137 @@
   appearance: none;
   border: 0;
   text-align: left;
+}
+
+
+/* =========================================================
+   TOOLTIP AVATARES · DATA-TOOLTIP
+   Usa sólo ::before para no pisar el brillo ::after del avatar.
+========================================================= */
+
+:where(.home-view-root, [data-home-scope])
+:is(
+  .home-user-avatar,
+  .home-ticket-avatar,
+  .home-technician-avatar,
+  .home-modal-technician-avatar,
+  .incidencias-avatar,
+  .incidencias-agent-avatar
+)[data-tooltip] {
+  position: relative;
+  overflow: visible;
+}
+
+:where(.home-view-root, [data-home-scope])
+:is(
+  .home-user-avatar,
+  .home-ticket-avatar,
+  .home-technician-avatar,
+  .home-modal-technician-avatar,
+  .incidencias-avatar,
+  .incidencias-agent-avatar
+)[data-tooltip] > img,
+:where(.home-view-root, [data-home-scope])
+:is(
+  .home-user-avatar,
+  .home-ticket-avatar,
+  .home-technician-avatar,
+  .home-modal-technician-avatar,
+  .incidencias-avatar,
+  .incidencias-agent-avatar
+)[data-tooltip] .incidencias-avatar-img,
+:where(.home-view-root, [data-home-scope])
+:is(
+  .home-user-avatar,
+  .home-ticket-avatar,
+  .home-technician-avatar,
+  .home-modal-technician-avatar,
+  .incidencias-avatar,
+  .incidencias-agent-avatar
+)[data-tooltip] .incidencias-agent-avatar-img {
+  border-radius: inherit;
+}
+
+:where(.home-view-root, [data-home-scope])
+:is(
+  .home-user-avatar,
+  .home-ticket-avatar,
+  .home-technician-avatar,
+  .home-modal-technician-avatar,
+  .incidencias-avatar,
+  .incidencias-agent-avatar
+)[data-tooltip]::before {
+  content: attr(data-tooltip);
+
+  position: absolute;
+  inset-inline-start: 50%;
+  inset-block-end: calc(100% + 10px);
+  z-index: 50;
+
+  inline-size: max-content;
+  max-inline-size: 260px;
+
+  padding: 8px 10px;
+
+  overflow: hidden;
+
+  border: 1px solid color-mix(in srgb, var(--home-text-strong) 14%, transparent);
+  border-radius: 12px;
+
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.06)),
+    rgba(12,12,14,.92);
+
+  color: var(--home-text-strong);
+
+  box-shadow:
+    0 14px 34px rgba(0,0,0,.42),
+    inset 0 1px 0 rgba(255,255,255,.08);
+
+  font-size: 11px;
+  line-height: 1.1;
+  font-weight: 900;
+  letter-spacing: .025em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+
+  transform: translate(-50%, 6px) scale(.98);
+  transform-origin: 50% 100%;
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+
+  transition:
+    opacity var(--home-transition-fast) ease,
+    visibility var(--home-transition-fast) ease,
+    transform var(--home-transition-fast) var(--home-ease);
+}
+
+:where(.home-view-root, [data-home-scope])
+:is(
+  .home-user-avatar,
+  .home-ticket-avatar,
+  .home-technician-avatar,
+  .home-modal-technician-avatar,
+  .incidencias-avatar,
+  .incidencias-agent-avatar
+)[data-tooltip]:hover::before,
+:where(.home-view-root, [data-home-scope])
+:is(
+  .home-user-avatar,
+  .home-ticket-avatar,
+  .home-technician-avatar,
+  .home-modal-technician-avatar,
+  .incidencias-avatar,
+  .incidencias-agent-avatar
+)[data-tooltip]:focus-visible::before {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0) scale(1);
 }
 
 
@@ -438,7 +592,8 @@
 .home-user-avatar::after,
 .home-ticket-avatar::after,
 .home-technician-avatar::after,
-.home-modal-technician-avatar::after {
+.home-modal-technician-avatar::after,
+.incidencias-avatar::after {
   content: "";
 
   position: absolute;
@@ -466,6 +621,7 @@
 
   display: block;
 
+  border-radius: inherit;
   object-fit: cover;
   object-position: center;
 }
@@ -754,7 +910,7 @@
 
 
 /* =========================================================
-   MINI MÉTRICAS · ABIERDAS/CERRADAS A TODO ANCHO
+   MINI MÉTRICAS · ABIERDAS/CERRADAS
 ========================================================= */
 
 .home-hero-minimetrics,
@@ -1862,7 +2018,7 @@
 
 
 /* =========================================================
-   TABLA HOME · INCIDENCIAS 7 COLUMNAS
+   TABLA HOME · INCIDENCIAS COMPACTA 7 COLUMNAS
 ========================================================= */
 
 .home-tickets--incidencias-table {
@@ -1888,36 +2044,40 @@
 }
 
 .home-table--incidencias,
-.home-tickets--incidencias-table .incidencias-table {
-  min-inline-size: 1180px;
+.home-tickets--incidencias-table .incidencias-table,
+.home-table--incidencias.home-table--compact,
+.home-tickets--incidencias-table .incidencias-table--compact,
+.home-tickets--incidencias-table .incidencias-table--precision {
+  min-inline-size: var(--home-table-min-width);
+  table-layout: fixed;
 }
 
 .home-table--incidencias .incidencias-col--main {
-  width: 46%;
+  width: var(--home-col-main) !important;
 }
 
 .home-table--incidencias .incidencias-col--status {
-  width: 10%;
+  width: var(--home-col-status) !important;
 }
 
 .home-table--incidencias .incidencias-col--created {
-  width: 11%;
+  width: var(--home-col-created) !important;
 }
 
 .home-table--incidencias .incidencias-col--updated {
-  width: 12%;
+  width: var(--home-col-updated) !important;
 }
 
 .home-table--incidencias .incidencias-col--importe {
-  width: 10%;
+  width: var(--home-col-importe) !important;
 }
 
 .home-table--incidencias .incidencias-col--attachments {
-  width: 72px;
+  width: var(--home-col-attachments) !important;
 }
 
 .home-table--incidencias .incidencias-col--actions {
-  width: 116px;
+  width: var(--home-col-actions) !important;
 }
 
 .home-table--incidencias thead th {
@@ -1927,7 +2087,7 @@
 
   block-size: 50px;
 
-  padding: 12px 12px;
+  padding: 12px 10px;
 
   border-block-end: 1px solid var(--home-border-soft);
 
@@ -1952,48 +2112,48 @@
 }
 
 .home-table--incidencias thead th:first-child {
-  padding-inline-start: 30px;
+  padding-inline-start: 26px;
   text-align: left;
 }
 
 .home-table--incidencias thead th:last-child,
 .home-table--incidencias tbody td:last-child {
-  padding-inline-end: 18px;
+  padding-inline-end: 14px;
 }
 
 .home-table--incidencias thead th:nth-child(1),
 .home-table--incidencias tbody td:nth-child(1) {
-  inline-size: 46%;
+  inline-size: var(--home-col-main) !important;
 }
 
 .home-table--incidencias thead th:nth-child(2),
 .home-table--incidencias tbody td:nth-child(2) {
-  inline-size: 10%;
+  inline-size: var(--home-col-status) !important;
 }
 
 .home-table--incidencias thead th:nth-child(3),
 .home-table--incidencias tbody td:nth-child(3) {
-  inline-size: 11%;
+  inline-size: var(--home-col-created) !important;
 }
 
 .home-table--incidencias thead th:nth-child(4),
 .home-table--incidencias tbody td:nth-child(4) {
-  inline-size: 12%;
+  inline-size: var(--home-col-updated) !important;
 }
 
 .home-table--incidencias thead th:nth-child(5),
 .home-table--incidencias tbody td:nth-child(5) {
-  inline-size: 10%;
+  inline-size: var(--home-col-importe) !important;
 }
 
 .home-table--incidencias thead th:nth-child(6),
 .home-table--incidencias tbody td:nth-child(6) {
-  inline-size: 72px;
+  inline-size: var(--home-col-attachments) !important;
 }
 
 .home-table--incidencias thead th:nth-child(7),
 .home-table--incidencias tbody td:nth-child(7) {
-  inline-size: 116px;
+  inline-size: var(--home-col-actions) !important;
 }
 
 .home-table--incidencias tbody tr {
@@ -2002,7 +2162,7 @@
 
 .home-table--incidencias tbody td,
 .home-table--incidencias .incidencias-cell {
-  padding: 13px 12px;
+  padding: 12px 10px;
 
   border-block-end: 1px solid var(--home-border-soft);
 
@@ -2072,7 +2232,7 @@
 .home-table--incidencias .incidencias-cell--main {
   position: relative;
 
-  padding-inline-start: 28px !important;
+  padding-inline-start: 24px !important;
 
   text-align: left;
 }
@@ -2135,10 +2295,10 @@
   min-inline-size: 0;
 
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-columns: var(--home-avatar-user-size) minmax(0, 1fr);
   align-items: center;
 
-  gap: 14px;
+  gap: 12px;
 }
 
 .home-table--incidencias .incidencias-main-copy {
@@ -2151,7 +2311,6 @@
 }
 
 .home-table--incidencias .incidencias-ticket-line,
-.home-table--incidencias .incidencias-client-line,
 .home-table--incidencias .incidencias-row-badges {
   min-inline-size: 0;
 
@@ -2186,7 +2345,11 @@
   align-items: center;
   justify-content: center;
 
+  max-inline-size: 180px;
+
   padding-inline: 10px;
+
+  overflow: hidden;
 
   border: 1px solid color-mix(in srgb, var(--home-text-strong) 13%, transparent);
   border-radius: 999px;
@@ -2199,6 +2362,7 @@
   font-weight: 950;
   letter-spacing: .055em;
   text-transform: uppercase;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -2234,64 +2398,27 @@
   white-space: nowrap;
 }
 
-.home-table--incidencias .incidencias-client-line {
-  color: var(--home-text-dim);
-
-  font-size: 12px;
-  line-height: 1.22;
-  font-weight: 750;
-}
-
-.home-table--incidencias .incidencias-client-name {
-  min-inline-size: 0;
-  max-inline-size: 220px;
-
-  overflow: hidden;
-
-  color: color-mix(in srgb, var(--home-text-strong) 78%, transparent);
-
-  font-weight: 950;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.home-table--incidencias .incidencias-client-email {
-  min-inline-size: 0;
-  max-inline-size: 280px;
-
-  overflow: hidden;
-
-  color: var(--home-text-dim);
-
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.home-table--incidencias .incidencias-client-separator {
-  color: color-mix(in srgb, var(--home-text-strong) 32%, transparent);
-}
-
 .home-table--incidencias .incidencias-row-badges {
   margin-block-start: 2px;
 }
 
 
 /* =========================================================
-   TABLA · AVATAR CLIENTE
+   TABLA · AVATAR USUARIO COMPACTO
 ========================================================= */
 
-.home-table--incidencias .incidencias-avatar {
+.home-table--incidencias .incidencias-avatar,
+.home-table--incidencias .incidencias-avatar--compact {
   position: relative;
 
-  inline-size: 58px;
-  block-size: 58px;
+  inline-size: var(--home-avatar-user-size) !important;
+  block-size: var(--home-avatar-user-size) !important;
+  min-inline-size: var(--home-avatar-user-size) !important;
 
   display: grid;
   place-items: center;
 
-  overflow: hidden;
-
-  flex: 0 0 58px;
+  flex: 0 0 var(--home-avatar-user-size) !important;
 
   border: 1px solid color-mix(in srgb, var(--home-row-accent) 22%, rgba(255,255,255,.15));
   border-radius: 999px;
@@ -2309,21 +2436,6 @@
   transform: translateZ(0);
 }
 
-.home-table--incidencias .incidencias-avatar::after {
-  content: "";
-
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-
-  border-radius: inherit;
-
-  pointer-events: none;
-
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.20), transparent 48%);
-}
-
 .home-table--incidencias .incidencias-avatar-img {
   position: absolute;
   inset: 0;
@@ -2334,6 +2446,7 @@
 
   display: block;
 
+  border-radius: inherit;
   object-fit: cover;
   object-position: center;
 }
@@ -2349,7 +2462,7 @@
 
   color: #ffffff;
 
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1;
   font-weight: 950;
   letter-spacing: -.055em;
@@ -2546,25 +2659,41 @@
 }
 
 .incidencias-mini-badge--agent {
-  max-inline-size: 240px;
+  max-inline-size: min(240px, 100%);
   padding-inline-start: 5px;
 
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.incidencias-agent-avatar {
+.incidencias-agent-name {
+  min-inline-size: 0;
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* =========================================================
+   AVATAR TÉCNICO
+========================================================= */
+
+.incidencias-agent-avatar,
+.incidencias-agent-avatar--compact {
   position: relative;
 
-  inline-size: 22px;
-  block-size: 22px;
+  inline-size: var(--home-avatar-agent-size) !important;
+  block-size: var(--home-avatar-agent-size) !important;
+  min-inline-size: var(--home-avatar-agent-size) !important;
 
   display: grid;
   place-items: center;
 
-  overflow: hidden;
+  overflow: visible;
 
-  flex: 0 0 22px;
+  flex: 0 0 var(--home-avatar-agent-size) !important;
 
   border: 1px solid color-mix(in srgb, var(--home-text-strong) 16%, transparent);
   border-radius: 999px;
@@ -2586,7 +2715,9 @@
 
   display: block;
 
+  border-radius: inherit;
   object-fit: cover;
+  object-position: center;
 }
 
 .incidencias-agent-avatar-fallback {
@@ -2609,6 +2740,11 @@
   display: none !important;
 }
 
+
+/* =========================================================
+   TABLA · FECHAS / IMPORTE / ADJUNTOS / ACCIONES
+========================================================= */
+
 .home-date-inline,
 .incidencias-date-inline {
   inline-size: 100%;
@@ -2626,8 +2762,8 @@
 }
 
 .incidencias-importe {
-  min-inline-size: 90px;
-  max-inline-size: 128px;
+  min-inline-size: 74px;
+  max-inline-size: 104px;
 
   color: var(--home-text-muted);
 
@@ -2654,16 +2790,11 @@
 }
 
 .incidencias-attachments-pill {
-  min-inline-size: 58px;
-  padding-inline: 10px;
+  min-inline-size: 52px;
+  padding-inline: 8px;
 
   color: var(--home-text-muted);
 }
-
-
-/* =========================================================
-   BOTÓN DETALLE TABLA
-========================================================= */
 
 .home-detail-btn,
 .incidencias-detail-btn {
@@ -2768,7 +2899,7 @@
   min-block-size: 92px;
 
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr) 118px 126px 126px 104px 64px 104px;
+  grid-template-columns: 52px minmax(0, 1fr) 110px 118px 126px 88px 56px 104px;
   align-items: center;
 
   gap: 12px;
@@ -2812,8 +2943,8 @@
 
 .home-skeleton--avatar,
 .incidencias-skeleton--avatar {
-  inline-size: 58px;
-  block-size: 58px;
+  inline-size: 52px;
+  block-size: 52px;
   border-radius: var(--home-radius-pill);
 }
 
@@ -2861,14 +2992,14 @@
 
 .home-skeleton--amount,
 .incidencias-skeleton--amount {
-  inline-size: 104px;
-  block-size: 36px;
+  inline-size: 88px;
+  block-size: 34px;
   border-radius: var(--home-radius-pill);
 }
 
 .home-skeleton--attach,
 .incidencias-skeleton--attach {
-  inline-size: 58px;
+  inline-size: 56px;
   block-size: 34px;
   border-radius: var(--home-radius-pill);
 }
@@ -3619,8 +3750,8 @@
 }
 
 @container (max-width: 760px) {
-  .home-table--incidencias {
-    min-inline-size: 1120px;
+  :where(.home-view-root, [data-home-scope]) {
+    --home-table-min-width: 1080px;
   }
 
   .home-detail-btn,
@@ -3635,6 +3766,7 @@
   :where(.home-view-root, [data-home-scope]) {
     --home-panel-pad-x: 14px;
     --home-panel-pad-y: 14px;
+    --home-table-min-width: 1040px;
     --home-table-row-height: 96px;
   }
 
@@ -3677,10 +3809,6 @@
 
   .home-btn {
     min-block-size: 42px;
-  }
-
-  .home-table--incidencias {
-    min-inline-size: 1080px;
   }
 
   .home-table thead th,
@@ -3802,6 +3930,10 @@
 }
 
 @media (max-width: 680px) {
+  :where(.home-view-root, [data-home-scope]) {
+    --home-table-min-width: 1040px;
+  }
+
   .home-hero-actions,
   .home-panel-head-actions {
     inline-size: 100%;
@@ -3821,10 +3953,6 @@
   .home-stats,
   .home-cards-loading {
     grid-template-columns: 1fr;
-  }
-
-  .home-table--incidencias {
-    min-inline-size: 1080px;
   }
 
   .home-modal {
@@ -3910,7 +4038,16 @@
 
 @media (prefers-reduced-transparency: reduce) {
   .home-table thead th,
-  .home-modal-backdrop {
+  .home-modal-backdrop,
+  :where(.home-view-root, [data-home-scope])
+  :is(
+    .home-user-avatar,
+    .home-ticket-avatar,
+    .home-technician-avatar,
+    .home-modal-technician-avatar,
+    .incidencias-avatar,
+    .incidencias-agent-avatar
+  )[data-tooltip]::before {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
@@ -3939,7 +4076,16 @@
   .incidencias-inline-spinner,
   .incidencias-cell--main::before,
   .home-stat-card::after,
-  .home-modal {
+  .home-modal,
+  :where(.home-view-root, [data-home-scope])
+  :is(
+    .home-user-avatar,
+    .home-ticket-avatar,
+    .home-technician-avatar,
+    .home-modal-technician-avatar,
+    .incidencias-avatar,
+    .incidencias-agent-avatar
+  )[data-tooltip]::before {
     transition: none !important;
     animation: none !important;
   }

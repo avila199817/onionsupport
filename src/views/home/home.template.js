@@ -14,13 +14,16 @@
    - Listas Home limitadas a 5 últimos elementos.
    - Contadores sobre totales completos.
    - Tabla de incidencias del Home alineada 1:1 con el template de Incidencias.
-   - Primera columna con avatar/cliente, ID completo, asunto, descripción, prioridad y técnico.
+   - Columnas de incidencias preparadas para layout compacto y sin huecos muertos.
+   - Primera columna con avatar de usuario compacto, ID completo, asunto, descripción,
+     prioridad y técnico asignado.
+   - Sin línea visual redundante "Cliente · Sin email".
    - Sin columna Técnico separada.
    - Usuario/avatar del Home consumido desde el view-model canónico del sidebar.
    - ID de incidencia completo visible.
    - Detalle de incidencia abre modal.
    - Modal con técnico asignado, avatar/iniciales y facturas vinculadas.
-   - Avatar visible con tono dinámico.
+   - Avatar visible con tono dinámico y data-tooltip con nombre completo.
    - Textos visibles en español.
    - Modelo calculado una sola vez por render.
    - Sin rutas opcionales inventadas.
@@ -80,7 +83,7 @@ import {
   getActivityType,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.final.15";
+export const TEMPLATE_VERSION = "home.template.final.16";
 
 const ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -1198,6 +1201,8 @@ function avatar({
     <div
       class="${joinClasses(className, src ? "has-image" : fallbackClass, src ? "" : "is-fallback", `home-avatar-tone-${tone}`)}"
       aria-label="${attr(label)}"
+      data-tooltip="${attr(label)}"
+      title="${attr(label)}"
       data-avatar-root="true"
       data-avatar-kind="${attr(kind)}"
       data-avatar-seed="${attr(avatarSeed)}"
@@ -1895,49 +1900,7 @@ function getTicketClientNameForRow(item = {}) {
   );
 }
 
-function getTicketClientEmailForRow(item = {}) {
-  const raw = getRawItem(item);
-
-  return safeText(
-    first(
-      item.clientEmail,
-      item.clienteEmail,
-      item.emailCliente,
-      item.requesterEmail,
-      item.customerEmail,
-      item.createdByEmail,
-
-      item.requesterSnapshot?.email,
-      item.createdBy?.email,
-
-      item.cliente?.email,
-      item.cliente?.emailLower,
-      item.client?.email,
-      item.customer?.email,
-      item.receptor?.email,
-
-      raw.clientEmail,
-      raw.clienteEmail,
-      raw.emailCliente,
-      raw.requesterEmail,
-      raw.customerEmail,
-      raw.createdByEmail,
-
-      raw.requesterSnapshot?.email,
-      raw.createdBy?.email,
-
-      raw.cliente?.email,
-      raw.cliente?.emailLower,
-      raw.client?.email,
-      raw.customer?.email,
-      raw.receptor?.email,
-      ""
-    ),
-    ""
-  ).toLowerCase();
-}
-
-function getTicketClientAvatarForRow(item = {}) {
+function getTicketUserAvatarForRow(item = {}) {
   const raw = getRawItem(item);
 
   return safeImageSrc(
@@ -2510,19 +2473,25 @@ function renderIncidenciasInlineSpinner(label = "") {
   `;
 }
 
-function renderTicketClientAvatar(item = {}) {
+function renderTicketUserAvatar(item = {}) {
   const ticketId = getRowTicketId(item);
   const fullName = getTicketClientNameForRow(item);
   const initials = safeText(getInitials(fullName), "ON").slice(0, 3).toUpperCase();
-  const avatarUrl = getTicketClientAvatarForRow(item);
+  const avatarUrl = getTicketUserAvatarForRow(item);
   const tone = String(hashString(`${ticketId}|${fullName}`) % 10);
+  const tooltip = fullName || "Usuario";
 
   if (avatarUrl) {
     return `
       <div
-        class="incidencias-avatar"
-        ${tooltipAttrs(fullName, fullName)}
+        class="incidencias-avatar incidencias-avatar--user incidencias-avatar--compact"
+        ${tooltipAttrs(tooltip, tooltip)}
+        title="${attr(tooltip)}"
+        style="inline-size: 52px; block-size: 52px; min-inline-size: 52px;"
         data-avatar-tone="${attr(tone)}"
+        data-avatar-name="${attr(fullName)}"
+        data-avatar-size="sm"
+        data-user-avatar="true"
         data-has-avatar="true"
         data-fallback="false"
         data-incidencias-avatar="true"
@@ -2537,16 +2506,21 @@ function renderTicketClientAvatar(item = {}) {
           draggable="false"
           data-incidencias-avatar-img="true"
         >
-        <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
+        <span class="incidencias-avatar-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
       </div>
     `;
   }
 
   return `
     <div
-      class="incidencias-avatar incidencias-avatar--fallback"
-      ${tooltipAttrs(fullName, fullName)}
+      class="incidencias-avatar incidencias-avatar--user incidencias-avatar--compact incidencias-avatar--fallback"
+      ${tooltipAttrs(tooltip, tooltip)}
+      title="${attr(tooltip)}"
+      style="inline-size: 52px; block-size: 52px; min-inline-size: 52px;"
       data-avatar-tone="${attr(tone)}"
+      data-avatar-name="${attr(fullName)}"
+      data-avatar-size="sm"
+      data-user-avatar="true"
       data-fallback="true"
       data-incidencias-avatar="true"
     >
@@ -2582,13 +2556,24 @@ function renderTicketPriorityBadge(item = {}) {
 
 function renderAssignedAgentAvatar(item = {}) {
   const technician = getRowTechnician(item);
-  const initials = safeText(first(technician.initials, getInitials(technician.name)), "SA")
+  const label = visualLabel(technician.name, "Sin asignar");
+  const initials = safeText(first(technician.initials, getInitials(label)), "SA")
     .slice(0, 3)
     .toUpperCase();
 
   if (!technician.avatarUrl) {
     return `
-      <span class="incidencias-agent-avatar incidencias-agent-avatar--fallback" aria-hidden="true">
+      <span
+        class="incidencias-agent-avatar incidencias-agent-avatar--compact incidencias-agent-avatar--fallback"
+        ${tooltipAttrs(label, label)}
+        title="${attr(label)}"
+        style="inline-size: 22px; block-size: 22px; min-inline-size: 22px;"
+        data-technician-avatar="true"
+        data-avatar-name="${attr(label)}"
+        data-avatar-size="xs"
+        data-fallback="true"
+        role="img"
+      >
         <span class="incidencias-agent-avatar-fallback">${escapeHtml(initials)}</span>
       </span>
     `;
@@ -2596,42 +2581,48 @@ function renderAssignedAgentAvatar(item = {}) {
 
   return `
     <span
-      class="incidencias-agent-avatar incidencias-agent-avatar--image"
-      ${tooltipAttrs(technician.email || technician.name, technician.email || technician.name)}
+      class="incidencias-agent-avatar incidencias-agent-avatar--compact incidencias-agent-avatar--image"
+      ${tooltipAttrs(label, label)}
+      title="${attr(label)}"
+      style="inline-size: 22px; block-size: 22px; min-inline-size: 22px;"
       data-technician-avatar="true"
+      data-avatar-name="${attr(label)}"
+      data-avatar-size="xs"
       data-avatar-fallback-index="0"
       data-avatar-fallback-srcs="${attr(technician.avatarUrl)}"
       data-fallback="false"
-      aria-hidden="true"
+      role="img"
     >
       <img
         class="incidencias-agent-avatar-img"
         src="${attr(technician.avatarUrl)}"
-        alt=""
+        alt="${attr(label)}"
         loading="lazy"
         decoding="async"
         referrerpolicy="no-referrer"
         draggable="false"
         data-incidencias-agent-avatar-img="true"
       >
-      <span class="incidencias-agent-avatar-fallback">${escapeHtml(initials)}</span>
+      <span class="incidencias-agent-avatar-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
     </span>
   `;
 }
 
 function renderAssignedBadge(item = {}) {
   const technician = getRowTechnician(item);
-  const tooltip = `Técnico · ${technician.name}${technician.email ? ` · ${technician.email}` : ""}`;
+  const technicianName = visualLabel(technician.name, "Sin asignar");
+  const tooltip = `Técnico asignado · ${technicianName}`;
 
   return `
     <span
       class="incidencias-mini-badge incidencias-mini-badge--agent"
       ${tooltipAttrs(tooltip, tooltip)}
-      data-assigned-technician="${attr(technician.name)}"
+      title="${attr(tooltip)}"
+      data-assigned-technician="${attr(technicianName)}"
       data-assigned-email="${attr(technician.email)}"
     >
       ${renderAssignedAgentAvatar(item)}
-      ${escapeHtml(technician.name)}
+      <span class="incidencias-agent-name">${escapeHtml(technicianName)}</span>
     </span>
   `;
 }
@@ -2691,7 +2682,6 @@ function ticketRow(item = {}, state = {}) {
   const statusKey = getTicketStatusKeyForRow(item);
   const priorityKey = getTicketPriorityKeyForRow(item);
   const clientName = getTicketClientNameForRow(item);
-  const clientEmail = getTicketClientEmailForRow(item) || "Sin email";
   const createdAt = first(item.createdAt, item.fechaCreacion, item.createdAtES, getTicketCreatedAt(item));
   const updatedAt = first(item.lastActivityAt, item.updatedAt, item.lastUpdateAt, item.ultimaNovedad, getTicketUpdatedAt(item));
   const createdLabel = safeText(first(item.createdAtLabel, item.fechaCreacionLabel, formatDateTime(createdAt)), "—");
@@ -2719,6 +2709,7 @@ function ticketRow(item = {}, state = {}) {
       data-ticket-id="${attr(ticketId)}"
       data-incidencia-id="${attr(ticketId)}"
       data-entity-id="${attr(ticketId)}"
+      data-requester-name="${attr(clientName)}"
       data-status-key="${attr(statusKey)}"
       data-priority-key="${attr(priorityKey)}"
       data-detail-target="true"
@@ -2732,7 +2723,7 @@ function ticketRow(item = {}, state = {}) {
     >
       <td class="incidencias-cell incidencias-cell--main home-ticket-cell home-ticket-cell--main">
         <div class="incidencias-main">
-          ${renderTicketClientAvatar(item)}
+          ${renderTicketUserAvatar(item)}
 
           <div class="incidencias-main-copy">
             <div class="incidencias-ticket-line">
@@ -2742,12 +2733,6 @@ function ticketRow(item = {}, state = {}) {
 
             <div class="incidencias-ticket-subject">${escapeHtml(subject)}</div>
             <div class="incidencias-ticket-description">${escapeHtml(description)}</div>
-
-            <div class="incidencias-client-line">
-              <span class="incidencias-client-name">${escapeHtml(clientName)}</span>
-              <span class="incidencias-client-separator">·</span>
-              <span class="incidencias-client-email">${escapeHtml(clientEmail)}</span>
-            </div>
 
             <div class="incidencias-row-badges">
               ${renderTicketPriorityBadge(item)}
@@ -2886,20 +2871,25 @@ export function renderHomeTicketsTable(input = {}) {
             ${rows.length
               ? `
                 <div class="home-table-shell incidencias-table-shell">
-                  <table class="home-table home-table--incidencias incidencias-table" role="table" aria-label="Últimas incidencias del Home">
+                  <table
+                    class="home-table home-table--incidencias home-table--compact incidencias-table incidencias-table--compact incidencias-table--precision"
+                    role="table"
+                    aria-label="Últimas incidencias del Home"
+                    data-table-layout="incidencias-compact"
+                  >
                     <colgroup>
-                      <col class="incidencias-col incidencias-col--main">
-                      <col class="incidencias-col incidencias-col--status">
-                      <col class="incidencias-col incidencias-col--created">
-                      <col class="incidencias-col incidencias-col--updated">
-                      <col class="incidencias-col incidencias-col--importe">
-                      <col class="incidencias-col incidencias-col--attachments">
-                      <col class="incidencias-col incidencias-col--actions">
+                      <col class="incidencias-col incidencias-col--main" style="width: 41%">
+                      <col class="incidencias-col incidencias-col--status" style="width: 10%">
+                      <col class="incidencias-col incidencias-col--created" style="width: 11%">
+                      <col class="incidencias-col incidencias-col--updated" style="width: 12%">
+                      <col class="incidencias-col incidencias-col--importe" style="width: 8%">
+                      <col class="incidencias-col incidencias-col--attachments" style="width: 5%">
+                      <col class="incidencias-col incidencias-col--actions" style="width: 13%">
                     </colgroup>
 
                     <thead data-incidencias-table-head="true">
                       <tr>
-                        <th scope="col">Incidencia / cliente</th>
+                        <th scope="col">Incidencia</th>
                         <th scope="col">Estado</th>
                         <th scope="col">Creación</th>
                         <th scope="col">Última novedad</th>

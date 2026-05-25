@@ -60,7 +60,7 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_API_VERSION = "home.api.v10";
+export const HOME_API_VERSION = "home.api.v11";
 
 export const HOME_DASHBOARD_ENDPOINT = "local:home-list-aggregate";
 export const HOME_DASHBOARD_LEGACY_ENDPOINT = "";
@@ -1068,60 +1068,750 @@ function ticketAvatarUrl(item = {}) {
 function technicianId(item = {}) {
   return safePublicId(
     first(
+      item.assignedToUserId,
+      item.assignedToId,
+      item.assigneeId,
+      item.technicianId,
+      item.tecnicoId,
+      item.agentId,
+
       item.assignment?.assignedToUserId,
+      item.assignment?.assignedToId,
+      item.assignment?.assigneeId,
+      item.assignment?.technicianId,
+      item.assignment?.tecnicoId,
+      item.assignment?.agentId,
       item.assignment?.userId,
+      item.assignment?.id,
+
       item.assignedTo?.userId,
+      item.assignedTo?.usuarioId,
+      item.assignedTo?.uid,
+      item.assignedTo?.sub,
       item.assignedTo?.id,
+
       item.tecnico?.userId,
+      item.tecnico?.usuarioId,
+      item.tecnico?.uid,
+      item.tecnico?.sub,
       item.tecnico?.id,
+
       item.technician?.userId,
+      item.technician?.usuarioId,
+      item.technician?.uid,
+      item.technician?.sub,
       item.technician?.id,
+
+      item.assignedTechnician?.userId,
+      item.assignedTechnician?.id,
+      item.assignedUser?.userId,
+      item.assignedUser?.id,
+
       item.meta?.technicianUserId,
       item.meta?.assignedToUserId,
+      item.meta?.tecnicoId,
+      item.meta?.assigneeId,
       ""
     )
   );
 }
 
 function technicianName(item = {}) {
+  const assignedToObject = safeObject(typeof item.assignedTo === "object" ? item.assignedTo : {});
+
   return firstVisual(
     [
+      item.technicianName,
+      item.tecnicoName,
+      item.tecnicoNombre,
+      item.assignedToName,
+      item.assignedName,
+      item.assigneeName,
+      item.agentName,
+
       item.assignment?.assignedToName,
+      item.assignment?.technicianName,
+      item.assignment?.tecnicoName,
+      item.assignment?.agentName,
       item.assignment?.displayName,
+      item.assignment?.fullName,
       item.assignment?.name,
-      item.assignedTo?.displayName,
-      item.assignedTo?.name,
+      item.assignment?.assignedTo?.displayName,
+      item.assignment?.assignedTo?.fullName,
+      item.assignment?.assignedTo?.name,
+
+      assignedToObject.displayName,
+      assignedToObject.fullName,
+      assignedToObject.name,
+      assignedToObject.nombre,
+      assignedToObject.username,
+
       item.tecnico?.displayName,
+      item.tecnico?.fullName,
       item.tecnico?.name,
+      item.tecnico?.nombre,
+      item.tecnico?.username,
+
       item.technician?.displayName,
+      item.technician?.fullName,
       item.technician?.name,
+      item.technician?.nombre,
+      item.technician?.username,
+
+      item.assignedTechnician?.displayName,
+      item.assignedTechnician?.fullName,
+      item.assignedTechnician?.name,
+      item.assignedUser?.displayName,
+      item.assignedUser?.fullName,
+      item.assignedUser?.name,
+
       item.meta?.technicianName,
       item.meta?.lastTechnicianName,
+      item.meta?.assignedToName,
+
       typeof item.assignedTo === "string" ? item.assignedTo : "",
       typeof item.tecnico === "string" ? item.tecnico : "",
-      item.agent,
-      item.assignee,
+      typeof item.technician === "string" ? item.technician : "",
+      typeof item.agent === "string" ? item.agent : "",
+      typeof item.assignee === "string" ? item.assignee : "",
     ],
     "Sin asignar"
   );
 }
 
-function technicianAvatarUrl(item = {}) {
+function userAvatarUrl(item = {}) {
+  const source = safeObject(item);
+
   return safePublicUrl(
     first(
-      item.technician?.avatarUrl,
-      item.technician?.avatar,
-      item.assignedTo?.avatarUrl,
-      item.assignedTo?.avatar,
-      item.tecnico?.avatarUrl,
-      item.tecnico?.avatar,
-      item.assignment?.avatarUrl,
-      item.assignment?.avatar,
-      item.technicianAvatarUrl,
-      item.technicianAvatar,
+      source.avatarUrl,
+      source.avatarURL,
+      source.avatar_url,
+      source.avatar,
+
+      source.photoUrl,
+      source.photoURL,
+      source.photo_url,
+      source.photo,
+
+      source.pictureUrl,
+      source.pictureURL,
+      source.picture_url,
+      source.picture,
+
+      source.imageUrl,
+      source.imageURL,
+      source.image_url,
+      source.image,
+
+      source.fotoUrl,
+      source.fotoURL,
+      source.foto_url,
+      source.foto,
+
+      source.imagenUrl,
+      source.imagenURL,
+      source.imagen_url,
+      source.imagen,
+
+      source.profile?.avatarUrl,
+      source.profile?.avatarURL,
+      source.profile?.avatar_url,
+      source.profile?.avatar,
+      source.profile?.photoUrl,
+      source.profile?.photoURL,
+      source.profile?.photo_url,
+      source.profile?.photo,
+      source.profile?.pictureUrl,
+      source.profile?.pictureURL,
+      source.profile?.picture_url,
+      source.profile?.picture,
+      source.profile?.imageUrl,
+      source.profile?.imageURL,
+      source.profile?.image_url,
+      source.profile?.image,
+
+      source.media?.avatarUrl,
+      source.media?.avatarURL,
+      source.media?.avatar_url,
+      source.media?.avatar,
+      source.media?.photoUrl,
+      source.media?.photoURL,
+      source.media?.photo_url,
+      source.media?.photo,
+      source.media?.pictureUrl,
+      source.media?.pictureURL,
+      source.media?.picture_url,
+      source.media?.picture,
+      source.media?.imageUrl,
+      source.media?.imageURL,
+      source.media?.image_url,
+      source.media?.image,
       ""
     )
   );
+}
+
+function userDisplayName(item = {}, fallback = "Usuario") {
+  const source = safeObject(item);
+  const userId = getUserId(source);
+
+  return firstVisual(
+    [
+      source.displayName,
+      source.fullName,
+      source.name,
+      source.nombre,
+      source.contacto?.displayName,
+      source.contacto?.name,
+      source.contacto?.nombre,
+      source.profile?.publicName,
+      source.profile?.displayName,
+      source.profile?.fullName,
+      source.profile?.name,
+      source.profile?.nombre,
+      source.username,
+      source.userName,
+      source.slug,
+      userId ? `Usuario ${userId}` : "",
+    ],
+    fallback
+  );
+}
+
+function technicianAvatarUrl(item = {}) {
+  const assignedToObject = safeObject(typeof item.assignedTo === "object" ? item.assignedTo : {});
+
+  return safePublicUrl(
+    first(
+      item.technician?.avatarUrl,
+      item.technician?.avatarURL,
+      item.technician?.avatar_url,
+      item.technician?.avatar,
+      item.technician?.photoUrl,
+      item.technician?.photoURL,
+      item.technician?.photo_url,
+      item.technician?.photo,
+      item.technician?.pictureUrl,
+      item.technician?.pictureURL,
+      item.technician?.picture_url,
+      item.technician?.picture,
+      item.technician?.imageUrl,
+      item.technician?.imageURL,
+      item.technician?.image_url,
+      item.technician?.image,
+      item.technician?.profile?.avatarUrl,
+      item.technician?.profile?.avatar,
+      item.technician?.media?.avatarUrl,
+      item.technician?.media?.avatar,
+
+      assignedToObject.avatarUrl,
+      assignedToObject.avatarURL,
+      assignedToObject.avatar_url,
+      assignedToObject.avatar,
+      assignedToObject.photoUrl,
+      assignedToObject.photoURL,
+      assignedToObject.photo_url,
+      assignedToObject.photo,
+      assignedToObject.pictureUrl,
+      assignedToObject.pictureURL,
+      assignedToObject.picture_url,
+      assignedToObject.picture,
+      assignedToObject.imageUrl,
+      assignedToObject.imageURL,
+      assignedToObject.image_url,
+      assignedToObject.image,
+      assignedToObject.profile?.avatarUrl,
+      assignedToObject.profile?.avatar,
+      assignedToObject.media?.avatarUrl,
+      assignedToObject.media?.avatar,
+
+      item.tecnico?.avatarUrl,
+      item.tecnico?.avatarURL,
+      item.tecnico?.avatar_url,
+      item.tecnico?.avatar,
+      item.tecnico?.photoUrl,
+      item.tecnico?.photoURL,
+      item.tecnico?.photo_url,
+      item.tecnico?.photo,
+      item.tecnico?.pictureUrl,
+      item.tecnico?.pictureURL,
+      item.tecnico?.picture_url,
+      item.tecnico?.picture,
+      item.tecnico?.imageUrl,
+      item.tecnico?.imageURL,
+      item.tecnico?.image_url,
+      item.tecnico?.image,
+      item.tecnico?.profile?.avatarUrl,
+      item.tecnico?.profile?.avatar,
+      item.tecnico?.media?.avatarUrl,
+      item.tecnico?.media?.avatar,
+
+      item.assignedTechnician?.avatarUrl,
+      item.assignedTechnician?.avatar,
+      item.assignedTechnician?.photoUrl,
+      item.assignedTechnician?.pictureUrl,
+      item.assignedTechnician?.imageUrl,
+      item.assignedUser?.avatarUrl,
+      item.assignedUser?.avatar,
+      item.assignedUser?.photoUrl,
+      item.assignedUser?.pictureUrl,
+      item.assignedUser?.imageUrl,
+
+      item.assignment?.assignedTo?.avatarUrl,
+      item.assignment?.assignedTo?.avatar,
+      item.assignment?.technician?.avatarUrl,
+      item.assignment?.technician?.avatar,
+      item.assignment?.agent?.avatarUrl,
+      item.assignment?.agent?.avatar,
+      item.assignment?.assignedToAvatarUrl,
+      item.assignment?.assignedToAvatar,
+      item.assignment?.technicianAvatarUrl,
+      item.assignment?.technicianAvatar,
+      item.assignment?.agentAvatarUrl,
+      item.assignment?.agentAvatar,
+      item.assignment?.avatarUrl,
+      item.assignment?.avatar,
+
+      item.technicianAvatarUrl,
+      item.technicianAvatar,
+      item.tecnicoAvatarUrl,
+      item.tecnicoAvatar,
+      item.assignedToAvatarUrl,
+      item.assignedToAvatar,
+      item.assignedAvatarUrl,
+      item.assignedAvatar,
+      item.agentAvatarUrl,
+      item.agentAvatar,
+      item.meta?.technicianAvatarUrl,
+      item.meta?.technicianAvatar,
+      item.meta?.assignedToAvatarUrl,
+      ""
+    )
+  );
+}
+
+function normalizeLookupIdentity(value = "") {
+  const key = normalizeKey(value);
+
+  if (!key) return "";
+
+  if ([
+    "sin_asignar",
+    "sin_tecnico",
+    "no_asignado",
+    "no_asignada",
+    "unassigned",
+    "none",
+    "null",
+    "undefined",
+  ].includes(key)) {
+    return "";
+  }
+
+  return key;
+}
+
+function lookupEntry(value = "", priority = 0) {
+  const key = normalizeLookupIdentity(value);
+  return key ? { key, priority } : null;
+}
+
+function pushLookupEntries(entries = [], priority = 0, values = []) {
+  for (const value of safeArray(values).flat(Infinity)) {
+    const entry = lookupEntry(value, priority);
+    if (entry) entries.push(entry);
+  }
+
+  return entries;
+}
+
+function uniqueLookupEntries(entries = []) {
+  const seen = new Set();
+  const output = [];
+
+  for (const entry of safeArray(entries)) {
+    const key = safeText(entry?.key, "");
+    const priority = safeNumber(entry?.priority, 0);
+
+    if (!key || seen.has(key)) continue;
+
+    seen.add(key);
+    output.push({ key, priority });
+  }
+
+  return output.sort((left, right) => right.priority - left.priority);
+}
+
+function userLookupEntries(item = {}) {
+  const source = safeObject(item);
+  const entries = [];
+
+  pushLookupEntries(entries, 100, [
+    getUserId(source),
+    source.userId,
+    source.usuarioId,
+    source.uid,
+    source.sub,
+    source.id,
+    source.userRef?.userId,
+    source.userRef?.id,
+    source.account?.userId,
+    source.auth?.userId,
+    source.lookup?.userId,
+    source.search?.normalizedUserId,
+  ]);
+
+  pushLookupEntries(entries, 90, [
+    source.emailLower,
+    source.email,
+    source.mail,
+    source.contacto?.emailLower,
+    source.contacto?.email,
+    source.lookup?.emailLower,
+    source.search?.normalizedEmail,
+  ]);
+
+  pushLookupEntries(entries, 80, [
+    source.usernameLower,
+    source.username,
+    source.userName,
+    source.slug,
+    source.lookup?.usernameLower,
+    source.lookup?.slug,
+    source.search?.normalizedUsername,
+  ]);
+
+  pushLookupEntries(entries, 40, [
+    source.displayName,
+    source.fullName,
+    source.name,
+    source.nombre,
+    safeText(`${safeText(source.firstName, "")} ${safeText(source.lastName, "")}`, ""),
+    source.contacto?.displayName,
+    source.contacto?.name,
+    source.contacto?.nombre,
+    source.profile?.publicName,
+    source.profile?.displayName,
+    source.profile?.fullName,
+    source.profile?.name,
+    source.profile?.nombre,
+    source.search?.normalizedName,
+    source.search?.normalizedDisplayName,
+  ]);
+
+  return uniqueLookupEntries(entries);
+}
+
+function setUserLookup(map = new Map(), key = "", user = {}, priority = 0) {
+  const cleanKey = normalizeLookupIdentity(key);
+
+  if (!cleanKey || !hasOwnKeys(user)) return map;
+
+  const nextUserId = normalizeLookupIdentity(getUserId(user));
+  const current = map.get(cleanKey);
+
+  if (!current) {
+    map.set(cleanKey, {
+      user,
+      priority,
+      userId: nextUserId,
+      ambiguous: false,
+    });
+
+    return map;
+  }
+
+  const sameUser = Boolean(
+    nextUserId &&
+      current.userId &&
+      nextUserId === current.userId
+  );
+
+  if (sameUser) {
+    if (priority > current.priority) {
+      map.set(cleanKey, {
+        user,
+        priority,
+        userId: nextUserId,
+        ambiguous: false,
+      });
+    }
+
+    return map;
+  }
+
+  if (priority > current.priority) {
+    map.set(cleanKey, {
+      user,
+      priority,
+      userId: nextUserId,
+      ambiguous: false,
+    });
+
+    return map;
+  }
+
+  if (priority === current.priority) {
+    map.set(cleanKey, {
+      ...current,
+      ambiguous: true,
+    });
+  }
+
+  return map;
+}
+
+function buildUsersLookup(...sources) {
+  const map = new Map();
+  const users = safeArray(sources).flat(Infinity).filter(hasOwnKeys);
+
+  for (const user of users) {
+    for (const entry of userLookupEntries(user)) {
+      setUserLookup(map, entry.key, user, entry.priority);
+    }
+  }
+
+  return map;
+}
+
+function ticketTechnicianLookupEntries(item = {}) {
+  const source = safeObject(item);
+  const assignedToObject = safeObject(typeof source.assignedTo === "object" ? source.assignedTo : {});
+  const entries = [];
+
+  pushLookupEntries(entries, 100, [
+    technicianId(source),
+    source.assignedToUserId,
+    source.assignedToId,
+    source.assigneeId,
+    source.technicianId,
+    source.tecnicoId,
+    source.agentId,
+
+    source.assignment?.assignedToUserId,
+    source.assignment?.assignedToId,
+    source.assignment?.assigneeId,
+    source.assignment?.technicianId,
+    source.assignment?.tecnicoId,
+    source.assignment?.agentId,
+    source.assignment?.userId,
+    source.assignment?.id,
+
+    assignedToObject.userId,
+    assignedToObject.usuarioId,
+    assignedToObject.uid,
+    assignedToObject.sub,
+    assignedToObject.id,
+
+    source.tecnico?.userId,
+    source.tecnico?.usuarioId,
+    source.tecnico?.uid,
+    source.tecnico?.sub,
+    source.tecnico?.id,
+
+    source.technician?.userId,
+    source.technician?.usuarioId,
+    source.technician?.uid,
+    source.technician?.sub,
+    source.technician?.id,
+
+    source.assignedTechnician?.userId,
+    source.assignedTechnician?.id,
+    source.assignedUser?.userId,
+    source.assignedUser?.id,
+
+    source.meta?.technicianUserId,
+    source.meta?.assignedToUserId,
+    source.meta?.tecnicoId,
+    source.meta?.assigneeId,
+  ]);
+
+  pushLookupEntries(entries, 90, [
+    source.assignedToEmail,
+    source.technicianEmail,
+    source.tecnicoEmail,
+    source.agentEmail,
+    source.assignment?.assignedToEmail,
+    source.assignment?.technicianEmail,
+    source.assignment?.agentEmail,
+    source.assignment?.email,
+    assignedToObject.emailLower,
+    assignedToObject.email,
+    source.tecnico?.emailLower,
+    source.tecnico?.email,
+    source.technician?.emailLower,
+    source.technician?.email,
+    source.assignedTechnician?.email,
+    source.assignedUser?.email,
+    source.meta?.technicianEmail,
+  ]);
+
+  pushLookupEntries(entries, 80, [
+    source.assignedToUsername,
+    source.technicianUsername,
+    source.tecnicoUsername,
+    source.agentUsername,
+    source.assignment?.username,
+    source.assignment?.assignedToUsername,
+    assignedToObject.usernameLower,
+    assignedToObject.username,
+    assignedToObject.slug,
+    source.tecnico?.usernameLower,
+    source.tecnico?.username,
+    source.tecnico?.slug,
+    source.technician?.usernameLower,
+    source.technician?.username,
+    source.technician?.slug,
+    source.assignedTechnician?.username,
+    source.assignedUser?.username,
+  ]);
+
+  pushLookupEntries(entries, 40, [
+    technicianName(source),
+    source.technicianName,
+    source.tecnicoName,
+    source.tecnicoNombre,
+    source.assignedToName,
+    source.assignedName,
+    source.assigneeName,
+    source.agentName,
+    source.assignment?.assignedToName,
+    source.assignment?.technicianName,
+    source.assignment?.tecnicoName,
+    source.assignment?.agentName,
+    source.assignment?.displayName,
+    source.assignment?.fullName,
+    source.assignment?.name,
+    assignedToObject.displayName,
+    assignedToObject.fullName,
+    assignedToObject.name,
+    assignedToObject.nombre,
+    source.tecnico?.displayName,
+    source.tecnico?.fullName,
+    source.tecnico?.name,
+    source.tecnico?.nombre,
+    source.technician?.displayName,
+    source.technician?.fullName,
+    source.technician?.name,
+    source.technician?.nombre,
+    source.assignedTechnician?.displayName,
+    source.assignedTechnician?.fullName,
+    source.assignedTechnician?.name,
+    source.assignedUser?.displayName,
+    source.assignedUser?.fullName,
+    source.assignedUser?.name,
+    typeof source.assignedTo === "string" ? source.assignedTo : "",
+    typeof source.tecnico === "string" ? source.tecnico : "",
+    typeof source.technician === "string" ? source.technician : "",
+    typeof source.agent === "string" ? source.agent : "",
+    typeof source.assignee === "string" ? source.assignee : "",
+  ]);
+
+  return uniqueLookupEntries(entries);
+}
+
+function findTechnicianUser(item = {}, usersLookup = new Map()) {
+  if (!(usersLookup instanceof Map) || !usersLookup.size) return null;
+
+  for (const entry of ticketTechnicianLookupEntries(item)) {
+    const hit = usersLookup.get(entry.key);
+
+    if (hit?.user && hit.ambiguous !== true) {
+      return hit.user;
+    }
+  }
+
+  return null;
+}
+
+function enrichTicketTechnicianFromUsers(item = {}, usersLookup = new Map()) {
+  const source = safeObject(item);
+
+  if (!hasOwnKeys(source) || technicianAvatarUrl(source)) return source;
+
+  const user = findTechnicianUser(source, usersLookup);
+  const avatarUrl = userAvatarUrl(user);
+
+  if (!avatarUrl) return source;
+
+  const assignedToUserId = safePublicId(
+    first(
+      technicianId(source),
+      getUserId(user),
+      user?.userId,
+      user?.usuarioId,
+      user?.id,
+      ""
+    )
+  );
+
+  const sourceTechnicianName = technicianName(source);
+  const assignedToName = firstVisual(
+    [
+      normalizeLookupIdentity(sourceTechnicianName) ? sourceTechnicianName : "",
+      source.assignedToName,
+      source.technicianName,
+      source.tecnicoName,
+      userDisplayName(user, ""),
+    ],
+    userDisplayName(user, "Sin asignar")
+  );
+
+  const assignment = safeObject(source.assignment);
+  const assignedTo = safeObject(typeof source.assignedTo === "object" ? source.assignedTo : {});
+  const tecnico = safeObject(typeof source.tecnico === "object" ? source.tecnico : {});
+  const technician = safeObject(typeof source.technician === "object" ? source.technician : {});
+
+  return {
+    ...source,
+
+    assignedToUserId: first(source.assignedToUserId, assignedToUserId),
+    assignedToName: first(source.assignedToName, assignedToName),
+    technicianName: first(source.technicianName, assignedToName),
+    technicianAvatarUrl: first(source.technicianAvatarUrl, avatarUrl),
+
+    assignment: {
+      ...assignment,
+      assignedToUserId: first(assignment.assignedToUserId, assignedToUserId),
+      userId: first(assignment.userId, assignedToUserId),
+      assignedToName: first(assignment.assignedToName, assignedToName),
+      displayName: first(assignment.displayName, assignedToName),
+      name: first(assignment.name, assignedToName),
+      avatarUrl: first(assignment.avatarUrl, avatarUrl),
+      avatar: first(assignment.avatar, avatarUrl),
+    },
+
+    assignedTo: {
+      ...assignedTo,
+      userId: first(assignedTo.userId, assignedToUserId),
+      id: first(assignedTo.id, assignedToUserId),
+      displayName: first(assignedTo.displayName, assignedToName),
+      name: first(assignedTo.name, assignedToName),
+      avatarUrl: first(assignedTo.avatarUrl, avatarUrl),
+      avatar: first(assignedTo.avatar, avatarUrl),
+    },
+
+    tecnico: {
+      ...tecnico,
+      userId: first(tecnico.userId, assignedToUserId),
+      id: first(tecnico.id, assignedToUserId),
+      displayName: first(tecnico.displayName, assignedToName),
+      name: first(tecnico.name, assignedToName),
+      avatarUrl: first(tecnico.avatarUrl, avatarUrl),
+      avatar: first(tecnico.avatar, avatarUrl),
+    },
+
+    technician: {
+      ...technician,
+      userId: first(technician.userId, assignedToUserId),
+      id: first(technician.id, assignedToUserId),
+      displayName: first(technician.displayName, assignedToName),
+      name: first(technician.name, assignedToName),
+      avatarUrl: first(technician.avatarUrl, avatarUrl),
+      avatar: first(technician.avatar, avatarUrl),
+    },
+  };
 }
 
 function ticketInvoiceIds(item = {}) {
@@ -1541,22 +2231,7 @@ function userPreview(item = {}) {
     "user"
   );
 
-  const avatarUrl = safePublicUrl(
-    first(
-      source.avatarUrl,
-      source.avatar,
-      source.photoUrl,
-      source.photoURL,
-      source.picture,
-      source.pictureUrl,
-      source.profile?.avatarUrl,
-      source.profile?.avatar,
-      source.profile?.photoUrl,
-      source.media?.avatarUrl,
-      source.media?.avatar,
-      ""
-    )
-  );
+  const avatarUrl = userAvatarUrl(source);
 
   return {
     id: userId,
@@ -1802,13 +2477,19 @@ function pickSummaryNumber(payload = null, keys = [], fallback = 0) {
    MODULE NORMALIZATION FROM LISTS ONLY
 ========================================================= */
 
-function normalizeTicketsModule(listPayload = null) {
+function normalizeTicketsModule(listPayload = null, options = {}) {
   const collection = extractCollection(listPayload, ["tickets", "incidencias"]);
   const summarySource = listPayload || collection.source || {};
+  const usersLookup = buildUsersLookup(
+    options.users,
+    options.rawUsers,
+    options.contextUsers,
+    getCurrentUser()
+  );
 
   const items = projectList(
     collection.items,
-    ticketPreview,
+    (item) => ticketPreview(enrichTicketTechnicianFromUsers(item, usersLookup)),
     (item) => item.ticketId || item.incidenciaId || item.id
   );
 
@@ -2380,17 +3061,28 @@ function sanitizeDashboardForRole(dashboard = {}, role = getCurrentRole()) {
     (item) => item.facturaId || item.invoiceId || item.id
   );
 
+  const rawUsers = admin ? first(source.users, source.usuarios, []) : [];
+
   const users = admin
-    ? projectList(first(source.users, source.usuarios, []), userPreview, (item) => item.userId || item.id)
+    ? projectList(rawUsers, userPreview, (item) => item.userId || item.id)
     : [];
 
   const clients = admin
     ? projectList(first(source.clients, source.clientes, source.customers, []), clientPreview, (item) => item.clienteId || item.id)
     : [];
 
+  const usersLookup = buildUsersLookup(
+    rawUsers,
+    users,
+    source.currentUser,
+    source.user,
+    source.sidebarUser,
+    getCurrentUser()
+  );
+
   const tickets = projectList(
     first(source.tickets, source.incidencias, []),
-    ticketPreview,
+    (item) => ticketPreview(enrichTicketTechnicianFromUsers(item, usersLookup)),
     (item) => item.ticketId || item.incidenciaId || item.id
   );
 
@@ -2554,6 +3246,9 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
   const admin = role === "admin";
 
   const facturas = normalizeFacturasModule(modules.facturas?.data);
+  const rawUsers = admin
+    ? extractCollection(modules.users?.data, ["users", "usuarios", "members"]).items
+    : [];
 
   const users = admin
     ? normalizeUsersModule(modules.users?.data)
@@ -2563,7 +3258,11 @@ function buildDashboardFromModules(modules = {}, meta = {}) {
     ? normalizeClientesModule(modules.clientes?.data)
     : normalizeClientesModule(null);
 
-  const tickets = normalizeTicketsModule(modules.tickets?.data);
+  const tickets = normalizeTicketsModule(modules.tickets?.data, {
+    users: users.items,
+    rawUsers,
+    contextUsers: [meta.currentUser, meta.user, meta.sidebarUser],
+  });
 
   const summary = buildSummaryFromModules({
     tickets,
@@ -3463,6 +4162,7 @@ export function getHomeApiSnapshot() {
       projectsLargeBackendObjectsToLightHomeDTO: true,
       preservesTicketInvoiceRelations: true,
       preservesTicketTechnicianData: true,
+      resolvesTechnicianAvatarFromUsers: true,
       paidInvoiceAmountOnly: true,
 
       noRawBackendPayloadInDashboard: true,

@@ -7,6 +7,7 @@
    - Renderizar detalle, comentario, adjuntos y timeline.
    - Delegar acciones operativas a incidencias.actions.js.
    - Delegar normalización a incidencias.model.js.
+   - Reutilizar helpers comunes desde incidencias.utils.js.
    - No llamar API directamente.
    - No registrar globals.
    - No crear bridges.
@@ -14,14 +15,11 @@
    - No duplicar lógica de View/Actions/API.
 ========================================================= */
 
-import { AppCore } from "../../core/index.js";
-
 import {
   normalizeIncidenciaModel,
   getStatusLabel,
   getPriorityLabel,
   getAvatarTheme,
-  getInitials,
 } from "./incidencias.model.js";
 
 import {
@@ -33,11 +31,43 @@ import {
   downloadTicketAttachmentAction,
 } from "./incidencias.actions.js";
 
+import {
+  BrowserDocument,
+  BrowserWindow,
+
+  isObject,
+  safeText,
+  safeNumber,
+  safeArray,
+  safeObject,
+  first,
+  hasOwnKeys,
+
+  escapeHtml,
+  normalizeWhitespace,
+  normalizeKey,
+  getInitials,
+
+  formatBytes,
+  formatMoney,
+  formatDate,
+  formatRelativeDate,
+  toTimestamp,
+
+  safeImageSrc,
+  safeExternalUrl,
+  safeFilename,
+
+  showToast,
+  safeEmit,
+  getErrorMessage,
+} from "./incidencias.utils.js";
+
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_MODAL_VERSION = "incidencias.modal.v1";
+export const INCIDENCIAS_MODAL_VERSION = "incidencias.modal.v2";
 
 const MODAL_ID = "incidencias-detail-modal-root";
 const PANEL_ID = "incidencias-detail-modal-panel";
@@ -54,6 +84,7 @@ const modalState = {
 
   bindingsAttached: false,
   rootAbortController: null,
+  rootCleanups: [],
 
   lastActiveElement: null,
   escHandler: null,
@@ -71,7 +102,6 @@ const modalState = {
   previewObjectUrl: "",
 
   bodyLocked: false,
-  bodyOverflowBeforeLock: "",
 
   openTicketId: "",
   lastOpenAt: 0,
@@ -81,15 +111,11 @@ const modalState = {
 };
 
 /* =========================================================
-   SAFE HELPERS
+   LOCAL HELPERS
 ========================================================= */
 
 function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  return Boolean(BrowserWindow && BrowserDocument);
 }
 
 function isFile(value) {
@@ -98,72 +124,6 @@ function isFile(value) {
 
 function isBlob(value) {
   return typeof Blob !== "undefined" && value instanceof Blob;
-}
-
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return text || fallback;
-}
-
-function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function safeObject(value) {
-  return isObject(value) ? value : {};
-}
-
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-
-    return value;
-  }
-
-  return null;
-}
-
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function normalizeWhitespace(value = "") {
-  return safeText(value, "")
-    .replace(/\r/g, " ")
-    .replace(/\n+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function normalizeKey(value = "") {
-  return safeText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .trim();
 }
 
 function htmlAttrs(attrs = {}) {
@@ -188,46 +148,16 @@ function tooltipAttrs(tooltip = "", ariaLabel = "") {
   });
 }
 
-function disabledAttr(disabled = false) {
-  return disabled ? "disabled aria-disabled=\"true\"" : "";
+function disabledAttr(disabled = false, busy = false) {
+  return htmlAttrs({
+    disabled: Boolean(disabled),
+    "aria-disabled": disabled ? "true" : false,
+    "aria-busy": busy ? "true" : false,
+  });
 }
 
 function emit(eventName = "", payload = {}) {
-  const name = safeText(eventName, "");
-
-  if (!name) return false;
-
-  try {
-    AppCore?.events?.emit?.(name, payload);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function showToast(message = "", type = "info") {
-  const text = safeText(message, "");
-
-  if (!text) return false;
-
-  try {
-    if (typeof AppCore?.toast?.[type] === "function") {
-      AppCore.toast[type](text);
-      return true;
-    }
-  } catch {}
-
-  try {
-    AppCore?.toast?.show?.(text, type);
-    return true;
-  } catch {}
-
-  try {
-    AppCore?.ui?.toast?.show?.(text, type);
-    return true;
-  } catch {}
-
-  return false;
+  return safeEmit(eventName, payload);
 }
 
 function getObjectHash(value = {}) {
@@ -237,7 +167,7 @@ function getObjectHash(value = {}) {
     return JSON.stringify({
       id: first(obj.ticketId, obj.id, obj.raw?.ticketId, obj.raw?.id),
       status: first(obj.status, obj.estado, obj.raw?.status, obj.raw?.estado),
-      updatedAt: first(obj.updatedAt, obj.raw?.updatedAt, obj.raw?._ts),
+      updatedAt: first(obj.updatedAt, obj.lastActivityAt, obj.raw?.updatedAt, obj.raw?.lastActivityAt, obj.raw?._ts),
       attachmentsCount: safeArray(first(obj.attachments, obj.files, obj.adjuntos, obj.raw?.attachments)).length,
       commentsCount: safeArray(first(obj.comments, obj.raw?.comments)).length,
     });
@@ -284,18 +214,25 @@ function clearAttachmentPreview() {
 
 function setAttachmentPreview(file = {}) {
   const next = safeObject(file);
+  const url = safeExternalUrl(first(next.url, next.viewUrl, next.openUrl, next.downloadUrl, ""));
 
-  if (!safeText(next.url, "")) {
+  if (!url) {
     clearAttachmentPreview();
     return false;
   }
 
   revokePreviewObjectUrl();
 
-  modalState.previewFile = next;
+  modalState.previewFile = {
+    ...next,
+    url,
+    viewUrl: safeExternalUrl(first(next.viewUrl, next.openUrl, url)),
+    openUrl: safeExternalUrl(first(next.openUrl, next.viewUrl, url)),
+    downloadUrl: safeExternalUrl(first(next.downloadUrl, url)),
+  };
 
   if (next.managedObjectUrl) {
-    modalState.previewObjectUrl = safeText(next.url, "");
+    modalState.previewObjectUrl = url;
   }
 
   return true;
@@ -311,116 +248,8 @@ function resetTransientStateForNewTicket() {
 }
 
 /* =========================================================
-   FORMAT HELPERS
+   FILE HELPERS
 ========================================================= */
-
-function formatBytes(bytes = 0) {
-  const size = Number(bytes);
-
-  if (!Number.isFinite(size) || size <= 0) return "";
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-
-  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-function formatMoney(value = 0, currency = "EUR") {
-  const amount = Number(value);
-
-  if (!Number.isFinite(amount)) return "";
-
-  try {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: safeText(currency, "EUR"),
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${safeText(currency, "EUR")}`;
-  }
-}
-
-function toDate(value = null) {
-  if (!value) return null;
-
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const ms = value > 9999999999 ? value : value * 1000;
-    const date = new Date(ms);
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-
-  const raw = safeText(value, "");
-  if (!raw) return null;
-
-  const esMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
-
-  if (esMatch) {
-    const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = esMatch;
-    const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(ss));
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-
-  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function formatDate(value = null) {
-  const date = toDate(value);
-  if (!date) return "—";
-
-  try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
-  } catch {
-    return "—";
-  }
-}
-
-function formatRelativeDate(value = null) {
-  const date = toDate(value);
-  if (!date) return "Sin fecha";
-
-  const diffMs = date.getTime() - Date.now();
-  const diffMin = Math.round(diffMs / 60000);
-  const absMin = Math.abs(diffMin);
-
-  if (absMin < 1) return "Ahora mismo";
-  if (absMin < 60) return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
-
-  const diffHours = Math.round(absMin / 60);
-  if (diffHours < 24) return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
-
-  const diffDays = Math.round(diffHours / 24);
-  if (diffDays <= 7) {
-    return diffMin > 0
-      ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
-      : `Hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
-  }
-
-  return formatDate(value);
-}
-
-function getErrorMessage(error = null, fallback = "No se pudo completar la acción.") {
-  return safeText(
-    first(
-      error?.message,
-      error?.response?.message,
-      error?.response?.data?.message,
-      error?.data?.message,
-      error?.error,
-      fallback
-    ),
-    fallback
-  );
-}
 
 function dedupeFiles(files = []) {
   const map = new Map();
@@ -481,14 +310,20 @@ function getClientName(detail = {}) {
   return safeText(
     first(
       detail.clientName,
+      detail.clienteNombre,
       detail.name,
       detail.cliente?.nombre,
       detail.cliente?.name,
+      detail.cliente?.displayName,
       detail.client?.name,
+      detail.client?.displayName,
       detail.receptor?.name,
+      detail.receptor?.nombre,
       detail.createdBy?.name,
       detail.requesterSnapshot?.name,
+      detail.requesterSnapshot?.displayName,
       detail.raw?.clientName,
+      detail.raw?.clienteNombre,
       detail.raw?.name,
       detail.raw?.cliente?.nombre,
       detail.raw?.cliente?.name,
@@ -502,7 +337,7 @@ function getClientName(detail = {}) {
 }
 
 function getClientAvatar(detail = {}) {
-  return safeText(
+  return safeImageSrc(
     first(
       detail.clientAvatar,
       detail.avatar,
@@ -513,6 +348,8 @@ function getClientAvatar(detail = {}) {
       detail.client?.avatarUrl,
       detail.requesterSnapshot?.avatar,
       detail.requesterSnapshot?.avatarUrl,
+      detail.receptor?.avatar,
+      detail.receptor?.avatarUrl,
       detail.raw?.clientAvatar,
       detail.raw?.avatar,
       detail.raw?.avatarUrl,
@@ -522,8 +359,7 @@ function getClientAvatar(detail = {}) {
       detail.raw?.cliente?.avatarUrl,
       detail.raw?.requesterSnapshot?.avatar,
       detail.raw?.requesterSnapshot?.avatarUrl
-    ),
-    ""
+    )
   );
 }
 
@@ -560,22 +396,77 @@ function getDescription(detail = {}) {
 function getTecnico(detail = {}) {
   return safeText(
     first(
+      detail.technician?.name,
+      detail.technician?.nombre,
+      detail.technician?.displayName,
       detail.tecnico?.name,
       detail.tecnico?.nombre,
+      detail.tecnico?.displayName,
       detail.assignedToName,
+      detail.technicianName,
       detail.assignedTo?.name,
       detail.assignedTo?.nombre,
+      detail.assignedTo?.displayName,
+      detail.assignment?.assignedToName,
+      detail.assignment?.technicianName,
       detail.assignment?.agentName,
       detail.assignment?.name,
+      detail.raw?.technician?.name,
       detail.raw?.tecnico?.name,
       detail.raw?.tecnico?.nombre,
       detail.raw?.assignedTo?.name,
       detail.raw?.assignedTo?.nombre,
       detail.raw?.assignedToName,
+      detail.raw?.technicianName,
+      detail.raw?.assignment?.assignedToName,
       detail.raw?.assignment?.agentName,
       detail.raw?.assignment?.name
     ),
     "No asignado"
+  );
+}
+
+function getTecnicoAvatar(detail = {}) {
+  return safeImageSrc(
+    first(
+      detail.technicianAvatarUrl,
+      detail.technicianAvatar,
+      detail.assignedToAvatarUrl,
+      detail.assignedToAvatar,
+      detail.tecnicoAvatarUrl,
+      detail.tecnicoAvatar,
+
+      detail.technician?.avatarUrl,
+      detail.technician?.avatar,
+      detail.tecnico?.avatarUrl,
+      detail.tecnico?.avatar,
+      detail.assignedTo?.avatarUrl,
+      detail.assignedTo?.avatar,
+
+      detail.assignment?.assignedToAvatarUrl,
+      detail.assignment?.assignedToAvatar,
+      detail.assignment?.technicianAvatarUrl,
+      detail.assignment?.technicianAvatar,
+      detail.assignment?.avatarUrl,
+      detail.assignment?.avatar,
+
+      detail.meta?.technicianAvatarUrl,
+      detail.meta?.technicianAvatar,
+
+      detail.raw?.technicianAvatarUrl,
+      detail.raw?.technicianAvatar,
+      detail.raw?.assignedToAvatarUrl,
+      detail.raw?.assignedToAvatar,
+      detail.raw?.tecnicoAvatarUrl,
+      detail.raw?.tecnicoAvatar,
+      detail.raw?.technician?.avatarUrl,
+      detail.raw?.tecnico?.avatarUrl,
+      detail.raw?.assignedTo?.avatarUrl,
+      detail.raw?.assignment?.assignedToAvatarUrl,
+      detail.raw?.assignment?.assignedToAvatar,
+      detail.raw?.meta?.technicianAvatarUrl,
+      detail.raw?.meta?.technicianAvatar
+    )
   );
 }
 
@@ -678,7 +569,7 @@ function getAttachments(detail = {}) {
     const item = safeObject(file);
     const itemRaw = safeObject(item.raw);
 
-    const name = safeText(
+    const name = safeFilename(
       first(item.name, item.filename, item.fileName, item.title, itemRaw.name, itemRaw.filename, itemRaw.fileName, itemRaw.title),
       `archivo_${index + 1}`
     );
@@ -703,48 +594,28 @@ function getAttachments(detail = {}) {
       `attachment-${index + 1}`
     );
 
+    const url = safeExternalUrl(first(item.viewUrl, item.openUrl, item.signedUrl, item.url, item.blobUrl, item.publicUrl, item.downloadUrl, itemRaw.viewUrl, itemRaw.openUrl, itemRaw.signedUrl, itemRaw.url, itemRaw.blobUrl, itemRaw.publicUrl, itemRaw.downloadUrl));
+
     return {
       ...item,
       id,
       attachmentId: safeText(first(item.attachmentId, itemRaw.attachmentId, id), id),
       name,
-      filename: safeText(first(item.filename, item.fileName, item.name, itemRaw.filename, itemRaw.fileName, itemRaw.name), name),
-      fileName: safeText(first(item.fileName, item.filename, item.name, itemRaw.fileName, itemRaw.filename, itemRaw.name), name),
+      filename: safeFilename(first(item.filename, item.fileName, item.name, itemRaw.filename, itemRaw.fileName, itemRaw.name), name),
+      fileName: safeFilename(first(item.fileName, item.filename, item.name, itemRaw.fileName, itemRaw.filename, itemRaw.name), name),
       size: safeNumber(first(item.size, item.sizeBytes, item.contentLength, itemRaw.size, itemRaw.sizeBytes, itemRaw.contentLength), 0),
       type: safeText(first(item.type, item.contentType, item.mimetype, item.mimeType, itemRaw.type, itemRaw.contentType, itemRaw.mimetype, itemRaw.mimeType), ""),
       contentType: safeText(first(item.contentType, item.mimetype, item.mimeType, item.type, itemRaw.contentType, itemRaw.mimetype, itemRaw.mimeType, itemRaw.type), ""),
       uploadedAt: first(item.uploadedAt, item.createdAt, item.date, itemRaw.uploadedAt, itemRaw.createdAt, itemRaw.date, null),
-      url: safeText(first(item.viewUrl, item.openUrl, item.signedUrl, item.url, item.blobUrl, item.publicUrl, item.downloadUrl, itemRaw.viewUrl, itemRaw.openUrl, itemRaw.signedUrl, itemRaw.url, itemRaw.blobUrl, itemRaw.publicUrl, itemRaw.downloadUrl), ""),
-      viewUrl: safeText(first(item.viewUrl, item.openUrl, item.signedUrl, item.url, itemRaw.viewUrl, itemRaw.openUrl, itemRaw.signedUrl, itemRaw.url), ""),
-      openUrl: safeText(first(item.openUrl, item.viewUrl, item.signedUrl, item.url, itemRaw.openUrl, itemRaw.viewUrl, itemRaw.signedUrl, itemRaw.url), ""),
-      downloadUrl: safeText(first(item.downloadUrl, item.signedUrl, item.url, itemRaw.downloadUrl, itemRaw.signedUrl, itemRaw.url), ""),
+      url,
+      viewUrl: safeExternalUrl(first(item.viewUrl, item.openUrl, item.signedUrl, item.url, url)),
+      openUrl: safeExternalUrl(first(item.openUrl, item.viewUrl, item.signedUrl, item.url, url)),
+      downloadUrl: safeExternalUrl(first(item.downloadUrl, item.signedUrl, item.url, url)),
       raw: {
         ...itemRaw,
         ...item,
       },
     };
-  });
-}
-
-function getTimeline(detail = {}) {
-  const raw = safeObject(detail.raw);
-
-  const timeline = safeArray(first(detail.timeline, raw.timeline));
-
-  if (timeline.length) {
-    return timeline.map((entry, index) => normalizeTimelineEntry(entry, index));
-  }
-
-  const history = safeArray(first(detail.history, raw.history, raw.events));
-  const comments = safeArray(first(detail.comments, detail.notes, detail.messages, raw.comments, raw.notes, raw.messages));
-
-  return [
-    ...history.map((entry, index) => normalizeTimelineEntry(entry, index)),
-    ...comments.map((entry, index) => normalizeTimelineEntry({ ...safeObject(entry), kind: "comment", type: "comment" }, index)),
-  ].sort((a, b) => {
-    const aTime = toDate(a.createdAt)?.getTime?.() || 0;
-    const bTime = toDate(b.createdAt)?.getTime?.() || 0;
-    return bTime - aTime;
   });
 }
 
@@ -768,6 +639,24 @@ function normalizeTimelineEntry(entry = {}, index = 0) {
     createdAt: first(item.createdAt, item.date, item.timestamp, item.updatedAt, null),
     raw: item,
   };
+}
+
+function getTimeline(detail = {}) {
+  const raw = safeObject(detail.raw);
+
+  const timeline = safeArray(first(detail.timeline, raw.timeline));
+
+  if (timeline.length) {
+    return timeline.map((entry, index) => normalizeTimelineEntry(entry, index));
+  }
+
+  const history = safeArray(first(detail.history, raw.history, raw.events));
+  const comments = safeArray(first(detail.comments, detail.notes, detail.messages, raw.comments, raw.notes, raw.messages));
+
+  return [
+    ...history.map((entry, index) => normalizeTimelineEntry(entry, index)),
+    ...comments.map((entry, index) => normalizeTimelineEntry({ ...safeObject(entry), kind: "comment", type: "comment" }, index)),
+  ].sort((a, b) => toTimestamp(b.createdAt) - toTimestamp(a.createdAt));
 }
 
 function getStatusClassKey(value = "") {
@@ -858,6 +747,7 @@ function renderAvatar(detail = {}) {
             src="${escapeHtml(avatarUrl)}"
             alt="${escapeHtml(clientName)}"
             loading="lazy"
+            decoding="async"
             referrerpolicy="no-referrer"
             data-modal-avatar-img="true"
           />
@@ -876,11 +766,45 @@ function renderAvatar(detail = {}) {
   `;
 }
 
-function renderMetaField(label = "", value = "") {
+function renderTechnicianValue(detail = {}) {
+  const name = getTecnico(detail);
+  const avatarUrl = getTecnicoAvatar(detail);
+  const initials = getInitials(name);
+
+  if (!avatarUrl) {
+    return `
+      <span class="incidencias-modal-technician-inline">
+        <span class="incidencias-modal-technician-avatar incidencias-modal-technician-avatar--fallback">${escapeHtml(initials)}</span>
+        <strong>${escapeHtml(name)}</strong>
+      </span>
+    `;
+  }
+
+  return `
+    <span class="incidencias-modal-technician-inline">
+      <span class="incidencias-modal-technician-avatar" data-modal-technician-avatar-frame="true" data-fallback="false">
+        <img
+          src="${escapeHtml(avatarUrl)}"
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+          data-modal-technician-avatar-img="true"
+        />
+        <span>${escapeHtml(initials)}</span>
+      </span>
+      <strong>${escapeHtml(name)}</strong>
+    </span>
+  `;
+}
+
+function renderMetaField(label = "", value = "", options = {}) {
+  const rawHtml = Boolean(options.html);
+
   return `
     <div class="incidencias-modal-meta-card">
       <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(safeText(value, "—"))}</strong>
+      ${rawHtml ? value : `<strong>${escapeHtml(safeText(value, "—"))}</strong>`}
     </div>
   `;
 }
@@ -926,11 +850,11 @@ function renderPendingFiles() {
       ${files.map((file, index) => `
         <div class="incidencias-modal-pending-file">
           <div>
-            <strong>${escapeHtml(file.name || `archivo_${index + 1}`)}</strong>
+            <strong>${escapeHtml(safeFilename(file.name || `archivo_${index + 1}`, `archivo_${index + 1}`))}</strong>
             <span>${escapeHtml([safeText(file.type, ""), formatBytes(file.size)].filter(Boolean).join(" · ") || "Archivo preparado")}</span>
           </div>
 
-          <button type="button" data-modal-action="remove-pending-file" data-file-index="${index}">
+          <button type="button" data-modal-action="remove-pending-file" data-file-index="${escapeHtml(String(index))}">
             Quitar
           </button>
         </div>
@@ -940,8 +864,8 @@ function renderPendingFiles() {
 }
 
 function renderComposer() {
-  const draft = safeText(modalState.commentDraft, "");
-  const disabled = disabledAttr(modalState.isSubmitting);
+  const draft = modalState.commentDraft || "";
+  const disabled = disabledAttr(modalState.isSubmitting, modalState.isSubmitting);
 
   return `
     <section class="incidencias-modal-composer">
@@ -1013,6 +937,7 @@ function getAttachmentBusyMeta(file = {}) {
 function renderAttachmentActionButtons(file = {}) {
   const busy = getAttachmentBusyMeta(file);
   const isImage = isImageLikeAttachment(file);
+  const name = safeFilename(file.name || file.filename || "archivo", "archivo");
 
   return `
     <div class="incidencias-modal-attachment-actions">
@@ -1020,9 +945,9 @@ function renderAttachmentActionButtons(file = {}) {
         type="button"
         data-modal-action="open-attachment"
         data-attachment-id="${escapeHtml(file.id)}"
-        ${disabledAttr(busy.isOpening || modalState.isSubmitting)}
+        ${disabledAttr(busy.isOpening || modalState.isSubmitting, busy.isOpening)}
         class="incidencias-modal-view-btn"
-        ${tooltipAttrs(isImage ? "Ampliar imagen" : "Ver documento", `${isImage ? "Ampliar imagen" : "Ver documento"} ${file.name || file.filename || "archivo"}`)}
+        ${tooltipAttrs(isImage ? "Ampliar imagen" : "Ver documento", `${isImage ? "Ampliar imagen" : "Ver documento"} ${name}`)}
       >
         ${
           busy.isOpening
@@ -1035,9 +960,9 @@ function renderAttachmentActionButtons(file = {}) {
         type="button"
         data-modal-action="download-attachment"
         data-attachment-id="${escapeHtml(file.id)}"
-        ${disabledAttr(busy.isDownloading || modalState.isSubmitting)}
+        ${disabledAttr(busy.isDownloading || modalState.isSubmitting, busy.isDownloading)}
         class="incidencias-modal-download-btn"
-        ${tooltipAttrs("Descargar", `Descargar ${file.name || file.filename || "archivo"}`)}
+        ${tooltipAttrs("Descargar", `Descargar ${name}`)}
       >
         ${
           busy.isDownloading
@@ -1051,7 +976,10 @@ function renderAttachmentActionButtons(file = {}) {
 
 function renderAttachmentPreviewSquare(file = {}) {
   const isImage = isImageLikeAttachment(file);
-  const url = safeText(first(file.viewUrl, file.openUrl, file.signedUrl, file.url, file.blobUrl, file.publicUrl), "");
+  const url = isImage
+    ? safeImageSrc(first(file.viewUrl, file.openUrl, file.signedUrl, file.url, file.blobUrl, file.publicUrl))
+    : "";
+  const name = safeFilename(file.name || file.filename || "archivo", "archivo");
 
   if (!isImage || !url) {
     return `
@@ -1060,7 +988,7 @@ function renderAttachmentPreviewSquare(file = {}) {
         data-modal-action="open-attachment"
         data-attachment-id="${escapeHtml(file.id)}"
         class="incidencias-modal-file-square${isImage ? " incidencias-modal-file-square--image" : ""}"
-        aria-label="Ver ${escapeHtml(file.name || file.filename || "archivo")}" 
+        aria-label="Ver ${escapeHtml(name)}"
       >
         <span>${isImage ? "IMG" : "DOC"}</span>
       </button>
@@ -1073,14 +1001,15 @@ function renderAttachmentPreviewSquare(file = {}) {
       data-modal-action="open-attachment"
       data-attachment-id="${escapeHtml(file.id)}"
       class="incidencias-modal-image-thumb-wrap"
-      aria-label="Ampliar ${escapeHtml(file.name || file.filename || "imagen adjunta")}" 
+      aria-label="Ampliar ${escapeHtml(name)}"
       data-modal-thumb-frame="true"
       data-thumb-error="false"
     >
       <img
         src="${escapeHtml(url)}"
-        alt="${escapeHtml(file.name || file.filename || "Imagen adjunta")}" 
+        alt="${escapeHtml(name)}"
         loading="lazy"
+        decoding="async"
         referrerpolicy="no-referrer"
         class="incidencias-modal-image-thumb"
         data-modal-thumb-img="true"
@@ -1107,20 +1036,24 @@ function renderAttachments(detail = {}) {
             ? `<div class="incidencias-modal-empty-box">No hay archivos adjuntos en esta incidencia.</div>`
             : `
               <div class="incidencias-modal-attachments-grid">
-                ${files.map((file) => `
-                  <article class="incidencias-modal-attachment-card">
-                    <div class="incidencias-modal-attachment-row">
-                      ${renderAttachmentPreviewSquare(file)}
+                ${files.map((file) => {
+                  const name = safeFilename(file.name || file.filename || "Archivo", "Archivo");
 
-                      <div class="incidencias-modal-attachment-copy">
-                        <strong>${escapeHtml(file.name || file.filename || "Archivo")}</strong>
-                        <span>${escapeHtml([file.contentType || file.type, formatBytes(file.size), file.uploadedAt ? formatDate(file.uploadedAt) : ""].filter(Boolean).join(" · ") || "Archivo adjunto")}</span>
+                  return `
+                    <article class="incidencias-modal-attachment-card">
+                      <div class="incidencias-modal-attachment-row">
+                        ${renderAttachmentPreviewSquare(file)}
+
+                        <div class="incidencias-modal-attachment-copy">
+                          <strong>${escapeHtml(name)}</strong>
+                          <span>${escapeHtml([file.contentType || file.type, formatBytes(file.size), file.uploadedAt ? formatDate(file.uploadedAt) : ""].filter(Boolean).join(" · ") || "Archivo adjunto")}</span>
+                        </div>
+
+                        ${renderAttachmentActionButtons(file)}
                       </div>
-
-                      ${renderAttachmentActionButtons(file)}
-                    </div>
-                  </article>
-                `).join("")}
+                    </article>
+                  `;
+                }).join("")}
               </div>
             `
         }
@@ -1131,11 +1064,11 @@ function renderAttachments(detail = {}) {
 
 function renderAttachmentPreview() {
   const file = safeObject(modalState.previewFile);
-  const url = safeText(file.url, "");
+  const url = safeExternalUrl(file.url || file.viewUrl || file.openUrl || file.downloadUrl);
 
   if (!url) return "";
 
-  const filename = safeText(first(file.filename, file.name), "Documento");
+  const filename = safeFilename(first(file.filename, file.name), "Documento");
   const type = safeText(first(file.contentType, file.type, file.mimeType, file.mimetype), "");
   const size = formatBytes(file.size);
   const image = isPreviewImage(file);
@@ -1166,7 +1099,7 @@ function renderAttachmentPreview() {
       <div class="incidencias-modal-preview-frame ${image ? "is-image" : ""}">
         ${
           image
-            ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(filename)}" class="incidencias-modal-preview-image" />`
+            ? `<img src="${escapeHtml(safeImageSrc(url))}" alt="${escapeHtml(filename)}" class="incidencias-modal-preview-image" />`
             : `<iframe src="${escapeHtml(url)}" title="${escapeHtml(filename)}" class="incidencias-modal-preview-iframe" loading="lazy" referrerpolicy="no-referrer"></iframe>`
         }
       </div>
@@ -1238,7 +1171,7 @@ function renderFooter(detail = {}) {
         type="button"
         data-modal-action="submit-update"
         data-ticket-id="${escapeHtml(ticketId)}"
-        ${disabledAttr(modalState.isSubmitting)}
+        ${disabledAttr(modalState.isSubmitting, modalState.isSubmitting)}
         class="incidencias-modal-submit-btn"
       >
         ${modalState.isSubmitting ? renderInlineSpinner("Actualizando...") : "Actualizar incidencia"}
@@ -1256,10 +1189,9 @@ function renderModalInner(detail = {}) {
   const ticketId = getDisplayTicketId(item);
   const title = getTitle(item);
   const description = getDescription(item);
-  const tecnico = getTecnico(item);
   const facturaRelacionada = getFacturaRelacionada(item);
   const createdAt = formatDate(first(item.createdAt, item.raw?.createdAt));
-  const updatedAgo = formatRelativeDate(first(item.updatedAt, item.raw?.updatedAt, item.raw?.createdAt));
+  const updatedAgo = formatRelativeDate(first(item.updatedAt, item.lastActivityAt, item.raw?.updatedAt, item.raw?.lastActivityAt, item.raw?.createdAt));
   const attachments = getAttachments(item);
 
   const statusRaw = safeText(first(item.status, item.raw?.status, item.raw?.estado), "open");
@@ -1318,7 +1250,7 @@ function renderModalInner(detail = {}) {
             type="button"
             data-modal-close="true"
             aria-label="Cerrar modal"
-            ${disabledAttr(modalState.isSubmitting)}
+            ${disabledAttr(modalState.isSubmitting, modalState.isSubmitting)}
             class="incidencias-modal-close-btn"
           >
             ✕
@@ -1330,7 +1262,7 @@ function renderModalInner(detail = {}) {
           ${renderAttachmentPreview()}
 
           <div class="incidencias-modal-meta-grid">
-            ${renderMetaField("Técnico", tecnico)}
+            ${renderMetaField("Técnico", renderTechnicianValue(item), { html: true })}
             ${renderMetaField("Factura", facturaRelacionada)}
             ${renderMetaField("Creada", createdAt)}
             ${renderMetaField("Adjuntos", String(attachments.length))}
@@ -1366,13 +1298,13 @@ function renderModalInner(detail = {}) {
 
 function getRoot() {
   if (!isBrowser()) return null;
-  return document.getElementById(MODAL_ID);
+  return BrowserDocument.getElementById(MODAL_ID);
 }
 
 function ensureRoot() {
   if (!isBrowser()) return null;
 
-  const existing = Array.from(document.querySelectorAll(`#${MODAL_ID}`));
+  const existing = Array.from(BrowserDocument.querySelectorAll(`#${MODAL_ID}`));
   let root = existing[0];
 
   existing.slice(1).forEach((duplicate) => {
@@ -1383,26 +1315,19 @@ function ensureRoot() {
 
   if (root) return root;
 
-  root = document.createElement("div");
+  root = BrowserDocument.createElement("div");
   root.id = MODAL_ID;
-  document.body.appendChild(root);
+  BrowserDocument.body.appendChild(root);
 
   return root;
 }
 
 function lockBody() {
-  if (!isBrowser() || !document.body) return false;
+  if (!isBrowser() || !BrowserDocument.body) return false;
   if (modalState.bodyLocked) return true;
 
   try {
-    modalState.bodyOverflowBeforeLock = safeText(document.body.style?.overflow, "");
-  } catch {
-    modalState.bodyOverflowBeforeLock = "";
-  }
-
-  try {
-    document.body.classList.add("modal-open", "incidencias-modal-open");
-    document.body.style.overflow = "hidden";
+    BrowserDocument.body.classList.add("modal-open", "incidencias-modal-open");
   } catch {}
 
   modalState.bodyLocked = true;
@@ -1410,15 +1335,13 @@ function lockBody() {
 }
 
 function unlockBody() {
-  if (!isBrowser() || !document.body) return false;
+  if (!isBrowser() || !BrowserDocument.body) return false;
   if (!modalState.bodyLocked) return true;
 
   try {
-    document.body.classList.remove("modal-open", "incidencias-modal-open");
-    document.body.style.overflow = safeText(modalState.bodyOverflowBeforeLock, "");
+    BrowserDocument.body.classList.remove("modal-open", "incidencias-modal-open");
   } catch {}
 
-  modalState.bodyOverflowBeforeLock = "";
   modalState.bodyLocked = false;
 
   return true;
@@ -1434,7 +1357,7 @@ function detachEscHandler() {
   if (!modalState.escHandler || !isBrowser()) return;
 
   try {
-    document.removeEventListener("keydown", modalState.escHandler);
+    BrowserDocument.removeEventListener("keydown", modalState.escHandler);
   } catch {}
 
   modalState.escHandler = null;
@@ -1452,13 +1375,13 @@ function attachEscHandler() {
   };
 
   try {
-    document.addEventListener("keydown", modalState.escHandler);
+    BrowserDocument.addEventListener("keydown", modalState.escHandler);
   } catch {}
 }
 
 function focusPanel() {
   try {
-    document.getElementById(PANEL_ID)?.focus?.();
+    BrowserDocument.getElementById(PANEL_ID)?.focus?.();
   } catch {}
 }
 
@@ -1499,7 +1422,7 @@ function renderModal({ preserveFocus = true } = {}) {
     return root;
   }
 
-  const activeId = preserveFocus ? safeText(document.activeElement?.id, "") : "";
+  const activeId = preserveFocus ? safeText(BrowserDocument?.activeElement?.id, "") : "";
 
   detachRootBindings();
   root.innerHTML = renderModalInner(modalState.detail);
@@ -1510,7 +1433,7 @@ function renderModal({ preserveFocus = true } = {}) {
 
   if (activeId) {
     try {
-      document.getElementById(activeId)?.focus?.();
+      BrowserDocument.getElementById(activeId)?.focus?.();
     } catch {}
   }
 
@@ -1530,7 +1453,7 @@ function scheduleModalRender() {
   };
 
   try {
-    requestAnimationFrame(run);
+    BrowserWindow?.requestAnimationFrame?.(run) || setTimeout(run, 0);
   } catch {
     setTimeout(run, 0);
   }
@@ -1580,7 +1503,7 @@ export function openIncidenciasModal(detail = {}, options = {}) {
   const newTicket = ticketId && ticketId !== previousTicketId;
 
   if (!wasOpen) {
-    modalState.lastActiveElement = document.activeElement || null;
+    modalState.lastActiveElement = BrowserDocument.activeElement || null;
   }
 
   modalState.detail = nextDetail;
@@ -1622,6 +1545,7 @@ export function closeIncidenciasModal(options = {}) {
   modalState.openTicketId = "";
   modalState.lastOpenHash = "";
   modalState.lastRenderedHash = "";
+  modalState.renderQueued = false;
 
   clearFeedback();
   clearAttachmentBusyState();
@@ -1675,7 +1599,7 @@ export function updateIncidenciasModal(detail = {}, options = {}) {
 async function waitForPaint() {
   return new Promise((resolve) => {
     try {
-      requestAnimationFrame(() => requestAnimationFrame(resolve));
+      BrowserWindow?.requestAnimationFrame?.(() => BrowserWindow.requestAnimationFrame(resolve));
     } catch {
       setTimeout(resolve, 0);
     }
@@ -1895,19 +1819,19 @@ async function handleAttachmentAction(attachmentId = "", mode = "download") {
 
 function downloadResolvedPreviewFile() {
   const file = safeObject(modalState.previewFile);
-  const url = safeText(file.downloadUrl || file.url, "");
+  const url = safeExternalUrl(file.downloadUrl || file.url);
 
   if (!url || !isBrowser()) return false;
 
   try {
-    const anchor = document.createElement("a");
+    const anchor = BrowserDocument.createElement("a");
     anchor.href = url;
     anchor.rel = "noopener";
     anchor.target = "_blank";
-    anchor.download = safeText(first(file.filename, file.fileName, file.name), "archivo");
+    anchor.download = safeFilename(first(file.filename, file.fileName, file.name), "archivo");
     anchor.className = "incidencias-modal-hidden-download-link";
 
-    document.body.appendChild(anchor);
+    BrowserDocument.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
 
@@ -1920,6 +1844,26 @@ function downloadResolvedPreviewFile() {
 /* =========================================================
    ROOT BINDINGS
 ========================================================= */
+
+function addRootListener(root, eventName, handler, options = {}) {
+  if (!root || typeof root.addEventListener !== "function") return false;
+
+  try {
+    root.addEventListener(eventName, handler, options);
+
+    if (!options.signal) {
+      modalState.rootCleanups.push(() => {
+        try {
+          root.removeEventListener(eventName, handler, options);
+        } catch {}
+      });
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function bindImageFallbacks(root) {
   root.querySelectorAll("[data-modal-avatar-img='true']").forEach((img) => {
@@ -1940,7 +1884,33 @@ function bindImageFallbacks(root) {
       } catch {}
     };
 
-    img.addEventListener("error", setFallback, {
+    addRootListener(img, "error", setFallback, {
+      passive: true,
+      signal: modalState.rootAbortController?.signal,
+    });
+
+    if (img.complete && img.naturalWidth === 0) setFallback();
+  });
+
+  root.querySelectorAll("[data-modal-technician-avatar-img='true']").forEach((img) => {
+    if (img.dataset.modalTechnicianFallbackBound === "true") return;
+
+    img.dataset.modalTechnicianFallbackBound = "true";
+
+    const frame = img.closest("[data-modal-technician-avatar-frame='true']");
+
+    const setFallback = () => {
+      if (frame) {
+        frame.setAttribute("data-fallback", "true");
+        frame.classList.add("incidencias-modal-technician-avatar--fallback");
+      }
+
+      try {
+        img.hidden = true;
+      } catch {}
+    };
+
+    addRootListener(img, "error", setFallback, {
       passive: true,
       signal: modalState.rootAbortController?.signal,
     });
@@ -1962,7 +1932,7 @@ function bindImageFallbacks(root) {
       } catch {}
     };
 
-    img.addEventListener("error", setFallback, {
+    addRootListener(img, "error", setFallback, {
       passive: true,
       signal: modalState.rootAbortController?.signal,
     });
@@ -1983,8 +1953,16 @@ function attachRootBindings() {
 
   detachRootBindings();
 
-  const controller = new AbortController();
+  const controller = typeof AbortController !== "undefined"
+    ? new AbortController()
+    : null;
+
   modalState.rootAbortController = controller;
+  modalState.rootCleanups = [];
+
+  const listenerOptions = controller
+    ? { signal: controller.signal }
+    : {};
 
   const onInput = (event) => {
     const field = event.target?.closest?.("[data-modal-field]");
@@ -2106,9 +2084,9 @@ function attachRootBindings() {
     }
   };
 
-  root.addEventListener("input", onInput, { signal: controller.signal });
-  root.addEventListener("change", onChange, { signal: controller.signal });
-  root.addEventListener("click", onClick, { signal: controller.signal });
+  addRootListener(root, "input", onInput, listenerOptions);
+  addRootListener(root, "change", onChange, listenerOptions);
+  addRootListener(root, "click", onClick, listenerOptions);
 
   modalState.bindingsAttached = true;
   bindImageFallbacks(root);
@@ -2119,6 +2097,13 @@ function detachRootBindings() {
     modalState.rootAbortController?.abort?.();
   } catch {}
 
+  safeArray(modalState.rootCleanups).forEach((cleanup) => {
+    try {
+      cleanup();
+    } catch {}
+  });
+
+  modalState.rootCleanups = [];
   modalState.rootAbortController = null;
   modalState.bindingsAttached = false;
 }
@@ -2142,8 +2127,26 @@ export const OnionIncidenciasModal = Object.freeze({
     return updateIncidenciasModal(detail, options);
   },
 
+  render() {
+    if (!modalState.isOpen) return null;
+    return renderModal({ preserveFocus: true });
+  },
+
+  scheduleRender() {
+    scheduleModalRender();
+    return true;
+  },
+
   setFeedback(message = "", type = "info") {
     setFeedback(message, type);
+
+    if (modalState.isOpen) renderModal();
+
+    return true;
+  },
+
+  clearFeedback() {
+    clearFeedback();
 
     if (modalState.isOpen) renderModal();
 
@@ -2163,6 +2166,8 @@ export const OnionIncidenciasModal = Object.freeze({
       openingAttachmentId: modalState.openingAttachmentId,
       downloadingAttachmentId: modalState.downloadingAttachmentId,
       previewFile: modalState.previewFile ? { ...modalState.previewFile } : null,
+      bodyLocked: modalState.bodyLocked,
+      bindingsAttached: modalState.bindingsAttached,
     };
   },
 

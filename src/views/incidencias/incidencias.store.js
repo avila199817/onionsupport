@@ -6,9 +6,8 @@
    - Encapsular acceso al Store global para incidencias.
    - Leer/escribir colección normalizada completa.
    - Mantener índice derivado por id para búsquedas rápidas.
-   - Dedupe básico por ticketId/id/code/ticketCode/incidenciaId.
-   - Delegar normalización principal a incidencias.model.js.
-   - Delegar orden canónico nuevo→antiguo a incidencias.model.js.
+   - Dedupe por ticketId/id/code/ticketCode/incidenciaId.
+   - Delegar normalización principal, stats y orden actualizado al modelo.
    - No limitar colecciones.
    - No paginar.
    - No llamar APIs.
@@ -21,6 +20,7 @@
 import { Store } from "../../store/index.js";
 
 import {
+  computeIncidenciasStats as computeIncidenciasStatsModel,
   normalizeIncidenciaModel,
   sortIncidenciasByUpdatedDesc as sortIncidenciasByUpdatedDescModel,
 } from "./incidencias.model.js";
@@ -28,6 +28,8 @@ import {
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+export const INCIDENCIAS_STORE_VERSION = "incidencias.store.v2.optimized";
 
 export const STORE_PATH = "entities.incidencias";
 export const STORE_COLLECTION_KEY = "incidencias";
@@ -41,7 +43,7 @@ const READ_PATHS = Object.freeze([
   STORE_COLLECTION_KEY,
   `collections.${STORE_COLLECTION_KEY}`,
 
-  // Lectura legacy, no escritura canónica.
+  // Legacy read-only.
   "entities.tickets",
   "tickets",
   "collections.tickets",
@@ -59,7 +61,7 @@ const DETAIL_READ_PATHS = Object.freeze([
   "incidenciasById",
   "incidenciasDetail",
 
-  // Lectura legacy.
+  // Legacy read-only.
   "entities.ticketsById",
   "ticketsById",
 ]);
@@ -67,11 +69,9 @@ const DETAIL_READ_PATHS = Object.freeze([
 const NESTED_OBJECT_KEYS = Object.freeze([
   "raw",
   "meta",
-
   "cliente",
   "client",
   "customer",
-
   "tecnico",
   "technician",
   "assignedTo",
@@ -79,19 +79,16 @@ const NESTED_OBJECT_KEYS = Object.freeze([
   "assignedUser",
   "agent",
   "assignee",
-
   "receptor",
   "createdBy",
   "requester",
   "requesterSnapshot",
   "owner",
   "usuario",
-
   "factura",
   "invoice",
   "billing",
   "linkedInvoices",
-
   "assignment",
   "lifecycle",
   "sla",
@@ -107,17 +104,20 @@ const ARRAY_KEYS = Object.freeze([
   "attachments",
   "files",
   "adjuntos",
-
   "history",
   "comments",
   "timeline",
-
   "facturas",
   "invoices",
   "facturasRelacionadas",
   "linkedFacturas",
   "normalizedInvoices",
 ]);
+
+const EMPTY_SIGNATURE = "__empty__";
+
+let collectionCacheSignature = "";
+let collectionCacheItems = null;
 
 /* =========================================================
    SAFE HELPERS
@@ -214,11 +214,34 @@ function uniqueStrings(values = []) {
 }
 
 function normalizeCompare(value = "") {
-  return safeLower(value, "");
+  return safeLower(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function invalidateCollectionCache() {
+  collectionCacheSignature = "";
+  collectionCacheItems = null;
+}
+
+function rememberCollection(signature = "", items = []) {
+  collectionCacheSignature = safeText(signature, EMPTY_SIGNATURE);
+  collectionCacheItems = safeArray(items);
+}
+
+function readCachedCollection(signature = "") {
+  const cleanSignature = safeText(signature, EMPTY_SIGNATURE);
+
+  if (!collectionCacheItems || collectionCacheSignature !== cleanSignature) {
+    return null;
+  }
+
+  return collectionCacheItems.slice();
 }
 
 /* =========================================================
-   PATH HELPERS
+   PATH / DATE HELPERS
 ========================================================= */
 
 function getByPath(source = {}, path = "") {
@@ -232,55 +255,18 @@ function getByPath(source = {}, path = "") {
   }, source);
 }
 
-function setByPath(source = {}, path = "", value = null) {
-  const cleanPath = safeText(path, "");
-
-  if (!cleanPath || !source || typeof source !== "object") {
-    return false;
-  }
-
-  const parts = cleanPath.split(".").filter(Boolean);
-
-  if (!parts.length) {
-    return false;
-  }
-
-  let cursor = source;
-
-  for (let index = 0; index < parts.length - 1; index += 1) {
-    const key = parts[index];
-
-    if (!cursor[key] || typeof cursor[key] !== "object") {
-      cursor[key] = {};
-    }
-
-    cursor = cursor[key];
-  }
-
-  cursor[parts[parts.length - 1]] = value;
-
-  return true;
-}
-
-/* =========================================================
-   TIMESTAMP HELPERS
-   Sólo para sortIncidenciasByCreatedDesc y snapshots.
-   El orden principal actualizado lo delegamos al modelo.
-========================================================= */
-
 function parseSpanishDate(value = "") {
   const text = safeText(value, "");
 
   if (!text) return 0;
 
   const match = text.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
   );
 
   if (!match) return 0;
 
   const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = match;
-
   const date = new Date(
     Number(yyyy),
     Number(mm) - 1,
@@ -291,14 +277,11 @@ function parseSpanishDate(value = "") {
   );
 
   const timestamp = date.getTime();
-
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function safeTimestamp(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") {
-    return fallback;
-  }
+  if (value === null || value === undefined || value === "") return fallback;
 
   const numeric = Number(value);
 
@@ -306,20 +289,13 @@ function safeTimestamp(value, fallback = 0) {
     return numeric > 9999999999 ? numeric : numeric * 1000;
   }
 
-  const nativeDate = new Date(value);
-  const nativeTimestamp = nativeDate.getTime();
-
-  if (Number.isFinite(nativeTimestamp) && nativeTimestamp > 0) {
-    return nativeTimestamp;
-  }
-
   const spanishTimestamp = parseSpanishDate(value);
+  if (Number.isFinite(spanishTimestamp) && spanishTimestamp > 0) return spanishTimestamp;
 
-  if (Number.isFinite(spanishTimestamp) && spanishTimestamp > 0) {
-    return spanishTimestamp;
-  }
-
-  return fallback;
+  const nativeTimestamp = new Date(value).getTime();
+  return Number.isFinite(nativeTimestamp) && nativeTimestamp > 0
+    ? nativeTimestamp
+    : fallback;
 }
 
 function getCreatedTimestamp(item = {}) {
@@ -334,14 +310,42 @@ function getCreatedTimestamp(item = {}) {
       row.createdAtES,
       row.date,
       row._ts,
-
       raw.createdAtMs,
       raw.createdAtTs,
       raw.createdAt,
       raw.createdAtES,
       raw.date,
       raw._ts,
+      0
+    ),
+    0
+  );
+}
 
+function getUpdatedTimestamp(item = {}) {
+  const row = safeObject(item);
+  const raw = safeObject(row.raw);
+
+  return safeTimestamp(
+    first(
+      row.meta?.updatedAtMs,
+      row.meta?.timestampMs,
+      row.updatedAtTs,
+      row.lastActivityAt,
+      row.updatedAt,
+      row.modifiedAt,
+      row.closedAt,
+      row.createdAt,
+      raw.meta?.updatedAtMs,
+      raw.meta?.timestampMs,
+      raw.updatedAtTs,
+      raw.lastActivityAt,
+      raw.updatedAt,
+      raw.modifiedAt,
+      raw.closedAt,
+      raw.createdAt,
+      raw._ts,
+      row._ts,
       0
     ),
     0
@@ -364,37 +368,31 @@ export function getItemId(item = {}) {
       row.code,
       row.ticketCode,
       row._id,
-
       row.ticket?.ticketId,
       row.ticket?.incidenciaId,
       row.ticket?.id,
       row.ticket?.code,
       row.ticket?.ticketCode,
-
       row.item?.ticketId,
       row.item?.incidenciaId,
       row.item?.id,
       row.item?.code,
       row.item?.ticketCode,
-
       row.data?.ticketId,
       row.data?.incidenciaId,
       row.data?.id,
       row.data?.code,
       row.data?.ticketCode,
-
       row.detail?.ticketId,
       row.detail?.incidenciaId,
       row.detail?.id,
       row.detail?.code,
       row.detail?.ticketCode,
-
       row.incidencia?.ticketId,
       row.incidencia?.incidenciaId,
       row.incidencia?.id,
       row.incidencia?.code,
       row.incidencia?.ticketCode,
-
       raw.ticketId,
       raw.incidenciaId,
       raw.id,
@@ -418,37 +416,31 @@ export function getItemCandidateIds(item = {}) {
     row.ticketCode,
     row._id,
     row.entityId,
-
     row.ticket?.ticketId,
     row.ticket?.incidenciaId,
     row.ticket?.id,
     row.ticket?.code,
     row.ticket?.ticketCode,
-
     row.item?.ticketId,
     row.item?.incidenciaId,
     row.item?.id,
     row.item?.code,
     row.item?.ticketCode,
-
     row.data?.ticketId,
     row.data?.incidenciaId,
     row.data?.id,
     row.data?.code,
     row.data?.ticketCode,
-
     row.detail?.ticketId,
     row.detail?.incidenciaId,
     row.detail?.id,
     row.detail?.code,
     row.detail?.ticketCode,
-
     row.incidencia?.ticketId,
     row.incidencia?.incidenciaId,
     row.incidencia?.id,
     row.incidencia?.code,
     row.incidencia?.ticketCode,
-
     raw.ticketId,
     raw.incidenciaId,
     raw.id,
@@ -474,9 +466,7 @@ function isSameItemId(item = {}, id = "") {
 }
 
 function findExistingKeyForItem(aliasIndex = new Map(), item = {}) {
-  const candidates = getItemCandidateIds(item);
-
-  for (const candidate of candidates) {
+  for (const candidate of getItemCandidateIds(item)) {
     const normalized = normalizeCompare(candidate);
 
     if (normalized && aliasIndex.has(normalized)) {
@@ -499,6 +489,40 @@ function registerAliases(aliasIndex = new Map(), primaryKey = "", item = {}) {
       aliasIndex.set(normalized, cleanPrimary);
     }
   });
+}
+
+/* =========================================================
+   COLLECTION SIGNATURE
+========================================================= */
+
+function getSignaturePart(item = {}, index = 0) {
+  const row = safeObject(item);
+  const raw = safeObject(row.raw);
+
+  return [
+    getItemId(row) || `anon:${index}`,
+    getUpdatedTimestamp(row),
+    getCreatedTimestamp(row),
+    first(row.status, row.estado, raw.status, raw.estado, ""),
+    first(row.priority, row.prioridad, raw.priority, raw.prioridad, ""),
+    first(row.title, row.subject, row.asunto, raw.title, raw.subject, raw.asunto, ""),
+    first(row.clientName, row.clienteNombre, row.name, raw.clientName, raw.clienteNombre, raw.name, ""),
+    first(row.assignedToName, row.technicianName, row.tecnico?.name, raw.assignedToName, raw.technicianName, raw.tecnico?.name, ""),
+    first(row.attachmentsCount, row.filesCount, safeArray(row.attachments).length, safeArray(row.files).length, raw.attachmentsCount, raw.filesCount, ""),
+    first(row.commentsCount, safeArray(row.comments).length, raw.commentsCount, ""),
+    first(row.historyCount, safeArray(row.history).length, raw.historyCount, ""),
+    first(row.facturasCount, row.invoicesCount, row.linkedInvoices?.count, raw.facturasCount, raw.invoicesCount, raw.linkedInvoices?.count, ""),
+  ]
+    .map((value) => safeText(value, ""))
+    .join("~");
+}
+
+function buildCollectionSignature(items = []) {
+  const list = safeArray(items);
+
+  if (!list.length) return EMPTY_SIGNATURE;
+
+  return `${list.length}|${list.map(getSignaturePart).join("|")}`;
 }
 
 /* =========================================================
@@ -589,19 +613,13 @@ function mergeNestedObjects(current = {}, incoming = {}) {
 
   NESTED_OBJECT_KEYS.forEach((key) => {
     if (isObject(current[key]) || isObject(incoming[key])) {
-      merged[key] = mergePlainObject(
-        current[key],
-        incoming[key]
-      );
+      merged[key] = mergePlainObject(current[key], incoming[key]);
     }
   });
 
   ARRAY_KEYS.forEach((key) => {
     if (Array.isArray(current[key]) || Array.isArray(incoming[key])) {
-      merged[key] = mergeArrayById(
-        current[key],
-        incoming[key]
-      );
+      merged[key] = mergeArrayById(current[key], incoming[key]);
     }
   });
 
@@ -655,15 +673,18 @@ function mergeNestedObjects(current = {}, incoming = {}) {
   return normalizeStoreItem(merged);
 }
 
-function mergeIncidencia(base = {}, patch = {}) {
-  const current = normalizeStoreItem(base);
-  const incoming = normalizeStoreItem(patch);
+function mergeIncidencia(base = {}, patch = {}, { normalized = false } = {}) {
+  const current = normalized ? safeObject(base) : normalizeStoreItem(base);
+  const incoming = normalized ? safeObject(patch) : normalizeStoreItem(patch);
 
   return mergeNestedObjects(current, incoming);
 }
 
-function dedupeIncidencias(items = []) {
-  const list = normalizeStoreItems(items);
+function dedupeIncidencias(items = [], { normalized = false } = {}) {
+  const list = normalized
+    ? safeArray(items).filter(isObject)
+    : normalizeStoreItems(items);
+
   const map = new Map();
   const aliasIndex = new Map();
   const anonymous = [];
@@ -685,10 +706,9 @@ function dedupeIncidencias(items = []) {
       return;
     }
 
-    const merged = mergeIncidencia(
-      map.get(finalKey),
-      item
-    );
+    const merged = mergeIncidencia(map.get(finalKey), item, {
+      normalized: true,
+    });
 
     map.set(finalKey, merged);
     registerAliases(aliasIndex, finalKey, merged);
@@ -700,8 +720,10 @@ function dedupeIncidencias(items = []) {
   ];
 }
 
-function normalizeCollection(items = [], { sort = true } = {}) {
-  const deduped = dedupeIncidencias(items);
+function normalizeCollection(items = [], { sort = true, normalized = false } = {}) {
+  const deduped = dedupeIncidencias(items, {
+    normalized,
+  });
 
   return sort
     ? sortIncidenciasByUpdatedDescModel(deduped)
@@ -714,6 +736,12 @@ function normalizeCollection(items = [], { sort = true } = {}) {
 
 function objectMapToArray(value = {}) {
   return Object.values(safeObject(value)).filter(isObject);
+}
+
+function collectionValueToArray(value = null) {
+  if (Array.isArray(value)) return value;
+  if (isObject(value)) return objectMapToArray(value);
+  return [];
 }
 
 function getStoreStateCandidates() {
@@ -732,9 +760,7 @@ function getStoreStateCandidates() {
   } catch {}
 
   try {
-    if (isFn(Store?.getState)) {
-      output.push(Store.getState());
-    }
+    if (isFn(Store?.getState)) output.push(Store.getState());
   } catch {}
 
   return output;
@@ -746,9 +772,7 @@ function readViaStoreGet(paths = READ_PATHS) {
   for (const path of paths) {
     try {
       const value = Store.get(path);
-
-      if (Array.isArray(value)) return value;
-      if (isObject(value)) return value;
+      if (Array.isArray(value) || isObject(value)) return value;
     } catch {}
   }
 
@@ -763,9 +787,7 @@ function readViaStoreState(paths = READ_PATHS) {
 
     for (const path of paths) {
       const value = getByPath(source, path);
-
-      if (Array.isArray(value)) return value;
-      if (isObject(value)) return value;
+      if (Array.isArray(value) || isObject(value)) return value;
     }
   }
 
@@ -782,14 +804,13 @@ function readViaStoreDirect() {
   ];
 
   for (const value of candidates) {
-    if (Array.isArray(value)) return value;
-    if (isObject(value)) return value;
+    if (Array.isArray(value) || isObject(value)) return value;
   }
 
   return null;
 }
 
-function readStoreCollection() {
+function readStoreCollectionValue() {
   const candidates = [
     readViaStoreGet(READ_PATHS),
     readViaStoreState(READ_PATHS),
@@ -797,20 +818,14 @@ function readStoreCollection() {
   ];
 
   for (const value of candidates) {
-    if (Array.isArray(value)) {
-      return value.map((item) => ({ ...safeObject(item) }));
-    }
-
-    if (isObject(value)) {
-      const list = objectMapToArray(value);
-
-      if (list.length) {
-        return list.map((item) => ({ ...safeObject(item) }));
-      }
-    }
+    if (Array.isArray(value) || isObject(value)) return value;
   }
 
   return [];
+}
+
+function readStoreCollection() {
+  return collectionValueToArray(readStoreCollectionValue());
 }
 
 function readStoreDetailMap() {
@@ -823,9 +838,7 @@ function readStoreDetailMap() {
   ];
 
   for (const value of candidates) {
-    if (isObject(value)) {
-      return safeObject(value);
-    }
+    if (isObject(value)) return safeObject(value);
   }
 
   return {};
@@ -882,9 +895,7 @@ function writeViaActions(list = []) {
 
 function writeDirectFallback(list = []) {
   try {
-    if (!Store || typeof Store !== "object") {
-      return false;
-    }
+    if (!Store || typeof Store !== "object") return false;
 
     Store.entities = safeObject(Store.entities);
     Store.collections = safeObject(Store.collections);
@@ -909,10 +920,7 @@ function buildDetailMap(items = []) {
 
     getItemCandidateIds(row).forEach((id) => {
       const key = normalizeCompare(id);
-
-      if (key) {
-        map[key] = row;
-      }
+      if (key) map[key] = row;
     });
 
     map[primaryId] = row;
@@ -949,6 +957,7 @@ function writeMeta(list = []) {
     updatedAt: new Date().toISOString(),
     order: "updated_desc",
     source: "incidencias.store",
+    version: INCIDENCIAS_STORE_VERSION,
   };
 
   writeViaSet(STORE_META_PATH, meta);
@@ -963,8 +972,12 @@ function writeMeta(list = []) {
   return meta;
 }
 
-function writeStoreCollection(items = []) {
-  const list = normalizeCollection(items);
+function writeStoreCollection(items = [], options = {}) {
+  const opts = safeObject(options);
+  const list = normalizeCollection(items, {
+    normalized: Boolean(opts.normalized),
+    sort: opts.sort !== false,
+  });
 
   let wrote = false;
 
@@ -978,6 +991,9 @@ function writeStoreCollection(items = []) {
   writeDetailMap(list);
   writeMeta(list);
 
+  invalidateCollectionCache();
+  rememberCollection(buildCollectionSignature(list), list);
+
   return list;
 }
 
@@ -986,7 +1002,17 @@ function writeStoreCollection(items = []) {
 ========================================================= */
 
 export function getIncidencias() {
-  return normalizeCollection(readStoreCollection());
+  const rawItems = readStoreCollection();
+  const signature = buildCollectionSignature(rawItems);
+  const cached = readCachedCollection(signature);
+
+  if (cached) return cached;
+
+  const list = normalizeCollection(rawItems);
+
+  rememberCollection(signature, list);
+
+  return list.slice();
 }
 
 export function getIncidenciasStore() {
@@ -1013,10 +1039,7 @@ export function getIncidenciaById(id = "") {
     return normalizeStoreItem(detailMap[target]);
   }
 
-  return (
-    getIncidencias().find((item) => isSameItemId(item, target)) ||
-    null
-  );
+  return getIncidencias().find((item) => isSameItemId(item, target)) || null;
 }
 
 export function getIncidenciaByIdStore(id = "") {
@@ -1069,43 +1092,38 @@ export function clearIncidenciasStore() {
 }
 
 export function appendIncidenciaStore(item = null) {
-  if (!item) {
-    return getIncidencias();
-  }
+  if (!item) return getIncidencias();
 
   return writeStoreCollection([
-    ...getIncidencias(),
-    normalizeStoreItem(item),
+    ...readStoreCollection(),
+    item,
   ]);
 }
 
 export function updateIncidenciaStore(id = "", patch = {}) {
   const target = safeText(id, "");
 
-  if (!target) {
-    return getIncidencias();
-  }
+  if (!target) return getIncidencias();
 
   const current = getIncidencias();
   const incomingPatch = normalizeStoreItem(patch);
-
   let found = false;
 
   const next = current.map((item) => {
-    if (!isSameItemId(item, target)) {
-      return item;
-    }
+    if (!isSameItemId(item, target)) return item;
 
     found = true;
 
-    return mergeIncidencia(item, incomingPatch);
+    return mergeIncidencia(item, incomingPatch, {
+      normalized: true,
+    });
   });
 
-  if (!found) {
-    return current;
-  }
+  if (!found) return current;
 
-  return writeStoreCollection(next);
+  return writeStoreCollection(next, {
+    normalized: true,
+  });
 }
 
 export function patchIncidenciaStore(id = "", patch = {}) {
@@ -1117,25 +1135,21 @@ export function patchIncidenciaStore(id = "", patch = {}) {
 ========================================================= */
 
 export function upsertIncidenciaStore(item = null) {
-  if (!item) {
-    return getIncidencias();
-  }
+  if (!item) return getIncidencias();
 
   return writeStoreCollection([
-    ...getIncidencias(),
-    normalizeStoreItem(item),
+    ...readStoreCollection(),
+    item,
   ]);
 }
 
 export function upsertManyIncidenciasStore(items = []) {
-  const incoming = normalizeStoreItems(items);
+  const incoming = safeArray(items).filter(isObject);
 
-  if (!incoming.length) {
-    return getIncidencias();
-  }
+  if (!incoming.length) return getIncidencias();
 
   return writeStoreCollection([
-    ...getIncidencias(),
+    ...readStoreCollection(),
     ...incoming,
   ]);
 }
@@ -1147,13 +1161,13 @@ export function upsertManyIncidenciasStore(items = []) {
 export function removeIncidenciaStore(id = "") {
   const target = safeText(id, "");
 
-  if (!target) {
-    return getIncidencias();
-  }
+  if (!target) return getIncidencias();
 
-  return writeStoreCollection(
-    getIncidencias().filter((item) => !isSameItemId(item, target))
-  );
+  const next = getIncidencias().filter((item) => !isSameItemId(item, target));
+
+  return writeStoreCollection(next, {
+    normalized: true,
+  });
 }
 
 /* =========================================================
@@ -1171,9 +1185,7 @@ export function sortIncidenciasByCreatedDesc(items = []) {
     const aTime = getCreatedTimestamp(a);
     const bTime = getCreatedTimestamp(b);
 
-    if (bTime !== aTime) {
-      return bTime - aTime;
-    }
+    if (bTime !== aTime) return bTime - aTime;
 
     return safeText(getItemId(b)).localeCompare(
       safeText(getItemId(a)),
@@ -1215,128 +1227,33 @@ export function findIncidenciaStore(predicate = null) {
 }
 
 /* =========================================================
-   STATUS / STATS HELPERS
+   STATS HELPERS
 ========================================================= */
 
-function normalizeStatusKey(value = "") {
-  const key = safeLower(value, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-
-  if (["closed", "cerrada", "cerrado", "resolved", "resuelta", "resuelto", "cancelled", "canceled", "archived"].includes(key)) {
-    return "closed";
-  }
-
-  if (["open", "abierta", "abierto", "pending", "pendiente", "in_progress", "progress", "proceso", "en_proceso", "working", "assigned"].includes(key)) {
-    return "open";
-  }
-
-  return key || "open";
-}
-
-function getStatus(item = {}) {
-  return normalizeStatusKey(
-    first(
-      item.status,
-      item.estado,
-      item.lifecycle?.status,
-      item.raw?.status,
-      item.raw?.estado,
-      item.raw?.lifecycle?.status
-    )
-  );
-}
-
-function getPriority(item = {}) {
-  return safeLower(
-    first(
-      item.priority,
-      item.prioridad,
-      item.raw?.priority,
-      item.raw?.prioridad
-    ),
-    ""
-  );
-}
-
-function isClosedLike(item = {}) {
-  return getStatus(item) === "closed";
-}
-
-function isOpenLike(item = {}) {
-  return getStatus(item) === "open";
-}
-
-function isUrgentLike(item = {}) {
-  const priority = getPriority(item);
-
-  return [
-    "urgent",
-    "urgente",
-    "critical",
-    "critica",
-    "crítica",
-    "high",
-    "alta",
-  ].includes(priority);
-}
-
-function hasAttachments(item = {}) {
-  return (
-    safeArray(first(item.attachments, item.files, item.adjuntos)).length > 0 ||
-    safeNumber(first(item.attachmentsCount, item.filesCount, item.adjuntosCount), 0) > 0 ||
-    Boolean(item.meta?.hasAttachments)
-  );
-}
-
-function hasInvoices(item = {}) {
-  return Boolean(
-    item.factura ||
-      item.invoice ||
-      item.billing ||
-      item.linkedInvoices ||
-      item.meta?.hasFactura ||
-      item.meta?.hasInvoice ||
-      item.meta?.hasLinkedInvoices ||
-      safeArray(item.facturas).length ||
-      safeArray(item.invoices).length ||
-      safeNumber(
-        first(
-          item.facturasTotal,
-          item.invoicesTotal,
-          item.invoiceTotal,
-          item.facturaTotal,
-          item.totalFactura,
-          item.invoiceAmount,
-          item.linkedInvoices?.total,
-          item.billing?.total
-        ),
-        0
-      ) > 0
-  );
-}
-
 export function computeIncidenciasStoreStats(items = getIncidencias()) {
-  const list = safeArray(items);
+  const stats = computeIncidenciasStatsModel(safeArray(items));
 
-  const total = list.length;
-  const closed = list.filter(isClosedLike).length;
-  const open = list.filter(isOpenLike).length;
-  const urgent = list.filter(isUrgentLike).length;
-  const withAttachments = list.filter(hasAttachments).length;
-  const withInvoices = list.filter(hasInvoices).length;
+  const closed = safeNumber(stats.closed, 0) + safeNumber(stats.resolved, 0);
+  const active = Math.max(safeNumber(stats.total, 0) - closed, 0);
+  const open = safeNumber(stats.open, 0) +
+    safeNumber(stats.pending, 0) +
+    safeNumber(stats.inProgress, 0);
+  const urgent = safeNumber(stats.urgent, 0) + safeNumber(stats.high, 0);
 
   return {
-    total,
+    ...stats,
+
+    // Compatibilidad histórica del store:
+    // open = abiertas + pendientes + en proceso
+    // closed = cerradas + resueltas
+    // urgent = urgentes + altas
     open,
     closed,
-    active: Math.max(total - closed, 0),
+    active,
     urgent,
-    withAttachments,
-    withInvoices,
+
+    withAttachments: safeNumber(stats.withAttachments, 0),
+    withInvoices: safeNumber(stats.withInvoices, 0),
   };
 }
 
@@ -1349,6 +1266,8 @@ export function getIncidenciasStoreDebugSnapshot() {
   const detailMap = readStoreDetailMap();
 
   return {
+    version: INCIDENCIAS_STORE_VERSION,
+
     path: STORE_PATH,
     collectionKey: STORE_COLLECTION_KEY,
     byIdPath: STORE_BY_ID_PATH,
@@ -1370,6 +1289,11 @@ export function getIncidenciasStoreDebugSnapshot() {
       null,
 
     order: "updated_desc",
+    cache: {
+      hasCache: Boolean(collectionCacheItems),
+      signature: collectionCacheSignature,
+      count: collectionCacheItems?.length || 0,
+    },
     stats: computeIncidenciasStoreStats(items),
     items,
   };
@@ -1380,6 +1304,8 @@ export function getIncidenciasStoreDebugSnapshot() {
 ========================================================= */
 
 export default {
+  INCIDENCIAS_STORE_VERSION,
+
   STORE_PATH,
   STORE_COLLECTION_KEY,
   STORE_BY_ID_PATH,

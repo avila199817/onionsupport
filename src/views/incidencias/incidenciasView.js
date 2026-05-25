@@ -5,12 +5,15 @@
    Responsabilidad:
    - Controlador de la vista Incidencias.
    - Renderizar la plantilla en el contenedor principal.
-   - Coordinar carga, estado, paginación, filtros y acciones de UI.
+   - Coordinar carga, estado, filtros, scroll incremental y acciones de UI.
    - Delegar datos a api/store/model/state.
    - Delegar HTML a incidencias.table.template.js.
    - Delegar acciones remotas a incidencias.actions.js.
    - Delegar modales a incidencias.modal.js e incidencias.create.modal.js.
-   - Delegar eventos DOM a incidencias.bindings.js.
+   - Delegar eventos DOM generales a incidencias.bindings.js.
+   - Mantener compatibilidad con llamadas antiguas de paginación sin mostrar páginas.
+   - Pintar incidencias de más nuevas a más antiguas.
+   - Ir ampliando la lista visible al hacer scroll, estilo feed/infinite scroll.
    - No validar rutas.
    - No resolver slug.
    - No registrar globals.
@@ -59,7 +62,6 @@ import {
   DEFAULT_PAGE_SIZE as MODEL_DEFAULT_PAGE_SIZE,
   normalizeIncidenciasCollection,
   sortIncidenciasByUpdatedDesc,
-  paginateIncidencias,
   findIncidenciaById,
 } from "./incidencias.model.js";
 
@@ -84,12 +86,21 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_VIEW_VERSION = "incidencias.view.v2";
+export const INCIDENCIAS_VIEW_VERSION = "incidencias.view.v3.infinite";
 
 const SCOPE = "view:incidencias";
 
-const PAGE_SIZE =
+const LEGACY_PAGE_SIZE =
   Number(MODEL_DEFAULT_PAGE_SIZE || STATE_DEFAULT_PAGE_SIZE || 5) || 5;
+
+const INITIAL_VISIBLE_COUNT = Math.max(
+  10,
+  Number(STATE_DEFAULT_PAGE_SIZE || MODEL_DEFAULT_PAGE_SIZE || 20) || 20
+);
+
+const LOAD_MORE_BATCH = Math.max(INITIAL_VISIBLE_COUNT, 20);
+
+const SCROLL_THRESHOLD_PX = 900;
 
 const DEFAULT_FILTER = "all";
 
@@ -202,6 +213,8 @@ export const IncidenciasView = (() => {
   let queuedReloadOptions = null;
 
   let bindingsCleanup = null;
+  let scrollCleanup = null;
+
   let pendingRenderFrame = 0;
   let renderToken = 0;
 
@@ -212,9 +225,19 @@ export const IncidenciasView = (() => {
   let inflightOpenTicket = null;
   let inflightOpenTicketId = "";
 
+  let inflightLoadMore = null;
+
   /* =========================================================
      BASICS
   ========================================================= */
+
+  function isBrowser() {
+    return typeof window !== "undefined" && typeof document !== "undefined";
+  }
+
+  function isElement(value = null) {
+    return Boolean(value && typeof value === "object" && value.nodeType === 1);
+  }
 
   function isFn(value) {
     return typeof value === "function";
@@ -658,12 +681,26 @@ export const IncidenciasView = (() => {
     ));
   }
 
-  function resetPage() {
+  function resetVisibleWindow() {
+    const filteredTotal = getFilteredItems(getItems()).length;
+    const nextVisibleCount = getInitialVisibleCount(filteredTotal);
+
+    incidenciasState.visibleCount = nextVisibleCount;
+    incidenciasState.visibleItemsCount = nextVisibleCount;
+    incidenciasState.loadedCount = nextVisibleCount;
+    incidenciasState.hasMoreItems = filteredTotal > nextVisibleCount;
+    incidenciasState.infiniteScroll = true;
+    incidenciasState.scrollMode = "infinite";
+
     try {
       setPage(1);
+      setPageSize(Math.max(1, nextVisibleCount || getLoadMoreBatch()));
     } catch {
       incidenciasState.page = 1;
+      incidenciasState.pageSize = Math.max(1, nextVisibleCount || getLoadMoreBatch());
     }
+
+    return nextVisibleCount;
   }
 
   function setFilter(filter = DEFAULT_FILTER) {
@@ -674,13 +711,14 @@ export const IncidenciasView = (() => {
       query: getCurrentSearchQuery(),
     });
 
-    resetPage();
+    resetVisibleWindow();
     rerender();
 
     emit("incidencias:filter:changed", {
       filter: nextFilter,
       searchQuery: getCurrentSearchQuery(),
       source: SCOPE,
+      mode: "infinite",
     });
 
     return nextFilter;
@@ -694,13 +732,14 @@ export const IncidenciasView = (() => {
       query: nextQuery,
     });
 
-    resetPage();
+    resetVisibleWindow();
     rerender();
 
     emit("incidencias:search:changed", {
       filter: getCurrentFilter(),
       searchQuery: nextQuery,
       source: SCOPE,
+      mode: "infinite",
     });
 
     return nextQuery;
@@ -712,11 +751,12 @@ export const IncidenciasView = (() => {
       query: "",
     });
 
-    resetPage();
+    resetVisibleWindow();
     rerender();
 
     emit("incidencias:filters:cleared", {
       source: SCOPE,
+      mode: "infinite",
     });
 
     return true;
@@ -728,15 +768,246 @@ export const IncidenciasView = (() => {
       query: "",
     });
 
-    resetPage();
+    resetVisibleWindow();
     rerender();
 
     emit("incidencias:search:cleared", {
       filter: getCurrentFilter(),
       source: SCOPE,
+      mode: "infinite",
     });
 
     return true;
+  }
+
+  /* =========================================================
+     INFINITE SCROLL STATE
+  ========================================================= */
+
+  function getLoadMoreBatch() {
+    return Math.max(
+      1,
+      safeNumber(
+        first(
+          incidenciasState.loadMoreBatch,
+          incidenciasState.batchSize,
+          LOAD_MORE_BATCH
+        ),
+        LOAD_MORE_BATCH
+      )
+    );
+  }
+
+  function getInitialVisibleCount(total = 0) {
+    const fallback = Math.max(1, INITIAL_VISIBLE_COUNT);
+    const configured = Math.max(
+      1,
+      safeNumber(
+        first(
+          incidenciasState.initialVisibleCount,
+          incidenciasState.visibleInitialCount,
+          fallback
+        ),
+        fallback
+      )
+    );
+
+    const totalCount = Math.max(0, safeNumber(total, 0));
+
+    if (!totalCount) {
+      return 0;
+    }
+
+    return Math.min(totalCount, configured);
+  }
+
+  function getVisibleCount(total = 0) {
+    const totalCount = Math.max(0, safeNumber(total, 0));
+
+    if (!totalCount) {
+      return 0;
+    }
+
+    const current = safeNumber(incidenciasState.visibleCount, 0);
+
+    if (current > 0) {
+      return Math.min(current, totalCount);
+    }
+
+    return getInitialVisibleCount(totalCount);
+  }
+
+  function setVisibleCount(value = 0, total = getFilteredItems(getItems()).length) {
+    const totalCount = Math.max(0, safeNumber(total, 0));
+    const next = totalCount
+      ? Math.min(Math.max(1, safeNumber(value, 1)), totalCount)
+      : 0;
+
+    incidenciasState.visibleCount = next;
+    incidenciasState.visibleItemsCount = next;
+    incidenciasState.loadedCount = next;
+    incidenciasState.hasMoreItems = totalCount > next;
+    incidenciasState.infiniteScroll = true;
+    incidenciasState.scrollMode = "infinite";
+
+    try {
+      setPage(1);
+      setPageSize(Math.max(1, next || getLoadMoreBatch()));
+    } catch {
+      incidenciasState.page = 1;
+      incidenciasState.pageSize = Math.max(1, next || getLoadMoreBatch());
+    }
+
+    return next;
+  }
+
+  function setLoadingMore(value = false) {
+    incidenciasState.loadingMore = Boolean(value);
+    incidenciasState.isLoadingMore = Boolean(value);
+    return incidenciasState.loadingMore;
+  }
+
+  function buildInfiniteMeta(items = getItems()) {
+    const allItems = safeArray(items);
+    const filteredItems = getFilteredItems(allItems);
+    const filteredTotal = filteredItems.length;
+    const visibleCount = getVisibleCount(filteredTotal);
+    const visibleItems = filteredItems.slice(0, visibleCount);
+    const remainingCount = Math.max(0, filteredTotal - visibleItems.length);
+    const remoteCount = Math.max(
+      allItems.length,
+      safeNumber(incidenciasState.remoteCount, allItems.length)
+    );
+
+    return {
+      mode: "infinite",
+      paginationDisabled: true,
+      infiniteScroll: true,
+
+      allItems,
+      filteredItems,
+      items: visibleItems,
+      pageItems: visibleItems,
+      rows: visibleItems,
+
+      page: 1,
+      currentPage: 1,
+      pageSize: Math.max(1, visibleItems.length || getLoadMoreBatch()),
+      limit: Math.max(1, visibleItems.length || getLoadMoreBatch()),
+
+      total: filteredTotal,
+      totalCount: filteredTotal,
+      filteredTotal,
+      filteredCount: filteredTotal,
+
+      remoteCount,
+      loadedTotal: allItems.length,
+      loadedCount: visibleItems.length,
+      visibleCount: visibleItems.length,
+      visibleItemsCount: visibleItems.length,
+
+      totalPages: 1,
+      pages: 1,
+
+      hasPrev: false,
+      hasNext: false,
+      hasMore: remainingCount > 0,
+      canLoadMore: remainingCount > 0,
+      remainingCount,
+
+      from: visibleItems.length ? 1 : 0,
+      to: visibleItems.length,
+      rangeStart: visibleItems.length ? 1 : 0,
+      rangeEnd: visibleItems.length,
+    };
+  }
+
+  function increaseVisibleCount(amount = getLoadMoreBatch()) {
+    const meta = buildInfiniteMeta(getItems());
+
+    if (!meta.hasMore) {
+      setVisibleCount(meta.filteredTotal, meta.filteredTotal);
+      return buildInfiniteMeta(getItems());
+    }
+
+    const nextVisibleCount = Math.min(
+      meta.filteredTotal,
+      meta.visibleCount + Math.max(1, safeNumber(amount, getLoadMoreBatch()))
+    );
+
+    setVisibleCount(nextVisibleCount, meta.filteredTotal);
+
+    const nextMeta = buildInfiniteMeta(getItems());
+
+    emit("incidencias:visible:changed", {
+      source: SCOPE,
+      mode: "infinite",
+      visibleCount: nextMeta.visibleCount,
+      filteredTotal: nextMeta.filteredTotal,
+      remainingCount: nextMeta.remainingCount,
+      hasMore: nextMeta.hasMore,
+    });
+
+    return nextMeta;
+  }
+
+  async function loadMore(options = {}) {
+    if (destroyed) {
+      return buildInfiniteMeta(getItems()).items;
+    }
+
+    if (inflightLoadMore) {
+      return inflightLoadMore;
+    }
+
+    const opts = safeObject(options);
+
+    inflightLoadMore = (async () => {
+      const beforeMeta = buildInfiniteMeta(getItems());
+
+      if (!beforeMeta.hasMore) {
+        return beforeMeta.items;
+      }
+
+      setLoadingMore(true);
+      scheduleRerender();
+
+      try {
+        const nextMeta = increaseVisibleCount(
+          safeNumber(opts.amount, getLoadMoreBatch())
+        );
+
+        if (!destroyed) {
+          rerender();
+        }
+
+        return nextMeta.items;
+      } finally {
+        setLoadingMore(false);
+
+        if (!destroyed) {
+          scheduleRerender();
+        }
+
+        emit("incidencias:load-more", {
+          source: SCOPE,
+          mode: "infinite",
+          reason: safeText(opts.reason || opts.source, "scroll"),
+          visibleCount: buildInfiniteMeta(getItems()).visibleCount,
+          filteredTotal: buildInfiniteMeta(getItems()).filteredTotal,
+        });
+      }
+    })();
+
+    try {
+      return await inflightLoadMore;
+    } finally {
+      inflightLoadMore = null;
+    }
+  }
+
+  function hasMoreVisibleItems() {
+    return buildInfiniteMeta(getItems()).hasMore;
   }
 
   /* =========================================================
@@ -936,41 +1207,56 @@ export const IncidenciasView = (() => {
   }
 
   function getPaginationMeta(items = getItems()) {
-    const filteredItems = getFilteredItems(items);
-    const page = safeNumber(incidenciasState.page, 1);
-    const pageSize = safeNumber(incidenciasState.pageSize, PAGE_SIZE);
-
-    return paginateIncidencias(
-      filteredItems,
-      page,
-      pageSize || PAGE_SIZE
-    );
+    return buildInfiniteMeta(items);
   }
 
   function clampPage(items = getItems()) {
-    const pagination = getPaginationMeta(items);
+    const meta = buildInfiniteMeta(items);
 
-    if (safeNumber(incidenciasState.page, 1) !== pagination.page) {
-      try {
-        setPage(pagination.page);
-      } catch {
-        incidenciasState.page = pagination.page;
-      }
+    try {
+      setPage(1);
+      setPageSize(Math.max(1, meta.pageSize || getLoadMoreBatch()));
+    } catch {
+      incidenciasState.page = 1;
+      incidenciasState.pageSize = Math.max(1, meta.pageSize || getLoadMoreBatch());
     }
 
-    return pagination;
+    setVisibleCount(meta.visibleCount, meta.filteredTotal);
+
+    return buildInfiniteMeta(items);
   }
 
   function ensureBaseState() {
-    const page = safeNumber(incidenciasState.page, 1);
-    const pageSize = safeNumber(incidenciasState.pageSize, PAGE_SIZE);
-
     try {
-      setPage(Math.max(1, page));
-      setPageSize(Math.max(1, pageSize));
+      setPage(1);
+      setPageSize(
+        Math.max(
+          1,
+          safeNumber(
+            first(
+              incidenciasState.pageSize,
+              incidenciasState.visibleCount,
+              LEGACY_PAGE_SIZE,
+              INITIAL_VISIBLE_COUNT
+            ),
+            INITIAL_VISIBLE_COUNT
+          )
+        )
+      );
     } catch {
-      incidenciasState.page = Math.max(1, page);
-      incidenciasState.pageSize = Math.max(1, pageSize);
+      incidenciasState.page = 1;
+      incidenciasState.pageSize = Math.max(
+        1,
+        safeNumber(
+          first(
+            incidenciasState.pageSize,
+            incidenciasState.visibleCount,
+            LEGACY_PAGE_SIZE,
+            INITIAL_VISIBLE_COUNT
+          ),
+          INITIAL_VISIBLE_COUNT
+        )
+      );
     }
 
     if (typeof incidenciasState.loading !== "boolean") {
@@ -983,6 +1269,11 @@ export const IncidenciasView = (() => {
 
     if (typeof incidenciasState.creating !== "boolean") {
       incidenciasState.creating = false;
+    }
+
+    if (typeof incidenciasState.loadingMore !== "boolean") {
+      incidenciasState.loadingMore = false;
+      incidenciasState.isLoadingMore = false;
     }
 
     incidenciasState.openingTicketId = safeText(
@@ -1005,7 +1296,23 @@ export const IncidenciasView = (() => {
       safeNumber(incidenciasState.remoteCount, 0)
     );
 
+    incidenciasState.page = 1;
+    incidenciasState.totalPages = 1;
+    incidenciasState.pages = 1;
+
+    incidenciasState.infiniteScroll = true;
+    incidenciasState.scrollMode = "infinite";
+    incidenciasState.paginationDisabled = true;
+
     syncFilterState();
+
+    const filteredTotal = getFilteredItems(getItems()).length;
+
+    if (filteredTotal && safeNumber(incidenciasState.visibleCount, 0) <= 0) {
+      setVisibleCount(getInitialVisibleCount(filteredTotal), filteredTotal);
+    } else {
+      setVisibleCount(getVisibleCount(filteredTotal), filteredTotal);
+    }
 
     return incidenciasState;
   }
@@ -1107,6 +1414,7 @@ export const IncidenciasView = (() => {
 
     const beforeItems = getItems();
     const hasData = beforeItems.length > 0;
+    const previousVisibleCount = safeNumber(incidenciasState.visibleCount, 0);
 
     try {
       clearError();
@@ -1147,6 +1455,19 @@ export const IncidenciasView = (() => {
       }
 
       const afterItems = getItems();
+      const filteredTotal = getFilteredItems(afterItems).length;
+
+      if (previousVisibleCount > 0) {
+        setVisibleCount(
+          Math.max(
+            previousVisibleCount,
+            getInitialVisibleCount(filteredTotal)
+          ),
+          filteredTotal
+        );
+      } else {
+        setVisibleCount(getInitialVisibleCount(filteredTotal), filteredTotal);
+      }
 
       markLoaded(afterItems, remoteCount);
       markSync();
@@ -1160,6 +1481,7 @@ export const IncidenciasView = (() => {
         silent: Boolean(silent),
         asRefresh: Boolean(asRefresh),
         source: SCOPE,
+        mode: "infinite",
       });
 
       return afterItems;
@@ -1300,8 +1622,7 @@ export const IncidenciasView = (() => {
     ensureBaseState();
 
     const allItems = getItems();
-    const filteredItems = getFilteredItems(allItems);
-    const pagination = clampPage(allItems);
+    const infinite = clampPage(allItems);
 
     const currentFilter = getCurrentFilter();
     const currentSearchQuery = getCurrentSearchQuery();
@@ -1316,15 +1637,30 @@ export const IncidenciasView = (() => {
 
     return {
       items: allItems,
-      filteredItems,
-      pageItems: pagination.items,
+      allItems,
+      filteredItems: infinite.filteredItems,
+      pageItems: infinite.pageItems,
+      visibleItems: infinite.pageItems,
 
       totalCount: remoteCount,
       remoteCount,
+      filteredCount: infinite.filteredCount,
+      visibleCount: infinite.visibleCount,
+      visibleItemsCount: infinite.visibleItemsCount,
+      loadedCount: infinite.loadedCount,
+      remainingCount: infinite.remainingCount,
 
-      page: pagination.page,
-      pageSize: pagination.pageSize,
-      totalPages: pagination.totalPages,
+      hasMore: infinite.hasMore,
+      canLoadMore: infinite.canLoadMore,
+      infiniteScroll: true,
+      scrollMode: "infinite",
+      paginationDisabled: true,
+
+      page: 1,
+      pageSize: infinite.pageSize,
+      totalPages: 1,
+
+      pagination: infinite,
 
       lastUpdatedAt: incidenciasState.lastSyncAt || "",
 
@@ -1345,11 +1681,24 @@ export const IncidenciasView = (() => {
       state: {
         ...incidenciasState,
 
-        page: pagination.page,
-        pageSize: pagination.pageSize,
-        totalPages: pagination.totalPages,
+        page: 1,
+        pageSize: infinite.pageSize,
+        totalPages: 1,
+        pages: 1,
+
         totalCount: remoteCount,
         remoteCount,
+        filteredCount: infinite.filteredCount,
+        visibleCount: infinite.visibleCount,
+        visibleItemsCount: infinite.visibleItemsCount,
+        loadedCount: infinite.loadedCount,
+        remainingCount: infinite.remainingCount,
+
+        hasMore: infinite.hasMore,
+        canLoadMore: infinite.canLoadMore,
+        infiniteScroll: true,
+        scrollMode: "infinite",
+        paginationDisabled: true,
 
         selectedTicketId: safeText(incidenciasState.selectedTicketId, ""),
         openingTicketId: safeText(incidenciasState.openingTicketId, ""),
@@ -1357,6 +1706,8 @@ export const IncidenciasView = (() => {
         creating: Boolean(incidenciasState.creating),
         loading: Boolean(incidenciasState.loading),
         refreshing: Boolean(incidenciasState.refreshing),
+        loadingMore: Boolean(incidenciasState.loadingMore),
+        isLoadingMore: Boolean(incidenciasState.loadingMore),
 
         user: currentUser,
         currentUser,
@@ -1388,6 +1739,7 @@ export const IncidenciasView = (() => {
         class="panel-content dashboard ready"
         data-view="incidencias"
         data-incidencias-scope="${escapeHtml(SCOPE)}"
+        data-incidencias-scroll-mode="infinite"
       >
         <div class="content-wrapper incidencias-view-shell">
           ${renderIncidenciasTableTemplate(payload)}
@@ -1476,6 +1828,180 @@ export const IncidenciasView = (() => {
     rerender();
 
     return api;
+  }
+
+  /* =========================================================
+     INFINITE SCROLL DOM BINDING
+  ========================================================= */
+
+  function getScrollDocument() {
+    if (!isBrowser()) return null;
+
+    return document.scrollingElement ||
+      document.documentElement ||
+      document.body ||
+      null;
+  }
+
+  function isNearViewportBottom() {
+    if (!isBrowser()) {
+      return false;
+    }
+
+    const scrolling = getScrollDocument();
+
+    if (!scrolling) {
+      return false;
+    }
+
+    const scrollTop = window.scrollY || scrolling.scrollTop || 0;
+    const viewportHeight = window.innerHeight || scrolling.clientHeight || 0;
+    const scrollHeight = scrolling.scrollHeight || 0;
+
+    return scrollTop + viewportHeight >= scrollHeight - SCROLL_THRESHOLD_PX;
+  }
+
+  function queryLoadMoreSentinel(container = null) {
+    if (!isElement(container)) {
+      return null;
+    }
+
+    return (
+      container.querySelector("[data-incidencias-load-more='true']") ||
+      container.querySelector("[data-incidencias-infinite-sentinel='true']") ||
+      container.querySelector("[data-infinite-scroll-sentinel='true']") ||
+      container.querySelector("[data-load-more-sentinel='true']") ||
+      container.querySelector("[data-home-load-more='true']") ||
+      null
+    );
+  }
+
+  function cleanupScrollBinding() {
+    try {
+      scrollCleanup?.();
+    } catch {}
+
+    scrollCleanup = null;
+  }
+
+  function bindInfiniteScroll(container = getContainer()) {
+    cleanupScrollBinding();
+
+    if (destroyed || !isBrowser() || !isElement(container)) {
+      return null;
+    }
+
+    let disposed = false;
+    let ticking = false;
+    let observer = null;
+
+    const maybeLoadMore = (reason = "scroll") => {
+      if (disposed || destroyed) {
+        return;
+      }
+
+      if (
+        incidenciasState.loading ||
+        incidenciasState.refreshing ||
+        incidenciasState.loadingMore
+      ) {
+        return;
+      }
+
+      if (!hasMoreVisibleItems()) {
+        return;
+      }
+
+      loadMore({
+        reason,
+      });
+    };
+
+    const onScroll = () => {
+      if (disposed || ticking) {
+        return;
+      }
+
+      ticking = true;
+
+      requestFrame(() => {
+        ticking = false;
+
+        if (isNearViewportBottom()) {
+          maybeLoadMore("scroll");
+        }
+      });
+    };
+
+    const sentinel = queryLoadMoreSentinel(container);
+
+    if (sentinel && typeof IntersectionObserver !== "undefined") {
+      try {
+        observer = new IntersectionObserver(
+          (entries = []) => {
+            const visible = entries.some((entry) => entry?.isIntersecting);
+
+            if (visible) {
+              maybeLoadMore("intersection");
+            }
+          },
+          {
+            root: null,
+            rootMargin: `${SCROLL_THRESHOLD_PX}px 0px`,
+            threshold: 0,
+          }
+        );
+
+        observer.observe(sentinel);
+      } catch {
+        observer = null;
+      }
+    }
+
+    window.addEventListener("scroll", onScroll, {
+      passive: true,
+    });
+
+    window.addEventListener("resize", onScroll, {
+      passive: true,
+    });
+
+    const shell =
+      container.querySelector(".incidencias-view-shell") ||
+      container.querySelector("[data-incidencias-scroll-host='true']") ||
+      null;
+
+    if (shell && shell !== window) {
+      try {
+        shell.addEventListener("scroll", onScroll, {
+          passive: true,
+        });
+      } catch {}
+    }
+
+    requestFrame(onScroll);
+
+    scrollCleanup = () => {
+      disposed = true;
+
+      try {
+        observer?.disconnect?.();
+      } catch {}
+
+      try {
+        window.removeEventListener("scroll", onScroll);
+      } catch {}
+
+      try {
+        window.removeEventListener("resize", onScroll);
+      } catch {}
+
+      try {
+        shell?.removeEventListener?.("scroll", onScroll);
+      } catch {}
+    };
+
+    return scrollCleanup;
   }
 
   /* =========================================================
@@ -1877,50 +2403,55 @@ export const IncidenciasView = (() => {
   }
 
   /* =========================================================
-     PAGINATION
+     LEGACY PAGINATION COMPAT
+     No hay paginación visual. Estas funciones sólo mantienen
+     compatibilidad con bindings antiguos.
   ========================================================= */
 
   function goToPage(page = 1) {
-    if (incidenciasState.loading || incidenciasState.refreshing) {
-      return safeNumber(incidenciasState.page, 1);
-    }
-
-    const pagination = paginateIncidencias(
-      getFilteredItems(getItems()),
-      page,
-      safeNumber(incidenciasState.pageSize, PAGE_SIZE)
+    const targetPage = Math.max(1, safeNumber(page, 1));
+    const filteredTotal = getFilteredItems(getItems()).length;
+    const targetVisible = Math.min(
+      filteredTotal,
+      Math.max(
+        getInitialVisibleCount(filteredTotal),
+        targetPage * getLoadMoreBatch()
+      )
     );
 
-    try {
-      setPage(pagination.page);
-    } catch {
-      incidenciasState.page = pagination.page;
-    }
-
+    setVisibleCount(targetVisible, filteredTotal);
     rerender();
 
-    return pagination.page;
+    return 1;
   }
 
-  function goPrevPage() {
-    return goToPage(safeNumber(incidenciasState.page, 1) - 1);
+  async function goPrevPage() {
+    resetVisibleWindow();
+    rerender();
+    return 1;
   }
 
-  function goNextPage() {
-    return goToPage(safeNumber(incidenciasState.page, 1) + 1);
+  async function goNextPage() {
+    await loadMore({
+      reason: "legacy_next_page",
+    });
+
+    return 1;
   }
 
-  function changePageSize(value = PAGE_SIZE) {
-    const nextSize = Math.max(1, safeNumber(value, PAGE_SIZE));
+  function changePageSize(value = LOAD_MORE_BATCH) {
+    const nextSize = Math.max(1, safeNumber(value, LOAD_MORE_BATCH));
 
-    try {
-      setPageSize(nextSize);
-      setPage(1);
-    } catch {
-      incidenciasState.pageSize = nextSize;
-      incidenciasState.page = 1;
-    }
+    incidenciasState.loadMoreBatch = nextSize;
+    incidenciasState.batchSize = nextSize;
 
+    const filteredTotal = getFilteredItems(getItems()).length;
+    const nextVisible = Math.min(
+      filteredTotal,
+      Math.max(getVisibleCount(filteredTotal), nextSize)
+    );
+
+    setVisibleCount(nextVisible, filteredTotal);
     rerender();
 
     return nextSize;
@@ -1936,6 +2467,8 @@ export const IncidenciasView = (() => {
     } catch {}
 
     bindingsCleanup = null;
+
+    cleanupScrollBinding();
   }
 
   function bind(container = getContainer()) {
@@ -1945,7 +2478,7 @@ export const IncidenciasView = (() => {
       return false;
     }
 
-    bindingsCleanup = bindIncidenciasEvents({
+    const eventsCleanup = bindIncidenciasEvents({
       container,
       scope: SCOPE,
 
@@ -1967,7 +2500,21 @@ export const IncidenciasView = (() => {
       goPrevPage,
       goNextPage,
       changePageSize,
+
+      loadMore,
+      showMore: loadMore,
+      infiniteScroll: true,
     });
+
+    bindInfiniteScroll(container);
+
+    bindingsCleanup = () => {
+      try {
+        eventsCleanup?.();
+      } catch {}
+
+      cleanupScrollBinding();
+    };
 
     return true;
   }
@@ -2101,6 +2648,7 @@ export const IncidenciasView = (() => {
     inflightInit = null;
     inflightOpenTicket = null;
     inflightOpenTicketId = "";
+    inflightLoadMore = null;
 
     try {
       setOpeningTicketId("");
@@ -2113,6 +2661,8 @@ export const IncidenciasView = (() => {
       incidenciasState.refreshing = false;
       incidenciasState.loading = false;
     }
+
+    setLoadingMore(false);
 
     incidenciasState.selectedTicketId = "";
 
@@ -2158,6 +2708,10 @@ export const IncidenciasView = (() => {
     refreshTicketDetail: handleRefreshTicketDetail,
     refreshDetail: handleRefreshTicketDetail,
 
+    loadMore,
+    showMore: loadMore,
+    hasMore: hasMoreVisibleItems,
+
     goToPage,
     goPrevPage,
     prevPage: goPrevPage,
@@ -2175,8 +2729,10 @@ export const IncidenciasView = (() => {
 
     getItems: () => getItems(),
     getFilteredItems: () => getFilteredItems(getItems()),
-    getPageItems: () => getPaginationMeta(getItems()).items,
+    getPageItems: () => buildInfiniteMeta(getItems()).pageItems,
+    getVisibleItems: () => buildInfiniteMeta(getItems()).pageItems,
     getPagination: () => getPaginationMeta(getItems()),
+    getInfiniteMeta: () => buildInfiniteMeta(getItems()),
 
     getTicketById: findTicketById,
     findTicketById,
@@ -2186,7 +2742,7 @@ export const IncidenciasView = (() => {
     getState: () => {
       const allItems = getItems();
       const filteredItems = getFilteredItems(allItems);
-      const pagination = getPaginationMeta(allItems);
+      const infinite = getPaginationMeta(allItems);
       const currentUser = getCurrentUserSnapshot();
       const currentUserAvatar = getCurrentUserAvatar(currentUser);
 
@@ -2201,6 +2757,7 @@ export const IncidenciasView = (() => {
         hasQueuedReload: Boolean(queuedReloadOptions),
         hasInflightOpenTicket: Boolean(inflightOpenTicket),
         inflightOpenTicketId,
+        hasInflightLoadMore: Boolean(inflightLoadMore),
 
         user: currentUser,
         currentUser,
@@ -2220,9 +2777,21 @@ export const IncidenciasView = (() => {
         filterQuery: getCurrentSearchQuery(),
         query: getCurrentSearchQuery(),
 
+        mode: "infinite",
+        scrollMode: "infinite",
+        infiniteScroll: true,
+        paginationDisabled: true,
+
         itemsCount: allItems.length,
         filteredItemsCount: filteredItems.length,
-        pagination,
+        visibleItemsCount: infinite.visibleItemsCount,
+        visibleCount: infinite.visibleCount,
+        remainingCount: infinite.remainingCount,
+        hasMore: infinite.hasMore,
+        canLoadMore: infinite.canLoadMore,
+        loadingMore: Boolean(incidenciasState.loadingMore),
+
+        pagination: infinite,
       };
     },
 

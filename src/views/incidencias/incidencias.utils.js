@@ -5,8 +5,8 @@
    Responsabilidad:
    - Helpers comunes y reutilizables del módulo Incidencias.
    - Sanitización, texto, números, fechas, arrays, objetos, formato y errores.
+   - URLs seguras para avatares, adjuntos y enlaces externos.
    - Toast y eventos mínimos a través de AppCore.
-   - No tocar DOM salvo referencias seguras de entorno.
    - No llamar APIs.
    - No leer Router/Auth/Store.
    - No registrar globals.
@@ -43,6 +43,10 @@ export function isPlainObject(value) {
   return proto === Object.prototype || proto === null;
 }
 
+export function isFunction(value) {
+  return typeof value === "function";
+}
+
 export function safeString(value, fallback = "") {
   if (isNil(value)) return fallback;
 
@@ -51,7 +55,14 @@ export function safeString(value, fallback = "") {
 }
 
 export function safeText(value, fallback = "") {
-  return safeString(value, fallback);
+  if (isNil(value)) return fallback;
+
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return text || fallback;
 }
 
 export function safeLower(value, fallback = "") {
@@ -77,6 +88,7 @@ export function first(...values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
 
     return value;
   }
@@ -94,6 +106,10 @@ export function firstDefined(...values) {
 
 export function hasOwn(object = {}, key = "") {
   return Object.prototype.hasOwnProperty.call(safeObject(object), key);
+}
+
+export function hasOwnKeys(value = {}) {
+  return Boolean(isObject(value) && Object.keys(value).length > 0);
 }
 
 export function noop() {}
@@ -143,11 +159,12 @@ export function parseLocaleNumber(value, fallback = NaN) {
     .replace(/€/g, "")
     .replace(/\$/g, "")
     .replace(/£/g, "")
+    .replace(/¥/g, "")
     .replace(/%/g, "")
     .replace(/[^\d.,+\-\s]/g, "")
     .replace(/\s+/g, "");
 
-  if (!normalized) return fallback;
+  if (!normalized || normalized === "-" || normalized === "+") return fallback;
 
   const hasComma = normalized.includes(",");
   const hasDot = normalized.includes(".");
@@ -278,7 +295,7 @@ export function normalizeWhitespace(value = "") {
 export function normalizeKey(value = "") {
   return normalizeText(value)
     .replace(/[\s-]+/g, "_")
-    .replace(/[^\w]+/g, "_")
+    .replace(/[^\w:.]+/g, "_")
     .replace(/^_+|_+$/g, "");
 }
 
@@ -310,10 +327,8 @@ export function getInitials(value = "") {
     return parts[0].slice(0, 2).toUpperCase() || "ON";
   }
 
-  return parts
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("")
+  return `${parts[0]?.[0] || ""}${parts[parts.length - 1]?.[0] || ""}`
+    .toUpperCase()
     .slice(0, 2) || "ON";
 }
 
@@ -349,6 +364,7 @@ export function compact(values = []) {
   return safeArray(values).filter((value) => {
     if (value === undefined || value === null) return false;
     if (typeof value === "string" && value.trim() === "") return false;
+    if (Array.isArray(value) && value.length === 0) return false;
     return true;
   });
 }
@@ -450,7 +466,7 @@ export function toDate(value = null) {
   const spanishDate = parseSpanishDate(raw);
   if (spanishDate) return spanishDate;
 
-  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+  const date = new Date(raw.includes("T") || raw.includes("Z") ? raw : `${raw}T00:00:00`);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -643,12 +659,107 @@ export function formatBytes(bytes = 0, fallback = "") {
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+export function safeFilename(value = "", fallback = "archivo") {
+  const name = safeText(value, fallback)
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return name || fallback;
+}
+
 /* =========================================================
    URL / PATH / QUERY
 ========================================================= */
 
+const SENSITIVE_QUERY_RE =
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
+
+export function hasSensitiveQuery(value = "") {
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
+}
+
 export function isAbsoluteUrl(value = "") {
   return /^https?:\/\//i.test(safeText(value, ""));
+}
+
+export function isSafeUrl(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return false;
+  if (hasSensitiveQuery(raw)) return false;
+  if (/[\r\n\t\\]/.test(raw)) return false;
+  if (/^(?:javascript|vbscript|file):/i.test(raw)) return false;
+  if (raw.startsWith("//")) return false;
+
+  if (raw.startsWith("/")) return true;
+
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw);
+      return url.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+export function safeExternalUrl(value = "") {
+  const raw = safeText(value, "");
+
+  if (!isSafeUrl(raw)) return "";
+
+  if (raw.startsWith("/")) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
+}
+
+export function safeImageSrc(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+  if (hasSensitiveQuery(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (/^(?:data|blob|javascript|vbscript|file):/i.test(raw)) return "";
+  if (raw.startsWith("//")) return "";
+
+  if (raw.startsWith("/")) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  if (
+    raw.includes("/") ||
+    /\.(?:png|jpe?g|gif|webp|svg|avif|bmp)(?:[?#].*)?$/i.test(raw)
+  ) {
+    const clean = raw
+      .replace(/^\.\//, "")
+      .replace(/^\/+/, "")
+      .replace(/\/{2,}/g, "/");
+
+    return clean ? `/${clean}` : "";
+  }
+
+  return "";
 }
 
 export function normalizePathPart(value = "") {
@@ -728,8 +839,8 @@ export function safeOn(event = "", handler = null) {
   if (!eventName || typeof handler !== "function") return false;
 
   try {
-    AppCore?.events?.on?.(eventName, handler);
-    return true;
+    const off = AppCore?.events?.on?.(eventName, handler);
+    return typeof off === "function" ? off : true;
   } catch {
     return false;
   }
@@ -755,6 +866,19 @@ export function sleep(ms = 0) {
   return new Promise((resolve) => {
     setTimeout(resolve, Math.max(0, safeNumber(ms, 0)));
   });
+}
+
+export function debounce(fn = null, wait = 0) {
+  let timer = 0;
+
+  return (...args) => {
+    if (timer) clearTimeout(timer);
+
+    timer = setTimeout(() => {
+      timer = 0;
+      if (typeof fn === "function") fn(...args);
+    }, Math.max(0, safeNumber(wait, 0)));
+  };
 }
 
 export function createTimeoutController(timeoutMs = 15000) {
@@ -920,6 +1044,7 @@ export default {
   isNil,
   isObject,
   isPlainObject,
+  isFunction,
 
   safeString,
   safeText,
@@ -933,6 +1058,7 @@ export default {
   first,
   firstDefined,
   hasOwn,
+  hasOwnKeys,
   noop,
   identity,
 
@@ -976,8 +1102,13 @@ export default {
   formatMoney,
   formatPercent,
   formatBytes,
+  safeFilename,
 
+  hasSensitiveQuery,
   isAbsoluteUrl,
+  isSafeUrl,
+  safeExternalUrl,
+  safeImageSrc,
   normalizePathPart,
   joinPath,
   joinApiPath,
@@ -990,6 +1121,7 @@ export default {
   safeOff,
 
   sleep,
+  debounce,
   createTimeoutController,
 
   normalizeToastType,

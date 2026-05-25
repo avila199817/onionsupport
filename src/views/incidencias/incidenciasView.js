@@ -86,7 +86,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_VIEW_VERSION = "incidencias.view.v3.infinite";
+export const INCIDENCIAS_VIEW_VERSION = "incidencias.view.v4.optimized";
 
 const SCOPE = "view:incidencias";
 
@@ -681,24 +681,15 @@ export const IncidenciasView = (() => {
     ));
   }
 
-  function resetVisibleWindow() {
-    const filteredTotal = getFilteredItems(getItems()).length;
+  function resetVisibleWindow(items = null) {
+    const sourceItems = Array.isArray(items)
+      ? items
+      : getItems();
+
+    const filteredTotal = getFilteredItems(sourceItems).length;
     const nextVisibleCount = getInitialVisibleCount(filteredTotal);
 
-    incidenciasState.visibleCount = nextVisibleCount;
-    incidenciasState.visibleItemsCount = nextVisibleCount;
-    incidenciasState.loadedCount = nextVisibleCount;
-    incidenciasState.hasMoreItems = filteredTotal > nextVisibleCount;
-    incidenciasState.infiniteScroll = true;
-    incidenciasState.scrollMode = "infinite";
-
-    try {
-      setPage(1);
-      setPageSize(Math.max(1, nextVisibleCount || getLoadMoreBatch()));
-    } catch {
-      incidenciasState.page = 1;
-      incidenciasState.pageSize = Math.max(1, nextVisibleCount || getLoadMoreBatch());
-    }
+    setVisibleCount(nextVisibleCount, filteredTotal);
 
     return nextVisibleCount;
   }
@@ -837,8 +828,12 @@ export const IncidenciasView = (() => {
     return getInitialVisibleCount(totalCount);
   }
 
-  function setVisibleCount(value = 0, total = getFilteredItems(getItems()).length) {
-    const totalCount = Math.max(0, safeNumber(total, 0));
+  function setVisibleCount(value = 0, total = null) {
+    const resolvedTotal = total === null || total === undefined
+      ? getFilteredItems(getItems()).length
+      : total;
+
+    const totalCount = Math.max(0, safeNumber(resolvedTotal, 0));
     const next = totalCount
       ? Math.min(Math.max(1, safeNumber(value, 1)), totalCount)
       : 0;
@@ -849,6 +844,7 @@ export const IncidenciasView = (() => {
     incidenciasState.hasMoreItems = totalCount > next;
     incidenciasState.infiniteScroll = true;
     incidenciasState.scrollMode = "infinite";
+    incidenciasState.paginationDisabled = true;
 
     try {
       setPage(1);
@@ -857,6 +853,9 @@ export const IncidenciasView = (() => {
       incidenciasState.page = 1;
       incidenciasState.pageSize = Math.max(1, next || getLoadMoreBatch());
     }
+
+    incidenciasState.totalPages = 1;
+    incidenciasState.pages = 1;
 
     return next;
   }
@@ -922,12 +921,16 @@ export const IncidenciasView = (() => {
     };
   }
 
-  function increaseVisibleCount(amount = getLoadMoreBatch()) {
-    const meta = buildInfiniteMeta(getItems());
+  function increaseVisibleCount(amount = getLoadMoreBatch(), items = null) {
+    const sourceItems = Array.isArray(items)
+      ? items
+      : getItems();
+
+    const meta = buildInfiniteMeta(sourceItems);
 
     if (!meta.hasMore) {
       setVisibleCount(meta.filteredTotal, meta.filteredTotal);
-      return buildInfiniteMeta(getItems());
+      return buildInfiniteMeta(sourceItems);
     }
 
     const nextVisibleCount = Math.min(
@@ -937,7 +940,7 @@ export const IncidenciasView = (() => {
 
     setVisibleCount(nextVisibleCount, meta.filteredTotal);
 
-    const nextMeta = buildInfiniteMeta(getItems());
+    const nextMeta = buildInfiniteMeta(sourceItems);
 
     emit("incidencias:visible:changed", {
       source: SCOPE,
@@ -969,32 +972,30 @@ export const IncidenciasView = (() => {
         return beforeMeta.items;
       }
 
+      let finalMeta = beforeMeta;
+
       setLoadingMore(true);
-      scheduleRerender();
 
       try {
-        const nextMeta = increaseVisibleCount(
-          safeNumber(opts.amount, getLoadMoreBatch())
+        finalMeta = increaseVisibleCount(
+          safeNumber(opts.amount, getLoadMoreBatch()),
+          beforeMeta.allItems
         );
 
-        if (!destroyed) {
-          rerender();
-        }
-
-        return nextMeta.items;
+        return finalMeta.items;
       } finally {
         setLoadingMore(false);
 
         if (!destroyed) {
-          scheduleRerender();
+          rerender();
         }
 
         emit("incidencias:load-more", {
           source: SCOPE,
           mode: "infinite",
           reason: safeText(opts.reason || opts.source, "scroll"),
-          visibleCount: buildInfiniteMeta(getItems()).visibleCount,
-          filteredTotal: buildInfiniteMeta(getItems()).filteredTotal,
+          visibleCount: finalMeta.visibleCount,
+          filteredTotal: finalMeta.filteredTotal,
         });
       }
     })();
@@ -1132,9 +1133,11 @@ export const IncidenciasView = (() => {
       return null;
     }
 
+    const items = getItems();
+
     return (
-      findIncidenciaById(getItems(), id) ||
-      getItems().find((item) => sameIdentity(getTicketIdentity(item), id)) ||
+      findIncidenciaById(items, id) ||
+      items.find((item) => sameIdentity(getTicketIdentity(item), id)) ||
       null
     );
   }
@@ -1211,52 +1214,34 @@ export const IncidenciasView = (() => {
   }
 
   function clampPage(items = getItems()) {
-    const meta = buildInfiniteMeta(items);
-
-    try {
-      setPage(1);
-      setPageSize(Math.max(1, meta.pageSize || getLoadMoreBatch()));
-    } catch {
-      incidenciasState.page = 1;
-      incidenciasState.pageSize = Math.max(1, meta.pageSize || getLoadMoreBatch());
-    }
+    const sourceItems = safeArray(items);
+    const meta = buildInfiniteMeta(sourceItems);
 
     setVisibleCount(meta.visibleCount, meta.filteredTotal);
 
-    return buildInfiniteMeta(items);
+    return buildInfiniteMeta(sourceItems);
   }
 
-  function ensureBaseState() {
+  function ensureBaseState(items = null) {
+    const fallbackPageSize = Math.max(
+      1,
+      safeNumber(
+        first(
+          incidenciasState.pageSize,
+          incidenciasState.visibleCount,
+          LEGACY_PAGE_SIZE,
+          INITIAL_VISIBLE_COUNT
+        ),
+        INITIAL_VISIBLE_COUNT
+      )
+    );
+
     try {
       setPage(1);
-      setPageSize(
-        Math.max(
-          1,
-          safeNumber(
-            first(
-              incidenciasState.pageSize,
-              incidenciasState.visibleCount,
-              LEGACY_PAGE_SIZE,
-              INITIAL_VISIBLE_COUNT
-            ),
-            INITIAL_VISIBLE_COUNT
-          )
-        )
-      );
+      setPageSize(fallbackPageSize);
     } catch {
       incidenciasState.page = 1;
-      incidenciasState.pageSize = Math.max(
-        1,
-        safeNumber(
-          first(
-            incidenciasState.pageSize,
-            incidenciasState.visibleCount,
-            LEGACY_PAGE_SIZE,
-            INITIAL_VISIBLE_COUNT
-          ),
-          INITIAL_VISIBLE_COUNT
-        )
-      );
+      incidenciasState.pageSize = fallbackPageSize;
     }
 
     if (typeof incidenciasState.loading !== "boolean") {
@@ -1273,8 +1258,9 @@ export const IncidenciasView = (() => {
 
     if (typeof incidenciasState.loadingMore !== "boolean") {
       incidenciasState.loadingMore = false;
-      incidenciasState.isLoadingMore = false;
     }
+
+    incidenciasState.isLoadingMore = Boolean(incidenciasState.loadingMore);
 
     incidenciasState.openingTicketId = safeText(
       incidenciasState.openingTicketId,
@@ -1306,13 +1292,17 @@ export const IncidenciasView = (() => {
 
     syncFilterState();
 
-    const filteredTotal = getFilteredItems(getItems()).length;
+    const sourceItems = Array.isArray(items)
+      ? items
+      : getItems();
 
-    if (filteredTotal && safeNumber(incidenciasState.visibleCount, 0) <= 0) {
-      setVisibleCount(getInitialVisibleCount(filteredTotal), filteredTotal);
-    } else {
-      setVisibleCount(getVisibleCount(filteredTotal), filteredTotal);
-    }
+    const filteredTotal = getFilteredItems(sourceItems).length;
+    const currentVisibleCount = safeNumber(incidenciasState.visibleCount, 0);
+    const nextVisibleCount = filteredTotal && currentVisibleCount <= 0
+      ? getInitialVisibleCount(filteredTotal)
+      : getVisibleCount(filteredTotal);
+
+    setVisibleCount(nextVisibleCount, filteredTotal);
 
     return incidenciasState;
   }
@@ -1407,6 +1397,7 @@ export const IncidenciasView = (() => {
     force = false,
     silent = false,
     asRefresh = false,
+    renderBeforeLoad = true,
   } = {}) {
     if (destroyed) {
       return getItems();
@@ -1430,7 +1421,7 @@ export const IncidenciasView = (() => {
       incidenciasState.refreshing = hasData && asRefresh;
     }
 
-    if (!silent) {
+    if (!silent && renderBeforeLoad) {
       rerender();
     }
 
@@ -1441,9 +1432,10 @@ export const IncidenciasView = (() => {
 
       lastApiPayload = payload || lastApiPayload;
 
+      const afterItems = getItems();
       const remoteCount = extractRemoteCount(
         payload,
-        getItems().length
+        afterItems.length
       );
 
       if (remoteCount > 0) {
@@ -1454,20 +1446,12 @@ export const IncidenciasView = (() => {
         }
       }
 
-      const afterItems = getItems();
       const filteredTotal = getFilteredItems(afterItems).length;
+      const nextVisibleCount = previousVisibleCount > 0
+        ? Math.max(previousVisibleCount, getInitialVisibleCount(filteredTotal))
+        : getInitialVisibleCount(filteredTotal);
 
-      if (previousVisibleCount > 0) {
-        setVisibleCount(
-          Math.max(
-            previousVisibleCount,
-            getInitialVisibleCount(filteredTotal)
-          ),
-          filteredTotal
-        );
-      } else {
-        setVisibleCount(getInitialVisibleCount(filteredTotal), filteredTotal);
-      }
+      setVisibleCount(nextVisibleCount, filteredTotal);
 
       markLoaded(afterItems, remoteCount);
       markSync();
@@ -1618,10 +1602,13 @@ export const IncidenciasView = (() => {
     return container;
   }
 
-  function buildTemplatePayload() {
-    ensureBaseState();
+  function buildTemplatePayload(preloadedItems = null) {
+    const allItems = Array.isArray(preloadedItems)
+      ? preloadedItems
+      : getItems();
 
-    const allItems = getItems();
+    ensureBaseState(allItems);
+
     const infinite = clampPage(allItems);
 
     const currentFilter = getCurrentFilter();
@@ -1731,8 +1718,8 @@ export const IncidenciasView = (() => {
     };
   }
 
-  function buildHtml() {
-    const payload = buildTemplatePayload();
+  function buildHtml(preloadedItems = null) {
+    const payload = buildTemplatePayload(preloadedItems);
 
     return `
       <section
@@ -1760,13 +1747,13 @@ export const IncidenciasView = (() => {
       return null;
     }
 
-    ensureBaseState();
+    const allItems = getItems();
 
     try {
       AppCore?.setDocumentTitle?.("Incidencias");
     } catch {}
 
-    container.innerHTML = buildHtml();
+    container.innerHTML = buildHtml(allItems);
 
     decorateDom(container);
 
@@ -1814,12 +1801,15 @@ export const IncidenciasView = (() => {
 
   async function renderAndLoad(options = {}) {
     const token = nextRenderToken();
+    const opts = safeObject(options);
 
     hydrateBestEffort();
-    ensureBaseState();
-    rerender();
+    ensureBaseState(getItems());
 
-    await loadData(options);
+    await loadData({
+      ...opts,
+      renderBeforeLoad: opts.renderBeforeLoad !== false,
+    });
 
     if (!isActiveRenderToken(token)) {
       return api;

@@ -4,10 +4,13 @@
 
    Responsabilidad:
    - Encapsular acceso al Store global para incidencias.
-   - Leer/escribir colección normalizada.
+   - Leer/escribir colección normalizada completa.
    - Mantener índice derivado por id para búsquedas rápidas.
    - Dedupe básico por ticketId/id/code/ticketCode/incidenciaId.
    - Delegar normalización principal a incidencias.model.js.
+   - Delegar orden canónico nuevo→antiguo a incidencias.model.js.
+   - No limitar colecciones.
+   - No paginar.
    - No llamar APIs.
    - No tocar DOM.
    - No registrar eventos.
@@ -19,6 +22,7 @@ import { Store } from "../../store/index.js";
 
 import {
   normalizeIncidenciaModel,
+  sortIncidenciasByUpdatedDesc as sortIncidenciasByUpdatedDescModel,
 } from "./incidencias.model.js";
 
 /* =========================================================
@@ -63,21 +67,31 @@ const DETAIL_READ_PATHS = Object.freeze([
 const NESTED_OBJECT_KEYS = Object.freeze([
   "raw",
   "meta",
+
   "cliente",
   "client",
   "customer",
+
   "tecnico",
+  "technician",
   "assignedTo",
+  "assignedTechnician",
+  "assignedUser",
+  "agent",
+  "assignee",
+
   "receptor",
   "createdBy",
   "requester",
   "requesterSnapshot",
   "owner",
   "usuario",
+
   "factura",
   "invoice",
   "billing",
   "linkedInvoices",
+
   "assignment",
   "lifecycle",
   "sla",
@@ -93,13 +107,16 @@ const ARRAY_KEYS = Object.freeze([
   "attachments",
   "files",
   "adjuntos",
+
   "history",
   "comments",
   "timeline",
+
   "facturas",
   "invoices",
   "facturasRelacionadas",
   "linkedFacturas",
+  "normalizedInvoices",
 ]);
 
 /* =========================================================
@@ -177,6 +194,7 @@ function first(...values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
 
     return value;
   }
@@ -246,6 +264,8 @@ function setByPath(source = {}, path = "", value = null) {
 
 /* =========================================================
    TIMESTAMP HELPERS
+   Sólo para sortIncidenciasByCreatedDesc y snapshots.
+   El orden principal actualizado lo delegamos al modelo.
 ========================================================= */
 
 function parseSpanishDate(value = "") {
@@ -300,52 +320,6 @@ function safeTimestamp(value, fallback = 0) {
   }
 
   return fallback;
-}
-
-function getUpdatedTimestamp(item = {}) {
-  const row = safeObject(item);
-  const raw = safeObject(row.raw);
-
-  return safeTimestamp(
-    first(
-      row.updatedAtMs,
-      row.updatedAtTs,
-      row.meta?.updatedAtMs,
-      row.meta?.timestampMs,
-
-      row.lastActivityAt,
-      row.lastActivityAtES,
-      row.updatedAt,
-      row.updatedAtES,
-      row.closedAt,
-      row.closedAtES,
-      row.modifiedAt,
-      row.lastUpdate,
-      row.createdAt,
-      row.createdAtES,
-      row._ts,
-
-      raw.updatedAtMs,
-      raw.updatedAtTs,
-      raw.meta?.updatedAtMs,
-      raw.meta?.timestampMs,
-
-      raw.lastActivityAt,
-      raw.lastActivityAtES,
-      raw.updatedAt,
-      raw.updatedAtES,
-      raw.closedAt,
-      raw.closedAtES,
-      raw.modifiedAt,
-      raw.lastUpdate,
-      raw.createdAt,
-      raw.createdAtES,
-      raw._ts,
-
-      0
-    ),
-    0
-  );
 }
 
 function getCreatedTimestamp(item = {}) {
@@ -641,10 +615,17 @@ function mergeNestedObjects(current = {}, incoming = {}) {
     merged.files = attachments;
     merged.adjuntos = attachments;
     merged.attachmentsCount = safeNumber(
-      first(incoming.attachmentsCount, incoming.filesCount, current.attachmentsCount, current.filesCount, attachments.length),
+      first(
+        incoming.attachmentsCount,
+        incoming.filesCount,
+        current.attachmentsCount,
+        current.filesCount,
+        attachments.length
+      ),
       attachments.length
     );
     merged.filesCount = merged.attachmentsCount;
+    merged.adjuntosCount = merged.attachmentsCount;
   }
 
   const id = safeText(
@@ -723,7 +704,7 @@ function normalizeCollection(items = [], { sort = true } = {}) {
   const deduped = dedupeIncidencias(items);
 
   return sort
-    ? sortIncidenciasByUpdatedDesc(deduped)
+    ? sortIncidenciasByUpdatedDescModel(deduped)
     : deduped;
 }
 
@@ -935,6 +916,7 @@ function buildDetailMap(items = []) {
     });
 
     map[primaryId] = row;
+    map[normalizeCompare(primaryId)] = row;
   });
 
   return map;
@@ -959,10 +941,14 @@ function writeDetailMap(items = []) {
 }
 
 function writeMeta(list = []) {
+  const items = safeArray(list);
+
   const meta = {
-    count: safeArray(list).length,
-    ids: safeArray(list).map(getItemId).filter(Boolean),
+    count: items.length,
+    ids: items.map(getItemId).filter(Boolean),
     updatedAt: new Date().toISOString(),
+    order: "updated_desc",
+    source: "incidencias.store",
   };
 
   writeViaSet(STORE_META_PATH, meta);
@@ -1008,7 +994,7 @@ export function getIncidenciasStore() {
 }
 
 export function getSortedIncidenciasStore() {
-  return sortIncidenciasByUpdatedDesc(getIncidencias());
+  return getIncidencias();
 }
 
 export function getIncidenciaById(id = "") {
@@ -1053,6 +1039,7 @@ export function getIncidenciasSnapshot() {
     count: items.length,
     hasItems: items.length > 0,
     ids: items.map(getItemId).filter(Boolean),
+    order: "updated_desc",
     lastReadAt: new Date().toISOString(),
   };
 }
@@ -1174,27 +1161,13 @@ export function removeIncidenciaStore(id = "") {
 ========================================================= */
 
 export function sortIncidenciasByUpdatedDesc(items = []) {
-  return [...safeArray(items)].sort((a, b) => {
-    const aTime = getUpdatedTimestamp(a);
-    const bTime = getUpdatedTimestamp(b);
-
-    if (bTime !== aTime) {
-      return bTime - aTime;
-    }
-
-    return safeText(getItemId(b)).localeCompare(
-      safeText(getItemId(a)),
-      "es",
-      {
-        numeric: true,
-        sensitivity: "base",
-      }
-    );
-  });
+  return sortIncidenciasByUpdatedDescModel(
+    normalizeStoreItems(items)
+  );
 }
 
 export function sortIncidenciasByCreatedDesc(items = []) {
-  return [...safeArray(items)].sort((a, b) => {
+  return [...normalizeStoreItems(items)].sort((a, b) => {
     const aTime = getCreatedTimestamp(a);
     const bTime = getCreatedTimestamp(b);
 
@@ -1245,8 +1218,27 @@ export function findIncidenciaStore(predicate = null) {
    STATUS / STATS HELPERS
 ========================================================= */
 
+function normalizeStatusKey(value = "") {
+  const key = safeLower(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (["closed", "cerrada", "cerrado", "resolved", "resuelta", "resuelto", "cancelled", "canceled", "archived"].includes(key)) {
+    return "closed";
+  }
+
+  if (["open", "abierta", "abierto", "pending", "pendiente", "in_progress", "progress", "proceso", "en_proceso", "working", "assigned"].includes(key)) {
+    return "open";
+  }
+
+  return key || "open";
+}
+
 function getStatus(item = {}) {
-  return safeLower(
+  return normalizeStatusKey(
     first(
       item.status,
       item.estado,
@@ -1254,8 +1246,7 @@ function getStatus(item = {}) {
       item.raw?.status,
       item.raw?.estado,
       item.raw?.lifecycle?.status
-    ),
-    ""
+    )
   );
 }
 
@@ -1272,37 +1263,11 @@ function getPriority(item = {}) {
 }
 
 function isClosedLike(item = {}) {
-  const status = getStatus(item);
-
-  return [
-    "closed",
-    "cerrada",
-    "cerrado",
-    "resolved",
-    "resuelta",
-    "resuelto",
-    "cancelled",
-    "canceled",
-    "archived",
-  ].includes(status);
+  return getStatus(item) === "closed";
 }
 
 function isOpenLike(item = {}) {
-  const status = getStatus(item);
-
-  return [
-    "open",
-    "abierta",
-    "abierto",
-    "pending",
-    "pendiente",
-    "in_progress",
-    "progress",
-    "proceso",
-    "en_proceso",
-    "working",
-    "assigned",
-  ].includes(status);
+  return getStatus(item) === "open";
 }
 
 function isUrgentLike(item = {}) {
@@ -1395,13 +1360,16 @@ export function getIncidenciasStoreDebugSnapshot() {
     ids: items.map(getItemId).filter(Boolean),
 
     firstId: getItemId(items[0] || {}),
-    lastUpdatedAt:
+    lastId: getItemId(items[items.length - 1] || {}),
+
+    firstUpdatedAt:
       items[0]?.lastActivityAt ||
       items[0]?.updatedAt ||
       items[0]?.raw?.lastActivityAt ||
       items[0]?.raw?.updatedAt ||
       null,
 
+    order: "updated_desc",
     stats: computeIncidenciasStoreStats(items),
     items,
   };

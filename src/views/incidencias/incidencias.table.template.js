@@ -6,6 +6,7 @@
    - Renderizar HTML de tabla/listado de incidencias.
    - Consumir datos ya preparados por incidenciasView.js.
    - Exponer data-action/data-incidencias-action para bindings.
+   - Pintar modo feed/infinite scroll sin paginación visual.
    - Mantener CSP limpio: sin estilos inline y sin eventos inline.
    - No cargar datos.
    - No filtrar ni paginar por su cuenta.
@@ -18,7 +19,7 @@
    CONSTANTS
 ========================================================= */
 
-const DEFAULT_PAGE_SIZE = 5;
+const DEFAULT_VISIBLE_ROWS = 20;
 const DEFAULT_CURRENCY = "EUR";
 const AVATAR_TONE_COUNT = 10;
 
@@ -95,6 +96,7 @@ function first(...values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
 
     return value;
   }
@@ -148,8 +150,46 @@ function hashString(value = "") {
   return Math.abs(hash >>> 0);
 }
 
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+    String(value || "")
+  );
+}
+
+function safeImageSrc(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+  if (hasSensitiveQuery(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (/^(?:data|blob|javascript|vbscript|file):/i.test(raw)) return "";
+  if (raw.startsWith("//")) return "";
+
+  if (raw.startsWith("/")) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  if (
+    raw.includes("/") ||
+    /\.(?:png|jpe?g|gif|webp|svg|avif|bmp)(?:[?#].*)?$/i.test(raw)
+  ) {
+    const clean = raw
+      .replace(/^\.\//, "")
+      .replace(/^\/+/, "")
+      .replace(/\/{2,}/g, "/");
+
+    return clean ? `/${clean}` : "";
+  }
+
+  return "";
 }
 
 function htmlAttrs(attrs = {}) {
@@ -218,6 +258,7 @@ function getInputItems(input = {}) {
   return safeArray(
     first(
       data.items,
+      data.allItems,
       data.rows,
       data.tickets,
       data.incidencias,
@@ -238,26 +279,27 @@ function getFilteredItems(input = {}) {
   return safeArray(
     first(
       data.filteredItems,
-      data.visibleItems,
       data.state?.filteredItems,
       null
     )
   );
 }
 
-function getPageItems(input = {}) {
+function getVisibleItems(input = {}) {
   const data = safeObject(input);
 
-  const explicitPageItems = safeArray(
+  const explicitVisibleItems = safeArray(
     first(
       data.pageItems,
+      data.visibleItems,
       data.itemsPage,
       data.state?.pageItems,
+      data.state?.visibleItems,
       null
     )
   );
 
-  if (explicitPageItems.length) return explicitPageItems;
+  if (explicitVisibleItems.length) return explicitVisibleItems;
 
   return getFilteredItems(data).length
     ? getFilteredItems(data)
@@ -367,70 +409,117 @@ function getActiveFilter(input = {}) {
   );
 }
 
-function getPagination(input = {}) {
+function getFeedMeta(input = {}) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
+
   const allItems = getInputItems(data);
   const filteredItems = getFilteredItems(data);
-  const pageItems = getPageItems(data);
+  const visibleItems = getVisibleItems(data);
 
-  const pageSize = clamp(
-    safeNumber(first(data.pageSize, runtime.pageSize, DEFAULT_PAGE_SIZE), DEFAULT_PAGE_SIZE),
-    1,
-    50
-  );
-
-  const currentPage = Math.max(
-    1,
-    safeNumber(first(data.page, data.currentPage, runtime.page, runtime.currentPage, 1), 1)
-  );
-
-  const totalCount = Math.max(
+  const filteredTotal = Math.max(
     0,
     safeNumber(
       first(
-        data.totalCount,
-        data.remoteCount,
-        runtime.totalCount,
-        runtime.remoteCount,
-        filteredItems.length || allItems.length
+        data.filteredCount,
+        data.filteredTotal,
+        runtime.filteredCount,
+        runtime.filteredTotal,
+        filteredItems.length,
+        visibleItems.length,
+        0
       ),
-      filteredItems.length || allItems.length
+      filteredItems.length || visibleItems.length
     )
   );
 
-  const totalPages = Math.max(
-    1,
+  const remoteCount = Math.max(
+    allItems.length,
     safeNumber(
       first(
-        data.totalPages,
-        runtime.totalPages,
-        Math.ceil((totalCount || 1) / pageSize)
+        data.remoteCount,
+        data.totalCount,
+        runtime.remoteCount,
+        runtime.totalCount,
+        runtime.total,
+        allItems.length
       ),
-      1
+      allItems.length
     )
   );
 
-  const safePage = clamp(currentPage, 1, totalPages);
-  const rangeStart = totalCount && pageItems.length
-    ? (safePage - 1) * pageSize + 1
-    : 0;
-  const rangeEnd = totalCount
-    ? Math.min(rangeStart + pageItems.length - 1, totalCount)
-    : 0;
+  const totalCount = filteredTotal || allItems.length || remoteCount;
+  const visibleCount = visibleItems.length;
+
+  const remainingCount = Math.max(
+    0,
+    safeNumber(
+      first(
+        data.remainingCount,
+        runtime.remainingCount,
+        totalCount - visibleCount
+      ),
+      totalCount - visibleCount
+    )
+  );
+
+  const hasMore = Boolean(
+    first(
+      data.hasMore,
+      data.canLoadMore,
+      runtime.hasMore,
+      runtime.canLoadMore,
+      runtime.hasMoreItems,
+      remainingCount > 0
+    )
+  );
+
+  const loadingMore = Boolean(
+    first(
+      data.loadingMore,
+      data.isLoadingMore,
+      runtime.loadingMore,
+      runtime.isLoadingMore,
+      false
+    )
+  );
 
   return {
+    mode: "infinite",
+    infiniteScroll: true,
+    paginationDisabled: true,
+
     allItems,
     filteredItems,
-    pageItems,
-    pageSize,
-    currentPage: safePage,
-    totalPages,
+    visibleItems,
+    pageItems: visibleItems,
+
     totalCount,
-    rangeStart,
-    rangeEnd,
-    hasPrev: safePage > 1,
-    hasNext: safePage < totalPages,
+    filteredTotal: totalCount,
+    filteredCount: totalCount,
+    remoteCount,
+
+    visibleCount,
+    visibleItemsCount: visibleCount,
+    loadedCount: visibleCount,
+    remainingCount,
+
+    hasMore,
+    canLoadMore: hasMore,
+    loadingMore,
+    isLoadingMore: loadingMore,
+
+    page: 1,
+    currentPage: 1,
+    pageSize: Math.max(1, safeNumber(first(data.pageSize, runtime.pageSize, visibleCount, DEFAULT_VISIBLE_ROWS), DEFAULT_VISIBLE_ROWS)),
+    totalPages: 1,
+
+    rangeStart: visibleCount ? 1 : 0,
+    rangeEnd: visibleCount,
+
+    hasPrev: false,
+    hasNext: false,
+
     activeFilter: getActiveFilter(data),
     searchQuery: getSearchQuery(data),
     filtering: getActiveFilter(data) !== "all" || Boolean(getSearchQuery(data)),
@@ -491,7 +580,7 @@ function toTimestamp(value = null) {
   const esTimestamp = parseSpanishDate(raw);
   if (esTimestamp) return esTimestamp;
 
-  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+  const date = new Date(raw.includes("T") || raw.includes("Z") ? raw : `${raw}T00:00:00`);
 
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
@@ -633,8 +722,8 @@ function icon(name = "") {
     search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
     euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
     activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
-    users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
     filter: `<svg ${common}><path d="M22 3H2l8 9.46V19l4 2v-8.54Z"/></svg>`,
+    chevronDown: `<svg ${common}><path d="m6 9 6 6 6-6"/></svg>`,
   };
 
   return icons[name] || "";
@@ -789,7 +878,7 @@ function getClientEmail(item = {}) {
 function getAvatarUrl(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return safeImageSrc(
     first(
       item.clientAvatar,
       item.avatar,
@@ -813,8 +902,7 @@ function getAvatarUrl(item = {}) {
       raw.client?.avatarUrl,
       raw.customer?.avatar,
       raw.customer?.avatarUrl
-    ),
-    ""
+    )
   );
 }
 
@@ -826,7 +914,7 @@ function getInitials(value = "") {
 
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
 
-  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
+  return `${parts[0]?.[0] || ""}${parts[parts.length - 1]?.[0] || ""}`.toUpperCase() || "ON";
 }
 
 function getAvatarTone(item = {}) {
@@ -853,11 +941,8 @@ function getStatusKey(value = "") {
 
   if (["pending", "pendiente", "new", "nueva", "nuevo", "created"].includes(key)) return "pending";
   if (["open", "abierta", "abierto"].includes(key)) return "open";
-
   if (["progress", "in_progress", "inprogress", "en_proceso", "proceso", "working", "trabajando", "assigned", "asignada", "asignado"].includes(key)) return "progress";
-
   if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
-
   if (["closed", "cerrada", "cerrado", "cancelled", "canceled", "cancelada", "cancelado", "archived", "archivada", "archivado"].includes(key)) return "closed";
 
   return "pending";
@@ -958,6 +1043,8 @@ function getAssignedTo(item = {}) {
       item.assignedTo?.nombre,
       item.assignedTo?.displayName,
       typeof item.assignedTo === "string" ? item.assignedTo : "",
+      item.technician?.name,
+      item.technician?.displayName,
       item.agent?.name,
       item.agent?.displayName,
       typeof item.agent === "string" ? item.agent : "",
@@ -979,6 +1066,8 @@ function getAssignedTo(item = {}) {
       raw.assignedTo?.nombre,
       raw.assignedTo?.displayName,
       typeof raw.assignedTo === "string" ? raw.assignedTo : "",
+      raw.technician?.name,
+      raw.technician?.displayName,
       raw.agent?.name,
       raw.agent?.displayName,
       typeof raw.agent === "string" ? raw.agent : "",
@@ -1003,6 +1092,7 @@ function getAssignedEmail(item = {}) {
       item.assignment?.email,
       item.tecnico?.email,
       item.assignedTo?.email,
+      item.technician?.email,
       item.agentEmail,
       item.agent?.email,
       item.meta?.technicianEmail,
@@ -1015,6 +1105,7 @@ function getAssignedEmail(item = {}) {
       raw.assignment?.email,
       raw.tecnico?.email,
       raw.assignedTo?.email,
+      raw.technician?.email,
       raw.agentEmail,
       raw.agent?.email,
       raw.meta?.technicianEmail
@@ -1026,44 +1117,72 @@ function getAssignedEmail(item = {}) {
 function getAssignedAvatarUrl(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return safeImageSrc(
     first(
+      item.assignedToAvatarUrl,
       item.assignedToAvatar,
+      item.tecnicoAvatarUrl,
       item.tecnicoAvatar,
+      item.technicianAvatarUrl,
       item.technicianAvatar,
+      item.agentAvatarUrl,
       item.agentAvatar,
+
+      item.assignment?.assignedToAvatarUrl,
       item.assignment?.assignedToAvatar,
+      item.assignment?.agentAvatarUrl,
       item.assignment?.agentAvatar,
+      item.assignment?.technicianAvatarUrl,
       item.assignment?.technicianAvatar,
-      item.assignment?.avatar,
       item.assignment?.avatarUrl,
-      item.tecnico?.avatar,
+      item.assignment?.avatar,
+
       item.tecnico?.avatarUrl,
-      item.assignedTo?.avatar,
+      item.tecnico?.avatar,
       item.assignedTo?.avatarUrl,
-      item.agent?.avatar,
+      item.assignedTo?.avatar,
+      item.technician?.avatarUrl,
+      item.technician?.avatar,
       item.agent?.avatarUrl,
-      item.meta?.technicianAvatar,
+      item.agent?.avatar,
+
       item.meta?.technicianAvatarUrl,
+      item.meta?.technicianAvatar,
+      item.meta?.assignedTechnicianAvatarUrl,
+      item.meta?.assignedTechnicianAvatar,
+
+      raw.assignedToAvatarUrl,
       raw.assignedToAvatar,
+      raw.tecnicoAvatarUrl,
       raw.tecnicoAvatar,
+      raw.technicianAvatarUrl,
       raw.technicianAvatar,
+      raw.agentAvatarUrl,
       raw.agentAvatar,
+
+      raw.assignment?.assignedToAvatarUrl,
       raw.assignment?.assignedToAvatar,
+      raw.assignment?.agentAvatarUrl,
       raw.assignment?.agentAvatar,
+      raw.assignment?.technicianAvatarUrl,
       raw.assignment?.technicianAvatar,
-      raw.assignment?.avatar,
       raw.assignment?.avatarUrl,
-      raw.tecnico?.avatar,
+      raw.assignment?.avatar,
+
       raw.tecnico?.avatarUrl,
-      raw.assignedTo?.avatar,
+      raw.tecnico?.avatar,
       raw.assignedTo?.avatarUrl,
-      raw.agent?.avatar,
+      raw.assignedTo?.avatar,
+      raw.technician?.avatarUrl,
+      raw.technician?.avatar,
       raw.agent?.avatarUrl,
+      raw.agent?.avatar,
+
+      raw.meta?.technicianAvatarUrl,
       raw.meta?.technicianAvatar,
-      raw.meta?.technicianAvatarUrl
-    ),
-    ""
+      raw.meta?.assignedTechnicianAvatarUrl,
+      raw.meta?.assignedTechnicianAvatar
+    )
   );
 }
 
@@ -1397,6 +1516,7 @@ function renderAvatar(item = {}) {
           src="${escapeHtml(avatarUrl)}"
           alt="${escapeHtml(fullName)}"
           loading="lazy"
+          decoding="async"
           referrerpolicy="no-referrer"
           data-incidencias-avatar-img="true"
         />
@@ -1410,6 +1530,7 @@ function renderAvatar(item = {}) {
       class="incidencias-avatar incidencias-avatar--fallback"
       ${tooltipAttrs(fullName, fullName)}
       data-avatar-tone="${escapeHtml(tone)}"
+      data-has-avatar="false"
       data-fallback="true"
       data-incidencias-avatar="true"
     >
@@ -1452,7 +1573,16 @@ function renderAssignedAvatar(item = {}) {
 
   if (!avatarUrl) {
     return `
-      <span class="incidencias-agent-avatar incidencias-agent-avatar--fallback" aria-hidden="true">
+      <span
+        class="incidencias-agent-avatar incidencias-agent-avatar--fallback"
+        ${tooltipAttrs(assignedEmail || assigned, assignedEmail || assigned)}
+        data-technician-avatar="true"
+        data-avatar-kind="technician"
+        data-avatar-name="${escapeHtml(assigned)}"
+        data-has-avatar="false"
+        data-fallback="true"
+        aria-hidden="true"
+      >
         <span class="incidencias-agent-avatar-fallback">${escapeHtml(assignedInitials)}</span>
       </span>
     `;
@@ -1463,8 +1593,11 @@ function renderAssignedAvatar(item = {}) {
       class="incidencias-agent-avatar incidencias-agent-avatar--image"
       ${tooltipAttrs(assignedEmail || assigned, assignedEmail || assigned)}
       data-technician-avatar="true"
+      data-avatar-kind="technician"
+      data-avatar-name="${escapeHtml(assigned)}"
       data-avatar-fallback-index="0"
       data-avatar-fallback-srcs="${escapeHtml(avatarUrl)}"
+      data-has-avatar="true"
       data-fallback="false"
       aria-hidden="true"
     >
@@ -1496,7 +1629,7 @@ function renderAssignedBadge(item = {}) {
       data-assigned-email="${escapeHtml(assignedEmail)}"
     >
       ${renderAssignedAvatar(item)}
-      ${escapeHtml(assigned)}
+      <span class="incidencias-agent-name">${escapeHtml(assigned)}</span>
     </span>
   `;
 }
@@ -1659,39 +1792,76 @@ function renderRow(item = {}, state = {}) {
   `;
 }
 
-function renderPagination(pagination = {}, state = {}) {
+function renderFeedFooter(feed = {}, state = {}) {
   const runtime = safeObject(state);
-  const loading = Boolean(runtime.loading);
-  const refreshing = Boolean(runtime.refreshing);
+  const hasMore = Boolean(feed.hasMore || feed.canLoadMore);
+  const loadingMore = Boolean(feed.loadingMore || runtime.loadingMore || runtime.isLoadingMore);
+  const visibleCount = safeNumber(feed.visibleCount, safeArray(feed.pageItems).length);
+  const totalCount = safeNumber(feed.totalCount, visibleCount);
+  const remainingCount = Math.max(0, safeNumber(feed.remainingCount, totalCount - visibleCount));
 
-  const prevDisabled = !pagination.hasPrev || loading || refreshing;
-  const nextDisabled = !pagination.hasNext || loading || refreshing;
+  if (!totalCount || !visibleCount) {
+    return `
+      <div
+        class="incidencias-feed-sentinel"
+        data-incidencias-load-more="true"
+        data-incidencias-infinite-sentinel="true"
+        data-infinite-scroll-sentinel="true"
+        aria-hidden="true"
+      ></div>
+    `;
+  }
+
+  if (!hasMore) {
+    return `
+      <div
+        class="incidencias-feed-end"
+        data-incidencias-feed-end="true"
+        data-incidencias-load-more="false"
+      >
+        <span class="incidencias-feed-end-text">
+          Has visto todas las incidencias disponibles.
+        </span>
+      </div>
+    `;
+  }
 
   return `
-    <div class="incidencias-pagination" aria-label="Paginación de incidencias">
+    <div
+      class="incidencias-feed-more"
+      data-incidencias-feed-more="true"
+    >
       <button
         type="button"
-        class="incidencias-pagination-btn"
-        ${actionAttrs("prev-page")}
-        data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
-        ${disabledAttrs(prevDisabled)}
+        class="incidencias-load-more-btn${loadingMore ? " is-loading" : ""}"
+        data-action="load-more"
+        data-incidencias-action="load-more"
+        data-incidencias-load-more-button="true"
+        ${disabledAttrs(loadingMore, loadingMore)}
       >
-        Anterior
+        ${
+          loadingMore
+            ? renderSpinner("Cargando más incidencias...")
+            : `
+              ${icon("chevronDown")}
+              <span class="incidencias-btn-text">
+                Mostrar más
+              </span>
+              <span class="incidencias-load-more-count">
+                ${escapeHtml(`${remainingCount} restantes`)}
+              </span>
+            `
+        }
       </button>
 
-      <span class="incidencias-pagination-status">
-        ${escapeHtml(`${pagination.currentPage}/${pagination.totalPages}`)}
-      </span>
-
-      <button
-        type="button"
-        class="incidencias-pagination-btn incidencias-pagination-btn--next"
-        ${actionAttrs("next-page")}
-        data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
-        ${disabledAttrs(nextDisabled)}
-      >
-        Siguiente
-      </button>
+      <div
+        class="incidencias-feed-sentinel"
+        data-incidencias-load-more="true"
+        data-incidencias-infinite-sentinel="true"
+        data-infinite-scroll-sentinel="true"
+        data-load-more-sentinel="true"
+        aria-hidden="true"
+      ></div>
     </div>
   `;
 }
@@ -1736,11 +1906,11 @@ function renderSearch(input = {}) {
   `;
 }
 
-function renderFilters(input = {}, pagination = {}) {
+function renderFilters(input = {}, feed = {}) {
   const data = safeObject(input);
   const items = getInputItems(data);
   const counts = computeFilterCounts(items, data);
-  const activeFilter = normalizeFilter(pagination.activeFilter || getActiveFilter(data));
+  const activeFilter = normalizeFilter(feed.activeFilter || getActiveFilter(data));
 
   return `
     <div class="incidencias-filters" aria-label="Filtros y búsqueda de incidencias">
@@ -1821,10 +1991,10 @@ function renderEmptyState({ hasError = false, filtering = false, searchQuery = "
   `;
 }
 
-function renderTableLoading(rows = DEFAULT_PAGE_SIZE) {
+function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
   return `
     <div class="incidencias-table-loading" aria-hidden="true">
-      ${Array.from({ length: rows }).map(() => `
+      ${Array.from({ length: Math.max(3, safeNumber(rows, DEFAULT_VISIBLE_ROWS)) }).map(() => `
         <div class="incidencias-table-loading-row">
           <div class="incidencias-skeleton incidencias-skeleton--avatar"></div>
           <div class="incidencias-table-loading-copy">
@@ -1887,8 +2057,15 @@ export function renderHeader(input = {}) {
     ...rows.map((item) => getUpdatedAt(item))
   );
 
-  const title = safeText(first(data.title, runtime.title, "Tus incidencias y solicitudes"), "Tus incidencias y solicitudes");
-  const subtitle = safeText(first(data.subtitle, runtime.subtitle, "Consulta el estado de tus incidencias, revisa actualizaciones y crea nuevas solicitudes."), "");
+  const title = safeText(
+    first(data.title, runtime.title, "Tus incidencias y solicitudes"),
+    "Tus incidencias y solicitudes"
+  );
+
+  const subtitle = safeText(
+    first(data.subtitle, runtime.subtitle, "Consulta el estado de tus incidencias, revisa actualizaciones y crea nuevas solicitudes."),
+    ""
+  );
 
   const creating = Boolean(first(runtime.creating, runtime.creatingIncidencia, data.creating));
   const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
@@ -1982,7 +2159,7 @@ export function renderHeader(input = {}) {
 export function renderLoadingState() {
   return `
     <section class="incidencias-history">
-      ${renderTableLoading(DEFAULT_PAGE_SIZE)}
+      ${renderTableLoading(DEFAULT_VISIBLE_ROWS)}
     </section>
   `;
 }
@@ -2003,48 +2180,55 @@ export function renderErrorState(message = "No se pudieron cargar las incidencia
 export function renderTable(input = {}) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
-  const pagination = getPagination(data);
+  const feed = getFeedMeta(data);
 
   const loading = Boolean(first(runtime.loading, data.loading));
   const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
   const hasError = Boolean(safeText(first(runtime.error, data.error), ""));
 
-  const showInitialLoading = loading && !pagination.pageItems.length;
-  const showRefreshOverlay = refreshing && pagination.pageItems.length;
+  const showInitialLoading = loading && !feed.pageItems.length;
+  const showRefreshOverlay = refreshing && feed.pageItems.length;
 
-  const activeFilterLabel = FILTERS.find((item) => item.key === pagination.activeFilter)?.label || "Todas";
+  const activeFilterLabel = FILTERS.find((item) => item.key === feed.activeFilter)?.label || "Todas";
   const activeCriteria = [
-    pagination.activeFilter !== "all" ? activeFilterLabel : "",
-    pagination.searchQuery ? `búsqueda “${pagination.searchQuery}”` : "",
+    feed.activeFilter !== "all" ? activeFilterLabel : "",
+    feed.searchQuery ? `búsqueda “${feed.searchQuery}”` : "",
   ].filter(Boolean);
 
   const subtitle = showInitialLoading
     ? "Cargando incidencias..."
-    : pagination.filtering
-      ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · ${activeCriteria.join(" · ")}`
-      : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`;
+    : feed.filtering
+      ? `Mostrando ${feed.visibleCount} de ${feed.totalCount}${activeCriteria.length ? ` · ${activeCriteria.join(" · ")}` : ""}`
+      : `Mostrando ${feed.visibleCount} de ${feed.totalCount} · ordenadas de más nuevas a más antiguas`;
 
   return `
-    <section class="incidencias-history">
+    <section
+      class="incidencias-history"
+      data-incidencias-scroll-host="true"
+      data-incidencias-scroll-mode="infinite"
+    >
       <div class="incidencias-history-head" data-incidencias-history-head="true">
         <div class="incidencias-history-copy">
           <h2 class="incidencias-history-title">Historial de incidencias</h2>
           <p class="incidencias-history-subtitle">${escapeHtml(subtitle)}</p>
         </div>
 
-        ${renderPagination(pagination, runtime)}
-        ${renderFilters(data, pagination)}
+        ${renderFilters(data, feed)}
       </div>
 
       ${
         showInitialLoading
-          ? renderTableLoading(Math.max(3, pagination.pageSize || DEFAULT_PAGE_SIZE))
+          ? renderTableLoading(Math.max(3, feed.pageSize || DEFAULT_VISIBLE_ROWS))
           : `
-            <div class="incidencias-table-wrap${refreshing ? " is-refreshing" : ""}">
+            <div
+              class="incidencias-table-wrap${refreshing ? " is-refreshing" : ""}"
+              data-incidencias-table-wrap="true"
+              data-incidencias-scroll-mode="infinite"
+            >
               ${showRefreshOverlay ? renderRefreshOverlay() : ""}
 
               ${
-                pagination.pageItems.length
+                feed.pageItems.length
                   ? `
                     <div class="incidencias-table-shell">
                       <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
@@ -2071,15 +2255,17 @@ export function renderTable(input = {}) {
                         </thead>
 
                         <tbody>
-                          ${pagination.pageItems.map((item) => renderRow(item, runtime)).join("")}
+                          ${feed.pageItems.map((item) => renderRow(item, runtime)).join("")}
                         </tbody>
                       </table>
                     </div>
+
+                    ${renderFeedFooter(feed, runtime)}
                   `
                   : renderEmptyState({
                       hasError,
-                      filtering: pagination.filtering,
-                      searchQuery: pagination.searchQuery,
+                      filtering: feed.filtering,
+                      searchQuery: feed.searchQuery,
                     })
               }
             </div>
@@ -2103,7 +2289,7 @@ export function renderIncidenciasTableTemplate(input = {}) {
 
   if (error && !items.length) {
     return `
-      <section class="incidencias-view-root" data-incidencias-scope="true">
+      <section class="incidencias-view-root" data-incidencias-scope="true" data-incidencias-scroll-mode="infinite">
         ${renderErrorState(error)}
       </section>
     `;
@@ -2116,7 +2302,7 @@ export function renderIncidenciasTableTemplate(input = {}) {
   };
 
   return `
-    <section class="incidencias-view-root" data-incidencias-scope="true">
+    <section class="incidencias-view-root" data-incidencias-scope="true" data-incidencias-scroll-mode="infinite">
       ${renderHeader(payload)}
       ${renderTable(payload)}
     </section>

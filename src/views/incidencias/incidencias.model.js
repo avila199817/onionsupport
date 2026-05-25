@@ -6,7 +6,10 @@
    - Normalizar payloads heterogéneos de tickets/incidencias.
    - Exponer un modelo estable para API, Store, View, tabla y modal.
    - Preservar datos relevantes: cliente, técnico, adjuntos, historial y facturas.
-   - Calcular etiquetas, flags, fechas, stats, ordenación y paginación.
+   - Calcular etiquetas, flags, fechas, stats y ordenación.
+   - Mantener compatibilidad legacy con paginateIncidencias sin paginación visual real.
+   - Orden canónico de lista: más nueva → más antigua.
+   - No limitar la colección normalizada.
    - No importar AppCore.
    - No tocar DOM.
    - No llamar APIs.
@@ -18,7 +21,11 @@
    CONSTANTS
 ========================================================= */
 
-export const DEFAULT_PAGE_SIZE = 5;
+export const DEFAULT_PAGE_SIZE = 20;
+export const DEFAULT_VISIBLE_COUNT = 20;
+export const DEFAULT_LOAD_MORE_BATCH = 20;
+export const MAX_VISIBLE_COUNT = 10000;
+
 export const DEFAULT_CURRENCY = "EUR";
 
 export const STATUS = Object.freeze({
@@ -107,6 +114,7 @@ function first(...values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
 
     return value;
   }
@@ -165,6 +173,105 @@ function clampNumber(value, min = 1, max = Number.MAX_SAFE_INTEGER) {
   return Math.min(Math.max(safeNumber(value, min), min), max);
 }
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+    String(value || "")
+  );
+}
+
+function safeImageSrc(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+  if (hasSensitiveQuery(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (/^(?:data|blob|javascript|vbscript|file):/i.test(raw)) return "";
+  if (raw.startsWith("//")) return "";
+
+  if (raw.startsWith("/")) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  if (
+    raw.includes("/") ||
+    /\.(?:png|jpe?g|gif|webp|svg|avif|bmp)(?:[?#].*)?$/i.test(raw)
+  ) {
+    const clean = raw
+      .replace(/^\.\//, "")
+      .replace(/^\/+/, "")
+      .replace(/\/{2,}/g, "/");
+
+    return clean ? `/${clean}` : "";
+  }
+
+  return "";
+}
+
+function avatarFromObject(value = null) {
+  if (typeof value === "string") {
+    return safeImageSrc(value);
+  }
+
+  if (!isObject(value)) return "";
+
+  return safeImageSrc(
+    first(
+      value.avatarUrl,
+      value.avatarURL,
+      value.avatar_url,
+      value.avatar,
+
+      value.assignedToAvatarUrl,
+      value.assignedToAvatar,
+      value.technicianAvatarUrl,
+      value.technicianAvatar,
+      value.tecnicoAvatarUrl,
+      value.tecnicoAvatar,
+      value.agentAvatarUrl,
+      value.agentAvatar,
+
+      value.photoUrl,
+      value.photoURL,
+      value.photo_url,
+      value.photo,
+
+      value.pictureUrl,
+      value.pictureURL,
+      value.picture_url,
+      value.picture,
+
+      value.imageUrl,
+      value.imageURL,
+      value.image_url,
+      value.image,
+
+      value.fotoUrl,
+      value.fotoURL,
+      value.foto_url,
+      value.foto,
+
+      value.imagenUrl,
+      value.imagenURL,
+      value.imagen_url,
+      value.imagen,
+
+      value.url,
+      value.href,
+      value.src,
+      value.path,
+      ""
+    )
+  );
+}
+
 /* =========================================================
    HASH / VISUALS
 ========================================================= */
@@ -192,11 +299,11 @@ export function getInitials(value = "") {
 
   if (!parts.length) return "ON";
 
-  return parts
-    .slice(0, 2)
-    .map((part) => safeText(part[0], ""))
-    .join("")
-    .toUpperCase() || "ON";
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase() || "ON";
+  }
+
+  return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toUpperCase() || "ON";
 }
 
 export function getAvatarTheme(seed = "") {
@@ -376,7 +483,14 @@ export function toDate(value = null) {
   const spanishDate = parseSpanishDate(raw);
   if (spanishDate) return spanishDate;
 
-  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    const milliseconds = numeric > 9999999999 ? numeric : numeric * 1000;
+    const date = new Date(milliseconds);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(raw.includes("T") || raw.includes("Z") ? raw : `${raw}T00:00:00`);
 
   return Number.isNaN(date.getTime()) ? null : date;
 }
@@ -1420,6 +1534,408 @@ function normalizeComments(value) {
 }
 
 /* =========================================================
+   TECHNICIAN / REQUESTER
+========================================================= */
+
+function resolveTechnicianSource(item = {}, raw = {}) {
+  const assignment = safeObject(first(item.assignment, raw.assignment));
+  const assignedTo = first(item.assignedTo, raw.assignedTo);
+  const tecnico = first(item.tecnico, raw.tecnico);
+  const technician = first(item.technician, raw.technician);
+
+  return {
+    assignment,
+    assignedTo: safeObject(typeof assignedTo === "object" ? assignedTo : {}),
+    tecnico: safeObject(typeof tecnico === "object" ? tecnico : {}),
+    technician: safeObject(typeof technician === "object" ? technician : {}),
+    assignedToString: typeof assignedTo === "string" ? assignedTo : "",
+    tecnicoString: typeof tecnico === "string" ? tecnico : "",
+    technicianString: typeof technician === "string" ? technician : "",
+  };
+}
+
+function resolveTechnicianId(item = {}, raw = {}) {
+  const {
+    assignment,
+    assignedTo,
+    tecnico,
+    technician,
+  } = resolveTechnicianSource(item, raw);
+
+  return safeText(
+    first(
+      item.assignedToUserId,
+      item.assignedToId,
+      item.assigneeId,
+      item.technicianId,
+      item.tecnicoId,
+      item.agentId,
+
+      raw.assignedToUserId,
+      raw.assignedToId,
+      raw.assigneeId,
+      raw.technicianId,
+      raw.tecnicoId,
+      raw.agentId,
+
+      assignment.assignedToUserId,
+      assignment.assignedToId,
+      assignment.assigneeId,
+      assignment.technicianId,
+      assignment.tecnicoId,
+      assignment.agentId,
+      assignment.userId,
+      assignment.id,
+
+      assignment.technician?.userId,
+      assignment.technician?.id,
+      assignment.assignedTo?.userId,
+      assignment.assignedTo?.id,
+      assignment.agent?.userId,
+      assignment.agent?.id,
+
+      assignedTo.userId,
+      assignedTo.id,
+      assignedTo.uid,
+      assignedTo.sub,
+
+      tecnico.userId,
+      tecnico.id,
+      tecnico.uid,
+      tecnico.sub,
+
+      technician.userId,
+      technician.id,
+      technician.uid,
+      technician.sub,
+
+      item.assignedTechnician?.userId,
+      item.assignedTechnician?.id,
+      item.assignedUser?.userId,
+      item.assignedUser?.id,
+
+      raw.assignedTechnician?.userId,
+      raw.assignedTechnician?.id,
+      raw.assignedUser?.userId,
+      raw.assignedUser?.id,
+
+      item.meta?.technicianUserId,
+      item.meta?.assignedToUserId,
+      item.meta?.assignedTechnicianUserId,
+      item.meta?.lastTechnicianUserId,
+      raw.meta?.technicianUserId,
+      raw.meta?.assignedToUserId,
+      raw.meta?.assignedTechnicianUserId,
+      raw.meta?.lastTechnicianUserId,
+      ""
+    ),
+    ""
+  );
+}
+
+function resolveTechnicianName(item = {}, raw = {}) {
+  const {
+    assignment,
+    assignedTo,
+    tecnico,
+    technician,
+    assignedToString,
+    tecnicoString,
+    technicianString,
+  } = resolveTechnicianSource(item, raw);
+
+  return safeText(
+    first(
+      item.technicianName,
+      item.tecnicoName,
+      item.tecnicoNombre,
+      item.assignedToName,
+      item.assignedName,
+      item.assigneeName,
+      item.agentName,
+
+      raw.technicianName,
+      raw.tecnicoName,
+      raw.tecnicoNombre,
+      raw.assignedToName,
+      raw.assignedName,
+      raw.assigneeName,
+      raw.agentName,
+
+      assignment.assignedToName,
+      assignment.technicianName,
+      assignment.tecnicoName,
+      assignment.agentName,
+      assignment.displayName,
+      assignment.fullName,
+      assignment.name,
+
+      assignment.technician?.displayName,
+      assignment.technician?.fullName,
+      assignment.technician?.name,
+      assignment.technician?.nombre,
+
+      assignment.assignedTo?.displayName,
+      assignment.assignedTo?.fullName,
+      assignment.assignedTo?.name,
+      assignment.assignedTo?.nombre,
+
+      assignment.agent?.displayName,
+      assignment.agent?.fullName,
+      assignment.agent?.name,
+      assignment.agent?.nombre,
+
+      assignedTo.displayName,
+      assignedTo.fullName,
+      assignedTo.name,
+      assignedTo.nombre,
+      assignedTo.username,
+
+      tecnico.displayName,
+      tecnico.fullName,
+      tecnico.name,
+      tecnico.nombre,
+      tecnico.username,
+
+      technician.displayName,
+      technician.fullName,
+      technician.name,
+      technician.nombre,
+      technician.username,
+
+      item.meta?.technicianName,
+      item.meta?.assignedTechnicianName,
+      item.meta?.lastTechnicianName,
+      raw.meta?.technicianName,
+      raw.meta?.assignedTechnicianName,
+      raw.meta?.lastTechnicianName,
+
+      assignedToString,
+      tecnicoString,
+      technicianString
+    ),
+    "No asignado"
+  );
+}
+
+function resolveTechnicianEmail(item = {}, raw = {}) {
+  const {
+    assignment,
+    assignedTo,
+    tecnico,
+    technician,
+  } = resolveTechnicianSource(item, raw);
+
+  return safeLower(
+    first(
+      item.assignedToEmail,
+      item.technicianEmail,
+      item.tecnicoEmail,
+      item.agentEmail,
+
+      raw.assignedToEmail,
+      raw.technicianEmail,
+      raw.tecnicoEmail,
+      raw.agentEmail,
+
+      assignment.assignedToEmail,
+      assignment.technicianEmail,
+      assignment.tecnicoEmail,
+      assignment.agentEmail,
+      assignment.email,
+
+      assignment.technician?.email,
+      assignment.assignedTo?.email,
+      assignment.agent?.email,
+
+      assignedTo.email,
+      assignedTo.emailLower,
+
+      tecnico.email,
+      tecnico.emailLower,
+
+      technician.email,
+      technician.emailLower,
+
+      item.meta?.technicianEmail,
+      item.meta?.assignedTechnicianEmail,
+      item.meta?.lastTechnicianEmail,
+      raw.meta?.technicianEmail,
+      raw.meta?.assignedTechnicianEmail,
+      raw.meta?.lastTechnicianEmail,
+      ""
+    ),
+    ""
+  );
+}
+
+function resolveTechnicianAvatar(item = {}, raw = {}) {
+  const {
+    assignment,
+    assignedTo,
+    tecnico,
+    technician,
+  } = resolveTechnicianSource(item, raw);
+
+  return safeImageSrc(
+    first(
+      avatarFromObject(technician),
+      avatarFromObject(assignedTo),
+      avatarFromObject(tecnico),
+      avatarFromObject(item.assignedTechnician),
+      avatarFromObject(item.assignedUser),
+      avatarFromObject(raw.assignedTechnician),
+      avatarFromObject(raw.assignedUser),
+
+      avatarFromObject(assignment.technician),
+      avatarFromObject(assignment.assignedTo),
+      avatarFromObject(assignment.agent),
+      avatarFromObject(assignment),
+
+      item.technicianAvatarUrl,
+      item.technicianAvatar,
+      item.tecnicoAvatarUrl,
+      item.tecnicoAvatar,
+      item.assignedToAvatarUrl,
+      item.assignedToAvatar,
+      item.assignedAvatarUrl,
+      item.assignedAvatar,
+      item.agentAvatarUrl,
+      item.agentAvatar,
+
+      raw.technicianAvatarUrl,
+      raw.technicianAvatar,
+      raw.tecnicoAvatarUrl,
+      raw.tecnicoAvatar,
+      raw.assignedToAvatarUrl,
+      raw.assignedToAvatar,
+      raw.assignedAvatarUrl,
+      raw.assignedAvatar,
+      raw.agentAvatarUrl,
+      raw.agentAvatar,
+
+      item.meta?.technicianAvatarUrl,
+      item.meta?.technicianAvatar,
+      item.meta?.assignedTechnicianAvatarUrl,
+      item.meta?.assignedTechnicianAvatar,
+      item.meta?.assignedToAvatarUrl,
+      item.meta?.assignedToAvatar,
+      item.meta?.lastTechnicianAvatarUrl,
+      item.meta?.lastTechnicianAvatar,
+
+      raw.meta?.technicianAvatarUrl,
+      raw.meta?.technicianAvatar,
+      raw.meta?.assignedTechnicianAvatarUrl,
+      raw.meta?.assignedTechnicianAvatar,
+      raw.meta?.assignedToAvatarUrl,
+      raw.meta?.assignedToAvatar,
+      raw.meta?.lastTechnicianAvatarUrl,
+      raw.meta?.lastTechnicianAvatar,
+      ""
+    )
+  );
+}
+
+function buildTechnicianObject(item = {}, raw = {}) {
+  const {
+    assignment,
+    assignedTo,
+    tecnico,
+    technician,
+  } = resolveTechnicianSource(item, raw);
+
+  const userId = resolveTechnicianId(item, raw);
+  const name = resolveTechnicianName(item, raw);
+  const email = resolveTechnicianEmail(item, raw);
+  const avatar = resolveTechnicianAvatar(item, raw);
+  const initials = getInitials(name);
+
+  const base = {
+    ...technician,
+    ...assignedTo,
+    ...tecnico,
+
+    id: userId || technician.id || assignedTo.id || tecnico.id || "",
+    userId: userId || technician.userId || assignedTo.userId || tecnico.userId || "",
+
+    name,
+    nombre: name,
+    displayName: name,
+    fullName: name,
+
+    email: email || technician.email || assignedTo.email || tecnico.email || "",
+    emailLower: email || technician.emailLower || assignedTo.emailLower || tecnico.emailLower || "",
+
+    avatar: avatar || null,
+    avatarUrl: avatar || null,
+    photoUrl: avatar || null,
+    pictureUrl: avatar || null,
+    imageUrl: avatar || null,
+    hasAvatar: Boolean(avatar),
+
+    initials,
+    iniciales: initials,
+
+    assignmentPolicy: safeText(first(item.assignmentPolicy, raw.assignmentPolicy, assignment.policy, assignment.assignmentPolicy), ""),
+    raw: {
+      assignment,
+      assignedTo,
+      tecnico,
+      technician,
+    },
+  };
+
+  return base;
+}
+
+function buildAssignmentObject(item = {}, raw = {}, technician = {}) {
+  const assignment = safeObject(first(item.assignment, raw.assignment));
+  const avatar = safeImageSrc(first(technician.avatarUrl, technician.avatar, ""));
+
+  return {
+    ...assignment,
+
+    status: safeText(first(assignment.status, "assigned"), "assigned"),
+    policy: safeText(first(assignment.policy, assignment.assignmentPolicy, technician.assignmentPolicy), ""),
+
+    assignedToUserId: safeText(first(assignment.assignedToUserId, technician.userId, technician.id), ""),
+    userId: safeText(first(assignment.userId, technician.userId, technician.id), ""),
+    id: safeText(first(assignment.id, technician.userId, technician.id), ""),
+
+    assignedToName: safeText(first(assignment.assignedToName, technician.name), technician.name || ""),
+    technicianName: safeText(first(assignment.technicianName, technician.name), technician.name || ""),
+    tecnicoName: safeText(first(assignment.tecnicoName, technician.name), technician.name || ""),
+    displayName: safeText(first(assignment.displayName, technician.displayName, technician.name), technician.name || ""),
+    name: safeText(first(assignment.name, technician.name), technician.name || ""),
+
+    assignedToEmail: safeLower(first(assignment.assignedToEmail, technician.email), ""),
+    technicianEmail: safeLower(first(assignment.technicianEmail, technician.email), ""),
+    email: safeLower(first(assignment.email, technician.email), ""),
+
+    avatar: avatar || null,
+    avatarUrl: avatar || null,
+    assignedToAvatar: avatar || null,
+    assignedToAvatarUrl: avatar || null,
+    technicianAvatar: avatar || null,
+    technicianAvatarUrl: avatar || null,
+    agentAvatar: avatar || null,
+    agentAvatarUrl: avatar || null,
+    assignedToHasAvatar: Boolean(avatar),
+    technicianHasAvatar: Boolean(avatar),
+
+    technician: {
+      ...safeObject(assignment.technician),
+      ...technician,
+    },
+
+    assignedTo: {
+      ...safeObject(assignment.assignedTo),
+      ...technician,
+    },
+  };
+}
+
+/* =========================================================
    PAYLOAD UNWRAP
 ========================================================= */
 
@@ -1483,7 +1999,6 @@ export function normalizeIncidenciaModel(payload = {}) {
   const raw = safeObject(item.raw);
 
   const clienteObject = safeObject(first(item.cliente, item.client, item.customer, raw.cliente, raw.client, raw.customer));
-  const tecnicoObject = safeObject(first(item.tecnico, item.assignedTo, item.assignee, raw.tecnico, raw.assignedTo, raw.assignee));
   const createdByObject = safeObject(first(item.createdBy, raw.createdBy));
   const receptorObject = safeObject(first(item.receptor, raw.receptor));
 
@@ -1560,7 +2075,7 @@ export function normalizeIncidenciaModel(payload = {}) {
     "Sin email"
   );
 
-  const clientAvatar = safeText(
+  const clientAvatar = safeImageSrc(
     first(
       item.clientAvatar,
       item.avatar,
@@ -1569,32 +2084,22 @@ export function normalizeIncidenciaModel(payload = {}) {
       item.requesterSnapshot?.avatarUrl,
       clienteObject.avatar,
       clienteObject.avatarUrl,
+      receptorObject.avatar,
+      receptorObject.avatarUrl,
       raw.clientAvatar,
       raw.avatar,
       raw.avatarUrl,
       raw.requesterSnapshot?.avatar,
       raw.requesterSnapshot?.avatarUrl
-    ),
-    ""
+    )
   );
 
-  const assignedToName = safeText(
-    first(
-      tecnicoObject.name,
-      tecnicoObject.nombre,
-      tecnicoObject.displayName,
-      item.assignedToName,
-      item.assignment?.agentName,
-      item.assignment?.name,
-      typeof item.assignedTo === "string" ? item.assignedTo : null,
-      typeof item.assignee === "string" ? item.assignee : null,
-      typeof item.tecnico === "string" ? item.tecnico : null,
-      raw.assignedToName,
-      raw.assignment?.agentName,
-      raw.assignment?.name
-    ),
-    "No asignado"
-  );
+  const technician = buildTechnicianObject(item, raw);
+  const assignedToName = technician.name || "No asignado";
+  const assignedToEmail = technician.email || "";
+  const assignedToUserId = technician.userId || technician.id || "";
+  const assignedToAvatar = safeImageSrc(first(technician.avatarUrl, technician.avatar, ""));
+  const assignment = buildAssignmentObject(item, raw, technician);
 
   const status = normalizeStatus(first(item.status, item.estado, item.state, item.lifecycle?.status, raw.status, raw.estado, raw.state, raw.lifecycle?.status));
   const priority = normalizePriority(first(item.priority, item.prioridad, item.severity, item.urgency, item.sla?.priority, raw.priority, raw.prioridad, raw.severity, raw.urgency, raw.sla?.priority));
@@ -1694,10 +2199,19 @@ export function normalizeIncidenciaModel(payload = {}) {
     ...safeObject(raw.meta),
     ...safeObject(item.meta),
     ...safeObject(invoicePatch.meta),
+
     timestampMs: updatedAtTs || createdAtTs || readTimestampFromItem(item),
     isClosed,
     isActive: !isClosed,
     isAssigned,
+
+    technicianUserId: first(item.meta?.technicianUserId, raw.meta?.technicianUserId, assignedToUserId, ""),
+    technicianName: first(item.meta?.technicianName, raw.meta?.technicianName, assignedToName, ""),
+    technicianEmail: first(item.meta?.technicianEmail, raw.meta?.technicianEmail, assignedToEmail, ""),
+    technicianAvatar: first(item.meta?.technicianAvatar, raw.meta?.technicianAvatar, assignedToAvatar, null),
+    technicianAvatarUrl: first(item.meta?.technicianAvatarUrl, raw.meta?.technicianAvatarUrl, assignedToAvatar, null),
+    technicianHasAvatar: Boolean(first(item.meta?.technicianAvatar, raw.meta?.technicianAvatar, assignedToAvatar, "")),
+
     hasAttachments: attachments.length > 0,
     hasComments: comments.length > 0,
     hasHistory: history.length > 0,
@@ -1729,7 +2243,31 @@ export function normalizeIncidenciaModel(payload = {}) {
     clientEmail,
     clienteEmail: safeText(first(item.clienteEmail, raw.clienteEmail, clientEmail), clientEmail),
     clientAvatar,
+    avatar: safeImageSrc(first(item.avatar, raw.avatar, clientAvatar)),
+    avatarUrl: safeImageSrc(first(item.avatarUrl, raw.avatarUrl, clientAvatar)),
+
+    assignedToUserId,
     assignedToName,
+    assignedToEmail,
+    assignedToAvatar,
+    assignedToAvatarUrl: assignedToAvatar,
+
+    technician,
+    technicianName: assignedToName,
+    technicianAvatar: assignedToAvatar,
+    technicianAvatarUrl: assignedToAvatar,
+
+    tecnico: {
+      ...technician,
+      raw: safeObject(first(item.tecnico, raw.tecnico, technician.raw?.tecnico)),
+    },
+
+    assignedTo: {
+      ...technician,
+      raw: safeObject(first(item.assignedTo, raw.assignedTo, technician.raw?.assignedTo)),
+    },
+
+    assignment,
 
     cliente: {
       ...clienteObject,
@@ -1739,28 +2277,10 @@ export function normalizeIncidenciaModel(payload = {}) {
       nombre: safeText(first(clienteObject.nombre, clienteObject.name, clientName), clientName),
       name: safeText(first(clienteObject.name, clienteObject.nombre, clientName), clientName),
       email: safeText(first(clienteObject.email, clientEmail), clientEmail),
-      avatar: safeText(first(clienteObject.avatar, clienteObject.avatarUrl, clientAvatar), clientAvatar),
-      avatarUrl: safeText(first(clienteObject.avatarUrl, clienteObject.avatar, clientAvatar), clientAvatar),
+      avatar: safeImageSrc(first(clienteObject.avatar, clienteObject.avatarUrl, clientAvatar)),
+      avatarUrl: safeImageSrc(first(clienteObject.avatarUrl, clienteObject.avatar, clientAvatar)),
       raw: clienteObject,
     },
-
-    tecnico: {
-      ...tecnicoObject,
-      name: safeText(first(tecnicoObject.name, tecnicoObject.nombre, assignedToName), assignedToName),
-      nombre: safeText(first(tecnicoObject.nombre, tecnicoObject.name, assignedToName), assignedToName),
-      email: safeText(first(tecnicoObject.email), ""),
-      raw: tecnicoObject,
-    },
-
-    assignedTo: first(
-      item.assignedTo,
-      raw.assignedTo,
-      {
-        name: assignedToName,
-        nombre: assignedToName,
-        email: safeText(first(tecnicoObject.email), ""),
-      }
-    ),
 
     createdBy: {
       ...createdByObject,
@@ -1780,6 +2300,8 @@ export function normalizeIncidenciaModel(payload = {}) {
       name: safeText(first(receptorObject.name, receptorObject.nombre, item.name, raw.name, clientName), clientName),
       nombre: safeText(first(receptorObject.nombre, receptorObject.name, item.name, raw.name, clientName), clientName),
       email: safeText(first(receptorObject.email, item.email, raw.email, clientEmail), clientEmail),
+      avatar: safeImageSrc(first(receptorObject.avatar, receptorObject.avatarUrl, clientAvatar)),
+      avatarUrl: safeImageSrc(first(receptorObject.avatarUrl, receptorObject.avatar, clientAvatar)),
       raw: receptorObject,
     },
 
@@ -1787,6 +2309,8 @@ export function normalizeIncidenciaModel(payload = {}) {
     requesterSnapshot: {
       ...safeObject(raw.requesterSnapshot),
       ...safeObject(item.requesterSnapshot),
+      avatar: safeImageSrc(first(item.requesterSnapshot?.avatar, raw.requesterSnapshot?.avatar, clientAvatar)),
+      avatarUrl: safeImageSrc(first(item.requesterSnapshot?.avatarUrl, raw.requesterSnapshot?.avatarUrl, clientAvatar)),
     },
 
     status,
@@ -1866,6 +2390,10 @@ export function normalizeIncidenciaModel(payload = {}) {
       ...raw,
       ...item,
       meta,
+      tecnico: technician,
+      assignedTo: technician,
+      technician,
+      assignment,
       attachments,
       files: attachments,
       adjuntos: attachments,
@@ -1958,11 +2486,11 @@ export function sortIncidenciasByPriorityDesc(items = []) {
 }
 
 export function sortIncidenciasDefault(items = []) {
-  return sortIncidenciasByUpdatedDesc(sortIncidenciasByPriorityDesc(items));
+  return sortIncidenciasByUpdatedDesc(items);
 }
 
 /* =========================================================
-   PAGINATION
+   INCREMENTAL WINDOW / LEGACY PAGINATION COMPAT
 ========================================================= */
 
 export function paginateIncidencias(
@@ -1971,31 +2499,53 @@ export function paginateIncidencias(
   pageSize = DEFAULT_PAGE_SIZE
 ) {
   const list = safeArray(items);
-  const size = clampNumber(pageSize, 1, 100);
+  const size = clampNumber(pageSize, 1, MAX_VISIBLE_COUNT);
+  const pageMultiplier = clampNumber(page, 1, MAX_VISIBLE_COUNT);
   const total = list.length;
-  const totalPages = Math.max(1, Math.ceil((total || 1) / size));
-  const current = clampNumber(page, 1, totalPages);
-  const start = (current - 1) * size;
-  const end = start + size;
-  const pageItems = list.slice(start, end);
+  const visibleLimit = Math.min(total, pageMultiplier * size);
+  const pageItems = list.slice(0, visibleLimit);
+  const remainingCount = Math.max(0, total - pageItems.length);
 
   return {
-    page: current,
-    currentPage: current,
-    incidenciasPage: current,
+    mode: "infinite",
+    infiniteScroll: true,
+    paginationDisabled: true,
+
+    page: 1,
+    currentPage: 1,
+    incidenciasPage: 1,
+
     pageSize: size,
     incidenciasPageSize: size,
+    limit: size,
+
     total,
     totalCount: total,
-    totalPages,
+    filteredTotal: total,
+    filteredCount: total,
+    totalPages: 1,
+    pages: 1,
+
     items: pageItems,
     pageItems,
-    from: total === 0 ? 0 : start + 1,
-    to: Math.min(end, total),
-    rangeStart: total === 0 ? 0 : start + 1,
-    rangeEnd: Math.min(end, total),
-    hasPrev: current > 1,
-    hasNext: current < totalPages,
+    rows: pageItems,
+    visibleItems: pageItems,
+
+    from: total === 0 ? 0 : 1,
+    to: pageItems.length,
+    rangeStart: total === 0 ? 0 : 1,
+    rangeEnd: pageItems.length,
+
+    hasPrev: false,
+    hasNext: false,
+
+    hasMore: remainingCount > 0,
+    canLoadMore: remainingCount > 0,
+    remainingCount,
+
+    visibleCount: pageItems.length,
+    visibleItemsCount: pageItems.length,
+    loadedCount: pageItems.length,
   };
 }
 
@@ -2019,9 +2569,12 @@ export function computeIncidenciasStats(items = []) {
     const assignedValue = safeLower(
       first(
         item?.assignedToName,
+        item?.technicianName,
         item?.tecnico?.name,
         item?.tecnico?.nombre,
-        typeof item?.assignedTo === "string" ? item.assignedTo : item?.assignedTo?.name,
+        item?.technician?.name,
+        item?.assignedTo?.name,
+        typeof item?.assignedTo === "string" ? item.assignedTo : "",
         ""
       )
     );
@@ -2143,6 +2696,9 @@ export function findIncidenciaById(items = [], ticketId = "") {
 
 export default {
   DEFAULT_PAGE_SIZE,
+  DEFAULT_VISIBLE_COUNT,
+  DEFAULT_LOAD_MORE_BATCH,
+  MAX_VISIBLE_COUNT,
   DEFAULT_CURRENCY,
   STATUS,
   PRIORITY,

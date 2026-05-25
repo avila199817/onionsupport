@@ -4,6 +4,7 @@
 
    FINAL SIDEBAR SYSTEM · PRIVATE SPA · EXTREME 10/10
    SOLID GRAPHITE · DESKTOP · COLLAPSED · MOBILE RAIL
+   REVISION: compact mobile drawer aligned to account/user width
 
    Responsabilidad:
    - Pintar y organizar visualmente el sidebar.
@@ -35,9 +36,11 @@
   --sidebar-local-width: var(--sidebar-width, 260px);
   --sidebar-local-collapsed-width: var(--sidebar-collapsed, 72px);
   --sidebar-local-mobile-collapsed-width: var(--sidebar-mobile-collapsed-width, 60px);
-  --sidebar-local-mobile-width: var(
-    --sidebar-mobile-width,
-    min(320px, calc(100vw - var(--sidebar-local-mobile-collapsed-width) - 8px))
+  --sidebar-local-mobile-target-width: clamp(288px, 40vw, 320px);
+  --sidebar-local-mobile-width: min(
+    var(--sidebar-mobile-width, var(--sidebar-local-mobile-target-width)),
+    var(--sidebar-local-mobile-target-width),
+    calc(100vw - 8px)
   );
 
   /* Palette */
@@ -2018,6 +2021,13 @@ body[data-sidebar-open="false"] .sidebar {
 
 @media (max-width: 900px) {
   .sidebar {
+    --sidebar-local-mobile-target-width: clamp(288px, 40vw, 320px);
+    --sidebar-local-mobile-width: min(
+      var(--sidebar-mobile-width, var(--sidebar-local-mobile-target-width)),
+      var(--sidebar-local-mobile-target-width),
+      calc(100vw - 8px)
+    );
+
     inline-size: var(--sidebar-local-mobile-collapsed-width);
     max-inline-size: var(--sidebar-local-mobile-collapsed-width);
     z-index: var(--z-sidebar, 60);
@@ -2050,7 +2060,8 @@ body[data-sidebar-open="false"] .sidebar {
   body[data-sidebar-state="open"] .sidebar,
   body[data-sidebar-open="true"] .sidebar {
     inline-size: var(--sidebar-local-mobile-width);
-    max-inline-size: calc(100vw - 8px);
+    min-inline-size: var(--sidebar-local-mobile-width);
+    max-inline-size: var(--sidebar-local-mobile-width);
 
     transform: translate3d(0, 0, 0) !important;
 
@@ -2222,6 +2233,7 @@ body[data-sidebar-open="false"] .sidebar {
   body[data-sidebar-open="true"] .sidebar .sidebar-inner {
     inline-size: 100%;
     min-inline-size: 0;
+    max-inline-size: 100%;
 
     align-items: stretch;
   }
@@ -2237,6 +2249,29 @@ body[data-sidebar-open="false"] .sidebar {
     display: flex;
     align-items: center;
     justify-content: space-between;
+  }
+
+  .sidebar.is-open .sidebar-nav,
+  .sidebar[data-open="true"] .sidebar-nav,
+  .sidebar[data-sidebar-state="open"] .sidebar-nav,
+  body.sidebar-open .sidebar .sidebar-nav,
+  body[data-sidebar-state="open"] .sidebar .sidebar-nav,
+  body[data-sidebar-open="true"] .sidebar .sidebar-nav,
+  .sidebar.is-open .sidebar-footer,
+  .sidebar[data-open="true"] .sidebar-footer,
+  .sidebar[data-sidebar-state="open"] .sidebar-footer,
+  body.sidebar-open .sidebar .sidebar-footer,
+  body[data-sidebar-state="open"] .sidebar .sidebar-footer,
+  body[data-sidebar-open="true"] .sidebar .sidebar-footer,
+  .sidebar.is-open .sidebar-account-dropdown,
+  .sidebar[data-open="true"] .sidebar-account-dropdown,
+  .sidebar[data-sidebar-state="open"] .sidebar-account-dropdown,
+  body.sidebar-open .sidebar .sidebar-account-dropdown,
+  body[data-sidebar-state="open"] .sidebar .sidebar-account-dropdown,
+  body[data-sidebar-open="true"] .sidebar .sidebar-account-dropdown {
+    inline-size: 100%;
+    min-inline-size: 0;
+    max-inline-size: 100%;
   }
 
   .sidebar.is-open .sidebar-brand,
@@ -2327,9 +2362,9 @@ body[data-sidebar-open="false"] .sidebar {
   body.sidebar-open .sidebar .sidebar-account-trigger,
   body[data-sidebar-state="open"] .sidebar .sidebar-account-trigger,
   body[data-sidebar-open="true"] .sidebar .sidebar-account-trigger {
-    inline-size: auto;
+    inline-size: 100%;
     min-inline-size: 0;
-    max-inline-size: none;
+    max-inline-size: 100%;
 
     block-size: auto;
     min-block-size: var(--sidebar-local-item-height);
@@ -2398,9 +2433,11 @@ body[data-sidebar-open="false"] .sidebar {
 @media (max-width: 640px) {
   .sidebar {
     --sidebar-local-mobile-collapsed-width: var(--sidebar-mobile-collapsed-width, 60px);
-    --sidebar-local-mobile-width: var(
-      --sidebar-mobile-width,
-      min(312px, calc(100vw - var(--sidebar-local-mobile-collapsed-width) - 8px))
+    --sidebar-local-mobile-target-width: clamp(272px, 74vw, 288px);
+    --sidebar-local-mobile-width: min(
+      var(--sidebar-mobile-width, var(--sidebar-local-mobile-target-width)),
+      var(--sidebar-local-mobile-target-width),
+      calc(100vw - 8px)
     );
   }
 }
@@ -2408,6 +2445,12 @@ body[data-sidebar-open="false"] .sidebar {
 @media (max-width: 380px) {
   .sidebar {
     --sidebar-local-mobile-collapsed-width: var(--sidebar-mobile-collapsed-width, 56px);
+    --sidebar-local-mobile-target-width: clamp(264px, 74vw, 280px);
+    --sidebar-local-mobile-width: min(
+      var(--sidebar-mobile-width, var(--sidebar-local-mobile-target-width)),
+      var(--sidebar-local-mobile-target-width),
+      calc(100vw - 8px)
+    );
     --sidebar-local-collapsed-slot: 40px;
     --sidebar-local-avatar-collapsed-size: 30px;
   }

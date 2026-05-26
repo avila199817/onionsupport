@@ -4,14 +4,15 @@
 
    Responsabilidad:
    - Compat mínima de sesión para Core.
-   - Estado en memoria.
-   - Auth estricta: token + user usable.
+   - Estado en memoria delegado.
+   - Auth estricta: token usable + user usable.
    - Token sin user = hasToken, pero NO authenticated.
    - User sin token = NO authenticated.
-   - User inválido sólo si disabled.
+   - User inválido si disabled/deleted/archived/active=false.
    - Roles únicos: admin / user.
+   - Home visible de usuario: /@{user.slug}.
    - Theme simple.
-   - Idiomas: ca / es / en.
+   - Idioma base: es.
    - Sin imports.
    - Sin storage.
    - Sin HTTP.
@@ -19,10 +20,10 @@
    - Sin Toast.
    - Sin rutas legacy.
    - Sin 2FA/MFA/OTP.
-   - Sin magia negra.
+   - Sin secretos en snapshots.
 ========================================================= */
 
-export const SESSION_VERSION = "simple";
+export const SESSION_VERSION = "core.session.v2";
 
 export const SESSION_EVENTS = Object.freeze({
   routeChange: "app:route:change",
@@ -40,11 +41,113 @@ export const SESSION_EVENTS = Object.freeze({
 });
 
 const DEFAULT_ROUTE = "/";
-const DEFAULT_LANG = "en";
+const USER_HOME_PREFIX = "/@";
+const DEFAULT_LANG = "es";
 const DEFAULT_THEME = "system";
 
-const VALID_LANGS = new Set(["ca", "es", "en"]);
+const VALID_LANGS = new Set(["es", "ca", "en"]);
 const VALID_THEMES = new Set(["dark", "light", "system"]);
+const VALID_ROLES = new Set(["admin", "user"]);
+
+const INVALID_USER_STATUSES = new Set([
+  "disabled",
+  "inactive",
+  "deleted",
+  "archived",
+  "revoked",
+  "blocked",
+  "banned",
+  "suspended",
+  "desactivado",
+  "inactivo",
+  "eliminado",
+  "archivado",
+  "bloqueado",
+  "suspendido",
+]);
+
+const BLOCKED_FRONTEND_ROUTES = Object.freeze([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
+]);
+
+const SENSITIVE_KEYS = new Set([
+  "password",
+  "passwordhash",
+  "password_hash",
+  "hash",
+  "salt",
+  "passwordmeta",
+
+  "refreshtoken",
+  "refresh_token",
+  "refreshtokenhash",
+  "refresh_token_hash",
+
+  "idtoken",
+  "id_token",
+
+  "resettoken",
+  "reset_token",
+  "activationtoken",
+  "activation_token",
+
+  "authorization",
+  "authheader",
+
+  "secret",
+  "secrets",
+  "code",
+  "codes",
+  "backupcodes",
+  "backup_codes",
+
+  "otp",
+  "otpcode",
+  "totp",
+  "mfa",
+  "twofa_secret",
+  "twofasecret",
+  "totpsecret",
+
+  "jwt",
+  "apikey",
+  "api_key",
+  "sas",
+  "connectionstring",
+  "connection_string",
+
+  "_rid",
+  "_self",
+  "_etag",
+  "_attachments",
+  "_ts",
+  "_lsn",
+  "_metadata",
+]);
+
+const SENSITIVE_QUERY_KEYS = new Set([
+  "token",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "secret",
+  "session",
+  "code",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
+  "jwt",
+  "authorization",
+  "reset_token",
+  "activation_token",
+]);
 
 /* =========================================================
    BASICS
@@ -63,8 +166,26 @@ function isFunction(value) {
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
+}
+
+function normalizeKey(value = "") {
+  return text(value, "").toLowerCase();
+}
+
+function redact(value = "") {
+  return text(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function emit(events, name, payload = {}) {
@@ -95,44 +216,300 @@ function emit(events, name, payload = {}) {
 function commitState({ state, setState, patch = {}, options = {} } = {}) {
   if (!isObject(patch)) return false;
 
-  if (isObject(state)) {
-    Object.assign(state, patch);
-  }
-
   if (isFunction(setState)) {
     try {
       setState(patch, options);
+      return true;
     } catch {
-      // Compat mínima: nunca rompe.
+      // Fallback abajo.
     }
   }
 
-  return true;
+  if (isObject(state)) {
+    try {
+      Object.assign(state, patch);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+function normalizeError(error = null) {
+  if (!error) return null;
+
+  if (typeof error === "string") {
+    return {
+      name: "Error",
+      message: redact(error),
+      code: null,
+      status: null,
+    };
+  }
+
+  if (!isObject(error)) {
+    return {
+      name: "Error",
+      message: redact(String(error)),
+      code: null,
+      status: null,
+    };
+  }
+
+  return {
+    name: text(error.name, "Error"),
+    message: redact(error.message || error.detail || error.reason || String(error)),
+    code: error.code || error.error || null,
+    status: error.status || error.statusCode || error.response?.status || null,
+  };
+}
+
+function sanitizeObject(value, depth = 0) {
+  if (depth > 8) return null;
+
+  if (typeof value === "string") {
+    return redact(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 500)
+      .map((item) => sanitizeObject(item, depth + 1))
+      .filter((item) => item !== undefined);
+  }
+
+  if (!isObject(value)) return value;
+
+  const output = {};
+
+  for (const [key, child] of Object.entries(value)) {
+    if (SENSITIVE_KEYS.has(normalizeKey(key))) continue;
+
+    const sanitized = sanitizeObject(child, depth + 1);
+
+    if (sanitized !== undefined) {
+      output[key] = sanitized;
+    }
+  }
+
+  return output;
 }
 
 /* =========================================================
    PATHS
 ========================================================= */
 
+function normalizeHashRouterPath(value = "") {
+  const raw = text(value, DEFAULT_ROUTE);
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
+  }
+
+  if (raw.startsWith("#/")) {
+    return raw.slice(1) || DEFAULT_ROUTE;
+  }
+
+  return raw || DEFAULT_ROUTE;
+}
+
+function routePathFromInput(value = DEFAULT_ROUTE) {
+  let raw = text(value, DEFAULT_ROUTE);
+
+  if (!raw) return DEFAULT_ROUTE;
+
+  if (raw.startsWith("#/") || raw.startsWith("#!")) {
+    return normalizeHashRouterPath(raw);
+  }
+
+  if (raw.startsWith("//")) {
+    return DEFAULT_ROUTE;
+  }
+
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      const url = new URL(raw);
+
+      if (isBrowser() && url.origin === window.location.origin) {
+        if (url.hash && (url.hash.startsWith("#/") || url.hash.startsWith("#!"))) {
+          return normalizeHashRouterPath(url.hash);
+        }
+
+        return `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
+      }
+
+      return DEFAULT_ROUTE;
+    }
+  } catch {
+    return DEFAULT_ROUTE;
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return DEFAULT_ROUTE;
+  }
+
+  if (/[\r\n\t\\]/.test(raw)) {
+    return DEFAULT_ROUTE;
+  }
+
+  return raw;
+}
+
+function normalizePathname(pathname = DEFAULT_ROUTE) {
+  let value = text(pathname, DEFAULT_ROUTE)
+    .split("#")[0]
+    .split("?")[0]
+    .replace(/\\/g, "/");
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  value = value.replace(/\/{2,}/g, "/");
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+  }
+
+  return value || DEFAULT_ROUTE;
+}
+
+function normalizeSearch(search = "") {
+  const raw = text(search, "");
+
+  if (!raw || raw === "?") return "";
+
+  const normalized = raw.startsWith("?")
+    ? raw
+    : `?${raw.replace(/^\?+/, "")}`;
+
+  try {
+    const params = new URLSearchParams(normalized);
+
+    for (const key of [...params.keys()]) {
+      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+        params.delete(key);
+      }
+    }
+
+    const output = params.toString();
+
+    return output ? `?${output}` : "";
+  } catch {
+    return "";
+  }
+}
+
+function normalizeHash(hash = "") {
+  const raw = text(hash, "");
+
+  if (!raw || raw === "#") return "";
+
+  const normalized = raw.startsWith("#")
+    ? raw
+    : `#${raw.replace(/^#+/, "")}`;
+
+  const body = normalized.slice(1);
+
+  if (!body || /[\r\n\t\\]/.test(body)) return "";
+
+  const queryIndex = body.indexOf("?");
+
+  if (queryIndex >= 0) {
+    const hashPath = body.slice(0, queryIndex);
+    const cleanQuery = normalizeSearch(`?${body.slice(queryIndex + 1)}`);
+
+    return cleanQuery ? `#${hashPath}${cleanQuery}` : `#${hashPath}`;
+  }
+
+  if (/^[^/?#=&]+=/i.test(body)) {
+    const cleanQuery = normalizeSearch(`?${body}`);
+    return cleanQuery ? `#${cleanQuery.slice(1)}` : "";
+  }
+
+  return redact(normalized);
+}
+
+function splitPath(path = DEFAULT_ROUTE) {
+  let raw = routePathFromInput(path);
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
+  }
+
+  return {
+    pathname: normalizePathname(pathname),
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
+  };
+}
+
+function pathIsOrStartsWith(path = "", blocked = "") {
+  const current = normalizePathname(path).toLowerCase();
+  const target = normalizePathname(blocked).toLowerCase();
+
+  return Boolean(
+    current === target ||
+      current.startsWith(`${target}/`)
+  );
+}
+
+function isBlockedRoutePath(path = DEFAULT_ROUTE) {
+  const clean = normalizePathname(path);
+
+  return BLOCKED_FRONTEND_ROUTES.some((blocked) =>
+    pathIsOrStartsWith(clean, blocked)
+  );
+}
+
 function normalizePublicPath(value = DEFAULT_ROUTE) {
-  let path = text(value, DEFAULT_ROUTE);
+  const parts = splitPath(value);
 
-  if (path.startsWith("#/")) path = path.slice(1);
-  if (path.startsWith("#!")) path = path.replace(/^#!\/?/, "/");
+  if (isBlockedRoutePath(parts.pathname)) {
+    return DEFAULT_ROUTE;
+  }
 
-  if (!path.startsWith("/")) path = `/${path}`;
-
-  return path || DEFAULT_ROUTE;
+  return `${parts.pathname}${parts.search}${parts.hash}` || DEFAULT_ROUTE;
 }
 
 function normalizeCanonicalPath(value = DEFAULT_ROUTE) {
-  let path = normalizePublicPath(value).split("?")[0].split("#")[0] || DEFAULT_ROUTE;
+  const path = normalizePublicPath(value);
+  const pathname = normalizePathname(path);
 
-  if (path.length > 1) {
-    path = path.replace(/\/+$/g, "");
-  }
+  return isBlockedRoutePath(pathname) ? DEFAULT_ROUTE : pathname;
+}
 
-  return path || DEFAULT_ROUTE;
+/* =========================================================
+   LANG / THEME
+========================================================= */
+
+function normalizeLang(value = DEFAULT_LANG) {
+  const lang = text(value, DEFAULT_LANG).toLowerCase();
+  return VALID_LANGS.has(lang) ? lang : DEFAULT_LANG;
+}
+
+function normalizeTheme(value = DEFAULT_THEME) {
+  const theme = text(value, DEFAULT_THEME).toLowerCase();
+  return VALID_THEMES.has(theme) ? theme : DEFAULT_THEME;
+}
+
+function themeMetaColor(theme = DEFAULT_THEME) {
+  return normalizeTheme(theme) === "light" ? "#ffffff" : "#0a0c11";
 }
 
 /* =========================================================
@@ -148,6 +525,7 @@ function validToken(token = "") {
 
   if (!clean) return false;
   if (/\s/.test(clean)) return false;
+  if (clean.length > 8192) return false;
 
   return ![
     "null",
@@ -160,83 +538,364 @@ function validToken(token = "") {
   ].includes(clean.toLowerCase());
 }
 
+function cleanToken(token = "") {
+  const clean = stripBearer(token);
+  return validToken(clean) ? clean : null;
+}
+
 function normalizeRole(value = "") {
-  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = text(value, "").toLowerCase();
+
+  return VALID_ROLES.has(role) ? role : "";
+}
+
+function cleanRole(value = "") {
+  return normalizeRole(value) || "user";
+}
+
+function userPayload(value = null) {
+  if (!isObject(value)) return null;
+
+  return (
+    value.user ||
+    value.usuario ||
+    value.me ||
+    value.account ||
+    value.profile ||
+    value
+  );
 }
 
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  return (
+  const status = text(
+    user.status ||
+      user.estado ||
+      user.state ||
+      "",
+    ""
+  ).toLowerCase();
+
+  return Boolean(
     user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
+      user.deleted === true ||
+      user.archived === true ||
+      user.revoked === true ||
+      user.blocked === true ||
+      user.banned === true ||
+      user.suspended === true ||
+      user.active === false ||
+      user.enabled === false ||
+      Boolean(user.deletedAt) ||
+      INVALID_USER_STATUSES.has(status)
   );
 }
 
-function normalizeUser(user = null) {
-  if (!isObject(user)) return null;
-  if (userDisabled(user)) return null;
+function hasUserIdentity(user = null) {
+  if (!isObject(user)) return false;
 
-  const id = user.userId || user.id || null;
-  const email = user.email || null;
-  const username = user.username || user.slug || email || id || null;
+  return Boolean(
+    text(user.id, "") ||
+      text(user.userId, "") ||
+      text(user.uid, "") ||
+      text(user.sub, "") ||
+      text(user.username, "") ||
+      text(user.slug, "") ||
+      text(user.lookup?.slug, "")
+  );
+}
+
+function normalizeSlug(value = "") {
+  const slug = text(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+function extractUserSlug(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeSlug(
+    user.slug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      user.routing?.slug ||
+      user.username ||
+      user.userName ||
+      user.user_name ||
+      user.usernameLower ||
+      user.username_lower ||
+      user.userId ||
+      user.id ||
+      ""
+  );
+}
+
+function buildUserHomePath(user = null) {
+  const slug = extractUserSlug(user);
+  return slug ? `${USER_HOME_PREFIX}${slug}` : DEFAULT_ROUTE;
+}
+
+function userAvatarUrl(user = null) {
+  if (!isObject(user)) return "";
+
+  return text(
+    user.avatarUrl ||
+      user.avatar ||
+      user.picture ||
+      user.pictureUrl ||
+      user.photoUrl ||
+      user.photoURL ||
+      user.imageUrl ||
+      user.image ||
+      user.profile?.avatarUrl ||
+      user.profile?.avatar ||
+      user.profile?.picture ||
+      "",
+    ""
+  );
+}
+
+function normalizeUser(value = null) {
+  const source = userPayload(value);
+
+  if (!isObject(source)) return null;
+  if (userDisabled(source)) return null;
+  if (!hasUserIdentity(source)) return null;
+
+  const safeUser = sanitizeObject(source);
+
+  if (!isObject(safeUser)) return null;
+
+  const id = text(
+    safeUser.userId ||
+      safeUser.id ||
+      safeUser.uid ||
+      safeUser.sub ||
+      "",
+    ""
+  );
+
+  const email = text(safeUser.email, "") || null;
+  const slug = extractUserSlug(safeUser);
+
+  const username = text(
+    safeUser.username ||
+      safeUser.userName ||
+      safeUser.user_name ||
+      safeUser.usernameLower ||
+      safeUser.username_lower ||
+      slug ||
+      email ||
+      id,
+    ""
+  );
 
   if (!id && !username && !email) return null;
 
-  const name =
-    user.name ||
-    user.fullName ||
-    user.displayName ||
-    user.nombre ||
-    username ||
-    email ||
-    id ||
-    "Usuario";
+  const profile = isObject(safeUser.profile) ? safeUser.profile : {};
 
-  const role = normalizeRole(user.role || user.rol);
+  const displayName = text(
+    safeUser.displayName ||
+      safeUser.fullName ||
+      safeUser.name ||
+      safeUser.nombre ||
+      profile.displayName ||
+      profile.fullName ||
+      profile.name ||
+      profile.nombre ||
+      username ||
+      email ||
+      id,
+    "Usuario"
+  );
+
+  const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
+  const avatar = userAvatarUrl(safeUser);
 
   return {
-    ...user,
+    ...safeUser,
 
-    id,
-    userId: user.userId || id,
+    id: id || null,
+    userId: safeUser.userId || id || null,
+    uid: safeUser.uid || id || null,
+    sub: safeUser.sub || id || null,
 
-    username,
-    usernameLower: username ? String(username).toLowerCase() : null,
-    slug: user.slug || username,
+    username: username || null,
+    usernameLower: username ? username.toLowerCase() : null,
+    slug: slug || username || null,
 
-    name,
-    fullName: user.fullName || name,
-    displayName: user.displayName || name,
+    name: safeUser.name || displayName,
+    nombre: safeUser.nombre || displayName,
+    fullName: safeUser.fullName || displayName,
+    displayName,
 
     email,
-    emailLower: email ? String(email).toLowerCase() : null,
+    emailLower: email ? email.toLowerCase() : null,
 
     role,
     rol: role,
+    userRole: role,
     roles: [role],
 
+    hasAvatar: Boolean(safeUser.hasAvatar || avatar),
+    avatar: avatar || safeUser.avatar || null,
+    avatarUrl: avatar || safeUser.avatarUrl || null,
+    photoUrl: safeUser.photoUrl || safeUser.photoURL || avatar || null,
+    picture: safeUser.picture || safeUser.pictureUrl || avatar || null,
+    avatarUpdatedAt: safeUser.avatarUpdatedAt || null,
+
     active: true,
+    enabled: true,
     disabled: false,
+    deleted: false,
+    archived: false,
+
+    isAdmin: role === "admin",
+    isUser: role === "user",
   };
 }
 
-function authPatch({ token = null, user = null } = {}) {
-  const cleanToken = validToken(token) ? stripBearer(token) : null;
-  const cleanUser = normalizeUser(user);
+/* =========================================================
+   SESSION CONTEXT
+========================================================= */
 
-  const base = {
-    token: cleanToken,
-    accessToken: cleanToken,
-    access_token: cleanToken,
+function normalizeSessionContext(value = null, user = null) {
+  if (!isObject(value)) return null;
+
+  const sessionId = text(
+    value.sessionId ||
+      value.session_id ||
+      value.sid ||
+      value.id ||
+      "",
+    ""
+  );
+
+  const userId = text(
+    value.sessionUserId ||
+      value.session_user_id ||
+      value.userId ||
+      value.user_id ||
+      value.uid ||
+      user?.userId ||
+      user?.id ||
+      user?.uid ||
+      user?.sub ||
+      "",
+    ""
+  );
+
+  const expiresAt =
+    value.expiresAt ||
+    value.expires_at ||
+    value.refreshExpiresAt ||
+    value.refresh_expires_at ||
+    null;
+
+  if (!sessionId && !userId && !expiresAt) return null;
+
+  return {
+    sessionId: sessionId || null,
+    id: sessionId || null,
+    sid: sessionId || null,
+
+    userId: userId || null,
+    sessionUserId: userId || null,
+
+    expiresAt,
+    refreshExpiresAt: value.refreshExpiresAt || value.refresh_expires_at || expiresAt || null,
+
+    persistent: value.persistent === true,
+    restoreOnBoot: value.restoreOnBoot === true,
+    rollingRefresh: value.rollingRefresh === true,
+    expiryEnforced: value.expiryEnforced === true,
+
+    revoked: value.revoked === true,
+    active: value.active !== false,
+    status: value.status || value.estado || "active",
+  };
+}
+
+function sameSessionUser(session = null, user = null) {
+  if (!session || !user) return false;
+
+  const sessionUserId = text(session.userId || session.sessionUserId, "");
+  const userId = text(
+    user.userId ||
+      user.id ||
+      user.uid ||
+      user.sub ||
+      "",
+    ""
+  );
+
+  if (!sessionUserId || !userId) return true;
+
+  return sessionUserId === userId;
+}
+
+/* =========================================================
+   AUTH PATCH
+========================================================= */
+
+function readTokenFrom(source = {}) {
+  return (
+    source.token ||
+    source.accessToken ||
+    source.access_token ||
+    null
+  );
+}
+
+function readUserFrom(source = {}) {
+  return (
+    source.user ||
+    source.currentUser ||
+    source.authUser ||
+    source.sessionUser ||
+    null
+  );
+}
+
+function clearAuthPatch() {
+  return {
+    token: null,
+    accessToken: null,
+    access_token: null,
 
     user: null,
     currentUser: null,
     authUser: null,
     sessionUser: null,
 
-    hasToken: Boolean(cleanToken),
+    hasToken: false,
+    hasRefreshToken: false,
     authenticated: false,
+
+    userSlug: null,
+    homePath: DEFAULT_ROUTE,
+    defaultHome: DEFAULT_ROUTE,
+    postLoginTarget: null,
 
     role: null,
     rol: null,
@@ -245,76 +904,233 @@ function authPatch({ token = null, user = null } = {}) {
 
     username: null,
 
+    session: null,
+    sessionData: null,
+    sessionId: null,
+    sessionUserId: null,
+
+    hasAvatar: false,
+    avatar: null,
+    avatarUrl: null,
+    photoUrl: null,
+    picture: null,
+    avatarUpdatedAt: null,
+
     isAdmin: false,
     isUser: false,
     isSupport: false,
     isManager: false,
     isClient: false,
   };
+}
 
-  if (!cleanToken || !cleanUser) {
-    return base;
+function authPatch(source = {}, options = {}) {
+  if (options.forceUnauthenticated === true) {
+    return clearAuthPatch();
   }
 
-  const role = normalizeRole(cleanUser.role || cleanUser.rol);
+  const token = cleanToken(readTokenFrom(source));
+  const user = normalizeUser(readUserFrom(source));
+
+  if (!token) {
+    return clearAuthPatch();
+  }
+
+  if (!user) {
+    return {
+      ...clearAuthPatch(),
+
+      token,
+      accessToken: token,
+      access_token: token,
+
+      hasToken: true,
+      hasRefreshToken: source.hasRefreshToken === true,
+      authenticated: false,
+    };
+  }
+
+  const role = cleanRole(user.role || user.rol || user.roles);
+  const slug = extractUserSlug(user);
+  const homePath = buildUserHomePath(user);
+  const avatar = userAvatarUrl(user);
+
+  const sessionSource =
+    source.session ||
+    source.sessionData ||
+    (
+      source.sessionId || source.sessionUserId
+        ? {
+            sessionId: source.sessionId,
+            sessionUserId: source.sessionUserId,
+          }
+        : null
+    );
+
+  const session = normalizeSessionContext(sessionSource, user);
+  const validSession = session && sameSessionUser(session, user)
+    ? session
+    : null;
 
   return {
-    ...base,
+    token,
+    accessToken: token,
+    access_token: token,
 
-    user: cleanUser,
-    currentUser: cleanUser,
-    authUser: cleanUser,
-    sessionUser: cleanUser,
+    user,
+    currentUser: user,
+    authUser: user,
+    sessionUser: user,
 
+    hasToken: true,
+    hasRefreshToken: source.hasRefreshToken === true,
     authenticated: true,
+
+    userSlug: slug || null,
+    homePath,
+    defaultHome: homePath,
+    postLoginTarget: homePath,
 
     role,
     rol: role,
     userRole: role,
     roles: [role],
 
-    username: cleanUser.username || null,
+    username: user.username || null,
+
+    session: validSession,
+    sessionData: validSession,
+    sessionId: validSession?.sessionId || null,
+    sessionUserId: validSession?.sessionUserId || validSession?.userId || null,
+
+    hasAvatar: Boolean(user.hasAvatar || avatar),
+    avatar: avatar || null,
+    avatarUrl: avatar || null,
+    photoUrl: user.photoUrl || avatar || null,
+    picture: user.picture || avatar || null,
+    avatarUpdatedAt: user.avatarUpdatedAt || null,
 
     isAdmin: role === "admin",
     isUser: role === "user",
+    isSupport: false,
+    isManager: false,
+    isClient: false,
   };
+}
+
+/* =========================================================
+   PAYLOAD PICKERS
+========================================================= */
+
+function nestedPayloads(payload = {}) {
+  if (!isObject(payload)) return [];
+
+  return [
+    payload,
+    isObject(payload.data) ? payload.data : null,
+    isObject(payload.payload) ? payload.payload : null,
+    isObject(payload.result) ? payload.result : null,
+    isObject(payload.auth) ? payload.auth : null,
+    isObject(payload.session) ? payload.session : null,
+    isObject(payload.sessionData) ? payload.sessionData : null,
+  ].filter(Boolean);
+}
+
+function pick(payload = {}, names = []) {
+  for (const node of nestedPayloads(payload)) {
+    for (const name of names) {
+      const value =
+        node?.[name] ??
+        node?.session?.[name] ??
+        node?.sessionData?.[name];
+
+      if (value !== undefined && value !== null && value !== "") {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
+function pickSession(payload = {}) {
+  for (const node of nestedPayloads(payload)) {
+    const session =
+      (isObject(node.session) ? node.session : null) ||
+      (isObject(node.sessionData) ? node.sessionData : null);
+
+    if (session) return session;
+  }
+
+  return null;
+}
+
+function pickUser(payload = {}) {
+  return (
+    pick(payload, ["user", "usuario", "me", "account", "profile"]) ||
+    (normalizeUser(payload) ? payload : null)
+  );
 }
 
 /* =========================================================
    SNAPSHOT
 ========================================================= */
 
+function safeSnapshotUser(user = null) {
+  const normalized = normalizeUser(user);
+
+  if (!normalized) return null;
+
+  return {
+    id: normalized.id || normalized.userId || null,
+    userId: normalized.userId || normalized.id || null,
+    username: normalized.username || null,
+    slug: normalized.slug || null,
+    displayName: normalized.displayName || normalized.name || normalized.username || null,
+    role: normalized.role || null,
+    hasAvatar: Boolean(normalized.hasAvatar || userAvatarUrl(normalized)),
+  };
+}
+
 function sessionSnapshot(state = {}, cause = "session") {
+  const token = cleanToken(readTokenFrom(state));
+  const user = normalizeUser(readUserFrom(state));
+  const authenticated = Boolean(token && user);
+  const role = authenticated ? cleanRole(state.role || user.role || user.rol || user.roles) : null;
+
   return {
     version: SESSION_VERSION,
     cause,
 
-    authenticated: Boolean(state.authenticated),
-    hasToken: Boolean(state.hasToken),
+    authenticated,
+    hasToken: Boolean(token),
+    hasRefreshToken: Boolean(state.hasRefreshToken),
 
-    user: state.authenticated
-      ? {
-          id: state.user?.id || state.user?.userId || null,
-          userId: state.user?.userId || state.user?.id || null,
-          username: state.user?.username || null,
-          displayName:
-            state.user?.name ||
-            state.user?.fullName ||
-            state.user?.displayName ||
-            state.user?.username ||
-            null,
-          role: state.role || null,
-        }
-      : null,
+    user: authenticated ? safeSnapshotUser(user) : null,
 
-    role: state.role || null,
-    username: state.username || null,
+    userSlug: authenticated ? extractUserSlug(user) || null : null,
+    homePath: authenticated ? buildUserHomePath(user) : DEFAULT_ROUTE,
 
-    route: state.route || DEFAULT_ROUTE,
-    publicPath: state.publicPath || state.route || DEFAULT_ROUTE,
+    role,
+    roles: authenticated && role ? [role] : [],
+    username: authenticated ? user.username || null : null,
 
-    theme: state.theme || DEFAULT_THEME,
-    lang: state.lang || DEFAULT_LANG,
+    isAdmin: authenticated && role === "admin",
+    isUser: authenticated && role === "user",
+
+    hasSessionContext: Boolean(state.session || state.sessionData || state.sessionId || state.sessionUserId),
+    sessionId: state.sessionId ? "***" : null,
+    sessionUserId: state.sessionUserId ? "***" : null,
+
+    route: redact(state.route || DEFAULT_ROUTE),
+    canonicalPath: redact(state.canonicalPath || state.route || DEFAULT_ROUTE),
+    publicPath: redact(state.publicPath || state.route || DEFAULT_ROUTE),
+
+    theme: normalizeTheme(state.theme || DEFAULT_THEME),
+    lang: normalizeLang(state.lang || state.language || state.locale || DEFAULT_LANG),
+
+    hasError: Boolean(state.hasError),
+    error: normalizeError(state.error),
   };
 }
 
@@ -385,8 +1201,9 @@ export function setPublicPath({ state, setState, events, path = DEFAULT_ROUTE, o
 
 export function setUser({ state, events, setState, user = null, options = {} } = {}) {
   const patch = authPatch({
-    token: state?.token,
+    ...state,
     user,
+    currentUser: user,
   });
 
   commitState({
@@ -396,20 +1213,21 @@ export function setUser({ state, events, setState, user = null, options = {} } =
     options: {
       ...options,
       source: options.source || "core-session:setUser",
-      forceUnauthenticated: !patch.authenticated,
     },
   });
 
   emit(events, SESSION_EVENTS.userChange, sessionSnapshot(state, "setUser"));
   emit(events, SESSION_EVENTS.authChange, sessionSnapshot(state, "setUser"));
 
-  return state?.user || null;
+  return state?.user || patch.user || null;
 }
 
 export function setToken({ state, events, setState, token = null, options = {} } = {}) {
   const patch = authPatch({
+    ...state,
     token,
-    user: state?.user,
+    accessToken: token,
+    access_token: token,
   });
 
   commitState({
@@ -419,18 +1237,17 @@ export function setToken({ state, events, setState, token = null, options = {} }
     options: {
       ...options,
       source: options.source || "core-session:setToken",
-      forceUnauthenticated: !patch.authenticated,
     },
   });
 
   emit(events, SESSION_EVENTS.tokenChange, {
-    hasToken: Boolean(state?.hasToken),
-    authenticated: Boolean(state?.authenticated),
+    hasToken: Boolean(patch.hasToken),
+    authenticated: Boolean(patch.authenticated),
   });
 
   emit(events, SESSION_EVENTS.authChange, sessionSnapshot(state, "setToken"));
 
-  return state?.token || null;
+  return state?.token || patch.token || null;
 }
 
 /* =========================================================
@@ -440,31 +1257,26 @@ export function setToken({ state, events, setState, token = null, options = {} }
 export function applySession(input = {}) {
   const { state, events, setState } = input || {};
 
-  const token =
-    input.token ||
-    input.accessToken ||
-    input.access_token ||
-    input.data?.token ||
-    input.data?.accessToken ||
-    input.data?.access_token ||
-    input.auth?.token ||
-    input.session?.token ||
-    null;
-
-  const user =
-    input.user ||
-    input.usuario ||
-    input.me ||
-    input.account ||
-    input.profile ||
-    input.data?.user ||
-    input.auth?.user ||
-    input.session?.user ||
-    null;
+  const token = pick(input, ["token", "accessToken", "access_token"]);
+  const user = pickUser(input);
+  const session = normalizeSessionContext(pickSession(input), normalizeUser(user));
 
   const patch = authPatch({
+    ...state,
+
     token,
+    accessToken: token,
+    access_token: token,
+
     user,
+    currentUser: user,
+
+    session,
+    sessionData: session,
+
+    hasRefreshToken: Boolean(
+      pick(input, ["refreshToken", "refresh_token"])
+    ),
   });
 
   if (input.route || input.publicPath) {
@@ -479,8 +1291,8 @@ export function applySession(input = {}) {
     setState,
     patch,
     options: {
+      ...(input.options || {}),
       source: input.options?.source || "core-session:applySession",
-      forceUnauthenticated: !patch.authenticated,
     },
   });
 
@@ -493,10 +1305,7 @@ export function applySession(input = {}) {
 }
 
 export function clearSession({ state, events, setState, options = {} } = {}) {
-  const patch = authPatch({
-    token: null,
-    user: null,
-  });
+  const patch = clearAuthPatch();
 
   commitState({
     state,
@@ -523,24 +1332,21 @@ export function clearSession({ state, events, setState, options = {} } = {}) {
 
 export function loadPreferences({ state, setState } = {}) {
   const lang = isBrowser()
-    ? document.documentElement.lang || DEFAULT_LANG
+    ? normalizeLang(document.documentElement.lang || DEFAULT_LANG)
     : DEFAULT_LANG;
 
   const theme = isBrowser()
-    ? document.documentElement.dataset.theme || DEFAULT_THEME
+    ? normalizeTheme(document.documentElement.dataset.theme || DEFAULT_THEME)
     : DEFAULT_THEME;
-
-  const cleanLang = VALID_LANGS.has(lang) ? lang : DEFAULT_LANG;
-  const cleanTheme = VALID_THEMES.has(theme) ? theme : DEFAULT_THEME;
 
   commitState({
     state,
     setState,
     patch: {
-      lang: cleanLang,
-      language: cleanLang,
-      locale: cleanLang,
-      theme: cleanTheme,
+      lang,
+      language: lang,
+      locale: lang,
+      theme,
     },
     options: {
       source: "core-session:loadPreferences",
@@ -548,15 +1354,14 @@ export function loadPreferences({ state, setState } = {}) {
   });
 
   return {
-    lang: state?.lang || cleanLang,
-    theme: state?.theme || cleanTheme,
+    lang: state?.lang || lang,
+    theme: state?.theme || theme,
   };
 }
 
 export function loadSession({ state, events, setState } = {}) {
   const patch = authPatch({
-    token: state?.token,
-    user: state?.user,
+    ...state,
   });
 
   commitState({
@@ -565,7 +1370,6 @@ export function loadSession({ state, events, setState } = {}) {
     patch,
     options: {
       source: "core-session:loadSession",
-      forceUnauthenticated: !patch.authenticated,
     },
   });
 
@@ -584,8 +1388,7 @@ export function loadSession({ state, events, setState } = {}) {
 export function syncThemeMetaColor({ theme = DEFAULT_THEME } = {}) {
   if (!isBrowser()) return false;
 
-  const color = theme === "light" ? "#ffffff" : "#0a0c11";
-
+  const color = themeMetaColor(theme);
   let changed = false;
 
   try {
@@ -607,7 +1410,7 @@ export function syncThemeMetaColor({ theme = DEFAULT_THEME } = {}) {
 }
 
 export function setTheme({ setState, events, theme = DEFAULT_THEME } = {}) {
-  const value = VALID_THEMES.has(theme) ? theme : DEFAULT_THEME;
+  const value = normalizeTheme(theme);
 
   setState?.(
     {
@@ -632,7 +1435,7 @@ export function setTheme({ setState, events, theme = DEFAULT_THEME } = {}) {
 }
 
 export function setLang({ setState, events, lang = DEFAULT_LANG } = {}) {
-  const value = VALID_LANGS.has(lang) ? lang : DEFAULT_LANG;
+  const value = normalizeLang(lang);
 
   setState?.(
     {
@@ -652,6 +1455,8 @@ export function setLang({ setState, events, lang = DEFAULT_LANG } = {}) {
 
   emit(events, SESSION_EVENTS.langChange, {
     lang: value,
+    language: value,
+    locale: value,
   });
 
   return value;
@@ -692,13 +1497,7 @@ export function setLoading({ setState, events, value = false } = {}) {
 }
 
 export function setError({ events, setState, error = null } = {}) {
-  const normalized = error
-    ? {
-        name: error.name || "Error",
-        message: error.message || String(error),
-        code: error.code || error.status || error.statusCode || null,
-      }
-    : null;
+  const normalized = normalizeError(error);
 
   setState?.(
     {

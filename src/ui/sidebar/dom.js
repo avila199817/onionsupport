@@ -33,7 +33,7 @@ import {
   SIDEBAR_SELECTORS,
 } from "./constants.js";
 
-export const SIDEBAR_DOM_VERSION = "sidebar.dom.v6";
+export const SIDEBAR_DOM_VERSION = "sidebar.dom.v7";
 
 /* =========================================================
    BASICS
@@ -165,11 +165,11 @@ export function createElement(tag = "div", options = {}) {
   } = options || {};
 
   if (className) {
-    node.className = className;
+    node.className = String(className);
   }
 
   if (textContent) {
-    node.textContent = textContent;
+    node.textContent = String(textContent);
   }
 
   for (const [key, value] of Object.entries(attrs || {})) {
@@ -389,10 +389,18 @@ export function mountSidebarRoot(nextRoot = null) {
   if (!root) return null;
 
   try {
+    /*
+      Limpieza previa:
+      elimina roots antiguos que estén fuera del nuevo árbol antes de sustituir.
+    */
     removeDuplicateSidebarRoots(root);
 
     mount.replaceChildren(root);
 
+    /*
+      Limpieza posterior:
+      garantiza root único tras el montaje real.
+    */
     removeDuplicateSidebarRoots(root);
 
     return root;
@@ -785,6 +793,8 @@ export function getSidebarDomSnapshot(root = getSidebarRoot()) {
       noDropdownBehavior: true,
       noTooltips: true,
       noFallbackDom: true,
+
+      snapshotRedacted: true,
     },
   };
 }

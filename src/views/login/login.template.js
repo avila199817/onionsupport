@@ -24,6 +24,7 @@
    - Sin /403.
    - Sin /404.
    - Sin 2FA/MFA/OTP.
+   - Sin opción "Recordarme" en el template.
 ========================================================= */
 
 import {
@@ -40,7 +41,7 @@ import {
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
 
-export const TEMPLATE_VERSION = "login.template.v8";
+export const TEMPLATE_VERSION = "login.template.v9";
 
 const DEFAULT_APP_NAME = "Onion Support";
 
@@ -407,18 +408,6 @@ function normalizeIdentifier(value = "") {
     .slice(0, MAX_IDENTIFIER_LENGTH);
 }
 
-function bool(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value === 1;
-
-  const clean = String(value ?? "").trim().toLowerCase();
-
-  if (["1", "true", "yes", "si", "sí", "on"].includes(clean)) return true;
-  if (["0", "false", "no", "off"].includes(clean)) return false;
-
-  return Boolean(fallback);
-}
-
 /* =========================================================
    PASSWORD FIELD
 ========================================================= */
@@ -485,7 +474,6 @@ export function getLoginTemplate(options = {}) {
   const passwordLabel = text(options.passwordLabel, "Contraseña");
   const passwordPlaceholder = text(options.passwordPlaceholder, "Contraseña");
 
-  const rememberLabel = text(options.rememberLabel, "Recordarme");
   const submitLabel = text(options.submitLabel, "Entrar");
 
   const passwordRequestLabel = text(
@@ -497,8 +485,6 @@ export function getLoginTemplate(options = {}) {
     options.passwordRequestHref || options.forgotPasswordHref,
     DEFAULT_PASSWORD_REQUEST_HREF
   );
-
-  const rememberChecked = bool(options.remember, false);
 
   return `
     <section
@@ -619,25 +605,7 @@ export function getLoginTemplate(options = {}) {
               hidden
             ></p>
 
-            <div class="login-options">
-              <label
-                class="login-check"
-                for="loginRemember"
-              >
-                <input
-                  id="loginRemember"
-                  name="remember"
-                  type="checkbox"
-                  value="1"
-                  data-login-remember="true"
-                  ${rememberChecked ? "checked" : ""}
-                >
-
-                <span data-i18n="login.rememberLabel">
-                  ${escapeHtml(rememberLabel)}
-                </span>
-              </label>
-
+            <div class="login-options login-options--reset-only">
               <a
                 class="login-reset-link"
                 href="${escapeAttr(passwordRequestHref)}"
@@ -706,6 +674,8 @@ export function getLoginTemplateSnapshot() {
 
       publicAuthLogoCanonical: true,
       noLegacyThemeLogoSwitch: true,
+
+      noRememberOption: true,
 
       noAuth: true,
       noHttp: true,

@@ -17,6 +17,7 @@
    - Sin avatar.
    - Sin Store propio.
    - Sin DOM propio: delega en dom.js.
+   - Evitar escrituras repetidas en AppCore.state si el patch no cambia.
 ========================================================= */
 
 import {
@@ -26,7 +27,7 @@ import {
   setSidebarOpenState,
 } from "./dom.js";
 
-export const SIDEBAR_STATE_VERSION = "sidebar.state.v6";
+export const SIDEBAR_STATE_VERSION = "sidebar.state.v7.idempotent-core-sync";
 
 const SOURCE = "sidebar.state";
 const DEFAULT_OPEN = true;
@@ -42,6 +43,8 @@ const runtime = {
   logoutInFlight: false,
   root: null,
 };
+
+const corePatchSignatures = new WeakMap();
 
 /* =========================================================
    BASICS
@@ -97,6 +100,14 @@ function rootSnapshot(root = null) {
   };
 }
 
+function stablePatchSignature(patch = {}) {
+  try {
+    return JSON.stringify(patch);
+  } catch {
+    return "";
+  }
+}
+
 /* =========================================================
    CORE STATE SYNC
 ========================================================= */
@@ -134,11 +145,41 @@ function createCorePatch(root = runtime.root) {
   };
 }
 
+function markCorePatchSynced(AppCore = null, signature = "") {
+  if (!isObject(AppCore) || !signature) return false;
+
+  try {
+    corePatchSignatures.set(AppCore, signature);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function corePatchAlreadySynced(AppCore = null, signature = "") {
+  if (!isObject(AppCore) || !signature) return false;
+
+  try {
+    return corePatchSignatures.get(AppCore) === signature;
+  } catch {
+    return false;
+  }
+}
+
 function syncCoreState(AppCore = null) {
   if (!isObject(AppCore)) return false;
 
   const root = resolveRoot();
   const patch = createCorePatch(root);
+  const signature = stablePatchSignature(patch);
+
+  /*
+    Evita AppCore.setState/Object.assign repetidos cuando no hay cambios.
+    Esto reduce ruido y trabajo durante syncs frecuentes del sidebar.
+  */
+  if (signature && corePatchAlreadySynced(AppCore, signature)) {
+    return true;
+  }
 
   try {
     if (isFunction(AppCore.setState)) {
@@ -148,6 +189,7 @@ function syncCoreState(AppCore = null) {
         emit: false,
       });
 
+      markCorePatchSynced(AppCore, signature);
       return true;
     }
   } catch {
@@ -160,6 +202,7 @@ function syncCoreState(AppCore = null) {
 
   try {
     Object.assign(state, patch);
+    markCorePatchSynced(AppCore, signature);
     return true;
   } catch {
     return false;
@@ -390,6 +433,7 @@ export function getSidebarState() {
       noOwnDom: true,
 
       syncsCoreStateSilently: true,
+      skipsDuplicateCoreStatePatch: true,
       noSensitiveData: true,
     },
   };

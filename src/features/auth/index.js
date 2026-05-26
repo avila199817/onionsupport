@@ -15,6 +15,7 @@
    - Sin Toast.
    - Sin fetch propio.
    - Sin storage paralelo.
+   - Sin opción "Recordarme".
    - Sin rutas inventadas.
    - Sin /home.
    - Sin 2FA/MFA/OTP.
@@ -42,7 +43,7 @@ import * as GuardsApi from "./guards.js";
 import * as ActivationApi from "./activation.js";
 import * as PasswordResetApi from "./password-reset.js";
 
-export const AUTH_MODULE_VERSION = "auth.facade.v9";
+export const AUTH_MODULE_VERSION = "auth.facade.v10";
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
 
@@ -918,6 +919,18 @@ function publicAuthResult(payload = {}) {
   };
 }
 
+function cleanLoginCredentials(credentials = {}) {
+  const output = isObject(credentials) ? { ...credentials } : {};
+
+  delete output.remember;
+  delete output.rememberMe;
+  delete output.remember_me;
+  delete output.persist;
+  delete output.persistent;
+
+  return output;
+}
+
 /* =========================================================
    STATE WRITE
 ========================================================= */
@@ -1214,14 +1227,16 @@ async function login(credentials = {}, options = {}) {
 
   Auth.session.loginPromise = (async () => {
     try {
+      const loginPayload = cleanLoginCredentials(credentials);
+
       const raw = isFunction(loginCore)
-        ? await loginCore(credentials, {
+        ? await loginCore(loginPayload, {
             ...options,
             skipNavigation: true,
             skipRedirect: true,
             noRedirect: true,
           })
-        : await httpPost(AUTH_ENDPOINTS.login, credentials, {
+        : await httpPost(AUTH_ENDPOINTS.login, loginPayload, {
             ...options,
             public: true,
             auth: false,
@@ -1296,7 +1311,6 @@ async function handleLoginFormSubmit(form, options = {}) {
     {
       identifier: data.get("identifier") || data.get("email") || data.get("username") || "",
       password: data.get("password") || "",
-      remember: ["1", "on", "true"].includes(String(data.get("remember") || "").toLowerCase()),
     },
     options
   );
@@ -1808,6 +1822,7 @@ function getAuthModuleSnapshot() {
       noToast: true,
       noFetchOwn: true,
       noStorageParallel: true,
+      noRememberOption: true,
       noRefreshTokenExposure: true,
       noHomeRoute: true,
       no2fa: true,

@@ -7,6 +7,7 @@
    - Scope cerrado en .home-view-root / [data-home-scope].
    - Layout premium, compacto, centrado y responsive.
    - Header con avatar, saludo y CTA superior para crear incidencia.
+   - Stats alineados exactamente con el grid principal.
    - Stats, grid, panels, actividad, facturas, entidades admin.
    - Tabla compacta basada en div[role=table] del template actual.
    - Modal de detalle de incidencia.
@@ -70,6 +71,8 @@
   --home-content-max: min(100%, 1380px);
   --home-content-pad-x: clamp(8px, 1vw, 18px);
   --home-gap: clamp(12px, 1.15vw, 18px);
+
+  --home-main-grid-columns: minmax(0, 1.12fr) minmax(320px, .88fr);
 
   --home-panel-bg:
     linear-gradient(180deg, rgba(255,255,255,.068), rgba(255,255,255,.032) 52%, rgba(255,255,255,.020)),
@@ -862,13 +865,13 @@
 
 
 /* =========================================================
-   STATS
+   STATS · ALINEADO CON HOME GRID
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]) .home-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
-  gap: clamp(12px, 1.1vw, 16px);
+  grid-template-columns: var(--home-main-grid-columns);
+  gap: var(--home-gap);
 
   inline-size: 100%;
   min-inline-size: 0;
@@ -1091,9 +1094,9 @@
 
 :where(.home-view-root, [data-home-scope]) .home-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.12fr) minmax(320px, .88fr);
+  grid-template-columns: var(--home-main-grid-columns);
   grid-template-areas: "activity invoices";
-  gap: clamp(12px, 1.15vw, 18px);
+  gap: var(--home-gap);
   align-items: start;
 
   min-inline-size: 0;
@@ -2199,7 +2202,7 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-hero--loading {
-  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  grid-template-columns: var(--home-main-grid-columns);
 }
 
 
@@ -2214,6 +2217,11 @@
 
   :where(.home-view-root, [data-home-scope]) .home-create-card-button {
     min-block-size: 82px;
+  }
+
+  :where(.home-view-root, [data-home-scope]) .home-stats,
+  :where(.home-view-root, [data-home-scope]) .home-hero--loading {
+    grid-template-columns: 1fr;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-grid,
@@ -2278,7 +2286,8 @@
   }
 
   :where(.home-view-root, [data-home-scope]) .home-stats,
-  :where(.home-view-root, [data-home-scope]) .home-entity-columns {
+  :where(.home-view-root, [data-home-scope]) .home-entity-columns,
+  :where(.home-view-root, [data-home-scope]) .home-hero--loading {
     grid-template-columns: 1fr;
   }
 
@@ -2363,6 +2372,11 @@
     grid-template-columns: 1fr;
   }
 
+  :where(.home-view-root, [data-home-scope]) .home-stats,
+  :where(.home-view-root, [data-home-scope]) .home-hero--loading {
+    grid-template-columns: 1fr;
+  }
+
   :where(.home-view-root, [data-home-scope]) .home-grid,
   :where(.home-view-root--admin, [data-home-admin="true"]) .home-grid {
     grid-template-columns: 1fr;
@@ -2379,7 +2393,8 @@
   }
 
   :where(.home-view-root, [data-home-scope]) .home-stats,
-  :where(.home-view-root, [data-home-scope]) .home-entity-columns {
+  :where(.home-view-root, [data-home-scope]) .home-entity-columns,
+  :where(.home-view-root, [data-home-scope]) .home-hero--loading {
     grid-template-columns: 1fr;
   }
 

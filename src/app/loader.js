@@ -12,10 +12,15 @@
    - Sin timers.
    - Sin fallback DOM.
    - Sin mutar textos.
+   - Sin Auth.
+   - Sin Router.
+   - Sin Store.
+   - Sin fetch.
+   - Sin storage.
    - Sin magia negra.
 ========================================================= */
 
-export const LOADER_VERSION = "app.loader.v5";
+export const LOADER_VERSION = "app.loader.v6";
 
 const LOADER_ID = "app-loader";
 
@@ -74,12 +79,13 @@ export function isLoaderVisible() {
   return Boolean(
     loader &&
       loader.hidden !== true &&
-      loader.getAttribute("aria-hidden") !== "true"
+      loader.getAttribute("aria-hidden") !== "true" &&
+      loader.dataset?.loaderVisible !== "false"
   );
 }
 
 /* =========================================================
-   LOADER STATE
+   LOW-LEVEL DOM WRITES
 ========================================================= */
 
 function setLoaderDataset(loader = null, key = "", value = "") {
@@ -116,6 +122,21 @@ function setLoaderClasses(loader = null, visible = false) {
   }
 }
 
+function setLoaderHidden(loader = null, hidden = true) {
+  if (!loader) return false;
+
+  try {
+    loader.hidden = Boolean(hidden);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   LOADER STATE
+========================================================= */
+
 function setLoaderVisibility(visible = false, state = "booting") {
   const loader = getLoaderElement();
 
@@ -125,9 +146,7 @@ function setLoaderVisibility(visible = false, state = "booting") {
   const status = show ? normalizeState(state) : "hidden";
   const busy = show && status === "booting";
 
-  try {
-    loader.hidden = !show;
-  } catch {
+  if (!setLoaderHidden(loader, !show)) {
     return false;
   }
 
@@ -178,6 +197,8 @@ export function getLoaderSnapshot() {
       ariaHidden: loader?.getAttribute?.("aria-hidden") || null,
       ariaBusy: loader?.getAttribute?.("aria-busy") || null,
       loaderVisible: loader?.dataset?.loaderVisible || null,
+      classVisible: loader?.classList?.contains?.("is-visible") ?? null,
+      classHidden: loader?.classList?.contains?.("is-hidden") ?? null,
     },
 
     policy: {
@@ -193,6 +214,14 @@ export function getLoaderSnapshot() {
       noTimers: true,
       noFallbackDom: true,
       noTextMutation: true,
+
+      noAuth: true,
+      noRouter: true,
+      noStore: true,
+      noFetch: true,
+      noStorage: true,
+
+      snapshotMinimal: true,
     },
   };
 }

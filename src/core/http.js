@@ -7,9 +7,11 @@
    - API real única.
    - Endpoints auth reales desde core/config.js.
    - /api/auth/me privado siempre.
+   - /api/auth/refresh público y sin Authorization.
    - Enviar Authorization cuando hay access token válido.
    - No reutilizar token runtime si AppCore ya marcó sesión sin token.
-   - Exponer helpers mínimos para que session.js detecte refresh silencioso.
+   - Exponer helpers mínimos para detectar refresh silencioso.
+   - Clasificar errores auth sin decidir logout por su cuenta.
    - Sin fetch propio.
    - Sin parser propio.
    - Sin retry propio.
@@ -23,7 +25,7 @@
    NOTA:
    - TOKEN_EXPIRED no implica logout.
    - Este archivo sólo clasifica el error.
-   - session.js decide si llama /api/auth/refresh y rehidrata sesión.
+   - La capa de sesión/auth decide si llama /api/auth/refresh.
 ========================================================= */
 
 import {
@@ -41,7 +43,7 @@ import {
   createApiClient,
 } from "./request.js";
 
-export const HTTP_VERSION = "core.http.v6";
+export const HTTP_VERSION = "core.http.v7";
 
 export const DEFAULT_API_ORIGIN = getApiBase();
 export const DEFAULT_TIMEOUT_MS = config?.api?.timeout || 30000;
@@ -50,6 +52,7 @@ let apiOrigin = normalizeOrigin(
   config?.apiBase ||
     config?.apiOrigin ||
     config?.api?.baseUrl ||
+    config?.api?.base ||
     DEFAULT_API_ORIGIN
 );
 
@@ -130,6 +133,16 @@ const SENSITIVE_QUERY_KEYS = new Set([
   "activation_token",
 ]);
 
+const ALLOWED_METHODS = new Set([
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+]);
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -174,6 +187,42 @@ function keyIsSensitive(value = "") {
   return SENSITIVE_QUERY_KEYS.has(cleanText(value, "").toLowerCase());
 }
 
+function headersFrom(input = null) {
+  const headers = {};
+
+  if (!input) return headers;
+
+  if (typeof Headers !== "undefined" && input instanceof Headers) {
+    input.forEach((value, key) => {
+      headers[key] = value;
+    });
+
+    return headers;
+  }
+
+  if (isObject(input)) {
+    return {
+      ...input,
+    };
+  }
+
+  return headers;
+}
+
+function hasHeader(headers = {}, name = "") {
+  const target = cleanText(name, "").toLowerCase();
+
+  if (!target) return false;
+
+  return Object.keys(headers || {}).some((key) => key.toLowerCase() === target);
+}
+
+function resetEngines() {
+  requestEngine = null;
+  apiEngine = null;
+  return true;
+}
+
 /* =========================================================
    ORIGIN
 ========================================================= */
@@ -212,10 +261,7 @@ export function getApiOrigin() {
 
 export function setApiOrigin(value = "") {
   apiOrigin = normalizeOrigin(value || DEFAULT_API_ORIGIN);
-
-  requestEngine = null;
-  apiEngine = null;
-
+  resetEngines();
   return apiOrigin;
 }
 
@@ -306,7 +352,7 @@ export function getAccessToken() {
 
   /*
     Si AppCore ya declaró que no hay token, no recuperamos un token runtime
-    ni un token stale que haya quedado en state por compat.
+    ni un token stale que haya quedado por compat.
   */
   if (stateExplicitlyHasNoToken(state)) {
     return "";
@@ -376,28 +422,28 @@ export function clearAuthTokens() {
 ========================================================= */
 
 function endpointToPath(endpoint = "/") {
-  const raw = cleanText(endpoint, "/");
+  const raw = cleanText(endpoint, "");
 
-  if (!raw) return "/";
-  if (raw.startsWith("//")) return "/";
-  if (/[\r\n\t\\]/.test(raw)) return "/";
+  if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
 
   try {
     if (/^https?:\/\//i.test(raw)) {
       const url = new URL(raw);
 
       if (url.origin !== apiUrlOrigin()) {
-        return "/";
+        return "";
       }
 
       return `${url.pathname || "/"}${url.search || ""}`;
     }
   } catch {
-    return "/";
+    return "";
   }
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    return "/";
+    return "";
   }
 
   const path = raw.startsWith("/") ? raw : `/${raw}`;
@@ -406,11 +452,15 @@ function endpointToPath(endpoint = "/") {
 }
 
 function endpointCleanPath(endpoint = "/") {
-  return endpointToPath(endpoint).split("?")[0] || "/";
+  const clean = endpointToPath(endpoint);
+
+  if (!clean) return "";
+
+  return clean.split("?")[0] || "/";
 }
 
 function appendQuery(url = "", query = null) {
-  if (!isObject(query)) return url;
+  if (!url || !isObject(query)) return url;
 
   const parsed = new URL(url, apiOrigin);
 
@@ -425,6 +475,9 @@ function appendQuery(url = "", query = null) {
 
 export function buildApiUrl(endpoint = "/", options = {}) {
   const path = endpointToPath(endpoint);
+
+  if (!path) return "";
+
   return appendQuery(`${apiOrigin}${path}`, options.query || options.params);
 }
 
@@ -436,13 +489,10 @@ function endpointIsMe(endpoint = "") {
   return endpointCleanPath(endpoint) === AUTH_ENDPOINTS.me;
 }
 
-function endpointIsRefresh(endpoint = "") {
-  return endpointCleanPath(endpoint) === AUTH_ENDPOINTS.refresh;
-}
-
 function endpointIsPublic(endpoint = "") {
   const clean = endpointCleanPath(endpoint);
 
+  if (!clean) return false;
   if (clean === AUTH_ENDPOINTS.me) return false;
 
   return isPublicApiPath(clean);
@@ -501,10 +551,10 @@ export class HttpError extends Error {
     super(redact(message));
 
     this.name = "HttpError";
-    this.status = options.status || 0;
+    this.status = Number(options.status || options.statusCode || 0) || 0;
     this.statusCode = this.status;
-    this.code = options.code || "HTTP_ERROR";
-    this.method = options.method || "";
+    this.code = cleanText(options.code, "HTTP_ERROR");
+    this.method = cleanText(options.method, "");
     this.url = redact(options.url || "");
     this.data = sanitizeErrorData(options.data || null);
   }
@@ -524,15 +574,21 @@ function getErrorPayload(error = null) {
 
 export function getHttpErrorCode(error = null) {
   const payload = getErrorPayload(error);
+  const auth = isObject(payload.auth) ? payload.auth : {};
 
   return cleanText(
     first(
+      auth.code,
+      auth.error,
+
+      payload.code,
+      payload.errorCode,
+      payload.error_code,
+
       error?.code,
       error?.error,
-      payload.code,
+
       payload.error,
-      payload.auth?.code,
-      payload.auth?.error,
       ""
     ),
     ""
@@ -540,16 +596,23 @@ export function getHttpErrorCode(error = null) {
 }
 
 export function getHttpStatus(error = null) {
+  const payload = getErrorPayload(error);
+
   return Number(
     error?.status ||
       error?.statusCode ||
       error?.response?.status ||
-      getErrorPayload(error).statusCode ||
+      payload.status ||
+      payload.statusCode ||
       0
   ) || 0;
 }
 
 export function isRefreshableAuthError(error = null) {
+  if (error?.canRefresh === true || error?.refreshRequired === true) {
+    return true;
+  }
+
   const payload = getErrorPayload(error);
   const auth = isObject(payload.auth) ? payload.auth : {};
   const code = getHttpErrorCode(error);
@@ -566,6 +629,10 @@ export function isRefreshableAuthError(error = null) {
 }
 
 export function shouldClearSessionForAuthError(error = null) {
+  if (error?.shouldLogout === true || error?.clearClientSession === true) {
+    return true;
+  }
+
   const payload = getErrorPayload(error);
   const auth = isObject(payload.auth) ? payload.auth : {};
   const code = getHttpErrorCode(error);
@@ -596,6 +663,8 @@ export function normalizeHttpError(error = null) {
           error?.message,
           payload.message,
           payload.error_description,
+          payload.detail,
+          payload.reason,
           code,
           "HTTP_ERROR"
         ),
@@ -611,6 +680,26 @@ export function normalizeHttpError(error = null) {
     shouldLogout,
     clearClientSession: shouldLogout,
   };
+}
+
+function recordHttpError(error = null, url = "", method = "") {
+  const normalized = normalizeHttpError(error);
+
+  stats.error += 1;
+  stats.lastAuthCode = normalized.code || "";
+  stats.lastRefreshable = Boolean(normalized.canRefresh);
+  stats.lastError = {
+    name: normalized.name,
+    message: redact(normalized.message || String(error)),
+    status: normalized.status,
+    code: normalized.code,
+    url: redact(url),
+    method: cleanText(method, ""),
+    canRefresh: normalized.canRefresh,
+    shouldLogout: normalized.shouldLogout,
+  };
+
+  return normalized;
 }
 
 /* =========================================================
@@ -634,9 +723,7 @@ function ensureEngines() {
   }
 
   requestEngine = createRequest({
-    state: getState(),
-    events: appCore?.events || null,
-    setError: appCore?.setError || null,
+    state: () => getState(),
   });
 
   apiEngine = createApiClient(requestEngine);
@@ -679,19 +766,18 @@ function normalizeRequestArgs(firstArg = "/", second = {}, third = {}) {
 }
 
 function requestMethod(options = {}) {
-  return cleanText(options.method, "GET").toUpperCase();
+  const method = cleanText(options.method, "GET").toUpperCase();
+
+  return ALLOWED_METHODS.has(method) ? method : "GET";
 }
 
 function buildAuthHeaders(options = {}, token = "") {
-  const headers = {
-    ...(isObject(options.headers) ? options.headers : {}),
-  };
-
+  const headers = headersFrom(options.headers);
   const value = cleanToken(token);
 
   if (!value) return headers;
 
-  if (!headers.Authorization && !headers.authorization) {
+  if (!hasHeader(headers, "authorization")) {
     headers.Authorization = `Bearer ${value}`;
   }
 
@@ -704,20 +790,47 @@ function buildAuthHeaders(options = {}, token = "") {
 
 export async function request(firstArg = "/", second = {}, third = {}) {
   const parsed = normalizeRequestArgs(firstArg, second, third);
-
-  const endpoint = endpointToPath(parsed.endpoint);
   const options = isObject(parsed.options) ? parsed.options : {};
   const method = requestMethod(options);
+  const endpoint = endpointToPath(parsed.endpoint);
+
+  stats.total += 1;
+  stats.lastMethod = method;
+
+  if (!endpoint) {
+    const error = new HttpError("Endpoint no permitido.", {
+      code: "ENDPOINT_NOT_ALLOWED",
+      method,
+      url: parsed.endpoint || "",
+    });
+
+    stats.lastUrl = redact(parsed.endpoint || "");
+    recordHttpError(error, parsed.endpoint || "", method);
+
+    throw error;
+  }
 
   const url = buildApiUrl(endpoint, options);
+
+  if (!url) {
+    const error = new HttpError("URL de API no permitida.", {
+      code: "API_URL_NOT_ALLOWED",
+      method,
+      url: parsed.endpoint || endpoint,
+    });
+
+    stats.lastUrl = redact(parsed.endpoint || endpoint);
+    recordHttpError(error, parsed.endpoint || endpoint, method);
+
+    throw error;
+  }
+
   const auth = shouldUseAuth(endpoint, options);
   const token = auth ? cleanToken(options.token || getAccessToken()) : "";
 
   const headers = auth
     ? buildAuthHeaders(options, token)
-    : isObject(options.headers)
-      ? options.headers
-      : undefined;
+    : options.headers;
 
   const finalOptions = {
     ...options,
@@ -736,9 +849,7 @@ export async function request(firstArg = "/", second = {}, third = {}) {
     headers,
   };
 
-  stats.total += 1;
   stats.lastUrl = redact(url);
-  stats.lastMethod = method;
 
   try {
     const result = await ensureEngines().apiEngine.request(url, finalOptions);
@@ -747,22 +858,7 @@ export async function request(firstArg = "/", second = {}, third = {}) {
 
     return result;
   } catch (error) {
-    const normalized = normalizeHttpError(error);
-
-    stats.error += 1;
-    stats.lastAuthCode = normalized.code || "";
-    stats.lastRefreshable = Boolean(normalized.canRefresh);
-    stats.lastError = {
-      name: normalized.name,
-      message: redact(normalized.message || String(error)),
-      status: normalized.status,
-      code: normalized.code,
-      url: redact(url),
-      method,
-      canRefresh: normalized.canRefresh,
-      shouldLogout: normalized.shouldLogout,
-    };
-
+    recordHttpError(error, url, method);
     throw error;
   }
 }
@@ -913,6 +1009,16 @@ export function activate(body = {}, options = {}) {
   });
 }
 
+export function activateAccount(body = {}, options = {}) {
+  return post(AUTH_ENDPOINTS.activateAccount || AUTH_ENDPOINTS.activate, body, {
+    ...options,
+    auth: false,
+    public: true,
+    skipAuth: true,
+    noAuthHeader: true,
+  });
+}
+
 export function requestPasswordReset(body = {}, options = {}) {
   return post(AUTH_ENDPOINTS.requestPasswordReset, body, {
     ...options,
@@ -942,17 +1048,18 @@ export function installHttp(AppCore = null, options = {}) {
 
   if (options.apiOrigin || options.apiBase || options.baseUrl) {
     setApiOrigin(options.apiOrigin || options.apiBase || options.baseUrl);
+  } else {
+    resetEngines();
   }
-
-  requestEngine = null;
-  apiEngine = null;
 
   if (isObject(appCore)) {
     if (isObject(appCore.services)) {
       appCore.services.http = Http;
     }
 
-    appCore.modules?.register?.("http", Http);
+    appCore.modules?.register?.("http", Http, {
+      overwrite: true,
+    });
   }
 
   return Http;
@@ -1013,7 +1120,7 @@ export function getHttpSnapshot() {
       noAuthDiscovery: true,
 
       authErrorClassificationOnly: true,
-      sessionJsOwnsSilentRefresh: true,
+      sessionOwnsSilentRefresh: true,
 
       noRouter: true,
       noToast: true,
@@ -1022,6 +1129,7 @@ export function getHttpSnapshot() {
       mePrivate: true,
       refreshPublicNoAuthHeader: true,
       blocksExternalEndpoints: true,
+      blocksInvalidEndpoints: true,
 
       accessTokenRuntimeOnlyAsFallback: true,
       blocksStaleRuntimeTokenWhenStateCleared: true,
@@ -1059,6 +1167,7 @@ export const Http = {
   get,
   head,
   options: optionsRequest,
+  optionsRequest,
   post,
   put,
   patch,
@@ -1077,6 +1186,7 @@ export const Http = {
   logout,
 
   activate,
+  activateAccount,
   requestPasswordReset,
   confirmPasswordReset,
 

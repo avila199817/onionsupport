@@ -7,16 +7,20 @@
    - Pintar error de boot simple.
    - Marcar estado fatal.
    - Ocultar loader.
+   - Ocultar chrome mínimo en fatal.
    - Sin imports.
-   - Sin eventos.
+   - Sin eventos de app.
    - Sin Toast.
    - Sin Auth.
    - Sin Router.
    - Sin telemetry.
    - Sin debug global.
+   - Sin fetch.
+   - Sin storage.
+   - Sin lógica de dominio.
 ========================================================= */
 
-export const APP_ERRORS_VERSION = "app.errors.v3";
+export const APP_ERRORS_VERSION = "app.errors.v4";
 
 let lastError = null;
 
@@ -26,10 +30,6 @@ let lastError = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function cleanText(value = "", fallback = "") {
@@ -139,7 +139,8 @@ export function redactTokenInText(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
@@ -159,6 +160,7 @@ export function resolveErrorMessage(
   return redactTokenInText(
     error.message ||
       error.reason ||
+      error.detail ||
       fallback
   );
 }
@@ -166,6 +168,7 @@ export function resolveErrorMessage(
 function normalizeErrorCode(error = null) {
   return (
     error?.code ||
+    error?.error ||
     error?.status ||
     error?.statusCode ||
     error?.response?.status ||
@@ -232,7 +235,9 @@ function markFatalState() {
 
     addClasses(root, ["app-fatal"]);
 
+    setDataset(root, "mainState", "fatal");
     setDataset(root, "appState", "fatal");
+
     setDataset(root, "appBooted", "false");
     setDataset(root, "appBooting", "false");
     setDataset(root, "appLoading", "false");
@@ -280,6 +285,7 @@ function hideChromeForFatal() {
   for (const node of nodes) {
     setHidden(node, true);
     setDataset(node, "chrome", "hidden");
+    setDataset(node, "routeMode", "fatal");
   }
 
   return true;
@@ -296,7 +302,7 @@ function hideLoaderForFatal() {
   addClasses(loader, ["is-hidden"]);
 
   setDataset(loader, "loaderVisible", "false");
-  setDataset(loader, "loaderState", "hidden");
+  setDataset(loader, "loaderState", "fatal");
 
   setAttr(loader, "aria-hidden", "true");
   setAttr(loader, "aria-busy", "false");
@@ -308,6 +314,7 @@ function createErrorView() {
   const section = document.createElement("section");
   section.className = "boot-error-view";
   section.setAttribute("role", "alert");
+  section.setAttribute("aria-live", "assertive");
 
   const title = document.createElement("h1");
   title.textContent = "Error de arranque";
@@ -352,6 +359,7 @@ export function renderBootError({ error = null } = {}) {
   if (!root) return false;
 
   try {
+    setHidden(root, false);
     setAttr(root, "aria-busy", "false");
     setAttr(root, "aria-hidden", "false");
     setDataset(root, "routeMode", "fatal");
@@ -391,12 +399,15 @@ export function getErrorStateSnapshot() {
       bootFatalFallback: true,
 
       noImports: true,
-      noEvents: true,
+      noAppEvents: true,
       noToast: true,
       noAuth: true,
       noRouter: true,
       noTelemetry: true,
       noGlobalDebug: true,
+      noFetch: true,
+      noStorage: true,
+      noDomainLogic: true,
 
       redactedSnapshot: true,
     },

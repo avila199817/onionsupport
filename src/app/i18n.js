@@ -13,13 +13,14 @@
    - Sin fetch.
    - Sin rerender propio.
    - Sin innerHTML.
+   - Idioma base: es.
 ========================================================= */
 
 import {
   UI_CONSTANTS,
 } from "./constants.js";
 
-export const I18N_VERSION = "app.i18n.v3";
+export const I18N_VERSION = "app.i18n.v4";
 
 const DEFAULT_SUPPORTED_LANGS = Object.freeze(["es", "ca", "en"]);
 const BASE_FALLBACK_LANG = "es";
@@ -29,7 +30,9 @@ const SUPPORTED_LANGS = Object.freeze(
 );
 
 const FALLBACK_LANG = normalizeLang(
-  UI_CONSTANTS?.fallbackLang || UI_CONSTANTS?.defaultLang || BASE_FALLBACK_LANG,
+  UI_CONSTANTS?.fallbackLang ||
+    UI_CONSTANTS?.defaultLang ||
+    BASE_FALLBACK_LANG,
   BASE_FALLBACK_LANG
 );
 
@@ -74,7 +77,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
@@ -113,7 +117,7 @@ function normalizeSupportedLangs(values = []) {
   return langs.length ? langs : [...DEFAULT_SUPPORTED_LANGS];
 }
 
-function normalizeLang(value = "", fallback = FALLBACK_LANG || BASE_FALLBACK_LANG) {
+function normalizeLang(value = "", fallback = BASE_FALLBACK_LANG) {
   const raw = normalizeLangToken(value);
   const cleanFallback = normalizeLangToken(fallback) || BASE_FALLBACK_LANG;
   const short = raw.split("-")[0];
@@ -157,12 +161,13 @@ function getDocumentLang() {
   return normalizeLang(
     document.documentElement?.dataset?.locale ||
       document.documentElement?.lang ||
-      FALLBACK_LANG
+      FALLBACK_LANG,
+    FALLBACK_LANG
   );
 }
 
 function setDocumentLang(lang = FALLBACK_LANG) {
-  const clean = normalizeLang(lang);
+  const clean = normalizeLang(lang, FALLBACK_LANG);
 
   if (!isBrowser()) return clean;
 
@@ -194,29 +199,36 @@ function getCoreLang(AppCore = null) {
 }
 
 function setCoreLang(AppCore = null, lang = FALLBACK_LANG) {
-  const clean = normalizeLang(lang);
+  const clean = normalizeLang(lang, FALLBACK_LANG);
+  const patch = {
+    lang: clean,
+    language: clean,
+    locale: clean,
+  };
 
-  if (AppCore?.state && typeof AppCore.state === "object") {
-    AppCore.state.lang = clean;
-    AppCore.state.language = clean;
-    AppCore.state.locale = clean;
-  }
-
+  /*
+    Vía preferente: AppCore.setState().
+    Mutación directa sólo como fallback de compat.
+  */
   if (isFunction(AppCore?.setState)) {
     safeCall(
       AppCore.setState,
       AppCore,
-      {
-        lang: clean,
-        language: clean,
-        locale: clean,
-      },
+      patch,
       {
         source: "app.i18n",
         silent: true,
         emit: false,
       }
     );
+
+    return clean;
+  }
+
+  if (AppCore?.state && typeof AppCore.state === "object") {
+    AppCore.state.lang = clean;
+    AppCore.state.language = clean;
+    AppCore.state.locale = clean;
   }
 
   return clean;
@@ -239,7 +251,7 @@ function getI18nLang(I18n = null) {
 }
 
 function setI18nLang(I18n = null, lang = FALLBACK_LANG, options = {}) {
-  const clean = normalizeLang(lang);
+  const clean = normalizeLang(lang, FALLBACK_LANG);
 
   if (!I18n || I18n === api) return clean;
 
@@ -321,6 +333,7 @@ export async function initI18n(options = {}) {
   const payload = isObject(options) ? options : {};
   const I18n = payload.I18n || null;
   const AppCore = payload.AppCore || payload.core || null;
+
   const lang = applyLang(payload);
 
   if (I18n && I18n !== api && isFunction(I18n.bindCore)) {
@@ -353,7 +366,11 @@ export function changeLanguage(options = {}, second = "") {
       }
     : {
         ...(isObject(options) ? options : {}),
-        lang: options.lang || options.locale || options.language || second,
+        lang:
+          options.lang ||
+          options.locale ||
+          options.language ||
+          second,
       };
 
   return applyLang(payload);
@@ -415,6 +432,10 @@ export function getI18nSnapshot(options = {}) {
       bridgeOnly: true,
       noOwnDictionaries: true,
       doesNotDuplicateSrcI18n: true,
+
+      setStatePreferred: true,
+      directCoreMutationOnlyAsFallback: true,
+
       noStorage: true,
       noEvents: true,
       noRouter: true,
@@ -422,6 +443,7 @@ export function getI18nSnapshot(options = {}) {
       noFetch: true,
       noOwnRerender: true,
       noInnerHTML: true,
+
       baseFallbackEs: true,
       redactedSnapshot: true,
     },

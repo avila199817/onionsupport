@@ -14,10 +14,13 @@
    - Sin eventos.
    - Sin rutas.
    - Sin repair automático.
-   - Sin debug.
+   - Sin debug global.
+   - Sin fetch.
+   - Sin storage.
+   - Sin lógica de dominio.
 ========================================================= */
 
-export const UI_VERSION = "app.ui.v4";
+export const UI_VERSION = "app.ui.v5";
 
 let initialized = false;
 let bridged = false;
@@ -50,7 +53,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function safeCall(fn = null, context = null, ...args) {
@@ -92,6 +96,18 @@ const TEXT_OPTION_KEYS = new Set([
   "details",
 ]);
 
+function getModule(AppCore = null, name = "") {
+  try {
+    if (isFunction(AppCore?.modules?.get)) {
+      return AppCore.modules.get(name);
+    }
+  } catch {
+    // noop
+  }
+
+  return null;
+}
+
 function getToast(AppCore = null, Toast = null) {
   return (
     Toast ||
@@ -99,6 +115,8 @@ function getToast(AppCore = null, Toast = null) {
     AppCore?.Toast ||
     AppCore?.ui?.toast ||
     AppCore?.ui?.Toast ||
+    getModule(AppCore, "toast") ||
+    getModule(AppCore, "Toast") ||
     null
   );
 }
@@ -264,7 +282,8 @@ export function bindToastBridge({
 
   /*
     No pisar una implementación existente.
-    Si AppCore.showToast ya existe, este módulo queda como compat pasiva.
+    En el Core final AppCore.showToast ya existe y puede resolver Toast
+    desde el registry de módulos; este archivo queda como compat pasiva.
   */
   if (isFunction(AppCore.showToast)) {
     initialized = true;
@@ -327,6 +346,7 @@ export function getUISystemsSnapshot({
     policy: {
       toastBridgeOnly: true,
       idempotentBridge: true,
+      passiveWhenCoreShowToastExists: true,
       doesNotOverrideExistingShowToast: true,
       redactsToastText: true,
 
@@ -338,7 +358,10 @@ export function getUISystemsSnapshot({
       noEvents: true,
       noRoutes: true,
       noRepair: true,
-      noDebug: true,
+      noDebugGlobal: true,
+      noFetch: true,
+      noStorage: true,
+      noDomainLogic: true,
     },
   };
 }

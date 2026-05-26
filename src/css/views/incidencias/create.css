@@ -1891,3 +1891,849 @@ body.modal-open:has(.inc-create-overlay) {
     transform: rotate(360deg);
   }
 }
+
+/* =========================================================
+   INCIDENCIAS CREATE MODAL · EXTREME POLISH 15/10
+   Archivo: /src/css/views/incidencias/create.css
+
+   Objetivo:
+   - Refuerzo premium sin tocar JS.
+   - Scroll único real en .inc-create-panel.
+   - Header sticky limpio.
+   - Footer/acciones sticky para UX productiva.
+   - Mejor legibilidad, foco, drag/drop, errores y busy states.
+   - Fallbacks para backdrop-filter/color-mix.
+   - Forced-colors, contrast y mobile bottom-sheet.
+   - CSP clean.
+========================================================= */
+
+
+/* =========================================================
+   ROOT HARDENING
+========================================================= */
+
+#incidencias-create-modal-root {
+  isolation: isolate;
+  contain: layout style;
+}
+
+#incidencias-create-modal-root:not(:empty) {
+  pointer-events: auto;
+}
+
+#incidencias-create-modal-root *,
+#incidencias-create-modal-root *::before,
+#incidencias-create-modal-root *::after {
+  min-inline-size: 0;
+}
+
+#incidencias-create-modal-root button,
+#incidencias-create-modal-root input,
+#incidencias-create-modal-root textarea,
+#incidencias-create-modal-root select {
+  font: inherit;
+}
+
+#incidencias-create-modal-root svg {
+  flex: 0 0 auto;
+}
+
+#incidencias-create-modal-root [hidden] {
+  display: none !important;
+}
+
+
+/* =========================================================
+   BODY LOCK SAFETY
+========================================================= */
+
+body.incidencias-create-open,
+body.incidencias-modal-open,
+body.modal-open:has(#incidencias-create-modal-root:not(:empty)),
+body.modal-open:has(.inc-create-overlay) {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+
+/* =========================================================
+   OVERLAY EXTREME
+========================================================= */
+
+.inc-create-overlay {
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+.inc-create-overlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #fff 4%, transparent),
+      transparent 28%,
+      color-mix(in srgb, #000 12%, transparent)
+    );
+
+  opacity: .82;
+}
+
+
+/* =========================================================
+   PANEL EXTREME
+========================================================= */
+
+.inc-create-panel {
+  scrollbar-gutter: stable;
+  contain: layout paint;
+  will-change: transform, opacity;
+  background-clip: padding-box;
+}
+
+.inc-create-panel:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--ic-panel-shadow),
+    var(--focus-ring);
+}
+
+.inc-create-panel.is-submitting {
+  pointer-events: auto;
+}
+
+.inc-create-panel.is-submitting .inc-create-form {
+  pointer-events: none;
+  user-select: none;
+}
+
+
+/* =========================================================
+   HEADER STICKY PRODUCT MODE
+========================================================= */
+
+.inc-create-header {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 20;
+
+  backdrop-filter: blur(16px) saturate(1.08);
+  -webkit-backdrop-filter: blur(16px) saturate(1.08);
+
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--text-strong) 5%, transparent),
+    0 12px 30px color-mix(in srgb, #000 12%, transparent);
+}
+
+.inc-create-header::before {
+  content: "";
+  position: absolute;
+  inset-inline: clamp(18px, 2vw, var(--space-xl));
+  inset-block-end: -1px;
+  block-size: 1px;
+
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--accent) 36%, transparent),
+      color-mix(in srgb, var(--info) 22%, transparent),
+      transparent
+    );
+
+  pointer-events: none;
+}
+
+.inc-create-header-copy h2 {
+  text-shadow:
+    0 1px 0 color-mix(in srgb, #fff 5%, transparent),
+    0 12px 34px color-mix(in srgb, #000 14%, transparent);
+}
+
+.inc-create-header-copy p {
+  text-wrap: pretty;
+}
+
+
+/* =========================================================
+   CLOSE BUTTON HARDENING
+========================================================= */
+
+.inc-create-close {
+  position: relative;
+  overflow: hidden;
+}
+
+.inc-create-close::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+
+  border-radius: inherit;
+
+  background:
+    radial-gradient(
+      circle at 50% 0%,
+      color-mix(in srgb, #fff 16%, transparent),
+      transparent 54%
+    );
+
+  opacity: .6;
+  pointer-events: none;
+}
+
+.inc-create-close:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--focus-ring),
+    0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent),
+    var(--ic-control-shadow-hover) !important;
+}
+
+
+/* =========================================================
+   FORM STRUCTURE POLISH
+========================================================= */
+
+.inc-create-form {
+  align-items: stretch;
+}
+
+.inc-create-grid--2 > * {
+  min-inline-size: 0;
+}
+
+.inc-create-field {
+  scroll-margin-block-start: calc(var(--topbar-height, 72px) + 24px);
+}
+
+.inc-create-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inc-create-label::after {
+  content: "";
+  inline-size: 4px;
+  block-size: 4px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, currentColor 35%, transparent);
+  opacity: .5;
+}
+
+
+/* =========================================================
+   INPUTS · PREMIUM FEEL
+========================================================= */
+
+.inc-create-input,
+.inc-create-textarea,
+.inc-create-select {
+  caret-color: var(--accent);
+}
+
+.inc-create-input:focus,
+.inc-create-textarea:focus,
+.inc-create-select:focus {
+  transform: translateY(-1px);
+}
+
+.inc-create-input.is-error:focus,
+.inc-create-textarea.is-error:focus,
+.inc-create-select.is-error:focus {
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--error) 14%, transparent),
+    var(--input-shadow-focus, var(--ic-mini-shadow));
+}
+
+.inc-create-textarea {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.inc-create-textarea::-webkit-scrollbar {
+  inline-size: var(--scrollbar-size, 10px);
+}
+
+.inc-create-textarea::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.inc-create-select-wrap:focus-within .inc-create-select-chevron {
+  color: var(--accent-active, var(--accent));
+}
+
+
+/* =========================================================
+   ERROR TEXT
+========================================================= */
+
+.inc-create-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  min-block-size: 18px;
+}
+
+.inc-create-error::before {
+  content: "";
+
+  inline-size: 6px;
+  block-size: 6px;
+
+  border-radius: var(--radius-pill);
+
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 13%, transparent);
+}
+
+
+/* =========================================================
+   ALERTS EXTREME
+========================================================= */
+
+.inc-create-alert {
+  scroll-margin-block-start: calc(var(--topbar-height, 72px) + 24px);
+}
+
+.inc-create-alert.is-success::after {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.inc-create-alert.is-error::after {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+
+.inc-create-alert-copy strong,
+.inc-create-alert-copy span {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+
+/* =========================================================
+   TARGET USER SUMMARY / SELECTED USER
+========================================================= */
+
+.inc-create-block--target {
+  border-color:
+    color-mix(in srgb, var(--accent) 34%, var(--card-border));
+  background:
+    radial-gradient(
+      circle at 0% 0%,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 42%
+    ),
+    var(--glass-shine),
+    var(--ic-card-bg);
+}
+
+.inc-create-block--target .inc-create-block-head strong {
+  color: color-mix(in srgb, var(--text-strong) 86%, var(--accent) 14%);
+}
+
+.inc-create-block--target .inc-create-block-head span {
+  overflow-wrap: anywhere;
+}
+
+.inc-create-target-user-card {
+  scroll-margin-block-start: calc(var(--topbar-height, 72px) + 24px);
+}
+
+.inc-create-target-user-card:focus-within {
+  box-shadow:
+    var(--focus-ring),
+    0 0 0 5px color-mix(in srgb, var(--accent) 9%, transparent),
+    var(--ic-mini-shadow);
+}
+
+
+/* =========================================================
+   USER SEARCH EXTREME SAFETY
+========================================================= */
+
+.inc-create-user-search-slot {
+  scroll-margin-block-start: calc(var(--topbar-height, 72px) + 24px);
+}
+
+.inc-create-search-results {
+  max-block-size: min(360px, 42dvh);
+  overflow: auto;
+  padding-inline-end: 2px;
+
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.inc-create-search-results::-webkit-scrollbar {
+  inline-size: var(--scrollbar-size, 10px);
+}
+
+.inc-create-search-results::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.inc-create-search-item:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--focus-ring),
+    0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent),
+    var(--ic-control-shadow-hover) !important;
+}
+
+.inc-create-search-item[aria-selected="true"],
+.inc-create-search-item.is-selected {
+  border-color: var(--accent-border-strong);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 44%),
+    var(--accent-soft);
+}
+
+
+/* =========================================================
+   AVATAR FALLBACK HARDENING
+========================================================= */
+
+.inc-create-search-avatar[data-fallback="true"] img,
+.inc-create-search-avatar:not(.has-image) img,
+.inc-create-search-avatar img[src=""],
+.inc-create-search-avatar img:not([src]) {
+  display: none !important;
+}
+
+.inc-create-search-avatar[data-fallback="true"] .inc-create-search-avatar-fallback,
+.inc-create-search-avatar:not(.has-image) .inc-create-search-avatar-fallback,
+.inc-create-search-avatar img[src=""] + .inc-create-search-avatar-fallback,
+.inc-create-search-avatar img:not([src]) + .inc-create-search-avatar-fallback {
+  display: grid;
+}
+
+.inc-create-search-avatar[data-avatar-tone="0"] {
+  background: linear-gradient(135deg, #475569, #334155);
+}
+
+.inc-create-search-avatar[data-avatar-tone="1"] {
+  background: linear-gradient(135deg, #3b82f6, #334155);
+}
+
+.inc-create-search-avatar[data-avatar-tone="2"] {
+  background: linear-gradient(135deg, #64748b, #27272a);
+}
+
+.inc-create-search-avatar[data-avatar-tone="3"] {
+  background: linear-gradient(135deg, #15803d, #334155);
+}
+
+.inc-create-search-avatar[data-avatar-tone="4"] {
+  background: linear-gradient(135deg, #6366f1, #334155);
+}
+
+.inc-create-search-avatar[data-avatar-tone="5"] {
+  background: linear-gradient(135deg, #a16207, #334155);
+}
+
+.inc-create-search-avatar[data-avatar-tone="6"] {
+  background: linear-gradient(135deg, #0f766e, #334155);
+}
+
+.inc-create-search-avatar[data-avatar-tone="7"] {
+  background: linear-gradient(135deg, #be123c, #334155);
+}
+
+.inc-create-search-avatar[data-avatar-tone="8"] {
+  background: linear-gradient(135deg, #4b5563, #111827);
+}
+
+.inc-create-search-avatar[data-avatar-tone="9"] {
+  background: linear-gradient(135deg, #4338ca, #334155);
+}
+
+
+/* =========================================================
+   CARDS / BLOCKS EXTREME
+========================================================= */
+
+.inc-create-block,
+.inc-create-files-card {
+  transform: translateZ(0);
+  contain: layout paint;
+}
+
+.inc-create-block:focus-within,
+.inc-create-files-card:focus-within {
+  border-color:
+    color-mix(in srgb, var(--accent) 42%, var(--card-border));
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent),
+    var(--ic-card-shadow);
+}
+
+
+/* =========================================================
+   DROPZONE EXTREME
+========================================================= */
+
+.inc-create-dropzone {
+  outline: none;
+}
+
+.inc-create-dropzone:focus-within {
+  border-color: var(--accent-border-strong);
+  box-shadow:
+    var(--focus-ring),
+    0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent),
+    var(--ic-control-shadow-hover);
+}
+
+.inc-create-dropzone.is-active .inc-create-dropzone-copy strong {
+  color: var(--accent-active, var(--accent));
+}
+
+.inc-create-dropzone.is-error .inc-create-dropzone-copy strong {
+  color: var(--error);
+}
+
+
+/* =========================================================
+   FILE LIST EXTREME
+========================================================= */
+
+.inc-create-files-list {
+  max-block-size: min(280px, 38dvh);
+  overflow: auto;
+  padding-inline-end: 2px;
+
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.inc-create-files-list::-webkit-scrollbar {
+  inline-size: var(--scrollbar-size, 10px);
+}
+
+.inc-create-files-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.inc-create-file-row {
+  transform: translateZ(0);
+}
+
+.inc-create-file-row:hover {
+  border-color:
+    color-mix(in srgb, var(--badge-border) 66%, var(--accent-border));
+  box-shadow: var(--ic-control-shadow-hover);
+}
+
+.inc-create-file-remove {
+  color: color-mix(in srgb, var(--btn-secondary-text) 88%, var(--error) 12%);
+}
+
+.inc-create-file-remove:hover {
+  border-color:
+    color-mix(in srgb, var(--error) 28%, var(--btn-secondary-border));
+  color: var(--error);
+}
+
+
+/* =========================================================
+   STICKY ACTIONS
+========================================================= */
+
+.inc-create-actions {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 16;
+
+  margin-inline:
+    calc(clamp(20px, 2.4vw, var(--space-xl)) * -1);
+  margin-block-end:
+    calc(clamp(26px, 2.8vw, var(--space-xl)) * -1);
+
+  padding:
+    var(--space-md)
+    clamp(20px, 2.4vw, var(--space-xl))
+    clamp(20px, 2.4vw, var(--space-xl));
+
+  border-block-start: 1px solid var(--ic-border-soft);
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ic-panel-bg) 64%, transparent),
+      color-mix(in srgb, var(--ic-panel-bg) 98%, transparent)
+    );
+
+  backdrop-filter: blur(16px) saturate(1.08);
+  -webkit-backdrop-filter: blur(16px) saturate(1.08);
+}
+
+.inc-create-submit[aria-busy="true"],
+.inc-create-submit.is-loading {
+  cursor: wait;
+  opacity: .84;
+}
+
+.inc-create-submit:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--focus-ring),
+    0 0 0 5px color-mix(in srgb, var(--accent) 12%, transparent),
+    var(--btn-primary-shadow) !important;
+}
+
+
+/* =========================================================
+   BUSY / DISABLED UNIVERSAL
+========================================================= */
+
+#incidencias-create-modal-root [aria-busy="true"] {
+  cursor: wait;
+}
+
+#incidencias-create-modal-root button[disabled],
+#incidencias-create-modal-root button[aria-disabled="true"],
+#incidencias-create-modal-root input[disabled],
+#incidencias-create-modal-root textarea[disabled],
+#incidencias-create-modal-root select[disabled] {
+  pointer-events: none;
+  opacity: .62;
+  filter: saturate(.78);
+}
+
+
+/* =========================================================
+   BACKDROP / COLOR-MIX FALLBACKS
+========================================================= */
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .inc-create-overlay,
+  .inc-create-header,
+  .inc-create-actions,
+  .inc-create-loading-overlay {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .inc-create-overlay {
+    background: rgba(8, 8, 10, .82);
+  }
+
+  .inc-create-header,
+  .inc-create-actions {
+    background: var(--panel-bg);
+  }
+}
+
+@supports not (color: color-mix(in srgb, #fff 50%, #000 50%)) {
+  .inc-create-overlay,
+  .inc-create-panel {
+    --ic-border: var(--card-border);
+    --ic-border-soft: var(--border-default);
+    --ic-panel-bg: var(--panel-bg);
+    --ic-card-bg: var(--card-bg);
+    --ic-mini-bg: var(--badge-bg);
+    --ic-input-bg: var(--input-bg);
+    --ic-glow-accent: transparent;
+    --ic-glow-info: transparent;
+    --ic-glow-success: transparent;
+  }
+
+  .inc-create-block,
+  .inc-create-files-card,
+  .inc-create-alert,
+  .inc-create-search-item,
+  .inc-create-search-state,
+  .inc-create-target-user-card,
+  .inc-create-file-row,
+  .inc-create-dropzone {
+    border-color: var(--border-default);
+  }
+}
+
+
+/* =========================================================
+   CONTRAST / FORCED COLORS
+========================================================= */
+
+@media (prefers-contrast: more) {
+  .inc-create-panel,
+  .inc-create-block,
+  .inc-create-files-card,
+  .inc-create-alert,
+  .inc-create-search-item,
+  .inc-create-search-state,
+  .inc-create-target-user-card,
+  .inc-create-file-row,
+  .inc-create-dropzone,
+  .inc-create-input,
+  .inc-create-textarea,
+  .inc-create-select,
+  .inc-create-submit,
+  .inc-create-close {
+    border-width: 2px;
+  }
+}
+
+@media (forced-colors: active) {
+  .inc-create-panel,
+  .inc-create-block,
+  .inc-create-files-card,
+  .inc-create-alert,
+  .inc-create-search-item,
+  .inc-create-search-state,
+  .inc-create-target-user-card,
+  .inc-create-file-row,
+  .inc-create-dropzone,
+  .inc-create-input,
+  .inc-create-textarea,
+  .inc-create-select,
+  .inc-create-submit,
+  .inc-create-close,
+  .inc-create-file-remove,
+  .inc-create-target-user-clear {
+    forced-color-adjust: auto;
+    border-color: CanvasText;
+  }
+
+  .inc-create-block::before,
+  .inc-create-files-card::before,
+  .inc-create-loading-spinner,
+  .inc-create-spinner,
+  .inc-create-mini-spinner {
+    forced-color-adjust: none;
+    border-color: Highlight;
+  }
+}
+
+
+/* =========================================================
+   LIGHT THEME EXTREME POLISH
+========================================================= */
+
+[data-theme="light"] .inc-create-actions {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.70),
+      rgba(255,255,255,.97)
+    );
+  border-color: rgba(23,32,51,.074);
+}
+
+[data-theme="light"] .inc-create-block:focus-within,
+[data-theme="light"] .inc-create-files-card:focus-within {
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent),
+    0 18px 46px rgba(32,43,72,.09),
+    inset 0 1px 0 rgba(255,255,255,.84);
+}
+
+[data-theme="light"] .inc-create-file-row:hover,
+[data-theme="light"] .inc-create-search-item:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.86),
+    0 12px 28px rgba(32,43,72,.08);
+}
+
+[data-theme="light"] .inc-create-dropzone.is-active {
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 44%),
+    color-mix(in srgb, var(--accent) 8%, #fff 92%);
+}
+
+
+/* =========================================================
+   DARK THEME EXTREME POLISH
+========================================================= */
+
+[data-theme="dark"] .inc-create-actions {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--panel-bg) 58%, transparent),
+      color-mix(in srgb, var(--panel-bg) 96%, #000 4%)
+    );
+}
+
+[data-theme="dark"] .inc-create-submit:hover {
+  box-shadow:
+    var(--btn-primary-shadow),
+    0 18px 42px color-mix(in srgb, var(--accent) 24%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent);
+}
+
+[data-theme="dark"] .inc-create-dropzone.is-active {
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 44%),
+    color-mix(in srgb, var(--accent-soft) 42%, #000 58%);
+}
+
+
+/* =========================================================
+   RESPONSIVE EXTREME POLISH
+========================================================= */
+
+@media (max-width: 720px) {
+  .inc-create-actions {
+    margin-inline: calc(var(--space-md) * -1);
+    margin-block-end: calc(var(--space-lg) * -1);
+    padding:
+      var(--space-md)
+      var(--space-md)
+      var(--space-lg);
+  }
+
+  .inc-create-header {
+    position: sticky;
+    inset-block-start: 0;
+  }
+
+  .inc-create-submit {
+    min-block-size: calc(50px * var(--ui-scale));
+  }
+}
+
+@media (max-width: 560px) {
+  .inc-create-actions {
+    margin-inline: calc(var(--space-md) * -1);
+  }
+
+  .inc-create-overlay {
+    place-items: end center;
+  }
+
+  .inc-create-panel {
+    inline-size: 100%;
+    max-block-size: 96dvh;
+  }
+
+  .inc-create-dropzone {
+    min-block-size: 132px;
+  }
+}
+
+@media (max-width: 430px) {
+  .inc-create-actions {
+    margin-inline: calc(var(--space-md) * -1);
+    padding-inline: var(--space-md);
+  }
+
+  .inc-create-submit {
+    padding-inline: var(--space-md);
+  }
+}

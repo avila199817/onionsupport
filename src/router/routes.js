@@ -24,6 +24,7 @@
    - Resolver /@{slug}/clientes hacia /clientes sólo si admin.
    - Resolver /@{slug}/usuarios hacia /usuarios sólo si admin.
    - Resolver /@{slug}/servidor hacia /servidor sólo si admin.
+   - Proteger lazy renders obsoletos: no ejecutar vista si el render ya no es vigente.
    - Sin declarar /@:slug como ruta real.
    - Sin alias /home.
    - Sin aliases legacy.
@@ -47,7 +48,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.v10.lifecycle-priority";
+export const ROUTES_VERSION = "routes.v11.fast-guarded-lazy";
 
 const ROUTE_SOURCE = "router.routes";
 const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
@@ -146,12 +147,12 @@ export const PUBLIC_AUTH_ROUTES = Object.freeze([
   ROUTE_PATHS.PASSWORD_REQUEST,
   ROUTE_PATHS.PASSWORD_RESET,
   ROUTE_PATHS.ACTIVATE_ACCOUNT,
-].filter(Boolean));
+].filter(Boolean).map(normalizePath));
 
 export const TOKEN_ROUTE_PATHS = Object.freeze([
   ROUTE_PATHS.PASSWORD_RESET,
   ROUTE_PATHS.ACTIVATE_ACCOUNT,
-].filter(Boolean));
+].filter(Boolean).map(normalizePath));
 
 export const ROUTE_ALIASES = Object.freeze({});
 
@@ -168,7 +169,7 @@ const USER_SCOPED_ROUTE_SET = new Set(
     ROUTE_PATHS.AJUSTES,
     ROUTE_PATHS.USUARIOS,
     ROUTE_PATHS.SERVIDOR,
-  ].filter(Boolean)
+  ].filter(Boolean).map(normalizePath)
 );
 
 /* =========================================================
@@ -195,6 +196,16 @@ function isObject(value) {
 
 function isFunction(value) {
   return typeof value === "function";
+}
+
+function isDomRootUsable(root = null) {
+  if (!root) return true;
+
+  try {
+    return root.isConnected !== false;
+  } catch {
+    return true;
+  }
 }
 
 function freeze(value) {
@@ -224,6 +235,36 @@ function redact(value = "") {
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+function renderStillCurrent(context = {}) {
+  const source = isObject(context) ? context : {};
+  const checker = source.isCurrentRender;
+
+  if (!isFunction(checker)) return true;
+
+  try {
+    return checker() !== false;
+  } catch {
+    return false;
+  }
+}
+
+function cleanupViewController(value = null) {
+  if (!value || typeof value !== "object") return false;
+
+  for (const method of ["destroy", "unmount", "cleanup", "dispose", "teardown"]) {
+    try {
+      if (isFunction(value?.[method])) {
+        value[method]();
+        return true;
+      }
+    } catch {
+      // noop
+    }
+  }
+
+  return false;
 }
 
 /* =========================================================
@@ -578,21 +619,35 @@ function createLazyRender(viewKey = "", viewName = "") {
   const finalViewName = normalizeViewName(viewName || viewKey);
 
   async function render(root = null, context = {}) {
+    const baseContext = isObject(context) ? context : {};
+
+    if (!renderStillCurrent(baseContext) || !isDomRootUsable(root || baseContext.renderRoot || baseContext.renderHost || baseContext.viewContainer)) {
+      return null;
+    }
+
     const view = await loadView(finalViewKey);
+
+    if (!renderStillCurrent(baseContext) || !isDomRootUsable(root || baseContext.renderRoot || baseContext.renderHost || baseContext.viewContainer)) {
+      return null;
+    }
+
     const renderer = resolveRenderer(view, finalViewKey);
+    const renderRoot = root || baseContext.renderRoot || null;
+    const renderHost = root || baseContext.renderHost || renderRoot || null;
+    const viewContainer = baseContext.viewContainer || renderRoot || renderHost || null;
 
     const ctx = {
-      ...(isObject(context) ? context : {}),
+      ...baseContext,
       viewKey: finalViewKey,
       viewName: finalViewName,
       routeViewKey: finalViewKey,
       routeViewName: finalViewName,
-      renderRoot: root || context?.renderRoot || null,
-      renderHost: root || context?.renderHost || null,
-      viewContainer: context?.viewContainer || root || null,
+      renderRoot,
+      renderHost,
+      viewContainer,
     };
 
-    if (root?.setAttribute) {
+    if (root?.setAttribute && renderStillCurrent(ctx)) {
       try {
         root.setAttribute("data-route-view-key", finalViewKey);
         root.setAttribute("data-route-view-name", finalViewName);
@@ -602,7 +657,21 @@ function createLazyRender(viewKey = "", viewName = "") {
       }
     }
 
+    if (!renderStillCurrent(ctx) || !isDomRootUsable(renderRoot)) {
+      return null;
+    }
+
     const result = await renderer(ctx.renderRoot, ctx);
+
+    if (!renderStillCurrent(ctx) || !isDomRootUsable(renderRoot)) {
+      cleanupViewController(result);
+
+      if ((result === undefined || result === null) && isObject(view)) {
+        cleanupViewController(view);
+      }
+
+      return null;
+    }
 
     return result === undefined && isObject(view) ? view : result;
   }
@@ -1259,6 +1328,8 @@ export function getRoutesIntegritySnapshot() {
       noLocalBlockedRouteList: true,
       adminRoutesAlignedWithConfig: true,
       lazyViews: true,
+      lazyRenderStaleGuard: true,
+      staleLazyViewDoesNotExecuteRenderer: true,
 
       ownAuth: false,
       ownGuards: false,

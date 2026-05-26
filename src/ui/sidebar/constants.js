@@ -5,7 +5,7 @@
    Responsabilidad:
    - Constantes compartidas del sidebar.
    - Rutas base desde core/config.js.
-   - Rutas públicas reales.
+   - Rutas públicas reales desde core/config.js.
    - Rutas privadas visibles con /@{user.slug}/{ruta}.
    - Selectores comunes.
    - Clases comunes.
@@ -17,6 +17,7 @@
    - Roles únicos: admin / user.
    - Home interna: /
    - Home visible de usuario: /@{user.slug}
+   - Bloqueos delegados en core/config.js.
    - No inventar rutas opcionales.
    - Sin DOM.
    - Sin Auth.
@@ -36,10 +37,16 @@ import {
   ROUTES,
   PUBLIC_ROUTES,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
-  BLOCKED_FRONTEND_ROUTES,
+  getUserScopedRouteInfo as configGetUserScopedRouteInfo,
+  isAdminRoute as configIsAdminRoute,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  isPublicRoute as configIsPublicRoute,
+  normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v7";
+export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v8";
 
 /* =========================================================
    HELPERS INTERNOS
@@ -155,17 +162,11 @@ export const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest || "/password-reque
 export const PASSWORD_RESET_ROUTE = ROUTES.passwordReset || "/password-reset";
 export const ACTIVATE_ACCOUNT_ROUTE = ROUTES.activateAccount || "/activate-account";
 
-export const SIDEBAR_BLOCKED_ROUTES = freeze(
-  unique([
-    ...(Array.isArray(BLOCKED_FRONTEND_ROUTES) ? BLOCKED_FRONTEND_ROUTES : []),
-    "/home",
-    "/403",
-    "/404",
-    "/2fa",
-    "/mfa",
-    "/otp",
-  ])
-);
+/*
+  Compat export.
+  No es fuente de bloqueo. El bloqueo real se delega en core/config.js.
+*/
+export const SIDEBAR_BLOCKED_ROUTES = freeze([]);
 
 export const SIDEBAR_PUBLIC_ROUTES = freeze(
   unique(
@@ -219,32 +220,44 @@ function normalizeHashPath(value = "/") {
 }
 
 function pathFromInput(value = "/") {
-  const raw = normalizeHashPath(value);
+  try {
+    return configRoutePathFromUrlLike(value) || HOME_ROUTE;
+  } catch {
+    const raw = normalizeHashPath(value);
 
-  if (!raw) return HOME_ROUTE;
-  if (raw.startsWith("//")) return HOME_ROUTE;
+    if (!raw) return HOME_ROUTE;
+    if (raw.startsWith("//")) return HOME_ROUTE;
 
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    return HOME_ROUTE;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+      return HOME_ROUTE;
+    }
+
+    if (/[\r\n\t\\]/.test(raw)) {
+      return HOME_ROUTE;
+    }
+
+    return raw;
   }
-
-  return raw;
 }
 
 function normalizePathname(pathname = "/") {
-  let value = text(pathname, HOME_ROUTE).replace(/\\/g, "/");
+  try {
+    return configNormalizeRoutePath(pathname) || HOME_ROUTE;
+  } catch {
+    let value = text(pathname, HOME_ROUTE).replace(/\\/g, "/");
 
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    value = value.replace(/\/{2,}/g, "/");
+
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "") || HOME_ROUTE;
+    }
+
+    return value || HOME_ROUTE;
   }
-
-  value = value.replace(/\/{2,}/g, "/");
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || HOME_ROUTE;
-  }
-
-  return value || HOME_ROUTE;
 }
 
 function normalizeSearch(search = "") {
@@ -303,43 +316,71 @@ function joinSidebarPath(parts = {}) {
 }
 
 export function normalizeSidebarPath(path = "/") {
-  return joinSidebarPath(splitSidebarPath(path));
+  const output = joinSidebarPath(splitSidebarPath(path));
+
+  return isSidebarBlockedRoute(output) ? HOME_ROUTE : output;
 }
 
 export function canonicalSidebarPath(path = "/") {
+  const route = splitSidebarPath(path).pathname || HOME_ROUTE;
+
+  return isSidebarBlockedRoute(route) ? HOME_ROUTE : route;
+}
+
+function rawCanonicalSidebarPath(path = "/") {
   return splitSidebarPath(path).pathname || HOME_ROUTE;
 }
 
 export function isSidebarBlockedRoute(path = "/") {
-  const route = canonicalSidebarPath(path).toLowerCase();
+  const route = rawCanonicalSidebarPath(path);
 
-  if (SIDEBAR_BLOCKED_ROUTES.includes(route)) return true;
+  try {
+    if (configIsBlockedRoutePath(path) === true) return true;
+  } catch {
+    // noop
+  }
 
-  return (
-    route.startsWith("/2fa/") ||
-    route.startsWith("/mfa/") ||
-    route.startsWith("/otp/")
-  );
+  try {
+    if (configIsBlockedRoutePath(route) === true) return true;
+  } catch {
+    // noop
+  }
+
+  try {
+    const scoped = configGetUserScopedRouteInfo(route);
+
+    if (scoped?.scoped && scoped?.restPath) {
+      return configIsBlockedRoutePath(scoped.restPath) === true;
+    }
+  } catch {
+    // noop
+  }
+
+  return false;
 }
 
 export function normalizeSidebarSlug(value = "") {
-  const slug = text(value, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
+  try {
+    return configNormalizeUserSlug(value) || "";
+  } catch {
+    const slug = text(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/^\/+/, "")
+      .replace(/^@+/, "")
+      .split(/[/?#]/)[0]
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase();
 
-  if (!slug) return "";
+    if (!slug) return "";
 
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  }
 }
 
 export function getSidebarUserScopedRouteInfo(path = "/") {
-  const route = canonicalSidebarPath(path);
+  const route = rawCanonicalSidebarPath(path);
 
   if (isSidebarBlockedRoute(route)) {
     return freeze({
@@ -351,6 +392,43 @@ export function getSidebarUserScopedRouteInfo(path = "/") {
       lookupPath: route,
       blocked: true,
     });
+  }
+
+  try {
+    const info = configGetUserScopedRouteInfo(route);
+
+    if (info && typeof info === "object") {
+      const restPath = normalizePathname(
+        info.restPath ||
+          info.canonicalPath ||
+          route
+      );
+
+      const lookupPath = normalizePathname(
+        info.lookupPath ||
+          info.canonicalPath ||
+          restPath
+      );
+
+      const routable =
+        !isSidebarBlockedRoute(restPath) &&
+        (
+          info.routable === true ||
+          SIDEBAR_USER_SCOPED_ROUTES.includes(restPath)
+        );
+
+      return freeze({
+        scoped: Boolean(info.scoped),
+        routable: Boolean(routable),
+        home: Boolean(info.home && routable),
+        slug: normalizeSidebarSlug(info.slug || ""),
+        restPath,
+        lookupPath: routable ? lookupPath : route,
+        blocked: false,
+      });
+    }
+  } catch {
+    // fallback local abajo
   }
 
   if (!route.startsWith(USER_HOME_PREFIX)) {
@@ -425,7 +503,7 @@ export function isSidebarUserScopedRoute(path = "/") {
 }
 
 export function isSidebarHomeRoute(path = "/") {
-  const route = canonicalSidebarPath(path);
+  const route = rawCanonicalSidebarPath(path);
   return route === HOME_ROUTE || isSidebarUserHomeRoute(route);
 }
 
@@ -440,8 +518,15 @@ export function sidebarHomeLookupPath(path = "/") {
 
 export function isSidebarPublicRoute(path = "/") {
   const route = canonicalSidebarPath(path);
+  const scoped = getSidebarUserScopedRouteInfo(path);
 
-  if (isSidebarBlockedRoute(route)) return false;
+  if (!route || isSidebarBlockedRoute(route) || scoped.scoped) return false;
+
+  try {
+    if (configIsPublicRoute(route) === true) return true;
+  } catch {
+    // fallback abajo
+  }
 
   return SIDEBAR_PUBLIC_ROUTES.includes(route);
 }
@@ -450,6 +535,12 @@ export function isSidebarAdminFallbackRoute(path = "/") {
   const route = sidebarHomeLookupPath(path);
 
   if (!route || isSidebarBlockedRoute(route)) return false;
+
+  try {
+    if (configIsAdminRoute(route) === true) return true;
+  } catch {
+    // fallback abajo
+  }
 
   return SIDEBAR_ADMIN_FALLBACK_ROUTES.includes(route);
 }
@@ -768,7 +859,9 @@ export function getSidebarConstantsSnapshot() {
       privateFallback: SIDEBAR_PRIVATE_FALLBACK_ROUTES,
       adminFallback: SIDEBAR_ADMIN_FALLBACK_ROUTES,
       userScoped: SIDEBAR_USER_SCOPED_ROUTES,
+
       blocked: SIDEBAR_BLOCKED_ROUTES,
+      blockedOwner: "core/config.js",
 
       optionalAdmin: {
         usuarios: Boolean(USUARIOS_ROUTE),
@@ -786,6 +879,8 @@ export function getSidebarConstantsSnapshot() {
     policy: {
       constantsOnly: true,
       configDrivenRoutes: true,
+      blockedRoutesDelegatedToCoreConfig: true,
+      noLocalBlockedRouteList: true,
 
       clientesAdminOnly: true,
       optionalAdminRoutesRequireConfig: true,

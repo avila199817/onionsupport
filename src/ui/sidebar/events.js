@@ -9,7 +9,8 @@
    - Click en logout -> handleLogout().
    - Respetar el dropdown de cuenta sin gestionarlo.
    - Delegar normalización/validación de navegación en actions.js.
-   - Bloquear href sensibles o legacy antes de que navegue el navegador.
+   - Bloquear href sensibles antes de que navegue el navegador.
+   - Rechazar rutas bloqueadas vía actions.js -> constants.js -> core/config.js.
    - Sin navegación propia.
    - Sin active menu propio.
    - Sin indicadores.
@@ -23,6 +24,7 @@
    - Sin Router directo.
    - Sin Store.
    - Sin Toast.
+   - Sin denylist local.
    - Sin /home.
    - Sin /403.
    - Sin /404.
@@ -45,7 +47,7 @@ import {
   toggleSidebar,
 } from "./actions.js";
 
-export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v5";
+export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v6";
 
 const HANDLED_FLAG = "__onionSidebarHandled";
 
@@ -167,7 +169,7 @@ function isBlocked(element = null) {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
     String(value || "")
   );
 }
@@ -270,9 +272,9 @@ function getNavigableTarget(rawHref = "") {
 
   /*
     La normalización real se delega en actions.js:
-    - bloquea /home, /403, /404, /2fa, /mfa, /otp;
-    - bloquea /@slug/home y legacy scopeadas;
-    - preserva /@slug/ruta si es válida;
+    - rechaza rutas bloqueadas;
+    - rechaza rutas bloqueadas bajo /@{slug};
+    - preserva /@{slug}/ruta si es válida;
     - evita queries sensibles.
   */
   return getSafeSidebarTarget(rawHref, "");
@@ -341,7 +343,7 @@ export function handleSidebarClick(event = null, context = {}) {
 
   /*
     Nunca permitir que un enlace del sidebar navegue con tokens/códigos
-    o rutas legacy por navegación nativa.
+    o protocolos no SPA por navegación nativa.
   */
   if (isDangerousHref(rawHref)) {
     if (shouldSwallowInvalidSidebarHref(link, rawHref)) {
@@ -466,12 +468,14 @@ export function getSidebarEventsSnapshot() {
       targetNormalizationDelegatedToActions: true,
 
       rejectsSensitiveHref: true,
+      rejectsBlockedHrefViaActionsConstantsAndCoreConfig: true,
       swallowsInvalidSidebarSpaHref: true,
 
       noRouterDirect: true,
       noAuthDirect: true,
       noStorage: true,
       noToast: true,
+      noLocalBlockedRouteList: true,
 
       noHomeRoute: true,
       no403Route: true,

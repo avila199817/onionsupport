@@ -7,6 +7,7 @@
    - Consumir view-model desde home.selectors.js.
    - Calcular el modelo una sola vez por render.
    - Home simple, visual y directo.
+   - Header limpio: sin etiqueta de rol visible y sin acciones superiores.
    - Sin card grande envolvente.
    - Sin accesos rápidos duplicados.
    - Sin widgets duplicados.
@@ -89,7 +90,7 @@ import {
   getActivityType,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.v17.model-backed-pure-html";
+export const TEMPLATE_VERSION = "home.template.v18.clean-header-no-top-actions";
 
 const ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -470,11 +471,9 @@ function errorBanner(message = "") {
 function renderHomeHeader(vm = {}) {
   const user = safeObject(vm.user);
   const name = safeText(first(user.displayName, user.name), "Usuario");
-  const roleLabel = safeText(user.roleLabel, vm.admin ? "Administrador" : "Estándar");
-  const lastUpdate = vm.meta?.lastUpdatedAt ? formatLastUpdate(vm.meta.lastUpdatedAt) : "Sin fecha";
 
   return `
-    <header class="home-header" data-home-section="header">
+    <header class="home-header home-header--clean" data-home-section="header">
       <div class="home-header-main">
         ${avatar({
           name,
@@ -485,7 +484,6 @@ function renderHomeHeader(vm = {}) {
           className: "home-current-user-avatar",
         })}
         <div>
-          <p class="home-kicker">${escapeHtml(roleLabel)}</p>
           <h1>Hola, ${escapeHtml(name)}</h1>
           <p class="home-subtitle">
             ${vm.admin
@@ -494,30 +492,6 @@ function renderHomeHeader(vm = {}) {
             }
           </p>
         </div>
-      </div>
-
-      <div class="home-header-actions">
-        <span class="home-last-update">
-          ${icon("clock")}
-          <span>Actualizado: ${escapeHtml(lastUpdate)}</span>
-        </span>
-
-        <button type="button" class="home-btn" data-home-action="${ACTIONS.REFRESH}" data-action="${ACTIONS.REFRESH}">
-          ${icon("refresh")}
-          Actualizar
-        </button>
-
-        <button
-          type="button"
-          class="home-btn home-btn--primary"
-          data-home-action="${ACTIONS.CREATE_INCIDENCIA}"
-          data-action="${ACTIONS.CREATE_INCIDENCIA}"
-          data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
-          data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
-        >
-          ${icon("plus")}
-          Crear incidencia
-        </button>
       </div>
     </header>
 
@@ -1196,6 +1170,13 @@ export function getHomeTemplateSnapshot() {
       pureHtmlString: true,
       modelCalculatedOncePerRender: true,
       selectorsOwnViewModel: true,
+
+      cleanHeader: true,
+      noVisibleRoleLabelInHeader: true,
+      noTopHeaderActions: true,
+      noTopUpdatedPill: true,
+      noTopRefreshButton: true,
+      noTopCreateButton: true,
 
       noDomApi: true,
       noListeners: true,

@@ -6,16 +6,20 @@
    - Título del documento.
    - Limpieza mínima de contenedores dinámicos.
    - Sync mínimo de usuario si existen nodos.
+   - Compat básica con IDs actuales/legacy.
    - Sin imports.
    - Sin config.
    - Sin avatar manager.
    - Sin sidebar/topbar complejos.
    - Sin i18n runtime.
-   - Sin snapshots grandes.
+   - Sin Auth runtime.
+   - Sin Router.
+   - Sin Store.
+   - Sin fetch.
    - Sin usuario fantasma.
 ========================================================= */
 
-export const UI_VERSION = "simple";
+export const UI_VERSION = "core.ui.v2";
 
 export const USER_UI_EVENT = "app:user-ui:sync";
 export const TITLE_EVENT = "app:title:change";
@@ -23,6 +27,50 @@ export const DYNAMIC_CLEARED_EVENT = "app:dynamic:cleared";
 
 const APP_NAME = "Onion Support";
 const DEFAULT_USER_NAME = "Usuario";
+
+const VALID_ROLES = new Set(["admin", "user"]);
+
+const INVALID_USER_STATUSES = new Set([
+  "disabled",
+  "inactive",
+  "deleted",
+  "archived",
+  "revoked",
+  "blocked",
+  "banned",
+  "suspended",
+  "desactivado",
+  "inactivo",
+  "eliminado",
+  "archivado",
+  "bloqueado",
+  "suspendido",
+]);
+
+const USER_NODE_IDS = Object.freeze({
+  sidebarName: Object.freeze(["sidebar-name", "sidebarName"]),
+  sidebarEmail: Object.freeze(["sidebar-email", "sidebarEmail"]),
+  sidebarRole: Object.freeze(["sidebar-role", "sidebarRole"]),
+  sidebarAvatar: Object.freeze([
+    "sidebar-avatar",
+    "sidebarAvatar",
+    "sidebarAvatarFallback",
+  ]),
+  topbarUserName: Object.freeze(["topbar-user-name", "topbarUserName"]),
+  topbarTitle: Object.freeze(["topbar-title", "topbarTitle"]),
+  userToggle: Object.freeze(["userToggle", "user-toggle"]),
+  userDropdown: Object.freeze(["userDropdown", "user-dropdown"]),
+  logoutBtn: Object.freeze(["logoutBtn", "logout-button", "logout-btn"]),
+});
+
+const DYNAMIC_CONTAINER_IDS = Object.freeze({
+  tablehead: Object.freeze(["tablehead-container", "table-head"]),
+  view: Object.freeze(["view-container"]),
+});
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -37,7 +85,11 @@ function isObject(value) {
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -74,6 +126,20 @@ function byId(id = "") {
   }
 }
 
+function firstNode(ids = []) {
+  for (const id of ids || []) {
+    const node = byId(id);
+
+    if (node) return node;
+  }
+
+  return null;
+}
+
+function nodeExists(ids = []) {
+  return Boolean(firstNode(ids));
+}
+
 function setText(node, value = "") {
   if (!node) return false;
 
@@ -101,6 +167,10 @@ function setData(node, key = "", value = "") {
   }
 }
 
+function setBoolData(node, key = "", value = false) {
+  return setData(node, key, value ? "true" : "false");
+}
+
 function clearNode(node) {
   if (!node) return false;
 
@@ -117,16 +187,67 @@ function clearNode(node) {
   }
 }
 
+function tagName(node = null) {
+  return String(node?.tagName || "").toLowerCase();
+}
+
+/* =========================================================
+   USER NORMALIZATION
+========================================================= */
+
 function normalizeRole(value = "") {
-  return String(value).toLowerCase() === "admin" ? "admin" : "user";
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = text(value, "").toLowerCase();
+
+  return VALID_ROLES.has(role) ? role : "";
 }
 
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  return (
+  const status = text(
+    user.status ||
+      user.estado ||
+      user.state ||
+      "",
+    ""
+  ).toLowerCase();
+
+  return Boolean(
     user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
+      user.deleted === true ||
+      user.archived === true ||
+      user.revoked === true ||
+      user.blocked === true ||
+      user.banned === true ||
+      user.suspended === true ||
+      user.active === false ||
+      user.enabled === false ||
+      Boolean(user.deletedAt) ||
+      INVALID_USER_STATUSES.has(status)
+  );
+}
+
+function hasUserIdentity(user = null) {
+  if (!isObject(user)) return false;
+
+  return Boolean(
+    text(user.id, "") ||
+      text(user.userId, "") ||
+      text(user.uid, "") ||
+      text(user.sub, "") ||
+      text(user.username, "") ||
+      text(user.slug, "") ||
+      text(user.email, "") ||
+      text(user.lookup?.slug, "")
   );
 }
 
@@ -142,38 +263,74 @@ function getUser(state = {}) {
 
   if (!isObject(user)) return null;
   if (userDisabled(user)) return null;
+  if (!hasUserIdentity(user)) return null;
 
   return user;
 }
 
 function userName(user = null) {
-  if (!user) return DEFAULT_USER_NAME;
+  if (!user) return "";
 
-  return (
-    user.name ||
-    user.fullName ||
+  return text(
     user.displayName ||
-    user.nombre ||
-    user.username ||
-    user.email ||
-    DEFAULT_USER_NAME
+      user.fullName ||
+      user.name ||
+      user.nombre ||
+      user.username ||
+      user.email ||
+      "",
+    ""
   );
 }
 
 function username(user = null) {
   if (!user) return "";
 
-  return user.username || user.slug || user.email || "";
+  return text(
+    user.username ||
+      user.slug ||
+      user.lookup?.slug ||
+      user.email ||
+      "",
+    ""
+  );
 }
 
 function userEmail(user = null) {
-  return user?.email || "";
+  return text(user?.email, "");
 }
 
 function userRole(state = {}, user = null) {
   if (!user) return "";
 
-  return normalizeRole(state.role || user.role || user.rol);
+  return normalizeRole(
+    state.role ||
+      state.rol ||
+      state.userRole ||
+      user.role ||
+      user.rol ||
+      user.roles
+  );
+}
+
+function userAvatarUrl(user = null) {
+  if (!user) return "";
+
+  return text(
+    user.avatarUrl ||
+      user.avatar ||
+      user.picture ||
+      user.pictureUrl ||
+      user.photoUrl ||
+      user.photoURL ||
+      user.imageUrl ||
+      user.image ||
+      user.profile?.avatarUrl ||
+      user.profile?.avatar ||
+      user.profile?.picture ||
+      "",
+    ""
+  );
 }
 
 function initials(value = "") {
@@ -190,20 +347,46 @@ function resolveUserData(state = {}) {
   const user = getUser(state);
   const authenticated = Boolean(user);
 
-  const displayName = authenticated ? userName(user) : DEFAULT_USER_NAME;
+  const displayName = authenticated
+    ? userName(user) || DEFAULT_USER_NAME
+    : DEFAULT_USER_NAME;
+
   const handle = authenticated ? username(user) : "";
   const email = authenticated ? userEmail(user) : "";
   const role = authenticated ? userRole(state, user) : "";
+  const avatarUrl = authenticated ? userAvatarUrl(user) : "";
 
   return {
     authenticated,
     hasUser: authenticated,
+
     displayName,
     username: handle,
     email,
     role,
+
+    hasAvatar: Boolean(avatarUrl),
+    avatarUrl,
     avatarText: initials(displayName),
   };
+}
+
+/* =========================================================
+   NODE SYNC
+========================================================= */
+
+function syncDataset(node, data = {}) {
+  if (!node) return false;
+
+  setBoolData(node, "authenticated", data.authenticated);
+  setBoolData(node, "hasUser", data.hasUser);
+  setBoolData(node, "hasAvatar", data.hasAvatar);
+
+  setData(node, "username", data.username || "");
+  setData(node, "role", data.role || "");
+  setData(node, "avatarText", data.avatarText || "");
+
+  return true;
 }
 
 function syncNode(id = "", value = "", data = {}) {
@@ -212,9 +395,7 @@ function syncNode(id = "", value = "", data = {}) {
   if (!node) return false;
 
   setText(node, value);
-  setData(node, "authenticated", data.authenticated ? "true" : "false");
-  setData(node, "username", data.username || "");
-  setData(node, "role", data.role || "");
+  syncDataset(node, data);
 
   try {
     node.removeAttribute("title");
@@ -225,15 +406,63 @@ function syncNode(id = "", value = "", data = {}) {
   return true;
 }
 
+function syncFirstNode(ids = [], value = "", data = {}) {
+  for (const id of ids || []) {
+    if (syncNode(id, value, data)) return true;
+  }
+
+  return false;
+}
+
 function syncAvatar(id = "", data = {}) {
   const node = byId(id);
 
   if (!node) return false;
 
-  setText(node, data.avatarText || "ON");
-  setData(node, "authenticated", data.authenticated ? "true" : "false");
-  setData(node, "username", data.username || "");
-  setData(node, "role", data.role || "");
+  /*
+    Core UI no gestiona imagen/avatar real.
+    Sólo sincroniza fallback textual y dataset mínimo.
+    El avatar visual complejo pertenece a ui/sidebar/user.js o equivalente.
+  */
+  if (tagName(node) !== "img") {
+    setText(node, data.avatarText || "ON");
+  } else {
+    try {
+      node.alt = data.authenticated
+        ? data.displayName || DEFAULT_USER_NAME
+        : APP_NAME;
+    } catch {
+      // noop
+    }
+  }
+
+  syncDataset(node, data);
+
+  return true;
+}
+
+function syncFirstAvatar(ids = [], data = {}) {
+  for (const id of ids || []) {
+    if (syncAvatar(id, data)) return true;
+  }
+
+  return false;
+}
+
+function syncActionNodes(data = {}) {
+  const ids = [
+    ...USER_NODE_IDS.userToggle,
+    ...USER_NODE_IDS.userDropdown,
+    ...USER_NODE_IDS.logoutBtn,
+  ];
+
+  for (const id of ids) {
+    const node = byId(id);
+
+    if (node) {
+      syncDataset(node, data);
+    }
+  }
 
   return true;
 }
@@ -255,13 +484,15 @@ export function setDocumentTitle(input = {}, extra = {}) {
 
   const title = text(payload.title, APP_NAME);
   const suffix = text(payload.suffix, "");
-  const finalTitle = suffix && !title.includes(suffix) ? `${title} · ${suffix}` : title;
+  const finalTitle = suffix && !title.includes(suffix)
+    ? `${title} · ${suffix}`
+    : title;
 
   if (isBrowser()) {
     document.title = finalTitle;
   }
 
-  const topbarTitle = byId("topbar-title");
+  const topbarTitle = firstNode(USER_NODE_IDS.topbarTitle);
 
   if (topbarTitle && payload.updateTopbar !== false) {
     setText(topbarTitle, text(payload.topbarTitle, title));
@@ -288,16 +519,18 @@ export function clearDynamicContainers({
   const ids = [];
 
   if (includeTablehead !== false) {
-    ids.push("tablehead-container", "table-head");
+    ids.push(...DYNAMIC_CONTAINER_IDS.tablehead);
   }
 
   if (includeView === true) {
-    ids.push("view-container");
+    ids.push(...DYNAMIC_CONTAINER_IDS.view);
   }
 
   for (const key of extraKeys || []) {
-    if (key && !ids.includes(key)) {
-      ids.push(key);
+    const clean = text(key, "");
+
+    if (clean && !ids.includes(clean)) {
+      ids.push(clean);
     }
   }
 
@@ -314,14 +547,19 @@ export function clearDynamicContainers({
   const tableHead = byId("table-head");
 
   if (tableHead && includeTablehead !== false) {
-    tableHead.hidden = true;
-    tableHead.setAttribute("aria-hidden", "true");
-    setData(tableHead, "visible", "false");
+    try {
+      tableHead.hidden = true;
+      tableHead.setAttribute("aria-hidden", "true");
+      setData(tableHead, "visible", "false");
+    } catch {
+      // noop
+    }
   }
 
   emit(events, DYNAMIC_CLEARED_EVENT, {
     cleared,
     includeView: Boolean(includeView),
+    includeTablehead: includeTablehead !== false,
   });
 
   return true;
@@ -333,14 +571,17 @@ export function clearDynamicContainers({
 
 export function recacheUserNodes() {
   return {
-    sidebarName: Boolean(byId("sidebar-name") || byId("sidebarName")),
-    sidebarEmail: Boolean(byId("sidebar-email") || byId("sidebarEmail")),
-    sidebarRole: Boolean(byId("sidebar-role") || byId("sidebarRole")),
-    sidebarAvatar: Boolean(byId("sidebar-avatar") || byId("sidebarAvatar")),
-    topbarUserName: Boolean(byId("topbar-user-name") || byId("topbarUserName")),
-    userToggle: Boolean(byId("userToggle") || byId("user-toggle")),
-    userDropdown: Boolean(byId("userDropdown") || byId("user-dropdown")),
-    logoutBtn: Boolean(byId("logoutBtn") || byId("logout-button") || byId("logout-btn")),
+    sidebarName: nodeExists(USER_NODE_IDS.sidebarName),
+    sidebarEmail: nodeExists(USER_NODE_IDS.sidebarEmail),
+    sidebarRole: nodeExists(USER_NODE_IDS.sidebarRole),
+    sidebarAvatar: nodeExists(USER_NODE_IDS.sidebarAvatar),
+
+    topbarUserName: nodeExists(USER_NODE_IDS.topbarUserName),
+    topbarTitle: nodeExists(USER_NODE_IDS.topbarTitle),
+
+    userToggle: nodeExists(USER_NODE_IDS.userToggle),
+    userDropdown: nodeExists(USER_NODE_IDS.userDropdown),
+    logoutBtn: nodeExists(USER_NODE_IDS.logoutBtn),
   };
 }
 
@@ -350,55 +591,34 @@ export function syncUserUI(input = {}) {
   const data = resolveUserData(state);
 
   const synced = {
-    sidebarName:
-      syncNode("sidebar-name", data.displayName, data) ||
-      syncNode("sidebarName", data.displayName, data),
+    sidebarName: syncFirstNode(USER_NODE_IDS.sidebarName, data.displayName, data),
+    sidebarEmail: syncFirstNode(USER_NODE_IDS.sidebarEmail, data.email, data),
+    sidebarRole: syncFirstNode(USER_NODE_IDS.sidebarRole, data.role, data),
+    sidebarAvatar: syncFirstAvatar(USER_NODE_IDS.sidebarAvatar, data),
 
-    sidebarEmail:
-      syncNode("sidebar-email", data.email, data) ||
-      syncNode("sidebarEmail", data.email, data),
+    topbarUserName: syncFirstNode(USER_NODE_IDS.topbarUserName, data.displayName, data),
 
-    sidebarRole:
-      syncNode("sidebar-role", data.role, data) ||
-      syncNode("sidebarRole", data.role, data),
-
-    sidebarAvatar:
-      syncAvatar("sidebar-avatar", data) ||
-      syncAvatar("sidebarAvatar", data) ||
-      syncAvatar("sidebarAvatarFallback", data),
-
-    topbarUserName:
-      syncNode("topbar-user-name", data.displayName, data) ||
-      syncNode("topbarUserName", data.displayName, data),
-
-    userToggle:
-      Boolean(byId("userToggle") || byId("user-toggle")),
-
-    userDropdown:
-      Boolean(byId("userDropdown") || byId("user-dropdown")),
-
-    logoutBtn:
-      Boolean(byId("logoutBtn") || byId("logout-button") || byId("logout-btn")),
+    userToggle: nodeExists(USER_NODE_IDS.userToggle),
+    userDropdown: nodeExists(USER_NODE_IDS.userDropdown),
+    logoutBtn: nodeExists(USER_NODE_IDS.logoutBtn),
   };
 
-  for (const id of ["userToggle", "user-toggle", "userDropdown", "user-dropdown", "logoutBtn", "logout-button", "logout-btn"]) {
-    const node = byId(id);
-
-    if (node) {
-      setData(node, "authenticated", data.authenticated ? "true" : "false");
-      setData(node, "username", data.username || "");
-      setData(node, "role", data.role || "");
-    }
-  }
+  syncActionNodes(data);
 
   const payload = {
     version: UI_VERSION,
+
     authenticated: data.authenticated,
     hasUser: data.hasUser,
+
     displayName: data.displayName,
     username: data.username || null,
+    email: data.email || null,
     role: data.role || null,
+
+    hasAvatar: data.hasAvatar,
     avatarText: data.avatarText,
+
     synced,
   };
 
@@ -419,7 +639,18 @@ function nodeState(id = "") {
     exists: Boolean(node),
     text: text(node?.textContent, "").slice(0, 80),
     hidden: Boolean(node?.hidden),
+    ariaHidden: node?.getAttribute?.("aria-hidden") || "",
+    authenticated: node?.dataset?.authenticated || "",
+    username: node?.dataset?.username || "",
+    role: node?.dataset?.role || "",
   };
+}
+
+function firstNodeState(ids = []) {
+  const node = firstNode(ids);
+  const id = node?.id || ids?.[0] || "";
+
+  return nodeState(id);
 }
 
 export function getUiSnapshot({ state = {} } = {}) {
@@ -427,22 +658,45 @@ export function getUiSnapshot({ state = {} } = {}) {
 
   return {
     version: UI_VERSION,
+
+    browser: isBrowser(),
     title: isBrowser() ? document.title : "",
+
     user: {
       authenticated: data.authenticated,
       hasUser: data.hasUser,
       displayName: data.displayName,
       username: data.username || null,
+      email: data.email ? "***" : null,
       role: data.role || null,
+      hasAvatar: data.hasAvatar,
       avatarText: data.avatarText,
     },
+
     nodes: {
-      sidebarName: nodeState("sidebar-name"),
-      sidebarEmail: nodeState("sidebar-email"),
-      sidebarRole: nodeState("sidebar-role"),
-      sidebarAvatar: nodeState("sidebar-avatar"),
-      topbarUserName: nodeState("topbar-user-name"),
-      topbarTitle: nodeState("topbar-title"),
+      sidebarName: firstNodeState(USER_NODE_IDS.sidebarName),
+      sidebarEmail: firstNodeState(USER_NODE_IDS.sidebarEmail),
+      sidebarRole: firstNodeState(USER_NODE_IDS.sidebarRole),
+      sidebarAvatar: firstNodeState(USER_NODE_IDS.sidebarAvatar),
+
+      topbarUserName: firstNodeState(USER_NODE_IDS.topbarUserName),
+      topbarTitle: firstNodeState(USER_NODE_IDS.topbarTitle),
+
+      userToggle: firstNodeState(USER_NODE_IDS.userToggle),
+      userDropdown: firstNodeState(USER_NODE_IDS.userDropdown),
+      logoutBtn: firstNodeState(USER_NODE_IDS.logoutBtn),
+    },
+
+    policy: {
+      minimalCoreUi: true,
+      noImports: true,
+      noAuthRuntime: true,
+      noRouter: true,
+      noStore: true,
+      noFetch: true,
+      noAvatarManager: true,
+      noGhostUser: true,
+      snapshotRedacted: true,
     },
   };
 }
@@ -453,6 +707,10 @@ export function getUiSnapshot({ state = {} } = {}) {
 
 export default {
   UI_VERSION,
+
+  USER_UI_EVENT,
+  TITLE_EVENT,
+  DYNAMIC_CLEARED_EVENT,
 
   setDocumentTitle,
   clearDynamicContainers,

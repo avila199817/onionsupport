@@ -8,7 +8,7 @@
    - Bindear Router si existe.
    - Renderizar ruta inicial capturada por main.js.
    - Preservar query/hash de la ruta inicial.
-   - Delegar guards/render/history al Router real.
+   - Delegar guards/render/history/canonicalización al Router real.
    - No iniciar restore.
    - No tocar Auth.
    - No tocar storage.
@@ -21,11 +21,14 @@
 
 import { Router } from "../router/index.js";
 
-export const ROUTER_BOOTSTRAP_VERSION = "app.router.v5";
+export const ROUTER_BOOTSTRAP_VERSION = "app.router.v6";
 
 let configured = false;
 let bound = false;
 let rendered = false;
+
+let configurePromise = null;
+let bindPromise = null;
 let renderPromise = null;
 
 let lastInitialPath = "";
@@ -63,16 +66,17 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function safeError(error = null) {
   if (!error) return null;
 
   return {
-    name: error.name || "Error",
+    name: cleanText(error.name, "Error"),
     message: redact(error.message || String(error)),
-    code: error.code || null,
+    code: error.code || error.error || null,
     status: error.status || error.statusCode || error.response?.status || null,
   };
 }
@@ -131,63 +135,107 @@ function requireRouterMethod(name = "") {
   return fn;
 }
 
+function summarizeRenderResult(result = null) {
+  if (!isObject(result)) {
+    return {
+      ok: result !== false,
+    };
+  }
+
+  return {
+    ok: result.ok !== false,
+    found: result.found ?? null,
+    forbidden: result.forbidden ?? null,
+    skipped: result.skipped ?? null,
+    redirected: result.redirected ?? null,
+    reason: result.reason || null,
+    canonicalPath: redact(result.canonicalPath || ""),
+    publicPath: redact(result.publicPath || ""),
+    routeMode: result.routeMode || null,
+  };
+}
+
 /* =========================================================
    CONFIGURE
 ========================================================= */
 
-export async function configureRouter(options = {}) {
-  if (configured) return true;
+export function configureRouter(options = {}) {
+  if (configured) return Promise.resolve(true);
+  if (configurePromise) return configurePromise;
 
-  const init = requireRouterMethod("init");
+  configurePromise = (async () => {
+    const init = requireRouterMethod("init");
 
-  const result = await init.call(
-    Router,
-    payload(options, {
-      appManagedInitialRender: true,
-      skipInitialRender: true,
-      render: false,
+    const result = await init.call(
+      Router,
+      payload(options, {
+        appManagedInitialRender: true,
+        skipInitialRender: true,
+        render: false,
+      })
+    );
+
+    if (result === false) {
+      throw new Error("Router.init() devolvió false.");
+    }
+
+    configured = true;
+    return true;
+  })()
+    .catch((error) => {
+      configured = false;
+      throw error;
     })
-  );
+    .finally(() => {
+      configurePromise = null;
+    });
 
-  if (result === false) {
-    throw new Error("Router.init() devolvió false.");
-  }
-
-  configured = true;
-  return true;
+  return configurePromise;
 }
 
 /* =========================================================
    BIND
 ========================================================= */
 
-export async function bindRouter(options = {}) {
-  if (bound) return true;
+export function bindRouter(options = {}) {
+  if (bound) return Promise.resolve(true);
+  if (bindPromise) return bindPromise;
 
-  if (!configured) {
-    await configureRouter(options);
-  }
+  bindPromise = (async () => {
+    if (!configured) {
+      await configureRouter(options);
+    }
 
-  if (!isFunction(Router?.bind)) {
+    if (!isFunction(Router?.bind)) {
+      bound = true;
+      return true;
+    }
+
+    const result = await Router.bind.call(
+      Router,
+      payload(options, {
+        appManagedInitialRender: true,
+        skipInitialRender: true,
+        render: false,
+      })
+    );
+
+    if (result === false) {
+      throw new Error("Router.bind() devolvió false.");
+    }
+
     bound = true;
     return true;
-  }
-
-  const result = await Router.bind.call(
-    Router,
-    payload(options, {
-      appManagedInitialRender: true,
-      skipInitialRender: true,
-      render: false,
+  })()
+    .catch((error) => {
+      bound = false;
+      throw error;
     })
-  );
+    .finally(() => {
+      bindPromise = null;
+    });
 
-  if (result === false) {
-    throw new Error("Router.bind() devolvió false.");
-  }
-
-  bound = true;
-  return true;
+  return bindPromise;
 }
 
 /* =========================================================
@@ -228,21 +276,7 @@ export function renderInitialRoute(options = {}) {
       throw new Error("Router.render() devolvió false en el render inicial.");
     }
 
-    lastRenderResult = isObject(result)
-      ? {
-          ok: result.ok !== false,
-          found: result.found ?? null,
-          forbidden: result.forbidden ?? null,
-          skipped: result.skipped ?? null,
-          redirected: result.redirected ?? null,
-          reason: result.reason || null,
-          canonicalPath: redact(result.canonicalPath || ""),
-          publicPath: redact(result.publicPath || ""),
-          routeMode: result.routeMode || null,
-        }
-      : {
-          ok: true,
-        };
+    lastRenderResult = summarizeRenderResult(result);
 
     rendered = true;
     return true;
@@ -267,6 +301,9 @@ export function resetRouterBootstrap() {
   configured = false;
   bound = false;
   rendered = false;
+
+  configurePromise = null;
+  bindPromise = null;
   renderPromise = null;
 
   lastInitialPath = "";
@@ -287,6 +324,9 @@ export function getRouterBootstrapState() {
     configured,
     bound,
     rendered,
+
+    configuring: Boolean(configurePromise),
+    binding: Boolean(bindPromise),
     rendering: Boolean(renderPromise),
 
     lastInitialPath: redact(lastInitialPath),
@@ -304,6 +344,10 @@ export function getRouterBootstrapState() {
       wrapperOnly: true,
 
       appManagedInitialRender: true,
+      configIdempotent: true,
+      bindIdempotent: true,
+      renderInitialOnce: true,
+
       bindsBeforeInitialRender: true,
       preservesInitialPath: true,
       preservesQueryAndHash: true,

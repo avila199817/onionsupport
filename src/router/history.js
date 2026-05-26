@@ -28,7 +28,6 @@
 ========================================================= */
 
 import {
-  BLOCKED_FRONTEND_ROUTES,
   PROTECTED_PUBLIC_TOKEN_ROUTES,
   TOKEN_PARAM,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
@@ -38,28 +37,16 @@ import {
   isUserHomeRoute as configIsUserHomeRoute,
   isUserScopedRoute as configIsUserScopedRoute,
   normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_HISTORY_VERSION = "router.history.v8";
+export const ROUTER_HISTORY_VERSION = "router.history.v9";
 
 const HISTORY_STATE_VERSION = 1;
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 const TOKEN_PARAM_NAME = TOKEN_PARAM || "token";
-
-const BLOCKED_ROUTE_PATHS = new Set(
-  Array.isArray(BLOCKED_FRONTEND_ROUTES) && BLOCKED_FRONTEND_ROUTES.length
-    ? BLOCKED_FRONTEND_ROUTES
-    : [
-        "/home",
-        "/403",
-        "/404",
-        "/2fa",
-        "/mfa",
-        "/otp",
-      ]
-);
 
 const SENSITIVE_QUERY_KEYS = new Set([
   "token",
@@ -142,7 +129,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
@@ -179,20 +167,10 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
 
 function isBlockedPathname(pathname = DEFAULT_ROUTE) {
   try {
-    if (configIsBlockedRoutePath(pathname) === true) return true;
+    return configIsBlockedRoutePath(pathname) === true;
   } catch {
-    // fallback local
+    return false;
   }
-
-  const value = normalizePathname(pathname).toLowerCase();
-
-  if (BLOCKED_ROUTE_PATHS.has(value)) return true;
-
-  return (
-    value.startsWith("/2fa/") ||
-    value.startsWith("/mfa/") ||
-    value.startsWith("/otp/")
-  );
 }
 
 function normalizeTokenRoutePath(value = "") {
@@ -355,19 +333,23 @@ export function normalizePublicPath(path = DEFAULT_ROUTE) {
 }
 
 function normalizeUserSlug(value = "") {
-  const slug = cleanText(value, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
+  try {
+    return configNormalizeUserSlug(value) || "";
+  } catch {
+    const slug = cleanText(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/^\/+/, "")
+      .replace(/^@+/, "")
+      .split(/[/?#]/)[0]
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase();
 
-  if (!slug) return "";
+    if (!slug) return "";
 
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  }
 }
 
 export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
@@ -977,6 +959,9 @@ export function getHistorySnapshot(AppCore = null) {
       preservesTokenParamOnlyOnProtectedRoutes: true,
       stripsSensitiveAuthQueryKeys: true,
       stripsSensitiveAuthHashKeys: true,
+
+      blockedRoutesDelegatedToCoreConfig: true,
+      noLocalBlockedRouteList: true,
 
       snapshotRedacted: true,
     },

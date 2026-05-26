@@ -6,7 +6,9 @@
    - Helpers puros mínimos del Router.
    - Normalizar rutas públicas y canónicas.
    - Mantener /@{user.slug} como Home pública visible.
+   - Mantener /@{user.slug}/{ruta} como ruta privada visible.
    - Canonicalizar /@{user.slug} internamente como /.
+   - Canonicalizar /@{user.slug}/{ruta} internamente como /{ruta} sólo si la ruta es real.
    - Delegar rutas, token param, token routes, user-scope y bloqueos en core/config.js.
    - Rutas públicas actuales:
      /login
@@ -21,6 +23,7 @@
    - Sin history real.
    - Sin username public slug.
    - Sin aliases legacy.
+   - Sin rutas opcionales inventadas.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
@@ -42,7 +45,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_HELPERS_VERSION = "router.helpers.v3";
+export const ROUTER_HELPERS_VERSION = "router.helpers.v4.aligned-user-scope";
 
 export const ROUTER_CONFIG = Object.freeze({
   maxRouteLength: 2048,
@@ -95,6 +98,26 @@ const TOKEN_PATHS = new Set(
     .filter(Boolean)
 );
 
+const USER_SCOPED_CANONICAL_PATHS = new Set(
+  [
+    HOME,
+    CORE_ROUTES.incidencias || "/incidencias",
+    CORE_ROUTES.facturas || "/facturas",
+    CORE_ROUTES.clientes || "/clientes",
+    CORE_ROUTES.cuenta || "/cuenta",
+    CORE_ROUTES.ajustes || "/ajustes",
+
+    /*
+      Opcionales reales:
+      sólo entran si core/config.js las define.
+    */
+    CORE_ROUTES.usuarios || "",
+    CORE_ROUTES.servidor || CORE_ROUTES.server || "",
+  ]
+    .filter(Boolean)
+    .map((path) => normalizePath(path))
+);
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -114,13 +137,6 @@ function text(value = "", fallback = "") {
     .trim();
 
   return output || fallback;
-}
-
-function asArray(value) {
-  if (Array.isArray(value)) return value;
-  if (value === null || value === undefined || value === "") return [];
-
-  return [value];
 }
 
 function looksLikeAppCore(value) {
@@ -194,9 +210,13 @@ export function getRouteNames(AppCore = null) {
     CUENTA: routes.cuenta || CORE_ROUTES.cuenta || "/cuenta",
     AJUSTES: routes.ajustes || CORE_ROUTES.ajustes || "/ajustes",
 
-    USUARIOS: routes.usuarios || CORE_ROUTES.usuarios || "/usuarios",
-    SERVER: routes.server || routes.servidor || CORE_ROUTES.server || CORE_ROUTES.servidor || "/servidor",
-    SERVIDOR: routes.servidor || routes.server || CORE_ROUTES.servidor || CORE_ROUTES.server || "/servidor",
+    /*
+      Admin opcionales:
+      no se inventan. Si config no los define, quedan vacíos.
+    */
+    USUARIOS: routes.usuarios || CORE_ROUTES.usuarios || "",
+    SERVER: routes.server || routes.servidor || CORE_ROUTES.server || CORE_ROUTES.servidor || "",
+    SERVIDOR: routes.servidor || routes.server || CORE_ROUTES.servidor || CORE_ROUTES.server || "",
   };
 }
 
@@ -519,12 +539,21 @@ function userScopedInfo(path = HOME) {
     const info = getConfigUserScopedRouteInfo(path);
 
     if (isObject(info)) {
+      const pathname = stripSearchAndHash(path);
+      const restPath = normalizePathname(info.restPath || info.canonicalPath || HOME);
+      const lookupPath = normalizePathname(info.lookupPath || info.canonicalPath || info.restPath || HOME);
+
+      const routable = Object.prototype.hasOwnProperty.call(info, "routable")
+        ? Boolean(info.routable)
+        : USER_SCOPED_CANONICAL_PATHS.has(restPath);
+
       return {
         scoped: Boolean(info.scoped),
-        home: Boolean(info.home),
+        routable,
+        home: Boolean(info.home && routable),
         slug: sanitizeUserSlug(info.slug || ""),
-        restPath: normalizePathname(info.restPath || info.canonicalPath || HOME),
-        lookupPath: normalizePathname(info.lookupPath || info.canonicalPath || info.restPath || HOME),
+        restPath,
+        lookupPath: routable ? lookupPath : pathname,
       };
     }
   } catch {
@@ -536,6 +565,7 @@ function userScopedInfo(path = HOME) {
   if (!pathname.startsWith(USER_HOME_PREFIX)) {
     return {
       scoped: false,
+      routable: false,
       home: false,
       slug: "",
       restPath: pathname,
@@ -550,12 +580,15 @@ function userScopedInfo(path = HOME) {
     ? normalizePathname(`/${segments.join("/")}`)
     : HOME;
 
+  const routable = Boolean(slug && USER_SCOPED_CANONICAL_PATHS.has(restPath));
+
   return {
     scoped: Boolean(slug),
-    home: Boolean(slug && restPath === HOME),
+    routable,
+    home: Boolean(slug && routable && restPath === HOME),
     slug,
     restPath,
-    lookupPath: restPath,
+    lookupPath: routable ? restPath : pathname,
   };
 }
 
@@ -576,7 +609,8 @@ export function isUserScopedPath(path = HOME) {
   try {
     return configIsUserScopedRoute(path) === true;
   } catch {
-    return Boolean(userScopedInfo(path).scoped);
+    const info = userScopedInfo(path);
+    return Boolean(info.scoped && info.routable);
   }
 }
 
@@ -588,6 +622,16 @@ export function buildUserHomePath(slug = "") {
   } catch {
     return clean ? `${USER_HOME_PREFIX}${clean}` : HOME;
   }
+}
+
+function buildUserScopedPath(slug = "", canonicalPath = HOME) {
+  const cleanSlug = sanitizeUserSlug(slug);
+  const canonical = normalizeCanonicalPath(canonicalPath);
+
+  if (!cleanSlug) return canonical;
+  if (canonical === HOME) return buildUserHomePath(cleanSlug);
+
+  return `${USER_HOME_PREFIX}${cleanSlug}${canonical}`;
 }
 
 function userFromState(AppCore = null) {
@@ -644,7 +688,7 @@ export function getCurrentResolvedUsername(AppCore = null) {
 
 export function stripUsernamePrefix(first = null, second = undefined) {
   const { path } = resolvePathArgs(first, second, HOME);
-  return normalizePath(path);
+  return normalizeCanonicalPath(path);
 }
 
 /* =========================================================
@@ -666,12 +710,21 @@ export function normalizeCanonicalPath(first = null, second = undefined) {
 
     const scoped = userScopedInfo(pathname);
 
-    if (scoped.scoped) {
+    if (scoped.scoped && scoped.routable) {
       return isBlockedPath(scoped.lookupPath) ? HOME : scoped.lookupPath;
+    }
+
+    if (scoped.scoped && !scoped.routable) {
+      return pathname;
     }
 
     return pathname;
   }
+}
+
+function isUserScopedCanonicalPath(path = HOME) {
+  const canonical = normalizeCanonicalPath(path);
+  return USER_SCOPED_CANONICAL_PATHS.has(canonical);
 }
 
 export function isSameCanonicalPath(AppCore, a = HOME, b = HOME) {
@@ -765,12 +818,16 @@ export function isHashOnlyHref(href = "") {
 }
 
 export function isSlugCandidatePath(path = "") {
-  return isUserHomePath(path);
+  return isUserScopedPath(path) || isUserHomePath(path);
 }
 
 export function canUsePublicSlugForRoute(path = HOME) {
   const canonical = normalizeCanonicalPath(path);
-  return canonical === HOME || isUserHomePath(path);
+
+  return Boolean(
+    isUserScopedCanonicalPath(canonical) &&
+      !isPublicAuthCanonical(canonical)
+  );
 }
 
 export function resolveSpaHref(AppCore = null, href = HOME) {
@@ -921,17 +978,27 @@ export function buildPublicPath(
   const canonical = normalizeCanonicalPath(AppCore, canonicalPath || source);
   const suffix = getSearchAndHash(source);
 
+  const slug =
+    sanitizeUserSlug(opts.slug) ||
+    sanitizeUserSlug(opts.userSlug) ||
+    getCurrentUserSlug(AppCore);
+
   if (
     canonical === HOME &&
     opts.keepCanonicalHome !== true &&
     opts.useSlugHome !== false
   ) {
-    const slug =
-      sanitizeUserSlug(opts.slug) ||
-      sanitizeUserSlug(opts.userSlug) ||
-      getCurrentUserSlug(AppCore);
-
     return normalizePath(AppCore, `${buildUserHomePath(slug)}${suffix}`);
+  }
+
+  if (
+    canonical !== HOME &&
+    opts.useSlugPrivate !== false &&
+    slug &&
+    isUserScopedCanonicalPath(canonical) &&
+    !isPublicAuthCanonical(canonical)
+  ) {
+    return normalizePath(AppCore, `${buildUserScopedPath(slug, canonical)}${suffix}`);
   }
 
   return normalizePath(AppCore, `${canonical}${suffix}`);
@@ -1053,6 +1120,7 @@ export function getRouterHelpersSnapshot(AppCore = null) {
     resetConfirmPathToken: getResetConfirmTokenFromPath(currentPublicPath) ? "***" : null,
 
     routeNames: getRouteNames(AppCore),
+    userScopedCanonicalPaths: [...USER_SCOPED_CANONICAL_PATHS],
 
     policy: {
       helpersOnly: true,
@@ -1073,8 +1141,13 @@ export function getRouterHelpersSnapshot(AppCore = null) {
       tokenParam: TOKEN_PARAM,
 
       userSlugHome: true,
+      userSlugPrivateRoutes: true,
       canonicalizesUserHome: true,
+      canonicalizesOnlyKnownUserScopedRoutes: true,
+      publicAuthRoutesCannotLiveUnderUserScope: true,
       usernamePublicSlug: false,
+
+      optionalAdminRoutesNotInvented: true,
 
       noLegacyRoutes: true,
       noHomeRoute: true,

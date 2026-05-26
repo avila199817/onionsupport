@@ -8,13 +8,14 @@
    - Sin fetch.
    - Sin Auth.
    - Sin Router.
-   - Sin Store.
+   - Sin Store propio.
    - Sin Storage.
    - Sin UI.
    - Sólo online/offline.
+   - Bind/unbind idempotente.
 ========================================================= */
 
-export const NETWORK_VERSION = "simple";
+export const NETWORK_VERSION = "core.network.v2";
 export const NETWORK_SCOPE = "core:network";
 
 export const NETWORK_EVENTS = Object.freeze({
@@ -33,12 +34,20 @@ let setStateRef = null;
 
 const disposers = new Set();
 
+/* =========================================================
+   BASICS
+========================================================= */
+
 function isBrowser() {
   return typeof window !== "undefined" && typeof navigator !== "undefined";
 }
 
 function isFunction(value) {
   return typeof value === "function";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function emit(events, name, payload = {}) {
@@ -64,6 +73,10 @@ function emit(events, name, payload = {}) {
   return false;
 }
 
+/* =========================================================
+   READ
+========================================================= */
+
 function readOnline() {
   if (!isBrowser()) return null;
 
@@ -82,38 +95,51 @@ function statusFromOnline(online = null) {
 
 function buildPatch(online = readOnline()) {
   const status = statusFromOnline(online);
+  const offline = online === null ? null : !online;
 
   return {
     online,
-    offline: online === null ? null : !online,
+    offline,
+
     networkOnline: online,
-    networkOffline: online === null ? null : !online,
+    networkOffline: offline,
     networkStatus: status,
   };
 }
 
+/* =========================================================
+   WRITE
+========================================================= */
+
 function writeState(state = stateRef, patch = {}) {
-  if (!state || typeof state !== "object") return false;
+  if (!isObject(patch)) return false;
 
-  try {
-    Object.assign(state, patch);
-  } catch {
-    return false;
-  }
-
-  try {
-    if (isFunction(setStateRef)) {
+  /*
+    Si existe setState, lo usamos como vía preferente para no escribir dos veces.
+    Si no existe, mutamos stateRef de forma mínima por compat.
+  */
+  if (isFunction(setStateRef)) {
+    try {
       setStateRef(patch, {
         source: "core:network",
         silent: true,
         emit: false,
       });
+
+      return true;
+    } catch {
+      // Fallback a mutación directa abajo.
     }
-  } catch {
-    // noop
   }
 
-  return true;
+  if (!isObject(state)) return false;
+
+  try {
+    Object.assign(state, patch);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function sync(reason = "sync", shouldEmit = true) {
@@ -147,6 +173,10 @@ function sync(reason = "sync", shouldEmit = true) {
   return payload;
 }
 
+/* =========================================================
+   LISTENERS
+========================================================= */
+
 function addWindowListener(name, handler) {
   if (!isBrowser() || !isFunction(window.addEventListener)) {
     return () => false;
@@ -166,6 +196,7 @@ function addWindowListener(name, handler) {
     };
 
     disposers.add(dispose);
+
     return dispose;
   } catch {
     return () => false;
@@ -179,6 +210,10 @@ function handleOnline() {
 function handleOffline() {
   sync("offline", true);
 }
+
+/* =========================================================
+   PUBLIC API
+========================================================= */
 
 export function syncNetworkState({
   state = stateRef,
@@ -277,18 +312,44 @@ export function getNetworkSnapshot({ state = stateRef } = {}) {
 
   return {
     version: NETWORK_VERSION,
+
     bound,
+    listeners: disposers.size,
+
     online,
     offline: online === null ? null : !online,
     status: statusFromOnline(online),
+
     state: {
       online: state?.online ?? null,
       offline: state?.offline ?? null,
+      networkOnline: state?.networkOnline ?? null,
+      networkOffline: state?.networkOffline ?? null,
       networkStatus: state?.networkStatus || "",
     },
-    listeners: disposers.size,
+
+    policy: {
+      minimalNetworkCompat: true,
+      onlineOfflineOnly: true,
+
+      noFetch: true,
+      noAuth: true,
+      noRouter: true,
+      noStorage: true,
+      noUi: true,
+
+      setStatePreferred: true,
+      directMutationOnlyAsFallback: true,
+
+      bindIdempotent: true,
+      unbindSupported: true,
+    },
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   NETWORK_VERSION,

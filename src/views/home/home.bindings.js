@@ -11,6 +11,7 @@
    - Solicitar rerender tras cambios de estado si HomeView pasa callback.
    - Limpiar listeners por scope.
    - Evitar doble binding tras rerender.
+   - Mantener binding idempotente si el root no cambia.
    - Busy state durante acciones async.
    - Rutas base desde core/config.js.
    - Bloqueos de rutas desde core/config.js.
@@ -36,18 +37,53 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const HOME_BINDINGS_VERSION = "home.bindings.v7";
+export const HOME_BINDINGS_VERSION = "home.bindings.v8.stable-delegation";
 
 const DEFAULT_SCOPE = "view:home";
 
 const ACTIONS = Object.freeze({
-  refresh: new Set(["refresh", "retry"]),
-  exportCsv: new Set(["export_csv"]),
+  refresh: new Set([
+    "refresh",
+    "retry",
+    "reload",
+    "refresh_home",
+    "home_refresh",
+  ]),
 
-  copyId: new Set(["copy_widget_id"]),
+  exportCsv: new Set([
+    "export",
+    "export_csv",
+    "export_home",
+    "export_home_csv",
+    "home_export",
+    "home_export_csv",
+  ]),
 
-  navigate: new Set(["navigate_home"]),
-  create: new Set(["create_incidencia"]),
+  copyId: new Set([
+    "copy",
+    "copy_id",
+    "copy_widget_id",
+    "copy_home_id",
+    "copy_ticket_id",
+    "copy_incidencia_id",
+  ]),
+
+  navigate: new Set([
+    "navigate",
+    "navigate_home",
+    "go",
+    "go_to",
+    "open_route",
+  ]),
+
+  create: new Set([
+    "create",
+    "new",
+    "create_incidencia",
+    "new_incidencia",
+    "open_create",
+    "open_create_incidencia",
+  ]),
 
   ticketOpen: new Set([
     "open_ticket_detail",
@@ -56,6 +92,8 @@ const ACTIONS = Object.freeze({
     "incidencia_detail",
     "detail_ticket",
     "detail_incidencia",
+    "open_ticket",
+    "open_incidencia",
   ]),
 
   ticketClose: new Set([
@@ -64,9 +102,24 @@ const ACTIONS = Object.freeze({
     "close_detail",
   ]),
 
-  pagePrev: new Set(["prev_page"]),
-  pageNext: new Set(["next_page"]),
-  pageGo: new Set(["page"]),
+  pagePrev: new Set([
+    "prev_page",
+    "previous_page",
+    "page_prev",
+    "prev",
+  ]),
+
+  pageNext: new Set([
+    "next_page",
+    "page_next",
+    "next",
+  ]),
+
+  pageGo: new Set([
+    "page",
+    "go_page",
+    "set_page",
+  ]),
 });
 
 const ACTION_RESULT_TYPES = Object.freeze({
@@ -120,7 +173,9 @@ const KEYBOARD_SELECTOR = [
   "[tabindex][data-href]",
 ].join(",");
 
-const TICKET_ROW_SELECTOR = "[data-ticket-row], [data-ticket-id], [data-incidencia-id]";
+const TICKET_ROW_SELECTOR =
+  "[data-ticket-row], [data-ticket-id], [data-incidencia-id]";
+
 const TICKET_MODAL_SELECTOR = "[data-home-modal='ticket-detail']";
 
 const cleanupsByScope = new Map();
@@ -274,6 +329,10 @@ function sanitizePayload(value = {}) {
    SAFE IDS
 ========================================================= */
 
+function hasSensitiveQuery(value = "") {
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
+}
+
 function safePublicId(value = "") {
   const text = safeText(value, "");
 
@@ -289,10 +348,6 @@ function safePublicId(value = "") {
 /* =========================================================
    ROUTES
 ========================================================= */
-
-function hasSensitiveQuery(value = "") {
-  return SENSITIVE_QUERY_RE.test(String(value || ""));
-}
 
 function routeInput(value = "") {
   const raw = safeText(value, "");
@@ -428,6 +483,9 @@ function cleanupScope(scope = DEFAULT_SCOPE) {
   const name = scopeName(scope);
   const list = cleanupsByScope.get(name) || [];
 
+  cleanupsByScope.delete(name);
+  rootsByScope.delete(name);
+
   for (const cleanup of list) {
     try {
       cleanup();
@@ -435,9 +493,6 @@ function cleanupScope(scope = DEFAULT_SCOPE) {
       // noop
     }
   }
-
-  cleanupsByScope.delete(name);
-  rootsByScope.delete(name);
 
   return true;
 }
@@ -452,6 +507,22 @@ function addCleanup(scope = DEFAULT_SCOPE, cleanup = null) {
   cleanupsByScope.set(name, list);
 
   return true;
+}
+
+function getCleanupCount(scope = DEFAULT_SCOPE) {
+  const name = scopeName(scope);
+  return cleanupsByScope.get(name)?.length || 0;
+}
+
+function scopeIsBoundToRoot(scope = DEFAULT_SCOPE, root = null) {
+  const name = scopeName(scope);
+
+  return Boolean(
+    isElement(root) &&
+      rootsByScope.get(name) === root &&
+      getCleanupCount(name) > 0 &&
+      root.isConnected !== false
+  );
 }
 
 function listen(scope, target, eventName = "", handler = null, options = undefined) {
@@ -890,10 +961,6 @@ async function applyStatePatch(patch = {}, result = {}, api = {}) {
 
   if (!Object.keys(cleanPatch).length) return false;
 
-  const currentState = isFunction(api.getState)
-    ? safeObject(await api.getState(), {})
-    : {};
-
   const appliedBySpecificPatchHandler = await callFirstAvailable(
     [
       api.onStatePatch,
@@ -908,6 +975,15 @@ async function applyStatePatch(patch = {}, result = {}, api = {}) {
     await requestHomeRender(api, result);
     return true;
   }
+
+  const needsCurrentState = Boolean(
+    isFunction(api.reduceHomeActionState) ||
+      isFunction(api.setState)
+  );
+
+  const currentState = needsCurrentState && isFunction(api.getState)
+    ? safeObject(await api.getState(), {})
+    : {};
 
   if (
     isFunction(api.reduceHomeActionState) &&
@@ -1354,6 +1430,7 @@ async function dispatchAction(event = null, element = null, api = {}, root = nul
 export function bindHomeEvents({
   scope = DEFAULT_SCOPE,
   container = null,
+  force = false,
 
   reload,
   refresh,
@@ -1399,11 +1476,15 @@ export function bindHomeEvents({
   const name = scopeName(scope);
   const root = getContainer(container);
 
-  cleanupScope(name);
-
   if (!isElement(root)) {
     return () => false;
   }
+
+  if (force !== true && scopeIsBoundToRoot(name, root)) {
+    return () => cleanupScope(name);
+  }
+
+  cleanupScope(name);
 
   rootsByScope.set(name, root);
 
@@ -1520,6 +1601,7 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
     cleanupCount: cleanupsByScope.get(name)?.length || 0,
     hasContainer: Boolean(root),
     containerConnected: Boolean(root?.isConnected),
+    stableBindingActive: scopeIsBoundToRoot(name, root),
 
     actions: {
       refresh: [...ACTIONS.refresh],
@@ -1540,6 +1622,8 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
 
     policy: {
       delegatedDomEventsOnly: true,
+      stableSameRootBinding: true,
+      noDuplicateBindingForSameRoot: true,
 
       noAppCore: true,
       noGlobalEvents: true,

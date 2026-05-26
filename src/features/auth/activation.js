@@ -46,11 +46,11 @@ import {
   normalizeUser as normalizeSessionUser,
 } from "./session.js";
 
-export const ACTIVATION_MODULE_VERSION = "auth.activation.v5";
+export const ACTIVATION_MODULE_VERSION = "auth.activation.v6";
 
 const SOURCE = "auth.activation";
 
-const ENDPOINT = AUTH_ENDPOINTS.activate || AUTH_ENDPOINTS.activateAccount;
+const ENDPOINT = AUTH_ENDPOINTS.activateAccount || AUTH_ENDPOINTS.activate;
 const DEFAULT_LOGIN_REDIRECT = ROUTES.login || "/login";
 const HOME_ROUTE = ROUTES.home || "/";
 
@@ -126,7 +126,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function payloadValue(payload = {}, names = []) {
@@ -305,6 +306,32 @@ function validateActivationPayload(payload = {}) {
   return "";
 }
 
+export function validateActivationToken(payload = {}) {
+  const token = resolveActivationToken(payload);
+
+  return {
+    version: ACTIVATION_MODULE_VERSION,
+
+    ok: Boolean(token),
+    valid: Boolean(token),
+    hasToken: Boolean(token),
+
+    token: null,
+
+    message: token ? "" : "No se recibió token de activación.",
+
+    policy: {
+      localFormatOnly: true,
+      noValidateEndpoint: true,
+      noFetch: true,
+      noStorage: true,
+      noRouter: true,
+      noToast: true,
+      tokenRedacted: true,
+    },
+  };
+}
+
 /* =========================================================
    USER / SESSION DELEGATES
 ========================================================= */
@@ -444,7 +471,12 @@ function publicUser(user = null) {
 
   if (!clean) return null;
 
-  const avatar = clean.avatarUrl || clean.avatar || clean.picture || clean.photoUrl || "";
+  const avatar =
+    clean.avatarUrl ||
+    clean.avatar ||
+    clean.picture ||
+    clean.photoUrl ||
+    "";
 
   return {
     id: clean.id || clean.userId || null,
@@ -464,7 +496,7 @@ function publicUser(user = null) {
 }
 
 /* =========================================================
-   RESPONSE NORMALIZATION
+   RESPONSE READERS
 ========================================================= */
 
 function nested(payload = {}) {
@@ -630,6 +662,10 @@ function readSession(payload = {}, user = null) {
   return null;
 }
 
+/* =========================================================
+   RESPONSE NORMALIZATION
+========================================================= */
+
 function responseNode(input = {}) {
   const source = isObject(input) ? input : {};
 
@@ -674,7 +710,7 @@ function responseMessage(input = {}, fallback = "") {
 
 function responseCode(input = {}) {
   const source = responseNode(input);
-  return cleanText(source.code || source.errorCode || "", "");
+  return cleanText(source.code || source.errorCode || source.error_code || "", "");
 }
 
 function responseStatus(input = {}) {
@@ -703,40 +739,59 @@ function normalizeRedirectPath(value = "", fallback = DEFAULT_LOGIN_REDIRECT) {
   return normalized || fallbackPath;
 }
 
-export function normalizeActivationResponse(input = {}) {
-  const ok = responseOk(input);
+function responseRedirect(input = {}, user = null) {
+  const source = responseNode(input);
 
-  const token = readToken(input);
-  const refreshToken = readRefreshToken(input);
+  const candidate = first(
+    source.redirectTo,
+    source.redirect,
+    source.next,
+    source.nextPath,
+    source.location,
+    source.homePath,
+    source.defaultHome,
+    ""
+  );
+
+  const clean = normalizeRedirectPath(candidate, "");
+
+  if (isUserHomePath(clean)) return clean;
+
+  const home = buildUserHomePath(user);
+
+  if (isUserHomePath(home)) return home;
+
+  return DEFAULT_LOGIN_REDIRECT;
+}
+
+export function normalizeActivationResponse(input = {}) {
   const user = readUser(input);
   const session = readSession(input, user);
+  const token = readToken(input);
+  const refreshToken = readRefreshToken(input);
 
-  const authenticated = Boolean(ok && token && user);
-  const homePath = authenticated ? buildUserHomePath(user) : HOME_ROUTE;
+  const hasSessionPayload = Boolean(token && user);
+  const ok = responseOk(input) || hasSessionPayload;
+  const activated = Boolean(ok && !responseCode(input));
 
-  const redirectTo = authenticated
-    ? homePath
-    : normalizeRedirectPath(
-        responseNode(input).redirectTo ||
-          responseNode(input).redirect ||
-          responseNode(input).returnTo ||
-          DEFAULT_LOGIN_REDIRECT,
-        DEFAULT_LOGIN_REDIRECT
-      );
+  const homePath = user ? buildUserHomePath(user) : HOME_ROUTE;
+  const redirectTo = hasSessionPayload
+    ? responseRedirect(input, user)
+    : normalizeRedirectPath(responseRedirect(input, user), DEFAULT_LOGIN_REDIRECT);
 
   return {
     ok,
     success: ok,
-    activated: ok,
+    activated,
     error: !ok,
 
-    authenticated,
+    authenticated: false,
+    sessionApplied: false,
 
     message: responseMessage(
       input,
-      ok ? "La cuenta se ha activado correctamente." : "No se pudo activar la cuenta."
+      ok ? "Cuenta activada correctamente." : "No se pudo activar la cuenta."
     ),
-
     code: responseCode(input),
     status: responseStatus(input),
 
@@ -744,23 +799,22 @@ export function normalizeActivationResponse(input = {}) {
 
     homePath,
     defaultHome: homePath,
-    postLoginTarget: authenticated ? homePath : redirectTo,
+    postLoginTarget: hasSessionPayload ? homePath : redirectTo,
 
-    token: authenticated ? token : null,
-    accessToken: authenticated ? token : null,
-    access_token: authenticated ? token : null,
+    token,
+    accessToken: token,
+    access_token: token,
 
-    refreshToken: authenticated && refreshToken ? refreshToken : null,
-    refresh_token: authenticated && refreshToken ? refreshToken : null,
+    refreshToken: refreshToken || "",
+    refresh_token: refreshToken || "",
 
-    user: authenticated ? user : null,
-    usuario: authenticated ? user : null,
-    me: authenticated ? user : null,
+    user,
+    usuario: user,
+    me: user,
 
-    session: authenticated ? session : null,
-    sessionData: authenticated ? session : null,
+    session,
+    sessionData: session,
 
-    sessionApplied: false,
     at: nowIso(),
   };
 }
@@ -769,21 +823,21 @@ export function normalizeActivationResponse(input = {}) {
    HTTP
 ========================================================= */
 
-function publicOptions(options = {}) {
-  return {
+async function postActivation(body = {}, options = {}) {
+  const requestOptions = {
     ...options,
 
-    public: true,
     auth: false,
+    public: true,
     skipAuth: true,
     noAuthHeader: true,
 
-    storeError: false,
+    cache: "no-store",
   };
-}
 
-async function postActivation(body = {}, options = {}) {
-  const requestOptions = publicOptions(options);
+  if (isFunction(CoreHttp?.activateAccount)) {
+    return CoreHttp.activateAccount(body, requestOptions);
+  }
 
   if (isFunction(CoreHttp?.activate)) {
     return CoreHttp.activate(body, requestOptions);
@@ -937,13 +991,17 @@ export async function activateAccount(payload = {}, options = {}) {
 
       const result = normalizeActivationResponse(raw);
 
-      if (result.authenticated && result.token && result.user) {
+      /*
+        Sólo aplica sesión si backend devuelve access token + user usable.
+        No hay refresh ni restore aquí.
+      */
+      if (result.token && result.user) {
         try {
           const snapshot = applySession(
             {
               token: result.token,
-              accessToken: result.token,
-              access_token: result.token,
+              accessToken: result.accessToken,
+              access_token: result.access_token,
 
               refreshToken: result.refreshToken || undefined,
               refresh_token: result.refresh_token || undefined,
@@ -1019,7 +1077,12 @@ export function getActivationSnapshot() {
     },
 
     transport: {
-      hasCoreHttp: Boolean(CoreHttp?.activate || CoreHttp?.post || CoreHttp?.request),
+      hasCoreHttp: Boolean(
+        CoreHttp?.activateAccount ||
+          CoreHttp?.activate ||
+          CoreHttp?.post ||
+          CoreHttp?.request
+      ),
       ownFetch: false,
       ownApiClient: false,
       ownRouter: false,
@@ -1078,6 +1141,8 @@ export default {
   ACTIVATION_MODULE_VERSION,
 
   activateAccount,
+
+  validateActivationToken,
 
   resolveActivationToken,
   extractActivationToken,

@@ -451,20 +451,15 @@ function parseSpanishDate(value = "") {
 
   if (!match) return null;
 
-  const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"];
-  const parts = text.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
-  );
-
-  if (!parts) return null;
+  const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = match;
 
   const date = new Date(
-    Number(parts[3]),
-    Number(parts[2]) - 1,
-    Number(parts[1]),
-    Number(parts[4] || hh),
-    Number(parts[5] || min),
-    Number(parts[6] || ss)
+    Number(yyyy),
+    Number(mm) - 1,
+    Number(dd),
+    Number(hh),
+    Number(min),
+    Number(ss)
   );
 
   return Number.isNaN(date.getTime()) ? null : date;

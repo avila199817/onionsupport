@@ -4,7 +4,9 @@
 
    Responsabilidad:
    - Gestionar apertura/cierre del dropdown de cuenta del sidebar.
+   - Aceptar contexto { AppCore, root } desde index.js.
    - Abrir el sidebar antes de abrir el dropdown si está collapsed.
+   - Sincronizar estado runtime/Core delegando en state.js.
    - Sin crear DOM.
    - Sin navegar.
    - Sin hacer logout.
@@ -34,7 +36,7 @@ import {
   openSidebar as openRuntimeSidebar,
 } from "./state.js";
 
-export const SIDEBAR_DROPDOWN_VERSION = "sidebar.dropdown.v5";
+export const SIDEBAR_DROPDOWN_VERSION = "sidebar.dropdown.v6.context-aware-open";
 
 const DROPDOWN_KEY = "account";
 
@@ -104,7 +106,7 @@ function eventElement(target = null) {
 }
 
 /* =========================================================
-   DOM RESOLUTION
+   OPTIONS / CONTEXT
 ========================================================= */
 
 function getTargetElement(value = null) {
@@ -116,6 +118,33 @@ function getTargetElement(value = null) {
   if (isElement(value?.menu)) return value.menu;
 
   return null;
+}
+
+function normalizeOptions(value = null, options = {}) {
+  if (isEvent(value)) {
+    return {
+      ...options,
+      event: value,
+      target: eventElement(value.target),
+    };
+  }
+
+  if (isElement(value)) {
+    return {
+      ...options,
+      root: value,
+      target: value,
+    };
+  }
+
+  if (isObject(value)) {
+    return {
+      ...value,
+      ...options,
+    };
+  }
+
+  return isObject(options) ? options : {};
 }
 
 function resolveRoot(value = null) {
@@ -131,6 +160,10 @@ function resolveRoot(value = null) {
 
   return getSidebarRoot();
 }
+
+/* =========================================================
+   DOM RESOLUTION
+========================================================= */
 
 function getTrigger(root = null) {
   try {
@@ -217,12 +250,10 @@ function ensureSidebarOpen(root = null, options = {}) {
   }
 
   try {
-    openRuntimeSidebar({
+    return openRuntimeSidebar({
       root,
       AppCore: options.AppCore || null,
-    });
-
-    return true;
+    }) === true;
   } catch {
     return false;
   }
@@ -320,33 +351,6 @@ function setDomState(root = null, open = false) {
   return true;
 }
 
-function normalizeOptions(value = null, options = {}) {
-  if (isEvent(value)) {
-    return {
-      ...options,
-      event: value,
-      target: eventElement(value.target),
-    };
-  }
-
-  if (isElement(value)) {
-    return {
-      ...options,
-      root: value,
-      target: value,
-    };
-  }
-
-  if (isObject(value)) {
-    return {
-      ...value,
-      ...options,
-    };
-  }
-
-  return isObject(options) ? options : {};
-}
-
 /* =========================================================
    GLOBAL HANDLERS
 ========================================================= */
@@ -437,8 +441,9 @@ function attachGlobalHandlers(root = null) {
    A11Y
 ========================================================= */
 
-export function syncDropdownA11y(value = null) {
-  const root = resolveRoot(value);
+export function syncDropdownA11y(value = null, options = {}) {
+  const opts = normalizeOptions(value, options);
+  const root = resolveRoot(opts);
   const trigger = getTrigger(root);
   const menu = getMenu(root);
 
@@ -475,8 +480,8 @@ export function setDropdownOpen(open = false, options = {}) {
 
   const nextOpen = Boolean(open);
 
-  if (nextOpen) {
-    ensureSidebarOpen(root, opts);
+  if (nextOpen && !ensureSidebarOpen(root, opts)) {
+    return false;
   }
 
   if (!setDomState(root, nextOpen)) return false;
@@ -555,7 +560,10 @@ export function bindSidebarDropdown(value = null) {
     return () => false;
   }
 
-  boundRootOptions.set(root, opts);
+  boundRootOptions.set(root, {
+    ...opts,
+    root,
+  });
 
   if (boundRoots.has(root)) {
     return boundRoots.get(root);
@@ -613,7 +621,10 @@ export function bindSidebarDropdown(value = null) {
     return () => false;
   }
 
-  syncDropdownA11y(root);
+  syncDropdownA11y({
+    ...opts,
+    root,
+  });
 
   const cleanup = () => {
     try {
@@ -679,6 +690,7 @@ export function getDropdownSnapshot(value = null) {
   const trigger = getTrigger(root);
   const menu = getMenu(root);
   const open = isDropdownOpen(root);
+  const rootOptions = root ? boundRootOptions.get(root) || null : null;
 
   return {
     version: SIDEBAR_DROPDOWN_VERSION,
@@ -692,6 +704,8 @@ export function getDropdownSnapshot(value = null) {
     hasTrigger: Boolean(trigger),
     hasMenu: Boolean(menu),
 
+    hasAppCoreContext: Boolean(rootOptions?.AppCore),
+
     rootCollapsed: root ? rootIsCollapsed(root) : null,
     runtimeSidebarOpen: getSidebarOpen(),
 
@@ -702,7 +716,11 @@ export function getDropdownSnapshot(value = null) {
 
     policy: {
       dropdownOnly: true,
+      acceptsContextObject: true,
+      acceptsAppCoreFromSidebarIndex: true,
       opensSidebarBeforeDropdown: true,
+      requiresSidebarOpenBeforeDropdown: true,
+      syncsRuntimeAndCoreViaState: true,
 
       ownNavigation: false,
       ownLogout: false,

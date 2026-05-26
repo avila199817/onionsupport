@@ -34,7 +34,7 @@ import {
   openSidebar as openRuntimeSidebar,
 } from "./state.js";
 
-export const SIDEBAR_DROPDOWN_VERSION = "sidebar.dropdown.v4";
+export const SIDEBAR_DROPDOWN_VERSION = "sidebar.dropdown.v5";
 
 const DROPDOWN_KEY = "account";
 
@@ -647,11 +647,25 @@ export const bind = bindSidebarDropdown;
 export function unbindSidebarDropdown(value = null) {
   const root = resolveRoot(value);
 
-  if (!isElement(root)) return false;
+  if (!isElement(root)) {
+    if (activeRoot) {
+      closeAllDropdowns();
+    }
+
+    return false;
+  }
 
   const cleanup = boundRoots.get(root);
 
-  if (!cleanup) return false;
+  if (!cleanup) {
+    if (activeRoot === root) {
+      detachGlobalHandlers();
+      setDomState(root, false);
+    }
+
+    boundRootOptions.delete(root);
+    return false;
+  }
 
   return cleanup();
 }
@@ -708,6 +722,9 @@ export function getDropdownSnapshot(value = null) {
       closesOnEscape: true,
       closesWhenMenuItemClicked: true,
       doesNotHandleNavigationOrLogout: true,
+
+      noSensitiveData: true,
+      snapshotRedacted: true,
     },
   };
 }

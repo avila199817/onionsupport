@@ -18,7 +18,9 @@
    - Clientes / Usuarios / Servidor pasan como adminOnly desde rutas.
    - visibility.js oculta items admin para rol user.
    - Router/guards bloquean acceso directo a rutas admin.
-   - Rebuild limpio del DOM desde template.js en cada sync válido.
+   - Rebuild limpio del DOM desde template.js cuando cambia el contexto visible.
+   - Evitar rebuild completo si ruta/usuario/items no cambian.
+   - Mantener sync de estado/visibilidad aunque se omita rebuild.
    - Snapshot de usuario completo para consumo interno de Home.
    - Bloqueos delegados en sidebar/constants.js -> core/config.js.
    - Sin HTML duplicado.
@@ -111,9 +113,10 @@ import {
   unbindSidebarDropdown,
 } from "./dropdown.js";
 
-export const SIDEBAR_UI_VERSION = "sidebar.ui.v11";
+export const SIDEBAR_UI_VERSION = "sidebar.ui.v12.optimized-sync";
 
 let syncing = false;
+let lastRenderSignature = "";
 
 /* =========================================================
    BASICS
@@ -575,6 +578,74 @@ function sidebarItems(context = getContext()) {
 }
 
 /* =========================================================
+   RENDER SIGNATURE
+========================================================= */
+
+function userRenderSignature(user = null) {
+  if (!isObject(user) || user.hasUser !== true) {
+    return {
+      hasUser: false,
+    };
+  }
+
+  return {
+    hasUser: true,
+
+    id: user.id || null,
+    userId: user.userId || null,
+    slug: user.slug || null,
+    username: user.username || "",
+
+    displayName: user.displayName || "",
+    role: user.role || "",
+    roleLabel: user.roleLabel || "",
+
+    avatarUrl: user.avatarUrl || "",
+    initials: user.initials || "",
+
+    isAdmin: user.isAdmin === true,
+    isUser: user.isUser === true,
+  };
+}
+
+function itemRenderSignature(items = []) {
+  return (Array.isArray(items) ? items : []).map((item) => ({
+    key: item.key || "",
+    href: item.href || "",
+    label: item.label || "",
+    icon: item.icon || "",
+    active: item.active === true,
+    adminOnly: item.adminOnly === true,
+    requiredRole: item.requiredRole || "",
+    requiredRoles: Array.isArray(item.requiredRoles)
+      ? item.requiredRoles.join(",")
+      : String(item.requiredRoles || ""),
+  }));
+}
+
+function buildRenderSignature(context = {}, items = []) {
+  try {
+    return JSON.stringify({
+      publicPath: context.publicPath || "",
+      canonicalPath: context.canonicalPath || "",
+      role: context.role || "",
+
+      authenticated: context.authenticated === true,
+      hasSession: context.hasSession === true,
+
+      user: userRenderSignature(context.user),
+      items: itemRenderSignature(items),
+    });
+  } catch {
+    /*
+      Si por cualquier motivo no se puede serializar una firma estable,
+      forzamos rebuild antes que reutilizar un DOM potencialmente obsoleto.
+    */
+    return `unstable:${Date.now()}`;
+  }
+}
+
+/* =========================================================
    CORE REGISTRATION
 ========================================================= */
 
@@ -648,6 +719,8 @@ function hideCurrentSidebar() {
     hideSidebarRoot(root);
   }
 
+  lastRenderSignature = "";
+
   markSidebarUnmounted(AppCore);
   clearSidebarDomCache(AppCore);
 
@@ -665,12 +738,46 @@ function bindRenderedSidebar(root = null) {
     sync,
   });
 
-  bindSidebarDropdown(root);
+  bindSidebarDropdown({
+    AppCore,
+    root,
+  });
 
   return true;
 }
 
-function renderSidebar(context = getContext()) {
+function syncExistingSidebar(context = {}, signature = "") {
+  const root = getSidebarRoot();
+
+  if (!isElement(root)) return false;
+
+  setSidebarRoot(root, AppCore);
+  cacheSidebarDom(AppCore, root);
+
+  syncSidebarState({
+    AppCore,
+    root,
+  });
+
+  syncSidebarVisibility({
+    ...context,
+    root,
+  });
+
+  bindRenderedSidebar(root);
+
+  markSidebarMounted(root, AppCore);
+
+  lastRenderSignature = signature;
+
+  return true;
+}
+
+function renderSidebar(context = getContext(), preparedItems = null, signature = "") {
+  const items = Array.isArray(preparedItems)
+    ? preparedItems
+    : sidebarItems(context);
+
   unbindAllSidebarDom();
 
   /*
@@ -685,7 +792,7 @@ function renderSidebar(context = getContext()) {
     brandLabel: SIDEBAR_BRAND_LABEL,
     brandHref: userHomeHref(context, SIDEBAR_BRAND_HREF),
     open: getSidebarOpen(),
-    items: sidebarItems(context),
+    items,
     user: context.user,
   });
 
@@ -712,6 +819,8 @@ function renderSidebar(context = getContext()) {
 
   markSidebarMounted(mountedRoot, AppCore);
 
+  lastRenderSignature = signature || buildRenderSignature(context, items);
+
   return true;
 }
 
@@ -729,7 +838,21 @@ function sync() {
       return api;
     }
 
-    if (!renderSidebar(context)) {
+    const items = sidebarItems(context);
+    const signature = buildRenderSignature(context, items);
+    const root = getSidebarRoot();
+
+    if (
+      signature &&
+      signature === lastRenderSignature &&
+      isElement(root) &&
+      syncExistingSidebar(context, signature)
+    ) {
+      return api;
+    }
+
+    if (!renderSidebar(context, items, signature)) {
+      lastRenderSignature = "";
       markSidebarUnmounted(AppCore);
     }
 
@@ -757,6 +880,11 @@ async function navigateTo(path = HOME_ROUTE, options = {}) {
     ...options,
   });
 
+  /*
+    Router suele sincronizar el chrome/sidebar tras render.
+    Este sync queda como garantía para consumidores directos de SidebarUI.navigateTo().
+    Si no cambió el contexto visible, no reconstruye DOM completo.
+  */
   sync();
 
   return ok;
@@ -868,6 +996,8 @@ function destroy() {
     hideSidebarRoot(root);
   }
 
+  lastRenderSignature = "";
+
   resetSidebarState(AppCore);
   clearSidebarDomCache(AppCore);
   unregisterModule();
@@ -893,6 +1023,8 @@ function getSnapshot() {
     open: state.open,
     collapsed: state.collapsed,
     logoutInFlight: getSidebarLogoutInFlight(),
+
+    renderSignatureCached: Boolean(lastRenderSignature),
 
     publicPath: redact(context.publicPath),
     canonicalPath: redact(context.canonicalPath),
@@ -963,7 +1095,9 @@ function getSnapshot() {
 
       usesRouterRoutes: true,
       usesTemplate: true,
-      rebuildsTemplateDomOnSync: true,
+      rebuildsTemplateDomWhenRenderSignatureChanges: true,
+      skipsFullDomRebuildWhenRenderSignatureUnchanged: true,
+      stillSyncsStateAndVisibilityOnSkippedRebuild: true,
       clearsDomCacheBeforeRender: true,
 
       usesUserViewModel: true,
@@ -979,6 +1113,7 @@ function getSnapshot() {
       usesActions: true,
       usesDelegatedEvents: true,
       usesDropdown: true,
+      passesAppCoreToDropdown: true,
 
       blockedRoutesDelegatedToConstantsAndCoreConfig: true,
       noLocalBlockedRouteList: true,

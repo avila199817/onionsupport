@@ -26,9 +26,10 @@
 import {
   SIDEBAR_ROLE_ADMIN,
   SIDEBAR_ROLE_USER,
+  normalizeSidebarSlug,
 } from "./constants.js";
 
-export const SIDEBAR_USER_VERSION = "sidebar.user.v9";
+export const SIDEBAR_USER_VERSION = "sidebar.user.v10";
 
 const DEFAULT_NAME = "Usuario";
 const DEFAULT_INITIALS = "U";
@@ -164,7 +165,7 @@ function safeCall(fn = null, ...args) {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
     String(value || "")
   );
 }
@@ -334,19 +335,7 @@ function payloadDecorators(payload = null) {
 ========================================================= */
 
 export function normalizeSidebarUserSlug(value = "") {
-  const slug = text(value, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
-
-  if (!slug) return "";
-
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  return normalizeSidebarSlug(value);
 }
 
 export function getSidebarUserSlug(user = null) {
@@ -1042,6 +1031,7 @@ export function getSidebarUserSnapshot(context = {}) {
 
       noEmailIdentity: true,
       noSlugFabrication: true,
+      slugNormalizationDelegatedToSidebarConstantsAndCoreConfig: true,
 
       mergesUserDecorations: true,
       supportsProfileAvatarOutsideUserObject: true,

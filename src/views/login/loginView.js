@@ -1,28 +1,35 @@
 /* =========================================================
-   Onion SPA - Login View Legacy Bridge
-   Archivo: src/views/loginView.js
+   Onion Support - Login View Legacy Bridge
+   Archivo: /src/views/loginView.js
 
    Responsabilidad:
    - Mantener compatibilidad con imports antiguos.
-   - Delegar en src/views/login/index.js.
-   - Sin Auth.
-   - Sin Router.
-   - Sin Shell.
-   - Sin Loader.
-   - Sin eventos.
-   - Sin DOM propio.
-   - Sin debug pesado.
+   - Delegar en /src/views/login/index.js.
+   - No poseer lógica de login.
+   - No renderizar DOM propio.
+   - No leer Auth.
+   - No leer Router.
+   - No tocar Shell.
+   - No tocar Loader.
+   - No emitir eventos.
+   - No hacer navegación.
+   - No hacer storage.
+   - No hacer HTTP.
+   - No hacer Toast.
+   - Sin rutas.
+   - Sin /home.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import * as LoginModule from "./login/index.js";
 
-export const LOGIN_VIEW_BRIDGE_VERSION = "minimal-1";
+export const LOGIN_VIEW_BRIDGE_VERSION = "login.view.bridge.v2";
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
-function isFn(value) {
+function isFunction(value) {
   return typeof value === "function";
 }
 
@@ -34,21 +41,21 @@ function call(methods = [], args = [], options = {}) {
   const api = getApi();
 
   for (const method of methods) {
-    if (isFn(LoginModule[method])) {
+    if (isFunction(LoginModule?.[method])) {
       return LoginModule[method](...args);
     }
 
-    if (isFn(api?.[method])) {
+    if (isFunction(api?.[method])) {
       return api[method](...args);
     }
   }
 
-  if (options.allowCallable === true && isFn(api)) {
+  if (options.allowCallable === true && isFunction(api)) {
     return api(...args);
   }
 
   if (options.required === true) {
-    throw new Error("[loginView] src/views/login/index.js no expone render/init/mount válido.");
+    throw new Error("[loginView] /src/views/login/index.js no expone render/init/mount válido.");
   }
 
   return null;
@@ -90,28 +97,53 @@ export const dispose = destroy;
 export const teardown = destroy;
 
 /* =========================================================
-   SNAPSHOT MÍNIMO
+   SNAPSHOT
 ========================================================= */
 
 export function getSnapshot() {
   const api = getApi();
 
-  if (isFn(LoginModule.getSnapshot)) return LoginModule.getSnapshot();
-  if (isFn(api?.getSnapshot)) return api.getSnapshot();
+  if (isFunction(LoginModule.getSnapshot)) return LoginModule.getSnapshot();
+  if (isFunction(api?.getSnapshot)) return api.getSnapshot();
 
   return {
     version: LOGIN_VIEW_BRIDGE_VERSION,
+
     delegated: true,
-    target: "src/views/login/index.js",
+    target: "/src/views/login/index.js",
+
     hasRenderer: Boolean(
-      isFn(LoginModule.render) ||
-        isFn(LoginModule.init) ||
-        isFn(LoginModule.mount) ||
-        isFn(api?.render) ||
-        isFn(api?.init) ||
-        isFn(api?.mount) ||
-        isFn(api)
+      isFunction(LoginModule.render) ||
+        isFunction(LoginModule.init) ||
+        isFunction(LoginModule.mount) ||
+        isFunction(api?.render) ||
+        isFunction(api?.init) ||
+        isFunction(api?.mount) ||
+        isFunction(api)
     ),
+
+    policy: {
+      bridgeOnly: true,
+      legacyCompatOnly: true,
+
+      ownsLoginLogic: false,
+      ownsDom: false,
+      ownsAuth: false,
+      ownsRouter: false,
+      ownsShell: false,
+      ownsLoader: false,
+      ownsEvents: false,
+      ownsNavigation: false,
+      ownsStorage: false,
+      ownsHttp: false,
+      ownsToast: false,
+
+      noRoutes: true,
+      noHomeRoute: true,
+      no2fa: true,
+      noMfa: true,
+      noOtp: true,
+    },
   };
 }
 

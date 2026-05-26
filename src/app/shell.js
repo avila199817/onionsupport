@@ -7,7 +7,8 @@
    - Mantener app-shell visible.
    - Mostrar/ocultar chrome de forma básica.
    - Obtener #view-container.
-   - Marcar ready/busy.
+   - Marcar ready/busy del shell.
+   - Limpiar sólo áreas dinámicas propias del shell.
    - Sin imports.
    - Sin Router interno.
    - Sin Auth.
@@ -16,6 +17,7 @@
    - Sin loader.
    - Sin rutas inventadas.
    - Sin /home.
+   - Sin navegación.
    - Sin magia negra.
 
    Nota:
@@ -23,7 +25,7 @@
    - Este módulo sólo da soporte base al arranque de la app.
 ========================================================= */
 
-export const SHELL_VERSION = "app.shell.v4";
+export const SHELL_VERSION = "app.shell.v5";
 
 const IDS = Object.freeze({
   shell: "app-shell",
@@ -36,8 +38,6 @@ const IDS = Object.freeze({
   viewContainer: "view-container",
 });
 
-const READY_CLASSES = Object.freeze(["app-ready"]);
-const LOADING_CLASSES = Object.freeze(["app-loading", "app-booting"]);
 const ROUTER_VIEW_HOST_ATTR = "data-router-view-host";
 
 /* =========================================================
@@ -46,10 +46,6 @@ const ROUTER_VIEW_HOST_ATTR = "data-router-view-host";
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function cleanText(value = "", fallback = "") {
@@ -129,28 +125,6 @@ function setBusy(element = null, busy = false) {
   }
 }
 
-function addClasses(element = null, classes = []) {
-  if (!element || !classes.length) return false;
-
-  try {
-    element.classList.add(...classes.filter(Boolean));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function removeClasses(element = null, classes = []) {
-  if (!element || !classes.length) return false;
-
-  try {
-    element.classList.remove(...classes.filter(Boolean));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function toggleClass(element = null, className = "", active = false) {
   if (!element || !className) return false;
 
@@ -160,20 +134,6 @@ function toggleClass(element = null, className = "", active = false) {
   } catch {
     return false;
   }
-}
-
-function setRootClassState(root = null, busy = false) {
-  if (!root) return false;
-
-  if (busy) {
-    removeClasses(root, READY_CLASSES);
-    addClasses(root, LOADING_CLASSES);
-  } else {
-    removeClasses(root, LOADING_CLASSES);
-    addClasses(root, READY_CLASSES);
-  }
-
-  return true;
 }
 
 function hasContent(element = null) {
@@ -319,6 +279,7 @@ function syncShellDataset({
   for (const element of shellNodes(elements)) {
     setHidden(element, false);
     setBusy(element, busy);
+
     setDataset(element, "shell", "visible");
     setDataset(element, "shellState", shellState);
     setDataset(element, "shellInteractive", shellInteractive);
@@ -344,18 +305,6 @@ function syncShellDataset({
   return true;
 }
 
-function syncRootBootDataset(busy = false) {
-  for (const root of roots()) {
-    setDataset(root, "appLoading", busy ? "true" : "false");
-    setDataset(root, "appBooting", busy ? "true" : "false");
-    setDataset(root, "appReady", busy ? "false" : "true");
-
-    setRootClassState(root, busy);
-  }
-
-  return true;
-}
-
 /* =========================================================
    CHROME
 ========================================================= */
@@ -368,7 +317,7 @@ export function readShellVisibility() {
     document.documentElement?.dataset?.chrome ||
     "hidden";
 
-  return chrome !== "hidden";
+  return chrome === "visible";
 }
 
 export function setShellVisibility(_AppCore = null, visible = true) {
@@ -405,11 +354,11 @@ export function setShellVisibility(_AppCore = null, visible = true) {
 
   setHidden(elements.tableheadContainer, !showTablehead);
   setBusy(elements.tableheadContainer, false);
-
-  for (const root of roots()) {
-    toggleClass(root, "route-app", chromeVisible);
-    toggleClass(root, "route-auth", !chromeVisible);
-  }
+  setDataset(
+    elements.tableheadContainer,
+    "tableheadState",
+    showTablehead ? "visible" : "empty"
+  );
 
   return chromeVisible;
 }
@@ -427,8 +376,6 @@ export function markShellBusy() {
     busy: true,
   });
 
-  syncRootBootDataset(true);
-
   return true;
 }
 
@@ -440,8 +387,6 @@ export function markShellReady() {
     state: "ready",
     busy: false,
   });
-
-  syncRootBootDataset(false);
 
   return true;
 }
@@ -455,10 +400,15 @@ export function clearDynamicContainers() {
 
   let changed = false;
 
+  /*
+    App shell sólo limpia el tablehead.
+    El view-container pertenece al Router/render real.
+  */
   if (elements.tableheadContainer) {
     changed = clearNode(elements.tableheadContainer) || changed;
     setHidden(elements.tableheadContainer, true);
     setBusy(elements.tableheadContainer, false);
+    setDataset(elements.tableheadContainer, "tableheadState", "empty");
   }
 
   if (elements.tablehead) {
@@ -491,6 +441,7 @@ function elementSnapshot(element = null) {
     ariaBusy: element.getAttribute?.("aria-busy") || "",
     shellState: element.dataset?.shellState || "",
     chrome: element.dataset?.chrome || "",
+    tableheadState: element.dataset?.tableheadState || "",
     isRouteHost: isRouteHost(element),
   };
 }
@@ -516,15 +467,19 @@ export function getShellSnapshot() {
         appLoading: elements.html?.dataset?.appLoading || "",
         appBooting: elements.html?.dataset?.appBooting || "",
         appReady: elements.html?.dataset?.appReady || "",
+        appFatal: elements.html?.dataset?.appFatal || "",
         shellState: elements.html?.dataset?.shellState || "",
         chrome: elements.html?.dataset?.chrome || "",
+        routeMode: elements.html?.dataset?.routeMode || "",
       },
       body: {
         appLoading: elements.body?.dataset?.appLoading || "",
         appBooting: elements.body?.dataset?.appBooting || "",
         appReady: elements.body?.dataset?.appReady || "",
+        appFatal: elements.body?.dataset?.appFatal || "",
         shellState: elements.body?.dataset?.shellState || "",
         chrome: elements.body?.dataset?.chrome || "",
+        routeMode: elements.body?.dataset?.routeMode || "",
       },
     },
 
@@ -554,9 +509,12 @@ export function getShellSnapshot() {
       noStorage: true,
       noRouteParsing: true,
       noHomeRoute: true,
+      noNavigation: true,
 
       doesNotOwnFinalRouteChrome: true,
+      doesNotOwnBootState: true,
       doesNotClobberRouterHost: true,
+      doesNotClearViewContainer: true,
     },
   };
 }

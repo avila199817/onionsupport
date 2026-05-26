@@ -19,7 +19,10 @@
    - Usuario/rol/avatar salen del mismo view-model canónico del sidebar.
    - Lee colecciones desde homeState raíz y fallback dashboard.
    - Recarga si Home está marcado como loaded pero no hay datos reales.
-   - Render único y estable tras sincronizar datos reales.
+   - Render paint-first: pinta estructura/cache/skeleton antes de cargar remoto.
+   - Carga remota diferida tras primer paint.
+   - Bindings delegados estables entre rerenders.
+   - Render único final tras sincronizar datos reales.
    - Elimina inline styles antes de insertar HTML para cumplir CSP.
    - Elimina tooltips custom data-tooltip y conserva title nativo.
    - Corrige títulos genéricos de avatares con nombre real cuando existe.
@@ -119,7 +122,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v17";
+export const HOME_VIEW_VERSION = "home.view.v18.paint-first-stable-bindings";
 
 export const HomeView = (() => {
   "use strict";
@@ -168,6 +171,7 @@ export const HomeView = (() => {
 
   let inflightLoad = null;
   let bindingsCleanup = null;
+  let boundContainer = null;
 
   let currentContainer = null;
   let currentContext = {};
@@ -193,6 +197,11 @@ export const HomeView = (() => {
 
   function hasKeys(value = {}) {
     return Boolean(isObject(value) && Object.keys(value).length > 0);
+  }
+
+  function getTimerHost() {
+    if (typeof window !== "undefined") return window;
+    return globalThis;
   }
 
   function nextRenderSeq() {
@@ -232,13 +241,64 @@ export const HomeView = (() => {
       .replace(/'/g, "&#39;");
   }
 
+  function waitForPaint() {
+    return new Promise((resolve) => {
+      const host = getTimerHost();
+
+      try {
+        if (!isFunction(host.requestAnimationFrame)) {
+          host.setTimeout(resolve, 0);
+          return;
+        }
+
+        host.requestAnimationFrame(() => {
+          host.requestAnimationFrame(resolve);
+        });
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  function runDeferred(label = "async", callback = null) {
+    if (!isFunction(callback)) return false;
+
+    Promise.resolve()
+      .then(callback)
+      .catch((error) => {
+        try {
+          CoreModule?.AppCore?.utils?.warn?.(`[HomeView] ${label} falló.`, error);
+        } catch {
+          try {
+            console.warn(`[HomeView] ${label} falló.`, error);
+          } catch {
+            // noop
+          }
+        }
+      });
+
+    return true;
+  }
+
+  function startLoadAfterPaint(options = {}, label = "home:load") {
+    const opts = safeObject(options);
+
+    return runDeferred(label, async () => {
+      await waitForPaint();
+
+      if (destroyed) return false;
+
+      return loadData(opts);
+    });
+  }
+
   function sanitizeHomeHtml(html = "") {
     return String(html || "")
       .replace(INLINE_STYLE_TAG_RE, "")
       .replace(INLINE_STYLE_ATTR_RE, "");
   }
 
-  function htmlToElement(html = "") {
+  function htmlToElement(html = "", payload = {}) {
     if (!isBrowser()) return null;
 
     try {
@@ -248,7 +308,7 @@ export const HomeView = (() => {
       const node = template.content.firstElementChild || null;
 
       if (node) {
-        normalizeRenderedHomeDom(node);
+        normalizeRenderedHomeDom(node, payload);
       }
 
       return node;
@@ -449,6 +509,33 @@ export const HomeView = (() => {
     } catch {
       return null;
     }
+  }
+
+  function setInitialLoadVisualState(options = {}) {
+    const opts = safeObject(options);
+    const hasData = hasCollectionData();
+
+    try {
+      clearHomeError();
+
+      if (!hasData && opts.silent !== true) {
+        setLoading(true);
+        setRefreshing(false);
+      } else if (hasData && opts.asRefresh === true) {
+        setLoading(false);
+        setRefreshing(true);
+      }
+    } catch {
+      homeState.error = "";
+      homeState.loading = !hasData && opts.silent !== true;
+      homeState.refreshing = hasData && opts.asRefresh === true;
+    }
+
+    return {
+      hasData,
+      loading: Boolean(homeState.loading),
+      refreshing: Boolean(homeState.refreshing),
+    };
   }
 
   /* =======================================================
@@ -1834,7 +1921,14 @@ export const HomeView = (() => {
     return filterWidgetsForRole(widgets, isAdmin());
   }
 
-  function getActivity() {
+  function getActivityFromCollections({
+    tickets = null,
+    invoices = null,
+    users = null,
+    clients = null,
+  } = {}) {
+    const admin = isAdmin();
+
     const current = filterActivityForRole(
       firstArray(
         homeState.activity,
@@ -1847,20 +1941,24 @@ export const HomeView = (() => {
         homeState.dashboard?.recent,
         homeState.dashboard?.recentActivity
       ),
-      isAdmin()
+      admin
     );
 
     if (current.length) return current;
 
     return filterActivityForRole(
       buildHomeActivityFromCollections({
-        tickets: getTickets(),
-        invoices: getInvoices(),
-        users: getUsers(),
-        clients: getClients(),
+        tickets: Array.isArray(tickets) ? tickets : getTickets(),
+        invoices: Array.isArray(invoices) ? invoices : getInvoices(),
+        users: Array.isArray(users) ? users : getUsers(),
+        clients: Array.isArray(clients) ? clients : getClients(),
       }),
-      isAdmin()
+      admin
     );
+  }
+
+  function getActivity() {
+    return getActivityFromCollections();
   }
 
   function getPagination(items = getTickets()) {
@@ -1903,17 +2001,48 @@ export const HomeView = (() => {
     }
   }
 
-  function buildDashboardForTemplate() {
-    const role = getCurrentRole();
+  function buildDashboardForTemplate(collections = {}) {
+    const prepared = safeObject(collections);
+
+    const role = normalizeRole(prepared.role) || getCurrentRole();
     const admin = role === "admin";
 
-    const tickets = getTickets();
-    const invoices = getInvoices();
-    const users = admin ? getUsers() : [];
-    const clients = admin ? getClients() : [];
-    const activity = getActivity();
-    const summary = getSummary();
-    const widgets = getWidgets();
+    const tickets = Array.isArray(prepared.tickets)
+      ? prepared.tickets
+      : getTickets();
+
+    const invoices = Array.isArray(prepared.invoices)
+      ? prepared.invoices
+      : getInvoices();
+
+    const users = admin
+      ? Array.isArray(prepared.users)
+        ? prepared.users
+        : getUsers()
+      : [];
+
+    const clients = admin
+      ? Array.isArray(prepared.clients)
+        ? prepared.clients
+        : getClients()
+      : [];
+
+    const activity = Array.isArray(prepared.activity)
+      ? prepared.activity
+      : getActivityFromCollections({
+          tickets,
+          invoices,
+          users,
+          clients,
+        });
+
+    const summary = hasKeys(prepared.summary)
+      ? prepared.summary
+      : getSummary();
+
+    const widgets = Array.isArray(prepared.widgets)
+      ? prepared.widgets
+      : getWidgets();
 
     return normalizeHomeDashboard({
       ...stripAdminDashboardForRole(homeState.dashboard, admin),
@@ -2045,11 +2174,27 @@ export const HomeView = (() => {
     const invoices = getInvoices();
     const users = admin ? getUsers() : [];
     const clients = admin ? getClients() : [];
-    const activity = getActivity();
-    const dashboard = buildDashboardForTemplate();
-    const pagination = getPagination(tickets);
+    const activity = getActivityFromCollections({
+      tickets,
+      invoices,
+      users,
+      clients,
+    });
     const summary = getSummary();
     const widgets = getWidgets();
+    const pagination = getPagination(tickets);
+
+    const dashboard = buildDashboardForTemplate({
+      role,
+      admin,
+      tickets,
+      invoices,
+      users,
+      clients,
+      activity,
+      summary,
+      widgets,
+    });
 
     const selectedTicketId = safeText(
       first(homeState.selectedTicketId, homeState.selectedIncidenciaId, ""),
@@ -2254,8 +2399,6 @@ export const HomeView = (() => {
 
     if (!node) return null;
 
-    normalizeRenderedHomeDom(node);
-
     try {
       container.replaceChildren(node);
       setViewBusy(container, false);
@@ -2284,11 +2427,9 @@ export const HomeView = (() => {
       setViewBusy(container, busy);
 
       const payload = buildTemplatePayload();
-      const node = htmlToElement(buildHtml(payload));
+      const node = htmlToElement(buildHtml(payload), payload);
 
       if (!node) throw new Error("HOME_VIEW_NODE_EMPTY");
-
-      normalizeRenderedHomeDom(node, payload);
 
       container.replaceChildren(node);
       currentContainer = container;
@@ -2327,18 +2468,30 @@ export const HomeView = (() => {
       hydrateBestEffort();
     }
 
-    renderAndBind(container);
-
     const needsBootLoad = !bootLoadRequested;
     const needsDataLoad = !homeState.loaded || !hasCollectionData();
+    const shouldLoad = Boolean((needsBootLoad || needsDataLoad) && !inflightLoad);
 
-    if ((needsBootLoad || needsDataLoad) && !inflightLoad) {
-      bootLoadRequested = true;
-
-      void loadData({
-        force: homeState.loaded === true || needsBootLoad,
+    if (shouldLoad && !hasCollectionData()) {
+      setInitialLoadVisualState({
+        silent: false,
         asRefresh: false,
       });
+    }
+
+    renderAndBind(container);
+
+    if (shouldLoad) {
+      bootLoadRequested = true;
+
+      startLoadAfterPaint(
+        {
+          force: homeState.loaded === true || needsBootLoad,
+          asRefresh: false,
+          renderBeforeLoad: false,
+        },
+        "home:boot-load"
+      );
     }
 
     return api;
@@ -2367,12 +2520,18 @@ export const HomeView = (() => {
 
     request = (async () => {
       const hadData = hasCollectionData();
+      const renderBeforeLoad = opts.renderBeforeLoad === true;
 
       clearHomeError();
 
       setLoading(!hadData && !refresh);
       setRefreshing(refresh);
       setViewBusy(currentContainer, !hadData || refresh);
+
+      if (renderBeforeLoad) {
+        renderAndBind(currentContainer);
+        await waitForPaint();
+      }
 
       try {
         const response = refresh
@@ -2565,17 +2724,31 @@ export const HomeView = (() => {
     }
 
     bindingsCleanup = null;
+    boundContainer = null;
   }
 
-  function bind(container = currentContainer) {
-    cleanupBindings();
+  function bind(container = currentContainer, options = {}) {
+    const target = container || currentContainer;
+    const opts = safeObject(options);
+    const force = opts.force === true;
 
-    if (destroyed || !isElement(container)) return false;
+    if (destroyed || !isElement(target)) return false;
+
+    /*
+      home.bindings.js es delegado sobre el contenedor.
+      renderView() sustituye el HTML hijo, no el host raíz.
+      Por tanto no se destruyen/recrean listeners en cada rerender.
+    */
+    if (bindingsCleanup && boundContainer === target && !force) {
+      return true;
+    }
+
+    cleanupBindings();
 
     try {
       bindingsCleanup = bindHomeEvents({
         scope: SCOPE,
-        container,
+        container: target,
 
         reload,
         refresh,
@@ -2623,9 +2796,11 @@ export const HomeView = (() => {
         changePageSize,
       });
 
+      boundContainer = target;
       return true;
     } catch {
       bindingsCleanup = null;
+      boundContainer = null;
       return false;
     }
   }
@@ -2653,6 +2828,7 @@ export const HomeView = (() => {
       ...opts,
       force: opts.force === true,
       asRefresh: opts.asRefresh === true,
+      renderBeforeLoad: opts.renderBeforeLoad === true,
     });
 
     return api;
@@ -2663,6 +2839,7 @@ export const HomeView = (() => {
       ...safeObject(options),
       force: true,
       asRefresh: true,
+      renderBeforeLoad: true,
     });
   }
 
@@ -2776,6 +2953,7 @@ export const HomeView = (() => {
 
       hasContainer: Boolean(currentContainer),
       hasBindings: Boolean(bindingsCleanup),
+      hasStableBindings: Boolean(bindingsCleanup && boundContainer),
       hasInflightLoad: Boolean(inflightLoad),
       bootLoadRequested,
 
@@ -2788,6 +2966,12 @@ export const HomeView = (() => {
         modelDelegated: true,
         bindingsDelegated: true,
         actionsDelegated: true,
+
+        paintFirst: true,
+        loadAfterFirstPaint: true,
+        stableDelegatedBindings: true,
+        noBindingRecreationOnEveryRerender: true,
+        avoidsDuplicatedCollectionNormalizationInPayload: true,
 
         readsUserFromSidebarViewModel: true,
         passesSidebarUserToTemplate: true,

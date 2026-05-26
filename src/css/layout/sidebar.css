@@ -4,7 +4,7 @@
 
    FINAL SIDEBAR SYSTEM · PRIVATE SPA · EXTREME 10/10
    SOLID GRAPHITE · DESKTOP · COLLAPSED · MOBILE RAIL
-   REVISION: compact mobile drawer calibrated under 900px
+   REVISION: desktop physical width hardening / compact mobile drawer calibrated under 900px
 
    Responsabilidad:
    - Pintar y organizar visualmente el sidebar.
@@ -142,7 +142,12 @@
   z-index: var(--z-sidebar, 40);
 
   inline-size: var(--sidebar-local-width);
+  min-inline-size: var(--sidebar-local-width);
   max-inline-size: 100vw;
+
+  width: var(--sidebar-local-width);
+  min-width: var(--sidebar-local-width);
+  max-width: 100vw;
 
   block-size: 100vh;
   block-size: 100svh;
@@ -188,7 +193,9 @@
 
   transition:
     inline-size var(--duration-slow, .30s) var(--ease-emphasis, cubic-bezier(.16,1,.3,1)),
+    width var(--duration-slow, .30s) var(--ease-emphasis, cubic-bezier(.16,1,.3,1)),
     max-inline-size var(--duration-slow, .30s) var(--ease-emphasis, cubic-bezier(.16,1,.3,1)),
+    max-width var(--duration-slow, .30s) var(--ease-emphasis, cubic-bezier(.16,1,.3,1)),
     transform var(--duration-slow, .30s) var(--ease-emphasis, cubic-bezier(.16,1,.3,1)),
     background-color var(--duration-normal, .20s) var(--ease-standard, ease),
     border-color var(--duration-normal, .20s) var(--ease-standard, ease),
@@ -427,6 +434,13 @@ body.sidebar-open .sidebar,
 body[data-sidebar-state="open"] .sidebar,
 body[data-sidebar-open="true"] .sidebar {
   inline-size: var(--sidebar-local-width);
+  min-inline-size: var(--sidebar-local-width);
+  max-inline-size: 100vw;
+
+  width: var(--sidebar-local-width);
+  min-width: var(--sidebar-local-width);
+  max-width: 100vw;
+
   transform: translate3d(0, 0, 0);
 }
 
@@ -437,6 +451,13 @@ body.sidebar-collapsed .sidebar,
 body[data-sidebar-state="collapsed"] .sidebar,
 body[data-sidebar-open="false"] .sidebar {
   inline-size: var(--sidebar-local-collapsed-width);
+  min-inline-size: var(--sidebar-local-collapsed-width);
+  max-inline-size: var(--sidebar-local-collapsed-width);
+
+  width: var(--sidebar-local-collapsed-width);
+  min-width: var(--sidebar-local-collapsed-width);
+  max-width: var(--sidebar-local-collapsed-width);
+
   transform: translate3d(0, 0, 0);
 }
 
@@ -2329,6 +2350,15 @@ body[data-sidebar-open="false"] .sidebar {
   body.sidebar-open .sidebar .sidebar-brand-logo,
   body[data-sidebar-state="open"] .sidebar .sidebar-brand-logo,
   body[data-sidebar-open="true"] .sidebar .sidebar-brand-logo {
+    display: inline-grid !important;
+  }
+
+  .sidebar.is-open .sidebar-link-badge,
+  .sidebar[data-open="true"] .sidebar-link-badge,
+  .sidebar[data-sidebar-state="open"] .sidebar-link-badge,
+  body.sidebar-open .sidebar .sidebar-link-badge,
+  body[data-sidebar-state="open"] .sidebar .sidebar-link-badge,
+  body[data-sidebar-open="true"] .sidebar .sidebar-link-badge {
     display: inline-grid !important;
   }
 

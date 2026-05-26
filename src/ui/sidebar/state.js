@@ -26,7 +26,7 @@ import {
   setSidebarOpenState,
 } from "./dom.js";
 
-export const SIDEBAR_STATE_VERSION = "sidebar.state.v5";
+export const SIDEBAR_STATE_VERSION = "sidebar.state.v6";
 
 const SOURCE = "sidebar.state";
 const DEFAULT_OPEN = true;
@@ -89,6 +89,7 @@ function rootSnapshot(root = null) {
   return {
     hasRoot: isElement(root),
     rootConnected: isConnected(root),
+    rootVisible: visibleRoot(root),
     rootHidden: Boolean(root?.hidden),
     rootAriaHidden: root?.getAttribute?.("aria-hidden") || "",
     rootOpen: root?.dataset?.open || "",
@@ -123,8 +124,11 @@ function createCorePatch(root = runtime.root) {
 
     sidebarHasRoot: snapshot.hasRoot,
     sidebarRootConnected: snapshot.rootConnected,
+    sidebarRootVisible: snapshot.rootVisible,
     sidebarRootHidden: snapshot.rootHidden,
     sidebarRootAriaHidden: snapshot.rootAriaHidden,
+    sidebarRootOpen: snapshot.rootOpen,
+    sidebarRootState: snapshot.rootSidebarState,
 
     sidebarStateVersion: SIDEBAR_STATE_VERSION,
   };
@@ -386,6 +390,7 @@ export function getSidebarState() {
       noOwnDom: true,
 
       syncsCoreStateSilently: true,
+      noSensitiveData: true,
     },
   };
 }

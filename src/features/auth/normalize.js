@@ -12,13 +12,15 @@
    - Sin side effects.
    - Sin 2FA/MFA/OTP.
    - Roles únicos: admin / user.
-   - User inválido sólo si disabled.
-   - Auth estricta: token + user usable.
+   - User inválido si disabled/deleted/archived/active=false.
+   - Auth estricta: access token usable + user usable.
+   - Token sin user = no authenticated salvo modo token-only explícito.
+   - User sin token = no authenticated salvo modo user-only explícito.
+   - No fabricar slug si no existe slug real.
 ========================================================= */
 
 import {
   sanitizeUsername,
-  slugify,
 } from "./helpers.js";
 
 import {
@@ -27,10 +29,12 @@ import {
   AUTH_SUCCESS_STATUSES as AUTH_SUCCESS_STATUS_LIST,
 } from "./constants.js";
 
-export const AUTH_NORMALIZE_VERSION = "simple";
+export const AUTH_NORMALIZE_VERSION = "auth.normalize.v2";
 
 const DEFAULT_TOKEN_MAX_LENGTH = 8192;
 const DEFAULT_SESSION_VALUE_MAX_LENGTH = 200;
+
+const VALID_ROLES = Object.freeze(["admin", "user"]);
 
 const TOKEN_KEYS = Object.freeze([
   "token",
@@ -56,20 +60,59 @@ const SESSION_KEYS = Object.freeze([
   "sessionData",
 ]);
 
+const INVALID_USER_STATUSES = new Set([
+  "disabled",
+  "inactive",
+  "deleted",
+  "archived",
+  "revoked",
+  "blocked",
+  "banned",
+  "suspended",
+  "desactivado",
+  "inactivo",
+  "eliminado",
+  "archivado",
+  "bloqueado",
+  "suspendido",
+]);
+
 const FAILURE_CODES = new Set([
   ...(Array.isArray(AUTH_FAILURE_CODE_LIST) ? AUTH_FAILURE_CODE_LIST : []),
+
   "INVALID_CREDENTIALS",
   "MISSING_CREDENTIALS",
+
   "ACCOUNT_DISABLED",
   "USER_DISABLED",
+  "USER_INVALID",
+  "USER_INACTIVE",
+  "USER_NOT_AVAILABLE",
+  "USER_EMAIL_UNVERIFIED",
+
   "UNAUTHORIZED",
   "FORBIDDEN",
+
   "TOKEN_INVALID",
   "INVALID_TOKEN",
+  "INVALID_TOKEN_FORMAT",
   "TOKEN_EXPIRED",
+  "TOKEN_MISSING",
+  "MISSING_TOKEN",
+  "TOKEN_VERSION_MISMATCH",
+
+  "SESSION_REQUIRED",
   "SESSION_EXPIRED",
   "SESSION_REVOKED",
+  "SESSION_INVALID",
   "SESSION_NOT_FOUND",
+  "SESSION_USER_MISMATCH",
+  "SESSION_ID_MISMATCH",
+  "SESSION_TOKEN_VERSION_MISMATCH",
+  "SESSION_TOKEN_MISMATCH",
+
+  "INVALID_REFRESH_TOKEN",
+
   "LOGIN_FAILED",
   "AUTH_FAILED",
   "AUTH_RESTORE_FAILED",
@@ -77,12 +120,14 @@ const FAILURE_CODES = new Set([
 
 const SUCCESS_STATUSES = new Set([
   ...(Array.isArray(AUTH_SUCCESS_STATUS_LIST) ? AUTH_SUCCESS_STATUS_LIST : []),
+
   "ok",
   "success",
   "authenticated",
   "active",
   "valid",
   "session",
+  "restored",
   "refreshed",
 ]);
 
@@ -101,12 +146,70 @@ const BAD_TOKEN_VALUES = new Set([
   "''",
 ]);
 
+const SENSITIVE_USER_KEYS = new Set([
+  "password",
+  "passwordhash",
+  "password_hash",
+  "hash",
+  "salt",
+  "passwordmeta",
+
+  "token",
+  "accesstoken",
+  "access_token",
+  "refreshtoken",
+  "refresh_token",
+  "refreshtokenhash",
+  "refresh_token_hash",
+  "idtoken",
+  "id_token",
+
+  "resettoken",
+  "reset_token",
+  "activationtoken",
+  "activation_token",
+
+  "authorization",
+  "authheader",
+
+  "secret",
+  "secrets",
+  "code",
+  "codes",
+  "backupcodes",
+  "backup_codes",
+
+  "otp",
+  "otpcode",
+  "totp",
+  "mfa",
+  "twofa_secret",
+  "twofasecret",
+  "totpsecret",
+
+  "sas",
+  "connectionstring",
+  "connection_string",
+
+  "_rid",
+  "_self",
+  "_etag",
+  "_attachments",
+  "_ts",
+  "_lsn",
+  "_metadata",
+]);
+
 /* =========================================================
    BASICS
 ========================================================= */
 
 function safeText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -129,6 +232,7 @@ function first(...values) {
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
     if (isObject(value) && Object.keys(value).length === 0) continue;
+
     return value;
   }
 
@@ -140,13 +244,17 @@ function clone(value) {
   if (value === null) return null;
 
   try {
-    return structuredClone(value);
-  } catch {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
     }
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
   }
 }
 
@@ -154,7 +262,11 @@ function pick(source = {}, keys = []) {
   if (!isObject(source)) return undefined;
 
   for (const key of keys) {
-    if (source[key] !== undefined && source[key] !== null && source[key] !== "") {
+    if (
+      source[key] !== undefined &&
+      source[key] !== null &&
+      source[key] !== ""
+    ) {
       return source[key];
     }
   }
@@ -192,11 +304,25 @@ function normalizeBoolean(value, fallback = false) {
 }
 
 function tokenMaxLength() {
-  return safeNumber(AUTH_CONSTANTS?.tokenMaxLength, DEFAULT_TOKEN_MAX_LENGTH) || DEFAULT_TOKEN_MAX_LENGTH;
+  return safeNumber(AUTH_CONSTANTS?.tokenMaxLength, DEFAULT_TOKEN_MAX_LENGTH) ||
+    DEFAULT_TOKEN_MAX_LENGTH;
 }
 
 function sessionValueMaxLength() {
-  return safeNumber(AUTH_CONSTANTS?.sessionValueMaxLength, DEFAULT_SESSION_VALUE_MAX_LENGTH) || DEFAULT_SESSION_VALUE_MAX_LENGTH;
+  return safeNumber(
+    AUTH_CONSTANTS?.sessionValueMaxLength,
+    DEFAULT_SESSION_VALUE_MAX_LENGTH
+  ) || DEFAULT_SESSION_VALUE_MAX_LENGTH;
+}
+
+function redact(value = "") {
+  return safeText(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
@@ -204,7 +330,22 @@ function sessionValueMaxLength() {
 ========================================================= */
 
 function normalizeRole(value = "") {
-  return safeLower(value) === "admin" ? "admin" : "user";
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = safeLower(value);
+
+  return VALID_ROLES.includes(role) ? role : "";
+}
+
+function defaultRole(value = "") {
+  return normalizeRole(value) || "user";
 }
 
 export function normalizeRoleList(value) {
@@ -216,11 +357,12 @@ export function normalizeRoleList(value) {
         ? [value]
         : [];
 
-  return raw.some((item) => safeLower(item) === "admin")
-    ? ["admin"]
-    : raw.length
-      ? ["user"]
-      : [];
+  const roles = raw.map(normalizeRole).filter(Boolean);
+
+  if (roles.includes("admin")) return ["admin"];
+  if (roles.includes("user")) return ["user"];
+
+  return [];
 }
 
 export function expandRoleAliases(roles = []) {
@@ -235,7 +377,11 @@ function unwrapToken(value = null) {
   if (value === null || value === undefined) return null;
 
   if (isObject(value)) {
-    return value.token || value.accessToken || value.access_token || value.value || null;
+    return value.token ||
+      value.accessToken ||
+      value.access_token ||
+      value.value ||
+      null;
   }
 
   return value;
@@ -246,7 +392,11 @@ export function normalizeTokenValue(value = null) {
 
   if (candidate === null || candidate === undefined) return null;
 
-  let token = String(candidate).trim().replace(/^Bearer\s+/i, "");
+  const token = String(candidate)
+    .normalize("NFKC")
+    .trim()
+    .replace(/^Bearer\s+/i, "")
+    .trim();
 
   if (!token) return null;
   if (BAD_TOKEN_VALUES.has(token.toLowerCase())) return null;
@@ -263,7 +413,10 @@ export function hasUsableToken(token = null) {
 function normalizeSessionValue(value = null) {
   if (value === null || value === undefined) return null;
 
-  const output = String(value).trim().replace(/[\r\n\t]/g, "");
+  const output = String(value)
+    .normalize("NFKC")
+    .trim()
+    .replace(/[\r\n\t]/g, "");
 
   if (!output) return null;
   if (BAD_TOKEN_VALUES.has(output.toLowerCase())) return null;
@@ -289,7 +442,9 @@ export function isAuthEnvelope(value = {}) {
       value.auth !== undefined ||
       value.session !== undefined ||
       TOKEN_KEYS.some((key) => value[key] !== undefined) ||
-      USER_KEYS.some((key) => value[key] !== undefined)
+      REFRESH_TOKEN_KEYS.some((key) => value[key] !== undefined) ||
+      USER_KEYS.some((key) => value[key] !== undefined) ||
+      SESSION_KEYS.some((key) => value[key] !== undefined)
   );
 }
 
@@ -305,7 +460,9 @@ function statusValue(payload = null) {
 function errorCode(payload = null) {
   for (const item of nested(payload)) {
     const value = item.code || item.errorCode || item.error_code || item.error;
-    if (value !== undefined && value !== null && value !== "") return safeText(value, "");
+    if (value !== undefined && value !== null && value !== "") {
+      return safeText(value, "");
+    }
   }
 
   return "";
@@ -322,7 +479,9 @@ function responseMessage(payload = null) {
       item.errorMessage ||
       item.error_message;
 
-    if (value !== undefined && value !== null && value !== "") return safeText(value, "");
+    if (value !== undefined && value !== null && value !== "") {
+      return redact(value);
+    }
   }
 
   return "";
@@ -341,7 +500,19 @@ function explicitFailure(payload = null) {
   const status = safeLower(statusValue(payload));
   const code = errorCode(payload).toUpperCase();
 
-  if (status && ["error", "failed", "failure", "invalid", "unauthorized", "forbidden", "expired", "disabled"].includes(status)) {
+  if (
+    status &&
+    [
+      "error",
+      "failed",
+      "failure",
+      "invalid",
+      "unauthorized",
+      "forbidden",
+      "expired",
+      "disabled",
+    ].includes(status)
+  ) {
     return true;
   }
 
@@ -355,7 +526,7 @@ function createNormalizeError(
   message = "La respuesta del API no contiene una sesión válida.",
   { status = 401, code = "INVALID_AUTH_RESPONSE", response = null } = {}
 ) {
-  const error = new Error(message);
+  const error = new Error(redact(message));
 
   error.name = "AuthNormalizeError";
   error.status = status;
@@ -363,7 +534,7 @@ function createNormalizeError(
   error.code = code;
   error.data = {
     code,
-    message,
+    message: redact(message),
     status,
   };
   error.response = response;
@@ -376,12 +547,70 @@ function createNormalizeError(
    USER
 ========================================================= */
 
+function isSensitiveUserKey(key = "") {
+  return SENSITIVE_USER_KEYS.has(safeLower(key));
+}
+
+function sanitizeUserValue(value, keyHint = "", depth = 0) {
+  if (depth > 8) return null;
+  if (isSensitiveUserKey(keyHint)) return undefined;
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 500)
+      .map((item) => sanitizeUserValue(item, "", depth + 1))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (isSensitiveUserKey(key)) continue;
+
+      const clean = sanitizeUserValue(item, key, depth + 1);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  if (typeof value === "string") {
+    return redact(value);
+  }
+
+  return value;
+}
+
+function sanitizeUser(user = {}) {
+  return isObject(user) ? sanitizeUserValue(user) || {} : {};
+}
+
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  return (
+  const status = safeLower(
+    user.status ||
+      user.estado ||
+      user.state ||
+      ""
+  );
+
+  return Boolean(
     user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
+      user.deleted === true ||
+      user.archived === true ||
+      user.revoked === true ||
+      user.blocked === true ||
+      user.banned === true ||
+      user.suspended === true ||
+      user.active === false ||
+      user.enabled === false ||
+      Boolean(user.deletedAt) ||
+      INVALID_USER_STATUSES.has(status)
   );
 }
 
@@ -389,11 +618,51 @@ function hasUserIdentity(user = null) {
   if (!isObject(user)) return false;
 
   return Boolean(
-    user.id ||
-      user.userId ||
-      user.username ||
-      user.slug ||
-      user.email
+    safeText(user.id, "") ||
+      safeText(user.userId, "") ||
+      safeText(user.uid, "") ||
+      safeText(user.sub, "") ||
+      safeText(user.username, "") ||
+      safeText(user.userName, "") ||
+      safeText(user.user_name, "") ||
+      safeText(user.slug, "") ||
+      safeText(user.lookup?.slug, "") ||
+      safeText(user.profile?.slug, "")
+  );
+}
+
+function explicitSlug(user = null) {
+  if (!isObject(user)) return null;
+
+  const slug =
+    user.slug ||
+    user.lookup?.slug ||
+    user.profile?.slug ||
+    user.routing?.slug ||
+    null;
+
+  const clean = safeText(slug, "");
+
+  return clean || null;
+}
+
+function avatarFromUser(user = null) {
+  if (!isObject(user)) return "";
+
+  return safeText(
+    user.avatarUrl ||
+      user.avatar ||
+      user.picture ||
+      user.pictureUrl ||
+      user.photoUrl ||
+      user.photoURL ||
+      user.imageUrl ||
+      user.image ||
+      user.profile?.avatarUrl ||
+      user.profile?.avatar ||
+      user.profile?.picture ||
+      "",
+    ""
   );
 }
 
@@ -403,72 +672,110 @@ export function normalizeUser(rawUser = null) {
   if (userDisabled(rawUser)) return null;
   if (!hasUserIdentity(rawUser)) return null;
 
-  const id = rawUser.userId || rawUser.id || null;
-  const email = safeLower(rawUser.email || "");
-  const username = sanitizeUsername(rawUser.username || rawUser.slug || email || id || "");
-  const displayName =
-    rawUser.name ||
-    rawUser.fullName ||
-    rawUser.displayName ||
-    rawUser.nombre ||
-    username ||
-    email ||
-    id ||
-    "Usuario";
+  const safeUser = sanitizeUser(clone(rawUser));
 
-  const role = normalizeRole(rawUser.role || rawUser.rol);
+  if (!isObject(safeUser)) return null;
+
+  const id = safeText(
+    safeUser.userId ||
+      safeUser.id ||
+      safeUser.uid ||
+      safeUser.sub ||
+      "",
+    ""
+  );
+
+  const email = safeLower(safeUser.email || "");
+
+  const username = sanitizeUsername(
+    safeUser.username ||
+      safeUser.userName ||
+      safeUser.user_name ||
+      safeUser.usernameLower ||
+      safeUser.username_lower ||
+      ""
+  );
+
+  const slug = explicitSlug(safeUser);
+
+  const displayName = safeText(
+    safeUser.displayName ||
+      safeUser.fullName ||
+      safeUser.name ||
+      safeUser.nombre ||
+      username ||
+      id ||
+      "Usuario",
+    "Usuario"
+  );
+
+  const role = defaultRole(safeUser.role || safeUser.rol || safeUser.roles);
   const roles = [role];
 
-  const avatar = rawUser.avatarUrl || rawUser.avatar || rawUser.picture || null;
-  const lang = rawUser.lang || rawUser.language || rawUser.locale || null;
-  const theme = rawUser.theme || rawUser.mode || rawUser.appearance || null;
+  const avatar = avatarFromUser(safeUser);
+
+  const lang = safeUser.lang || safeUser.language || safeUser.locale || null;
+  const theme = safeUser.theme || safeUser.mode || safeUser.appearance || null;
 
   return {
-    ...clone(rawUser),
+    ...safeUser,
 
-    id,
-    userId: rawUser.userId || id,
+    id: id || safeUser.id || safeUser.userId || null,
+    userId: safeUser.userId || id || null,
+    uid: safeUser.uid || id || null,
+    sub: safeUser.sub || id || null,
 
-    username,
-    userName: username,
-    user_name: username,
+    username: username || null,
+    userName: username || null,
+    user_name: username || null,
     usernameLower: username || null,
     username_lower: username || null,
-    slug: rawUser.slug || slugify(username || displayName || email || id || "usuario"),
 
-    name: displayName,
-    nombre: displayName,
-    fullName: displayName,
-    full_name: displayName,
+    /*
+      Slug real únicamente.
+      No se fabrica desde username/email/id.
+    */
+    slug,
+
+    name: safeUser.name || displayName,
+    nombre: safeUser.nombre || displayName,
+    fullName: safeUser.fullName || displayName,
+    full_name: safeUser.full_name || safeUser.fullName || displayName,
     displayName,
 
-    email,
-    emailLower: email,
-    email_lower: email,
+    email: email || null,
+    emailLower: email || null,
+    email_lower: email || null,
 
     role,
     rol: role,
     userRole: role,
     roles,
 
-    permissions: [],
-    permisos: [],
+    permissions: Array.isArray(safeUser.permissions) ? safeUser.permissions : [],
+    permisos: Array.isArray(safeUser.permisos) ? safeUser.permisos : [],
 
     isAdmin: role === "admin",
     admin: role === "admin",
+    isUser: role === "user",
     isSupport: false,
     isManager: false,
     isClient: false,
 
-    hasAvatar: Boolean(avatar),
-    avatar,
-    avatarUrl: avatar,
-    avatar_url: avatar,
-    picture: avatar,
+    hasAvatar: Boolean(safeUser.hasAvatar || avatar),
+    avatar: avatar || safeUser.avatar || null,
+    avatarUrl: avatar || safeUser.avatarUrl || null,
+    avatar_url: avatar || safeUser.avatar_url || null,
+    picture: safeUser.picture || avatar || null,
+    photoUrl: safeUser.photoUrl || safeUser.photoURL || avatar || null,
 
     active: true,
+    enabled: true,
     disabled: false,
-    status: rawUser.status || null,
+    deleted: false,
+    archived: false,
+
+    status: safeUser.status || null,
 
     theme: ["dark", "light", "system"].includes(theme) ? theme : null,
     mode: ["dark", "light", "system"].includes(theme) ? theme : null,
@@ -488,6 +795,24 @@ export function isUsableUser(user = null) {
    EXTRACTORS
 ========================================================= */
 
+function looksLikeStandaloneUser(value = null) {
+  if (!isObject(value)) return false;
+  if (!hasUserIdentity(value)) return false;
+
+  return !Boolean(
+    value.token ||
+      value.accessToken ||
+      value.access_token ||
+      value.refreshToken ||
+      value.refresh_token ||
+      value.session ||
+      value.sessionData ||
+      value.auth ||
+      value.payload ||
+      value.result
+  );
+}
+
 export function extractUser(payload = null) {
   if (!payload) return null;
 
@@ -498,7 +823,9 @@ export function extractUser(payload = null) {
     if (normalized) return normalized;
   }
 
-  return normalizeUser(payload);
+  return looksLikeStandaloneUser(payload)
+    ? normalizeUser(payload)
+    : null;
 }
 
 export function normalizeSessionPayload(payload = null) {
@@ -522,8 +849,12 @@ export function normalizeSessionPayload(payload = null) {
   const userId = normalizeSessionValue(
     session.userId ||
       session.user_id ||
+      session.sessionUserId ||
+      session.session_user_id ||
       user?.userId ||
       user?.id ||
+      user?.uid ||
+      user?.sub ||
       ""
   );
 
@@ -533,7 +864,13 @@ export function normalizeSessionPayload(payload = null) {
     session.exp ||
     null;
 
-  if (!sessionId && !userId && !expiresAt) return null;
+  const refreshExpiresAt =
+    session.refreshExpiresAt ||
+    session.refresh_expires_at ||
+    expiresAt ||
+    null;
+
+  if (!sessionId && !userId && !expiresAt && !refreshExpiresAt) return null;
 
   return {
     id: sessionId || null,
@@ -543,9 +880,22 @@ export function normalizeSessionPayload(payload = null) {
 
     userId: userId || null,
     user_id: userId || null,
+    sessionUserId: userId || null,
+    session_user_id: userId || null,
 
     expiresAt,
     expires_at: expiresAt,
+    refreshExpiresAt,
+    refresh_expires_at: refreshExpiresAt,
+
+    persistent: normalizeBoolean(session.persistent, false),
+    restoreOnBoot: normalizeBoolean(session.restoreOnBoot, false),
+    rollingRefresh: normalizeBoolean(session.rollingRefresh, false),
+    expiryEnforced: normalizeBoolean(session.expiryEnforced, false),
+
+    revoked: session.revoked === true,
+    active: session.active !== false,
+    status: session.status || session.estado || "active",
   };
 }
 
@@ -614,6 +964,7 @@ export function validateAuthResponse(response = null, options = {}) {
   const sessionData = normalizeSessionPayload(response);
 
   const hasToken = Boolean(token);
+  const hasRefreshToken = Boolean(refreshToken);
   const hasUser = Boolean(user);
 
   const requireAuthenticated =
@@ -626,12 +977,23 @@ export function validateAuthResponse(response = null, options = {}) {
     mode === "login" ||
     mode === "refresh";
 
+  const requireRefreshToken =
+    opts.requireRefreshToken === true;
+
   const requireUser =
     opts.requireUser === true ||
     mode === "login" ||
     mode === "me";
 
   if (hasToken && hasUser) {
+    if (requireRefreshToken && !hasRefreshToken) {
+      throw createNormalizeError("La respuesta del API no contiene refresh token persistente.", {
+        status: 401,
+        code: "REFRESH_TOKEN_MISSING",
+        response,
+      });
+    }
+
     return {
       ok: true,
       success: true,
@@ -660,7 +1022,13 @@ export function validateAuthResponse(response = null, options = {}) {
     };
   }
 
-  if (hasToken && !hasUser && !requireAuthenticated && !requireUser && allowTokenOnly(opts, mode)) {
+  if (
+    hasToken &&
+    !hasUser &&
+    !requireAuthenticated &&
+    !requireUser &&
+    allowTokenOnly(opts, mode)
+  ) {
     return {
       ok: true,
       success: true,
@@ -689,7 +1057,13 @@ export function validateAuthResponse(response = null, options = {}) {
     };
   }
 
-  if (!hasToken && hasUser && !requireAuthenticated && !requireToken && allowUserOnly(opts, mode)) {
+  if (
+    !hasToken &&
+    hasUser &&
+    !requireAuthenticated &&
+    !requireToken &&
+    allowUserOnly(opts, mode)
+  ) {
     return {
       ok: true,
       success: true,
@@ -777,9 +1151,10 @@ export function normalizeAuthResponse(response = null, options = {}) {
       ok: false,
       success: false,
       authenticated: false,
+
       status: error?.data?.status || error?.status || "invalid",
       code: error?.code || error?.data?.code || errorCode(response) || "INVALID_AUTH_RESPONSE",
-      message: error?.message || responseMessage(response) || "La respuesta del API no contiene una sesión válida.",
+      message: redact(error?.message || responseMessage(response) || "La respuesta del API no contiene una sesión válida."),
 
       token: null,
       accessToken: null,
@@ -817,6 +1192,7 @@ export function normalizeAuthPayload(response = null, options = {}) {
 
 function previewToken(token = "") {
   const value = normalizeTokenValue(token);
+
   if (!value) return null;
 
   return value.length <= 8
@@ -836,6 +1212,7 @@ export function getAuthNormalizeSnapshot(response = null) {
 
   return {
     version: AUTH_NORMALIZE_VERSION,
+
     explicitFailure: explicitFailure(response),
     status: statusValue(response) || null,
     normalizedStatus: normalized.status || null,
@@ -860,8 +1237,7 @@ export function getAuthNormalizeSnapshot(response = null) {
           id: user.id || null,
           userId: user.userId || null,
           username: user.username || null,
-          email: user.email || null,
-          name: user.name || null,
+          slug: user.slug || null,
           displayName: user.displayName || null,
           role: user.role || null,
           roles: user.roles || [],
@@ -874,14 +1250,30 @@ export function getAuthNormalizeSnapshot(response = null) {
 
     policy: {
       pureNormalizer: true,
+
       ownFetch: false,
       ownStorage: false,
       ownSession: false,
       ownRouter: false,
       ownToast: false,
+      sideEffects: false,
+
+      authRequiresTokenAndUser: true,
+      tokenOnlyRequiresExplicitMode: true,
+      userOnlyRequiresExplicitMode: true,
+
+      invalidUserStatusHardened: true,
+      noSlugFabrication: true,
+
       roles: ["admin", "user"],
-      tokenNoTruncate: true,
+
+      noTempToken: true,
       no2fa: true,
+      noMfa: true,
+      noOtp: true,
+
+      tokensRedacted: true,
+      snapshotRedacted: true,
     },
   };
 }

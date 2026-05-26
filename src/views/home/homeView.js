@@ -29,6 +29,7 @@
    - Render único final tras sincronizar datos reales.
    - Bindings delegados estables entre rerenders, sin duplicar listeners.
    - Alineado con template actual: sin acción Exportar CSV.
+   - Alineado con bindings/actions actuales: sin quick actions legacy.
    - Elimina inline styles/scripts antes de insertar HTML para cumplir CSP.
    - Elimina handlers inline on*.
    - Elimina tooltips custom data-tooltip/data-tippy y conserva title nativo.
@@ -105,7 +106,6 @@ import {
 import {
   navigateFromHomeAction,
   createHomeIncidenciaAction,
-  runHomeQuickAction as actionRunHomeQuickAction,
   openHomeTicketDetailAction as actionOpenHomeTicketDetail,
   closeHomeTicketDetailAction as actionCloseHomeTicketDetail,
   reduceHomeActionState as actionReduceHomeActionState,
@@ -124,7 +124,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v22.initial-refresh-once-template-aligned";
+export const HOME_VIEW_VERSION = "home.view.v23.template-actions-aligned";
 
 export const HomeView = (() => {
   "use strict";
@@ -1222,7 +1222,6 @@ export const HomeView = (() => {
       loadHomeDashboard: loadData,
 
       navigateFromHomeAction: navigateFromHome,
-      runHomeQuickAction: actionRunHomeQuickAction,
       copyHomeWidgetIdAction,
       createFromHomeAction,
 
@@ -1488,6 +1487,7 @@ export const HomeView = (() => {
         explicitReloadStillAllowed: true,
 
         templateAlignedNoCsvExportAction: true,
+        templateAlignedNoQuickActionsLegacy: true,
 
         stableBindings: true,
         noDuplicateBindingsOnRerender: true,

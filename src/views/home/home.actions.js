@@ -5,12 +5,11 @@
    Responsabilidad:
    - Acciones operativas mínimas de Home.
    - Navegación SPA delegada en Router si existe.
+   - Crear incidencia delegando a la ruta real de incidencias.
    - Abrir/cerrar detalle de incidencia sin navegar.
    - Devolver statePatch para que bindings/homeView actualicen selectedTicketId.
-   - Export CSV desde colecciones reales del store.
-   - Copiar IDs.
-   - Ejecutar acciones simples.
-   - Leer dashboard/widget/ticket desde store si hace falta.
+   - Copiar IDs públicos.
+   - Leer dashboard/ticket desde store si hace falta.
    - Rutas base desde core/config.js.
    - Admin routes reales desde core/config.js.
    - Toast sólo mediante AppCore.showToast si existe.
@@ -20,6 +19,8 @@
    - Sin eventos globales.
    - Sin window bridges.
    - Sin route aliases legacy.
+   - Sin quick actions legacy.
+   - Sin export CSV.
    - Sin Router.push/go legacy.
    - Sin AppCore.navigate.
    - Sin fallback manual de history.
@@ -42,47 +43,32 @@ import {
 
 import {
   getHomeDashboardStore,
-  getHomeWidgetByIdStore,
-  getHomeWidgetsStore,
   getHomeTicketsStore,
   getHomeInvoicesStore,
   getHomeUsersStore,
-  getHomeClientsStore,
-  getHomeActivityStore,
 } from "./home.store.js";
 
 import {
   normalizeHomeDashboard,
-  normalizeHomeWidget,
   normalizeHomeTickets,
   normalizeHomeInvoices,
   normalizeHomeUsers,
-  normalizeHomeClients,
 
-  getHomeWidgetId,
   getHomeTicketId,
-  getHomeInvoiceId,
-  getHomeUserId,
-  getHomeClientId,
 
   findHomeTicketById,
   resolveHomeTicketInvoices,
   resolveHomeTicketTechnician,
 } from "./home.model.js";
 
-export const HOME_ACTIONS_VERSION = "home.actions.v8.router-safe-store-aligned";
+export const HOME_ACTIONS_VERSION = "home.actions.v9.template-aligned-minimal";
 
 const SOURCE = "views.home.actions";
 
-const CSV_FILENAME = "home-export.csv";
-const CSV_MIME_TYPE = "text/csv;charset=utf-8;";
-
-const HOME_ACTION_RESULT_TYPES = Object.freeze({
+export const HOME_ACTION_RESULT_TYPES = Object.freeze({
   STATE_PATCH: "home_state_patch",
   NAVIGATION: "home_navigation",
-  EXPORT: "home_export",
   COPY: "home_copy",
-  READ: "home_read",
 });
 
 const RAW_KEYS = new Set([
@@ -152,47 +138,6 @@ function safeText(value = "", fallback = "") {
     .trim();
 
   return output || fallback;
-}
-
-function safeNumber(value = 0, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : fallback;
-  }
-
-  if (typeof value === "string") {
-    let clean = value
-      .trim()
-      .replace(/[€$£¥%]/g, "")
-      .replace(/[^\d.,+\-\s]/g, "")
-      .replace(/\s/g, "");
-
-    if (!clean || clean === "-" || clean === "+") return fallback;
-
-    const hasComma = clean.includes(",");
-    const hasDot = clean.includes(".");
-
-    if (hasComma && hasDot) {
-      const lastComma = clean.lastIndexOf(",");
-      const lastDot = clean.lastIndexOf(".");
-
-      clean =
-        lastComma > lastDot
-          ? clean.replace(/\./g, "").replace(/,/g, ".")
-          : clean.replace(/,/g, "");
-    } else if (hasComma) {
-      clean = clean.replace(/,/g, ".");
-    }
-
-    const number = Number(clean);
-
-    return Number.isFinite(number) ? number : fallback;
-  }
-
-  const number = Number(value);
-
-  return Number.isFinite(number) ? number : fallback;
 }
 
 function first(...values) {
@@ -344,41 +289,6 @@ function notify(message = "", type = "info", options = {}) {
   return false;
 }
 
-function publicError(error = null) {
-  if (!error) return null;
-
-  return {
-    name: safeText(error.name, "HomeActionError"),
-    message: redact(
-      safeText(
-        first(
-          error.response?.data?.message,
-          error.data?.message,
-          error.message,
-          error.reason,
-          "Error Home."
-        ),
-        "Error Home."
-      )
-    ),
-    status:
-      error.status ||
-      error.statusCode ||
-      error.response?.status ||
-      error.data?.status ||
-      0,
-    code: safeText(
-      first(
-        error.code,
-        error.data?.code,
-        error.response?.data?.code,
-        "HOME_ACTION_ERROR"
-      ),
-      "HOME_ACTION_ERROR"
-    ),
-  };
-}
-
 /* =========================================================
    ROUTES
 ========================================================= */
@@ -449,10 +359,6 @@ function isBlockedRoute(value = "") {
 
   if (!path) return true;
 
-  /*
-    Crear incidencia se delega a /incidencias.
-    No existe /incidencias/nueva en esta fase.
-  */
   if (
     lower === "/incidencias/nueva" ||
     lower.startsWith("/incidencias/nueva/")
@@ -508,17 +414,9 @@ const ROUTES = Object.freeze({
   FACTURAS: routeFromCore("facturas", "/facturas"),
   CLIENTES: routeFromCore("clientes", "/clientes"),
   USUARIOS: routeFromCore("usuarios", ""),
+  SERVIDOR: routeFromCore("servidor", ""),
   CUENTA: routeFromCore("cuenta", ""),
   AJUSTES: routeFromCore("ajustes", ""),
-});
-
-const ACTION_ROUTES = Object.freeze({
-  go_incidencias: ROUTES.INCIDENCIAS,
-  go_facturas: ROUTES.FACTURAS,
-  go_clientes: ROUTES.CLIENTES,
-  go_usuarios: ROUTES.USUARIOS,
-  go_cuenta: ROUTES.CUENTA,
-  go_ajustes: ROUTES.AJUSTES,
 });
 
 function routePath(route = "") {
@@ -529,23 +427,21 @@ function isAdminOnlyRoute(route = "") {
   const path = routePath(route);
   const clientes = routePath(ROUTES.CLIENTES);
   const usuarios = routePath(ROUTES.USUARIOS);
+  const servidor = routePath(ROUTES.SERVIDOR);
 
   if (!path) return false;
 
   try {
     if (configIsAdminRoute(path) === true) return true;
   } catch {
-    // fallback local
+    // fallback local mínimo
   }
 
   return (
     Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
-    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
+    Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
   );
-}
-
-function routeFromAction(action = "") {
-  return ACTION_ROUTES[normalizeKey(action)] || "";
 }
 
 /* =========================================================
@@ -610,7 +506,7 @@ async function navigateSpa(route = "", options = {}) {
 }
 
 /* =========================================================
-   STORE READ
+   STORE / PERMISSIONS
 ========================================================= */
 
 export function getHomeDashboardFromStoreAction() {
@@ -974,7 +870,7 @@ export async function closeHomeTicketDetailAction() {
 }
 
 /* =========================================================
-   NAVIGATION / QUICK ACTIONS
+   NAVIGATION / CREATE
 ========================================================= */
 
 export async function navigateFromHomeAction({
@@ -1051,14 +947,12 @@ export async function createHomeIncidenciaAction({
   });
 }
 
-function normalizeQuickActionRoute(action = "", route = "") {
-  const explicit = normalizeSpaRoute(route);
-
-  if (explicit) return explicit;
-
-  return routeFromAction(action);
-}
-
+/*
+   Compatibilidad temporal:
+   homeView.js anterior aún puede importar runHomeQuickAction.
+   No contiene aliases legacy ni acciones extra; sólo delega las acciones
+   reales del template actual.
+*/
 export async function runHomeQuickAction({
   action = "",
   route = "",
@@ -1068,12 +962,7 @@ export async function runHomeQuickAction({
   const cleanAction = normalizeKey(action);
   const data = sanitizePayload(payload || {});
 
-  if (
-    cleanAction === "open_ticket_detail" ||
-    cleanAction === "open_incidencia_detail" ||
-    cleanAction === "ticket_detail" ||
-    cleanAction === "incidencia_detail"
-  ) {
+  if (cleanAction === "open_ticket_detail") {
     return openHomeTicketDetailAction({
       ticketId: data.ticketId,
       incidenciaId: data.incidenciaId,
@@ -1083,63 +972,33 @@ export async function runHomeQuickAction({
     });
   }
 
-  if (
-    cleanAction === "close_ticket_detail" ||
-    cleanAction === "close_incidencia_detail" ||
-    cleanAction === "close_detail"
-  ) {
+  if (cleanAction === "close_ticket_detail") {
     return closeHomeTicketDetailAction();
   }
 
-  if (
-    cleanAction === "create" ||
-    cleanAction === "new" ||
-    cleanAction === "create_incidencia" ||
-    cleanAction === "new_incidencia" ||
-    cleanAction === "open_create" ||
-    cleanAction === "open_create_incidencia"
-  ) {
+  if (cleanAction === "create_incidencia") {
     return createHomeIncidenciaAction({
       payload: data,
       silent,
     });
   }
 
-  if (
-    cleanAction === "copy" ||
-    cleanAction === "copy_id" ||
-    cleanAction === "copy_widget_id" ||
-    cleanAction === "copy_ticket_id" ||
-    cleanAction === "copy_incidencia_id"
-  ) {
+  if (cleanAction === "copy_widget_id") {
     return copyHomeWidgetIdAction({
       widgetId: first(data.widgetId, data.ticketId, data.incidenciaId, data.entityId, data.id, ""),
       silent,
     });
   }
 
-  const target = normalizeQuickActionRoute(cleanAction, route);
-
-  if (target) {
+  if (cleanAction === "navigate_home") {
     return navigateFromHomeAction({
-      route: target,
+      route,
       payload: data,
       silent,
     });
   }
 
-  const widgetId = safeCopyText(first(data.widgetId, data.widgetKey, data.id, ""));
-  const widget = widgetId ? getHomeWidgetByIdStore?.(widgetId) : null;
-
-  return sanitizePayload({
-    ok: true,
-    type: HOME_ACTION_RESULT_TYPES.READ,
-    action: cleanAction || "read",
-    source: SOURCE,
-    widget: widget ? normalizeHomeWidget(widget) : null,
-    payload: data,
-    at: nowIso(),
-  });
+  return false;
 }
 
 /* =========================================================
@@ -1193,223 +1052,6 @@ export function reduceHomeActionState(currentState = {}, result = {}) {
   }
 
   return sanitizePayload(output);
-}
-
-/* =========================================================
-   CSV EXPORT
-========================================================= */
-
-function csvMode(value = "") {
-  const mode = normalizeKey(value || "tickets");
-
-  if (["ticket", "tickets", "incidencia", "incidencias"].includes(mode)) return "tickets";
-  if (["invoice", "invoices", "factura", "facturas"].includes(mode)) return "invoices";
-  if (["user", "users", "usuario", "usuarios"].includes(mode)) return "users";
-  if (["client", "clients", "cliente", "clientes", "customer", "customers"].includes(mode)) return "clients";
-  if (["activity", "actividad", "recent"].includes(mode)) return "activity";
-  if (["widget", "widgets", "cards", "kpis"].includes(mode)) return "widgets";
-  if (["dashboard", "home"].includes(mode)) return "dashboard";
-
-  return "tickets";
-}
-
-function rowsForCsvMode(mode = "tickets") {
-  const cleanMode = csvMode(mode);
-
-  if (cleanMode === "tickets") {
-    return normalizeHomeTickets(getHomeTicketsStore?.() || [], {
-      invoices: normalizeHomeInvoices(getHomeInvoicesStore?.() || []),
-      users: canUseAdminActions() ? normalizeHomeUsers(getHomeUsersStore?.() || []) : [],
-    });
-  }
-
-  if (cleanMode === "invoices") return normalizeHomeInvoices(getHomeInvoicesStore?.() || []);
-  if (cleanMode === "users") return canUseAdminActions() ? normalizeHomeUsers(getHomeUsersStore?.() || []) : [];
-  if (cleanMode === "clients") return canUseAdminActions() ? normalizeHomeClients(getHomeClientsStore?.() || []) : [];
-  if (cleanMode === "activity") return safeArray(getHomeActivityStore?.());
-  if (cleanMode === "widgets") return safeArray(getHomeWidgetsStore?.());
-
-  if (cleanMode === "dashboard") {
-    const dashboard = normalizeHomeDashboard(getHomeDashboardStore?.() || {});
-    return [
-      {
-        role: dashboard.role,
-        admin: dashboard.admin,
-        tickets: safeArray(dashboard.tickets).length,
-        invoices: safeArray(dashboard.invoices).length,
-        users: dashboard.admin ? safeArray(dashboard.users).length : 0,
-        clients: dashboard.admin ? safeArray(dashboard.clients).length : 0,
-        activity: safeArray(dashboard.activity).length,
-        requestId: dashboard.requestId || "",
-        updatedAt: dashboard.updatedAt || "",
-      },
-    ];
-  }
-
-  return [];
-}
-
-function flattenCsvValue(value) {
-  if (value === null || value === undefined) return "";
-
-  if (typeof value === "number" || typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    return redact(value);
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => {
-        if (isObject(item)) return first(item.id, item.ticketId, item.invoiceId, item.name, item.title, "");
-        return item;
-      })
-      .filter((item) => item !== undefined && item !== null && item !== "")
-      .join(" | ");
-  }
-
-  if (isObject(value)) {
-    return first(value.id, value.userId, value.clientId, value.ticketId, value.invoiceId, value.name, value.title, value.displayName, "");
-  }
-
-  return redact(String(value));
-}
-
-function rowForCsv(row = {}) {
-  const clean = sanitizePayload(row);
-
-  return Object.fromEntries(
-    Object.entries(safeObject(clean)).filter(([key, value]) => {
-      if (isRawKey(key)) return false;
-      if (isCosmosMetaKey(key)) return false;
-      if (isSensitiveKey(key)) return false;
-      if (isObject(value)) return false;
-
-      return true;
-    })
-  );
-}
-
-function csvEscape(value = "") {
-  const text = String(flattenCsvValue(value) ?? "");
-
-  if (/[",\r\n;]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`;
-  }
-
-  return text;
-}
-
-function buildCsv(rows = []) {
-  const cleanRows = safeArray(rows).map(rowForCsv).filter((row) => Object.keys(row).length);
-
-  if (!cleanRows.length) return "";
-
-  const headers = [
-    ...new Set(cleanRows.flatMap((row) => Object.keys(row))),
-  ];
-
-  const lines = [
-    headers.map(csvEscape).join(";"),
-    ...cleanRows.map((row) => headers.map((key) => csvEscape(row[key])).join(";")),
-  ];
-
-  return lines.join("\r\n");
-}
-
-function safeFilename(value = "") {
-  const name = safeText(value, CSV_FILENAME)
-    .replace(/[\\/:*?"<>|]+/g, "-")
-    .replace(/\s+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 160);
-
-  if (!name) return CSV_FILENAME;
-
-  return name.toLowerCase().endsWith(".csv") ? name : `${name}.csv`;
-}
-
-function downloadCsv(filename = CSV_FILENAME, csv = "") {
-  if (!isBrowser()) return false;
-  if (!csv) return false;
-
-  try {
-    const blob = new Blob([`\uFEFF${csv}`], {
-      type: CSV_MIME_TYPE,
-    });
-
-    const url = window.URL?.createObjectURL?.(blob);
-
-    if (!url) return false;
-
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = safeFilename(filename);
-    link.rel = "noopener";
-    link.style.display = "none";
-
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-
-    window.URL.revokeObjectURL(url);
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export async function exportHomeCsvAction({
-  filename = CSV_FILENAME,
-  mode = "tickets",
-  silent = false,
-} = {}) {
-  const cleanMode = csvMode(mode);
-  const rows = rowsForCsvMode(cleanMode);
-  const csv = buildCsv(rows);
-  const finalFilename = safeFilename(filename);
-
-  if (!csv) {
-    if (!silent) notify("No hay datos para exportar.", "warning");
-
-    return sanitizePayload({
-      ok: false,
-      type: HOME_ACTION_RESULT_TYPES.EXPORT,
-      action: "export_csv",
-      source: SOURCE,
-      mode: cleanMode,
-      filename: finalFilename,
-      rowCount: 0,
-      downloaded: false,
-      reason: "empty",
-      at: nowIso(),
-    });
-  }
-
-  const downloaded = downloadCsv(finalFilename, csv);
-
-  if (!downloaded && !silent) {
-    notify("No se pudo descargar el CSV.", "error");
-  }
-
-  if (downloaded && !silent) {
-    notify("Exportación generada.", "success");
-  }
-
-  return sanitizePayload({
-    ok: downloaded,
-    type: HOME_ACTION_RESULT_TYPES.EXPORT,
-    action: "export_csv",
-    source: SOURCE,
-    mode: cleanMode,
-    filename: finalFilename,
-    rowCount: rows.length,
-    downloaded,
-    at: nowIso(),
-  });
 }
 
 /* =========================================================
@@ -1477,41 +1119,6 @@ export async function copyHomeWidgetIdAction({
 }
 
 /* =========================================================
-   READ HELPERS
-========================================================= */
-
-export function getHomeWidgetAction({
-  widgetId = "",
-  id = "",
-} = {}) {
-  const target = safeCopyText(first(widgetId, id, ""));
-
-  if (!target) return null;
-
-  try {
-    const widget = getHomeWidgetByIdStore?.(target);
-
-    return widget ? normalizeHomeWidget(widget) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function getHomeCollectionsAction() {
-  const admin = canUseAdminActions();
-
-  return sanitizePayload({
-    dashboard: normalizeHomeDashboard(getHomeDashboardStore?.() || {}),
-    widgets: safeArray(getHomeWidgetsStore?.()),
-    tickets: safeArray(getHomeTicketsStore?.()),
-    invoices: safeArray(getHomeInvoicesStore?.()),
-    users: admin ? safeArray(getHomeUsersStore?.()) : [],
-    clients: admin ? safeArray(getHomeClientsStore?.()) : [],
-    activity: safeArray(getHomeActivityStore?.()),
-  });
-}
-
-/* =========================================================
    SNAPSHOT
 ========================================================= */
 
@@ -1530,6 +1137,7 @@ export function getHomeActionsSnapshot() {
       facturas: ROUTES.FACTURAS,
       clientes: ROUTES.CLIENTES,
       usuarios: ROUTES.USUARIOS,
+      servidor: ROUTES.SERVIDOR,
       cuenta: ROUTES.CUENTA,
       ajustes: ROUTES.AJUSTES,
     },
@@ -1543,16 +1151,14 @@ export function getHomeActionsSnapshot() {
 
     store: {
       dashboard: Boolean(getHomeDashboardFromStoreAction()),
-      widgets: safeArray(getHomeWidgetsStore?.()).length,
       tickets: safeArray(getHomeTicketsStore?.()).length,
       invoices: safeArray(getHomeInvoicesStore?.()).length,
       users: admin ? safeArray(getHomeUsersStore?.()).length : 0,
-      clients: admin ? safeArray(getHomeClientsStore?.()).length : 0,
-      activity: safeArray(getHomeActivityStore?.()).length,
     },
 
     policy: {
       actionsOnly: true,
+      templateAlignedActionsOnly: true,
 
       navigationDelegatedToRouter: true,
       noRouterPushLegacy: true,
@@ -1572,8 +1178,12 @@ export function getHomeActionsSnapshot() {
       ticketDetailReturnsStatePatch: true,
       closeDetailClearsSelection: true,
 
-      exportCsvFromStoreCollections: true,
+      createIncidenciaDelegatesToIncidenciasRoute: true,
       copyUsesClipboardOnlyWhenAvailable: true,
+
+      noExportCsv: true,
+      noQuickActionsLegacy: true,
+      runHomeQuickActionCompatOnly: true,
 
       routesFromCoreConfig: true,
       adminRoutesFromCoreConfig: true,
@@ -1605,9 +1215,6 @@ export default {
   refreshHomeDashboardAction,
   getHomeDashboardFromStoreAction,
 
-  getHomeWidgetAction,
-  getHomeCollectionsAction,
-
   navigateFromHomeAction,
   createHomeIncidenciaAction,
   runHomeQuickAction,
@@ -1618,7 +1225,6 @@ export default {
 
   reduceHomeActionState,
 
-  exportHomeCsvAction,
   copyHomeWidgetIdAction,
 
   getHomeActionsSnapshot,

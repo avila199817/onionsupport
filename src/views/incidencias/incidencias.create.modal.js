@@ -14,8 +14,6 @@
    - Sin leer Router/Auth/Store.
 ========================================================= */
 
-import { AppCore } from "../../core/index.js";
-
 import {
   incidenciasState,
   setCreating,
@@ -29,11 +27,31 @@ import {
   createIncidenciaAction,
 } from "./incidencias.actions.js";
 
+import {
+  BrowserDocument,
+  BrowserWindow,
+
+  isObject,
+  safeText,
+  safeNumber,
+  safeArray,
+  safeObject,
+  first,
+
+  escapeHtml,
+  normalizeWhitespace,
+  safeImageSrc,
+  formatBytes,
+  showToast,
+  safeEmit,
+  getErrorMessage,
+} from "./incidencias.utils.js";
+
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_CREATE_MODAL_VERSION = "incidencias.create.modal.v1";
+export const INCIDENCIAS_CREATE_MODAL_VERSION = "incidencias.create.modal.v2.optimized";
 
 const MODAL_ID = "incidencias-create-modal-root";
 const PANEL_ID = "incidencias-create-modal-panel";
@@ -123,6 +141,7 @@ const modalState = {
   isOpen: false,
   bindingsAttached: false,
   rootAbortController: null,
+  rootCleanups: [],
 
   escHandler: null,
   lastActiveElement: null,
@@ -146,11 +165,7 @@ const modalState = {
 ========================================================= */
 
 function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  return Boolean(BrowserWindow && BrowserDocument);
 }
 
 function isFile(value) {
@@ -161,59 +176,12 @@ function isBlob(value) {
   return typeof Blob !== "undefined" && value instanceof Blob;
 }
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return text || fallback;
-}
-
 function safeLower(value, fallback = "") {
   return safeText(value, fallback).toLowerCase();
 }
 
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
-
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-
-    return value;
-  }
-
-  return null;
-}
-
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function normalizeWhitespace(value = "") {
-  return safeText(value, "").replace(/\s+/g, " ").trim();
+function hasOwnKeys(value = {}) {
+  return Boolean(isObject(value) && Object.keys(value).length);
 }
 
 function htmlAttrs(attrs = {}) {
@@ -228,78 +196,38 @@ function htmlAttrs(attrs = {}) {
     .join(" ");
 }
 
-function tooltipAttrs(tooltip = "", ariaLabel = "") {
-  const cleanTooltip = safeText(tooltip, "");
-  const cleanAria = safeText(ariaLabel, cleanTooltip);
-
+function disabledAttr(disabled = false, busy = false) {
   return htmlAttrs({
-    "aria-label": cleanAria || false,
-    "data-tooltip": cleanTooltip || false,
+    disabled: Boolean(disabled),
+    "aria-disabled": disabled ? "true" : false,
+    "aria-busy": busy ? "true" : false,
   });
 }
 
-function disabledAttr(disabled = false) {
-  return disabled ? "disabled aria-disabled=\"true\"" : "";
-}
-
 function getDocument() {
-  return isBrowser() ? document : null;
+  return isBrowser() ? BrowserDocument : null;
 }
 
-function emit(eventName = "", payload = {}) {
-  const name = safeText(eventName, "");
-
-  if (!name) return false;
-
+function rootContains(root = null, element = null) {
   try {
-    AppCore?.events?.emit?.(name, payload);
-    return true;
+    return Boolean(root && element && (root === element || root.contains(element)));
   } catch {
     return false;
   }
 }
 
-function showToast(message = "", type = "info") {
-  const text = safeText(message, "");
-  const kind = safeText(type, "info");
-
-  if (!text) return false;
-
-  try {
-    if (typeof AppCore?.toast?.[kind] === "function") {
-      AppCore.toast[kind](text);
-      return true;
-    }
-  } catch {}
-
-  try {
-    AppCore?.toast?.show?.(text, kind);
-    return true;
-  } catch {}
-
-  try {
-    AppCore?.ui?.toast?.show?.(text, kind);
-    return true;
-  } catch {}
-
-  return false;
+function emit(eventName = "", payload = {}) {
+  return safeEmit(eventName, payload);
 }
 
-function getErrorMessage(error = null, fallback = "No se pudo completar la operación.") {
-  return safeText(
-    first(
-      error?.message,
-      error?.response?.message,
-      error?.response?.data?.message,
-      error?.data?.message,
-      error?.data?.error,
-      error?.response?.error,
-      error?.error,
-      error?.detail,
-      fallback
-    ),
-    fallback
-  );
+function setCreatingSafe(value = false) {
+  try {
+    setCreating(Boolean(value));
+  } catch {
+    try {
+      incidenciasState.creating = Boolean(value);
+    } catch {}
+  }
 }
 
 /* =========================================================
@@ -315,14 +243,18 @@ function getFileListFromInput(target) {
 }
 
 function formatFileSize(bytes = 0) {
-  const size = Number(bytes);
+  try {
+    return formatBytes(bytes);
+  } catch {
+    const size = Number(bytes);
 
-  if (!Number.isFinite(size) || size <= 0) return "0 B";
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+    if (!Number.isFinite(size) || size <= 0) return "0 B";
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 
-  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  }
 }
 
 function getFileExtension(filename = "") {
@@ -392,6 +324,14 @@ function validateFiles(files = []) {
    STATE HELPERS
 ========================================================= */
 
+function validateOption(value = "", options = [], fallback = "") {
+  const key = safeText(value, fallback);
+
+  return safeArray(options).some((item) => item.value === key)
+    ? key
+    : fallback;
+}
+
 function getInitialForm(draft = {}) {
   const stateDraft = safeObject(incidenciasState?.createDraft);
   const input = {
@@ -403,7 +343,7 @@ function getInitialForm(draft = {}) {
     targetUserId: safeText(first(input.targetUserId, input.userId), ""),
     targetUserName: safeText(first(input.targetUserName, input.userName, input.clientName, input.clienteNombre), ""),
     targetUserEmail: safeText(first(input.targetUserEmail, input.userEmail, input.clientEmail, input.clienteEmail), ""),
-    targetUserAvatar: safeText(first(input.targetUserAvatar, input.userAvatar, input.clientAvatar, input.avatar, input.avatarUrl), ""),
+    targetUserAvatar: safeImageSrc(first(input.targetUserAvatar, input.userAvatar, input.clientAvatar, input.avatar, input.avatarUrl)),
 
     subject: safeText(first(input.subject, input.asunto, input.title), ""),
     description: safeText(first(input.description, input.descripcion, input.message, input.body), ""),
@@ -413,7 +353,7 @@ function getInitialForm(draft = {}) {
     category: validateOption(first(input.category, input.categoria, input.tipo, "general"), CATEGORY_OPTIONS, "general"),
     source: safeText(first(input.source, input.origen, "panel"), "panel"),
 
-    attachments: [],
+    attachments: dedupeFiles(input.attachments),
   };
 }
 
@@ -424,12 +364,12 @@ function persistDraft() {
     targetUserId: safeText(form.targetUserId, ""),
     targetUserName: safeText(form.targetUserName, ""),
     targetUserEmail: safeText(form.targetUserEmail, ""),
-    targetUserAvatar: safeText(form.targetUserAvatar, ""),
+    targetUserAvatar: safeImageSrc(form.targetUserAvatar),
 
     userId: safeText(form.targetUserId, ""),
     userName: safeText(form.targetUserName, ""),
     userEmail: safeText(form.targetUserEmail, ""),
-    userAvatar: safeText(form.targetUserAvatar, ""),
+    userAvatar: safeImageSrc(form.targetUserAvatar),
 
     subject: safeText(form.subject, ""),
     description: safeText(form.description, ""),
@@ -481,6 +421,7 @@ function setFormPatch(patch = {}) {
   modalState.form.category = validateOption(modalState.form.category, CATEGORY_OPTIONS, "general");
   modalState.form.status = safeText(modalState.form.status, "open");
   modalState.form.source = safeText(modalState.form.source, "panel");
+  modalState.form.targetUserAvatar = safeImageSrc(modalState.form.targetUserAvatar);
   modalState.form.attachments = dedupeFiles(modalState.form.attachments);
 
   persistDraft();
@@ -514,14 +455,6 @@ function resetFormState() {
 /* =========================================================
    VALIDATION / PAYLOAD
 ========================================================= */
-
-function validateOption(value = "", options = [], fallback = "") {
-  const key = safeText(value, fallback);
-
-  return safeArray(options).some((item) => item.value === key)
-    ? key
-    : fallback;
-}
 
 function validateForm(form = {}) {
   const current = safeObject(form);
@@ -573,7 +506,7 @@ function buildPayload(form = {}) {
   const targetUserId = safeText(current.targetUserId, "");
   const targetUserName = safeText(current.targetUserName, "");
   const targetUserEmail = safeText(current.targetUserEmail, "");
-  const targetUserAvatar = safeText(current.targetUserAvatar, "");
+  const targetUserAvatar = safeImageSrc(current.targetUserAvatar);
 
   return {
     subject,
@@ -697,7 +630,7 @@ function renderInput({
         value="${escapeHtml(value)}"
         placeholder="${escapeHtml(placeholder)}"
         autocomplete="${escapeHtml(autocomplete)}"
-        ${disabledAttr(modalState.submitting)}
+        ${disabledAttr(modalState.submitting, modalState.submitting)}
       />
 
       ${renderFieldError(error)}
@@ -724,7 +657,7 @@ function renderTextarea({
         name="${escapeHtml(name)}"
         rows="${Number(rows) || 5}"
         placeholder="${escapeHtml(placeholder)}"
-        ${disabledAttr(modalState.submitting)}
+        ${disabledAttr(modalState.submitting, modalState.submitting)}
       >${escapeHtml(value)}</textarea>
 
       ${renderFieldError(error)}
@@ -749,7 +682,7 @@ function renderSelect({
           class="inc-create-select ${error ? "is-error" : ""}"
           data-field="${escapeHtml(name)}"
           name="${escapeHtml(name)}"
-          ${disabledAttr(modalState.submitting)}
+          ${disabledAttr(modalState.submitting, modalState.submitting)}
         >
           ${safeArray(options).map((option) => {
             const optionValue = safeText(option.value, "");
@@ -808,9 +741,10 @@ function renderFilesSummary(files = []) {
 
           <button
             type="button"
-            data-remove-attachment="${index}"
+            data-modal-action="remove-attachment"
+            data-remove-attachment="${escapeHtml(String(index))}"
             class="inc-create-file-remove"
-            ${disabledAttr(modalState.submitting)}
+            ${disabledAttr(modalState.submitting, modalState.submitting)}
           >
             ${icon("trash")}
             <span>Quitar</span>
@@ -848,7 +782,7 @@ function renderFileInput({ files = [], dragActive = false, error = "" } = {}) {
           multiple
           accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.csv,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
           class="inc-create-hidden-input"
-          ${disabledAttr(modalState.submitting)}
+          ${disabledAttr(modalState.submitting, modalState.submitting)}
         />
 
         <div class="inc-create-dropzone-copy">
@@ -926,7 +860,7 @@ function renderModalInner() {
             type="button"
             data-modal-close="true"
             aria-label="Cerrar modal"
-            ${disabledAttr(submitting)}
+            ${disabledAttr(submitting, submitting)}
             class="inc-create-close"
           >
             ${icon("close")}
@@ -989,7 +923,7 @@ function renderModalInner() {
               <button
                 id="incidencias-create-submit-btn"
                 type="submit"
-                ${disabledAttr(submitting)}
+                ${disabledAttr(submitting, submitting)}
                 class="inc-create-submit"
               >
                 <span class="inc-create-submit-inner">
@@ -1253,6 +1187,7 @@ export function updateIncidenciasCreateModal(draft = {}) {
 
   modalState.form.priority = validateOption(modalState.form.priority, PRIORITY_OPTIONS, "medium");
   modalState.form.category = validateOption(modalState.form.category, CATEGORY_OPTIONS, "general");
+  modalState.form.targetUserAvatar = safeImageSrc(modalState.form.targetUserAvatar);
 
   persistDraft();
   renderModal();
@@ -1290,10 +1225,7 @@ async function handleSubmit() {
   const payload = buildPayload(modalState.form);
 
   modalState.submitting = true;
-
-  try {
-    setCreating(true);
-  } catch {}
+  setCreatingSafe(true);
 
   try {
     patchCreateViewState({
@@ -1321,6 +1253,10 @@ async function handleSubmit() {
       silent: true,
     });
 
+    if (!detail) {
+      throw new Error("CREATE_INCIDENCIA_EMPTY_RESPONSE");
+    }
+
     const createdTicketId = resolveCreatedTicketId(detail);
 
     modalState.submitting = false;
@@ -1329,9 +1265,7 @@ async function handleSubmit() {
     modalState.successMessage = "Incidencia creada.";
     modalState.createdTicketId = createdTicketId;
 
-    try {
-      setCreating(false);
-    } catch {}
+    setCreatingSafe(false);
 
     try {
       patchCreateViewState({
@@ -1367,9 +1301,7 @@ async function handleSubmit() {
     modalState.submitting = false;
     modalState.serverError = getErrorMessage(error, "No se pudo crear la incidencia.");
 
-    try {
-      setCreating(false);
-    } catch {}
+    setCreatingSafe(false);
 
     try {
       patchCreateViewState({
@@ -1394,6 +1326,26 @@ async function handleSubmit() {
 /* =========================================================
    ROOT BINDINGS
 ========================================================= */
+
+function addRootListener(root, eventName, handler, options = {}) {
+  if (!root || typeof root.addEventListener !== "function") return false;
+
+  try {
+    root.addEventListener(eventName, handler, options);
+
+    if (!options.signal) {
+      modalState.rootCleanups.push(() => {
+        try {
+          root.removeEventListener(eventName, handler, options);
+        } catch {}
+      });
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function addAttachments(files = []) {
   const merged = dedupeFiles([
@@ -1460,26 +1412,34 @@ function attachRootBindings() {
 
   detachRootBindings();
 
-  const controller = new AbortController();
+  const controller = typeof AbortController !== "undefined"
+    ? new AbortController()
+    : null;
+
   modalState.rootAbortController = controller;
+  modalState.rootCleanups = [];
+
+  const listenerOptions = controller
+    ? { signal: controller.signal }
+    : {};
 
   const onInput = (event) => {
     const field = event.target?.closest?.("[data-field]");
-    if (!field || field.type === "file") return;
+    if (!field || !rootContains(root, field) || field.type === "file") return;
 
     handleFieldChange(field);
   };
 
   const onChange = (event) => {
     const field = event.target?.closest?.("[data-field]");
-    if (!field) return;
+    if (!field || !rootContains(root, field)) return;
 
     handleFieldChange(field);
   };
 
   const onSubmit = async (event) => {
     const form = event.target?.closest?.("#incidencias-create-form");
-    if (!form) return;
+    if (!form || !rootContains(root, form)) return;
 
     event.preventDefault();
     await handleSubmit();
@@ -1487,7 +1447,7 @@ function attachRootBindings() {
 
   const onDragEnter = (event) => {
     const dropzone = event.target?.closest?.("[data-dropzone='attachments']");
-    if (!dropzone || modalState.submitting) return;
+    if (!dropzone || !rootContains(root, dropzone) || modalState.submitting) return;
 
     event.preventDefault();
 
@@ -1499,7 +1459,7 @@ function attachRootBindings() {
 
   const onDragOver = (event) => {
     const dropzone = event.target?.closest?.("[data-dropzone='attachments']");
-    if (!dropzone || modalState.submitting) return;
+    if (!dropzone || !rootContains(root, dropzone) || modalState.submitting) return;
 
     event.preventDefault();
 
@@ -1511,7 +1471,7 @@ function attachRootBindings() {
 
   const onDragLeave = (event) => {
     const dropzone = event.target?.closest?.("[data-dropzone='attachments']");
-    if (!dropzone || modalState.submitting) return;
+    if (!dropzone || !rootContains(root, dropzone) || modalState.submitting) return;
 
     const related = event.relatedTarget;
     if (related && dropzone.contains(related)) return;
@@ -1523,7 +1483,7 @@ function attachRootBindings() {
 
   const onDrop = (event) => {
     const dropzone = event.target?.closest?.("[data-dropzone='attachments']");
-    if (!dropzone || modalState.submitting) return;
+    if (!dropzone || !rootContains(root, dropzone) || modalState.submitting) return;
 
     event.preventDefault();
     modalState.dragActive = false;
@@ -1534,25 +1494,20 @@ function attachRootBindings() {
   };
 
   const onClick = (event) => {
-    const closeButton = event.target?.closest?.("[data-modal-close='true']");
+    const target = event.target;
+    if (!target?.closest) return;
 
-    if (closeButton) {
+    const closeButton = target.closest("[data-modal-close='true']");
+
+    if (closeButton && rootContains(root, closeButton)) {
       event.preventDefault();
       closeIncidenciasCreateModal();
       return;
     }
 
-    const overlay = event.target?.closest?.("[data-incidencias-create-modal-overlay='true']");
-    const panel = event.target?.closest?.("[data-incidencias-create-modal-panel='true']");
+    const removeAttachmentButton = target.closest("[data-modal-action='remove-attachment'], [data-remove-attachment]");
 
-    if (overlay && !panel && event.target === overlay && !modalState.submitting) {
-      closeIncidenciasCreateModal();
-      return;
-    }
-
-    const removeAttachmentButton = event.target?.closest?.("[data-remove-attachment]");
-
-    if (removeAttachmentButton) {
+    if (removeAttachmentButton && rootContains(root, removeAttachmentButton)) {
       event.preventDefault();
 
       if (modalState.submitting) return;
@@ -1570,17 +1525,25 @@ function attachRootBindings() {
 
       renderModal();
       focusPanel();
+      return;
+    }
+
+    const overlay = target.closest("[data-incidencias-create-modal-overlay='true']");
+    const panel = target.closest("[data-incidencias-create-modal-panel='true']");
+
+    if (overlay && rootContains(root, overlay) && !panel && event.target === overlay && !modalState.submitting) {
+      closeIncidenciasCreateModal();
     }
   };
 
-  root.addEventListener("input", onInput, { signal: controller.signal });
-  root.addEventListener("change", onChange, { signal: controller.signal });
-  root.addEventListener("submit", onSubmit, { signal: controller.signal });
-  root.addEventListener("dragenter", onDragEnter, { signal: controller.signal });
-  root.addEventListener("dragover", onDragOver, { signal: controller.signal });
-  root.addEventListener("dragleave", onDragLeave, { signal: controller.signal });
-  root.addEventListener("drop", onDrop, { signal: controller.signal });
-  root.addEventListener("click", onClick, { signal: controller.signal });
+  addRootListener(root, "input", onInput, listenerOptions);
+  addRootListener(root, "change", onChange, listenerOptions);
+  addRootListener(root, "submit", onSubmit, listenerOptions);
+  addRootListener(root, "dragenter", onDragEnter, listenerOptions);
+  addRootListener(root, "dragover", onDragOver, listenerOptions);
+  addRootListener(root, "dragleave", onDragLeave, listenerOptions);
+  addRootListener(root, "drop", onDrop, listenerOptions);
+  addRootListener(root, "click", onClick, listenerOptions);
 
   modalState.bindingsAttached = true;
 }
@@ -1590,6 +1553,13 @@ function detachRootBindings() {
     modalState.rootAbortController?.abort?.();
   } catch {}
 
+  safeArray(modalState.rootCleanups).forEach((cleanup) => {
+    try {
+      cleanup();
+    } catch {}
+  });
+
+  modalState.rootCleanups = [];
   modalState.rootAbortController = null;
   modalState.bindingsAttached = false;
 }
@@ -1621,6 +1591,11 @@ export const OnionIncidenciasCreateModal = Object.freeze({
     return updateIncidenciasCreateModal(draft);
   },
 
+  render() {
+    if (!modalState.isOpen) return null;
+    return renderModal();
+  },
+
   getState() {
     return {
       isOpen: modalState.isOpen,
@@ -1634,6 +1609,7 @@ export const OnionIncidenciasCreateModal = Object.freeze({
         ...safeObject(modalState.form),
         attachments: [...safeArray(modalState.form.attachments)],
       },
+      bindingsAttached: modalState.bindingsAttached,
     };
   },
 

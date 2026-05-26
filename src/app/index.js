@@ -5,9 +5,10 @@
    Responsabilidad:
    - Boot mínimo de la SPA.
    - Iniciar Core.
-   - Iniciar I18n.
+   - Registrar módulos principales en Core.
+   - Iniciar I18n mediante app/i18n.js.
    - Iniciar Toast.
-   - Registrar bridge UI mínimo de Toast.
+   - Registrar bridge UI mínimo de Toast mediante app/ui.js.
    - Iniciar Auth.
    - Restaurar sesión ANTES del primer render Router.
    - Delegar restore compat en /src/app/session.js.
@@ -49,12 +50,26 @@ import {
 } from "./shell.js";
 
 import {
+  markBootStart,
+  markBootReady,
+  markBootError,
+  getBootStateSnapshot,
+} from "./boot-state.js";
+
+import {
+  initI18n as initAppI18n,
+  getI18nSnapshot,
+} from "./i18n.js";
+
+import {
   restoreAuthSession,
+  getSessionBootstrapSnapshot,
 } from "./session.js";
 
 import {
   configureRouter,
   renderInitialRoute as renderRouterInitialRoute,
+  getRouterBootstrapState,
 } from "./router.js";
 
 import {
@@ -62,7 +77,7 @@ import {
   getUISystemsSnapshot,
 } from "./ui.js";
 
-export const APP_INDEX_VERSION = "app.index.v9";
+export const APP_INDEX_VERSION = "app.index.v10";
 
 let bootPromise = null;
 let ready = false;
@@ -100,16 +115,17 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function safeError(error = null) {
   if (!error) return null;
 
   return {
-    name: error.name || "Error",
+    name: cleanText(error.name, "Error"),
     message: redact(error.message || String(error)),
-    code: error.code || null,
+    code: error.code || error.error || null,
     status: error.status || error.statusCode || error.response?.status || null,
   };
 }
@@ -186,7 +202,16 @@ async function callOptional(target = null, method = "", payload = {}) {
    UI STATE
 ========================================================= */
 
-function setBusy() {
+function setBusy(payload = {}) {
+  try {
+    markBootStart(AppCore, {
+      ...payload,
+      source: "app.index",
+    });
+  } catch {
+    // noop
+  }
+
   try {
     markShellBusy();
   } catch {
@@ -200,7 +225,16 @@ function setBusy() {
   }
 }
 
-function setReady() {
+function setReady(payload = {}) {
+  try {
+    markBootReady(AppCore, {
+      ...payload,
+      source: "app.index",
+    });
+  } catch {
+    // noop
+  }
+
   try {
     markShellReady();
   } catch {
@@ -209,6 +243,17 @@ function setReady() {
 
   try {
     hideLoader();
+  } catch {
+    // noop
+  }
+}
+
+function setBootError(error = null, payload = {}) {
+  try {
+    markBootError(AppCore, error, {
+      ...payload,
+      source: "app.index",
+    });
   } catch {
     // noop
   }
@@ -230,12 +275,29 @@ function setCoreModuleProperty(name = "", module = null) {
 }
 
 function registerCoreModule(name = "", module = null) {
-  if (!name || !module || !isFunction(AppCore?.modules?.register)) {
+  if (!name || !module) return false;
+
+  if (isFunction(AppCore?.registerModule)) {
+    try {
+      AppCore.registerModule(name, module, {
+        overwrite: true,
+      });
+
+      return true;
+    } catch {
+      // fallback abajo
+    }
+  }
+
+  if (!isFunction(AppCore?.modules?.register)) {
     return false;
   }
 
   try {
-    AppCore.modules.register(name, module);
+    AppCore.modules.register(name, module, {
+      overwrite: true,
+    });
+
     return true;
   } catch {
     return false;
@@ -262,7 +324,7 @@ function exposeCoreModules() {
 }
 
 /* =========================================================
-   CORE / I18N / TOAST / UI COMPAT
+   CORE / I18N / TOAST / UI
 ========================================================= */
 
 async function initCore(payload = {}) {
@@ -272,19 +334,14 @@ async function initCore(payload = {}) {
   return AppCore;
 }
 
-async function initI18n(payload = {}) {
-  if (isFunction(I18n?.bindCore)) {
-    try {
-      I18n.bindCore(AppCore);
-    } catch {
-      // noop
-    }
-  }
-
-  await callRequired(I18n, "init", "I18n", withCore(payload, {
+async function initI18nSystem(payload = {}) {
+  await initAppI18n(withCore(payload, {
+    I18n,
     updateDOM: false,
     updateUi: false,
   }));
+
+  exposeCoreModules();
 
   return I18n;
 }
@@ -293,8 +350,10 @@ async function initToast(payload = {}) {
   await callRequired(Toast, "init", "Toast", withCore(payload));
 
   /*
-    Bridge mínimo: expone AppCore.showToast si no existe.
-    No crea sistema UI paralelo y no pisa implementaciones existentes.
+    Bridge mínimo:
+    - No crea sistema UI paralelo.
+    - No pisa AppCore.showToast si ya existe.
+    - AppCore.showToast puede usar el Toast registrado en Core.
   */
   try {
     initUISystems({
@@ -304,6 +363,8 @@ async function initToast(payload = {}) {
   } catch {
     // compat pasiva, no debe romper boot
   }
+
+  exposeCoreModules();
 
   return Toast;
 }
@@ -347,6 +408,36 @@ async function initAuth(payload = {}) {
   return Auth;
 }
 
+function normalizeRestoreSummary(result = null) {
+  if (!isObject(result)) return null;
+
+  return {
+    ok: Boolean(result.ok),
+    restored: Boolean(result.restored),
+    authenticated: Boolean(result.authenticated),
+
+    hasUser: Boolean(
+      result.user ||
+        result.currentUser ||
+        result.result?.user ||
+        result.result?.currentUser
+    ),
+
+    hasSession: Boolean(
+      result.session ||
+        result.currentSession ||
+        result.result?.session ||
+        result.result?.currentSession
+    ),
+
+    source: cleanText(
+      result.source ||
+        result.result?.source,
+      "app.session"
+    ),
+  };
+}
+
 async function restoreAuth(payload = {}) {
   /*
     No llamar Auth.syncAuthState() aquí.
@@ -355,24 +446,7 @@ async function restoreAuth(payload = {}) {
   */
   const result = await restoreAuthSession(authPayload(payload));
 
-  lastRestoreResult = isObject(result)
-    ? {
-        ok: Boolean(result.ok),
-        restored: Boolean(result.restored),
-        authenticated: Boolean(result.authenticated),
-        hasUser: Boolean(
-          result.user ||
-            result.currentUser ||
-            result.result?.user ||
-            result.result?.currentUser
-        ),
-        hasSession: Boolean(result.session || result.result?.session),
-        source: cleanText(
-          result.source || result.result?.source,
-          "app.session"
-        ),
-      }
-    : null;
+  lastRestoreResult = normalizeRestoreSummary(result);
 
   return result;
 }
@@ -425,11 +499,11 @@ async function runBoot(options = {}) {
   lastBootError = null;
   lastRestoreResult = null;
 
-  setBusy();
+  setBusy(payload);
 
   try {
     await initCore(payload);
-    await initI18n(payload);
+    await initI18nSystem(payload);
     await initToast(payload);
 
     /*
@@ -468,12 +542,14 @@ async function runBoot(options = {}) {
     refreshI18nDom();
 
     ready = true;
-    setReady();
+    setReady(payload);
 
     return App;
   } catch (error) {
     ready = false;
     lastBootError = safeError(error);
+
+    setBootError(error, payload);
 
     /*
       No marcar shell ready ni ocultar loader aquí.
@@ -508,19 +584,42 @@ export function getAppSnapshot() {
       topbar: Boolean(TopbarUI),
     },
 
+    bootState: getBootStateSnapshot(AppCore),
+
+    session: getSessionBootstrapSnapshot({
+      AppCore,
+      Auth,
+    }),
+
+    router: getRouterBootstrapState(),
+
+    i18n: getI18nSnapshot({
+      AppCore,
+      I18n,
+    }),
+
     ui: getUISystemsSnapshot({
       AppCore,
       Toast,
     }),
 
     state: {
+      initialized: AppCore?.state?.initialized === true,
+      ready: AppCore?.state?.ready === true,
+
       authenticated: AppCore?.state?.authenticated === true,
       hasToken: AppCore?.state?.hasToken === true,
       hasRefreshToken: AppCore?.state?.hasRefreshToken === true,
       hasUser: Boolean(AppCore?.state?.user || AppCore?.state?.currentUser),
+
+      role: AppCore?.state?.role || null,
+      userSlug: AppCore?.state?.userSlug || null,
+      homePath: redact(AppCore?.state?.homePath || ""),
+
       route: redact(AppCore?.state?.route || ""),
       canonicalPath: redact(AppCore?.state?.canonicalPath || ""),
       publicPath: redact(AppCore?.state?.publicPath || ""),
+
       routeMode: AppCore?.state?.routeMode || null,
       chromeVisible: AppCore?.state?.chromeVisible ?? null,
     },
@@ -528,6 +627,12 @@ export function getAppSnapshot() {
     policy: {
       singleEntryPoint: true,
       bootAppContract: true,
+
+      coreInitDelegated: true,
+      coreModuleRegistryUsed: true,
+
+      i18nDelegatedToAppI18nBridge: true,
+      toastBridgeDelegatedToAppUi: true,
 
       restoresAuthBeforeRouterRender: true,
       sessionRestoreDelegated: true,
@@ -540,7 +645,9 @@ export function getAppSnapshot() {
       chromeRegisteredBeforeInitialRoute: true,
       chromeSyncedAfterInitialRoute: true,
 
-      toastBridgeRegisteredAfterToastInit: true,
+      loaderDelegated: true,
+      shellDelegated: true,
+      bootStateDelegated: true,
 
       noStore: true,
       noParallelServices: true,
@@ -580,9 +687,12 @@ export const App = {
   version: APP_INDEX_VERSION,
 
   boot: bootApp,
+  bootApp,
   isReady,
 
   getSnapshot: getAppSnapshot,
+  getDebugSnapshot: getAppSnapshot,
+  snapshot: getAppSnapshot,
 };
 
 export default App;

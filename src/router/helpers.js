@@ -8,7 +8,8 @@
    - Mantener /@{user.slug} como Home pública visible.
    - Mantener /@{user.slug}/{ruta} como ruta privada visible.
    - Canonicalizar /@{user.slug} internamente como /.
-   - Canonicalizar /@{user.slug}/{ruta} internamente como /{ruta} sólo si la ruta es real.
+   - Canonicalizar /@{user.slug}/{ruta} internamente como /{ruta} sólo si la ruta es real/routable.
+   - No canonicalizar /@{user.slug}/ruta-inexistente como /ruta-inexistente.
    - Delegar rutas, token param, token routes, user-scope y bloqueos en core/config.js.
    - Rutas públicas actuales:
      /login
@@ -45,7 +46,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_HELPERS_VERSION = "router.helpers.v4.aligned-user-scope";
+export const ROUTER_HELPERS_VERSION = "router.helpers.v5.routable-first-canonical";
 
 export const ROUTER_CONFIG = Object.freeze({
   maxRouteLength: 2048,
@@ -700,22 +701,25 @@ export function normalizeCanonicalPath(first = null, second = undefined) {
 
   if (isBlockedPath(path)) return HOME;
 
+  const pathname = stripSearchAndHash(path);
+
+  if (isBlockedPath(pathname)) return HOME;
+
+  const scoped = userScopedInfo(pathname);
+
+  if (scoped.scoped && !scoped.routable) {
+    return pathname;
+  }
+
   try {
-    const canonical = configCanonicalRoutePath(path) || HOME;
+    const canonical = configCanonicalRoutePath(path) ||
+      (scoped.scoped && scoped.routable ? scoped.lookupPath : pathname) ||
+      HOME;
+
     return isBlockedPath(canonical) ? HOME : normalizePathname(canonical);
   } catch {
-    const pathname = stripSearchAndHash(path);
-
-    if (isBlockedPath(pathname)) return HOME;
-
-    const scoped = userScopedInfo(pathname);
-
     if (scoped.scoped && scoped.routable) {
       return isBlockedPath(scoped.lookupPath) ? HOME : scoped.lookupPath;
-    }
-
-    if (scoped.scoped && !scoped.routable) {
-      return pathname;
     }
 
     return pathname;
@@ -1056,7 +1060,9 @@ export function buildHistoryUrl(AppCore = null, _getRoute = null, pathname = HOM
 export function buildStatePayload(AppCore = null, pathname = HOME, extras = {}) {
   const publicPath = normalizePath(AppCore, pathname);
   const canonicalPath = normalizeCanonicalPath(AppCore, publicPath);
-  const slug = extractUserHomeSlugFromPath(publicPath);
+  const scoped = userScopedInfo(publicPath);
+  const scopedRoutable = Boolean(scoped.scoped && scoped.routable);
+  const slug = scopedRoutable ? scoped.slug || "" : "";
 
   return {
     path: publicPath,
@@ -1071,7 +1077,9 @@ export function buildStatePayload(AppCore = null, pathname = HOME, extras = {}) 
     },
 
     publicSlug: slug || null,
-    isUserHomePath: Boolean(slug),
+    isUserHomePath: Boolean(scoped.home),
+    isUserScopedPath: scopedRoutable,
+    userScopedRestPath: scopedRoutable ? scoped.restPath : null,
 
     isActivationRoute: canonicalPath === ACTIVATE_ACCOUNT,
     isResetConfirmRoute: canonicalPath === PASSWORD_RESET,
@@ -1097,7 +1105,9 @@ export function getDefaultHomeTarget(AppCore = null) {
 export function getRouterHelpersSnapshot(AppCore = null) {
   const currentPublicPath = getCurrentPublicPath(AppCore);
   const currentCanonicalPath = getCurrentCanonicalPath(AppCore);
-  const currentSlug = extractUserHomeSlugFromPath(currentPublicPath);
+  const scoped = userScopedInfo(currentPublicPath);
+  const scopedRoutable = Boolean(scoped.scoped && scoped.routable);
+  const currentSlug = scopedRoutable ? scoped.slug || "" : "";
 
   return {
     version: ROUTER_HELPERS_VERSION,
@@ -1144,6 +1154,8 @@ export function getRouterHelpersSnapshot(AppCore = null) {
       userSlugPrivateRoutes: true,
       canonicalizesUserHome: true,
       canonicalizesOnlyKnownUserScopedRoutes: true,
+      doesNotCanonicalizeUnknownUserScopedRoutes: true,
+      preservesScopedSlugInStatePayload: true,
       publicAuthRoutesCannotLiveUnderUserScope: true,
       usernamePublicSlug: false,
 

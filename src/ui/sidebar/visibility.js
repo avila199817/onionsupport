@@ -7,6 +7,7 @@
    - Aplicar visibilidad al root.
    - Aplicar visibilidad básica por rol admin/user.
    - Usar metadatos estáticos de rutas para ocultar rutas admin.
+   - Cachear lookups estáticos de rutas/admin/roles para no recalcular por cada enlace.
    - Clientes se oculta para user porque /clientes es ruta admin.
    - Usuarios se oculta para user porque /usuarios es ruta admin.
    - Servidor se oculta para user porque /servidor es ruta admin.
@@ -58,7 +59,18 @@ import {
   isAdminRoutePath,
 } from "../../router/routes.js";
 
-export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v8";
+export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v9.cached-static-route-meta";
+
+/* =========================================================
+   STATIC CACHE
+========================================================= */
+
+let staticRoutesCache = null;
+
+const staticRouteByPathCache = new Map();
+const staticAdminPathCache = new Map();
+const staticRequiredRolesCache = new Map();
+const staticAdminOnlyCache = new Map();
 
 /* =========================================================
    BASICS
@@ -98,6 +110,14 @@ function first(...values) {
 
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function freeze(value) {
+  try {
+    return Object.freeze(value);
+  } catch {
+    return value;
+  }
 }
 
 function redact(value = "") {
@@ -202,46 +222,83 @@ function pathIsBlocked(path = "") {
    STATIC ROUTE META
 ========================================================= */
 
+function getStaticRoutes() {
+  if (staticRoutesCache) return staticRoutesCache;
+
+  try {
+    const routes = isFunction(getImmutableRoutes)
+      ? getImmutableRoutes()
+      : [];
+
+    staticRoutesCache = Array.isArray(routes) ? routes : [];
+  } catch {
+    staticRoutesCache = [];
+  }
+
+  return staticRoutesCache;
+}
+
+function routeCacheKey(path = "") {
+  return routeLookupPath(path || "/");
+}
+
 function getStaticRouteByPath(path = "") {
-  const lookupPath = routeLookupPath(path || "/");
+  const lookupPath = routeCacheKey(path);
 
   if (!lookupPath) return null;
+
+  if (staticRouteByPathCache.has(lookupPath)) {
+    return staticRouteByPathCache.get(lookupPath);
+  }
+
+  let route = null;
 
   try {
     const finalPath = isFunction(resolveRouteLookupPath)
       ? resolveRouteLookupPath(lookupPath)
       : lookupPath;
 
-    if (!finalPath || pathIsBlocked(finalPath)) return null;
+    if (!finalPath || pathIsBlocked(finalPath)) {
+      staticRouteByPathCache.set(lookupPath, null);
+      return null;
+    }
 
-    const routes = isFunction(getImmutableRoutes)
-      ? getImmutableRoutes()
-      : [];
-
-    return routes.find((route) => {
+    route = getStaticRoutes().find((item) => {
       return Boolean(
-        route &&
+        item &&
           (
-            route.path === finalPath ||
-            route.canonicalPath === finalPath
+            item.path === finalPath ||
+            item.canonicalPath === finalPath
           )
       );
     }) || null;
   } catch {
-    return null;
+    route = null;
   }
+
+  staticRouteByPathCache.set(lookupPath, route);
+  return route;
 }
 
 function staticRouteIsAdminPath(path = "") {
-  const lookupPath = routeLookupPath(path || "/");
+  const lookupPath = routeCacheKey(path);
 
   if (!lookupPath || pathIsBlocked(lookupPath)) return false;
 
-  try {
-    return isFunction(isAdminRoutePath) && isAdminRoutePath(lookupPath) === true;
-  } catch {
-    return false;
+  if (staticAdminPathCache.has(lookupPath)) {
+    return staticAdminPathCache.get(lookupPath);
   }
+
+  let output = false;
+
+  try {
+    output = isFunction(isAdminRoutePath) && isAdminRoutePath(lookupPath) === true;
+  } catch {
+    output = false;
+  }
+
+  staticAdminPathCache.set(lookupPath, output);
+  return output;
 }
 
 function staticRouteRoles(route = null) {
@@ -256,42 +313,63 @@ function staticRouteRoles(route = null) {
 }
 
 function staticRouteRequiredRoles(path = "") {
-  const lookupPath = routeLookupPath(path || "");
+  const lookupPath = routeCacheKey(path);
+
+  if (!lookupPath) return [];
+
+  if (staticRequiredRolesCache.has(lookupPath)) {
+    return staticRequiredRolesCache.get(lookupPath);
+  }
+
   const route = getStaticRouteByPath(lookupPath);
 
-  return unique([
-    ...staticRouteRoles(route),
-    ...(staticRouteIsAdminPath(lookupPath) || isSidebarAdminFallbackRoute(lookupPath)
-      ? [SIDEBAR_ROLE_ADMIN]
-      : []),
-  ].filter(validSidebarRole));
+  const roles = freeze(
+    unique([
+      ...staticRouteRoles(route),
+      ...(staticRouteIsAdminPath(lookupPath) || isSidebarAdminFallbackRoute(lookupPath)
+        ? [SIDEBAR_ROLE_ADMIN]
+        : []),
+    ].filter(validSidebarRole))
+  );
+
+  staticRequiredRolesCache.set(lookupPath, roles);
+  return roles;
 }
 
 function staticRouteIsAdminOnly(path = "") {
-  const lookupPath = routeLookupPath(path || "");
+  const lookupPath = routeCacheKey(path);
 
   if (!lookupPath) return false;
-  if (isSidebarAdminFallbackRoute(lookupPath)) return true;
-  if (staticRouteIsAdminPath(lookupPath)) return true;
 
-  const route = getStaticRouteByPath(lookupPath);
-
-  if (!route) return false;
-
-  if (
-    route.adminOnly === true ||
-    route.requiresAdmin === true ||
-    route.admin === true ||
-    route.meta?.adminOnly === true ||
-    route.meta?.requiresAdmin === true ||
-    route.meta?.admin === true
-  ) {
-    return true;
+  if (staticAdminOnlyCache.has(lookupPath)) {
+    return staticAdminOnlyCache.get(lookupPath);
   }
 
-  const roles = staticRouteRoles(route);
+  let output = false;
 
-  return roles.includes(SIDEBAR_ROLE_ADMIN) && !roles.includes(SIDEBAR_ROLE_USER);
+  if (isSidebarAdminFallbackRoute(lookupPath) || staticRouteIsAdminPath(lookupPath)) {
+    output = true;
+  } else {
+    const route = getStaticRouteByPath(lookupPath);
+
+    if (
+      route?.adminOnly === true ||
+      route?.requiresAdmin === true ||
+      route?.admin === true ||
+      route?.meta?.adminOnly === true ||
+      route?.meta?.requiresAdmin === true ||
+      route?.meta?.admin === true
+    ) {
+      output = true;
+    } else {
+      const roles = staticRouteRoles(route);
+
+      output = roles.includes(SIDEBAR_ROLE_ADMIN) && !roles.includes(SIDEBAR_ROLE_USER);
+    }
+  }
+
+  staticAdminOnlyCache.set(lookupPath, output);
+  return output;
 }
 
 /* =========================================================
@@ -710,6 +788,14 @@ export function getSidebarVisibilitySnapshot(context = {}) {
     managedCount: elements.length,
     managedItems: elements.map(elementSnapshot).filter(Boolean),
 
+    cache: {
+      routesCached: Boolean(staticRoutesCache),
+      routeByPath: staticRouteByPathCache.size,
+      adminPath: staticAdminPathCache.size,
+      requiredRoles: staticRequiredRolesCache.size,
+      adminOnly: staticAdminOnlyCache.size,
+    },
+
     policy: {
       visibilityOnly: true,
 
@@ -724,6 +810,10 @@ export function getSidebarVisibilitySnapshot(context = {}) {
       noAvatar: true,
 
       staticRoutesAsRoleSource: true,
+      cachedStaticRoutes: true,
+      cachedStaticAdminLookups: true,
+      cachedStaticRoleLookups: true,
+
       hidesAdminRoutesForUser: true,
       clientesAdminOnlyFromRoutes: true,
       usuariosAdminOnlyFromRoutes: true,

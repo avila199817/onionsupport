@@ -19,6 +19,7 @@
    - Sin layout visual extra.
    - Sin logos legacy favicon_black.png / favicon_white.png.
    - Sin lógica de logo por tema.
+   - Sin denylist local.
    - Sin /home.
    - Sin /403.
    - Sin /404.
@@ -26,10 +27,12 @@
 ========================================================= */
 
 import {
+  PUBLIC_ROUTES,
   ROUTES,
   USER_HOME_PREFIX,
   getUserScopedRouteInfo as configGetUserScopedRouteInfo,
   isBlockedRoutePath as configIsBlockedRoutePath,
+  isPublicRoute as configIsPublicRoute,
   normalizeRoutePath as configNormalizeRoutePath,
   normalizeUserSlug as configNormalizeUserSlug,
   routePathFromUrlLike as configRoutePathFromUrlLike,
@@ -37,7 +40,7 @@ import {
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
 
-export const TEMPLATE_VERSION = "login.template.v7";
+export const TEMPLATE_VERSION = "login.template.v8";
 
 const DEFAULT_APP_NAME = "Onion Support";
 
@@ -153,6 +156,26 @@ function pathFromInput(value = "/") {
   }
 }
 
+function normalizeSearch(search = "") {
+  const value = text(search, "");
+
+  if (!value || value === "?") return "";
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = text(hash, "");
+
+  if (!value || value === "#") return "";
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
 function normalizePathname(value = "/", fallback = "/") {
   let pathname = text(value, fallback);
 
@@ -177,6 +200,41 @@ function normalizePathname(value = "/", fallback = "/") {
   }
 
   return pathname || fallback;
+}
+
+function splitPath(value = "/") {
+  let raw = pathFromInput(value);
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || "/";
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || "/";
+  }
+
+  return {
+    pathname: normalizePathname(pathname, "/"),
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
+  };
+}
+
+function joinPath(parts = {}) {
+  return [
+    normalizePathname(parts.pathname || "/", "/"),
+    normalizeSearch(parts.search || ""),
+    normalizeHash(parts.hash || ""),
+  ].join("");
 }
 
 function getUserScopedInfo(pathname = "/") {
@@ -232,37 +290,32 @@ function getUserScopedInfo(pathname = "/") {
   };
 }
 
-function fallbackBlockedPath(pathname = "") {
-  const clean = normalizePathname(pathname, "/").toLowerCase();
-
-  return Boolean(
-    clean === "/home" ||
-      clean.startsWith("/home/") ||
-      clean === "/403" ||
-      clean.startsWith("/403/") ||
-      clean === "/404" ||
-      clean.startsWith("/404/") ||
-      clean === "/2fa" ||
-      clean.startsWith("/2fa/") ||
-      clean === "/mfa" ||
-      clean.startsWith("/mfa/") ||
-      clean === "/otp" ||
-      clean.startsWith("/otp/")
-  );
-}
-
 function isBlockedPath(pathname = "") {
   try {
     if (configIsBlockedRoutePath(pathname) === true) return true;
   } catch {
-    // fallback abajo
+    // noop
   }
 
-  if (fallbackBlockedPath(pathname)) return true;
+  const parts = splitPath(pathname);
 
-  const scoped = getUserScopedInfo(pathname);
+  try {
+    if (configIsBlockedRoutePath(parts.pathname) === true) return true;
+  } catch {
+    // noop
+  }
 
-  return Boolean(scoped.scoped && fallbackBlockedPath(scoped.restPath));
+  const scoped = getUserScopedInfo(parts.pathname);
+
+  if (scoped.scoped && scoped.restPath) {
+    try {
+      return configIsBlockedRoutePath(scoped.restPath) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
 }
 
 function normalizePath(value = "/", fallback = "/") {
@@ -283,21 +336,12 @@ function normalizePath(value = "/", fallback = "/") {
   if (/[\r\n\t\\]/.test(raw)) return fallbackPath;
   if (hasSensitiveQuery(raw)) return fallbackPath;
 
-  const hashIndex = raw.indexOf("#");
-  const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+  const parts = splitPath(raw);
 
-  const queryIndex = beforeHash.indexOf("?");
-  const pathnameRaw =
-    queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash;
+  if (!parts.pathname) return fallbackPath;
+  if (isBlockedPath(parts.pathname)) return fallbackPath;
 
-  const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
-
-  const pathname = normalizePathname(pathnameRaw, fallbackPath);
-
-  if (!pathname) return fallbackPath;
-  if (isBlockedPath(pathname)) return fallbackPath;
-
-  return `${pathname}${search}`;
+  return joinPath(parts);
 }
 
 function pathnameOnly(value = "/") {
@@ -306,12 +350,16 @@ function pathnameOnly(value = "/") {
 
 function publicAuthPathnames() {
   return new Set(
-    [
-      DEFAULT_LOGIN_HREF,
-      DEFAULT_PASSWORD_REQUEST_HREF,
-      DEFAULT_PASSWORD_RESET_HREF,
-      DEFAULT_ACTIVATE_ACCOUNT_HREF,
-    ]
+    (
+      Array.isArray(PUBLIC_ROUTES) && PUBLIC_ROUTES.length
+        ? PUBLIC_ROUTES
+        : [
+            DEFAULT_LOGIN_HREF,
+            DEFAULT_PASSWORD_REQUEST_HREF,
+            DEFAULT_PASSWORD_RESET_HREF,
+            DEFAULT_ACTIVATE_ACCOUNT_HREF,
+          ]
+    )
       .map((path) => pathnameOnly(path))
       .filter(Boolean)
   );
@@ -323,6 +371,12 @@ function isPublicAuthHref(value = "") {
   if (!pathname) return false;
   if (getUserScopedInfo(pathname).scoped) return false;
   if (isBlockedPath(pathname)) return false;
+
+  try {
+    if (configIsPublicRoute(pathname) === true) return true;
+  } catch {
+    // fallback abajo
+  }
 
   return publicAuthPathnames().has(pathname);
 }
@@ -610,6 +664,65 @@ export function getLoginTemplate(options = {}) {
       </div>
     </section>
   `;
+}
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
+export function getLoginTemplateSnapshot() {
+  return {
+    version: TEMPLATE_VERSION,
+
+    logo: {
+      publicAuthLogo: PUBLIC_AUTH_LOGO,
+    },
+
+    routes: {
+      login: DEFAULT_LOGIN_HREF,
+      passwordRequest: DEFAULT_PASSWORD_REQUEST_HREF,
+      passwordReset: DEFAULT_PASSWORD_RESET_HREF,
+      activateAccount: DEFAULT_ACTIVATE_ACCOUNT_HREF,
+    },
+
+    limits: {
+      identifierMaxLength: MAX_IDENTIFIER_LENGTH,
+      passwordMaxLength: MAX_PASSWORD_LENGTH,
+    },
+
+    policy: {
+      templateOnly: true,
+      htmlStringOnly: true,
+
+      configOwnsRoutes: true,
+      configOwnsBlockedRoutes: true,
+      configOwnsUserScope: true,
+
+      publicAuthRoutesOnly: true,
+      publicRoutesCannotLiveUnderUserScope: true,
+
+      passwordFieldShared: true,
+      noOwnPasswordLogic: true,
+
+      publicAuthLogoCanonical: true,
+      noLegacyThemeLogoSwitch: true,
+
+      noAuth: true,
+      noHttp: true,
+      noRouter: true,
+      noStore: true,
+      noToast: true,
+      noNavigation: true,
+
+      noLocalBlockedRouteList: true,
+      noHomeRoute: true,
+      no403Route: true,
+      no404Route: true,
+      no2fa: true,
+      noMfa: true,
+      noOtp: true,
+    },
+  };
 }
 
 export { getLoginTemplate as LoginTemplate };

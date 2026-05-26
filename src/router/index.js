@@ -50,7 +50,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v14.fast-transition";
+export const ROUTER_VERSION = "router.index.v15.routable-lean-transition";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -325,7 +325,18 @@ export const Router = (() => {
     return joinPath(splitPath(path));
   }
 
+  function userScopedPathIsRoutable(restPath = HOME_PATH) {
+    const clean = normalizePathname(restPath || HOME_PATH);
+
+    return routes.some((route) => {
+      if (!route || route.public === true) return false;
+      return normalizePathname(route.path || HOME_PATH) === clean;
+    });
+  }
+
   function getUserPathInfo(path = HOME_PATH) {
+    const pathname = splitPath(path).pathname || HOME_PATH;
+
     try {
       const info = getConfigUserScopedRouteInfo(path);
 
@@ -333,64 +344,90 @@ export const Router = (() => {
         const restPath = normalizePathname(
           info.restPath ||
             info.canonicalPath ||
-            splitPath(path).pathname
+            pathname
         );
 
-        const lookupPath = normalizePathname(
+        const configuredLookupPath = normalizePathname(
           info.canonicalPath ||
             info.lookupPath ||
             restPath
         );
 
+        const routable = Object.prototype.hasOwnProperty.call(info, "routable")
+          ? Boolean(info.routable)
+          : userScopedPathIsRoutable(restPath);
+
         return {
           scoped: Boolean(info.scoped),
+          routable,
           slug: normalizeUserSlug(info.slug || ""),
           restPath,
-          lookupPath,
-          isHome: Boolean(info.home),
+          lookupPath: routable ? configuredLookupPath : pathname,
+          isHome: Boolean(info.home && routable),
         };
       }
     } catch {
       // fallback abajo
     }
 
-    const canonical = splitPath(path).pathname;
-
-    if (!canonical.startsWith(USER_HOME_PREFIX)) {
+    if (!pathname.startsWith(USER_HOME_PREFIX)) {
       return {
         scoped: false,
+        routable: false,
         slug: "",
-        restPath: canonical,
-        lookupPath: canonical,
+        restPath: pathname,
+        lookupPath: pathname,
         isHome: false,
       };
     }
 
-    const rest = canonical.slice(USER_HOME_PREFIX.length);
+    const rest = pathname.slice(USER_HOME_PREFIX.length);
     const [slugSegment = "", ...restSegments] = rest.split("/");
     const slug = normalizeUserSlug(slugSegment);
+
+    if (!slug) {
+      return {
+        scoped: false,
+        routable: false,
+        slug: "",
+        restPath: pathname,
+        lookupPath: pathname,
+        isHome: false,
+      };
+    }
 
     const restPath = restSegments.length
       ? normalizePathname(`/${restSegments.join("/")}`)
       : HOME_PATH;
 
+    const routable = userScopedPathIsRoutable(restPath);
+
     return {
-      scoped: Boolean(slug),
+      scoped: true,
+      routable,
       slug,
       restPath,
-      lookupPath: restPath,
-      isHome: Boolean(slug && restPath === HOME_PATH),
+      lookupPath: routable ? restPath : pathname,
+      isHome: Boolean(routable && restPath === HOME_PATH),
     };
   }
 
   function normalizeCanonicalPath(path = HOME_PATH) {
-    try {
-      return configCanonicalRoutePath(path) || splitPath(path).pathname || HOME_PATH;
-    } catch {
-      const pathname = splitPath(path).pathname || HOME_PATH;
-      const scoped = getUserPathInfo(pathname);
+    const pathname = splitPath(path).pathname || HOME_PATH;
+    const scoped = getUserPathInfo(pathname);
 
-      return scoped.scoped ? scoped.lookupPath : pathname;
+    if (scoped.scoped && !scoped.routable) {
+      return pathname;
+    }
+
+    try {
+      return normalizePathname(
+        configCanonicalRoutePath(path) ||
+          (scoped.scoped && scoped.routable ? scoped.lookupPath : pathname) ||
+          HOME_PATH
+      );
+    } catch {
+      return scoped.scoped && scoped.routable ? scoped.lookupPath : pathname;
     }
   }
 
@@ -827,7 +864,8 @@ export const Router = (() => {
   }
 
   function isUserScopedPath(path = HOME_PATH) {
-    return getUserPathInfo(path).scoped;
+    const info = getUserPathInfo(path);
+    return Boolean(info.scoped && info.routable);
   }
 
   function isCurrentUserScopedPath(path = HOME_PATH) {
@@ -859,8 +897,12 @@ export const Router = (() => {
     const canonical = normalizeCanonicalPath(path);
     const scoped = getUserPathInfo(canonical);
 
-    if (scoped.scoped) {
+    if (scoped.scoped && scoped.routable) {
       return scoped.restPath;
+    }
+
+    if (scoped.scoped && !scoped.routable) {
+      return canonical;
     }
 
     if (isFunction(Routes.resolveRouteLookupPath)) {
@@ -988,9 +1030,11 @@ export const Router = (() => {
     */
     const scoped = getUserPathInfo(publicPathnameValue);
 
-    const lookupPath = scoped.scoped
+    const lookupPath = scoped.scoped && scoped.routable
       ? scoped.restPath
-      : resolveRouteLookupPath(visibleCanonicalPath);
+      : scoped.scoped
+        ? publicPathnameValue
+        : resolveRouteLookupPath(visibleCanonicalPath);
 
     const blockedLegacy = Boolean(
       isBlockedRouterPath(publicPath) ||
@@ -1019,7 +1063,7 @@ export const Router = (() => {
       lookupPath,
       routeParams: scoped.slug ? { slug: scoped.slug } : {},
       matchedBy: route
-        ? scoped.slug
+        ? scoped.scoped && scoped.routable
           ? "user-scope"
           : "static"
         : "none",
@@ -1547,14 +1591,11 @@ export const Router = (() => {
         routeParams: data.routeParams || {},
         renderSeq: seq,
         isCurrentRender: () => isCurrentRenderSeq(seq),
-        setShellMode: (route) => Shell.setShellMode?.(AppCore, route),
-        setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
       });
     } else {
       renderFallback("Ruta no encontrada", "La vista solicitada no existe.");
     }
 
-    updateShell(null, state.canonicalPath);
     syncRouteChromeDeferred(null, state, options, seq);
 
     return {
@@ -1582,14 +1623,11 @@ export const Router = (() => {
         routeParams: data.routeParams || {},
         renderSeq: seq,
         isCurrentRender: () => isCurrentRenderSeq(seq),
-        setShellMode: (nextRoute) => Shell.setShellMode?.(AppCore, nextRoute),
-        setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
       });
     } else {
       renderFallback("Acceso no permitido", "No tienes permisos para ver esta vista.");
     }
 
-    updateShell(route, state.canonicalPath);
     syncRouteChromeDeferred(route, state, options, seq);
 
     return {
@@ -1639,8 +1677,6 @@ export const Router = (() => {
         routeParams: data.routeParams || {},
         renderSeq: seq,
         isCurrentRender: () => isCurrentRenderSeq(seq),
-        setShellMode: (nextRoute) => Shell.setShellMode?.(AppCore, nextRoute),
-        setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
       });
     } else if (isFunction(route?.render)) {
       view = await route.render(viewRoot(), {
@@ -1670,17 +1706,14 @@ export const Router = (() => {
 
     activeView = view || null;
 
-    const state = setRouterState(data);
-
-    updateShell(route, state.canonicalPath);
-    syncRouteChromeDeferred(route, state, options, seq);
+    syncRouteChromeDeferred(route, transitionState, options, seq);
 
     return {
       ok: true,
       found: true,
-      canonicalPath: state.canonicalPath,
-      publicPath: state.publicPath,
-      routeParams: state.routeParams,
+      canonicalPath: transitionState.canonicalPath,
+      publicPath: transitionState.publicPath,
+      routeParams: transitionState.routeParams,
       route,
     };
   }
@@ -1702,14 +1735,11 @@ export const Router = (() => {
         routeParams: data.routeParams || {},
         renderSeq: seq,
         isCurrentRender: () => isCurrentRenderSeq(seq),
-        setShellMode: (nextRoute) => Shell.setShellMode?.(AppCore, nextRoute),
-        setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
       });
     } else {
       renderFallback("Error de vista", "No se pudo renderizar esta vista.");
     }
 
-    updateShell(route, state.canonicalPath);
     syncRouteChromeDeferred(route, state, options, seq);
 
     return {
@@ -2101,6 +2131,7 @@ export const Router = (() => {
         userSlugPrivateRoutes: true,
         validatesRealUserSlug: true,
         preservesVisibleUserSlugBeforeCanonicalizing: true,
+        respectsRoutableUserScope: true,
 
         homeInternalPath: HOME_PATH,
         homeVisiblePattern: "/@{user.slug}",

@@ -42,13 +42,21 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_HISTORY_VERSION = "router.history.v10.aligned-user-scope";
+export const ROUTER_HISTORY_VERSION = "router.history.v11.token-routes-fallback";
 
 const HISTORY_STATE_VERSION = 1;
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 const TOKEN_PARAM_NAME = TOKEN_PARAM || "token";
 const CORE_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
+
+const PASSWORD_RESET_ROUTE = CORE_ROUTES.passwordReset || "/password-reset";
+const ACTIVATE_ACCOUNT_ROUTE = CORE_ROUTES.activateAccount || "/activate-account";
+
+const FALLBACK_TOKEN_ROUTE_PATHS = Object.freeze([
+  PASSWORD_RESET_ROUTE,
+  ACTIVATE_ACCOUNT_ROUTE,
+].filter(Boolean));
 
 const SENSITIVE_QUERY_KEYS = new Set([
   "token",
@@ -70,7 +78,12 @@ const SENSITIVE_QUERY_KEYS = new Set([
 ]);
 
 const TOKEN_ROUTES = new Set(
-  (Array.isArray(PROTECTED_PUBLIC_TOKEN_ROUTES) ? PROTECTED_PUBLIC_TOKEN_ROUTES : [])
+  (
+    Array.isArray(PROTECTED_PUBLIC_TOKEN_ROUTES) &&
+      PROTECTED_PUBLIC_TOKEN_ROUTES.length
+      ? PROTECTED_PUBLIC_TOKEN_ROUTES
+      : FALLBACK_TOKEN_ROUTE_PATHS
+  )
     .flatMap((item) => Array.isArray(item?.paths) ? item.paths : [item?.path || item])
     .map(normalizeTokenRoutePath)
     .filter(Boolean)

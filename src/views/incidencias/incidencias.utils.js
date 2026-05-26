@@ -17,12 +17,30 @@
 import { AppCore } from "../../core/index.js";
 
 /* =========================================================
+   VERSION
+========================================================= */
+
+export const INCIDENCIAS_UTILS_VERSION = "incidencias.utils.v2.optimized";
+
+/* =========================================================
    ENV
 ========================================================= */
 
 export const BrowserWindow = typeof window !== "undefined" ? window : null;
 export const BrowserDocument = typeof document !== "undefined" ? document : null;
 export const BrowserNavigator = typeof navigator !== "undefined" ? navigator : null;
+
+export function isBrowser() {
+  return Boolean(BrowserWindow && BrowserDocument);
+}
+
+export function isFile(value) {
+  return typeof File !== "undefined" && value instanceof File;
+}
+
+export function isBlob(value) {
+  return typeof Blob !== "undefined" && value instanceof Blob;
+}
 
 /* =========================================================
    BASE
@@ -45,6 +63,10 @@ export function isPlainObject(value) {
 
 export function isFunction(value) {
   return typeof value === "function";
+}
+
+export function isPromiseLike(value) {
+  return Boolean(value && typeof value.then === "function");
 }
 
 export function safeString(value, fallback = "") {
@@ -429,14 +451,20 @@ function parseSpanishDate(value = "") {
 
   if (!match) return null;
 
-  const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = match;
+  const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"];
+  const parts = text.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+
+  if (!parts) return null;
+
   const date = new Date(
-    Number(yyyy),
-    Number(mm) - 1,
-    Number(dd),
-    Number(hh),
-    Number(min),
-    Number(ss)
+    Number(parts[3]),
+    Number(parts[2]) - 1,
+    Number(parts[1]),
+    Number(parts[4] || hh),
+    Number(parts[5] || min),
+    Number(parts[6] || ss)
   );
 
   return Number.isNaN(date.getTime()) ? null : date;
@@ -683,8 +711,13 @@ export function isAbsoluteUrl(value = "") {
   return /^https?:\/\//i.test(safeText(value, ""));
 }
 
-export function isSafeUrl(value = "") {
+export function isBlobUrl(value = "") {
+  return /^blob:/i.test(safeText(value, ""));
+}
+
+export function isSafeUrl(value = "", options = {}) {
   const raw = safeText(value, "");
+  const opts = safeObject(options);
 
   if (!raw) return false;
   if (hasSensitiveQuery(raw)) return false;
@@ -692,7 +725,13 @@ export function isSafeUrl(value = "") {
   if (/^(?:javascript|vbscript|file):/i.test(raw)) return false;
   if (raw.startsWith("//")) return false;
 
-  if (raw.startsWith("/")) return true;
+  if (isBlobUrl(raw)) {
+    return Boolean(opts.allowBlob);
+  }
+
+  if (raw.startsWith("/")) {
+    return opts.allowRelative !== false;
+  }
 
   if (/^https:\/\//i.test(raw)) {
     try {
@@ -701,6 +740,10 @@ export function isSafeUrl(value = "") {
     } catch {
       return false;
     }
+  }
+
+  if (/^http:\/\//i.test(raw)) {
+    return Boolean(opts.allowHttp);
   }
 
   return false;
@@ -716,6 +759,42 @@ export function safeExternalUrl(value = "") {
   }
 
   if (/^https:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
+}
+
+export function safeResourceUrl(value = "", options = {}) {
+  const raw = safeText(value, "");
+  const opts = {
+    allowBlob: true,
+    allowRelative: true,
+    allowHttp: false,
+    ...safeObject(options),
+  };
+
+  if (!isSafeUrl(raw, opts)) return "";
+
+  if (isBlobUrl(raw)) return raw;
+
+  if (raw.startsWith("/")) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  if (opts.allowHttp && /^http:\/\//i.test(raw)) {
     try {
       return new URL(raw).href;
     } catch {
@@ -760,6 +839,10 @@ export function safeImageSrc(value = "") {
   }
 
   return "";
+}
+
+export function safeAvatarSrc(value = "") {
+  return safeImageSrc(value);
 }
 
 export function normalizePathPart(value = "") {
@@ -839,11 +922,13 @@ export function safeOn(event = "", handler = null) {
   if (!eventName || typeof handler !== "function") return false;
 
   try {
-    const off = AppCore?.events?.on?.(eventName, handler);
-    return typeof off === "function" ? off : true;
-  } catch {
-    return false;
-  }
+    if (typeof AppCore?.events?.on === "function") {
+      const off = AppCore.events.on(eventName, handler);
+      return typeof off === "function" ? off : true;
+    }
+  } catch {}
+
+  return false;
 }
 
 export function safeOff(event = "", handler = null) {
@@ -871,7 +956,7 @@ export function sleep(ms = 0) {
 export function debounce(fn = null, wait = 0) {
   let timer = 0;
 
-  return (...args) => {
+  const debounced = (...args) => {
     if (timer) clearTimeout(timer);
 
     timer = setTimeout(() => {
@@ -879,6 +964,14 @@ export function debounce(fn = null, wait = 0) {
       if (typeof fn === "function") fn(...args);
     }, Math.max(0, safeNumber(wait, 0)));
   };
+
+  debounced.cancel = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = 0;
+  };
+
+  return debounced;
 }
 
 export function createTimeoutController(timeoutMs = 15000) {
@@ -1020,6 +1113,13 @@ export function getErrorStatus(error = null) {
   );
 }
 
+export function isAbortError(error = null) {
+  const name = safeText(error?.name, "");
+  const message = safeText(error?.message, "");
+
+  return name === "AbortError" || /aborted|abortado/i.test(message);
+}
+
 export function cloneError(error = null) {
   if (!error) return null;
 
@@ -1027,6 +1127,7 @@ export function cloneError(error = null) {
     name: safeText(error?.name, "Error"),
     message: getErrorMessage(error),
     status: getErrorStatus(error),
+    aborted: isAbortError(error),
     stack: safeText(error?.stack, ""),
     raw: error,
   };
@@ -1037,14 +1138,21 @@ export function cloneError(error = null) {
 ========================================================= */
 
 export default {
+  INCIDENCIAS_UTILS_VERSION,
+
   BrowserWindow,
   BrowserDocument,
   BrowserNavigator,
+
+  isBrowser,
+  isFile,
+  isBlob,
 
   isNil,
   isObject,
   isPlainObject,
   isFunction,
+  isPromiseLike,
 
   safeString,
   safeText,
@@ -1106,9 +1214,12 @@ export default {
 
   hasSensitiveQuery,
   isAbsoluteUrl,
+  isBlobUrl,
   isSafeUrl,
   safeExternalUrl,
+  safeResourceUrl,
   safeImageSrc,
+  safeAvatarSrc,
   normalizePathPart,
   joinPath,
   joinApiPath,
@@ -1129,5 +1240,6 @@ export default {
 
   getErrorMessage,
   getErrorStatus,
+  isAbortError,
   cloneError,
 };

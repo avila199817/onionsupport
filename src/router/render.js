@@ -8,7 +8,9 @@
    - Crear un host estable por navegación.
    - Exponer el host activo como AppCore.dom.viewContainer.
    - Ejecutar route.render(host, context).
-   - Adoptar resultado de vista sólo si es seguro.
+   - Adoptar resultado de vista sólo si es seguro y el render sigue vigente.
+   - Ignorar/limpiar resultados tardíos de navegaciones obsoletas.
+   - Pintar feedback mínimo inmediato mientras carga la vista.
    - Inyectar contexto común: AppCore / I18n / t / Toast.
    - Pintar fallback simple.
    - Mantener publicPath visible y canonicalPath interno.
@@ -40,13 +42,14 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_RENDER_VERSION = "router.render.v9";
+export const ROUTER_RENDER_VERSION = "router.render.v10.fast-guarded-host";
 
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
 const HOST_ATTR = "data-router-view-host";
 const HOST_CLASS = "router-view-host";
+const PENDING_CLASS = "router-view-pending";
 
 let renderSeq = 0;
 
@@ -104,6 +107,33 @@ function call(fn = null, ...args) {
   } catch {
     return null;
   }
+}
+
+function renderStillCurrent(isCurrentRender = null) {
+  if (!isFunction(isCurrentRender)) return true;
+
+  try {
+    return isCurrentRender() !== false;
+  } catch {
+    return false;
+  }
+}
+
+function cleanupReturnedView(result = null) {
+  if (!result || isNode(result)) return false;
+
+  for (const method of ["destroy", "unmount", "cleanup", "dispose", "teardown"]) {
+    try {
+      if (isFunction(result?.[method])) {
+        result[method]();
+        return true;
+      }
+    } catch {
+      // noop
+    }
+  }
+
+  return false;
 }
 
 /* =========================================================
@@ -727,6 +757,58 @@ function markView(
   return true;
 }
 
+function pendingView(route = null) {
+  const section = create("section", {
+    className: PENDING_CLASS,
+    attrs: {
+      role: "status",
+      "aria-live": "polite",
+      "data-router-pending": "true",
+    },
+  });
+
+  const title = cleanText(
+    route?.pendingLabel ||
+      route?.title ||
+      route?.label ||
+      route?.name ||
+      "Cargando vista",
+    "Cargando vista"
+  );
+
+  append(
+    section,
+    create("div", {
+      className: `${PENDING_CLASS}__inner`,
+      attrs: {
+        "aria-hidden": "false",
+      },
+    })
+  );
+
+  const inner = section.firstElementChild || section;
+
+  append(
+    inner,
+    create("span", {
+      className: `${PENDING_CLASS}__spinner`,
+      attrs: {
+        "aria-hidden": "true",
+      },
+    })
+  );
+
+  append(
+    inner,
+    create("span", {
+      className: `${PENDING_CLASS}__text`,
+      textContent: title,
+    })
+  );
+
+  return section;
+}
+
 function prepareHost({
   AppCore = null,
   route = null,
@@ -734,7 +816,16 @@ function prepareHost({
   canonicalPath = DEFAULT_ROUTE,
   publicPath = DEFAULT_ROUTE,
   mode = "route",
+  pending = true,
+  isCurrentRender = null,
 } = {}) {
+  if (!renderStillCurrent(isCurrentRender)) {
+    return {
+      view: null,
+      host: null,
+    };
+  }
+
   const view = getViewContainer(AppCore);
 
   if (!view) {
@@ -764,8 +855,13 @@ function prepareHost({
       "data-router-view-name": route?.viewName || "",
       "data-router-canonical-path": normalizeCanonicalPath(canonicalPath),
       "data-router-public-path": domPath(publicPath),
+      "aria-busy": "true",
     },
   });
+
+  if (pending) {
+    append(host, pendingView(route));
+  }
 
   paint(view, host);
   exposeActiveHost(AppCore, view, host);
@@ -857,6 +953,8 @@ export function buildRouteRenderContext({
   found = true,
   forbidden = false,
   renderId = null,
+  renderSeq = null,
+  isCurrentRender = null,
   renderRoot = null,
   viewContainer = null,
   appViewContainer = null,
@@ -901,6 +999,10 @@ export function buildRouteRenderContext({
     forbidden: Boolean(forbidden),
 
     renderId,
+    renderSeq,
+    isCurrentRender: isFunction(isCurrentRender)
+      ? isCurrentRender
+      : () => true,
 
     appViewContainer: appContainer,
     rootViewContainer: appContainer,
@@ -992,7 +1094,11 @@ function renderFallbackInto({
   status = "ready",
   setShellMode = null,
   setDocumentTitle = null,
+  renderSeq: externalRenderSeq = null,
+  isCurrentRender = null,
 } = {}) {
+  if (!renderStillCurrent(isCurrentRender)) return null;
+
   const renderId = nextRenderId();
 
   const resolved = resolvePaths({
@@ -1012,6 +1118,8 @@ function renderFallbackInto({
     canonicalPath: resolved.canonicalPath,
     publicPath: resolved.publicPath,
     mode,
+    pending: false,
+    isCurrentRender,
   });
 
   const target = host || view;
@@ -1026,6 +1134,8 @@ function renderFallbackInto({
   });
 
   paint(target, node);
+
+  if (!renderStillCurrent(isCurrentRender)) return null;
 
   markView(AppCore, {
     status,
@@ -1043,6 +1153,8 @@ function renderFallbackInto({
     publicPath: resolved.publicPath,
     routeParams,
     renderId,
+    renderSeq: externalRenderSeq,
+    isCurrentRender,
     appViewContainer: view,
     viewContainer: target,
     renderRoot: target,
@@ -1134,9 +1246,13 @@ export async function renderRouteSuccess({
   canonicalPath = DEFAULT_ROUTE,
   publicPath = null,
   routeParams = {},
+  renderSeq: externalRenderSeq = null,
+  isCurrentRender = null,
   setShellMode = null,
   setDocumentTitle = null,
 } = {}) {
+  if (!renderStillCurrent(isCurrentRender)) return null;
+
   const renderId = nextRenderId();
 
   const resolved = resolvePaths({
@@ -1156,6 +1272,8 @@ export async function renderRouteSuccess({
     canonicalPath: resolved.canonicalPath,
     publicPath: resolved.publicPath,
     mode: "success",
+    pending: true,
+    isCurrentRender,
   });
 
   const target = host || view;
@@ -1170,6 +1288,8 @@ export async function renderRouteSuccess({
     publicPath: resolved.publicPath,
     routeParams,
     renderId,
+    renderSeq: externalRenderSeq,
+    isCurrentRender,
     appViewContainer: view,
     viewContainer: target,
     renderRoot: target,
@@ -1178,11 +1298,27 @@ export async function renderRouteSuccess({
   try {
     const renderer = routeRenderer(route);
 
+    if (!renderStillCurrent(isCurrentRender) || !isConnectedNode(target)) {
+      return null;
+    }
+
     const result = renderer
       ? await Promise.resolve(renderer(target, context))
       : renderGenericView(AppCore, route, target);
 
+    if (!renderStillCurrent(isCurrentRender) || !isConnectedNode(target)) {
+      cleanupReturnedView(result);
+      return null;
+    }
+
     adoptResult(target, result);
+
+    if (!renderStillCurrent(isCurrentRender) || !isConnectedNode(target)) {
+      cleanupReturnedView(result);
+      return null;
+    }
+
+    setAttr(target, "aria-busy", "false");
 
     markView(AppCore, {
       status: "ready",
@@ -1194,6 +1330,12 @@ export async function renderRouteSuccess({
 
     return result || target;
   } catch (error) {
+    if (!renderStillCurrent(isCurrentRender) || !isConnectedNode(target)) {
+      return null;
+    }
+
+    setAttr(target, "aria-busy", "false");
+
     markView(AppCore, {
       status: "error",
       renderId,
@@ -1213,6 +1355,8 @@ export function renderRouteForbidden({
   canonicalPath = DEFAULT_ROUTE,
   publicPath = null,
   routeParams = {},
+  renderSeq: externalRenderSeq = null,
+  isCurrentRender = null,
   setShellMode = null,
   setDocumentTitle = null,
 } = {}) {
@@ -1231,6 +1375,8 @@ export function renderRouteForbidden({
     publicPath,
     routeParams,
     mode: "forbidden",
+    renderSeq: externalRenderSeq,
+    isCurrentRender,
     setShellMode,
     setDocumentTitle,
   });
@@ -1243,6 +1389,8 @@ export function renderRouteNotFound({
   canonicalPath = DEFAULT_ROUTE,
   publicPath = null,
   routeParams = {},
+  renderSeq: externalRenderSeq = null,
+  isCurrentRender = null,
   setShellMode = null,
   setDocumentTitle = null,
 } = {}) {
@@ -1263,6 +1411,8 @@ export function renderRouteNotFound({
     publicPath: visible,
     routeParams,
     mode: "not-found",
+    renderSeq: externalRenderSeq,
+    isCurrentRender,
     setShellMode,
     setDocumentTitle,
   });
@@ -1276,6 +1426,8 @@ export function renderRouteRuntimeError({
   canonicalPath = DEFAULT_ROUTE,
   publicPath = null,
   routeParams = {},
+  renderSeq: externalRenderSeq = null,
+  isCurrentRender = null,
   setShellMode = null,
   setDocumentTitle = null,
 } = {}) {
@@ -1297,6 +1449,8 @@ export function renderRouteRuntimeError({
     routeParams,
     mode: "error",
     status: "error",
+    renderSeq: externalRenderSeq,
+    isCurrentRender,
     setShellMode,
     setDocumentTitle,
   });
@@ -1351,6 +1505,7 @@ export function getRenderSnapshot(AppCore = null) {
       hostPublicPath: redact(host?.dataset?.routerPublicPath || ""),
       hostViewKey: host?.dataset?.routerViewKey || null,
       hostViewName: host?.dataset?.routerViewName || null,
+      hostBusy: host?.getAttribute?.("aria-busy") || null,
     },
 
     policy: {
@@ -1370,8 +1525,13 @@ export function getRenderSnapshot(AppCore = null) {
 
       injectsSharedContext: true,
       safeAdoptResult: true,
+      guardedAdoptResult: true,
+      ignoresStaleRenderResults: true,
+      cleansStaleViewController: true,
+
       singleStableHost: true,
       exposesActiveHostAsViewContainer: true,
+      paintsImmediatePendingState: true,
 
       preservesPublicPath: true,
       preservesCanonicalPath: true,

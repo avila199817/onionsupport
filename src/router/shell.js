@@ -8,7 +8,7 @@
    - Aplicar document.title.
    - Marcar menú activo usando canonicalPath.
    - /@{user.slug} marca Home porque canonicalPath = /.
-   - /@{user.slug}/{ruta} marca la ruta canónica /{ruta}.
+   - /@{user.slug}/{ruta} marca la ruta canónica /{ruta} sólo si la ruta es real.
    - Mostrar/ocultar chrome según route.hideShell/public/auth layout.
    - Mantener app-shell visible.
    - No pisar el host activo de router/render.js.
@@ -29,6 +29,7 @@
 
 import {
   config,
+  ROUTES,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
   canonicalRoutePath as configCanonicalRoutePath,
   getUserScopedRouteInfo as getConfigUserScopedRouteInfo,
@@ -40,9 +41,10 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_SHELL_VERSION = "router.shell.v8";
+export const ROUTER_SHELL_VERSION = "router.shell.v9.aligned-user-scope";
 
 const APP_NAME = config?.appName || config?.name || "Onion Support";
+const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
 
 const HOME_PATH = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
@@ -60,6 +62,26 @@ const MENU_SELECTOR = [
   "a[data-topbar-link]",
   "a[data-route]",
 ].join(",");
+
+const USER_SCOPED_CANONICAL_PATHS = new Set(
+  [
+    HOME_PATH,
+    CONFIG_ROUTES.incidencias || "/incidencias",
+    CONFIG_ROUTES.facturas || "/facturas",
+    CONFIG_ROUTES.clientes || "/clientes",
+    CONFIG_ROUTES.cuenta || "/cuenta",
+    CONFIG_ROUTES.ajustes || "/ajustes",
+
+    /*
+      Opcionales reales:
+      sólo entran si core/config.js las define.
+    */
+    CONFIG_ROUTES.usuarios || "",
+    CONFIG_ROUTES.servidor || CONFIG_ROUTES.server || "",
+  ]
+    .filter(Boolean)
+    .map((path) => normalizePath(path))
+);
 
 /* =========================================================
    BASICS
@@ -117,11 +139,48 @@ function hasSensitiveQuery(value = "") {
    PATHS
 ========================================================= */
 
+function isHashRouterPath(value = "") {
+  const raw = cleanText(value, "");
+  return raw.startsWith("#/") || raw.startsWith("#!");
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw = cleanText(value, HOME_PATH);
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/") || HOME_PATH;
+  }
+
+  if (raw.startsWith("#/")) {
+    return raw.slice(1) || HOME_PATH;
+  }
+
+  return raw || HOME_PATH;
+}
+
 function pathFromInput(path = HOME_PATH) {
   try {
     return configRoutePathFromUrlLike(path) || HOME_PATH;
   } catch {
-    return HOME_PATH;
+    const raw = cleanText(path, HOME_PATH);
+
+    if (!raw) return HOME_PATH;
+
+    if (isHashRouterPath(raw)) {
+      return normalizeHashRouterPath(raw);
+    }
+
+    if (raw.startsWith("//")) return HOME_PATH;
+
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+      return HOME_PATH;
+    }
+
+    if (/[\r\n\t\\]/.test(raw)) {
+      return HOME_PATH;
+    }
+
+    return raw || HOME_PATH;
   }
 }
 
@@ -139,6 +198,20 @@ function normalizePath(path = HOME_PATH) {
     }
 
     value = value.replace(/\/{2,}/g, "/");
+
+    const parts = [];
+
+    for (const part of value.split("/")) {
+      if (!part || part === ".") continue;
+
+      if (part === "..") {
+        parts.pop();
+      } else {
+        parts.push(part);
+      }
+    }
+
+    value = `/${parts.join("/")}`;
 
     if (value.length > 1) {
       value = value.replace(/\/+$/g, "") || HOME_PATH;
@@ -196,25 +269,36 @@ function isBlockedShellPath(path = HOME_PATH) {
   return false;
 }
 
+function userScopedPathIsRoutable(restPath = HOME_PATH) {
+  return USER_SCOPED_CANONICAL_PATHS.has(normalizePath(restPath));
+}
+
 function getUserScopedRouteInfo(path = HOME_PATH) {
   try {
     const info = getConfigUserScopedRouteInfo(path);
 
     if (isObject(info)) {
+      const clean = normalizePath(path);
+
       const restPath = normalizePath(
-        info.restPath || info.canonicalPath || normalizePath(path)
+        info.restPath || info.canonicalPath || clean
       );
 
       const lookupPath = normalizePath(
         info.canonicalPath || info.lookupPath || restPath
       );
 
+      const routable = Object.prototype.hasOwnProperty.call(info, "routable")
+        ? Boolean(info.routable)
+        : userScopedPathIsRoutable(restPath);
+
       return {
         scoped: Boolean(info.scoped),
-        home: Boolean(info.home),
+        routable,
+        home: Boolean(info.home && routable),
         slug: normalizeUserSlug(info.slug || ""),
         restPath,
-        lookupPath,
+        lookupPath: routable ? lookupPath : clean,
       };
     }
   } catch {
@@ -226,6 +310,7 @@ function getUserScopedRouteInfo(path = HOME_PATH) {
   if (!clean.startsWith(USER_HOME_PREFIX)) {
     return {
       scoped: false,
+      routable: false,
       home: false,
       slug: "",
       restPath: clean,
@@ -240,6 +325,7 @@ function getUserScopedRouteInfo(path = HOME_PATH) {
   if (!slug) {
     return {
       scoped: false,
+      routable: false,
       home: false,
       slug: "",
       restPath: clean,
@@ -251,33 +337,43 @@ function getUserScopedRouteInfo(path = HOME_PATH) {
     ? normalizePath(`/${restSegments.join("/")}`)
     : HOME_PATH;
 
+  const routable = userScopedPathIsRoutable(restPath);
+
   return {
     scoped: true,
-    home: restPath === HOME_PATH,
+    routable,
+    home: routable && restPath === HOME_PATH,
     slug,
     restPath,
-    lookupPath: restPath,
+    lookupPath: routable ? restPath : clean,
   };
 }
 
 function extractUserHomeSlug(path = HOME_PATH) {
-  return getUserScopedRouteInfo(path).slug;
+  const info = getUserScopedRouteInfo(path);
+  return info.home ? info.slug : "";
 }
 
 function isUserHomePath(path = HOME_PATH) {
   try {
-    return configIsUserHomeRoute(path) === true;
+    if (configIsUserHomeRoute(path) === true) return true;
   } catch {
-    return Boolean(getUserScopedRouteInfo(path).home);
+    // fallback abajo
   }
+
+  const info = getUserScopedRouteInfo(path);
+  return Boolean(info.scoped && info.routable && info.home);
 }
 
 function isUserScopedPath(path = HOME_PATH) {
   try {
-    return configIsUserScopedRoute(path) === true;
+    if (configIsUserScopedRoute(path) === true) return true;
   } catch {
-    return Boolean(getUserScopedRouteInfo(path).scoped);
+    // fallback abajo
   }
+
+  const info = getUserScopedRouteInfo(path);
+  return Boolean(info.scoped && info.routable);
 }
 
 function canonicalPath(path = HOME_PATH) {
@@ -285,12 +381,23 @@ function canonicalPath(path = HOME_PATH) {
     return HOME_PATH;
   }
 
+  const clean = normalizePath(path);
+  const scoped = getUserScopedRouteInfo(clean);
+
+  if (scoped.scoped && !scoped.routable) {
+    return isBlockedShellPath(clean) ? HOME_PATH : clean;
+  }
+
   try {
-    const canonical = configCanonicalRoutePath(path) || normalizePath(path);
+    const canonical = normalizePath(
+      configCanonicalRoutePath(path) || clean
+    );
+
     return isBlockedShellPath(canonical) ? HOME_PATH : canonical;
   } catch {
-    const scoped = getUserScopedRouteInfo(path);
-    const canonical = scoped.scoped ? scoped.lookupPath : normalizePath(path);
+    const canonical = scoped.scoped && scoped.routable
+      ? scoped.lookupPath
+      : clean;
 
     return isBlockedShellPath(canonical) ? HOME_PATH : canonical;
   }
@@ -334,9 +441,20 @@ function setHidden(node = null, hidden = false) {
   const value = Boolean(hidden);
 
   try {
-    node.hidden = value;
-    node.setAttribute("aria-hidden", value ? "true" : "false");
-    node.setAttribute("aria-busy", "false");
+    if (node.hidden !== value) {
+      node.hidden = value;
+    }
+
+    const ariaHidden = value ? "true" : "false";
+
+    if (node.getAttribute("aria-hidden") !== ariaHidden) {
+      node.setAttribute("aria-hidden", ariaHidden);
+    }
+
+    if (node.getAttribute("aria-busy") !== "false") {
+      node.setAttribute("aria-busy", "false");
+    }
+
     return true;
   } catch {
     return false;
@@ -348,8 +466,10 @@ function setData(node = null, key = "", value = "") {
 
   try {
     if (value === null || value === undefined || value === "") {
-      delete node.dataset[key];
-    } else {
+      if (Object.prototype.hasOwnProperty.call(node.dataset, key)) {
+        delete node.dataset[key];
+      }
+    } else if (node.dataset[key] !== String(value)) {
       node.dataset[key] = String(value);
     }
 
@@ -364,8 +484,10 @@ function setAttr(node = null, key = "", value = "") {
 
   try {
     if (value === null || value === undefined || value === "") {
-      node.removeAttribute(key);
-    } else {
+      if (node.hasAttribute(key)) {
+        node.removeAttribute(key);
+      }
+    } else if (node.getAttribute(key) !== String(value)) {
       node.setAttribute(key, String(value));
     }
 
@@ -379,7 +501,13 @@ function addClasses(node = null, classes = []) {
   if (!node || !classes.length) return false;
 
   try {
-    node.classList.add(...classes.filter(Boolean));
+    const list = classes.filter(Boolean);
+    const missing = list.filter((className) => !node.classList.contains(className));
+
+    if (missing.length) {
+      node.classList.add(...missing);
+    }
+
     return true;
   } catch {
     return false;
@@ -390,7 +518,13 @@ function removeClasses(node = null, classes = []) {
   if (!node || !classes.length) return false;
 
   try {
-    node.classList.remove(...classes.filter(Boolean));
+    const list = classes.filter(Boolean);
+    const existing = list.filter((className) => node.classList.contains(className));
+
+    if (existing.length) {
+      node.classList.remove(...existing);
+    }
+
     return true;
   } catch {
     return false;
@@ -401,7 +535,12 @@ function toggleClass(node = null, className = "", active = false) {
   if (!node || !className) return false;
 
   try {
-    node.classList.toggle(className, Boolean(active));
+    const value = Boolean(active);
+
+    if (node.classList.contains(className) !== value) {
+      node.classList.toggle(className, value);
+    }
+
     return true;
   } catch {
     return false;
@@ -412,11 +551,17 @@ function clearNode(node = null) {
   if (!node) return false;
 
   try {
-    node.replaceChildren();
+    if (node.childNodes.length) {
+      node.replaceChildren();
+    }
+
     return true;
   } catch {
     try {
-      node.textContent = "";
+      if (node.textContent) {
+        node.textContent = "";
+      }
+
       return true;
     } catch {
       return false;
@@ -582,7 +727,10 @@ export function setDocumentTitle(AppCore = null, title = "") {
   const finalTitle = cleanTitle === name ? name : `${cleanTitle} · ${name}`;
 
   try {
-    document.title = finalTitle;
+    if (document.title !== finalTitle) {
+      document.title = finalTitle;
+    }
+
     return true;
   } catch {
     return false;
@@ -863,6 +1011,7 @@ function elementSnapshot(node = null) {
 export function getShellSnapshot(AppCore = null) {
   const elements = getShellElements(AppCore);
   const publicPath = cleanText(AppCore?.state?.publicPath, "");
+  const publicInfo = getUserScopedRouteInfo(publicPath || HOME_PATH);
 
   const route = canonicalPath(
     AppCore?.state?.route ||
@@ -877,9 +1026,13 @@ export function getShellSnapshot(AppCore = null) {
 
     route: redact(route),
     publicPath: redact(publicPath),
-    publicSlug: extractUserHomeSlug(publicPath) || null,
+    publicSlug: publicInfo.home ? publicInfo.slug || null : null,
     isUserHomePath: isUserHomePath(publicPath || HOME_PATH),
     isUserScopedPath: isUserScopedPath(publicPath || HOME_PATH),
+    userScopedRoutable: Boolean(publicInfo.scoped && publicInfo.routable),
+    userScopedRestPath: publicInfo.scoped && publicInfo.routable
+      ? publicInfo.restPath
+      : null,
     blockedLegacyPath: isBlockedShellPath(publicPath || route || HOME_PATH),
 
     shellVisible: AppCore?.state?.shellVisible ?? null,
@@ -924,7 +1077,8 @@ export function getShellSnapshot(AppCore = null) {
       userSlugHome: true,
       userScopedPrivateRoutes: true,
       canonicalizesUserHome: true,
-      canonicalizesUserScopedRoutes: true,
+      canonicalizesOnlyKnownUserScopedRoutes: true,
+      doesNotCanonicalizeUnknownUserScopedRoutes: true,
 
       doesNotClobberActiveRouteHost: true,
 
@@ -944,6 +1098,7 @@ export function getShellSnapshot(AppCore = null) {
 
       chromeByRouteOnly: true,
       keepsAppShellVisible: true,
+      idempotentDomWrites: true,
       snapshotRedacted: true,
     },
   };

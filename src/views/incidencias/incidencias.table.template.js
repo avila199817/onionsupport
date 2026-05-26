@@ -29,7 +29,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_TABLE_TEMPLATE_VERSION = "incidencias.table.template.v2.optimized";
+export const INCIDENCIAS_TABLE_TEMPLATE_VERSION = "incidencias.table.template.v3.paint-perf";
 
 const DEFAULT_VISIBLE_ROWS = 20;
 const DEFAULT_CURRENCY = "EUR";
@@ -52,6 +52,11 @@ const CLOSED_STATUS_KEYS = new Set([
   "resolved",
   "closed",
 ]);
+
+const MEMO_CACHE_LIMIT = 24;
+
+const statsCache = new Map();
+const updatedAtCache = new Map();
 
 /* =========================================================
    SAFE HELPERS
@@ -126,6 +131,27 @@ function first(...values) {
   }
 
   return null;
+}
+
+function setMemoCache(cache, key, value) {
+  if (!cache || !key) return value;
+
+  try {
+    if (cache.has(key)) {
+      cache.delete(key);
+    }
+
+    cache.set(key, value);
+
+    while (cache.size > MEMO_CACHE_LIMIT) {
+      const firstKey = cache.keys().next().value;
+      cache.delete(firstKey);
+    }
+  } catch {
+    // noop
+  }
+
+  return value;
 }
 
 function escapeHtml(value = "") {
@@ -1576,6 +1602,148 @@ function computeStats(items = []) {
   }
 }
 
+function normalizeStatsPayload(stats = {}, fallbackRows = []) {
+  const source = safeObject(stats);
+  const rows = safeArray(fallbackRows);
+
+  if (!Object.keys(source).length) {
+    return null;
+  }
+
+  return {
+    total: safeNumber(
+      first(source.total, source.totalCount, source.count, rows.length),
+      rows.length
+    ),
+    openCount: safeNumber(
+      first(source.openCount, source.open, source.pendingOpen, source.active, 0),
+      0
+    ),
+    closedCount: safeNumber(
+      first(source.closedCount, source.closed, source.resolved, 0),
+      0
+    ),
+    urgentCount: safeNumber(
+      first(source.urgentCount, source.urgent, source.high, source.critical, 0),
+      0
+    ),
+    attachmentsCount: safeNumber(
+      first(source.attachmentsCount, source.attachments, source.filesCount, 0),
+      0
+    ),
+    totalImporte: safeNumber(
+      first(source.totalImporte, source.invoiceTotal, source.invoicesTotal, source.amount, 0),
+      0
+    ),
+  };
+}
+
+function getPrecomputedStats(input = {}, rows = []) {
+  const data = safeObject(input);
+  const runtime = getRuntimeState(data);
+
+  return normalizeStatsPayload(
+    first(
+      data.stats,
+      data.summary,
+      data.metrics,
+      data.incidentStats,
+      data.incidenciasStats,
+      runtime.stats,
+      runtime.summary,
+      runtime.metrics,
+      runtime.incidentStats,
+      runtime.incidenciasStats,
+      null
+    ),
+    rows
+  );
+}
+
+function buildItemsSignature(items = [], input = {}) {
+  const rows = safeArray(items);
+  const data = safeObject(input);
+  const runtime = getRuntimeState(data);
+
+  const firstRow = rows[0] || null;
+  const lastRow = rows[rows.length - 1] || null;
+
+  return [
+    rows.length,
+    safeNumber(first(data.remoteCount, data.totalCount, runtime.remoteCount, runtime.totalCount, 0), 0),
+    safeText(first(data.lastUpdatedAt, runtime.lastSyncAt, data.updatedAt, runtime.updatedAt, ""), ""),
+    firstRow ? getTicketId(firstRow) : "",
+    firstRow ? safeText(getUpdatedAt(firstRow), "") : "",
+    firstRow ? safeText(getStatusRaw(firstRow), "") : "",
+    firstRow ? safeText(getPriorityRaw(firstRow), "") : "",
+    lastRow ? getTicketId(lastRow) : "",
+    lastRow ? safeText(getUpdatedAt(lastRow), "") : "",
+    lastRow ? safeText(getStatusRaw(lastRow), "") : "",
+    lastRow ? safeText(getPriorityRaw(lastRow), "") : "",
+  ].join("|");
+}
+
+function computeStatsMemoized(items = [], input = {}) {
+  const rows = safeArray(items);
+  const precomputed = getPrecomputedStats(input, rows);
+
+  if (precomputed) {
+    return precomputed;
+  }
+
+  const signature = buildItemsSignature(rows, input);
+  const cached = statsCache.get(signature);
+
+  if (cached) {
+    return cached;
+  }
+
+  return setMemoCache(statsCache, signature, computeStats(rows));
+}
+
+function getLatestUpdatedAt(input = {}, rows = []) {
+  const data = safeObject(input);
+  const runtime = getRuntimeState(data);
+
+  const explicit = first(
+    data.lastUpdatedAt,
+    runtime.lastSyncAt,
+    data.updatedAt,
+    runtime.updatedAt,
+    runtime.lastUpdatedAt,
+    null
+  );
+
+  if (explicit) {
+    return explicit;
+  }
+
+  const sourceRows = safeArray(rows);
+
+  if (!sourceRows.length) {
+    return null;
+  }
+
+  const signature = buildItemsSignature(sourceRows, data);
+  const cached = updatedAtCache.get(signature);
+
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  /*
+    La vista ya entrega las incidencias ordenadas de más nuevas a más antiguas.
+    Revisar sólo la primera fila evita mapear todo el historial en cada render.
+  */
+  const latest = first(
+    getUpdatedAt(sourceRows[0]),
+    getCreatedAt(sourceRows[0]),
+    null
+  );
+
+  return setMemoCache(updatedAtCache, signature, latest || null);
+}
+
 function resolveBusyMeta(item = {}, state = {}) {
   const runtime = safeObject(state);
   const ticketId = getTicketId(item);
@@ -2152,7 +2320,7 @@ export function renderHeader(input = {}) {
   const data = safeObject(input);
   const rows = getInputItems(data);
   const runtime = getRuntimeState(data);
-  const stats = computeStats(rows);
+  const stats = computeStatsMemoized(rows, data);
 
   const remoteCount = Math.max(
     stats.total,
@@ -2169,13 +2337,7 @@ export function renderHeader(input = {}) {
     )
   );
 
-  const updatedAt = first(
-    data.lastUpdatedAt,
-    runtime.lastSyncAt,
-    data.updatedAt,
-    runtime.updatedAt,
-    ...rows.map((item) => getUpdatedAt(item))
-  );
+  const updatedAt = getLatestUpdatedAt(data, rows);
 
   const title = safeText(
     first(data.title, runtime.title, "Tus incidencias y solicitudes"),

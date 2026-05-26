@@ -18,12 +18,13 @@
    - Sin navegación.
    - Sin lógica propia de password toggle.
    - Sin theme toggle.
+   - Sin opción "Recordarme".
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
 
-export const LOGIN_DOM_VERSION = "login.dom.v6";
+export const LOGIN_DOM_VERSION = "login.dom.v7";
 
 const DEFAULT_SUBMIT_LABEL = "Entrar";
 const DEFAULT_LOADING_LABEL = "Accediendo...";
@@ -40,7 +41,6 @@ const SELECTORS = Object.freeze({
 
   identifier: "[data-login-identifier], #loginIdentifier, [name='identifier']",
   password: "[data-login-password], [data-password-input], #loginPassword, [name='password']",
-  remember: "[data-login-remember], #loginRemember, [name='remember']",
 
   message: "[data-login-message], [data-login-error], #loginMessage, #loginError, .login-error",
   submit: "[data-login-submit], #loginSubmit, button[type='submit']",
@@ -403,7 +403,7 @@ function normalizePasswordInput(input = null) {
   return true;
 }
 
-function rememberSubmitOriginalLabel(button = null) {
+function storeSubmitOriginalLabel(button = null) {
   if (!button) return false;
 
   try {
@@ -445,7 +445,7 @@ export function getLoginRefs(container = null) {
     }
   }
 
-  rememberSubmitOriginalLabel(submitButton);
+  storeSubmitOriginalLabel(submitButton);
 
   const refs = {
     container: safeContainer,
@@ -456,7 +456,6 @@ export function getLoginRefs(container = null) {
     emailInput: identifierInput,
     passwordInput,
 
-    rememberInput: qs(scope, SELECTORS.remember),
     errorBox: qs(scope, SELECTORS.message),
     submitButton,
 
@@ -690,7 +689,6 @@ export function setLoginLoading(refs = {}, loading = false, options = {}) {
   setLoadingDisabled(refs.identifierInput || refs.emailInput, active);
   setLoadingDisabled(refs.passwordInput, active);
   setLoadingDisabled(refs.togglePasswordButton, active);
-  setLoadingDisabled(refs.rememberInput, active);
 
   if (refs.submitButton) {
     const submitLabel = text(options.submitLabel, originalSubmitLabel(refs.submitButton));
@@ -745,8 +743,6 @@ export function readLoginFormState(refs = {}) {
     login: identifier,
 
     password: normalizePassword(refs.passwordInput?.value),
-    remember: Boolean(refs.rememberInput?.checked),
-    rememberMe: Boolean(refs.rememberInput?.checked),
   };
 }
 
@@ -874,6 +870,7 @@ export function getLoginDomSnapshot(refs = {}) {
       passwordFieldShared: true,
       noOwnPasswordToggleLogic: true,
       noThemeToggle: true,
+      noRememberOption: true,
 
       submitIdempotent: true,
       errorsRedacted: true,

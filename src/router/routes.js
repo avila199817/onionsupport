@@ -47,7 +47,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.v9";
+export const ROUTES_VERSION = "routes.v10.lifecycle-priority";
 
 const ROUTE_SOURCE = "router.routes";
 const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
@@ -557,12 +557,20 @@ async function loadView(viewKey = "") {
 
 function resolveRenderer(view, viewKey = "") {
   if (isFunction(view)) return view;
-  if (isFunction(view?.render)) return view.render.bind(view);
+
+  /*
+    Prioridad intencionada:
+    - init/mount/bootstrap ejecutan el lifecycle real de la vista.
+    - render queda como fallback de pintado puro.
+    Si una vista expone render e init, init debe ganar para hidratar,
+    cargar datos, bindear eventos y dejar estado consistente.
+  */
   if (isFunction(view?.init)) return view.init.bind(view);
   if (isFunction(view?.mount)) return view.mount.bind(view);
   if (isFunction(view?.bootstrap)) return view.bootstrap.bind(view);
+  if (isFunction(view?.render)) return view.render.bind(view);
 
-  throw new Error(`Router: la vista "${viewKey}" no expone render/init/mount/bootstrap.`);
+  throw new Error(`Router: la vista "${viewKey}" no expone init/mount/bootstrap/render.`);
 }
 
 function createLazyRender(viewKey = "", viewName = "") {

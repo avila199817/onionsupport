@@ -48,7 +48,7 @@ import {
   getCurrentUserHomePath,
 } from "./session.js";
 
-export const RESTORE_VERSION = "auth.restore.v8";
+export const RESTORE_VERSION = "auth.restore.v9";
 
 const ME_ENDPOINT = AUTH_ENDPOINTS.me;
 const REFRESH_ENDPOINT = AUTH_ENDPOINTS.refresh;
@@ -119,7 +119,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
@@ -249,6 +250,7 @@ function authErrorStatus(error = null) {
       error?.status ||
         error?.statusCode ||
         error?.response?.status ||
+        payload.status ||
         payload.statusCode ||
         0
     ) || 0
@@ -271,10 +273,12 @@ function authErrorCode(error = null) {
     first(
       error?.code,
       error?.error,
-      payload.code,
-      payload.error,
       payload.auth?.code,
       payload.auth?.error,
+      payload.code,
+      payload.error,
+      payload.errorCode,
+      payload.error_code,
       ""
     ),
     ""
@@ -289,6 +293,8 @@ function extractMessage(error = null) {
       first(
         payload.message,
         payload.error_description,
+        payload.detail,
+        payload.reason,
         error?.message,
         authErrorCode(error),
         "No se pudo restaurar la sesión."

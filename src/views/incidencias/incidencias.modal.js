@@ -20,6 +20,8 @@ import {
   getStatusLabel,
   getPriorityLabel,
   getAvatarTheme,
+  normalizeStatus,
+  normalizePriority,
 } from "./incidencias.model.js";
 
 import {
@@ -67,7 +69,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_MODAL_VERSION = "incidencias.modal.v2";
+export const INCIDENCIAS_MODAL_VERSION = "incidencias.modal.v3.optimized";
 
 const MODAL_ID = "incidencias-detail-modal-root";
 const PANEL_ID = "incidencias-detail-modal-panel";
@@ -126,6 +128,14 @@ function isBlob(value) {
   return typeof Blob !== "undefined" && value instanceof Blob;
 }
 
+function rootContains(root = null, element = null) {
+  try {
+    return Boolean(root && element && (root === element || root.contains(element)));
+  } catch {
+    return false;
+  }
+}
+
 function htmlAttrs(attrs = {}) {
   return Object.entries(safeObject(attrs))
     .map(([key, value]) => {
@@ -176,6 +186,67 @@ function getObjectHash(value = {}) {
   }
 }
 
+function safeModalUrl(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (/^(?:javascript|vbscript|file):/i.test(raw)) return "";
+  if (raw.startsWith("//")) return "";
+
+  if (/^blob:/i.test(raw)) {
+    return raw;
+  }
+
+  if (raw.startsWith("/")) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return safeExternalUrl(raw);
+}
+
+function safeModalImageSrc(value = "") {
+  const raw = safeText(value, "");
+
+  if (/^blob:/i.test(raw)) {
+    return raw;
+  }
+
+  return safeImageSrc(raw);
+}
+
+function getModalActionElement(root = null, target = null) {
+  const element = target?.nodeType === 1 ? target : target?.parentElement || null;
+
+  if (!root || !element || typeof element.closest !== "function") {
+    return null;
+  }
+
+  const action = element.closest("[data-modal-action]");
+
+  if (!action || !rootContains(root, action)) {
+    return null;
+  }
+
+  return action;
+}
+
+function getModalActionName(element = null) {
+  return safeText(element?.dataset?.modalAction, "")
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/_+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 /* =========================================================
    STATE HELPERS
 ========================================================= */
@@ -214,7 +285,7 @@ function clearAttachmentPreview() {
 
 function setAttachmentPreview(file = {}) {
   const next = safeObject(file);
-  const url = safeExternalUrl(first(next.url, next.viewUrl, next.openUrl, next.downloadUrl, ""));
+  const url = safeModalUrl(first(next.url, next.viewUrl, next.openUrl, next.downloadUrl, ""));
 
   if (!url) {
     clearAttachmentPreview();
@@ -226,12 +297,12 @@ function setAttachmentPreview(file = {}) {
   modalState.previewFile = {
     ...next,
     url,
-    viewUrl: safeExternalUrl(first(next.viewUrl, next.openUrl, url)),
-    openUrl: safeExternalUrl(first(next.openUrl, next.viewUrl, url)),
-    downloadUrl: safeExternalUrl(first(next.downloadUrl, url)),
+    viewUrl: safeModalUrl(first(next.viewUrl, next.openUrl, url)),
+    openUrl: safeModalUrl(first(next.openUrl, next.viewUrl, url)),
+    downloadUrl: safeModalUrl(first(next.downloadUrl, url)),
   };
 
-  if (next.managedObjectUrl) {
+  if (next.managedObjectUrl || next.blob || /^blob:/i.test(url)) {
     modalState.previewObjectUrl = url;
   }
 
@@ -594,7 +665,7 @@ function getAttachments(detail = {}) {
       `attachment-${index + 1}`
     );
 
-    const url = safeExternalUrl(first(item.viewUrl, item.openUrl, item.signedUrl, item.url, item.blobUrl, item.publicUrl, item.downloadUrl, itemRaw.viewUrl, itemRaw.openUrl, itemRaw.signedUrl, itemRaw.url, itemRaw.blobUrl, itemRaw.publicUrl, itemRaw.downloadUrl));
+    const url = safeModalUrl(first(item.viewUrl, item.openUrl, item.signedUrl, item.url, item.blobUrl, item.publicUrl, item.downloadUrl, itemRaw.viewUrl, itemRaw.openUrl, itemRaw.signedUrl, itemRaw.url, itemRaw.blobUrl, itemRaw.publicUrl, itemRaw.downloadUrl));
 
     return {
       ...item,
@@ -608,9 +679,9 @@ function getAttachments(detail = {}) {
       contentType: safeText(first(item.contentType, item.mimetype, item.mimeType, item.type, itemRaw.contentType, itemRaw.mimetype, itemRaw.mimeType, itemRaw.type), ""),
       uploadedAt: first(item.uploadedAt, item.createdAt, item.date, itemRaw.uploadedAt, itemRaw.createdAt, itemRaw.date, null),
       url,
-      viewUrl: safeExternalUrl(first(item.viewUrl, item.openUrl, item.signedUrl, item.url, url)),
-      openUrl: safeExternalUrl(first(item.openUrl, item.viewUrl, item.signedUrl, item.url, url)),
-      downloadUrl: safeExternalUrl(first(item.downloadUrl, item.signedUrl, item.url, url)),
+      viewUrl: safeModalUrl(first(item.viewUrl, item.openUrl, item.signedUrl, item.url, url)),
+      openUrl: safeModalUrl(first(item.openUrl, item.viewUrl, item.signedUrl, item.url, url)),
+      downloadUrl: safeModalUrl(first(item.downloadUrl, item.signedUrl, item.url, url)),
       raw: {
         ...itemRaw,
         ...item,
@@ -660,13 +731,20 @@ function getTimeline(detail = {}) {
 }
 
 function getStatusClassKey(value = "") {
+  let status = "";
+
+  try {
+    status = normalizeStatus(value);
+  } catch {
+    status = normalizeKey(value);
+  }
+
+  if (status === "in_progress") return "progress";
+  if (["open", "pending", "resolved", "closed"].includes(status)) return status;
+
   const key = normalizeKey(value);
 
-  if (["open", "abierta", "abierto"].includes(key)) return "open";
-  if (["pending", "pendiente"].includes(key)) return "pending";
-  if (["progress", "in_progress", "inprogress", "en_proceso", "proceso", "working", "trabajando"].includes(key)) return "progress";
-  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
-  if (["closed", "cerrada", "cerrado", "archived", "archivada", "cancelled", "canceled"].includes(key)) return "closed";
+  if (["progress", "inprogress", "en_proceso", "proceso", "working", "trabajando"].includes(key)) return "progress";
 
   return "neutral";
 }
@@ -674,10 +752,20 @@ function getStatusClassKey(value = "") {
 function getPriorityClassKey(value = "") {
   const key = normalizeKey(value);
 
+  if (["critical", "critica", "critico", "crítica", "crítico", "p0"].includes(key)) {
+    return "critical";
+  }
+
+  try {
+    const priority = normalizePriority(value);
+
+    if (priority === "low") return "low";
+    if (priority === "medium") return "medium";
+    if (priority === "high" || priority === "urgent") return "high";
+  } catch {}
+
   if (["low", "baja", "minor", "p3"].includes(key)) return "low";
-  if (["medium", "media", "normal", "p2"].includes(key)) return "medium";
   if (["high", "alta", "urgent", "urgente", "p1"].includes(key)) return "high";
-  if (["critical", "critica", "critico", "crítica", "crítico", "p0"].includes(key)) return "critical";
 
   return "medium";
 }
@@ -977,7 +1065,7 @@ function renderAttachmentActionButtons(file = {}) {
 function renderAttachmentPreviewSquare(file = {}) {
   const isImage = isImageLikeAttachment(file);
   const url = isImage
-    ? safeImageSrc(first(file.viewUrl, file.openUrl, file.signedUrl, file.url, file.blobUrl, file.publicUrl))
+    ? safeModalImageSrc(first(file.viewUrl, file.openUrl, file.signedUrl, file.url, file.blobUrl, file.publicUrl))
     : "";
   const name = safeFilename(file.name || file.filename || "archivo", "archivo");
 
@@ -1064,7 +1152,7 @@ function renderAttachments(detail = {}) {
 
 function renderAttachmentPreview() {
   const file = safeObject(modalState.previewFile);
-  const url = safeExternalUrl(file.url || file.viewUrl || file.openUrl || file.downloadUrl);
+  const url = safeModalUrl(file.url || file.viewUrl || file.openUrl || file.downloadUrl);
 
   if (!url) return "";
 
@@ -1099,7 +1187,7 @@ function renderAttachmentPreview() {
       <div class="incidencias-modal-preview-frame ${image ? "is-image" : ""}">
         ${
           image
-            ? `<img src="${escapeHtml(safeImageSrc(url))}" alt="${escapeHtml(filename)}" class="incidencias-modal-preview-image" />`
+            ? `<img src="${escapeHtml(safeModalImageSrc(url))}" alt="${escapeHtml(filename)}" class="incidencias-modal-preview-image" />`
             : `<iframe src="${escapeHtml(url)}" title="${escapeHtml(filename)}" class="incidencias-modal-preview-iframe" loading="lazy" referrerpolicy="no-referrer"></iframe>`
         }
       </div>
@@ -1819,7 +1907,7 @@ async function handleAttachmentAction(attachmentId = "", mode = "download") {
 
 function downloadResolvedPreviewFile() {
   const file = safeObject(modalState.previewFile);
-  const url = safeExternalUrl(file.downloadUrl || file.url);
+  const url = safeModalUrl(file.downloadUrl || file.url);
 
   if (!url || !isBrowser()) return false;
 
@@ -1966,7 +2054,7 @@ function attachRootBindings() {
 
   const onInput = (event) => {
     const field = event.target?.closest?.("[data-modal-field]");
-    if (!field) return;
+    if (!field || !rootContains(root, field)) return;
 
     const fieldName = safeText(field.dataset.modalField, "");
 
@@ -1977,7 +2065,7 @@ function attachRootBindings() {
 
   const onChange = (event) => {
     const field = event.target?.closest?.("[data-modal-field]");
-    if (!field) return;
+    if (!field || !rootContains(root, field)) return;
 
     const fieldName = safeText(field.dataset.modalField, "");
 
@@ -1998,88 +2086,70 @@ function attachRootBindings() {
 
     const closeButton = target.closest("[data-modal-close='true']");
 
-    if (closeButton) {
+    if (closeButton && rootContains(root, closeButton)) {
       event.preventDefault();
       if (!modalState.isSubmitting) closeIncidenciasModal();
       return;
     }
 
-    const copyButton = target.closest('[data-modal-action="copy"]');
+    const actionElement = getModalActionElement(root, target);
 
-    if (copyButton) {
-      event.preventDefault();
-      await handleCopy(copyButton.dataset.ticketId || "");
-      return;
-    }
-
-    const submitButton = target.closest('[data-modal-action="submit-update"]');
-
-    if (submitButton) {
-      event.preventDefault();
-      await handleSubmitUpdate(submitButton.dataset.ticketId || "");
-      return;
-    }
-
-    const openAttachmentButton = target.closest('[data-modal-action="open-attachment"]');
-
-    if (openAttachmentButton) {
-      event.preventDefault();
-      await handleAttachmentAction(openAttachmentButton.dataset.attachmentId || "", "open");
-      return;
-    }
-
-    const downloadAttachmentButton = target.closest('[data-modal-action="download-attachment"]');
-
-    if (downloadAttachmentButton) {
-      event.preventDefault();
-      await handleAttachmentAction(downloadAttachmentButton.dataset.attachmentId || "", "download");
-      return;
-    }
-
-    const closePreviewButton = target.closest('[data-modal-action="close-preview"]');
-
-    if (closePreviewButton) {
-      event.preventDefault();
-      clearAttachmentPreview();
-      renderModal();
-      focusPanel();
-      return;
-    }
-
-    const downloadPreviewButton = target.closest('[data-modal-action="download-preview"]');
-
-    if (downloadPreviewButton) {
+    if (actionElement) {
+      const action = getModalActionName(actionElement);
       event.preventDefault();
 
-      if (downloadResolvedPreviewFile()) {
-        showToast("Descarga iniciada.", "success");
-      } else {
-        showToast("No se pudo descargar el documento.", "error");
+      switch (action) {
+        case "copy":
+          await handleCopy(actionElement.dataset.ticketId || "");
+          return;
+
+        case "submit-update":
+          await handleSubmitUpdate(actionElement.dataset.ticketId || "");
+          return;
+
+        case "open-attachment":
+          await handleAttachmentAction(actionElement.dataset.attachmentId || "", "open");
+          return;
+
+        case "download-attachment":
+          await handleAttachmentAction(actionElement.dataset.attachmentId || "", "download");
+          return;
+
+        case "close-preview":
+          clearAttachmentPreview();
+          renderModal();
+          focusPanel();
+          return;
+
+        case "download-preview":
+          if (downloadResolvedPreviewFile()) {
+            showToast("Descarga iniciada.", "success");
+          } else {
+            showToast("No se pudo descargar el documento.", "error");
+          }
+          return;
+
+        case "remove-pending-file": {
+          const index = safeNumber(actionElement.dataset.fileIndex, -1);
+
+          if (index >= 0) {
+            modalState.pendingFiles = safeArray(modalState.pendingFiles).filter((_, currentIndex) => currentIndex !== index);
+            renderModal();
+            focusPanel();
+          }
+
+          return;
+        }
+
+        default:
+          break;
       }
-
-      return;
-    }
-
-    const removePendingButton = target.closest('[data-modal-action="remove-pending-file"]');
-
-    if (removePendingButton) {
-      event.preventDefault();
-
-      const index = safeNumber(removePendingButton.dataset.fileIndex, -1);
-
-      if (index >= 0) {
-        modalState.pendingFiles = safeArray(modalState.pendingFiles).filter((_, currentIndex) => currentIndex !== index);
-        renderModal();
-        focusPanel();
-      }
-
-      return;
     }
 
     const overlay = target.closest("[data-incidencias-modal-overlay='true']");
     const panel = target.closest("[data-incidencias-modal-panel='true']");
 
-    if (overlay && !panel && target === overlay && !modalState.isSubmitting) {
+    if (overlay && rootContains(root, overlay) && !panel && target === overlay && !modalState.isSubmitting) {
       closeIncidenciasModal();
     }
   };

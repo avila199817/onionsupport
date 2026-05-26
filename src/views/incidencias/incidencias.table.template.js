@@ -8,16 +8,28 @@
    - Exponer data-action/data-incidencias-action para bindings.
    - Pintar modo feed/infinite scroll sin paginación visual.
    - Mantener CSP limpio: sin estilos inline y sin eventos inline.
+   - Delegar normalización principal al modelo cuando aplique.
    - No cargar datos.
-   - No filtrar ni paginar por su cuenta.
+   - No filtrar ni paginar por su cuenta salvo conteos visuales de filtros.
    - No abrir modales.
    - No registrar listeners de acciones.
    - No leer AppCore, Router, Auth, Store ni globals.
 ========================================================= */
 
+import {
+  computeIncidenciasStats,
+  getInitials as getModelInitials,
+  getPriorityLabel as getModelPriorityLabel,
+  getStatusLabel as getModelStatusLabel,
+  normalizePriority,
+  normalizeStatus,
+} from "./incidencias.model.js";
+
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+export const INCIDENCIAS_TABLE_TEMPLATE_VERSION = "incidencias.table.template.v2.optimized";
 
 const DEFAULT_VISIBLE_ROWS = 20;
 const DEFAULT_CURRENCY = "EUR";
@@ -27,6 +39,18 @@ const FILTERS = Object.freeze([
   { key: "all", label: "Todas" },
   { key: "open", label: "Abiertas" },
   { key: "closed", label: "Cerradas" },
+]);
+
+const OPEN_STATUS_KEYS = new Set([
+  "open",
+  "pending",
+  "in_progress",
+  "progress",
+]);
+
+const CLOSED_STATUS_KEYS = new Set([
+  "resolved",
+  "closed",
 ]);
 
 /* =========================================================
@@ -257,8 +281,8 @@ function getInputItems(input = {}) {
 
   return safeArray(
     first(
-      data.items,
       data.allItems,
+      data.items,
       data.rows,
       data.tickets,
       data.incidencias,
@@ -280,7 +304,7 @@ function getFilteredItems(input = {}) {
     first(
       data.filteredItems,
       data.state?.filteredItems,
-      null
+      []
     )
   );
 }
@@ -295,15 +319,15 @@ function getVisibleItems(input = {}) {
       data.itemsPage,
       data.state?.pageItems,
       data.state?.visibleItems,
-      null
+      []
     )
   );
 
   if (explicitVisibleItems.length) return explicitVisibleItems;
 
-  return getFilteredItems(data).length
-    ? getFilteredItems(data)
-    : getInputItems(data);
+  const filteredItems = getFilteredItems(data);
+
+  return filteredItems.length ? filteredItems : getInputItems(data);
 }
 
 function getSearchQuery(input = {}) {
@@ -425,9 +449,8 @@ function getFeedMeta(input = {}) {
         data.filteredTotal,
         runtime.filteredCount,
         runtime.filteredTotal,
-        filteredItems.length,
-        visibleItems.length,
-        0
+        filteredItems.length || null,
+        visibleItems.length
       ),
       filteredItems.length || visibleItems.length
     )
@@ -448,8 +471,8 @@ function getFeedMeta(input = {}) {
     )
   );
 
-  const totalCount = filteredTotal || allItems.length || remoteCount;
   const visibleCount = visibleItems.length;
+  const totalCount = filteredTotal || allItems.length || remoteCount || visibleCount;
 
   const remainingCount = Math.max(
     0,
@@ -495,8 +518,8 @@ function getFeedMeta(input = {}) {
     pageItems: visibleItems,
 
     totalCount,
-    filteredTotal: totalCount,
-    filteredCount: totalCount,
+    filteredTotal,
+    filteredCount: filteredTotal,
     remoteCount,
 
     visibleCount,
@@ -511,7 +534,13 @@ function getFeedMeta(input = {}) {
 
     page: 1,
     currentPage: 1,
-    pageSize: Math.max(1, safeNumber(first(data.pageSize, runtime.pageSize, visibleCount, DEFAULT_VISIBLE_ROWS), DEFAULT_VISIBLE_ROWS)),
+    pageSize: Math.max(
+      1,
+      safeNumber(
+        first(data.pageSize, runtime.pageSize, visibleCount, DEFAULT_VISIBLE_ROWS),
+        DEFAULT_VISIBLE_ROWS
+      )
+    ),
     totalPages: 1,
 
     rangeStart: visibleCount ? 1 : 0,
@@ -907,14 +936,18 @@ function getAvatarUrl(item = {}) {
 }
 
 function getInitials(value = "") {
-  const text = normalizeWhitespace(value);
-  if (!text) return "ON";
+  try {
+    return getModelInitials(value);
+  } catch {
+    const text = normalizeWhitespace(value);
+    if (!text) return "ON";
 
-  const parts = text.split(" ").filter(Boolean);
+    const parts = text.split(" ").filter(Boolean);
 
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
 
-  return `${parts[0]?.[0] || ""}${parts[parts.length - 1]?.[0] || ""}`.toUpperCase() || "ON";
+    return `${parts[0]?.[0] || ""}${parts[parts.length - 1]?.[0] || ""}`.toUpperCase() || "ON";
+  }
 }
 
 function getAvatarTone(item = {}) {
@@ -937,27 +970,36 @@ function getStatusRaw(item = {}) {
 }
 
 function getStatusKey(value = "") {
-  const key = normalizeKey(value);
+  let normalized = "pending";
 
-  if (["pending", "pendiente", "new", "nueva", "nuevo", "created"].includes(key)) return "pending";
-  if (["open", "abierta", "abierto"].includes(key)) return "open";
-  if (["progress", "in_progress", "inprogress", "en_proceso", "proceso", "working", "trabajando", "assigned", "asignada", "asignado"].includes(key)) return "progress";
-  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
-  if (["closed", "cerrada", "cerrado", "cancelled", "canceled", "cancelada", "cancelado", "archived", "archivada", "archivado"].includes(key)) return "closed";
+  try {
+    normalized = normalizeStatus(value);
+  } catch {
+    normalized = normalizeKey(value);
+  }
+
+  if (normalized === "in_progress") return "progress";
+  if (["pending", "open", "resolved", "closed"].includes(normalized)) return normalized;
+  if (OPEN_STATUS_KEYS.has(normalized)) return normalized === "in_progress" ? "progress" : normalized;
+  if (CLOSED_STATUS_KEYS.has(normalized)) return normalized;
 
   return "pending";
 }
 
 function getStatusLabel(value = "") {
-  const key = getStatusKey(value);
+  try {
+    return getModelStatusLabel(value);
+  } catch {
+    const key = getStatusKey(value);
 
-  if (key === "open") return "Abierta";
-  if (key === "pending") return "Pendiente";
-  if (key === "progress") return "En proceso";
-  if (key === "resolved") return "Resuelta";
-  if (key === "closed") return "Cerrada";
+    if (key === "open") return "Abierta";
+    if (key === "pending") return "Pendiente";
+    if (key === "progress") return "En proceso";
+    if (key === "resolved") return "Resuelta";
+    if (key === "closed") return "Cerrada";
 
-  return safeText(value, "Pendiente");
+    return safeText(value, "Pendiente");
+  }
 }
 
 function getPriorityRaw(item = {}) {
@@ -979,25 +1021,38 @@ function getPriorityRaw(item = {}) {
 }
 
 function getPriorityKey(item = {}) {
-  const key = normalizeKey(getPriorityRaw(item));
+  const rawKey = normalizeKey(getPriorityRaw(item));
 
-  if (["critical", "critica", "crítica", "critico", "crítico", "p0"].includes(key)) return "critical";
-  if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) return "urgent";
-  if (["medium", "media", "normal", "p2"].includes(key)) return "medium";
-  if (["low", "baja", "minor", "p3"].includes(key)) return "low";
+  if (["critical", "critica", "crítica", "critico", "crítico", "p0"].includes(rawKey)) {
+    return "critical";
+  }
 
-  return "medium";
+  try {
+    const normalized = normalizePriority(getPriorityRaw(item));
+
+    if (normalized === "urgent" || normalized === "high") return "urgent";
+    if (normalized === "low") return "low";
+    return "medium";
+  } catch {
+    if (["urgent", "urgente", "high", "alta", "p1"].includes(rawKey)) return "urgent";
+    if (["low", "baja", "minor", "p3"].includes(rawKey)) return "low";
+    return "medium";
+  }
 }
 
 function getPriorityLabel(item = {}) {
   const key = getPriorityKey(item);
 
   if (key === "critical") return "Crítica";
-  if (key === "urgent") return "Urgente";
-  if (key === "medium") return "Media";
-  if (key === "low") return "Baja";
 
-  return "Media";
+  try {
+    return getModelPriorityLabel(key === "urgent" ? "urgent" : key);
+  } catch {
+    if (key === "urgent") return "Urgente";
+    if (key === "medium") return "Media";
+    if (key === "low") return "Baja";
+    return "Media";
+  }
 }
 
 function getCategory(item = {}) {
@@ -1379,6 +1434,8 @@ function getSearchHaystack(item = {}) {
   const raw = getRaw(item);
 
   return [
+    item.searchText,
+    raw.search?.text,
     getTicketId(item),
     getSubject(item),
     getDescription(item),
@@ -1421,7 +1478,30 @@ function itemMatchesSearch(item = {}, query = "") {
   return terms.every((term) => haystack.includes(term));
 }
 
+function getPrecomputedFilterCounts(input = {}) {
+  const data = safeObject(input);
+  const runtime = getRuntimeState(data);
+  const candidates = first(
+    data.filterCounts,
+    data.countsByFilter,
+    runtime.filterCounts,
+    runtime.countsByFilter,
+    null
+  );
+
+  return safeObject(candidates);
+}
+
 function computeFilterCounts(items = [], input = {}) {
+  const precomputed = getPrecomputedFilterCounts(input);
+
+  if (Object.keys(precomputed).length) {
+    return FILTERS.reduce((acc, filter) => {
+      acc[filter.key] = safeNumber(precomputed[filter.key], 0);
+      return acc;
+    }, {});
+  }
+
   const rows = safeArray(items);
   const searchQuery = getSearchQuery(input);
   const searchableRows = rows.filter((item) => itemMatchesSearch(item, searchQuery));
@@ -1432,7 +1512,7 @@ function computeFilterCounts(items = [], input = {}) {
   }, {});
 }
 
-function computeStats(items = []) {
+function computeStatsFallback(items = []) {
   return safeArray(items).reduce(
     (acc, item) => {
       acc.total += 1;
@@ -1454,6 +1534,46 @@ function computeStats(items = []) {
       totalImporte: 0,
     }
   );
+}
+
+function computeStats(items = []) {
+  const rows = safeArray(items);
+
+  try {
+    const modelStats = computeIncidenciasStats(rows);
+
+    return {
+      total: safeNumber(modelStats.total, rows.length),
+      openCount: Math.max(
+        0,
+        safeNumber(modelStats.open, 0) +
+          safeNumber(modelStats.pending, 0) +
+          safeNumber(modelStats.inProgress, 0)
+      ),
+      closedCount: Math.max(
+        0,
+        safeNumber(modelStats.closed, 0) +
+          safeNumber(modelStats.resolved, 0)
+      ),
+      urgentCount: Math.max(
+        0,
+        safeNumber(modelStats.urgent, 0) +
+          safeNumber(modelStats.high, 0)
+      ),
+      attachmentsCount: rows.reduce((total, item) => total + getAttachmentsCount(item), 0),
+      totalImporte: safeNumber(
+        first(
+          modelStats.totalImporte,
+          modelStats.invoiceTotal,
+          modelStats.invoicesTotal,
+          0
+        ),
+        0
+      ),
+    };
+  } catch {
+    return computeStatsFallback(rows);
+  }
 }
 
 function resolveBusyMeta(item = {}, state = {}) {
@@ -2364,7 +2484,7 @@ function bindImageFallback({
     return false;
   };
 
-  img.addEventListener("error", tryNextSource, { passive: true });
+  img.addEventListener("error", tryNextSource);
 
   if (img.complete && img.naturalWidth === 0) {
     tryNextSource();

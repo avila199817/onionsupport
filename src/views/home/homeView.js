@@ -20,11 +20,13 @@
    - No pasa AppCore/Auth/Router/DOM al modelo ni al template.
    - Sólo pasa contexto plano y seguro al template.
    - Lee colecciones desde homeState raíz y fallback dashboard.
-   - Recarga si Home está marcado como loaded pero no hay datos reales.
-   - Render paint-first: pinta estructura/cache/skeleton antes de cargar remoto.
-   - Carga remota diferida tras primer paint.
-   - Bindings delegados estables entre rerenders.
+   - Carga remota automática sólo si Home no está hidratado/cargado.
+   - Una vez loaded/hydrated, no recarga por montar la vista otra vez.
+   - Un dashboard vacío también cuenta como carga válida.
+   - Render memory-first/cache-first.
+   - Render skeleton sólo antes de la primera carga real.
    - Render único final tras sincronizar datos reales.
+   - Bindings delegados estables entre rerenders, sin duplicar listeners.
    - Elimina inline styles/scripts antes de insertar HTML para cumplir CSP.
    - Elimina handlers inline on*.
    - Elimina tooltips custom data-tooltip/data-tippy y conserva title nativo.
@@ -121,7 +123,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v20.safe-template-context";
+export const HOME_VIEW_VERSION = "home.view.v21.load-once-memory-first";
 
 export const HomeView = (() => {
   "use strict";
@@ -167,6 +169,8 @@ export const HomeView = (() => {
   let initialized = false;
   let destroyed = false;
   let bootLoadRequested = false;
+  let bootLoadCompleted = false;
+  let bootLoadCompletedAt = "";
 
   let inflightLoad = null;
   let bindingsCleanup = null;
@@ -199,6 +203,14 @@ export const HomeView = (() => {
     return globalThis;
   }
 
+  function nowIso() {
+    try {
+      return new Date().toISOString();
+    } catch {
+      return "";
+    }
+  }
+
   function nextRenderSeq() {
     renderSeq += 1;
     return renderSeq;
@@ -225,15 +237,6 @@ export const HomeView = (() => {
       )
       .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
       .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-  }
-
-  function escapeHtml(value = "") {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
   }
 
   function normalizeRole(value = "", fallback = "user") {
@@ -708,8 +711,12 @@ export const HomeView = (() => {
   }
 
   /* =======================================================
-     DATA
+     DATA / MEMORY POLICY
   ======================================================= */
+
+  function stateHasLoadedPayload() {
+    return Boolean(homeState.loaded === true && homeState.hydrated === true);
+  }
 
   function stateHasRealData() {
     return Boolean(
@@ -723,11 +730,22 @@ export const HomeView = (() => {
         safeArray(homeState.recentActivity).length ||
         (homeState.admin && safeArray(homeState.users).length) ||
         (homeState.admin && safeArray(homeState.clients).length) ||
-        hasKeys(homeState.summary)
+        hasKeys(homeState.summary) ||
+        hasKeys(homeState.dashboard)
     );
   }
 
-  function hydrateFromCacheIfPossible() {
+  function stateCanRenderFinal() {
+    return Boolean(stateHasLoadedPayload() || stateHasRealData());
+  }
+
+  function hydrateFromCacheIfPossible(options = {}) {
+    const opts = safeObject(options);
+
+    if (opts.force !== true && stateCanRenderFinal()) {
+      return false;
+    }
+
     try {
       const cached = hydrateHomeFromCache();
 
@@ -750,7 +768,12 @@ export const HomeView = (() => {
   function applyDashboardPayload(payload = {}, options = {}) {
     const raw = safeObject(payload);
 
-    if (!hasKeys(raw)) return homeState;
+    if (!hasKeys(raw)) {
+      setLoaded(true);
+      setHydrated(true);
+      clearHomeError();
+      return homeState;
+    }
 
     const role = resolveCurrentRole(raw, {
       trustPayloadRole: options.trustPayloadRole === true,
@@ -904,9 +927,10 @@ export const HomeView = (() => {
   }
 
   function renderLoadingIfNeeded() {
-    if (stateHasRealData()) return false;
+    if (stateCanRenderFinal()) return false;
 
     setLoading(true);
+
     renderNow({
       reason: "initial-loading",
     });
@@ -914,11 +938,15 @@ export const HomeView = (() => {
     return true;
   }
 
-  function shouldLoadOnMount(force = false) {
-    if (force) return true;
-    if (!homeState.loaded || !homeState.hydrated) return true;
-    if (!stateHasRealData()) return true;
-    return false;
+  function shouldLoadOnMount(options = {}) {
+    const opts = safeObject(options);
+
+    if (opts.force === true) return true;
+    if (inflightLoad) return false;
+    if (stateHasLoadedPayload()) return false;
+    if (stateHasRealData()) return false;
+
+    return true;
   }
 
   /* =======================================================
@@ -930,6 +958,19 @@ export const HomeView = (() => {
 
     if (destroyed) return null;
 
+    if (opts.force !== true && stateHasLoadedPayload()) {
+      setLoading(false);
+      setRefreshing(false);
+
+      if (opts.render !== false) {
+        renderNow({
+          reason: "load-skip-memory",
+        });
+      }
+
+      return getHomeStateSnapshot();
+    }
+
     if (inflightLoad && opts.force !== true) {
       return inflightLoad;
     }
@@ -939,8 +980,10 @@ export const HomeView = (() => {
 
     if (asRefresh) {
       setRefreshing(true);
+      setLoading(false);
     } else {
       setLoading(true);
+      setRefreshing(false);
     }
 
     renderNow({
@@ -968,6 +1011,9 @@ export const HomeView = (() => {
           preserveExisting: false,
           source: asRefresh ? "refresh" : "load",
         });
+
+        bootLoadCompleted = true;
+        bootLoadCompletedAt = nowIso();
 
         setLoading(false);
         setRefreshing(false);
@@ -1137,6 +1183,16 @@ export const HomeView = (() => {
   function bindEvents(container = currentContainer) {
     if (!isElement(container)) return false;
 
+    if (
+      isFunction(bindingsCleanup) &&
+      boundContainer === container &&
+      container.isConnected !== false
+    ) {
+      return true;
+    }
+
+    unbindEvents();
+
     const cleanup = bindHomeEvents({
       scope: SCOPE,
       container,
@@ -1204,25 +1260,36 @@ export const HomeView = (() => {
 
   function mount(root = null, context = {}) {
     const container = resolveContainer(root, context);
+    const ctx = safeObject(context);
+    const force = ctx.force === true;
 
     destroyed = false;
     initialized = true;
-    currentContext = safeObject(context);
+    currentContext = ctx;
     currentContainer = container;
 
     if (!isElement(container)) return api;
 
-    hydrateFromCacheIfPossible();
-
-    if (!stateHasRealData()) {
-      renderLoadingIfNeeded();
-    } else {
-      renderNow({
-        reason: "mount-cache",
+    if (force) {
+      hydrateFromCacheIfPossible({
+        force: true,
       });
+    } else {
+      hydrateFromCacheIfPossible();
     }
 
-    if (shouldLoadOnMount(context.force === true)) {
+    if (stateCanRenderFinal()) {
+      setLoading(false);
+      setRefreshing(false);
+
+      renderNow({
+        reason: stateHasLoadedPayload() ? "mount-memory" : "mount-state",
+      });
+    } else {
+      renderLoadingIfNeeded();
+    }
+
+    if (shouldLoadOnMount({ force })) {
       bootLoadRequested = true;
 
       runDeferred("boot-load", async () => {
@@ -1230,7 +1297,7 @@ export const HomeView = (() => {
 
         if (!destroyed) {
           await loadData({
-            force: !stateHasRealData(),
+            force,
             returnStaleOnError: true,
           });
         }
@@ -1298,7 +1365,10 @@ export const HomeView = (() => {
 
       initialized,
       destroyed,
+
       bootLoadRequested,
+      bootLoadCompleted,
+      bootLoadCompletedAt,
 
       hasContainer: isElement(currentContainer),
       bound: Boolean(bindingsCleanup && boundContainer),
@@ -1339,6 +1409,10 @@ export const HomeView = (() => {
         refreshing: state.refreshing,
         creating: state.creating,
 
+        hasLoadedPayload: stateHasLoadedPayload(),
+        hasRealData: stateHasRealData(),
+        canRenderFinal: stateCanRenderFinal(),
+
         selectedTicketId: state.selectedTicketId || "",
         selectedIncidenciaId: state.selectedIncidenciaId || "",
         openingTicketId: state.openingTicketId || "",
@@ -1375,9 +1449,16 @@ export const HomeView = (() => {
         domEventsDelegatedToBindings: true,
         actionsDelegatedToHomeActions: true,
 
-        paintFirst: true,
-        deferredRemoteLoad: true,
+        loadOnceOnMount: true,
+        doesNotReloadWhenLoadedAndHydrated: true,
+        emptyDashboardCountsAsLoaded: true,
+        memoryFirstRender: true,
+        cacheFirstHydration: true,
+        skeletonOnlyBeforeFirstLoad: true,
+        explicitReloadStillAllowed: true,
+
         stableBindings: true,
+        noDuplicateBindingsOnRerender: true,
         mutableBindingsApi: true,
 
         safeTemplateContextOnly: true,

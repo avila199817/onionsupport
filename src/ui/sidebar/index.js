@@ -20,6 +20,7 @@
    - Router/guards bloquean acceso directo a rutas admin.
    - Rebuild limpio del DOM desde template.js en cada sync válido.
    - Snapshot de usuario completo para consumo interno de Home.
+   - Bloqueos delegados en sidebar/constants.js -> core/config.js.
    - Sin HTML duplicado.
    - Sin helpers DOM duplicados.
    - Sin lógica de usuario/avatar duplicada.
@@ -27,6 +28,7 @@
    - Sin HTTP.
    - Sin Toast.
    - Sin Store propio.
+   - Sin denylist local.
    - Sin /home.
    - Sin /403.
    - Sin /404.
@@ -52,6 +54,7 @@ import {
   getSidebarRouteIcon,
   getSidebarRouteLabel,
   getSidebarRouteOrder,
+  isSidebarBlockedRoute as isSidebarBlockedRouteFromConstants,
   isSidebarHomeRoute,
   isSidebarPublicRoute,
   normalizeSidebarPath,
@@ -108,16 +111,7 @@ import {
   unbindSidebarDropdown,
 } from "./dropdown.js";
 
-export const SIDEBAR_UI_VERSION = "sidebar.ui.v10";
-
-const BLOCKED_SIDEBAR_PATHS = new Set([
-  "/home",
-  "/403",
-  "/404",
-  "/2fa",
-  "/mfa",
-  "/otp",
-]);
+export const SIDEBAR_UI_VERSION = "sidebar.ui.v11";
 
 let syncing = false;
 
@@ -149,14 +143,15 @@ function unique(values = []) {
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
     String(value || "")
   );
 }
@@ -180,15 +175,11 @@ function isBlockedSidebarPath(path = "") {
 
   if (!raw) return true;
 
-  const normalized = normalizeSidebarPath(raw).split("?")[0].split("#")[0].toLowerCase();
-
-  if (BLOCKED_SIDEBAR_PATHS.has(normalized)) return true;
-
-  return (
-    normalized.startsWith("/2fa/") ||
-    normalized.startsWith("/mfa/") ||
-    normalized.startsWith("/otp/")
-  );
+  try {
+    return isSidebarBlockedRouteFromConstants(raw) === true;
+  } catch {
+    return true;
+  }
 }
 
 function isUnsafePath(path = "") {
@@ -234,6 +225,16 @@ function safeSidebarPath(path = HOME_ROUTE, fallback = HOME_ROUTE) {
     raw = `/${raw}`;
   }
 
+  if (isBlockedSidebarPath(raw)) {
+    if (fallback === "") return "";
+
+    const safeFallback = normalizeSidebarPath(fallback || HOME_ROUTE);
+
+    return isBlockedSidebarPath(safeFallback)
+      ? HOME_ROUTE
+      : safeFallback;
+  }
+
   const normalized = normalizeSidebarPath(raw || fallback);
 
   if (isBlockedSidebarPath(normalized)) {
@@ -264,9 +265,8 @@ function userHomeHref(context = {}, fallback = SIDEBAR_BRAND_HREF) {
 }
 
 function routerPublicPath(path = HOME_ROUTE, context = {}) {
-  const lookupPath = sidebarHomeLookupPath(
-    safeSidebarPath(path || HOME_ROUTE, HOME_ROUTE)
-  );
+  const safePath = safeSidebarPath(path || HOME_ROUTE, HOME_ROUTE);
+  const lookupPath = sidebarHomeLookupPath(safePath);
 
   if (!lookupPath || isBlockedSidebarPath(lookupPath)) {
     return HOME_ROUTE;
@@ -342,7 +342,7 @@ function currentCanonicalPath() {
         currentPublicPath()
     );
 
-    return isBlockedSidebarPath(path) ? HOME_ROUTE : path;
+    return !path || isBlockedSidebarPath(path) ? HOME_ROUTE : path;
   } catch {
     return HOME_ROUTE;
   }
@@ -583,10 +583,14 @@ function registerModule() {
     AppCore.ui = isObject(AppCore.ui) ? AppCore.ui : {};
     AppCore.ui.sidebar = api;
 
-    AppCore.modules?.register?.(SIDEBAR_MODULE_KEY, api);
+    AppCore.modules?.register?.(SIDEBAR_MODULE_KEY, api, {
+      overwrite: true,
+    });
 
     if (SIDEBAR_MODULE_NAME && SIDEBAR_MODULE_NAME !== SIDEBAR_MODULE_KEY) {
-      AppCore.modules?.register?.(SIDEBAR_MODULE_NAME, api);
+      AppCore.modules?.register?.(SIDEBAR_MODULE_NAME, api, {
+        overwrite: true,
+      });
     }
 
     return true;
@@ -975,6 +979,9 @@ function getSnapshot() {
       usesActions: true,
       usesDelegatedEvents: true,
       usesDropdown: true,
+
+      blockedRoutesDelegatedToConstantsAndCoreConfig: true,
+      noLocalBlockedRouteList: true,
 
       clientesAdminOnly: true,
       usuariosAdminOnly: true,

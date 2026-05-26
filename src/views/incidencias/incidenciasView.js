@@ -15,6 +15,8 @@
    - Pintar incidencias de más nuevas a más antiguas.
    - Ir ampliando la lista visible al hacer scroll, estilo feed/infinite scroll.
    - Pintar primero estructura/cache/skeleton y cargar remoto después del primer paint.
+   - Mantener bindings delegados estables entre rerenders.
+   - Reenganchar sólo scroll/sentinel cuando el DOM se repinta.
    - No validar rutas.
    - No resolver slug.
    - No registrar globals.
@@ -106,7 +108,8 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_VIEW_VERSION = "incidencias.view.v6.paint-first";
+export const INCIDENCIAS_VIEW_VERSION =
+  "incidencias.view.v7.paint-first-stable-bindings";
 
 const SCOPE = "view:incidencias";
 
@@ -137,6 +140,7 @@ export const IncidenciasView = (() => {
   let queuedReloadOptions = null;
 
   let bindingsCleanup = null;
+  let boundContainer = null;
   let scrollCleanup = null;
 
   let pendingRenderFrame = 0;
@@ -1684,6 +1688,10 @@ export const IncidenciasView = (() => {
       return null;
     }
 
+    if (!hasMoreVisibleItems()) {
+      return null;
+    }
+
     let disposed = false;
     let ticking = false;
     let observer = null;
@@ -2260,54 +2268,72 @@ export const IncidenciasView = (() => {
     } catch {}
 
     bindingsCleanup = null;
+    boundContainer = null;
 
     cleanupScrollBinding();
   }
 
-  function bind(container = getContainer()) {
-    cleanupBindings();
+  function bind(container = getContainer(), options = {}) {
+    const target = container || getContainer();
+    const opts = safeObject(options);
+    const force = opts.force === true;
 
-    if (destroyed || !container) {
+    if (destroyed || !target) {
       return false;
     }
 
-    const eventsCleanup = bindIncidenciasEvents({
-      container,
-      scope: SCOPE,
+    /*
+      Los eventos de incidencias.bindings.js son delegados sobre el contenedor.
+      Como render() sustituye innerHTML pero no sustituye #view-container,
+      no hace falta destruir/recrear listeners en cada rerender.
+    */
+    if (!bindingsCleanup || boundContainer !== target || force) {
+      if (bindingsCleanup || boundContainer) {
+        cleanupBindings();
+      }
 
-      loadIncidencias,
-      reload,
+      const eventsCleanup = bindIncidenciasEvents({
+        container: target,
+        scope: SCOPE,
 
-      openTicket: handleOpenTicket,
+        loadIncidencias,
+        reload,
 
-      copyTicketId: handleCopyTicketId,
-      exportCsv: handleExportCsv,
-      createIncidencia: handleCreateIncidencia,
+        openTicket: handleOpenTicket,
 
-      setFilter,
-      setSearchQuery,
-      clearFilters,
-      clearSearchOnly,
+        copyTicketId: handleCopyTicketId,
+        exportCsv: handleExportCsv,
+        createIncidencia: handleCreateIncidencia,
 
-      goToPage,
-      goPrevPage,
-      goNextPage,
-      changePageSize,
+        setFilter,
+        setSearchQuery,
+        clearFilters,
+        clearSearchOnly,
 
-      loadMore,
-      showMore: loadMore,
-      infiniteScroll: true,
-    });
+        goToPage,
+        goPrevPage,
+        goNextPage,
+        changePageSize,
 
-    bindInfiniteScroll(container);
+        loadMore,
+        showMore: loadMore,
+        infiniteScroll: true,
+      });
 
-    bindingsCleanup = () => {
-      try {
-        eventsCleanup?.();
-      } catch {}
+      bindingsCleanup = () => {
+        try {
+          eventsCleanup?.();
+        } catch {}
+      };
 
-      cleanupScrollBinding();
-    };
+      boundContainer = target;
+    }
+
+    /*
+      El sentinel/host de scroll sí puede cambiar porque render() rehace HTML.
+      Por eso sólo se reengancha el binding de scroll.
+    */
+    bindInfiniteScroll(target);
 
     return true;
   }
@@ -2423,6 +2449,7 @@ export const IncidenciasView = (() => {
             silent: hasCurrentItems || Boolean(opts.silent),
             asRefresh: hasCurrentItems,
             paintBeforeLoad: false,
+            renderBeforeLoad: false,
           },
           "incidencias:init:reload-existing"
         );
@@ -2465,6 +2492,7 @@ export const IncidenciasView = (() => {
           silent: hasInitialItems || Boolean(opts.silent),
           asRefresh: hasInitialItems,
           paintBeforeLoad: false,
+          renderBeforeLoad: false,
         },
         "incidencias:init:background-load"
       );
@@ -2604,6 +2632,9 @@ export const IncidenciasView = (() => {
         hasInflightOpenTicket: Boolean(inflightOpenTicket),
         inflightOpenTicketId,
         hasInflightLoadMore: Boolean(inflightLoadMore),
+
+        hasStableBindings: Boolean(bindingsCleanup),
+        hasScrollBinding: Boolean(scrollCleanup),
 
         user: currentUser,
         currentUser,

@@ -9,10 +9,12 @@
    - /api/auth/me siempre privado.
    - /api/auth/refresh público y sin Authorization.
    - Bloquear endpoints externos.
+   - Bloquear endpoints inválidos.
    - Preservar Authorization si ya viene preparado por core/http.js.
    - Parsear respuesta JSON/text/blob/arrayBuffer de forma mínima.
    - Preservar payload de error backend para core/http.js.
    - TOKEN_EXPIRED no limpia sesión aquí.
+   - Timeout técnico opcional sin retry.
    - Sin hooks.
    - Sin retry real.
    - Sin dedupe real.
@@ -35,9 +37,10 @@ import {
   isPublicApiPath,
 } from "./config.js";
 
-export const REQUEST_VERSION = "core.request.v6";
+export const REQUEST_VERSION = "core.request.v7";
 
 const DEFAULT_API_BASE = getApiBase();
+const DEFAULT_TIMEOUT_MS = Number(config?.api?.timeout || 30000) || 30000;
 
 const API_BASE = normalizeApiBase(
   config?.apiBase ||
@@ -48,6 +51,41 @@ const API_BASE = normalizeApiBase(
 );
 
 const PRIVATE_ME_PATH = AUTH_ENDPOINTS.me || "/api/auth/me";
+
+const ALLOWED_METHODS = new Set([
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+]);
+
+const BODYLESS_METHODS = new Set([
+  "GET",
+  "HEAD",
+  "OPTIONS",
+]);
+
+const SENSITIVE_KEYS = new Set([
+  "token",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "secret",
+  "session",
+  "code",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
+  "jwt",
+  "authorization",
+  "reset_token",
+  "activation_token",
+]);
 
 /* =========================================================
    BASICS
@@ -70,6 +108,10 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
+function safeKey(value = "") {
+  return cleanText(value, "").toLowerCase();
+}
+
 function redact(value = "") {
   return cleanText(value, "")
     .replace(
@@ -78,29 +120,6 @@ function redact(value = "") {
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
-
-function safeKey(value = "") {
-  return cleanText(value, "").toLowerCase();
-}
-
-const SENSITIVE_KEYS = new Set([
-  "token",
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "secret",
-  "session",
-  "code",
-  "password",
-  "pwd",
-  "key",
-  "sig",
-  "signature",
-  "jwt",
-  "authorization",
-  "reset_token",
-  "activation_token",
-]);
 
 /* =========================================================
    API BASE
@@ -176,16 +195,17 @@ function isArrayBuffer(value) {
   );
 }
 
+function isReadableStream(value) {
+  return typeof ReadableStream !== "undefined" && value instanceof ReadableStream;
+}
+
 /* =========================================================
    METHOD / TOKEN
 ========================================================= */
 
 function normalizeMethod(method = "GET") {
   const value = cleanText(method, "GET").toUpperCase();
-
-  return ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"].includes(value)
-    ? value
-    : "GET";
+  return ALLOWED_METHODS.has(value) ? value : "GET";
 }
 
 function stripBearer(token = "") {
@@ -230,7 +250,7 @@ function getToken(state = {}, options = {}) {
 ========================================================= */
 
 function endpointToPath(endpoint = "/") {
-  const raw = cleanText(endpoint, "/");
+  const raw = cleanText(endpoint, "");
 
   if (!raw) return "";
   if (raw.startsWith("//")) return "";
@@ -271,16 +291,28 @@ function joinUrl(base = "", path = "") {
   const root = cleanText(base, API_BASE).replace(/\/+$/g, "");
   const clean = cleanText(path, "/").replace(/^\/+/g, "");
 
+  if (!root || !clean) return "";
+
   return `${root}/${clean}`;
 }
 
 function appendQuery(url = "", query = null) {
-  if (!isObject(query)) return url;
+  if (!url || !isObject(query)) return url;
 
   const target = new URL(url, API_BASE);
 
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === null || value === "") continue;
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== undefined && item !== null && item !== "") {
+          target.searchParams.append(key, String(item));
+        }
+      }
+
+      continue;
+    }
 
     target.searchParams.set(key, String(value));
   }
@@ -328,12 +360,13 @@ function shouldSerializeAsJson(body = undefined) {
       !isUrlSearchParams(body) &&
       !isBlob(body) &&
       !isArrayBuffer(body) &&
+      !isReadableStream(body) &&
       typeof body !== "string"
   );
 }
 
 function serializeBody(method = "GET", body = undefined) {
-  if (["GET", "HEAD", "OPTIONS"].includes(method)) return undefined;
+  if (BODYLESS_METHODS.has(method)) return undefined;
   if (body === undefined || body === null) return undefined;
 
   if (shouldSerializeAsJson(body)) {
@@ -366,15 +399,19 @@ function headersFrom(input = null) {
 }
 
 function hasHeader(headers = {}, name = "") {
-  const target = name.toLowerCase();
+  const target = cleanText(name, "").toLowerCase();
 
-  return Object.keys(headers).some((key) => key.toLowerCase() === target);
+  if (!target) return false;
+
+  return Object.keys(headers || {}).some((key) => key.toLowerCase() === target);
 }
 
 function removeHeader(headers = {}, name = "") {
-  const target = name.toLowerCase();
+  const target = cleanText(name, "").toLowerCase();
 
-  for (const key of Object.keys(headers)) {
+  if (!target) return headers;
+
+  for (const key of Object.keys(headers || {})) {
     if (key.toLowerCase() === target) {
       delete headers[key];
     }
@@ -435,25 +472,131 @@ function normalizeCredentials(value = "") {
 }
 
 /* =========================================================
+   TIMEOUT / ABORT
+========================================================= */
+
+function normalizeTimeout(value = undefined) {
+  if (value === false || value === null) return 0;
+
+  const source = value === undefined
+    ? DEFAULT_TIMEOUT_MS
+    : Number(value);
+
+  if (!Number.isFinite(source) || source <= 0) return 0;
+
+  return Math.floor(source);
+}
+
+function abortController(controller = null, reason = "abort") {
+  if (!controller || !isFunction(controller.abort)) return false;
+
+  try {
+    controller.abort(reason);
+    return true;
+  } catch {
+    try {
+      controller.abort();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function createAbortContext({
+  signal = null,
+  timeout = 0,
+} = {}) {
+  const timeoutMs = normalizeTimeout(timeout);
+
+  if (
+    typeof AbortController === "undefined" ||
+    (!timeoutMs && !signal)
+  ) {
+    return {
+      signal: signal || undefined,
+      timedOut: () => false,
+      clear: () => true,
+    };
+  }
+
+  if (!timeoutMs && signal) {
+    return {
+      signal,
+      timedOut: () => false,
+      clear: () => true,
+    };
+  }
+
+  const controller = new AbortController();
+  let didTimeout = false;
+  let timeoutId = null;
+  let removeExternalAbort = () => true;
+
+  if (signal) {
+    if (signal.aborted) {
+      abortController(controller, signal.reason || "aborted");
+    } else if (isFunction(signal.addEventListener)) {
+      const onAbort = () => {
+        abortController(controller, signal.reason || "aborted");
+      };
+
+      signal.addEventListener("abort", onAbort, { once: true });
+
+      removeExternalAbort = () => {
+        try {
+          signal.removeEventListener("abort", onAbort);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+    }
+  }
+
+  if (timeoutMs > 0) {
+    timeoutId = setTimeout(() => {
+      didTimeout = true;
+      abortController(controller, "timeout");
+    }, timeoutMs);
+  }
+
+  return {
+    signal: controller.signal,
+    timedOut: () => didTimeout,
+    clear: () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
+      removeExternalAbort();
+      return true;
+    },
+  };
+}
+
+/* =========================================================
    RESPONSE / ERROR
 ========================================================= */
 
 export async function parseResponseBody(response, responseType = "auto") {
   if (!response || [204, 205, 304].includes(response.status)) return null;
 
-  if (responseType === "raw" || responseType === "response") return response;
-  if (responseType === "blob") return response.blob();
+  const type = cleanText(responseType, "auto");
 
-  if (responseType === "arrayBuffer" || responseType === "arraybuffer") {
+  if (type === "raw" || type === "response") return response;
+  if (type === "blob") return response.blob();
+
+  if (type === "arrayBuffer" || type === "arraybuffer") {
     return response.arrayBuffer();
   }
 
-  if (responseType === "text") return response.text();
+  if (type === "text") return response.text();
 
   const contentType = response.headers?.get?.("content-type") || "";
 
   if (
-    responseType === "json" ||
+    type === "json" ||
     contentType.includes("application/json") ||
     contentType.includes("+json")
   ) {
@@ -464,7 +607,7 @@ export async function parseResponseBody(response, responseType = "auto") {
     try {
       return JSON.parse(raw);
     } catch {
-      return responseType === "json" ? null : raw;
+      return type === "json" ? null : raw;
     }
   }
 
@@ -497,12 +640,12 @@ function errorCodeFrom(value = null) {
   if (!isObject(value)) return "";
 
   return cleanText(
-    value.code ||
+    value.auth?.code ||
+      value.auth?.error ||
+      value.code ||
       value.errorCode ||
       value.error_code ||
       value.error ||
-      value.auth?.code ||
-      value.auth?.error ||
       value.data?.code ||
       value.data?.error ||
       "",
@@ -543,7 +686,7 @@ export function buildRequestError({
   raw = null,
   code = "",
 } = {}) {
-  const status = response?.status || 0;
+  const status = Number(response?.status || 0) || 0;
 
   const message =
     errorMessageFrom(data) ||
@@ -588,7 +731,9 @@ export function buildRequestError({
 
   error.safeData = sanitizeForSnapshot(data);
 
-  error.raw = typeof raw === "string" ? redact(raw) : sanitizeForSnapshot(raw) || null;
+  error.raw = typeof raw === "string"
+    ? redact(raw)
+    : sanitizeForSnapshot(raw) || null;
 
   error.auth = isObject(data?.auth) ? data.auth : null;
 
@@ -674,6 +819,7 @@ export function createRequest({
     if (!clean) {
       throw buildRequestError({
         method,
+        url: path || "",
         raw: "Endpoint no permitido.",
         code: "ENDPOINT_NOT_ALLOWED",
       });
@@ -686,6 +832,15 @@ export function createRequest({
     const endpointPath = cleanEndpointPath(clean);
     const auth = shouldUseAuth(endpointPath, options);
 
+    if (!url || !endpointPath) {
+      throw buildRequestError({
+        method,
+        url: path || "",
+        raw: "URL de API no permitida.",
+        code: "API_URL_NOT_ALLOWED",
+      });
+    }
+
     const serializedBody = serializeBody(method, originalBody);
 
     const headers = buildHeaders({
@@ -696,13 +851,18 @@ export function createRequest({
       serializedBody,
     });
 
+    const abort = createAbortContext({
+      signal: options.signal || null,
+      timeout: options.timeoutMs ?? options.timeout,
+    });
+
     const finalRequestOptions = {
       method,
       headers,
       credentials: normalizeCredentials(options.credentials),
       cache: options.cache || "default",
       body: serializedBody,
-      signal: options.signal || undefined,
+      signal: abort.signal,
     };
 
     pending += 1;
@@ -758,9 +918,21 @@ export function createRequest({
 
       return data;
     } catch (error) {
+      if (abort.timedOut()) {
+        lastError = buildRequestError({
+          url,
+          method,
+          raw: "Tiempo de espera agotado.",
+          code: "REQUEST_TIMEOUT",
+        });
+
+        throw lastError;
+      }
+
       lastError = error;
       throw error;
     } finally {
+      abort.clear();
       pending = Math.max(0, pending - 1);
     }
   }
@@ -813,7 +985,10 @@ export function createRequest({
         refreshPublicWithoutAuthorization: true,
 
         blocksExternalEndpoints: true,
+        blocksInvalidEndpoints: true,
         preservesPreparedAuthorization: true,
+
+        timeoutWithoutRetry: true,
 
         snapshotRedacted: true,
       },
@@ -833,7 +1008,7 @@ export function createApiClient(request) {
   function call(method, path, bodyOrOptions = undefined, maybeOptions = {}) {
     const finalMethod = normalizeMethod(method);
 
-    if (["GET", "HEAD", "OPTIONS"].includes(finalMethod)) {
+    if (BODYLESS_METHODS.has(finalMethod)) {
       return request(path, {
         ...(isObject(bodyOrOptions) ? bodyOrOptions : {}),
         method: finalMethod,

@@ -3289,3 +3289,151 @@
     transform: translateX(100%);
   }
 }
+
+/* =========================================================
+   INCIDENCIAS · TECHNICIAN AVATAR HARD LOCK
+   Corrige avatar técnico gigante en filas de incidencias.
+   No afecta al modal de detalle ni al modal de creación.
+========================================================= */
+
+.panel-content[data-view="incidencias"],
+.incidencias-view-root,
+[data-incidencias-scope] {
+  --inc-agent-avatar-size: 18px;
+}
+
+.panel-content[data-view="incidencias"] .incidencias-mini-badge--agent,
+.incidencias-view-root .incidencias-mini-badge--agent,
+[data-incidencias-scope] .incidencias-mini-badge--agent {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+
+  max-inline-size: 190px;
+  min-inline-size: 0;
+
+  overflow: hidden;
+}
+
+.panel-content[data-view="incidencias"] .incidencias-agent-avatar,
+.incidencias-view-root .incidencias-agent-avatar,
+[data-incidencias-scope] .incidencias-agent-avatar {
+  position: relative !important;
+
+  inline-size: var(--inc-agent-avatar-size, 18px) !important;
+  block-size: var(--inc-agent-avatar-size, 18px) !important;
+  min-inline-size: var(--inc-agent-avatar-size, 18px) !important;
+  min-block-size: var(--inc-agent-avatar-size, 18px) !important;
+  max-inline-size: var(--inc-agent-avatar-size, 18px) !important;
+  max-block-size: var(--inc-agent-avatar-size, 18px) !important;
+  flex: 0 0 var(--inc-agent-avatar-size, 18px) !important;
+
+  display: inline-grid !important;
+  place-items: center !important;
+
+  overflow: hidden !important;
+
+  border-radius: var(--radius-pill, 999px) !important;
+
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 72%, var(--surface-4)),
+      color-mix(in srgb, var(--info) 52%, var(--surface-3))
+    ) !important;
+
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--border-default) 72%, transparent),
+    0 4px 10px color-mix(in srgb, #000 16%, transparent) !important;
+}
+
+.panel-content[data-view="incidencias"] .incidencias-agent-avatar-img,
+.incidencias-view-root .incidencias-agent-avatar-img,
+[data-incidencias-scope] .incidencias-agent-avatar-img {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 1 !important;
+
+  display: block !important;
+
+  inline-size: 100% !important;
+  block-size: 100% !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  max-inline-size: 100% !important;
+  max-block-size: 100% !important;
+
+  object-fit: cover !important;
+  object-position: center !important;
+
+  border-radius: inherit !important;
+
+  transform: none !important;
+}
+
+.panel-content[data-view="incidencias"] .incidencias-agent-avatar-fallback,
+.incidencias-view-root .incidencias-agent-avatar-fallback,
+[data-incidencias-scope] .incidencias-agent-avatar-fallback {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 2 !important;
+
+  display: none;
+  place-items: center;
+
+  inline-size: 100% !important;
+  block-size: 100% !important;
+
+  color: var(--avatar-text, #fff);
+
+  font-size: 9px !important;
+  font-weight: var(--weight-black, 800) !important;
+  line-height: 1 !important;
+  letter-spacing: -.03em;
+
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 76%, var(--surface-4)),
+      color-mix(in srgb, var(--info) 56%, var(--surface-3))
+    );
+}
+
+.panel-content[data-view="incidencias"] .incidencias-agent-avatar--fallback .incidencias-agent-avatar-fallback,
+.panel-content[data-view="incidencias"] .incidencias-agent-avatar[data-fallback="true"] .incidencias-agent-avatar-fallback,
+.panel-content[data-view="incidencias"] .incidencias-agent-avatar:not([data-has-avatar="true"]) .incidencias-agent-avatar-fallback,
+.incidencias-view-root .incidencias-agent-avatar--fallback .incidencias-agent-avatar-fallback,
+.incidencias-view-root .incidencias-agent-avatar[data-fallback="true"] .incidencias-agent-avatar-fallback,
+.incidencias-view-root .incidencias-agent-avatar:not([data-has-avatar="true"]) .incidencias-agent-avatar-fallback,
+[data-incidencias-scope] .incidencias-agent-avatar--fallback .incidencias-agent-avatar-fallback,
+[data-incidencias-scope] .incidencias-agent-avatar[data-fallback="true"] .incidencias-agent-avatar-fallback,
+[data-incidencias-scope] .incidencias-agent-avatar:not([data-has-avatar="true"]) .incidencias-agent-avatar-fallback {
+  display: grid !important;
+}
+
+.panel-content[data-view="incidencias"] .incidencias-agent-avatar--fallback .incidencias-agent-avatar-img,
+.panel-content[data-view="incidencias"] .incidencias-agent-avatar[data-fallback="true"] .incidencias-agent-avatar-img,
+.panel-content[data-view="incidencias"] .incidencias-agent-avatar:not([data-has-avatar="true"]) .incidencias-agent-avatar-img,
+.panel-content[data-view="incidencias"] .incidencias-agent-avatar-img[src=""],
+.panel-content[data-view="incidencias"] .incidencias-agent-avatar-img:not([src]),
+.incidencias-view-root .incidencias-agent-avatar--fallback .incidencias-agent-avatar-img,
+.incidencias-view-root .incidencias-agent-avatar[data-fallback="true"] .incidencias-agent-avatar-img,
+.incidencias-view-root .incidencias-agent-avatar:not([data-has-avatar="true"]) .incidencias-agent-avatar-img,
+.incidencias-view-root .incidencias-agent-avatar-img[src=""],
+.incidencias-view-root .incidencias-agent-avatar-img:not([src]),
+[data-incidencias-scope] .incidencias-agent-avatar--fallback .incidencias-agent-avatar-img,
+[data-incidencias-scope] .incidencias-agent-avatar[data-fallback="true"] .incidencias-agent-avatar-img,
+[data-incidencias-scope] .incidencias-agent-avatar:not([data-has-avatar="true"]) .incidencias-agent-avatar-img,
+[data-incidencias-scope] .incidencias-agent-avatar-img[src=""],
+[data-incidencias-scope] .incidencias-agent-avatar-img:not([src]) {
+  display: none !important;
+}
+
+.panel-content[data-view="incidencias"] .incidencias-agent-name,
+.incidencias-view-root .incidencias-agent-name,
+[data-incidencias-scope] .incidencias-agent-name {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

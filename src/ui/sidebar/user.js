@@ -9,6 +9,8 @@
    - Resolver slug público real.
    - Resolver displayName, email y avatarUrl para template/dropdown.
    - Leer avatar canónico desde avatar/avatarUrl/photo/picture/image/foto/imagen.
+   - Probar candidatos de avatar hasta encontrar una URL segura válida.
+   - No truncar URLs de avatar largas: rechazarlas si exceden el límite.
    - Fusionar usuario base con profile/media/account/me si la foto viene separada.
    - Tratar hasAvatar sólo como señal diagnóstica, no como URL.
    - Crear view-model mínimo para template.js.
@@ -29,7 +31,7 @@ import {
   normalizeSidebarSlug,
 } from "./constants.js";
 
-export const SIDEBAR_USER_VERSION = "sidebar.user.v10";
+export const SIDEBAR_USER_VERSION = "sidebar.user.v11.avatar-candidate-safety";
 
 const DEFAULT_NAME = "Usuario";
 const DEFAULT_INITIALS = "U";
@@ -697,6 +699,9 @@ export function getSidebarDisplayName(user = null) {
 export function getSidebarUsername(user = null) {
   if (!isUsableSidebarUser(user)) return "";
 
+  const lookup = isObject(user.lookup) ? user.lookup : {};
+  const profile = isObject(user.profile) ? user.profile : {};
+
   const raw = limitText(
     first(
       user.username,
@@ -704,6 +709,15 @@ export function getSidebarUsername(user = null) {
       user.user_name,
       user.usernameLower,
       user.username_lower,
+
+      lookup.username,
+      lookup.usernameLower,
+      lookup.username_lower,
+
+      profile.username,
+      profile.userName,
+      profile.usernameLower,
+
       getSidebarUserSlug(user)
     ),
     MAX_USERNAME_LENGTH
@@ -777,9 +791,12 @@ function avatarObjectValue(value = null) {
 }
 
 function safeAvatarUrl(value = "") {
-  const avatar = limitText(stringText(value, ""), MAX_AVATAR_URL_LENGTH);
+  const raw = stringText(value, "");
+  const avatar = text(raw, "");
 
   if (!avatar) return "";
+  if (avatar.length > MAX_AVATAR_URL_LENGTH) return "";
+
   if (/[\r\n\t]/.test(avatar)) return "";
   if (/^\/\//.test(avatar)) return "";
   if (hasSensitiveQuery(avatar)) return "";
@@ -864,6 +881,16 @@ function collectAvatarCandidatesFromObject(source = null) {
   return output;
 }
 
+function firstSafeAvatarUrl(...candidates) {
+  for (const candidate of candidates.flat(Infinity)) {
+    const safe = safeAvatarUrl(candidate);
+
+    if (safe) return safe;
+  }
+
+  return "";
+}
+
 export function getSidebarUserAvatarUrl(user = null) {
   if (!isUsableSidebarUser(user)) return "";
 
@@ -879,18 +906,17 @@ export function getSidebarUserAvatarUrl(user = null) {
     hasAvatar es sólo una señal.
     La URL real debe venir en avatar/avatarUrl/photo/picture/image/foto/imagen
     o variantes seguras.
+    Si un candidato existe pero es inválido, se prueba el siguiente.
   */
-  return safeAvatarUrl(
-    first(
-      ...collectAvatarCandidatesFromObject(user),
-      ...collectAvatarCandidatesFromObject(profile),
-      ...collectAvatarCandidatesFromObject(media),
-      ...collectAvatarCandidatesFromObject(preferences),
-      ...collectAvatarCandidatesFromObject(contacto),
-      ...collectAvatarCandidatesFromObject(account),
-      ...collectAvatarCandidatesFromObject(me),
-      ...collectAvatarCandidatesFromObject(raw)
-    )
+  return firstSafeAvatarUrl(
+    collectAvatarCandidatesFromObject(user),
+    collectAvatarCandidatesFromObject(profile),
+    collectAvatarCandidatesFromObject(media),
+    collectAvatarCandidatesFromObject(preferences),
+    collectAvatarCandidatesFromObject(contacto),
+    collectAvatarCandidatesFromObject(account),
+    collectAvatarCandidatesFromObject(me),
+    collectAvatarCandidatesFromObject(raw)
   );
 }
 
@@ -1046,6 +1072,8 @@ export function getSidebarUserSnapshot(context = {}) {
         rootAvatarUrl: true,
         rootHasAvatarSignalOnly: true,
         hasAvatarDoesNotCreateUrl: true,
+        triesNextCandidateWhenAvatarCandidateInvalid: true,
+        rejectsOverlongAvatarUrlInsteadOfTruncating: true,
       },
 
       avatarInternalOrHttpsOnly: true,

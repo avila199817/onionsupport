@@ -8,14 +8,17 @@
    - Registrar eventos DOM.
    - Registrar eventos de bus si existe.
    - Registrar timers simples.
-   - Ejecutar limpieza.
+   - Registrar raf/idle.
+   - Registrar observers.
+   - Registrar AbortController.
+   - Ejecutar limpieza por scope o global.
    - Sin imports.
    - Sin snapshots grandes.
    - Sin dedupe complejo.
    - Sin lógica rara.
 ========================================================= */
 
-export const CLEANUP_VERSION = "simple";
+export const CLEANUP_VERSION = "core.cleanup.v2";
 export const DEFAULT_SCOPE = "global";
 
 export const CLEANUP_EVENTS = Object.freeze({
@@ -29,6 +32,10 @@ export const CLEANUP_EVENTS = Object.freeze({
 
 let nextId = 1;
 
+/* =========================================================
+   BASICS
+========================================================= */
+
 function isFunction(value) {
   return typeof value === "function";
 }
@@ -38,7 +45,11 @@ function isObject(value) {
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -48,40 +59,6 @@ function noop() {
 
 function nowIso() {
   return new Date().toISOString();
-}
-
-function isEventTarget(value) {
-  return Boolean(
-    value &&
-      isFunction(value.addEventListener) &&
-      isFunction(value.removeEventListener)
-  );
-}
-
-function browserTarget(name = "") {
-  if (typeof window === "undefined" || typeof document === "undefined") {
-    return null;
-  }
-
-  const key = text(name, "").toLowerCase();
-
-  if (key === "window") return window;
-  if (key === "document") return document;
-  if (key === "body") return document.body;
-  if (key === "html") return document.documentElement;
-
-  try {
-    return document.querySelector(name);
-  } catch {
-    return null;
-  }
-}
-
-function resolveTarget(target) {
-  if (isEventTarget(target)) return target;
-  if (typeof target === "string") return browserTarget(target);
-
-  return null;
 }
 
 function emit(events, name, payload = {}) {
@@ -107,15 +84,74 @@ function emit(events, name, payload = {}) {
   return false;
 }
 
+/* =========================================================
+   TARGETS
+========================================================= */
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isEventTarget(value) {
+  return Boolean(
+    value &&
+      isFunction(value.addEventListener) &&
+      isFunction(value.removeEventListener)
+  );
+}
+
+function browserTarget(name = "") {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const key = text(name, "").toLowerCase();
+
+  if (key === "window") return window;
+  if (key === "document") return document;
+  if (key === "body") return document.body;
+  if (key === "html") return document.documentElement;
+
+  try {
+    return document.querySelector(name);
+  } catch {
+    return null;
+  }
+}
+
+function resolveTarget(target) {
+  if (isEventTarget(target)) return target;
+  if (typeof target === "string") return browserTarget(target);
+
+  return null;
+}
+
+/* =========================================================
+   RECORDS
+========================================================= */
+
 function createRecord(type = "manual", label = "", dispose = noop) {
   return {
     id: `${type}:${nextId++}`,
-    type,
-    label,
+    type: text(type, "manual"),
+    label: text(label, type || "manual"),
     dispose,
     createdAt: nowIso(),
   };
 }
+
+function recordSnapshot(record = {}) {
+  return {
+    id: record.id,
+    type: record.type,
+    label: record.label,
+    createdAt: record.createdAt,
+  };
+}
+
+/* =========================================================
+   ARG PARSERS
+========================================================= */
 
 function parseTimerArgs(args, fallbackLabel) {
   if (isFunction(args[0])) {
@@ -136,7 +172,7 @@ function parseTimerArgs(args, fallbackLabel) {
     };
   }
 
-  if (isFunction(args[1])) {
+  if (typeof args[0] === "string" && isFunction(args[1])) {
     return {
       scope: text(args[0], DEFAULT_SCOPE),
       fn: args[1],
@@ -145,7 +181,11 @@ function parseTimerArgs(args, fallbackLabel) {
     };
   }
 
-  if (typeof args[1] === "number" && isFunction(args[2])) {
+  if (
+    typeof args[0] === "string" &&
+    typeof args[1] === "number" &&
+    isFunction(args[2])
+  ) {
     return {
       scope: text(args[0], DEFAULT_SCOPE),
       fn: args[2],
@@ -162,6 +202,62 @@ function parseTimerArgs(args, fallbackLabel) {
   };
 }
 
+function parseEventArgs(args = []) {
+  if (isEventTarget(args[0])) {
+    return {
+      scope: DEFAULT_SCOPE,
+      target: args[0],
+      eventName: args[1],
+      handler: args[2],
+      options: args[3] || false,
+    };
+  }
+
+  if (
+    typeof args[0] === "string" &&
+    typeof args[1] === "string" &&
+    isFunction(args[2])
+  ) {
+    return {
+      scope: DEFAULT_SCOPE,
+      target: args[0],
+      eventName: args[1],
+      handler: args[2],
+      options: args[3] || false,
+    };
+  }
+
+  return {
+    scope: text(args[0], DEFAULT_SCOPE),
+    target: args[1],
+    eventName: args[2],
+    handler: args[3],
+    options: args[4] || false,
+  };
+}
+
+function parseBusArgs(args = []) {
+  if (typeof args[0] === "string" && isFunction(args[1])) {
+    return {
+      scope: DEFAULT_SCOPE,
+      eventName: args[0],
+      handler: args[1],
+      options: args[2],
+    };
+  }
+
+  return {
+    scope: text(args[0], DEFAULT_SCOPE),
+    eventName: args[1],
+    handler: args[2],
+    options: args[3],
+  };
+}
+
+/* =========================================================
+   FACTORY
+========================================================= */
+
 export function createCleanup(input = {}) {
   const registry = isObject(input.registry) ? input.registry : {};
   const events = input.events || input.bus || null;
@@ -171,15 +267,15 @@ export function createCleanup(input = {}) {
   }
 
   function ensureScope(name = DEFAULT_SCOPE) {
-    const scope = text(name, DEFAULT_SCOPE);
+    const scopeName = text(name, DEFAULT_SCOPE);
 
-    if (!registry.scopes.has(scope)) {
-      registry.scopes.set(scope, new Map());
+    if (!registry.scopes.has(scopeName)) {
+      registry.scopes.set(scopeName, new Map());
     }
 
     return {
-      name: scope,
-      records: registry.scopes.get(scope),
+      name: scopeName,
+      records: registry.scopes.get(scopeName),
     };
   }
 
@@ -195,24 +291,11 @@ export function createCleanup(input = {}) {
     return registry.scopes.has(text(name, DEFAULT_SCOPE));
   }
 
-  function add(scopeOrDisposer = DEFAULT_SCOPE, disposerOrLabel = null, label = "manual") {
-    let scopeName = DEFAULT_SCOPE;
-    let disposer = null;
-    let finalLabel = label;
-
-    if (isFunction(scopeOrDisposer)) {
-      disposer = scopeOrDisposer;
-      finalLabel = text(disposerOrLabel, "manual");
-    } else {
-      scopeName = text(scopeOrDisposer, DEFAULT_SCOPE);
-      disposer = disposerOrLabel;
-      finalLabel = text(label, "manual");
-    }
-
+  function addRecord(scopeName = DEFAULT_SCOPE, type = "manual", label = "", disposer = noop) {
     if (!isFunction(disposer)) return noop;
 
     const currentScope = ensureScope(scopeName);
-    const record = createRecord("manual", finalLabel, disposer);
+    const record = createRecord(type, label, disposer);
 
     currentScope.records.set(record.id, record);
 
@@ -223,81 +306,71 @@ export function createCleanup(input = {}) {
       label: record.label,
     });
 
-    return () => off(currentScope.name, record.id);
+    let disposed = false;
+
+    return () => {
+      if (disposed) return false;
+
+      disposed = true;
+      return off(currentScope.name, record.id);
+    };
+  }
+
+  function add(scopeOrDisposer = DEFAULT_SCOPE, disposerOrLabel = null, label = "manual") {
+    if (isFunction(scopeOrDisposer)) {
+      return addRecord(
+        DEFAULT_SCOPE,
+        "manual",
+        text(disposerOrLabel, "manual"),
+        scopeOrDisposer
+      );
+    }
+
+    return addRecord(
+      text(scopeOrDisposer, DEFAULT_SCOPE),
+      "manual",
+      text(label, "manual"),
+      disposerOrLabel
+    );
   }
 
   function event(...args) {
-    let scopeName = DEFAULT_SCOPE;
-    let target = null;
-    let eventName = "";
-    let handler = null;
-    let options = false;
+    const parsed = parseEventArgs(args);
+    const resolvedTarget = resolveTarget(parsed.target);
+    const eventName = text(parsed.eventName, "");
 
-    if (isEventTarget(args[0]) || typeof args[0] === "string") {
-      if (typeof args[1] === "string" && isFunction(args[2])) {
-        target = args[0];
-        eventName = args[1];
-        handler = args[2];
-        options = args[3] || false;
-      } else {
-        scopeName = text(args[0], DEFAULT_SCOPE);
-        target = args[1];
-        eventName = args[2];
-        handler = args[3];
-        options = args[4] || false;
-      }
-    }
-
-    const resolvedTarget = resolveTarget(target);
-
-    if (!resolvedTarget || !eventName || !isFunction(handler)) {
+    if (!resolvedTarget || !eventName || !isFunction(parsed.handler)) {
       return noop;
     }
 
     try {
-      resolvedTarget.addEventListener(eventName, handler, options);
+      resolvedTarget.addEventListener(eventName, parsed.handler, parsed.options);
     } catch {
       return noop;
     }
 
-    return add(scopeName, () => {
-      resolvedTarget.removeEventListener(eventName, handler, options);
-    }, `event:${eventName}`);
-  }
-
-  function on(...args) {
-    if (isEventTarget(args[0]) || (typeof args[0] === "string" && typeof args[1] === "string" && isFunction(args[2]))) {
-      return event(...args);
-    }
-
-    return bus(...args);
+    return addRecord(
+      parsed.scope,
+      "event",
+      `event:${eventName}`,
+      () => {
+        resolvedTarget.removeEventListener(eventName, parsed.handler, parsed.options);
+      }
+    );
   }
 
   function bus(...args) {
-    let scopeName = DEFAULT_SCOPE;
-    let eventName = "";
-    let handler = null;
-    let options = undefined;
+    const parsed = parseBusArgs(args);
+    const eventName = text(parsed.eventName, "");
 
-    if (typeof args[0] === "string" && isFunction(args[1])) {
-      eventName = args[0];
-      handler = args[1];
-      options = args[2];
-    } else {
-      scopeName = text(args[0], DEFAULT_SCOPE);
-      eventName = args[1];
-      handler = args[2];
-      options = args[3];
-    }
-
-    if (!eventName || !isFunction(handler) || !isFunction(events?.on)) {
+    if (!eventName || !isFunction(parsed.handler) || !isFunction(events?.on)) {
       return noop;
     }
 
     let dispose = null;
 
     try {
-      dispose = events.on(eventName, handler, options);
+      dispose = events.on(eventName, parsed.handler, parsed.options);
     } catch {
       return noop;
     }
@@ -305,14 +378,55 @@ export function createCleanup(input = {}) {
     if (!isFunction(dispose)) {
       dispose = () => {
         try {
-          events?.off?.(eventName, handler);
+          events?.off?.(eventName, parsed.handler);
+          return true;
         } catch {
-          // noop
+          return false;
         }
       };
     }
 
-    return add(scopeName, dispose, `bus:${eventName}`);
+    return addRecord(
+      parsed.scope,
+      "bus",
+      `bus:${eventName}`,
+      dispose
+    );
+  }
+
+  function on(...args) {
+    if (isEventTarget(args[0])) {
+      return event(...args);
+    }
+
+    /*
+      on("eventName", handler) => bus
+      on("scope", "eventName", handler) => bus salvo que "scope" resuelva a target DOM.
+      on("window", "resize", handler) => DOM event.
+      on("scope", "window", "resize", handler) => DOM event scoped.
+    */
+    if (typeof args[0] === "string" && isFunction(args[1])) {
+      return bus(...args);
+    }
+
+    if (
+      typeof args[0] === "string" &&
+      typeof args[1] === "string" &&
+      isFunction(args[2])
+    ) {
+      return resolveTarget(args[0]) ? event(...args) : bus(...args);
+    }
+
+    if (
+      typeof args[0] === "string" &&
+      (isEventTarget(args[1]) || typeof args[1] === "string") &&
+      typeof args[2] === "string" &&
+      isFunction(args[3])
+    ) {
+      return event(...args);
+    }
+
+    return bus(...args);
   }
 
   function windowEvent(scopeName = DEFAULT_SCOPE, eventName = "", handler = null, options = false) {
@@ -328,9 +442,24 @@ export function createCleanup(input = {}) {
 
     if (!isFunction(parsed.fn)) return noop;
 
-    const id = setTimeout(parsed.fn, Math.max(0, parsed.delay));
+    let dispose = noop;
 
-    return add(parsed.scope, () => clearTimeout(id), parsed.label);
+    const id = setTimeout(() => {
+      try {
+        parsed.fn();
+      } finally {
+        dispose();
+      }
+    }, Math.max(0, parsed.delay));
+
+    dispose = addRecord(
+      parsed.scope,
+      "timeout",
+      parsed.label,
+      () => clearTimeout(id)
+    );
+
+    return dispose;
   }
 
   function interval(...args) {
@@ -340,7 +469,12 @@ export function createCleanup(input = {}) {
 
     const id = setInterval(parsed.fn, Math.max(0, parsed.delay));
 
-    return add(parsed.scope, () => clearInterval(id), parsed.label);
+    return addRecord(
+      parsed.scope,
+      "interval",
+      parsed.label,
+      () => clearInterval(id)
+    );
   }
 
   function raf(scopeName = DEFAULT_SCOPE, fn = null, label = "raf") {
@@ -354,9 +488,24 @@ export function createCleanup(input = {}) {
       return timeout(scopeName, fn, 0, label);
     }
 
-    const id = requestAnimationFrame(fn);
+    let dispose = noop;
 
-    return add(scopeName, () => cancelAnimationFrame(id), text(label, "raf"));
+    const id = requestAnimationFrame((timestamp) => {
+      try {
+        fn(timestamp);
+      } finally {
+        dispose();
+      }
+    });
+
+    dispose = addRecord(
+      scopeName,
+      "raf",
+      text(label, "raf"),
+      () => cancelAnimationFrame(id)
+    );
+
+    return dispose;
   }
 
   function idle(scopeName = DEFAULT_SCOPE, fn = null, options = {}) {
@@ -370,9 +519,24 @@ export function createCleanup(input = {}) {
       return timeout(scopeName, fn, 0, "idle");
     }
 
-    const id = requestIdleCallback(fn, isObject(options) ? options : {});
+    let dispose = noop;
 
-    return add(scopeName, () => cancelIdleCallback(id), "idle");
+    const id = requestIdleCallback((deadline) => {
+      try {
+        fn(deadline);
+      } finally {
+        dispose();
+      }
+    }, isObject(options) ? options : {});
+
+    dispose = addRecord(
+      scopeName,
+      "idle",
+      "idle",
+      () => cancelIdleCallback(id)
+    );
+
+    return dispose;
   }
 
   function observer(scopeName = DEFAULT_SCOPE, observerRef = null, label = "observer") {
@@ -384,7 +548,12 @@ export function createCleanup(input = {}) {
       return noop;
     }
 
-    return add(scopeName, () => observerRef.disconnect(), text(label, "observer"));
+    return addRecord(
+      scopeName,
+      "observer",
+      text(label, "observer"),
+      () => observerRef.disconnect()
+    );
   }
 
   function abortController(scopeName = DEFAULT_SCOPE, controller = null, label = "abort") {
@@ -396,13 +565,18 @@ export function createCleanup(input = {}) {
       return noop;
     }
 
-    return add(scopeName, () => {
-      try {
-        controller.abort("cleanup");
-      } catch {
-        controller.abort();
+    return addRecord(
+      scopeName,
+      "abort",
+      text(label, "abort"),
+      () => {
+        try {
+          controller.abort("cleanup");
+        } catch {
+          controller.abort();
+        }
       }
-    }, text(label, "abort"));
+    );
   }
 
   function off(scopeName = DEFAULT_SCOPE, idOrDisposer = "") {
@@ -422,30 +596,44 @@ export function createCleanup(input = {}) {
       }
     }
 
-    const currentScope = registry.scopes.get(text(scopeName, DEFAULT_SCOPE));
+    const name = text(scopeName, DEFAULT_SCOPE);
     const id = text(idOrDisposer, "");
 
-    if (!currentScope || !id || !currentScope.has(id)) {
+    if (!id) return false;
+
+    const records = registry.scopes.get(name);
+
+    if (!records || !records.has(id)) {
       return false;
     }
 
-    const record = currentScope.get(id);
-    currentScope.delete(id);
+    const record = records.get(id);
+
+    /*
+      Borramos antes de ejecutar para evitar dobles disposiciones
+      si el disposer se llama a sí mismo indirectamente.
+    */
+    records.delete(id);
 
     try {
       record.dispose();
+
       emit(events, CLEANUP_EVENTS.disposed, {
-        scope: text(scopeName, DEFAULT_SCOPE),
+        scope: name,
         id,
         type: record.type,
         label: record.label,
       });
+
       return true;
     } catch {
       emit(events, CLEANUP_EVENTS.error, {
-        scope: text(scopeName, DEFAULT_SCOPE),
+        scope: name,
         id,
+        type: record.type,
+        label: record.label,
       });
+
       return false;
     }
   }
@@ -458,6 +646,7 @@ export function createCleanup(input = {}) {
       return {
         scope: name,
         disposed: 0,
+        failed: 0,
         missing: true,
       };
     }
@@ -527,8 +716,10 @@ export function createCleanup(input = {}) {
   }
 
   function size(scopeName = "") {
-    if (scopeName) {
-      return registry.scopes.get(scopeName)?.size || 0;
+    const name = text(scopeName, "");
+
+    if (name) {
+      return registry.scopes.get(name)?.size || 0;
     }
 
     let total = 0;
@@ -549,12 +740,7 @@ export function createCleanup(input = {}) {
       name,
       recordCount: records?.size || 0,
       records: records
-        ? [...records.values()].map((record) => ({
-            id: record.id,
-            type: record.type,
-            label: record.label,
-            createdAt: record.createdAt,
-          }))
+        ? [...records.values()].map(recordSnapshot)
         : [],
     };
   }
@@ -567,6 +753,20 @@ export function createCleanup(input = {}) {
       scopeCount: scopes.length,
       totalRecords: size(),
       scopes,
+
+      policy: {
+        scopedCleanup: true,
+        noImports: true,
+        noDomRequired: true,
+        domEventsSupported: true,
+        busEventsSupported: true,
+        timersSupported: true,
+        rafSupported: true,
+        idleSupported: true,
+        observerSupported: true,
+        abortControllerSupported: true,
+        snapshotMinimal: true,
+      },
     };
   }
 
@@ -589,6 +789,7 @@ export function createCleanup(input = {}) {
     on,
     event,
     bus,
+
     windowEvent,
     documentEvent,
 
@@ -624,6 +825,10 @@ export function createCleanup(input = {}) {
     snapshot: getSnapshot,
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   CLEANUP_VERSION,

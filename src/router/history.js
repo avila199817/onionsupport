@@ -9,7 +9,7 @@
    - publicPath conserva query/hash seguros.
    - canonicalPath limpio.
    - /@{user.slug} conserva URL pública pero canonicaliza a /.
-   - /@{user.slug}/{ruta} conserva URL pública pero canonicaliza a /{ruta}.
+   - /@{user.slug}/{ruta} conserva URL pública pero canonicaliza a /{ruta} sólo si la ruta es real.
    - Delegar normalización de rutas/user-scope/bloqueos en core/config.js.
    - No escribir /home, /403, /404, /2fa, /mfa, /otp en history.
    - Scrub explícito del TOKEN_PARAM en rutas públicas protegidas.
@@ -28,6 +28,7 @@
 ========================================================= */
 
 import {
+  ROUTES,
   PROTECTED_PUBLIC_TOKEN_ROUTES,
   TOKEN_PARAM,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
@@ -41,12 +42,13 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_HISTORY_VERSION = "router.history.v9";
+export const ROUTER_HISTORY_VERSION = "router.history.v10.aligned-user-scope";
 
 const HISTORY_STATE_VERSION = 1;
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 const TOKEN_PARAM_NAME = TOKEN_PARAM || "token";
+const CORE_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
 
 const SENSITIVE_QUERY_KEYS = new Set([
   "token",
@@ -72,6 +74,26 @@ const TOKEN_ROUTES = new Set(
     .flatMap((item) => Array.isArray(item?.paths) ? item.paths : [item?.path || item])
     .map(normalizeTokenRoutePath)
     .filter(Boolean)
+);
+
+const USER_SCOPED_CANONICAL_PATHS = new Set(
+  [
+    DEFAULT_ROUTE,
+    CORE_ROUTES.incidencias || "/incidencias",
+    CORE_ROUTES.facturas || "/facturas",
+    CORE_ROUTES.clientes || "/clientes",
+    CORE_ROUTES.cuenta || "/cuenta",
+    CORE_ROUTES.ajustes || "/ajustes",
+
+    /*
+      Opcionales reales:
+      sólo entran si core/config.js las define.
+    */
+    CORE_ROUTES.usuarios || "",
+    CORE_ROUTES.servidor || CORE_ROUTES.server || "",
+  ]
+    .filter(Boolean)
+    .map((path) => normalizePathname(path))
 );
 
 let sequence = 0;
@@ -137,11 +159,72 @@ function redact(value = "") {
    PATHS
 ========================================================= */
 
+function isHashRouterPath(value = "") {
+  const raw = cleanText(value, "");
+  return raw.startsWith("#/") || raw.startsWith("#!");
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw = cleanText(value, DEFAULT_ROUTE);
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
+  }
+
+  if (raw.startsWith("#/")) {
+    return raw.slice(1) || DEFAULT_ROUTE;
+  }
+
+  return raw || DEFAULT_ROUTE;
+}
+
+function sameOriginUrlToPath(raw = "") {
+  if (!isBrowser()) return "";
+
+  try {
+    const url = new URL(raw, window.location.origin);
+
+    if (url.origin !== window.location.origin) {
+      return "";
+    }
+
+    if (url.hash && isHashRouterPath(url.hash)) {
+      return normalizeHashRouterPath(url.hash);
+    }
+
+    return `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
+  } catch {
+    return "";
+  }
+}
+
 function pathFromInput(path = DEFAULT_ROUTE) {
   try {
     return configRoutePathFromUrlLike(path) || DEFAULT_ROUTE;
   } catch {
-    return DEFAULT_ROUTE;
+    const raw = cleanText(path, DEFAULT_ROUTE);
+
+    if (!raw) return DEFAULT_ROUTE;
+
+    if (isHashRouterPath(raw)) {
+      return normalizeHashRouterPath(raw);
+    }
+
+    if (raw.startsWith("//")) return DEFAULT_ROUTE;
+
+    if (/^https?:\/\//i.test(raw)) {
+      return sameOriginUrlToPath(raw) || DEFAULT_ROUTE;
+    }
+
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+      return DEFAULT_ROUTE;
+    }
+
+    if (/[\r\n\t\\]/.test(raw)) {
+      return DEFAULT_ROUTE;
+    }
+
+    return raw || DEFAULT_ROUTE;
   }
 }
 
@@ -157,6 +240,20 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
 
     value = value.replace(/\/{2,}/g, "/");
 
+    const parts = [];
+
+    for (const part of value.split("/")) {
+      if (!part || part === ".") continue;
+
+      if (part === "..") {
+        parts.pop();
+      } else {
+        parts.push(part);
+      }
+    }
+
+    value = `/${parts.join("/")}`;
+
     if (value.length > 1) {
       value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
     }
@@ -166,11 +263,15 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
 }
 
 function isBlockedPathname(pathname = DEFAULT_ROUTE) {
+  const clean = normalizePathname(pathname);
+
   try {
-    return configIsBlockedRoutePath(pathname) === true;
+    if (configIsBlockedRoutePath(clean) === true) return true;
   } catch {
-    return false;
+    // noop
   }
+
+  return false;
 }
 
 function normalizeTokenRoutePath(value = "") {
@@ -317,6 +418,10 @@ function joinPath(parts = {}) {
   ].join("");
 }
 
+function userScopedPathIsRoutable(restPath = DEFAULT_ROUTE) {
+  return USER_SCOPED_CANONICAL_PATHS.has(normalizePathname(restPath));
+}
+
 export function normalizePublicPath(path = DEFAULT_ROUTE) {
   const parts = splitPath(path);
   const canonical = normalizeCanonicalPath(parts.pathname);
@@ -357,20 +462,27 @@ export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
     const info = getConfigUserScopedRouteInfo(path);
 
     if (isObject(info)) {
+      const pathname = splitPath(path).pathname;
+
       const restPath = normalizePathname(
-        info.restPath || info.canonicalPath || splitPath(path).pathname
+        info.restPath || info.canonicalPath || pathname
       );
 
       const lookupPath = normalizePathname(
         info.canonicalPath || info.lookupPath || restPath
       );
 
+      const routable = Object.prototype.hasOwnProperty.call(info, "routable")
+        ? Boolean(info.routable)
+        : userScopedPathIsRoutable(restPath);
+
       return {
         scoped: Boolean(info.scoped),
-        home: Boolean(info.home),
+        routable,
+        home: Boolean(info.home && routable),
         slug: normalizeUserSlug(info.slug || ""),
         restPath,
-        lookupPath,
+        lookupPath: routable ? lookupPath : pathname,
       };
     }
   } catch {
@@ -382,6 +494,7 @@ export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
   if (!pathname.startsWith(USER_HOME_PREFIX)) {
     return {
       scoped: false,
+      routable: false,
       home: false,
       slug: "",
       restPath: pathname,
@@ -396,6 +509,7 @@ export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
   if (!slug) {
     return {
       scoped: false,
+      routable: false,
       home: false,
       slug: "",
       restPath: pathname,
@@ -407,12 +521,15 @@ export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
     ? normalizePathname(`/${restSegments.join("/")}`)
     : DEFAULT_ROUTE;
 
+  const routable = userScopedPathIsRoutable(restPath);
+
   return {
     scoped: true,
-    home: restPath === DEFAULT_ROUTE,
+    routable,
+    home: routable && restPath === DEFAULT_ROUTE,
     slug,
     restPath,
-    lookupPath: restPath,
+    lookupPath: routable ? restPath : pathname,
   };
 }
 
@@ -422,18 +539,24 @@ export function extractSlugFromPath(path = DEFAULT_ROUTE) {
 
 export function isUserHomePath(path = DEFAULT_ROUTE) {
   try {
-    return configIsUserHomeRoute(path) === true;
+    if (configIsUserHomeRoute(path) === true) return true;
   } catch {
-    return Boolean(getUserScopedRouteInfo(path).home);
+    // fallback abajo
   }
+
+  const info = getUserScopedRouteInfo(path);
+  return Boolean(info.scoped && info.routable && info.home);
 }
 
 export function isUserScopedPath(path = DEFAULT_ROUTE) {
   try {
-    return configIsUserScopedRoute(path) === true;
+    if (configIsUserScopedRoute(path) === true) return true;
   } catch {
-    return Boolean(getUserScopedRouteInfo(path).scoped);
+    // fallback abajo
   }
+
+  const info = getUserScopedRouteInfo(path);
+  return Boolean(info.scoped && info.routable);
 }
 
 export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
@@ -451,7 +574,19 @@ export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
     return isBlockedPathname(fromConfig) ? DEFAULT_ROUTE : fromConfig;
   } catch {
     const scoped = getUserScopedRouteInfo(pathname);
-    const canonical = scoped.scoped ? scoped.lookupPath : pathname;
+
+    if (scoped.scoped && scoped.routable) {
+      return isBlockedPathname(scoped.lookupPath)
+        ? DEFAULT_ROUTE
+        : scoped.lookupPath;
+    }
+
+    /*
+      Importante:
+      si /@slug/algo no es una ruta user-scope real, NO se convierte en /algo.
+      Se conserva como pathname público/candidato para que index.js decida not-found.
+    */
+    const canonical = scoped.scoped ? pathname : pathname;
 
     return isBlockedPathname(canonical) ? DEFAULT_ROUTE : canonical;
   }
@@ -461,8 +596,14 @@ function browserPath() {
   if (!isBrowser()) return DEFAULT_ROUTE;
 
   try {
-    const { pathname = DEFAULT_ROUTE, search = "", hash = "" } = window.location;
-    return normalizePublicPath(`${pathname || DEFAULT_ROUTE}${search || ""}${hash || ""}`);
+    const hash = window.location.hash || "";
+
+    if (isHashRouterPath(hash)) {
+      return normalizePublicPath(normalizeHashRouterPath(hash));
+    }
+
+    const { pathname = DEFAULT_ROUTE, search = "", hash: locationHash = "" } = window.location;
+    return normalizePublicPath(`${pathname || DEFAULT_ROUTE}${search || ""}${locationHash || ""}`);
   } catch {
     return DEFAULT_ROUTE;
   }
@@ -509,6 +650,7 @@ export function createHistoryState({
   const publicPath = normalizePublicPath(extra.publicPath || pathname || DEFAULT_ROUTE);
   const canonicalPath = normalizeCanonicalPath(extra.canonicalPath || publicPath);
   const scoped = getUserScopedRouteInfo(publicPath);
+  const scopedRoutable = Boolean(scoped.scoped && scoped.routable);
 
   return {
     __onionRouterHistory: true,
@@ -526,13 +668,13 @@ export function createHistoryState({
 
     routeParams: {
       ...cleanRouteParams(extra.routeParams),
-      ...(scoped.slug ? { slug: scoped.slug } : {}),
+      ...(scopedRoutable && scoped.slug ? { slug: scoped.slug } : {}),
     },
 
-    publicSlug: scoped.slug || null,
+    publicSlug: scopedRoutable ? scoped.slug || null : null,
     isUserHomePath: Boolean(scoped.home),
-    isUserScopedPath: Boolean(scoped.scoped),
-    userScopedRestPath: scoped.scoped ? scoped.restPath : null,
+    isUserScopedPath: scopedRoutable,
+    userScopedRestPath: scopedRoutable ? scoped.restPath : null,
 
     source: cleanText(extra.source, null),
     mode: cleanText(extra.mode, null),
@@ -902,6 +1044,7 @@ export function getHistorySnapshot(AppCore = null) {
   const publicPath = normalizePublicPath(currentUrl);
   const canonicalPath = normalizeCanonicalPath(publicPath);
   const scoped = getUserScopedRouteInfo(publicPath);
+  const scopedRoutable = Boolean(scoped.scoped && scoped.routable);
 
   return {
     version: ROUTER_HISTORY_VERSION,
@@ -915,8 +1058,8 @@ export function getHistorySnapshot(AppCore = null) {
 
     isUserHomePath: isUserHomePath(publicPath),
     isUserScopedPath: isUserScopedPath(publicPath),
-    publicSlug: extractSlugFromPath(publicPath) || null,
-    userScopedRestPath: scoped.scoped ? scoped.restPath : null,
+    publicSlug: scopedRoutable ? extractSlugFromPath(publicPath) || null : null,
+    userScopedRestPath: scopedRoutable ? scoped.restPath : null,
 
     state: serializeState(currentHistoryState()),
 
@@ -939,7 +1082,8 @@ export function getHistorySnapshot(AppCore = null) {
       userScopedPrivateRoutes: true,
       preservesUserSlugPublicUrl: true,
       canonicalizesUserHome: true,
-      canonicalizesUserScopedPrivateRoutes: true,
+      canonicalizesKnownUserScopedPrivateRoutes: true,
+      doesNotCanonicalizeUnknownUserScopedRoutes: true,
 
       defaultRoute: DEFAULT_ROUTE,
       noHomeAlias: true,

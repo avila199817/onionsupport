@@ -14,6 +14,7 @@
    - Pintar metadata admin/roles si index.js/rutas la entregan.
    - Preparar markup del dropdown de cuenta.
    - Recibir datos ya normalizados desde index.js/user.js.
+   - Delegar seguridad de href en constants.js -> core/config.js.
    - No navegar.
    - No leer sesión.
    - No leer rutas.
@@ -24,6 +25,7 @@
    - No depender de Auth / Router / Core / Store.
    - No usar HTML string.
    - No duplicar lógica de negocio.
+   - Sin denylist local.
    - Sin HTTP.
    - Sin Toast.
 ========================================================= */
@@ -39,7 +41,9 @@ import {
   SIDEBAR_ROOT_ID,
   SIDEBAR_ROLE_ADMIN,
   SIDEBAR_ROLE_USER,
+  isSidebarBlockedRoute,
   normalizeSidebarIcon,
+  normalizeSidebarPath,
 } from "./constants.js";
 
 import {
@@ -48,7 +52,7 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v12";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v13";
 
 /* =========================================================
    BRAND ASSETS
@@ -65,15 +69,6 @@ const ROLE_LABEL_STANDARD = "Estándar";
 const ATTR_USER_AVATAR = SIDEBAR_ATTRS.userAvatar || "data-sidebar-user-avatar";
 const ATTR_USER_NAME = SIDEBAR_ATTRS.userName || "data-sidebar-user-name";
 const ATTR_USER_ROLE = SIDEBAR_ATTRS.userRole || "data-sidebar-user-role";
-
-const BLOCKED_HREFS = new Set([
-  "/home",
-  "/403",
-  "/404",
-  "/2fa",
-  "/mfa",
-  "/otp",
-]);
 
 /* =========================================================
    ICON PATHS
@@ -161,13 +156,23 @@ function appendChildren(parent = null, children = []) {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
     String(value || "")
   );
 }
 
 function normalizeInternalPath(value = "") {
-  let href = text(value, "");
+  const raw = text(value, "");
+
+  if (!raw) return "";
+  if (!raw.startsWith("/")) return "";
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (hasSensitiveQuery(raw)) return "";
+  if (isSidebarBlockedRoute(raw)) return "";
+
+  const href = normalizeSidebarPath(raw);
 
   if (!href) return "";
   if (!href.startsWith("/")) return "";
@@ -175,15 +180,7 @@ function normalizeInternalPath(value = "") {
   if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return "";
   if (/[\r\n\t\\]/.test(href)) return "";
   if (hasSensitiveQuery(href)) return "";
-
-  href = href.replace(/\/{2,}/g, "/") || "";
-
-  const cleanPath = href.split("?")[0].split("#")[0].replace(/\/+$/g, "") || "/";
-
-  if (BLOCKED_HREFS.has(cleanPath.toLowerCase())) return "";
-  if (cleanPath.toLowerCase().startsWith("/2fa/")) return "";
-  if (cleanPath.toLowerCase().startsWith("/mfa/")) return "";
-  if (cleanPath.toLowerCase().startsWith("/otp/")) return "";
+  if (isSidebarBlockedRoute(href)) return "";
 
   return href;
 }
@@ -1137,7 +1134,8 @@ export function getSidebarTemplateSnapshot() {
       safeInternalHref: true,
       safeAssetSrc: true,
       noSensitiveHrefInDom: true,
-      blocksLegacyRoutes: true,
+      blocksLegacyRoutesViaConstantsAndCoreConfig: true,
+      noLocalBlockedRouteList: true,
 
       noNavigation: true,
       noSessionRead: true,

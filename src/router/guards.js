@@ -12,7 +12,8 @@
    - Roles únicos exactos: admin / user.
    - Rutas admin: sólo admin.
    - Delegar normalización de rutas/user-scope/bloqueos en core/config.js.
-   - Canonicalizar user-scope sólo para rutas privadas reales conocidas.
+   - Canonicalizar user-scope sólo para rutas privadas reales conocidas/routable.
+   - No canonicalizar /@slug/ruta-inexistente como /ruta-inexistente.
    - No validar aquí si el slug coincide con el usuario real.
    - La validación real del slug pertenece a router/index.js.
    - No inventar slug.
@@ -45,7 +46,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const GUARDS_VERSION = "router.guards.v12.aligned-user-scope";
+export const GUARDS_VERSION = "router.guards.v13.routable-first-canonical";
 
 const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
 
@@ -349,17 +350,6 @@ function isBlockedPath(path = HOME_PATH) {
   }
 }
 
-function isBlockedGuardPath(path = HOME_PATH) {
-  const publicPath = normalizePublicPath(path);
-  const canonicalPath = canonicalGuardPath(publicPath);
-
-  return Boolean(
-    isBlockedPath(publicPath) ||
-      isBlockedPath(splitPath(publicPath).pathname) ||
-      isBlockedPath(canonicalPath)
-  );
-}
-
 function normalizeUserSlug(value = "") {
   try {
     return configNormalizeUserSlug(value) || "";
@@ -491,13 +481,22 @@ export function isUserScopedPath(path = HOME_PATH) {
 }
 
 export function canonicalGuardPath(path = HOME_PATH) {
-  try {
-    const canonical = configCanonicalRoutePath(path) || splitPath(path).pathname || HOME_PATH;
-    return normalizePathname(canonical);
-  } catch {
-    const pathname = splitPath(path).pathname || HOME_PATH;
-    const scoped = getUserScopedRouteInfo(pathname);
+  const pathname = splitPath(path).pathname || HOME_PATH;
+  const scoped = getUserScopedRouteInfo(pathname);
 
+  if (scoped.scoped && !scoped.routable) {
+    return pathname;
+  }
+
+  try {
+    const canonical = normalizePathname(
+      configCanonicalRoutePath(path) ||
+        (scoped.scoped && scoped.routable ? scoped.lookupPath : pathname) ||
+        HOME_PATH
+    );
+
+    return canonical || HOME_PATH;
+  } catch {
     if (scoped.scoped && scoped.routable) {
       return scoped.lookupPath;
     }
@@ -508,6 +507,20 @@ export function canonicalGuardPath(path = HOME_PATH) {
     */
     return scoped.scoped ? pathname : pathname;
   }
+}
+
+function isBlockedGuardPath(path = HOME_PATH) {
+  const publicPath = normalizePublicPath(path);
+  const pathname = splitPath(publicPath).pathname;
+  const scoped = getUserScopedRouteInfo(pathname);
+  const canonicalPath = canonicalGuardPath(publicPath);
+
+  return Boolean(
+    isBlockedPath(publicPath) ||
+      isBlockedPath(pathname) ||
+      (scoped.scoped && scoped.restPath && isBlockedPath(scoped.restPath)) ||
+      isBlockedPath(canonicalPath)
+  );
 }
 
 function isSafeInternalPath(path = "") {
@@ -1267,6 +1280,8 @@ export function getGuardsSnapshot({
       userSlugHome: true,
       userScopedPrivateRoutes: true,
       canonicalizesOnlyKnownUserScopeForAccess: true,
+      respectsRoutableUserScope: true,
+      checksScopedRestPathForBlockedLegacy: true,
 
       validatesRealUserSlug: false,
       realSlugValidationOwner: "router/index.js",

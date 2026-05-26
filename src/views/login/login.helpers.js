@@ -20,6 +20,7 @@
    - Sin storage propio.
    - Sin eventos.
    - Sin Toast.
+   - Sin opción "Recordarme" funcional.
    - Sin 2FA/MFA/OTP.
    - Sin /home.
    - Sin rutas legacy.
@@ -40,7 +41,13 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const LOGIN_HELPERS_VERSION = "login.helpers.v22";
+export const LOGIN_HELPERS_VERSION = "login.helpers.v23";
+
+/*
+  Compat legacy:
+  se conserva para no romper imports antiguos mientras se audita loginView.js.
+  No habilita storage ni persistencia de identificador.
+*/
 export const LOGIN_REMEMBER_KEY = "auth:last-identifier";
 
 const HOME_ROUTE = "/";
@@ -463,8 +470,6 @@ export function createLoginPayload({
   phone = "",
   telefono = "",
   password = "",
-  remember = false,
-  rememberMe = undefined,
   redirect = "",
 } = {}) {
   const id =
@@ -479,7 +484,6 @@ export function createLoginPayload({
   const finalEmail = looksLikeEmail(id) ? id.toLowerCase() : "";
   const finalPhone = !finalEmail && looksLikePhone(id) ? normalizePhone(id) : "";
   const finalUsername = !finalEmail && !finalPhone ? normalizeUsername(id) : "";
-  const finalRemember = rememberMe !== undefined ? safeBool(rememberMe, false) : Boolean(remember);
 
   return {
     identifier: id,
@@ -493,9 +497,6 @@ export function createLoginPayload({
     telefono: finalPhone,
 
     password: rawText(password, ""),
-
-    remember: finalRemember,
-    rememberMe: finalRemember,
 
     redirect: safeText(redirect, ""),
   };
@@ -550,7 +551,7 @@ export function getFirstLoginError(errors = {}) {
 }
 
 /* =========================================================
-   STORAGE / REMEMBER COMPAT
+   STORAGE / REMEMBER LEGACY COMPAT NO-OP
 ========================================================= */
 
 export function getStorage() {
@@ -1900,6 +1901,7 @@ export function getLoginHelpersSnapshot(auth = null) {
       noEmailIdentity: true,
       noSlugFabrication: true,
 
+      noRememberOption: true,
       rememberCompatNoop: true,
 
       no2fa: true,

@@ -21,9 +21,10 @@
    - Sin clipboard.
    - Sin collection model.
    - Sin import directo de Toast.
+   - Sin globals propios.
 ========================================================= */
 
-export const HOME_UTILS_VERSION = "home.utils.v3";
+export const HOME_UTILS_VERSION = "home.utils.v4.clean-core";
 
 export const DEFAULT_LOCALE = "es-ES";
 export const DEFAULT_CURRENCY = "EUR";
@@ -58,12 +59,14 @@ const COSMOS_META_KEYS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni/i;
+  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|bank|cuenta|account|ipRaw|userAgent/i;
 
 const SENSITIVE_QUERY_RE =
-  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|tempToken|temp_token|sas)=/i;
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|tempToken|temp_token|sas|sig|signature|key)=/i;
 
 const EMAIL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
+
+const EMAIL_EXACT_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
 
 const JWT_RE =
   /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
@@ -138,19 +141,13 @@ export function safeText(value, fallback = "") {
 }
 
 export function safeArray(value, fallback = []) {
-  return Array.isArray(value)
-    ? value
-    : Array.isArray(fallback)
-      ? fallback
-      : [];
+  if (Array.isArray(value)) return value;
+  return Array.isArray(fallback) ? fallback : [];
 }
 
 export function safeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : isObject(fallback)
-      ? fallback
-      : {};
+  if (isObject(value)) return value;
+  return isObject(fallback) ? fallback : {};
 }
 
 export function safeNumber(value, fallback = 0) {
@@ -236,8 +233,10 @@ export function first(...values) {
 
 export function clamp(value, min = 0, max = 100) {
   const number = safeNumber(value, min);
+  const safeMin = safeNumber(min, 0);
+  const safeMax = safeNumber(max, safeMin);
 
-  return Math.min(Math.max(number, min), max);
+  return Math.min(Math.max(number, safeMin), safeMax);
 }
 
 export function round(value = 0, digits = 0) {
@@ -293,12 +292,12 @@ export function deepClone(value, fallback = null) {
 export function parseJson(value, fallback = null) {
   if (isObject(value) || Array.isArray(value)) return value;
 
-  const text = safeText(value, "");
+  const raw = safeText(value, "");
 
-  if (!text) return fallback;
+  if (!raw) return fallback;
 
   try {
-    return JSON.parse(text);
+    return JSON.parse(raw);
   } catch {
     return fallback;
   }
@@ -329,8 +328,8 @@ function isSensitiveKey(key = "") {
 }
 
 function isEmailLike(value = "") {
-  const text = safeText(value, "");
-  return Boolean(text && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i.test(text));
+  const output = safeText(value, "");
+  return Boolean(output && EMAIL_EXACT_RE.test(output));
 }
 
 export function redactTokenInText(value = "") {
@@ -340,7 +339,7 @@ export function redactTokenInText(value = "") {
 
   try {
     output = output.replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|tempToken|temp_token|sas)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|tempToken|temp_token|sas|sig|signature|key)=)([^&#\s]+)/gi,
       "$1***"
     );
 
@@ -453,14 +452,14 @@ export function sanitizePayload(value, depth = 0, keyHint = "") {
 }
 
 export function safePublicText(value = "", fallback = "") {
-  const text = redactTokenInText(safeText(value, ""));
+  const output = redactTokenInText(safeText(value, ""));
 
-  if (!text) return fallback;
-  if (isEmailLike(text)) return fallback;
-  if (SENSITIVE_QUERY_RE.test(text)) return fallback;
-  if (/Bearer\s+/i.test(text)) return fallback;
+  if (!output) return fallback;
+  if (isEmailLike(output)) return fallback;
+  if (SENSITIVE_QUERY_RE.test(output)) return fallback;
+  if (/Bearer\s+/i.test(output)) return fallback;
 
-  return text;
+  return output;
 }
 
 /* =========================================================
@@ -496,29 +495,29 @@ export function normalizeKey(value = "") {
 }
 
 export function truncate(value = "", max = 160, suffix = "…") {
-  const text = safeString(value, "");
+  const output = safeString(value, "");
   const limit = Math.max(1, safeInteger(max, 160));
 
-  if (!text) return "";
-  if (text.length <= limit) return text;
+  if (!output) return "";
+  if (output.length <= limit) return output;
 
   const finalSuffix = safeText(suffix, "…");
 
-  return `${text.slice(0, Math.max(1, limit - finalSuffix.length)).trim()}${finalSuffix}`;
+  return `${output.slice(0, Math.max(1, limit - finalSuffix.length)).trim()}${finalSuffix}`;
 }
 
 export function getInitials(value = "", fallback = "ON") {
-  const text = normalizeWhitespace(safePublicText(value, ""));
+  const output = normalizeWhitespace(safePublicText(value, ""));
 
-  if (!text) return fallback;
+  if (!output) return fallback;
 
-  const parts = text.split(/\s+/).filter(Boolean);
+  const parts = output.split(/\s+/).filter(Boolean);
 
   if (parts.length === 1) {
     return parts[0].slice(0, 2).toUpperCase() || fallback;
   }
 
-  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || fallback;
+  return `${parts[0]?.[0] || ""}${parts[parts.length - 1]?.[0] || ""}`.toUpperCase() || fallback;
 }
 
 export function includesNormalized(haystack = "", needle = "") {
@@ -630,7 +629,7 @@ export function toTimestamp(value) {
   }
 
   const esDate = raw.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+-\s+|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
   );
 
   if (esDate) {
@@ -654,40 +653,30 @@ export function toTimestamp(value) {
   return Number.isNaN(time) ? 0 : time;
 }
 
-export function toDate(value) {
-  const timestamp = toTimestamp(value);
-
-  if (!timestamp) return null;
-
-  const date = new Date(timestamp);
-
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
 export function toMs(value) {
   return toTimestamp(value);
 }
 
-export function getDateFormatter(locale = DEFAULT_LOCALE, withTime = true, options = {}) {
+export function toDate(value, fallback = null) {
+  const timestamp = toTimestamp(value);
+
+  if (!timestamp) return fallback;
+
+  const date = new Date(timestamp);
+
+  return Number.isNaN(date.getTime()) ? fallback : date;
+}
+
+export function getDateFormatter(locale = DEFAULT_LOCALE, options = {}) {
   const cleanLocale = safeText(locale, DEFAULT_LOCALE);
+  const opts = {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    ...safeObject(options),
+  };
 
-  const opts = withTime
-    ? {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        ...safeObject(options),
-      }
-    : {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        ...safeObject(options),
-      };
-
-  const key = `${cleanLocale}:${withTime ? "date-time" : "date"}:${stringifyJson(opts, "{}")}`;
+  const key = `${cleanLocale}:${stringifyJson(opts, "{}")}`;
 
   if (DATE_FORMATTER_CACHE.has(key)) {
     return DATE_FORMATTER_CACHE.get(key);
@@ -700,69 +689,60 @@ export function getDateFormatter(locale = DEFAULT_LOCALE, withTime = true, optio
   return formatter;
 }
 
-export function formatDate(value, {
-  locale = DEFAULT_LOCALE,
-  fallback = DEFAULT_DATE_FALLBACK,
-  withTime = true,
-  options = {},
-} = {}) {
+export function formatDate(value = null, locale = DEFAULT_LOCALE, options = {}) {
   const date = toDate(value);
 
-  if (!date) return fallback;
+  if (!date) return DEFAULT_DATE_FALLBACK;
 
   try {
-    return getDateFormatter(locale, withTime, options).format(date);
+    return getDateFormatter(locale, options).format(date);
   } catch {
-    return fallback;
+    return DEFAULT_DATE_FALLBACK;
   }
 }
 
-export function formatDateTime(value, options = {}) {
-  return formatDate(value, {
-    ...safeObject(options),
-    withTime: true,
+export function formatDateOnly(value = null, locale = DEFAULT_LOCALE) {
+  return formatDate(value, locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
   });
 }
 
-export function formatDateOnly(value, options = {}) {
-  return formatDate(value, {
-    ...safeObject(options),
-    withTime: false,
+export function formatDateTime(value = null, locale = DEFAULT_LOCALE) {
+  return formatDate(value, locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
-export function formatRelativeDate(value, {
-  fallback = "Sin fecha",
-  nowMs = now(),
-} = {}) {
+export function formatRelativeDate(value = null) {
   const timestamp = toTimestamp(value);
 
-  if (!timestamp) return fallback;
+  if (!timestamp) return "Sin fecha";
 
-  const diff = timestamp - safeNumber(nowMs, now());
-  const abs = Math.abs(diff);
+  const diffMin = Math.round((timestamp - Date.now()) / 60000);
+  const absMin = Math.abs(diffMin);
 
-  const minute = 60 * 1000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
+  if (absMin < 1) return "Ahora mismo";
 
-  const future = diff > 0;
-
-  if (abs < minute) return future ? "En un momento" : "Hace un momento";
-
-  if (abs < hour) {
-    const minutes = Math.max(1, Math.floor(abs / minute));
-    return future ? `En ${minutes} min` : `Hace ${minutes} min`;
+  if (absMin < 60) {
+    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
   }
 
-  if (abs < day) {
-    const hours = Math.max(1, Math.floor(abs / hour));
-    return future ? `En ${hours} h` : `Hace ${hours} h`;
+  const hours = Math.round(absMin / 60);
+
+  if (hours < 24) {
+    return diffMin > 0 ? `En ${hours} h` : `Hace ${hours} h`;
   }
 
-  if (abs < day * 7) {
-    const days = Math.max(1, Math.floor(abs / day));
-    return future
+  const days = Math.round(hours / 24);
+
+  if (days <= 7) {
+    return diffMin > 0
       ? `En ${days} día${days === 1 ? "" : "s"}`
       : `Hace ${days} día${days === 1 ? "" : "s"}`;
   }
@@ -770,121 +750,78 @@ export function formatRelativeDate(value, {
   return formatDateOnly(value);
 }
 
-export function formatLastUpdate(value, options = {}) {
+export function formatLastUpdate(value = null) {
   const timestamp = toTimestamp(value);
 
   if (!timestamp) return "Sin fecha";
 
-  const diffHours = Math.abs(now() - timestamp) / 3600000;
+  const diffHours = Math.abs(Date.now() - timestamp) / 3600000;
 
-  return diffHours <= 72
-    ? formatRelativeDate(value, options)
-    : formatDateTime(value, options);
+  return diffHours <= 72 ? formatRelativeDate(value) : formatDateTime(value);
 }
 
 /* =========================================================
-   TOAST COMPAT OPCIONAL
+   TOAST COMPAT - EXPLICIT INSTANCE ONLY
 ========================================================= */
 
 export function normalizeToastType(type = "info") {
-  const key = normalizeKey(type);
+  const clean = normalizeKey(type || "info");
 
-  if (key === "warn") return "warning";
-  if (key === "load") return "loading";
+  if (["success", "ok", "done"].includes(clean)) return "success";
+  if (["error", "danger", "fail", "failed"].includes(clean)) return "error";
+  if (["warning", "warn", "alert"].includes(clean)) return "warning";
+  if (["info", "default", "neutral"].includes(clean)) return "info";
 
-  return ["success", "error", "warning", "info", "loading"].includes(key)
-    ? key
-    : "info";
+  return "info";
 }
 
-export function normalizeToastInput(message = "", type = "info", options = {}) {
-  if (isObject(message)) {
-    const payload = sanitizePayload(message);
-    const cleanPayload = safeObject(payload);
-
+export function normalizeToastInput(input = "", type = "info", options = {}) {
+  if (isObject(input)) {
     return {
-      message: safeText(first(cleanPayload.message, cleanPayload.text, cleanPayload.title, ""), ""),
-      type: normalizeToastType(first(cleanPayload.type, cleanPayload.variant, cleanPayload.level, type)),
-      options: {
-        ...safeObject(options),
-        ...cleanPayload,
-      },
+      message: safePublicText(
+        first(
+          input.message,
+          input.text,
+          input.title,
+          ""
+        ),
+        ""
+      ),
+      type: normalizeToastType(first(input.type, input.level, type)),
+      options: safeObject(first(input.options, input.meta, options), {}),
     };
   }
 
   return {
-    message: safeText(message, ""),
+    message: safePublicText(input, ""),
     type: normalizeToastType(type),
     options: safeObject(options),
   };
 }
 
-function callToastMethod(toast, type = "info", message = "", payload = {}) {
+export function showToast(toast = null, input = "", type = "info", options = {}) {
+  const normalized = normalizeToastInput(input, type, options);
+
+  if (!normalized.message) return false;
   if (!toast) return false;
 
-  const methodName = type === "warning" ? "warning" : type;
-  const altMethodName = type === "warning" ? "warn" : "";
-
   try {
-    const method = toast?.[methodName] || (altMethodName ? toast?.[altMethodName] : null);
-
-    if (isFunction(method)) {
-      method.call(toast, message, payload);
-      return true;
+    if (isFunction(toast.show)) {
+      return toast.show(normalized.message, normalized.type, normalized.options) !== false;
     }
-  } catch {
-    // probar show abajo
-  }
 
-  try {
-    if (isFunction(toast?.show)) {
-      toast.show(payload);
-      return true;
+    if (isFunction(toast.notify)) {
+      return toast.notify(normalized.message, normalized.type, normalized.options) !== false;
     }
-  } catch {
-    // probar función directa abajo
-  }
 
-  try {
     if (isFunction(toast)) {
-      toast(payload);
-      return true;
+      return toast(normalized.message, normalized.type, normalized.options) !== false;
     }
   } catch {
-    // noop
+    return false;
   }
 
   return false;
-}
-
-export function showToast(message = "", type = "info", options = {}) {
-  const normalized = normalizeToastInput(message, type, options);
-
-  if (!normalized.message) return false;
-
-  const opts = safeObject(normalized.options);
-  const toast = opts.toast || opts.Toast || opts.target || null;
-
-  if (!toast) return false;
-
-  const payload = sanitizePayload({
-    ...opts,
-    type: normalized.type,
-    message: redactTokenInText(normalized.message),
-  });
-
-  const cleanPayload = safeObject(payload);
-
-  delete cleanPayload.toast;
-  delete cleanPayload.Toast;
-  delete cleanPayload.target;
-
-  return callToastMethod(
-    toast,
-    normalized.type,
-    cleanPayload.message,
-    cleanPayload
-  );
 }
 
 /* =========================================================
@@ -892,9 +829,9 @@ export function showToast(message = "", type = "info", options = {}) {
 ========================================================= */
 
 export function sleep(ms = 0) {
-  return new Promise((resolve) => {
-    const delay = Math.max(0, safeNumber(ms, 0));
+  const delay = Math.max(0, safeInteger(ms, 0));
 
+  return new Promise((resolve) => {
     try {
       setTimeout(resolve, delay);
     } catch {
@@ -914,58 +851,26 @@ export function nextFrame() {
       // fallback abajo
     }
 
-    try {
-      setTimeout(resolve, 0);
-    } catch {
-      resolve();
-    }
+    sleep(0).then(resolve);
   });
 }
 
-export function afterPaint(callback = null) {
-  if (!isFunction(callback)) return false;
-
-  if (!isBrowser()) {
-    try {
-      callback();
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  try {
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        try {
-          callback();
-        } catch {
-          // noop
-        }
-      });
-    });
-
-    return true;
-  } catch {
-    try {
-      setTimeout(callback, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  }
+export async function afterPaint() {
+  await nextFrame();
+  await nextFrame();
 }
 
-export function withTimeout(promise, ms = 8000, label = "TIMEOUT") {
-  const timeoutMs = Math.max(0, safeNumber(ms, 8000));
-
+export function withTimeout(promise, ms = 15000, reason = "Operación agotada.") {
+  const timeoutMs = Math.max(1, safeInteger(ms, 15000));
   let timer = null;
 
   const timeout = new Promise((_, reject) => {
     try {
-      timer = setTimeout(() => reject(new Error(label)), timeoutMs);
+      timer = setTimeout(() => {
+        reject(new Error(safeText(reason, "Operación agotada.")));
+      }, timeoutMs);
     } catch {
-      reject(new Error(label));
+      reject(new Error(safeText(reason, "Operación agotada.")));
     }
   });
 

@@ -6,6 +6,7 @@
    - Contrato estático mínimo de Auth.
    - Backend real bajo /api/auth desde core/config.js.
    - /api/auth/me siempre privado.
+   - /api/auth/refresh público y sin Authorization.
    - Token param único desde core/config.js.
    - Rutas públicas reales actuales desde core/config.js.
    - Home visible de usuario: /@{user.slug}.
@@ -31,19 +32,25 @@ import {
 
   buildUserHomeRoute as coreBuildUserHomeRoute,
   canonicalRoutePath as coreCanonicalRoutePath,
+  endpointPathFromUrlLike as coreEndpointPathFromUrlLike,
   getUserScopedRouteInfo as coreGetUserScopedRouteInfo,
   isBlockedRoutePath as coreIsBlockedRoutePath,
   isUserHomeRoute as coreIsUserHomeRoute,
+  normalizeEndpointPath as coreNormalizeEndpointPath,
   normalizeRoutePath as coreNormalizeRoutePath,
   normalizeUserSlug as coreNormalizeUserSlug,
   routePathFromUrlLike as coreRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const AUTH_CONSTANTS_VERSION = "auth.constants.v5";
+export const AUTH_CONSTANTS_VERSION = "auth.constants.v6";
 export const AUTH_MODULE_VERSION = AUTH_CONSTANTS_VERSION;
 
 const DEFAULT_ROUTE = ROUTES.home || ROUTES.root || "/";
 const USER_PREFIX = USER_HOME_PREFIX || "/@";
+
+/* =========================================================
+   INTERNAL
+========================================================= */
 
 function freeze(value) {
   try {
@@ -51,6 +58,17 @@ function freeze(value) {
   } catch {
     return value;
   }
+}
+
+function unique(values = []) {
+  return [
+    ...new Set(
+      (Array.isArray(values) ? values : [values])
+        .flat(Infinity)
+        .map((item) => safeText(item, ""))
+        .filter(Boolean)
+    ),
+  ];
 }
 
 /* =========================================================
@@ -96,7 +114,7 @@ export function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
    PATH HELPERS
 ========================================================= */
 
-function fallbackPathFromUrlLike(value = "") {
+function fallbackRoutePathFromUrlLike(value = "") {
   const raw = safeText(value, "");
 
   if (!raw) return "";
@@ -116,11 +134,34 @@ function fallbackPathFromUrlLike(value = "") {
   }
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return DEFAULT_ROUTE;
+  if (/[\r\n\t\\]/.test(raw)) return DEFAULT_ROUTE;
 
   return raw;
 }
 
-function fallbackNormalizeRoutePath(path = "") {
+function fallbackEndpointPathFromUrlLike(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+
+  if (raw.startsWith("//")) return "";
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw);
+      return `${url.pathname || "/"}${url.search || ""}`;
+    } catch {
+      return "";
+    }
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+
+  return raw.startsWith("/") ? raw : `/${raw}`;
+}
+
+function fallbackNormalizePath(path = "") {
   let value = safeText(path, "");
 
   if (!value) return "";
@@ -143,6 +184,8 @@ function fallbackNormalizeRoutePath(path = "") {
   } else if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
     return DEFAULT_ROUTE;
   }
+
+  if (/[\r\n\t\\]/.test(value)) return DEFAULT_ROUTE;
 
   value = value
     .split("?")[0]
@@ -179,24 +222,27 @@ export function pathFromUrlLike(value = "") {
   try {
     return coreRoutePathFromUrlLike(value) || "";
   } catch {
-    return fallbackPathFromUrlLike(value);
+    return fallbackRoutePathFromUrlLike(value);
   }
 }
 
 export function normalizeEndpointPath(path = "") {
-  const raw = pathFromUrlLike(path);
-
-  if (!raw) return "";
-
   try {
-    return coreNormalizeRoutePath(raw) || "";
+    const raw = coreEndpointPathFromUrlLike(path) || "";
+    return raw ? coreNormalizeEndpointPath(raw) || "" : "";
   } catch {
-    return fallbackNormalizeRoutePath(raw);
+    const raw = fallbackEndpointPathFromUrlLike(path);
+    return raw ? fallbackNormalizePath(raw) : "";
   }
 }
 
 export function normalizeRoutePath(path = "") {
-  return normalizeEndpointPath(path);
+  try {
+    const raw = pathFromUrlLike(path);
+    return raw ? coreNormalizeRoutePath(raw) || "" : "";
+  } catch {
+    return fallbackNormalizePath(path);
+  }
 }
 
 function isBlockedAuthRoute(path = "") {
@@ -386,8 +432,13 @@ export const ACTIVATE_ACCOUNT_ENDPOINT =
   CORE_AUTH_ENDPOINTS.activateAccount ||
   CORE_AUTH_ENDPOINTS.activate;
 
-export const REQUEST_RESET_ENDPOINT = CORE_AUTH_ENDPOINTS.requestPasswordReset;
-export const CONFIRM_RESET_ENDPOINT = CORE_AUTH_ENDPOINTS.confirmPasswordReset;
+export const REQUEST_RESET_ENDPOINT =
+  CORE_AUTH_ENDPOINTS.requestPasswordReset ||
+  CORE_AUTH_ENDPOINTS.passwordRequest;
+
+export const CONFIRM_RESET_ENDPOINT =
+  CORE_AUTH_ENDPOINTS.confirmPasswordReset ||
+  CORE_AUTH_ENDPOINTS.passwordReset;
 
 export const AUTH_ENDPOINTS = freeze({
   login: LOGIN_ENDPOINT,
@@ -474,6 +525,7 @@ export const AUTH_PRIVATE_REQUEST_OPTIONS = freeze({
 export const AUTH_REFRESH_REQUEST_OPTIONS = freeze({
   ...AUTH_PUBLIC_REQUEST_OPTIONS,
   silent: true,
+  cache: "no-store",
 });
 
 export function getPublicAuthRequestOptions(extra = {}) {
@@ -537,14 +589,21 @@ export const AUTH_FAILURE_CODES = freeze([
   "MISSING_CREDENTIALS",
   "ACCOUNT_DISABLED",
   "USER_DISABLED",
+  "USER_INVALID",
+  "USER_INACTIVE",
+  "USER_NOT_AVAILABLE",
+  "USER_EMAIL_UNVERIFIED",
+
   "UNAUTHORIZED",
   "FORBIDDEN",
 
   "TOKEN_INVALID",
   "INVALID_TOKEN",
+  "INVALID_TOKEN_FORMAT",
   "TOKEN_EXPIRED",
   "TOKEN_MISSING",
   "MISSING_TOKEN",
+  "TOKEN_VERSION_MISMATCH",
 
   "SESSION_REQUIRED",
   "SESSION_EXPIRED",
@@ -552,6 +611,11 @@ export const AUTH_FAILURE_CODES = freeze([
   "SESSION_INVALID",
   "SESSION_NOT_FOUND",
   "SESSION_USER_MISMATCH",
+  "SESSION_ID_MISMATCH",
+  "SESSION_TOKEN_VERSION_MISMATCH",
+  "SESSION_TOKEN_MISMATCH",
+
+  "INVALID_REFRESH_TOKEN",
 
   "LOGIN_FAILED",
   "AUTH_FAILED",
@@ -565,6 +629,7 @@ export const AUTH_SUCCESS_STATUSES = freeze([
   "active",
   "valid",
   "session",
+  "restored",
   "refreshed",
 ]);
 
@@ -905,6 +970,7 @@ export function getAuthConstantsSnapshot() {
       userSlugHome: true,
       preservesAtSlug: true,
       configOwnsRouteParsing: true,
+      configOwnsEndpointParsing: true,
       configOwnsUserSlug: true,
       configOwnsBlockedRoutes: true,
 

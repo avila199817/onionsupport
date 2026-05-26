@@ -41,6 +41,7 @@ import {
 
 import {
   DEFAULT_HOME_RECENT_LIMIT,
+
   normalizeHomeDashboard,
   normalizeHomeWidgets,
   normalizeHomeTickets,
@@ -49,22 +50,38 @@ import {
   normalizeHomeClients,
   normalizeHomeActivityList,
   buildHomeActivityFromCollections,
+
   findHomeTicketById,
   resolveHomeTicketInvoices,
   resolveHomeTicketTechnician,
+
+  getHomeTicketId,
+  getHomeTicketSubject,
+  getHomeTicketDescription,
   getHomeTicketStatusKey as modelTicketStatusKey,
   getHomeTicketStatusLabel as modelTicketStatusLabel,
   getHomeTicketPriorityKey as modelTicketPriorityKey,
+  getHomeTicketPriorityLabel as modelTicketPriorityLabel,
+  getHomeTicketCategory,
+  getHomeTicketCreatedAt,
+  getHomeTicketUpdatedAt,
+
+  getHomeInvoiceId,
+  getHomeInvoiceAmount as modelGetInvoiceAmount,
+  getHomeInvoicePaidAmount as modelGetInvoicePaidAmount,
+  getHomeInvoicePendingAmount as modelGetInvoicePendingAmount,
+  getHomeInvoiceCurrency as modelGetInvoiceCurrency,
   getHomeInvoiceStatusKey as modelInvoiceStatusKey,
   getHomeInvoiceStatusLabel as modelInvoiceStatusLabel,
   isHomeInvoicePaid as modelIsInvoicePaid,
   isHomeInvoicePendingLike as modelIsInvoicePendingLike,
-  getHomeInvoiceAmount as modelGetInvoiceAmount,
-  getHomeInvoicePaidAmount as modelGetInvoicePaidAmount,
-  getHomeInvoicePendingAmount as modelGetInvoicePendingAmount,
+
+  getHomeUserId,
+  getHomeClientId,
+  getHomeWidgetId,
 } from "./home.model.js";
 
-export const HOME_SELECTORS_VERSION = "home.selectors.v9";
+export const HOME_SELECTORS_VERSION = "home.selectors.v10.model-backed-light";
 
 /* =========================================================
    CONSTANTS
@@ -81,20 +98,6 @@ const ACTIONS = Object.freeze({
   OPEN_TICKET_DETAIL: "open_ticket_detail",
   CLOSE_TICKET_DETAIL: "close_ticket_detail",
 });
-
-const REQUIRED_ROUTE_FALLBACKS = Object.freeze({
-  incidencias: "/incidencias",
-  facturas: "/facturas",
-  clientes: "/clientes",
-  usuarios: "/usuarios",
-});
-
-const OPTIONAL_ROUTE_NAMES = Object.freeze([
-  "usuarios",
-  "cuenta",
-  "ajustes",
-  "search",
-]);
 
 export const VALID_ROLES = Object.freeze(["admin", "user"]);
 
@@ -132,21 +135,15 @@ export const INVOICE_PENDING_KEYS = Object.freeze([
   INVOICE_STATUS_KEYS.PARTIAL,
 ]);
 
-const ADMIN_ACTIVITY_TYPES = new Set([
-  "client",
-  "cliente",
-  "customer",
-  "user",
-  "usuario",
-  "member",
-]);
-
 const RAW_KEYS = new Set([
   "raw",
   "data",
   "payload",
   "response",
   "body",
+  "request",
+  "headers",
+  "config",
 ]);
 
 const COSMOS_META_KEYS = new Set([
@@ -161,12 +158,14 @@ const COSMOS_META_KEYS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni|ipRaw|userAgent/i;
+  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|correo|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|bank|cuenta|account|ipRaw|ip|userAgent/i;
 
 const SENSITIVE_QUERY_RE =
-  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i;
 
 const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
+const JWT_RE =
+  /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
 
 const ADMIN_ENTITY_RE =
   /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
@@ -280,7 +279,6 @@ export function clampNumber(value = 0, min = 0, max = Number.POSITIVE_INFINITY) 
 
 export function roundMoney(value = 0) {
   const number = safeNumber(value, NaN);
-
   return Number.isFinite(number)
     ? Math.round((number + Number.EPSILON) * 100) / 100
     : 0;
@@ -333,10 +331,11 @@ export function isSameIdentity(a = "", b = "") {
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(JWT_RE, "***");
 }
 
 function isSensitiveKey(key = "") {
@@ -415,6 +414,7 @@ function safeImageSrc(value = "") {
   const raw = safeText(value, "");
 
   if (!raw) return "";
+  if (raw.length > 2048) return "";
   if (hasSensitiveQuery(raw)) return "";
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (/^(?:data|blob|javascript|vbscript|file):/i.test(raw)) return "";
@@ -549,12 +549,12 @@ function routeFromCore(name = "", fallback = "") {
 }
 
 export const HOME_ROUTES = Object.freeze({
-  INCIDENCIAS: routeFromCore("incidencias", REQUIRED_ROUTE_FALLBACKS.incidencias),
-  FACTURAS: routeFromCore("facturas", REQUIRED_ROUTE_FALLBACKS.facturas),
-  CLIENTES: routeFromCore("clientes", REQUIRED_ROUTE_FALLBACKS.clientes),
-  USUARIOS: routeFromCore("usuarios", REQUIRED_ROUTE_FALLBACKS.usuarios),
-  CUENTA: routeFromCore("cuenta", ""),
-  AJUSTES: routeFromCore("ajustes", ""),
+  INCIDENCIAS: routeFromCore("incidencias", "/incidencias"),
+  FACTURAS: routeFromCore("facturas", "/facturas"),
+  CLIENTES: routeFromCore("clientes", "/clientes"),
+  USUARIOS: routeFromCore("usuarios", ""),
+  CUENTA: routeFromCore("cuenta", "/cuenta"),
+  AJUSTES: routeFromCore("ajustes", "/ajustes"),
   SEARCH: routeFromCore("search", ""),
 });
 
@@ -583,36 +583,6 @@ function isAdminOnlyRoute(route = "") {
 
 function isAdminEntityValue(value = "") {
   return ADMIN_ENTITY_RE.test(String(value || "").toLowerCase());
-}
-
-function sanitizeSummaryForRole(summary = {}, admin = false) {
-  const output = { ...safeObject(summary) };
-
-  if (!admin) {
-    output.usersCount = 0;
-    output.usuariosCount = 0;
-    output.totalUsers = 0;
-    output.totalUsuarios = 0;
-    output.usersTotal = 0;
-    output.usuariosTotal = 0;
-    output.visibleUsersCount = 0;
-    output.visibleUsuariosCount = 0;
-
-    output.clientsCount = 0;
-    output.clientesCount = 0;
-    output.customersCount = 0;
-    output.totalClients = 0;
-    output.totalClientes = 0;
-    output.totalCustomers = 0;
-    output.clientsTotal = 0;
-    output.clientesTotal = 0;
-    output.customersTotal = 0;
-    output.visibleClientsCount = 0;
-    output.visibleClientesCount = 0;
-    output.visibleCustomersCount = 0;
-  }
-
-  return sanitizeObject(output);
 }
 
 /* =========================================================
@@ -718,6 +688,7 @@ export function toTimestamp(value = null) {
       Number(min),
       Number(ss)
     );
+
     const time = date.getTime();
     return Number.isNaN(time) ? 0 : time;
   }
@@ -829,6 +800,20 @@ export function formatLastUpdate(value = null) {
   return diffHours <= 72 ? formatRelativeDate(value) : formatDateTime(value);
 }
 
+export function getInitials(value = "", fallback = "ON") {
+  const text = normalizeWhitespace(visualText(value, ""));
+
+  if (!text) return fallback;
+
+  const parts = text.split(/\s+/).filter(Boolean);
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase() || fallback;
+  }
+
+  return `${parts[0]?.[0] || ""}${parts[parts.length - 1]?.[0] || ""}`.toUpperCase() || fallback;
+}
+
 /* =========================================================
    USER / ROLE
 ========================================================= */
@@ -865,9 +850,9 @@ function roleFromAdminFlag(value = {}) {
   if (
     source.admin === true ||
     source.isAdmin === true ||
-    source.meta?.admin === true ||
-    source.dashboard?.admin === true ||
-    source.dashboard?.meta?.admin === true
+      source.meta?.admin === true ||
+      source.dashboard?.admin === true ||
+      source.dashboard?.meta?.admin === true
   ) {
     return "admin";
   }
@@ -1017,40 +1002,21 @@ function publicUser(user = {}) {
       raw.media?.picture,
       raw.media?.pictureUrl,
       raw.media?.image,
-      raw.media?.imageUrl,
-      ""
+      raw.media?.imageUrl
     )
   );
 
-  const initials = safeText(
-    first(
-      raw.initials,
-      raw.iniciales,
-      getInitials(displayName)
-    ),
-    getInitials(displayName)
-  )
-    .slice(0, 3)
-    .toUpperCase();
-
   return sanitizeObject({
+    ...raw,
+
     hasUser: raw.hasUser !== false,
 
-    id: safeText(first(raw.id, raw.userId, raw.uid, raw.sub), ""),
-    userId: safeText(first(raw.userId, raw.id, raw.uid, raw.sub), ""),
-
-    username: safeText(first(raw.username, raw.userName), ""),
-    userName: safeText(first(raw.userName, raw.username), ""),
-    slug: safeText(first(raw.slug, raw.lookup?.slug, raw.profile?.slug), ""),
-
     displayName,
-    fullName: displayName,
     name: displayName,
-    nombre: displayName,
+    fullName: displayName,
 
-    hasAvatar: Boolean(avatarUrl),
-    avatar: avatarUrl,
     avatarUrl,
+    avatar: avatarUrl,
     photoUrl: avatarUrl,
     photoURL: avatarUrl,
     picture: avatarUrl,
@@ -1062,13 +1028,18 @@ function publicUser(user = {}) {
     imagen: avatarUrl,
     imagenUrl: avatarUrl,
 
-    initials,
-    iniciales: initials,
+    initials: safeText(first(raw.initials, raw.iniciales, getInitials(displayName, "U")), "U")
+      .slice(0, 3)
+      .toUpperCase(),
 
     role,
     rol: role,
     roles: [role],
-    roleLabel: safeText(first(raw.roleLabel, role === "admin" ? "Administrador" : "Estándar"), role === "admin" ? "Administrador" : "Estándar"),
+
+    roleLabel: safeText(
+      first(raw.roleLabel, role === "admin" ? "Administrador" : "Estándar"),
+      role === "admin" ? "Administrador" : "Estándar"
+    ),
 
     isAdmin: role === "admin",
     isUser: role === "user",
@@ -1088,90 +1059,47 @@ export function getRole(input = {}) {
   return (
     normalizeRole(
       first(
+        user.role,
+        user.rol,
+        user.roles,
+
         data.role,
         data.rol,
-        data.currentRole,
-        data.userRole,
         data.roles,
 
         state.role,
         state.rol,
-        state.userRole,
         state.roles,
-
-        user.role,
-        user.rol,
-        user.roles,
 
         dashboard.role,
         dashboard.rol,
         dashboard.roles,
         dashboard.meta?.role,
-        dashboard.meta?.rol,
-        dashboard.meta?.roles,
+
         ""
       )
     ) ||
     roleFromAdminFlag(data) ||
     roleFromAdminFlag(state) ||
-    roleFromAdminFlag(user) ||
     roleFromAdminFlag(dashboard) ||
     "user"
   );
 }
 
 export function canSeeUsersModule(input = {}) {
-  return isAdminRole(getRole(input));
+  return isAdminRole(getRole(input)) && Boolean(HOME_ROUTES.USUARIOS);
 }
 
 export function canSeeClientsModule(input = {}) {
-  return isAdminRole(getRole(input));
+  return isAdminRole(getRole(input)) && Boolean(HOME_ROUTES.CLIENTES);
 }
 
 export function getDisplayName(input = {}) {
-  const user = getUser(input);
-
-  return firstVisual(
-    [
-      user.displayName,
-      user.fullName,
-      user.name,
-      user.nombre,
-      user.username,
-      user.slug,
-    ],
-    "Usuario"
-  );
+  return getUser(input).displayName || "Usuario";
 }
 
 export function getAvatarUrl(input = {}) {
-  const user = getUser(input);
-
-  return safeImageSrc(
-    first(
-      user.avatarUrl,
-      user.avatar,
-      user.photoUrl,
-      user.photoURL,
-      user.picture,
-      user.pictureUrl,
-      user.image,
-      user.imageUrl,
-      user.fotoUrl,
-      user.imagenUrl,
-      ""
-    )
-  );
-}
-
-export function getInitials(value = "") {
-  const clean = visualText(value, "ON");
-  const parts = clean.split(" ").filter(Boolean);
-
-  if (!parts.length) return "ON";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-
-  return `${parts[0]?.[0] || ""}${parts[parts.length - 1]?.[0] || ""}`.toUpperCase() || "ON";
+  return getUser(input).avatarUrl || "";
 }
 
 /* =========================================================
@@ -1179,315 +1107,280 @@ export function getInitials(value = "") {
 ========================================================= */
 
 export function getSummary(input = {}) {
+  const dashboard = getNormalizedDashboard(input);
   const data = safeObject(input);
-  const dashboard = getDashboard(data);
-  const admin = isAdminRole(getRole(data));
+  const state = safeObject(data.state);
+  const admin = isAdminRole(getRole(input));
 
-  return sanitizeSummaryForRole(
-    safeObject(
-      first(
-        data.summary,
-        data.stats,
-        data.metrics,
-        data.totals,
-        data.counts,
-        data.state?.summary,
-        data.state?.stats,
-        dashboard.summary,
-        dashboard.stats,
-        dashboard.metrics,
-        dashboard.totals,
-        dashboard.counts,
-        {}
-      )
+  const summary = safeObject(
+    first(
+      data.summary,
+      state.summary,
+      dashboard.summary,
+      dashboard.stats,
+      dashboard.metrics,
+      dashboard.totals,
+      dashboard.counts,
+      {}
+    )
+  );
+
+  if (admin) return sanitizeObject(summary);
+
+  return sanitizeObject({
+    ...summary,
+
+    usersCount: 0,
+    usuariosCount: 0,
+    totalUsers: 0,
+    totalUsuarios: 0,
+    usersTotal: 0,
+    usuariosTotal: 0,
+
+    clientsCount: 0,
+    clientesCount: 0,
+    customersCount: 0,
+    totalClients: 0,
+    totalClientes: 0,
+    totalCustomers: 0,
+    clientsTotal: 0,
+    clientesTotal: 0,
+    customersTotal: 0,
+  });
+}
+
+export function getSummaryValue(summary = {}, keys = [], fallback = 0) {
+  const source = safeObject(summary);
+
+  return safeNumber(
+    first(
+      ...safeArray(keys).map((key) => source[key]),
+      fallback
     ),
-    admin
+    fallback
   );
 }
 
-export function getSummaryValue(input = {}, keys = [], fallback = null) {
-  const data = safeObject(input);
-  const summary = getSummary(data);
-  const dashboard = getDashboard(data);
-  const sources = [summary, dashboard, data.state, data];
-
-  for (const key of safeArray(keys)) {
-    for (const source of sources) {
-      const value = String(key).includes(".") ? getPath(source, key) : source?.[key];
-
-      if (value !== null && value !== undefined && value !== "") return value;
-    }
-  }
-
-  return fallback;
-}
-
-export function getBestSummaryNumber(input = {}, keys = [], fallback = 0, extraCandidates = []) {
-  const values = [
-    ...safeArray(keys).map((key) => getSummaryValue(input, [key], null)),
-    ...safeArray(extraCandidates),
-    fallback,
-  ];
-
-  const numbers = values
-    .map((value) => safeNumber(value, NaN))
-    .filter(Number.isFinite);
-
-  if (!numbers.length) return safeNumber(fallback, 0);
-
-  const positive = numbers.filter((value) => value > 0);
-  return positive.length ? Math.max(...positive) : Math.max(...numbers);
+export function getBestSummaryNumber(input = {}, keys = [], fallback = 0) {
+  return getSummaryValue(getSummary(input), keys, fallback);
 }
 
 /* =========================================================
    COLLECTIONS
 ========================================================= */
 
-function collection(input = {}, names = []) {
-  const data = safeObject(input);
-  const dashboard = getDashboard(data);
-  const state = safeObject(data.state);
-
-  for (const name of safeArray(names)) {
-    const value = first(data[name], state[name], dashboard[name]);
-
-    if (Array.isArray(value)) return value;
-
-    if (isObject(value)) {
-      const nested = first(value.items, value.rows, value.results, value.records);
-      if (Array.isArray(nested)) return nested;
-    }
-  }
-
-  return [];
-}
-
-function countFrom(input = {}, names = [], fallback = 0) {
-  const data = safeObject(input);
-  const dashboard = getDashboard(data);
-  const summary = getSummary(data);
-  const state = safeObject(data.state);
-  const candidates = [];
-
-  for (const name of safeArray(names)) {
-    candidates.push(
-      data[name],
-      state[name],
-      dashboard[name],
-      dashboard.meta?.[name],
-      summary[name]
-    );
-  }
-
-  return Math.max(
-    safeNumber(fallback, 0),
-    ...candidates.map((value) => safeNumber(value, fallback))
-  );
-}
-
-function activityVisibleForRole(input = {}, item = {}) {
-  if (isAdminRole(getRole(input))) return true;
-
-  const type = normalizeKey(first(item.type, item.kind, item.category, ""));
-  const route = normalizeRoute(first(item.route, item.href, item.link, item.to, ""));
-  const identity = safeText(
-    first(
-      item.entity,
-      item.resource,
-      item.collection,
-      item.targetType,
-      item.meta?.entity,
-      item.meta?.type,
-      type,
-      route,
-      ""
-    ),
-    ""
-  );
-
-  if (ADMIN_ACTIVITY_TYPES.has(type)) return false;
-  if (isAdminOnlyRoute(route)) return false;
-  if (isAdminEntityValue(identity)) return false;
-
-  return true;
-}
-
-export function getCollections(input = {}) {
-  const admin = isAdminRole(getRole(input));
-  const rawInvoices = collection(input, ["invoices", "facturas"]);
-  const invoices = normalizeHomeInvoices(rawInvoices);
-
-  const users = admin ? normalizeHomeUsers(collection(input, ["users", "usuarios"])) : [];
-  const clients = admin ? normalizeHomeClients(collection(input, ["clients", "clientes", "customers"])) : [];
-
-  const tickets = normalizeHomeTickets(collection(input, ["tickets", "incidencias"]), {
-    invoices,
-    users: admin ? users : [],
-  });
-
-  const rawActivity = normalizeHomeActivityList(
-    collection(input, ["activity", "activities", "recent", "recentActivity"])
-  );
-
-  const activity = rawActivity.filter((item) => activityVisibleForRole(input, item));
-
-  return {
-    tickets,
-    incidencias: tickets,
-    invoices,
-    facturas: invoices,
-    users,
-    usuarios: users,
-    clients,
-    clientes: clients,
-    activity,
-
-    ticketsRemoteCount: countFrom(
-      input,
-      ["totalTickets", "ticketsTotal", "incidenciasTotal", "totalIncidencias", "ticketsCount", "incidenciasCount"],
-      tickets.length
-    ),
-
-    invoicesRemoteCount: countFrom(
-      input,
-      ["totalInvoices", "invoicesTotal", "facturasTotal", "totalFacturas", "invoicesCount", "facturasCount"],
-      invoices.length
-    ),
-
-    usersRemoteCount: admin
-      ? countFrom(input, ["usersCount", "usuariosCount", "totalUsers", "totalUsuarios"], users.length)
-      : 0,
-
-    clientsRemoteCount: admin
-      ? countFrom(input, ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes", "totalCustomers"], clients.length)
-      : 0,
-  };
-}
-
 export function unwrapCollectionPayload(value = null) {
-  if (Array.isArray(value)) {
-    return {
-      items: value,
-      total: value.length,
-      count: value.length,
-    };
-  }
-
-  return safeObject(value);
-}
-
-export function normalizeCollection(value = null) {
   if (Array.isArray(value)) return value;
 
-  const object = safeObject(value);
-  return safeArray(first(object.items, object.rows, object.results, object.records, []));
+  const object = safeObject(value, null);
+
+  if (!object) return [];
+
+  return safeArray(
+    first(
+      object.items,
+      object.rows,
+      object.records,
+      object.results,
+      object.docs,
+      object.documents,
+      object.value,
+      object.list,
+      Array.isArray(object.data) ? object.data : null,
+      Array.isArray(object.payload) ? object.payload : null,
+      Array.isArray(object.result) ? object.result : null,
+      Array.isArray(object.response) ? object.response : null,
+      []
+    )
+  );
 }
 
 export function getRemoteCountFromCollection(value = null, fallback = 0) {
-  const object = safeObject(value);
+  if (Array.isArray(value)) return Math.max(value.length, fallback);
+
+  const object = safeObject(value, null);
+
+  if (!object) return fallback;
 
   return Math.max(
-    safeNumber(fallback, 0),
-    safeNumber(first(object.totalCount, object.remoteCount, object.total, object.count, fallback), fallback)
+    fallback,
+    safeNumber(
+      first(
+        object.total,
+        object.count,
+        object.totalCount,
+        object.remoteCount,
+        object.meta?.total,
+        object.meta?.count,
+        object.meta?.totalCount,
+        object.pagination?.total,
+        object.pagination?.totalCount,
+        fallback
+      ),
+      fallback
+    )
   );
 }
 
+export function normalizeCollection(value = null, aliases = []) {
+  const items = unwrapCollectionPayload(value);
+
+  if (items.length) {
+    return {
+      items,
+      total: getRemoteCountFromCollection(value, items.length),
+      totalCount: getRemoteCountFromCollection(value, items.length),
+      remoteCount: getRemoteCountFromCollection(value, items.length),
+      visibleCount: items.length,
+    };
+  }
+
+  const object = safeObject(value, null);
+
+  if (object) {
+    for (const alias of safeArray(aliases)) {
+      const candidate = object[alias];
+
+      if (Array.isArray(candidate)) {
+        return normalizeCollection(candidate, aliases);
+      }
+
+      if (isObject(candidate)) {
+        const normalized = normalizeCollection(candidate, aliases);
+
+        if (normalized.items.length || normalized.remoteCount > 0) {
+          return normalized;
+        }
+      }
+    }
+  }
+
+  return {
+    items: [],
+    total: 0,
+    totalCount: 0,
+    remoteCount: 0,
+    visibleCount: 0,
+  };
+}
+
 export function resolveCollectionSource(input = {}, aliases = []) {
-  return collection(input, aliases);
+  const data = safeObject(input);
+  const state = safeObject(data.state);
+  const dashboard = getNormalizedDashboard(input);
+
+  const sources = [
+    data,
+    state,
+    dashboard,
+    dashboard.collections,
+    dashboard.resources,
+    dashboard.lists,
+  ].filter(hasKeys);
+
+  for (const source of sources) {
+    for (const alias of safeArray(aliases)) {
+      const value = source?.[alias];
+
+      if (Array.isArray(value)) return normalizeCollection(value, aliases);
+
+      if (isObject(value)) {
+        const normalized = normalizeCollection(value, aliases);
+
+        if (normalized.items.length || normalized.remoteCount > 0) {
+          return normalized;
+        }
+      }
+    }
+  }
+
+  return normalizeCollection([], aliases);
 }
 
 /* =========================================================
    WIDGETS
 ========================================================= */
 
-function widgetVisibleForRole(input = {}, widget = {}) {
-  if (isAdminRole(getRole(input))) return true;
+export function getWidgets(input = {}) {
+  const dashboard = getNormalizedDashboard(input);
+  const admin = isAdminRole(getRole(input));
 
-  const route = getWidgetRoute(widget);
-  if (isAdminOnlyRoute(route)) return false;
-
-  const identity = safeText(
+  return normalizeHomeWidgets(
     first(
-      widget.entity,
-      widget.resource,
-      widget.collection,
-      widget.type,
-      widget.kind,
-      widget.variant,
-      widget.category,
-      widget.widgetId,
-      widget.id,
-      widget.key,
-      widget.slug,
-      getWidgetId(widget),
-      getWidgetType(widget),
-      getWidgetTitle(widget),
-      route,
-      ""
+      input.widgets,
+      input.state?.widgets,
+      dashboard.widgets,
+      dashboard.cards,
+      dashboard.kpis,
+      dashboard.blocks,
+      []
     ),
-    ""
+    admin
+  );
+}
+
+export function getWidgetId(item = {}) {
+  return getHomeWidgetId(item);
+}
+
+export function getWidgetTitle(item = {}) {
+  return safeText(first(item.label, item.title, item.name), "Métrica");
+}
+
+export function getWidgetText(item = {}) {
+  return safeText(first(item.text, item.description, item.subtitle), "");
+}
+
+export function getWidgetValue(item = {}) {
+  return first(item.value, item.count, item.total, 0);
+}
+
+export function getWidgetTrend(item = {}) {
+  return safeText(first(item.trend, item.delta, item.change), "");
+}
+
+export function getWidgetType(item = {}) {
+  return normalizeKey(first(item.type, item.kind, item.modifier, item.variant, "widget"));
+}
+
+export function getWidgetRoute(item = {}) {
+  const explicit = normalizeRoute(first(item.route, item.href, item.to, ""));
+
+  if (explicit) return explicit;
+
+  const identity = normalizeKey(
+    [
+      item.id,
+      item.key,
+      item.type,
+      item.kind,
+      item.modifier,
+      item.iconName,
+      item.label,
+      item.title,
+      item.text,
+    ]
+      .filter(Boolean)
+      .join(" ")
   );
 
-  return !isAdminEntityValue(identity);
-}
-
-export function getWidgets(input = {}) {
-  return normalizeHomeWidgets(collection(input, ["widgets", "cards", "kpis", "blocks"]))
-    .filter((widget) => widgetVisibleForRole(input, widget));
-}
-
-export function getWidgetId(widget = {}) {
-  return safeText(first(widget.widgetId, widget.widgetKey, widget.id, widget.key, widget.slug, widget.code), "");
-}
-
-export function getWidgetTitle(widget = {}) {
-  return safeText(first(widget.title, widget.name, widget.label, widget.heading), "Bloque");
-}
-
-export function getWidgetText(widget = {}) {
-  return safeText(first(widget.description, widget.descripcion, widget.subtitle, widget.text, widget.summary), "");
-}
-
-export function getWidgetValue(widget = {}) {
-  return first(widget.value, widget.total, widget.amount, widget.count, widget.metric, "—");
-}
-
-export function getWidgetTrend(widget = {}) {
-  return first(widget.trend, widget.delta, widget.change, widget.variation, "");
-}
-
-export function getWidgetType(widget = {}) {
-  return normalizeKey(first(widget.type, widget.kind, widget.variant, widget.category, "widget"));
-}
-
-export function getWidgetRoute(widget = {}) {
-  return normalizeRoute(first(widget.route, widget.href, widget.link, widget.to, ""));
-}
-
-export function getWidgetNumericValue(input = {}, matchers = [], fallback = null) {
-  const aliases = safeArray(matchers).map(normalizeKey).filter(Boolean);
-
-  for (const widget of getWidgets(input)) {
-    const text = [
-      getWidgetId(widget),
-      getWidgetTitle(widget),
-      getWidgetText(widget),
-      widget.key,
-      widget.slug,
-      widget.type,
-      widget.kind,
-      widget.label,
-    ]
-      .map(normalizeKey)
-      .join(" ");
-
-    if (!aliases.some((alias) => text.includes(alias))) continue;
-
-    const value = safeNumber(getWidgetValue(widget), NaN);
-    if (Number.isFinite(value)) return value;
+  if (identity.includes("factur") || identity.includes("invoice") || identity.includes("billing")) {
+    return HOME_ROUTES.FACTURAS;
   }
 
-  return fallback;
+  if (identity.includes("cliente") || identity.includes("client") || identity.includes("customer")) {
+    return HOME_ROUTES.CLIENTES;
+  }
+
+  if (identity.includes("usuario") || identity.includes("user") || identity.includes("member")) {
+    return HOME_ROUTES.USUARIOS;
+  }
+
+  return HOME_ROUTES.INCIDENCIAS;
+}
+
+export function getWidgetNumericValue(item = {}) {
+  return safeNumber(getWidgetValue(item), 0);
 }
 
 /* =========================================================
@@ -1495,55 +1388,27 @@ export function getWidgetNumericValue(input = {}, matchers = [], fallback = null
 ========================================================= */
 
 export function getTicketIdentity(item = {}) {
-  return safeText(
-    first(
-      item.ticketId,
-      item.incidenciaId,
-      item.code,
-      item.numero,
-      item.ticketCode,
-      item.entityId,
-      item.id
-    ),
-    ""
-  );
+  return getTicketId(item);
 }
 
 export function getTicketId(item = {}) {
-  return getTicketIdentity(item) || "INC-SIN-ID";
+  return getHomeTicketId(item);
 }
 
-export function getTicketUniqueKey(item = {}, index = 0) {
-  return getTicketIdentity(item) || `${getTicketSubject(item)}:${getTicketCreatedAt(item)}:${index}`;
+export function getTicketUniqueKey(item = {}) {
+  return normalizeKey(getTicketId(item));
 }
 
 export function getTicketSubject(item = {}) {
-  return safeText(first(item.subject, item.title, item.asunto, item.name, item.preview), "Incidencia sin asunto");
+  return getHomeTicketSubject(item);
 }
 
 export function getTicketDescription(item = {}) {
-  return safeText(first(item.description, item.descripcion, item.preview, item.message, item.body, item.text), "Sin descripción.");
+  return getHomeTicketDescription(item);
 }
 
 export function getTicketOwnerName(item = {}) {
-  return firstVisual(
-    [
-      item.clientName,
-      item.clienteNombre,
-      item.customerName,
-      item.requesterName,
-      item.userName,
-      item.ownerName,
-      item.requesterSnapshot?.name,
-      item.requesterSnapshot?.displayName,
-      item.cliente?.nombreContacto,
-      item.cliente?.nombre,
-      item.client?.name,
-      item.customer?.name,
-      item.user?.name,
-    ],
-    getTicketSubject(item)
-  );
+  return visualText(first(item.ownerName, item.requesterName, item.clientName, item.userName), "Usuario");
 }
 
 export function getTicketOwnerEmail() {
@@ -1551,34 +1416,26 @@ export function getTicketOwnerEmail() {
 }
 
 export function getTicketAvatarUrl(item = {}) {
-  return safeImageSrc(first(item.clientAvatar, item.avatar, item.avatarUrl, item.avatar_url, item.userAvatar, ""));
+  return safeImageSrc(first(item.avatarUrl, item.requesterAvatarUrl, item.userAvatarUrl, item.photoUrl, item.photoURL, ""));
 }
 
 export function getTicketStatus(item = {}) {
-  return first(item.status, item.estado, item.state, item.lifecycle?.status, "pending");
+  return getTicketStatusKey(item);
 }
 
-export function getTicketStatusKey(value = "") {
+export function getTicketStatusKey(item = {}) {
   try {
-    return modelTicketStatusKey(value);
+    return modelTicketStatusKey(item);
   } catch {
-    const raw = isObject(value) ? getTicketStatus(value) : value;
-    const key = normalizeKey(raw);
-
-    if (["open", "opened", "abierta", "abierto"].includes(key)) return "open";
-    if (["progress", "in_progress", "inprogress", "en_proceso", "working", "assigned"].includes(key)) return "progress";
-    if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
-    if (["closed", "close", "cerrada", "cerrado", "cancelled", "canceled", "archived"].includes(key)) return "closed";
-
-    return "pending";
+    return safeText(first(item.status, item.estado, "pending"), "pending");
   }
 }
 
-export function getTicketStatusLabel(value = "") {
+export function getTicketStatusLabel(item = {}) {
   try {
-    return modelTicketStatusLabel(value);
+    return modelTicketStatusLabel(item);
   } catch {
-    const key = getTicketStatusKey(value);
+    const key = getTicketStatusKey(item);
 
     if (key === "open") return "Abierta";
     if (key === "progress") return "En curso";
@@ -1590,7 +1447,7 @@ export function getTicketStatusLabel(value = "") {
 }
 
 export function getTicketPriorityRaw(item = {}) {
-  return first(item.priority, item.prioridad, item.severity, item.urgency, item.sla?.priority, "medium");
+  return safeText(first(item.priority, item.prioridad, item.severity, item.urgency), "medium");
 }
 
 export function getTicketPriorityKey(item = {}) {
@@ -1608,17 +1465,21 @@ export function getTicketPriorityKey(item = {}) {
 }
 
 export function getTicketPriorityLabel(item = {}) {
-  const key = getTicketPriorityKey(item);
+  try {
+    return modelTicketPriorityLabel(item);
+  } catch {
+    const key = getTicketPriorityKey(item);
 
-  if (key === "critical") return "Crítica";
-  if (key === "urgent") return "Urgente";
-  if (key === "low") return "Baja";
+    if (key === "critical") return "Crítica";
+    if (key === "urgent") return "Alta";
+    if (key === "low") return "Baja";
 
-  return "Media";
+    return "Media";
+  }
 }
 
 export function isTicketUrgent(item = {}) {
-  return ["urgent", "critical"].includes(getTicketPriorityKey(item));
+  return ["critical", "urgent"].includes(getTicketPriorityKey(item));
 }
 
 export function isTicketClosedLike(item = {}) {
@@ -1630,80 +1491,37 @@ export function isTicketOpenLike(item = {}) {
 }
 
 export function getTicketCategory(item = {}) {
-  return safeText(first(item.category, item.categoria, item.type, item.tipo, item.subcategory), "Soporte");
+  return getHomeTicketCategory(item);
 }
 
 export function getTicketTechnician(item = {}, users = []) {
-  const source = safeObject(item);
-  const embedded = safeObject(first(source.technician, source.tecnico, {}), {});
-
-  let resolved = embedded;
-
   try {
-    resolved = resolveHomeTicketTechnician(source, users);
+    return resolveHomeTicketTechnician(item, users);
   } catch {
-    resolved = embedded;
+    const name = safeText(first(item.technicianName, item.tecnicoName, item.assignedToName, item.assignedTo), "Sin asignar");
+
+    return {
+      id: "",
+      userId: "",
+      displayName: name,
+      name,
+      initials: getInitials(name, "?"),
+      avatarUrl: "",
+      assigned: name !== "Sin asignar",
+    };
   }
-
-  const name = firstVisual(
-    [
-      resolved.displayName,
-      resolved.name,
-      source.technicianName,
-      source.assignedToName,
-      source.assignedTo,
-      source.assignment?.assignedToName,
-      source.tecnico?.name,
-      source.assignedTo?.name,
-    ],
-    "Sin asignar"
-  );
-
-  const avatarUrl = safeImageSrc(
-    first(
-      resolved.avatarUrl,
-      resolved.avatar,
-      source.technicianAvatarUrl,
-      source.technicianAvatar,
-      source.assignedTo?.avatarUrl,
-      source.tecnico?.avatarUrl,
-      ""
-    )
-  );
-
-  return sanitizeObject({
-    id: safeText(first(resolved.id, resolved.userId, source.assignedToUserId, source.assignment?.assignedToUserId), ""),
-    userId: safeText(first(resolved.userId, resolved.id, source.assignedToUserId, source.assignment?.assignedToUserId), ""),
-    name,
-    displayName: name,
-    avatarUrl,
-    avatar: avatarUrl,
-    initials: safeText(first(resolved.initials, getInitials(name)), getInitials(name)),
-    assigned: Boolean(name && name !== "Sin asignar"),
-  });
 }
 
-export function getTicketAssignedTo(item = {}) {
-  return getTicketTechnician(item).name;
+export function getTicketAssignedTo(item = {}, users = []) {
+  return getTicketTechnician(item, users);
 }
 
 export function getTicketCreatedAt(item = {}) {
-  return first(item.createdAt, item.fechaCreacion, item.createdAtES, item.date, item.fecha, item.lifecycle?.createdAt);
+  return getHomeTicketCreatedAt(item);
 }
 
 export function getTicketUpdatedAt(item = {}) {
-  return first(
-    item.updatedAt,
-    item.lastUpdateAt,
-    item.lastActivityAt,
-    item.ultimaNovedad,
-    item.modifiedAt,
-    item.closedAt,
-    item.lifecycle?.updatedAt,
-    item.lifecycle?.lastActivityAt,
-    item.audit?.updatedAt,
-    item.createdAt
-  );
+  return getHomeTicketUpdatedAt(item);
 }
 
 export function getTicketAttachmentsCount(item = {}) {
@@ -1711,21 +1529,35 @@ export function getTicketAttachmentsCount(item = {}) {
 
   if (Array.isArray(attachments)) return attachments.length;
 
-  return safeNumber(first(item.attachmentsCount, item.filesCount, item.adjuntosCount, item.documentsCount, 0), 0);
+  return safeNumber(
+    first(
+      item.attachmentsCount,
+      item.filesCount,
+      item.adjuntosCount,
+      item.documentsCount,
+      0
+    ),
+    0
+  );
 }
 
 export function getTicketSortTimestamp(item = {}) {
-  return toTimestamp(getTicketUpdatedAt(item)) || toTimestamp(getTicketCreatedAt(item));
+  return toTimestamp(first(getTicketUpdatedAt(item), item.lastActivityAt, getTicketCreatedAt(item)));
 }
 
 export function compareTicketsNewestFirst(a = {}, b = {}) {
   const diff = getTicketSortTimestamp(b) - getTicketSortTimestamp(a);
+
   if (diff !== 0) return diff;
 
-  return getTicketId(b).localeCompare(getTicketId(a), "es-ES", {
-    numeric: true,
-    sensitivity: "base",
-  });
+  return safeText(getTicketId(b)).localeCompare(
+    safeText(getTicketId(a)),
+    "es-ES",
+    {
+      numeric: true,
+      sensitivity: "base",
+    }
+  );
 }
 
 export function sortTicketsNewestFirst(items = []) {
@@ -1733,72 +1565,163 @@ export function sortTicketsNewestFirst(items = []) {
 }
 
 export function getRecentTickets(input = {}, limit = DEFAULT_RECENT_LIMIT) {
-  const collections = getCollections(input);
-  const max = clampNumber(limit, 1, 50);
-
-  return sortTicketsNewestFirst(collections.tickets).slice(0, max);
+  return sortTicketsNewestFirst(getCollections(input).tickets).slice(0, clampNumber(limit, 1, 50));
 }
 
 export function getTicketLinkedInvoices(ticket = {}, invoices = []) {
-  const embedded = safeArray(first(ticket.invoices, ticket.facturas, ticket.relatedInvoices, ticket.linkedInvoices, []));
-
-  if (embedded.length) return normalizeHomeInvoices(embedded);
-
   try {
     return resolveHomeTicketInvoices(ticket, invoices);
   } catch {
-    return [];
+    return safeArray(first(ticket.invoices, ticket.facturas, []));
   }
 }
 
-/* =========================================================
-   FACTURAS / USERS / CLIENTS
-========================================================= */
+export function buildTicketTableRow(ticket = {}, input = {}) {
+  const collections = getCollections(input);
+  const normalized = normalizeHomeTickets([ticket], {
+    invoices: collections.invoices,
+    users: collections.users,
+  })[0] || safeObject(ticket);
 
-export function getInvoiceIdentity(item = {}) {
+  const technician = getTicketTechnician(normalized, collections.users);
+  const linkedInvoices = getTicketLinkedInvoices(normalized, collections.invoices);
+
+  return sanitizeObject({
+    ...normalized,
+
+    id: getTicketId(normalized),
+    ticketId: getTicketId(normalized),
+    incidenciaId: getTicketId(normalized),
+
+    subject: getTicketSubject(normalized),
+    title: getTicketSubject(normalized),
+    description: getTicketDescription(normalized),
+    preview: getTicketDescription(normalized),
+
+    status: getTicketStatusKey(normalized),
+    statusKey: getTicketStatusKey(normalized),
+    statusLabel: getTicketStatusLabel(normalized),
+
+    priority: getTicketPriorityKey(normalized),
+    priorityKey: getTicketPriorityKey(normalized),
+    priorityLabel: getTicketPriorityLabel(normalized),
+
+    category: getTicketCategory(normalized),
+
+    ownerName: getTicketOwnerName(normalized),
+    avatarUrl: getTicketAvatarUrl(normalized),
+    initials: getInitials(getTicketOwnerName(normalized), "U"),
+
+    technician,
+    tecnico: technician,
+    assignedTo: technician.displayName,
+    assignedToName: technician.displayName,
+
+    invoices: linkedInvoices,
+    facturas: linkedInvoices,
+    invoiceIds: linkedInvoices.map(getInvoiceId).filter(Boolean),
+    facturaIds: linkedInvoices.map(getInvoiceId).filter(Boolean),
+
+    createdAt: getTicketCreatedAt(normalized),
+    updatedAt: getTicketUpdatedAt(normalized),
+
+    attachmentsCount: getTicketAttachmentsCount(normalized),
+
+    action: ACTIONS.OPEN_TICKET_DETAIL,
+    dataAction: ACTIONS.OPEN_TICKET_DETAIL,
+    payload: {
+      ticketId: getTicketId(normalized),
+      incidenciaId: getTicketId(normalized),
+    },
+  });
+}
+
+export function getTicketTableRows(input = {}, limit = DEFAULT_PAGE_SIZE) {
+  const collections = getCollections(input);
+  const pagination = getPagination(collections.tickets, input);
+  const rows = pagination.pageItems.length
+    ? pagination.pageItems
+    : collections.tickets.slice(0, clampNumber(limit, 1, 50));
+
+  return rows.map((ticket) => buildTicketTableRow(ticket, input));
+}
+
+export function getSelectedTicketId(input = {}) {
+  const data = safeObject(input);
+  const state = safeObject(data.state);
+
   return safeText(
     first(
-      item.invoiceId,
-      item.facturaId,
-      item.numeroFacturaLegal,
-      item.numeroFactura,
-      item.invoiceNumber,
-      item.number,
-      item.numero,
-      item.code,
-      item.id
+      data.selectedTicketId,
+      data.selectedIncidenciaId,
+      state.selectedTicketId,
+      state.selectedIncidenciaId,
+      ""
     ),
     ""
   );
 }
 
-export function getInvoiceId(item = {}) {
-  return getInvoiceIdentity(item) || "FAC-SIN-ID";
+export function getSelectedTicket(input = {}) {
+  const selectedTicketId = getSelectedTicketId(input);
+
+  if (!selectedTicketId) return null;
+
+  return findHomeTicketById(getCollections(input).tickets, selectedTicketId);
 }
 
-export function getInvoiceUniqueKey(item = {}, index = 0) {
-  return getInvoiceIdentity(item) || `invoice:${index}`;
+export function buildTicketModalData(input = {}) {
+  const ticket = getSelectedTicket(input);
+  const collections = getCollections(input);
+
+  if (!ticket) {
+    return {
+      open: false,
+      ticket: null,
+      incidencia: null,
+      invoices: [],
+      facturas: [],
+      technician: null,
+      tecnico: null,
+    };
+  }
+
+  const row = buildTicketTableRow(ticket, input);
+
+  return {
+    open: true,
+    ticket: row,
+    incidencia: row,
+    ticketId: row.ticketId,
+    incidenciaId: row.incidenciaId,
+    invoices: row.invoices,
+    facturas: row.facturas,
+    technician: row.technician || getTicketTechnician(row, collections.users),
+    tecnico: row.tecnico || getTicketTechnician(row, collections.users),
+  };
+}
+
+/* =========================================================
+   INVOICES
+========================================================= */
+
+export function getInvoiceIdentity(item = {}) {
+  return getInvoiceId(item);
+}
+
+export function getInvoiceId(item = {}) {
+  return getHomeInvoiceId(item);
+}
+
+export function getInvoiceUniqueKey(item = {}) {
+  return normalizeKey(getInvoiceId(item));
 }
 
 export function getInvoiceAmount(item = {}) {
   try {
     return modelGetInvoiceAmount(item);
   } catch {
-    return safeNumber(
-      first(
-        item.total,
-        item.amount,
-        item.importe,
-        item.price,
-        item.subtotal,
-        item.totalFactura,
-        item.importeTotal,
-        item.invoiceAmount,
-        item.facturaTotal,
-        0
-      ),
-      0
-    );
+    return safeNumber(first(item.total, item.amount, item.importe, 0), 0);
   }
 }
 
@@ -1819,7 +1742,11 @@ export function getInvoicePendingAmount(item = {}) {
 }
 
 export function getInvoiceCurrency(item = {}) {
-  return safeText(first(item.currency, item.moneda, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
+  try {
+    return modelGetInvoiceCurrency(item);
+  } catch {
+    return safeText(first(item.currency, item.moneda, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
+  }
 }
 
 export function getInvoiceStatusKey(item = {}) {
@@ -1871,23 +1798,15 @@ export function isInvoicePendingLike(item = {}) {
 }
 
 export function getInvoiceDate(item = {}) {
-  return first(item.date, item.fechaFactura, item.fechaFacturaISO, item.createdAt, item.updatedAt);
+  return first(item.issuedAt, item.createdAt, item.date, item.fechaEmision);
 }
 
 export function getInvoiceUpdatedAt(item = {}) {
-  return first(item.updatedAt, item.modifiedAt, item.fechaPago, item.fechaEnvio, item.sentAt, item.date, item.createdAt);
+  return first(item.updatedAt, item.paidAt, item.issuedAt, item.createdAt);
 }
 
 export function compareInvoicesNewestFirst(a = {}, b = {}) {
-  const diff = (toTimestamp(getInvoiceUpdatedAt(b)) || toTimestamp(getInvoiceDate(b))) -
-    (toTimestamp(getInvoiceUpdatedAt(a)) || toTimestamp(getInvoiceDate(a)));
-
-  if (diff !== 0) return diff;
-
-  return getInvoiceId(b).localeCompare(getInvoiceId(a), "es-ES", {
-    numeric: true,
-    sensitivity: "base",
-  });
+  return toTimestamp(getInvoiceUpdatedAt(b)) - toTimestamp(getInvoiceUpdatedAt(a));
 }
 
 export function sortInvoicesNewestFirst(items = []) {
@@ -1895,464 +1814,193 @@ export function sortInvoicesNewestFirst(items = []) {
 }
 
 export function getRecentInvoices(input = {}, limit = DEFAULT_RECENT_LIMIT) {
-  const collections = getCollections(input);
-  const max = clampNumber(limit, 1, 50);
-
-  return sortInvoicesNewestFirst(collections.invoices).slice(0, max);
+  return sortInvoicesNewestFirst(getCollections(input).invoices).slice(0, clampNumber(limit, 1, 50));
 }
 
-export function getUserId(item = {}) {
-  return safeText(first(item.userId, item.usuarioId, item.id, item.username), "");
-}
-
-export function getUserUniqueKey(item = {}, index = 0) {
-  return getUserId(item) || `user:${index}`;
-}
-
-export function isActiveUser(item = {}) {
-  const active = first(item.active, item.isActive, item.enabled, item.status, item.estado);
-  const key = normalizeKey(active);
-
-  if (active === false || active === 0) return false;
-
-  return !["false", "disabled", "inactive", "inactivo", "blocked", "deleted", "archived"].includes(key);
-}
-
-export function getClientId(item = {}) {
-  return safeText(first(item.clienteId, item.clientId, item.customerId, item.userId, item.id), "");
-}
-
-export function getClientUniqueKey(item = {}, index = 0) {
-  return getClientId(item) || `client:${index}`;
-}
-
-export function isActiveClient(item = {}) {
-  const active = first(item.active, item.isActive, item.enabled, item.status, item.estado);
-  const key = normalizeKey(active);
-
-  if (active === false || active === 0) return false;
-
-  return !["false", "disabled", "inactive", "inactivo", "blocked", "deleted", "archived"].includes(key);
-}
-
-/* =========================================================
-   TABLE ROWS / MODAL
-========================================================= */
-
-export function buildTicketTableRow(ticket = {}, index = 0, context = {}) {
-  const users = safeArray(context.users);
-  const invoices = safeArray(context.invoices);
-  const id = getTicketId(ticket);
-  const statusKey = getTicketStatusKey(ticket);
-  const priorityKey = getTicketPriorityKey(ticket);
-  const technician = getTicketTechnician(ticket, users);
-  const linkedInvoices = getTicketLinkedInvoices(ticket, invoices);
-  const createdAt = getTicketCreatedAt(ticket);
-  const updatedAt = getTicketUpdatedAt(ticket);
-
+export function buildInvoiceRow(invoice = {}) {
   return sanitizeObject({
-    key: getTicketUniqueKey(ticket, index),
-    index,
+    ...invoice,
 
-    id,
-    ticketId: id,
-    incidenciaId: id,
-    fullId: id,
-    displayId: id,
+    id: getInvoiceId(invoice),
+    invoiceId: getInvoiceId(invoice),
+    facturaId: getInvoiceId(invoice),
 
-    subject: getTicketSubject(ticket),
-    title: getTicketSubject(ticket),
-    description: getTicketDescription(ticket),
-    preview: getTicketDescription(ticket),
+    title: safeText(first(invoice.title, invoice.name, invoice.concepto, `Factura ${getInvoiceId(invoice)}`), "Factura"),
 
-    category: getTicketCategory(ticket),
-    categoria: getTicketCategory(ticket),
+    amount: getInvoiceAmount(invoice),
+    paidAmount: getInvoicePaidAmount(invoice),
+    pendingAmount: getInvoicePendingAmount(invoice),
+    currency: getInvoiceCurrency(invoice),
 
-    statusKey,
-    status: getTicketStatus(ticket),
-    statusLabel: getTicketStatusLabel(ticket),
-
-    priorityKey,
-    priority: getTicketPriorityRaw(ticket),
-    priorityLabel: getTicketPriorityLabel(ticket),
-    urgent: isTicketUrgent(ticket),
-    isUrgent: isTicketUrgent(ticket),
-
-    technician,
-    tecnico: technician,
-    technicianName: technician.name,
-    technicianAvatarUrl: technician.avatarUrl,
-    technicianInitials: technician.initials,
-
-    createdAt,
-    updatedAt,
-    lastActivityAt: first(ticket.lastActivityAt, updatedAt),
-    createdAtLabel: formatDateTime(createdAt),
-    updatedAtLabel: formatDateTime(updatedAt),
-    lastActivityLabel: formatLastUpdate(first(ticket.lastActivityAt, updatedAt)),
-
-    attachmentsCount: getTicketAttachmentsCount(ticket),
-
-    invoicesCount: linkedInvoices.length,
-    facturasCount: linkedInvoices.length,
-    linkedInvoiceCount: linkedInvoices.length,
-    hasLinkedInvoices: linkedInvoices.length > 0,
-
-    action: ACTIONS.OPEN_TICKET_DETAIL,
-    dataAction: ACTIONS.OPEN_TICKET_DETAIL,
-    route: HOME_ROUTES.INCIDENCIAS,
-  });
-}
-
-export function getTicketTableRows(input = {}, limit = DEFAULT_PAGE_SIZE) {
-  const collections = getCollections(input);
-  const max = clampNumber(limit, 1, 50);
-  const rows = sortTicketsNewestFirst(collections.tickets).slice(0, max);
-
-  return rows.map((ticket, index) =>
-    buildTicketTableRow(ticket, index, {
-      users: collections.users,
-      invoices: collections.invoices,
-    })
-  );
-}
-
-export function buildInvoiceRow(invoice = {}, index = 0) {
-  const id = getInvoiceId(invoice);
-  const currency = getInvoiceCurrency(invoice);
-  const paid = isInvoicePaid(invoice);
-  const amount = paid ? getInvoicePaidAmount(invoice) : 0;
-  const pendingAmount = getInvoicePendingAmount(invoice);
-  const statusKey = getInvoiceStatusKey(invoice);
-  const date = getInvoiceDate(invoice);
-
-  return sanitizeObject({
-    key: getInvoiceUniqueKey(invoice, index),
-    index,
-
-    id,
-    invoiceId: id,
-    facturaId: id,
-    fullId: id,
-    displayId: id,
-
-    title: safeText(first(invoice.title, invoice.concepto, id ? `Factura ${id}` : "Factura"), id ? `Factura ${id}` : "Factura"),
-    number: safeText(first(invoice.numeroFacturaLegal, invoice.numeroFactura, invoice.invoiceNumber, invoice.number, invoice.numero, id), id),
-
-    statusKey,
-    status: first(invoice.status, invoice.estado, invoice.paymentStatus, invoice.estadoPago, statusKey),
+    status: getInvoiceStatusKey(invoice),
+    statusKey: getInvoiceStatusKey(invoice),
     statusLabel: getInvoiceStatusLabel(invoice),
 
-    paid,
-    isPaid: paid,
-    pending: isInvoicePendingLike(invoice),
-    isPending: isInvoicePendingLike(invoice),
+    paid: isInvoicePaid(invoice),
+    isPaid: isInvoicePaid(invoice),
 
-    amount,
-    paidAmount: amount,
-    pendingAmount,
-    rawAmount: getInvoiceAmount(invoice),
-    currency,
-
-    amountLabel: paid ? formatMoney(amount, currency) : "",
-    paidAmountLabel: paid ? formatMoney(amount, currency) : "",
-    pendingAmountLabel: pendingAmount > 0 ? formatMoney(pendingAmount, currency) : "",
-
-    date,
+    date: getInvoiceDate(invoice),
     updatedAt: getInvoiceUpdatedAt(invoice),
-    dateLabel: formatDateShort(date),
-    updatedAtLabel: formatDateTime(getInvoiceUpdatedAt(invoice)),
-
-    ticketId: safeText(first(invoice.ticketId, invoice.incidenciaId), ""),
-    incidenciaId: safeText(first(invoice.incidenciaId, invoice.ticketId), ""),
-
-    route: HOME_ROUTES.FACTURAS,
-    action: ACTIONS.NAVIGATE,
-    dataAction: ACTIONS.NAVIGATE,
   });
 }
 
 export function getInvoiceRows(input = {}, limit = DEFAULT_RECENT_LIMIT) {
-  const rows = getRecentInvoices(input, limit);
-
-  return rows.map((invoice, index) => buildInvoiceRow(invoice, index));
-}
-
-export function getSelectedTicketId(input = {}) {
-  const data = safeObject(input);
-  const state = safeObject(data.state);
-  const dashboard = getDashboard(data);
-
-  return safeText(
-    first(
-      data.selectedTicketId,
-      data.selectedIncidenciaId,
-      data.ticketId,
-      data.incidenciaId,
-      state.selectedTicketId,
-      state.selectedIncidenciaId,
-      state.ticketId,
-      state.incidenciaId,
-      dashboard.selectedTicketId,
-      dashboard.selectedIncidenciaId,
-      ""
-    ),
-    ""
-  );
-}
-
-export function getSelectedTicket(input = {}) {
-  const selectedTicketId = getSelectedTicketId(input);
-
-  if (!selectedTicketId) return null;
-
-  const collections = getCollections(input);
-
-  try {
-    return findHomeTicketById(collections.tickets, selectedTicketId);
-  } catch {
-    return collections.tickets.find((ticket) => isSameIdentity(getTicketId(ticket), selectedTicketId)) || null;
-  }
-}
-
-export function buildTicketModalData(input = {}) {
-  const collections = getCollections(input);
-  const selectedTicket = getSelectedTicket(input);
-
-  if (!selectedTicket) {
-    return {
-      open: false,
-      ticket: null,
-      invoices: [],
-      facturas: [],
-      technician: null,
-    };
-  }
-
-  const linkedInvoices = getTicketLinkedInvoices(selectedTicket, collections.invoices);
-  const technician = getTicketTechnician(selectedTicket, collections.users);
-  const createdAt = getTicketCreatedAt(selectedTicket);
-  const updatedAt = getTicketUpdatedAt(selectedTicket);
-
-  return sanitizeObject({
-    open: true,
-
-    ticket: selectedTicket,
-    id: getTicketId(selectedTicket),
-    ticketId: getTicketId(selectedTicket),
-    incidenciaId: getTicketId(selectedTicket),
-    fullId: getTicketId(selectedTicket),
-    displayId: getTicketId(selectedTicket),
-
-    title: getTicketSubject(selectedTicket),
-    subject: getTicketSubject(selectedTicket),
-    description: getTicketDescription(selectedTicket),
-    preview: getTicketDescription(selectedTicket),
-
-    category: getTicketCategory(selectedTicket),
-    categoria: getTicketCategory(selectedTicket),
-
-    statusKey: getTicketStatusKey(selectedTicket),
-    status: getTicketStatus(selectedTicket),
-    statusLabel: getTicketStatusLabel(selectedTicket),
-
-    priorityKey: getTicketPriorityKey(selectedTicket),
-    priority: getTicketPriorityRaw(selectedTicket),
-    priorityLabel: getTicketPriorityLabel(selectedTicket),
-    urgent: isTicketUrgent(selectedTicket),
-
-    technician,
-    tecnico: technician,
-    technicianName: technician.name,
-    technicianAvatarUrl: technician.avatarUrl,
-    technicianInitials: technician.initials,
-
-    invoices: linkedInvoices,
-    facturas: linkedInvoices,
-    invoiceRows: linkedInvoices.map((invoice, index) => buildInvoiceRow(invoice, index)),
-    invoicesCount: linkedInvoices.length,
-    facturasCount: linkedInvoices.length,
-    linkedInvoiceCount: linkedInvoices.length,
-    hasLinkedInvoices: linkedInvoices.length > 0,
-
-    createdAt,
-    updatedAt,
-    lastActivityAt: first(selectedTicket.lastActivityAt, updatedAt),
-    createdAtLabel: formatDateTime(createdAt),
-    updatedAtLabel: formatDateTime(updatedAt),
-    lastActivityLabel: formatLastUpdate(first(selectedTicket.lastActivityAt, updatedAt)),
-
-    attachmentsCount: getTicketAttachmentsCount(selectedTicket),
-
-    closeAction: ACTIONS.CLOSE_TICKET_DETAIL,
-  });
+  return getRecentInvoices(input, limit).map(buildInvoiceRow);
 }
 
 /* =========================================================
-   STATS / CARDS / ACTIONS
+   USERS / CLIENTS
 ========================================================= */
+
+export function getUserId(item = {}) {
+  return getHomeUserId(item);
+}
+
+export function getUserUniqueKey(item = {}) {
+  return normalizeKey(getUserId(item));
+}
+
+export function isActiveUser(item = {}) {
+  return item.active !== false && item.isActive !== false && item.enabled !== false;
+}
+
+export function getClientId(item = {}) {
+  return getHomeClientId(item);
+}
+
+export function getClientUniqueKey(item = {}) {
+  return normalizeKey(getClientId(item));
+}
+
+export function isActiveClient(item = {}) {
+  return item.active !== false && item.isActive !== false && item.enabled !== false;
+}
+
+/* =========================================================
+   COLLECTIONS / STATS
+========================================================= */
+
+export function getCollections(input = {}) {
+  const data = safeObject(input);
+  const dashboard = getNormalizedDashboard(data);
+  const admin = isAdminRole(getRole(data));
+
+  const tickets = normalizeHomeTickets(
+    first(
+      data.tickets,
+      data.incidencias,
+      data.state?.tickets,
+      data.state?.incidencias,
+      dashboard.tickets,
+      dashboard.incidencias,
+      []
+    ),
+    {
+      invoices: first(data.invoices, data.facturas, data.state?.invoices, data.state?.facturas, dashboard.invoices, dashboard.facturas, []),
+      users: admin ? first(data.users, data.usuarios, data.state?.users, data.state?.usuarios, dashboard.users, dashboard.usuarios, []) : [],
+    }
+  );
+
+  const invoices = normalizeHomeInvoices(
+    first(
+      data.invoices,
+      data.facturas,
+      data.state?.invoices,
+      data.state?.facturas,
+      dashboard.invoices,
+      dashboard.facturas,
+      []
+    )
+  );
+
+  const users = admin
+    ? normalizeHomeUsers(first(data.users, data.usuarios, data.state?.users, data.state?.usuarios, dashboard.users, dashboard.usuarios, []))
+    : [];
+
+  const clients = admin
+    ? normalizeHomeClients(first(data.clients, data.clientes, data.customers, data.state?.clients, data.state?.clientes, data.state?.customers, dashboard.clients, dashboard.clientes, dashboard.customers, []))
+    : [];
+
+  const widgets = normalizeHomeWidgets(
+    first(data.widgets, data.cards, data.kpis, data.blocks, data.state?.widgets, data.state?.cards, dashboard.widgets, dashboard.cards, []),
+    admin
+  );
+
+  const activity = normalizeHomeActivityList(
+    first(data.activity, data.recentActivity, data.recent, data.state?.activity, data.state?.recentActivity, dashboard.activity, dashboard.recentActivity, []),
+    admin
+  );
+
+  return {
+    tickets,
+    incidencias: tickets,
+
+    invoices,
+    facturas: invoices,
+
+    users,
+    usuarios: users,
+
+    clients,
+    clientes: clients,
+    customers: clients,
+
+    widgets,
+    cards: widgets,
+    kpis: widgets,
+    blocks: widgets,
+
+    activity,
+    recent: activity,
+    recentActivity: activity,
+  };
+}
 
 export function getLatestDateFromTickets(tickets = []) {
   const timestamps = safeArray(tickets)
-    .map((item) => toTimestamp(getTicketUpdatedAt(item)) || toTimestamp(getTicketCreatedAt(item)))
+    .map((ticket) => toTimestamp(first(getTicketUpdatedAt(ticket), getTicketCreatedAt(ticket))))
     .filter(Boolean);
 
-  return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null;
+  return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : "";
 }
 
 export function computeHomeStats(input = {}) {
   const collections = getCollections(input);
+  const summary = getSummary(input);
   const admin = isAdminRole(getRole(input));
-  const tickets = collections.tickets;
-  const invoices = collections.invoices;
-  const users = admin ? collections.users : [];
-  const clients = admin ? collections.clients : [];
 
-  const computedPendingTickets = tickets.filter((item) => getTicketStatusKey(item) === "pending").length;
-  const computedOpenTickets = tickets.filter((item) => getTicketStatusKey(item) === "open").length;
-  const computedProgressTickets = tickets.filter((item) => getTicketStatusKey(item) === "progress").length;
-  const computedResolvedTickets = tickets.filter((item) => getTicketStatusKey(item) === "resolved").length;
-  const computedClosedTickets = tickets.filter((item) => getTicketStatusKey(item) === "closed").length;
-  const computedActiveTickets = computedPendingTickets + computedOpenTickets + computedProgressTickets;
+  const pendingTickets = collections.tickets.filter((ticket) => getTicketStatusKey(ticket) === "pending").length;
+  const openTickets = collections.tickets.filter((ticket) => getTicketStatusKey(ticket) === "open").length;
+  const progressTickets = collections.tickets.filter((ticket) => getTicketStatusKey(ticket) === "progress").length;
+  const resolvedTickets = collections.tickets.filter((ticket) => getTicketStatusKey(ticket) === "resolved").length;
+  const closedTickets = collections.tickets.filter((ticket) => getTicketStatusKey(ticket) === "closed").length;
 
-  const paidInvoices = invoices.filter(isInvoicePaid);
-  const pendingInvoiceRows = invoices.filter(isInvoicePendingLike);
-
-  const totalTickets = getBestSummaryNumber(
-    input,
-    ["totalTickets", "ticketsTotal", "incidenciasTotal", "totalIncidencias", "ticketsCount", "incidenciasCount"],
-    collections.ticketsRemoteCount,
-    [tickets.length]
-  );
-
-  const pendingTickets = getBestSummaryNumber(
-    input,
-    ["pendingTickets", "pendingIncidencias", "incidenciasPendientes"],
-    computedPendingTickets
-  );
-
-  const openTickets = getBestSummaryNumber(
-    input,
-    ["openTickets", "openIncidencias", "incidenciasAbiertas"],
-    computedOpenTickets
-  );
-
-  const progressTickets = getBestSummaryNumber(
-    input,
-    ["progressTickets", "progressIncidencias", "incidenciasEnCurso"],
-    computedProgressTickets
-  );
-
-  const resolvedTickets = getBestSummaryNumber(
-    input,
-    ["resolvedTickets", "resolvedIncidencias", "incidenciasResueltas"],
-    computedResolvedTickets
-  );
-
-  const closedTickets = getBestSummaryNumber(
-    input,
-    ["closedTickets", "closedIncidencias", "incidenciasCerradas"],
-    computedClosedTickets
-  );
-
-  const activeTickets = getBestSummaryNumber(
-    input,
-    ["activeTickets", "activeIncidencias"],
-    computedActiveTickets,
-    [pendingTickets + openTickets + progressTickets]
-  );
-
-  const urgentTickets = getBestSummaryNumber(
-    input,
-    ["urgentTickets", "urgentIncidencias", "highPriorityTickets", "ticketsUrgentes", "incidenciasUrgentes"],
-    tickets.filter(isTicketUrgent).length
-  );
-
-  const totalInvoices = getBestSummaryNumber(
-    input,
-    ["totalInvoices", "invoicesTotal", "facturasTotal", "totalFacturas", "invoicesCount", "facturasCount"],
-    collections.invoicesRemoteCount,
-    [invoices.length]
-  );
-
-  const paidInvoicesCount = getBestSummaryNumber(
-    input,
-    ["paidInvoices", "paidFacturas", "facturasPagadas"],
-    paidInvoices.length
-  );
-
-  const pendingInvoices = getBestSummaryNumber(
-    input,
-    ["pendingInvoices", "pendingFacturas", "facturasPendientes", "invoicesPending"],
-    pendingInvoiceRows.length
-  );
-
-  const invoiceAmount = roundMoney(
-    getBestSummaryNumber(
-      input,
-      ["invoiceAmount", "paidInvoiceAmount", "billingTotal", "totalBilling", "totalFacturado", "importeFacturas", "facturacionVisible", "facturacionTotal"],
-      paidInvoices.reduce((sum, item) => sum + getInvoicePaidAmount(item), 0)
-    )
-  );
-
-  const pendingInvoiceAmount = roundMoney(
-    getBestSummaryNumber(
-      input,
-      ["pendingInvoiceAmount", "importePendiente", "facturacionPendiente"],
-      pendingInvoiceRows.reduce((sum, item) => sum + getInvoicePendingAmount(item), 0)
-    )
-  );
-
-  const usersCount = admin
-    ? getBestSummaryNumber(
-        input,
-        ["usersCount", "usuariosCount", "totalUsers", "totalUsuarios", "activeUsers", "usuariosActivos"],
-        collections.usersRemoteCount,
-        [users.length]
-      )
-    : 0;
-
-  const clientsCount = admin
-    ? getBestSummaryNumber(
-        input,
-        ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes", "totalCustomers", "activeClients", "clientesActivos"],
-        collections.clientsRemoteCount,
-        [clients.length]
-      )
-    : 0;
-
-  const attachmentsCount = tickets.reduce((sum, item) => sum + getTicketAttachmentsCount(item), 0);
+  const paidInvoices = collections.invoices.filter(isInvoicePaid).length;
+  const pendingInvoices = collections.invoices.filter(isInvoicePendingLike).length;
+  const invoiceAmount = collections.invoices.reduce((total, invoice) => total + getInvoicePaidAmount(invoice), 0);
 
   return sanitizeObject({
     role: getRole(input),
     admin,
 
-    totalTickets,
-    visibleTickets: tickets.length,
-    pendingTickets,
-    openTickets,
-    progressTickets,
-    resolvedTickets,
-    closedTickets,
-    activeTickets,
-    urgentTickets,
+    totalTickets: getSummaryValue(summary, ["totalTickets", "ticketsTotal", "incidenciasTotal", "ticketsCount", "incidenciasCount"], collections.tickets.length),
+    activeTickets: getSummaryValue(summary, ["activeTickets", "activeIncidencias"], pendingTickets + openTickets + progressTickets),
+    pendingTickets: getSummaryValue(summary, ["pendingTickets", "pendingIncidencias"], pendingTickets),
+    openTickets: getSummaryValue(summary, ["openTickets", "openIncidencias"], openTickets),
+    progressTickets: getSummaryValue(summary, ["progressTickets", "progressIncidencias"], progressTickets),
+    resolvedTickets: getSummaryValue(summary, ["resolvedTickets", "resolvedIncidencias"], resolvedTickets),
+    closedTickets: getSummaryValue(summary, ["closedTickets", "closedIncidencias"], closedTickets),
 
-    totalInvoices,
-    visibleInvoices: invoices.length,
-    paidInvoices: paidInvoicesCount,
-    pendingInvoices,
-    invoiceAmount,
-    paidInvoiceAmount: invoiceAmount,
-    pendingInvoiceAmount,
+    totalInvoices: getSummaryValue(summary, ["totalInvoices", "invoicesTotal", "facturasTotal", "invoicesCount", "facturasCount"], collections.invoices.length),
+    paidInvoices: getSummaryValue(summary, ["paidInvoices", "paidFacturas"], paidInvoices),
+    pendingInvoices: getSummaryValue(summary, ["pendingInvoices", "pendingFacturas"], pendingInvoices),
+    invoiceAmount: getSummaryValue(summary, ["invoiceAmount", "paidInvoiceAmount", "billingTotal", "totalFacturado"], invoiceAmount),
+    paidInvoiceAmount: getSummaryValue(summary, ["paidInvoiceAmount", "invoiceAmount"], invoiceAmount),
 
-    usersCount,
-    activeUsersCount: admin ? users.filter(isActiveUser).length : 0,
+    totalUsers: admin ? getSummaryValue(summary, ["totalUsers", "usersTotal", "usuariosTotal", "usersCount", "usuariosCount"], collections.users.length) : 0,
+    totalClients: admin ? getSummaryValue(summary, ["totalClients", "totalClientes", "totalCustomers", "clientsCount", "clientesCount", "customersCount"], collections.clients.length) : 0,
 
-    clientsCount,
-    activeClientsCount: admin ? clients.filter(isActiveClient).length : 0,
-
-    attachmentsCount,
-    lastTicketUpdate: getLatestDateFromTickets(tickets),
+    latestTicketAt: getLatestDateFromTickets(collections.tickets),
   });
 }
 
@@ -2364,129 +2012,148 @@ export function getStatusPills(input = {}) {
       key: "pending",
       label: "Pendientes",
       value: stats.pendingTickets,
-      valueLabel: formatNumber(stats.pendingTickets),
-      modifier: "pending",
+      status: "pending",
     },
     {
       key: "open",
       label: "Abiertas",
       value: stats.openTickets,
-      valueLabel: formatNumber(stats.openTickets),
-      modifier: "open",
+      status: "open",
     },
     {
       key: "progress",
       label: "En curso",
       value: stats.progressTickets,
-      valueLabel: formatNumber(stats.progressTickets),
-      modifier: "progress",
-    },
-    {
-      key: "resolved",
-      label: "Resueltas",
-      value: stats.resolvedTickets,
-      valueLabel: formatNumber(stats.resolvedTickets),
-      modifier: "resolved",
+      status: "progress",
     },
     {
       key: "closed",
       label: "Cerradas",
       value: stats.closedTickets,
-      valueLabel: formatNumber(stats.closedTickets),
-      modifier: "closed",
+      status: "closed",
     },
   ];
 }
 
-export function getStatCards(input = {}) {
-  const stats = computeHomeStats(input);
+function statCard({
+  id = "",
+  label = "",
+  value = 0,
+  text = "",
+  iconName = "activity",
+  route = "",
+  modifier = "",
+  adminOnly = false,
+} = {}) {
+  const safeRoute = normalizeRoute(route);
 
-  if (stats.admin) {
-    return [
-      {
-        iconName: "ticket",
-        label: "Incidencias",
-        value: formatNumber(stats.totalTickets),
-        text: `${formatNumber(stats.activeTickets)} abiertas o en seguimiento.`,
-        modifier: "open",
-        badge: stats.urgentTickets ? `${formatNumber(stats.urgentTickets)} urg.` : "",
-      },
-      {
-        iconName: "euro",
-        label: "Facturas totales",
-        value: formatNumber(stats.totalInvoices),
-        text: `Importe pagado: ${formatMoney(stats.invoiceAmount)}.`,
-        modifier: "billing",
-      },
-      {
-        iconName: "invoice",
-        label: "Facturas pendientes",
-        value: formatNumber(stats.pendingInvoices),
-        text: "Facturas emitidas pendientes o vencidas.",
-        modifier: "invoices",
-      },
-      {
-        iconName: "client",
-        label: "Clientes",
-        value: formatNumber(stats.clientsCount),
-        text: "Clientes visibles en el panel.",
-        modifier: "clients",
-      },
-      {
-        iconName: "users",
-        label: "Usuarios",
-        value: formatNumber(stats.usersCount),
-        text: "Usuarios sincronizados.",
-        modifier: "users",
-      },
-    ];
+  if (!safeRoute) return null;
+
+  if (adminOnly && !isAdminOnlyRoute(safeRoute)) {
+    return null;
+  }
+
+  return sanitizeObject({
+    id,
+    key: id,
+    widgetId: id,
+    label,
+    title: label,
+    value,
+    text,
+    iconName,
+    route: safeRoute,
+    href: safeRoute,
+    modifier,
+    adminOnly,
+    action: ACTIONS.NAVIGATE,
+    dataAction: ACTIONS.NAVIGATE,
+  });
+}
+
+export function getStatCards(input = {}) {
+  const admin = isAdminRole(getRole(input));
+  const stats = computeHomeStats(input);
+  const widgets = getWidgets(input);
+
+  if (widgets.length) {
+    return widgets.map((widget) => ({
+      ...widget,
+      route: normalizeRoute(getWidgetRoute(widget)),
+      href: normalizeRoute(getWidgetRoute(widget)),
+      action: ACTIONS.NAVIGATE,
+      dataAction: ACTIONS.NAVIGATE,
+    })).filter((widget) => widget.route);
   }
 
   return [
-    {
+    statCard({
+      id: "incidencias",
+      label: admin ? "Incidencias" : "Mis incidencias",
+      value: stats.totalTickets,
+      text: admin ? "Incidencias visibles en el panel." : "Tus solicitudes visibles.",
       iconName: "ticket",
-      label: "Mis incidencias",
-      value: formatNumber(stats.totalTickets),
-      text: `${formatNumber(stats.activeTickets)} solicitudes abiertas o en seguimiento.`,
-      modifier: "open",
-      badge: stats.urgentTickets ? `${formatNumber(stats.urgentTickets)} urg.` : "",
-    },
-    {
-      iconName: "euro",
-      label: "Facturas pendientes",
-      value: formatNumber(stats.pendingInvoices),
-      text: "Facturas visibles pendientes o vencidas.",
-      modifier: "billing",
-    },
-    {
-      iconName: "invoice",
+      route: HOME_ROUTES.INCIDENCIAS,
+      modifier: "tickets",
+    }),
+    statCard({
+      id: "facturas-totales",
       label: "Facturas totales",
-      value: formatNumber(stats.totalInvoices),
-      text: `Importe pagado: ${formatMoney(stats.invoiceAmount)}.`,
-      modifier: "invoices",
-    },
-  ];
+      value: stats.totalInvoices,
+      text: `Importe total: ${formatMoney(stats.invoiceAmount, DEFAULT_CURRENCY)}`,
+      iconName: "euro",
+      route: HOME_ROUTES.FACTURAS,
+      modifier: "invoice-total",
+    }),
+    admin
+      ? statCard({
+          id: "clientes",
+          label: "Clientes",
+          value: stats.totalClients,
+          text: "Clientes visibles.",
+          iconName: "client",
+          route: HOME_ROUTES.CLIENTES,
+          modifier: "clients",
+          adminOnly: true,
+        })
+      : null,
+    admin && HOME_ROUTES.USUARIOS
+      ? statCard({
+          id: "usuarios",
+          label: "Usuarios",
+          value: stats.totalUsers,
+          text: "Usuarios visibles.",
+          iconName: "users",
+          route: HOME_ROUTES.USUARIOS,
+          modifier: "users",
+          adminOnly: true,
+        })
+      : null,
+  ].filter(Boolean);
 }
 
 function quickAction({
   iconName = "activity",
-  title = "Acción",
+  title = "",
   text = "",
+  route = "",
   action = ACTIONS.NAVIGATE,
   dataAction = ACTIONS.NAVIGATE,
-  route = "",
-  modifier = "default",
+  modifier = "",
 } = {}) {
-  const normalizedRoute = normalizeRoute(route);
-  if (!normalizedRoute) return null;
+  const safeRoute = normalizeRoute(route);
+
+  if (!safeRoute && action === ACTIONS.NAVIGATE) return null;
 
   return sanitizeObject({
     iconName,
     title,
+    label: title,
     text,
+    route: safeRoute,
+    href: safeRoute,
     action,
     dataAction,
-    route: normalizedRoute,
     modifier,
   });
 }
@@ -2517,13 +2184,15 @@ export function getQuickActions(input = {}) {
         route: HOME_ROUTES.CLIENTES,
         modifier: "clients",
       }),
-      quickAction({
-        iconName: "users",
-        title: "Usuarios",
-        text: "Gestionar usuarios del panel.",
-        route: HOME_ROUTES.USUARIOS,
-        modifier: "users",
-      }),
+      HOME_ROUTES.USUARIOS
+        ? quickAction({
+            iconName: "users",
+            title: "Usuarios",
+            text: "Gestionar usuarios del panel.",
+            route: HOME_ROUTES.USUARIOS,
+            modifier: "users",
+          })
+        : null,
     ].filter(Boolean);
   }
 
@@ -2565,6 +2234,34 @@ export function getQuickActions(input = {}) {
    ACTIVITY / PAGINATION
 ========================================================= */
 
+function activityVisibleForRole(input = {}, item = {}) {
+  if (isAdminRole(getRole(input))) return true;
+
+  const type = normalizeKey(first(item.type, item.kind, item.category, ""));
+
+  if (["client", "cliente", "customer", "user", "usuario", "member", "server", "servidor"].includes(type)) {
+    return false;
+  }
+
+  const route = normalizeRoute(first(item.route, item.href, item.link, item.to, ""));
+
+  if (route && isAdminOnlyRoute(route)) return false;
+
+  const identity = [
+    item.entity,
+    item.resource,
+    item.collection,
+    item.targetType,
+    item.meta?.entity,
+    item.meta?.type,
+    type,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return !isAdminEntityValue(identity);
+}
+
 export function buildSyntheticActivity(input = {}, limit = DEFAULT_RECENT_LIMIT) {
   const collections = getCollections(input);
   const admin = isAdminRole(getRole(input));
@@ -2576,7 +2273,8 @@ export function buildSyntheticActivity(input = {}, limit = DEFAULT_RECENT_LIMIT)
       users: admin ? collections.users : [],
       clients: admin ? collections.clients : [],
       limit,
-    })
+    }),
+    admin
   )
     .filter((item) => activityVisibleForRole(input, item))
     .slice(0, clampNumber(limit, 1, 50));
@@ -2587,7 +2285,7 @@ export function getActivity(input = {}, limit = DEFAULT_RECENT_LIMIT) {
   const max = clampNumber(limit, 1, 50);
 
   const activity = collections.activity.length
-    ? normalizeHomeActivityList(collections.activity)
+    ? normalizeHomeActivityList(collections.activity, isAdminRole(getRole(input)))
     : buildSyntheticActivity(input, max);
 
   return activity
@@ -2622,6 +2320,7 @@ export function getPagination(items = [], input = {}) {
   const rows = safeArray(items);
   const data = safeObject(input);
   const state = safeObject(data.state);
+
   const pageSize = clampNumber(first(data.pageSize, state.pageSize, DEFAULT_PAGE_SIZE), 1, 50);
   const totalCount = Math.max(
     rows.length,
@@ -2656,29 +2355,30 @@ export function getPagination(items = [], input = {}) {
 export function buildHomeTemplateData(input = {}) {
   const source = safeObject(input);
   const dashboard = getNormalizedDashboard(source);
-
-  const baseUser = getUser(source);
-  const role = getRole({
-    ...source,
-    dashboard,
-    user: baseUser,
-    sidebarUser: baseUser,
-  });
-
+  const role = getRole(source);
   const admin = isAdminRole(role);
-
-  const user = publicUser({
-    ...baseUser,
+  const user = getUser(source);
+  const collections = getCollections({
+    ...source,
     role,
-    rol: role,
-    roles: [role],
-    isAdmin: admin,
-    isUser: !admin,
+    admin,
   });
 
-  const state = {
-    ...safeObject(source.state),
+  const tickets = collections.tickets;
+  const invoices = collections.invoices;
+  const users = admin ? collections.users : [];
+  const clients = admin ? collections.clients : [];
+  const activity = getActivity(source, DEFAULT_RECENT_LIMIT);
+  const summary = getSummary(source);
+  const stats = computeHomeStats(source);
+  const pagination = getPagination(tickets, source);
+  const ticketRows = getTicketTableRows(source);
+  const invoiceRows = getInvoiceRows(source);
+  const selectedTicketId = getSelectedTicketId(source);
+  const selectedTicket = selectedTicketId ? getSelectedTicket(source) : null;
+  const ticketModal = buildTicketModalData(source);
 
+  const view = sanitizeObject({
     role,
     admin,
 
@@ -2686,149 +2386,62 @@ export function buildHomeTemplateData(input = {}) {
     currentUser: user,
     sidebarUser: user,
 
-    sidebar: {
-      ...safeObject(source.state?.sidebar),
-      user,
-    },
-  };
-
-  const summary = getSummary({
-    ...source,
-    dashboard,
-    state,
-    user,
-    currentUser: user,
-    sidebarUser: user,
-    sidebar: {
-      ...safeObject(source.sidebar),
-      user,
-    },
-    role,
-  });
-
-  const scopedInput = {
-    ...source,
-
-    dashboard,
-    summary,
-
-    role,
-    admin,
-
-    user,
-    currentUser: user,
-    sidebarUser: user,
-
-    sidebar: {
-      ...safeObject(source.sidebar),
-      user,
-    },
-
-    layout: {
-      ...safeObject(source.layout),
-      sidebarUser: user,
-    },
-
-    context: {
-      ...safeObject(source.context),
-      user,
-      sidebarUser: user,
-    },
-
-    state,
-  };
-
-  const collections = getCollections(scopedInput);
-  const stats = computeHomeStats(scopedInput);
-  const widgets = getWidgets(scopedInput);
-  const activity = getActivity(scopedInput, DEFAULT_RECENT_LIMIT);
-  const ticketRows = getTicketTableRows(scopedInput, DEFAULT_PAGE_SIZE);
-  const invoiceRows = getInvoiceRows(scopedInput, DEFAULT_RECENT_LIMIT);
-
-  const recentTickets = getRecentTickets(scopedInput, DEFAULT_RECENT_LIMIT);
-  const recentInvoices = getRecentInvoices(scopedInput, DEFAULT_RECENT_LIMIT);
-
-  const pagination = getPagination(recentTickets, {
-    ...source,
-    state,
-    totalCount: collections.ticketsRemoteCount,
-    pageSize: DEFAULT_PAGE_SIZE,
-  });
-
-  const selectedTicketId = getSelectedTicketId(scopedInput);
-  const selectedTicket = selectedTicketId ? getSelectedTicket(scopedInput) : null;
-  const ticketModal = buildTicketModalData(scopedInput);
-
-  const displayName = getDisplayName(scopedInput);
-  const avatarUrl = getAvatarUrl(scopedInput);
-  const initials = safeText(first(user.initials, getInitials(displayName)), getInitials(displayName))
-    .slice(0, 3)
-    .toUpperCase();
-
-  return sanitizeObject({
-    version: HOME_SELECTORS_VERSION,
-
-    user,
-    currentUser: user,
-    sidebarUser: user,
-
-    sidebar: {
-      user,
-    },
-
-    layout: {
-      sidebarUser: user,
-    },
-
-    context: {
-      user,
-      sidebarUser: user,
-    },
-
-    role,
-    admin,
-
-    displayName,
-    avatarUrl,
-    initials,
+    displayName: user.displayName,
+    name: user.displayName,
+    fullName: user.displayName,
+    avatarUrl: user.avatarUrl,
+    initials: user.initials,
 
     dashboard,
     summary,
     stats,
 
-    widgets,
-    statCards: getStatCards(scopedInput),
-    statusPills: getStatusPills(scopedInput),
-    quickActions: getQuickActions(scopedInput),
+    statCards: getStatCards(source),
+    statusPills: getStatusPills(source),
+    widgets: getWidgets(source),
+    quickActions: getQuickActions(source),
 
-    tickets: collections.tickets,
-    incidencias: collections.tickets,
-    recentTickets,
-    recentIncidencias: recentTickets,
-    latestTickets: recentTickets,
-    latestIncidencias: recentTickets,
+    tickets,
+    incidencias: tickets,
+    recentTickets: getRecentTickets(source),
+    recentIncidencias: getRecentTickets(source),
     ticketRows,
     incidenceRows: ticketRows,
     tableRows: ticketRows,
 
-    invoices: collections.invoices,
-    facturas: collections.invoices,
-    recentInvoices,
-    recentFacturas: recentInvoices,
-    latestInvoices: recentInvoices,
-    latestFacturas: recentInvoices,
+    invoices,
+    facturas: invoices,
+    recentInvoices: getRecentInvoices(source),
+    recentFacturas: getRecentInvoices(source),
     invoiceRows,
     facturaRows: invoiceRows,
 
-    users: admin ? collections.users : [],
-    usuarios: admin ? collections.users : [],
+    users,
+    usuarios: users,
 
-    clients: admin ? collections.clients : [],
-    clientes: admin ? collections.clients : [],
+    clients,
+    clientes: clients,
+    customers: clients,
 
     activity,
     recentActivity: activity,
-    recent: activity,
+
+    collections: {
+      tickets,
+      incidencias: tickets,
+      invoices,
+      facturas: invoices,
+      users,
+      usuarios: users,
+      clients,
+      clientes: clients,
+      customers: clients,
+      activity,
+      widgets: getWidgets(source),
+    },
+
+    pagination,
+    pageItems: pagination.pageItems,
 
     selectedTicketId,
     selectedIncidenciaId: selectedTicketId,
@@ -2837,38 +2450,51 @@ export function buildHomeTemplateData(input = {}) {
     ticketModal,
     incidenciaModal: ticketModal,
 
-    collections,
+    lastUpdatedAt: first(source.lastUpdatedAt, source.lastSyncAt, source.state?.lastUpdatedAt, source.state?.lastSyncAt, dashboard.updatedAt, dashboard.generatedAt, dashboard.lastSyncAt, ""),
+    requestId: safeText(first(source.requestId, source.state?.requestId, dashboard.requestId, dashboard.meta?.requestId, ""), ""),
+  });
 
-    pagination,
-    pageItems: ticketRows,
+  return view;
+}
 
-    counts: {
-      tickets: collections.tickets.length,
-      ticketsRemote: collections.ticketsRemoteCount,
+/* =========================================================
+   SNAPSHOT
+========================================================= */
 
-      invoices: collections.invoices.length,
-      invoicesRemote: collections.invoicesRemoteCount,
+export function getHomeSelectorsSnapshot() {
+  return sanitizeObject({
+    version: HOME_SELECTORS_VERSION,
+    source: "views.home.selectors",
 
-      users: admin ? collections.users.length : 0,
-      usersRemote: admin ? collections.usersRemoteCount : 0,
+    routes: HOME_ROUTES,
 
-      clients: admin ? collections.clients.length : 0,
-      clientsRemote: admin ? collections.clientsRemoteCount : 0,
+    policy: {
+      selectorsOnly: true,
+      modelBackedNormalization: true,
 
-      activity: activity.length,
-      widgets: widgets.length,
-    },
+      noFetch: true,
+      noAuth: true,
+      noRouter: true,
+      noStorage: true,
+      noCssInline: true,
 
-    meta: {
-      requestId: first(dashboard.requestId, dashboard.meta?.requestId, source.requestId, ""),
-      updatedAt: first(dashboard.updatedAt, dashboard.generatedAt, dashboard.meta?.updatedAt, ""),
-      partial: Boolean(dashboard.partial),
-      errorsCount: safeArray(dashboard.errors).length,
-      canSeeUsers: admin,
-      canSeeClients: admin,
-      recentLimit: DEFAULT_RECENT_LIMIT,
-      tableLimit: DEFAULT_PAGE_SIZE,
-      optionalRoutes: OPTIONAL_ROUTE_NAMES.filter((name) => Boolean(HOME_ROUTES[name.toUpperCase()])),
+      routesFromCoreConfig: true,
+      adminRoutesFromCoreConfig: true,
+      blockedRoutesFromCoreConfig: true,
+
+      userNeverExposesUsersClients: true,
+      limitsOnlyVisibleLists: true,
+      countersUseFullTotals: true,
+
+      ticketModalPreparedHere: true,
+      technicianAndInvoicesFromModel: true,
+
+      noHomeRoute: true,
+      noHealthServerReadyPing: true,
+      noEmailIdentity: true,
+      noRawBackendPayloadInOutput: true,
+
+      snapshotRedacted: true,
     },
   });
 }
@@ -3032,4 +2658,7 @@ export default {
 
   getPagination,
   buildHomeTemplateData,
+
+  getHomeSelectorsSnapshot,
+  getDebugSnapshot: getHomeSelectorsSnapshot,
 };

@@ -10,6 +10,7 @@
    - /@{user.slug} marca Home porque canonicalPath = /.
    - /@{user.slug}/{ruta} marca la ruta canónica /{ruta} sólo si la ruta es real.
    - Mostrar/ocultar chrome según route.hideShell/public/auth layout.
+   - Actualizar menú activo en una sola pasada DOM.
    - Mantener app-shell visible.
    - No pisar el host activo de router/render.js.
    - Delegar normalización de rutas/user-scope/bloqueos en core/config.js.
@@ -41,7 +42,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_SHELL_VERSION = "router.shell.v9.aligned-user-scope";
+export const ROUTER_SHELL_VERSION = "router.shell.v10.single-pass-active-menu";
 
 const APP_NAME = config?.appName || config?.name || "Onion Support";
 const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
@@ -347,11 +348,6 @@ function getUserScopedRouteInfo(path = HOME_PATH) {
     restPath,
     lookupPath: routable ? restPath : clean,
   };
-}
-
-function extractUserHomeSlug(path = HOME_PATH) {
-  const info = getUserScopedRouteInfo(path);
-  return info.home ? info.slug : "";
 }
 
 function isUserHomePath(path = HOME_PATH) {
@@ -804,21 +800,18 @@ export function setActiveMenu(_AppCore = null, pathname = HOME_PATH) {
   const links = queryAll(MENU_SELECTOR);
 
   for (const link of links) {
-    setActive(link, false);
-  }
+    let active = false;
 
-  if (currentBlocked) return true;
+    if (!currentBlocked) {
+      const href = linkPath(link);
 
-  for (const link of links) {
-    const href = linkPath(link);
-
-    if (isIgnoredHref(href)) continue;
-
-    const candidate = canonicalPath(href);
-
-    if (!isBlockedShellPath(candidate) && candidate === current) {
-      setActive(link, true);
+      if (!isIgnoredHref(href)) {
+        const candidate = canonicalPath(href);
+        active = !isBlockedShellPath(candidate) && candidate === current;
+      }
     }
+
+    setActive(link, active);
   }
 
   return true;
@@ -1099,6 +1092,7 @@ export function getShellSnapshot(AppCore = null) {
       chromeByRouteOnly: true,
       keepsAppShellVisible: true,
       idempotentDomWrites: true,
+      activeMenuSinglePass: true,
       snapshotRedacted: true,
     },
   };

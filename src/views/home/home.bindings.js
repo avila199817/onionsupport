@@ -12,6 +12,7 @@
    - Limpiar listeners por scope.
    - Evitar doble binding tras rerender.
    - Mantener binding idempotente si el root no cambia.
+   - Actualizar callbacks/API aunque el root no cambie.
    - Busy state durante acciones async.
    - Rutas base desde core/config.js.
    - Bloqueos de rutas desde core/config.js.
@@ -37,7 +38,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const HOME_BINDINGS_VERSION = "home.bindings.v8.stable-delegation";
+export const HOME_BINDINGS_VERSION = "home.bindings.v9.mutable-api-stable-binding";
 
 const DEFAULT_SCOPE = "view:home";
 
@@ -132,6 +133,9 @@ const RAW_KEYS = new Set([
   "payloadRaw",
   "response",
   "body",
+  "request",
+  "headers",
+  "config",
 ]);
 
 const COSMOS_META_KEYS = new Set([
@@ -146,12 +150,15 @@ const COSMOS_META_KEYS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni|ipRaw|ip|userAgent/i;
+  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|correo|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|bank|cuenta|account|ipRaw|ip|userAgent/i;
 
 const SENSITIVE_QUERY_RE =
-  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i;
 
 const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
+const EMAIL_GLOBAL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
+const JWT_RE =
+  /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
 
 const ACTION_SELECTOR = [
   "[data-home-action]",
@@ -180,6 +187,7 @@ const TICKET_MODAL_SELECTOR = "[data-home-modal='ticket-detail']";
 
 const cleanupsByScope = new Map();
 const rootsByScope = new Map();
+const apiByScope = new Map();
 const busyState = new WeakMap();
 
 /* =========================================================
@@ -270,14 +278,24 @@ function nowIso() {
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(JWT_RE, "***")
+    .replace(EMAIL_GLOBAL_RE, "");
 }
 
 function isSensitiveKey(key = "") {
   return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function isRawKey(key = "") {
+  return RAW_KEYS.has(String(key || ""));
+}
+
+function isCosmosMetaKey(key = "") {
+  return COSMOS_META_KEYS.has(String(key || ""));
 }
 
 function isEmailLike(value = "") {
@@ -285,9 +303,13 @@ function isEmailLike(value = "") {
   return Boolean(text && EMAIL_RE.test(text));
 }
 
+function hasSensitiveQuery(value = "") {
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
+}
+
 function sanitizePayloadValue(value, keyHint = "") {
-  if (RAW_KEYS.has(keyHint)) return undefined;
-  if (COSMOS_META_KEYS.has(keyHint)) return undefined;
+  if (isRawKey(keyHint)) return undefined;
+  if (isCosmosMetaKey(keyHint)) return undefined;
   if (isSensitiveKey(keyHint)) return undefined;
 
   if (typeof value === "string") {
@@ -304,8 +326,8 @@ function sanitizePayloadValue(value, keyHint = "") {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if (RAW_KEYS.has(key)) continue;
-      if (COSMOS_META_KEYS.has(key)) continue;
+      if (isRawKey(key)) continue;
+      if (isCosmosMetaKey(key)) continue;
       if (isSensitiveKey(key)) continue;
 
       const clean = sanitizePayloadValue(item, key);
@@ -328,10 +350,6 @@ function sanitizePayload(value = {}) {
 /* =========================================================
    SAFE IDS
 ========================================================= */
-
-function hasSensitiveQuery(value = "") {
-  return SENSITIVE_QUERY_RE.test(String(value || ""));
-}
 
 function safePublicId(value = "") {
   const text = safeText(value, "");
@@ -485,6 +503,7 @@ function cleanupScope(scope = DEFAULT_SCOPE) {
 
   cleanupsByScope.delete(name);
   rootsByScope.delete(name);
+  apiByScope.delete(name);
 
   for (const cleanup of list) {
     try {
@@ -549,6 +568,57 @@ function listen(scope, target, eventName = "", handler = null, options = undefin
   } catch {
     return () => false;
   }
+}
+
+/* =========================================================
+   API CONTEXT
+========================================================= */
+
+function buildApi(callbacks = {}) {
+  return {
+    reload: callbacks.reload,
+    refresh: callbacks.refresh,
+    loadHomeDashboard: callbacks.loadHomeDashboard,
+
+    exportHomeCsvAction: callbacks.exportHomeCsvAction,
+    navigateFromHomeAction: callbacks.navigateFromHomeAction,
+    runHomeQuickAction: callbacks.runHomeQuickAction,
+    copyHomeWidgetIdAction: callbacks.copyHomeWidgetIdAction,
+    createFromHomeAction: callbacks.createFromHomeAction,
+
+    openHomeTicketDetailAction: callbacks.openHomeTicketDetailAction,
+    closeHomeTicketDetailAction: callbacks.closeHomeTicketDetailAction,
+    reduceHomeActionState: callbacks.reduceHomeActionState,
+
+    getState: callbacks.getState,
+    setState: callbacks.setState,
+    patchState: callbacks.patchState,
+    updateState: callbacks.updateState,
+
+    requestRender: callbacks.requestRender,
+    requestRerender: callbacks.requestRerender,
+    rerender: callbacks.rerender,
+    render: callbacks.render,
+    onRenderRequest: callbacks.onRenderRequest,
+    onRenderRequested: callbacks.onRenderRequested,
+
+    onStatePatch: callbacks.onStatePatch,
+    onActionResult: callbacks.onActionResult,
+    onHomeActionResult: callbacks.onHomeActionResult,
+    onTicketDetailOpen: callbacks.onTicketDetailOpen,
+    onIncidenciaDetailOpen: callbacks.onIncidenciaDetailOpen,
+    onTicketDetailClose: callbacks.onTicketDetailClose,
+    onIncidenciaDetailClose: callbacks.onIncidenciaDetailClose,
+
+    goToPage: callbacks.goToPage,
+    goPrevPage: callbacks.goPrevPage,
+    goNextPage: callbacks.goNextPage,
+    changePageSize: callbacks.changePageSize,
+  };
+}
+
+function getBoundApi(scope = DEFAULT_SCOPE) {
+  return apiByScope.get(scopeName(scope)) || {};
 }
 
 /* =========================================================
@@ -1480,15 +1550,7 @@ export function bindHomeEvents({
     return () => false;
   }
 
-  if (force !== true && scopeIsBoundToRoot(name, root)) {
-    return () => cleanupScope(name);
-  }
-
-  cleanupScope(name);
-
-  rootsByScope.set(name, root);
-
-  const api = {
+  const nextApi = buildApi({
     reload,
     refresh,
     loadHomeDashboard,
@@ -1527,7 +1589,17 @@ export function bindHomeEvents({
     goPrevPage,
     goNextPage,
     changePageSize,
-  };
+  });
+
+  if (force !== true && scopeIsBoundToRoot(name, root)) {
+    apiByScope.set(name, nextApi);
+    return () => cleanupScope(name);
+  }
+
+  cleanupScope(name);
+
+  rootsByScope.set(name, root);
+  apiByScope.set(name, nextApi);
 
   listen(name, root, "click", async (event) => {
     if (event.defaultPrevented) return;
@@ -1542,7 +1614,7 @@ export function bindHomeEvents({
       return;
     }
 
-    await dispatchAction(event, element, api, root);
+    await dispatchAction(event, element, getBoundApi(name), root);
   });
 
   listen(name, root, "keydown", async (event) => {
@@ -1550,7 +1622,7 @@ export function bindHomeEvents({
       event.preventDefault();
       event.stopPropagation();
 
-      await handleCloseTicketDetail(root, api);
+      await handleCloseTicketDetail(root, getBoundApi(name));
       return;
     }
 
@@ -1590,6 +1662,7 @@ export function bindHomeEvents({
 export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
   const name = scopeName(scope);
   const root = rootsByScope.get(name) || null;
+  const api = apiByScope.get(name) || {};
 
   return {
     version: HOME_BINDINGS_VERSION,
@@ -1602,6 +1675,21 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
     hasContainer: Boolean(root),
     containerConnected: Boolean(root?.isConnected),
     stableBindingActive: scopeIsBoundToRoot(name, root),
+    mutableApiContext: Boolean(apiByScope.has(name)),
+
+    callbacks: {
+      reload: isFunction(api.reload),
+      refresh: isFunction(api.refresh),
+      exportHomeCsvAction: isFunction(api.exportHomeCsvAction),
+      navigateFromHomeAction: isFunction(api.navigateFromHomeAction),
+      runHomeQuickAction: isFunction(api.runHomeQuickAction),
+      copyHomeWidgetIdAction: isFunction(api.copyHomeWidgetIdAction),
+      createFromHomeAction: isFunction(api.createFromHomeAction),
+      openHomeTicketDetailAction: isFunction(api.openHomeTicketDetailAction),
+      closeHomeTicketDetailAction: isFunction(api.closeHomeTicketDetailAction),
+      patchState: isFunction(api.patchState),
+      requestRender: isFunction(api.requestRender),
+    },
 
     actions: {
       refresh: [...ACTIONS.refresh],
@@ -1624,6 +1712,7 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
       delegatedDomEventsOnly: true,
       stableSameRootBinding: true,
       noDuplicateBindingForSameRoot: true,
+      updatesApiCallbacksOnSameRootRebind: true,
 
       noAppCore: true,
       noGlobalEvents: true,

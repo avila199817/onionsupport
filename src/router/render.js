@@ -14,6 +14,7 @@
    - Inyectar contexto común: AppCore / I18n / t / Toast.
    - Pintar fallback simple sólo en forbidden/not-found/runtime-error.
    - Mantener publicPath visible y canonicalPath interno.
+   - Canonicalizar user-scope sólo si la ruta privada es real/routable.
    - Delegar normalización de rutas/user-scope/bloqueos en core/config.js.
    - No exponer token real en DOM/snapshot.
    - Sin Auth.
@@ -33,6 +34,7 @@
 ========================================================= */
 
 import {
+  ROUTES,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
   canonicalRoutePath as configCanonicalRoutePath,
   getUserScopedRouteInfo as getConfigUserScopedRouteInfo,
@@ -42,10 +44,31 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_RENDER_VERSION = "router.render.v11.empty-guarded-host";
+export const ROUTER_RENDER_VERSION = "router.render.v12.routable-user-scope";
 
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
+const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
+
+const USER_SCOPED_CANONICAL_PATHS = new Set(
+  [
+    DEFAULT_ROUTE,
+    CONFIG_ROUTES.incidencias || "/incidencias",
+    CONFIG_ROUTES.facturas || "/facturas",
+    CONFIG_ROUTES.clientes || "/clientes",
+    CONFIG_ROUTES.cuenta || "/cuenta",
+    CONFIG_ROUTES.ajustes || "/ajustes",
+
+    /*
+      Opcionales reales:
+      sólo entran si core/config.js las define.
+    */
+    CONFIG_ROUTES.usuarios || "",
+    CONFIG_ROUTES.servidor || CONFIG_ROUTES.server || "",
+  ]
+    .filter(Boolean)
+    .map((path) => normalizePathname(path))
+);
 
 const HOST_ATTR = "data-router-view-host";
 const HOST_CLASS = "router-view-host";
@@ -282,25 +305,36 @@ function normalizeUserSlug(value = "") {
   }
 }
 
+function userScopedPathIsRoutable(restPath = DEFAULT_ROUTE) {
+  return USER_SCOPED_CANONICAL_PATHS.has(normalizePathname(restPath));
+}
+
 export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
   try {
     const info = getConfigUserScopedRouteInfo(path);
 
     if (isObject(info)) {
+      const pathname = splitPath(path).pathname;
+
       const restPath = normalizePathname(
-        info.restPath || info.canonicalPath || splitPath(path).pathname
+        info.restPath || info.canonicalPath || pathname
       );
 
       const lookupPath = normalizePathname(
         info.canonicalPath || info.lookupPath || restPath
       );
 
+      const routable = Object.prototype.hasOwnProperty.call(info, "routable")
+        ? Boolean(info.routable)
+        : userScopedPathIsRoutable(restPath);
+
       return {
         scoped: Boolean(info.scoped),
-        home: Boolean(info.home),
+        routable,
+        home: Boolean(info.home && routable),
         slug: normalizeUserSlug(info.slug || ""),
         restPath,
-        lookupPath,
+        lookupPath: routable ? lookupPath : pathname,
       };
     }
   } catch {
@@ -312,6 +346,7 @@ export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
   if (!pathname.startsWith(USER_HOME_PREFIX)) {
     return {
       scoped: false,
+      routable: false,
       home: false,
       slug: "",
       restPath: pathname,
@@ -326,6 +361,7 @@ export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
   if (!slug) {
     return {
       scoped: false,
+      routable: false,
       home: false,
       slug: "",
       restPath: pathname,
@@ -337,12 +373,15 @@ export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
     ? normalizePathname(`/${restSegments.join("/")}`)
     : DEFAULT_ROUTE;
 
+  const routable = userScopedPathIsRoutable(restPath);
+
   return {
     scoped: true,
-    home: restPath === DEFAULT_ROUTE,
+    routable,
+    home: routable && restPath === DEFAULT_ROUTE,
     slug,
     restPath,
-    lookupPath: restPath,
+    lookupPath: routable ? restPath : pathname,
   };
 }
 
@@ -357,15 +396,24 @@ export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
     return DEFAULT_ROUTE;
   }
 
+  const scoped = getUserScopedRouteInfo(pathname);
+
+  if (scoped.scoped && !scoped.routable) {
+    return isBlockedRoutePath(pathname) ? DEFAULT_ROUTE : pathname;
+  }
+
   try {
     const canonical = normalizePathname(
-      configCanonicalRoutePath(path) || pathname || DEFAULT_ROUTE
+      configCanonicalRoutePath(path) ||
+        (scoped.scoped && scoped.routable ? scoped.lookupPath : pathname) ||
+        DEFAULT_ROUTE
     );
 
     return isBlockedRoutePath(canonical) ? DEFAULT_ROUTE : canonical;
   } catch {
-    const scoped = getUserScopedRouteInfo(pathname);
-    const canonical = scoped.scoped ? scoped.lookupPath : pathname;
+    const canonical = scoped.scoped && scoped.routable
+      ? scoped.lookupPath
+      : pathname;
 
     return isBlockedRoutePath(canonical) ? DEFAULT_ROUTE : canonical;
   }
@@ -1485,6 +1533,7 @@ export function getRenderSnapshot(AppCore = null) {
       noTokenInDomDataset: true,
 
       supportsUserScopedPaths: true,
+      respectsRoutableUserScope: true,
       validatesRealUserSlug: false,
       realSlugValidationOwner: "router/index.js",
 

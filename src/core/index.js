@@ -5,10 +5,10 @@
    Responsabilidad:
    - Kernel mínimo global.
    - Estado en memoria.
-   - Event bus mínimo.
-   - Registry mínimo de módulos.
-   - Cleanup mínimo.
-   - Hooks mínimos.
+   - Event bus canónico desde core/events.js.
+   - Registry de módulos canónico desde core/modules.js.
+   - Cleanup canónico desde core/cleanup.js.
+   - Hooks canónicos desde core/hooks.js.
    - Instalar HTTP único desde core/http.js.
    - Auth estricta base: access token usable + user usable.
    - User inválido si disabled/deleted/archived/active=false.
@@ -18,14 +18,13 @@
    - Delegar rutas, user-scope y bloqueos en core/config.js.
    - Session context mínimo seguro en memoria.
    - No guardar refresh token en Core.
-   - No guardar secretos.
+   - No guardar secretos persistentes.
    - Sin storage.
    - Sin DOM cache complejo.
    - Sin network listeners.
    - Sin fetch propio.
    - Sin cliente HTTP paralelo.
    - Sin framework interno.
-   - Sin magia negra.
    - Sin /home.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
@@ -43,9 +42,14 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "./config.js";
 
+import { createEvents } from "./events.js";
+import { createModules } from "./modules.js";
+import { createCleanup } from "./cleanup.js";
+import { createHooks } from "./hooks.js";
+
 import Http, { installHttp } from "./http.js";
 
-export const CORE_VERSION = "core.index.v7";
+export const CORE_VERSION = "core.index.v8";
 
 const APP_NAME =
   config?.appName ||
@@ -242,6 +246,10 @@ function safeCall(fn = null, context = null, ...args) {
   } catch {
     return null;
   }
+}
+
+function nowIso() {
+  return new Date().toISOString();
 }
 
 /* =========================================================
@@ -619,10 +627,6 @@ function safeInternalPath(path = ROOT_PATH) {
   if (/[\r\n\t\\]/.test(target)) return ROOT_PATH;
   if (isBlockedRoutePath(target)) return ROOT_PATH;
 
-  /*
-    Core no debe conservar tokens/secrets en rutas de estado.
-    normalizePublicPath() ya limpia la query/hash; esto sólo documenta la frontera.
-  */
   if (rawPathHasSensitiveQuery(raw)) {
     return target;
   }
@@ -662,6 +666,13 @@ function extractUserSlug(user = null) {
       user.lookup?.slug ||
       user.profile?.slug ||
       user.routing?.slug ||
+      user.username ||
+      user.userName ||
+      user.user_name ||
+      user.usernameLower ||
+      user.username_lower ||
+      user.userId ||
+      user.id ||
       ""
   );
 }
@@ -681,7 +692,7 @@ function isSensitiveObjectKey(key = "") {
 }
 
 function isDroppedStateKey(key = "") {
-  return SENSITIVE_STATE_KEYS.has(normalizeKey(key));
+  return DROPPED_STATE_KEYS.includes(normalizeKey(key));
 }
 
 function isTokenStateKey(key = "") {
@@ -847,7 +858,8 @@ function normalizeUser(user = null) {
     sub: safeUser.sub || id || null,
 
     username: username || null,
-    slug: slug || null,
+    usernameLower: username ? username.toLowerCase() : null,
+    slug: slug || username || null,
 
     name: safeUser.name || displayName,
     nombre: safeUser.nombre || displayName,
@@ -855,6 +867,7 @@ function normalizeUser(user = null) {
     displayName,
 
     email: safeUser.email || null,
+    emailLower: safeUser.email ? String(safeUser.email).toLowerCase() : null,
 
     role,
     rol: role,
@@ -977,285 +990,14 @@ function sameSessionUser(session = null, user = null) {
 }
 
 /* =========================================================
-   EVENTS
+   CANONICAL CORE REGISTRIES
 ========================================================= */
 
-function createEvents() {
-  const listeners = new Map();
-
-  function on(name = "", handler = null) {
-    if (!name || !isFunction(handler)) return () => false;
-
-    if (!listeners.has(name)) {
-      listeners.set(name, new Set());
-    }
-
-    listeners.get(name).add(handler);
-
-    return () => off(name, handler);
-  }
-
-  function once(name = "", handler = null) {
-    if (!isFunction(handler)) return () => false;
-
-    const dispose = on(name, (event) => {
-      dispose();
-      handler(event);
-    });
-
-    return dispose;
-  }
-
-  function off(name = "", handler = null) {
-    if (!name) return false;
-
-    if (!handler) {
-      listeners.delete(name);
-      return true;
-    }
-
-    listeners.get(name)?.delete(handler);
-    return true;
-  }
-
-  function emit(name = "", payload = {}) {
-    if (!name) return false;
-
-    const event = {
-      type: name,
-      detail: payload,
-      payload,
-    };
-
-    for (const handler of [...(listeners.get(name) || [])]) {
-      try {
-        handler(event);
-      } catch {
-        // Un listener no debe romper Core.
-      }
-    }
-
-    return true;
-  }
-
-  function clear() {
-    listeners.clear();
-    return true;
-  }
-
-  function getSnapshot() {
-    return {
-      names: [...listeners.keys()],
-    };
-  }
-
-  return {
-    on,
-    once,
-    off,
-    emit,
-    clear,
-    getSnapshot,
-  };
-}
-
-/* =========================================================
-   MODULES
-========================================================= */
-
-function createModules() {
-  const map = new Map();
-
-  function register(name = "", value = null) {
-    if (!name || !value) return false;
-
-    map.set(name, value);
-    return value;
-  }
-
-  function get(name = "") {
-    return map.get(name) || null;
-  }
-
-  function remove(name = "") {
-    return map.delete(name);
-  }
-
-  function list() {
-    return [...map.keys()];
-  }
-
-  function getSnapshot() {
-    return {
-      count: map.size,
-      modules: list(),
-    };
-  }
-
-  return {
-    register,
-    get,
-    has: (name = "") => map.has(name),
-    remove,
-    list,
-    getSnapshot,
-  };
-}
-
-/* =========================================================
-   CLEANUP
-========================================================= */
-
-function createCleanup() {
-  const scopes = new Map();
-
-  function add(scope = "global", disposer = null) {
-    if (!isFunction(disposer)) return () => false;
-
-    if (!scopes.has(scope)) {
-      scopes.set(scope, new Set());
-    }
-
-    scopes.get(scope).add(disposer);
-
-    return () => {
-      try {
-        disposer();
-      } catch {
-        // noop
-      }
-
-      scopes.get(scope)?.delete(disposer);
-      return true;
-    };
-  }
-
-  function event(scope = "global", target = null, eventName = "", handler = null, options = false) {
-    if (!target || !eventName || !isFunction(handler)) {
-      return () => false;
-    }
-
-    try {
-      target.addEventListener(eventName, handler, options);
-    } catch {
-      return () => false;
-    }
-
-    return add(scope, () => {
-      try {
-        target.removeEventListener(eventName, handler, options);
-      } catch {
-        // noop
-      }
-    });
-  }
-
-  function run(scope = "") {
-    const names = scope ? [scope] : [...scopes.keys()];
-
-    for (const name of names) {
-      for (const disposer of [...(scopes.get(name) || [])]) {
-        try {
-          disposer();
-        } catch {
-          // noop
-        }
-      }
-
-      scopes.delete(name);
-    }
-
-    return true;
-  }
-
-  function getSnapshot() {
-    return {
-      scopes: [...scopes.keys()],
-    };
-  }
-
-  return {
-    add,
-    event,
-    run,
-    clear: run,
-    dispose: run,
-    getSnapshot,
-  };
-}
-
-/* =========================================================
-   HOOKS
-========================================================= */
-
-function createHooks() {
-  const map = new Map();
-
-  function add(name = "", handler = null) {
-    if (!name || !isFunction(handler)) return () => false;
-
-    if (!map.has(name)) {
-      map.set(name, []);
-    }
-
-    map.get(name).push(handler);
-
-    return () => {
-      map.set(
-        name,
-        (map.get(name) || []).filter((item) => item !== handler)
-      );
-
-      return true;
-    };
-  }
-
-  async function run(name = "", payload = {}) {
-    let current = payload;
-
-    for (const handler of map.get(name) || []) {
-      try {
-        const next = await handler(current);
-
-        if (next !== undefined) {
-          current = next;
-        }
-      } catch {
-        // Un hook no debe romper Core.
-      }
-    }
-
-    return current;
-  }
-
-  function clear(name = "") {
-    if (name) {
-      map.delete(name);
-    } else {
-      map.clear();
-    }
-
-    return true;
-  }
-
-  function getSnapshot() {
-    return {
-      hooks: [...map.keys()],
-    };
-  }
-
-  return {
-    add,
-    run,
-    clear,
-    getSnapshot,
-  };
-}
-
+const internalRegistry = {};
 const events = createEvents();
-const modules = createModules();
-const cleanup = createCleanup();
-const hooks = createHooks();
+const modules = createModules({ registry: internalRegistry, events });
+const cleanup = createCleanup({ registry: internalRegistry, events });
+const hooks = createHooks({ registry: internalRegistry, events });
 
 const services = {};
 const dom = {};
@@ -1264,6 +1006,7 @@ const registry = {
   modules,
   hooks,
   cleanup,
+  records: internalRegistry,
 };
 
 /* =========================================================
@@ -1281,6 +1024,8 @@ const initialLocale = isBrowser()
 const initialTheme = isBrowser()
   ? document.documentElement.dataset.theme || "system"
   : "system";
+
+const createdAt = nowIso();
 
 const state = {
   initialized: false,
@@ -1349,6 +1094,10 @@ const state = {
   error: null,
   lastError: null,
   hasError: false,
+
+  createdAt,
+  updatedAt: createdAt,
+  stateChangeCount: 0,
 };
 
 let initialized = false;
@@ -1427,6 +1176,7 @@ function sanitizeStatePatch(patch = {}) {
         null;
 
       const session = normalizeSessionContext(value, currentUser);
+
       output.session = session;
       output.sessionData = session;
       output.sessionId = session?.sessionId || null;
@@ -1453,6 +1203,44 @@ function sanitizeStatePatch(patch = {}) {
 
     if (key === "route" || key === "canonicalPath") {
       output[key] = normalizeCanonicalPath(value);
+      continue;
+    }
+
+    if (key === "lang" || key === "language" || key === "locale") {
+      const lang = ["es", "ca", "en"].includes(value) ? value : "es";
+      output.lang = lang;
+      output.language = lang;
+      output.locale = lang;
+      continue;
+    }
+
+    if (key === "theme") {
+      output.theme = ["dark", "light", "system"].includes(value)
+        ? value
+        : "system";
+      continue;
+    }
+
+    if (key === "error") {
+      const normalized = normalizeError(value);
+      output.error = normalized;
+      output.lastError = normalized;
+      output.hasError = Boolean(normalized);
+      continue;
+    }
+
+    if (key === "lastError") {
+      const normalized = normalizeError(value);
+      output.error = normalized;
+      output.lastError = normalized;
+      output.hasError = Boolean(normalized);
+      continue;
+    }
+
+    if (key === "hasError" && value === false) {
+      output.error = null;
+      output.lastError = null;
+      output.hasError = false;
       continue;
     }
 
@@ -1620,6 +1408,9 @@ function setState(patch = {}, options = {}) {
 
   syncAuth();
 
+  state.updatedAt = nowIso();
+  state.stateChangeCount = Number(state.stateChangeCount || 0) + 1;
+
   if (options.emit !== false && options.silent !== true) {
     events.emit("app:state:change", {
       state: getState(),
@@ -1768,6 +1559,8 @@ function nestedPayloads(payload = {}) {
     isObject(payload.payload) ? payload.payload : null,
     isObject(payload.result) ? payload.result : null,
     isObject(payload.auth) ? payload.auth : null,
+    isObject(payload.session) ? payload.session : null,
+    isObject(payload.sessionData) ? payload.sessionData : null,
   ].filter(Boolean);
 }
 
@@ -1851,6 +1644,9 @@ function applySession(payload = {}, options = {}) {
 function clearSession(options = {}) {
   clearSessionFields();
 
+  state.updatedAt = nowIso();
+  state.stateChangeCount = Number(state.stateChangeCount || 0) + 1;
+
   if (options.emit !== false && options.silent !== true) {
     events.emit("app:state:change", {
       state: getState(),
@@ -1861,32 +1657,51 @@ function clearSession(options = {}) {
   return true;
 }
 
-function setTheme(theme = "system") {
+function setTheme(theme = "system", options = {}) {
   const value = ["dark", "light", "system"].includes(theme)
     ? theme
     : "system";
 
   state.theme = value;
+  state.updatedAt = nowIso();
+
+  if (options.emit === true) {
+    events.emit("app:theme:change", {
+      theme: value,
+    });
+  }
+
   return value;
 }
 
-function setLang(lang = "es") {
+function setLang(lang = "es", options = {}) {
   const value = ["es", "ca", "en"].includes(lang) ? lang : "es";
 
   state.lang = value;
   state.language = value;
   state.locale = value;
+  state.updatedAt = nowIso();
+
+  if (options.emit === true) {
+    events.emit("app:lang:change", {
+      lang: value,
+      language: value,
+      locale: value,
+    });
+  }
 
   return value;
 }
 
 function setSidebarOpen(value = false) {
   state.sidebarOpen = Boolean(value);
+  state.updatedAt = nowIso();
   return state.sidebarOpen;
 }
 
 function setLoading(value = false) {
   state.loading = Boolean(value);
+  state.updatedAt = nowIso();
   return state.loading;
 }
 
@@ -1900,12 +1715,19 @@ function normalizeError(error = null) {
   };
 }
 
-function setError(error = null) {
+function setError(error = null, options = {}) {
   const normalized = normalizeError(error);
 
   state.error = normalized;
   state.lastError = normalized;
   state.hasError = Boolean(normalized);
+  state.updatedAt = nowIso();
+
+  if (options.emit === true) {
+    events.emit("app:error", {
+      error: normalized,
+    });
+  }
 
   return normalized;
 }
@@ -2000,8 +1822,11 @@ function showToast(message = "", type = "info", options = {}) {
    MODULES
 ========================================================= */
 
-function registerModule(name = "", value = null) {
-  return modules.register(name, value);
+function registerModule(name = "", value = null, options = {}) {
+  return modules.register(name, value, {
+    ...options,
+    overwrite: options.overwrite !== false,
+  });
 }
 
 function getModule(name = "") {
@@ -2030,7 +1855,7 @@ function installHttpBridge(options = {}) {
   }
 
   services.http = httpClient;
-  modules.register("http", httpClient);
+  modules.register("http", httpClient, { overwrite: true });
 
   return httpClient;
 }
@@ -2040,7 +1865,7 @@ function setHttpClient(value = null) {
 
   httpClient = value;
   services.http = httpClient;
-  modules.register("http", httpClient);
+  modules.register("http", httpClient, { overwrite: true });
 
   return true;
 }
@@ -2110,10 +1935,15 @@ async function init(options = {}) {
   if (initPromise) return initPromise;
 
   initPromise = Promise.resolve()
-    .then(() => {
+    .then(async () => {
       state.booting = true;
       state.loading = true;
       state.ready = false;
+
+      await hooks.run("beforeInit", {
+        core: AppCore,
+        options,
+      });
 
       installHttpBridge(options);
 
@@ -2123,8 +1953,27 @@ async function init(options = {}) {
       state.booting = false;
       state.loading = false;
       state.ready = true;
+      state.updatedAt = nowIso();
+
+      await hooks.run("afterInit", {
+        core: AppCore,
+        options,
+      });
+
+      events.emit("core:ready", {
+        version: CORE_VERSION,
+      });
 
       return AppCore;
+    })
+    .catch((error) => {
+      state.booting = false;
+      state.loading = false;
+      state.ready = false;
+
+      setError(error, { emit: true });
+
+      throw error;
     })
     .finally(() => {
       initPromise = null;
@@ -2142,6 +1991,8 @@ function getSnapshot() {
 
   return {
     version: CORE_VERSION,
+
+    appName: APP_NAME,
 
     initialized,
     ready: Boolean(state.ready),
@@ -2179,6 +2030,12 @@ function getSnapshot() {
 
     hasHttp: Boolean(httpClient),
     modules: modules.list(),
+    events: events.names(),
+    cleanup: cleanup.getSnapshot?.() || null,
+    hooks: hooks.getSnapshot?.() || null,
+
+    updatedAt: state.updatedAt || null,
+    stateChangeCount: Number(state.stateChangeCount || 0),
 
     policy: {
       memoryStateOnly: true,
@@ -2335,7 +2192,7 @@ Object.defineProperties(AppCore, {
       return modules.get("router");
     },
     set(value) {
-      modules.register("router", value);
+      modules.register("router", value, { overwrite: true });
     },
   },
 
@@ -2344,7 +2201,7 @@ Object.defineProperties(AppCore, {
       return modules.get("router");
     },
     set(value) {
-      modules.register("router", value);
+      modules.register("router", value, { overwrite: true });
     },
   },
 
@@ -2353,7 +2210,7 @@ Object.defineProperties(AppCore, {
       return modules.get("auth");
     },
     set(value) {
-      modules.register("auth", value);
+      modules.register("auth", value, { overwrite: true });
     },
   },
 
@@ -2362,7 +2219,7 @@ Object.defineProperties(AppCore, {
       return modules.get("auth");
     },
     set(value) {
-      modules.register("auth", value);
+      modules.register("auth", value, { overwrite: true });
     },
   },
 
@@ -2371,7 +2228,7 @@ Object.defineProperties(AppCore, {
       return modules.get("i18n");
     },
     set(value) {
-      modules.register("i18n", value);
+      modules.register("i18n", value, { overwrite: true });
     },
   },
 
@@ -2380,7 +2237,7 @@ Object.defineProperties(AppCore, {
       return modules.get("i18n");
     },
     set(value) {
-      modules.register("i18n", value);
+      modules.register("i18n", value, { overwrite: true });
     },
   },
 
@@ -2389,7 +2246,7 @@ Object.defineProperties(AppCore, {
       return modules.get("toast");
     },
     set(value) {
-      modules.register("toast", value);
+      modules.register("toast", value, { overwrite: true });
       services.toast = value;
     },
   },
@@ -2399,7 +2256,7 @@ Object.defineProperties(AppCore, {
       return modules.get("toast");
     },
     set(value) {
-      modules.register("toast", value);
+      modules.register("toast", value, { overwrite: true });
       services.toast = value;
     },
   },

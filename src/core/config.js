@@ -12,6 +12,7 @@
    - Rutas admin reales: clientes, usuarios, servidor.
    - Auth endpoints mínimos alineados con backend.
    - /api/auth/me siempre privado.
+   - /api/auth/refresh público y sin Authorization.
    - Token param único: token.
    - Roles únicos: admin / user.
    - Idioma base primario: es.
@@ -24,7 +25,7 @@
    - Sin magia negra.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.v7";
+export const CONFIG_VERSION = "core.config.v8";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
@@ -174,7 +175,7 @@ export const PRIVATE_API_PATHS = Object.freeze([
 ]);
 
 /* =========================================================
-   HELPERS
+   INTERNAL HELPERS
 ========================================================= */
 
 function freeze(value) {
@@ -291,14 +292,28 @@ function normalizePathname(pathname = "/") {
   return value || "/";
 }
 
-function pathIsOrStartsWith(path = "", blocked = "") {
+function pathIsOrStartsWith(path = "", candidate = "") {
   const current = normalizePathname(path).toLowerCase();
-  const target = normalizePathname(blocked).toLowerCase();
+  const target = normalizePathname(candidate).toLowerCase();
 
   return Boolean(
     current === target ||
       current.startsWith(`${target}/`)
   );
+}
+
+function pathMatches(path = "", candidate = "") {
+  const current = normalizeRoutePath(path);
+  const target = normalizeRoutePath(candidate);
+
+  return Boolean(current && target && current === target);
+}
+
+function endpointMatches(path = "", candidate = "") {
+  const current = normalizeEndpointPath(path);
+  const target = normalizeEndpointPath(candidate);
+
+  return Boolean(current && target && current === target);
 }
 
 function isBlockedNormalizedPath(path = "") {
@@ -318,6 +333,10 @@ function isBlockedNormalizedPath(path = "") {
     clean.startsWith("/otp/")
   );
 }
+
+/* =========================================================
+   URL / PATH NORMALIZATION
+========================================================= */
 
 export function routePathFromUrlLike(value = "") {
   const raw = text(value, "");
@@ -354,6 +373,10 @@ export function routePathFromUrlLike(value = "") {
     return "/";
   }
 
+  if (/[\r\n\t\\]/.test(raw)) {
+    return "/";
+  }
+
   return raw;
 }
 
@@ -363,7 +386,7 @@ export function endpointPathFromUrlLike(value = "") {
   if (!raw) return "";
 
   if (raw.startsWith("//")) {
-    return "/";
+    return "";
   }
 
   try {
@@ -371,17 +394,21 @@ export function endpointPathFromUrlLike(value = "") {
       const url = new URL(raw);
 
       if (!isAllowedBackendOrigin(url.origin)) {
-        return "/";
+        return "";
       }
 
       return `${url.pathname || "/"}${url.search || ""}`;
     }
   } catch {
-    return "/";
+    return "";
   }
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    return "/";
+    return "";
+  }
+
+  if (/[\r\n\t\\]/.test(raw)) {
+    return "";
   }
 
   return raw;
@@ -409,20 +436,6 @@ export function normalizeEndpointPath(path = "") {
   if (!raw) return "";
 
   return normalizePathname(raw);
-}
-
-function pathMatches(path = "", candidate = "") {
-  const current = normalizeRoutePath(path);
-  const target = normalizeRoutePath(candidate);
-
-  return Boolean(current && target && current === target);
-}
-
-function endpointMatches(path = "", candidate = "") {
-  const current = normalizeEndpointPath(path);
-  const target = normalizeEndpointPath(candidate);
-
-  return Boolean(current && target && current === target);
 }
 
 /* =========================================================
@@ -862,7 +875,9 @@ export function isAdminRoute(path = "") {
 
   const route = canonicalRoutePath(path);
 
-  return config.adminRoutes.some((item) => pathMatches(route, item));
+  return config.adminRoutes.some((item) =>
+    pathIsOrStartsWith(route, item)
+  );
 }
 
 export function getProtectedPublicTokenRoutes() {
@@ -928,6 +943,7 @@ export function getConfigSnapshot() {
       refresh: AUTH_ENDPOINTS.refresh,
       me: AUTH_ENDPOINTS.me,
       logout: AUTH_ENDPOINTS.logout,
+      logoutAll: AUTH_ENDPOINTS.logoutAll,
       activateAccount: AUTH_ENDPOINTS.activateAccount,
       passwordRequest: AUTH_ENDPOINTS.requestPasswordReset,
       passwordReset: AUTH_ENDPOINTS.confirmPasswordReset,
@@ -978,6 +994,8 @@ export function getConfigSnapshot() {
       no2fa: true,
       noOtp: true,
       noMfa: true,
+
+      invalidApiEndpointsReturnEmpty: true,
     },
   };
 }

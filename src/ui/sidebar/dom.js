@@ -10,6 +10,7 @@
    - Eliminar roots duplicados/stale tras cada montaje.
    - Ocultar/limpiar sidebar.
    - Sincronizar estado visual open/collapsed.
+   - Hacer mutaciones DOM idempotentes cuando sea posible.
    - Cachear referencias básicas en AppCore.dom.
    - Cachear referencias estructurales del dropdown.
    - Cachear referencias diagnósticas de logo/avatar sin decidir lógica.
@@ -33,7 +34,7 @@ import {
   SIDEBAR_SELECTORS,
 } from "./constants.js";
 
-export const SIDEBAR_DOM_VERSION = "sidebar.dom.v7";
+export const SIDEBAR_DOM_VERSION = "sidebar.dom.v8.idempotent-writes";
 
 /* =========================================================
    BASICS
@@ -97,6 +98,53 @@ function matches(node = null, selector = "") {
 
 function uniqueElements(values = []) {
   return [...new Set(values.filter(isElement))];
+}
+
+/* =========================================================
+   IDEMPOTENT MUTATION HELPERS
+========================================================= */
+
+function setAttributeIfChanged(node = null, name = "", value = "") {
+  if (!isElement(node) || !name) return false;
+
+  const next = String(value ?? "");
+
+  try {
+    if (node.getAttribute(name) === next) return false;
+
+    node.setAttribute(name, next);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeAttributeIfPresent(node = null, name = "") {
+  if (!isElement(node) || !name) return false;
+
+  try {
+    if (!node.hasAttribute(name)) return false;
+
+    node.removeAttribute(name);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setTextIfChanged(node = null, value = "") {
+  if (!isElement(node)) return false;
+
+  const next = String(value ?? "");
+
+  try {
+    if (node.textContent === next) return false;
+
+    node.textContent = next;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -201,10 +249,16 @@ export function clearNode(node = null) {
   if (!isElement(node)) return false;
 
   try {
+    if (!node.childNodes.length && !node.textContent) {
+      return false;
+    }
+
     node.replaceChildren();
     return true;
   } catch {
     try {
+      if (!node.textContent) return false;
+
       node.textContent = "";
       return true;
     } catch {
@@ -217,17 +271,27 @@ export function setHidden(node = null, hidden = false) {
   if (!isElement(node)) return false;
 
   const value = Boolean(hidden);
+  let changed = false;
 
   try {
-    node.hidden = value;
-    node.setAttribute("aria-hidden", value ? "true" : "false");
-    node.setAttribute("aria-busy", "false");
-
-    if (SIDEBAR_CLASSES.hidden) {
-      node.classList.toggle(SIDEBAR_CLASSES.hidden, value);
+    if (node.hidden !== value) {
+      node.hidden = value;
+      changed = true;
     }
 
-    return true;
+    changed = setAttributeIfChanged(node, "aria-hidden", value ? "true" : "false") || changed;
+    changed = setAttributeIfChanged(node, "aria-busy", "false") || changed;
+
+    if (SIDEBAR_CLASSES.hidden) {
+      const hasClass = node.classList.contains(SIDEBAR_CLASSES.hidden);
+
+      if (hasClass !== value) {
+        node.classList.toggle(SIDEBAR_CLASSES.hidden, value);
+        changed = true;
+      }
+    }
+
+    return changed;
   } catch {
     return false;
   }
@@ -238,11 +302,19 @@ export function setDataset(node = null, key = "", value = "") {
 
   try {
     if (value === null || value === undefined || value === "") {
+      if (!Object.prototype.hasOwnProperty.call(node.dataset, key)) {
+        return false;
+      }
+
       delete node.dataset[key];
-    } else {
-      node.dataset[key] = String(value);
+      return true;
     }
 
+    const next = String(value);
+
+    if (node.dataset[key] === next) return false;
+
+    node.dataset[key] = next;
     return true;
   } catch {
     return false;
@@ -253,7 +325,13 @@ export function setClass(node = null, className = "", enabled = false) {
   if (!isElement(node) || !className) return false;
 
   try {
-    node.classList.toggle(className, Boolean(enabled));
+    const value = Boolean(enabled);
+
+    if (node.classList.contains(className) === value) {
+      return false;
+    }
+
+    node.classList.toggle(className, value);
     return true;
   } catch {
     return false;
@@ -358,14 +436,19 @@ function prepareSidebarRoot(root = null) {
   if (!isElement(root)) return null;
 
   try {
-    root.id = SIDEBAR_ROOT_ID;
-    root.dataset.sidebarRoot = "true";
+    if (root.id !== SIDEBAR_ROOT_ID) {
+      root.id = SIDEBAR_ROOT_ID;
+    }
 
-    if (SIDEBAR_CLASSES.root) {
+    if (root.dataset.sidebarRoot !== "true") {
+      root.dataset.sidebarRoot = "true";
+    }
+
+    if (SIDEBAR_CLASSES.root && !root.classList.contains(SIDEBAR_CLASSES.root)) {
       root.classList.add(SIDEBAR_CLASSES.root);
     }
 
-    if (SIDEBAR_CLASSES.appRoot) {
+    if (SIDEBAR_CLASSES.appRoot && !root.classList.contains(SIDEBAR_CLASSES.appRoot)) {
       root.classList.add(SIDEBAR_CLASSES.appRoot);
     }
 
@@ -395,7 +478,12 @@ export function mountSidebarRoot(nextRoot = null) {
     */
     removeDuplicateSidebarRoots(root);
 
-    mount.replaceChildren(root);
+    if (
+      mount.childNodes.length !== 1 ||
+      mount.firstElementChild !== root
+    ) {
+      mount.replaceChildren(root);
+    }
 
     /*
       Limpieza posterior:
@@ -412,10 +500,10 @@ export function mountSidebarRoot(nextRoot = null) {
 export function hideSidebarRoot(root = getSidebarRoot()) {
   if (!isElement(root)) return false;
 
-  setHidden(root, true);
-  clearNode(root);
+  const hiddenChanged = setHidden(root, true);
+  const cleared = clearNode(root);
 
-  return true;
+  return hiddenChanged || cleared;
 }
 
 export function removeSidebarRoot(root = getSidebarRoot()) {
@@ -433,37 +521,32 @@ export function setSidebarOpenState(root = getSidebarRoot(), open = true) {
   if (!isElement(root)) return false;
 
   const value = Boolean(open);
+  let changed = false;
 
   try {
-    root.dataset.open = value ? "true" : "false";
-    root.dataset.sidebarState = value ? "open" : "collapsed";
+    changed = setDataset(root, "open", value ? "true" : "false") || changed;
+    changed = setDataset(root, "sidebarState", value ? "open" : "collapsed") || changed;
 
-    if (SIDEBAR_CLASSES.open) {
-      root.classList.toggle(SIDEBAR_CLASSES.open, value);
-    }
-
-    if (SIDEBAR_CLASSES.collapsed) {
-      root.classList.toggle(SIDEBAR_CLASSES.collapsed, !value);
-    }
+    changed = setClass(root, SIDEBAR_CLASSES.open, value) || changed;
+    changed = setClass(root, SIDEBAR_CLASSES.collapsed, !value) || changed;
 
     const toggle = query(SIDEBAR_SELECTORS.toggle, root);
 
     if (toggle) {
-      toggle.setAttribute("aria-expanded", value ? "true" : "false");
-      toggle.setAttribute(
-        "aria-label",
-        value ? "Cerrar barra lateral" : "Abrir barra lateral"
-      );
-      toggle.dataset.state = value ? "open" : "collapsed";
+      const labelText = value ? "Cerrar barra lateral" : "Abrir barra lateral";
+
+      changed = setAttributeIfChanged(toggle, "aria-expanded", value ? "true" : "false") || changed;
+      changed = setAttributeIfChanged(toggle, "aria-label", labelText) || changed;
+      changed = setDataset(toggle, "state", value ? "open" : "collapsed") || changed;
 
       const label = query(".sidebar-toggle-label", toggle);
 
       if (label) {
-        label.textContent = value ? "Cerrar barra lateral" : "Abrir barra lateral";
+        changed = setTextIfChanged(label, labelText) || changed;
       }
     }
 
-    return true;
+    return changed;
   } catch {
     return false;
   }
@@ -622,21 +705,19 @@ export function setActiveLink(link = null, active = false) {
   if (!isElement(link)) return false;
 
   const value = Boolean(active);
+  let changed = false;
 
   try {
-    if (SIDEBAR_CLASSES.active) {
-      link.classList.toggle(SIDEBAR_CLASSES.active, value);
-    }
-
-    link.dataset.active = value ? "true" : "false";
+    changed = setClass(link, SIDEBAR_CLASSES.active, value) || changed;
+    changed = setDataset(link, "active", value ? "true" : "false") || changed;
 
     if (value) {
-      link.setAttribute("aria-current", "page");
+      changed = setAttributeIfChanged(link, "aria-current", "page") || changed;
     } else {
-      link.removeAttribute("aria-current");
+      changed = removeAttributeIfPresent(link, "aria-current") || changed;
     }
 
-    return true;
+    return changed;
   } catch {
     return false;
   }
@@ -645,11 +726,13 @@ export function setActiveLink(link = null, active = false) {
 export function clearActiveLinks(root = getSidebarRoot()) {
   const refs = getSidebarRefs(root);
 
+  let changed = false;
+
   for (const link of refs.navLinks) {
-    setActiveLink(link, false);
+    changed = setActiveLink(link, false) || changed;
   }
 
-  return true;
+  return changed;
 }
 
 /* =========================================================
@@ -779,6 +862,11 @@ export function getSidebarDomSnapshot(root = getSidebarRoot()) {
       prioritizesMountRoot: true,
       replacesMountChildren: true,
       removesDuplicateRoots: true,
+
+      idempotentHiddenWrites: true,
+      idempotentDatasetWrites: true,
+      idempotentClassWrites: true,
+      idempotentOpenStateWrites: true,
 
       cachesLogoRefs: true,
       cachesAvatarRefsForDiagnosticsOnly: true,

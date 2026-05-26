@@ -12,6 +12,7 @@
    - Roles únicos exactos: admin / user.
    - Rutas admin: sólo admin.
    - Delegar normalización de rutas/user-scope/bloqueos en core/config.js.
+   - Canonicalizar user-scope sólo para rutas privadas reales conocidas.
    - No validar aquí si el slug coincide con el usuario real.
    - La validación real del slug pertenece a router/index.js.
    - No inventar slug.
@@ -44,7 +45,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const GUARDS_VERSION = "router.guards.v11";
+export const GUARDS_VERSION = "router.guards.v12.aligned-user-scope";
 
 const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
 
@@ -53,6 +54,26 @@ const HOME_PATH = "/";
 const USER_PREFIX = USER_HOME_PREFIX || "/@";
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
+
+const USER_SCOPED_CANONICAL_PATHS = new Set(
+  [
+    HOME_PATH,
+    CONFIG_ROUTES.incidencias || "/incidencias",
+    CONFIG_ROUTES.facturas || "/facturas",
+    CONFIG_ROUTES.clientes || "/clientes",
+    CONFIG_ROUTES.cuenta || "/cuenta",
+    CONFIG_ROUTES.ajustes || "/ajustes",
+
+    /*
+      Admin opcionales:
+      sólo entran si core/config.js las define.
+    */
+    CONFIG_ROUTES.usuarios || "",
+    CONFIG_ROUTES.servidor || CONFIG_ROUTES.server || "",
+  ]
+    .filter(Boolean)
+    .map((path) => normalizePathname(path))
+);
 
 export const GUARD_REASONS = Object.freeze({
   allow: "allowed",
@@ -170,11 +191,48 @@ function tokenOk(value = "") {
    PATHS
 ========================================================= */
 
+function isHashRouterPath(value = "") {
+  const raw = cleanText(value, "");
+  return raw.startsWith("#/") || raw.startsWith("#!");
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw = cleanText(value, HOME_PATH);
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/") || HOME_PATH;
+  }
+
+  if (raw.startsWith("#/")) {
+    return raw.slice(1) || HOME_PATH;
+  }
+
+  return raw || HOME_PATH;
+}
+
 function pathFromInput(path = HOME_PATH) {
   try {
     return configRoutePathFromUrlLike(path) || HOME_PATH;
   } catch {
-    return HOME_PATH;
+    const raw = cleanText(path, HOME_PATH);
+
+    if (!raw) return HOME_PATH;
+
+    if (isHashRouterPath(raw)) {
+      return normalizeHashRouterPath(raw);
+    }
+
+    if (raw.startsWith("//")) return HOME_PATH;
+
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+      return HOME_PATH;
+    }
+
+    if (/[\r\n\t\\]/.test(raw)) {
+      return HOME_PATH;
+    }
+
+    return raw || HOME_PATH;
   }
 }
 
@@ -189,6 +247,20 @@ function normalizePathname(pathname = HOME_PATH) {
     }
 
     value = value.replace(/\/{2,}/g, "/");
+
+    const parts = [];
+
+    for (const part of value.split("/")) {
+      if (!part || part === ".") continue;
+
+      if (part === "..") {
+        parts.pop();
+      } else {
+        parts.push(part);
+      }
+    }
+
+    value = `/${parts.join("/")}`;
 
     if (value.length > 1) {
       value = value.replace(/\/+$/g, "") || HOME_PATH;
@@ -308,15 +380,21 @@ function normalizeUserSlug(value = "") {
   }
 }
 
+function userScopedPathIsRoutable(restPath = HOME_PATH) {
+  return USER_SCOPED_CANONICAL_PATHS.has(normalizePathname(restPath));
+}
+
 export function getUserScopedRouteInfo(path = HOME_PATH) {
   try {
     const info = getConfigUserScopedRouteInfo(path);
 
     if (isObject(info)) {
+      const pathname = splitPath(path).pathname;
+
       const restPath = normalizePathname(
         info.restPath ||
           info.canonicalPath ||
-          splitPath(path).pathname
+          pathname
       );
 
       const lookupPath = normalizePathname(
@@ -325,12 +403,17 @@ export function getUserScopedRouteInfo(path = HOME_PATH) {
           restPath
       );
 
+      const routable = Object.prototype.hasOwnProperty.call(info, "routable")
+        ? Boolean(info.routable)
+        : userScopedPathIsRoutable(restPath);
+
       return {
         scoped: Boolean(info.scoped),
-        home: Boolean(info.home),
+        routable,
+        home: Boolean(info.home && routable),
         slug: normalizeUserSlug(info.slug || ""),
         restPath,
-        lookupPath,
+        lookupPath: routable ? lookupPath : pathname,
       };
     }
   } catch {
@@ -342,6 +425,7 @@ export function getUserScopedRouteInfo(path = HOME_PATH) {
   if (!pathname.startsWith(USER_PREFIX)) {
     return {
       scoped: false,
+      routable: false,
       home: false,
       slug: "",
       restPath: pathname,
@@ -356,6 +440,7 @@ export function getUserScopedRouteInfo(path = HOME_PATH) {
   if (!slug) {
     return {
       scoped: false,
+      routable: false,
       home: false,
       slug: "",
       restPath: pathname,
@@ -367,12 +452,15 @@ export function getUserScopedRouteInfo(path = HOME_PATH) {
     ? normalizePathname(`/${restSegments.join("/")}`)
     : HOME_PATH;
 
+  const routable = userScopedPathIsRoutable(restPath);
+
   return {
     scoped: true,
-    home: restPath === HOME_PATH,
+    routable,
+    home: routable && restPath === HOME_PATH,
     slug,
     restPath,
-    lookupPath: restPath,
+    lookupPath: routable ? restPath : pathname,
   };
 }
 
@@ -382,28 +470,43 @@ export function extractSlugFromPath(path = HOME_PATH) {
 
 export function isUserHomePath(path = HOME_PATH) {
   try {
-    return isConfigUserHomeRoute(path) === true;
+    if (isConfigUserHomeRoute(path) === true) return true;
   } catch {
-    return Boolean(getUserScopedRouteInfo(path).home);
+    // fallback abajo
   }
+
+  const info = getUserScopedRouteInfo(path);
+  return Boolean(info.scoped && info.routable && info.home);
 }
 
 export function isUserScopedPath(path = HOME_PATH) {
   try {
-    return isConfigUserScopedRoute(path) === true;
+    if (isConfigUserScopedRoute(path) === true) return true;
   } catch {
-    return Boolean(getUserScopedRouteInfo(path).scoped);
+    // fallback abajo
   }
+
+  const info = getUserScopedRouteInfo(path);
+  return Boolean(info.scoped && info.routable);
 }
 
 export function canonicalGuardPath(path = HOME_PATH) {
   try {
-    return configCanonicalRoutePath(path) || splitPath(path).pathname || HOME_PATH;
+    const canonical = configCanonicalRoutePath(path) || splitPath(path).pathname || HOME_PATH;
+    return normalizePathname(canonical);
   } catch {
     const pathname = splitPath(path).pathname || HOME_PATH;
     const scoped = getUserScopedRouteInfo(pathname);
 
-    return scoped.scoped ? scoped.lookupPath : pathname;
+    if (scoped.scoped && scoped.routable) {
+      return scoped.lookupPath;
+    }
+
+    /*
+      Si /@slug/algo no es una ruta user-scope real, no se convierte en /algo.
+      Index/render decidirán not-found si procede.
+    */
+    return scoped.scoped ? pathname : pathname;
   }
 }
 
@@ -580,7 +683,11 @@ function getUserHomePath(AppCore = null, Auth = null) {
     const configured = configBuildUserHomeRoute(slug);
 
     if (configured && isSafeInternalPath(configured)) {
-      return normalizePublicPath(configured);
+      const normalized = normalizePublicPath(configured);
+
+      if (normalized !== HOME_PATH || !slug) {
+        return normalized;
+      }
     }
   } catch {
     // fallback local
@@ -781,6 +888,7 @@ function buildDetails({
   const user = getUser(AppCore, auth);
   const scoped = getUserScopedRouteInfo(publicPath);
   const adminOnly = routeRequiresAdmin(route, canonicalPath);
+  const scopedRoutable = Boolean(scoped.scoped && scoped.routable);
 
   return {
     version: GUARDS_VERSION,
@@ -790,9 +898,10 @@ function buildDetails({
     canonicalPath: redact(canonicalPath),
     publicPath: redact(publicPath),
 
-    requestedSlug: scoped.slug || null,
-    scopedPath: Boolean(scoped.scoped),
-    scopedRestPath: scoped.scoped ? scoped.restPath : null,
+    requestedSlug: scoped.scoped ? scoped.slug || null : null,
+    scopedPath: scopedRoutable,
+    scopedRoutable,
+    scopedRestPath: scopedRoutable ? scoped.restPath : null,
 
     authenticated: hasStrictSession(AppCore, auth),
     authSignal: isAuthenticatedSignal(AppCore, auth),
@@ -1053,6 +1162,7 @@ export function getGuardsSnapshot({
   );
 
   const scoped = getUserScopedRouteInfo(publicPath);
+  const scopedRoutable = Boolean(scoped.scoped && scoped.routable);
   const user = getUser(AppCore, auth);
   const adminOnly = routeRequiresAdmin(route, canonicalPath);
 
@@ -1074,10 +1184,11 @@ export function getGuardsSnapshot({
 
     blockedLegacy: isBlockedGuardPath(publicPath) || isBlockedGuardPath(canonicalPath),
 
-    userScopedPath: Boolean(scoped.scoped),
+    userScopedPath: scopedRoutable,
+    userScopedRoutable: scopedRoutable,
     isUserHomePath: Boolean(scoped.home),
-    requestedSlug: scoped.slug || null,
-    scopedRestPath: scoped.scoped ? scoped.restPath : null,
+    requestedSlug: scoped.scoped ? scoped.slug || null : null,
+    scopedRestPath: scopedRoutable ? scoped.restPath : null,
 
     route: route
       ? {
@@ -1150,12 +1261,12 @@ export function getGuardsSnapshot({
       adminRoutesFromConfig: true,
       adminRoutesRequireAdmin: true,
       clientesAdminOnly: true,
-      usuariosAdminOnly: true,
-      servidorAdminOnly: true,
+      usuariosAdminOnly: Boolean(CONFIG_ROUTES.usuarios),
+      servidorAdminOnly: Boolean(CONFIG_ROUTES.servidor || CONFIG_ROUTES.server),
 
       userSlugHome: true,
       userScopedPrivateRoutes: true,
-      canonicalizesUserScopeForAccess: true,
+      canonicalizesOnlyKnownUserScopeForAccess: true,
 
       validatesRealUserSlug: false,
       realSlugValidationOwner: "router/index.js",

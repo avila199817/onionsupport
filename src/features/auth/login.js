@@ -42,7 +42,7 @@ import {
 
 import * as SessionApi from "./session.js";
 
-export const LOGIN_VERSION = "auth.login.v7";
+export const LOGIN_VERSION = "auth.login.v8";
 
 const LOGIN_ROUTE = ROUTES.login || "/login";
 const HOME_ROUTE = "/";
@@ -76,6 +76,10 @@ function isFunction(value) {
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFormData(value) {
+  return typeof FormData !== "undefined" && value instanceof FormData;
 }
 
 function cleanText(value = "", fallback = "") {
@@ -121,7 +125,34 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+function payloadValue(payload = {}, names = []) {
+  if (isFormData(payload)) {
+    for (const name of names) {
+      const value = payload.get(name);
+
+      if (value !== undefined && value !== null && value !== "") {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  if (!isObject(payload)) return undefined;
+
+  for (const name of names) {
+    const value = payload[name];
+
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+
+  return undefined;
 }
 
 function sessionMethod(name = "") {
@@ -445,9 +476,24 @@ function looksLikeExplicitLoginUserObject(value = null) {
 }
 
 function looksLikeStandaloneLoginUserObject(value = null) {
+  return Boolean(
+    looksLikeExplicitLoginUserObject(value) &&
+      !hasAuthEnvelopeSignals(value)
+  );
+}
+
+function looksLikeFlatLoginUserObject(value = null) {
   if (!looksLikeExplicitLoginUserObject(value)) return false;
 
-  return !hasAuthEnvelopeSignals(value);
+  return Boolean(
+    cleanText(value.userId || value.id || value.uid || value.sub, "") &&
+      (
+        cleanText(value.username || value.userName || value.user_name, "") ||
+        cleanText(value.slug || value.lookup?.slug || value.profile?.slug, "") ||
+        cleanText(value.displayName || value.fullName || value.name || value.nombre, "") ||
+        cleanText(value.role || value.rol || value.roles, "")
+      )
+  );
 }
 
 /* =========================================================
@@ -519,14 +565,21 @@ function readUser(payload = {}) {
   }
 
   for (const node of nested(payload)) {
-    if (!looksLikeStandaloneLoginUserObject(node)) continue;
+    if (
+      !looksLikeStandaloneLoginUserObject(node) &&
+      !looksLikeFlatLoginUserObject(node)
+    ) {
+      continue;
+    }
 
     const flatUser = normalizeUser(node);
 
     if (flatUser) return flatUser;
   }
 
-  return looksLikeStandaloneLoginUserObject(payload) ? normalizeUser(payload) : null;
+  return looksLikeStandaloneLoginUserObject(payload)
+    ? normalizeUser(payload)
+    : null;
 }
 
 function readSession(payload = {}, user = null) {
@@ -682,6 +735,7 @@ function extractMessage(error = null) {
     cleanText(payload.message, "") ||
     cleanText(payload.error_description, "") ||
     cleanText(payload.error, "") ||
+    cleanText(payload.detail, "") ||
     cleanText(error?.message, "") ||
     String(error || "")
   );
@@ -768,7 +822,19 @@ function sanitizeUsername(value = "") {
 }
 
 export function resolveLoginIdentifier(credentials = {}) {
-  const input = isObject(credentials) ? credentials : {};
+  const input = isFormData(credentials)
+    ? {
+        identifier:
+          credentials.get("identifier") ||
+          credentials.get("email") ||
+          credentials.get("username") ||
+          credentials.get("user") ||
+          credentials.get("login") ||
+          "",
+      }
+    : isObject(credentials)
+      ? credentials
+      : {};
 
   return cleanText(
     input.identifier ??
@@ -782,7 +848,21 @@ export function resolveLoginIdentifier(credentials = {}) {
 }
 
 export function normalizeLoginPayload(credentials = {}) {
-  const input = isObject(credentials) ? credentials : {};
+  const input = isFormData(credentials)
+    ? {
+        identifier:
+          credentials.get("identifier") ||
+          credentials.get("email") ||
+          credentials.get("username") ||
+          credentials.get("user") ||
+          credentials.get("login") ||
+          "",
+        password: credentials.get("password") || "",
+        remember: credentials.get("remember") || false,
+      }
+    : isObject(credentials)
+      ? credentials
+      : {};
 
   return {
     identifier: normalizeIdentifier(resolveLoginIdentifier(input)),
@@ -832,6 +912,7 @@ function loginOptions(options = {}) {
 
     retries: 0,
     storeError: false,
+    cache: "no-store",
   };
 }
 
@@ -878,7 +959,11 @@ export async function login(credentials = {}, options = {}) {
 
   loginPromise = (async () => {
     try {
-      const response = await requestLogin(buildLoginRequestBody(payload), options);
+      const response = await requestLogin(
+        buildLoginRequestBody(payload),
+        options
+      );
+
       const result = normalizeLoginResponse(response);
 
       if (!result.token) {
@@ -950,20 +1035,7 @@ export async function handleLoginFormSubmit(formElement, options = {}) {
 
   const formData = new FormData(formElement);
 
-  const result = await login(
-    {
-      identifier:
-        formData.get("identifier") ||
-        formData.get("email") ||
-        formData.get("username") ||
-        formData.get("user") ||
-        formData.get("login") ||
-        "",
-      password: formData.get("password") || "",
-      remember: formData.get("remember") || false,
-    },
-    options
-  );
+  const result = await login(formData, options);
 
   if (options.resetOnSuccess === true && result.authenticated) {
     try {
@@ -991,8 +1063,28 @@ export function getLoginSnapshot() {
     homeRoute: HOME_ROUTE,
     userHomePrefix: USER_HOME_PREFIX,
 
+    limits: {
+      identifierMaxLength: MAX_IDENTIFIER_LENGTH,
+      passwordMaxLength: MAX_PASSWORD_LENGTH,
+      tokenMaxLength: MAX_TOKEN_LENGTH,
+    },
+
+    transport: {
+      hasCoreHttp: Boolean(
+        CoreHttp?.login ||
+          CoreHttp?.post ||
+          CoreHttp?.request
+      ),
+      ownFetch: false,
+      ownApiClient: false,
+      ownRouter: false,
+      ownToast: false,
+      ownStorage: false,
+    },
+
     policy: {
       configDrivenEndpoint: true,
+
       sessionOwnsUserNormalization: true,
       sessionOwnsSessionContextNormalization: true,
       configOwnsSlugAndHomeRoute: true,
@@ -1009,6 +1101,8 @@ export function getLoginSnapshot() {
       noToast: true,
       noStorage: true,
       noFetchOwn: true,
+      noAppCoreState: true,
+      noEvents: true,
 
       noSlugFabrication: true,
       noUserFabricationFromTokenEnvelope: true,

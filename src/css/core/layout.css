@@ -4,7 +4,7 @@
 
    FINAL LAYOUT SYSTEM · PRIVATE SPA · EXTREME 10/10
    SHELL · STACKING · SCROLL · MOUNTS · RESPONSIVE
-   REVISION: fixed shell specificity / mobile rail offset / no horizontal escape
+   REVISION: fixed shell specificity / mobile rail offset / mobile drawer mount overlay / no horizontal escape
 
    Responsabilidad:
    - Layout, stacking, scroll, shell y responsive.
@@ -1683,6 +1683,26 @@ body[data-route-mode="auth"] .content-wrapper {
     body[data-route-mode="auth"] {
       --app-sidebar-current-width: 0px !important;
       --layout-main-inset-left: 0px;
+    }
+  }
+
+  body.sidebar-open #sidebar-mount,
+  body.sidebar-open [data-sidebar-mount],
+  body[data-sidebar-state="open"] #sidebar-mount,
+  body[data-sidebar-state="open"] [data-sidebar-mount],
+  body[data-sidebar-open="true"] #sidebar-mount,
+  body[data-sidebar-open="true"] [data-sidebar-mount] {
+    z-index: var(--z-overlay, 80);
+  }
+
+  @supports selector(body:has(.sidebar)) {
+    body:has(#sidebar-mount .sidebar.is-open) #sidebar-mount,
+    body:has(#sidebar-mount .sidebar[data-open="true"]) #sidebar-mount,
+    body:has(#sidebar-mount .sidebar[data-sidebar-state="open"]) #sidebar-mount,
+    body:has([data-sidebar-mount] .sidebar.is-open) [data-sidebar-mount],
+    body:has([data-sidebar-mount] .sidebar[data-open="true"]) [data-sidebar-mount],
+    body:has([data-sidebar-mount] .sidebar[data-sidebar-state="open"]) [data-sidebar-mount] {
+      z-index: var(--z-overlay, 80);
     }
   }
 

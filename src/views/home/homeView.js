@@ -20,6 +20,9 @@
    - Lee colecciones desde homeState raíz y fallback dashboard.
    - Recarga si Home está marcado como loaded pero no hay datos reales.
    - Render único y estable tras sincronizar datos reales.
+   - Elimina inline styles antes de insertar HTML para cumplir CSP.
+   - Elimina tooltips custom data-tooltip y conserva title nativo.
+   - Corrige títulos genéricos de avatares con nombre real cuando existe.
    - No resuelve slug.
    - No ejecuta Auth guards.
    - No ejecuta Router guards.
@@ -34,6 +37,7 @@
 
 import {
   ROUTES,
+  getUserScopedRouteInfo as configGetUserScopedRouteInfo,
   isBlockedRoutePath as configIsBlockedRoutePath,
   normalizeRoutePath as configNormalizeRoutePath,
   routePathFromUrlLike as configRoutePathFromUrlLike,
@@ -115,7 +119,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v16";
+export const HOME_VIEW_VERSION = "home.view.v17";
 
 export const HomeView = (() => {
   "use strict";
@@ -125,10 +129,33 @@ export const HomeView = (() => {
   const DEFAULT_PAGE_SIZE = 5;
 
   const SENSITIVE_QUERY_RE =
-    /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
+    /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i;
 
   const ADMIN_ENTITY_RE =
     /(^|[\s._-])(admin|users?|usuarios?|clients?|clientes?|customers?)([\s._-]|$)/i;
+
+  const INLINE_STYLE_ATTR_RE =
+    /\sstyle\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
+
+  const INLINE_STYLE_TAG_RE =
+    /<style\b[^>]*>[\s\S]*?<\/style>/gi;
+
+  const GENERIC_AVATAR_TITLES = new Set([
+    "avatar",
+    "cliente",
+    "client",
+    "usuario",
+    "user",
+    "perfil",
+    "profile",
+    "contacto",
+    "contact",
+  ]);
+
+  const TOOLTIP_ATTR_PREFIXES = Object.freeze([
+    "data-tooltip",
+    "data-tippy",
+  ]);
 
   const INCIDENCIAS_ROUTE = safeInternalRoute(
     ROUTES?.incidencias,
@@ -189,10 +216,11 @@ export const HomeView = (() => {
   function redact(value = "") {
     return String(value || "")
       .replace(
-        /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+        /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
         "$1***"
       )
-      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+      .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
   }
 
   function escapeHtml(value = "") {
@@ -204,14 +232,26 @@ export const HomeView = (() => {
       .replace(/'/g, "&#39;");
   }
 
+  function sanitizeHomeHtml(html = "") {
+    return String(html || "")
+      .replace(INLINE_STYLE_TAG_RE, "")
+      .replace(INLINE_STYLE_ATTR_RE, "");
+  }
+
   function htmlToElement(html = "") {
     if (!isBrowser()) return null;
 
     try {
       const template = document.createElement("template");
-      template.innerHTML = String(html || "").trim();
+      template.innerHTML = sanitizeHomeHtml(html).trim();
 
-      return template.content.firstElementChild || null;
+      const node = template.content.firstElementChild || null;
+
+      if (node) {
+        normalizeRenderedHomeDom(node);
+      }
+
+      return node;
     } catch {
       return null;
     }
@@ -268,22 +308,30 @@ export const HomeView = (() => {
 
   function isBlockedRoute(value = "") {
     try {
-      return configIsBlockedRoutePath(value) === true;
+      if (configIsBlockedRoutePath(value) === true) return true;
     } catch {
-      const path = normalizePathname(value).toLowerCase();
-
-      return Boolean(
-        path === "/home" ||
-          path === "/403" ||
-          path === "/404" ||
-          path === "/2fa" ||
-          path === "/mfa" ||
-          path === "/otp" ||
-          path.startsWith("/2fa/") ||
-          path.startsWith("/mfa/") ||
-          path.startsWith("/otp/")
-      );
+      // noop
     }
+
+    const pathname = normalizePathname(pathFromInput(value));
+
+    try {
+      if (configIsBlockedRoutePath(pathname) === true) return true;
+    } catch {
+      // noop
+    }
+
+    try {
+      const scoped = configGetUserScopedRouteInfo(pathname);
+
+      if (scoped?.scoped && scoped?.restPath) {
+        return configIsBlockedRoutePath(scoped.restPath) === true;
+      }
+    } catch {
+      // noop
+    }
+
+    return false;
   }
 
   function safeInternalRoute(route = "", fallback = "") {
@@ -401,6 +449,328 @@ export const HomeView = (() => {
     } catch {
       return null;
     }
+  }
+
+  /* =======================================================
+     DOM NORMALIZATION / CSP
+  ======================================================= */
+
+  function allElements(root = null) {
+    if (!isElement(root)) return [];
+
+    try {
+      return [root, ...root.querySelectorAll("*")];
+    } catch {
+      return [root];
+    }
+  }
+
+  function safeTitle(value = "") {
+    return redact(safeText(value, ""))
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 180);
+  }
+
+  function removeInlineStyles(root = null) {
+    for (const node of allElements(root)) {
+      try {
+        node.removeAttribute("style");
+      } catch {
+        // noop
+      }
+    }
+
+    return true;
+  }
+
+  function isTooltipAttribute(name = "", value = "") {
+    const attr = String(name || "").toLowerCase();
+    const cleanValue = String(value || "").toLowerCase();
+
+    if (TOOLTIP_ATTR_PREFIXES.some((prefix) => attr.startsWith(prefix))) {
+      return true;
+    }
+
+    if (attr === "data-bs-title") return true;
+    if (attr === "data-bs-toggle" && cleanValue === "tooltip") return true;
+
+    return false;
+  }
+
+  function removeCustomTooltipAttributes(root = null) {
+    for (const node of allElements(root)) {
+      const attrs = [...(node.attributes || [])];
+
+      let tooltipText = "";
+
+      for (const attr of attrs) {
+        if (!isTooltipAttribute(attr.name, attr.value)) continue;
+
+        if (!tooltipText && attr.value && attr.value !== "tooltip") {
+          tooltipText = safeTitle(attr.value);
+        }
+
+        try {
+          node.removeAttribute(attr.name);
+        } catch {
+          // noop
+        }
+      }
+
+      if (tooltipText && !safeText(node.getAttribute("title"), "")) {
+        try {
+          node.setAttribute("title", tooltipText);
+        } catch {
+          // noop
+        }
+      }
+    }
+
+    return true;
+  }
+
+  function genericAvatarTitle(value = "") {
+    const clean = safeText(value, "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+
+    return !clean || GENERIC_AVATAR_TITLES.has(clean);
+  }
+
+  function displayNameFromUser(user = {}) {
+    const source = safeObject(user);
+
+    return safeTitle(
+      first(
+        source.fullName,
+        source.displayName,
+        source.name,
+        source.nombre,
+        source.profile?.fullName,
+        source.profile?.displayName,
+        source.profile?.name,
+        source.username,
+        source.userName,
+        source.slug,
+        ""
+      )
+    );
+  }
+
+  function candidateNameFromElement(element = null) {
+    if (!isElement(element)) return "";
+
+    const attrName = safeTitle(
+      first(
+        element.getAttribute("data-full-name"),
+        element.getAttribute("data-display-name"),
+        element.getAttribute("data-user-name"),
+        element.getAttribute("data-client-name"),
+        element.getAttribute("data-customer-name"),
+        element.getAttribute("data-name"),
+        ""
+      )
+    );
+
+    if (attrName && !genericAvatarTitle(attrName)) return attrName;
+
+    const title = safeTitle(element.getAttribute("title") || "");
+    if (title && !genericAvatarTitle(title)) return title;
+
+    const aria = safeTitle(element.getAttribute("aria-label") || "");
+    if (aria && !genericAvatarTitle(aria)) return aria;
+
+    return "";
+  }
+
+  function candidateNameFromScope(element = null) {
+    if (!isElement(element)) return "";
+
+    const scope = element.closest?.(
+      [
+        "[data-ticket-card]",
+        "[data-incidencia-card]",
+        "[data-home-ticket]",
+        "[data-home-incidencia]",
+        "[data-home-card]",
+        "[data-card]",
+        "article",
+        "li",
+      ].join(",")
+    );
+
+    if (!isElement(scope)) return "";
+
+    const direct = candidateNameFromElement(scope);
+    if (direct) return direct;
+
+    const selectors = [
+      "[data-ticket-user-name]",
+      "[data-ticket-client-name]",
+      "[data-incidencia-user-name]",
+      "[data-incidencia-client-name]",
+      "[data-user-name]",
+      "[data-client-name]",
+      "[data-customer-name]",
+      "[data-display-name]",
+      ".home-ticket-user-name",
+      ".home-ticket-client-name",
+      ".home-card-user-name",
+      ".home-card-client-name",
+      ".ticket-user-name",
+      ".ticket-client-name",
+      ".client-name",
+      ".user-name",
+    ];
+
+    for (const selector of selectors) {
+      try {
+        const node = scope.querySelector(selector);
+        const value = safeTitle(
+          first(
+            node?.getAttribute?.("data-full-name"),
+            node?.getAttribute?.("data-display-name"),
+            node?.getAttribute?.("data-user-name"),
+            node?.getAttribute?.("data-client-name"),
+            node?.textContent,
+            ""
+          )
+        );
+
+        if (value && !genericAvatarTitle(value)) return value;
+      } catch {
+        // noop
+      }
+    }
+
+    return "";
+  }
+
+  function isCurrentUserAvatar(element = null) {
+    if (!isElement(element)) return false;
+
+    try {
+      return Boolean(
+        element.matches(
+          [
+            "[data-current-user-avatar]",
+            "[data-home-current-user-avatar]",
+            "[data-home-user-avatar]",
+            "[data-user-avatar='current']",
+            ".home-current-user-avatar",
+            ".home-user-avatar",
+          ].join(",")
+        ) ||
+          element.closest(
+            [
+              "[data-current-user]",
+              "[data-home-current-user]",
+              "[data-home-user]",
+              ".home-current-user",
+              ".home-user",
+            ].join(",")
+          )
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function setAvatarTitle(element = null, title = "") {
+    const clean = safeTitle(title);
+
+    if (!isElement(element) || !clean || genericAvatarTitle(clean)) return false;
+
+    try {
+      element.setAttribute("title", clean);
+
+      if (!safeText(element.getAttribute("aria-label"), "")) {
+        element.setAttribute("aria-label", clean);
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function fixAvatarTitles(root = null, payload = {}) {
+    if (!isElement(root)) return false;
+
+    const userTitle = displayNameFromUser(
+      first(
+        payload.user,
+        payload.currentUser,
+        payload.sidebarUser,
+        payload.state?.user,
+        payload.state?.currentUser,
+        payload.state?.sidebarUser,
+        {}
+      )
+    );
+
+    const avatarSelector = [
+      "[data-avatar]",
+      "[data-home-avatar]",
+      "[data-user-avatar]",
+      "[data-client-avatar]",
+      "[data-customer-avatar]",
+      "[data-ticket-avatar]",
+      "[data-incidencia-avatar]",
+      "[data-home-user-avatar]",
+      "[data-current-user-avatar]",
+      ".avatar",
+      ".user-avatar",
+      ".client-avatar",
+      ".customer-avatar",
+      ".ticket-avatar",
+      ".incidencia-avatar",
+      ".home-avatar",
+      ".home-user-avatar",
+    ].join(",");
+
+    let avatars = [];
+
+    try {
+      avatars = [...root.querySelectorAll(avatarSelector)].filter(isElement);
+    } catch {
+      avatars = [];
+    }
+
+    for (const avatar of avatars) {
+      const currentTitle = safeTitle(avatar.getAttribute("title") || "");
+
+      if (isCurrentUserAvatar(avatar) && userTitle) {
+        setAvatarTitle(avatar, userTitle);
+        continue;
+      }
+
+      if (!genericAvatarTitle(currentTitle)) continue;
+
+      const scopedName =
+        candidateNameFromElement(avatar) ||
+        candidateNameFromScope(avatar);
+
+      if (scopedName) {
+        setAvatarTitle(avatar, scopedName);
+      }
+    }
+
+    return true;
+  }
+
+  function normalizeRenderedHomeDom(root = null, payload = {}) {
+    if (!isElement(root)) return false;
+
+    removeInlineStyles(root);
+    removeCustomTooltipAttributes(root);
+    fixAvatarTitles(root, safeObject(payload));
+
+    return true;
   }
 
   /* =======================================================
@@ -1850,9 +2220,7 @@ export const HomeView = (() => {
      RENDER
   ======================================================= */
 
-  function buildHtml() {
-    const payload = buildTemplatePayload();
-
+  function buildHtml(payload = buildTemplatePayload()) {
     return `
       <section
         class="panel-content home-view ready"
@@ -1886,6 +2254,8 @@ export const HomeView = (() => {
 
     if (!node) return null;
 
+    normalizeRenderedHomeDom(node);
+
     try {
       container.replaceChildren(node);
       setViewBusy(container, false);
@@ -1913,9 +2283,12 @@ export const HomeView = (() => {
     try {
       setViewBusy(container, busy);
 
-      const node = htmlToElement(buildHtml());
+      const payload = buildTemplatePayload();
+      const node = htmlToElement(buildHtml(payload));
 
       if (!node) throw new Error("HOME_VIEW_NODE_EMPTY");
+
+      normalizeRenderedHomeDom(node, payload);
 
       container.replaceChildren(node);
       currentContainer = container;
@@ -2422,6 +2795,12 @@ export const HomeView = (() => {
         readsCollectionsFromDashboardFallback: true,
         reloadsWhenLoadedButEmpty: true,
         optimizedSingleRenderAfterLoad: true,
+
+        removesInlineStylesBeforeDomInsertion: true,
+        noInlineStyleCspViolation: true,
+        removesCustomDataTooltips: true,
+        preservesNativeTitles: true,
+        fixesGenericAvatarTitlesWhenNameExists: true,
 
         ticketDetailModalState: true,
         ticketDetailDoesNotNavigate: true,

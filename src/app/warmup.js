@@ -12,9 +12,12 @@
    - Sin storage.
    - Sin DOM scan.
    - Sin snapshots grandes.
+   - Sin timers.
+   - Sin repair loops.
+   - Sin lógica de dominio.
 ========================================================= */
 
-export const WARMUP_VERSION = "app.warmup.v3";
+export const WARMUP_VERSION = "app.warmup.v4";
 
 let runs = 0;
 
@@ -41,7 +44,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
@@ -71,6 +75,9 @@ export function createWarmupSnapshot({
       noFetch: true,
       noStorage: true,
       noDomScan: true,
+      noTimers: true,
+      noRepairLoops: true,
+      noDomainLogic: true,
       noLargeSnapshots: true,
 
       redactedSnapshot: true,
@@ -87,6 +94,15 @@ export function getWarmupRuntimeSnapshot() {
     policy: {
       compatibilityOnly: true,
       noopWarmup: true,
+
+      noImports: true,
+      noEvents: true,
+      noFetch: true,
+      noStorage: true,
+      noDomScan: true,
+      noTimers: true,
+      noRepairLoops: true,
+
       redactedSnapshot: true,
     },
   };

@@ -22,6 +22,7 @@
    - Sin eventos.
    - Sin refresh automático.
    - Sin storage paralelo.
+   - Sin opción "Recordarme".
    - Sin rutas inventadas.
    - Sin /home.
    - Sin 2FA/MFA/OTP.
@@ -42,7 +43,7 @@ import {
 
 import * as SessionApi from "./session.js";
 
-export const LOGIN_VERSION = "auth.login.v8";
+export const LOGIN_VERSION = "auth.login.v9";
 
 const LOGIN_ROUTE = ROUTES.login || "/login";
 const HOME_ROUTE = "/";
@@ -94,18 +95,6 @@ function cleanText(value = "", fallback = "") {
 function rawText(value = "", fallback = "") {
   if (value === null || value === undefined) return fallback;
   return String(value);
-}
-
-function bool(value, fallback = false) {
-  if (value === true || value === 1 || value === "1") return true;
-  if (value === false || value === 0 || value === "0") return false;
-
-  const clean = cleanText(value, "").toLowerCase();
-
-  if (["true", "yes", "si", "sí", "on"].includes(clean)) return true;
-  if (["false", "no", "off"].includes(clean)) return false;
-
-  return Boolean(fallback);
 }
 
 function first(...values) {
@@ -858,7 +847,6 @@ export function normalizeLoginPayload(credentials = {}) {
           credentials.get("login") ||
           "",
         password: credentials.get("password") || "",
-        remember: credentials.get("remember") || false,
       }
     : isObject(credentials)
       ? credentials
@@ -867,7 +855,6 @@ export function normalizeLoginPayload(credentials = {}) {
   return {
     identifier: normalizeIdentifier(resolveLoginIdentifier(input)),
     password: normalizePassword(input.password ?? input.pass ?? ""),
-    remember: bool(input.remember, false),
   };
 }
 
@@ -891,9 +878,6 @@ export function buildLoginRequestBody(credentials = {}) {
     usernameLower: username ? username.toLowerCase() : undefined,
 
     password: payload.password,
-
-    remember: payload.remember,
-    rememberMe: payload.remember,
   };
 }
 
@@ -1103,6 +1087,7 @@ export function getLoginSnapshot() {
       noFetchOwn: true,
       noAppCoreState: true,
       noEvents: true,
+      noRememberOption: true,
 
       noSlugFabrication: true,
       noUserFabricationFromTokenEnvelope: true,

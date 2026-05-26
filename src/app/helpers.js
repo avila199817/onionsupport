@@ -8,12 +8,14 @@
    - Delegar rutas, user-scope, bloqueos y token routes en core/config.js.
    - Sólo token param canónico desde core/config.js.
    - Sólo rutas públicas técnicas definidas en core/config.js.
+   - Preservar query/hash cuando toca, especialmente rutas públicas con token.
    - Sin Auth.
    - Sin Router real.
    - Sin fetch.
    - Sin storage.
    - Sin history complejo.
    - Sin rutas inventadas.
+   - Sin navegación paralela.
 ========================================================= */
 
 import {
@@ -31,7 +33,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const HELPERS_VERSION = "app.helpers.v4";
+export const HELPERS_VERSION = "app.helpers.v5";
 
 const CORE_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
 
@@ -98,6 +100,10 @@ function isBrowser() {
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function cleanText(value = "", fallback = "") {
@@ -184,6 +190,10 @@ function fallbackPathFromInput(value = DEFAULT_ROUTE) {
   }
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return DEFAULT_ROUTE;
+  }
+
+  if (/[\r\n\t\\]/.test(raw)) {
     return DEFAULT_ROUTE;
   }
 
@@ -449,11 +459,11 @@ export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
 ========================================================= */
 
 export function getCurrentPath(_AppCore = null, Router = null) {
-  if (typeof Router?.getCurrentPublicPath === "function") {
+  if (isFunction(Router?.getCurrentPublicPath)) {
     return normalizePublicPath(Router.getCurrentPublicPath());
   }
 
-  if (typeof Router?.getCurrentPath === "function") {
+  if (isFunction(Router?.getCurrentPath)) {
     return normalizePublicPath(Router.getCurrentPath());
   }
 
@@ -465,7 +475,7 @@ export function getCurrentPublicPath(AppCore = null, Router = null) {
 }
 
 export function getCurrentCanonicalPath(AppCore = null, Router = null) {
-  if (typeof Router?.getCurrentCanonicalPath === "function") {
+  if (isFunction(Router?.getCurrentCanonicalPath)) {
     return normalizeCanonicalPath(Router.getCurrentCanonicalPath());
   }
 
@@ -631,6 +641,11 @@ export function redactTokenInText(value = "") {
     "$1***"
   );
 
+  output = output.replace(
+    /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+    "***"
+  );
+
   return output;
 }
 
@@ -730,19 +745,25 @@ export function getHelpersSnapshot(AppCore = null, Router = null) {
 
     policy: {
       helpersOnly: true,
+
       configOwnsRoutes: true,
       configOwnsUserScope: true,
       configOwnsBlockedRoutes: true,
+      configOwnsProtectedTokenRoutes: true,
 
       internalHomeIsRoot: true,
       visibleHomeOwnedByRouter: true,
       visibleHomePattern: `${USER_HOME_PREFIX}{slug}`,
+
+      preservesQueryAndHash: true,
+      tokenFlowDetectionOnly: true,
 
       noAuth: true,
       noRouterReal: true,
       noFetch: true,
       noStorage: true,
       noHistoryComplex: true,
+      noNavigation: true,
       noInventedRoutes: true,
       noHomeRoute: true,
 

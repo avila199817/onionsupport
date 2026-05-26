@@ -9,7 +9,7 @@
      comentar, reabrir, subir adjuntos y resolver adjuntos.
    - Delegar HTTP a incidencias.api.js.
    - Delegar normalización a incidencias.model.js.
-   - Delegar persistencia a incidencias.store.js.
+   - Delegar persistencia canónica a API/Store.
    - Exportar siempre la colección completa ordenada nuevo→antiguo.
    - No tocar Router.
    - No registrar globals.
@@ -21,10 +21,10 @@
 import { AppCore } from "../../core/index.js";
 
 import {
-  getIncidenciaByIdRequest,
-  commentIncidenciaRequest,
-  reopenIncidenciaRequest,
-  uploadIncidenciaAttachmentsRequest,
+  loadIncidenciaDetail,
+  commentIncidencia,
+  reopenIncidencia,
+  uploadIncidenciaAttachments,
   getIncidenciaAttachmentFileRequest,
   createIncidencia,
 } from "./incidencias.api.js";
@@ -48,7 +48,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_ACTIONS_VERSION = "incidencias.actions.v2.infinite";
+export const INCIDENCIAS_ACTIONS_VERSION = "incidencias.actions.v3.optimized";
 
 const CSV_FILENAME = "incidencias.csv";
 const CSV_BOM = "\uFEFF";
@@ -63,6 +63,10 @@ function isBrowser() {
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isBlob(value) {
+  return typeof Blob !== "undefined" && value instanceof Blob;
 }
 
 function safeArray(value) {
@@ -154,6 +158,8 @@ function normalizeTicketId(value = "") {
         value.id,
         value.code,
         value.ticketCode,
+        value.value,
+        value.key,
 
         value.detail?.ticketId,
         value.detail?.incidenciaId,
@@ -236,12 +242,6 @@ function getErrorMessage(error = null, fallback = "No se pudo completar la acci�
   );
 }
 
-function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
-    String(value || "")
-  );
-}
-
 function safeExternalUrl(value = "") {
   const raw = safeText(value, "");
 
@@ -252,6 +252,10 @@ function safeExternalUrl(value = "") {
 
   if (raw.startsWith("/")) {
     return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (/^blob:/i.test(raw)) {
+    return raw;
   }
 
   if (/^https:\/\//i.test(raw)) {
@@ -282,10 +286,10 @@ function buildDatedFilename(base = CSV_FILENAME) {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const extension = clean.includes(".") ? clean.split(".").pop() : "csv";
-  const name = clean.endsWith(`.${extension}`)
-    ? clean.slice(0, -(extension.length + 1))
-    : clean;
+  const lastDotIndex = clean.lastIndexOf(".");
+  const hasExtension = lastDotIndex > 0 && lastDotIndex < clean.length - 1;
+  const name = hasExtension ? clean.slice(0, lastDotIndex) : clean;
+  const extension = hasExtension ? clean.slice(lastDotIndex + 1) : "csv";
 
   return `${name}_${today}.${extension}`;
 }
@@ -314,7 +318,12 @@ function pickDetail(payload = null) {
 
 function normalizeTicketDetail(detail = {}) {
   const picked = pickDetail(detail) || detail;
-  return normalizeIncidenciaModel(picked);
+
+  try {
+    return normalizeIncidenciaModel(picked);
+  } catch {
+    return safeObject(picked);
+  }
 }
 
 function persistDetail(detail = null) {
@@ -1006,6 +1015,16 @@ function downloadExternalUrl(url = "", filename = "") {
   }
 }
 
+function buildFileObjectUrl(blob = null) {
+  if (!isBlob(blob) || !isBrowser()) return "";
+
+  try {
+    return URL.createObjectURL(blob);
+  } catch {
+    return "";
+  }
+}
+
 /* =========================================================
    DETAIL ACTIONS
 ========================================================= */
@@ -1053,8 +1072,7 @@ export async function getTicketDetailAction({
   });
 
   try {
-    const response = await getIncidenciaByIdRequest(id);
-    const detail = pickDetail(response) || response;
+    const detail = await loadIncidenciaDetail(id);
 
     if (!detail) {
       if (fallbackStoreDetail) {
@@ -1243,7 +1261,7 @@ export async function commentTicketAction({
   });
 
   try {
-    const updated = await commentIncidenciaRequest(id, normalizedMessage, {
+    const updated = await commentIncidencia(id, normalizedMessage, {
       status: finalStatus,
     });
 
@@ -1311,7 +1329,7 @@ export async function reopenTicketAction({
       { ticketId: id }
   );
 
-  if (!canReopenStatus(current.status)) {
+  if (!canReopenStatus(current.status || current.estado)) {
     return current;
   }
 
@@ -1320,7 +1338,7 @@ export async function reopenTicketAction({
   });
 
   try {
-    const updated = await reopenIncidenciaRequest(id);
+    const updated = await reopenIncidencia(id);
     const normalized = persistDetail(updated);
 
     emit("incidencias:reopen:success", {
@@ -1412,7 +1430,7 @@ export async function uploadTicketAttachmentsAction({
   });
 
   try {
-    const updated = await uploadIncidenciaAttachmentsRequest(id, finalFiles, {
+    const updated = await uploadIncidenciaAttachments(id, finalFiles, {
       status: finalStatus,
     });
 
@@ -1421,6 +1439,7 @@ export async function uploadTicketAttachmentsAction({
     emit("incidencias:upload:success", {
       ticketId: id,
       files: finalFiles,
+      total: finalFiles.length,
       detail: normalized,
     });
 
@@ -1431,6 +1450,7 @@ export async function uploadTicketAttachmentsAction({
     emit("incidencias:upload:error", {
       ticketId: id,
       files: finalFiles,
+      total: finalFiles.length,
       error,
     });
 
@@ -1561,6 +1581,9 @@ function normalizeAttachmentFileResponse(payload = {}, fallback = {}) {
     )
   );
 
+  const blob = first(file.blob, source.blob, null);
+  const generatedBlobUrl = buildFileObjectUrl(blob);
+
   const url = safeExternalUrl(
     first(
       file.url,
@@ -1576,13 +1599,15 @@ function normalizeAttachmentFileResponse(payload = {}, fallback = {}) {
       fallbackObj.downloadUrl,
       fallbackObj.signedUrl,
       fallbackObj.blobUrl,
-      fallbackObj.publicUrl
+      fallbackObj.publicUrl,
+      generatedBlobUrl
     )
   );
 
   return {
     ...fallbackObj,
     ...file,
+    blob: blob || file.blob || fallbackObj.blob || null,
     url,
     viewUrl: safeExternalUrl(first(file.viewUrl, file.openUrl, url)),
     openUrl: safeExternalUrl(first(file.openUrl, file.viewUrl, url)),
@@ -1664,8 +1689,9 @@ export async function openTicketAttachmentAction({
   silent = true,
   autoOpen = true,
 } = {}) {
+  const id = normalizeTicketId(ticketId);
   const file = await getTicketAttachmentFileAction({
-    ticketId,
+    ticketId: id,
     attachment,
     attachmentId,
     mode: "view",
@@ -1675,7 +1701,7 @@ export async function openTicketAttachmentAction({
   if (!file?.url) return null;
 
   emit("incidencias:attachment:open", {
-    ticketId: normalizeTicketId(ticketId),
+    ticketId: id,
     attachment,
     detail,
     file,
@@ -1698,8 +1724,9 @@ export async function downloadTicketAttachmentAction({
   silent = true,
   autoDownload = true,
 } = {}) {
+  const id = normalizeTicketId(ticketId);
   const file = await getTicketAttachmentFileAction({
-    ticketId,
+    ticketId: id,
     attachment,
     attachmentId,
     mode: "download",
@@ -1709,7 +1736,7 @@ export async function downloadTicketAttachmentAction({
   if (!file?.url) return null;
 
   emit("incidencias:attachment:download", {
-    ticketId: normalizeTicketId(ticketId),
+    ticketId: id,
     attachment,
     detail,
     file,
@@ -1783,11 +1810,13 @@ export function exportIncidenciasCsvAction({
     return false;
   }
 
+  const finalFilename = buildDatedFilename(filename);
+
   try {
     const csv = `${CSV_BOM}${buildCsvRows(list)}`;
 
     const downloaded = downloadTextFile({
-      filename: buildDatedFilename(filename),
+      filename: finalFilename,
       content: csv,
       mimeType: "text/csv;charset=utf-8;",
     });
@@ -1796,7 +1825,7 @@ export function exportIncidenciasCsvAction({
 
     emit("incidencias:export:csv", {
       total: list.length,
-      filename: buildDatedFilename(filename),
+      filename: finalFilename,
       order: "updated_desc",
     });
 

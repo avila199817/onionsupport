@@ -5,20 +5,26 @@
    Responsabilidad:
    - Renderizar login.
    - Delegar DOM en login.dom.js.
-   - Validar campos mínimos.
+   - Delegar validación/payload/error en login.helpers.js.
    - Llamar Auth.login().
-   - Navegar vía Router a /@{user.slug} tras login correcto.
+   - Navegar vía Router tras login correcto.
    - Rutas/base/path helpers desde core/config.js.
+   - Home visible autenticada: /@{user.slug}.
+   - Home interna/canónica: /.
    - Sin HTTP directo.
    - Sin Store.
    - Sin Toast directo.
-   - Sin 2FA/MFA/OTP.
+   - Sin aplicar sesión manualmente.
+   - Sin storage propio.
    - Sin eventos globales.
    - Sin loader propio.
    - Sin navegación browser paralela.
    - Sin AppCore.navigate.
-   - Sin magia negra.
+   - Sin denylist local.
    - Sin /home.
+   - Sin /403.
+   - Sin /404.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -28,6 +34,8 @@ import {
   PUBLIC_ROUTES,
   ROUTES,
   USER_HOME_PREFIX,
+  buildUserHomeRoute as configBuildUserHomeRoute,
+  getUserScopedRouteInfo as configGetUserScopedRouteInfo,
   isBlockedRoutePath as configIsBlockedRoutePath,
   isPublicRoute as configIsPublicRoute,
   isUserHomeRoute as configIsUserHomeRoute,
@@ -37,6 +45,14 @@ import {
 } from "../../core/config.js";
 
 import getLoginTemplate from "./login.template.js";
+
+import {
+  createLoginPayload,
+  getFirstLoginError,
+  normalizeAuthResult,
+  resolveAuthErrorMessage,
+  validateLoginPayload,
+} from "./login.helpers.js";
 
 import {
   getLoginRefs,
@@ -52,7 +68,7 @@ import {
   bindLoginSubmit,
 } from "./login.dom.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.v6";
+export const LOGIN_VIEW_VERSION = "login.view.v7";
 
 const SOURCE = "login.view";
 
@@ -63,15 +79,6 @@ const PASSWORD_RESET_ROUTE = ROUTES.passwordReset || "/password-reset";
 const ACTIVATE_ACCOUNT_ROUTE = ROUTES.activateAccount || "/activate-account";
 
 const USER_PREFIX = USER_HOME_PREFIX || "/@";
-
-const FALLBACK_BLOCKED_PATHS = new Set([
-  "/home",
-  "/403",
-  "/404",
-  "/2fa",
-  "/mfa",
-  "/otp",
-]);
 
 const PUBLIC_AUTH_ROUTES = new Set(
   (
@@ -117,26 +124,24 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function firstText(...values) {
+  for (const value of values) {
+    const output = text(value, "");
+
+    if (output) return output;
+  }
+
+  return "";
+}
+
 function redact(value = "") {
   return text(value, "")
     .replace(
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
-}
-
-function errorPayload(error = null) {
-  if (!error) return {};
-
-  if (isObject(error.data)) return error.data;
-  if (isObject(error.body)) return error.body;
-  if (isObject(error.payload)) return error.payload;
-  if (isObject(error.responseData)) return error.responseData;
-  if (isObject(error.response?.data)) return error.response.data;
-  if (isObject(error.response) && !isFn(error.response.blob)) return error.response;
-
-  return {};
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
@@ -147,8 +152,72 @@ function pathFromInput(value = HOME_ROUTE) {
   try {
     return configRoutePathFromUrlLike(value) || HOME_ROUTE;
   } catch {
-    return HOME_ROUTE;
+    const raw = text(value, HOME_ROUTE);
+
+    if (!raw) return HOME_ROUTE;
+    if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || HOME_ROUTE;
+    if (raw.startsWith("#/")) return raw.slice(1) || HOME_ROUTE;
+    if (raw.startsWith("//")) return HOME_ROUTE;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return HOME_ROUTE;
+    if (/[\r\n\t\\]/.test(raw)) return HOME_ROUTE;
+
+    return raw;
   }
+}
+
+function normalizeSearch(search = "") {
+  const value = text(search, "");
+
+  if (!value || value === "?") return "";
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = text(hash, "");
+
+  if (!value || value === "#") return "";
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
+function splitPath(value = HOME_ROUTE) {
+  let raw = pathFromInput(value);
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || HOME_ROUTE;
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || HOME_ROUTE;
+  }
+
+  return {
+    pathname: cleanPath(pathname),
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
+  };
+}
+
+function joinPath(parts = {}) {
+  return [
+    cleanPath(parts.pathname || HOME_ROUTE),
+    normalizeSearch(parts.search || ""),
+    normalizeHash(parts.hash || ""),
+  ].join("");
 }
 
 function cleanPath(value = HOME_ROUTE) {
@@ -196,6 +265,21 @@ function normalizeSlug(value = "") {
 }
 
 function getUserScopedPathInfo(value = HOME_ROUTE) {
+  try {
+    const info = configGetUserScopedRouteInfo(value);
+
+    if (isObject(info)) {
+      return {
+        scoped: Boolean(info.scoped),
+        home: Boolean(info.home),
+        slug: normalizeSlug(info.slug || ""),
+        restPath: cleanPath(info.restPath || info.canonicalPath || HOME_ROUTE),
+      };
+    }
+  } catch {
+    // fallback abajo
+  }
+
   const path = cleanPath(value);
 
   if (!path.startsWith(USER_PREFIX)) {
@@ -238,33 +322,32 @@ function hasSensitiveQuery(value = "") {
   );
 }
 
-function isLocallyBlockedPath(value = "") {
-  const path = cleanPath(value).toLowerCase();
-
-  if (FALLBACK_BLOCKED_PATHS.has(path)) return true;
-
-  return (
-    path.startsWith("/home/") ||
-    path.startsWith("/403/") ||
-    path.startsWith("/404/") ||
-    path.startsWith("/2fa/") ||
-    path.startsWith("/mfa/") ||
-    path.startsWith("/otp/")
-  );
-}
-
-function isBlockedLegacyPath(value = "") {
+function isBlockedLoginPath(value = "") {
   try {
     if (configIsBlockedRoutePath(value) === true) return true;
   } catch {
-    // fallback abajo
+    // noop
   }
 
-  if (isLocallyBlockedPath(value)) return true;
+  const parts = splitPath(value);
 
-  const scoped = getUserScopedPathInfo(value);
+  try {
+    if (configIsBlockedRoutePath(parts.pathname) === true) return true;
+  } catch {
+    // noop
+  }
 
-  return Boolean(scoped.scoped && isLocallyBlockedPath(scoped.restPath));
+  const scoped = getUserScopedPathInfo(parts.pathname);
+
+  if (scoped.scoped && scoped.restPath) {
+    try {
+      return configIsBlockedRoutePath(scoped.restPath) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
 }
 
 function isUserHomePath(value = "") {
@@ -275,25 +358,40 @@ function isUserHomePath(value = "") {
   }
 }
 
+function normalizePublicPath(value = HOME_ROUTE, fallback = HOME_ROUTE) {
+  const fallbackPath = fallback === ""
+    ? ""
+    : joinPath(splitPath(fallback || HOME_ROUTE));
+
+  const raw = text(value, fallbackPath || HOME_ROUTE);
+
+  if (!raw && fallback === "") return "";
+  if (!raw.startsWith("/")) return fallbackPath || HOME_ROUTE;
+  if (raw.startsWith("//")) return fallbackPath || HOME_ROUTE;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallbackPath || HOME_ROUTE;
+  if (/[\r\n\t\\]/.test(raw)) return fallbackPath || HOME_ROUTE;
+  if (hasSensitiveQuery(raw)) return fallbackPath || HOME_ROUTE;
+  if (isBlockedLoginPath(raw)) return fallbackPath || HOME_ROUTE;
+
+  const normalized = joinPath(splitPath(raw));
+
+  if (!normalized || isBlockedLoginPath(normalized)) {
+    return fallbackPath || HOME_ROUTE;
+  }
+
+  return normalized;
+}
+
 function safeInternalPath(value = "", fallback = HOME_ROUTE) {
-  const raw = text(value, fallback);
-
-  if (!raw.startsWith("/")) return fallback;
-  if (raw.startsWith("//")) return fallback;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
-  if (/[\r\n\t\\]/.test(raw)) return fallback;
-  if (hasSensitiveQuery(raw)) return fallback;
-  if (isBlockedLegacyPath(raw)) return fallback;
-
-  const normalized = cleanPath(raw);
-
-  return normalized || fallback;
+  return normalizePublicPath(value, fallback);
 }
 
 function isPublicAuthPath(value = "") {
   const path = cleanPath(value);
 
+  if (!path) return false;
   if (getUserScopedPathInfo(path).scoped) return false;
+  if (isBlockedLoginPath(path)) return false;
 
   try {
     if (configIsPublicRoute(path) === true) return true;
@@ -305,7 +403,7 @@ function isPublicAuthPath(value = "") {
 }
 
 /* =========================================================
-   NAVIGATION
+   AUTH / ROUTER
 ========================================================= */
 
 function getRouter() {
@@ -322,31 +420,69 @@ function getRouter() {
   }
 }
 
-function authHomeTarget(result = {}) {
-  const target = safeInternalPath(
-    result?.postLoginTarget ||
-      result?.homePath ||
-      result?.defaultHome ||
-      result?.redirectTo ||
-      Auth?.getPostLoginTarget?.() ||
-      Auth?.getDefaultHome?.() ||
-      AppCore?.state?.postLoginTarget ||
-      AppCore?.state?.homePath ||
-      AppCore?.state?.defaultHome ||
-      HOME_ROUTE,
-    HOME_ROUTE
+function authResultUserSlug(result = {}) {
+  const normalized = normalizeAuthResult(result);
+
+  const explicit = firstText(
+    result?.userSlug,
+    result?.slug,
+    normalized?.user?.slug,
+    normalized?.user?.lookup?.slug,
+    normalized?.user?.profile?.slug,
+    normalized?.user?.routing?.slug,
+    Auth?.getUserSlug?.(),
+    Auth?.extractUserSlug?.(normalized?.user || result?.user || null)
   );
 
+  return normalizeSlug(explicit);
+}
+
+function buildUserHomePathFromResult(result = {}) {
+  const slug = authResultUserSlug(result);
+
+  if (!slug) return HOME_ROUTE;
+
+  try {
+    const home = configBuildUserHomeRoute(slug);
+    return safeInternalPath(home, HOME_ROUTE);
+  } catch {
+    return `${USER_PREFIX}${slug}`;
+  }
+}
+
+function authHomeTarget(result = {}) {
+  const explicitTarget = firstText(
+    result?.postLoginTarget,
+    result?.homePath,
+    result?.defaultHome,
+    result?.redirectTo,
+    Auth?.getPostLoginTarget?.(),
+    Auth?.getDefaultHome?.(),
+    AppCore?.state?.postLoginTarget,
+    AppCore?.state?.homePath,
+    AppCore?.state?.defaultHome
+  );
+
+  let target = safeInternalPath(explicitTarget, HOME_ROUTE);
+
   if (isPublicAuthPath(target)) {
-    return HOME_ROUTE;
+    target = HOME_ROUTE;
   }
 
   /*
-    Si Auth ya resolvió /@slug, lo respetamos.
-    Si sólo tenemos "/", Router real se encargará de canonicalizar
-    a /@{slug} cuando la sesión esté aplicada.
+    Si Auth ya resolvió /@slug, se respeta.
+    Si sólo tenemos "/", construimos /@{slug} si hay slug real.
+    Si no hay slug, Router decidirá el fallback canónico.
   */
-  return isUserHomePath(target) ? cleanPath(target) : target;
+  if (target === HOME_ROUTE && !isUserHomePath(target)) {
+    const home = buildUserHomePathFromResult(result);
+
+    if (home && home !== HOME_ROUTE) {
+      return home;
+    }
+  }
+
+  return target;
 }
 
 async function goAfterLogin(result = {}) {
@@ -419,25 +555,19 @@ function renderTemplate(container, deps = {}) {
 }
 
 /* =========================================================
-   VALIDATION
+   VALIDATION / AUTH
 ========================================================= */
 
 function validate(payload = {}) {
-  const errors = {};
-
-  if (!text(payload.identifier, "")) {
-    errors.identifier = "Introduce tu usuario o email.";
-  }
-
-  if (!String(payload.password || "")) {
-    errors.password = "Introduce tu contraseña.";
-  }
-
-  return errors;
+  return validateLoginPayload(payload);
 }
 
 function authenticated(result = {}) {
   if (result?.authenticated === true) return true;
+
+  const normalized = normalizeAuthResult(result);
+
+  if (normalized.authenticated === true) return true;
 
   try {
     return Auth.isAuthenticated?.() === true;
@@ -447,16 +577,7 @@ function authenticated(result = {}) {
 }
 
 function errorMessage(error = null) {
-  const payload = errorPayload(error);
-
-  return redact(
-    text(payload.message, "") ||
-      text(payload.error_description, "") ||
-      text(payload.error, "") ||
-      text(payload.detail, "") ||
-      text(error?.message, "") ||
-      "No se pudo iniciar sesión."
-  );
+  return resolveAuthErrorMessage(error);
 }
 
 /* =========================================================
@@ -534,7 +655,8 @@ export function renderLoginView(container, deps = {}) {
 
     clearLoginErrors(refs);
 
-    const payload = readLoginFormState(refs);
+    const formState = readLoginFormState(refs);
+    const payload = createLoginPayload(formState);
     const errors = validate(payload);
 
     if (Object.keys(errors).length) {
@@ -560,7 +682,14 @@ export function renderLoginView(container, deps = {}) {
       );
 
       if (!authenticated(result)) {
-        throw new Error(result?.message || "Login inválido.");
+        const normalized = normalizeAuthResult(result);
+        throw new Error(
+          normalized.message ||
+            getFirstLoginError({
+              message: "Login inválido.",
+            }) ||
+            "Login inválido."
+        );
       }
 
       const navigated = await goAfterLogin(result);
@@ -626,14 +755,19 @@ export function renderLoginView(container, deps = {}) {
 
       return {
         version: LOGIN_VIEW_VERSION,
+
         mounted,
         submitting,
         authenticated: isAuth,
         target: isAuth ? redact(authHomeTarget()) : null,
+
         policy: {
           viewOnly: true,
           delegatesDom: true,
+          delegatesValidationToHelpers: true,
+
           authLoginOnly: true,
+          authOwnsSessionApply: true,
           routerNavigationOnly: true,
 
           configOwnsRoutes: true,
@@ -643,14 +777,22 @@ export function renderLoginView(container, deps = {}) {
           noHttpDirect: true,
           noStore: true,
           noToastDirect: true,
+          noStorageOwn: true,
           noBrowserNavigation: true,
           noAppCoreNavigate: true,
+          noSessionApply: true,
+          noEvents: true,
 
-          blocksLegacyRoutes: true,
+          blocksRoutesViaCoreConfig: true,
           blocksSensitiveRedirects: true,
           publicRoutesCannotLiveUnderUserScope: true,
 
+          homeInternalPath: HOME_ROUTE,
+          homeVisiblePattern: `${USER_PREFIX}{user.slug}`,
+
           noHomeRoute: true,
+          no403Route: true,
+          no404Route: true,
           no2fa: true,
           noMfa: true,
           noOtp: true,

@@ -21,6 +21,7 @@
    - Sin navegación browser paralela.
    - Sin AppCore.navigate.
    - Sin denylist local.
+   - Sin opción "Recordarme".
    - Sin /home.
    - Sin /403.
    - Sin /404.
@@ -68,7 +69,7 @@ import {
   bindLoginSubmit,
 } from "./login.dom.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.v7";
+export const LOGIN_VIEW_VERSION = "login.view.v8";
 
 const SOURCE = "login.view";
 
@@ -671,7 +672,6 @@ export function renderLoginView(container, deps = {}) {
         {
           identifier: payload.identifier,
           password: payload.password,
-          remember: payload.remember,
         },
         {
           source: SOURCE,
@@ -782,6 +782,7 @@ export function renderLoginView(container, deps = {}) {
           noAppCoreNavigate: true,
           noSessionApply: true,
           noEvents: true,
+          noRememberOption: true,
 
           blocksRoutesViaCoreConfig: true,
           blocksSensitiveRedirects: true,

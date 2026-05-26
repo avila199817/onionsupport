@@ -22,7 +22,7 @@ import { AppCore } from "../../core/index.js";
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_BINDINGS_VERSION = "incidencias.bindings.v2.infinite";
+export const INCIDENCIAS_BINDINGS_VERSION = "incidencias.bindings.v3.optimized";
 
 const DEFAULT_SCOPE = "view:incidencias";
 const SEARCH_DEBOUNCE_MS = 180;
@@ -191,6 +191,22 @@ const ACTIONS = Object.freeze({
     "incidencias-next-page",
   ]),
 });
+
+const ACTION_ORDER = Object.freeze([
+  ["refresh", ACTIONS.refresh],
+  ["retry", ACTIONS.retry],
+  ["export", ACTIONS.export],
+  ["create", ACTIONS.create],
+  ["clearFilters", ACTIONS.clearFilters],
+  ["clearSearch", ACTIONS.clearSearch],
+  ["filter", ACTIONS.filter],
+  ["loadMore", ACTIONS.loadMore],
+  ["page", ACTIONS.page],
+  ["prevPage", ACTIONS.prevPage],
+  ["nextPage", ACTIONS.nextPage],
+  ["copy", ACTIONS.copy],
+  ["open", ACTIONS.open],
+]);
 
 const DEFAULT_MUTATION_EVENTS = Object.freeze([
   "incidencias:modal:updated",
@@ -457,26 +473,40 @@ function getActionNames(element = null) {
     .filter(Boolean);
 }
 
-function elementMatchesActionSet(element = null, actionSet = null) {
-  if (!element || !actionSet) {
-    return false;
+function getActionType(element = null) {
+  if (!element) {
+    return "";
   }
 
-  return getActionNames(element).some((action) => actionSet.has(action));
+  const actionNames = getActionNames(element);
+
+  if (!actionNames.length) {
+    return "";
+  }
+
+  const match = ACTION_ORDER.find(([, actionSet]) => {
+    return actionNames.some((action) => actionSet.has(action));
+  });
+
+  return match?.[0] || "";
 }
 
-function getActionElement(root = null, target = null, actionSet = null) {
+function getRecognizedAction(root = null, target = null) {
   let element =
     target?.nodeType === 1
       ? target
       : target?.parentElement || null;
 
   while (element && rootContains(root, element)) {
-    if (
-      element.matches?.(ACTION_SELECTOR) &&
-      elementMatchesActionSet(element, actionSet)
-    ) {
-      return element;
+    if (element.matches?.(ACTION_SELECTOR)) {
+      const type = getActionType(element);
+
+      if (type) {
+        return {
+          element,
+          type,
+        };
+      }
     }
 
     if (element === root) {
@@ -486,7 +516,10 @@ function getActionElement(root = null, target = null, actionSet = null) {
     element = element.parentElement;
   }
 
-  return null;
+  return {
+    element: null,
+    type: "",
+  };
 }
 
 function getDataSource(element = null) {
@@ -1305,11 +1338,10 @@ export function bindIncidenciasEvents({
 
     clearSearchTimer();
 
-    try {
-      void callSetSearchQuery(setSearchQuery, safeText(input.value, ""));
-    } catch (error) {
-      safeWarn("No se pudo aplicar búsqueda.", error);
-    }
+    Promise.resolve(callSetSearchQuery(setSearchQuery, safeText(input.value, "")))
+      .catch((error) => {
+        safeWarn("No se pudo aplicar búsqueda.", error);
+      });
   }
 
   function handlePageSizeChange(input = null) {
@@ -1317,11 +1349,10 @@ export function bindIncidenciasEvents({
       return;
     }
 
-    try {
-      void changePageSize(input.value);
-    } catch (error) {
-      safeWarn("No se pudo cambiar tamaño de página.", error);
-    }
+    Promise.resolve(changePageSize(input.value))
+      .catch((error) => {
+        safeWarn("No se pudo cambiar tamaño de página.", error);
+      });
   }
 
   addDomListener(cleanups, root, "click", async (event) => {
@@ -1335,134 +1366,68 @@ export function bindIncidenciasEvents({
       return;
     }
 
-    const refreshAction = getActionElement(root, target, ACTIONS.refresh);
+    const action = getRecognizedAction(root, target);
 
-    if (refreshAction) {
+    if (action.element && action.type) {
       event.preventDefault();
       event.stopPropagation();
 
-      await handleRefresh(refreshAction, false);
-      return;
-    }
+      switch (action.type) {
+        case "refresh":
+          await handleRefresh(action.element, false);
+          return;
 
-    const retryAction = getActionElement(root, target, ACTIONS.retry);
+        case "retry":
+          await handleRefresh(action.element, true);
+          return;
 
-    if (retryAction) {
-      event.preventDefault();
-      event.stopPropagation();
+        case "export":
+          await handleExport(action.element);
+          return;
 
-      await handleRefresh(retryAction, true);
-      return;
-    }
+        case "create":
+          await handleCreate(action.element);
+          return;
 
-    const exportAction = getActionElement(root, target, ACTIONS.export);
+        case "clearFilters":
+          await handleClearFilters(action.element);
+          return;
 
-    if (exportAction) {
-      event.preventDefault();
-      event.stopPropagation();
+        case "clearSearch":
+          await handleClearSearch(action.element);
+          return;
 
-      await handleExport(exportAction);
-      return;
-    }
+        case "filter":
+          await handleFilter(action.element);
+          return;
 
-    const createAction = getActionElement(root, target, ACTIONS.create);
+        case "loadMore":
+          await handleLoadMore(action.element, "button");
+          return;
 
-    if (createAction) {
-      event.preventDefault();
-      event.stopPropagation();
+        case "page":
+          await handlePage(action.element);
+          return;
 
-      await handleCreate(createAction);
-      return;
-    }
+        case "prevPage":
+          await handlePrevPage();
+          return;
 
-    const clearFiltersAction = getActionElement(root, target, ACTIONS.clearFilters);
+        case "nextPage":
+          await handleNextPage();
+          return;
 
-    if (clearFiltersAction) {
-      event.preventDefault();
-      event.stopPropagation();
+        case "copy":
+          await handleCopy(action.element);
+          return;
 
-      await handleClearFilters(clearFiltersAction);
-      return;
-    }
+        case "open":
+          await handleOpen(action.element);
+          return;
 
-    const clearSearchAction = getActionElement(root, target, ACTIONS.clearSearch);
-
-    if (clearSearchAction) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      await handleClearSearch(clearSearchAction);
-      return;
-    }
-
-    const filterAction = getActionElement(root, target, ACTIONS.filter);
-
-    if (filterAction) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      await handleFilter(filterAction);
-      return;
-    }
-
-    const loadMoreAction = getActionElement(root, target, ACTIONS.loadMore);
-
-    if (loadMoreAction) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      await handleLoadMore(loadMoreAction, "button");
-      return;
-    }
-
-    const pageAction = getActionElement(root, target, ACTIONS.page);
-
-    if (pageAction) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      await handlePage(pageAction);
-      return;
-    }
-
-    const prevPageAction = getActionElement(root, target, ACTIONS.prevPage);
-
-    if (prevPageAction) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      await handlePrevPage();
-      return;
-    }
-
-    const nextPageAction = getActionElement(root, target, ACTIONS.nextPage);
-
-    if (nextPageAction) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      await handleNextPage();
-      return;
-    }
-
-    const copyAction = getActionElement(root, target, ACTIONS.copy);
-
-    if (copyAction) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      await handleCopy(copyAction);
-      return;
-    }
-
-    const openAction = getActionElement(root, target, ACTIONS.open);
-
-    if (openAction) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      await handleOpen(openAction);
-      return;
+        default:
+          break;
+      }
     }
 
     const row = getRowFromClick(root, event);
@@ -1481,7 +1446,7 @@ export function bindIncidenciasEvents({
 
     const key = safeText(event.key, "");
 
-    if (key !== "Enter" && key !== " ") {
+    if (key !== "Enter" && key !== " " && key !== "Spacebar") {
       return;
     }
 

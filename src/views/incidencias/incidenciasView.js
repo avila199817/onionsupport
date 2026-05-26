@@ -60,6 +60,8 @@ import renderIncidenciasTableTemplate, {
 
 import {
   DEFAULT_PAGE_SIZE as MODEL_DEFAULT_PAGE_SIZE,
+  filterIncidencias,
+  normalizeFilter as normalizeModelFilter,
   normalizeIncidenciasCollection,
   sortIncidenciasByUpdatedDesc,
   findIncidenciaById,
@@ -82,11 +84,28 @@ import {
   OnionIncidenciasModal,
 } from "./incidencias.modal.js";
 
+import {
+  BrowserDocument,
+  BrowserWindow,
+  safeText,
+  safeNumber,
+  safeArray,
+  safeObject,
+  first,
+  hasOwnKeys,
+  escapeHtml,
+  normalizeText,
+  showToast,
+  getErrorMessage as getUtilsErrorMessage,
+  safeEmit,
+  safeImageSrc,
+} from "./incidencias.utils.js";
+
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_VIEW_VERSION = "incidencias.view.v4.optimized";
+export const INCIDENCIAS_VIEW_VERSION = "incidencias.view.v5.model-utils";
 
 const SCOPE = "view:incidencias";
 
@@ -99,104 +118,8 @@ const INITIAL_VISIBLE_COUNT = Math.max(
 );
 
 const LOAD_MORE_BATCH = Math.max(INITIAL_VISIBLE_COUNT, 20);
-
 const SCROLL_THRESHOLD_PX = 900;
-
 const DEFAULT_FILTER = "all";
-
-const FILTER_ALIASES = Object.freeze({
-  all: "all",
-  todo: "all",
-  todos: "all",
-  todas: "all",
-
-  open: "open",
-  opened: "open",
-  active: "open",
-  pending: "open",
-  progress: "open",
-  in_progress: "open",
-  inprogress: "open",
-  pendiente: "open",
-  pendientes: "open",
-  abierta: "open",
-  abiertas: "open",
-  abierto: "open",
-  abiertos: "open",
-  proceso: "open",
-  en_proceso: "open",
-
-  closed: "closed",
-  close: "closed",
-  resolved: "closed",
-  solved: "closed",
-  archived: "closed",
-  cancelled: "closed",
-  canceled: "closed",
-  cerrada: "closed",
-  cerradas: "closed",
-  cerrado: "closed",
-  cerrados: "closed",
-  resuelta: "closed",
-  resueltas: "closed",
-  resuelto: "closed",
-  resueltos: "closed",
-});
-
-const STATUS_ALIASES = Object.freeze({
-  new: "pending",
-  created: "pending",
-  pending: "pending",
-  pendiente: "pending",
-  pendientes: "pending",
-
-  open: "open",
-  opened: "open",
-  active: "open",
-  abierta: "open",
-  abiertas: "open",
-  abierto: "open",
-  abiertos: "open",
-
-  progress: "progress",
-  in_progress: "progress",
-  inprogress: "progress",
-  working: "progress",
-  assigned: "progress",
-  proceso: "progress",
-  en_proceso: "progress",
-  trabajando: "progress",
-  asignada: "progress",
-  asignado: "progress",
-
-  resolved: "resolved",
-  solved: "resolved",
-  resuelta: "resolved",
-  resueltas: "resolved",
-  resuelto: "resolved",
-  resueltos: "resolved",
-
-  closed: "closed",
-  close: "closed",
-  archived: "closed",
-  cancelled: "closed",
-  canceled: "closed",
-  cerrada: "closed",
-  cerradas: "closed",
-  cerrado: "closed",
-  cerrados: "closed",
-});
-
-const OPEN_STATUS_KEYS = new Set([
-  "pending",
-  "open",
-  "progress",
-]);
-
-const CLOSED_STATUS_KEYS = new Set([
-  "resolved",
-  "closed",
-]);
 
 /* =========================================================
    VIEW
@@ -232,7 +155,7 @@ export const IncidenciasView = (() => {
   ========================================================= */
 
   function isBrowser() {
-    return typeof window !== "undefined" && typeof document !== "undefined";
+    return Boolean(BrowserWindow && BrowserDocument);
   }
 
   function isElement(value = null) {
@@ -241,96 +164,6 @@ export const IncidenciasView = (() => {
 
   function isFn(value) {
     return typeof value === "function";
-  }
-
-  function safeText(value, fallback = "") {
-    if (value === null || value === undefined) {
-      return fallback;
-    }
-
-    const text = String(value)
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    return text || fallback;
-  }
-
-  function safeNumber(value, fallback = 0) {
-    if (value === null || value === undefined || value === "") {
-      return fallback;
-    }
-
-    const number = Number(value);
-
-    return Number.isFinite(number)
-      ? number
-      : fallback;
-  }
-
-  function safeArray(value) {
-    return Array.isArray(value)
-      ? value
-      : [];
-  }
-
-  function safeObject(value) {
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? value
-      : {};
-  }
-
-  function hasOwnKeys(value) {
-    return Boolean(
-      value &&
-        typeof value === "object" &&
-        !Array.isArray(value) &&
-        Object.keys(value).length
-    );
-  }
-
-  function first(...values) {
-    for (const value of values) {
-      if (value === undefined || value === null) {
-        continue;
-      }
-
-      if (typeof value === "string" && value.trim() === "") {
-        continue;
-      }
-
-      if (Array.isArray(value) && value.length === 0) {
-        continue;
-      }
-
-      return value;
-    }
-
-    return null;
-  }
-
-  function normalizeText(value = "") {
-    return String(value || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  function normalizeKey(value = "") {
-    return normalizeText(value)
-      .replace(/[^\w]+/g, "_")
-      .replace(/^_+|_+$/g, "");
-  }
-
-  function escapeHtml(value = "") {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
   }
 
   function safeLog(...args) {
@@ -350,54 +183,12 @@ export const IncidenciasView = (() => {
   }
 
   function emit(eventName = "", payload = {}) {
-    const name = safeText(eventName, "");
-
-    if (!name) {
-      return false;
-    }
-
-    try {
-      AppCore?.events?.emit?.(name, payload);
-      return true;
-    } catch {
-      return false;
-    }
+    return safeEmit(eventName, payload);
   }
 
-  function showToast(message = "", type = "info") {
-    const text = safeText(message, "");
-
-    if (!text) {
-      return;
-    }
-
-    try {
-      if (isFn(AppCore?.toast?.[type])) {
-        AppCore.toast[type](text);
-        return;
-      }
-    } catch {}
-
-    try {
-      AppCore?.toast?.show?.(text, type);
-      return;
-    } catch {}
-
-    try {
-      AppCore?.ui?.toast?.show?.(text, type);
-    } catch {}
-  }
-
-  function getErrorMessage(error = null) {
-    return safeText(
-      first(
-        error?.message,
-        error?.response?.message,
-        error?.response?.data?.message,
-        error?.data?.message,
-        error?.error,
-        "No se pudo cargar el historial de incidencias."
-      ),
+  function getLoadErrorMessage(error = null) {
+    return getUtilsErrorMessage(
+      error,
       "No se pudo cargar el historial de incidencias."
     );
   }
@@ -406,7 +197,7 @@ export const IncidenciasView = (() => {
     try {
       return (
         AppCore?.dom?.viewContainer ||
-        document.getElementById("view-container") ||
+        BrowserDocument?.getElementById?.("view-container") ||
         null
       );
     } catch {
@@ -415,11 +206,7 @@ export const IncidenciasView = (() => {
   }
 
   function getTimerHost() {
-    if (typeof window !== "undefined") {
-      return window;
-    }
-
-    return globalThis;
+    return BrowserWindow || globalThis;
   }
 
   function requestFrame(callback) {
@@ -491,15 +278,11 @@ export const IncidenciasView = (() => {
   ========================================================= */
 
   function normalizeFilter(value = DEFAULT_FILTER) {
-    const key = normalizeKey(value || DEFAULT_FILTER);
-
-    return FILTER_ALIASES[key] || DEFAULT_FILTER;
-  }
-
-  function normalizeStatus(value = "") {
-    const key = normalizeKey(value || "");
-
-    return STATUS_ALIASES[key] || key || "pending";
+    try {
+      return normalizeModelFilter(value || DEFAULT_FILTER) || DEFAULT_FILTER;
+    } catch {
+      return DEFAULT_FILTER;
+    }
   }
 
   function getCurrentFilter() {
@@ -520,6 +303,7 @@ export const IncidenciasView = (() => {
         incidenciasState.searchQuery,
         incidenciasState.filterQuery,
         incidenciasState.query,
+        incidenciasState.q,
         searchQuery,
         ""
       ),
@@ -541,6 +325,7 @@ export const IncidenciasView = (() => {
     incidenciasState.searchQuery = searchQuery;
     incidenciasState.filterQuery = searchQuery;
     incidenciasState.query = searchQuery;
+    incidenciasState.q = searchQuery;
 
     return {
       filter: activeFilter,
@@ -548,137 +333,31 @@ export const IncidenciasView = (() => {
     };
   }
 
-  function getItemStatus(item = {}) {
-    const source = safeObject(item);
-
-    return normalizeStatus(
-      first(
-        source.status,
-        source.estado,
-        source.state,
-        source.lifecycle?.status,
-        source.raw?.status,
-        source.raw?.estado,
-        source.raw?.state,
-        source.raw?.lifecycle?.status,
-        ""
-      )
-    );
-  }
-
-  function itemMatchesFilter(item = {}, filter = getCurrentFilter()) {
-    const currentFilter = normalizeFilter(filter);
-    const status = getItemStatus(item);
-
-    if (currentFilter === "all") {
-      return true;
-    }
-
-    if (currentFilter === "open") {
-      return OPEN_STATUS_KEYS.has(status);
-    }
-
-    if (currentFilter === "closed") {
-      return CLOSED_STATUS_KEYS.has(status);
-    }
-
-    return true;
-  }
-
-  function getItemSearchText(item = {}) {
-    const source = safeObject(item);
-
-    return normalizeText(
-      [
-        source.ticketId,
-        source.id,
-        source.code,
-        source.ticketCode,
-        source.incidenciaId,
-
-        source.subject,
-        source.title,
-        source.asunto,
-        source.description,
-        source.descripcion,
-        source.message,
-        source.preview,
-
-        source.clientName,
-        source.clienteNombre,
-        source.requesterName,
-        source.name,
-        source.email,
-        source.clientEmail,
-        source.clienteEmail,
-
-        source.requesterSnapshot?.name,
-        source.requesterSnapshot?.email,
-        source.cliente?.nombre,
-        source.cliente?.name,
-        source.cliente?.email,
-        source.client?.name,
-        source.client?.email,
-
-        source.assignedTo?.name,
-        source.assignedTo?.email,
-        source.assignment?.assignedToName,
-        source.assignment?.assignedToEmail,
-        source.tecnico?.name,
-        source.tecnico?.email,
-        source.tecnico,
-
-        source.category,
-        source.categoria,
-        source.subcategory,
-        source.subcategoria,
-        source.type,
-        source.tipo,
-
-        source.status,
-        source.estado,
-        source.priority,
-        source.prioridad,
-
-        source.numeroFacturaLegal,
-        source.numeroFactura,
-        source.invoiceNumber,
-        source.facturaId,
-        source.invoiceId,
-
-        source.raw?.search?.text,
-      ]
-        .map((value) => safeText(value, ""))
-        .filter(Boolean)
-        .join(" ")
-    );
-  }
-
-  function itemMatchesSearch(item = {}, query = getCurrentSearchQuery()) {
-    const normalizedQuery = normalizeText(query);
-
-    if (!normalizedQuery) {
-      return true;
-    }
-
-    const terms = normalizedQuery
-      .split(" ")
-      .map((term) => term.trim())
-      .filter(Boolean);
-
-    const haystack = getItemSearchText(item);
-
-    return terms.every((term) => haystack.includes(term));
-  }
-
   function getFilteredItems(items = getItems()) {
-    const filter = getCurrentFilter();
+    return filterIncidencias(safeArray(items), {
+      filter: getCurrentFilter(),
+      searchQuery: getCurrentSearchQuery(),
+    });
+  }
+
+  function getFilterCounts(items = getItems()) {
+    const sourceItems = safeArray(items);
     const query = getCurrentSearchQuery();
 
-    return safeArray(items).filter((item) => (
-      itemMatchesFilter(item, filter) &&
-      itemMatchesSearch(item, query)
-    ));
+    return {
+      all: filterIncidencias(sourceItems, {
+        filter: "all",
+        searchQuery: query,
+      }).length,
+      open: filterIncidencias(sourceItems, {
+        filter: "open",
+        searchQuery: query,
+      }).length,
+      closed: filterIncidencias(sourceItems, {
+        filter: "closed",
+        searchQuery: query,
+      }).length,
+    };
   }
 
   function resetVisibleWindow(items = null) {
@@ -841,7 +520,10 @@ export const IncidenciasView = (() => {
     incidenciasState.visibleCount = next;
     incidenciasState.visibleItemsCount = next;
     incidenciasState.loadedCount = next;
+    incidenciasState.remainingCount = Math.max(0, totalCount - next);
     incidenciasState.hasMoreItems = totalCount > next;
+    incidenciasState.hasMore = totalCount > next;
+    incidenciasState.canLoadMore = totalCount > next;
     incidenciasState.infiniteScroll = true;
     incidenciasState.scrollMode = "infinite";
     incidenciasState.paginationDisabled = true;
@@ -1076,15 +758,44 @@ export const IncidenciasView = (() => {
     }
   }
 
+  function getPayloadItems() {
+    try {
+      return extractItemsFromPayload(lastApiPayload);
+    } catch {
+      return [];
+    }
+  }
+
+  function normalizePayloadItems(items = []) {
+    try {
+      return normalizeIncidenciasCollection(items, {
+        sort: false,
+        dedupe: true,
+      });
+    } catch {
+      return safeArray(items);
+    }
+  }
+
   function getItems() {
     try {
       const storeItems = getRawItems();
-      const payloadItems = extractItemsFromPayload(lastApiPayload);
-      const sourceItems = storeItems.length ? storeItems : payloadItems;
 
-      const normalizedItems = normalizeIncidenciasCollection(sourceItems);
+      if (storeItems.length) {
+        return safeArray(sortIncidenciasByUpdatedDesc(storeItems));
+      }
 
-      return safeArray(sortIncidenciasByUpdatedDesc(normalizedItems));
+      const payloadItems = getPayloadItems();
+
+      if (!payloadItems.length) {
+        return [];
+      }
+
+      return safeArray(
+        sortIncidenciasByUpdatedDesc(
+          normalizePayloadItems(payloadItems)
+        )
+      );
     } catch (error) {
       safeWarn("getItems falló.", error);
       return [];
@@ -1428,6 +1139,7 @@ export const IncidenciasView = (() => {
     try {
       const payload = await loadIncidencias({
         force: Boolean(force),
+        silent: Boolean(silent),
       });
 
       lastApiPayload = payload || lastApiPayload;
@@ -1470,7 +1182,7 @@ export const IncidenciasView = (() => {
 
       return afterItems;
     } catch (error) {
-      const message = getErrorMessage(error);
+      const message = getLoadErrorMessage(error);
 
       try {
         setError(message);
@@ -1523,7 +1235,7 @@ export const IncidenciasView = (() => {
     const source = safeObject(user);
     const raw = safeObject(source.raw);
 
-    return safeText(
+    return safeImageSrc(
       first(
         source.avatar,
         source.avatarUrl,
@@ -1541,8 +1253,7 @@ export const IncidenciasView = (() => {
         raw.pictureUrl,
         raw.image,
         raw.imageUrl
-      ),
-      ""
+      )
     );
   }
 
@@ -1575,7 +1286,7 @@ export const IncidenciasView = (() => {
       return;
     }
 
-    const banner = document.createElement("div");
+    const banner = BrowserDocument.createElement("div");
 
     banner.className = "incidencias-error-banner";
     banner.dataset.incidenciasErrorBanner = "true";
@@ -1622,12 +1333,17 @@ export const IncidenciasView = (() => {
       safeNumber(incidenciasState.remoteCount, allItems.length)
     );
 
+    const filterCounts = getFilterCounts(allItems);
+
     return {
       items: allItems,
       allItems,
       filteredItems: infinite.filteredItems,
       pageItems: infinite.pageItems,
       visibleItems: infinite.pageItems,
+
+      filterCounts,
+      countsByFilter: filterCounts,
 
       totalCount: remoteCount,
       remoteCount,
@@ -1672,6 +1388,9 @@ export const IncidenciasView = (() => {
         pageSize: infinite.pageSize,
         totalPages: 1,
         pages: 1,
+
+        filterCounts,
+        countsByFilter: filterCounts,
 
         totalCount: remoteCount,
         remoteCount,
@@ -1827,9 +1546,9 @@ export const IncidenciasView = (() => {
   function getScrollDocument() {
     if (!isBrowser()) return null;
 
-    return document.scrollingElement ||
-      document.documentElement ||
-      document.body ||
+    return BrowserDocument.scrollingElement ||
+      BrowserDocument.documentElement ||
+      BrowserDocument.body ||
       null;
   }
 
@@ -1844,8 +1563,8 @@ export const IncidenciasView = (() => {
       return false;
     }
 
-    const scrollTop = window.scrollY || scrolling.scrollTop || 0;
-    const viewportHeight = window.innerHeight || scrolling.clientHeight || 0;
+    const scrollTop = BrowserWindow.scrollY || scrolling.scrollTop || 0;
+    const viewportHeight = BrowserWindow.innerHeight || scrolling.clientHeight || 0;
     const scrollHeight = scrolling.scrollHeight || 0;
 
     return scrollTop + viewportHeight >= scrollHeight - SCROLL_THRESHOLD_PX;
@@ -1948,11 +1667,11 @@ export const IncidenciasView = (() => {
       }
     }
 
-    window.addEventListener("scroll", onScroll, {
+    BrowserWindow.addEventListener("scroll", onScroll, {
       passive: true,
     });
 
-    window.addEventListener("resize", onScroll, {
+    BrowserWindow.addEventListener("resize", onScroll, {
       passive: true,
     });
 
@@ -1961,7 +1680,7 @@ export const IncidenciasView = (() => {
       container.querySelector("[data-incidencias-scroll-host='true']") ||
       null;
 
-    if (shell && shell !== window) {
+    if (shell && shell !== BrowserWindow) {
       try {
         shell.addEventListener("scroll", onScroll, {
           passive: true,
@@ -1979,11 +1698,11 @@ export const IncidenciasView = (() => {
       } catch {}
 
       try {
-        window.removeEventListener("scroll", onScroll);
+        BrowserWindow.removeEventListener("scroll", onScroll);
       } catch {}
 
       try {
-        window.removeEventListener("resize", onScroll);
+        BrowserWindow.removeEventListener("resize", onScroll);
       } catch {}
 
       try {
@@ -2723,6 +2442,7 @@ export const IncidenciasView = (() => {
     getVisibleItems: () => buildInfiniteMeta(getItems()).pageItems,
     getPagination: () => getPaginationMeta(getItems()),
     getInfiniteMeta: () => buildInfiniteMeta(getItems()),
+    getFilterCounts: () => getFilterCounts(getItems()),
 
     getTicketById: findTicketById,
     findTicketById,
@@ -2735,6 +2455,7 @@ export const IncidenciasView = (() => {
       const infinite = getPaginationMeta(allItems);
       const currentUser = getCurrentUserSnapshot();
       const currentUserAvatar = getCurrentUserAvatar(currentUser);
+      const filterCounts = getFilterCounts(allItems);
 
       return {
         ...safeObject(getIncidenciasStateSnapshot?.()),
@@ -2766,6 +2487,9 @@ export const IncidenciasView = (() => {
         searchQuery: getCurrentSearchQuery(),
         filterQuery: getCurrentSearchQuery(),
         query: getCurrentSearchQuery(),
+
+        filterCounts,
+        countsByFilter: filterCounts,
 
         mode: "infinite",
         scrollMode: "infinite",

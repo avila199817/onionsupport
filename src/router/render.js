@@ -31,35 +31,22 @@
 ========================================================= */
 
 import {
-  BLOCKED_FRONTEND_ROUTES,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
   canonicalRoutePath as configCanonicalRoutePath,
   getUserScopedRouteInfo as getConfigUserScopedRouteInfo,
   isBlockedRoutePath as configIsBlockedRoutePath,
   normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_RENDER_VERSION = "router.render.v8";
+export const ROUTER_RENDER_VERSION = "router.render.v9";
 
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
 const HOST_ATTR = "data-router-view-host";
 const HOST_CLASS = "router-view-host";
-
-const BLOCKED_ROUTE_PATHS = new Set(
-  Array.isArray(BLOCKED_FRONTEND_ROUTES) && BLOCKED_FRONTEND_ROUTES.length
-    ? BLOCKED_FRONTEND_ROUTES
-    : [
-        "/home",
-        "/403",
-        "/404",
-        "/2fa",
-        "/mfa",
-        "/otp",
-      ]
-);
 
 let renderSeq = 0;
 
@@ -107,7 +94,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function call(fn = null, ...args) {
@@ -205,6 +193,36 @@ function joinPath(parts = {}) {
   ].join("");
 }
 
+function isBlockedRoutePath(path = DEFAULT_ROUTE) {
+  const raw = cleanText(path, DEFAULT_ROUTE);
+
+  try {
+    if (configIsBlockedRoutePath(raw) === true) return true;
+  } catch {
+    // noop
+  }
+
+  const pathname = splitPath(raw).pathname;
+
+  try {
+    if (configIsBlockedRoutePath(pathname) === true) return true;
+  } catch {
+    // noop
+  }
+
+  try {
+    const scoped = getConfigUserScopedRouteInfo(pathname);
+
+    if (scoped?.scoped && scoped?.restPath) {
+      return configIsBlockedRoutePath(scoped.restPath) === true;
+    }
+  } catch {
+    // noop
+  }
+
+  return false;
+}
+
 export function normalizePublicPath(path = DEFAULT_ROUTE) {
   const parts = splitPath(path);
 
@@ -215,38 +233,24 @@ export function normalizePublicPath(path = DEFAULT_ROUTE) {
   return joinPath(parts);
 }
 
-function isBlockedRoutePath(path = DEFAULT_ROUTE) {
-  try {
-    if (configIsBlockedRoutePath(path) === true) return true;
-  } catch {
-    // fallback local
-  }
-
-  const canonical = splitPath(path).pathname.toLowerCase();
-
-  if (BLOCKED_ROUTE_PATHS.has(canonical)) return true;
-
-  return (
-    canonical.startsWith("/2fa/") ||
-    canonical.startsWith("/mfa/") ||
-    canonical.startsWith("/otp/")
-  );
-}
-
 function normalizeUserSlug(value = "") {
-  const slug = cleanText(value, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
+  try {
+    return configNormalizeUserSlug(value) || "";
+  } catch {
+    const slug = cleanText(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/^\/+/, "")
+      .replace(/^@+/, "")
+      .split(/[/?#]/)[0]
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase();
 
-  if (!slug) return "";
+    if (!slug) return "";
 
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  }
 }
 
 export function getUserScopedRouteInfo(path = DEFAULT_ROUTE) {
@@ -1379,6 +1383,9 @@ export function getRenderSnapshot(AppCore = null) {
 
       blocksHomeAliasInFallbackActions: true,
       defaultFallbackAction: DEFAULT_ROUTE,
+
+      blockedRoutesDelegatedToCoreConfig: true,
+      noLocalBlockedRouteList: true,
 
       noCustomEvent: true,
       noHomeRoute: true,

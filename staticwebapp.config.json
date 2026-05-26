@@ -133,10 +133,6 @@
       "statusCode": 404
     },
     {
-      "route": "/BingSiteAuth.xml",
-      "statusCode": 404
-    },
-    {
       "route": "/manifest.json",
       "statusCode": 404
     },

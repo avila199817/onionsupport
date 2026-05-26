@@ -1975,3 +1975,746 @@ body.incidencias-modal-open{
     transform:none !important;
   }
 }
+
+/* =========================================================
+   INCIDENCIAS DETAIL MODAL · EXTREME POLISH 10/10
+   Archivo: /src/css/views/incidencias/detail.css
+
+   Objetivo:
+   - Refuerzo premium del modal sin tocar JS.
+   - Mejorar accesibilidad, rendimiento y estados visuales.
+   - Añadir estilos faltantes para técnico/avatar/fallbacks.
+   - Blindar preview, adjuntos, busy states, forced-colors y fallbacks.
+   - Mantener CSP limpio.
+========================================================= */
+
+
+/* =========================================================
+   PANEL HARDENING
+========================================================= */
+
+#incidencias-detail-modal-root {
+  position: relative;
+  z-index: var(--z-modal, 9999);
+}
+
+.incidencias-modal-panel {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  will-change: transform, opacity;
+  contain: layout paint;
+}
+
+.incidencias-modal-body {
+  min-inline-size: 0;
+}
+
+.incidencias-modal-panel [hidden] {
+  display: none !important;
+}
+
+.incidencias-modal-panel button,
+.incidencias-modal-panel textarea,
+.incidencias-modal-panel input {
+  font: inherit;
+}
+
+.incidencias-modal-panel svg {
+  flex: 0 0 auto;
+}
+
+
+/* =========================================================
+   BODY LOCK SAFETY
+========================================================= */
+
+body.incidencias-modal-open,
+body.modal-open:has(#incidencias-detail-modal-root:not(:empty)) {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+
+/* =========================================================
+   HEADER DEPTH / STICKY EDGE
+========================================================= */
+
+.incidencias-modal-header {
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--text-strong, #fff) 5%, transparent),
+    0 10px 30px color-mix(in srgb, #000 18%, transparent);
+}
+
+.incidencias-modal-header::after {
+  content: "";
+  position: absolute;
+  inset-inline: var(--space-lg, 20px);
+  inset-block-end: -1px;
+
+  block-size: 1px;
+
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--accent, #6f59d9) 34%, transparent),
+      transparent
+    );
+
+  pointer-events: none;
+}
+
+
+/* =========================================================
+   TECHNICIAN INLINE VALUE
+========================================================= */
+
+.incidencias-modal-technician-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.incidencias-modal-technician-inline strong {
+  min-inline-size: 0;
+
+  overflow: hidden;
+
+  color: var(--text-strong, #fff);
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.incidencias-modal-technician-avatar {
+  position: relative;
+
+  inline-size: 28px;
+  block-size: 28px;
+  flex: 0 0 28px;
+
+  overflow: hidden;
+
+  border: 1px solid color-mix(in srgb, var(--accent, #6f59d9) 22%, var(--border-soft, rgba(255,255,255,.07)));
+  border-radius: var(--radius-pill, 999px);
+
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255,255,255,.24), transparent 34%),
+    linear-gradient(135deg, var(--accent, #6f59d9), color-mix(in srgb, var(--accent, #6f59d9) 52%, #334155));
+
+  box-shadow:
+    0 6px 14px color-mix(in srgb, #000 18%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent);
+
+  display: inline-grid;
+  place-items: center;
+
+  color: var(--text-on-accent, #fff);
+
+  font-size: 10px;
+  font-weight: var(--weight-black, 800);
+  line-height: 1;
+  letter-spacing: -.02em;
+}
+
+.incidencias-modal-technician-avatar img {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+
+  display: block;
+
+  inline-size: 100%;
+  block-size: 100%;
+
+  object-fit: cover;
+}
+
+.incidencias-modal-technician-avatar span {
+  position: relative;
+  z-index: 2;
+}
+
+.incidencias-modal-technician-avatar[data-fallback="true"] img,
+.incidencias-modal-technician-avatar--fallback img {
+  display: none !important;
+}
+
+
+/* =========================================================
+   AVATAR / THUMB FALLBACK HARDENING
+========================================================= */
+
+.incidencias-modal-avatar-frame[data-fallback="true"] .incidencias-modal-avatar-fallback,
+.incidencias-modal-avatar-frame--fallback .incidencias-modal-avatar-fallback {
+  display: grid;
+}
+
+.incidencias-modal-avatar-frame[data-fallback="true"] img,
+.incidencias-modal-avatar-frame--fallback img {
+  display: none !important;
+}
+
+[data-modal-thumb-frame="true"][data-thumb-error="true"] .incidencias-modal-image-thumb {
+  display: none !important;
+}
+
+[data-modal-thumb-frame="true"][data-thumb-error="true"] .incidencias-modal-image-thumb-fallback {
+  display: grid;
+}
+
+.incidencias-modal-image-thumb-fallback {
+  color: var(--text-dim, rgba(245,245,245,.50));
+
+  font-size: 11px;
+  font-weight: var(--weight-black, 800);
+  letter-spacing: .08em;
+}
+
+
+/* =========================================================
+   CHIPS MICRO-POLISH
+========================================================= */
+
+.incidencias-modal-id-chip,
+.incidencias-modal-chip {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent),
+    0 1px 2px color-mix(in srgb, #000 10%, transparent);
+}
+
+.incidencias-modal-id-chip:active {
+  transform: translateY(0) scale(.985);
+}
+
+.incidencias-modal-chip--status-neutral,
+.incidencias-modal-chip--priority-neutral {
+  color: var(--text-dim, rgba(245,245,245,.50));
+  background: var(--chip-bg, rgba(255,255,255,.034));
+  border-color: var(--chip-border, rgba(255,255,255,.07));
+}
+
+
+/* =========================================================
+   META GRID · DENSE MODE SAFETY
+========================================================= */
+
+.incidencias-modal-meta-card {
+  min-inline-size: 0;
+}
+
+.incidencias-modal-meta-card strong,
+.incidencias-modal-meta-card span {
+  min-inline-size: 0;
+}
+
+.incidencias-modal-meta-card strong {
+  overflow-wrap: anywhere;
+}
+
+.incidencias-modal-meta-card:hover::after {
+  opacity: .9;
+}
+
+
+/* =========================================================
+   PREVIEW HARDENING
+========================================================= */
+
+.incidencias-modal-preview {
+  scroll-margin-block-start: 96px;
+}
+
+.incidencias-modal-preview-frame {
+  isolation: isolate;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--text-strong, #fff) 4%, transparent),
+    0 18px 42px color-mix(in srgb, #000 18%, transparent);
+}
+
+.incidencias-modal-preview-frame.is-image {
+  display: grid;
+  place-items: center;
+}
+
+.incidencias-modal-preview-image {
+  image-rendering: auto;
+}
+
+.incidencias-modal-preview-iframe {
+  color-scheme: light;
+}
+
+.incidencias-modal-preview-actions {
+  min-inline-size: 0;
+}
+
+.incidencias-modal-preview-btn {
+  white-space: nowrap;
+}
+
+.incidencias-modal-preview-btn:active {
+  transform: translateY(0) scale(.985);
+}
+
+
+/* =========================================================
+   COMPOSER · STRONGER PRODUCT FEEL
+========================================================= */
+
+.incidencias-modal-composer {
+  scroll-margin-block-start: 96px;
+}
+
+.incidencias-modal-composer:focus-within {
+  border-color:
+    color-mix(in srgb, var(--accent, #6f59d9) 58%, var(--border-soft, rgba(255,255,255,.052)));
+
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--accent, #6f59d9) 11%, transparent),
+    0 14px 36px color-mix(in srgb, var(--accent, #6f59d9) 16%, transparent),
+    var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.06));
+}
+
+.incidencias-modal-comment-textarea {
+  caret-color: var(--accent, #6f59d9);
+}
+
+.incidencias-modal-comment-textarea:disabled {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+.incidencias-modal-dropzone:focus-within {
+  outline: none;
+  border-color:
+    color-mix(in srgb, var(--accent, #6f59d9) 58%, var(--border-soft, rgba(255,255,255,.052)));
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--accent, #6f59d9) 11%, transparent),
+    var(--shadow-sm, 0 6px 14px rgba(0,0,0,.16));
+}
+
+
+/* =========================================================
+   PENDING FILES · BETTER DENSITY
+========================================================= */
+
+.incidencias-modal-pending-list {
+  max-block-size: 260px;
+  overflow: auto;
+  padding-inline-end: 2px;
+
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb, rgba(255,255,255,.12)) transparent;
+}
+
+.incidencias-modal-pending-list::-webkit-scrollbar {
+  inline-size: var(--scrollbar-size, 10px);
+}
+
+.incidencias-modal-pending-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--scrollbar-thumb, rgba(255,255,255,.12));
+  background-clip: padding-box;
+}
+
+.incidencias-modal-pending-file {
+  min-inline-size: 0;
+}
+
+.incidencias-modal-pending-file button:active {
+  transform: translateY(0) scale(.985);
+}
+
+
+/* =========================================================
+   ATTACHMENTS · PREMIUM GRID
+========================================================= */
+
+.incidencias-modal-attachments-grid {
+  container-type: inline-size;
+}
+
+.incidencias-modal-attachment-card {
+  min-inline-size: 0;
+}
+
+.incidencias-modal-attachment-row {
+  min-inline-size: 0;
+}
+
+.incidencias-modal-attachment-copy {
+  overflow: hidden;
+}
+
+.incidencias-modal-attachment-copy strong,
+.incidencias-modal-attachment-copy span {
+  min-inline-size: 0;
+}
+
+.incidencias-modal-attachment-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.incidencias-modal-file-square:active,
+.incidencias-modal-image-thumb-wrap:active,
+.incidencias-modal-view-btn:active,
+.incidencias-modal-download-btn:active {
+  transform: translateY(0) scale(.985);
+}
+
+.incidencias-modal-file-square[aria-busy="true"],
+.incidencias-modal-image-thumb-wrap[aria-busy="true"],
+.incidencias-modal-view-btn[aria-busy="true"],
+.incidencias-modal-download-btn[aria-busy="true"] {
+  cursor: wait;
+  opacity: .72;
+}
+
+@container (min-width: 820px) {
+  .incidencias-modal-attachments-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .incidencias-modal-attachment-row {
+    grid-template-columns: 78px minmax(0, 1fr);
+  }
+
+  .incidencias-modal-attachment-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+
+/* =========================================================
+   TIMELINE · STRONGER READABILITY
+========================================================= */
+
+.incidencias-timeline-list {
+  position: relative;
+}
+
+.incidencias-timeline-card {
+  min-inline-size: 0;
+}
+
+.incidencias-timeline-main,
+.incidencias-timeline-body {
+  min-inline-size: 0;
+}
+
+.incidencias-timeline-body {
+  overflow-wrap: anywhere;
+}
+
+.incidencias-timeline-card.is-comment {
+  border-color:
+    color-mix(in srgb, var(--success, #22c55e) 18%, var(--border-soft, rgba(255,255,255,.052)));
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--success, #22c55e) 6%, transparent),
+      transparent 96%
+    ),
+    var(--surface-glass, rgba(255,255,255,.030));
+}
+
+.incidencias-timeline-card.is-created {
+  opacity: .92;
+}
+
+.incidencias-timeline-kind {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent);
+}
+
+
+/* =========================================================
+   FOOTER / SUBMIT HARDENING
+========================================================= */
+
+.incidencias-modal-footer {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 5;
+
+  margin-inline: calc(var(--space-lg, 20px) * -1);
+  margin-block-end: calc(var(--space-lg, 20px) * -1);
+  padding:
+    var(--space-md, 14px)
+    var(--space-lg, 20px)
+    var(--space-lg, 20px);
+
+  border-block-start: 1px solid var(--border-soft, rgba(255,255,255,.052));
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--modal-bg, rgba(44,44,48,.94)) 72%, transparent),
+      color-mix(in srgb, var(--modal-bg, rgba(44,44,48,.94)) 96%, transparent)
+    );
+
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.incidencias-modal-submit-btn[aria-busy="true"],
+.incidencias-modal-submit-btn.is-loading {
+  cursor: wait;
+  opacity: .84;
+}
+
+
+/* =========================================================
+   BUSY / DISABLED UNIVERSAL
+========================================================= */
+
+#incidencias-detail-modal-root [aria-busy="true"] {
+  cursor: wait;
+}
+
+#incidencias-detail-modal-root button[disabled],
+#incidencias-detail-modal-root button[aria-disabled="true"],
+#incidencias-detail-modal-root textarea[disabled],
+#incidencias-detail-modal-root input[disabled] {
+  pointer-events: none;
+  opacity: .62;
+  filter: saturate(.78);
+}
+
+
+/* =========================================================
+   BACKDROP / COLOR-MIX FALLBACKS
+========================================================= */
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .incidencias-modal-overlay,
+  .incidencias-modal-header,
+  .incidencias-modal-footer,
+  .incidencias-modal-loading-overlay,
+  .incidencias-modal-image-open-badge {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .incidencias-modal-overlay {
+    background: rgba(8, 8, 10, .82);
+  }
+
+  .incidencias-modal-header,
+  .incidencias-modal-footer {
+    background: var(--modal-bg, var(--surface-elevated-strong, rgba(44,44,48,.96)));
+  }
+}
+
+@supports not (color: color-mix(in srgb, #fff 50%, #000 50%)) {
+  .incidencias-modal-panel,
+  .incidencias-modal-meta-card,
+  .incidencias-modal-description-box,
+  .incidencias-modal-composer,
+  .incidencias-modal-attachment-card,
+  .incidencias-timeline-card,
+  .incidencias-modal-preview {
+    border-color: var(--border-default, rgba(255,255,255,.10));
+  }
+
+  .incidencias-modal-chip--status-open {
+    color: var(--accent, #6f59d9);
+  }
+
+  .incidencias-modal-chip--status-pending,
+  .incidencias-modal-chip--priority-medium {
+    color: var(--warning, #f59e0b);
+  }
+
+  .incidencias-modal-chip--status-progress,
+  .incidencias-modal-chip--priority-low {
+    color: var(--info, #94a3b8);
+  }
+
+  .incidencias-modal-chip--status-resolved,
+  .incidencias-modal-chip--status-closed {
+    color: var(--success, #22c55e);
+  }
+
+  .incidencias-modal-chip--priority-high,
+  .incidencias-modal-chip--priority-critical {
+    color: var(--error, #ef4444);
+  }
+}
+
+
+/* =========================================================
+   CONTRAST / FORCED COLORS
+========================================================= */
+
+@media (prefers-contrast: more) {
+  .incidencias-modal-panel,
+  .incidencias-modal-meta-card,
+  .incidencias-modal-description-box,
+  .incidencias-modal-composer,
+  .incidencias-modal-attachment-card,
+  .incidencias-timeline-card,
+  .incidencias-modal-preview,
+  .incidencias-modal-feedback {
+    border-width: 2px;
+  }
+
+  .incidencias-modal-id-chip,
+  .incidencias-modal-chip,
+  .incidencias-modal-view-btn,
+  .incidencias-modal-download-btn,
+  .incidencias-modal-submit-btn,
+  .incidencias-modal-preview-btn {
+    border-width: 2px;
+  }
+}
+
+@media (forced-colors: active) {
+  .incidencias-modal-panel,
+  .incidencias-modal-meta-card,
+  .incidencias-modal-description-box,
+  .incidencias-modal-composer,
+  .incidencias-modal-attachment-card,
+  .incidencias-timeline-card,
+  .incidencias-modal-preview,
+  .incidencias-modal-feedback,
+  .incidencias-modal-id-chip,
+  .incidencias-modal-chip,
+  .incidencias-modal-view-btn,
+  .incidencias-modal-download-btn,
+  .incidencias-modal-submit-btn,
+  .incidencias-modal-preview-btn,
+  .incidencias-modal-close-btn {
+    forced-color-adjust: auto;
+    border-color: CanvasText;
+  }
+
+  .incidencias-timeline-accent,
+  .incidencias-modal-loading-box > span,
+  .incidencias-modal-inline-spinner > span {
+    forced-color-adjust: none;
+    border-color: Highlight;
+  }
+}
+
+
+/* =========================================================
+   LIGHT THEME EXTREME POLISH
+========================================================= */
+
+[data-theme="light"] .incidencias-modal-footer {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.72),
+      rgba(255,255,255,.96)
+    );
+  border-color: rgba(23,32,51,.074);
+}
+
+[data-theme="light"] .incidencias-modal-technician-avatar {
+  border-color: rgba(23,32,51,.10);
+  box-shadow:
+    0 6px 14px rgba(15,23,42,.08),
+    inset 0 1px 0 rgba(255,255,255,.84);
+}
+
+[data-theme="light"] .incidencias-modal-comment-textarea {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.86), rgba(255,255,255,.62)),
+    color-mix(in srgb, var(--accent, #6f59d9) 4%, #fff 96%);
+}
+
+[data-theme="light"] .incidencias-modal-dropzone,
+[data-theme="light"] .incidencias-modal-attachment-card,
+[data-theme="light"] .incidencias-timeline-card,
+[data-theme="light"] .incidencias-modal-description-box,
+[data-theme="light"] .incidencias-modal-meta-card {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.72), rgba(255,255,255,.52)),
+    rgba(255,255,255,.76);
+}
+
+
+/* =========================================================
+   RESPONSIVE EXTREME POLISH
+========================================================= */
+
+@media (max-width: 720px) {
+  .incidencias-modal-footer {
+    margin-inline: calc(var(--space-md, 14px) * -1);
+    margin-block-end: calc(var(--space-md, 14px) * -1);
+    padding:
+      var(--space-sm, 12px)
+      var(--space-md, 14px)
+      var(--space-md, 14px);
+  }
+
+  .incidencias-modal-preview-actions,
+  .incidencias-modal-attachment-actions {
+    inline-size: 100%;
+  }
+
+  .incidencias-modal-preview-btn,
+  .incidencias-modal-view-btn,
+  .incidencias-modal-download-btn {
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .incidencias-modal-hero {
+    align-items: flex-start;
+  }
+
+  .incidencias-modal-avatar,
+  .incidencias-modal-avatar-frame {
+    inline-size: 52px;
+    block-size: 52px;
+    flex-basis: 52px;
+  }
+
+  .incidencias-modal-hero-chips {
+    gap: 5px;
+  }
+
+  .incidencias-modal-id-chip,
+  .incidencias-modal-chip {
+    max-inline-size: 100%;
+    font-size: 9px;
+  }
+
+  .incidencias-modal-close-btn {
+    inline-size: 38px;
+    block-size: 38px;
+  }
+
+  .incidencias-modal-attachment-row {
+    grid-template-columns: 1fr;
+  }
+
+  .incidencias-modal-file-square,
+  .incidencias-modal-image-thumb-wrap {
+    inline-size: 100%;
+    block-size: 168px;
+  }
+
+  .incidencias-modal-attachment-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .incidencias-modal-view-btn,
+  .incidencias-modal-download-btn {
+    inline-size: 100%;
+  }
+}

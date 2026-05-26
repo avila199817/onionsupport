@@ -5,16 +5,19 @@
    Responsabilidad:
    - Cache DOM mínimo.
    - Sólo nodos reales del index.html.
+   - Resolver nodos canónicos y aliases de compat.
+   - Validar mounts mínimos.
+   - Refrescar nodos stale.
    - Sin imports.
-   - Sin selectors legacy masivos.
    - Sin montaje UI.
    - Sin Auth.
    - Sin Router.
    - Sin Store.
    - Sin fetch.
+   - Sin lógica pesada.
 ========================================================= */
 
-export const DOM_VERSION = "simple";
+export const DOM_VERSION = "core.dom.v2";
 
 export const REQUIRED_KEYS = Object.freeze([
   "body",
@@ -76,14 +79,58 @@ export const DOM_SELECTORS = Object.freeze({
 
   themeColorMeta: 'meta[name="theme-color"]:not([media])',
   metaThemeColor: 'meta[name="theme-color"]:not([media])',
+
   tileColorMeta: 'meta[name="msapplication-TileColor"]',
 });
 
-const DOM_KEYS = Object.freeze([
+const DOM_ALIASES = Object.freeze({
+  appLoader: "loader",
+
+  shell: "appShell",
+
+  main: "mainContent",
+  appMain: "mainContent",
+
+  viewRoot: "viewContainer",
+  routerView: "viewContainer",
+
+  tableHead: "tablehead",
+  tableHeadContainer: "tableheadContainer",
+
+  metaThemeColor: "themeColorMeta",
+});
+
+const CANONICAL_DOM_KEYS = Object.freeze([
   "html",
   "body",
-  ...Object.keys(DOM_SELECTORS),
+
+  "loader",
+  "appShell",
+
+  "sidebarMount",
+  "topbarMount",
+
+  "mainContent",
+  "appContent",
+  "viewContainer",
+
+  "tablehead",
+  "tableheadContainer",
+
+  "themeColorMeta",
+  "tileColorMeta",
 ]);
+
+const DOM_KEYS = Object.freeze([
+  ...new Set([
+    ...CANONICAL_DOM_KEYS,
+    ...Object.keys(DOM_SELECTORS),
+  ]),
+]);
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -96,6 +143,11 @@ function isFunction(value) {
 function text(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
+}
+
+function canonicalKey(key = "") {
+  const clean = text(key, "");
+  return DOM_ALIASES[clean] || clean;
 }
 
 function emit(events, name, payload = {}) {
@@ -121,6 +173,10 @@ function emit(events, name, payload = {}) {
   return false;
 }
 
+/* =========================================================
+   QUERY
+========================================================= */
+
 function query(selector = "", root = null) {
   if (!isBrowser() || !selector) return null;
 
@@ -135,16 +191,16 @@ function queryAll(selector = "", root = null) {
   if (!isBrowser() || !selector) return [];
 
   try {
-    return [...((root || document).querySelectorAll(selector) || [])];
+    return Array.from((root || document).querySelectorAll(selector) || []);
   } catch {
     return [];
   }
 }
 
 function bySelector(selector = "", root = null) {
-  if (!selector) return null;
+  if (!isBrowser() || !selector) return null;
 
-  if (selector.startsWith("#") && !selector.includes(" ")) {
+  if (!root && selector.startsWith("#") && !selector.includes(" ")) {
     try {
       return document.getElementById(selector.slice(1));
     } catch {
@@ -153,6 +209,21 @@ function bySelector(selector = "", root = null) {
   }
 
   return query(selector, root);
+}
+
+function resolveNode(key = "", root = null) {
+  if (!isBrowser()) return null;
+
+  const clean = canonicalKey(key);
+
+  if (clean === "html") return document.documentElement || null;
+  if (clean === "body") return document.body || null;
+
+  const selector = DOM_SELECTORS[clean];
+
+  if (!selector) return null;
+
+  return bySelector(selector, root);
 }
 
 export function isNodeConnected(node) {
@@ -174,6 +245,10 @@ export function isNodeConnected(node) {
   }
 }
 
+/* =========================================================
+   CACHE INTERNALS
+========================================================= */
+
 function emptyValidation() {
   return {
     ok: false,
@@ -188,41 +263,26 @@ function emptyValidation() {
 function applyAliases(dom) {
   if (!dom) return false;
 
-  dom.shell = dom.appShell;
-  dom.appLoader = dom.loader;
-
-  dom.main = dom.mainContent;
-  dom.appMain = dom.mainContent;
-
-  dom.viewRoot = dom.viewContainer;
-  dom.routerView = dom.viewContainer;
-
-  dom.tableHead = dom.tablehead;
-  dom.tableHeadContainer = dom.tableheadContainer;
-
-  dom.metaThemeColor = dom.themeColorMeta;
+  for (const [alias, target] of Object.entries(DOM_ALIASES)) {
+    dom[alias] = dom[target] || null;
+  }
 
   return true;
 }
 
-function setNode(dom, key, node) {
-  if (!dom || !key) return false;
+function setCanonicalNode(dom, key = "", node = null) {
+  if (!dom) return false;
 
-  dom[key] = node || null;
+  const clean = canonicalKey(key);
+
+  if (!clean) return false;
+
+  dom[clean] = node || null;
   return true;
 }
 
-function resolveNode(key = "", root = null) {
-  if (!isBrowser()) return null;
-
-  if (key === "html") return document.documentElement || null;
-  if (key === "body") return document.body || null;
-
-  const selector = DOM_SELECTORS[key];
-
-  if (!selector) return null;
-
-  return bySelector(selector, root);
+function missing(dom, keys = []) {
+  return keys.filter((key) => !dom?.[canonicalKey(key)]);
 }
 
 /* =========================================================
@@ -250,14 +310,14 @@ export function createDomCache() {
 export function cacheDom({ dom, events, root = null, force = false } = {}) {
   if (!dom || !isBrowser()) return dom;
 
-  for (const key of DOM_KEYS) {
+  for (const key of CANONICAL_DOM_KEYS) {
     const current = dom[key];
 
     if (!force && isNodeConnected(current)) {
       continue;
     }
 
-    setNode(dom, key, resolveNode(key, root));
+    setCanonicalNode(dom, key, resolveNode(key, root));
   }
 
   applyAliases(dom);
@@ -272,6 +332,7 @@ export function cacheDom({ dom, events, root = null, force = false } = {}) {
 
   emit(events, DOM_EVENTS.cached, {
     cacheCount: dom.cacheCount,
+    validation: dom.validation,
   });
 
   return dom;
@@ -280,10 +341,6 @@ export function cacheDom({ dom, events, root = null, force = false } = {}) {
 /* =========================================================
    VALIDATION
 ========================================================= */
-
-function missing(dom, keys = []) {
-  return keys.filter((key) => !dom?.[key]);
-}
 
 export function validateRequiredDomDetailed({
   dom,
@@ -352,23 +409,30 @@ export function validateRequiredDom({ dom, events } = {}) {
 ========================================================= */
 
 export function getDomNode(dom, key = "", fallback = null) {
-  const node = dom?.[text(key, "")] || null;
+  const clean = canonicalKey(key);
+  const node = dom?.[clean] || dom?.[text(key, "")] || null;
 
   return isNodeConnected(node) ? node : fallback;
 }
 
 export function setDomNode(dom, key = "", node = null) {
-  return setNode(dom, text(key, ""), node);
+  const ok = setCanonicalNode(dom, key, node);
+
+  if (ok) {
+    applyAliases(dom);
+  }
+
+  return ok;
 }
 
 export function refreshDomNode({ dom, key, root = null } = {}) {
-  const clean = text(key, "");
+  const clean = canonicalKey(key);
 
   if (!dom || !clean) return null;
 
   const node = resolveNode(clean, root);
 
-  setNode(dom, clean, node);
+  setCanonicalNode(dom, clean, node);
   applyAliases(dom);
 
   return node;
@@ -378,7 +442,8 @@ export function refreshDomNodes({ dom, keys = [], root = null } = {}) {
   const output = {};
 
   for (const key of keys || []) {
-    output[key] = refreshDomNode({ dom, key, root });
+    const clean = canonicalKey(key);
+    output[key] = refreshDomNode({ dom, key: clean, root });
   }
 
   return output;
@@ -403,8 +468,14 @@ export function refreshUserDomNodes() {
 export function ensureFreshDom({ dom, events, keys = [] } = {}) {
   if (!dom) return dom;
 
-  const finalKeys = keys.length ? keys : DOM_KEYS;
-  const stale = finalKeys.filter((key) => dom[key] && !isNodeConnected(dom[key]));
+  const finalKeys = keys.length
+    ? [...new Set(keys.map(canonicalKey))]
+    : CANONICAL_DOM_KEYS;
+
+  const stale = finalKeys.filter((key) => {
+    const node = dom?.[key];
+    return node && !isNodeConnected(node);
+  });
 
   if (!stale.length) return dom;
 
@@ -427,6 +498,8 @@ export function clearDomCache(dom, events = null) {
   dom.cachedAt = "";
   dom.cachedAtMs = 0;
   dom.validation = emptyValidation();
+
+  applyAliases(dom);
 
   emit(events, DOM_EVENTS.cleared, {});
 
@@ -490,6 +563,7 @@ function nodeSnapshot(node) {
     id: node.id || "",
     tag: String(node.tagName || "").toLowerCase(),
     hidden: Boolean(node.hidden),
+    ariaHidden: node.getAttribute?.("aria-hidden") || "",
     childCount: Number(node.children?.length || 0),
   };
 }
@@ -501,21 +575,41 @@ export function getDomSnapshot(dom = {}) {
     cachedAt: dom?.cachedAt || "",
     cacheCount: Number(dom?.cacheCount || 0),
     validation: dom?.validation || null,
+
     exists: Object.fromEntries(
       DOM_KEYS.map((key) => [key, Boolean(dom?.[key])])
     ),
+
     nodes: {
       html: nodeSnapshot(dom.html),
       body: nodeSnapshot(dom.body),
+
       appShell: nodeSnapshot(dom.appShell),
       loader: nodeSnapshot(dom.loader),
+
       mainContent: nodeSnapshot(dom.mainContent),
       appContent: nodeSnapshot(dom.appContent),
       viewContainer: nodeSnapshot(dom.viewContainer),
+
       sidebarMount: nodeSnapshot(dom.sidebarMount),
       topbarMount: nodeSnapshot(dom.topbarMount),
+
       tablehead: nodeSnapshot(dom.tablehead),
       tableheadContainer: nodeSnapshot(dom.tableheadContainer),
+
+      themeColorMeta: nodeSnapshot(dom.themeColorMeta),
+      tileColorMeta: nodeSnapshot(dom.tileColorMeta),
+    },
+
+    policy: {
+      cacheOnly: true,
+      canonicalKeysOnlyResolved: true,
+      aliasesAppliedFromCanonical: true,
+      noAuth: true,
+      noRouter: true,
+      noStore: true,
+      noFetch: true,
+      noMounting: true,
     },
   };
 }
@@ -529,7 +623,8 @@ export function getDomValidationSnapshot(dom = {}) {
 ========================================================= */
 
 export function findDomCandidates({ key = "", root = null } = {}) {
-  const selector = DOM_SELECTORS[text(key, "")];
+  const clean = canonicalKey(key);
+  const selector = DOM_SELECTORS[clean] || DOM_SELECTORS[text(key, "")];
 
   if (!selector) return [];
 

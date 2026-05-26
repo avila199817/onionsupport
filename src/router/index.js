@@ -31,10 +31,16 @@
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
+
 import {
-  BLOCKED_FRONTEND_ROUTES as CONFIG_BLOCKED_FRONTEND_ROUTES,
+  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
+  canonicalRoutePath as configCanonicalRoutePath,
+  getUserScopedRouteInfo as getConfigUserScopedRouteInfo,
   isAdminRoute as isConfigAdminRoute,
   isBlockedRoutePath as isConfigBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
 import * as Routes from "./routes.js";
@@ -43,7 +49,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v11";
+export const ROUTER_VERSION = "router.index.v12";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -59,23 +65,9 @@ export const Router = (() => {
 
   const HOME_PATH = "/";
   const LOGIN_PATH = ROUTE_PATHS.LOGIN || "/login";
-  const USER_HOME_PREFIX = Routes.USER_HOME_PREFIX || "/@";
+  const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || Routes.USER_HOME_PREFIX || "/@";
 
   const routes = getImmutableRoutes();
-
-  const BLOCKED_LEGACY_PATHS = new Set(
-    Array.isArray(CONFIG_BLOCKED_FRONTEND_ROUTES) &&
-      CONFIG_BLOCKED_FRONTEND_ROUTES.length
-      ? CONFIG_BLOCKED_FRONTEND_ROUTES
-      : [
-          "/home",
-          "/403",
-          "/404",
-          "/2fa",
-          "/mfa",
-          "/otp",
-        ]
-  );
 
   let initialized = false;
   let bound = false;
@@ -114,7 +106,7 @@ export const Router = (() => {
     return isObject(AppCore?.state) ? AppCore.state : {};
   }
 
-  function safeCall(fn, ...args) {
+  function safeCall(fn = null, ...args) {
     try {
       return isFunction(fn) ? fn(...args) : null;
     } catch {
@@ -128,7 +120,8 @@ export const Router = (() => {
         /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
         "$1***"
       )
-      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+      .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
   }
 
   function safeRouteParams(params = {}) {
@@ -185,57 +178,65 @@ export const Router = (() => {
       : `#${value.replace(/^#+/, "")}`;
   }
 
-  function normalizePathname(pathname = HOME_PATH) {
-    let value = cleanText(pathname, HOME_PATH).replace(/\\/g, "/");
-
-    if (!value.startsWith("/")) {
-      value = `/${value}`;
-    }
-
-    value = value.replace(/\/{2,}/g, "/");
-
-    if (value.length > 1) {
-      value = value.replace(/\/+$/g, "") || HOME_PATH;
-    }
-
-    return value || HOME_PATH;
-  }
-
   function pathFromInput(path = HOME_PATH) {
-    const raw = cleanText(path, HOME_PATH);
+    try {
+      return configRoutePathFromUrlLike(path) || HOME_PATH;
+    } catch {
+      const raw = cleanText(path, HOME_PATH);
 
-    if (isHashRouterPath(raw)) {
-      return normalizeHashPath(raw);
-    }
+      if (isHashRouterPath(raw)) {
+        return normalizeHashPath(raw);
+      }
 
-    if (!raw || raw.startsWith("//")) {
-      return HOME_PATH;
-    }
-
-    if (/^https?:\/\//i.test(raw)) {
-      try {
-        const base = isBrowser() ? window.location.origin : "http://localhost";
-        const url = new URL(raw, base);
-
-        if (url.origin !== base) {
-          return HOME_PATH;
-        }
-
-        if (isHashRouterPath(url.hash)) {
-          return normalizeHashPath(url.hash);
-        }
-
-        return `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
-      } catch {
+      if (!raw || raw.startsWith("//")) {
         return HOME_PATH;
       }
-    }
 
-    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-      return HOME_PATH;
-    }
+      if (/^https?:\/\//i.test(raw)) {
+        try {
+          const base = isBrowser() ? window.location.origin : "http://localhost";
+          const url = new URL(raw, base);
 
-    return raw || HOME_PATH;
+          if (url.origin !== base) {
+            return HOME_PATH;
+          }
+
+          if (isHashRouterPath(url.hash)) {
+            return normalizeHashPath(url.hash);
+          }
+
+          return `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
+        } catch {
+          return HOME_PATH;
+        }
+      }
+
+      if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+        return HOME_PATH;
+      }
+
+      return raw || HOME_PATH;
+    }
+  }
+
+  function normalizePathname(pathname = HOME_PATH) {
+    try {
+      return configNormalizeRoutePath(pathname) || HOME_PATH;
+    } catch {
+      let value = cleanText(pathname, HOME_PATH).replace(/\\/g, "/");
+
+      if (!value.startsWith("/")) {
+        value = `/${value}`;
+      }
+
+      value = value.replace(/\/{2,}/g, "/");
+
+      if (value.length > 1) {
+        value = value.replace(/\/+$/g, "") || HOME_PATH;
+      }
+
+      return value || HOME_PATH;
+    }
   }
 
   function splitPath(path = HOME_PATH) {
@@ -277,8 +278,73 @@ export const Router = (() => {
     return joinPath(splitPath(path));
   }
 
+  function getUserPathInfo(path = HOME_PATH) {
+    try {
+      const info = getConfigUserScopedRouteInfo(path);
+
+      if (isObject(info)) {
+        const restPath = normalizePathname(
+          info.restPath ||
+            info.canonicalPath ||
+            splitPath(path).pathname
+        );
+
+        const lookupPath = normalizePathname(
+          info.canonicalPath ||
+            info.lookupPath ||
+            restPath
+        );
+
+        return {
+          scoped: Boolean(info.scoped),
+          slug: normalizeUserSlug(info.slug || ""),
+          restPath,
+          lookupPath,
+          isHome: Boolean(info.home),
+        };
+      }
+    } catch {
+      // fallback abajo
+    }
+
+    const canonical = splitPath(path).pathname;
+
+    if (!canonical.startsWith(USER_HOME_PREFIX)) {
+      return {
+        scoped: false,
+        slug: "",
+        restPath: canonical,
+        lookupPath: canonical,
+        isHome: false,
+      };
+    }
+
+    const rest = canonical.slice(USER_HOME_PREFIX.length);
+    const [slugSegment = "", ...restSegments] = rest.split("/");
+    const slug = normalizeUserSlug(slugSegment);
+
+    const restPath = restSegments.length
+      ? normalizePathname(`/${restSegments.join("/")}`)
+      : HOME_PATH;
+
+    return {
+      scoped: Boolean(slug),
+      slug,
+      restPath,
+      lookupPath: restPath,
+      isHome: Boolean(slug && restPath === HOME_PATH),
+    };
+  }
+
   function normalizeCanonicalPath(path = HOME_PATH) {
-    return splitPath(path).pathname || HOME_PATH;
+    try {
+      return configCanonicalRoutePath(path) || splitPath(path).pathname || HOME_PATH;
+    } catch {
+      const pathname = splitPath(path).pathname || HOME_PATH;
+      const scoped = getUserPathInfo(pathname);
+
+      return scoped.scoped ? scoped.lookupPath : pathname;
+    }
   }
 
   function canonicalAuthPath(path = HOME_PATH) {
@@ -361,22 +427,41 @@ export const Router = (() => {
     return value.startsWith("#") && !isHashRouterPath(value);
   }
 
-  function isBlockedLegacyPath(path = HOME_PATH) {
-    const normalized = normalizeCanonicalPath(path).toLowerCase();
+  function isBlockedRouterPath(path = HOME_PATH) {
+    const raw = cleanText(path, "");
+
+    if (!raw) return false;
 
     try {
-      if (isConfigBlockedRoutePath(normalized) === true) return true;
+      if (isConfigBlockedRoutePath(raw) === true) return true;
     } catch {
-      // fallback local
+      // noop
     }
 
-    if (BLOCKED_LEGACY_PATHS.has(normalized)) return true;
+    const parts = splitPath(raw);
 
-    return (
-      normalized.startsWith("/2fa/") ||
-      normalized.startsWith("/mfa/") ||
-      normalized.startsWith("/otp/")
-    );
+    try {
+      if (isConfigBlockedRoutePath(parts.pathname) === true) return true;
+    } catch {
+      // noop
+    }
+
+    const scoped = getUserPathInfo(parts.pathname);
+
+    if (scoped.scoped && scoped.restPath) {
+      try {
+        if (isConfigBlockedRoutePath(scoped.restPath) === true) return true;
+      } catch {
+        // noop
+      }
+    }
+
+    try {
+      const canonical = normalizeCanonicalPath(raw);
+      return isConfigBlockedRoutePath(canonical) === true;
+    } catch {
+      return false;
+    }
   }
 
   function safeRedirectPath(path = HOME_PATH, fallback = HOME_PATH) {
@@ -386,12 +471,17 @@ export const Router = (() => {
       isUnsafeHref(value) ||
       isExternalHref(value) ||
       isHashOnlyHref(value) ||
-      hasSensitiveQuery(value)
+      hasSensitiveQuery(value) ||
+      isBlockedRouterPath(value)
     ) {
       return normalizePublicPath(fallback);
     }
 
-    return normalizePublicPath(value || fallback);
+    const normalized = normalizePublicPath(value || fallback);
+
+    return isBlockedRouterPath(normalized)
+      ? normalizePublicPath(fallback)
+      : normalized;
   }
 
   /* =======================================================
@@ -482,7 +572,7 @@ export const Router = (() => {
     try {
       await promise;
     } catch {
-      // restore fallido se decide después por guards
+      // Restore fallido se decide después por guards.
     }
 
     return true;
@@ -497,14 +587,100 @@ export const Router = (() => {
     );
   }
 
+  function stripBearer(value = "") {
+    return cleanText(value, "").replace(/^Bearer\s+/i, "");
+  }
+
+  function tokenOk(value = "") {
+    const token = stripBearer(value);
+
+    if (!token) return false;
+    if (/\s/.test(token)) return false;
+    if (token.length > 8192) return false;
+
+    return ![
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "[object object]",
+      "{}",
+      "[]",
+    ].includes(token.toLowerCase());
+  }
+
+  function hasAuthToken() {
+    if (authCall("hasValidToken", false) === true) return true;
+    if (authCall("hasToken", false) === true) return true;
+
+    const state = readState();
+
+    const token =
+      authCall("getToken", "") ||
+      authCall("getAccessToken", "") ||
+      state.token ||
+      state.accessToken ||
+      state.access_token ||
+      "";
+
+    return tokenOk(token);
+  }
+
+  function isUserUsable(user = null) {
+    if (!isObject(user)) return false;
+
+    const status = cleanText(
+      user.status ||
+        user.estado ||
+        user.state ||
+        "",
+      ""
+    ).toLowerCase();
+
+    return !(
+      user.disabled === true ||
+        user.deleted === true ||
+        user.archived === true ||
+        user.revoked === true ||
+        user.blocked === true ||
+        user.banned === true ||
+        user.suspended === true ||
+        user.active === false ||
+        user.enabled === false ||
+        Boolean(user.deletedAt) ||
+        [
+          "disabled",
+          "inactive",
+          "deleted",
+          "archived",
+          "revoked",
+          "blocked",
+          "banned",
+          "suspended",
+          "desactivado",
+          "inactivo",
+          "eliminado",
+          "archivado",
+          "bloqueado",
+          "suspendido",
+        ].includes(status)
+    );
+  }
+
   function isAuthenticated() {
     const authResult = authCall("isAuthenticated", null);
 
-    if (authResult !== null) {
-      return authResult === true;
-    }
+    if (authResult === false) return false;
 
-    return safeCall(AppCore?.isAuthenticated?.bind?.(AppCore) || AppCore?.isAuthenticated) === true;
+    const strict = Boolean(
+      hasAuthToken() &&
+        isUserUsable(getCurrentUser())
+    );
+
+    if (authResult === true) return strict;
+
+    return safeCall(AppCore?.isAuthenticated?.bind?.(AppCore) || AppCore?.isAuthenticated) === true &&
+      strict;
   }
 
   function normalizeRole(value = "") {
@@ -526,6 +702,8 @@ export const Router = (() => {
   }
 
   function getCurrentRole() {
+    if (!isAuthenticated()) return "";
+
     const fromAuth =
       authCall("getRole", "") ||
       authCall("getCurrentRole", "");
@@ -549,26 +727,32 @@ export const Router = (() => {
   ======================================================= */
 
   function normalizeUserSlug(value = "") {
-    if (isFunction(Routes.normalizeUserHomeSlug)) {
-      return Routes.normalizeUserHomeSlug(value);
+    try {
+      return configNormalizeUserSlug(value) || "";
+    } catch {
+      if (isFunction(Routes.normalizeUserHomeSlug)) {
+        return Routes.normalizeUserHomeSlug(value);
+      }
+
+      const slug = cleanText(value, "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/^\/+/, "")
+        .replace(/^@+/, "")
+        .split(/[/?#]/)[0]
+        .replace(/\s+/g, "")
+        .replace(/[^a-zA-Z0-9._-]/g, "")
+        .toLowerCase();
+
+      if (!slug) return "";
+
+      return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
     }
-
-    const slug = cleanText(value, "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/^\/+/, "")
-      .replace(/^@+/, "")
-      .split(/[/?#]/)[0]
-      .replace(/\s+/g, "")
-      .replace(/[^a-zA-Z0-9._-]/g, "")
-      .toLowerCase();
-
-    if (!slug) return "";
-
-    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
   }
 
   function getCurrentUserSlug() {
+    if (!isAuthenticated()) return "";
+
     const fromAuth =
       authCall("getUserSlug", "") ||
       authCall("extractUserSlug", "", getCurrentUser());
@@ -585,34 +769,6 @@ export const Router = (() => {
         state.userSlug ||
         ""
     );
-  }
-
-  function getUserPathInfo(path = HOME_PATH) {
-    const canonical = normalizeCanonicalPath(path);
-
-    if (!canonical.startsWith(USER_HOME_PREFIX)) {
-      return {
-        scoped: false,
-        slug: "",
-        restPath: canonical,
-        isHome: false,
-      };
-    }
-
-    const rest = canonical.slice(USER_HOME_PREFIX.length);
-    const [slugSegment = "", ...restSegments] = rest.split("/");
-    const slug = normalizeUserSlug(slugSegment);
-
-    const restPath = restSegments.length
-      ? normalizePathname(`/${restSegments.join("/")}`)
-      : HOME_PATH;
-
-    return {
-      scoped: Boolean(slug),
-      slug,
-      restPath,
-      isHome: Boolean(slug && restPath === HOME_PATH),
-    };
   }
 
   function extractSlugFromPath(path = HOME_PATH) {
@@ -754,7 +910,12 @@ export const Router = (() => {
     const visibleCanonicalPath = normalizeCanonicalPath(publicPath);
     const scoped = getUserPathInfo(visibleCanonicalPath);
     const lookupPath = resolveRouteLookupPath(visibleCanonicalPath);
-    const blockedLegacy = isBlockedLegacyPath(visibleCanonicalPath);
+
+    const blockedLegacy = Boolean(
+      isBlockedRouterPath(publicPath) ||
+        isBlockedRouterPath(visibleCanonicalPath) ||
+        isBlockedRouterPath(lookupPath)
+    );
 
     let route = blockedLegacy
       ? null
@@ -799,7 +960,7 @@ export const Router = (() => {
   function isPublicAuthRoutePath(path = HOME_PATH) {
     const canonical = canonicalAuthPath(path);
 
-    if (isBlockedLegacyPath(canonical)) return false;
+    if (isBlockedRouterPath(canonical)) return false;
 
     if (isFunction(Routes.isPublicAuthPath)) {
       return Routes.isPublicAuthPath(canonical) === true;
@@ -841,7 +1002,7 @@ export const Router = (() => {
 
     if (!target) return false;
     if (hasSensitiveQuery(target)) return false;
-    if (isBlockedLegacyPath(target)) return false;
+    if (isBlockedRouterPath(target)) return false;
     if (isPublicAuthRoutePath(target)) return false;
 
     return routeExists(target);
@@ -1033,7 +1194,7 @@ export const Router = (() => {
     if (
       !target ||
       hasSensitiveQuery(target) ||
-      isBlockedLegacyPath(target) ||
+      isBlockedRouterPath(target) ||
       isPublicAuthRoutePath(target) ||
       !routeExists(target)
     ) {
@@ -1542,7 +1703,8 @@ export const Router = (() => {
       isUnsafeHref(href) ||
       isExternalHref(href) ||
       isHashOnlyHref(href) ||
-      hasSensitiveQuery(href)
+      hasSensitiveQuery(href) ||
+      isBlockedRouterPath(href)
     ) {
       return Promise.resolve({
         ok: true,
@@ -1639,7 +1801,7 @@ export const Router = (() => {
 
     if (!href || linkTarget === "_blank") return;
     if (isUnsafeHref(href) || isExternalHref(href) || isHashOnlyHref(href)) return;
-    if (hasSensitiveQuery(href)) return;
+    if (hasSensitiveQuery(href) || isBlockedRouterPath(href)) return;
 
     event.preventDefault();
 
@@ -1660,7 +1822,9 @@ export const Router = (() => {
     try {
       AppCore.Router = api;
       AppCore.router = api;
-      AppCore.modules?.register?.("router", api);
+      AppCore.modules?.register?.("router", api, {
+        overwrite: true,
+      });
     } catch {
       // noop
     }
@@ -1746,6 +1910,8 @@ export const Router = (() => {
       })),
 
       policy: {
+        routerOrchestrator: true,
+
         ownAuthStatic: false,
         authDelegated: true,
         waitsForInFlightAuthRestore: true,
@@ -1756,6 +1922,9 @@ export const Router = (() => {
         ownToast: false,
 
         strictAuth: true,
+        accessTokenAndUserRequired: true,
+        userUsableRequired: true,
+
         adminRoutesDelegatedToConfig: true,
         adminRoutesRequireAdmin: true,
 
@@ -1769,6 +1938,9 @@ export const Router = (() => {
         privateVisiblePattern: "/@{user.slug}/{route}",
 
         syncsRegisteredChromeAfterRender: true,
+
+        blockedRoutesDelegatedToCoreConfig: true,
+        noLocalBlockedRouteList: true,
 
         noHomeAlias: true,
         noHomeRoute: true,

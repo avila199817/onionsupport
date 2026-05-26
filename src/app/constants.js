@@ -8,8 +8,13 @@
    - Delegar rutas, token param, token routes, idioma y DOM ids en core/config.js.
    - No ser fuente paralela de configuración.
    - Sin rutas inventadas.
+   - Sin /home.
    - Sin helpers complejos.
    - Sin lógica de boot pesada.
+   - Sin Auth.
+   - Sin Router real.
+   - Sin fetch.
+   - Sin storage.
 ========================================================= */
 
 import {
@@ -22,10 +27,11 @@ import {
   BLOCKED_FRONTEND_ROUTES as CORE_BLOCKED_FRONTEND_ROUTES,
   normalizeRoutePath as coreNormalizeRoutePath,
   isPublicRoute as coreIsPublicRoute,
+  isBlockedRoutePath as coreIsBlockedRoutePath,
   routePathFromUrlLike as coreRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const APP_CONSTANTS_VERSION = "app.constants.v4";
+export const APP_CONSTANTS_VERSION = "app.constants.v5";
 
 const FALLBACK_APP_NAME = "Onion Support";
 const FALLBACK_ROOT_PATH = "/";
@@ -34,24 +40,6 @@ const DEFAULT_SUPPORTED_LANGS = Object.freeze(["es", "ca", "en"]);
 
 const CORE_CONFIG = copyObject(config);
 const CORE_ROUTE_MAP = copyObject(CORE_ROUTES);
-
-const BLOCKED_FRONTEND_ROUTE_SET = new Set(
-  (
-    Array.isArray(CORE_BLOCKED_FRONTEND_ROUTES) &&
-    CORE_BLOCKED_FRONTEND_ROUTES.length
-      ? CORE_BLOCKED_FRONTEND_ROUTES
-      : [
-          "/home",
-          "/403",
-          "/404",
-          "/2fa",
-          "/mfa",
-          "/otp",
-        ]
-  )
-    .map((path) => normalizeCanonicalRoutePath(path))
-    .filter(Boolean)
-);
 
 /* =========================================================
    BASICS
@@ -181,6 +169,7 @@ export function normalizePublicRoutePath(path = FALLBACK_ROOT_PATH) {
 export function normalizeCanonicalRoutePath(path = FALLBACK_ROOT_PATH) {
   try {
     const normalized = coreNormalizeRoutePath(path) || FALLBACK_ROOT_PATH;
+
     return fallbackPublicRoutePath(normalized)
       .split("?")[0]
       .split("#")[0];
@@ -199,7 +188,31 @@ export function normalizeCanonicalRoutePath(path = FALLBACK_ROOT_PATH) {
   }
 }
 
+const BLOCKED_FRONTEND_ROUTE_SET = new Set(
+  (
+    Array.isArray(CORE_BLOCKED_FRONTEND_ROUTES) &&
+    CORE_BLOCKED_FRONTEND_ROUTES.length
+      ? CORE_BLOCKED_FRONTEND_ROUTES
+      : [
+          "/home",
+          "/403",
+          "/404",
+          "/2fa",
+          "/mfa",
+          "/otp",
+        ]
+  )
+    .map((path) => normalizeCanonicalRoutePath(path).toLowerCase())
+    .filter(Boolean)
+);
+
 function isBlockedFrontendRoute(path = "") {
+  try {
+    if (coreIsBlockedRoutePath(path) === true) return true;
+  } catch {
+    // fallback local abajo
+  }
+
   const clean = normalizeCanonicalRoutePath(path).toLowerCase();
 
   if (BLOCKED_FRONTEND_ROUTE_SET.has(clean)) return true;
@@ -212,11 +225,20 @@ function isBlockedFrontendRoute(path = "") {
 }
 
 function safeConfigRoute(path = "", fallback = FALLBACK_ROOT_PATH) {
+  const fallbackIsEmpty = fallback === "";
   const clean = normalizeCanonicalRoutePath(path || fallback || FALLBACK_ROOT_PATH);
 
-  return isBlockedFrontendRoute(clean)
-    ? normalizeCanonicalRoutePath(fallback || FALLBACK_ROOT_PATH)
-    : clean;
+  if (!isBlockedFrontendRoute(clean)) {
+    return clean;
+  }
+
+  if (fallbackIsEmpty) return "";
+
+  const fallbackRoute = normalizeCanonicalRoutePath(fallback || FALLBACK_ROOT_PATH);
+
+  return isBlockedFrontendRoute(fallbackRoute)
+    ? FALLBACK_ROOT_PATH
+    : fallbackRoute;
 }
 
 function sameRoute(path = "", route = "") {
@@ -591,6 +613,11 @@ export function redactSensitiveText(value = "") {
     "$1***"
   );
 
+  output = output.replace(
+    /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+    "***"
+  );
+
   return output;
 }
 
@@ -642,6 +669,8 @@ export function getAppConstantsSnapshot() {
 
       baseFallbackEs: true,
       noBootLogic: true,
+      noFetch: true,
+      noStorage: true,
       redactedSnapshot: true,
     },
   };

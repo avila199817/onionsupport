@@ -20,6 +20,7 @@
    - Sin refresh.
    - Sin validate endpoint real.
    - Sin aliases legacy masivos.
+   - Sin 2FA/MFA/OTP.
    - Sin magia negra.
 ========================================================= */
 
@@ -39,7 +40,7 @@ import {
 
 import * as SessionApi from "./session.js";
 
-export const PASSWORD_RESET_MODULE_VERSION = "auth.password-reset.v5";
+export const PASSWORD_RESET_MODULE_VERSION = "auth.password-reset.v6";
 
 const SOURCE = "auth.password-reset";
 
@@ -123,7 +124,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function stripEmpty(object = {}) {
@@ -364,6 +366,32 @@ function validateConfirmPayload(payload = {}) {
   }
 
   return "";
+}
+
+export function validateResetPasswordToken(payload = {}) {
+  const token = resolveResetPasswordToken(payload);
+
+  return {
+    version: PASSWORD_RESET_MODULE_VERSION,
+
+    ok: Boolean(token),
+    valid: Boolean(token),
+    hasToken: Boolean(token),
+
+    token: null,
+
+    message: token ? "" : "No se recibió token de recuperación.",
+
+    policy: {
+      localFormatOnly: true,
+      noValidateEndpoint: true,
+      noFetch: true,
+      noStorage: true,
+      noRouter: true,
+      noToast: true,
+      tokenRedacted: true,
+    },
+  };
 }
 
 /* =========================================================
@@ -741,7 +769,7 @@ function responseMessage(input = {}, fallback = "") {
 
 function responseCode(input = {}) {
   const source = responseNode(input);
-  return cleanText(source.code || source.errorCode || "", "");
+  return cleanText(source.code || source.errorCode || source.error_code || "", "");
 }
 
 function responseStatus(input = {}) {
@@ -910,6 +938,7 @@ function publicOptions(options = {}) {
     skipAuth: true,
     noAuthHeader: true,
 
+    cache: "no-store",
     storeError: false,
   };
 }
@@ -1245,6 +1274,8 @@ export default {
 
   requestPasswordReset,
   confirmResetPassword,
+
+  validateResetPasswordToken,
 
   resolveResetPasswordIdentifier,
   resolveResetPasswordToken,

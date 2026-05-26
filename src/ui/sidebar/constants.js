@@ -12,12 +12,13 @@
    - Metadatos visuales mínimos de rutas.
    - Clientes: sólo admin.
    - Usuarios: sólo admin si core/config.js define ROUTES.usuarios.
-   - Servidor: sólo admin si core/config.js define ROUTES.servidor.
+   - Servidor: sólo admin si core/config.js define ROUTES.servidor o ROUTES.server.
    - Avatar: sólo constantes visuales; datos reales resueltos en user/template.
    - Roles únicos: admin / user.
    - Home interna: /
    - Home visible de usuario: /@{user.slug}
    - Bloqueos delegados en core/config.js.
+   - Respetar info.routable explícito de core/config.js.
    - No inventar rutas opcionales.
    - Sin DOM.
    - Sin Auth.
@@ -46,11 +47,13 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v8";
+export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v9.aligned-router";
 
 /* =========================================================
    HELPERS INTERNOS
 ========================================================= */
+
+const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
 
 function freeze(value) {
   try {
@@ -143,24 +146,25 @@ export function normalizeSidebarRole(value = "", fallback = SIDEBAR_ROLE_USER) {
 export const HOME_ROUTE = "/";
 export const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
-export const INCIDENCIAS_ROUTE = ROUTES.incidencias || "/incidencias";
-export const FACTURAS_ROUTE = ROUTES.facturas || "/facturas";
-export const CLIENTES_ROUTE = ROUTES.clientes || "/clientes";
-export const CUENTA_ROUTE = ROUTES.cuenta || "/cuenta";
-export const AJUSTES_ROUTE = ROUTES.ajustes || "/ajustes";
+export const INCIDENCIAS_ROUTE = CONFIG_ROUTES.incidencias || "/incidencias";
+export const FACTURAS_ROUTE = CONFIG_ROUTES.facturas || "/facturas";
+export const CLIENTES_ROUTE = CONFIG_ROUTES.clientes || "/clientes";
+export const CUENTA_ROUTE = CONFIG_ROUTES.cuenta || "/cuenta";
+export const AJUSTES_ROUTE = CONFIG_ROUTES.ajustes || "/ajustes";
 
 /*
   Admin opcionales.
   No se inventan por fallback: sólo existen si core/config.js los define.
+  Servidor acepta compat secundaria ROUTES.server sólo si viene de config.
 */
-export const USUARIOS_ROUTE = ROUTES.usuarios || "";
-export const SERVIDOR_ROUTE = ROUTES.servidor || "";
+export const USUARIOS_ROUTE = CONFIG_ROUTES.usuarios || "";
+export const SERVIDOR_ROUTE = CONFIG_ROUTES.servidor || CONFIG_ROUTES.server || "";
 export const SERVER_ROUTE = SERVIDOR_ROUTE;
 
-export const LOGIN_ROUTE = ROUTES.login || "/login";
-export const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest || "/password-request";
-export const PASSWORD_RESET_ROUTE = ROUTES.passwordReset || "/password-reset";
-export const ACTIVATE_ACCOUNT_ROUTE = ROUTES.activateAccount || "/activate-account";
+export const LOGIN_ROUTE = CONFIG_ROUTES.login || "/login";
+export const PASSWORD_REQUEST_ROUTE = CONFIG_ROUTES.passwordRequest || "/password-request";
+export const PASSWORD_RESET_ROUTE = CONFIG_ROUTES.passwordReset || "/password-reset";
+export const ACTIVATE_ACCOUNT_ROUTE = CONFIG_ROUTES.activateAccount || "/activate-account";
 
 /*
   Compat export.
@@ -410,11 +414,17 @@ export function getSidebarUserScopedRouteInfo(path = "/") {
           restPath
       );
 
+      const hasExplicitRoutable = Object.prototype.hasOwnProperty.call(
+        info,
+        "routable"
+      );
+
       const routable =
         !isSidebarBlockedRoute(restPath) &&
         (
-          info.routable === true ||
-          SIDEBAR_USER_SCOPED_ROUTES.includes(restPath)
+          hasExplicitRoutable
+            ? Boolean(info.routable)
+            : SIDEBAR_USER_SCOPED_ROUTES.includes(restPath)
         );
 
       return freeze({
@@ -866,6 +876,11 @@ export function getSidebarConstantsSnapshot() {
       optionalAdmin: {
         usuarios: Boolean(USUARIOS_ROUTE),
         servidor: Boolean(SERVIDOR_ROUTE),
+        servidorSource: SERVIDOR_ROUTE
+          ? CONFIG_ROUTES.servidor
+            ? "servidor"
+            : "server"
+          : null,
       },
     },
 
@@ -886,6 +901,10 @@ export function getSidebarConstantsSnapshot() {
       optionalAdminRoutesRequireConfig: true,
       usuariosAdminOnly: true,
       servidorAdminOnly: true,
+      servidorCompatServerKey: true,
+
+      respectsExplicitCoreRoutable: true,
+      doesNotReenableCoreNonRoutableUserScope: true,
 
       noDom: true,
       noAuth: true,

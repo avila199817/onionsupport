@@ -4,9 +4,10 @@
 
    Responsabilidad:
    - Bind DOM mínimo de Home.
-   - Delegar clicks por data-home-action / data-action.
-   - Soportar refresh, retry, export, navigate, create,
-     copy id, detalle de incidencia y cierre de modal.
+   - Delegar clicks sólo por data-home-action / data-action.
+   - Acciones alineadas con home.template.js actual:
+     retry, navigate_home, create_incidencia, copy_widget_id,
+     open_ticket_detail, close_ticket_detail, page_prev, page_next, page.
    - Conectar open_ticket_detail / close_ticket_detail con statePatch.
    - Solicitar rerender tras cambios de estado si HomeView pasa callback.
    - Limpiar listeners por scope.
@@ -16,6 +17,9 @@
    - Busy state durante acciones async.
    - Rutas base desde core/config.js.
    - Bloqueos de rutas desde core/config.js.
+   - Sin acción refresh manual.
+   - Sin acción export CSV.
+   - Sin quick actions legacy.
    - Sin AppCore.
    - Sin eventos globales.
    - Sin window bridges.
@@ -38,88 +42,45 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const HOME_BINDINGS_VERSION = "home.bindings.v9.mutable-api-stable-binding";
+export const HOME_BINDINGS_VERSION = "home.bindings.v10.template-aligned";
 
 const DEFAULT_SCOPE = "view:home";
 
 const ACTIONS = Object.freeze({
-  refresh: new Set([
-    "refresh",
+  retry: new Set([
     "retry",
-    "reload",
-    "refresh_home",
-    "home_refresh",
-  ]),
-
-  exportCsv: new Set([
-    "export",
-    "export_csv",
-    "export_home",
-    "export_home_csv",
-    "home_export",
-    "home_export_csv",
   ]),
 
   copyId: new Set([
-    "copy",
-    "copy_id",
     "copy_widget_id",
-    "copy_home_id",
-    "copy_ticket_id",
-    "copy_incidencia_id",
   ]),
 
   navigate: new Set([
-    "navigate",
     "navigate_home",
-    "go",
-    "go_to",
-    "open_route",
   ]),
 
   create: new Set([
-    "create",
-    "new",
     "create_incidencia",
-    "new_incidencia",
-    "open_create",
-    "open_create_incidencia",
   ]),
 
   ticketOpen: new Set([
     "open_ticket_detail",
-    "open_incidencia_detail",
-    "ticket_detail",
-    "incidencia_detail",
-    "detail_ticket",
-    "detail_incidencia",
-    "open_ticket",
-    "open_incidencia",
   ]),
 
   ticketClose: new Set([
     "close_ticket_detail",
-    "close_incidencia_detail",
-    "close_detail",
   ]),
 
   pagePrev: new Set([
-    "prev_page",
-    "previous_page",
     "page_prev",
-    "prev",
   ]),
 
   pageNext: new Set([
-    "next_page",
     "page_next",
-    "next",
   ]),
 
   pageGo: new Set([
     "page",
-    "go_page",
-    "set_page",
   ]),
 });
 
@@ -163,21 +124,13 @@ const JWT_RE =
 const ACTION_SELECTOR = [
   "[data-home-action]",
   "[data-action]",
-  "[data-quick-action]",
-  "[data-route]",
-  "[data-href]",
-  "a[href]",
 ].join(",");
 
 const KEYBOARD_SELECTOR = [
   "[role='button'][data-home-action]",
   "[role='button'][data-action]",
-  "[role='button'][data-quick-action]",
   "[tabindex][data-home-action]",
   "[tabindex][data-action]",
-  "[tabindex][data-quick-action]",
-  "[tabindex][data-route]",
-  "[tabindex][data-href]",
 ].join(",");
 
 const TICKET_ROW_SELECTOR =
@@ -216,10 +169,6 @@ function isElement(value) {
 
 function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
 }
 
 function safeText(value = "", fallback = "") {
@@ -580,9 +529,7 @@ function buildApi(callbacks = {}) {
     refresh: callbacks.refresh,
     loadHomeDashboard: callbacks.loadHomeDashboard,
 
-    exportHomeCsvAction: callbacks.exportHomeCsvAction,
     navigateFromHomeAction: callbacks.navigateFromHomeAction,
-    runHomeQuickAction: callbacks.runHomeQuickAction,
     copyHomeWidgetIdAction: callbacks.copyHomeWidgetIdAction,
     createFromHomeAction: callbacks.createFromHomeAction,
 
@@ -714,8 +661,6 @@ function actionName(element = null) {
     first(
       datasetValue(element, "homeAction"),
       datasetValue(element, "action"),
-      datasetValue(element, "quickAction"),
-      datasetValue(element, "actionName"),
       ""
     )
   );
@@ -812,37 +757,6 @@ function payloadFromElement(element = null, root = null) {
     entityId: first(parsed.entityId, datasetValue(element, "entityId"), id, ""),
     id: first(parsed.id, id, ""),
   });
-}
-
-function filenameFromElement(element = null) {
-  const value = safeText(
-    first(
-      datasetValue(element, "filename"),
-      datasetValue(element, "fileName"),
-      datasetValue(element, "exportFilename"),
-      "home-incidencias.csv"
-    ),
-    "home-incidencias.csv"
-  );
-
-  return (
-    value
-      .replace(/[\\/:*?"<>|]+/g, "-")
-      .replace(/\s+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 160) || "home-incidencias.csv"
-  );
-}
-
-function exportModeFromElement(element = null) {
-  return normalizeKey(
-    first(
-      datasetValue(element, "exportMode"),
-      datasetValue(element, "mode"),
-      datasetValue(element, "collection"),
-      "tickets"
-    )
-  );
 }
 
 function pageFromElement(element = null) {
@@ -1157,42 +1071,18 @@ async function applyActionResult(result = null, api = {}, element = null) {
    ACTION RESOLUTION
 ========================================================= */
 
-function isTicketDetailElement(element = null, root = null) {
-  if (!element) return false;
-
+function resolveKind(element = null) {
   const action = actionName(element);
 
-  if (ACTIONS.ticketOpen.has(action)) return true;
-
-  const ticketId = ticketIdFromElement(element, root);
-
-  if (!ticketId) return false;
-
-  /*
-    Compat con templates antiguos:
-    si un elemento de una fila trae navigate_home + ticketId, se abre modal.
-    Las cards generales no tienen ticketId, así que siguen navegando.
-  */
-  return ACTIONS.navigate.has(action);
-}
-
-function resolveKind(element = null, root = null) {
-  const action = actionName(element);
-  const route = normalizeInternalRoute(routeFromElement(element));
-
-  if (ACTIONS.refresh.has(action)) return "refresh";
-  if (ACTIONS.exportCsv.has(action)) return "export";
+  if (ACTIONS.retry.has(action)) return "retry";
   if (ACTIONS.copyId.has(action)) return "copy-id";
   if (ACTIONS.ticketClose.has(action)) return "ticket-close";
-  if (isTicketDetailElement(element, root)) return "ticket-open";
+  if (ACTIONS.ticketOpen.has(action)) return "ticket-open";
   if (ACTIONS.create.has(action)) return "create";
   if (ACTIONS.pagePrev.has(action)) return "page-prev";
   if (ACTIONS.pageNext.has(action)) return "page-next";
   if (ACTIONS.pageGo.has(action)) return "page-go";
   if (ACTIONS.navigate.has(action)) return "navigate";
-
-  if (route) return "navigate";
-  if (action) return "quick";
 
   return "";
 }
@@ -1201,7 +1091,7 @@ function resolveKind(element = null, root = null) {
    HANDLERS
 ========================================================= */
 
-async function handleRefresh(element, api = {}) {
+async function handleRetry(element, api = {}) {
   return withBusy(element, async () => {
     if (isFunction(api.reload)) {
       return api.reload({
@@ -1222,25 +1112,12 @@ async function handleRefresh(element, api = {}) {
     if (isFunction(api.loadHomeDashboard)) {
       return api.loadHomeDashboard({
         force: true,
+        asRefresh: true,
         returnStaleOnError: true,
       });
     }
 
     return false;
-  });
-}
-
-async function handleExport(element, api = {}) {
-  if (!isFunction(api.exportHomeCsvAction)) return false;
-
-  return withBusy(element, async () => {
-    const result = await api.exportHomeCsvAction({
-      filename: filenameFromElement(element),
-      mode: exportModeFromElement(element) || "tickets",
-      silent: false,
-    });
-
-    return applyActionResult(result, api, element);
   });
 }
 
@@ -1294,17 +1171,6 @@ async function handleCreate(element, api = {}, root = null) {
       return applyActionResult(result, api, element);
     }
 
-    if (isFunction(api.runHomeQuickAction)) {
-      const result = await api.runHomeQuickAction({
-        action: "create_incidencia",
-        route,
-        payload,
-        silent: false,
-      });
-
-      return applyActionResult(result, api, element);
-    }
-
     if (isFunction(api.navigateFromHomeAction)) {
       const result = await api.navigateFromHomeAction({
         route,
@@ -1345,18 +1211,6 @@ async function handleOpenTicketDetail(element, api = {}, root = null) {
         payload,
         silent: false,
       });
-    } else if (isFunction(api.runHomeQuickAction)) {
-      result = await api.runHomeQuickAction({
-        action: "open_ticket_detail",
-        route: "",
-        payload: {
-          ...payload,
-          ticketId,
-          incidenciaId: ticketId,
-          entityId: ticketId,
-        },
-        silent: false,
-      });
     } else {
       result = {
         ok: true,
@@ -1388,13 +1242,6 @@ async function handleCloseTicketDetail(element, api = {}) {
 
     if (isFunction(api.closeHomeTicketDetailAction)) {
       result = await api.closeHomeTicketDetailAction();
-    } else if (isFunction(api.runHomeQuickAction)) {
-      result = await api.runHomeQuickAction({
-        action: "close_ticket_detail",
-        route: "",
-        payload: {},
-        silent: false,
-      });
     } else {
       result = {
         ok: true,
@@ -1440,31 +1287,12 @@ async function handlePage(kind = "", element = null, api = {}) {
   });
 }
 
-async function handleQuick(element, api = {}, root = null) {
-  const action = actionName(element);
-  const route = normalizeInternalRoute(routeFromElement(element));
-  const payload = payloadFromElement(element, root);
-
-  if (!isFunction(api.runHomeQuickAction)) return false;
-
-  return withBusy(element, async () => {
-    const result = await api.runHomeQuickAction({
-      action,
-      route,
-      payload,
-      silent: false,
-    });
-
-    return applyActionResult(result, api, element);
-  });
-}
-
 /* =========================================================
    MAIN DISPATCH
 ========================================================= */
 
 async function dispatchAction(event = null, element = null, api = {}, root = null) {
-  const kind = resolveKind(element, root);
+  const kind = resolveKind(element);
 
   if (!kind) return false;
 
@@ -1476,8 +1304,7 @@ async function dispatchAction(event = null, element = null, api = {}, root = nul
   event?.stopPropagation?.();
 
   try {
-    if (kind === "refresh") return handleRefresh(element, api);
-    if (kind === "export") return handleExport(element, api);
+    if (kind === "retry") return handleRetry(element, api);
     if (kind === "navigate") return handleNavigate(element, api, root);
     if (kind === "copy-id") return handleCopyId(element, api, root);
     if (kind === "create") return handleCreate(element, api, root);
@@ -1487,7 +1314,7 @@ async function dispatchAction(event = null, element = null, api = {}, root = nul
     if (kind === "page-next") return handlePage(kind, element, api);
     if (kind === "page-go") return handlePage(kind, element, api);
 
-    return handleQuick(element, api, root);
+    return false;
   } catch {
     return false;
   }
@@ -1506,9 +1333,7 @@ export function bindHomeEvents({
   refresh,
   loadHomeDashboard,
 
-  exportHomeCsvAction,
   navigateFromHomeAction,
-  runHomeQuickAction,
   copyHomeWidgetIdAction,
   createFromHomeAction,
 
@@ -1555,9 +1380,7 @@ export function bindHomeEvents({
     refresh,
     loadHomeDashboard,
 
-    exportHomeCsvAction,
     navigateFromHomeAction,
-    runHomeQuickAction,
     copyHomeWidgetIdAction,
     createFromHomeAction,
 
@@ -1680,9 +1503,8 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
     callbacks: {
       reload: isFunction(api.reload),
       refresh: isFunction(api.refresh),
-      exportHomeCsvAction: isFunction(api.exportHomeCsvAction),
+      loadHomeDashboard: isFunction(api.loadHomeDashboard),
       navigateFromHomeAction: isFunction(api.navigateFromHomeAction),
-      runHomeQuickAction: isFunction(api.runHomeQuickAction),
       copyHomeWidgetIdAction: isFunction(api.copyHomeWidgetIdAction),
       createFromHomeAction: isFunction(api.createFromHomeAction),
       openHomeTicketDetailAction: isFunction(api.openHomeTicketDetailAction),
@@ -1692,8 +1514,7 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
     },
 
     actions: {
-      refresh: [...ACTIONS.refresh],
-      exportCsv: [...ACTIONS.exportCsv],
+      retry: [...ACTIONS.retry],
       copyId: [...ACTIONS.copyId],
       navigate: [...ACTIONS.navigate],
       create: [...ACTIONS.create],
@@ -1713,6 +1534,13 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
       stableSameRootBinding: true,
       noDuplicateBindingForSameRoot: true,
       updatesApiCallbacksOnSameRootRebind: true,
+
+      templateAlignedActionsOnly: true,
+      noManualRefreshAction: true,
+      retryOnlyForErrorState: true,
+      noExportCsvAction: true,
+      noQuickActionsLegacy: true,
+      noPassiveRouteCapture: true,
 
       noAppCore: true,
       noGlobalEvents: true,

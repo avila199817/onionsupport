@@ -32,8 +32,6 @@
 import {
   ROUTES,
   USER_HOME_PREFIX,
-  ADMIN_ROUTES as CONFIG_ADMIN_ROUTES,
-  BLOCKED_FRONTEND_ROUTES as CONFIG_BLOCKED_FRONTEND_ROUTES,
   buildUserHomeRoute as configBuildUserHomeRoute,
   canonicalRoutePath as configCanonicalRoutePath,
   getUserScopedRouteInfo as getConfigUserScopedRouteInfo,
@@ -46,7 +44,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const GUARDS_VERSION = "router.guards.v10";
+export const GUARDS_VERSION = "router.guards.v11";
 
 const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
 
@@ -55,25 +53,6 @@ const HOME_PATH = "/";
 const USER_PREFIX = USER_HOME_PREFIX || "/@";
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
-
-const BLOCKED_LEGACY_PATHS = new Set(
-  Array.isArray(CONFIG_BLOCKED_FRONTEND_ROUTES) &&
-    CONFIG_BLOCKED_FRONTEND_ROUTES.length
-    ? CONFIG_BLOCKED_FRONTEND_ROUTES
-    : [
-        "/home",
-        "/403",
-        "/404",
-        "/2fa",
-        "/mfa",
-        "/otp",
-      ]
-);
-
-const CONFIG_ADMIN_ROUTE_SET = new Set(
-  (Array.isArray(CONFIG_ADMIN_ROUTES) ? CONFIG_ADMIN_ROUTES : [])
-    .filter(Boolean)
-);
 
 export const GUARD_REASONS = Object.freeze({
   allow: "allowed",
@@ -157,7 +136,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
@@ -289,21 +269,22 @@ function hasSensitiveQuery(value = "") {
   );
 }
 
-function isBlockedLegacyPath(path = HOME_PATH) {
+function isBlockedPath(path = HOME_PATH) {
   try {
-    if (isConfigBlockedRoutePath(path) === true) return true;
+    return isConfigBlockedRoutePath(path) === true;
   } catch {
-    // fallback local
+    return false;
   }
+}
 
-  const canonical = splitPath(path).pathname.toLowerCase();
+function isBlockedGuardPath(path = HOME_PATH) {
+  const publicPath = normalizePublicPath(path);
+  const canonicalPath = canonicalGuardPath(publicPath);
 
-  if (BLOCKED_LEGACY_PATHS.has(canonical)) return true;
-
-  return (
-    canonical.startsWith("/2fa/") ||
-    canonical.startsWith("/mfa/") ||
-    canonical.startsWith("/otp/")
+  return Boolean(
+    isBlockedPath(publicPath) ||
+      isBlockedPath(splitPath(publicPath).pathname) ||
+      isBlockedPath(canonicalPath)
   );
 }
 
@@ -332,13 +313,22 @@ export function getUserScopedRouteInfo(path = HOME_PATH) {
     const info = getConfigUserScopedRouteInfo(path);
 
     if (isObject(info)) {
-      const restPath = info.restPath || info.canonicalPath || splitPath(path).pathname;
-      const lookupPath = info.canonicalPath || info.lookupPath || restPath;
+      const restPath = normalizePathname(
+        info.restPath ||
+          info.canonicalPath ||
+          splitPath(path).pathname
+      );
+
+      const lookupPath = normalizePathname(
+        info.canonicalPath ||
+          info.lookupPath ||
+          restPath
+      );
 
       return {
         scoped: Boolean(info.scoped),
         home: Boolean(info.home),
-        slug: cleanText(info.slug, ""),
+        slug: normalizeUserSlug(info.slug || ""),
         restPath,
         lookupPath,
       };
@@ -427,7 +417,7 @@ function isSafeInternalPath(path = "") {
       !/^[a-z][a-z0-9+.-]*:/i.test(value) &&
       !/[\r\n\t\\]/.test(value) &&
       !hasSensitiveQuery(value) &&
-      !isBlockedLegacyPath(value)
+      !isBlockedGuardPath(value)
   );
 }
 
@@ -604,7 +594,7 @@ function buildLoginRedirect(AppCore = null, Auth = null, publicPath = HOME_PATH)
 
   if (
     canonicalGuardPath(target) === LOGIN_PATH ||
-    isBlockedLegacyPath(target)
+    isBlockedGuardPath(target)
   ) {
     return LOGIN_PATH;
   }
@@ -732,7 +722,7 @@ function routePath(route = null) {
 function isConfiguredAdminPath(path = HOME_PATH) {
   const canonical = canonicalGuardPath(path);
 
-  if (CONFIG_ADMIN_ROUTE_SET.has(canonical)) return true;
+  if (isBlockedGuardPath(canonical)) return false;
 
   try {
     return isConfigAdminRoute(canonical) === true;
@@ -742,11 +732,7 @@ function isConfiguredAdminPath(path = HOME_PATH) {
 }
 
 export function isAdminGuardPath(path = HOME_PATH) {
-  const canonical = canonicalGuardPath(path);
-
-  if (isBlockedLegacyPath(canonical)) return false;
-
-  return isConfiguredAdminPath(canonical);
+  return isConfiguredAdminPath(path);
 }
 
 function routeRequiresAdmin(route = null, canonicalPath = HOME_PATH) {
@@ -896,7 +882,7 @@ export function shouldAllowRoute({
     publicPath,
   };
 
-  if (isBlockedLegacyPath(publicPath) || isBlockedLegacyPath(canonicalPath)) {
+  if (isBlockedGuardPath(publicPath) || isBlockedGuardPath(canonicalPath)) {
     return deny({
       reason: GUARD_REASONS.blockedLegacy,
       route,
@@ -1086,7 +1072,7 @@ export function getGuardsSnapshot({
     canonicalPath: redact(canonicalPath),
     publicPath: redact(publicPath),
 
-    blockedLegacy: isBlockedLegacyPath(publicPath) || isBlockedLegacyPath(canonicalPath),
+    blockedLegacy: isBlockedGuardPath(publicPath) || isBlockedGuardPath(canonicalPath),
 
     userScopedPath: Boolean(scoped.scoped),
     isUserHomePath: Boolean(scoped.home),
@@ -1176,6 +1162,9 @@ export function getGuardsSnapshot({
 
       homeInternalPath: HOME_PATH,
       homeVisiblePattern: `${USER_PREFIX}{user.slug}`,
+
+      blockedRoutesDelegatedToCoreConfig: true,
+      noLocalBlockedRouteList: true,
 
       blocksHomeAlias: true,
       blocks403Route: true,

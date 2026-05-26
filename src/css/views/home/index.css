@@ -5,7 +5,7 @@
    Responsabilidad:
    - CSS único de Home alineado con /src/views/home/home.template.js.
    - Scope cerrado en .home-view-root / [data-home-scope].
-   - Layout 100% ancho, limpio, responsive y premium.
+   - Layout premium, compacto, centrado y responsive.
    - Header con avatar, saludo y CTA superior para crear incidencia.
    - Stats, grid, panels, actividad, facturas, entidades admin.
    - Tabla compacta basada en div[role=table] del template actual.
@@ -55,13 +55,6 @@
   --home-radius-3xl: var(--radius-3xl, 30px);
   --home-radius-pill: var(--radius-pill, 999px);
 
-  --home-space-xs: var(--space-xs, 8px);
-  --home-space-sm: var(--space-sm, 12px);
-  --home-space-md: var(--space-md, 16px);
-  --home-space-lg: var(--space-lg, 22px);
-  --home-space-xl: var(--space-xl, 26px);
-  --home-space-2xl: var(--space-2xl, 32px);
-
   --home-shadow-sm: var(--shadow-sm, 0 8px 20px rgba(0,0,0,.24));
   --home-shadow-md: var(--shadow-md, 0 16px 38px rgba(0,0,0,.32));
   --home-shadow-lg: var(--shadow-lg, 0 26px 64px rgba(0,0,0,.42));
@@ -74,36 +67,42 @@
   --home-normal: var(--duration-normal, .20s);
   --home-slow: var(--duration-slow, .30s);
 
+  --home-content-max: min(100%, 1380px);
+  --home-content-pad-x: clamp(8px, 1vw, 18px);
+  --home-gap: clamp(12px, 1.15vw, 18px);
+
   --home-panel-bg:
-    linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.035) 52%, rgba(255,255,255,.022)),
+    linear-gradient(180deg, rgba(255,255,255,.068), rgba(255,255,255,.032) 52%, rgba(255,255,255,.020)),
     var(--home-bg-1);
 
   --home-panel-bg-hover:
-    linear-gradient(180deg, rgba(255,255,255,.095), rgba(255,255,255,.045) 52%, rgba(255,255,255,.026)),
+    linear-gradient(180deg, rgba(255,255,255,.090), rgba(255,255,255,.044) 52%, rgba(255,255,255,.024)),
     var(--home-bg-2);
 
   --home-card-bg:
-    radial-gradient(circle at 88% 0%, rgba(255,255,255,.12), transparent 32%),
-    linear-gradient(180deg, rgba(255,255,255,.082), rgba(255,255,255,.034)),
+    radial-gradient(circle at 88% 0%, rgba(255,255,255,.10), transparent 31%),
+    linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.032)),
     var(--home-bg-1);
 
   --home-card-bg-strong:
-    radial-gradient(circle at 84% 0%, rgba(255,255,255,.15), transparent 34%),
-    linear-gradient(180deg, rgba(255,255,255,.105), rgba(255,255,255,.040)),
+    radial-gradient(circle at 84% 0%, rgba(255,255,255,.13), transparent 33%),
+    linear-gradient(180deg, rgba(255,255,255,.096), rgba(255,255,255,.038)),
     var(--home-bg-2);
 
   --home-focus:
     0 0 0 3px rgba(255,255,255,.18),
     0 0 0 6px rgba(255,255,255,.075);
 
-  inline-size: 100%;
-  max-inline-size: var(--content-wide, 1520px);
+  inline-size: var(--home-content-max);
+  max-inline-size: var(--home-content-max);
   min-inline-size: 0;
 
   margin-inline: auto;
+  padding-inline: var(--home-content-pad-x);
+  padding-block: clamp(8px, .8vw, 14px) clamp(18px, 1.4vw, 28px);
 
   display: grid;
-  gap: clamp(16px, 1.45vw, 24px);
+  gap: var(--home-gap);
 
   color: var(--home-text);
   font-family: var(--font-family, inherit);
@@ -186,9 +185,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 7px;
 
-  padding: 0 14px;
+  padding: 0 13px;
 
   appearance: none;
   border: 1px solid rgba(255,255,255,.13);
@@ -202,7 +201,7 @@
 
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.06),
-    0 10px 22px rgba(0,0,0,.18);
+    0 9px 18px rgba(0,0,0,.16);
 
   font-size: var(--font-sm, 12px);
   line-height: 1;
@@ -222,15 +221,15 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-btn {
-  min-block-size: var(--btn-height, 42px);
-  padding-inline: 16px;
-  font-size: var(--font-md, 13px);
+  min-block-size: 38px;
+  padding-inline: 15px;
+  font-size: var(--font-sm, 12px);
   font-weight: 850;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-link-button:hover,
 :where(.home-view-root, [data-home-scope]) .home-btn:hover {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
   border-color: rgba(255,255,255,.22);
   background:
     linear-gradient(180deg, rgba(255,255,255,.145), rgba(255,255,255,.062)),
@@ -238,7 +237,7 @@
   color: var(--home-text-strong);
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.09),
-    0 18px 34px rgba(0,0,0,.30);
+    0 14px 28px rgba(0,0,0,.26);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-btn:active,
@@ -258,8 +257,8 @@
 
 :where(.home-view-root, [data-home-scope]) .home-btn svg,
 :where(.home-view-root, [data-home-scope]) .home-link-button svg {
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: 15px;
+  block-size: 15px;
   flex: 0 0 auto;
 }
 
@@ -288,19 +287,19 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
+  gap: 11px;
 
-  padding: 14px 16px;
+  padding: 12px 14px;
 
   border: 1px solid color-mix(in srgb, var(--home-danger) 36%, transparent);
-  border-radius: var(--home-radius-2xl);
+  border-radius: var(--home-radius-xl);
 
   background:
     radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--home-danger) 18%, transparent), transparent 42%),
     color-mix(in srgb, var(--home-danger) 8%, transparent);
 
   color: var(--home-text);
-  box-shadow: var(--home-shadow-md);
+  box-shadow: var(--home-shadow-sm);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-alert svg {
@@ -308,43 +307,43 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state {
-  min-block-size: 230px;
+  min-block-size: 150px;
 
   display: grid;
   place-items: center;
   align-content: center;
   justify-items: center;
-  gap: 10px;
+  gap: 8px;
 
-  padding: clamp(36px, 4vw, 60px) 20px;
+  padding: clamp(24px, 3vw, 42px) 18px;
 
   text-align: center;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state-icon {
-  inline-size: 60px;
-  block-size: 60px;
+  inline-size: 48px;
+  block-size: 48px;
 
   display: grid;
   place-items: center;
 
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 20px;
+  border-radius: 17px;
 
   background:
-    radial-gradient(circle at 28% 16%, rgba(255,255,255,.16), transparent 52%),
+    radial-gradient(circle at 28% 16%, rgba(255,255,255,.15), transparent 52%),
     rgba(255,255,255,.055);
 
   color: var(--home-text-muted);
 
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.06),
-    0 12px 28px rgba(0,0,0,.20);
+    0 10px 22px rgba(0,0,0,.18);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state-icon svg {
-  inline-size: 21px;
-  block-size: 21px;
+  inline-size: 18px;
+  block-size: 18px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state h3 {
@@ -352,19 +351,19 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(18px, 1.65vw, 24px);
+  font-size: clamp(16px, 1.35vw, 21px);
   line-height: 1.08;
   font-weight: 950;
-  letter-spacing: -.045em;
+  letter-spacing: -.042em;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state p {
   margin: 0;
-  max-inline-size: 58ch;
+  max-inline-size: 54ch;
 
   color: var(--home-text-muted);
 
-  font-size: var(--font-md, 13px);
+  font-size: var(--font-sm, 12px);
   line-height: var(--line-relaxed, 1.64);
   font-weight: 500;
 }
@@ -384,51 +383,51 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-skeleton--icon {
-  inline-size: 44px;
-  block-size: 44px;
-  border-radius: 16px;
+  inline-size: 38px;
+  block-size: 38px;
+  border-radius: 14px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-skeleton--title {
-  inline-size: 62%;
-  block-size: 14px;
-}
-
-:where(.home-view-root, [data-home-scope]) .home-skeleton--value {
-  inline-size: 42%;
-  block-size: 38px;
-}
-
-:where(.home-view-root, [data-home-scope]) .home-skeleton--text {
-  inline-size: 78%;
+  inline-size: 58%;
   block-size: 12px;
 }
 
+:where(.home-view-root, [data-home-scope]) .home-skeleton--value {
+  inline-size: 40%;
+  block-size: 30px;
+}
+
+:where(.home-view-root, [data-home-scope]) .home-skeleton--text {
+  inline-size: 72%;
+  block-size: 10px;
+}
+
 :where(.home-view-root, [data-home-scope]) .home-skeleton--avatar {
-  inline-size: 48px;
-  block-size: 48px;
+  inline-size: 42px;
+  block-size: 42px;
   border-radius: 999px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-skeleton--wide {
-  inline-size: 76%;
-  block-size: 14px;
-}
-
-:where(.home-view-root, [data-home-scope]) .home-skeleton--small {
-  inline-size: 38%;
+  inline-size: 72%;
   block-size: 12px;
 }
 
+:where(.home-view-root, [data-home-scope]) .home-skeleton--small {
+  inline-size: 34%;
+  block-size: 10px;
+}
+
 :where(.home-view-root, [data-home-scope]) .home-row-skeleton {
-  min-block-size: 76px;
+  min-block-size: 68px;
 
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) 120px;
+  grid-template-columns: 42px minmax(0, 1fr) 104px;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 
-  padding: 12px;
+  padding: 10px;
 
   border: 1px solid var(--home-border-soft);
   border-radius: var(--home-radius-lg);
@@ -463,25 +462,25 @@
   color: var(--avatar-text, #fff);
 
   box-shadow:
-    0 14px 30px rgba(0,0,0,.28),
+    0 12px 26px rgba(0,0,0,.26),
     inset 0 1px 0 rgba(255,255,255,.12);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-current-user-avatar {
-  inline-size: clamp(58px, 4.8vw, 72px);
-  block-size: clamp(58px, 4.8vw, 72px);
-  border-radius: 22px;
+  inline-size: clamp(54px, 4.2vw, 64px);
+  block-size: clamp(54px, 4.2vw, 64px);
+  border-radius: 20px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-avatar {
-  inline-size: 48px;
-  block-size: 48px;
+  inline-size: 42px;
+  block-size: 42px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-modal-technician-avatar {
-  inline-size: 56px;
-  block-size: 56px;
-  border-radius: 20px;
+  inline-size: 50px;
+  block-size: 50px;
+  border-radius: 18px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-current-user-avatar::after,
@@ -536,15 +535,15 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-current-user-avatar .home-avatar-initials {
-  font-size: clamp(22px, 2vw, 30px);
+  font-size: clamp(21px, 1.8vw, 27px);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-avatar .home-avatar-initials {
-  font-size: 16px;
+  font-size: 14px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-modal-technician-avatar .home-avatar-initials {
-  font-size: 22px;
+  font-size: 19px;
 }
 
 :where(.home-view-root, [data-home-scope]) [data-avatar-tone="violet"] {
@@ -590,11 +589,11 @@
 
 :where(.home-view-root, [data-home-scope]) .home-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 390px);
-  align-items: stretch;
-  gap: clamp(18px, 2vw, 32px);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  align-items: center;
+  gap: clamp(16px, 1.6vw, 26px);
 
-  padding-block-start: clamp(2px, .45vw, 8px);
+  padding-block-start: 0;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-header-main {
@@ -603,14 +602,14 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: clamp(16px, 1.5vw, 22px);
+  gap: clamp(14px, 1.2vw, 18px);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-header-main > div {
   min-inline-size: 0;
 
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-kicker,
@@ -619,7 +618,7 @@
 
   color: var(--home-text-dim);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 10px;
   line-height: 1.1;
   font-weight: 950;
   letter-spacing: .09em;
@@ -635,25 +634,25 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(40px, 4.8vw, 68px);
+  font-size: clamp(36px, 4vw, 56px);
   line-height: .94;
   font-weight: 950;
-  letter-spacing: -.07em;
+  letter-spacing: -.068em;
   text-wrap: balance;
 
   text-shadow:
     0 1px 0 rgba(255,255,255,.08),
-    0 18px 34px rgba(0,0,0,.34);
+    0 16px 30px rgba(0,0,0,.32);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-subtitle {
   margin: 0;
-  max-inline-size: 920px;
+  max-inline-size: 820px;
 
   color: var(--home-text-muted);
 
-  font-size: clamp(13px, 1vw, 16px);
-  line-height: 1.52;
+  font-size: clamp(12px, .9vw, 14px);
+  line-height: 1.48;
   font-weight: 650;
 }
 
@@ -672,15 +671,15 @@
   isolation: isolate;
 
   inline-size: 100%;
-  min-block-size: clamp(92px, 7.4vw, 118px);
+  min-block-size: 86px;
   block-size: 100%;
 
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) auto;
+  grid-template-columns: 46px minmax(0, 1fr) 32px;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 
-  padding: 16px 18px;
+  padding: 14px 14px;
 
   overflow: hidden;
 
@@ -689,15 +688,15 @@
   border-radius: var(--home-radius-2xl);
 
   background:
-    radial-gradient(circle at 12% 0%, rgba(255,255,255,.16), transparent 36%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--home-success) 12%, transparent), transparent 34%),
-    linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.038)),
+    radial-gradient(circle at 12% 0%, rgba(255,255,255,.14), transparent 36%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--home-success) 11%, transparent), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.086), rgba(255,255,255,.036)),
     var(--home-bg-1);
 
   color: var(--home-text);
 
   box-shadow:
-    var(--home-shadow-md),
+    var(--home-shadow-sm),
     inset 0 1px 0 rgba(255,255,255,.070);
 
   text-align: left;
@@ -715,7 +714,7 @@
   content: "";
   position: absolute;
   inset-block-start: 0;
-  inset-inline: 18px;
+  inset-inline: 16px;
   z-index: -1;
 
   block-size: 1px;
@@ -724,46 +723,46 @@
     linear-gradient(
       90deg,
       transparent,
-      rgba(255,255,255,.30),
-      color-mix(in srgb, var(--home-success) 42%, transparent),
+      rgba(255,255,255,.25),
+      color-mix(in srgb, var(--home-success) 35%, transparent),
       transparent
     );
 
-  opacity: .92;
+  opacity: .86;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-button::after {
   content: "";
   position: absolute;
-  inset-inline-end: -42px;
-  inset-block-end: -52px;
+  inset-inline-end: -44px;
+  inset-block-end: -56px;
   z-index: -1;
 
-  inline-size: 148px;
-  block-size: 148px;
+  inline-size: 130px;
+  block-size: 130px;
 
   border-radius: 999px;
 
-  background: color-mix(in srgb, var(--home-success) 12%, transparent);
+  background: color-mix(in srgb, var(--home-success) 11%, transparent);
   filter: blur(22px);
 
-  opacity: .82;
+  opacity: .76;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-button:hover {
-  transform: translateY(-4px);
+  transform: translateY(-3px);
 
-  border-color: rgba(255,255,255,.24);
+  border-color: rgba(255,255,255,.23);
 
   background:
-    radial-gradient(circle at 12% 0%, rgba(255,255,255,.20), transparent 36%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--home-success) 18%, transparent), transparent 36%),
-    linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.050)),
+    radial-gradient(circle at 12% 0%, rgba(255,255,255,.18), transparent 36%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--home-success) 16%, transparent), transparent 36%),
+    linear-gradient(180deg, rgba(255,255,255,.112), rgba(255,255,255,.046)),
     var(--home-bg-2);
 
   box-shadow:
-    var(--home-shadow-lg),
-    0 0 54px color-mix(in srgb, var(--home-success) 8%, transparent),
+    var(--home-shadow-md),
+    0 0 42px color-mix(in srgb, var(--home-success) 7%, transparent),
     inset 0 1px 0 rgba(255,255,255,.10);
 }
 
@@ -772,36 +771,36 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-icon {
-  inline-size: 54px;
-  block-size: 54px;
+  inline-size: 46px;
+  block-size: 46px;
 
   display: grid;
   place-items: center;
 
   border: 1px solid color-mix(in srgb, var(--home-success) 32%, rgba(255,255,255,.10));
-  border-radius: 19px;
+  border-radius: 17px;
 
   background:
-    radial-gradient(circle at 34% 20%, color-mix(in srgb, var(--home-success) 30%, transparent), transparent 58%),
+    radial-gradient(circle at 34% 20%, color-mix(in srgb, var(--home-success) 28%, transparent), transparent 58%),
     color-mix(in srgb, var(--home-success) 10%, rgba(255,255,255,.040));
 
   color: color-mix(in srgb, var(--home-success) 74%, var(--home-text-strong));
 
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.075),
-    0 12px 28px rgba(0,0,0,.20);
+    0 10px 22px rgba(0,0,0,.18);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-icon svg {
-  inline-size: 22px;
-  block-size: 22px;
+  inline-size: 19px;
+  block-size: 19px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-content {
   min-inline-size: 0;
 
   display: grid;
-  gap: 5px;
+  gap: 4px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-content strong {
@@ -810,7 +809,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(20px, 1.55vw, 26px);
+  font-size: clamp(18px, 1.25vw, 22px);
   line-height: 1.04;
   font-weight: 950;
   letter-spacing: -.052em;
@@ -824,24 +823,24 @@
 
   color: var(--home-text-muted);
 
-  font-size: var(--font-md, 13px);
-  line-height: 1.35;
+  font-size: var(--font-sm, 12px);
+  line-height: 1.32;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-arrow {
-  inline-size: 36px;
-  block-size: 36px;
+  inline-size: 32px;
+  block-size: 32px;
 
   display: grid;
   place-items: center;
 
   border: 1px solid rgba(255,255,255,.10);
-  border-radius: 14px;
+  border-radius: 13px;
 
-  background: rgba(255,255,255,.048);
+  background: rgba(255,255,255,.046);
   color: var(--home-text-muted);
 
   transition:
@@ -850,9 +849,14 @@
     background var(--home-normal) var(--home-ease-standard);
 }
 
+:where(.home-view-root, [data-home-scope]) .home-create-card-arrow svg {
+  inline-size: 15px;
+  block-size: 15px;
+}
+
 :where(.home-view-root, [data-home-scope]) .home-create-card-button:hover .home-create-card-arrow {
   transform: translateX(3px);
-  background: rgba(255,255,255,.072);
+  background: rgba(255,255,255,.070);
   color: var(--home-text-strong);
 }
 
@@ -863,8 +867,8 @@
 
 :where(.home-view-root, [data-home-scope]) .home-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr));
-  gap: clamp(14px, 1.35vw, 18px);
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  gap: clamp(12px, 1.1vw, 16px);
 
   inline-size: 100%;
   min-inline-size: 0;
@@ -877,7 +881,7 @@
   isolation: isolate;
 
   min-inline-size: 0;
-  min-block-size: clamp(132px, 10vw, 154px);
+  min-block-size: 118px;
 
   overflow: hidden;
 
@@ -885,11 +889,11 @@
   border-radius: var(--home-radius-2xl);
 
   background:
-    radial-gradient(circle at 86% 0%, color-mix(in srgb, var(--home-stat-color) 18%, transparent), transparent 34%),
+    radial-gradient(circle at 86% 0%, color-mix(in srgb, var(--home-stat-color) 17%, transparent), transparent 34%),
     var(--home-card-bg);
 
   box-shadow:
-    var(--home-shadow-md),
+    var(--home-shadow-sm),
     inset 0 1px 0 rgba(255,255,255,.060);
 
   transform: translateZ(0);
@@ -904,7 +908,7 @@
 :where(.home-view-root, [data-home-scope]) .home-stat-card::before {
   content: "";
   position: absolute;
-  inset-inline: 18px;
+  inset-inline: 16px;
   inset-block-start: 0;
   z-index: 0;
 
@@ -914,43 +918,43 @@
     linear-gradient(
       90deg,
       transparent,
-      color-mix(in srgb, var(--home-stat-color) 52%, rgba(255,255,255,.20)),
+      color-mix(in srgb, var(--home-stat-color) 48%, rgba(255,255,255,.18)),
       transparent
     );
 
-  opacity: .84;
+  opacity: .78;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-card::after {
   content: "";
   position: absolute;
-  inset-inline-end: -46px;
-  inset-block-end: -54px;
+  inset-inline-end: -48px;
+  inset-block-end: -58px;
   z-index: 0;
 
-  inline-size: 142px;
-  block-size: 142px;
+  inline-size: 128px;
+  block-size: 128px;
 
   border-radius: 999px;
 
-  background: color-mix(in srgb, var(--home-stat-color) 13%, transparent);
-  filter: blur(28px);
+  background: color-mix(in srgb, var(--home-stat-color) 12%, transparent);
+  filter: blur(26px);
 
   pointer-events: none;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-3px);
 
   border-color: color-mix(in srgb, var(--home-stat-color) 34%, var(--home-border-strong));
 
   background:
-    radial-gradient(circle at 86% 0%, color-mix(in srgb, var(--home-stat-color) 22%, transparent), transparent 34%),
+    radial-gradient(circle at 86% 0%, color-mix(in srgb, var(--home-stat-color) 21%, transparent), transparent 34%),
     var(--home-card-bg-strong);
 
   box-shadow:
-    var(--home-shadow-lg),
-    0 0 46px color-mix(in srgb, var(--home-stat-color) 7%, transparent),
+    var(--home-shadow-md),
+    0 0 40px color-mix(in srgb, var(--home-stat-color) 7%, transparent),
     inset 0 1px 0 rgba(255,255,255,.090);
 }
 
@@ -962,12 +966,12 @@
   min-block-size: inherit;
 
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr);
+  grid-template-columns: 46px minmax(0, 1fr);
   align-content: center;
   align-items: center;
-  gap: 16px;
+  gap: 13px;
 
-  padding: clamp(18px, 1.6vw, 24px);
+  padding: 16px 18px;
 
   appearance: none;
   border: 0;
@@ -982,42 +986,42 @@
 :where(.home-view-root, [data-home-scope]) .home-stat-card--loading {
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 10px;
 
-  padding: 20px;
+  padding: 16px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-icon {
-  inline-size: 54px;
-  block-size: 54px;
+  inline-size: 46px;
+  block-size: 46px;
 
   display: grid;
   place-items: center;
 
   border: 1px solid color-mix(in srgb, var(--home-stat-color) 25%, rgba(255,255,255,.10));
-  border-radius: 19px;
+  border-radius: 17px;
 
   background:
-    radial-gradient(circle at 34% 20%, color-mix(in srgb, var(--home-stat-color) 27%, transparent), transparent 58%),
+    radial-gradient(circle at 34% 20%, color-mix(in srgb, var(--home-stat-color) 26%, transparent), transparent 58%),
     color-mix(in srgb, var(--home-stat-color) 9%, rgba(255,255,255,.035));
 
   color: color-mix(in srgb, var(--home-stat-color) 76%, var(--home-text-strong));
 
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.07),
-    0 12px 28px rgba(0,0,0,.18);
+    0 10px 22px rgba(0,0,0,.17);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-icon svg {
-  inline-size: 20px;
-  block-size: 20px;
+  inline-size: 18px;
+  block-size: 18px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-content {
   min-inline-size: 0;
 
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-label {
@@ -1027,7 +1031,7 @@
 
   color: var(--home-text-dim);
 
-  font-size: var(--font-sm, 12px);
+  font-size: 11px;
   line-height: 1.1;
   font-weight: 950;
   letter-spacing: .085em;
@@ -1043,7 +1047,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(42px, 3.55vw, 60px);
+  font-size: clamp(34px, 2.75vw, 46px);
   line-height: .88;
   font-weight: 950;
   letter-spacing: -.070em;
@@ -1054,8 +1058,8 @@
 :where(.home-view-root, [data-home-scope]) .home-stat-text {
   color: var(--home-text-muted);
 
-  font-size: clamp(13px, .92vw, 15px);
-  line-height: 1.42;
+  font-size: clamp(12px, .82vw, 13px);
+  line-height: 1.38;
   font-weight: 550;
 }
 
@@ -1087,10 +1091,10 @@
 
 :where(.home-view-root, [data-home-scope]) .home-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.18fr) minmax(360px, .82fr);
+  grid-template-columns: minmax(0, 1.12fr) minmax(320px, .88fr);
   grid-template-areas: "activity invoices";
-  gap: clamp(16px, 1.45vw, 22px);
-  align-items: stretch;
+  gap: clamp(12px, 1.15vw, 18px);
+  align-items: start;
 
   min-inline-size: 0;
 }
@@ -1111,13 +1115,13 @@
   overflow: hidden;
 
   border: 1px solid var(--home-border);
-  border-radius: var(--home-radius-3xl);
+  border-radius: var(--home-radius-2xl);
 
   background: var(--home-panel-bg);
   color: var(--home-text);
 
   box-shadow:
-    var(--home-shadow-md),
+    var(--home-shadow-sm),
     inset 0 1px 0 rgba(255,255,255,.045);
 
   backdrop-filter: var(--home-blur);
@@ -1133,16 +1137,16 @@
   pointer-events: none;
 
   background:
-    radial-gradient(circle at 14% 0%, rgba(255,255,255,.080), transparent 34%),
-    linear-gradient(180deg, rgba(255,255,255,.040), transparent 38%);
+    radial-gradient(circle at 14% 0%, rgba(255,255,255,.070), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.036), transparent 38%);
 
-  opacity: .86;
+  opacity: .82;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-panel::after {
   content: "";
   position: absolute;
-  inset-inline: 24px;
+  inset-inline: 20px;
   inset-block-start: 0;
   z-index: 0;
 
@@ -1152,11 +1156,11 @@
     linear-gradient(
       90deg,
       transparent,
-      rgba(255,255,255,.22),
+      rgba(255,255,255,.20),
       transparent
     );
 
-  opacity: .92;
+  opacity: .86;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-panel > * {
@@ -1181,9 +1185,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 16px;
+  gap: 14px;
 
-  padding: clamp(18px, 1.55vw, 24px) clamp(18px, 1.65vw, 26px) 15px;
+  padding: 16px 18px 12px;
 
   border-block-end: 1px solid var(--home-border-soft);
 }
@@ -1196,21 +1200,21 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(22px, 1.7vw, 30px);
+  font-size: clamp(19px, 1.35vw, 24px);
   line-height: 1.02;
   font-weight: 950;
-  letter-spacing: -.052em;
+  letter-spacing: -.050em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-panel-header h3,
 :where(.home-view-root, [data-home-scope]) .home-entity-columns h3 {
-  margin: 0 0 10px;
+  margin: 0 0 9px;
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-lg, 15px);
+  font-size: var(--font-md, 13px);
   line-height: 1.15;
   font-weight: 950;
   letter-spacing: -.025em;
@@ -1219,7 +1223,7 @@
 :where(.home-view-root, [data-home-scope]) .home-panel-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -1232,7 +1236,7 @@
 :where(.home-view-root, [data-home-scope]) .home-invoice-list,
 :where(.home-view-root, [data-home-scope]) .home-mini-list,
 :where(.home-view-root, [data-home-scope]) .home-modal-invoice-list {
-  padding: 14px;
+  padding: 12px;
   margin: 0;
 
   list-style: none;
@@ -1240,23 +1244,23 @@
 
 :where(.home-view-root, [data-home-scope]) .home-activity-list {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-item {
   --home-activity-color: var(--home-accent);
 
-  min-block-size: 74px;
+  min-block-size: 62px;
 
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 
-  padding: 12px;
+  padding: 9px 10px;
 
   border: 1px solid transparent;
-  border-radius: 20px;
+  border-radius: 17px;
 
   background: transparent;
   color: inherit;
@@ -1269,15 +1273,15 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-item:hover {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 
   border-color: color-mix(in srgb, var(--home-activity-color) 22%, rgba(255,255,255,.10));
 
   background:
-    radial-gradient(circle at 0% 20%, color-mix(in srgb, var(--home-activity-color) 11%, transparent), transparent 42%),
-    rgba(255,255,255,.045);
+    radial-gradient(circle at 0% 20%, color-mix(in srgb, var(--home-activity-color) 10%, transparent), transparent 42%),
+    rgba(255,255,255,.042);
 
-  box-shadow: 0 14px 28px rgba(0,0,0,.20);
+  box-shadow: 0 12px 24px rgba(0,0,0,.18);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-item--invoice {
@@ -1290,29 +1294,29 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-icon {
-  inline-size: 44px;
-  block-size: 44px;
+  inline-size: 38px;
+  block-size: 38px;
 
   display: grid;
   place-items: center;
 
   border: 1px solid color-mix(in srgb, var(--home-activity-color) 26%, rgba(255,255,255,.10));
-  border-radius: 16px;
+  border-radius: 14px;
 
   background: color-mix(in srgb, var(--home-activity-color) 10%, rgba(255,255,255,.035));
   color: color-mix(in srgb, var(--home-activity-color) 76%, var(--home-text-strong));
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-icon svg {
-  inline-size: 18px;
-  block-size: 18px;
+  inline-size: 16px;
+  block-size: 16px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-body {
   min-inline-size: 0;
 
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-body strong {
@@ -1321,7 +1325,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-md, 13px);
+  font-size: var(--font-sm, 12px);
   line-height: 1.15;
   font-weight: 900;
   text-overflow: ellipsis;
@@ -1334,7 +1338,7 @@
 
   color: var(--home-text-dim);
 
-  font-size: var(--font-sm, 12px);
+  font-size: var(--font-xs, 11px);
   line-height: 1.35;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -1344,7 +1348,7 @@
 :where(.home-view-root, [data-home-scope]) .home-activity-item time {
   color: var(--home-text-dim);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 10px;
   font-weight: 950;
   white-space: nowrap;
 }
@@ -1356,27 +1360,27 @@
 
 :where(.home-view-root, [data-home-scope]) .home-billing-total {
   display: grid;
-  gap: 7px;
+  gap: 6px;
 
-  margin: 14px 14px 0;
-  padding: clamp(18px, 1.65vw, 24px);
+  margin: 12px 12px 0;
+  padding: 16px 18px;
 
   border: 1px solid color-mix(in srgb, var(--home-warning) 24%, var(--home-border));
-  border-radius: var(--home-radius-2xl);
+  border-radius: var(--home-radius-xl);
 
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--home-warning) 14%, transparent), transparent 40%),
-    rgba(255,255,255,.034);
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--home-warning) 13%, transparent), transparent 40%),
+    rgba(255,255,255,.032);
 
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.055),
-    0 12px 28px rgba(0,0,0,.16);
+    0 10px 24px rgba(0,0,0,.15);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-billing-total span {
   color: var(--home-text-dim);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 10px;
   line-height: 1.1;
   font-weight: 950;
   letter-spacing: .08em;
@@ -1386,7 +1390,7 @@
 :where(.home-view-root, [data-home-scope]) .home-billing-total strong {
   color: var(--home-text-strong);
 
-  font-size: clamp(38px, 3.7vw, 56px);
+  font-size: clamp(32px, 3vw, 46px);
   line-height: .90;
   font-weight: 950;
   letter-spacing: -.070em;
@@ -1395,22 +1399,22 @@
 :where(.home-view-root, [data-home-scope]) .home-invoice-list,
 :where(.home-view-root, [data-home-scope]) .home-mini-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-invoice-item,
 :where(.home-view-root, [data-home-scope]) .home-mini-list li {
-  min-block-size: 66px;
+  min-block-size: 56px;
 
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 
-  padding: 12px 14px;
+  padding: 10px 12px;
 
   border: 1px solid var(--home-border-soft);
-  border-radius: 20px;
+  border-radius: 17px;
 
   background: rgba(255,255,255,.034);
 
@@ -1446,7 +1450,7 @@
   min-inline-size: 0;
 
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-invoice-main strong,
@@ -1456,7 +1460,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-md, 13px);
+  font-size: var(--font-sm, 12px);
   line-height: 1.18;
   font-weight: 950;
   text-overflow: ellipsis;
@@ -1468,7 +1472,7 @@
 :where(.home-view-root, [data-home-scope]) .home-panel-muted {
   color: var(--home-text-dim);
 
-  font-size: var(--font-sm, 12px);
+  font-size: var(--font-xs, 11px);
   line-height: 1.36;
   font-weight: 600;
 }
@@ -1476,7 +1480,7 @@
 :where(.home-view-root, [data-home-scope]) .home-invoice-amount {
   color: color-mix(in srgb, var(--invoice-color) 82%, var(--home-text-strong));
 
-  font-size: var(--font-sm, 12px);
+  font-size: var(--font-xs, 11px);
   font-weight: 950;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1485,9 +1489,9 @@
 :where(.home-view-root, [data-home-scope]) .home-entity-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 
-  padding: 14px;
+  padding: 12px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-entity-columns > div {
@@ -1530,12 +1534,12 @@
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-table-head,
 :where(.home-view-root, [data-home-scope]) .home-ticket-row {
-  min-inline-size: 980px;
+  min-inline-size: 900px;
 
   display: grid;
-  grid-template-columns: minmax(420px, 1.42fr) 150px 150px 100px;
+  grid-template-columns: minmax(380px, 1.42fr) 135px 135px 88px;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-table-head {
@@ -1543,19 +1547,19 @@
   inset-block-start: 0;
   z-index: 2;
 
-  min-block-size: 52px;
+  min-block-size: 46px;
 
-  padding: 0 18px;
+  padding: 0 16px;
 
   border-block-end: 1px solid var(--home-border-soft);
 
   background:
-    linear-gradient(180deg, rgba(255,255,255,.092), rgba(255,255,255,.042)),
+    linear-gradient(180deg, rgba(255,255,255,.088), rgba(255,255,255,.040)),
     color-mix(in srgb, var(--home-bg-1) 94%, transparent);
 
   color: var(--home-text-dim);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 10px;
   font-weight: 950;
   letter-spacing: .085em;
   text-transform: uppercase;
@@ -1574,10 +1578,10 @@
 
   position: relative;
 
-  min-block-size: 108px;
+  min-block-size: 92px;
   inline-size: 100%;
 
-  padding: 12px 18px;
+  padding: 10px 16px;
 
   appearance: none;
   border: 0;
@@ -1601,14 +1605,14 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-row:hover {
-  background: rgba(255,255,255,.058);
+  background: rgba(255,255,255,.054);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-row::before {
   content: "";
 
   position: absolute;
-  inset-block: 16px;
+  inset-block: 14px;
   inset-inline-start: 0;
 
   inline-size: 4px;
@@ -1660,27 +1664,27 @@
 
   color: var(--home-text-muted);
 
-  font-size: var(--font-sm, 12px);
+  font-size: var(--font-xs, 11px);
   line-height: 1.25;
   font-weight: 800;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-cell--main {
   justify-content: flex-start;
-  gap: 12px;
+  gap: 10px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-main-text {
   min-inline-size: 0;
 
   display: grid;
-  gap: 5px;
+  gap: 4px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-id {
   color: color-mix(in srgb, var(--home-text-strong) 62%, transparent);
 
-  font-size: var(--font-sm, 12px);
+  font-size: 10px;
   line-height: 1.12;
   font-weight: 950;
   letter-spacing: .055em;
@@ -1693,7 +1697,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-base, 14px);
+  font-size: var(--font-sm, 12px);
   line-height: 1.16;
   font-weight: 950;
   letter-spacing: -.025em;
@@ -1708,7 +1712,7 @@
 
   color: color-mix(in srgb, var(--home-text-strong) 58%, transparent);
 
-  font-size: var(--font-sm, 12px);
+  font-size: var(--font-xs, 11px);
   line-height: 1.25;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -1721,7 +1725,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 6px;
 }
 
 
@@ -1731,14 +1735,14 @@
 
 :where(.home-view-root, [data-home-scope]) .home-chip,
 :where(.home-view-root, [data-home-scope]) .home-mini-badge {
-  min-block-size: var(--chip-height, 26px);
+  min-block-size: 24px;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 6px;
 
-  padding: 0 11px;
+  padding: 0 10px;
 
   border: 1px solid var(--chip-border, rgba(255,255,255,.14));
   border-radius: var(--home-radius-pill);
@@ -1746,7 +1750,7 @@
   background: var(--chip-bg, rgba(255,255,255,.085));
   color: var(--chip-text, var(--home-text-soft));
 
-  font-size: var(--font-xs, 11px);
+  font-size: 10px;
   line-height: 1;
   font-weight: 950;
   letter-spacing: .045em;
@@ -1755,27 +1759,27 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-mini-badge {
-  min-block-size: var(--chip-height-sm, 22px);
+  min-block-size: 21px;
 
-  padding-inline: 9px;
+  padding-inline: 8px;
 
-  font-size: 10px;
+  font-size: 9px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-mini-badge svg {
-  inline-size: 13px;
-  block-size: 13px;
+  inline-size: 12px;
+  block-size: 12px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-chip-dot {
-  inline-size: 7px;
-  block-size: 7px;
-  flex: 0 0 7px;
+  inline-size: 6px;
+  block-size: 6px;
+  flex: 0 0 6px;
 
   border-radius: 999px;
 
   background: currentColor;
-  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 16%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 15%, transparent);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-chip--pending,
@@ -1818,7 +1822,7 @@
 
 :where(.home-view-root, [data-home-scope]) .home-mini-badge--category,
 :where(.home-view-root, [data-home-scope]) .home-mini-badge--technician {
-  max-inline-size: min(260px, 100%);
+  max-inline-size: min(240px, 100%);
 
   overflow: hidden;
 
@@ -1838,10 +1842,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 
-  padding: 14px 18px;
+  padding: 12px 16px;
 
   border-block-start: 1px solid var(--home-border-soft);
 }
@@ -1849,7 +1853,7 @@
 :where(.home-view-root, [data-home-scope]) .home-pagination > span {
   color: var(--home-text-dim);
 
-  font-size: var(--font-sm, 12px);
+  font-size: var(--font-xs, 11px);
   font-weight: 850;
 }
 
@@ -1886,8 +1890,8 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-modal {
-  inline-size: min(980px, 100%);
-  max-block-size: min(760px, calc(100dvh - 32px));
+  inline-size: min(920px, 100%);
+  max-block-size: min(720px, calc(100dvh - 32px));
 
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -1895,7 +1899,7 @@
   overflow: hidden;
 
   border: 1px solid var(--home-border);
-  border-radius: var(--modal-radius, var(--home-radius-3xl));
+  border-radius: var(--modal-radius, var(--home-radius-2xl));
 
   background:
     radial-gradient(circle at 12% 0%, rgba(255,255,255,.10), transparent 34%),
@@ -1912,9 +1916,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 16px;
+  gap: 14px;
 
-  padding: clamp(18px, 2vw, 24px);
+  padding: 18px 20px;
 
   border-block-end: 1px solid var(--home-border-soft);
 }
@@ -1926,15 +1930,15 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(24px, 2.2vw, 34px);
+  font-size: clamp(22px, 2vw, 30px);
   line-height: 1.02;
   font-weight: 950;
   letter-spacing: -.055em;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-modal-close {
-  inline-size: 40px;
-  block-size: 40px;
+  inline-size: 38px;
+  block-size: 38px;
 
   display: grid;
   place-items: center;
@@ -1943,7 +1947,7 @@
 
   appearance: none;
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 14px;
+  border-radius: 13px;
 
   background: rgba(255,255,255,.045);
   color: var(--home-text-muted);
@@ -1966,10 +1970,10 @@
   min-block-size: 0;
 
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: 14px;
 
-  padding: clamp(16px, 2vw, 22px);
+  padding: 18px;
 
   overflow: auto;
 }
@@ -1980,7 +1984,7 @@
 
   display: grid;
   align-content: start;
-  gap: 14px;
+  gap: 12px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-modal-section,
@@ -1989,7 +1993,7 @@
   min-inline-size: 0;
 
   border: 1px solid var(--home-border-soft);
-  border-radius: var(--home-radius-2xl);
+  border-radius: var(--home-radius-xl);
 
   background:
     linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.024));
@@ -1999,9 +2003,9 @@
 
 :where(.home-view-root, [data-home-scope]) .home-modal-section {
   display: grid;
-  gap: 12px;
+  gap: 11px;
 
-  padding: 16px;
+  padding: 14px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-modal-section h3 {
@@ -2009,7 +2013,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-lg, 15px);
+  font-size: var(--font-md, 13px);
   font-weight: 950;
 }
 
@@ -2018,23 +2022,23 @@
 
   color: var(--home-text-muted);
 
-  font-size: var(--font-md, 13px);
-  line-height: 1.62;
+  font-size: var(--font-sm, 12px);
+  line-height: 1.58;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-modal-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 7px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-modal-technician {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-columns: 50px minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 11px;
 
-  padding: 14px;
+  padding: 12px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-modal-technician > div {
@@ -2050,7 +2054,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-lg, 15px);
+  font-size: var(--font-md, 13px);
   font-weight: 950;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2061,7 +2065,7 @@
 
   color: var(--home-text-dim);
 
-  font-size: var(--font-sm, 12px);
+  font-size: var(--font-xs, 11px);
   line-height: 1.35;
 }
 
@@ -2076,9 +2080,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 
-  padding: 11px 10px;
+  padding: 10px 9px;
 
   border-block-end: 1px solid var(--home-border-soft);
 }
@@ -2090,7 +2094,7 @@
 :where(.home-view-root, [data-home-scope]) .home-modal-facts dt {
   color: var(--home-text-dim);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 10px;
   font-weight: 950;
   letter-spacing: .075em;
   text-transform: uppercase;
@@ -2101,7 +2105,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-sm, 12px);
+  font-size: var(--font-xs, 11px);
   font-weight: 850;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -2122,17 +2126,17 @@
 :where(.home-view-root, [data-home-scope]) .home-modal-invoice-item {
   --invoice-color: var(--home-warning);
 
-  min-block-size: 58px;
+  min-block-size: 52px;
 
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
 
-  padding: 10px;
+  padding: 9px;
 
   border: 1px solid color-mix(in srgb, var(--invoice-color) 20%, var(--home-border));
-  border-radius: 17px;
+  border-radius: 15px;
 
   background:
     radial-gradient(circle at 0% 12%, color-mix(in srgb, var(--invoice-color) 12%, transparent), transparent 46%),
@@ -2158,14 +2162,14 @@
 :where(.home-view-root, [data-home-scope]) .home-modal-invoice-item strong {
   color: var(--home-text-strong);
 
-  font-size: var(--font-md, 13px);
+  font-size: var(--font-sm, 12px);
   font-weight: 950;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-modal-invoice-item small {
   color: var(--home-text-dim);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 10px;
   font-weight: 850;
   letter-spacing: .045em;
   text-transform: uppercase;
@@ -2175,10 +2179,10 @@
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   flex-wrap: wrap;
 
-  padding: 14px clamp(18px, 2vw, 24px);
+  padding: 12px 20px;
 
   border-block-start: 1px solid var(--home-border-soft);
 }
@@ -2191,11 +2195,11 @@
 :where(.home-view-root, [data-home-scope]) .home-hero,
 :where(.home-view-root, [data-home-scope]) .home-hero--frameless {
   display: grid;
-  gap: clamp(14px, 1.35vw, 18px);
+  gap: clamp(12px, 1.1vw, 16px);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-hero--loading {
-  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
 }
 
 
@@ -2209,7 +2213,7 @@
   }
 
   :where(.home-view-root, [data-home-scope]) .home-create-card-button {
-    min-block-size: 96px;
+    min-block-size: 82px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-grid,
@@ -2238,34 +2242,35 @@
 
 @container (max-width: 720px) {
   :where(.home-view-root, [data-home-scope]) {
-    gap: 14px;
+    gap: 12px;
+    padding-inline: 0;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-header-main {
-    grid-template-columns: 54px minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: 50px minmax(0, 1fr);
+    gap: 11px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-current-user-avatar {
-    inline-size: 54px;
-    block-size: 54px;
-    border-radius: 18px;
+    inline-size: 50px;
+    block-size: 50px;
+    border-radius: 17px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-header h1 {
-    font-size: clamp(32px, 8.5vw, 44px);
+    font-size: clamp(30px, 8vw, 40px);
     letter-spacing: -.060em;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-create-card-button {
-    grid-template-columns: 48px minmax(0, 1fr);
-    min-block-size: 92px;
+    grid-template-columns: 44px minmax(0, 1fr);
+    min-block-size: 78px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-create-card-icon {
-    inline-size: 48px;
-    block-size: 48px;
-    border-radius: 17px;
+    inline-size: 44px;
+    block-size: 44px;
+    border-radius: 16px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-create-card-arrow {
@@ -2321,30 +2326,30 @@
   }
 
   :where(.home-view-root, [data-home-scope]) .home-row-skeleton {
-    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-columns: 42px minmax(0, 1fr);
   }
 }
 
 @container (max-width: 480px) {
   :where(.home-view-root, [data-home-scope]) .home-create-card-button {
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: 9px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-create-card-icon {
-    inline-size: 44px;
-    block-size: 44px;
+    inline-size: 42px;
+    block-size: 42px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-stat-card-button {
-    grid-template-columns: 48px minmax(0, 1fr);
-    padding: 16px;
+    grid-template-columns: 42px minmax(0, 1fr);
+    padding: 14px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-stat-icon {
-    inline-size: 48px;
-    block-size: 48px;
-    border-radius: 17px;
+    inline-size: 42px;
+    block-size: 42px;
+    border-radius: 15px;
   }
 }
 
@@ -2391,15 +2396,15 @@
 
 @media (max-width: 420px) {
   :where(.home-view-root, [data-home-scope]) .home-header h1 {
-    font-size: clamp(28px, 9vw, 38px);
+    font-size: clamp(27px, 8.5vw, 36px);
   }
 
   :where(.home-view-root, [data-home-scope]) .home-subtitle {
-    font-size: var(--font-sm, 12px);
+    font-size: var(--font-xs, 11px);
   }
 
   :where(.home-view-root, [data-home-scope]) .home-panel {
-    border-radius: 22px;
+    border-radius: 20px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-panel-header,
@@ -2407,7 +2412,7 @@
   :where(.home-view-root, [data-home-scope]) .home-invoice-list,
   :where(.home-view-root, [data-home-scope]) .home-mini-list,
   :where(.home-view-root, [data-home-scope]) .home-modal-invoice-list {
-    padding-inline: 12px;
+    padding-inline: 10px;
   }
 }
 

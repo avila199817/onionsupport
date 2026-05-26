@@ -46,7 +46,7 @@ import {
 
 import * as Session from "./session.js";
 
-export const GUARDS_VERSION = "auth.guards.v7";
+export const GUARDS_VERSION = "auth.guards.v8";
 
 const HOME_PATH = "/";
 const LOGIN_PATH = ROUTES.login || "/login";
@@ -70,6 +70,10 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function isFunction(value) {
+  return typeof value === "function";
+}
+
 function cleanText(value = "", fallback = "") {
   const output = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
@@ -84,6 +88,7 @@ function unique(values = []) {
     ...new Set(
       (Array.isArray(values) ? values : [values])
         .flat(Infinity)
+        .map((item) => cleanText(item, ""))
         .filter(Boolean)
     ),
   ];
@@ -95,7 +100,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
@@ -190,6 +196,10 @@ export function normalizePublicPath(path = HOME_PATH) {
     if (!value || value.startsWith("//")) return HOME_PATH;
 
     if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+      return HOME_PATH;
+    }
+
+    if (/[\r\n\t\\]/.test(value)) {
       return HOME_PATH;
     }
 
@@ -427,7 +437,7 @@ function publicAuthRoutes() {
 
 export function syncAuthState(options = {}) {
   try {
-    if (typeof Session.syncAuthState === "function") {
+    if (isFunction(Session.syncAuthState)) {
       Session.syncAuthState({
         source: options.source || "auth.guards",
       });
@@ -840,6 +850,7 @@ export function getAuthGuardsSnapshot() {
       no2fa: true,
       noMfa: true,
       noOtp: true,
+
       snapshotRedacted: true,
     },
   };

@@ -4,7 +4,7 @@
 
    FINAL SIDEBAR SYSTEM · PRIVATE SPA · EXTREME 10/10
    SOLID GRAPHITE · DESKTOP · COLLAPSED · MOBILE RAIL
-   REVISION: compact mobile drawer aligned to account/user width
+   REVISION: compact mobile drawer calibrated under 900px
 
    Responsabilidad:
    - Pintar y organizar visualmente el sidebar.
@@ -36,11 +36,10 @@
   --sidebar-local-width: var(--sidebar-width, 260px);
   --sidebar-local-collapsed-width: var(--sidebar-collapsed, 72px);
   --sidebar-local-mobile-collapsed-width: var(--sidebar-mobile-collapsed-width, 60px);
-  --sidebar-local-mobile-target-width: clamp(288px, 40vw, 320px);
+  --sidebar-local-mobile-target-width: clamp(276px, 33vw, 304px);
   --sidebar-local-mobile-width: min(
-    var(--sidebar-mobile-width, var(--sidebar-local-mobile-target-width)),
     var(--sidebar-local-mobile-target-width),
-    calc(100vw - 8px)
+    calc(100vw - 12px)
   );
 
   /* Palette */
@@ -2021,15 +2020,20 @@ body[data-sidebar-open="false"] .sidebar {
 
 @media (max-width: 900px) {
   .sidebar {
-    --sidebar-local-mobile-target-width: clamp(288px, 40vw, 320px);
+    --sidebar-local-mobile-target-width: clamp(276px, 33vw, 304px);
     --sidebar-local-mobile-width: min(
-      var(--sidebar-mobile-width, var(--sidebar-local-mobile-target-width)),
       var(--sidebar-local-mobile-target-width),
-      calc(100vw - 8px)
+      calc(100vw - 12px)
     );
 
-    inline-size: var(--sidebar-local-mobile-collapsed-width);
-    max-inline-size: var(--sidebar-local-mobile-collapsed-width);
+    width: var(--sidebar-local-mobile-collapsed-width) !important;
+    min-width: var(--sidebar-local-mobile-collapsed-width) !important;
+    max-width: var(--sidebar-local-mobile-collapsed-width) !important;
+
+    inline-size: var(--sidebar-local-mobile-collapsed-width) !important;
+    min-inline-size: var(--sidebar-local-mobile-collapsed-width) !important;
+    max-inline-size: var(--sidebar-local-mobile-collapsed-width) !important;
+
     z-index: var(--z-sidebar, 60);
 
     transform: translate3d(0, 0, 0) !important;
@@ -2045,8 +2049,13 @@ body[data-sidebar-open="false"] .sidebar {
   body.sidebar-collapsed .sidebar,
   body[data-sidebar-state="collapsed"] .sidebar,
   body[data-sidebar-open="false"] .sidebar {
-    inline-size: var(--sidebar-local-mobile-collapsed-width);
-    max-inline-size: var(--sidebar-local-mobile-collapsed-width);
+    width: var(--sidebar-local-mobile-collapsed-width) !important;
+    min-width: var(--sidebar-local-mobile-collapsed-width) !important;
+    max-width: var(--sidebar-local-mobile-collapsed-width) !important;
+
+    inline-size: var(--sidebar-local-mobile-collapsed-width) !important;
+    min-inline-size: var(--sidebar-local-mobile-collapsed-width) !important;
+    max-inline-size: var(--sidebar-local-mobile-collapsed-width) !important;
 
     transform: translate3d(0, 0, 0) !important;
 
@@ -2059,9 +2068,13 @@ body[data-sidebar-open="false"] .sidebar {
   body.sidebar-open .sidebar,
   body[data-sidebar-state="open"] .sidebar,
   body[data-sidebar-open="true"] .sidebar {
-    inline-size: var(--sidebar-local-mobile-width);
-    min-inline-size: var(--sidebar-local-mobile-width);
-    max-inline-size: var(--sidebar-local-mobile-width);
+    width: var(--sidebar-local-mobile-width) !important;
+    min-width: var(--sidebar-local-mobile-width) !important;
+    max-width: var(--sidebar-local-mobile-width) !important;
+
+    inline-size: var(--sidebar-local-mobile-width) !important;
+    min-inline-size: var(--sidebar-local-mobile-width) !important;
+    max-inline-size: var(--sidebar-local-mobile-width) !important;
 
     transform: translate3d(0, 0, 0) !important;
 
@@ -2433,11 +2446,10 @@ body[data-sidebar-open="false"] .sidebar {
 @media (max-width: 640px) {
   .sidebar {
     --sidebar-local-mobile-collapsed-width: var(--sidebar-mobile-collapsed-width, 60px);
-    --sidebar-local-mobile-target-width: clamp(272px, 74vw, 288px);
+    --sidebar-local-mobile-target-width: clamp(264px, 68vw, 280px);
     --sidebar-local-mobile-width: min(
-      var(--sidebar-mobile-width, var(--sidebar-local-mobile-target-width)),
       var(--sidebar-local-mobile-target-width),
-      calc(100vw - 8px)
+      calc(100vw - 12px)
     );
   }
 }
@@ -2445,9 +2457,8 @@ body[data-sidebar-open="false"] .sidebar {
 @media (max-width: 380px) {
   .sidebar {
     --sidebar-local-mobile-collapsed-width: var(--sidebar-mobile-collapsed-width, 56px);
-    --sidebar-local-mobile-target-width: clamp(264px, 74vw, 280px);
+    --sidebar-local-mobile-target-width: clamp(252px, 70vw, 268px);
     --sidebar-local-mobile-width: min(
-      var(--sidebar-mobile-width, var(--sidebar-local-mobile-target-width)),
       var(--sidebar-local-mobile-target-width),
       calc(100vw - 8px)
     );

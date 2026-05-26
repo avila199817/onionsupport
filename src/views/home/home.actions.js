@@ -57,14 +57,20 @@ import {
   normalizeHomeTickets,
   normalizeHomeInvoices,
   normalizeHomeUsers,
+  normalizeHomeClients,
+
   getHomeWidgetId,
   getHomeTicketId,
+  getHomeInvoiceId,
+  getHomeUserId,
+  getHomeClientId,
+
   findHomeTicketById,
   resolveHomeTicketInvoices,
   resolveHomeTicketTechnician,
 } from "./home.model.js";
 
-export const HOME_ACTIONS_VERSION = "home.actions.v7";
+export const HOME_ACTIONS_VERSION = "home.actions.v8.router-safe-store-aligned";
 
 const SOURCE = "views.home.actions";
 
@@ -86,6 +92,9 @@ const RAW_KEYS = new Set([
   "payloadRaw",
   "response",
   "body",
+  "request",
+  "headers",
+  "config",
 ]);
 
 const COSMOS_META_KEYS = new Set([
@@ -100,12 +109,15 @@ const COSMOS_META_KEYS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni|ipRaw|ip|userAgent/i;
+  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|correo|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|bank|cuenta|account|ipRaw|ip|userAgent/i;
 
 const SENSITIVE_QUERY_RE =
-  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i;
 
 const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
+const EMAIL_GLOBAL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
+const JWT_RE =
+  /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
 
 /* =========================================================
    BASICS
@@ -140,6 +152,47 @@ function safeText(value = "", fallback = "") {
     .trim();
 
   return output || fallback;
+}
+
+function safeNumber(value = 0, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  if (typeof value === "string") {
+    let clean = value
+      .trim()
+      .replace(/[€$£¥%]/g, "")
+      .replace(/[^\d.,+\-\s]/g, "")
+      .replace(/\s/g, "");
+
+    if (!clean || clean === "-" || clean === "+") return fallback;
+
+    const hasComma = clean.includes(",");
+    const hasDot = clean.includes(".");
+
+    if (hasComma && hasDot) {
+      const lastComma = clean.lastIndexOf(",");
+      const lastDot = clean.lastIndexOf(".");
+
+      clean =
+        lastComma > lastDot
+          ? clean.replace(/\./g, "").replace(/,/g, ".")
+          : clean.replace(/,/g, "");
+    } else if (hasComma) {
+      clean = clean.replace(/,/g, ".");
+    }
+
+    const number = Number(clean);
+
+    return Number.isFinite(number) ? number : fallback;
+  }
+
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function first(...values) {
@@ -194,14 +247,24 @@ function nowIso() {
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(JWT_RE, "***")
+    .replace(EMAIL_GLOBAL_RE, "");
 }
 
 function isSensitiveKey(key = "") {
   return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function isRawKey(key = "") {
+  return RAW_KEYS.has(String(key || ""));
+}
+
+function isCosmosMetaKey(key = "") {
+  return COSMOS_META_KEYS.has(String(key || ""));
 }
 
 function isEmailLike(value = "") {
@@ -209,9 +272,25 @@ function isEmailLike(value = "") {
   return Boolean(text && EMAIL_RE.test(text));
 }
 
+function hasSensitiveQuery(value = "") {
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
+}
+
+function safeCopyText(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) return "";
+  if (isEmailLike(text)) return "";
+  if (hasSensitiveQuery(text)) return "";
+  if (/Bearer\s+/i.test(text)) return "";
+  if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
+
+  return redact(text).slice(0, 240);
+}
+
 function sanitizePayloadValue(value, keyHint = "") {
-  if (RAW_KEYS.has(keyHint)) return undefined;
-  if (COSMOS_META_KEYS.has(keyHint)) return undefined;
+  if (isRawKey(keyHint)) return undefined;
+  if (isCosmosMetaKey(keyHint)) return undefined;
   if (isSensitiveKey(keyHint)) return undefined;
 
   if (typeof value === "string") {
@@ -228,8 +307,8 @@ function sanitizePayloadValue(value, keyHint = "") {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if (RAW_KEYS.has(key)) continue;
-      if (COSMOS_META_KEYS.has(key)) continue;
+      if (isRawKey(key)) continue;
+      if (isCosmosMetaKey(key)) continue;
       if (isSensitiveKey(key)) continue;
 
       const clean = sanitizePayloadValue(item, key);
@@ -265,13 +344,44 @@ function notify(message = "", type = "info", options = {}) {
   return false;
 }
 
+function publicError(error = null) {
+  if (!error) return null;
+
+  return {
+    name: safeText(error.name, "HomeActionError"),
+    message: redact(
+      safeText(
+        first(
+          error.response?.data?.message,
+          error.data?.message,
+          error.message,
+          error.reason,
+          "Error Home."
+        ),
+        "Error Home."
+      )
+    ),
+    status:
+      error.status ||
+      error.statusCode ||
+      error.response?.status ||
+      error.data?.status ||
+      0,
+    code: safeText(
+      first(
+        error.code,
+        error.data?.code,
+        error.response?.data?.code,
+        "HOME_ACTION_ERROR"
+      ),
+      "HOME_ACTION_ERROR"
+    ),
+  };
+}
+
 /* =========================================================
    ROUTES
 ========================================================= */
-
-function hasSensitiveQuery(value = "") {
-  return SENSITIVE_QUERY_RE.test(String(value || ""));
-}
 
 function routeInput(value = "") {
   const raw = safeText(value, "");
@@ -339,6 +449,10 @@ function isBlockedRoute(value = "") {
 
   if (!path) return true;
 
+  /*
+    Crear incidencia se delega a /incidencias.
+    No existe /incidencias/nueva en esta fase.
+  */
   if (
     lower === "/incidencias/nueva" ||
     lower.startsWith("/incidencias/nueva/")
@@ -450,7 +564,9 @@ function getRouterCandidates() {
 
   try {
     candidates.push(AppCore?.router);
+    candidates.push(AppCore?.Router);
     candidates.push(AppCore?.modules?.get?.("router"));
+    candidates.push(AppCore?.modules?.get?.("Router"));
   } catch {
     // noop
   }
@@ -462,6 +578,7 @@ async function navigateSpa(route = "", options = {}) {
   const target = normalizeSpaRoute(route);
 
   if (!target) return false;
+  if (!canUseRoute(target)) return false;
 
   const rawOptions = safeObject(options);
   const cleanOptions = sanitizePayload({
@@ -541,7 +658,22 @@ function getStoredRole() {
     return "admin";
   }
 
-  return "user";
+  try {
+    const state = safeObject(AppCore?.state);
+    return normalizeRole(
+      first(
+        state.role,
+        state.rol,
+        state.roles,
+        state.user?.role,
+        state.user?.rol,
+        state.user?.roles,
+        "user"
+      )
+    ) || "user";
+  } catch {
+    return "user";
+  }
 }
 
 function canUseAdminActions() {
@@ -782,25 +914,41 @@ export async function openHomeTicketDetailAction({
   });
 
   if (!id) {
-    if (!silent) notify("Incidencia inválida.", "error");
-    return false;
-  }
-
-  const detail = getHomeTicketDetailFromStoreAction({
-    ticketId: id,
-    payload: data,
-  });
-
-  if (!detail) {
     if (!silent) notify("No se pudo abrir la incidencia.", "error");
     return false;
   }
 
-  return detail;
+  const result = getHomeTicketDetailFromStoreAction({
+    ticketId: id,
+    incidenciaId: id,
+    payload: data,
+  });
+
+  if (!result) {
+    if (!silent) notify("No se encontró la incidencia.", "warning");
+
+    return sanitizePayload({
+      ok: false,
+      type: HOME_ACTION_RESULT_TYPES.STATE_PATCH,
+      action: "open_ticket_detail",
+      source: SOURCE,
+      found: false,
+      ticketId: id,
+      incidenciaId: id,
+      statePatch: {
+        selectedTicketId: "",
+        selectedIncidenciaId: "",
+        openingTicketId: "",
+      },
+      at: nowIso(),
+    });
+  }
+
+  return result;
 }
 
 export async function closeHomeTicketDetailAction() {
-  return {
+  return sanitizePayload({
     ok: true,
     type: HOME_ACTION_RESULT_TYPES.STATE_PATCH,
     action: "close_ticket_detail",
@@ -822,645 +970,93 @@ export async function closeHomeTicketDetailAction() {
     },
 
     at: nowIso(),
-  };
-}
-
-export function reduceHomeActionState(state = {}, result = {}) {
-  const current = safeObject(state);
-  const output = {
-    ...current,
-  };
-
-  const data = safeObject(result);
-  const patch = safeObject(data.statePatch);
-
-  if (Object.keys(patch).length) {
-    return {
-      ...output,
-      ...patch,
-    };
-  }
-
-  const action = normalizeKey(data.action);
-
-  if (action === "open_ticket_detail") {
-    const selectedTicketId = safeCopyText(
-      first(data.selectedTicketId, data.selectedIncidenciaId, data.ticketId, data.incidenciaId, "")
-    );
-
-    return {
-      ...output,
-      selectedTicketId,
-      selectedIncidenciaId: selectedTicketId,
-      openingTicketId: "",
-    };
-  }
-
-  if (action === "close_ticket_detail") {
-    return {
-      ...output,
-      selectedTicketId: "",
-      selectedIncidenciaId: "",
-      openingTicketId: "",
-    };
-  }
-
-  return output;
-}
-
-/* =========================================================
-   WIDGETS / COMPAT
-========================================================= */
-
-function widgetRoute(widget = {}) {
-  const raw = safeObject(widget);
-  return normalizeSpaRoute(first(raw.route, raw.href, raw.link, raw.to, ""));
-}
-
-function normalizeWidgetDetail(widget = {}) {
-  const item = normalizeHomeWidget(sanitizePayload(widget));
-  const id = safeText(getHomeWidgetId(item), "");
-  const route = widgetRoute(item);
-
-  return sanitizePayload({
-    ...item,
-
-    widgetId: id,
-    id: safeText(first(item.id, id), id),
-    key: safeText(first(item.key, id), id),
-
-    title: safeText(first(item.title, item.name, item.label, item.heading), "Bloque"),
-    description: safeText(first(item.description, item.descripcion, item.subtitle, item.summary, item.text), ""),
-
-    type: safeText(first(item.type, item.kind, item.variant, item.category), "widget"),
-    value: first(item.value, item.total, item.amount, item.count, item.metric, "—"),
-    trend: first(item.trend, item.delta, item.change, item.variation, ""),
-    status: safeText(first(item.status, item.estado, item.state), "active"),
-
-    route,
-    href: route,
-
-    items: safeArray(first(item.items, item.rows, item.list, [])).map(sanitizePayload),
   });
 }
 
-export function getHomeWidgetDetailFromStoreAction({
-  widgetId = "",
-} = {}) {
-  const id = safeText(widgetId, "");
-
-  if (!id) return null;
-
-  try {
-    const widget = getHomeWidgetByIdStore?.(id);
-    return widget ? normalizeWidgetDetail(widget) : null;
-  } catch {
-    return null;
-  }
-}
-
-export async function getHomeWidgetDetailAction({
-  widgetId = "",
-  payload = null,
-  silent = true,
-} = {}) {
-  try {
-    if (payload) return normalizeWidgetDetail(payload);
-
-    return getHomeWidgetDetailFromStoreAction({
-      widgetId,
-    });
-  } catch {
-    if (!silent) notify("No se pudo resolver el bloque.", "error");
-    return null;
-  }
-}
-
-/*
-  Compat mínima: el template/bindings actuales ya no deberían generar open_widget.
-  Se mantiene exportado para no romper imports antiguos, pero no introduce
-  rutas ni acciones nuevas.
-*/
-export async function openHomeWidgetAction({
-  widgetId = "",
-  payload = null,
-  navigate = true,
-  silent = true,
-} = {}) {
-  const cleanPayload = sanitizePayload(payload || {});
-  const id = safeText(widgetId || getHomeWidgetId(cleanPayload), "");
-
-  if (!id && !payload) {
-    if (!silent) notify("Bloque inválido.", "error");
-    return null;
-  }
-
-  const detail = await getHomeWidgetDetailAction({
-    widgetId: id,
-    payload: cleanPayload,
-    silent,
-  });
-
-  if (!detail) return null;
-
-  const route = normalizeSpaRoute(detail.route || detail.href || "");
-
-  if (navigate && route) {
-    await navigateFromHomeAction({
-      route,
-      silent,
-      payload: {
-        widgetId: id || detail.widgetId,
-      },
-    });
-  }
-
-  return detail;
-}
-
-export async function refreshHomeWidgetDetailAction(options = {}) {
-  return getHomeWidgetDetailAction(options);
-}
-
 /* =========================================================
-   CLIPBOARD
-========================================================= */
-
-function safeCopyText(value = "") {
-  const text = safeText(value, "");
-
-  if (!text) return "";
-  if (hasSensitiveQuery(text)) return "";
-  if (/Bearer\s+/i.test(text)) return "";
-  if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
-  if (isEmailLike(text)) return "";
-
-  return text.slice(0, 240);
-}
-
-async function writeClipboardText(value = "") {
-  const text = safeCopyText(value);
-
-  if (!text || !isBrowser()) return false;
-
-  try {
-    if (window.navigator?.clipboard?.writeText) {
-      await window.navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // fallback abajo
-  }
-
-  let textarea = null;
-
-  try {
-    textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.setAttribute("readonly", "true");
-    textarea.setAttribute("aria-hidden", "true");
-    textarea.setAttribute("tabindex", "-1");
-    textarea.className = "sr-only";
-
-    document.body.appendChild(textarea);
-
-    textarea.focus();
-    textarea.select();
-    textarea.setSelectionRange?.(0, textarea.value.length);
-
-    const ok = document.execCommand("copy");
-
-    textarea.remove();
-
-    return Boolean(ok);
-  } catch {
-    try {
-      textarea?.remove?.();
-    } catch {
-      // noop
-    }
-
-    return false;
-  }
-}
-
-export async function copyHomeWidgetIdAction({
-  widgetId = "",
-  silent = false,
-} = {}) {
-  const id = safeCopyText(widgetId);
-
-  if (!id) {
-    if (!silent) notify("No hay ID válido para copiar.", "error");
-    return false;
-  }
-
-  const copied = await writeClipboardText(id);
-
-  if (!copied) {
-    if (!silent) notify("No se pudo copiar el ID.", "error");
-    return false;
-  }
-
-  if (!silent) notify("ID copiado", "success");
-
-  return {
-    ok: true,
-    type: HOME_ACTION_RESULT_TYPES.COPY,
-    action: "copy_widget_id",
-    copied: true,
-    value: id,
-  };
-}
-
-/* =========================================================
-   CSV
-========================================================= */
-
-function normalizeFilename(value = "", fallback = CSV_FILENAME) {
-  const name = safeText(value, fallback)
-    .replace(/[\\/:*?"<>|]+/g, "-")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 160);
-
-  if (!name) return fallback;
-
-  return name.toLowerCase().endsWith(".csv") ? name : `${name}.csv`;
-}
-
-function safeCsvText(value = "") {
-  const text = redact(safeText(value, ""));
-
-  if (!text) return "";
-  if (isEmailLike(text)) return "";
-  if (hasSensitiveQuery(text)) return "";
-  if (/Bearer\s+/i.test(text)) return "";
-
-  if (/^[=+\-@]/.test(text)) {
-    return `'${text}`;
-  }
-
-  return text;
-}
-
-function csvCell(value = "") {
-  const text = safeCsvText(value);
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
-function safePathParts(path = "") {
-  return safeText(path, "")
-    .split(".")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .filter((part) => !RAW_KEYS.has(part))
-    .filter((part) => !COSMOS_META_KEYS.has(part))
-    .filter((part) => !isSensitiveKey(part));
-}
-
-function readValue(row = {}, paths = []) {
-  const source = sanitizePayload(row);
-
-  for (const path of safeArray(paths)) {
-    const keys = safePathParts(path);
-
-    if (!keys.length) continue;
-
-    let value = source;
-
-    for (const key of keys) {
-      value = value?.[key];
-    }
-
-    if (value !== null && value !== undefined && value !== "") {
-      return value;
-    }
-  }
-
-  return "";
-}
-
-function plainCsvValue(value) {
-  if (value === null || value === undefined) return "";
-
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  return "";
-}
-
-function columnSpecs(mode = "widgets") {
-  const key = normalizeKey(mode);
-
-  if (["ticket", "tickets", "incidencia", "incidencias"].includes(key)) {
-    return [
-      ["ID", ["ticketId", "incidenciaId", "id"]],
-      ["Asunto", ["subject", "title", "asunto"]],
-      ["Estado", ["statusLabel", "status", "estado"]],
-      ["Prioridad", ["priorityLabel", "priority", "prioridad", "priorityKey"]],
-      ["Categoría", ["category", "categoria", "type"]],
-      ["Técnico", ["technicianName", "assignedToName", "assignedTo", "tecnico.name", "assignment.assignedToName", "meta.technicianName"]],
-      ["Facturas", ["linkedInvoiceCount", "facturasCount", "invoicesCount"]],
-      ["Creado", ["createdAt", "fechaCreacion"]],
-      ["Actualizado", ["updatedAt", "lastActivityAt", "lastUpdateAt"]],
-    ];
-  }
-
-  if (["invoice", "invoices", "factura", "facturas", "billing"].includes(key)) {
-    return [
-      ["ID", ["facturaId", "invoiceId", "id"]],
-      ["Número", ["numeroFacturaLegal", "numeroFactura", "invoiceNumber", "number"]],
-      ["Importe", ["paidAmount", "total", "amount", "importe", "invoiceAmount"]],
-      ["Moneda", ["currency", "moneda"]],
-      ["Estado", ["statusLabel", "paymentStatus", "estadoPago", "status", "estado"]],
-      ["Incidencia", ["ticketId", "incidenciaId"]],
-      ["Creada", ["createdAt", "fechaFactura", "issueDate"]],
-      ["Actualizada", ["updatedAt", "modifiedAt"]],
-    ];
-  }
-
-  if (["client", "clients", "cliente", "clientes", "customer", "customers"].includes(key)) {
-    return [
-      ["ID", ["clienteId", "clientId", "customerId", "id"]],
-      ["Nombre", ["displayName", "name", "nombre", "razonSocial", "company"]],
-      ["Activo", ["active", "isActive", "enabled"]],
-      ["Creado", ["createdAt"]],
-      ["Actualizado", ["updatedAt", "modifiedAt"]],
-    ];
-  }
-
-  if (["user", "users", "usuario", "usuarios"].includes(key)) {
-    return [
-      ["ID", ["userId", "usuarioId", "id"]],
-      ["Nombre", ["displayName", "fullName", "name", "nombre", "username"]],
-      ["Rol", ["role", "rol"]],
-      ["Activo", ["active", "isActive", "enabled"]],
-      ["Creado", ["createdAt"]],
-      ["Actualizado", ["updatedAt", "modifiedAt", "lastLoginAt"]],
-    ];
-  }
-
-  if (["activity", "activities", "recent", "timeline"].includes(key)) {
-    return [
-      ["Tipo", ["type", "kind", "category"]],
-      ["Título", ["title", "name", "subject"]],
-      ["Texto", ["text", "description", "message", "detail"]],
-      ["Fecha", ["date", "createdAt", "updatedAt", "timestamp"]],
-      ["Entidad", ["entityId", "ticketId", "incidenciaId", "facturaId", "invoiceId", "userId", "clienteId"]],
-    ];
-  }
-
-  return [
-    ["ID", ["widgetId", "widgetKey", "id", "key"]],
-    ["Título", ["title", "name", "label"]],
-    ["Tipo", ["type", "kind", "variant", "category"]],
-    ["Valor", ["value", "total", "amount", "count", "metric"]],
-    ["Estado", ["status", "estado", "state"]],
-    ["Ruta", ["route", "href"]],
-  ];
-}
-
-function buildCsv(items = [], mode = "widgets", columns = []) {
-  const rows = safeArray(items)
-    .map(sanitizePayload)
-    .filter((item) => Object.keys(item).length);
-
-  const specs = safeArray(columns).length
-    ? safeArray(columns)
-        .map((key) => [safeText(key, ""), [safeText(key, "")]])
-        .filter(([label]) => Boolean(label))
-        .filter(([, paths]) => safePathParts(paths[0]).length)
-    : columnSpecs(mode);
-
-  if (!rows.length || !specs.length) return "";
-
-  return [
-    specs.map(([label]) => csvCell(label)).join(","),
-    ...rows.map((row) =>
-      specs
-        .map(([, paths]) => csvCell(plainCsvValue(readValue(row, paths))))
-        .join(",")
-    ),
-  ].join("\n");
-}
-
-function downloadTextFile({
-  filename = CSV_FILENAME,
-  content = "",
-  mimeType = "text/plain;charset=utf-8;",
-} = {}) {
-  if (!isBrowser()) return false;
-
-  let url = "";
-
-  try {
-    const blob = new Blob([String(content || "")], {
-      type: mimeType,
-    });
-
-    url = URL.createObjectURL(blob);
-
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = normalizeFilename(filename);
-    anchor.rel = "noopener";
-    anchor.className = "sr-only";
-    anchor.setAttribute("aria-hidden", "true");
-    anchor.setAttribute("tabindex", "-1");
-
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-
-    window.setTimeout(() => {
-      try {
-        URL.revokeObjectURL(url);
-      } catch {
-        // noop
-      }
-    }, 0);
-
-    return true;
-  } catch {
-    try {
-      if (url) URL.revokeObjectURL(url);
-    } catch {
-      // noop
-    }
-
-    return false;
-  }
-}
-
-function isAdminExportMode(mode = "") {
-  const key = normalizeKey(mode);
-
-  return [
-    "user",
-    "users",
-    "usuario",
-    "usuarios",
-    "client",
-    "clients",
-    "cliente",
-    "clientes",
-    "customer",
-    "customers",
-  ].includes(key);
-}
-
-function resolveExportItems(items = null, mode = "widgets") {
-  if (Array.isArray(items)) return items;
-
-  const key = normalizeKey(mode);
-
-  if (isAdminExportMode(key) && !canUseAdminActions()) {
-    return [];
-  }
-
-  try {
-    if (["ticket", "tickets", "incidencia", "incidencias"].includes(key)) {
-      return safeArray(getHomeTicketsStore?.());
-    }
-
-    if (["invoice", "invoices", "factura", "facturas", "billing"].includes(key)) {
-      return safeArray(getHomeInvoicesStore?.());
-    }
-
-    if (["user", "users", "usuario", "usuarios"].includes(key)) {
-      return safeArray(getHomeUsersStore?.());
-    }
-
-    if (["client", "clients", "cliente", "clientes", "customer", "customers"].includes(key)) {
-      return safeArray(getHomeClientsStore?.());
-    }
-
-    if (["activity", "activities", "recent", "timeline"].includes(key)) {
-      return safeArray(getHomeActivityStore?.());
-    }
-
-    return safeArray(getHomeWidgetsStore?.());
-  } catch {
-    return [];
-  }
-}
-
-export function exportHomeCsvAction({
-  filename = CSV_FILENAME,
-  items = null,
-  columns = [],
-  mode = "widgets",
-  silent = false,
-} = {}) {
-  if (isAdminExportMode(mode) && !canUseAdminActions()) {
-    if (!silent) notify("Exportación no disponible.", "error");
-    return false;
-  }
-
-  const list = resolveExportItems(items, mode);
-
-  if (!list.length) {
-    if (!silent) notify("No hay datos para exportar.", "info");
-    return false;
-  }
-
-  const csvBody = buildCsv(list, mode, columns);
-
-  if (!csvBody) {
-    if (!silent) notify("No hay columnas válidas para exportar.", "info");
-    return false;
-  }
-
-  const finalFilename = normalizeFilename(filename);
-  const downloaded = downloadTextFile({
-    filename: finalFilename,
-    content: `\uFEFF${csvBody}`,
-    mimeType: CSV_MIME_TYPE,
-  });
-
-  if (!downloaded) {
-    if (!silent) notify("No se pudo exportar el CSV.", "error");
-    return false;
-  }
-
-  if (!silent) notify("CSV exportado", "success");
-
-  return {
-    ok: true,
-    type: HOME_ACTION_RESULT_TYPES.EXPORT,
-    action: "export_csv",
-    filename: finalFilename,
-    mode: normalizeKey(mode),
-    count: list.length,
-  };
-}
-
-/* =========================================================
-   NAVIGATION
+   NAVIGATION / QUICK ACTIONS
 ========================================================= */
 
 export async function navigateFromHomeAction({
   route = "",
+  payload = {},
   silent = false,
   replaceState = false,
-  payload = {},
 } = {}) {
   const target = normalizeSpaRoute(route);
 
   if (!target) {
-    if (!silent) notify("Ruta inválida.", "error");
-    return false;
+    if (!silent) notify("Ruta no disponible.", "warning");
+
+    return sanitizePayload({
+      ok: false,
+      type: HOME_ACTION_RESULT_TYPES.NAVIGATION,
+      action: "navigate",
+      source: SOURCE,
+      route: "",
+      reason: "invalid-route",
+      at: nowIso(),
+    });
   }
 
   if (!canUseRoute(target)) {
-    if (!silent) notify("Ruta no disponible.", "error");
-    return false;
-  }
+    if (!silent) notify("No tienes permisos para abrir esta ruta.", "warning");
 
-  try {
-    const ok = await navigateSpa(target, {
-      replaceState: Boolean(replaceState),
-      payload: sanitizePayload(payload),
-    });
-
-    if (!ok) throw new Error("HOME_NAVIGATION_FAILED");
-
-    return {
-      ok: true,
+    return sanitizePayload({
+      ok: false,
       type: HOME_ACTION_RESULT_TYPES.NAVIGATION,
-      action: "navigate_home",
+      action: "navigate",
+      source: SOURCE,
       route: target,
-      href: target,
-    };
-  } catch {
-    if (!silent) notify("No se pudo navegar desde Home.", "error");
-    return false;
+      reason: "route-not-allowed",
+      at: nowIso(),
+    });
   }
+
+  const ok = await navigateSpa(target, {
+    payload,
+    replaceState,
+  });
+
+  if (!ok && !silent) {
+    notify("No se pudo abrir la vista solicitada.", "error");
+  }
+
+  return sanitizePayload({
+    ok,
+    type: HOME_ACTION_RESULT_TYPES.NAVIGATION,
+    action: "navigate",
+    source: SOURCE,
+    route: target,
+    statePatch: {
+      navigatingAction: "",
+    },
+    at: nowIso(),
+  });
 }
 
-/* =========================================================
-   QUICK ACTIONS
-========================================================= */
-
-export async function createFromHomeAction({
-  route = ROUTES.INCIDENCIAS,
-  silent = false,
+export async function createHomeIncidenciaAction({
   payload = {},
+  draft = {},
+  silent = false,
 } = {}) {
-  const target = normalizeSpaRoute(route) || ROUTES.INCIDENCIAS;
-
   return navigateFromHomeAction({
-    route: target,
+    route: ROUTES.INCIDENCIAS,
+    payload: {
+      ...safeObject(payload),
+      ...safeObject(draft),
+      action: "create_incidencia",
+    },
     silent,
-    payload: sanitizePayload(payload),
   });
+}
+
+function normalizeQuickActionRoute(action = "", route = "") {
+  const explicit = normalizeSpaRoute(route);
+
+  if (explicit) return explicit;
+
+  return routeFromAction(action);
 }
 
 export async function runHomeQuickAction({
@@ -1469,85 +1065,450 @@ export async function runHomeQuickAction({
   payload = {},
   silent = false,
 } = {}) {
-  const data = sanitizePayload(payload);
-  const actionName = normalizeKey(action);
+  const cleanAction = normalizeKey(action);
+  const data = sanitizePayload(payload || {});
 
   if (
-    actionName === "open_ticket_detail" ||
-    actionName === "open_incidencia_detail" ||
-    actionName === "ticket_detail" ||
-    actionName === "incidencia_detail" ||
-    actionName === "detail_ticket" ||
-    actionName === "detail_incidencia"
+    cleanAction === "open_ticket_detail" ||
+    cleanAction === "open_incidencia_detail" ||
+    cleanAction === "ticket_detail" ||
+    cleanAction === "incidencia_detail"
   ) {
     return openHomeTicketDetailAction({
-      ticketId: first(data.ticketId, data.incidenciaId, data.entityId, data.id, data.widgetId, ""),
+      ticketId: data.ticketId,
+      incidenciaId: data.incidenciaId,
+      entityId: data.entityId,
       payload: data,
       silent,
     });
   }
 
   if (
-    actionName === "close_ticket_detail" ||
-    actionName === "close_incidencia_detail" ||
-    actionName === "close_detail"
+    cleanAction === "close_ticket_detail" ||
+    cleanAction === "close_incidencia_detail" ||
+    cleanAction === "close_detail"
   ) {
     return closeHomeTicketDetailAction();
   }
 
-  if (actionName === "create_incidencia") {
-    return createFromHomeAction({
-      silent,
+  if (
+    cleanAction === "create" ||
+    cleanAction === "new" ||
+    cleanAction === "create_incidencia" ||
+    cleanAction === "new_incidencia" ||
+    cleanAction === "open_create" ||
+    cleanAction === "open_create_incidencia"
+  ) {
+    return createHomeIncidenciaAction({
       payload: data,
+      silent,
     });
   }
 
-  if (actionName === "copy_widget_id") {
+  if (
+    cleanAction === "copy" ||
+    cleanAction === "copy_id" ||
+    cleanAction === "copy_widget_id" ||
+    cleanAction === "copy_ticket_id" ||
+    cleanAction === "copy_incidencia_id"
+  ) {
     return copyHomeWidgetIdAction({
       widgetId: first(data.widgetId, data.ticketId, data.incidenciaId, data.entityId, data.id, ""),
       silent,
     });
   }
 
-  if (actionName === "export_csv") {
-    return exportHomeCsvAction({
-      ...data,
-      silent,
-    });
-  }
+  const target = normalizeQuickActionRoute(cleanAction, route);
 
-  if (actionName === "refresh" || actionName === "retry") {
-    return {
-      ok: true,
-      type: HOME_ACTION_RESULT_TYPES.READ,
-      action: actionName,
-      at: nowIso(),
-    };
-  }
-
-  const targetRoute = normalizeSpaRoute(
-    first(route, data.route, data.href, routeFromAction(actionName), "")
-  );
-
-  if (targetRoute) {
+  if (target) {
     return navigateFromHomeAction({
-      route: targetRoute,
-      silent,
+      route: target,
       payload: data,
+      silent,
     });
   }
 
-  if (!actionName) {
-    if (!silent) notify("Acción inválida.", "error");
+  const widgetId = safeCopyText(first(data.widgetId, data.widgetKey, data.id, ""));
+  const widget = widgetId ? getHomeWidgetByIdStore?.(widgetId) : null;
+
+  return sanitizePayload({
+    ok: true,
+    type: HOME_ACTION_RESULT_TYPES.READ,
+    action: cleanAction || "read",
+    source: SOURCE,
+    widget: widget ? normalizeHomeWidget(widget) : null,
+    payload: data,
+    at: nowIso(),
+  });
+}
+
+/* =========================================================
+   STATE REDUCER
+========================================================= */
+
+export function reduceHomeActionState(currentState = {}, result = {}) {
+  const state = safeObject(currentState);
+  const output = {};
+  const clean = safeObject(result);
+  const patch = safeObject(clean.statePatch);
+
+  Object.assign(output, patch);
+
+  const action = normalizeKey(clean.action);
+
+  if (action === "open_ticket_detail") {
+    const selectedTicketId = safeCopyText(
+      first(
+        clean.selectedTicketId,
+        clean.selectedIncidenciaId,
+        clean.ticketId,
+        clean.incidenciaId,
+        clean.modal?.ticketId,
+        clean.modal?.incidenciaId,
+        ""
+      )
+    );
+
+    output.selectedTicketId = selectedTicketId;
+    output.selectedIncidenciaId = selectedTicketId;
+    output.openingTicketId = "";
+  }
+
+  if (action === "close_ticket_detail") {
+    output.selectedTicketId = "";
+    output.selectedIncidenciaId = "";
+    output.openingTicketId = "";
+  }
+
+  if (clean.type === HOME_ACTION_RESULT_TYPES.NAVIGATION) {
+    output.navigatingAction = "";
+  }
+
+  if (clean.error) {
+    output.error = clean.error?.message || "Error Home.";
+  }
+
+  if (!Object.keys(output).length) {
+    return state;
+  }
+
+  return sanitizePayload(output);
+}
+
+/* =========================================================
+   CSV EXPORT
+========================================================= */
+
+function csvMode(value = "") {
+  const mode = normalizeKey(value || "tickets");
+
+  if (["ticket", "tickets", "incidencia", "incidencias"].includes(mode)) return "tickets";
+  if (["invoice", "invoices", "factura", "facturas"].includes(mode)) return "invoices";
+  if (["user", "users", "usuario", "usuarios"].includes(mode)) return "users";
+  if (["client", "clients", "cliente", "clientes", "customer", "customers"].includes(mode)) return "clients";
+  if (["activity", "actividad", "recent"].includes(mode)) return "activity";
+  if (["widget", "widgets", "cards", "kpis"].includes(mode)) return "widgets";
+  if (["dashboard", "home"].includes(mode)) return "dashboard";
+
+  return "tickets";
+}
+
+function rowsForCsvMode(mode = "tickets") {
+  const cleanMode = csvMode(mode);
+
+  if (cleanMode === "tickets") {
+    return normalizeHomeTickets(getHomeTicketsStore?.() || [], {
+      invoices: normalizeHomeInvoices(getHomeInvoicesStore?.() || []),
+      users: canUseAdminActions() ? normalizeHomeUsers(getHomeUsersStore?.() || []) : [],
+    });
+  }
+
+  if (cleanMode === "invoices") return normalizeHomeInvoices(getHomeInvoicesStore?.() || []);
+  if (cleanMode === "users") return canUseAdminActions() ? normalizeHomeUsers(getHomeUsersStore?.() || []) : [];
+  if (cleanMode === "clients") return canUseAdminActions() ? normalizeHomeClients(getHomeClientsStore?.() || []) : [];
+  if (cleanMode === "activity") return safeArray(getHomeActivityStore?.());
+  if (cleanMode === "widgets") return safeArray(getHomeWidgetsStore?.());
+
+  if (cleanMode === "dashboard") {
+    const dashboard = normalizeHomeDashboard(getHomeDashboardStore?.() || {});
+    return [
+      {
+        role: dashboard.role,
+        admin: dashboard.admin,
+        tickets: safeArray(dashboard.tickets).length,
+        invoices: safeArray(dashboard.invoices).length,
+        users: dashboard.admin ? safeArray(dashboard.users).length : 0,
+        clients: dashboard.admin ? safeArray(dashboard.clients).length : 0,
+        activity: safeArray(dashboard.activity).length,
+        requestId: dashboard.requestId || "",
+        updatedAt: dashboard.updatedAt || "",
+      },
+    ];
+  }
+
+  return [];
+}
+
+function flattenCsvValue(value) {
+  if (value === null || value === undefined) return "";
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return redact(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (isObject(item)) return first(item.id, item.ticketId, item.invoiceId, item.name, item.title, "");
+        return item;
+      })
+      .filter((item) => item !== undefined && item !== null && item !== "")
+      .join(" | ");
+  }
+
+  if (isObject(value)) {
+    return first(value.id, value.userId, value.clientId, value.ticketId, value.invoiceId, value.name, value.title, value.displayName, "");
+  }
+
+  return redact(String(value));
+}
+
+function rowForCsv(row = {}) {
+  const clean = sanitizePayload(row);
+
+  return Object.fromEntries(
+    Object.entries(safeObject(clean)).filter(([key, value]) => {
+      if (isRawKey(key)) return false;
+      if (isCosmosMetaKey(key)) return false;
+      if (isSensitiveKey(key)) return false;
+      if (isObject(value)) return false;
+
+      return true;
+    })
+  );
+}
+
+function csvEscape(value = "") {
+  const text = String(flattenCsvValue(value) ?? "");
+
+  if (/[",\r\n;]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  return text;
+}
+
+function buildCsv(rows = []) {
+  const cleanRows = safeArray(rows).map(rowForCsv).filter((row) => Object.keys(row).length);
+
+  if (!cleanRows.length) return "";
+
+  const headers = [
+    ...new Set(cleanRows.flatMap((row) => Object.keys(row))),
+  ];
+
+  const lines = [
+    headers.map(csvEscape).join(";"),
+    ...cleanRows.map((row) => headers.map((key) => csvEscape(row[key])).join(";")),
+  ];
+
+  return lines.join("\r\n");
+}
+
+function safeFilename(value = "") {
+  const name = safeText(value, CSV_FILENAME)
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 160);
+
+  if (!name) return CSV_FILENAME;
+
+  return name.toLowerCase().endsWith(".csv") ? name : `${name}.csv`;
+}
+
+function downloadCsv(filename = CSV_FILENAME, csv = "") {
+  if (!isBrowser()) return false;
+  if (!csv) return false;
+
+  try {
+    const blob = new Blob([`\uFEFF${csv}`], {
+      type: CSV_MIME_TYPE,
+    });
+
+    const url = window.URL?.createObjectURL?.(blob);
+
+    if (!url) return false;
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = safeFilename(filename);
+    link.rel = "noopener";
+    link.style.display = "none";
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    window.URL.revokeObjectURL(url);
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function exportHomeCsvAction({
+  filename = CSV_FILENAME,
+  mode = "tickets",
+  silent = false,
+} = {}) {
+  const cleanMode = csvMode(mode);
+  const rows = rowsForCsvMode(cleanMode);
+  const csv = buildCsv(rows);
+  const finalFilename = safeFilename(filename);
+
+  if (!csv) {
+    if (!silent) notify("No hay datos para exportar.", "warning");
+
+    return sanitizePayload({
+      ok: false,
+      type: HOME_ACTION_RESULT_TYPES.EXPORT,
+      action: "export_csv",
+      source: SOURCE,
+      mode: cleanMode,
+      filename: finalFilename,
+      rowCount: 0,
+      downloaded: false,
+      reason: "empty",
+      at: nowIso(),
+    });
+  }
+
+  const downloaded = downloadCsv(finalFilename, csv);
+
+  if (!downloaded && !silent) {
+    notify("No se pudo descargar el CSV.", "error");
+  }
+
+  if (downloaded && !silent) {
+    notify("Exportación generada.", "success");
+  }
+
+  return sanitizePayload({
+    ok: downloaded,
+    type: HOME_ACTION_RESULT_TYPES.EXPORT,
+    action: "export_csv",
+    source: SOURCE,
+    mode: cleanMode,
+    filename: finalFilename,
+    rowCount: rows.length,
+    downloaded,
+    at: nowIso(),
+  });
+}
+
+/* =========================================================
+   COPY
+========================================================= */
+
+async function copyTextToClipboard(value = "") {
+  const text = safeCopyText(value);
+
+  if (!text) return false;
+
+  try {
+    if (typeof navigator !== "undefined" && isFunction(navigator.clipboard?.writeText)) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
     return false;
   }
 
-  return {
-    ok: true,
-    type: HOME_ACTION_RESULT_TYPES.READ,
-    action: actionName,
+  return false;
+}
+
+export async function copyHomeWidgetIdAction({
+  widgetId = "",
+  id = "",
+  value = "",
+  silent = false,
+} = {}) {
+  const target = safeCopyText(first(widgetId, id, value, ""));
+
+  if (!target) {
+    if (!silent) notify("No hay ID para copiar.", "warning");
+
+    return sanitizePayload({
+      ok: false,
+      type: HOME_ACTION_RESULT_TYPES.COPY,
+      action: "copy_id",
+      source: SOURCE,
+      copied: false,
+      reason: "empty",
+      at: nowIso(),
+    });
+  }
+
+  const copied = await copyTextToClipboard(target);
+
+  if (copied && !silent) {
+    notify("ID copiado.", "success");
+  }
+
+  if (!copied && !silent) {
+    notify("No se pudo copiar el ID.", "warning");
+  }
+
+  return sanitizePayload({
+    ok: copied,
+    type: HOME_ACTION_RESULT_TYPES.COPY,
+    action: "copy_id",
+    source: SOURCE,
+    copied,
+    value: copied ? target : "",
     at: nowIso(),
-  };
+  });
+}
+
+/* =========================================================
+   READ HELPERS
+========================================================= */
+
+export function getHomeWidgetAction({
+  widgetId = "",
+  id = "",
+} = {}) {
+  const target = safeCopyText(first(widgetId, id, ""));
+
+  if (!target) return null;
+
+  try {
+    const widget = getHomeWidgetByIdStore?.(target);
+
+    return widget ? normalizeHomeWidget(widget) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function getHomeCollectionsAction() {
+  const admin = canUseAdminActions();
+
+  return sanitizePayload({
+    dashboard: normalizeHomeDashboard(getHomeDashboardStore?.() || {}),
+    widgets: safeArray(getHomeWidgetsStore?.()),
+    tickets: safeArray(getHomeTicketsStore?.()),
+    invoices: safeArray(getHomeInvoicesStore?.()),
+    users: admin ? safeArray(getHomeUsersStore?.()) : [],
+    clients: admin ? safeArray(getHomeClientsStore?.()) : [],
+    activity: safeArray(getHomeActivityStore?.()),
+  });
 }
 
 /* =========================================================
@@ -1555,136 +1516,111 @@ export async function runHomeQuickAction({
 ========================================================= */
 
 export function getHomeActionsSnapshot() {
-  const routes = Object.fromEntries(
-    Object.entries(ROUTES).filter(([, route]) => Boolean(route))
-  );
+  const admin = canUseAdminActions();
 
-  return {
+  return sanitizePayload({
     version: HOME_ACTIONS_VERSION,
     source: SOURCE,
 
-    browser: isBrowser(),
-
     role: getStoredRole(),
-    admin: canUseAdminActions(),
+    admin,
 
-    router: {
-      hasCandidates: getRouterCandidates().length > 0,
-      usesNavigate: true,
-      usesReplace: true,
-      usesPush: false,
-      usesGo: false,
-      usesAppCoreNavigate: false,
+    routes: {
+      incidencias: ROUTES.INCIDENCIAS,
+      facturas: ROUTES.FACTURAS,
+      clientes: ROUTES.CLIENTES,
+      usuarios: ROUTES.USUARIOS,
+      cuenta: ROUTES.CUENTA,
+      ajustes: ROUTES.AJUSTES,
     },
 
+    availableRoutes: Object.fromEntries(
+      Object.entries(ROUTES).map(([key, value]) => [
+        key,
+        Boolean(value && canUseRoute(value)),
+      ])
+    ),
+
     store: {
-      hasDashboard: isFunction(getHomeDashboardStore),
-      hasWidgets: isFunction(getHomeWidgetsStore),
-      hasTickets: isFunction(getHomeTicketsStore),
-      hasInvoices: isFunction(getHomeInvoicesStore),
-      hasUsers: isFunction(getHomeUsersStore),
-      hasClients: isFunction(getHomeClientsStore),
-      hasActivity: isFunction(getHomeActivityStore),
+      dashboard: Boolean(getHomeDashboardFromStoreAction()),
+      widgets: safeArray(getHomeWidgetsStore?.()).length,
+      tickets: safeArray(getHomeTicketsStore?.()).length,
+      invoices: safeArray(getHomeInvoicesStore?.()).length,
+      users: admin ? safeArray(getHomeUsersStore?.()).length : 0,
+      clients: admin ? safeArray(getHomeClientsStore?.()).length : 0,
+      activity: safeArray(getHomeActivityStore?.()).length,
     },
 
     policy: {
       actionsOnly: true,
 
-      noFetch: true,
-      noApiCalls: true,
-      noStorage: true,
-      noEvents: true,
-      noGlobals: true,
-      noAuth: true,
-      noCss: true,
-
-      noHomeAlias: true,
-      noCreateRoute: true,
-      noRouteAliasesLegacy: true,
-      noInventedOptionalRoutes: true,
-
+      navigationDelegatedToRouter: true,
       noRouterPushLegacy: true,
-      noRouterGoLegacy: true,
       noAppCoreNavigate: true,
       noManualHistoryFallback: true,
 
+      noFetch: true,
+      noApiCalls: true,
+      noStorage: true,
+      noGlobalEvents: true,
+      noWindowBridge: true,
+
+      toastOnlyViaAppCoreShowToast: true,
+
+      ticketDetailModalOnly: true,
       ticketDetailDoesNotNavigate: true,
       ticketDetailReturnsStatePatch: true,
       closeDetailClearsSelection: true,
 
-      rejectsSensitiveRoutes: true,
-      rejectsSensitiveClipboard: true,
-      blocksAdminRoutesForUser: true,
-      blocksAdminExportsForUser: true,
+      exportCsvFromStoreCollections: true,
+      copyUsesClipboardOnlyWhenAvailable: true,
 
-      sanitizesPayload: true,
-      csvExcludesEmail: true,
-      csvRedacted: true,
+      routesFromCoreConfig: true,
+      adminRoutesFromCoreConfig: true,
+      blocksLegacyRoutesViaCoreConfig: true,
+      noLocalDenylistExceptCreateRouteAlias: true,
 
-      routesFromConfig: true,
-      adminRoutesFromConfig: true,
-      blockedRoutesFromConfig: true,
-      toastViaAppCoreShowToastOnly: true,
+      noHomeRoute: true,
+      noIncidenciasNuevaRoute: true,
+      noOptionalRoutesInvented: true,
+      noAuth: true,
+      noCss: true,
+
+      snapshotRedacted: true,
     },
 
-    routes,
-
     at: nowIso(),
-  };
+  });
 }
 
 /* =========================================================
-   DETAIL HELPERS EXPORT
+   DEFAULT EXPORT
 ========================================================= */
 
-export {
-  normalizeWidgetDetail as normalizeHomeWidgetDetailAction,
-  normalizeSpaRoute as normalizeHomeRouteAction,
-};
+export default {
+  HOME_ACTIONS_VERSION,
+  HOME_ACTION_RESULT_TYPES,
 
-export function getHomeWidgetIdAction(item = {}) {
-  return getHomeWidgetId(item);
-}
-
-export function normalizeHomeDashboardAction(payload = {}) {
-  return normalizeHomeDashboard(sanitizePayload(payload));
-}
-
-/* =========================================================
-   PUBLIC API
-========================================================= */
-
-export const HomeActions = Object.freeze({
-  version: HOME_ACTIONS_VERSION,
-
-  getHomeDashboardFromStoreAction,
   getHomeDashboardAction,
   refreshHomeDashboardAction,
+  getHomeDashboardFromStoreAction,
 
-  getHomeWidgetDetailFromStoreAction,
-  getHomeWidgetDetailAction,
-  openHomeWidgetAction,
-  refreshHomeWidgetDetailAction,
+  getHomeWidgetAction,
+  getHomeCollectionsAction,
+
+  navigateFromHomeAction,
+  createHomeIncidenciaAction,
+  runHomeQuickAction,
 
   getHomeTicketDetailFromStoreAction,
   openHomeTicketDetailAction,
   closeHomeTicketDetailAction,
+
   reduceHomeActionState,
 
-  copyHomeWidgetIdAction,
   exportHomeCsvAction,
-
-  navigateFromHomeAction,
-  runHomeQuickAction,
-  createFromHomeAction,
-
-  getHomeWidgetIdAction,
-  normalizeHomeWidgetDetailAction: normalizeWidgetDetail,
-  normalizeHomeDashboardAction,
-  normalizeHomeRouteAction: normalizeSpaRoute,
+  copyHomeWidgetIdAction,
 
   getHomeActionsSnapshot,
   getDebugSnapshot: getHomeActionsSnapshot,
-});
-
-export default HomeActions;
+};

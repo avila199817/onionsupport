@@ -17,6 +17,8 @@
    - Renderiza dentro del host recibido por Router.
    - Devuelve API/controller, no el contenedor padre.
    - Usuario/rol/avatar salen del mismo view-model canónico del sidebar.
+   - No pasa AppCore/Auth/Router/DOM al modelo ni al template.
+   - Sólo pasa contexto plano y seguro al template.
    - Lee colecciones desde homeState raíz y fallback dashboard.
    - Recarga si Home está marcado como loaded pero no hay datos reales.
    - Render paint-first: pinta estructura/cache/skeleton antes de cargar remoto.
@@ -24,6 +26,7 @@
    - Bindings delegados estables entre rerenders.
    - Render único final tras sincronizar datos reales.
    - Elimina inline styles/scripts antes de insertar HTML para cumplir CSP.
+   - Elimina handlers inline on*.
    - Elimina tooltips custom data-tooltip/data-tippy y conserva title nativo.
    - Corrige títulos genéricos de avatares con nombre real cuando existe.
    - No resuelve slug.
@@ -118,7 +121,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v19.clean-orchestrator";
+export const HOME_VIEW_VERSION = "home.view.v20.safe-template-context";
 
 export const HomeView = (() => {
   "use strict";
@@ -415,6 +418,15 @@ export const HomeView = (() => {
     }
   }
 
+  function safeCoreCall(AppCore = null, method = "", fallback = null, ...args) {
+    try {
+      const fn = AppCore?.[method];
+      return isFunction(fn) ? fn.call(AppCore, ...args) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
   function getAuthUser(context = currentContext) {
     const AppCore = resolveAppCore(context);
     const Auth = resolveAuth(context);
@@ -424,7 +436,7 @@ export const HomeView = (() => {
       first(
         safeAuthCall(Auth, "getCurrentUser", null),
         safeAuthCall(Auth, "getUser", null),
-        AppCore?.getCurrentUser?.(),
+        safeCoreCall(AppCore, "getCurrentUser", null),
         state.user,
         state.currentUser,
         state.authUser,
@@ -446,7 +458,7 @@ export const HomeView = (() => {
       first(
         safeAuthCall(Auth, "getRole", ""),
         safeAuthCall(Auth, "getCurrentRole", ""),
-        AppCore?.getCurrentRole?.(),
+        safeCoreCall(AppCore, "getCurrentRole", ""),
         state.role,
         state.rol,
         state.roles,
@@ -471,15 +483,17 @@ export const HomeView = (() => {
         user: context?.user || context?.currentUser || null,
       });
     } catch {
+      const role = getAuthRole(context) || "user";
+
       return {
         hasUser: false,
         displayName: "Usuario",
         name: "Usuario",
-        role: getAuthRole(context) || "user",
-        roles: [getAuthRole(context) || "user"],
-        roleLabel: getAuthRole(context) === "admin" ? "Administrador" : "Estándar",
-        isAdmin: getAuthRole(context) === "admin",
-        isUser: getAuthRole(context) !== "admin",
+        role,
+        roles: [role],
+        roleLabel: role === "admin" ? "Administrador" : "Estándar",
+        isAdmin: role === "admin",
+        isUser: role !== "admin",
         avatarUrl: "",
         initials: "U",
       };
@@ -505,6 +519,38 @@ export const HomeView = (() => {
       ),
       "user"
     );
+  }
+
+  function getSafeTemplateContext(context = currentContext, sidebarUser = null) {
+    const ctx = safeObject(context);
+    const route = safeObject(ctx.route);
+
+    return sanitizePayload({
+      routePath: first(
+        ctx.canonicalPath,
+        ctx.publicPath,
+        ctx.requestedPath,
+        ctx.path,
+        route.path,
+        ""
+      ),
+      publicPath: first(
+        ctx.publicPath,
+        ctx.requestedPath,
+        ctx.path,
+        ""
+      ),
+      canonicalPath: first(
+        ctx.canonicalPath,
+        route.path,
+        ""
+      ),
+      routeName: safeText(route.name, ""),
+      viewKey: safeText(route.viewKey, ""),
+      viewName: safeText(route.viewName, ""),
+      user: sidebarUser,
+      sidebarUser,
+    });
   }
 
   /* =======================================================
@@ -600,22 +646,22 @@ export const HomeView = (() => {
 
     try {
       container.querySelectorAll("*").forEach((node) => {
-        for (const attr of [...node.attributes]) {
-          const name = String(attr.name || "").toLowerCase();
+        for (const htmlAttr of [...node.attributes]) {
+          const name = String(htmlAttr.name || "").toLowerCase();
 
           if (name.startsWith("on")) {
-            node.removeAttribute(attr.name);
+            node.removeAttribute(htmlAttr.name);
             continue;
           }
 
           if (TOOLTIP_ATTR_PREFIXES.some((prefix) => name === prefix || name.startsWith(`${prefix}-`))) {
-            const value = safeText(attr.value, "");
+            const value = safeText(htmlAttr.value, "");
 
             if (value && !node.hasAttribute("title")) {
               node.setAttribute("title", value);
             }
 
-            node.removeAttribute(attr.name);
+            node.removeAttribute(htmlAttr.name);
           }
         }
       });
@@ -695,7 +741,7 @@ export const HomeView = (() => {
         return true;
       }
     } catch {
-      // fallback store abajo
+      // fallback abajo
     }
 
     return false;
@@ -751,6 +797,7 @@ export const HomeView = (() => {
     const sidebarUser = getSidebarUserViewModel(currentContext);
     const role = resolveCurrentRole(snapshot);
     const admin = role === "admin";
+    const safeContext = getSafeTemplateContext(currentContext, sidebarUser);
 
     return buildHomeTemplatePayload({
       ...snapshot,
@@ -771,17 +818,16 @@ export const HomeView = (() => {
       user: sidebarUser,
       currentUser: sidebarUser,
       sidebarUser,
+
       sidebar: {
         user: sidebarUser,
       },
+
       layout: {
         sidebarUser,
       },
-      context: {
-        ...safeObject(currentContext),
-        user: sidebarUser,
-        sidebarUser,
-      },
+
+      context: safeContext,
 
       summary: snapshot.summary,
       widgets: snapshot.widgets,
@@ -1013,8 +1059,7 @@ export const HomeView = (() => {
     setCreating(true);
 
     try {
-      const result = await createHomeIncidenciaAction(options);
-      return result;
+      return await createHomeIncidenciaAction(options);
     } finally {
       setCreating(false);
     }
@@ -1024,8 +1069,7 @@ export const HomeView = (() => {
     setNavigatingAction(first(options.route, options.action, "navigate"));
 
     try {
-      const result = await navigateFromHomeAction(options);
-      return result;
+      return await navigateFromHomeAction(options);
     } finally {
       setNavigatingAction("");
     }
@@ -1050,6 +1094,7 @@ export const HomeView = (() => {
 
   async function closeHomeTicketDetail(options = {}) {
     const result = await actionCloseHomeTicketDetail(options);
+
     setSelectedTicketId("");
     setOpeningTicketId("");
 
@@ -1058,6 +1103,7 @@ export const HomeView = (() => {
 
   function goToPage(page = 1) {
     setPage(Math.max(1, safeNumber(page, 1)));
+
     renderNow({
       reason: "page-go",
     });
@@ -1243,6 +1289,8 @@ export const HomeView = (() => {
   function getSnapshot() {
     const state = getHomeStateSnapshot();
     const sidebarUser = getSidebarUserViewModel(currentContext);
+    const role = resolveCurrentRole(state);
+    const safeContext = getSafeTemplateContext(currentContext, sidebarUser);
 
     return {
       version: HOME_VIEW_VERSION,
@@ -1264,6 +1312,8 @@ export const HomeView = (() => {
         incidencias: INCIDENCIAS_ROUTE,
       },
 
+      context: safeContext,
+
       user: sidebarUser?.hasUser
         ? {
             hasUser: true,
@@ -1275,8 +1325,8 @@ export const HomeView = (() => {
           }
         : {
             hasUser: false,
-            role: resolveCurrentRole(state),
-            isAdmin: resolveCurrentRole(state) === "admin",
+            role,
+            isAdmin: role === "admin",
             hasAvatar: false,
           },
 
@@ -1329,6 +1379,9 @@ export const HomeView = (() => {
         deferredRemoteLoad: true,
         stableBindings: true,
         mutableBindingsApi: true,
+
+        safeTemplateContextOnly: true,
+        doesNotPassAppCoreAuthRouterDomToModel: true,
 
         noAuthGuards: true,
         noRouterGuards: true,

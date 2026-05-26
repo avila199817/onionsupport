@@ -39,6 +39,9 @@
    - Sin storage.
    - Sin CSS inline.
    - Sin handlers inline.
+   - Sin botón Actualizar en actividad.
+   - Sin botón Exportar CSV en incidencias.
+   - Sin card Tus solicitudes / Incidencias recientes para usuario normal.
    - Sin /home.
 ========================================================= */
 
@@ -90,15 +93,13 @@ import {
   getActivityType,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.v18.clean-header-no-top-actions";
+export const TEMPLATE_VERSION = "home.template.v19.no-refresh-no-csv-no-user-recent-card";
 
 const ACTIONS = Object.freeze({
-  REFRESH: "refresh",
   RETRY: "retry",
   CREATE_INCIDENCIA: "create_incidencia",
   NAVIGATE: "navigate_home",
   COPY_ID: "copy_widget_id",
-  EXPORT_CSV: "export_csv",
   OPEN_TICKET_DETAIL: "open_ticket_detail",
   CLOSE_TICKET_DETAIL: "close_ticket_detail",
   PAGE_PREV: "page_prev",
@@ -564,9 +565,6 @@ function renderHomeActivity(vm = {}) {
           <p class="home-panel-kicker">Actividad</p>
           <h2>Últimos movimientos</h2>
         </div>
-        <button type="button" class="home-link-button" data-home-action="${ACTIONS.REFRESH}" data-action="${ACTIONS.REFRESH}">
-          Actualizar
-        </button>
       </div>
 
       ${items.length
@@ -665,42 +663,7 @@ function invoiceItem(invoice = {}) {
 
 function renderHomeEntitiesPreview(vm = {}) {
   if (!vm.admin) {
-    const tickets = safeArray(vm.recentTickets).slice(0, LIMITS.entities);
-
-    return `
-      <section class="home-panel home-panel--user-summary" data-home-section="user-summary">
-        <div class="home-panel-header">
-          <div>
-            <p class="home-panel-kicker">Tus solicitudes</p>
-            <h2>Incidencias recientes</h2>
-          </div>
-          <button
-            type="button"
-            class="home-link-button"
-            data-home-action="${ACTIONS.NAVIGATE}"
-            data-action="${ACTIONS.NAVIGATE}"
-            data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
-            data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
-          >
-            Ver incidencias
-          </button>
-        </div>
-
-        ${tickets.length
-          ? `<ul class="home-mini-list">${tickets.map((ticket) => `
-              <li>
-                <strong>${escapeHtml(getTicketSubject(ticket))}</strong>
-                <span>${escapeHtml(getTicketStatusLabel(ticket))}</span>
-              </li>
-            `).join("")}</ul>`
-          : emptyState({
-              title: "Sin incidencias recientes",
-              text: "No hay solicitudes recientes visibles.",
-              iconName: "ticket",
-            })
-        }
-      </section>
-    `;
+    return "";
   }
 
   const clients = safeArray(vm.clients).slice(0, LIMITS.entities);
@@ -761,17 +724,6 @@ function renderHomeTicketsTable(vm = {}) {
         </div>
 
         <div class="home-panel-actions">
-          <button
-            type="button"
-            class="home-link-button"
-            data-home-action="${ACTIONS.EXPORT_CSV}"
-            data-action="${ACTIONS.EXPORT_CSV}"
-            data-export-mode="tickets"
-            data-filename="home-incidencias.csv"
-          >
-            Exportar CSV
-          </button>
-
           <button
             type="button"
             class="home-link-button"
@@ -1177,6 +1129,9 @@ export function getHomeTemplateSnapshot() {
       noTopUpdatedPill: true,
       noTopRefreshButton: true,
       noTopCreateButton: true,
+      noActivityRefreshButton: true,
+      noTicketsCsvExportButton: true,
+      noUserRecentIncidenciasCard: true,
 
       noDomApi: true,
       noListeners: true,

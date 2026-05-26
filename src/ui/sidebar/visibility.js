@@ -11,7 +11,8 @@
    - Usuarios se oculta para user porque /usuarios es ruta admin.
    - Servidor se oculta para user porque /servidor es ruta admin.
    - Rutas públicas ocultan sidebar.
-   - Rutas legacy/sensibles ocultan sidebar.
+   - Rutas bloqueadas/sensibles ocultan sidebar.
+   - Bloqueos delegados en constants.js -> core/config.js.
    - Sesión válida obligatoria.
    - Entender rutas visibles /@{slug}/{ruta}.
    - No navegar.
@@ -23,6 +24,7 @@
    - No reparar estructuras legacy.
    - No gestionar comportamiento de dropdown.
    - Sin avatar.
+   - Sin denylist local.
    - Sin /home.
    - Sin /403.
    - Sin /404.
@@ -56,7 +58,7 @@ import {
   isAdminRoutePath,
 } from "../../router/routes.js";
 
-export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v7";
+export const SIDEBAR_VISIBILITY_VERSION = "sidebar.visibility.v8";
 
 /* =========================================================
    BASICS
@@ -101,14 +103,15 @@ function unique(values = []) {
 function redact(value = "") {
   return text(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
     String(value || "")
   );
 }
@@ -187,6 +190,7 @@ function pathIsBlocked(path = "") {
   const scoped = getSidebarUserScopedRouteInfo(path);
 
   if (scoped?.blocked === true) return true;
+
   if (scoped?.scoped === true && scoped.restPath) {
     return isSidebarBlockedRoute(scoped.restPath);
   }
@@ -724,6 +728,9 @@ export function getSidebarVisibilitySnapshot(context = {}) {
       clientesAdminOnlyFromRoutes: true,
       usuariosAdminOnlyFromRoutes: true,
       servidorAdminOnlyFromRoutes: true,
+
+      blocksRoutesViaConstantsAndCoreConfig: true,
+      noLocalBlockedRouteList: true,
 
       blocksHomeAlias: true,
       blocks403Route: true,

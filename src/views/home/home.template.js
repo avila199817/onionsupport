@@ -7,7 +7,8 @@
    - Consumir view-model desde home.selectors.js.
    - Calcular el modelo una sola vez por render.
    - Home simple, visual y directo.
-   - Header limpio: sin etiqueta de rol visible y sin acciones superiores.
+   - Header limpio: sin etiqueta de rol visible y sin acciones superiores pesadas.
+   - CTA superior derecho para crear incidencia.
    - Sin card grande envolvente.
    - Sin accesos rápidos duplicados.
    - Sin widgets duplicados.
@@ -93,7 +94,7 @@ import {
   getActivityType,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.v19.no-refresh-no-csv-no-user-recent-card";
+export const TEMPLATE_VERSION = "home.template.v20.create-incidencia-header-card";
 
 const ACTIONS = Object.freeze({
   RETRY: "retry",
@@ -469,6 +470,40 @@ function errorBanner(message = "") {
   `;
 }
 
+function renderCreateIncidenciaCard(vm = {}) {
+  const state = safeObject(vm.state);
+  const route = safeRoute(HOME_ROUTES.INCIDENCIAS, "/incidencias");
+
+  return `
+    <aside class="home-create-card home-create-card--incidencia" data-home-section="create-incidencia">
+      <button
+        type="button"
+        class="home-create-card-button"
+        data-home-action="${ACTIONS.CREATE_INCIDENCIA}"
+        data-action="${ACTIONS.CREATE_INCIDENCIA}"
+        data-route="${attr(route)}"
+        data-href="${attr(route)}"
+        aria-label="Crear incidencia"
+        ${state.creating ? "aria-busy=\"true\"" : ""}
+      >
+        <span class="home-create-card-icon" aria-hidden="true">
+          ${icon("plus")}
+        </span>
+
+        <span class="home-create-card-content">
+          <span class="home-panel-kicker">Nueva solicitud</span>
+          <strong>Crear incidencia</strong>
+          <span>Abre una incidencia de soporte.</span>
+        </span>
+
+        <span class="home-create-card-arrow" aria-hidden="true">
+          ${icon("arrowRight")}
+        </span>
+      </button>
+    </aside>
+  `;
+}
+
 function renderHomeHeader(vm = {}) {
   const user = safeObject(vm.user);
   const name = safeText(first(user.displayName, user.name), "Usuario");
@@ -494,6 +529,8 @@ function renderHomeHeader(vm = {}) {
           </p>
         </div>
       </div>
+
+      ${renderCreateIncidenciaCard(vm)}
     </header>
 
     ${renderHomeStats(vm)}
@@ -1125,10 +1162,11 @@ export function getHomeTemplateSnapshot() {
 
       cleanHeader: true,
       noVisibleRoleLabelInHeader: true,
-      noTopHeaderActions: true,
       noTopUpdatedPill: true,
       noTopRefreshButton: true,
-      noTopCreateButton: true,
+      noTopCreateButton: false,
+      createIncidenciaHeaderCard: true,
+
       noActivityRefreshButton: true,
       noTicketsCsvExportButton: true,
       noUserRecentIncidenciasCard: true,

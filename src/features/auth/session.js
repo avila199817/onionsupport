@@ -42,7 +42,7 @@ import {
   persistAuthStorage,
 } from "./storage.js";
 
-export const AUTH_SESSION_VERSION = "auth.session.v9";
+export const AUTH_SESSION_VERSION = "auth.session.v10";
 
 const SOURCE = "auth.session";
 
@@ -52,6 +52,23 @@ const AUTH_HOME = Object.freeze({
 });
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
+
+const INVALID_USER_STATUSES = new Set([
+  "disabled",
+  "inactive",
+  "deleted",
+  "archived",
+  "revoked",
+  "blocked",
+  "banned",
+  "suspended",
+  "desactivado",
+  "inactivo",
+  "eliminado",
+  "archivado",
+  "bloqueado",
+  "suspendido",
+]);
 
 const SENSITIVE_USER_KEYS = new Set([
   "password",
@@ -205,7 +222,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
@@ -317,10 +335,6 @@ function commitState(patch = {}, options = {}) {
 ========================================================= */
 
 export function normalizeSessionSlug(value = "") {
-  if (isFunction(AppCore?.normalizeSlug)) {
-    return AppCore.normalizeSlug(value);
-  }
-
   const slug = cleanText(value, "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -337,12 +351,12 @@ export function normalizeSessionSlug(value = "") {
 }
 
 export function extractSessionUserSlug(user = null) {
-  if (isFunction(AppCore?.extractUserSlug)) {
-    return AppCore.extractUserSlug(user);
-  }
-
   if (!isObject(user)) return "";
 
+  /*
+    Slug real únicamente.
+    No se inventa desde username/email/id.
+  */
   return normalizeSessionSlug(
     user.slug ||
       user.lookup?.slug ||
@@ -353,11 +367,6 @@ export function extractSessionUserSlug(user = null) {
 }
 
 export function buildSessionUserHomePath(user = null) {
-  if (isFunction(AppCore?.buildUserHomePath)) {
-    const path = AppCore.buildUserHomePath(user);
-    return path === "/home" ? AUTH_HOME.canonical : path;
-  }
-
   const slug = extractSessionUserSlug(user);
 
   return slug ? `${AUTH_HOME.userPrefix}${slug}` : AUTH_HOME.canonical;
@@ -536,12 +545,14 @@ function isSensitiveUserKey(key = "") {
   return SENSITIVE_USER_KEYS.has(normalizeKey(key));
 }
 
-function sanitizeUserValue(value, keyHint = "") {
+function sanitizeUserValue(value, keyHint = "", depth = 0) {
+  if (depth > 8) return null;
   if (isSensitiveUserKey(keyHint)) return undefined;
 
   if (Array.isArray(value)) {
     return value
-      .map((item) => sanitizeUserValue(item))
+      .slice(0, 500)
+      .map((item) => sanitizeUserValue(item, "", depth + 1))
       .filter((item) => item !== undefined);
   }
 
@@ -551,7 +562,7 @@ function sanitizeUserValue(value, keyHint = "") {
     for (const [key, item] of Object.entries(value)) {
       if (isSensitiveUserKey(key)) continue;
 
-      const clean = sanitizeUserValue(item, key);
+      const clean = sanitizeUserValue(item, key, depth + 1);
 
       if (clean !== undefined) {
         output[key] = clean;
@@ -559,6 +570,10 @@ function sanitizeUserValue(value, keyHint = "") {
     }
 
     return output;
+  }
+
+  if (typeof value === "string") {
+    return redact(value);
   }
 
   return value;
@@ -571,7 +586,13 @@ function removeSensitiveUserFields(user = {}) {
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  const status = cleanText(user.status || user.estado || user.state, "").toLowerCase();
+  const status = cleanText(
+    user.status ||
+      user.estado ||
+      user.state ||
+      "",
+    ""
+  ).toLowerCase();
 
   return Boolean(
     user.disabled === true ||
@@ -584,22 +605,7 @@ function userDisabled(user = null) {
       user.active === false ||
       user.enabled === false ||
       Boolean(user.deletedAt) ||
-      [
-        "disabled",
-        "inactive",
-        "deleted",
-        "archived",
-        "revoked",
-        "blocked",
-        "banned",
-        "suspended",
-        "desactivado",
-        "inactivo",
-        "eliminado",
-        "archivado",
-        "bloqueado",
-        "suspendido",
-      ].includes(status)
+      INVALID_USER_STATUSES.has(status)
   );
 }
 
@@ -612,8 +618,11 @@ function hasUserIdentity(user = null) {
       cleanText(user.uid, "") ||
       cleanText(user.sub, "") ||
       cleanText(user.username, "") ||
+      cleanText(user.userName, "") ||
+      cleanText(user.user_name, "") ||
       cleanText(user.slug, "") ||
-      cleanText(user.lookup?.slug, "")
+      cleanText(user.lookup?.slug, "") ||
+      cleanText(user.profile?.slug, "")
   );
 }
 
@@ -621,20 +630,16 @@ export function normalizeUser(user = null) {
   if (!isObject(user)) return null;
   if (userDisabled(user)) return null;
 
-  if (isFunction(AppCore?.normalizeUser)) {
-    const normalized = AppCore.normalizeUser(user);
+  const appNormalized = isFunction(AppCore?.normalizeUser)
+    ? AppCore.normalizeUser(user)
+    : null;
 
-    if (!normalized || userDisabled(normalized)) return null;
+  const safeUser = removeSensitiveUserFields(
+    isObject(appNormalized) ? appNormalized : user
+  );
 
-    const clean = removeSensitiveUserFields(normalized);
-
-    if (!hasUserIdentity(clean)) return null;
-
-    return mergeUserVisualFields(user, clean);
-  }
-
-  const safeUser = removeSensitiveUserFields(user);
-
+  if (!isObject(safeUser)) return null;
+  if (userDisabled(safeUser)) return null;
   if (!hasUserIdentity(safeUser)) return null;
 
   const id = cleanText(
@@ -645,7 +650,7 @@ export function normalizeUser(user = null) {
     ""
   );
 
-  const slug = extractSessionUserSlug(safeUser);
+  const slug = extractSessionUserSlug(user) || extractSessionUserSlug(safeUser);
 
   const username = cleanText(
     safeUser.username ||
@@ -653,8 +658,7 @@ export function normalizeUser(user = null) {
       safeUser.user_name ||
       safeUser.usernameLower ||
       safeUser.username_lower ||
-      slug ||
-      id,
+      "",
     ""
   );
 
@@ -676,7 +680,7 @@ export function normalizeUser(user = null) {
 
   const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
 
-  return mergeUserVisualFields(safeUser, {
+  return mergeUserVisualFields(user, {
     ...safeUser,
 
     id: id || safeUser.id || safeUser.userId || null,
@@ -747,6 +751,37 @@ function pick(nodes = [], keys = []) {
   return undefined;
 }
 
+function hasAuthEnvelopeSignals(value = null) {
+  if (!isObject(value)) return false;
+
+  return Boolean(
+    value.token ||
+      value.accessToken ||
+      value.access_token ||
+      value.refreshToken ||
+      value.refresh_token ||
+      value.session ||
+      value.sessionData ||
+      value.sessionId ||
+      value.session_id ||
+      value.sid ||
+      value.sessionUserId ||
+      value.session_user_id ||
+      value.expiresAt ||
+      value.expires_at ||
+      value.auth ||
+      value.payload ||
+      value.result
+  );
+}
+
+function looksLikeStandaloneUserObject(value = null) {
+  if (!isObject(value)) return false;
+  if (!hasUserIdentity(value)) return false;
+
+  return !hasAuthEnvelopeSignals(value);
+}
+
 function readTokenFromPayload(payload = {}) {
   return cleanToken(
     pick(nested(payload), [
@@ -781,12 +816,11 @@ function payloadHasExplicitUser(payload = {}) {
     }
   }
 
-  return hasUserIdentity(payload);
+  return looksLikeStandaloneUserObject(payload);
 }
 
 function readUserFromPayload(payload = {}) {
   const nodes = nested(payload);
-
   const candidates = [];
 
   for (const node of nodes) {
@@ -813,7 +847,11 @@ function readUserFromPayload(payload = {}) {
 
   const best = selectBestUserCandidate(candidates);
 
-  return normalizeUser(best || payload);
+  if (best) return normalizeUser(best);
+
+  return looksLikeStandaloneUserObject(payload)
+    ? normalizeUser(payload)
+    : null;
 }
 
 function sanitizeSessionContext(session = {}) {
@@ -1046,13 +1084,6 @@ function shouldKeepCurrentRefreshContext({
   user = null,
   session = null,
 } = {}) {
-  /*
-    Si el payload no trae usuario explícito, puede conservarse el contexto.
-    Si trae usuario explícito, sólo se conserva si:
-      - el usuario explícito es usable;
-      - el user actual es el mismo; o
-      - la sesión actual pertenece a ese usuario.
-  */
   if (!explicitUserProvided) return true;
   if (!explicitUser || !user) return false;
 
@@ -1076,6 +1107,7 @@ function buildStatePatch({
   const safeRefreshToken = cleanToken(refreshToken);
   const safeUser = normalizeUser(user);
   const rawSession = sanitizeSessionContext(session);
+
   const safeSession = safeUser && rawSession && sameSessionUser(rawSession, safeUser)
     ? rawSession
     : null;
@@ -1103,6 +1135,7 @@ function buildStatePatch({
 
         sessionId: safeSession.sessionId || safeSession.id || null,
         id: safeSession.sessionId || safeSession.id || null,
+
         userId: safeSession.userId || safeSession.sessionUserId || safeUser.userId || safeUser.id || null,
         sessionUserId: safeSession.sessionUserId || safeSession.userId || safeUser.userId || safeUser.id || null,
 
@@ -1167,10 +1200,14 @@ function buildStatePatch({
 function persistPatch({
   token = "",
   refreshToken = "",
+  user = null,
   session = null,
+  clearMissingRefreshToken = false,
+  clearMissingSessionContext = false,
 } = {}) {
   const safeToken = cleanToken(token);
   const safeRefreshToken = cleanToken(refreshToken);
+  const safeUser = normalizeUser(user);
   const safeSession = sanitizeSessionContext(session);
 
   if (!safeToken) return false;
@@ -1189,6 +1226,12 @@ function persistPatch({
             }
           : {}),
 
+        ...(safeUser
+          ? {
+              user: safeUser,
+            }
+          : {}),
+
         ...(safeSession
           ? {
               session: safeSession,
@@ -1198,6 +1241,8 @@ function persistPatch({
       },
       {
         source: SOURCE,
+        clearMissingRefreshToken,
+        clearMissingSessionContext,
       }
     );
 
@@ -1320,17 +1365,27 @@ function publicSnapshot(snapshot = {}) {
     policy: {
       sessionOnly: true,
       strictAuth: true,
+
       tokenWithoutUserIsNotAuthenticated: true,
       userWithoutTokenIsNotAuthenticated: true,
+
       doesNotFabricateUserFromStorage: true,
+
+      accessTokenPersistedForReload: true,
       refreshTokenStoredOnlyInStorage: true,
+      refreshTokenReadForRestoreOnly: true,
       noRefreshTokenInSnapshot: true,
+
+      preservesUserVisualFields: true,
+      noSlugFabrication: true,
+
       noRouter: true,
       noToast: true,
       noFetch: true,
       noOtp: true,
       noMfa: true,
       no2fa: true,
+
       snapshotRedacted: true,
     },
   };
@@ -1423,13 +1478,16 @@ export function applySession(payload = {}, options = {}) {
 
   /*
     Persistimos token/refresh/contexto auxiliar.
-    No persistimos user como fuente de autenticación.
+    No persistimos user completo como fuente de autenticación.
   */
   if (patch.hasToken) {
     persistPatch({
       token,
       refreshToken,
+      user,
       session: patch.session,
+      clearMissingRefreshToken: !canKeepCurrentRefreshContext,
+      clearMissingSessionContext: !canKeepCurrentRefreshContext,
     });
   }
 
@@ -1565,6 +1623,10 @@ export function getCurrentRefreshToken() {
   return bestStateRefreshToken();
 }
 
+export function getCurrentSession() {
+  return getCurrentSessionContext();
+}
+
 export function getCurrentSessionContext() {
   const user = bestStateUser();
   return bestStateSession(user);
@@ -1673,6 +1735,7 @@ export default {
   getCurrentUser,
   getCurrentToken,
   getCurrentRefreshToken,
+  getCurrentSession,
   getCurrentSessionContext,
 
   getCurrentRole,

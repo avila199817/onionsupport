@@ -41,7 +41,7 @@ import {
   AUTH_CONSTANTS,
 } from "./constants.js";
 
-export const AUTH_STORAGE_VERSION = "auth.storage.v7";
+export const AUTH_STORAGE_VERSION = "auth.storage.v8";
 
 const PREFIX = "onion:auth:";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
@@ -173,17 +173,14 @@ function number(value, fallback = 0) {
   return Number.isFinite(output) ? output : fallback;
 }
 
-function escapeRegExp(value = "") {
-  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function redact(value = "") {
   return cleanText(value, "")
     .replace(
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function recordError(error = null) {
@@ -287,6 +284,10 @@ function writeRaw(name = "", value = "", options = {}) {
   const primary = useSession ? sessionStore() : localStore();
   const secondary = useSession ? localStore() : sessionStore();
 
+  /*
+    Sólo removemos nuestras claves concretas namespaced.
+    Nunca se llama storage.clear().
+  */
   removeFrom(secondary, name);
   removeMemory(name);
 
@@ -672,6 +673,33 @@ function readSessionFromPayload(payload = {}) {
   return null;
 }
 
+function explicitIdentityMismatch({
+  user = null,
+  sessionData = null,
+} = {}) {
+  const safeUser = isObject(user) ? user : null;
+  const safeSession = isObject(sessionData) ? sessionData : null;
+
+  const explicitUserId = extractUserId(safeUser);
+
+  const sessionUserId = normalizeSessionValue(
+    safeSession?.sessionUserId ||
+      safeSession?.session_user_id ||
+      safeSession?.userId ||
+      safeSession?.user_id ||
+      safeSession?.uid ||
+      ""
+  );
+
+  const storedUserId = getStoredSessionUserId() || getStoredUserId();
+
+  if (explicitUserId && storedUserId && explicitUserId !== storedUserId) return true;
+  if (sessionUserId && storedUserId && sessionUserId !== storedUserId) return true;
+  if (explicitUserId && sessionUserId && explicitUserId !== sessionUserId) return true;
+
+  return false;
+}
+
 /* =========================================================
    TOKENS
 ========================================================= */
@@ -818,7 +846,7 @@ export function persistSessionContext(sessionData = null, user = null, options =
   };
 }
 
-function removeStoredSessionContext() {
+export function removeStoredSessionContext() {
   removeMany(SESSION_CONTEXT_KEYS);
   return true;
 }
@@ -842,20 +870,12 @@ export function persistAuxSessionData(user = null, options = {}) {
     writeRaw(KEYS.userId, userId, options);
   }
 
-  /*
-    Slug real únicamente.
-    No se usa username/email/name/id como fallback.
-  */
   if (slug) {
     writeRaw(KEYS.userSlug, slug, options);
   } else {
     removeRaw(KEYS.userSlug);
   }
 
-  /*
-    Rol auxiliar, no canónico.
-    La autenticación real siempre requiere token + user canónico.
-  */
   if (role) {
     writeRaw(KEYS.role, role, options);
   } else {
@@ -870,7 +890,13 @@ export function getStoredSessionId() {
 }
 
 export function getStoredSessionUserId() {
-  return normalizeSessionValue(readFirst([KEYS.sessionUserId, KEYS.userId]));
+  return normalizeSessionValue(
+    readFirst([KEYS.sessionUserId, KEYS.userId])
+  );
+}
+
+function getStoredUserId() {
+  return normalizeSessionValue(readRaw(KEYS.userId));
 }
 
 export function getStoredSessionExpiresAt() {
@@ -879,36 +905,42 @@ export function getStoredSessionExpiresAt() {
 
 export function getStoredSessionContext() {
   const sessionId = getStoredSessionId();
-  const sessionUserId = getStoredSessionUserId();
+  const userId = getStoredSessionUserId();
   const expiresAt = getStoredSessionExpiresAt();
 
-  if (!sessionId && !sessionUserId && !expiresAt) return null;
+  if (!sessionId && !userId && !expiresAt) return null;
 
   return {
     sessionId: sessionId || null,
     session_id: sessionId || null,
+    id: sessionId || null,
+    sid: sessionId || null,
 
-    userId: sessionUserId || null,
-    user_id: sessionUserId || null,
-
-    sessionUserId: sessionUserId || null,
-    session_user_id: sessionUserId || null,
+    userId: userId || null,
+    user_id: userId || null,
+    sessionUserId: userId || null,
+    session_user_id: userId || null,
 
     expiresAt: expiresAt || null,
     expires_at: expiresAt || null,
+    refreshExpiresAt: expiresAt || null,
+    refresh_expires_at: expiresAt || null,
   };
 }
 
 export function hasSessionContext() {
-  return Boolean(
-    getStoredSessionId() ||
-      getStoredSessionUserId() ||
-      getStoredSessionExpiresAt()
-  );
+  return Boolean(getStoredSessionId() || getStoredSessionUserId() || getStoredSessionExpiresAt());
 }
 
-function hasAnyRefreshContext() {
-  return Boolean(getStoredRefreshToken() || hasSessionContext());
+export function hasAnyRefreshContext() {
+  return Boolean(hasRefreshToken());
+}
+
+export function hasRefreshContext() {
+  /*
+    Contexto mínimo permitido por contrato: refreshToken.
+  */
+  return Boolean(getStoredRefreshToken());
 }
 
 export function hasCompleteRefreshContext() {
@@ -919,58 +951,9 @@ export function hasCompleteRefreshContext() {
   );
 }
 
-export function hasRefreshContext() {
-  /*
-    Backend persistente puede resolver sesión por refreshTokenHash.
-    sessionId/userId son preferidos, pero no obligatorios.
-  */
-  return Boolean(getStoredRefreshToken());
-}
-
 /* =========================================================
-   AUTH PAYLOAD STORAGE
+   AUTH PAYLOAD
 ========================================================= */
-
-function extractSessionUserIdFromPayloadSession(session = null) {
-  if (!isObject(session)) return "";
-
-  return normalizeSessionValue(
-    session.sessionUserId ||
-      session.session_user_id ||
-      session.userId ||
-      session.user_id ||
-      session.uid ||
-      ""
-  );
-}
-
-function explicitIdentityMismatch({
-  user = null,
-  sessionData = null,
-} = {}) {
-  const storedUserId = getStoredSessionUserId();
-  const storedSlug = getStoredUserSlug();
-
-  const userId = extractUserId(user);
-  const slug = extractRealUserSlug(user);
-  const sessionUserId = extractSessionUserIdFromPayloadSession(sessionData);
-
-  if (userId && storedUserId && userId !== storedUserId) return true;
-  if (slug && storedSlug && slug !== storedSlug) return true;
-
-  if (sessionUserId && storedUserId && sessionUserId !== storedUserId) return true;
-  if (sessionUserId && userId && sessionUserId !== userId) return true;
-
-  /*
-    Si llega usuario explícito pero no podemos comprobarlo contra el
-    userId persistido, preferimos limpiar contexto auxiliar antiguo.
-  */
-  if (user && storedUserId && !userId && (!slug || !storedSlug || slug !== storedSlug)) {
-    return true;
-  }
-
-  return false;
-}
 
 export function persistAuthStorage(payload = {}, options = {}) {
   const nodes = nested(payload);
@@ -1320,6 +1303,7 @@ export default {
   removeStoredRefreshToken,
 
   persistSessionContext,
+  removeStoredSessionContext,
   persistAuxSessionData,
 
   persistAuthStorage,
@@ -1332,6 +1316,7 @@ export default {
   getStoredSessionContext,
 
   hasSessionContext,
+  hasAnyRefreshContext,
   hasRefreshContext,
   hasCompleteRefreshContext,
 

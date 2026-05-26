@@ -42,7 +42,7 @@ import * as GuardsApi from "./guards.js";
 import * as ActivationApi from "./activation.js";
 import * as PasswordResetApi from "./password-reset.js";
 
-export const AUTH_MODULE_VERSION = "auth.facade.v8";
+export const AUTH_MODULE_VERSION = "auth.facade.v9";
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
 
@@ -114,7 +114,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function cleanRole(value = "") {
@@ -236,9 +237,9 @@ function emit(eventName = "", payload = {}) {
 function safeError(error = null, type = "runtime") {
   return {
     type,
-    name: error?.name || "Error",
+    name: cleanText(error?.name, "Error"),
     message: redact(error?.message || String(error || "")),
-    code: error?.code || null,
+    code: error?.code || error?.error || null,
     status: error?.status || error?.statusCode || error?.response?.status || null,
     refreshable: isRefreshableAuthError(error),
     shouldClearSession: shouldClearSessionForAuthError(error),
@@ -335,6 +336,10 @@ function isUserDisabled(user = {}) {
 }
 
 function extractUserSlug(user = null) {
+  if (isFunction(SessionApi?.extractSessionUserSlug)) {
+    return SessionApi.extractSessionUserSlug(user);
+  }
+
   if (isFunction(AppCore?.extractUserSlug)) {
     return AppCore.extractUserSlug(user);
   }
@@ -349,8 +354,16 @@ function extractUserSlug(user = null) {
 }
 
 function buildUserHomePath(user = null) {
+  if (isFunction(SessionApi?.buildSessionUserHomePath)) {
+    const path = normalizeSpaPath(SessionApi.buildSessionUserHomePath(user));
+
+    if (isUserHomePath(path)) return path;
+  }
+
   if (isFunction(AppCore?.buildUserHomePath)) {
-    return AppCore.buildUserHomePath(user);
+    const path = normalizeSpaPath(AppCore.buildUserHomePath(user));
+
+    if (isUserHomePath(path)) return path;
   }
 
   const slug = extractUserSlug(user);
@@ -544,10 +557,12 @@ const logoutCore = optionalMethod(LogoutApi, "logout");
 const sessionApplySession = optionalMethod(SessionApi, "applySession");
 const sessionClearSession = optionalMethod(SessionApi, "clearSession");
 const sessionBuildSnapshot = optionalMethod(SessionApi, "buildSessionSnapshot");
+const sessionSyncAuthState = optionalMethod(SessionApi, "syncAuthState");
 const sessionIsAuthenticated = optionalMethod(SessionApi, "isAuthenticated");
 const sessionGetCurrentUser = optionalMethod(SessionApi, "getCurrentUser");
 const sessionGetCurrentSession = optionalMethod(SessionApi, "getCurrentSession");
 const sessionGetCurrentToken = optionalMethod(SessionApi, "getCurrentToken");
+const sessionGetCurrentRefreshToken = optionalMethod(SessionApi, "getCurrentRefreshToken");
 const sessionGetCurrentRole = optionalMethod(SessionApi, "getCurrentRole");
 const sessionGetCurrentRoles = optionalMethod(SessionApi, "getCurrentRoles");
 const sessionGetAuthHeader = optionalMethod(SessionApi, "getAuthHeader");
@@ -558,7 +573,6 @@ const guardGuestCore = optionalMethod(GuardsApi, "guardGuest");
 const guardRoleCore = optionalMethod(GuardsApi, "guardRole");
 const guardAdminCore = optionalMethod(GuardsApi, "guardAdmin");
 const canAccessRouteCore = optionalMethod(GuardsApi, "canAccessRoute");
-const syncAuthStateCore = optionalMethod(GuardsApi, "syncAuthState");
 const buildGuardErrorPayloadCore = optionalMethod(GuardsApi, "buildGuardErrorPayload");
 const getAuthGuardsSnapshotCore = optionalMethod(GuardsApi, "getAuthGuardsSnapshot");
 
@@ -593,6 +607,10 @@ function hasValidToken() {
   return Boolean(getToken());
 }
 
+function getRefreshToken() {
+  return cleanToken(safeCall(sessionGetCurrentRefreshToken) || "");
+}
+
 function getUser() {
   const currentState = state();
 
@@ -605,9 +623,6 @@ function getUser() {
     currentState.authUser ||
     currentState.session?.user ||
     currentState.sessionData?.user ||
-    currentState.auth?.user ||
-    AppCore?.user ||
-    AppCore?.currentUser ||
     null;
 
   return normalizeUser(user);
@@ -845,7 +860,7 @@ function normalizeAuthPayload(payload = {}) {
     accessToken: token,
     access_token: token,
 
-    hasRefreshToken: Boolean(refreshToken),
+    hasRefreshToken: Boolean(refreshToken || getRefreshToken()),
 
     session,
     sessionData: session,
@@ -893,7 +908,7 @@ function publicAuthResult(payload = {}) {
     hasToken: hasValidToken(),
     hasUser: Boolean(user),
     hasSession: Boolean(getCurrentSession()),
-    hasRefreshToken: payload.hasRefreshToken === true,
+    hasRefreshToken: payload.hasRefreshToken === true || Boolean(getRefreshToken()),
 
     token: null,
     accessToken: null,
@@ -952,11 +967,6 @@ function writeSession(payload = {}, options = {}) {
   const normalized = normalizeAuthPayload(payload);
 
   if (!(normalized.token && normalized.user)) {
-    clearSession({
-      ...options,
-      source: options.source || "Auth.writeSession.invalid",
-    });
-
     return normalizeAuthPayload({});
   }
 
@@ -1065,40 +1075,41 @@ function clearSession(options = {}) {
   return true;
 }
 
-function syncAuthState() {
+function syncAuthState(options = {}) {
   try {
-    if (isFunction(syncAuthStateCore)) {
-      syncAuthStateCore();
+    if (isFunction(sessionSyncAuthState)) {
+      sessionSyncAuthState({
+        source: options.source || "Auth.syncAuthState",
+      });
     }
   } catch {
-    // se normaliza abajo
+    // noop
   }
+
+  /*
+    Importante:
+    No limpia token-only aquí. En reload puede existir access/refresh
+    persistido sin user todavía; restore.js es quien valida /me o refresh.
+  */
+  if (!isAuthenticated()) return false;
 
   const token = getToken();
   const user = getUser();
 
-  if (!(token && user)) {
-    clearSession({
-      source: "Auth.syncAuthState",
-      silent: true,
-      emit: false,
-    });
-
-    return false;
+  if (token && user) {
+    writeSession(
+      {
+        token,
+        user,
+        session: getCurrentSession(),
+      },
+      {
+        source: options.source || "Auth.syncAuthState",
+        silent: true,
+        emit: false,
+      }
+    );
   }
-
-  writeSession(
-    {
-      token,
-      user,
-      session: getCurrentSession(),
-    },
-    {
-      source: "Auth.syncAuthState",
-      silent: true,
-      emit: false,
-    }
-  );
 
   return true;
 }
@@ -1302,22 +1313,25 @@ async function restoreSession(options = {}) {
         ? await restoreSessionCore(createRestoreOptions(options))
         : null;
 
-      if (raw) {
-        const normalized = normalizeAuthPayload(raw);
-
-        if (normalized.authenticated) {
-          applySession(normalized, {
-            source: "Auth.restoreSession",
-          });
-        } else {
-          syncAuthState();
-        }
-      } else {
-        syncAuthState();
-      }
+      /*
+        restore.js es dueño del restore real, /me, refresh silencioso,
+        aplicación de sesión y limpieza por sesión inválida.
+        La fachada sólo sincroniza lectura pública.
+      */
+      syncAuthState({
+        source: "Auth.restoreSession",
+      });
 
       Auth.session.lastError = null;
       Auth.session.lastRestoreAt = Date.now();
+
+      if (isObject(raw)) {
+        return {
+          ...sanitizePayload(raw),
+          ...buildSessionSnapshotSafe(),
+          source: raw.source || "Auth.restoreSession",
+        };
+      }
 
       return buildSessionSnapshotSafe();
     } catch (error) {
@@ -1330,7 +1344,9 @@ async function restoreSession(options = {}) {
           emit: false,
         });
       } else {
-        syncAuthState();
+        syncAuthState({
+          source: "Auth.restoreSession.error",
+        });
       }
 
       return buildSessionSnapshotSafe();
@@ -1370,9 +1386,12 @@ async function refreshSession(options = {}) {
               noAuthHeader: true,
             });
 
-      const result = applySession(raw || {}, {
-        source: "Auth.refreshSession",
-      });
+      const normalized = normalizeAuthPayload(raw || {});
+      const result = normalized.authenticated
+        ? applySession(normalized, {
+            source: "Auth.refreshSession",
+          })
+        : publicAuthResult({});
 
       Auth.session.lastError = null;
       Auth.session.lastRefreshAt = Date.now();
@@ -1416,9 +1435,12 @@ async function fetchMe(options = {}) {
             noAuthHeader: false,
           });
 
-      const result = applySession(raw || {}, {
-        source: "Auth.me",
-      });
+      const normalized = normalizeAuthPayload(raw || {});
+      const result = normalized.authenticated
+        ? applySession(normalized, {
+            source: "Auth.me",
+          })
+        : publicAuthResult({});
 
       Auth.session.lastError = null;
       Auth.session.lastMeAt = Date.now();
@@ -1464,7 +1486,10 @@ async function logout(options = {}) {
       });
     }
   } catch {
-    // Logout remoto best-effort.
+    /*
+      Logout remoto best-effort.
+      La limpieza local es obligatoria.
+    */
   }
 
   clearSession({
@@ -1484,113 +1509,72 @@ async function logout(options = {}) {
 
 function guardAuthenticated(...args) {
   if (isFunction(guardAuthenticatedCore)) return guardAuthenticatedCore(...args);
-
-  return isAuthenticated()
-    ? { ok: true, allowed: true }
-    : {
-        ok: false,
-        allowed: false,
-        redirectTo: AUTH_ROUTES.login,
-        code: "AUTH_REQUIRED",
-        status: 401,
-      };
+  return isAuthenticated();
 }
 
 function guardGuest(...args) {
   if (isFunction(guardGuestCore)) return guardGuestCore(...args);
-
-  return isAuthenticated()
-    ? {
-        ok: false,
-        allowed: false,
-        redirectTo: getDefaultHome(),
-        code: "GUEST_ONLY",
-      }
-    : { ok: true, allowed: true };
+  return !isAuthenticated();
 }
 
-function guardRole(role = "user", ...args) {
-  if (isFunction(guardRoleCore)) return guardRoleCore(role, ...args);
+function guardRole(...args) {
+  if (isFunction(guardRoleCore)) return guardRoleCore(...args);
 
-  return hasRole(role)
-    ? { ok: true, allowed: true }
-    : {
-        ok: false,
-        allowed: false,
-        code: "AUTH_FORBIDDEN",
-        status: 403,
-      };
+  const roles = args.length > 1 ? args : args[0];
+  const required = Array.isArray(roles) ? roles : [roles];
+
+  if (!required.length) return isAuthenticated();
+
+  return required.some((role) => hasRole(role));
 }
 
 function guardAdmin(...args) {
   if (isFunction(guardAdminCore)) return guardAdminCore(...args);
-  return guardRole("admin");
+  return isAdmin();
 }
 
-function canAccessRoute(route = {}) {
-  if (isFunction(canAccessRouteCore)) return canAccessRouteCore(route);
-
-  if (route?.public === true) return true;
-  if (route?.guestOnly === true) return !isAuthenticated();
-  if (route?.requiresAuth !== false && !isAuthenticated()) return false;
-
-  const roles = Array.isArray(route?.roles)
-    ? route.roles.map(cleanRole).filter(Boolean)
-    : [];
-
-  if (!roles.length) return true;
-  if (getRole() === "admin") return true;
-
-  return roles.includes(getRole());
+function canAccessRoute(...args) {
+  if (isFunction(canAccessRouteCore)) return canAccessRouteCore(...args);
+  return guardAuthenticated();
 }
 
-function buildGuardErrorPayload(error = {}) {
-  if (isFunction(buildGuardErrorPayloadCore)) return buildGuardErrorPayloadCore(error);
+function buildGuardErrorPayload(error = null) {
+  if (isFunction(buildGuardErrorPayloadCore)) {
+    return buildGuardErrorPayloadCore(error);
+  }
 
   return {
-    ok: false,
-    allowed: false,
-    code: error?.code || "AUTH_ERROR",
-    status: error?.status || 401,
-    message: redact(error?.message || "No autorizado."),
+    message: redact(error?.message || String(error || "Error")),
+    name: error?.name || "Error",
+    status: error?.status || error?.statusCode || error?.response?.status || 0,
+    code: error?.code || null,
   };
 }
 
 function getAuthGuardsSnapshot() {
-  if (isFunction(getAuthGuardsSnapshotCore)) return getAuthGuardsSnapshotCore();
+  if (isFunction(getAuthGuardsSnapshotCore)) {
+    return getAuthGuardsSnapshotCore();
+  }
 
   return {
-    version: AUTH_MODULE_VERSION,
     authenticated: isAuthenticated(),
-    role: getRole(),
+    role: getRole() || null,
     roles: getRoles(),
+    userSlug: getUserSlug() || null,
+    homePath: getDefaultHome(),
   };
 }
 
 /* =========================================================
-   PUBLIC FLOWS
+   PUBLIC AUTH FLOWS
 ========================================================= */
 
 async function activateAccount(payload = {}, options = {}) {
-  const raw = isFunction(activateAccountCore)
-    ? await activateAccountCore(payload, options)
-    : await httpPost(AUTH_ENDPOINTS.activate, payload, {
-        ...options,
-        auth: false,
-        public: true,
-        skipAuth: true,
-        noAuthHeader: true,
-      });
-
-  const normalized = normalizeAuthPayload(raw);
-
-  if (normalized.authenticated) {
-    return applySession(normalized, {
-      source: "Auth.activateAccount",
-    });
+  if (!isFunction(activateAccountCore)) {
+    throw new Error("Activation.activateAccount() no disponible.");
   }
 
-  return sanitizePayload(raw);
+  return activateAccountCore(payload, options);
 }
 
 function validateActivationToken(payload = {}, options = {}) {
@@ -1605,30 +1589,22 @@ function validateActivationToken(payload = {}, options = {}) {
   return validateActivationTokenCore(payload, options);
 }
 
-function requestPasswordReset(payload = {}, options = {}) {
-  return isFunction(requestPasswordResetCore)
-    ? requestPasswordResetCore(payload, options)
-    : httpPost(AUTH_ENDPOINTS.requestPasswordReset, payload, {
-        ...options,
-        auth: false,
-        public: true,
-        skipAuth: true,
-        noAuthHeader: true,
-      });
+async function requestPasswordReset(payload = {}, options = {}) {
+  if (!isFunction(requestPasswordResetCore)) {
+    throw new Error("PasswordReset.requestPasswordReset() no disponible.");
+  }
+
+  return requestPasswordResetCore(payload, options);
 }
 
 async function confirmResetPassword(payload = {}, options = {}) {
-  const raw = isFunction(confirmResetPasswordCore)
-    ? await confirmResetPasswordCore(payload, options)
-    : await httpPost(AUTH_ENDPOINTS.confirmPasswordReset, payload, {
-        ...options,
-        auth: false,
-        public: true,
-        skipAuth: true,
-        noAuthHeader: true,
-      });
+  if (!isFunction(confirmResetPasswordCore)) {
+    throw new Error("PasswordReset.confirmResetPassword() no disponible.");
+  }
 
-  const normalized = normalizeAuthPayload(raw);
+  const raw = await confirmResetPasswordCore(payload, options);
+
+  const normalized = normalizeAuthPayload(raw || {});
 
   if (normalized.authenticated) {
     return applySession(normalized, {
@@ -1666,6 +1642,7 @@ function buildSessionSnapshotSafe() {
 
       return {
         ...sanitizePayload(snapshot),
+
         token: null,
         accessToken: null,
         access_token: null,
@@ -1685,6 +1662,7 @@ function buildSessionSnapshotSafe() {
         hasToken: hasValidToken(),
         hasUser: Boolean(getUser()),
         hasSession: Boolean(getCurrentSession()),
+        hasRefreshToken: Boolean(getRefreshToken()),
       };
     }
   } catch {
@@ -1697,6 +1675,7 @@ function buildSessionSnapshotSafe() {
   return {
     authenticated: isAuthenticated(),
     hasToken: hasValidToken(),
+    hasRefreshToken: Boolean(getRefreshToken()),
     hasUser: Boolean(user),
     hasSession: Boolean(getCurrentSession()),
 
@@ -1711,6 +1690,7 @@ function buildSessionSnapshotSafe() {
 
     token: null,
     accessToken: null,
+    access_token: null,
     refreshToken: null,
     refresh_token: null,
   };
@@ -1723,11 +1703,13 @@ function getSessionDebugSnapshotSafe() {
 
       return {
         ...sanitizePayload(snapshot),
+
         token: null,
         accessToken: null,
         access_token: null,
         refreshToken: null,
         refresh_token: null,
+
         user: publicUser(getUser()),
       };
     }
@@ -1748,6 +1730,7 @@ function getAuthModuleSnapshot() {
 
     authenticated: isAuthenticated(),
     hasToken: hasValidToken(),
+    hasRefreshToken: Boolean(getRefreshToken()),
     hasUser: Boolean(user),
     hasSession: Boolean(getCurrentSession()),
 
@@ -1768,17 +1751,45 @@ function getAuthModuleSnapshot() {
     roles: getRoles(),
     isAdmin: isAdmin(),
 
+    routes: AUTH_ROUTES,
+    home: AUTH_HOME,
+
     session: {
       loggingIn: Auth.session.loggingIn,
       restoring: Auth.session.restoring,
       checking: Auth.session.checking,
       refreshing: Auth.session.refreshing,
+
+      lastLoginAt: Auth.session.lastLoginAt,
+      lastRestoreAt: Auth.session.lastRestoreAt,
+      lastRefreshAt: Auth.session.lastRefreshAt,
+      lastMeAt: Auth.session.lastMeAt,
+
       lastError: Auth.session.lastError,
     },
 
+    delegates: {
+      login: Boolean(loginCore),
+      restore: Boolean(restoreSessionCore),
+      refresh: Boolean(restoreRefreshSessionCore),
+      logout: Boolean(logoutCore),
+      session: Boolean(sessionApplySession),
+      guards: Boolean(guardAuthenticatedCore || canAccessRouteCore),
+      activation: Boolean(activateAccountCore),
+      passwordReset: Boolean(requestPasswordResetCore || confirmResetPasswordCore),
+    },
+
     policy: {
+      facadeOnly: true,
+
       strictAuth: true,
       requiresTokenAndUsableUser: true,
+
+      delegatesLogin: true,
+      delegatesRestore: true,
+      delegatesLogout: true,
+      delegatesSession: true,
+      delegatesGuards: true,
 
       delegatesUserNormalizationToSession: true,
       avatarNormalizationOwner: "features/auth/session.js",
@@ -1816,7 +1827,16 @@ function attachToCore(api) {
   try {
     AppCore.Auth = api;
     AppCore.auth = api;
-    AppCore.modules?.register?.("auth", api);
+
+    if (isFunction(AppCore?.registerModule)) {
+      AppCore.registerModule("auth", api, {
+        overwrite: true,
+      });
+    } else {
+      AppCore.modules?.register?.("auth", api, {
+        overwrite: true,
+      });
+    }
   } catch {
     // noop
   }
@@ -1855,6 +1875,7 @@ export const Auth = {
     lastRestoreAt: null,
     lastRefreshAt: null,
     lastMeAt: null,
+
     lastError: null,
   },
 
@@ -1912,6 +1933,7 @@ export const Auth = {
   syncAuthState,
 
   getAuthHeader,
+
   buildSessionSnapshot: buildSessionSnapshotSafe,
   getSessionDebugSnapshot: getSessionDebugSnapshotSafe,
 
@@ -1921,8 +1943,8 @@ export const Auth = {
   guardAdmin,
 
   requireAuth: guardAuthenticated,
+  ensureAuthenticated: guardAuthenticated,
   requireGuest: guardGuest,
-
   requireAdmin: guardAdmin,
 
   canAccessRoute,
@@ -1942,6 +1964,7 @@ export const Auth = {
   getAuthModuleSnapshot,
   getSnapshot: getAuthModuleSnapshot,
   getDebugSnapshot: getAuthModuleSnapshot,
+  snapshot: getAuthModuleSnapshot,
 };
 
 export default Auth;

@@ -31,7 +31,7 @@ import {
   buildSessionSnapshot,
 } from "./session.js";
 
-export const AUTH_LOGOUT_VERSION = "auth.logout.v4";
+export const AUTH_LOGOUT_VERSION = "auth.logout.v5";
 
 const SOURCE = "auth.logout";
 const LOGOUT_ENDPOINT = AUTH_ENDPOINTS.logout;
@@ -80,7 +80,25 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+/* =========================================================
+   ERROR NORMALIZATION
+========================================================= */
+
+function errorPayload(error = null) {
+  if (!error) return {};
+
+  if (isObject(error.data)) return error.data;
+  if (isObject(error.body)) return error.body;
+  if (isObject(error.payload)) return error.payload;
+  if (isObject(error.responseData)) return error.responseData;
+  if (isObject(error.response?.data)) return error.response.data;
+  if (isObject(error.response) && !isFunction(error.response.blob)) return error.response;
+
+  return {};
 }
 
 function statusOf(value = null) {
@@ -94,19 +112,6 @@ function statusOf(value = null) {
       payload.statusCode ||
       0
   ) || 0;
-}
-
-function errorPayload(error = null) {
-  if (!error) return {};
-
-  if (isObject(error.data)) return error.data;
-  if (isObject(error.body)) return error.body;
-  if (isObject(error.payload)) return error.payload;
-  if (isObject(error.responseData)) return error.responseData;
-  if (isObject(error.response?.data)) return error.response.data;
-  if (isObject(error.response) && !isFunction(error.response.blob)) return error.response;
-
-  return {};
 }
 
 function extractMessage(error = null) {
@@ -139,7 +144,7 @@ function publicError(error = null) {
   if (!error) return null;
 
   return {
-    name: error.name || "Error",
+    name: cleanText(error.name, "Error"),
     message: redact(extractMessage(error)),
     status: statusOf(error),
     code: extractCode(error),

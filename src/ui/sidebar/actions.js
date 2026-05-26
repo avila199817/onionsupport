@@ -12,7 +12,7 @@
    - Logout usando Auth si existe.
    - Cerrar sidebar durante logout.
    - Redirigir a /login tras logout.
-   - Rechazar rutas legacy/sensibles.
+   - Rechazar rutas legacy/sensibles delegando en constants.js -> core/config.js.
    - Sin DOM manual.
    - Sin eventos propios.
    - Sin storage.
@@ -22,6 +22,7 @@
    - Sin Router.push legacy.
    - Sin mobile magic.
    - Sin route aliases.
+   - Sin denylist local.
    - Sin /home.
    - Sin /403.
    - Sin /404.
@@ -49,7 +50,7 @@ import {
   toggleSidebar as toggleRuntimeSidebar,
 } from "./state.js";
 
-export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v6";
+export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v7";
 
 /* =========================================================
    BASICS
@@ -94,10 +95,11 @@ function navigationOk(result = null) {
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function publicError(error = null) {
@@ -156,7 +158,7 @@ function shouldReplace(context = {}) {
 ========================================================= */
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
     String(value || "")
   );
 }
@@ -184,8 +186,8 @@ function isBlockedTargetPath(path = "") {
   if (scoped?.blocked === true) return true;
 
   /*
-    Bloquea /@slug/home, /@slug/2fa, etc.
-    Router no debe recibir aliases legacy disfrazados bajo el scope público.
+    Bloquea rutas legacy disfrazadas bajo /@{slug}.
+    La fuente real del bloqueo es constants.js -> core/config.js.
   */
   if (scoped?.scoped === true && scoped.restPath) {
     return isSidebarBlockedRoute(scoped.restPath);
@@ -514,8 +516,11 @@ export function getSidebarActionsSnapshot() {
 
       buildsPublicTargetsWithRouter: true,
       rejectsSensitiveTargets: true,
-      rejectsLegacyTargets: true,
+      rejectsLegacyTargetsViaConstantsAndCoreConfig: true,
       rejectsScopedLegacyTargets: true,
+
+      blockedRoutesDelegatedToConstantsAndCoreConfig: true,
+      noLocalBlockedRouteList: true,
 
       userScopedPrivateRoutes: true,
 

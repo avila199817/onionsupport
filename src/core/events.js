@@ -3,24 +3,33 @@
    Archivo: /src/core/events.js
 
    Responsabilidad:
-   - Event bus mínimo.
+   - Event bus mínimo canónico.
    - Sin imports.
    - Sin DOM obligatorio.
    - Sin firebreak.
    - Sin rate limits.
    - Sin snapshots grandes.
    - Sin lógica rara.
+   - Un listener no rompe el bus.
 ========================================================= */
 
-export const EVENTS_VERSION = "simple";
+export const EVENTS_VERSION = "core.events.v2";
 export const WILDCARD_EVENT = "*";
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isFunction(value) {
   return typeof value === "function";
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -28,26 +37,59 @@ function noop() {
   return false;
 }
 
+/* =========================================================
+   EVENT OBJECT
+========================================================= */
+
 function eventObject(name = "", payload = {}) {
+  let propagationStopped = false;
+  let immediatePropagationStopped = false;
+
   return {
     type: name,
     detail: payload,
     payload,
+
     defaultPrevented: false,
+
+    get propagationStopped() {
+      return propagationStopped;
+    },
+
+    get immediatePropagationStopped() {
+      return immediatePropagationStopped;
+    },
+
     preventDefault() {
       this.defaultPrevented = true;
     },
-    stopPropagation() {},
-    stopImmediatePropagation() {},
+
+    stopPropagation() {
+      propagationStopped = true;
+    },
+
+    stopImmediatePropagation() {
+      propagationStopped = true;
+      immediatePropagationStopped = true;
+    },
   };
 }
 
+/* =========================================================
+   FACTORY
+========================================================= */
+
 export function createEvents() {
   const listeners = new Map();
+
   let emitCount = 0;
 
+  function normalizeName(name = "") {
+    return text(name, "");
+  }
+
   function bucket(name = "") {
-    const eventName = text(name, "");
+    const eventName = normalizeName(name);
 
     if (!eventName) return null;
 
@@ -58,21 +100,46 @@ export function createEvents() {
     return listeners.get(eventName);
   }
 
+  function cleanupBucket(name = "") {
+    const eventName = normalizeName(name);
+
+    if (!eventName) return false;
+
+    const set = listeners.get(eventName);
+
+    if (set && set.size === 0) {
+      listeners.delete(eventName);
+      return true;
+    }
+
+    return false;
+  }
+
   function on(name = "", handler = null) {
-    const eventName = text(name, "");
+    const eventName = normalizeName(name);
 
     if (!eventName || !isFunction(handler)) {
       return noop;
     }
 
     const set = bucket(eventName);
+
+    if (!set) return noop;
+
     set.add(handler);
 
-    return () => off(eventName, handler);
+    let disposed = false;
+
+    return () => {
+      if (disposed) return false;
+
+      disposed = true;
+      return off(eventName, handler);
+    };
   }
 
   function once(name = "", handler = null) {
-    const eventName = text(name, "");
+    const eventName = normalizeName(name);
 
     if (!eventName || !isFunction(handler)) {
       return noop;
@@ -93,7 +160,7 @@ export function createEvents() {
   }
 
   function off(name = "", handler = null) {
-    const eventName = text(name, "");
+    const eventName = normalizeName(name);
 
     if (!eventName) return false;
 
@@ -101,11 +168,19 @@ export function createEvents() {
       return listeners.delete(eventName);
     }
 
-    return Boolean(listeners.get(eventName)?.delete(handler));
+    const set = listeners.get(eventName);
+
+    if (!set) return false;
+
+    const removed = set.delete(handler);
+
+    cleanupBucket(eventName);
+
+    return removed;
   }
 
   function emit(name = "", payload = {}) {
-    const eventName = text(name, "");
+    const eventName = normalizeName(name);
 
     if (!eventName) return false;
 
@@ -113,20 +188,35 @@ export function createEvents() {
 
     const event = eventObject(eventName, payload);
 
-    for (const handler of [...(listeners.get(eventName) || [])]) {
+    const directHandlers = [...(listeners.get(eventName) || [])];
+
+    for (const handler of directHandlers) {
       try {
         handler(event);
       } catch {
         // Un listener no debe romper el bus.
       }
+
+      if (event.immediatePropagationStopped) {
+        break;
+      }
     }
 
-    if (eventName !== WILDCARD_EVENT) {
-      for (const handler of [...(listeners.get(WILDCARD_EVENT) || [])]) {
+    if (
+      eventName !== WILDCARD_EVENT &&
+      !event.propagationStopped
+    ) {
+      const wildcardHandlers = [...(listeners.get(WILDCARD_EVENT) || [])];
+
+      for (const handler of wildcardHandlers) {
         try {
           handler(eventName, payload, event);
         } catch {
           // Un wildcard listener no debe romper el bus.
+        }
+
+        if (event.immediatePropagationStopped) {
+          break;
         }
       }
     }
@@ -135,7 +225,7 @@ export function createEvents() {
   }
 
   function clear(name = "") {
-    const eventName = text(name, "");
+    const eventName = normalizeName(name);
 
     if (eventName) {
       listeners.delete(eventName);
@@ -147,7 +237,7 @@ export function createEvents() {
   }
 
   function listenerCount(name = "") {
-    const eventName = text(name, "");
+    const eventName = normalizeName(name);
 
     if (eventName) {
       return listeners.get(eventName)?.size || 0;
@@ -162,8 +252,15 @@ export function createEvents() {
     return count;
   }
 
+  function has(name = "") {
+    const eventName = normalizeName(name);
+    return Boolean(eventName && listeners.has(eventName));
+  }
+
   function names() {
-    return [...listeners.keys()];
+    return [...listeners.entries()]
+      .filter(([, set]) => set.size > 0)
+      .map(([name]) => name);
   }
 
   function getSnapshot() {
@@ -200,6 +297,8 @@ export function createEvents() {
     clear,
     removeAllListeners: clear,
 
+    has,
+
     listenerCount,
     names,
     eventNames: names,
@@ -211,6 +310,10 @@ export function createEvents() {
     reset,
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   EVENTS_VERSION,

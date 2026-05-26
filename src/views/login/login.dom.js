@@ -1,6 +1,6 @@
 /* =========================================================
-   Onion SPA - Login DOM
-   Archivo: src/views/login/login.dom.js
+   Onion Support - Login DOM
+   Archivo: /src/views/login/login.dom.js
 
    Responsabilidad:
    - Obtener refs del login.
@@ -23,7 +23,7 @@
 
 import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
 
-export const LOGIN_DOM_VERSION = "login.dom.v5";
+export const LOGIN_DOM_VERSION = "login.dom.v6";
 
 const DEFAULT_SUBMIT_LABEL = "Entrar";
 const DEFAULT_LOADING_LABEL = "Accediendo...";
@@ -93,7 +93,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function doc() {

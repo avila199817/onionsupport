@@ -14,10 +14,11 @@
    - Pintar metadata admin/roles si index.js/rutas la entregan.
    - Preparar markup del dropdown de cuenta.
    - Recibir datos ya normalizados desde index.js/user.js.
+   - Construir hrefs privados visibles del dropdown con /@{user.slug}/{ruta} si existe slug.
    - Delegar seguridad de href en constants.js -> core/config.js.
    - No navegar.
    - No leer sesión.
-   - No leer rutas.
+   - No leer rutas dinámicas.
    - No hacer logout.
    - No decidir visibilidad.
    - No decidir permisos.
@@ -41,9 +42,11 @@ import {
   SIDEBAR_ROOT_ID,
   SIDEBAR_ROLE_ADMIN,
   SIDEBAR_ROLE_USER,
+  USER_HOME_PREFIX,
   isSidebarBlockedRoute,
   normalizeSidebarIcon,
   normalizeSidebarPath,
+  normalizeSidebarSlug,
 } from "./constants.js";
 
 import {
@@ -52,7 +55,7 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v13";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v14.user-scoped-account-links";
 
 /* =========================================================
    BRAND ASSETS
@@ -330,6 +333,29 @@ function initialsFromName(value = "") {
   const second = parts.length > 1 ? parts[parts.length - 1]?.[0] || "" : "";
 
   return `${first}${second}`.toUpperCase();
+}
+
+function templateUserSlug(user = {}) {
+  return normalizeSidebarSlug(
+    user.slug ||
+      user.publicSlug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      ""
+  );
+}
+
+function userScopedPrivateHref(path = "", user = {}) {
+  const canonical = safeInternalHref(path, "");
+
+  if (!canonical) return "";
+
+  const slug = templateUserSlug(user);
+
+  if (!slug) return canonical;
+  if (canonical === "/") return safeInternalHref(`${USER_HOME_PREFIX}${slug}`, canonical);
+
+  return safeInternalHref(`${USER_HOME_PREFIX}${slug}${canonical}`, canonical);
 }
 
 /* =========================================================
@@ -860,9 +886,19 @@ function createAccountMenuItem({
   return element;
 }
 
-function createAccountDropdown(user = {}) {
+function createAccountDropdown(user = {}, options = {}) {
   const normalizedUser = normalizeUser(user);
   const menuId = `${SIDEBAR_ROOT_ID}-account-menu`;
+
+  const cuentaHref = safeInternalHref(
+    options.cuentaHref || options.accountHref || "",
+    ""
+  ) || userScopedPrivateHref(CUENTA_ROUTE, user);
+
+  const ajustesHref = safeInternalHref(
+    options.ajustesHref || options.settingsHref || "",
+    ""
+  ) || userScopedPrivateHref(AJUSTES_ROUTE, user);
 
   const dropdown = createElement("div", {
     className: "sidebar-account-dropdown",
@@ -966,13 +1002,13 @@ function createAccountDropdown(user = {}) {
       label: "Cuenta",
       iconName: SIDEBAR_ICONS.cuenta,
       action: "navigate",
-      href: CUENTA_ROUTE,
+      href: cuentaHref,
     }),
     createAccountMenuItem({
       label: "Ajustes",
       iconName: SIDEBAR_ICONS.ajustes,
       action: "navigate",
-      href: AJUSTES_ROUTE,
+      href: ajustesHref,
     }),
   ]);
 
@@ -1011,7 +1047,7 @@ function createAccountDropdown(user = {}) {
    FOOTER
 ========================================================= */
 
-export function createSidebarFooter(user = {}) {
+export function createSidebarFooter(user = {}, options = {}) {
   const footer = createElement("footer", {
     className: classNames(SIDEBAR_CLASSES.footer, "sidebar-footer--chatgpt"),
     attrs: {
@@ -1021,7 +1057,7 @@ export function createSidebarFooter(user = {}) {
   });
 
   appendChildren(footer, [
-    createAccountDropdown(user),
+    createAccountDropdown(user, options.accountLinks || options),
   ]);
 
   return footer;
@@ -1075,7 +1111,9 @@ export function createSidebarTemplate(options = {}) {
       open,
     }),
     createSidebarNav(options.items),
-    createSidebarFooter(options.user),
+    createSidebarFooter(options.user, {
+      accountLinks: options.accountLinks,
+    }),
   ]);
 
   return sidebar;
@@ -1125,6 +1163,9 @@ export function getSidebarTemplateSnapshot() {
 
       navItemRoleMetadataOnly: true,
       adminOnlyMetadataFromInput: true,
+
+      accountDropdownLinksUserScopedWhenSlugExists: true,
+      accountDropdownCanonicalFallbackWithoutSlug: true,
 
       standardRoleLabelForNonAdmin: true,
       adminRoleLabelPreserved: true,

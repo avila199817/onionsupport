@@ -9,22 +9,70 @@
    - fallback memory.
    - Nunca localStorage.clear().
    - Nunca sessionStorage.clear().
+   - Bloqueo defensivo de claves sensibles.
    - Sin legacy masivo.
-   - Sin migraciones.
+   - Sin migraciones reales.
    - Sin repair complejo.
    - Sin imports.
+   - Sin Auth.
+   - Sin Router.
+   - Sin Store.
+   - Sin fetch.
 ========================================================= */
 
-export const STORAGE_VERSION = "simple";
+export const STORAGE_VERSION = "core.storage.v2";
 
 export const STORAGE_EVENTS = Object.freeze({
   ready: "app:core:storage:ready",
   error: "app:core:storage:error",
+  blocked: "app:core:storage:blocked",
   cleared: "app:core:storage:cleared",
 });
 
 const PREFIX = "onion:";
+const PREFIX_RAW = "onion";
+
 const memory = new Map();
+
+const SENSITIVE_KEY_PARTS = Object.freeze([
+  "token",
+  "access_token",
+  "accesstoken",
+  "refresh_token",
+  "refreshtoken",
+  "id_token",
+  "idtoken",
+  "jwt",
+
+  "authorization",
+  "authheader",
+  "cookie",
+  "session_secret",
+
+  "password",
+  "passwordhash",
+  "password_hash",
+  "secret",
+  "secrets",
+
+  "otp",
+  "totp",
+  "mfa",
+  "twofa_secret",
+  "twofasecret",
+  "backupcodes",
+  "backup_codes",
+
+  "apikey",
+  "api_key",
+  "sas",
+  "connectionstring",
+  "connection_string",
+]);
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isBrowser() {
   return typeof window !== "undefined";
@@ -34,9 +82,24 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
+}
+
+function normalizeKeyText(value = "") {
+  return text(value, "")
+    .replace(/^onion:/i, "")
+    .replace(/^:+/g, "")
+    .trim();
 }
 
 function key(name = "") {
@@ -49,44 +112,23 @@ function key(name = "") {
 }
 
 function rawKey(name = "") {
-  return String(name || "").replace(/^onion:/, "");
+  return String(name || "").replace(/^onion:/i, "");
 }
 
-function local() {
-  try {
-    return isBrowser() ? window.localStorage : null;
-  } catch {
-    return null;
-  }
+function keyIsSensitive(name = "") {
+  const clean = normalizeKeyText(name).toLowerCase();
+
+  if (!clean) return false;
+
+  return SENSITIVE_KEY_PARTS.some((part) => {
+    return clean === part || clean.includes(part);
+  });
 }
 
-function session() {
-  try {
-    return isBrowser() ? window.sessionStorage : null;
-  } catch {
-    return null;
-  }
-}
-
-function parse(raw, fallback = null) {
-  if (raw === null || raw === undefined || raw === "") return fallback;
-
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
-}
-
-function stringify(value) {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "string") return value;
-
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+function safeKeyPayload(finalKey = "") {
+  return {
+    key: rawKey(finalKey),
+  };
 }
 
 function emit(events, name, payload = {}) {
@@ -112,9 +154,30 @@ function emit(events, name, payload = {}) {
   return false;
 }
 
+/* =========================================================
+   STORAGE ACCESS
+========================================================= */
+
+function local() {
+  try {
+    return isBrowser() ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+function session() {
+  try {
+    return isBrowser() ? window.sessionStorage : null;
+  } catch {
+    return null;
+  }
+}
+
 function storageFor(options = {}) {
   if (options.memory === true || options.kind === "memory") return null;
   if (options.session === true || options.kind === "session") return session();
+  if (options.local === true || options.kind === "local") return local();
 
   return local();
 }
@@ -148,16 +211,46 @@ function removeRaw(storage, finalKey) {
 function storageKeys(storage) {
   const output = [];
 
+  if (!storage) return output;
+
   try {
     for (let index = 0; index < storage.length; index += 1) {
       const current = storage.key(index);
-      if (current) output.push(current);
+
+      if (current) {
+        output.push(current);
+      }
     }
   } catch {
     // noop
   }
 
   return output;
+}
+
+/* =========================================================
+   JSON
+========================================================= */
+
+function parse(raw, fallback = null) {
+  if (raw === null || raw === undefined || raw === "") return fallback;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function stringify(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value;
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 /* =========================================================
@@ -177,8 +270,22 @@ export function resetStorageAvailabilityCache() {
 ========================================================= */
 
 export function createStorage({ events = null } = {}) {
+  function blocked(finalKey = "", operation = "storage") {
+    emit(events, STORAGE_EVENTS.blocked, {
+      operation,
+      ...safeKeyPayload(finalKey),
+    });
+
+    return true;
+  }
+
   function getRaw(name = "", fallback = null, options = {}) {
     const finalKey = key(name);
+
+    if (keyIsSensitive(finalKey)) {
+      blocked(finalKey, "getRaw");
+      return fallback;
+    }
 
     if (memory.has(finalKey)) {
       return memory.get(finalKey);
@@ -219,6 +326,11 @@ export function createStorage({ events = null } = {}) {
   function setRaw(name = "", value = "", options = {}) {
     const finalKey = key(name);
 
+    if (keyIsSensitive(finalKey)) {
+      blocked(finalKey, "setRaw");
+      return false;
+    }
+
     if (value === null || value === undefined) {
       return remove(name, options);
     }
@@ -237,10 +349,14 @@ export function createStorage({ events = null } = {}) {
     if (!ok) {
       emit(events, STORAGE_EVENTS.error, {
         operation: "setRaw",
-        key: rawKey(finalKey),
+        ...safeKeyPayload(finalKey),
       });
     }
 
+    /*
+      Devuelve true porque memory queda como fallback operativo aunque
+      local/sessionStorage fallen por privacidad, cuota o bloqueo del navegador.
+    */
     return true;
   }
 
@@ -284,8 +400,20 @@ export function createStorage({ events = null } = {}) {
   function has(name = "", options = {}) {
     const finalKey = key(name);
 
+    if (keyIsSensitive(finalKey)) {
+      blocked(finalKey, "has");
+      return false;
+    }
+
     if (memory.has(finalKey)) return true;
-    if (readRaw(storageFor(options), finalKey) !== null) return true;
+
+    const primary = storageFor(options);
+
+    if (readRaw(primary, finalKey) !== null) return true;
+
+    if (options.session !== true && options.kind !== "session") {
+      return readRaw(session(), finalKey) !== null;
+    }
 
     return false;
   }
@@ -295,15 +423,21 @@ export function createStorage({ events = null } = {}) {
     const output = new Set();
 
     for (const current of memory.keys()) {
-      if (current.startsWith(wantedPrefix)) output.add(current);
+      if (current.startsWith(wantedPrefix) && !keyIsSensitive(current)) {
+        output.add(current);
+      }
     }
 
     for (const current of storageKeys(local())) {
-      if (current.startsWith(wantedPrefix)) output.add(current);
+      if (current.startsWith(wantedPrefix) && !keyIsSensitive(current)) {
+        output.add(current);
+      }
     }
 
     for (const current of storageKeys(session())) {
-      if (current.startsWith(wantedPrefix)) output.add(current);
+      if (current.startsWith(wantedPrefix) && !keyIsSensitive(current)) {
+        output.add(current);
+      }
     }
 
     return [...output];
@@ -365,9 +499,36 @@ export function createStorage({ events = null } = {}) {
   function getSnapshot() {
     return {
       version: STORAGE_VERSION,
+
       prefix: PREFIX,
+      prefixRaw: PREFIX_RAW,
+
+      browser: isBrowser(),
+
       memorySize: memory.size,
       keys: keys().map(rawKey),
+
+      policy: {
+        namespacedOnly: true,
+        prefix: PREFIX,
+
+        memoryFallback: true,
+        localStorageWhenAvailable: true,
+        sessionStorageWhenRequested: true,
+
+        neverCallsLocalStorageClear: true,
+        neverCallsSessionStorageClear: true,
+
+        blocksSensitiveKeys: true,
+        noTokens: true,
+        noSecrets: true,
+        noAuthRuntime: true,
+
+        noLegacyMigration: true,
+        noRepairComplexity: true,
+
+        snapshotRedacted: true,
+      },
     };
   }
 
@@ -380,7 +541,7 @@ export function createStorage({ events = null } = {}) {
     version: STORAGE_VERSION,
 
     prefix: PREFIX,
-    prefixRaw: "onion",
+    prefixRaw: PREFIX_RAW,
 
     key,
     getNamespacedKey: key,
@@ -421,7 +582,9 @@ export function createStorage({ events = null } = {}) {
 export default {
   STORAGE_VERSION,
   STORAGE_EVENTS,
+
   createStorage,
+
   removeLegacySessionKeys,
   resetStorageAvailabilityCache,
 };

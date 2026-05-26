@@ -11,6 +11,7 @@
    - Clientes: sólo admin.
    - Usuarios: sólo admin si core/config.js define ROUTES.usuarios.
    - Servidor: sólo admin si core/config.js define ROUTES.servidor.
+   - Compat secundaria: ROUTES.server sólo si core/config.js la define explícitamente.
    - Rutas públicas actuales:
      /login
      /password-request
@@ -48,7 +49,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.v11.fast-guarded-lazy";
+export const ROUTES_VERSION = "routes.v12.resilient-lazy-cache";
 
 const ROUTE_SOURCE = "router.routes";
 const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
@@ -69,9 +70,10 @@ export const ROUTE_PATHS = Object.freeze({
   /*
     Admin opcionales:
     no se inventan por fallback. Sólo se declaran si config los define.
+    Servidor acepta compat secundaria CONFIG_ROUTES.server sólo si existe en config.
   */
   USUARIOS: CONFIG_ROUTES.usuarios || "",
-  SERVIDOR: CONFIG_ROUTES.servidor || "",
+  SERVIDOR: CONFIG_ROUTES.servidor || CONFIG_ROUTES.server || "",
 
   LOGIN: CONFIG_ROUTES.login || "/login",
   PASSWORD_REQUEST: CONFIG_ROUTES.passwordRequest || "/password-request",
@@ -590,7 +592,19 @@ async function loadView(viewKey = "") {
   }
 
   if (!VIEW_CACHE.has(key)) {
-    VIEW_CACHE.set(key, Promise.resolve().then(loader));
+    const promise = Promise.resolve()
+      .then(loader)
+      .catch((error) => {
+        /*
+          Importante:
+          si un chunk lazy falla una vez, no dejamos una promesa rechazada
+          cacheada para siempre. La siguiente navegación podrá reintentar.
+        */
+        VIEW_CACHE.delete(key);
+        throw error;
+      });
+
+    VIEW_CACHE.set(key, promise);
   }
 
   return VIEW_CACHE.get(key);
@@ -1316,6 +1330,11 @@ export function getRoutesIntegritySnapshot() {
     optionalRoutes: {
       usuarios: Boolean(ROUTE_PATHS.USUARIOS),
       servidor: Boolean(ROUTE_PATHS.SERVIDOR),
+      servidorSource: ROUTE_PATHS.SERVIDOR
+        ? CONFIG_ROUTES.servidor
+          ? "servidor"
+          : "server"
+        : null,
     },
 
     critical: getCriticalRoutesDebug(),
@@ -1328,6 +1347,7 @@ export function getRoutesIntegritySnapshot() {
       noLocalBlockedRouteList: true,
       adminRoutesAlignedWithConfig: true,
       lazyViews: true,
+      lazyViewRejectedPromiseEvicted: true,
       lazyRenderStaleGuard: true,
       staleLazyViewDoesNotExecuteRenderer: true,
 

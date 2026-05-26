@@ -39,14 +39,15 @@
 
 import {
   ROUTES,
-  ADMIN_ROUTES as CONFIG_ADMIN_ROUTES,
-  BLOCKED_FRONTEND_ROUTES as CONFIG_BLOCKED_FRONTEND_ROUTES,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
   isAdminRoute as isConfigAdminRoute,
   isBlockedRoutePath as isConfigBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.v8";
+export const ROUTES_VERSION = "routes.v9";
 
 const ROUTE_SOURCE = "router.routes";
 const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
@@ -145,36 +146,17 @@ export const PUBLIC_AUTH_ROUTES = Object.freeze([
   ROUTE_PATHS.PASSWORD_REQUEST,
   ROUTE_PATHS.PASSWORD_RESET,
   ROUTE_PATHS.ACTIVATE_ACCOUNT,
-]);
+].filter(Boolean));
 
 export const TOKEN_ROUTE_PATHS = Object.freeze([
   ROUTE_PATHS.PASSWORD_RESET,
   ROUTE_PATHS.ACTIVATE_ACCOUNT,
-]);
+].filter(Boolean));
 
 export const ROUTE_ALIASES = Object.freeze({});
 
-const PUBLIC_AUTH_ROUTE_SET = new Set(PUBLIC_AUTH_ROUTES.filter(Boolean));
-const TOKEN_ROUTE_SET = new Set(TOKEN_ROUTE_PATHS.filter(Boolean));
-
-const BLOCKED_ROUTE_PATHS = new Set(
-  Array.isArray(CONFIG_BLOCKED_FRONTEND_ROUTES) &&
-    CONFIG_BLOCKED_FRONTEND_ROUTES.length
-    ? CONFIG_BLOCKED_FRONTEND_ROUTES
-    : [
-        "/home",
-        "/403",
-        "/404",
-        "/2fa",
-        "/mfa",
-        "/otp",
-      ]
-);
-
-const CONFIG_ADMIN_ROUTE_SET = new Set(
-  (Array.isArray(CONFIG_ADMIN_ROUTES) ? CONFIG_ADMIN_ROUTES : [])
-    .filter(Boolean)
-);
+const PUBLIC_AUTH_ROUTE_SET = new Set(PUBLIC_AUTH_ROUTES);
+const TOKEN_ROUTE_SET = new Set(TOKEN_ROUTE_PATHS);
 
 const USER_SCOPED_ROUTE_SET = new Set(
   [
@@ -240,51 +222,57 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
    NORMALIZATION
 ========================================================= */
 
-function normalizeHashPath(value = "") {
-  const raw = text(value, "/");
-
-  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
-  if (raw.startsWith("#/")) return raw.slice(1) || "/";
-
-  return raw;
-}
-
 function pathFromInput(value = "/") {
-  const raw = normalizeHashPath(value);
+  try {
+    return configRoutePathFromUrlLike(value) || "/";
+  } catch {
+    const raw = text(value, "/");
 
-  if (!raw) return "/";
-  if (raw.startsWith("//")) return "/";
+    if (!raw) return "/";
+    if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
+    if (raw.startsWith("#/")) return raw.slice(1) || "/";
+    if (raw.startsWith("//")) return "/";
 
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    return "/";
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+      return "/";
+    }
+
+    if (/[\r\n\t\\]/.test(raw)) {
+      return "/";
+    }
+
+    return raw;
   }
-
-  return raw;
 }
 
 function normalizePath(path = "/") {
-  let clean = text(pathFromInput(path), "/")
-    .split("#")[0]
-    .split("?")[0]
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
+  try {
+    return configNormalizeRoutePath(pathFromInput(path)) || "/";
+  } catch {
+    let clean = text(pathFromInput(path), "/")
+      .split("#")[0]
+      .split("?")[0]
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
 
-  if (!clean.startsWith("/")) {
-    clean = `/${clean}`;
+    if (!clean.startsWith("/")) {
+      clean = `/${clean}`;
+    }
+
+    if (clean.length > 1) {
+      clean = clean.replace(/\/+$/g, "") || "/";
+    }
+
+    return clean || "/";
   }
-
-  if (clean.length > 1) {
-    clean = clean.replace(/\/+$/g, "") || "/";
-  }
-
-  return clean || "/";
 }
 
 function normalizeName(value = "route") {
@@ -333,30 +321,16 @@ function normalizeRoles(roles = []) {
 }
 
 function isBlockedRoutePath(path = "/") {
-  const clean = normalizePath(path).toLowerCase();
-
   try {
-    if (isConfigBlockedRoutePath(clean) === true) return true;
+    return isConfigBlockedRoutePath(normalizePath(path)) === true;
   } catch {
-    // fallback local
+    return false;
   }
-
-  if (BLOCKED_ROUTE_PATHS.has(clean)) return true;
-
-  return (
-    clean.startsWith("/2fa/") ||
-    clean.startsWith("/mfa/") ||
-    clean.startsWith("/otp/")
-  );
 }
 
 function isConfiguredAdminPath(path = "/") {
-  const clean = normalizePath(path);
-
-  if (CONFIG_ADMIN_ROUTE_SET.has(clean)) return true;
-
   try {
-    return isConfigAdminRoute(clean) === true;
+    return isConfigAdminRoute(normalizePath(path)) === true;
   } catch {
     return false;
   }
@@ -376,19 +350,23 @@ export function normalizeRoutePath(path = "/") {
 }
 
 export function normalizeUserHomeSlug(value = "") {
-  const slug = text(value, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
+  try {
+    return configNormalizeUserSlug(value) || "";
+  } catch {
+    const slug = text(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/^\/+/, "")
+      .replace(/^@+/, "")
+      .split(/[/?#]/)[0]
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase();
 
-  if (!slug) return "";
+    if (!slug) return "";
 
-  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  }
 }
 
 export function getUserScopedRouteInfo(path = "/") {
@@ -1072,12 +1050,6 @@ export function validateRoutesTable(_AppCore = null, routes = getImmutableRoutes
     }
   }
 
-  for (const blockedPath of BLOCKED_ROUTE_PATHS) {
-    if (seenPaths.has(blockedPath)) {
-      throw new Error(`Router: ruta bloqueada declarada "${blockedPath}".`);
-    }
-  }
-
   return true;
 }
 
@@ -1215,6 +1187,12 @@ export function getCriticalRoutesDebug() {
     });
 }
 
+function getAdminRoutePaths() {
+  return getImmutableRoutes()
+    .filter((route) => route.adminOnly || route.requiresAdmin)
+    .map((route) => route.path);
+}
+
 export function getRoutesIntegritySnapshot() {
   const routes = getImmutableRoutes();
 
@@ -1245,8 +1223,8 @@ export function getRoutesIntegritySnapshot() {
     tokenRoutePaths: [...TOKEN_ROUTE_PATHS],
     aliases: ROUTE_ALIASES,
 
-    adminRoutes: [...CONFIG_ADMIN_ROUTE_SET],
-    blockedRoutes: [...BLOCKED_ROUTE_PATHS],
+    adminRoutes: getAdminRoutePaths(),
+    blockedRoutesOwner: "core/config.js",
 
     userHome: {
       enabled: true,
@@ -1269,6 +1247,8 @@ export function getRoutesIntegritySnapshot() {
     policy: {
       staticRoutesOnly: true,
       configDrivenPaths: true,
+      blockedRoutesDelegatedToCoreConfig: true,
+      noLocalBlockedRouteList: true,
       adminRoutesAlignedWithConfig: true,
       lazyViews: true,
 

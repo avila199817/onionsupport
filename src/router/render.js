@@ -10,9 +10,9 @@
    - Ejecutar route.render(host, context).
    - Adoptar resultado de vista sólo si es seguro y el render sigue vigente.
    - Ignorar/limpiar resultados tardíos de navegaciones obsoletas.
-   - Pintar feedback mínimo inmediato mientras carga la vista.
+   - Crear host vacío inmediato sin pintar texto/placeholder de ruta.
    - Inyectar contexto común: AppCore / I18n / t / Toast.
-   - Pintar fallback simple.
+   - Pintar fallback simple sólo en forbidden/not-found/runtime-error.
    - Mantener publicPath visible y canonicalPath interno.
    - Delegar normalización de rutas/user-scope/bloqueos en core/config.js.
    - No exponer token real en DOM/snapshot.
@@ -42,14 +42,13 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_RENDER_VERSION = "router.render.v10.fast-guarded-host";
+export const ROUTER_RENDER_VERSION = "router.render.v11.empty-guarded-host";
 
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
 const HOST_ATTR = "data-router-view-host";
 const HOST_CLASS = "router-view-host";
-const PENDING_CLASS = "router-view-pending";
 
 let renderSeq = 0;
 
@@ -757,58 +756,6 @@ function markView(
   return true;
 }
 
-function pendingView(route = null) {
-  const section = create("section", {
-    className: PENDING_CLASS,
-    attrs: {
-      role: "status",
-      "aria-live": "polite",
-      "data-router-pending": "true",
-    },
-  });
-
-  const title = cleanText(
-    route?.pendingLabel ||
-      route?.title ||
-      route?.label ||
-      route?.name ||
-      "Cargando vista",
-    "Cargando vista"
-  );
-
-  append(
-    section,
-    create("div", {
-      className: `${PENDING_CLASS}__inner`,
-      attrs: {
-        "aria-hidden": "false",
-      },
-    })
-  );
-
-  const inner = section.firstElementChild || section;
-
-  append(
-    inner,
-    create("span", {
-      className: `${PENDING_CLASS}__spinner`,
-      attrs: {
-        "aria-hidden": "true",
-      },
-    })
-  );
-
-  append(
-    inner,
-    create("span", {
-      className: `${PENDING_CLASS}__text`,
-      textContent: title,
-    })
-  );
-
-  return section;
-}
-
 function prepareHost({
   AppCore = null,
   route = null,
@@ -816,7 +763,6 @@ function prepareHost({
   canonicalPath = DEFAULT_ROUTE,
   publicPath = DEFAULT_ROUTE,
   mode = "route",
-  pending = true,
   isCurrentRender = null,
 } = {}) {
   if (!renderStillCurrent(isCurrentRender)) {
@@ -859,10 +805,11 @@ function prepareHost({
     },
   });
 
-  if (pending) {
-    append(host, pendingView(route));
-  }
-
+  /*
+    Importante:
+    Router crea host inmediato, pero no pinta texto, loader ni placeholder.
+    El contenido visible pertenece a la vista renderizada.
+  */
   paint(view, host);
   exposeActiveHost(AppCore, view, host);
 
@@ -1118,7 +1065,6 @@ function renderFallbackInto({
     canonicalPath: resolved.canonicalPath,
     publicPath: resolved.publicPath,
     mode,
-    pending: false,
     isCurrentRender,
   });
 
@@ -1272,7 +1218,6 @@ export async function renderRouteSuccess({
     canonicalPath: resolved.canonicalPath,
     publicPath: resolved.publicPath,
     mode: "success",
-    pending: true,
     isCurrentRender,
   });
 
@@ -1531,7 +1476,9 @@ export function getRenderSnapshot(AppCore = null) {
 
       singleStableHost: true,
       exposesActiveHostAsViewContainer: true,
-      paintsImmediatePendingState: true,
+      createsImmediateEmptyHost: true,
+      doesNotPaintPendingRouteLabel: true,
+      visibleContentOwnedByView: true,
 
       preservesPublicPath: true,
       preservesCanonicalPath: true,

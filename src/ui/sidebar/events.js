@@ -11,6 +11,7 @@
    - Delegar normalización/validación de navegación en actions.js.
    - Bloquear href sensibles antes de que navegue el navegador.
    - Rechazar rutas bloqueadas vía actions.js -> constants.js -> core/config.js.
+   - Selectores compartidos desde constants.js.
    - Sin navegación propia.
    - Sin active menu propio.
    - Sin indicadores.
@@ -47,11 +48,12 @@ import {
   toggleSidebar,
 } from "./actions.js";
 
-export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v6";
+export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v7.constants-selectors";
 
 const HANDLED_FLAG = "__onionSidebarHandled";
 
-const DROPDOWN_TRIGGER_SELECTOR = "[data-sidebar-dropdown-trigger]";
+const DROPDOWN_TRIGGER_SELECTOR =
+  SIDEBAR_SELECTORS.dropdownTrigger || "[data-sidebar-dropdown-trigger]";
 
 let boundRoot = null;
 let boundHandler = null;
@@ -451,6 +453,10 @@ export function getSidebarEventsSnapshot() {
     hasRoot: isElement(boundRoot),
     rootId: boundRoot?.id || "",
 
+    selectors: {
+      dropdownTrigger: DROPDOWN_TRIGGER_SELECTOR,
+    },
+
     policy: {
       delegatedOnly: true,
 
@@ -460,6 +466,7 @@ export function getSidebarEventsSnapshot() {
       ownResize: false,
       ownDropdown: false,
       dropdownAware: true,
+      dropdownSelectorFromConstants: true,
       ownKeydown: false,
       ownCustomEvent: false,
       ownTimers: false,

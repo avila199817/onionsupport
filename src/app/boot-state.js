@@ -13,9 +13,10 @@
    - Sin Router.
    - Sin storage.
    - Sin navegación.
+   - Sin lógica de dominio.
 ========================================================= */
 
-export const BOOT_STATE_VERSION = "app.boot-state.v3";
+export const BOOT_STATE_VERSION = "app.boot-state.v4";
 
 export const BOOT_PHASES = Object.freeze({
   IDLE: "idle",
@@ -37,6 +38,10 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function isFunction(value) {
+  return typeof value === "function";
+}
+
 function cleanText(value = "", fallback = "") {
   const output = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
@@ -52,7 +57,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function readStateTarget(target = null) {
@@ -88,6 +94,17 @@ function setDataset(element = null, key = "", value = "") {
       element.dataset[key] = String(value);
     }
 
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function toggleClass(element = null, className = "", enabled = false) {
+  if (!element || !className) return false;
+
+  try {
+    element.classList.toggle(className, Boolean(enabled));
     return true;
   } catch {
     return false;
@@ -139,22 +156,54 @@ export function normalizeBootPhase(value = "") {
 function normalizeError(error = null) {
   if (!error) return null;
 
+  if (typeof error === "string") {
+    return {
+      name: "Error",
+      message: redact(error),
+      code: null,
+      status: null,
+    };
+  }
+
   return {
     name: cleanText(error?.name, "Error"),
     message: redact(error?.message || String(error)),
-    code: error?.code || error?.status || error?.statusCode || null,
+    code: error?.code || error?.error || null,
+    status: error?.status || error?.statusCode || error?.response?.status || null,
   };
 }
 
 function derivePhaseFromPayload(payload = {}) {
-  const explicit = normalizeBootPhase(payload.bootPhase || payload.phase);
+  const input = isObject(payload) ? payload : {};
+  const explicit = normalizeBootPhase(input.bootPhase || input.phase);
 
   if (explicit !== BOOT_PHASES.IDLE) return explicit;
 
-  if (payload.fatal === true || payload.appFatal === true) return BOOT_PHASES.FATAL;
-  if (payload.lastBootError || payload.error) return BOOT_PHASES.ERROR;
-  if (payload.booting === true || payload.loading === true || payload.appBooting === true) return BOOT_PHASES.BOOTING;
-  if (payload.ready === true || payload.appReady === true || payload.booted === true || payload.appBooted === true) return BOOT_PHASES.READY;
+  if (input.fatal === true || input.appFatal === true) {
+    return BOOT_PHASES.FATAL;
+  }
+
+  if (input.lastBootError || input.error || input.appError === true) {
+    return BOOT_PHASES.ERROR;
+  }
+
+  if (
+    input.booting === true ||
+    input.loading === true ||
+    input.appBooting === true ||
+    input.appLoading === true
+  ) {
+    return BOOT_PHASES.BOOTING;
+  }
+
+  if (
+    input.ready === true ||
+    input.appReady === true ||
+    input.booted === true ||
+    input.appBooted === true
+  ) {
+    return BOOT_PHASES.READY;
+  }
 
   return BOOT_PHASES.IDLE;
 }
@@ -162,10 +211,9 @@ function derivePhaseFromPayload(payload = {}) {
 function createBootPayload(options = {}) {
   const input = isObject(options) ? options : {};
   const phase = derivePhaseFromPayload(input);
-  const error = input.error || null;
-  const fatal = phase === BOOT_PHASES.FATAL || input.fatal === true;
+  const error = normalizeError(input.error || input.lastBootError || null);
 
-  if (fatal) {
+  if (phase === BOOT_PHASES.FATAL) {
     return {
       booted: false,
       booting: false,
@@ -173,11 +221,11 @@ function createBootPayload(options = {}) {
       loading: false,
       fatal: true,
       bootPhase: BOOT_PHASES.FATAL,
-      lastBootError: normalizeError(error),
+      lastBootError: error,
     };
   }
 
-  if (phase === BOOT_PHASES.ERROR || error) {
+  if (phase === BOOT_PHASES.ERROR) {
     return {
       booted: false,
       booting: false,
@@ -185,11 +233,11 @@ function createBootPayload(options = {}) {
       loading: false,
       fatal: false,
       bootPhase: BOOT_PHASES.ERROR,
-      lastBootError: normalizeError(error),
+      lastBootError: error,
     };
   }
 
-  if (phase === BOOT_PHASES.READY || input.ready === true) {
+  if (phase === BOOT_PHASES.READY) {
     return {
       booted: true,
       booting: false,
@@ -201,7 +249,7 @@ function createBootPayload(options = {}) {
     };
   }
 
-  if (phase === BOOT_PHASES.BOOTING || input.booting === true || input.loading === true) {
+  if (phase === BOOT_PHASES.BOOTING) {
     return {
       booted: false,
       booting: true,
@@ -229,33 +277,47 @@ function createBootPayload(options = {}) {
 ========================================================= */
 
 function createStatePatch(payload = {}) {
-  return {
-    ...payload,
+  const input = isObject(payload) ? payload : {};
+  const error = Boolean(input.lastBootError && !input.fatal);
 
-    appBooted: Boolean(payload.booted),
-    appBooting: Boolean(payload.booting),
-    appLoading: Boolean(payload.loading || payload.booting),
-    appReady: Boolean(payload.ready),
-    appFatal: Boolean(payload.fatal),
-    appError: Boolean(payload.lastBootError && !payload.fatal),
+  return {
+    ...input,
+
+    appBooted: Boolean(input.booted),
+    appBooting: Boolean(input.booting),
+    appLoading: Boolean(input.loading || input.booting),
+    appReady: Boolean(input.ready),
+    appFatal: Boolean(input.fatal),
+    appError: error,
   };
 }
 
 function writeAppState(AppCore = null, payload = {}) {
   const patch = createStatePatch(payload);
-  const state = ensureStateTarget(AppCore);
 
-  if (state) {
-    Object.assign(state, patch);
-  }
-
-  if (typeof AppCore?.setState === "function") {
+  /*
+    Vía preferente: Core.setState().
+    Evita doble escritura y deja que Core normalice internamente.
+  */
+  if (isFunction(AppCore?.setState)) {
     try {
       AppCore.setState(patch, {
         source: "app.boot-state",
         silent: true,
         emit: false,
       });
+
+      return patch;
+    } catch {
+      // fallback a mutación directa abajo
+    }
+  }
+
+  const state = ensureStateTarget(AppCore);
+
+  if (state) {
+    try {
+      Object.assign(state, patch);
     } catch {
       // noop
     }
@@ -283,18 +345,18 @@ export function syncDocumentBootState(payload = {}) {
           : "idle";
 
   for (const root of roots()) {
-    root.classList.toggle("app-booting", booting);
-    root.classList.toggle("app-loading", booting);
-    root.classList.toggle("app-ready", ready);
-    root.classList.toggle("app-error", error);
-    root.classList.toggle("app-fatal", fatal);
+    toggleClass(root, "app-booting", booting);
+    toggleClass(root, "app-loading", booting);
+    toggleClass(root, "app-ready", ready);
+    toggleClass(root, "app-error", error);
+    toggleClass(root, "app-fatal", fatal);
 
-    setDataset(root, "appBooted", String(ready));
-    setDataset(root, "appBooting", String(booting));
-    setDataset(root, "appLoading", String(booting));
-    setDataset(root, "appReady", String(ready));
-    setDataset(root, "appError", String(error));
-    setDataset(root, "appFatal", String(fatal));
+    setDataset(root, "appBooted", ready ? "true" : "false");
+    setDataset(root, "appBooting", booting ? "true" : "false");
+    setDataset(root, "appLoading", booting ? "true" : "false");
+    setDataset(root, "appReady", ready ? "true" : "false");
+    setDataset(root, "appError", error ? "true" : "false");
+    setDataset(root, "appFatal", fatal ? "true" : "false");
     setDataset(root, "appState", appState);
     setDataset(root, "bootPhase", phase);
   }
@@ -372,12 +434,25 @@ export function isAppReady(AppCore = null) {
 
 export function isAppLoading(AppCore = null) {
   const state = readStateTarget(AppCore);
-  return Boolean(state.loading || state.booting || state.appLoading || state.appBooting);
+
+  return Boolean(
+    state.loading ||
+      state.booting ||
+      state.appLoading ||
+      state.appBooting
+  );
 }
 
 export function hasBootError(AppCore = null) {
   const state = readStateTarget(AppCore);
-  return Boolean(state.lastBootError || state.fatal || state.appFatal || state.appError);
+
+  return Boolean(
+    state.lastBootError ||
+      state.error ||
+      state.fatal ||
+      state.appFatal ||
+      state.appError
+  );
 }
 
 /* =========================================================
@@ -386,9 +461,10 @@ export function hasBootError(AppCore = null) {
 
 export function getAppBootStateSnapshot(AppCore = null) {
   const state = readStateTarget(AppCore);
+  const phase = derivePhaseFromPayload(state);
 
-  const error = state.lastBootError
-    ? normalizeError(state.lastBootError)
+  const error = state.lastBootError || state.error
+    ? normalizeError(state.lastBootError || state.error)
     : null;
 
   return {
@@ -397,10 +473,15 @@ export function getAppBootStateSnapshot(AppCore = null) {
     booted: Boolean(state.booted || state.appBooted),
     booting: Boolean(state.booting || state.appBooting),
     ready: Boolean(state.ready || state.appReady),
-    loading: Boolean(state.loading || state.booting || state.appLoading || state.appBooting),
+    loading: Boolean(
+      state.loading ||
+        state.booting ||
+        state.appLoading ||
+        state.appBooting
+    ),
     fatal: Boolean(state.fatal || state.appFatal),
 
-    phase: normalizeBootPhase(state.bootPhase || state.phase),
+    phase,
     error,
   };
 }
@@ -435,19 +516,27 @@ export function getDocumentBootStateSnapshot() {
 export function getBootStateSnapshot(AppCore = null) {
   return {
     version: BOOT_STATE_VERSION,
+
     app: getAppBootStateSnapshot(AppCore),
     document: getDocumentBootStateSnapshot(),
 
     policy: {
       bootStateOnly: true,
+
+      setStatePreferred: true,
+      directStateMutationOnlyAsFallback: true,
+
       noImports: true,
       noEvents: true,
       noGlobalDebug: true,
       noComplexStore: true,
+
       noAuth: true,
       noRouter: true,
       noStorage: true,
       noNavigation: true,
+      noDomainLogic: true,
+
       redactedSnapshot: true,
     },
   };

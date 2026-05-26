@@ -5,8 +5,8 @@
    Responsabilidad:
    - Selectores puros para Home.
    - Leer dashboard normalizado.
-   - Leer colecciones para template.js.
-   - Calcular métricas/cards/actions ligeras.
+   - Leer colecciones para home.template.js.
+   - Calcular métricas/cards ligeras alineadas con el template actual.
    - Formatear números, dinero y fechas.
    - Consumir usuario/rol ya resuelto desde sidebarUser cuando exista.
    - Construir filas visibles de Home sin duplicar lógica de modelo.
@@ -19,6 +19,8 @@
    - Rutas base desde core/config.js.
    - Rutas admin reales desde core/config.js.
    - Bloqueos legacy desde core/config.js.
+   - Sin quick actions visibles.
+   - Sin widgets como fuente de cards principales.
    - Sin fetch.
    - Sin Auth.
    - Sin Router.
@@ -81,7 +83,7 @@ import {
   getHomeWidgetId,
 } from "./home.model.js";
 
-export const HOME_SELECTORS_VERSION = "home.selectors.v10.model-backed-light";
+export const HOME_SELECTORS_VERSION = "home.selectors.v11.template-aligned";
 
 /* =========================================================
    CONSTANTS
@@ -164,11 +166,12 @@ const SENSITIVE_QUERY_RE =
   /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i;
 
 const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
+
 const JWT_RE =
   /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
 
 const ADMIN_ENTITY_RE =
-  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory)([\s._/-]|$)/i;
+  /(^|[\s._/-])(clientes?|clients?|customers?|usuarios?|users?|members?|directorio|directory|servidor|server)([\s._/-]|$)/i;
 
 /* =========================================================
    SAFE HELPERS
@@ -505,21 +508,24 @@ function routePathOnly(value = "") {
 }
 
 function isBlockedRoute(value = "") {
-  try {
-    return configIsBlockedRoutePath(value) === true;
-  } catch {
-    const path = routePathOnly(value).toLowerCase();
+  const path = routePathOnly(value);
+  const lower = path.toLowerCase();
 
+  if (!path) return true;
+
+  try {
+    return configIsBlockedRoutePath(path) === true;
+  } catch {
     return Boolean(
-      path === "/home" ||
-        path === "/403" ||
-        path === "/404" ||
-        path === "/2fa" ||
-        path === "/mfa" ||
-        path === "/otp" ||
-        path.startsWith("/2fa/") ||
-        path.startsWith("/mfa/") ||
-        path.startsWith("/otp/")
+      lower === "/home" ||
+        lower === "/403" ||
+        lower === "/404" ||
+        lower === "/2fa" ||
+        lower === "/mfa" ||
+        lower === "/otp" ||
+        lower.startsWith("/2fa/") ||
+        lower.startsWith("/mfa/") ||
+        lower.startsWith("/otp/")
     );
   }
 }
@@ -553,9 +559,9 @@ export const HOME_ROUTES = Object.freeze({
   FACTURAS: routeFromCore("facturas", "/facturas"),
   CLIENTES: routeFromCore("clientes", "/clientes"),
   USUARIOS: routeFromCore("usuarios", ""),
+  SERVIDOR: routeFromCore("servidor", ""),
   CUENTA: routeFromCore("cuenta", "/cuenta"),
   AJUSTES: routeFromCore("ajustes", "/ajustes"),
-  SEARCH: routeFromCore("search", ""),
 });
 
 function getRoutePath(route = "") {
@@ -566,18 +572,20 @@ function isAdminOnlyRoute(route = "") {
   const path = getRoutePath(route);
   const clientes = getRoutePath(HOME_ROUTES.CLIENTES);
   const usuarios = getRoutePath(HOME_ROUTES.USUARIOS);
+  const servidor = getRoutePath(HOME_ROUTES.SERVIDOR);
 
   if (!path) return false;
 
   try {
     if (configIsAdminRoute(path) === true) return true;
   } catch {
-    // fallback local
+    // fallback local mínimo
   }
 
   return (
     Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
-    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
+    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`))) ||
+    Boolean(servidor && (path === servidor || path.startsWith(`${servidor}/`)))
   );
 }
 
@@ -850,9 +858,9 @@ function roleFromAdminFlag(value = {}) {
   if (
     source.admin === true ||
     source.isAdmin === true ||
-      source.meta?.admin === true ||
-      source.dashboard?.admin === true ||
-      source.dashboard?.meta?.admin === true
+    source.meta?.admin === true ||
+    source.dashboard?.admin === true ||
+    source.dashboard?.meta?.admin === true
   ) {
     return "admin";
   }
@@ -1007,8 +1015,6 @@ function publicUser(user = {}) {
   );
 
   return sanitizeObject({
-    ...raw,
-
     hasUser: raw.hasUser !== false,
 
     displayName,
@@ -1226,11 +1232,13 @@ export function normalizeCollection(value = null, aliases = []) {
   const items = unwrapCollectionPayload(value);
 
   if (items.length) {
+    const remoteCount = getRemoteCountFromCollection(value, items.length);
+
     return {
       items,
-      total: getRemoteCountFromCollection(value, items.length),
-      totalCount: getRemoteCountFromCollection(value, items.length),
-      remoteCount: getRemoteCountFromCollection(value, items.length),
+      total: remoteCount,
+      totalCount: remoteCount,
+      remoteCount,
       visibleCount: items.length,
     };
   }
@@ -1299,6 +1307,7 @@ export function resolveCollectionSource(input = {}, aliases = []) {
 
 /* =========================================================
    WIDGETS
+   Compatibilidad: se normalizan, pero ya no gobiernan las cards principales.
 ========================================================= */
 
 export function getWidgets(input = {}) {
@@ -1408,7 +1417,17 @@ export function getTicketDescription(item = {}) {
 }
 
 export function getTicketOwnerName(item = {}) {
-  return visualText(first(item.ownerName, item.requesterName, item.clientName, item.userName), "Usuario");
+  return visualText(
+    first(
+      item.ownerName,
+      item.requesterName,
+      item.clientName,
+      item.userName,
+      item.createdByName,
+      item.authorName
+    ),
+    "Usuario"
+  );
 }
 
 export function getTicketOwnerEmail() {
@@ -1416,7 +1435,16 @@ export function getTicketOwnerEmail() {
 }
 
 export function getTicketAvatarUrl(item = {}) {
-  return safeImageSrc(first(item.avatarUrl, item.requesterAvatarUrl, item.userAvatarUrl, item.photoUrl, item.photoURL, ""));
+  return safeImageSrc(
+    first(
+      item.avatarUrl,
+      item.requesterAvatarUrl,
+      item.userAvatarUrl,
+      item.photoUrl,
+      item.photoURL,
+      ""
+    )
+  );
 }
 
 export function getTicketStatus(item = {}) {
@@ -1498,7 +1526,15 @@ export function getTicketTechnician(item = {}, users = []) {
   try {
     return resolveHomeTicketTechnician(item, users);
   } catch {
-    const name = safeText(first(item.technicianName, item.tecnicoName, item.assignedToName, item.assignedTo), "Sin asignar");
+    const name = safeText(
+      first(
+        item.technicianName,
+        item.tecnicoName,
+        item.assignedToName,
+        item.assignedTo
+      ),
+      "Sin asignar"
+    );
 
     return {
       id: "",
@@ -1552,7 +1588,7 @@ export function compareTicketsNewestFirst(a = {}, b = {}) {
 
   return safeText(getTicketId(b)).localeCompare(
     safeText(getTicketId(a)),
-    "es-ES",
+    DEFAULT_LOCALE,
     {
       numeric: true,
       sensitivity: "base",
@@ -1585,13 +1621,14 @@ export function buildTicketTableRow(ticket = {}, input = {}) {
 
   const technician = getTicketTechnician(normalized, collections.users);
   const linkedInvoices = getTicketLinkedInvoices(normalized, collections.invoices);
+  const ticketId = getTicketId(normalized);
 
   return sanitizeObject({
     ...normalized,
 
-    id: getTicketId(normalized),
-    ticketId: getTicketId(normalized),
-    incidenciaId: getTicketId(normalized),
+    id: ticketId,
+    ticketId,
+    incidenciaId: ticketId,
 
     subject: getTicketSubject(normalized),
     title: getTicketSubject(normalized),
@@ -1629,10 +1666,6 @@ export function buildTicketTableRow(ticket = {}, input = {}) {
 
     action: ACTIONS.OPEN_TICKET_DETAIL,
     dataAction: ACTIONS.OPEN_TICKET_DETAIL,
-    payload: {
-      ticketId: getTicketId(normalized),
-      incidenciaId: getTicketId(normalized),
-    },
   });
 }
 
@@ -1737,7 +1770,9 @@ export function getInvoicePendingAmount(item = {}) {
   try {
     return modelGetInvoicePendingAmount(item);
   } catch {
-    return isInvoicePendingLike(item) ? Math.max(0, getInvoiceAmount(item) - getInvoicePaidAmount(item)) : 0;
+    return isInvoicePendingLike(item)
+      ? Math.max(0, getInvoiceAmount(item) - getInvoicePaidAmount(item))
+      : 0;
   }
 }
 
@@ -1818,14 +1853,16 @@ export function getRecentInvoices(input = {}, limit = DEFAULT_RECENT_LIMIT) {
 }
 
 export function buildInvoiceRow(invoice = {}) {
+  const invoiceId = getInvoiceId(invoice);
+
   return sanitizeObject({
     ...invoice,
 
-    id: getInvoiceId(invoice),
-    invoiceId: getInvoiceId(invoice),
-    facturaId: getInvoiceId(invoice),
+    id: invoiceId,
+    invoiceId,
+    facturaId: invoiceId,
 
-    title: safeText(first(invoice.title, invoice.name, invoice.concepto, `Factura ${getInvoiceId(invoice)}`), "Factura"),
+    title: safeText(first(invoice.title, invoice.name, invoice.concepto, `Factura ${invoiceId}`), "Factura"),
 
     amount: getInvoiceAmount(invoice),
     paidAmount: getInvoicePaidAmount(invoice),
@@ -1885,6 +1922,28 @@ export function getCollections(input = {}) {
   const dashboard = getNormalizedDashboard(data);
   const admin = isAdminRole(getRole(data));
 
+  const rawInvoices = first(
+    data.invoices,
+    data.facturas,
+    data.state?.invoices,
+    data.state?.facturas,
+    dashboard.invoices,
+    dashboard.facturas,
+    []
+  );
+
+  const rawUsers = admin
+    ? first(
+        data.users,
+        data.usuarios,
+        data.state?.users,
+        data.state?.usuarios,
+        dashboard.users,
+        dashboard.usuarios,
+        []
+      )
+    : [];
+
   const tickets = normalizeHomeTickets(
     first(
       data.tickets,
@@ -1896,38 +1955,60 @@ export function getCollections(input = {}) {
       []
     ),
     {
-      invoices: first(data.invoices, data.facturas, data.state?.invoices, data.state?.facturas, dashboard.invoices, dashboard.facturas, []),
-      users: admin ? first(data.users, data.usuarios, data.state?.users, data.state?.usuarios, dashboard.users, dashboard.usuarios, []) : [],
+      invoices: rawInvoices,
+      users: rawUsers,
     }
   );
 
-  const invoices = normalizeHomeInvoices(
-    first(
-      data.invoices,
-      data.facturas,
-      data.state?.invoices,
-      data.state?.facturas,
-      dashboard.invoices,
-      dashboard.facturas,
-      []
-    )
-  );
+  const invoices = normalizeHomeInvoices(rawInvoices);
 
   const users = admin
-    ? normalizeHomeUsers(first(data.users, data.usuarios, data.state?.users, data.state?.usuarios, dashboard.users, dashboard.usuarios, []))
+    ? normalizeHomeUsers(rawUsers)
     : [];
 
   const clients = admin
-    ? normalizeHomeClients(first(data.clients, data.clientes, data.customers, data.state?.clients, data.state?.clientes, data.state?.customers, dashboard.clients, dashboard.clientes, dashboard.customers, []))
+    ? normalizeHomeClients(
+        first(
+          data.clients,
+          data.clientes,
+          data.customers,
+          data.state?.clients,
+          data.state?.clientes,
+          data.state?.customers,
+          dashboard.clients,
+          dashboard.clientes,
+          dashboard.customers,
+          []
+        )
+      )
     : [];
 
   const widgets = normalizeHomeWidgets(
-    first(data.widgets, data.cards, data.kpis, data.blocks, data.state?.widgets, data.state?.cards, dashboard.widgets, dashboard.cards, []),
+    first(
+      data.widgets,
+      data.cards,
+      data.kpis,
+      data.blocks,
+      data.state?.widgets,
+      data.state?.cards,
+      dashboard.widgets,
+      dashboard.cards,
+      []
+    ),
     admin
   );
 
   const activity = normalizeHomeActivityList(
-    first(data.activity, data.recentActivity, data.recent, data.state?.activity, data.state?.recentActivity, dashboard.activity, dashboard.recentActivity, []),
+    first(
+      data.activity,
+      data.recentActivity,
+      data.recent,
+      data.state?.activity,
+      data.state?.recentActivity,
+      dashboard.activity,
+      dashboard.recentActivity,
+      []
+    ),
     admin
   );
 
@@ -2074,24 +2155,13 @@ function statCard({
 export function getStatCards(input = {}) {
   const admin = isAdminRole(getRole(input));
   const stats = computeHomeStats(input);
-  const widgets = getWidgets(input);
-
-  if (widgets.length) {
-    return widgets.map((widget) => ({
-      ...widget,
-      route: normalizeRoute(getWidgetRoute(widget)),
-      href: normalizeRoute(getWidgetRoute(widget)),
-      action: ACTIONS.NAVIGATE,
-      dataAction: ACTIONS.NAVIGATE,
-    })).filter((widget) => widget.route);
-  }
 
   return [
     statCard({
       id: "incidencias",
       label: admin ? "Incidencias" : "Mis incidencias",
       value: stats.totalTickets,
-      text: admin ? "Incidencias visibles en el panel." : "Tus solicitudes visibles.",
+      text: "Incidencias visibles en el panel.",
       iconName: "ticket",
       route: HOME_ROUTES.INCIDENCIAS,
       modifier: "tickets",
@@ -2100,7 +2170,7 @@ export function getStatCards(input = {}) {
       id: "facturas-totales",
       label: "Facturas totales",
       value: stats.totalInvoices,
-      text: `Importe total: ${formatMoney(stats.invoiceAmount, DEFAULT_CURRENCY)}`,
+      text: `Importe total: ${formatNumber(stats.invoiceAmount)}`,
       iconName: "euro",
       route: HOME_ROUTES.FACTURAS,
       modifier: "invoice-total",
@@ -2132,102 +2202,13 @@ export function getStatCards(input = {}) {
   ].filter(Boolean);
 }
 
-function quickAction({
-  iconName = "activity",
-  title = "",
-  text = "",
-  route = "",
-  action = ACTIONS.NAVIGATE,
-  dataAction = ACTIONS.NAVIGATE,
-  modifier = "",
-} = {}) {
-  const safeRoute = normalizeRoute(route);
-
-  if (!safeRoute && action === ACTIONS.NAVIGATE) return null;
-
-  return sanitizeObject({
-    iconName,
-    title,
-    label: title,
-    text,
-    route: safeRoute,
-    href: safeRoute,
-    action,
-    dataAction,
-    modifier,
-  });
-}
-
-export function getQuickActions(input = {}) {
-  const admin = isAdminRole(getRole(input));
-
-  if (admin) {
-    return [
-      quickAction({
-        iconName: "ticket",
-        title: "Incidencias",
-        text: "Revisar solicitudes, estados y prioridades.",
-        route: HOME_ROUTES.INCIDENCIAS,
-        modifier: "primary",
-      }),
-      quickAction({
-        iconName: "invoice",
-        title: "Facturas",
-        text: "Consultar facturas, estados e importes.",
-        route: HOME_ROUTES.FACTURAS,
-        modifier: "billing",
-      }),
-      quickAction({
-        iconName: "client",
-        title: "Clientes",
-        text: "Abrir el listado de clientes.",
-        route: HOME_ROUTES.CLIENTES,
-        modifier: "clients",
-      }),
-      HOME_ROUTES.USUARIOS
-        ? quickAction({
-            iconName: "users",
-            title: "Usuarios",
-            text: "Gestionar usuarios del panel.",
-            route: HOME_ROUTES.USUARIOS,
-            modifier: "users",
-          })
-        : null,
-    ].filter(Boolean);
-  }
-
-  return [
-    quickAction({
-      iconName: "plus",
-      title: "Crear incidencia",
-      text: "Abre una solicitud para soporte.",
-      action: ACTIONS.CREATE_INCIDENCIA,
-      dataAction: ACTIONS.CREATE_INCIDENCIA,
-      route: HOME_ROUTES.INCIDENCIAS,
-      modifier: "primary",
-    }),
-    quickAction({
-      iconName: "ticket",
-      title: "Mis incidencias",
-      text: "Consulta el estado y las últimas novedades.",
-      route: HOME_ROUTES.INCIDENCIAS,
-      modifier: "tickets",
-    }),
-    quickAction({
-      iconName: "invoice",
-      title: "Mis facturas",
-      text: "Revisa facturas, importes y estados.",
-      route: HOME_ROUTES.FACTURAS,
-      modifier: "billing",
-    }),
-    quickAction({
-      iconName: "home",
-      title: "Mi cuenta",
-      text: "Actualiza tus datos y preferencias.",
-      route: HOME_ROUTES.CUENTA,
-      modifier: "account",
-    }),
-  ].filter(Boolean);
+/*
+   Compatibilidad de API pública:
+   El template actual no pinta quick actions. Se mantiene export estable,
+   pero no se generan accesos rápidos duplicados.
+*/
+export function getQuickActions() {
+  return [];
 }
 
 /* =========================================================
@@ -2358,27 +2339,30 @@ export function buildHomeTemplateData(input = {}) {
   const role = getRole(source);
   const admin = isAdminRole(role);
   const user = getUser(source);
-  const collections = getCollections({
+
+  const scopedSource = {
     ...source,
     role,
     admin,
-  });
+  };
 
+  const collections = getCollections(scopedSource);
   const tickets = collections.tickets;
   const invoices = collections.invoices;
   const users = admin ? collections.users : [];
   const clients = admin ? collections.clients : [];
-  const activity = getActivity(source, DEFAULT_RECENT_LIMIT);
-  const summary = getSummary(source);
-  const stats = computeHomeStats(source);
-  const pagination = getPagination(tickets, source);
-  const ticketRows = getTicketTableRows(source);
-  const invoiceRows = getInvoiceRows(source);
-  const selectedTicketId = getSelectedTicketId(source);
-  const selectedTicket = selectedTicketId ? getSelectedTicket(source) : null;
-  const ticketModal = buildTicketModalData(source);
+  const activity = getActivity(scopedSource, DEFAULT_RECENT_LIMIT);
+  const summary = getSummary(scopedSource);
+  const stats = computeHomeStats(scopedSource);
+  const pagination = getPagination(tickets, scopedSource);
+  const ticketRows = getTicketTableRows(scopedSource);
+  const invoiceRows = getInvoiceRows(scopedSource);
+  const selectedTicketId = getSelectedTicketId(scopedSource);
+  const selectedTicket = selectedTicketId ? getSelectedTicket(scopedSource) : null;
+  const ticketModal = buildTicketModalData(scopedSource);
+  const widgets = getWidgets(scopedSource);
 
-  const view = sanitizeObject({
+  return sanitizeObject({
     role,
     admin,
 
@@ -2396,23 +2380,23 @@ export function buildHomeTemplateData(input = {}) {
     summary,
     stats,
 
-    statCards: getStatCards(source),
-    statusPills: getStatusPills(source),
-    widgets: getWidgets(source),
-    quickActions: getQuickActions(source),
+    statCards: getStatCards(scopedSource),
+    statusPills: getStatusPills(scopedSource),
+    widgets,
+    quickActions: [],
 
     tickets,
     incidencias: tickets,
-    recentTickets: getRecentTickets(source),
-    recentIncidencias: getRecentTickets(source),
+    recentTickets: getRecentTickets(scopedSource),
+    recentIncidencias: getRecentTickets(scopedSource),
     ticketRows,
     incidenceRows: ticketRows,
     tableRows: ticketRows,
 
     invoices,
     facturas: invoices,
-    recentInvoices: getRecentInvoices(source),
-    recentFacturas: getRecentInvoices(source),
+    recentInvoices: getRecentInvoices(scopedSource),
+    recentFacturas: getRecentInvoices(scopedSource),
     invoiceRows,
     facturaRows: invoiceRows,
 
@@ -2437,7 +2421,7 @@ export function buildHomeTemplateData(input = {}) {
       clientes: clients,
       customers: clients,
       activity,
-      widgets: getWidgets(source),
+      widgets,
     },
 
     pagination,
@@ -2450,11 +2434,27 @@ export function buildHomeTemplateData(input = {}) {
     ticketModal,
     incidenciaModal: ticketModal,
 
-    lastUpdatedAt: first(source.lastUpdatedAt, source.lastSyncAt, source.state?.lastUpdatedAt, source.state?.lastSyncAt, dashboard.updatedAt, dashboard.generatedAt, dashboard.lastSyncAt, ""),
-    requestId: safeText(first(source.requestId, source.state?.requestId, dashboard.requestId, dashboard.meta?.requestId, ""), ""),
+    lastUpdatedAt: first(
+      source.lastUpdatedAt,
+      source.lastSyncAt,
+      source.state?.lastUpdatedAt,
+      source.state?.lastSyncAt,
+      dashboard.updatedAt,
+      dashboard.generatedAt,
+      dashboard.lastSyncAt,
+      ""
+    ),
+    requestId: safeText(
+      first(
+        source.requestId,
+        source.state?.requestId,
+        dashboard.requestId,
+        dashboard.meta?.requestId,
+        ""
+      ),
+      ""
+    ),
   });
-
-  return view;
 }
 
 /* =========================================================
@@ -2470,7 +2470,13 @@ export function getHomeSelectorsSnapshot() {
 
     policy: {
       selectorsOnly: true,
+      templateAligned: true,
       modelBackedNormalization: true,
+
+      statCardsIgnoreLegacyWidgets: true,
+      noQuickActionsVisible: true,
+      twoUserCardsOnly: true,
+      adminCardsOnlyForAdmin: true,
 
       noFetch: true,
       noAuth: true,

@@ -14,6 +14,7 @@
    - Mantener compatibilidad con llamadas antiguas de paginación sin mostrar páginas.
    - Pintar incidencias de más nuevas a más antiguas.
    - Ir ampliando la lista visible al hacer scroll, estilo feed/infinite scroll.
+   - Pintar primero estructura/cache/skeleton y cargar remoto después del primer paint.
    - No validar rutas.
    - No resolver slug.
    - No registrar globals.
@@ -105,7 +106,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_VIEW_VERSION = "incidencias.view.v5.model-utils";
+export const INCIDENCIAS_VIEW_VERSION = "incidencias.view.v6.paint-first";
 
 const SCOPE = "view:incidencias";
 
@@ -271,6 +272,63 @@ export const IncidenciasView = (() => {
         resolve();
       }
     });
+  }
+
+  function runDeferred(label = "async", callback = null) {
+    if (!isFn(callback)) {
+      return false;
+    }
+
+    Promise.resolve()
+      .then(callback)
+      .catch((error) => {
+        safeWarn(`${label} falló.`, error);
+      });
+
+    return true;
+  }
+
+  function startReloadAfterPaint(options = {}, label = "reload") {
+    const opts = safeObject(options);
+
+    return runDeferred(label, async () => {
+      await waitForPaint();
+
+      if (destroyed) {
+        return api;
+      }
+
+      return reload(opts);
+    });
+  }
+
+  function setInitialLoadVisualState(options = {}, items = null) {
+    const opts = safeObject(options);
+    const sourceItems = Array.isArray(items)
+      ? items
+      : getItems();
+
+    const hasData = sourceItems.length > 0;
+
+    try {
+      clearError();
+
+      if (!hasData && !opts.silent) {
+        setLoading(true);
+      } else if (hasData && opts.asRefresh) {
+        setRefreshing(true);
+      }
+    } catch {
+      incidenciasState.error = "";
+      incidenciasState.loading = !hasData && !opts.silent;
+      incidenciasState.refreshing = hasData && Boolean(opts.asRefresh);
+    }
+
+    return {
+      hasData,
+      loading: Boolean(incidenciasState.loading),
+      refreshing: Boolean(incidenciasState.refreshing),
+    };
   }
 
   /* =========================================================
@@ -1521,13 +1579,39 @@ export const IncidenciasView = (() => {
   async function renderAndLoad(options = {}) {
     const token = nextRenderToken();
     const opts = safeObject(options);
+    const paintBeforeLoad = opts.paintBeforeLoad !== false;
 
     hydrateBestEffort();
-    ensureBaseState(getItems());
+
+    const initialItems = getItems();
+
+    ensureBaseState(initialItems);
+
+    /*
+      Rendimiento:
+      primero se pinta estructura/cache/skeleton.
+      Después se deja respirar al navegador antes de cargar API.
+    */
+    if (paintBeforeLoad) {
+      setInitialLoadVisualState(
+        {
+          silent: Boolean(opts.silent),
+          asRefresh: Boolean(opts.asRefresh),
+        },
+        initialItems
+      );
+
+      rerender();
+      await waitForPaint();
+    }
+
+    if (!isActiveRenderToken(token)) {
+      return api;
+    }
 
     await loadData({
       ...opts,
-      renderBeforeLoad: opts.renderBeforeLoad !== false,
+      renderBeforeLoad: opts.renderBeforeLoad !== false && !paintBeforeLoad,
     });
 
     if (!isActiveRenderToken(token)) {
@@ -2307,16 +2391,41 @@ export const IncidenciasView = (() => {
       return inflightInit;
     }
 
+    const opts = safeObject(options);
+
     if (initialized) {
-      ensureBaseState();
+      hydrateBestEffort();
+
+      const currentItems = getItems();
+
+      ensureBaseState(currentItems);
+
+      if (!incidenciasState.loaded) {
+        const hasCurrentItems = currentItems.length > 0;
+
+        setInitialLoadVisualState(
+          {
+            silent: Boolean(opts.silent),
+            asRefresh: hasCurrentItems,
+          },
+          currentItems
+        );
+      }
+
       rerender();
 
       if (!incidenciasState.loaded && !inflightReload) {
-        await reload({
-          force: false,
-          silent: true,
-          asRefresh: false,
-        });
+        const hasCurrentItems = getItems().length > 0;
+
+        startReloadAfterPaint(
+          {
+            force: false,
+            silent: hasCurrentItems || Boolean(opts.silent),
+            asRefresh: hasCurrentItems,
+            paintBeforeLoad: false,
+          },
+          "incidencias:init:reload-existing"
+        );
       }
 
       return api;
@@ -2328,11 +2437,37 @@ export const IncidenciasView = (() => {
     inflightInit = (async () => {
       safeLog("init");
 
-      await renderAndLoad({
-        force: Boolean(options.force),
-        silent: Boolean(options.silent),
-        asRefresh: false,
-      });
+      /*
+        Rendimiento:
+        init ya no bloquea la navegación esperando la API.
+        Primero pinta estructura/cache/skeleton; después carga remoto.
+      */
+      hydrateBestEffort();
+
+      const initialItems = getItems();
+      const hasInitialItems = initialItems.length > 0;
+
+      ensureBaseState(initialItems);
+
+      setInitialLoadVisualState(
+        {
+          silent: Boolean(opts.silent),
+          asRefresh: hasInitialItems,
+        },
+        initialItems
+      );
+
+      rerender();
+
+      startReloadAfterPaint(
+        {
+          force: Boolean(opts.force),
+          silent: hasInitialItems || Boolean(opts.silent),
+          asRefresh: hasInitialItems,
+          paintBeforeLoad: false,
+        },
+        "incidencias:init:background-load"
+      );
 
       return api;
     })();

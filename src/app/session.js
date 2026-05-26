@@ -24,7 +24,7 @@
    - Sin sync UI.
 ========================================================= */
 
-export const SESSION_VERSION = "app.session.v6";
+export const SESSION_VERSION = "app.session.v7";
 
 let restorePromise = null;
 
@@ -55,7 +55,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function safeCall(fn = null, ...args) {
@@ -73,6 +74,14 @@ function callMethod(target = null, method = "", ...args) {
 
   return safeCall(target[method].bind(target), ...args);
 }
+
+function readState(AppCore = null) {
+  return isObject(AppCore?.state) ? AppCore.state : {};
+}
+
+/* =========================================================
+   AUTH RESOLVE
+========================================================= */
 
 function resolveAuth(AppCore = null, Auth = null) {
   try {
@@ -94,8 +103,14 @@ function resolveAuth(AppCore = null, Auth = null) {
   }
 }
 
-function readState(AppCore = null) {
-  return isObject(AppCore?.state) ? AppCore.state : {};
+function requireRestore(AppCore = null, Auth = null) {
+  const auth = resolveAuth(AppCore, Auth);
+
+  if (!isFunction(auth?.restoreSession)) {
+    throw new Error("Auth.restoreSession() no disponible.");
+  }
+
+  return auth.restoreSession.bind(auth);
 }
 
 /* =========================================================
@@ -170,16 +185,6 @@ function hasAuthenticatedUser(AppCore = null, Auth = null) {
   );
 }
 
-function requireRestore(AppCore = null, Auth = null) {
-  const auth = resolveAuth(AppCore, Auth);
-
-  if (!isFunction(auth?.restoreSession)) {
-    throw new Error("Auth.restoreSession() no disponible.");
-  }
-
-  return auth.restoreSession.bind(auth);
-}
-
 /* =========================================================
    RESULT READ
 ========================================================= */
@@ -224,6 +229,7 @@ function getResultFlags(result = null) {
       ok: false,
       restored: false,
       authenticated: false,
+      skipped: false,
     };
   }
 
@@ -233,6 +239,7 @@ function getResultFlags(result = null) {
     ok: result.ok === true || nested.ok === true,
     restored: result.restored === true || nested.restored === true,
     authenticated: result.authenticated === true || nested.authenticated === true,
+    skipped: result.skipped === true || nested.skipped === true,
   };
 }
 
@@ -246,11 +253,13 @@ function buildRestoreMeta(result = null) {
     ok: flags.ok,
     restored: flags.restored,
     authenticated: flags.authenticated,
+    skipped: flags.skipped,
 
     hasUser: Boolean(getResultUser(result)),
     hasSession: Boolean(getResultSession(result)),
 
     source: cleanText(result.source || nested.source, null),
+    reason: cleanText(result.reason || nested.reason, null),
     code: result.code || nested.code || null,
     status: result.status || result.statusCode || nested.status || nested.statusCode || null,
   };
@@ -327,15 +336,25 @@ function normalizeRestoreResult(result = null, AppCore = null, Auth = null) {
 
   const restored = Boolean(
     resultFlags.restored ||
-      resultFlags.ok ||
       resultFlags.authenticated ||
       snapshot?.restored === true ||
       snapshot?.authenticated === true ||
       authenticated
   );
 
+  /*
+    ok indica que el bridge ha completado sin lanzar excepción.
+    No significa usuario autenticado. Auth conserva la autoridad real.
+  */
+  const ok = Boolean(
+    resultFlags.ok ||
+      resultFlags.skipped ||
+      restored ||
+      result !== null
+  );
+
   return {
-    ok: Boolean(restored && authenticated),
+    ok,
     restored,
     authenticated,
 
@@ -432,10 +451,18 @@ export function getSessionBootstrapSnapshot({
 
     policy: {
       bridgeOnly: true,
+
       authOwnsRestore: true,
       authOwnsSilentRefresh: true,
       authOwnsUserValidity: true,
+      authOwnsSessionValidity: true,
+
       doesNotValidateUserStatus: true,
+      doesNotValidateRoutes: true,
+      doesNotNavigate: true,
+
+      singleConcurrentRestore: true,
+      restoreResultNormalizedForBoot: true,
 
       noImports: true,
       noRouter: true,

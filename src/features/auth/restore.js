@@ -6,6 +6,7 @@
    - Restaurar sesión mínima.
    - Validar sesión contra /api/auth/me cuando hay access token.
    - Si access token caducó y hay refresh token: renovar por /api/auth/refresh.
+   - Si /me devuelve 401 genérico y hay refresh context: intentar refresh antes de limpiar.
    - Si no hay access token pero hay refresh token: intentar refresh silencioso.
    - Si refresh devuelve sesión válida: aplicar sesión.
    - Si /me devuelve user válido: aplicar sesión.
@@ -48,7 +49,7 @@ import {
   getCurrentUserHomePath,
 } from "./session.js";
 
-export const RESTORE_VERSION = "auth.restore.v9";
+export const RESTORE_VERSION = "auth.restore.v10";
 
 const ME_ENDPOINT = AUTH_ENDPOINTS.me;
 const REFRESH_ENDPOINT = AUTH_ENDPOINTS.refresh;
@@ -399,15 +400,24 @@ function shouldClearSessionForAuthError(error = null) {
 function isRefreshableAuthFailure(error = null, options = {}) {
   if (!allowSilentRefresh(options)) return false;
 
+  /*
+    Señales explícitas de sesión inválida/revocada ganan siempre.
+    No se intenta refresh si backend/CoreHttp pide limpiar cliente.
+  */
+  if (shouldClearSessionForAuthError(error)) return false;
+
   if (coreHttpSaysRefreshable(error)) return true;
   if (payloadSaysRefreshable(error)) return true;
 
   const status = authErrorStatus(error);
   const code = cleanText(authErrorCode(error), "").toUpperCase();
+  const context = refreshContext();
 
   if (status && status !== 401) return false;
 
-  if (code === "TOKEN_EXPIRED") return true;
+  if (code === "TOKEN_EXPIRED") {
+    return Boolean(context.usable);
+  }
 
   if (
     [
@@ -416,7 +426,17 @@ function isRefreshableAuthFailure(error = null, options = {}) {
       "SESSION_REQUIRED",
     ].includes(code)
   ) {
-    return Boolean(refreshContext().usable);
+    return Boolean(context.usable);
+  }
+
+  /*
+    Caso real tras Ctrl+F5:
+    /me puede devolver 401 genérico sin code/canRefresh/refreshRequired.
+    Si existe refresh token persistido, se debe intentar /refresh antes
+    de limpiar storage. Si /refresh falla con 401/403, entonces se limpia.
+  */
+  if (status === 401 && context.usable) {
+    return true;
   }
 
   return false;
@@ -889,7 +909,8 @@ export async function restoreSession(options = {}) {
 
       /*
         Aunque exista token+user local, en restore de arranque validamos /me.
-        Si el access token caducó, /me devolverá TOKEN_EXPIRED y se hará refresh.
+        Si el access token caducó, /me devolverá TOKEN_EXPIRED o incluso 401 genérico.
+        Con refresh context usable, se intenta /refresh antes de limpiar sesión.
       */
       if (tokenOk(token)) {
         try {
@@ -1039,6 +1060,7 @@ export function getRestoreSnapshot() {
 
       validatesMeOnRestore: true,
       refreshOnTokenExpired: true,
+      refreshOnGenericMe401WithContext: true,
       tokenExpiredDoesNotMeanLogout: true,
 
       noFetchOwn: true,

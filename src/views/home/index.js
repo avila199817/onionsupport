@@ -5,6 +5,7 @@
    Responsabilidad:
    - Entry público de Home para el Router.
    - Exponer HomeView desde homeView.js.
+   - Exportar default compatible con lazy loader del Router.
    - No validar rutas.
    - No resolver slug.
    - No leer Auth.
@@ -24,7 +25,7 @@ import {
   HOME_VIEW_VERSION,
 } from "./homeView.js";
 
-export const HOME_INDEX_VERSION = "home.index.v5";
+export const HOME_INDEX_VERSION = "home.index.v6.clean-entry";
 
 /* =========================================================
    EXPORTS

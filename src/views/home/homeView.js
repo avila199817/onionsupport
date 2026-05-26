@@ -20,13 +20,15 @@
    - No pasa AppCore/Auth/Router/DOM al modelo ni al template.
    - Sólo pasa contexto plano y seguro al template.
    - Lee colecciones desde homeState raíz y fallback dashboard.
-   - Carga remota automática sólo si Home no está hidratado/cargado.
-   - Una vez loaded/hydrated, no recarga por montar la vista otra vez.
-   - Un dashboard vacío también cuenta como carga válida.
-   - Render memory-first/cache-first.
-   - Render skeleton sólo antes de la primera carga real.
+   - Primera carga remota automática por el flujo real refresh(force).
+   - La cache no bloquea la primera carga remota real del runtime.
+   - Una vez completada la primera carga remota, no recarga al montar de nuevo.
+   - Un dashboard remoto vacío también cuenta como carga válida.
+   - Render memory-first/cache-first cuando hay datos visibles.
+   - Skeleton sólo antes de la primera carga útil si no hay datos visibles.
    - Render único final tras sincronizar datos reales.
    - Bindings delegados estables entre rerenders, sin duplicar listeners.
+   - Alineado con template actual: sin acción Exportar CSV.
    - Elimina inline styles/scripts antes de insertar HTML para cumplir CSP.
    - Elimina handlers inline on*.
    - Elimina tooltips custom data-tooltip/data-tippy y conserva title nativo.
@@ -101,7 +103,6 @@ import {
 } from "./home.bindings.js";
 
 import {
-  exportHomeCsvAction,
   navigateFromHomeAction,
   createHomeIncidenciaAction,
   runHomeQuickAction as actionRunHomeQuickAction,
@@ -123,7 +124,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v21.load-once-memory-first";
+export const HOME_VIEW_VERSION = "home.view.v22.initial-refresh-once-template-aligned";
 
 export const HomeView = (() => {
   "use strict";
@@ -168,6 +169,7 @@ export const HomeView = (() => {
 
   let initialized = false;
   let destroyed = false;
+
   let bootLoadRequested = false;
   let bootLoadCompleted = false;
   let bootLoadCompletedAt = "";
@@ -718,7 +720,7 @@ export const HomeView = (() => {
     return Boolean(homeState.loaded === true && homeState.hydrated === true);
   }
 
-  function stateHasRealData() {
+  function stateHasVisibleData() {
     return Boolean(
       safeArray(homeState.tickets).length ||
         safeArray(homeState.incidencias).length ||
@@ -729,14 +731,16 @@ export const HomeView = (() => {
         safeArray(homeState.activity).length ||
         safeArray(homeState.recentActivity).length ||
         (homeState.admin && safeArray(homeState.users).length) ||
-        (homeState.admin && safeArray(homeState.clients).length) ||
-        hasKeys(homeState.summary) ||
-        hasKeys(homeState.dashboard)
+        (homeState.admin && safeArray(homeState.clients).length)
     );
   }
 
+  function stateHasRealData() {
+    return stateHasVisibleData();
+  }
+
   function stateCanRenderFinal() {
-    return Boolean(stateHasLoadedPayload() || stateHasRealData());
+    return Boolean(stateHasLoadedPayload() || stateHasVisibleData());
   }
 
   function hydrateFromCacheIfPossible(options = {}) {
@@ -926,10 +930,15 @@ export const HomeView = (() => {
     });
   }
 
-  function renderLoadingIfNeeded() {
-    if (stateCanRenderFinal()) return false;
+  function renderLoadingIfNeeded(options = {}) {
+    const opts = safeObject(options);
+
+    if (opts.force !== true && stateCanRenderFinal()) {
+      return false;
+    }
 
     setLoading(true);
+    setRefreshing(false);
 
     renderNow({
       reason: "initial-loading",
@@ -943,10 +952,14 @@ export const HomeView = (() => {
 
     if (opts.force === true) return true;
     if (inflightLoad) return false;
-    if (stateHasLoadedPayload()) return false;
-    if (stateHasRealData()) return false;
 
-    return true;
+    if (!bootLoadCompleted) return true;
+
+    if (!stateHasLoadedPayload() && !stateHasVisibleData()) {
+      return true;
+    }
+
+    return false;
   }
 
   /* =======================================================
@@ -977,10 +990,17 @@ export const HomeView = (() => {
 
     const seq = nextLoadSeq();
     const asRefresh = opts.asRefresh === true || opts.force === true;
+    const initialRemote = opts.initial === true || opts.boot === true;
+    const hasVisibleBeforeLoad = stateHasVisibleData();
 
     if (asRefresh) {
-      setRefreshing(true);
-      setLoading(false);
+      if (initialRemote && !hasVisibleBeforeLoad) {
+        setLoading(true);
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+        setRefreshing(true);
+      }
     } else {
       setLoading(true);
       setRefreshing(false);
@@ -1201,7 +1221,6 @@ export const HomeView = (() => {
       refresh,
       loadHomeDashboard: loadData,
 
-      exportHomeCsvAction,
       navigateFromHomeAction: navigateFromHome,
       runHomeQuickAction: actionRunHomeQuickAction,
       copyHomeWidgetIdAction,
@@ -1278,7 +1297,10 @@ export const HomeView = (() => {
       hydrateFromCacheIfPossible();
     }
 
-    if (stateCanRenderFinal()) {
+    const needsLoad = shouldLoadOnMount({ force });
+    const hasVisibleData = stateHasVisibleData();
+
+    if (stateCanRenderFinal() && !(needsLoad && !hasVisibleData)) {
       setLoading(false);
       setRefreshing(false);
 
@@ -1286,10 +1308,12 @@ export const HomeView = (() => {
         reason: stateHasLoadedPayload() ? "mount-memory" : "mount-state",
       });
     } else {
-      renderLoadingIfNeeded();
+      renderLoadingIfNeeded({
+        force: true,
+      });
     }
 
-    if (shouldLoadOnMount({ force })) {
+    if (needsLoad) {
       bootLoadRequested = true;
 
       runDeferred("boot-load", async () => {
@@ -1297,7 +1321,9 @@ export const HomeView = (() => {
 
         if (!destroyed) {
           await loadData({
-            force,
+            force: true,
+            asRefresh: true,
+            initial: true,
             returnStaleOnError: true,
           });
         }
@@ -1410,6 +1436,7 @@ export const HomeView = (() => {
         creating: state.creating,
 
         hasLoadedPayload: stateHasLoadedPayload(),
+        hasVisibleData: stateHasVisibleData(),
         hasRealData: stateHasRealData(),
         canRenderFinal: stateCanRenderFinal(),
 
@@ -1449,13 +1476,18 @@ export const HomeView = (() => {
         domEventsDelegatedToBindings: true,
         actionsDelegatedToHomeActions: true,
 
-        loadOnceOnMount: true,
-        doesNotReloadWhenLoadedAndHydrated: true,
-        emptyDashboardCountsAsLoaded: true,
-        memoryFirstRender: true,
+        initialRemoteRefreshOnce: true,
+        initialRemoteRefreshUsesSamePathAsManualRefresh: true,
+        cacheDoesNotBlockFirstRemoteRefresh: true,
+        doesNotReloadAfterInitialRemoteCompleted: true,
+        emptyRemoteDashboardCountsAsLoaded: true,
+
+        memoryFirstRenderWhenVisibleDataExists: true,
         cacheFirstHydration: true,
-        skeletonOnlyBeforeFirstLoad: true,
+        skeletonOnlyBeforeFirstUsefulLoad: true,
         explicitReloadStillAllowed: true,
+
+        templateAlignedNoCsvExportAction: true,
 
         stableBindings: true,
         noDuplicateBindingsOnRerender: true,

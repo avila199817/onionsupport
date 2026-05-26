@@ -2,51 +2,55 @@
    Onion Support - Home Template
    Archivo: /src/views/home/home.template.js
 
-   Final:
+   Responsabilidad:
+   - Render HTML puro de Home.
+   - Consumir view-model desde home.selectors.js.
+   - Calcular el modelo una sola vez por render.
    - Home simple, visual y directo.
    - Sin card grande envolvente.
    - Sin accesos rápidos duplicados.
    - Sin widgets duplicados.
    - Sin health/server/ready/ping.
    - Sólo Home sobre usuarios, clientes, incidencias y facturas.
-   - Con Facturas totales + importe total pagado.
+   - Facturas totales + importe total pagado.
    - Si una factura no está pagada, no se muestra importe como cobrado.
-   - Listas Home limitadas a 5 últimos elementos.
+   - Listas Home limitadas visualmente a 5 elementos.
    - Contadores sobre totales completos.
-   - Tabla de incidencias del Home alineada 1:1 con el template de Incidencias.
-   - Columnas de incidencias preparadas para layout compacto y sin huecos muertos.
-   - Primera columna con avatar de usuario compacto, ID completo, asunto, descripción,
-     prioridad y técnico asignado.
+   - Tabla de incidencias compacta.
+   - Primera columna con avatar de usuario compacto, ID completo, asunto,
+     descripción, prioridad y técnico asignado.
    - Sin línea visual redundante "Cliente · Sin email".
    - Sin columna Técnico separada.
-   - Usuario/avatar del Home consumido desde el view-model canónico del sidebar.
+   - Usuario/avatar del Home consumido desde el view-model canónico.
    - ID de incidencia completo visible.
    - Detalle de incidencia abre modal.
    - Modal con técnico asignado, avatar/iniciales y facturas vinculadas.
-   - Avatar visible con tono dinámico y data-tooltip con nombre completo.
    - Textos visibles en español.
-   - Modelo calculado una sola vez por render.
+   - Rutas desde selectors/core config.
+   - Bloqueos delegados en selectors/core config.
    - Sin rutas opcionales inventadas.
+   - Sin DOM API.
+   - Sin listeners.
+   - Sin Auth.
+   - Sin Router.
+   - Sin AppCore.
+   - Sin HTTP.
+   - Sin storage.
+   - Sin CSS inline.
+   - Sin handlers inline.
+   - Sin /home.
 ========================================================= */
-
-import {
-  ROUTES as CORE_ROUTES,
-  isAdminRoute as configIsAdminRoute,
-  isBlockedRoutePath as configIsBlockedRoutePath,
-  normalizeRoutePath as configNormalizeRoutePath,
-  routePathFromUrlLike as configRoutePathFromUrlLike,
-} from "../../core/config.js";
 
 import {
   DEFAULT_PAGE_SIZE,
   DEFAULT_CURRENCY,
+  HOME_ROUTES,
 
   safeText,
   safeNumber,
   safeArray,
   safeObject,
   first,
-  isSameIdentity,
   normalizeKey,
 
   formatNumber,
@@ -62,13 +66,15 @@ import {
   getTicketId,
   getTicketSubject,
   getTicketDescription,
-  getTicketStatus,
   getTicketStatusKey,
   getTicketStatusLabel,
   getTicketPriorityKey,
+  getTicketPriorityLabel,
   getTicketCategory,
   getTicketCreatedAt,
   getTicketUpdatedAt,
+  getTicketOwnerName,
+  getTicketAvatarUrl,
 
   getInvoiceId,
   getInvoicePaidAmount,
@@ -83,7 +89,7 @@ import {
   getActivityType,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.final.16";
+export const TEMPLATE_VERSION = "home.template.v17.model-backed-pure-html";
 
 const ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -94,6 +100,9 @@ const ACTIONS = Object.freeze({
   EXPORT_CSV: "export_csv",
   OPEN_TICKET_DETAIL: "open_ticket_detail",
   CLOSE_TICKET_DETAIL: "close_ticket_detail",
+  PAGE_PREV: "page_prev",
+  PAGE_NEXT: "page_next",
+  PAGE_GO: "page",
 });
 
 const LIMITS = Object.freeze({
@@ -102,32 +111,6 @@ const LIMITS = Object.freeze({
   entities: 5,
   tickets: 5,
 });
-
-const STATUS_ORDER = Object.freeze([
-  "pending",
-  "open",
-  "progress",
-  "resolved",
-  "closed",
-]);
-
-const RAW_KEYS = new Set(["raw", "data", "payload", "response", "body"]);
-
-const COSMOS_META_KEYS = new Set([
-  "_id",
-  "_rid",
-  "_self",
-  "_etag",
-  "_attachments",
-  "_ts",
-  "_lsn",
-  "_metadata",
-]);
-
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|otp|totp|mfa|2fa|backupCode|backup_code|sessionId|session_id|email|correo|phone|telefono|teléfono|address|direccion|dirección|nif|dni|ipRaw|userAgent/i;
-
-const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
 
 const AVATAR_TONES = Object.freeze([
   "violet",
@@ -139,16 +122,17 @@ const AVATAR_TONES = Object.freeze([
 ]);
 
 /* =========================================================
-   Seguridad HTML / rutas
+   HTML / SANITIZE
 ========================================================= */
 
 function redact(value = "") {
   return String(value || "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function escapeHtml(value = "") {
@@ -172,184 +156,17 @@ function joinClasses(...values) {
     .join(" ");
 }
 
-function boolAttr(condition = false, value = "") {
-  return condition ? value : "";
-}
-
-function isEmailLike(value = "") {
-  const text = safeText(value, "").trim();
-  return Boolean(text && EMAIL_RE.test(text));
-}
-
-function visualLabel(value = "", fallback = "Usuario") {
-  const text = redact(safeText(value, "")).trim();
-
-  if (!text) return fallback;
-  if (isEmailLike(text)) return fallback;
-
-  return text;
-}
-
-function sanitizePayloadValue(value, keyHint = "") {
-  if (RAW_KEYS.has(keyHint)) return undefined;
-  if (COSMOS_META_KEYS.has(keyHint)) return undefined;
-  if (SENSITIVE_KEY_RE.test(String(keyHint || ""))) return undefined;
-
-  if (typeof value === "string") return redact(value);
-
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => sanitizePayloadValue(item))
-      .filter((item) => item !== undefined);
-  }
-
-  if (value && typeof value === "object") {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value)) {
-      if (RAW_KEYS.has(key)) continue;
-      if (COSMOS_META_KEYS.has(key)) continue;
-      if (SENSITIVE_KEY_RE.test(String(key || ""))) continue;
-
-      const clean = sanitizePayloadValue(item, key);
-      if (clean !== undefined) output[key] = clean;
-    }
-
-    return output;
-  }
-
-  return value;
-}
-
 function jsonAttr(value = {}) {
   try {
-    return escapeHtml(JSON.stringify(sanitizePayloadValue(value) || {}));
+    return escapeHtml(JSON.stringify(safeObject(value)));
   } catch {
     return "{}";
   }
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i.test(
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(
     String(value || "")
-  );
-}
-
-function routeInput(value = "") {
-  try {
-    return configRoutePathFromUrlLike(value) || "";
-  } catch {
-    return safeText(value, "");
-  }
-}
-
-function routeSuffix(value = "") {
-  const raw = safeText(value, "");
-  const hashIndex = raw.indexOf("#");
-  const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
-  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-  const queryIndex = beforeHash.indexOf("?");
-  const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
-
-  if (hasSensitiveQuery(search) || hasSensitiveQuery(hash)) return "";
-
-  return `${search}${hash}`;
-}
-
-function routePathOnly(value = "") {
-  const raw = routeInput(value);
-
-  if (!raw) return "";
-  if (!raw.startsWith("/")) return "";
-  if (raw.startsWith("//")) return "";
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
-  if (/[\r\n\t\\]/.test(raw)) return "";
-  if (hasSensitiveQuery(raw)) return "";
-
-  const pathOnly = raw.split("?")[0].split("#")[0] || "";
-
-  try {
-    return configNormalizeRoutePath(pathOnly) || "";
-  } catch {
-    let path = pathOnly.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
-
-    if (!path.startsWith("/")) path = `/${path}`;
-    if (path.length > 1) path = path.replace(/\/+$/g, "") || "/";
-
-    return path || "";
-  }
-}
-
-function isBlockedRoute(value = "") {
-  try {
-    return configIsBlockedRoutePath(value) === true;
-  } catch {
-    const path = routePathOnly(value).toLowerCase();
-
-    return Boolean(
-      path === "/home" ||
-        path === "/403" ||
-        path === "/404" ||
-        path === "/2fa" ||
-        path === "/mfa" ||
-        path === "/otp" ||
-        path.startsWith("/2fa/") ||
-        path.startsWith("/mfa/") ||
-        path.startsWith("/otp/")
-    );
-  }
-}
-
-function safeRoute(value = "", fallback = "") {
-  const raw = routeInput(value);
-  const safeFallback = safeText(fallback, "");
-
-  if (!raw) return safeFallback;
-  if (!raw.startsWith("/")) return safeFallback;
-  if (raw.startsWith("//")) return safeFallback;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return safeFallback;
-  if (/[\r\n\t\\]/.test(raw)) return safeFallback;
-  if (hasSensitiveQuery(raw)) return safeFallback;
-
-  const canonical = routePathOnly(raw);
-
-  if (!canonical) return safeFallback;
-  if (isBlockedRoute(canonical)) return safeFallback;
-
-  return `${canonical}${routeSuffix(raw)}`;
-}
-
-function safeStaticRoute(value = "", fallback = "") {
-  return safeRoute(value, fallback) || fallback;
-}
-
-const ROUTES = Object.freeze({
-  INCIDENCIAS: safeStaticRoute(CORE_ROUTES?.incidencias, "/incidencias"),
-  FACTURAS: safeStaticRoute(CORE_ROUTES?.facturas, "/facturas"),
-  CLIENTES: safeStaticRoute(CORE_ROUTES?.clientes, "/clientes"),
-  USUARIOS: safeStaticRoute(CORE_ROUTES?.usuarios, ""),
-});
-
-function getRoutePath(value = "") {
-  return safeRoute(value, "").split("?")[0].split("#")[0] || "";
-}
-
-function isAdminOnlyRoute(route = "") {
-  const path = getRoutePath(route);
-  const clientes = getRoutePath(ROUTES.CLIENTES);
-  const usuarios = getRoutePath(ROUTES.USUARIOS);
-
-  if (!path) return false;
-
-  try {
-    if (configIsAdminRoute(path) === true) return true;
-  } catch {
-    // Fallback local.
-  }
-
-  return (
-    Boolean(clientes && (path === clientes || path.startsWith(`${clientes}/`))) ||
-    Boolean(usuarios && (path === usuarios || path.startsWith(`${usuarios}/`)))
   );
 }
 
@@ -357,6 +174,7 @@ function safeImageSrc(value = "") {
   const raw = safeText(value, "");
 
   if (!raw) return "";
+  if (raw.length > 2048) return "";
   if (hasSensitiveQuery(raw)) return "";
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (/^(?:data|blob|javascript|vbscript|file):/i.test(raw)) return "";
@@ -389,258 +207,135 @@ function safeImageSrc(value = "") {
   return "";
 }
 
+function safeRoute(value = "", fallback = "") {
+  const route = safeText(value, "");
+
+  if (!route) return fallback;
+  if (!route.startsWith("/")) return fallback;
+  if (route.startsWith("//")) return fallback;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(route)) return fallback;
+  if (/[\r\n\t\\]/.test(route)) return fallback;
+  if (hasSensitiveQuery(route)) return fallback;
+
+  return route;
+}
+
+function hashString(value = "") {
+  const text = safeText(value, "");
+  let hash = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return Math.abs(hash);
+}
+
+function avatarTone(seed = "") {
+  const index = hashString(seed || "avatar") % AVATAR_TONES.length;
+  return AVATAR_TONES[index] || "violet";
+}
+
 /* =========================================================
-   View model único
+   ICONS
 ========================================================= */
 
-function getState(input = {}) {
-  return safeObject(input.state);
-}
+function icon(name = "activity") {
+  const common =
+    `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 
-function getLoadingState(input = {}) {
-  const data = safeObject(input);
-  const state = getState(data);
-
-  return {
-    loading: Boolean(state.loading || data.loading),
-    refreshing: Boolean(state.refreshing || data.refreshing),
-    creating: Boolean(state.creating || data.creating),
-    loaded: Boolean(state.loaded || data.loaded),
-    hydrated: Boolean(state.hydrated || data.hydrated),
-    error: redact(safeText(first(state.error, data.error), "")),
-    openingTicketId: safeText(state.openingTicketId, ""),
-    selectedTicketId: safeText(first(state.selectedTicketId, data.selectedTicketId, data.selectedIncidenciaId), ""),
-    navigatingAction: redact(safeText(state.navigatingAction, "")),
-  };
-}
-
-function getTemplateMetaFromView(data = {}, view = {}) {
-  const state = getState(data);
-  const dashboard = safeObject(view.dashboard);
-
-  const lastUpdatedAt = first(
-    data.lastUpdatedAt,
-    data.lastSyncAt,
-    state.lastUpdatedAt,
-    state.lastSyncAt,
-    view.lastUpdatedAt,
-    dashboard.updatedAt,
-    dashboard.generatedAt,
-    dashboard.lastSyncAt,
-    dashboard.meta?.updatedAt
-  );
-
-  return {
-    requestId: safeText(first(data.requestId, state.requestId, view.requestId, dashboard.requestId, dashboard.meta?.requestId), ""),
-    lastUpdatedAt,
-    partial: Boolean(first(dashboard.partial, data.partial, false)),
-    errorsCount: safeArray(first(dashboard.errors, data.errors, [])).length,
-  };
-}
-
-function getHomeUserViewModel(data = {}, view = {}) {
-  const state = getState(data);
-
-  const source = safeObject(
-    first(
-      data.sidebarUser,
-      data.sidebar?.user,
-      data.layout?.sidebarUser,
-      data.context?.sidebarUser,
-      data.context?.user,
-
-      state.sidebarUser,
-      state.sidebar?.user,
-      state.user,
-      state.currentUser,
-
-      view.sidebarUser,
-      view.sidebar?.user,
-
-      data.user,
-      data.currentUser,
-      data.authUser,
-      data.sessionUser,
-      data.session?.user,
-      data.auth?.user,
-
-      view.user,
-      {}
-    )
-  );
-
-  const displayName = visualLabel(
-    first(
-      source.displayName,
-      source.name,
-      source.fullName,
-      source.username,
-      source.userName,
-      source.slug
-    ),
-    "Usuario"
-  );
-
-  const avatarUrl = safeImageSrc(
-    first(
-      source.avatarUrl,
-      source.avatar,
-      source.photoUrl,
-      source.photoURL,
-      source.picture,
-      source.pictureUrl,
-      source.image,
-      source.imageUrl,
-      source.foto,
-      source.fotoUrl,
-      source.imagen,
-      source.imagenUrl,
-
-      source.profile?.avatarUrl,
-      source.profile?.avatar,
-      source.profile?.photoUrl,
-      source.profile?.photoURL,
-      source.profile?.picture,
-      source.profile?.pictureUrl,
-      source.profile?.image,
-      source.profile?.imageUrl,
-
-      source.media?.avatarUrl,
-      source.media?.avatar,
-      source.media?.photoUrl,
-      source.media?.photoURL,
-      source.media?.picture,
-      source.media?.pictureUrl,
-      source.media?.image,
-      source.media?.imageUrl
-    )
-  );
-
-  const initials = safeText(
-    first(
-      source.initials,
-      source.iniciales,
-      getInitials(displayName)
-    ),
-    "U"
-  )
-    .slice(0, 3)
-    .toUpperCase();
-
-  const rawRole = first(
-    source.role,
-    source.rol,
-    Array.isArray(source.roles) ? source.roles[0] : "",
-
-    data.role,
-    data.rol,
-    Array.isArray(data.roles) ? data.roles[0] : "",
-
-    state.role,
-    state.rol,
-    Array.isArray(state.roles) ? state.roles[0] : "",
-
-    view.role,
-    view.rol,
-    Array.isArray(view.roles) ? view.roles[0] : ""
-  );
-
-  const role = safeText(rawRole, "user").toLowerCase() === "admin"
-    ? "admin"
-    : "user";
-
-  const isAdmin = Boolean(
-    source.isAdmin === true ||
-      data.admin === true ||
-      state.admin === true ||
-      view.admin === true ||
-      role === "admin"
-  );
-
-  const finalRole = isAdmin ? "admin" : "user";
-
-  const user = {
-    ...source,
-
-    hasUser: source.hasUser !== false,
-
-    displayName,
-    name: displayName,
-    fullName: displayName,
-
-    avatarUrl,
-    avatar: avatarUrl,
-    photoUrl: avatarUrl,
-    photoURL: avatarUrl,
-    picture: avatarUrl,
-    pictureUrl: avatarUrl,
-    image: avatarUrl,
-    imageUrl: avatarUrl,
-    foto: avatarUrl,
-    fotoUrl: avatarUrl,
-    imagen: avatarUrl,
-    imagenUrl: avatarUrl,
-
-    initials,
-
-    role: finalRole,
-    rol: finalRole,
-    roles: [finalRole],
-
-    roleLabel: safeText(
-      first(source.roleLabel, isAdmin ? "Administrador" : "Estándar"),
-      isAdmin ? "Administrador" : "Estándar"
-    ),
-
-    isAdmin,
-    isUser: !isAdmin,
+  const icons = {
+    home: `<svg ${common}><path d="m3 10.5 9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>`,
+    refresh: `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
+    plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
+    ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
+    invoice: `<svg ${common}><path d="M6 2h12v20l-3-2-3 2-3-2-3 2Z"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>`,
+    client: `<svg ${common}><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9h.01"/><path d="M9 13h.01"/><path d="M9 17h.01"/></svg>`,
+    users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
+    euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
+    clock: `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
+    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+    arrowRight: `<svg ${common}><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>`,
+    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+    copy: `<svg ${common}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
   };
 
-  return {
-    user,
-    displayName,
-    avatarUrl,
-    initials,
-    role: finalRole,
-    isAdmin,
-  };
+  return icons[name] || icons.activity;
 }
+
+/* =========================================================
+   VIEW MODEL
+========================================================= */
 
 function buildTemplateViewModel(input = {}) {
   const data = safeObject(input);
   const view = buildHomeTemplateData(data);
-  const state = getLoadingState(data);
-  const sidebarUser = getHomeUserViewModel(data, view);
-  const admin = sidebarUser.isAdmin;
-  const meta = getTemplateMetaFromView(data, view);
+  const state = safeObject(first(data.state, view.state, {}));
+  const dashboard = safeObject(view.dashboard);
+  const user = safeObject(view.user);
+
+  const role = safeText(first(view.role, data.role, state.role, dashboard.role, user.role, "user"), "user").toLowerCase() === "admin"
+    ? "admin"
+    : "user";
+
+  const admin = Boolean(view.admin === true || data.admin === true || state.admin === true || dashboard.admin === true || user.isAdmin === true || role === "admin");
+
+  const meta = {
+    requestId: safeText(first(data.requestId, state.requestId, view.requestId, dashboard.requestId, dashboard.meta?.requestId, ""), ""),
+    lastUpdatedAt: first(data.lastUpdatedAt, data.lastSyncAt, state.lastUpdatedAt, state.lastSyncAt, view.lastUpdatedAt, dashboard.updatedAt, dashboard.generatedAt, dashboard.lastSyncAt, dashboard.meta?.updatedAt, ""),
+    partial: Boolean(first(dashboard.partial, data.partial, state.partial, false)),
+    errorsCount: safeArray(first(dashboard.errors, data.errors, state.errors, [])).length,
+  };
 
   const ticketRows = safeArray(first(view.ticketRows, view.incidenceRows, view.tableRows, view.pageItems, []));
   const invoiceRows = safeArray(first(view.invoiceRows, view.facturaRows, []));
   const recentTickets = safeArray(first(view.recentTickets, view.recentIncidencias, view.latestTickets, view.latestIncidencias, []));
   const recentInvoices = safeArray(first(view.recentInvoices, view.recentFacturas, view.latestInvoices, view.latestFacturas, []));
+  const clients = admin ? safeArray(first(view.clients, view.clientes, view.customers, [])) : [];
+  const users = admin ? safeArray(first(view.users, view.usuarios, [])) : [];
 
   return {
     __homeTemplateVm: true,
 
     data,
     view,
-    state,
+    state: {
+      loading: Boolean(state.loading || data.loading),
+      refreshing: Boolean(state.refreshing || data.refreshing),
+      creating: Boolean(state.creating || data.creating),
+      loaded: Boolean(state.loaded || data.loaded),
+      hydrated: Boolean(state.hydrated || data.hydrated),
+      error: redact(safeText(first(state.error, data.error), "")),
+      openingTicketId: safeText(state.openingTicketId, ""),
+      selectedTicketId: safeText(first(state.selectedTicketId, data.selectedTicketId, data.selectedIncidenciaId), ""),
+      navigatingAction: redact(safeText(state.navigatingAction, "")),
+    },
     meta,
     admin,
+    role: admin ? "admin" : "user",
 
-    role: sidebarUser.role,
-    user: sidebarUser.user,
-    displayName: sidebarUser.displayName,
-    avatarUrl: sidebarUser.avatarUrl,
-    initials: sidebarUser.initials,
+    user: {
+      ...user,
+      displayName: safeText(first(user.displayName, user.name, user.fullName, view.displayName, data.displayName), "Usuario"),
+      name: safeText(first(user.displayName, user.name, user.fullName, view.displayName, data.displayName), "Usuario"),
+      avatarUrl: safeImageSrc(first(user.avatarUrl, user.avatar, user.photoUrl, user.picture, view.avatarUrl, data.avatarUrl, "")),
+      initials: safeText(first(user.initials, view.initials, getInitials(first(user.displayName, user.name, view.displayName), "U")), "U").slice(0, 3).toUpperCase(),
+      role: admin ? "admin" : "user",
+      roleLabel: safeText(first(user.roleLabel, admin ? "Administrador" : "Estándar"), admin ? "Administrador" : "Estándar"),
+      isAdmin: admin,
+      isUser: !admin,
+    },
 
-    dashboard: safeObject(view.dashboard),
+    dashboard,
     summary: safeObject(view.summary),
     stats: safeObject(view.stats),
 
     statCards: safeArray(view.statCards),
     statusPills: safeArray(view.statusPills),
     widgets: safeArray(view.widgets),
+    quickActions: safeArray(view.quickActions),
 
     tickets: safeArray(view.tickets),
     incidencias: safeArray(first(view.incidencias, view.tickets, [])),
@@ -654,11 +349,12 @@ function buildTemplateViewModel(input = {}) {
     recentFacturas: recentInvoices,
     invoiceRows,
 
-    users: admin ? safeArray(view.users) : [],
-    usuarios: admin ? safeArray(first(view.usuarios, view.users, [])) : [],
+    users,
+    usuarios: users,
 
-    clients: admin ? safeArray(view.clients) : [],
-    clientes: admin ? safeArray(first(view.clientes, view.clients, [])) : [],
+    clients,
+    clientes: clients,
+    customers: clients,
 
     activity: safeArray(view.activity),
     recentActivity: safeArray(first(view.recentActivity, view.activity, [])),
@@ -678,2297 +374,610 @@ function buildTemplateViewModel(input = {}) {
   };
 }
 
-function asViewModel(input = {}) {
-  return input && input.__homeTemplateVm === true
-    ? input
-    : buildTemplateViewModel(input);
-}
-
 /* =========================================================
-   Filtros visuales / totales / avatar
+   UI PARTS
 ========================================================= */
 
-function firstDefined(...values) {
-  for (const value of values) {
-    if (value !== undefined && value !== null && value !== "") return value;
-  }
+function avatar({
+  name = "Usuario",
+  image = "",
+  initials = "",
+  kind = "user",
+  seed = "",
+  className = "home-avatar",
+} = {}) {
+  const safeName = safeText(name, "Usuario");
+  const safeImage = safeImageSrc(image);
+  const safeInitials = safeText(initials, getInitials(safeName, "U")).slice(0, 3).toUpperCase();
+  const tone = avatarTone(seed || safeName);
 
-  return undefined;
-}
-
-function hashString(value = "") {
-  const text = safeText(value, "");
-  let hash = 0;
-
-  for (let index = 0; index < text.length; index += 1) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(index);
-    hash |= 0;
-  }
-
-  return Math.abs(hash);
-}
-
-function getAvatarTone(seed = "") {
-  const safeSeed = safeText(seed, "avatar");
-  const index = hashString(safeSeed) % AVATAR_TONES.length;
-
-  return AVATAR_TONES[index] || "violet";
-}
-
-function homeIdentity(...values) {
-  return values
-    .flat(Infinity)
-    .map((value) => safeText(value, ""))
-    .filter(Boolean)
-    .join(" ");
-}
-
-function isBlockedHomeIdentity(...values) {
-  const raw = homeIdentity(...values).toLowerCase();
-  const identity = normalizeKey(raw);
-
-  if (!identity && !raw) return false;
-
-  return Boolean(
-    identity.includes("urgent") ||
-      identity.includes("urgente") ||
-      identity.includes("salud") ||
-      identity.includes("health") ||
-      identity.includes("ready") ||
-      identity.includes("ping") ||
-      identity.includes("server") ||
-      identity.includes("servidor") ||
-      identity.includes("infra") ||
-      identity.includes("adjunto") ||
-      identity.includes("adjuntos") ||
-      identity.includes("archivo") ||
-      identity.includes("archivos") ||
-      identity.includes("documento") ||
-      identity.includes("documentos") ||
-      identity.includes("file") ||
-      identity.includes("files") ||
-      identity.includes("attachment") ||
-      identity.includes("attachments") ||
-      identity.includes("paperclip") ||
-      (
-        (identity.includes("ultima") || identity.includes("last") || raw.includes("última")) &&
-        (identity.includes("actividad") || identity.includes("activity"))
-      )
-  );
-}
-
-function isInvoiceTotalsCard(card = {}) {
-  const raw = homeIdentity(
-    card.id,
-    card.key,
-    card.type,
-    card.kind,
-    card.modifier,
-    card.iconName,
-    card.label,
-    card.title,
-    card.text
-  ).toLowerCase();
-
-  const identity = normalizeKey(raw);
-
-  return Boolean(
-    raw.includes("facturas totales") ||
-      raw.includes("total facturas") ||
-      raw.includes("total de facturas") ||
-      raw.includes("invoices total") ||
-      raw.includes("total invoices") ||
-      (identity.includes("factur") && (identity.includes("total") || identity.includes("totales"))) ||
-      (identity.includes("invoice") && identity.includes("total"))
-  );
-}
-
-function parseAmount(value) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : Number.NaN;
-
-  const text = safeText(value, "").trim();
-  if (!text) return Number.NaN;
-
-  const clean = text.replace(/[^\d,.-]/g, "");
-  if (!clean) return Number.NaN;
-
-  const lastComma = clean.lastIndexOf(",");
-  const lastDot = clean.lastIndexOf(".");
-  const normalized = lastComma > lastDot
-    ? clean.replace(/\./g, "").replace(",", ".")
-    : clean.replace(/,/g, "");
-
-  const amount = Number(normalized);
-
-  return Number.isFinite(amount) ? amount : Number.NaN;
-}
-
-function getInvoicesTotalAmount(vm = {}) {
-  const invoices = safeArray(vm.invoices);
-
-  const candidate = firstDefined(
-    vm.stats.invoiceAmount,
-    vm.stats.paidInvoiceAmount,
-    vm.summary.invoiceAmount,
-    vm.summary.paidInvoiceAmount,
-    vm.summary.billingTotal,
-    vm.summary.totalFacturado,
-    vm.dashboard.invoiceAmount,
-    vm.dashboard.paidInvoiceAmount,
-    vm.dashboard.billingTotal,
-    vm.dashboard.totalFacturado,
-    vm.dashboard.facturacionTotal
-  );
-
-  const candidateAmount = parseAmount(candidate);
-
-  if (Number.isFinite(candidateAmount)) return candidateAmount;
-
-  return invoices.reduce((total, invoice) => {
-    if (!isInvoicePaid(invoice)) return total;
-    return total + safeNumber(getInvoicePaidAmount(invoice), 0);
-  }, 0);
-}
-
-function getInvoicesTotalCount(vm = {}) {
-  const invoices = safeArray(vm.invoices);
-
-  return safeNumber(
-    firstDefined(
-      vm.stats.totalInvoices,
-      vm.summary.totalInvoices,
-      vm.summary.invoicesTotal,
-      vm.summary.facturasTotal,
-      vm.collections.invoicesRemoteCount,
-      vm.dashboard.totalInvoices,
-      vm.dashboard.invoicesTotal,
-      vm.dashboard.facturasTotal
-    ),
-    invoices.length
-  );
-}
-
-function getInvoicesTotalCurrency(vm = {}) {
-  const invoices = safeArray(vm.invoices);
-  const firstInvoice = safeObject(invoices[0]);
-
-  return safeText(
-    firstDefined(
-      vm.collections.invoicesCurrency,
-      vm.dashboard.invoicesCurrency,
-      vm.dashboard.currency,
-      getInvoiceCurrency(firstInvoice)
-    ),
-    DEFAULT_CURRENCY
-  );
-}
-
-function buildInvoicesTotalCard(vm = {}) {
-  const amount = getInvoicesTotalAmount(vm);
-  const currency = getInvoicesTotalCurrency(vm);
-  const count = getInvoicesTotalCount(vm);
-
-  return {
-    id: "facturas-totales",
-    key: "facturas-totales",
-    label: "Facturas totales",
-    value: formatNumber(count),
-    text: `Importe total: ${formatMoney(amount, currency)}`,
-    iconName: "euro",
-    modifier: "invoice-total",
-    route: ROUTES.FACTURAS,
-  };
-}
-
-function translateCard(card = {}, vm = {}) {
-  const admin = Boolean(vm.admin);
-  const identity = normalizeKey(homeIdentity(
-    card.id,
-    card.key,
-    card.type,
-    card.kind,
-    card.modifier,
-    card.iconName,
-    card.label,
-    card.title,
-    card.text
-  ));
-
-  if (identity.includes("ticket") || identity.includes("incid")) {
-    return {
-      ...card,
-      label: admin ? "Incidencias" : "Mis incidencias",
-      text: card.text || (admin ? "Incidencias visibles en el panel." : "Tus solicitudes visibles."),
-    };
-  }
-
-  if (identity.includes("invoice") || identity.includes("factur")) {
-    return {
-      ...card,
-      label: card.label && !String(card.label).toLowerCase().includes("invoice")
-        ? card.label
-        : "Facturas",
-      text: card.text || "Facturación visible.",
-    };
-  }
-
-  if (identity.includes("client") || identity.includes("cliente") || identity.includes("customer")) {
-    return {
-      ...card,
-      label: "Clientes",
-      text: card.text || "Clientes visibles.",
-    };
-  }
-
-  if (identity.includes("user") || identity.includes("usuario") || identity.includes("member")) {
-    return {
-      ...card,
-      label: "Usuarios",
-      text: card.text || "Usuarios visibles.",
-    };
-  }
-
-  return card;
-}
-
-function getVisibleHomeStatCards(vm = {}) {
-  const cards = safeArray(vm.statCards)
-    .map((card) => translateCard(card, vm))
-    .filter((card) => !isBlockedHomeIdentity(
-      card.id,
-      card.key,
-      card.type,
-      card.kind,
-      card.modifier,
-      card.iconName,
-      card.label,
-      card.title,
-      card.text,
-      card.badge,
-      card.value
-    ));
-
-  const hasInvoiceTotals = cards.some(isInvoiceTotalsCard);
-
-  if (hasInvoiceTotals) return cards;
-
-  return [
-    ...cards,
-    buildInvoicesTotalCard(vm),
-  ];
-}
-
-function inferHomeRouteFromIdentity(...values) {
-  const identity = normalizeKey(homeIdentity(...values));
-
-  if (!identity) return "";
-
-  if (
-    identity.includes("factur") ||
-    identity.includes("invoice") ||
-    identity.includes("billing") ||
-    identity.includes("bill") ||
-    identity.includes("euro")
-  ) {
-    return ROUTES.FACTURAS;
-  }
-
-  if (
-    identity.includes("client") ||
-    identity.includes("cliente") ||
-    identity.includes("customer") ||
-    identity.includes("directorio")
-  ) {
-    return ROUTES.CLIENTES;
-  }
-
-  if (
-    identity.includes("usuario") ||
-    identity.includes("user") ||
-    identity.includes("member") ||
-    identity.includes("miembro")
-  ) {
-    return ROUTES.USUARIOS;
-  }
-
-  if (
-    identity.includes("incid") ||
-    identity.includes("ticket") ||
-    identity.includes("solicitud") ||
-    identity.includes("open") ||
-    identity.includes("abiert") ||
-    identity.includes("closed") ||
-    identity.includes("cerrad")
-  ) {
-    return ROUTES.INCIDENCIAS;
-  }
-
-  return "";
-}
-
-function resolveStatRoute(card = {}) {
-  const explicitRoute = safeRoute(first(card.route, card.href, card.to, ""), "");
-
-  if (explicitRoute) return explicitRoute;
-
-  return inferHomeRouteFromIdentity(
-    card.id,
-    card.key,
-    card.type,
-    card.kind,
-    card.modifier,
-    card.iconName,
-    card.label,
-    card.title,
-    card.text,
-    card.badge
-  ) || ROUTES.INCIDENCIAS;
-}
-
-function filterActivityForRole(vm = {}, rows = []) {
-  const activity = safeArray(rows).filter((item) => !isBlockedHomeIdentity(
-    item.type,
-    item.kind,
-    item.category,
-    item.title,
-    item.text,
-    getActivityType(item),
-    getActivityTitle(item),
-    getActivityText(item)
-  ));
-
-  if (vm.admin) return activity;
-
-  return activity.filter((item) => {
-    const type = normalizeKey(first(item.type, item.kind, item.category, ""));
-
-    return ![
-      "client",
-      "cliente",
-      "customer",
-      "user",
-      "usuario",
-      "member",
-      "server",
-      "servidor",
-    ].includes(type);
-  });
-}
-
-/* =========================================================
-   Iconos
-========================================================= */
-
-function icon(name = "activity") {
-  const common =
-    `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
-
-  const icons = {
-    home: `<svg ${common}><path d="m3 10.5 9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>`,
-    refresh: `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
-    plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
-    ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
-    invoice: `<svg ${common}><path d="M6 2h12v20l-3-2-3 2-3-2-3 2Z"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>`,
-    client: `<svg ${common}><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9h.01"/><path d="M9 13h.01"/><path d="M9 17h.01"/></svg>`,
-    users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
-    activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
-    euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
-    clock: `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
-    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-    shield: `<svg ${common}><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.48 17.01 5 19 5a1 1 0 0 1 1 1z"/></svg>`,
-    spark: `<svg ${common}><path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 21l-1.9-7.8L4 11l6.1-2.2Z"/></svg>`,
-    eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
-    copy: `<svg ${common}><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
-    download: `<svg ${common}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>`,
-    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-    chevronLeft: `<svg ${common}><path d="m15 18-6-6 6-6"/></svg>`,
-    chevronRight: `<svg ${common}><path d="m9 18 6-6-6-6"/></svg>`,
-    arrowRight: `<svg ${common}><path d="M5 12h14"/><path d="m13 5 7 7-7 7"/></svg>`,
-  };
-
-  return icons[name] || icons.activity;
-}
-
-/* =========================================================
-   UI pequeña
-========================================================= */
-
-function spinner(label = "Cargando") {
   return `
-    <span class="home-inline-loading" role="status" aria-label="${attr(label)}">
-      <span class="home-inline-spinner" aria-hidden="true"></span>
-      <span class="home-inline-loading-text">${escapeHtml(label)}</span>
+    <span
+      class="${attr(joinClasses(className, safeImage ? "has-image" : "is-fallback"))}"
+      data-avatar-kind="${attr(kind)}"
+      data-avatar-tone="${attr(tone)}"
+      title="${attr(safeName)}"
+      aria-label="${attr(safeName)}"
+    >
+      ${safeImage
+        ? `<img src="${attr(safeImage)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">`
+        : ""
+      }
+      <span class="home-avatar-initials" aria-hidden="true">${escapeHtml(safeInitials)}</span>
     </span>
   `;
 }
 
-function emptyState({
-  title = "No hay datos para mostrar",
-  text = "Cuando haya información disponible aparecerá aquí.",
-  action = "",
-  actionLabel = "Continuar",
-  iconName = "spark",
-} = {}) {
-  return `
-    <div class="home-empty">
-      <div class="home-empty-icon" aria-hidden="true">${icon(iconName)}</div>
-      <h3 class="home-empty-title">${escapeHtml(title)}</h3>
-      <p class="home-empty-text">${escapeHtml(text)}</p>
-      ${action ? `
-        <button type="button" class="home-btn home-btn--primary" data-home-action="${attr(action)}" data-action="${attr(action)}">
-          ${escapeHtml(actionLabel)}
-        </button>
-      ` : ""}
-    </div>
-  `;
-}
-
 function loadingCards(count = 4) {
-  return `
-    <div class="home-cards-loading" aria-hidden="true">
-      ${Array.from({ length: Math.max(1, safeNumber(count, 4)) })
-        .map(() => `
-          <div class="home-card-skeleton">
-            <div class="home-skeleton home-skeleton--icon"></div>
-            <div class="home-skeleton home-skeleton--xs"></div>
-            <div class="home-skeleton home-skeleton--xl"></div>
-            <div class="home-skeleton home-skeleton--md"></div>
-          </div>
-        `)
-        .join("")}
-    </div>
-  `;
+  return Array.from({ length: count }, (_, index) => `
+    <article class="home-stat-card home-stat-card--loading" aria-hidden="true">
+      <span class="home-skeleton home-skeleton--icon"></span>
+      <span class="home-skeleton home-skeleton--title"></span>
+      <span class="home-skeleton home-skeleton--value"></span>
+      <span class="home-skeleton home-skeleton--text"></span>
+      <span class="sr-only">Cargando bloque ${index + 1}</span>
+    </article>
+  `).join("");
 }
 
 function loadingRows(count = DEFAULT_PAGE_SIZE) {
+  return Array.from({ length: count }, (_, index) => `
+    <div class="home-row-skeleton" aria-hidden="true">
+      <span class="home-skeleton home-skeleton--avatar"></span>
+      <span class="home-skeleton home-skeleton--wide"></span>
+      <span class="home-skeleton home-skeleton--small"></span>
+      <span class="sr-only">Cargando fila ${index + 1}</span>
+    </div>
+  `).join("");
+}
+
+function emptyState({
+  title = "Sin datos",
+  text = "No hay información disponible.",
+  action = "",
+  actionLabel = "",
+  iconName = "activity",
+} = {}) {
   return `
-    <div class="home-table-loading" aria-hidden="true">
-      ${Array.from({ length: Math.max(1, safeNumber(count, DEFAULT_PAGE_SIZE)) })
-        .map(() => `
-          <div class="home-table-loading-row">
-            <div class="home-skeleton home-skeleton--avatar"></div>
-            <div class="home-table-loading-copy">
-              <div class="home-skeleton home-skeleton--xs"></div>
-              <div class="home-skeleton home-skeleton--lg"></div>
-              <div class="home-skeleton home-skeleton--md"></div>
-            </div>
-            <div class="home-skeleton home-skeleton--pill"></div>
-            <div class="home-skeleton home-skeleton--date"></div>
-            <div class="home-skeleton home-skeleton--btn"></div>
-          </div>
-        `)
-        .join("")}
+    <div class="home-empty-state">
+      <span class="home-empty-state-icon" aria-hidden="true">${icon(iconName)}</span>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(text)}</p>
+      ${action
+        ? `<button type="button" class="home-btn" data-home-action="${attr(action)}" data-action="${attr(action)}">${escapeHtml(actionLabel || "Actualizar")}</button>`
+        : ""
+      }
     </div>
   `;
 }
 
 function errorBanner(message = "") {
-  const text = redact(safeText(message, ""));
+  const clean = safeText(message, "");
 
-  if (!text) return "";
+  if (!clean) return "";
 
   return `
-    <div class="home-error-banner" role="status" data-home-error-banner="true">
-      <span class="home-error-banner-icon" aria-hidden="true">${icon("alert")}</span>
-      <span class="home-error-banner-text">${escapeHtml(text)}</span>
-      <button type="button" class="home-error-banner-action" data-home-action="${ACTIONS.RETRY}" data-action="${ACTIONS.RETRY}">
+    <div class="home-alert home-alert--error" role="alert">
+      ${icon("alert")}
+      <span>${escapeHtml(redact(clean))}</span>
+      <button type="button" class="home-btn home-btn--ghost" data-home-action="${ACTIONS.RETRY}" data-action="${ACTIONS.RETRY}">
         Reintentar
       </button>
     </div>
   `;
 }
 
-function avatar({
-  name = "Usuario",
-  image = "",
-  kind = "user",
-  seed = "",
-  initials = "",
-  className = "home-avatar",
-} = {}) {
-  const label = visualLabel(name, "Usuario");
-  const fallbackInitials = safeText(first(initials, getInitials(label)), "U")
-    .slice(0, 3)
-    .toUpperCase();
-  const src = safeImageSrc(image);
-  const avatarSeedBase = safeText(first(seed, label, fallbackInitials, kind), label);
-  const avatarSeed = getInitials(avatarSeedBase);
-  const tone = getAvatarTone(`${kind}|${avatarSeedBase}|${label}`);
-  const toneIndex = Math.max(1, AVATAR_TONES.indexOf(tone) + 1);
-  const fallbackClass = `${safeText(className, "home-avatar")}--fallback`;
+function renderHomeHeader(vm = {}) {
+  const user = safeObject(vm.user);
+  const name = safeText(first(user.displayName, user.name), "Usuario");
+  const roleLabel = safeText(user.roleLabel, vm.admin ? "Administrador" : "Estándar");
+  const lastUpdate = vm.meta?.lastUpdatedAt ? formatLastUpdate(vm.meta.lastUpdatedAt) : "Sin fecha";
 
   return `
-    <div
-      class="${joinClasses(className, src ? "has-image" : fallbackClass, src ? "" : "is-fallback", `home-avatar-tone-${tone}`)}"
-      aria-label="${attr(label)}"
-      data-tooltip="${attr(label)}"
-      title="${attr(label)}"
-      data-avatar-root="true"
-      data-avatar-kind="${attr(kind)}"
-      data-avatar-seed="${attr(avatarSeed)}"
-      data-avatar-initials="${attr(fallbackInitials)}"
-      data-avatar-tone="${attr(tone)}"
-      data-avatar-color-index="${attr(String(toneIndex))}"
-      data-avatar-state="${src ? "image" : "fallback"}"
-      data-fallback="${src ? "false" : "true"}"
-    >
-      <span class="${attr(className)}-fallback" aria-hidden="true">${escapeHtml(fallbackInitials)}</span>
-      ${src ? `
-        <img
-          class="${attr(className)}-img"
-          src="${attr(src)}"
-          alt="${attr(label)}"
-          loading="lazy"
-          decoding="async"
-          referrerpolicy="no-referrer"
-          draggable="false"
-        >
-      ` : ""}
-    </div>
-  `;
-}
-
-/* =========================================================
-   Estados visuales
-========================================================= */
-
-function ticketStatusLabel(item = {}) {
-  const key = safeText(first(item.statusKey, getTicketStatusKey(getTicketStatus(item))), "pending");
-
-  const labels = {
-    pending: "Pendiente",
-    open: "Abierta",
-    progress: "En curso",
-    in_progress: "En curso",
-    resolved: "Resuelta",
-    closed: "Cerrada",
-    cancelled: "Cancelada",
-    canceled: "Cancelada",
-  };
-
-  return safeText(first(item.statusLabel, labels[key], getTicketStatusLabel(item)), "Pendiente");
-}
-
-function statusChip(item = {}) {
-  const key = safeText(first(item.statusKey, getTicketStatusKey(item)), "pending");
-  const label = ticketStatusLabel(item);
-
-  return `
-    <span class="home-chip home-chip--${attr(key)}" data-status-key="${attr(key)}">
-      <span class="home-chip-dot" aria-hidden="true"></span>
-      ${escapeHtml(label)}
-    </span>
-  `;
-}
-
-function priorityBadge(item = {}) {
-  const key = safeText(first(item.priorityKey, getTicketPriorityKey(item)), "medium");
-
-  const labels = {
-    low: "Baja",
-    medium: "Media",
-    normal: "Normal",
-    high: "Alta",
-    urgent: "Urgente",
-    critical: "Crítica",
-  };
-
-  const label = safeText(first(item.priorityLabel, labels[key]), "Media");
-
-  return `
-    <span class="home-mini-badge home-mini-badge--${attr(key)}" data-priority-key="${attr(key)}">
-      ${icon(key === "critical" || key === "urgent" ? "alert" : "activity")}
-      ${escapeHtml(label)}
-    </span>
-  `;
-}
-
-/* =========================================================
-   Cabecera / métricas
-========================================================= */
-
-function heroMetrics(stats = {}) {
-  const items = [
-    ["Abiertas", stats.activeTickets ?? stats.openTickets ?? 0, "open"],
-    ["Cerradas", stats.closedTickets ?? 0, "closed"],
-  ];
-
-  return `
-    <div class="home-hero-minimetrics home-hero-minimetrics--compact" aria-label="Métricas rápidas">
-      ${items
-        .map(([label, value, key]) => `
-          <span class="home-minimetric home-minimetric--${attr(key)}">
-            <strong>${escapeHtml(String(value ?? 0))}</strong>
-            <span>${escapeHtml(label)}</span>
-          </span>
-        `)
-        .join("")}
-    </div>
-  `;
-}
-
-function statCard(card = {}, index = 0) {
-  const value = safeText(card.value, "0");
-  const label = safeText(card.label, "Métrica");
-  const iconName = safeText(card.iconName, "activity");
-  const modifier = normalizeKey(card.modifier || iconName || `stat-${index + 1}`);
-  const route = resolveStatRoute(card);
-
-  return `
-    <button
-      type="button"
-      class="home-stat-card home-stat-card--clickable home-stat-card--${attr(modifier)}"
-      data-home-action="${ACTIONS.NAVIGATE}"
-      data-action="${ACTIONS.NAVIGATE}"
-      data-route="${attr(route)}"
-      data-href="${attr(route)}"
-      data-home-stat-card="true"
-      data-stat-index="${attr(index + 1)}"
-      data-stat-modifier="${attr(modifier)}"
-      data-payload="${jsonAttr({ stat: modifier, route })}"
-      aria-label="Abrir ${attr(label)}"
-    >
-      <span class="home-stat-topline">
-        <span class="home-stat-icon" aria-hidden="true">${icon(iconName)}</span>
-        ${card.badge ? `<span class="home-stat-badge">${escapeHtml(card.badge)}</span>` : ""}
-      </span>
-      <span class="home-stat-label">${escapeHtml(label)}</span>
-      <strong class="home-stat-value" data-stat-value="${attr(value)}">${escapeHtml(value)}</strong>
-      ${card.text ? `<span class="home-stat-text">${escapeHtml(card.text)}</span>` : ""}
-    </button>
-  `;
-}
-
-export function renderHomeHeader(input = {}) {
-  const vm = asViewModel(input);
-  const state = vm.state;
-  const stats = vm.stats;
-  const meta = vm.meta;
-  const admin = vm.admin;
-  const displayName = vm.displayName;
-  const user = vm.user;
-
-  const title = admin ? "Centro de control Onion" : `Hola, ${displayName}`;
-  const subtitle = admin
-    ? "Vista clara de usuarios, clientes, incidencias y facturas."
-    : "Tus incidencias, facturas y actividad principal de un vistazo.";
-
-  return `
-    <section
-      class="home-hero home-hero--frameless home-hero--${admin ? "admin" : "user"}"
-      data-home-section="hero"
-      data-home-role="${admin ? "admin" : "user"}"
-    >
-      <div class="home-hero-top">
-        <div class="home-hero-main">
-          ${avatar({
-            name: displayName,
-            image: vm.avatarUrl,
-            kind: "user",
-            seed: safeText(first(user.userId, user.id, user.username, displayName), displayName),
-            initials: vm.initials,
-            className: "home-user-avatar",
-          })}
-
-          <div class="home-hero-copy">
-            <h1 class="home-page-title">${escapeHtml(title)}</h1>
-            <p class="home-page-subtitle">${escapeHtml(subtitle)}</p>
-          </div>
-        </div>
-
-        <div class="home-hero-actions">
-          <button
-            type="button"
-            id="home-refresh-btn"
-            class="${joinClasses("home-btn", state.refreshing ? "is-loading" : "")}"
-            data-home-action="${ACTIONS.REFRESH}"
-            data-action="${ACTIONS.REFRESH}"
-            aria-label="Actualizar Home"
-            ${boolAttr(state.refreshing || state.loading, 'disabled aria-busy="true"')}
-          >
-            ${state.refreshing ? spinner("Actualizando...") : `${icon("refresh")}<span class="home-btn-text">Actualizar</span>`}
-          </button>
-
-          <button
-            type="button"
-            id="home-export-btn"
-            class="home-btn home-btn--ghost"
-            data-home-action="${ACTIONS.EXPORT_CSV}"
-            data-action="${ACTIONS.EXPORT_CSV}"
-            data-export-mode="tickets"
-            data-export-filename="home-incidencias.csv"
-            ${boolAttr(state.loading || state.refreshing, "disabled")}
-          >
-            ${icon("download")}
-            <span class="home-btn-text">Exportar</span>
-          </button>
-
-          <button
-            type="button"
-            id="home-create-ticket-btn"
-            class="${joinClasses("home-btn home-btn--primary", state.creating ? "is-loading" : "")}"
-            data-home-action="${ACTIONS.CREATE_INCIDENCIA}"
-            data-action="${ACTIONS.CREATE_INCIDENCIA}"
-            data-route="${attr(ROUTES.INCIDENCIAS)}"
-            data-href="${attr(ROUTES.INCIDENCIAS)}"
-            ${boolAttr(state.creating || state.loading || state.refreshing, 'disabled aria-busy="true"')}
-          >
-            ${state.creating ? spinner("Abriendo...") : `${icon("plus")}<span class="home-btn-text">Crear incidencia</span>`}
-          </button>
+    <header class="home-header" data-home-section="header">
+      <div class="home-header-main">
+        ${avatar({
+          name,
+          image: user.avatarUrl,
+          initials: user.initials,
+          kind: "current-user",
+          seed: safeText(first(user.id, user.userId, user.slug, name), name),
+          className: "home-current-user-avatar",
+        })}
+        <div>
+          <p class="home-kicker">${escapeHtml(roleLabel)}</p>
+          <h1>Hola, ${escapeHtml(name)}</h1>
+          <p class="home-subtitle">
+            ${vm.admin
+              ? "Resumen operativo de clientes, usuarios, incidencias y facturas."
+              : "Resumen de tus incidencias y facturas."
+            }
+          </p>
         </div>
       </div>
 
-      <div class="home-hero-meta">
-        <span class="home-meta-pill">${icon("ticket")}${escapeHtml(`${formatNumber(stats.totalTickets)} incidencias`)}</span>
-        <span class="home-meta-pill">${icon("invoice")}${escapeHtml(`${formatNumber(stats.pendingInvoices)} facturas pendientes`)}</span>
-        <span class="home-meta-pill">
-          ${icon("refresh")}
-          ${meta.lastUpdatedAt ? escapeHtml(`Actualizado · ${formatRelativeDate(meta.lastUpdatedAt)}`) : "Sin sincronización reciente"}
+      <div class="home-header-actions">
+        <span class="home-last-update">
+          ${icon("clock")}
+          <span>Actualizado: ${escapeHtml(lastUpdate)}</span>
         </span>
-      </div>
 
-      ${heroMetrics(stats)}
+        <button type="button" class="home-btn" data-home-action="${ACTIONS.REFRESH}" data-action="${ACTIONS.REFRESH}">
+          ${icon("refresh")}
+          Actualizar
+        </button>
 
-      <div class="home-stats" data-home-section="stats">
-        ${getVisibleHomeStatCards(vm).map(statCard).join("")}
+        <button
+          type="button"
+          class="home-btn home-btn--primary"
+          data-home-action="${ACTIONS.CREATE_INCIDENCIA}"
+          data-action="${ACTIONS.CREATE_INCIDENCIA}"
+          data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
+          data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
+        >
+          ${icon("plus")}
+          Crear incidencia
+        </button>
       </div>
+    </header>
+
+    ${renderHomeStats(vm)}
+  `;
+}
+
+function renderHomeStats(vm = {}) {
+  const cards = safeArray(vm.statCards).slice(0, vm.admin ? 4 : 3);
+
+  if (!cards.length) {
+    return `
+      <section class="home-stats" data-home-section="stats">
+        ${loadingCards(vm.admin ? 4 : 3)}
+      </section>
+    `;
+  }
+
+  return `
+    <section class="home-stats" data-home-section="stats">
+      ${cards.map((card) => statCard(card)).join("")}
     </section>
   `;
 }
 
-/* =========================================================
-   Widgets y accesos rápidos anulados
-========================================================= */
-
-export function renderHomeWidgets() {
-  return "";
-}
-
-export function renderHomeQuickActions() {
-  return "";
-}
-
-/* =========================================================
-   Actividad / facturación / entidades
-========================================================= */
-
-function routeForActivityType(typeKey = "") {
-  if (typeKey === "invoice" || typeKey === "factura") return ROUTES.FACTURAS;
-  if (typeKey === "client" || typeKey === "cliente" || typeKey === "customer") return ROUTES.CLIENTES;
-  if (typeKey === "user" || typeKey === "usuario" || typeKey === "member") return ROUTES.USUARIOS;
-
-  return ROUTES.INCIDENCIAS;
-}
-
-function activityIcon(typeKey = "") {
-  if (typeKey === "invoice" || typeKey === "factura") return "invoice";
-  if (typeKey === "client" || typeKey === "cliente" || typeKey === "customer") return "client";
-  if (typeKey === "user" || typeKey === "usuario" || typeKey === "member") return "users";
-  if (typeKey === "ticket" || typeKey === "incidencia") return "ticket";
-
-  return "activity";
-}
-
-function activityItem(vm = {}, item = {}) {
-  const type = getActivityType(item);
-  const typeKey = normalizeKey(type);
-  const admin = vm.admin;
-
-  if (
-    !admin &&
-    ["client", "cliente", "customer", "user", "usuario", "member"].includes(typeKey)
-  ) {
-    return "";
-  }
-
-  if (isBlockedHomeIdentity(type, getActivityTitle(item), getActivityText(item))) {
-    return "";
-  }
-
-  const route = safeRoute(first(item.route, item.href, item.link, item.to, ""), "") || routeForActivityType(typeKey);
-
-  if (!route) return "";
-  if (!admin && isAdminOnlyRoute(route)) return "";
-
-  const entityId = safeText(first(item.entityId, item.id, item.ticketId, item.incidenciaId, item.facturaId, item.invoiceId), "");
+function statCard(card = {}) {
+  const route = safeRoute(first(card.route, card.href, ""), HOME_ROUTES.INCIDENCIAS);
+  const id = safeText(first(card.id, card.key, card.widgetId, card.label), "stat");
+  const iconName = safeText(first(card.iconName, card.icon, "activity"), "activity");
+  const label = safeText(first(card.label, card.title, "Métrica"), "Métrica");
+  const value = first(card.value, card.count, card.total, 0);
+  const text = safeText(first(card.text, card.description, card.subtitle, ""), "");
+  const modifier = normalizeKey(first(card.modifier, card.type, card.kind, id));
 
   return `
-    <button
-      type="button"
-      class="home-activity-item home-activity-item--${attr(type || "activity")}"
-      data-home-action="${ACTIONS.NAVIGATE}"
-      data-action="${ACTIONS.NAVIGATE}"
+    <article
+      class="home-stat-card home-stat-card--${attr(modifier || "default")}"
+      data-home-widget-id="${attr(id)}"
+      data-widget-id="${attr(id)}"
       data-route="${attr(route)}"
-      data-href="${attr(route)}"
-      data-entity-id="${attr(entityId)}"
-      data-payload="${jsonAttr({ type, route, entityId })}"
     >
-      <span class="home-activity-icon" aria-hidden="true">${icon(activityIcon(typeKey))}</span>
-      <span class="home-activity-copy">
-        <strong class="home-activity-title">${escapeHtml(getActivityTitle(item))}</strong>
-        <span class="home-activity-text">${escapeHtml(getActivityText(item))}</span>
-      </span>
-      <span class="home-activity-time" title="${attr(formatDateTime(getActivityDate(item)))}">
-        ${escapeHtml(formatRelativeDate(getActivityDate(item)))}
-      </span>
-    </button>
+      <button
+        type="button"
+        class="home-stat-card-button"
+        data-home-action="${ACTIONS.NAVIGATE}"
+        data-action="${ACTIONS.NAVIGATE}"
+        data-route="${attr(route)}"
+        data-href="${attr(route)}"
+        data-widget-id="${attr(id)}"
+        aria-label="${attr(label)}"
+      >
+        <span class="home-stat-icon" aria-hidden="true">${icon(iconName)}</span>
+        <span class="home-stat-content">
+          <span class="home-stat-label">${escapeHtml(label)}</span>
+          <strong class="home-stat-value">${escapeHtml(String(value))}</strong>
+          ${text ? `<span class="home-stat-text">${escapeHtml(text)}</span>` : ""}
+        </span>
+      </button>
+    </article>
   `;
 }
 
-export function renderHomeActivity(input = {}) {
-  const vm = asViewModel(input);
-  const state = vm.state;
-  const activity = filterActivityForRole(vm, vm.activity).slice(0, LIMITS.activity);
-  const items = activity.map((item) => activityItem(vm, item)).filter(Boolean);
+function renderHomeActivity(vm = {}) {
+  const items = safeArray(vm.activity).slice(0, LIMITS.activity);
 
   return `
     <section class="home-panel home-panel--activity" data-home-section="activity">
-      <div class="home-panel-head">
-        <div class="home-panel-copy">
-          <span class="home-panel-kicker">Actividad</span>
-          <h2 class="home-panel-title">Últimas acciones</h2>
-          <p class="home-panel-subtitle">
-            ${state.loading && !items.length ? "Cargando actividad..." : escapeHtml(`${formatNumber(items.length)} últimas acciones`)}
-          </p>
+      <div class="home-panel-header">
+        <div>
+          <p class="home-panel-kicker">Actividad</p>
+          <h2>Últimos movimientos</h2>
         </div>
-
-        <button
-          type="button"
-          class="home-panel-link"
-          data-home-action="${ACTIONS.NAVIGATE}"
-          data-action="${ACTIONS.NAVIGATE}"
-          data-route="${attr(ROUTES.INCIDENCIAS)}"
-          data-href="${attr(ROUTES.INCIDENCIAS)}"
-        >
-          Ver incidencias ${icon("arrowRight")}
+        <button type="button" class="home-link-button" data-home-action="${ACTIONS.REFRESH}" data-action="${ACTIONS.REFRESH}">
+          Actualizar
         </button>
       </div>
 
-      ${state.loading && !items.length
-        ? loadingCards(3)
-        : items.length
-          ? `<div class="home-activity-list">${items.join("")}</div>`
-          : emptyState({
-              title: "Sin actividad reciente",
-              text: "Cuando haya movimientos aparecerán aquí.",
-              iconName: "clock",
-            })
+      ${items.length
+        ? `<ul class="home-activity-list">${items.map(activityItem).join("")}</ul>`
+        : emptyState({
+            title: "Sin actividad reciente",
+            text: "Todavía no hay movimientos visibles en el Home.",
+            iconName: "activity",
+          })
       }
     </section>
   `;
 }
 
-function invoiceItem(item = {}) {
-  const id = safeText(first(item.fullId, item.displayId, item.invoiceId, item.facturaId, getInvoiceId(item)), "FAC-SIN-ID");
-  const rawInvoice = safeObject(item);
-  const currency = getInvoiceCurrency(rawInvoice);
-  const status = safeText(first(rawInvoice.statusKey, getInvoiceStatusKey(rawInvoice)), "pending");
-  const statusLabel = safeText(first(rawInvoice.statusLabel, getInvoiceStatusLabel(rawInvoice)), "Pendiente");
-  const paid = Boolean(first(rawInvoice.isPaid, rawInvoice.paid, isInvoicePaid(rawInvoice)));
-  const amount = paid
-    ? safeNumber(first(rawInvoice.paidAmount, rawInvoice.amount, getInvoicePaidAmount(rawInvoice)), 0)
-    : 0;
+function activityItem(item = {}) {
+  const type = getActivityType(item);
+  const title = getActivityTitle(item);
+  const text = getActivityText(item);
+  const date = getActivityDate(item);
 
   return `
-    <button
-      type="button"
-      class="home-invoice-mini home-invoice-mini--${attr(status)}"
-      data-home-action="${ACTIONS.NAVIGATE}"
-      data-action="${ACTIONS.NAVIGATE}"
-      data-route="${attr(ROUTES.FACTURAS)}"
-      data-href="${attr(ROUTES.FACTURAS)}"
-      data-invoice-id="${attr(id)}"
-      data-factura-id="${attr(id)}"
-      data-entity-id="${attr(id)}"
-      data-payload="${jsonAttr({ invoiceId: id, facturaId: id })}"
-    >
-      <span class="home-invoice-mini-icon" aria-hidden="true">${icon("invoice")}</span>
-      <span class="home-invoice-mini-copy">
-        <strong>${escapeHtml(id || "Factura")}</strong>
-        ${paid ? `<span>${escapeHtml(formatMoney(amount, currency || DEFAULT_CURRENCY))}</span>` : ""}
+    <li class="home-activity-item home-activity-item--${attr(type)}">
+      <span class="home-activity-icon" aria-hidden="true">${icon(type === "invoice" ? "invoice" : type === "ticket" ? "ticket" : "activity")}</span>
+      <span class="home-activity-body">
+        <strong>${escapeHtml(title)}</strong>
+        <span>${escapeHtml(text)}</span>
       </span>
-      <span class="home-invoice-mini-status">${escapeHtml(statusLabel)}</span>
-    </button>
-  `;
-}
-
-export function renderHomeInvoicePreview(input = {}) {
-  const vm = asViewModel(input);
-  const state = vm.state;
-  const invoices = safeArray(first(vm.invoiceRows, vm.recentInvoices, vm.invoices, [])).slice(0, LIMITS.invoices);
-  const total = safeNumber(first(vm.collections.invoicesRemoteCount, vm.stats.totalInvoices, vm.invoices.length), vm.invoices.length);
-
-  return `
-    <section class="home-panel home-panel--invoice-preview" data-home-section="invoice-preview">
-      <div class="home-panel-head">
-        <div class="home-panel-copy">
-          <span class="home-panel-kicker">Facturación</span>
-          <h2 class="home-panel-title">${vm.admin ? "Últimas facturas" : "Mis últimas facturas"}</h2>
-          <p class="home-panel-subtitle">
-            ${state.loading && !invoices.length ? "Cargando facturas..." : escapeHtml(`Mostrando ${formatNumber(invoices.length)} de ${formatNumber(total)} facturas`)}
-          </p>
-        </div>
-
-        <button
-          type="button"
-          class="home-panel-link"
-          data-home-action="${ACTIONS.NAVIGATE}"
-          data-action="${ACTIONS.NAVIGATE}"
-          data-route="${attr(ROUTES.FACTURAS)}"
-          data-href="${attr(ROUTES.FACTURAS)}"
-        >
-          Ver facturas ${icon("arrowRight")}
-        </button>
-      </div>
-
-      ${state.loading && !invoices.length
-        ? loadingCards(3)
-        : invoices.length
-          ? `<div class="home-invoice-mini-list">${invoices.map(invoiceItem).join("")}</div>`
-          : emptyState({
-              title: "Sin facturas visibles",
-              text: "Cuando haya facturas disponibles aparecerán aquí.",
-              iconName: "invoice",
-            })
-      }
-    </section>
-  `;
-}
-
-function entityName(item = {}, type = "client") {
-  return visualLabel(
-    first(item.displayName, item.fullName, item.name, item.nombre, item.razonSocial, item.company, item.username),
-    type === "user" ? "Usuario" : "Cliente"
-  );
-}
-
-function entityMeta(item = {}, type = "client") {
-  if (type === "user") return safeText(first(item.role, item.rol, "Usuario"), "Usuario");
-
-  return safeText(first(item.clientId, item.clienteId, item.customerId, item.id, "Cliente"), "Cliente");
-}
-
-function entityItem(item = {}, type = "client") {
-  const isUser = type === "user";
-  const label = entityName(item, type);
-  const route = isUser ? ROUTES.USUARIOS : ROUTES.CLIENTES;
-  const entityId = safeText(first(item.userId, item.usuarioId, item.clienteId, item.clientId, item.customerId, item.id), "");
-
-  if (!route) return "";
-
-  return `
-    <button
-      type="button"
-      class="home-entity-mini home-entity-mini--${isUser ? "user" : "client"}"
-      data-home-action="${ACTIONS.NAVIGATE}"
-      data-action="${ACTIONS.NAVIGATE}"
-      data-route="${attr(route)}"
-      data-href="${attr(route)}"
-      data-entity-id="${attr(entityId)}"
-      data-payload="${jsonAttr({ type, entityId })}"
-    >
-      <span class="home-entity-mini-avatar" data-avatar-seed="${attr(getInitials(label))}" aria-hidden="true">
-        ${escapeHtml(getInitials(label))}
-      </span>
-      <span class="home-entity-mini-copy">
-        <strong>${escapeHtml(label)}</strong>
-        <span>${escapeHtml(entityMeta(item, type))}</span>
-      </span>
-      <span class="home-entity-mini-arrow" aria-hidden="true">${icon("chevronRight")}</span>
-    </button>
-  `;
-}
-
-export function renderHomeEntitiesPreview(input = {}) {
-  const vm = asViewModel(input);
-  const state = vm.state;
-
-  if (!vm.admin) return "";
-
-  const clients = safeArray(vm.clients).slice(0, LIMITS.entities);
-  const users = safeArray(vm.users).slice(0, LIMITS.entities);
-
-  const clientItems = clients.map((item) => entityItem(item, "client")).filter(Boolean);
-  const userItems = users.map((item) => entityItem(item, "user")).filter(Boolean);
-
-  return `
-    <section class="home-panel home-panel--entities" data-home-section="entities">
-      <div class="home-panel-head">
-        <div class="home-panel-copy">
-          <span class="home-panel-kicker">Directorio</span>
-          <h2 class="home-panel-title">Clientes y usuarios</h2>
-          <p class="home-panel-subtitle">
-            ${state.loading && !clientItems.length && !userItems.length
-              ? "Cargando directorio..."
-              : escapeHtml(`${formatNumber(vm.collections.clientsRemoteCount || clients.length)} clientes · ${formatNumber(vm.collections.usersRemoteCount || users.length)} usuarios`)
-            }
-          </p>
-        </div>
-
-        <button
-          type="button"
-          class="home-panel-link"
-          data-home-action="${ACTIONS.NAVIGATE}"
-          data-action="${ACTIONS.NAVIGATE}"
-          data-route="${attr(ROUTES.CLIENTES)}"
-          data-href="${attr(ROUTES.CLIENTES)}"
-        >
-          Ver clientes ${icon("arrowRight")}
-        </button>
-      </div>
-
-      ${state.loading && !clientItems.length && !userItems.length
-        ? loadingCards(3)
-        : `
-          <div class="home-entities-list">
-            ${clientItems.length
-              ? clientItems.join("")
-              : emptyState({
-                  title: "Sin clientes visibles",
-                  text: "Cuando haya clientes disponibles aparecerán aquí.",
-                  iconName: "client",
-                })
-            }
-            ${userItems.length ? `
-              <div class="home-entities-separator" aria-hidden="true"></div>
-              ${userItems.join("")}
-            ` : ""}
-          </div>
-        `
-      }
-    </section>
-  `;
-}
-
-/* =========================================================
-   Tabla de incidencias
-========================================================= */
-
-function getRawItem(item = {}) {
-  return safeObject(first(item.raw, item.data, item.payload, {}));
-}
-
-function tooltipAttrs(tooltip = "", ariaLabel = "") {
-  const cleanTooltip = safeText(tooltip, "");
-  const cleanAria = safeText(ariaLabel, cleanTooltip);
-
-  return [
-    cleanAria ? `aria-label="${attr(cleanAria)}"` : "",
-    cleanTooltip ? `data-tooltip="${attr(cleanTooltip)}"` : "",
-  ].filter(Boolean).join(" ");
-}
-
-function disabledTableAttrs(disabled = false, busy = false) {
-  return [
-    disabled ? "disabled" : "",
-    disabled ? 'aria-disabled="true"' : "",
-    busy ? 'aria-busy="true"' : "",
-  ].filter(Boolean).join(" ");
-}
-
-function tableIcon(name = "") {
-  if (name === "paperclip") {
-    return '<svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>';
-  }
-
-  return icon(name);
-}
-
-function statusSummary(vm = {}) {
-  const tickets = safeArray(vm.tickets);
-  const fallbackCounts = Object.fromEntries(STATUS_ORDER.map((status) => [status, 0]));
-
-  for (const ticket of tickets) {
-    const key = getTicketStatusKeyForRow(ticket);
-
-    if (Object.prototype.hasOwnProperty.call(fallbackCounts, key)) {
-      fallbackCounts[key] = safeNumber(fallbackCounts[key], 0) + 1;
-    }
-  }
-
-  const stats = safeObject(vm.stats);
-
-  const counts = {
-    pending: safeNumber(first(stats.pendingTickets, fallbackCounts.pending), fallbackCounts.pending),
-    open: safeNumber(first(stats.openTickets, fallbackCounts.open), fallbackCounts.open),
-    progress: safeNumber(first(stats.progressTickets, fallbackCounts.progress), fallbackCounts.progress),
-    resolved: safeNumber(first(stats.resolvedTickets, fallbackCounts.resolved), fallbackCounts.resolved),
-    closed: safeNumber(first(stats.closedTickets, fallbackCounts.closed), fallbackCounts.closed),
-  };
-
-  const labels = {
-    pending: "Pendientes",
-    open: "Abiertas",
-    progress: "En curso",
-    resolved: "Resueltas",
-    closed: "Cerradas",
-  };
-
-  return `
-    <div class="home-status-summary" aria-label="Resumen de estados">
-      ${STATUS_ORDER.map((status) => `
-        <span class="home-status-summary-item home-status-summary-item--${attr(status)}">
-          <span class="home-status-summary-dot" aria-hidden="true"></span>
-          <strong>${escapeHtml(formatNumber(counts[status] || 0))}</strong>
-          <span>${escapeHtml(labels[status] || "Estado")}</span>
-        </span>
-      `).join("")}
-    </div>
-  `;
-}
-
-function getRowTicketId(item = {}) {
-  const raw = getRawItem(item);
-
-  return safeText(
-    first(
-      item.fullId,
-      item.displayId,
-      item.ticketId,
-      item.incidenciaId,
-      item.code,
-      item.numero,
-      item.ticketCode,
-      item.id,
-      raw.fullId,
-      raw.displayId,
-      raw.ticketId,
-      raw.incidenciaId,
-      raw.code,
-      raw.numero,
-      raw.ticketCode,
-      raw.id,
-      getTicketId(item)
-    ),
-    "INC-SIN-ID"
-  );
-}
-
-function getTicketClientNameForRow(item = {}) {
-  const raw = getRawItem(item);
-
-  return visualLabel(
-    first(
-      item.clientName,
-      item.clienteNombre,
-      item.requesterName,
-      item.requesterDisplayName,
-      item.customerName,
-      item.userName,
-      item.createdByName,
-
-      item.requesterSnapshot?.name,
-      item.requesterSnapshot?.displayName,
-      item.createdBy?.name,
-      item.createdBy?.displayName,
-
-      item.cliente?.nombreContacto,
-      item.cliente?.nombre,
-      item.cliente?.name,
-      item.cliente?.displayName,
-      item.client?.name,
-      item.client?.displayName,
-      item.customer?.name,
-      item.customer?.displayName,
-      item.receptor?.name,
-
-      raw.clientName,
-      raw.clienteNombre,
-      raw.requesterName,
-      raw.requesterDisplayName,
-      raw.customerName,
-      raw.userName,
-      raw.createdByName,
-
-      raw.requesterSnapshot?.name,
-      raw.requesterSnapshot?.displayName,
-      raw.createdBy?.name,
-      raw.createdBy?.displayName,
-
-      raw.cliente?.nombreContacto,
-      raw.cliente?.nombre,
-      raw.cliente?.name,
-      raw.cliente?.displayName,
-      raw.client?.name,
-      raw.client?.displayName,
-      raw.customer?.name,
-      raw.customer?.displayName,
-      raw.receptor?.name,
-      ""
-    ),
-    "Cliente"
-  );
-}
-
-function getTicketUserAvatarForRow(item = {}) {
-  const raw = getRawItem(item);
-
-  return safeImageSrc(
-    first(
-      item.clientAvatar,
-      item.clientAvatarUrl,
-      item.clienteAvatar,
-      item.clienteAvatarUrl,
-      item.requesterAvatar,
-      item.requesterAvatarUrl,
-      item.customerAvatar,
-      item.customerAvatarUrl,
-      item.avatar,
-      item.avatarUrl,
-
-      item.requesterSnapshot?.avatar,
-      item.requesterSnapshot?.avatarUrl,
-      item.createdBy?.avatar,
-      item.createdBy?.avatarUrl,
-
-      item.cliente?.avatar,
-      item.cliente?.avatarUrl,
-      item.client?.avatar,
-      item.client?.avatarUrl,
-      item.customer?.avatar,
-      item.customer?.avatarUrl,
-
-      raw.clientAvatar,
-      raw.clientAvatarUrl,
-      raw.clienteAvatar,
-      raw.clienteAvatarUrl,
-      raw.requesterAvatar,
-      raw.requesterAvatarUrl,
-      raw.customerAvatar,
-      raw.customerAvatarUrl,
-      raw.avatar,
-      raw.avatarUrl,
-
-      raw.requesterSnapshot?.avatar,
-      raw.requesterSnapshot?.avatarUrl,
-      raw.createdBy?.avatar,
-      raw.createdBy?.avatarUrl,
-
-      raw.cliente?.avatar,
-      raw.cliente?.avatarUrl,
-      raw.client?.avatar,
-      raw.client?.avatarUrl,
-      raw.customer?.avatar,
-      raw.customer?.avatarUrl,
-      ""
-    )
-  );
-}
-
-function getTicketStatusKeyForRow(item = {}) {
-  const raw = getRawItem(item);
-  const key = normalizeKey(
-    first(
-      item.statusKey,
-      item.estadoKey,
-      item.lifecycle?.statusKey,
-      raw.statusKey,
-      raw.estadoKey,
-      raw.lifecycle?.statusKey,
-      getTicketStatusKey(item),
-      getTicketStatusKey(getTicketStatus(item)),
-      "pending"
-    )
-  );
-
-  if (["pending", "pendiente", "new", "nueva", "nuevo", "created"].includes(key)) return "pending";
-  if (["open", "abierta", "abierto"].includes(key)) return "open";
-  if (["progress", "in_progress", "inprogress", "en_proceso", "proceso", "working", "trabajando", "assigned", "asignada", "asignado"].includes(key)) return "progress";
-  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
-  if (["closed", "cerrada", "cerrado", "cancelled", "canceled", "cancelada", "cancelado", "archived", "archivada", "archivado"].includes(key)) return "closed";
-
-  return "pending";
-}
-
-function getTicketPriorityKeyForRow(item = {}) {
-  const raw = getRawItem(item);
-  const key = normalizeKey(
-    first(
-      item.priorityKey,
-      item.prioridadKey,
-      item.priority,
-      item.prioridad,
-      item.severity,
-      item.urgency,
-      item.sla?.priority,
-      raw.priorityKey,
-      raw.prioridadKey,
-      raw.priority,
-      raw.prioridad,
-      raw.severity,
-      raw.urgency,
-      raw.sla?.priority,
-      getTicketPriorityKey(item),
-      "medium"
-    )
-  );
-
-  if (["critical", "critica", "crítica", "critico", "crítico", "p0"].includes(key)) return "critical";
-  if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) return "urgent";
-  if (["medium", "media", "normal", "p2"].includes(key)) return "medium";
-  if (["low", "baja", "minor", "p3"].includes(key)) return "low";
-
-  return "medium";
-}
-
-function getTicketPriorityLabelForRow(item = {}) {
-  const key = getTicketPriorityKeyForRow(item);
-
-  const labels = {
-    critical: "Crítica",
-    urgent: "Urgente",
-    medium: "Media",
-    low: "Baja",
-  };
-
-  return safeText(first(item.priorityLabel, item.prioridadLabel, labels[key]), "Media");
-}
-
-function getRowTechnician(item = {}) {
-  const raw = getRawItem(item);
-  const assignedToObject = safeObject(typeof item.assignedTo === "object" ? item.assignedTo : {});
-  const rawAssignedToObject = safeObject(typeof raw.assignedTo === "object" ? raw.assignedTo : {});
-
-  const technician = safeObject(
-    first(
-      item.technician,
-      item.tecnico,
-      item.assignedTechnician,
-      item.assignedUser,
-      item.assignment?.technician,
-      item.assignment?.assignedTo,
-      item.assignment?.agent,
-      assignedToObject,
-
-      raw.technician,
-      raw.tecnico,
-      raw.assignedTechnician,
-      raw.assignedUser,
-      raw.assignment?.technician,
-      raw.assignment?.assignedTo,
-      raw.assignment?.agent,
-      rawAssignedToObject,
-      {}
-    )
-  );
-
-  const name = visualLabel(
-    first(
-      technician.displayName,
-      technician.fullName,
-      technician.name,
-      technician.nombre,
-      technician.username,
-      technician.userName,
-
-      item.technicianName,
-      item.tecnicoName,
-      item.tecnicoNombre,
-      item.assignedToName,
-      item.assignedName,
-      item.assignment?.assignedToName,
-      item.assignment?.agentName,
-      item.assignment?.technicianName,
-      item.assignment?.displayName,
-      item.assignment?.name,
-      item.meta?.technicianName,
-      item.meta?.lastTechnicianName,
-      typeof item.tecnico === "string" ? item.tecnico : "",
-      typeof item.assignedTo === "string" ? item.assignedTo : "",
-      typeof item.agent === "string" ? item.agent : "",
-
-      raw.technicianName,
-      raw.tecnicoName,
-      raw.tecnicoNombre,
-      raw.assignedToName,
-      raw.assignedName,
-      raw.assignment?.assignedToName,
-      raw.assignment?.agentName,
-      raw.assignment?.technicianName,
-      raw.assignment?.displayName,
-      raw.assignment?.name,
-      raw.meta?.technicianName,
-      raw.meta?.lastTechnicianName,
-      typeof raw.tecnico === "string" ? raw.tecnico : "",
-      typeof raw.assignedTo === "string" ? raw.assignedTo : "",
-      typeof raw.agent === "string" ? raw.agent : "",
-      ""
-    ),
-    "Sin asignar"
-  );
-
-  const email = safeText(
-    first(
-      technician.email,
-      item.assignedToEmail,
-      item.technicianEmail,
-      item.tecnicoEmail,
-      item.assignment?.assignedToEmail,
-      item.assignment?.agentEmail,
-      item.assignment?.technicianEmail,
-      item.assignment?.email,
-      item.meta?.technicianEmail,
-
-      raw.assignedToEmail,
-      raw.technicianEmail,
-      raw.tecnicoEmail,
-      raw.assignment?.assignedToEmail,
-      raw.assignment?.agentEmail,
-      raw.assignment?.technicianEmail,
-      raw.assignment?.email,
-      raw.meta?.technicianEmail,
-      ""
-    ),
-    ""
-  ).toLowerCase();
-
-  const avatarUrl = safeImageSrc(
-    first(
-      technician.avatarUrl,
-      technician.avatarURL,
-      technician.avatar_url,
-      technician.avatar,
-
-      technician.photoUrl,
-      technician.photoURL,
-      technician.photo_url,
-      technician.photo,
-
-      technician.pictureUrl,
-      technician.pictureURL,
-      technician.picture_url,
-      technician.picture,
-
-      technician.imageUrl,
-      technician.imageURL,
-      technician.image_url,
-      technician.image,
-
-      technician.fotoUrl,
-      technician.fotoURL,
-      technician.foto_url,
-      technician.foto,
-
-      technician.imagenUrl,
-      technician.imagenURL,
-      technician.imagen_url,
-      technician.imagen,
-
-      technician.profile?.avatarUrl,
-      technician.profile?.avatar,
-      technician.profile?.photoUrl,
-      technician.profile?.photoURL,
-      technician.profile?.picture,
-      technician.profile?.pictureUrl,
-      technician.profile?.image,
-      technician.profile?.imageUrl,
-
-      technician.media?.avatarUrl,
-      technician.media?.avatar,
-      technician.media?.photoUrl,
-      technician.media?.photoURL,
-      technician.media?.picture,
-      technician.media?.pictureUrl,
-      technician.media?.image,
-      technician.media?.imageUrl,
-
-      item.technicianAvatarUrl,
-      item.technicianAvatar,
-      item.tecnicoAvatarUrl,
-      item.tecnicoAvatar,
-      item.assignedToAvatarUrl,
-      item.assignedToAvatar,
-      item.assignedAvatarUrl,
-      item.agentAvatar,
-      item.assignment?.assignedToAvatar,
-      item.assignment?.agentAvatar,
-      item.assignment?.technicianAvatar,
-      item.assignment?.avatar,
-      item.assignment?.avatarUrl,
-      item.meta?.technicianAvatar,
-      item.meta?.technicianAvatarUrl,
-
-      assignedToObject.avatarUrl,
-      assignedToObject.avatar,
-      assignedToObject.photoUrl,
-      assignedToObject.photoURL,
-      assignedToObject.picture,
-      assignedToObject.image,
-
-      raw.technicianAvatarUrl,
-      raw.technicianAvatar,
-      raw.tecnicoAvatarUrl,
-      raw.tecnicoAvatar,
-      raw.assignedToAvatarUrl,
-      raw.assignedToAvatar,
-      raw.assignedAvatarUrl,
-      raw.agentAvatar,
-      raw.assignment?.assignedToAvatar,
-      raw.assignment?.agentAvatar,
-      raw.assignment?.technicianAvatar,
-      raw.assignment?.avatar,
-      raw.assignment?.avatarUrl,
-      raw.meta?.technicianAvatar,
-      raw.meta?.technicianAvatarUrl,
-
-      rawAssignedToObject.avatarUrl,
-      rawAssignedToObject.avatar,
-      rawAssignedToObject.photoUrl,
-      rawAssignedToObject.photoURL,
-      rawAssignedToObject.picture,
-      rawAssignedToObject.image,
-      ""
-    )
-  );
-
-  const initials = safeText(
-    first(
-      technician.initials,
-      technician.iniciales,
-      item.technicianInitials,
-      item.tecnicoInitials,
-      assignedToObject.initials,
-      raw.technicianInitials,
-      raw.tecnicoInitials,
-      rawAssignedToObject.initials,
-      getInitials(name)
-    ),
-    getInitials(name)
-  )
-    .slice(0, 3)
-    .toUpperCase();
-
-  return {
-    ...technician,
-    name,
-    displayName: name,
-    email,
-    avatarUrl,
-    avatar: avatarUrl,
-    initials,
-  };
-}
-
-function getTicketLinkedInvoices(item = {}) {
-  const raw = getRawItem(item);
-
-  return safeArray(
-    first(
-      item.invoiceRows,
-      item.invoices,
-      item.facturas,
-      item.linkedInvoices?.items,
-      item.linkedInvoices?.rows,
-      item.relations?.facturas,
-      item.relations?.invoices,
-      raw.invoiceRows,
-      raw.invoices,
-      raw.facturas,
-      raw.linkedInvoices?.items,
-      raw.linkedInvoices?.rows,
-      raw.relations?.facturas,
-      raw.relations?.invoices,
-      []
-    )
-  );
-}
-
-function getTicketLinkedInvoiceCount(item = {}) {
-  const raw = getRawItem(item);
-  const invoices = getTicketLinkedInvoices(item);
-
-  if (invoices.length) return invoices.length;
-
-  return safeNumber(
-    first(
-      item.linkedInvoiceCount,
-      item.invoicesCount,
-      item.facturasCount,
-      item.invoiceCount,
-      item.facturaCount,
-      item.linkedInvoices?.count,
-      item.linkedInvoices?.totalCount,
-      raw.linkedInvoiceCount,
-      raw.invoicesCount,
-      raw.facturasCount,
-      raw.invoiceCount,
-      raw.facturaCount,
-      raw.linkedInvoices?.count,
-      raw.linkedInvoices?.totalCount,
-      0
-    ),
-    0
-  );
-}
-
-function getTicketImporteAmount(item = {}) {
-  const raw = getRawItem(item);
-
-  const explicit = first(
-    item.facturasTotal,
-    item.invoicesTotal,
-    item.importeFacturas,
-    item.invoiceTotal,
-    item.facturaTotal,
-    item.facturaImporte,
-    item.importeFactura,
-    item.totalFactura,
-    item.invoiceAmount,
-    item.linkedInvoices?.total,
-    item.linkedInvoices?.amount,
-    item.linkedInvoices?.importe,
-    item.meta?.invoicesTotal,
-    item.meta?.invoiceTotal,
-
-    raw.facturasTotal,
-    raw.invoicesTotal,
-    raw.importeFacturas,
-    raw.invoiceTotal,
-    raw.facturaTotal,
-    raw.facturaImporte,
-    raw.importeFactura,
-    raw.totalFactura,
-    raw.invoiceAmount,
-    raw.linkedInvoices?.total,
-    raw.linkedInvoices?.amount,
-    raw.linkedInvoices?.importe,
-    raw.meta?.invoicesTotal,
-    raw.meta?.invoiceTotal
-  );
-
-  if (explicit !== undefined && explicit !== null && explicit !== "") return explicit;
-
-  const invoices = getTicketLinkedInvoices(item);
-
-  if (!invoices.length) return undefined;
-
-  return invoices.reduce((total, invoice) => {
-    if (!isInvoicePaid(invoice)) return total;
-    return total + safeNumber(getInvoicePaidAmount(invoice), 0);
-  }, 0);
-}
-
-function getTicketImporteCurrency(item = {}) {
-  const raw = getRawItem(item);
-  const firstInvoice = safeObject(getTicketLinkedInvoices(item)[0]);
-
-  return safeText(
-    first(
-      item.currency,
-      item.moneda,
-      item.linkedInvoices?.currency,
-      item.linkedInvoices?.moneda,
-      item.meta?.invoiceCurrency,
-      item.meta?.currency,
-      item.meta?.moneda,
-
-      raw.currency,
-      raw.moneda,
-      raw.linkedInvoices?.currency,
-      raw.linkedInvoices?.moneda,
-      raw.meta?.invoiceCurrency,
-      raw.meta?.currency,
-      raw.meta?.moneda,
-
-      getInvoiceCurrency(firstInvoice),
-      DEFAULT_CURRENCY
-    ),
-    DEFAULT_CURRENCY
-  );
-}
-
-function getTicketPaymentStatusKey(item = {}) {
-  const raw = getRawItem(item);
-  const key = normalizeKey(
-    first(
-      item.paymentStatus,
-      item.estadoPago,
-      item.linkedInvoices?.paymentStatus,
-      item.linkedInvoices?.estadoPago,
-      raw.paymentStatus,
-      raw.estadoPago,
-      raw.linkedInvoices?.paymentStatus,
-      raw.linkedInvoices?.estadoPago,
-      ""
-    )
-  );
-
-  if (["paid", "pagada", "pagado", "cobrada", "cobrado"].includes(key)) return "paid";
-  if (["pending", "pendiente", "unpaid"].includes(key)) return "pending";
-  if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
-  if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
-
-  return "";
-}
-
-function getTicketImporteLabel(item = {}) {
-  const amount = getTicketImporteAmount(item);
-
-  if (amount !== undefined && amount !== null && amount !== "") {
-    const numericAmount = safeNumber(amount, NaN);
-
-    if (Number.isFinite(numericAmount)) {
-      return formatMoney(numericAmount, getTicketImporteCurrency(item));
-    }
-  }
-
-  const paymentKey = getTicketPaymentStatusKey(item);
-
-  if (paymentKey === "paid") return "Pagado";
-  if (paymentKey === "pending") return "Pendiente";
-  if (paymentKey === "partial") return "Parcial";
-  if (paymentKey === "overdue") return "Vencido";
-
-  return "—";
-}
-
-function getTicketAttachmentsCountForRow(item = {}) {
-  const raw = getRawItem(item);
-
-  const attachments = first(
-    item.attachments,
-    item.files,
-    item.adjuntos,
-    item.relations?.attachments,
-    item.relations?.files,
-    raw.attachments,
-    raw.files,
-    raw.adjuntos,
-    raw.relations?.attachments,
-    raw.relations?.files
-  );
-
-  if (Array.isArray(attachments)) return attachments.length;
-
-  return safeNumber(
-    first(
-      item.attachmentsCount,
-      item.filesCount,
-      item.adjuntosCount,
-      item.relations?.attachmentsCount,
-      raw.attachmentsCount,
-      raw.filesCount,
-      raw.adjuntosCount,
-      raw.relations?.attachmentsCount,
-      0
-    ),
-    0
-  );
-}
-
-function renderIncidenciasLoaderOnly(label = "Cargando") {
-  return `
-    <span class="incidencias-loader-only" role="status" ${tooltipAttrs(label, label)}>
-      <span class="incidencias-inline-spinner" aria-hidden="true"></span>
-    </span>
-  `;
-}
-
-function renderIncidenciasInlineSpinner(label = "") {
-  return `
-    <span class="incidencias-inline-loading">
-      <span class="incidencias-inline-spinner" aria-hidden="true"></span>
-      ${label ? `<span class="incidencias-inline-loading-text">${escapeHtml(label)}</span>` : ""}
-    </span>
-  `;
-}
-
-function renderTicketUserAvatar(item = {}) {
-  const ticketId = getRowTicketId(item);
-  const fullName = getTicketClientNameForRow(item);
-  const initials = safeText(getInitials(fullName), "ON").slice(0, 3).toUpperCase();
-  const avatarUrl = getTicketUserAvatarForRow(item);
-  const tone = String(hashString(`${ticketId}|${fullName}`) % 10);
-  const tooltip = fullName || "Usuario";
-
-  if (avatarUrl) {
-    return `
-      <div
-        class="incidencias-avatar incidencias-avatar--user incidencias-avatar--compact"
-        ${tooltipAttrs(tooltip, tooltip)}
-        title="${attr(tooltip)}"
-        style="inline-size: 52px; block-size: 52px; min-inline-size: 52px;"
-        data-avatar-tone="${attr(tone)}"
-        data-avatar-name="${attr(fullName)}"
-        data-avatar-size="sm"
-        data-user-avatar="true"
-        data-has-avatar="true"
-        data-fallback="false"
-        data-incidencias-avatar="true"
-      >
-        <img
-          class="incidencias-avatar-img"
-          src="${attr(avatarUrl)}"
-          alt="${attr(fullName)}"
-          loading="lazy"
-          decoding="async"
-          referrerpolicy="no-referrer"
-          draggable="false"
-          data-incidencias-avatar-img="true"
-        >
-        <span class="incidencias-avatar-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
-      </div>
-    `;
-  }
-
-  return `
-    <div
-      class="incidencias-avatar incidencias-avatar--user incidencias-avatar--compact incidencias-avatar--fallback"
-      ${tooltipAttrs(tooltip, tooltip)}
-      title="${attr(tooltip)}"
-      style="inline-size: 52px; block-size: 52px; min-inline-size: 52px;"
-      data-avatar-tone="${attr(tone)}"
-      data-avatar-name="${attr(fullName)}"
-      data-avatar-size="sm"
-      data-user-avatar="true"
-      data-fallback="true"
-      data-incidencias-avatar="true"
-    >
-      <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
-    </div>
-  `;
-}
-
-function renderTicketStatusChip(item = {}) {
-  const key = getTicketStatusKeyForRow(item);
-  const label = ticketStatusLabel({ ...item, statusKey: key });
-
-  return `
-    <span class="incidencias-chip incidencias-chip--${attr(key)}">
-      <span class="incidencias-chip-dot" aria-hidden="true"></span>
-      ${escapeHtml(label)}
-    </span>
-  `;
-}
-
-function renderTicketPriorityBadge(item = {}) {
-  const key = getTicketPriorityKeyForRow(item);
-  const label = getTicketPriorityLabelForRow(item);
-  const tooltip = `Prioridad ${label}`;
-
-  return `
-    <span class="incidencias-mini-badge incidencias-mini-badge--${attr(key)}" ${tooltipAttrs(tooltip, tooltip)}>
-      ${key === "critical" || key === "urgent" ? icon("alert") : icon("activity")}
-      ${escapeHtml(label)}
-    </span>
-  `;
-}
-
-function renderAssignedAgentAvatar(item = {}) {
-  const technician = getRowTechnician(item);
-  const label = visualLabel(technician.name, "Sin asignar");
-  const initials = safeText(first(technician.initials, getInitials(label)), "SA")
-    .slice(0, 3)
-    .toUpperCase();
-
-  if (!technician.avatarUrl) {
-    return `
-      <span
-        class="incidencias-agent-avatar incidencias-agent-avatar--compact incidencias-agent-avatar--fallback"
-        ${tooltipAttrs(label, label)}
-        title="${attr(label)}"
-        style="inline-size: 22px; block-size: 22px; min-inline-size: 22px;"
-        data-technician-avatar="true"
-        data-avatar-name="${attr(label)}"
-        data-avatar-size="xs"
-        data-fallback="true"
-        role="img"
-      >
-        <span class="incidencias-agent-avatar-fallback">${escapeHtml(initials)}</span>
-      </span>
-    `;
-  }
-
-  return `
-    <span
-      class="incidencias-agent-avatar incidencias-agent-avatar--compact incidencias-agent-avatar--image"
-      ${tooltipAttrs(label, label)}
-      title="${attr(label)}"
-      style="inline-size: 22px; block-size: 22px; min-inline-size: 22px;"
-      data-technician-avatar="true"
-      data-avatar-name="${attr(label)}"
-      data-avatar-size="xs"
-      data-avatar-fallback-index="0"
-      data-avatar-fallback-srcs="${attr(technician.avatarUrl)}"
-      data-fallback="false"
-      role="img"
-    >
-      <img
-        class="incidencias-agent-avatar-img"
-        src="${attr(technician.avatarUrl)}"
-        alt="${attr(label)}"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
-        draggable="false"
-        data-incidencias-agent-avatar-img="true"
-      >
-      <span class="incidencias-agent-avatar-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
-    </span>
-  `;
-}
-
-function renderAssignedBadge(item = {}) {
-  const technician = getRowTechnician(item);
-  const technicianName = visualLabel(technician.name, "Sin asignar");
-  const tooltip = `Técnico asignado · ${technicianName}`;
-
-  return `
-    <span
-      class="incidencias-mini-badge incidencias-mini-badge--agent"
-      ${tooltipAttrs(tooltip, tooltip)}
-      title="${attr(tooltip)}"
-      data-assigned-technician="${attr(technicianName)}"
-      data-assigned-email="${attr(technician.email)}"
-    >
-      ${renderAssignedAgentAvatar(item)}
-      <span class="incidencias-agent-name">${escapeHtml(technicianName)}</span>
-    </span>
-  `;
-}
-
-function renderTicketImporteChip(item = {}) {
-  const label = getTicketImporteLabel(item);
-  const isMoney = /€|EUR|\$|USD|£|GBP/i.test(label);
-  const paymentKey = getTicketPaymentStatusKey(item) || "idle";
-
-  if (isMoney) {
-    return `
-      <span class="incidencias-importe incidencias-importe--money incidencias-importe--${attr(paymentKey)}">
-        ${icon("euro")}
-        ${escapeHtml(label)}
-      </span>
-    `;
-  }
-
-  return `
-    <span class="incidencias-importe incidencias-importe--status incidencias-importe--${attr(paymentKey)}">
-      ${escapeHtml(label)}
-    </span>
-  `;
-}
-
-function renderTicketDetailButton(ticketId = "", isOpening = false) {
-  return `
-    <button
-      type="button"
-      class="${joinClasses("incidencias-detail-btn", "home-detail-btn", isOpening ? "is-loading" : "")}"
-      data-home-action="${ACTIONS.OPEN_TICKET_DETAIL}"
-      data-action="${ACTIONS.OPEN_TICKET_DETAIL}"
-      data-incidencias-action="open-ticket"
-      data-ticket-id="${attr(ticketId)}"
-      data-incidencia-id="${attr(ticketId)}"
-      data-entity-id="${attr(ticketId)}"
-      data-payload="${jsonAttr({ ticketId, incidenciaId: ticketId })}"
-      ${tooltipAttrs("Abrir detalle de incidencia", "Abrir detalle de incidencia")}
-      ${disabledTableAttrs(isOpening, isOpening)}
-    >
-      ${isOpening
-        ? renderIncidenciasLoaderOnly("Cargando detalle")
-        : `
-          <span class="incidencias-action-icon">${icon("eye")}</span>
-          <span class="incidencias-btn-text home-btn-text">Detalle</span>
-        `
-      }
-    </button>
-  `;
-}
-
-function ticketRow(item = {}, state = {}) {
-  const ticketId = getRowTicketId(item);
-  const subject = safeText(first(item.subject, item.title, item.asunto, getTicketSubject(item)), "Incidencia sin asunto");
-  const description = safeText(first(item.description, item.descripcion, item.message, item.preview, getTicketDescription(item)), "Sin descripción.");
-  const category = safeText(first(item.category, item.categoria, item.type, item.tipo, getTicketCategory(item)), "Soporte");
-  const statusKey = getTicketStatusKeyForRow(item);
-  const priorityKey = getTicketPriorityKeyForRow(item);
-  const clientName = getTicketClientNameForRow(item);
-  const createdAt = first(item.createdAt, item.fechaCreacion, item.createdAtES, getTicketCreatedAt(item));
-  const updatedAt = first(item.lastActivityAt, item.updatedAt, item.lastUpdateAt, item.ultimaNovedad, getTicketUpdatedAt(item));
-  const createdLabel = safeText(first(item.createdAtLabel, item.fechaCreacionLabel, formatDateTime(createdAt)), "—");
-  const updatedLabel = safeText(first(item.lastActivityLabel, item.updatedAtLabel, item.ultimaNovedadLabel, formatLastUpdate(updatedAt)), "Sin fecha");
-  const attachmentsCount = getTicketAttachmentsCountForRow(item);
-  const isOpening = isSameIdentity(state.openingTicketId, ticketId);
-  const isSelected = isSameIdentity(state.selectedTicketId, ticketId);
-
-  return `
-    <tr
-      class="${joinClasses(
-        "home-ticket-row",
-        "incidencias-row",
-        `incidencias-row--${statusKey}`,
-        `home-ticket-row--${statusKey}`,
-        `home-ticket-row--priority-${priorityKey}`,
-        "incidencias-row--clickable",
-        isOpening ? "is-opening" : "",
-        isSelected ? "is-selected" : ""
-      )}"
-      data-home-action="${ACTIONS.OPEN_TICKET_DETAIL}"
-      data-action="${ACTIONS.OPEN_TICKET_DETAIL}"
-      data-incidencias-action="open-ticket"
-      data-ticket-row="true"
-      data-ticket-id="${attr(ticketId)}"
-      data-incidencia-id="${attr(ticketId)}"
-      data-entity-id="${attr(ticketId)}"
-      data-requester-name="${attr(clientName)}"
-      data-status-key="${attr(statusKey)}"
-      data-priority-key="${attr(priorityKey)}"
-      data-detail-target="true"
-      data-row-click-disabled="false"
-      data-payload="${jsonAttr({ ticketId, incidenciaId: ticketId })}"
-      role="button"
-      tabindex="0"
-      ${tooltipAttrs(`Abrir detalle de incidencia ${ticketId}`, `Abrir detalle de incidencia ${ticketId}`)}
-      ${boolAttr(isOpening, 'aria-busy="true"')}
-      ${boolAttr(isSelected, 'aria-current="true"')}
-    >
-      <td class="incidencias-cell incidencias-cell--main home-ticket-cell home-ticket-cell--main">
-        <div class="incidencias-main">
-          ${renderTicketUserAvatar(item)}
-
-          <div class="incidencias-main-copy">
-            <div class="incidencias-ticket-line">
-              <span class="incidencias-ticket-id">${escapeHtml(ticketId)}</span>
-              <span class="incidencias-category-pill">${escapeHtml(category)}</span>
-            </div>
-
-            <div class="incidencias-ticket-subject">${escapeHtml(subject)}</div>
-            <div class="incidencias-ticket-description">${escapeHtml(description)}</div>
-
-            <div class="incidencias-row-badges">
-              ${renderTicketPriorityBadge(item)}
-              ${renderAssignedBadge(item)}
-            </div>
-          </div>
-        </div>
-      </td>
-
-      <td class="incidencias-cell incidencias-cell--status home-ticket-cell home-ticket-cell--status">
-        ${renderTicketStatusChip(item)}
-      </td>
-
-      <td class="incidencias-cell incidencias-cell--date home-ticket-cell home-ticket-cell--date">
-        <span class="incidencias-date-inline home-date-inline" ${tooltipAttrs(formatDateTime(createdAt), `Fecha de creación ${formatDateTime(createdAt)}`)}>
-          ${escapeHtml(createdLabel)}
-        </span>
-      </td>
-
-      <td class="incidencias-cell incidencias-cell--date home-ticket-cell home-ticket-cell--date">
-        <span class="incidencias-date-inline home-date-inline" ${tooltipAttrs(formatDateTime(updatedAt), `Última novedad ${formatDateTime(updatedAt)}`)}>
-          ${escapeHtml(updatedLabel)}
-        </span>
-      </td>
-
-      <td class="incidencias-cell incidencias-cell--importe">
-        ${renderTicketImporteChip(item)}
-      </td>
-
-      <td class="incidencias-cell incidencias-cell--attachments">
-        <span
-          class="incidencias-attachments-pill"
-          ${tooltipAttrs(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`, `${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}
-        >
-          ${tableIcon("paperclip")}
-          ${escapeHtml(String(attachmentsCount))}
-        </span>
-      </td>
-
-      <td class="incidencias-cell incidencias-cell--actions home-ticket-cell home-ticket-cell--actions">
-        ${renderTicketDetailButton(ticketId, isOpening)}
-      </td>
-    </tr>
-  `;
-}
-
-function renderHomeIncidenciasLoadingRows(rows = DEFAULT_PAGE_SIZE) {
-  return `
-    <div class="incidencias-table-loading home-table-loading" aria-hidden="true">
-      ${Array.from({ length: Math.max(1, safeNumber(rows, DEFAULT_PAGE_SIZE)) }).map(() => `
-        <div class="incidencias-table-loading-row home-table-loading-row">
-          <div class="incidencias-skeleton incidencias-skeleton--avatar home-skeleton home-skeleton--avatar"></div>
-          <div class="incidencias-table-loading-copy home-table-loading-copy">
-            <div class="incidencias-skeleton incidencias-skeleton--xs home-skeleton home-skeleton--xs"></div>
-            <div class="incidencias-skeleton incidencias-skeleton--lg home-skeleton home-skeleton--lg"></div>
-            <div class="incidencias-skeleton incidencias-skeleton--md home-skeleton home-skeleton--md"></div>
-          </div>
-          <div class="incidencias-skeleton incidencias-skeleton--pill home-skeleton home-skeleton--pill"></div>
-          <div class="incidencias-skeleton incidencias-skeleton--date home-skeleton home-skeleton--date"></div>
-          <div class="incidencias-skeleton incidencias-skeleton--date home-skeleton home-skeleton--date"></div>
-          <div class="incidencias-skeleton incidencias-skeleton--amount home-skeleton"></div>
-          <div class="incidencias-skeleton incidencias-skeleton--attach home-skeleton"></div>
-          <div class="incidencias-skeleton incidencias-skeleton--btn home-skeleton home-skeleton--btn"></div>
-        </div>
-      `).join("")}
-    </div>
-  `;
-}
-
-function renderHomeIncidenciasRefreshOverlay() {
-  return `
-    <div class="incidencias-refresh-overlay" aria-live="polite">
-      <div class="incidencias-refresh-card">
-        ${renderIncidenciasInlineSpinner("Actualizando historial...")}
-      </div>
-    </div>
-  `;
-}
-
-function getTicketRowsForHome(vm = {}) {
-  const rows = safeArray(first(vm.ticketRows, vm.pageItems, vm.recentTickets, []));
-
-  if (rows.length) return rows.slice(0, LIMITS.tickets);
-
-  return safeArray(vm.tickets).slice(0, LIMITS.tickets);
-}
-
-export function renderHomeTicketsTable(input = {}) {
-  const vm = asViewModel(input);
-  const state = vm.state;
-  const tickets = safeArray(vm.tickets);
-  const rows = getTicketRowsForHome(vm);
-  const totalCount = safeNumber(first(vm.collections.ticketsRemoteCount, vm.stats.totalTickets, tickets.length), tickets.length);
-  const initialLoading = state.loading && !rows.length;
-
-  return `
-    <section class="home-tickets home-tickets--incidencias-table" data-home-section="tickets">
-      <div class="home-panel-head">
-        <div class="home-panel-copy">
-          <span class="home-panel-kicker">Incidencias</span>
-          <h2 class="home-panel-title">${vm.admin ? "Últimas incidencias" : "Tus últimas incidencias"}</h2>
-          <p class="home-panel-subtitle">
-            ${initialLoading
-              ? "Cargando incidencias..."
-              : escapeHtml(
-                  totalCount
-                    ? `Mostrando ${formatNumber(rows.length)} últimas de ${formatNumber(totalCount)}`
-                    : "Sin incidencias visibles"
-                )
-            }
-          </p>
-        </div>
-
-        <div class="home-panel-head-actions">
-          ${statusSummary(vm)}
-
-          <button
-            type="button"
-            class="home-panel-link"
-            data-home-action="${ACTIONS.NAVIGATE}"
-            data-action="${ACTIONS.NAVIGATE}"
-            data-route="${attr(ROUTES.INCIDENCIAS)}"
-            data-href="${attr(ROUTES.INCIDENCIAS)}"
-          >
-            Ver todas ${icon("arrowRight")}
-          </button>
-        </div>
-      </div>
-
-      ${initialLoading
-        ? renderHomeIncidenciasLoadingRows(Math.max(3, DEFAULT_PAGE_SIZE))
-        : `
-          <div class="${joinClasses("home-table-wrap", "incidencias-table-wrap", state.refreshing ? "is-refreshing" : "")}">
-            ${state.refreshing && rows.length ? renderHomeIncidenciasRefreshOverlay() : ""}
-
-            ${rows.length
-              ? `
-                <div class="home-table-shell incidencias-table-shell">
-                  <table
-                    class="home-table home-table--incidencias home-table--compact incidencias-table incidencias-table--compact incidencias-table--precision"
-                    role="table"
-                    aria-label="Últimas incidencias del Home"
-                    data-table-layout="incidencias-compact"
-                  >
-                    <colgroup>
-                      <col class="incidencias-col incidencias-col--main" style="width: 41%">
-                      <col class="incidencias-col incidencias-col--status" style="width: 10%">
-                      <col class="incidencias-col incidencias-col--created" style="width: 11%">
-                      <col class="incidencias-col incidencias-col--updated" style="width: 12%">
-                      <col class="incidencias-col incidencias-col--importe" style="width: 8%">
-                      <col class="incidencias-col incidencias-col--attachments" style="width: 5%">
-                      <col class="incidencias-col incidencias-col--actions" style="width: 13%">
-                    </colgroup>
-
-                    <thead data-incidencias-table-head="true">
-                      <tr>
-                        <th scope="col">Incidencia</th>
-                        <th scope="col">Estado</th>
-                        <th scope="col">Creación</th>
-                        <th scope="col">Última novedad</th>
-                        <th scope="col">Importe</th>
-                        <th scope="col">Adj.</th>
-                        <th scope="col">Acciones</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      ${rows.map((item) => ticketRow(item, state)).join("")}
-                    </tbody>
-                  </table>
-                </div>
-              `
-              : emptyState({
-                  title: state.error ? "No se pudieron cargar las incidencias" : "No hay incidencias para mostrar",
-                  text: state.error ? "Puedes reintentar la carga desde el botón de actualizar." : "Cuando haya solicitudes registradas aparecerán aquí.",
-                  action: state.error ? ACTIONS.RETRY : "",
-                  actionLabel: "Reintentar",
-                  iconName: state.error ? "alert" : "ticket",
-                })
-            }
-          </div>
-        `
-      }
-    </section>
-  `;
-}
-
-/* =========================================================
-   Modal incidencia
-========================================================= */
-
-function modalInvoiceItem(item = {}) {
-  const id = safeText(first(item.fullId, item.displayId, item.invoiceId, item.facturaId, getInvoiceId(item)), "FAC-SIN-ID");
-  const statusKey = safeText(first(item.statusKey, getInvoiceStatusKey(item)), "pending");
-  const statusLabel = safeText(first(item.statusLabel, getInvoiceStatusLabel(item)), "Pendiente");
-  const currency = getInvoiceCurrency(item);
-  const paid = Boolean(first(item.isPaid, item.paid, isInvoicePaid(item)));
-  const amount = paid
-    ? safeNumber(first(item.paidAmount, item.amount, getInvoicePaidAmount(item)), 0)
-    : 0;
-
-  return `
-    <li class="home-modal-invoice home-modal-invoice--${attr(statusKey)}">
-      <span class="home-modal-invoice-icon" aria-hidden="true">${icon("invoice")}</span>
-      <span class="home-modal-invoice-copy">
-        <strong>${escapeHtml(id)}</strong>
-        <span>${escapeHtml(statusLabel)}</span>
-      </span>
-      ${paid ? `<span class="home-modal-invoice-amount">${escapeHtml(formatMoney(amount, currency))}</span>` : ""}
+      <time>${escapeHtml(formatRelativeDate(date))}</time>
     </li>
   `;
 }
 
-function renderTicketModal(input = {}) {
-  const vm = asViewModel(input);
+function renderHomeInvoicePreview(vm = {}) {
+  const invoices = safeArray(vm.recentInvoices).slice(0, LIMITS.invoices);
+  const totalPaid = safeArray(vm.invoices).reduce((sum, invoice) => {
+    return isInvoicePaid(invoice) ? sum + safeNumber(getInvoicePaidAmount(invoice), 0) : sum;
+  }, 0);
+  const currency = safeText(first(getInvoiceCurrency(invoices[0] || {}), DEFAULT_CURRENCY), DEFAULT_CURRENCY);
+
+  return `
+    <section class="home-panel home-panel--invoices" data-home-section="invoices">
+      <div class="home-panel-header">
+        <div>
+          <p class="home-panel-kicker">Facturación</p>
+          <h2>Facturas</h2>
+        </div>
+        <button
+          type="button"
+          class="home-link-button"
+          data-home-action="${ACTIONS.NAVIGATE}"
+          data-action="${ACTIONS.NAVIGATE}"
+          data-route="${attr(HOME_ROUTES.FACTURAS)}"
+          data-href="${attr(HOME_ROUTES.FACTURAS)}"
+        >
+          Ver facturas
+        </button>
+      </div>
+
+      <div class="home-billing-total">
+        <span>Importe total pagado</span>
+        <strong>${escapeHtml(formatMoney(totalPaid, currency))}</strong>
+      </div>
+
+      ${invoices.length
+        ? `<ul class="home-invoice-list">${invoices.map(invoiceItem).join("")}</ul>`
+        : emptyState({
+            title: "Sin facturas visibles",
+            text: "Cuando haya facturas disponibles aparecerán aquí.",
+            iconName: "invoice",
+          })
+      }
+    </section>
+  `;
+}
+
+function invoiceItem(invoice = {}) {
+  const id = getInvoiceId(invoice);
+  const paid = isInvoicePaid(invoice);
+  const amount = paid ? getInvoicePaidAmount(invoice) : 0;
+  const currency = getInvoiceCurrency(invoice);
+  const statusKey = getInvoiceStatusKey(invoice);
+  const statusLabel = getInvoiceStatusLabel(invoice);
+
+  return `
+    <li class="home-invoice-item home-invoice-item--${attr(statusKey)}">
+      <span class="home-invoice-main">
+        <strong>${escapeHtml(id || "Factura")}</strong>
+        <span>${escapeHtml(statusLabel)}</span>
+      </span>
+      <span class="home-invoice-amount">
+        ${paid ? escapeHtml(formatMoney(amount, currency)) : "—"}
+      </span>
+    </li>
+  `;
+}
+
+function renderHomeEntitiesPreview(vm = {}) {
+  if (!vm.admin) {
+    const tickets = safeArray(vm.recentTickets).slice(0, LIMITS.entities);
+
+    return `
+      <section class="home-panel home-panel--user-summary" data-home-section="user-summary">
+        <div class="home-panel-header">
+          <div>
+            <p class="home-panel-kicker">Tus solicitudes</p>
+            <h2>Incidencias recientes</h2>
+          </div>
+          <button
+            type="button"
+            class="home-link-button"
+            data-home-action="${ACTIONS.NAVIGATE}"
+            data-action="${ACTIONS.NAVIGATE}"
+            data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
+            data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
+          >
+            Ver incidencias
+          </button>
+        </div>
+
+        ${tickets.length
+          ? `<ul class="home-mini-list">${tickets.map((ticket) => `
+              <li>
+                <strong>${escapeHtml(getTicketSubject(ticket))}</strong>
+                <span>${escapeHtml(getTicketStatusLabel(ticket))}</span>
+              </li>
+            `).join("")}</ul>`
+          : emptyState({
+              title: "Sin incidencias recientes",
+              text: "No hay solicitudes recientes visibles.",
+              iconName: "ticket",
+            })
+        }
+      </section>
+    `;
+  }
+
+  const clients = safeArray(vm.clients).slice(0, LIMITS.entities);
+  const users = safeArray(vm.users).slice(0, LIMITS.entities);
+
+  return `
+    <section class="home-panel home-panel--entities" data-home-section="entities">
+      <div class="home-panel-header">
+        <div>
+          <p class="home-panel-kicker">Administración</p>
+          <h2>Clientes y usuarios</h2>
+        </div>
+      </div>
+
+      <div class="home-entity-columns">
+        <div>
+          <h3>Clientes</h3>
+          ${clients.length
+            ? `<ul class="home-mini-list">${clients.map((client) => `
+                <li>
+                  <strong>${escapeHtml(safeText(first(client.name, client.nombre, client.displayName), "Cliente"))}</strong>
+                  <span>${escapeHtml(client.active === false ? "Inactivo" : "Activo")}</span>
+                </li>
+              `).join("")}</ul>`
+            : `<p class="home-panel-muted">Sin clientes visibles.</p>`
+          }
+        </div>
+
+        <div>
+          <h3>Usuarios</h3>
+          ${users.length
+            ? `<ul class="home-mini-list">${users.map((user) => `
+                <li>
+                  <strong>${escapeHtml(safeText(first(user.displayName, user.name, user.username), "Usuario"))}</strong>
+                  <span>${escapeHtml(safeText(first(user.roleLabel, user.role, "user"), "user"))}</span>
+                </li>
+              `).join("")}</ul>`
+            : `<p class="home-panel-muted">Sin usuarios visibles.</p>`
+          }
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderHomeTicketsTable(vm = {}) {
+  const rows = safeArray(vm.ticketRows).slice(0, LIMITS.tickets);
+  const pagination = safeObject(vm.pagination);
+  const hasPrev = pagination.hasPrev === true;
+  const hasNext = pagination.hasNext === true;
+
+  return `
+    <section class="home-panel home-panel--tickets" data-home-section="tickets">
+      <div class="home-panel-header">
+        <div>
+          <p class="home-panel-kicker">Incidencias</p>
+          <h2>${vm.admin ? "Últimas incidencias" : "Mis incidencias"}</h2>
+        </div>
+
+        <div class="home-panel-actions">
+          <button
+            type="button"
+            class="home-link-button"
+            data-home-action="${ACTIONS.EXPORT_CSV}"
+            data-action="${ACTIONS.EXPORT_CSV}"
+            data-export-mode="tickets"
+            data-filename="home-incidencias.csv"
+          >
+            Exportar CSV
+          </button>
+
+          <button
+            type="button"
+            class="home-link-button"
+            data-home-action="${ACTIONS.NAVIGATE}"
+            data-action="${ACTIONS.NAVIGATE}"
+            data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
+            data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
+          >
+            Ver todas
+          </button>
+        </div>
+      </div>
+
+      ${rows.length
+        ? `
+          <div class="home-ticket-table" role="table" aria-label="Incidencias recientes">
+            <div class="home-ticket-table-head" role="row">
+              <span role="columnheader">Incidencia</span>
+              <span role="columnheader">Estado</span>
+              <span role="columnheader">Actualización</span>
+              <span role="columnheader">Facturas</span>
+            </div>
+            <div class="home-ticket-table-body">
+              ${rows.map(ticketRow).join("")}
+            </div>
+          </div>
+
+          <div class="home-pagination" data-home-pagination="true">
+            <span>
+              ${escapeHtml(formatNumber(pagination.rangeStart || 1))}
+              -
+              ${escapeHtml(formatNumber(pagination.rangeEnd || rows.length))}
+              de
+              ${escapeHtml(formatNumber(pagination.totalCount || rows.length))}
+            </span>
+
+            <div class="home-pagination-actions">
+              <button
+                type="button"
+                class="home-btn home-btn--ghost"
+                data-home-action="${ACTIONS.PAGE_PREV}"
+                data-action="${ACTIONS.PAGE_PREV}"
+                ${hasPrev ? "" : "disabled aria-disabled=\"true\""}
+              >
+                Anterior
+              </button>
+              <button
+                type="button"
+                class="home-btn home-btn--ghost"
+                data-home-action="${ACTIONS.PAGE_NEXT}"
+                data-action="${ACTIONS.PAGE_NEXT}"
+                ${hasNext ? "" : "disabled aria-disabled=\"true\""}
+              >
+                Siguiente
+              </button>
+            </div>
+          </div>
+        `
+        : emptyState({
+            title: "Sin incidencias visibles",
+            text: "No hay incidencias para mostrar en este momento.",
+            action: ACTIONS.CREATE_INCIDENCIA,
+            actionLabel: "Crear incidencia",
+            iconName: "ticket",
+          })
+      }
+    </section>
+  `;
+}
+
+function ticketRow(row = {}) {
+  const ticketId = getTicketId(row);
+  const subject = getTicketSubject(row);
+  const description = getTicketDescription(row);
+  const ownerName = getTicketOwnerName(row);
+  const avatarUrl = getTicketAvatarUrl(row);
+  const statusKey = getTicketStatusKey(row);
+  const statusLabel = getTicketStatusLabel(row);
+  const priorityKey = getTicketPriorityKey(row);
+  const priorityLabel = getTicketPriorityLabel(row);
+  const category = getTicketCategory(row);
+  const updatedAt = getTicketUpdatedAt(row);
+  const technician = safeObject(first(row.technician, row.tecnico, {}));
+  const technicianName = safeText(first(technician.displayName, technician.name, row.assignedToName, row.technicianName), "Sin asignar");
+  const invoices = safeArray(first(row.invoices, row.facturas, []));
+
+  return `
+    <button
+      type="button"
+      class="home-ticket-row home-ticket-row--${attr(statusKey)}"
+      role="row"
+      data-ticket-row="true"
+      data-home-action="${ACTIONS.OPEN_TICKET_DETAIL}"
+      data-action="${ACTIONS.OPEN_TICKET_DETAIL}"
+      data-ticket-id="${attr(ticketId)}"
+      data-incidencia-id="${attr(ticketId)}"
+      data-entity-id="${attr(ticketId)}"
+      data-payload="${jsonAttr({ ticketId, incidenciaId: ticketId })}"
+    >
+      <span class="home-ticket-cell home-ticket-cell--main" role="cell">
+        ${avatar({
+          name: ownerName,
+          image: avatarUrl,
+          kind: "ticket-owner",
+          seed: ticketId || ownerName,
+          initials: getInitials(ownerName, "U"),
+          className: "home-ticket-avatar",
+        })}
+        <span class="home-ticket-main-text">
+          <span class="home-ticket-id">${escapeHtml(ticketId)}</span>
+          <strong>${escapeHtml(subject)}</strong>
+          ${description ? `<span>${escapeHtml(description)}</span>` : ""}
+          <span class="home-ticket-meta">
+            <span class="home-mini-badge home-mini-badge--${attr(priorityKey)}">${escapeHtml(priorityLabel)}</span>
+            <span class="home-mini-badge home-mini-badge--category">${escapeHtml(category)}</span>
+            <span class="home-mini-badge home-mini-badge--technician">Técnico: ${escapeHtml(technicianName)}</span>
+          </span>
+        </span>
+      </span>
+
+      <span class="home-ticket-cell" role="cell">
+        <span class="home-chip home-chip--${attr(statusKey)}">
+          <span class="home-chip-dot" aria-hidden="true"></span>
+          ${escapeHtml(statusLabel)}
+        </span>
+      </span>
+
+      <span class="home-ticket-cell" role="cell">
+        ${escapeHtml(formatRelativeDate(updatedAt))}
+      </span>
+
+      <span class="home-ticket-cell" role="cell">
+        ${escapeHtml(formatNumber(invoices.length))}
+      </span>
+    </button>
+  `;
+}
+
+function modalInvoiceItem(invoice = {}) {
+  const id = getInvoiceId(invoice);
+  const statusKey = getInvoiceStatusKey(invoice);
+  const statusLabel = getInvoiceStatusLabel(invoice);
+  const paid = isInvoicePaid(invoice);
+  const amount = paid ? getInvoicePaidAmount(invoice) : 0;
+  const currency = getInvoiceCurrency(invoice);
+
+  return `
+    <li class="home-modal-invoice-item home-modal-invoice-item--${attr(statusKey)}">
+      <span>
+        <strong>${escapeHtml(id || "Factura")}</strong>
+        <small>${escapeHtml(statusLabel)}</small>
+      </span>
+      <span>${paid ? escapeHtml(formatMoney(amount, currency)) : "—"}</span>
+    </li>
+  `;
+}
+
+function renderTicketModal(vm = {}) {
   const modal = safeObject(vm.ticketModal);
 
-  if (!modal.open || !modal.ticket) return "";
+  if (modal.open !== true) return "";
 
-  const ticketId = safeText(first(modal.fullId, modal.displayId, modal.ticketId, modal.incidenciaId, modal.id), "INC-SIN-ID");
-  const title = safeText(first(modal.title, modal.subject), "Incidencia sin asunto");
-  const description = safeText(first(modal.description, modal.preview), "Sin descripción.");
-  const technician = getRowTechnician(modal);
-  const technicianName = technician.name;
-  const technicianAvatar = technician.avatarUrl;
-  const invoices = safeArray(first(modal.invoiceRows, modal.invoices, modal.facturas, [])).slice(0, LIMITS.invoices);
-  const statusKey = safeText(first(modal.statusKey, getTicketStatusKey(modal.ticket)), "pending");
-  const statusLabel = safeText(first(modal.statusLabel, getTicketStatusLabel(modal.ticket)), "Pendiente");
-  const priorityKey = safeText(first(modal.priorityKey, getTicketPriorityKey(modal.ticket)), "medium");
-  const priorityLabel = safeText(first(modal.priorityLabel), "Media");
-  const createdAt = first(modal.createdAt, getTicketCreatedAt(modal.ticket));
-  const updatedAt = first(modal.lastActivityAt, modal.updatedAt, getTicketUpdatedAt(modal.ticket));
+  const ticket = safeObject(first(modal.ticket, modal.incidencia, vm.selectedTicket, {}));
+  const ticketId = safeText(first(modal.ticketId, modal.incidenciaId, getTicketId(ticket), vm.selectedTicketId), "");
+  const subject = getTicketSubject(ticket);
+  const description = safeText(first(getTicketDescription(ticket), "Sin descripción."), "Sin descripción.");
+  const statusKey = getTicketStatusKey(ticket);
+  const statusLabel = getTicketStatusLabel(ticket);
+  const priorityKey = getTicketPriorityKey(ticket);
+  const priorityLabel = getTicketPriorityLabel(ticket);
+  const createdAt = getTicketCreatedAt(ticket);
+  const updatedAt = getTicketUpdatedAt(ticket);
+  const invoices = safeArray(first(modal.invoices, modal.facturas, ticket.invoices, ticket.facturas, []));
+  const technician = safeObject(first(modal.technician, modal.tecnico, ticket.technician, ticket.tecnico, {}));
+  const technicianName = safeText(first(technician.displayName, technician.name, technician.fullName), "Sin asignar");
+  const technicianAvatar = safeImageSrc(first(technician.avatarUrl, technician.avatar, technician.photoUrl, ""));
 
   return `
     <section
-      class="home-modal"
+      class="home-modal-backdrop"
       data-home-modal="ticket-detail"
       data-ticket-id="${attr(ticketId)}"
       data-incidencia-id="${attr(ticketId)}"
@@ -2976,20 +985,11 @@ function renderTicketModal(input = {}) {
       aria-modal="true"
       aria-labelledby="home-ticket-modal-title"
     >
-      <button
-        type="button"
-        class="home-modal-backdrop"
-        data-home-action="${ACTIONS.CLOSE_TICKET_DETAIL}"
-        data-action="${ACTIONS.CLOSE_TICKET_DETAIL}"
-        aria-label="Cerrar detalle de incidencia"
-      ></button>
-
-      <div class="home-modal-dialog" role="document">
-        <div class="home-modal-head">
-          <div class="home-modal-title-block">
-            <span class="home-panel-kicker">Detalle de incidencia</span>
-            <h2 id="home-ticket-modal-title" class="home-modal-title">${escapeHtml(ticketId)}</h2>
-            <p class="home-modal-subtitle">${escapeHtml(title)}</p>
+      <div class="home-modal">
+        <div class="home-modal-header">
+          <div>
+            <p class="home-panel-kicker">${escapeHtml(ticketId)}</p>
+            <h2 id="home-ticket-modal-title">${escapeHtml(subject)}</h2>
           </div>
 
           <button
@@ -3019,7 +1019,7 @@ function renderTicketModal(input = {}) {
                   ${escapeHtml(priorityLabel)}
                 </span>
                 <span class="home-mini-badge home-mini-badge--category">
-                  ${escapeHtml(safeText(first(modal.category, modal.categoria, getTicketCategory(modal.ticket)), "Soporte"))}
+                  ${escapeHtml(safeText(first(modal.category, modal.categoria, getTicketCategory(ticket)), "Soporte"))}
                 </span>
               </div>
             </div>
@@ -3065,7 +1065,7 @@ function renderTicketModal(input = {}) {
               </div>
               <div>
                 <dt>Adjuntos</dt>
-                <dd>${escapeHtml(formatNumber(safeNumber(first(modal.attachmentsCount, 0), 0)))}</dd>
+                <dd>${escapeHtml(formatNumber(safeNumber(first(ticket.attachmentsCount, modal.attachmentsCount, 0), 0)))}</dd>
               </div>
             </dl>
           </aside>
@@ -3086,8 +1086,8 @@ function renderTicketModal(input = {}) {
             class="home-btn home-btn--primary"
             data-home-action="${ACTIONS.NAVIGATE}"
             data-action="${ACTIONS.NAVIGATE}"
-            data-route="${attr(ROUTES.INCIDENCIAS)}"
-            data-href="${attr(ROUTES.INCIDENCIAS)}"
+            data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
+            data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
             data-ticket-id="${attr(ticketId)}"
             data-incidencia-id="${attr(ticketId)}"
           >
@@ -3100,7 +1100,7 @@ function renderTicketModal(input = {}) {
 }
 
 /* =========================================================
-   Estados fallback
+   FALLBACK STATES
 ========================================================= */
 
 export function renderHomeLoadingState() {
@@ -3133,7 +1133,7 @@ export function renderHomeErrorState(message = "No se pudo cargar el Home.") {
 }
 
 /* =========================================================
-   Template completo
+   TEMPLATE
 ========================================================= */
 
 export function renderHomeTemplate(input = {}) {
@@ -3178,6 +1178,55 @@ export function renderHomeTemplate(input = {}) {
     </section>
   `;
 }
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
+export function getHomeTemplateSnapshot() {
+  return {
+    version: TEMPLATE_VERSION,
+    source: "views.home.template",
+
+    actions: ACTIONS,
+    routes: HOME_ROUTES,
+
+    policy: {
+      templateOnly: true,
+      pureHtmlString: true,
+      modelCalculatedOncePerRender: true,
+      selectorsOwnViewModel: true,
+
+      noDomApi: true,
+      noListeners: true,
+      noAuth: true,
+      noRouter: true,
+      noAppCore: true,
+      noHttp: true,
+      noStorage: true,
+      noInlineCss: true,
+      noInlineHandlers: true,
+
+      noQuickActionsDuplicateSection: true,
+      noWidgetsDuplicateSection: true,
+      noHealthServerReadyPing: true,
+      noHomeRoute: true,
+
+      ticketDetailModalOnly: true,
+      ticketDetailDoesNotNavigate: true,
+      ticketDetailActionsForBindings: true,
+
+      escapedHtml: true,
+      escapedAttributes: true,
+      noSensitiveHref: true,
+      snapshotRedacted: true,
+    },
+  };
+}
+
+/* =========================================================
+   EXPORTS
+========================================================= */
 
 export const renderHomeViewTemplate = renderHomeTemplate;
 export const renderHomeDashboardTemplate = renderHomeTemplate;

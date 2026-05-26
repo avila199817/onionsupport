@@ -6,7 +6,8 @@
    - Acciones reales del sidebar.
    - Abrir / cerrar / alternar usando state.js.
    - Navegar usando Router si existe.
-   - Normalizar targets públicos con Router.buildPublicPath().
+   - Normalizar targets públicos con Router.buildPublicPath()/resolveSpaHref().
+   - Validar que el target público construido conserva el mismo destino canónico.
    - Mantener rutas privadas visibles como /@{slug}/{ruta}.
    - Navegar sin modificar open/collapsed.
    - Logout usando Auth si existe.
@@ -37,6 +38,7 @@ import {
   getSidebarUserScopedRouteInfo,
   isSidebarBlockedRoute,
   normalizeSidebarPath,
+  sidebarHomeLookupPath,
 } from "./constants.js";
 
 import {
@@ -50,7 +52,7 @@ import {
   toggleSidebar as toggleRuntimeSidebar,
 } from "./state.js";
 
-export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v7";
+export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v8.safe-public-target";
 
 /* =========================================================
    BASICS
@@ -196,6 +198,27 @@ function isBlockedTargetPath(path = "") {
   return false;
 }
 
+function sidebarDestination(path = "") {
+  const normalized = normalizeSidebarPath(path);
+
+  if (!normalized || isBlockedTargetPath(normalized)) return "";
+
+  const lookup = sidebarHomeLookupPath(normalized);
+
+  return lookup && !isBlockedTargetPath(lookup) ? lookup : "";
+}
+
+function sameSidebarDestination(left = "", right = "") {
+  const leftDestination = sidebarDestination(left);
+  const rightDestination = sidebarDestination(right);
+
+  return Boolean(
+    leftDestination &&
+      rightDestination &&
+      leftDestination === rightDestination
+  );
+}
+
 export function getSafeSidebarTarget(target = "", fallback = "") {
   const raw = text(target, "");
 
@@ -219,6 +242,78 @@ export function getSafeSidebarTarget(target = "", fallback = "") {
   return normalized;
 }
 
+/* =========================================================
+   ROUTER TARGET BUILDING
+========================================================= */
+
+function publicTargetOptions() {
+  return {
+    useSlugHome: true,
+    useSlugPrivate: true,
+  };
+}
+
+function normalizeBuiltPublicTarget(candidate = "", safeTarget = "") {
+  const output = getSafeSidebarTarget(candidate, "");
+
+  if (!output) return "";
+
+  /*
+    No aceptamos una ruta pública construida si cambia el destino canónico.
+    Esto protege contra firmas incompatibles de helpers antiguos.
+      /cuenta -> /@slug/cuenta  OK, mismo lookup /cuenta
+      /cuenta -> /@slug         NO, lookup cambia a /
+  */
+  if (!sameSidebarDestination(output, safeTarget)) {
+    return "";
+  }
+
+  return output;
+}
+
+function tryRouterPublicBuilder(router = null, method = "", safeTarget = "", context = {}) {
+  const fn = router?.[method];
+
+  if (!isFunction(fn)) return "";
+
+  const ctx = options(context);
+  const AppCore = ctx.AppCore || null;
+  const opts = publicTargetOptions();
+
+  const attempts = [
+    /*
+      Firma Router actual:
+        buildPublicPath(path, options)
+        resolveSpaHref(path, options)
+    */
+    () => fn.call(router, safeTarget, opts),
+
+    /*
+      Compat helpers antiguos:
+        buildPublicPath(AppCore, getRoute, canonicalPath, options)
+    */
+    () => fn.call(router, AppCore, null, safeTarget, opts),
+
+    /*
+      Compat helpers antiguos:
+        resolveSpaHref(AppCore, href)
+    */
+    () => fn.call(router, AppCore, safeTarget),
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const candidate = normalizeBuiltPublicTarget(attempt(), safeTarget);
+
+      if (candidate) return candidate;
+    } catch {
+      // probar siguiente firma
+    }
+  }
+
+  return "";
+}
+
 function buildPublicTarget(target = "", context = {}) {
   const safeTarget = getSafeSidebarTarget(target, "");
 
@@ -226,33 +321,11 @@ function buildPublicTarget(target = "", context = {}) {
 
   const router = resolveRouter(context);
 
-  try {
-    if (isFunction(router?.buildPublicPath)) {
-      const publicTarget = router.buildPublicPath(safeTarget, {
-        useSlugHome: true,
-        useSlugPrivate: true,
-      });
+  const built =
+    tryRouterPublicBuilder(router, "buildPublicPath", safeTarget, context) ||
+    tryRouterPublicBuilder(router, "resolveSpaHref", safeTarget, context);
 
-      return getSafeSidebarTarget(publicTarget, safeTarget);
-    }
-  } catch {
-    return safeTarget;
-  }
-
-  try {
-    if (isFunction(router?.resolveSpaHref)) {
-      const publicTarget = router.resolveSpaHref(safeTarget, {
-        useSlugHome: true,
-        useSlugPrivate: true,
-      });
-
-      return getSafeSidebarTarget(publicTarget, safeTarget);
-    }
-  } catch {
-    return safeTarget;
-  }
-
-  return safeTarget;
+  return built || safeTarget;
 }
 
 /* =========================================================
@@ -515,6 +588,11 @@ export function getSidebarActionsSnapshot() {
       noRouterPushLegacy: true,
 
       buildsPublicTargetsWithRouter: true,
+      supportsCurrentRouterBuilderSignature: true,
+      supportsLegacyHelperBuilderSignatureSafely: true,
+      validatesBuiltPublicTargetDestination: true,
+      rejectsBuilderOutputChangingCanonicalDestination: true,
+
       rejectsSensitiveTargets: true,
       rejectsLegacyTargetsViaConstantsAndCoreConfig: true,
       rejectsScopedLegacyTargets: true,

@@ -49,7 +49,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v12";
+export const ROUTER_VERSION = "router.index.v13";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -264,6 +264,10 @@ export const Router = (() => {
       search: normalizeSearch(search),
       hash: normalizeHash(hash),
     };
+  }
+
+  function publicPathname(path = HOME_PATH) {
+    return splitPath(path || HOME_PATH).pathname || HOME_PATH;
   }
 
   function joinPath(parts = {}) {
@@ -844,19 +848,30 @@ export const Router = (() => {
 
     if (!realSlug) return "";
 
-    const expected = buildScopedPublicPath(data, realSlug);
-    const visibleCanonical = normalizeCanonicalPath(data.publicPath || HOME_PATH);
-    const requestedSlug = normalizeUserSlug(data.routeParams?.slug || "");
+    const publicPath = data.publicPath || data.canonicalPath || HOME_PATH;
+    const visiblePathname = publicPathname(publicPath);
+    const requestedSlug = normalizeUserSlug(
+      data.routeParams?.slug || extractSlugFromPath(publicPath)
+    );
 
-    if (visibleCanonical === HOME_PATH) return expected;
+    const expectedPathname = buildUserScopedPath(HOME_PATH, realSlug);
+    const expected = withSearchHashFrom(publicPath, expectedPathname);
+
+    /*
+      Si está en "/" canónico y ya hay sesión, debe ir a /@{slug}.
+    */
+    if (visiblePathname === HOME_PATH) return expected;
+
+    /*
+      Si intenta entrar con otro slug, corregimos al slug real.
+    */
     if (requestedSlug && requestedSlug !== realSlug) return expected;
 
-    if (
-      requestedSlug === realSlug &&
-      visibleCanonical !== normalizeCanonicalPath(expected)
-    ) {
-      return expected;
-    }
+    /*
+      Comparar contra la URL visible, no contra canonicalPath.
+      /@{slug} canonicaliza internamente a "/", pero visualmente ya es correcto.
+    */
+    if (visiblePathname !== expectedPathname) return expected;
 
     return "";
   }
@@ -871,23 +886,35 @@ export const Router = (() => {
 
     if (!realSlug) return "";
 
-    const visibleCanonical = normalizeCanonicalPath(
-      data.publicPath || data.canonicalPath || HOME_PATH
+    const canonicalPath = data.canonicalPath || HOME_PATH;
+    const publicPath = data.publicPath || canonicalPath;
+
+    const visiblePathname = publicPathname(publicPath);
+    const requestedSlug = normalizeUserSlug(
+      data.routeParams?.slug || extractSlugFromPath(publicPath)
     );
 
-    const expectedPathname = buildUserScopedPath(
-      data.canonicalPath || HOME_PATH,
-      realSlug
-    );
+    const expectedPathname = buildUserScopedPath(canonicalPath, realSlug);
+    const expected = withSearchHashFrom(publicPath, expectedPathname);
 
-    const requestedSlug = normalizeUserSlug(data.routeParams?.slug || "");
+    /*
+      Ruta privada canónica sin /@slug:
+        /incidencias -> /@{slug}/incidencias
+        /             -> /@{slug}
+    */
+    if (!requestedSlug && visiblePathname === canonicalPath) return expected;
 
-    if (visibleCanonical !== expectedPathname || requestedSlug !== realSlug) {
-      return withSearchHashFrom(
-        data.publicPath || data.canonicalPath || HOME_PATH,
-        expectedPathname
-      );
-    }
+    /*
+      Slug incorrecto:
+        /@otro/incidencias -> /@{slug}/incidencias
+    */
+    if (requestedSlug && requestedSlug !== realSlug) return expected;
+
+    /*
+      Comparar contra la URL visible, no contra canonicalPath.
+      /@{slug}/ruta canonicaliza internamente a /ruta.
+    */
+    if (visiblePathname !== expectedPathname) return expected;
 
     return "";
   }
@@ -907,12 +934,24 @@ export const Router = (() => {
 
   function getRouteMatch(path = HOME_PATH) {
     const publicPath = normalizePublicPath(path);
+    const publicPathnameValue = publicPathname(publicPath);
     const visibleCanonicalPath = normalizeCanonicalPath(publicPath);
-    const scoped = getUserPathInfo(visibleCanonicalPath);
-    const lookupPath = resolveRouteLookupPath(visibleCanonicalPath);
+
+    /*
+      Importante:
+      El slug debe leerse desde la URL pública visible.
+      Si usamos visibleCanonicalPath, /@{slug} ya se convirtió en "/"
+      y perdemos routeParams.slug.
+    */
+    const scoped = getUserPathInfo(publicPathnameValue);
+
+    const lookupPath = scoped.scoped
+      ? scoped.restPath
+      : resolveRouteLookupPath(visibleCanonicalPath);
 
     const blockedLegacy = Boolean(
       isBlockedRouterPath(publicPath) ||
+        isBlockedRouterPath(publicPathnameValue) ||
         isBlockedRouterPath(visibleCanonicalPath) ||
         isBlockedRouterPath(lookupPath)
     );
@@ -1932,6 +1971,7 @@ export const Router = (() => {
         userSlugHome: true,
         userSlugPrivateRoutes: true,
         validatesRealUserSlug: true,
+        preservesVisibleUserSlugBeforeCanonicalizing: true,
 
         homeInternalPath: HOME_PATH,
         homeVisiblePattern: "/@{user.slug}",

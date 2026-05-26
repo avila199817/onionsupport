@@ -14,7 +14,11 @@
    - Mantener compatibilidad con llamadas antiguas de paginación sin mostrar páginas.
    - Pintar incidencias de más nuevas a más antiguas.
    - Ir ampliando la lista visible al hacer scroll, estilo feed/infinite scroll.
-   - Pintar primero estructura/cache/skeleton y cargar remoto después del primer paint.
+   - Primera entrada: pintar estructura/cache/skeleton y cargar remoto tras paint.
+   - La primera carga remota se hace una sola vez por runtime SPA.
+   - La cache no bloquea la primera carga remota útil.
+   - Después de la primera carga remota, montar la vista usa memoria/store.
+   - Reload/refresh explícitos siguen permitidos.
    - Mantener bindings delegados estables entre rerenders.
    - Reenganchar sólo scroll/sentinel cuando el DOM se repinta.
    - No validar rutas.
@@ -109,7 +113,7 @@ import {
 ========================================================= */
 
 export const INCIDENCIAS_VIEW_VERSION =
-  "incidencias.view.v7.paint-first-stable-bindings";
+  "incidencias.view.v8.load-once-memory-first";
 
 const SCOPE = "view:incidencias";
 
@@ -134,6 +138,11 @@ export const IncidenciasView = (() => {
 
   let initialized = false;
   let destroyed = false;
+
+  let initialRemoteLoadRequested = false;
+  let initialRemoteLoadScheduled = false;
+  let initialRemoteLoadCompleted = false;
+  let initialRemoteLoadCompletedAt = "";
 
   let inflightInit = null;
   let inflightReload = null;
@@ -214,6 +223,14 @@ export const IncidenciasView = (() => {
     return BrowserWindow || globalThis;
   }
 
+  function nowIso() {
+    try {
+      return new Date().toISOString();
+    } catch {
+      return "";
+    }
+  }
+
   function requestFrame(callback) {
     const host = getTimerHost();
 
@@ -292,17 +309,73 @@ export const IncidenciasView = (() => {
     return true;
   }
 
-  function startReloadAfterPaint(options = {}, label = "reload") {
+  function stateHasLoadedPayload() {
+    return Boolean(
+      incidenciasState.loaded === true &&
+        incidenciasState.hydrated === true
+    );
+  }
+
+  function stateHasVisibleData(items = null) {
+    const sourceItems = Array.isArray(items)
+      ? items
+      : getItems();
+
+    return safeArray(sourceItems).length > 0;
+  }
+
+  function shouldLoadOnInit(options = {}) {
     const opts = safeObject(options);
+
+    if (opts.force === true) {
+      return true;
+    }
+
+    if (inflightReload || initialRemoteLoadScheduled) {
+      return false;
+    }
+
+    if (!initialRemoteLoadCompleted) {
+      return true;
+    }
+
+    if (!stateHasLoadedPayload() && !stateHasVisibleData()) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function startInitialRemoteLoadAfterPaint(options = {}, label = "incidencias:init:initial-load") {
+    const opts = safeObject(options);
+
+    if (inflightReload || initialRemoteLoadScheduled) {
+      return false;
+    }
+
+    if (initialRemoteLoadCompleted && opts.force !== true) {
+      return false;
+    }
+
+    initialRemoteLoadRequested = true;
+    initialRemoteLoadScheduled = true;
 
     return runDeferred(label, async () => {
       await waitForPaint();
+
+      initialRemoteLoadScheduled = false;
 
       if (destroyed) {
         return api;
       }
 
-      return reload(opts);
+      return reload({
+        ...opts,
+        force: true,
+        initial: true,
+        paintBeforeLoad: false,
+        renderBeforeLoad: false,
+      });
     });
   }
 
@@ -321,6 +394,9 @@ export const IncidenciasView = (() => {
         setLoading(true);
       } else if (hasData && opts.asRefresh) {
         setRefreshing(true);
+      } else {
+        setLoading(false);
+        setRefreshing(false);
       }
     } catch {
       incidenciasState.error = "";
@@ -1127,6 +1203,12 @@ export const IncidenciasView = (() => {
     }
   }
 
+  function markInitialRemoteLoadCompleted() {
+    initialRemoteLoadCompleted = true;
+    initialRemoteLoadCompletedAt = nowIso();
+    return initialRemoteLoadCompletedAt;
+  }
+
   function hydrateBestEffort() {
     let hydrated = false;
 
@@ -1171,8 +1253,9 @@ export const IncidenciasView = (() => {
     silent = false,
     asRefresh = false,
     renderBeforeLoad = true,
+    initial = false,
   } = {}) {
-    if (destroyed) {
+    if (destroyed && !initial) {
       return getItems();
     }
 
@@ -1231,6 +1314,10 @@ export const IncidenciasView = (() => {
       markSync();
       persistCacheBestEffort();
 
+      if (initial || !initialRemoteLoadCompleted) {
+        markInitialRemoteLoadCompleted();
+      }
+
       emit("incidencias:loaded", {
         items: afterItems,
         total: afterItems.length,
@@ -1238,6 +1325,7 @@ export const IncidenciasView = (() => {
         force: Boolean(force),
         silent: Boolean(silent),
         asRefresh: Boolean(asRefresh),
+        initial: Boolean(initial),
         source: SCOPE,
         mode: "infinite",
       });
@@ -1265,6 +1353,7 @@ export const IncidenciasView = (() => {
       emit("incidencias:load:error", {
         error,
         message,
+        initial: Boolean(initial),
         source: SCOPE,
       });
 
@@ -1591,11 +1680,6 @@ export const IncidenciasView = (() => {
 
     ensureBaseState(initialItems);
 
-    /*
-      Rendimiento:
-      primero se pinta estructura/cache/skeleton.
-      Después se deja respirar al navegador antes de cargar API.
-    */
     if (paintBeforeLoad) {
       setInitialLoadVisualState(
         {
@@ -1609,7 +1693,7 @@ export const IncidenciasView = (() => {
       await waitForPaint();
     }
 
-    if (!isActiveRenderToken(token)) {
+    if (!isActiveRenderToken(token) && !opts.initial) {
       return api;
     }
 
@@ -1618,7 +1702,7 @@ export const IncidenciasView = (() => {
       renderBeforeLoad: opts.renderBeforeLoad !== false && !paintBeforeLoad,
     });
 
-    if (!isActiveRenderToken(token)) {
+    if (!isActiveRenderToken(token) && !opts.initial) {
       return api;
     }
 
@@ -2282,11 +2366,6 @@ export const IncidenciasView = (() => {
       return false;
     }
 
-    /*
-      Los eventos de incidencias.bindings.js son delegados sobre el contenedor.
-      Como render() sustituye innerHTML pero no sustituye #view-container,
-      no hace falta destruir/recrear listeners en cada rerender.
-    */
     if (!bindingsCleanup || boundContainer !== target || force) {
       if (bindingsCleanup || boundContainer) {
         cleanupBindings();
@@ -2329,10 +2408,6 @@ export const IncidenciasView = (() => {
       boundContainer = target;
     }
 
-    /*
-      El sentinel/host de scroll sí puede cambiar porque render() rehace HTML.
-      Por eso sólo se reengancha el binding de scroll.
-    */
     bindInfiniteScroll(target);
 
     return true;
@@ -2356,22 +2431,56 @@ export const IncidenciasView = (() => {
       "silent"
     );
 
+    const hasIncomingPaintBeforeLoad = Object.prototype.hasOwnProperty.call(
+      incomingOptions,
+      "paintBeforeLoad"
+    );
+
+    const hasBasePaintBeforeLoad = Object.prototype.hasOwnProperty.call(
+      baseOptions,
+      "paintBeforeLoad"
+    );
+
+    const hasIncomingRenderBeforeLoad = Object.prototype.hasOwnProperty.call(
+      incomingOptions,
+      "renderBeforeLoad"
+    );
+
+    const hasBaseRenderBeforeLoad = Object.prototype.hasOwnProperty.call(
+      baseOptions,
+      "renderBeforeLoad"
+    );
+
     return {
       ...baseOptions,
       ...incomingOptions,
 
       force: Boolean(baseOptions.force || incomingOptions.force),
       asRefresh: Boolean(baseOptions.asRefresh || incomingOptions.asRefresh),
+      initial: Boolean(baseOptions.initial || incomingOptions.initial),
+
       silent: hasIncomingSilent
         ? Boolean(incomingOptions.silent)
         : hasBaseSilent
           ? Boolean(baseOptions.silent)
           : false,
+
+      paintBeforeLoad: hasIncomingPaintBeforeLoad
+        ? incomingOptions.paintBeforeLoad !== false
+        : hasBasePaintBeforeLoad
+          ? baseOptions.paintBeforeLoad !== false
+          : true,
+
+      renderBeforeLoad: hasIncomingRenderBeforeLoad
+        ? incomingOptions.renderBeforeLoad !== false
+        : hasBaseRenderBeforeLoad
+          ? baseOptions.renderBeforeLoad !== false
+          : true,
     };
   }
 
   async function reload(options = {}) {
-    if (destroyed) {
+    if (destroyed && !safeObject(options).initial) {
       return api;
     }
 
@@ -2418,40 +2527,41 @@ export const IncidenciasView = (() => {
     }
 
     const opts = safeObject(options);
+    const force = opts.force === true;
 
     if (initialized) {
       hydrateBestEffort();
 
       const currentItems = getItems();
+      const hasCurrentItems = currentItems.length > 0;
+      const needsInitialLoad = shouldLoadOnInit({
+        force,
+      });
 
       ensureBaseState(currentItems);
 
-      if (!incidenciasState.loaded) {
-        const hasCurrentItems = currentItems.length > 0;
-
+      if (needsInitialLoad) {
         setInitialLoadVisualState(
           {
-            silent: Boolean(opts.silent),
+            silent: hasCurrentItems || Boolean(opts.silent),
             asRefresh: hasCurrentItems,
           },
           currentItems
         );
+      } else {
+        markIdle();
       }
 
       rerender();
 
-      if (!incidenciasState.loaded && !inflightReload) {
-        const hasCurrentItems = getItems().length > 0;
-
-        startReloadAfterPaint(
+      if (needsInitialLoad) {
+        startInitialRemoteLoadAfterPaint(
           {
-            force: false,
+            force: true,
             silent: hasCurrentItems || Boolean(opts.silent),
             asRefresh: hasCurrentItems,
-            paintBeforeLoad: false,
-            renderBeforeLoad: false,
           },
-          "incidencias:init:reload-existing"
+          "incidencias:init:initial-load-existing"
         );
       }
 
@@ -2464,38 +2574,40 @@ export const IncidenciasView = (() => {
     inflightInit = (async () => {
       safeLog("init");
 
-      /*
-        Rendimiento:
-        init ya no bloquea la navegación esperando la API.
-        Primero pinta estructura/cache/skeleton; después carga remoto.
-      */
       hydrateBestEffort();
 
       const initialItems = getItems();
       const hasInitialItems = initialItems.length > 0;
+      const needsInitialLoad = shouldLoadOnInit({
+        force,
+      });
 
       ensureBaseState(initialItems);
 
-      setInitialLoadVisualState(
-        {
-          silent: Boolean(opts.silent),
-          asRefresh: hasInitialItems,
-        },
-        initialItems
-      );
+      if (needsInitialLoad) {
+        setInitialLoadVisualState(
+          {
+            silent: hasInitialItems || Boolean(opts.silent),
+            asRefresh: hasInitialItems,
+          },
+          initialItems
+        );
+      } else {
+        markIdle();
+      }
 
       rerender();
 
-      startReloadAfterPaint(
-        {
-          force: Boolean(opts.force),
-          silent: hasInitialItems || Boolean(opts.silent),
-          asRefresh: hasInitialItems,
-          paintBeforeLoad: false,
-          renderBeforeLoad: false,
-        },
-        "incidencias:init:background-load"
-      );
+      if (needsInitialLoad) {
+        startInitialRemoteLoadAfterPaint(
+          {
+            force: true,
+            silent: hasInitialItems || Boolean(opts.silent),
+            asRefresh: hasInitialItems,
+          },
+          "incidencias:init:initial-load"
+        );
+      }
 
       return api;
     })();
@@ -2516,7 +2628,6 @@ export const IncidenciasView = (() => {
     cleanupBindings();
 
     queuedReloadOptions = null;
-    inflightReload = null;
     inflightInit = null;
     inflightOpenTicket = null;
     inflightOpenTicketId = "";
@@ -2626,6 +2737,11 @@ export const IncidenciasView = (() => {
         initialized,
         destroyed,
 
+        initialRemoteLoadRequested,
+        initialRemoteLoadScheduled,
+        initialRemoteLoadCompleted,
+        initialRemoteLoadCompletedAt,
+
         hasInflightInit: Boolean(inflightInit),
         hasInflightReload: Boolean(inflightReload),
         hasQueuedReload: Boolean(queuedReloadOptions),
@@ -2672,6 +2788,17 @@ export const IncidenciasView = (() => {
         loadingMore: Boolean(incidenciasState.loadingMore),
 
         pagination: infinite,
+
+        policy: {
+          loadOncePerRuntime: true,
+          initialRemoteLoadAfterFirstPaint: true,
+          cacheDoesNotBlockInitialRemoteLoad: true,
+          memoryFirstAfterInitialRemoteLoad: true,
+          explicitReloadStillAllowed: true,
+          noRouterAuthDuplication: true,
+          noLocalDataPatch: true,
+          delegatedApiStoreModelState: true,
+        },
       };
     },
 

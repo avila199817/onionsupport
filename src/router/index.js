@@ -14,12 +14,13 @@
    - Actualizar history.
    - Actualizar estado de ruta.
    - Actualizar shell.
-   - Sincronizar chrome registrado tras render.
+   - Sincronizar chrome registrado tras render sin bloquear la transición visual.
    - Ruta privada sin sesión válida -> /login.
    - Login con sesión válida -> /@{user.slug}.
    - Rutas admin definidas en core/config.js requieren rol admin.
    - Home interna: /
    - Home visible: /@{user.slug}
+   - Navegación latest-wins: no serializar cambios de vista en cola rígida.
    - Sin Auth estático.
    - Sin fetch.
    - Sin storage.
@@ -49,7 +50,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v13";
+export const ROUTER_VERSION = "router.index.v14.fast-transition";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -133,6 +134,48 @@ export const Router = (() => {
         typeof value === "string" ? redact(value) : value,
       ])
     );
+  }
+
+  function isCurrentRenderSeq(seq = 0) {
+    return Boolean(seq && seq === renderSeq);
+  }
+
+  function getTimerHost() {
+    if (typeof window !== "undefined") return window;
+    return globalThis;
+  }
+
+  function deferAfterPaint(callback = null) {
+    if (!isFunction(callback)) return false;
+
+    const host = getTimerHost();
+
+    const run = () => {
+      try {
+        callback();
+      } catch {
+        // noop
+      }
+    };
+
+    try {
+      if (isFunction(host.requestAnimationFrame)) {
+        host.requestAnimationFrame(() => {
+          host.requestAnimationFrame(run);
+        });
+
+        return true;
+      }
+    } catch {
+      // fallback abajo
+    }
+
+    try {
+      host.setTimeout(run, 0);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /* =======================================================
@@ -1164,26 +1207,42 @@ export const Router = (() => {
     return true;
   }
 
+  function syncRouteChromeDeferred(route = null, state = {}, options = {}, seq = renderSeq) {
+    return deferAfterPaint(() => {
+      if (!isCurrentRenderSeq(seq)) return;
+
+      syncRouteChrome(route, state, options);
+    });
+  }
+
   function clearChrome() {
     safeCall(Shell.clearDynamicContainers, AppCore);
     return true;
   }
 
-  function destroyActiveView() {
-    if (!activeView) return false;
+  function cleanupViewInstance(view = null) {
+    if (!view) return false;
 
     for (const method of ["destroy", "unmount", "cleanup"]) {
       try {
-        if (isFunction(activeView?.[method])) {
-          activeView[method]();
-          break;
+        if (isFunction(view?.[method])) {
+          view[method]();
+          return true;
         }
       } catch {
         // noop
       }
     }
 
+    return false;
+  }
+
+  function destroyActiveView() {
+    if (!activeView) return false;
+
+    cleanupViewInstance(activeView);
     activeView = null;
+
     return true;
   }
 
@@ -1221,6 +1280,15 @@ export const Router = (() => {
     root.replaceChildren(section);
 
     return section;
+  }
+
+  function beginRouteTransition(route = null, data = {}, options = {}) {
+    const state = setRouterState(data);
+
+    updateShell(route, state.canonicalPath);
+    writeHistory(state.publicPath, options);
+
+    return state;
   }
 
   /* =======================================================
@@ -1463,10 +1531,11 @@ export const Router = (() => {
      RENDER HELPERS
   ======================================================= */
 
-  function renderNotFound(data, options = {}) {
+  function renderNotFound(data, options = {}, seq = renderSeq) {
     destroyActiveView();
     clearChrome();
-    writeHistory(data.publicPath, options);
+
+    const state = beginRouteTransition(null, data, options);
 
     if (isFunction(Render.renderRouteNotFound)) {
       Render.renderRouteNotFound({
@@ -1476,6 +1545,8 @@ export const Router = (() => {
         canonicalPath: data.canonicalPath,
         publicPath: data.publicPath,
         routeParams: data.routeParams || {},
+        renderSeq: seq,
+        isCurrentRender: () => isCurrentRenderSeq(seq),
         setShellMode: (route) => Shell.setShellMode?.(AppCore, route),
         setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
       });
@@ -1483,10 +1554,8 @@ export const Router = (() => {
       renderFallback("Ruta no encontrada", "La vista solicitada no existe.");
     }
 
-    const state = setRouterState(data);
-
     updateShell(null, state.canonicalPath);
-    syncRouteChrome(null, state, options);
+    syncRouteChromeDeferred(null, state, options, seq);
 
     return {
       ok: true,
@@ -1497,10 +1566,11 @@ export const Router = (() => {
     };
   }
 
-  function renderForbidden(route, data, reason = "forbidden", options = {}) {
+  function renderForbidden(route, data, reason = "forbidden", options = {}, seq = renderSeq) {
     destroyActiveView();
     clearChrome();
-    writeHistory(data.publicPath, options);
+
+    const state = beginRouteTransition(route, data, options);
 
     if (isFunction(Render.renderRouteForbidden)) {
       Render.renderRouteForbidden({
@@ -1510,6 +1580,8 @@ export const Router = (() => {
         canonicalPath: data.canonicalPath,
         publicPath: data.publicPath,
         routeParams: data.routeParams || {},
+        renderSeq: seq,
+        isCurrentRender: () => isCurrentRenderSeq(seq),
         setShellMode: (nextRoute) => Shell.setShellMode?.(AppCore, nextRoute),
         setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
       });
@@ -1517,10 +1589,8 @@ export const Router = (() => {
       renderFallback("Acceso no permitido", "No tienes permisos para ver esta vista.");
     }
 
-    const state = setRouterState(data);
-
     updateShell(route, state.canonicalPath);
-    syncRouteChrome(route, state, options);
+    syncRouteChromeDeferred(route, state, options, seq);
 
     return {
       ok: true,
@@ -1532,11 +1602,30 @@ export const Router = (() => {
     };
   }
 
-  async function renderSuccess(route, data, options = {}) {
+  async function renderSuccess(route, data, options = {}, seq = renderSeq) {
+    /*
+      Transición visual inmediata:
+      - estado de ruta
+      - active menu
+      - título
+      - history
+      antes del render pesado/lazy.
+    */
+    const transitionState = beginRouteTransition(route, data, options);
+
     destroyActiveView();
     clearChrome();
-    updateShell(route, data.canonicalPath);
-    writeHistory(data.publicPath, options);
+
+    if (!isCurrentRenderSeq(seq)) {
+      return {
+        ok: false,
+        skipped: true,
+        reason: "stale-before-render",
+        canonicalPath: transitionState.canonicalPath,
+        publicPath: transitionState.publicPath,
+        routeParams: transitionState.routeParams,
+      };
+    }
 
     let view = null;
 
@@ -1548,6 +1637,8 @@ export const Router = (() => {
         canonicalPath: data.canonicalPath,
         publicPath: data.publicPath,
         routeParams: data.routeParams || {},
+        renderSeq: seq,
+        isCurrentRender: () => isCurrentRenderSeq(seq),
         setShellMode: (nextRoute) => Shell.setShellMode?.(AppCore, nextRoute),
         setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
       });
@@ -1559,7 +1650,22 @@ export const Router = (() => {
         canonicalPath: data.canonicalPath,
         publicPath: data.publicPath,
         routeParams: data.routeParams || {},
+        renderSeq: seq,
+        isCurrentRender: () => isCurrentRenderSeq(seq),
       });
+    }
+
+    if (!isCurrentRenderSeq(seq)) {
+      cleanupViewInstance(view);
+
+      return {
+        ok: false,
+        skipped: true,
+        reason: "stale-after-render",
+        canonicalPath: data.canonicalPath,
+        publicPath: data.publicPath,
+        routeParams: data.routeParams || {},
+      };
     }
 
     activeView = view || null;
@@ -1567,7 +1673,7 @@ export const Router = (() => {
     const state = setRouterState(data);
 
     updateShell(route, state.canonicalPath);
-    syncRouteChrome(route, state, options);
+    syncRouteChromeDeferred(route, state, options, seq);
 
     return {
       ok: true,
@@ -1579,10 +1685,11 @@ export const Router = (() => {
     };
   }
 
-  async function renderRuntimeError(route, data, error, options = {}) {
+  async function renderRuntimeError(route, data, error, options = {}, seq = renderSeq) {
     destroyActiveView();
     clearChrome();
-    writeHistory(data.publicPath, options);
+
+    const state = beginRouteTransition(route, data, options);
 
     if (isFunction(Render.renderRouteRuntimeError)) {
       await Render.renderRouteRuntimeError({
@@ -1593,6 +1700,8 @@ export const Router = (() => {
         canonicalPath: data.canonicalPath,
         publicPath: data.publicPath,
         routeParams: data.routeParams || {},
+        renderSeq: seq,
+        isCurrentRender: () => isCurrentRenderSeq(seq),
         setShellMode: (nextRoute) => Shell.setShellMode?.(AppCore, nextRoute),
         setDocumentTitle: (title) => Shell.setDocumentTitle?.(AppCore, title),
       });
@@ -1600,10 +1709,8 @@ export const Router = (() => {
       renderFallback("Error de vista", "No se pudo renderizar esta vista.");
     }
 
-    const state = setRouterState(data);
-
     updateShell(route, state.canonicalPath);
-    syncRouteChrome(route, state, options);
+    syncRouteChromeDeferred(route, state, options, seq);
 
     return {
       ok: false,
@@ -1644,13 +1751,13 @@ export const Router = (() => {
         return redirectTo(LOGIN_PATH, options, "blocked-legacy-login");
       }
 
-      return renderNotFound(data, options);
+      return renderNotFound(data, options, seq);
     }
 
     const waitedAuth = await waitForAuthIfNeeded(data, options);
 
     if (waitedAuth) {
-      if (seq !== renderSeq) {
+      if (!isCurrentRenderSeq(seq)) {
         return {
           ok: false,
           skipped: true,
@@ -1670,12 +1777,12 @@ export const Router = (() => {
         );
       }
 
-      return renderNotFound(data, options);
+      return renderNotFound(data, options, seq);
     }
 
     const access = checkAccess(data.route, data.canonicalPath, data.publicPath);
 
-    if (seq !== renderSeq) {
+    if (!isCurrentRenderSeq(seq)) {
       return {
         ok: false,
         skipped: true,
@@ -1688,7 +1795,7 @@ export const Router = (() => {
         return redirectTo(access.redirectTo, options, access.reason || "guard-redirect");
       }
 
-      return renderForbidden(data.route, data, access.reason || "forbidden", options);
+      return renderForbidden(data.route, data, access.reason || "forbidden", options, seq);
     }
 
     const privateSlugRedirect = options.keepCanonicalHome === true
@@ -1708,18 +1815,32 @@ export const Router = (() => {
     }
 
     try {
-      return await renderSuccess(data.route, data, options);
+      return await renderSuccess(data.route, data, options, seq);
     } catch (error) {
-      return renderRuntimeError(data.route, data, error, options);
+      if (!isCurrentRenderSeq(seq)) {
+        return {
+          ok: false,
+          skipped: true,
+          reason: "stale-error",
+          error,
+        };
+      }
+
+      return renderRuntimeError(data.route, data, error, options, seq);
     }
   }
 
   function render(path = HOME_PATH, options = {}) {
-    renderPromise = renderPromise
-      .catch(() => null)
-      .then(() => executeRender(path, isObject(options) ? options : {}));
+    /*
+      Navegación latest-wins.
+      No se encadenan renders con .then(), porque eso congela el cambio
+      de vista si una vista anterior tarda en resolver.
+    */
+    const task = executeRender(path, isObject(options) ? options : {});
 
-    return renderPromise;
+    renderPromise = Promise.resolve(task).catch(() => null);
+
+    return task;
   }
 
   function renderCurrent(options = {}) {
@@ -1925,6 +2046,7 @@ export const Router = (() => {
       bound,
       renderSeq,
       hasActiveView: Boolean(activeView),
+      hasRenderPromise: Boolean(renderPromise),
 
       route: redact(readState().route || HOME_PATH),
       canonicalPath: redact(currentCanonicalPath()),
@@ -1950,6 +2072,13 @@ export const Router = (() => {
 
       policy: {
         routerOrchestrator: true,
+
+        latestWinsNavigation: true,
+        noRigidRenderQueue: true,
+        routeStateBeforeHeavyRender: true,
+        shellUpdateBeforeHeavyRender: true,
+        chromeSyncDeferredAfterPaint: true,
+        staleRenderProtection: true,
 
         ownAuthStatic: false,
         authDelegated: true,

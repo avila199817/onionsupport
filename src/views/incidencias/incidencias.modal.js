@@ -37,13 +37,11 @@ import {
   BrowserDocument,
   BrowserWindow,
 
-  isObject,
   safeText,
   safeNumber,
   safeArray,
   safeObject,
   first,
-  hasOwnKeys,
 
   escapeHtml,
   normalizeWhitespace,
@@ -69,7 +67,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_MODAL_VERSION = "incidencias.modal.v3.optimized";
+export const INCIDENCIAS_MODAL_VERSION = "incidencias.modal.v3.optimized.1";
 
 const MODAL_ID = "incidencias-detail-modal-root";
 const PANEL_ID = "incidencias-detail-modal-panel";
@@ -1251,7 +1249,7 @@ function renderLoadingOverlay(label = "Procesando...") {
 }
 
 function renderFooter(detail = {}) {
-  const ticketId = getDisplayTicketId(detail);
+  const ticketId = getTicketId(detail);
 
   return `
     <footer class="incidencias-modal-footer">
@@ -1273,8 +1271,9 @@ function renderFooter(detail = {}) {
 ========================================================= */
 
 function renderModalInner(detail = {}) {
-  const item = getDetail(detail);
-  const ticketId = getDisplayTicketId(item);
+  const item = safeObject(detail);
+  const ticketId = getTicketId(item);
+  const displayTicketId = getDisplayTicketId(item);
   const title = getTitle(item);
   const description = getDescription(item);
   const facturaRelacionada = getFacturaRelacionada(item);
@@ -1317,7 +1316,7 @@ function renderModalInner(detail = {}) {
                   class="incidencias-modal-id-chip"
                   ${tooltipAttrs("Copiar ID", "Copiar ID")}
                 >
-                  ${escapeHtml(ticketId)}
+                  ${escapeHtml(displayTicketId)}
                 </button>
 
                 ${renderChip(statusLabel, `status-${statusClass}`)}

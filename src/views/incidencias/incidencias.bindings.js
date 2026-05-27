@@ -22,11 +22,11 @@ import { AppCore } from "../../core/index.js";
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_BINDINGS_VERSION = "incidencias.bindings.v3.optimized";
+export const INCIDENCIAS_BINDINGS_VERSION = "incidencias.bindings.v4.solid";
 
 const DEFAULT_SCOPE = "view:incidencias";
 const SEARCH_DEBOUNCE_MS = 180;
-const MUTATION_RELOAD_DELAY_MS = 120;
+const MUTATION_SYNC_DELAY_MS = 160;
 
 const ACTION_SELECTOR = [
   "[data-incidencias-action]",
@@ -219,6 +219,9 @@ const DEFAULT_MUTATION_EVENTS = Object.freeze([
   "incidencias:created",
 ]);
 
+const TRUE_VALUES = new Set(["true", "1", "yes", "si", "sí", "on"]);
+const PLACEHOLDER_IDS = new Set(["-", "—", "_", "n/a", "na", "null", "undefined"]);
+
 const scopeCleanups = new Map();
 const busyKeys = new Set();
 const busyElementMeta = new WeakMap();
@@ -232,8 +235,7 @@ function isBrowser() {
 }
 
 function getTimerHost() {
-  if (typeof window !== "undefined") return window;
-  return globalThis;
+  return typeof window !== "undefined" ? window : globalThis;
 }
 
 function isFn(value) {
@@ -241,9 +243,7 @@ function isFn(value) {
 }
 
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
   const text = String(value)
     .replace(/[\r\n\t]/g, " ")
@@ -254,43 +254,28 @@ function safeText(value, fallback = "") {
 }
 
 function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") {
-    return fallback;
-  }
+  if (value === null || value === undefined || value === "") return fallback;
 
   const number = Number(value);
 
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
-function safeObject(value) {
+function safeObject(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
-    : {};
+    : fallback;
 }
 
 function first(...values) {
   for (const value of values) {
-    if (value === null || value === undefined) {
-      continue;
-    }
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
-
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
     return value;
   }
 
@@ -309,6 +294,19 @@ function normalizeScope(scope = DEFAULT_SCOPE) {
   return safeText(scope, DEFAULT_SCOPE);
 }
 
+function cleanIdentifier(value = "") {
+  const text = safeText(value, "");
+  const normalized = text.toLowerCase();
+
+  if (!text || PLACEHOLDER_IDS.has(normalized)) return "";
+
+  return text;
+}
+
+function isTruthyValue(value = "") {
+  return TRUE_VALUES.has(normalizeAction(value));
+}
+
 function safeWarn(...args) {
   try {
     AppCore?.utils?.warn?.("[IncidenciasBindings]", ...args);
@@ -323,9 +321,7 @@ function safeWarn(...args) {
 function emit(eventName = "", payload = {}) {
   const name = safeText(eventName, "");
 
-  if (!name) {
-    return false;
-  }
+  if (!name) return false;
 
   try {
     AppCore?.events?.emit?.(name, payload);
@@ -338,9 +334,7 @@ function emit(eventName = "", payload = {}) {
 function showToast(message = "", type = "info") {
   const text = safeText(message, "");
 
-  if (!text) {
-    return;
-  }
+  if (!text) return;
 
   try {
     if (isFn(AppCore?.toast?.[type])) {
@@ -375,18 +369,14 @@ function cleanupScope(scope = DEFAULT_SCOPE) {
   const scopeName = normalizeScope(scope);
   const cleanups = scopeCleanups.get(scopeName);
 
-  if (!cleanups) {
-    return;
-  }
+  if (!cleanups) return;
 
   scopeCleanups.delete(scopeName);
   runCleanups([...cleanups]);
 }
 
 function registerScopeCleanup(scope = DEFAULT_SCOPE, cleanup = null) {
-  if (!isFn(cleanup)) {
-    return;
-  }
+  if (!isFn(cleanup)) return;
 
   const scopeName = normalizeScope(scope);
 
@@ -402,15 +392,9 @@ function registerScopeCleanup(scope = DEFAULT_SCOPE, cleanup = null) {
 ========================================================= */
 
 function getDefaultContainer() {
-  if (!isBrowser()) {
-    return null;
-  }
+  if (!isBrowser()) return null;
 
-  return (
-    AppCore?.dom?.viewContainer ||
-    document.getElementById("view-container") ||
-    null
-  );
+  return AppCore?.dom?.viewContainer || document.getElementById("view-container") || null;
 }
 
 function resolveContainer(container = null) {
@@ -420,13 +404,8 @@ function resolveContainer(container = null) {
 function getEventElement(event = null) {
   const target = event?.target || null;
 
-  if (!target) {
-    return null;
-  }
-
-  if (target.nodeType === 1) {
-    return target;
-  }
+  if (!target) return null;
+  if (target.nodeType === 1) return target;
 
   return target.parentElement || null;
 }
@@ -440,28 +419,19 @@ function rootContains(root = null, element = null) {
 }
 
 function closestInside(root = null, target = null, selector = "") {
-  const element =
-    target?.nodeType === 1
-      ? target
-      : target?.parentElement || null;
+  const element = target?.nodeType === 1 ? target : target?.parentElement || null;
 
-  if (!root || !element || !selector || !isFn(element.closest)) {
-    return null;
-  }
+  if (!root || !element || !selector || !isFn(element.closest)) return null;
 
   const match = element.closest(selector);
 
-  if (!match || !rootContains(root, match)) {
-    return null;
-  }
+  if (!match || !rootContains(root, match)) return null;
 
   return match;
 }
 
 function getActionNames(element = null) {
-  if (!element) {
-    return [];
-  }
+  if (!element) return [];
 
   return [
     element.dataset?.incidenciasAction,
@@ -474,15 +444,9 @@ function getActionNames(element = null) {
 }
 
 function getActionType(element = null) {
-  if (!element) {
-    return "";
-  }
-
   const actionNames = getActionNames(element);
 
-  if (!actionNames.length) {
-    return "";
-  }
+  if (!actionNames.length) return "";
 
   const match = ACTION_ORDER.find(([, actionSet]) => {
     return actionNames.some((action) => actionSet.has(action));
@@ -492,40 +456,27 @@ function getActionType(element = null) {
 }
 
 function getRecognizedAction(root = null, target = null) {
-  let element =
-    target?.nodeType === 1
-      ? target
-      : target?.parentElement || null;
+  let element = target?.nodeType === 1 ? target : target?.parentElement || null;
 
   while (element && rootContains(root, element)) {
     if (element.matches?.(ACTION_SELECTOR)) {
       const type = getActionType(element);
 
       if (type) {
-        return {
-          element,
-          type,
-        };
+        return { element, type };
       }
     }
 
-    if (element === root) {
-      break;
-    }
+    if (element === root) break;
 
     element = element.parentElement;
   }
 
-  return {
-    element: null,
-    type: "",
-  };
+  return { element: null, type: "" };
 }
 
 function getDataSource(element = null) {
-  if (!element) {
-    return null;
-  }
+  if (!element) return null;
 
   return (
     element.closest?.(
@@ -535,15 +486,14 @@ function getDataSource(element = null) {
         "[data-id]",
         "[data-ticket-code]",
       ].join(",")
-    ) ||
-    element
+    ) || element
   );
 }
 
 function getTicketId(element = null) {
   const source = getDataSource(element);
 
-  return safeText(
+  return cleanIdentifier(
     first(
       element?.dataset?.ticketId,
       element?.dataset?.incidenciaId,
@@ -564,23 +514,21 @@ function getTicketId(element = null) {
       source?.getAttribute?.("data-incidencia-id"),
       source?.getAttribute?.("data-id"),
       source?.getAttribute?.("data-ticket-code")
-    ),
-    ""
+    )
   );
 }
 
 function getTicketCode(element = null) {
   const source = getDataSource(element);
 
-  return safeText(
+  return cleanIdentifier(
     first(
       element?.dataset?.ticketCode,
       element?.getAttribute?.("data-ticket-code"),
       source?.dataset?.ticketCode,
       source?.getAttribute?.("data-ticket-code"),
       getTicketId(element)
-    ),
-    ""
+    )
   );
 }
 
@@ -590,6 +538,7 @@ function getFilter(element = null) {
       element?.dataset?.filter,
       element?.dataset?.filterStatus,
       element?.dataset?.statusFilter,
+      element?.value,
       element?.getAttribute?.("data-filter"),
       element?.getAttribute?.("data-filter-status"),
       element?.getAttribute?.("data-status-filter"),
@@ -604,6 +553,7 @@ function getPage(element = null) {
     first(
       element?.dataset?.page,
       element?.dataset?.targetPage,
+      element?.value,
       element?.getAttribute?.("data-page"),
       element?.getAttribute?.("data-target-page")
     ),
@@ -612,7 +562,7 @@ function getPage(element = null) {
 }
 
 function getRowClickDisabled(row = null) {
-  const value = normalizeAction(
+  return isTruthyValue(
     first(
       row?.dataset?.rowClickDisabled,
       row?.dataset?.noRowOpen,
@@ -621,8 +571,6 @@ function getRowClickDisabled(row = null) {
       ""
     )
   );
-
-  return ["true", "1", "yes", "si", "sí", "on"].includes(value);
 }
 
 function rowContains(row = null, element = null) {
@@ -633,26 +581,15 @@ function rowContains(row = null, element = null) {
   }
 }
 
-function getRowFromClick(root = null, event = null) {
-  const target = getEventElement(event);
-
-  if (!target) {
-    return null;
-  }
+function getRowFromTarget(root = null, target = null) {
+  if (!target) return null;
 
   const row = closestInside(root, target, ROW_SELECTOR);
 
-  if (!row || getRowClickDisabled(row)) {
-    return null;
-  }
+  if (!row || getRowClickDisabled(row)) return null;
 
   const interactive = target.closest?.(INTERACTIVE_SELECTOR);
 
-  /*
-    Las filas pueden tener role="button".
-    Si interactive === row, NO debe bloquear la apertura de la fila.
-    Sólo bloquean los controles internos: button, input, data-action, etc.
-  */
   if (interactive && interactive !== row && rowContains(row, interactive)) {
     return null;
   }
@@ -666,10 +603,19 @@ function isFormControl(element = null) {
   return ["button", "input", "select", "textarea"].includes(tag);
 }
 
+function isDisabledElement(element = null) {
+  if (!element) return false;
+
+  return Boolean(
+    element.disabled === true ||
+      element.getAttribute?.("aria-disabled") === "true" ||
+      isTruthyValue(element.dataset?.disabled) ||
+      isTruthyValue(element.getAttribute?.("data-disabled"))
+  );
+}
+
 function setElementBusy(element = null, busy = false) {
-  if (!element) {
-    return;
-  }
+  if (!element) return;
 
   try {
     if (busy && !busyElementMeta.has(element)) {
@@ -714,13 +660,8 @@ function setElementBusy(element = null, busy = false) {
 async function runBusy(key = "", element = null, task = null) {
   const busyKey = safeText(key, "");
 
-  if (!busyKey || !isFn(task)) {
-    return null;
-  }
-
-  if (busyKeys.has(busyKey)) {
-    return null;
-  }
+  if (!busyKey || !isFn(task)) return null;
+  if (busyKeys.has(busyKey)) return null;
 
   busyKeys.add(busyKey);
   setElementBusy(element, true);
@@ -746,20 +687,11 @@ async function callReload({
   source = "bindings",
 } = {}) {
   if (isFn(reload)) {
-    return reload({
-      force,
-      asRefresh,
-      silent,
-      source,
-    });
+    return reload({ force, asRefresh, silent, source });
   }
 
   if (isFn(loadIncidencias)) {
-    return loadIncidencias({
-      force,
-      silent,
-      source,
-    });
+    return loadIncidencias({ force, silent, source });
   }
 
   safeWarn("No hay callback reload/loadIncidencias para refrescar.");
@@ -772,18 +704,7 @@ async function callOpenTicket(openTicket, ticketId = "", payload = {}) {
     return null;
   }
 
-  try {
-    return await openTicket(ticketId, payload);
-  } catch (firstError) {
-    try {
-      return await openTicket({
-        ...safeObject(payload),
-        ticketId,
-      });
-    } catch {
-      throw firstError;
-    }
-  }
+  return openTicket(ticketId, payload);
 }
 
 async function callCopyTicket(copyTicketId, ticketId = "", payload = {}) {
@@ -792,18 +713,7 @@ async function callCopyTicket(copyTicketId, ticketId = "", payload = {}) {
     return false;
   }
 
-  try {
-    return await copyTicketId(ticketId, payload);
-  } catch (firstError) {
-    try {
-      return await copyTicketId({
-        ...safeObject(payload),
-        ticketId,
-      });
-    } catch {
-      throw firstError;
-    }
-  }
+  return copyTicketId(ticketId, payload);
 }
 
 async function callExport(exportCsv) {
@@ -812,18 +722,10 @@ async function callExport(exportCsv) {
     return false;
   }
 
-  try {
-    return await exportCsv({
-      silent: false,
-      source: "bindings",
-    });
-  } catch (firstError) {
-    try {
-      return await exportCsv();
-    } catch {
-      throw firstError;
-    }
-  }
+  return exportCsv({
+    silent: false,
+    source: "bindings",
+  });
 }
 
 async function callCreate(createIncidencia, payload = {}) {
@@ -832,15 +734,7 @@ async function callCreate(createIncidencia, payload = {}) {
     return false;
   }
 
-  try {
-    return await createIncidencia(payload);
-  } catch (firstError) {
-    try {
-      return await createIncidencia(payload.draft || {}, payload);
-    } catch {
-      throw firstError;
-    }
-  }
+  return createIncidencia(payload);
 }
 
 async function callSetFilter(setFilter, filter = "all") {
@@ -869,23 +763,13 @@ async function callLoadMore({
   reason = "manual",
 } = {}) {
   if (isFn(loadMore)) {
-    return loadMore({
-      source,
-      reason,
-    });
+    return loadMore({ source, reason });
   }
 
   if (isFn(showMore)) {
-    return showMore({
-      source,
-      reason,
-    });
+    return showMore({ source, reason });
   }
 
-  /*
-    Compatibilidad: en el View nuevo goNextPage delega en loadMore.
-    Sólo se usa si loadMore/showMore no están disponibles.
-  */
   if (isFn(goNextPage)) {
     return goNextPage();
   }
@@ -894,14 +778,42 @@ async function callLoadMore({
   return null;
 }
 
+async function callViewSync({
+  scheduleRender,
+  render,
+  refreshView,
+  reload,
+  loadIncidencias,
+  source = "mutation",
+} = {}) {
+  if (isFn(refreshView)) {
+    return refreshView({ source });
+  }
+
+  if (isFn(scheduleRender)) {
+    return scheduleRender({ source });
+  }
+
+  if (isFn(render)) {
+    return render({ source });
+  }
+
+  return callReload({
+    reload,
+    loadIncidencias,
+    force: false,
+    asRefresh: false,
+    silent: true,
+    source,
+  });
+}
+
 /* =========================================================
    EVENT BINDERS
 ========================================================= */
 
 function addDomListener(cleanups, target, eventName, handler, options) {
-  if (!target || !eventName || !isFn(handler)) {
-    return false;
-  }
+  if (!target || !eventName || !isFn(handler)) return false;
 
   try {
     target.addEventListener(eventName, handler, options);
@@ -921,11 +833,7 @@ function addDomListener(cleanups, target, eventName, handler, options) {
 function addAppEventListener(cleanups, eventName = "", handler = null) {
   const name = safeText(eventName, "");
 
-  if (!name || !isFn(handler)) {
-    return false;
-  }
-
-  let attached = false;
+  if (!name || !isFn(handler)) return false;
 
   try {
     if (isFn(AppCore?.events?.on)) {
@@ -942,11 +850,11 @@ function addAppEventListener(cleanups, eventName = "", handler = null) {
         } catch {}
       });
 
-      attached = true;
+      return true;
     }
   } catch {}
 
-  return attached;
+  return false;
 }
 
 /* =========================================================
@@ -959,6 +867,9 @@ export function bindIncidenciasEvents({
 
   loadIncidencias,
   reload,
+  render,
+  scheduleRender,
+  refreshView,
 
   openTicket,
 
@@ -986,7 +897,7 @@ export function bindIncidenciasEvents({
   changePageSize,
 
   mutationEvents = DEFAULT_MUTATION_EVENTS,
-  bindMutationEvents = true,
+  bindMutationEvents = false,
 } = {}) {
   const scopeName = normalizeScope(scope);
 
@@ -1000,21 +911,19 @@ export function bindIncidenciasEvents({
   }
 
   const cleanups = [];
+  const timerHost = getTimerHost();
 
   let destroyed = false;
   let searchTimer = 0;
-  let mutationReloadTimer = 0;
-
-  const timerHost = getTimerHost();
+  let mutationSyncTimer = 0;
+  let lastSearchValue = "";
 
   const resolvedCopyTicketId = copyTicketId || copyTicketIdAction;
   const resolvedExportCsv = exportCsv || exportIncidenciasCsvAction;
   const resolvedCreateIncidencia = createIncidencia || createIncidenciaAction;
 
   function clearSearchTimer() {
-    if (!searchTimer) {
-      return;
-    }
+    if (!searchTimer) return;
 
     try {
       timerHost.clearTimeout(searchTimer);
@@ -1023,47 +932,44 @@ export function bindIncidenciasEvents({
     searchTimer = 0;
   }
 
-  function clearMutationReloadTimer() {
-    if (!mutationReloadTimer) {
-      return;
-    }
+  function clearMutationSyncTimer() {
+    if (!mutationSyncTimer) return;
 
     try {
-      timerHost.clearTimeout(mutationReloadTimer);
+      timerHost.clearTimeout(mutationSyncTimer);
     } catch {}
 
-    mutationReloadTimer = 0;
+    mutationSyncTimer = 0;
   }
 
-  function scheduleMutationReload(payload = {}) {
-    if (!bindMutationEvents) {
-      return;
-    }
+  function scheduleMutationSync(payload = {}) {
+    if (!bindMutationEvents) return;
 
-    clearMutationReloadTimer();
+    clearMutationSyncTimer();
 
-    mutationReloadTimer = timerHost.setTimeout(async () => {
-      mutationReloadTimer = 0;
+    mutationSyncTimer = timerHost.setTimeout(async () => {
+      mutationSyncTimer = 0;
 
-      if (destroyed) {
-        return;
+      if (destroyed) return;
+
+      try {
+        await callViewSync({
+          scheduleRender,
+          render,
+          refreshView,
+          reload,
+          loadIncidencias,
+          source: safeText(payload?.source, "mutation"),
+        });
+      } catch (error) {
+        safeWarn("No se pudo sincronizar la vista tras mutación.", error);
       }
-
-      await callReload({
-        reload,
-        loadIncidencias,
-        force: true,
-        asRefresh: true,
-        silent: true,
-        source: "mutation",
-        payload,
-      });
-    }, MUTATION_RELOAD_DELAY_MS);
+    }, MUTATION_SYNC_DELAY_MS);
   }
 
   async function handleRefresh(element = null, retry = false) {
-    await runBusy("incidencias:refresh", element, async () => {
-      await callReload({
+    return runBusy("incidencias:refresh", element, async () => {
+      return callReload({
         reload,
         loadIncidencias,
         force: true,
@@ -1075,7 +981,7 @@ export function bindIncidenciasEvents({
   }
 
   async function handleExport(element = null) {
-    await runBusy("incidencias:export", element, async () => {
+    return runBusy("incidencias:export", element, async () => {
       try {
         const result = await callExport(resolvedExportCsv);
 
@@ -1094,7 +1000,7 @@ export function bindIncidenciasEvents({
   }
 
   async function handleCreate(element = null) {
-    await runBusy("incidencias:create", element, async () => {
+    return runBusy("incidencias:create", element, async () => {
       try {
         const payload = {
           source: scopeName,
@@ -1121,27 +1027,28 @@ export function bindIncidenciasEvents({
   async function handleOpen(element = null) {
     const ticketId = getTicketId(element);
     const ticketCode = getTicketCode(element);
+    const finalId = ticketId || ticketCode;
 
-    if (!ticketId) {
+    if (!finalId) {
       safeWarn("open-ticket sin id.");
       showToast("No se pudo identificar la incidencia.", "error");
       return null;
     }
 
-    await runBusy(`incidencias:open:${ticketId}`, element, async () => {
+    return runBusy(`incidencias:open:${finalId}`, element, async () => {
       try {
         const payload = {
-          ticketId,
+          ticketId: finalId,
           ticketCode,
           preferFresh: true,
           silent: false,
           source: scopeName,
         };
 
-        const result = await callOpenTicket(openTicket, ticketId, payload);
+        const result = await callOpenTicket(openTicket, finalId, payload);
 
         emit("incidencias:bindings:open", {
-          ticketId,
+          ticketId: finalId,
           ticketCode,
           ok: Boolean(result),
           source: scopeName,
@@ -1167,7 +1074,7 @@ export function bindIncidenciasEvents({
       return false;
     }
 
-    await runBusy(`incidencias:copy:${finalId}`, element, async () => {
+    return runBusy(`incidencias:copy:${finalId}`, element, async () => {
       try {
         const result = await callCopyTicket(resolvedCopyTicketId, finalId, {
           ticketId: finalId,
@@ -1194,7 +1101,7 @@ export function bindIncidenciasEvents({
   async function handleFilter(element = null) {
     const filter = getFilter(element);
 
-    await runBusy(`incidencias:filter:${filter}`, element, async () => {
+    return runBusy(`incidencias:filter:${filter}`, element, async () => {
       try {
         const result = await callSetFilter(setFilter, filter);
 
@@ -1213,13 +1120,13 @@ export function bindIncidenciasEvents({
   }
 
   async function handleClearFilters(element = null) {
-    await runBusy("incidencias:filters:clear", element, async () => {
+    return runBusy("incidencias:filters:clear", element, async () => {
       try {
         if (isFn(clearFilters)) {
-          return await clearFilters();
+          return clearFilters();
         }
 
-        return await callSetFilter(setFilter, "all");
+        return callSetFilter(setFilter, "all");
       } catch (error) {
         safeWarn("No se pudieron limpiar filtros.", error);
         return false;
@@ -1228,13 +1135,15 @@ export function bindIncidenciasEvents({
   }
 
   async function handleClearSearch(element = null) {
-    await runBusy("incidencias:search:clear", element, async () => {
+    return runBusy("incidencias:search:clear", element, async () => {
       try {
+        lastSearchValue = "";
+
         if (isFn(clearSearchOnly)) {
-          return await clearSearchOnly();
+          return clearSearchOnly();
         }
 
-        return await callSetSearchQuery(setSearchQuery, "");
+        return callSetSearchQuery(setSearchQuery, "");
       } catch (error) {
         safeWarn("No se pudo limpiar búsqueda.", error);
         return false;
@@ -1243,11 +1152,9 @@ export function bindIncidenciasEvents({
   }
 
   async function handleLoadMore(element = null, reason = "manual") {
-    if (!infiniteScroll) {
-      return false;
-    }
+    if (!infiniteScroll) return false;
 
-    await runBusy("incidencias:load-more", element, async () => {
+    return runBusy("incidencias:load-more", element, async () => {
       try {
         const result = await callLoadMore({
           loadMore,
@@ -1274,18 +1181,13 @@ export function bindIncidenciasEvents({
   async function handlePage(element = null) {
     const page = getPage(element);
 
-    if (!page || !isFn(goToPage)) {
-      return false;
-    }
+    if (!page || !isFn(goToPage)) return false;
 
     return goToPage(page);
   }
 
   async function handlePrevPage() {
-    if (isFn(goPrevPage)) {
-      return goPrevPage();
-    }
-
+    if (isFn(goPrevPage)) return goPrevPage();
     return false;
   }
 
@@ -1300,189 +1202,168 @@ export function bindIncidenciasEvents({
       });
     }
 
-    if (isFn(goNextPage)) {
-      return goNextPage();
-    }
+    if (isFn(goNextPage)) return goNextPage();
 
     return false;
   }
 
-  function handleSearchInput(input = null) {
-    if (!input) {
-      return;
-    }
+  async function dispatchAction(type = "", element = null, reason = "action") {
+    if (!type || isDisabledElement(element)) return null;
 
-    const value = safeText(input.value, "");
+    switch (type) {
+      case "refresh":
+        return handleRefresh(element, false);
+
+      case "retry":
+        return handleRefresh(element, true);
+
+      case "export":
+        return handleExport(element);
+
+      case "create":
+        return handleCreate(element);
+
+      case "clearFilters":
+        return handleClearFilters(element);
+
+      case "clearSearch":
+        return handleClearSearch(element);
+
+      case "filter":
+        return handleFilter(element);
+
+      case "loadMore":
+        return handleLoadMore(element, reason === "keyboard" ? "keyboard" : "button");
+
+      case "page":
+        return handlePage(element);
+
+      case "prevPage":
+        return handlePrevPage();
+
+      case "nextPage":
+        return handleNextPage();
+
+      case "copy":
+        return handleCopy(element);
+
+      case "open":
+        return handleOpen(element);
+
+      default:
+        return null;
+    }
+  }
+
+  function queueSearchValue(value = "") {
+    const nextValue = safeText(value, "");
 
     clearSearchTimer();
+
+    if (nextValue === lastSearchValue) return;
 
     searchTimer = timerHost.setTimeout(async () => {
       searchTimer = 0;
 
-      if (destroyed) {
-        return;
-      }
+      if (destroyed) return;
+      if (nextValue === lastSearchValue) return;
+
+      lastSearchValue = nextValue;
 
       try {
-        await callSetSearchQuery(setSearchQuery, value);
+        await callSetSearchQuery(setSearchQuery, nextValue);
       } catch (error) {
         safeWarn("No se pudo aplicar búsqueda.", error);
       }
     }, SEARCH_DEBOUNCE_MS);
   }
 
-  function handleSearchChange(input = null) {
-    if (!input) {
-      return;
-    }
+  function commitSearchValue(value = "") {
+    const nextValue = safeText(value, "");
 
     clearSearchTimer();
 
-    Promise.resolve(callSetSearchQuery(setSearchQuery, safeText(input.value, "")))
-      .catch((error) => {
-        safeWarn("No se pudo aplicar búsqueda.", error);
-      });
+    if (nextValue === lastSearchValue) return;
+
+    lastSearchValue = nextValue;
+
+    Promise.resolve(callSetSearchQuery(setSearchQuery, nextValue)).catch((error) => {
+      safeWarn("No se pudo aplicar búsqueda.", error);
+    });
+  }
+
+  function handleSearchInput(input = null) {
+    if (!input) return;
+    queueSearchValue(input.value);
+  }
+
+  function handleSearchChange(input = null) {
+    if (!input) return;
+    commitSearchValue(input.value);
   }
 
   function handlePageSizeChange(input = null) {
-    if (!input || !isFn(changePageSize)) {
-      return;
-    }
+    if (!input || !isFn(changePageSize)) return;
 
-    Promise.resolve(changePageSize(input.value))
-      .catch((error) => {
-        safeWarn("No se pudo cambiar tamaño de página.", error);
-      });
+    Promise.resolve(changePageSize(input.value)).catch((error) => {
+      safeWarn("No se pudo cambiar tamaño de página.", error);
+    });
   }
 
   addDomListener(cleanups, root, "click", async (event) => {
-    if (destroyed) {
-      return;
-    }
+    if (destroyed || event.defaultPrevented) return;
 
     const target = getEventElement(event);
 
-    if (!target) {
-      return;
-    }
+    if (!target) return;
 
     const action = getRecognizedAction(root, target);
 
     if (action.element && action.type) {
       event.preventDefault();
       event.stopPropagation();
-
-      switch (action.type) {
-        case "refresh":
-          await handleRefresh(action.element, false);
-          return;
-
-        case "retry":
-          await handleRefresh(action.element, true);
-          return;
-
-        case "export":
-          await handleExport(action.element);
-          return;
-
-        case "create":
-          await handleCreate(action.element);
-          return;
-
-        case "clearFilters":
-          await handleClearFilters(action.element);
-          return;
-
-        case "clearSearch":
-          await handleClearSearch(action.element);
-          return;
-
-        case "filter":
-          await handleFilter(action.element);
-          return;
-
-        case "loadMore":
-          await handleLoadMore(action.element, "button");
-          return;
-
-        case "page":
-          await handlePage(action.element);
-          return;
-
-        case "prevPage":
-          await handlePrevPage();
-          return;
-
-        case "nextPage":
-          await handleNextPage();
-          return;
-
-        case "copy":
-          await handleCopy(action.element);
-          return;
-
-        case "open":
-          await handleOpen(action.element);
-          return;
-
-        default:
-          break;
-      }
+      await dispatchAction(action.type, action.element, "click");
+      return;
     }
 
-    const row = getRowFromClick(root, event);
+    const row = getRowFromTarget(root, target);
 
     if (row) {
       event.preventDefault();
-
       await handleOpen(row);
     }
   });
 
   addDomListener(cleanups, root, "keydown", async (event) => {
-    if (destroyed) {
-      return;
-    }
+    if (destroyed || event.defaultPrevented) return;
 
     const key = safeText(event.key, "");
 
-    if (key !== "Enter" && key !== " " && key !== "Spacebar") {
-      return;
-    }
+    if (key !== "Enter" && key !== " " && key !== "Spacebar") return;
 
     const target = getEventElement(event);
 
-    if (!target) {
+    if (!target) return;
+
+    const action = getRecognizedAction(root, target);
+
+    if (action.element && action.type) {
+      event.preventDefault();
+      event.stopPropagation();
+      await dispatchAction(action.type, action.element, "keyboard");
       return;
     }
 
-    const action = closestInside(root, target, ACTION_SELECTOR);
+    const row = getRowFromTarget(root, target);
 
-    if (action) {
-      return;
-    }
-
-    const row = closestInside(root, target, ROW_SELECTOR);
-
-    if (!row || getRowClickDisabled(row)) {
-      return;
-    }
-
-    const interactive = target.closest?.(INTERACTIVE_SELECTOR);
-
-    if (interactive && interactive !== row && rowContains(row, interactive)) {
-      return;
-    }
+    if (!row) return;
 
     event.preventDefault();
-
     await handleOpen(row);
   });
 
   addDomListener(cleanups, root, "input", (event) => {
-    if (destroyed) {
-      return;
-    }
+    if (destroyed) return;
 
     const target = getEventElement(event);
     const input = closestInside(root, target, SEARCH_SELECTOR);
@@ -1493,12 +1374,9 @@ export function bindIncidenciasEvents({
   });
 
   addDomListener(cleanups, root, "change", (event) => {
-    if (destroyed) {
-      return;
-    }
+    if (destroyed) return;
 
     const target = getEventElement(event);
-
     const searchInput = closestInside(root, target, SEARCH_SELECTOR);
 
     if (searchInput) {
@@ -1513,12 +1391,11 @@ export function bindIncidenciasEvents({
     }
   });
 
-  if (bindMutationEvents && (isFn(reload) || isFn(loadIncidencias))) {
+  if (bindMutationEvents) {
     safeArray(mutationEvents).forEach((eventName) => {
       addAppEventListener(cleanups, eventName, (eventOrPayload = {}) => {
         const payload = safeObject(eventOrPayload?.detail || eventOrPayload);
-
-        scheduleMutationReload(payload);
+        scheduleMutationSync(payload);
       });
     });
   }
@@ -1527,17 +1404,16 @@ export function bindIncidenciasEvents({
     scope: scopeName,
     source: "incidencias.bindings",
     mode: infiniteScroll ? "infinite" : "legacy",
+    mutationEvents: Boolean(bindMutationEvents),
   });
 
   const cleanup = () => {
-    if (destroyed) {
-      return;
-    }
+    if (destroyed) return;
 
     destroyed = true;
 
     clearSearchTimer();
-    clearMutationReloadTimer();
+    clearMutationSyncTimer();
     runCleanups(cleanups);
     scopeCleanups.delete(scopeName);
 

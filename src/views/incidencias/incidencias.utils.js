@@ -20,7 +20,7 @@ import { AppCore } from "../../core/index.js";
    VERSION
 ========================================================= */
 
-export const INCIDENCIAS_UTILS_VERSION = "incidencias.utils.v2.optimized";
+export const INCIDENCIAS_UTILS_VERSION = "incidencias.utils.v3.solid";
 
 /* =========================================================
    ENV
@@ -695,11 +695,24 @@ export function safeFilename(value = "", fallback = "archivo") {
    URL / PATH / QUERY
 ========================================================= */
 
-const SENSITIVE_QUERY_RE =
-  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature)=/i;
+const STRICT_SENSITIVE_QUERY_RE =
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key)=/i;
 
-export function hasSensitiveQuery(value = "") {
-  return SENSITIVE_QUERY_RE.test(String(value || ""));
+const SIGNED_RESOURCE_QUERY_RE =
+  /[?&#](?:sig|signature)=/i;
+
+export function hasSensitiveQuery(value = "", options = {}) {
+  const raw = String(value || "");
+  const opts = safeObject(options);
+
+  if (!raw) return false;
+  if (STRICT_SENSITIVE_QUERY_RE.test(raw)) return true;
+
+  if (opts.allowSignedResource === true) {
+    return false;
+  }
+
+  return SIGNED_RESOURCE_QUERY_RE.test(raw);
 }
 
 export function isAbsoluteUrl(value = "") {
@@ -715,7 +728,7 @@ export function isSafeUrl(value = "", options = {}) {
   const opts = safeObject(options);
 
   if (!raw) return false;
-  if (hasSensitiveQuery(raw)) return false;
+  if (hasSensitiveQuery(raw, { allowSignedResource: Boolean(opts.allowSignedResource) })) return false;
   if (/[\r\n\t\\]/.test(raw)) return false;
   if (/^(?:javascript|vbscript|file):/i.test(raw)) return false;
   if (raw.startsWith("//")) return false;
@@ -747,7 +760,14 @@ export function isSafeUrl(value = "", options = {}) {
 export function safeExternalUrl(value = "") {
   const raw = safeText(value, "");
 
-  if (!isSafeUrl(raw)) return "";
+  if (!isSafeUrl(raw, {
+    allowBlob: false,
+    allowRelative: true,
+    allowHttp: false,
+    allowSignedResource: false,
+  })) {
+    return "";
+  }
 
   if (raw.startsWith("/")) {
     return raw.replace(/\/{2,}/g, "/");
@@ -770,6 +790,7 @@ export function safeResourceUrl(value = "", options = {}) {
     allowBlob: true,
     allowRelative: true,
     allowHttp: false,
+    allowSignedResource: true,
     ...safeObject(options),
   };
 
@@ -891,9 +912,13 @@ export function appendQueryParams(url = "", params = {}) {
   const cleanUrl = safeText(url, "");
   const query = buildQueryString(params);
 
-  if (!query) return cleanUrl;
+  if (!cleanUrl || !query) return cleanUrl;
 
-  return `${cleanUrl}${cleanUrl.includes("?") ? "&" : "?"}${query.slice(1)}`;
+  const [baseWithQuery, hash = ""] = cleanUrl.split("#");
+  const separator = baseWithQuery.includes("?") ? "&" : "?";
+  const nextUrl = `${baseWithQuery}${separator}${query.slice(1)}`;
+
+  return hash ? `${nextUrl}#${hash}` : nextUrl;
 }
 
 /* =========================================================
@@ -1083,10 +1108,14 @@ export function getErrorMessage(error = null, fallback = "No se pudo completar l
   return safeText(
     first(
       error?.message,
+      error?.cause?.message,
       error?.response?.message,
       error?.response?.data?.message,
+      error?.response?.data?.error,
+      error?.response?.data?.detail,
       error?.data?.message,
       error?.data?.error,
+      error?.data?.detail,
       error?.response?.error,
       error?.error,
       error?.detail,
@@ -1101,8 +1130,13 @@ export function getErrorStatus(error = null) {
     first(
       error?.status,
       error?.statusCode,
+      error?.code,
       error?.response?.status,
-      error?.data?.status
+      error?.response?.statusCode,
+      error?.response?.data?.status,
+      error?.response?.data?.statusCode,
+      error?.data?.status,
+      error?.data?.statusCode
     ),
     0
   );
@@ -1124,7 +1158,6 @@ export function cloneError(error = null) {
     status: getErrorStatus(error),
     aborted: isAbortError(error),
     stack: safeText(error?.stack, ""),
-    raw: error,
   };
 }
 

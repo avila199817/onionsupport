@@ -29,7 +29,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_STORE_VERSION = "incidencias.store.v2.optimized";
+export const INCIDENCIAS_STORE_VERSION = "incidencias.store.v3.solid";
 
 export const STORE_PATH = "entities.incidencias";
 export const STORE_COLLECTION_KEY = "incidencias";
@@ -67,7 +67,6 @@ const DETAIL_READ_PATHS = Object.freeze([
 ]);
 
 const NESTED_OBJECT_KEYS = Object.freeze([
-  "raw",
   "meta",
   "cliente",
   "client",
@@ -112,6 +111,11 @@ const ARRAY_KEYS = Object.freeze([
   "facturasRelacionadas",
   "linkedFacturas",
   "normalizedInvoices",
+]);
+
+const RAW_DROP_KEYS = new Set([
+  "raw",
+  "searchText",
 ]);
 
 const EMPTY_SIGNATURE = "__empty__";
@@ -220,6 +224,25 @@ function normalizeCompare(value = "") {
     .trim();
 }
 
+function removeRawKey(value = {}) {
+  if (!isObject(value)) return {};
+
+  return Object.entries(value).reduce((acc, [key, entry]) => {
+    if (RAW_DROP_KEYS.has(key)) return acc;
+    acc[key] = entry;
+    return acc;
+  }, {});
+}
+
+function buildRawSnapshot(current = {}, incoming = {}) {
+  return {
+    ...removeRawKey(safeObject(current.raw)),
+    ...removeRawKey(current),
+    ...removeRawKey(safeObject(incoming.raw)),
+    ...removeRawKey(incoming),
+  };
+}
+
 function invalidateCollectionCache() {
   collectionCacheSignature = "";
   collectionCacheItems = null;
@@ -227,7 +250,7 @@ function invalidateCollectionCache() {
 
 function rememberCollection(signature = "", items = []) {
   collectionCacheSignature = safeText(signature, EMPTY_SIGNATURE);
-  collectionCacheItems = safeArray(items);
+  collectionCacheItems = safeArray(items).slice();
 }
 
 function readCachedCollection(signature = "") {
@@ -255,6 +278,23 @@ function getByPath(source = {}, path = "") {
   }, source);
 }
 
+function setByPath(source = {}, path = "", value = null) {
+  const root = safeObject(source);
+  const parts = safeText(path, "").split(".").filter(Boolean);
+
+  if (!parts.length) return false;
+
+  let target = root;
+
+  parts.slice(0, -1).forEach((part) => {
+    if (!isObject(target[part])) target[part] = {};
+    target = target[part];
+  });
+
+  target[parts[parts.length - 1]] = value;
+  return true;
+}
+
 function parseSpanishDate(value = "") {
   const text = safeText(value, "");
 
@@ -267,16 +307,9 @@ function parseSpanishDate(value = "") {
   if (!match) return 0;
 
   const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = match;
-  const date = new Date(
-    Number(yyyy),
-    Number(mm) - 1,
-    Number(dd),
-    Number(hh),
-    Number(min),
-    Number(ss)
-  );
-
+  const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(ss));
   const timestamp = date.getTime();
+
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
@@ -293,9 +326,7 @@ function safeTimestamp(value, fallback = 0) {
   if (Number.isFinite(spanishTimestamp) && spanishTimestamp > 0) return spanishTimestamp;
 
   const nativeTimestamp = new Date(value).getTime();
-  return Number.isFinite(nativeTimestamp) && nativeTimestamp > 0
-    ? nativeTimestamp
-    : fallback;
+  return Number.isFinite(nativeTimestamp) && nativeTimestamp > 0 ? nativeTimestamp : fallback;
 }
 
 function getCreatedTimestamp(item = {}) {
@@ -309,12 +340,12 @@ function getCreatedTimestamp(item = {}) {
       row.createdAt,
       row.createdAtES,
       row.date,
-      row._ts,
       raw.createdAtMs,
       raw.createdAtTs,
       raw.createdAt,
       raw.createdAtES,
       raw.date,
+      row._ts,
       raw._ts,
       0
     ),
@@ -344,8 +375,8 @@ function getUpdatedTimestamp(item = {}) {
       raw.modifiedAt,
       raw.closedAt,
       raw.createdAt,
-      raw._ts,
       row._ts,
+      raw._ts,
       0
     ),
     0
@@ -456,9 +487,7 @@ function hasCandidateId(item = {}, id = "") {
 
   if (!target) return false;
 
-  return getItemCandidateIds(item).some((candidate) => {
-    return normalizeCompare(candidate) === target;
-  });
+  return getItemCandidateIds(item).some((candidate) => normalizeCompare(candidate) === target);
 }
 
 function isSameItemId(item = {}, id = "") {
@@ -535,9 +564,7 @@ function normalizeStoreItem(item = {}) {
   try {
     return normalizeIncidenciaModel(source);
   } catch {
-    return {
-      ...source,
-    };
+    return { ...source };
   }
 }
 
@@ -556,6 +583,7 @@ function mergePlainObject(base = {}, patch = {}) {
 
 function getArrayItemKey(item = {}, fallback = "") {
   const row = safeObject(item);
+  const raw = safeObject(row.raw);
 
   return safeText(
     first(
@@ -574,6 +602,17 @@ function getArrayItemKey(item = {}, fallback = "") {
       row.path,
       row.blobName,
       row.storageKey,
+      raw.id,
+      raw.attachmentId,
+      raw.fileId,
+      raw.commentId,
+      raw.historyId,
+      raw.eventId,
+      raw.facturaId,
+      raw.invoiceId,
+      raw.path,
+      raw.blobName,
+      raw.storageKey,
       fallback
     ),
     fallback
@@ -586,7 +625,7 @@ function mergeArrayById(baseItems = [], patchItems = []) {
 
   [...safeArray(baseItems), ...safeArray(patchItems)].forEach((item, position) => {
     const row = safeObject(item);
-    const key = getArrayItemKey(row, `__anon_${position}`);
+    const key = normalizeCompare(getArrayItemKey(row, `__anon_${position}`));
 
     if (!index.has(key)) {
       index.set(key, output.length);
@@ -595,37 +634,36 @@ function mergeArrayById(baseItems = [], patchItems = []) {
     }
 
     const currentIndex = index.get(key);
-
-    output[currentIndex] = mergePlainObject(
-      output[currentIndex],
-      row
-    );
+    output[currentIndex] = mergePlainObject(output[currentIndex], row);
   });
 
   return output;
 }
 
 function mergeNestedObjects(current = {}, incoming = {}) {
+  const base = safeObject(current);
+  const patch = safeObject(incoming);
+
   const merged = {
-    ...safeObject(current),
-    ...safeObject(incoming),
+    ...base,
+    ...patch,
   };
 
   NESTED_OBJECT_KEYS.forEach((key) => {
-    if (isObject(current[key]) || isObject(incoming[key])) {
-      merged[key] = mergePlainObject(current[key], incoming[key]);
+    if (isObject(base[key]) || isObject(patch[key])) {
+      merged[key] = mergePlainObject(base[key], patch[key]);
     }
   });
 
   ARRAY_KEYS.forEach((key) => {
-    if (Array.isArray(current[key]) || Array.isArray(incoming[key])) {
-      merged[key] = mergeArrayById(current[key], incoming[key]);
+    if (Array.isArray(base[key]) || Array.isArray(patch[key])) {
+      merged[key] = mergeArrayById(base[key], patch[key]);
     }
   });
 
   const attachments = mergeArrayById(
-    first(current.attachments, current.files, current.adjuntos, []),
-    first(incoming.attachments, incoming.files, incoming.adjuntos, [])
+    first(base.attachments, base.files, base.adjuntos, []),
+    first(patch.attachments, patch.files, patch.adjuntos, [])
   );
 
   if (attachments.length) {
@@ -634,10 +672,10 @@ function mergeNestedObjects(current = {}, incoming = {}) {
     merged.adjuntos = attachments;
     merged.attachmentsCount = safeNumber(
       first(
-        incoming.attachmentsCount,
-        incoming.filesCount,
-        current.attachmentsCount,
-        current.filesCount,
+        patch.attachmentsCount,
+        patch.filesCount,
+        base.attachmentsCount,
+        base.filesCount,
         attachments.length
       ),
       attachments.length
@@ -648,27 +686,30 @@ function mergeNestedObjects(current = {}, incoming = {}) {
 
   const id = safeText(
     first(
-      incoming.ticketId,
-      incoming.incidenciaId,
-      incoming.id,
-      incoming.code,
-      incoming.ticketCode,
-      current.ticketId,
-      current.incidenciaId,
-      current.id,
-      current.code,
-      current.ticketCode
+      patch.ticketId,
+      patch.incidenciaId,
+      patch.id,
+      patch.code,
+      patch.ticketCode,
+      base.ticketId,
+      base.incidenciaId,
+      base.id,
+      base.code,
+      base.ticketCode
     ),
     ""
   );
 
   if (id) {
-    merged.id = safeText(first(incoming.id, current.id, id), id);
-    merged.ticketId = safeText(first(incoming.ticketId, current.ticketId, id), id);
-    merged.incidenciaId = safeText(first(incoming.incidenciaId, current.incidenciaId, id), id);
-    merged.code = safeText(first(incoming.code, incoming.ticketCode, current.code, current.ticketCode, id), id);
-    merged.ticketCode = safeText(first(incoming.ticketCode, incoming.code, current.ticketCode, current.code, id), id);
+    merged.id = safeText(first(patch.id, base.id, id), id);
+    merged.ticketId = safeText(first(patch.ticketId, base.ticketId, id), id);
+    merged.incidenciaId = safeText(first(patch.incidenciaId, base.incidenciaId, id), id);
+    merged.code = safeText(first(patch.code, patch.ticketCode, base.code, base.ticketCode, id), id);
+    merged.ticketCode = safeText(first(patch.ticketCode, patch.code, base.ticketCode, base.code, id), id);
   }
+
+  merged.raw = buildRawSnapshot(base, patch);
+  merged.meta = mergePlainObject(base.meta, patch.meta);
 
   return normalizeStoreItem(merged);
 }
@@ -678,6 +719,17 @@ function mergeIncidencia(base = {}, patch = {}, { normalized = false } = {}) {
   const incoming = normalized ? safeObject(patch) : normalizeStoreItem(patch);
 
   return mergeNestedObjects(current, incoming);
+}
+
+function mergeByFreshness(previous = {}, incoming = {}) {
+  const previousTs = getUpdatedTimestamp(previous);
+  const incomingTs = getUpdatedTimestamp(incoming);
+
+  if (incomingTs >= previousTs) {
+    return mergeIncidencia(previous, incoming, { normalized: true });
+  }
+
+  return mergeIncidencia(incoming, previous, { normalized: true });
 }
 
 function dedupeIncidencias(items = [], { normalized = false } = {}) {
@@ -706,28 +758,19 @@ function dedupeIncidencias(items = [], { normalized = false } = {}) {
       return;
     }
 
-    const merged = mergeIncidencia(map.get(finalKey), item, {
-      normalized: true,
-    });
+    const merged = mergeByFreshness(map.get(finalKey), item);
 
     map.set(finalKey, merged);
     registerAliases(aliasIndex, finalKey, merged);
   });
 
-  return [
-    ...map.values(),
-    ...anonymous,
-  ];
+  return [...map.values(), ...anonymous];
 }
 
 function normalizeCollection(items = [], { sort = true, normalized = false } = {}) {
-  const deduped = dedupeIncidencias(items, {
-    normalized,
-  });
+  const deduped = dedupeIncidencias(items, { normalized });
 
-  return sort
-    ? sortIncidenciasByUpdatedDescModel(deduped)
-    : deduped;
+  return sort ? sortIncidenciasByUpdatedDescModel(deduped) : deduped;
 }
 
 /* =========================================================
@@ -902,6 +945,7 @@ function writeDirectFallback(list = []) {
 
     Store.entities.incidencias = list;
     Store.collections.incidencias = list;
+    Store[STORE_COLLECTION_KEY] = list;
 
     return true;
   } catch {
@@ -942,6 +986,7 @@ function writeDetailMap(items = []) {
       Store.entities = safeObject(Store.entities);
       Store.entities.incidenciasById = detailMap;
       Store.entities.incidenciasDetail = detailMap;
+      Store.incidenciasById = detailMap;
     }
   } catch {}
 
@@ -966,6 +1011,7 @@ function writeMeta(list = []) {
     if (Store && typeof Store === "object") {
       Store.entities = safeObject(Store.entities);
       Store.entities.incidenciasMeta = meta;
+      setByPath(Store, STORE_META_PATH, meta);
     }
   } catch {}
 
@@ -994,7 +1040,7 @@ function writeStoreCollection(items = [], options = {}) {
   invalidateCollectionCache();
   rememberCollection(buildCollectionSignature(list), list);
 
-  return list;
+  return list.slice();
 }
 
 /* =========================================================
@@ -1106,7 +1152,7 @@ export function updateIncidenciaStore(id = "", patch = {}) {
   if (!target) return getIncidencias();
 
   const current = getIncidencias();
-  const incomingPatch = normalizeStoreItem(patch);
+  const nextPatch = safeObject(patch);
   let found = false;
 
   const next = current.map((item) => {
@@ -1114,16 +1160,19 @@ export function updateIncidenciaStore(id = "", patch = {}) {
 
     found = true;
 
-    return mergeIncidencia(item, incomingPatch, {
-      normalized: true,
-    });
+    return mergeIncidencia(
+      item,
+      {
+        ...nextPatch,
+        ticketId: first(nextPatch.ticketId, nextPatch.id, target),
+      },
+      { normalized: false }
+    );
   });
 
   if (!found) return current;
 
-  return writeStoreCollection(next, {
-    normalized: true,
-  });
+  return writeStoreCollection(next, { normalized: true });
 }
 
 export function patchIncidenciaStore(id = "", patch = {}) {
@@ -1165,9 +1214,7 @@ export function removeIncidenciaStore(id = "") {
 
   const next = getIncidencias().filter((item) => !isSameItemId(item, target));
 
-  return writeStoreCollection(next, {
-    normalized: true,
-  });
+  return writeStoreCollection(next, { normalized: true });
 }
 
 /* =========================================================
@@ -1175,9 +1222,7 @@ export function removeIncidenciaStore(id = "") {
 ========================================================= */
 
 export function sortIncidenciasByUpdatedDesc(items = []) {
-  return sortIncidenciasByUpdatedDescModel(
-    normalizeStoreItems(items)
-  );
+  return sortIncidenciasByUpdatedDescModel(normalizeStoreItems(items));
 }
 
 export function sortIncidenciasByCreatedDesc(items = []) {
@@ -1187,14 +1232,10 @@ export function sortIncidenciasByCreatedDesc(items = []) {
 
     if (bTime !== aTime) return bTime - aTime;
 
-    return safeText(getItemId(b)).localeCompare(
-      safeText(getItemId(a)),
-      "es",
-      {
-        numeric: true,
-        sensitivity: "base",
-      }
-    );
+    return safeText(getItemId(b)).localeCompare(safeText(getItemId(a)), "es", {
+      numeric: true,
+      sensitivity: "base",
+    });
   });
 }
 
@@ -1205,25 +1246,19 @@ export function sortIncidenciasByCreatedDesc(items = []) {
 export function filterIncidenciasStore(predicate = null) {
   const items = getIncidencias();
 
-  return isFn(predicate)
-    ? items.filter(predicate)
-    : items;
+  return isFn(predicate) ? items.filter(predicate) : items;
 }
 
 export function mapIncidenciasStore(mapper = null) {
   const items = getIncidencias();
 
-  return isFn(mapper)
-    ? items.map(mapper)
-    : items;
+  return isFn(mapper) ? items.map(mapper) : items;
 }
 
 export function findIncidenciaStore(predicate = null) {
   const items = getIncidencias();
 
-  return isFn(predicate)
-    ? items.find(predicate) || null
-    : null;
+  return isFn(predicate) ? items.find(predicate) || null : null;
 }
 
 /* =========================================================
@@ -1242,16 +1277,10 @@ export function computeIncidenciasStoreStats(items = getIncidencias()) {
 
   return {
     ...stats,
-
-    // Compatibilidad histórica del store:
-    // open = abiertas + pendientes + en proceso
-    // closed = cerradas + resueltas
-    // urgent = urgentes + altas
     open,
     closed,
     active,
     urgent,
-
     withAttachments: safeNumber(stats.withAttachments, 0),
     withInvoices: safeNumber(stats.withInvoices, 0),
   };
@@ -1267,27 +1296,21 @@ export function getIncidenciasStoreDebugSnapshot() {
 
   return {
     version: INCIDENCIAS_STORE_VERSION,
-
     path: STORE_PATH,
     collectionKey: STORE_COLLECTION_KEY,
     byIdPath: STORE_BY_ID_PATH,
     detailPath: STORE_DETAIL_PATH,
-
     count: items.length,
     detailKeys: Object.keys(detailMap || {}).length,
-
     ids: items.map(getItemId).filter(Boolean),
-
     firstId: getItemId(items[0] || {}),
     lastId: getItemId(items[items.length - 1] || {}),
-
     firstUpdatedAt:
       items[0]?.lastActivityAt ||
       items[0]?.updatedAt ||
       items[0]?.raw?.lastActivityAt ||
       items[0]?.raw?.updatedAt ||
       null,
-
     order: "updated_desc",
     cache: {
       hasCache: Boolean(collectionCacheItems),
@@ -1305,13 +1328,11 @@ export function getIncidenciasStoreDebugSnapshot() {
 
 export default {
   INCIDENCIAS_STORE_VERSION,
-
   STORE_PATH,
   STORE_COLLECTION_KEY,
   STORE_BY_ID_PATH,
   STORE_DETAIL_PATH,
   STORE_META_PATH,
-
   getIncidencias,
   getIncidenciasStore,
   getSortedIncidenciasStore,
@@ -1320,7 +1341,6 @@ export default {
   getIncidenciasSnapshot,
   hasIncidencias,
   getIncidenciasCount,
-
   setIncidencias,
   setIncidenciasStore,
   replaceIncidenciasStore,
@@ -1332,16 +1352,12 @@ export default {
   removeIncidenciaStore,
   clearIncidencias,
   clearIncidenciasStore,
-
   filterIncidenciasStore,
   mapIncidenciasStore,
   findIncidenciaStore,
-
   sortIncidenciasByUpdatedDesc,
   sortIncidenciasByCreatedDesc,
-
   computeIncidenciasStoreStats,
-
   getItemId,
   getItemCandidateIds,
   getIncidenciasStoreDebugSnapshot,

@@ -48,7 +48,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_ACTIONS_VERSION = "incidencias.actions.v3.optimized";
+export const INCIDENCIAS_ACTIONS_VERSION = "incidencias.actions.v3.optimized.1";
 
 const CSV_FILENAME = "incidencias.csv";
 const CSV_BOM = "\uFEFF";
@@ -242,6 +242,74 @@ function getErrorMessage(error = null, fallback = "No se pudo completar la acci�
   );
 }
 
+function getErrorStatus(error = null) {
+  const status = safeNumber(
+    first(
+      error?.status,
+      error?.statusCode,
+      error?.code,
+      error?.response?.status,
+      error?.response?.statusCode,
+      error?.response?.data?.status,
+      error?.data?.status
+    ),
+    0
+  );
+
+  return Number.isFinite(status) ? status : 0;
+}
+
+function isAuthorizationError(error = null) {
+  const status = getErrorStatus(error);
+
+  return status === 401 || status === 403;
+}
+
+function shouldRethrowActionError({
+  silent = false,
+  throwOnError = null,
+} = {}) {
+  if (throwOnError === true) return true;
+  if (throwOnError === false) return false;
+
+  return Boolean(silent);
+}
+
+function handleActionError(error = null, {
+  silent = false,
+  throwOnError = null,
+  fallbackMessage = "No se pudo completar la acción.",
+} = {}) {
+  if (!silent) {
+    showToast(getErrorMessage(error, fallbackMessage), "error");
+  }
+
+  if (shouldRethrowActionError({ silent, throwOnError })) {
+    throw error;
+  }
+
+  return null;
+}
+
+function createActionError(message = "No se pudo completar la acción.") {
+  return new Error(safeText(message, "No se pudo completar la acción."));
+}
+
+function getFileMeta(file = {}, index = 0) {
+  const item = safeObject(file);
+
+  return {
+    name: safeFilename(first(item.name, item.filename, item.fileName), `archivo_${index + 1}`),
+    size: safeNumber(item.size, 0),
+    type: safeText(first(item.type, item.contentType), ""),
+    lastModified: safeNumber(item.lastModified, 0),
+  };
+}
+
+function getFilesMeta(files = []) {
+  return safeArray(files).map((file, index) => getFileMeta(file, index));
+}
+
 function safeExternalUrl(value = "") {
   const raw = safeText(value, "");
 
@@ -330,6 +398,9 @@ function persistDetail(detail = null) {
   if (!detail) return null;
 
   const normalized = normalizeTicketDetail(detail);
+  const id = getId(normalized);
+
+  if (!id) return normalized;
 
   try {
     upsertIncidenciaStore?.(normalized);
@@ -338,6 +409,50 @@ function persistDetail(detail = null) {
   }
 
   return normalized;
+}
+
+function isUsableTicketDetail(detail = null, ticketId = "") {
+  const normalized = safeObject(detail, null);
+  const id = normalizeTicketId(normalized);
+  const expectedId = normalizeTicketId(ticketId);
+
+  if (!id) return false;
+
+  return !expectedId || id === expectedId;
+}
+
+async function persistWriteResult(updated = null, {
+  ticketId = "",
+  fallbackDetail = null,
+  action = "update",
+} = {}) {
+  const id = normalizeTicketId(ticketId);
+  const normalized = updated ? persistDetail(updated) : null;
+
+  if (isUsableTicketDetail(normalized, id)) {
+    return normalized;
+  }
+
+  if (id) {
+    try {
+      const fresh = await loadIncidenciaDetail(id);
+      const refreshed = persistDetail(fresh);
+
+      if (isUsableTicketDetail(refreshed, id)) {
+        return refreshed;
+      }
+    } catch (error) {
+      warn(`No se pudo refrescar la incidencia después de ${action}.`, error);
+    }
+  }
+
+  const fallback = normalizeTicketDetail(
+    fallbackDetail ||
+      getTicketDetailFromStoreAction({ ticketId: id }) ||
+      { ticketId: id }
+  );
+
+  return fallback;
 }
 
 function getAllStoreItems() {
@@ -1097,7 +1212,7 @@ export async function getTicketDetailAction({
 
     return normalized;
   } catch (error) {
-    if (fallbackStoreDetail) {
+    if (fallbackStoreDetail && !isAuthorizationError(error)) {
       emit("incidencias:detail:fallback", {
         ticketId: id,
         source: "store",
@@ -1180,21 +1295,36 @@ export async function refreshTicketDetailAction({
 
 export async function createIncidenciaAction(options = {}) {
   const input = safeObject(options);
+  const {
+    silent: rawSilent,
+    throwOnError = null,
+    payload,
+    draft,
+    form,
+    ...rest
+  } = input;
+
   const data = safeObject(
     first(
-      input.payload,
-      input.draft,
-      input.form,
-      input
+      payload,
+      draft,
+      form,
+      rest
     ),
     null
   );
 
-  const silent = Boolean(input.silent);
+  const silent = Boolean(rawSilent);
 
   if (!hasOwnKeys(data)) {
+    const error = createActionError("No hay datos para crear la incidencia.");
+
     if (!silent) {
-      showToast("No hay datos para crear la incidencia.", "error");
+      showToast(error.message, "error");
+    }
+
+    if (shouldRethrowActionError({ silent, throwOnError })) {
+      throw error;
     }
 
     return null;
@@ -1224,11 +1354,11 @@ export async function createIncidenciaAction(options = {}) {
       payload: data,
     });
 
-    if (!silent) {
-      showToast(getErrorMessage(error, "No se pudo crear la incidencia."), "error");
-    }
-
-    return null;
+    return handleActionError(error, {
+      silent,
+      throwOnError,
+      fallbackMessage: "No se pudo crear la incidencia.",
+    });
   }
 }
 
@@ -1238,17 +1368,26 @@ export async function commentTicketAction({
   detail = null,
   status = "open",
   silent = false,
+  throwOnError = null,
 } = {}) {
   const id = normalizeTicketId(ticketId);
   const normalizedMessage = normalizeCommentMessage(message);
 
   if (!id) {
-    if (!silent) showToast("No se pudo identificar la incidencia.", "error");
+    const error = createActionError("No se pudo identificar la incidencia.");
+
+    if (!silent) showToast(error.message, "error");
+    if (shouldRethrowActionError({ silent, throwOnError })) throw error;
+
     return null;
   }
 
   if (!normalizedMessage) {
-    if (!silent) showToast("Escribe un comentario antes de enviarlo.", "error");
+    const error = createActionError("Escribe un comentario antes de enviarlo.");
+
+    if (!silent) showToast(error.message, "error");
+    if (shouldRethrowActionError({ silent, throwOnError })) throw error;
+
     return null;
   }
 
@@ -1257,7 +1396,7 @@ export async function commentTicketAction({
 
   emit("incidencias:comment:start", {
     ticketId: id,
-    message: normalizedMessage,
+    messageLength: normalizedMessage.length,
   });
 
   try {
@@ -1265,11 +1404,15 @@ export async function commentTicketAction({
       status: finalStatus,
     });
 
-    const normalized = persistDetail(updated);
+    const normalized = await persistWriteResult(updated, {
+      ticketId: id,
+      fallbackDetail: currentDetail,
+      action: "comentar",
+    });
 
     emit("incidencias:comment:success", {
       ticketId: id,
-      message: normalizedMessage,
+      messageLength: normalizedMessage.length,
       detail: normalized,
       source: "backend",
     });
@@ -1280,15 +1423,15 @@ export async function commentTicketAction({
   } catch (error) {
     emit("incidencias:comment:error", {
       ticketId: id,
-      message: normalizedMessage,
+      messageLength: normalizedMessage.length,
       error,
     });
 
-    if (!silent) {
-      showToast(getErrorMessage(error, "No se pudo añadir la actualización."), "error");
-    }
-
-    return null;
+    return handleActionError(error, {
+      silent,
+      throwOnError,
+      fallbackMessage: "No se pudo añadir la actualización.",
+    });
   }
 }
 
@@ -1315,11 +1458,16 @@ export async function reopenTicketAction({
   ticketId = "",
   detail = null,
   silent = false,
+  throwOnError = null,
 } = {}) {
   const id = normalizeTicketId(ticketId);
 
   if (!id) {
-    if (!silent) showToast("No se pudo identificar la incidencia.", "error");
+    const error = createActionError("No se pudo identificar la incidencia.");
+
+    if (!silent) showToast(error.message, "error");
+    if (shouldRethrowActionError({ silent, throwOnError })) throw error;
+
     return null;
   }
 
@@ -1339,7 +1487,11 @@ export async function reopenTicketAction({
 
   try {
     const updated = await reopenIncidencia(id);
-    const normalized = persistDetail(updated);
+    const normalized = await persistWriteResult(updated, {
+      ticketId: id,
+      fallbackDetail: current,
+      action: "reabrir",
+    });
 
     emit("incidencias:reopen:success", {
       ticketId: id,
@@ -1356,11 +1508,11 @@ export async function reopenTicketAction({
       error,
     });
 
-    if (!silent) {
-      showToast(getErrorMessage(error, "No se pudo reabrir la incidencia."), "error");
-    }
-
-    return null;
+    return handleActionError(error, {
+      silent,
+      throwOnError,
+      fallbackMessage: "No se pudo reabrir la incidencia.",
+    });
   }
 }
 
@@ -1402,12 +1554,18 @@ export async function uploadTicketAttachmentsAction({
   detail = null,
   status = "open",
   silent = false,
+  throwOnError = null,
 } = {}) {
   const id = normalizeTicketId(ticketId);
   const finalFiles = dedupeFiles(files);
+  const filesMeta = getFilesMeta(finalFiles);
 
   if (!id) {
-    if (!silent) showToast("No se pudo identificar la incidencia.", "error");
+    const error = createActionError("No se pudo identificar la incidencia.");
+
+    if (!silent) showToast(error.message, "error");
+    if (shouldRethrowActionError({ silent, throwOnError })) throw error;
+
     return null;
   }
 
@@ -1425,7 +1583,7 @@ export async function uploadTicketAttachmentsAction({
 
   emit("incidencias:upload:start", {
     ticketId: id,
-    files: finalFiles,
+    files: filesMeta,
     total: finalFiles.length,
   });
 
@@ -1434,11 +1592,15 @@ export async function uploadTicketAttachmentsAction({
       status: finalStatus,
     });
 
-    const normalized = persistDetail(updated);
+    const normalized = await persistWriteResult(updated, {
+      ticketId: id,
+      fallbackDetail: detail,
+      action: "subir adjuntos",
+    });
 
     emit("incidencias:upload:success", {
       ticketId: id,
-      files: finalFiles,
+      files: filesMeta,
       total: finalFiles.length,
       detail: normalized,
     });
@@ -1449,16 +1611,16 @@ export async function uploadTicketAttachmentsAction({
   } catch (error) {
     emit("incidencias:upload:error", {
       ticketId: id,
-      files: finalFiles,
+      files: filesMeta,
       total: finalFiles.length,
       error,
     });
 
-    if (!silent) {
-      showToast(getErrorMessage(error, "No se pudieron subir los archivos."), "error");
-    }
-
-    return null;
+    return handleActionError(error, {
+      silent,
+      throwOnError,
+      fallbackMessage: "No se pudieron subir los archivos.",
+    });
   }
 }
 

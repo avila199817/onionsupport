@@ -14,10 +14,10 @@
    - No duplicar lógica de modelo, vista ni bindings.
 ========================================================= */
 
-export const INCIDENCIAS_STATE_VERSION = "incidencias.state.v2.optimized";
+export const INCIDENCIAS_STATE_VERSION = "incidencias.state.v3.solid";
 
 export const CACHE_KEY = "incidencias.cache";
-export const CACHE_VERSION = 4;
+export const CACHE_VERSION = 5;
 export const CACHE_TTL = 1000 * 60 * 3;
 
 export const DEFAULT_PAGE_SIZE = 20;
@@ -59,6 +59,7 @@ const FILTER_ALIASES = Object.freeze({
   todas: "all",
   total: "all",
   totales: "all",
+
   open: "open",
   opened: "open",
   active: "open",
@@ -74,6 +75,7 @@ const FILTER_ALIASES = Object.freeze({
   abiertos: "open",
   proceso: "open",
   en_proceso: "open",
+
   closed: "closed",
   close: "closed",
   resolved: "closed",
@@ -94,15 +96,20 @@ const FILTER_ALIASES = Object.freeze({
 const STATUS_ALIASES = Object.freeze({
   open: "open",
   opened: "open",
+  active: "open",
+  activa: "open",
+  activo: "open",
   abierta: "open",
   abiertas: "open",
   abierto: "open",
   abiertos: "open",
+
   new: "pending",
   created: "pending",
   pending: "pending",
   pendiente: "pending",
   pendientes: "pending",
+
   progress: "in_progress",
   in_progress: "in_progress",
   inprogress: "in_progress",
@@ -113,12 +120,14 @@ const STATUS_ALIASES = Object.freeze({
   assigned: "in_progress",
   asignada: "in_progress",
   asignado: "in_progress",
+
   resolved: "resolved",
   solved: "resolved",
   resuelta: "resolved",
   resueltas: "resolved",
   resuelto: "resolved",
   resueltos: "resolved",
+
   closed: "closed",
   close: "closed",
   archived: "closed",
@@ -136,19 +145,23 @@ const PRIORITY_ALIASES = Object.freeze({
   minor: "low",
   menor: "low",
   p3: "low",
+
   medium: "medium",
   media: "medium",
   normal: "medium",
   p2: "medium",
+
   high: "high",
   alta: "high",
   p1: "high",
+
   urgent: "urgent",
   urgente: "urgent",
   critical: "urgent",
   critica: "urgent",
-  crítico: "urgent",
+  crítica: "urgent",
   critico: "urgent",
+  crítico: "urgent",
   p0: "urgent",
 });
 
@@ -159,6 +172,22 @@ const MUTATION_KEYS = Object.freeze({
   update: ["updating", "updateTicketId"],
   export: ["exporting", ""],
 });
+
+const CACHE_DROP_KEYS = new Set([
+  "accessToken",
+  "refreshToken",
+  "idToken",
+  "authorization",
+  "password",
+  "secret",
+  "tokenHash",
+  "connectionString",
+  "sas",
+]);
+
+/* =========================================================
+   SAFE HELPERS
+========================================================= */
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -174,7 +203,12 @@ function safeObject(value, fallback = {}) {
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-  const text = String(value).replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
+
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return text || fallback;
 }
 
@@ -184,6 +218,7 @@ function safeLower(value, fallback = "") {
 
 function safeNumber(value, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
+
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
 }
@@ -201,9 +236,12 @@ function normalizeKey(value = "") {
 function safeBoolean(value, fallback = false) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
+
   const key = normalizeKey(value);
+
   if (["true", "1", "yes", "y", "si", "sí", "on"].includes(key)) return true;
   if (["false", "0", "no", "n", "off"].includes(key)) return false;
+
   return fallback;
 }
 
@@ -215,6 +253,7 @@ function first(...values) {
     if (isObject(value) && !Object.keys(value).length) continue;
     return value;
   }
+
   return null;
 }
 
@@ -232,8 +271,15 @@ function now() {
 
 function safeTimestamp(value, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
+
+  if (value instanceof Date) {
+    const dateTs = value.getTime();
+    return Number.isFinite(dateTs) && dateTs > 0 ? dateTs : fallback;
+  }
+
   const direct = Number(value);
   if (Number.isFinite(direct) && direct > 0) return direct > 9999999999 ? direct : direct * 1000;
+
   const timestamp = new Date(value).getTime();
   return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : fallback;
 }
@@ -308,6 +354,41 @@ function normalizeItems(items = []) {
   return safeArray(items).filter(isObject);
 }
 
+function sanitizeCacheValue(value, depth = 0) {
+  if (value === null || value === undefined) return value;
+  if (typeof value !== "object") return value;
+  if (value instanceof Date) return value.toISOString();
+  if (depth > 5) return undefined;
+
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => sanitizeCacheValue(entry, depth + 1))
+      .filter((entry) => entry !== undefined);
+  }
+
+  const output = {};
+
+  Object.entries(value).forEach(([key, entry]) => {
+    if (!key) return;
+    if (CACHE_DROP_KEYS.has(key)) return;
+    if (key === "raw" && depth > 0) return;
+    if (typeof entry === "function" || entry === undefined) return;
+
+    const next = sanitizeCacheValue(entry, depth + 1);
+    if (next !== undefined) output[key] = next;
+  });
+
+  return output;
+}
+
+function prepareCacheItems(items = []) {
+  return normalizeItems(items).map((item) => sanitizeCacheValue(item, 0)).filter(isObject);
+}
+
+/* =========================================================
+   DEFAULT SUBSTATES
+========================================================= */
+
 function createDefaultCreateDraft() {
   return {
     subject: "",
@@ -364,7 +445,7 @@ function normalizeCreateDraft(value = {}) {
     estado: status,
     clientName: safeText(first(draft.clientName, draft.clienteNombre, draft.name, draft.cliente?.name, draft.cliente?.nombre, ""), ""),
     clientEmail: safeText(first(draft.clientEmail, draft.clienteEmail, draft.email, draft.cliente?.email, ""), ""),
-    clienteId: safeText(first(draft.clienteId, draft.cliente?.id, ""), ""),
+    clienteId: safeText(first(draft.clienteId, draft.cliente?.id, draft.cliente?.clienteId, ""), ""),
     userId: safeText(first(draft.userId, draft.cliente?.userId, ""), ""),
     assignedTo: safeText(first(draft.assignedTo, draft.tecnico, ""), ""),
     category,
@@ -402,6 +483,7 @@ function createDefaultCreateViewState() {
 function normalizeCreateViewState(value = {}) {
   const state = safeObject(value);
   const base = createDefaultCreateViewState();
+
   return {
     form: normalizeCreateDraft(first(state.form, base.form)),
     errors: safeObject(state.errors),
@@ -432,6 +514,7 @@ function createDefaultDetailState() {
 
 function normalizeDetailState(value = {}) {
   const state = safeObject(value);
+
   return {
     open: safeBoolean(state.open, false),
     ticketId: safeText(state.ticketId, ""),
@@ -463,6 +546,7 @@ function createDefaultMutationState() {
 
 function normalizeMutationState(value = {}) {
   const state = safeObject(value);
+
   return {
     commenting: safeBoolean(state.commenting, false),
     uploading: safeBoolean(state.uploading, false),
@@ -490,9 +574,11 @@ function createInitialIncidenciasState() {
     selectedTicketId: "",
     error: "",
     errorAt: 0,
+
     items: [],
     remoteCount: 0,
     lastSyncAt: 0,
+
     page: 1,
     currentPage: 1,
     pageSize: DEFAULT_PAGE_SIZE,
@@ -500,6 +586,7 @@ function createInitialIncidenciasState() {
     pages: 1,
     hasPrev: false,
     hasNext: false,
+
     infiniteScroll: true,
     scrollMode: "infinite",
     paginationDisabled: true,
@@ -516,6 +603,7 @@ function createInitialIncidenciasState() {
     canLoadMore: false,
     loadingMore: false,
     isLoadingMore: false,
+
     sort: DEFAULT_SORT,
     filters: normalizeFilters(DEFAULT_FILTERS),
     filter: DEFAULT_LIST_FILTER,
@@ -526,14 +614,17 @@ function createInitialIncidenciasState() {
     filterQuery: "",
     query: "",
     q: "",
+
     requestId: 0,
     activeRequestId: 0,
     lastRequestStartedAt: 0,
     lastRequestFinishedAt: 0,
+
     createDraft: createDefaultCreateDraft(),
     createView: createDefaultCreateViewState(),
     detail: createDefaultDetailState(),
     mutations: createDefaultMutationState(),
+
     cache: {
       restored: false,
       restoredAt: 0,
@@ -547,13 +638,18 @@ export const incidenciasState = createInitialIncidenciasState();
 
 let inflightLoad = null;
 
+/* =========================================================
+   INTERNAL STATE HELPERS
+========================================================= */
+
 function getListTotal() {
-  return Math.max(safeNumber(incidenciasState.remoteCount, 0), safeArray(incidenciasState.items).length);
+  return safeArray(incidenciasState.items).length;
 }
 
 function getSafeInitialVisibleCount(total = getListTotal()) {
   const totalCount = Math.max(0, safeNumber(total, 0));
   if (!totalCount) return 0;
+
   return Math.min(
     totalCount,
     clamp(first(incidenciasState.initialVisibleCount, incidenciasState.visibleInitialCount, DEFAULT_INITIAL_VISIBLE_COUNT), 1, MAX_VISIBLE_COUNT)
@@ -567,6 +663,7 @@ function getSafeLoadMoreBatch() {
 function getSafeVisibleCount(total = getListTotal()) {
   const totalCount = Math.max(0, safeNumber(total, 0));
   if (!totalCount) return 0;
+
   const current = safeNumber(incidenciasState.visibleCount, 0);
   return current > 0 ? Math.min(current, totalCount, MAX_VISIBLE_COUNT) : getSafeInitialVisibleCount(totalCount);
 }
@@ -601,11 +698,17 @@ function syncInfiniteAliases(total = getListTotal()) {
   incidenciasState.loadMoreBatch = getSafeLoadMoreBatch();
   incidenciasState.batchSize = incidenciasState.loadMoreBatch;
 
-  return { total: totalCount, visibleCount, remainingCount, hasMore };
+  return {
+    total: totalCount,
+    visibleCount,
+    remainingCount,
+    hasMore,
+  };
 }
 
 function normalizePageState() {
   const meta = syncInfiniteAliases(getListTotal());
+
   return {
     page: 1,
     currentPage: 1,
@@ -632,6 +735,7 @@ function normalizePageState() {
 
 function syncRootFilterAliases(value = {}) {
   const filters = normalizeFilters(value);
+
   incidenciasState.filters = filters;
   incidenciasState.filter = filters.filter;
   incidenciasState.activeFilter = filters.activeFilter;
@@ -641,6 +745,7 @@ function syncRootFilterAliases(value = {}) {
   incidenciasState.filterQuery = filters.query;
   incidenciasState.query = filters.query;
   incidenciasState.q = filters.query;
+
   return filters;
 }
 
@@ -667,12 +772,14 @@ function touchRequestId() {
 
 function finishRequest(requestId = incidenciasState.activeRequestId) {
   if (requestId && incidenciasState.activeRequestId && requestId !== incidenciasState.activeRequestId) return false;
+
   incidenciasState.lastRequestFinishedAt = now();
   return true;
 }
 
 function markIdle(requestId = incidenciasState.activeRequestId) {
   if (!finishRequest(requestId)) return incidenciasState;
+
   incidenciasState.loading = false;
   incidenciasState.refreshing = false;
   return incidenciasState;
@@ -690,11 +797,14 @@ function markMutationDone(type = "", ticketId = "") {
   const mutationType = normalizeKey(type);
   const [flagKey, ticketKey] = MUTATION_KEYS[mutationType] || [];
   const mutations = normalizeMutationState(incidenciasState.mutations);
+
   if (flagKey) mutations[flagKey] = false;
   if (ticketKey) mutations[ticketKey] = "";
+
   mutations.lastMutationAt = now();
   mutations.lastMutationType = safeText(type, "");
   mutations.lastMutationTicketId = safeText(ticketId, "");
+
   incidenciasState.mutations = normalizeMutationState(mutations);
   return incidenciasState.mutations;
 }
@@ -702,6 +812,7 @@ function markMutationDone(type = "", ticketId = "") {
 function getItemCandidateIds(item = {}) {
   const source = safeObject(item);
   const raw = safeObject(source.raw);
+
   return [
     source.ticketId,
     source.id,
@@ -717,7 +828,9 @@ function getItemCandidateIds(item = {}) {
     raw.ticketCode,
     raw.incidenciaId,
     raw.entityId,
-  ].map((value) => safeText(value, "")).filter(Boolean);
+  ]
+    .map((value) => safeText(value, ""))
+    .filter(Boolean);
 }
 
 function getItemIdentity(item = {}) {
@@ -727,12 +840,14 @@ function getItemIdentity(item = {}) {
 function itemMatchesIdentity(item = {}, ticketId = "") {
   const target = normalizeKey(ticketId);
   if (!target) return false;
+
   return getItemCandidateIds(item).some((candidate) => normalizeKey(candidate) === target);
 }
 
 function mergeItemPatch(current = {}, patch = {}) {
   const base = safeObject(current);
   const next = safeObject(patch);
+
   return {
     ...base,
     ...next,
@@ -746,6 +861,28 @@ function mergeItemPatch(current = {}, patch = {}) {
     },
   };
 }
+
+function setRemoteCountFromOptions(items = [], options = {}) {
+  const list = safeArray(items);
+  const opts = safeObject(options);
+
+  if (hasOwn(opts, "remoteCount")) {
+    incidenciasState.remoteCount = Math.max(0, safeNumber(opts.remoteCount, list.length));
+    return incidenciasState.remoteCount;
+  }
+
+  if (hasOwn(opts, "total")) {
+    incidenciasState.remoteCount = Math.max(0, safeNumber(opts.total, list.length));
+    return incidenciasState.remoteCount;
+  }
+
+  incidenciasState.remoteCount = Math.max(safeNumber(incidenciasState.remoteCount, 0), list.length);
+  return incidenciasState.remoteCount;
+}
+
+/* =========================================================
+   INFLIGHT
+========================================================= */
 
 export function getInflightLoad() {
   return inflightLoad;
@@ -764,6 +901,10 @@ export function clearInflightLoad() {
 export function hasInflightLoad() {
   return Boolean(inflightLoad);
 }
+
+/* =========================================================
+   RESET / REQUEST
+========================================================= */
 
 export function resetIncidenciasState() {
   Object.assign(incidenciasState, createInitialIncidenciasState());
@@ -790,12 +931,15 @@ export function resetIncidenciasRuntimeState() {
 
 export function beginRequest({ loading = false, refreshing = false } = {}) {
   const requestId = touchRequestId();
+
   incidenciasState.error = "";
   incidenciasState.errorAt = 0;
   incidenciasState.loading = Boolean(loading);
   incidenciasState.refreshing = Boolean(refreshing);
+
   if (incidenciasState.loading) incidenciasState.refreshing = false;
   if (incidenciasState.refreshing) incidenciasState.loading = false;
+
   return requestId;
 }
 
@@ -807,29 +951,34 @@ export function isActiveRequest(requestId = 0) {
 export function completeRequest(requestId = 0) {
   const id = safeNumber(requestId, 0);
   if (id && !isActiveRequest(id)) return false;
+
   markIdle(id || incidenciasState.activeRequestId);
   return true;
 }
 
 export function setLoading(value) {
   incidenciasState.loading = Boolean(value);
+
   if (incidenciasState.loading) {
     incidenciasState.refreshing = false;
     touchRequestId();
   } else {
     finishRequest();
   }
+
   return incidenciasState.loading;
 }
 
 export function setRefreshing(value) {
   incidenciasState.refreshing = Boolean(value);
+
   if (incidenciasState.refreshing) {
     incidenciasState.loading = false;
     touchRequestId();
   } else {
     finishRequest();
   }
+
   return incidenciasState.refreshing;
 }
 
@@ -860,25 +1009,35 @@ export function setOpeningTicketId(value = "") {
   return incidenciasState.openingTicketId;
 }
 
+/* =========================================================
+   INFINITE SCROLL / LEGACY PAGINATION
+========================================================= */
+
 export function setInfiniteScrollMeta(value = {}) {
   const meta = safeObject(value);
+
   if (hasOwn(meta, "remoteCount") || hasOwn(meta, "total") || hasOwn(meta, "totalCount")) {
     incidenciasState.remoteCount = Math.max(0, safeNumber(first(meta.remoteCount, meta.total, meta.totalCount), incidenciasState.remoteCount));
   }
+
   if (hasOwn(meta, "initialVisibleCount") || hasOwn(meta, "visibleInitialCount")) {
     incidenciasState.initialVisibleCount = clamp(first(meta.initialVisibleCount, meta.visibleInitialCount), 1, MAX_VISIBLE_COUNT);
     incidenciasState.visibleInitialCount = incidenciasState.initialVisibleCount;
   }
+
   if (hasOwn(meta, "loadMoreBatch") || hasOwn(meta, "batchSize")) {
     incidenciasState.loadMoreBatch = clamp(first(meta.loadMoreBatch, meta.batchSize), 1, MAX_VISIBLE_COUNT);
     incidenciasState.batchSize = incidenciasState.loadMoreBatch;
   }
+
   if (hasOwn(meta, "pageSize")) incidenciasState.pageSize = clamp(meta.pageSize, 1, MAX_PAGE_SIZE);
   if (hasOwn(meta, "visibleCount")) setVisibleCount(meta.visibleCount);
   else normalizePageState();
+
   incidenciasState.infiniteScroll = true;
   incidenciasState.scrollMode = "infinite";
   incidenciasState.paginationDisabled = true;
+
   return getInfiniteScrollState();
 }
 
@@ -911,6 +1070,7 @@ export function setHasMoreItems(value = false) {
 
 export function getInfiniteScrollState() {
   const pagination = normalizePageState();
+
   return {
     mode: "infinite",
     infiniteScroll: true,
@@ -972,6 +1132,10 @@ export function getPaginationState() {
   return normalizePageState();
 }
 
+/* =========================================================
+   FILTERS / SORT
+========================================================= */
+
 export function setFilters(value = {}) {
   const filters = syncRootFilterAliases(value);
   resetPage();
@@ -979,7 +1143,11 @@ export function setFilters(value = {}) {
 }
 
 export function patchFilters(patch = {}) {
-  const filters = syncRootFilterAliases({ ...getCurrentFiltersForSnapshot(), ...safeObject(patch) });
+  const filters = syncRootFilterAliases({
+    ...getCurrentFiltersForSnapshot(),
+    ...safeObject(patch),
+  });
+
   resetPage();
   return filters;
 }
@@ -1003,66 +1171,95 @@ export function getSort() {
   return safeText(incidenciasState.sort, DEFAULT_SORT);
 }
 
+/* =========================================================
+   ITEMS
+========================================================= */
+
 export function setItems(items = [], options = {}) {
   const list = normalizeItems(items);
   const opts = safeObject(options);
+
   incidenciasState.items = list;
   incidenciasState.error = "";
   incidenciasState.errorAt = 0;
-  if (hasOwn(opts, "remoteCount")) incidenciasState.remoteCount = Math.max(0, safeNumber(opts.remoteCount, list.length));
-  else if (hasOwn(opts, "total")) incidenciasState.remoteCount = Math.max(0, safeNumber(opts.total, list.length));
-  else incidenciasState.remoteCount = Math.max(safeNumber(incidenciasState.remoteCount, 0), list.length);
-  if (hasOwn(opts, "visibleCount")) incidenciasState.visibleCount = clamp(opts.visibleCount, 0, MAX_VISIBLE_COUNT);
-  else if (!safeNumber(incidenciasState.visibleCount, 0)) incidenciasState.visibleCount = getSafeInitialVisibleCount(Math.max(list.length, incidenciasState.remoteCount));
+
+  setRemoteCountFromOptions(list, opts);
+
+  if (hasOwn(opts, "visibleCount")) {
+    incidenciasState.visibleCount = clamp(opts.visibleCount, 0, MAX_VISIBLE_COUNT);
+  } else if (!safeNumber(incidenciasState.visibleCount, 0)) {
+    incidenciasState.visibleCount = getSafeInitialVisibleCount(list.length);
+  } else {
+    incidenciasState.visibleCount = Math.min(incidenciasState.visibleCount, list.length);
+  }
+
   if (hasOwn(opts, "pageSize")) incidenciasState.pageSize = clamp(opts.pageSize, 1, MAX_PAGE_SIZE);
+
   incidenciasState.page = 1;
   incidenciasState.currentPage = 1;
+
   markLoaded();
   normalizePageState();
+
   return incidenciasState.items;
 }
 
 export function patchItemById(ticketId = "", patch = {}) {
   const id = safeText(ticketId, "");
   const nextPatch = safeObject(patch);
+
   if (!id) return incidenciasState.items;
+
   let updated = false;
+
   incidenciasState.items = safeArray(incidenciasState.items).map((item) => {
     if (!itemMatchesIdentity(item, id)) return item;
     updated = true;
     return mergeItemPatch(item, nextPatch);
   });
+
   if (updated) normalizePageState();
+
   return incidenciasState.items;
 }
 
 export function upsertItem(item = {}) {
   const row = safeObject(item);
   const id = getItemIdentity(row);
+
   if (!id) {
     incidenciasState.items = [row, ...safeArray(incidenciasState.items)];
     incidenciasState.remoteCount = Math.max(safeNumber(incidenciasState.remoteCount, 0), incidenciasState.items.length);
     normalizePageState();
     return incidenciasState.items;
   }
+
   let found = false;
+
   incidenciasState.items = safeArray(incidenciasState.items).map((current) => {
     if (!itemMatchesIdentity(current, id)) return current;
     found = true;
     return mergeItemPatch(current, row);
   });
-  if (!found) incidenciasState.items = [row, ...safeArray(incidenciasState.items)];
+
+  if (!found) {
+    incidenciasState.items = [row, ...safeArray(incidenciasState.items)];
+  }
+
   incidenciasState.remoteCount = Math.max(safeNumber(incidenciasState.remoteCount, 0), incidenciasState.items.length);
   normalizePageState();
+
   return incidenciasState.items;
 }
 
 export function removeItemById(ticketId = "") {
   const id = safeText(ticketId, "");
   if (!id) return incidenciasState.items;
+
   incidenciasState.items = safeArray(incidenciasState.items).filter((item) => !itemMatchesIdentity(item, id));
   incidenciasState.remoteCount = Math.max(0, Math.min(safeNumber(incidenciasState.remoteCount, incidenciasState.items.length), incidenciasState.items.length));
   normalizePageState();
+
   return incidenciasState.items;
 }
 
@@ -1100,10 +1297,16 @@ export function setRemoteCount(value = 0) {
   return incidenciasState.remoteCount;
 }
 
+/* =========================================================
+   ERROR / SYNC
+========================================================= */
+
 export function setError(value = null) {
   incidenciasState.error = value ? safeText(value, "") : "";
   incidenciasState.errorAt = incidenciasState.error ? now() : 0;
+
   if (incidenciasState.error) markIdle();
+
   return incidenciasState.error;
 }
 
@@ -1123,18 +1326,27 @@ export function touchLastSyncAt() {
   return incidenciasState.lastSyncAt;
 }
 
+/* =========================================================
+   DETAIL
+========================================================= */
+
 export function setDetailState(value = {}) {
   incidenciasState.detail = normalizeDetailState(value);
   return incidenciasState.detail;
 }
 
 export function patchDetailState(patch = {}) {
-  incidenciasState.detail = normalizeDetailState({ ...safeObject(incidenciasState.detail), ...safeObject(patch) });
+  incidenciasState.detail = normalizeDetailState({
+    ...safeObject(incidenciasState.detail),
+    ...safeObject(patch),
+  });
+
   return incidenciasState.detail;
 }
 
 export function openDetail(ticketId = "", item = null) {
   const id = safeText(ticketId, "");
+
   incidenciasState.detail = normalizeDetailState({
     ...safeObject(incidenciasState.detail),
     open: true,
@@ -1142,8 +1354,10 @@ export function openDetail(ticketId = "", item = null) {
     item: item || incidenciasState.detail.item || null,
     error: "",
   });
+
   incidenciasState.openingTicketId = id;
   incidenciasState.selectedTicketId = id;
+
   return incidenciasState.detail;
 }
 
@@ -1155,6 +1369,7 @@ export function closeDetail() {
     refreshing: false,
     error: "",
   });
+
   incidenciasState.openingTicketId = "";
   return incidenciasState.detail;
 }
@@ -1162,6 +1377,7 @@ export function closeDetail() {
 export function setDetailLoading(value = false, ticketId = "") {
   const loading = Boolean(value);
   const id = safeText(ticketId, incidenciasState.detail.ticketId || "");
+
   incidenciasState.detail = normalizeDetailState({
     ...safeObject(incidenciasState.detail),
     loading,
@@ -1169,12 +1385,14 @@ export function setDetailLoading(value = false, ticketId = "") {
     ticketId: id,
     error: loading ? "" : incidenciasState.detail.error,
   });
+
   incidenciasState.openingTicketId = loading ? id : "";
   return incidenciasState.detail.loading;
 }
 
 export function setDetailRefreshing(value = false, ticketId = "") {
   const refreshing = Boolean(value);
+
   incidenciasState.detail = normalizeDetailState({
     ...safeObject(incidenciasState.detail),
     refreshing,
@@ -1182,11 +1400,13 @@ export function setDetailRefreshing(value = false, ticketId = "") {
     ticketId: safeText(ticketId, incidenciasState.detail.ticketId || ""),
     error: refreshing ? "" : incidenciasState.detail.error,
   });
+
   return incidenciasState.detail.refreshing;
 }
 
 export function setDetailItem(item = null, ticketId = "") {
   const finalTicketId = safeText(first(ticketId, item?.ticketId, item?.id, item?.code, item?.ticketCode, incidenciasState.detail.ticketId), "");
+
   incidenciasState.detail = normalizeDetailState({
     ...safeObject(incidenciasState.detail),
     open: true,
@@ -1198,9 +1418,12 @@ export function setDetailItem(item = null, ticketId = "") {
     lastLoadedAt: now(),
     lastUpdatedAt: now(),
   });
+
   incidenciasState.openingTicketId = "";
   incidenciasState.selectedTicketId = finalTicketId;
+
   if (item) upsertItem(item);
+
   return incidenciasState.detail.item;
 }
 
@@ -1211,6 +1434,7 @@ export function setDetailError(value = "") {
     refreshing: false,
     error: safeText(value, ""),
   });
+
   incidenciasState.openingTicketId = "";
   return incidenciasState.detail.error;
 }
@@ -1226,13 +1450,21 @@ export function clearDetailState() {
   return incidenciasState.detail;
 }
 
+/* =========================================================
+   MUTATIONS
+========================================================= */
+
 export function setMutationState(value = {}) {
   incidenciasState.mutations = normalizeMutationState(value);
   return incidenciasState.mutations;
 }
 
 export function patchMutationState(patch = {}) {
-  incidenciasState.mutations = normalizeMutationState({ ...safeObject(incidenciasState.mutations), ...safeObject(patch) });
+  incidenciasState.mutations = normalizeMutationState({
+    ...safeObject(incidenciasState.mutations),
+    ...safeObject(patch),
+  });
+
   return incidenciasState.mutations;
 }
 
@@ -1242,7 +1474,9 @@ export function setCommenting(value = false, ticketId = "") {
     commenting: Boolean(value),
     commentTicketId: Boolean(value) ? safeText(ticketId, "") : "",
   });
+
   if (!value) markMutationDone("comment", ticketId);
+
   return incidenciasState.mutations.commenting;
 }
 
@@ -1252,7 +1486,9 @@ export function setUploading(value = false, ticketId = "") {
     uploading: Boolean(value),
     uploadTicketId: Boolean(value) ? safeText(ticketId, "") : "",
   });
+
   if (!value) markMutationDone("upload", ticketId);
+
   return incidenciasState.mutations.uploading;
 }
 
@@ -1262,7 +1498,9 @@ export function setReopening(value = false, ticketId = "") {
     reopening: Boolean(value),
     reopenTicketId: Boolean(value) ? safeText(ticketId, "") : "",
   });
+
   if (!value) markMutationDone("reopen", ticketId);
+
   return incidenciasState.mutations.reopening;
 }
 
@@ -1272,13 +1510,20 @@ export function setUpdating(value = false, ticketId = "") {
     updating: Boolean(value),
     updateTicketId: Boolean(value) ? safeText(ticketId, "") : "",
   });
+
   if (!value) markMutationDone("update", ticketId);
+
   return incidenciasState.mutations.updating;
 }
 
 export function setExporting(value = false) {
-  incidenciasState.mutations = normalizeMutationState({ ...safeObject(incidenciasState.mutations), exporting: Boolean(value) });
+  incidenciasState.mutations = normalizeMutationState({
+    ...safeObject(incidenciasState.mutations),
+    exporting: Boolean(value),
+  });
+
   if (!value) markMutationDone("export", "");
+
   return incidenciasState.mutations.exporting;
 }
 
@@ -1287,13 +1532,21 @@ export function clearMutationState() {
   return incidenciasState.mutations;
 }
 
+/* =========================================================
+   CREATE DRAFT / CREATE VIEW
+========================================================= */
+
 export function setCreateDraft(value = {}) {
   incidenciasState.createDraft = normalizeCreateDraft(value);
   return incidenciasState.createDraft;
 }
 
 export function patchCreateDraft(patch = {}) {
-  incidenciasState.createDraft = normalizeCreateDraft({ ...safeObject(incidenciasState.createDraft), ...safeObject(patch) });
+  incidenciasState.createDraft = normalizeCreateDraft({
+    ...safeObject(incidenciasState.createDraft),
+    ...safeObject(patch),
+  });
+
   return incidenciasState.createDraft;
 }
 
@@ -1317,29 +1570,53 @@ export function patchCreateViewState(patch = {}) {
   const form = hasOwn(nextPatch, "form") ? normalizeCreateDraft({ ...current.form, ...safeObject(nextPatch.form) }) : current.form;
   const errors = hasOwn(nextPatch, "errors") ? safeObject(nextPatch.errors) : current.errors;
   const touched = hasOwn(nextPatch, "touched") ? safeObject(nextPatch.touched) : current.touched;
-  incidenciasState.createView = normalizeCreateViewState({ ...current, ...nextPatch, form, errors, touched });
+
+  incidenciasState.createView = normalizeCreateViewState({
+    ...current,
+    ...nextPatch,
+    form,
+    errors,
+    touched,
+  });
+
   return incidenciasState.createView;
 }
 
 export function setCreateViewForm(form = {}) {
   const current = normalizeCreateViewState(incidenciasState.createView);
   const nextForm = normalizeCreateDraft(form);
-  incidenciasState.createView = normalizeCreateViewState({ ...current, form: nextForm });
+
+  incidenciasState.createView = normalizeCreateViewState({
+    ...current,
+    form: nextForm,
+  });
   incidenciasState.createDraft = nextForm;
+
   return incidenciasState.createView.form;
 }
 
 export function patchCreateViewForm(patch = {}) {
   const current = normalizeCreateViewState(incidenciasState.createView);
-  const form = normalizeCreateDraft({ ...current.form, ...safeObject(patch) });
-  incidenciasState.createView = normalizeCreateViewState({ ...current, form });
+  const form = normalizeCreateDraft({
+    ...current.form,
+    ...safeObject(patch),
+  });
+
+  incidenciasState.createView = normalizeCreateViewState({
+    ...current,
+    form,
+  });
   incidenciasState.createDraft = form;
+
   return incidenciasState.createView.form;
 }
 
 export function setCreateViewErrors(errors = {}) {
   const current = normalizeCreateViewState(incidenciasState.createView);
-  incidenciasState.createView = normalizeCreateViewState({ ...current, errors: safeObject(errors) });
+  incidenciasState.createView = normalizeCreateViewState({
+    ...current,
+    errors: safeObject(errors),
+  });
   return incidenciasState.createView.errors;
 }
 
@@ -1347,7 +1624,10 @@ export function patchCreateViewErrors(patch = {}) {
   const current = normalizeCreateViewState(incidenciasState.createView);
   incidenciasState.createView = normalizeCreateViewState({
     ...current,
-    errors: { ...safeObject(current.errors), ...safeObject(patch) },
+    errors: {
+      ...safeObject(current.errors),
+      ...safeObject(patch),
+    },
   });
   return incidenciasState.createView.errors;
 }
@@ -1358,7 +1638,10 @@ export function clearCreateViewErrors() {
 
 export function setCreateViewTouched(touched = {}) {
   const current = normalizeCreateViewState(incidenciasState.createView);
-  incidenciasState.createView = normalizeCreateViewState({ ...current, touched: safeObject(touched) });
+  incidenciasState.createView = normalizeCreateViewState({
+    ...current,
+    touched: safeObject(touched),
+  });
   return incidenciasState.createView.touched;
 }
 
@@ -1366,7 +1649,10 @@ export function patchCreateViewTouched(patch = {}) {
   const current = normalizeCreateViewState(incidenciasState.createView);
   incidenciasState.createView = normalizeCreateViewState({
     ...current,
-    touched: { ...safeObject(current.touched), ...safeObject(patch) },
+    touched: {
+      ...safeObject(current.touched),
+      ...safeObject(patch),
+    },
   });
   return incidenciasState.createView.touched;
 }
@@ -1374,6 +1660,7 @@ export function patchCreateViewTouched(patch = {}) {
 export function setCreateViewSubmitting(value = false) {
   const current = normalizeCreateViewState(incidenciasState.createView);
   const submitting = Boolean(value);
+
   incidenciasState.creating = submitting;
   incidenciasState.createView = normalizeCreateViewState({
     ...current,
@@ -1381,18 +1668,26 @@ export function setCreateViewSubmitting(value = false) {
     serverError: submitting ? "" : current.serverError,
     submittedAt: submitting ? now() : current.submittedAt,
   });
+
   return incidenciasState.createView.submitting;
 }
 
 export function setCreateViewValidating(value = false) {
   const current = normalizeCreateViewState(incidenciasState.createView);
-  incidenciasState.createView = normalizeCreateViewState({ ...current, validating: Boolean(value) });
+  incidenciasState.createView = normalizeCreateViewState({
+    ...current,
+    validating: Boolean(value),
+  });
   return incidenciasState.createView.validating;
 }
 
 export function setCreateViewServerError(value = "") {
   const current = normalizeCreateViewState(incidenciasState.createView);
-  incidenciasState.createView = normalizeCreateViewState({ ...current, submitting: false, serverError: safeText(value, "") });
+  incidenciasState.createView = normalizeCreateViewState({
+    ...current,
+    submitting: false,
+    serverError: safeText(value, ""),
+  });
   incidenciasState.creating = false;
   return incidenciasState.createView.serverError;
 }
@@ -1403,6 +1698,7 @@ export function clearCreateViewServerError() {
 
 export function setCreateViewSuccess({ createdTicketId = "", successMessage = "" } = {}) {
   const current = normalizeCreateViewState(incidenciasState.createView);
+
   incidenciasState.createView = normalizeCreateViewState({
     ...current,
     submitting: false,
@@ -1412,11 +1708,15 @@ export function setCreateViewSuccess({ createdTicketId = "", successMessage = ""
     completedAt: now(),
   });
   incidenciasState.creating = false;
+
   return incidenciasState.createView;
 }
 
 export function clearCreateViewSuccess() {
-  return setCreateViewSuccess({ createdTicketId: "", successMessage: "" });
+  return setCreateViewSuccess({
+    createdTicketId: "",
+    successMessage: "",
+  });
 }
 
 export function resetCreateViewState() {
@@ -1430,13 +1730,18 @@ export function getCreateViewState() {
   return normalizeCreateViewState(incidenciasState.createView);
 }
 
+/* =========================================================
+   CACHE
+========================================================= */
+
 export function getCachePayload() {
   const filters = getCurrentFiltersForSnapshot();
   normalizePageState();
+
   return {
     version: CACHE_VERSION,
     savedAt: now(),
-    items: getItems(),
+    items: prepareCacheItems(getItems()),
     remoteCount: incidenciasState.remoteCount,
     lastSyncAt: incidenciasState.lastSyncAt,
     page: 1,
@@ -1470,12 +1775,16 @@ export function isCacheFresh(savedAt = 0) {
 
 export function isCachePayloadValid(payload = {}) {
   const data = safeObject(payload);
-  return Boolean(Object.keys(data).length && safeNumber(data.version, 0) === CACHE_VERSION && Array.isArray(data.items));
+  const version = safeNumber(data.version, 0);
+
+  return Boolean(Object.keys(data).length && [CACHE_VERSION, 4].includes(version) && Array.isArray(data.items));
 }
 
 export function writeCachePayload(payload = null) {
   if (!canUseLocalStorage()) return false;
+
   const finalPayload = safeObject(payload || getCachePayload());
+
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(finalPayload));
     incidenciasState.cache = {
@@ -1491,12 +1800,15 @@ export function writeCachePayload(payload = null) {
 
 export function readCachePayload({ freshOnly = true } = {}) {
   if (!canUseLocalStorage()) return null;
+
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
+
     const payload = safeObject(JSON.parse(raw));
     if (!isCachePayloadValid(payload)) return null;
     if (freshOnly && !isCacheFresh(payload.savedAt)) return null;
+
     return payload;
   } catch {
     return null;
@@ -1505,9 +1817,15 @@ export function readCachePayload({ freshOnly = true } = {}) {
 
 export function clearCachePayload() {
   if (!canUseLocalStorage()) return false;
+
   try {
     localStorage.removeItem(CACHE_KEY);
-    incidenciasState.cache = { restored: false, restoredAt: 0, savedAt: 0, fresh: false };
+    incidenciasState.cache = {
+      restored: false,
+      restoredAt: 0,
+      savedAt: 0,
+      fresh: false,
+    };
     return true;
   } catch {
     return false;
@@ -1531,7 +1849,7 @@ export function hydrateStateFromCache({ freshOnly = true } = {}) {
   incidenciasState.initialVisibleCount = clamp(first(payload.initialVisibleCount, payload.visibleInitialCount, DEFAULT_INITIAL_VISIBLE_COUNT), 1, MAX_VISIBLE_COUNT);
   incidenciasState.visibleInitialCount = incidenciasState.initialVisibleCount;
 
-  const total = Math.max(incidenciasState.remoteCount, incidenciasState.items.length);
+  const total = incidenciasState.items.length;
   incidenciasState.visibleCount = clamp(first(payload.visibleCount, payload.visibleItemsCount, payload.loadedCount, getSafeInitialVisibleCount(total)), 0, total || MAX_VISIBLE_COUNT);
   incidenciasState.sort = safeText(payload.sort, DEFAULT_SORT);
   incidenciasState.infiniteScroll = true;
@@ -1561,6 +1879,10 @@ export function hydrateStateFromCache({ freshOnly = true } = {}) {
   normalizePageState();
   return true;
 }
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
 
 export function getIncidenciasStateSnapshot() {
   const filters = getCurrentFiltersForSnapshot();
@@ -1655,6 +1977,10 @@ export function getIncidenciasStateSnapshot() {
     },
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   INCIDENCIAS_STATE_VERSION,

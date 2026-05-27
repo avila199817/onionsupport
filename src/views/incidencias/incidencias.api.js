@@ -49,7 +49,7 @@ import {
    CONFIG
 ========================================================= */
 
-export const INCIDENCIAS_API_VERSION = "incidencias.api.v2.optimized";
+export const INCIDENCIAS_API_VERSION = "incidencias.api.v2.optimized.1";
 
 export const INCIDENCIAS_RESOURCE = "tickets";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
@@ -73,6 +73,18 @@ function isFn(value) {
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFormData(value) {
+  return typeof FormData !== "undefined" && value instanceof FormData;
+}
+
+function isFile(value) {
+  return typeof File !== "undefined" && value instanceof File;
+}
+
+function isBlob(value) {
+  return typeof Blob !== "undefined" && value instanceof Blob;
 }
 
 function safeText(value, fallback = "") {
@@ -107,6 +119,7 @@ function first(...values) {
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
     if (isObject(value) && Object.keys(value).length === 0) continue;
+
     return value;
   }
 
@@ -127,18 +140,6 @@ function normalizeKey(value = "") {
     .replace(/[\s-]+/g, "_")
     .replace(/[^\w]+/g, "_")
     .replace(/^_+|_+$/g, "");
-}
-
-function isFormData(value) {
-  return typeof FormData !== "undefined" && value instanceof FormData;
-}
-
-function isFile(value) {
-  return typeof File !== "undefined" && value instanceof File;
-}
-
-function isBlob(value) {
-  return typeof Blob !== "undefined" && value instanceof Blob;
 }
 
 function encodeUrlPathSegment(value = "") {
@@ -288,23 +289,6 @@ function normalizeErrorMessage(error = null, fallback = "Error de API.") {
     ),
     fallback
   );
-}
-
-function getErrorStatus(error = null) {
-  return safeNumber(
-    first(
-      error?.status,
-      error?.statusCode,
-      error?.response?.status,
-      error?.data?.status
-    ),
-    0
-  );
-}
-
-function shouldTryNextEndpoint(error = null) {
-  const status = getErrorStatus(error);
-  return !status || [404, 405, 409, 415, 422, 500, 502, 503, 504].includes(status);
 }
 
 function normalizeStatus(value = "open") {
@@ -464,6 +448,28 @@ function looksLikeTicket(value = null) {
   );
 }
 
+function getDetailId(value = null) {
+  const obj = safeObject(value);
+
+  return safeText(
+    first(
+      obj.ticketId,
+      obj.incidenciaId,
+      obj.id,
+      obj._id,
+      obj.code,
+      obj.ticketCode,
+      obj.raw?.ticketId,
+      obj.raw?.incidenciaId,
+      obj.raw?.id,
+      obj.raw?._id,
+      obj.raw?.code,
+      obj.raw?.ticketCode
+    ),
+    ""
+  );
+}
+
 function pickDetail(payload = null) {
   if (!payload) return null;
   if (Array.isArray(payload)) return payload[0] || null;
@@ -482,7 +488,7 @@ function pickDetail(payload = null) {
   if (isObject(obj.data)) return pickDetail(obj.data);
   if (isObject(obj.payload)) return pickDetail(obj.payload);
 
-  return Object.keys(obj).length ? obj : null;
+  return null;
 }
 
 function pickFile(payload = null) {
@@ -701,28 +707,6 @@ async function request(method = "GET", path = "", options = {}) {
   throw new Error("INCIDENCIAS_HTTP_CLIENT_UNAVAILABLE");
 }
 
-async function requestFirst(method = "GET", paths = [], options = {}) {
-  const candidates = [...new Set(
-    safeArray(paths)
-      .map((path) => safeText(path, ""))
-      .filter(Boolean)
-  )];
-
-  let lastError = null;
-
-  for (const path of candidates) {
-    try {
-      return await request(method, path, options);
-    } catch (error) {
-      lastError = error;
-
-      if (!shouldTryNextEndpoint(error)) break;
-    }
-  }
-
-  throw lastError || new Error("INCIDENCIAS_REQUEST_CANDIDATES_FAILED");
-}
-
 /* =========================================================
    FORM DATA HELPERS
 ========================================================= */
@@ -795,32 +779,18 @@ export async function fetchIncidenciasRequest({
   timeout = INCIDENCIAS_TIMEOUT,
   query = {},
 } = {}) {
-  return requestFirst(
-    "GET",
-    [
-      INCIDENCIAS_ENDPOINT,
-      INCIDENCIAS_ALT_ENDPOINT,
-    ],
-    {
-      timeout,
-      query,
-    }
-  );
+  return request("GET", INCIDENCIAS_ENDPOINT, {
+    timeout,
+    query,
+  });
 }
 
 export async function fetchIncidenciasStatsRequest({
   timeout = INCIDENCIAS_TIMEOUT,
 } = {}) {
-  const response = await requestFirst(
-    "GET",
-    [
-      getIncidenciasStatsEndpoint(),
-      getIncidenciasAltStatsEndpoint(),
-    ],
-    {
-      timeout,
-    }
-  );
+  const response = await request("GET", getIncidenciasStatsEndpoint(), {
+    timeout,
+  });
 
   return normalizeIncidenciaStatsResponse(response);
 }
@@ -833,16 +803,9 @@ export async function getIncidenciaByIdRequest(
 ) {
   const ticketId = normalizeIncidenciaId(id);
 
-  const response = await requestFirst(
-    "GET",
-    [
-      getIncidenciaEndpoint(ticketId),
-      getIncidenciaAltEndpoint(ticketId),
-    ],
-    {
-      timeout,
-    }
-  );
+  const response = await request("GET", getIncidenciaEndpoint(ticketId), {
+    timeout,
+  });
 
   return normalizeIncidenciaDetailResponse(response).item;
 }
@@ -857,22 +820,15 @@ export async function createIncidenciaRequest(
   const files = extractFilesFromPayload(source);
   const body = files.length ? buildFormDataFromPayload(source) : source;
 
-  const response = await requestFirst(
-    "POST",
-    [
-      INCIDENCIAS_ENDPOINT,
-      INCIDENCIAS_ALT_ENDPOINT,
-    ],
-    {
-      timeout: files.length ? INCIDENCIAS_UPLOAD_TIMEOUT : timeout,
-      body,
-      headers: files.length ? {} : undefined,
-    }
-  );
+  const response = await request("POST", INCIDENCIAS_ENDPOINT, {
+    timeout: files.length ? INCIDENCIAS_UPLOAD_TIMEOUT : timeout,
+    body,
+    headers: files.length ? {} : undefined,
+  });
 
   const created = pickDetail(response);
 
-  return created ? normalizeIncidencia(created) : response;
+  return created ? normalizeIncidencia(created) : null;
 }
 
 /* =========================================================
@@ -890,21 +846,14 @@ export async function updateIncidenciaRequest(
   const ticketId = normalizeIncidenciaId(id);
   const httpMethod = safeText(method, "PATCH").toUpperCase() === "PUT" ? "PUT" : "PATCH";
 
-  const response = await requestFirst(
-    httpMethod,
-    [
-      getIncidenciaEndpoint(ticketId),
-      getIncidenciaAltEndpoint(ticketId),
-    ],
-    {
-      timeout,
-      body: safeObject(payload),
-    }
-  );
+  const response = await request(httpMethod, getIncidenciaEndpoint(ticketId), {
+    timeout,
+    body: safeObject(payload),
+  });
 
   const detail = pickDetail(response);
 
-  return detail ? normalizeIncidencia(detail) : response;
+  return detail ? normalizeIncidencia(detail) : null;
 }
 
 export async function commentIncidenciaRequest(
@@ -923,55 +872,17 @@ export async function commentIncidenciaRequest(
   const finalStatus = normalizeStatus(status || "open");
   const payload = {
     message: text,
-    comment: text,
-    body: text,
-    text,
     status: finalStatus,
-    estado: finalStatus,
   };
 
-  let response = null;
-  let postError = null;
-
-  try {
-    response = await requestFirst(
-      "POST",
-      [
-        getIncidenciaCommentsEndpoint(ticketId),
-        getIncidenciaMessagesEndpoint(ticketId),
-        `${getIncidenciaAltEndpoint(ticketId)}/comments`,
-        `${getIncidenciaAltEndpoint(ticketId)}/messages`,
-      ],
-      {
-        timeout,
-        body: payload,
-      }
-    );
-  } catch (error) {
-    postError = error;
-  }
-
-  if (!response) {
-    try {
-      response = await requestFirst(
-        "PATCH",
-        [
-          getIncidenciaEndpoint(ticketId),
-          getIncidenciaAltEndpoint(ticketId),
-        ],
-        {
-          timeout,
-          body: payload,
-        }
-      );
-    } catch (patchError) {
-      throw patchError || postError;
-    }
-  }
+  const response = await request("POST", getIncidenciaCommentsEndpoint(ticketId), {
+    timeout,
+    body: payload,
+  });
 
   const detail = pickDetail(response);
 
-  return detail ? normalizeIncidencia(detail) : response;
+  return detail ? normalizeIncidencia(detail) : null;
 }
 
 export async function reopenIncidenciaRequest(
@@ -983,49 +894,16 @@ export async function reopenIncidenciaRequest(
   const ticketId = normalizeIncidenciaId(id);
   const payload = {
     status: "open",
-    estado: "open",
   };
 
-  let response = null;
-  let postError = null;
-
-  try {
-    response = await requestFirst(
-      "POST",
-      [
-        getIncidenciaReopenEndpoint(ticketId),
-        `${getIncidenciaAltEndpoint(ticketId)}/reopen`,
-      ],
-      {
-        timeout,
-        body: payload,
-      }
-    );
-  } catch (error) {
-    postError = error;
-  }
-
-  if (!response) {
-    try {
-      response = await requestFirst(
-        "PATCH",
-        [
-          getIncidenciaEndpoint(ticketId),
-          getIncidenciaAltEndpoint(ticketId),
-        ],
-        {
-          timeout,
-          body: payload,
-        }
-      );
-    } catch (patchError) {
-      throw patchError || postError;
-    }
-  }
+  const response = await request("POST", getIncidenciaReopenEndpoint(ticketId), {
+    timeout,
+    body: payload,
+  });
 
   const detail = pickDetail(response);
 
-  return detail ? normalizeIncidencia(detail) : response;
+  return detail ? normalizeIncidencia(detail) : null;
 }
 
 /* =========================================================
@@ -1049,30 +927,18 @@ export async function uploadIncidenciaAttachmentsRequest(
   const finalStatus = normalizeStatus(status || "open");
   const formData = buildAttachmentsFormData(list, {
     status: finalStatus,
-    estado: finalStatus,
     ...safeObject(extra),
   });
 
-  const response = await requestFirst(
-    "POST",
-    [
-      getIncidenciaAttachmentsEndpoint(ticketId),
-      getIncidenciaFilesEndpoint(ticketId),
-      getIncidenciaAdjuntosEndpoint(ticketId),
-      `${getIncidenciaAltEndpoint(ticketId)}/attachments`,
-      `${getIncidenciaAltEndpoint(ticketId)}/files`,
-      `${getIncidenciaAltEndpoint(ticketId)}/adjuntos`,
-    ],
-    {
-      timeout,
-      body: formData,
-      headers: {},
-    }
-  );
+  const response = await request("POST", getIncidenciaAttachmentsEndpoint(ticketId), {
+    timeout,
+    body: formData,
+    headers: {},
+  });
 
   const detail = pickDetail(response);
 
-  return detail ? normalizeIncidencia(detail) : response;
+  return detail ? normalizeIncidencia(detail) : null;
 }
 
 export async function getIncidenciaAttachmentFileRequest(
@@ -1092,34 +958,28 @@ export async function getIncidenciaAttachmentFileRequest(
   if (!attId) throw new Error("ATTACHMENT_ID_REQUIRED");
 
   const safeMode = mode === "download" ? "download" : "view";
+  const safeKind = ["attachments", "files", "adjuntos"].includes(kind)
+    ? kind
+    : "attachments";
 
-  const kinds = [
-    kind,
-    kind === "files" ? "attachments" : "files",
-    "adjuntos",
-  ]
-    .map((value) => safeText(value, ""))
-    .filter(Boolean);
-
-  const paths = [...new Set(kinds)].flatMap((currentKind) => [
+  const response = await request(
+    "GET",
     getIncidenciaAttachmentFileEndpoint({
       ticketId: id,
       attachmentId: attId,
       mode: safeMode,
-      kind: currentKind,
+      kind: safeKind,
     }),
-    `${getIncidenciaAltEndpoint(id)}/${currentKind}/${encodeUrlPathSegment(attId)}/${safeMode}`,
-  ]);
-
-  const response = await requestFirst("GET", paths, {
-    timeout,
-  });
+    {
+      timeout,
+    }
+  );
 
   return normalizeIncidenciaFileResponse(response, {
     ticketId: id,
     attachmentId: attId,
     mode: safeMode,
-    kind,
+    kind: safeKind,
   });
 }
 
@@ -1165,6 +1025,10 @@ function upsertLoadedDetail(detail = null) {
   if (!detail) return null;
 
   const normalized = normalizeIncidencia(detail);
+
+  if (!looksLikeTicket(normalized) || !getDetailId(normalized)) {
+    return null;
+  }
 
   callSafe(upsertIncidenciaStore, normalized);
   callSafe(upsertStateItem, normalized);
@@ -1263,19 +1127,33 @@ export async function createIncidencia(payload = {}) {
   return upsertLoadedDetail(created);
 }
 
+async function hydrateMutationResult(ticketId = "", detail = null) {
+  const normalized = upsertLoadedDetail(detail);
+
+  if (normalized) return normalized;
+
+  if (!safeText(ticketId, "")) return null;
+
+  try {
+    return await loadIncidenciaDetail(ticketId);
+  } catch {
+    return null;
+  }
+}
+
 export async function updateIncidencia(ticketId = "", payload = {}, options = {}) {
   const updated = await updateIncidenciaRequest(ticketId, payload, options);
-  return upsertLoadedDetail(updated);
+  return hydrateMutationResult(ticketId, updated);
 }
 
 export async function commentIncidencia(ticketId = "", message = "", options = {}) {
   const updated = await commentIncidenciaRequest(ticketId, message, options);
-  return upsertLoadedDetail(updated);
+  return hydrateMutationResult(ticketId, updated);
 }
 
 export async function reopenIncidencia(ticketId = "", options = {}) {
   const updated = await reopenIncidenciaRequest(ticketId, options);
-  return upsertLoadedDetail(updated);
+  return hydrateMutationResult(ticketId, updated);
 }
 
 export async function uploadIncidenciaAttachments(
@@ -1284,7 +1162,7 @@ export async function uploadIncidenciaAttachments(
   options = {}
 ) {
   const updated = await uploadIncidenciaAttachmentsRequest(ticketId, files, options);
-  return upsertLoadedDetail(updated);
+  return hydrateMutationResult(ticketId, updated);
 }
 
 export async function loadIncidenciasStats(options = {}) {

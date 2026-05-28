@@ -22,28 +22,9 @@
   data-shell-state="booting"
   data-shell-interactive="false"
   data-chrome="hidden"
-  class="app-booting app-loading"
+  class="no-js app-booting app-loading"
 >
 <head>
-  <!-- =========================================================
-       Onion Support - Entrada SPA
-       Archivo: /index.html
-
-       Responsabilidad:
-       - Entrada física única de la SPA.
-       - Declarar mounts reales.
-       - Cargar preboot/theme antes del CSS.
-       - Cargar /src/main.js como entrypoint único.
-       - Idioma base primario: es.
-       - Sin JS inline.
-       - Sin CSS inline.
-       - Sin auth.
-       - Sin router.
-       - Sin API.
-       - Sin clientes HTTP.
-       - Sin rutas inventadas.
-  ========================================================= -->
-
   <meta charset="UTF-8">
   <base href="/">
 
@@ -150,22 +131,6 @@
   <link
     rel="manifest"
     href="/site.webmanifest"
-  >
-
-  <link
-    rel="preload"
-    href="/src/media/img/favicon_white.png"
-    as="image"
-    type="image/png"
-    fetchpriority="high"
-  >
-
-  <link
-    rel="preload"
-    href="/src/media/img/favicon_black.png"
-    as="image"
-    type="image/png"
-    fetchpriority="low"
   >
 
   <link

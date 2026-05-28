@@ -1,6 +1,6 @@
 /* =========================================================
    Onion Support - Home Utils
-   Archivo: /src/views/home/home.utils.js
+   Archivo: src/views/home/home.utils.js
 
    Responsabilidad:
    - Helpers mínimos y puros para Home.
@@ -24,7 +24,7 @@
    - Sin globals propios.
 ========================================================= */
 
-export const HOME_UTILS_VERSION = "home.utils.v4.clean-core";
+export const HOME_UTILS_VERSION = "home.utils.v5.pure-helpers";
 
 export const DEFAULT_LOCALE = "es-ES";
 export const DEFAULT_CURRENCY = "EUR";
@@ -58,11 +58,53 @@ const COSMOS_META_KEYS = new Set([
   "_metadata",
 ]);
 
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|bank|cuenta|account|ipRaw|userAgent/i;
+const SENSITIVE_KEY_PARTS = Object.freeze([
+  "token",
+  "authorization",
+  "cookie",
+  "password",
+  "passwd",
+  "pwd",
+  "secret",
+  "credential",
+  "jwt",
+  "bearer",
+  "refresh",
+  "apikey",
+  "privatekey",
+  "connectionstring",
+  "sas",
+  "otp",
+  "totp",
+  "mfa",
+  "twofa",
+  "backupcode",
+  "sessionid",
+  "sessiontoken",
+  "email",
+  "correo",
+  "mail",
+  "phone",
+  "telefono",
+  "address",
+  "direccion",
+  "nif",
+  "dni",
+  "iban",
+  "bank",
+  "cuenta",
+  "account",
+  "useragent",
+]);
+
+const SENSITIVE_KEY_EXACT = new Set([
+  "session",
+  "ip",
+  "ipraw",
+]);
 
 const SENSITIVE_QUERY_RE =
-  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|tempToken|temp_token|sas|sig|signature|key)=/i;
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|tempToken|temp_token|sas)=/i;
 
 const EMAIL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
 
@@ -323,8 +365,17 @@ function isCosmosMetaKey(key = "") {
   return COSMOS_META_KEYS.has(String(key || ""));
 }
 
+function normalizeSensitiveKey(value = "") {
+  return normalizeKey(value).replace(/_/g, "");
+}
+
 function isSensitiveKey(key = "") {
-  return SENSITIVE_KEY_RE.test(String(key || ""));
+  const clean = normalizeSensitiveKey(key);
+
+  if (!clean) return false;
+  if (SENSITIVE_KEY_EXACT.has(clean)) return true;
+
+  return SENSITIVE_KEY_PARTS.some((part) => clean.includes(part));
 }
 
 function isEmailLike(value = "") {
@@ -339,7 +390,7 @@ export function redactTokenInText(value = "") {
 
   try {
     output = output.replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|tempToken|temp_token|sas|sig|signature|key)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|tempToken|temp_token|sas)=)([^&#\s]+)/gi,
       "$1***"
     );
 
@@ -913,6 +964,7 @@ export function getHomeUtilsSnapshot() {
       redactsSensitiveText: true,
       stripsSensitiveKeys: true,
       removesEmailsFromText: true,
+      doesNotStripDescription: true,
     },
 
     policy: {

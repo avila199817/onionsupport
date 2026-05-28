@@ -7,43 +7,12 @@
    - Consumir view-model desde home.selectors.js.
    - Calcular el modelo una sola vez por render.
    - Home simple, visual y directo.
-   - Header limpio: sin etiqueta de rol visible y sin acciones superiores pesadas.
-   - CTA superior derecho para crear incidencia.
-   - Sin card grande envolvente.
-   - Sin accesos rápidos duplicados.
-   - Sin widgets duplicados.
-   - Sin health/server/ready/ping.
-   - Sólo Home sobre usuarios, clientes, incidencias y facturas.
-   - Facturas totales + importe total pagado.
-   - Si una factura no está pagada, no se muestra importe como cobrado.
-   - Listas Home limitadas visualmente a 5 elementos.
-   - Contadores sobre totales completos.
-   - Tabla de incidencias compacta.
-   - Primera columna con avatar de usuario compacto, ID completo, asunto,
-     descripción, prioridad y técnico asignado.
-   - Sin línea visual redundante "Cliente · Sin email".
-   - Sin columna Técnico separada.
-   - Usuario/avatar del Home consumido desde el view-model canónico.
-   - ID de incidencia completo visible.
-   - Detalle de incidencia abre modal.
-   - Modal con técnico asignado, avatar/iniciales y facturas vinculadas.
+   - Header limpio con CTA para crear incidencia.
+   - Sin accesos rápidos duplicados, widgets duplicados, health/server/ping,
+     CSV, refresh superior ni card redundante para usuario normal.
    - Textos visibles en español.
-   - Rutas desde selectors/core config.
-   - Bloqueos delegados en selectors/core config.
-   - Sin rutas opcionales inventadas.
-   - Sin DOM API.
-   - Sin listeners.
-   - Sin Auth.
-   - Sin Router.
-   - Sin AppCore.
-   - Sin HTTP.
-   - Sin storage.
-   - Sin CSS inline.
-   - Sin handlers inline.
-   - Sin botón Actualizar en actividad.
-   - Sin botón Exportar CSV en incidencias.
-   - Sin card Tus solicitudes / Incidencias recientes para usuario normal.
-   - Sin /home.
+   - Sin DOM API, listeners, Auth, Router, AppCore, HTTP, storage,
+     CSS inline ni handlers inline.
 ========================================================= */
 
 import {
@@ -94,18 +63,16 @@ import {
   getActivityType,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.v20.create-incidencia-header-card";
+export const TEMPLATE_VERSION = "home.template.v21";
 
 const ACTIONS = Object.freeze({
   RETRY: "retry",
   CREATE_INCIDENCIA: "create_incidencia",
   NAVIGATE: "navigate_home",
-  COPY_ID: "copy_widget_id",
   OPEN_TICKET_DETAIL: "open_ticket_detail",
   CLOSE_TICKET_DETAIL: "close_ticket_detail",
   PAGE_PREV: "page_prev",
   PAGE_NEXT: "page_next",
-  PAGE_GO: "page",
 });
 
 const LIMITS = Object.freeze({
@@ -223,6 +190,11 @@ function safeRoute(value = "", fallback = "") {
   return route;
 }
 
+const ROUTE_TARGETS = Object.freeze({
+  INCIDENCIAS: safeRoute(HOME_ROUTES.INCIDENCIAS, "/incidencias"),
+  FACTURAS: safeRoute(HOME_ROUTES.FACTURAS, "/facturas"),
+});
+
 function hashString(value = "") {
   const text = safeText(value, "");
   let hash = 0;
@@ -262,7 +234,6 @@ function icon(name = "activity") {
     alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
     arrowRight: `<svg ${common}><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>`,
     close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-    copy: `<svg ${common}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
   };
 
   return icons[name] || icons.activity;
@@ -283,7 +254,14 @@ function buildTemplateViewModel(input = {}) {
     ? "admin"
     : "user";
 
-  const admin = Boolean(view.admin === true || data.admin === true || state.admin === true || dashboard.admin === true || user.isAdmin === true || role === "admin");
+  const admin = Boolean(
+    view.admin === true ||
+      data.admin === true ||
+      state.admin === true ||
+      dashboard.admin === true ||
+      user.isAdmin === true ||
+      role === "admin"
+  );
 
   const meta = {
     requestId: safeText(first(data.requestId, state.requestId, view.requestId, dashboard.requestId, dashboard.meta?.requestId, ""), ""),
@@ -298,6 +276,7 @@ function buildTemplateViewModel(input = {}) {
   const recentInvoices = safeArray(first(view.recentInvoices, view.recentFacturas, view.latestInvoices, view.latestFacturas, []));
   const clients = admin ? safeArray(first(view.clients, view.clientes, view.customers, [])) : [];
   const users = admin ? safeArray(first(view.users, view.usuarios, [])) : [];
+  const displayName = safeText(first(user.displayName, user.name, user.fullName, view.displayName, data.displayName), "Usuario");
 
   return {
     __homeTemplateVm: true,
@@ -321,10 +300,10 @@ function buildTemplateViewModel(input = {}) {
 
     user: {
       ...user,
-      displayName: safeText(first(user.displayName, user.name, user.fullName, view.displayName, data.displayName), "Usuario"),
-      name: safeText(first(user.displayName, user.name, user.fullName, view.displayName, data.displayName), "Usuario"),
+      displayName,
+      name: displayName,
       avatarUrl: safeImageSrc(first(user.avatarUrl, user.avatar, user.photoUrl, user.picture, view.avatarUrl, data.avatarUrl, "")),
-      initials: safeText(first(user.initials, view.initials, getInitials(first(user.displayName, user.name, view.displayName), "U")), "U").slice(0, 3).toUpperCase(),
+      initials: safeText(first(user.initials, view.initials, getInitials(displayName, "U")), "U").slice(0, 3).toUpperCase(),
       role: admin ? "admin" : "user",
       roleLabel: safeText(first(user.roleLabel, admin ? "Administrador" : "Estándar"), admin ? "Administrador" : "Estándar"),
       isAdmin: admin,
@@ -377,6 +356,11 @@ function buildTemplateViewModel(input = {}) {
   };
 }
 
+function isInitialLoading(vm = {}) {
+  const state = safeObject(vm.state);
+  return Boolean(state.loading && !state.loaded && !state.hydrated);
+}
+
 /* =========================================================
    UI PARTS
 ========================================================= */
@@ -412,24 +396,22 @@ function avatar({
 }
 
 function loadingCards(count = 4) {
-  return Array.from({ length: count }, (_, index) => `
+  return Array.from({ length: count }, () => `
     <article class="home-stat-card home-stat-card--loading" aria-hidden="true">
       <span class="home-skeleton home-skeleton--icon"></span>
       <span class="home-skeleton home-skeleton--title"></span>
       <span class="home-skeleton home-skeleton--value"></span>
       <span class="home-skeleton home-skeleton--text"></span>
-      <span class="sr-only">Cargando bloque ${index + 1}</span>
     </article>
   `).join("");
 }
 
 function loadingRows(count = DEFAULT_PAGE_SIZE) {
-  return Array.from({ length: count }, (_, index) => `
+  return Array.from({ length: count }, () => `
     <div class="home-row-skeleton" aria-hidden="true">
       <span class="home-skeleton home-skeleton--avatar"></span>
       <span class="home-skeleton home-skeleton--wide"></span>
       <span class="home-skeleton home-skeleton--small"></span>
-      <span class="sr-only">Cargando fila ${index + 1}</span>
     </div>
   `).join("");
 }
@@ -472,7 +454,7 @@ function errorBanner(message = "") {
 
 function renderCreateIncidenciaCard(vm = {}) {
   const state = safeObject(vm.state);
-  const route = safeRoute(HOME_ROUTES.INCIDENCIAS, "/incidencias");
+  const route = ROUTE_TARGETS.INCIDENCIAS;
 
   return `
     <aside class="home-create-card home-create-card--incidencia" data-home-section="create-incidencia">
@@ -540,13 +522,15 @@ function renderHomeHeader(vm = {}) {
 function renderHomeStats(vm = {}) {
   const cards = safeArray(vm.statCards).slice(0, vm.admin ? 4 : 3);
 
-  if (!cards.length) {
+  if (!cards.length && isInitialLoading(vm)) {
     return `
       <section class="home-stats" data-home-section="stats">
         ${loadingCards(vm.admin ? 4 : 3)}
       </section>
     `;
   }
+
+  if (!cards.length) return "";
 
   return `
     <section class="home-stats" data-home-section="stats">
@@ -556,7 +540,7 @@ function renderHomeStats(vm = {}) {
 }
 
 function statCard(card = {}) {
-  const route = safeRoute(first(card.route, card.href, ""), HOME_ROUTES.INCIDENCIAS);
+  const route = safeRoute(first(card.route, card.href, ""), ROUTE_TARGETS.INCIDENCIAS);
   const id = safeText(first(card.id, card.key, card.widgetId, card.label), "stat");
   const iconName = safeText(first(card.iconName, card.icon, "activity"), "activity");
   const label = safeText(first(card.label, card.title, "Métrica"), "Métrica");
@@ -606,11 +590,13 @@ function renderHomeActivity(vm = {}) {
 
       ${items.length
         ? `<ul class="home-activity-list">${items.map(activityItem).join("")}</ul>`
-        : emptyState({
-            title: "Sin actividad reciente",
-            text: "Todavía no hay movimientos visibles en el Home.",
-            iconName: "activity",
-          })
+        : isInitialLoading(vm)
+          ? loadingRows(3)
+          : emptyState({
+              title: "Sin actividad reciente",
+              text: "Todavía no hay movimientos visibles en el Home.",
+              iconName: "activity",
+            })
       }
     </section>
   `;
@@ -640,6 +626,7 @@ function renderHomeInvoicePreview(vm = {}) {
     return isInvoicePaid(invoice) ? sum + safeNumber(getInvoicePaidAmount(invoice), 0) : sum;
   }, 0);
   const currency = safeText(first(getInvoiceCurrency(invoices[0] || {}), DEFAULT_CURRENCY), DEFAULT_CURRENCY);
+  const route = ROUTE_TARGETS.FACTURAS;
 
   return `
     <section class="home-panel home-panel--invoices" data-home-section="invoices">
@@ -653,8 +640,8 @@ function renderHomeInvoicePreview(vm = {}) {
           class="home-link-button"
           data-home-action="${ACTIONS.NAVIGATE}"
           data-action="${ACTIONS.NAVIGATE}"
-          data-route="${attr(HOME_ROUTES.FACTURAS)}"
-          data-href="${attr(HOME_ROUTES.FACTURAS)}"
+          data-route="${attr(route)}"
+          data-href="${attr(route)}"
         >
           Ver facturas
         </button>
@@ -667,11 +654,13 @@ function renderHomeInvoicePreview(vm = {}) {
 
       ${invoices.length
         ? `<ul class="home-invoice-list">${invoices.map(invoiceItem).join("")}</ul>`
-        : emptyState({
-            title: "Sin facturas visibles",
-            text: "Cuando haya facturas disponibles aparecerán aquí.",
-            iconName: "invoice",
-          })
+        : isInitialLoading(vm)
+          ? loadingRows(3)
+          : emptyState({
+              title: "Sin facturas visibles",
+              text: "Cuando haya facturas disponibles aparecerán aquí.",
+              iconName: "invoice",
+            })
       }
     </section>
   `;
@@ -699,9 +688,7 @@ function invoiceItem(invoice = {}) {
 }
 
 function renderHomeEntitiesPreview(vm = {}) {
-  if (!vm.admin) {
-    return "";
-  }
+  if (!vm.admin) return "";
 
   const clients = safeArray(vm.clients).slice(0, LIMITS.entities);
   const users = safeArray(vm.users).slice(0, LIMITS.entities);
@@ -725,7 +712,9 @@ function renderHomeEntitiesPreview(vm = {}) {
                   <span>${escapeHtml(client.active === false ? "Inactivo" : "Activo")}</span>
                 </li>
               `).join("")}</ul>`
-            : `<p class="home-panel-muted">Sin clientes visibles.</p>`
+            : isInitialLoading(vm)
+              ? loadingRows(2)
+              : `<p class="home-panel-muted">Sin clientes visibles.</p>`
           }
         </div>
 
@@ -738,7 +727,9 @@ function renderHomeEntitiesPreview(vm = {}) {
                   <span>${escapeHtml(safeText(first(user.roleLabel, user.role, "user"), "user"))}</span>
                 </li>
               `).join("")}</ul>`
-            : `<p class="home-panel-muted">Sin usuarios visibles.</p>`
+            : isInitialLoading(vm)
+              ? loadingRows(2)
+              : `<p class="home-panel-muted">Sin usuarios visibles.</p>`
           }
         </div>
       </div>
@@ -751,6 +742,7 @@ function renderHomeTicketsTable(vm = {}) {
   const pagination = safeObject(vm.pagination);
   const hasPrev = pagination.hasPrev === true;
   const hasNext = pagination.hasNext === true;
+  const route = ROUTE_TARGETS.INCIDENCIAS;
 
   return `
     <section class="home-panel home-panel--tickets" data-home-section="tickets">
@@ -766,8 +758,8 @@ function renderHomeTicketsTable(vm = {}) {
             class="home-link-button"
             data-home-action="${ACTIONS.NAVIGATE}"
             data-action="${ACTIONS.NAVIGATE}"
-            data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
-            data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
+            data-route="${attr(route)}"
+            data-href="${attr(route)}"
           >
             Ver todas
           </button>
@@ -819,13 +811,15 @@ function renderHomeTicketsTable(vm = {}) {
             </div>
           </div>
         `
-        : emptyState({
-            title: "Sin incidencias visibles",
-            text: "No hay incidencias para mostrar en este momento.",
-            action: ACTIONS.CREATE_INCIDENCIA,
-            actionLabel: "Crear incidencia",
-            iconName: "ticket",
-          })
+        : isInitialLoading(vm)
+          ? loadingRows(DEFAULT_PAGE_SIZE)
+          : emptyState({
+              title: "Sin incidencias visibles",
+              text: "No hay incidencias para mostrar en este momento.",
+              action: ACTIONS.CREATE_INCIDENCIA,
+              actionLabel: "Crear incidencia",
+              iconName: "ticket",
+            })
       }
     </section>
   `;
@@ -937,6 +931,7 @@ function renderTicketModal(vm = {}) {
   const technician = safeObject(first(modal.technician, modal.tecnico, ticket.technician, ticket.tecnico, {}));
   const technicianName = safeText(first(technician.displayName, technician.name, technician.fullName), "Sin asignar");
   const technicianAvatar = safeImageSrc(first(technician.avatarUrl, technician.avatar, technician.photoUrl, ""));
+  const route = ROUTE_TARGETS.INCIDENCIAS;
 
   return `
     <section
@@ -1009,7 +1004,6 @@ function renderTicketModal(vm = {}) {
               <div>
                 <span class="home-panel-kicker">Técnico asignado</span>
                 <strong>${escapeHtml(technicianName)}</strong>
-                <p>${technicianAvatar ? "Avatar real del usuario." : "Mostrando iniciales."}</p>
               </div>
             </div>
 
@@ -1049,8 +1043,8 @@ function renderTicketModal(vm = {}) {
             class="home-btn home-btn--primary"
             data-home-action="${ACTIONS.NAVIGATE}"
             data-action="${ACTIONS.NAVIGATE}"
-            data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
-            data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
+            data-route="${attr(route)}"
+            data-href="${attr(route)}"
             data-ticket-id="${attr(ticketId)}"
             data-incidencia-id="${attr(ticketId)}"
           >
@@ -1068,7 +1062,7 @@ function renderTicketModal(vm = {}) {
 
 export function renderHomeLoadingState() {
   return `
-    <section class="home-view-root home-view-root--loading" data-home-scope="true">
+    <section class="home-view-root home-view-root--loading" data-home-scope="true" aria-busy="true">
       <section class="home-hero home-hero--frameless home-hero--loading">
         ${loadingCards(4)}
       </section>
@@ -1152,7 +1146,11 @@ export function getHomeTemplateSnapshot() {
     source: "views.home.template",
 
     actions: ACTIONS,
-    routes: HOME_ROUTES,
+    routes: {
+      ...HOME_ROUTES,
+      INCIDENCIAS: ROUTE_TARGETS.INCIDENCIAS,
+      FACTURAS: ROUTE_TARGETS.FACTURAS,
+    },
 
     policy: {
       templateOnly: true,
@@ -1161,12 +1159,9 @@ export function getHomeTemplateSnapshot() {
       selectorsOwnViewModel: true,
 
       cleanHeader: true,
-      noVisibleRoleLabelInHeader: true,
-      noTopUpdatedPill: true,
-      noTopRefreshButton: true,
-      noTopCreateButton: false,
       createIncidenciaHeaderCard: true,
-
+      noVisibleRoleLabelInHeader: true,
+      noTopRefreshButton: true,
       noActivityRefreshButton: true,
       noTicketsCsvExportButton: true,
       noUserRecentIncidenciasCard: true,

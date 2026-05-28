@@ -4,23 +4,66 @@
 
    Responsabilidad:
    - Compat mínima de errores.
-   - Pintar error de boot simple.
+   - Pintar fallback fatal de boot en castellano.
    - Marcar estado fatal.
-   - Ocultar loader.
-   - Ocultar chrome mínimo en fatal.
-   - Sin imports.
-   - Sin eventos de app.
-   - Sin Toast.
-   - Sin Auth.
-   - Sin Router.
-   - Sin telemetry.
-   - Sin debug global.
-   - Sin fetch.
-   - Sin storage.
-   - Sin lógica de dominio.
+   - Ocultar loader y chrome mínimo en fatal.
+   - Sin imports, eventos de app, Toast, Auth, Router, telemetry,
+     debug global, fetch, storage ni lógica de dominio.
 ========================================================= */
 
-export const APP_ERRORS_VERSION = "app.errors.v4";
+export const APP_ERRORS_VERSION = "app.errors.v5";
+
+const IDS = Object.freeze({
+  loader: "app-loader",
+  shell: "app-shell",
+  sidebar: "sidebar-mount",
+  topbar: "topbar-mount",
+  tablehead: "table-head",
+  tableheadContainer: "tablehead-container",
+  view: "view-container",
+  appContent: "app-content",
+  main: "main-content",
+});
+
+const DEFAULT_ERROR_MESSAGE = "Se produjo un error.";
+const BOOT_ERROR_TITLE = "Error de arranque";
+const BOOT_ERROR_MESSAGE = "No se pudo iniciar Onion Support. Recarga la página.";
+const BOOT_ERROR_ACTION = "Volver a intentar";
+
+const CODE_MESSAGES = Object.freeze({
+  UNAUTHORIZED: "Necesitas iniciar sesión.",
+  SESSION_EXPIRED: "La sesión ha caducado.",
+  SESSION_REVOKED: "La sesión ya no está disponible.",
+  REFRESH_FAILED: "No se pudo restaurar la sesión.",
+  USER_DISABLED: "El usuario está desactivado.",
+  USER_DELETED: "El usuario no está disponible.",
+  USER_ARCHIVED: "El usuario no está disponible.",
+  USER_NOT_AVAILABLE: "El usuario no está disponible.",
+  FORBIDDEN: "No tienes permisos para realizar esta acción.",
+  ADMIN_REQUIRED: "Se requiere una cuenta de administrador.",
+  VALIDATION_ERROR: "Revisa los datos introducidos.",
+  RATE_LIMITED: "Demasiadas solicitudes. Inténtalo de nuevo más tarde.",
+  SERVER_ERROR: "El servidor no pudo completar la operación.",
+  NETWORK_ERROR: "No se pudo conectar con el servidor.",
+  MAINTENANCE: "El servicio no está disponible temporalmente.",
+});
+
+const STATUS_MESSAGES = Object.freeze({
+  400: "La solicitud no es válida.",
+  401: "Necesitas iniciar sesión.",
+  403: "No tienes permisos para realizar esta acción.",
+  404: "El recurso solicitado no existe.",
+  408: "La solicitud ha tardado demasiado.",
+  409: "La operación no se pudo completar por un conflicto.",
+  413: "La solicitud es demasiado grande.",
+  415: "El tipo de contenido no es compatible.",
+  422: "Revisa los datos introducidos.",
+  429: "Demasiadas solicitudes. Inténtalo de nuevo más tarde.",
+  500: "El servidor no pudo completar la operación.",
+  502: "El servidor no respondió correctamente.",
+  503: "El servicio no está disponible temporalmente.",
+  504: "El servidor ha tardado demasiado en responder.",
+});
 
 let lastError = null;
 
@@ -42,34 +85,19 @@ function cleanText(value = "", fallback = "") {
 }
 
 function byId(id = "") {
-  if (!isBrowser() || !id) return null;
-
-  try {
-    return document.getElementById(id);
-  } catch {
-    return null;
-  }
+  return isBrowser() && id ? document.getElementById(id) : null;
 }
 
-function roots() {
+function documentRoots() {
   if (!isBrowser()) return [];
-
-  return [
-    document.documentElement,
-    document.body,
-  ].filter(Boolean);
+  return [document.documentElement, document.body].filter(Boolean);
 }
 
 function setDataset(element = null, key = "", value = "") {
   if (!element || !key) return false;
 
   try {
-    if (value === null || value === undefined || value === "") {
-      delete element.dataset[key];
-    } else {
-      element.dataset[key] = String(value);
-    }
-
+    element.dataset[key] = String(value);
     return true;
   } catch {
     return false;
@@ -80,12 +108,7 @@ function setAttr(element = null, key = "", value = "") {
   if (!element || !key) return false;
 
   try {
-    if (value === null || value === undefined || value === "") {
-      element.removeAttribute(key);
-    } else {
-      element.setAttribute(key, String(value));
-    }
-
+    element.setAttribute(key, String(value));
     return true;
   } catch {
     return false;
@@ -107,30 +130,31 @@ function setHidden(element = null, hidden = false) {
   }
 }
 
-function removeClasses(element = null, classes = []) {
-  if (!element || !classes.length) return false;
+function setClasses(element = null, {
+  add = [],
+  remove = [],
+} = {}) {
+  if (!element) return false;
 
   try {
-    element.classList.remove(...classes.filter(Boolean));
+    if (remove.length) element.classList.remove(...remove.filter(Boolean));
+    if (add.length) element.classList.add(...add.filter(Boolean));
     return true;
   } catch {
     return false;
   }
 }
 
-function addClasses(element = null, classes = []) {
-  if (!element || !classes.length) return false;
-
+function nowIso() {
   try {
-    element.classList.add(...classes.filter(Boolean));
-    return true;
+    return new Date().toISOString();
   } catch {
-    return false;
+    return "";
   }
 }
 
 /* =========================================================
-   REDACTION
+   REDACTION / NORMALIZATION
 ========================================================= */
 
 export function redactTokenInText(value = "") {
@@ -143,45 +167,45 @@ export function redactTokenInText(value = "") {
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
-/* =========================================================
-   ERROR NORMALIZATION
-========================================================= */
+function normalizeErrorCode(error = null) {
+  return cleanText(
+    error?.code ||
+      error?.error ||
+      error?.response?.data?.code ||
+      error?.response?.data?.error ||
+      "",
+    ""
+  ).toUpperCase();
+}
+
+function normalizeErrorStatus(error = null) {
+  const status = Number(
+    error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      error?.response?.data?.status ||
+      0
+  );
+
+  return Number.isInteger(status) && status >= 100 && status <= 599
+    ? status
+    : null;
+}
 
 export function resolveErrorMessage(
   error = null,
-  fallback = "Se produjo un error."
+  fallback = DEFAULT_ERROR_MESSAGE
 ) {
   if (!error) return fallback;
 
-  if (typeof error === "string") {
-    return redactTokenInText(error);
-  }
+  const code = normalizeErrorCode(error);
+  const status = normalizeErrorStatus(error);
 
-  return redactTokenInText(
-    error.message ||
-      error.reason ||
-      error.detail ||
-      fallback
-  );
-}
-
-function normalizeErrorCode(error = null) {
   return (
-    error?.code ||
-    error?.error ||
-    error?.status ||
-    error?.statusCode ||
-    error?.response?.status ||
-    null
+    CODE_MESSAGES[code] ||
+    STATUS_MESSAGES[status] ||
+    fallback
   );
-}
-
-function nowIso() {
-  try {
-    return new Date().toISOString();
-  } catch {
-    return "";
-  }
 }
 
 export function createErrorSnapshot({
@@ -190,19 +214,17 @@ export function createErrorSnapshot({
   severity = "error",
   boot = false,
 } = {}) {
-  const normalizedSource = cleanText(source, "app").slice(0, 96);
-  const normalizedSeverity = cleanText(severity, "error").toLowerCase().slice(0, 32);
-
   return {
     version: APP_ERRORS_VERSION,
 
-    source: normalizedSource,
-    severity: normalizedSeverity,
+    source: cleanText(source, "app").slice(0, 96),
+    severity: cleanText(severity, "error").toLowerCase().slice(0, 32),
     boot: Boolean(boot),
 
     name: cleanText(error?.name, "Error").slice(0, 96),
     message: resolveErrorMessage(error),
-    code: normalizeErrorCode(error),
+    code: normalizeErrorCode(error) || null,
+    status: normalizeErrorStatus(error),
 
     at: nowIso(),
   };
@@ -216,24 +238,25 @@ function getErrorRoot() {
   if (!isBrowser()) return null;
 
   return (
-    byId("view-container") ||
-    byId("app-content") ||
-    byId("main-content") ||
+    byId(IDS.view) ||
+    byId(IDS.appContent) ||
+    byId(IDS.main) ||
     document.body ||
     null
   );
 }
 
 function markFatalState() {
-  for (const root of roots()) {
-    removeClasses(root, [
-      "app-booting",
-      "app-loading",
-      "app-ready",
-      "app-error",
-    ]);
-
-    addClasses(root, ["app-fatal"]);
+  for (const root of documentRoots()) {
+    setClasses(root, {
+      remove: [
+        "app-booting",
+        "app-loading",
+        "app-ready",
+        "app-error",
+      ],
+      add: ["app-fatal"],
+    });
 
     setDataset(root, "mainState", "fatal");
     setDataset(root, "appState", "fatal");
@@ -256,7 +279,7 @@ function markFatalState() {
 }
 
 function showShellForFatal() {
-  const shell = byId("app-shell");
+  const shell = byId(IDS.shell);
 
   if (!shell) return false;
 
@@ -268,21 +291,16 @@ function showShellForFatal() {
   setDataset(shell, "chrome", "hidden");
   setDataset(shell, "routeMode", "fatal");
 
-  setAttr(shell, "aria-hidden", "false");
-  setAttr(shell, "aria-busy", "false");
-
   return true;
 }
 
 function hideChromeForFatal() {
-  const nodes = [
-    byId("sidebar-mount"),
-    byId("topbar-mount"),
-    byId("table-head"),
-    byId("tablehead-container"),
-  ].filter(Boolean);
-
-  for (const node of nodes) {
+  for (const node of [
+    byId(IDS.sidebar),
+    byId(IDS.topbar),
+    byId(IDS.tablehead),
+    byId(IDS.tableheadContainer),
+  ].filter(Boolean)) {
     setHidden(node, true);
     setDataset(node, "chrome", "hidden");
     setDataset(node, "routeMode", "fatal");
@@ -292,20 +310,19 @@ function hideChromeForFatal() {
 }
 
 function hideLoaderForFatal() {
-  const loader = byId("app-loader");
+  const loader = byId(IDS.loader);
 
   if (!loader) return false;
 
   setHidden(loader, true);
 
-  removeClasses(loader, ["is-visible"]);
-  addClasses(loader, ["is-hidden"]);
+  setClasses(loader, {
+    remove: ["is-visible"],
+    add: ["is-hidden"],
+  });
 
   setDataset(loader, "loaderVisible", "false");
   setDataset(loader, "loaderState", "fatal");
-
-  setAttr(loader, "aria-hidden", "true");
-  setAttr(loader, "aria-busy", "false");
 
   return true;
 }
@@ -317,15 +334,15 @@ function createErrorView() {
   section.setAttribute("aria-live", "assertive");
 
   const title = document.createElement("h1");
-  title.textContent = "Error de arranque";
+  title.textContent = BOOT_ERROR_TITLE;
 
   const message = document.createElement("p");
-  message.textContent = "No se pudo iniciar Onion Support. Recarga la página.";
+  message.textContent = BOOT_ERROR_MESSAGE;
 
   const action = document.createElement("a");
   action.className = "boot-error-view__action";
   action.href = "/";
-  action.textContent = "Volver a intentar";
+  action.textContent = BOOT_ERROR_ACTION;
   action.setAttribute("data-spa-disabled", "true");
 
   section.append(title, message, action);
@@ -340,14 +357,12 @@ function createErrorView() {
 export function renderBootError({ error = null } = {}) {
   if (!isBrowser()) return false;
 
-  const snapshot = createErrorSnapshot({
+  lastError = createErrorSnapshot({
     source: "boot",
     error,
     severity: "critical",
     boot: true,
   });
-
-  lastError = snapshot;
 
   markFatalState();
   showShellForFatal();
@@ -360,12 +375,8 @@ export function renderBootError({ error = null } = {}) {
 
   try {
     setHidden(root, false);
-    setAttr(root, "aria-busy", "false");
-    setAttr(root, "aria-hidden", "false");
     setDataset(root, "routeMode", "fatal");
-
     root.replaceChildren(createErrorView());
-
     return true;
   } catch {
     return false;
@@ -397,7 +408,7 @@ export function getErrorStateSnapshot() {
     policy: {
       errorsCompatOnly: true,
       bootFatalFallback: true,
-
+      visibleErrorsInSpanish: true,
       noImports: true,
       noAppEvents: true,
       noToast: true,
@@ -408,7 +419,6 @@ export function getErrorStateSnapshot() {
       noFetch: true,
       noStorage: true,
       noDomainLogic: true,
-
       redactedSnapshot: true,
     },
   };
@@ -418,10 +428,6 @@ export function resetErrorState() {
   lastError = null;
   return getErrorStateSnapshot();
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   APP_ERRORS_VERSION,

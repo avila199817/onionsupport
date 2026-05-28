@@ -1,6 +1,6 @@
 /* =========================================================
    Onion Support - Auth Storage
-   Archivo: /src/features/auth/storage.js
+   Archivo: src/features/auth/storage.js
 
    Responsabilidad:
    - Storage mínimo de Auth.
@@ -29,7 +29,6 @@
 ========================================================= */
 
 import {
-  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
   isBlockedRoutePath as configIsBlockedRoutePath,
   normalizeRoutePath as configNormalizeRoutePath,
   normalizeUserSlug as configNormalizeUserSlug,
@@ -41,10 +40,9 @@ import {
   AUTH_CONSTANTS,
 } from "./constants.js";
 
-export const AUTH_STORAGE_VERSION = "auth.storage.v8";
+export const AUTH_STORAGE_VERSION = "auth.storage.v9";
 
 const PREFIX = "onion:auth:";
-const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
 const memory = new Map();
 
@@ -126,25 +124,6 @@ const REFRESH_TOKEN_FIELDS = Object.freeze([
   "refreshToken",
   "refresh_token",
   "value",
-]);
-
-const SENSITIVE_QUERY_KEYS = Object.freeze([
-  "token",
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "secret",
-  "session",
-  "code",
-  "password",
-  "pwd",
-  "key",
-  "sig",
-  "signature",
-  "jwt",
-  "authorization",
-  "reset_token",
-  "activation_token",
 ]);
 
 /* =========================================================
@@ -440,10 +419,18 @@ function hasSensitiveQuery(value = "") {
 }
 
 function normalizeRoutePathOnly(value = "") {
+  const raw = cleanText(value, "");
+
+  if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (hasSensitiveQuery(raw)) return "";
+
   try {
-    return configNormalizeRoutePath(value) || "";
+    return configNormalizeRoutePath(raw) || "";
   } catch {
-    let path = cleanText(value, "")
+    let path = raw
       .split("#")[0]
       .split("?")[0]
       .replace(/\\/g, "/")
@@ -463,53 +450,16 @@ function normalizeRoutePathOnly(value = "") {
   }
 }
 
-function userScopedRestPath(path = "") {
+function isBlockedRoute(path = "") {
   const clean = normalizeRoutePathOnly(path);
 
-  if (!clean.startsWith(USER_HOME_PREFIX)) return "";
+  if (!clean) return true;
 
-  const rest = clean.slice(USER_HOME_PREFIX.length);
-  const [slugSegment = "", ...segments] = rest.split("/");
-  const slug = normalizeSlug(slugSegment);
-
-  if (!slug) return "";
-
-  return segments.length
-    ? normalizeRoutePathOnly(`/${segments.join("/")}`)
-    : "/";
-}
-
-function isBlockedFallbackRoute(path = "") {
-  const clean = normalizeRoutePathOnly(path).toLowerCase();
-
-  return Boolean(
-    clean === "/home" ||
-      clean.startsWith("/home/") ||
-      clean === "/403" ||
-      clean.startsWith("/403/") ||
-      clean === "/404" ||
-      clean.startsWith("/404/") ||
-      clean === "/2fa" ||
-      clean.startsWith("/2fa/") ||
-      clean === "/mfa" ||
-      clean.startsWith("/mfa/") ||
-      clean === "/otp" ||
-      clean.startsWith("/otp/")
-  );
-}
-
-function isBlockedRoute(path = "") {
   try {
-    if (configIsBlockedRoutePath(path) === true) return true;
+    return configIsBlockedRoutePath(clean) === true;
   } catch {
-    // fallback abajo
+    return true;
   }
-
-  if (isBlockedFallbackRoute(path)) return true;
-
-  const scopedRest = userScopedRestPath(path);
-
-  return Boolean(scopedRest && isBlockedFallbackRoute(scopedRest));
 }
 
 function normalizeRoute(value = "") {
@@ -1251,6 +1201,7 @@ export function getAuthStorageSnapshot() {
       configOwnsSlugNormalization: true,
       configOwnsRouteNormalization: true,
       configOwnsBlockedRoutes: true,
+      noLocalBlockedRouteFallback: true,
 
       persistsAccessToken: true,
       persistsRefreshToken: true,

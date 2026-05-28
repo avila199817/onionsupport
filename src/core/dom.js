@@ -7,7 +7,7 @@
    - Sólo nodos reales del index.html.
    - Resolver nodos canónicos y aliases de compat.
    - Validar mounts mínimos.
-   - Refrescar nodos stale.
+   - Refrescar nodos missing/stale.
    - Sin imports.
    - Sin montaje UI.
    - Sin Auth.
@@ -17,7 +17,7 @@
    - Sin lógica pesada.
 ========================================================= */
 
-export const DOM_VERSION = "core.dom.v2";
+export const DOM_VERSION = "core.dom.v3";
 
 export const REQUIRED_KEYS = Object.freeze([
   "body",
@@ -39,6 +39,7 @@ export const RECOMMENDED_KEYS = Object.freeze([
 export const DEFERRED_UI_KEYS = Object.freeze([]);
 
 export const OPTIONAL_KEYS = Object.freeze([
+  "noscriptRoot",
   "themeColorMeta",
   "tileColorMeta",
 ]);
@@ -57,6 +58,8 @@ export const DOM_SELECTORS = Object.freeze({
 
   appShell: "#app-shell",
   shell: "#app-shell",
+
+  noscriptRoot: "#noscript-root",
 
   sidebarMount: "#sidebar-mount",
   topbarMount: "#topbar-mount",
@@ -106,6 +109,7 @@ const CANONICAL_DOM_KEYS = Object.freeze([
 
   "loader",
   "appShell",
+  "noscriptRoot",
 
   "sidebarMount",
   "topbarMount",
@@ -125,8 +129,19 @@ const DOM_KEYS = Object.freeze([
   ...new Set([
     ...CANONICAL_DOM_KEYS,
     ...Object.keys(DOM_SELECTORS),
+    ...Object.keys(DOM_ALIASES),
   ]),
 ]);
+
+const CANONICAL_KEY_LOOKUP = Object.freeze(
+  Object.fromEntries([
+    ...CANONICAL_DOM_KEYS.map((key) => [key.toLowerCase(), key]),
+    ...Object.entries(DOM_ALIASES).map(([alias, target]) => [
+      alias.toLowerCase(),
+      target,
+    ]),
+  ])
+);
 
 /* =========================================================
    BASICS
@@ -147,10 +162,19 @@ function text(value = "", fallback = "") {
 
 function canonicalKey(key = "") {
   const clean = text(key, "");
-  return DOM_ALIASES[clean] || clean;
+
+  if (!clean) return "";
+
+  return (
+    DOM_ALIASES[clean] ||
+    CANONICAL_KEY_LOOKUP[clean.toLowerCase()] ||
+    clean
+  );
 }
 
 function emit(events, name, payload = {}) {
+  if (!name) return false;
+
   try {
     if (isFunction(events?.emit)) {
       events.emit(name, payload);
@@ -200,7 +224,11 @@ function queryAll(selector = "", root = null) {
 function bySelector(selector = "", root = null) {
   if (!isBrowser() || !selector) return null;
 
-  if (!root && selector.startsWith("#") && !selector.includes(" ")) {
+  if (
+    !root &&
+    selector.startsWith("#") &&
+    /^#[A-Za-z][\w:-]*$/.test(selector)
+  ) {
     try {
       return document.getElementById(selector.slice(1));
     } catch {
@@ -282,7 +310,10 @@ function setCanonicalNode(dom, key = "", node = null) {
 }
 
 function missing(dom, keys = []) {
-  return keys.filter((key) => !dom?.[canonicalKey(key)]);
+  return keys.filter((key) => {
+    const clean = canonicalKey(key);
+    return !isNodeConnected(dom?.[clean]);
+  });
 }
 
 /* =========================================================
@@ -412,7 +443,11 @@ export function getDomNode(dom, key = "", fallback = null) {
   const clean = canonicalKey(key);
   const node = dom?.[clean] || dom?.[text(key, "")] || null;
 
-  return isNodeConnected(node) ? node : fallback;
+  if (isNodeConnected(node)) return node;
+
+  const fresh = resolveNode(clean);
+
+  return isNodeConnected(fresh) ? fresh : fallback;
 }
 
 export function setDomNode(dom, key = "", node = null) {
@@ -443,7 +478,7 @@ export function refreshDomNodes({ dom, keys = [], root = null } = {}) {
 
   for (const key of keys || []) {
     const clean = canonicalKey(key);
-    output[key] = refreshDomNode({ dom, key: clean, root });
+    output[clean] = refreshDomNode({ dom, key: clean, root });
   }
 
   return output;
@@ -469,13 +504,10 @@ export function ensureFreshDom({ dom, events, keys = [] } = {}) {
   if (!dom) return dom;
 
   const finalKeys = keys.length
-    ? [...new Set(keys.map(canonicalKey))]
+    ? [...new Set(keys.map(canonicalKey).filter(Boolean))]
     : CANONICAL_DOM_KEYS;
 
-  const stale = finalKeys.filter((key) => {
-    const node = dom?.[key];
-    return node && !isNodeConnected(node);
-  });
+  const stale = finalKeys.filter((key) => !isNodeConnected(dom?.[key]));
 
   if (!stale.length) return dom;
 
@@ -497,6 +529,7 @@ export function clearDomCache(dom, events = null) {
 
   dom.cachedAt = "";
   dom.cachedAtMs = 0;
+  dom.cacheCount = 0;
   dom.validation = emptyValidation();
 
   applyAliases(dom);
@@ -522,6 +555,10 @@ export function getAppShell(dom = {}) {
   return getDomNode(dom, "appShell", null);
 }
 
+export function getNoscriptRoot(dom = {}) {
+  return getDomNode(dom, "noscriptRoot", null);
+}
+
 export function getMainContent(dom = {}) {
   return getDomNode(dom, "mainContent", null);
 }
@@ -544,6 +581,14 @@ export function getSidebarMount(dom = {}) {
 
 export function getTopbarMount(dom = {}) {
   return getDomNode(dom, "topbarMount", null);
+}
+
+export function getTablehead(dom = {}) {
+  return getDomNode(dom, "tablehead", null);
+}
+
+export function getTableheadContainer(dom = {}) {
+  return getDomNode(dom, "tableheadContainer", null);
 }
 
 /* =========================================================
@@ -586,6 +631,7 @@ export function getDomSnapshot(dom = {}) {
 
       appShell: nodeSnapshot(dom.appShell),
       loader: nodeSnapshot(dom.loader),
+      noscriptRoot: nodeSnapshot(dom.noscriptRoot),
 
       mainContent: nodeSnapshot(dom.mainContent),
       appContent: nodeSnapshot(dom.appContent),
@@ -603,8 +649,11 @@ export function getDomSnapshot(dom = {}) {
 
     policy: {
       cacheOnly: true,
+      realIndexNodesOnly: true,
       canonicalKeysOnlyResolved: true,
       aliasesAppliedFromCanonical: true,
+      refreshesMissingAndStaleNodes: true,
+
       noAuth: true,
       noRouter: true,
       noStore: true,
@@ -685,12 +734,15 @@ export default {
   getHtml,
   getBody,
   getAppShell,
+  getNoscriptRoot,
   getMainContent,
   getViewContainer,
   getAppContent,
   getLoader,
   getSidebarMount,
   getTopbarMount,
+  getTablehead,
+  getTableheadContainer,
 
   getDomSnapshot,
   getDomValidationSnapshot,

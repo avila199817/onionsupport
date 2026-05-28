@@ -44,7 +44,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_RENDER_VERSION = "router.render.v12.routable-user-scope";
+export const ROUTER_RENDER_VERSION = "router.render.v13";
 
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
@@ -402,20 +402,20 @@ export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
     return isBlockedRoutePath(pathname) ? DEFAULT_ROUTE : pathname;
   }
 
+  if (scoped.scoped && scoped.routable) {
+    return isBlockedRoutePath(scoped.lookupPath)
+      ? DEFAULT_ROUTE
+      : scoped.lookupPath;
+  }
+
   try {
     const canonical = normalizePathname(
-      configCanonicalRoutePath(path) ||
-        (scoped.scoped && scoped.routable ? scoped.lookupPath : pathname) ||
-        DEFAULT_ROUTE
+      configCanonicalRoutePath(path) || pathname || DEFAULT_ROUTE
     );
 
     return isBlockedRoutePath(canonical) ? DEFAULT_ROUTE : canonical;
   } catch {
-    const canonical = scoped.scoped && scoped.routable
-      ? scoped.lookupPath
-      : pathname;
-
-    return isBlockedRoutePath(canonical) ? DEFAULT_ROUTE : canonical;
+    return isBlockedRoutePath(pathname) ? DEFAULT_ROUTE : pathname;
   }
 }
 
@@ -1119,6 +1119,7 @@ function renderFallbackInto({
   const target = host || view;
 
   if (!target) return null;
+  if (!renderStillCurrent(isCurrentRender)) return null;
 
   const node = fallbackView({
     kind,

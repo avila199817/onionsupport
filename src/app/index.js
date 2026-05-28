@@ -3,30 +3,11 @@
    Archivo: /src/app/index.js
 
    Responsabilidad:
-   - Boot mínimo de la SPA.
-   - Iniciar Core.
-   - Registrar módulos principales en Core.
-   - Iniciar I18n mediante app/i18n.js.
-   - Iniciar Toast.
-   - Registrar bridge UI mínimo de Toast mediante app/ui.js.
-   - Iniciar Auth.
-   - Restaurar sesión ANTES del primer render Router.
-   - Delegar restore compat en /src/app/session.js.
-   - Delegar Router en /src/app/router.js.
-   - Configurar Router antes del primer render.
-   - Registrar Sidebar/Topbar después de Auth + Router config.
-   - Renderizar ruta inicial capturada por main.js.
-   - Sincronizar Sidebar/Topbar después del primer render.
-   - Refrescar textos i18n.
-   - Ocultar loader sólo cuando el boot termina correctamente.
-   - Sin Store.
-   - Sin Services paralelos.
-   - Sin warmup.
-   - Sin repair loops.
-   - Sin eventos custom.
-   - Sin fetch.
-   - Sin storage.
-   - Sin lógica de dominio.
+   - Orquestar el boot mínimo de la SPA.
+   - Delegar Core, I18n, Toast, Auth, Router, Shell, Loader y UI.
+   - Restaurar sesión antes del primer render Router.
+   - Sin Store, Services paralelos, warmup, eventos custom, fetch,
+     storage ni lógica de dominio.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -77,7 +58,24 @@ import {
   getUISystemsSnapshot,
 } from "./ui.js";
 
-export const APP_INDEX_VERSION = "app.index.v10";
+export const APP_INDEX_VERSION = "app.index.v11";
+
+const CORE_MODULES = Object.freeze([
+  ["auth", "Auth", Auth],
+  ["router", "Router", Router],
+  ["i18n", "I18n", I18n],
+  ["toast", "Toast", Toast],
+]);
+
+const AUTH_BOOT_OPTIONS = Object.freeze({
+  persistent: true,
+  restoreOnBoot: true,
+  allowSilentRefresh: true,
+  silentRefresh: true,
+  skipNavigation: true,
+  skipRedirect: true,
+  noRedirect: true,
+});
 
 let bootPromise = null;
 let ready = false;
@@ -92,12 +90,12 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 function isFunction(value) {
   return typeof value === "function";
+}
+
+function isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function cleanText(value = "", fallback = "") {
@@ -141,25 +139,20 @@ function currentPath() {
   }
 }
 
-function bootPath(options = {}) {
-  return cleanText(
-    options.bootContext?.initialPath ||
-      options.initialPath ||
-      currentPath(),
+function createBootPayload(options = {}) {
+  const input = isPlainObject(options) ? options : {};
+
+  const initialPath = cleanText(
+    input.bootContext?.initialPath || input.initialPath || currentPath(),
     "/"
   );
-}
-
-function createBootPayload(options = {}) {
-  const input = isObject(options) ? options : {};
-  const initialPath = bootPath(input);
 
   return {
     ...input,
     source: cleanText(input.source, "app"),
     initialPath,
     bootContext: {
-      ...(isObject(input.bootContext) ? input.bootContext : {}),
+      ...(isPlainObject(input.bootContext) ? input.bootContext : {}),
       initialPath,
     },
   };
@@ -174,15 +167,30 @@ function withCore(payload = {}, extra = {}) {
   };
 }
 
+function withSource(payload = {}, source = "app.index") {
+  return {
+    ...payload,
+    source,
+  };
+}
+
 /* =========================================================
-   METHOD CONTRACTS
+   SAFE CALLS
 ========================================================= */
 
-async function callRequired(target = null, method = "", label = "", payload = {}) {
+function safeCall(fn) {
+  try {
+    return isFunction(fn) ? fn() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function callRequired(target = null, method = "", label = "Módulo", payload = {}) {
   const fn = target?.[method];
 
   if (!isFunction(fn)) {
-    throw new Error(`${label || "Módulo"}.${method}() no disponible.`);
+    throw new Error(`${label}.${method}() no disponible.`);
   }
 
   return fn.call(target, payload);
@@ -190,114 +198,60 @@ async function callRequired(target = null, method = "", label = "", payload = {}
 
 async function callOptional(target = null, method = "", payload = {}) {
   const fn = target?.[method];
-
-  if (!isFunction(fn)) {
-    return null;
-  }
-
-  return fn.call(target, payload);
+  return isFunction(fn) ? fn.call(target, payload) : null;
 }
 
 /* =========================================================
-   UI STATE
+   BOOT UI STATE
 ========================================================= */
 
-function setBusy(payload = {}) {
-  try {
-    markBootStart(AppCore, {
-      ...payload,
-      source: "app.index",
-    });
-  } catch {
-    // noop
-  }
+function markBusy(payload = {}) {
+  const statePayload = withSource(payload);
 
-  try {
-    markShellBusy();
-  } catch {
-    // noop
-  }
-
-  try {
-    showLoader("booting");
-  } catch {
-    // noop
-  }
+  safeCall(() => markBootStart(AppCore, statePayload));
+  safeCall(() => markShellBusy());
+  safeCall(() => showLoader("booting"));
 }
 
-function setReady(payload = {}) {
-  try {
-    markBootReady(AppCore, {
-      ...payload,
-      source: "app.index",
-    });
-  } catch {
-    // noop
-  }
+function markReady(payload = {}) {
+  const statePayload = withSource(payload);
 
-  try {
-    markShellReady();
-  } catch {
-    // noop
-  }
-
-  try {
-    hideLoader();
-  } catch {
-    // noop
-  }
+  safeCall(() => markBootReady(AppCore, statePayload));
+  safeCall(() => markShellReady());
+  safeCall(() => hideLoader());
 }
 
-function setBootError(error = null, payload = {}) {
-  try {
-    markBootError(AppCore, error, {
-      ...payload,
-      source: "app.index",
-    });
-  } catch {
-    // noop
-  }
+function markError(error = null, payload = {}) {
+  safeCall(() => markBootError(AppCore, error, withSource(payload)));
 }
 
 /* =========================================================
    CORE REGISTRY
 ========================================================= */
 
-function setCoreModuleProperty(name = "", module = null) {
-  if (!name || !module) return false;
-
-  try {
-    AppCore[name] = module;
-    return true;
-  } catch {
-    return false;
+function getCoreRegistrar() {
+  if (isFunction(AppCore?.registerModule)) {
+    return AppCore.registerModule.bind(AppCore);
   }
+
+  if (isFunction(AppCore?.modules?.register)) {
+    return AppCore.modules.register.bind(AppCore.modules);
+  }
+
+  return null;
 }
 
-function registerCoreModule(name = "", module = null) {
+function exposeCoreModule(name = "", module = null, registrar = null) {
   if (!name || !module) return false;
 
-  if (isFunction(AppCore?.registerModule)) {
-    try {
-      AppCore.registerModule(name, module, {
-        overwrite: true,
-      });
+  safeCall(() => {
+    AppCore[name] = module;
+  });
 
-      return true;
-    } catch {
-      // fallback abajo
-    }
-  }
-
-  if (!isFunction(AppCore?.modules?.register)) {
-    return false;
-  }
+  if (!registrar) return true;
 
   try {
-    AppCore.modules.register(name, module, {
-      overwrite: true,
-    });
-
+    registrar(name, module, { overwrite: true });
     return true;
   } catch {
     return false;
@@ -305,188 +259,74 @@ function registerCoreModule(name = "", module = null) {
 }
 
 function exposeCoreModules() {
-  const modules = [
-    ["auth", "Auth", Auth],
-    ["router", "Router", Router],
-    ["i18n", "I18n", I18n],
-    ["toast", "Toast", Toast],
-  ];
+  const registrar = getCoreRegistrar();
 
-  for (const [lowerName, upperName, module] of modules) {
-    setCoreModuleProperty(lowerName, module);
-    setCoreModuleProperty(upperName, module);
-
-    registerCoreModule(lowerName, module);
-    registerCoreModule(upperName, module);
+  for (const [lowerName, upperName, module] of CORE_MODULES) {
+    exposeCoreModule(lowerName, module, registrar);
+    exposeCoreModule(upperName, module, registrar);
   }
 
   return true;
 }
 
 /* =========================================================
-   CORE / I18N / TOAST / UI
+   SESSION SUMMARY
 ========================================================= */
-
-async function initCore(payload = {}) {
-  await callRequired(AppCore, "init", "AppCore", payload);
-  exposeCoreModules();
-
-  return AppCore;
-}
-
-async function initI18nSystem(payload = {}) {
-  await initAppI18n(withCore(payload, {
-    I18n,
-    updateDOM: false,
-    updateUi: false,
-  }));
-
-  exposeCoreModules();
-
-  return I18n;
-}
-
-async function initToast(payload = {}) {
-  await callRequired(Toast, "init", "Toast", withCore(payload));
-
-  /*
-    Bridge mínimo:
-    - No crea sistema UI paralelo.
-    - No pisa AppCore.showToast si ya existe.
-    - AppCore.showToast puede usar el Toast registrado en Core.
-  */
-  try {
-    initUISystems({
-      ...withCore(payload),
-      Toast,
-    });
-  } catch {
-    // compat pasiva, no debe romper boot
-  }
-
-  exposeCoreModules();
-
-  return Toast;
-}
-
-function refreshI18nDom() {
-  if (!isFunction(I18n?.updateDOM)) {
-    return false;
-  }
-
-  try {
-    I18n.updateDOM();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* =========================================================
-   AUTH
-========================================================= */
-
-function authPayload(payload = {}) {
-  return withCore(payload, {
-    Auth,
-
-    persistent: true,
-    restoreOnBoot: true,
-    allowSilentRefresh: true,
-    silentRefresh: true,
-
-    skipNavigation: true,
-    skipRedirect: true,
-    noRedirect: true,
-  });
-}
-
-async function initAuth(payload = {}) {
-  await callRequired(Auth, "init", "Auth", authPayload(payload));
-  exposeCoreModules();
-
-  return Auth;
-}
 
 function normalizeRestoreSummary(result = null) {
-  if (!isObject(result)) return null;
+  if (!isPlainObject(result)) return null;
+
+  const nested = isPlainObject(result.result) ? result.result : {};
+  const data = isPlainObject(result.data) ? result.data : {};
+  const auth = isPlainObject(result.auth) ? result.auth : {};
 
   return {
-    ok: Boolean(result.ok),
-    restored: Boolean(result.restored),
-    authenticated: Boolean(result.authenticated),
+    ok: result.ok !== false,
+
+    restored: Boolean(
+      result.restored ||
+        nested.restored ||
+        data.restored ||
+        auth.restored
+    ),
+
+    authenticated: Boolean(
+      result.authenticated ||
+        nested.authenticated ||
+        data.authenticated ||
+        auth.authenticated
+    ),
 
     hasUser: Boolean(
       result.user ||
         result.currentUser ||
-        result.result?.user ||
-        result.result?.currentUser
+        nested.user ||
+        nested.currentUser ||
+        data.user ||
+        data.currentUser ||
+        auth.user ||
+        auth.currentUser
     ),
 
     hasSession: Boolean(
       result.session ||
         result.currentSession ||
-        result.result?.session ||
-        result.result?.currentSession
+        nested.session ||
+        nested.currentSession ||
+        data.session ||
+        data.currentSession ||
+        auth.session ||
+        auth.currentSession
     ),
 
     source: cleanText(
       result.source ||
-        result.result?.source,
+        nested.source ||
+        data.source ||
+        auth.source,
       "app.session"
     ),
   };
-}
-
-async function restoreAuth(payload = {}) {
-  /*
-    No llamar Auth.syncAuthState() aquí.
-    El restore real ya decide si aplica sesión, refresca o limpia.
-    App sólo espera el resultado antes del primer render del Router.
-  */
-  const result = await restoreAuthSession(authPayload(payload));
-
-  lastRestoreResult = normalizeRestoreSummary(result);
-
-  return result;
-}
-
-/* =========================================================
-   ROUTER
-========================================================= */
-
-async function initRouter(payload = {}) {
-  await configureRouter(withCore(payload, {
-    source: "app.router",
-  }));
-
-  return Router;
-}
-
-async function renderInitialRoute(payload = {}) {
-  await renderRouterInitialRoute(withCore(payload, {
-    source: "app.boot",
-  }));
-
-  return Router;
-}
-
-/* =========================================================
-   CHROME
-========================================================= */
-
-async function initChrome(payload = {}) {
-  await callRequired(SidebarUI, "init", "SidebarUI", withCore(payload));
-  await callRequired(TopbarUI, "init", "TopbarUI", withCore(payload));
-
-  return true;
-}
-
-async function syncChrome(payload = {}) {
-  await callOptional(SidebarUI, "sync", withCore(payload));
-  await callOptional(TopbarUI, "sync", withCore(payload));
-
-  return true;
 }
 
 /* =========================================================
@@ -496,65 +336,62 @@ async function syncChrome(payload = {}) {
 async function runBoot(options = {}) {
   const payload = createBootPayload(options);
 
+  const corePayload = withCore(payload);
+
+  const authPayload = withCore(payload, {
+    Auth,
+    ...AUTH_BOOT_OPTIONS,
+  });
+
+  ready = false;
   lastBootError = null;
   lastRestoreResult = null;
 
-  setBusy(payload);
+  markBusy(payload);
 
   try {
-    await initCore(payload);
-    await initI18nSystem(payload);
-    await initToast(payload);
+    await callRequired(AppCore, "init", "AppCore", payload);
+    exposeCoreModules();
 
-    /*
-      Orden crítico:
-      Auth debe estar inicializado y restaurado antes del primer render Router.
-      Así /@{user.slug} puede resolver Home si hay sesión válida.
-    */
-    await initAuth(payload);
-    await restoreAuth(payload);
+    await initAppI18n(withCore(payload, {
+      I18n,
+      updateDOM: false,
+      updateUi: false,
+    }));
 
-    /*
-      Router queda configurado antes de registrar chrome.
-      Sidebar/Topbar necesitan rutas reales y Auth restaurado.
-    */
-    await initRouter(payload);
+    await callRequired(Toast, "init", "Toast", corePayload);
 
-    /*
-      Chrome se registra ANTES del primer render de ruta.
-      Esto permite que Home pueda consumir AppCore.ui.sidebar.getSnapshot()
-      durante su primer render sin caer a "Usuario".
-    */
-    await initChrome(payload);
+    safeCall(() => initUISystems(withCore(payload, {
+      Toast,
+    })));
 
-    /*
-      Primer render real de la SPA.
-      A partir de aquí la vista Home ya puede recibir usuario/chrome/contexto.
-    */
-    await renderInitialRoute(payload);
+    await callRequired(Auth, "init", "Auth", authPayload);
 
-    /*
-      Re-sincronización final de chrome con la ruta ya renderizada.
-      Mantiene visibilidad, active item, route mode y mounts correctos.
-    */
-    await syncChrome(payload);
+    const restoreResult = await restoreAuthSession(authPayload);
+    lastRestoreResult = normalizeRestoreSummary(restoreResult);
 
-    refreshI18nDom();
+    await configureRouter(withSource(corePayload, "app.router"));
+
+    await callRequired(SidebarUI, "init", "SidebarUI", corePayload);
+    await callRequired(TopbarUI, "init", "TopbarUI", corePayload);
+
+    await renderRouterInitialRoute(withSource(corePayload, "app.boot"));
+
+    await callOptional(SidebarUI, "sync", corePayload);
+    await callOptional(TopbarUI, "sync", corePayload);
+
+    safeCall(() => I18n.updateDOM());
 
     ready = true;
-    setReady(payload);
+    markReady(payload);
 
     return App;
   } catch (error) {
     ready = false;
     lastBootError = safeError(error);
 
-    setBootError(error, payload);
+    markError(error, payload);
 
-    /*
-      No marcar shell ready ni ocultar loader aquí.
-      El fatal UI lo gestiona /src/main.js, que es el entrypoint real.
-    */
     throw error;
   }
 }
@@ -564,6 +401,8 @@ async function runBoot(options = {}) {
 ========================================================= */
 
 export function getAppSnapshot() {
+  const state = AppCore?.state || {};
+
   return {
     version: APP_INDEX_VERSION,
 
@@ -604,55 +443,34 @@ export function getAppSnapshot() {
     }),
 
     state: {
-      initialized: AppCore?.state?.initialized === true,
-      ready: AppCore?.state?.ready === true,
+      initialized: state.initialized === true,
+      ready: state.ready === true,
 
-      authenticated: AppCore?.state?.authenticated === true,
-      hasToken: AppCore?.state?.hasToken === true,
-      hasRefreshToken: AppCore?.state?.hasRefreshToken === true,
-      hasUser: Boolean(AppCore?.state?.user || AppCore?.state?.currentUser),
+      authenticated: state.authenticated === true,
+      hasToken: state.hasToken === true,
+      hasRefreshToken: state.hasRefreshToken === true,
+      hasUser: Boolean(state.user || state.currentUser),
 
-      role: AppCore?.state?.role || null,
-      userSlug: AppCore?.state?.userSlug || null,
-      homePath: redact(AppCore?.state?.homePath || ""),
+      role: state.role || null,
+      userSlug: state.userSlug || null,
+      homePath: redact(state.homePath || ""),
 
-      route: redact(AppCore?.state?.route || ""),
-      canonicalPath: redact(AppCore?.state?.canonicalPath || ""),
-      publicPath: redact(AppCore?.state?.publicPath || ""),
+      route: redact(state.route || ""),
+      canonicalPath: redact(state.canonicalPath || ""),
+      publicPath: redact(state.publicPath || ""),
 
-      routeMode: AppCore?.state?.routeMode || null,
-      chromeVisible: AppCore?.state?.chromeVisible ?? null,
+      routeMode: state.routeMode || null,
+      chromeVisible: state.chromeVisible ?? null,
     },
 
     policy: {
       singleEntryPoint: true,
-      bootAppContract: true,
-
-      coreInitDelegated: true,
-      coreModuleRegistryUsed: true,
-
-      i18nDelegatedToAppI18nBridge: true,
-      toastBridgeDelegatedToAppUi: true,
-
+      delegatesCoreAuthRouterUi: true,
       restoresAuthBeforeRouterRender: true,
-      sessionRestoreDelegated: true,
-      appDoesNotForceAuthSyncAfterRestore: true,
-
-      routerDelegatedToAppRouter: true,
-      routerConfiguredBeforeChrome: true,
-      initialRouteDelegatedToAppRouter: true,
-
-      chromeRegisteredBeforeInitialRoute: true,
-      chromeSyncedAfterInitialRoute: true,
-
-      loaderDelegated: true,
-      shellDelegated: true,
-      bootStateDelegated: true,
 
       noStore: true,
       noParallelServices: true,
       noWarmup: true,
-      noRepairLoops: true,
       noCustomEvents: true,
       noFetch: true,
       noStorage: true,
@@ -668,8 +486,7 @@ export function getAppSnapshot() {
 ========================================================= */
 
 export function bootApp(options = {}) {
-  if (!isBrowser()) return Promise.resolve(App);
-  if (ready) return Promise.resolve(App);
+  if (!isBrowser() || ready) return Promise.resolve(App);
   if (bootPromise) return bootPromise;
 
   bootPromise = runBoot(options).finally(() => {

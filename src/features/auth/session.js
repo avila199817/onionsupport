@@ -9,10 +9,7 @@
    - User sin token: authenticated false.
    - User inválido sólo por:
      - disabled === true
-     - suspended === true
-     - active === false
-     - enabled === false
-     - status/estado/state: "suspended" o "desactivado"
+     - status/estado/state: "disabled" o "desactivado"
    - Roles únicos: admin / user.
    - Leer access token persistido para soportar reload.
    - Leer refresh token persistido si existe por compat.
@@ -50,7 +47,7 @@ import {
   persistAuthStorage,
 } from "./storage.js";
 
-export const AUTH_SESSION_VERSION = "auth.session.v11";
+export const AUTH_SESSION_VERSION = "auth.session.v12";
 
 const SOURCE = "auth.session";
 
@@ -62,7 +59,7 @@ const AUTH_HOME = Object.freeze({
 const VALID_ROLES = Object.freeze(["admin", "user"]);
 
 const INVALID_USER_STATUSES = new Set([
-  "suspended",
+  "disabled",
   "desactivado",
 ]);
 
@@ -498,6 +495,23 @@ function mergeUserVisualFields(source = {}, normalized = {}) {
   };
 }
 
+function userDisabled(user = null) {
+  if (!isObject(user)) return true;
+
+  const status = cleanText(
+    user.status ||
+      user.estado ||
+      user.state ||
+      "",
+    ""
+  ).toLowerCase();
+
+  return Boolean(
+    user.disabled === true ||
+      INVALID_USER_STATUSES.has(status)
+  );
+}
+
 function userCandidateScore(user = null) {
   if (!isObject(user)) return -1;
   if (userDisabled(user)) return -1;
@@ -577,26 +591,6 @@ function sanitizeUserValue(value, keyHint = "", depth = 0) {
 
 function removeSensitiveUserFields(user = {}) {
   return isObject(user) ? sanitizeUserValue(user) || {} : {};
-}
-
-function userDisabled(user = null) {
-  if (!isObject(user)) return true;
-
-  const status = cleanText(
-    user.status ||
-      user.estado ||
-      user.state ||
-      "",
-    ""
-  ).toLowerCase();
-
-  return Boolean(
-    user.disabled === true ||
-      user.suspended === true ||
-      user.active === false ||
-      user.enabled === false ||
-      INVALID_USER_STATUSES.has(status)
-  );
 }
 
 function hasUserIdentity(user = null) {
@@ -703,10 +697,7 @@ export function normalizeUser(user = null) {
     userRole: role,
     roles: [role],
 
-    active: true,
-    enabled: true,
     disabled: false,
-    suspended: false,
 
     isAdmin: role === "admin",
     isUser: role === "user",
@@ -828,10 +819,6 @@ function readUserFromPayload(payload = {}) {
 
     if (!isObject(rawUser)) continue;
 
-    /*
-      Si el payload trae avatar en raíz y user reducido dentro,
-      se conserva como fuente visual sin convertirlo en fuente de identidad.
-    */
     candidates.push(
       mergeUserVisualFields(node, {
         ...rawUser,
@@ -992,28 +979,12 @@ function bestStateToken() {
 }
 
 function bestStateRefreshToken() {
-  /*
-    El refresh token no debe vivir en AppCore.state.
-    Se lee únicamente desde storage.js como contexto auxiliar de restore.
-    Si el backend usa cookie httpOnly, puede no existir aquí y restore.js
-    igualmente intentará /api/auth/refresh con credentials include.
-  */
   return cleanToken(storedRefreshToken() || "");
 }
 
 function bestStateUser() {
   const state = readState();
 
-  /*
-    No se fabrica usuario desde storage.
-    El reload se restaura así:
-      token persistido -> restore.js -> /me -> user canónico.
-      token caducado -> restore.js -> /refresh -> user canónico.
-      sin token visible -> restore.js -> /refresh por cookie httpOnly si existe.
-
-    Si hay varias copias del usuario en estado, se usa la más completa.
-    Esto evita que una copia reducida sin avatar gane sobre otra con avatar.
-  */
   const best = selectBestUserCandidate([
     state.user,
     state.currentUser,
@@ -1149,10 +1120,6 @@ function buildStatePatch({
     accessToken: hasToken ? safeToken : null,
     access_token: hasToken ? safeToken : null,
 
-    /*
-      El refresh token no se mantiene como estado canónico.
-      Sólo se lee/persiste vía storage.js para restore controlado.
-    */
     hasRefreshToken,
 
     user: authenticated ? safeUser : null,
@@ -1220,11 +1187,6 @@ function persistPatch({
               refresh_token: safeRefreshToken,
             }
           : {}),
-
-        /*
-          No persistimos user completo como fuente de autenticación.
-          El usuario canónico se resuelve en restore vía /api/auth/me.
-        */
 
         ...(safeSession
           ? {
@@ -1363,7 +1325,7 @@ function publicSnapshot(snapshot = {}) {
       tokenWithoutUserIsNotAuthenticated: true,
       userWithoutTokenIsNotAuthenticated: true,
 
-      invalidStatuses: ["suspended", "desactivado"],
+      invalidStatuses: ["disabled", "desactivado"],
 
       doesNotFabricateUserFromStorage: true,
       doesNotPersistUserAsAuthSource: true,
@@ -1474,10 +1436,6 @@ export function applySession(payload = {}, options = {}) {
     forceUnauthenticated: !patch.hasToken,
   });
 
-  /*
-    Persistimos token/refresh/contexto auxiliar.
-    No persistimos user completo como fuente de autenticación.
-  */
   if (patch.hasToken) {
     persistPatch({
       token,

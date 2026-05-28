@@ -6,8 +6,8 @@
    - Bind DOM mínimo de Home.
    - Delegar clicks sólo por data-home-action / data-action.
    - Acciones alineadas con home.template.js actual:
-     retry, navigate_home, create_incidencia, copy_widget_id,
-     open_ticket_detail, close_ticket_detail, page_prev, page_next, page.
+     retry, navigate_home, create_incidencia,
+     open_ticket_detail, close_ticket_detail, page_prev, page_next.
    - Conectar open_ticket_detail / close_ticket_detail con statePatch.
    - Solicitar rerender tras cambios de estado si HomeView pasa callback.
    - Limpiar listeners por scope.
@@ -42,17 +42,13 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const HOME_BINDINGS_VERSION = "home.bindings.v10.template-aligned";
+export const HOME_BINDINGS_VERSION = "home.bindings.v11.template-contract";
 
 const DEFAULT_SCOPE = "view:home";
 
 const ACTIONS = Object.freeze({
   retry: new Set([
     "retry",
-  ]),
-
-  copyId: new Set([
-    "copy_widget_id",
   ]),
 
   navigate: new Set([
@@ -77,10 +73,6 @@ const ACTIONS = Object.freeze({
 
   pageNext: new Set([
     "page_next",
-  ]),
-
-  pageGo: new Set([
-    "page",
   ]),
 });
 
@@ -110,8 +102,49 @@ const COSMOS_META_KEYS = new Set([
   "_metadata",
 ]);
 
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|correo|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|bank|cuenta|account|ipRaw|ip|userAgent/i;
+const SENSITIVE_KEY_PARTS = Object.freeze([
+  "token",
+  "authorization",
+  "cookie",
+  "password",
+  "passwd",
+  "pwd",
+  "secret",
+  "credential",
+  "jwt",
+  "bearer",
+  "refresh",
+  "apikey",
+  "privatekey",
+  "connectionstring",
+  "sas",
+  "otp",
+  "totp",
+  "mfa",
+  "twofa",
+  "backupcode",
+  "sessionid",
+  "email",
+  "correo",
+  "mail",
+  "phone",
+  "telefono",
+  "address",
+  "direccion",
+  "nif",
+  "dni",
+  "iban",
+  "bank",
+  "cuenta",
+  "account",
+  "useragent",
+]);
+
+const SENSITIVE_KEY_EXACT = new Set([
+  "session",
+  "ip",
+  "ipraw",
+]);
 
 const SENSITIVE_QUERY_RE =
   /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i;
@@ -120,6 +153,9 @@ const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
 const EMAIL_GLOBAL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
 const JWT_RE =
   /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
+
+const JWT_TEST_RE =
+  /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/;
 
 const ACTION_SELECTOR = [
   "[data-home-action]",
@@ -216,6 +252,10 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
+function normalizeSensitiveKey(value = "") {
+  return normalizeKey(value).replace(/_/g, "");
+}
+
 function nowIso() {
   try {
     return new Date().toISOString();
@@ -236,7 +276,12 @@ function redact(value = "") {
 }
 
 function isSensitiveKey(key = "") {
-  return SENSITIVE_KEY_RE.test(String(key || ""));
+  const clean = normalizeSensitiveKey(key);
+
+  if (!clean) return false;
+  if (SENSITIVE_KEY_EXACT.has(clean)) return true;
+
+  return SENSITIVE_KEY_PARTS.some((part) => clean.includes(part));
 }
 
 function isRawKey(key = "") {
@@ -254,6 +299,10 @@ function isEmailLike(value = "") {
 
 function hasSensitiveQuery(value = "") {
   return SENSITIVE_QUERY_RE.test(String(value || ""));
+}
+
+function hasJwt(value = "") {
+  return JWT_TEST_RE.test(String(value || ""));
 }
 
 function sanitizePayloadValue(value, keyHint = "") {
@@ -307,7 +356,7 @@ function safePublicId(value = "") {
   if (isEmailLike(text)) return "";
   if (hasSensitiveQuery(text)) return "";
   if (/Bearer\s+/i.test(text)) return "";
-  if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
+  if (hasJwt(text)) return "";
 
   return redact(text).slice(0, 240);
 }
@@ -378,31 +427,13 @@ function routePathOnly(value = "") {
 
 function isBlockedRoute(value = "") {
   const path = routePathOnly(value);
-  const lower = path.toLowerCase();
 
   if (!path) return true;
-
-  if (
-    lower === "/incidencias/nueva" ||
-    lower.startsWith("/incidencias/nueva/")
-  ) {
-    return true;
-  }
 
   try {
     return configIsBlockedRoutePath(path) === true;
   } catch {
-    return Boolean(
-      lower === "/home" ||
-        lower === "/403" ||
-        lower === "/404" ||
-        lower === "/2fa" ||
-        lower === "/mfa" ||
-        lower === "/otp" ||
-        lower.startsWith("/2fa/") ||
-        lower.startsWith("/mfa/") ||
-        lower.startsWith("/otp/")
-    );
+    return true;
   }
 }
 
@@ -530,7 +561,6 @@ function buildApi(callbacks = {}) {
     loadHomeDashboard: callbacks.loadHomeDashboard,
 
     navigateFromHomeAction: callbacks.navigateFromHomeAction,
-    copyHomeWidgetIdAction: callbacks.copyHomeWidgetIdAction,
     createFromHomeAction: callbacks.createFromHomeAction,
 
     openHomeTicketDetailAction: callbacks.openHomeTicketDetailAction,
@@ -557,10 +587,8 @@ function buildApi(callbacks = {}) {
     onTicketDetailClose: callbacks.onTicketDetailClose,
     onIncidenciaDetailClose: callbacks.onIncidenciaDetailClose,
 
-    goToPage: callbacks.goToPage,
     goPrevPage: callbacks.goPrevPage,
     goNextPage: callbacks.goNextPage,
-    changePageSize: callbacks.changePageSize,
   };
 }
 
@@ -757,20 +785,6 @@ function payloadFromElement(element = null, root = null) {
     entityId: first(parsed.entityId, datasetValue(element, "entityId"), id, ""),
     id: first(parsed.id, id, ""),
   });
-}
-
-function pageFromElement(element = null) {
-  return Math.max(
-    1,
-    safeNumber(
-      first(
-        datasetValue(element, "page"),
-        element?.getAttribute?.("aria-label")?.match?.(/\d+/)?.[0],
-        1
-      ),
-      1
-    )
-  );
 }
 
 function hasTicketModal(root = null) {
@@ -1075,13 +1089,11 @@ function resolveKind(element = null) {
   const action = actionName(element);
 
   if (ACTIONS.retry.has(action)) return "retry";
-  if (ACTIONS.copyId.has(action)) return "copy-id";
   if (ACTIONS.ticketClose.has(action)) return "ticket-close";
   if (ACTIONS.ticketOpen.has(action)) return "ticket-open";
   if (ACTIONS.create.has(action)) return "create";
   if (ACTIONS.pagePrev.has(action)) return "page-prev";
   if (ACTIONS.pageNext.has(action)) return "page-next";
-  if (ACTIONS.pageGo.has(action)) return "page-go";
   if (ACTIONS.navigate.has(action)) return "navigate";
 
   return "";
@@ -1138,24 +1150,9 @@ async function handleNavigate(element, api = {}, root = null) {
   });
 }
 
-async function handleCopyId(element, api = {}, root = null) {
-  const id = idFromElement(element, root);
-
-  if (!id || !isFunction(api.copyHomeWidgetIdAction)) return false;
-
-  return withBusy(element, async () => {
-    const result = await api.copyHomeWidgetIdAction({
-      widgetId: id,
-      silent: false,
-    });
-
-    return applyActionResult(result, api, element);
-  });
-}
-
 async function handleCreate(element, api = {}, root = null) {
   const payload = payloadFromElement(element, root);
-  const route = normalizeInternalRoute(routeFromElement(element)) || INCIDENCIAS_ROUTE;
+  const route = INCIDENCIAS_ROUTE;
 
   if (!route) return false;
 
@@ -1268,8 +1265,6 @@ async function handleCloseTicketDetail(element, api = {}) {
 }
 
 async function handlePage(kind = "", element = null, api = {}) {
-  const page = pageFromElement(element);
-
   return withBusy(element, async () => {
     if (kind === "page-prev" && isFunction(api.goPrevPage)) {
       return api.goPrevPage();
@@ -1277,10 +1272,6 @@ async function handlePage(kind = "", element = null, api = {}) {
 
     if (kind === "page-next" && isFunction(api.goNextPage)) {
       return api.goNextPage();
-    }
-
-    if (isFunction(api.goToPage)) {
-      return api.goToPage(page);
     }
 
     return false;
@@ -1306,13 +1297,11 @@ async function dispatchAction(event = null, element = null, api = {}, root = nul
   try {
     if (kind === "retry") return handleRetry(element, api);
     if (kind === "navigate") return handleNavigate(element, api, root);
-    if (kind === "copy-id") return handleCopyId(element, api, root);
     if (kind === "create") return handleCreate(element, api, root);
     if (kind === "ticket-open") return handleOpenTicketDetail(element, api, root);
     if (kind === "ticket-close") return handleCloseTicketDetail(element, api);
     if (kind === "page-prev") return handlePage(kind, element, api);
     if (kind === "page-next") return handlePage(kind, element, api);
-    if (kind === "page-go") return handlePage(kind, element, api);
 
     return false;
   } catch {
@@ -1334,7 +1323,6 @@ export function bindHomeEvents({
   loadHomeDashboard,
 
   navigateFromHomeAction,
-  copyHomeWidgetIdAction,
   createFromHomeAction,
 
   openHomeTicketDetailAction,
@@ -1361,10 +1349,8 @@ export function bindHomeEvents({
   onTicketDetailClose,
   onIncidenciaDetailClose,
 
-  goToPage,
   goPrevPage,
   goNextPage,
-  changePageSize,
 } = {}) {
   if (!isBrowser()) return () => false;
 
@@ -1381,7 +1367,6 @@ export function bindHomeEvents({
     loadHomeDashboard,
 
     navigateFromHomeAction,
-    copyHomeWidgetIdAction,
     createFromHomeAction,
 
     openHomeTicketDetailAction,
@@ -1408,10 +1393,8 @@ export function bindHomeEvents({
     onTicketDetailClose,
     onIncidenciaDetailClose,
 
-    goToPage,
     goPrevPage,
     goNextPage,
-    changePageSize,
   });
 
   if (force !== true && scopeIsBoundToRoot(name, root)) {
@@ -1505,24 +1488,23 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
       refresh: isFunction(api.refresh),
       loadHomeDashboard: isFunction(api.loadHomeDashboard),
       navigateFromHomeAction: isFunction(api.navigateFromHomeAction),
-      copyHomeWidgetIdAction: isFunction(api.copyHomeWidgetIdAction),
       createFromHomeAction: isFunction(api.createFromHomeAction),
       openHomeTicketDetailAction: isFunction(api.openHomeTicketDetailAction),
       closeHomeTicketDetailAction: isFunction(api.closeHomeTicketDetailAction),
       patchState: isFunction(api.patchState),
       requestRender: isFunction(api.requestRender),
+      goPrevPage: isFunction(api.goPrevPage),
+      goNextPage: isFunction(api.goNextPage),
     },
 
     actions: {
       retry: [...ACTIONS.retry],
-      copyId: [...ACTIONS.copyId],
       navigate: [...ACTIONS.navigate],
       create: [...ACTIONS.create],
       ticketOpen: [...ACTIONS.ticketOpen],
       ticketClose: [...ACTIONS.ticketClose],
       pagePrev: [...ACTIONS.pagePrev],
       pageNext: [...ACTIONS.pageNext],
-      pageGo: [...ACTIONS.pageGo],
     },
 
     routes: {
@@ -1540,6 +1522,8 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
       retryOnlyForErrorState: true,
       noExportCsvAction: true,
       noQuickActionsLegacy: true,
+      noCopyWidgetAction: true,
+      noPageGoAction: true,
       noPassiveRouteCapture: true,
 
       noAppCore: true,
@@ -1563,6 +1547,7 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
 
       configRoutes: true,
       configBlockedRoutes: true,
+      noLocalBlockedRouteFallback: true,
 
       ticketDetailDoesNotNavigate: true,
       ticketDetailReturnsStatePatch: true,

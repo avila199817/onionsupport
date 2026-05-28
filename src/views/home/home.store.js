@@ -1,6 +1,6 @@
 /* =========================================================
    Onion Support - Home Store
-   Archivo: /src/views/home/home.store.js
+   Archivo: src/views/home/home.store.js
 
    Responsabilidad:
    - Cache runtime mínima de datos Home.
@@ -44,7 +44,7 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_STORE_VERSION = "home.store.v9.runtime-cache-only";
+export const HOME_STORE_VERSION = "home.store.v10.runtime-cache-contract";
 export const HOME_STORE_SOURCE = "views.home.store";
 
 const DEFAULT_PAGE = 1;
@@ -72,13 +72,63 @@ const COSMOS_META_KEYS = new Set([
   "_metadata",
 ]);
 
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|correo|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|bank|cuenta|account|ipRaw|ip|userAgent/i;
+const SENSITIVE_KEY_PARTS = Object.freeze([
+  "token",
+  "authorization",
+  "cookie",
+  "password",
+  "passwd",
+  "pwd",
+  "secret",
+  "credential",
+  "jwt",
+  "bearer",
+  "refresh",
+  "apikey",
+  "privatekey",
+  "connectionstring",
+  "sas",
+  "otp",
+  "totp",
+  "mfa",
+  "twofa",
+  "backupcode",
+  "sessionid",
+  "sessiondata",
+  "sessiontoken",
+  "email",
+  "correo",
+  "mail",
+  "phone",
+  "telefono",
+  "address",
+  "direccion",
+  "nif",
+  "dni",
+  "iban",
+  "bank",
+  "cuenta",
+  "account",
+  "useragent",
+]);
 
-const EMAIL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
+const SENSITIVE_KEY_EXACT = new Set([
+  "session",
+  "ip",
+  "ipraw",
+]);
+
+const EMAIL_GLOBAL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
+const EMAIL_EXACT_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
 
 const JWT_RE =
   /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
+
+const JWT_TEST_RE =
+  /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/;
+
+const SENSITIVE_QUERY_RE =
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i;
 
 /* =========================================================
    SAFE HELPERS
@@ -225,7 +275,7 @@ function redact(value = "") {
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(JWT_RE, "***")
-    .replace(EMAIL_RE, "");
+    .replace(EMAIL_GLOBAL_RE, "");
 }
 
 function normalizeText(value = "") {
@@ -241,6 +291,10 @@ function normalizeKey(value = "") {
     .replace(/[\s-]+/g, "_")
     .replace(/[^a-z0-9_:.]/g, "")
     .replace(/^_+|_+$/g, "");
+}
+
+function normalizeSensitiveKey(value = "") {
+  return normalizeKey(value).replace(/_/g, "");
 }
 
 function normalizeRole(value = "", fallback = "user") {
@@ -276,18 +330,25 @@ function isCosmosMetaKey(key = "") {
 }
 
 function isSensitiveKey(key = "") {
-  return SENSITIVE_KEY_RE.test(String(key || ""));
+  const clean = normalizeSensitiveKey(key);
+
+  if (!clean) return false;
+  if (SENSITIVE_KEY_EXACT.has(clean)) return true;
+
+  return SENSITIVE_KEY_PARTS.some((part) => clean.includes(part));
 }
 
 function isEmailLike(value = "") {
   const text = safeText(value, "");
-  return Boolean(text && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i.test(text));
+  return Boolean(text && EMAIL_EXACT_RE.test(text));
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(
-    String(value || "")
-  );
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
+}
+
+function hasJwt(value = "") {
+  return JWT_TEST_RE.test(String(value || ""));
 }
 
 function safePublicId(value = "") {
@@ -297,7 +358,7 @@ function safePublicId(value = "") {
   if (isEmailLike(text)) return "";
   if (hasSensitiveQuery(text)) return "";
   if (/Bearer\s+/i.test(text)) return "";
-  if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
+  if (hasJwt(text)) return "";
 
   return redact(text).slice(0, 240);
 }
@@ -1820,6 +1881,8 @@ export function getHomeStoreSnapshot(options = {}) {
       userNeverKeepsAdminUsersClients: true,
       noRawBackendPayload: true,
       stripsCosmosMetadata: true,
+      noEmailAsIdentity: true,
+      sanitizerDoesNotStripDescription: true,
       snapshotRedacted: true,
     },
 

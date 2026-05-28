@@ -4,39 +4,18 @@
 
    Responsabilidad:
    - Bridge mínimo de idioma para la app.
-   - Sin diccionarios propios.
-   - Sin duplicar src/i18n/index.js.
-   - Sin storage.
-   - Sin eventos.
-   - Sin Router.
-   - Sin Toast.
-   - Sin fetch.
-   - Sin rerender propio.
-   - Sin innerHTML.
-   - Idioma base: es.
+   - Idioma activo/base forzado: es.
+   - Sin detección de navegador, usuario, backend ni storage.
+   - Sin diccionarios propios ni duplicar src/i18n/index.js.
+   - Sin eventos, Router, Toast, fetch, rerender propio ni innerHTML.
 ========================================================= */
 
-import {
-  UI_CONSTANTS,
-} from "./constants.js";
+export const I18N_VERSION = "app.i18n.v5";
 
-export const I18N_VERSION = "app.i18n.v4";
+const BASE_LANG = "es";
+const SUPPORTED_LANGS = Object.freeze(["es", "ca", "en"]);
 
-const DEFAULT_SUPPORTED_LANGS = Object.freeze(["es", "ca", "en"]);
-const BASE_FALLBACK_LANG = "es";
-
-const SUPPORTED_LANGS = Object.freeze(
-  normalizeSupportedLangs(UI_CONSTANTS?.supportedLangs)
-);
-
-const FALLBACK_LANG = normalizeLang(
-  UI_CONSTANTS?.fallbackLang ||
-    UI_CONSTANTS?.defaultLang ||
-    BASE_FALLBACK_LANG,
-  BASE_FALLBACK_LANG
-);
-
-let currentLang = "";
+let currentLang = BASE_LANG;
 
 /* =========================================================
    BASICS
@@ -46,12 +25,12 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 function isFunction(value) {
   return typeof value === "function";
+}
+
+function isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function cleanText(value = "", fallback = "") {
@@ -61,14 +40,6 @@ function cleanText(value = "", fallback = "") {
     .trim();
 
   return output || fallback;
-}
-
-function safeCall(fn = null, context = null, ...args) {
-  try {
-    return isFunction(fn) ? fn.apply(context, args) : null;
-  } catch {
-    return null;
-  }
 }
 
 function redact(value = "") {
@@ -81,62 +52,25 @@ function redact(value = "") {
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
-/* =========================================================
-   LANG NORMALIZATION
-========================================================= */
-
-function normalizeLangToken(value = "") {
-  const raw = cleanText(value, "")
-    .toLowerCase()
-    .replace(/_/g, "-")
-    .replace(/[^a-z0-9-]/g, "");
-
-  if (!raw) return "";
-
-  return raw.split("-").filter(Boolean).join("-");
-}
-
-function normalizeSupportedLangs(values = []) {
-  const input = Array.isArray(values) && values.length
-    ? values
-    : DEFAULT_SUPPORTED_LANGS;
-
-  const langs = [
-    ...new Set(
-      input
-        .map(normalizeLangToken)
-        .map((lang) => lang.split("-")[0] || lang)
-        .filter(Boolean)
-    ),
-  ];
-
-  if (!langs.includes(BASE_FALLBACK_LANG)) {
-    langs.unshift(BASE_FALLBACK_LANG);
+function safeCall(fn = null, context = null, ...args) {
+  try {
+    return isFunction(fn) ? fn.apply(context, args) : null;
+  } catch {
+    return null;
   }
-
-  return langs.length ? langs : [...DEFAULT_SUPPORTED_LANGS];
 }
 
-function normalizeLang(value = "", fallback = BASE_FALLBACK_LANG) {
-  const raw = normalizeLangToken(value);
-  const cleanFallback = normalizeLangToken(fallback) || BASE_FALLBACK_LANG;
-  const short = raw.split("-")[0];
-
-  if (SUPPORTED_LANGS.includes(raw)) return raw;
-  if (SUPPORTED_LANGS.includes(short)) return short;
-
-  if (SUPPORTED_LANGS.includes(cleanFallback)) return cleanFallback;
-
-  const fallbackShort = cleanFallback.split("-")[0];
-
-  if (SUPPORTED_LANGS.includes(fallbackShort)) return fallbackShort;
-
-  return BASE_FALLBACK_LANG;
+function normalizeLang() {
+  return BASE_LANG;
 }
+
+/* =========================================================
+   INTERPOLATION
+========================================================= */
 
 function interpolate(value = "", params = {}) {
   const source = redact(value);
-  const data = isObject(params) ? params : {};
+  const data = isPlainObject(params) ? params : {};
 
   return source.replace(
     /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}|\{\s*([a-zA-Z0-9_.-]+)\s*\}/g,
@@ -152,173 +86,97 @@ function interpolate(value = "", params = {}) {
 }
 
 /* =========================================================
-   DOCUMENT LANG
+   LANG APPLY
 ========================================================= */
 
-function getDocumentLang() {
-  if (!isBrowser()) return FALLBACK_LANG;
-
-  return normalizeLang(
-    document.documentElement?.dataset?.locale ||
-      document.documentElement?.lang ||
-      FALLBACK_LANG,
-    FALLBACK_LANG
-  );
-}
-
-function setDocumentLang(lang = FALLBACK_LANG) {
-  const clean = normalizeLang(lang, FALLBACK_LANG);
-
-  if (!isBrowser()) return clean;
+function setLocaleDataset(element = null) {
+  if (!element) return false;
 
   try {
-    document.documentElement.lang = clean;
+    element.dataset.locale = BASE_LANG;
+    element.dataset.localeSource = "base";
+    element.dataset.localeFallback = BASE_LANG;
+    element.dataset.localeSupported = SUPPORTED_LANGS.join(" ");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setDocumentLang() {
+  currentLang = BASE_LANG;
+
+  if (!isBrowser()) return BASE_LANG;
+
+  try {
+    document.documentElement.lang = BASE_LANG;
     document.documentElement.dir = "ltr";
-    document.documentElement.dataset.locale = clean;
-    document.documentElement.dataset.localeSource = "app";
-    document.documentElement.dataset.localeFallback = FALLBACK_LANG;
+
+    setLocaleDataset(document.documentElement);
+    setLocaleDataset(document.body);
   } catch {
     // noop
   }
 
-  return clean;
+  return BASE_LANG;
 }
 
-/* =========================================================
-   CORE LANG
-========================================================= */
-
-function getCoreLang(AppCore = null) {
-  return normalizeLang(
-    AppCore?.state?.lang ||
-      AppCore?.state?.language ||
-      AppCore?.state?.locale ||
-      "",
-    ""
-  );
-}
-
-function setCoreLang(AppCore = null, lang = FALLBACK_LANG) {
-  const clean = normalizeLang(lang, FALLBACK_LANG);
+function setCoreLang(AppCore = null) {
   const patch = {
-    lang: clean,
-    language: clean,
-    locale: clean,
+    lang: BASE_LANG,
+    language: BASE_LANG,
+    locale: BASE_LANG,
   };
 
-  /*
-    Vía preferente: AppCore.setState().
-    Mutación directa sólo como fallback de compat.
-  */
   if (isFunction(AppCore?.setState)) {
-    safeCall(
-      AppCore.setState,
-      AppCore,
-      patch,
-      {
-        source: "app.i18n",
-        silent: true,
-        emit: false,
-      }
-    );
+    safeCall(AppCore.setState, AppCore, patch, {
+      source: "app.i18n",
+      silent: true,
+      emit: false,
+    });
 
-    return clean;
+    return BASE_LANG;
   }
 
-  if (AppCore?.state && typeof AppCore.state === "object") {
-    AppCore.state.lang = clean;
-    AppCore.state.language = clean;
-    AppCore.state.locale = clean;
+  if (isPlainObject(AppCore?.state)) {
+    try {
+      Object.assign(AppCore.state, patch);
+    } catch {
+      // noop
+    }
   }
 
-  return clean;
+  return BASE_LANG;
 }
 
-/* =========================================================
-   I18N MODULE LANG
-========================================================= */
+function setI18nLang(I18n = null, options = {}) {
+  if (!I18n || I18n === api) return BASE_LANG;
 
-function getI18nLang(I18n = null) {
-  if (!I18n || I18n === api) return "";
+  const payload = isPlainObject(options) ? options : {};
 
-  return normalizeLang(
-    safeCall(I18n.getLang, I18n) ||
-      safeCall(I18n.getLocale, I18n) ||
-      safeCall(I18n.getLanguage, I18n) ||
-      "",
-    ""
-  );
+  for (const method of ["setLang", "setLocale", "setLanguage", "changeLanguage"]) {
+    if (isFunction(I18n[method])) {
+      safeCall(I18n[method], I18n, BASE_LANG, payload);
+      return BASE_LANG;
+    }
+  }
+
+  return BASE_LANG;
 }
 
-function setI18nLang(I18n = null, lang = FALLBACK_LANG, options = {}) {
-  const clean = normalizeLang(lang, FALLBACK_LANG);
-
-  if (!I18n || I18n === api) return clean;
-
-  const payload = isObject(options) ? options : {};
-
-  if (isFunction(I18n.setLang)) {
-    safeCall(I18n.setLang, I18n, clean, payload);
-    return clean;
-  }
-
-  if (isFunction(I18n.setLocale)) {
-    safeCall(I18n.setLocale, I18n, clean, payload);
-    return clean;
-  }
-
-  if (isFunction(I18n.setLanguage)) {
-    safeCall(I18n.setLanguage, I18n, clean, payload);
-    return clean;
-  }
-
-  if (isFunction(I18n.changeLanguage)) {
-    safeCall(I18n.changeLanguage, I18n, clean, payload);
-    return clean;
-  }
-
-  return clean;
-}
-
-/* =========================================================
-   RESOLVE / APPLY
-========================================================= */
-
-function resolveLang({
-  AppCore = null,
-  core = null,
-  I18n = null,
-  lang = "",
-  locale = "",
-  language = "",
-} = {}) {
-  return normalizeLang(
-    lang ||
-      locale ||
-      language ||
-      getCoreLang(AppCore || core) ||
-      getI18nLang(I18n) ||
-      getDocumentLang(),
-    FALLBACK_LANG
-  );
-}
-
-function applyLang(options = {}) {
-  const payload = isObject(options) ? options : {};
+function applyBaseLang(options = {}) {
+  const payload = isPlainObject(options) ? options : {};
   const AppCore = payload.AppCore || payload.core || null;
   const I18n = payload.I18n || null;
-  const clean = resolveLang(payload);
 
-  currentLang = clean;
-
-  setDocumentLang(clean);
-  setCoreLang(AppCore, clean);
-  setI18nLang(I18n, clean, {
+  setDocumentLang();
+  setCoreLang(AppCore);
+  setI18nLang(I18n, {
     updateDOM: payload.updateDOM === true,
     updateUi: payload.updateUi === true,
   });
 
-  return clean;
+  return BASE_LANG;
 }
 
 /* =========================================================
@@ -326,15 +184,15 @@ function applyLang(options = {}) {
 ========================================================= */
 
 export function syncLangState(options = {}) {
-  return applyLang(options);
+  return applyBaseLang(options);
 }
 
 export async function initI18n(options = {}) {
-  const payload = isObject(options) ? options : {};
-  const I18n = payload.I18n || null;
+  const payload = isPlainObject(options) ? options : {};
   const AppCore = payload.AppCore || payload.core || null;
+  const I18n = payload.I18n || null;
 
-  const lang = applyLang(payload);
+  applyBaseLang(payload);
 
   if (I18n && I18n !== api && isFunction(I18n.bindCore)) {
     safeCall(I18n.bindCore, I18n, AppCore);
@@ -343,41 +201,30 @@ export async function initI18n(options = {}) {
   if (I18n && I18n !== api && isFunction(I18n.init)) {
     await I18n.init({
       ...payload,
-      lang,
-      locale: lang,
-      language: lang,
+      lang: BASE_LANG,
+      locale: BASE_LANG,
+      language: BASE_LANG,
       updateDOM: payload.updateDOM === true,
       updateUi: payload.updateUi === true,
     });
   }
 
-  applyLang({
-    ...payload,
-    lang,
-  });
+  /*
+    Segunda pasada intencionada:
+    garantiza que ningún init interno pise el contrato base es.
+  */
+  applyBaseLang(payload);
 
-  return lang;
+  return BASE_LANG;
 }
 
-export function changeLanguage(options = {}, second = "") {
-  const payload = typeof options === "string"
-    ? {
-        lang: options,
-      }
-    : {
-        ...(isObject(options) ? options : {}),
-        lang:
-          options.lang ||
-          options.locale ||
-          options.language ||
-          second,
-      };
-
-  return applyLang(payload);
+export function changeLanguage(options = {}) {
+  void options;
+  return applyBaseLang();
 }
 
 export function t(input = "", fallback = "", params = {}) {
-  if (isObject(input)) {
+  if (isPlainObject(input)) {
     const payload = input;
     const I18n = payload.I18n || null;
     const key = cleanText(payload.key, "");
@@ -407,35 +254,58 @@ export function t(input = "", fallback = "", params = {}) {
    SNAPSHOT
 ========================================================= */
 
+function getDocumentLang() {
+  if (!isBrowser()) return BASE_LANG;
+  return cleanText(document.documentElement?.lang, BASE_LANG);
+}
+
+function getCoreLang(AppCore = null) {
+  return cleanText(
+    AppCore?.state?.lang ||
+      AppCore?.state?.language ||
+      AppCore?.state?.locale,
+    ""
+  );
+}
+
+function getI18nLang(I18n = null) {
+  if (!I18n || I18n === api) return "";
+
+  return cleanText(
+    safeCall(I18n.getLang, I18n) ||
+      safeCall(I18n.getLocale, I18n) ||
+      safeCall(I18n.getLanguage, I18n),
+    ""
+  );
+}
+
 export function getI18nSnapshot(options = {}) {
-  const payload = isObject(options) ? options : {};
-  const lang = resolveLang({
-    ...payload,
-    lang: currentLang || payload.lang || payload.locale || payload.language || "",
-  });
+  const payload = isPlainObject(options) ? options : {};
+  const AppCore = payload.AppCore || payload.core || null;
+  const I18n = payload.I18n || null;
 
   return {
     version: I18N_VERSION,
 
-    lang,
-    language: lang,
-    locale: lang,
+    lang: currentLang,
+    language: currentLang,
+    locale: currentLang,
 
-    fallbackLang: FALLBACK_LANG,
+    fallbackLang: BASE_LANG,
     supportedLangs: [...SUPPORTED_LANGS],
 
     documentLang: getDocumentLang(),
-    coreLang: getCoreLang(payload.AppCore || payload.core || null) || null,
-    i18nLang: getI18nLang(payload.I18n || null) || null,
+    coreLang: getCoreLang(AppCore) || null,
+    i18nLang: getI18nLang(I18n) || null,
 
     policy: {
       bridgeOnly: true,
+      forcedBaseEs: true,
+      noBrowserDetection: true,
+      noUserPreferenceLanguage: true,
+      noBackendLanguageOverride: true,
       noOwnDictionaries: true,
       doesNotDuplicateSrcI18n: true,
-
-      setStatePreferred: true,
-      directCoreMutationOnlyAsFallback: true,
-
       noStorage: true,
       noEvents: true,
       noRouter: true,
@@ -443,8 +313,6 @@ export function getI18nSnapshot(options = {}) {
       noFetch: true,
       noOwnRerender: true,
       noInnerHTML: true,
-
-      baseFallbackEs: true,
       redactedSnapshot: true,
     },
   };

@@ -9,10 +9,11 @@
    - Normaliza resultado de boot sin navegar ni tocar rutas.
    - Soporta refresh por cookie httpOnly con credentials include.
    - No limpia sesión por access token caducado/rotado.
+   - No decide logout.
    - Sin imports, Router, rutas, eventos, storage, fetch, warmup ni UI sync.
 ========================================================= */
 
-export const SESSION_VERSION = "app.session.v9";
+export const SESSION_VERSION = "app.session.v10";
 
 const RESTORE_OPTIONS = Object.freeze({
   persistent: true,
@@ -52,7 +53,30 @@ const RESULT_BRANCH_KEYS = Object.freeze([
   "result",
   "data",
   "auth",
+  "session",
   "snapshot",
+]);
+
+const TERMINAL_AUTH_CODES = new Set([
+  "SESSION_REVOKED",
+  "SESSION_INVALID",
+  "SESSION_NOT_FOUND",
+
+  "INVALID_REFRESH_TOKEN",
+  "REFRESH_TOKEN_INVALID",
+  "REFRESH_TOKEN_REVOKED",
+
+  "USER_DISABLED",
+  "USER_INACTIVE",
+  "USER_SUSPENDED",
+  "USER_BLOCKED",
+  "USER_BANNED",
+  "USER_REVOKED",
+  "USER_DELETED",
+  "USER_ARCHIVED",
+
+  "USER_DESACTIVADO",
+  "USUARIO_DESACTIVADO",
 ]);
 
 let restorePromise = null;
@@ -86,6 +110,12 @@ function redact(value = "") {
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+function normalizeCode(value = "") {
+  return cleanText(value, "")
+    .replace(/[\s-]+/g, "_")
+    .toUpperCase();
 }
 
 function safeCall(fn = null) {
@@ -206,6 +236,24 @@ function hasAuthenticatedUser(AppCore = null, Auth = null) {
   return Boolean(isAuthenticated(AppCore, auth) && getUser(AppCore, auth));
 }
 
+function hasRestoreCandidate(AppCore = null, Auth = null, snapshotMeta = null) {
+  const state = readState(AppCore);
+  const auth = resolveAuth(AppCore, Auth);
+
+  return Boolean(
+    state.hasRefreshToken === true ||
+      state.session ||
+      state.sessionData ||
+      state.sessionId ||
+      auth?.hasRefreshToken === true ||
+      auth?.refreshAvailable === true ||
+      snapshotMeta?.hasRefreshToken === true ||
+      snapshotMeta?.hasSession === true ||
+      snapshotMeta?.hasCookieRefreshCandidate === true ||
+      snapshotMeta?.supportsHttpOnlyRefresh === true
+  );
+}
+
 /* =========================================================
    RESULT READ
 ========================================================= */
@@ -276,12 +324,27 @@ function getResultFlags(result = null) {
 }
 
 function buildRestoreMeta(result = null) {
-  if (!isPlainObject(result)) return null;
+  if (!isPlainObject(result)) {
+    return {
+      ok: result !== false,
+      failed: result === false,
+      restored: result === true,
+      authenticated: false,
+      skipped: result === null || result === undefined,
+      hasUser: false,
+      hasSession: false,
+      source: "app.session",
+      reason: result === null || result === undefined ? "empty-result" : "",
+      code: null,
+      status: null,
+    };
+  }
 
   const flags = getResultFlags(result);
+  const code = normalizeCode(firstBranchValue(result, ["code", "error"]));
 
   return {
-    ok: flags.ok,
+    ok: flags.failed ? false : true,
     failed: flags.failed,
     restored: flags.restored,
     authenticated: flags.authenticated,
@@ -292,7 +355,7 @@ function buildRestoreMeta(result = null) {
 
     source: cleanText(firstBranchValue(result, ["source"]), null),
     reason: cleanText(firstBranchValue(result, ["reason"]), null),
-    code: firstBranchValue(result, ["code", "error"]),
+    code: code || null,
     status: firstBranchValue(result, ["status", "statusCode"]),
   };
 }
@@ -323,20 +386,44 @@ function buildSnapshotMeta(snapshot = null) {
    ERROR
 ========================================================= */
 
+function errorCode(error = null) {
+  return normalizeCode(
+    error?.code ||
+      error?.error ||
+      error?.data?.code ||
+      error?.data?.error ||
+      error?.response?.data?.code ||
+      error?.response?.data?.error ||
+      ""
+  );
+}
+
 function publicError(error = null) {
   if (!error) return null;
 
   return {
     name: cleanText(error.name, "Error"),
     message: redact(error.message || String(error)),
-    code: error.code || error.error || null,
+    code: errorCode(error) || null,
     status:
       error.status ||
       error.statusCode ||
       error.response?.status ||
       error.data?.status ||
       null,
+    canRefresh: error.canRefresh === true || error.refreshRequired === true,
+    shouldLogout: error.shouldLogout === true || error.clearClientSession === true,
   };
+}
+
+function isTerminalRestoreError(error = null) {
+  if (!error) return false;
+
+  if (error.shouldLogout === true || error.clearClientSession === true) {
+    return true;
+  }
+
+  return TERMINAL_AUTH_CODES.has(errorCode(error));
 }
 
 /* =========================================================
@@ -347,11 +434,6 @@ function createRestorePayload(options = {}) {
   return {
     ...options,
     ...RESTORE_OPTIONS,
-
-    /*
-      App/session siempre pide restore persistente.
-      Auth/restore decide si hay token, /me, refresh o sesión vacía.
-    */
     source: "app.session",
   };
 }
@@ -360,31 +442,33 @@ function normalizeRestoreResult(result = null, AppCore = null, Auth = null) {
   const auth = resolveAuth(AppCore, Auth);
   const snapshot = getAuthSnapshot(AppCore, auth);
   const snapshotMeta = buildSnapshotMeta(snapshot);
-  const resultFlags = getResultFlags(result);
+  const resultMeta = buildRestoreMeta(result);
 
   const user = getUser(AppCore, auth) || getResultUser(result) || null;
   const session = getSession(AppCore, auth) || getResultSession(result) || null;
 
   const authenticated = Boolean(
     hasAuthenticatedUser(AppCore, auth) ||
-      (resultFlags.authenticated && user) ||
+      (resultMeta.authenticated && user) ||
       (snapshotMeta?.authenticated && user)
   );
 
   const restored = Boolean(
-    resultFlags.restored ||
-      resultFlags.authenticated ||
+    resultMeta.restored ||
+      resultMeta.authenticated ||
       snapshotMeta?.restored ||
       snapshotMeta?.authenticated ||
       authenticated
   );
+
+  const hasCandidate = hasRestoreCandidate(AppCore, auth, snapshotMeta);
 
   return {
     /*
       ok indica que el intento de restore terminó sin romper el boot,
       no que haya sesión autenticada.
     */
-    ok: Boolean(result !== null && !resultFlags.failed),
+    ok: resultMeta.failed !== true,
     restoreCompleted: true,
 
     restored,
@@ -392,15 +476,18 @@ function normalizeRestoreResult(result = null, AppCore = null, Auth = null) {
 
     hasUser: Boolean(user),
     hasSession: Boolean(session),
+    hasRestoreCandidate: hasCandidate,
 
     user: authenticated ? user : null,
     session: authenticated && isPlainObject(session) ? session : null,
 
-    result: buildRestoreMeta(result),
+    result: resultMeta,
     snapshot: snapshotMeta,
 
     source: cleanText(
-      firstBranchValue(result, ["source"]) || snapshotMeta?.source,
+      firstBranchValue(result, ["source"]) ||
+        snapshotMeta?.source ||
+        resultMeta.source,
       "app.session"
     ),
 
@@ -414,18 +501,27 @@ function normalizeRestoreFailure(error = null, AppCore = null, Auth = null) {
   const snapshotMeta = buildSnapshotMeta(snapshot);
 
   const authenticated = hasAuthenticatedUser(AppCore, auth);
-  const user = authenticated ? getUser(AppCore, auth) : null;
-  const session = authenticated ? getSession(AppCore, auth) : null;
+  const user = getUser(AppCore, auth);
+  const session = getSession(AppCore, auth);
+  const terminal = isTerminalRestoreError(error);
+  const hasCandidate = hasRestoreCandidate(AppCore, auth, snapshotMeta);
 
   return {
     ok: false,
-    restoreCompleted: false,
+    restoreCompleted: true,
 
     restored: false,
     authenticated,
 
     hasUser: Boolean(user),
     hasSession: Boolean(session),
+    hasRestoreCandidate: hasCandidate,
+
+    /*
+      recoverable sólo informa.
+      App/session no limpia sesión ni navega.
+    */
+    recoverable: !terminal,
 
     user: authenticated ? user : null,
     session: authenticated && isPlainObject(session) ? session : null,
@@ -456,7 +552,6 @@ export function restoreAuthSession({
       /*
         App/session no limpia sesión ni navega.
         Auth/restore/session son los únicos dueños de aplicar/limpiar.
-        Si restore falla por error técnico, el boot recibe resultado seguro.
       */
       return normalizeRestoreFailure(error, AppCore, Auth);
     }
@@ -491,6 +586,7 @@ export function getSessionBootstrapSnapshot({
     hasUser: Boolean(getUser(AppCore, auth)),
     hasAuthenticatedUser: authenticated,
     hasSession: Boolean(getSession(AppCore, auth)),
+    hasRestoreCandidate: hasRestoreCandidate(AppCore, auth, snapshotMeta),
 
     authSnapshot: snapshotMeta
       ? {
@@ -521,6 +617,7 @@ export function getSessionBootstrapSnapshot({
       credentialsInclude: true,
 
       tokenExpiredDoesNotMeanLogout: true,
+      restoreFailureDoesNotNavigate: true,
       noSessionClearHere: true,
 
       noFetch: true,

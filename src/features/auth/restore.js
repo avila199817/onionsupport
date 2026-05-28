@@ -5,13 +5,15 @@
    Responsabilidad:
    - Restaurar sesión mínima.
    - Validar sesión contra /api/auth/me cuando hay access token.
-   - Si access token caducó y hay refresh token: renovar por /api/auth/refresh.
-   - Si /me devuelve 401 genérico y hay refresh context: intentar refresh antes de limpiar.
-   - Si no hay access token pero hay refresh token: intentar refresh silencioso.
+   - Si access token caducó: intentar /api/auth/refresh antes de limpiar.
+   - Si /me devuelve 401 genérico: intentar refresh silencioso antes de limpiar.
+   - Si no hay access token: intentar refresh silencioso igualmente.
+   - Refresh puede funcionar con cookie httpOnly y credentials include.
    - Si refresh devuelve sesión válida: aplicar sesión.
+   - Si refresh devuelve token sin user: validar /me con el nuevo token.
    - Si /me devuelve user válido: aplicar sesión.
-   - Si no hay token ni refresh context: limpiar sesión local.
-   - Si refresh falla con revocación/usuario inválido/tokenVersion: limpiar sesión local.
+   - Si refresh falla con 401/403 o señal terminal: limpiar sesión local.
+   - Si hay error técnico/no auth: no fabricar logout.
    - CoreHttp clasifica errores auth refreshable/clear-session.
    - session.js aplica/limpia/persiste sesión.
    - No inventar slug.
@@ -25,9 +27,10 @@
    - Sin 2FA/MFA/OTP.
 
    CONTRATO:
-   - CoreHttp clasifica errores auth.
-   - session.js es el único que aplica/limpia/persiste sesión.
-   - Backend permite refresh con refreshToken y, si existen, sessionId/userId.
+   - Access token caducado/rotado NO equivale a logout.
+   - /api/auth/refresh es público, sin Authorization y con credentials include.
+   - El refresh token NO tiene por qué estar disponible en JS.
+   - session.js es el único que aplica/limpia sesión local.
 ========================================================= */
 
 import * as CoreHttpModule from "../../core/http.js";
@@ -49,7 +52,7 @@ import {
   getCurrentUserHomePath,
 } from "./session.js";
 
-export const RESTORE_VERSION = "auth.restore.v10";
+export const RESTORE_VERSION = "auth.restore.v11";
 
 const ME_ENDPOINT = AUTH_ENDPOINTS.me;
 const REFRESH_ENDPOINT = AUTH_ENDPOINTS.refresh;
@@ -124,8 +127,22 @@ function redact(value = "") {
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
+function safeHttpCall(name = "", ...args) {
+  try {
+    const fn = CoreHttp?.[name];
+
+    if (isFunction(fn)) {
+      return fn.apply(CoreHttp, args);
+    }
+  } catch {
+    // noop
+  }
+
+  return null;
+}
+
 /* =========================================================
-   TOKEN / SESSION CONTEXT
+   TOKEN / PAYLOAD
 ========================================================= */
 
 function stripBearer(value = "") {
@@ -175,7 +192,70 @@ function currentSession() {
   }
 }
 
-function refreshContext() {
+function nestedPayloads(payload = {}) {
+  if (!isObject(payload)) return [];
+
+  return [
+    payload,
+    isObject(payload.data) ? payload.data : null,
+    isObject(payload.payload) ? payload.payload : null,
+    isObject(payload.result) ? payload.result : null,
+    isObject(payload.auth) ? payload.auth : null,
+    isObject(payload.session) ? payload.session : null,
+    isObject(payload.sessionData) ? payload.sessionData : null,
+  ].filter(Boolean);
+}
+
+function pick(payload = {}, names = []) {
+  for (const node of nestedPayloads(payload)) {
+    for (const name of names) {
+      const value =
+        node?.[name] ??
+        node?.session?.[name] ??
+        node?.sessionData?.[name] ??
+        node?.auth?.[name];
+
+      if (value !== undefined && value !== null && value !== "") {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
+function accessTokenFromPayload(payload = {}) {
+  return cleanToken(
+    pick(payload, [
+      "token",
+      "accessToken",
+      "access_token",
+    ]) || ""
+  );
+}
+
+/* =========================================================
+   REFRESH CONTEXT
+========================================================= */
+
+function allowSilentRefresh(options = {}) {
+  return !(
+    options.allowSilentRefresh === false ||
+    options.silentRefresh === false ||
+    options.disableRefresh === true ||
+    options.noRefresh === true
+  );
+}
+
+function allowCookieRefresh(options = {}) {
+  return !(
+    options.allowCookieRefresh === false ||
+    options.cookieRefresh === false ||
+    options.credentials === "omit"
+  );
+}
+
+function refreshContext(options = {}) {
   const session = currentSession();
   const user = currentUser();
   const refreshToken = currentRefreshToken();
@@ -202,9 +282,12 @@ function refreshContext() {
     ""
   );
 
+  const cookieCandidate = allowCookieRefresh(options);
+
   /*
-    Backend refresh puede resolver por refreshTokenHash si falta sessionId/userId.
-    Por tanto, el contexto usable mínimo es refreshToken.
+    Contexto usable:
+    - refreshToken visible, si existe por compat; o
+    - cookie httpOnly de backend, con credentials include.
   */
   return {
     refreshToken,
@@ -212,18 +295,12 @@ function refreshContext() {
     userId,
     session,
     user,
-    usable: Boolean(refreshToken),
-    hasFullContext: Boolean(refreshToken && sessionId && userId),
-  };
-}
 
-function allowSilentRefresh(options = {}) {
-  return !(
-    options.allowSilentRefresh === false ||
-    options.silentRefresh === false ||
-    options.disableRefresh === true ||
-    options.noRefresh === true
-  );
+    usable: Boolean(refreshToken || cookieCandidate),
+    hasRefreshToken: Boolean(refreshToken),
+    hasCookieRefreshCandidate: Boolean(cookieCandidate),
+    hasFullContext: Boolean((refreshToken || cookieCandidate) && sessionId && userId),
+  };
 }
 
 /* =========================================================
@@ -411,29 +488,31 @@ function isRefreshableAuthFailure(error = null, options = {}) {
 
   const status = authErrorStatus(error);
   const code = cleanText(authErrorCode(error), "").toUpperCase();
-  const context = refreshContext();
+  const context = refreshContext(options);
 
   if (status && status !== 401) return false;
 
-  if (code === "TOKEN_EXPIRED") {
-    return Boolean(context.usable);
-  }
-
   if (
     [
+      "TOKEN_EXPIRED",
+      "ACCESS_TOKEN_EXPIRED",
+      "JWT_EXPIRED",
+      "TOKEN_STALE",
       "MISSING_TOKEN",
       "TOKEN_MISSING",
       "SESSION_REQUIRED",
+      "AUTH_REQUIRED",
+      "UNAUTHORIZED",
     ].includes(code)
   ) {
     return Boolean(context.usable);
   }
 
   /*
-    Caso real tras Ctrl+F5:
+    Caso real:
     /me puede devolver 401 genérico sin code/canRefresh/refreshRequired.
-    Si existe refresh token persistido, se debe intentar /refresh antes
-    de limpiar storage. Si /refresh falla con 401/403, entonces se limpia.
+    Si se puede intentar refresh por cookie httpOnly o refreshToken,
+    no se limpia sesión todavía.
   */
   if (status === 401 && context.usable) {
     return true;
@@ -619,6 +698,7 @@ async function requestMe(token = "", options = {}) {
     skipAuth: false,
     noAuthHeader: false,
     cache: "no-store",
+    credentials: options.credentials || "include",
   };
 
   if (isFunction(CoreHttp?.me)) {
@@ -647,17 +727,23 @@ async function requestRefresh(context = {}, options = {}) {
   const sessionId = cleanText(context.sessionId, "");
   const userId = cleanText(context.userId, "");
 
-  if (!refreshToken) {
-    throw createRestoreError("Falta refresh token para renovar sesión.", {
+  if (!refreshToken && !allowCookieRefresh(options)) {
+    throw createRestoreError("Falta contexto de refresh para renovar sesión.", {
       status: 401,
       code: "MISSING_REFRESH_CONTEXT",
     });
   }
 
-  const body = {
-    refreshToken,
-    refresh_token: refreshToken,
-  };
+  const body = {};
+
+  /*
+    Compat: si existe refreshToken visible, se envía.
+    Flujo preferente: cookie httpOnly con credentials include.
+  */
+  if (refreshToken) {
+    body.refreshToken = refreshToken;
+    body.refresh_token = refreshToken;
+  }
 
   if (sessionId) {
     body.sessionId = sessionId;
@@ -694,6 +780,7 @@ async function requestRefresh(context = {}, options = {}) {
     skipAuth: true,
     noAuthHeader: true,
     cache: "no-store",
+    credentials: options.credentials || "include",
   };
 
   if (isFunction(CoreHttp?.refreshSession)) {
@@ -731,6 +818,8 @@ function applyMeResponse(response = {}, token = "", options = {}) {
         data: response,
       };
 
+  safeHttpCall("setAccessToken", safeToken);
+
   const snapshot = applySession(
     {
       ...payload,
@@ -756,12 +845,14 @@ function applyMeResponse(response = {}, token = "", options = {}) {
   return snapshot;
 }
 
-function applyRefreshResponse(response = {}, options = {}) {
+async function applyRefreshResponse(response = {}, options = {}) {
   const payload = isObject(response)
     ? response
     : {
         data: response,
       };
+
+  safeHttpCall("setAuthTokens", payload);
 
   const snapshot = applySession(payload, {
     source: "auth.restore.refresh",
@@ -770,14 +861,30 @@ function applyRefreshResponse(response = {}, options = {}) {
     emit: options.emit === true,
   });
 
-  if (!snapshot?.authenticated && !isAuthenticated()) {
-    throw createRestoreError("No se pudo renovar una sesión válida.", {
-      status: 401,
-      code: "REFRESH_SESSION_INVALID",
+  if (snapshot?.authenticated || isAuthenticated()) {
+    return snapshot;
+  }
+
+  /*
+    Si refresh devuelve sólo access token, validamos /me.
+    Esto evita falso logout cuando backend separa refresh de user payload.
+  */
+  const refreshedToken =
+    accessTokenFromPayload(payload) ||
+    currentToken();
+
+  if (tokenOk(refreshedToken)) {
+    const meResponse = await requestMe(refreshedToken, options);
+    return applyMeResponse(meResponse, refreshedToken, {
+      ...options,
+      source: "auth.restore.refresh.me",
     });
   }
 
-  return snapshot;
+  throw createRestoreError("No se pudo renovar una sesión válida.", {
+    status: 401,
+    code: "REFRESH_SESSION_INVALID",
+  });
 }
 
 function clearInvalidSession(options = {}) {
@@ -790,6 +897,10 @@ function clearInvalidSession(options = {}) {
   } catch {
     // noop
   }
+
+  safeHttpCall("clearAuthTokens", {
+    clearState: true,
+  });
 
   return true;
 }
@@ -851,10 +962,10 @@ export async function refreshSession(options = {}) {
 
   runtime.refreshPromise = (async () => {
     try {
-      const context = refreshContext();
+      const context = refreshContext(options);
 
       if (!context.usable) {
-        throw createRestoreError("No hay refresh token para renovar sesión.", {
+        throw createRestoreError("No hay contexto para renovar sesión.", {
           status: 401,
           code: "MISSING_REFRESH_CONTEXT",
         });
@@ -862,7 +973,7 @@ export async function refreshSession(options = {}) {
 
       const response = await requestRefresh(context, options);
 
-      applyRefreshResponse(response, options);
+      await applyRefreshResponse(response, options);
 
       runtime.lastRefreshAt = Date.now();
       clearLastError();
@@ -884,7 +995,7 @@ async function tryRefreshAfterAuthFailure(error = null, options = {}) {
     throw normalizeRestoreError(error);
   }
 
-  const context = refreshContext();
+  const context = refreshContext(options);
 
   if (!context.usable) {
     throw normalizeRestoreError(error);
@@ -905,12 +1016,12 @@ export async function restoreSession(options = {}) {
   runtime.restorePromise = (async () => {
     try {
       const token = currentToken();
-      const context = refreshContext();
+      const context = refreshContext(options);
 
       /*
-        Aunque exista token+user local, en restore de arranque validamos /me.
-        Si el access token caducó, /me devolverá TOKEN_EXPIRED o incluso 401 genérico.
-        Con refresh context usable, se intenta /refresh antes de limpiar sesión.
+        Aunque exista token local, se valida /me.
+        Si el access token caducó, /me puede devolver TOKEN_EXPIRED o 401 genérico.
+        Con refresh por cookie/httpOnly o refreshToken visible, se intenta refresh antes de limpiar.
       */
       if (tokenOk(token)) {
         try {
@@ -954,6 +1065,11 @@ export async function restoreSession(options = {}) {
         }
       }
 
+      /*
+        Sin access token:
+        No limpiamos de entrada. Intentamos refresh silencioso por cookie httpOnly.
+        Si el backend no tiene sesión/cookie válida, devolverá 401/403 y entonces limpiamos.
+      */
       if (!context.usable) {
         clearInvalidSession(options);
 
@@ -1037,6 +1153,8 @@ export function getRestoreSnapshot() {
     refresh_token: null,
 
     hasRefreshContext: Boolean(context.usable),
+    hasRefreshTokenContext: Boolean(context.hasRefreshToken),
+    hasCookieRefreshCandidate: Boolean(context.hasCookieRefreshCandidate),
     hasFullRefreshContext: Boolean(context.hasFullContext),
     hasSessionId: Boolean(context.sessionId),
     hasSessionUserId: Boolean(context.userId),
@@ -1061,6 +1179,8 @@ export function getRestoreSnapshot() {
       validatesMeOnRestore: true,
       refreshOnTokenExpired: true,
       refreshOnGenericMe401WithContext: true,
+      refreshWithoutVisibleRefreshToken: true,
+      supportsHttpOnlyCookieRefresh: true,
       tokenExpiredDoesNotMeanLogout: true,
 
       noFetchOwn: true,
@@ -1069,7 +1189,7 @@ export function getRestoreSnapshot() {
       restoresViaMe: true,
       refreshesViaCoreHttp: true,
 
-      refreshTokenIsMinimumContext: true,
+      refreshTokenIsOptionalInJavascript: true,
       sessionIdUserIdPreferredButOptional: true,
 
       noSlugFabrication: true,

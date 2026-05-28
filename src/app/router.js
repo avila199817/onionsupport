@@ -6,22 +6,29 @@
    - Wrapper mínimo sobre /src/router/index.js.
    - Inicializar Router sin render automático.
    - Bindear Router si existe.
-   - Renderizar ruta inicial capturada por main.js.
+   - Renderizar una sola vez la ruta inicial capturada por main.js.
    - Preservar query/hash de la ruta inicial.
-   - Delegar guards/render/history/canonicalización al Router real.
-   - No iniciar restore.
-   - No tocar Auth.
-   - No tocar storage.
-   - No hacer fetch.
-   - No crear eventos propios.
-   - No aplicar navegación paralela.
-   - Sin token flow.
-   - Sin debug pesado.
+   - Delegar guards, render, history, canonicalización y redirects
+     al Router real.
+   - Sin restore, Auth, storage, fetch, eventos, token flow,
+     navegación paralela ni debug pesado.
 ========================================================= */
 
 import { Router } from "../router/index.js";
 
-export const ROUTER_BOOTSTRAP_VERSION = "app.router.v6";
+export const ROUTER_BOOTSTRAP_VERSION = "app.router.v7";
+
+const INIT_OPTIONS = Object.freeze({
+  appManagedInitialRender: true,
+  skipInitialRender: true,
+  render: false,
+});
+
+const INITIAL_RENDER_OPTIONS = Object.freeze({
+  initialRender: true,
+  replaceState: true,
+  skipHistory: true,
+});
 
 let configured = false;
 let bound = false;
@@ -43,12 +50,12 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 function isFunction(value) {
   return typeof value === "function";
+}
+
+function isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function cleanText(value = "", fallback = "") {
@@ -96,14 +103,10 @@ function pathCandidate(value = "") {
   return typeof value === "string" ? cleanText(value, "") : "";
 }
 
-function routeFrom(options = {}) {
-  const input = isObject(options) ? options : {};
-  const bootContext = isObject(input.bootContext) ? input.bootContext : {};
+function resolveInitialPath(options = {}) {
+  const input = isPlainObject(options) ? options : {};
+  const bootContext = isPlainObject(input.bootContext) ? input.bootContext : {};
 
-  /*
-    No normalizar aquí.
-    El Router real decide canonicalización, guards, redirects y render.
-  */
   return (
     pathCandidate(bootContext.initialPath) ||
     pathCandidate(input.initialPath) ||
@@ -114,14 +117,14 @@ function routeFrom(options = {}) {
   );
 }
 
-function payload(options = {}, extra = {}) {
-  const input = isObject(options) ? options : {};
-  const addition = isObject(extra) ? extra : {};
+function routerPayload(options = {}, extra = {}) {
+  const input = isPlainObject(options) ? options : {};
+  const patch = isPlainObject(extra) ? extra : {};
 
   return {
     ...input,
-    ...addition,
-    source: cleanText(addition.source || input.source, "app.router"),
+    ...patch,
+    source: cleanText(patch.source || input.source, "app.router"),
   };
 }
 
@@ -132,11 +135,11 @@ function requireRouterMethod(name = "") {
     throw new Error(`Router.${name}() no disponible.`);
   }
 
-  return fn;
+  return fn.bind(Router);
 }
 
 function summarizeRenderResult(result = null) {
-  if (!isObject(result)) {
+  if (!isPlainObject(result)) {
     return {
       ok: result !== false,
     };
@@ -156,7 +159,7 @@ function summarizeRenderResult(result = null) {
 }
 
 /* =========================================================
-   CONFIGURE
+   CONFIGURE / BIND
 ========================================================= */
 
 export function configureRouter(options = {}) {
@@ -165,15 +168,7 @@ export function configureRouter(options = {}) {
 
   configurePromise = (async () => {
     const init = requireRouterMethod("init");
-
-    const result = await init.call(
-      Router,
-      payload(options, {
-        appManagedInitialRender: true,
-        skipInitialRender: true,
-        render: false,
-      })
-    );
+    const result = await init(routerPayload(options, INIT_OPTIONS));
 
     if (result === false) {
       throw new Error("Router.init() devolvió false.");
@@ -193,32 +188,19 @@ export function configureRouter(options = {}) {
   return configurePromise;
 }
 
-/* =========================================================
-   BIND
-========================================================= */
-
 export function bindRouter(options = {}) {
   if (bound) return Promise.resolve(true);
   if (bindPromise) return bindPromise;
 
   bindPromise = (async () => {
-    if (!configured) {
-      await configureRouter(options);
-    }
+    await configureRouter(options);
 
     if (!isFunction(Router?.bind)) {
       bound = true;
       return true;
     }
 
-    const result = await Router.bind.call(
-      Router,
-      payload(options, {
-        appManagedInitialRender: true,
-        skipInitialRender: true,
-        render: false,
-      })
-    );
+    const result = await Router.bind(routerPayload(options, INIT_OPTIONS));
 
     if (result === false) {
       throw new Error("Router.bind() devolvió false.");
@@ -249,27 +231,16 @@ export function renderInitialRoute(options = {}) {
   renderPromise = (async () => {
     lastRenderError = null;
 
-    await configureRouter(options);
     await bindRouter(options);
 
-    const path = routeFrom(options);
+    const path = resolveInitialPath(options);
     const render = requireRouterMethod("render");
 
     lastInitialPath = path;
 
-    const result = await render.call(
-      Router,
+    const result = await render(
       path,
-      payload(options, {
-        initialRender: true,
-        replaceState: true,
-
-        /*
-          La URL actual ya existe en el navegador.
-          La gestión real de history pertenece a /src/router.
-        */
-        skipHistory: true,
-      })
+      routerPayload(options, INITIAL_RENDER_OPTIONS)
     );
 
     if (result === false) {
@@ -277,8 +248,8 @@ export function renderInitialRoute(options = {}) {
     }
 
     lastRenderResult = summarizeRenderResult(result);
-
     rendered = true;
+
     return true;
   })()
     .catch((error) => {
@@ -342,42 +313,23 @@ export function getRouterBootstrapState() {
 
     policy: {
       wrapperOnly: true,
-
       appManagedInitialRender: true,
-      configIdempotent: true,
-      bindIdempotent: true,
       renderInitialOnce: true,
-
-      bindsBeforeInitialRender: true,
       preservesInitialPath: true,
       preservesQueryAndHash: true,
-
-      routerOwnsAuthWait: true,
       routerOwnsGuards: true,
       routerOwnsHistory: true,
       routerOwnsCanonicalization: true,
       routerOwnsRedirects: true,
-
-      ownAuth: false,
-      ownStorage: false,
-      ownTransport: false,
-      ownNavigationPolicy: false,
-      ownRouteGuards: false,
-      ownHistory: false,
-
-      noTokenFlow: true,
+      noAuth: true,
+      noStorage: true,
       noFetch: true,
       noEventsOwn: true,
-      noDebugNoise: true,
-
+      noTokenFlow: true,
       snapshotRedacted: true,
     },
   };
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   ROUTER_BOOTSTRAP_VERSION,

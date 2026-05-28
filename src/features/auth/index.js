@@ -11,13 +11,15 @@
    - Exponer Home privada por slug: /@{user.slug}.
    - Pedir restore persistente/silent refresh a restore.js.
    - Init sólo registra Auth; restoreSession gobierna la restauración.
+   - /api/auth/me es el único endpoint válido de "me".
+   - Refresh visible opcional: puede ir en cookie httpOnly.
    - Sin Router.
    - Sin Toast.
    - Sin fetch propio.
    - Sin storage paralelo.
    - Sin opción "Recordarme".
    - Sin rutas inventadas.
-   - Sin /home.
+   - Sin /home como ruta real.
    - Sin 2FA/MFA/OTP.
    - Roles únicos: admin / user.
    - Auth estricta: access token usable + user usable.
@@ -43,7 +45,7 @@ import * as GuardsApi from "./guards.js";
 import * as ActivationApi from "./activation.js";
 import * as PasswordResetApi from "./password-reset.js";
 
-export const AUTH_MODULE_VERSION = "auth.facade.v10";
+export const AUTH_MODULE_VERSION = "auth.facade.v11";
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
 
@@ -59,6 +61,11 @@ const AUTH_HOME = Object.freeze({
   userPrefix: USER_HOME_PREFIX || "/@",
 });
 
+const INVALID_USER_STATUSES = new Set([
+  "suspended",
+  "desactivado",
+]);
+
 const CoreHttp =
   CoreHttpModule.default ||
   CoreHttpModule.Http ||
@@ -67,11 +74,11 @@ const CoreHttp =
 
 const SENSITIVE_KEYS = new Set([
   "token",
-  "accessToken",
+  "accesstoken",
   "access_token",
-  "refreshToken",
+  "refreshtoken",
   "refresh_token",
-  "idToken",
+  "idtoken",
   "id_token",
   "password",
   "pwd",
@@ -82,9 +89,9 @@ const SENSITIVE_KEYS = new Set([
   "signature",
   "jwt",
   "authorization",
-  "resetToken",
+  "resettoken",
   "reset_token",
-  "activationToken",
+  "activationtoken",
   "activation_token",
 ]);
 
@@ -107,6 +114,10 @@ function cleanText(value = "", fallback = "") {
     .trim();
 
   return output || fallback;
+}
+
+function normalizeKey(value = "") {
+  return cleanText(value, "").toLowerCase();
 }
 
 function redact(value = "") {
@@ -205,7 +216,7 @@ function sanitizePayload(value = null, depth = 0) {
   const output = {};
 
   for (const [key, child] of Object.entries(value)) {
-    if (SENSITIVE_KEYS.has(key)) {
+    if (SENSITIVE_KEYS.has(normalizeKey(key))) {
       output[key] = null;
       continue;
     }
@@ -225,6 +236,7 @@ function emit(eventName = "", payload = {}) {
 
       token: null,
       accessToken: null,
+      access_token: null,
       refreshToken: null,
       refresh_token: null,
     });
@@ -233,6 +245,34 @@ function emit(eventName = "", payload = {}) {
   } catch {
     return false;
   }
+}
+
+/* =========================================================
+   HTTP ERROR POLICY
+========================================================= */
+
+function isRefreshableAuthError(error = null) {
+  try {
+    if (isFunction(CoreHttp?.isRefreshableAuthError)) {
+      return CoreHttp.isRefreshableAuthError(error);
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
+function shouldClearSessionForAuthError(error = null) {
+  try {
+    if (isFunction(CoreHttp?.shouldClearSessionForAuthError)) {
+      return CoreHttp.shouldClearSessionForAuthError(error);
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
 }
 
 function safeError(error = null, type = "runtime") {
@@ -290,17 +330,15 @@ function normalizeSpaPath(path = "") {
   try {
     if (configIsBlockedRoutePath(pathOnly) === true) return "";
   } catch {
-    // fallback local
+    return "";
   }
 
-  if (pathOnly === "/home" || pathOnly.startsWith("/home/")) return "";
-  if (pathOnly === "/403" || pathOnly.startsWith("/403/")) return "";
-  if (pathOnly === "/404" || pathOnly.startsWith("/404/")) return "";
-  if (pathOnly === "/2fa" || pathOnly.startsWith("/2fa/")) return "";
-  if (pathOnly === "/mfa" || pathOnly.startsWith("/mfa/")) return "";
-  if (pathOnly === "/otp" || pathOnly.startsWith("/otp/")) return "";
-
   return pathOnly;
+}
+
+function isUserHomePath(path = "") {
+  const value = normalizeSpaPath(path);
+  return /^\/@[a-z0-9][a-z0-9._-]{0,95}$/i.test(value);
 }
 
 function isUserDisabled(user = {}) {
@@ -308,41 +346,16 @@ function isUserDisabled(user = {}) {
 
   return Boolean(
     user.disabled === true ||
-      user.deleted === true ||
-      user.archived === true ||
-      user.revoked === true ||
-      user.blocked === true ||
-      user.banned === true ||
       user.suspended === true ||
       user.active === false ||
       user.enabled === false ||
-      Boolean(user.deletedAt) ||
-      [
-        "disabled",
-        "inactive",
-        "deleted",
-        "archived",
-        "revoked",
-        "blocked",
-        "banned",
-        "suspended",
-        "desactivado",
-        "inactivo",
-        "eliminado",
-        "archivado",
-        "bloqueado",
-        "suspendido",
-      ].includes(status)
+      INVALID_USER_STATUSES.has(status)
   );
 }
 
 function extractUserSlug(user = null) {
   if (isFunction(SessionApi?.extractSessionUserSlug)) {
     return SessionApi.extractSessionUserSlug(user);
-  }
-
-  if (isFunction(AppCore?.extractUserSlug)) {
-    return AppCore.extractUserSlug(user);
   }
 
   return normalizeSlug(
@@ -357,12 +370,6 @@ function extractUserSlug(user = null) {
 function buildUserHomePath(user = null) {
   if (isFunction(SessionApi?.buildSessionUserHomePath)) {
     const path = normalizeSpaPath(SessionApi.buildSessionUserHomePath(user));
-
-    if (isUserHomePath(path)) return path;
-  }
-
-  if (isFunction(AppCore?.buildUserHomePath)) {
-    const path = normalizeSpaPath(AppCore.buildUserHomePath(user));
 
     if (isUserHomePath(path)) return path;
   }
@@ -386,24 +393,6 @@ function buildUserHomePathFromSlug(slug = "") {
   }
 }
 
-function isUserHomePath(path = "") {
-  const value = normalizeSpaPath(path);
-  return /^\/@[a-z0-9][a-z0-9._-]{0,95}$/i.test(value);
-}
-
-function stripSensitiveUserFields(user = {}) {
-  if (!isObject(user)) return {};
-
-  const output = {};
-
-  for (const [key, value] of Object.entries(user)) {
-    if (SENSITIVE_KEYS.has(key)) continue;
-    output[key] = value;
-  }
-
-  return output;
-}
-
 function normalizeUser(user = null) {
   if (!isObject(user)) return null;
 
@@ -419,74 +408,7 @@ function normalizeUser(user = null) {
 
   if (isUserDisabled(user)) return null;
 
-  const safeUser = stripSensitiveUserFields(user);
-
-  const id = cleanText(safeUser.userId || safeUser.id || safeUser.uid || safeUser.sub, "");
-  const slug = extractUserSlug(safeUser);
-
-  const username = cleanText(
-    safeUser.username ||
-      safeUser.userName ||
-      safeUser.user_name ||
-      safeUser.usernameLower ||
-      safeUser.username_lower ||
-      slug ||
-      "",
-    ""
-  );
-
-  if (!id && !username && !slug) return null;
-
-  const profile = isObject(safeUser.profile) ? safeUser.profile : {};
-
-  const displayName = cleanText(
-    safeUser.displayName ||
-      safeUser.fullName ||
-      safeUser.name ||
-      safeUser.nombre ||
-      profile.displayName ||
-      profile.fullName ||
-      profile.name ||
-      profile.nombre ||
-      username ||
-      slug ||
-      id,
-    "Usuario"
-  );
-
-  const role = defaultRole(safeUser.role || safeUser.rol || safeUser.roles);
-
-  return {
-    ...safeUser,
-
-    id: id || null,
-    userId: cleanText(safeUser.userId || id, "") || null,
-    uid: cleanText(safeUser.uid || id, "") || null,
-    sub: cleanText(safeUser.sub || id, "") || null,
-
-    username: username || null,
-    slug: slug || null,
-
-    name: safeUser.name || displayName,
-    nombre: safeUser.nombre || displayName,
-    fullName: safeUser.fullName || displayName,
-    displayName,
-
-    email: safeUser.email || null,
-
-    role,
-    rol: role,
-    roles: [role],
-
-    active: true,
-    enabled: true,
-    disabled: false,
-    deleted: false,
-    archived: false,
-
-    isAdmin: role === "admin",
-    isUser: role === "user",
-  };
+  return null;
 }
 
 function avatarFromUser(user = null) {
@@ -861,7 +783,13 @@ function normalizeAuthPayload(payload = {}) {
     accessToken: token,
     access_token: token,
 
+    /*
+      Refresh visible opcional. Cookie httpOnly no es detectable desde JS.
+    */
     hasRefreshToken: Boolean(refreshToken || getRefreshToken()),
+
+    refreshToken: refreshToken || null,
+    refresh_token: refreshToken || null,
 
     session,
     sessionData: session,
@@ -910,6 +838,7 @@ function publicAuthResult(payload = {}) {
     hasUser: Boolean(user),
     hasSession: Boolean(getCurrentSession()),
     hasRefreshToken: payload.hasRefreshToken === true || Boolean(getRefreshToken()),
+    supportsHttpOnlyRefresh: true,
 
     token: null,
     accessToken: null,
@@ -936,19 +865,23 @@ function cleanLoginCredentials(credentials = {}) {
 ========================================================= */
 
 function syncHttpToken(token = "") {
+  const clean = cleanToken(token);
+
+  if (!clean) return false;
+
   try {
-    if (token && isFunction(CoreHttp?.setAuthTokens)) {
+    if (isFunction(CoreHttp?.setAuthTokens)) {
       CoreHttp.setAuthTokens({
-        token,
-        accessToken: token,
-        access_token: token,
+        token: clean,
+        accessToken: clean,
+        access_token: clean,
       });
 
       return true;
     }
 
-    if (token && isFunction(CoreHttp?.setAccessToken)) {
-      CoreHttp.setAccessToken(token);
+    if (isFunction(CoreHttp?.setAccessToken)) {
+      CoreHttp.setAccessToken(clean);
       return true;
     }
   } catch {
@@ -961,12 +894,16 @@ function syncHttpToken(token = "") {
 function clearHttpToken() {
   try {
     if (isFunction(CoreHttp?.clearAuthTokens)) {
-      CoreHttp.clearAuthTokens();
+      CoreHttp.clearAuthTokens({
+        clearState: true,
+      });
       return true;
     }
 
     if (isFunction(CoreHttp?.setAccessToken)) {
-      CoreHttp.setAccessToken(null);
+      CoreHttp.setAccessToken(null, {
+        clearState: true,
+      });
       return true;
     }
   } catch {
@@ -1100,9 +1037,9 @@ function syncAuthState(options = {}) {
   }
 
   /*
-    Importante:
-    No limpia token-only aquí. En reload puede existir access/refresh
-    persistido sin user todavía; restore.js es quien valida /me o refresh.
+    No limpia token-only aquí.
+    En reload puede existir access token sin user todavía; restore.js valida
+    /api/auth/me o intenta /api/auth/refresh por cookie httpOnly.
   */
   if (!isAuthenticated()) return false;
 
@@ -1171,30 +1108,6 @@ function httpPost(path = "", body = {}, options = {}) {
   return httpRequest("POST", path, body, options);
 }
 
-function isRefreshableAuthError(error = null) {
-  try {
-    if (isFunction(CoreHttp?.isRefreshableAuthError)) {
-      return CoreHttp.isRefreshableAuthError(error);
-    }
-  } catch {
-    return false;
-  }
-
-  return false;
-}
-
-function shouldClearSessionForAuthError(error = null) {
-  try {
-    if (isFunction(CoreHttp?.shouldClearSessionForAuthError)) {
-      return CoreHttp.shouldClearSessionForAuthError(error);
-    }
-  } catch {
-    return false;
-  }
-
-  return false;
-}
-
 /* =========================================================
    RESTORE PAYLOAD
 ========================================================= */
@@ -1208,7 +1121,10 @@ function createRestoreOptions(options = {}) {
     persistent: true,
     restoreOnBoot: true,
     allowSilentRefresh: true,
+    allowCookieRefresh: true,
     silentRefresh: true,
+
+    credentials: options.credentials || "include",
 
     skipNavigation: true,
     skipRedirect: true,
@@ -1232,6 +1148,7 @@ async function login(credentials = {}, options = {}) {
       const raw = isFunction(loginCore)
         ? await loginCore(loginPayload, {
             ...options,
+            credentials: options.credentials || "include",
             skipNavigation: true,
             skipRedirect: true,
             noRedirect: true,
@@ -1242,6 +1159,8 @@ async function login(credentials = {}, options = {}) {
             auth: false,
             skipAuth: true,
             noAuthHeader: true,
+            credentials: options.credentials || "include",
+            cache: "no-store",
           });
 
       const result = applySession(raw || {}, {
@@ -1279,6 +1198,7 @@ async function handleLoginFormSubmit(form, options = {}) {
   if (isFunction(handleLoginFormSubmitCore)) {
     const raw = await handleLoginFormSubmitCore(form, {
       ...options,
+      credentials: options.credentials || "include",
       skipNavigation: true,
       skipRedirect: true,
       noRedirect: true,
@@ -1328,7 +1248,7 @@ async function restoreSession(options = {}) {
         : null;
 
       /*
-        restore.js es dueño del restore real, /me, refresh silencioso,
+        restore.js es dueño del restore real, /api/auth/me, refresh silencioso,
         aplicación de sesión y limpieza por sesión inválida.
         La fachada sólo sincroniza lectura pública.
       */
@@ -1386,19 +1306,35 @@ async function refreshSession(options = {}) {
         ? await restoreRefreshSessionCore({
             ...options,
             body,
+            credentials: options.credentials || "include",
+            allowCookieRefresh: options.allowCookieRefresh !== false,
             skipNavigation: true,
             skipRedirect: true,
             noRedirect: true,
           })
         : isFunction(CoreHttp?.refreshSession)
-          ? await CoreHttp.refreshSession(body, options)
+          ? await CoreHttp.refreshSession(body, {
+              ...options,
+              auth: false,
+              public: true,
+              skipAuth: true,
+              noAuthHeader: true,
+              credentials: options.credentials || "include",
+              cache: "no-store",
+            })
           : await httpPost(AUTH_ENDPOINTS.refresh, body, {
               ...options,
               public: true,
               auth: false,
               skipAuth: true,
               noAuthHeader: true,
+              credentials: options.credentials || "include",
+              cache: "no-store",
             });
+
+      syncAuthState({
+        source: "Auth.refreshSession",
+      });
 
       const normalized = normalizeAuthPayload(raw || {});
       const result = normalized.authenticated
@@ -1440,13 +1376,18 @@ async function fetchMe(options = {}) {
   Auth.session.mePromise = (async () => {
     try {
       const raw = isFunction(CoreHttp?.me)
-        ? await CoreHttp.me(options)
+        ? await CoreHttp.me({
+            ...options,
+            credentials: options.credentials || "include",
+          })
         : await httpRequest("GET", AUTH_ENDPOINTS.me, undefined, {
             ...options,
             auth: true,
             public: false,
             skipAuth: false,
             noAuthHeader: false,
+            credentials: options.credentials || "include",
+            cache: "no-store",
           });
 
       const normalized = normalizeAuthPayload(raw || {});
@@ -1486,6 +1427,7 @@ async function logout(options = {}) {
     if (isFunction(logoutCore)) {
       await logoutCore({
         ...options,
+        credentials: options.credentials || "include",
         skipNavigation: true,
         skipRedirect: true,
         noRedirect: true,
@@ -1497,6 +1439,8 @@ async function logout(options = {}) {
         public: false,
         skipAuth: false,
         noAuthHeader: false,
+        credentials: options.credentials || "include",
+        cache: "no-store",
       });
     }
   } catch {
@@ -1617,7 +1561,6 @@ async function confirmResetPassword(payload = {}, options = {}) {
   }
 
   const raw = await confirmResetPasswordCore(payload, options);
-
   const normalized = normalizeAuthPayload(raw || {});
 
   if (normalized.authenticated) {
@@ -1677,6 +1620,7 @@ function buildSessionSnapshotSafe() {
         hasUser: Boolean(getUser()),
         hasSession: Boolean(getCurrentSession()),
         hasRefreshToken: Boolean(getRefreshToken()),
+        supportsHttpOnlyRefresh: true,
       };
     }
   } catch {
@@ -1690,6 +1634,7 @@ function buildSessionSnapshotSafe() {
     authenticated: isAuthenticated(),
     hasToken: hasValidToken(),
     hasRefreshToken: Boolean(getRefreshToken()),
+    supportsHttpOnlyRefresh: true,
     hasUser: Boolean(user),
     hasSession: Boolean(getCurrentSession()),
 
@@ -1745,6 +1690,7 @@ function getAuthModuleSnapshot() {
     authenticated: isAuthenticated(),
     hasToken: hasValidToken(),
     hasRefreshToken: Boolean(getRefreshToken()),
+    supportsHttpOnlyRefresh: true,
     hasUser: Boolean(user),
     hasSession: Boolean(getCurrentSession()),
 
@@ -1767,6 +1713,13 @@ function getAuthModuleSnapshot() {
 
     routes: AUTH_ROUTES,
     home: AUTH_HOME,
+
+    endpoints: {
+      me: AUTH_ENDPOINTS.me,
+      login: AUTH_ENDPOINTS.login,
+      refresh: AUTH_ENDPOINTS.refresh,
+      logout: AUTH_ENDPOINTS.logout,
+    },
 
     session: {
       loggingIn: Auth.session.loggingIn,
@@ -1810,13 +1763,19 @@ function getAuthModuleSnapshot() {
 
       persistentSession: true,
       restoreRequestsSilentRefresh: true,
+      supportsHttpOnlyRefreshCookie: true,
+      visibleRefreshTokenOptional: true,
       tokenExpiredDoesNotMeanLogout: true,
+
+      canonicalMeEndpointOnly: true,
+      meEndpoint: "/api/auth/me",
 
       initOnlyAttachesAuth: true,
       restoreOwnsBootstrapSession: true,
       userSlugHome: true,
 
       roles: ["admin", "user"],
+      invalidStatuses: ["suspended", "desactivado"],
 
       noRouter: true,
       noToast: true,

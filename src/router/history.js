@@ -12,6 +12,7 @@
    - /@{user.slug}/{ruta} conserva URL pública pero canonicaliza a /{ruta} sólo si la ruta es real.
    - Delegar normalización de rutas/user-scope/bloqueos en core/config.js.
    - No escribir /home, /403, /404, /2fa, /mfa, /otp en history.
+   - Mantener TOKEN_PARAM sólo en rutas públicas protegidas.
    - Scrub explícito del TOKEN_PARAM en rutas públicas protegidas.
    - No guardar access_token/refresh_token/id_token/secret/session en URL normalizada.
    - Constantes base desde core/config.js.
@@ -42,7 +43,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTER_HISTORY_VERSION = "router.history.v11.token-routes-fallback";
+export const ROUTER_HISTORY_VERSION = "router.history.v12";
 
 const HISTORY_STATE_VERSION = 1;
 const DEFAULT_ROUTE = "/";

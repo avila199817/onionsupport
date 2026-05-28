@@ -7,16 +7,23 @@
    - Auth hace restore, refresh silencioso y validación real.
    - App/session coordina una única restauración concurrente.
    - Normaliza resultado de boot sin navegar ni tocar rutas.
+   - Soporta refresh por cookie httpOnly con credentials include.
+   - No limpia sesión por access token caducado/rotado.
    - Sin imports, Router, rutas, eventos, storage, fetch, warmup ni UI sync.
 ========================================================= */
 
-export const SESSION_VERSION = "app.session.v8";
+export const SESSION_VERSION = "app.session.v9";
 
 const RESTORE_OPTIONS = Object.freeze({
   persistent: true,
   restoreOnBoot: true,
+
   allowSilentRefresh: true,
+  allowCookieRefresh: true,
   silentRefresh: true,
+
+  credentials: "include",
+
   silent: true,
   skipNavigation: true,
   skipRedirect: true,
@@ -45,6 +52,7 @@ const RESULT_BRANCH_KEYS = Object.freeze([
   "result",
   "data",
   "auth",
+  "snapshot",
 ]);
 
 let restorePromise = null;
@@ -229,9 +237,15 @@ function firstBranchValue(result = null, keys = []) {
 }
 
 function trueBranchFlag(result = null, keys = []) {
-  return getResultBranches(result).some((branch) => (
+  return getResultBranches(result).some((branch) =>
     keys.some((key) => branch[key] === true)
-  ));
+  );
+}
+
+function falseBranchFlag(result = null, keys = []) {
+  return getResultBranches(result).some((branch) =>
+    keys.some((key) => branch[key] === false)
+  );
 }
 
 function getResultUser(result = null) {
@@ -254,6 +268,7 @@ function getResultSession(result = null) {
 function getResultFlags(result = null) {
   return {
     ok: trueBranchFlag(result, ["ok", "success"]),
+    failed: falseBranchFlag(result, ["ok", "success"]),
     restored: trueBranchFlag(result, ["restored"]),
     authenticated: trueBranchFlag(result, ["authenticated"]),
     skipped: trueBranchFlag(result, ["skipped"]),
@@ -267,6 +282,7 @@ function buildRestoreMeta(result = null) {
 
   return {
     ok: flags.ok,
+    failed: flags.failed,
     restored: flags.restored,
     authenticated: flags.authenticated,
     skipped: flags.skipped,
@@ -293,10 +309,33 @@ function buildSnapshotMeta(snapshot = null) {
     hasUser: snapshot.hasUser === true,
     hasSession: snapshot.hasSession === true,
 
+    supportsHttpOnlyRefresh: snapshot.supportsHttpOnlyRefresh === true,
+    hasCookieRefreshCandidate: snapshot.hasCookieRefreshCandidate === true,
+
     role: cleanText(snapshot.role, null),
     userSlug: cleanText(snapshot.userSlug, null),
     homePath: redact(snapshot.homePath || snapshot.defaultHome || ""),
     source: cleanText(snapshot.source, null),
+  };
+}
+
+/* =========================================================
+   ERROR
+========================================================= */
+
+function publicError(error = null) {
+  if (!error) return null;
+
+  return {
+    name: cleanText(error.name, "Error"),
+    message: redact(error.message || String(error)),
+    code: error.code || error.error || null,
+    status:
+      error.status ||
+      error.statusCode ||
+      error.response?.status ||
+      error.data?.status ||
+      null,
   };
 }
 
@@ -308,6 +347,11 @@ function createRestorePayload(options = {}) {
   return {
     ...options,
     ...RESTORE_OPTIONS,
+
+    /*
+      App/session siempre pide restore persistente.
+      Auth/restore decide si hay token, /me, refresh o sesión vacía.
+    */
     source: "app.session",
   };
 }
@@ -336,12 +380,12 @@ function normalizeRestoreResult(result = null, AppCore = null, Auth = null) {
   );
 
   return {
-    ok: Boolean(
-      resultFlags.ok ||
-        resultFlags.skipped ||
-        restored ||
-        result !== null
-    ),
+    /*
+      ok indica que el intento de restore terminó sin romper el boot,
+      no que haya sesión autenticada.
+    */
+    ok: Boolean(result !== null && !resultFlags.failed),
+    restoreCompleted: true,
 
     restored,
     authenticated,
@@ -364,6 +408,37 @@ function normalizeRestoreResult(result = null, AppCore = null, Auth = null) {
   };
 }
 
+function normalizeRestoreFailure(error = null, AppCore = null, Auth = null) {
+  const auth = resolveAuth(AppCore, Auth);
+  const snapshot = getAuthSnapshot(AppCore, auth);
+  const snapshotMeta = buildSnapshotMeta(snapshot);
+
+  const authenticated = hasAuthenticatedUser(AppCore, auth);
+  const user = authenticated ? getUser(AppCore, auth) : null;
+  const session = authenticated ? getSession(AppCore, auth) : null;
+
+  return {
+    ok: false,
+    restoreCompleted: false,
+
+    restored: false,
+    authenticated,
+
+    hasUser: Boolean(user),
+    hasSession: Boolean(session),
+
+    user: authenticated ? user : null,
+    session: authenticated && isPlainObject(session) ? session : null,
+
+    error: publicError(error),
+    result: null,
+    snapshot: snapshotMeta,
+
+    source: "app.session:error",
+    version: SESSION_VERSION,
+  };
+}
+
 export function restoreAuthSession({
   AppCore = null,
   Auth = null,
@@ -372,10 +447,19 @@ export function restoreAuthSession({
   if (restorePromise) return restorePromise;
 
   restorePromise = (async () => {
-    const { auth, restoreSession } = getRestoreSession(AppCore, Auth);
-    const result = await restoreSession(createRestorePayload(options));
+    try {
+      const { auth, restoreSession } = getRestoreSession(AppCore, Auth);
+      const result = await restoreSession(createRestorePayload(options));
 
-    return normalizeRestoreResult(result, AppCore, auth);
+      return normalizeRestoreResult(result, AppCore, auth);
+    } catch (error) {
+      /*
+        App/session no limpia sesión ni navega.
+        Auth/restore/session son los únicos dueños de aplicar/limpiar.
+        Si restore falla por error técnico, el boot recibe resultado seguro.
+      */
+      return normalizeRestoreFailure(error, AppCore, Auth);
+    }
   })().finally(() => {
     restorePromise = null;
   });
@@ -416,6 +500,8 @@ export function getSessionBootstrapSnapshot({
           hasRefreshToken: snapshotMeta.hasRefreshToken,
           hasUser: snapshotMeta.hasUser,
           hasSession: snapshotMeta.hasSession,
+          supportsHttpOnlyRefresh: snapshotMeta.supportsHttpOnlyRefresh,
+          hasCookieRefreshCandidate: snapshotMeta.hasCookieRefreshCandidate,
           role: snapshotMeta.role,
           userSlug: snapshotMeta.userSlug,
           homePath: snapshotMeta.homePath,
@@ -425,7 +511,18 @@ export function getSessionBootstrapSnapshot({
     policy: {
       bridgeOnly: true,
       authOwnsRestore: true,
+      authOwnsRefresh: true,
+      authOwnsSessionClear: true,
+
       singleConcurrentRestore: true,
+
+      restoreUsesSilentRefresh: true,
+      restoreUsesCookieRefresh: true,
+      credentialsInclude: true,
+
+      tokenExpiredDoesNotMeanLogout: true,
+      noSessionClearHere: true,
+
       noFetch: true,
       noStorage: true,
       noNavigation: true,

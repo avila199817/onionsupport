@@ -8,6 +8,7 @@
    - Restaurar sesión antes del primer render Router.
    - Pedir restore con silent refresh y cookie httpOnly.
    - No limpiar sesión por access token caducado/rotado.
+   - No convertir fallo recuperable de restore en fatal.
    - Sin Store, Services paralelos, warmup, eventos custom, fetch,
      storage ni lógica de dominio.
 ========================================================= */
@@ -60,13 +61,13 @@ import {
   getUISystemsSnapshot,
 } from "./ui.js";
 
-export const APP_INDEX_VERSION = "app.index.v12";
+export const APP_INDEX_VERSION = "app.index.v13";
 
 const CORE_MODULES = Object.freeze([
-  ["auth", "Auth", Auth],
-  ["router", "Router", Router],
-  ["i18n", "I18n", I18n],
-  ["toast", "Toast", Toast],
+  ["auth", Auth],
+  ["router", Router],
+  ["i18n", I18n],
+  ["toast", Toast],
 ]);
 
 const AUTH_BOOT_OPTIONS = Object.freeze({
@@ -114,7 +115,7 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
-function redact(value = "") {
+function fallbackRedact(value = "") {
   return cleanText(value, "")
     .replace(
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
@@ -122,6 +123,20 @@ function redact(value = "") {
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+function redact(value = "") {
+  const coreRedact = AppCore?.utils?.redact;
+
+  if (isFunction(coreRedact)) {
+    try {
+      return coreRedact(value);
+    } catch {
+      // fallback abajo
+    }
+  }
+
+  return fallbackRedact(value);
 }
 
 function safeError(error = null) {
@@ -256,29 +271,24 @@ function getCoreRegistrar() {
   return null;
 }
 
-function exposeCoreModule(name = "", module = null, registrar = null) {
-  if (!name || !module) return false;
-
-  safeCall(() => {
-    AppCore[name] = module;
-  });
-
-  if (!registrar) return true;
-
-  try {
-    registrar(name, module, { overwrite: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function exposeCoreModules() {
   const registrar = getCoreRegistrar();
 
-  for (const [lowerName, upperName, module] of CORE_MODULES) {
-    exposeCoreModule(lowerName, module, registrar);
-    exposeCoreModule(upperName, module, registrar);
+  for (const [name, module] of CORE_MODULES) {
+    if (!name || !module) continue;
+
+    if (registrar) {
+      try {
+        registrar(name, module, { overwrite: true });
+        continue;
+      } catch {
+        // fallback abajo
+      }
+    }
+
+    safeCall(() => {
+      AppCore[name] = module;
+    });
   }
 
   return true;
@@ -288,7 +298,36 @@ function exposeCoreModules() {
    SESSION SUMMARY
 ========================================================= */
 
-function normalizeRestoreSummary(result = null) {
+function normalizeRestoreSummary(result = null, error = null) {
+  if (error) {
+    return {
+      ok: false,
+      restoreCompleted: false,
+      restored: false,
+      authenticated: false,
+      hasUser: false,
+      hasSession: false,
+      supportsHttpOnlyRefresh: true,
+      hasCookieRefreshCandidate: false,
+      source: "app.session",
+      error: safeError(error),
+    };
+  }
+
+  if (result === true || result === false) {
+    return {
+      ok: result !== false,
+      restoreCompleted: true,
+      restored: result === true,
+      authenticated: false,
+      hasUser: false,
+      hasSession: false,
+      supportsHttpOnlyRefresh: true,
+      hasCookieRefreshCandidate: false,
+      source: "app.session",
+    };
+  }
+
   if (!isPlainObject(result)) return null;
 
   const nested = isPlainObject(result.result) ? result.result : {};
@@ -368,6 +407,24 @@ function normalizeRestoreSummary(result = null) {
   };
 }
 
+async function restoreSessionBeforeRouter(authPayload = {}) {
+  try {
+    const result = await restoreAuthSession(authPayload);
+    lastRestoreResult = normalizeRestoreSummary(result);
+    return result;
+  } catch (error) {
+    lastRestoreResult = normalizeRestoreSummary(null, error);
+
+    /*
+      Restore no debe tumbar el boot.
+      Auth/Session/Router deciden si hay sesión recuperable, sesión inválida
+      o usuario no autenticado. App sólo garantiza que el intento ocurrió
+      antes del primer render Router.
+    */
+    return null;
+  }
+}
+
 /* =========================================================
    BOOT
 ========================================================= */
@@ -408,12 +465,10 @@ async function runBoot(options = {}) {
 
     /*
       Punto crítico:
-      restore antes de configurar/renderizar Router.
-      Auth decide /api/auth/me, refresh silencioso, cookie httpOnly y limpieza
-      sólo si backend confirma sesión inválida.
+      Restore SIEMPRE antes de configurar/renderizar Router.
+      App no limpia sesión ni redirige a login por access token caducado.
     */
-    const restoreResult = await restoreAuthSession(authPayload);
-    lastRestoreResult = normalizeRestoreSummary(restoreResult);
+    await restoreSessionBeforeRouter(authPayload);
 
     await configureRouter(withSource(corePayload, "app.router"));
 
@@ -512,6 +567,7 @@ export function getAppSnapshot() {
       singleEntryPoint: true,
       delegatesCoreAuthRouterUi: true,
       restoresAuthBeforeRouterRender: true,
+      restoreFailureDoesNotFatalBoot: true,
 
       restoreUsesSilentRefresh: true,
       restoreUsesCookieRefresh: true,

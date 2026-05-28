@@ -1,6 +1,6 @@
 /* =========================================================
    Onion Support - Auth Login
-   Archivo: /src/features/auth/login.js
+   Archivo: src/features/auth/login.js
 
    Responsabilidad:
    - Login público vía CoreHttp.
@@ -24,7 +24,7 @@
    - Sin storage paralelo.
    - Sin opción "Recordarme".
    - Sin rutas inventadas.
-   - Sin /home.
+   - Sin rutas legacy.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
@@ -43,7 +43,7 @@ import {
 
 import * as SessionApi from "./session.js";
 
-export const LOGIN_VERSION = "auth.login.v9";
+export const LOGIN_VERSION = "auth.login.v10";
 
 const LOGIN_ROUTE = ROUTES.login || "/login";
 const HOME_ROUTE = "/";
@@ -201,33 +201,40 @@ export function normalizeLoginSlug(value = "") {
   }
 }
 
-function isBlockedSpaPath(path = "") {
+function pathOnlyForBlock(path = "") {
+  const raw = cleanText(path, "");
+
+  if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+
   try {
-    if (configIsBlockedRoutePath(path) === true) return true;
+    return configNormalizeRoutePath(raw) || "";
   } catch {
-    // fallback local
+    if (!raw.startsWith("/")) return "";
+    if (raw.startsWith("//")) return "";
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+    if (/[\r\n\t\\]/.test(raw)) return "";
+
+    return raw
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/\/{2,}/g, "/")
+      .replace(/\/+$/g, "") || "/";
   }
+}
 
-  const clean = cleanText(path, "")
-    .split("?")[0]
-    .split("#")[0]
-    .replace(/\/+$/g, "")
-    .toLowerCase() || "/";
+function isBlockedSpaPath(path = "") {
+  const clean = pathOnlyForBlock(path);
 
-  return Boolean(
-    clean === "/home" ||
-      clean.startsWith("/home/") ||
-      clean === "/403" ||
-      clean.startsWith("/403/") ||
-      clean === "/404" ||
-      clean.startsWith("/404/") ||
-      clean === "/2fa" ||
-      clean.startsWith("/2fa/") ||
-      clean === "/mfa" ||
-      clean.startsWith("/mfa/") ||
-      clean === "/otp" ||
-      clean.startsWith("/otp/")
-  );
+  if (!clean) return true;
+
+  try {
+    return configIsBlockedRoutePath(clean) === true;
+  } catch {
+    return true;
+  }
 }
 
 function normalizeSpaPath(path = "") {
@@ -238,28 +245,11 @@ function normalizeSpaPath(path = "") {
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
   if (/[\r\n\t\\]/.test(raw)) return "";
 
-  try {
-    const clean = configNormalizeRoutePath(raw) || "";
+  const clean = pathOnlyForBlock(raw);
 
-    if (!clean || isBlockedSpaPath(clean)) return "";
+  if (!clean || isBlockedSpaPath(clean)) return "";
 
-    return clean;
-  } catch {
-    if (!raw.startsWith("/")) return "";
-    if (raw.startsWith("//")) return "";
-    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
-    if (/[\r\n\t\\]/.test(raw)) return "";
-
-    const clean = raw
-      .split("?")[0]
-      .split("#")[0]
-      .replace(/\/{2,}/g, "/")
-      .replace(/\/+$/g, "") || "/";
-
-    if (isBlockedSpaPath(clean)) return "";
-
-    return clean;
-  }
+  return clean;
 }
 
 export function extractLoginUserSlug(user = null) {
@@ -1072,6 +1062,8 @@ export function getLoginSnapshot() {
       sessionOwnsUserNormalization: true,
       sessionOwnsSessionContextNormalization: true,
       configOwnsSlugAndHomeRoute: true,
+      configOwnsBlockedRoutes: true,
+      noLocalBlockedRouteFallback: true,
 
       requiresAccessToken: true,
       requiresRefreshToken: true,
@@ -1092,7 +1084,7 @@ export function getLoginSnapshot() {
       noSlugFabrication: true,
       noUserFabricationFromTokenEnvelope: true,
       noEmailIdentity: true,
-      noHomeRoute: true,
+      noLegacyHomeRoute: true,
 
       no2fa: true,
       noMfa: true,

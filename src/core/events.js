@@ -6,14 +6,14 @@
    - Event bus mínimo canónico.
    - Sin imports.
    - Sin DOM obligatorio.
-   - Sin firebreak.
+   - Sin storage.
    - Sin rate limits.
    - Sin snapshots grandes.
-   - Sin lógica rara.
+   - Sin lógica de dominio.
    - Un listener no rompe el bus.
 ========================================================= */
 
-export const EVENTS_VERSION = "core.events.v2";
+export const EVENTS_VERSION = "core.events.v3";
 export const WILDCARD_EVENT = "*";
 
 /* =========================================================
@@ -41,16 +41,20 @@ function noop() {
    EVENT OBJECT
 ========================================================= */
 
-function eventObject(name = "", payload = {}) {
+function createEventObject(name = "", payload = {}) {
   let propagationStopped = false;
   let immediatePropagationStopped = false;
+  let defaultPrevented = false;
 
   return {
     type: name,
+    name,
     detail: payload,
     payload,
 
-    defaultPrevented: false,
+    get defaultPrevented() {
+      return defaultPrevented;
+    },
 
     get propagationStopped() {
       return propagationStopped;
@@ -61,7 +65,7 @@ function eventObject(name = "", payload = {}) {
     },
 
     preventDefault() {
-      this.defaultPrevented = true;
+      defaultPrevented = true;
     },
 
     stopPropagation() {
@@ -88,24 +92,21 @@ export function createEvents() {
     return text(name, "");
   }
 
-  function bucket(name = "") {
+  function getBucket(name = "", create = false) {
     const eventName = normalizeName(name);
 
     if (!eventName) return null;
 
-    if (!listeners.has(eventName)) {
+    if (!listeners.has(eventName) && create) {
       listeners.set(eventName, new Set());
     }
 
-    return listeners.get(eventName);
+    return listeners.get(eventName) || null;
   }
 
   function cleanupBucket(name = "") {
     const eventName = normalizeName(name);
-
-    if (!eventName) return false;
-
-    const set = listeners.get(eventName);
+    const set = getBucket(eventName);
 
     if (set && set.size === 0) {
       listeners.delete(eventName);
@@ -122,7 +123,7 @@ export function createEvents() {
       return noop;
     }
 
-    const set = bucket(eventName);
+    const set = getBucket(eventName, true);
 
     if (!set) return noop;
 
@@ -130,7 +131,7 @@ export function createEvents() {
 
     let disposed = false;
 
-    return () => {
+    return function dispose() {
       if (disposed) return false;
 
       disposed = true;
@@ -146,8 +147,9 @@ export function createEvents() {
     }
 
     let disposed = false;
+    let dispose = noop;
 
-    const dispose = on(eventName, (...args) => {
+    dispose = on(eventName, (...args) => {
       if (disposed) return;
 
       disposed = true;
@@ -168,7 +170,7 @@ export function createEvents() {
       return listeners.delete(eventName);
     }
 
-    const set = listeners.get(eventName);
+    const set = getBucket(eventName);
 
     if (!set) return false;
 
@@ -186,9 +188,8 @@ export function createEvents() {
 
     emitCount += 1;
 
-    const event = eventObject(eventName, payload);
-
-    const directHandlers = [...(listeners.get(eventName) || [])];
+    const event = createEventObject(eventName, payload);
+    const directHandlers = [...(getBucket(eventName) || [])];
 
     for (const handler of directHandlers) {
       try {
@@ -206,7 +207,7 @@ export function createEvents() {
       eventName !== WILDCARD_EVENT &&
       !event.propagationStopped
     ) {
-      const wildcardHandlers = [...(listeners.get(WILDCARD_EVENT) || [])];
+      const wildcardHandlers = [...(getBucket(WILDCARD_EVENT) || [])];
 
       for (const handler of wildcardHandlers) {
         try {
@@ -221,7 +222,7 @@ export function createEvents() {
       }
     }
 
-    return true;
+    return !event.defaultPrevented;
   }
 
   function clear(name = "") {
@@ -240,7 +241,7 @@ export function createEvents() {
     const eventName = normalizeName(name);
 
     if (eventName) {
-      return listeners.get(eventName)?.size || 0;
+      return getBucket(eventName)?.size || 0;
     }
 
     let count = 0;
@@ -254,7 +255,7 @@ export function createEvents() {
 
   function has(name = "") {
     const eventName = normalizeName(name);
-    return Boolean(eventName && listeners.has(eventName));
+    return Boolean(eventName && listenerCount(eventName) > 0);
   }
 
   function names() {

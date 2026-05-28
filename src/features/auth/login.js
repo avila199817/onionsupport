@@ -32,9 +32,12 @@
 import * as CoreHttpModule from "../../core/http.js";
 
 import {
+  ALLOWED_ROLES,
   AUTH_ENDPOINTS,
   ROUTES,
   USER_HOME_PREFIX,
+  SENSITIVE_QUERY_PARAMS,
+  TOKEN_PARAM,
   buildUserHomeRoute as configBuildUserHomeRoute,
   isBlockedRoutePath as configIsBlockedRoutePath,
   isUserHomeRoute as configIsUserHomeRoute,
@@ -44,7 +47,7 @@ import {
 
 import * as SessionApi from "./session.js";
 
-export const LOGIN_VERSION = "auth.login.v11";
+export const LOGIN_VERSION = "auth.login.v12";
 
 const LOGIN_ROUTE = ROUTES.login || "/login";
 const HOME_ROUTE = "/";
@@ -54,7 +57,21 @@ const MAX_IDENTIFIER_LENGTH = 160;
 const MAX_PASSWORD_LENGTH = 1024;
 const MAX_TOKEN_LENGTH = 8192;
 
-const VALID_ROLES = Object.freeze(["admin", "user"]);
+const VALID_ROLES = Object.freeze(
+  (Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
+    ? ALLOWED_ROLES
+    : ["admin", "user"]
+  ).map((role) => String(role).toLowerCase())
+);
+
+const SENSITIVE_QUERY_KEYS = Object.freeze(
+  (Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
+    ? SENSITIVE_QUERY_PARAMS
+    : [TOKEN_PARAM]
+  ).map((key) => String(key).toLowerCase())
+);
+
+const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -109,14 +126,36 @@ function first(...values) {
   return null;
 }
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSensitiveQueryPattern() {
+  const keys = SENSITIVE_QUERY_KEYS
+    .map(escapeRegExp)
+    .filter(Boolean)
+    .join("|");
+
+  return keys
+    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
+    : null;
+}
+
 function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
+  const raw = cleanText(value, "");
+  const redactedQuery = SENSITIVE_QUERY_PATTERN
+    ? raw.replace(SENSITIVE_QUERY_PATTERN, "$1***")
+    : raw;
+
+  return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+function normalizeCode(value = "") {
+  return cleanText(value, "")
+    .replace(/[\s-]+/g, "_")
+    .toUpperCase();
 }
 
 function sessionMethod(name = "") {
@@ -604,14 +643,13 @@ function readMessage(payload = {}) {
 function readCode(payload = {}) {
   if (!isObject(payload)) return "";
 
-  return cleanText(
+  return normalizeCode(
     pick(nested(payload), [
       "code",
       "errorCode",
       "error_code",
       "reason",
-    ]) || "",
-    ""
+    ]) || ""
   );
 }
 
@@ -642,7 +680,9 @@ function normalizeLoginResponse(response = {}) {
 
     persistentReady,
     hasVisibleRefreshToken,
+    hasRefreshToken: hasVisibleRefreshToken,
     supportsHttpOnlyRefresh: true,
+    hasCookieRefreshCandidate: true,
 
     token,
     accessToken: token,
@@ -707,13 +747,13 @@ function extractMessage(error = null) {
 function extractCode(error = null) {
   const payload = extractErrorPayload(error);
 
-  return (
+  return normalizeCode(
     error?.code ||
-    payload.code ||
-    payload.errorCode ||
-    payload.error_code ||
-    payload.error ||
-    ""
+      payload.code ||
+      payload.errorCode ||
+      payload.error_code ||
+      payload.error ||
+      ""
   );
 }
 
@@ -738,7 +778,7 @@ function createLoginError(message = "No se pudo iniciar sesión.", options = {})
   error.name = "AuthLoginError";
   error.status = options.status || 401;
   error.statusCode = error.status;
-  error.code = options.code || "LOGIN_FAILED";
+  error.code = normalizeCode(options.code || "LOGIN_FAILED");
 
   return error;
 }
@@ -1038,6 +1078,8 @@ export function getLoginSnapshot() {
 
       sessionOwnsUserNormalization: true,
       sessionOwnsSessionContextNormalization: true,
+      configOwnsRoles: true,
+      configOwnsSensitiveQueryParams: true,
       configOwnsSlugAndHomeRoute: true,
       configOwnsBlockedRoutes: true,
       noLocalBlockedRouteFallback: true,
@@ -1046,6 +1088,7 @@ export function getLoginSnapshot() {
       requiresVisibleRefreshToken: false,
       supportsHttpOnlyRefreshCookie: true,
       validatesUser: true,
+      invalidUserOnlyDisabledOrDesactivado: true,
       returnsRefreshAndSessionContextWhenBackendProvidesThem: true,
       persistentSessionCanUseCookie: true,
 

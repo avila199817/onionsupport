@@ -83,7 +83,7 @@ import {
   getHomeWidgetId,
 } from "./home.model.js";
 
-export const HOME_SELECTORS_VERSION = "home.selectors.v11.template-aligned";
+export const HOME_SELECTORS_VERSION = "home.selectors.v12.template-contract";
 
 /* =========================================================
    CONSTANTS
@@ -159,8 +159,49 @@ const COSMOS_META_KEYS = new Set([
   "_metadata",
 ]);
 
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|correo|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|bank|cuenta|account|ipRaw|ip|userAgent/i;
+const SENSITIVE_KEY_PARTS = Object.freeze([
+  "token",
+  "authorization",
+  "cookie",
+  "password",
+  "passwd",
+  "pwd",
+  "secret",
+  "credential",
+  "jwt",
+  "bearer",
+  "refresh",
+  "apikey",
+  "privatekey",
+  "connectionstring",
+  "sas",
+  "otp",
+  "totp",
+  "mfa",
+  "twofa",
+  "backupcode",
+  "sessionid",
+  "email",
+  "correo",
+  "mail",
+  "phone",
+  "telefono",
+  "address",
+  "direccion",
+  "nif",
+  "dni",
+  "iban",
+  "bank",
+  "cuenta",
+  "account",
+  "useragent",
+]);
+
+const SENSITIVE_KEY_EXACT = new Set([
+  "session",
+  "ip",
+  "ipraw",
+]);
 
 const SENSITIVE_QUERY_RE =
   /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i;
@@ -342,7 +383,12 @@ function redact(value = "") {
 }
 
 function isSensitiveKey(key = "") {
-  return SENSITIVE_KEY_RE.test(String(key || ""));
+  const clean = normalizeKey(key).replace(/_/g, "");
+
+  if (!clean) return false;
+  if (SENSITIVE_KEY_EXACT.has(clean)) return true;
+
+  return SENSITIVE_KEY_PARTS.some((part) => clean.includes(part));
 }
 
 function sanitizeValue(value, keyHint = "") {
@@ -509,24 +555,13 @@ function routePathOnly(value = "") {
 
 function isBlockedRoute(value = "") {
   const path = routePathOnly(value);
-  const lower = path.toLowerCase();
 
   if (!path) return true;
 
   try {
     return configIsBlockedRoutePath(path) === true;
   } catch {
-    return Boolean(
-      lower === "/home" ||
-        lower === "/403" ||
-        lower === "/404" ||
-        lower === "/2fa" ||
-        lower === "/mfa" ||
-        lower === "/otp" ||
-        lower.startsWith("/2fa/") ||
-        lower.startsWith("/mfa/") ||
-        lower.startsWith("/otp/")
-    );
+    return false;
   }
 }
 
@@ -2058,7 +2093,17 @@ export function computeHomeStats(input = {}) {
 
   const paidInvoices = collections.invoices.filter(isInvoicePaid).length;
   const pendingInvoices = collections.invoices.filter(isInvoicePendingLike).length;
-  const invoiceAmount = collections.invoices.reduce((total, invoice) => total + getInvoicePaidAmount(invoice), 0);
+
+  const paidInvoiceAmount = roundMoney(
+    collections.invoices.reduce((total, invoice) => {
+      return total + getInvoicePaidAmount(invoice);
+    }, 0)
+  );
+
+  const invoiceCurrency = safeText(
+    first(...collections.invoices.map(getInvoiceCurrency), DEFAULT_CURRENCY),
+    DEFAULT_CURRENCY
+  ).toUpperCase();
 
   return sanitizeObject({
     role: getRole(input),
@@ -2075,8 +2120,9 @@ export function computeHomeStats(input = {}) {
     totalInvoices: getSummaryValue(summary, ["totalInvoices", "invoicesTotal", "facturasTotal", "invoicesCount", "facturasCount"], collections.invoices.length),
     paidInvoices: getSummaryValue(summary, ["paidInvoices", "paidFacturas"], paidInvoices),
     pendingInvoices: getSummaryValue(summary, ["pendingInvoices", "pendingFacturas"], pendingInvoices),
-    invoiceAmount: getSummaryValue(summary, ["invoiceAmount", "paidInvoiceAmount", "billingTotal", "totalFacturado"], invoiceAmount),
-    paidInvoiceAmount: getSummaryValue(summary, ["paidInvoiceAmount", "invoiceAmount"], invoiceAmount),
+    invoiceAmount: getSummaryValue(summary, ["paidInvoiceAmount", "totalPagado", "paidAmount", "facturasPaidAmount"], paidInvoiceAmount),
+    paidInvoiceAmount: getSummaryValue(summary, ["paidInvoiceAmount", "totalPagado", "paidAmount", "facturasPaidAmount"], paidInvoiceAmount),
+    invoiceCurrency,
 
     totalUsers: admin ? getSummaryValue(summary, ["totalUsers", "usersTotal", "usuariosTotal", "usersCount", "usuariosCount"], collections.users.length) : 0,
     totalClients: admin ? getSummaryValue(summary, ["totalClients", "totalClientes", "totalCustomers", "clientsCount", "clientesCount", "customersCount"], collections.clients.length) : 0,
@@ -2170,7 +2216,7 @@ export function getStatCards(input = {}) {
       id: "facturas-totales",
       label: "Facturas totales",
       value: stats.totalInvoices,
-      text: `Importe total: ${formatNumber(stats.invoiceAmount)}`,
+      text: `Pagado: ${formatMoney(stats.paidInvoiceAmount, stats.invoiceCurrency || DEFAULT_CURRENCY)}`,
       iconName: "euro",
       route: HOME_ROUTES.FACTURAS,
       modifier: "invoice-total",
@@ -2475,7 +2521,6 @@ export function getHomeSelectorsSnapshot() {
 
       statCardsIgnoreLegacyWidgets: true,
       noQuickActionsVisible: true,
-      twoUserCardsOnly: true,
       adminCardsOnlyForAdmin: true,
 
       noFetch: true,
@@ -2491,6 +2536,7 @@ export function getHomeSelectorsSnapshot() {
       userNeverExposesUsersClients: true,
       limitsOnlyVisibleLists: true,
       countersUseFullTotals: true,
+      invoicePaidAmountOnly: true,
 
       ticketModalPreparedHere: true,
       technicianAndInvoicesFromModel: true,

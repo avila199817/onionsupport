@@ -9,18 +9,25 @@
    - fallback memory.
    - Nunca localStorage.clear().
    - Nunca sessionStorage.clear().
-   - Bloqueo defensivo de claves sensibles.
+   - Bloqueo defensivo de claves y payloads sensibles.
+   - Sin tokens.
+   - Sin sesiones auth.
+   - Sin secrets.
    - Sin legacy masivo.
    - Sin migraciones reales.
    - Sin repair complejo.
-   - Sin imports.
    - Sin Auth.
    - Sin Router.
    - Sin Store.
    - Sin fetch.
 ========================================================= */
 
-export const STORAGE_VERSION = "core.storage.v2";
+import {
+  SENSITIVE_QUERY_PARAMS,
+  TOKEN_PARAM,
+} from "./config.js";
+
+export const STORAGE_VERSION = "core.storage.v3";
 
 export const STORAGE_EVENTS = Object.freeze({
   ready: "app:core:storage:ready",
@@ -35,7 +42,7 @@ const PREFIX_RAW = "onion";
 const memory = new Map();
 
 const SENSITIVE_KEY_PARTS = Object.freeze([
-  "token",
+  TOKEN_PARAM,
   "access_token",
   "accesstoken",
   "refresh_token",
@@ -47,11 +54,18 @@ const SENSITIVE_KEY_PARTS = Object.freeze([
   "authorization",
   "authheader",
   "cookie",
+
+  "session",
+  "sessiondata",
+  "session_data",
+  "sessionid",
+  "session_id",
   "session_secret",
 
   "password",
   "passwordhash",
   "password_hash",
+
   "secret",
   "secrets",
 
@@ -68,6 +82,32 @@ const SENSITIVE_KEY_PARTS = Object.freeze([
   "sas",
   "connectionstring",
   "connection_string",
+]);
+
+const SENSITIVE_QUERY_KEYS = new Set(
+  (Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
+    ? SENSITIVE_QUERY_PARAMS
+    : [TOKEN_PARAM]
+  ).map((item) => String(item).toLowerCase())
+);
+
+const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
+
+const LEGACY_SENSITIVE_KEYS = Object.freeze([
+  "token",
+  "access_token",
+  "accessToken",
+  "refresh_token",
+  "refreshToken",
+  "id_token",
+  "idToken",
+  "jwt",
+  "auth",
+  "authorization",
+  "session",
+  "sessionData",
+  "currentUser",
+  "user",
 ]);
 
 /* =========================================================
@@ -95,6 +135,21 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSensitiveQueryPattern() {
+  const keys = [...SENSITIVE_QUERY_KEYS]
+    .map(escapeRegExp)
+    .filter(Boolean)
+    .join("|");
+
+  return keys
+    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
+    : null;
+}
+
 function normalizeKeyText(value = "") {
   return text(value, "")
     .replace(/^onion:/i, "")
@@ -103,12 +158,17 @@ function normalizeKeyText(value = "") {
 }
 
 function key(name = "") {
-  const clean = text(name, "");
+  const clean = normalizeKeyText(name);
 
-  if (!clean) return PREFIX.replace(/:$/g, "");
-  if (clean.startsWith(PREFIX)) return clean;
+  if (!clean) return PREFIX_RAW;
 
-  return `${PREFIX}${clean.replace(/^:+/g, "")}`;
+  return `${PREFIX}${clean}`;
+}
+
+function namespacePrefix(namespace = "") {
+  const clean = normalizeKeyText(namespace);
+
+  return clean ? `${PREFIX}${clean}` : PREFIX;
 }
 
 function rawKey(name = "") {
@@ -121,8 +181,56 @@ function keyIsSensitive(name = "") {
   if (!clean) return false;
 
   return SENSITIVE_KEY_PARTS.some((part) => {
-    return clean === part || clean.includes(part);
+    const value = String(part || "").toLowerCase();
+
+    return value && (clean === value || clean.includes(value));
   });
+}
+
+function valueHasSensitiveKeys(value = null, depth = 0) {
+  if (depth > 8) return false;
+
+  if (Array.isArray(value)) {
+    return value.some((item) => valueHasSensitiveKeys(item, depth + 1));
+  }
+
+  if (!isObject(value)) return false;
+
+  for (const [keyName, child] of Object.entries(value)) {
+    if (keyIsSensitive(keyName)) return true;
+    if (valueHasSensitiveKeys(child, depth + 1)) return true;
+  }
+
+  return false;
+}
+
+function rawLooksSensitive(raw = "") {
+  const value = String(raw || "");
+
+  if (!value) return false;
+
+  if (SENSITIVE_QUERY_PATTERN) {
+    SENSITIVE_QUERY_PATTERN.lastIndex = 0;
+
+    if (SENSITIVE_QUERY_PATTERN.test(value)) {
+      SENSITIVE_QUERY_PATTERN.lastIndex = 0;
+      return true;
+    }
+
+    SENSITIVE_QUERY_PATTERN.lastIndex = 0;
+  }
+
+  if (/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/i.test(value)) {
+    return true;
+  }
+
+  if (/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/.test(value)) {
+    return true;
+  }
+
+  const parsed = parse(value, null);
+
+  return valueHasSensitiveKeys(parsed);
 }
 
 function safeKeyPayload(finalKey = "") {
@@ -132,6 +240,8 @@ function safeKeyPayload(finalKey = "") {
 }
 
 function emit(events, name, payload = {}) {
+  if (!name) return false;
+
   try {
     if (isFunction(events?.emit)) {
       events.emit(name, payload);
@@ -208,6 +318,16 @@ function removeRaw(storage, finalKey) {
   }
 }
 
+function removeExistingRaw(storage, finalKey) {
+  if (!storage) return false;
+
+  const exists = readRaw(storage, finalKey) !== null;
+
+  removeRaw(storage, finalKey);
+
+  return exists;
+}
+
 function storageKeys(storage) {
   const output = [];
 
@@ -226,6 +346,43 @@ function storageKeys(storage) {
   }
 
   return output;
+}
+
+function collectKeys(options = {}, includeSensitive = false) {
+  const wantedPrefix = options.prefix
+    ? namespacePrefix(options.prefix)
+    : PREFIX;
+
+  const output = new Set();
+
+  for (const current of memory.keys()) {
+    if (
+      current.startsWith(wantedPrefix) &&
+      (includeSensitive || !keyIsSensitive(current))
+    ) {
+      output.add(current);
+    }
+  }
+
+  for (const current of storageKeys(local())) {
+    if (
+      current.startsWith(wantedPrefix) &&
+      (includeSensitive || !keyIsSensitive(current))
+    ) {
+      output.add(current);
+    }
+  }
+
+  for (const current of storageKeys(session())) {
+    if (
+      current.startsWith(wantedPrefix) &&
+      (includeSensitive || !keyIsSensitive(current))
+    ) {
+      output.add(current);
+    }
+  }
+
+  return [...output];
 }
 
 /* =========================================================
@@ -258,7 +415,29 @@ function stringify(value) {
 ========================================================= */
 
 export function removeLegacySessionKeys() {
-  return 0;
+  let removed = 0;
+  const candidates = new Set();
+
+  for (const name of LEGACY_SENSITIVE_KEYS) {
+    candidates.add(String(name));
+    candidates.add(key(name));
+  }
+
+  for (const candidate of candidates) {
+    if (memory.delete(candidate)) {
+      removed += 1;
+    }
+
+    if (removeExistingRaw(local(), candidate)) {
+      removed += 1;
+    }
+
+    if (removeExistingRaw(session(), candidate)) {
+      removed += 1;
+    }
+  }
+
+  return removed;
 }
 
 export function resetStorageAvailabilityCache() {
@@ -270,9 +449,10 @@ export function resetStorageAvailabilityCache() {
 ========================================================= */
 
 export function createStorage({ events = null } = {}) {
-  function blocked(finalKey = "", operation = "storage") {
+  function blocked(finalKey = "", operation = "storage", reason = "sensitive") {
     emit(events, STORAGE_EVENTS.blocked, {
       operation,
+      reason,
       ...safeKeyPayload(finalKey),
     });
 
@@ -337,6 +517,11 @@ export function createStorage({ events = null } = {}) {
 
     const raw = String(value);
 
+    if (rawLooksSensitive(raw)) {
+      blocked(finalKey, "setRaw", "sensitive-payload");
+      return false;
+    }
+
     memory.set(finalKey, raw);
 
     if (options.memory === true || options.kind === "memory") {
@@ -353,14 +538,22 @@ export function createStorage({ events = null } = {}) {
       });
     }
 
-    /*
-      Devuelve true porque memory queda como fallback operativo aunque
-      local/sessionStorage fallen por privacidad, cuota o bloqueo del navegador.
-    */
     return true;
   }
 
   function set(name = "", value = null, options = {}) {
+    const finalKey = key(name);
+
+    if (keyIsSensitive(finalKey)) {
+      blocked(finalKey, "set");
+      return false;
+    }
+
+    if (valueHasSensitiveKeys(value)) {
+      blocked(finalKey, "set", "sensitive-payload");
+      return false;
+    }
+
     const raw = stringify(value);
 
     if (raw === null) {
@@ -419,28 +612,7 @@ export function createStorage({ events = null } = {}) {
   }
 
   function keys(options = {}) {
-    const wantedPrefix = options.prefix ? key(options.prefix) : PREFIX;
-    const output = new Set();
-
-    for (const current of memory.keys()) {
-      if (current.startsWith(wantedPrefix) && !keyIsSensitive(current)) {
-        output.add(current);
-      }
-    }
-
-    for (const current of storageKeys(local())) {
-      if (current.startsWith(wantedPrefix) && !keyIsSensitive(current)) {
-        output.add(current);
-      }
-    }
-
-    for (const current of storageKeys(session())) {
-      if (current.startsWith(wantedPrefix) && !keyIsSensitive(current)) {
-        output.add(current);
-      }
-    }
-
-    return [...output];
+    return collectKeys(options, false);
   }
 
   function entries(options = {}) {
@@ -451,18 +623,20 @@ export function createStorage({ events = null } = {}) {
   }
 
   function clearNamespace(namespace = "", options = {}) {
-    const wantedPrefix = namespace ? key(namespace) : PREFIX;
+    const wantedPrefix = namespacePrefix(namespace);
     let removed = 0;
 
-    for (const current of keys({ prefix: wantedPrefix })) {
-      memory.delete(current);
+    for (const current of collectKeys({ prefix: wantedPrefix }, true)) {
+      if (memory.delete(current)) {
+        removed += 1;
+      }
 
       if (options.all === true || options.session !== true) {
-        if (removeRaw(local(), current)) removed += 1;
+        if (removeExistingRaw(local(), current)) removed += 1;
       }
 
       if (options.all === true || options.local !== true) {
-        if (removeRaw(session(), current)) removed += 1;
+        if (removeExistingRaw(session(), current)) removed += 1;
       }
     }
 
@@ -520,13 +694,17 @@ export function createStorage({ events = null } = {}) {
         neverCallsSessionStorageClear: true,
 
         blocksSensitiveKeys: true,
+        blocksSensitivePayloads: true,
+
         noTokens: true,
+        noSessions: true,
         noSecrets: true,
         noAuthRuntime: true,
 
         noLegacyMigration: true,
         noRepairComplexity: true,
 
+        namespaceClearRemovesSensitiveLegacyKeysToo: true,
         snapshotRedacted: true,
       },
     };

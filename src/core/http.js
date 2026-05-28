@@ -22,10 +22,11 @@
    - Sin Storage.
    - Sin magia negra.
 
-   NOTA:
-   - TOKEN_EXPIRED no implica logout.
-   - Este archivo sólo clasifica el error.
-   - La capa de sesión/auth decide si llama /api/auth/refresh.
+   Contrato crítico:
+   - TOKEN_EXPIRED / 401 recuperable NO implica logout.
+   - Access token caducado/rotado NO equivale a sesión perdida.
+   - HTTP sólo clasifica: canRefresh / shouldLogout.
+   - Session/Auth decide si llama /api/auth/refresh o clearSession().
 ========================================================= */
 
 import {
@@ -43,7 +44,7 @@ import {
   createApiClient,
 } from "./request.js";
 
-export const HTTP_VERSION = "core.http.v7";
+export const HTTP_VERSION = "core.http.v8";
 
 export const DEFAULT_API_ORIGIN = getApiBase();
 export const DEFAULT_TIMEOUT_MS = config?.api?.timeout || 30000;
@@ -83,35 +84,28 @@ const stats = {
 
 const REFRESHABLE_AUTH_CODES = new Set([
   "TOKEN_EXPIRED",
+  "ACCESS_TOKEN_EXPIRED",
+  "JWT_EXPIRED",
+  "TOKEN_STALE",
+  "INVALID_TOKEN",
   "MISSING_TOKEN",
   "SESSION_REQUIRED",
+  "AUTH_REQUIRED",
+  "UNAUTHORIZED",
 ]);
 
 const CLEAR_SESSION_AUTH_CODES = new Set([
-  "INVALID_TOKEN",
-  "INVALID_TOKEN_FORMAT",
-  "INVALID_AUTHORIZATION_HEADER",
-  "TEMP_TOKEN_NOT_ALLOWED",
-  "TEMP_AUTH_DISABLED",
-
-  "SESSION_INVALID",
   "SESSION_REVOKED",
-  "SESSION_USER_MISMATCH",
-  "SESSION_ID_MISMATCH",
-  "SESSION_TOKEN_VERSION_MISMATCH",
-  "SESSION_TOKEN_MISMATCH",
-
-  "USER_INVALID",
-  "USER_INACTIVE",
-  "USER_DISABLED",
-  "USER_NOT_AVAILABLE",
-  "USER_EMAIL_UNVERIFIED",
-
-  "PASSWORD_CHANGE_REQUIRED",
-  "TOKEN_VERSION_MISMATCH",
+  "SESSION_INVALID",
+  "SESSION_NOT_FOUND",
 
   "INVALID_REFRESH_TOKEN",
-  "SESSION_NOT_FOUND",
+  "REFRESH_TOKEN_INVALID",
+  "REFRESH_TOKEN_REVOKED",
+
+  "USER_DISABLED",
+  "USER_SUSPENDED",
+  "USER_DESACTIVADO",
 ]);
 
 const SENSITIVE_QUERY_KEYS = new Set([
@@ -180,7 +174,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function keyIsSensitive(value = "") {
@@ -215,6 +210,13 @@ function hasHeader(headers = {}, name = "") {
   if (!target) return false;
 
   return Object.keys(headers || {}).some((key) => key.toLowerCase() === target);
+}
+
+function sessionCredentials(options = {}) {
+  return {
+    ...options,
+    credentials: options.credentials || "include",
+  };
 }
 
 function resetEngines() {
@@ -308,12 +310,50 @@ function stateAccessToken(state = getState()) {
 
 function stateExplicitlyHasNoToken(state = getState()) {
   return Boolean(
-    state.hasToken === false ||
-      (
-        state.authenticated === false &&
-        !stateAccessToken(state)
-      )
+    state.hasToken === false &&
+      !stateAccessToken(state)
   );
+}
+
+function patchStateAccessToken(token = "", options = {}) {
+  const state = getState();
+
+  if (!isObject(state)) return false;
+
+  const value = cleanToken(token);
+
+  if (value) {
+    state.token = value;
+    state.accessToken = value;
+    state.access_token = value;
+    state.hasToken = true;
+    return true;
+  }
+
+  if (
+    options.clearState === true ||
+    options.clearSession === true ||
+    options.forceUnauthenticated === true
+  ) {
+    delete state.token;
+    delete state.accessToken;
+    delete state.access_token;
+
+    state.hasToken = false;
+    return true;
+  }
+
+  return false;
+}
+
+function normalizeTokenOptions(options = {}) {
+  if (options === true) {
+    return {
+      clearState: true,
+    };
+  }
+
+  return isObject(options) ? options : {};
 }
 
 function nestedPayloads(payload = {}) {
@@ -352,7 +392,7 @@ export function getAccessToken() {
 
   /*
     Si AppCore ya declaró que no hay token, no recuperamos un token runtime
-    ni un token stale que haya quedado por compat.
+    antiguo que haya quedado por compat.
   */
   if (stateExplicitlyHasNoToken(state)) {
     return "";
@@ -365,35 +405,27 @@ export function getAccessToken() {
   return cleanToken(runtimeTokens.accessToken || "");
 }
 
-export function setAccessToken(token = "") {
+export function setAccessToken(token = "", options = {}) {
+  const opts = normalizeTokenOptions(options);
   const value = cleanToken(token);
-  const state = getState();
-
-  runtimeTokens.accessToken = value;
 
   if (!value) {
-    delete state.token;
-    delete state.accessToken;
-    delete state.access_token;
-
-    state.hasToken = false;
-    state.authenticated = false;
-
+    runtimeTokens.accessToken = "";
+    patchStateAccessToken("", opts);
     return "";
   }
 
-  state.token = value;
-  state.accessToken = value;
-  state.access_token = value;
-  state.hasToken = true;
+  runtimeTokens.accessToken = value;
+  patchStateAccessToken(value, opts);
 
   return value;
 }
 
 export function setAuthTokens(payload = {}) {
-  const access = setAccessToken(
-    accessTokenFromPayload(payload)
-  );
+  const nextToken = accessTokenFromPayload(payload);
+  const access = nextToken
+    ? setAccessToken(nextToken)
+    : getAccessToken();
 
   return {
     token: access || "",
@@ -402,17 +434,11 @@ export function setAuthTokens(payload = {}) {
   };
 }
 
-export function clearAuthTokens() {
-  const state = getState();
+export function clearAuthTokens(options = {}) {
+  const opts = normalizeTokenOptions(options);
 
   runtimeTokens.accessToken = "";
-
-  delete state.token;
-  delete state.accessToken;
-  delete state.access_token;
-
-  state.hasToken = false;
-  state.authenticated = false;
+  patchStateAccessToken("", opts);
 
   return true;
 }
@@ -557,6 +583,11 @@ export class HttpError extends Error {
     this.method = cleanText(options.method, "");
     this.url = redact(options.url || "");
     this.data = sanitizeErrorData(options.data || null);
+
+    this.canRefresh = options.canRefresh === true;
+    this.refreshRequired = options.refreshRequired === true;
+    this.shouldLogout = options.shouldLogout === true;
+    this.clearClientSession = options.clearClientSession === true;
   }
 }
 
@@ -608,26 +639,6 @@ export function getHttpStatus(error = null) {
   ) || 0;
 }
 
-export function isRefreshableAuthError(error = null) {
-  if (error?.canRefresh === true || error?.refreshRequired === true) {
-    return true;
-  }
-
-  const payload = getErrorPayload(error);
-  const auth = isObject(payload.auth) ? payload.auth : {};
-  const code = getHttpErrorCode(error);
-
-  if (auth.refreshRequired === true || payload.refreshRequired === true) {
-    return true;
-  }
-
-  if (auth.canRefresh === true || payload.canRefresh === true) {
-    return true;
-  }
-
-  return REFRESHABLE_AUTH_CODES.has(code);
-}
-
 export function shouldClearSessionForAuthError(error = null) {
   if (error?.shouldLogout === true || error?.clearClientSession === true) {
     return true;
@@ -648,12 +659,46 @@ export function shouldClearSessionForAuthError(error = null) {
   return CLEAR_SESSION_AUTH_CODES.has(code);
 }
 
+export function isRefreshableAuthError(error = null) {
+  if (shouldClearSessionForAuthError(error)) {
+    return false;
+  }
+
+  if (error?.canRefresh === true || error?.refreshRequired === true) {
+    return true;
+  }
+
+  const payload = getErrorPayload(error);
+  const auth = isObject(payload.auth) ? payload.auth : {};
+  const code = getHttpErrorCode(error);
+  const status = getHttpStatus(error);
+
+  if (auth.refreshRequired === true || payload.refreshRequired === true) {
+    return true;
+  }
+
+  if (auth.canRefresh === true || payload.canRefresh === true) {
+    return true;
+  }
+
+  if (REFRESHABLE_AUTH_CODES.has(code)) {
+    return true;
+  }
+
+  /*
+    Un 401 de una request privada es recuperable por defecto.
+    La sesión sólo se limpia si refresh falla o el backend devuelve
+    clearClientSession / shouldLogout / código terminal.
+  */
+  return status === 401;
+}
+
 export function normalizeHttpError(error = null) {
   const payload = getErrorPayload(error);
   const code = getHttpErrorCode(error);
   const status = getHttpStatus(error);
-  const canRefresh = isRefreshableAuthError(error);
   const shouldLogout = shouldClearSessionForAuthError(error);
+  const canRefresh = shouldLogout ? false : isRefreshableAuthError(error);
 
   return {
     name: error?.name || "Error",
@@ -680,6 +725,26 @@ export function normalizeHttpError(error = null) {
     shouldLogout,
     clearClientSession: shouldLogout,
   };
+}
+
+function decorateError(error = null, normalized = null) {
+  if (!error || !isObject(error) || !normalized) {
+    return error;
+  }
+
+  try {
+    error.status = normalized.status;
+    error.statusCode = normalized.statusCode;
+    error.code = normalized.code;
+    error.canRefresh = normalized.canRefresh;
+    error.refreshRequired = normalized.refreshRequired;
+    error.shouldLogout = normalized.shouldLogout;
+    error.clearClientSession = normalized.clearClientSession;
+  } catch {
+    // noop
+  }
+
+  return error;
 }
 
 function recordHttpError(error = null, url = "", method = "") {
@@ -858,7 +923,8 @@ export async function request(firstArg = "/", second = {}, third = {}) {
 
     return result;
   } catch (error) {
-    recordHttpError(error, url, method);
+    const normalized = recordHttpError(error, url, method);
+    decorateError(error, normalized);
     throw error;
   }
 }
@@ -948,17 +1014,18 @@ export function raw(endpoint = "/", options = {}) {
 
 export function login(credentials = {}, options = {}) {
   return post(AUTH_ENDPOINTS.login, credentials, {
-    ...options,
+    ...sessionCredentials(options),
     auth: false,
     public: true,
     skipAuth: true,
     noAuthHeader: true,
+    cache: "no-store",
   });
 }
 
 export function me(options = {}) {
   return get(AUTH_ENDPOINTS.me, {
-    ...options,
+    ...sessionCredentials(options),
     auth: true,
     public: false,
     skipAuth: false,
@@ -969,7 +1036,7 @@ export function me(options = {}) {
 
 export function refreshSession(body = {}, options = {}) {
   return post(AUTH_ENDPOINTS.refresh, body, {
-    ...options,
+    ...sessionCredentials(options),
     auth: false,
     public: true,
     skipAuth: true,
@@ -989,53 +1056,60 @@ export function refresh(options = {}) {
 
 export function logout(options = {}) {
   return post(AUTH_ENDPOINTS.logout, {}, {
-    ...options,
+    ...sessionCredentials(options),
     auth: true,
     public: false,
     skipAuth: false,
     noAuthHeader: false,
+    cache: "no-store",
   }).finally(() => {
-    clearAuthTokens();
+    clearAuthTokens({
+      clearState: true,
+    });
   });
 }
 
 export function activate(body = {}, options = {}) {
   return post(AUTH_ENDPOINTS.activate, body, {
-    ...options,
+    ...sessionCredentials(options),
     auth: false,
     public: true,
     skipAuth: true,
     noAuthHeader: true,
+    cache: "no-store",
   });
 }
 
 export function activateAccount(body = {}, options = {}) {
   return post(AUTH_ENDPOINTS.activateAccount || AUTH_ENDPOINTS.activate, body, {
-    ...options,
+    ...sessionCredentials(options),
     auth: false,
     public: true,
     skipAuth: true,
     noAuthHeader: true,
+    cache: "no-store",
   });
 }
 
 export function requestPasswordReset(body = {}, options = {}) {
   return post(AUTH_ENDPOINTS.requestPasswordReset, body, {
-    ...options,
+    ...sessionCredentials(options),
     auth: false,
     public: true,
     skipAuth: true,
     noAuthHeader: true,
+    cache: "no-store",
   });
 }
 
 export function confirmPasswordReset(body = {}, options = {}) {
   return post(AUTH_ENDPOINTS.confirmPasswordReset, body, {
-    ...options,
+    ...sessionCredentials(options),
     auth: false,
     public: true,
     skipAuth: true,
     noAuthHeader: true,
+    cache: "no-store",
   });
 }
 
@@ -1105,6 +1179,9 @@ export function getHttpSnapshot() {
       refreshPublic: isPublicApiPath(AUTH_ENDPOINTS.refresh),
       refreshUsesAuthHeader: shouldUseAuth(AUTH_ENDPOINTS.refresh, {}),
       meUsesAuthHeader: shouldUseAuth(AUTH_ENDPOINTS.me, {}),
+      refreshUsesCredentials: true,
+      loginUsesCredentials: true,
+      logoutUsesCredentials: true,
     },
 
     policy: {
@@ -1136,6 +1213,8 @@ export function getHttpSnapshot() {
       noRefreshTokenStorage: true,
 
       tokenExpiredDoesNotMeanLogout: true,
+      bare401IsRefreshable: true,
+      clearSessionOnlyForTerminalBackendSignals: true,
       snapshotRedacted: true,
     },
   };

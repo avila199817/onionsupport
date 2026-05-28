@@ -1,6 +1,6 @@
 /* =========================================================
    Onion Support - Password Reset
-   Archivo: /src/features/auth/password-reset.js
+   Archivo: src/features/auth/password-reset.js
 
    Responsabilidad:
    - Password reset público mínimo.
@@ -20,6 +20,7 @@
    - Sin refresh.
    - Sin validate endpoint real.
    - Sin aliases legacy masivos.
+   - Sin rutas legacy.
    - Sin 2FA/MFA/OTP.
    - Sin magia negra.
 ========================================================= */
@@ -40,7 +41,7 @@ import {
 
 import * as SessionApi from "./session.js";
 
-export const PASSWORD_RESET_MODULE_VERSION = "auth.password-reset.v6";
+export const PASSWORD_RESET_MODULE_VERSION = "auth.password-reset.v7";
 
 const SOURCE = "auth.password-reset";
 
@@ -48,7 +49,7 @@ const REQUEST_ENDPOINT = AUTH_ENDPOINTS.requestPasswordReset;
 const CONFIRM_ENDPOINT = AUTH_ENDPOINTS.confirmPasswordReset;
 
 const DEFAULT_LOGIN_REDIRECT = ROUTES.login || "/login";
-const HOME_ROUTE = ROUTES.home || "/";
+const HOME_ROUTE = ROUTES.root || "/";
 const USER_HOME_PREFIX_VALUE = USER_HOME_PREFIX || "/@";
 
 const IDENTIFIER_MAX_LENGTH = 160;
@@ -174,6 +175,12 @@ function sessionMethod(name = "") {
   }
 
   return null;
+}
+
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
+    String(value || "")
+  );
 }
 
 /* =========================================================
@@ -446,62 +453,57 @@ function extractUserSlug(user = null) {
   }
 }
 
-function isBlockedSpaPath(path = "") {
-  try {
-    if (configIsBlockedRoutePath(path) === true) return true;
-  } catch {
-    // fallback local
-  }
-
-  const clean = cleanText(path, "")
-    .split("?")[0]
-    .split("#")[0]
-    .replace(/\/+$/g, "")
-    .toLowerCase() || "/";
-
-  return Boolean(
-    clean === "/home" ||
-      clean.startsWith("/home/") ||
-      clean === "/403" ||
-      clean.startsWith("/403/") ||
-      clean === "/404" ||
-      clean.startsWith("/404/") ||
-      clean === "/2fa" ||
-      clean.startsWith("/2fa/") ||
-      clean === "/mfa" ||
-      clean.startsWith("/mfa/") ||
-      clean === "/otp" ||
-      clean.startsWith("/otp/")
-  );
-}
-
-function normalizeSpaPath(value = "") {
+function pathOnlyForBlock(value = "") {
   const raw = cleanText(value, "");
 
   if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
 
   try {
-    const path = configNormalizeRoutePath(raw);
-
-    if (!path || isBlockedSpaPath(path)) return "";
-
-    return path;
+    return configNormalizeRoutePath(raw) || "";
   } catch {
     if (!raw.startsWith("/")) return "";
     if (raw.startsWith("//")) return "";
     if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
     if (/[\r\n\t\\]/.test(raw)) return "";
 
-    const clean = raw
+    return raw
       .split("?")[0]
       .split("#")[0]
       .replace(/\/{2,}/g, "/")
       .replace(/\/+$/g, "") || "/";
-
-    if (isBlockedSpaPath(clean)) return "";
-
-    return clean;
   }
+}
+
+function isBlockedSpaPath(path = "") {
+  const clean = pathOnlyForBlock(path);
+
+  if (!clean) return true;
+
+  try {
+    return configIsBlockedRoutePath(clean) === true;
+  } catch {
+    return true;
+  }
+}
+
+function normalizeSpaPath(value = "") {
+  const raw = cleanText(value, "");
+
+  if (!raw) return "";
+  if (!raw.startsWith("/")) return "";
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (hasSensitiveQuery(raw)) return "";
+
+  const path = pathOnlyForBlock(raw);
+
+  if (!path || isBlockedSpaPath(path)) return "";
+
+  return path;
 }
 
 function isUserHomePath(path = "") {
@@ -776,12 +778,6 @@ function responseStatus(input = {}) {
   const source = responseNode(input);
   const status = Number(source.status || source.statusCode || 0);
   return Number.isFinite(status) ? status : 0;
-}
-
-function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
-    String(value || "")
-  );
 }
 
 function normalizeRedirectPath(value = "", fallback = DEFAULT_LOGIN_REDIRECT) {
@@ -1221,6 +1217,9 @@ export function getPasswordResetSnapshot() {
     policy: {
       endpointsFromConfig: true,
       tokenParamFromConfig: true,
+
+      configOwnsBlockedRoutes: true,
+      noLocalBlockedRouteFallback: true,
 
       noValidateEndpoint: true,
       noRouter: true,

@@ -4,12 +4,13 @@
 
    Responsabilidad:
    - Password reset público mínimo.
-   - Request endpoint desde core/config.js.
-   - Confirm endpoint desde core/config.js.
-   - Token param único desde core/config.js.
+   - Request endpoint real desde core/config.js: /api/auth/password-request.
+   - Confirm endpoint real desde core/config.js: /api/auth/password-reset.
+   - Token param único desde core/config.js: token.
    - Transporte único vía CoreHttp.
    - Validar identifier/token/password/confirmPassword.
-   - No toca sesión salvo token + user explícitos del backend.
+   - No toca sesión salvo access token + user explícitos del backend.
+   - Refresh token visible opcional: puede ir en cookie httpOnly.
    - Delegar normalización de usuario/sesión en session.js.
    - Delegar slug/home/rutas en core/config.js/session.js.
    - Sin fetch propio.
@@ -19,7 +20,7 @@
    - Sin storage paralelo.
    - Sin refresh.
    - Sin validate endpoint real.
-   - Sin aliases legacy masivos.
+   - Sin aliases legacy.
    - Sin rutas legacy.
    - Sin 2FA/MFA/OTP.
    - Sin magia negra.
@@ -41,7 +42,7 @@ import {
 
 import * as SessionApi from "./session.js";
 
-export const PASSWORD_RESET_MODULE_VERSION = "auth.password-reset.v7";
+export const PASSWORD_RESET_MODULE_VERSION = "auth.password-reset.v8";
 
 const SOURCE = "auth.password-reset";
 
@@ -464,16 +465,7 @@ function pathOnlyForBlock(value = "") {
   try {
     return configNormalizeRoutePath(raw) || "";
   } catch {
-    if (!raw.startsWith("/")) return "";
-    if (raw.startsWith("//")) return "";
-    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
-    if (/[\r\n\t\\]/.test(raw)) return "";
-
-    return raw
-      .split("?")[0]
-      .split("#")[0]
-      .replace(/\/{2,}/g, "/")
-      .replace(/\/+$/g, "") || "/";
+    return "";
   }
 }
 
@@ -853,6 +845,7 @@ function normalizeBaseResponse(input = {}, fallbackSuccess = "", fallbackError =
     session: authenticated ? session : null,
     sessionData: authenticated ? session : null,
 
+    supportsHttpOnlyRefresh: true,
     sessionApplied: false,
     at: nowIso(),
   };
@@ -901,6 +894,7 @@ function sanitizeResult(result = {}) {
     session: null,
     sessionData: null,
 
+    supportsHttpOnlyRefresh: true,
     at: result.at || nowIso(),
   };
 }
@@ -933,6 +927,8 @@ function publicOptions(options = {}) {
     auth: false,
     skipAuth: true,
     noAuthHeader: true,
+
+    credentials: options.credentials || "include",
 
     cache: "no-store",
     storeError: false,
@@ -1212,10 +1208,13 @@ export function getPasswordResetSnapshot() {
       ownRouter: false,
       ownToast: false,
       ownStorage: false,
+      credentialsInclude: true,
     },
 
     policy: {
       endpointsFromConfig: true,
+      requestEndpoint: "/api/auth/password-request",
+      confirmEndpoint: "/api/auth/password-reset",
       tokenParamFromConfig: true,
 
       configOwnsBlockedRoutes: true,
@@ -1232,6 +1231,8 @@ export function getPasswordResetSnapshot() {
       configOwnsSlugAndHomeRoute: true,
 
       sessionOnlyIfBackendReturnsTokenAndUser: true,
+      visibleRefreshTokenOptional: true,
+      supportsHttpOnlyRefreshCookie: true,
       avoidsSessionEnvelopeAsUser: true,
 
       noLegacyRoutes: true,

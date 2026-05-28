@@ -3,11 +3,11 @@
    Archivo: /src/core/config.js
 
    Responsabilidad:
-   - Config estática mínima.
+   - Config estática mínima del frontend.
    - API real única.
    - Rutas reales actuales.
    - Home interna: /.
-   - Home visible de usuario: /@{user.slug}.
+   - Home visible autenticada: /@{user.slug}.
    - Rutas privadas visibles: /@{user.slug}/{ruta}.
    - Rutas admin reales: clientes, usuarios, servidor.
    - Auth endpoints mínimos alineados con backend.
@@ -17,16 +17,15 @@
    - Roles únicos: admin / user.
    - Idioma base primario: es.
    - Denylist legacy centralizada.
+   - Sesión persistente con restore/silent refresh.
    - Sin rutas inventadas.
    - Sin /home como ruta real.
-   - Sin aliases masivos.
    - Sin storage real.
    - Sin runtime complejo.
    - Sin 2FA/MFA/OTP funcional.
-   - Sin magia negra.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.v9";
+export const CONFIG_VERSION = "core.config.v10";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
@@ -39,11 +38,6 @@ export const CANONICAL_FRONTEND_ORIGINS = Object.freeze([
   "https://www.onionsupport.com",
 ]);
 
-/*
-  Compat defensiva:
-  Estos orígenes son frontend y nunca deben usarse como API base.
-  Incluimos variantes http sólo para bloquearlas como API, no como canónicas.
-*/
 export const KNOWN_FRONTEND_ORIGINS = Object.freeze([
   ...CANONICAL_FRONTEND_ORIGINS,
   "http://onionsupport.com",
@@ -60,11 +54,12 @@ export const ALLOWED_ROLES = Object.freeze([
   "user",
 ]);
 
-/*
-  Denylist canónica.
-  Estas NO son rutas reales de la SPA.
-  Existen aquí sólo para que Router/Core/History no creen listas paralelas.
-*/
+export const SUPPORTED_LANGS = Object.freeze([
+  "es",
+  "ca",
+  "en",
+]);
+
 export const BLOCKED_FRONTEND_ROUTES = Object.freeze([
   "/home",
   "/403",
@@ -79,16 +74,16 @@ export const SENSITIVE_QUERY_PARAMS = Object.freeze([
   "access_token",
   "refresh_token",
   "id_token",
-  "secret",
+  "jwt",
+  "authorization",
   "session",
+  "secret",
   "code",
   "password",
   "pwd",
   "key",
   "sig",
   "signature",
-  "jwt",
-  "authorization",
   "reset_token",
   "activation_token",
 ]);
@@ -123,13 +118,13 @@ export const PUBLIC_ROUTES = Object.freeze([
   ROUTES.activateAccount,
 ]);
 
+export const TECHNICAL_PUBLIC_ROUTES = PUBLIC_ROUTES;
+
 export const ADMIN_ROUTES = Object.freeze([
   ROUTES.clientes,
   ROUTES.usuarios,
   ROUTES.servidor,
 ]);
-
-export const TECHNICAL_PUBLIC_ROUTES = PUBLIC_ROUTES;
 
 export const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
@@ -413,10 +408,6 @@ export function endpointPathFromUrlLike(value = "") {
   return raw;
 }
 
-/*
-  Compat de nombre antiguo:
-  Para rutas de la SPA. No convierte URLs externas en rutas internas.
-*/
 export function pathFromUrlLike(value = "") {
   return routePathFromUrlLike(value);
 }
@@ -583,7 +574,7 @@ export const config = freeze({
 
   defaultLang: "es",
   fallbackLang: "es",
-  supportedLangs: freeze(["es", "ca", "en"]),
+  supportedLangs: SUPPORTED_LANGS,
 
   defaultTheme: "system",
 
@@ -631,10 +622,6 @@ export const config = freeze({
 
     loginRoute: ROUTES.login,
 
-    /*
-      Home interna canónica.
-      La home visible autenticada la construyen Auth/Router como /@{slug}.
-    */
     homeRoute: ROUTES.home,
     homeCanonicalRoute: ROUTES.home,
     userHomePrefix: USER_HOME_PREFIX,
@@ -708,7 +695,7 @@ export const config = freeze({
   i18n: freeze({
     defaultLang: "es",
     fallbackLang: "es",
-    supported: freeze(["es", "ca", "en"]),
+    supported: SUPPORTED_LANGS,
   }),
 
   router: freeze({
@@ -819,10 +806,6 @@ export function getRoute(key = "home", fallback = "/") {
   return fallback;
 }
 
-/*
-  Compat de nombre antiguo.
-  No declara alias reales.
-*/
 export function getRouteAlias() {
   return "";
 }

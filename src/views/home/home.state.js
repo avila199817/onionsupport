@@ -1,6 +1,6 @@
 /* =========================================================
    Onion Support - Home State
-   Archivo: /src/views/home/home.state.js
+   Archivo: src/views/home/home.state.js
 
    Responsabilidad:
    - Estado runtime mínimo de Home.
@@ -38,7 +38,7 @@ import {
   buildHomeActivityFromCollections,
 } from "./home.model.js";
 
-export const HOME_STATE_VERSION = "home.state.v10.model-backed-runtime";
+export const HOME_STATE_VERSION = "home.state.v11.runtime-contract";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 5;
@@ -65,13 +65,61 @@ const COSMOS_META_KEYS = new Set([
   "_metadata",
 ]);
 
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|correo|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|bank|cuenta|account|ipRaw|ip|userAgent/i;
+const SENSITIVE_KEY_PARTS = Object.freeze([
+  "token",
+  "authorization",
+  "cookie",
+  "password",
+  "passwd",
+  "pwd",
+  "secret",
+  "credential",
+  "jwt",
+  "bearer",
+  "refresh",
+  "apikey",
+  "privatekey",
+  "connectionstring",
+  "sas",
+  "otp",
+  "totp",
+  "mfa",
+  "twofa",
+  "backupcode",
+  "sessionid",
+  "email",
+  "correo",
+  "mail",
+  "phone",
+  "telefono",
+  "address",
+  "direccion",
+  "nif",
+  "dni",
+  "iban",
+  "bank",
+  "cuenta",
+  "account",
+  "useragent",
+]);
 
-const EMAIL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
+const SENSITIVE_KEY_EXACT = new Set([
+  "session",
+  "ip",
+  "ipraw",
+]);
+
+const EMAIL_GLOBAL_RE = /[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/gi;
+const EMAIL_EXACT_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i;
 
 const JWT_RE =
   /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
+
+const JWT_TEST_RE =
+  /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/;
+
+const SENSITIVE_QUERY_RE =
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i;
 
 const ADMIN_COLLECTION_KEYS = new Set([
   "users",
@@ -201,7 +249,7 @@ function clone(value, fallback = null) {
       return structuredClone(value);
     }
   } catch {
-    // fallback abajo
+    // fallback below
   }
 
   try {
@@ -219,7 +267,7 @@ function redact(value = "") {
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(JWT_RE, "***")
-    .replace(EMAIL_RE, "");
+    .replace(EMAIL_GLOBAL_RE, "");
 }
 
 function normalizeRole(value = "", fallback = "user") {
@@ -254,19 +302,40 @@ function isCosmosMetaKey(key = "") {
   return COSMOS_META_KEYS.has(String(key || ""));
 }
 
+function normalizeKey(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/^_+|_+$/g, "");
+}
+
+function normalizeSensitiveKey(value = "") {
+  return normalizeKey(value).replace(/_/g, "");
+}
+
 function isSensitiveKey(key = "") {
-  return SENSITIVE_KEY_RE.test(String(key || ""));
+  const clean = normalizeSensitiveKey(key);
+
+  if (!clean) return false;
+  if (SENSITIVE_KEY_EXACT.has(clean)) return true;
+
+  return SENSITIVE_KEY_PARTS.some((part) => clean.includes(part));
 }
 
 function isEmailLike(value = "") {
   const text = safeText(value, "");
-  return Boolean(text && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/i.test(text));
+  return Boolean(text && EMAIL_EXACT_RE.test(text));
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(
-    String(value || "")
-  );
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
+}
+
+function hasJwt(value = "") {
+  return JWT_TEST_RE.test(String(value || ""));
 }
 
 function safePublicId(value = "") {
@@ -276,7 +345,7 @@ function safePublicId(value = "") {
   if (isEmailLike(text)) return "";
   if (hasSensitiveQuery(text)) return "";
   if (/Bearer\s+/i.test(text)) return "";
-  if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
+  if (hasJwt(text)) return "";
 
   return redact(text).slice(0, 240);
 }
@@ -718,12 +787,6 @@ function syncAliases() {
   homeState.kpis = homeState.widgets;
   homeState.blocks = homeState.widgets;
 
-  homeState.tickets = normalizeHomeTickets(homeState.tickets, {
-    invoices: homeState.invoices,
-    users: admin ? homeState.users : [],
-  });
-  homeState.incidencias = homeState.tickets;
-
   homeState.invoices = normalizeHomeInvoices(homeState.invoices);
   homeState.facturas = homeState.invoices;
 
@@ -733,6 +796,12 @@ function syncAliases() {
   homeState.clients = admin ? normalizeHomeClients(homeState.clients) : [];
   homeState.clientes = admin ? homeState.clients : [];
   homeState.customers = admin ? homeState.clients : [];
+
+  homeState.tickets = normalizeHomeTickets(homeState.tickets, {
+    invoices: homeState.invoices,
+    users: admin ? homeState.users : [],
+  });
+  homeState.incidencias = homeState.tickets;
 
   homeState.activity = normalizeHomeActivityList(homeState.activity, admin);
   homeState.activities = homeState.activity;
@@ -1419,6 +1488,7 @@ export function getHomeStateSnapshot() {
         noRawBackendPayloadInDashboard: true,
         stripsCosmosMetadata: true,
         noEmailAsIdentity: true,
+        sanitizerDoesNotStripDescription: true,
 
         errorsRedacted: true,
         snapshotRedacted: true,

@@ -5,24 +5,33 @@
    Responsabilidad:
    - Store mínimo de compat.
    - Estado UI/app/entities/flags en memoria.
-   - get / set / patch / update / remove.
+   - get / set / patch / replace / update / remove.
    - Suscripciones simples.
    - No duplica Auth.
-   - No duplica Core.
+   - No duplica sesión.
+   - No duplica Core State.
    - No duplica Router.
    - No duplica HTTP.
    - No sincroniza Core en paralelo.
    - No guarda tokens reales.
-   - Sin helpers externos.
+   - No guarda usuarios Auth.
+   - Sin fetch.
    - Sin storage.
    - Sin batch fake.
    - Sin sesión fake.
-   - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
 
-export const STORE_VERSION = "store.index.v2";
+export const STORE_VERSION = "store.index.v3";
+
+const ROOT_KEYS = Object.freeze([
+  "ui",
+  "app",
+  "entities",
+  "flags",
+  "meta",
+]);
 
 const BLOCKED_KEYS = new Set([
   "__proto__",
@@ -31,7 +40,7 @@ const BLOCKED_KEYS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE =
-  /(^auth$|^session$|^currentUser$|^authUser$|^sessionUser$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id)/i;
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id)/i;
 
 /* =========================================================
    BASICS
@@ -82,12 +91,20 @@ function same(left, right) {
   }
 }
 
+function normalizeKey(key = "") {
+  return String(key || "").trim();
+}
+
 function isBlockedKey(key = "") {
-  return BLOCKED_KEYS.has(String(key || ""));
+  return BLOCKED_KEYS.has(normalizeKey(key));
 }
 
 function isSensitiveKey(key = "") {
-  return SENSITIVE_KEY_RE.test(String(key || ""));
+  return SENSITIVE_KEY_RE.test(normalizeKey(key));
+}
+
+function isAllowedRootKey(key = "") {
+  return ROOT_KEYS.includes(normalizeKey(key));
 }
 
 function sanitizeForStore(value, keyHint = "") {
@@ -131,7 +148,7 @@ function pathParts(path = "") {
     : String(path || "").split(".");
 
   return parts
-    .map((part) => String(part || "").trim())
+    .map((part) => normalizeKey(part))
     .filter(Boolean)
     .filter((part) => !isBlockedKey(part));
 }
@@ -140,6 +157,7 @@ function pathAllowed(path = "") {
   const parts = pathParts(path);
 
   if (!parts.length) return false;
+  if (!isAllowedRootKey(parts[0])) return false;
 
   return !parts.some(isSensitiveKey);
 }
@@ -215,6 +233,7 @@ function merge(target = {}, source = {}) {
   if (!isObject(source)) return output;
 
   for (const [key, value] of Object.entries(source)) {
+    if (!isAllowedRootKey(key) && !isObject(target)) continue;
     if (isBlockedKey(key)) continue;
     if (isSensitiveKey(key)) continue;
 
@@ -226,6 +245,26 @@ function merge(target = {}, source = {}) {
       isObject(clean) && isObject(output[key])
         ? merge(output[key], clean)
         : clean;
+  }
+
+  return output;
+}
+
+function sanitizeRootPatch(partial = {}) {
+  if (!isObject(partial)) return {};
+
+  const output = {};
+
+  for (const [key, value] of Object.entries(partial)) {
+    if (!isAllowedRootKey(key)) continue;
+    if (isBlockedKey(key)) continue;
+    if (isSensitiveKey(key)) continue;
+
+    const clean = sanitizeForStore(value, key);
+
+    if (clean !== undefined) {
+      output[key] = clean;
+    }
   }
 
   return output;
@@ -267,6 +306,8 @@ function touch(state) {
 }
 
 function matchPath(watched = "", changed = "") {
+  if (!watched || !changed) return false;
+
   return (
     watched === changed ||
     watched.startsWith(`${changed}.`) ||
@@ -415,11 +456,9 @@ export const Store = (() => {
   }
 
   function patch(partial = {}) {
-    if (!isObject(partial)) return get();
+    const sanitized = sanitizeRootPatch(partial);
 
-    const sanitized = sanitizeForStore(partial);
-
-    if (!isObject(sanitized)) return get();
+    if (!isObject(sanitized) || !Object.keys(sanitized).length) return get();
 
     const previous = get();
     const next = merge(state, sanitized);
@@ -442,7 +481,7 @@ export const Store = (() => {
 
     const sanitized = merge(
       createInitialState(),
-      sanitizeForStore(nextState)
+      sanitizeRootPatch(nextState)
     );
 
     if (same(state, sanitized)) return get();
@@ -455,7 +494,7 @@ export const Store = (() => {
 
     Object.assign(state, sanitized);
 
-    commit(Object.keys(state), previous);
+    commit(ROOT_KEYS, previous);
 
     return get();
   }
@@ -504,9 +543,9 @@ export const Store = (() => {
     return update(path, (current = []) => {
       const list = Array.isArray(current) ? current : [];
       const cleanItem = sanitizeForStore(item);
-      const key = String(idKey || "id");
+      const key = normalizeKey(idKey || "id");
 
-      if (!isObject(cleanItem) || isSensitiveKey(key)) {
+      if (!isObject(cleanItem) || isBlockedKey(key) || isSensitiveKey(key)) {
         return list;
       }
 
@@ -536,9 +575,9 @@ export const Store = (() => {
   function removeById(path, id, idKey = "id") {
     return update(path, (current = []) => {
       const list = Array.isArray(current) ? current : [];
-      const key = String(idKey || "id");
+      const key = normalizeKey(idKey || "id");
 
-      if (isSensitiveKey(key)) return list;
+      if (isBlockedKey(key) || isSensitiveKey(key)) return list;
 
       return list.filter((entry) => entry?.[key] !== id);
     });
@@ -663,7 +702,9 @@ export const Store = (() => {
   function attachToCore() {
     try {
       AppCore.store = api;
-      AppCore.modules?.register?.("store", api);
+      AppCore.modules?.register?.("store", api, {
+        overwrite: true,
+      });
       return true;
     } catch {
       return false;
@@ -751,6 +792,8 @@ export const Store = (() => {
 
       stateChangeCount: state.meta?.changeCount || 0,
 
+      rootKeys: ROOT_KEYS,
+
       policy: {
         memoryOnly: true,
 
@@ -765,6 +808,8 @@ export const Store = (() => {
 
         noRealTokens: true,
         noSensitiveKeys: true,
+        noUserAuthObjects: true,
+
         noImportSideEffectRegistration: true,
         noFakeSessionSelector: true,
         noBatchFake: true,

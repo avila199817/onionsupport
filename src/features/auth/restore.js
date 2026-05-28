@@ -12,8 +12,9 @@
    - Si refresh devuelve sesión válida: aplicar sesión.
    - Si refresh devuelve token sin user: validar /me con el nuevo token.
    - Si /me devuelve user válido: aplicar sesión.
-   - Si refresh falla con 401/403 o señal terminal: limpiar sesión local.
+   - Si refresh confirma sesión inválida: limpiar sesión local.
    - Si hay error técnico/no auth: no fabricar logout.
+   - Usuario inválido sólo por disabled/desactivado.
    - CoreHttp clasifica errores auth refreshable/clear-session.
    - session.js aplica/limpia/persiste sesión.
    - No inventar slug.
@@ -52,10 +53,24 @@ import {
   getCurrentUserHomePath,
 } from "./session.js";
 
-export const RESTORE_VERSION = "auth.restore.v11";
+export const RESTORE_VERSION = "auth.restore.v12";
 
 const ME_ENDPOINT = AUTH_ENDPOINTS.me;
 const REFRESH_ENDPOINT = AUTH_ENDPOINTS.refresh;
+
+const TERMINAL_CLEAR_CODES = new Set([
+  "SESSION_REVOKED",
+  "SESSION_INVALID",
+  "SESSION_NOT_FOUND",
+
+  "INVALID_REFRESH_TOKEN",
+  "REFRESH_TOKEN_INVALID",
+  "REFRESH_TOKEN_REVOKED",
+
+  "USER_DISABLED",
+  "USER_DESACTIVADO",
+  "USUARIO_DESACTIVADO",
+]);
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -125,6 +140,12 @@ function redact(value = "") {
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+function normalizeCode(value = "") {
+  return cleanText(value, "")
+    .replace(/[\s-]+/g, "_")
+    .toUpperCase();
 }
 
 function safeHttpCall(name = "", ...args) {
@@ -284,11 +305,6 @@ function refreshContext(options = {}) {
 
   const cookieCandidate = allowCookieRefresh(options);
 
-  /*
-    Contexto usable:
-    - refreshToken visible, si existe por compat; o
-    - cookie httpOnly de backend, con credentials include.
-  */
   return {
     refreshToken,
     sessionId,
@@ -339,7 +355,7 @@ function authErrorCode(error = null) {
   try {
     if (isFunction(CoreHttp?.getHttpErrorCode)) {
       const code = CoreHttp.getHttpErrorCode(error);
-      if (code) return code;
+      if (code) return normalizeCode(code);
     }
   } catch {
     // fallback abajo
@@ -347,7 +363,7 @@ function authErrorCode(error = null) {
 
   const payload = getErrorPayload(error);
 
-  return cleanText(
+  return normalizeCode(
     first(
       error?.code,
       error?.error,
@@ -358,8 +374,7 @@ function authErrorCode(error = null) {
       payload.errorCode,
       payload.error_code,
       ""
-    ),
-    ""
+    )
   );
 }
 
@@ -393,7 +408,7 @@ function createRestoreError(
   error.name = "AuthRestoreError";
   error.status = options.status || 401;
   error.statusCode = error.status;
-  error.code = options.code || "AUTH_RESTORE_FAILED";
+  error.code = normalizeCode(options.code || "AUTH_RESTORE_FAILED");
 
   return error;
 }
@@ -464,30 +479,46 @@ function payloadSaysClearSession(error = null) {
   );
 }
 
+function localSaysClearSession(error = null) {
+  return TERMINAL_CLEAR_CODES.has(authErrorCode(error));
+}
+
 function isAuthFailure(error = null) {
   const status = authErrorStatus(error);
   return status === 401 || status === 403;
 }
 
 function shouldClearSessionForAuthError(error = null) {
-  if (coreHttpSaysClearSession(error)) return true;
-  return payloadSaysClearSession(error);
+  if (payloadSaysClearSession(error)) return true;
+  if (localSaysClearSession(error)) return true;
+
+  /*
+    CoreHttp puede tener una clasificación más amplia por compat.
+    Para códigos USER_* no declarados en este proyecto, no limpiamos aquí.
+  */
+  if (coreHttpSaysClearSession(error)) {
+    const code = authErrorCode(error);
+
+    if (code.startsWith("USER_") && !TERMINAL_CLEAR_CODES.has(code)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  return false;
 }
 
 function isRefreshableAuthFailure(error = null, options = {}) {
   if (!allowSilentRefresh(options)) return false;
 
-  /*
-    Señales explícitas de sesión inválida/revocada ganan siempre.
-    No se intenta refresh si backend/CoreHttp pide limpiar cliente.
-  */
   if (shouldClearSessionForAuthError(error)) return false;
 
   if (coreHttpSaysRefreshable(error)) return true;
   if (payloadSaysRefreshable(error)) return true;
 
   const status = authErrorStatus(error);
-  const code = cleanText(authErrorCode(error), "").toUpperCase();
+  const code = authErrorCode(error);
   const context = refreshContext(options);
 
   if (status && status !== 401) return false;
@@ -508,12 +539,6 @@ function isRefreshableAuthFailure(error = null, options = {}) {
     return Boolean(context.usable);
   }
 
-  /*
-    Caso real:
-    /me puede devolver 401 genérico sin code/canRefresh/refreshRequired.
-    Si se puede intentar refresh por cookie httpOnly o refreshToken,
-    no se limpia sesión todavía.
-  */
   if (status === 401 && context.usable) {
     return true;
   }
@@ -736,10 +761,6 @@ async function requestRefresh(context = {}, options = {}) {
 
   const body = {};
 
-  /*
-    Compat: si existe refreshToken visible, se envía.
-    Flujo preferente: cookie httpOnly con credentials include.
-  */
   if (refreshToken) {
     body.refreshToken = refreshToken;
     body.refresh_token = refreshToken;
@@ -865,10 +886,6 @@ async function applyRefreshResponse(response = {}, options = {}) {
     return snapshot;
   }
 
-  /*
-    Si refresh devuelve sólo access token, validamos /me.
-    Esto evita falso logout cuando backend separa refresh de user payload.
-  */
   const refreshedToken =
     accessTokenFromPayload(payload) ||
     currentToken();
@@ -1018,11 +1035,6 @@ export async function restoreSession(options = {}) {
       const token = currentToken();
       const context = refreshContext(options);
 
-      /*
-        Aunque exista token local, se valida /me.
-        Si el access token caducó, /me puede devolver TOKEN_EXPIRED o 401 genérico.
-        Con refresh por cookie/httpOnly o refreshToken visible, se intenta refresh antes de limpiar.
-      */
       if (tokenOk(token)) {
         try {
           const result = await fetchMe(options);
@@ -1065,11 +1077,6 @@ export async function restoreSession(options = {}) {
         }
       }
 
-      /*
-        Sin access token:
-        No limpiamos de entrada. Intentamos refresh silencioso por cookie httpOnly.
-        Si el backend no tiene sesión/cookie válida, devolverá 401/403 y entonces limpiamos.
-      */
       if (!context.usable) {
         clearInvalidSession(options);
 
@@ -1182,6 +1189,9 @@ export function getRestoreSnapshot() {
       refreshWithoutVisibleRefreshToken: true,
       supportsHttpOnlyCookieRefresh: true,
       tokenExpiredDoesNotMeanLogout: true,
+
+      clearsOnlyTerminalSessionOrRefreshFailure: true,
+      invalidUserStatuses: ["disabled", "desactivado"],
 
       noFetchOwn: true,
       noStorageDirect: true,

@@ -4,11 +4,12 @@
 
    Responsabilidad:
    - Activación pública mínima.
-   - Endpoint real desde core/config.js.
+   - Endpoint real único desde core/config.js: /api/auth/activate-account.
    - Token param único: token.
    - Transporte único vía CoreHttp.
    - Validar token/password/confirmPassword.
-   - Aplica sesión sólo si backend devuelve token + user usable.
+   - Aplica sesión sólo si backend devuelve access token + user usable.
+   - Refresh token visible opcional: puede ir en cookie httpOnly.
    - Delegar normalización de usuario/sesión en session.js.
    - Delegar slug/home/rutas en core/config.js/session.js.
    - No inventar slug.
@@ -20,7 +21,7 @@
    - Sin storage directo.
    - Sin first-user.
    - Sin validate endpoint inventado.
-   - Sin aliases legacy pesados.
+   - Sin aliases legacy.
    - Sin 2FA/MFA/OTP.
    - Sin magia negra.
 ========================================================= */
@@ -46,11 +47,11 @@ import {
   normalizeUser as normalizeSessionUser,
 } from "./session.js";
 
-export const ACTIVATION_MODULE_VERSION = "auth.activation.v6";
+export const ACTIVATION_MODULE_VERSION = "auth.activation.v7";
 
 const SOURCE = "auth.activation";
 
-const ENDPOINT = AUTH_ENDPOINTS.activateAccount || AUTH_ENDPOINTS.activate;
+const ENDPOINT = AUTH_ENDPOINTS.activateAccount;
 const DEFAULT_LOGIN_REDIRECT = ROUTES.login || "/login";
 const HOME_ROUTE = ROUTES.home || "/";
 
@@ -379,61 +380,23 @@ function extractUserSlug(user = null) {
   }
 }
 
-function isBlockedSpaPath(path = "") {
-  try {
-    if (configIsBlockedRoutePath(path) === true) return true;
-  } catch {
-    // fallback local
-  }
-
-  const clean = cleanText(path, "")
-    .split("?")[0]
-    .split("#")[0]
-    .replace(/\/+$/g, "")
-    .toLowerCase() || "/";
-
-  return Boolean(
-    clean === "/home" ||
-      clean.startsWith("/home/") ||
-      clean === "/403" ||
-      clean.startsWith("/403/") ||
-      clean === "/404" ||
-      clean.startsWith("/404/") ||
-      clean === "/2fa" ||
-      clean.startsWith("/2fa/") ||
-      clean === "/mfa" ||
-      clean.startsWith("/mfa/") ||
-      clean === "/otp" ||
-      clean.startsWith("/otp/")
-  );
-}
-
 function normalizeSpaPath(value = "") {
   const raw = cleanText(value, "");
 
   if (!raw) return "";
+  if (!raw.startsWith("/")) return "";
+  if (raw.startsWith("//")) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
 
   try {
     const path = configNormalizeRoutePath(raw);
 
-    if (!path || isBlockedSpaPath(path)) return "";
+    if (!path || configIsBlockedRoutePath(path) === true) return "";
 
     return path;
   } catch {
-    if (!raw.startsWith("/")) return "";
-    if (raw.startsWith("//")) return "";
-    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
-    if (/[\r\n\t\\]/.test(raw)) return "";
-
-    const clean = raw
-      .split("?")[0]
-      .split("#")[0]
-      .replace(/\/{2,}/g, "/")
-      .replace(/\/+$/g, "") || "/";
-
-    if (isBlockedSpaPath(clean)) return "";
-
-    return clean;
+    return "";
   }
 }
 
@@ -815,6 +778,7 @@ export function normalizeActivationResponse(input = {}) {
     session,
     sessionData: session,
 
+    supportsHttpOnlyRefresh: true,
     at: nowIso(),
   };
 }
@@ -832,15 +796,12 @@ async function postActivation(body = {}, options = {}) {
     skipAuth: true,
     noAuthHeader: true,
 
+    credentials: options.credentials || "include",
     cache: "no-store",
   };
 
   if (isFunction(CoreHttp?.activateAccount)) {
     return CoreHttp.activateAccount(body, requestOptions);
-  }
-
-  if (isFunction(CoreHttp?.activate)) {
-    return CoreHttp.activate(body, requestOptions);
   }
 
   if (isFunction(CoreHttp?.post)) {
@@ -902,6 +863,7 @@ function sanitizeActivationResult(result = {}) {
     session: null,
     sessionData: null,
 
+    supportsHttpOnlyRefresh: true,
     at: result.at || nowIso(),
   };
 }
@@ -1079,7 +1041,6 @@ export function getActivationSnapshot() {
     transport: {
       hasCoreHttp: Boolean(
         CoreHttp?.activateAccount ||
-          CoreHttp?.activate ||
           CoreHttp?.post ||
           CoreHttp?.request
       ),
@@ -1088,10 +1049,12 @@ export function getActivationSnapshot() {
       ownRouter: false,
       ownToast: false,
       ownStorage: false,
+      credentialsInclude: true,
     },
 
     policy: {
       endpointFromConfig: true,
+      endpoint: "/api/auth/activate-account",
       tokenParamFromConfig: true,
 
       publicEndpoint: true,
@@ -1106,6 +1069,9 @@ export function getActivationSnapshot() {
       noRouter: true,
       noToast: true,
       noRefresh: true,
+
+      visibleRefreshTokenOptional: true,
+      supportsHttpOnlyRefreshCookie: true,
 
       noSlugFabrication: true,
       noEmailIdentity: true,

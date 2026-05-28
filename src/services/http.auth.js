@@ -4,8 +4,9 @@
 
    Responsabilidad:
    - Compat mínima de auth para Services.
-   - /api/auth/me, /auth/me, /api/me y /me siempre privados.
-   - Detectar endpoints públicos reales.
+   - /api/auth/me siempre privado.
+   - /api/auth/refresh público y sin Authorization.
+   - Detectar endpoints públicos reales desde core/config.js.
    - Auto-refresh opcional sólo en 401/419 privado.
    - Single-flight mínimo para refresh concurrente.
    - Delegar refresh siempre en src/core/http.js.
@@ -16,50 +17,33 @@
    - Sin Router.
    - Sin Toast.
    - Sin interceptores reales.
+   - Sin aliases legacy.
+   - Sin /auth/me.
+   - Sin /api/me.
+   - Sin /me.
    - Sin 2FA/MFA/OTP.
    - Sin magia negra.
 ========================================================= */
 
 import CoreHttp from "../core/http.js";
 
-export const HTTP_AUTH_VERSION = "simple";
+import {
+  AUTH_ENDPOINTS,
+  PUBLIC_API_PATHS,
+  PUBLIC_ROUTES,
+  normalizeEndpointPath as normalizeConfigEndpointPath,
+  normalizeRoutePath as normalizeConfigRoutePath,
+  isPublicApiPath,
+} from "../core/config.js";
 
-const PRIVATE_ME_ENDPOINTS = Object.freeze([
-  "/api/auth/me",
-  "/auth/me",
-  "/api/me",
-  "/me",
-]);
+export const HTTP_AUTH_VERSION = "services.http.auth.v2";
 
-const PUBLIC_AUTH_ENDPOINTS = Object.freeze([
-  "/api/auth/login",
-  "/auth/login",
-
-  "/api/auth/refresh",
-  "/auth/refresh",
-
-  "/api/auth/activate",
-  "/auth/activate",
-
-  "/api/auth/reset-password-request",
-  "/auth/reset-password-request",
-
-  "/api/auth/reset-password-confirm",
-  "/auth/reset-password-confirm",
-]);
+const PRIVATE_ME_ENDPOINT = AUTH_ENDPOINTS.me;
 
 const AUTH_CONTROL_ENDPOINTS = Object.freeze([
-  ...PUBLIC_AUTH_ENDPOINTS,
-
-  "/api/auth/logout",
-  "/auth/logout",
-]);
-
-const PUBLIC_ROUTES = Object.freeze([
-  "/login",
-  "/password-request",
-  "/password-reset",
-  "/activate-account",
+  ...PUBLIC_API_PATHS,
+  AUTH_ENDPOINTS.logout,
+  AUTH_ENDPOINTS.logoutAll,
 ]);
 
 let refreshPromise = null;
@@ -85,7 +69,11 @@ function isFunction(value) {
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -95,8 +83,12 @@ function nowIso() {
 
 function redact(value = "") {
   return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function statusFromError(error = null) {
@@ -105,8 +97,27 @@ function statusFromError(error = null) {
       error?.statusCode ||
       error?.response?.status ||
       error?.data?.status ||
+      error?.payload?.status ||
+      error?.responseData?.status ||
       0
   ) || 0;
+}
+
+function codeFromError(error = null) {
+  return text(
+    error?.code ||
+      error?.error ||
+      error?.data?.auth?.code ||
+      error?.data?.code ||
+      error?.payload?.auth?.code ||
+      error?.payload?.code ||
+      error?.responseData?.auth?.code ||
+      error?.responseData?.code ||
+      error?.response?.data?.auth?.code ||
+      error?.response?.data?.code ||
+      "",
+    ""
+  );
 }
 
 function publicError(error = null) {
@@ -116,7 +127,7 @@ function publicError(error = null) {
     name: error.name || "Error",
     message: redact(error.message || String(error)),
     status: statusFromError(error),
-    code: error.code || error.data?.code || error.response?.data?.code || null,
+    code: codeFromError(error) || null,
   };
 }
 
@@ -124,24 +135,28 @@ function publicError(error = null) {
    PATH POLICY
 ========================================================= */
 
-function baseOrigin() {
+export function normalizeEndpointPath(path = "") {
   try {
-    return window.location?.origin || "http://localhost";
+    return normalizeConfigEndpointPath(path) || "";
   } catch {
-    return "http://localhost";
+    const raw = text(path, "");
+
+    if (!raw) return "";
+
+    try {
+      const parsed = new URL(raw);
+      return normalizePathname(parsed.pathname || "/");
+    } catch {
+      return normalizePathname(raw.split("?")[0].split("#")[0] || "/");
+    }
   }
 }
 
-export function normalizeEndpointPath(path = "") {
-  const raw = text(path, "");
-
-  if (!raw) return "";
-
+function normalizeRoutePath(path = "") {
   try {
-    const parsed = new URL(raw, baseOrigin());
-    return normalizePathname(parsed.pathname || "/");
+    return normalizeConfigRoutePath(path) || "";
   } catch {
-    return normalizePathname(raw.split("?")[0].split("#")[0] || "/");
+    return normalizePathname(path);
   }
 }
 
@@ -161,29 +176,18 @@ function normalizePathname(pathname = "/") {
   return value;
 }
 
-function stripApiPrefix(path = "") {
+function endpointMatches(path = "", endpoint = "") {
   const clean = normalizeEndpointPath(path);
+  const target = normalizeEndpointPath(endpoint);
 
-  if (clean === "/api") return "/";
-  if (clean.startsWith("/api/")) return clean.slice(4) || "/";
-
-  return clean;
+  return Boolean(clean && target && clean === target);
 }
 
-function pathCandidates(path = "") {
-  const clean = normalizeEndpointPath(path);
-  const stripped = stripApiPrefix(clean);
+function routeMatches(path = "", route = "") {
+  const clean = normalizeRoutePath(path);
+  const target = normalizeRoutePath(route);
 
-  return [...new Set([clean, stripped].filter(Boolean))];
-}
-
-function pathMatches(path = "", list = []) {
-  const candidates = pathCandidates(path);
-
-  return list.some((item) => {
-    const marker = normalizeEndpointPath(item);
-    return candidates.includes(marker);
-  });
+  return Boolean(clean && target && clean === target);
 }
 
 function requestPath(requestConfig = {}) {
@@ -203,23 +207,27 @@ function requestPath(requestConfig = {}) {
 }
 
 export function isAuthMeEndpoint(path = "") {
-  return pathMatches(path, PRIVATE_ME_ENDPOINTS);
+  return endpointMatches(path, PRIVATE_ME_ENDPOINT);
 }
 
 export function isPublicAuthEndpoint(path = "") {
   if (isAuthMeEndpoint(path)) return false;
 
-  return pathMatches(path, PUBLIC_AUTH_ENDPOINTS);
+  try {
+    return isPublicApiPath(path) === true;
+  } catch {
+    return PUBLIC_API_PATHS.some((endpoint) => endpointMatches(path, endpoint));
+  }
 }
 
 export function isAuthRefreshControlEndpoint(path = "") {
   if (isAuthMeEndpoint(path)) return false;
 
-  return pathMatches(path, AUTH_CONTROL_ENDPOINTS);
+  return AUTH_CONTROL_ENDPOINTS.some((endpoint) => endpointMatches(path, endpoint));
 }
 
 export function isTechnicalPublicRoute(path = "") {
-  return pathMatches(path, PUBLIC_ROUTES);
+  return PUBLIC_ROUTES.some((route) => routeMatches(path, route));
 }
 
 export function isPublicEndpoint(path = "") {
@@ -231,12 +239,9 @@ export function isPublicEndpoint(path = "") {
 export function isAuthEndpoint(path = "") {
   const clean = normalizeEndpointPath(path);
 
-  return (
+  return Boolean(
     clean === "/api/auth" ||
-    clean === "/auth" ||
-    clean.startsWith("/api/auth/") ||
-    clean.startsWith("/auth/") ||
-    isAuthMeEndpoint(clean)
+      clean.startsWith("/api/auth/")
   );
 }
 
@@ -256,6 +261,24 @@ function isAbortOrTimeout(error = null, requestConfig = {}) {
   }
 }
 
+function coreHttpSaysRefreshable(error = null) {
+  try {
+    return isFunction(CoreHttp?.isRefreshableAuthError) &&
+      CoreHttp.isRefreshableAuthError(error) === true;
+  } catch {
+    return false;
+  }
+}
+
+function coreHttpSaysClearSession(error = null) {
+  try {
+    return isFunction(CoreHttp?.shouldClearSessionForAuthError) &&
+      CoreHttp.shouldClearSessionForAuthError(error) === true;
+  } catch {
+    return false;
+  }
+}
+
 function skipReason({ config = {}, error = null, requestConfig = {} } = {}) {
   const cfg = isObject(config) ? config : {};
   const req = isObject(requestConfig) ? requestConfig : {};
@@ -263,7 +286,11 @@ function skipReason({ config = {}, error = null, requestConfig = {} } = {}) {
   const status = statusFromError(error);
 
   if (cfg.autoRefreshOn401 === false) return "auto-refresh-disabled";
-  if (status !== 401 && status !== 419) return "status-not-refreshable";
+  if (coreHttpSaysClearSession(error)) return "terminal-auth-error";
+  if (status !== 401 && status !== 419 && !coreHttpSaysRefreshable(error)) {
+    return "status-not-refreshable";
+  }
+
   if (isAbortOrTimeout(error, req)) return "aborted-or-timeout";
 
   if (req._authRefreshAttempted === true || req._retriedAfterRefresh === true) {
@@ -288,6 +315,10 @@ function skipReason({ config = {}, error = null, requestConfig = {} } = {}) {
     return "public-request";
   }
 
+  /*
+    /api/auth/me es privado y sí puede disparar refresh.
+    El resto de endpoints de control auth no deben hacerlo.
+  */
   if (!isAuthMeEndpoint(path) && isAuthRefreshControlEndpoint(path)) {
     return "auth-control-endpoint";
   }
@@ -310,7 +341,16 @@ function refreshSucceeded(result = null) {
   const data = isObject(result) ? result : {};
 
   if (data.ok === false || data.success === false || data.error) return false;
-  if (data.ok === true || data.success === true || data.refreshed === true) return true;
+
+  if (
+    data.ok === true ||
+    data.success === true ||
+    data.refreshed === true ||
+    data.authenticated === true ||
+    data.restored === true
+  ) {
+    return true;
+  }
 
   return Boolean(
     data.token ||
@@ -321,7 +361,10 @@ function refreshSucceeded(result = null) {
       data.data?.access_token ||
       data.auth?.token ||
       data.auth?.accessToken ||
-      data.auth?.access_token
+      data.auth?.access_token ||
+      data.session?.token ||
+      data.session?.accessToken ||
+      data.session?.access_token
   );
 }
 
@@ -343,12 +386,15 @@ async function refreshViaCore(options = {}) {
     auth: false,
     public: true,
     skipAuth: true,
+    noAuthHeader: true,
 
     _skipAuthRefresh: true,
     skipAuthRefresh: true,
     noAutoRefresh: true,
     autoRefresh: false,
 
+    credentials: options.credentials || "include",
+    cache: "no-store",
     retries: 0,
     storeError: false,
   };
@@ -362,7 +408,7 @@ async function refreshViaCore(options = {}) {
   }
 
   if (isFunction(CoreHttp?.post)) {
-    return CoreHttp.post("/api/auth/refresh", {}, requestOptions);
+    return CoreHttp.post(AUTH_ENDPOINTS.refresh, {}, requestOptions);
   }
 
   throw new Error("CoreHttp refresh no disponible.");
@@ -428,7 +474,7 @@ export async function runAutoRefreshIfNeeded({
     failures += 1;
     lastError = {
       name: "RefreshRejected",
-      message: "Refresh finalizado sin token usable.",
+      message: "Refresh finalizado sin sesión/token usable.",
       status: 401,
       code: "REFRESH_REJECTED",
     };
@@ -465,14 +511,21 @@ export function getHttpAuthSnapshot() {
 
     endpointPolicy: {
       authMePrivate: true,
-      privateMeEndpoints: [...PRIVATE_ME_ENDPOINTS],
-      publicAuthEndpoints: [...PUBLIC_AUTH_ENDPOINTS],
+      privateMeEndpoint: PRIVATE_ME_ENDPOINT,
+      publicAuthEndpoints: [...PUBLIC_API_PATHS],
       publicRoutes: [...PUBLIC_ROUTES],
     },
 
     policy: {
       bridgeOnly: true,
       delegatesRefreshToCoreHttp: true,
+
+      canonicalMeOnly: true,
+      meEndpoint: "/api/auth/me",
+      noAuthMeAliases: true,
+      noApiMeAlias: true,
+      noRootMeAlias: true,
+
       directFetch: false,
       restoreSession: false,
       logout: false,

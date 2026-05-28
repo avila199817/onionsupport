@@ -19,7 +19,7 @@
    - Sin usuario fantasma.
 ========================================================= */
 
-export const UI_VERSION = "core.ui.v2";
+export const UI_VERSION = "core.ui.v3";
 
 export const USER_UI_EVENT = "app:user-ui:sync";
 export const TITLE_EVENT = "app:title:change";
@@ -29,23 +29,6 @@ const APP_NAME = "Onion Support";
 const DEFAULT_USER_NAME = "Usuario";
 
 const VALID_ROLES = new Set(["admin", "user"]);
-
-const INVALID_USER_STATUSES = new Set([
-  "disabled",
-  "inactive",
-  "deleted",
-  "archived",
-  "revoked",
-  "blocked",
-  "banned",
-  "suspended",
-  "desactivado",
-  "inactivo",
-  "eliminado",
-  "archivado",
-  "bloqueado",
-  "suspendido",
-]);
 
 const USER_NODE_IDS = Object.freeze({
   sidebarName: Object.freeze(["sidebar-name", "sidebarName"]),
@@ -94,6 +77,8 @@ function text(value = "", fallback = "") {
 }
 
 function emit(events, name, payload = {}) {
+  if (!name) return false;
+
   try {
     if (isFunction(events?.emit)) {
       events.emit(name, payload);
@@ -171,6 +156,20 @@ function setBoolData(node, key = "", value = false) {
   return setData(node, key, value ? "true" : "false");
 }
 
+function setHidden(node = null, hidden = false) {
+  if (!node) return false;
+
+  const value = Boolean(hidden);
+
+  try {
+    node.hidden = value;
+    node.setAttribute("aria-hidden", value ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function clearNode(node) {
   if (!node) return false;
 
@@ -192,6 +191,21 @@ function tagName(node = null) {
 }
 
 /* =========================================================
+   REDACTION
+========================================================= */
+
+function redactUiText(value = "") {
+  return text(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "***");
+}
+
+/* =========================================================
    USER NORMALIZATION
 ========================================================= */
 
@@ -210,49 +224,8 @@ function normalizeRole(value = "") {
   return VALID_ROLES.has(role) ? role : "";
 }
 
-function userDisabled(user = null) {
-  if (!isObject(user)) return true;
-
-  const status = text(
-    user.status ||
-      user.estado ||
-      user.state ||
-      "",
-    ""
-  ).toLowerCase();
-
-  return Boolean(
-    user.disabled === true ||
-      user.deleted === true ||
-      user.archived === true ||
-      user.revoked === true ||
-      user.blocked === true ||
-      user.banned === true ||
-      user.suspended === true ||
-      user.active === false ||
-      user.enabled === false ||
-      Boolean(user.deletedAt) ||
-      INVALID_USER_STATUSES.has(status)
-  );
-}
-
-function hasUserIdentity(user = null) {
-  if (!isObject(user)) return false;
-
-  return Boolean(
-    text(user.id, "") ||
-      text(user.userId, "") ||
-      text(user.uid, "") ||
-      text(user.sub, "") ||
-      text(user.username, "") ||
-      text(user.slug, "") ||
-      text(user.email, "") ||
-      text(user.lookup?.slug, "")
-  );
-}
-
 function getUser(state = {}) {
-  if (!state?.authenticated) return null;
+  if (state?.authenticated !== true) return null;
 
   const user =
     state.user ||
@@ -261,11 +234,7 @@ function getUser(state = {}) {
     state.sessionUser ||
     null;
 
-  if (!isObject(user)) return null;
-  if (userDisabled(user)) return null;
-  if (!hasUserIdentity(user)) return null;
-
-  return user;
+  return isObject(user) ? user : null;
 }
 
 function userName(user = null) {
@@ -277,7 +246,6 @@ function userName(user = null) {
       user.name ||
       user.nombre ||
       user.username ||
-      user.email ||
       "",
     ""
   );
@@ -290,7 +258,6 @@ function username(user = null) {
     user.username ||
       user.slug ||
       user.lookup?.slug ||
-      user.email ||
       "",
     ""
   );
@@ -349,7 +316,7 @@ function resolveUserData(state = {}) {
 
   const displayName = authenticated
     ? userName(user) || DEFAULT_USER_NAME
-    : DEFAULT_USER_NAME;
+    : "";
 
   const handle = authenticated ? username(user) : "";
   const email = authenticated ? userEmail(user) : "";
@@ -367,7 +334,7 @@ function resolveUserData(state = {}) {
 
     hasAvatar: Boolean(avatarUrl),
     avatarUrl,
-    avatarText: initials(displayName),
+    avatarText: authenticated ? initials(displayName) : "ON",
   };
 }
 
@@ -421,11 +388,11 @@ function syncAvatar(id = "", data = {}) {
 
   /*
     Core UI no gestiona imagen/avatar real.
-    Sólo sincroniza fallback textual y dataset mínimo.
+    Sólo sincroniza fallback textual, alt y dataset mínimo.
     El avatar visual complejo pertenece a ui/sidebar/user.js o equivalente.
   */
   if (tagName(node) !== "img") {
-    setText(node, data.avatarText || "ON");
+    setText(node, data.authenticated ? data.avatarText || "ON" : "ON");
   } else {
     try {
       node.alt = data.authenticated
@@ -482,8 +449,8 @@ export function setDocumentTitle(input = {}, extra = {}) {
           ...input,
         };
 
-  const title = text(payload.title, APP_NAME);
-  const suffix = text(payload.suffix, "");
+  const title = redactUiText(text(payload.title, APP_NAME));
+  const suffix = redactUiText(text(payload.suffix, ""));
   const finalTitle = suffix && !title.includes(suffix)
     ? `${title} · ${suffix}`
     : title;
@@ -547,13 +514,8 @@ export function clearDynamicContainers({
   const tableHead = byId("table-head");
 
   if (tableHead && includeTablehead !== false) {
-    try {
-      tableHead.hidden = true;
-      tableHead.setAttribute("aria-hidden", "true");
-      setData(tableHead, "visible", "false");
-    } catch {
-      // noop
-    }
+    setHidden(tableHead, true);
+    setData(tableHead, "visible", "false");
   }
 
   emit(events, DYNAMIC_CLEARED_EVENT, {
@@ -611,9 +573,9 @@ export function syncUserUI(input = {}) {
     authenticated: data.authenticated,
     hasUser: data.hasUser,
 
-    displayName: data.displayName,
+    displayName: data.displayName || null,
     username: data.username || null,
-    email: data.email || null,
+    email: data.email ? "***" : null,
     role: data.role || null,
 
     hasAvatar: data.hasAvatar,
@@ -637,7 +599,7 @@ function nodeState(id = "") {
   return {
     id,
     exists: Boolean(node),
-    text: text(node?.textContent, "").slice(0, 80),
+    text: redactUiText(node?.textContent || "").slice(0, 80),
     hidden: Boolean(node?.hidden),
     ariaHidden: node?.getAttribute?.("aria-hidden") || "",
     authenticated: node?.dataset?.authenticated || "",
@@ -660,12 +622,12 @@ export function getUiSnapshot({ state = {} } = {}) {
     version: UI_VERSION,
 
     browser: isBrowser(),
-    title: isBrowser() ? document.title : "",
+    title: isBrowser() ? redactUiText(document.title) : "",
 
     user: {
       authenticated: data.authenticated,
       hasUser: data.hasUser,
-      displayName: data.displayName,
+      displayName: data.displayName || null,
       username: data.username || null,
       email: data.email ? "***" : null,
       role: data.role || null,
@@ -696,6 +658,7 @@ export function getUiSnapshot({ state = {} } = {}) {
       noFetch: true,
       noAvatarManager: true,
       noGhostUser: true,
+      trustsNormalizedState: true,
       snapshotRedacted: true,
     },
   };

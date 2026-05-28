@@ -16,16 +16,17 @@
    - Token param único: token.
    - Roles únicos: admin / user.
    - Idioma base primario: es.
+   - Denylist legacy centralizada.
    - Sin rutas inventadas.
-   - Sin /home.
+   - Sin /home como ruta real.
    - Sin aliases masivos.
    - Sin storage real.
    - Sin runtime complejo.
-   - Sin 2FA/MFA/OTP.
+   - Sin 2FA/MFA/OTP funcional.
    - Sin magia negra.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.v8";
+export const CONFIG_VERSION = "core.config.v9";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
@@ -54,8 +55,16 @@ export const FORBIDDEN_FRONTEND_API_ORIGINS = KNOWN_FRONTEND_ORIGINS;
 export const TOKEN_PARAM = "token";
 export const USER_HOME_PREFIX = "/@";
 
-export const ALLOWED_ROLES = Object.freeze(["admin", "user"]);
+export const ALLOWED_ROLES = Object.freeze([
+  "admin",
+  "user",
+]);
 
+/*
+  Denylist canónica.
+  Estas NO son rutas reales de la SPA.
+  Existen aquí sólo para que Router/Core/History no creen listas paralelas.
+*/
 export const BLOCKED_FRONTEND_ROUTES = Object.freeze([
   "/home",
   "/403",
@@ -319,18 +328,8 @@ function endpointMatches(path = "", candidate = "") {
 function isBlockedNormalizedPath(path = "") {
   const clean = normalizePathname(path).toLowerCase();
 
-  if (
-    BLOCKED_FRONTEND_ROUTES.some((blocked) =>
-      pathIsOrStartsWith(clean, blocked)
-    )
-  ) {
-    return true;
-  }
-
-  return (
-    clean.startsWith("/2fa/") ||
-    clean.startsWith("/mfa/") ||
-    clean.startsWith("/otp/")
+  return BLOCKED_FRONTEND_ROUTES.some((blocked) =>
+    pathIsOrStartsWith(clean, blocked)
   );
 }
 
@@ -595,7 +594,9 @@ export const config = freeze({
   publicRoutes: PUBLIC_ROUTES,
   authLikeRoutes: PUBLIC_ROUTES,
   technicalPublicRoutes: TECHNICAL_PUBLIC_ROUTES,
+
   adminRoutes: ADMIN_ROUTES,
+
   protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
 
   blockedFrontendRoutes: BLOCKED_FRONTEND_ROUTES,
@@ -726,7 +727,9 @@ export const config = freeze({
     publicRoutes: PUBLIC_ROUTES,
     authLikeRoutes: PUBLIC_ROUTES,
     technicalPublicRoutes: TECHNICAL_PUBLIC_ROUTES,
+
     adminRoutes: ADMIN_ROUTES,
+
     protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
     blockedFrontendRoutes: BLOCKED_FRONTEND_ROUTES,
   }),
@@ -965,9 +968,13 @@ export function getConfigSnapshot() {
       noHomeRoute: true,
       noRouteAliases: true,
 
+      legacyRoutesOnlyAsDenylist: true,
       blockedHomeAlias: true,
       blocked403: true,
       blocked404: true,
+      blocked2fa: true,
+      blockedMfa: true,
+      blockedOtp: true,
 
       blocksNestedLegacyRoutes: true,
       blocksUserScopedLegacyRoutes: true,

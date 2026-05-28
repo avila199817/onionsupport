@@ -46,7 +46,7 @@ import {
 
 import * as Session from "./session.js";
 
-export const GUARDS_VERSION = "auth.guards.v8";
+export const GUARDS_VERSION = "auth.guards.v9";
 
 const HOME_PATH = "/";
 const LOGIN_PATH = ROUTES.login || "/login";
@@ -241,49 +241,6 @@ function normalizeUserSlug(value = "") {
   }
 }
 
-function localUserScopedRouteInfo(path = HOME_PATH) {
-  const normalized = normalizePublicPath(path);
-
-  if (!normalized.startsWith(USER_PREFIX)) {
-    return {
-      scoped: false,
-      home: false,
-      slug: "",
-      restPath: normalized,
-      canonicalPath: normalized,
-      lookupPath: normalized,
-    };
-  }
-
-  const rest = normalized.slice(USER_PREFIX.length);
-  const [slugSegment = "", ...restSegments] = rest.split("/");
-  const slug = normalizeUserSlug(slugSegment);
-
-  if (!slug) {
-    return {
-      scoped: false,
-      home: false,
-      slug: "",
-      restPath: normalized,
-      canonicalPath: normalized,
-      lookupPath: normalized,
-    };
-  }
-
-  const restPath = restSegments.length
-    ? normalizePublicPath(`/${restSegments.join("/")}`)
-    : HOME_PATH;
-
-  return {
-    scoped: true,
-    home: restPath === HOME_PATH,
-    slug,
-    restPath,
-    canonicalPath: restPath,
-    lookupPath: restPath,
-  };
-}
-
 export function getUserScopedRouteInfo(path = HOME_PATH) {
   try {
     const info = getConfigUserScopedRouteInfo(path);
@@ -311,10 +268,19 @@ export function getUserScopedRouteInfo(path = HOME_PATH) {
       };
     }
   } catch {
-    // fallback abajo
+    // fallback seguro sin duplicar user-scope
   }
 
-  return localUserScopedRouteInfo(path);
+  const normalized = normalizePublicPath(path);
+
+  return {
+    scoped: false,
+    home: false,
+    slug: "",
+    restPath: normalized,
+    canonicalPath: normalized,
+    lookupPath: normalized,
+  };
 }
 
 export function extractUserScopedSlug(path = HOME_PATH) {
@@ -342,37 +308,15 @@ export function isUserScopedPath(path = HOME_PATH) {
   }
 }
 
-function localBlockedPath(path = HOME_PATH) {
-  const normalized = normalizePublicPath(path).toLowerCase();
-
-  return Boolean(
-    normalized === "/home" ||
-      normalized.startsWith("/home/") ||
-      normalized === "/403" ||
-      normalized.startsWith("/403/") ||
-      normalized === "/404" ||
-      normalized.startsWith("/404/") ||
-      normalized === "/2fa" ||
-      normalized.startsWith("/2fa/") ||
-      normalized === "/mfa" ||
-      normalized.startsWith("/mfa/") ||
-      normalized === "/otp" ||
-      normalized.startsWith("/otp/")
-  );
-}
-
 function isBlockedLegacyPath(path = HOME_PATH) {
   try {
-    if (configIsBlockedRoutePath(path) === true) return true;
+    return configIsBlockedRoutePath(path) === true;
   } catch {
-    // fallback local
+    /*
+      Sin denylist local: si Config falla, bloqueamos por seguridad.
+    */
+    return true;
   }
-
-  if (localBlockedPath(path)) return true;
-
-  const scoped = getUserScopedRouteInfo(path);
-
-  return Boolean(scoped.scoped && localBlockedPath(scoped.restPath));
 }
 
 function isCurrentUserScopedPath(path = HOME_PATH) {
@@ -693,7 +637,7 @@ export function canAccessRoute(route = {}) {
     Las rutas públicas/auth no se aceptan bajo user scope.
     Router/index.js también protege esto; aquí se replica sólo para compat.
   */
-  if (scoped.scoped && route.public === true) {
+  if (scoped.scoped && (route.public === true || isPublicTechnicalPath(canonicalPath))) {
     return false;
   }
 
@@ -822,6 +766,8 @@ export function getAuthGuardsSnapshot() {
       configOwnsBlockedRoutes: true,
       routerIndexOwnsCanonicalNavigation: true,
       routerGuardsOwnRouteAccess: true,
+
+      noLocalBlockedRouteList: true,
 
       ownFetch: false,
       ownRefresh: false,

@@ -49,7 +49,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.v12.resilient-lazy-cache";
+export const ROUTES_VERSION = "routes.v13";
 
 const ROUTE_SOURCE = "router.routes";
 const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
@@ -635,13 +635,29 @@ function createLazyRender(viewKey = "", viewName = "") {
   async function render(root = null, context = {}) {
     const baseContext = isObject(context) ? context : {};
 
-    if (!renderStillCurrent(baseContext) || !isDomRootUsable(root || baseContext.renderRoot || baseContext.renderHost || baseContext.viewContainer)) {
+    if (
+      !renderStillCurrent(baseContext) ||
+      !isDomRootUsable(
+        root ||
+          baseContext.renderRoot ||
+          baseContext.renderHost ||
+          baseContext.viewContainer
+      )
+    ) {
       return null;
     }
 
     const view = await loadView(finalViewKey);
 
-    if (!renderStillCurrent(baseContext) || !isDomRootUsable(root || baseContext.renderRoot || baseContext.renderHost || baseContext.viewContainer)) {
+    if (
+      !renderStillCurrent(baseContext) ||
+      !isDomRootUsable(
+        root ||
+          baseContext.renderRoot ||
+          baseContext.renderHost ||
+          baseContext.viewContainer
+      )
+    ) {
       return null;
     }
 

@@ -1,6 +1,6 @@
 /* =========================================================
    Onion Support - Home View
-   Archivo: /src/views/home/homeView.js
+   Archivo: src/views/home/homeView.js
 
    Responsabilidad:
    - Controlador real de la vista Home.
@@ -14,6 +14,7 @@
    - Renderiza dentro del host recibido por Router.
    - No ejecuta guards, no resuelve slug, no crea globals,
      no emite eventos externos, no usa Toast directo y no usa /home.
+   - Sin fallback innerHTML.
 ========================================================= */
 
 import {
@@ -79,7 +80,6 @@ import {
   openHomeTicketDetailAction as actionOpenHomeTicketDetail,
   closeHomeTicketDetailAction as actionCloseHomeTicketDetail,
   reduceHomeActionState as actionReduceHomeActionState,
-  copyHomeWidgetIdAction,
   getHomeActionsSnapshot,
 } from "./home.actions.js";
 
@@ -94,7 +94,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v24";
+export const HOME_VIEW_VERSION = "home.view.v25";
 
 export const HomeView = (() => {
   "use strict";
@@ -316,7 +316,7 @@ export const HomeView = (() => {
     try {
       return configIsBlockedRoutePath(normalizePath(value)) === true;
     } catch {
-      return false;
+      return true;
     }
   }
 
@@ -546,11 +546,7 @@ export const HomeView = (() => {
     try {
       container.replaceChildren(node);
     } catch {
-      try {
-        container.innerHTML = sanitizeHtml(html);
-      } catch {
-        return null;
-      }
+      return null;
     }
 
     markContainer(container);
@@ -889,7 +885,12 @@ export const HomeView = (() => {
 
       if (!isCurrentRender(seq)) return api;
 
-      paintHtml(container, html);
+      const painted = paintHtml(container, html);
+
+      if (!painted) {
+        throw new Error("No se pudo renderizar el Home.");
+      }
+
       bindEvents(container);
 
       return api;
@@ -1178,7 +1179,6 @@ export const HomeView = (() => {
       loadHomeDashboard: loadData,
 
       navigateFromHomeAction: navigateFromHome,
-      copyHomeWidgetIdAction,
       createFromHomeAction,
 
       openHomeTicketDetailAction: openHomeTicketDetail,
@@ -1432,6 +1432,7 @@ export const HomeView = (() => {
         noExternalEvents: true,
         noOwnCache: true,
         noToastDirect: true,
+        noInnerHTMLFallback: true,
         removesInlineStyles: true,
         removesInlineScripts: true,
         removesInlineEventHandlers: true,

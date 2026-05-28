@@ -29,7 +29,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const INCIDENCIAS_TABLE_TEMPLATE_VERSION = "incidencias.table.template.v3.paint-perf";
+export const INCIDENCIAS_TABLE_TEMPLATE_VERSION = "incidencias.table.template.v3.1.css-sync";
 
 const DEFAULT_VISIBLE_ROWS = 20;
 const DEFAULT_CURRENCY = "EUR";
@@ -261,6 +261,14 @@ function tooltipAttrs(tooltip = "", ariaLabel = "") {
   return htmlAttrs({
     "aria-label": cleanAria || false,
     "data-tooltip": cleanTooltip || false,
+  });
+}
+
+function ariaLabelAttrs(label = "") {
+  const cleanLabel = safeText(label, "");
+
+  return htmlAttrs({
+    "aria-label": cleanLabel || false,
   });
 }
 
@@ -1777,7 +1785,7 @@ function renderSpinner(label = "") {
 
 function renderLoaderOnly(label = "Cargando") {
   return `
-    <span class="incidencias-loader-only" role="status" ${tooltipAttrs(label, label)}>
+    <span class="incidencias-loader-only" role="status" ${ariaLabelAttrs(label)}>
       <span class="incidencias-inline-spinner" aria-hidden="true"></span>
     </span>
   `;
@@ -1907,12 +1915,12 @@ function renderAssignedAvatar(item = {}) {
 function renderAssignedBadge(item = {}) {
   const assigned = getAssignedTo(item);
   const assignedEmail = getAssignedEmail(item);
-  const tooltip = `Técnico · ${assigned}${assignedEmail ? ` · ${assignedEmail}` : ""}`;
+  const ariaLabel = `Técnico · ${assigned}${assignedEmail ? ` · ${assignedEmail}` : ""}`;
 
   return `
     <span
       class="incidencias-mini-badge incidencias-mini-badge--agent"
-      ${tooltipAttrs(tooltip, tooltip)}
+      ${ariaLabelAttrs(ariaLabel)}
       data-assigned-technician="${escapeHtml(assigned)}"
       data-assigned-email="${escapeHtml(assignedEmail)}"
     >
@@ -1954,14 +1962,14 @@ function renderActionButton({
   tooltip = "",
 } = {}) {
   const finalDisabled = disabled || loading;
-  const finalTooltip = tooltip || label;
+  const finalAriaLabel = tooltip || label;
 
   return `
     <button
       type="button"
       class="incidencias-detail-btn${loading ? " is-loading" : ""}"
       ${actionAttrs(action, ticketId)}
-      ${tooltipAttrs(finalTooltip, finalTooltip)}
+      ${ariaLabelAttrs(finalAriaLabel)}
       ${disabledAttrs(finalDisabled, loading)}
     >
       ${
@@ -2007,7 +2015,7 @@ function renderRow(item = {}, state = {}) {
       data-row-click-disabled="false"
       role="button"
       tabindex="0"
-      ${tooltipAttrs(`Abrir detalle de incidencia ${ticketId}`, `Abrir detalle de incidencia ${ticketId}`)}
+      ${ariaLabelAttrs(`Abrir detalle de incidencia ${ticketId}`)}
     >
       <td class="incidencias-cell incidencias-cell--main">
         <div class="incidencias-main">
@@ -2073,7 +2081,7 @@ function renderRow(item = {}, state = {}) {
           label: "Detalle",
           loadingLabel: "Cargando detalle",
           iconName: "eye",
-          tooltip: "Abrir detalle de incidencia",
+          tooltip: `Abrir detalle de incidencia ${ticketId}`,
         })}
       </td>
     </tr>

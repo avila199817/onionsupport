@@ -7,7 +7,7 @@
    - Limpieza local garantizada vía session.js.
    - Endpoint auth real desde core/config.js.
    - Usar credentials include para cookie httpOnly.
-   - Limpiar access token runtime tras logout real.
+   - Limpiar access token runtime tras logout real o local.
    - Sin fetch propio.
    - Sin apiClient propio.
    - Sin Router.
@@ -19,13 +19,14 @@
    - Sin storage.clear().
    - Sin AppCore directo.
    - Sin helpers externos.
-   - Sin magia negra.
 ========================================================= */
 
 import * as CoreHttpModule from "../../core/http.js";
 
 import {
   AUTH_ENDPOINTS,
+  SENSITIVE_QUERY_PARAMS,
+  TOKEN_PARAM,
 } from "../../core/config.js";
 
 import {
@@ -33,10 +34,19 @@ import {
   buildSessionSnapshot,
 } from "./session.js";
 
-export const AUTH_LOGOUT_VERSION = "auth.logout.v6";
+export const AUTH_LOGOUT_VERSION = "auth.logout.v7";
 
 const SOURCE = "auth.logout";
 const LOGOUT_ENDPOINT = AUTH_ENDPOINTS.logout;
+
+const SENSITIVE_QUERY_KEYS = Object.freeze(
+  (Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
+    ? SENSITIVE_QUERY_PARAMS
+    : [TOKEN_PARAM]
+  ).map((key) => String(key).toLowerCase())
+);
+
+const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
 
 const CoreHttp =
   CoreHttpModule.default ||
@@ -76,14 +86,36 @@ function nowIso() {
   }
 }
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSensitiveQueryPattern() {
+  const keys = SENSITIVE_QUERY_KEYS
+    .map(escapeRegExp)
+    .filter(Boolean)
+    .join("|");
+
+  return keys
+    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
+    : null;
+}
+
 function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
+  const raw = cleanText(value, "");
+  const redactedQuery = SENSITIVE_QUERY_PATTERN
+    ? raw.replace(SENSITIVE_QUERY_PATTERN, "$1***")
+    : raw;
+
+  return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+function normalizeCode(value = "") {
+  return cleanText(value, "")
+    .replace(/[\s-]+/g, "_")
+    .toUpperCase();
 }
 
 /* =========================================================
@@ -132,14 +164,14 @@ function extractMessage(error = null) {
 function extractCode(error = null) {
   const payload = errorPayload(error);
 
-  return (
+  return normalizeCode(
     error?.code ||
-    payload.code ||
-    payload.errorCode ||
-    payload.error_code ||
-    payload.error ||
-    null
-  );
+      payload.code ||
+      payload.errorCode ||
+      payload.error_code ||
+      payload.error ||
+      ""
+  ) || null;
 }
 
 function publicError(error = null) {
@@ -235,8 +267,8 @@ async function remoteLogout(options = {}) {
     noAuthHeader: false,
 
     /*
-      Impide que el propio logout dispare refresh/retry auth.
       Logout es finalizador de sesión, no restaurador.
+      No debe provocar refresh/retry auth.
     */
     _skipAuthRefresh: true,
     skipAuthRefresh: true,

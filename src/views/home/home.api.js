@@ -14,21 +14,13 @@
    - Vista Home distinta para admin y user.
    - User: incidencias + facturas propias según scope backend.
    - Admin: incidencias + facturas + clientes + usuarios.
-   - Calcular métricas desde listas/meta devueltas mediante home.model.js.
+   - Calcular métricas desde listas/meta mediante home.model.js.
    - Normalizar respuesta para homeView.js.
    - Blindar cache admin cuando el rol actual sea user.
    - Rutas/admin-routes/bloqueos delegados en core/config.js.
    - No conservar raw backend sensible en dashboard/cache.
-   - No tocar DOM.
-   - No CSS.
-   - No Router.
-   - No Storage persistente.
-   - No fetch propio.
-   - No eventos.
-   - No apiClient paralelo.
-   - No /api/dashboard.
-   - No endpoints /stats inexistentes.
-   - No /home.
+   - Sin DOM, CSS, Router, Storage persistente, fetch propio,
+     eventos, apiClient paralelo, /api/dashboard, /stats ni /home.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -60,7 +52,7 @@ import {
   getHomeClientId,
 } from "./home.model.js";
 
-export const HOME_API_VERSION = "home.api.v12.core-http-list-aggregate";
+export const HOME_API_VERSION = "home.api.v13.template-contract";
 
 export const HOME_DASHBOARD_ENDPOINT = "local:home-list-aggregate";
 export const HOME_DASHBOARD_LEGACY_ENDPOINT = "";
@@ -88,7 +80,6 @@ const DEFAULT_LIST_PARAMS = Object.freeze({
 });
 
 const HOME_MAX_ITEMS = 24;
-const HOME_ACTIVITY_LIMIT = 5;
 const HOME_TEXT_LIMIT = 180;
 const HOME_TITLE_LIMIT = 120;
 
@@ -114,8 +105,49 @@ const COSMOS_META_KEYS = new Set([
   "_id",
 ]);
 
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|correo|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|bank|cuenta|account|ipRaw|ip|userAgent/i;
+const SENSITIVE_KEY_PARTS = Object.freeze([
+  "token",
+  "authorization",
+  "cookie",
+  "password",
+  "passwd",
+  "pwd",
+  "secret",
+  "credential",
+  "jwt",
+  "bearer",
+  "refresh",
+  "apikey",
+  "privatekey",
+  "connectionstring",
+  "sas",
+  "otp",
+  "totp",
+  "mfa",
+  "twofa",
+  "backupcode",
+  "sessionid",
+  "email",
+  "correo",
+  "mail",
+  "phone",
+  "telefono",
+  "address",
+  "direccion",
+  "nif",
+  "dni",
+  "iban",
+  "bank",
+  "cuenta",
+  "account",
+  "useragent",
+]);
+
+const SENSITIVE_KEY_EXACT = new Set([
+  "session",
+  "ip",
+  "ipraw",
+]);
 
 const SENSITIVE_QUERY_RE =
   /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i;
@@ -276,6 +308,10 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
+function normalizeSensitiveKey(value = "") {
+  return normalizeKey(value).replace(/_/g, "");
+}
+
 function normalizeRole(value = "", fallback = "") {
   if (Array.isArray(value)) {
     const roles = value
@@ -296,44 +332,6 @@ function normalizeRole(value = "", fallback = "") {
   return fallback;
 }
 
-function uniqueBy(items = [], picker = (item) => item) {
-  const seen = new Set();
-  const output = [];
-
-  for (const item of safeArray(items)) {
-    const raw = safeText(picker(item), "");
-    const key = raw ? normalizeKey(raw) : "";
-
-    if (!key) {
-      output.push(item);
-      continue;
-    }
-
-    if (seen.has(key)) continue;
-
-    seen.add(key);
-    output.push(item);
-  }
-
-  return output;
-}
-
-function clone(value, fallback = null) {
-  try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
-  } catch {
-    // fallback abajo
-  }
-
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch {
-    return fallback;
-  }
-}
-
 function safeCall(fn = null, ...args) {
   try {
     return isFunction(fn) ? fn(...args) : null;
@@ -343,7 +341,12 @@ function safeCall(fn = null, ...args) {
 }
 
 function isSensitiveKey(key = "") {
-  return SENSITIVE_KEY_RE.test(String(key || ""));
+  const clean = normalizeSensitiveKey(key);
+
+  if (!clean) return false;
+  if (SENSITIVE_KEY_EXACT.has(clean)) return true;
+
+  return SENSITIVE_KEY_PARTS.some((part) => clean.includes(part));
 }
 
 function isRawKey(key = "") {
@@ -370,7 +373,6 @@ function safePublicId(value = "") {
   if (isEmailLike(text)) return "";
   if (hasSensitiveQuery(text)) return "";
   if (/Bearer\s+/i.test(text)) return "";
-  if (SENSITIVE_KEY_RE.test(text) && text.length > 80) return "";
 
   return compactText(redact(text), "", 160);
 }
@@ -463,27 +465,15 @@ function sanitizeDashboardObject(value = {}) {
   return safeObject(sanitizeDashboardValue(value), {});
 }
 
-function normalizeErrorMessage(error = null) {
-  return redact(
-    safeText(
-      first(
-        error?.response?.data?.message,
-        error?.data?.message,
-        error?.message,
-        error?.reason,
-        "No se pudo cargar el Home."
-      ),
-      "No se pudo cargar el Home."
-    )
-  );
-}
-
 function getErrorStatus(error = null) {
-  return (
-    error?.status ||
-    error?.statusCode ||
-    error?.response?.status ||
-    error?.data?.status ||
+  return safeNumber(
+    first(
+      error?.status,
+      error?.statusCode,
+      error?.response?.status,
+      error?.data?.status,
+      0
+    ),
     0
   );
 }
@@ -497,7 +487,19 @@ function getErrorCode(error = null) {
       ""
     ),
     ""
-  );
+  ).toUpperCase();
+}
+
+function normalizeErrorMessage(error = null) {
+  const code = getErrorCode(error);
+  const status = getErrorStatus(error);
+
+  if (code === "UNAUTHORIZED" || status === 401) return "Necesitas iniciar sesión.";
+  if (code === "FORBIDDEN" || status === 403) return "No tienes permisos para cargar estos datos.";
+  if (status === 429) return "Demasiadas solicitudes. Inténtalo de nuevo más tarde.";
+  if (status >= 500) return "El servidor no pudo cargar el Home.";
+
+  return "No se pudo cargar el Home.";
 }
 
 function normalizeError(error = null) {
@@ -583,19 +585,7 @@ function isBlockedRoute(value = "") {
   try {
     return configIsBlockedRoutePath(path) === true;
   } catch {
-    const lower = path.toLowerCase();
-
-    return Boolean(
-      lower === "/home" ||
-        lower === "/403" ||
-        lower === "/404" ||
-        lower === "/2fa" ||
-        lower === "/mfa" ||
-        lower === "/otp" ||
-        lower.startsWith("/2fa/") ||
-        lower.startsWith("/mfa/") ||
-        lower.startsWith("/otp/")
-    );
+    return false;
   }
 }
 
@@ -640,7 +630,7 @@ function isAdminOnlyRoute(route = "") {
   try {
     if (configIsAdminRoute(path) === true) return true;
   } catch {
-    // fallback abajo
+    // fallback mínimo
   }
 
   return (
@@ -947,21 +937,42 @@ function totalFromPayload(payload = null, fallback = 0) {
    DTO PROJECTION
 ========================================================= */
 
-function projectTicketDto(item = {}) {
+function projectPersonDto(item = {}) {
   const raw = safeObject(item);
 
   return sanitizeDashboardObject({
-    id: first(raw.id, raw.ticketId, raw.incidenciaId, raw.code, raw.numero),
-    ticketId: first(raw.ticketId, raw.incidenciaId, raw.id, raw.code, raw.numero),
+    id: first(raw.id, raw.userId, raw.uid, raw.sub, raw.username, raw.slug),
+    userId: first(raw.userId, raw.id, raw.uid, raw.sub),
+    displayName: first(raw.displayName, raw.fullName, raw.name, raw.nombre, raw.profile?.displayName, raw.profile?.publicName, raw.username, raw.slug),
+    name: first(raw.name, raw.displayName, raw.fullName, raw.nombre, raw.profile?.name, raw.profile?.publicName),
+    username: first(raw.username, raw.userName, raw.slug),
+    slug: first(raw.slug, raw.lookup?.slug),
+    role: first(raw.role, raw.rol, raw.roles),
+    rol: first(raw.rol, raw.role, raw.roles),
+    roles: raw.roles,
+    avatarUrl: first(raw.avatarUrl, raw.avatarURL, raw.avatar_url, raw.avatar, raw.photoUrl, raw.pictureUrl, raw.imageUrl, raw.profile?.avatarUrl, raw.media?.avatarUrl),
+    avatar: first(raw.avatar, raw.avatarUrl, raw.photoUrl, raw.pictureUrl, raw.imageUrl),
+    active: first(raw.active, raw.isActive, raw.enabled),
+    isActive: first(raw.isActive, raw.active, raw.enabled),
+  });
+}
+
+function projectTicketDto(item = {}) {
+  const raw = safeObject(item);
+  const ticketId = first(raw.ticketId, raw.incidenciaId, raw.id, raw.code, raw.numero);
+
+  return sanitizeDashboardObject({
+    id: first(raw.id, ticketId),
+    ticketId,
     incidenciaId: first(raw.incidenciaId, raw.ticketId, raw.id, raw.code, raw.numero),
     entityId: first(raw.entityId, raw.ticketId, raw.incidenciaId, raw.id),
 
     subject: first(raw.subject, raw.asunto, raw.title, raw.titulo, raw.name),
     asunto: first(raw.asunto, raw.subject, raw.title, raw.titulo, raw.name),
     title: first(raw.title, raw.subject, raw.asunto, raw.titulo, raw.name),
-    message: first(raw.message, raw.description, raw.descripcion, raw.preview, raw.body, raw.text),
-    description: first(raw.description, raw.descripcion, raw.message, raw.preview, raw.body, raw.text),
-    descripcion: first(raw.descripcion, raw.description, raw.message, raw.preview, raw.body, raw.text),
+    message: first(raw.message, raw.description, raw.descripcion, raw.preview, raw.text),
+    description: first(raw.description, raw.descripcion, raw.message, raw.preview, raw.text),
+    descripcion: first(raw.descripcion, raw.description, raw.message, raw.preview, raw.text),
     preview: first(raw.preview, raw.description, raw.descripcion, raw.message),
 
     status: first(raw.status, raw.estado, raw.state, raw.lifecycle?.status),
@@ -976,55 +987,52 @@ function projectTicketDto(item = {}) {
     clienteId: first(raw.clienteId, raw.clientId, raw.customerId, raw.clienteRef?.clienteId, raw.clienteRef?.id),
     clientId: first(raw.clientId, raw.clienteId, raw.customerId, raw.clienteRef?.clienteId, raw.clienteRef?.id),
 
-    requesterName: first(
-      raw.requesterName,
-      raw.ownerName,
-      raw.clientName,
-      raw.clienteName,
-      raw.userName,
-      raw.requesterSnapshot?.displayName,
-      raw.requesterSnapshot?.name,
-      raw.clienteSnapshot?.displayName,
-      raw.clienteSnapshot?.name,
-      raw.userSnapshot?.displayName,
-      raw.userSnapshot?.name,
-      raw.user?.displayName,
-      raw.user?.name,
-      raw.cliente?.displayName,
-      raw.cliente?.name
+    requesterName: safePublicText(
+      first(
+        raw.requesterName,
+        raw.ownerName,
+        raw.clientName,
+        raw.clienteName,
+        raw.userName,
+        raw.requesterSnapshot?.displayName,
+        raw.requesterSnapshot?.name,
+        raw.clienteSnapshot?.displayName,
+        raw.clienteSnapshot?.name,
+        raw.userSnapshot?.displayName,
+        raw.userSnapshot?.name,
+        raw.user?.displayName,
+        raw.user?.name,
+        raw.cliente?.displayName,
+        raw.cliente?.name
+      ),
+      "Usuario"
     ),
-    clientName: first(raw.clientName, raw.clienteName, raw.clienteSnapshot?.displayName, raw.clienteSnapshot?.name),
-    userName: first(raw.userName, raw.usuarioName, raw.userSnapshot?.displayName, raw.userSnapshot?.name, raw.user?.displayName, raw.user?.name),
+    clientName: safePublicText(first(raw.clientName, raw.clienteName, raw.clienteSnapshot?.displayName, raw.clienteSnapshot?.name), ""),
+    userName: safePublicText(first(raw.userName, raw.usuarioName, raw.userSnapshot?.displayName, raw.userSnapshot?.name, raw.user?.displayName, raw.user?.name), ""),
 
-    avatarUrl: first(raw.avatarUrl, raw.requesterAvatarUrl, raw.userAvatarUrl, raw.photoUrl, raw.photoURL),
-    requesterAvatarUrl: first(raw.requesterAvatarUrl, raw.avatarUrl, raw.userAvatarUrl, raw.photoUrl, raw.photoURL),
-    userAvatarUrl: first(raw.userAvatarUrl, raw.avatarUrl, raw.requesterAvatarUrl, raw.photoUrl, raw.photoURL),
+    avatarUrl: safePublicUrl(first(raw.avatarUrl, raw.requesterAvatarUrl, raw.userAvatarUrl, raw.photoUrl, raw.photoURL)),
+    requesterAvatarUrl: safePublicUrl(first(raw.requesterAvatarUrl, raw.avatarUrl, raw.userAvatarUrl, raw.photoUrl, raw.photoURL)),
+    userAvatarUrl: safePublicUrl(first(raw.userAvatarUrl, raw.avatarUrl, raw.requesterAvatarUrl, raw.photoUrl, raw.photoURL)),
 
     assignedToUserId: first(raw.assignedToUserId, raw.assignedToId, raw.assigneeId, raw.technicianId, raw.tecnicoId, raw.agentId, raw.assignment?.assignedToUserId),
     assignedToId: first(raw.assignedToId, raw.assignedToUserId, raw.assigneeId, raw.technicianId, raw.tecnicoId, raw.agentId),
     technicianId: first(raw.technicianId, raw.tecnicoId, raw.assignedToUserId, raw.assignedToId, raw.assigneeId),
     tecnicoId: first(raw.tecnicoId, raw.technicianId, raw.assignedToUserId, raw.assignedToId, raw.assigneeId),
 
-    assignedToName: first(raw.assignedToName, raw.technicianName, raw.tecnicoName, raw.assigneeName, raw.agentName, raw.assignment?.assignedToName),
-    technicianName: first(raw.technicianName, raw.tecnicoName, raw.assignedToName, raw.assigneeName, raw.agentName, raw.assignment?.technicianName),
-    tecnicoName: first(raw.tecnicoName, raw.technicianName, raw.assignedToName, raw.assigneeName, raw.agentName, raw.assignment?.tecnicoName),
+    assignedToName: safePublicText(first(raw.assignedToName, raw.technicianName, raw.tecnicoName, raw.assigneeName, raw.agentName, raw.assignment?.assignedToName), ""),
+    technicianName: safePublicText(first(raw.technicianName, raw.tecnicoName, raw.assignedToName, raw.assigneeName, raw.agentName, raw.assignment?.technicianName), ""),
+    tecnicoName: safePublicText(first(raw.tecnicoName, raw.technicianName, raw.assignedToName, raw.assigneeName, raw.agentName, raw.assignment?.tecnicoName), ""),
 
-    assignedToAvatarUrl: first(raw.assignedToAvatarUrl, raw.technicianAvatarUrl, raw.tecnicoAvatarUrl, raw.agentAvatarUrl),
-    technicianAvatarUrl: first(raw.technicianAvatarUrl, raw.tecnicoAvatarUrl, raw.assignedToAvatarUrl, raw.agentAvatarUrl),
-    tecnicoAvatarUrl: first(raw.tecnicoAvatarUrl, raw.technicianAvatarUrl, raw.assignedToAvatarUrl, raw.agentAvatarUrl),
+    assignedToAvatarUrl: safePublicUrl(first(raw.assignedToAvatarUrl, raw.technicianAvatarUrl, raw.tecnicoAvatarUrl, raw.agentAvatarUrl)),
+    technicianAvatarUrl: safePublicUrl(first(raw.technicianAvatarUrl, raw.tecnicoAvatarUrl, raw.assignedToAvatarUrl, raw.agentAvatarUrl)),
+    tecnicoAvatarUrl: safePublicUrl(first(raw.tecnicoAvatarUrl, raw.technicianAvatarUrl, raw.assignedToAvatarUrl, raw.agentAvatarUrl)),
 
     assignment: raw.assignment,
-    assignedTo: raw.assignedTo,
-    tecnico: raw.tecnico,
-    technician: raw.technician,
-    assignedTechnician: raw.assignedTechnician,
-    assignedUser: raw.assignedUser,
-
-    requesterSnapshot: raw.requesterSnapshot,
-    userSnapshot: raw.userSnapshot,
-    clienteSnapshot: raw.clienteSnapshot,
-    user: raw.user,
-    cliente: raw.cliente,
+    assignedTo: isObject(raw.assignedTo) ? projectPersonDto(raw.assignedTo) : safePublicText(raw.assignedTo, ""),
+    tecnico: projectPersonDto(first(raw.tecnico, raw.technician, raw.assignedTechnician, raw.assignedUser, {})),
+    technician: projectPersonDto(first(raw.technician, raw.tecnico, raw.assignedTechnician, raw.assignedUser, {})),
+    assignedTechnician: projectPersonDto(first(raw.assignedTechnician, raw.technician, raw.tecnico, raw.assignedUser, {})),
+    assignedUser: projectPersonDto(first(raw.assignedUser, raw.assignedTechnician, raw.technician, raw.tecnico, {})),
 
     invoiceId: raw.invoiceId,
     facturaId: raw.facturaId,
@@ -1085,38 +1093,7 @@ function projectInvoiceDto(item = {}) {
 }
 
 function projectUserDto(item = {}) {
-  const raw = safeObject(item);
-
-  return sanitizeDashboardObject({
-    id: first(raw.id, raw.userId, raw.usuarioId, raw.uid, raw.sub, raw.username, raw.userName, raw.slug),
-    userId: first(raw.userId, raw.id, raw.usuarioId, raw.uid, raw.sub, raw.username, raw.userName, raw.slug),
-    usuarioId: first(raw.usuarioId, raw.userId, raw.id, raw.uid, raw.sub),
-
-    displayName: first(raw.displayName, raw.fullName, raw.name, raw.nombre, raw.profile?.displayName, raw.profile?.fullName, raw.profile?.name, raw.username, raw.userName, raw.slug),
-    fullName: first(raw.fullName, raw.displayName, raw.name, raw.nombre, raw.profile?.fullName, raw.profile?.displayName, raw.profile?.name),
-    name: first(raw.name, raw.displayName, raw.fullName, raw.nombre, raw.profile?.name, raw.profile?.displayName, raw.profile?.fullName),
-    nombre: first(raw.nombre, raw.name, raw.displayName, raw.fullName, raw.profile?.nombre, raw.profile?.name),
-
-    username: first(raw.username, raw.userName, raw.slug),
-    userName: first(raw.userName, raw.username, raw.slug),
-    slug: first(raw.slug, raw.lookup?.slug, raw.profile?.slug),
-
-    role: first(raw.role, raw.rol, raw.roles),
-    rol: first(raw.rol, raw.role, raw.roles),
-    roles: raw.roles,
-
-    avatarUrl: first(raw.avatarUrl, raw.avatarURL, raw.avatar_url, raw.avatar, raw.photoUrl, raw.photoURL, raw.picture, raw.image, raw.foto, raw.imagen, raw.profile?.avatarUrl, raw.profile?.avatar, raw.media?.avatarUrl),
-    avatar: first(raw.avatar, raw.avatarUrl, raw.photoUrl, raw.picture, raw.image, raw.foto, raw.imagen),
-    photoUrl: first(raw.photoUrl, raw.photoURL, raw.avatarUrl, raw.avatar, raw.picture, raw.image),
-    picture: first(raw.picture, raw.pictureUrl, raw.avatarUrl, raw.photoUrl),
-    image: first(raw.image, raw.imageUrl, raw.avatarUrl, raw.photoUrl),
-
-    active: first(raw.active, raw.isActive, raw.enabled),
-    isActive: first(raw.isActive, raw.active, raw.enabled),
-    createdAt: raw.createdAt,
-    updatedAt: first(raw.updatedAt, raw.modifiedAt, raw.lastLoginAt),
-    lastLoginAt: raw.lastLoginAt,
-  });
+  return projectPersonDto(item);
 }
 
 function projectClientDto(item = {}) {
@@ -1129,10 +1106,10 @@ function projectClientDto(item = {}) {
     customerId: first(raw.customerId, raw.clientId, raw.clienteId, raw.id, raw.userId, raw.slug),
     userId: raw.userId,
 
-    name: first(raw.name, raw.nombre, raw.displayName, raw.razonSocial, raw.companyName, raw.company, raw.nombreContacto, raw.contacto?.name),
-    nombre: first(raw.nombre, raw.name, raw.displayName, raw.razonSocial, raw.companyName, raw.company, raw.nombreContacto, raw.contacto?.nombre),
-    displayName: first(raw.displayName, raw.name, raw.nombre, raw.razonSocial, raw.companyName, raw.company),
-    razonSocial: first(raw.razonSocial, raw.companyName, raw.company, raw.name, raw.nombre, raw.displayName),
+    name: safePublicText(first(raw.name, raw.nombre, raw.displayName, raw.razonSocial, raw.companyName, raw.company, raw.nombreContacto, raw.contacto?.name), "Cliente"),
+    nombre: safePublicText(first(raw.nombre, raw.name, raw.displayName, raw.razonSocial, raw.companyName, raw.company, raw.nombreContacto, raw.contacto?.nombre), "Cliente"),
+    displayName: safePublicText(first(raw.displayName, raw.name, raw.nombre, raw.razonSocial, raw.companyName, raw.company), "Cliente"),
+    razonSocial: safePublicText(first(raw.razonSocial, raw.companyName, raw.company, raw.name, raw.nombre, raw.displayName), ""),
 
     active: first(raw.active, raw.isActive, raw.enabled),
     isActive: first(raw.isActive, raw.active, raw.enabled),
@@ -1320,6 +1297,7 @@ function buildLocalDashboard({
   requestId = "",
 } = {}) {
   const admin = role === "admin";
+  const timestamp = nowIso();
 
   const tickets = safeArray(ticketsModule.items);
   const invoices = safeArray(facturasModule.items);
@@ -1356,8 +1334,8 @@ function buildLocalDashboard({
       activity: normalizeHomeActivityList([], admin),
 
       requestId,
-      updatedAt: nowIso(),
-      lastSyncAt: nowIso(),
+      updatedAt: timestamp,
+      lastSyncAt: timestamp,
 
       collections: {
         ticketsRemoteCount: safeNumber(ticketsModule.remoteCount, tickets.length),
@@ -1384,8 +1362,8 @@ function buildLocalDashboard({
         role,
         admin,
         requestId,
-        updatedAt: nowIso(),
-        lastSyncAt: nowIso(),
+        updatedAt: timestamp,
+        lastSyncAt: timestamp,
       },
     },
     {
@@ -1662,6 +1640,8 @@ export async function fetchHomeDashboardRequest({
 
   runtime.modules = local.modules;
 
+  const timestamp = nowIso();
+
   return {
     endpoint: HOME_DASHBOARD_ENDPOINT,
     requestId: id,
@@ -1671,9 +1651,9 @@ export async function fetchHomeDashboardRequest({
     dashboard: local.dashboard,
     modules: local.modules,
 
-    updatedAt: nowIso(),
-    generatedAt: nowIso(),
-    lastSyncAt: nowIso(),
+    updatedAt: timestamp,
+    generatedAt: timestamp,
+    lastSyncAt: timestamp,
   };
 }
 
@@ -1761,7 +1741,8 @@ export async function refreshHomeDashboard(options = {}) {
 ========================================================= */
 
 export function getHomeApiSnapshot() {
-  const dashboard = safeObject(hydrateHomeFromCache().dashboard);
+  const hydrated = hydrateHomeFromCache();
+  const dashboard = safeObject(hydrated.dashboard);
 
   return {
     version: HOME_API_VERSION,
@@ -1801,7 +1782,7 @@ export function getHomeApiSnapshot() {
     },
 
     cache: {
-      hydrated: hydrateHomeFromCache().hydrated,
+      hydrated: hydrated.hydrated,
       dashboardRole: dashboard.role || null,
       dashboardAdmin: dashboard.admin === true,
       ticketsCount: safeArray(dashboard.tickets).length,

@@ -4,8 +4,9 @@
 
    Responsabilidad:
    - Storage mínimo de Auth.
-   - Persistir access token para soportar reload.
-   - Persistir refresh token para restore persistente.
+   - Persistir access token para soportar reload si existe.
+   - Persistir refresh token sólo si backend lo entrega explícitamente por compat.
+   - Soportar restore con cookie httpOnly aunque no exista refresh token visible.
    - Persistir contexto auxiliar mínimo no canónico.
    - No autenticar por sí mismo.
    - Nunca storage.clear().
@@ -23,8 +24,9 @@
    - Sin arrastrar refresh/session de otro usuario.
 
    CONTRATO RESTORE:
-   - refreshToken es el contexto mínimo para intentar /api/auth/refresh.
-   - sessionId/userId son preferidos si existen.
+   - /api/auth/refresh puede funcionar por cookie httpOnly con credentials include.
+   - refreshToken visible es opcional y sólo compat.
+   - sessionId/userId son contexto auxiliar preferido si existen.
    - user completo nunca se usa como fuente canónica desde storage.
 ========================================================= */
 
@@ -40,7 +42,7 @@ import {
   AUTH_CONSTANTS,
 } from "./constants.js";
 
-export const AUTH_STORAGE_VERSION = "auth.storage.v9";
+export const AUTH_STORAGE_VERSION = "auth.storage.v10";
 
 const PREFIX = "onion:auth:";
 
@@ -883,19 +885,21 @@ export function hasSessionContext() {
 }
 
 export function hasAnyRefreshContext() {
-  return Boolean(hasRefreshToken());
+  /*
+    Contexto auxiliar visible.
+    La cookie httpOnly no es detectable desde JS, así que restore.js
+    puede intentar /api/auth/refresh aunque esto devuelva false.
+  */
+  return Boolean(hasRefreshToken() || hasSessionContext());
 }
 
 export function hasRefreshContext() {
-  /*
-    Contexto mínimo permitido por contrato: refreshToken.
-  */
-  return Boolean(getStoredRefreshToken());
+  return hasAnyRefreshContext();
 }
 
 export function hasCompleteRefreshContext() {
   return Boolean(
-    getStoredRefreshToken() &&
+    hasRefreshToken() &&
       getStoredSessionId() &&
       getStoredSessionUserId()
   );
@@ -946,6 +950,12 @@ export function persistAuthStorage(payload = {}, options = {}) {
     removeStoredAccessToken();
   }
 
+  /*
+    Refresh token visible:
+    - Se guarda sólo si backend lo entrega explícitamente.
+    - Si no viene, se conserva salvo limpieza explícita.
+    - Cookie httpOnly queda fuera de este storage.
+  */
   if (refreshToken) {
     refreshStored = persistRefreshToken(refreshToken, options);
   } else if (options.clearMissingRefreshToken === true || userChanged) {
@@ -1008,15 +1018,15 @@ export function getStoredAuthPayload() {
     /*
       Importante:
       No devolvemos user fabricado.
-      Restore debe usar token -> /me -> user canónico,
-      o refreshToken -> /refresh -> user canónico.
+      Restore debe usar token -> /api/auth/me -> user canónico,
+      o /api/auth/refresh -> user canónico/token nuevo.
     */
     user: null,
   };
 }
 
 export function hasStoredAuthPayload() {
-  return Boolean(hasAccessToken() || hasRefreshToken());
+  return Boolean(hasAccessToken() || hasRefreshToken() || hasSessionContext());
 }
 
 /* =========================================================
@@ -1204,12 +1214,15 @@ export function getAuthStorageSnapshot() {
       noLocalBlockedRouteFallback: true,
 
       persistsAccessToken: true,
-      persistsRefreshToken: true,
+      persistsVisibleRefreshTokenOnlyIfProvided: true,
+      visibleRefreshTokenOptional: true,
+      supportsHttpOnlyCookieRefresh: true,
+
       persistsAuxContextOnly: true,
       persistsFullUser: false,
       authenticatesByItself: false,
 
-      refreshTokenIsMinimumContext: true,
+      refreshCanUseCookieOutsideStorage: true,
       sessionIdUserIdPreferredButOptional: true,
       tokenOnlyDoesNotFabricateUser: true,
       preservesSessionContextWhenPayloadOmitsSession: true,

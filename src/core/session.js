@@ -8,7 +8,12 @@
    - Auth estricta: token usable + user usable.
    - Token sin user = hasToken, pero NO authenticated.
    - User sin token = NO authenticated.
-   - User inválido si disabled/deleted/archived/active=false.
+   - User inválido sólo por:
+     - disabled === true
+     - suspended === true
+     - active === false
+     - enabled === false
+     - status/estado/state: "suspended" o "desactivado"
    - Roles únicos: admin / user.
    - Home visible de usuario: /@{user.slug}.
    - Theme simple.
@@ -19,8 +24,12 @@
    - Sin Router.
    - Sin Toast.
    - Sin rutas legacy.
-   - Sin 2FA/MFA/OTP.
+   - Sin 2FA/MFA/OTP funcional.
    - Sin secretos en snapshots.
+
+   Regla crítica:
+   - Cambiar/rotar/caducar access token NO equivale a logout.
+   - setToken(null) NO borra sesión salvo clearSession/forceUnauthenticated explícito.
 ========================================================= */
 
 export const SESSION_VERSION = "core.session.v2";
@@ -50,29 +59,8 @@ const VALID_THEMES = new Set(["dark", "light", "system"]);
 const VALID_ROLES = new Set(["admin", "user"]);
 
 const INVALID_USER_STATUSES = new Set([
-  "disabled",
-  "inactive",
-  "deleted",
-  "archived",
-  "revoked",
-  "blocked",
-  "banned",
   "suspended",
   "desactivado",
-  "inactivo",
-  "eliminado",
-  "archivado",
-  "bloqueado",
-  "suspendido",
-]);
-
-const BLOCKED_FRONTEND_ROUTES = Object.freeze([
-  "/home",
-  "/403",
-  "/404",
-  "/2fa",
-  "/mfa",
-  "/otp",
 ]);
 
 const SENSITIVE_KEYS = new Set([
@@ -459,39 +447,13 @@ function splitPath(path = DEFAULT_ROUTE) {
   };
 }
 
-function pathIsOrStartsWith(path = "", blocked = "") {
-  const current = normalizePathname(path).toLowerCase();
-  const target = normalizePathname(blocked).toLowerCase();
-
-  return Boolean(
-    current === target ||
-      current.startsWith(`${target}/`)
-  );
-}
-
-function isBlockedRoutePath(path = DEFAULT_ROUTE) {
-  const clean = normalizePathname(path);
-
-  return BLOCKED_FRONTEND_ROUTES.some((blocked) =>
-    pathIsOrStartsWith(clean, blocked)
-  );
-}
-
 function normalizePublicPath(value = DEFAULT_ROUTE) {
   const parts = splitPath(value);
-
-  if (isBlockedRoutePath(parts.pathname)) {
-    return DEFAULT_ROUTE;
-  }
-
   return `${parts.pathname}${parts.search}${parts.hash}` || DEFAULT_ROUTE;
 }
 
 function normalizeCanonicalPath(value = DEFAULT_ROUTE) {
-  const path = normalizePublicPath(value);
-  const pathname = normalizePathname(path);
-
-  return isBlockedRoutePath(pathname) ? DEFAULT_ROUTE : pathname;
+  return normalizePathname(normalizePublicPath(value));
 }
 
 /* =========================================================
@@ -588,15 +550,9 @@ function userDisabled(user = null) {
 
   return Boolean(
     user.disabled === true ||
-      user.deleted === true ||
-      user.archived === true ||
-      user.revoked === true ||
-      user.blocked === true ||
-      user.banned === true ||
       user.suspended === true ||
       user.active === false ||
       user.enabled === false ||
-      Boolean(user.deletedAt) ||
       INVALID_USER_STATUSES.has(status)
   );
 }
@@ -767,8 +723,7 @@ function normalizeUser(value = null) {
     active: true,
     enabled: true,
     disabled: false,
-    deleted: false,
-    archived: false,
+    suspended: false,
 
     isAdmin: role === "admin",
     isUser: role === "user",
@@ -852,6 +807,18 @@ function sameSessionUser(session = null, user = null) {
   if (!sessionUserId || !userId) return true;
 
   return sessionUserId === userId;
+}
+
+function sessionRevoked(session = null) {
+  if (!isObject(session)) return false;
+
+  const status = text(session.status || session.estado || "", "").toLowerCase();
+
+  return Boolean(
+    session.revoked === true ||
+      session.active === false ||
+      status === "revoked"
+  );
 }
 
 /* =========================================================
@@ -968,6 +935,11 @@ function authPatch(source = {}, options = {}) {
     );
 
   const session = normalizeSessionContext(sessionSource, user);
+
+  if (sessionRevoked(session)) {
+    return clearAuthPatch();
+  }
+
   const validSession = session && sameSessionUser(session, user)
     ? session
     : null;
@@ -1069,6 +1041,20 @@ function pickUser(payload = {}) {
   return (
     pick(payload, ["user", "usuario", "me", "account", "profile"]) ||
     (normalizeUser(payload) ? payload : null)
+  );
+}
+
+function pickHasRefresh(payload = {}) {
+  return Boolean(
+    pick(payload, [
+      "hasRefreshToken",
+      "refreshAvailable",
+      "canRefresh",
+      "persistent",
+      "restoreOnBoot",
+      "refreshToken",
+      "refresh_token",
+    ])
   );
 }
 
@@ -1204,7 +1190,9 @@ export function setUser({ state, events, setState, user = null, options = {} } =
     ...state,
     user,
     currentUser: user,
-  });
+    authUser: user,
+    sessionUser: user,
+  }, options);
 
   commitState({
     state,
@@ -1223,12 +1211,37 @@ export function setUser({ state, events, setState, user = null, options = {} } =
 }
 
 export function setToken({ state, events, setState, token = null, options = {} } = {}) {
+  const nextToken = cleanToken(token);
+
+  if (!nextToken) {
+    if (options.clearSession === true || options.forceUnauthenticated === true) {
+      return clearSession({
+        state,
+        events,
+        setState,
+        options: {
+          ...options,
+          source: options.source || "core-session:setToken:clear",
+        },
+      });
+    }
+
+    emit(events, SESSION_EVENTS.tokenChange, {
+      hasToken: Boolean(cleanToken(readTokenFrom(state))),
+      authenticated: Boolean(cleanToken(readTokenFrom(state)) && normalizeUser(readUserFrom(state))),
+      ignored: true,
+      reason: "empty-token",
+    });
+
+    return state?.token || state?.accessToken || null;
+  }
+
   const patch = authPatch({
     ...state,
-    token,
-    accessToken: token,
-    access_token: token,
-  });
+    token: nextToken,
+    accessToken: nextToken,
+    access_token: nextToken,
+  }, options);
 
   commitState({
     state,
@@ -1259,7 +1272,8 @@ export function applySession(input = {}) {
 
   const token = pick(input, ["token", "accessToken", "access_token"]);
   const user = pickUser(input);
-  const session = normalizeSessionContext(pickSession(input), normalizeUser(user));
+  const normalizedUser = normalizeUser(user);
+  const session = normalizeSessionContext(pickSession(input), normalizedUser);
 
   const patch = authPatch({
     ...state,
@@ -1270,17 +1284,18 @@ export function applySession(input = {}) {
 
     user,
     currentUser: user,
+    authUser: user,
+    sessionUser: user,
 
     session,
     sessionData: session,
 
-    hasRefreshToken: Boolean(
-      pick(input, ["refreshToken", "refresh_token"])
-    ),
-  });
+    hasRefreshToken: pickHasRefresh(input),
+  }, input.options || {});
 
   if (input.route || input.publicPath) {
     const visible = normalizePublicPath(input.publicPath || input.route || DEFAULT_ROUTE);
+
     patch.publicPath = visible;
     patch.route = normalizeCanonicalPath(visible);
     patch.canonicalPath = patch.route;

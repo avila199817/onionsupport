@@ -4,7 +4,7 @@
 
    Responsabilidad:
    - Fetch mínimo.
-   - API base desde config.
+   - API base desde core/config.js.
    - Auth header sólo si toca.
    - /api/auth/me siempre privado.
    - /api/auth/refresh público y sin Authorization.
@@ -25,7 +25,6 @@
    - Sin Router.
    - Sin Storage.
    - Sin Toast.
-   - Sin magia negra.
 ========================================================= */
 
 import {
@@ -33,12 +32,13 @@ import {
   AUTH_ENDPOINTS,
   PUBLIC_API_PATHS,
   PRIVATE_API_PATHS,
+  SENSITIVE_QUERY_PARAMS,
   getApiBase,
   isCanonicalBackendApiBase,
   isPublicApiPath,
 } from "./config.js";
 
-export const REQUEST_VERSION = "core.request.v8";
+export const REQUEST_VERSION = "core.request.v9";
 
 const DEFAULT_API_BASE = getApiBase();
 const DEFAULT_TIMEOUT_MS = Number(config?.api?.timeout || 30000) || 30000;
@@ -69,24 +69,11 @@ const BODYLESS_METHODS = new Set([
   "OPTIONS",
 ]);
 
-const SENSITIVE_KEYS = new Set([
-  "token",
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "secret",
-  "session",
-  "code",
-  "password",
-  "pwd",
-  "key",
-  "sig",
-  "signature",
-  "jwt",
-  "authorization",
-  "reset_token",
-  "activation_token",
-]);
+const SENSITIVE_KEYS = new Set(
+  SENSITIVE_QUERY_PARAMS.map((key) => String(key).toLowerCase())
+);
+
+const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
 
 /* =========================================================
    BASICS
@@ -113,14 +100,36 @@ function safeKey(value = "") {
   return cleanText(value, "").toLowerCase();
 }
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSensitiveQueryPattern() {
+  const keys = [...SENSITIVE_KEYS]
+    .map(escapeRegExp)
+    .filter(Boolean)
+    .join("|");
+
+  return keys
+    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
+    : null;
+}
+
 function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
+  const text = cleanText(value, "");
+  const redactedQuery = SENSITIVE_QUERY_PATTERN
+    ? text.replace(SENSITIVE_QUERY_PATTERN, "$1***")
+    : text;
+
+  return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+function normalizeErrorCode(value = "") {
+  return cleanText(value, "")
+    .replace(/[\s-]+/g, "_")
+    .toUpperCase();
 }
 
 /* =========================================================
@@ -335,6 +344,7 @@ function shouldUseAuth(path = "", options = {}) {
   const clean = cleanEndpointPath(path);
 
   if (clean === PRIVATE_ME_PATH) return true;
+  if (endpointIsPublic(clean)) return false;
 
   if (
     options.public === true ||
@@ -347,7 +357,7 @@ function shouldUseAuth(path = "", options = {}) {
 
   if (options.auth === true) return true;
 
-  return !endpointIsPublic(clean);
+  return true;
 }
 
 /* =========================================================
@@ -446,17 +456,10 @@ function buildHeaders({
   if (auth) {
     const token = getToken(state, options);
 
-    /*
-      No pisa Authorization si core/http.js ya lo preparó.
-      Sólo lo añade cuando falta y hay token usable.
-    */
     if (token && !hasHeader(headers, "authorization")) {
       headers.Authorization = `Bearer ${token}`;
     }
   } else {
-    /*
-      Rutas públicas como /api/auth/refresh no deben llevar Authorization stale.
-    */
     removeHeader(headers, "authorization");
   }
 
@@ -641,7 +644,7 @@ function errorMessageFrom(value = null) {
 function errorCodeFrom(value = null) {
   if (!isObject(value)) return "";
 
-  return cleanText(
+  return normalizeErrorCode(
     value.auth?.code ||
       value.auth?.error ||
       value.code ||
@@ -650,8 +653,7 @@ function errorCodeFrom(value = null) {
       value.error ||
       value.data?.code ||
       value.data?.error ||
-      "",
-    ""
+      ""
   );
 }
 
@@ -697,7 +699,7 @@ export function buildRequestError({
     `HTTP ${status || "ERROR"}`;
 
   const finalCode =
-    code ||
+    normalizeErrorCode(code) ||
     errorCodeFrom(data) ||
     errorCodeFrom(raw) ||
     "REQUEST_ERROR";
@@ -715,17 +717,6 @@ export function buildRequestError({
   error.url = redact(url);
   error.method = normalizeMethod(method);
 
-  /*
-    Importante:
-    No se transforma ni se aplana el payload de error.
-    core/http.js necesita leer:
-      - data.code / data.error
-      - data.auth.refreshRequired
-      - data.auth.canRefresh
-      - data.auth.shouldLogout
-      - data.auth.clearClientSession
-    para decidir refresh silencioso sin logout falso.
-  */
   error.data = data;
   error.body = data;
   error.payload = data;
@@ -902,33 +893,22 @@ export function createRequest({
 
       const response = await runFetch(url, finalRequestOptions);
 
-      if (options.raw === true) {
-        if (!response.ok) {
-          const errorData = await parseResponseBody(response, "auto").catch(() => null);
-
-          throw buildRequestError({
-            response,
-            data: errorData,
-            url,
-            method,
-          });
-        }
-
-        return response;
-      }
-
-      const data = await parseResponseBody(response, options.responseType || "auto");
-
       if (!response.ok) {
+        const errorData = await parseResponseBody(response, "auto").catch(() => null);
+
         throw buildRequestError({
           response,
-          data,
+          data: errorData,
           url,
           method,
         });
       }
 
-      return data;
+      if (options.raw === true) {
+        return response;
+      }
+
+      return parseResponseBody(response, options.responseType || "auto");
     } catch (error) {
       if (abort.timedOut()) {
         lastError = buildRequestError({

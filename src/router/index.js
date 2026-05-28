@@ -22,6 +22,8 @@
    - Home visible: /@{user.slug}
    - Navegación latest-wins: no serializar cambios de vista en cola rígida.
    - Sin Auth estático.
+   - Sin iniciar restore.
+   - Sin refresh.
    - Sin fetch.
    - Sin storage.
    - Sin Toast.
@@ -50,7 +52,7 @@ import * as History from "./history.js";
 import * as Render from "./render.js";
 import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v15.routable-lean-transition";
+export const ROUTER_VERSION = "router.index.v16";
 
 const ROUTE_PATHS = Routes.ROUTE_PATHS || {
   HOME: "/",
@@ -67,6 +69,11 @@ export const Router = (() => {
   const HOME_PATH = "/";
   const LOGIN_PATH = ROUTE_PATHS.LOGIN || "/login";
   const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || Routes.USER_HOME_PREFIX || "/@";
+
+  const INVALID_USER_STATUSES = new Set([
+    "suspended",
+    "desactivado",
+  ]);
 
   const routes = getImmutableRoutes();
 
@@ -723,31 +730,10 @@ export const Router = (() => {
 
     return !(
       user.disabled === true ||
-        user.deleted === true ||
-        user.archived === true ||
-        user.revoked === true ||
-        user.blocked === true ||
-        user.banned === true ||
         user.suspended === true ||
         user.active === false ||
         user.enabled === false ||
-        Boolean(user.deletedAt) ||
-        [
-          "disabled",
-          "inactive",
-          "deleted",
-          "archived",
-          "revoked",
-          "blocked",
-          "banned",
-          "suspended",
-          "desactivado",
-          "inactivo",
-          "eliminado",
-          "archivado",
-          "bloqueado",
-          "suspendido",
-        ].includes(status)
+        INVALID_USER_STATUSES.has(status)
     );
   }
 
@@ -2114,6 +2100,8 @@ export const Router = (() => {
         authDelegated: true,
         waitsForInFlightAuthRestore: true,
         doesNotStartRestore: true,
+        doesNotClearSession: true,
+        tokenExpiredDoesNotMeanLogout: true,
 
         ownStorage: false,
         ownTransport: false,
@@ -2122,6 +2110,7 @@ export const Router = (() => {
         strictAuth: true,
         accessTokenAndUserRequired: true,
         userUsableRequired: true,
+        invalidStatuses: ["suspended", "desactivado"],
 
         adminRoutesDelegatedToConfig: true,
         adminRoutesRequireAdmin: true,

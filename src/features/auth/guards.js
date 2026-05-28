@@ -28,9 +28,12 @@
 ========================================================= */
 
 import {
+  ALLOWED_ROLES,
   PUBLIC_ROUTES,
   ROUTES,
   USER_HOME_PREFIX,
+  TOKEN_PARAM,
+  SENSITIVE_QUERY_PARAMS,
   buildUserHomeRoute as configBuildUserHomeRoute,
   canonicalRoutePath as configCanonicalRoutePath,
   getUserScopedRouteInfo as getConfigUserScopedRouteInfo,
@@ -46,7 +49,7 @@ import {
 
 import * as Session from "./session.js";
 
-export const GUARDS_VERSION = "auth.guards.v9";
+export const GUARDS_VERSION = "auth.guards.v10";
 
 const HOME_PATH = "/";
 const LOGIN_PATH = ROUTES.login || "/login";
@@ -56,7 +59,21 @@ const ACTIVATE_ACCOUNT_PATH = ROUTES.activateAccount || "/activate-account";
 
 const USER_PREFIX = USER_HOME_PREFIX || "/@";
 
-const VALID_ROLES = Object.freeze(["admin", "user"]);
+const VALID_ROLES = Object.freeze(
+  (Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
+    ? ALLOWED_ROLES
+    : ["admin", "user"]
+  ).map((role) => String(role).toLowerCase())
+);
+
+const SENSITIVE_QUERY_KEYS = Object.freeze(
+  (Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
+    ? SENSITIVE_QUERY_PARAMS
+    : [TOKEN_PARAM]
+  ).map((key) => String(key).toLowerCase())
+);
+
+const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
 
 /* =========================================================
    BASICS
@@ -94,12 +111,28 @@ function unique(values = []) {
   ];
 }
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSensitiveQueryPattern() {
+  const keys = SENSITIVE_QUERY_KEYS
+    .map(escapeRegExp)
+    .filter(Boolean)
+    .join("|");
+
+  return keys
+    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
+    : null;
+}
+
 function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
+  const raw = cleanText(value, "");
+  const redactedQuery = SENSITIVE_QUERY_PATTERN
+    ? raw.replace(SENSITIVE_QUERY_PATTERN, "$1***")
+    : raw;
+
+  return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
@@ -312,9 +345,6 @@ function isBlockedLegacyPath(path = HOME_PATH) {
   try {
     return configIsBlockedRoutePath(path) === true;
   } catch {
-    /*
-      Sin denylist local: si Config falla, bloqueamos por seguridad.
-    */
     return true;
   }
 }
@@ -573,7 +603,6 @@ export function guardAuthenticated(options = {}) {
   const scoped = getUserScopedRouteInfo(path);
 
   if (isBlockedLegacyPath(path)) return false;
-
   if (!isAuthenticated()) return false;
 
   /*
@@ -764,10 +793,15 @@ export function getAuthGuardsSnapshot() {
       configOwnsRoutes: true,
       configOwnsUserScope: true,
       configOwnsBlockedRoutes: true,
+      configOwnsRoles: true,
+      configOwnsSensitiveQueryParams: true,
+
       routerIndexOwnsCanonicalNavigation: true,
       routerGuardsOwnRouteAccess: true,
 
       noLocalBlockedRouteList: true,
+      noUserValidationHere: true,
+      invalidUserOnlyDisabledOrDesactivadoInSession: true,
 
       ownFetch: false,
       ownRefresh: false,

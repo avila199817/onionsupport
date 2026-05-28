@@ -10,13 +10,19 @@
    - Preservar query/hash de la ruta inicial.
    - Delegar guards, render, history, canonicalización y redirects
      al Router real.
-   - Sin restore, Auth, storage, fetch, eventos, token flow,
-     navegación paralela ni debug pesado.
+   - Sin restore.
+   - Sin Auth.
+   - Sin storage.
+   - Sin fetch.
+   - Sin eventos propios.
+   - Sin token flow.
+   - Sin navegación paralela.
+   - Sin debug pesado.
 ========================================================= */
 
 import { Router } from "../router/index.js";
 
-export const ROUTER_BOOTSTRAP_VERSION = "app.router.v7";
+export const ROUTER_BOOTSTRAP_VERSION = "app.router.v8";
 
 const INIT_OPTIONS = Object.freeze({
   appManagedInitialRender: true,
@@ -315,17 +321,24 @@ export function getRouterBootstrapState() {
       wrapperOnly: true,
       appManagedInitialRender: true,
       renderInitialOnce: true,
+
+      initialRenderHappensAfterAppRestore: true,
+
       preservesInitialPath: true,
       preservesQueryAndHash: true,
+
       routerOwnsGuards: true,
       routerOwnsHistory: true,
       routerOwnsCanonicalization: true,
       routerOwnsRedirects: true,
+
       noAuth: true,
+      noRestore: true,
       noStorage: true,
       noFetch: true,
       noEventsOwn: true,
       noTokenFlow: true,
+
       snapshotRedacted: true,
     },
   };

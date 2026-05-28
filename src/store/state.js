@@ -6,22 +6,68 @@
    - Estado inicial mínimo del Store.
    - Compat para imports antiguos.
    - Store NO es dueño de Auth.
+   - Store NO es dueño de sesión.
    - Store NO es dueño de Router.
    - Store NO es dueño de HTTP.
    - Nunca guarda token real.
-   - Roles únicos: admin / user.
-   - User inválido sólo si disabled.
+   - Nunca guarda usuario Auth.
+   - Nunca guarda sesión Auth.
+   - Sólo app/ui/entities/flags/meta.
+   - Idioma base: es.
    - Sin rutas técnicas legacy.
    - Sin 2FA/MFA/OTP.
    - Sin recursos inventados.
 ========================================================= */
 
-export const STORE_STATE_VERSION = "simple";
+import {
+  config,
+  SENSITIVE_QUERY_PARAMS,
+  TOKEN_PARAM,
+  canonicalRoutePath as configCanonicalRoutePath,
+  isBlockedRoutePath as configIsBlockedRoutePath,
+  normalizeRoutePath as configNormalizeRoutePath,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
+} from "../core/config.js";
 
-const APP_NAME = "Onion Support";
+export const STORE_STATE_VERSION = "store.state.v3";
+
+const APP_NAME = config?.appName || config?.name || "Onion Support";
 const DEFAULT_ROUTE = "/";
-const DEFAULT_LANG = "en";
-const DEFAULT_THEME = "system";
+const DEFAULT_LANG = config?.defaultLang || "es";
+const DEFAULT_THEME = config?.defaultTheme || "system";
+
+const VALID_LANGS = new Set(
+  (Array.isArray(config?.supportedLangs) && config.supportedLangs.length
+    ? config.supportedLangs
+    : ["es", "ca", "en"]
+  ).map((lang) => String(lang).toLowerCase())
+);
+
+const VALID_THEMES = new Set(["dark", "light", "system"]);
+
+const ROOT_KEYS = Object.freeze([
+  "app",
+  "ui",
+  "entities",
+  "flags",
+  "meta",
+]);
+
+const SENSITIVE_KEY_RE =
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id)/i;
+
+const SENSITIVE_QUERY_KEYS = new Set(
+  (Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
+    ? SENSITIVE_QUERY_PARAMS
+    : [TOKEN_PARAM]
+  ).map((key) => String(key).toLowerCase())
+);
+
+const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -31,8 +77,16 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -41,35 +95,201 @@ function clone(value) {
   if (value === null) return null;
 
   try {
-    return structuredClone(value);
-  } catch {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
     }
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
   }
 }
 
 function nowIso() {
-  return new Date().toISOString();
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
+}
+
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSensitiveQueryPattern() {
+  const keys = [...SENSITIVE_QUERY_KEYS]
+    .map(escapeRegExp)
+    .filter(Boolean)
+    .join("|");
+
+  return keys
+    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
+    : null;
+}
+
+function redact(value = "") {
+  const raw = text(value, "");
+  const redactedQuery = SENSITIVE_QUERY_PATTERN
+    ? raw.replace(SENSITIVE_QUERY_PATTERN, "$1***")
+    : raw;
+
+  return redactedQuery
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+/* =========================================================
+   PATHS
+========================================================= */
+
+function routePathFromInput(path = DEFAULT_ROUTE) {
+  try {
+    return configRoutePathFromUrlLike(path) || DEFAULT_ROUTE;
+  } catch {
+    return DEFAULT_ROUTE;
+  }
+}
+
+function normalizeSearch(search = "") {
+  const raw = text(search, "");
+
+  if (!raw || raw === "?") return "";
+
+  const normalized = raw.startsWith("?")
+    ? raw
+    : `?${raw.replace(/^\?+/, "")}`;
+
+  try {
+    const params = new URLSearchParams(normalized);
+
+    for (const key of [...params.keys()]) {
+      if (SENSITIVE_QUERY_KEYS.has(String(key).toLowerCase())) {
+        params.delete(key);
+      }
+    }
+
+    const output = params.toString();
+
+    return output ? `?${output}` : "";
+  } catch {
+    return "";
+  }
+}
+
+function normalizeHash(hash = "") {
+  const raw = text(hash, "");
+
+  if (!raw || raw === "#") return "";
+
+  const normalized = raw.startsWith("#")
+    ? raw
+    : `#${raw.replace(/^#+/, "")}`;
+
+  const body = normalized.slice(1);
+
+  if (!body || /[\r\n\t\\]/.test(body)) return "";
+
+  const queryIndex = body.indexOf("?");
+
+  if (queryIndex >= 0) {
+    const hashPath = body.slice(0, queryIndex);
+    const cleanQuery = normalizeSearch(`?${body.slice(queryIndex + 1)}`);
+
+    return cleanQuery ? `#${hashPath}${cleanQuery}` : `#${hashPath}`;
+  }
+
+  if (/^[^/?#=&]+=/i.test(body)) {
+    const cleanQuery = normalizeSearch(`?${body}`);
+    return cleanQuery ? `#${cleanQuery.slice(1)}` : "";
+  }
+
+  return redact(normalized);
+}
+
+function splitPath(path = DEFAULT_ROUTE) {
+  let raw = routePathFromInput(path);
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
+  }
+
+  return {
+    pathname,
+    search,
+    hash,
+  };
+}
+
+function normalizePathname(pathname = DEFAULT_ROUTE) {
+  try {
+    return configNormalizeRoutePath(pathname) || DEFAULT_ROUTE;
+  } catch {
+    let value = text(pathname, DEFAULT_ROUTE)
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/\\/g, "/");
+
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    value = value.replace(/\/{2,}/g, "/");
+
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+    }
+
+    return value || DEFAULT_ROUTE;
+  }
+}
+
+function isBlockedPath(path = DEFAULT_ROUTE) {
+  try {
+    return configIsBlockedRoutePath(path) === true;
+  } catch {
+    return false;
+  }
 }
 
 function cleanPath(path = DEFAULT_ROUTE) {
-  let value = text(path, DEFAULT_ROUTE).split("?")[0].split("#")[0];
+  const pathname = normalizePathname(splitPath(path).pathname);
 
-  if (!value.startsWith("/")) value = `/${value}`;
-  if (value.length > 1) value = value.replace(/\/+$/g, "");
+  return isBlockedPath(pathname) ? DEFAULT_ROUTE : pathname;
+}
 
-  return value || DEFAULT_ROUTE;
+function canonicalPath(path = DEFAULT_ROUTE) {
+  if (isBlockedPath(path)) return DEFAULT_ROUTE;
+
+  try {
+    return configCanonicalRoutePath(path) || DEFAULT_ROUTE;
+  } catch {
+    return cleanPath(path);
+  }
 }
 
 function publicPath(path = DEFAULT_ROUTE) {
-  let value = text(path, DEFAULT_ROUTE);
+  const parts = splitPath(path);
+  const pathname = cleanPath(parts.pathname);
 
-  if (!value.startsWith("/")) value = `/${value}`;
-
-  return value || DEFAULT_ROUTE;
+  return `${pathname}${normalizeSearch(parts.search)}${normalizeHash(parts.hash)}` || DEFAULT_ROUTE;
 }
 
 function currentPublicPath() {
@@ -81,89 +301,51 @@ function currentPublicPath() {
 }
 
 function currentCanonicalPath() {
-  return cleanPath(currentPublicPath());
+  return canonicalPath(currentPublicPath());
 }
 
-function normalizeRole(value = "") {
-  return String(value).toLowerCase() === "admin" ? "admin" : "user";
-}
-
-function userDisabled(user = null) {
-  if (!isObject(user)) return true;
-
-  return (
-    user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
-  );
-}
-
-function usableUser(user = null) {
-  if (!isObject(user)) return false;
-  if (userDisabled(user)) return false;
-
-  return Boolean(
-    user.id ||
-      user.userId ||
-      user.username ||
-      user.slug ||
-      user.email
-  );
-}
-
-function publicUser(user = null) {
-  if (!usableUser(user)) return null;
-
-  const id = user.userId || user.id || null;
-  const username = user.username || user.slug || user.email || id || null;
-
-  const displayName =
-    user.name ||
-    user.fullName ||
-    user.displayName ||
-    user.nombre ||
-    username ||
-    user.email ||
-    id ||
-    "Usuario";
-
-  const role = normalizeRole(user.role || user.rol);
-
-  return {
-    id,
-    userId: user.userId || id,
-
-    username,
-    slug: user.slug || username,
-
-    displayName,
-    name: user.name || displayName,
-    fullName: user.fullName || displayName,
-
-    email: user.email || null,
-
-    role,
-    rol: role,
-    roles: [role],
-
-    avatar: user.avatar || user.avatarUrl || user.picture || null,
-    avatarUrl: user.avatarUrl || user.avatar || user.picture || null,
-    picture: user.picture || user.avatarUrl || user.avatar || null,
-    hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
-
-    active: true,
-    disabled: false,
-  };
-}
+/* =========================================================
+   CORE READ
+========================================================= */
 
 function readCoreState(AppCore = null) {
   return isObject(AppCore?.state) ? AppCore.state : {};
+}
+
+function safeError(error = null) {
+  if (!error) return null;
+
+  if (typeof error === "string") {
+    return {
+      name: "Error",
+      message: redact(error),
+      code: null,
+      status: null,
+    };
+  }
+
+  if (!isObject(error)) {
+    return {
+      name: "Error",
+      message: redact(String(error)),
+      code: null,
+      status: null,
+    };
+  }
+
+  return {
+    name: text(error.name, "Error"),
+    message: redact(error.message || error.detail || error.reason || String(error)),
+    code: error.code || error.error || null,
+    status: error.status || error.statusCode || error.response?.status || null,
+  };
 }
 
 function readRoute(AppCore = null) {
   const state = readCoreState(AppCore);
 
   const visible = publicPath(state.publicPath || state.route || currentPublicPath());
-  const canonical = cleanPath(state.canonicalPath || state.route || visible);
+  const canonical = canonicalPath(state.canonicalPath || state.route || visible);
 
   return {
     route: canonical,
@@ -172,88 +354,49 @@ function readRoute(AppCore = null) {
   };
 }
 
-function readSession(AppCore = null) {
-  const state = readCoreState(AppCore);
+function normalizeLang(value = DEFAULT_LANG) {
+  const lang = text(value, DEFAULT_LANG).toLowerCase();
+  return VALID_LANGS.has(lang) ? lang : DEFAULT_LANG;
+}
 
-  const authenticated = Boolean(state.authenticated);
-  const hasToken = Boolean(state.hasToken);
-  const user = authenticated ? publicUser(state.user || state.currentUser) : null;
-
-  if (!authenticated || !hasToken || !user) {
-    return {
-      authenticated: false,
-      hasToken,
-      user: null,
-      role: null,
-      roles: [],
-      username: null,
-      displayName: null,
-      avatarUrl: null,
-      isAdmin: false,
-      isUser: false,
-      isSupport: false,
-      isManager: false,
-      isClient: false,
-    };
-  }
-
-  const role = normalizeRole(state.role || user.role);
-
-  return {
-    authenticated: true,
-    hasToken: true,
-
-    user,
-    role,
-    roles: [role],
-
-    username: user.username || null,
-    displayName: user.displayName || user.name || user.username || null,
-    avatarUrl: user.avatarUrl || null,
-
-    isAdmin: role === "admin",
-    isUser: role === "user",
-    isSupport: false,
-    isManager: false,
-    isClient: false,
-  };
+function normalizeTheme(value = DEFAULT_THEME) {
+  const theme = text(value, DEFAULT_THEME).toLowerCase();
+  return VALID_THEMES.has(theme) ? theme : DEFAULT_THEME;
 }
 
 function readLang(AppCore = null) {
   const state = readCoreState(AppCore);
 
-  const lang =
+  return normalizeLang(
     state.lang ||
-    state.language ||
-    state.locale ||
-    (isBrowser() ? document.documentElement.lang : "") ||
-    DEFAULT_LANG;
-
-  return ["ca", "es", "en"].includes(lang) ? lang : DEFAULT_LANG;
+      state.language ||
+      state.locale ||
+      (isBrowser() ? document.documentElement.lang : "") ||
+      DEFAULT_LANG
+  );
 }
 
 function readTheme(AppCore = null) {
   const state = readCoreState(AppCore);
 
-  const theme =
+  return normalizeTheme(
     state.theme ||
-    (isBrowser() ? document.documentElement.dataset.theme : "") ||
-    DEFAULT_THEME;
-
-  return ["dark", "light", "system"].includes(theme) ? theme : DEFAULT_THEME;
+      (isBrowser() ? document.documentElement.dataset.theme : "") ||
+      DEFAULT_THEME
+  );
 }
 
 export function safeTitle() {
   if (!isBrowser()) return APP_NAME;
 
-  return text(document.title, APP_NAME);
+  return redact(text(document.title, APP_NAME));
 }
 
 export function safeTopbarTitle() {
   if (!isBrowser()) return safeTitle();
 
   return (
-    text(document.getElementById("topbar-title")?.textContent, "") ||
+    redact(text(document.getElementById("topbar-title")?.textContent, "")) ||
     safeTitle()
   );
 }
@@ -263,48 +406,26 @@ export function safeTopbarTitle() {
 ========================================================= */
 
 export function buildInitialState(AppCore = null) {
+  const coreState = readCoreState(AppCore);
   const route = readRoute(AppCore);
-  const session = readSession(AppCore);
   const lang = readLang(AppCore);
   const theme = readTheme(AppCore);
   const now = nowIso();
 
   return {
     app: {
-      ready: Boolean(AppCore?.state?.ready || AppCore?.state?.appReady),
-      booted: Boolean(AppCore?.state?.booted || AppCore?.state?.initialized),
-      initialized: Boolean(AppCore?.state?.initialized),
-      booting: Boolean(AppCore?.state?.booting),
-      loading: Boolean(AppCore?.state?.loading),
-      fatal: Boolean(AppCore?.state?.fatal || AppCore?.state?.appFatal),
+      ready: Boolean(coreState.ready || coreState.appReady),
+      booted: Boolean(coreState.booted || coreState.initialized),
+      initialized: Boolean(coreState.initialized),
+      booting: Boolean(coreState.booting),
+      loading: Boolean(coreState.loading),
+      fatal: Boolean(coreState.fatal || coreState.appFatal),
 
       route: route.route,
       canonicalPath: route.canonicalPath,
       publicPath: route.publicPath,
 
-      lastError: AppCore?.state?.lastError || AppCore?.state?.error || null,
-    },
-
-    session: {
-      authenticated: session.authenticated,
-      hasToken: session.hasToken,
-
-      token: null,
-      accessToken: null,
-
-      user: session.user,
-      role: session.role,
-      roles: session.roles,
-
-      username: session.username,
-      displayName: session.displayName,
-      avatarUrl: session.avatarUrl,
-
-      isAdmin: session.isAdmin,
-      isUser: session.isUser,
-      isSupport: false,
-      isManager: false,
-      isClient: false,
+      lastError: safeError(coreState.lastError || coreState.error || null),
     },
 
     ui: {
@@ -316,9 +437,9 @@ export function buildInitialState(AppCore = null) {
       language: lang,
       locale: lang,
 
-      sidebarOpen: AppCore?.state?.sidebarOpen !== false,
-      shellVisible: AppCore?.state?.shellVisible !== false,
-      chromeVisible: AppCore?.state?.chromeVisible !== false,
+      sidebarOpen: coreState.sidebarOpen !== false,
+      shellVisible: coreState.shellVisible !== false,
+      chromeVisible: coreState.chromeVisible !== false,
 
       pageTitle: safeTitle(),
       topbarTitle: safeTopbarTitle(),
@@ -330,7 +451,6 @@ export function buildInitialState(AppCore = null) {
       hydrating: false,
       hydrated: false,
       syncingCore: false,
-      refreshing: false,
       saving: false,
     },
 
@@ -376,11 +496,6 @@ export function shallowCloneRoot(state = {}) {
 
   return {
     app: clone(source.app || {}),
-    session: {
-      ...(clone(source.session || {}) || {}),
-      token: null,
-      accessToken: null,
-    },
     ui: clone(source.ui || {}),
     entities: clone(source.entities || {}),
     flags: clone(source.flags || {}),
@@ -389,7 +504,7 @@ export function shallowCloneRoot(state = {}) {
 }
 
 function sanitize(value, key = "") {
-  if (/token|password|secret|authorization|cookie|jwt|refresh|access/i.test(key)) {
+  if (isSensitiveKey(key)) {
     return value ? "***" : null;
   }
 
@@ -401,10 +516,15 @@ function sanitize(value, key = "") {
     const output = {};
 
     for (const [childKey, childValue] of Object.entries(value)) {
+      if (!ROOT_KEYS.includes(childKey) && key === "") continue;
       output[childKey] = sanitize(childValue, childKey);
     }
 
     return output;
+  }
+
+  if (typeof value === "string") {
+    return redact(value);
   }
 
   return value;

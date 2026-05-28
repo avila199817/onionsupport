@@ -10,7 +10,7 @@
    - Persistir contexto auxiliar mínimo no canónico.
    - No autenticar por sí mismo.
    - Nunca storage.clear().
-   - Delegar slug/rutas bloqueadas en core/config.js.
+   - Delegar slug/rutas bloqueadas/sensitive params en core/config.js.
    - Sin AppCore.
    - Sin Router.
    - Sin HTTP.
@@ -31,6 +31,9 @@
 ========================================================= */
 
 import {
+  ALLOWED_ROLES,
+  SENSITIVE_QUERY_PARAMS,
+  TOKEN_PARAM,
   isBlockedRoutePath as configIsBlockedRoutePath,
   normalizeRoutePath as configNormalizeRoutePath,
   normalizeUserSlug as configNormalizeUserSlug,
@@ -42,9 +45,10 @@ import {
   AUTH_CONSTANTS,
 } from "./constants.js";
 
-export const AUTH_STORAGE_VERSION = "auth.storage.v10";
+export const AUTH_STORAGE_VERSION = "auth.storage.v11";
 
 const PREFIX = "onion:auth:";
+const PREFIX_RAW = "onion:auth";
 
 const memory = new Map();
 
@@ -128,6 +132,22 @@ const REFRESH_TOKEN_FIELDS = Object.freeze([
   "value",
 ]);
 
+const VALID_ROLES = new Set(
+  (Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
+    ? ALLOWED_ROLES
+    : ["admin", "user"]
+  ).map((role) => String(role).toLowerCase())
+);
+
+const SENSITIVE_QUERY_KEYS = new Set(
+  (Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
+    ? SENSITIVE_QUERY_PARAMS
+    : [TOKEN_PARAM]
+  ).map((key) => String(key).toLowerCase())
+);
+
+const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -154,12 +174,28 @@ function number(value, fallback = 0) {
   return Number.isFinite(output) ? output : fallback;
 }
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSensitiveQueryPattern() {
+  const keys = [...SENSITIVE_QUERY_KEYS]
+    .map(escapeRegExp)
+    .filter(Boolean)
+    .join("|");
+
+  return keys
+    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
+    : null;
+}
+
 function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
+  const raw = cleanText(value, "");
+  const redactedQuery = SENSITIVE_QUERY_PATTERN
+    ? raw.replace(SENSITIVE_QUERY_PATTERN, "$1***")
+    : raw;
+
+  return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
@@ -168,9 +204,22 @@ function recordError(error = null) {
   lastStorageError = error || null;
 }
 
+function normalizeStorageName(name = "") {
+  return cleanText(name, "")
+    .replace(new RegExp(`^${escapeRegExp(PREFIX)}`, "i"), "")
+    .replace(/^onion:auth:?/i, "")
+    .replace(/^onion:/i, "")
+    .replace(/^:+/g, "")
+    .trim();
+}
+
 function key(name = "") {
-  const clean = cleanText(name, "");
+  const clean = normalizeStorageName(name);
   return clean ? `${PREFIX}${clean}` : "";
+}
+
+function rawKey(name = "") {
+  return normalizeStorageName(name);
 }
 
 function localStore() {
@@ -196,10 +245,12 @@ function sessionStore() {
 ========================================================= */
 
 function readFrom(storage, name = "") {
-  if (!storage || !name) return "";
+  const finalKey = key(name);
+
+  if (!storage || !finalKey) return "";
 
   try {
-    return storage.getItem(key(name)) || "";
+    return storage.getItem(finalKey) || "";
   } catch (error) {
     recordError(error);
     return "";
@@ -207,10 +258,12 @@ function readFrom(storage, name = "") {
 }
 
 function writeTo(storage, name = "", value = "") {
-  if (!storage || !name || !value) return false;
+  const finalKey = key(name);
+
+  if (!storage || !finalKey || !value) return false;
 
   try {
-    storage.setItem(key(name), value);
+    storage.setItem(finalKey, value);
     return true;
   } catch (error) {
     recordError(error);
@@ -219,10 +272,12 @@ function writeTo(storage, name = "", value = "") {
 }
 
 function removeFrom(storage, name = "") {
-  if (!storage || !name) return false;
+  const finalKey = key(name);
+
+  if (!storage || !finalKey) return false;
 
   try {
-    storage.removeItem(key(name));
+    storage.removeItem(finalKey);
     return true;
   } catch (error) {
     recordError(error);
@@ -235,9 +290,11 @@ function readMemory(name = "") {
 }
 
 function writeMemory(name = "", value = "") {
-  if (!name || !value) return false;
+  const finalKey = key(name);
 
-  memory.set(key(name), value);
+  if (!finalKey || !value) return false;
+
+  memory.set(finalKey, value);
   return true;
 }
 
@@ -265,10 +322,6 @@ function writeRaw(name = "", value = "", options = {}) {
   const primary = useSession ? sessionStore() : localStore();
   const secondary = useSession ? localStore() : sessionStore();
 
-  /*
-    Sólo removemos nuestras claves concretas namespaced.
-    Nunca se llama storage.clear().
-  */
   removeFrom(secondary, name);
   removeMemory(name);
 
@@ -391,7 +444,7 @@ function normalizeRole(value = "") {
 
   const role = cleanText(value, "").toLowerCase();
 
-  return role === "admin" || role === "user" ? role : "";
+  return VALID_ROLES.has(role) ? role : "";
 }
 
 function normalizeSlug(value = "") {
@@ -415,9 +468,15 @@ function normalizeSlug(value = "") {
 }
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
-    String(value || "")
-  );
+  const text = String(value || "");
+
+  if (!SENSITIVE_QUERY_PATTERN) return false;
+
+  SENSITIVE_QUERY_PATTERN.lastIndex = 0;
+  const matched = SENSITIVE_QUERY_PATTERN.test(text);
+  SENSITIVE_QUERY_PATTERN.lastIndex = 0;
+
+  return matched;
 }
 
 function normalizeRoutePathOnly(value = "") {
@@ -950,12 +1009,6 @@ export function persistAuthStorage(payload = {}, options = {}) {
     removeStoredAccessToken();
   }
 
-  /*
-    Refresh token visible:
-    - Se guarda sólo si backend lo entrega explícitamente.
-    - Si no viene, se conserva salvo limpieza explícita.
-    - Cookie httpOnly queda fuera de este storage.
-  */
   if (refreshToken) {
     refreshStored = persistRefreshToken(refreshToken, options);
   } else if (options.clearMissingRefreshToken === true || userChanged) {
@@ -1205,12 +1258,14 @@ export function getAuthStorageSnapshot() {
 
     policy: {
       concreteKeysOnly: true,
+      namespacedOnly: true,
       noStorageClear: true,
       noLegacyMassive: true,
 
       configOwnsSlugNormalization: true,
       configOwnsRouteNormalization: true,
       configOwnsBlockedRoutes: true,
+      configOwnsSensitiveQueryParams: true,
       noLocalBlockedRouteFallback: true,
 
       persistsAccessToken: true,

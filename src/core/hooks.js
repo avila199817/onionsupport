@@ -12,11 +12,11 @@
    - Sin priority real.
    - Sin timeouts.
    - Sin snapshots grandes.
-   - Sin lógica rara.
+   - Sin lógica de dominio.
    - Un hook no rompe la ejecución.
 ========================================================= */
 
-export const HOOKS_VERSION = "core.hooks.v2";
+export const HOOKS_VERSION = "core.hooks.v3";
 
 export const DEFAULT_HOOK_TYPES = Object.freeze([
   "beforeInit",
@@ -54,7 +54,19 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function redact(value = "") {
+  return text(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
 function emit(events, name, payload = {}) {
+  if (!name) return false;
+
   try {
     if (isFunction(events?.emit)) {
       events.emit(name, payload);
@@ -77,8 +89,12 @@ function emit(events, name, payload = {}) {
   return false;
 }
 
-function ensureObject(value) {
-  return isObject(value) ? value : {};
+function ensureHooksRegistry(registry = {}) {
+  if (!isObject(registry.hooks)) {
+    registry.hooks = Object.create(null);
+  }
+
+  return registry.hooks;
 }
 
 function normalizeHookList(value) {
@@ -86,11 +102,11 @@ function normalizeHookList(value) {
 }
 
 function hookName(handler = null) {
-  return isFunction(handler) ? handler.name || "" : "";
+  return isFunction(handler) ? text(handler.name, "") : "";
 }
 
 function safeErrorMessage(error = null) {
-  return text(error?.message || String(error || "Error"), "Error");
+  return redact(error?.message || String(error || "Error"));
 }
 
 /* =========================================================
@@ -98,17 +114,8 @@ function safeErrorMessage(error = null) {
 ========================================================= */
 
 export function createHooks({ registry = {}, events = null } = {}) {
-  const finalRegistry = ensureObject(registry);
-
-  if (!isObject(finalRegistry.hooks)) {
-    finalRegistry.hooks = {};
-  }
-
-  for (const type of DEFAULT_HOOK_TYPES) {
-    if (!Array.isArray(finalRegistry.hooks[type])) {
-      finalRegistry.hooks[type] = [];
-    }
-  }
+  const finalRegistry = isObject(registry) ? registry : {};
+  const hooksRegistry = ensureHooksRegistry(finalRegistry);
 
   function normalizeType(type = "") {
     return text(type, "");
@@ -119,20 +126,25 @@ export function createHooks({ registry = {}, events = null } = {}) {
 
     if (!name) return false;
 
-    if (!Array.isArray(finalRegistry.hooks[name])) {
-      finalRegistry.hooks[name] = [];
+    if (!Array.isArray(hooksRegistry[name])) {
+      hooksRegistry[name] = [];
     }
 
     return true;
   }
 
+  for (const type of DEFAULT_HOOK_TYPES) {
+    defineType(type);
+  }
+
   function hasType(type = "") {
     const name = normalizeType(type);
-    return Boolean(name && Array.isArray(finalRegistry.hooks[name]));
+    return Boolean(name && Array.isArray(hooksRegistry[name]));
   }
 
   function types() {
-    return Object.keys(finalRegistry.hooks);
+    return Object.keys(hooksRegistry)
+      .filter((type) => Array.isArray(hooksRegistry[type]));
   }
 
   function add(type = "", handler = null) {
@@ -144,17 +156,17 @@ export function createHooks({ registry = {}, events = null } = {}) {
 
     defineType(name);
 
-    finalRegistry.hooks[name].push(handler);
+    hooksRegistry[name].push(handler);
 
     emit(events, HOOK_EVENTS.add, {
       type: name,
-      count: finalRegistry.hooks[name].length,
+      count: hooksRegistry[name].length,
       name: hookName(handler),
     });
 
     let disposed = false;
 
-    return () => {
+    return function disposeHook() {
       if (disposed) return false;
 
       disposed = true;
@@ -170,8 +182,9 @@ export function createHooks({ registry = {}, events = null } = {}) {
     }
 
     let disposed = false;
+    let dispose = () => false;
 
-    const dispose = add(name, async (payload, context) => {
+    dispose = add(name, async (payload, context) => {
       if (disposed) return payload;
 
       disposed = true;
@@ -186,13 +199,13 @@ export function createHooks({ registry = {}, events = null } = {}) {
   function remove(type = "", handler = null) {
     const name = normalizeType(type);
 
-    if (!name || !Array.isArray(finalRegistry.hooks[name])) {
+    if (!name || !Array.isArray(hooksRegistry[name])) {
       return false;
     }
 
     if (!handler) {
-      const count = finalRegistry.hooks[name].length;
-      finalRegistry.hooks[name] = [];
+      const count = hooksRegistry[name].length;
+      hooksRegistry[name] = [];
 
       if (count > 0) {
         emit(events, HOOK_EVENTS.remove, {
@@ -204,13 +217,11 @@ export function createHooks({ registry = {}, events = null } = {}) {
       return count > 0;
     }
 
-    const before = finalRegistry.hooks[name].length;
+    const before = hooksRegistry[name].length;
 
-    finalRegistry.hooks[name] = finalRegistry.hooks[name].filter(
-      (item) => item !== handler
-    );
+    hooksRegistry[name] = hooksRegistry[name].filter((item) => item !== handler);
 
-    const removed = before - finalRegistry.hooks[name].length;
+    const removed = before - hooksRegistry[name].length;
 
     if (removed > 0) {
       emit(events, HOOK_EVENTS.remove, {
@@ -227,8 +238,8 @@ export function createHooks({ registry = {}, events = null } = {}) {
     const name = normalizeType(type);
 
     if (name) {
-      const count = finalRegistry.hooks[name]?.length || 0;
-      finalRegistry.hooks[name] = [];
+      const count = hooksRegistry[name]?.length || 0;
+      hooksRegistry[name] = [];
 
       emit(events, HOOK_EVENTS.clear, {
         type: name,
@@ -241,8 +252,8 @@ export function createHooks({ registry = {}, events = null } = {}) {
     let count = 0;
 
     for (const hookType of types()) {
-      count += finalRegistry.hooks[hookType]?.length || 0;
-      finalRegistry.hooks[hookType] = [];
+      count += hooksRegistry[hookType]?.length || 0;
+      hooksRegistry[hookType] = [];
     }
 
     emit(events, HOOK_EVENTS.clear, {
@@ -258,7 +269,7 @@ export function createHooks({ registry = {}, events = null } = {}) {
 
     if (!name) return payload;
 
-    const hooks = normalizeHookList(finalRegistry.hooks[name]);
+    const hooks = [...normalizeHookList(hooksRegistry[name])];
 
     emit(events, HOOK_EVENTS.runStart, {
       type: name,
@@ -303,7 +314,7 @@ export function createHooks({ registry = {}, events = null } = {}) {
 
     if (!name) return [];
 
-    const hooks = normalizeHookList(finalRegistry.hooks[name]);
+    const hooks = [...normalizeHookList(hooksRegistry[name])];
 
     emit(events, HOOK_EVENTS.runStart, {
       type: name,
@@ -348,7 +359,7 @@ export function createHooks({ registry = {}, events = null } = {}) {
   }
 
   function get(type = "") {
-    return [...normalizeHookList(finalRegistry.hooks[normalizeType(type)])];
+    return [...normalizeHookList(hooksRegistry[normalizeType(type)])];
   }
 
   function getEntries(type = "") {
@@ -379,11 +390,11 @@ export function createHooks({ registry = {}, events = null } = {}) {
     const name = normalizeType(type);
 
     if (name) {
-      return normalizeHookList(finalRegistry.hooks[name]).length;
+      return normalizeHookList(hooksRegistry[name]).length;
     }
 
     return types().reduce((total, hookType) => {
-      return total + normalizeHookList(finalRegistry.hooks[hookType]).length;
+      return total + normalizeHookList(hooksRegistry[hookType]).length;
     }, 0);
   }
 
@@ -406,6 +417,7 @@ export function createHooks({ registry = {}, events = null } = {}) {
         runSeriesSupported: true,
         runParallelSupported: true,
         hooksDoNotBreakExecution: true,
+        stableRunCopies: true,
         snapshotMinimal: true,
       },
     };

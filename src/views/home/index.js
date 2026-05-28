@@ -4,20 +4,8 @@
 
    Responsabilidad:
    - Entry público de Home para el Router.
-   - Exponer HomeView desde homeView.js.
-   - Exportar default compatible con lazy loader del Router.
-   - No validar rutas.
-   - No resolver slug.
-   - No leer Auth.
-   - No leer Router.
-   - No tocar AppCore.
-   - No tocar DOM.
-   - No crear globals.
-   - No duplicar lifecycle.
-   - No duplicar lógica visual.
-   - No bloquear render si Router ya resolvió Home.
-   - Home visible /@{user.slug} lo resuelve Router.
-   - Home interna / la resuelve routes/router.
+   - Reexportar HomeView sin añadir lógica.
+   - Sin Auth, Router, AppCore, DOM, slug, rutas ni lifecycle propio.
 ========================================================= */
 
 import {
@@ -25,14 +13,12 @@ import {
   HOME_VIEW_VERSION,
 } from "./homeView.js";
 
-export const HOME_INDEX_VERSION = "home.index.v6.clean-entry";
+export const HOME_INDEX_VERSION = "home.index.v7";
 
-/* =========================================================
-   EXPORTS
-========================================================= */
-
-export { HOME_VIEW_VERSION };
-export { HomeView };
+export {
+  HomeView,
+  HOME_VIEW_VERSION,
+};
 
 export const HomeIndex = HomeView;
 

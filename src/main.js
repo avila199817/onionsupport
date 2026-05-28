@@ -8,18 +8,12 @@
    - Capturar path inicial para el boot.
    - Cargar /src/app/index.js.
    - Ejecutar boot una sola vez.
-   - Mostrar error mínimo si falla el arranque.
+   - Mostrar error mínimo en castellano si falla el arranque.
    - Exponer snapshot técnico redacted.
-   - Sin Auth.
-   - Sin Router.
-   - Sin Store.
-   - Sin Services.
-   - Sin fetch.
-   - Sin storage.
-   - Sin lógica de dominio.
+   - Sin Auth, Router, Store, Services, fetch, storage ni dominio.
 ========================================================= */
 
-export const MAIN_VERSION = "main.v4";
+export const MAIN_VERSION = "main.v5";
 
 const APP_MODULE = "./app/index.js";
 
@@ -27,10 +21,6 @@ const BOOT_PROMISE_KEY = "__ONION_MAIN_BOOT_PROMISE__";
 const DISABLE_AUTO_BOOT_KEY = "__ONION_DISABLE_AUTO_BOOT__";
 const BOOT_CONTEXT_KEY = "__ONION_BOOT_CONTEXT__";
 const MAIN_GLOBAL_KEY = "__ONION_MAIN__";
-
-/* =========================================================
-   BASICS
-========================================================= */
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -68,10 +58,6 @@ function safeError(error = null) {
   };
 }
 
-/* =========================================================
-   INITIAL PATH
-========================================================= */
-
 function getInitialPath() {
   if (!isBrowser()) return "/";
 
@@ -82,10 +68,6 @@ function getInitialPath() {
     return "/";
   }
 }
-
-/* =========================================================
-   ROOT STATE
-========================================================= */
 
 function setDataset(node = null, key = "", value = "") {
   if (!node || !key) return false;
@@ -117,12 +99,9 @@ function setMainState(state = "booting") {
   const ready = value === "ready";
   const fatal = value === "fatal";
 
-  const roots = [document.documentElement, document.body].filter(Boolean);
-
-  for (const root of roots) {
+  for (const root of [document.documentElement, document.body].filter(Boolean)) {
     setDataset(root, "mainState", value);
     setDataset(root, "appState", value);
-
     setDataset(root, "appLoading", booting ? "true" : "false");
     setDataset(root, "appBooting", booting ? "true" : "false");
     setDataset(root, "appReady", ready ? "true" : "false");
@@ -137,10 +116,6 @@ function setMainState(state = "booting") {
   return true;
 }
 
-/* =========================================================
-   BOOT CONTEXT
-========================================================= */
-
 function disableLegacyAutoBoot() {
   if (!isBrowser()) return false;
 
@@ -154,8 +129,6 @@ function disableLegacyAutoBoot() {
 
 function createBootContext() {
   const initialPath = getInitialPath();
-
-  disableLegacyAutoBoot();
 
   const context = Object.freeze({
     version: MAIN_VERSION,
@@ -172,10 +145,6 @@ function createBootContext() {
 
   return context;
 }
-
-/* =========================================================
-   FATAL DOM
-========================================================= */
 
 function hideLoaderForFatal() {
   if (!isBrowser()) return false;
@@ -254,10 +223,7 @@ function showFatalError(error = null) {
 
     setAria(root, "aria-busy", "false");
     setAria(root, "aria-hidden", "false");
-
-    if (root.dataset) {
-      root.dataset.routeMode = "fatal";
-    }
+    setDataset(root, "routeMode", "fatal");
 
     const section = document.createElement("section");
     section.className = "boot-error-view";
@@ -284,7 +250,7 @@ function showFatalError(error = null) {
   }
 
   try {
-    console.error("[Onion Main] Boot error:", safeError(error));
+    console.error("[Onion Main] Error de arranque:", safeError(error));
   } catch {
     // noop
   }
@@ -292,14 +258,12 @@ function showFatalError(error = null) {
   return true;
 }
 
-/* =========================================================
-   DEBUG API
-========================================================= */
-
 function exposeMainDebugApi() {
   if (!isBrowser()) return false;
 
   try {
+    if (window[MAIN_GLOBAL_KEY]) return true;
+
     window[MAIN_GLOBAL_KEY] = Object.freeze({
       version: MAIN_VERSION,
       boot,
@@ -312,10 +276,6 @@ function exposeMainDebugApi() {
     return false;
   }
 }
-
-/* =========================================================
-   RUN
-========================================================= */
 
 async function runBoot() {
   const bootContext = createBootContext();
@@ -338,10 +298,6 @@ async function runBoot() {
 
   return result === undefined ? true : result;
 }
-
-/* =========================================================
-   PUBLIC BOOT
-========================================================= */
 
 export function boot() {
   if (!isBrowser()) return Promise.resolve(false);
@@ -370,23 +326,25 @@ export function getMainSnapshot() {
   }
 
   const bootContext = window[BOOT_CONTEXT_KEY] || null;
+  const root = document.documentElement;
 
   return {
     version: MAIN_VERSION,
     browser: true,
 
-    booting: Boolean(window[BOOT_PROMISE_KEY]),
+    bootStarted: Boolean(window[BOOT_PROMISE_KEY]),
+    booting: root?.dataset?.appBooting === "true",
     disableAutoBoot: window[DISABLE_AUTO_BOOT_KEY] === true,
 
     initialPath: redactText(bootContext?.initialPath || getInitialPath()),
 
     state: {
-      mainState: document.documentElement?.dataset?.mainState || null,
-      appState: document.documentElement?.dataset?.appState || null,
-      appLoading: document.documentElement?.dataset?.appLoading || null,
-      appBooting: document.documentElement?.dataset?.appBooting || null,
-      appReady: document.documentElement?.dataset?.appReady || null,
-      appFatal: document.documentElement?.dataset?.appFatal || null,
+      mainState: root?.dataset?.mainState || null,
+      appState: root?.dataset?.appState || null,
+      appLoading: root?.dataset?.appLoading || null,
+      appBooting: root?.dataset?.appBooting || null,
+      appReady: root?.dataset?.appReady || null,
+      appFatal: root?.dataset?.appFatal || null,
     },
 
     dom: {
@@ -415,10 +373,6 @@ export function getMainSnapshot() {
     },
   };
 }
-
-/* =========================================================
-   START
-========================================================= */
 
 boot();
 

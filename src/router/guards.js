@@ -8,7 +8,12 @@
    - Evaluar route.adminOnly / route.requiresAdmin / rutas admin de core/config.js.
    - Auth real delegada en Auth/AppCore.
    - Auth estricta: señal Auth válida + access token usable + user usable.
-   - Usuario inválido si disabled/deleted/archived/active=false.
+   - Usuario inválido sólo por:
+     - disabled === true
+     - suspended === true
+     - active === false
+     - enabled === false
+     - status/estado/state: "suspended" o "desactivado"
    - Roles únicos exactos: admin / user.
    - Rutas admin: sólo admin.
    - Delegar normalización de rutas/user-scope/bloqueos en core/config.js.
@@ -46,7 +51,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../core/config.js";
 
-export const GUARDS_VERSION = "router.guards.v13.routable-first-canonical";
+export const GUARDS_VERSION = "router.guards.v14";
 
 const CONFIG_ROUTES = ROUTES && typeof ROUTES === "object" ? ROUTES : {};
 
@@ -55,6 +60,11 @@ const HOME_PATH = "/";
 const USER_PREFIX = USER_HOME_PREFIX || "/@";
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
+
+const INVALID_USER_STATUSES = new Set([
+  "suspended",
+  "desactivado",
+]);
 
 const USER_SCOPED_CANONICAL_PATHS = new Set(
   [
@@ -610,35 +620,20 @@ function getUser(AppCore = null, Auth = null) {
 function isUserUsable(user = null) {
   if (!isObject(user)) return false;
 
-  const status = cleanText(user.status || user.estado || user.state, "").toLowerCase();
+  const status = cleanText(
+    user.status ||
+      user.estado ||
+      user.state ||
+      "",
+    ""
+  ).toLowerCase();
 
   return !(
     user.disabled === true ||
-    user.deleted === true ||
-    user.archived === true ||
-    user.revoked === true ||
-    user.blocked === true ||
-    user.banned === true ||
-    user.suspended === true ||
-    user.active === false ||
-    user.enabled === false ||
-    Boolean(user.deletedAt) ||
-    [
-      "disabled",
-      "inactive",
-      "deleted",
-      "archived",
-      "revoked",
-      "blocked",
-      "banned",
-      "suspended",
-      "desactivado",
-      "inactivo",
-      "eliminado",
-      "archivado",
-      "bloqueado",
-      "suspendido",
-    ].includes(status)
+      user.suspended === true ||
+      user.active === false ||
+      user.enabled === false ||
+      INVALID_USER_STATUSES.has(status)
   );
 }
 
@@ -1262,11 +1257,10 @@ export function getGuardsSnapshot({
       userUsableRequired: true,
 
       invalidUserWhenDisabledTrue: true,
-      invalidUserWhenDeletedTrue: true,
-      invalidUserWhenArchivedTrue: true,
+      invalidUserWhenSuspendedTrue: true,
       invalidUserWhenActiveFalse: true,
       invalidUserWhenEnabledFalse: true,
-      invalidUserWhenStatusDisabled: true,
+      invalidUserStatuses: ["suspended", "desactivado"],
 
       roles: [...VALID_ROLES],
       rolesStrict: true,

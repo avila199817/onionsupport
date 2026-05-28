@@ -37,7 +37,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "../../core/config.js";
 
-export const HOME_MODEL_VERSION = "home.model.v11.clean-single-normalizer";
+export const HOME_MODEL_VERSION = "home.model.v12.template-contract";
 
 export const DEFAULT_HOME_PAGE = 1;
 export const DEFAULT_HOME_PAGE_SIZE = 5;
@@ -91,8 +91,49 @@ const COSMOS_META_KEYS = new Set([
   "_metadata",
 ]);
 
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access_token|accessToken|id_token|idToken|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|session|sessionId|session_id|email|correo|mail|phone|telefono|teléfono|address|direccion|dirección|nif|dni|iban|bank|cuenta|account|ipRaw|ip|userAgent/i;
+const SENSITIVE_KEY_PARTS = Object.freeze([
+  "token",
+  "authorization",
+  "cookie",
+  "password",
+  "passwd",
+  "pwd",
+  "secret",
+  "credential",
+  "jwt",
+  "bearer",
+  "refresh",
+  "apikey",
+  "privatekey",
+  "connectionstring",
+  "sas",
+  "otp",
+  "totp",
+  "mfa",
+  "twofa",
+  "backupcode",
+  "sessionid",
+  "email",
+  "correo",
+  "mail",
+  "phone",
+  "telefono",
+  "address",
+  "direccion",
+  "nif",
+  "dni",
+  "iban",
+  "bank",
+  "cuenta",
+  "account",
+  "useragent",
+]);
+
+const SENSITIVE_KEY_EXACT = new Set([
+  "session",
+  "ip",
+  "ipraw",
+]);
 
 const SENSITIVE_QUERY_RE =
   /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i;
@@ -254,6 +295,10 @@ export function normalizeHomeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
+function normalizeSensitiveKey(value = "") {
+  return normalizeHomeKey(value).replace(/_/g, "");
+}
+
 function normalizeRole(value = "", fallback = "") {
   if (Array.isArray(value)) {
     const roles = value.map((item) => normalizeRole(item, "")).filter(Boolean);
@@ -273,7 +318,12 @@ function normalizeRole(value = "", fallback = "") {
 }
 
 function isSensitiveKey(key = "") {
-  return SENSITIVE_KEY_RE.test(String(key || ""));
+  const clean = normalizeSensitiveKey(key);
+
+  if (!clean) return false;
+  if (SENSITIVE_KEY_EXACT.has(clean)) return true;
+
+  return SENSITIVE_KEY_PARTS.some((part) => clean.includes(part));
 }
 
 function isEmailLike(value = "") {
@@ -302,7 +352,6 @@ function safePublicId(value = "") {
   if (isEmailLike(output)) return "";
   if (hasSensitiveQuery(output)) return "";
   if (/Bearer\s+/i.test(output)) return "";
-  if (SENSITIVE_KEY_RE.test(output) && output.length > 80) return "";
 
   return compactText(redact(output), "", HOME_ID_LIMIT);
 }
@@ -560,6 +609,13 @@ function maxNumber(...values) {
   return numbers.length ? Math.max(...numbers) : 0;
 }
 
+function roundMoney(value = 0) {
+  const number = safeNumber(value, NaN);
+  return Number.isFinite(number)
+    ? Math.round((number + Number.EPSILON) * 100) / 100
+    : 0;
+}
+
 function initialsFromName(value = "") {
   const output = safeText(value, "");
   const parts = output.split(/\s+/).filter(Boolean);
@@ -630,22 +686,14 @@ function routePathOnly(value = "") {
 }
 
 function isBlockedRoute(value = "") {
-  try {
-    return configIsBlockedRoutePath(value) === true;
-  } catch {
-    const path = routePathOnly(value).toLowerCase();
+  const path = routePathOnly(value);
 
-    return Boolean(
-      path === "/home" ||
-        path === "/403" ||
-        path === "/404" ||
-        path === "/2fa" ||
-        path === "/mfa" ||
-        path === "/otp" ||
-        path.startsWith("/2fa/") ||
-        path.startsWith("/mfa/") ||
-        path.startsWith("/otp/")
-    );
+  if (!path) return true;
+
+  try {
+    return configIsBlockedRoutePath(path) === true;
+  } catch {
+    return false;
   }
 }
 
@@ -693,7 +741,7 @@ function isAdminOnlyRoute(route = "") {
   try {
     if (configIsAdminRoute(path) === true) return true;
   } catch {
-    // fallback local
+    // fallback mínimo
   }
 
   return (
@@ -1328,8 +1376,8 @@ export function normalizeHomeInvoice(item = {}) {
   const source = safeObject(item);
   const id = getHomeInvoiceId(source);
   const amount = getHomeInvoiceAmount(source);
-  const paidAmount = getHomeInvoicePaidAmount(source);
-  const pendingAmount = getHomeInvoicePendingAmount(source);
+  const paidAmount = roundMoney(getHomeInvoicePaidAmount(source));
+  const pendingAmount = roundMoney(getHomeInvoicePendingAmount(source));
   const statusKey = getHomeInvoiceStatusKey(source);
   const currency = getHomeInvoiceCurrency(source);
 
@@ -2186,17 +2234,17 @@ function invoiceAmounts(invoices = []) {
   return safeArray(invoices).reduce(
     (acc, invoice) => {
       const statusKey = getHomeInvoiceStatusKey(invoice);
-      acc.grossInvoiceAmount += getHomeInvoiceAmount(invoice);
+      acc.grossInvoiceAmount = roundMoney(acc.grossInvoiceAmount + getHomeInvoiceAmount(invoice));
 
       if (statusKey === HOME_INVOICE_STATUS_KEYS.PAID) {
         acc.paidInvoices += 1;
-        acc.invoiceAmount += getHomeInvoicePaidAmount(invoice);
-        acc.paidInvoiceAmount = acc.invoiceAmount;
+        acc.paidInvoiceAmount = roundMoney(acc.paidInvoiceAmount + getHomeInvoicePaidAmount(invoice));
+        acc.invoiceAmount = acc.paidInvoiceAmount;
       }
 
       if (isHomeInvoicePendingLike(invoice)) {
         acc.pendingInvoices += 1;
-        acc.pendingInvoiceAmount += getHomeInvoicePendingAmount(invoice);
+        acc.pendingInvoiceAmount = roundMoney(acc.pendingInvoiceAmount + getHomeInvoicePendingAmount(invoice));
       }
 
       if (statusKey === HOME_INVOICE_STATUS_KEYS.OVERDUE) {
@@ -2260,6 +2308,21 @@ function buildSummary({
     ? maxNumber(raw.clientsCount, raw.clientesCount, raw.customersCount, raw.totalClients, collections.clients?.remoteCount, clients.length)
     : 0;
 
+  const paidInvoiceAmount = maxNumber(
+    raw.paidInvoiceAmount,
+    raw.totalPagado,
+    raw.paidAmount,
+    raw.facturasPaidAmount,
+    invoiceData.paidInvoiceAmount
+  );
+
+  const pendingInvoiceAmount = maxNumber(
+    raw.pendingInvoiceAmount,
+    raw.importePendiente,
+    raw.totalPendiente,
+    invoiceData.pendingInvoiceAmount
+  );
+
   return sanitizeSummaryForRole(
     {
       ...raw,
@@ -2287,10 +2350,10 @@ function buildSummary({
       pendingInvoices: maxNumber(raw.pendingInvoices, raw.pendingFacturas, invoiceData.pendingInvoices),
       overdueInvoices: maxNumber(raw.overdueInvoices, raw.overdueFacturas, invoiceData.overdueInvoices),
 
-      invoiceAmount: maxNumber(raw.invoiceAmount, raw.paidInvoiceAmount, raw.billingTotal, raw.totalFacturado, invoiceData.invoiceAmount),
-      paidInvoiceAmount: maxNumber(raw.paidInvoiceAmount, raw.invoiceAmount, invoiceData.paidInvoiceAmount),
-      pendingInvoiceAmount: maxNumber(raw.pendingInvoiceAmount, raw.importePendiente, invoiceData.pendingInvoiceAmount),
-      grossInvoiceAmount: maxNumber(raw.grossInvoiceAmount, invoiceData.grossInvoiceAmount),
+      invoiceAmount: paidInvoiceAmount,
+      paidInvoiceAmount,
+      pendingInvoiceAmount,
+      grossInvoiceAmount: maxNumber(raw.grossInvoiceAmount, raw.totalFacturado, invoiceData.grossInvoiceAmount),
 
       usersCount,
       usuariosCount: usersCount,
@@ -2309,6 +2372,8 @@ function buildSummary({
 }
 
 function defaultWidgets(summary = {}, admin = false) {
+  const paidAmount = safeNumber(first(summary.paidInvoiceAmount, summary.invoiceAmount, 0), 0);
+
   const items = [
     {
       id: "incidencias",
@@ -2322,7 +2387,7 @@ function defaultWidgets(summary = {}, admin = false) {
       id: "facturas-totales",
       label: "Facturas totales",
       value: first(summary.totalInvoices, summary.facturasTotal, 0),
-      text: `Importe total: ${safeNumber(first(summary.invoiceAmount, summary.paidInvoiceAmount, 0), 0)}`,
+      text: `Pagado: ${paidAmount}`,
       iconName: "euro",
       route: HOME_ROUTES.FACTURAS,
     },

@@ -5,18 +5,12 @@
    Responsabilidad:
    - CSS único de Home alineado con /src/views/home/home.template.js.
    - Scope cerrado en .home-view-root / [data-home-scope].
-   - Layout premium, compacto, centrado y responsive.
-   - Header con avatar, saludo y CTA superior para crear incidencia.
-   - Stats alineados exactamente con el grid principal.
-   - Stats, grid, panels, actividad, facturas, entidades admin.
-   - Tabla compacta basada en div[role=table] del template actual.
-   - Modal de detalle de incidencia.
-   - Avatares reales/fallback por data-avatar-tone.
-   - Sin clases legacy incidencias-*.
-   - Sin health/server/ready/ping.
-   - Sin CSS inline.
-   - Sin dependencias externas.
-   - Sin paletas paralelas: consume tokens globales.
+   - Panel SaaS premium, compacto, nítido y responsive.
+   - Header con avatar + saludo + CTA "Crear incidencia".
+   - Stats, actividad, facturas, entidades admin, tabla y modal.
+   - Sin quick actions legacy, CSV, refresh superior, health/server/ping.
+   - Sin CSS inline, sin dependencias externas, sin paletas paralelas.
+   - Consume tokens globales y respeta el tema del sistema.
 ========================================================= */
 
 
@@ -25,71 +19,67 @@
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]) {
-  --home-accent: var(--accent, #696969);
-  --home-accent-2: var(--accent-2, #525252);
+  --home-accent: var(--accent, #71717a);
+  --home-accent-strong: var(--accent-strong, #a1a1aa);
   --home-success: var(--success, #22c55e);
-  --home-warning: var(--warning, #eab308);
+  --home-warning: var(--warning, #f59e0b);
   --home-danger: var(--error, #ef4444);
-  --home-info: var(--info, #696969);
+  --home-info: var(--info, #60a5fa);
 
-  --home-bg-0: var(--surface-0, #0d0d0d);
-  --home-bg-1: var(--surface-1, #242424);
-  --home-bg-2: var(--surface-2, #3b3b3b);
-  --home-bg-3: var(--surface-3, #525252);
+  --home-bg-0: var(--surface-0, #0a0a0a);
+  --home-bg-1: var(--surface-1, #111113);
+  --home-bg-2: var(--surface-2, #18181b);
+  --home-bg-3: var(--surface-3, #27272a);
 
   --home-text: var(--text, rgba(255,255,255,.92));
   --home-text-strong: var(--text-strong, #fff);
-  --home-text-soft: var(--text-soft, rgba(255,255,255,.84));
-  --home-text-muted: var(--text-muted, rgba(255,255,255,.66));
-  --home-text-dim: var(--text-dim, rgba(255,255,255,.48));
-  --home-text-faint: var(--text-faint, rgba(255,255,255,.30));
+  --home-text-soft: var(--text-soft, rgba(255,255,255,.82));
+  --home-text-muted: var(--text-muted, rgba(255,255,255,.62));
+  --home-text-dim: var(--text-dim, rgba(255,255,255,.44));
+  --home-text-faint: var(--text-faint, rgba(255,255,255,.28));
 
   --home-border: var(--border-default, rgba(255,255,255,.12));
-  --home-border-soft: var(--border-soft, rgba(255,255,255,.08));
+  --home-border-soft: var(--border-soft, rgba(255,255,255,.075));
   --home-border-strong: var(--border-strong, rgba(255,255,255,.18));
 
+  --home-radius-xs: 8px;
   --home-radius-sm: var(--radius-sm, 11px);
   --home-radius-md: var(--radius-md, 14px);
-  --home-radius-lg: var(--radius-lg, 17px);
-  --home-radius-xl: var(--radius-xl, 20px);
-  --home-radius-2xl: var(--radius-2xl, 24px);
-  --home-radius-3xl: var(--radius-3xl, 30px);
-  --home-radius-pill: var(--radius-pill, 999px);
+  --home-radius-lg: var(--radius-lg, 18px);
+  --home-radius-xl: var(--radius-xl, 22px);
+  --home-radius-2xl: var(--radius-2xl, 26px);
+  --home-radius-pill: 999px;
 
-  --home-shadow-sm: var(--shadow-sm, 0 8px 20px rgba(0,0,0,.24));
-  --home-shadow-md: var(--shadow-md, 0 16px 38px rgba(0,0,0,.32));
-  --home-shadow-lg: var(--shadow-lg, 0 26px 64px rgba(0,0,0,.42));
-  --home-shadow-xl: var(--shadow-xl, 0 42px 104px rgba(0,0,0,.56));
+  --home-shadow-xs: 0 8px 18px rgba(0,0,0,.18);
+  --home-shadow-sm: var(--shadow-sm, 0 14px 34px rgba(0,0,0,.26));
+  --home-shadow-md: var(--shadow-md, 0 22px 56px rgba(0,0,0,.34));
+  --home-shadow-lg: var(--shadow-lg, 0 34px 86px rgba(0,0,0,.46));
+  --home-shadow-modal: var(--shadow-modal, 0 46px 120px rgba(0,0,0,.62));
 
-  --home-blur: var(--blur-md, blur(16px));
-  --home-ease: var(--ease-emphasis, cubic-bezier(.16,1,.3,1));
-  --home-ease-standard: var(--ease-standard, cubic-bezier(.2,.8,.2,1));
-  --home-fast: var(--duration-fast, .12s);
-  --home-normal: var(--duration-normal, .20s);
-  --home-slow: var(--duration-slow, .30s);
+  --home-blur: blur(18px) saturate(1.05);
+  --home-ease: cubic-bezier(.16,1,.3,1);
+  --home-ease-standard: cubic-bezier(.2,.8,.2,1);
+  --home-fast: .13s;
+  --home-normal: .22s;
+  --home-slow: .34s;
 
-  --home-content-max: min(100%, 1380px);
-  --home-content-pad-x: clamp(8px, 1vw, 18px);
+  --home-content-max: min(100%, 1400px);
+  --home-content-pad-x: clamp(8px, 1.1vw, 18px);
   --home-gap: clamp(12px, 1.15vw, 18px);
+  --home-main-grid-columns: minmax(0, 1.14fr) minmax(320px, .86fr);
 
-  --home-main-grid-columns: minmax(0, 1.12fr) minmax(320px, .88fr);
-
-  --home-panel-bg:
-    linear-gradient(180deg, rgba(255,255,255,.068), rgba(255,255,255,.032) 52%, rgba(255,255,255,.020)),
+  --home-glass-1:
+    linear-gradient(180deg, rgba(255,255,255,.086), rgba(255,255,255,.032) 58%, rgba(255,255,255,.018)),
     var(--home-bg-1);
 
-  --home-panel-bg-hover:
-    linear-gradient(180deg, rgba(255,255,255,.090), rgba(255,255,255,.044) 52%, rgba(255,255,255,.024)),
-    var(--home-bg-2);
-
-  --home-card-bg:
-    radial-gradient(circle at 88% 0%, rgba(255,255,255,.10), transparent 31%),
-    linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.032)),
+  --home-glass-2:
+    radial-gradient(circle at 16% 0%, rgba(255,255,255,.095), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.080), rgba(255,255,255,.030)),
     var(--home-bg-1);
 
-  --home-card-bg-strong:
-    radial-gradient(circle at 84% 0%, rgba(255,255,255,.13), transparent 33%),
-    linear-gradient(180deg, rgba(255,255,255,.096), rgba(255,255,255,.038)),
+  --home-glass-hover:
+    radial-gradient(circle at 16% 0%, rgba(255,255,255,.125), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.108), rgba(255,255,255,.040)),
     var(--home-bg-2);
 
   --home-focus:
@@ -102,7 +92,7 @@
 
   margin-inline: auto;
   padding-inline: var(--home-content-pad-x);
-  padding-block: clamp(8px, .8vw, 14px) clamp(18px, 1.4vw, 28px);
+  padding-block: clamp(8px, .75vw, 14px) clamp(20px, 1.6vw, 30px);
 
   display: grid;
   gap: var(--home-gap);
@@ -143,20 +133,6 @@
   display: block;
 }
 
-:where(.home-view-root, [data-home-scope]) .sr-only {
-  position: absolute;
-
-  inline-size: 1px;
-  block-size: 1px;
-
-  overflow: hidden;
-
-  clip: rect(0, 0, 0, 0);
-  clip-path: inset(50%);
-
-  white-space: nowrap;
-}
-
 
 /* =========================================================
    ROOT STATES
@@ -169,46 +145,46 @@
 }
 
 :where(.home-view-root, [data-home-scope]).is-partial {
-  --home-border: color-mix(in srgb, var(--home-warning) 18%, var(--border-default));
+  --home-border: color-mix(in srgb, var(--home-warning) 18%, var(--border-default, rgba(255,255,255,.12)));
 }
 
 :where(.home-view-root, [data-home-scope]).has-error {
-  --home-border: color-mix(in srgb, var(--home-danger) 22%, var(--border-default));
+  --home-border: color-mix(in srgb, var(--home-danger) 22%, var(--border-default, rgba(255,255,255,.12)));
 }
 
 
 /* =========================================================
-   BOTONES BASE
+   BUTTONS
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]) .home-btn,
 :where(.home-view-root, [data-home-scope]) .home-link-button {
-  min-block-size: var(--btn-height-sm, 34px);
+  min-block-size: 36px;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 8px;
 
-  padding: 0 13px;
+  padding: 0 14px;
 
   appearance: none;
   border: 1px solid rgba(255,255,255,.13);
-  border-radius: var(--btn-radius, 15px);
+  border-radius: 15px;
 
   background:
-    linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.045)),
-    rgba(255,255,255,.035);
+    linear-gradient(180deg, rgba(255,255,255,.105), rgba(255,255,255,.044)),
+    rgba(255,255,255,.034);
 
   color: var(--home-text-soft);
 
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.06),
-    0 9px 18px rgba(0,0,0,.16);
+    inset 0 1px 0 rgba(255,255,255,.065),
+    0 10px 22px rgba(0,0,0,.18);
 
-  font-size: var(--font-sm, 12px);
+  font-size: 12px;
   line-height: 1;
-  font-weight: 800;
+  font-weight: 850;
   text-decoration: none;
   white-space: nowrap;
 
@@ -224,23 +200,21 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-btn {
-  min-block-size: 38px;
-  padding-inline: 15px;
-  font-size: var(--font-sm, 12px);
-  font-weight: 850;
+  min-block-size: 39px;
+  padding-inline: 16px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-link-button:hover,
 :where(.home-view-root, [data-home-scope]) .home-btn:hover {
   transform: translateY(-1px);
-  border-color: rgba(255,255,255,.22);
+  border-color: rgba(255,255,255,.24);
   background:
-    linear-gradient(180deg, rgba(255,255,255,.145), rgba(255,255,255,.062)),
-    rgba(255,255,255,.055);
+    linear-gradient(180deg, rgba(255,255,255,.150), rgba(255,255,255,.060)),
+    rgba(255,255,255,.058);
   color: var(--home-text-strong);
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.09),
-    0 14px 28px rgba(0,0,0,.26);
+    0 16px 32px rgba(0,0,0,.28);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-btn:active,
@@ -252,7 +226,7 @@
 :where(.home-view-root, [data-home-scope]) .home-btn[aria-disabled="true"],
 :where(.home-view-root, [data-home-scope]) .home-link-button:disabled,
 :where(.home-view-root, [data-home-scope]) .home-link-button[aria-disabled="true"] {
-  opacity: .45;
+  opacity: .46;
   cursor: not-allowed;
   pointer-events: none;
   transform: none;
@@ -269,10 +243,10 @@
   border-color: rgba(255,255,255,.18);
   background:
     radial-gradient(circle at 18% 0%, rgba(255,255,255,.20), transparent 42%),
-    linear-gradient(135deg, var(--btn-primary-bg, #525252), var(--btn-primary-bg-active, #3b3b3b));
-  color: var(--btn-primary-text, #fff);
+    linear-gradient(135deg, var(--home-accent-strong), var(--home-accent));
+  color: #fff;
   box-shadow:
-    var(--btn-primary-shadow, 0 12px 28px rgba(0,0,0,.24)),
+    0 16px 36px color-mix(in srgb, var(--home-accent) 18%, rgba(0,0,0,.36)),
     inset 0 1px 0 rgba(255,255,255,.12);
 }
 
@@ -290,19 +264,19 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
 
   padding: 12px 14px;
 
-  border: 1px solid color-mix(in srgb, var(--home-danger) 36%, transparent);
+  border: 1px solid color-mix(in srgb, var(--home-danger) 38%, transparent);
   border-radius: var(--home-radius-xl);
 
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--home-danger) 18%, transparent), transparent 42%),
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--home-danger) 18%, transparent), transparent 44%),
     color-mix(in srgb, var(--home-danger) 8%, transparent);
 
   color: var(--home-text);
-  box-shadow: var(--home-shadow-sm);
+  box-shadow: var(--home-shadow-xs);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-alert svg {
@@ -310,13 +284,13 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state {
-  min-block-size: 150px;
+  min-block-size: 152px;
 
   display: grid;
   place-items: center;
   align-content: center;
   justify-items: center;
-  gap: 8px;
+  gap: 9px;
 
   padding: clamp(24px, 3vw, 42px) 18px;
 
@@ -324,24 +298,24 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state-icon {
-  inline-size: 48px;
-  block-size: 48px;
+  inline-size: 50px;
+  block-size: 50px;
 
   display: grid;
   place-items: center;
 
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 17px;
+  border-radius: 18px;
 
   background:
-    radial-gradient(circle at 28% 16%, rgba(255,255,255,.15), transparent 52%),
-    rgba(255,255,255,.055);
+    radial-gradient(circle at 28% 16%, rgba(255,255,255,.16), transparent 52%),
+    rgba(255,255,255,.054);
 
   color: var(--home-text-muted);
 
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.06),
-    0 10px 22px rgba(0,0,0,.18);
+    inset 0 1px 0 rgba(255,255,255,.065),
+    0 12px 26px rgba(0,0,0,.20);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state-icon svg {
@@ -362,13 +336,13 @@
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state p {
   margin: 0;
-  max-inline-size: 54ch;
+  max-inline-size: 56ch;
 
   color: var(--home-text-muted);
 
-  font-size: var(--font-sm, 12px);
-  line-height: var(--line-relaxed, 1.64);
-  font-weight: 500;
+  font-size: 12px;
+  line-height: 1.64;
+  font-weight: 550;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-skeleton {
@@ -377,18 +351,18 @@
 
   display: block;
 
-  border-radius: var(--skeleton-radius, var(--home-radius-md));
+  border-radius: var(--home-radius-md);
   background:
-    linear-gradient(90deg, rgba(255,255,255,.080), rgba(255,255,255,.125), rgba(255,255,255,.080));
+    linear-gradient(90deg, rgba(255,255,255,.075), rgba(255,255,255,.135), rgba(255,255,255,.075));
   background-size: 220% 100%;
 
-  animation: homeShimmer 1.25s var(--home-ease-standard) infinite;
+  animation: homeShimmer 1.22s var(--home-ease-standard) infinite;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-skeleton--icon {
-  inline-size: 38px;
-  block-size: 38px;
-  border-radius: 14px;
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: 15px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-skeleton--title {
@@ -440,15 +414,15 @@
 
 
 /* =========================================================
-   AVATARES
+   AVATARS
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]) .home-current-user-avatar,
 :where(.home-view-root, [data-home-scope]) .home-ticket-avatar,
 :where(.home-view-root, [data-home-scope]) .home-modal-technician-avatar {
   --avatar-bg:
-    radial-gradient(circle at 30% 18%, rgba(255,255,255,.22), transparent 30%),
-    linear-gradient(135deg, var(--avatar-bg-2, #525252), var(--avatar-bg, #3b3b3b) 74%);
+    radial-gradient(circle at 30% 18%, rgba(255,255,255,.24), transparent 30%),
+    linear-gradient(135deg, var(--avatar-bg-2, #71717a), var(--avatar-bg, #27272a) 74%);
 
   position: relative;
 
@@ -465,14 +439,14 @@
   color: var(--avatar-text, #fff);
 
   box-shadow:
-    0 12px 26px rgba(0,0,0,.26),
+    0 14px 28px rgba(0,0,0,.28),
     inset 0 1px 0 rgba(255,255,255,.12);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-current-user-avatar {
-  inline-size: clamp(54px, 4.2vw, 64px);
-  block-size: clamp(54px, 4.2vw, 64px);
-  border-radius: 20px;
+  inline-size: clamp(56px, 4.3vw, 66px);
+  block-size: clamp(56px, 4.3vw, 66px);
+  border-radius: 21px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-avatar {
@@ -538,7 +512,7 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-current-user-avatar .home-avatar-initials {
-  font-size: clamp(21px, 1.8vw, 27px);
+  font-size: clamp(21px, 1.8vw, 28px);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-avatar .home-avatar-initials {
@@ -549,10 +523,12 @@
   font-size: 19px;
 }
 
-:where(.home-view-root, [data-home-scope]) [data-avatar-tone="violet"] {
+:where(.home-view-root, [data-home-scope]) [data-avatar-tone="violet"],
+:where(.home-view-root, [data-home-scope]) [data-avatar-tone="cyan"],
+:where(.home-view-root, [data-home-scope]) [data-avatar-tone="slate"] {
   --avatar-bg:
     radial-gradient(circle at 30% 18%, rgba(255,255,255,.24), transparent 30%),
-    linear-gradient(135deg, #696969, #242424 74%);
+    linear-gradient(135deg, #71717a, #27272a 74%);
 }
 
 :where(.home-view-root, [data-home-scope]) [data-avatar-tone="green"] {
@@ -561,28 +537,16 @@
     linear-gradient(135deg, #22c55e, #064e3b 74%);
 }
 
-:where(.home-view-root, [data-home-scope]) [data-avatar-tone="cyan"] {
-  --avatar-bg:
-    radial-gradient(circle at 30% 18%, rgba(255,255,255,.22), transparent 30%),
-    linear-gradient(135deg, #696969, #242424 74%);
-}
-
 :where(.home-view-root, [data-home-scope]) [data-avatar-tone="amber"] {
   --avatar-bg:
     radial-gradient(circle at 30% 18%, rgba(255,255,255,.24), transparent 30%),
-    linear-gradient(135deg, #d97706, #78350f 74%);
+    linear-gradient(135deg, #f59e0b, #78350f 74%);
 }
 
 :where(.home-view-root, [data-home-scope]) [data-avatar-tone="rose"] {
   --avatar-bg:
     radial-gradient(circle at 30% 18%, rgba(255,255,255,.24), transparent 30%),
     linear-gradient(135deg, #f43f5e, #881337 74%);
-}
-
-:where(.home-view-root, [data-home-scope]) [data-avatar-tone="slate"] {
-  --avatar-bg:
-    radial-gradient(circle at 30% 18%, rgba(255,255,255,.22), transparent 30%),
-    linear-gradient(135deg, #696969, #242424 74%);
 }
 
 
@@ -592,7 +556,7 @@
 
 :where(.home-view-root, [data-home-scope]) .home-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  grid-template-columns: minmax(0, 1fr) minmax(270px, 360px);
   align-items: center;
   gap: clamp(16px, 1.6vw, 26px);
 
@@ -612,11 +576,11 @@
   min-inline-size: 0;
 
   display: grid;
-  gap: 5px;
+  gap: 6px;
 }
 
-:where(.home-view-root, [data-home-scope]) .home-kicker,
-:where(.home-view-root, [data-home-scope]) .home-panel-kicker {
+:where(.home-view-root, [data-home-scope]) .home-panel-kicker,
+:where(.home-view-root, [data-home-scope]) .home-kicker {
   margin: 0;
 
   color: var(--home-text-dim);
@@ -637,15 +601,15 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(36px, 4vw, 56px);
+  font-size: clamp(36px, 4vw, 58px);
   line-height: .94;
   font-weight: 950;
-  letter-spacing: -.068em;
+  letter-spacing: -.070em;
   text-wrap: balance;
 
   text-shadow:
     0 1px 0 rgba(255,255,255,.08),
-    0 16px 30px rgba(0,0,0,.32);
+    0 18px 34px rgba(0,0,0,.34);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-subtitle {
@@ -655,13 +619,13 @@
   color: var(--home-text-muted);
 
   font-size: clamp(12px, .9vw, 14px);
-  line-height: 1.48;
+  line-height: 1.50;
   font-weight: 650;
 }
 
 
 /* =========================================================
-   HEADER CTA · CREAR INCIDENCIA
+   HEADER CTA
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]) .home-create-card {
@@ -674,33 +638,33 @@
   isolation: isolate;
 
   inline-size: 100%;
-  min-block-size: 86px;
+  min-block-size: 88px;
   block-size: 100%;
 
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) 32px;
+  grid-template-columns: 48px minmax(0, 1fr) 34px;
   align-items: center;
   gap: 12px;
 
-  padding: 14px 14px;
+  padding: 14px;
 
   overflow: hidden;
 
   appearance: none;
-  border: 1px solid rgba(255,255,255,.14);
+  border: 1px solid rgba(255,255,255,.145);
   border-radius: var(--home-radius-2xl);
 
   background:
-    radial-gradient(circle at 12% 0%, rgba(255,255,255,.14), transparent 36%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--home-success) 11%, transparent), transparent 34%),
-    linear-gradient(180deg, rgba(255,255,255,.086), rgba(255,255,255,.036)),
+    radial-gradient(circle at 10% 0%, rgba(255,255,255,.16), transparent 36%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--home-success) 14%, transparent), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.092), rgba(255,255,255,.034)),
     var(--home-bg-1);
 
   color: var(--home-text);
 
   box-shadow:
     var(--home-shadow-sm),
-    inset 0 1px 0 rgba(255,255,255,.070);
+    inset 0 1px 0 rgba(255,255,255,.074);
 
   text-align: left;
 
@@ -726,46 +690,46 @@
     linear-gradient(
       90deg,
       transparent,
-      rgba(255,255,255,.25),
-      color-mix(in srgb, var(--home-success) 35%, transparent),
+      rgba(255,255,255,.28),
+      color-mix(in srgb, var(--home-success) 38%, transparent),
       transparent
     );
 
-  opacity: .86;
+  opacity: .9;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-button::after {
   content: "";
   position: absolute;
-  inset-inline-end: -44px;
-  inset-block-end: -56px;
+  inset-inline-end: -48px;
+  inset-block-end: -62px;
   z-index: -1;
 
-  inline-size: 130px;
-  block-size: 130px;
+  inline-size: 140px;
+  block-size: 140px;
 
   border-radius: 999px;
 
-  background: color-mix(in srgb, var(--home-success) 11%, transparent);
-  filter: blur(22px);
+  background: color-mix(in srgb, var(--home-success) 13%, transparent);
+  filter: blur(24px);
 
-  opacity: .76;
+  opacity: .82;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-button:hover {
   transform: translateY(-3px);
 
-  border-color: rgba(255,255,255,.23);
+  border-color: rgba(255,255,255,.24);
 
   background:
-    radial-gradient(circle at 12% 0%, rgba(255,255,255,.18), transparent 36%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--home-success) 16%, transparent), transparent 36%),
-    linear-gradient(180deg, rgba(255,255,255,.112), rgba(255,255,255,.046)),
+    radial-gradient(circle at 10% 0%, rgba(255,255,255,.20), transparent 36%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--home-success) 18%, transparent), transparent 36%),
+    linear-gradient(180deg, rgba(255,255,255,.118), rgba(255,255,255,.046)),
     var(--home-bg-2);
 
   box-shadow:
     var(--home-shadow-md),
-    0 0 42px color-mix(in srgb, var(--home-success) 7%, transparent),
+    0 0 44px color-mix(in srgb, var(--home-success) 7%, transparent),
     inset 0 1px 0 rgba(255,255,255,.10);
 }
 
@@ -774,24 +738,24 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-icon {
-  inline-size: 46px;
-  block-size: 46px;
+  inline-size: 48px;
+  block-size: 48px;
 
   display: grid;
   place-items: center;
 
-  border: 1px solid color-mix(in srgb, var(--home-success) 32%, rgba(255,255,255,.10));
-  border-radius: 17px;
+  border: 1px solid color-mix(in srgb, var(--home-success) 34%, rgba(255,255,255,.10));
+  border-radius: 18px;
 
   background:
-    radial-gradient(circle at 34% 20%, color-mix(in srgb, var(--home-success) 28%, transparent), transparent 58%),
+    radial-gradient(circle at 34% 20%, color-mix(in srgb, var(--home-success) 30%, transparent), transparent 58%),
     color-mix(in srgb, var(--home-success) 10%, rgba(255,255,255,.040));
 
-  color: color-mix(in srgb, var(--home-success) 74%, var(--home-text-strong));
+  color: color-mix(in srgb, var(--home-success) 76%, var(--home-text-strong));
 
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.075),
-    0 10px 22px rgba(0,0,0,.18);
+    inset 0 1px 0 rgba(255,255,255,.080),
+    0 12px 24px rgba(0,0,0,.20);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-icon svg {
@@ -826,7 +790,7 @@
 
   color: var(--home-text-muted);
 
-  font-size: var(--font-sm, 12px);
+  font-size: 12px;
   line-height: 1.32;
   font-weight: 650;
   text-overflow: ellipsis;
@@ -834,14 +798,14 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-arrow {
-  inline-size: 32px;
-  block-size: 32px;
+  inline-size: 34px;
+  block-size: 34px;
 
   display: grid;
   place-items: center;
 
   border: 1px solid rgba(255,255,255,.10);
-  border-radius: 13px;
+  border-radius: 14px;
 
   background: rgba(255,255,255,.046);
   color: var(--home-text-muted);
@@ -865,7 +829,7 @@
 
 
 /* =========================================================
-   STATS · ALINEADO CON HOME GRID
+   STATS
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]) .home-stats {
@@ -884,7 +848,7 @@
   isolation: isolate;
 
   min-inline-size: 0;
-  min-block-size: 118px;
+  min-block-size: 122px;
 
   overflow: hidden;
 
@@ -892,8 +856,8 @@
   border-radius: var(--home-radius-2xl);
 
   background:
-    radial-gradient(circle at 86% 0%, color-mix(in srgb, var(--home-stat-color) 17%, transparent), transparent 34%),
-    var(--home-card-bg);
+    radial-gradient(circle at 86% 0%, color-mix(in srgb, var(--home-stat-color) 18%, transparent), transparent 34%),
+    var(--home-glass-2);
 
   box-shadow:
     var(--home-shadow-sm),
@@ -925,23 +889,23 @@
       transparent
     );
 
-  opacity: .78;
+  opacity: .82;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-card::after {
   content: "";
   position: absolute;
-  inset-inline-end: -48px;
-  inset-block-end: -58px;
+  inset-inline-end: -50px;
+  inset-block-end: -60px;
   z-index: 0;
 
-  inline-size: 128px;
-  block-size: 128px;
+  inline-size: 134px;
+  block-size: 134px;
 
   border-radius: 999px;
 
-  background: color-mix(in srgb, var(--home-stat-color) 12%, transparent);
-  filter: blur(26px);
+  background: color-mix(in srgb, var(--home-stat-color) 13%, transparent);
+  filter: blur(28px);
 
   pointer-events: none;
 }
@@ -952,12 +916,12 @@
   border-color: color-mix(in srgb, var(--home-stat-color) 34%, var(--home-border-strong));
 
   background:
-    radial-gradient(circle at 86% 0%, color-mix(in srgb, var(--home-stat-color) 21%, transparent), transparent 34%),
-    var(--home-card-bg-strong);
+    radial-gradient(circle at 86% 0%, color-mix(in srgb, var(--home-stat-color) 23%, transparent), transparent 34%),
+    var(--home-glass-hover);
 
   box-shadow:
     var(--home-shadow-md),
-    0 0 40px color-mix(in srgb, var(--home-stat-color) 7%, transparent),
+    0 0 42px color-mix(in srgb, var(--home-stat-color) 8%, transparent),
     inset 0 1px 0 rgba(255,255,255,.090);
 }
 
@@ -969,12 +933,12 @@
   min-block-size: inherit;
 
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr);
   align-content: center;
   align-items: center;
   gap: 13px;
 
-  padding: 16px 18px;
+  padding: 17px 18px;
 
   appearance: none;
   border: 0;
@@ -995,24 +959,24 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-icon {
-  inline-size: 46px;
-  block-size: 46px;
+  inline-size: 48px;
+  block-size: 48px;
 
   display: grid;
   place-items: center;
 
   border: 1px solid color-mix(in srgb, var(--home-stat-color) 25%, rgba(255,255,255,.10));
-  border-radius: 17px;
+  border-radius: 18px;
 
   background:
-    radial-gradient(circle at 34% 20%, color-mix(in srgb, var(--home-stat-color) 26%, transparent), transparent 58%),
+    radial-gradient(circle at 34% 20%, color-mix(in srgb, var(--home-stat-color) 28%, transparent), transparent 58%),
     color-mix(in srgb, var(--home-stat-color) 9%, rgba(255,255,255,.035));
 
-  color: color-mix(in srgb, var(--home-stat-color) 76%, var(--home-text-strong));
+  color: color-mix(in srgb, var(--home-stat-color) 78%, var(--home-text-strong));
 
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.07),
-    0 10px 22px rgba(0,0,0,.17);
+    0 12px 24px rgba(0,0,0,.18);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-icon svg {
@@ -1050,10 +1014,10 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(34px, 2.75vw, 46px);
+  font-size: clamp(34px, 2.75vw, 48px);
   line-height: .88;
   font-weight: 950;
-  letter-spacing: -.070em;
+  letter-spacing: -.072em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1120,7 +1084,7 @@
   border: 1px solid var(--home-border);
   border-radius: var(--home-radius-2xl);
 
-  background: var(--home-panel-bg);
+  background: var(--home-glass-1);
   color: var(--home-text);
 
   box-shadow:
@@ -1140,8 +1104,8 @@
   pointer-events: none;
 
   background:
-    radial-gradient(circle at 14% 0%, rgba(255,255,255,.070), transparent 34%),
-    linear-gradient(180deg, rgba(255,255,255,.036), transparent 38%);
+    radial-gradient(circle at 14% 0%, rgba(255,255,255,.075), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.038), transparent 38%);
 
   opacity: .82;
 }
@@ -1159,7 +1123,7 @@
     linear-gradient(
       90deg,
       transparent,
-      rgba(255,255,255,.20),
+      rgba(255,255,255,.22),
       transparent
     );
 
@@ -1217,7 +1181,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-md, 13px);
+  font-size: 13px;
   line-height: 1.15;
   font-weight: 950;
   letter-spacing: -.025em;
@@ -1282,7 +1246,7 @@
 
   background:
     radial-gradient(circle at 0% 20%, color-mix(in srgb, var(--home-activity-color) 10%, transparent), transparent 42%),
-    rgba(255,255,255,.042);
+    rgba(255,255,255,.044);
 
   box-shadow: 0 12px 24px rgba(0,0,0,.18);
 }
@@ -1328,7 +1292,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-sm, 12px);
+  font-size: 12px;
   line-height: 1.15;
   font-weight: 900;
   text-overflow: ellipsis;
@@ -1341,7 +1305,7 @@
 
   color: var(--home-text-dim);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 11px;
   line-height: 1.35;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -1393,7 +1357,7 @@
 :where(.home-view-root, [data-home-scope]) .home-billing-total strong {
   color: var(--home-text-strong);
 
-  font-size: clamp(32px, 3vw, 46px);
+  font-size: clamp(32px, 3vw, 48px);
   line-height: .90;
   font-weight: 950;
   letter-spacing: -.070em;
@@ -1463,7 +1427,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-sm, 12px);
+  font-size: 12px;
   line-height: 1.18;
   font-weight: 950;
   text-overflow: ellipsis;
@@ -1475,7 +1439,7 @@
 :where(.home-view-root, [data-home-scope]) .home-panel-muted {
   color: var(--home-text-dim);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 11px;
   line-height: 1.36;
   font-weight: 600;
 }
@@ -1483,7 +1447,7 @@
 :where(.home-view-root, [data-home-scope]) .home-invoice-amount {
   color: color-mix(in srgb, var(--invoice-color) 82%, var(--home-text-strong));
 
-  font-size: var(--font-xs, 11px);
+  font-size: 11px;
   font-weight: 950;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1523,7 +1487,7 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-table::-webkit-scrollbar {
-  block-size: var(--scrollbar-size-sm, 6px);
+  block-size: 6px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-ticket-table::-webkit-scrollbar-track {
@@ -1667,7 +1631,7 @@
 
   color: var(--home-text-muted);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 11px;
   line-height: 1.25;
   font-weight: 800;
 }
@@ -1700,7 +1664,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-sm, 12px);
+  font-size: 12px;
   line-height: 1.16;
   font-weight: 950;
   letter-spacing: -.025em;
@@ -1715,7 +1679,7 @@
 
   color: color-mix(in srgb, var(--home-text-strong) 58%, transparent);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 11px;
   line-height: 1.25;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -1856,7 +1820,7 @@
 :where(.home-view-root, [data-home-scope]) .home-pagination > span {
   color: var(--home-text-dim);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 11px;
   font-weight: 850;
 }
 
@@ -1881,20 +1845,20 @@
   padding: clamp(14px, 2vw, 28px);
 
   background:
-    radial-gradient(circle at 50% 0%, rgba(255,255,255,.10), transparent 42%),
-    var(--overlay-bg, rgba(0,0,0,.64));
+    radial-gradient(circle at 50% 0%, rgba(255,255,255,.11), transparent 42%),
+    var(--overlay-bg, rgba(0,0,0,.66));
 
   color: var(--home-text);
 
-  backdrop-filter: var(--overlay-blur, blur(12px) saturate(1.02));
-  -webkit-backdrop-filter: var(--overlay-blur, blur(12px) saturate(1.02));
+  backdrop-filter: blur(13px) saturate(1.04);
+  -webkit-backdrop-filter: blur(13px) saturate(1.04);
 
   animation: homeModalIn var(--home-normal) var(--home-ease) both;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-modal {
-  inline-size: min(920px, 100%);
-  max-block-size: min(720px, calc(100dvh - 32px));
+  inline-size: min(940px, 100%);
+  max-block-size: min(740px, calc(100dvh - 32px));
 
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -1907,11 +1871,11 @@
   background:
     radial-gradient(circle at 12% 0%, rgba(255,255,255,.10), transparent 34%),
     radial-gradient(circle at 86% 10%, color-mix(in srgb, var(--home-success) 8%, transparent), transparent 30%),
-    linear-gradient(180deg, rgba(255,255,255,.082), rgba(255,255,255,.035) 48%, rgba(255,255,255,.020)),
+    linear-gradient(180deg, rgba(255,255,255,.086), rgba(255,255,255,.034) 48%, rgba(255,255,255,.020)),
     var(--modal-bg, var(--home-bg-2));
 
   box-shadow:
-    var(--shadow-modal, var(--home-shadow-xl)),
+    var(--home-shadow-modal),
     inset 0 1px 0 rgba(255,255,255,.08);
 }
 
@@ -1933,7 +1897,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(22px, 2vw, 30px);
+  font-size: clamp(22px, 2vw, 31px);
   line-height: 1.02;
   font-weight: 950;
   letter-spacing: -.055em;
@@ -2016,7 +1980,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-md, 13px);
+  font-size: 13px;
   font-weight: 950;
 }
 
@@ -2025,7 +1989,7 @@
 
   color: var(--home-text-muted);
 
-  font-size: var(--font-sm, 12px);
+  font-size: 12px;
   line-height: 1.58;
 }
 
@@ -2057,7 +2021,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-md, 13px);
+  font-size: 13px;
   font-weight: 950;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2068,7 +2032,7 @@
 
   color: var(--home-text-dim);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 11px;
   line-height: 1.35;
 }
 
@@ -2108,7 +2072,7 @@
 
   color: var(--home-text-strong);
 
-  font-size: var(--font-xs, 11px);
+  font-size: 11px;
   font-weight: 850;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -2165,7 +2129,7 @@
 :where(.home-view-root, [data-home-scope]) .home-modal-invoice-item strong {
   color: var(--home-text-strong);
 
-  font-size: var(--font-sm, 12px);
+  font-size: 12px;
   font-weight: 950;
 }
 
@@ -2192,7 +2156,7 @@
 
 
 /* =========================================================
-   FALLBACK LOADING / ERROR VIEWS
+   FALLBACK LOADING / ERROR
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]) .home-hero,
@@ -2207,7 +2171,7 @@
 
 
 /* =========================================================
-   RESPONSIVE · CONTAINER QUERIES
+   RESPONSIVE
 ========================================================= */
 
 @container (max-width: 1220px) {
@@ -2364,7 +2328,7 @@
 
 
 /* =========================================================
-   RESPONSIVE · MEDIA FALLBACK
+   MEDIA FALLBACK
 ========================================================= */
 
 @media (max-width: 1220px) {
@@ -2415,7 +2379,7 @@
   }
 
   :where(.home-view-root, [data-home-scope]) .home-subtitle {
-    font-size: var(--font-xs, 11px);
+    font-size: 11px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-panel {

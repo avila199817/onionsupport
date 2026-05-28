@@ -6,6 +6,7 @@
    - Compat mínima de red.
    - Sin imports.
    - Sin fetch.
+   - Sin healthcheck.
    - Sin Auth.
    - Sin Router.
    - Sin Store propio.
@@ -15,7 +16,7 @@
    - Bind/unbind idempotente.
 ========================================================= */
 
-export const NETWORK_VERSION = "core.network.v2";
+export const NETWORK_VERSION = "core.network.v3";
 export const NETWORK_SCOPE = "core:network";
 
 export const NETWORK_EVENTS = Object.freeze({
@@ -31,6 +32,7 @@ let bound = false;
 let stateRef = null;
 let eventsRef = null;
 let setStateRef = null;
+let lastOnline = null;
 
 const disposers = new Set();
 
@@ -51,6 +53,8 @@ function isObject(value) {
 }
 
 function emit(events, name, payload = {}) {
+  if (!name) return false;
+
   try {
     if (isFunction(events?.emit)) {
       events.emit(name, payload);
@@ -114,21 +118,17 @@ function buildPatch(online = readOnline()) {
 function writeState(state = stateRef, patch = {}) {
   if (!isObject(patch)) return false;
 
-  /*
-    Si existe setState, lo usamos como vía preferente para no escribir dos veces.
-    Si no existe, mutamos stateRef de forma mínima por compat.
-  */
   if (isFunction(setStateRef)) {
     try {
       setStateRef(patch, {
-        source: "core:network",
+        source: NETWORK_SCOPE,
         silent: true,
         emit: false,
       });
 
       return true;
     } catch {
-      // Fallback a mutación directa abajo.
+      // fallback a mutación directa abajo
     }
   }
 
@@ -143,7 +143,12 @@ function writeState(state = stateRef, patch = {}) {
 }
 
 function sync(reason = "sync", shouldEmit = true) {
+  const previousOnline = lastOnline;
   const online = readOnline();
+  const changed = previousOnline !== online;
+
+  lastOnline = online;
+
   const patch = buildPatch(online);
 
   writeState(stateRef, patch);
@@ -153,20 +158,25 @@ function sync(reason = "sync", shouldEmit = true) {
     online: patch.online,
     offline: patch.offline,
     status: patch.networkStatus,
+    previousStatus: statusFromOnline(previousOnline),
+    changed,
     reason,
     bound,
   };
 
   if (shouldEmit) {
     emit(eventsRef, NETWORK_EVENTS.state, payload);
-    emit(eventsRef, NETWORK_EVENTS.change, payload);
 
-    if (online === true) {
-      emit(eventsRef, NETWORK_EVENTS.online, payload);
-    }
+    if (changed) {
+      emit(eventsRef, NETWORK_EVENTS.change, payload);
 
-    if (online === false) {
-      emit(eventsRef, NETWORK_EVENTS.offline, payload);
+      if (online === true) {
+        emit(eventsRef, NETWORK_EVENTS.online, payload);
+      }
+
+      if (online === false) {
+        emit(eventsRef, NETWORK_EVENTS.offline, payload);
+      }
     }
   }
 
@@ -183,11 +193,17 @@ function addWindowListener(name, handler) {
   }
 
   try {
-    window.addEventListener(name, handler);
+    window.addEventListener(name, handler, false);
+
+    let disposed = false;
 
     const dispose = () => {
+      if (disposed) return false;
+
+      disposed = true;
+
       try {
-        window.removeEventListener(name, handler);
+        window.removeEventListener(name, handler, false);
         disposers.delete(dispose);
         return true;
       } catch {
@@ -290,6 +306,8 @@ export function unbindNetworkEvents() {
 
   emit(eventsRef, NETWORK_EVENTS.unbound, {
     version: NETWORK_VERSION,
+    online: lastOnline,
+    status: statusFromOnline(lastOnline),
   });
 
   return true;
@@ -319,6 +337,8 @@ export function getNetworkSnapshot({ state = stateRef } = {}) {
     online,
     offline: online === null ? null : !online,
     status: statusFromOnline(online),
+    lastOnline,
+    lastStatus: statusFromOnline(lastOnline),
 
     state: {
       online: state?.online ?? null,
@@ -333,6 +353,7 @@ export function getNetworkSnapshot({ state = stateRef } = {}) {
       onlineOfflineOnly: true,
 
       noFetch: true,
+      noHealthcheck: true,
       noAuth: true,
       noRouter: true,
       noStorage: true,
@@ -343,6 +364,7 @@ export function getNetworkSnapshot({ state = stateRef } = {}) {
 
       bindIdempotent: true,
       unbindSupported: true,
+      emitsChangeOnlyWhenStatusChanges: true,
     },
   };
 }

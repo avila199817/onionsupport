@@ -15,6 +15,7 @@
    - Preservar payload de error backend para core/http.js.
    - TOKEN_EXPIRED no limpia sesión aquí.
    - Timeout técnico opcional sin retry.
+   - Credentials include por defecto para sesión/refresh con cookie httpOnly.
    - Sin hooks.
    - Sin retry real.
    - Sin dedupe real.
@@ -37,7 +38,7 @@ import {
   isPublicApiPath,
 } from "./config.js";
 
-export const REQUEST_VERSION = "core.request.v7";
+export const REQUEST_VERSION = "core.request.v8";
 
 const DEFAULT_API_BASE = getApiBase();
 const DEFAULT_TIMEOUT_MS = Number(config?.api?.timeout || 30000) || 30000;
@@ -118,7 +119,8 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
@@ -722,7 +724,7 @@ export function buildRequestError({
       - data.auth.canRefresh
       - data.auth.shouldLogout
       - data.auth.clearClientSession
-    para decidir refresh silencioso sin logout.
+    para decidir refresh silencioso sin logout falso.
   */
   error.data = data;
   error.body = data;
@@ -825,14 +827,24 @@ export function createRequest({
       });
     }
 
+    const endpointPath = cleanEndpointPath(clean);
+
+    if (!endpointPath) {
+      throw buildRequestError({
+        method,
+        url: path || "",
+        raw: "URL de API no permitida.",
+        code: "API_URL_NOT_ALLOWED",
+      });
+    }
+
     const originalBody = options.body ?? options.data ?? options.payload;
     const query = options.query ?? options.params ?? null;
 
     const url = appendQuery(joinUrl(API_BASE, clean), query);
-    const endpointPath = cleanEndpointPath(clean);
     const auth = shouldUseAuth(endpointPath, options);
 
-    if (!url || !endpointPath) {
+    if (!url) {
       throw buildRequestError({
         method,
         url: path || "",
@@ -958,7 +970,7 @@ export function createRequest({
             refreshRequired: lastError.refreshRequired === true,
             shouldLogout: lastError.shouldLogout === true,
             clearClientSession: lastError.clearClientSession === true,
-            safeData: sanitizeForSnapshot(lastError.safeData || null),
+            safeData: sanitizeForSnapshot(lastError.safeData || lastError.data || null),
           }
         : null,
 
@@ -983,6 +995,7 @@ export function createRequest({
 
         meAlwaysPrivate: true,
         refreshPublicWithoutAuthorization: true,
+        credentialsIncludeByDefault: true,
 
         blocksExternalEndpoints: true,
         blocksInvalidEndpoints: true,

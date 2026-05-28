@@ -5,106 +5,55 @@
    Responsabilidad:
    - Compat mínima post-boot.
    - No bloquea el arranque.
-   - Sin imports.
-   - Sin eventos.
-   - Sin debug global.
-   - Sin fetch.
-   - Sin storage.
-   - Sin DOM scan.
-   - Sin snapshots grandes.
-   - Sin timers.
-   - Sin repair loops.
-   - Sin lógica de dominio.
+   - No hace trabajo real.
+   - Sin imports, eventos, debug global, fetch, storage, DOM scan,
+     snapshots grandes, timers, repair loops ni dominio.
 ========================================================= */
 
-export const WARMUP_VERSION = "app.warmup.v4";
+export const WARMUP_VERSION = "app.warmup.v5";
 
 let runs = 0;
 
-/* =========================================================
-   BASICS
-========================================================= */
+const WARMUP_POLICY = Object.freeze({
+  compatibilityOnly: true,
+  noopWarmup: true,
+  doesNotBlockBoot: true,
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
-
-function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-}
+  noImports: true,
+  noEvents: true,
+  noGlobalDebug: true,
+  noFetch: true,
+  noStorage: true,
+  noDomScan: true,
+  noTimers: true,
+  noRepairLoops: true,
+  noDomainLogic: true,
+  noLargeSnapshots: true,
+});
 
 /* =========================================================
    SNAPSHOT
 ========================================================= */
 
-export function createWarmupSnapshot({
-  reason = "warmup",
-} = {}) {
+export function createWarmupSnapshot() {
   return {
     version: WARMUP_VERSION,
 
     ok: true,
     skipped: true,
-    reason: redact(reason || "warmup"),
+    reason: "noop",
 
     runs,
 
-    policy: {
-      compatibilityOnly: true,
-      noopWarmup: true,
-      doesNotBlockBoot: true,
-
-      noImports: true,
-      noEvents: true,
-      noGlobalDebug: true,
-      noFetch: true,
-      noStorage: true,
-      noDomScan: true,
-      noTimers: true,
-      noRepairLoops: true,
-      noDomainLogic: true,
-      noLargeSnapshots: true,
-
-      redactedSnapshot: true,
-    },
+    policy: WARMUP_POLICY,
   };
 }
 
 export function getWarmupRuntimeSnapshot() {
   return {
     version: WARMUP_VERSION,
-
     runs,
-
-    policy: {
-      compatibilityOnly: true,
-      noopWarmup: true,
-
-      noImports: true,
-      noEvents: true,
-      noFetch: true,
-      noStorage: true,
-      noDomScan: true,
-      noTimers: true,
-      noRepairLoops: true,
-
-      redactedSnapshot: true,
-    },
+    policy: WARMUP_POLICY,
   };
 }
 
@@ -117,16 +66,9 @@ export function resetWarmupRuntimeState() {
    PUBLIC API
 ========================================================= */
 
-export async function warmup(options = {}) {
-  const payload = isObject(options) ? options : {};
-
+export async function warmup() {
   runs += 1;
-
-  return createWarmupSnapshot(payload);
+  return createWarmupSnapshot();
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default warmup;

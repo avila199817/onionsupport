@@ -4,46 +4,16 @@
 
    Responsabilidad:
    - Controlador real de la vista Home.
-   - Render principal con home.template.js.
-   - Carga de datos delegada en home.api.js.
-   - Estado runtime delegado en home.state.js.
+   - Render delegado en home.template.js.
+   - Datos delegados en home.api.js.
+   - Estado delegado en home.state.js.
    - Store/cache runtime delegado en home.store.js.
    - Modelo/normalización delegado en home.model.js.
    - Eventos DOM delegados en home.bindings.js.
    - Acciones delegadas en home.actions.js.
-   - Detalle de incidencia abre modal sin navegar.
-   - Home distinto para admin/user.
-   - User no arrastra usuarios/clientes de cache admin.
    - Renderiza dentro del host recibido por Router.
-   - Devuelve API/controller, no el contenedor padre.
-   - Usuario/rol/avatar salen del mismo view-model canónico del sidebar.
-   - No pasa AppCore/Auth/Router/DOM al modelo ni al template.
-   - Sólo pasa contexto plano y seguro al template.
-   - Lee colecciones desde homeState raíz y fallback dashboard.
-   - Primera carga remota automática por el flujo real refresh(force).
-   - La cache no bloquea la primera carga remota real del runtime.
-   - Una vez completada la primera carga remota, no recarga al montar de nuevo.
-   - Un dashboard remoto vacío también cuenta como carga válida.
-   - Render memory-first/cache-first cuando hay datos visibles.
-   - Skeleton sólo antes de la primera carga útil si no hay datos visibles.
-   - Render único final tras sincronizar datos reales.
-   - Bindings delegados estables entre rerenders, sin duplicar listeners.
-   - Alineado con template actual: sin acción Exportar CSV.
-   - Alineado con bindings/actions actuales: sin quick actions legacy.
-   - Elimina inline styles/scripts antes de insertar HTML para cumplir CSP.
-   - Elimina handlers inline on*.
-   - Elimina tooltips custom data-tooltip/data-tippy y conserva title nativo.
-   - Corrige títulos genéricos de avatares con nombre real cuando existe.
-   - No resuelve slug.
-   - No ejecuta Auth guards.
-   - No ejecuta Router guards.
-   - No crea bridges globales.
-   - No emite eventos externos.
-   - No crea cache local propia.
-   - No abre modales de otras vistas.
-   - No usa Toast directo.
-   - No usa /home.
-   - No expone health/server/ready/ping.
+   - No ejecuta guards, no resuelve slug, no crea globals,
+     no emite eventos externos, no usa Toast directo y no usa /home.
 ========================================================= */
 
 import {
@@ -124,7 +94,7 @@ import {
   sanitizePayload,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v23.template-actions-aligned";
+export const HOME_VIEW_VERSION = "home.view.v24";
 
 export const HomeView = (() => {
   "use strict";
@@ -132,18 +102,12 @@ export const HomeView = (() => {
   const SOURCE = "views.home";
   const SCOPE = "view:home";
   const DEFAULT_PAGE_SIZE = 5;
+  const DEFAULT_ERROR_MESSAGE = "No se pudo cargar el panel de inicio.";
 
-  const INLINE_STYLE_ATTR_RE =
-    /\sstyle\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
-
-  const INLINE_STYLE_TAG_RE =
-    /<style\b[^>]*>[\s\S]*?<\/style>/gi;
-
-  const SCRIPT_TAG_RE =
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi;
-
-  const INLINE_EVENT_ATTR_RE =
-    /\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
+  const INLINE_STYLE_ATTR_RE = /\sstyle\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
+  const INLINE_STYLE_TAG_RE = /<style\b[^>]*>[\s\S]*?<\/style>/gi;
+  const SCRIPT_TAG_RE = /<script\b[^>]*>[\s\S]*?<\/script>/gi;
+  const INLINE_EVENT_ATTR_RE = /\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
 
   const GENERIC_AVATAR_TITLES = new Set([
     "avatar",
@@ -157,15 +121,20 @@ export const HomeView = (() => {
     "contact",
   ]);
 
+  const ADMIN_COLLECTION_PATCH = Object.freeze({
+    users: [],
+    usuarios: [],
+    clients: [],
+    clientes: [],
+    customers: [],
+  });
+
   const TOOLTIP_ATTR_PREFIXES = Object.freeze([
     "data-tooltip",
     "data-tippy",
   ]);
 
-  const INCIDENCIAS_ROUTE = safeInternalRoute(
-    ROUTES?.incidencias,
-    "/incidencias"
-  );
+  const INCIDENCIAS_ROUTE = safeInternalRoute(ROUTES?.incidencias, "/incidencias");
 
   let initialized = false;
   let destroyed = false;
@@ -201,8 +170,7 @@ export const HomeView = (() => {
   }
 
   function getTimerHost() {
-    if (typeof window !== "undefined") return window;
-    return globalThis;
+    return typeof window !== "undefined" ? window : globalThis;
   }
 
   function nowIso() {
@@ -345,33 +313,17 @@ export const HomeView = (() => {
   }
 
   function isBlockedRoute(value = "/") {
-    const path = normalizePath(value);
-
     try {
-      return configIsBlockedRoutePath(path) === true;
+      return configIsBlockedRoutePath(normalizePath(value)) === true;
     } catch {
-      const lower = path.toLowerCase();
-
-      return Boolean(
-        lower === "/home" ||
-          lower === "/403" ||
-          lower === "/404" ||
-          lower === "/2fa" ||
-          lower === "/mfa" ||
-          lower === "/otp" ||
-          lower.startsWith("/2fa/") ||
-          lower.startsWith("/mfa/") ||
-          lower.startsWith("/otp/")
-      );
+      return false;
     }
   }
 
   function safeInternalRoute(value = "", fallback = "") {
     const path = normalizePath(value || fallback || "");
 
-    if (!path) return "";
-    if (!path.startsWith("/")) return "";
-    if (path.startsWith("//")) return "";
+    if (!path || !path.startsWith("/") || path.startsWith("//")) return "";
     if (isBlockedRoute(path)) return "";
 
     return path;
@@ -531,25 +483,9 @@ export const HomeView = (() => {
     const route = safeObject(ctx.route);
 
     return sanitizePayload({
-      routePath: first(
-        ctx.canonicalPath,
-        ctx.publicPath,
-        ctx.requestedPath,
-        ctx.path,
-        route.path,
-        ""
-      ),
-      publicPath: first(
-        ctx.publicPath,
-        ctx.requestedPath,
-        ctx.path,
-        ""
-      ),
-      canonicalPath: first(
-        ctx.canonicalPath,
-        route.path,
-        ""
-      ),
+      routePath: first(ctx.canonicalPath, ctx.publicPath, ctx.requestedPath, ctx.path, route.path, ""),
+      publicPath: first(ctx.publicPath, ctx.requestedPath, ctx.path, ""),
+      canonicalPath: first(ctx.canonicalPath, route.path, ""),
       routeName: safeText(route.name, ""),
       viewKey: safeText(route.viewKey, ""),
       viewName: safeText(route.viewName, ""),
@@ -590,7 +526,11 @@ export const HomeView = (() => {
       const template = document.createElement("template");
       template.innerHTML = sanitizeHtml(html).trim();
 
-      return template.content.firstElementChild || template.content;
+      if (template.content.childElementCount === 1) {
+        return template.content.firstElementChild;
+      }
+
+      return template.content;
     } catch {
       return null;
     }
@@ -605,19 +545,18 @@ export const HomeView = (() => {
 
     try {
       container.replaceChildren(node);
-      markContainer(container);
-      sanitizeRenderedDom(container);
-      return node;
     } catch {
       try {
         container.innerHTML = sanitizeHtml(html);
-        markContainer(container);
-        sanitizeRenderedDom(container);
-        return container.firstElementChild || container;
       } catch {
         return null;
       }
     }
+
+    markContainer(container);
+    sanitizeRenderedDom(container);
+
+    return container.firstElementChild || container;
   }
 
   function markContainer(container = null) {
@@ -638,13 +577,14 @@ export const HomeView = (() => {
     if (!isElement(container)) return false;
 
     try {
-      container.querySelectorAll("script, style").forEach((node) => node.remove());
-    } catch {
-      // noop
-    }
+      container.querySelectorAll("script, style, [style]").forEach((node) => {
+        if (node.matches("script, style")) {
+          node.remove();
+          return;
+        }
 
-    try {
-      container.querySelectorAll("[style]").forEach((node) => node.removeAttribute("style"));
+        node.removeAttribute("style");
+      });
     } catch {
       // noop
     }
@@ -685,18 +625,19 @@ export const HomeView = (() => {
     try {
       container.querySelectorAll("[title]").forEach((node) => {
         const title = safeText(node.getAttribute("title"), "");
-        const key = title.toLowerCase();
 
-        if (!GENERIC_AVATAR_TITLES.has(key)) return;
+        if (!GENERIC_AVATAR_TITLES.has(title.toLowerCase())) return;
 
-        const label =
+        const label = safeText(
           node.getAttribute("aria-label") ||
-          node.closest("[aria-label]")?.getAttribute("aria-label") ||
-          node.closest("[data-ticket-row]")?.querySelector?.("strong")?.textContent ||
-          "";
+            node.closest("[aria-label]")?.getAttribute("aria-label") ||
+            node.closest("[data-ticket-row]")?.querySelector?.("strong")?.textContent ||
+            "",
+          ""
+        );
 
-        if (safeText(label, "")) {
-          node.setAttribute("title", safeText(label, ""));
+        if (label) {
+          node.setAttribute("title", label);
         }
       });
 
@@ -706,10 +647,20 @@ export const HomeView = (() => {
     }
   }
 
-  function paintError(container = currentContainer, error = null) {
-    const message = redact(error?.message || error || "No se pudo renderizar el Home.");
+  function resolveHomeErrorMessage(error = null) {
+    const code = safeText(error?.code || error?.error || "", "").toUpperCase();
+    const status = safeNumber(error?.status || error?.statusCode || error?.response?.status, 0);
 
-    return paintHtml(container, renderHomeErrorState(message));
+    if (code === "UNAUTHORIZED" || status === 401) return "Necesitas iniciar sesión.";
+    if (code === "FORBIDDEN" || status === 403) return "No tienes permisos para ver este contenido.";
+    if (status === 429) return "Demasiadas solicitudes. Inténtalo de nuevo más tarde.";
+    if (status >= 500) return "El servidor no pudo cargar el panel de inicio.";
+
+    return DEFAULT_ERROR_MESSAGE;
+  }
+
+  function paintError(container = currentContainer, error = null) {
+    return paintHtml(container, renderHomeErrorState(resolveHomeErrorMessage(error)));
   }
 
   /* =======================================================
@@ -721,6 +672,8 @@ export const HomeView = (() => {
   }
 
   function stateHasVisibleData() {
+    const admin = homeState.admin === true;
+
     return Boolean(
       safeArray(homeState.tickets).length ||
         safeArray(homeState.incidencias).length ||
@@ -730,25 +683,57 @@ export const HomeView = (() => {
         safeArray(homeState.cards).length ||
         safeArray(homeState.activity).length ||
         safeArray(homeState.recentActivity).length ||
-        (homeState.admin && safeArray(homeState.users).length) ||
-        (homeState.admin && safeArray(homeState.clients).length)
+        (admin && safeArray(homeState.users).length) ||
+        (admin && safeArray(homeState.clients).length)
     );
-  }
-
-  function stateHasRealData() {
-    return stateHasVisibleData();
   }
 
   function stateCanRenderFinal() {
     return Boolean(stateHasLoadedPayload() || stateHasVisibleData());
   }
 
+  function stripAdminCollectionsForUser(payload = {}, role = "user") {
+    if (role === "admin") return payload;
+
+    return {
+      ...safeObject(payload),
+      ...ADMIN_COLLECTION_PATCH,
+      admin: false,
+      meta: {
+        ...safeObject(payload?.meta),
+        admin: false,
+        role: "user",
+      },
+    };
+  }
+
+  function clearAdminCollectionsForUser(role = "user") {
+    if (role === "admin") return false;
+
+    patchHomeState(
+      {
+        ...ADMIN_COLLECTION_PATCH,
+        admin: false,
+        role: "user",
+        rol: "user",
+        roles: ["user"],
+      },
+      {
+        replace: false,
+        source: SOURCE,
+        result: {
+          reason: "strip-admin-cache",
+        },
+      }
+    );
+
+    return true;
+  }
+
   function hydrateFromCacheIfPossible(options = {}) {
     const opts = safeObject(options);
 
-    if (opts.force !== true && stateCanRenderFinal()) {
-      return false;
-    }
+    if (opts.force !== true && stateCanRenderFinal()) return false;
 
     try {
       const cached = hydrateHomeFromCache();
@@ -763,7 +748,7 @@ export const HomeView = (() => {
         return true;
       }
     } catch {
-      // fallback abajo
+      // noop
     }
 
     return false;
@@ -771,26 +756,20 @@ export const HomeView = (() => {
 
   function applyDashboardPayload(payload = {}, options = {}) {
     const raw = safeObject(payload);
-
-    if (!hasKeys(raw)) {
-      setLoaded(true);
-      setHydrated(true);
-      clearHomeError();
-      return homeState;
-    }
-
     const role = resolveCurrentRole(raw, {
       trustPayloadRole: options.trustPayloadRole === true,
     });
 
+    const sourceDashboard = stripAdminCollectionsForUser(raw, role);
+
     const dashboard = normalizeHomeDashboard({
-      ...raw,
+      ...sourceDashboard,
       role,
       rol: role,
       roles: [role],
       admin: role === "admin",
       meta: {
-        ...safeObject(raw.meta),
+        ...safeObject(sourceDashboard.meta),
         role,
         admin: role === "admin",
       },
@@ -812,6 +791,8 @@ export const HomeView = (() => {
       hydrated: true,
     });
 
+    clearAdminCollectionsForUser(role);
+
     setLoaded(true);
     setHydrated(true);
     clearHomeError();
@@ -825,6 +806,9 @@ export const HomeView = (() => {
     const role = resolveCurrentRole(snapshot);
     const admin = role === "admin";
     const safeContext = getSafeTemplateContext(currentContext, sidebarUser);
+    const publicUsers = admin ? snapshot.users : [];
+    const publicClientes = admin ? snapshot.clientes : [];
+    const publicClients = admin ? snapshot.clients : [];
 
     return buildHomeTemplatePayload({
       ...snapshot,
@@ -868,11 +852,11 @@ export const HomeView = (() => {
       invoices: snapshot.invoices,
       facturas: snapshot.facturas,
 
-      users: admin ? snapshot.users : [],
+      users: publicUsers,
       usuarios: admin ? snapshot.usuarios : [],
 
-      clients: admin ? snapshot.clients : [],
-      clientes: admin ? snapshot.clientes : [],
+      clients: publicClients,
+      clientes: publicClientes,
       customers: admin ? snapshot.customers : [],
 
       activity: snapshot.activity,
@@ -901,8 +885,7 @@ export const HomeView = (() => {
     const seq = nextRenderSeq();
 
     try {
-      const payload = buildTemplatePayload(options.payload || {});
-      const html = renderHomeTemplate(payload);
+      const html = renderHomeTemplate(buildTemplatePayload(options.payload || {}));
 
       if (!isCurrentRender(seq)) return api;
 
@@ -931,11 +914,7 @@ export const HomeView = (() => {
   }
 
   function renderLoadingIfNeeded(options = {}) {
-    const opts = safeObject(options);
-
-    if (opts.force !== true && stateCanRenderFinal()) {
-      return false;
-    }
+    if (options?.force !== true && stateCanRenderFinal()) return false;
 
     setLoading(true);
     setRefreshing(false);
@@ -952,14 +931,9 @@ export const HomeView = (() => {
 
     if (opts.force === true) return true;
     if (inflightLoad) return false;
-
     if (!bootLoadCompleted) return true;
 
-    if (!stateHasLoadedPayload() && !stateHasVisibleData()) {
-      return true;
-    }
-
-    return false;
+    return !stateHasLoadedPayload() && !stateHasVisibleData();
   }
 
   /* =======================================================
@@ -984,23 +958,16 @@ export const HomeView = (() => {
       return getHomeStateSnapshot();
     }
 
-    if (inflightLoad && opts.force !== true) {
-      return inflightLoad;
-    }
+    if (inflightLoad && opts.force !== true) return inflightLoad;
 
     const seq = nextLoadSeq();
     const asRefresh = opts.asRefresh === true || opts.force === true;
     const initialRemote = opts.initial === true || opts.boot === true;
     const hasVisibleBeforeLoad = stateHasVisibleData();
 
-    if (asRefresh) {
-      if (initialRemote && !hasVisibleBeforeLoad) {
-        setLoading(true);
-        setRefreshing(false);
-      } else {
-        setLoading(false);
-        setRefreshing(true);
-      }
+    if (asRefresh && !(initialRemote && !hasVisibleBeforeLoad)) {
+      setLoading(false);
+      setRefreshing(true);
     } else {
       setLoading(true);
       setRefreshing(false);
@@ -1012,17 +979,12 @@ export const HomeView = (() => {
 
     inflightLoad = (async () => {
       try {
-        const dashboard = asRefresh
-          ? await refreshHomeDashboard({
-              force: true,
-              returnStaleOnError: opts.returnStaleOnError !== false,
-              params: opts.params || null,
-            })
-          : await loadHomeDashboard({
-              force: opts.force === true,
-              returnStaleOnError: opts.returnStaleOnError !== false,
-              params: opts.params || null,
-            });
+        const loader = asRefresh ? refreshHomeDashboard : loadHomeDashboard;
+        const dashboard = await loader({
+          force: asRefresh || opts.force === true,
+          returnStaleOnError: opts.returnStaleOnError !== false,
+          params: opts.params || null,
+        });
 
         if (!isCurrentLoad(seq)) return dashboard;
 
@@ -1104,20 +1066,14 @@ export const HomeView = (() => {
   }
 
   function setState(nextState = {}, result = {}) {
-    patchHomeState(nextState, {
-      replace: false,
-      source: SOURCE,
-      result: sanitizePayload(result),
-    });
-
-    return true;
+    return patchState(nextState, result);
   }
 
   function onStatePatch(patch = {}, result = {}) {
     return patchState(patch, result);
   }
 
-  function onActionResult(_result = {}) {
+  function onActionResult() {
     return true;
   }
 
@@ -1213,7 +1169,7 @@ export const HomeView = (() => {
 
     unbindEvents();
 
-    const cleanup = bindHomeEvents({
+    bindingsCleanup = bindHomeEvents({
       scope: SCOPE,
       container,
 
@@ -1251,7 +1207,6 @@ export const HomeView = (() => {
       changePageSize,
     });
 
-    bindingsCleanup = cleanup;
     boundContainer = container;
 
     return true;
@@ -1259,9 +1214,7 @@ export const HomeView = (() => {
 
   function unbindEvents() {
     try {
-      if (isFunction(bindingsCleanup)) {
-        bindingsCleanup();
-      }
+      if (isFunction(bindingsCleanup)) bindingsCleanup();
     } catch {
       // noop
     }
@@ -1288,13 +1241,7 @@ export const HomeView = (() => {
 
     if (!isElement(container)) return api;
 
-    if (force) {
-      hydrateFromCacheIfPossible({
-        force: true,
-      });
-    } else {
-      hydrateFromCacheIfPossible();
-    }
+    hydrateFromCacheIfPossible({ force });
 
     const needsLoad = shouldLoadOnMount({ force });
     const hasVisibleData = stateHasVisibleData();
@@ -1341,9 +1288,7 @@ export const HomeView = (() => {
   }
 
   function render(root = null, context = {}) {
-    if (isElement(root)) {
-      currentContainer = root;
-    }
+    if (isElement(root)) currentContainer = root;
 
     currentContext = {
       ...safeObject(currentContext),
@@ -1436,7 +1381,7 @@ export const HomeView = (() => {
 
         hasLoadedPayload: stateHasLoadedPayload(),
         hasVisibleData: stateHasVisibleData(),
-        hasRealData: stateHasRealData(),
+        hasRealData: stateHasVisibleData(),
         canRenderFinal: stateCanRenderFinal(),
 
         selectedTicketId: state.selectedTicketId || "",
@@ -1466,7 +1411,6 @@ export const HomeView = (() => {
 
       policy: {
         controllerOnly: true,
-
         renderDelegatedToTemplate: true,
         dataDelegatedToApi: true,
         runtimeStateDelegatedToHomeState: true,
@@ -1474,53 +1418,30 @@ export const HomeView = (() => {
         modelDelegatedToHomeModel: true,
         domEventsDelegatedToBindings: true,
         actionsDelegatedToHomeActions: true,
-
         initialRemoteRefreshOnce: true,
-        initialRemoteRefreshUsesSamePathAsManualRefresh: true,
         cacheDoesNotBlockFirstRemoteRefresh: true,
-        doesNotReloadAfterInitialRemoteCompleted: true,
         emptyRemoteDashboardCountsAsLoaded: true,
-
         memoryFirstRenderWhenVisibleDataExists: true,
-        cacheFirstHydration: true,
-        skeletonOnlyBeforeFirstUsefulLoad: true,
-        explicitReloadStillAllowed: true,
-
-        templateAlignedNoCsvExportAction: true,
-        templateAlignedNoQuickActionsLegacy: true,
-
         stableBindings: true,
         noDuplicateBindingsOnRerender: true,
-        mutableBindingsApi: true,
-
         safeTemplateContextOnly: true,
-        doesNotPassAppCoreAuthRouterDomToModel: true,
-
         noAuthGuards: true,
         noRouterGuards: true,
         noSlugResolution: true,
-
         noGlobalBridge: true,
         noExternalEvents: true,
         noOwnCache: true,
         noToastDirect: true,
-
         removesInlineStyles: true,
         removesInlineScripts: true,
         removesInlineEventHandlers: true,
         stripsCustomTooltips: true,
-
         userNeverKeepsAdminCache: true,
         noHomeRoute: true,
         noHealthServerReadyPing: true,
-
         snapshotRedacted: true,
       },
     };
-  }
-
-  function getDebugSnapshot() {
-    return getSnapshot();
   }
 
   const api = {
@@ -1550,7 +1471,7 @@ export const HomeView = (() => {
     changePageSize,
 
     getSnapshot,
-    getDebugSnapshot,
+    getDebugSnapshot: getSnapshot,
 
     get initialized() {
       return initialized;

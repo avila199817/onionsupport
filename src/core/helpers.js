@@ -23,9 +23,12 @@
 
 import {
   config,
+  ALLOWED_ROLES,
   CANONICAL_PRODUCTION_API_BASE,
   CANONICAL_BACKEND_API_ORIGINS,
   TOKEN_PARAM,
+  SENSITIVE_QUERY_PARAMS,
+  USER_HOME_PREFIX,
   AUTH_ENDPOINTS,
   PUBLIC_API_PATHS,
   PRIVATE_API_PATHS,
@@ -35,20 +38,38 @@ import {
   isPrivateApiPath as configIsPrivateApiPath,
   routePathFromUrlLike as configRoutePathFromUrlLike,
   endpointPathFromUrlLike as configEndpointPathFromUrlLike,
+  normalizeRoutePath as configNormalizeRoutePath,
+  canonicalRoutePath as configCanonicalRoutePath,
+  getUserScopedRouteInfo as configGetUserScopedRouteInfo,
+  isBlockedRoutePath as configIsBlockedRoutePath,
   normalizeUserSlug as configNormalizeUserSlug,
+  buildUserHomeRoute as configBuildUserHomeRoute,
+  buildUserScopedRoute as configBuildUserScopedRoute,
 } from "./config.js";
 
-export const HELPERS_VERSION = "core.helpers.v2";
+export const HELPERS_VERSION = "core.helpers.v3";
 
 const DEFAULT_ROUTE = "/";
-const DEFAULT_LANG = "es";
-const DEFAULT_THEME = "system";
+const DEFAULT_LANG = config?.defaultLang || "es";
+const DEFAULT_THEME = config?.defaultTheme || "system";
 const LOCAL_ORIGIN = "http://localhost";
 const STORAGE_PREFIX = "onion";
 
-const VALID_LANGS = new Set(["es", "ca", "en"]);
+const VALID_LANGS = new Set(
+  (Array.isArray(config?.supportedLangs) && config.supportedLangs.length
+    ? config.supportedLangs
+    : ["es", "ca", "en"]
+  ).map((lang) => String(lang).toLowerCase())
+);
+
 const VALID_THEMES = new Set(["dark", "light", "system"]);
-const VALID_ROLES = new Set(["admin", "user"]);
+
+const VALID_ROLES = new Set(
+  (Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
+    ? ALLOWED_ROLES
+    : ["admin", "user"]
+  ).map((role) => String(role).toLowerCase())
+);
 
 const INVALID_USER_STATUSES = new Set([
   "disabled",
@@ -59,12 +80,16 @@ const INVALID_USER_STATUSES = new Set([
   "blocked",
   "banned",
   "suspended",
+
   "desactivado",
   "inactivo",
   "eliminado",
   "archivado",
+  "revocado",
   "bloqueado",
+  "baneado",
   "suspendido",
+  "baja",
 ]);
 
 const SENSITIVE_KEYS = new Set([
@@ -118,24 +143,14 @@ const SENSITIVE_KEYS = new Set([
   "_metadata",
 ]);
 
-const SENSITIVE_QUERY_KEYS = new Set([
-  TOKEN_PARAM,
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "secret",
-  "session",
-  "code",
-  "password",
-  "pwd",
-  "key",
-  "sig",
-  "signature",
-  "jwt",
-  "authorization",
-  "reset_token",
-  "activation_token",
-]);
+const SENSITIVE_QUERY_KEYS = new Set(
+  (Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
+    ? SENSITIVE_QUERY_PARAMS
+    : [TOKEN_PARAM]
+  ).map((key) => String(key).toLowerCase())
+);
+
+const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
 
 /* =========================================================
    BASICS
@@ -349,12 +364,28 @@ function keyIsSensitive(value = "") {
   return SENSITIVE_KEYS.has(normalizeKey(value));
 }
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSensitiveQueryPattern() {
+  const keys = [...SENSITIVE_QUERY_KEYS]
+    .map(escapeRegExp)
+    .filter(Boolean)
+    .join("|");
+
+  return keys
+    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
+    : null;
+}
+
 export function redactTokenInText(value = "") {
-  return String(value || "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
+  const clean = String(value || "");
+  const redactedQuery = SENSITIVE_QUERY_PATTERN
+    ? clean.replace(SENSITIVE_QUERY_PATTERN, "$1***")
+    : clean;
+
+  return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
@@ -425,12 +456,58 @@ export function normalizeHashRouterPath(value = "") {
 
 export function normalizeSearch(search = "") {
   const raw = safeText(search, "");
-  return raw ? (raw.startsWith("?") ? raw : `?${raw}`) : "";
+
+  if (!raw || raw === "?") return "";
+
+  const normalized = raw.startsWith("?")
+    ? raw
+    : `?${raw.replace(/^\?+/, "")}`;
+
+  try {
+    const params = new URLSearchParams(normalized);
+
+    for (const key of [...params.keys()]) {
+      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+        params.delete(key);
+      }
+    }
+
+    const output = params.toString();
+
+    return output ? `?${output}` : "";
+  } catch {
+    return "";
+  }
 }
 
 export function normalizeHash(hash = "") {
   const raw = safeText(hash, "");
-  return raw ? (raw.startsWith("#") ? raw : `#${raw}`) : "";
+
+  if (!raw || raw === "#") return "";
+
+  const normalized = raw.startsWith("#")
+    ? raw
+    : `#${raw.replace(/^#+/, "")}`;
+
+  const body = normalized.slice(1);
+
+  if (!body || /[\r\n\t\\]/.test(body)) return "";
+
+  const queryIndex = body.indexOf("?");
+
+  if (queryIndex >= 0) {
+    const hashPath = body.slice(0, queryIndex);
+    const cleanQuery = normalizeSearch(`?${body.slice(queryIndex + 1)}`);
+
+    return cleanQuery ? `#${hashPath}${cleanQuery}` : `#${hashPath}`;
+  }
+
+  if (/^[^/?#=&]+=/i.test(body)) {
+    const cleanQuery = normalizeSearch(`?${body}`);
+    return cleanQuery ? `#${cleanQuery.slice(1)}` : "";
+  }
+
+  return redactTokenInText(normalized);
 }
 
 export function splitPathParts(path = DEFAULT_ROUTE) {
@@ -443,7 +520,7 @@ export function splitPathParts(path = DEFAULT_ROUTE) {
   try {
     raw = configRoutePathFromUrlLike(raw) || DEFAULT_ROUTE;
   } catch {
-    // fallback local abajo
+    raw = DEFAULT_ROUTE;
   }
 
   let pathname = raw;
@@ -472,79 +549,86 @@ export function splitPathParts(path = DEFAULT_ROUTE) {
   };
 }
 
+export function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
+  try {
+    return configNormalizeRoutePath(pathname) || DEFAULT_ROUTE;
+  } catch {
+    let value = safeText(pathname, DEFAULT_ROUTE)
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/\\/g, "/");
+
+    if (!value.startsWith("/")) value = `/${value}`;
+
+    value = value.replace(/\/+/g, "/");
+
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "");
+    }
+
+    return value || DEFAULT_ROUTE;
+  }
+}
+
 export function stripSearchAndHash(path = DEFAULT_ROUTE) {
   return normalizePathnameOnly(splitPathParts(path).pathname);
 }
 
 export function getSearchAndHash(path = DEFAULT_ROUTE) {
-  return splitPathParts(path).suffix;
-}
-
-export function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
-  let value = safeText(pathname, DEFAULT_ROUTE)
-    .split("?")[0]
-    .split("#")[0]
-    .replace(/\\/g, "/");
-
-  if (!value.startsWith("/")) value = `/${value}`;
-
-  value = value.replace(/\/+/g, "/");
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "");
-  }
-
-  return value || DEFAULT_ROUTE;
+  const parts = splitPathParts(path);
+  return `${normalizeSearch(parts.search)}${normalizeHash(parts.hash)}`;
 }
 
 export function normalizePath(path = DEFAULT_ROUTE) {
   if (path === null || path === undefined) return DEFAULT_ROUTE;
 
-  let raw = safeText(path, DEFAULT_ROUTE);
-
-  if (isHashRouterPath(raw)) {
-    raw = normalizeHashRouterPath(raw);
-  }
-
-  try {
-    raw = configRoutePathFromUrlLike(raw) || DEFAULT_ROUTE;
-  } catch {
-    if (isAbsoluteUrl(raw)) {
-      try {
-        const url = new URL(raw, getBaseOrigin());
-        raw = url.origin === getBaseOrigin()
-          ? `${url.pathname}${url.search}${url.hash}`
-          : DEFAULT_ROUTE;
-      } catch {
-        raw = DEFAULT_ROUTE;
-      }
-    }
-  }
-
-  const { pathname, search, hash } = splitPathParts(raw);
+  const { pathname, search, hash } = splitPathParts(path);
 
   return `${normalizePathnameOnly(pathname)}${normalizeSearch(search)}${normalizeHash(hash)}`;
 }
 
 export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
   const normalized = normalizePath(path);
-  const pathname = stripSearchAndHash(normalized);
-  const suffix = getSearchAndHash(normalized);
-  const parts = pathname.split("/").filter(Boolean);
+  const parts = splitPathParts(normalized);
 
-  if (parts[0]?.startsWith("@")) {
-    return normalizePath(`/${parts.slice(1).join("/")}${suffix}`);
+  try {
+    const info = configGetUserScopedRouteInfo(parts.pathname);
+
+    if (info?.scoped) {
+      return normalizePath(`${info.canonicalPath || info.restPath || DEFAULT_ROUTE}${parts.search}${parts.hash}`);
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  const pathname = normalizePathnameOnly(parts.pathname);
+  const segments = pathname.split("/").filter(Boolean);
+
+  if (segments[0]?.startsWith("@")) {
+    return normalizePath(`/${segments.slice(1).join("/")}${parts.search}${parts.hash}`);
   }
 
   return normalized;
 }
 
 export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
-  return stripSearchAndHash(stripUsernamePrefix(normalizePath(path)));
+  try {
+    return configCanonicalRoutePath(path) || DEFAULT_ROUTE;
+  } catch {
+    return stripSearchAndHash(stripUsernamePrefix(normalizePath(path)));
+  }
 }
 
 export function normalizePublicPath(path = DEFAULT_ROUTE) {
   return normalizePath(path);
+}
+
+export function isBlockedRoutePath(path = DEFAULT_ROUTE) {
+  try {
+    return configIsBlockedRoutePath(path) === true;
+  } catch {
+    return false;
+  }
 }
 
 export function getCurrentLocationPath() {
@@ -619,13 +703,30 @@ export function slugify(value = "") {
     .slice(0, 96);
 }
 
-export function buildPublicPath(path = DEFAULT_ROUTE, username = "") {
-  const cleanPath = stripUsernamePrefix(normalizePublicPath(path));
-  const cleanUser = sanitizeUsername(username);
+function normalizeUserSlug(value = "") {
+  try {
+    return configNormalizeUserSlug(value) || "";
+  } catch {
+    return slugify(value);
+  }
+}
 
-  return cleanUser
-    ? normalizePath(`/@${cleanUser}${cleanPath}`)
-    : cleanPath;
+export function buildPublicPath(path = DEFAULT_ROUTE, username = "") {
+  const normalized = normalizePublicPath(path);
+  const cleanPath = stripUsernamePrefix(normalized);
+  const parts = splitPathParts(cleanPath);
+  const cleanUser = normalizeUserSlug(username);
+
+  if (!cleanUser) return cleanPath;
+
+  try {
+    return normalizePath(
+      `${configBuildUserScopedRoute(cleanUser, parts.pathname)}${parts.search}${parts.hash}`
+    );
+  } catch {
+    const prefix = parts.pathname === DEFAULT_ROUTE ? "" : parts.pathname;
+    return normalizePath(`${USER_HOME_PREFIX}${cleanUser}${prefix}${parts.search}${parts.hash}`);
+  }
 }
 
 /* =========================================================
@@ -699,6 +800,14 @@ function endpointPathFromInput(path = "") {
   }
 }
 
+export function normalizeEndpointPath(path = "") {
+  const clean = endpointPathFromInput(path);
+
+  if (!clean) return "";
+
+  return normalizePathnameOnly(clean);
+}
+
 export function joinUrl(base = "", path = "") {
   const root = normalizeApiBase(base || getSafeApiBase()).replace(/\/+$/g, "");
   const endpoint = endpointPathFromInput(path);
@@ -715,7 +824,7 @@ export function buildUrl(path = "", query = null) {
 
   if (!baseUrl || !query || !isPlainObject(query)) return baseUrl;
 
-  const url = new URL(baseUrl, getBaseOrigin());
+  const url = new URL(baseUrl);
 
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === null || value === "") continue;
@@ -740,11 +849,12 @@ export function isPublicApiPath(path = "") {
   try {
     return configIsPublicApiPath(path);
   } catch {
-    const clean = normalizeCanonicalPath(path);
+    const clean = normalizeEndpointPath(path);
 
+    if (!clean) return false;
     if (clean === AUTH_ENDPOINTS.me) return false;
 
-    return PUBLIC_API_PATHS.some((item) => clean === item);
+    return PUBLIC_API_PATHS.some((item) => clean === normalizeEndpointPath(item));
   }
 }
 
@@ -752,11 +862,12 @@ export function isPrivateApiPath(path = "") {
   try {
     return configIsPrivateApiPath(path);
   } catch {
-    const clean = normalizeCanonicalPath(path);
+    const clean = normalizeEndpointPath(path);
 
+    if (!clean) return false;
     if (clean === AUTH_ENDPOINTS.me) return true;
 
-    return PRIVATE_API_PATHS.some((item) => clean === item);
+    return PRIVATE_API_PATHS.some((item) => clean === normalizeEndpointPath(item));
   }
 }
 
@@ -790,8 +901,26 @@ export function hasValidToken(token = null) {
    USER
 ========================================================= */
 
+function looksLikeUser(value = null) {
+  if (!isPlainObject(value)) return false;
+
+  return Boolean(
+    safeText(value.id, "") ||
+      safeText(value.userId, "") ||
+      safeText(value.uid, "") ||
+      safeText(value.sub, "") ||
+      safeText(value.username, "") ||
+      safeText(value.slug, "") ||
+      safeText(value.lookup?.slug, "") ||
+      safeText(value.role, "") ||
+      safeText(value.rol, "") ||
+      Array.isArray(value.roles)
+  );
+}
+
 function userPayload(value = null) {
   if (!isPlainObject(value)) return null;
+  if (looksLikeUser(value)) return value;
 
   return (
     value.user ||
@@ -862,14 +991,6 @@ function cleanRole(value = "") {
   return normalizeRole(value) || "user";
 }
 
-function normalizeUserSlug(value = "") {
-  try {
-    return configNormalizeUserSlug(value) || "";
-  } catch {
-    return slugify(value);
-  }
-}
-
 export function normalizeUser(user = null) {
   const source = userPayload(user);
 
@@ -913,12 +1034,11 @@ export function normalizeUser(user = null) {
       safeUser.usernameLower ||
       safeUser.username_lower ||
       slug ||
-      email ||
       id ||
       ""
   );
 
-  if (!id && !username && !email) return null;
+  if (!id && !username) return null;
 
   const profile = isPlainObject(safeUser.profile) ? safeUser.profile : {};
 
@@ -932,7 +1052,6 @@ export function normalizeUser(user = null) {
     profile.displayName,
     profile.nombre,
     username,
-    email,
     id,
     "Usuario"
   );
@@ -963,7 +1082,7 @@ export function normalizeUser(user = null) {
 
     username: username || null,
     usernameLower: username || null,
-    slug: safeUser.slug || slug || username || null,
+    slug: slug || username || null,
 
     name,
     nombre: safeUser.nombre || name,
@@ -989,6 +1108,10 @@ export function normalizeUser(user = null) {
     disabled: false,
     deleted: false,
     archived: false,
+    revoked: false,
+    blocked: false,
+    banned: false,
+    suspended: false,
 
     isAdmin: role === "admin",
     isUser: role === "user",
@@ -1008,7 +1131,6 @@ export function getUserDisplayName(user = null) {
     normalized?.name ||
     normalized?.nombre ||
     normalized?.username ||
-    normalized?.email ||
     "Usuario"
   );
 }
@@ -1064,13 +1186,13 @@ export async function runHookSeries(hooks = [], payload = {}) {
   return current;
 }
 
-export function getThemeColor(theme = DEFAULT_THEME) {
-  return normalizeTheme(theme) === "light" ? "#ffffff" : "#0a0c11";
-}
-
-function normalizeTheme(value = DEFAULT_THEME) {
+export function normalizeTheme(value = DEFAULT_THEME) {
   const theme = safeLower(value, DEFAULT_THEME);
   return VALID_THEMES.has(theme) ? theme : DEFAULT_THEME;
+}
+
+export function getThemeColor(theme = DEFAULT_THEME) {
+  return normalizeTheme(theme) === "light" ? "#ffffff" : "#0a0c11";
 }
 
 export function normalizeLang(value = DEFAULT_LANG) {
@@ -1246,13 +1368,19 @@ export function getHelpersSnapshot() {
 
     policy: {
       pureHelpers: true,
+
       noFetch: true,
       noStorageReal: true,
+      storageKeysOnly: true,
       noAuthRuntime: true,
       noRouter: true,
       noStore: true,
       noToast: true,
+
       configOwnsRoutesAndApi: true,
+      configOwnsRoles: true,
+      configOwnsSensitiveQueryParams: true,
+
       meAlwaysPrivate: true,
       snapshotRedacted: true,
     },
@@ -1316,10 +1444,12 @@ export default {
 
   normalizeApiBase,
   getSafeApiBase,
+  normalizeEndpointPath,
   normalizePath,
   stripUsernamePrefix,
   normalizeCanonicalPath,
   normalizePublicPath,
+  isBlockedRoutePath,
   buildPublicPath,
 
   joinUrl,
@@ -1345,6 +1475,7 @@ export default {
 
   runHookSeries,
   getThemeColor,
+  normalizeTheme,
   normalizeLang,
 
   createAbortTimeout,

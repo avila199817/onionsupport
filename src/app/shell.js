@@ -3,29 +3,18 @@
    Archivo: /src/app/shell.js
 
    Responsabilidad:
-   - Controlar el shell real del index.html durante boot/fatal.
-   - Mantener app-shell visible.
-   - Mostrar/ocultar chrome de forma básica.
-   - Obtener #view-container.
-   - Marcar ready/busy del shell.
-   - Limpiar sólo áreas dinámicas propias del shell.
-   - Sin imports.
-   - Sin Router interno.
-   - Sin Auth.
-   - Sin AppCore.
-   - Sin eventos.
-   - Sin loader.
-   - Sin rutas inventadas.
-   - Sin /home.
-   - Sin navegación.
-   - Sin magia negra.
+   - Soporte mínimo del shell real durante boot/fatal.
+   - Mantener app-shell/main/app-content/view-container visibles.
+   - Mostrar/ocultar chrome base sin decidir rutas finales.
+   - Limpiar sólo tablehead.
+   - Sin imports, Auth, Router interno, AppCore, eventos, loader,
+     rutas, /home, navegación, storage ni lógica de dominio.
 
    Nota:
-   - La visibilidad final por ruta la gobierna /src/router/shell.js.
-   - Este módulo sólo da soporte base al arranque de la app.
+   - La visibilidad final por ruta pertenece a /src/router/shell.js.
 ========================================================= */
 
-export const SHELL_VERSION = "app.shell.v5";
+export const SHELL_VERSION = "app.shell.v6";
 
 const IDS = Object.freeze({
   shell: "app-shell",
@@ -58,42 +47,19 @@ function cleanText(value = "", fallback = "") {
 }
 
 function byId(id = "") {
-  if (!isBrowser() || !id) return null;
-
-  try {
-    return document.getElementById(id);
-  } catch {
-    return null;
-  }
+  return isBrowser() && id ? document.getElementById(id) : null;
 }
 
-function roots() {
+function documentRoots() {
   if (!isBrowser()) return [];
-
-  return [
-    document.documentElement,
-    document.body,
-  ].filter(Boolean);
-}
-
-function isRouteHost(element = null) {
-  try {
-    return element?.getAttribute?.(ROUTER_VIEW_HOST_ATTR) === "true";
-  } catch {
-    return false;
-  }
+  return [document.documentElement, document.body].filter(Boolean);
 }
 
 function setDataset(element = null, key = "", value = "") {
   if (!element || !key) return false;
 
   try {
-    if (value === null || value === undefined || value === "") {
-      delete element.dataset[key];
-    } else {
-      element.dataset[key] = String(value);
-    }
-
+    element.dataset[key] = String(value);
     return true;
   } catch {
     return false;
@@ -163,6 +129,14 @@ function clearNode(element = null) {
     } catch {
       return false;
     }
+  }
+}
+
+function isRouteHost(element = null) {
+  try {
+    return element?.getAttribute?.(ROUTER_VIEW_HOST_ATTR) === "true";
+  } catch {
+    return false;
   }
 }
 
@@ -236,14 +210,7 @@ export function getShellElements() {
 }
 
 export function getViewContainer() {
-  if (!isBrowser()) return null;
-
-  return (
-    byId(IDS.viewContainer) ||
-    byId(IDS.appContent) ||
-    byId(IDS.main) ||
-    null
-  );
+  return byId(IDS.viewContainer) || byId(IDS.appContent) || byId(IDS.main);
 }
 
 function shellNodes(elements = getShellElements()) {
@@ -273,26 +240,25 @@ function syncShellDataset({
   busy = false,
 } = {}) {
   const shellState = cleanText(state, "ready");
-  const shellInteractive = busy ? "false" : "true";
+  const interactive = busy ? "false" : "true";
   const chromeState = cleanText(chrome, "");
 
   for (const element of shellNodes(elements)) {
     setHidden(element, false);
     setBusy(element, busy);
-
     setDataset(element, "shell", "visible");
     setDataset(element, "shellState", shellState);
-    setDataset(element, "shellInteractive", shellInteractive);
+    setDataset(element, "shellInteractive", interactive);
 
     if (chromeState) {
       setDataset(element, "chrome", chromeState);
     }
   }
 
-  for (const root of roots()) {
+  for (const root of documentRoots()) {
     setDataset(root, "shell", "visible");
     setDataset(root, "shellState", shellState);
-    setDataset(root, "shellInteractive", shellInteractive);
+    setDataset(root, "shellInteractive", interactive);
 
     if (chromeState) {
       setDataset(root, "chrome", chromeState);
@@ -305,6 +271,19 @@ function syncShellDataset({
   return true;
 }
 
+function setTableheadVisible(elements = getShellElements(), visible = false) {
+  const show = Boolean(visible);
+  const state = show ? "visible" : "empty";
+
+  for (const element of [elements.tablehead, elements.tableheadContainer]) {
+    setHidden(element, !show);
+    setBusy(element, false);
+    setDataset(element, "tableheadState", state);
+  }
+
+  return show;
+}
+
 /* =========================================================
    CHROME
 ========================================================= */
@@ -312,10 +291,12 @@ function syncShellDataset({
 export function readShellVisibility() {
   if (!isBrowser()) return false;
 
-  const chrome =
+  const chrome = cleanText(
     document.body?.dataset?.chrome ||
-    document.documentElement?.dataset?.chrome ||
-    "hidden";
+      document.documentElement?.dataset?.chrome ||
+      byId(IDS.shell)?.dataset?.chrome,
+    "hidden"
+  );
 
   return chrome === "visible";
 }
@@ -340,24 +321,9 @@ export function setShellVisibility(_AppCore = null, visible = true) {
     setDataset(element, "chrome", chromeState);
   }
 
-  const showTablehead =
-    chromeVisible &&
-    hasContent(elements.tableheadContainer);
-
-  setHidden(elements.tablehead, !showTablehead);
-  setBusy(elements.tablehead, false);
-  setDataset(
-    elements.tablehead,
-    "tableheadState",
-    showTablehead ? "visible" : "empty"
-  );
-
-  setHidden(elements.tableheadContainer, !showTablehead);
-  setBusy(elements.tableheadContainer, false);
-  setDataset(
-    elements.tableheadContainer,
-    "tableheadState",
-    showTablehead ? "visible" : "empty"
+  setTableheadVisible(
+    elements,
+    chromeVisible && hasContent(elements.tableheadContainer)
   );
 
   return chromeVisible;
@@ -368,10 +334,7 @@ export function setShellVisibility(_AppCore = null, visible = true) {
 ========================================================= */
 
 export function markShellBusy() {
-  const elements = getShellElements();
-
   syncShellDataset({
-    elements,
     state: "busy",
     busy: true,
   });
@@ -380,10 +343,7 @@ export function markShellBusy() {
 }
 
 export function markShellReady() {
-  const elements = getShellElements();
-
   syncShellDataset({
-    elements,
     state: "ready",
     busy: false,
   });
@@ -397,28 +357,12 @@ export function markShellReady() {
 
 export function clearDynamicContainers() {
   const elements = getShellElements();
+  const hadContent = hasContent(elements.tableheadContainer);
 
-  let changed = false;
+  clearNode(elements.tableheadContainer);
+  setTableheadVisible(elements, false);
 
-  /*
-    App shell sólo limpia el tablehead.
-    El view-container pertenece al Router/render real.
-  */
-  if (elements.tableheadContainer) {
-    changed = clearNode(elements.tableheadContainer) || changed;
-    setHidden(elements.tableheadContainer, true);
-    setBusy(elements.tableheadContainer, false);
-    setDataset(elements.tableheadContainer, "tableheadState", "empty");
-  }
-
-  if (elements.tablehead) {
-    setHidden(elements.tablehead, true);
-    setBusy(elements.tablehead, false);
-    setDataset(elements.tablehead, "tableheadState", "empty");
-    changed = true;
-  }
-
-  return changed;
+  return Boolean(hadContent || elements.tablehead || elements.tableheadContainer);
 }
 
 /* =========================================================
@@ -426,11 +370,7 @@ export function clearDynamicContainers() {
 ========================================================= */
 
 function elementSnapshot(element = null) {
-  if (!element) {
-    return {
-      exists: false,
-    };
-  }
+  if (!element) return { exists: false };
 
   return {
     exists: true,
@@ -499,9 +439,7 @@ export function getShellSnapshot() {
       shellAlwaysVisible: true,
       chromeToggleOnly: true,
       finalRouteShellOwner: "router/shell.js",
-
       noImports: true,
-      noAppCore: true,
       noAuth: true,
       noRouterInternal: true,
       noEvents: true,
@@ -510,18 +448,11 @@ export function getShellSnapshot() {
       noRouteParsing: true,
       noHomeRoute: true,
       noNavigation: true,
-
-      doesNotOwnFinalRouteChrome: true,
-      doesNotOwnBootState: true,
       doesNotClobberRouterHost: true,
       doesNotClearViewContainer: true,
     },
   };
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   SHELL_VERSION,

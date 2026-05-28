@@ -151,6 +151,13 @@
     ),
     var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
 
+  --inc-status-open-accent: color-mix(in srgb, var(--info) 78%, #93c5fd 22%);
+  --inc-status-open-text: color-mix(in srgb, var(--info) 84%, var(--text-strong) 16%);
+  --inc-status-open-bg:
+    color-mix(in srgb, var(--info-bg) 72%, var(--surface-active));
+  --inc-status-open-border:
+    color-mix(in srgb, var(--border-info) 72%, var(--chip-border));
+
   display: grid;
   gap: var(--view-section-gap, var(--space-lg));
   inline-size: 100%;
@@ -641,8 +648,8 @@
 
 .incidencias-stat-card--open,
 .incidencias-stat-card--accent {
-  --inc-stat-color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent-border) 72%, var(--card-border));
+  --inc-stat-color: var(--inc-status-open-accent);
+  border-color: color-mix(in srgb, var(--inc-status-open-border) 72%, var(--card-border));
 }
 
 .incidencias-stat-card--closed,
@@ -1345,8 +1352,8 @@
 }
 
 .incidencias-row--open {
-  --inc-row-accent: var(--accent);
-  --inc-row-accent-soft: var(--accent-soft);
+  --inc-row-accent: var(--inc-status-open-accent);
+  --inc-row-accent-soft: var(--inc-status-open-bg);
 }
 
 .incidencias-row--progress {
@@ -1488,12 +1495,15 @@
   block-size: 100%;
 
   object-fit: cover;
+  border-radius: inherit;
 }
 
 .incidencias-avatar-fallback {
   position: absolute;
   inset: 0;
   z-index: 2;
+
+  border-radius: inherit;
 
   display: none;
   align-items: center;
@@ -1891,9 +1901,9 @@
 }
 
 .incidencias-chip--open {
-  color: color-mix(in srgb, var(--text-strong) 76%, var(--accent) 24%);
-  background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface-active));
-  border-color: var(--accent-border);
+  color: var(--inc-status-open-text);
+  background: var(--inc-status-open-bg);
+  border-color: var(--inc-status-open-border);
 }
 
 .incidencias-chip--progress {
@@ -2606,14 +2616,31 @@
 
 /* =========================================================
    TOOLTIPS · PROGRESSIVE ENHANCEMENT
+   - No pinta tooltip en acciones de detalle.
+   - Evita colisión del avatar con ::after.
+   - Avatar usa ::before para tooltip y conserva su brillo ::after.
 ========================================================= */
 
 :where(.incidencias-view-root, [data-incidencias-scope]) [data-tooltip] {
   position: relative;
 }
 
+/* La acción ya es evidente: no pintar tooltip de “Abrir detalle...” */
+:where(.incidencias-view-root, [data-incidencias-scope])
+  :is(.incidencias-detail-btn, .incidencias-row, [data-detail-target="true"], [data-action="open-ticket"])[data-tooltip]::before,
+:where(.incidencias-view-root, [data-incidencias-scope])
+  :is(.incidencias-detail-btn, .incidencias-row, [data-detail-target="true"], [data-action="open-ticket"])[data-tooltip]::after,
+:where(.incidencias-view-root, [data-incidencias-scope])
+  .incidencias-cell--actions [data-tooltip]::before,
+:where(.incidencias-view-root, [data-incidencias-scope])
+  .incidencias-cell--actions [data-tooltip]::after {
+  content: none !important;
+  display: none !important;
+}
+
 @media (hover: hover) and (pointer: fine) {
-  :where(.incidencias-view-root, [data-incidencias-scope]) [data-tooltip]::after {
+  :where(.incidencias-view-root, [data-incidencias-scope])
+    [data-tooltip]:not(.incidencias-detail-btn):not(.incidencias-row):not(.incidencias-avatar):not(.incidencias-agent-avatar):not([data-detail-target="true"]):not([data-action="open-ticket"])::after {
     content: attr(data-tooltip);
 
     position: absolute;
@@ -2648,10 +2675,66 @@
       transform var(--duration-fast) var(--ease-standard);
   }
 
-  :where(.incidencias-view-root, [data-incidencias-scope]) [data-tooltip]:hover::after,
-  :where(.incidencias-view-root, [data-incidencias-scope]) [data-tooltip]:focus-visible::after {
+  :where(.incidencias-view-root, [data-incidencias-scope])
+    [data-tooltip]:not(.incidencias-detail-btn):not(.incidencias-row):not(.incidencias-avatar):not(.incidencias-agent-avatar):not([data-detail-target="true"]):not([data-action="open-ticket"]):hover::after,
+  :where(.incidencias-view-root, [data-incidencias-scope])
+    [data-tooltip]:not(.incidencias-detail-btn):not(.incidencias-row):not(.incidencias-avatar):not(.incidencias-agent-avatar):not([data-detail-target="true"]):not([data-action="open-ticket"]):focus-visible::after {
     opacity: 1;
     transform: translate(-50%, 0);
+  }
+
+  :where(.incidencias-view-root, [data-incidencias-scope])
+    :is(.incidencias-avatar, .incidencias-agent-avatar)[data-tooltip] {
+    overflow: visible;
+  }
+
+  :where(.incidencias-view-root, [data-incidencias-scope])
+    :is(.incidencias-avatar, .incidencias-agent-avatar)[data-tooltip]::before {
+    content: attr(data-tooltip);
+
+    position: absolute;
+    inset-inline-start: 50%;
+    inset-block-end: calc(100% + 9px);
+    z-index: 40;
+
+    max-inline-size: min(260px, 70vw);
+
+    padding: 6px 8px;
+
+    border: 1px solid var(--popover-border, var(--border-default));
+    border-radius: var(--radius-md);
+
+    background: var(--popover-bg, var(--surface-4));
+    color: var(--text-strong);
+
+    box-shadow: var(--shadow-lg);
+
+    font-size: 11px;
+    font-weight: var(--weight-bold);
+    line-height: 1.2;
+    white-space: nowrap;
+
+    opacity: 0;
+    pointer-events: none;
+
+    transform: translate(-50%, 4px);
+
+    transition:
+      opacity var(--duration-fast) var(--ease-standard),
+      transform var(--duration-fast) var(--ease-standard);
+  }
+
+  :where(.incidencias-view-root, [data-incidencias-scope])
+    :is(.incidencias-avatar, .incidencias-agent-avatar)[data-tooltip]:hover::before,
+  :where(.incidencias-view-root, [data-incidencias-scope])
+    :is(.incidencias-avatar, .incidencias-agent-avatar)[data-tooltip]:focus-visible::before {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  :where(.incidencias-view-root, [data-incidencias-scope])
+    .incidencias-mini-badge--agent:has(.incidencias-agent-avatar[data-tooltip]) {
+    overflow: visible;
   }
 }
 
@@ -2718,6 +2801,13 @@
     inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent),
     inset 0 1px 0 rgba(255,255,255,.86),
     0 8px 18px color-mix(in srgb, var(--accent) 11%, transparent);
+
+  --inc-status-open-accent: color-mix(in srgb, var(--info) 72%, #60a5fa 28%);
+  --inc-status-open-text: color-mix(in srgb, var(--info-hover, var(--info)) 86%, #1d4ed8 14%);
+  --inc-status-open-bg:
+    color-mix(in srgb, var(--info-soft, var(--info-bg)) 86%, #ffffff 14%);
+  --inc-status-open-border:
+    color-mix(in srgb, var(--border-info) 76%, var(--chip-border));
 }
 
 [data-theme="light"] .incidencias-hero,
@@ -2813,9 +2903,9 @@
 }
 
 [data-theme="light"] .incidencias-chip--open {
-  color: var(--accent-active);
-  background: var(--accent-soft);
-  border-color: var(--accent-border-strong);
+  color: var(--inc-status-open-text);
+  background: var(--inc-status-open-bg);
+  border-color: var(--inc-status-open-border);
 }
 
 [data-theme="light"] .incidencias-chip--progress {
@@ -2909,6 +2999,15 @@
 /* =========================================================
    DARK THEME FIT
 ========================================================= */
+
+[data-theme="dark"] :where(.incidencias-view, .incidencias-view-root, [data-incidencias-scope]) {
+  --inc-status-open-accent: color-mix(in srgb, var(--info) 82%, #93c5fd 18%);
+  --inc-status-open-text: color-mix(in srgb, var(--info) 88%, #ffffff 12%);
+  --inc-status-open-bg:
+    color-mix(in srgb, var(--info-bg) 68%, var(--surface-active));
+  --inc-status-open-border:
+    color-mix(in srgb, var(--border-info) 74%, var(--chip-border));
+}
 
 [data-theme="dark"] .incidencias-filter-pills {
   background:
@@ -3436,4 +3535,24 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+
+/* =========================================================
+   INCIDENCIAS · AVATAR TOOLTIP FINAL OVERRIDE
+   Mantiene visibles los tooltips de avatar incluso con hard locks.
+========================================================= */
+
+@media (hover: hover) and (pointer: fine) {
+  .panel-content[data-view="incidencias"] :is(.incidencias-avatar, .incidencias-agent-avatar)[data-tooltip],
+  .incidencias-view-root :is(.incidencias-avatar, .incidencias-agent-avatar)[data-tooltip],
+  [data-incidencias-scope] :is(.incidencias-avatar, .incidencias-agent-avatar)[data-tooltip] {
+    overflow: visible !important;
+  }
+
+  .panel-content[data-view="incidencias"] .incidencias-mini-badge--agent:has(.incidencias-agent-avatar[data-tooltip]),
+  .incidencias-view-root .incidencias-mini-badge--agent:has(.incidencias-agent-avatar[data-tooltip]),
+  [data-incidencias-scope] .incidencias-mini-badge--agent:has(.incidencias-agent-avatar[data-tooltip]) {
+    overflow: visible !important;
+  }
 }

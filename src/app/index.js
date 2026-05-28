@@ -6,6 +6,8 @@
    - Orquestar el boot mínimo de la SPA.
    - Delegar Core, I18n, Toast, Auth, Router, Shell, Loader y UI.
    - Restaurar sesión antes del primer render Router.
+   - Pedir restore con silent refresh y cookie httpOnly.
+   - No limpiar sesión por access token caducado/rotado.
    - Sin Store, Services paralelos, warmup, eventos custom, fetch,
      storage ni lógica de dominio.
 ========================================================= */
@@ -58,7 +60,7 @@ import {
   getUISystemsSnapshot,
 } from "./ui.js";
 
-export const APP_INDEX_VERSION = "app.index.v11";
+export const APP_INDEX_VERSION = "app.index.v12";
 
 const CORE_MODULES = Object.freeze([
   ["auth", "Auth", Auth],
@@ -70,8 +72,13 @@ const CORE_MODULES = Object.freeze([
 const AUTH_BOOT_OPTIONS = Object.freeze({
   persistent: true,
   restoreOnBoot: true,
+
   allowSilentRefresh: true,
+  allowCookieRefresh: true,
   silentRefresh: true,
+
+  credentials: "include",
+
   skipNavigation: true,
   skipRedirect: true,
   noRedirect: true,
@@ -186,6 +193,14 @@ function safeCall(fn) {
   }
 }
 
+async function safeAsyncCall(fn) {
+  try {
+    return isFunction(fn) ? await fn() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function callRequired(target = null, method = "", label = "Módulo", payload = {}) {
   const fn = target?.[method];
 
@@ -279,22 +294,27 @@ function normalizeRestoreSummary(result = null) {
   const nested = isPlainObject(result.result) ? result.result : {};
   const data = isPlainObject(result.data) ? result.data : {};
   const auth = isPlainObject(result.auth) ? result.auth : {};
+  const snapshot = isPlainObject(result.snapshot) ? result.snapshot : {};
 
   return {
     ok: result.ok !== false,
+
+    restoreCompleted: result.restoreCompleted === true,
 
     restored: Boolean(
       result.restored ||
         nested.restored ||
         data.restored ||
-        auth.restored
+        auth.restored ||
+        snapshot.restored
     ),
 
     authenticated: Boolean(
       result.authenticated ||
         nested.authenticated ||
         data.authenticated ||
-        auth.authenticated
+        auth.authenticated ||
+        snapshot.authenticated
     ),
 
     hasUser: Boolean(
@@ -305,7 +325,8 @@ function normalizeRestoreSummary(result = null) {
         data.user ||
         data.currentUser ||
         auth.user ||
-        auth.currentUser
+        auth.currentUser ||
+        snapshot.hasUser
     ),
 
     hasSession: Boolean(
@@ -316,14 +337,32 @@ function normalizeRestoreSummary(result = null) {
         data.session ||
         data.currentSession ||
         auth.session ||
-        auth.currentSession
+        auth.currentSession ||
+        snapshot.hasSession
+    ),
+
+    supportsHttpOnlyRefresh: Boolean(
+      result.supportsHttpOnlyRefresh ||
+        nested.supportsHttpOnlyRefresh ||
+        data.supportsHttpOnlyRefresh ||
+        auth.supportsHttpOnlyRefresh ||
+        snapshot.supportsHttpOnlyRefresh
+    ),
+
+    hasCookieRefreshCandidate: Boolean(
+      result.hasCookieRefreshCandidate ||
+        nested.hasCookieRefreshCandidate ||
+        data.hasCookieRefreshCandidate ||
+        auth.hasCookieRefreshCandidate ||
+        snapshot.hasCookieRefreshCandidate
     ),
 
     source: cleanText(
       result.source ||
         nested.source ||
         data.source ||
-        auth.source,
+        auth.source ||
+        snapshot.source,
       "app.session"
     ),
   };
@@ -361,12 +400,18 @@ async function runBoot(options = {}) {
 
     await callRequired(Toast, "init", "Toast", corePayload);
 
-    safeCall(() => initUISystems(withCore(payload, {
+    await safeAsyncCall(() => initUISystems(withCore(payload, {
       Toast,
     })));
 
     await callRequired(Auth, "init", "Auth", authPayload);
 
+    /*
+      Punto crítico:
+      restore antes de configurar/renderizar Router.
+      Auth decide /api/auth/me, refresh silencioso, cookie httpOnly y limpieza
+      sólo si backend confirma sesión inválida.
+    */
     const restoreResult = await restoreAuthSession(authPayload);
     lastRestoreResult = normalizeRestoreSummary(restoreResult);
 
@@ -467,6 +512,11 @@ export function getAppSnapshot() {
       singleEntryPoint: true,
       delegatesCoreAuthRouterUi: true,
       restoresAuthBeforeRouterRender: true,
+
+      restoreUsesSilentRefresh: true,
+      restoreUsesCookieRefresh: true,
+      credentialsInclude: true,
+      tokenExpiredDoesNotMeanLogout: true,
 
       noStore: true,
       noParallelServices: true,

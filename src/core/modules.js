@@ -13,10 +13,10 @@
    - Sin metadata pesada.
    - Sin snapshots grandes.
    - Sin dispose avanzado.
-   - Sin lógica rara.
+   - Sin lógica de dominio.
 ========================================================= */
 
-export const MODULES_VERSION = "core.modules.v2";
+export const MODULES_VERSION = "core.modules.v3";
 
 export const DEFAULT_DISPOSE_METHODS = Object.freeze([
   "destroy",
@@ -51,7 +51,13 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function normalizeName(name = "") {
+  return text(name, "").toLowerCase();
+}
+
 function emit(events, name, payload = {}) {
+  if (!name) return false;
+
   try {
     if (isFunction(events?.emit)) {
       events.emit(name, payload);
@@ -74,10 +80,6 @@ function emit(events, name, payload = {}) {
   return false;
 }
 
-function normalizeName(name = "") {
-  return text(name, "");
-}
-
 function ensureMap(value) {
   return value instanceof Map ? value : new Map();
 }
@@ -94,13 +96,13 @@ function callDispose(instance = null) {
   if (!instance) return false;
 
   for (const method of DEFAULT_DISPOSE_METHODS) {
+    if (!isFunction(instance?.[method])) continue;
+
     try {
-      if (isFunction(instance?.[method])) {
-        instance[method]();
-        return true;
-      }
+      instance[method]();
+      return true;
     } catch {
-      return false;
+      // Se prueba el siguiente método si existe.
     }
   }
 
@@ -122,6 +124,7 @@ export function createModules(input = {}) {
   const events = input.events || input.bus || null;
 
   registry.modules = ensureMap(registry.modules);
+  registry.moduleAliases = ensureMap(registry.moduleAliases);
 
   function register(name = "", instance = null, options = {}) {
     const key = normalizeName(name);
@@ -130,8 +133,9 @@ export function createModules(input = {}) {
 
     const exists = registry.modules.has(key);
     const previous = exists ? registry.modules.get(key) : null;
+    const overwrite = options.overwrite === true || options.replace === true;
 
-    if (exists && options.overwrite !== true && options.replace !== true) {
+    if (exists && !overwrite) {
       return previous;
     }
 
@@ -144,6 +148,7 @@ export function createModules(input = {}) {
     }
 
     registry.modules.set(key, instance);
+    registry.moduleAliases.delete(key);
 
     emit(events, MODULE_EVENTS.registered, {
       name: key,
@@ -165,7 +170,11 @@ export function createModules(input = {}) {
   }
 
   function get(name = "") {
-    return registry.modules.get(normalizeName(name)) || null;
+    const key = normalizeName(name);
+
+    if (!key) return null;
+
+    return registry.modules.get(key) || null;
   }
 
   function requireModule(name = "") {
@@ -175,6 +184,23 @@ export function createModules(input = {}) {
   function has(name = "") {
     const key = normalizeName(name);
     return Boolean(key && registry.modules.has(key));
+  }
+
+  function removeAliasesForSource(sourceName = "") {
+    const source = normalizeName(sourceName);
+    let removed = 0;
+
+    if (!source) return removed;
+
+    for (const [aliasName, targetName] of [...registry.moduleAliases.entries()]) {
+      if (targetName !== source) continue;
+
+      registry.moduleAliases.delete(aliasName);
+      registry.modules.delete(aliasName);
+      removed += 1;
+    }
+
+    return removed;
   }
 
   function remove(name = "", options = {}) {
@@ -190,10 +216,16 @@ export function createModules(input = {}) {
     }
 
     registry.modules.delete(key);
+    registry.moduleAliases.delete(key);
+
+    const aliasesRemoved = options.removeAliases === false
+      ? 0
+      : removeAliasesForSource(key);
 
     emit(events, MODULE_EVENTS.removed, {
       name: key,
       disposed,
+      aliasesRemoved,
     });
 
     return true;
@@ -204,14 +236,17 @@ export function createModules(input = {}) {
     let disposed = 0;
 
     if (options.dispose === true) {
-      for (const name of names) {
-        if (callDispose(get(name))) {
+      const uniqueInstances = new Set(registry.modules.values());
+
+      for (const instance of uniqueInstances) {
+        if (callDispose(instance)) {
           disposed += 1;
         }
       }
     }
 
     registry.modules.clear();
+    registry.moduleAliases.clear();
 
     emit(events, MODULE_EVENTS.cleared, {
       removed: names.length,
@@ -231,8 +266,7 @@ export function createModules(input = {}) {
   }
 
   function dispose(name = "") {
-    const instance = get(name);
-    return callDispose(instance);
+    return callDispose(get(name));
   }
 
   function disposeModule(name = "") {
@@ -307,42 +341,26 @@ export function createModules(input = {}) {
     return {
       name: key,
       registered: true,
+      aliasOf: registry.moduleAliases.get(key) || null,
       type: typeof instance,
       disposable: isDisposable(instance),
     };
   }
 
   function getModuleSnapshot(name = "") {
-    const key = normalizeName(name);
-    const instance = get(key);
+    const meta = getMeta(name);
 
-    if (!instance) return null;
+    if (!meta) return null;
 
     return {
-      name: key,
-      type: typeof instance,
-      disposable: isDisposable(instance),
+      name: meta.name,
+      aliasOf: meta.aliasOf,
+      type: meta.type,
+      disposable: meta.disposable,
     };
   }
 
-  function getSnapshot() {
-    return {
-      version: MODULES_VERSION,
-      count: count(),
-      names: list(),
-
-      policy: {
-        minimalModuleRegistry: true,
-        noImports: true,
-        noMetadataHeavy: true,
-        noDisposeAdvanced: true,
-        aliasesSimpleOnly: true,
-        snapshotMinimal: true,
-      },
-    };
-  }
-
-  function alias(name = "", aliases = []) {
+  function alias(name = "", aliases = [], options = {}) {
     const sourceName = normalizeName(name);
     const instance = get(sourceName);
 
@@ -356,9 +374,13 @@ export function createModules(input = {}) {
 
       if (!key || key === sourceName) continue;
 
-      const result = register(key, instance);
+      const result = register(key, instance, {
+        overwrite: options.overwrite === true,
+        replace: options.replace === true,
+      });
 
-      if (result) {
+      if (result === instance) {
+        registry.moduleAliases.set(key, sourceName);
         added += 1;
       }
     }
@@ -366,12 +388,40 @@ export function createModules(input = {}) {
     return added > 0;
   }
 
-  function aliases() {
-    return [];
+  function aliases(name = "") {
+    const sourceName = normalizeName(name);
+
+    if (!sourceName) {
+      return [...registry.moduleAliases.keys()];
+    }
+
+    return [...registry.moduleAliases.entries()]
+      .filter(([, source]) => source === sourceName)
+      .map(([aliasName]) => aliasName);
   }
 
   function aliasEntries() {
-    return [];
+    return [...registry.moduleAliases.entries()];
+  }
+
+  function getSnapshot() {
+    return {
+      version: MODULES_VERSION,
+
+      count: count(),
+      names: list(),
+      aliases: aliasEntries(),
+
+      policy: {
+        minimalModuleRegistry: true,
+        noImports: true,
+        noMetadataHeavy: true,
+        noDisposeAdvanced: true,
+        aliasesSimpleOnly: true,
+        namesNormalized: true,
+        snapshotMinimal: true,
+      },
+    };
   }
 
   emit(events, MODULE_EVENTS.ready, {

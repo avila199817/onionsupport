@@ -3,28 +3,18 @@
    Archivo: /src/preboot/theme.js
 
    Responsabilidad:
-   - Aplicar tema inicial según sistema.
-   - Aplicar idioma base inicial: castellano.
-   - Preparar html/body antes del arranque SPA.
-   - Base primaria: es.
-   - Sin imports.
-   - Sin storage.
-   - Sin API.
-   - Sin Auth.
-   - Sin Router.
-   - Sin HTTP.
-   - Sin eventos custom.
-   - Sin i18n propio.
-   - Sin detección de idioma por ahora.
-   - Sin magia negra.
+   - Tema inicial y vivo según sistema.
+   - Idioma base inicial: castellano.
+   - Sin imports, storage, API, Auth, Router, HTTP ni i18n propio.
 ========================================================= */
 
 (() => {
   "use strict";
 
-  const SUPPORTED_LOCALES = Object.freeze(["es", "ca", "en"]);
   const BASE_LOCALE = "es";
+  const SUPPORTED_LOCALES = Object.freeze(["es", "ca", "en"]);
 
+  const DARK_QUERY = "(prefers-color-scheme: dark)";
   const THEMES = Object.freeze(["light", "dark"]);
   const FALLBACK_THEME = "light";
 
@@ -33,44 +23,38 @@
     dark: "#0a0c11",
   });
 
-  /* =========================================================
-     BASICS
-  ========================================================= */
+  let systemThemeQuery = null;
+  let systemThemeListenerBound = false;
 
   function isBrowser() {
     return typeof window !== "undefined" && typeof document !== "undefined";
   }
 
-  function text(value = "", fallback = "") {
+  function cleanText(value = "", fallback = "") {
     const output = String(value ?? "").trim();
     return output || fallback;
   }
 
   function normalizeTheme(value = "", fallback = FALLBACK_THEME) {
-    const theme = text(value, "").toLowerCase();
+    const theme = cleanText(value, "").toLowerCase();
     return THEMES.includes(theme) ? theme : fallback;
   }
 
-  function resolveLocale() {
-    return {
-      value: BASE_LOCALE,
-      source: "base",
-    };
+  function getSystemThemeQuery() {
+    if (systemThemeQuery) return systemThemeQuery;
+
+    try {
+      systemThemeQuery = window.matchMedia(DARK_QUERY);
+    } catch {
+      systemThemeQuery = null;
+    }
+
+    return systemThemeQuery;
   }
 
   function resolveSystemTheme() {
-    try {
-      return window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
-    } catch {
-      return FALLBACK_THEME;
-    }
+    return getSystemThemeQuery()?.matches ? "dark" : "light";
   }
-
-  /* =========================================================
-     APPLY
-  ========================================================= */
 
   function applyThemeToElement(element = null, theme = FALLBACK_THEME) {
     if (!element) return false;
@@ -93,15 +77,15 @@
     }
   }
 
-  function applyLocaleToElement(element = null, locale = null) {
-    if (!element || !locale) return false;
+  function applyLocaleToElement(element = null) {
+    if (!element) return false;
 
     try {
       element.lang = BASE_LOCALE;
       element.dir = "ltr";
 
       element.dataset.locale = BASE_LOCALE;
-      element.dataset.localeSource = text(locale.source, "base");
+      element.dataset.localeSource = "base";
       element.dataset.localeFallback = BASE_LOCALE;
       element.dataset.localeSupported = SUPPORTED_LOCALES.join(" ");
 
@@ -138,7 +122,7 @@
     }
   }
 
-  function writePrebootSnapshot(theme = FALLBACK_THEME, locale = null) {
+  function writePrebootSnapshot(theme = FALLBACK_THEME) {
     const cleanTheme = normalizeTheme(theme);
 
     try {
@@ -149,7 +133,7 @@
         systemTheme: cleanTheme,
 
         locale: BASE_LOCALE,
-        localeSource: text(locale?.source, "base"),
+        localeSource: "base",
         fallbackLocale: BASE_LOCALE,
         supportedLocales: [...SUPPORTED_LOCALES],
       };
@@ -164,29 +148,52 @@
     if (!isBrowser()) return false;
 
     const theme = resolveSystemTheme();
-    const locale = resolveLocale();
 
     applyThemeToElement(document.documentElement, theme);
-    applyLocaleToElement(document.documentElement, locale);
+    applyLocaleToElement(document.documentElement);
 
     if (document.body) {
       applyThemeToElement(document.body, theme);
-      applyLocaleToElement(document.body, locale);
+      applyLocaleToElement(document.body);
     }
 
     applyThemeColor(theme);
-    writePrebootSnapshot(theme, locale);
+    writePrebootSnapshot(theme);
 
     return true;
   }
 
-  /* =========================================================
-     RUN
-  ========================================================= */
+  function bindSystemThemeListener() {
+    if (systemThemeListenerBound) return true;
+
+    const query = getSystemThemeQuery();
+
+    if (!query) return false;
+
+    const onSystemThemeChange = () => {
+      applyPreboot();
+    };
+
+    try {
+      if (typeof query.addEventListener === "function") {
+        query.addEventListener("change", onSystemThemeChange);
+      } else if (typeof query.addListener === "function") {
+        query.addListener(onSystemThemeChange);
+      } else {
+        return false;
+      }
+
+      systemThemeListenerBound = true;
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   if (!isBrowser()) return;
 
   applyPreboot();
+  bindSystemThemeListener();
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", applyPreboot, {

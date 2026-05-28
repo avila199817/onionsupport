@@ -7,7 +7,12 @@
    - Auth estricta: token usable + user usable.
    - Token sin user = hasToken, pero NO authenticated.
    - User sin token = NO authenticated.
-   - User inválido si disabled/deleted/archived/active=false.
+   - User inválido sólo por:
+     - disabled === true
+     - suspended === true
+     - active === false
+     - enabled === false
+     - status/estado/state: "suspended" o "desactivado"
    - Roles únicos: admin / user.
    - Idioma base: es.
    - Sin imports.
@@ -17,7 +22,7 @@
    - Sin Toast.
    - Sin network listeners.
    - Sin rutas técnicas.
-   - Sin 2FA/MFA/OTP.
+   - Sin 2FA/MFA/OTP funcional.
    - Sin secretos en snapshots.
 ========================================================= */
 
@@ -32,20 +37,8 @@ const VALID_THEMES = new Set(["dark", "light", "system"]);
 const VALID_ROLES = new Set(["admin", "user"]);
 
 const INVALID_USER_STATUSES = new Set([
-  "disabled",
-  "inactive",
-  "deleted",
-  "archived",
-  "revoked",
-  "blocked",
-  "banned",
   "suspended",
   "desactivado",
-  "inactivo",
-  "eliminado",
-  "archivado",
-  "bloqueado",
-  "suspendido",
 ]);
 
 const SENSITIVE_KEYS = new Set([
@@ -503,15 +496,9 @@ function userDisabled(user = null) {
 
   return Boolean(
     user.disabled === true ||
-      user.deleted === true ||
-      user.archived === true ||
-      user.revoked === true ||
-      user.blocked === true ||
-      user.banned === true ||
       user.suspended === true ||
       user.active === false ||
       user.enabled === false ||
-      Boolean(user.deletedAt) ||
       INVALID_USER_STATUSES.has(status)
   );
 }
@@ -682,8 +669,7 @@ function normalizeUser(value = null) {
     active: true,
     enabled: true,
     disabled: false,
-    deleted: false,
-    archived: false,
+    suspended: false,
 
     isAdmin: role === "admin",
     isUser: role === "user",
@@ -1451,6 +1437,7 @@ export function getStateDebugSnapshot(state = {}) {
       noToast: true,
       authRequiresTokenAndUser: true,
       tokenWithoutUserIsNotAuthenticated: true,
+      invalidStatuses: ["suspended", "desactivado"],
       roles: ["admin", "user"],
       defaultLang: DEFAULT_LANG,
       snapshotRedacted: true,

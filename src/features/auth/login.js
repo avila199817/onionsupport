@@ -6,7 +6,8 @@
    - Login público vía CoreHttp.
    - Normalizar credenciales.
    - Validar respuesta mínima.
-   - Exigir access token + refresh token + user usable.
+   - Exigir access token + user usable.
+   - Refresh token visible opcional: puede ir en cookie httpOnly.
    - Devolver token + user para que Auth/index.js aplique sesión.
    - Devolver refresh/session si el backend lo entrega.
    - Delegar normalización de usuario/sesión en session.js.
@@ -43,7 +44,7 @@ import {
 
 import * as SessionApi from "./session.js";
 
-export const LOGIN_VERSION = "auth.login.v10";
+export const LOGIN_VERSION = "auth.login.v11";
 
 const LOGIN_ROUTE = ROUTES.login || "/login";
 const HOME_ROUTE = "/";
@@ -116,32 +117,6 @@ function redact(value = "") {
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-}
-
-function payloadValue(payload = {}, names = []) {
-  if (isFormData(payload)) {
-    for (const name of names) {
-      const value = payload.get(name);
-
-      if (value !== undefined && value !== null && value !== "") {
-        return value;
-      }
-    }
-
-    return undefined;
-  }
-
-  if (!isObject(payload)) return undefined;
-
-  for (const name of names) {
-    const value = payload[name];
-
-    if (value !== undefined && value !== null && value !== "") {
-      return value;
-    }
-  }
-
-  return undefined;
 }
 
 function sessionMethod(name = "") {
@@ -646,8 +621,15 @@ function normalizeLoginResponse(response = {}) {
   const user = readUser(response);
   const session = readSession(response, user);
 
-  const authenticated = Boolean(token && refreshToken && user);
-  const persistentReady = Boolean(refreshToken);
+  /*
+    Login válido:
+    - access token usable
+    - user usable
+    El refresh token visible es opcional porque puede ir en cookie httpOnly.
+  */
+  const authenticated = Boolean(token && user);
+  const hasVisibleRefreshToken = Boolean(refreshToken);
+  const persistentReady = authenticated;
 
   const role = authenticated ? user.role || null : null;
   const slug = authenticated ? extractLoginUserSlug(user) : "";
@@ -659,6 +641,8 @@ function normalizeLoginResponse(response = {}) {
     authenticated,
 
     persistentReady,
+    hasVisibleRefreshToken,
+    supportsHttpOnlyRefresh: true,
 
     token,
     accessToken: token,
@@ -884,6 +868,8 @@ function loginOptions(options = {}) {
     skipAuth: true,
     noAuthHeader: true,
 
+    credentials: options.credentials || "include",
+
     retries: 0,
     storeError: false,
     cache: "no-store",
@@ -946,16 +932,6 @@ export async function login(credentials = {}, options = {}) {
           {
             status: 401,
             code: result.code || "LOGIN_ACCESS_TOKEN_MISSING",
-          }
-        );
-      }
-
-      if (!result.refreshToken) {
-        throw createLoginError(
-          result.message || "El login no devolvió refresh token persistente.",
-          {
-            status: 401,
-            code: result.code || "LOGIN_REFRESH_TOKEN_MISSING",
           }
         );
       }
@@ -1054,6 +1030,7 @@ export function getLoginSnapshot() {
       ownRouter: false,
       ownToast: false,
       ownStorage: false,
+      credentialsInclude: true,
     },
 
     policy: {
@@ -1066,10 +1043,11 @@ export function getLoginSnapshot() {
       noLocalBlockedRouteFallback: true,
 
       requiresAccessToken: true,
-      requiresRefreshToken: true,
+      requiresVisibleRefreshToken: false,
+      supportsHttpOnlyRefreshCookie: true,
       validatesUser: true,
-      returnsRefreshAndSessionContext: true,
-      persistentSessionRequired: true,
+      returnsRefreshAndSessionContextWhenBackendProvidesThem: true,
+      persistentSessionCanUseCookie: true,
 
       avoidsSessionEnvelopeAsUser: true,
 

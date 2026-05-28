@@ -36,6 +36,8 @@
 
 import {
   config,
+  ALLOWED_ROLES,
+  SENSITIVE_QUERY_PARAMS,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
   buildUserHomeRoute as configBuildUserHomeRoute,
   canonicalRoutePath as configCanonicalRoutePath,
@@ -50,7 +52,6 @@ import {
   createInitialState,
   getStateBase as getStateSnapshot,
   setStateBase as setStateSnapshot,
-  computeAuthenticated,
   getStateDebugSnapshot,
 } from "./state.js";
 
@@ -75,7 +76,7 @@ import { createHooks } from "./hooks.js";
 
 import Http, { installHttp } from "./http.js";
 
-export const CORE_VERSION = "core.index.v9";
+export const CORE_VERSION = "core.index.v10";
 
 const APP_NAME =
   config?.appName ||
@@ -85,7 +86,12 @@ const APP_NAME =
 const ROOT_PATH = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
-const VALID_ROLES = Object.freeze(["admin", "user"]);
+const VALID_ROLES = new Set(
+  (Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
+    ? ALLOWED_ROLES
+    : ["admin", "user"]
+  ).map((role) => String(role).toLowerCase())
+);
 
 const TOKEN_STATE_KEYS = new Set([
   "token",
@@ -155,24 +161,11 @@ const SENSITIVE_OBJECT_KEYS = new Set([
   "connection_string",
 ]);
 
-const SENSITIVE_QUERY_KEYS = new Set([
-  "token",
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "secret",
-  "session",
-  "code",
-  "password",
-  "pwd",
-  "key",
-  "sig",
-  "signature",
-  "jwt",
-  "authorization",
-  "reset_token",
-  "activation_token",
-]);
+const SENSITIVE_QUERY_KEYS = new Set(
+  SENSITIVE_QUERY_PARAMS.map((key) => String(key).toLowerCase())
+);
+
+const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
 
 /* =========================================================
    BASICS
@@ -221,12 +214,28 @@ function clone(value) {
   }
 }
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSensitiveQueryPattern() {
+  const keys = [...SENSITIVE_QUERY_KEYS]
+    .map(escapeRegExp)
+    .filter(Boolean)
+    .join("|");
+
+  return keys
+    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
+    : null;
+}
+
 function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
+  const text = cleanText(value, "");
+  const redactedQuery = SENSITIVE_QUERY_PATTERN
+    ? text.replace(SENSITIVE_QUERY_PATTERN, "$1***")
+    : text;
+
+  return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
@@ -265,7 +274,7 @@ function normalizeRole(value = "") {
 
   const role = cleanText(value, "").toLowerCase();
 
-  return VALID_ROLES.includes(role) ? role : "";
+  return VALID_ROLES.has(role) ? role : "";
 }
 
 function cleanRole(value = "") {
@@ -339,9 +348,25 @@ function normalizeSearch(search = "") {
 
   if (!value || value === "?") return "";
 
-  return value.startsWith("?")
+  const normalized = value.startsWith("?")
     ? value
     : `?${value.replace(/^\?+/, "")}`;
+
+  try {
+    const params = new URLSearchParams(normalized);
+
+    for (const key of [...params.keys()]) {
+      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+        params.delete(key);
+      }
+    }
+
+    const output = params.toString();
+
+    return output ? `?${output}` : "";
+  } catch {
+    return "";
+  }
 }
 
 function normalizeHash(hash = "") {
@@ -349,9 +374,30 @@ function normalizeHash(hash = "") {
 
   if (!value || value === "#") return "";
 
-  return value.startsWith("#")
+  const normalized = value.startsWith("#")
     ? value
     : `#${value.replace(/^#+/, "")}`;
+
+  const body = normalized.slice(1);
+
+  if (!body || /[\r\n\t\\]/.test(body)) return "";
+
+  const queryIndex = body.indexOf("?");
+
+  if (queryIndex >= 0) {
+    const hashPath = body.slice(0, queryIndex);
+    const query = body.slice(queryIndex + 1);
+    const cleanQuery = normalizeSearch(`?${query}`);
+
+    return cleanQuery ? `#${hashPath}${cleanQuery}` : `#${hashPath}`;
+  }
+
+  if (/^[^/?#=&]+=/i.test(body)) {
+    const cleanQuery = normalizeSearch(`?${body}`);
+    return cleanQuery ? `#${cleanQuery.slice(1)}` : "";
+  }
+
+  return redact(normalized);
 }
 
 function splitPath(path = ROOT_PATH) {
@@ -381,64 +427,11 @@ function splitPath(path = ROOT_PATH) {
   };
 }
 
-function keyIsSensitiveQueryParam(key = "") {
-  return SENSITIVE_QUERY_KEYS.has(cleanText(key, "").toLowerCase());
-}
-
-function sanitizeSearch(search = "") {
-  const normalized = normalizeSearch(search);
-
-  if (!normalized) return "";
-
-  try {
-    const params = new URLSearchParams(normalized);
-
-    for (const key of [...params.keys()]) {
-      if (keyIsSensitiveQueryParam(key)) {
-        params.delete(key);
-      }
-    }
-
-    const output = params.toString();
-
-    return output ? `?${output}` : "";
-  } catch {
-    return "";
-  }
-}
-
-function sanitizeHash(hash = "") {
-  const normalized = normalizeHash(hash);
-
-  if (!normalized) return "";
-
-  const body = normalized.slice(1);
-
-  if (!body || /[\r\n\t\\]/.test(body)) return "";
-
-  const queryIndex = body.indexOf("?");
-
-  if (queryIndex >= 0) {
-    const hashPath = body.slice(0, queryIndex);
-    const query = body.slice(queryIndex + 1);
-    const cleanQuery = sanitizeSearch(`?${query}`);
-
-    return cleanQuery ? `#${hashPath}${cleanQuery}` : `#${hashPath}`;
-  }
-
-  if (/^[^/?#=&]+=/i.test(body)) {
-    const cleanQuery = sanitizeSearch(`?${body}`);
-    return cleanQuery ? `#${cleanQuery.slice(1)}` : "";
-  }
-
-  return redact(normalized);
-}
-
 function joinPath(parts = {}) {
   return [
     normalizePathname(parts.pathname || ROOT_PATH),
-    sanitizeSearch(parts.search || ""),
-    sanitizeHash(parts.hash || ""),
+    normalizeSearch(parts.search || ""),
+    normalizeHash(parts.hash || ""),
   ].join("");
 }
 
@@ -565,12 +558,6 @@ function isUserScopedPath(path = ROOT_PATH) {
   return Boolean(getUserScopedPathInfo(path).scoped);
 }
 
-function rawPathHasSensitiveQuery(path = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
-    String(path || "")
-  );
-}
-
 function safeInternalPath(path = ROOT_PATH) {
   const raw = cleanText(path, ROOT_PATH);
 
@@ -587,9 +574,7 @@ function safeInternalPath(path = ROOT_PATH) {
   if (/[\r\n\t\\]/.test(target)) return ROOT_PATH;
   if (isBlockedRoutePath(target)) return ROOT_PATH;
 
-  return rawPathHasSensitiveQuery(raw)
-    ? target
-    : target;
+  return target || ROOT_PATH;
 }
 
 /* =========================================================
@@ -900,6 +885,7 @@ function emitStateChange(source = "core:setState") {
 
 function getState(options = {}) {
   dropForbiddenStateFields(state);
+
   return options.raw === true
     ? state
     : getStateSnapshot(state, options);
@@ -936,8 +922,7 @@ function patchState(patch = {}, options = {}) {
 }
 
 function isAuthenticated() {
-  const snapshot = getState();
-  return Boolean(snapshot.authenticated);
+  return Boolean(getState().authenticated);
 }
 
 function getCurrentUser() {
@@ -1483,7 +1468,7 @@ function getSnapshot() {
       configOwnsBlockedRoutes: true,
       noLocalBlockedRouteList: true,
 
-      roles: ["admin", "user"],
+      roles: [...VALID_ROLES],
       authRequiresTokenAndUsableUser: true,
 
       userSlugHome: true,

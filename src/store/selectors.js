@@ -3,21 +3,47 @@
    Archivo: /src/store/selectors.js
 
    Responsabilidad:
-   - Selectores mínimos sobre slices reales.
+   - Selectores mínimos sobre slices reales del Store.
+   - Store sólo expone app/ui/entities/flags/meta.
+   - Compat antigua para selectores Auth como no-op seguro.
    - Sin imports.
    - Sin collections.js.
    - Sin recursos inventados.
    - Sin permisos complejos.
-   - Sin token raw por defecto.
-   - Auth estricta: hasToken + user usable.
-   - User inválido sólo si disabled.
-   - Roles únicos: admin / user.
+   - Sin token raw.
+   - Sin usuario Auth.
+   - Sin sesión Auth.
+   - Sin roles Auth.
+   - Auth real pertenece a features/auth + core/state.
 ========================================================= */
 
-export const STORE_SELECTORS_VERSION = "simple";
+export const STORE_SELECTORS_VERSION = "store.selectors.v3";
 
-const ROLE_ADMIN = "admin";
-const ROLE_USER = "user";
+const DEFAULT_ROUTE = "/";
+const DEFAULT_LANG = "es";
+const DEFAULT_THEME = "system";
+const DEFAULT_TITLE = "Onion Support";
+
+const ROOT_KEYS = Object.freeze([
+  "app",
+  "ui",
+  "entities",
+  "flags",
+  "meta",
+]);
+
+const BLOCKED_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+]);
+
+const SENSITIVE_KEY_RE =
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|role|roles|permissions)/i;
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -28,7 +54,11 @@ function isFunction(value) {
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -37,24 +67,63 @@ function clone(value) {
   if (value === null) return null;
 
   try {
-    return structuredClone(value);
-  } catch {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
     }
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
   }
 }
 
-function getByPath(object, path, fallback = undefined) {
-  const parts = String(path || "")
+function nowIso() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
+}
+
+function isBlockedKey(key = "") {
+  return BLOCKED_KEYS.has(String(key || ""));
+}
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function isRootKey(key = "") {
+  return ROOT_KEYS.includes(String(key || ""));
+}
+
+function pathParts(path = "") {
+  return String(path || "")
+    .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
     .split(".")
     .map((part) => part.trim())
     .filter(Boolean)
-    .filter((part) => !["__proto__", "prototype", "constructor"].includes(part));
+    .filter((part) => !isBlockedKey(part))
+    .filter((part) => !isSensitiveKey(part));
+}
 
-  if (!parts.length) return fallback;
+function pathAllowed(path = "") {
+  const parts = pathParts(path);
+
+  if (!parts.length) return false;
+  if (!isRootKey(parts[0])) return false;
+
+  return true;
+}
+
+function getByPath(object, path, fallback = undefined) {
+  const parts = pathParts(path);
+
+  if (!parts.length || !pathAllowed(parts)) return fallback;
 
   let current = object;
 
@@ -66,84 +135,11 @@ function getByPath(object, path, fallback = undefined) {
   return current === undefined ? fallback : current;
 }
 
-function normalizeRole(value = "") {
-  return String(value).toLowerCase() === ROLE_ADMIN ? ROLE_ADMIN : ROLE_USER;
-}
-
-function userDisabled(user = null) {
-  if (!isObject(user)) return true;
-
-  return (
-    user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
-  );
-}
-
-function usableUser(user = null) {
-  if (!isObject(user)) return false;
-  if (userDisabled(user)) return false;
-
-  return Boolean(
-    user.id ||
-      user.userId ||
-      user.username ||
-      user.slug ||
-      user.email
-  );
-}
-
-function userId(user = null) {
-  return user?.userId || user?.id || null;
-}
-
-function username(user = null) {
-  return user?.username || user?.slug || user?.email || "";
-}
-
-function displayName(user = null) {
-  return (
-    user?.displayName ||
-    user?.fullName ||
-    user?.name ||
-    user?.nombre ||
-    user?.username ||
-    user?.email ||
-    "Usuario"
-  );
-}
-
-function avatarUrl(user = null) {
-  return user?.avatarUrl || user?.avatar || user?.picture || "";
-}
-
-function hasToken(session = {}, root = {}) {
-  return Boolean(session.hasToken || root.hasToken);
-}
-
-function sessionUser(session = {}, root = {}) {
-  return (
-    session.user ||
-    session.currentUser ||
-    root.user ||
-    root.currentUser ||
-    null
-  );
-}
-
-function isAuthenticated(session = {}, root = {}) {
-  return Boolean(
-    (session.authenticated === true || root.authenticated === true) &&
-      hasToken(session, root) &&
-      usableUser(sessionUser(session, root))
-  );
-}
-
 function entityId(entity = null) {
   if (!isObject(entity)) return "";
 
   return text(
     entity.id ||
-      entity.userId ||
       entity.ticketId ||
       entity.clienteId ||
       entity.facturaId ||
@@ -154,12 +150,30 @@ function entityId(entity = null) {
   );
 }
 
-function asList(value) {
-  return Array.isArray(value) ? value : [];
+function collectionName(key = "") {
+  const name = text(key, "");
+
+  if (!name) return "";
+  if (isBlockedKey(name)) return "";
+  if (isSensitiveKey(name)) return "";
+
+  return name;
 }
 
-function nowIso() {
-  return new Date().toISOString();
+function nowSnapshot() {
+  return nowIso();
+}
+
+function normalizeTheme(value = DEFAULT_THEME) {
+  const theme = text(value, DEFAULT_THEME).toLowerCase();
+
+  return ["dark", "light", "system"].includes(theme) ? theme : DEFAULT_THEME;
+}
+
+function normalizeLang(value = DEFAULT_LANG) {
+  const lang = text(value, DEFAULT_LANG).toLowerCase().split("-")[0];
+
+  return ["ca", "es", "en"].includes(lang) ? lang : DEFAULT_LANG;
 }
 
 /* =========================================================
@@ -175,10 +189,6 @@ export function createSelectors({ state } = {}) {
 
   function app() {
     return isObject(root().app) ? root().app : {};
-  }
-
-  function session() {
-    return isObject(root().session) ? root().session : {};
   }
 
   function ui() {
@@ -197,31 +207,13 @@ export function createSelectors({ state } = {}) {
     return isObject(root().meta) ? root().meta : {};
   }
 
-  function currentUserRaw() {
-    return isAuthenticated(session(), root())
-      ? sessionUser(session(), root())
-      : null;
-  }
-
-  function currentRoleRaw() {
-    const user = currentUserRaw();
-
-    if (!user) return null;
-
-    return normalizeRole(session().role || root().role || user.role || user.rol);
-  }
-
   function collectionRawValue(key = "") {
-    const name = text(key, "");
+    const name = collectionName(key);
 
     if (!name) return undefined;
 
     if (Object.prototype.hasOwnProperty.call(entities(), name)) {
       return entities()[name];
-    }
-
-    if (Object.prototype.hasOwnProperty.call(root(), name)) {
-      return root()[name];
     }
 
     return undefined;
@@ -230,6 +222,49 @@ export function createSelectors({ state } = {}) {
   function collectionListRaw(key = "") {
     const value = collectionRawValue(key);
     return Array.isArray(value) ? value : [];
+  }
+
+  function emptySessionSnapshot() {
+    return {
+      version: STORE_SELECTORS_VERSION,
+
+      authenticated: false,
+      hasToken: false,
+
+      token: null,
+      accessToken: null,
+      access_token: null,
+      refreshToken: null,
+      refresh_token: null,
+
+      user: null,
+      userIdentity: null,
+      userId: null,
+      username: null,
+      displayName: null,
+      avatar: null,
+
+      role: null,
+      roles: [],
+      permissions: [],
+
+      isAdmin: false,
+      isUser: false,
+      isSupport: false,
+      isManager: false,
+      isClient: false,
+
+      raw: null,
+      at: nowSnapshot(),
+
+      policy: {
+        compatOnly: true,
+        storeDoesNotOwnAuth: true,
+        storeDoesNotOwnSession: true,
+        noTokenExposure: true,
+        noUserAuthObjects: true,
+      },
+    };
   }
 
   const selectors = {
@@ -262,15 +297,15 @@ export function createSelectors({ state } = {}) {
     },
 
     currentRoute() {
-      return text(app().route || root().route, "/");
+      return text(app().route || root().route, DEFAULT_ROUTE);
     },
 
     currentCanonicalPath() {
-      return text(app().canonicalPath || root().canonicalPath || selectors.currentRoute(), "/");
+      return text(app().canonicalPath || root().canonicalPath || selectors.currentRoute(), DEFAULT_ROUTE);
     },
 
     currentPublicPath() {
-      return text(app().publicPath || root().publicPath || selectors.currentRoute(), "/");
+      return text(app().publicPath || root().publicPath || selectors.currentRoute(), DEFAULT_ROUTE);
     },
 
     routeSnapshot() {
@@ -296,61 +331,55 @@ export function createSelectors({ state } = {}) {
     },
 
     /* =====================================
-       SESSION
+       AUTH / SESSION COMPAT NO-OP
     ===================================== */
 
     isAuthenticated() {
-      return isAuthenticated(session(), root());
+      return false;
     },
 
     hasToken() {
-      return hasToken(session(), root());
+      return false;
     },
 
     hasUser() {
-      return usableUser(currentUserRaw());
+      return false;
     },
 
     currentUser() {
-      return clone(currentUserRaw());
+      return null;
     },
 
     currentUserRaw() {
-      return currentUserRaw();
+      return null;
     },
 
     currentUserIdentity() {
-      const user = currentUserRaw();
-      return user ? userId(user) || username(user) || null : null;
+      return null;
     },
 
     currentUserId() {
-      const user = currentUserRaw();
-      return user ? userId(user) : null;
+      return null;
     },
 
     currentUsername() {
-      const user = currentUserRaw();
-      return user ? username(user) || null : null;
+      return null;
     },
 
     currentDisplayName() {
-      const user = currentUserRaw();
-      return user ? displayName(user) : null;
+      return null;
     },
 
     currentAvatar() {
-      const user = currentUserRaw();
-      return user ? avatarUrl(user) || null : null;
+      return null;
     },
 
     currentRole() {
-      return currentRoleRaw();
+      return null;
     },
 
     currentRoles() {
-      const role = currentRoleRaw();
-      return role ? [role] : [];
+      return [];
     },
 
     currentPermissions() {
@@ -358,11 +387,11 @@ export function createSelectors({ state } = {}) {
     },
 
     isAdmin() {
-      return currentRoleRaw() === ROLE_ADMIN;
+      return false;
     },
 
     isUser() {
-      return currentRoleRaw() === ROLE_USER;
+      return false;
     },
 
     isSupport() {
@@ -377,34 +406,16 @@ export function createSelectors({ state } = {}) {
       return false;
     },
 
-    hasRole(...roles) {
-      if (!selectors.isAuthenticated()) return false;
-
-      const requested = roles
-        .flat()
-        .map(normalizeRole)
-        .filter(Boolean);
-
-      if (!requested.length) return true;
-
-      return requested.includes(currentRoleRaw());
+    hasRole() {
+      return false;
     },
 
-    hasAnyRole(roles = []) {
-      return selectors.hasRole(...roles);
+    hasAnyRole() {
+      return false;
     },
 
-    hasAllRoles(roles = []) {
-      if (!selectors.isAuthenticated()) return false;
-
-      const requested = roles
-        .flat()
-        .map(normalizeRole)
-        .filter(Boolean);
-
-      if (!requested.length) return true;
-
-      return requested.every((role) => role === currentRoleRaw());
+    hasAllRoles() {
+      return false;
     },
 
     hasPermission() {
@@ -427,39 +438,8 @@ export function createSelectors({ state } = {}) {
       return {};
     },
 
-    sessionSnapshot(options = {}) {
-      const user = currentUserRaw();
-      const role = currentRoleRaw();
-
-      return {
-        version: STORE_SELECTORS_VERSION,
-
-        authenticated: selectors.isAuthenticated(),
-        hasToken: selectors.hasToken(),
-
-        token: options.includeToken === true ? null : null,
-        accessToken: options.includeToken === true ? null : null,
-
-        user: clone(user),
-        userIdentity: selectors.currentUserIdentity(),
-        userId: selectors.currentUserId(),
-        username: selectors.currentUsername(),
-        displayName: selectors.currentDisplayName(),
-        avatar: selectors.currentAvatar(),
-
-        role,
-        roles: role ? [role] : [],
-        permissions: [],
-
-        isAdmin: role === ROLE_ADMIN,
-        isUser: role === ROLE_USER,
-        isSupport: false,
-        isManager: false,
-        isClient: false,
-
-        raw: options.includeRaw === true ? clone(session()) : null,
-        at: nowIso(),
-      };
+    sessionSnapshot() {
+      return emptySessionSnapshot();
     },
 
     /* =====================================
@@ -467,17 +447,15 @@ export function createSelectors({ state } = {}) {
     ===================================== */
 
     currentTheme() {
-      const theme = ui().theme || root().theme || "system";
-      return ["dark", "light", "system"].includes(theme) ? theme : "system";
+      return normalizeTheme(ui().theme || root().theme || DEFAULT_THEME);
     },
 
     themePreference() {
-      return selectors.currentTheme();
+      return normalizeTheme(ui().themePreference || selectors.currentTheme());
     },
 
     currentLang() {
-      const lang = ui().lang || ui().language || root().lang || "en";
-      return ["ca", "es", "en"].includes(lang) ? lang : "en";
+      return normalizeLang(ui().lang || ui().language || root().lang || DEFAULT_LANG);
     },
 
     isSidebarOpen() {
@@ -485,7 +463,7 @@ export function createSelectors({ state } = {}) {
     },
 
     pageTitle() {
-      return text(ui().pageTitle || root().pageTitle, "Onion Support");
+      return text(ui().pageTitle || root().pageTitle, DEFAULT_TITLE);
     },
 
     topbarTitle() {
@@ -514,7 +492,8 @@ export function createSelectors({ state } = {}) {
     ===================================== */
 
     flag(key, fallback = false) {
-      const name = text(key, "");
+      const name = collectionName(key);
+
       return name && Object.prototype.hasOwnProperty.call(flags(), name)
         ? Boolean(flags()[name])
         : fallback;
@@ -529,8 +508,11 @@ export function createSelectors({ state } = {}) {
     },
 
     isFetching(key = "") {
-      const name = text(key, "");
-      return name ? selectors.flag(`fetching${name[0]?.toUpperCase() || ""}${name.slice(1)}`, false) : false;
+      const name = collectionName(key);
+
+      return name
+        ? selectors.flag(`fetching${name[0]?.toUpperCase() || ""}${name.slice(1)}`, false)
+        : false;
     },
 
     /* =====================================
@@ -672,18 +654,38 @@ export function createSelectors({ state } = {}) {
     snapshot(options = {}) {
       return {
         version: STORE_SELECTORS_VERSION,
+
         app: selectors.appSnapshot(),
-        session: selectors.sessionSnapshot({
-          includeToken: options.includeToken === true,
-          includeRaw: options.includeRawSession === true,
-        }),
+
         ui: selectors.uiSnapshot({
           includeRaw: options.includeRawUi === true,
         }),
+
         flags: selectors.flags(),
         entities: options.includeEntities === false ? null : clone(entities()) || {},
         meta: selectors.meta(),
-        at: nowIso(),
+
+        /*
+          Compat explícita: no es fuente Auth.
+        */
+        session: options.includeCompatSession === true
+          ? selectors.sessionSnapshot()
+          : null,
+
+        policy: {
+          storeSelectorsOnly: true,
+          slices: [...ROOT_KEYS],
+
+          noAuth: true,
+          noSession: true,
+          noToken: true,
+          noUserAuthObjects: true,
+          noRolesAuth: true,
+
+          authSelectorsAreCompatNoop: true,
+        },
+
+        at: nowSnapshot(),
       };
     },
 

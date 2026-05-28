@@ -3,15 +3,17 @@
    Archivo: /src/core/http.js
 
    Responsabilidad:
-   - Fachada mínima sobre core/request.js.
-   - API real única.
+   - Fachada única sobre core/request.js.
+   - API real única desde core/config.js.
    - Endpoints auth reales desde core/config.js.
    - /api/auth/me privado siempre.
    - /api/auth/refresh público y sin Authorization.
-   - Enviar Authorization cuando hay access token válido.
+   - Enviar Authorization sólo cuando hay access token válido.
    - No reutilizar token runtime si AppCore ya marcó sesión sin token.
-   - Exponer helpers mínimos para detectar refresh silencioso.
    - Clasificar errores auth sin decidir logout por su cuenta.
+   - TOKEN_EXPIRED / 401 recuperable NO implica logout.
+   - Access token caducado/rotado NO equivale a sesión perdida.
+   - Session/Auth decide refresh o clearSession().
    - Sin fetch propio.
    - Sin parser propio.
    - Sin retry propio.
@@ -20,13 +22,6 @@
    - Sin Router.
    - Sin Toast.
    - Sin Storage.
-   - Sin magia negra.
-
-   Contrato crítico:
-   - TOKEN_EXPIRED / 401 recuperable NO implica logout.
-   - Access token caducado/rotado NO equivale a sesión perdida.
-   - HTTP sólo clasifica: canRefresh / shouldLogout.
-   - Session/Auth decide si llama /api/auth/refresh o clearSession().
 ========================================================= */
 
 import {
@@ -34,6 +29,7 @@ import {
   AUTH_ENDPOINTS,
   PUBLIC_API_PATHS,
   PRIVATE_API_PATHS,
+  SENSITIVE_QUERY_PARAMS,
   getApiBase,
   isCanonicalBackendApiBase,
   isPublicApiPath,
@@ -44,7 +40,7 @@ import {
   createApiClient,
 } from "./request.js";
 
-export const HTTP_VERSION = "core.http.v8";
+export const HTTP_VERSION = "core.http.v9";
 
 export const DEFAULT_API_ORIGIN = getApiBase();
 export const DEFAULT_TIMEOUT_MS = config?.api?.timeout || 30000;
@@ -104,28 +100,21 @@ const CLEAR_SESSION_AUTH_CODES = new Set([
   "REFRESH_TOKEN_REVOKED",
 
   "USER_DISABLED",
+  "USER_INACTIVE",
   "USER_SUSPENDED",
+  "USER_BLOCKED",
+  "USER_BANNED",
+  "USER_REVOKED",
+  "USER_DELETED",
+  "USER_ARCHIVED",
+
   "USER_DESACTIVADO",
+  "USUARIO_DESACTIVADO",
 ]);
 
-const SENSITIVE_QUERY_KEYS = new Set([
-  "token",
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "secret",
-  "session",
-  "code",
-  "password",
-  "pwd",
-  "key",
-  "sig",
-  "signature",
-  "jwt",
-  "authorization",
-  "reset_token",
-  "activation_token",
-]);
+const SENSITIVE_QUERY_KEYS = new Set(
+  SENSITIVE_QUERY_PARAMS.map((key) => String(key).toLowerCase())
+);
 
 const ALLOWED_METHODS = new Set([
   "GET",
@@ -168,14 +157,34 @@ function first(...values) {
   return null;
 }
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function sensitiveQueryPattern() {
+  const keys = [...SENSITIVE_QUERY_KEYS]
+    .map(escapeRegExp)
+    .filter(Boolean)
+    .join("|");
+
+  return keys
+    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
+    : null;
+}
+
 function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
+  const pattern = sensitiveQueryPattern();
+  const text = cleanText(value, "");
+
+  return (pattern ? text.replace(pattern, "$1***") : text)
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+function normalizeErrorCode(value = "") {
+  return cleanText(value, "")
+    .replace(/[\s-]+/g, "_")
+    .toUpperCase();
 }
 
 function keyIsSensitive(value = "") {
@@ -204,18 +213,50 @@ function headersFrom(input = null) {
   return headers;
 }
 
-function hasHeader(headers = {}, name = "") {
+function removeHeader(headers = {}, name = "") {
   const target = cleanText(name, "").toLowerCase();
 
-  if (!target) return false;
+  if (!target) return headers;
 
-  return Object.keys(headers || {}).some((key) => key.toLowerCase() === target);
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === target) {
+      delete headers[key];
+    }
+  }
+
+  return headers;
+}
+
+function stripAuthHeaders(input = null) {
+  return removeHeader(headersFrom(input), "authorization");
 }
 
 function sessionCredentials(options = {}) {
   return {
     ...options,
     credentials: options.credentials || "include",
+  };
+}
+
+function publicSessionOptions(options = {}) {
+  return {
+    ...sessionCredentials(options),
+    auth: false,
+    public: true,
+    skipAuth: true,
+    noAuthHeader: true,
+    cache: "no-store",
+  };
+}
+
+function privateSessionOptions(options = {}) {
+  return {
+    ...sessionCredentials(options),
+    auth: true,
+    public: false,
+    skipAuth: false,
+    noAuthHeader: false,
+    cache: "no-store",
   };
 }
 
@@ -390,10 +431,6 @@ function accessTokenFromPayload(payload = {}) {
 export function getAccessToken() {
   const state = getState();
 
-  /*
-    Si AppCore ya declaró que no hay token, no recuperamos un token runtime
-    antiguo que haya quedado por compat.
-  */
   if (stateExplicitlyHasNoToken(state)) {
     return "";
   }
@@ -526,6 +563,7 @@ function endpointIsPublic(endpoint = "") {
 
 function shouldUseAuth(endpoint = "", options = {}) {
   if (endpointIsMe(endpoint)) return true;
+  if (endpointIsPublic(endpoint)) return false;
 
   if (
     options.auth === false ||
@@ -538,7 +576,7 @@ function shouldUseAuth(endpoint = "", options = {}) {
 
   if (options.auth === true) return true;
 
-  return !endpointIsPublic(endpoint);
+  return true;
 }
 
 /* =========================================================
@@ -579,7 +617,7 @@ export class HttpError extends Error {
     this.name = "HttpError";
     this.status = Number(options.status || options.statusCode || 0) || 0;
     this.statusCode = this.status;
-    this.code = cleanText(options.code, "HTTP_ERROR");
+    this.code = normalizeErrorCode(options.code) || "HTTP_ERROR";
     this.method = cleanText(options.method, "");
     this.url = redact(options.url || "");
     this.data = sanitizeErrorData(options.data || null);
@@ -607,7 +645,7 @@ export function getHttpErrorCode(error = null) {
   const payload = getErrorPayload(error);
   const auth = isObject(payload.auth) ? payload.auth : {};
 
-  return cleanText(
+  return normalizeErrorCode(
     first(
       auth.code,
       auth.error,
@@ -621,8 +659,7 @@ export function getHttpErrorCode(error = null) {
 
       payload.error,
       ""
-    ),
-    ""
+    )
   );
 }
 
@@ -685,11 +722,6 @@ export function isRefreshableAuthError(error = null) {
     return true;
   }
 
-  /*
-    Un 401 de una request privada es recuperable por defecto.
-    La sesión sólo se limpia si refresh falla o el backend devuelve
-    clearClientSession / shouldLogout / código terminal.
-  */
   return status === 401;
 }
 
@@ -837,12 +869,10 @@ function requestMethod(options = {}) {
 }
 
 function buildAuthHeaders(options = {}, token = "") {
-  const headers = headersFrom(options.headers);
+  const headers = stripAuthHeaders(options.headers);
   const value = cleanToken(token);
 
-  if (!value) return headers;
-
-  if (!hasHeader(headers, "authorization")) {
+  if (value) {
     headers.Authorization = `Bearer ${value}`;
   }
 
@@ -893,10 +923,6 @@ export async function request(firstArg = "/", second = {}, third = {}) {
   const auth = shouldUseAuth(endpoint, options);
   const token = auth ? cleanToken(options.token || getAccessToken()) : "";
 
-  const headers = auth
-    ? buildAuthHeaders(options, token)
-    : options.headers;
-
   const finalOptions = {
     ...options,
 
@@ -911,7 +937,9 @@ export async function request(firstArg = "/", second = {}, third = {}) {
     skipAuth: !auth,
     noAuthHeader: !auth,
 
-    headers,
+    headers: auth
+      ? buildAuthHeaders(options, token)
+      : stripAuthHeaders(options.headers),
   };
 
   stats.lastUrl = redact(url);
@@ -1013,36 +1041,15 @@ export function raw(endpoint = "/", options = {}) {
 ========================================================= */
 
 export function login(credentials = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.login, credentials, {
-    ...sessionCredentials(options),
-    auth: false,
-    public: true,
-    skipAuth: true,
-    noAuthHeader: true,
-    cache: "no-store",
-  });
+  return post(AUTH_ENDPOINTS.login, credentials, publicSessionOptions(options));
 }
 
 export function me(options = {}) {
-  return get(AUTH_ENDPOINTS.me, {
-    ...sessionCredentials(options),
-    auth: true,
-    public: false,
-    skipAuth: false,
-    noAuthHeader: false,
-    cache: "no-store",
-  });
+  return get(AUTH_ENDPOINTS.me, privateSessionOptions(options));
 }
 
 export function refreshSession(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.refresh, body, {
-    ...sessionCredentials(options),
-    auth: false,
-    public: true,
-    skipAuth: true,
-    noAuthHeader: true,
-    cache: "no-store",
-  });
+  return post(AUTH_ENDPOINTS.refresh, body, publicSessionOptions(options));
 }
 
 export function refresh(options = {}) {
@@ -1055,62 +1062,32 @@ export function refresh(options = {}) {
 }
 
 export function logout(options = {}) {
-  return post(AUTH_ENDPOINTS.logout, {}, {
-    ...sessionCredentials(options),
-    auth: true,
-    public: false,
-    skipAuth: false,
-    noAuthHeader: false,
-    cache: "no-store",
-  }).finally(() => {
-    clearAuthTokens({
-      clearState: true,
+  return post(AUTH_ENDPOINTS.logout, {}, privateSessionOptions(options))
+    .finally(() => {
+      clearAuthTokens({
+        clearState: true,
+      });
     });
-  });
 }
 
 export function activate(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.activate, body, {
-    ...sessionCredentials(options),
-    auth: false,
-    public: true,
-    skipAuth: true,
-    noAuthHeader: true,
-    cache: "no-store",
-  });
+  return post(AUTH_ENDPOINTS.activate, body, publicSessionOptions(options));
 }
 
 export function activateAccount(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.activateAccount || AUTH_ENDPOINTS.activate, body, {
-    ...sessionCredentials(options),
-    auth: false,
-    public: true,
-    skipAuth: true,
-    noAuthHeader: true,
-    cache: "no-store",
-  });
+  return post(
+    AUTH_ENDPOINTS.activateAccount || AUTH_ENDPOINTS.activate,
+    body,
+    publicSessionOptions(options)
+  );
 }
 
 export function requestPasswordReset(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.requestPasswordReset, body, {
-    ...sessionCredentials(options),
-    auth: false,
-    public: true,
-    skipAuth: true,
-    noAuthHeader: true,
-    cache: "no-store",
-  });
+  return post(AUTH_ENDPOINTS.requestPasswordReset, body, publicSessionOptions(options));
 }
 
 export function confirmPasswordReset(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.confirmPasswordReset, body, {
-    ...sessionCredentials(options),
-    auth: false,
-    public: true,
-    skipAuth: true,
-    noAuthHeader: true,
-    cache: "no-store",
-  });
+  return post(AUTH_ENDPOINTS.confirmPasswordReset, body, publicSessionOptions(options));
 }
 
 /* =========================================================
@@ -1179,22 +1156,17 @@ export function getHttpSnapshot() {
       refreshPublic: isPublicApiPath(AUTH_ENDPOINTS.refresh),
       refreshUsesAuthHeader: shouldUseAuth(AUTH_ENDPOINTS.refresh, {}),
       meUsesAuthHeader: shouldUseAuth(AUTH_ENDPOINTS.me, {}),
-      refreshUsesCredentials: true,
-      loginUsesCredentials: true,
-      logoutUsesCredentials: true,
+      credentials: "include",
     },
 
     policy: {
-      facadeOnly: true,
       singleHttpFacade: true,
-
       configIsSourceOfEndpoints: true,
 
       noOwnFetch: true,
       noOwnParser: true,
       noRetry: true,
       noAutoRefresh: true,
-      noAuthDiscovery: true,
 
       authErrorClassificationOnly: true,
       sessionOwnsSilentRefresh: true,
@@ -1205,8 +1177,6 @@ export function getHttpSnapshot() {
 
       mePrivate: true,
       refreshPublicNoAuthHeader: true,
-      blocksExternalEndpoints: true,
-      blocksInvalidEndpoints: true,
 
       accessTokenRuntimeOnlyAsFallback: true,
       blocksStaleRuntimeTokenWhenStateCleared: true,

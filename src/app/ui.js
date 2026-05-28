@@ -4,23 +4,47 @@
 
    Responsabilidad:
    - Compat mínima de UI.
-   - Bridge simple de Toast si existe.
+   - Bridge pasivo de Toast si existe.
    - No pisar AppCore.showToast si ya existe.
-   - Sin Sidebar.
-   - Sin Topbar.
-   - Sin Router.
-   - Sin Auth.
-   - Sin Store.
-   - Sin eventos.
-   - Sin rutas.
-   - Sin repair automático.
-   - Sin debug global.
-   - Sin fetch.
-   - Sin storage.
-   - Sin lógica de dominio.
+   - Sin Sidebar, Topbar, Router, Auth, Store, eventos, rutas,
+     repair automático, debug global, fetch, storage ni dominio.
 ========================================================= */
 
-export const UI_VERSION = "app.ui.v5";
+export const UI_VERSION = "app.ui.v6";
+
+const TOAST_TYPES = Object.freeze({
+  INFO: "info",
+  SUCCESS: "success",
+  WARNING: "warning",
+  ERROR: "error",
+});
+
+const TEXT_KEYS = Object.freeze([
+  "message",
+  "text",
+  "title",
+  "description",
+  "detail",
+  "details",
+]);
+
+const SENSITIVE_KEYS = Object.freeze([
+  "token",
+  "accesstoken",
+  "refreshtoken",
+  "idtoken",
+  "secret",
+  "session",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
+  "jwt",
+  "authorization",
+  "resettoken",
+  "activationtoken",
+]);
 
 let initialized = false;
 let bridged = false;
@@ -34,7 +58,7 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function isObject(value) {
+function isPlainObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
@@ -45,6 +69,12 @@ function cleanText(value = "", fallback = "") {
     .trim();
 
   return output || fallback;
+}
+
+function normalizeKey(value = "") {
+  return cleanText(value, "")
+    .toLowerCase()
+    .replace(/[_\-. \s]/g, "");
 }
 
 function redact(value = "") {
@@ -66,46 +96,11 @@ function safeCall(fn = null, context = null, ...args) {
 }
 
 /* =========================================================
-   TOAST
+   TOAST RESOLVE
 ========================================================= */
 
-const SENSITIVE_OPTION_KEYS = new Set([
-  "token",
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "secret",
-  "session",
-  "password",
-  "pwd",
-  "key",
-  "sig",
-  "signature",
-  "jwt",
-  "authorization",
-  "reset_token",
-  "activation_token",
-]);
-
-const TEXT_OPTION_KEYS = new Set([
-  "message",
-  "text",
-  "title",
-  "description",
-  "detail",
-  "details",
-]);
-
 function getModule(AppCore = null, name = "") {
-  try {
-    if (isFunction(AppCore?.modules?.get)) {
-      return AppCore.modules.get(name);
-    }
-  } catch {
-    // noop
-  }
-
-  return null;
+  return safeCall(AppCore?.modules?.get, AppCore?.modules, name);
 }
 
 function getToast(AppCore = null, Toast = null) {
@@ -121,112 +116,119 @@ function getToast(AppCore = null, Toast = null) {
   );
 }
 
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEYS.includes(normalizeKey(key));
+}
+
+function isTextKey(key = "") {
+  return TEXT_KEYS.includes(normalizeKey(key));
+}
+
 function sanitizeToastOptions(options = {}) {
-  if (!isObject(options)) return {};
+  if (!isPlainObject(options)) return {};
 
   const output = {};
 
   for (const [key, value] of Object.entries(options)) {
     const cleanKey = cleanText(key, "");
-
     if (!cleanKey) continue;
 
-    const lowerKey = cleanKey.toLowerCase();
-
-    if (SENSITIVE_OPTION_KEYS.has(lowerKey)) {
+    if (isSensitiveKey(cleanKey)) {
       output[cleanKey] = "***";
       continue;
     }
 
-    if (TEXT_OPTION_KEYS.has(lowerKey) && typeof value === "string") {
-      output[cleanKey] = redact(value);
-      continue;
-    }
-
-    output[cleanKey] = value;
+    output[cleanKey] = isTextKey(cleanKey) && typeof value === "string"
+      ? redact(value)
+      : value;
   }
 
   return output;
 }
 
-function normalizeToastType(type = "info") {
-  const value = cleanText(type, "info").toLowerCase();
+function normalizeToastType(type = TOAST_TYPES.INFO) {
+  const value = cleanText(type, TOAST_TYPES.INFO).toLowerCase();
 
-  if (value === "warn") return "warning";
-  if (value === "danger") return "error";
+  if (value === "warn") return TOAST_TYPES.WARNING;
+  if (value === "danger") return TOAST_TYPES.ERROR;
 
-  if (value === "success") return "success";
-  if (value === "error") return "error";
-  if (value === "warning") return "warning";
-  if (value === "info") return "info";
+  if (
+    value === TOAST_TYPES.INFO ||
+    value === TOAST_TYPES.SUCCESS ||
+    value === TOAST_TYPES.WARNING ||
+    value === TOAST_TYPES.ERROR
+  ) {
+    return value;
+  }
 
-  return "info";
+  return TOAST_TYPES.INFO;
 }
 
-function normalizeToastInput(message = "", type = "info", options = {}) {
-  if (isObject(message)) {
-    const mergedOptions = sanitizeToastOptions({
-      ...message,
-      ...(isObject(options) ? options : {}),
-    });
+function readToastMessage(input = null) {
+  if (!isPlainObject(input)) return redact(input);
 
+  for (const key of TEXT_KEYS) {
+    const value = input[key];
+
+    if (typeof value === "string" && cleanText(value, "")) {
+      return redact(value);
+    }
+  }
+
+  return "";
+}
+
+function normalizeToastInput(message = "", type = TOAST_TYPES.INFO, options = {}) {
+  if (isPlainObject(message)) {
     return {
-      message: redact(
-        message.message ||
-          message.text ||
-          message.title ||
-          ""
-      ),
-      type: normalizeToastType(
-        message.type ||
-          message.variant ||
-          type
-      ),
-      options: mergedOptions,
+      message: readToastMessage(message),
+      type: normalizeToastType(message.type || message.variant || type),
+      options: sanitizeToastOptions({
+        ...message,
+        ...(isPlainObject(options) ? options : {}),
+      }),
     };
   }
 
   return {
-    message: redact(message),
+    message: readToastMessage(message),
     type: normalizeToastType(type),
     options: sanitizeToastOptions(options),
   };
 }
 
-function showToastWith(Toast = null, message = "", type = "info", options = {}) {
+function showToastWith(Toast = null, message = "", type = TOAST_TYPES.INFO, options = {}) {
   if (!Toast) return null;
 
   const payload = normalizeToastInput(message, type, options);
-  const toastMessage = payload.message;
-  const toastType = payload.type;
 
-  if (!toastMessage) return null;
+  if (!payload.message) return null;
 
-  if (isFunction(Toast[toastType])) {
-    return safeCall(Toast[toastType], Toast, toastMessage, payload.options);
+  if (isFunction(Toast[payload.type])) {
+    return safeCall(Toast[payload.type], Toast, payload.message, payload.options);
   }
 
-  if (toastType === "warning" && isFunction(Toast.warn)) {
-    return safeCall(Toast.warn, Toast, toastMessage, payload.options);
+  if (payload.type === TOAST_TYPES.WARNING && isFunction(Toast.warn)) {
+    return safeCall(Toast.warn, Toast, payload.message, payload.options);
   }
 
   if (isFunction(Toast.show)) {
     return safeCall(Toast.show, Toast, {
       ...payload.options,
-      type: toastType,
-      message: toastMessage,
+      type: payload.type,
+      message: payload.message,
     });
   }
 
   if (isFunction(Toast)) {
-    return safeCall(Toast, null, toastMessage, toastType, payload.options);
+    return safeCall(Toast, null, payload.message, payload.type, payload.options);
   }
 
   return null;
 }
 
 function createToastBridge(Toast = null) {
-  const bridge = function showToast(message = "", type = "info", options = {}) {
+  const bridge = function showToast(message = "", type = TOAST_TYPES.INFO, options = {}) {
     return showToastWith(Toast, message, type, options);
   };
 
@@ -264,8 +266,6 @@ export function bindToastBridge({
   AppCore = null,
   Toast = null,
 } = {}) {
-  const toast = getToast(AppCore, Toast);
-
   if (!AppCore) {
     initialized = false;
     bridged = false;
@@ -273,23 +273,20 @@ export function bindToastBridge({
     return false;
   }
 
-  if (!toast) {
-    initialized = false;
-    bridged = false;
-    lastBridgeReason = "missing-toast";
-    return false;
-  }
-
-  /*
-    No pisar una implementación existente.
-    En el Core final AppCore.showToast ya existe y puede resolver Toast
-    desde el registry de módulos; este archivo queda como compat pasiva.
-  */
   if (isFunction(AppCore.showToast)) {
     initialized = true;
     bridged = isToastBridge(AppCore.showToast);
     lastBridgeReason = bridged ? "already-bridged" : "existing-showToast";
     return true;
+  }
+
+  const toast = getToast(AppCore, Toast);
+
+  if (!toast) {
+    initialized = false;
+    bridged = false;
+    lastBridgeReason = "missing-toast";
+    return false;
   }
 
   try {
@@ -316,6 +313,17 @@ export function initUISystems(options = {}) {
    SNAPSHOT
 ========================================================= */
 
+function getToastCapabilities(toast = null) {
+  return {
+    callable: isFunction(toast),
+    hasShow: isFunction(toast?.show),
+    hasInfo: isFunction(toast?.info),
+    hasSuccess: isFunction(toast?.success),
+    hasWarning: isFunction(toast?.warning) || isFunction(toast?.warn),
+    hasError: isFunction(toast?.error),
+  };
+}
+
 export function getUISystemsSnapshot({
   AppCore = null,
   Toast = null,
@@ -334,14 +342,7 @@ export function getUISystemsSnapshot({
     hasShowToast: isFunction(showToast),
     showToastIsBridge: isToastBridge(showToast),
 
-    toastCapabilities: {
-      callable: isFunction(toast),
-      hasShow: isFunction(toast?.show),
-      hasInfo: isFunction(toast?.info),
-      hasSuccess: isFunction(toast?.success),
-      hasWarning: isFunction(toast?.warning) || isFunction(toast?.warn),
-      hasError: isFunction(toast?.error),
-    },
+    toastCapabilities: getToastCapabilities(toast),
 
     policy: {
       toastBridgeOnly: true,
@@ -349,7 +350,6 @@ export function getUISystemsSnapshot({
       passiveWhenCoreShowToastExists: true,
       doesNotOverrideExistingShowToast: true,
       redactsToastText: true,
-
       noSidebar: true,
       noTopbar: true,
       noRouter: true,
@@ -365,10 +365,6 @@ export function getUISystemsSnapshot({
     },
   };
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   UI_VERSION,

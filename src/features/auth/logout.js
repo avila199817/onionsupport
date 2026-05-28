@@ -6,6 +6,8 @@
    - Logout remoto best-effort vía CoreHttp.
    - Limpieza local garantizada vía session.js.
    - Endpoint auth real desde core/config.js.
+   - Usar credentials include para cookie httpOnly.
+   - Limpiar access token runtime tras logout real.
    - Sin fetch propio.
    - Sin apiClient propio.
    - Sin Router.
@@ -31,7 +33,7 @@ import {
   buildSessionSnapshot,
 } from "./session.js";
 
-export const AUTH_LOGOUT_VERSION = "auth.logout.v5";
+export const AUTH_LOGOUT_VERSION = "auth.logout.v6";
 
 const SOURCE = "auth.logout";
 const LOGOUT_ENDPOINT = AUTH_ENDPOINTS.logout;
@@ -232,8 +234,19 @@ async function remoteLogout(options = {}) {
     skipAuth: false,
     noAuthHeader: false,
 
+    /*
+      Impide que el propio logout dispare refresh/retry auth.
+      Logout es finalizador de sesión, no restaurador.
+    */
+    _skipAuthRefresh: true,
+    skipAuthRefresh: true,
+    noAutoRefresh: true,
+    autoRefresh: false,
+
+    credentials: options.credentials || "include",
     storeError: false,
     cache: "no-store",
+    retries: 0,
   };
 
   try {
@@ -312,12 +325,16 @@ async function remoteLogout(options = {}) {
 function clearHttpAuth() {
   try {
     if (isFunction(CoreHttp?.clearAuthTokens)) {
-      CoreHttp.clearAuthTokens();
+      CoreHttp.clearAuthTokens({
+        clearState: true,
+      });
       return true;
     }
 
     if (isFunction(CoreHttp?.setAccessToken)) {
-      CoreHttp.setAccessToken(null);
+      CoreHttp.setAccessToken(null, {
+        clearState: true,
+      });
       return true;
     }
   } catch {
@@ -369,6 +386,12 @@ export async function logout(options = {}) {
 
     const remote = await remoteLogout(options);
 
+    /*
+      Limpieza local obligatoria siempre:
+      - aunque logout remoto falle,
+      - aunque ya esté 401/403/404,
+      - aunque se haya pedido localOnly.
+    */
     const local = clearLocal({
       ...options,
       reason: "logout",
@@ -477,6 +500,7 @@ export function getLogoutSnapshot() {
       coreLogout: Boolean(CoreHttp?.logout),
       corePost: Boolean(CoreHttp?.post),
       coreRequest: Boolean(CoreHttp?.request),
+      credentialsInclude: true,
     },
 
     policy: {
@@ -484,6 +508,10 @@ export function getLogoutSnapshot() {
       localClearGuaranteed: true,
 
       endpointFromConfig: true,
+      endpoint: "/api/auth/logout",
+
+      credentialsInclude: true,
+      noAuthRefreshDuringLogout: true,
 
       ownFetch: false,
       ownApiClient: false,

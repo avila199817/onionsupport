@@ -4,25 +4,47 @@
 
    Responsabilidad:
    - Acciones mínimas de compat.
+   - Sólo app/ui/entities/flags/meta.
    - No duplica Auth.
-   - No duplica Core.
+   - No duplica sesión.
+   - No duplica Core State.
    - No duplica Router.
    - No duplica HTTP.
    - No guarda tokens reales.
-   - Roles únicos: admin / user.
-   - User inválido sólo si disabled.
+   - No guarda usuario Auth.
+   - No guarda roles Auth.
    - Sin rutas técnicas legacy.
-   - Sin 2FA/MFA/OTP.
    - Sin colecciones concretas inventadas.
    - Sin imports.
 ========================================================= */
 
-export const STORE_ACTIONS_VERSION = "simple";
+export const STORE_ACTIONS_VERSION = "store.actions.v3";
 
 const DEFAULT_ROUTE = "/";
-const DEFAULT_LANG = "en";
+const DEFAULT_LANG = "es";
 const DEFAULT_THEME = "system";
 const DEFAULT_TITLE = "Onion Support";
+
+const ROOT_KEYS = Object.freeze([
+  "app",
+  "ui",
+  "entities",
+  "flags",
+  "meta",
+]);
+
+const BLOCKED_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+]);
+
+const SENSITIVE_KEY_RE =
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|role|roles|permissions)/i;
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -37,7 +59,11 @@ function isFunction(value) {
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -46,18 +72,26 @@ function clone(value) {
   if (value === null) return null;
 
   try {
-    return structuredClone(value);
-  } catch {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
     }
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
   }
 }
 
 function nowIso() {
-  return new Date().toISOString();
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function normalizeTheme(value = DEFAULT_THEME) {
@@ -72,38 +106,35 @@ function normalizeLang(value = DEFAULT_LANG) {
   return ["ca", "es", "en"].includes(lang) ? lang : DEFAULT_LANG;
 }
 
-function normalizeRole(value = "") {
-  return String(value).toLowerCase() === "admin" ? "admin" : "user";
-}
-
 function cleanPath(value = DEFAULT_ROUTE) {
-  let path = text(value, DEFAULT_ROUTE).split("?")[0].split("#")[0];
+  let path = text(value, DEFAULT_ROUTE)
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
   if (!path.startsWith("/")) path = `/${path}`;
-  if (path.length > 1) path = path.replace(/\/+$/g, "");
+  if (path.length > 1) path = path.replace(/\/+$/g, "") || DEFAULT_ROUTE;
 
   return path || DEFAULT_ROUTE;
 }
 
 function publicPath(value = DEFAULT_ROUTE) {
-  let path = text(value, DEFAULT_ROUTE);
+  const raw = text(value, DEFAULT_ROUTE);
 
-  if (!path.startsWith("/")) path = `/${path}`;
+  if (!raw) return DEFAULT_ROUTE;
+  if (raw.startsWith("//")) return DEFAULT_ROUTE;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return DEFAULT_ROUTE;
+  if (/[\r\n\t\\]/.test(raw)) return DEFAULT_ROUTE;
 
-  return path || DEFAULT_ROUTE;
+  return raw.startsWith("/") ? raw : `/${raw}`;
 }
 
 function canonicalPath(value = DEFAULT_ROUTE) {
-  let path = cleanPath(value);
-
-  if (path.startsWith("/@")) {
-    path = `/${path.split("/").slice(2).join("/")}`;
-  }
-
-  return cleanPath(path);
+  return cleanPath(value);
 }
 
-function safeKey(value = "") {
+function normalizeKey(value = "") {
   return text(value, "")
     .replace(/^\.+|\.+$/g, "")
     .replace(/\s+/g, "_")
@@ -111,7 +142,25 @@ function safeKey(value = "") {
 }
 
 function isUnsafeKey(key = "") {
-  return ["__proto__", "prototype", "constructor"].includes(String(key));
+  return BLOCKED_KEYS.has(String(key || ""));
+}
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || ""));
+}
+
+function isRootKey(key = "") {
+  return ROOT_KEYS.includes(String(key || ""));
+}
+
+function safeKey(value = "") {
+  const key = normalizeKey(value);
+
+  if (!key) return "";
+  if (isUnsafeKey(key)) return "";
+  if (isSensitiveKey(key)) return "";
+
+  return key;
 }
 
 function pathParts(path = "") {
@@ -120,13 +169,23 @@ function pathParts(path = "") {
     .split(".")
     .map((part) => part.trim())
     .filter(Boolean)
-    .filter((part) => !isUnsafeKey(part));
+    .filter((part) => !isUnsafeKey(part))
+    .filter((part) => !isSensitiveKey(part));
+}
+
+function pathAllowed(path = "") {
+  const parts = pathParts(path);
+
+  if (!parts.length) return false;
+  if (!isRootKey(parts[0])) return false;
+
+  return true;
 }
 
 function getByPath(root, path, fallback = undefined) {
   const parts = pathParts(path);
 
-  if (!parts.length) return fallback;
+  if (!parts.length || !pathAllowed(parts)) return fallback;
 
   let current = root;
 
@@ -141,7 +200,7 @@ function getByPath(root, path, fallback = undefined) {
 function setByPath(root, path, value) {
   const parts = pathParts(path);
 
-  if (!root || !parts.length) return false;
+  if (!root || !parts.length || !pathAllowed(parts)) return false;
 
   let current = root;
 
@@ -153,7 +212,7 @@ function setByPath(root, path, value) {
     current = current[part];
   }
 
-  current[parts.at(-1)] = value;
+  current[parts.at(-1)] = sanitizeValue(value, parts.at(-1));
 
   return true;
 }
@@ -161,7 +220,7 @@ function setByPath(root, path, value) {
 function deleteByPath(root, path) {
   const parts = pathParts(path);
 
-  if (!root || !parts.length) return false;
+  if (!root || !parts.length || !pathAllowed(parts)) return false;
 
   let current = root;
 
@@ -178,6 +237,57 @@ function deleteByPath(root, path) {
   return true;
 }
 
+function sanitizeValue(value, keyHint = "") {
+  if (isUnsafeKey(keyHint) || isSensitiveKey(keyHint)) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, child] of Object.entries(value)) {
+      if (isUnsafeKey(key)) continue;
+      if (isSensitiveKey(key)) continue;
+
+      const clean = sanitizeValue(child, key);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  return clone(value);
+}
+
+function sanitizeRootPatch(source = {}) {
+  if (!isObject(source)) return {};
+
+  const output = {};
+
+  for (const [key, value] of Object.entries(source)) {
+    if (!isRootKey(key)) continue;
+    if (isUnsafeKey(key)) continue;
+    if (isSensitiveKey(key)) continue;
+
+    const clean = sanitizeValue(value, key);
+
+    if (clean !== undefined) {
+      output[key] = clean;
+    }
+  }
+
+  return output;
+}
+
 function mergeDeep(target = {}, source = {}) {
   const output = isObject(target) ? clone(target) : {};
 
@@ -185,218 +295,19 @@ function mergeDeep(target = {}, source = {}) {
 
   for (const [key, value] of Object.entries(source)) {
     if (isUnsafeKey(key)) continue;
+    if (isSensitiveKey(key)) continue;
+
+    const clean = sanitizeValue(value, key);
+
+    if (clean === undefined) continue;
 
     output[key] =
-      isObject(value) && isObject(output[key])
-        ? mergeDeep(output[key], value)
-        : clone(value);
+      isObject(clean) && isObject(output[key])
+        ? mergeDeep(output[key], clean)
+        : clean;
   }
 
   return output;
-}
-
-function userDisabled(user = null) {
-  if (!isObject(user)) return true;
-
-  return (
-    user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
-  );
-}
-
-function usableUser(user = null) {
-  if (!isObject(user)) return false;
-  if (userDisabled(user)) return false;
-
-  return Boolean(
-    user.id ||
-      user.userId ||
-      user.username ||
-      user.slug ||
-      user.email
-  );
-}
-
-function normalizeUser(user = null) {
-  if (!usableUser(user)) return null;
-
-  const id = user.userId || user.id || null;
-  const username = user.username || user.slug || user.email || id || null;
-
-  const displayName =
-    user.name ||
-    user.fullName ||
-    user.displayName ||
-    user.nombre ||
-    username ||
-    user.email ||
-    id ||
-    "Usuario";
-
-  const role = normalizeRole(user.role || user.rol);
-
-  return {
-    ...clone(user),
-
-    id,
-    userId: user.userId || id,
-
-    username,
-    slug: user.slug || username,
-
-    name: user.name || displayName,
-    fullName: user.fullName || displayName,
-    displayName,
-
-    email: user.email || null,
-
-    role,
-    rol: role,
-    roles: [role],
-
-    avatar: user.avatar || user.avatarUrl || user.picture || null,
-    avatarUrl: user.avatarUrl || user.avatar || user.picture || null,
-    picture: user.picture || user.avatarUrl || user.avatar || null,
-    hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
-
-    active: true,
-    disabled: false,
-  };
-}
-
-function tokenProvided(value = "") {
-  const token = text(value, "").replace(/^Bearer\s+/i, "");
-
-  if (!token) return false;
-  if (/\s/.test(token)) return false;
-
-  return !["null", "undefined", "false", "true", "[object object]"].includes(
-    token.toLowerCase()
-  );
-}
-
-function sessionPatch(input = {}, currentSession = {}) {
-  const source = isObject(input) ? input : {};
-  const user = normalizeUser(source.user ?? currentSession.user ?? null);
-
-  const hasToken =
-    source.hasToken === true ||
-    currentSession.hasToken === true ||
-    tokenProvided(source.token || source.accessToken || source.access_token);
-
-  const authenticated = Boolean(source.authenticated !== false && hasToken && user);
-  const role = authenticated
-    ? normalizeRole(source.role || source.rol || user.role || user.rol)
-    : null;
-
-  if (!authenticated) {
-    return {
-      authenticated: false,
-      hasToken,
-
-      token: null,
-      accessToken: null,
-
-      user: null,
-      role: null,
-      roles: [],
-
-      username: null,
-      displayName: null,
-      avatarUrl: null,
-
-      isAdmin: false,
-      isUser: false,
-      isSupport: false,
-      isManager: false,
-      isClient: false,
-    };
-  }
-
-  return {
-    authenticated: true,
-    hasToken: true,
-
-    token: null,
-    accessToken: null,
-
-    user,
-    role,
-    roles: [role],
-
-    username: user.username || null,
-    displayName: user.displayName || user.name || user.username || null,
-    avatarUrl: user.avatarUrl || null,
-
-    isAdmin: role === "admin",
-    isUser: role === "user",
-    isSupport: false,
-    isManager: false,
-    isClient: false,
-  };
-}
-
-function extractSession(payload = {}) {
-  const data = isObject(payload.data) ? payload.data : {};
-  const auth = isObject(payload.auth) ? payload.auth : {};
-  const session = isObject(payload.session) ? payload.session : {};
-
-  return {
-    token:
-      payload.token ||
-      payload.accessToken ||
-      payload.access_token ||
-      data.token ||
-      data.accessToken ||
-      data.access_token ||
-      auth.token ||
-      auth.accessToken ||
-      auth.access_token ||
-      session.token ||
-      session.accessToken ||
-      session.access_token ||
-      "",
-
-    hasToken:
-      payload.hasToken ??
-      data.hasToken ??
-      auth.hasToken ??
-      session.hasToken,
-
-    authenticated:
-      payload.authenticated ??
-      data.authenticated ??
-      auth.authenticated ??
-      session.authenticated,
-
-    user:
-      payload.user ||
-      payload.usuario ||
-      payload.me ||
-      payload.account ||
-      payload.profile ||
-      data.user ||
-      data.usuario ||
-      data.me ||
-      auth.user ||
-      auth.usuario ||
-      auth.me ||
-      session.user ||
-      session.usuario ||
-      session.me ||
-      null,
-
-    role:
-      payload.role ||
-      payload.rol ||
-      data.role ||
-      data.rol ||
-      auth.role ||
-      auth.rol ||
-      session.role ||
-      session.rol ||
-      null,
-  };
 }
 
 function entityId(item = null) {
@@ -404,7 +315,6 @@ function entityId(item = null) {
 
   return text(
     item.id ||
-      item.userId ||
       item.ticketId ||
       item.clienteId ||
       item.facturaId ||
@@ -427,7 +337,7 @@ function matcherFor(matcher, item = null) {
 
 function normalizeItems(items = []) {
   if (items === null || items === undefined) return [];
-  return Array.isArray(items) ? clone(items) : [clone(items)];
+  return Array.isArray(items) ? sanitizeValue(items) : [sanitizeValue(items)].filter((item) => item !== undefined);
 }
 
 function collectionKey(key = "") {
@@ -447,6 +357,35 @@ function readDocumentTitle() {
   return text(document.title, DEFAULT_TITLE);
 }
 
+function safeError(error = null) {
+  if (!error) return null;
+
+  if (typeof error === "string") {
+    return {
+      name: "Error",
+      message: text(error, ""),
+      code: null,
+      status: null,
+    };
+  }
+
+  if (!isObject(error)) {
+    return {
+      name: "Error",
+      message: text(String(error), ""),
+      code: null,
+      status: null,
+    };
+  }
+
+  return {
+    name: text(error.name, "Error"),
+    message: text(error.message || error.detail || error.reason || String(error), ""),
+    code: error.code || error.error || null,
+    status: error.status || error.statusCode || error.response?.status || null,
+  };
+}
+
 /* =========================================================
    FACTORY
 ========================================================= */
@@ -463,6 +402,7 @@ export function createActions({
   const writeSet = isFunction(set)
     ? set
     : (path, value) => {
+        if (!pathAllowed(path)) return undefined;
         setByPath(state, path, clone(value));
         return getByPath(state, path);
       };
@@ -470,7 +410,8 @@ export function createActions({
   const writePatch = isFunction(patch)
     ? patch
     : (partial) => {
-        const next = mergeDeep(state, partial);
+        const cleanPatch = sanitizeRootPatch(partial);
+        const next = mergeDeep(state, cleanPatch);
 
         for (const key of Object.keys(state)) {
           delete state[key];
@@ -483,17 +424,21 @@ export function createActions({
   const writeReplace = isFunction(replace)
     ? replace
     : (nextState) => {
+        const cleanPatch = sanitizeRootPatch(nextState);
+
         for (const key of Object.keys(state)) {
           delete state[key];
         }
 
-        Object.assign(state, clone(nextState));
+        Object.assign(state, clone(cleanPatch));
         return state;
       };
 
   const writeUpdate = isFunction(update)
     ? update
     : (path, updater) => {
+        if (!pathAllowed(path)) return undefined;
+
         const current = getByPath(state, path);
         return writeSet(path, updater(current));
       };
@@ -503,29 +448,42 @@ export function createActions({
     : (path) => deleteByPath(state, path);
 
   function patchApp(value = {}) {
-    return writePatch({ app: { ...(state.app || {}), ...(isObject(value) ? value : {}) } });
-  }
-
-  function patchSession(value = {}) {
     return writePatch({
-      session: sessionPatch(value, state.session || {}),
+      app: {
+        ...(state.app || {}),
+        ...(isObject(value) ? sanitizeValue(value, "app") : {}),
+      },
     });
   }
 
   function patchUi(value = {}) {
-    return writePatch({ ui: { ...(state.ui || {}), ...(isObject(value) ? value : {}) } });
+    return writePatch({
+      ui: {
+        ...(state.ui || {}),
+        ...(isObject(value) ? sanitizeValue(value, "ui") : {}),
+      },
+    });
   }
 
   function patchMeta(extra = {}) {
     return writePatch({
       meta: {
         ...(state.meta || {}),
-        ...(isObject(extra) ? extra : {}),
+        ...(isObject(extra) ? sanitizeValue(extra, "meta") : {}),
         version: STORE_ACTIONS_VERSION,
         updatedAt: nowIso(),
         revision: Number(state.meta?.revision || 0) + 1,
       },
     });
+  }
+
+  function authNoop() {
+    /*
+      Compat antigua:
+      Store ya no escribe Auth/session/token/user/role.
+      Esas responsabilidades pertenecen a features/auth y core/state.
+    */
+    return false;
   }
 
   const api = {
@@ -572,8 +530,8 @@ export function createActions({
 
     setError(error = null) {
       return patchApp({
-        lastError: error || null,
-        error: error || null,
+        lastError: safeError(error),
+        error: safeError(error),
         hasError: Boolean(error),
       });
     },
@@ -599,7 +557,11 @@ export function createActions({
       return writeSet("app.publicPath", publicPath(path));
     },
 
-    setRouteSnapshot({ route = undefined, canonicalPath: canonical = undefined, publicPath: visible = undefined } = {}) {
+    setRouteSnapshot({
+      route = undefined,
+      canonicalPath: canonical = undefined,
+      publicPath: visible = undefined,
+    } = {}) {
       const nextPublicPath = publicPath(visible || route || canonical || state.app?.publicPath || DEFAULT_ROUTE);
       const nextRoute = canonicalPath(canonical || route || nextPublicPath);
 
@@ -621,95 +583,32 @@ export function createActions({
       });
     },
 
-    /* SESSION */
+    /* AUTH / SESSION COMPAT NO-OP */
 
-    setSession(payload = {}) {
-      return patchSession(payload);
-    },
-
-    applySession(payload = {}) {
-      return patchSession(extractSession(payload));
-    },
-
-    clearSession() {
-      return patchSession({
-        authenticated: false,
-        hasToken: false,
-        user: null,
-      });
-    },
-
-    setAuthenticated(value = false) {
-      if (!value) return api.clearSession();
-
-      return patchSession({
-        authenticated: true,
-        hasToken: state.session?.hasToken === true,
-        user: state.session?.user || null,
-      });
-    },
-
-    setToken(value = "") {
-      return patchSession({
-        hasToken: tokenProvided(value),
-        user: state.session?.user || null,
-        authenticated: state.session?.authenticated === true,
-      });
-    },
-
-    setAccessToken(value = "") {
-      return api.setToken(value);
-    },
-
-    setRefreshToken() {
-      return true;
-    },
-
-    setTempToken() {
-      return true;
-    },
-
-    setSessionId() {
-      return true;
-    },
-
-    setSessionUserId() {
-      return true;
-    },
-
-    setUser(user = null) {
-      return patchSession({
-        hasToken: state.session?.hasToken === true,
-        authenticated: state.session?.authenticated === true,
-        user,
-      });
-    },
-
-    setRole(role = "user") {
-      return patchSession({
-        hasToken: state.session?.hasToken === true,
-        authenticated: state.session?.authenticated === true,
-        user: state.session?.user || null,
-        role,
-      });
-    },
-
-    setRoles(roles = []) {
-      const role = Array.isArray(roles) && roles.includes("admin") ? "admin" : "user";
-      return api.setRole(role);
-    },
-
-    setPermissions() {
-      return true;
-    },
+    setSession: authNoop,
+    applySession: authNoop,
+    clearSession: authNoop,
+    setAuthenticated: authNoop,
+    setToken: authNoop,
+    setAccessToken: authNoop,
+    setRefreshToken: authNoop,
+    setTempToken: authNoop,
+    setSessionId: authNoop,
+    setSessionUserId: authNoop,
+    setUser: authNoop,
+    setRole: authNoop,
+    setRoles: authNoop,
+    setPermissions: authNoop,
 
     /* UI */
 
     setTheme(theme = DEFAULT_THEME) {
+      const value = normalizeTheme(theme);
+
       return patchUi({
-        theme: normalizeTheme(theme),
-        themeMode: normalizeTheme(theme),
-        themePreference: normalizeTheme(theme),
+        theme: value,
+        themeMode: value,
+        themePreference: value,
       });
     },
 
@@ -827,23 +726,32 @@ export function createActions({
     appendToCollection(key = "", item = null) {
       return writeUpdate(collectionPath(key), (list = []) => {
         const current = Array.isArray(list) ? list : [];
-        return [...current, clone(item)];
+        const clean = sanitizeValue(item);
+
+        if (clean === undefined) return current;
+
+        return [...current, clean];
       });
     },
 
     prependToCollection(key = "", item = null) {
       return writeUpdate(collectionPath(key), (list = []) => {
         const current = Array.isArray(list) ? list : [];
-        return [clone(item), ...current];
+        const clean = sanitizeValue(item);
+
+        if (clean === undefined) return current;
+
+        return [clean, ...current];
       });
     },
 
     replaceCollectionItem(key = "", matcher = null, nextItem = null) {
-      const match = matcherFor(matcher, nextItem);
+      const cleanItem = sanitizeValue(nextItem);
+      const match = matcherFor(matcher, cleanItem);
 
       return writeUpdate(collectionPath(key), (list = []) => {
         const current = Array.isArray(list) ? list : [];
-        return current.map((item) => (match(item) ? clone(nextItem) : item));
+        return current.map((item) => (match(item) ? cleanItem : item));
       });
     },
 
@@ -861,7 +769,9 @@ export function createActions({
           if (!match(item)) return item;
 
           const next = updater(clone(item));
-          return next === undefined ? item : next;
+          const clean = sanitizeValue(next);
+
+          return clean === undefined ? item : clean;
         });
       });
     },
@@ -874,7 +784,12 @@ export function createActions({
     },
 
     upsertCollectionItem(key = "", item = null, matcher = null) {
-      const nextItem = clone(item);
+      const nextItem = sanitizeValue(item);
+
+      if (nextItem === undefined) {
+        return writeUpdate(collectionPath(key), (list = []) => Array.isArray(list) ? list : []);
+      }
+
       const match = matcherFor(matcher, nextItem);
 
       return writeUpdate(collectionPath(key), (list = []) => {
@@ -925,27 +840,24 @@ export function createActions({
           initialized: Boolean(coreState.initialized),
           booting: Boolean(coreState.booting),
           loading: Boolean(coreState.loading),
+          fatal: Boolean(coreState.fatal || coreState.appFatal),
           route,
           canonicalPath: route,
           publicPath: visible,
-          lastError: coreState.lastError || coreState.error || null,
+          lastError: safeError(coreState.lastError || coreState.error || null),
         },
-
-        session: sessionPatch({
-          authenticated: coreState.authenticated,
-          hasToken: coreState.hasToken,
-          user: coreState.user || coreState.currentUser || null,
-          role: coreState.role || coreState.rol || null,
-        }),
 
         ui: {
           ...(state.ui || {}),
           theme: normalizeTheme(coreState.theme || state.ui?.theme || DEFAULT_THEME),
           themeMode: normalizeTheme(coreState.theme || state.ui?.themeMode || DEFAULT_THEME),
+          themePreference: normalizeTheme(coreState.theme || state.ui?.themePreference || DEFAULT_THEME),
           lang: normalizeLang(coreState.lang || coreState.language || state.ui?.lang || DEFAULT_LANG),
           language: normalizeLang(coreState.language || coreState.lang || state.ui?.language || DEFAULT_LANG),
           locale: normalizeLang(coreState.locale || coreState.lang || state.ui?.locale || DEFAULT_LANG),
           sidebarOpen: coreState.sidebarOpen !== false,
+          shellVisible: coreState.shellVisible !== false,
+          chromeVisible: coreState.chromeVisible !== false,
           pageTitle: readDocumentTitle(),
           topbarTitle: readDocumentTitle(),
         },

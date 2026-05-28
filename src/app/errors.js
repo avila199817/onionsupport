@@ -3,15 +3,25 @@
    Archivo: /src/app/errors.js
 
    Responsabilidad:
-   - Compat mínima de errores.
+   - Compat mínima de errores de App.
    - Pintar fallback fatal de boot en castellano.
    - Marcar estado fatal.
    - Ocultar loader y chrome mínimo en fatal.
-   - Sin imports, eventos de app, Toast, Auth, Router, telemetry,
-     debug global, fetch, storage ni lógica de dominio.
+   - No decidir logout.
+   - No redirigir a login.
+   - Sin imports.
+   - Sin eventos de app.
+   - Sin Toast.
+   - Sin Auth.
+   - Sin Router.
+   - Sin telemetry.
+   - Sin debug global.
+   - Sin fetch.
+   - Sin storage.
+   - Sin lógica de dominio.
 ========================================================= */
 
-export const APP_ERRORS_VERSION = "app.errors.v5";
+export const APP_ERRORS_VERSION = "app.errors.v6";
 
 const IDS = Object.freeze({
   loader: "app-loader",
@@ -30,17 +40,49 @@ const BOOT_ERROR_TITLE = "Error de arranque";
 const BOOT_ERROR_MESSAGE = "No se pudo iniciar Onion Support. Recarga la página.";
 const BOOT_ERROR_ACTION = "Volver a intentar";
 
+const SENSITIVE_QUERY_KEYS = Object.freeze([
+  "token",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "jwt",
+  "authorization",
+  "session",
+  "secret",
+  "code",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
+  "reset_token",
+  "activation_token",
+]);
+
 const CODE_MESSAGES = Object.freeze({
-  UNAUTHORIZED: "Necesitas iniciar sesión.",
-  SESSION_EXPIRED: "La sesión ha caducado.",
-  SESSION_REVOKED: "La sesión ya no está disponible.",
+  UNAUTHORIZED: "No se pudo validar la sesión.",
+  AUTH_REQUIRED: "No se pudo validar la sesión.",
+  SESSION_REQUIRED: "No se pudo validar la sesión.",
+  SESSION_EXPIRED: "No se pudo restaurar la sesión.",
+  TOKEN_EXPIRED: "No se pudo restaurar la sesión.",
+  ACCESS_TOKEN_EXPIRED: "No se pudo restaurar la sesión.",
   REFRESH_FAILED: "No se pudo restaurar la sesión.",
+
+  SESSION_REVOKED: "La sesión ya no está disponible.",
+  SESSION_INVALID: "La sesión ya no está disponible.",
+  SESSION_NOT_FOUND: "La sesión ya no está disponible.",
+
   USER_DISABLED: "El usuario está desactivado.",
+  USER_INACTIVE: "El usuario está desactivado.",
+  USER_SUSPENDED: "El usuario está desactivado.",
+  USER_BLOCKED: "El usuario está desactivado.",
   USER_DELETED: "El usuario no está disponible.",
   USER_ARCHIVED: "El usuario no está disponible.",
   USER_NOT_AVAILABLE: "El usuario no está disponible.",
+
   FORBIDDEN: "No tienes permisos para realizar esta acción.",
   ADMIN_REQUIRED: "Se requiere una cuenta de administrador.",
+
   VALIDATION_ERROR: "Revisa los datos introducidos.",
   RATE_LIMITED: "Demasiadas solicitudes. Inténtalo de nuevo más tarde.",
   SERVER_ERROR: "El servidor no pudo completar la operación.",
@@ -50,7 +92,7 @@ const CODE_MESSAGES = Object.freeze({
 
 const STATUS_MESSAGES = Object.freeze({
   400: "La solicitud no es válida.",
-  401: "Necesitas iniciar sesión.",
+  401: "No se pudo validar la sesión.",
   403: "No tienes permisos para realizar esta acción.",
   404: "El recurso solicitado no existe.",
   408: "La solicitud ha tardado demasiado.",
@@ -65,6 +107,8 @@ const STATUS_MESSAGES = Object.freeze({
   504: "El servidor ha tardado demasiado en responder.",
 });
 
+const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
+
 let lastError = null;
 
 /* =========================================================
@@ -73,6 +117,14 @@ let lastError = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function cleanText(value = "", fallback = "") {
@@ -157,12 +209,28 @@ function nowIso() {
    REDACTION / NORMALIZATION
 ========================================================= */
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSensitiveQueryPattern() {
+  const keys = SENSITIVE_QUERY_KEYS
+    .map(escapeRegExp)
+    .filter(Boolean)
+    .join("|");
+
+  return keys
+    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
+    : null;
+}
+
 export function redactTokenInText(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
+  const text = cleanText(value, "");
+  const redactedQuery = SENSITIVE_QUERY_PATTERN
+    ? text.replace(SENSITIVE_QUERY_PATTERN, "$1***")
+    : text;
+
+  return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
@@ -173,9 +241,13 @@ function normalizeErrorCode(error = null) {
       error?.error ||
       error?.response?.data?.code ||
       error?.response?.data?.error ||
+      error?.data?.code ||
+      error?.data?.error ||
       "",
     ""
-  ).toUpperCase();
+  )
+    .replace(/[\s-]+/g, "_")
+    .toUpperCase();
 }
 
 function normalizeErrorStatus(error = null) {
@@ -184,12 +256,23 @@ function normalizeErrorStatus(error = null) {
       error?.statusCode ||
       error?.response?.status ||
       error?.response?.data?.status ||
+      error?.data?.status ||
       0
   );
 
   return Number.isInteger(status) && status >= 100 && status <= 599
     ? status
     : null;
+}
+
+function normalizeSeverity(value = "error") {
+  const severity = cleanText(value, "error").toLowerCase();
+
+  if (severity === "critical") return "critical";
+  if (severity === "warning") return "warning";
+  if (severity === "info") return "info";
+
+  return "error";
 }
 
 export function resolveErrorMessage(
@@ -218,13 +301,16 @@ export function createErrorSnapshot({
     version: APP_ERRORS_VERSION,
 
     source: cleanText(source, "app").slice(0, 96),
-    severity: cleanText(severity, "error").toLowerCase().slice(0, 32),
+    severity: normalizeSeverity(severity),
     boot: Boolean(boot),
 
     name: cleanText(error?.name, "Error").slice(0, 96),
     message: resolveErrorMessage(error),
     code: normalizeErrorCode(error) || null,
     status: normalizeErrorStatus(error),
+
+    canRefresh: error?.canRefresh === true || error?.refreshRequired === true,
+    shouldLogout: error?.shouldLogout === true || error?.clearClientSession === true,
 
     at: nowIso(),
   };
@@ -273,6 +359,8 @@ function markFatalState() {
     setDataset(root, "shellInteractive", "false");
     setDataset(root, "chrome", "hidden");
     setDataset(root, "routeMode", "fatal");
+
+    setAttr(root, "aria-busy", "false");
   }
 
   return true;
@@ -327,23 +415,49 @@ function hideLoaderForFatal() {
   return true;
 }
 
+function retryBoot() {
+  if (!isBrowser()) return false;
+
+  try {
+    window.location.reload();
+    return true;
+  } catch {
+    try {
+      window.location.href = "/";
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 function createErrorView() {
   const section = document.createElement("section");
   section.className = "boot-error-view";
   section.setAttribute("role", "alert");
   section.setAttribute("aria-live", "assertive");
+  section.setAttribute("aria-labelledby", "boot-error-title");
+  section.setAttribute("aria-describedby", "boot-error-message");
 
   const title = document.createElement("h1");
+  title.id = "boot-error-title";
   title.textContent = BOOT_ERROR_TITLE;
 
   const message = document.createElement("p");
+  message.id = "boot-error-message";
   message.textContent = BOOT_ERROR_MESSAGE;
 
-  const action = document.createElement("a");
+  const action = document.createElement("button");
   action.className = "boot-error-view__action";
-  action.href = "/";
+  action.type = "button";
   action.textContent = BOOT_ERROR_ACTION;
   action.setAttribute("data-spa-disabled", "true");
+
+  try {
+    action.addEventListener("click", retryBoot, { once: true });
+  } catch {
+    // noop
+  }
 
   section.append(title, message, action);
 
@@ -376,6 +490,7 @@ export function renderBootError({ error = null } = {}) {
   try {
     setHidden(root, false);
     setDataset(root, "routeMode", "fatal");
+    setAttr(root, "aria-busy", "false");
     root.replaceChildren(createErrorView());
     return true;
   } catch {
@@ -409,6 +524,10 @@ export function getErrorStateSnapshot() {
       errorsCompatOnly: true,
       bootFatalFallback: true,
       visibleErrorsInSpanish: true,
+
+      noLoginRedirect: true,
+      noLogoutDecision: true,
+
       noImports: true,
       noAppEvents: true,
       noToast: true,
@@ -419,6 +538,7 @@ export function getErrorStateSnapshot() {
       noFetch: true,
       noStorage: true,
       noDomainLogic: true,
+
       redactedSnapshot: true,
     },
   };

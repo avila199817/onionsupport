@@ -6,13 +6,13 @@
    - Fachada pública mínima de Auth.
    - Delegar login/restore/logout/session/guards.
    - HTTP delegado en CoreHttp/AppCore.
-   - Normalizar usuario autenticado delegando en session.js.
-   - Preservar campos públicos visuales del usuario vía session.js.
+   - Normalizar usuario autenticado delegando en session.js/Core.
+   - Preservar campos públicos visuales del usuario vía session.js/Core.
    - Exponer Home privada por slug: /@{user.slug}.
    - Pedir restore persistente/silent refresh a restore.js.
    - Init sólo registra Auth; restoreSession gobierna la restauración.
    - /api/auth/me es el único endpoint válido de "me".
-   - Refresh visible opcional: puede ir en cookie httpOnly.
+   - Refresh visible opcional pero nunca se expone ni se guarda.
    - Sin Router.
    - Sin Toast.
    - Sin fetch propio.
@@ -23,15 +23,18 @@
    - Sin 2FA/MFA/OTP.
    - Roles únicos: admin / user.
    - Auth estricta: access token usable + user usable.
+   - Usuario inválido sólo por disabled/desactivado.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import * as CoreHttpModule from "../../core/http.js";
 
 import {
+  ALLOWED_ROLES,
   AUTH_ENDPOINTS,
   ROUTES,
   USER_HOME_PREFIX,
+  SENSITIVE_QUERY_PARAMS,
   buildUserHomeRoute as configBuildUserHomeRoute,
   isBlockedRoutePath as configIsBlockedRoutePath,
   normalizeUserSlug as configNormalizeUserSlug,
@@ -45,9 +48,14 @@ import * as GuardsApi from "./guards.js";
 import * as ActivationApi from "./activation.js";
 import * as PasswordResetApi from "./password-reset.js";
 
-export const AUTH_MODULE_VERSION = "auth.facade.v11";
+export const AUTH_MODULE_VERSION = "auth.facade.v13";
 
-const VALID_ROLES = Object.freeze(["admin", "user"]);
+const VALID_ROLES = Object.freeze(
+  (Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
+    ? ALLOWED_ROLES
+    : ["admin", "user"]
+  ).map((role) => String(role).toLowerCase())
+);
 
 const AUTH_ROUTES = Object.freeze({
   login: ROUTES.login,
@@ -62,7 +70,7 @@ const AUTH_HOME = Object.freeze({
 });
 
 const INVALID_USER_STATUSES = new Set([
-  "suspended",
+  "disabled",
   "desactivado",
 ]);
 
@@ -73,6 +81,8 @@ const CoreHttp =
   CoreHttpModule;
 
 const SENSITIVE_KEYS = new Set([
+  ...SENSITIVE_QUERY_PARAMS.map((key) => String(key).toLowerCase()),
+
   "token",
   "accesstoken",
   "access_token",
@@ -94,6 +104,8 @@ const SENSITIVE_KEYS = new Set([
   "activationtoken",
   "activation_token",
 ]);
+
+const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
 
 /* =========================================================
    BASICS
@@ -120,12 +132,28 @@ function normalizeKey(value = "") {
   return cleanText(value, "").toLowerCase();
 }
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSensitiveQueryPattern() {
+  const keys = SENSITIVE_QUERY_PARAMS
+    .map(escapeRegExp)
+    .filter(Boolean)
+    .join("|");
+
+  return keys
+    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
+    : null;
+}
+
 function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
+  const clean = cleanText(value, "");
+  const redactedQuery = SENSITIVE_QUERY_PATTERN
+    ? clean.replace(SENSITIVE_QUERY_PATTERN, "$1***")
+    : clean;
+
+  return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
@@ -342,13 +370,18 @@ function isUserHomePath(path = "") {
 }
 
 function isUserDisabled(user = {}) {
-  const status = cleanText(user.status || user.estado || user.state, "").toLowerCase();
+  if (!isObject(user)) return true;
+
+  const status = cleanText(
+    user.status ||
+      user.estado ||
+      user.state ||
+      "",
+    ""
+  ).toLowerCase();
 
   return Boolean(
     user.disabled === true ||
-      user.suspended === true ||
-      user.active === false ||
-      user.enabled === false ||
       INVALID_USER_STATUSES.has(status)
   );
 }
@@ -363,6 +396,9 @@ function extractUserSlug(user = null) {
       user?.lookup?.slug ||
       user?.profile?.slug ||
       user?.routing?.slug ||
+      user?.username ||
+      user?.userId ||
+      user?.id ||
       ""
   );
 }
@@ -531,7 +567,33 @@ function hasValidToken() {
 }
 
 function getRefreshToken() {
-  return cleanToken(safeCall(sessionGetCurrentRefreshToken) || "");
+  /*
+    Refresh token visible no se expone.
+    Persistencia real por cookie httpOnly / backend.
+  */
+  return "";
+}
+
+function hasRefreshCandidate(source = null) {
+  return Boolean(
+    isObject(source) && (
+      source.hasRefreshToken === true ||
+      source.refreshAvailable === true ||
+      source.canRefresh === true ||
+      source.persistent === true ||
+      source.restoreOnBoot === true ||
+      cleanToken(extractRefreshToken(source))
+    )
+  );
+}
+
+function hasRefreshToken() {
+  return Boolean(
+    state().hasRefreshToken === true ||
+      getCurrentSession()?.persistent === true ||
+      getCurrentSession()?.restoreOnBoot === true ||
+      Auth.session.hasCookieRefreshCandidate === true
+  );
 }
 
 function getUser() {
@@ -762,13 +824,22 @@ function extractBackendHomePath(payload = {}, user = null) {
   return buildUserHomePath(user);
 }
 
-function normalizeAuthPayload(payload = {}) {
+function normalizeAuthPayload(payload = {}, options = {}) {
   const source = isObject(payload) ? payload : {};
 
-  const token = cleanToken(extractToken(source) || getToken());
-  const refreshToken = cleanToken(extractRefreshToken(source) || "");
+  const allowCurrentToken = options.allowCurrentToken === true;
+  const allowCurrentUser = options.allowCurrentUser !== false;
 
-  const user = normalizeUser(extractUser(source) || getUser());
+  const token = cleanToken(
+    extractToken(source) ||
+      (allowCurrentToken ? getToken() : "")
+  );
+
+  const user = normalizeUser(
+    extractUser(source) ||
+      (allowCurrentUser ? getUser() : null)
+  );
+
   const session = extractSession(source);
   const routing = extractRouting(source);
 
@@ -777,19 +848,18 @@ function normalizeAuthPayload(payload = {}) {
   const role = user ? defaultRole(user.role || user.rol || user.roles) : "";
 
   const authenticated = Boolean(token && user);
+  const hasRefresh = Boolean(
+    hasRefreshCandidate(source) ||
+      source.hasRefreshToken === true ||
+      state().hasRefreshToken === true
+  );
 
   return {
     token,
     accessToken: token,
     access_token: token,
 
-    /*
-      Refresh visible opcional. Cookie httpOnly no es detectable desde JS.
-    */
-    hasRefreshToken: Boolean(refreshToken || getRefreshToken()),
-
-    refreshToken: refreshToken || null,
-    refresh_token: refreshToken || null,
+    hasRefreshToken: hasRefresh,
 
     session,
     sessionData: session,
@@ -812,33 +882,44 @@ function normalizeAuthPayload(payload = {}) {
   };
 }
 
-function publicAuthResult(payload = {}) {
-  const user = getUser();
-  const homePath = getDefaultHome();
+function publicAuthResult(payload = {}, options = {}) {
+  const useState = options.useState !== false;
+
+  const user = useState
+    ? getUser()
+    : normalizeUser(payload.user || payload.currentUser);
+
+  const authenticated = useState
+    ? isAuthenticated()
+    : Boolean(payload.authenticated === true && payload.token && user);
+
+  const homePath = user ? buildUserHomePath(user) : AUTH_HOME.canonical;
+  const role = authenticated ? defaultRole(payload.role || user?.role || user?.rol || user?.roles) : "";
 
   return {
-    ok: payload.authenticated === true || isAuthenticated(),
-    authenticated: isAuthenticated(),
+    ok: payload.authenticated === true || authenticated,
+    authenticated,
 
-    user: publicUser(user),
-    currentUser: publicUser(user),
+    user: authenticated ? publicUser(user) : null,
+    currentUser: authenticated ? publicUser(user) : null,
 
-    session: getCurrentSession(),
-    sessionData: getCurrentSession(),
+    session: authenticated ? getCurrentSession() : null,
+    sessionData: authenticated ? getCurrentSession() : null,
 
-    userSlug: getUserSlug() || null,
+    userSlug: user ? extractUserSlug(user) || null : null,
     homePath,
     defaultHome: homePath,
-    postLoginTarget: getPostLoginTarget(),
+    postLoginTarget: authenticated ? homePath : null,
 
-    role: getRole() || null,
-    roles: getRoles(),
+    role: role || null,
+    roles: role ? [role] : [],
 
-    hasToken: hasValidToken(),
+    hasToken: authenticated ? hasValidToken() : Boolean(payload.token),
     hasUser: Boolean(user),
-    hasSession: Boolean(getCurrentSession()),
-    hasRefreshToken: payload.hasRefreshToken === true || Boolean(getRefreshToken()),
+    hasSession: Boolean(getCurrentSession() || payload.session || payload.sessionData),
+    hasRefreshToken: Boolean(payload.hasRefreshToken || hasRefreshToken()),
     supportsHttpOnlyRefresh: true,
+    hasCookieRefreshCandidate: true,
 
     token: null,
     accessToken: null,
@@ -914,10 +995,10 @@ function clearHttpToken() {
 }
 
 function writeSession(payload = {}, options = {}) {
-  const normalized = normalizeAuthPayload(payload);
+  const normalized = normalizeAuthPayload(payload, options);
 
   if (!(normalized.token && normalized.user)) {
-    return normalizeAuthPayload({});
+    return normalized;
   }
 
   try {
@@ -960,7 +1041,9 @@ function applySession(payload = {}, options = {}) {
     ...options,
   });
 
-  return publicAuthResult(result);
+  return publicAuthResult(result, {
+    useState: Boolean(result.token && result.user),
+  });
 }
 
 function clearSession(options = {}) {
@@ -1037,9 +1120,8 @@ function syncAuthState(options = {}) {
   }
 
   /*
-    No limpia token-only aquí.
-    En reload puede existir access token sin user todavía; restore.js valida
-    /api/auth/me o intenta /api/auth/refresh por cookie httpOnly.
+    No limpia token-only ni user-only aquí.
+    Restore.js valida /me o intenta /refresh por cookie httpOnly.
   */
   if (!isAuthenticated()) return false;
 
@@ -1052,11 +1134,14 @@ function syncAuthState(options = {}) {
         token,
         user,
         session: getCurrentSession(),
+        hasRefreshToken: hasRefreshToken(),
       },
       {
         source: options.source || "Auth.syncAuthState",
         silent: true,
         emit: false,
+        allowCurrentToken: true,
+        allowCurrentUser: true,
       }
     );
   }
@@ -1165,6 +1250,8 @@ async function login(credentials = {}, options = {}) {
 
       const result = applySession(raw || {}, {
         source: "Auth.login",
+        allowCurrentToken: false,
+        allowCurrentUser: false,
       });
 
       if (result.authenticated) {
@@ -1205,11 +1292,16 @@ async function handleLoginFormSubmit(form, options = {}) {
     });
 
     if (isObject(raw)) {
-      const normalized = normalizeAuthPayload(raw);
+      const normalized = normalizeAuthPayload(raw, {
+        allowCurrentToken: false,
+        allowCurrentUser: false,
+      });
 
       if (normalized.authenticated) {
         return applySession(normalized, {
           source: "Auth.handleLoginFormSubmit",
+          allowCurrentToken: false,
+          allowCurrentUser: false,
         });
       }
     }
@@ -1250,7 +1342,6 @@ async function restoreSession(options = {}) {
       /*
         restore.js es dueño del restore real, /api/auth/me, refresh silencioso,
         aplicación de sesión y limpieza por sesión inválida.
-        La fachada sólo sincroniza lectura pública.
       */
       syncAuthState({
         source: "Auth.restoreSession",
@@ -1258,6 +1349,7 @@ async function restoreSession(options = {}) {
 
       Auth.session.lastError = null;
       Auth.session.lastRestoreAt = Date.now();
+      Auth.session.hasCookieRefreshCandidate = true;
 
       if (isObject(raw)) {
         return {
@@ -1336,15 +1428,15 @@ async function refreshSession(options = {}) {
         source: "Auth.refreshSession",
       });
 
-      const normalized = normalizeAuthPayload(raw || {});
-      const result = normalized.authenticated
-        ? applySession(normalized, {
-            source: "Auth.refreshSession",
-          })
-        : publicAuthResult({});
+      const result = applySession(raw || {}, {
+        source: "Auth.refreshSession",
+        allowCurrentToken: false,
+        allowCurrentUser: true,
+      });
 
       Auth.session.lastError = null;
       Auth.session.lastRefreshAt = Date.now();
+      Auth.session.hasCookieRefreshCandidate = true;
 
       return result;
     } catch (error) {
@@ -1390,12 +1482,11 @@ async function fetchMe(options = {}) {
             cache: "no-store",
           });
 
-      const normalized = normalizeAuthPayload(raw || {});
-      const result = normalized.authenticated
-        ? applySession(normalized, {
-            source: "Auth.me",
-          })
-        : publicAuthResult({});
+      const result = applySession(raw || {}, {
+        source: "Auth.me",
+        allowCurrentToken: true,
+        allowCurrentUser: false,
+      });
 
       Auth.session.lastError = null;
       Auth.session.lastMeAt = Date.now();
@@ -1561,11 +1652,16 @@ async function confirmResetPassword(payload = {}, options = {}) {
   }
 
   const raw = await confirmResetPasswordCore(payload, options);
-  const normalized = normalizeAuthPayload(raw || {});
+  const normalized = normalizeAuthPayload(raw || {}, {
+    allowCurrentToken: false,
+    allowCurrentUser: false,
+  });
 
   if (normalized.authenticated) {
     return applySession(normalized, {
       source: "Auth.confirmResetPassword",
+      allowCurrentToken: false,
+      allowCurrentUser: false,
     });
   }
 
@@ -1593,6 +1689,10 @@ function authApiRequest(method = "GET", path = "", body = undefined, options = {
 ========================================================= */
 
 function buildSessionSnapshotSafe() {
+  const authenticated = isAuthenticated();
+  const user = getUser();
+  const homePath = buildUserHomePath(user);
+
   try {
     if (isFunction(sessionBuildSnapshot)) {
       const snapshot = sessionBuildSnapshot();
@@ -1606,46 +1706,45 @@ function buildSessionSnapshotSafe() {
         refreshToken: null,
         refresh_token: null,
 
-        user: publicUser(getUser()),
+        user: authenticated ? publicUser(user) : null,
 
-        userSlug: getUserSlug() || null,
-        homePath: getDefaultHome(),
-        defaultHome: getDefaultHome(),
+        userSlug: user ? getUserSlug() || null : null,
+        homePath,
+        defaultHome: homePath,
 
-        role: getRole() || null,
-        roles: getRoles(),
+        role: authenticated ? getRole() || null : null,
+        roles: authenticated ? getRoles() : [],
 
-        authenticated: isAuthenticated(),
+        authenticated,
         hasToken: hasValidToken(),
-        hasUser: Boolean(getUser()),
+        hasUser: Boolean(user),
         hasSession: Boolean(getCurrentSession()),
-        hasRefreshToken: Boolean(getRefreshToken()),
+        hasRefreshToken: hasRefreshToken(),
         supportsHttpOnlyRefresh: true,
+        hasCookieRefreshCandidate: true,
       };
     }
   } catch {
     // fallback abajo
   }
 
-  const user = getUser();
-  const homePath = buildUserHomePath(user);
-
   return {
-    authenticated: isAuthenticated(),
+    authenticated,
     hasToken: hasValidToken(),
-    hasRefreshToken: Boolean(getRefreshToken()),
+    hasRefreshToken: hasRefreshToken(),
     supportsHttpOnlyRefresh: true,
+    hasCookieRefreshCandidate: true,
     hasUser: Boolean(user),
     hasSession: Boolean(getCurrentSession()),
 
-    user: publicUser(user),
+    user: authenticated ? publicUser(user) : null,
 
-    userSlug: extractUserSlug(user) || null,
+    userSlug: user ? extractUserSlug(user) || null : null,
     homePath,
     defaultHome: homePath,
 
-    role: getRole(),
-    roles: getRoles(),
+    role: authenticated ? getRole() : null,
+    roles: authenticated ? getRoles() : [],
 
     token: null,
     accessToken: null,
@@ -1669,7 +1768,7 @@ function getSessionDebugSnapshotSafe() {
         refreshToken: null,
         refresh_token: null,
 
-        user: publicUser(getUser()),
+        user: isAuthenticated() ? publicUser(getUser()) : null,
       };
     }
   } catch {
@@ -1680,6 +1779,7 @@ function getSessionDebugSnapshotSafe() {
 }
 
 function getAuthModuleSnapshot() {
+  const authenticated = isAuthenticated();
   const user = getUser();
   const slug = extractUserSlug(user);
   const homePath = buildUserHomePath(user);
@@ -1687,10 +1787,11 @@ function getAuthModuleSnapshot() {
   return {
     version: AUTH_MODULE_VERSION,
 
-    authenticated: isAuthenticated(),
+    authenticated,
     hasToken: hasValidToken(),
-    hasRefreshToken: Boolean(getRefreshToken()),
+    hasRefreshToken: hasRefreshToken(),
     supportsHttpOnlyRefresh: true,
+    hasCookieRefreshCandidate: true,
     hasUser: Boolean(user),
     hasSession: Boolean(getCurrentSession()),
 
@@ -1700,16 +1801,16 @@ function getAuthModuleSnapshot() {
     refreshToken: null,
     refresh_token: null,
 
-    user: publicUser(user),
+    user: authenticated ? publicUser(user) : null,
 
-    userSlug: slug || null,
+    userSlug: user ? slug || null : null,
     homePath,
     defaultHome: homePath,
-    postLoginTarget: getPostLoginTarget(),
+    postLoginTarget: authenticated ? getPostLoginTarget() : null,
 
-    role: getRole() || null,
-    roles: getRoles(),
-    isAdmin: isAdmin(),
+    role: authenticated ? getRole() || null : null,
+    roles: authenticated ? getRoles() : [],
+    isAdmin: authenticated && isAdmin(),
 
     routes: AUTH_ROUTES,
     home: AUTH_HOME,
@@ -1764,7 +1865,7 @@ function getAuthModuleSnapshot() {
       persistentSession: true,
       restoreRequestsSilentRefresh: true,
       supportsHttpOnlyRefreshCookie: true,
-      visibleRefreshTokenOptional: true,
+      visibleRefreshTokenOptionalButNeverExposed: true,
       tokenExpiredDoesNotMeanLogout: true,
 
       canonicalMeEndpointOnly: true,
@@ -1774,8 +1875,8 @@ function getAuthModuleSnapshot() {
       restoreOwnsBootstrapSession: true,
       userSlugHome: true,
 
-      roles: ["admin", "user"],
-      invalidStatuses: ["suspended", "desactivado"],
+      roles: [...VALID_ROLES],
+      invalidStatuses: [...INVALID_USER_STATUSES],
 
       noRouter: true,
       noToast: true,
@@ -1844,6 +1945,8 @@ export const Auth = {
     restorePromise: null,
     refreshPromise: null,
     mePromise: null,
+
+    hasCookieRefreshCandidate: true,
 
     lastLoginAt: null,
     lastRestoreAt: null,

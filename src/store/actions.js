@@ -22,16 +22,18 @@ export const STORE_ACTIONS_VERSION = "store.actions.v3";
 
 const DEFAULT_ROUTE = "/";
 const DEFAULT_LANG = "es";
-const DEFAULT_THEME = "system";
+const THEME_PREFERENCE = "system";
 const DEFAULT_TITLE = "Onion Support";
 
 const ROOT_KEYS = Object.freeze([
-  "app",
   "ui",
+  "app",
   "entities",
   "flags",
   "meta",
 ]);
+
+const ROOT_KEY_SET = new Set(ROOT_KEYS);
 
 const BLOCKED_KEYS = new Set([
   "__proto__",
@@ -40,7 +42,20 @@ const BLOCKED_KEYS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE =
-  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|role|roles|permissions)/i;
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|^role$|^roles$|^permissions$|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
+
+const SENSITIVE_QUERY_KEYS = new Set([
+  "token",
+  "access_token",
+  "accessToken",
+  "refresh_token",
+  "refreshToken",
+  "id_token",
+  "idToken",
+  "code",
+  "session",
+  "sessionId",
+]);
 
 /* =========================================================
    BASICS
@@ -51,7 +66,13 @@ function isBrowser() {
 }
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+
+  return prototype === Object.prototype || prototype === null;
 }
 
 function isFunction(value) {
@@ -94,29 +115,184 @@ function nowIso() {
   }
 }
 
-function normalizeTheme(value = DEFAULT_THEME) {
-  const theme = String(value || "").toLowerCase();
-
-  return ["dark", "light", "system"].includes(theme) ? theme : DEFAULT_THEME;
+function normalizeKey(value = "") {
+  return String(value ?? "").trim();
 }
 
-function normalizeLang(value = DEFAULT_LANG) {
-  const lang = String(value || "").toLowerCase().split("-")[0];
+function isUnsafeKey(key = "") {
+  return BLOCKED_KEYS.has(normalizeKey(key));
+}
 
-  return ["ca", "es", "en"].includes(lang) ? lang : DEFAULT_LANG;
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(normalizeKey(key));
+}
+
+function isRootKey(key = "") {
+  return ROOT_KEY_SET.has(normalizeKey(key));
+}
+
+function readState(source = {}) {
+  if (isFunction(source.get)) {
+    const next = source.get();
+    return isObject(next) ? next : {};
+  }
+
+  if (isFunction(source.getState)) {
+    const next = source.getState();
+    return isObject(next) ? next : {};
+  }
+
+  if (isFunction(source.state)) {
+    const next = source.state();
+    return isObject(next) ? next : {};
+  }
+
+  return isObject(source.state) ? source.state : {};
+}
+
+function redact(value = "") {
+  return text(value, "")
+    .replace(/([?&#](?:token|access_token|accessToken|refresh_token|refreshToken|id_token|idToken|code|session|sessionId)=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
+}
+
+function normalizeLang() {
+  return DEFAULT_LANG;
+}
+
+function readEffectiveTheme() {
+  if (isBrowser()) {
+    const domTheme = text(document.documentElement?.dataset?.theme, "").toLowerCase();
+
+    if (domTheme === "dark" || domTheme === "light") {
+      return domTheme;
+    }
+
+    try {
+      return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches
+        ? "dark"
+        : "light";
+    } catch {
+      return THEME_PREFERENCE;
+    }
+  }
+
+  return THEME_PREFERENCE;
 }
 
 function cleanPath(value = DEFAULT_ROUTE) {
-  let path = text(value, DEFAULT_ROUTE)
+  const raw = text(value, DEFAULT_ROUTE);
+
+  if (!raw) return DEFAULT_ROUTE;
+  if (raw.startsWith("//")) return DEFAULT_ROUTE;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return DEFAULT_ROUTE;
+  if (/[\r\n\t\\]/.test(raw)) return DEFAULT_ROUTE;
+
+  let path = raw
     .split("?")[0]
     .split("#")[0]
-    .replace(/\\/g, "/")
     .replace(/\/{2,}/g, "/");
 
-  if (!path.startsWith("/")) path = `/${path}`;
-  if (path.length > 1) path = path.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+  if (!path.startsWith("/")) {
+    path = `/${path}`;
+  }
+
+  if (path.length > 1) {
+    path = path.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+  }
 
   return path || DEFAULT_ROUTE;
+}
+
+function cleanSearch(search = "") {
+  const raw = text(search, "");
+
+  if (!raw || raw === "?") return "";
+
+  const normalized = raw.startsWith("?")
+    ? raw
+    : `?${raw.replace(/^\?+/, "")}`;
+
+  try {
+    const params = new URLSearchParams(normalized);
+
+    for (const key of [...params.keys()]) {
+      if (SENSITIVE_QUERY_KEYS.has(key) || SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) {
+        params.delete(key);
+      }
+    }
+
+    const output = params.toString();
+
+    return output ? `?${output}` : "";
+  } catch {
+    return "";
+  }
+}
+
+function cleanHash(hash = "") {
+  const raw = text(hash, "");
+
+  if (!raw || raw === "#") return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+
+  const normalized = raw.startsWith("#")
+    ? raw
+    : `#${raw.replace(/^#+/, "")}`;
+
+  const body = normalized.slice(1);
+
+  if (!body) return "";
+
+  const queryIndex = body.indexOf("?");
+
+  if (queryIndex >= 0) {
+    const hashPath = body.slice(0, queryIndex).replace(/[?#\\]/g, "");
+    const query = cleanSearch(`?${body.slice(queryIndex + 1)}`);
+
+    return query ? `#${hashPath}${query}` : `#${hashPath}`;
+  }
+
+  if (/^[^/?#=&]+=/i.test(body)) {
+    const query = cleanSearch(`?${body}`);
+    return query ? `#${query.slice(1)}` : "";
+  }
+
+  return redact(normalized);
+}
+
+function splitRouteLike(value = DEFAULT_ROUTE) {
+  let raw = text(value, DEFAULT_ROUTE);
+
+  if (!raw) raw = DEFAULT_ROUTE;
+
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
+  }
+
+  return {
+    pathname,
+    search,
+    hash,
+  };
 }
 
 function publicPath(value = DEFAULT_ROUTE) {
@@ -127,34 +303,23 @@ function publicPath(value = DEFAULT_ROUTE) {
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return DEFAULT_ROUTE;
   if (/[\r\n\t\\]/.test(raw)) return DEFAULT_ROUTE;
 
-  return raw.startsWith("/") ? raw : `/${raw}`;
+  const parts = splitRouteLike(raw);
+  const pathname = cleanPath(parts.pathname);
+  const output = `${pathname}${cleanSearch(parts.search)}${cleanHash(parts.hash)}`;
+
+  return output || DEFAULT_ROUTE;
 }
 
 function canonicalPath(value = DEFAULT_ROUTE) {
   return cleanPath(value);
 }
 
-function normalizeKey(value = "") {
-  return text(value, "")
-    .replace(/^\.+|\.+$/g, "")
+function safeDataKey(value = "") {
+  const key = text(value, "")
     .replace(/\s+/g, "_")
-    .replace(/[^a-zA-Z0-9_.:-]/g, "");
-}
-
-function isUnsafeKey(key = "") {
-  return BLOCKED_KEYS.has(String(key || ""));
-}
-
-function isSensitiveKey(key = "") {
-  return SENSITIVE_KEY_RE.test(String(key || ""));
-}
-
-function isRootKey(key = "") {
-  return ROOT_KEYS.includes(String(key || ""));
-}
-
-function safeKey(value = "") {
-  const key = normalizeKey(value);
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
 
   if (!key) return "";
   if (isUnsafeKey(key)) return "";
@@ -164,22 +329,29 @@ function safeKey(value = "") {
 }
 
 function pathParts(path = "") {
-  return String(path || "")
-    .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
-    .split(".")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .filter((part) => !isUnsafeKey(part))
-    .filter((part) => !isSensitiveKey(part));
+  const source = Array.isArray(path)
+    ? path
+    : String(path ?? "")
+        .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
+        .split(".");
+
+  const parts = source
+    .map((part) => normalizeKey(part))
+    .filter(Boolean);
+
+  if (!parts.length) return [];
+  if (parts.some(isUnsafeKey)) return [];
+  if (parts.some(isSensitiveKey)) return [];
+
+  return parts;
 }
 
 function pathAllowed(path = "") {
   const parts = pathParts(path);
 
   if (!parts.length) return false;
-  if (!isRootKey(parts[0])) return false;
 
-  return true;
+  return isRootKey(parts[0]);
 }
 
 function getByPath(root, path, fallback = undefined) {
@@ -200,45 +372,48 @@ function getByPath(root, path, fallback = undefined) {
 function setByPath(root, path, value) {
   const parts = pathParts(path);
 
-  if (!root || !parts.length || !pathAllowed(parts)) return false;
+  if (!isObject(root) || !parts.length || !pathAllowed(parts)) return false;
+
+  const key = parts.at(-1);
+  const clean = sanitizeValue(value, key);
+
+  if (clean === undefined) return false;
+  if (parts.length === 1 && !isObject(clean)) return false;
 
   let current = root;
 
   for (const part of parts.slice(0, -1)) {
-    if (!isObject(current[part])) {
+    if (current[part] === undefined) {
       current[part] = {};
+    }
+
+    if (!isObject(current[part])) {
+      return false;
     }
 
     current = current[part];
   }
 
-  current[parts.at(-1)] = sanitizeValue(value, parts.at(-1));
+  current[key] = clean;
 
-  return true;
-}
-
-function deleteByPath(root, path) {
-  const parts = pathParts(path);
-
-  if (!root || !parts.length || !pathAllowed(parts)) return false;
-
-  let current = root;
-
-  for (const part of parts.slice(0, -1)) {
-    if (!isObject(current[part])) return false;
-    current = current[part];
-  }
-
-  const key = parts.at(-1);
-
-  if (!(key in current)) return false;
-
-  delete current[key];
   return true;
 }
 
 function sanitizeValue(value, keyHint = "") {
   if (isUnsafeKey(keyHint) || isSensitiveKey(keyHint)) {
+    return undefined;
+  }
+
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const valueType = typeof value;
+
+  if (
+    valueType === "function" ||
+    valueType === "symbol" ||
+    valueType === "bigint"
+  ) {
     return undefined;
   }
 
@@ -265,7 +440,15 @@ function sanitizeValue(value, keyHint = "") {
     return output;
   }
 
-  return clone(value);
+  if (
+    valueType === "string" ||
+    valueType === "number" ||
+    valueType === "boolean"
+  ) {
+    return clone(value);
+  }
+
+  return undefined;
 }
 
 function sanitizeRootPatch(source = {}) {
@@ -280,7 +463,7 @@ function sanitizeRootPatch(source = {}) {
 
     const clean = sanitizeValue(value, key);
 
-    if (clean !== undefined) {
+    if (isObject(clean)) {
       output[key] = clean;
     }
   }
@@ -326,7 +509,15 @@ function entityId(item = null) {
 }
 
 function matcherFor(matcher, item = null) {
-  if (isFunction(matcher)) return matcher;
+  if (isFunction(matcher)) {
+    return (current) => {
+      try {
+        return Boolean(matcher(clone(current)));
+      } catch {
+        return false;
+      }
+    };
+  }
 
   const wanted = text(matcher || entityId(item), "");
 
@@ -337,13 +528,20 @@ function matcherFor(matcher, item = null) {
 
 function normalizeItems(items = []) {
   if (items === null || items === undefined) return [];
-  return Array.isArray(items) ? sanitizeValue(items) : [sanitizeValue(items)].filter((item) => item !== undefined);
+
+  const source = Array.isArray(items) ? items : [items];
+
+  return source
+    .map((item) => sanitizeValue(item))
+    .filter((item) => item !== undefined);
 }
 
 function collectionKey(key = "") {
-  const clean = safeKey(key);
+  const clean = safeDataKey(key);
 
-  if (!clean) throw new Error("Collection key requerido.");
+  if (!clean) {
+    throw new Error("Collection key requerido.");
+  }
 
   return clean;
 }
@@ -354,7 +552,8 @@ function collectionPath(key = "") {
 
 function readDocumentTitle() {
   if (!isBrowser()) return DEFAULT_TITLE;
-  return text(document.title, DEFAULT_TITLE);
+
+  return redact(text(document.title, DEFAULT_TITLE));
 }
 
 function safeError(error = null) {
@@ -363,7 +562,7 @@ function safeError(error = null) {
   if (typeof error === "string") {
     return {
       name: "Error",
-      message: text(error, ""),
+      message: redact(error),
       code: null,
       status: null,
     };
@@ -372,7 +571,7 @@ function safeError(error = null) {
   if (!isObject(error)) {
     return {
       name: "Error",
-      message: text(String(error), ""),
+      message: redact(String(error)),
       code: null,
       status: null,
     };
@@ -380,7 +579,7 @@ function safeError(error = null) {
 
   return {
     name: text(error.name, "Error"),
-    message: text(error.message || error.detail || error.reason || String(error), ""),
+    message: redact(error.message || error.detail || error.reason || String(error)),
     code: error.code || error.error || null,
     status: error.status || error.statusCode || error.response?.status || null,
   };
@@ -393,86 +592,87 @@ function safeError(error = null) {
 export function createActions({
   AppCore = null,
   state = {},
+  get = null,
+  getState = null,
   set = null,
   patch = null,
-  replace = null,
   update = null,
-  remove = null,
 } = {}) {
+  const source = {
+    state,
+    get,
+    getState,
+  };
+
   const writeSet = isFunction(set)
     ? set
     : (path, value) => {
+        const currentState = readState(source);
+
         if (!pathAllowed(path)) return undefined;
-        setByPath(state, path, clone(value));
-        return getByPath(state, path);
+
+        const ok = setByPath(currentState, path, value);
+
+        return ok ? clone(getByPath(currentState, path)) : undefined;
       };
 
   const writePatch = isFunction(patch)
     ? patch
     : (partial) => {
+        const currentState = readState(source);
         const cleanPatch = sanitizeRootPatch(partial);
-        const next = mergeDeep(state, cleanPatch);
+        const next = mergeDeep(currentState, cleanPatch);
 
-        for (const key of Object.keys(state)) {
-          delete state[key];
+        for (const key of Object.keys(currentState)) {
+          delete currentState[key];
         }
 
-        Object.assign(state, next);
-        return state;
-      };
+        Object.assign(currentState, next);
 
-  const writeReplace = isFunction(replace)
-    ? replace
-    : (nextState) => {
-        const cleanPatch = sanitizeRootPatch(nextState);
-
-        for (const key of Object.keys(state)) {
-          delete state[key];
-        }
-
-        Object.assign(state, clone(cleanPatch));
-        return state;
+        return clone(currentState);
       };
 
   const writeUpdate = isFunction(update)
     ? update
     : (path, updater) => {
+        const currentState = readState(source);
+
+        if (!isFunction(updater)) return undefined;
         if (!pathAllowed(path)) return undefined;
 
-        const current = getByPath(state, path);
+        const current = clone(getByPath(currentState, path));
         return writeSet(path, updater(current));
       };
 
-  const writeRemove = isFunction(remove)
-    ? remove
-    : (path) => deleteByPath(state, path);
+  function current() {
+    return readState(source);
+  }
 
   function patchApp(value = {}) {
+    const clean = isObject(value) ? sanitizeValue(value, "app") : {};
+
     return writePatch({
-      app: {
-        ...(state.app || {}),
-        ...(isObject(value) ? sanitizeValue(value, "app") : {}),
-      },
+      app: clean,
     });
   }
 
   function patchUi(value = {}) {
+    const clean = isObject(value) ? sanitizeValue(value, "ui") : {};
+
     return writePatch({
-      ui: {
-        ...(state.ui || {}),
-        ...(isObject(value) ? sanitizeValue(value, "ui") : {}),
-      },
+      ui: clean,
     });
   }
 
   function patchMeta(extra = {}) {
+    const meta = current().meta || {};
+
     return writePatch({
       meta: {
-        ...(state.meta || {}),
         ...(isObject(extra) ? sanitizeValue(extra, "meta") : {}),
         version: STORE_ACTIONS_VERSION,
         updatedAt: nowIso(),
-        revision: Number(state.meta?.revision || 0) + 1,
+        revision: Number(meta.revision || 0) + 1,
       },
     });
   }
@@ -492,22 +692,24 @@ export function createActions({
     /* APP */
 
     markReady(value = true) {
+      const app = current().app || {};
       const ready = Boolean(value);
 
       return patchApp({
         ready,
-        loading: ready ? false : Boolean(state.app?.loading),
-        booting: ready ? false : Boolean(state.app?.booting),
+        loading: ready ? false : Boolean(app.loading),
+        booting: ready ? false : Boolean(app.booting),
       });
     },
 
     markBooted(value = true) {
+      const app = current().app || {};
       const booted = Boolean(value);
 
       return patchApp({
         booted,
-        booting: booted ? false : Boolean(state.app?.booting),
-        loading: booted ? false : Boolean(state.app?.loading),
+        booting: booted ? false : Boolean(app.booting),
+        loading: booted ? false : Boolean(app.loading),
       });
     },
 
@@ -516,11 +718,12 @@ export function createActions({
     },
 
     setBooting(value = false) {
+      const app = current().app || {};
       const booting = Boolean(value);
 
       return patchApp({
         booting,
-        loading: booting ? true : Boolean(state.app?.loading),
+        loading: booting ? true : Boolean(app.loading),
       });
     },
 
@@ -529,10 +732,12 @@ export function createActions({
     },
 
     setError(error = null) {
+      const clean = safeError(error);
+
       return patchApp({
-        lastError: safeError(error),
-        error: safeError(error),
-        hasError: Boolean(error),
+        lastError: clean,
+        error: clean,
+        hasError: Boolean(clean),
       });
     },
 
@@ -562,7 +767,14 @@ export function createActions({
       canonicalPath: canonical = undefined,
       publicPath: visible = undefined,
     } = {}) {
-      const nextPublicPath = publicPath(visible || route || canonical || state.app?.publicPath || DEFAULT_ROUTE);
+      const app = current().app || {};
+      const nextPublicPath = publicPath(
+        visible ||
+          route ||
+          canonical ||
+          app.publicPath ||
+          DEFAULT_ROUTE
+      );
       const nextRoute = canonicalPath(canonical || route || nextPublicPath);
 
       return patchApp({
@@ -573,13 +785,14 @@ export function createActions({
     },
 
     setAppReady(value = true) {
+      const app = current().app || {};
       const ready = Boolean(value);
 
       return patchApp({
         ready,
-        booted: ready ? true : Boolean(state.app?.booted),
-        loading: ready ? false : Boolean(state.app?.loading),
-        booting: ready ? false : Boolean(state.app?.booting),
+        booted: ready ? true : Boolean(app.booted),
+        loading: ready ? false : Boolean(app.loading),
+        booting: ready ? false : Boolean(app.booting),
       });
     },
 
@@ -602,27 +815,21 @@ export function createActions({
 
     /* UI */
 
-    setTheme(theme = DEFAULT_THEME) {
-      const value = normalizeTheme(theme);
-
+    setTheme() {
       return patchUi({
-        theme: value,
-        themeMode: value,
-        themePreference: value,
+        theme: THEME_PREFERENCE,
+        themePreference: THEME_PREFERENCE,
+        themeMode: readEffectiveTheme(),
+        effectiveTheme: readEffectiveTheme(),
       });
     },
 
-    setThemePreference(theme = DEFAULT_THEME) {
-      const value = normalizeTheme(theme);
-
-      return patchUi({
-        themePreference: value,
-        themeMode: value,
-      });
+    setThemePreference() {
+      return api.setTheme();
     },
 
-    setLang(lang = DEFAULT_LANG) {
-      const value = normalizeLang(lang);
+    setLang() {
+      const value = normalizeLang();
 
       return patchUi({
         lang: value,
@@ -636,11 +843,13 @@ export function createActions({
     },
 
     toggleSidebar() {
-      return api.setSidebarOpen(!Boolean(state.ui?.sidebarOpen));
+      const ui = current().ui || {};
+
+      return api.setSidebarOpen(!Boolean(ui.sidebarOpen));
     },
 
     setPageTitle(title = DEFAULT_TITLE) {
-      const value = text(title, DEFAULT_TITLE);
+      const value = redact(text(title, DEFAULT_TITLE));
 
       return patchUi({
         pageTitle: value,
@@ -649,7 +858,7 @@ export function createActions({
     },
 
     setTopbarTitle(title = DEFAULT_TITLE) {
-      return writeSet("ui.topbarTitle", text(title, DEFAULT_TITLE));
+      return writeSet("ui.topbarTitle", redact(text(title, DEFAULT_TITLE)));
     },
 
     setDensity(density = "default") {
@@ -667,9 +876,11 @@ export function createActions({
     /* FLAGS */
 
     setFlag(flag = "", value = true) {
-      const key = safeKey(flag);
+      const key = safeDataKey(flag);
 
-      if (!key) throw new Error("actions.setFlag(flag, value) requiere flag válido.");
+      if (!key) {
+        throw new Error("actions.setFlag(flag, value) requiere flag válido.");
+      }
 
       return writeSet(`flags.${key}`, Boolean(value));
     },
@@ -679,27 +890,28 @@ export function createActions({
     },
 
     toggleFlag(flag = "") {
-      const key = safeKey(flag);
+      const key = safeDataKey(flag);
 
-      if (!key) throw new Error("actions.toggleFlag(flag) requiere flag válido.");
+      if (!key) {
+        throw new Error("actions.toggleFlag(flag) requiere flag válido.");
+      }
 
-      return writeSet(`flags.${key}`, !Boolean(state.flags?.[key]));
+      return writeSet(`flags.${key}`, !Boolean(current().flags?.[key]));
     },
 
     setFlags(flags = {}) {
       const next = {};
 
       for (const [key, value] of Object.entries(isObject(flags) ? flags : {})) {
-        const clean = safeKey(key);
+        const clean = safeDataKey(key);
 
-        if (clean) next[clean] = Boolean(value);
+        if (clean) {
+          next[clean] = Boolean(value);
+        }
       }
 
       return writePatch({
-        flags: {
-          ...(state.flags || {}),
-          ...next,
-        },
+        flags: next,
       });
     },
 
@@ -710,11 +922,16 @@ export function createActions({
     },
 
     setFetching(key = "", value = true) {
-      const clean = safeKey(key);
+      const clean = safeDataKey(key);
 
-      if (!clean) throw new Error("actions.setFetching(key, value) requiere key válido.");
+      if (!clean) {
+        throw new Error("actions.setFetching(key, value) requiere key válido.");
+      }
 
-      return api.setFlag(`fetching${clean[0].toUpperCase()}${clean.slice(1)}`, value);
+      return api.setFlag(
+        `fetching${clean[0].toUpperCase()}${clean.slice(1)}`,
+        value
+      );
     },
 
     /* COLLECTIONS */
@@ -725,33 +942,41 @@ export function createActions({
 
     appendToCollection(key = "", item = null) {
       return writeUpdate(collectionPath(key), (list = []) => {
-        const current = Array.isArray(list) ? list : [];
+        const currentList = Array.isArray(list) ? list : [];
         const clean = sanitizeValue(item);
 
-        if (clean === undefined) return current;
+        if (clean === undefined) return currentList;
 
-        return [...current, clean];
+        return [...currentList, clean];
       });
     },
 
     prependToCollection(key = "", item = null) {
       return writeUpdate(collectionPath(key), (list = []) => {
-        const current = Array.isArray(list) ? list : [];
+        const currentList = Array.isArray(list) ? list : [];
         const clean = sanitizeValue(item);
 
-        if (clean === undefined) return current;
+        if (clean === undefined) return currentList;
 
-        return [clean, ...current];
+        return [clean, ...currentList];
       });
     },
 
     replaceCollectionItem(key = "", matcher = null, nextItem = null) {
       const cleanItem = sanitizeValue(nextItem);
+
+      if (cleanItem === undefined) {
+        return writeUpdate(collectionPath(key), (list = []) =>
+          Array.isArray(list) ? list : []
+        );
+      }
+
       const match = matcherFor(matcher, cleanItem);
 
       return writeUpdate(collectionPath(key), (list = []) => {
-        const current = Array.isArray(list) ? list : [];
-        return current.map((item) => (match(item) ? cleanItem : item));
+        const currentList = Array.isArray(list) ? list : [];
+
+        return currentList.map((item) => (match(item) ? cleanItem : item));
       });
     },
 
@@ -763,9 +988,9 @@ export function createActions({
       const match = matcherFor(matcher);
 
       return writeUpdate(collectionPath(key), (list = []) => {
-        const current = Array.isArray(list) ? list : [];
+        const currentList = Array.isArray(list) ? list : [];
 
-        return current.map((item) => {
+        return currentList.map((item) => {
           if (!match(item)) return item;
 
           const next = updater(clone(item));
@@ -777,9 +1002,11 @@ export function createActions({
     },
 
     patchCollectionItem(key = "", matcher = null, partial = {}) {
+      const cleanPartial = isObject(partial) ? sanitizeValue(partial) : {};
+
       return api.updateCollectionItem(key, matcher, (item) => ({
         ...(isObject(item) ? item : {}),
-        ...(isObject(partial) ? clone(partial) : {}),
+        ...(isObject(cleanPartial) ? cleanPartial : {}),
       }));
     },
 
@@ -787,22 +1014,24 @@ export function createActions({
       const nextItem = sanitizeValue(item);
 
       if (nextItem === undefined) {
-        return writeUpdate(collectionPath(key), (list = []) => Array.isArray(list) ? list : []);
+        return writeUpdate(collectionPath(key), (list = []) =>
+          Array.isArray(list) ? list : []
+        );
       }
 
       const match = matcherFor(matcher, nextItem);
 
       return writeUpdate(collectionPath(key), (list = []) => {
-        const current = Array.isArray(list) ? [...list] : [];
-        const index = current.findIndex((entry) => match(entry));
+        const currentList = Array.isArray(list) ? [...list] : [];
+        const index = currentList.findIndex((entry) => match(entry));
 
         if (index >= 0) {
-          current[index] = nextItem;
+          currentList[index] = nextItem;
         } else {
-          current.push(nextItem);
+          currentList.push(nextItem);
         }
 
-        return current;
+        return currentList;
       });
     },
 
@@ -810,8 +1039,9 @@ export function createActions({
       const match = matcherFor(matcher);
 
       return writeUpdate(collectionPath(key), (list = []) => {
-        const current = Array.isArray(list) ? list : [];
-        return current.filter((item) => !match(item));
+        const currentList = Array.isArray(list) ? list : [];
+
+        return currentList.filter((item) => !match(item));
       });
     },
 
@@ -829,13 +1059,21 @@ export function createActions({
 
     hydrateFromCore() {
       const coreState = isObject(AppCore?.state) ? AppCore.state : {};
-
-      const route = canonicalPath(coreState.canonicalPath || coreState.route || coreState.publicPath || DEFAULT_ROUTE);
-      const visible = publicPath(coreState.publicPath || coreState.route || DEFAULT_ROUTE);
+      const route = canonicalPath(
+        coreState.canonicalPath ||
+          coreState.route ||
+          coreState.publicPath ||
+          DEFAULT_ROUTE
+      );
+      const visible = publicPath(
+        coreState.publicPath ||
+          coreState.route ||
+          DEFAULT_ROUTE
+      );
+      const lang = normalizeLang();
 
       return writePatch({
         app: {
-          ...(state.app || {}),
           ready: Boolean(coreState.ready || coreState.appReady),
           initialized: Boolean(coreState.initialized),
           booting: Boolean(coreState.booting),
@@ -848,16 +1086,19 @@ export function createActions({
         },
 
         ui: {
-          ...(state.ui || {}),
-          theme: normalizeTheme(coreState.theme || state.ui?.theme || DEFAULT_THEME),
-          themeMode: normalizeTheme(coreState.theme || state.ui?.themeMode || DEFAULT_THEME),
-          themePreference: normalizeTheme(coreState.theme || state.ui?.themePreference || DEFAULT_THEME),
-          lang: normalizeLang(coreState.lang || coreState.language || state.ui?.lang || DEFAULT_LANG),
-          language: normalizeLang(coreState.language || coreState.lang || state.ui?.language || DEFAULT_LANG),
-          locale: normalizeLang(coreState.locale || coreState.lang || state.ui?.locale || DEFAULT_LANG),
+          theme: THEME_PREFERENCE,
+          themePreference: THEME_PREFERENCE,
+          themeMode: readEffectiveTheme(),
+          effectiveTheme: readEffectiveTheme(),
+
+          lang,
+          language: lang,
+          locale: lang,
+
           sidebarOpen: coreState.sidebarOpen !== false,
           shellVisible: coreState.shellVisible !== false,
           chromeVisible: coreState.chromeVisible !== false,
+
           pageTitle: readDocumentTitle(),
           topbarTitle: readDocumentTitle(),
         },

@@ -14,6 +14,7 @@
    - Nunca guarda sesión Auth.
    - Sólo app/ui/entities/flags/meta.
    - Idioma base: es.
+   - Tema gobernado por sistema/preboot, no por Store.
    - Sin rutas técnicas legacy.
    - Sin 2FA/MFA/OTP.
    - Sin recursos inventados.
@@ -33,34 +34,36 @@ export const STORE_STATE_VERSION = "store.state.v3";
 
 const APP_NAME = config?.appName || config?.name || "Onion Support";
 const DEFAULT_ROUTE = "/";
-const DEFAULT_LANG = config?.defaultLang || "es";
-const DEFAULT_THEME = config?.defaultTheme || "system";
-
-const VALID_LANGS = new Set(
-  (Array.isArray(config?.supportedLangs) && config.supportedLangs.length
-    ? config.supportedLangs
-    : ["es", "ca", "en"]
-  ).map((lang) => String(lang).toLowerCase())
-);
-
-const VALID_THEMES = new Set(["dark", "light", "system"]);
+const DEFAULT_LANG = "es";
+const THEME_PREFERENCE = "system";
 
 const ROOT_KEYS = Object.freeze([
-  "app",
   "ui",
+  "app",
   "entities",
   "flags",
   "meta",
 ]);
 
+const ROOT_KEY_SET = new Set(ROOT_KEYS);
+
+const BLOCKED_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+]);
+
 const SENSITIVE_KEY_RE =
-  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id)/i;
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
 
 const SENSITIVE_QUERY_KEYS = new Set(
-  (Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
-    ? SENSITIVE_QUERY_PARAMS
-    : [TOKEN_PARAM]
-  ).map((key) => String(key).toLowerCase())
+  [
+    ...(Array.isArray(SENSITIVE_QUERY_PARAMS) ? SENSITIVE_QUERY_PARAMS : []),
+    TOKEN_PARAM,
+    "token",
+  ]
+    .map((key) => String(key || "").trim().toLowerCase())
+    .filter(Boolean)
 );
 
 const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
@@ -74,11 +77,25 @@ function isBrowser() {
 }
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+
+  return prototype === Object.prototype || prototype === null;
+}
+
+function isBlockedKey(key = "") {
+  return BLOCKED_KEYS.has(String(key || "").trim());
 }
 
 function isSensitiveKey(key = "") {
-  return SENSITIVE_KEY_RE.test(String(key || ""));
+  return SENSITIVE_KEY_RE.test(String(key || "").trim());
+}
+
+function isAllowedRootKey(key = "") {
+  return ROOT_KEY_SET.has(String(key || "").trim());
 }
 
 function text(value = "", fallback = "") {
@@ -140,11 +157,14 @@ function redact(value = "") {
 
   return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 /* =========================================================
-   PATHS
+   ROUTE SNAPSHOT HELPERS
 ========================================================= */
 
 function routePathFromInput(path = DEFAULT_ROUTE) {
@@ -197,7 +217,7 @@ function normalizeHash(hash = "") {
   const queryIndex = body.indexOf("?");
 
   if (queryIndex >= 0) {
-    const hashPath = body.slice(0, queryIndex);
+    const hashPath = body.slice(0, queryIndex).replace(/[?#\\]/g, "");
     const cleanQuery = normalizeSearch(`?${body.slice(queryIndex + 1)}`);
 
     return cleanQuery ? `#${hashPath}${cleanQuery}` : `#${hashPath}`;
@@ -212,8 +232,7 @@ function normalizeHash(hash = "") {
 }
 
 function splitPath(path = DEFAULT_ROUTE) {
-  let raw = routePathFromInput(path);
-  let pathname = raw;
+  let pathname = routePathFromInput(path);
   let search = "";
   let hash = "";
 
@@ -288,8 +307,9 @@ function canonicalPath(path = DEFAULT_ROUTE) {
 function publicPath(path = DEFAULT_ROUTE) {
   const parts = splitPath(path);
   const pathname = cleanPath(parts.pathname);
+  const output = `${pathname}${normalizeSearch(parts.search)}${normalizeHash(parts.hash)}`;
 
-  return `${pathname}${normalizeSearch(parts.search)}${normalizeHash(parts.hash)}` || DEFAULT_ROUTE;
+  return output || DEFAULT_ROUTE;
 }
 
 function currentPublicPath() {
@@ -300,12 +320,8 @@ function currentPublicPath() {
   );
 }
 
-function currentCanonicalPath() {
-  return canonicalPath(currentPublicPath());
-}
-
 /* =========================================================
-   CORE READ
+   SAFE READS
 ========================================================= */
 
 function readCoreState(AppCore = null) {
@@ -324,26 +340,24 @@ function safeError(error = null) {
     };
   }
 
-  if (!isObject(error)) {
-    return {
-      name: "Error",
-      message: redact(String(error)),
-      code: null,
-      status: null,
-    };
-  }
+  const name = text(error?.name, "Error");
+  const message = redact(
+    error?.message ||
+      error?.detail ||
+      error?.reason ||
+      String(error)
+  );
 
   return {
-    name: text(error.name, "Error"),
-    message: redact(error.message || error.detail || error.reason || String(error)),
-    code: error.code || error.error || null,
-    status: error.status || error.statusCode || error.response?.status || null,
+    name,
+    message,
+    code: error?.code || error?.error || null,
+    status: error?.status || error?.statusCode || error?.response?.status || null,
   };
 }
 
 function readRoute(AppCore = null) {
   const state = readCoreState(AppCore);
-
   const visible = publicPath(state.publicPath || state.route || currentPublicPath());
   const canonical = canonicalPath(state.canonicalPath || state.route || visible);
 
@@ -356,12 +370,8 @@ function readRoute(AppCore = null) {
 
 function normalizeLang(value = DEFAULT_LANG) {
   const lang = text(value, DEFAULT_LANG).toLowerCase();
-  return VALID_LANGS.has(lang) ? lang : DEFAULT_LANG;
-}
 
-function normalizeTheme(value = DEFAULT_THEME) {
-  const theme = text(value, DEFAULT_THEME).toLowerCase();
-  return VALID_THEMES.has(theme) ? theme : DEFAULT_THEME;
+  return lang === DEFAULT_LANG ? DEFAULT_LANG : DEFAULT_LANG;
 }
 
 function readLang(AppCore = null) {
@@ -376,14 +386,30 @@ function readLang(AppCore = null) {
   );
 }
 
-function readTheme(AppCore = null) {
+function readEffectiveTheme(AppCore = null) {
   const state = readCoreState(AppCore);
+  const value = text(
+    state.effectiveTheme ||
+      state.themeMode ||
+      (isBrowser() ? document.documentElement.dataset.theme : ""),
+    ""
+  ).toLowerCase();
 
-  return normalizeTheme(
-    state.theme ||
-      (isBrowser() ? document.documentElement.dataset.theme : "") ||
-      DEFAULT_THEME
-  );
+  if (value === "dark" || value === "light") {
+    return value;
+  }
+
+  if (isBrowser()) {
+    try {
+      return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches
+        ? "dark"
+        : "light";
+    } catch {
+      return THEME_PREFERENCE;
+    }
+  }
+
+  return THEME_PREFERENCE;
 }
 
 export function safeTitle() {
@@ -409,10 +435,28 @@ export function buildInitialState(AppCore = null) {
   const coreState = readCoreState(AppCore);
   const route = readRoute(AppCore);
   const lang = readLang(AppCore);
-  const theme = readTheme(AppCore);
+  const effectiveTheme = readEffectiveTheme(AppCore);
   const now = nowIso();
 
   return {
+    ui: {
+      theme: THEME_PREFERENCE,
+      themeMode: effectiveTheme,
+      themePreference: THEME_PREFERENCE,
+      effectiveTheme,
+
+      lang,
+      language: lang,
+      locale: lang,
+
+      sidebarOpen: coreState.sidebarOpen !== false,
+      shellVisible: coreState.shellVisible !== false,
+      chromeVisible: coreState.chromeVisible !== false,
+
+      pageTitle: safeTitle(),
+      topbarTitle: safeTopbarTitle(),
+    },
+
     app: {
       ready: Boolean(coreState.ready || coreState.appReady),
       booted: Boolean(coreState.booted || coreState.initialized),
@@ -426,23 +470,6 @@ export function buildInitialState(AppCore = null) {
       publicPath: route.publicPath,
 
       lastError: safeError(coreState.lastError || coreState.error || null),
-    },
-
-    ui: {
-      theme,
-      themeMode: theme,
-      themePreference: theme,
-
-      lang,
-      language: lang,
-      locale: lang,
-
-      sidebarOpen: coreState.sidebarOpen !== false,
-      shellVisible: coreState.shellVisible !== false,
-      chromeVisible: coreState.chromeVisible !== false,
-
-      pageTitle: safeTitle(),
-      topbarTitle: safeTopbarTitle(),
     },
 
     entities: {},
@@ -495,29 +522,39 @@ export function shallowCloneRoot(state = {}) {
   const source = isObject(state) ? state : {};
 
   return {
-    app: clone(source.app || {}),
     ui: clone(source.ui || {}),
+    app: clone(source.app || {}),
     entities: clone(source.entities || {}),
     flags: clone(source.flags || {}),
     meta: clone(source.meta || {}),
   };
 }
 
-function sanitize(value, key = "") {
+function sanitize(value, key = "", isRoot = false) {
+  if (isBlockedKey(key)) return undefined;
+
   if (isSensitiveKey(key)) {
     return value ? "***" : null;
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => sanitize(item));
+    return value
+      .map((item) => sanitize(item))
+      .filter((item) => item !== undefined);
   }
 
   if (isObject(value)) {
     const output = {};
 
     for (const [childKey, childValue] of Object.entries(value)) {
-      if (!ROOT_KEYS.includes(childKey) && key === "") continue;
-      output[childKey] = sanitize(childValue, childKey);
+      if (isBlockedKey(childKey)) continue;
+      if (isRoot && !isAllowedRootKey(childKey)) continue;
+
+      const clean = sanitize(childValue, childKey, false);
+
+      if (clean !== undefined) {
+        output[childKey] = clean;
+      }
     }
 
     return output;
@@ -527,11 +564,19 @@ function sanitize(value, key = "") {
     return redact(value);
   }
 
-  return value;
+  if (
+    value === null ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  return undefined;
 }
 
 export function buildSafeSnapshot(state = {}) {
-  return sanitize(shallowCloneRoot(state));
+  return sanitize(shallowCloneRoot(state), "", true) || {};
 }
 
 export default {

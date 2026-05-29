@@ -30,6 +30,14 @@ export const MODULE_EVENTS = Object.freeze({
   cleared: "app:modules:cleared",
 });
 
+const MODULE_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+
+const BLOCKED_MODULE_NAMES = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+]);
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -52,7 +60,13 @@ function text(value = "", fallback = "") {
 }
 
 function normalizeName(name = "") {
-  return text(name, "").toLowerCase();
+  const value = text(name, "").toLowerCase();
+
+  if (!value) return "";
+  if (BLOCKED_MODULE_NAMES.has(value)) return "";
+  if (!MODULE_NAME_RE.test(value)) return "";
+
+  return value;
 }
 
 function emit(events, name, payload = {}) {
@@ -126,14 +140,38 @@ export function createModules(input = {}) {
   registry.modules = ensureMap(registry.modules);
   registry.moduleAliases = ensureMap(registry.moduleAliases);
 
+  function resolveKey(name = "") {
+    const key = normalizeName(name);
+
+    if (!key) return "";
+
+    if (registry.modules.has(key)) {
+      return key;
+    }
+
+    const target = registry.moduleAliases.get(key);
+
+    return target && registry.modules.has(target) ? target : "";
+  }
+
   function register(name = "", instance = null, options = {}) {
     const key = normalizeName(name);
 
     if (!key || !hasValue(instance)) return false;
 
+    const overwrite = options.overwrite === true || options.replace === true;
+    const aliasTarget = registry.moduleAliases.get(key);
+
+    if (aliasTarget && !overwrite) {
+      return get(key);
+    }
+
+    if (aliasTarget) {
+      registry.moduleAliases.delete(key);
+    }
+
     const exists = registry.modules.has(key);
     const previous = exists ? registry.modules.get(key) : null;
-    const overwrite = options.overwrite === true || options.replace === true;
 
     if (exists && !overwrite) {
       return previous;
@@ -148,11 +186,11 @@ export function createModules(input = {}) {
     }
 
     registry.modules.set(key, instance);
-    registry.moduleAliases.delete(key);
 
     emit(events, MODULE_EVENTS.registered, {
       name: key,
-      overwritten: exists,
+      overwritten: exists || Boolean(aliasTarget),
+      aliasReplaced: Boolean(aliasTarget),
     });
 
     return instance;
@@ -170,7 +208,7 @@ export function createModules(input = {}) {
   }
 
   function get(name = "") {
-    const key = normalizeName(name);
+    const key = resolveKey(name);
 
     if (!key) return null;
 
@@ -182,8 +220,7 @@ export function createModules(input = {}) {
   }
 
   function has(name = "") {
-    const key = normalizeName(name);
-    return Boolean(key && registry.modules.has(key));
+    return Boolean(resolveKey(name));
   }
 
   function removeAliasesForSource(sourceName = "") {
@@ -196,7 +233,6 @@ export function createModules(input = {}) {
       if (targetName !== source) continue;
 
       registry.moduleAliases.delete(aliasName);
-      registry.modules.delete(aliasName);
       removed += 1;
     }
 
@@ -206,7 +242,25 @@ export function createModules(input = {}) {
   function remove(name = "", options = {}) {
     const key = normalizeName(name);
 
-    if (!key || !registry.modules.has(key)) return false;
+    if (!key) return false;
+
+    const aliasTarget = registry.moduleAliases.get(key);
+
+    if (aliasTarget && !registry.modules.has(key)) {
+      registry.moduleAliases.delete(key);
+
+      emit(events, MODULE_EVENTS.removed, {
+        name: key,
+        alias: true,
+        aliasOf: aliasTarget,
+        disposed: false,
+        aliasesRemoved: 1,
+      });
+
+      return true;
+    }
+
+    if (!registry.modules.has(key)) return false;
 
     const instance = registry.modules.get(key);
     let disposed = false;
@@ -216,7 +270,6 @@ export function createModules(input = {}) {
     }
 
     registry.modules.delete(key);
-    registry.moduleAliases.delete(key);
 
     const aliasesRemoved = options.removeAliases === false
       ? 0
@@ -224,6 +277,7 @@ export function createModules(input = {}) {
 
     emit(events, MODULE_EVENTS.removed, {
       name: key,
+      alias: false,
       disposed,
       aliasesRemoved,
     });
@@ -274,7 +328,7 @@ export function createModules(input = {}) {
   }
 
   function list() {
-    return [...registry.modules.keys()];
+    return [...registry.modules.keys()].sort();
   }
 
   function names() {
@@ -282,11 +336,14 @@ export function createModules(input = {}) {
   }
 
   function entries() {
-    return [...registry.modules.entries()];
+    return list().map((name) => [
+      name,
+      registry.modules.get(name),
+    ]);
   }
 
   function values() {
-    return [...registry.modules.values()];
+    return entries().map(([, instance]) => instance);
   }
 
   function count() {
@@ -296,7 +353,7 @@ export function createModules(input = {}) {
   function forEach(callback) {
     if (!isFunction(callback)) return false;
 
-    for (const [name, instance] of registry.modules.entries()) {
+    for (const [name, instance] of entries()) {
       callback(instance, name);
     }
 
@@ -320,7 +377,7 @@ export function createModules(input = {}) {
   function find(callback) {
     if (!isFunction(callback)) return null;
 
-    for (const [name, instance] of registry.modules.entries()) {
+    for (const [name, instance] of entries()) {
       if (callback(instance, name)) return instance;
     }
 
@@ -328,20 +385,33 @@ export function createModules(input = {}) {
   }
 
   function toObject() {
-    return Object.fromEntries(registry.modules.entries());
+    const output = {};
+
+    for (const [name, instance] of entries()) {
+      output[name] = instance;
+    }
+
+    return output;
   }
 
   function getMeta(name = "") {
     const key = normalizeName(name);
 
-    if (!has(key)) return null;
+    if (!key) return null;
 
-    const instance = get(key);
+    const aliasOf = registry.moduleAliases.get(key) || null;
+    const target = resolveKey(key);
+
+    if (!target) return null;
+
+    const instance = registry.modules.get(target);
 
     return {
       name: key,
+      target,
       registered: true,
-      aliasOf: registry.moduleAliases.get(key) || null,
+      alias: Boolean(aliasOf),
+      aliasOf,
       type: typeof instance,
       disposable: isDisposable(instance),
     };
@@ -354,6 +424,8 @@ export function createModules(input = {}) {
 
     return {
       name: meta.name,
+      target: meta.target,
+      alias: meta.alias,
       aliasOf: meta.aliasOf,
       type: meta.type,
       disposable: meta.disposable,
@@ -361,12 +433,13 @@ export function createModules(input = {}) {
   }
 
   function alias(name = "", aliases = [], options = {}) {
-    const sourceName = normalizeName(name);
-    const instance = get(sourceName);
+    const sourceName = resolveKey(name);
 
-    if (!sourceName || !instance) return false;
+    if (!sourceName) return false;
 
     const aliasList = Array.isArray(aliases) ? aliases : [aliases];
+    const overwrite = options.overwrite === true || options.replace === true;
+
     let added = 0;
 
     for (const aliasName of aliasList) {
@@ -374,34 +447,53 @@ export function createModules(input = {}) {
 
       if (!key || key === sourceName) continue;
 
-      const result = register(key, instance, {
-        overwrite: options.overwrite === true,
-        replace: options.replace === true,
-      });
+      if (registry.modules.has(key)) {
+        if (!overwrite) continue;
 
-      if (result === instance) {
-        registry.moduleAliases.set(key, sourceName);
-        added += 1;
+        remove(key, {
+          dispose: false,
+          removeAliases: true,
+        });
       }
+
+      const currentTarget = registry.moduleAliases.get(key);
+
+      if (currentTarget && currentTarget !== sourceName && !overwrite) {
+        continue;
+      }
+
+      registry.moduleAliases.set(key, sourceName);
+      added += 1;
+
+      emit(events, MODULE_EVENTS.registered, {
+        name: key,
+        alias: true,
+        aliasOf: sourceName,
+        overwritten: Boolean(currentTarget),
+      });
     }
 
     return added > 0;
   }
 
   function aliases(name = "") {
-    const sourceName = normalizeName(name);
+    const sourceName = name
+      ? resolveKey(name) || normalizeName(name)
+      : "";
 
     if (!sourceName) {
-      return [...registry.moduleAliases.keys()];
+      return [...registry.moduleAliases.keys()].sort();
     }
 
     return [...registry.moduleAliases.entries()]
       .filter(([, source]) => source === sourceName)
-      .map(([aliasName]) => aliasName);
+      .map(([aliasName]) => aliasName)
+      .sort();
   }
 
   function aliasEntries() {
-    return [...registry.moduleAliases.entries()];
+    return [...registry.moduleAliases.entries()]
+      .sort(([left], [right]) => left.localeCompare(right));
   }
 
   function getSnapshot() {
@@ -410,6 +502,8 @@ export function createModules(input = {}) {
 
       count: count(),
       names: list(),
+
+      aliasCount: registry.moduleAliases.size,
       aliases: aliasEntries(),
 
       policy: {
@@ -418,6 +512,7 @@ export function createModules(input = {}) {
         noMetadataHeavy: true,
         noDisposeAdvanced: true,
         aliasesSimpleOnly: true,
+        aliasesDoNotDuplicateModules: true,
         namesNormalized: true,
         snapshotMinimal: true,
       },

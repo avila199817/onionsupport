@@ -7,20 +7,51 @@
    - Global / key / selector.
    - immediate / once básicos.
    - Sin imports.
-   - Sin diagnósticos.
    - Sin metadata pesada.
    - Sin eventos AppCore.
+   - Sin Router.
+   - Sin HTTP.
+   - Sin Auth/session.
    - Sin magia negra.
 ========================================================= */
 
 export const STORE_SUBSCRIPTIONS_VERSION = "simple";
+
+const ROOT_KEYS = Object.freeze([
+  "ui",
+  "app",
+  "entities",
+  "flags",
+  "meta",
+]);
+
+const ROOT_KEY_SET = new Set(ROOT_KEYS);
+
+const BLOCKED_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+]);
+
+const SENSITIVE_KEY_RE =
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|^role$|^roles$|^permissions$|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isFunction(value) {
   return typeof value === "function";
 }
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+
+  return prototype === Object.prototype || prototype === null;
 }
 
 function clone(value) {
@@ -28,32 +59,113 @@ function clone(value) {
   if (value === null) return null;
 
   try {
-    return structuredClone(value);
-  } catch {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
     }
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
   }
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
-function normalizePath(path = "") {
-  if (Array.isArray(path)) {
-    return path.map((part) => text(part, "")).filter(Boolean);
+function normalizeKey(value = "") {
+  return String(value ?? "").trim();
+}
+
+function isBlockedKey(key = "") {
+  return BLOCKED_KEYS.has(normalizeKey(key));
+}
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(normalizeKey(key));
+}
+
+function isRootKey(key = "") {
+  return ROOT_KEY_SET.has(normalizeKey(key));
+}
+
+function safeClone(value, key = "", rootLevel = false) {
+  if (isBlockedKey(key)) return undefined;
+
+  if (isSensitiveKey(key)) {
+    return value ? "***" : null;
   }
 
-  return text(path, "")
-    .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
-    .split(".")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .filter((part) => !["__proto__", "prototype", "constructor"].includes(part));
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => safeClone(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [childKey, childValue] of Object.entries(value)) {
+      if (isBlockedKey(childKey)) continue;
+      if (rootLevel && !isRootKey(childKey)) continue;
+
+      const clean = safeClone(childValue, childKey, false);
+
+      if (clean !== undefined) {
+        output[childKey] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  if (typeof value === "string") {
+    return text(value, "")
+      .replace(/([?&#](?:token|access_token|accessToken|refresh_token|refreshToken|id_token|idToken|code|session|sessionId)=)([^&#\s]+)/gi, "$1***")
+      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+      .replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
+      );
+  }
+
+  if (
+    value === null ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return clone(value);
+  }
+
+  return undefined;
+}
+
+function normalizePath(path = "") {
+  const source = Array.isArray(path)
+    ? path
+    : text(path, "")
+        .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
+        .split(".");
+
+  const parts = source
+    .map((part) => normalizeKey(part))
+    .filter(Boolean);
+
+  if (!parts.length) return [];
+  if (!isRootKey(parts[0])) return [];
+  if (parts.some(isBlockedKey)) return [];
+  if (parts.some(isSensitiveKey)) return [];
+
+  return parts;
 }
 
 function pathString(path = "") {
@@ -89,19 +201,25 @@ function snapshotValue(snapshot) {
   if (!isFunction(snapshot)) return {};
 
   try {
-    return snapshot();
+    const value = snapshot();
+    return isObject(value) ? value : {};
   } catch {
     return {};
   }
 }
 
-function buildPayload({ snapshot, path = "", value = undefined, previousValue = undefined } = {}) {
+function buildPayload({
+  snapshot,
+  path = "",
+  value = undefined,
+  previousValue = undefined,
+} = {}) {
   return {
     version: STORE_SUBSCRIPTIONS_VERSION,
-    state: clone(snapshotValue(snapshot)) || {},
-    path: path || "",
-    value: clone(value),
-    previousValue: clone(previousValue),
+    state: safeClone(snapshotValue(snapshot), "", true) || {},
+    path: pathString(path) || "",
+    value: safeClone(value),
+    previousValue: safeClone(previousValue),
     timestamp: Date.now(),
   };
 }
@@ -115,7 +233,11 @@ function noop() {
 ========================================================= */
 
 export function subscribe(listeners, listener, options = {}) {
-  if (!listeners || !isFunction(listeners.add) || !isFunction(listeners.delete)) {
+  if (
+    !listeners ||
+    !isFunction(listeners.add) ||
+    !isFunction(listeners.delete)
+  ) {
     return noop;
   }
 
@@ -178,7 +300,13 @@ export function subscribeKey({
     return noop;
   }
 
-  if (!keyListeners || !isFunction(keyListeners.has) || !isFunction(keyListeners.set) || !isFunction(keyListeners.get)) {
+  if (
+    !keyListeners ||
+    !isFunction(keyListeners.has) ||
+    !isFunction(keyListeners.set) ||
+    !isFunction(keyListeners.get) ||
+    !isFunction(keyListeners.delete)
+  ) {
     return noop;
   }
 
@@ -187,8 +315,15 @@ export function subscribeKey({
   }
 
   const bucket = keyListeners.get(watchedPath);
+
+  if (!(bucket instanceof Set)) {
+    return noop;
+  }
+
   const once = options?.once === true;
   const immediate = options?.immediate === true;
+
+  let active = true;
 
   const entry = {
     path: watchedPath,
@@ -199,6 +334,9 @@ export function subscribeKey({
   bucket.add(entry);
 
   function unsubscribe() {
+    if (!active) return false;
+
+    active = false;
     bucket.delete(entry);
 
     if (bucket.size === 0) {
@@ -214,12 +352,14 @@ export function subscribeKey({
       : getByPath(snapshotValue(snapshot), watchedPath);
 
     try {
-      listener(buildPayload({
-        snapshot,
-        path: watchedPath,
-        value,
-        previousValue: undefined,
-      }));
+      listener(
+        buildPayload({
+          snapshot,
+          path: watchedPath,
+          value,
+          previousValue: undefined,
+        })
+      );
     } catch {
       // noop
     }
@@ -245,7 +385,11 @@ export function subscribeSelector({
   state,
   options = {},
 } = {}) {
-  if (!selectorListeners || !isFunction(selectorListeners.add) || !isFunction(selectorListeners.delete)) {
+  if (
+    !selectorListeners ||
+    !isFunction(selectorListeners.add) ||
+    !isFunction(selectorListeners.delete)
+  ) {
     return noop;
   }
 
@@ -260,32 +404,40 @@ export function subscribeSelector({
   let initialValue;
 
   try {
-    initialValue = selector(sourceState);
+    initialValue = selector(safeClone(sourceState, "", true) || {});
   } catch {
     initialValue = undefined;
   }
+
+  let active = true;
 
   const entry = {
     selector,
     listener,
     once: options?.once === true,
-    lastValue: clone(initialValue),
+    lastValue: safeClone(initialValue),
   };
 
   selectorListeners.add(entry);
 
   function unsubscribe() {
+    if (!active) return false;
+
+    active = false;
     selectorListeners.delete(entry);
+
     return true;
   }
 
   if (options?.immediate === true) {
     try {
-      listener(buildPayload({
-        snapshot,
-        value: initialValue,
-        previousValue: undefined,
-      }));
+      listener(
+        buildPayload({
+          snapshot,
+          value: initialValue,
+          previousValue: undefined,
+        })
+      );
     } catch {
       // noop
     }
@@ -336,7 +488,9 @@ export function getSubscriptionsSnapshot({
   selectorListeners,
 } = {}) {
   const keyPaths = keyListeners instanceof Map
-    ? [...keyListeners.keys()].map(pathString)
+    ? [...keyListeners.keys()]
+        .map(pathString)
+        .filter(Boolean)
     : [];
 
   let keyCount = 0;

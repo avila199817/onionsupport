@@ -12,6 +12,7 @@
    - Usuario inválido por disabled/suspended/deleted/archived/blocked/revoked.
    - Roles únicos: admin / user.
    - Idioma base: es.
+   - Tema gobernado por sistema/preboot, no por Core.
    - Sin storage.
    - Sin HTTP.
    - Sin Router.
@@ -36,17 +37,8 @@ import {
 export const STATE_VERSION = "core.state.v3";
 
 const DEFAULT_ROUTE = "/";
-const DEFAULT_LANG = config?.defaultLang || "es";
-const DEFAULT_THEME = config?.defaultTheme || "system";
-
-const VALID_LANGS = new Set(
-  (Array.isArray(config?.supportedLangs) && config.supportedLangs.length
-    ? config.supportedLangs
-    : ["es", "ca", "en"]
-  ).map((lang) => String(lang).toLowerCase())
-);
-
-const VALID_THEMES = new Set(["dark", "light", "system"]);
+const DEFAULT_LANG = "es";
+const THEME_PREFERENCE = "system";
 
 const VALID_ROLES = new Set(
   (Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
@@ -94,12 +86,22 @@ const INVALID_SESSION_STATUSES = new Set([
 ]);
 
 const SENSITIVE_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+
   "password",
   "passwordhash",
   "password_hash",
   "hash",
   "salt",
   "passwordmeta",
+
+  "token",
+  "accesstoken",
+  "access_token",
+  "bearer",
+  "jwt",
 
   "refreshtoken",
   "refresh_token",
@@ -119,22 +121,28 @@ const SENSITIVE_KEYS = new Set([
 
   "secret",
   "secrets",
+  "credential",
+  "credentials",
   "code",
   "codes",
+  "backupcode",
   "backupcodes",
+  "backup_code",
   "backup_codes",
 
   "otp",
   "otpcode",
   "totp",
   "mfa",
+  "twofa",
   "twofa_secret",
   "twofasecret",
   "totpsecret",
 
-  "jwt",
   "apikey",
   "api_key",
+  "privatekey",
+  "private_key",
   "sas",
   "connectionstring",
   "connection_string",
@@ -149,7 +157,21 @@ const SENSITIVE_KEYS = new Set([
 ]);
 
 const SENSITIVE_QUERY_KEYS = new Set(
-  SENSITIVE_QUERY_PARAMS.map((key) => String(key).toLowerCase())
+  [
+    ...(Array.isArray(SENSITIVE_QUERY_PARAMS) ? SENSITIVE_QUERY_PARAMS : []),
+    "token",
+    "access_token",
+    "accessToken",
+    "refresh_token",
+    "refreshToken",
+    "id_token",
+    "idToken",
+    "code",
+    "session",
+    "sessionId",
+  ]
+    .map((key) => String(key || "").trim().toLowerCase())
+    .filter(Boolean)
 );
 
 const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
@@ -164,6 +186,17 @@ function isBrowser() {
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isPlainObject(value) {
+  if (!isObject(value)) return false;
+
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
 }
 
 function text(value = "", fallback = "") {
@@ -181,6 +214,17 @@ function normalizeKey(value = "") {
 
 function clone(value) {
   if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const valueType = typeof value;
+
+  if (
+    valueType === "function" ||
+    valueType === "symbol" ||
+    valueType === "bigint"
+  ) {
+    return undefined;
+  }
 
   try {
     if (typeof structuredClone === "function") {
@@ -191,14 +235,19 @@ function clone(value) {
   }
 
   try {
-    return JSON.parse(JSON.stringify(value));
+    const serialized = JSON.stringify(value);
+    return serialized === undefined ? undefined : JSON.parse(serialized);
   } catch {
-    return value;
+    return undefined;
   }
 }
 
 function nowIso() {
-  return new Date().toISOString();
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function escapeRegExp(value = "") {
@@ -224,14 +273,49 @@ function redact(value = "") {
 
   return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+
+    return value;
+  }
+
+  return null;
+}
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEYS.has(normalizeKey(key));
 }
 
 function sanitizeObject(value, depth = 0) {
   if (depth > 8) return null;
 
-  if (typeof value === "string") {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const valueType = typeof value;
+
+  if (
+    valueType === "function" ||
+    valueType === "symbol" ||
+    valueType === "bigint"
+  ) {
+    return undefined;
+  }
+
+  if (valueType === "string") {
     return redact(value);
+  }
+
+  if (valueType === "number" || valueType === "boolean") {
+    return value;
   }
 
   if (Array.isArray(value)) {
@@ -241,12 +325,14 @@ function sanitizeObject(value, depth = 0) {
       .filter((item) => item !== undefined);
   }
 
-  if (!isObject(value)) return value;
+  if (!isPlainObject(value)) {
+    return null;
+  }
 
   const output = {};
 
   for (const [key, child] of Object.entries(value)) {
-    if (SENSITIVE_KEYS.has(normalizeKey(key))) continue;
+    if (isSensitiveKey(key)) continue;
 
     const sanitized = sanitizeObject(child, depth + 1);
 
@@ -281,7 +367,14 @@ function normalizeError(error = null) {
 
   return {
     name: text(error.name, "Error"),
-    message: redact(error.message || error.detail || error.reason || String(error)),
+    message: redact(
+      first(
+        error.message,
+        error.detail,
+        error.reason,
+        String(error)
+      ) || ""
+    ),
     code: error.code || error.error || null,
     status: error.status || error.statusCode || error.response?.status || null,
   };
@@ -364,7 +457,9 @@ function normalizeHash(hash = "") {
   const queryIndex = body.indexOf("?");
 
   if (queryIndex >= 0) {
-    const hashPath = body.slice(0, queryIndex);
+    const hashPath = body
+      .slice(0, queryIndex)
+      .replace(/[?#\\]/g, "");
     const cleanQuery = normalizeSearch(`?${body.slice(queryIndex + 1)}`);
 
     return cleanQuery ? `#${hashPath}${cleanQuery}` : `#${hashPath}`;
@@ -425,6 +520,48 @@ function currentPublicPath() {
 
 function currentCanonicalPath() {
   return cleanPath(currentPublicPath());
+}
+
+/* =========================================================
+   THEME / LANG
+========================================================= */
+
+function normalizeLang() {
+  return DEFAULT_LANG;
+}
+
+function normalizeTheme() {
+  return THEME_PREFERENCE;
+}
+
+function readEffectiveTheme() {
+  if (isBrowser()) {
+    const domTheme = text(document.documentElement?.dataset?.theme, "").toLowerCase();
+
+    if (domTheme === "dark" || domTheme === "light") {
+      return domTheme;
+    }
+
+    try {
+      return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches
+        ? "dark"
+        : "light";
+    } catch {
+      return THEME_PREFERENCE;
+    }
+  }
+
+  return THEME_PREFERENCE;
+}
+
+function normalizeEffectiveTheme(value = "") {
+  const theme = text(value, "").toLowerCase();
+
+  if (theme === "dark" || theme === "light") {
+    return theme;
+  }
+
+  return readEffectiveTheme();
 }
 
 /* =========================================================
@@ -504,7 +641,7 @@ function userPayload(value = null) {
     value.me ||
     value.account ||
     value.profile ||
-    value
+    null
   );
 }
 
@@ -598,7 +735,7 @@ function buildUserHomePath(user = null) {
 function userAvatarUrl(user = null) {
   if (!isObject(user)) return "";
 
-  return text(
+  return redact(
     user.avatarUrl ||
       user.avatar ||
       user.picture ||
@@ -610,8 +747,7 @@ function userAvatarUrl(user = null) {
       user.profile?.avatarUrl ||
       user.profile?.avatar ||
       user.profile?.picture ||
-      "",
-    ""
+      ""
   );
 }
 
@@ -669,6 +805,7 @@ function normalizeUser(value = null) {
 
   const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
   const avatar = userAvatarUrl(safeUser);
+  const normalizedSlug = slug || normalizeSlug(username) || normalizeSlug(id);
 
   return {
     ...safeUser,
@@ -680,7 +817,7 @@ function normalizeUser(value = null) {
 
     username: username || null,
     usernameLower: username ? username.toLowerCase() : null,
-    slug: slug || username || null,
+    slug: normalizedSlug || null,
 
     name: safeUser.name || displayName,
     nombre: safeUser.nombre || displayName,
@@ -696,8 +833,8 @@ function normalizeUser(value = null) {
     roles: [role],
 
     hasAvatar: Boolean(safeUser.hasAvatar || avatar),
-    avatar: avatar || safeUser.avatar || null,
-    avatarUrl: avatar || safeUser.avatarUrl || null,
+    avatar: avatar || null,
+    avatarUrl: avatar || null,
     photoUrl: safeUser.photoUrl || safeUser.photoURL || avatar || null,
     picture: safeUser.picture || safeUser.pictureUrl || avatar || null,
     avatarUpdatedAt: safeUser.avatarUpdatedAt || null,
@@ -797,7 +934,7 @@ function normalizeSessionContext(value = null, user = null) {
 
     revoked: value.revoked === true,
     active: value.active !== false,
-    status: value.status || value.estado || "active",
+    status: text(value.status || value.estado || "active", "active"),
   };
 }
 
@@ -1056,18 +1193,8 @@ function authPatch(source = {}, options = {}) {
    PATCH NORMALIZATION
 ========================================================= */
 
-function normalizeLang(value = DEFAULT_LANG) {
-  const lang = text(value, DEFAULT_LANG).toLowerCase();
-  return VALID_LANGS.has(lang) ? lang : DEFAULT_LANG;
-}
-
-function normalizeTheme(value = DEFAULT_THEME) {
-  const theme = text(value, DEFAULT_THEME).toLowerCase();
-  return VALID_THEMES.has(theme) ? theme : DEFAULT_THEME;
-}
-
 function isSensitivePatchKey(key = "") {
-  return SENSITIVE_KEYS.has(normalizeKey(key));
+  return isSensitiveKey(key);
 }
 
 function normalizePatch(state, patch = {}, options = {}) {
@@ -1137,15 +1264,26 @@ function normalizePatch(state, patch = {}, options = {}) {
     }
 
     if (key === "lang" || key === "language" || key === "locale") {
-      const lang = normalizeLang(value);
+      const lang = normalizeLang();
       next.lang = lang;
       next.language = lang;
       next.locale = lang;
       continue;
     }
 
-    if (key === "theme") {
-      next.theme = normalizeTheme(value);
+    if (key === "theme" || key === "themePreference") {
+      next.theme = normalizeTheme();
+      next.themePreference = THEME_PREFERENCE;
+      continue;
+    }
+
+    if (key === "themeMode" || key === "effectiveTheme") {
+      const effectiveTheme = normalizeEffectiveTheme(value);
+
+      next.themeMode = effectiveTheme;
+      next.effectiveTheme = effectiveTheme;
+      next.theme = THEME_PREFERENCE;
+      next.themePreference = THEME_PREFERENCE;
       continue;
     }
 
@@ -1191,6 +1329,7 @@ function normalizePatch(state, patch = {}, options = {}) {
       key === "booting" ||
       key === "ready" ||
       key === "initialized" ||
+      key === "fatal" ||
       key === "appReady" ||
       key === "appFatal" ||
       key === "shellVisible" ||
@@ -1227,12 +1366,11 @@ function normalizePatch(state, patch = {}, options = {}) {
       continue;
     }
 
-    if (typeof value === "string") {
-      next[key] = redact(value);
-      continue;
-    }
+    const sanitized = sanitizeObject(value);
 
-    next[key] = value;
+    if (sanitized !== undefined) {
+      next[key] = sanitized;
+    }
   }
 
   const authKeys = [
@@ -1305,6 +1443,7 @@ export function createInitialState() {
   const createdAt = nowIso();
   const route = currentCanonicalPath();
   const visiblePath = currentPublicPath();
+  const effectiveTheme = readEffectiveTheme();
 
   return {
     __version: STATE_VERSION,
@@ -1314,6 +1453,7 @@ export function createInitialState() {
     ready: false,
     appReady: false,
     appFatal: false,
+    fatal: false,
     loading: true,
 
     route,
@@ -1364,21 +1504,14 @@ export function createInitialState() {
     isManager: false,
     isClient: false,
 
-    lang: isBrowser()
-      ? normalizeLang(document.documentElement.lang || DEFAULT_LANG)
-      : DEFAULT_LANG,
+    lang: DEFAULT_LANG,
+    language: DEFAULT_LANG,
+    locale: DEFAULT_LANG,
 
-    language: isBrowser()
-      ? normalizeLang(document.documentElement.lang || DEFAULT_LANG)
-      : DEFAULT_LANG,
-
-    locale: isBrowser()
-      ? normalizeLang(document.documentElement.dataset.locale || document.documentElement.lang || DEFAULT_LANG)
-      : DEFAULT_LANG,
-
-    theme: isBrowser()
-      ? normalizeTheme(document.documentElement.dataset.theme || DEFAULT_THEME)
-      : DEFAULT_THEME,
+    theme: THEME_PREFERENCE,
+    themePreference: THEME_PREFERENCE,
+    themeMode: effectiveTheme,
+    effectiveTheme,
 
     sidebarOpen: false,
 
@@ -1410,6 +1543,7 @@ export function cloneState(state = {}, options = {}) {
   const user = readUserFrom(state);
   const authenticated = computeAuthenticated(user, token);
   const clean = cleanToken(token);
+  const normalizedUser = authenticated ? normalizeUser(user) : null;
 
   snapshot.token = options.includeToken ? clean : null;
   snapshot.accessToken = options.includeToken ? clean : null;
@@ -1435,7 +1569,7 @@ export function cloneState(state = {}, options = {}) {
   snapshot.userRole = snapshot.role;
   snapshot.roles = authenticated && snapshot.role ? [snapshot.role] : [];
 
-  snapshot.username = authenticated ? normalizeUser(user)?.username || null : null;
+  snapshot.username = authenticated ? normalizedUser?.username || null : null;
 
   snapshot.session = null;
   snapshot.sessionData = null;
@@ -1443,13 +1577,13 @@ export function cloneState(state = {}, options = {}) {
   snapshot.sessionUserId = state.sessionUserId ? "***" : null;
 
   snapshot.hasAvatar = authenticated
-    ? Boolean(normalizeUser(user)?.hasAvatar || userAvatarUrl(user))
+    ? Boolean(normalizedUser?.hasAvatar || userAvatarUrl(user))
     : false;
 
   snapshot.avatar = authenticated ? userAvatarUrl(user) || null : null;
   snapshot.avatarUrl = snapshot.avatar;
-  snapshot.photoUrl = authenticated ? normalizeUser(user)?.photoUrl || snapshot.avatar || null : null;
-  snapshot.picture = authenticated ? normalizeUser(user)?.picture || snapshot.avatar || null : null;
+  snapshot.photoUrl = authenticated ? normalizedUser?.photoUrl || snapshot.avatar || null : null;
+  snapshot.picture = authenticated ? normalizedUser?.picture || snapshot.avatar || null : null;
 
   snapshot.isAdmin = authenticated && snapshot.role === "admin";
   snapshot.isUser = authenticated && snapshot.role === "user";
@@ -1457,10 +1591,14 @@ export function cloneState(state = {}, options = {}) {
   snapshot.isManager = false;
   snapshot.isClient = false;
 
-  snapshot.lang = normalizeLang(state.lang || state.language || state.locale || DEFAULT_LANG);
-  snapshot.language = snapshot.lang;
-  snapshot.locale = snapshot.lang;
-  snapshot.theme = normalizeTheme(state.theme || DEFAULT_THEME);
+  snapshot.lang = DEFAULT_LANG;
+  snapshot.language = DEFAULT_LANG;
+  snapshot.locale = DEFAULT_LANG;
+
+  snapshot.theme = THEME_PREFERENCE;
+  snapshot.themePreference = THEME_PREFERENCE;
+  snapshot.themeMode = normalizeEffectiveTheme(state.themeMode || state.effectiveTheme);
+  snapshot.effectiveTheme = snapshot.themeMode;
 
   snapshot.route = redact(state.route || DEFAULT_ROUTE);
   snapshot.canonicalPath = redact(state.canonicalPath || state.route || DEFAULT_ROUTE);
@@ -1540,6 +1678,7 @@ export function getStateDebugSnapshot(state = {}) {
     ready: Boolean(state.ready),
     appReady: Boolean(state.appReady),
     appFatal: Boolean(state.appFatal),
+    fatal: Boolean(state.fatal || state.appFatal),
     loading: Boolean(state.loading),
 
     route: redact(state.route || DEFAULT_ROUTE),
@@ -1569,8 +1708,14 @@ export function getStateDebugSnapshot(state = {}) {
     isManager: false,
     isClient: false,
 
-    lang: normalizeLang(state.lang || state.language || state.locale || DEFAULT_LANG),
-    theme: normalizeTheme(state.theme || DEFAULT_THEME),
+    lang: DEFAULT_LANG,
+    language: DEFAULT_LANG,
+    locale: DEFAULT_LANG,
+
+    theme: THEME_PREFERENCE,
+    themePreference: THEME_PREFERENCE,
+    themeMode: normalizeEffectiveTheme(state.themeMode || state.effectiveTheme),
+    effectiveTheme: normalizeEffectiveTheme(state.themeMode || state.effectiveTheme),
 
     hasError: Boolean(state.hasError),
     error: normalizeError(state.error),
@@ -1596,6 +1741,8 @@ export function getStateDebugSnapshot(state = {}) {
       roles: [...VALID_ROLES],
 
       defaultLang: DEFAULT_LANG,
+      themeOwnedBySystem: true,
+
       snapshotRedacted: true,
       noRefreshTokenStorage: true,
     },

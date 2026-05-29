@@ -13,6 +13,7 @@
    - Sin timeouts.
    - Sin snapshots grandes.
    - Sin lógica de dominio.
+   - No es event bus paralelo.
    - Un hook no rompe la ejecución.
 ========================================================= */
 
@@ -32,6 +33,14 @@ export const HOOK_EVENTS = Object.freeze({
   runStart: "core:hook:run:start",
   runDone: "core:hook:run:done",
 });
+
+const HOOK_TYPE_RE = /^[a-zA-Z][a-zA-Z0-9:._-]{0,95}$/;
+
+const BLOCKED_HOOK_TYPES = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+]);
 
 /* =========================================================
    BASICS
@@ -57,11 +66,14 @@ function text(value = "", fallback = "") {
 function redact(value = "") {
   return text(value, "")
     .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 function emit(events, name, payload = {}) {
@@ -101,8 +113,24 @@ function normalizeHookList(value) {
   return Array.isArray(value) ? value.filter(isFunction) : [];
 }
 
+function safeHookType(type = "") {
+  const name = text(type, "");
+
+  if (!name) return "";
+  if (BLOCKED_HOOK_TYPES.has(name.toLowerCase())) return "";
+  if (!HOOK_TYPE_RE.test(name)) return "";
+
+  return name;
+}
+
+function hookOriginal(handler = null) {
+  return handler?.__hookOriginal || handler;
+}
+
 function hookName(handler = null) {
-  return isFunction(handler) ? text(handler.name, "") : "";
+  const source = hookOriginal(handler);
+
+  return isFunction(source) ? redact(text(source.name, "")) : "";
 }
 
 function safeErrorMessage(error = null) {
@@ -118,7 +146,7 @@ export function createHooks({ registry = {}, events = null } = {}) {
   const hooksRegistry = ensureHooksRegistry(finalRegistry);
 
   function normalizeType(type = "") {
-    return text(type, "");
+    return safeHookType(type);
   }
 
   function defineType(type = "") {
@@ -139,15 +167,17 @@ export function createHooks({ registry = {}, events = null } = {}) {
 
   function hasType(type = "") {
     const name = normalizeType(type);
+
     return Boolean(name && Array.isArray(hooksRegistry[name]));
   }
 
   function types() {
     return Object.keys(hooksRegistry)
-      .filter((type) => Array.isArray(hooksRegistry[type]));
+      .filter((type) => hasType(type))
+      .sort();
   }
 
-  function add(type = "", handler = null) {
+  function add(type = "", handler = null, options = {}) {
     const name = normalizeType(type);
 
     if (!name || !isFunction(handler)) {
@@ -155,6 +185,13 @@ export function createHooks({ registry = {}, events = null } = {}) {
     }
 
     defineType(name);
+
+    if (
+      options?.dedupe !== false &&
+      hooksRegistry[name].some((item) => hookOriginal(item) === handler)
+    ) {
+      return () => false;
+    }
 
     hooksRegistry[name].push(handler);
 
@@ -184,13 +221,26 @@ export function createHooks({ registry = {}, events = null } = {}) {
     let disposed = false;
     let dispose = () => false;
 
-    dispose = add(name, async (payload, context) => {
+    const wrapped = async (payload, context) => {
       if (disposed) return payload;
 
       disposed = true;
       dispose();
 
       return handler(payload, context);
+    };
+
+    try {
+      Object.defineProperty(wrapped, "__hookOriginal", {
+        value: handler,
+        enumerable: false,
+      });
+    } catch {
+      wrapped.__hookOriginal = handler;
+    }
+
+    dispose = add(name, wrapped, {
+      dedupe: false,
     });
 
     return dispose;
@@ -219,7 +269,9 @@ export function createHooks({ registry = {}, events = null } = {}) {
 
     const before = hooksRegistry[name].length;
 
-    hooksRegistry[name] = hooksRegistry[name].filter((item) => item !== handler);
+    hooksRegistry[name] = hooksRegistry[name].filter((item) => {
+      return item !== handler && hookOriginal(item) !== handler;
+    });
 
     const removed = before - hooksRegistry[name].length;
 
@@ -270,6 +322,7 @@ export function createHooks({ registry = {}, events = null } = {}) {
     if (!name) return payload;
 
     const hooks = [...normalizeHookList(hooksRegistry[name])];
+    let errors = 0;
 
     emit(events, HOOK_EVENTS.runStart, {
       type: name,
@@ -291,6 +344,8 @@ export function createHooks({ registry = {}, events = null } = {}) {
           current = result;
         }
       } catch (error) {
+        errors += 1;
+
         emit(events, HOOK_EVENTS.error, {
           type: name,
           mode: "series",
@@ -303,6 +358,7 @@ export function createHooks({ registry = {}, events = null } = {}) {
     emit(events, HOOK_EVENTS.runDone, {
       type: name,
       count: hooks.length,
+      errors,
       mode: "series",
     });
 
@@ -315,6 +371,7 @@ export function createHooks({ registry = {}, events = null } = {}) {
     if (!name) return [];
 
     const hooks = [...normalizeHookList(hooksRegistry[name])];
+    let errors = 0;
 
     emit(events, HOOK_EVENTS.runStart, {
       type: name,
@@ -331,6 +388,8 @@ export function createHooks({ registry = {}, events = null } = {}) {
             hooks: api,
           });
         } catch (error) {
+          errors += 1;
+
           emit(events, HOOK_EVENTS.error, {
             type: name,
             mode: "parallel",
@@ -346,6 +405,7 @@ export function createHooks({ registry = {}, events = null } = {}) {
     emit(events, HOOK_EVENTS.runDone, {
       type: name,
       count: hooks.length,
+      errors,
       mode: "parallel",
     });
 
@@ -369,19 +429,23 @@ export function createHooks({ registry = {}, events = null } = {}) {
       index,
       type: name,
       name: hookName(handler),
+      once: Boolean(handler?.__hookOriginal),
     }));
   }
 
   function getEntry(type = "", handler = null) {
     const name = normalizeType(type);
     const hooks = get(name);
-    const index = hooks.indexOf(handler);
+    const index = hooks.findIndex((item) => {
+      return item === handler || hookOriginal(item) === handler;
+    });
 
     return index >= 0
       ? {
           index,
           type: name,
-          name: hookName(handler),
+          name: hookName(hooks[index]),
+          once: Boolean(hooks[index]?.__hookOriginal),
         }
       : null;
   }
@@ -412,12 +476,14 @@ export function createHooks({ registry = {}, events = null } = {}) {
       policy: {
         minimalHooksRegistry: true,
         noImports: true,
+        noEventBusParallel: true,
         noPriorityRuntime: true,
         noTimeouts: true,
         runSeriesSupported: true,
         runParallelSupported: true,
         hooksDoNotBreakExecution: true,
         stableRunCopies: true,
+        hookTypesValidated: true,
         snapshotMinimal: true,
       },
     };
@@ -452,19 +518,19 @@ export function createHooks({ registry = {}, events = null } = {}) {
     clear,
 
     enable() {
-      return true;
+      return false;
     },
 
     disable() {
-      return true;
+      return false;
     },
 
     setPriority() {
-      return true;
+      return false;
     },
 
     priority() {
-      return true;
+      return false;
     },
 
     run,

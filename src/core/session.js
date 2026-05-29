@@ -13,7 +13,7 @@
    - Usuario inválido por disabled/suspended/deleted/archived/blocked/revoked.
    - Roles únicos: admin / user.
    - Home visible de usuario: /@{user.slug}.
-   - Theme simple.
+   - Tema gobernado por sistema/preboot, no por Core.
    - Idioma base: es.
    - Sin storage.
    - Sin HTTP.
@@ -29,11 +29,12 @@
 ========================================================= */
 
 import {
-  config,
   ALLOWED_ROLES,
   SENSITIVE_QUERY_PARAMS,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
   buildUserHomeRoute as configBuildUserHomeRoute,
+  canonicalRoutePath as configCanonicalRoutePath,
+  isBlockedRoutePath as configIsBlockedRoutePath,
   normalizeRoutePath as configNormalizeRoutePath,
   normalizeUserSlug as configNormalizeUserSlug,
   routePathFromUrlLike as configRoutePathFromUrlLike,
@@ -58,17 +59,8 @@ export const SESSION_EVENTS = Object.freeze({
 
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
-const DEFAULT_LANG = config?.defaultLang || "es";
-const DEFAULT_THEME = config?.defaultTheme || "system";
-
-const VALID_LANGS = new Set(
-  (Array.isArray(config?.supportedLangs) && config.supportedLangs.length
-    ? config.supportedLangs
-    : ["es", "ca", "en"]
-  ).map((lang) => String(lang).toLowerCase())
-);
-
-const VALID_THEMES = new Set(["dark", "light", "system"]);
+const DEFAULT_LANG = "es";
+const THEME_PREFERENCE = "system";
 
 const VALID_ROLES = new Set(
   (Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
@@ -116,12 +108,22 @@ const INVALID_SESSION_STATUSES = new Set([
 ]);
 
 const SENSITIVE_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+
   "password",
   "passwordhash",
   "password_hash",
   "hash",
   "salt",
   "passwordmeta",
+
+  "token",
+  "accesstoken",
+  "access_token",
+  "bearer",
+  "jwt",
 
   "refreshtoken",
   "refresh_token",
@@ -141,22 +143,28 @@ const SENSITIVE_KEYS = new Set([
 
   "secret",
   "secrets",
+  "credential",
+  "credentials",
   "code",
   "codes",
+  "backupcode",
   "backupcodes",
+  "backup_code",
   "backup_codes",
 
   "otp",
   "otpcode",
   "totp",
   "mfa",
+  "twofa",
   "twofa_secret",
   "twofasecret",
   "totpsecret",
 
-  "jwt",
   "apikey",
   "api_key",
+  "privatekey",
+  "private_key",
   "sas",
   "connectionstring",
   "connection_string",
@@ -171,7 +179,21 @@ const SENSITIVE_KEYS = new Set([
 ]);
 
 const SENSITIVE_QUERY_KEYS = new Set(
-  SENSITIVE_QUERY_PARAMS.map((key) => String(key).toLowerCase())
+  [
+    ...(Array.isArray(SENSITIVE_QUERY_PARAMS) ? SENSITIVE_QUERY_PARAMS : []),
+    "token",
+    "access_token",
+    "accessToken",
+    "refresh_token",
+    "refreshToken",
+    "id_token",
+    "idToken",
+    "code",
+    "session",
+    "sessionId",
+  ]
+    .map((key) => String(key || "").trim().toLowerCase())
+    .filter(Boolean)
 );
 
 const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
@@ -186,6 +208,17 @@ function isBrowser() {
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isPlainObject(value) {
+  if (!isObject(value)) return false;
+
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
 }
 
 function isFunction(value) {
@@ -203,6 +236,17 @@ function text(value = "", fallback = "") {
 
 function normalizeKey(value = "") {
   return text(value, "").toLowerCase();
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+
+    return value;
+  }
+
+  return null;
 }
 
 function escapeRegExp(value = "") {
@@ -228,7 +272,10 @@ function redact(value = "") {
 
   return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 function emit(events, name, payload = {}) {
@@ -303,17 +350,45 @@ function normalizeError(error = null) {
 
   return {
     name: text(error.name, "Error"),
-    message: redact(error.message || error.detail || error.reason || String(error)),
+    message: redact(
+      first(
+        error.message,
+        error.detail,
+        error.reason,
+        String(error)
+      ) || ""
+    ),
     code: error.code || error.error || null,
     status: error.status || error.statusCode || error.response?.status || null,
   };
 }
 
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEYS.has(normalizeKey(key));
+}
+
 function sanitizeObject(value, depth = 0) {
   if (depth > 8) return null;
 
-  if (typeof value === "string") {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const valueType = typeof value;
+
+  if (
+    valueType === "function" ||
+    valueType === "symbol" ||
+    valueType === "bigint"
+  ) {
+    return undefined;
+  }
+
+  if (valueType === "string") {
     return redact(value);
+  }
+
+  if (valueType === "number" || valueType === "boolean") {
+    return value;
   }
 
   if (Array.isArray(value)) {
@@ -323,12 +398,14 @@ function sanitizeObject(value, depth = 0) {
       .filter((item) => item !== undefined);
   }
 
-  if (!isObject(value)) return value;
+  if (!isPlainObject(value)) {
+    return null;
+  }
 
   const output = {};
 
   for (const [key, child] of Object.entries(value)) {
-    if (SENSITIVE_KEYS.has(normalizeKey(key))) continue;
+    if (isSensitiveKey(key)) continue;
 
     const sanitized = sanitizeObject(child, depth + 1);
 
@@ -417,7 +494,9 @@ function normalizeHash(hash = "") {
   const queryIndex = body.indexOf("?");
 
   if (queryIndex >= 0) {
-    const hashPath = body.slice(0, queryIndex);
+    const hashPath = body
+      .slice(0, queryIndex)
+      .replace(/[?#\\]/g, "");
     const cleanQuery = normalizeSearch(`?${body.slice(queryIndex + 1)}`);
 
     return cleanQuery ? `#${hashPath}${cleanQuery}` : `#${hashPath}`;
@@ -458,31 +537,80 @@ function splitPath(path = DEFAULT_ROUTE) {
   };
 }
 
+function isBlockedRoutePath(path = DEFAULT_ROUTE) {
+  try {
+    return configIsBlockedRoutePath(path) === true;
+  } catch {
+    return false;
+  }
+}
+
 function normalizePublicPath(value = DEFAULT_ROUTE) {
   const parts = splitPath(value);
+
+  if (isBlockedRoutePath(parts.pathname)) {
+    return DEFAULT_ROUTE;
+  }
+
   return `${parts.pathname}${parts.search}${parts.hash}` || DEFAULT_ROUTE;
 }
 
 function normalizeCanonicalPath(value = DEFAULT_ROUTE) {
-  return normalizePathname(normalizePublicPath(value));
+  if (isBlockedRoutePath(value)) return DEFAULT_ROUTE;
+
+  try {
+    const canonical = configCanonicalRoutePath(value) || DEFAULT_ROUTE;
+
+    return isBlockedRoutePath(canonical)
+      ? DEFAULT_ROUTE
+      : normalizePathname(canonical);
+  } catch {
+    const pathname = normalizePathname(normalizePublicPath(value));
+
+    return isBlockedRoutePath(pathname) ? DEFAULT_ROUTE : pathname;
+  }
 }
 
 /* =========================================================
    LANG / THEME
 ========================================================= */
 
-function normalizeLang(value = DEFAULT_LANG) {
-  const lang = text(value, DEFAULT_LANG).toLowerCase();
-  return VALID_LANGS.has(lang) ? lang : DEFAULT_LANG;
+function normalizeLang() {
+  return DEFAULT_LANG;
 }
 
-function normalizeTheme(value = DEFAULT_THEME) {
-  const theme = text(value, DEFAULT_THEME).toLowerCase();
-  return VALID_THEMES.has(theme) ? theme : DEFAULT_THEME;
+function readEffectiveTheme() {
+  if (isBrowser()) {
+    const domTheme = text(document.documentElement?.dataset?.theme, "").toLowerCase();
+
+    if (domTheme === "dark" || domTheme === "light") {
+      return domTheme;
+    }
+
+    try {
+      return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches
+        ? "dark"
+        : "light";
+    } catch {
+      return THEME_PREFERENCE;
+    }
+  }
+
+  return THEME_PREFERENCE;
 }
 
-function themeMetaColor(theme = DEFAULT_THEME) {
-  return normalizeTheme(theme) === "light" ? "#ffffff" : "#0a0c11";
+function normalizeEffectiveTheme(value = "") {
+  const theme = text(value, "").toLowerCase();
+
+  if (theme === "dark" || theme === "light") {
+    return theme;
+  }
+
+  return readEffectiveTheme();
+}
+
+function themeMetaColor(theme = "") {
+  return normalizeEffectiveTheme(theme) === "light" ? "#ffffff" : "#0a0c11";
 }
 
 /* =========================================================
@@ -562,7 +690,7 @@ function userPayload(value = null) {
     value.me ||
     value.account ||
     value.profile ||
-    value
+    null
   );
 }
 
@@ -656,7 +784,7 @@ function buildUserHomePath(user = null) {
 function userAvatarUrl(user = null) {
   if (!isObject(user)) return "";
 
-  return text(
+  return redact(
     user.avatarUrl ||
       user.avatar ||
       user.picture ||
@@ -668,8 +796,7 @@ function userAvatarUrl(user = null) {
       user.profile?.avatarUrl ||
       user.profile?.avatar ||
       user.profile?.picture ||
-      "",
-    ""
+      ""
   );
 }
 
@@ -727,6 +854,7 @@ function normalizeUser(value = null) {
 
   const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
   const avatar = userAvatarUrl(safeUser);
+  const normalizedSlug = slug || normalizeSlug(username) || normalizeSlug(id);
 
   return {
     ...safeUser,
@@ -738,7 +866,7 @@ function normalizeUser(value = null) {
 
     username: username || null,
     usernameLower: username ? username.toLowerCase() : null,
-    slug: slug || username || null,
+    slug: normalizedSlug || null,
 
     name: safeUser.name || displayName,
     nombre: safeUser.nombre || displayName,
@@ -754,8 +882,8 @@ function normalizeUser(value = null) {
     roles: [role],
 
     hasAvatar: Boolean(safeUser.hasAvatar || avatar),
-    avatar: avatar || safeUser.avatar || null,
-    avatarUrl: avatar || safeUser.avatarUrl || null,
+    avatar: avatar || null,
+    avatarUrl: avatar || null,
     photoUrl: safeUser.photoUrl || safeUser.photoURL || avatar || null,
     picture: safeUser.picture || safeUser.pictureUrl || avatar || null,
     avatarUpdatedAt: safeUser.avatarUpdatedAt || null,
@@ -832,7 +960,7 @@ function normalizeSessionContext(value = null, user = null) {
 
     revoked: value.revoked === true,
     active: value.active !== false,
-    status: value.status || value.estado || "active",
+    status: text(value.status || value.estado || "active", "active"),
   };
 }
 
@@ -1201,6 +1329,7 @@ function sessionSnapshot(state = {}, cause = "session") {
   const user = normalizeUser(readUserFrom(state));
   const authenticated = Boolean(token && user);
   const role = authenticated ? cleanRole(state.role || user.role || user.rol || user.roles) : null;
+  const effectiveTheme = normalizeEffectiveTheme(state.themeMode || state.effectiveTheme);
 
   return {
     version: SESSION_VERSION,
@@ -1230,8 +1359,14 @@ function sessionSnapshot(state = {}, cause = "session") {
     canonicalPath: redact(state.canonicalPath || state.route || DEFAULT_ROUTE),
     publicPath: redact(state.publicPath || state.route || DEFAULT_ROUTE),
 
-    theme: normalizeTheme(state.theme || DEFAULT_THEME),
-    lang: normalizeLang(state.lang || state.language || state.locale || DEFAULT_LANG),
+    theme: THEME_PREFERENCE,
+    themePreference: THEME_PREFERENCE,
+    themeMode: effectiveTheme,
+    effectiveTheme,
+
+    lang: DEFAULT_LANG,
+    language: DEFAULT_LANG,
+    locale: DEFAULT_LANG,
 
     hasError: Boolean(state.hasError),
     error: normalizeError(state.error),
@@ -1481,13 +1616,8 @@ export function clearSession({ state, events, setState, options = {} } = {}) {
 ========================================================= */
 
 export function loadPreferences({ state, setState } = {}) {
-  const lang = isBrowser()
-    ? normalizeLang(document.documentElement.lang || DEFAULT_LANG)
-    : DEFAULT_LANG;
-
-  const theme = isBrowser()
-    ? normalizeTheme(document.documentElement.dataset.theme || DEFAULT_THEME)
-    : DEFAULT_THEME;
+  const lang = normalizeLang();
+  const effectiveTheme = readEffectiveTheme();
 
   commitState({
     state,
@@ -1496,7 +1626,11 @@ export function loadPreferences({ state, setState } = {}) {
       lang,
       language: lang,
       locale: lang,
-      theme,
+
+      theme: THEME_PREFERENCE,
+      themePreference: THEME_PREFERENCE,
+      themeMode: effectiveTheme,
+      effectiveTheme,
     },
     options: {
       source: "core-session:loadPreferences",
@@ -1505,7 +1639,10 @@ export function loadPreferences({ state, setState } = {}) {
 
   return {
     lang: state?.lang || lang,
-    theme: state?.theme || theme,
+    theme: THEME_PREFERENCE,
+    themePreference: THEME_PREFERENCE,
+    themeMode: state?.themeMode || effectiveTheme,
+    effectiveTheme: state?.effectiveTheme || effectiveTheme,
   };
 }
 
@@ -1535,57 +1672,44 @@ export function loadSession({ state, events, setState } = {}) {
    UI SETTERS
 ========================================================= */
 
-export function syncThemeMetaColor({ theme = DEFAULT_THEME } = {}) {
-  if (!isBrowser()) return false;
-
-  const color = themeMetaColor(theme);
-  let changed = false;
-
-  try {
-    document
-      .querySelectorAll("meta[name='theme-color']")
-      .forEach((meta) => {
-        const media = meta.getAttribute("media") || "";
-
-        if (!media) {
-          meta.setAttribute("content", color);
-          changed = true;
-        }
-      });
-  } catch {
-    return false;
-  }
-
-  return changed;
+export function syncThemeMetaColor() {
+  /*
+    Compat conservada.
+    El color real lo gobierna preboot/theme.js según prefers-color-scheme.
+    Core Session no debe pisar <html data-theme> ni theme-color.
+  */
+  return false;
 }
 
-export function setTheme({ setState, events, theme = DEFAULT_THEME } = {}) {
-  const value = normalizeTheme(theme);
+export function setTheme({ setState, events } = {}) {
+  const effectiveTheme = readEffectiveTheme();
 
   setState?.(
     {
-      theme: value,
+      theme: THEME_PREFERENCE,
+      themePreference: THEME_PREFERENCE,
+      themeMode: effectiveTheme,
+      effectiveTheme,
     },
     {
       source: "core-session:setTheme",
     }
   );
 
-  if (isBrowser()) {
-    document.documentElement.dataset.theme = value;
-  }
-
-  syncThemeMetaColor({ theme: value });
-
   emit(events, SESSION_EVENTS.themeChange, {
-    theme: value,
+    theme: THEME_PREFERENCE,
+    themePreference: THEME_PREFERENCE,
+    themeMode: effectiveTheme,
+    effectiveTheme,
+    metaColor: themeMetaColor(effectiveTheme),
+    systemOwned: true,
   });
 
-  return value;
+  return THEME_PREFERENCE;
 }
 
-export function setLang({ setState, events, lang = DEFAULT_LANG } = {}) {
-  const value = normalizeLang(lang);
+export function setLang({ setState, events } = {}) {
+  const value = normalizeLang();
 
   setState?.(
     {

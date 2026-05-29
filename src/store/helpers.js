@@ -14,11 +14,24 @@
 
 export const STORE_HELPERS_VERSION = "simple";
 
+const ROOT_KEYS = Object.freeze([
+  "ui",
+  "app",
+  "entities",
+  "flags",
+  "meta",
+]);
+
+const ROOT_KEY_SET = new Set(ROOT_KEYS);
+
 const UNSAFE_KEYS = new Set([
   "__proto__",
   "prototype",
   "constructor",
 ]);
+
+const SENSITIVE_KEY_RE =
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|^role$|^roles$|^permissions$|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
 
 /* =========================================================
    TYPES
@@ -72,11 +85,11 @@ export function isSet(value) {
 }
 
 export function isWeakMap(value) {
-  return value instanceof WeakMap;
+  return typeof WeakMap !== "undefined" && value instanceof WeakMap;
 }
 
 export function isWeakSet(value) {
-  return value instanceof WeakSet;
+  return typeof WeakSet !== "undefined" && value instanceof WeakSet;
 }
 
 export function isArrayBuffer(value) {
@@ -89,7 +102,11 @@ export function isDataView(value) {
 
 export function isTypedArray(value) {
   try {
-    return typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(value) && !isDataView(value);
+    return (
+      typeof ArrayBuffer !== "undefined" &&
+      ArrayBuffer.isView(value) &&
+      !isDataView(value)
+    );
   } catch {
     return false;
   }
@@ -100,7 +117,7 @@ export function getType(value) {
 }
 
 export function hasOwn(object, key) {
-  return Object.prototype.hasOwnProperty.call(object, key);
+  return Object.prototype.hasOwnProperty.call(Object(object), key);
 }
 
 /* =========================================================
@@ -108,7 +125,11 @@ export function hasOwn(object, key) {
 ========================================================= */
 
 export function safeText(value, fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -154,38 +175,57 @@ export function unique(values = []) {
 }
 
 export function compact(values = []) {
-  return asArray(values).filter((item) => item !== null && item !== undefined && item !== "");
+  return asArray(values).filter((item) => {
+    return item !== null && item !== undefined && item !== "";
+  });
 }
 
 /* =========================================================
    PATH SAFETY
 ========================================================= */
 
+function normalizedKey(key = "") {
+  return String(key ?? "").trim();
+}
+
+function isSensitivePathKey(key = "") {
+  return SENSITIVE_KEY_RE.test(normalizedKey(key));
+}
+
 export function isUnsafePathKey(key = "") {
-  return UNSAFE_KEYS.has(String(key || "").trim());
+  const clean = normalizedKey(key);
+
+  return UNSAFE_KEYS.has(clean) || isSensitivePathKey(clean);
 }
 
 export function normalizePath(path) {
-  if (Array.isArray(path)) {
-    return path.map((part) => safeText(part, "")).filter(Boolean).filter((part) => !isUnsafePathKey(part));
-  }
-
-  return safeText(path, "")
-    .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
-    .split(".")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .filter((part) => !isUnsafePathKey(part));
-}
-
-export function hasUnsafePathSegment(path) {
-  const parts = Array.isArray(path)
+  const source = Array.isArray(path)
     ? path
     : safeText(path, "")
         .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
         .split(".");
 
-  return parts.some((part) => isUnsafePathKey(part));
+  const parts = source
+    .map((part) => normalizedKey(part))
+    .filter(Boolean);
+
+  if (!parts.length) return [];
+  if (parts.some(isUnsafePathKey)) return [];
+
+  return parts;
+}
+
+export function hasUnsafePathSegment(path) {
+  const source = Array.isArray(path)
+    ? path
+    : safeText(path, "")
+        .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
+        .split(".");
+
+  return source
+    .map((part) => normalizedKey(part))
+    .filter(Boolean)
+    .some(isUnsafePathKey);
 }
 
 /* =========================================================
@@ -196,14 +236,29 @@ export function deepClone(value) {
   if (value === undefined) return undefined;
   if (value === null) return null;
 
+  const valueType = typeof value;
+
+  if (
+    valueType === "function" ||
+    valueType === "symbol" ||
+    valueType === "bigint"
+  ) {
+    return undefined;
+  }
+
   try {
-    return structuredClone(value);
-  } catch {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
     }
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined ? undefined : JSON.parse(serialized);
+  } catch {
+    return undefined;
   }
 }
 
@@ -215,6 +270,57 @@ export function deepEqual(left, right) {
   } catch {
     return false;
   }
+}
+
+function sanitizeValue(value, keyHint = "") {
+  if (isUnsafePathKey(keyHint)) {
+    return undefined;
+  }
+
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const valueType = typeof value;
+
+  if (
+    valueType === "function" ||
+    valueType === "symbol" ||
+    valueType === "bigint"
+  ) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isPlainObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (isUnsafePathKey(key)) continue;
+
+      const clean = sanitizeValue(item, key);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  if (
+    valueType === "string" ||
+    valueType === "number" ||
+    valueType === "boolean"
+  ) {
+    return deepClone(value);
+  }
+
+  return undefined;
 }
 
 /* =========================================================
@@ -245,7 +351,7 @@ export function hasByPath(object, path) {
 
   for (const part of parts) {
     if (current === null || current === undefined) return false;
-    if (!hasOwn(Object(current), part)) return false;
+    if (!hasOwn(current, part)) return false;
     current = current[part];
   }
 
@@ -255,19 +361,24 @@ export function hasByPath(object, path) {
 export function setByPath(object, path, value) {
   const parts = normalizePath(path);
 
-  if (!object || !parts.length) return object;
+  if (!isAnyObject(object) || !parts.length) return object;
+
+  const key = parts.at(-1);
+  const clean = sanitizeValue(value, key);
+
+  if (clean === undefined) return object;
 
   let current = object;
 
   for (const part of parts.slice(0, -1)) {
-    if (!isObject(current[part]) && !Array.isArray(current[part])) {
+    if (!isPlainObject(current[part]) && !Array.isArray(current[part])) {
       current[part] = {};
     }
 
     current = current[part];
   }
 
-  current[parts.at(-1)] = value;
+  current[key] = clean;
 
   return object;
 }
@@ -275,16 +386,18 @@ export function setByPath(object, path, value) {
 export function deleteByPath(object, path) {
   const parts = normalizePath(path);
 
-  if (!object || !parts.length) return object;
+  if (!isAnyObject(object) || !parts.length) return object;
 
   let current = object;
 
   for (const part of parts.slice(0, -1)) {
-    if (!current?.[part]) return object;
+    if (!isAnyObject(current?.[part])) return object;
     current = current[part];
   }
 
   const key = parts.at(-1);
+
+  if (!hasOwn(current, key)) return object;
 
   if (Array.isArray(current) && /^\d+$/.test(key)) {
     current.splice(Number(key), 1);
@@ -297,11 +410,13 @@ export function deleteByPath(object, path) {
 
 export function setImmutableByPath(object, path, value) {
   const output = deepClone(object);
+
   return setByPath(output, path, value);
 }
 
 export function deleteImmutableByPath(object, path) {
   const output = deepClone(object);
+
   return deleteByPath(output, path);
 }
 
@@ -310,17 +425,21 @@ export function deleteImmutableByPath(object, path) {
 ========================================================= */
 
 export function mergeDeep(target = {}, source = {}) {
-  const output = isPlainObject(target) ? deepClone(target) : {};
+  const output = isPlainObject(target) ? deepClone(target) || {} : {};
 
   if (!isPlainObject(source)) return output;
 
   for (const [key, value] of Object.entries(source)) {
     if (isUnsafePathKey(key)) continue;
 
-    if (isPlainObject(value) && isPlainObject(output[key])) {
-      output[key] = mergeDeep(output[key], value);
+    const clean = sanitizeValue(value, key);
+
+    if (clean === undefined) continue;
+
+    if (isPlainObject(clean) && isPlainObject(output[key])) {
+      output[key] = mergeDeep(output[key], clean);
     } else {
-      output[key] = deepClone(value);
+      output[key] = clean;
     }
   }
 
@@ -336,7 +455,11 @@ export function mergeMany(...objects) {
 ========================================================= */
 
 export function collectChangedPaths(input = {}, prefix = "") {
-  if (!isPlainObject(input)) return prefix ? [prefix] : [];
+  if (prefix && hasUnsafePathSegment(prefix)) return [];
+
+  if (!isPlainObject(input)) {
+    return prefix ? [prefix] : [];
+  }
 
   const paths = [];
 
@@ -351,6 +474,7 @@ export function collectChangedPaths(input = {}, prefix = "") {
 }
 
 export function collectDiffPaths(previous = {}, next = {}, prefix = "") {
+  if (prefix && hasUnsafePathSegment(prefix)) return [];
   if (deepEqual(previous, next)) return [];
 
   if (!isPlainObject(previous) || !isPlainObject(next)) {
@@ -382,38 +506,80 @@ export function collectDiffPaths(previous = {}, next = {}, prefix = "") {
 ========================================================= */
 
 export function normalizeCollection(items, fallback = []) {
-  return Array.isArray(items)
-    ? items.map((item) => deepClone(item))
+  const source = Array.isArray(items)
+    ? items
     : Array.isArray(fallback)
-      ? fallback.map((item) => deepClone(item))
+      ? fallback
       : [];
+
+  return source
+    .map((item) => sanitizeValue(item))
+    .filter((item) => item !== undefined);
+}
+
+function safeCollectionKey(key = "id") {
+  const clean = safeText(key, "id");
+
+  return clean && !isUnsafePathKey(clean) ? clean : "id";
 }
 
 export function collectionToMap(items = [], key = "id") {
   const map = new Map();
+  const list = normalizeCollection(items);
 
-  for (const item of normalizeCollection(items)) {
-    const id = isFunction(key) ? key(item) : item?.[key];
+  for (const item of list) {
+    let id;
+
+    try {
+      id = isFunction(key)
+        ? key(deepClone(item))
+        : item?.[safeCollectionKey(key)];
+    } catch {
+      id = null;
+    }
 
     if (id !== null && id !== undefined && id !== "") {
-      map.set(String(id), item);
+      map.set(String(id), deepClone(item));
     }
   }
 
   return map;
 }
 
+function buildCollectionMatcher(matcher, item = null, list = []) {
+  if (isFunction(matcher)) {
+    return (entry, index) => {
+      try {
+        return Boolean(matcher(deepClone(entry), index, deepClone(list)));
+      } catch {
+        return false;
+      }
+    };
+  }
+
+  if (matcher !== null && matcher !== undefined && matcher !== "") {
+    return (entry) => entry?.id === matcher;
+  }
+
+  const id = item?.id;
+
+  if (id !== null && id !== undefined && id !== "") {
+    return (entry) => entry?.id === id;
+  }
+
+  return () => false;
+}
+
 export function upsertCollection(items = [], nextItem = null, matcher = null) {
   const list = normalizeCollection(items);
+  const item = sanitizeValue(nextItem);
 
-  if (!nextItem) return list;
+  if (item === undefined || item === null) return list;
 
-  const item = deepClone(nextItem);
-  const match = isFunction(matcher)
-    ? matcher
-    : (entry) => entry?.id === item?.id;
-
-  const index = list.findIndex(match);
+  const match = buildCollectionMatcher(matcher, item, list);
+  const index = list.findIndex((entry, entryIndex) => {
+    return match(entry, entryIndex);
+  });
 
   if (index >= 0) {
     list[index] = item;
@@ -426,11 +592,9 @@ export function upsertCollection(items = [], nextItem = null, matcher = null) {
 
 export function removeFromCollection(items = [], matcher) {
   const list = normalizeCollection(items);
-  const match = isFunction(matcher)
-    ? matcher
-    : (entry) => entry?.id === matcher;
+  const match = buildCollectionMatcher(matcher, null, list);
 
-  return list.filter((item) => !match(item));
+  return list.filter((item, index) => !match(item, index));
 }
 
 export function sortCollection(items = [], compareFn = null) {
@@ -441,16 +605,29 @@ export function sortCollection(items = [], compareFn = null) {
 
 export function groupCollectionBy(items = [], keyOrFn = "id") {
   const groups = new Map();
+  const list = normalizeCollection(items);
 
-  for (const item of normalizeCollection(items)) {
-    const value = isFunction(keyOrFn) ? keyOrFn(item) : item?.[keyOrFn];
-    const key = value === null || value === undefined || value === "" ? "__empty__" : String(value);
+  for (const item of list) {
+    let value;
+
+    try {
+      value = isFunction(keyOrFn)
+        ? keyOrFn(deepClone(item))
+        : item?.[safeCollectionKey(keyOrFn)];
+    } catch {
+      value = null;
+    }
+
+    const key =
+      value === null || value === undefined || value === ""
+        ? "__empty__"
+        : String(value);
 
     if (!groups.has(key)) {
       groups.set(key, []);
     }
 
-    groups.get(key).push(item);
+    groups.get(key).push(deepClone(item));
   }
 
   return groups;
@@ -461,7 +638,21 @@ export function groupCollectionBy(items = [], keyOrFn = "id") {
 ========================================================= */
 
 export function shallowCloneRoot(state = {}) {
-  return isObject(state) ? { ...state } : {};
+  if (!isPlainObject(state)) return {};
+
+  const output = {};
+
+  for (const key of ROOT_KEYS) {
+    if (hasOwn(state, key)) {
+      const clean = sanitizeValue(state[key], key);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
+    }
+  }
+
+  return output;
 }
 
 export function pick(object = {}, keys = []) {
@@ -469,8 +660,16 @@ export function pick(object = {}, keys = []) {
   const output = {};
 
   for (const key of asArray(keys)) {
-    if (hasOwn(source, key)) {
-      output[key] = source[key];
+    const cleanKey = safeText(key, "");
+
+    if (!cleanKey || isUnsafePathKey(cleanKey)) continue;
+
+    if (hasOwn(source, cleanKey)) {
+      const cleanValue = sanitizeValue(source[cleanKey], cleanKey);
+
+      if (cleanValue !== undefined) {
+        output[cleanKey] = cleanValue;
+      }
     }
   }
 
@@ -479,12 +678,21 @@ export function pick(object = {}, keys = []) {
 
 export function omit(object = {}, keys = []) {
   const source = safeObject(object);
-  const blocked = new Set(asArray(keys));
+  const blocked = new Set(
+    asArray(keys)
+      .map((key) => safeText(key, ""))
+      .filter(Boolean)
+  );
   const output = {};
 
   for (const [key, value] of Object.entries(source)) {
-    if (!blocked.has(key) && !isUnsafePathKey(key)) {
-      output[key] = value;
+    if (blocked.has(key)) continue;
+    if (isUnsafePathKey(key)) continue;
+
+    const clean = sanitizeValue(value, key);
+
+    if (clean !== undefined) {
+      output[key] = clean;
     }
   }
 
@@ -499,7 +707,18 @@ export function freezeDev(value) {
   }
 }
 
-export function deepFreeze(value) {
+export function deepFreeze(value, seen = new WeakSet()) {
+  if (!isAnyObject(value)) return value;
+  if (seen.has(value)) return value;
+
+  seen.add(value);
+
+  if (Array.isArray(value) || isPlainObject(value)) {
+    for (const key of Object.keys(value)) {
+      deepFreeze(value[key], seen);
+    }
+  }
+
   return freezeDev(value);
 }
 

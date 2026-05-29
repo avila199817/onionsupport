@@ -25,12 +25,14 @@ const DEFAULT_THEME = "system";
 const DEFAULT_TITLE = "Onion Support";
 
 const ROOT_KEYS = Object.freeze([
-  "app",
   "ui",
+  "app",
   "entities",
   "flags",
   "meta",
 ]);
+
+const ROOT_KEY_SET = new Set(ROOT_KEYS);
 
 const BLOCKED_KEYS = new Set([
   "__proto__",
@@ -39,14 +41,20 @@ const BLOCKED_KEYS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE =
-  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|role|roles|permissions)/i;
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|^role$|^roles$|^permissions$|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+
+  return prototype === Object.prototype || prototype === null;
 }
 
 function isFunction(value) {
@@ -89,35 +97,88 @@ function nowIso() {
   }
 }
 
+function normalizeKey(key = "") {
+  return String(key ?? "").trim();
+}
+
 function isBlockedKey(key = "") {
-  return BLOCKED_KEYS.has(String(key || ""));
+  return BLOCKED_KEYS.has(normalizeKey(key));
 }
 
 function isSensitiveKey(key = "") {
-  return SENSITIVE_KEY_RE.test(String(key || ""));
+  return SENSITIVE_KEY_RE.test(normalizeKey(key));
 }
 
 function isRootKey(key = "") {
-  return ROOT_KEYS.includes(String(key || ""));
+  return ROOT_KEY_SET.has(normalizeKey(key));
+}
+
+function safeClone(value, key = "", rootLevel = false) {
+  if (isBlockedKey(key)) return undefined;
+
+  if (isSensitiveKey(key)) {
+    return value ? "***" : null;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => safeClone(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [childKey, childValue] of Object.entries(value)) {
+      if (isBlockedKey(childKey)) continue;
+      if (rootLevel && !isRootKey(childKey)) continue;
+
+      const clean = safeClone(childValue, childKey, false);
+
+      if (clean !== undefined) {
+        output[childKey] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return clone(value);
+  }
+
+  return undefined;
 }
 
 function pathParts(path = "") {
-  return String(path || "")
-    .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
-    .split(".")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .filter((part) => !isBlockedKey(part))
-    .filter((part) => !isSensitiveKey(part));
+  const source = Array.isArray(path)
+    ? path
+    : String(path ?? "")
+        .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
+        .split(".");
+
+  const parts = source
+    .map((part) => normalizeKey(part))
+    .filter(Boolean);
+
+  if (!parts.length) return [];
+  if (parts.some(isBlockedKey)) return [];
+  if (parts.some(isSensitiveKey)) return [];
+
+  return parts;
 }
 
 function pathAllowed(path = "") {
   const parts = pathParts(path);
 
   if (!parts.length) return false;
-  if (!isRootKey(parts[0])) return false;
 
-  return true;
+  return isRootKey(parts[0]);
 }
 
 function getByPath(object, path, fallback = undefined) {
@@ -156,6 +217,7 @@ function collectionName(key = "") {
   if (!name) return "";
   if (isBlockedKey(name)) return "";
   if (isSensitiveKey(name)) return "";
+  if (name.includes(".") || name.includes("[") || name.includes("]")) return "";
 
   return name;
 }
@@ -170,21 +232,37 @@ function normalizeTheme(value = DEFAULT_THEME) {
   return ["dark", "light", "system"].includes(theme) ? theme : DEFAULT_THEME;
 }
 
-function normalizeLang(value = DEFAULT_LANG) {
-  const lang = text(value, DEFAULT_LANG).toLowerCase().split("-")[0];
+function normalizeEffectiveTheme(value = "") {
+  const theme = text(value, "").toLowerCase();
 
-  return ["ca", "es", "en"].includes(lang) ? lang : DEFAULT_LANG;
+  return theme === "dark" || theme === "light" ? theme : DEFAULT_THEME;
+}
+
+function normalizeLang() {
+  return DEFAULT_LANG;
 }
 
 /* =========================================================
    FACTORY
 ========================================================= */
 
-export function createSelectors({ state } = {}) {
-  const rootState = state || {};
+export function createSelectors(source = {}) {
+  const fixedState = source?.state;
 
   function root() {
-    return isObject(rootState) ? rootState : {};
+    let value = fixedState;
+
+    if (isFunction(source?.getState)) {
+      value = source.getState();
+    } else if (isFunction(source?.get)) {
+      value = source.get();
+    } else if (isFunction(fixedState)) {
+      value = fixedState();
+    } else if (isObject(source?.store?.state)) {
+      value = source.store.state;
+    }
+
+    return isObject(value) ? value : {};
   }
 
   function app() {
@@ -221,6 +299,7 @@ export function createSelectors({ state } = {}) {
 
   function collectionListRaw(key = "") {
     const value = collectionRawValue(key);
+
     return Array.isArray(value) ? value : [];
   }
 
@@ -293,7 +372,7 @@ export function createSelectors({ state } = {}) {
     },
 
     lastError() {
-      return clone(app().lastError || root().lastError || root().error || null);
+      return safeClone(app().lastError || root().lastError || root().error || null);
     },
 
     currentRoute() {
@@ -301,11 +380,21 @@ export function createSelectors({ state } = {}) {
     },
 
     currentCanonicalPath() {
-      return text(app().canonicalPath || root().canonicalPath || selectors.currentRoute(), DEFAULT_ROUTE);
+      return text(
+        app().canonicalPath ||
+          root().canonicalPath ||
+          selectors.currentRoute(),
+        DEFAULT_ROUTE
+      );
     },
 
     currentPublicPath() {
-      return text(app().publicPath || root().publicPath || selectors.currentRoute(), DEFAULT_ROUTE);
+      return text(
+        app().publicPath ||
+          root().publicPath ||
+          selectors.currentRoute(),
+        DEFAULT_ROUTE
+      );
     },
 
     routeSnapshot() {
@@ -318,7 +407,7 @@ export function createSelectors({ state } = {}) {
 
     appSnapshot() {
       return {
-        ...clone(app()),
+        ...safeClone(app()),
         initialized: selectors.isInitialized(),
         ready: selectors.isReady(),
         booting: selectors.isBooting(),
@@ -447,15 +536,38 @@ export function createSelectors({ state } = {}) {
     ===================================== */
 
     currentTheme() {
-      return normalizeTheme(ui().theme || root().theme || DEFAULT_THEME);
+      return normalizeEffectiveTheme(
+        ui().effectiveTheme ||
+          ui().themeMode ||
+          root().effectiveTheme ||
+          root().themeMode ||
+          ui().theme ||
+          root().theme ||
+          DEFAULT_THEME
+      );
+    },
+
+    effectiveTheme() {
+      return selectors.currentTheme();
     },
 
     themePreference() {
-      return normalizeTheme(ui().themePreference || selectors.currentTheme());
+      return normalizeTheme(
+        ui().themePreference ||
+          ui().theme ||
+          root().themePreference ||
+          root().theme ||
+          DEFAULT_THEME
+      );
     },
 
     currentLang() {
-      return normalizeLang(ui().lang || ui().language || root().lang || DEFAULT_LANG);
+      return normalizeLang(
+        ui().lang ||
+          ui().language ||
+          root().lang ||
+          DEFAULT_LANG
+      );
     },
 
     isSidebarOpen() {
@@ -467,7 +579,12 @@ export function createSelectors({ state } = {}) {
     },
 
     topbarTitle() {
-      return text(ui().topbarTitle || ui().pageTitle || root().topbarTitle, selectors.pageTitle());
+      return text(
+        ui().topbarTitle ||
+          ui().pageTitle ||
+          root().topbarTitle,
+        selectors.pageTitle()
+      );
     },
 
     density() {
@@ -477,13 +594,14 @@ export function createSelectors({ state } = {}) {
     uiSnapshot(options = {}) {
       return {
         theme: selectors.currentTheme(),
+        effectiveTheme: selectors.effectiveTheme(),
         themePreference: selectors.themePreference(),
         lang: selectors.currentLang(),
         sidebarOpen: selectors.isSidebarOpen(),
         density: selectors.density(),
         pageTitle: selectors.pageTitle(),
         topbarTitle: selectors.topbarTitle(),
-        raw: options.includeRaw === true ? clone(ui()) : null,
+        raw: options.includeRaw === true ? safeClone(ui()) : null,
       };
     },
 
@@ -500,7 +618,7 @@ export function createSelectors({ state } = {}) {
     },
 
     flags() {
-      return clone(flags()) || {};
+      return safeClone(flags()) || {};
     },
 
     isHydrating() {
@@ -511,7 +629,10 @@ export function createSelectors({ state } = {}) {
       const name = collectionName(key);
 
       return name
-        ? selectors.flag(`fetching${name[0]?.toUpperCase() || ""}${name.slice(1)}`, false)
+        ? selectors.flag(
+            `fetching${name[0]?.toUpperCase() || ""}${name.slice(1)}`,
+            false
+          )
         : false;
     },
 
@@ -520,20 +641,22 @@ export function createSelectors({ state } = {}) {
     ===================================== */
 
     collection(key) {
-      return clone(collectionRawValue(key));
+      return safeClone(collectionRawValue(key));
     },
 
     collectionRaw(key) {
-      return collectionRawValue(key);
+      return safeClone(collectionRawValue(key));
     },
 
     collectionList(key) {
-      return collectionListRaw(key).map((item) => clone(item));
+      return collectionListRaw(key).map((item) => safeClone(item));
     },
 
     count(key) {
       const value = collectionRawValue(key);
+
       if (Array.isArray(value)) return value.length;
+
       return value ? 1 : 0;
     },
 
@@ -543,12 +666,14 @@ export function createSelectors({ state } = {}) {
 
     first(key) {
       const list = collectionListRaw(key);
-      return list.length ? clone(list[0]) : null;
+
+      return list.length ? safeClone(list[0]) : null;
     },
 
     last(key) {
       const list = collectionListRaw(key);
-      return list.length ? clone(list[list.length - 1]) : null;
+
+      return list.length ? safeClone(list[list.length - 1]) : null;
     },
 
     find(key, predicate) {
@@ -556,7 +681,7 @@ export function createSelectors({ state } = {}) {
 
       for (const item of collectionListRaw(key)) {
         try {
-          if (predicate(item)) return clone(item);
+          if (predicate(safeClone(item))) return safeClone(item);
         } catch {
           // noop
         }
@@ -571,12 +696,12 @@ export function createSelectors({ state } = {}) {
       return collectionListRaw(key)
         .filter((item) => {
           try {
-            return predicate(item);
+            return predicate(safeClone(item));
           } catch {
             return false;
           }
         })
-        .map((item) => clone(item));
+        .map((item) => safeClone(item));
     },
 
     map(key, mapper) {
@@ -584,7 +709,8 @@ export function createSelectors({ state } = {}) {
 
       return collectionListRaw(key).map((item, index) => {
         try {
-          return mapper(clone(item), index);
+          const mapped = mapper(safeClone(item), index);
+          return safeClone(mapped);
         } catch {
           return null;
         }
@@ -593,6 +719,7 @@ export function createSelectors({ state } = {}) {
 
     byId(key, id) {
       const wanted = text(id, "");
+
       if (!wanted) return null;
 
       return selectors.find(key, (item) => entityId(item) === wanted);
@@ -609,18 +736,23 @@ export function createSelectors({ state } = {}) {
 
       for (const item of collectionListRaw(key)) {
         const id = entityId(item);
-        if (id) map.set(id, clone(item));
+
+        if (id) {
+          map.set(id, safeClone(item));
+        }
       }
 
       return map;
     },
 
     entitiesSnapshot() {
-      return clone(entities()) || {};
+      return safeClone(entities()) || {};
     },
 
     get(path, fallback = undefined) {
-      return clone(getByPath(root(), path, fallback));
+      const value = getByPath(root(), path, fallback);
+
+      return value === fallback ? fallback : safeClone(value);
     },
 
     /* =====================================
@@ -628,7 +760,7 @@ export function createSelectors({ state } = {}) {
     ===================================== */
 
     meta() {
-      return clone(meta()) || {};
+      return safeClone(meta()) || {};
     },
 
     hydrated() {
@@ -662,7 +794,9 @@ export function createSelectors({ state } = {}) {
         }),
 
         flags: selectors.flags(),
-        entities: options.includeEntities === false ? null : clone(entities()) || {},
+        entities: options.includeEntities === false
+          ? null
+          : safeClone(entities()) || {},
         meta: selectors.meta(),
 
         /*

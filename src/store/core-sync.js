@@ -27,6 +27,7 @@ const RELEVANT_CORE_PATHS = Object.freeze([
   "ready",
   "appReady",
   "initialized",
+  "booted",
   "booting",
   "loading",
   "fatal",
@@ -40,11 +41,17 @@ const RELEVANT_CORE_PATHS = Object.freeze([
   "lang",
   "language",
   "locale",
+
   "theme",
+  "themeMode",
+  "effectiveTheme",
 
   "sidebarOpen",
   "shellVisible",
   "chromeVisible",
+
+  "pageTitle",
+  "topbarTitle",
 
   "error",
   "lastError",
@@ -52,6 +59,10 @@ const RELEVANT_CORE_PATHS = Object.freeze([
 ]);
 
 const IGNORED_CORE_PATH_PARTS = Object.freeze([
+  "__proto__",
+  "prototype",
+  "constructor",
+
   "auth",
   "authenticated",
 
@@ -64,30 +75,61 @@ const IGNORED_CORE_PATH_PARTS = Object.freeze([
   "id_token",
   "jwt",
   "authorization",
+  "bearer",
 
   "session",
   "sessionData",
   "sessionId",
+  "session_id",
   "sessionUserId",
 
   "user",
   "currentUser",
   "authUser",
   "sessionUser",
+
   "role",
   "rol",
   "roles",
   "permissions",
 
   "password",
+  "passwd",
+  "pwd",
   "secret",
+  "credential",
   "cookie",
+  "apiKey",
+  "api_key",
+  "privateKey",
+  "private_key",
+  "connectionString",
+  "connection_string",
+  "sas",
+
   "otp",
   "totp",
   "mfa",
   "twofa",
   "2fa",
+  "backupCode",
+  "backup_code",
+  "backupCodes",
+  "backup_codes",
+
+  "_rid",
+  "_self",
+  "_etag",
+  "_attachments",
+  "_ts",
 ]);
+
+const IGNORED_CORE_PATH_SET = new Set(
+  IGNORED_CORE_PATH_PARTS.map((part) => String(part).toLowerCase())
+);
+
+const SENSITIVE_PATH_RE =
+  /(token|authorization|bearer|cookie|password|passwd|pwd|secret|credential|jwt|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id)/i;
 
 /* =========================================================
    BASICS
@@ -98,7 +140,13 @@ function isFunction(value) {
 }
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+
+  return prototype === Object.prototype || prototype === null;
 }
 
 function noop() {
@@ -114,12 +162,36 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function normalizePathParts(path = "") {
+  const source = Array.isArray(path)
+    ? path
+    : text(path, "")
+        .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
+        .replace(/^\.+|\.+$/g, "")
+        .replace(/\.{2,}/g, ".")
+        .split(".");
+
+  const parts = source
+    .map((part) => text(part, ""))
+    .filter(Boolean);
+
+  if (!parts.length) return [];
+
+  const hasBlockedPart = parts.some((part) => {
+    const clean = part.toLowerCase();
+
+    return (
+      clean === "__proto__" ||
+      clean === "prototype" ||
+      clean === "constructor"
+    );
+  });
+
+  return hasBlockedPart ? [] : parts;
+}
+
 function normalizePath(path = "") {
-  return text(path, "")
-    .replace(/\[(\w+)\]/g, ".$1")
-    .replace(/^\.+|\.+$/g, "")
-    .replace(/\.{2,}/g, ".")
-    .trim();
+  return normalizePathParts(path).join(".");
 }
 
 function lowerPath(path = "") {
@@ -154,6 +226,8 @@ function changedPathsFromPayload(payload = {}) {
     payload.paths ||
     payload.keys ||
     payload.changed ||
+    payload.path ||
+    payload.key ||
     [];
 
   const list = Array.isArray(paths) ? paths : [paths];
@@ -176,45 +250,61 @@ function pathTouches(path = "", candidate = "") {
   return (
     current === target ||
     current.startsWith(`${target}.`) ||
-    target.startsWith(`${current}.`)
+    target.startsWith(`${current}.`) ||
+    current.endsWith(`.${target}`) ||
+    current.includes(`.${target}.`)
   );
 }
 
 function isIgnoredPath(path = "") {
-  const current = lowerPath(path);
+  const parts = normalizePathParts(path);
 
-  if (!current) return false;
+  if (!parts.length) return true;
 
-  return IGNORED_CORE_PATH_PARTS.some((part) => {
-    const clean = lowerPath(part);
+  return parts.some((part) => {
+    const clean = part.toLowerCase();
 
-    return (
-      current === clean ||
-      current.includes(`.${clean}`) ||
-      current.startsWith(`${clean}.`) ||
-      current.endsWith(`.${clean}`)
-    );
+    return IGNORED_CORE_PATH_SET.has(clean) || SENSITIVE_PATH_RE.test(part);
   });
 }
 
 function isRelevantPath(path = "") {
-  if (isIgnoredPath(path)) return false;
+  if (!path || isIgnoredPath(path)) return false;
 
-  return RELEVANT_CORE_PATHS.some((candidate) =>
-    pathTouches(path, candidate)
-  );
+  return RELEVANT_CORE_PATHS.some((candidate) => {
+    return pathTouches(path, candidate);
+  });
+}
+
+function relevantChangedPathsFromPayload(payload = {}) {
+  return changedPathsFromPayload(payload).filter(isRelevantPath);
 }
 
 function shouldHydrateFromPayload(payload = {}) {
   const changedPaths = changedPathsFromPayload(payload);
 
-  /*
-    Sin lista de paths, mantenemos compat: hidratar una vez.
-    La limpieza real de campos sensibles corresponde a actions/state.
-  */
-  if (!changedPaths.length) return true;
+  if (!changedPaths.length) return false;
 
   return changedPaths.some(isRelevantPath);
+}
+
+function safePayload(payload = {}, reason = "core-sync") {
+  if (!isObject(payload)) {
+    return {
+      version: STORE_CORE_SYNC_VERSION,
+      source: "store.core-sync",
+      reason,
+      changedPaths: [],
+    };
+  }
+
+  return {
+    version: STORE_CORE_SYNC_VERSION,
+    source: "store.core-sync",
+    reason,
+    changedPaths: relevantChangedPathsFromPayload(payload),
+    timestamp: Number(payload.timestamp || Date.now()),
+  };
 }
 
 /* =========================================================
@@ -231,13 +321,13 @@ function hydrateFromCore(actions = null, reason = "core-sync", payload = {}) {
 
   if (!isFunction(hydrate)) return false;
 
-  safeCall(hydrate, {
+  const result = safeCall(hydrate, {
     source: "store.core-sync",
     reason,
-    payload,
+    payload: safePayload(payload, reason),
   });
 
-  return true;
+  return result !== null && result !== false;
 }
 
 /* =========================================================
@@ -265,7 +355,7 @@ export function addCoreEvent({
   }
 
   if (!isFunction(off)) {
-    off = noop;
+    return noop;
   }
 
   pushUnsubscriber(coreUnsubscribers, off);
@@ -290,7 +380,13 @@ export function bindCoreEvents({
     return true;
   }
 
-  hydrateFromCore(actions, "bind", null);
+  const hydrated = hydrateFromCore(actions, "bind", null);
+
+  if (!Array.isArray(coreUnsubscribers)) {
+    return hydrated;
+  }
+
+  const before = coreUnsubscribers.length;
 
   addCoreEvent({
     AppCore,
@@ -303,7 +399,7 @@ export function bindCoreEvents({
     },
   });
 
-  return true;
+  return hydrated || coreUnsubscribers.length > before;
 }
 
 export function unbindCoreEvents({ coreUnsubscribers = null } = {}) {
@@ -350,6 +446,7 @@ export function getCoreSyncSnapshot({ coreUnsubscribers = null } = {}) {
       singleCoreEvent: true,
       filtersAuthSessionTokenUserChanges: true,
       hydratesOnlyAppUiRouteChanges: true,
+      skipsEventsWithoutChangedPaths: true,
 
       noStorage: true,
       noFetch: true,

@@ -15,8 +15,8 @@
    - /api/auth/refresh público y sin Authorization.
    - Token param único: token.
    - Roles únicos: admin / user.
-   - Idioma base primario: es.
-   - Denylist legacy centralizada.
+   - Idioma base único: es.
+   - Denylist legacy/técnica centralizada.
    - Sesión persistente con restore/silent refresh.
    - Sin rutas inventadas.
    - Sin /home como ruta real.
@@ -56,8 +56,6 @@ export const ALLOWED_ROLES = Object.freeze([
 
 export const SUPPORTED_LANGS = Object.freeze([
   "es",
-  "ca",
-  "en",
 ]);
 
 export const BLOCKED_FRONTEND_ROUTES = Object.freeze([
@@ -67,16 +65,24 @@ export const BLOCKED_FRONTEND_ROUTES = Object.freeze([
   "/2fa",
   "/mfa",
   "/otp",
+
+  "/api",
+  "/.auth",
+  "/docs",
 ]);
 
 export const SENSITIVE_QUERY_PARAMS = Object.freeze([
   TOKEN_PARAM,
   "access_token",
+  "accessToken",
   "refresh_token",
+  "refreshToken",
   "id_token",
+  "idToken",
   "jwt",
   "authorization",
   "session",
+  "sessionId",
   "secret",
   "code",
   "password",
@@ -85,7 +91,9 @@ export const SENSITIVE_QUERY_PARAMS = Object.freeze([
   "sig",
   "signature",
   "reset_token",
+  "resetToken",
   "activation_token",
+  "activationToken",
 ]);
 
 /* =========================================================
@@ -124,6 +132,15 @@ export const ADMIN_ROUTES = Object.freeze([
   ROUTES.clientes,
   ROUTES.usuarios,
   ROUTES.servidor,
+]);
+
+export const PRIVATE_ROUTES = Object.freeze([
+  ROUTES.home,
+  ROUTES.incidencias,
+  ROUTES.facturas,
+  ROUTES.cuenta,
+  ROUTES.ajustes,
+  ...ADMIN_ROUTES,
 ]);
 
 export const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
@@ -328,6 +345,14 @@ function isBlockedNormalizedPath(path = "") {
   );
 }
 
+function isPublicCanonicalRoute(path = "") {
+  const route = normalizeRoutePath(path);
+
+  if (!route) return false;
+
+  return PUBLIC_ROUTES.some((item) => pathMatches(route, item));
+}
+
 /* =========================================================
    URL / PATH NORMALIZATION
 ========================================================= */
@@ -517,6 +542,14 @@ export function buildUserScopedRoute(slug = "", route = ROUTES.home) {
   const clean = normalizeUserSlug(slug);
   const canonical = normalizeRoutePath(route) || ROUTES.home;
 
+  if (isBlockedRoutePath(canonical)) {
+    return clean ? `${USER_HOME_PREFIX}${clean}` : ROUTES.home;
+  }
+
+  if (isPublicCanonicalRoute(canonical)) {
+    return canonical;
+  }
+
   if (!clean) return canonical;
   if (canonical === ROUTES.home) return `${USER_HOME_PREFIX}${clean}`;
 
@@ -586,6 +619,7 @@ export const config = freeze({
   authLikeRoutes: PUBLIC_ROUTES,
   technicalPublicRoutes: TECHNICAL_PUBLIC_ROUTES,
 
+  privateRoutes: PRIVATE_ROUTES,
   adminRoutes: ADMIN_ROUTES,
 
   protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
@@ -672,7 +706,9 @@ export const config = freeze({
       restoreOnBoot: true,
       silentRefresh: true,
       requireTokenForAuthenticated: true,
-      clearGhostUserWithoutToken: true,
+      clearGhostUserWithoutToken: false,
+      tokenRotationDoesNotLogout: true,
+      emptyAccessTokenDoesNotClearUser: true,
       userHomePrefix: USER_HOME_PREFIX,
     }),
   }),
@@ -680,6 +716,7 @@ export const config = freeze({
   ui: freeze({
     defaultTheme: "system",
     theme: "system",
+    themeOwnedBySystem: true,
 
     shellId: "app-shell",
     loaderId: "app-loader",
@@ -715,6 +752,7 @@ export const config = freeze({
     authLikeRoutes: PUBLIC_ROUTES,
     technicalPublicRoutes: TECHNICAL_PUBLIC_ROUTES,
 
+    privateRoutes: PRIVATE_ROUTES,
     adminRoutes: ADMIN_ROUTES,
 
     protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
@@ -741,6 +779,9 @@ export const config = freeze({
 
     userSlugHome: true,
     userScopedPrivateRoutes: true,
+
+    themeOwnedBySystem: true,
+    langBaseEs: true,
   }),
 
   diagnostics: freeze({
@@ -894,11 +935,13 @@ export function getConfigSnapshot() {
 
     defaultLang: config.defaultLang,
     fallbackLang: config.fallbackLang,
+    supportedLangs: config.supportedLangs,
     defaultTheme: config.defaultTheme,
 
     routes: config.routes,
     publicRoutes: config.publicRoutes,
     technicalPublicRoutes: config.technicalPublicRoutes,
+    privateRoutes: config.privateRoutes,
     adminRoutes: config.adminRoutes,
     blockedFrontendRoutes: config.blockedFrontendRoutes,
 
@@ -958,6 +1001,9 @@ export function getConfigSnapshot() {
       blocked2fa: true,
       blockedMfa: true,
       blockedOtp: true,
+      blockedApiFrontendRoute: true,
+      blockedAzureAuthRoute: true,
+      blockedDocsRoute: true,
 
       blocksNestedLegacyRoutes: true,
       blocksUserScopedLegacyRoutes: true,
@@ -970,10 +1016,14 @@ export function getConfigSnapshot() {
       servidorAdminOnly: true,
 
       langBase: "es",
+      supportedLangsOnlyEs: true,
+      themeOwnedBySystem: true,
 
       sessionPersistent: true,
       restoreSessionOnBoot: true,
       silentRefresh: true,
+      accessTokenLossDoesNotClearUser: true,
+      clearGhostUserWithoutToken: false,
 
       userSlugHome: true,
       userScopedPrivateRoutes: true,

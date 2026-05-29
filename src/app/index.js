@@ -3,96 +3,41 @@
    Archivo: /src/app/index.js
 
    Responsabilidad:
-   - Orquestar el boot mínimo de la SPA.
-   - Delegar Core, I18n, Toast, Auth, Router, Shell, Loader y UI.
-   - Restaurar sesión antes del primer render Router.
-   - Pedir restore con silent refresh y cookie httpOnly.
-   - No limpiar sesión por access token caducado/rotado.
-   - No convertir fallo recuperable de restore en fatal.
-   - Sin Store, Services paralelos, warmup, eventos custom, fetch,
-     storage ni lógica de dominio.
+   - Boot mínimo de la SPA.
+   - Inicializar Core/Auth/UI.
+   - Restaurar sesión antes del primer render del Router.
+   - Arrancar Router.
+   - Ocultar loader al terminar.
+   - Sin Store, Services, i18n funcional, warmup, eventos custom,
+     fetch directo, storage directo ni lógica de dominio.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
 import { Auth } from "../features/auth/index.js";
 import { Router } from "../router/index.js";
 
-import I18n from "../i18n/index.js";
 import Toast from "../ui/toast/index.js";
-
 import SidebarUI from "../ui/sidebar/index.js";
 import TopbarUI from "../ui/topbar/index.js";
 
-import {
-  showLoader,
-  hideLoader,
-} from "./loader.js";
+import { showLoader, hideLoader } from "./loader.js";
 
-import {
-  markShellReady,
-  markShellBusy,
-} from "./shell.js";
-
-import {
-  markBootStart,
-  markBootReady,
-  markBootError,
-  getBootStateSnapshot,
-} from "./boot-state.js";
-
-import {
-  initI18n as initAppI18n,
-  getI18nSnapshot,
-} from "./i18n.js";
-
-import {
-  restoreAuthSession,
-  getSessionBootstrapSnapshot,
-} from "./session.js";
-
-import {
-  configureRouter,
-  renderInitialRoute as renderRouterInitialRoute,
-  getRouterBootstrapState,
-} from "./router.js";
-
-import {
-  initUISystems,
-  getUISystemsSnapshot,
-} from "./ui.js";
-
-export const APP_INDEX_VERSION = "app.index.v13";
-
-const CORE_MODULES = Object.freeze([
-  ["auth", Auth],
-  ["router", Router],
-  ["i18n", I18n],
-  ["toast", Toast],
-]);
+export const APP_VERSION = "app.minimal.v1";
 
 const AUTH_BOOT_OPTIONS = Object.freeze({
   persistent: true,
   restoreOnBoot: true,
-
-  allowSilentRefresh: true,
-  allowCookieRefresh: true,
+  silent: true,
   silentRefresh: true,
-
   credentials: "include",
-
-  skipNavigation: true,
   skipRedirect: true,
-  noRedirect: true,
+  skipNavigation: true,
 });
 
 let bootPromise = null;
 let ready = false;
-let lastBootError = null;
-let lastRestoreResult = null;
-
-/* =========================================================
-   BASICS
-========================================================= */
+let lastError = null;
+let lastRestore = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -100,10 +45,6 @@ function isBrowser() {
 
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function isPlainObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function cleanText(value = "", fallback = "") {
@@ -115,7 +56,7 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
-function fallbackRedact(value = "") {
+function redact(value = "") {
   return cleanText(value, "")
     .replace(
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
@@ -123,31 +64,6 @@ function fallbackRedact(value = "") {
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-}
-
-function redact(value = "") {
-  const coreRedact = AppCore?.utils?.redact;
-
-  if (isFunction(coreRedact)) {
-    try {
-      return coreRedact(value);
-    } catch {
-      // fallback abajo
-    }
-  }
-
-  return fallbackRedact(value);
-}
-
-function safeError(error = null) {
-  if (!error) return null;
-
-  return {
-    name: cleanText(error.name, "Error"),
-    message: redact(error.message || String(error)),
-    code: error.code || error.error || null,
-    status: error.status || error.statusCode || error.response?.status || null,
-  };
 }
 
 function currentPath() {
@@ -161,443 +77,252 @@ function currentPath() {
   }
 }
 
-function createBootPayload(options = {}) {
-  const input = isPlainObject(options) ? options : {};
-
-  const initialPath = cleanText(
-    input.bootContext?.initialPath || input.initialPath || currentPath(),
-    "/"
-  );
+function safeError(error = null) {
+  if (!error) return null;
 
   return {
-    ...input,
-    source: cleanText(input.source, "app"),
-    initialPath,
-    bootContext: {
-      ...(isPlainObject(input.bootContext) ? input.bootContext : {}),
-      initialPath,
-    },
+    name: cleanText(error.name, "Error"),
+    message: redact(error.message || String(error)),
+    status: error.status || error.statusCode || error.response?.status || null,
+    code: error.code || error.error || null,
   };
 }
 
-function withCore(payload = {}, extra = {}) {
+function createBootPayload(options = {}) {
+  const initialPath = cleanText(options?.initialPath || currentPath(), "/");
+
   return {
-    ...payload,
+    ...options,
+
+    source: cleanText(options?.source, "app"),
+    version: APP_VERSION,
+    initialPath,
+
     AppCore,
     core: AppCore,
-    ...extra,
+
+    Auth,
+    Router,
+    Toast,
+    SidebarUI,
+    TopbarUI,
   };
 }
 
-function withSource(payload = {}, source = "app.index") {
-  return {
-    ...payload,
-    source,
-  };
-}
+function registerCoreModule(name = "", module = null) {
+  if (!name || !module) return false;
 
-/* =========================================================
-   SAFE CALLS
-========================================================= */
-
-function safeCall(fn) {
   try {
-    return isFunction(fn) ? fn() : null;
+    if (isFunction(AppCore?.registerModule)) {
+      AppCore.registerModule(name, module, { overwrite: true });
+      return true;
+    }
+
+    if (isFunction(AppCore?.modules?.register)) {
+      AppCore.modules.register(name, module, { overwrite: true });
+      return true;
+    }
+
+    AppCore[name] = module;
+    return true;
   } catch {
-    return null;
+    return false;
   }
 }
 
-async function safeAsyncCall(fn) {
-  try {
-    return isFunction(fn) ? await fn() : null;
-  } catch {
-    return null;
-  }
+function registerCoreModules() {
+  registerCoreModule("auth", Auth);
+  registerCoreModule("router", Router);
+  registerCoreModule("toast", Toast);
+  return true;
 }
 
-async function callRequired(target = null, method = "", label = "Módulo", payload = {}) {
+async function optionalCall(target = null, method = "", payload = {}) {
   const fn = target?.[method];
 
-  if (!isFunction(fn)) {
-    throw new Error(`${label}.${method}() no disponible.`);
-  }
+  if (!isFunction(fn)) return null;
 
   return fn.call(target, payload);
 }
 
-async function callOptional(target = null, method = "", payload = {}) {
-  const fn = target?.[method];
-  return isFunction(fn) ? fn.call(target, payload) : null;
-}
+async function callFirst(target = null, methods = [], payload = {}) {
+  for (const method of methods) {
+    const fn = target?.[method];
 
-/* =========================================================
-   BOOT UI STATE
-========================================================= */
+    if (!isFunction(fn)) continue;
 
-function markBusy(payload = {}) {
-  const statePayload = withSource(payload);
-
-  safeCall(() => markBootStart(AppCore, statePayload));
-  safeCall(() => markShellBusy());
-  safeCall(() => showLoader("booting"));
-}
-
-function markReady(payload = {}) {
-  const statePayload = withSource(payload);
-
-  safeCall(() => markBootReady(AppCore, statePayload));
-  safeCall(() => markShellReady());
-  safeCall(() => hideLoader());
-}
-
-function markError(error = null, payload = {}) {
-  safeCall(() => markBootError(AppCore, error, withSource(payload)));
-}
-
-/* =========================================================
-   CORE REGISTRY
-========================================================= */
-
-function getCoreRegistrar() {
-  if (isFunction(AppCore?.registerModule)) {
-    return AppCore.registerModule.bind(AppCore);
-  }
-
-  if (isFunction(AppCore?.modules?.register)) {
-    return AppCore.modules.register.bind(AppCore.modules);
-  }
-
-  return null;
-}
-
-function exposeCoreModules() {
-  const registrar = getCoreRegistrar();
-
-  for (const [name, module] of CORE_MODULES) {
-    if (!name || !module) continue;
-
-    if (registrar) {
-      try {
-        registrar(name, module, { overwrite: true });
-        continue;
-      } catch {
-        // fallback abajo
-      }
-    }
-
-    safeCall(() => {
-      AppCore[name] = module;
-    });
-  }
-
-  return true;
-}
-
-/* =========================================================
-   SESSION SUMMARY
-========================================================= */
-
-function normalizeRestoreSummary(result = null, error = null) {
-  if (error) {
     return {
-      ok: false,
-      restoreCompleted: false,
-      restored: false,
-      authenticated: false,
-      hasUser: false,
-      hasSession: false,
-      supportsHttpOnlyRefresh: true,
-      hasCookieRefreshCandidate: false,
-      source: "app.session",
-      error: safeError(error),
+      called: true,
+      method,
+      value: await fn.call(target, payload),
     };
   }
-
-  if (result === true || result === false) {
-    return {
-      ok: result !== false,
-      restoreCompleted: true,
-      restored: result === true,
-      authenticated: false,
-      hasUser: false,
-      hasSession: false,
-      supportsHttpOnlyRefresh: true,
-      hasCookieRefreshCandidate: false,
-      source: "app.session",
-    };
-  }
-
-  if (!isPlainObject(result)) return null;
-
-  const nested = isPlainObject(result.result) ? result.result : {};
-  const data = isPlainObject(result.data) ? result.data : {};
-  const auth = isPlainObject(result.auth) ? result.auth : {};
-  const snapshot = isPlainObject(result.snapshot) ? result.snapshot : {};
 
   return {
-    ok: result.ok !== false,
-
-    restoreCompleted: result.restoreCompleted === true,
-
-    restored: Boolean(
-      result.restored ||
-        nested.restored ||
-        data.restored ||
-        auth.restored ||
-        snapshot.restored
-    ),
-
-    authenticated: Boolean(
-      result.authenticated ||
-        nested.authenticated ||
-        data.authenticated ||
-        auth.authenticated ||
-        snapshot.authenticated
-    ),
-
-    hasUser: Boolean(
-      result.user ||
-        result.currentUser ||
-        nested.user ||
-        nested.currentUser ||
-        data.user ||
-        data.currentUser ||
-        auth.user ||
-        auth.currentUser ||
-        snapshot.hasUser
-    ),
-
-    hasSession: Boolean(
-      result.session ||
-        result.currentSession ||
-        nested.session ||
-        nested.currentSession ||
-        data.session ||
-        data.currentSession ||
-        auth.session ||
-        auth.currentSession ||
-        snapshot.hasSession
-    ),
-
-    supportsHttpOnlyRefresh: Boolean(
-      result.supportsHttpOnlyRefresh ||
-        nested.supportsHttpOnlyRefresh ||
-        data.supportsHttpOnlyRefresh ||
-        auth.supportsHttpOnlyRefresh ||
-        snapshot.supportsHttpOnlyRefresh
-    ),
-
-    hasCookieRefreshCandidate: Boolean(
-      result.hasCookieRefreshCandidate ||
-        nested.hasCookieRefreshCandidate ||
-        data.hasCookieRefreshCandidate ||
-        auth.hasCookieRefreshCandidate ||
-        snapshot.hasCookieRefreshCandidate
-    ),
-
-    source: cleanText(
-      result.source ||
-        nested.source ||
-        data.source ||
-        auth.source ||
-        snapshot.source,
-      "app.session"
-    ),
+    called: false,
+    method: null,
+    value: null,
   };
 }
 
-async function restoreSessionBeforeRouter(authPayload = {}) {
-  try {
-    const result = await restoreAuthSession(authPayload);
-    lastRestoreResult = normalizeRestoreSummary(result);
-    return result;
-  } catch (error) {
-    lastRestoreResult = normalizeRestoreSummary(null, error);
+async function initCore(payload = {}) {
+  await optionalCall(AppCore, "init", payload);
+  registerCoreModules();
+}
 
-    /*
-      Restore no debe tumbar el boot.
-      Auth/Session/Router deciden si hay sesión recuperable, sesión inválida
-      o usuario no autenticado. App sólo garantiza que el intento ocurrió
-      antes del primer render Router.
-    */
-    return null;
+async function initToast(payload = {}) {
+  await optionalCall(Toast, "init", payload);
+}
+
+async function initAuth(payload = {}) {
+  await optionalCall(Auth, "init", {
+    ...payload,
+    ...AUTH_BOOT_OPTIONS,
+    restoreOnBoot: false,
+  });
+}
+
+async function restoreAuth(payload = {}) {
+  const restore = await callFirst(
+    Auth,
+    [
+      "restoreSession",
+      "restoreAuthSession",
+      "restore",
+      "silentRestore",
+      "refreshSession",
+      "syncSession",
+    ],
+    {
+      ...payload,
+      ...AUTH_BOOT_OPTIONS,
+    }
+  );
+
+  lastRestore = {
+    attempted: restore.called,
+    method: restore.method,
+    ok: restore.called ? restore.value !== false : null,
+  };
+
+  return restore.value;
+}
+
+async function initGlobalUI(payload = {}) {
+  await optionalCall(SidebarUI, "init", payload);
+  await optionalCall(TopbarUI, "init", payload);
+}
+
+async function syncGlobalUI(payload = {}) {
+  await optionalCall(SidebarUI, "sync", payload);
+  await optionalCall(TopbarUI, "sync", payload);
+}
+
+async function startRouter(payload = {}) {
+  const result = await callFirst(
+    Router,
+    [
+      "start",
+      "boot",
+      "init",
+      "renderInitialRoute",
+    ],
+    payload
+  );
+
+  if (result.called) return result.value;
+
+  if (isFunction(Router?.navigate)) {
+    return Router.navigate(payload.initialPath || currentPath(), {
+      replace: true,
+      source: "app.boot",
+    });
+  }
+
+  throw new Error("Router.start() no disponible.");
+}
+
+function markBooting() {
+  try {
+    showLoader("booting");
+  } catch {
+    // noop
   }
 }
 
-/* =========================================================
-   BOOT
-========================================================= */
+function markReady() {
+  ready = true;
+  lastError = null;
+
+  try {
+    hideLoader();
+  } catch {
+    // noop
+  }
+}
+
+function markFailed(error = null) {
+  ready = false;
+  lastError = safeError(error);
+
+  try {
+    hideLoader();
+  } catch {
+    // noop
+  }
+}
 
 async function runBoot(options = {}) {
   const payload = createBootPayload(options);
 
-  const corePayload = withCore(payload);
-
-  const authPayload = withCore(payload, {
-    Auth,
-    ...AUTH_BOOT_OPTIONS,
-  });
-
   ready = false;
-  lastBootError = null;
-  lastRestoreResult = null;
+  lastError = null;
+  lastRestore = null;
 
-  markBusy(payload);
+  markBooting();
 
+  await initCore(payload);
+  await initToast(payload);
+  await initAuth(payload);
+
+  /*
+    Restore antes del primer render.
+    Un fallo recuperable de restore no debe tumbar el boot:
+    Router decidirá si muestra login o zona privada.
+  */
   try {
-    await callRequired(AppCore, "init", "AppCore", payload);
-    exposeCoreModules();
-
-    await initAppI18n(withCore(payload, {
-      I18n,
-      updateDOM: false,
-      updateUi: false,
-    }));
-
-    await callRequired(Toast, "init", "Toast", corePayload);
-
-    await safeAsyncCall(() => initUISystems(withCore(payload, {
-      Toast,
-    })));
-
-    await callRequired(Auth, "init", "Auth", authPayload);
-
-    /*
-      Punto crítico:
-      Restore SIEMPRE antes de configurar/renderizar Router.
-      App no limpia sesión ni redirige a login por access token caducado.
-    */
-    await restoreSessionBeforeRouter(authPayload);
-
-    await configureRouter(withSource(corePayload, "app.router"));
-
-    await callRequired(SidebarUI, "init", "SidebarUI", corePayload);
-    await callRequired(TopbarUI, "init", "TopbarUI", corePayload);
-
-    await renderRouterInitialRoute(withSource(corePayload, "app.boot"));
-
-    await callOptional(SidebarUI, "sync", corePayload);
-    await callOptional(TopbarUI, "sync", corePayload);
-
-    safeCall(() => I18n.updateDOM());
-
-    ready = true;
-    markReady(payload);
-
-    return App;
+    await restoreAuth(payload);
   } catch (error) {
-    ready = false;
-    lastBootError = safeError(error);
-
-    markError(error, payload);
-
-    throw error;
+    lastRestore = {
+      attempted: true,
+      method: "restore",
+      ok: false,
+      error: safeError(error),
+    };
   }
+
+  await initGlobalUI(payload);
+  await startRouter(payload);
+  await syncGlobalUI(payload);
+
+  markReady();
+
+  return App;
 }
-
-/* =========================================================
-   SNAPSHOT
-========================================================= */
-
-export function getAppSnapshot() {
-  const state = AppCore?.state || {};
-
-  return {
-    version: APP_INDEX_VERSION,
-
-    ready,
-    booting: Boolean(bootPromise),
-    currentPath: redact(currentPath()),
-
-    lastBootError,
-    lastRestoreResult,
-
-    modules: {
-      core: Boolean(AppCore),
-      auth: Boolean(Auth),
-      router: Boolean(Router),
-      i18n: Boolean(I18n),
-      toast: Boolean(Toast),
-      sidebar: Boolean(SidebarUI),
-      topbar: Boolean(TopbarUI),
-    },
-
-    bootState: getBootStateSnapshot(AppCore),
-
-    session: getSessionBootstrapSnapshot({
-      AppCore,
-      Auth,
-    }),
-
-    router: getRouterBootstrapState(),
-
-    i18n: getI18nSnapshot({
-      AppCore,
-      I18n,
-    }),
-
-    ui: getUISystemsSnapshot({
-      AppCore,
-      Toast,
-    }),
-
-    state: {
-      initialized: state.initialized === true,
-      ready: state.ready === true,
-
-      authenticated: state.authenticated === true,
-      hasToken: state.hasToken === true,
-      hasRefreshToken: state.hasRefreshToken === true,
-      hasUser: Boolean(state.user || state.currentUser),
-
-      role: state.role || null,
-      userSlug: state.userSlug || null,
-      homePath: redact(state.homePath || ""),
-
-      route: redact(state.route || ""),
-      canonicalPath: redact(state.canonicalPath || ""),
-      publicPath: redact(state.publicPath || ""),
-
-      routeMode: state.routeMode || null,
-      chromeVisible: state.chromeVisible ?? null,
-    },
-
-    policy: {
-      singleEntryPoint: true,
-      delegatesCoreAuthRouterUi: true,
-      restoresAuthBeforeRouterRender: true,
-      restoreFailureDoesNotFatalBoot: true,
-
-      restoreUsesSilentRefresh: true,
-      restoreUsesCookieRefresh: true,
-      credentialsInclude: true,
-      tokenExpiredDoesNotMeanLogout: true,
-
-      noStore: true,
-      noParallelServices: true,
-      noWarmup: true,
-      noCustomEvents: true,
-      noFetch: true,
-      noStorage: true,
-      noDomainLogic: true,
-
-      redactedSnapshot: true,
-    },
-  };
-}
-
-/* =========================================================
-   PUBLIC API
-========================================================= */
 
 export function bootApp(options = {}) {
-  if (!isBrowser() || ready) return Promise.resolve(App);
+  if (!isBrowser()) return Promise.resolve(App);
+  if (ready) return Promise.resolve(App);
   if (bootPromise) return bootPromise;
 
-  bootPromise = runBoot(options).finally(() => {
-    bootPromise = null;
-  });
+  bootPromise = runBoot(options)
+    .catch((error) => {
+      markFailed(error);
+      throw error;
+    })
+    .finally(() => {
+      bootPromise = null;
+    });
 
   return bootPromise;
 }
@@ -606,15 +331,34 @@ export function isReady() {
   return ready;
 }
 
+export function getAppSnapshot() {
+  return {
+    version: APP_VERSION,
+    ready,
+    booting: Boolean(bootPromise),
+    path: redact(currentPath()),
+    lastError,
+    lastRestore,
+
+    modules: {
+      core: Boolean(AppCore),
+      auth: Boolean(Auth),
+      router: Boolean(Router),
+      toast: Boolean(Toast),
+      sidebar: Boolean(SidebarUI),
+      topbar: Boolean(TopbarUI),
+    },
+  };
+}
+
 export const App = {
-  version: APP_INDEX_VERSION,
+  version: APP_VERSION,
 
   boot: bootApp,
   bootApp,
   isReady,
 
   getSnapshot: getAppSnapshot,
-  getDebugSnapshot: getAppSnapshot,
   snapshot: getAppSnapshot,
 };
 

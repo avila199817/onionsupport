@@ -4,146 +4,89 @@
 
    Responsabilidad:
    - Kernel mínimo global.
-   - Estado en memoria delegado en core/state.js.
-   - Compat de sesión delegada en core/session.js.
-   - Event bus canónico desde core/events.js.
-   - Registry de módulos canónico desde core/modules.js.
-   - Cleanup canónico desde core/cleanup.js.
-   - Hooks canónicos desde core/hooks.js.
-   - HTTP único desde core/http.js.
-   - Auth estricta base: access token usable + user usable.
-   - Roles únicos: admin / user.
-   - Home interna: /.
-   - Home visible de usuario: /@{user.slug}.
-   - Rutas, user-scope y bloqueos delegados en core/config.js.
-   - Session context mínimo seguro en memoria.
-   - No guardar refresh token en Core.
-   - No guardar secretos persistentes.
-   - Sin storage.
-   - Sin DOM cache complejo.
-   - Sin network listeners.
-   - Sin fetch propio.
-   - Sin cliente HTTP paralelo.
-   - Sin framework interno.
-   - Sin /home local.
-   - Sin 2FA/MFA/OTP funcional.
-
-   Contrato crítico:
-   - Cambiar/rotar/caducar access token NO equivale a logout.
-   - setToken(null) NO borra sesión salvo clearSession/force explícito.
-   - Core no hace refresh automático; lo orquesta Auth/Session.
+   - Estado mínimo en memoria.
+   - Sesión actual en memoria.
+   - Helpers básicos de usuario/rol/ruta.
+   - Puente único hacia core/http.js.
+   - Sin Store, Services, hooks, cleanup, event bus, network listeners,
+     fetch propio, i18n funcional ni framework interno.
 ========================================================= */
 
-import {
-  config,
-  ALLOWED_ROLES,
-  SENSITIVE_QUERY_PARAMS,
-  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
-  buildUserHomeRoute as configBuildUserHomeRoute,
-  canonicalRoutePath as configCanonicalRoutePath,
-  getUserScopedRouteInfo as configGetUserScopedRouteInfo,
-  isBlockedRoutePath as configIsBlockedRoutePath,
-  normalizeRoutePath as configNormalizeRoutePath,
-  normalizeUserSlug as configNormalizeUserSlug,
-  routePathFromUrlLike as configRoutePathFromUrlLike,
-} from "./config.js";
+import { config } from "./config.js";
+import Http from "./http.js";
 
-import {
-  createInitialState,
-  getStateBase as getStateSnapshot,
-  setStateBase as setStateSnapshot,
-  getStateDebugSnapshot,
-} from "./state.js";
+export const CORE_VERSION = "core.minimal.v1";
 
-import {
-  setRoute as sessionSetRoute,
-  setPublicPath as sessionSetPublicPath,
-  setUser as sessionSetUser,
-  setToken as sessionSetToken,
-  applySession as sessionApplySession,
-  clearSession as sessionClearSession,
-  setTheme as sessionSetTheme,
-  setLang as sessionSetLang,
-  setSidebarOpen as sessionSetSidebarOpen,
-  setLoading as sessionSetLoading,
-  setError as sessionSetError,
-} from "./session.js";
-
-import { createEvents } from "./events.js";
-import { createModules } from "./modules.js";
-import { createCleanup } from "./cleanup.js";
-import { createHooks } from "./hooks.js";
-
-import Http, { installHttp } from "./http.js";
-
-export const CORE_VERSION = "core.index.v10";
-
-const APP_NAME =
-  config?.appName ||
-  config?.name ||
-  "Onion Support";
-
+const APP_NAME = config?.appName || config?.name || "Onion Support";
 const ROOT_PATH = "/";
-const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
+const USER_HOME_PREFIX = "/@";
 
-const VALID_ROLES = new Set(
-  (Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
-    ? ALLOWED_ROLES
-    : ["admin", "user"]
-  ).map((role) => String(role).toLowerCase())
-);
+const VALID_ROLES = new Set(["admin", "user"]);
 
-const TOKEN_STATE_KEYS = new Set([
-  "token",
-  "accesstoken",
-  "access_token",
+const BAD_USER_STATUSES = new Set([
+  "disabled",
+  "inactive",
+  "deleted",
+  "archived",
+  "revoked",
+  "blocked",
+  "banned",
+  "suspended",
+
+  "desactivado",
+  "inactivo",
+  "eliminado",
+  "archivado",
+  "revocado",
+  "bloqueado",
+  "baneado",
+  "suspendido",
 ]);
 
-const DROPPED_STATE_KEYS = new Set([
+const SENSITIVE_KEYS = new Set([
   "__proto__",
   "prototype",
   "constructor",
 
+  "password",
+  "passwordhash",
+  "password_hash",
+  "passwordmeta",
+  "password_meta",
+
+  "token",
+  "accesstoken",
+  "access_token",
   "refreshtoken",
   "refresh_token",
-  "refreshtokenhash",
-  "refresh_token_hash",
-
   "idtoken",
   "id_token",
+  "jwt",
+  "bearer",
+  "authorization",
 
   "resettoken",
   "reset_token",
   "activationtoken",
   "activation_token",
 
-  "authorization",
-  "authheader",
-
-  "password",
-  "passwordhash",
-  "password_hash",
-  "hash",
-  "salt",
-  "passwordmeta",
-
   "secret",
   "secrets",
-  "backupcode",
-  "backupcodes",
-  "backup_code",
-  "backup_codes",
+  "apikey",
+  "api_key",
+  "connectionstring",
+  "connection_string",
+  "sas",
 
   "otp",
-  "otpcode",
   "totp",
   "mfa",
   "twofa",
   "twofa_secret",
-  "twofasecret",
-  "totpsecret",
-
-  "auth",
+  "backupcode",
+  "backupcodes",
+  "backup_code",
+  "backup_codes",
 
   "_rid",
   "_self",
@@ -154,40 +97,71 @@ const DROPPED_STATE_KEYS = new Set([
   "_metadata",
 ]);
 
-const SENSITIVE_OBJECT_KEYS = new Set([
-  ...DROPPED_STATE_KEYS,
-
+const SENSITIVE_QUERY_KEYS = new Set([
   "token",
-  "accesstoken",
   "access_token",
+  "accesstoken",
+  "refresh_token",
+  "refreshtoken",
+  "id_token",
+  "idtoken",
+  "code",
+  "secret",
+  "session",
+  "sessionid",
+  "session_id",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
   "jwt",
-  "bearer",
-  "apikey",
-  "api_key",
-  "sas",
-  "connectionstring",
-  "connection_string",
+  "authorization",
+  "reset_token",
+  "activation_token",
 ]);
 
-const SENSITIVE_QUERY_KEYS = new Set(
-  [
-    ...(Array.isArray(SENSITIVE_QUERY_PARAMS) ? SENSITIVE_QUERY_PARAMS : []),
-    "token",
-    "access_token",
-    "accessToken",
-    "refresh_token",
-    "refreshToken",
-    "id_token",
-    "idToken",
-    "code",
-    "session",
-    "sessionId",
-  ]
-    .map((key) => String(key || "").trim().toLowerCase())
-    .filter(Boolean)
-);
+const state = {
+  initialized: false,
+  ready: false,
+  booting: false,
+  loading: false,
+  error: null,
 
-const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
+  token: null,
+  accessToken: null,
+  hasToken: false,
+
+  authenticated: false,
+  user: null,
+  currentUser: null,
+  hasUser: false,
+
+  role: null,
+  roles: [],
+
+  userSlug: null,
+  homePath: ROOT_PATH,
+
+  session: null,
+  sessionId: null,
+  sessionUserId: null,
+
+  route: ROOT_PATH,
+  canonicalPath: ROOT_PATH,
+  publicPath: ROOT_PATH,
+
+  lang: "es",
+  locale: "es-ES",
+  theme: "system",
+
+  updatedAt: null,
+};
+
+const moduleRegistry = new Map();
+
+let httpClient = null;
+let toastBridge = null;
 
 /* =========================================================
    BASICS
@@ -205,17 +179,6 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function isPlainObject(value) {
-  if (!isObject(value)) return false;
-
-  try {
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
-  } catch {
-    return false;
-  }
-}
-
 function cleanText(value = "", fallback = "") {
   const output = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
@@ -226,22 +189,22 @@ function cleanText(value = "", fallback = "") {
 }
 
 function normalizeKey(value = "") {
-  return cleanText(value, "").toLowerCase();
+  return cleanText(value, "").replace(/[-_\s]/g, "").toLowerCase();
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    return value;
+  }
+
+  return null;
 }
 
 function clone(value) {
   if (value === undefined) return undefined;
   if (value === null) return null;
-
-  const valueType = typeof value;
-
-  if (
-    valueType === "function" ||
-    valueType === "symbol" ||
-    valueType === "bigint"
-  ) {
-    return undefined;
-  }
 
   try {
     if (typeof structuredClone === "function") {
@@ -255,79 +218,57 @@ function clone(value) {
     const serialized = JSON.stringify(value);
     return serialized === undefined ? undefined : JSON.parse(serialized);
   } catch {
-    return undefined;
-  }
-}
-
-function escapeRegExp(value = "") {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function buildSensitiveQueryPattern() {
-  const keys = [...SENSITIVE_QUERY_KEYS]
-    .map(escapeRegExp)
-    .filter(Boolean)
-    .join("|");
-
-  return keys
-    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
-    : null;
-}
-
-function redact(value = "") {
-  const text = cleanText(value, "");
-  const redactedQuery = SENSITIVE_QUERY_PATTERN
-    ? text.replace(SENSITIVE_QUERY_PATTERN, "$1***")
-    : text;
-
-  return redactedQuery
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
-}
-
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    return value;
-  }
-
-  return null;
-}
-
-function safeCall(fn = null, context = null, ...args) {
-  try {
-    return isFunction(fn) ? fn.apply(context, args) : null;
-  } catch {
     return null;
   }
 }
 
-/* =========================================================
-   ROLES / TOKEN
-========================================================= */
+function touch() {
+  state.updatedAt = new Date().toISOString();
+}
 
-function normalizeRole(value = "") {
-  if (Array.isArray(value)) {
-    const roles = value.map(normalizeRole).filter(Boolean);
+function redact(value = "") {
+  let text = cleanText(value, "");
 
-    if (roles.includes("admin")) return "admin";
-    if (roles.includes("user")) return "user";
+  try {
+    const fakeUrl = new URL(text, "https://onionsupport.local");
 
-    return "";
+    for (const key of [...fakeUrl.searchParams.keys()]) {
+      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+        fakeUrl.searchParams.set(key, "***");
+      }
+    }
+
+    if (text.startsWith("http://") || text.startsWith("https://")) {
+      text = fakeUrl.toString();
+    } else {
+      text = `${fakeUrl.pathname}${fakeUrl.search}${fakeUrl.hash}`;
+    }
+  } catch {
+    text = text.replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    );
   }
 
-  const role = cleanText(value, "").toLowerCase();
-
-  return VALID_ROLES.has(role) ? role : "";
+  return text
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
-function cleanRole(value = "") {
-  return normalizeRole(value) || "user";
+function safeError(error = null) {
+  if (!error) return null;
+
+  return {
+    name: cleanText(error.name, "Error"),
+    message: redact(error.message || String(error)),
+    status: error.status || error.statusCode || error.response?.status || null,
+    code: error.code || error.error || null,
+  };
 }
+
+/* =========================================================
+   TOKEN / ROLE / USER
+========================================================= */
 
 function stripBearer(value = "") {
   return cleanText(value, "").replace(/^Bearer\s+/i, "");
@@ -356,52 +297,201 @@ function cleanToken(value = "") {
   return tokenOk(token) ? token : null;
 }
 
+function normalizeRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = cleanText(value, "").toLowerCase();
+
+  return VALID_ROLES.has(role) ? role : "";
+}
+
+function normalizeSlug(value = "") {
+  const slug = cleanText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+function extractUserSlug(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeSlug(
+    first(
+      user.slug,
+      user.lookup?.slug,
+      user.profile?.slug,
+      user.routing?.slug,
+      user.username,
+      user.userName,
+      user.user_name,
+      user.usernameLower,
+      user.username_lower,
+      user.userId,
+      user.id,
+      ""
+    )
+  );
+}
+
+function buildUserHomePath(userOrSlug = null) {
+  const slug = isObject(userOrSlug)
+    ? extractUserSlug(userOrSlug)
+    : normalizeSlug(userOrSlug);
+
+  return slug ? `${USER_HOME_PREFIX}${slug}` : ROOT_PATH;
+}
+
+function userStatus(user = null) {
+  if (!isObject(user)) return "";
+
+  return cleanText(
+    first(user.status, user.estado, user.state, user.accountStatus, ""),
+    ""
+  ).toLowerCase();
+}
+
+function isUsableUser(user = null) {
+  if (!isObject(user)) return false;
+  if (user.disabled === true) return false;
+  if (user.deleted === true) return false;
+  if (user.archived === true) return false;
+  if (user.active === false) return false;
+
+  const status = userStatus(user);
+
+  if (status && BAD_USER_STATUSES.has(status)) return false;
+
+  return true;
+}
+
+function publicUser(user = null) {
+  if (!isObject(user)) return null;
+
+  return {
+    id: first(user.id, user.userId, null),
+    userId: first(user.userId, user.id, null),
+
+    username: first(user.username, user.userName, user.user_name, null),
+    slug: extractUserSlug(user),
+
+    displayName: first(
+      user.displayName,
+      user.fullName,
+      user.name,
+      user.nombre,
+      user.profile?.displayName,
+      user.profile?.name,
+      ""
+    ),
+
+    email: first(user.email, user.mail, null),
+
+    role: normalizeRole(first(user.role, user.rol, user.roles, "")) || "user",
+    roles: [normalizeRole(first(user.role, user.rol, user.roles, "")) || "user"],
+
+    avatarUrl: cleanText(
+      first(
+        user.avatarUrl,
+        user.avatar,
+        user.picture,
+        user.photoUrl,
+        user.profile?.avatarUrl,
+        user.profile?.avatar,
+        ""
+      ),
+      ""
+    ),
+
+    active: user.active !== false,
+    status: userStatus(user) || "active",
+  };
+}
+
+function normalizeUser(user = null) {
+  const output = publicUser(user);
+
+  if (!output) return null;
+
+  return {
+    ...output,
+    usable: isUsableUser(user),
+  };
+}
+
+function updateAuthFlags() {
+  const user = state.user;
+  const usableUser = isUsableUser(user);
+  const token = cleanToken(state.token || state.accessToken);
+
+  const role = normalizeRole(first(user?.role, state.role, "user")) || "user";
+  const slug = extractUserSlug(user);
+
+  state.token = token;
+  state.accessToken = token;
+  state.hasToken = Boolean(token);
+
+  state.hasUser = usableUser;
+  state.currentUser = user || null;
+
+  state.role = usableUser ? role : null;
+  state.roles = usableUser ? [role] : [];
+
+  state.userSlug = usableUser ? slug || null : null;
+  state.homePath = usableUser ? buildUserHomePath(slug) : ROOT_PATH;
+
+  state.authenticated = Boolean(token && usableUser);
+
+  touch();
+}
+
 /* =========================================================
-   ROUTES / PATHS
+   ROUTES
 ========================================================= */
 
-function pathFromInput(path = ROOT_PATH) {
-  try {
-    return configRoutePathFromUrlLike(path) || ROOT_PATH;
-  } catch {
-    return ROOT_PATH;
+function normalizePathname(value = ROOT_PATH) {
+  let path = cleanText(value, ROOT_PATH)
+    .split("#")[0]
+    .split("?")[0]
+    .replace(/\\/g, "/");
+
+  if (!path.startsWith("/")) {
+    path = `/${path}`;
   }
+
+  path = path.replace(/\/{2,}/g, "/");
+
+  if (path.length > 1) {
+    path = path.replace(/\/+$/g, "") || ROOT_PATH;
+  }
+
+  return path || ROOT_PATH;
 }
 
-function normalizePathname(pathname = ROOT_PATH) {
-  try {
-    return configNormalizeRoutePath(pathname) || ROOT_PATH;
-  } catch {
-    let value = cleanText(pathname, ROOT_PATH)
-      .split("#")[0]
-      .split("?")[0]
-      .replace(/\\/g, "/");
+function safeSearch(value = "") {
+  const raw = cleanText(value, "");
 
-    if (!value.startsWith("/")) {
-      value = `/${value}`;
-    }
+  if (!raw || raw === "?") return "";
 
-    value = value.replace(/\/{2,}/g, "/");
-
-    if (value.length > 1) {
-      value = value.replace(/\/+$/g, "") || ROOT_PATH;
-    }
-
-    return value || ROOT_PATH;
-  }
-}
-
-function normalizeSearch(search = "") {
-  const value = cleanText(search, "");
-
-  if (!value || value === "?") return "";
-
-  const normalized = value.startsWith("?")
-    ? value
-    : `?${value.replace(/^\?+/, "")}`;
+  const search = raw.startsWith("?") ? raw : `?${raw.replace(/^\?+/, "")}`;
 
   try {
-    const params = new URLSearchParams(normalized);
+    const params = new URLSearchParams(search);
 
     for (const key of [...params.keys()]) {
       if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
@@ -417,41 +507,34 @@ function normalizeSearch(search = "") {
   }
 }
 
-function normalizeHash(hash = "") {
-  const value = cleanText(hash, "");
+function safeHash(value = "") {
+  const hash = cleanText(value, "");
 
-  if (!value || value === "#") return "";
+  if (!hash || hash === "#") return "";
+  if (/[\r\n\t\\]/.test(hash)) return "";
 
-  const normalized = value.startsWith("#")
-    ? value
-    : `#${value.replace(/^#+/, "")}`;
-
-  const body = normalized.slice(1);
-
-  if (!body || /[\r\n\t\\]/.test(body)) return "";
-
-  const queryIndex = body.indexOf("?");
-
-  if (queryIndex >= 0) {
-    const hashPath = body
-      .slice(0, queryIndex)
-      .replace(/[?#\\]/g, "");
-    const query = body.slice(queryIndex + 1);
-    const cleanQuery = normalizeSearch(`?${query}`);
-
-    return cleanQuery ? `#${hashPath}${cleanQuery}` : `#${hashPath}`;
-  }
-
-  if (/^[^/?#=&]+=/i.test(body)) {
-    const cleanQuery = normalizeSearch(`?${body}`);
-    return cleanQuery ? `#${cleanQuery.slice(1)}` : "";
-  }
-
-  return redact(normalized);
+  return hash.startsWith("#") ? redact(hash) : redact(`#${hash.replace(/^#+/, "")}`);
 }
 
-function splitPath(path = ROOT_PATH) {
-  let raw = pathFromInput(path);
+function splitPath(value = ROOT_PATH) {
+  let raw = cleanText(value, ROOT_PATH);
+
+  if (raw.startsWith("//")) raw = ROOT_PATH;
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    try {
+      const url = new URL(raw);
+
+      if (isBrowser() && url.origin === window.location.origin) {
+        raw = `${url.pathname}${url.search}${url.hash}`;
+      } else {
+        raw = ROOT_PATH;
+      }
+    } catch {
+      raw = ROOT_PATH;
+    }
+  }
+
   let pathname = raw;
   let search = "";
   let hash = "";
@@ -472,82 +555,46 @@ function splitPath(path = ROOT_PATH) {
 
   return {
     pathname: normalizePathname(pathname),
-    search: normalizeSearch(search),
-    hash: normalizeHash(hash),
+    search: safeSearch(search),
+    hash: safeHash(hash),
   };
 }
 
-function joinPath(parts = {}) {
-  return [
-    normalizePathname(parts.pathname || ROOT_PATH),
-    normalizeSearch(parts.search || ""),
-    normalizeHash(parts.hash || ""),
-  ].join("");
+function normalizePublicPath(value = ROOT_PATH) {
+  const parts = splitPath(value);
+  return `${parts.pathname}${parts.search}${parts.hash}` || ROOT_PATH;
 }
 
-function isBlockedRoutePath(path = ROOT_PATH) {
-  try {
-    return configIsBlockedRoutePath(path) === true;
-  } catch {
-    return false;
-  }
-}
+function normalizeCanonicalPath(value = ROOT_PATH) {
+  const pathname = splitPath(value).pathname;
 
-function normalizePublicPath(path = ROOT_PATH) {
-  const parts = splitPath(path);
-
-  if (isBlockedRoutePath(parts.pathname)) {
-    return ROOT_PATH;
+  if (!pathname.startsWith(USER_HOME_PREFIX)) {
+    return pathname || ROOT_PATH;
   }
 
-  return joinPath(parts) || ROOT_PATH;
+  const rest = pathname.slice(USER_HOME_PREFIX.length);
+  const [, ...segments] = rest.split("/");
+
+  return segments.length
+    ? normalizePathname(`/${segments.join("/")}`)
+    : ROOT_PATH;
 }
 
-function stripQueryHash(path = ROOT_PATH) {
-  return splitPath(path).pathname || ROOT_PATH;
-}
+function getUserScopedRouteInfo(value = ROOT_PATH) {
+  const pathname = splitPath(value).pathname;
 
-function getUserScopedPathInfo(path = ROOT_PATH) {
-  try {
-    const info = configGetUserScopedRouteInfo(path);
-
-    if (isObject(info)) {
-      const restPath = normalizePathname(
-        info.restPath || info.canonicalPath || stripQueryHash(path)
-      );
-
-      const canonicalPath = normalizePathname(
-        info.canonicalPath || info.lookupPath || restPath
-      );
-
-      return {
-        scoped: Boolean(info.scoped),
-        home: Boolean(info.home),
-        slug: normalizeSlug(info.slug || ""),
-        restPath,
-        canonicalPath,
-        lookupPath: canonicalPath,
-      };
-    }
-  } catch {
-    // fallback mínimo abajo
-  }
-
-  const value = stripQueryHash(path);
-
-  if (!value.startsWith(USER_HOME_PREFIX)) {
+  if (!pathname.startsWith(USER_HOME_PREFIX)) {
     return {
       scoped: false,
       home: false,
       slug: "",
-      restPath: value,
-      canonicalPath: value,
-      lookupPath: value,
+      canonicalPath: pathname,
+      restPath: pathname,
     };
   }
 
-  const rest = value.slice(USER_HOME_PREFIX.length);
-  const [slugSegment = "", ...restSegments] = rest.split("/");
+  const rest = pathname.slice(USER_HOME_PREFIX.length);
+  const [slugSegment = "", ...segments] = rest.split("/");
   const slug = normalizeSlug(slugSegment);
 
   if (!slug) {
@@ -555,502 +602,319 @@ function getUserScopedPathInfo(path = ROOT_PATH) {
       scoped: false,
       home: false,
       slug: "",
-      restPath: value,
-      canonicalPath: value,
-      lookupPath: value,
+      canonicalPath: pathname,
+      restPath: pathname,
     };
   }
 
-  const restPath = restSegments.length
-    ? normalizePathname(`/${restSegments.join("/")}`)
+  const restPath = segments.length
+    ? normalizePathname(`/${segments.join("/")}`)
     : ROOT_PATH;
 
   return {
     scoped: true,
     home: restPath === ROOT_PATH,
     slug,
-    restPath,
     canonicalPath: restPath,
-    lookupPath: restPath,
+    restPath,
   };
 }
 
-function normalizeCanonicalPath(path = ROOT_PATH) {
-  if (isBlockedRoutePath(path)) return ROOT_PATH;
-
-  try {
-    const canonical = configCanonicalRoutePath(path) || ROOT_PATH;
-    return isBlockedRoutePath(canonical)
-      ? ROOT_PATH
-      : normalizePathname(canonical);
-  } catch {
-    const info = getUserScopedPathInfo(path);
-    const canonical = info.scoped ? info.canonicalPath : stripQueryHash(path);
-
-    return isBlockedRoutePath(canonical)
-      ? ROOT_PATH
-      : normalizePathname(canonical || ROOT_PATH);
-  }
-}
-
-function extractUserHomeSlug(path = ROOT_PATH) {
-  const info = getUserScopedPathInfo(path);
-  return info.home ? info.slug : "";
-}
-
-function extractUserScopedSlug(path = ROOT_PATH) {
-  return getUserScopedPathInfo(path).slug;
-}
-
-function isUserHomePath(path = ROOT_PATH) {
-  return Boolean(extractUserHomeSlug(path));
-}
-
-function isUserScopedPath(path = ROOT_PATH) {
-  return Boolean(getUserScopedPathInfo(path).scoped);
-}
-
-function safeInternalPath(path = ROOT_PATH) {
-  const raw = cleanText(path, ROOT_PATH);
+function safeInternalPath(value = ROOT_PATH) {
+  const raw = cleanText(value, ROOT_PATH);
 
   if (!raw) return ROOT_PATH;
   if (raw.startsWith("//")) return ROOT_PATH;
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return ROOT_PATH;
   if (/[\r\n\t\\]/.test(raw)) return ROOT_PATH;
 
-  const target = normalizePublicPath(raw);
+  const path = normalizePublicPath(raw);
 
-  if (!target.startsWith("/")) return ROOT_PATH;
-  if (target.startsWith("//")) return ROOT_PATH;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return ROOT_PATH;
-  if (/[\r\n\t\\]/.test(target)) return ROOT_PATH;
-  if (isBlockedRoutePath(target)) return ROOT_PATH;
-
-  return target || ROOT_PATH;
+  return path.startsWith("/") ? path : ROOT_PATH;
 }
-
-/* =========================================================
-   USER / SESSION UTILITIES
-========================================================= */
-
-function normalizeSlug(value = "") {
-  try {
-    return configNormalizeUserSlug(value) || "";
-  } catch {
-    const slug = cleanText(value, "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/^\/+/, "")
-      .replace(/^@+/, "")
-      .split(/[/?#]/)[0]
-      .replace(/\s+/g, "")
-      .replace(/[^a-zA-Z0-9._-]/g, "")
-      .toLowerCase();
-
-    if (!slug) return "";
-
-    return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
-  }
-}
-
-function extractUserSlug(user = null) {
-  if (!isObject(user)) return "";
-
-  return normalizeSlug(
-    user.slug ||
-      user.lookup?.slug ||
-      user.profile?.slug ||
-      user.routing?.slug ||
-      user.username ||
-      user.userName ||
-      user.user_name ||
-      user.usernameLower ||
-      user.username_lower ||
-      user.userId ||
-      user.id ||
-      ""
-  );
-}
-
-function buildUserHomePath(user = null) {
-  const slug = isObject(user)
-    ? extractUserSlug(user)
-    : normalizeSlug(user);
-
-  try {
-    return configBuildUserHomeRoute(slug) || ROOT_PATH;
-  } catch {
-    return slug ? `${USER_HOME_PREFIX}${slug}` : ROOT_PATH;
-  }
-}
-
-function normalizeUser(user = null) {
-  if (!isObject(user)) return null;
-
-  const probe = createInitialState();
-
-  setStateSnapshot(
-    probe,
-    {
-      token: "__core_probe_token__",
-      accessToken: "__core_probe_token__",
-      user,
-      currentUser: user,
-    },
-    {
-      source: "core:normalizeUser",
-      silent: true,
-      emit: false,
-    }
-  );
-
-  return probe.user || null;
-}
-
-function publicUser(user = null) {
-  const normalized = normalizeUser(user);
-
-  if (!normalized) return null;
-
-  return {
-    id: normalized.id || normalized.userId || null,
-    userId: normalized.userId || normalized.id || null,
-    username: normalized.username || null,
-    slug: normalized.slug || null,
-    displayName: normalized.displayName || null,
-    role: normalized.role || null,
-    hasAvatar: Boolean(normalized.hasAvatar || normalized.avatarUrl || normalized.avatar),
-  };
-}
-
-function userAvatarUrl(user = null) {
-  const normalized = normalizeUser(user);
-
-  if (!normalized) return "";
-
-  return cleanText(
-    normalized.avatarUrl ||
-      normalized.avatar ||
-      normalized.picture ||
-      normalized.photoUrl ||
-      "",
-    ""
-  );
-}
-
-function normalizeSessionContext(value = null, user = null) {
-  if (!isObject(value)) return null;
-
-  const normalizedUser = normalizeUser(user) || user;
-
-  const sessionId = cleanText(
-    value.sessionId ||
-      value.session_id ||
-      value.sid ||
-      value.id ||
-      "",
-    ""
-  );
-
-  const userId = cleanText(
-    value.sessionUserId ||
-      value.session_user_id ||
-      value.userId ||
-      value.user_id ||
-      value.uid ||
-      normalizedUser?.userId ||
-      normalizedUser?.id ||
-      normalizedUser?.uid ||
-      normalizedUser?.sub ||
-      "",
-    ""
-  );
-
-  const expiresAt =
-    value.expiresAt ||
-    value.expires_at ||
-    value.refreshExpiresAt ||
-    value.refresh_expires_at ||
-    null;
-
-  if (!sessionId && !userId && !expiresAt) return null;
-
-  return {
-    sessionId: sessionId || null,
-    id: sessionId || null,
-    sid: sessionId || null,
-
-    userId: userId || null,
-    sessionUserId: userId || null,
-
-    expiresAt,
-    refreshExpiresAt: value.refreshExpiresAt || value.refresh_expires_at || expiresAt || null,
-
-    persistent: value.persistent === true,
-    restoreOnBoot: value.restoreOnBoot === true,
-    rollingRefresh: value.rollingRefresh === true,
-    expiryEnforced: value.expiryEnforced === true,
-
-    revoked: value.revoked === true,
-    active: value.active !== false,
-    status: value.status || value.estado || "active",
-  };
-}
-
-/* =========================================================
-   CANONICAL CORE REGISTRIES
-========================================================= */
-
-const internalRegistry = {};
-const events = createEvents();
-const modules = createModules({ registry: internalRegistry, events });
-const cleanup = createCleanup({ registry: internalRegistry, events });
-const hooks = createHooks({ registry: internalRegistry, events });
-
-const services = {};
-const dom = {};
-
-const registry = {
-  modules,
-  hooks,
-  cleanup,
-  records: internalRegistry,
-};
 
 /* =========================================================
    STATE
 ========================================================= */
 
-const state = createInitialState();
+function sanitizePatchValue(key = "", value = null) {
+  const normalizedKey = normalizeKey(key);
 
-let initialized = false;
-let initPromise = null;
-let toastBridge = null;
-let httpClient = null;
+  if (SENSITIVE_KEYS.has(normalizedKey)) return undefined;
 
-/* =========================================================
-   STATE SANITIZE
-========================================================= */
-
-function isDroppedStateKey(key = "") {
-  return DROPPED_STATE_KEYS.has(normalizeKey(key));
-}
-
-function isTokenStateKey(key = "") {
-  return TOKEN_STATE_KEYS.has(normalizeKey(key));
-}
-
-function isSensitiveObjectKey(key = "") {
-  return SENSITIVE_OBJECT_KEYS.has(normalizeKey(key));
-}
-
-function sanitizeErrorValue(error = null) {
-  if (!error) return null;
-
-  if (typeof error === "string") {
-    return {
-      name: "Error",
-      message: redact(error),
-      code: null,
-      status: null,
-    };
+  if (key === "error" || key === "lastError") {
+    return safeError(value);
   }
 
-  if (!isObject(error)) {
-    return {
-      name: "Error",
-      message: redact(String(error)),
-      code: null,
-      status: null,
-    };
+  if (key === "route" || key === "publicPath") {
+    return normalizePublicPath(value);
   }
 
-  return {
-    name: cleanText(error.name, "Error"),
-    message: redact(
-      first(
-        error.message,
-        error.detail,
-        error.reason,
-        String(error)
-      ) || ""
-    ),
-    code: error.code || error.error || null,
-    status: error.status || error.statusCode || error.response?.status || null,
-  };
-}
+  if (key === "canonicalPath") {
+    return normalizeCanonicalPath(value);
+  }
 
-function sanitizeObject(value, depth = 0) {
-  if (depth > 8) return null;
+  if (key === "theme") return "system";
+  if (key === "lang") return "es";
+  if (key === "locale") return "es-ES";
 
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-
-  const valueType = typeof value;
-
-  if (
-    valueType === "function" ||
-    valueType === "symbol" ||
-    valueType === "bigint"
-  ) {
+  if (typeof value === "function" || typeof value === "symbol" || typeof value === "bigint") {
     return undefined;
   }
 
-  if (valueType === "string") {
-    return redact(value);
-  }
-
-  if (valueType === "number" || valueType === "boolean") {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 500)
-      .map((item) => sanitizeObject(item, depth + 1))
-      .filter((item) => item !== undefined);
-  }
-
-  if (!isPlainObject(value)) {
-    return null;
-  }
-
-  const output = {};
-
-  for (const [key, child] of Object.entries(value)) {
-    if (isSensitiveObjectKey(key)) continue;
-
-    const sanitized = sanitizeObject(child, depth + 1);
-
-    if (sanitized !== undefined) {
-      output[key] = sanitized;
-    }
-  }
-
-  return output;
+  return clone(value);
 }
-
-function dropForbiddenStateFields(target = state) {
-  if (!isObject(target)) return target;
-
-  for (const key of Object.keys(target)) {
-    if (isDroppedStateKey(key)) {
-      try {
-        delete target[key];
-      } catch {
-        // noop
-      }
-    }
-  }
-
-  return target;
-}
-
-function sanitizeStatePatch(patch = {}) {
-  if (!isObject(patch)) return {};
-
-  const output = {};
-
-  for (const [key, value] of Object.entries(patch)) {
-    if (isTokenStateKey(key)) {
-      output[key] = cleanToken(value);
-      continue;
-    }
-
-    if (isDroppedStateKey(key)) {
-      continue;
-    }
-
-    if (key === "error" || key === "lastError") {
-      output[key] = sanitizeErrorValue(value);
-      continue;
-    }
-
-    const sanitized = sanitizeObject(value);
-
-    if (sanitized !== undefined) {
-      output[key] = sanitized;
-    }
-  }
-
-  return output;
-}
-
-function collectChangedPathsFromPatch(patch = {}) {
-  if (!isObject(patch)) return [];
-
-  return [
-    ...new Set(
-      Object.keys(patch)
-        .map((key) => cleanText(key, ""))
-        .filter(Boolean)
-        .filter((key) => !isDroppedStateKey(key))
-        .filter((key) => !isTokenStateKey(key))
-    ),
-  ];
-}
-
-function emitStateChange(source = "core:setState", changedPaths = []) {
-  const paths = Array.isArray(changedPaths)
-    ? changedPaths.filter(Boolean)
-    : [];
-
-  events.emit("app:state:change", {
-    state: getState(),
-    source,
-    changedPaths: paths,
-    paths,
-    timestamp: Date.now(),
-  });
-}
-
-/* =========================================================
-   STATE API
-========================================================= */
 
 function getState(options = {}) {
-  dropForbiddenStateFields(state);
+  updateAuthFlags();
 
-  return options.raw === true
-    ? state
-    : getStateSnapshot(state, options);
+  if (options.raw === true) {
+    return state;
+  }
+
+  const snapshot = clone(state) || {};
+
+  if (options.includeToken !== true) {
+    snapshot.token = null;
+    snapshot.accessToken = null;
+  }
+
+  return snapshot;
 }
 
 function setState(patch = {}, options = {}) {
-  dropForbiddenStateFields(state);
+  if (!isObject(patch)) return getState(options);
 
-  const safePatch = sanitizeStatePatch(patch);
-  const changedPaths = collectChangedPathsFromPatch(safePatch);
-  const beforeCount = Number(state.stateChangeCount || 0);
-
-  const snapshot = setStateSnapshot(
-    state,
-    safePatch,
-    {
-      ...options,
-      source: options.source || "core:setState",
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === "user" || key === "currentUser") {
+      state.user = normalizeUser(value);
+      continue;
     }
-  );
 
-  dropForbiddenStateFields(state);
+    if (key === "token" || key === "accessToken" || key === "access_token") {
+      state.token = cleanToken(value);
+      state.accessToken = state.token;
+      continue;
+    }
 
-  if (
-    Number(state.stateChangeCount || 0) !== beforeCount &&
-    options.emit !== false &&
-    options.silent !== true
-  ) {
-    emitStateChange(options.source || "core:setState", changedPaths);
+    const sanitized = sanitizePatchValue(key, value);
+
+    if (sanitized !== undefined) {
+      state[key] = sanitized;
+    }
   }
 
-  return options.raw === true ? state : snapshot;
+  updateAuthFlags();
+
+  return getState(options);
 }
 
 function patchState(patch = {}, options = {}) {
   return setState(patch, options);
 }
 
+function setRoute(route = ROOT_PATH) {
+  state.route = normalizeCanonicalPath(route);
+  state.canonicalPath = normalizeCanonicalPath(route);
+  state.publicPath = normalizePublicPath(route);
+  touch();
+
+  return getState();
+}
+
+function setPublicPath(path = ROOT_PATH) {
+  state.publicPath = normalizePublicPath(path);
+  state.canonicalPath = normalizeCanonicalPath(path);
+  state.route = state.canonicalPath;
+  touch();
+
+  return getState();
+}
+
+function setUser(user = null) {
+  state.user = normalizeUser(user);
+  updateAuthFlags();
+
+  return getState();
+}
+
+function setToken(token = null, options = {}) {
+  const clean = cleanToken(token);
+
+  state.token = clean;
+  state.accessToken = clean;
+
+  if (clean) {
+    callHttp("setAccessToken", clean);
+  } else if (options.clearSession === true || options.force === true) {
+    callHttp("clearAuthTokens");
+  }
+
+  updateAuthFlags();
+
+  return getState();
+}
+
+function normalizeSessionContext(value = null, user = null) {
+  if (!isObject(value)) return null;
+
+  const sessionId = cleanText(
+    first(value.sessionId, value.session_id, value.sid, value.id, ""),
+    ""
+  );
+
+  const userId = cleanText(
+    first(
+      value.sessionUserId,
+      value.session_user_id,
+      value.userId,
+      value.user_id,
+      user?.userId,
+      user?.id,
+      ""
+    ),
+    ""
+  );
+
+  const expiresAt = first(
+    value.expiresAt,
+    value.expires_at,
+    value.refreshExpiresAt,
+    value.refresh_expires_at,
+    null
+  );
+
+  if (!sessionId && !userId && !expiresAt) return null;
+
+  return {
+    sessionId: sessionId || null,
+    id: sessionId || null,
+    userId: userId || null,
+    sessionUserId: userId || null,
+    expiresAt,
+    active: value.active !== false,
+    revoked: value.revoked === true,
+    persistent: value.persistent === true,
+  };
+}
+
+function applySession(payload = {}, options = {}) {
+  if (!isObject(payload)) return getState();
+
+  const token = first(
+    payload.token,
+    payload.accessToken,
+    payload.access_token,
+    payload.data?.token,
+    payload.data?.accessToken,
+    payload.data?.access_token,
+    payload.auth?.token,
+    payload.auth?.accessToken,
+    null
+  );
+
+  const user = first(
+    payload.user,
+    payload.currentUser,
+    payload.data?.user,
+    payload.data?.currentUser,
+    payload.auth?.user,
+    payload.auth?.currentUser,
+    null
+  );
+
+  const sessionPayload = first(
+    payload.session,
+    payload.currentSession,
+    payload.data?.session,
+    payload.auth?.session,
+    payload,
+    null
+  );
+
+  if (token !== null && token !== undefined) {
+    setToken(token, options);
+  }
+
+  if (user !== null && user !== undefined) {
+    setUser(user);
+  }
+
+  const session = normalizeSessionContext(sessionPayload, state.user);
+
+  state.session = session;
+  state.sessionId = session?.sessionId || null;
+  state.sessionUserId = session?.sessionUserId || null;
+
+  updateAuthFlags();
+
+  return getState();
+}
+
+function clearSession() {
+  state.token = null;
+  state.accessToken = null;
+  state.hasToken = false;
+
+  state.authenticated = false;
+  state.user = null;
+  state.currentUser = null;
+  state.hasUser = false;
+
+  state.role = null;
+  state.roles = [];
+
+  state.userSlug = null;
+  state.homePath = ROOT_PATH;
+
+  state.session = null;
+  state.sessionId = null;
+  state.sessionUserId = null;
+
+  callHttp("clearAuthTokens");
+
+  touch();
+
+  return getState();
+}
+
+function setTheme() {
+  state.theme = "system";
+  touch();
+  return getState();
+}
+
+function setLang() {
+  state.lang = "es";
+  state.locale = "es-ES";
+  touch();
+  return getState();
+}
+
+function setSidebarOpen(value = false) {
+  state.sidebarOpen = value === true;
+  touch();
+  return getState();
+}
+
+function setLoading(value = false) {
+  state.loading = value === true;
+  touch();
+  return getState();
+}
+
+function setError(error = null) {
+  state.error = safeError(error);
+  touch();
+  return getState();
+}
+
+/* =========================================================
+   AUTH HELPERS
+========================================================= */
+
 function isAuthenticated() {
-  return Boolean(getState().authenticated);
+  return getState().authenticated === true;
 }
 
 function getCurrentUser() {
@@ -1070,268 +934,22 @@ function hasRole(roleOrRoles = []) {
     ? roleOrRoles.flat(Infinity)
     : [roleOrRoles];
 
-  if (!requested.length) return true;
+  const roles = requested.map(normalizeRole).filter(Boolean);
 
-  const required = requested.map(normalizeRole).filter(Boolean);
-
-  if (!required.length) return false;
+  if (!roles.length) return true;
   if (snapshot.role === "admin") return true;
 
-  return required.includes(snapshot.role);
+  return roles.includes(snapshot.role);
 }
 
 function getAuthHeader() {
-  const snapshot = getState({ includeToken: true });
-  const token = cleanToken(snapshot.token || snapshot.accessToken || snapshot.access_token);
+  const token = cleanToken(state.token || state.accessToken);
 
-  if (!token) return {};
-
-  return {
-    Authorization: `Bearer ${token}`,
-  };
-}
-
-/* =========================================================
-   STATE WRAPPERS
-========================================================= */
-
-function setRoute(route = ROOT_PATH, options = {}) {
-  return sessionSetRoute({
-    state,
-    setState,
-    events,
-    route,
-    options: {
-      ...options,
-      source: options.source || "core:setRoute",
-    },
-  });
-}
-
-function setPublicPath(path = ROOT_PATH, options = {}) {
-  return sessionSetPublicPath({
-    state,
-    setState,
-    events,
-    path,
-    options: {
-      ...options,
-      source: options.source || "core:setPublicPath",
-    },
-  });
-}
-
-function setUser(user = null, options = {}) {
-  return sessionSetUser({
-    state,
-    setState,
-    events,
-    user,
-    options: {
-      ...options,
-      source: options.source || "core:setUser",
-    },
-  });
-}
-
-function setToken(token = null, options = {}) {
-  const clean = cleanToken(token);
-
-  const result = sessionSetToken({
-    state,
-    setState,
-    events,
-    token,
-    options: {
-      ...options,
-      source: options.source || "core:setToken",
-    },
-  });
-
-  if (clean) {
-    safeCall((httpClient || Http)?.setAccessToken, httpClient || Http, clean);
-  }
-
-  if (!clean && (options.clearSession === true || options.forceUnauthenticated === true)) {
-    safeCall((httpClient || Http)?.clearAuthTokens, httpClient || Http, {
-      clearState: true,
-    });
-  }
-
-  return result;
-}
-
-function applySession(payload = {}, options = {}) {
-  const snapshot = sessionApplySession({
-    ...(isObject(payload) ? payload : {}),
-    state,
-    setState,
-    events,
-    options: {
-      ...options,
-      source: options.source || "core:applySession",
-    },
-  });
-
-  const token = cleanToken(state.token || state.accessToken || state.access_token);
-
-  if (token) {
-    safeCall((httpClient || Http)?.setAccessToken, httpClient || Http, token);
-  }
-
-  return snapshot;
-}
-
-function clearSession(options = {}) {
-  const result = sessionClearSession({
-    state,
-    setState,
-    events,
-    options: {
-      ...options,
-      source: options.source || "core:clearSession",
-    },
-  });
-
-  safeCall((httpClient || Http)?.clearAuthTokens, httpClient || Http, {
-    clearState: true,
-  });
-
-  return result;
-}
-
-function setTheme(_theme = "system", options = {}) {
-  return sessionSetTheme({
-    setState,
-    events,
-    theme: "system",
-    options: {
-      ...options,
-      source: options.source || "core:setTheme",
-    },
-  });
-}
-
-function setLang(_lang = "es", options = {}) {
-  return sessionSetLang({
-    setState,
-    events,
-    lang: "es",
-    options: {
-      ...options,
-      source: options.source || "core:setLang",
-    },
-  });
-}
-
-function setSidebarOpen(value = false) {
-  return sessionSetSidebarOpen({
-    setState,
-    value,
-  });
-}
-
-function setLoading(value = false) {
-  return sessionSetLoading({
-    setState,
-    events,
-    value,
-  });
-}
-
-function setError(error = null, options = {}) {
-  return sessionSetError({
-    setState,
-    events,
-    error,
-    options,
-  });
-}
-
-/* =========================================================
-   TOAST BRIDGE
-========================================================= */
-
-function normalizeToastType(type = "info") {
-  const value = cleanText(type, "info").toLowerCase();
-
-  if (value === "warn") return "warning";
-  if (value === "danger") return "error";
-
-  if (value === "success") return "success";
-  if (value === "error") return "error";
-  if (value === "warning") return "warning";
-  if (value === "info") return "info";
-
-  return "info";
-}
-
-function getRegisteredToast() {
-  return (
-    toastBridge ||
-    modules.get("toast") ||
-    modules.get("Toast") ||
-    services.toast ||
-    null
-  );
-}
-
-function callToastModule(toast = null, message = "", type = "info", options = {}) {
-  if (!toast) return null;
-
-  const toastType = normalizeToastType(type);
-  const textValue = redact(message);
-
-  if (!textValue) return null;
-
-  if (isFunction(toast?.[toastType])) {
-    return safeCall(toast[toastType], toast, textValue, options);
-  }
-
-  if (toastType === "warning" && isFunction(toast?.warn)) {
-    return safeCall(toast.warn, toast, textValue, options);
-  }
-
-  if (isFunction(toast?.show)) {
-    return safeCall(toast.show, toast, {
-      ...(isObject(options) ? options : {}),
-      type: toastType,
-      message: textValue,
-    });
-  }
-
-  if (isFunction(toast)) {
-    return safeCall(toast, null, textValue, toastType, options);
-  }
-
-  return null;
-}
-
-function setShowToast(fn = null) {
-  if (!isFunction(fn)) return false;
-
-  toastBridge = fn;
-  return true;
-}
-
-function showToast(message = "", type = "info", options = {}) {
-  const toast = getRegisteredToast();
-
-  return callToastModule(
-    toast,
-    isObject(message)
-      ? first(message.message, message.text, message.title, "")
-      : message,
-    isObject(message)
-      ? first(message.type, message.variant, type, "info")
-      : type,
-    isObject(message)
-      ? {
-          ...message,
-          ...(isObject(options) ? options : {}),
-        }
-      : options
-  );
+  return token
+    ? {
+        Authorization: `Bearer ${token}`,
+      }
+    : {};
 }
 
 /* =========================================================
@@ -1339,66 +957,95 @@ function showToast(message = "", type = "info", options = {}) {
 ========================================================= */
 
 function registerModule(name = "", value = null, options = {}) {
-  return modules.register(name, value, {
-    ...options,
-    overwrite: options.overwrite !== false,
-  });
+  const key = cleanText(name, "");
+
+  if (!key) return null;
+
+  if (moduleRegistry.has(key) && options.overwrite === false) {
+    return moduleRegistry.get(key);
+  }
+
+  moduleRegistry.set(key, value);
+  return value;
 }
 
 function getModule(name = "") {
-  return modules.get(name);
+  return moduleRegistry.get(cleanText(name, "")) || null;
 }
+
+function removeModule(name = "") {
+  return moduleRegistry.delete(cleanText(name, ""));
+}
+
+function listModules() {
+  return [...moduleRegistry.keys()];
+}
+
+const modules = {
+  register: registerModule,
+  get: getModule,
+  remove: removeModule,
+  list: listModules,
+};
 
 /* =========================================================
    HTTP
 ========================================================= */
 
-function installHttpBridge(options = {}) {
-  if (httpClient) {
-    return httpClient;
-  }
+function callHttp(method = "", ...args) {
+  const client = getHttpClient();
+  const fn = client?.[method];
+
+  if (!isFunction(fn)) return null;
 
   try {
-    httpClient = isFunction(installHttp)
-      ? installHttp(AppCore, options)
-      : Http;
+    return fn.apply(client, args);
   } catch {
-    httpClient = Http;
+    return null;
   }
-
-  if (!httpClient) {
-    httpClient = Http;
-  }
-
-  services.http = httpClient;
-  modules.register("http", httpClient, { overwrite: true });
-
-  return httpClient;
 }
 
 function setHttpClient(value = null) {
   if (!value) return false;
 
   httpClient = value;
-  services.http = httpClient;
-  modules.register("http", httpClient, { overwrite: true });
+  registerModule("http", httpClient, { overwrite: true });
 
   return true;
 }
 
 function getHttpClient() {
-  return httpClient || installHttpBridge();
+  if (httpClient) return httpClient;
+
+  httpClient = Http;
+  registerModule("http", httpClient, { overwrite: true });
+
+  return httpClient;
 }
 
 function getActiveRequest() {
   const client = getHttpClient();
 
-  return isFunction(client?.request)
-    ? client.request.bind(client)
-    : null;
+  if (isFunction(client?.request)) {
+    return client.request.bind(client);
+  }
+
+  if (isFunction(client)) {
+    return client;
+  }
+
+  return null;
 }
 
 function getActiveApiClient() {
+  return getHttpClient();
+}
+
+function installHttpBridge(value = null) {
+  if (value) {
+    setHttpClient(value);
+  }
+
   return getHttpClient();
 }
 
@@ -1410,6 +1057,49 @@ function request(...args) {
   }
 
   return activeRequest(...args);
+}
+
+/* =========================================================
+   TOAST BRIDGE
+========================================================= */
+
+function setShowToast(fn = null) {
+  if (!isFunction(fn)) return false;
+
+  toastBridge = fn;
+  return true;
+}
+
+function showToast(message = "", type = "info", options = {}) {
+  const text = isObject(message)
+    ? cleanText(first(message.message, message.text, message.title, ""))
+    : cleanText(message, "");
+
+  if (!text) return null;
+
+  const variant = isObject(message)
+    ? cleanText(first(message.type, message.variant, type, "info"), "info")
+    : cleanText(type, "info");
+
+  if (toastBridge) {
+    return toastBridge(text, variant, options);
+  }
+
+  const toast = getModule("toast");
+
+  if (isFunction(toast?.show)) {
+    return toast.show({
+      ...(isObject(options) ? options : {}),
+      type: variant,
+      message: text,
+    });
+  }
+
+  if (isFunction(toast?.[variant])) {
+    return toast[variant](text, options);
+  }
+
+  return null;
 }
 
 /* =========================================================
@@ -1429,11 +1119,7 @@ function ready(fn = null) {
     return () => true;
   }
 
-  try {
-    document.addEventListener("DOMContentLoaded", fn, { once: true });
-  } catch {
-    return () => false;
-  }
+  document.addEventListener("DOMContentLoaded", fn, { once: true });
 
   return () => {
     try {
@@ -1446,84 +1132,23 @@ function ready(fn = null) {
   };
 }
 
-async function init(options = {}) {
-  if (initialized) return AppCore;
-  if (initPromise) return initPromise;
+async function init() {
+  if (state.initialized) return AppCore;
 
-  initPromise = Promise.resolve()
-    .then(async () => {
-      setState(
-        {
-          booting: true,
-          loading: true,
-          ready: false,
-          appReady: false,
-          appFatal: false,
-        },
-        {
-          source: "core:init:start",
-          silent: true,
-        }
-      );
+  state.booting = true;
+  state.loading = true;
+  state.ready = false;
+  touch();
 
-      await hooks.run("beforeInit", {
-        core: AppCore,
-        options,
-      });
+  getHttpClient();
 
-      installHttpBridge(options);
+  state.initialized = true;
+  state.booting = false;
+  state.loading = false;
+  state.ready = true;
+  touch();
 
-      initialized = true;
-
-      setState(
-        {
-          initialized: true,
-          booting: false,
-          loading: false,
-          ready: true,
-          appReady: true,
-        },
-        {
-          source: "core:init:ready",
-          silent: true,
-        }
-      );
-
-      await hooks.run("afterInit", {
-        core: AppCore,
-        options,
-      });
-
-      events.emit("core:ready", {
-        version: CORE_VERSION,
-      });
-
-      return AppCore;
-    })
-    .catch((error) => {
-      setState(
-        {
-          booting: false,
-          loading: false,
-          ready: false,
-          appReady: false,
-          appFatal: true,
-        },
-        {
-          source: "core:init:error",
-          silent: true,
-        }
-      );
-
-      setError(error, { emit: true });
-
-      throw error;
-    })
-    .finally(() => {
-      initPromise = null;
-    });
-
-  return initPromise;
+  return AppCore;
 }
 
 /* =========================================================
@@ -1532,38 +1157,26 @@ async function init(options = {}) {
 
 function getSnapshot() {
   const snapshot = getState();
-  const debug = getStateDebugSnapshot(state);
 
   return {
     version: CORE_VERSION,
-
     appName: APP_NAME,
 
-    initialized,
-    ready: Boolean(snapshot.ready),
-    booting: Boolean(snapshot.booting),
-    loading: Boolean(snapshot.loading),
+    initialized: snapshot.initialized === true,
+    ready: snapshot.ready === true,
+    booting: snapshot.booting === true,
+    loading: snapshot.loading === true,
 
-    authenticated: Boolean(snapshot.authenticated),
-    hasToken: Boolean(snapshot.hasToken),
-    hasRefreshToken: Boolean(snapshot.hasRefreshToken),
-
-    token: null,
-    accessToken: null,
-    refreshToken: null,
+    authenticated: snapshot.authenticated === true,
+    hasToken: snapshot.hasToken === true,
+    hasUser: snapshot.hasUser === true,
 
     user: publicUser(snapshot.user),
-
-    userSlug: snapshot.userSlug || null,
-    homePath: snapshot.homePath || ROOT_PATH,
-    defaultHome: snapshot.defaultHome || snapshot.homePath || ROOT_PATH,
-
     role: snapshot.role,
     roles: Array.isArray(snapshot.roles) ? [...snapshot.roles] : [],
 
-    hasSessionContext: Boolean(snapshot.sessionId || snapshot.sessionUserId || snapshot.session),
-    sessionId: snapshot.sessionId ? "***" : null,
-    sessionUserId: snapshot.sessionUserId ? "***" : null,
+    userSlug: snapshot.userSlug,
+    homePath: snapshot.homePath || ROOT_PATH,
 
     route: redact(snapshot.route || ROOT_PATH),
     canonicalPath: redact(snapshot.canonicalPath || ROOT_PATH),
@@ -1574,57 +1187,31 @@ function getSnapshot() {
     theme: snapshot.theme,
 
     hasHttp: Boolean(httpClient),
-    modules: modules.list(),
-    events: events.names(),
-    cleanup: cleanup.getSnapshot?.() || null,
-    hooks: hooks.getSnapshot?.() || null,
+    modules: listModules(),
 
-    updatedAt: snapshot.updatedAt || null,
-    stateChangeCount: Number(snapshot.stateChangeCount || 0),
-
-    state: {
-      version: debug.version,
-      policy: debug.policy,
+    session: {
+      hasSession: Boolean(snapshot.sessionId || snapshot.sessionUserId || snapshot.session),
+      sessionId: snapshot.sessionId ? "***" : null,
+      sessionUserId: snapshot.sessionUserId ? "***" : null,
     },
 
+    error: snapshot.error,
+    updatedAt: snapshot.updatedAt,
+
     policy: {
-      memoryStateOnly: true,
-      stateDelegatedToCoreState: true,
-      sessionDelegatedToCoreSession: true,
-
-      noStorage: true,
+      memoryOnly: true,
+      noStore: true,
+      noServices: true,
+      noEvents: true,
+      noHooks: true,
+      noCleanupRegistry: true,
+      noNetworkListeners: true,
       noFetchOwn: true,
-      httpFacadeOnly: true,
-      noApiClientParallel: true,
-
-      configOwnsRouteNormalization: true,
-      configOwnsUserScope: true,
-      configOwnsBlockedRoutes: true,
-      noLocalBlockedRouteList: true,
-
-      roles: [...VALID_ROLES],
-      authRequiresTokenAndUsableUser: true,
-
-      userSlugHome: true,
-      userScopedPrivateRoutes: true,
-      noEmailIdentity: true,
-
-      safeSessionContextOnly: true,
-      noSessionSecrets: true,
-      noSessionIpUserAgent: true,
-      noRefreshTokenInCoreState: true,
-
-      tokenRotationDoesNotLogout: true,
-      emptySetTokenDoesNotLogout: true,
-
-      themeOwnedBySystem: true,
+      httpBridgeOnly: true,
+      roles: ["admin", "user"],
+      themeSystemOnly: true,
       langBaseEs: true,
-
-      noHomeRoute: true,
-      no2fa: true,
-      noMfa: true,
-      noOtp: true,
-
+      noMfaOtp: true,
       snapshotRedacted: true,
     },
   };
@@ -1640,22 +1227,9 @@ export const AppCore = {
 
   config,
   state,
-  dom,
-  registry,
+  dom: {},
 
-  utils: {
-    text: cleanText,
-    clone,
-    redact,
-    isObject,
-    isFunction,
-  },
-
-  events,
-  cleanup,
   modules,
-  hooks,
-  services,
 
   init,
   ready,
@@ -1691,6 +1265,7 @@ export const AppCore = {
   getModule,
 
   installHttpBridge,
+  setHttpClient,
   getHttpClient,
   getActiveRequest,
   getActiveApiClient,
@@ -1702,41 +1277,31 @@ export const AppCore = {
   extractUserSlug,
   buildUserHomePath,
   publicUser,
+  isUsableUser,
 
   normalizeSessionContext,
 
   normalizePublicPath,
   normalizeCanonicalPath,
-  extractUserHomeSlug,
-  extractUserScopedSlug,
-  isUserHomePath,
-  isUserScopedPath,
+  getUserScopedRouteInfo,
   safeInternalPath,
+
+  utils: {
+    cleanText,
+    text: cleanText,
+    clone,
+    redact,
+    safeError,
+    isObject,
+    isFunction,
+  },
 
   getSnapshot,
   getDebugSnapshot: getSnapshot,
   snapshot: getSnapshot,
-
-  getUserDisplayName: (user) =>
-    normalizeUser(user)?.displayName || "",
-
-  getUserUsername: (user) =>
-    normalizeUser(user)?.username || "",
-
-  getUserAvatarUrl: (user) =>
-    userAvatarUrl(user),
 };
 
 Object.defineProperties(AppCore, {
-  Http: {
-    get() {
-      return getHttpClient();
-    },
-    set(value) {
-      setHttpClient(value);
-    },
-  },
-
   http: {
     get() {
       return getHttpClient();
@@ -1746,77 +1311,66 @@ Object.defineProperties(AppCore, {
     },
   },
 
-  Router: {
+  Http: {
     get() {
-      return modules.get("router");
+      return getHttpClient();
     },
     set(value) {
-      modules.register("router", value, { overwrite: true });
-    },
-  },
-
-  router: {
-    get() {
-      return modules.get("router");
-    },
-    set(value) {
-      modules.register("router", value, { overwrite: true });
-    },
-  },
-
-  Auth: {
-    get() {
-      return modules.get("auth");
-    },
-    set(value) {
-      modules.register("auth", value, { overwrite: true });
+      setHttpClient(value);
     },
   },
 
   auth: {
     get() {
-      return modules.get("auth");
+      return getModule("auth");
     },
     set(value) {
-      modules.register("auth", value, { overwrite: true });
+      registerModule("auth", value, { overwrite: true });
     },
   },
 
-  I18n: {
+  Auth: {
     get() {
-      return modules.get("i18n");
+      return getModule("auth");
     },
     set(value) {
-      modules.register("i18n", value, { overwrite: true });
+      registerModule("auth", value, { overwrite: true });
     },
   },
 
-  i18n: {
+  router: {
     get() {
-      return modules.get("i18n");
+      return getModule("router");
     },
     set(value) {
-      modules.register("i18n", value, { overwrite: true });
+      registerModule("router", value, { overwrite: true });
     },
   },
 
-  Toast: {
+  Router: {
     get() {
-      return modules.get("toast");
+      return getModule("router");
     },
     set(value) {
-      modules.register("toast", value, { overwrite: true });
-      services.toast = value;
+      registerModule("router", value, { overwrite: true });
     },
   },
 
   toast: {
     get() {
-      return modules.get("toast");
+      return getModule("toast");
     },
     set(value) {
-      modules.register("toast", value, { overwrite: true });
-      services.toast = value;
+      registerModule("toast", value, { overwrite: true });
+    },
+  },
+
+  Toast: {
+    get() {
+      return getModule("toast");
+    },
+    set(value) {
+      registerModule("toast", value, { overwrite: true });
     },
   },
 });

@@ -113,8 +113,37 @@ const CLEAR_SESSION_AUTH_CODES = new Set([
 ]);
 
 const SENSITIVE_QUERY_KEYS = new Set(
-  SENSITIVE_QUERY_PARAMS.map((key) => String(key).toLowerCase())
+  [
+    ...(Array.isArray(SENSITIVE_QUERY_PARAMS) ? SENSITIVE_QUERY_PARAMS : []),
+    "token",
+    "access_token",
+    "accessToken",
+    "refresh_token",
+    "refreshToken",
+    "id_token",
+    "idToken",
+    "jwt",
+    "authorization",
+    "session",
+    "sessionId",
+    "secret",
+    "code",
+    "password",
+    "pwd",
+    "key",
+    "sig",
+    "signature",
+    "reset_token",
+    "resetToken",
+    "activation_token",
+    "activationToken",
+  ]
+    .map((key) => String(key || "").trim().toLowerCase())
+    .filter(Boolean)
 );
+
+const SENSITIVE_ERROR_KEY_RE =
+  /(token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
 
 const ALLOWED_METHODS = new Set([
   "GET",
@@ -132,6 +161,17 @@ const ALLOWED_METHODS = new Set([
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isPlainObject(value) {
+  if (!isObject(value)) return false;
+
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
 }
 
 function isFunction(value) {
@@ -178,7 +218,10 @@ function redact(value = "") {
 
   return (pattern ? text.replace(pattern, "$1***") : text)
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 function normalizeErrorCode(value = "") {
@@ -188,7 +231,10 @@ function normalizeErrorCode(value = "") {
 }
 
 function keyIsSensitive(value = "") {
-  return SENSITIVE_QUERY_KEYS.has(cleanText(value, "").toLowerCase());
+  const key = cleanText(value, "");
+  const lower = key.toLowerCase();
+
+  return SENSITIVE_QUERY_KEYS.has(lower) || SENSITIVE_ERROR_KEY_RE.test(key);
 }
 
 function headersFrom(input = null) {
@@ -200,6 +246,21 @@ function headersFrom(input = null) {
     input.forEach((value, key) => {
       headers[key] = value;
     });
+
+    return headers;
+  }
+
+  if (Array.isArray(input)) {
+    for (const entry of input) {
+      if (!Array.isArray(entry) || entry.length < 2) continue;
+
+      const key = cleanText(entry[0], "");
+      const value = entry[1];
+
+      if (key) {
+        headers[key] = value;
+      }
+    }
 
     return headers;
   }
@@ -484,6 +545,32 @@ export function clearAuthTokens(options = {}) {
    ENDPOINTS
 ========================================================= */
 
+function sanitizeSearch(search = "") {
+  const raw = cleanText(search, "");
+
+  if (!raw || raw === "?") return "";
+
+  const normalized = raw.startsWith("?")
+    ? raw
+    : `?${raw.replace(/^\?+/, "")}`;
+
+  try {
+    const params = new URLSearchParams(normalized);
+
+    for (const key of [...params.keys()]) {
+      if (keyIsSensitive(key)) {
+        params.delete(key);
+      }
+    }
+
+    const output = params.toString();
+
+    return output ? `?${output}` : "";
+  } catch {
+    return "";
+  }
+}
+
 function endpointToPath(endpoint = "/") {
   const raw = cleanText(endpoint, "");
 
@@ -499,7 +586,7 @@ function endpointToPath(endpoint = "/") {
         return "";
       }
 
-      return `${url.pathname || "/"}${url.search || ""}`;
+      return `${url.pathname || "/"}${sanitizeSearch(url.search)}`;
     }
   } catch {
     return "";
@@ -509,9 +596,20 @@ function endpointToPath(endpoint = "/") {
     return "";
   }
 
-  const path = raw.startsWith("/") ? raw : `/${raw}`;
+  const withoutHash = raw.split("#")[0] || "";
+  const queryIndex = withoutHash.indexOf("?");
+  const rawPath = queryIndex >= 0
+    ? withoutHash.slice(0, queryIndex)
+    : withoutHash;
+  const rawSearch = queryIndex >= 0
+    ? withoutHash.slice(queryIndex)
+    : "";
 
-  return path.split("#")[0] || "/";
+  let path = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
+
+  path = path.replace(/\/{2,}/g, "/");
+
+  return `${path || "/"}${sanitizeSearch(rawSearch)}`;
 }
 
 function endpointCleanPath(endpoint = "/") {
@@ -522,18 +620,43 @@ function endpointCleanPath(endpoint = "/") {
   return clean.split("?")[0] || "/";
 }
 
+function stripSensitiveQueryParams(url = "") {
+  try {
+    const parsed = new URL(url, apiOrigin);
+
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (keyIsSensitive(key)) {
+        parsed.searchParams.delete(key);
+      }
+    }
+
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
 function appendQuery(url = "", query = null) {
-  if (!url || !isObject(query)) return url;
+  if (!url) return "";
 
-  const parsed = new URL(url, apiOrigin);
+  let parsed;
 
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null || value === "") continue;
-
-    parsed.searchParams.set(key, String(value));
+  try {
+    parsed = new URL(url, apiOrigin);
+  } catch {
+    return "";
   }
 
-  return parsed.toString();
+  if (isObject(query)) {
+    for (const [key, value] of Object.entries(query)) {
+      if (keyIsSensitive(key)) continue;
+      if (value === undefined || value === null || value === "") continue;
+
+      parsed.searchParams.set(key, String(value));
+    }
+  }
+
+  return stripSensitiveQueryParams(parsed.toString());
 }
 
 export function buildApiUrl(endpoint = "/", options = {}) {
@@ -586,25 +709,49 @@ function shouldUseAuth(endpoint = "", options = {}) {
 function sanitizeErrorData(value = null, depth = 0) {
   if (depth > 5) return null;
 
-  if (typeof value === "string") {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const valueType = typeof value;
+
+  if (valueType === "string") {
     return redact(value);
   }
 
-  if (Array.isArray(value)) {
-    return value.slice(0, 100).map((item) => sanitizeErrorData(item, depth + 1));
+  if (valueType === "number" || valueType === "boolean") {
+    return value;
   }
 
-  if (!isObject(value)) return value;
+  if (
+    valueType === "function" ||
+    valueType === "symbol" ||
+    valueType === "bigint"
+  ) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 100)
+      .map((item) => sanitizeErrorData(item, depth + 1))
+      .filter((item) => item !== undefined);
+  }
+
+  if (!isPlainObject(value)) return null;
 
   const output = {};
 
   for (const [key, child] of Object.entries(value)) {
     if (keyIsSensitive(key)) {
-      output[key] = "***";
+      output[key] = child ? "***" : null;
       continue;
     }
 
-    output[key] = sanitizeErrorData(child, depth + 1);
+    const clean = sanitizeErrorData(child, depth + 1);
+
+    if (clean !== undefined) {
+      output[key] = clean;
+    }
   }
 
   return output;
@@ -620,7 +767,7 @@ export class HttpError extends Error {
     this.code = normalizeErrorCode(options.code) || "HTTP_ERROR";
     this.method = cleanText(options.method, "");
     this.url = redact(options.url || "");
-    this.data = sanitizeErrorData(options.data || null);
+    this.data = sanitizeErrorData(options.data ?? null);
 
     this.canRefresh = options.canRefresh === true;
     this.refreshRequired = options.refreshRequired === true;
@@ -685,7 +832,12 @@ export function shouldClearSessionForAuthError(error = null) {
   const auth = isObject(payload.auth) ? payload.auth : {};
   const code = getHttpErrorCode(error);
 
-  if (auth.clearClientSession === true || payload.clearClientSession === true) {
+  if (
+    auth.clearClientSession === true ||
+    payload.clearClientSession === true ||
+    auth.clearSession === true ||
+    payload.clearSession === true
+  ) {
     return true;
   }
 
@@ -1177,6 +1329,9 @@ export function getHttpSnapshot() {
 
       mePrivate: true,
       refreshPublicNoAuthHeader: true,
+
+      stripsSensitiveQueryParams: true,
+      tokenQueryNotAllowed: true,
 
       accessTokenRuntimeOnlyAsFallback: true,
       blocksStaleRuntimeTokenWhenStateCleared: true,

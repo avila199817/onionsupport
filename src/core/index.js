@@ -100,6 +100,10 @@ const TOKEN_STATE_KEYS = new Set([
 ]);
 
 const DROPPED_STATE_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+
   "refreshtoken",
   "refresh_token",
   "refreshtokenhash",
@@ -125,13 +129,16 @@ const DROPPED_STATE_KEYS = new Set([
 
   "secret",
   "secrets",
+  "backupcode",
   "backupcodes",
+  "backup_code",
   "backup_codes",
 
   "otp",
   "otpcode",
   "totp",
   "mfa",
+  "twofa",
   "twofa_secret",
   "twofasecret",
   "totpsecret",
@@ -154,6 +161,7 @@ const SENSITIVE_OBJECT_KEYS = new Set([
   "accesstoken",
   "access_token",
   "jwt",
+  "bearer",
   "apikey",
   "api_key",
   "sas",
@@ -162,7 +170,21 @@ const SENSITIVE_OBJECT_KEYS = new Set([
 ]);
 
 const SENSITIVE_QUERY_KEYS = new Set(
-  SENSITIVE_QUERY_PARAMS.map((key) => String(key).toLowerCase())
+  [
+    ...(Array.isArray(SENSITIVE_QUERY_PARAMS) ? SENSITIVE_QUERY_PARAMS : []),
+    "token",
+    "access_token",
+    "accessToken",
+    "refresh_token",
+    "refreshToken",
+    "id_token",
+    "idToken",
+    "code",
+    "session",
+    "sessionId",
+  ]
+    .map((key) => String(key || "").trim().toLowerCase())
+    .filter(Boolean)
 );
 
 const SENSITIVE_QUERY_PATTERN = buildSensitiveQueryPattern();
@@ -183,6 +205,17 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function isPlainObject(value) {
+  if (!isObject(value)) return false;
+
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}
+
 function cleanText(value = "", fallback = "") {
   const output = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
@@ -198,6 +231,17 @@ function normalizeKey(value = "") {
 
 function clone(value) {
   if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const valueType = typeof value;
+
+  if (
+    valueType === "function" ||
+    valueType === "symbol" ||
+    valueType === "bigint"
+  ) {
+    return undefined;
+  }
 
   try {
     if (typeof structuredClone === "function") {
@@ -208,9 +252,10 @@ function clone(value) {
   }
 
   try {
-    return JSON.parse(JSON.stringify(value));
+    const serialized = JSON.stringify(value);
+    return serialized === undefined ? undefined : JSON.parse(serialized);
   } catch {
-    return value;
+    return undefined;
   }
 }
 
@@ -237,7 +282,10 @@ function redact(value = "") {
 
   return redactedQuery
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 function first(...values) {
@@ -385,7 +433,9 @@ function normalizeHash(hash = "") {
   const queryIndex = body.indexOf("?");
 
   if (queryIndex >= 0) {
-    const hashPath = body.slice(0, queryIndex);
+    const hashPath = body
+      .slice(0, queryIndex)
+      .replace(/[?#\\]/g, "");
     const query = body.slice(queryIndex + 1);
     const cleanQuery = normalizeSearch(`?${query}`);
 
@@ -530,7 +580,9 @@ function normalizeCanonicalPath(path = ROOT_PATH) {
 
   try {
     const canonical = configCanonicalRoutePath(path) || ROOT_PATH;
-    return isBlockedRoutePath(canonical) ? ROOT_PATH : normalizePathname(canonical);
+    return isBlockedRoutePath(canonical)
+      ? ROOT_PATH
+      : normalizePathname(canonical);
   } catch {
     const info = getUserScopedPathInfo(path);
     const canonical = info.scoped ? info.canonicalPath : stripQueryHash(path);
@@ -563,7 +615,7 @@ function safeInternalPath(path = ROOT_PATH) {
 
   if (!raw) return ROOT_PATH;
   if (raw.startsWith("//")) return ROOT_PATH;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^https?:\/\//i.test(raw)) return ROOT_PATH;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return ROOT_PATH;
   if (/[\r\n\t\\]/.test(raw)) return ROOT_PATH;
 
   const target = normalizePublicPath(raw);
@@ -792,11 +844,64 @@ function isSensitiveObjectKey(key = "") {
   return SENSITIVE_OBJECT_KEYS.has(normalizeKey(key));
 }
 
+function sanitizeErrorValue(error = null) {
+  if (!error) return null;
+
+  if (typeof error === "string") {
+    return {
+      name: "Error",
+      message: redact(error),
+      code: null,
+      status: null,
+    };
+  }
+
+  if (!isObject(error)) {
+    return {
+      name: "Error",
+      message: redact(String(error)),
+      code: null,
+      status: null,
+    };
+  }
+
+  return {
+    name: cleanText(error.name, "Error"),
+    message: redact(
+      first(
+        error.message,
+        error.detail,
+        error.reason,
+        String(error)
+      ) || ""
+    ),
+    code: error.code || error.error || null,
+    status: error.status || error.statusCode || error.response?.status || null,
+  };
+}
+
 function sanitizeObject(value, depth = 0) {
   if (depth > 8) return null;
 
-  if (typeof value === "string") {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const valueType = typeof value;
+
+  if (
+    valueType === "function" ||
+    valueType === "symbol" ||
+    valueType === "bigint"
+  ) {
+    return undefined;
+  }
+
+  if (valueType === "string") {
     return redact(value);
+  }
+
+  if (valueType === "number" || valueType === "boolean") {
+    return value;
   }
 
   if (Array.isArray(value)) {
@@ -806,7 +911,9 @@ function sanitizeObject(value, depth = 0) {
       .filter((item) => item !== undefined);
   }
 
-  if (!isObject(value)) return value;
+  if (!isPlainObject(value)) {
+    return null;
+  }
 
   const output = {};
 
@@ -855,27 +962,45 @@ function sanitizeStatePatch(patch = {}) {
     }
 
     if (key === "error" || key === "lastError") {
-      output[key] = value;
+      output[key] = sanitizeErrorValue(value);
       continue;
     }
 
-    if (typeof value === "string") {
-      output[key] = redact(value);
-      continue;
-    }
+    const sanitized = sanitizeObject(value);
 
-    output[key] = isObject(value) || Array.isArray(value)
-      ? sanitizeObject(value)
-      : value;
+    if (sanitized !== undefined) {
+      output[key] = sanitized;
+    }
   }
 
   return output;
 }
 
-function emitStateChange(source = "core:setState") {
+function collectChangedPathsFromPatch(patch = {}) {
+  if (!isObject(patch)) return [];
+
+  return [
+    ...new Set(
+      Object.keys(patch)
+        .map((key) => cleanText(key, ""))
+        .filter(Boolean)
+        .filter((key) => !isDroppedStateKey(key))
+        .filter((key) => !isTokenStateKey(key))
+    ),
+  ];
+}
+
+function emitStateChange(source = "core:setState", changedPaths = []) {
+  const paths = Array.isArray(changedPaths)
+    ? changedPaths.filter(Boolean)
+    : [];
+
   events.emit("app:state:change", {
     state: getState(),
     source,
+    changedPaths: paths,
+    paths,
+    timestamp: Date.now(),
   });
 }
 
@@ -894,10 +1019,13 @@ function getState(options = {}) {
 function setState(patch = {}, options = {}) {
   dropForbiddenStateFields(state);
 
+  const safePatch = sanitizeStatePatch(patch);
+  const changedPaths = collectChangedPathsFromPatch(safePatch);
   const beforeCount = Number(state.stateChangeCount || 0);
+
   const snapshot = setStateSnapshot(
     state,
-    sanitizeStatePatch(patch),
+    safePatch,
     {
       ...options,
       source: options.source || "core:setState",
@@ -911,7 +1039,7 @@ function setState(patch = {}, options = {}) {
     options.emit !== false &&
     options.silent !== true
   ) {
-    emitStateChange(options.source || "core:setState");
+    emitStateChange(options.source || "core:setState", changedPaths);
   }
 
   return options.raw === true ? state : snapshot;
@@ -1072,21 +1200,27 @@ function clearSession(options = {}) {
   return result;
 }
 
-function setTheme(theme = "system", options = {}) {
+function setTheme(_theme = "system", options = {}) {
   return sessionSetTheme({
     setState,
     events,
-    theme,
-    options,
+    theme: "system",
+    options: {
+      ...options,
+      source: options.source || "core:setTheme",
+    },
   });
 }
 
-function setLang(lang = "es", options = {}) {
+function setLang(_lang = "es", options = {}) {
   return sessionSetLang({
     setState,
     events,
-    lang,
-    options,
+    lang: "es",
+    options: {
+      ...options,
+      source: options.source || "core:setLang",
+    },
   });
 }
 
@@ -1482,6 +1616,9 @@ function getSnapshot() {
 
       tokenRotationDoesNotLogout: true,
       emptySetTokenDoesNotLogout: true,
+
+      themeOwnedBySystem: true,
+      langBaseEs: true,
 
       noHomeRoute: true,
       no2fa: true,

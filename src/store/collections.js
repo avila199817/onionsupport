@@ -23,6 +23,9 @@ const UNSAFE_KEYS = new Set([
   "constructor",
 ]);
 
+const SENSITIVE_KEY_RE =
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|^role$|^roles$|^permissions$|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
+
 export const IDENTITY_FIELDS = Object.freeze([
   "id",
   "uuid",
@@ -31,9 +34,6 @@ export const IDENTITY_FIELDS = Object.freeze([
   "clienteId",
   "facturaId",
   "invoiceId",
-  "email",
-  "slug",
-  "username",
 ]);
 
 function isFunction(value) {
@@ -41,11 +41,21 @@ function isFunction(value) {
 }
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+
+  return prototype === Object.prototype || prototype === null;
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -58,18 +68,86 @@ function clone(value) {
   if (value === null) return null;
 
   try {
-    return structuredClone(value);
-  } catch {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
     }
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
   }
 }
 
 function isUnsafeKey(key = "") {
-  return UNSAFE_KEYS.has(String(key || ""));
+  return UNSAFE_KEYS.has(String(key || "").trim());
+}
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(String(key || "").trim());
+}
+
+function sanitizeValue(value, keyHint = "") {
+  if (isUnsafeKey(keyHint) || isSensitiveKey(keyHint)) {
+    return undefined;
+  }
+
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const valueType = typeof value;
+
+  if (
+    valueType === "function" ||
+    valueType === "symbol" ||
+    valueType === "bigint"
+  ) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, child] of Object.entries(value)) {
+      if (isUnsafeKey(key)) continue;
+      if (isSensitiveKey(key)) continue;
+
+      const clean = sanitizeValue(child, key);
+
+      if (clean !== undefined) {
+        output[key] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  if (
+    valueType === "string" ||
+    valueType === "number" ||
+    valueType === "boolean"
+  ) {
+    return clone(value);
+  }
+
+  return undefined;
+}
+
+function listFrom(value = []) {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => sanitizeValue(item))
+    .filter((item) => item !== undefined);
 }
 
 /* =========================================================
@@ -77,14 +155,21 @@ function isUnsafeKey(key = "") {
 ========================================================= */
 
 export function normalizeCollectionKey(key = "") {
-  return text(key, "")
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9_-]/g, "");
+  const normalized = text(key, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (!normalized) return "";
+  if (!COLLECTION_KEY_RE.test(normalized)) return "";
+  if (isUnsafeKey(normalized)) return "";
+  if (isSensitiveKey(normalized)) return "";
+
+  return normalized;
 }
 
 export function isValidCollectionKey(key = "") {
-  const normalized = normalizeCollectionKey(key);
-  return Boolean(normalized && COLLECTION_KEY_RE.test(normalized));
+  return Boolean(normalizeCollectionKey(key));
 }
 
 export function resolveCollectionKey(_state, key = "") {
@@ -98,11 +183,7 @@ export function ensureCollectionKey(state, key = "") {
     throw new Error("Clave de colección requerida.");
   }
 
-  if (!isValidCollectionKey(resolved)) {
-    throw new Error(`Clave de colección inválida: ${resolved}`);
-  }
-
-  if (!state || typeof state !== "object") {
+  if (!isObject(state)) {
     throw new Error("State inválido.");
   }
 
@@ -115,7 +196,7 @@ export function ensureCollectionKey(state, key = "") {
   }
 
   if (!Array.isArray(state.entities[resolved])) {
-    state.entities[resolved] = [];
+    throw new Error(`La colección no es una lista: ${resolved}`);
   }
 
   return resolved;
@@ -133,10 +214,18 @@ export function hasCollection(state, key = "") {
 }
 
 export function getCollection(state, key = "", fallback = []) {
-  const resolved = ensureCollectionKey(state, key);
-  const value = state.entities[resolved];
+  const resolved = resolveCollectionKey(state, key);
 
-  return Array.isArray(value) ? value : fallback;
+  if (
+    !resolved ||
+    !isObject(state?.entities) ||
+    !hasOwn(state.entities, resolved) ||
+    !Array.isArray(state.entities[resolved])
+  ) {
+    return clone(fallback);
+  }
+
+  return clone(state.entities[resolved]);
 }
 
 /* =========================================================
@@ -144,12 +233,19 @@ export function getCollection(state, key = "", fallback = []) {
 ========================================================= */
 
 function normalizePath(path = "") {
-  return text(path, "")
+  const source = String(path ?? "")
     .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
-    .split(".")
+    .split(".");
+
+  const parts = source
     .map((part) => part.trim())
-    .filter(Boolean)
-    .filter((part) => !isUnsafeKey(part));
+    .filter(Boolean);
+
+  if (!parts.length) return [];
+  if (parts.some(isUnsafeKey)) return [];
+  if (parts.some(isSensitiveKey)) return [];
+
+  return parts;
 }
 
 function getByPath(object, path = "") {
@@ -199,9 +295,17 @@ function partialMatch(item = null, matcher = {}) {
 
   for (const [key, expected] of Object.entries(matcher)) {
     if (isUnsafeKey(key)) return false;
-    if (["field", "key", "path", "value", "equals", "eq", "id"].includes(key)) continue;
+    if (isSensitiveKey(key)) return false;
 
-    const actual = key.includes(".") ? getByPath(item, key) : item[key];
+    if (
+      ["field", "key", "path", "value", "equals", "eq", "id"].includes(key)
+    ) {
+      continue;
+    }
+
+    const actual = key.includes(".")
+      ? getByPath(item, key)
+      : item[key];
 
     if (!sameValue(actual, expected)) return false;
   }
@@ -217,7 +321,7 @@ export function normalizeMatcher(matcher = null) {
   if (isFunction(matcher)) {
     return (item, index, list) => {
       try {
-        return Boolean(matcher(item, index, list));
+        return Boolean(matcher(clone(item), index, clone(list)));
       } catch {
         return false;
       }
@@ -228,7 +332,11 @@ export function normalizeMatcher(matcher = null) {
     return () => false;
   }
 
-  if (typeof matcher === "string" || typeof matcher === "number" || typeof matcher === "boolean") {
+  if (
+    typeof matcher === "string" ||
+    typeof matcher === "number" ||
+    typeof matcher === "boolean"
+  ) {
     return (item) => sameValue(getEntityIdentity(item), matcher);
   }
 
@@ -241,7 +349,11 @@ export function normalizeMatcher(matcher = null) {
     const value = matcher.value ?? matcher.equals ?? matcher.eq;
 
     if (field && value !== undefined) {
-      return (item) => sameValue(getByPath(item, field), value);
+      const path = normalizePath(field);
+
+      if (!path.length) return () => false;
+
+      return (item) => sameValue(getByPath(item, path.join(".")), value);
     }
 
     return (item) => partialMatch(item, matcher);
@@ -255,19 +367,23 @@ export function normalizeMatcher(matcher = null) {
 ========================================================= */
 
 export function findCollectionItem(list = [], matcher = null) {
-  if (!Array.isArray(list)) return null;
+  const current = listFrom(list);
+
+  if (!current.length) return null;
 
   const match = normalizeMatcher(matcher);
 
-  return list.find((item, index) => match(item, index, list)) || null;
+  return current.find((item, index) => match(item, index, current)) || null;
 }
 
 export function findCollectionIndex(list = [], matcher = null) {
-  if (!Array.isArray(list)) return -1;
+  const current = listFrom(list);
+
+  if (!current.length) return -1;
 
   const match = normalizeMatcher(matcher);
 
-  return list.findIndex((item, index) => match(item, index, list));
+  return current.findIndex((item, index) => match(item, index, current));
 }
 
 export function collectionIncludes(list = [], matcher = null) {
@@ -275,30 +391,42 @@ export function collectionIncludes(list = [], matcher = null) {
 }
 
 export function filterCollection(list = [], matcher = null) {
-  if (!Array.isArray(list)) return [];
+  const current = listFrom(list);
+
+  if (!current.length) return [];
 
   const match = normalizeMatcher(matcher);
 
-  return list.filter((item, index) => match(item, index, list));
+  return current.filter((item, index) => match(item, index, current));
 }
 
 export function removeCollectionItems(list = [], matcher = null) {
-  if (!Array.isArray(list)) return [];
+  const current = listFrom(list);
+
+  if (!current.length) return [];
 
   const match = normalizeMatcher(matcher);
 
-  return list.filter((item, index) => !match(item, index, list));
+  return current.filter((item, index) => !match(item, index, current));
 }
 
 export function upsertCollectionItem(list = [], item = null, matcher = null) {
-  const output = Array.isArray(list) ? [...list] : [];
-  const match = normalizeMatcher(matcher || item);
-  const index = output.findIndex((entry, entryIndex) => match(entry, entryIndex, output));
+  const output = listFrom(list);
+  const cleanItem = sanitizeValue(item);
+
+  if (cleanItem === undefined) {
+    return output;
+  }
+
+  const match = normalizeMatcher(matcher || cleanItem);
+  const index = output.findIndex((entry, entryIndex) => {
+    return match(entry, entryIndex, output);
+  });
 
   if (index >= 0) {
-    output[index] = clone(item);
+    output[index] = cleanItem;
   } else {
-    output.push(clone(item));
+    output.push(cleanItem);
   }
 
   return output;
@@ -310,12 +438,15 @@ export function upsertCollectionItem(list = [], item = null, matcher = null) {
 
 export function getCollectionsSnapshot(state = {}) {
   const entities = isObject(state?.entities) ? state.entities : {};
+  const entries = Object.entries(entities).filter(([key]) => {
+    return isValidCollectionKey(key);
+  });
 
   return {
     version: COLLECTIONS_VERSION,
-    keys: Object.keys(entities),
+    keys: entries.map(([key]) => key),
     counts: Object.fromEntries(
-      Object.entries(entities).map(([key, value]) => [
+      entries.map(([key, value]) => [
         key,
         Array.isArray(value) ? value.length : value ? 1 : 0,
       ])

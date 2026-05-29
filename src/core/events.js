@@ -10,11 +10,36 @@
    - Sin rate limits.
    - Sin snapshots grandes.
    - Sin lógica de dominio.
+   - Sin window.dispatchEvent.
    - Un listener no rompe el bus.
 ========================================================= */
 
 export const EVENTS_VERSION = "core.events.v3";
 export const WILDCARD_EVENT = "*";
+
+const RESERVED_EVENT_FIELDS = new Set([
+  "type",
+  "name",
+  "detail",
+  "payload",
+
+  "defaultPrevented",
+  "propagationStopped",
+  "immediatePropagationStopped",
+
+  "preventDefault",
+  "stopPropagation",
+  "stopImmediatePropagation",
+]);
+
+const BLOCKED_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+]);
+
+const SENSITIVE_KEY_RE =
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
 
 /* =========================================================
    BASICS
@@ -22,6 +47,21 @@ export const WILDCARD_EVENT = "*";
 
 function isFunction(value) {
   return typeof value === "function";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isPlainObject(value) {
+  if (!isObject(value)) return false;
+
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
 }
 
 function text(value = "", fallback = "") {
@@ -37,20 +77,127 @@ function noop() {
   return false;
 }
 
+function isBlockedKey(key = "") {
+  return BLOCKED_KEYS.has(text(key, ""));
+}
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(text(key, ""));
+}
+
+function redact(value = "") {
+  return text(value, "")
+    .replace(
+      /([?&#](?:token|access_token|accessToken|refresh_token|refreshToken|id_token|idToken|code|session|sessionId|authorization|secret)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
+}
+
+function sanitizePayload(value, keyHint = "", depth = 0) {
+  if (isBlockedKey(keyHint)) return undefined;
+
+  if (isSensitiveKey(keyHint)) {
+    return value ? "***" : null;
+  }
+
+  if (depth > 8) return null;
+
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const valueType = typeof value;
+
+  if (valueType === "string") {
+    return redact(value);
+  }
+
+  if (
+    valueType === "number" ||
+    valueType === "boolean" ||
+    valueType === "function"
+  ) {
+    return value;
+  }
+
+  if (
+    valueType === "symbol" ||
+    valueType === "bigint"
+  ) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 500)
+      .map((item) => sanitizePayload(item, "", depth + 1))
+      .filter((item) => item !== undefined);
+  }
+
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  const output = {};
+
+  for (const [key, child] of Object.entries(value)) {
+    if (isBlockedKey(key)) continue;
+    if (isSensitiveKey(key)) continue;
+
+    const clean = sanitizePayload(child, key, depth + 1);
+
+    if (clean !== undefined) {
+      output[key] = clean;
+    }
+  }
+
+  return output;
+}
+
+function normalizePayload(payload = {}) {
+  const clean = sanitizePayload(payload);
+
+  return clean === undefined ? {} : clean;
+}
+
 /* =========================================================
    EVENT OBJECT
 ========================================================= */
+
+function exposePayloadFields(event, payload = {}) {
+  if (!isPlainObject(payload)) return event;
+
+  for (const [key, value] of Object.entries(payload)) {
+    if (!key) continue;
+    if (RESERVED_EVENT_FIELDS.has(key)) continue;
+    if (isBlockedKey(key)) continue;
+
+    try {
+      event[key] = value;
+    } catch {
+      // noop
+    }
+  }
+
+  return event;
+}
 
 function createEventObject(name = "", payload = {}) {
   let propagationStopped = false;
   let immediatePropagationStopped = false;
   let defaultPrevented = false;
 
-  return {
+  const safePayload = normalizePayload(payload);
+
+  const event = {
     type: name,
     name,
-    detail: payload,
-    payload,
+    detail: safePayload,
+    payload: safePayload,
 
     get defaultPrevented() {
       return defaultPrevented;
@@ -77,6 +224,8 @@ function createEventObject(name = "", payload = {}) {
       immediatePropagationStopped = true;
     },
   };
+
+  return exposePayloadFields(event, safePayload);
 }
 
 /* =========================================================
@@ -89,7 +238,13 @@ export function createEvents() {
   let emitCount = 0;
 
   function normalizeName(name = "") {
-    return text(name, "");
+    const eventName = text(name, "");
+
+    if (!eventName) return "";
+    if (eventName.length > 160) return "";
+    if (/[\r\n\t]/.test(eventName)) return "";
+
+    return eventName;
   }
 
   function getBucket(name = "", create = false) {
@@ -211,7 +366,7 @@ export function createEvents() {
 
       for (const handler of wildcardHandlers) {
         try {
-          handler(eventName, payload, event);
+          handler(eventName, event.payload, event);
         } catch {
           // Un wildcard listener no debe romper el bus.
         }
@@ -255,13 +410,15 @@ export function createEvents() {
 
   function has(name = "") {
     const eventName = normalizeName(name);
+
     return Boolean(eventName && listenerCount(eventName) > 0);
   }
 
   function names() {
     return [...listeners.entries()]
       .filter(([, set]) => set.size > 0)
-      .map(([name]) => name);
+      .map(([name]) => name)
+      .sort();
   }
 
   function getSnapshot() {
@@ -270,6 +427,17 @@ export function createEvents() {
       emitCount,
       listenerCount: listenerCount(),
       eventNames: names(),
+
+      policy: {
+        memoryOnly: true,
+        noDomRequired: true,
+        noStorage: true,
+        noWindowDispatch: true,
+        noPayloadSnapshots: true,
+        listenersIsolated: true,
+        wildcardSupported: true,
+        eventPayloadFieldsExposed: true,
+      },
     };
   }
 

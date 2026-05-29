@@ -33,6 +33,8 @@ const ROOT_KEYS = Object.freeze([
   "meta",
 ]);
 
+const ROOT_KEY_SET = new Set(ROOT_KEYS);
+
 const BLOCKED_KEYS = new Set([
   "__proto__",
   "prototype",
@@ -40,7 +42,7 @@ const BLOCKED_KEYS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE =
-  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id)/i;
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
 
 /* =========================================================
    BASICS
@@ -55,7 +57,13 @@ function nowIso() {
 }
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+
+  return prototype === Object.prototype || prototype === null;
 }
 
 function isFunction(value) {
@@ -92,7 +100,7 @@ function same(left, right) {
 }
 
 function normalizeKey(key = "") {
-  return String(key || "").trim();
+  return String(key ?? "").trim();
 }
 
 function isBlockedKey(key = "") {
@@ -104,11 +112,24 @@ function isSensitiveKey(key = "") {
 }
 
 function isAllowedRootKey(key = "") {
-  return ROOT_KEYS.includes(normalizeKey(key));
+  return ROOT_KEY_SET.has(normalizeKey(key));
 }
 
 function sanitizeForStore(value, keyHint = "") {
   if (isBlockedKey(keyHint) || isSensitiveKey(keyHint)) {
+    return undefined;
+  }
+
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const valueType = typeof value;
+
+  if (
+    valueType === "function" ||
+    valueType === "symbol" ||
+    valueType === "bigint"
+  ) {
     return undefined;
   }
 
@@ -135,7 +156,15 @@ function sanitizeForStore(value, keyHint = "") {
     return output;
   }
 
-  return clone(value);
+  if (
+    valueType === "string" ||
+    valueType === "number" ||
+    valueType === "boolean"
+  ) {
+    return clone(value);
+  }
+
+  return undefined;
 }
 
 /* =========================================================
@@ -145,12 +174,15 @@ function sanitizeForStore(value, keyHint = "") {
 function pathParts(path = "") {
   const parts = Array.isArray(path)
     ? path
-    : String(path || "").split(".");
+    : String(path ?? "").split(".");
 
-  return parts
+  const normalized = parts
     .map((part) => normalizeKey(part))
-    .filter(Boolean)
-    .filter((part) => !isBlockedKey(part));
+    .filter(Boolean);
+
+  if (normalized.some(isBlockedKey)) return [];
+
+  return normalized;
 }
 
 function pathAllowed(path = "") {
@@ -164,6 +196,16 @@ function pathAllowed(path = "") {
 
 function pathKey(path = "") {
   return pathParts(path).join(".");
+}
+
+function isRootPath(path = "") {
+  return pathParts(path).length === 1;
+}
+
+function isCollectionPath(path = "") {
+  const parts = pathParts(path);
+
+  return parts.length > 1 && pathAllowed(parts);
 }
 
 function getByPath(root, path, fallback = undefined) {
@@ -186,20 +228,25 @@ function setByPath(root, path, value) {
 
   if (!parts.length || !pathAllowed(parts)) return false;
 
-  let current = root;
-
-  for (const part of parts.slice(0, -1)) {
-    if (!isObject(current[part])) {
-      current[part] = {};
-    }
-
-    current = current[part];
-  }
-
   const key = parts.at(-1);
   const clean = sanitizeForStore(value, key);
 
   if (clean === undefined) return false;
+  if (parts.length === 1 && !isObject(clean)) return false;
+
+  let current = root;
+
+  for (const part of parts.slice(0, -1)) {
+    if (current[part] === undefined) {
+      current[part] = {};
+    }
+
+    if (!isObject(current[part])) {
+      return false;
+    }
+
+    current = current[part];
+  }
 
   current[key] = clean;
 
@@ -209,7 +256,7 @@ function setByPath(root, path, value) {
 function deleteByPath(root, path) {
   const parts = pathParts(path);
 
-  if (!parts.length || !pathAllowed(parts)) return false;
+  if (parts.length < 2 || !pathAllowed(parts)) return false;
 
   let current = root;
 
@@ -233,7 +280,6 @@ function merge(target = {}, source = {}) {
   if (!isObject(source)) return output;
 
   for (const [key, value] of Object.entries(source)) {
-    if (!isAllowedRootKey(key) && !isObject(target)) continue;
     if (isBlockedKey(key)) continue;
     if (isSensitiveKey(key)) continue;
 
@@ -262,7 +308,7 @@ function sanitizeRootPatch(partial = {}) {
 
     const clean = sanitizeForStore(value, key);
 
-    if (clean !== undefined) {
+    if (isObject(clean)) {
       output[key] = clean;
     }
   }
@@ -436,23 +482,28 @@ export const Store = (() => {
   ======================================================= */
 
   function set(path, value) {
-    if (!path || !pathAllowed(path)) return get(path);
+    const parts = pathParts(path);
 
-    const key = pathParts(path).at(-1);
+    if (!parts.length || !pathAllowed(parts)) return get(path);
+
+    const key = parts.at(-1);
     const sanitized = sanitizeForStore(value, key);
 
     if (sanitized === undefined) return get(path);
+    if (parts.length === 1 && !isObject(sanitized)) return get(path);
 
-    const current = getInternal(path);
+    const current = getInternal(parts);
 
-    if (same(current, sanitized)) return get(path);
+    if (same(current, sanitized)) return get(parts);
 
     const previous = get();
+    const ok = setByPath(state, parts, sanitized);
 
-    setByPath(state, path, sanitized);
-    commit([path], previous);
+    if (!ok) return get(parts);
 
-    return get(path);
+    commit([parts], previous);
+
+    return get(parts);
   }
 
   function patch(partial = {}) {
@@ -507,7 +558,7 @@ export const Store = (() => {
   }
 
   function remove(path) {
-    if (!pathAllowed(path)) return false;
+    if (!pathAllowed(path) || isRootPath(path)) return false;
     if (getInternal(path) === undefined) return false;
 
     const previous = get();
@@ -529,61 +580,87 @@ export const Store = (() => {
   ======================================================= */
 
   function push(path, item) {
-    return update(path, (current = []) => {
-      const list = Array.isArray(current) ? current : [];
-      const clean = sanitizeForStore(item);
+    if (!isCollectionPath(path)) return get(path);
 
-      if (clean === undefined) return list;
+    const current = getInternal(path);
 
-      return [...list, clean];
-    });
+    if (current !== undefined && !Array.isArray(current)) return get(path);
+
+    const clean = sanitizeForStore(item);
+
+    if (clean === undefined) return get(path);
+
+    const list = Array.isArray(current) ? current : [];
+
+    return set(path, [...list, clean]);
   }
 
   function upsertById(path, item, idKey = "id") {
-    return update(path, (current = []) => {
-      const list = Array.isArray(current) ? current : [];
-      const cleanItem = sanitizeForStore(item);
-      const key = normalizeKey(idKey || "id");
+    if (!isCollectionPath(path)) return get(path);
 
-      if (!isObject(cleanItem) || isBlockedKey(key) || isSensitiveKey(key)) {
-        return list;
-      }
+    const current = getInternal(path);
 
-      const id = cleanItem[key];
+    if (current !== undefined && !Array.isArray(current)) return get(path);
 
-      if (id === undefined || id === null || id === "") {
-        return [...list, cleanItem];
-      }
+    const cleanItem = sanitizeForStore(item);
+    const key = normalizeKey(idKey || "id");
 
-      const index = list.findIndex((entry) => entry?.[key] === id);
+    if (!isObject(cleanItem) || isBlockedKey(key) || isSensitiveKey(key)) {
+      return get(path);
+    }
 
-      if (index < 0) {
-        return [...list, cleanItem];
-      }
+    const list = Array.isArray(current) ? current : [];
+    const id = cleanItem[key];
 
-      return list.map((entry, entryIndex) =>
+    if (id === undefined || id === null || id === "") {
+      return set(path, [...list, cleanItem]);
+    }
+
+    const index = list.findIndex((entry) => entry?.[key] === id);
+
+    if (index < 0) {
+      return set(path, [...list, cleanItem]);
+    }
+
+    return set(
+      path,
+      list.map((entry, entryIndex) =>
         entryIndex === index
           ? {
-              ...entry,
+              ...(isObject(entry) ? entry : {}),
               ...cleanItem,
             }
           : entry
-      );
-    });
+      )
+    );
   }
 
   function removeById(path, id, idKey = "id") {
-    return update(path, (current = []) => {
-      const list = Array.isArray(current) ? current : [];
-      const key = normalizeKey(idKey || "id");
+    if (!isCollectionPath(path)) return get(path);
 
-      if (isBlockedKey(key) || isSensitiveKey(key)) return list;
+    const current = getInternal(path);
 
-      return list.filter((entry) => entry?.[key] !== id);
-    });
+    if (!Array.isArray(current)) return get(path);
+
+    const key = normalizeKey(idKey || "id");
+
+    if (isBlockedKey(key) || isSensitiveKey(key)) return get(path);
+
+    const next = current.filter((entry) => entry?.[key] !== id);
+
+    if (same(current, next)) return get(path);
+
+    return set(path, next);
   }
 
   function clearCollection(path) {
+    if (!isCollectionPath(path)) return get(path);
+
+    const current = getInternal(path);
+
+    if (current !== undefined && !Array.isArray(current)) return get(path);
+    if (Array.isArray(current) && current.length === 0) return get(path);
+
     return set(path, []);
   }
 

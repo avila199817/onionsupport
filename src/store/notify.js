@@ -5,25 +5,62 @@
    Responsabilidad:
    - Compat mínima de notificación.
    - Sin imports.
-   - Sin diagnósticos.
+   - Sin diagnósticos pesados.
    - Sin event storm.
-   - Sin sanitizado profundo.
    - Sin duplicar Store.
+   - Sin duplicar Toast.
+   - Sin eventos AppCore.
+   - Sin Router.
+   - Sin HTTP.
+   - Sin Auth/session.
    - Sin lógica rara.
 ========================================================= */
 
 export const STORE_NOTIFY_VERSION = "simple";
+
+const ROOT_KEYS = Object.freeze([
+  "ui",
+  "app",
+  "entities",
+  "flags",
+  "meta",
+]);
+
+const ROOT_KEY_SET = new Set(ROOT_KEYS);
+
+const BLOCKED_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+]);
+
+const SENSITIVE_KEY_RE =
+  /(^auth$|^session$|^sessionData$|^currentUser$|^authUser$|^sessionUser$|^user$|token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|^role$|^roles$|^permissions$|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isFunction(value) {
   return typeof value === "function";
 }
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+
+  return prototype === Object.prototype || prototype === null;
 }
 
 function text(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
@@ -32,44 +69,139 @@ function clone(value) {
   if (value === null) return null;
 
   try {
-    return structuredClone(value);
-  } catch {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
     }
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
   }
 }
 
 function nowIso() {
-  return new Date().toISOString();
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeKey(value = "") {
+  return String(value ?? "").trim();
+}
+
+function isBlockedKey(key = "") {
+  return BLOCKED_KEYS.has(normalizeKey(key));
+}
+
+function isSensitiveKey(key = "") {
+  return SENSITIVE_KEY_RE.test(normalizeKey(key));
+}
+
+function isRootKey(key = "") {
+  return ROOT_KEY_SET.has(normalizeKey(key));
+}
+
+function redact(value = "") {
+  return text(value, "")
+    .replace(
+      /([?&#](?:token|access_token|accessToken|refresh_token|refreshToken|id_token|idToken|code|session|sessionId)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
+}
+
+function safeClone(value, key = "", rootLevel = false) {
+  if (isBlockedKey(key)) return undefined;
+
+  if (isSensitiveKey(key)) {
+    return value ? "***" : null;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => safeClone(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [childKey, childValue] of Object.entries(value)) {
+      if (isBlockedKey(childKey)) continue;
+      if (rootLevel && !isRootKey(childKey)) continue;
+
+      const clean = safeClone(childValue, childKey, false);
+
+      if (clean !== undefined) {
+        output[childKey] = clean;
+      }
+    }
+
+    return output;
+  }
+
+  if (typeof value === "string") {
+    return redact(value);
+  }
+
+  if (
+    value === null ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return clone(value);
+  }
+
+  return undefined;
+}
+
+function toArray(value) {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return [...value];
+
+  return [value];
 }
 
 function toSet(value) {
   if (value instanceof Set) return value;
-  if (Array.isArray(value)) return new Set(value);
-  if (value === null || value === undefined) return new Set();
-  return new Set([value]);
+  return new Set(toArray(value));
 }
 
 function toMap(value) {
   if (value instanceof Map) return value;
   if (isObject(value)) return new Map(Object.entries(value));
+
   return new Map();
 }
 
 function normalizePath(path = "") {
-  if (Array.isArray(path)) {
-    return path.map((part) => text(part, "")).filter(Boolean);
-  }
+  const source = Array.isArray(path)
+    ? path
+    : text(path, "")
+        .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
+        .split(".");
 
-  return text(path, "")
-    .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
-    .split(".")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .filter((part) => !["__proto__", "prototype", "constructor"].includes(part));
+  const parts = source
+    .map((part) => normalizeKey(part))
+    .filter(Boolean);
+
+  if (!parts.length) return [];
+  if (!isRootKey(parts[0])) return [];
+  if (parts.some(isBlockedKey)) return [];
+  if (parts.some(isSensitiveKey)) return [];
+
+  return parts;
 }
 
 function pathString(path = "") {
@@ -80,7 +212,7 @@ function uniquePaths(paths = []) {
   const output = [];
   const seen = new Set();
 
-  for (const item of Array.isArray(paths) ? paths : [paths]) {
+  for (const item of toArray(paths)) {
     const path = pathString(item);
 
     if (!path || seen.has(path)) continue;
@@ -94,8 +226,8 @@ function uniquePaths(paths = []) {
 
 /**
  * Matching bidireccional:
- * - watched: session      + changed: session.user => true
- * - watched: session.user + changed: session      => true
+ * - watched: ui          + changed: ui.theme => true
+ * - watched: ui.theme    + changed: ui       => true
  */
 export function pathMatches(watchedPath = "", changedPath = "") {
   const watched = pathString(watchedPath);
@@ -131,16 +263,27 @@ function getByPath(object, path, fallback = undefined) {
   return current === undefined ? fallback : current;
 }
 
+function equal(left, right) {
+  if (Object.is(left, right)) return true;
+
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
 function snapshotValue(snapshot) {
   if (isFunction(snapshot)) {
     try {
-      return snapshot();
+      const value = snapshot();
+      return isObject(value) ? value : {};
     } catch {
       return {};
     }
   }
 
-  return snapshot || {};
+  return isObject(snapshot) ? snapshot : {};
 }
 
 /* =========================================================
@@ -152,8 +295,10 @@ export function buildPayload(snapshot, changedPaths = [], previousState = null) 
 
   return {
     version: STORE_NOTIFY_VERSION,
-    state: clone(snapshotValue(snapshot)) || {},
-    previousState: previousState ? clone(previousState) : null,
+    state: safeClone(snapshotValue(snapshot), "", true) || {},
+    previousState: previousState
+      ? safeClone(previousState, "", true) || null
+      : null,
     changedPaths: uniquePaths(changedPaths),
     timestamp,
     timestampIso: nowIso(),
@@ -166,12 +311,14 @@ function normalizePayload({ payload, snapshot } = {}) {
     : buildPayload(snapshot, []);
 
   return {
-    version: source.version || STORE_NOTIFY_VERSION,
-    state: clone(source.state ?? snapshotValue(snapshot)) || {},
-    previousState: source.previousState ? clone(source.previousState) : null,
+    version: text(source.version, STORE_NOTIFY_VERSION),
+    state: safeClone(source.state ?? snapshotValue(snapshot), "", true) || {},
+    previousState: source.previousState
+      ? safeClone(source.previousState, "", true) || null
+      : null,
     changedPaths: uniquePaths(source.changedPaths),
-    timestamp: source.timestamp || Date.now(),
-    timestampIso: source.timestampIso || nowIso(),
+    timestamp: Number(source.timestamp || Date.now()),
+    timestampIso: text(source.timestampIso, nowIso()),
   };
 }
 
@@ -242,8 +389,8 @@ export function notifyKeyListeners({ keyListeners, get, payload } = {}) {
           ...clone(payload),
           listenerType: "key",
           path,
-          value: clone(value),
-          previousValue: clone(previousValue),
+          value: safeClone(value),
+          previousValue: safeClone(previousValue),
           matchedPaths,
         });
 
@@ -260,6 +407,14 @@ export function notifyKeyListeners({ keyListeners, get, payload } = {}) {
         }
       }
     }
+
+    if (bucket.size === 0 && map === keyListeners) {
+      try {
+        map.delete(rawPath);
+      } catch {
+        // noop
+      }
+    }
   }
 
   return notified;
@@ -269,13 +424,17 @@ export function notifyKeyListeners({ keyListeners, get, payload } = {}) {
    SELECTOR LISTENERS
 ========================================================= */
 
-export function notifySelectorListeners({ selectorListeners, state, payload } = {}) {
+export function notifySelectorListeners({
+  selectorListeners,
+  state,
+  payload,
+} = {}) {
   const bucket = toSet(selectorListeners);
 
   if (!bucket.size) return 0;
 
   let notified = 0;
-  const currentState = clone(state || payload?.state || {}) || {};
+  const currentState = safeClone(state || payload?.state || {}, "", true) || {};
 
   for (const entry of [...bucket]) {
     if (!entry || !isFunction(entry.selector)) continue;
@@ -290,20 +449,13 @@ export function notifySelectorListeners({ selectorListeners, state, payload } = 
     let nextValue;
 
     try {
-      nextValue = entry.selector(currentState);
+      nextValue = safeClone(entry.selector(currentState));
     } catch {
       continue;
     }
 
-    const previousValue = clone(entry.lastValue ?? entry.last);
-
-    let changed = true;
-
-    try {
-      changed = JSON.stringify(nextValue) !== JSON.stringify(previousValue);
-    } catch {
-      changed = nextValue !== previousValue;
-    }
+    const previousValue = safeClone(entry.lastValue ?? entry.last);
+    const changed = !equal(nextValue, previousValue);
 
     if (!changed) continue;
 
@@ -319,7 +471,7 @@ export function notifySelectorListeners({ selectorListeners, state, payload } = 
       listener({
         ...clone(payload),
         listenerType: "selector",
-        value: clone(nextValue),
+        value: safeClone(nextValue),
         previousValue,
         selectorName: text(entry.name || entry.selector.name, ""),
       });
@@ -405,7 +557,11 @@ export function notify({
    SNAPSHOT
 ========================================================= */
 
-export function buildNotifySnapshot({ listeners, keyListeners, selectorListeners } = {}) {
+export function buildNotifySnapshot({
+  listeners,
+  keyListeners,
+  selectorListeners,
+} = {}) {
   const keyMap = toMap(keyListeners);
 
   let keyListenerCount = 0;
@@ -417,7 +573,9 @@ export function buildNotifySnapshot({ listeners, keyListeners, selectorListeners
   return {
     version: STORE_NOTIFY_VERSION,
     globalListeners: toSet(listeners).size,
-    keyListenerPaths: [...keyMap.keys()].map(pathString).filter(Boolean),
+    keyListenerPaths: [...keyMap.keys()]
+      .map(pathString)
+      .filter(Boolean),
     keyListenerCount,
     selectorListeners: toSet(selectorListeners).size,
   };

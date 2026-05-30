@@ -11,7 +11,7 @@
    - Sin Auth, Router, Store, Services, fetch, storage ni dominio.
 ========================================================= */
 
-export const MAIN_VERSION = "main.minimal.v1";
+export const MAIN_VERSION = "main.minimal.v2";
 
 const APP_MODULE = "./app/index.js";
 const BOOT_PROMISE_KEY = "__ONION_BOOT_PROMISE__";
@@ -48,7 +48,8 @@ function redact(value = "") {
 function setAppState(state = "booting") {
   if (!isBrowser()) return;
 
-  const value = String(state || "booting");
+  const value = String(state || "booting").toLowerCase();
+
   const booting = value === "booting";
   const ready = value === "ready";
   const fatal = value === "fatal";
@@ -56,44 +57,68 @@ function setAppState(state = "booting") {
   for (const node of [document.documentElement, document.body].filter(Boolean)) {
     node.dataset.appState = value;
     node.dataset.appLoading = booting ? "true" : "false";
+    node.dataset.appBooting = booting ? "true" : "false";
     node.dataset.appReady = ready ? "true" : "false";
     node.dataset.appFatal = fatal ? "true" : "false";
 
     node.classList.toggle("app-booting", booting);
+    node.classList.toggle("app-loading", booting);
     node.classList.toggle("app-ready", ready);
     node.classList.toggle("app-fatal", fatal);
   }
 }
 
 function showNode(node) {
-  if (!node) return;
+  if (!node) return false;
 
   try {
     node.hidden = false;
+    node.removeAttribute("hidden");
+    node.removeAttribute("inert");
     node.setAttribute("aria-hidden", "false");
     node.setAttribute("aria-busy", "false");
+
+    node.classList.remove("is-hidden", "app-hidden", "shell-hidden");
+    node.classList.add("is-visible");
+
+    node.style.removeProperty("display");
+    node.style.removeProperty("visibility");
+    node.style.removeProperty("opacity");
+    node.style.removeProperty("pointer-events");
+
+    return true;
   } catch {
-    // noop
+    return false;
   }
 }
 
 function hideLoader() {
+  if (!isBrowser()) return false;
+
   const loader = document.getElementById("app-loader");
 
-  if (!loader) return;
+  if (!loader) return false;
 
   try {
     loader.hidden = true;
     loader.classList.remove("is-visible");
     loader.classList.add("is-hidden");
+
+    loader.dataset.loaderVisible = "false";
+    loader.dataset.loaderState = "hidden";
+
     loader.setAttribute("aria-hidden", "true");
     loader.setAttribute("aria-busy", "false");
+
+    return true;
   } catch {
-    // noop
+    return false;
   }
 }
 
 function getFatalRoot() {
+  if (!isBrowser()) return null;
+
   return (
     document.getElementById("view-container") ||
     document.getElementById("app-content") ||
@@ -167,6 +192,7 @@ async function runBoot() {
   });
 
   setAppState("ready");
+
   return true;
 }
 

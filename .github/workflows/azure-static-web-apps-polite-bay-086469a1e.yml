@@ -34,6 +34,10 @@ env:
   DEPLOY_COOLDOWN_SECONDS: "75"
   DEPLOY_RETRY_SECONDS: "90"
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   deploy:
     name: Deploy
@@ -69,7 +73,6 @@ jobs:
           persist-credentials: false
 
       - name: Validate static SPA package
-        shell: bash
         run: |
           set -euo pipefail
 
@@ -85,11 +88,10 @@ jobs:
             "robots.txt"
             "favicon.ico"
             "src/main.js"
+            "src/app/index.js"
             "src/preboot/theme.js"
             "src/css/app.css"
-            "src/media/img/favicon_black_circle.png"
-            "src/media/img/favicon_white.png"
-            "src/media/img/favicon_black.png"
+            "src/css/core/noscript.css"
           )
 
           for file in "${required_files[@]}"; do
@@ -102,6 +104,9 @@ jobs:
           removed_files=(
             "sitemap.xml"
             "BingSiteAuth.xml"
+            "manifest.json"
+            "sw.js"
+            "apple-touch-icon.png"
           )
 
           for file in "${removed_files[@]}"; do
@@ -115,14 +120,12 @@ jobs:
           python3 -m json.tool site.webmanifest >/dev/null
 
           required_index_refs=(
+            "/favicon.ico"
+            "/site.webmanifest"
             "/src/preboot/theme.js"
             "/src/css/app.css"
+            "/src/css/core/noscript.css"
             "/src/main.js"
-            "/site.webmanifest"
-            "/favicon.ico"
-            "/src/media/img/favicon_black_circle.png"
-            "/src/media/img/favicon_white.png"
-            "/src/media/img/favicon_black.png"
           )
 
           for ref in "${required_index_refs[@]}"; do
@@ -132,25 +135,144 @@ jobs:
             fi
           done
 
-          if grep -Fq "sitemap.xml" index.html; then
-            echo "::error file=index.html,title=Referencia obsoleta::index.html no debe referenciar sitemap.xml."
-            exit 1
-          fi
+          forbidden_boot_refs=(
+            "/src/media/img/favicon_black_circle.png"
+            "/src/media/img/favicon_white.png"
+            "/src/media/img/favicon_black.png"
+            "sitemap.xml"
+            "BingSiteAuth.xml"
+            "?v="
+          )
 
-          if grep -Fq "BingSiteAuth.xml" index.html staticwebapp.config.json robots.txt site.webmanifest 2>/dev/null; then
-            echo "::error title=Referencia obsoleta::No debe quedar ninguna referencia a BingSiteAuth.xml."
-            exit 1
-          fi
+          for ref in "${forbidden_boot_refs[@]}"; do
+            if grep -Fq "$ref" index.html site.webmanifest robots.txt 2>/dev/null; then
+              echo "::error title=Referencia obsoleta en archivo público::No debe quedar '${ref}' en index.html, site.webmanifest ni robots.txt."
+              exit 1
+            fi
+          done
 
-          if grep -Fq "?v=" index.html site.webmanifest; then
-            echo "::error title=Versionado manual detectado::No usar parámetros ?v= en index.html ni site.webmanifest."
-            exit 1
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          from urllib.parse import urlsplit
+          import json
+          import re
+          import sys
+
+          root = Path(".").resolve()
+          errors = []
+
+          def add_error(path, message):
+              errors.append((str(path), message))
+
+          def is_external(ref):
+              ref = (ref or "").strip()
+              if not ref:
+                  return True
+              if ref.startswith("#"):
+                  return True
+              if ref.startswith("//"):
+                  return True
+              if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", ref):
+                  return True
+              return False
+
+          def ref_to_path(ref):
+              ref = (ref or "").strip()
+              if is_external(ref):
+                  return None
+
+              parsed = urlsplit(ref)
+              path = parsed.path or ""
+
+              if not path or path == "/":
+                  return None
+
+              if path.startswith("/"):
+                  return root / path.lstrip("/")
+
+              return root / path
+
+          def check_ref(owner, ref):
+              path = ref_to_path(ref)
+
+              if path is None:
+                  return
+
+              if not path.exists():
+                  add_error(owner, f"Referencia local inexistente: {ref}")
+
+          class IndexRefParser(HTMLParser):
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs or [])
+
+                  if tag in {"script", "img", "source", "video", "audio"}:
+                      check_ref("index.html", attrs.get("src", ""))
+
+                  if tag == "link":
+                      check_ref("index.html", attrs.get("href", ""))
+
+          index_html = Path("index.html").read_text(encoding="utf-8")
+          IndexRefParser().feed(index_html)
+
+          manifest = json.loads(Path("site.webmanifest").read_text(encoding="utf-8"))
+
+          for icon in manifest.get("icons", []):
+              if isinstance(icon, dict):
+                  check_ref("site.webmanifest", icon.get("src", ""))
+
+          import_patterns = [
+              re.compile(r"""import\s+(?:[^'"]+?\s+from\s+)?['"]([^'"]+)['"]"""),
+              re.compile(r"""export\s+[^'"]+?\s+from\s+['"]([^'"]+)['"]"""),
+              re.compile(r"""import\s*\(\s*['"]([^'"]+)['"]\s*\)"""),
+          ]
+
+          def resolve_module(base_file, spec):
+              spec = (spec or "").strip()
+
+              if not spec:
+                  return True
+
+              if spec.startswith(("http://", "https://", "data:", "blob:")):
+                  return True
+
+              if not (spec.startswith("./") or spec.startswith("../") or spec.startswith("/")):
+                  return True
+
+              if spec.startswith("/"):
+                  base = root / spec.lstrip("/")
+              else:
+                  base = base_file.parent / spec
+
+              candidates = [base]
+
+              if base.suffix == "":
+                  candidates.append(base.with_suffix(".js"))
+                  candidates.append(base / "index.js")
+
+              return any(candidate.exists() and candidate.is_file() for candidate in candidates)
+
+          for js_file in sorted(Path("src").rglob("*.js")):
+              text = js_file.read_text(encoding="utf-8")
+
+              for pattern in import_patterns:
+                  for match in pattern.finditer(text):
+                      spec = match.group(1)
+
+                      if not resolve_module(js_file, spec):
+                          add_error(js_file, f"Import local inexistente: {spec}")
+
+          if errors:
+              for path, message in errors:
+                  print(f"::error file={path},title=Validación SPA fallida::{message}")
+              sys.exit(1)
+
+          print("Validación profunda de referencias locales OK.")
+          PY
 
           echo "Onion SPA static package OK."
 
       - name: Deployment cooldown
-        shell: bash
         run: |
           set -euo pipefail
           echo "Esperando ${DEPLOY_COOLDOWN_SECONDS}s para evitar solapar despliegues en Azure SWA..."
@@ -164,19 +286,15 @@ jobs:
           azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
-
           production_branch: ${{ env.PRODUCTION_BRANCH }}
-
           app_location: ${{ env.APP_LOCATION }}
           api_location: ${{ env.API_LOCATION }}
           output_location: ${{ env.OUTPUT_LOCATION }}
-
           skip_app_build: true
           skip_api_build: true
 
       - name: Wait before retry 2
         if: steps.deploy_1.outcome == 'failure'
-        shell: bash
         run: |
           set -euo pipefail
           echo "Deploy attempt 1 falló. Esperando ${DEPLOY_RETRY_SECONDS}s antes del segundo intento..."
@@ -191,19 +309,15 @@ jobs:
           azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
-
           production_branch: ${{ env.PRODUCTION_BRANCH }}
-
           app_location: ${{ env.APP_LOCATION }}
           api_location: ${{ env.API_LOCATION }}
           output_location: ${{ env.OUTPUT_LOCATION }}
-
           skip_app_build: true
           skip_api_build: true
 
       - name: Wait before retry 3
         if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure'
-        shell: bash
         run: |
           set -euo pipefail
           echo "Deploy attempt 2 falló. Esperando ${DEPLOY_RETRY_SECONDS}s antes del tercer intento..."
@@ -218,18 +332,14 @@ jobs:
           azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
-
           production_branch: ${{ env.PRODUCTION_BRANCH }}
-
           app_location: ${{ env.APP_LOCATION }}
           api_location: ${{ env.API_LOCATION }}
           output_location: ${{ env.OUTPUT_LOCATION }}
-
           skip_app_build: true
           skip_api_build: true
 
       - name: Verify deployment result
-        shell: bash
         run: |
           set -euo pipefail
 
@@ -265,7 +375,6 @@ jobs:
 
     steps:
       - name: Validate deployment token
-        shell: bash
         run: |
           set -euo pipefail
 
@@ -285,7 +394,6 @@ jobs:
 
       - name: Wait before close preview retry
         if: steps.close_preview_1.outcome == 'failure'
-        shell: bash
         run: |
           set -euo pipefail
           echo "Close preview falló. Esperando ${DEPLOY_RETRY_SECONDS}s antes de reintentar..."
@@ -302,7 +410,6 @@ jobs:
           action: close
 
       - name: Verify close preview result
-        shell: bash
         run: |
           set -euo pipefail
 

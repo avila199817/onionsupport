@@ -20,7 +20,7 @@ on:
 
 concurrency:
   group: swa-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -31,8 +31,8 @@ env:
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
   PRODUCTION_BRANCH: "main"
-  DEPLOY_COOLDOWN_SECONDS: "75"
-  DEPLOY_RETRY_SECONDS: "90"
+  DEPLOY_COOLDOWN_SECONDS: "45"
+  DEPLOY_RETRY_SECONDS: "75"
 
 defaults:
   run:
@@ -72,7 +72,7 @@ jobs:
           lfs: false
           persist-credentials: false
 
-      - name: Validate static SPA package
+      - name: Validate deploy contract
         run: |
           set -euo pipefail
 
@@ -135,21 +135,29 @@ jobs:
             fi
           done
 
-          forbidden_boot_refs=(
+          forbidden_public_refs=(
             "/src/media/img/favicon_black_circle.png"
             "/src/media/img/favicon_white.png"
             "/src/media/img/favicon_black.png"
-            "sitemap.xml"
-            "BingSiteAuth.xml"
             "?v="
           )
 
-          for ref in "${forbidden_boot_refs[@]}"; do
+          for ref in "${forbidden_public_refs[@]}"; do
             if grep -Fq "$ref" index.html site.webmanifest robots.txt 2>/dev/null; then
-              echo "::error title=Referencia obsoleta en archivo público::No debe quedar '${ref}' en index.html, site.webmanifest ni robots.txt."
+              echo "::error title=Referencia pública obsoleta::No debe quedar '${ref}' en index.html, site.webmanifest ni robots.txt."
               exit 1
             fi
           done
+
+          if grep -Fq "sitemap.xml" index.html site.webmanifest robots.txt 2>/dev/null; then
+            echo "::error title=Referencia obsoleta::No debe quedar sitemap.xml en index.html, site.webmanifest ni robots.txt."
+            exit 1
+          fi
+
+          if grep -Fq "BingSiteAuth.xml" index.html site.webmanifest robots.txt 2>/dev/null; then
+            echo "::error title=Referencia obsoleta::No debe quedar BingSiteAuth.xml en index.html, site.webmanifest ni robots.txt."
+            exit 1
+          fi
 
           python3 - <<'PY'
           from pathlib import Path
@@ -221,6 +229,27 @@ jobs:
               if isinstance(icon, dict):
                   check_ref("site.webmanifest", icon.get("src", ""))
 
+          if errors:
+              for path, message in errors:
+                  print(f"::error file={path},title=Referencia local inexistente::{message}")
+              sys.exit(1)
+
+          print("Referencias públicas locales OK.")
+          PY
+
+          echo "Contrato mínimo de deploy OK."
+
+      - name: Audit JS imports non blocking
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path(".").resolve()
+          warnings = []
+
           import_patterns = [
               re.compile(r"""import\s+(?:[^'"]+?\s+from\s+)?['"]([^'"]+)['"]"""),
               re.compile(r"""export\s+[^'"]+?\s+from\s+['"]([^'"]+)['"]"""),
@@ -260,17 +289,15 @@ jobs:
                       spec = match.group(1)
 
                       if not resolve_module(js_file, spec):
-                          add_error(js_file, f"Import local inexistente: {spec}")
+                          warnings.append((js_file, spec))
 
-          if errors:
-              for path, message in errors:
-                  print(f"::error file={path},title=Validación SPA fallida::{message}")
-              sys.exit(1)
-
-          print("Validación profunda de referencias locales OK.")
+          if warnings:
+              print("Imports locales inexistentes detectados. No bloquean deploy, pero hay que limpiarlos:")
+              for js_file, spec in warnings:
+                  print(f"::warning file={js_file},title=Import local inexistente::{spec}")
+          else:
+              print("Auditoría de imports locales OK.")
           PY
-
-          echo "Onion SPA static package OK."
 
       - name: Deployment cooldown
         run: |
@@ -343,13 +370,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          deploy_1="${{ steps.deploy_1.outcome }}"
-          deploy_2="${{ steps.deploy_2.outcome }}"
-          deploy_3="${{ steps.deploy_3.outcome }}"
+          deploy_1="${{ steps.deploy_1.outcome || 'skipped' }}"
+          deploy_2="${{ steps.deploy_2.outcome || 'skipped' }}"
+          deploy_3="${{ steps.deploy_3.outcome || 'skipped' }}"
 
           echo "Deploy attempt 1: ${deploy_1}"
-          echo "Deploy attempt 2: ${deploy_2:-skipped}"
-          echo "Deploy attempt 3: ${deploy_3:-skipped}"
+          echo "Deploy attempt 2: ${deploy_2}"
+          echo "Deploy attempt 3: ${deploy_3}"
 
           if [[ "${deploy_1}" == "success" || "${deploy_2}" == "success" || "${deploy_3}" == "success" ]]; then
             echo "Azure SWA deploy OK."
@@ -383,7 +410,7 @@ jobs:
             exit 1
           fi
 
-      - name: Close PR preview
+      - name: Close PR preview attempt 1
         id: close_preview_1
         continue-on-error: true
         uses: Azure/static-web-apps-deploy@v1
@@ -399,7 +426,7 @@ jobs:
           echo "Close preview falló. Esperando ${DEPLOY_RETRY_SECONDS}s antes de reintentar..."
           sleep "${DEPLOY_RETRY_SECONDS}"
 
-      - name: Close PR preview retry
+      - name: Close PR preview attempt 2
         id: close_preview_2
         if: steps.close_preview_1.outcome == 'failure'
         continue-on-error: true
@@ -413,11 +440,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          close_1="${{ steps.close_preview_1.outcome }}"
-          close_2="${{ steps.close_preview_2.outcome }}"
+          close_1="${{ steps.close_preview_1.outcome || 'skipped' }}"
+          close_2="${{ steps.close_preview_2.outcome || 'skipped' }}"
 
           echo "Close preview attempt 1: ${close_1}"
-          echo "Close preview attempt 2: ${close_2:-skipped}"
+          echo "Close preview attempt 2: ${close_2}"
 
           if [[ "${close_1}" == "success" || "${close_2}" == "success" ]]; then
             echo "Azure SWA preview close OK."

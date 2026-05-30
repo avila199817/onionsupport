@@ -7,8 +7,9 @@
    - Login/logout/restore/refresh/me.
    - Sesión actual delegada en AppCore.
    - HTTP delegado en core/http.js.
-   - Sesión persistente por cookie httpOnly + refresh.
-   - No llamar refresh en rutas públicas si no hay token.
+   - No llamar refresh automáticamente sin access token visible.
+   - Sesión persistente por cookie httpOnly sólo bajo refresh explícito
+     o cuando existe token visible que necesita renovación.
    - Home visible autenticada: /@{user.slug}.
    - Guards mínimos por auth/rol/admin.
    - Sin Router, sin Toast, sin Store, sin Storage, sin fetch propio,
@@ -27,12 +28,15 @@ import {
   normalizeUserSlug,
 } from "../../core/config.js";
 
-export const AUTH_VERSION = "auth.minimal.v2";
+export const AUTH_VERSION = "auth.minimal.v3";
 
 const ROOT_PATH = "/";
+
 const VALID_ROLES = new Set(
-  (Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length ? ALLOWED_ROLES : ["admin", "user"])
-    .map((role) => String(role).toLowerCase())
+  (Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
+    ? ALLOWED_ROLES
+    : ["admin", "user"]
+  ).map((role) => String(role).toLowerCase())
 );
 
 const AUTH_ROUTES = Object.freeze({
@@ -59,11 +63,8 @@ const sessionState = {
   mePromise: null,
 
   /*
-    Importante:
-    Arranca en false. Sólo pasa a true si:
-    - login correcto,
-    - refresh correcto,
-    - ruta privada fuerza intento de refresh.
+    No se presupone cookie httpOnly.
+    Sin access token visible no se intenta refresh automático.
   */
   hasCookieRefreshCandidate: false,
 
@@ -245,6 +246,30 @@ function shouldClearSessionForAuthError(error = null) {
   }
 }
 
+function httpPublicOptions(options = {}) {
+  return {
+    ...options,
+    auth: false,
+    public: true,
+    skipAuth: true,
+    noAuthHeader: true,
+    credentials: options.credentials || "include",
+    cache: options.cache || "no-store",
+  };
+}
+
+function httpPrivateOptions(options = {}) {
+  return {
+    ...options,
+    auth: true,
+    public: false,
+    skipAuth: false,
+    noAuthHeader: false,
+    credentials: options.credentials || "include",
+    cache: options.cache || "no-store",
+  };
+}
+
 /* =========================================================
    USER / SESSION READ
 ========================================================= */
@@ -298,11 +323,10 @@ function getToken() {
     includeToken: true,
   });
 
-  const token =
+  return (
     cleanToken(state.token || state.accessToken || state.access_token || "") ||
-    cleanToken(Http.getAccessToken?.() || "");
-
-  return token;
+    cleanToken(Http.getAccessToken?.() || "")
+  );
 }
 
 function getAccessToken() {
@@ -348,6 +372,21 @@ function getSession() {
   return getCurrentSession();
 }
 
+function getUserSlugFromUser(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeUserSlug(
+    user.slug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      user.routing?.slug ||
+      user.username ||
+      user.userId ||
+      user.id ||
+      ""
+  );
+}
+
 function getUserSlug() {
   const user = getCurrentUser();
 
@@ -361,21 +400,6 @@ function getUserSlug() {
         user?.id ||
         ""
     )
-  );
-}
-
-function getUserSlugFromUser(user = null) {
-  if (!isObject(user)) return "";
-
-  return normalizeUserSlug(
-    user.slug ||
-      user.lookup?.slug ||
-      user.profile?.slug ||
-      user.routing?.slug ||
-      user.username ||
-      user.userId ||
-      user.id ||
-      ""
   );
 }
 
@@ -616,31 +640,39 @@ function normalizeAuthPayload(payload = {}, options = {}) {
    STATE WRITE
 ========================================================= */
 
+function writeCoreState(patch = {}, source = "Auth.writeState") {
+  try {
+    if (isFunction(AppCore?.setState)) {
+      AppCore.setState(patch, {
+        source,
+        silent: true,
+        emit: false,
+      });
+
+      return true;
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    Object.assign(AppCore.state || {}, patch);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function applySession(payload = {}, options = {}) {
   const normalized = normalizeAuthPayload(payload, options);
 
-  if (normalized.token) {
-    try {
-      Http.setAccessToken?.(normalized.token);
-    } catch {
-      // noop
-    }
-  }
-
+  /*
+    No llamamos Http.setAccessToken() aquí.
+    El cliente HTTP lee el token desde AppCore.getState({ includeToken: true }).
+    Así evitamos bucles Core <-> HTTP.
+  */
   if (normalized.token || normalized.user || normalized.session) {
-    try {
-      if (isFunction(AppCore?.applySession)) {
-        AppCore.applySession(normalized, {
-          source: options.source || "Auth.applySession",
-        });
-      } else if (isFunction(AppCore?.setState)) {
-        AppCore.setState(normalized, {
-          source: options.source || "Auth.applySession",
-        });
-      }
-    } catch {
-      // noop
-    }
+    writeCoreState(normalized, options.source || "Auth.applySession");
   }
 
   return getPublicAuthResult({
@@ -653,15 +685,46 @@ function clearSession() {
   sessionState.hasCookieRefreshCandidate = false;
 
   try {
-    AppCore.clearSession?.();
+    if (isFunction(AppCore?.clearSession)) {
+      AppCore.clearSession({
+        source: "Auth.clearSession",
+      });
+    } else {
+      writeCoreState(
+        {
+          token: null,
+          accessToken: null,
+          access_token: null,
+
+          user: null,
+          currentUser: null,
+          session: null,
+          sessionData: null,
+
+          authenticated: false,
+          hasToken: false,
+          hasUser: false,
+          hasSession: false,
+          hasRefreshToken: false,
+
+          role: null,
+          rol: null,
+          roles: [],
+
+          userSlug: null,
+          homePath: ROOT_PATH,
+          defaultHome: ROOT_PATH,
+          postLoginTarget: null,
+        },
+        "Auth.clearSession"
+      );
+    }
   } catch {
     // noop
   }
 
   try {
-    Http.clearAuthTokens?.({
-      clearState: false,
-    });
+    Http.clearAuthTokens?.();
   } catch {
     // noop
   }
@@ -794,8 +857,10 @@ function getAuthModuleSnapshot() {
       minimal: true,
       strictAuth: true,
       requiresTokenAndUser: true,
-      persistentSessionByHttpOnlyCookie: true,
-      noRefreshOnPublicRouteWithoutToken: true,
+
+      noAutomaticRefreshWithoutVisibleToken: true,
+      persistentSessionRefreshRequiresTokenOrForce: true,
+
       noStorage: true,
       noStore: true,
       noRouter: true,
@@ -808,103 +873,26 @@ function getAuthModuleSnapshot() {
 }
 
 /* =========================================================
-   RESTORE ROUTE POLICY
+   RESTORE POLICY
 ========================================================= */
 
-function normalizeRestorePath(value = ROOT_PATH) {
-  let raw = cleanText(value, ROOT_PATH);
-
-  if (!raw) return ROOT_PATH;
-
-  if (raw.startsWith("#!")) {
-    raw = raw.replace(/^#!\/?/, "/") || ROOT_PATH;
-  } else if (raw.startsWith("#/")) {
-    raw = raw.slice(1) || ROOT_PATH;
-  }
-
-  try {
-    if (/^https?:\/\//i.test(raw)) {
-      const base = isBrowser()
-        ? window.location.origin
-        : "https://onionsupport.com";
-
-      const url = new URL(raw, base);
-
-      if (url.origin !== base) return ROOT_PATH;
-
-      raw = `${url.pathname || ROOT_PATH}${url.search || ""}${url.hash || ""}`;
-    }
-  } catch {
-    raw = ROOT_PATH;
-  }
-
-  if (raw.startsWith("//")) return ROOT_PATH;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return ROOT_PATH;
-  if (/[\r\n\t\\]/.test(raw)) return ROOT_PATH;
-
-  if (!raw.startsWith("/")) {
-    raw = `/${raw}`;
-  }
-
-  raw = raw
-    .split("?")[0]
-    .split("#")[0]
-    .replace(/\/{2,}/g, "/");
-
-  if (raw.length > 1) {
-    raw = raw.replace(/\/+$/g, "") || ROOT_PATH;
-  }
-
-  return raw || ROOT_PATH;
-}
-
-const PUBLIC_RESTORE_PATHS = new Set([
-  AUTH_ROUTES.login,
-  AUTH_ROUTES.passwordRequest,
-  AUTH_ROUTES.passwordReset,
-  AUTH_ROUTES.activateAccount,
-].map(normalizeRestorePath));
-
-function browserRestorePath() {
-  if (!isBrowser()) return ROOT_PATH;
-
-  try {
-    return `${window.location.pathname || ROOT_PATH}${window.location.search || ""}${window.location.hash || ""}`;
-  } catch {
-    return ROOT_PATH;
-  }
-}
-
-function restorePathFromOptions(options = {}) {
-  return normalizeRestorePath(
-    options.initialPath ||
-      options.path ||
-      options.publicPath ||
-      options.bootContext?.initialPath ||
-      browserRestorePath()
-  );
-}
-
-function isPublicRestorePath(path = ROOT_PATH) {
-  return PUBLIC_RESTORE_PATHS.has(normalizeRestorePath(path));
-}
-
 function shouldAttemptCookieRefresh(options = {}) {
-  if (options.forceRefresh === true || options.forceRestore === true) return true;
-  if (options.allowCookieRefresh === false) return false;
-
   /*
-    Si ya hay access token, el flujo primero intenta /me.
-    Si /me falla por token refreshable, permitimos refresh incluso en ruta pública.
+    Política final:
+    - Sin access token visible: no refresh automático.
+    - Evita 401 en boot cuando no hay sesión.
+    - Router decidirá si una ruta privada manda a /login.
+    - Sólo se fuerza refresh con forceRefresh/forceRestore.
   */
-  if (hasValidToken()) return true;
+  if (options.forceRefresh === true || options.forceRestore === true) {
+    return true;
+  }
 
-  /*
-    Sin token y en ruta pública/auth:
-    no llamamos /api/auth/refresh porque no hay forma razonable de esperar cookie.
-    Evita el 401 rojo innecesario en /login.
-  */
-  return !isPublicRestorePath(restorePathFromOptions(options));
+  if (options.allowCookieRefresh === false) {
+    return false;
+  }
+
+  return hasValidToken();
 }
 
 /* =========================================================
@@ -930,11 +918,11 @@ async function login(credentials = {}, options = {}) {
 
   sessionState.loginPromise = (async () => {
     try {
-      const raw = await Http.login(cleanLoginCredentials(credentials), {
-        ...options,
-        credentials: options.credentials || "include",
-        cache: "no-store",
-      });
+      const raw = await Http.post(
+        AUTH_ENDPOINTS.login,
+        cleanLoginCredentials(credentials),
+        httpPublicOptions(options)
+      );
 
       let result = applySession(raw || {}, {
         source: "Auth.login",
@@ -999,11 +987,10 @@ async function fetchMe(options = {}) {
 
   sessionState.mePromise = (async () => {
     try {
-      const raw = await Http.me({
-        ...options,
-        credentials: options.credentials || "include",
-        cache: "no-store",
-      });
+      const raw = await Http.get(
+        AUTH_ENDPOINTS.me,
+        httpPrivateOptions(options)
+      );
 
       const result = applySession(raw || {}, {
         source: options.source || "Auth.me",
@@ -1039,11 +1026,11 @@ async function refreshSession(options = {}) {
 
   sessionState.refreshPromise = (async () => {
     try {
-      const raw = await Http.refreshSession(isObject(options.body) ? options.body : {}, {
-        ...options,
-        credentials: options.credentials || "include",
-        cache: "no-store",
-      });
+      const raw = await Http.post(
+        AUTH_ENDPOINTS.refresh,
+        isObject(options.body) ? options.body : {},
+        httpPublicOptions(options)
+      );
 
       let result = applySession(raw || {}, {
         source: "Auth.refreshSession",
@@ -1099,7 +1086,7 @@ async function restoreSession(options = {}) {
 
       /*
         Caso 1:
-        Hay access token en memoria/core. Se valida usuario con /me.
+        Hay access token visible. Validamos con /me.
       */
       if (hasValidToken()) {
         try {
@@ -1118,15 +1105,15 @@ async function restoreSession(options = {}) {
           }
 
           /*
-            Si el error es refreshable, seguimos hacia refresh.
+            Si es refreshable, podrá pasar al refresh.
           */
         }
       }
 
       /*
         Caso 2:
-        Sin token + ruta pública/auth.
-        No llamamos /api/auth/refresh.
+        Sin token visible => no refresh automático.
+        Evita POST /api/auth/refresh 401 en boot sin sesión.
       */
       if (!shouldAttemptCookieRefresh(options)) {
         sessionState.hasCookieRefreshCandidate = false;
@@ -1135,14 +1122,13 @@ async function restoreSession(options = {}) {
         return getPublicAuthResult({
           ok: false,
           skippedRefresh: true,
-          reason: "public-route-without-token",
+          reason: "no-token-no-refresh",
         });
       }
 
       /*
         Caso 3:
-        Ruta privada sin token.
-        Intentamos refresh porque la cookie httpOnly no se puede leer desde frontend.
+        Sólo se intenta refresh si hay token visible o se fuerza explícitamente.
       */
       sessionState.hasCookieRefreshCandidate = true;
 
@@ -1176,11 +1162,11 @@ async function restoreSession(options = {}) {
 
 async function logout(options = {}) {
   try {
-    await Http.logout({
-      ...options,
-      credentials: options.credentials || "include",
-      cache: "no-store",
-    });
+    await Http.post(
+      AUTH_ENDPOINTS.logout,
+      {},
+      httpPrivateOptions(options)
+    );
   } catch {
     /*
       Logout remoto best-effort.
@@ -1225,11 +1211,11 @@ function validateActivationToken(payload = {}) {
 }
 
 async function activateAccount(payload = {}, options = {}) {
-  return Http.activateAccount(payload, {
-    ...options,
-    credentials: options.credentials || "include",
-    cache: "no-store",
-  });
+  return Http.post(
+    AUTH_ENDPOINTS.activateAccount,
+    payload,
+    httpPublicOptions(options)
+  );
 }
 
 function validateResetPasswordToken(payload = {}) {
@@ -1242,19 +1228,19 @@ function validateResetPasswordToken(payload = {}) {
 }
 
 async function requestPasswordReset(payload = {}, options = {}) {
-  return Http.requestPasswordReset(payload, {
-    ...options,
-    credentials: options.credentials || "include",
-    cache: "no-store",
-  });
+  return Http.post(
+    AUTH_ENDPOINTS.requestPasswordReset,
+    payload,
+    httpPublicOptions(options)
+  );
 }
 
 async function confirmResetPassword(payload = {}, options = {}) {
-  const raw = await Http.confirmPasswordReset(payload, {
-    ...options,
-    credentials: options.credentials || "include",
-    cache: "no-store",
-  });
+  const raw = await Http.post(
+    AUTH_ENDPOINTS.confirmPasswordReset,
+    payload,
+    httpPublicOptions(options)
+  );
 
   const normalized = normalizeAuthPayload(raw || {}, {
     allowCurrentToken: false,

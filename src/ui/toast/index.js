@@ -7,26 +7,15 @@
    - API pública única.
    - Auto-init al primer uso.
    - DOM seguro con textContent.
-   - Registro en AppCore sólo desde init/primer uso.
-   - Sin registro global window.
-   - Sin submódulos.
-   - Sin Auth.
-   - Sin Router.
-   - Sin HTTP.
-   - Sin Store global.
-   - Sin i18n complejo.
-   - Sin CSS runtime.
-   - Sin CustomEvent.
-   - Sin eventos AppCore.
-   - Sin redeclaraciones.
-   - Sin magia negra.
+   - Registro mínimo en AppCore.
+   - Sin submódulos, sin Auth, sin Router, sin HTTP,
+     sin Store, sin i18n, sin CSS runtime y sin eventos globales.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-export const TOAST_MODULE_VERSION = "toast.ui.v2";
+export const TOAST_VERSION = "toast.minimal.v1";
 
-const SOURCE = "ui.toast";
 const CONTAINER_ID = "toast-container";
 const MAX_TOASTS = 5;
 const MAX_DURATION_MS = 600000;
@@ -48,13 +37,8 @@ const DEFAULT_DURATIONS = Object.freeze({
 });
 
 let initialized = false;
-let eventsBound = false;
-let destroyed = false;
 let sequence = 0;
-
 let container = null;
-let boundContainer = null;
-let clickCleanup = null;
 
 const items = new Map();
 const timers = new Map();
@@ -76,21 +60,17 @@ function isFunction(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").trim();
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return output || fallback;
 }
 
-function nowIso() {
-  try {
-    return new Date().toISOString();
-  } catch {
-    return "";
-  }
-}
-
 function normalizeType(type = "info") {
-  const clean = cleanText(type, "info").toLowerCase();
-  return VALID_TYPES.has(clean) ? clean : "info";
+  const value = cleanText(type, "info").toLowerCase();
+  return VALID_TYPES.has(value) ? value : "info";
 }
 
 function normalizeId(value = "") {
@@ -107,15 +87,19 @@ function createId() {
 
 function redact(value = "") {
   return cleanText(value, "")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session)=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
    DOM
 ========================================================= */
 
-function getToastContainer({ create = true } = {}) {
+function getContainer() {
   if (!isBrowser()) return null;
 
   if (container && document.contains(container)) {
@@ -127,7 +111,7 @@ function getToastContainer({ create = true } = {}) {
     document.querySelector("[data-toast-container]") ||
     null;
 
-  if (!container && create) {
+  if (!container) {
     container = document.createElement("div");
     container.id = CONTAINER_ID;
     container.className = "toast-container";
@@ -135,71 +119,22 @@ function getToastContainer({ create = true } = {}) {
     container.setAttribute("aria-live", "polite");
     container.setAttribute("aria-atomic", "false");
 
-    try {
-      document.body.appendChild(container);
-    } catch {
-      container = null;
-    }
-  }
-
-  try {
-    AppCore.dom = isObject(AppCore.dom) ? AppCore.dom : {};
-    AppCore.dom.toastContainer = container;
-  } catch {
-    // noop
+    document.body.appendChild(container);
   }
 
   return container;
 }
 
-function findToastNode(id = "") {
-  const root = getToastContainer({ create: false });
+function findNode(id = "") {
+  const root = getContainer();
 
   if (!root || !id) return null;
 
-  try {
-    return (
-      [...root.querySelectorAll("[data-toast-id]")]
-        .find((node) => node.dataset.toastId === id) || null
-    );
-  } catch {
-    return null;
-  }
+  return root.querySelector(`[data-toast-id="${CSS.escape(id)}"]`);
 }
 
-function patchToastNode(node = null, item = null) {
-  if (!node || !item) return false;
-
-  const type = normalizeType(item.type);
-
-  try {
-    node.className = `toast toast--${type}`;
-    node.dataset.toastId = item.id;
-    node.dataset.toastType = type;
-    node.setAttribute("role", type === "error" ? "alert" : "status");
-    node.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
-
-    const title = node.querySelector("[data-toast-title]");
-    const message = node.querySelector("[data-toast-message]");
-
-    if (title) {
-      title.textContent = redact(item.title || "");
-      title.hidden = !cleanText(item.title, "");
-    }
-
-    if (message) {
-      message.textContent = redact(item.message || "");
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function createToastNode(item = {}) {
+function createNode(item) {
   const node = document.createElement("article");
-
   node.className = `toast toast--${item.type}`;
   node.dataset.toastId = item.id;
   node.dataset.toastType = item.type;
@@ -231,22 +166,60 @@ function createToastNode(item = {}) {
   body.append(content, close);
   node.appendChild(body);
 
-  patchToastNode(node, item);
+  patchNode(node, item);
 
   return node;
 }
 
-function removeToastNode(id = "") {
-  const node = findToastNode(id);
+function patchNode(node, item) {
+  if (!node || !item) return false;
+
+  const type = normalizeType(item.type);
+
+  node.className = `toast toast--${type}`;
+  node.dataset.toastId = item.id;
+  node.dataset.toastType = type;
+  node.setAttribute("role", type === "error" ? "alert" : "status");
+  node.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
+
+  const title = node.querySelector("[data-toast-title]");
+  const message = node.querySelector("[data-toast-message]");
+
+  if (title) {
+    title.textContent = redact(item.title || "");
+    title.hidden = !cleanText(item.title, "");
+  }
+
+  if (message) {
+    message.textContent = redact(item.message || "");
+  }
+
+  return true;
+}
+
+function renderItem(item) {
+  const root = getContainer();
+
+  if (!root) return false;
+
+  const current = findNode(item.id);
+
+  if (current) {
+    patchNode(current, item);
+    return true;
+  }
+
+  root.appendChild(createNode(item));
+  return true;
+}
+
+function removeNode(id = "") {
+  const node = findNode(id);
 
   if (!node) return false;
 
-  try {
-    node.remove();
-    return true;
-  } catch {
-    return false;
-  }
+  node.remove();
+  return true;
 }
 
 /* =========================================================
@@ -258,18 +231,13 @@ function clearTimer(id = "") {
 
   if (!timer) return false;
 
-  try {
-    globalThis.clearTimeout(timer);
-  } catch {
-    // noop
-  }
-
+  clearTimeout(timer);
   timers.delete(id);
 
   return true;
 }
 
-function durationFor(item = {}) {
+function getDuration(item) {
   if (item.persist === true) return 0;
 
   const duration = Number(item.duration);
@@ -281,19 +249,15 @@ function durationFor(item = {}) {
   return DEFAULT_DURATIONS[item.type] ?? DEFAULT_DURATIONS.info;
 }
 
-function armTimer(item = {}) {
-  if (!isBrowser() || !item?.id) return false;
-
+function armTimer(item) {
   clearTimer(item.id);
 
-  const duration = durationFor(item);
+  const duration = getDuration(item);
 
   if (!duration) return false;
 
   const timer = window.setTimeout(() => {
-    dismissToast(item.id, {
-      reason: "timeout",
-    });
+    dismissToast(item.id);
   }, duration);
 
   timers.set(item.id, timer);
@@ -307,9 +271,7 @@ function enforceLimit() {
 
     if (!firstId) break;
 
-    dismissToast(firstId, {
-      reason: "limit",
-    });
+    dismissToast(firstId);
   }
 }
 
@@ -317,12 +279,10 @@ function enforceLimit() {
    INPUT
 ========================================================= */
 
-function normalizeShowInput(input = {}, options = {}) {
-  const opts = isObject(options) ? options : {};
-
+function normalizeInput(input = {}, options = {}) {
   if (input instanceof Error) {
     return {
-      ...opts,
+      ...options,
       type: "error",
       message: input.message || "Error inesperado.",
     };
@@ -334,18 +294,18 @@ function normalizeShowInput(input = {}, options = {}) {
     typeof input === "boolean"
   ) {
     return {
-      ...opts,
+      ...options,
       message: cleanText(input, ""),
     };
   }
 
   return {
     ...(isObject(input) ? input : {}),
-    ...opts,
+    ...(isObject(options) ? options : {}),
   };
 }
 
-function normalizeMessageInput(message = "", options = {}, type = "info") {
+function normalizeMessage(message = "", options = {}, type = "info") {
   if (message instanceof Error) {
     return {
       ...options,
@@ -371,7 +331,7 @@ function normalizeMessageInput(message = "", options = {}, type = "info") {
 }
 
 /* =========================================================
-   REGISTRATION
+   CORE BRIDGE
 ========================================================= */
 
 function bridge(message = "", type = "info", options = {}) {
@@ -389,31 +349,18 @@ function bridge(message = "", type = "info", options = {}) {
 function registerToast() {
   try {
     AppCore.ui = isObject(AppCore.ui) ? AppCore.ui : {};
-    AppCore.ui.toast = api;
+    AppCore.ui.toast = Toast;
 
-    /*
-      Core tiene setters para AppCore.toast/AppCore.Toast.
-      Usamos ambos sólo como fachada del mismo módulo, sin cliente paralelo.
-    */
-    AppCore.toast = api;
-    AppCore.Toast = api;
+    AppCore.toast = Toast;
+    AppCore.Toast = Toast;
 
     AppCore.setShowToast?.(bridge);
-    AppCore.modules?.register?.("toast", api);
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function unregisterToast() {
-  try {
-    if (AppCore.ui?.toast === api) {
-      delete AppCore.ui.toast;
-    }
-
-    AppCore.modules?.remove?.("toast");
+    AppCore.registerModule?.("toast", Toast, {
+      overwrite: true,
+    });
+    AppCore.modules?.register?.("toast", Toast, {
+      overwrite: true,
+    });
 
     return true;
   } catch {
@@ -422,17 +369,56 @@ function unregisterToast() {
 }
 
 /* =========================================================
-   CORE API
+   EVENTS
 ========================================================= */
 
-function ensureReady() {
-  if (destroyed) destroyed = false;
+function onClick(event) {
+  const button = event.target?.closest?.("[data-toast-dismiss]");
 
+  if (!button) return;
+
+  event.preventDefault();
+  dismissToast(button.dataset.toastDismiss || "");
+}
+
+function bindEvents() {
+  const root = getContainer();
+
+  if (!root || root.dataset.toastEventsBound === "true") return false;
+
+  root.addEventListener("click", onClick);
+  root.dataset.toastEventsBound = "true";
+
+  return true;
+}
+
+/* =========================================================
+   API
+========================================================= */
+
+function initToast() {
+  if (!isBrowser()) return Toast;
+
+  if (initialized) {
+    registerToast();
+    return Toast;
+  }
+
+  initialized = true;
+
+  getContainer();
+  bindEvents();
+  registerToast();
+
+  return Toast;
+}
+
+function ensureReady() {
   if (!initialized) {
     initToast();
   }
 
-  getToastContainer();
+  getContainer();
 
   return true;
 }
@@ -440,7 +426,7 @@ function ensureReady() {
 function showToast(input = {}, options = {}) {
   ensureReady();
 
-  const payload = normalizeShowInput(input, options);
+  const payload = normalizeInput(input, options);
   const type = normalizeType(payload.type || "info");
 
   const title = redact(cleanText(payload.title || "", ""));
@@ -465,24 +451,12 @@ function showToast(input = {}, options = {}) {
     message,
     duration: payload.duration,
     persist: payload.persist === true || type === "loading",
-    createdAt: items.get(id)?.createdAt || nowIso(),
-    updatedAt: nowIso(),
+    createdAt: items.get(id)?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 
   items.set(id, item);
-
-  const root = getToastContainer();
-
-  if (root) {
-    const current = findToastNode(id);
-
-    if (current) {
-      patchToastNode(current, item);
-    } else {
-      root.appendChild(createToastNode(item));
-    }
-  }
-
+  renderItem(item);
   armTimer(item);
   enforceLimit();
 
@@ -503,7 +477,7 @@ function updateToast(idOrPatch = "", patch = {}) {
   const nextPatch = isObject(idOrPatch)
     ? {
         ...idOrPatch,
-        ...patch,
+        ...(isObject(patch) ? patch : {}),
       }
     : isObject(patch)
       ? patch
@@ -521,34 +495,34 @@ function updateToast(idOrPatch = "", patch = {}) {
     persist: nextPatch.persist !== undefined
       ? nextPatch.persist === true
       : type === "loading",
-    updatedAt: nowIso(),
+    updatedAt: new Date().toISOString(),
   };
 
   items.set(id, next);
-  patchToastNode(findToastNode(id), next);
+  renderItem(next);
   armTimer(next);
 
   return id;
 }
 
-function dismissToast(id = null, options = {}) {
+function dismissToast(id = null) {
   const toastId = normalizeId(id || "");
 
   if (!toastId) {
-    return clearToasts(options);
+    return clearToasts();
   }
 
   clearTimer(toastId);
   items.delete(toastId);
-  removeToastNode(toastId);
+  removeNode(toastId);
 
   return true;
 }
 
-function clearToasts(_options = {}) {
+function clearToasts() {
   for (const id of [...items.keys()]) {
     clearTimer(id);
-    removeToastNode(id);
+    removeNode(id);
   }
 
   items.clear();
@@ -556,27 +530,23 @@ function clearToasts(_options = {}) {
   return true;
 }
 
-function resetToasts(options = {}) {
-  clearToasts(options);
+function resetToasts() {
+  clearToasts();
   sequence = 0;
 
   return true;
 }
 
-/* =========================================================
-   VARIANTS
-========================================================= */
-
 function successToast(message = "", options = {}) {
-  return showToast(normalizeMessageInput(message, options, "success"));
+  return showToast(normalizeMessage(message, options, "success"));
 }
 
 function errorToast(message = "", options = {}) {
-  return showToast(normalizeMessageInput(message, options, "error"));
+  return showToast(normalizeMessage(message, options, "error"));
 }
 
 function warningToast(message = "", options = {}) {
-  return showToast(normalizeMessageInput(message, options, "warning"));
+  return showToast(normalizeMessage(message, options, "warning"));
 }
 
 function warnToast(message = "", options = {}) {
@@ -584,12 +554,12 @@ function warnToast(message = "", options = {}) {
 }
 
 function infoToast(message = "", options = {}) {
-  return showToast(normalizeMessageInput(message, options, "info"));
+  return showToast(normalizeMessage(message, options, "info"));
 }
 
 function loadingToast(message = "", options = {}) {
   return showToast(
-    normalizeMessageInput(
+    normalizeMessage(
       message,
       {
         persist: true,
@@ -601,197 +571,40 @@ function loadingToast(message = "", options = {}) {
   );
 }
 
-/* =========================================================
-   EVENTS
-========================================================= */
-
-function onClick(event) {
-  const button = event.target?.closest?.("[data-toast-dismiss]");
-
-  if (!button) return;
-
-  event.preventDefault();
-  dismissToast(button.dataset.toastDismiss || "");
-}
-
-function bindToastEvents() {
-  const root = getToastContainer();
-
-  if (!root) return false;
-
-  if (eventsBound && boundContainer === root) {
-    return true;
-  }
-
-  unbindToastEvents();
-
-  try {
-    root.addEventListener("click", onClick);
-  } catch {
-    return false;
-  }
-
-  boundContainer = root;
-
-  clickCleanup = () => {
-    try {
-      root.removeEventListener("click", onClick);
-    } catch {
-      // noop
-    }
-
-    clickCleanup = null;
-    boundContainer = null;
-  };
-
-  eventsBound = true;
-
-  return true;
-}
-
-function unbindToastEvents() {
-  try {
-    clickCleanup?.();
-  } catch {
-    // noop
-  }
-
-  clickCleanup = null;
-  boundContainer = null;
-  eventsBound = false;
-
-  return true;
-}
-
-/* =========================================================
-   LIFECYCLE
-========================================================= */
-
-function initToast() {
-  destroyed = false;
-
-  if (initialized) {
-    registerToast();
-    bindToastEvents();
-    return api;
-  }
-
-  initialized = true;
-
-  getToastContainer();
-  registerToast();
-  bindToastEvents();
-
-  return api;
-}
-
-function destroyToast(options = {}) {
-  unbindToastEvents();
-
-  if (options.clear !== false) {
-    clearToasts({
-      reason: "destroy",
-    });
-  }
-
-  initialized = false;
-  destroyed = true;
-
-  unregisterToast();
-
-  return true;
+function existsToast(id = "") {
+  return items.has(normalizeId(id));
 }
 
 function ready() {
-  return Boolean(initialized && !destroyed);
+  return initialized;
 }
-
-function resolveToast() {
-  ensureReady();
-  return api;
-}
-
-function existsToast(id = null) {
-  const toastId = normalizeId(id || "");
-  return Boolean(toastId && items.has(toastId));
-}
-
-/* =========================================================
-   SNAPSHOT
-========================================================= */
 
 function getSnapshot() {
-  const root = getToastContainer({
-    create: false,
-  });
-
   return {
-    version: TOAST_MODULE_VERSION,
-    source: SOURCE,
-
+    version: TOAST_VERSION,
     initialized,
-    eventsBound,
-    destroyed,
-
     count: items.size,
-
+    hasContainer: Boolean(container && isBrowser() && document.contains(container)),
     items: [...items.values()].map((item) => ({
       id: item.id,
       type: item.type,
-      title: redact(item.title),
       message: redact(item.message),
       persist: Boolean(item.persist),
-      duration: durationFor(item),
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
+      duration: getDuration(item),
     })),
-
-    dom: {
-      hasContainer: Boolean(root),
-      containerId: root?.id || "",
-    },
-
-    policy: {
-      toastOnly: true,
-      apiUnique: true,
-      autoInitOnFirstUse: true,
-
-      ownAuth: false,
-      ownRouter: false,
-      ownHttp: false,
-      ownStore: false,
-      submodules: false,
-
-      textContentOnly: true,
-      noCssRuntime: true,
-      noCustomEvent: true,
-      noAppCoreEvents: true,
-      noWindowGlobal: true,
-      noImportSideEffectRegistration: true,
-
-      appCoreRegistrationOnly: true,
-      snapshotRedacted: true,
-    },
   };
 }
 
 /* =========================================================
-   API
+   EXPORTS
 ========================================================= */
 
-const api = {
-  TOAST_MODULE_VERSION,
-  version: TOAST_MODULE_VERSION,
-  source: SOURCE,
+export const Toast = {
+  version: TOAST_VERSION,
 
   init: initToast,
-  destroy: destroyToast,
   ensureReady,
   register: registerToast,
-  resolve: resolveToast,
-
-  bindEvents: bindToastEvents,
-  unbindEvents: unbindToastEvents,
 
   show: showToast,
   update: updateToast,
@@ -813,35 +626,12 @@ const api = {
   getSnapshot,
   getDebugSnapshot: getSnapshot,
   getState: getSnapshot,
-
-  get initialized() {
-    return initialized;
-  },
-
-  get eventsBound() {
-    return eventsBound;
-  },
-
-  get destroyed() {
-    return destroyed;
-  },
 };
-
-export const Toast = api;
-
-/* =========================================================
-   NAMED EXPORTS
-========================================================= */
 
 export {
   initToast as init,
-  destroyToast as destroy,
   ensureReady,
   registerToast as register,
-  resolveToast as resolve,
-
-  bindToastEvents as bindEvents,
-  unbindToastEvents as unbindEvents,
 
   showToast as show,
   updateToast as update,

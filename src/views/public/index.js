@@ -1,20 +1,12 @@
 /* =========================================================
-   Onion Support - Public View Template
+   Onion Support - Public Views Template
    Archivo: /src/views/public/index.js
 
    Responsabilidad:
-   - Template base para vistas públicas/auth.
-   - Logo público, shell, card, título, subtítulo, body y footer.
-   - Consumible por login, password-reset, activate-account, etc.
-   - Helpers seguros para HTML, atributos, assets y href internos.
-   - Sin Auth.
-   - Sin Router.
-   - Sin HTTP.
-   - Sin Store.
-   - Sin Toast.
-   - Sin validación.
-   - Sin listeners.
-   - Sin navegación.
+   - Layout base para vistas públicas/auth.
+   - Logo, shell, card, título, subtítulo, body y footer.
+   - Consumible por login, password-reset, activate-account.
+   - Sin Auth, Router, HTTP, Store, Toast, validación ni eventos.
 ========================================================= */
 
 export const PUBLIC_TEMPLATE_VERSION = "public.template.v1";
@@ -48,18 +40,6 @@ function text(value = "", fallback = "") {
     .trim();
 
   return output || fallback;
-}
-
-function bool(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value === 1;
-
-  const clean = text(value, "").toLowerCase();
-
-  if (["1", "true", "yes", "si", "sí", "on"].includes(clean)) return true;
-  if (["0", "false", "no", "off"].includes(clean)) return false;
-
-  return Boolean(fallback);
 }
 
 function cleanKey(value = "", fallback = DEFAULT_VIEW) {
@@ -168,21 +148,6 @@ function dataAttrs(attrs = {}) {
     .join("");
 }
 
-function attrBlock(attrs = {}) {
-  if (!isObject(attrs)) return "";
-
-  return Object.entries(attrs)
-    .map(([key, value]) => {
-      const name = text(key, "");
-
-      if (!name) return "";
-      if (value === false || value === null || value === undefined || value === "") return "";
-
-      return ` ${escapeAttr(name)}="${escapeAttr(value === true ? "true" : value)}"`;
-    })
-    .join("");
-}
-
 /* =========================================================
    LOGO
 ========================================================= */
@@ -193,11 +158,7 @@ export function renderPublicLogo(options = {}) {
   const showName = options.showName !== false;
 
   return `
-    <div
-      class="auth-logo-wrap public-logo-wrap"
-      data-auth-logo-wrap="true"
-      data-public-logo-wrap="true"
-    >
+    <div class="auth-logo-wrap public-logo-wrap" data-public-logo-wrap="true">
       <img
         class="auth-logo public-logo"
         src="${escapeAttr(logoSrc)}"
@@ -208,18 +169,13 @@ export function renderPublicLogo(options = {}) {
         decoding="async"
         draggable="false"
         aria-hidden="true"
-        data-auth-logo="true"
         data-public-logo="true"
       >
 
       ${
         showName
           ? `
-            <span
-              class="auth-logo-name public-logo-name"
-              data-auth-logo-name="true"
-              data-public-logo-name="true"
-            >
+            <span class="auth-logo-name public-logo-name" data-public-logo-name="true">
               ${escapeHtml(appName)}
             </span>
           `
@@ -238,10 +194,8 @@ export const renderAuthLogo = renderPublicLogo;
 export function renderPublicShell(options = {}) {
   const view = cleanKey(options.view, DEFAULT_VIEW);
   const appName = text(options.appName, DEFAULT_APP_NAME);
-
   const title = text(options.title, DEFAULT_TITLE);
   const subtitle = text(options.subtitle, "");
-
   const body = String(options.body || "");
   const footer = String(options.footer || "");
 
@@ -254,20 +208,15 @@ export function renderPublicShell(options = {}) {
   const bodyClass = cleanClass(options.bodyClass, `auth-body public-body ${view}-body`);
   const footerClass = cleanClass(options.footerClass, `auth-footer public-footer ${view}-footer`);
 
-  const centered = options.centered !== false;
-  const compact = bool(options.compact, false);
-
   return `
     <section
-      class="auth-view public-view ${escapeAttr(view)}-view${centered ? " is-centered" : ""}${compact ? " is-compact" : ""}"
+      class="auth-view public-view ${escapeAttr(view)}-view"
       data-view="${escapeAttr(view)}"
       data-public-view="true"
-      data-auth-view="true"
       data-template-version="${escapeAttr(PUBLIC_TEMPLATE_VERSION)}"
       ${dataAttrs(options.dataAttrs)}
       aria-labelledby="${escapeAttr(titleId)}"
       ${descriptionId ? `aria-describedby="${escapeAttr(descriptionId)}"` : ""}
-      ${attrBlock(options.attrs)}
     >
       <div class="${escapeAttr(shellClass)}" data-public-shell="true">
         <article class="${escapeAttr(cardClass)}" data-public-card="true">
@@ -327,10 +276,6 @@ export function renderPublicShell(options = {}) {
 }
 
 export const renderAuthShell = renderPublicShell;
-
-/* =========================================================
-   DOM FACTORY
-========================================================= */
 
 export function createPublicShell(options = {}) {
   if (!isBrowser()) return null;

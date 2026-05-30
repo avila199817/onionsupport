@@ -7,40 +7,41 @@
    - Estado mínimo en memoria.
    - Sesión actual en memoria.
    - Helpers básicos de usuario/rol/ruta.
+   - Registro mínimo de módulos.
    - Puente único hacia core/http.js.
    - Sin Store, Services, hooks, cleanup, event bus, network listeners,
      fetch propio, i18n funcional ni framework interno.
 ========================================================= */
 
-import { config } from "./config.js";
+import {
+  config,
+  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
+  ALLOWED_ROLES,
+  buildUserHomeRoute as configBuildUserHomeRoute,
+  getUserScopedRouteInfo as configGetUserScopedRouteInfo,
+  normalizeRoutePath as configNormalizeRoutePath,
+  normalizeUserSlug as configNormalizeUserSlug,
+  routePathFromUrlLike as configRoutePathFromUrlLike,
+} from "./config.js";
+
 import Http from "./http.js";
 
-export const CORE_VERSION = "core.minimal.v1";
+export const CORE_VERSION = "core.minimal.v3";
 
 const APP_NAME = config?.appName || config?.name || "Onion Support";
 const ROOT_PATH = "/";
-const USER_HOME_PREFIX = "/@";
+const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
 
-const VALID_ROLES = new Set(["admin", "user"]);
+const VALID_ROLES = new Set(
+  (Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
+    ? ALLOWED_ROLES
+    : ["admin", "user"]
+  ).map((role) => String(role).toLowerCase())
+);
 
-const BAD_USER_STATUSES = new Set([
+const DISABLED_STATUSES = new Set([
   "disabled",
-  "inactive",
-  "deleted",
-  "archived",
-  "revoked",
-  "blocked",
-  "banned",
-  "suspended",
-
   "desactivado",
-  "inactivo",
-  "eliminado",
-  "archivado",
-  "revocado",
-  "bloqueado",
-  "baneado",
-  "suspendido",
 ]);
 
 const SENSITIVE_KEYS = new Set([
@@ -54,9 +55,6 @@ const SENSITIVE_KEYS = new Set([
   "passwordmeta",
   "password_meta",
 
-  "token",
-  "accesstoken",
-  "access_token",
   "refreshtoken",
   "refresh_token",
   "idtoken",
@@ -130,6 +128,7 @@ const state = {
 
   token: null,
   accessToken: null,
+  access_token: null,
   hasToken: false,
 
   authenticated: false,
@@ -138,18 +137,27 @@ const state = {
   hasUser: false,
 
   role: null,
+  rol: null,
   roles: [],
 
   userSlug: null,
   homePath: ROOT_PATH,
+  defaultHome: ROOT_PATH,
+  postLoginTarget: null,
 
   session: null,
+  sessionData: null,
   sessionId: null,
   sessionUserId: null,
+  hasSession: false,
+  hasRefreshToken: false,
 
   route: ROOT_PATH,
   canonicalPath: ROOT_PATH,
   publicPath: ROOT_PATH,
+  routeParams: {},
+
+  sidebarOpen: false,
 
   lang: "es",
   locale: "es-ES",
@@ -158,6 +166,8 @@ const state = {
   updatedAt: null,
 };
 
+const dom = {};
+const ui = {};
 const moduleRegistry = new Map();
 
 let httpClient = null;
@@ -189,7 +199,9 @@ function cleanText(value = "", fallback = "") {
 }
 
 function normalizeKey(value = "") {
-  return cleanText(value, "").replace(/[-_\s]/g, "").toLowerCase();
+  return cleanText(value, "")
+    .replace(/[-_\s]/g, "")
+    .toLowerCase();
 }
 
 function first(...values) {
@@ -227,10 +239,10 @@ function touch() {
 }
 
 function redact(value = "") {
-  let text = cleanText(value, "");
+  let output = cleanText(value, "");
 
   try {
-    const fakeUrl = new URL(text, "https://onionsupport.local");
+    const fakeUrl = new URL(output, "https://onionsupport.local");
 
     for (const key of [...fakeUrl.searchParams.keys()]) {
       if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
@@ -238,19 +250,17 @@ function redact(value = "") {
       }
     }
 
-    if (text.startsWith("http://") || text.startsWith("https://")) {
-      text = fakeUrl.toString();
-    } else {
-      text = `${fakeUrl.pathname}${fakeUrl.search}${fakeUrl.hash}`;
-    }
+    output = /^https?:\/\//i.test(output)
+      ? fakeUrl.toString()
+      : `${fakeUrl.pathname}${fakeUrl.search}${fakeUrl.hash}`;
   } catch {
-    text = text.replace(
+    output = output.replace(
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
     );
   }
 
-  return text
+  return output
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
@@ -313,6 +323,14 @@ function normalizeRole(value = "") {
 }
 
 function normalizeSlug(value = "") {
+  try {
+    if (isFunction(configNormalizeUserSlug)) {
+      return configNormalizeUserSlug(value) || "";
+    }
+  } catch {
+    // fallback abajo
+  }
+
   const slug = cleanText(value, "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -354,7 +372,17 @@ function buildUserHomePath(userOrSlug = null) {
     ? extractUserSlug(userOrSlug)
     : normalizeSlug(userOrSlug);
 
-  return slug ? `${USER_HOME_PREFIX}${slug}` : ROOT_PATH;
+  if (!slug) return ROOT_PATH;
+
+  try {
+    if (isFunction(configBuildUserHomeRoute)) {
+      return configBuildUserHomeRoute(slug) || `${USER_HOME_PREFIX}${slug}`;
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  return `${USER_HOME_PREFIX}${slug}`;
 }
 
 function userStatus(user = null) {
@@ -369,26 +397,24 @@ function userStatus(user = null) {
 function isUsableUser(user = null) {
   if (!isObject(user)) return false;
   if (user.disabled === true) return false;
-  if (user.deleted === true) return false;
-  if (user.archived === true) return false;
-  if (user.active === false) return false;
 
   const status = userStatus(user);
 
-  if (status && BAD_USER_STATUSES.has(status)) return false;
-
-  return true;
+  return !DISABLED_STATUSES.has(status);
 }
 
 function publicUser(user = null) {
   if (!isObject(user)) return null;
+
+  const role = normalizeRole(first(user.role, user.rol, user.roles, "")) || "user";
+  const slug = extractUserSlug(user);
 
   return {
     id: first(user.id, user.userId, null),
     userId: first(user.userId, user.id, null),
 
     username: first(user.username, user.userName, user.user_name, null),
-    slug: extractUserSlug(user),
+    slug,
 
     displayName: first(
       user.displayName,
@@ -397,13 +423,15 @@ function publicUser(user = null) {
       user.nombre,
       user.profile?.displayName,
       user.profile?.name,
+      user.username,
       ""
     ),
 
     email: first(user.email, user.mail, null),
 
-    role: normalizeRole(first(user.role, user.rol, user.roles, "")) || "user",
-    roles: [normalizeRole(first(user.role, user.rol, user.roles, "")) || "user"],
+    role,
+    rol: role,
+    roles: [role],
 
     avatarUrl: cleanText(
       first(
@@ -437,25 +465,30 @@ function normalizeUser(user = null) {
 function updateAuthFlags() {
   const user = state.user;
   const usableUser = isUsableUser(user);
-  const token = cleanToken(state.token || state.accessToken);
+  const token = cleanToken(state.token || state.accessToken || state.access_token);
 
-  const role = normalizeRole(first(user?.role, state.role, "user")) || "user";
+  const role = normalizeRole(first(user?.role, user?.rol, user?.roles, state.role, state.rol, "user")) || "user";
   const slug = extractUserSlug(user);
 
   state.token = token;
   state.accessToken = token;
+  state.access_token = token;
   state.hasToken = Boolean(token);
 
   state.hasUser = usableUser;
   state.currentUser = user || null;
 
   state.role = usableUser ? role : null;
+  state.rol = usableUser ? role : null;
   state.roles = usableUser ? [role] : [];
 
   state.userSlug = usableUser ? slug || null : null;
   state.homePath = usableUser ? buildUserHomePath(slug) : ROOT_PATH;
+  state.defaultHome = state.homePath;
+  state.postLoginTarget = token && usableUser ? state.homePath : null;
 
   state.authenticated = Boolean(token && usableUser);
+  state.hasSession = Boolean(state.session || state.sessionId || state.sessionUserId);
 
   touch();
 }
@@ -465,6 +498,14 @@ function updateAuthFlags() {
 ========================================================= */
 
 function normalizePathname(value = ROOT_PATH) {
+  try {
+    if (isFunction(configNormalizeRoutePath)) {
+      return configNormalizeRoutePath(value) || ROOT_PATH;
+    }
+  } catch {
+    // fallback abajo
+  }
+
   let path = cleanText(value, ROOT_PATH)
     .split("#")[0]
     .split("?")[0]
@@ -516,26 +557,41 @@ function safeHash(value = "") {
   return hash.startsWith("#") ? redact(hash) : redact(`#${hash.replace(/^#+/, "")}`);
 }
 
-function splitPath(value = ROOT_PATH) {
-  let raw = cleanText(value, ROOT_PATH);
+function pathFromInput(value = ROOT_PATH) {
+  const raw = cleanText(value, ROOT_PATH);
 
-  if (raw.startsWith("//")) raw = ROOT_PATH;
+  try {
+    if (isFunction(configRoutePathFromUrlLike)) {
+      return configRoutePathFromUrlLike(raw) || ROOT_PATH;
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  if (!raw) return ROOT_PATH;
+  if (raw.startsWith("//")) return ROOT_PATH;
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
     try {
       const url = new URL(raw);
 
       if (isBrowser() && url.origin === window.location.origin) {
-        raw = `${url.pathname}${url.search}${url.hash}`;
-      } else {
-        raw = ROOT_PATH;
+        return `${url.pathname || ROOT_PATH}${url.search || ""}${url.hash || ""}`;
       }
+
+      return ROOT_PATH;
     } catch {
-      raw = ROOT_PATH;
+      return ROOT_PATH;
     }
   }
 
-  let pathname = raw;
+  if (/[\r\n\t\\]/.test(raw)) return ROOT_PATH;
+
+  return raw;
+}
+
+function splitPath(value = ROOT_PATH) {
+  let pathname = pathFromInput(value);
   let search = "";
   let hash = "";
 
@@ -581,6 +637,14 @@ function normalizeCanonicalPath(value = ROOT_PATH) {
 }
 
 function getUserScopedRouteInfo(value = ROOT_PATH) {
+  try {
+    if (isFunction(configGetUserScopedRouteInfo)) {
+      return configGetUserScopedRouteInfo(value);
+    }
+  } catch {
+    // fallback abajo
+  }
+
   const pathname = splitPath(value).pathname;
 
   if (!pathname.startsWith(USER_HOME_PREFIX)) {
@@ -634,6 +698,53 @@ function safeInternalPath(value = ROOT_PATH) {
 }
 
 /* =========================================================
+   SESSION
+========================================================= */
+
+function normalizeSessionContext(value = null, user = null) {
+  if (!isObject(value)) return null;
+
+  const sessionId = cleanText(
+    first(value.sessionId, value.session_id, value.sid, value.id, ""),
+    ""
+  );
+
+  const userId = cleanText(
+    first(
+      value.sessionUserId,
+      value.session_user_id,
+      value.userId,
+      value.user_id,
+      user?.userId,
+      user?.id,
+      ""
+    ),
+    ""
+  );
+
+  const expiresAt = first(
+    value.expiresAt,
+    value.expires_at,
+    value.refreshExpiresAt,
+    value.refresh_expires_at,
+    null
+  );
+
+  if (!sessionId && !userId && !expiresAt) return null;
+
+  return {
+    sessionId: sessionId || null,
+    id: sessionId || null,
+    userId: userId || null,
+    sessionUserId: userId || null,
+    expiresAt,
+    active: value.active !== false,
+    revoked: value.revoked === true,
+    persistent: value.persistent === true || value.restoreOnBoot === true,
+  };
+}
+
+/* =========================================================
    STATE
 ========================================================= */
 
@@ -654,11 +765,19 @@ function sanitizePatchValue(key = "", value = null) {
     return normalizeCanonicalPath(value);
   }
 
+  if (key === "routeParams") {
+    return isObject(value) ? clone(value) || {} : {};
+  }
+
   if (key === "theme") return "system";
   if (key === "lang") return "es";
   if (key === "locale") return "es-ES";
 
-  if (typeof value === "function" || typeof value === "symbol" || typeof value === "bigint") {
+  if (
+    typeof value === "function" ||
+    typeof value === "symbol" ||
+    typeof value === "bigint"
+  ) {
     return undefined;
   }
 
@@ -677,6 +796,7 @@ function getState(options = {}) {
   if (options.includeToken !== true) {
     snapshot.token = null;
     snapshot.accessToken = null;
+    snapshot.access_token = null;
   }
 
   return snapshot;
@@ -686,7 +806,7 @@ function setState(patch = {}, options = {}) {
   if (!isObject(patch)) return getState(options);
 
   for (const [key, value] of Object.entries(patch)) {
-    if (key === "user" || key === "currentUser") {
+    if (key === "user" || key === "currentUser" || key === "authUser" || key === "sessionUser") {
       state.user = normalizeUser(value);
       continue;
     }
@@ -694,6 +814,18 @@ function setState(patch = {}, options = {}) {
     if (key === "token" || key === "accessToken" || key === "access_token") {
       state.token = cleanToken(value);
       state.accessToken = state.token;
+      state.access_token = state.token;
+      continue;
+    }
+
+    if (key === "session" || key === "sessionData" || key === "currentSession") {
+      const session = normalizeSessionContext(value, state.user);
+
+      state.session = session;
+      state.sessionData = session;
+      state.sessionId = session?.sessionId || null;
+      state.sessionUserId = session?.sessionUserId || null;
+      state.hasSession = Boolean(session);
       continue;
     }
 
@@ -738,64 +870,16 @@ function setUser(user = null) {
   return getState();
 }
 
-function setToken(token = null, options = {}) {
+function setToken(token = null) {
   const clean = cleanToken(token);
 
   state.token = clean;
   state.accessToken = clean;
-
-  if (clean) {
-    callHttp("setAccessToken", clean);
-  } else if (options.clearSession === true || options.force === true) {
-    callHttp("clearAuthTokens");
-  }
+  state.access_token = clean;
 
   updateAuthFlags();
 
   return getState();
-}
-
-function normalizeSessionContext(value = null, user = null) {
-  if (!isObject(value)) return null;
-
-  const sessionId = cleanText(
-    first(value.sessionId, value.session_id, value.sid, value.id, ""),
-    ""
-  );
-
-  const userId = cleanText(
-    first(
-      value.sessionUserId,
-      value.session_user_id,
-      value.userId,
-      value.user_id,
-      user?.userId,
-      user?.id,
-      ""
-    ),
-    ""
-  );
-
-  const expiresAt = first(
-    value.expiresAt,
-    value.expires_at,
-    value.refreshExpiresAt,
-    value.refresh_expires_at,
-    null
-  );
-
-  if (!sessionId && !userId && !expiresAt) return null;
-
-  return {
-    sessionId: sessionId || null,
-    id: sessionId || null,
-    userId: userId || null,
-    sessionUserId: userId || null,
-    expiresAt,
-    active: value.active !== false,
-    revoked: value.revoked === true,
-    persistent: value.persistent === true,
-  };
 }
 
 function applySession(payload = {}, options = {}) {
@@ -825,10 +909,10 @@ function applySession(payload = {}, options = {}) {
 
   const sessionPayload = first(
     payload.session,
+    payload.sessionData,
     payload.currentSession,
     payload.data?.session,
     payload.auth?.session,
-    payload,
     null
   );
 
@@ -840,11 +924,19 @@ function applySession(payload = {}, options = {}) {
     setUser(user);
   }
 
-  const session = normalizeSessionContext(sessionPayload, state.user);
+  if (sessionPayload !== null && sessionPayload !== undefined) {
+    const session = normalizeSessionContext(sessionPayload, state.user);
 
-  state.session = session;
-  state.sessionId = session?.sessionId || null;
-  state.sessionUserId = session?.sessionUserId || null;
+    state.session = session;
+    state.sessionData = session;
+    state.sessionId = session?.sessionId || null;
+    state.sessionUserId = session?.sessionUserId || null;
+    state.hasSession = Boolean(session);
+  }
+
+  if (payload.hasRefreshToken !== undefined) {
+    state.hasRefreshToken = payload.hasRefreshToken === true;
+  }
 
   updateAuthFlags();
 
@@ -854,6 +946,7 @@ function applySession(payload = {}, options = {}) {
 function clearSession() {
   state.token = null;
   state.accessToken = null;
+  state.access_token = null;
   state.hasToken = false;
 
   state.authenticated = false;
@@ -862,16 +955,26 @@ function clearSession() {
   state.hasUser = false;
 
   state.role = null;
+  state.rol = null;
   state.roles = [];
 
   state.userSlug = null;
   state.homePath = ROOT_PATH;
+  state.defaultHome = ROOT_PATH;
+  state.postLoginTarget = null;
 
   state.session = null;
+  state.sessionData = null;
   state.sessionId = null;
   state.sessionUserId = null;
+  state.hasSession = false;
+  state.hasRefreshToken = false;
 
-  callHttp("clearAuthTokens");
+  try {
+    getHttpClient()?.clearAuthTokens?.();
+  } catch {
+    // noop
+  }
 
   touch();
 
@@ -943,7 +1046,7 @@ function hasRole(roleOrRoles = []) {
 }
 
 function getAuthHeader() {
-  const token = cleanToken(state.token || state.accessToken);
+  const token = cleanToken(state.token || state.accessToken || state.access_token);
 
   return token
     ? {
@@ -992,24 +1095,13 @@ const modules = {
    HTTP
 ========================================================= */
 
-function callHttp(method = "", ...args) {
-  const client = getHttpClient();
-  const fn = client?.[method];
-
-  if (!isFunction(fn)) return null;
-
-  try {
-    return fn.apply(client, args);
-  } catch {
-    return null;
-  }
-}
-
 function setHttpClient(value = null) {
   if (!value) return false;
 
   httpClient = value;
-  registerModule("http", httpClient, { overwrite: true });
+  registerModule("http", httpClient, {
+    overwrite: true,
+  });
 
   return true;
 }
@@ -1018,9 +1110,27 @@ function getHttpClient() {
   if (httpClient) return httpClient;
 
   httpClient = Http;
-  registerModule("http", httpClient, { overwrite: true });
+  registerModule("http", httpClient, {
+    overwrite: true,
+  });
 
   return httpClient;
+}
+
+function installHttpBridge(value = null) {
+  if (value) {
+    setHttpClient(value);
+  }
+
+  const client = getHttpClient();
+
+  try {
+    client?.install?.(AppCore);
+  } catch {
+    // noop
+  }
+
+  return client;
 }
 
 function getActiveRequest() {
@@ -1038,14 +1148,6 @@ function getActiveRequest() {
 }
 
 function getActiveApiClient() {
-  return getHttpClient();
-}
-
-function installHttpBridge(value = null) {
-  if (value) {
-    setHttpClient(value);
-  }
-
   return getHttpClient();
 }
 
@@ -1140,7 +1242,7 @@ async function init() {
   state.ready = false;
   touch();
 
-  getHttpClient();
+  installHttpBridge(Http);
 
   state.initialized = true;
   state.booting = false;
@@ -1190,30 +1292,14 @@ function getSnapshot() {
     modules: listModules(),
 
     session: {
-      hasSession: Boolean(snapshot.sessionId || snapshot.sessionUserId || snapshot.session),
+      hasSession: snapshot.hasSession === true,
       sessionId: snapshot.sessionId ? "***" : null,
       sessionUserId: snapshot.sessionUserId ? "***" : null,
+      hasRefreshToken: snapshot.hasRefreshToken === true,
     },
 
     error: snapshot.error,
     updatedAt: snapshot.updatedAt,
-
-    policy: {
-      memoryOnly: true,
-      noStore: true,
-      noServices: true,
-      noEvents: true,
-      noHooks: true,
-      noCleanupRegistry: true,
-      noNetworkListeners: true,
-      noFetchOwn: true,
-      httpBridgeOnly: true,
-      roles: ["admin", "user"],
-      themeSystemOnly: true,
-      langBaseEs: true,
-      noMfaOtp: true,
-      snapshotRedacted: true,
-    },
   };
 }
 
@@ -1227,7 +1313,8 @@ export const AppCore = {
 
   config,
   state,
-  dom: {},
+  dom,
+  ui,
 
   modules,
 
@@ -1371,6 +1458,42 @@ Object.defineProperties(AppCore, {
     },
     set(value) {
       registerModule("toast", value, { overwrite: true });
+    },
+  },
+
+  sidebar: {
+    get() {
+      return getModule("sidebar");
+    },
+    set(value) {
+      registerModule("sidebar", value, { overwrite: true });
+    },
+  },
+
+  Sidebar: {
+    get() {
+      return getModule("sidebar");
+    },
+    set(value) {
+      registerModule("sidebar", value, { overwrite: true });
+    },
+  },
+
+  topbar: {
+    get() {
+      return getModule("topbar");
+    },
+    set(value) {
+      registerModule("topbar", value, { overwrite: true });
+    },
+  },
+
+  Topbar: {
+    get() {
+      return getModule("topbar");
+    },
+    set(value) {
+      registerModule("topbar", value, { overwrite: true });
     },
   },
 });

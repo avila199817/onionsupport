@@ -3,72 +3,88 @@
    Archivo: /src/preboot/theme.js
 
    Responsabilidad:
-   - Tema inicial y vivo según sistema.
-   - Idioma base inicial: castellano.
-   - Sin imports, storage, API, Auth, Router, HTTP ni i18n propio.
+   - Aplicar tema inicial según sistema.
+   - Mantener tema vivo si cambia prefers-color-scheme.
+   - Fijar idioma base inicial: es.
+   - Eliminar no-js lo antes posible.
+   - Sin imports, storage, API, Auth, Router, HTTP ni i18n.
 ========================================================= */
 
 (() => {
   "use strict";
 
   const BASE_LOCALE = "es";
-  const SUPPORTED_LOCALES = Object.freeze(["es", "ca", "en"]);
-
   const DARK_QUERY = "(prefers-color-scheme: dark)";
-  const THEMES = Object.freeze(["light", "dark"]);
-  const FALLBACK_THEME = "light";
+
+  const THEME_LIGHT = "light";
+  const THEME_DARK = "dark";
+  const THEME_MODE = "system";
 
   const THEME_COLORS = Object.freeze({
     light: "#ffffff",
     dark: "#0a0c11",
   });
 
-  let systemThemeQuery = null;
-  let systemThemeListenerBound = false;
+  let mediaQuery = null;
+  let listenerBound = false;
 
   function isBrowser() {
     return typeof window !== "undefined" && typeof document !== "undefined";
   }
 
-  function cleanText(value = "", fallback = "") {
-    const output = String(value ?? "").trim();
-    return output || fallback;
-  }
-
-  function normalizeTheme(value = "", fallback = FALLBACK_THEME) {
-    const theme = cleanText(value, "").toLowerCase();
-    return THEMES.includes(theme) ? theme : fallback;
-  }
-
-  function getSystemThemeQuery() {
-    if (systemThemeQuery) return systemThemeQuery;
+  function getMediaQuery() {
+    if (mediaQuery) return mediaQuery;
 
     try {
-      systemThemeQuery = window.matchMedia(DARK_QUERY);
+      mediaQuery = window.matchMedia(DARK_QUERY);
     } catch {
-      systemThemeQuery = null;
+      mediaQuery = null;
     }
 
-    return systemThemeQuery;
+    return mediaQuery;
   }
 
-  function resolveSystemTheme() {
-    return getSystemThemeQuery()?.matches ? "dark" : "light";
+  function getSystemTheme() {
+    return getMediaQuery()?.matches ? THEME_DARK : THEME_LIGHT;
   }
 
-  function applyThemeToElement(element = null, theme = FALLBACK_THEME) {
+  function normalizeTheme(value = "") {
+    return value === THEME_DARK ? THEME_DARK : THEME_LIGHT;
+  }
+
+  function applyRootClasses(element = null, theme = THEME_LIGHT) {
     if (!element) return false;
 
-    const cleanTheme = normalizeTheme(theme);
+    const value = normalizeTheme(theme);
 
     try {
-      element.classList.remove("no-js", "theme-light", "theme-dark");
-      element.classList.add("js", `theme-${cleanTheme}`);
+      element.classList.remove(
+        "no-js",
+        "theme-light",
+        "theme-dark"
+      );
 
-      element.dataset.theme = cleanTheme;
-      element.dataset.themeMode = "system";
+      element.classList.add(
+        "js",
+        `theme-${value}`
+      );
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function applyThemeDataset(element = null, theme = THEME_LIGHT) {
+    if (!element) return false;
+
+    const value = normalizeTheme(theme);
+
+    try {
+      element.dataset.theme = value;
+      element.dataset.themeMode = THEME_MODE;
       element.dataset.themeSource = "system";
-      element.dataset.systemTheme = cleanTheme;
+      element.dataset.systemTheme = value;
       element.dataset.themeReady = "true";
 
       return true;
@@ -77,7 +93,7 @@
     }
   }
 
-  function applyLocaleToElement(element = null) {
+  function applyLocale(element = null) {
     if (!element) return false;
 
     try {
@@ -87,7 +103,7 @@
       element.dataset.locale = BASE_LOCALE;
       element.dataset.localeSource = "base";
       element.dataset.localeFallback = BASE_LOCALE;
-      element.dataset.localeSupported = SUPPORTED_LOCALES.join(" ");
+      element.dataset.localeSupported = BASE_LOCALE;
 
       return true;
     } catch {
@@ -95,26 +111,30 @@
     }
   }
 
-  function applyThemeColor(theme = FALLBACK_THEME) {
-    const cleanTheme = normalizeTheme(theme);
-    const activeColor = THEME_COLORS[cleanTheme] || THEME_COLORS[FALLBACK_THEME];
+  function applyThemeColor(theme = THEME_LIGHT) {
+    if (!isBrowser()) return false;
+
+    const value = normalizeTheme(theme);
+    const activeColor = THEME_COLORS[value];
 
     try {
-      document
-        .querySelectorAll("meta[name='theme-color']")
-        .forEach((meta) => {
-          if (meta.hasAttribute("data-onion-theme-color-light")) {
-            meta.setAttribute("content", THEME_COLORS.light);
-            return;
-          }
+      const metas = document.querySelectorAll("meta[name='theme-color']");
 
-          if (meta.hasAttribute("data-onion-theme-color-dark")) {
-            meta.setAttribute("content", THEME_COLORS.dark);
-            return;
-          }
+      if (!metas.length) return false;
 
-          meta.setAttribute("content", activeColor);
-        });
+      metas.forEach((meta) => {
+        if (meta.hasAttribute("data-onion-theme-color-light")) {
+          meta.setAttribute("content", THEME_COLORS.light);
+          return;
+        }
+
+        if (meta.hasAttribute("data-onion-theme-color-dark")) {
+          meta.setAttribute("content", THEME_COLORS.dark);
+          return;
+        }
+
+        meta.setAttribute("content", activeColor);
+      });
 
       return true;
     } catch {
@@ -122,21 +142,23 @@
     }
   }
 
-  function writePrebootSnapshot(theme = FALLBACK_THEME) {
-    const cleanTheme = normalizeTheme(theme);
+  function writeSnapshot(theme = THEME_LIGHT) {
+    if (!isBrowser()) return false;
+
+    const value = normalizeTheme(theme);
 
     try {
-      window.__ONION_PREBOOT__ = {
-        theme: cleanTheme,
-        themeMode: "system",
+      window.__ONION_PREBOOT__ = Object.freeze({
+        theme: value,
+        themeMode: THEME_MODE,
         themeSource: "system",
-        systemTheme: cleanTheme,
+        systemTheme: value,
 
         locale: BASE_LOCALE,
         localeSource: "base",
         fallbackLocale: BASE_LOCALE,
-        supportedLocales: [...SUPPORTED_LOCALES],
-      };
+        supportedLocales: Object.freeze([BASE_LOCALE]),
+      });
 
       return true;
     } catch {
@@ -147,47 +169,54 @@
   function applyPreboot() {
     if (!isBrowser()) return false;
 
-    const theme = resolveSystemTheme();
+    const theme = getSystemTheme();
+    const html = document.documentElement;
+    const body = document.body;
 
-    applyThemeToElement(document.documentElement, theme);
-    applyLocaleToElement(document.documentElement);
+    applyRootClasses(html, theme);
+    applyThemeDataset(html, theme);
+    applyLocale(html);
 
-    if (document.body) {
-      applyThemeToElement(document.body, theme);
-      applyLocaleToElement(document.body);
+    if (body) {
+      applyRootClasses(body, theme);
+      applyThemeDataset(body, theme);
+      applyLocale(body);
     }
 
     applyThemeColor(theme);
-    writePrebootSnapshot(theme);
+    writeSnapshot(theme);
 
     return true;
   }
 
   function bindSystemThemeListener() {
-    if (systemThemeListenerBound) return true;
+    if (listenerBound) return true;
 
-    const query = getSystemThemeQuery();
+    const query = getMediaQuery();
 
     if (!query) return false;
 
-    const onSystemThemeChange = () => {
+    const onChange = () => {
       applyPreboot();
     };
 
     try {
       if (typeof query.addEventListener === "function") {
-        query.addEventListener("change", onSystemThemeChange);
-      } else if (typeof query.addListener === "function") {
-        query.addListener(onSystemThemeChange);
-      } else {
-        return false;
+        query.addEventListener("change", onChange);
+        listenerBound = true;
+        return true;
       }
 
-      systemThemeListenerBound = true;
-      return true;
+      if (typeof query.addListener === "function") {
+        query.addListener(onChange);
+        listenerBound = true;
+        return true;
+      }
     } catch {
       return false;
     }
+
+    return false;
   }
 
   if (!isBrowser()) return;

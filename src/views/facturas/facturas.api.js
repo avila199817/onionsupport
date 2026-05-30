@@ -41,6 +41,8 @@ export const FACTURAS_DEFAULT_PAGE = 1;
 export const FACTURAS_DEFAULT_LIMIT = 100;
 export const FACTURAS_MAX_LIMIT = 200;
 
+const DEFAULT_CURRENCY = "EUR";
+
 export const FACTURA_PDF_MODES = Object.freeze({
   VIEW: "view",
   INLINE: "inline",

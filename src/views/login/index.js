@@ -3,27 +3,30 @@
    Archivo: /src/views/login/index.js
 
    Responsabilidad:
-   - Renderizar login completo inline.
+   - Controlador mínimo de la vista Login.
+   - Montar el template recibido desde template.js.
+   - Leer refs por data attributes.
    - Validar formulario mínimo.
    - Llamar Auth.login().
    - Navegar vía Router tras login correcto.
-   - Sin login.template.js, login.dom.js, login.helpers.js,
-     password-field, HTTP directo, Store, Toast, storage ni eventos globales.
+   - Gestionar estado loading/error del formulario.
+   - Sin HTML inline.
+   - Sin construir campos.
+   - Sin HTTP directo.
+   - Sin Store.
+   - Sin Toast directo.
+   - Sin storage.
+   - Sin eventos globales.
+   - Sin navegación browser paralela.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { Auth } from "../../features/auth/index.js";
+import createLoginTemplate from "./template.js";
 
-import {
-  ROUTES,
-} from "../../core/config.js";
-
-export const LOGIN_VIEW_VERSION = "login.view.minimal.v2";
+export const LOGIN_VIEW_VERSION = "login.view.controller.v1";
 
 const SOURCE = "login.view";
-
-const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest || "/password-request";
-const ACTIVATE_ACCOUNT_ROUTE = ROUTES.activateAccount || "/activate-account";
 
 const INSTANCES = new WeakMap();
 
@@ -64,369 +67,20 @@ function redact(value = "") {
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
-/* =========================================================
-   DOM
-========================================================= */
-
-function create(tag = "div", options = {}) {
-  const node = document.createElement(tag);
-
-  if (options.className) {
-    node.className = options.className;
-  }
-
-  if (options.textContent) {
-    node.textContent = options.textContent;
-  }
-
-  for (const [key, value] of Object.entries(options.attrs || {})) {
-    if (value === false || value === null || value === undefined) continue;
-
-    node.setAttribute(key, value === true ? "true" : String(value));
-  }
-
-  for (const [key, value] of Object.entries(options.dataset || {})) {
-    if (value === false || value === null || value === undefined) continue;
-
-    node.dataset[key] = String(value);
-  }
-
-  return node;
-}
-
-function clear(node = null) {
+function clearNode(node = null) {
   if (!node) return false;
 
   try {
     node.replaceChildren();
     return true;
   } catch {
-    node.textContent = "";
-    return true;
-  }
-}
-
-function createField({
-  id,
-  name,
-  label,
-  type = "text",
-  autocomplete = "",
-  placeholder = "",
-} = {}) {
-  const field = create("div", {
-    className: "auth-field login-field",
-  });
-
-  const labelNode = create("label", {
-    className: "auth-label login-label",
-    textContent: label,
-    attrs: {
-      for: id,
-    },
-  });
-
-  const input = create("input", {
-    className: "auth-input login-input",
-    attrs: {
-      id,
-      name,
-      type,
-      autocomplete,
-      placeholder,
-      required: true,
-      "aria-describedby": `${id}-error`,
-      "data-login-input": name,
-    },
-  });
-
-  const error = create("p", {
-    className: "auth-field-error login-field-error",
-    attrs: {
-      id: `${id}-error`,
-      "data-login-error": name,
-      hidden: true,
-    },
-  });
-
-  field.append(labelNode, input, error);
-
-  return field;
-}
-
-function createLoginTemplate() {
-  const view = create("section", {
-    className: "auth-view login-view",
-    attrs: {
-      "aria-labelledby": "login-title",
-      "data-view": "login",
-    },
-  });
-
-  const shell = create("div", {
-    className: "auth-shell login-shell",
-  });
-
-  const card = create("article", {
-    className: "auth-card login-card",
-  });
-
-  const brand = create("div", {
-    className: "auth-brand login-brand",
-  });
-
-  const brandMark = create("div", {
-    className: "auth-brand-mark login-brand-mark",
-    textContent: "ON",
-    attrs: {
-      "aria-hidden": "true",
-    },
-  });
-
-  const brandText = create("div", {
-    className: "auth-brand-text login-brand-text",
-  });
-
-  const appName = create("strong", {
-    className: "auth-brand-name login-brand-name",
-    textContent: "Onion Support",
-  });
-
-  const appClaim = create("span", {
-    className: "auth-brand-claim login-brand-claim",
-    textContent: "Panel privado",
-  });
-
-  brandText.append(appName, appClaim);
-  brand.append(brandMark, brandText);
-
-  const title = create("h1", {
-    className: "auth-title login-title",
-    textContent: "Acceso",
-    attrs: {
-      id: "login-title",
-    },
-  });
-
-  const subtitle = create("p", {
-    className: "auth-subtitle login-subtitle",
-    textContent: "Inicia sesión para entrar en tu panel.",
-  });
-
-  const globalError = create("p", {
-    className: "auth-error login-global-error",
-    attrs: {
-      "data-login-global-error": "true",
-      role: "alert",
-      hidden: true,
-    },
-  });
-
-  const form = create("form", {
-    className: "auth-form login-form",
-    attrs: {
-      id: "login-form",
-      autocomplete: "on",
-      novalidate: true,
-      "data-login-form": "true",
-    },
-  });
-
-  form.append(
-    createField({
-      id: "login-identifier",
-      name: "identifier",
-      label: "Email o usuario",
-      type: "text",
-      autocomplete: "username",
-      placeholder: "tu@email.com",
-    }),
-    createField({
-      id: "login-password",
-      name: "password",
-      label: "Contraseña",
-      type: "password",
-      autocomplete: "current-password",
-      placeholder: "••••••••",
-    })
-  );
-
-  const actions = create("div", {
-    className: "auth-actions login-actions",
-  });
-
-  const submit = create("button", {
-    className: "auth-submit login-submit",
-    textContent: "Entrar",
-    attrs: {
-      type: "submit",
-      "data-login-submit": "true",
-    },
-  });
-
-  actions.appendChild(submit);
-  form.appendChild(actions);
-
-  const links = create("nav", {
-    className: "auth-links login-links",
-    attrs: {
-      "aria-label": "Opciones de acceso",
-    },
-  });
-
-  const forgot = create("a", {
-    className: "auth-link login-link",
-    textContent: "He olvidado mi contraseña",
-    attrs: {
-      href: PASSWORD_REQUEST_ROUTE,
-      "data-spa": "true",
-      "data-route": PASSWORD_REQUEST_ROUTE,
-    },
-  });
-
-  const activate = create("a", {
-    className: "auth-link login-link",
-    textContent: "Activar cuenta",
-    attrs: {
-      href: ACTIVATE_ACCOUNT_ROUTE,
-      "data-spa": "true",
-      "data-route": ACTIVATE_ACCOUNT_ROUTE,
-    },
-  });
-
-  links.append(forgot, activate);
-
-  card.append(brand, title, subtitle, globalError, form, links);
-  shell.appendChild(card);
-  view.appendChild(shell);
-
-  return view;
-}
-
-function getRefs(root) {
-  return {
-    root,
-    form: root.querySelector("[data-login-form]"),
-    identifier: root.querySelector("[name='identifier']"),
-    password: root.querySelector("[name='password']"),
-    submit: root.querySelector("[data-login-submit]"),
-    globalError: root.querySelector("[data-login-global-error]"),
-  };
-}
-
-function setFieldError(refs, name = "", message = "") {
-  const input = refs.form?.elements?.[name] || null;
-  const error = refs.root?.querySelector?.(`[data-login-error="${name}"]`) || null;
-  const hasError = Boolean(message);
-
-  if (input) {
-    input.setAttribute("aria-invalid", hasError ? "true" : "false");
-  }
-
-  if (error) {
-    error.textContent = message;
-    error.hidden = !hasError;
-  }
-
-  return hasError;
-}
-
-function clearErrors(refs) {
-  setFieldError(refs, "identifier", "");
-  setFieldError(refs, "password", "");
-
-  if (refs.globalError) {
-    refs.globalError.textContent = "";
-    refs.globalError.hidden = true;
-  }
-
-  return true;
-}
-
-function setGlobalError(refs, message = "") {
-  if (!refs.globalError) return false;
-
-  refs.globalError.textContent = cleanText(message, "No se pudo iniciar sesión.");
-  refs.globalError.hidden = false;
-
-  return true;
-}
-
-function setLoading(refs, loading = false) {
-  const value = Boolean(loading);
-
-  for (const input of [refs.identifier, refs.password, refs.submit].filter(Boolean)) {
-    input.disabled = value;
-  }
-
-  if (refs.submit) {
-    refs.submit.textContent = value ? "Accediendo..." : "Entrar";
-    refs.submit.dataset.loading = value ? "true" : "false";
-  }
-
-  return true;
-}
-
-function readPayload(refs) {
-  return {
-    identifier: cleanText(refs.identifier?.value || "", ""),
-    password: String(refs.password?.value || ""),
-  };
-}
-
-function validatePayload(payload = {}) {
-  const errors = {};
-
-  if (!cleanText(payload.identifier, "")) {
-    errors.identifier = "Introduce tu email o usuario.";
-  }
-
-  if (!String(payload.password || "")) {
-    errors.password = "Introduce tu contraseña.";
-  }
-
-  return errors;
-}
-
-function applyErrors(refs, errors = {}) {
-  let firstInvalid = null;
-
-  for (const [name, message] of Object.entries(errors)) {
-    setFieldError(refs, name, message);
-
-    if (!firstInvalid) {
-      firstInvalid = refs.form?.elements?.[name] || null;
+    try {
+      node.textContent = "";
+      return true;
+    } catch {
+      return false;
     }
   }
-
-  try {
-    firstInvalid?.focus?.({
-      preventScroll: true,
-    });
-  } catch {
-    firstInvalid?.focus?.();
-  }
-
-  return Object.keys(errors).length > 0;
-}
-
-function authErrorMessage(error = null) {
-  const status = Number(error?.status || error?.statusCode || error?.response?.status || 0);
-  const code = cleanText(error?.code || error?.error || "", "").toUpperCase();
-
-  if (status === 401 || code.includes("INVALID") || code.includes("UNAUTHORIZED")) {
-    return "Credenciales incorrectas.";
-  }
-
-  if (status === 403 || code.includes("DISABLED") || code.includes("BLOCKED")) {
-    return "Tu usuario no tiene acceso activo.";
-  }
-
-  if (status >= 500) {
-    return "El servidor no respondió correctamente. Inténtalo de nuevo.";
-  }
-
-  return cleanText(error?.message || "", "No se pudo iniciar sesión.");
 }
 
 /* =========================================================
@@ -486,6 +140,233 @@ async function goAfterLogin(result = {}, context = {}) {
 }
 
 /* =========================================================
+   TEMPLATE MOUNT
+========================================================= */
+
+function resolveTemplate(context = {}) {
+  if (!isFunction(createLoginTemplate)) {
+    throw new Error("[LoginView] template.js debe exportar createLoginTemplate().");
+  }
+
+  const view = createLoginTemplate({
+    AppCore,
+    Auth,
+    context,
+  });
+
+  if (!view || !(view instanceof Node)) {
+    throw new Error("[LoginView] createLoginTemplate() debe devolver un nodo DOM.");
+  }
+
+  return view;
+}
+
+function mountTemplate(container, context = {}) {
+  const view = resolveTemplate(context);
+
+  clearNode(container);
+  container.appendChild(view);
+
+  return view;
+}
+
+/* =========================================================
+   REFS
+========================================================= */
+
+function getRefs(root = null) {
+  if (!root) {
+    throw new Error("[LoginView] root inválido.");
+  }
+
+  const refs = {
+    root,
+
+    form: root.querySelector("[data-login-form]"),
+
+    identifier:
+      root.querySelector("[data-login-identifier]") ||
+      root.querySelector("[name='identifier']") ||
+      root.querySelector("[name='email']") ||
+      root.querySelector("[name='username']"),
+
+    password:
+      root.querySelector("[data-login-password]") ||
+      root.querySelector("[name='password']"),
+
+    submit: root.querySelector("[data-login-submit]"),
+
+    globalError: root.querySelector("[data-login-global-error]"),
+
+    identifierError:
+      root.querySelector("[data-login-error='identifier']") ||
+      root.querySelector("[data-login-identifier-error]"),
+
+    passwordError:
+      root.querySelector("[data-login-error='password']") ||
+      root.querySelector("[data-login-password-error]"),
+  };
+
+  if (!refs.form) {
+    throw new Error("[LoginView] falta [data-login-form].");
+  }
+
+  if (!refs.identifier) {
+    throw new Error("[LoginView] falta input identifier.");
+  }
+
+  if (!refs.password) {
+    throw new Error("[LoginView] falta input password.");
+  }
+
+  return refs;
+}
+
+/* =========================================================
+   FORM STATE
+========================================================= */
+
+function getFieldErrorNode(refs, name = "") {
+  if (name === "identifier") return refs.identifierError || null;
+  if (name === "password") return refs.passwordError || null;
+
+  return refs.root?.querySelector?.(`[data-login-error="${name}"]`) || null;
+}
+
+function getFieldInput(refs, name = "") {
+  if (name === "identifier") return refs.identifier || null;
+  if (name === "password") return refs.password || null;
+
+  return refs.form?.elements?.[name] || null;
+}
+
+function setFieldError(refs, name = "", message = "") {
+  const input = getFieldInput(refs, name);
+  const error = getFieldErrorNode(refs, name);
+  const hasError = Boolean(message);
+
+  if (input) {
+    input.setAttribute("aria-invalid", hasError ? "true" : "false");
+  }
+
+  if (error) {
+    error.textContent = message;
+    error.hidden = !hasError;
+  }
+
+  return hasError;
+}
+
+function clearErrors(refs) {
+  setFieldError(refs, "identifier", "");
+  setFieldError(refs, "password", "");
+
+  if (refs.globalError) {
+    refs.globalError.textContent = "";
+    refs.globalError.hidden = true;
+  }
+
+  return true;
+}
+
+function setGlobalError(refs, message = "") {
+  if (!refs.globalError) return false;
+
+  refs.globalError.textContent = cleanText(message, "No se pudo iniciar sesión.");
+  refs.globalError.hidden = false;
+
+  return true;
+}
+
+function setLoading(refs, loading = false) {
+  const value = Boolean(loading);
+
+  for (const node of [refs.identifier, refs.password, refs.submit].filter(Boolean)) {
+    node.disabled = value;
+  }
+
+  if (refs.submit) {
+    refs.submit.dataset.loading = value ? "true" : "false";
+    refs.submit.setAttribute("aria-busy", value ? "true" : "false");
+
+    const loadingText = refs.submit.dataset.loadingText || "Accediendo...";
+    const defaultText = refs.submit.dataset.defaultText || refs.submit.textContent || "Entrar";
+
+    if (!refs.submit.dataset.defaultText) {
+      refs.submit.dataset.defaultText = defaultText;
+    }
+
+    refs.submit.textContent = value ? loadingText : defaultText;
+  }
+
+  refs.form?.setAttribute("aria-busy", value ? "true" : "false");
+
+  return true;
+}
+
+function readPayload(refs) {
+  return {
+    identifier: cleanText(refs.identifier?.value || "", ""),
+    password: String(refs.password?.value || ""),
+  };
+}
+
+function validatePayload(payload = {}) {
+  const errors = {};
+
+  if (!cleanText(payload.identifier, "")) {
+    errors.identifier = "Introduce tu email o usuario.";
+  }
+
+  if (!String(payload.password || "")) {
+    errors.password = "Introduce tu contraseña.";
+  }
+
+  return errors;
+}
+
+function applyErrors(refs, errors = {}) {
+  let firstInvalid = null;
+
+  for (const [name, message] of Object.entries(errors)) {
+    setFieldError(refs, name, message);
+
+    if (!firstInvalid) {
+      firstInvalid = getFieldInput(refs, name);
+    }
+  }
+
+  try {
+    firstInvalid?.focus?.({
+      preventScroll: true,
+    });
+  } catch {
+    firstInvalid?.focus?.();
+  }
+
+  return Object.keys(errors).length > 0;
+}
+
+function authErrorMessage(error = null) {
+  const status = Number(error?.status || error?.statusCode || error?.response?.status || 0);
+  const code = cleanText(error?.code || error?.error || "", "").toUpperCase();
+
+  if (status === 401 || code.includes("INVALID") || code.includes("UNAUTHORIZED")) {
+    return "Credenciales incorrectas.";
+  }
+
+  if (status === 403 || code.includes("DISABLED") || code.includes("BLOCKED")) {
+    return "Tu usuario no tiene acceso activo.";
+  }
+
+  if (status >= 500) {
+    return "El servidor no respondió correctamente. Inténtalo de nuevo.";
+  }
+
+  return cleanText(error?.message || "", "No se pudo iniciar sesión.");
+}
+
+/* =========================================================
    INSTANCE
 ========================================================= */
 
@@ -533,11 +414,8 @@ export function renderLoginView(container, context = {}) {
   }
 
   destroyPrevious(container);
-  clear(container);
 
-  const view = createLoginTemplate();
-  container.appendChild(view);
-
+  const view = mountTemplate(container, context);
   const refs = getRefs(view);
 
   let mounted = true;
@@ -604,16 +482,16 @@ export function renderLoginView(container, context = {}) {
     clearErrors(refs);
   }
 
-  refs.form?.addEventListener("submit", submit);
-  refs.identifier?.addEventListener("input", onInput);
-  refs.password?.addEventListener("input", onInput);
+  refs.form.addEventListener("submit", submit);
+  refs.identifier.addEventListener("input", onInput);
+  refs.password.addEventListener("input", onInput);
 
   try {
-    refs.identifier?.focus?.({
+    refs.identifier.focus({
       preventScroll: true,
     });
   } catch {
-    refs.identifier?.focus?.();
+    refs.identifier.focus?.();
   }
 
   const instance = {
@@ -633,9 +511,9 @@ export function renderLoginView(container, context = {}) {
       submitting = false;
 
       try {
-        refs.form?.removeEventListener("submit", submit);
-        refs.identifier?.removeEventListener("input", onInput);
-        refs.password?.removeEventListener("input", onInput);
+        refs.form.removeEventListener("submit", submit);
+        refs.identifier.removeEventListener("input", onInput);
+        refs.password.removeEventListener("input", onInput);
       } catch {
         // noop
       }

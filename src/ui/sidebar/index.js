@@ -3,124 +3,54 @@
    Archivo: /src/ui/sidebar/index.js
 
    Responsabilidad:
-   - Orquestar el sidebar dentro del SPA.
+   - Sidebar mínimo del panel.
+   - Montar en #sidebar-mount.
+   - Pintar marca, menú, usuario y logout.
    - Usar rutas reales desde router/routes.js.
-   - Usar template.js para construir DOM.
-   - Usar user.js para normalizar usuario/rol/avatar view-model.
-   - Usar visibility.js para decidir mostrar/ocultar.
-   - Usar state.js para estado runtime.
-   - Usar actions.js para navegar/logout/open/close.
-   - Usar events.js para listener delegado.
-   - Usar dropdown.js para dropdown de cuenta.
-   - Home visible: /@{user.slug}.
-   - Home interna/canónica: /.
-   - Rutas privadas visibles: /@{user.slug}/{ruta}.
-   - Clientes / Usuarios / Servidor pasan como adminOnly desde rutas.
-   - visibility.js oculta items admin para rol user.
-   - Router/guards bloquean acceso directo a rutas admin.
-   - Rebuild limpio del DOM desde template.js cuando cambia el contexto visible.
-   - Evitar rebuild completo si ruta/usuario/items no cambian.
-   - Mantener sync de estado/visibilidad aunque se omita rebuild.
-   - Snapshot de usuario completo para consumo interno de Home.
-   - Bloqueos delegados en sidebar/constants.js -> core/config.js.
-   - Sin HTML duplicado.
-   - Sin helpers DOM duplicados.
-   - Sin lógica de usuario/avatar duplicada.
-   - Sin navegación propia duplicada.
-   - Sin HTTP.
-   - Sin Toast.
-   - Sin Store propio.
-   - Sin denylist local.
-   - Sin /home.
-   - Sin /403.
-   - Sin /404.
-   - Sin rutas legacy.
-   - Sin 2FA/MFA/OTP.
+   - Ocultar rutas admin para usuarios no admin.
+   - Construir URLs visibles /@{user.slug}/{ruta}.
+   - Delegar navegación en Router.
+   - Delegar logout en Auth.
+   - Sin submódulos, sin HTTP, sin Toast, sin Store,
+     sin dropdown externo, sin template externo y sin rutas inventadas.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { Auth } from "../../features/auth/index.js";
 import { Router } from "../../router/index.js";
+
+import {
+  ROUTES,
+  USER_HOME_PREFIX,
+  buildUserHomeRoute,
+  buildUserScopedRoute,
+  isBlockedRoutePath,
+  normalizeRoutePath,
+  normalizeUserSlug,
+} from "../../core/config.js";
+
 import { getImmutableRoutes } from "../../router/routes.js";
 
-import {
-  HOME_ROUTE,
-  SIDEBAR_BRAND_HREF,
-  SIDEBAR_BRAND_LABEL,
-  SIDEBAR_MODULE_KEY,
-  SIDEBAR_MODULE_NAME,
-  SIDEBAR_ROLE_ADMIN,
-  SIDEBAR_ROLE_USER,
-  SIDEBAR_ROOT_ID,
-  USER_HOME_PREFIX,
-  getSidebarRouteIcon,
-  getSidebarRouteLabel,
-  getSidebarRouteOrder,
-  isSidebarBlockedRoute as isSidebarBlockedRouteFromConstants,
-  isSidebarHomeRoute,
-  isSidebarPublicRoute,
-  normalizeSidebarPath,
-  normalizeSidebarSlug,
-  sidebarHomeLookupPath,
-} from "./constants.js";
+export const SIDEBAR_VERSION = "sidebar.minimal.v1";
 
-import {
-  cacheSidebarDom,
-  clearSidebarDomCache,
-  getSidebarRoot,
-  hideSidebarRoot,
-  isBrowser,
-  isElement,
-  mountSidebarRoot,
-} from "./dom.js";
+const SIDEBAR_ROOT_ID = "app-sidebar";
+const BRAND_LABEL = "Onion Support";
 
-import { createSidebarTemplate } from "./template.js";
-import { getSidebarUser } from "./user.js";
+let initialized = false;
+let mounted = false;
+let sidebarOpen = false;
+let logoutInFlight = false;
 
-import {
-  shouldRenderSidebar,
-  syncSidebarVisibility,
-} from "./visibility.js";
-
-import {
-  getSidebarLogoutInFlight,
-  getSidebarOpen,
-  getSidebarState,
-  markSidebarMounted,
-  markSidebarUnmounted,
-  resetSidebarState,
-  setSidebarInitialized,
-  setSidebarRoot,
-  syncSidebarState,
-} from "./state.js";
-
-import {
-  closeSidebar as closeSidebarAction,
-  handleLogout as handleLogoutAction,
-  navigateFromSidebar,
-  openSidebar as openSidebarAction,
-  setSidebarOpen as setSidebarOpenAction,
-  toggleSidebar as toggleSidebarAction,
-} from "./actions.js";
-
-import {
-  bindSidebarEvents,
-  unbindSidebarEvents,
-} from "./events.js";
-
-import {
-  bindSidebarDropdown,
-  unbindSidebarDropdown,
-} from "./dropdown.js";
-
-export const SIDEBAR_UI_VERSION = "sidebar.ui.v12.optimized-sync";
-
-let syncing = false;
-let lastRenderSignature = "";
+let root = null;
+let cleanupEvents = null;
 
 /* =========================================================
    BASICS
 ========================================================= */
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -130,21 +60,17 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function firstText(...values) {
-  for (const value of values) {
-    const output = String(value ?? "").trim();
-    if (output) return output;
-  }
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  return "";
-}
-
-function unique(values = []) {
-  return [...new Set(values.filter(Boolean))];
+  return output || fallback;
 }
 
 function redact(value = "") {
-  return String(value || "")
+  return cleanText(value, "")
     .replace(
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
       "$1***"
@@ -153,40 +79,327 @@ function redact(value = "") {
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
-function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
-    String(value || "")
-  );
+function titleCase(value = "") {
+  return cleanText(value, "")
+    .replace(/^\/+/, "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function normalizeHashPath(path = HOME_ROUTE) {
-  const value = String(path || HOME_ROUTE).trim();
+/* =========================================================
+   DOM
+========================================================= */
 
-  if (value.startsWith("#!")) {
-    return value.replace(/^#!\/?/, "/") || HOME_ROUTE;
-  }
-
-  if (value.startsWith("#/")) {
-    return value.slice(1) || HOME_ROUTE;
-  }
-
-  return value;
+function byId(id = "") {
+  if (!isBrowser() || !id) return null;
+  return document.getElementById(id);
 }
 
-function isBlockedSidebarPath(path = "") {
-  const raw = String(path || "").trim();
-
-  if (!raw) return true;
+function clear(node = null) {
+  if (!node) return false;
 
   try {
-    return isSidebarBlockedRouteFromConstants(raw) === true;
+    node.replaceChildren();
+    return true;
   } catch {
+    node.textContent = "";
     return true;
   }
 }
 
+function create(tag = "div", options = {}) {
+  const node = document.createElement(tag);
+
+  if (options.className) {
+    node.className = options.className;
+  }
+
+  if (options.textContent) {
+    node.textContent = options.textContent;
+  }
+
+  for (const [key, value] of Object.entries(options.attrs || {})) {
+    if (value === false || value === null || value === undefined) continue;
+    node.setAttribute(key, value === true ? "true" : String(value));
+  }
+
+  for (const [key, value] of Object.entries(options.dataset || {})) {
+    if (value === false || value === null || value === undefined) continue;
+    node.dataset[key] = String(value);
+  }
+
+  return node;
+}
+
+function setHidden(node = null, hidden = false) {
+  if (!node) return false;
+
+  const value = Boolean(hidden);
+
+  node.hidden = value;
+  node.setAttribute("aria-hidden", value ? "true" : "false");
+
+  return true;
+}
+
+function getMount() {
+  if (!isBrowser()) return null;
+
+  return (
+    byId("sidebar-mount") ||
+    byId("app-sidebar") ||
+    document.querySelector?.("[data-sidebar-mount]") ||
+    document.querySelector?.("[data-sidebar-root]") ||
+    null
+  );
+}
+
+function cacheDom() {
+  try {
+    AppCore.dom = isObject(AppCore.dom) ? AppCore.dom : {};
+
+    AppCore.dom.sidebar = root;
+    AppCore.dom.appSidebar = root;
+    AppCore.dom.sidebarRoot = root;
+    AppCore.dom.sidebarMount =
+      byId("sidebar-mount") ||
+      (root?.parentElement?.id === "sidebar-mount" ? root.parentElement : null);
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearDomCache() {
+  try {
+    if (!isObject(AppCore.dom)) return false;
+
+    delete AppCore.dom.sidebar;
+    delete AppCore.dom.appSidebar;
+    delete AppCore.dom.sidebarRoot;
+    delete AppCore.dom.sidebarMount;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   USER
+========================================================= */
+
+function getAuthUser() {
+  try {
+    return Auth.getUser?.() || Auth.getCurrentUser?.() || AppCore.getCurrentUser?.() || null;
+  } catch {
+    return null;
+  }
+}
+
+function getRole() {
+  try {
+    return Auth.getRole?.() || Auth.getCurrentRole?.() || AppCore.getCurrentRole?.() || "";
+  } catch {
+    return "";
+  }
+}
+
+function isAuthenticated() {
+  try {
+    return Auth.isAuthenticated?.() === true || AppCore.isAuthenticated?.() === true;
+  } catch {
+    return false;
+  }
+}
+
+function isAdmin() {
+  try {
+    return Auth.isAdmin?.() === true || getRole() === "admin";
+  } catch {
+    return false;
+  }
+}
+
+function safeImageUrl(value = "") {
+  const raw = cleanText(value, "");
+
+  if (!raw) return "";
+  if (/[\r\n\t]/.test(raw)) return "";
+  if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
+
+  if (raw.startsWith("/")) return raw;
+  if (/^https?:\/\//i.test(raw)) return raw;
+
+  return "";
+}
+
+function initialsFrom(value = "") {
+  return (
+    cleanText(value, "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || "")
+      .join("")
+      .slice(0, 2) || "ON"
+  );
+}
+
+function getUserViewModel() {
+  const raw = getAuthUser();
+
+  if (!raw || !isAuthenticated()) {
+    return {
+      hasUser: false,
+      role: "",
+      isAdmin: false,
+      displayName: "Usuario",
+      initials: "ON",
+      avatarUrl: "",
+      slug: "",
+    };
+  }
+
+  const publicUser = isFunction(AppCore.publicUser)
+    ? AppCore.publicUser(raw)
+    : raw;
+
+  const role = cleanText(publicUser?.role || raw.role || raw.rol || getRole(), "user");
+  const displayName = cleanText(
+    publicUser?.displayName ||
+      publicUser?.fullName ||
+      publicUser?.name ||
+      raw.displayName ||
+      raw.fullName ||
+      raw.name ||
+      raw.nombre ||
+      raw.username ||
+      "Usuario",
+    "Usuario"
+  );
+
+  const slug = normalizeUserSlug(
+    publicUser?.slug ||
+      raw.slug ||
+      raw.lookup?.slug ||
+      raw.profile?.slug ||
+      raw.username ||
+      raw.userId ||
+      raw.id ||
+      ""
+  );
+
+  const avatarUrl = safeImageUrl(
+    publicUser?.avatarUrl ||
+      publicUser?.avatar ||
+      publicUser?.picture ||
+      publicUser?.photoUrl ||
+      raw.avatarUrl ||
+      raw.avatar ||
+      raw.picture ||
+      raw.photoUrl ||
+      raw.profile?.avatarUrl ||
+      ""
+  );
+
+  return {
+    hasUser: true,
+
+    id: publicUser?.id || raw.id || raw.userId || null,
+    userId: publicUser?.userId || raw.userId || raw.id || null,
+
+    username: publicUser?.username || raw.username || "",
+    slug,
+
+    displayName,
+    role,
+    roles: role ? [role] : [],
+
+    roleLabel: role === "admin" ? "Administrador" : "Usuario",
+
+    isAdmin: role === "admin",
+    isUser: role === "user",
+
+    avatarUrl,
+    hasAvatar: Boolean(avatarUrl),
+    initials: initialsFrom(displayName),
+  };
+}
+
+/* =========================================================
+   PATHS
+========================================================= */
+
+function normalizePath(path = "/") {
+  try {
+    return normalizeRoutePath(path) || "/";
+  } catch {
+    let value = cleanText(path, "/")
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/\\/g, "/");
+
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    value = value.replace(/\/{2,}/g, "/");
+
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "") || "/";
+    }
+
+    return value || "/";
+  }
+}
+
+function routeLookupPath(path = "/") {
+  const clean = normalizePath(path);
+
+  if (!clean.startsWith(USER_HOME_PREFIX)) {
+    return clean;
+  }
+
+  const rest = clean.slice(USER_HOME_PREFIX.length);
+  const [, ...segments] = rest.split("/");
+
+  return segments.length ? normalizePath(`/${segments.join("/")}`) : "/";
+}
+
+function currentPublicPath() {
+  try {
+    return (
+      Router.getCurrentPublicPath?.() ||
+      Router.getCurrentPath?.() ||
+      AppCore.state?.publicPath ||
+      (isBrowser()
+        ? `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
+        : "/")
+    );
+  } catch {
+    return "/";
+  }
+}
+
+function currentCanonicalPath() {
+  try {
+    return normalizePath(
+      Router.getCurrentCanonicalPath?.() ||
+        AppCore.state?.canonicalPath ||
+        AppCore.state?.route ||
+        routeLookupPath(currentPublicPath())
+    );
+  } catch {
+    return "/";
+  }
+}
+
 function isUnsafePath(path = "") {
-  const raw = String(path || "").trim();
+  const raw = cleanText(path, "");
   const lower = raw.toLowerCase();
 
   return Boolean(
@@ -194,475 +407,623 @@ function isUnsafePath(path = "") {
       raw.startsWith("//") ||
       /^[a-z][a-z0-9+.-]*:/i.test(raw) ||
       /[\r\n\t\\]/.test(raw) ||
-      hasSensitiveQuery(raw) ||
+      /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(raw) ||
       lower.startsWith("javascript:") ||
       lower.startsWith("data:") ||
-      lower.startsWith("vbscript:") ||
-      lower.startsWith("mailto:") ||
-      lower.startsWith("tel:") ||
-      lower.startsWith("file:") ||
-      lower.startsWith("blob:")
+      lower.startsWith("vbscript:")
   );
 }
 
-function safeSidebarPath(path = HOME_ROUTE, fallback = HOME_ROUTE) {
-  let raw = normalizeHashPath(path || fallback);
+function safePath(path = "/", fallback = "/") {
+  const raw = cleanText(path || fallback, fallback);
 
-  if (!raw && fallback === "") {
-    return "";
+  if (isUnsafePath(raw)) return fallback;
+
+  const normalized = normalizePath(raw);
+
+  try {
+    if (isBlockedRoutePath(normalized)) return fallback;
+  } catch {
+    return fallback;
   }
 
-  if (raw.startsWith("#") && !raw.startsWith("#/") && !raw.startsWith("#!")) {
-    raw = fallback;
-  }
-
-  if (isUnsafePath(raw)) {
-    raw = fallback;
-  }
-
-  if (!raw && fallback === "") {
-    return "";
-  }
-
-  if (!raw.startsWith("/")) {
-    raw = `/${raw}`;
-  }
-
-  if (isBlockedSidebarPath(raw)) {
-    if (fallback === "") return "";
-
-    const safeFallback = normalizeSidebarPath(fallback || HOME_ROUTE);
-
-    return isBlockedSidebarPath(safeFallback)
-      ? HOME_ROUTE
-      : safeFallback;
-  }
-
-  const normalized = normalizeSidebarPath(raw || fallback);
-
-  if (isBlockedSidebarPath(normalized)) {
-    if (fallback === "") return "";
-
-    const safeFallback = normalizeSidebarPath(fallback || HOME_ROUTE);
-
-    return isBlockedSidebarPath(safeFallback)
-      ? HOME_ROUTE
-      : safeFallback;
-  }
-
-  return normalized || normalizeSidebarPath(fallback || HOME_ROUTE);
+  return normalized || fallback;
 }
 
-/* =========================================================
-   ROUTER HREF
-========================================================= */
+function userHomeHref(user = getUserViewModel()) {
+  const slug = normalizeUserSlug(user.slug || "");
 
-function userHomeHref(context = {}, fallback = SIDEBAR_BRAND_HREF) {
-  const slug = normalizeSidebarSlug(context.user?.slug || "");
+  if (!slug) return "/";
 
-  if (slug) {
+  try {
+    return buildUserHomeRoute(slug) || `${USER_HOME_PREFIX}${slug}`;
+  } catch {
     return `${USER_HOME_PREFIX}${slug}`;
   }
-
-  return safeSidebarPath(fallback || HOME_ROUTE, HOME_ROUTE);
 }
 
-function routerPublicPath(path = HOME_ROUTE, context = {}) {
-  const safePath = safeSidebarPath(path || HOME_ROUTE, HOME_ROUTE);
-  const lookupPath = sidebarHomeLookupPath(safePath);
+function routeHref(routePath = "/", user = getUserViewModel()) {
+  const path = safePath(routePath, "/");
+  const slug = normalizeUserSlug(user.slug || "");
 
-  if (!lookupPath || isBlockedSidebarPath(lookupPath)) {
-    return HOME_ROUTE;
+  if (!slug) return path;
+
+  try {
+    return buildUserScopedRoute(slug, path);
+  } catch {
+    return path === "/"
+      ? `${USER_HOME_PREFIX}${slug}`
+      : `${USER_HOME_PREFIX}${slug}${path}`;
   }
-
-  if (isFunction(Router?.buildPublicPath)) {
-    try {
-      const built = safeSidebarPath(
-        Router.buildPublicPath(lookupPath, {
-          useSlugHome: true,
-          useSlugPrivate: true,
-        }),
-        ""
-      );
-
-      if (built && !isBlockedSidebarPath(built)) return built;
-    } catch {
-      // fallback abajo
-    }
-  }
-
-  if (lookupPath === HOME_ROUTE) {
-    return userHomeHref(context, HOME_ROUTE);
-  }
-
-  const home = userHomeHref(context, HOME_ROUTE);
-
-  if (home.startsWith(USER_HOME_PREFIX)) {
-    return safeSidebarPath(`${home}${lookupPath}`, lookupPath);
-  }
-
-  return safeSidebarPath(lookupPath, HOME_ROUTE);
-}
-
-function routeHref(path = HOME_ROUTE, context = {}) {
-  return routerPublicPath(path, context);
 }
 
 /* =========================================================
-   ROUTE / SESSION CONTEXT
+   MENU
 ========================================================= */
 
-function browserPath() {
-  if (!isBrowser()) return HOME_ROUTE;
+function routeIcon(path = "/") {
+  const clean = normalizePath(path);
 
-  try {
-    return `${window.location.pathname || HOME_ROUTE}${window.location.search || ""}${window.location.hash || ""}`;
-  } catch {
-    return HOME_ROUTE;
-  }
+  if (clean === "/") return "⌂";
+  if (clean === ROUTES.incidencias) return "!";
+  if (clean === ROUTES.facturas) return "€";
+  if (clean === ROUTES.clientes) return "C";
+  if (clean === ROUTES.usuarios) return "U";
+  if (clean === ROUTES.servidor) return "S";
+  if (clean === ROUTES.cuenta) return "◎";
+  if (clean === ROUTES.ajustes) return "⚙";
+
+  return "•";
 }
 
-function currentPublicPath() {
-  try {
-    return safeSidebarPath(
-      Router?.getCurrentPublicPath?.() ||
-        Router?.getCurrentPath?.() ||
-        AppCore?.state?.publicPath ||
-        browserPath(),
-      HOME_ROUTE
-    );
-  } catch {
-    return safeSidebarPath(browserPath(), HOME_ROUTE);
-  }
+function routeLabel(route = null) {
+  const path = normalizePath(route?.path || "/");
+
+  if (route?.title) return cleanText(route.title);
+  if (route?.label) return cleanText(route.label);
+  if (route?.name) return titleCase(route.name);
+
+  if (path === "/") return "Inicio";
+
+  return titleCase(path);
 }
 
-function currentCanonicalPath() {
-  try {
-    const path = sidebarHomeLookupPath(
-      Router?.getCurrentCanonicalPath?.() ||
-        AppCore?.state?.canonicalPath ||
-        AppCore?.state?.route ||
-        currentPublicPath()
-    );
-
-    return !path || isBlockedSidebarPath(path) ? HOME_ROUTE : path;
-  } catch {
-    return HOME_ROUTE;
-  }
+function isRouteAdmin(route = null) {
+  return Boolean(route?.adminOnly || route?.requiresAdmin || route?.routeGroup === "admin");
 }
 
-function getRoutes() {
+function isRouteVisible(route = null, user = getUserViewModel()) {
+  if (!route?.path) return false;
+  if (route.public === true) return false;
+  if (route.hideShell === true || route.layout === "auth") return false;
+  if (route.showInSidebar === false || route.sidebar === false) return false;
+
+  const path = normalizePath(route.path);
+
+  if (!path) return false;
+
   try {
-    const routes = getImmutableRoutes();
-    return Array.isArray(routes) ? routes : [];
-  } catch {
-    return [];
-  }
-}
-
-function getCurrentRoute(path = currentCanonicalPath()) {
-  const current = sidebarHomeLookupPath(path);
-
-  return (
-    getRoutes().find((route) => {
-      if (!route?.path) return false;
-      return sidebarHomeLookupPath(route.path) === current;
-    }) || null
-  );
-}
-
-function isAuthenticated() {
-  try {
-    if (isFunction(Auth?.isAuthenticated)) {
-      return Auth.isAuthenticated() === true;
-    }
-
-    return AppCore?.state?.authenticated === true;
+    if (isBlockedRoutePath(path)) return false;
   } catch {
     return false;
   }
+
+  if (isRouteAdmin(route) && user.isAdmin !== true) return false;
+
+  return true;
+}
+
+function isActive(path = "/", current = currentCanonicalPath()) {
+  const itemPath = routeLookupPath(path);
+  const activePath = routeLookupPath(current);
+
+  if (itemPath === "/") {
+    return activePath === "/";
+  }
+
+  return activePath === itemPath || activePath.startsWith(`${itemPath}/`);
+}
+
+function getMenuItems(context = getContext()) {
+  const user = context.user;
+  const seen = new Set();
+
+  return getImmutableRoutes()
+    .filter((route) => isRouteVisible(route, user))
+    .map((route, index) => {
+      const path = normalizePath(route.path);
+      const lookup = routeLookupPath(path);
+
+      if (seen.has(lookup)) return null;
+      seen.add(lookup);
+
+      return {
+        key: cleanText(route.sidebarKey || route.viewKey || route.name || lookup, lookup),
+        href: routeHref(path, user),
+        path,
+        label: routeLabel(route),
+        icon: routeIcon(path),
+        active: isActive(path, context.canonicalPath),
+        adminOnly: isRouteAdmin(route),
+        order: Number(route.order || index || 0),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.order - b.order || a.href.localeCompare(b.href));
+}
+
+/* =========================================================
+   CONTEXT
+========================================================= */
+
+function getCurrentRoute() {
+  try {
+    return Router.getCurrentRoute?.() || null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldRenderSidebar(context = getContext()) {
+  if (!context.authenticated || !context.user?.hasUser) return false;
+
+  const route = context.route;
+
+  if (route?.public === true) return false;
+  if (route?.hideShell === true) return false;
+  if (route?.layout === "auth") return false;
+
+  return true;
 }
 
 function getContext() {
-  const publicPath = currentPublicPath();
-  const canonicalPath = currentCanonicalPath();
-
-  const user = getSidebarUser({
-    AppCore,
-    Auth,
-  });
-
-  const hasUser = user?.hasUser === true;
-  const hasSession = hasUser && isAuthenticated();
+  const user = getUserViewModel();
 
   return {
     AppCore,
     Auth,
     Router,
 
-    publicPath,
-    canonicalPath,
-    path: publicPath,
-    currentPath: publicPath,
-
-    route: getCurrentRoute(canonicalPath),
-
     user,
-    role: user?.role || "",
-
-    hasUser,
-    hasSession,
-    sessionValid: hasSession,
-    authenticated: hasSession,
-  };
-}
-
-/* =========================================================
-   MENU ITEMS
-========================================================= */
-
-function normalizeSidebarRole(value = "") {
-  const role = String(value || "").trim().toLowerCase();
-
-  if (role === SIDEBAR_ROLE_ADMIN) return SIDEBAR_ROLE_ADMIN;
-  if (role === SIDEBAR_ROLE_USER) return SIDEBAR_ROLE_USER;
-
-  return "";
-}
-
-function routeRoles(route = null) {
-  return unique(
-    [
-      route?.role,
-      route?.roles,
-      route?.meta?.role,
-      route?.meta?.roles,
-    ]
-      .flat(Infinity)
-      .map(normalizeSidebarRole)
-      .filter(Boolean)
-  );
-}
-
-function isAdminRoute(route = null) {
-  const roles = routeRoles(route);
-
-  return Boolean(
-    route?.routeGroup === "admin" ||
-      route?.meta?.routeGroup === "admin" ||
-      route?.admin === true ||
-      route?.adminOnly === true ||
-      route?.requiresAdmin === true ||
-      route?.meta?.admin === true ||
-      route?.meta?.adminOnly === true ||
-      route?.meta?.requiresAdmin === true ||
-      (
-        roles.includes(SIDEBAR_ROLE_ADMIN) &&
-        !roles.includes(SIDEBAR_ROLE_USER)
-      )
-  );
-}
-
-function isPublicRoute(route = null, path = HOME_ROUTE) {
-  return Boolean(
-    isSidebarPublicRoute(path) ||
-      route?.public === true ||
-      route?.hideShell === true ||
-      route?.shell === false ||
-      route?.layout === "auth" ||
-      route?.authScreen === true
-  );
-}
-
-function isHiddenRoute(route = null) {
-  return Boolean(
-    route?.sidebar === false ||
-      route?.showInSidebar === false ||
-      route?.hideFromSidebar === true ||
-      route?.menu === false ||
-      route?.nav === false
-  );
-}
-
-function isActivePath(routePath = HOME_ROUTE, current = currentPublicPath()) {
-  const path = sidebarHomeLookupPath(routePath);
-  const active = sidebarHomeLookupPath(current);
-
-  if (!path || isBlockedSidebarPath(path)) return false;
-
-  if (path === HOME_ROUTE) {
-    return active === HOME_ROUTE || isSidebarHomeRoute(current);
-  }
-
-  return active === path || active.startsWith(`${path}/`);
-}
-
-function toSidebarItem(route = null, index = 0, context = getContext()) {
-  if (!isObject(route) || !route.path) return null;
-
-  const path = sidebarHomeLookupPath(route.path);
-
-  if (!path || isBlockedSidebarPath(path)) return null;
-
-  if (isPublicRoute(route, path) || isHiddenRoute(route)) {
-    return null;
-  }
-
-  const adminOnly = isAdminRoute(route);
-
-  const explicitOrder =
-    route.sidebarOrder ??
-    route.navOrder ??
-    route.menuOrder ??
-    route.order ??
-    route.meta?.order ??
-    index;
-
-  const explicitLabel = firstText(
-    route.sidebarLabel,
-    route.navLabel,
-    route.menuLabel,
-    route.title,
-    route.label,
-    route.name
-  );
-
-  const explicitIcon = firstText(
-    route.sidebarIcon,
-    route.navIcon,
-    route.menuIcon,
-    route.icon,
-    route.meta?.icon
-  );
-
-  const href = routeHref(path, context);
-
-  if (!href || isBlockedSidebarPath(href)) return null;
-
-  return {
-    key: firstText(route.sidebarKey, route.viewKey, route.name, path),
-    order: getSidebarRouteOrder(path, explicitOrder),
-
-    href,
-    label: getSidebarRouteLabel(path, explicitLabel),
-    icon: getSidebarRouteIcon(path, explicitIcon),
-
-    active: isActivePath(path, context.publicPath),
-    adminOnly,
-
-    requiredRole: adminOnly ? SIDEBAR_ROLE_ADMIN : "",
-    requiredRoles: adminOnly ? [SIDEBAR_ROLE_ADMIN] : [],
-  };
-}
-
-function sidebarItems(context = getContext()) {
-  const seen = new Set();
-
-  return getRoutes()
-    .map((route, index) => toSidebarItem(route, index, context))
-    .filter(Boolean)
-    .filter((item) => {
-      const lookupPath = sidebarHomeLookupPath(item.href);
-
-      if (!lookupPath || isBlockedSidebarPath(lookupPath) || seen.has(lookupPath)) {
-        return false;
-      }
-
-      seen.add(lookupPath);
-      return true;
-    })
-    .sort((left, right) => {
-      return left.order - right.order || left.href.localeCompare(right.href);
-    })
-    .map(({ order, ...item }) => item);
-}
-
-/* =========================================================
-   RENDER SIGNATURE
-========================================================= */
-
-function userRenderSignature(user = null) {
-  if (!isObject(user) || user.hasUser !== true) {
-    return {
-      hasUser: false,
-    };
-  }
-
-  return {
-    hasUser: true,
-
-    id: user.id || null,
-    userId: user.userId || null,
-    slug: user.slug || null,
-    username: user.username || "",
-
-    displayName: user.displayName || "",
     role: user.role || "",
-    roleLabel: user.roleLabel || "",
 
-    avatarUrl: user.avatarUrl || "",
-    initials: user.initials || "",
+    authenticated: isAuthenticated(),
+    hasUser: user.hasUser === true,
+    hasSession: isAuthenticated() && user.hasUser === true,
 
-    isAdmin: user.isAdmin === true,
-    isUser: user.isUser === true,
+    publicPath: currentPublicPath(),
+    canonicalPath: currentCanonicalPath(),
+    route: getCurrentRoute(),
   };
 }
 
-function itemRenderSignature(items = []) {
-  return (Array.isArray(items) ? items : []).map((item) => ({
-    key: item.key || "",
-    href: item.href || "",
-    label: item.label || "",
-    icon: item.icon || "",
-    active: item.active === true,
-    adminOnly: item.adminOnly === true,
-    requiredRole: item.requiredRole || "",
-    requiredRoles: Array.isArray(item.requiredRoles)
-      ? item.requiredRoles.join(",")
-      : String(item.requiredRoles || ""),
-  }));
+/* =========================================================
+   RENDER
+========================================================= */
+
+function createBrand(context) {
+  const brand = create("a", {
+    className: "sidebar-brand",
+    attrs: {
+      href: userHomeHref(context.user),
+      "data-spa": "true",
+      "data-route": userHomeHref(context.user),
+      "aria-label": BRAND_LABEL,
+    },
+  });
+
+  const mark = create("span", {
+    className: "sidebar-brand-mark",
+    textContent: "ON",
+    attrs: {
+      "aria-hidden": "true",
+    },
+  });
+
+  const label = create("span", {
+    className: "sidebar-brand-label",
+    textContent: BRAND_LABEL,
+  });
+
+  brand.append(mark, label);
+
+  return brand;
 }
 
-function buildRenderSignature(context = {}, items = []) {
-  try {
-    return JSON.stringify({
-      publicPath: context.publicPath || "",
-      canonicalPath: context.canonicalPath || "",
-      role: context.role || "",
+function createMenuItem(item) {
+  const link = create("a", {
+    className: `sidebar-link${item.active ? " is-active" : ""}`,
+    attrs: {
+      href: item.href,
+      "data-spa": "true",
+      "data-route": item.href,
+      "data-sidebar-key": item.key,
+      "aria-current": item.active ? "page" : "false",
+    },
+  });
 
-      authenticated: context.authenticated === true,
-      hasSession: context.hasSession === true,
+  const icon = create("span", {
+    className: "sidebar-link-icon",
+    textContent: item.icon,
+    attrs: {
+      "aria-hidden": "true",
+    },
+  });
 
-      user: userRenderSignature(context.user),
-      items: itemRenderSignature(items),
-    });
-  } catch {
-    /*
-      Si por cualquier motivo no se puede serializar una firma estable,
-      forzamos rebuild antes que reutilizar un DOM potencialmente obsoleto.
-    */
-    return `unstable:${Date.now()}`;
+  const label = create("span", {
+    className: "sidebar-link-label",
+    textContent: item.label,
+  });
+
+  link.append(icon, label);
+
+  if (item.adminOnly) {
+    link.dataset.adminOnly = "true";
   }
+
+  return link;
+}
+
+function createMenu(items = []) {
+  const nav = create("nav", {
+    className: "sidebar-nav",
+    attrs: {
+      "aria-label": "Navegación principal",
+    },
+  });
+
+  const list = create("ul", {
+    className: "sidebar-menu",
+  });
+
+  for (const item of items) {
+    const li = create("li", {
+      className: "sidebar-menu-item",
+    });
+
+    li.appendChild(createMenuItem(item));
+    list.appendChild(li);
+  }
+
+  nav.appendChild(list);
+
+  return nav;
+}
+
+function createAvatar(user) {
+  const avatar = create("div", {
+    className: "sidebar-user-avatar",
+  });
+
+  if (user.hasAvatar && user.avatarUrl) {
+    const img = create("img", {
+      className: "sidebar-user-avatar-img",
+      attrs: {
+        src: user.avatarUrl,
+        alt: "",
+        loading: "lazy",
+        referrerpolicy: "no-referrer",
+      },
+    });
+
+    avatar.appendChild(img);
+    return avatar;
+  }
+
+  avatar.textContent = user.initials || "ON";
+  avatar.setAttribute("aria-hidden", "true");
+
+  return avatar;
+}
+
+function createUserBlock(user) {
+  const block = create("section", {
+    className: "sidebar-user",
+    attrs: {
+      "aria-label": "Usuario",
+    },
+  });
+
+  const summary = create("div", {
+    className: "sidebar-user-summary",
+  });
+
+  const info = create("div", {
+    className: "sidebar-user-info",
+  });
+
+  const name = create("strong", {
+    className: "sidebar-user-name",
+    textContent: user.displayName || "Usuario",
+  });
+
+  const role = create("span", {
+    className: "sidebar-user-role",
+    textContent: user.roleLabel || "Usuario",
+  });
+
+  info.append(name, role);
+  summary.append(createAvatar(user), info);
+
+  const logout = create("button", {
+    className: "sidebar-logout",
+    textContent: logoutInFlight ? "Cerrando..." : "Cerrar sesión",
+    attrs: {
+      type: "button",
+      "data-sidebar-action": "logout",
+      disabled: logoutInFlight ? "true" : null,
+    },
+  });
+
+  block.append(summary, logout);
+
+  return block;
+}
+
+function createRoot(context, items) {
+  const aside = create("aside", {
+    className: `sidebar app-sidebar${sidebarOpen ? " is-open" : ""}`,
+    attrs: {
+      id: SIDEBAR_ROOT_ID,
+      "data-sidebar-root": "true",
+      "data-sidebar-open": sidebarOpen ? "true" : "false",
+      "aria-label": "Menú principal",
+    },
+  });
+
+  aside.append(createBrand(context), createMenu(items), createUserBlock(context.user));
+
+  return aside;
+}
+
+function mountRoot(nextRoot) {
+  const mount = getMount();
+
+  if (!mount || !nextRoot) return null;
+
+  unbindEvents();
+
+  if (mount.matches?.("[data-sidebar-root], #app-sidebar")) {
+    clear(mount);
+
+    for (const child of [...nextRoot.childNodes]) {
+      mount.appendChild(child);
+    }
+
+    mount.className = nextRoot.className;
+    mount.dataset.sidebarRoot = "true";
+    mount.dataset.sidebarOpen = sidebarOpen ? "true" : "false";
+    mount.setAttribute("aria-label", "Menú principal");
+
+    root = mount;
+  } else {
+    clear(mount);
+    mount.appendChild(nextRoot);
+    root = nextRoot;
+  }
+
+  setHidden(root, false);
+  cacheDom();
+  bindEvents();
+
+  mounted = true;
+
+  return root;
+}
+
+function hideSidebar() {
+  unbindEvents();
+
+  const current = root || byId(SIDEBAR_ROOT_ID);
+
+  if (current) {
+    setHidden(current, true);
+  }
+
+  mounted = false;
+  cacheDom();
+
+  return true;
+}
+
+function syncSidebarStateToDom() {
+  if (!root) return false;
+
+  root.classList.toggle("is-open", sidebarOpen);
+  root.dataset.sidebarOpen = sidebarOpen ? "true" : "false";
+
+  try {
+    document.body?.classList.toggle("sidebar-open", sidebarOpen);
+    document.documentElement?.classList.toggle("sidebar-open", sidebarOpen);
+  } catch {
+    // noop
+  }
+
+  try {
+    AppCore.setSidebarOpen?.(sidebarOpen);
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+function renderSidebar(context = getContext()) {
+  if (!shouldRenderSidebar(context)) {
+    hideSidebar();
+    return SidebarUI;
+  }
+
+  const items = getMenuItems(context);
+  const nextRoot = createRoot(context, items);
+
+  mountRoot(nextRoot);
+  syncSidebarStateToDom();
+
+  return SidebarUI;
+}
+
+function sync() {
+  if (!isBrowser()) return SidebarUI;
+
+  return renderSidebar(getContext());
 }
 
 /* =========================================================
-   CORE REGISTRATION
+   ACTIONS
+========================================================= */
+
+async function navigateTo(path = "/", options = {}) {
+  const context = getContext();
+  const target = routeHref(path, context.user);
+
+  if (!target) return false;
+
+  await Router.navigate?.(target, {
+    source: "sidebar",
+    ...options,
+  });
+
+  closeSidebar();
+  sync();
+
+  return true;
+}
+
+function setSidebarOpen(value = true) {
+  sidebarOpen = value === true;
+  syncSidebarStateToDom();
+  return sidebarOpen;
+}
+
+function openSidebar() {
+  return setSidebarOpen(true);
+}
+
+function closeSidebar() {
+  return setSidebarOpen(false);
+}
+
+function toggleSidebar() {
+  return setSidebarOpen(!sidebarOpen);
+}
+
+async function handleLogout(options = {}) {
+  if (logoutInFlight) return false;
+
+  logoutInFlight = true;
+  sync();
+
+  try {
+    await Auth.logout?.(options);
+  } finally {
+    logoutInFlight = false;
+    sidebarOpen = false;
+
+    await Router.replace?.(ROUTES.login || "/login", {
+      source: "sidebar.logout",
+      replaceState: true,
+    });
+
+    sync();
+  }
+
+  return true;
+}
+
+/* =========================================================
+   EVENTS
+========================================================= */
+
+function linkHref(element = null) {
+  return cleanText(
+    element?.dataset?.route ||
+      element?.dataset?.href ||
+      element?.dataset?.to ||
+      element?.getAttribute?.("href"),
+    ""
+  );
+}
+
+function onClick(event) {
+  const action = event.target?.closest?.("[data-sidebar-action]");
+  const link = event.target?.closest?.("a[data-spa], a[data-route]");
+
+  if (action) {
+    const type = cleanText(action.dataset.sidebarAction, "");
+
+    event.preventDefault();
+
+    if (type === "logout") {
+      void handleLogout();
+      return;
+    }
+
+    if (type === "open") openSidebar();
+    if (type === "close") closeSidebar();
+    if (type === "toggle") toggleSidebar();
+
+    return;
+  }
+
+  if (!link) return;
+
+  const href = linkHref(link);
+
+  if (!href || isUnsafePath(href)) return;
+
+  event.preventDefault();
+
+  void navigateTo(href);
+}
+
+function bindEvents() {
+  if (!root || cleanupEvents) return false;
+
+  root.addEventListener("click", onClick);
+
+  cleanupEvents = () => {
+    try {
+      root?.removeEventListener("click", onClick);
+    } catch {
+      // noop
+    }
+
+    cleanupEvents = null;
+  };
+
+  return true;
+}
+
+function unbindEvents() {
+  try {
+    cleanupEvents?.();
+  } catch {
+    cleanupEvents = null;
+  }
+
+  return true;
+}
+
+/* =========================================================
+   REGISTRATION
 ========================================================= */
 
 function registerModule() {
   try {
     AppCore.ui = isObject(AppCore.ui) ? AppCore.ui : {};
-    AppCore.ui.sidebar = api;
+    AppCore.ui.sidebar = SidebarUI;
 
-    AppCore.modules?.register?.(SIDEBAR_MODULE_KEY, api, {
+    AppCore.sidebar = SidebarUI;
+    AppCore.Sidebar = SidebarUI;
+
+    AppCore.registerModule?.("sidebar", SidebarUI, {
       overwrite: true,
     });
 
-    if (SIDEBAR_MODULE_NAME && SIDEBAR_MODULE_NAME !== SIDEBAR_MODULE_KEY) {
-      AppCore.modules?.register?.(SIDEBAR_MODULE_NAME, api, {
-        overwrite: true,
-      });
-    }
+    AppCore.modules?.register?.("sidebar", SidebarUI, {
+      overwrite: true,
+    });
 
     return true;
   } catch {
@@ -672,15 +1033,19 @@ function registerModule() {
 
 function unregisterModule() {
   try {
-    if (AppCore.ui?.sidebar === api) {
+    if (AppCore.ui?.sidebar === SidebarUI) {
       delete AppCore.ui.sidebar;
     }
 
-    AppCore.modules?.remove?.(SIDEBAR_MODULE_KEY);
-
-    if (SIDEBAR_MODULE_NAME && SIDEBAR_MODULE_NAME !== SIDEBAR_MODULE_KEY) {
-      AppCore.modules?.remove?.(SIDEBAR_MODULE_NAME);
+    if (AppCore.sidebar === SidebarUI) {
+      delete AppCore.sidebar;
     }
+
+    if (AppCore.Sidebar === SidebarUI) {
+      delete AppCore.Sidebar;
+    }
+
+    AppCore.modules?.remove?.("sidebar");
 
     return true;
   } catch {
@@ -689,320 +1054,34 @@ function unregisterModule() {
 }
 
 /* =========================================================
-   RENDER / SYNC
-========================================================= */
-
-function unbindAllSidebarDom() {
-  const root = getSidebarRoot();
-
-  try {
-    unbindSidebarDropdown(root);
-  } catch {
-    // noop
-  }
-
-  try {
-    unbindSidebarEvents();
-  } catch {
-    // noop
-  }
-
-  return true;
-}
-
-function hideCurrentSidebar() {
-  unbindAllSidebarDom();
-
-  const root = getSidebarRoot();
-
-  if (root) {
-    hideSidebarRoot(root);
-  }
-
-  lastRenderSignature = "";
-
-  markSidebarUnmounted(AppCore);
-  clearSidebarDomCache(AppCore);
-
-  return true;
-}
-
-function bindRenderedSidebar(root = null) {
-  if (!isElement(root)) return false;
-
-  bindSidebarEvents({
-    AppCore,
-    Auth,
-    Router,
-    root,
-    sync,
-  });
-
-  bindSidebarDropdown({
-    AppCore,
-    root,
-  });
-
-  return true;
-}
-
-function syncExistingSidebar(context = {}, signature = "") {
-  const root = getSidebarRoot();
-
-  if (!isElement(root)) return false;
-
-  setSidebarRoot(root, AppCore);
-  cacheSidebarDom(AppCore, root);
-
-  syncSidebarState({
-    AppCore,
-    root,
-  });
-
-  syncSidebarVisibility({
-    ...context,
-    root,
-  });
-
-  bindRenderedSidebar(root);
-
-  markSidebarMounted(root, AppCore);
-
-  lastRenderSignature = signature;
-
-  return true;
-}
-
-function renderSidebar(context = getContext(), preparedItems = null, signature = "") {
-  const items = Array.isArray(preparedItems)
-    ? preparedItems
-    : sidebarItems(context);
-
-  unbindAllSidebarDom();
-
-  /*
-    Importante:
-    template.js es la fuente del DOM. Limpiamos caché antes de montar
-    para no conservar nodos viejos ni una marca SVG antigua.
-  */
-  clearSidebarDomCache(AppCore);
-
-  const nextRoot = createSidebarTemplate({
-    id: SIDEBAR_ROOT_ID,
-    brandLabel: SIDEBAR_BRAND_LABEL,
-    brandHref: userHomeHref(context, SIDEBAR_BRAND_HREF),
-    open: getSidebarOpen(),
-    items,
-    user: context.user,
-  });
-
-  if (!nextRoot) return false;
-
-  const mountedRoot = mountSidebarRoot(nextRoot);
-
-  if (!isElement(mountedRoot)) return false;
-
-  setSidebarRoot(mountedRoot, AppCore);
-  cacheSidebarDom(AppCore, mountedRoot);
-
-  syncSidebarState({
-    AppCore,
-    root: mountedRoot,
-  });
-
-  syncSidebarVisibility({
-    ...context,
-    root: mountedRoot,
-  });
-
-  bindRenderedSidebar(mountedRoot);
-
-  markSidebarMounted(mountedRoot, AppCore);
-
-  lastRenderSignature = signature || buildRenderSignature(context, items);
-
-  return true;
-}
-
-function sync() {
-  if (!isBrowser()) return api;
-  if (syncing) return api;
-
-  syncing = true;
-
-  try {
-    const context = getContext();
-
-    if (!shouldRenderSidebar(context)) {
-      hideCurrentSidebar();
-      return api;
-    }
-
-    const items = sidebarItems(context);
-    const signature = buildRenderSignature(context, items);
-    const root = getSidebarRoot();
-
-    if (
-      signature &&
-      signature === lastRenderSignature &&
-      isElement(root) &&
-      syncExistingSidebar(context, signature)
-    ) {
-      return api;
-    }
-
-    if (!renderSidebar(context, items, signature)) {
-      lastRenderSignature = "";
-      markSidebarUnmounted(AppCore);
-    }
-
-    return api;
-  } finally {
-    syncing = false;
-  }
-}
-
-/* =========================================================
-   ACTION WRAPPERS
-========================================================= */
-
-async function navigateTo(path = HOME_ROUTE, options = {}) {
-  const target = routeHref(path, getContext());
-
-  if (!target || isBlockedSidebarPath(target)) return false;
-
-  const ok = await navigateFromSidebar({
-    AppCore,
-    Auth,
-    Router,
-    root: getSidebarRoot(),
-    target,
-    ...options,
-  });
-
-  /*
-    Router suele sincronizar el chrome/sidebar tras render.
-    Este sync queda como garantía para consumidores directos de SidebarUI.navigateTo().
-    Si no cambió el contexto visible, no reconstruye DOM completo.
-  */
-  sync();
-
-  return ok;
-}
-
-function setSidebarOpen(open = true) {
-  const root = getSidebarRoot();
-
-  const value = setSidebarOpenAction({
-    AppCore,
-    root,
-    open,
-  });
-
-  syncSidebarState({
-    AppCore,
-    root,
-  });
-
-  return value;
-}
-
-function openSidebar() {
-  const root = getSidebarRoot();
-
-  const value = openSidebarAction({
-    AppCore,
-    root,
-  });
-
-  syncSidebarState({
-    AppCore,
-    root,
-  });
-
-  return value;
-}
-
-function closeSidebar() {
-  const root = getSidebarRoot();
-
-  const value = closeSidebarAction({
-    AppCore,
-    root,
-  });
-
-  syncSidebarState({
-    AppCore,
-    root,
-  });
-
-  return value;
-}
-
-function toggleSidebar() {
-  const root = getSidebarRoot();
-
-  const value = toggleSidebarAction({
-    AppCore,
-    root,
-  });
-
-  syncSidebarState({
-    AppCore,
-    root,
-  });
-
-  return value;
-}
-
-async function handleLogout(options = {}) {
-  const result = await handleLogoutAction({
-    AppCore,
-    Auth,
-    Router,
-    root: getSidebarRoot(),
-    ...options,
-  });
-
-  sync();
-
-  return result;
-}
-
-function isAdmin() {
-  return getContext().user?.isAdmin === true;
-}
-
-/* =========================================================
    LIFECYCLE
 ========================================================= */
 
 function init() {
+  initialized = true;
+
   registerModule();
+  sync();
 
-  if (!getSidebarState().initialized) {
-    setSidebarInitialized(true, AppCore);
-  }
-
-  return sync();
+  return SidebarUI;
 }
 
 function destroy() {
-  unbindAllSidebarDom();
-
-  const root = getSidebarRoot();
+  unbindEvents();
 
   if (root) {
-    hideSidebarRoot(root);
+    setHidden(root, true);
   }
 
-  lastRenderSignature = "";
+  mounted = false;
+  initialized = false;
+  sidebarOpen = false;
+  logoutInFlight = false;
 
-  resetSidebarState(AppCore);
-  clearSidebarDomCache(AppCore);
+  clearDomCache();
   unregisterModule();
 
-  return api;
+  return SidebarUI;
 }
 
 /* =========================================================
@@ -1011,152 +1090,54 @@ function destroy() {
 
 function getSnapshot() {
   const context = getContext();
-  const state = getSidebarState();
-  const items = sidebarItems(context);
-  const user = context.user?.hasUser === true ? context.user : null;
+  const items = getMenuItems(context);
 
   return {
-    version: SIDEBAR_UI_VERSION,
+    version: SIDEBAR_VERSION,
 
-    initialized: state.initialized,
-    mounted: state.mounted,
-    open: state.open,
-    collapsed: state.collapsed,
-    logoutInFlight: getSidebarLogoutInFlight(),
-
-    renderSignatureCached: Boolean(lastRenderSignature),
+    initialized,
+    mounted,
+    open: sidebarOpen,
+    logoutInFlight,
 
     publicPath: redact(context.publicPath),
     canonicalPath: redact(context.canonicalPath),
-    homeHref: redact(userHomeHref(context, SIDEBAR_BRAND_HREF)),
 
-    hasSession: context.hasSession,
-    isAdmin: user?.isAdmin === true,
+    authenticated: context.authenticated,
+    isAdmin: context.user?.isAdmin === true,
 
-    user: user
+    user: context.user?.hasUser
       ? {
           hasUser: true,
-
-          id: user.id || null,
-          userId: user.userId || user.id || null,
-
-          slug: user.slug || null,
-          username: user.username || null,
-
-          displayName: user.displayName,
-          name: user.displayName,
-          fullName: user.displayName,
-
-          role: user.role,
-          rol: user.role,
-          roles: Array.isArray(user.roles)
-            ? user.roles
-            : [user.role || SIDEBAR_ROLE_USER],
-          roleLabel: user.roleLabel || (
-            user.role === SIDEBAR_ROLE_ADMIN
-              ? "Administrador"
-              : "Estándar"
-          ),
-
-          isAdmin: user.isAdmin === true,
-          isUser: user.isUser === true,
-
-          avatarUrl: user.avatarUrl || "",
-          avatar: user.avatarUrl || "",
-          photoUrl: user.avatarUrl || "",
-          photoURL: user.avatarUrl || "",
-          picture: user.avatarUrl || "",
-          pictureUrl: user.avatarUrl || "",
-          image: user.avatarUrl || "",
-          imageUrl: user.avatarUrl || "",
-          foto: user.avatarUrl || "",
-          fotoUrl: user.avatarUrl || "",
-          imagen: user.avatarUrl || "",
-          imagenUrl: user.avatarUrl || "",
-
-          initials: user.initials || "",
-
-          hasAvatar: Boolean(user.avatarUrl),
+          id: context.user.id || null,
+          userId: context.user.userId || null,
+          slug: context.user.slug || null,
+          username: context.user.username || "",
+          displayName: context.user.displayName,
+          role: context.user.role,
+          roleLabel: context.user.roleLabel,
+          isAdmin: context.user.isAdmin,
+          avatarUrl: context.user.avatarUrl ? "***" : "",
+          hasAvatar: context.user.hasAvatar,
+          initials: context.user.initials,
         }
       : null,
 
     menuItems: items.map((item) => ({
       href: redact(item.href),
       label: item.label,
-      icon: item.icon,
       active: item.active,
-      adminOnly: item.adminOnly === true,
-      visibleForCurrentRole:
-        item.adminOnly !== true || user?.isAdmin === true,
+      adminOnly: item.adminOnly,
     })),
-
-    policy: {
-      controllerOnly: true,
-
-      usesRouterRoutes: true,
-      usesTemplate: true,
-      rebuildsTemplateDomWhenRenderSignatureChanges: true,
-      skipsFullDomRebuildWhenRenderSignatureUnchanged: true,
-      stillSyncsStateAndVisibilityOnSkippedRebuild: true,
-      clearsDomCacheBeforeRender: true,
-
-      usesUserViewModel: true,
-      avatarOwnedByUserAndTemplateModules: true,
-      passesUserAvatarViewModelToTemplate: true,
-      exposesCompleteUserSnapshotForHome: true,
-
-      usesVisibility: true,
-      adminItemVisibilityDelegatedToVisibility: true,
-      passesAdminMetadataToTemplate: true,
-
-      usesRuntimeState: true,
-      usesActions: true,
-      usesDelegatedEvents: true,
-      usesDropdown: true,
-      passesAppCoreToDropdown: true,
-
-      blockedRoutesDelegatedToConstantsAndCoreConfig: true,
-      noLocalBlockedRouteList: true,
-
-      clientesAdminOnly: true,
-      usuariosAdminOnly: true,
-      servidorAdminOnly: true,
-
-      userSlugHome: true,
-      userScopedPrivateRoutes: true,
-
-      noHomeRoute: true,
-      no403Route: true,
-      no404Route: true,
-      no2fa: true,
-      noMfa: true,
-      noOtp: true,
-      noSensitiveRoutes: true,
-
-      noHtmlDuplicate: true,
-      noDomHelpersDuplicate: true,
-      noUserLogicDuplicate: true,
-      noAvatarLogicDuplicate: true,
-      noNavigationDuplicate: true,
-
-      noHttp: true,
-      noToast: true,
-      noStoreOwn: true,
-      noImportSideEffectRegistration: true,
-
-      snapshotRedacted: true,
-    },
   };
 }
-
-const getDebugSnapshot = getSnapshot;
 
 /* =========================================================
    API
 ========================================================= */
 
-const api = {
-  version: SIDEBAR_UI_VERSION,
+export const SidebarUI = {
+  version: SIDEBAR_VERSION,
 
   init,
   destroy,
@@ -1181,21 +1162,19 @@ const api = {
 
   getSnapshot,
   getState: getSnapshot,
-  getDebugSnapshot,
+  getDebugSnapshot: getSnapshot,
 
   get initialized() {
-    return getSidebarState().initialized;
+    return initialized;
   },
 
   get mounted() {
-    return getSidebarState().mounted;
+    return mounted;
   },
 
   get logoutInFlight() {
-    return getSidebarLogoutInFlight();
+    return logoutInFlight;
   },
 };
-
-export const SidebarUI = api;
 
 export default SidebarUI;

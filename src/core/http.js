@@ -4,12 +4,12 @@
 
    Responsabilidad:
    - Cliente HTTP único de la SPA.
-   - API real: https://api.onionit.net salvo config explícita.
-   - Enviar credentials: "include".
-   - Enviar Authorization sólo si hay access token en memoria.
+   - API base desde core/config.js.
+   - credentials: "include" por defecto.
+   - Authorization sólo si corresponde y existe access token en Core.
    - Parsear JSON/text/blob/arrayBuffer.
-   - Descargar blobs para facturas/documentos.
-   - Clasificar errores auth sin decidir navegación.
+   - Descargar blobs/documentos.
+   - Clasificar errores auth sin navegar.
    - Sin Router.
    - Sin Toast.
    - Sin Store.
@@ -18,150 +18,41 @@
    - Sin refresh automático.
 ========================================================= */
 
-import * as ConfigModule from "./config.js";
+import {
+  config,
+  AUTH_ENDPOINTS as CONFIG_AUTH_ENDPOINTS,
+  SENSITIVE_QUERY_PARAMS,
+  getApiBase,
+  endpointPathFromUrlLike,
+  normalizeEndpointPath,
+  isPublicApiPath as configIsPublicApiPath,
+  isPrivateApiPath as configIsPrivateApiPath,
+} from "./config.js";
 
-export const HTTP_VERSION = "core.http.minimal.v2";
+export const HTTP_VERSION = "core.http.minimal.v3";
 
-const config = ConfigModule.config || ConfigModule.default || {};
+export const AUTH_ENDPOINTS = CONFIG_AUTH_ENDPOINTS;
 
-const DEFAULT_API_ORIGIN = "https://api.onionit.net";
-const DEFAULT_TIMEOUT_MS =
-  Number(config?.api?.timeout || config?.timeout || 30000) || 30000;
+const DEFAULT_TIMEOUT_MS = Number(config?.api?.timeout || 30000) || 30000;
+const DEFAULT_API_BASE = getApiBase();
 
-const RAW_AUTH_ENDPOINTS = {
-  ...(config?.auth?.endpoints || {}),
-  ...(config?.endpoints?.auth || {}),
-  ...(ConfigModule.AUTH_ENDPOINTS || {}),
-};
+const BODYLESS_METHODS = new Set(["GET", "HEAD"]);
+const VALID_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
 
-export const AUTH_ENDPOINTS = Object.freeze({
-  login: first(RAW_AUTH_ENDPOINTS.login, "/api/auth/login"),
-  logout: first(RAW_AUTH_ENDPOINTS.logout, "/api/auth/logout"),
-  logoutAll: first(RAW_AUTH_ENDPOINTS.logoutAll, RAW_AUTH_ENDPOINTS.logout_all, "/api/auth/logout-all"),
-  me: first(RAW_AUTH_ENDPOINTS.me, "/api/auth/me"),
-  refresh: first(RAW_AUTH_ENDPOINTS.refresh, "/api/auth/refresh"),
-
-  activateAccount: first(
-    RAW_AUTH_ENDPOINTS.activateAccount,
-    RAW_AUTH_ENDPOINTS.activate_account,
-    RAW_AUTH_ENDPOINTS.activate,
-    "/api/auth/activate-account"
-  ),
-
-  requestPasswordReset: first(
-    RAW_AUTH_ENDPOINTS.requestPasswordReset,
-    RAW_AUTH_ENDPOINTS.passwordRequest,
-    RAW_AUTH_ENDPOINTS.password_request,
-    RAW_AUTH_ENDPOINTS.resetPasswordRequest,
-    "/api/auth/password-request"
-  ),
-
-  confirmPasswordReset: first(
-    RAW_AUTH_ENDPOINTS.confirmPasswordReset,
-    RAW_AUTH_ENDPOINTS.passwordReset,
-    RAW_AUTH_ENDPOINTS.password_reset,
-    RAW_AUTH_ENDPOINTS.resetPasswordConfirm,
-    "/api/auth/password-reset"
-  ),
-});
-
-const PUBLIC_API_PATHS = new Set(
-  [
-    ...(Array.isArray(config?.api?.publicPaths) ? config.api.publicPaths : []),
-    ...(Array.isArray(ConfigModule.PUBLIC_API_PATHS) ? ConfigModule.PUBLIC_API_PATHS : []),
-
-    AUTH_ENDPOINTS.login,
-    AUTH_ENDPOINTS.refresh,
-    "/api/auth/token/refresh",
-    "/api/auth/renew",
-    AUTH_ENDPOINTS.activateAccount,
-    "/api/auth/activate",
-    AUTH_ENDPOINTS.requestPasswordReset,
-    "/api/auth/reset-password-request",
-    AUTH_ENDPOINTS.confirmPasswordReset,
-    "/api/auth/reset-password-confirm",
-    "/api/auth/reset-password/confirm",
-  ]
-    .map(cleanApiPath)
+const SENSITIVE_KEYS = new Set(
+  (Array.isArray(SENSITIVE_QUERY_PARAMS) ? SENSITIVE_QUERY_PARAMS : [])
+    .map((key) => normalizeKey(key))
     .filter(Boolean)
 );
 
-const PRIVATE_API_PATHS = new Set(
-  [
-    ...(Array.isArray(config?.api?.privatePaths) ? config.api.privatePaths : []),
-    ...(Array.isArray(ConfigModule.PRIVATE_API_PATHS) ? ConfigModule.PRIVATE_API_PATHS : []),
-
-    AUTH_ENDPOINTS.me,
-    AUTH_ENDPOINTS.logout,
-    AUTH_ENDPOINTS.logoutAll,
-  ]
-    .map(cleanApiPath)
-    .filter(Boolean)
-);
-
-const SENSITIVE_QUERY_KEYS = new Set([
-  "token",
-  "access_token",
-  "accesstoken",
-  "refresh_token",
-  "refreshtoken",
-  "id_token",
-  "idtoken",
-  "jwt",
-  "authorization",
-  "session",
-  "session_id",
-  "sessionid",
-  "code",
-  "secret",
-  "password",
-  "pwd",
-  "key",
-  "sig",
-  "signature",
-  "reset_token",
-  "resettoken",
-  "activation_token",
-  "activationtoken",
-]);
-
-const AUTH_REFRESHABLE_CODES = new Set([
-  "TOKEN_EXPIRED",
-  "ACCESS_TOKEN_EXPIRED",
-  "JWT_EXPIRED",
-  "TOKEN_STALE",
-  "AUTH_REQUIRED",
-  "SESSION_REQUIRED",
-  "UNAUTHORIZED",
-]);
-
-const AUTH_CLEAR_SESSION_CODES = new Set([
-  "SESSION_REVOKED",
-  "SESSION_INVALID",
-  "SESSION_NOT_FOUND",
-  "INVALID_REFRESH_TOKEN",
-  "REFRESH_TOKEN_INVALID",
-  "REFRESH_TOKEN_REVOKED",
-  "USER_DISABLED",
-  "USER_DESACTIVADO",
-  "USUARIO_DESACTIVADO",
-]);
-
-const METHODS_WITHOUT_BODY = new Set(["GET", "HEAD"]);
-
-let apiOrigin = resolveInitialApiOrigin();
 let appCore = null;
-
-const runtime = {
-  accessToken: "",
-};
 
 const stats = {
   total: 0,
   success: 0,
   error: 0,
-  lastUrl: "",
   lastMethod: "",
+  lastUrl: "",
   lastStatus: null,
   lastError: null,
 };
@@ -208,6 +99,12 @@ function normalizeKey(value = "") {
     .toLowerCase();
 }
 
+function normalizeCode(value = "") {
+  return cleanText(value, "")
+    .replace(/[\s-]+/g, "_")
+    .toUpperCase();
+}
+
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
@@ -218,57 +115,21 @@ function first(...values) {
   return null;
 }
 
-function normalizeCode(value = "") {
-  return cleanText(value, "")
-    .replace(/[\s-]+/g, "_")
-    .toUpperCase();
-}
-
-function cleanApiPath(value = "") {
-  let raw = cleanText(value, "");
-
-  if (!raw) return "";
-
-  try {
-    if (/^https?:\/\//i.test(raw)) {
-      const url = new URL(raw);
-      raw = `${url.pathname}${url.search || ""}`;
-    }
-  } catch {
-    return "";
-  }
-
-  raw = raw.split("#")[0] || "";
-
-  const queryIndex = raw.indexOf("?");
-  const pathname = queryIndex >= 0 ? raw.slice(0, queryIndex) : raw;
-
-  let path = pathname.startsWith("/") ? pathname : `/${pathname}`;
-
-  path = path.replace(/\/{2,}/g, "/");
-
-  if (path.length > 1) {
-    path = path.replace(/\/+$/g, "");
-  }
-
-  return path || "/";
-}
-
 function redact(value = "") {
   let text = cleanText(value, "");
 
   try {
-    const parsed = new URL(text, "https://onionsupport.local");
+    const url = new URL(text, "https://onionsupport.local");
 
-    for (const key of [...parsed.searchParams.keys()]) {
-      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
-        parsed.searchParams.set(key, "***");
+    for (const key of [...url.searchParams.keys()]) {
+      if (SENSITIVE_KEYS.has(normalizeKey(key))) {
+        url.searchParams.set(key, "***");
       }
     }
 
     text = /^https?:\/\//i.test(text)
-      ? parsed.toString()
-      : `${parsed.pathname}${parsed.search}${parsed.hash}`;
+      ? url.toString()
+      : `${url.pathname}${url.search}${url.hash}`;
   } catch {
     text = text.replace(
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
@@ -306,8 +167,8 @@ function sanitizeData(value, depth = 0) {
 
   for (const [key, child] of Object.entries(value)) {
     if (
-      /(token|authorization|cookie|password|pwd|secret|credential|jwt|bearer|refresh|access|idtoken|api[_-]?key|connection[_-]?string|sas|otp|totp|mfa|twofa|2fa|backup[_-]?code|session[_-]?id|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i.test(key) ||
-      SENSITIVE_QUERY_KEYS.has(normalizeKey(key))
+      SENSITIVE_KEYS.has(normalizeKey(key)) ||
+      /(token|authorization|cookie|password|pwd|secret|credential|jwt|bearer|refresh|access|api[_-]?key|connection[_-]?string|sas|session[_-]?id|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i.test(key)
     ) {
       output[key] = child ? "***" : null;
       continue;
@@ -324,138 +185,39 @@ function sanitizeData(value, depth = 0) {
 }
 
 /* =========================================================
-   ORIGIN / URL
+   API URL
 ========================================================= */
 
-function resolveConfigApiBase() {
-  try {
-    if (isFunction(ConfigModule.getApiBase)) {
-      const value = ConfigModule.getApiBase();
-
-      if (value) return value;
-    }
-  } catch {
-    // fallback abajo
-  }
-
-  return first(
-    config?.apiBase,
-    config?.apiOrigin,
-    config?.api?.baseUrl,
-    config?.api?.base,
-    config?.api?.origin,
-    ConfigModule.API_BASE_URL,
-    ConfigModule.API_ORIGIN,
-    DEFAULT_API_ORIGIN
-  );
-}
-
-function normalizeOrigin(value = "") {
-  const raw = cleanText(value, DEFAULT_API_ORIGIN).replace(/\/+$/g, "");
-
-  try {
-    const url = new URL(raw);
-
-    if (!["http:", "https:"].includes(url.protocol)) {
-      return DEFAULT_API_ORIGIN;
-    }
-
-    return url.origin;
-  } catch {
-    return DEFAULT_API_ORIGIN;
-  }
-}
-
-function resolveInitialApiOrigin() {
-  return normalizeOrigin(resolveConfigApiBase());
-}
-
-export function getApiOrigin() {
-  return apiOrigin;
-}
-
-export function setApiOrigin(value = "") {
-  apiOrigin = normalizeOrigin(value || DEFAULT_API_ORIGIN);
-  return apiOrigin;
-}
-
-function cleanSearch(search = "") {
-  const raw = cleanText(search, "");
-
-  if (!raw || raw === "?") return "";
-
-  const normalized = raw.startsWith("?")
-    ? raw
-    : `?${raw.replace(/^\?+/, "")}`;
-
-  try {
-    const params = new URLSearchParams(normalized);
-
-    for (const key of [...params.keys()]) {
-      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
-        params.delete(key);
-      }
-    }
-
-    const output = params.toString();
-
-    return output ? `?${output}` : "";
-  } catch {
-    return "";
-  }
+function getApiOrigin() {
+  return getApiBase();
 }
 
 function endpointToPath(endpoint = "/") {
   const raw = cleanText(endpoint, "");
 
   if (!raw) return "";
-  if (raw.startsWith("//")) return "";
-  if (/[\r\n\t\\]/.test(raw)) return "";
 
   try {
-    if (/^https?:\/\//i.test(raw)) {
-      const url = new URL(raw);
-
-      if (url.origin !== apiOrigin) {
-        return "";
-      }
-
-      return `${url.pathname || "/"}${cleanSearch(url.search)}`;
-    }
+    return endpointPathFromUrlLike(raw) || "";
   } catch {
     return "";
   }
+}
 
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
-
-  const withoutHash = raw.split("#")[0] || "";
-  const queryIndex = withoutHash.indexOf("?");
-
-  const rawPath = queryIndex >= 0
-    ? withoutHash.slice(0, queryIndex)
-    : withoutHash;
-
-  const rawSearch = queryIndex >= 0
-    ? withoutHash.slice(queryIndex)
-    : "";
-
-  let path = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
-
-  path = path.replace(/\/{2,}/g, "/");
-
-  if (path.length > 1) {
-    path = path.replace(/\/+$/g, "");
+function endpointPathOnly(endpoint = "/") {
+  try {
+    return normalizeEndpointPath(endpointToPath(endpoint)) || "";
+  } catch {
+    return "";
   }
-
-  return `${path || "/"}${cleanSearch(rawSearch)}`;
 }
 
 function appendQuery(url = "", query = null) {
   const parsed = new URL(url);
 
-  if (isObject(query)) {
+  if (isPlainObject(query)) {
     for (const [key, value] of Object.entries(query)) {
-      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) continue;
+      if (SENSITIVE_KEYS.has(normalizeKey(key))) continue;
       if (value === undefined || value === null || value === "") continue;
 
       if (Array.isArray(value)) {
@@ -473,7 +235,7 @@ function appendQuery(url = "", query = null) {
   }
 
   for (const key of [...parsed.searchParams.keys()]) {
-    if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+    if (SENSITIVE_KEYS.has(normalizeKey(key))) {
       parsed.searchParams.delete(key);
     }
   }
@@ -486,7 +248,10 @@ export function buildApiUrl(endpoint = "/", options = {}) {
 
   if (!path) return "";
 
-  return appendQuery(`${apiOrigin}${path}`, options.query || options.params);
+  const base = getApiOrigin().replace(/\/+$/g, "");
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+
+  return appendQuery(`${base}${cleanPath}`, options.query || options.params || null);
 }
 
 export function redactHttpText(value = "") {
@@ -537,7 +302,9 @@ function readCoreState() {
   return isObject(appCore.state) ? appCore.state : null;
 }
 
-function stateAccessToken(state = readCoreState()) {
+export function getAccessToken() {
+  const state = readCoreState();
+
   if (!isObject(state)) return "";
 
   return cleanToken(
@@ -550,90 +317,78 @@ function stateAccessToken(state = readCoreState()) {
   );
 }
 
-export function getAccessToken() {
-  return stateAccessToken() || cleanToken(runtime.accessToken);
-}
-
 export function setAccessToken(token = "") {
   const value = cleanToken(token);
 
-  runtime.accessToken = value;
+  try {
+    appCore?.setToken?.(value || null);
+  } catch {
+    // noop
+  }
 
   return value;
 }
 
+export function clearAuthTokens() {
+  try {
+    appCore?.setToken?.(null);
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
 export function setAuthTokens(payload = {}) {
-  const token = accessTokenFromPayload(payload);
+  const token = cleanToken(
+    first(
+      payload?.token,
+      payload?.accessToken,
+      payload?.access_token,
+      payload?.data?.token,
+      payload?.data?.accessToken,
+      payload?.data?.access_token,
+      ""
+    )
+  );
 
   if (token) {
     setAccessToken(token);
   }
 
   return {
-    token: getAccessToken(),
-    accessToken: getAccessToken(),
-    access_token: getAccessToken(),
+    token,
+    accessToken: token,
+    access_token: token,
   };
-}
-
-export function clearAuthTokens() {
-  runtime.accessToken = "";
-  return true;
-}
-
-function accessTokenFromPayload(payload = {}) {
-  const candidates = [
-    payload,
-    isObject(payload?.data) ? payload.data : null,
-    isObject(payload?.payload) ? payload.payload : null,
-    isObject(payload?.result) ? payload.result : null,
-    isObject(payload?.auth) ? payload.auth : null,
-    isObject(payload?.session) ? payload.session : null,
-  ].filter(Boolean);
-
-  for (const source of candidates) {
-    const token = cleanToken(
-      first(
-        source.token,
-        source.accessToken,
-        source.access_token,
-        ""
-      )
-    );
-
-    if (token) return token;
-  }
-
-  return "";
 }
 
 /* =========================================================
    AUTH POLICY
 ========================================================= */
 
-function endpointCleanPath(endpoint = "/") {
-  const path = endpointToPath(endpoint);
+function endpointIsPublic(endpoint = "") {
+  const path = endpointPathOnly(endpoint);
 
-  if (!path) return "";
+  if (!path) return false;
 
-  return cleanApiPath(path);
+  try {
+    return configIsPublicApiPath(path) === true;
+  } catch {
+    return false;
+  }
 }
 
 function endpointIsPrivate(endpoint = "") {
-  const clean = endpointCleanPath(endpoint);
+  const path = endpointPathOnly(endpoint);
 
-  if (!clean) return false;
+  if (!path) return false;
 
-  return PRIVATE_API_PATHS.has(clean);
-}
-
-function endpointIsPublic(endpoint = "") {
-  const clean = endpointCleanPath(endpoint);
-
-  if (!clean) return false;
-  if (endpointIsPrivate(clean)) return false;
-
-  return PUBLIC_API_PATHS.has(clean);
+  try {
+    return configIsPrivateApiPath(path) === true;
+  } catch {
+    return false;
+  }
 }
 
 function shouldUseAuth(endpoint = "", options = {}) {
@@ -646,7 +401,11 @@ function shouldUseAuth(endpoint = "", options = {}) {
     return false;
   }
 
-  if (options.auth === true || endpointIsPrivate(endpoint)) {
+  if (options.auth === true) {
+    return true;
+  }
+
+  if (endpointIsPrivate(endpoint)) {
     return true;
   }
 
@@ -681,9 +440,7 @@ function headersFrom(input = null) {
       const key = cleanText(item[0], "");
       const value = item[1];
 
-      if (key) {
-        headers[key] = value;
-      }
+      if (key) headers[key] = value;
     }
 
     return headers;
@@ -733,13 +490,12 @@ function deleteHeader(headers = {}, name = "") {
 }
 
 function isBodyInit(value) {
-  if (value === null || value === undefined) return false;
+  if (value === undefined || value === null) return false;
 
   if (typeof FormData !== "undefined" && value instanceof FormData) return true;
   if (typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams) return true;
   if (typeof Blob !== "undefined" && value instanceof Blob) return true;
   if (typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer) return true;
-  if (typeof ReadableStream !== "undefined" && value instanceof ReadableStream) return true;
   if (ArrayBuffer.isView?.(value)) return true;
   if (typeof value === "string") return true;
 
@@ -785,11 +541,10 @@ function normalizeBody(body = undefined, headers = {}) {
 function buildFetchOptions(endpoint = "", options = {}) {
   const method = cleanText(options.method, "GET").toUpperCase();
 
-  if (!["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"].includes(method)) {
+  if (!VALID_METHODS.has(method)) {
     throw createHttpError({
       code: "HTTP_METHOD_INVALID",
       message: `Método HTTP no permitido: ${method}`,
-      status: 0,
       endpoint,
     });
   }
@@ -814,7 +569,7 @@ function buildFetchOptions(endpoint = "", options = {}) {
 
   let body = undefined;
 
-  if (!METHODS_WITHOUT_BODY.has(method)) {
+  if (!BODYLESS_METHODS.has(method)) {
     const normalized = normalizeBody(options.body, headers);
     body = normalized.body;
   }
@@ -831,7 +586,7 @@ function buildFetchOptions(endpoint = "", options = {}) {
 }
 
 /* =========================================================
-   RESPONSE PARSE
+   RESPONSE
 ========================================================= */
 
 function contentTypeOf(response) {
@@ -865,23 +620,17 @@ function dispositionFilename(response) {
 }
 
 async function parseResponse(response, options = {}) {
-  if (response.status === 204 || response.status === 205 || options.method === "HEAD") {
+  const method = cleanText(options.method, "GET").toUpperCase();
+
+  if (response.status === 204 || response.status === 205 || method === "HEAD") {
     return null;
   }
 
   const responseType = cleanText(options.responseType, "").toLowerCase();
 
-  if (responseType === "blob") {
-    return response.blob();
-  }
-
-  if (responseType === "arraybuffer" || responseType === "array-buffer") {
-    return response.arrayBuffer();
-  }
-
-  if (responseType === "text") {
-    return response.text();
-  }
+  if (responseType === "blob") return response.blob();
+  if (responseType === "arraybuffer" || responseType === "array-buffer") return response.arrayBuffer();
+  if (responseType === "text") return response.text();
 
   const contentType = contentTypeOf(response).toLowerCase();
 
@@ -929,10 +678,6 @@ function extractErrorCode(payload = null, response = null) {
     );
   }
 
-  if (typeof payload === "string") {
-    return normalizeCode(payload.slice(0, 80));
-  }
-
   if (response?.status === 401) return "UNAUTHORIZED";
   if (response?.status === 403) return "FORBIDDEN";
   if (response?.status === 404) return "NOT_FOUND";
@@ -978,36 +723,26 @@ function createHttpError({
   const error = new Error(cleanText(message, "Error HTTP"));
 
   error.name = "HttpError";
-  error.code = normalizeCode(code || "HTTP_ERROR");
+  error.code = normalizeCode(code);
   error.status = Number(status || response?.status || 0);
   error.statusCode = error.status;
-  error.endpoint = redact(endpoint || "");
-  error.url = redact(url || "");
+  error.endpoint = redact(endpoint);
+  error.url = redact(url);
   error.method = cleanText(method, "");
   error.payload = sanitizeData(payload);
   error.data = error.payload;
   error.response = response || null;
   error.cause = cause || null;
-  error.auth = isAuthError(error);
 
   return error;
 }
 
-function isAuthEndpoint(endpoint = "") {
-  return cleanApiPath(endpoint).startsWith("/api/auth");
-}
-
 function isRefreshEndpoint(endpoint = "") {
-  const clean = cleanApiPath(endpoint);
-
-  return [
-    cleanApiPath(AUTH_ENDPOINTS.refresh),
-    "/api/auth/token/refresh",
-    "/api/auth/renew",
-  ].includes(clean);
+  const path = endpointPathOnly(endpoint);
+  return path === endpointPathOnly(AUTH_ENDPOINTS.refresh);
 }
 
-function isAuthError(error = null) {
+export function isAuthError(error = null) {
   const status = Number(error?.status || error?.statusCode || 0);
   return status === 401 || status === 403;
 }
@@ -1018,19 +753,33 @@ export function isRefreshableAuthError(error = null) {
 
   if (status !== 401) return false;
   if (isRefreshEndpoint(error?.endpoint || "")) return false;
-  if (AUTH_CLEAR_SESSION_CODES.has(code)) return false;
+  if (shouldClearSessionForAuthError(error)) return false;
 
-  return !code || AUTH_REFRESHABLE_CODES.has(code);
+  return (
+    !code ||
+    code === "UNAUTHORIZED" ||
+    code === "AUTH_REQUIRED" ||
+    code === "SESSION_REQUIRED" ||
+    code === "TOKEN_EXPIRED" ||
+    code === "ACCESS_TOKEN_EXPIRED" ||
+    code === "JWT_EXPIRED"
+  );
 }
 
 export function shouldClearSessionForAuthError(error = null) {
   const status = Number(error?.status || error?.statusCode || 0);
   const code = normalizeCode(error?.code || error?.payload?.code || error?.payload?.error || "");
 
-  if (status === 403 && code.includes("DISABLED")) return true;
   if (isRefreshEndpoint(error?.endpoint || "") && status === 401) return true;
 
-  return AUTH_CLEAR_SESSION_CODES.has(code);
+  return (
+    code === "SESSION_REVOKED" ||
+    code === "SESSION_INVALID" ||
+    code === "SESSION_NOT_FOUND" ||
+    code === "USER_DISABLED" ||
+    code === "USER_DESACTIVADO" ||
+    code === "USUARIO_DESACTIVADO"
+  );
 }
 
 /* =========================================================
@@ -1042,7 +791,6 @@ function ensureFetch() {
     throw createHttpError({
       code: "FETCH_UNAVAILABLE",
       message: "fetch() no está disponible.",
-      status: 0,
     });
   }
 
@@ -1074,26 +822,27 @@ function createAbortController(timeoutMs = DEFAULT_TIMEOUT_MS) {
   };
 }
 
-export async function request(endpoint = "/", options = {}) {
+async function fetchParsed(endpoint = "/", options = {}) {
   const url = buildApiUrl(endpoint, options);
 
   if (!url) {
     throw createHttpError({
       code: "HTTP_ENDPOINT_INVALID",
       message: "Endpoint API inválido.",
-      status: 0,
       endpoint,
     });
   }
 
   const method = cleanText(options.method, "GET").toUpperCase();
+
   const fetchOptions = buildFetchOptions(endpoint, {
     ...options,
     method,
   });
 
-  const timeoutMs = Number(options.timeout || options.timeoutMs || DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
-  const abort = createAbortController(timeoutMs);
+  const abort = createAbortController(
+    Number(options.timeout || options.timeoutMs || DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS
+  );
 
   if (abort.controller) {
     fetchOptions.signal = options.signal || abort.controller.signal;
@@ -1102,14 +851,13 @@ export async function request(endpoint = "/", options = {}) {
   }
 
   stats.total += 1;
-  stats.lastUrl = redact(url);
   stats.lastMethod = method;
+  stats.lastUrl = redact(url);
   stats.lastStatus = null;
   stats.lastError = null;
 
   try {
-    const fetchFn = ensureFetch();
-    const response = await fetchFn(url, fetchOptions);
+    const response = await ensureFetch()(url, fetchOptions);
     const data = await parseResponse(response, {
       ...options,
       method,
@@ -1118,12 +866,9 @@ export async function request(endpoint = "/", options = {}) {
     stats.lastStatus = response.status;
 
     if (!response.ok) {
-      const code = extractErrorCode(data, response);
-      const message = extractErrorMessage(data, `HTTP ${response.status}`);
-
       throw createHttpError({
-        code,
-        message,
+        code: extractErrorCode(data, response),
+        message: extractErrorMessage(data, `HTTP ${response.status}`),
         status: response.status,
         endpoint,
         url,
@@ -1133,28 +878,28 @@ export async function request(endpoint = "/", options = {}) {
       });
     }
 
-    if (isObject(data)) {
-      setAuthTokens(data);
-    }
-
     stats.success += 1;
-    return data;
+
+    return {
+      response,
+      data,
+      url,
+      method,
+    };
   } catch (error) {
-    const normalized =
-      error?.name === "HttpError"
-        ? error
-        : createHttpError({
-            code: error?.name === "AbortError" ? "HTTP_TIMEOUT" : "NETWORK_ERROR",
-            message:
-              error?.name === "AbortError"
-                ? "La solicitud ha tardado demasiado."
-                : error?.message || "No se pudo conectar con la API.",
-            status: 0,
-            endpoint,
-            url,
-            method,
-            cause: error,
-          });
+    const normalized = error?.name === "HttpError"
+      ? error
+      : createHttpError({
+          code: error?.name === "AbortError" ? "HTTP_TIMEOUT" : "NETWORK_ERROR",
+          message:
+            error?.name === "AbortError"
+              ? "La solicitud ha tardado demasiado."
+              : error?.message || "No se pudo conectar con la API.",
+          endpoint,
+          url,
+          method,
+          cause: error,
+        });
 
     stats.error += 1;
     stats.lastError = {
@@ -1172,8 +917,13 @@ export async function request(endpoint = "/", options = {}) {
   }
 }
 
+export async function request(endpoint = "/", options = {}) {
+  const result = await fetchParsed(endpoint, options);
+  return result.data;
+}
+
 /* =========================================================
-   METHOD HELPERS
+   METHODS
 ========================================================= */
 
 export function get(endpoint = "/", options = {}) {
@@ -1217,7 +967,7 @@ export function del(endpoint = "/", options = {}) {
 export { del as delete };
 
 /* =========================================================
-   AUTH HELPERS
+   AUTH ENDPOINT HELPERS
 ========================================================= */
 
 export function login(payload = {}, options = {}) {
@@ -1287,10 +1037,10 @@ export function confirmPasswordReset(payload = {}, options = {}) {
 }
 
 /* =========================================================
-   BLOB / DOWNLOADS
+   BLOBS / DOWNLOADS
 ========================================================= */
 
-function fallbackFileName(value = "", fallback = "descarga") {
+function safeFileName(value = "", fallback = "descarga") {
   const name = cleanText(value, fallback)
     .replace(/[\\/:*?"<>|#]+/g, "_")
     .replace(/\s+/g, "_")
@@ -1318,89 +1068,42 @@ export async function arrayBuffer(endpoint = "/", options = {}) {
 }
 
 export async function downloadBlob(endpoint = "/", options = {}) {
-  const url = buildApiUrl(endpoint, options);
-
-  if (!url) {
-    throw createHttpError({
-      code: "HTTP_ENDPOINT_INVALID",
-      message: "Endpoint API inválido.",
-      status: 0,
-      endpoint,
-    });
-  }
-
-  const method = cleanText(options.method, "GET").toUpperCase();
-  const fetchOptions = buildFetchOptions(endpoint, {
+  const result = await fetchParsed(endpoint, {
     ...options,
-    method,
+    method: options.method || "GET",
+    responseType: "blob",
   });
 
-  const timeoutMs = Number(options.timeout || options.timeoutMs || DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
-  const abort = createAbortController(timeoutMs);
+  const data = result.data;
+  const filename = safeFileName(
+    options.filename || dispositionFilename(result.response) || "descarga",
+    "descarga"
+  );
 
-  if (abort.controller) {
-    fetchOptions.signal = options.signal || abort.controller.signal;
-  } else if (options.signal) {
-    fetchOptions.signal = options.signal;
+  if (options.autoDownload !== false && isBrowser() && data instanceof Blob) {
+    const objectUrl = URL.createObjectURL(data);
+    const link = document.createElement("a");
+
+    link.href = objectUrl;
+    link.download = filename;
+    link.rel = "noopener";
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(() => {
+      URL.revokeObjectURL(objectUrl);
+    }, 1000);
   }
 
-  try {
-    const response = await ensureFetch()(url, fetchOptions);
-    const data = await parseResponse(response, {
-      ...options,
-      method,
-      responseType: "blob",
-    });
-
-    if (!response.ok) {
-      throw createHttpError({
-        code: extractErrorCode(data, response),
-        message: extractErrorMessage(data, `HTTP ${response.status}`),
-        status: response.status,
-        endpoint,
-        url,
-        method,
-        payload: data,
-        response,
-      });
-    }
-
-    const filename = fallbackFileName(
-      options.filename ||
-        dispositionFilename(response) ||
-        "descarga",
-      "descarga"
-    );
-
-    if (options.autoDownload !== false && isBrowser() && data instanceof Blob) {
-      const objectUrl = URL.createObjectURL(data);
-      const link = document.createElement("a");
-
-      link.href = objectUrl;
-      link.download = filename;
-      link.rel = "noopener";
-
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      setTimeout(() => {
-        URL.revokeObjectURL(objectUrl);
-      }, 1000);
-    }
-
-    return {
-      ok: true,
-      blob: data,
-      filename,
-      contentType: contentTypeOf(response),
-      size: data?.size || null,
-    };
-  } finally {
-    if (abort.timer) {
-      clearTimeout(abort.timer);
-    }
-  }
+  return {
+    ok: true,
+    blob: data,
+    filename,
+    contentType: contentTypeOf(result.response),
+    size: data?.size || null,
+  };
 }
 
 export const download = downloadBlob;
@@ -1411,9 +1114,7 @@ export const downloadFactura = downloadBlob;
 ========================================================= */
 
 export function install(core = null) {
-  if (core) {
-    appCore = core;
-  }
+  appCore = core || appCore;
 
   try {
     appCore?.registerModule?.("http", Http, {
@@ -1429,17 +1130,22 @@ export function install(core = null) {
 export function getSnapshot() {
   return {
     version: HTTP_VERSION,
-    apiOrigin,
+    apiBase: getApiOrigin(),
     installed: Boolean(appCore),
-    hasRuntimeToken: Boolean(runtime.accessToken),
-    hasCoreToken: Boolean(stateAccessToken()),
+    hasToken: Boolean(getAccessToken()),
     endpoints: AUTH_ENDPOINTS,
     stats: {
-      ...stats,
+      total: stats.total,
+      success: stats.success,
+      error: stats.error,
+      lastMethod: stats.lastMethod,
       lastUrl: redact(stats.lastUrl),
+      lastStatus: stats.lastStatus,
       lastError: sanitizeData(stats.lastError),
     },
     policy: {
+      singleClient: true,
+      configDriven: true,
       credentialsInclude: true,
       noAutoRefresh: true,
       noRouter: true,
@@ -1455,7 +1161,7 @@ export const getDebugSnapshot = getSnapshot;
 export const snapshot = getSnapshot;
 
 /* =========================================================
-   DEFAULT EXPORT
+   API
 ========================================================= */
 
 export const Http = {
@@ -1466,7 +1172,6 @@ export const Http = {
   install,
 
   getApiOrigin,
-  setApiOrigin,
   buildApiUrl,
 
   request,

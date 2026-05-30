@@ -32,7 +32,7 @@ import {
 
 import * as Routes from "./routes.js";
 
-export const ROUTER_VERSION = "router.minimal.v2";
+export const ROUTER_VERSION = "router.minimal.v3";
 
 const HOME_PATH = ROUTES.home || "/";
 const LOGIN_PATH = ROUTES.login || "/login";
@@ -42,7 +42,7 @@ let initialized = false;
 let bound = false;
 let activeView = null;
 let renderSeq = 0;
-let renderPromise = Promise.resolve();
+let renderTask = null;
 
 const disposers = [];
 
@@ -527,10 +527,6 @@ function getRouteMatch(path = HOME_PATH) {
 
   let route = isBlockedPath(publicPath) ? null : getRouteByCanonicalPath(lookupPath);
 
-  /*
-    Las rutas públicas no pueden vivir bajo /@{slug}.
-    /@cristian/login no es ruta válida.
-  */
   if (scoped.scoped && route?.public === true) {
     route = null;
   }
@@ -791,7 +787,7 @@ function setHidden(element = null, hidden = false) {
   }
 }
 
-function forceVisible(element = null, mode = "app") {
+function forceVisible(element = null, mode = "app", chrome = "visible") {
   if (!element) return false;
 
   try {
@@ -807,7 +803,7 @@ function forceVisible(element = null, mode = "app") {
     element.dataset.shellState = "ready";
     element.dataset.appReady = "true";
     element.dataset.appLoading = "false";
-    element.dataset.chrome = "visible";
+    element.dataset.chrome = chrome;
 
     element.classList.remove(
       "is-hidden",
@@ -828,6 +824,21 @@ function forceVisible(element = null, mode = "app") {
   } catch {
     return false;
   }
+}
+
+function clearTableHead() {
+  const tableHead = node("table-head");
+  const tableHeadContainer = node("tablehead-container");
+
+  setHidden(tableHead, true);
+
+  try {
+    tableHeadContainer?.replaceChildren();
+  } catch {
+    // noop
+  }
+
+  return true;
 }
 
 function setShell(route = null) {
@@ -852,13 +863,13 @@ function setShell(route = null) {
     root.classList.toggle("chrome-visible", !publicRoute);
   }
 
-  const appShell = node("app-shell");
-  const mainContent = node("main-content");
-  const appContent = node("app-content");
-  const viewContainer = node("view-container");
-
-  for (const element of [appShell, mainContent, appContent, viewContainer].filter(Boolean)) {
-    forceVisible(element, mode);
+  for (const element of [
+    node("app-shell"),
+    node("main-content"),
+    node("app-content"),
+    node("view-container"),
+  ].filter(Boolean)) {
+    forceVisible(element, mode, chrome);
   }
 
   const sidebar = node("sidebar-mount");
@@ -874,15 +885,7 @@ function setShell(route = null) {
     element.classList.toggle("is-visible", !publicRoute);
   }
 
-  const tableHead = node("table-head");
-  const tableHeadContainer = node("tablehead-container");
-
-  try {
-    tableHead?.replaceChildren();
-    tableHeadContainer?.replaceChildren();
-  } catch {
-    // noop
-  }
+  clearTableHead();
 
   return true;
 }
@@ -903,7 +906,7 @@ function setActiveMenu(route = null) {
   const key = cleanText(route?.sidebarKey || route?.viewKey || route?.name || "", "");
   const path = cleanText(route?.path || "", "");
 
-  for (const item of document.querySelectorAll("[data-sidebar-key], [data-route]")) {
+  for (const item of document.querySelectorAll("#sidebar-mount [data-sidebar-key], #sidebar-mount [data-route]")) {
     const itemKey = cleanText(item.getAttribute("data-sidebar-key"), "");
     const itemRoute = cleanText(item.getAttribute("data-route"), "");
 
@@ -913,21 +916,26 @@ function setActiveMenu(route = null) {
     );
 
     item.classList.toggle("is-active", active);
-    item.setAttribute("aria-current", active ? "page" : "false");
+
+    if (active) {
+      item.setAttribute("aria-current", "page");
+    } else {
+      item.removeAttribute("aria-current");
+    }
   }
 
   return true;
 }
 
 function syncChrome(route = null, context = {}) {
-  const modules = [
+  const modules = new Set([
     AppCore.sidebar,
     AppCore.Sidebar,
     AppCore.getModule?.("sidebar"),
     AppCore.topbar,
     AppCore.Topbar,
     AppCore.getModule?.("topbar"),
-  ].filter(Boolean);
+  ].filter(Boolean));
 
   for (const module of modules) {
     try {
@@ -1047,7 +1055,7 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
     };
   }
 
-  forceVisible(root, route?.public === true ? "auth" : "app");
+  forceVisible(root, route?.public === true ? "auth" : "app", route?.public === true ? "hidden" : "visible");
   root.replaceChildren();
 
   try {
@@ -1080,7 +1088,8 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
     if (typeof Node !== "undefined" && result instanceof Node && result !== root && !root.contains(result)) {
       root.replaceChildren(result);
     } else if (typeof result === "string") {
-      root.innerHTML = result;
+      root.textContent = "";
+      root.insertAdjacentHTML("beforeend", result);
     } else if (isObject(result)) {
       activeView = result;
     }
@@ -1180,6 +1189,7 @@ async function redirectTo(path = HOME_PATH, options = {}, reason = "redirect") {
   return executeRender(path, {
     ...options,
     replaceState: true,
+    skipHistory: false,
     source: reason,
     __redirectDepth: depth + 1,
   });
@@ -1237,7 +1247,7 @@ async function executeRender(path = HOME_PATH, options = {}) {
 function render(path = HOME_PATH, options = {}) {
   const task = executeRender(path, isObject(options) ? options : {});
 
-  renderPromise = Promise.resolve(task).catch(() => null);
+  renderTask = Promise.resolve(task).catch(() => null);
 
   return task;
 }
@@ -1246,7 +1256,7 @@ function renderCurrent(options = {}) {
   return render(browserPath(), {
     ...options,
     replaceState: true,
-    skipHistory: options.skipHistory ?? true,
+    skipHistory: options.skipHistory ?? false,
     source: options.source || "render-current",
   });
 }
@@ -1453,7 +1463,7 @@ function getSnapshot() {
     bound,
     renderSeq,
     hasActiveView: Boolean(activeView),
-    hasRenderPromise: Boolean(renderPromise),
+    rendering: Boolean(renderTask),
 
     publicPath: redact(currentPublicPath()),
     canonicalPath: redact(currentCanonicalPath()),

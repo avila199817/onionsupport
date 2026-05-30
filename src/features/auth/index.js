@@ -8,6 +8,7 @@
    - Sesión actual delegada en AppCore.
    - HTTP delegado en core/http.js.
    - Sesión persistente por cookie httpOnly + refresh.
+   - No llamar refresh en rutas públicas si no hay token.
    - Home visible autenticada: /@{user.slug}.
    - Guards mínimos por auth/rol/admin.
    - Sin Router, sin Toast, sin Store, sin Storage, sin fetch propio,
@@ -26,7 +27,7 @@ import {
   normalizeUserSlug,
 } from "../../core/config.js";
 
-export const AUTH_VERSION = "auth.minimal.v1";
+export const AUTH_VERSION = "auth.minimal.v2";
 
 const ROOT_PATH = "/";
 const VALID_ROLES = new Set(
@@ -35,10 +36,10 @@ const VALID_ROLES = new Set(
 );
 
 const AUTH_ROUTES = Object.freeze({
-  login: ROUTES.login,
-  passwordRequest: ROUTES.passwordRequest,
-  passwordReset: ROUTES.passwordReset,
-  activateAccount: ROUTES.activateAccount,
+  login: ROUTES.login || "/login",
+  passwordRequest: ROUTES.passwordRequest || "/password-request",
+  passwordReset: ROUTES.passwordReset || "/password-reset",
+  activateAccount: ROUTES.activateAccount || "/activate-account",
 });
 
 const AUTH_HOME = Object.freeze({
@@ -57,7 +58,14 @@ const sessionState = {
   refreshPromise: null,
   mePromise: null,
 
-  hasCookieRefreshCandidate: true,
+  /*
+    Importante:
+    Arranca en false. Sólo pasa a true si:
+    - login correcto,
+    - refresh correcto,
+    - ruta privada fuerza intento de refresh.
+  */
+  hasCookieRefreshCandidate: false,
 
   lastLoginAt: null,
   lastRestoreAt: null,
@@ -71,6 +79,10 @@ const sessionState = {
 /* =========================================================
    BASICS
 ========================================================= */
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -352,18 +364,6 @@ function getUserSlug() {
   );
 }
 
-function buildUserHomePath(user = getCurrentUser()) {
-  const slug = isObject(user)
-    ? getUserSlugFromUser(user)
-    : normalizeUserSlug(user);
-
-  try {
-    return buildUserHomeRoute(slug) || ROOT_PATH;
-  } catch {
-    return slug ? `${AUTH_HOME.userPrefix}${slug}` : ROOT_PATH;
-  }
-}
-
 function getUserSlugFromUser(user = null) {
   if (!isObject(user)) return "";
 
@@ -377,6 +377,18 @@ function getUserSlugFromUser(user = null) {
       user.id ||
       ""
   );
+}
+
+function buildUserHomePath(user = getCurrentUser()) {
+  const slug = isObject(user)
+    ? getUserSlugFromUser(user)
+    : normalizeUserSlug(user);
+
+  try {
+    return buildUserHomeRoute(slug) || ROOT_PATH;
+  } catch {
+    return slug ? `${AUTH_HOME.userPrefix}${slug}` : ROOT_PATH;
+  }
 }
 
 function buildUserHomePathFromSlug(slug = "") {
@@ -638,6 +650,8 @@ function applySession(payload = {}, options = {}) {
 }
 
 function clearSession() {
+  sessionState.hasCookieRefreshCandidate = false;
+
   try {
     AppCore.clearSession?.();
   } catch {
@@ -700,6 +714,9 @@ function getPublicAuthResult(payload = {}) {
   return {
     ok: payload.ok !== false,
     authenticated,
+
+    skippedRefresh: payload.skippedRefresh === true,
+    reason: payload.reason || null,
 
     user: authenticated ? publicUser(user) : null,
     currentUser: authenticated ? publicUser(user) : null,
@@ -778,6 +795,7 @@ function getAuthModuleSnapshot() {
       strictAuth: true,
       requiresTokenAndUser: true,
       persistentSessionByHttpOnlyCookie: true,
+      noRefreshOnPublicRouteWithoutToken: true,
       noStorage: true,
       noStore: true,
       noRouter: true,
@@ -787,6 +805,106 @@ function getAuthModuleSnapshot() {
       snapshotRedacted: true,
     },
   };
+}
+
+/* =========================================================
+   RESTORE ROUTE POLICY
+========================================================= */
+
+function normalizeRestorePath(value = ROOT_PATH) {
+  let raw = cleanText(value, ROOT_PATH);
+
+  if (!raw) return ROOT_PATH;
+
+  if (raw.startsWith("#!")) {
+    raw = raw.replace(/^#!\/?/, "/") || ROOT_PATH;
+  } else if (raw.startsWith("#/")) {
+    raw = raw.slice(1) || ROOT_PATH;
+  }
+
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      const base = isBrowser()
+        ? window.location.origin
+        : "https://onionsupport.com";
+
+      const url = new URL(raw, base);
+
+      if (url.origin !== base) return ROOT_PATH;
+
+      raw = `${url.pathname || ROOT_PATH}${url.search || ""}${url.hash || ""}`;
+    }
+  } catch {
+    raw = ROOT_PATH;
+  }
+
+  if (raw.startsWith("//")) return ROOT_PATH;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return ROOT_PATH;
+  if (/[\r\n\t\\]/.test(raw)) return ROOT_PATH;
+
+  if (!raw.startsWith("/")) {
+    raw = `/${raw}`;
+  }
+
+  raw = raw
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/\/{2,}/g, "/");
+
+  if (raw.length > 1) {
+    raw = raw.replace(/\/+$/g, "") || ROOT_PATH;
+  }
+
+  return raw || ROOT_PATH;
+}
+
+const PUBLIC_RESTORE_PATHS = new Set([
+  AUTH_ROUTES.login,
+  AUTH_ROUTES.passwordRequest,
+  AUTH_ROUTES.passwordReset,
+  AUTH_ROUTES.activateAccount,
+].map(normalizeRestorePath));
+
+function browserRestorePath() {
+  if (!isBrowser()) return ROOT_PATH;
+
+  try {
+    return `${window.location.pathname || ROOT_PATH}${window.location.search || ""}${window.location.hash || ""}`;
+  } catch {
+    return ROOT_PATH;
+  }
+}
+
+function restorePathFromOptions(options = {}) {
+  return normalizeRestorePath(
+    options.initialPath ||
+      options.path ||
+      options.publicPath ||
+      options.bootContext?.initialPath ||
+      browserRestorePath()
+  );
+}
+
+function isPublicRestorePath(path = ROOT_PATH) {
+  return PUBLIC_RESTORE_PATHS.has(normalizeRestorePath(path));
+}
+
+function shouldAttemptCookieRefresh(options = {}) {
+  if (options.forceRefresh === true || options.forceRestore === true) return true;
+  if (options.allowCookieRefresh === false) return false;
+
+  /*
+    Si ya hay access token, el flujo primero intenta /me.
+    Si /me falla por token refreshable, permitimos refresh incluso en ruta pública.
+  */
+  if (hasValidToken()) return true;
+
+  /*
+    Sin token y en ruta pública/auth:
+    no llamamos /api/auth/refresh porque no hay forma razonable de esperar cookie.
+    Evita el 401 rojo innecesario en /login.
+  */
+  return !isPublicRestorePath(restorePathFromOptions(options));
 }
 
 /* =========================================================
@@ -830,10 +948,16 @@ async function login(credentials = {}, options = {}) {
         });
       }
 
+      if (result.authenticated) {
+        sessionState.hasCookieRefreshCandidate = true;
+      }
+
       sessionState.lastError = null;
       sessionState.lastLoginAt = Date.now();
 
-      return result;
+      return getPublicAuthResult({
+        ok: result.ok !== false,
+      });
     } catch (error) {
       sessionState.lastError = safeError(error, "login");
       throw error;
@@ -933,13 +1057,20 @@ async function refreshSession(options = {}) {
         });
       }
 
-      sessionState.hasCookieRefreshCandidate = true;
+      if (result.authenticated || hasValidToken()) {
+        sessionState.hasCookieRefreshCandidate = true;
+      }
+
       sessionState.lastError = null;
       sessionState.lastRefreshAt = Date.now();
 
       return result;
     } catch (error) {
       sessionState.lastError = safeError(error, "refresh");
+
+      if (shouldClearSessionForAuthError(error) || !hasValidToken()) {
+        sessionState.hasCookieRefreshCandidate = false;
+      }
 
       if (shouldClearSessionForAuthError(error)) {
         clearSession();
@@ -966,6 +1097,10 @@ async function restoreSession(options = {}) {
         return getPublicAuthResult();
       }
 
+      /*
+        Caso 1:
+        Hay access token en memoria/core. Se valida usuario con /me.
+      */
       if (hasValidToken()) {
         try {
           return await fetchMe({
@@ -975,10 +1110,41 @@ async function restoreSession(options = {}) {
         } catch (error) {
           if (!isRefreshableAuthError(error) && shouldClearSessionForAuthError(error)) {
             clearSession();
-            return getPublicAuthResult();
+
+            return getPublicAuthResult({
+              ok: false,
+              reason: "me-terminal-auth-error",
+            });
           }
+
+          /*
+            Si el error es refreshable, seguimos hacia refresh.
+          */
         }
       }
+
+      /*
+        Caso 2:
+        Sin token + ruta pública/auth.
+        No llamamos /api/auth/refresh.
+      */
+      if (!shouldAttemptCookieRefresh(options)) {
+        sessionState.hasCookieRefreshCandidate = false;
+        sessionState.lastError = null;
+
+        return getPublicAuthResult({
+          ok: false,
+          skippedRefresh: true,
+          reason: "public-route-without-token",
+        });
+      }
+
+      /*
+        Caso 3:
+        Ruta privada sin token.
+        Intentamos refresh porque la cookie httpOnly no se puede leer desde frontend.
+      */
+      sessionState.hasCookieRefreshCandidate = true;
 
       try {
         return await refreshSession({
@@ -987,12 +1153,15 @@ async function restoreSession(options = {}) {
           credentials: options.credentials || "include",
         });
       } catch (error) {
+        sessionState.lastError = safeError(error, "restore");
+
         if (shouldClearSessionForAuthError(error) || !hasValidToken()) {
           clearSession();
         }
 
         return getPublicAuthResult({
           ok: false,
+          reason: "refresh-failed",
         });
       }
     } finally {

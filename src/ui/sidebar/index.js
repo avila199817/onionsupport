@@ -3,16 +3,16 @@
    Archivo: /src/ui/sidebar/index.js
 
    Responsabilidad:
-   - Sidebar mínimo del panel.
+   - Controlador mínimo del sidebar.
    - Montar en #sidebar-mount.
-   - Pintar marca, menú, usuario y logout.
-   - Usar rutas reales desde router/routes.js.
-   - Ocultar rutas admin para usuarios no admin.
-   - Construir URLs visibles /@{user.slug}/{ruta}.
-   - Dejar navegación en el Router global mediante data-spa/data-route.
+   - Calcular usuario, rutas visibles y estado open/collapsed.
+   - Consumir template.js para TODO el DOM visual.
+   - Conectar callbacks de template: toggle/dropdown/logout.
+   - Dejar navegación normal en Router global vía data-spa/data-route.
    - Delegar logout en Auth.
-   - Sin submódulos, HTTP, Toast, Store, dropdown externo,
-     template externo ni rutas inventadas.
+   - Sin construir HTML visual.
+   - Sin submódulos externos.
+   - Sin HTTP, Toast, Store, Services ni rutas inventadas.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -31,18 +31,27 @@ import {
 
 import { getImmutableRoutes } from "../../router/routes.js";
 
-export const SIDEBAR_VERSION = "sidebar.minimal.v2";
+import {
+  createSidebarTemplate,
+  bindSidebarTemplate,
+  unbindSidebarTemplate,
+  setSidebarTemplateOpen,
+  closeSidebarDropdown,
+} from "./template.js";
+
+export const SIDEBAR_VERSION = "sidebar.controller.v1";
 
 const SIDEBAR_ROOT_ID = "app-sidebar";
+const SIDEBAR_MOUNT_ID = "sidebar-mount";
 const BRAND_LABEL = "Onion Support";
 
 let initialized = false;
 let mounted = false;
-let sidebarOpen = false;
+let sidebarOpen = true;
 let logoutInFlight = false;
 
 let root = null;
-let cleanupEvents = null;
+let cleanupTemplate = null;
 
 /* =========================================================
    BASICS
@@ -79,15 +88,6 @@ function redact(value = "") {
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
-function titleCase(value = "") {
-  return cleanText(value, "")
-    .replace(/^\/+/, "")
-    .replace(/-/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
 /* =========================================================
    DOM
 ========================================================= */
@@ -95,6 +95,18 @@ function titleCase(value = "") {
 function byId(id = "") {
   if (!isBrowser() || !id) return null;
   return document.getElementById(id);
+}
+
+function getMount() {
+  if (!isBrowser()) return null;
+
+  return (
+    byId(SIDEBAR_MOUNT_ID) ||
+    byId(SIDEBAR_ROOT_ID) ||
+    document.querySelector?.("[data-sidebar-mount]") ||
+    document.querySelector?.("[data-sidebar-root]") ||
+    null
+  );
 }
 
 function clear(node = null) {
@@ -107,30 +119,6 @@ function clear(node = null) {
     node.textContent = "";
     return true;
   }
-}
-
-function create(tag = "div", options = {}) {
-  const node = document.createElement(tag);
-
-  if (options.className) {
-    node.className = options.className;
-  }
-
-  if (options.textContent) {
-    node.textContent = options.textContent;
-  }
-
-  for (const [key, value] of Object.entries(options.attrs || {})) {
-    if (value === false || value === null || value === undefined) continue;
-    node.setAttribute(key, value === true ? "true" : String(value));
-  }
-
-  for (const [key, value] of Object.entries(options.dataset || {})) {
-    if (value === false || value === null || value === undefined) continue;
-    node.dataset[key] = String(value);
-  }
-
-  return node;
 }
 
 function setHidden(node = null, hidden = false) {
@@ -147,18 +135,6 @@ function setHidden(node = null, hidden = false) {
   }
 }
 
-function getMount() {
-  if (!isBrowser()) return null;
-
-  return (
-    byId("sidebar-mount") ||
-    byId(SIDEBAR_ROOT_ID) ||
-    document.querySelector?.("[data-sidebar-mount]") ||
-    document.querySelector?.("[data-sidebar-root]") ||
-    null
-  );
-}
-
 function cacheDom() {
   try {
     AppCore.dom = isObject(AppCore.dom) ? AppCore.dom : {};
@@ -167,8 +143,8 @@ function cacheDom() {
     AppCore.dom.appSidebar = root;
     AppCore.dom.sidebarRoot = root;
     AppCore.dom.sidebarMount =
-      byId("sidebar-mount") ||
-      (root?.parentElement?.id === "sidebar-mount" ? root.parentElement : null);
+      byId(SIDEBAR_MOUNT_ID) ||
+      (root?.parentElement?.id === SIDEBAR_MOUNT_ID ? root.parentElement : null);
 
     return true;
   } catch {
@@ -191,8 +167,28 @@ function clearDomCache() {
   }
 }
 
+function unbindTemplate() {
+  try {
+    cleanupTemplate?.();
+  } catch {
+    // noop
+  }
+
+  try {
+    if (root) {
+      unbindSidebarTemplate(root);
+    }
+  } catch {
+    // noop
+  }
+
+  cleanupTemplate = null;
+
+  return true;
+}
+
 /* =========================================================
-   USER
+   AUTH / USER
 ========================================================= */
 
 function getAuthUser() {
@@ -274,10 +270,13 @@ function getUserViewModel() {
     return {
       hasUser: false,
       role: "",
+      roles: [],
       isAdmin: false,
+      isUser: false,
       displayName: "Usuario",
       initials: "ON",
       avatarUrl: "",
+      hasAvatar: false,
       slug: "",
     };
   }
@@ -286,7 +285,14 @@ function getUserViewModel() {
     ? AppCore.publicUser(raw)
     : raw;
 
-  const role = cleanText(publicUser?.role || raw.role || raw.rol || getRole(), "user");
+  const role = cleanText(
+    publicUser?.role ||
+      raw.role ||
+      raw.rol ||
+      getRole(),
+    "user"
+  );
+
   const displayName = cleanText(
     publicUser?.displayName ||
       publicUser?.fullName ||
@@ -334,10 +340,13 @@ function getUserViewModel() {
     slug,
 
     displayName,
+    name: displayName,
+
     role,
+    rol: role,
     roles: role ? [role] : [],
 
-    roleLabel: role === "admin" ? "Administrador" : "Usuario",
+    roleLabel: role === "admin" ? "Administrador" : "Estándar",
 
     isAdmin: role === "admin",
     isUser: role === "user",
@@ -482,16 +491,16 @@ function routeHref(routePath = "/", user = getUserViewModel()) {
 function routeIcon(path = "/") {
   const clean = normalizePath(path);
 
-  if (clean === "/") return "⌂";
-  if (clean === ROUTES.incidencias) return "!";
-  if (clean === ROUTES.facturas) return "€";
-  if (clean === ROUTES.clientes) return "C";
-  if (clean === ROUTES.usuarios) return "U";
-  if (clean === ROUTES.servidor) return "S";
-  if (clean === ROUTES.cuenta) return "◎";
-  if (clean === ROUTES.ajustes) return "⚙";
+  if (clean === "/") return "home";
+  if (clean === ROUTES.incidencias) return "incidencias";
+  if (clean === ROUTES.facturas) return "facturas";
+  if (clean === ROUTES.clientes) return "clientes";
+  if (clean === ROUTES.usuarios) return "usuarios";
+  if (clean === ROUTES.servidor) return "servidor";
+  if (clean === ROUTES.cuenta) return "cuenta";
+  if (clean === ROUTES.ajustes) return "ajustes";
 
-  return "•";
+  return "home";
 }
 
 function routeLabel(route = null) {
@@ -499,11 +508,10 @@ function routeLabel(route = null) {
 
   if (route?.title) return cleanText(route.title);
   if (route?.label) return cleanText(route.label);
-  if (route?.name) return titleCase(route.name);
 
   if (path === "/") return "Inicio";
 
-  return titleCase(path);
+  return cleanText(route?.name || path.replace(/^\/+/, ""), path);
 }
 
 function isRouteAdmin(route = null) {
@@ -572,7 +580,7 @@ function getMenuItems(context = getContext()) {
 }
 
 /* =========================================================
-   CONTEXT
+   CONTEXT / VISIBILITY
 ========================================================= */
 
 function getCurrentRoute() {
@@ -617,249 +625,11 @@ function shouldRenderSidebar(context = getContext()) {
 }
 
 /* =========================================================
-   RENDER
+   TEMPLATE CALLBACKS
 ========================================================= */
 
-function createBrand(context) {
-  const href = userHomeHref(context.user);
-
-  const brand = create("a", {
-    className: "sidebar-brand",
-    attrs: {
-      href,
-      "data-spa": "true",
-      "data-route": href,
-      "aria-label": BRAND_LABEL,
-    },
-  });
-
-  const mark = create("span", {
-    className: "sidebar-brand-mark",
-    textContent: "ON",
-    attrs: {
-      "aria-hidden": "true",
-    },
-  });
-
-  const label = create("span", {
-    className: "sidebar-brand-label",
-    textContent: BRAND_LABEL,
-  });
-
-  brand.append(mark, label);
-
-  return brand;
-}
-
-function createMenuItem(item) {
-  const link = create("a", {
-    className: `sidebar-link${item.active ? " is-active" : ""}`,
-    attrs: {
-      href: item.href,
-      "data-spa": "true",
-      "data-route": item.href,
-      "data-sidebar-key": item.key,
-    },
-  });
-
-  if (item.active) {
-    link.setAttribute("aria-current", "page");
-  }
-
-  if (item.adminOnly) {
-    link.dataset.adminOnly = "true";
-  }
-
-  const icon = create("span", {
-    className: "sidebar-link-icon",
-    textContent: item.icon,
-    attrs: {
-      "aria-hidden": "true",
-    },
-  });
-
-  const label = create("span", {
-    className: "sidebar-link-label",
-    textContent: item.label,
-  });
-
-  link.append(icon, label);
-
-  return link;
-}
-
-function createMenu(items = []) {
-  const nav = create("nav", {
-    className: "sidebar-nav",
-    attrs: {
-      "aria-label": "Navegación principal",
-    },
-  });
-
-  const list = create("ul", {
-    className: "sidebar-menu",
-  });
-
-  for (const item of items) {
-    const li = create("li", {
-      className: "sidebar-menu-item",
-    });
-
-    li.appendChild(createMenuItem(item));
-    list.appendChild(li);
-  }
-
-  nav.appendChild(list);
-
-  return nav;
-}
-
-function createAvatar(user) {
-  const avatar = create("div", {
-    className: "sidebar-user-avatar",
-  });
-
-  if (user.hasAvatar && user.avatarUrl) {
-    const img = create("img", {
-      className: "sidebar-user-avatar-img",
-      attrs: {
-        src: user.avatarUrl,
-        alt: "",
-        loading: "lazy",
-        referrerpolicy: "no-referrer",
-        draggable: "false",
-      },
-    });
-
-    avatar.appendChild(img);
-    return avatar;
-  }
-
-  avatar.textContent = user.initials || "ON";
-  avatar.setAttribute("aria-hidden", "true");
-
-  return avatar;
-}
-
-function createUserBlock(user) {
-  const block = create("section", {
-    className: "sidebar-user",
-    attrs: {
-      "aria-label": "Usuario",
-    },
-  });
-
-  const summary = create("div", {
-    className: "sidebar-user-summary",
-  });
-
-  const info = create("div", {
-    className: "sidebar-user-info",
-  });
-
-  const name = create("strong", {
-    className: "sidebar-user-name",
-    textContent: user.displayName || "Usuario",
-  });
-
-  const role = create("span", {
-    className: "sidebar-user-role",
-    textContent: user.roleLabel || "Usuario",
-  });
-
-  info.append(name, role);
-  summary.append(createAvatar(user), info);
-
-  const logout = create("button", {
-    className: "sidebar-logout",
-    textContent: logoutInFlight ? "Cerrando..." : "Cerrar sesión",
-    attrs: {
-      type: "button",
-      "data-sidebar-action": "logout",
-      disabled: logoutInFlight ? "true" : null,
-    },
-  });
-
-  block.append(summary, logout);
-
-  return block;
-}
-
-function createRoot(context, items) {
-  const aside = create("aside", {
-    className: `sidebar app-sidebar${sidebarOpen ? " is-open" : ""}`,
-    attrs: {
-      id: SIDEBAR_ROOT_ID,
-      "data-sidebar-root": "true",
-      "data-sidebar-open": sidebarOpen ? "true" : "false",
-      "aria-label": "Menú principal",
-    },
-  });
-
-  aside.append(
-    createBrand(context),
-    createMenu(items),
-    createUserBlock(context.user)
-  );
-
-  return aside;
-}
-
-function mountRoot(nextRoot) {
-  const mount = getMount();
-
-  if (!mount || !nextRoot) return null;
-
-  unbindEvents();
-
-  if (mount.matches?.("[data-sidebar-root], #app-sidebar")) {
-    clear(mount);
-
-    for (const child of [...nextRoot.childNodes]) {
-      mount.appendChild(child);
-    }
-
-    mount.className = nextRoot.className;
-    mount.dataset.sidebarRoot = "true";
-    mount.dataset.sidebarOpen = sidebarOpen ? "true" : "false";
-    mount.setAttribute("aria-label", "Menú principal");
-
-    root = mount;
-  } else {
-    clear(mount);
-    mount.appendChild(nextRoot);
-    root = nextRoot;
-  }
-
-  setHidden(root, false);
-  cacheDom();
-  bindEvents();
-
-  mounted = true;
-
-  return root;
-}
-
-function hideSidebar() {
-  unbindEvents();
-
-  const current = root || byId(SIDEBAR_ROOT_ID);
-
-  if (current) {
-    setHidden(current, true);
-  }
-
-  mounted = false;
-  cacheDom();
-
-  return true;
-}
-
-function syncSidebarStateToDom() {
-  if (!root) return false;
-
-  root.classList.toggle("is-open", sidebarOpen);
-  root.dataset.sidebarOpen = sidebarOpen ? "true" : "false";
+function onTemplateOpenChange(open = false) {
+  sidebarOpen = open === true;
 
   try {
     document.body?.classList.toggle("sidebar-open", sidebarOpen);
@@ -874,6 +644,72 @@ function syncSidebarStateToDom() {
     // noop
   }
 
+  return sidebarOpen;
+}
+
+async function onTemplateLogout() {
+  await handleLogout();
+}
+
+/* =========================================================
+   MOUNT / RENDER
+========================================================= */
+
+function mountRoot(nextRoot) {
+  const mount = getMount();
+
+  if (!mount || !nextRoot) return null;
+
+  unbindTemplate();
+
+  if (mount.matches?.("[data-sidebar-root], #app-sidebar")) {
+    clear(mount);
+
+    for (const child of [...nextRoot.childNodes]) {
+      mount.appendChild(child);
+    }
+
+    mount.className = nextRoot.className;
+
+    for (const [key, value] of Object.entries(nextRoot.dataset || {})) {
+      mount.dataset[key] = value;
+    }
+
+    mount.setAttribute("aria-label", nextRoot.getAttribute("aria-label") || "Panel lateral");
+    mount.setAttribute("aria-hidden", "false");
+
+    root = mount;
+  } else {
+    clear(mount);
+    mount.appendChild(nextRoot);
+    root = nextRoot;
+  }
+
+  setHidden(root, false);
+
+  cleanupTemplate = bindSidebarTemplate(root, {
+    onOpenChange: onTemplateOpenChange,
+    onLogout: onTemplateLogout,
+  });
+
+  cacheDom();
+  mounted = true;
+
+  return root;
+}
+
+function hideSidebar() {
+  unbindTemplate();
+
+  const current = root || byId(SIDEBAR_ROOT_ID);
+
+  if (current) {
+    setHidden(current, true);
+  }
+
+  mounted = false;
+  cacheDom();
+
   return true;
 }
 
@@ -883,10 +719,24 @@ function renderSidebar(context = getContext()) {
     return SidebarUI;
   }
 
-  const nextRoot = createRoot(context, getMenuItems(context));
+  const user = context.user;
+  const items = getMenuItems(context);
+
+  const nextRoot = createSidebarTemplate({
+    id: SIDEBAR_ROOT_ID,
+    open: sidebarOpen,
+    user,
+    items,
+    brandLabel: BRAND_LABEL,
+    brandHref: userHomeHref(user),
+    accountLinks: {
+      cuentaHref: routeHref(ROUTES.cuenta || "/cuenta", user),
+      ajustesHref: routeHref(ROUTES.ajustes || "/ajustes", user),
+    },
+  });
 
   mountRoot(nextRoot);
-  syncSidebarStateToDom();
+  onTemplateOpenChange(sidebarOpen);
 
   return SidebarUI;
 }
@@ -919,7 +769,15 @@ async function navigateTo(path = "/", options = {}) {
 
 function setSidebarOpen(value = true) {
   sidebarOpen = value === true;
-  syncSidebarStateToDom();
+
+  if (root) {
+    setSidebarTemplateOpen(root, sidebarOpen, {
+      onOpenChange: onTemplateOpenChange,
+    });
+  } else {
+    onTemplateOpenChange(sidebarOpen);
+  }
+
   return sidebarOpen;
 }
 
@@ -928,6 +786,14 @@ function openSidebar() {
 }
 
 function closeSidebar() {
+  try {
+    closeSidebarDropdown(root, {
+      focus: false,
+    });
+  } catch {
+    // noop
+  }
+
   return setSidebarOpen(false);
 }
 
@@ -947,61 +813,18 @@ async function handleLogout(options = {}) {
     logoutInFlight = false;
     sidebarOpen = false;
 
-    await Router.replace?.(ROUTES.login || "/login", {
-      source: "sidebar.logout",
-      replaceState: true,
-    });
-  }
-
-  return true;
-}
-
-/* =========================================================
-   EVENTS
-========================================================= */
-
-function onClick(event) {
-  const action = event.target?.closest?.("[data-sidebar-action]");
-
-  if (!action) return;
-
-  const type = cleanText(action.dataset.sidebarAction, "");
-
-  event.preventDefault();
-
-  if (type === "logout") {
-    void handleLogout();
-    return;
-  }
-
-  if (type === "open") openSidebar();
-  if (type === "close") closeSidebar();
-  if (type === "toggle") toggleSidebar();
-}
-
-function bindEvents() {
-  if (!root || cleanupEvents) return false;
-
-  root.addEventListener("click", onClick);
-
-  cleanupEvents = () => {
     try {
-      root?.removeEventListener("click", onClick);
+      closeSidebarDropdown(root, {
+        focus: false,
+      });
     } catch {
       // noop
     }
 
-    cleanupEvents = null;
-  };
-
-  return true;
-}
-
-function unbindEvents() {
-  try {
-    cleanupEvents?.();
-  } catch {
-    cleanupEvents = null;
+    await Router.replace?.(ROUTES.login || "/login", {
+      source: "sidebar.logout",
+      replaceState: true,
+    });
   }
 
   return true;
@@ -1069,7 +892,7 @@ function init() {
 }
 
 function destroy() {
-  unbindEvents();
+  unbindTemplate();
 
   if (root) {
     setHidden(root, true);
@@ -1079,6 +902,7 @@ function destroy() {
   initialized = false;
   sidebarOpen = false;
   logoutInFlight = false;
+  root = null;
 
   clearDomCache();
   unregisterModule();

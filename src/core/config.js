@@ -10,12 +10,20 @@
    - Home interna: /.
    - Home visible autenticada: /@{user.slug}.
    - Endpoints auth mínimos.
-   - Denylist legacy/técnica centralizada.
-   - Sin runtime, sin storage, sin lógica de sesión,
-     sin i18n funcional y sin 2FA/MFA/OTP.
+   - Denylist técnica centralizada.
+   - Helpers puros de path/ruta/API.
+   - Sin runtime.
+   - Sin storage.
+   - Sin sesión.
+   - Sin i18n funcional.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.minimal.v1";
+export const CONFIG_VERSION = "core.config.minimal.v2";
+
+/* =========================================================
+   CONSTANTES BASE
+========================================================= */
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
@@ -28,16 +36,6 @@ export const CANONICAL_FRONTEND_ORIGINS = Object.freeze([
   "https://www.onionsupport.com",
 ]);
 
-export const KNOWN_FRONTEND_ORIGINS = Object.freeze([
-  ...CANONICAL_FRONTEND_ORIGINS,
-  "http://onionsupport.com",
-  "http://www.onionsupport.com",
-]);
-
-export const FORBIDDEN_FRONTEND_API_ORIGINS = Object.freeze([
-  ...KNOWN_FRONTEND_ORIGINS,
-]);
-
 export const TOKEN_PARAM = "token";
 export const USER_HOME_PREFIX = "/@";
 
@@ -48,19 +46,6 @@ export const ALLOWED_ROLES = Object.freeze([
 
 export const SUPPORTED_LANGS = Object.freeze([
   "es",
-]);
-
-export const BLOCKED_FRONTEND_ROUTES = Object.freeze([
-  "/home",
-  "/403",
-  "/404",
-  "/2fa",
-  "/mfa",
-  "/otp",
-
-  "/api",
-  "/.auth",
-  "/docs",
 ]);
 
 export const SENSITIVE_QUERY_PARAMS = Object.freeze([
@@ -90,7 +75,7 @@ export const SENSITIVE_QUERY_PARAMS = Object.freeze([
 ]);
 
 /* =========================================================
-   ROUTES
+   RUTAS SPA
 ========================================================= */
 
 export const ROUTES = Object.freeze({
@@ -133,6 +118,18 @@ export const PRIVATE_ROUTES = Object.freeze([
   ROUTES.cuenta,
   ROUTES.ajustes,
   ...ADMIN_ROUTES,
+]);
+
+export const BLOCKED_FRONTEND_ROUTES = Object.freeze([
+  "/home",
+  "/403",
+  "/404",
+  "/2fa",
+  "/mfa",
+  "/otp",
+  "/api",
+  "/.auth",
+  "/docs",
 ]);
 
 export const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
@@ -249,7 +246,6 @@ function normalizeApiBase(value = "") {
   const origin = cleanOrigin(raw);
 
   if (!origin) return CANONICAL_PRODUCTION_API_BASE;
-  if (FORBIDDEN_FRONTEND_API_ORIGINS.includes(origin)) return CANONICAL_PRODUCTION_API_BASE;
   if (!isAllowedBackendOrigin(origin)) return CANONICAL_PRODUCTION_API_BASE;
 
   return origin;
@@ -751,7 +747,15 @@ export function getCanonicalProductionApiBase() {
 }
 
 export function isForbiddenFrontendApiOrigin(value = "") {
-  return FORBIDDEN_FRONTEND_API_ORIGINS.includes(cleanOrigin(value));
+  const origin = cleanOrigin(value);
+
+  return Boolean(
+    origin &&
+      (
+        CANONICAL_FRONTEND_ORIGINS.includes(origin) ||
+        isCurrentBrowserOrigin(origin)
+      )
+  );
 }
 
 export function isCanonicalFrontendOrigin(value = "") {

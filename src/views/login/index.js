@@ -3,13 +3,12 @@
    Archivo: /src/views/login/index.js
 
    Responsabilidad:
-   - Renderizar login.
+   - Renderizar login completo inline.
    - Validar formulario mínimo.
    - Llamar Auth.login().
    - Navegar vía Router tras login correcto.
-   - Sin login.dom.js, login.helpers.js, login.template.js,
-     password-field, HTTP directo, Store, Toast, storage,
-     eventos globales ni navegación browser paralela.
+   - Sin login.template.js, login.dom.js, login.helpers.js,
+     password-field, HTTP directo, Store, Toast, storage ni eventos globales.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -19,11 +18,10 @@ import {
   ROUTES,
 } from "../../core/config.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.minimal.v1";
+export const LOGIN_VIEW_VERSION = "login.view.minimal.v2";
 
 const SOURCE = "login.view";
 
-const LOGIN_ROUTE = ROUTES.login || "/login";
 const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest || "/password-request";
 const ACTIVATE_ACCOUNT_ROUTE = ROUTES.activateAccount || "/activate-account";
 
@@ -66,6 +64,10 @@ function redact(value = "") {
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
+/* =========================================================
+   DOM
+========================================================= */
+
 function create(tag = "div", options = {}) {
   const node = document.createElement(tag);
 
@@ -79,76 +81,30 @@ function create(tag = "div", options = {}) {
 
   for (const [key, value] of Object.entries(options.attrs || {})) {
     if (value === false || value === null || value === undefined) continue;
+
     node.setAttribute(key, value === true ? "true" : String(value));
   }
 
   for (const [key, value] of Object.entries(options.dataset || {})) {
     if (value === false || value === null || value === undefined) continue;
+
     node.dataset[key] = String(value);
   }
 
   return node;
 }
 
-/* =========================================================
-   ROUTER
-========================================================= */
+function clear(node = null) {
+  if (!node) return false;
 
-function getRouter(context = {}) {
-  return (
-    context.Router ||
-    AppCore.router ||
-    AppCore.Router ||
-    AppCore.getModule?.("router") ||
-    null
-  );
+  try {
+    node.replaceChildren();
+    return true;
+  } catch {
+    node.textContent = "";
+    return true;
+  }
 }
-
-async function goAfterLogin(result = {}, context = {}) {
-  const router = getRouter(context);
-
-  if (!router) {
-    throw new Error("Router no disponible.");
-  }
-
-  const target =
-    result.postLoginTarget ||
-    result.homePath ||
-    result.defaultHome ||
-    Auth.getPostLoginTarget?.() ||
-    Auth.getDefaultHome?.() ||
-    "/";
-
-  if (isFunction(router.goAfterLogin)) {
-    return router.goAfterLogin(target, {
-      source: SOURCE,
-      replaceState: true,
-      force: true,
-    });
-  }
-
-  if (isFunction(router.replace)) {
-    return router.replace(target, {
-      source: SOURCE,
-      replaceState: true,
-      force: true,
-    });
-  }
-
-  if (isFunction(router.navigate)) {
-    return router.navigate(target, {
-      source: SOURCE,
-      replaceState: true,
-      force: true,
-    });
-  }
-
-  throw new Error("Router no permite navegación.");
-}
-
-/* =========================================================
-   FORM
-========================================================= */
 
 function createField({
   id,
@@ -158,12 +114,12 @@ function createField({
   autocomplete = "",
   placeholder = "",
 } = {}) {
-  const wrapper = create("div", {
-    className: "login-field",
+  const field = create("div", {
+    className: "auth-field login-field",
   });
 
   const labelNode = create("label", {
-    className: "login-label",
+    className: "auth-label login-label",
     textContent: label,
     attrs: {
       for: id,
@@ -171,7 +127,7 @@ function createField({
   });
 
   const input = create("input", {
-    className: "login-input",
+    className: "auth-input login-input",
     attrs: {
       id,
       name,
@@ -180,11 +136,12 @@ function createField({
       placeholder,
       required: true,
       "aria-describedby": `${id}-error`,
+      "data-login-input": name,
     },
   });
 
   const error = create("p", {
-    className: "login-field-error",
+    className: "auth-field-error login-field-error",
     attrs: {
       id: `${id}-error`,
       "data-login-error": name,
@@ -192,29 +149,34 @@ function createField({
     },
   });
 
-  wrapper.append(labelNode, input, error);
+  field.append(labelNode, input, error);
 
-  return wrapper;
+  return field;
 }
 
-function createLoginDom() {
-  const section = create("section", {
-    className: "login-view auth-view",
+function createLoginTemplate() {
+  const view = create("section", {
+    className: "auth-view login-view",
     attrs: {
       "aria-labelledby": "login-title",
+      "data-view": "login",
     },
   });
 
-  const card = create("div", {
-    className: "login-card",
+  const shell = create("div", {
+    className: "auth-shell login-shell",
+  });
+
+  const card = create("article", {
+    className: "auth-card login-card",
   });
 
   const brand = create("div", {
-    className: "login-brand",
+    className: "auth-brand login-brand",
   });
 
-  const mark = create("div", {
-    className: "login-brand-mark",
+  const brandMark = create("div", {
+    className: "auth-brand-mark login-brand-mark",
     textContent: "ON",
     attrs: {
       "aria-hidden": "true",
@@ -222,14 +184,24 @@ function createLoginDom() {
   });
 
   const brandText = create("div", {
-    className: "login-brand-text",
+    className: "auth-brand-text login-brand-text",
+  });
+
+  const appName = create("strong", {
+    className: "auth-brand-name login-brand-name",
     textContent: "Onion Support",
   });
 
-  brand.append(mark, brandText);
+  const appClaim = create("span", {
+    className: "auth-brand-claim login-brand-claim",
+    textContent: "Panel privado",
+  });
+
+  brandText.append(appName, appClaim);
+  brand.append(brandMark, brandText);
 
   const title = create("h1", {
-    className: "login-title",
+    className: "auth-title login-title",
     textContent: "Acceso",
     attrs: {
       id: "login-title",
@@ -237,12 +209,12 @@ function createLoginDom() {
   });
 
   const subtitle = create("p", {
-    className: "login-subtitle",
+    className: "auth-subtitle login-subtitle",
     textContent: "Inicia sesión para entrar en tu panel.",
   });
 
   const globalError = create("p", {
-    className: "login-global-error",
+    className: "auth-error login-global-error",
     attrs: {
       "data-login-global-error": "true",
       role: "alert",
@@ -251,7 +223,7 @@ function createLoginDom() {
   });
 
   const form = create("form", {
-    className: "login-form",
+    className: "auth-form login-form",
     attrs: {
       id: "login-form",
       autocomplete: "on",
@@ -280,11 +252,11 @@ function createLoginDom() {
   );
 
   const actions = create("div", {
-    className: "login-actions",
+    className: "auth-actions login-actions",
   });
 
   const submit = create("button", {
-    className: "login-submit",
+    className: "auth-submit login-submit",
     textContent: "Entrar",
     attrs: {
       type: "submit",
@@ -295,12 +267,15 @@ function createLoginDom() {
   actions.appendChild(submit);
   form.appendChild(actions);
 
-  const links = create("div", {
-    className: "login-links",
+  const links = create("nav", {
+    className: "auth-links login-links",
+    attrs: {
+      "aria-label": "Opciones de acceso",
+    },
   });
 
   const forgot = create("a", {
-    className: "login-link",
+    className: "auth-link login-link",
     textContent: "He olvidado mi contraseña",
     attrs: {
       href: PASSWORD_REQUEST_ROUTE,
@@ -310,7 +285,7 @@ function createLoginDom() {
   });
 
   const activate = create("a", {
-    className: "login-link",
+    className: "auth-link login-link",
     textContent: "Activar cuenta",
     attrs: {
       href: ACTIVATE_ACCOUNT_ROUTE,
@@ -322,9 +297,10 @@ function createLoginDom() {
   links.append(forgot, activate);
 
   card.append(brand, title, subtitle, globalError, form, links);
-  section.appendChild(card);
+  shell.appendChild(card);
+  view.appendChild(shell);
 
-  return section;
+  return view;
 }
 
 function getRefs(root) {
@@ -370,9 +346,7 @@ function clearErrors(refs) {
 function setGlobalError(refs, message = "") {
   if (!refs.globalError) return false;
 
-  const text = cleanText(message, "No se pudo iniciar sesión.");
-
-  refs.globalError.textContent = text;
+  refs.globalError.textContent = cleanText(message, "No se pudo iniciar sesión.");
   refs.globalError.hidden = false;
 
   return true;
@@ -456,7 +430,63 @@ function authErrorMessage(error = null) {
 }
 
 /* =========================================================
-   VIEW
+   ROUTER
+========================================================= */
+
+function getRouter(context = {}) {
+  return (
+    context.Router ||
+    AppCore.router ||
+    AppCore.Router ||
+    AppCore.getModule?.("router") ||
+    null
+  );
+}
+
+async function goAfterLogin(result = {}, context = {}) {
+  const router = getRouter(context);
+
+  if (!router) {
+    throw new Error("Router no disponible.");
+  }
+
+  const target =
+    result.postLoginTarget ||
+    result.homePath ||
+    result.defaultHome ||
+    Auth.getPostLoginTarget?.() ||
+    Auth.getDefaultHome?.() ||
+    "/";
+
+  if (isFunction(router.goAfterLogin)) {
+    return router.goAfterLogin(target, {
+      source: SOURCE,
+      replaceState: true,
+      force: true,
+    });
+  }
+
+  if (isFunction(router.replace)) {
+    return router.replace(target, {
+      source: SOURCE,
+      replaceState: true,
+      force: true,
+    });
+  }
+
+  if (isFunction(router.navigate)) {
+    return router.navigate(target, {
+      source: SOURCE,
+      replaceState: true,
+      force: true,
+    });
+  }
+
+  throw new Error("Router no permite navegación.");
+}
+
+/* =========================================================
+   INSTANCE
 ========================================================= */
 
 function destroyPrevious(container) {
@@ -491,6 +521,10 @@ function clearInstance(container, instance) {
   return true;
 }
 
+/* =========================================================
+   VIEW
+========================================================= */
+
 export function renderLoginView(container, context = {}) {
   if (!isBrowser()) return null;
 
@@ -499,9 +533,10 @@ export function renderLoginView(container, context = {}) {
   }
 
   destroyPrevious(container);
+  clear(container);
 
-  const view = createLoginDom();
-  container.replaceChildren(view);
+  const view = createLoginTemplate();
+  container.appendChild(view);
 
   const refs = getRefs(view);
 
@@ -565,13 +600,13 @@ export function renderLoginView(container, context = {}) {
     }
   }
 
-  refs.form?.addEventListener("submit", submit);
-
-  for (const input of [refs.identifier, refs.password].filter(Boolean)) {
-    input.addEventListener("input", () => {
-      clearErrors(refs);
-    });
+  function onInput() {
+    clearErrors(refs);
   }
+
+  refs.form?.addEventListener("submit", submit);
+  refs.identifier?.addEventListener("input", onInput);
+  refs.password?.addEventListener("input", onInput);
 
   try {
     refs.identifier?.focus?.({
@@ -583,6 +618,8 @@ export function renderLoginView(container, context = {}) {
 
   const instance = {
     version: LOGIN_VIEW_VERSION,
+
+    root: view,
 
     submit,
 
@@ -597,6 +634,8 @@ export function renderLoginView(container, context = {}) {
 
       try {
         refs.form?.removeEventListener("submit", submit);
+        refs.identifier?.removeEventListener("input", onInput);
+        refs.password?.removeEventListener("input", onInput);
       } catch {
         // noop
       }
@@ -620,7 +659,6 @@ export function renderLoginView(container, context = {}) {
         mounted,
         submitting,
         authenticated,
-        loginRoute: LOGIN_ROUTE,
         target: authenticated
           ? redact(Auth.getPostLoginTarget?.() || Auth.getDefaultHome?.() || "/")
           : null,

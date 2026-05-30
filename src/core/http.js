@@ -4,25 +4,29 @@
 
    Responsabilidad:
    - Cliente HTTP único de la SPA.
-   - Usar la API real configurada o https://api.onionit.net.
+   - API real: https://api.onionit.net salvo config explícita.
    - Enviar credentials: "include".
-   - Enviar Authorization sólo si hay access token.
-   - Parsear JSON/text/blob.
-   - Descargar blobs para facturas.
+   - Enviar Authorization sólo si hay access token en memoria.
+   - Parsear JSON/text/blob/arrayBuffer.
+   - Descargar blobs para facturas/documentos.
    - Clasificar errores auth sin decidir navegación.
-   - Sin core/request.js, sin services, sin interceptors,
-     sin runtime paralelo, sin refresh automático, sin Router,
-     sin Toast y sin Storage.
+   - Sin Router.
+   - Sin Toast.
+   - Sin Store.
+   - Sin Services.
+   - Sin storage.
+   - Sin refresh automático.
 ========================================================= */
 
 import * as ConfigModule from "./config.js";
 
-export const HTTP_VERSION = "core.http.minimal.v1";
+export const HTTP_VERSION = "core.http.minimal.v2";
 
 const config = ConfigModule.config || ConfigModule.default || {};
 
-const DEFAULT_API_FALLBACK = "https://api.onionit.net";
-const DEFAULT_TIMEOUT_MS = Number(config?.api?.timeout || config?.timeout || 30000) || 30000;
+const DEFAULT_API_ORIGIN = "https://api.onionit.net";
+const DEFAULT_TIMEOUT_MS =
+  Number(config?.api?.timeout || config?.timeout || 30000) || 30000;
 
 const RAW_AUTH_ENDPOINTS = {
   ...(config?.auth?.endpoints || {}),
@@ -33,10 +37,10 @@ const RAW_AUTH_ENDPOINTS = {
 export const AUTH_ENDPOINTS = Object.freeze({
   login: first(RAW_AUTH_ENDPOINTS.login, "/api/auth/login"),
   logout: first(RAW_AUTH_ENDPOINTS.logout, "/api/auth/logout"),
+  logoutAll: first(RAW_AUTH_ENDPOINTS.logoutAll, RAW_AUTH_ENDPOINTS.logout_all, "/api/auth/logout-all"),
   me: first(RAW_AUTH_ENDPOINTS.me, "/api/auth/me"),
   refresh: first(RAW_AUTH_ENDPOINTS.refresh, "/api/auth/refresh"),
 
-  activate: first(RAW_AUTH_ENDPOINTS.activate, "/api/auth/activate"),
   activateAccount: first(
     RAW_AUTH_ENDPOINTS.activateAccount,
     RAW_AUTH_ENDPOINTS.activate_account,
@@ -48,6 +52,7 @@ export const AUTH_ENDPOINTS = Object.freeze({
     RAW_AUTH_ENDPOINTS.requestPasswordReset,
     RAW_AUTH_ENDPOINTS.passwordRequest,
     RAW_AUTH_ENDPOINTS.password_request,
+    RAW_AUTH_ENDPOINTS.resetPasswordRequest,
     "/api/auth/password-request"
   ),
 
@@ -55,6 +60,7 @@ export const AUTH_ENDPOINTS = Object.freeze({
     RAW_AUTH_ENDPOINTS.confirmPasswordReset,
     RAW_AUTH_ENDPOINTS.passwordReset,
     RAW_AUTH_ENDPOINTS.password_reset,
+    RAW_AUTH_ENDPOINTS.resetPasswordConfirm,
     "/api/auth/password-reset"
   ),
 });
@@ -66,12 +72,17 @@ const PUBLIC_API_PATHS = new Set(
 
     AUTH_ENDPOINTS.login,
     AUTH_ENDPOINTS.refresh,
-    AUTH_ENDPOINTS.activate,
+    "/api/auth/token/refresh",
+    "/api/auth/renew",
     AUTH_ENDPOINTS.activateAccount,
+    "/api/auth/activate",
     AUTH_ENDPOINTS.requestPasswordReset,
+    "/api/auth/reset-password-request",
     AUTH_ENDPOINTS.confirmPasswordReset,
+    "/api/auth/reset-password-confirm",
+    "/api/auth/reset-password/confirm",
   ]
-    .map(cleanApiPathLiteral)
+    .map(cleanApiPath)
     .filter(Boolean)
 );
 
@@ -82,90 +93,61 @@ const PRIVATE_API_PATHS = new Set(
 
     AUTH_ENDPOINTS.me,
     AUTH_ENDPOINTS.logout,
+    AUTH_ENDPOINTS.logoutAll,
   ]
-    .map(cleanApiPathLiteral)
+    .map(cleanApiPath)
     .filter(Boolean)
 );
 
-const ALLOWED_METHODS = new Set([
-  "GET",
-  "HEAD",
-  "POST",
-  "PUT",
-  "PATCH",
-  "DELETE",
-  "OPTIONS",
+const SENSITIVE_QUERY_KEYS = new Set([
+  "token",
+  "access_token",
+  "accesstoken",
+  "refresh_token",
+  "refreshtoken",
+  "id_token",
+  "idtoken",
+  "jwt",
+  "authorization",
+  "session",
+  "session_id",
+  "sessionid",
+  "code",
+  "secret",
+  "password",
+  "pwd",
+  "key",
+  "sig",
+  "signature",
+  "reset_token",
+  "resettoken",
+  "activation_token",
+  "activationtoken",
 ]);
 
-const REFRESHABLE_AUTH_CODES = new Set([
+const AUTH_REFRESHABLE_CODES = new Set([
   "TOKEN_EXPIRED",
   "ACCESS_TOKEN_EXPIRED",
   "JWT_EXPIRED",
   "TOKEN_STALE",
-  "INVALID_TOKEN",
-  "MISSING_TOKEN",
-  "SESSION_REQUIRED",
   "AUTH_REQUIRED",
+  "SESSION_REQUIRED",
   "UNAUTHORIZED",
 ]);
 
-const CLEAR_SESSION_AUTH_CODES = new Set([
+const AUTH_CLEAR_SESSION_CODES = new Set([
   "SESSION_REVOKED",
   "SESSION_INVALID",
   "SESSION_NOT_FOUND",
-
   "INVALID_REFRESH_TOKEN",
   "REFRESH_TOKEN_INVALID",
   "REFRESH_TOKEN_REVOKED",
-
   "USER_DISABLED",
-  "USER_INACTIVE",
-  "USER_SUSPENDED",
-  "USER_BLOCKED",
-  "USER_BANNED",
-  "USER_REVOKED",
-  "USER_DELETED",
-  "USER_ARCHIVED",
-
   "USER_DESACTIVADO",
   "USUARIO_DESACTIVADO",
 ]);
 
-const SENSITIVE_QUERY_KEYS = new Set(
-  [
-    ...(Array.isArray(config?.sensitiveQueryParams) ? config.sensitiveQueryParams : []),
-    ...(Array.isArray(ConfigModule.SENSITIVE_QUERY_PARAMS) ? ConfigModule.SENSITIVE_QUERY_PARAMS : []),
-
-    "token",
-    "access_token",
-    "accesstoken",
-    "refresh_token",
-    "refreshtoken",
-    "id_token",
-    "idtoken",
-    "jwt",
-    "authorization",
-    "session",
-    "session_id",
-    "sessionid",
-    "code",
-    "secret",
-    "password",
-    "pwd",
-    "key",
-    "sig",
-    "signature",
-    "reset_token",
-    "resettoken",
-    "activation_token",
-    "activationtoken",
-  ]
-    .map((key) => normalizeKey(key))
-    .filter(Boolean)
-);
-
-const SENSITIVE_OBJECT_KEY_RE =
-  /(token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access|idtoken|api[_-]?key|private[_-]?key|connection[_-]?string|sas|otp|totp|mfa|twofa|2fa|backup[_-]?code|session[_-]?id|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
+const METHODS_WITHOUT_BODY = new Set(["GET", "HEAD"]);
 
 let apiOrigin = resolveInitialApiOrigin();
 let appCore = null;
@@ -180,6 +162,7 @@ const stats = {
   error: 0,
   lastUrl: "",
   lastMethod: "",
+  lastStatus: null,
   lastError: null,
 };
 
@@ -199,8 +182,8 @@ function isPlainObject(value) {
   if (!isObject(value)) return false;
 
   try {
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
   } catch {
     return false;
   }
@@ -235,13 +218,13 @@ function first(...values) {
   return null;
 }
 
-function normalizeErrorCode(value = "") {
+function normalizeCode(value = "") {
   return cleanText(value, "")
     .replace(/[\s-]+/g, "_")
     .toUpperCase();
 }
 
-function cleanApiPathLiteral(value = "") {
+function cleanApiPath(value = "") {
   let raw = cleanText(value, "");
 
   if (!raw) return "";
@@ -249,7 +232,7 @@ function cleanApiPathLiteral(value = "") {
   try {
     if (/^https?:\/\//i.test(raw)) {
       const url = new URL(raw);
-      raw = `${url.pathname}${url.search}`;
+      raw = `${url.pathname}${url.search || ""}`;
     }
   } catch {
     return "";
@@ -283,11 +266,9 @@ function redact(value = "") {
       }
     }
 
-    if (/^https?:\/\//i.test(text)) {
-      text = parsed.toString();
-    } else {
-      text = `${parsed.pathname}${parsed.search}${parsed.hash}`;
-    }
+    text = /^https?:\/\//i.test(text)
+      ? parsed.toString()
+      : `${parsed.pathname}${parsed.search}${parsed.hash}`;
   } catch {
     text = text.replace(
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
@@ -324,7 +305,10 @@ function sanitizeData(value, depth = 0) {
   const output = {};
 
   for (const [key, child] of Object.entries(value)) {
-    if (SENSITIVE_OBJECT_KEY_RE.test(key) || SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+    if (
+      /(token|authorization|cookie|password|pwd|secret|credential|jwt|bearer|refresh|access|idtoken|api[_-]?key|connection[_-]?string|sas|otp|totp|mfa|twofa|2fa|backup[_-]?code|session[_-]?id|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i.test(key) ||
+      SENSITIVE_QUERY_KEYS.has(normalizeKey(key))
+    ) {
       output[key] = child ? "***" : null;
       continue;
     }
@@ -360,23 +344,25 @@ function resolveConfigApiBase() {
     config?.api?.baseUrl,
     config?.api?.base,
     config?.api?.origin,
-    DEFAULT_API_FALLBACK
+    ConfigModule.API_BASE_URL,
+    ConfigModule.API_ORIGIN,
+    DEFAULT_API_ORIGIN
   );
 }
 
 function normalizeOrigin(value = "") {
-  const raw = cleanText(value, DEFAULT_API_FALLBACK).replace(/\/+$/g, "");
+  const raw = cleanText(value, DEFAULT_API_ORIGIN).replace(/\/+$/g, "");
 
   try {
     const url = new URL(raw);
 
     if (!["http:", "https:"].includes(url.protocol)) {
-      return DEFAULT_API_FALLBACK;
+      return DEFAULT_API_ORIGIN;
     }
 
     return url.origin;
   } catch {
-    return DEFAULT_API_FALLBACK;
+    return DEFAULT_API_ORIGIN;
   }
 }
 
@@ -389,8 +375,34 @@ export function getApiOrigin() {
 }
 
 export function setApiOrigin(value = "") {
-  apiOrigin = normalizeOrigin(value || DEFAULT_API_FALLBACK);
+  apiOrigin = normalizeOrigin(value || DEFAULT_API_ORIGIN);
   return apiOrigin;
+}
+
+function cleanSearch(search = "") {
+  const raw = cleanText(search, "");
+
+  if (!raw || raw === "?") return "";
+
+  const normalized = raw.startsWith("?")
+    ? raw
+    : `?${raw.replace(/^\?+/, "")}`;
+
+  try {
+    const params = new URLSearchParams(normalized);
+
+    for (const key of [...params.keys()]) {
+      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+        params.delete(key);
+      }
+    }
+
+    const output = params.toString();
+
+    return output ? `?${output}` : "";
+  } catch {
+    return "";
+  }
 }
 
 function endpointToPath(endpoint = "/") {
@@ -436,32 +448,6 @@ function endpointToPath(endpoint = "/") {
   }
 
   return `${path || "/"}${cleanSearch(rawSearch)}`;
-}
-
-function cleanSearch(search = "") {
-  const raw = cleanText(search, "");
-
-  if (!raw || raw === "?") return "";
-
-  const normalized = raw.startsWith("?")
-    ? raw
-    : `?${raw.replace(/^\?+/, "")}`;
-
-  try {
-    const params = new URLSearchParams(normalized);
-
-    for (const key of [...params.keys()]) {
-      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
-        params.delete(key);
-      }
-    }
-
-    const output = params.toString();
-
-    return output ? `?${output}` : "";
-  } catch {
-    return "";
-  }
 }
 
 function appendQuery(url = "", query = null) {
@@ -564,43 +550,35 @@ function stateAccessToken(state = readCoreState()) {
   );
 }
 
-function stateExplicitlyCleared(state = readCoreState()) {
-  return Boolean(
-    isObject(state) &&
-      state.hasToken === false &&
-      !stateAccessToken(state)
-  );
+export function getAccessToken() {
+  return stateAccessToken() || cleanToken(runtime.accessToken);
 }
 
-function patchCoreToken(token = "", options = {}) {
-  if (!appCore) return false;
-
+export function setAccessToken(token = "") {
   const value = cleanToken(token);
 
-  try {
-    if (isFunction(appCore.setToken)) {
-      appCore.setToken(value, {
-        silent: true,
-        ...options,
-      });
-      return true;
-    }
-  } catch {
-    // fallback abajo
+  runtime.accessToken = value;
+
+  return value;
+}
+
+export function setAuthTokens(payload = {}) {
+  const token = accessTokenFromPayload(payload);
+
+  if (token) {
+    setAccessToken(token);
   }
 
-  try {
-    if (isObject(appCore.state)) {
-      appCore.state.token = value || null;
-      appCore.state.accessToken = value || null;
-      appCore.state.hasToken = Boolean(value);
-      return true;
-    }
-  } catch {
-    // noop
-  }
+  return {
+    token: getAccessToken(),
+    accessToken: getAccessToken(),
+    access_token: getAccessToken(),
+  };
+}
 
-  return false;
+export function clearAuthTokens() {
+  runtime.accessToken = "";
+  return true;
 }
 
 function accessTokenFromPayload(payload = {}) {
@@ -629,52 +607,6 @@ function accessTokenFromPayload(payload = {}) {
   return "";
 }
 
-export function getAccessToken() {
-  const state = readCoreState();
-
-  if (stateExplicitlyCleared(state)) {
-    return "";
-  }
-
-  return stateAccessToken(state) || cleanToken(runtime.accessToken);
-}
-
-export function setAccessToken(token = "", options = {}) {
-  const value = cleanToken(token);
-
-  runtime.accessToken = value;
-  patchCoreToken(value, options);
-
-  return value;
-}
-
-export function setAuthTokens(payload = {}) {
-  const token = accessTokenFromPayload(payload);
-
-  if (token) {
-    setAccessToken(token);
-  }
-
-  return {
-    token: getAccessToken(),
-    accessToken: getAccessToken(),
-    access_token: getAccessToken(),
-  };
-}
-
-export function clearAuthTokens(options = {}) {
-  runtime.accessToken = "";
-
-  if (options.clearState === true || options.clearSession === true || options.forceUnauthenticated === true) {
-    patchCoreToken("", {
-      clearSession: true,
-      forceUnauthenticated: true,
-    });
-  }
-
-  return true;
-}
-
 /* =========================================================
    AUTH POLICY
 ========================================================= */
@@ -684,14 +616,13 @@ function endpointCleanPath(endpoint = "/") {
 
   if (!path) return "";
 
-  return cleanApiPathLiteral(path);
+  return cleanApiPath(path);
 }
 
 function endpointIsPrivate(endpoint = "") {
   const clean = endpointCleanPath(endpoint);
 
   if (!clean) return false;
-  if (clean === cleanApiPathLiteral(AUTH_ENDPOINTS.me)) return true;
 
   return PRIVATE_API_PATHS.has(clean);
 }
@@ -706,7 +637,12 @@ function endpointIsPublic(endpoint = "") {
 }
 
 function shouldUseAuth(endpoint = "", options = {}) {
-  if (options.auth === false || options.public === true || options.skipAuth === true || options.noAuthHeader === true) {
+  if (
+    options.auth === false ||
+    options.public === true ||
+    options.skipAuth === true ||
+    options.noAuthHeader === true
+  ) {
     return false;
   }
 
@@ -768,7 +704,23 @@ function hasHeader(headers = {}, name = "") {
   return Object.keys(headers).some((key) => key.toLowerCase() === target);
 }
 
-function removeHeader(headers = {}, name = "") {
+function setHeader(headers = {}, name = "", value = "") {
+  const target = cleanText(name, "");
+
+  if (!target) return headers;
+
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === target.toLowerCase()) {
+      headers[key] = value;
+      return headers;
+    }
+  }
+
+  headers[target] = value;
+  return headers;
+}
+
+function deleteHeader(headers = {}, name = "") {
   const target = cleanText(name, "").toLowerCase();
 
   for (const key of Object.keys(headers)) {
@@ -780,45 +732,29 @@ function removeHeader(headers = {}, name = "") {
   return headers;
 }
 
-function buildHeaders(options = {}, auth = false, token = "") {
-  const headers = headersFrom(options.headers);
+function isBodyInit(value) {
+  if (value === null || value === undefined) return false;
 
-  removeHeader(headers, "authorization");
+  if (typeof FormData !== "undefined" && value instanceof FormData) return true;
+  if (typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams) return true;
+  if (typeof Blob !== "undefined" && value instanceof Blob) return true;
+  if (typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer) return true;
+  if (typeof ReadableStream !== "undefined" && value instanceof ReadableStream) return true;
+  if (ArrayBuffer.isView?.(value)) return true;
+  if (typeof value === "string") return true;
 
-  if (!hasHeader(headers, "accept")) {
-    headers.Accept = "application/json, text/plain, */*";
-  }
-
-  const accessToken = cleanToken(token);
-
-  if (auth && accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
-  }
-
-  return headers;
+  return false;
 }
 
-function isBodyPayload(value) {
-  if (value === undefined || value === null) return false;
-
-  return true;
-}
-
-function prepareBody(body = undefined, headers = {}) {
-  if (!isBodyPayload(body)) {
+function normalizeBody(body = undefined, headers = {}) {
+  if (body === undefined || body === null) {
     return {
       body: undefined,
       headers,
     };
   }
 
-  if (
-    typeof FormData !== "undefined" && body instanceof FormData ||
-    typeof Blob !== "undefined" && body instanceof Blob ||
-    typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer ||
-    typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams ||
-    typeof ReadableStream !== "undefined" && body instanceof ReadableStream
-  ) {
+  if (isBodyInit(body)) {
     return {
       body,
       headers,
@@ -826,8 +762,8 @@ function prepareBody(body = undefined, headers = {}) {
   }
 
   if (isPlainObject(body) || Array.isArray(body)) {
-    if (!hasHeader(headers, "content-type")) {
-      headers["Content-Type"] = "application/json";
+    if (!hasHeader(headers, "Content-Type")) {
+      setHeader(headers, "Content-Type", "application/json");
     }
 
     return {
@@ -836,263 +772,104 @@ function prepareBody(body = undefined, headers = {}) {
     };
   }
 
+  if (!hasHeader(headers, "Content-Type")) {
+    setHeader(headers, "Content-Type", "text/plain;charset=UTF-8");
+  }
+
   return {
-    body,
+    body: String(body),
     headers,
   };
 }
 
-/* =========================================================
-   ERROR
-========================================================= */
+function buildFetchOptions(endpoint = "", options = {}) {
+  const method = cleanText(options.method, "GET").toUpperCase();
 
-export class HttpError extends Error {
-  constructor(message = "HTTP_ERROR", options = {}) {
-    super(redact(message));
-
-    this.name = "HttpError";
-    this.status = Number(options.status || options.statusCode || 0) || 0;
-    this.statusCode = this.status;
-    this.code = normalizeErrorCode(options.code || "HTTP_ERROR") || "HTTP_ERROR";
-    this.method = cleanText(options.method, "");
-    this.url = redact(options.url || "");
-    this.data = sanitizeData(options.data ?? null);
-
-    this.canRefresh = options.canRefresh === true;
-    this.refreshRequired = options.refreshRequired === true;
-    this.shouldLogout = options.shouldLogout === true;
-    this.clearClientSession = options.clearClientSession === true;
-  }
-}
-
-function payloadFrom(error = null) {
-  if (!error) return {};
-
-  if (isObject(error.data)) return error.data;
-  if (isObject(error.body)) return error.body;
-  if (isObject(error.payload)) return error.payload;
-  if (isObject(error.responseData)) return error.responseData;
-
-  return {};
-}
-
-function extractErrorCodeFromPayload(payload = {}) {
-  const auth = isObject(payload.auth) ? payload.auth : {};
-
-  return normalizeErrorCode(
-    first(
-      auth.code,
-      auth.error,
-      payload.code,
-      payload.errorCode,
-      payload.error_code,
-      payload.error,
-      ""
-    )
-  );
-}
-
-function extractErrorMessage(payload = {}, fallback = "HTTP_ERROR") {
-  return cleanText(
-    first(
-      payload.message,
-      payload.error_description,
-      payload.detail,
-      payload.reason,
-      payload.error,
-      fallback
-    ),
-    fallback
-  );
-}
-
-export function getHttpErrorCode(error = null) {
-  if (!error) return "";
-
-  return normalizeErrorCode(
-    first(
-      error.code,
-      extractErrorCodeFromPayload(payloadFrom(error)),
-      ""
-    )
-  );
-}
-
-export function getHttpStatus(error = null) {
-  if (!error) return 0;
-
-  return Number(
-    error.status ||
-      error.statusCode ||
-      error.response?.status ||
-      payloadFrom(error).status ||
-      payloadFrom(error).statusCode ||
-      0
-  ) || 0;
-}
-
-export function shouldClearSessionForAuthError(error = null) {
-  if (!error) return false;
-
-  if (error.shouldLogout === true || error.clearClientSession === true) {
-    return true;
+  if (!["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"].includes(method)) {
+    throw createHttpError({
+      code: "HTTP_METHOD_INVALID",
+      message: `Método HTTP no permitido: ${method}`,
+      status: 0,
+      endpoint,
+    });
   }
 
-  const payload = payloadFrom(error);
-  const auth = isObject(payload.auth) ? payload.auth : {};
-  const code = getHttpErrorCode(error);
+  const headers = headersFrom(options.headers);
 
-  if (
-    payload.clearSession === true ||
-    payload.clearClientSession === true ||
-    payload.shouldLogout === true ||
-    auth.clearSession === true ||
-    auth.clearClientSession === true ||
-    auth.shouldLogout === true
-  ) {
-    return true;
+  if (!hasHeader(headers, "Accept")) {
+    setHeader(headers, "Accept", "application/json, text/plain, */*");
   }
 
-  return CLEAR_SESSION_AUTH_CODES.has(code);
-}
+  if (shouldUseAuth(endpoint, options)) {
+    const token = getAccessToken();
 
-export function isRefreshableAuthError(error = null) {
-  if (!error) return false;
-  if (shouldClearSessionForAuthError(error)) return false;
-
-  if (error.canRefresh === true || error.refreshRequired === true) {
-    return true;
+    if (token) {
+      setHeader(headers, "Authorization", `Bearer ${token}`);
+    } else {
+      deleteHeader(headers, "Authorization");
+    }
+  } else {
+    deleteHeader(headers, "Authorization");
   }
 
-  const payload = payloadFrom(error);
-  const auth = isObject(payload.auth) ? payload.auth : {};
-  const code = getHttpErrorCode(error);
-  const status = getHttpStatus(error);
+  let body = undefined;
 
-  if (
-    payload.canRefresh === true ||
-    payload.refreshRequired === true ||
-    auth.canRefresh === true ||
-    auth.refreshRequired === true
-  ) {
-    return true;
+  if (!METHODS_WITHOUT_BODY.has(method)) {
+    const normalized = normalizeBody(options.body, headers);
+    body = normalized.body;
   }
-
-  if (REFRESHABLE_AUTH_CODES.has(code)) {
-    return true;
-  }
-
-  return status === 401;
-}
-
-export function normalizeHttpError(error = null) {
-  const payload = payloadFrom(error);
-  const code = getHttpErrorCode(error) || "HTTP_ERROR";
-  const status = getHttpStatus(error);
-  const shouldLogout = shouldClearSessionForAuthError(error);
-  const canRefresh = shouldLogout ? false : isRefreshableAuthError(error);
 
   return {
-    name: error?.name || "Error",
-    message: redact(error?.message || extractErrorMessage(payload, code)),
-    status,
-    statusCode: status,
-    code,
-
-    canRefresh,
-    refreshRequired: canRefresh,
-    shouldLogout,
-    clearClientSession: shouldLogout,
-  };
-}
-
-function createResponseError(response, data, url, method) {
-  const code = extractErrorCodeFromPayload(data) || `HTTP_${response.status}`;
-  const message = extractErrorMessage(data, response.statusText || code);
-
-  const error = new HttpError(message, {
-    status: response.status,
-    code,
     method,
-    url,
-    data,
-  });
-
-  const normalized = normalizeHttpError(error);
-
-  error.canRefresh = normalized.canRefresh;
-  error.refreshRequired = normalized.refreshRequired;
-  error.shouldLogout = normalized.shouldLogout;
-  error.clearClientSession = normalized.clearClientSession;
-
-  return error;
-}
-
-function recordSuccess() {
-  stats.success += 1;
-}
-
-function recordError(error = null, url = "", method = "") {
-  const normalized = normalizeHttpError(error);
-
-  stats.error += 1;
-  stats.lastError = {
-    name: normalized.name,
-    message: redact(normalized.message || String(error || "")),
-    status: normalized.status,
-    code: normalized.code,
-    url: redact(url),
-    method,
-    canRefresh: normalized.canRefresh,
-    shouldLogout: normalized.shouldLogout,
+    headers,
+    body,
+    credentials: options.credentials || "include",
+    cache: options.cache || "no-store",
+    mode: options.mode || "cors",
+    redirect: options.redirect || "follow",
   };
-
-  return normalized;
 }
 
 /* =========================================================
-   RESPONSE
+   RESPONSE PARSE
 ========================================================= */
 
-async function readResponsePayload(response) {
-  const contentType = response.headers.get("content-type") || "";
-
-  if (contentType.includes("application/json")) {
-    try {
-      return await response.json();
-    } catch {
-      return null;
-    }
-  }
-
+function contentTypeOf(response) {
   try {
-    const text = await response.text();
-
-    if (!text) return null;
-
-    try {
-      return JSON.parse(text);
-    } catch {
-      return {
-        message: text,
-      };
-    }
+    return response.headers.get("content-type") || "";
   } catch {
-    return null;
+    return "";
   }
 }
 
-async function parseSuccessResponse(response, options = {}) {
-  if (options.raw === true) {
-    return response;
+function dispositionFilename(response) {
+  try {
+    const disposition = response.headers.get("content-disposition") || "";
+
+    const utf8 = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+
+    if (utf8?.[1]) {
+      return decodeURIComponent(utf8[1]).replace(/["]/g, "");
+    }
+
+    const ascii = disposition.match(/filename="?([^";]+)"?/i);
+
+    if (ascii?.[1]) {
+      return ascii[1].replace(/["]/g, "");
+    }
+  } catch {
+    // noop
   }
 
+  return "";
+}
+
+async function parseResponse(response, options = {}) {
   if (response.status === 204 || response.status === 205 || options.method === "HEAD") {
     return null;
   }
 
-  const responseType = cleanText(options.responseType || options.type || "", "").toLowerCase();
-  const contentType = response.headers.get("content-type") || "";
+  const responseType = cleanText(options.responseType, "").toLowerCase();
 
   if (responseType === "blob") {
     return response.blob();
@@ -1106,230 +883,303 @@ async function parseSuccessResponse(response, options = {}) {
     return response.text();
   }
 
-  if (contentType.includes("application/json")) {
+  const contentType = contentTypeOf(response).toLowerCase();
+
+  if (contentType.includes("application/json") || contentType.includes("+json")) {
+    const text = await response.text();
+
+    if (!text) return null;
+
     try {
-      return await response.json();
+      return JSON.parse(text);
     } catch {
-      return null;
+      return text;
     }
   }
 
-  const text = await response.text();
+  if (
+    contentType.startsWith("text/") ||
+    contentType.includes("xml") ||
+    contentType.includes("html")
+  ) {
+    return response.text();
+  }
 
-  return text || null;
+  try {
+    return await response.blob();
+  } catch {
+    return response.text();
+  }
+}
+
+/* =========================================================
+   ERRORS
+========================================================= */
+
+function extractErrorCode(payload = null, response = null) {
+  if (isObject(payload)) {
+    return normalizeCode(
+      first(
+        payload.code,
+        payload.error,
+        payload.status,
+        payload.name,
+        ""
+      )
+    );
+  }
+
+  if (typeof payload === "string") {
+    return normalizeCode(payload.slice(0, 80));
+  }
+
+  if (response?.status === 401) return "UNAUTHORIZED";
+  if (response?.status === 403) return "FORBIDDEN";
+  if (response?.status === 404) return "NOT_FOUND";
+  if (response?.status === 429) return "TOO_MANY_REQUESTS";
+  if (response?.status >= 500) return "SERVER_ERROR";
+
+  return "HTTP_ERROR";
+}
+
+function extractErrorMessage(payload = null, fallback = "Error HTTP") {
+  if (isObject(payload)) {
+    return cleanText(
+      first(
+        payload.message,
+        payload.error_description,
+        payload.detail,
+        payload.title,
+        payload.error,
+        ""
+      ),
+      fallback
+    );
+  }
+
+  if (typeof payload === "string") {
+    return cleanText(payload, fallback);
+  }
+
+  return fallback;
+}
+
+function createHttpError({
+  code = "HTTP_ERROR",
+  message = "Error HTTP",
+  status = 0,
+  endpoint = "",
+  url = "",
+  method = "",
+  payload = null,
+  response = null,
+  cause = null,
+} = {}) {
+  const error = new Error(cleanText(message, "Error HTTP"));
+
+  error.name = "HttpError";
+  error.code = normalizeCode(code || "HTTP_ERROR");
+  error.status = Number(status || response?.status || 0);
+  error.statusCode = error.status;
+  error.endpoint = redact(endpoint || "");
+  error.url = redact(url || "");
+  error.method = cleanText(method, "");
+  error.payload = sanitizeData(payload);
+  error.data = error.payload;
+  error.response = response || null;
+  error.cause = cause || null;
+  error.auth = isAuthError(error);
+
+  return error;
+}
+
+function isAuthEndpoint(endpoint = "") {
+  return cleanApiPath(endpoint).startsWith("/api/auth");
+}
+
+function isRefreshEndpoint(endpoint = "") {
+  const clean = cleanApiPath(endpoint);
+
+  return [
+    cleanApiPath(AUTH_ENDPOINTS.refresh),
+    "/api/auth/token/refresh",
+    "/api/auth/renew",
+  ].includes(clean);
+}
+
+function isAuthError(error = null) {
+  const status = Number(error?.status || error?.statusCode || 0);
+  return status === 401 || status === 403;
+}
+
+export function isRefreshableAuthError(error = null) {
+  const status = Number(error?.status || error?.statusCode || 0);
+  const code = normalizeCode(error?.code || error?.payload?.code || error?.payload?.error || "");
+
+  if (status !== 401) return false;
+  if (isRefreshEndpoint(error?.endpoint || "")) return false;
+  if (AUTH_CLEAR_SESSION_CODES.has(code)) return false;
+
+  return !code || AUTH_REFRESHABLE_CODES.has(code);
+}
+
+export function shouldClearSessionForAuthError(error = null) {
+  const status = Number(error?.status || error?.statusCode || 0);
+  const code = normalizeCode(error?.code || error?.payload?.code || error?.payload?.error || "");
+
+  if (status === 403 && code.includes("DISABLED")) return true;
+  if (isRefreshEndpoint(error?.endpoint || "") && status === 401) return true;
+
+  return AUTH_CLEAR_SESSION_CODES.has(code);
 }
 
 /* =========================================================
    REQUEST
 ========================================================= */
 
-function normalizeRequestArgs(firstArg = "/", second = {}, third = {}) {
-  if (
-    typeof firstArg === "string" &&
-    ALLOWED_METHODS.has(firstArg.toUpperCase()) &&
-    typeof second === "string"
-  ) {
-    return {
-      endpoint: second,
-      options: {
-        ...(isObject(third) ? third : {}),
-        method: firstArg.toUpperCase(),
-      },
-    };
+function ensureFetch() {
+  if (typeof fetch !== "function") {
+    throw createHttpError({
+      code: "FETCH_UNAVAILABLE",
+      message: "fetch() no está disponible.",
+      status: 0,
+    });
   }
 
-  if (isObject(firstArg)) {
-    return {
-      endpoint: firstArg.url || firstArg.path || firstArg.endpoint || "/",
-      options: {
-        ...firstArg,
-        ...(isObject(second) ? second : {}),
-      },
-    };
-  }
-
-  return {
-    endpoint: firstArg,
-    options: isObject(second) ? second : {},
-  };
+  return fetch;
 }
 
-function normalizeMethod(value = "GET") {
-  const method = cleanText(value, "GET").toUpperCase();
-
-  return ALLOWED_METHODS.has(method) ? method : "GET";
-}
-
-function publicOptions(options = {}) {
-  return {
-    ...options,
-    credentials: options.credentials || "include",
-    auth: false,
-    public: true,
-    skipAuth: true,
-    noAuthHeader: true,
-    cache: options.cache || "no-store",
-  };
-}
-
-function privateOptions(options = {}) {
-  return {
-    ...options,
-    credentials: options.credentials || "include",
-    auth: true,
-    public: false,
-    skipAuth: false,
-    noAuthHeader: false,
-    cache: options.cache || "no-store",
-  };
-}
-
-function withTimeout(signal = null, timeoutMs = DEFAULT_TIMEOUT_MS) {
+function createAbortController(timeoutMs = DEFAULT_TIMEOUT_MS) {
   if (typeof AbortController === "undefined") {
     return {
-      signal,
-      clear: () => {},
+      controller: null,
+      timer: null,
     };
   }
 
-  const timeout = Number(timeoutMs || 0);
-
-  if (!timeout || timeout <= 0) {
-    return {
-      signal,
-      clear: () => {},
-    };
-  }
+  const timeout = Math.max(1000, Number(timeoutMs || DEFAULT_TIMEOUT_MS));
 
   const controller = new AbortController();
-
-  if (signal) {
-    if (signal.aborted) {
+  const timer = setTimeout(() => {
+    try {
       controller.abort();
-    } else {
-      signal.addEventListener("abort", () => controller.abort(), {
-        once: true,
-      });
+    } catch {
+      // noop
     }
-  }
-
-  const timer = window.setTimeout(() => controller.abort(), timeout);
+  }, timeout);
 
   return {
-    signal: controller.signal,
-    clear: () => window.clearTimeout(timer),
+    controller,
+    timer,
   };
 }
 
-export async function request(firstArg = "/", second = {}, third = {}) {
-  const parsed = normalizeRequestArgs(firstArg, second, third);
-  const options = isObject(parsed.options) ? parsed.options : {};
-  const method = normalizeMethod(options.method);
-  const endpoint = endpointToPath(parsed.endpoint);
-  const url = endpoint ? buildApiUrl(endpoint, options) : "";
-
-  stats.total += 1;
-  stats.lastMethod = method;
-  stats.lastUrl = redact(url || parsed.endpoint || "");
+export async function request(endpoint = "/", options = {}) {
+  const url = buildApiUrl(endpoint, options);
 
   if (!url) {
-    const error = new HttpError("Endpoint no permitido.", {
-      code: "ENDPOINT_NOT_ALLOWED",
-      method,
-      url: parsed.endpoint || "",
+    throw createHttpError({
+      code: "HTTP_ENDPOINT_INVALID",
+      message: "Endpoint API inválido.",
+      status: 0,
+      endpoint,
     });
-
-    recordError(error, parsed.endpoint || "", method);
-    throw error;
   }
 
-  const auth = shouldUseAuth(endpoint, options);
-  const token = auth ? cleanToken(first(options.token, options.accessToken, getAccessToken(), "")) : "";
-
-  const headers = buildHeaders(options, auth, token);
-  const prepared = prepareBody(
-    method === "GET" || method === "HEAD" ? undefined : options.body,
-    headers
-  );
-
-  const timeout = withTimeout(options.signal, options.timeout || DEFAULT_TIMEOUT_MS);
-
-  const fetchOptions = {
+  const method = cleanText(options.method, "GET").toUpperCase();
+  const fetchOptions = buildFetchOptions(endpoint, {
+    ...options,
     method,
-    headers: prepared.headers,
-    body: prepared.body,
+  });
 
-    credentials: options.credentials || "include",
-    cache: options.cache || "no-store",
-    mode: options.mode || "cors",
-    signal: timeout.signal,
-  };
+  const timeoutMs = Number(options.timeout || options.timeoutMs || DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
+  const abort = createAbortController(timeoutMs);
+
+  if (abort.controller) {
+    fetchOptions.signal = options.signal || abort.controller.signal;
+  } else if (options.signal) {
+    fetchOptions.signal = options.signal;
+  }
+
+  stats.total += 1;
+  stats.lastUrl = redact(url);
+  stats.lastMethod = method;
+  stats.lastStatus = null;
+  stats.lastError = null;
 
   try {
-    const response = await fetch(url, fetchOptions);
-
-    if (!response.ok) {
-      const data = await readResponsePayload(response);
-      throw createResponseError(response, data, url, method);
-    }
-
-    const result = await parseSuccessResponse(response, {
+    const fetchFn = ensureFetch();
+    const response = await fetchFn(url, fetchOptions);
+    const data = await parseResponse(response, {
       ...options,
       method,
     });
 
-    recordSuccess();
+    stats.lastStatus = response.status;
 
-    return result;
-  } catch (error) {
-    if (error instanceof HttpError) {
-      recordError(error, url, method);
-      throw error;
+    if (!response.ok) {
+      const code = extractErrorCode(data, response);
+      const message = extractErrorMessage(data, `HTTP ${response.status}`);
+
+      throw createHttpError({
+        code,
+        message,
+        status: response.status,
+        endpoint,
+        url,
+        method,
+        payload: data,
+        response,
+      });
     }
 
-    const isAbort = error?.name === "AbortError";
+    if (isObject(data)) {
+      setAuthTokens(data);
+    }
 
-    const wrapped = new HttpError(
-      isAbort ? "Tiempo de espera agotado." : "Error de red.",
-      {
-        code: isAbort ? "REQUEST_TIMEOUT" : "NETWORK_ERROR",
-        method,
-        url,
-        data: {
-          message: error?.message || String(error || ""),
-        },
-      }
-    );
+    stats.success += 1;
+    return data;
+  } catch (error) {
+    const normalized =
+      error?.name === "HttpError"
+        ? error
+        : createHttpError({
+            code: error?.name === "AbortError" ? "HTTP_TIMEOUT" : "NETWORK_ERROR",
+            message:
+              error?.name === "AbortError"
+                ? "La solicitud ha tardado demasiado."
+                : error?.message || "No se pudo conectar con la API.",
+            status: 0,
+            endpoint,
+            url,
+            method,
+            cause: error,
+          });
 
-    recordError(wrapped, url, method);
-    throw wrapped;
+    stats.error += 1;
+    stats.lastError = {
+      code: normalized.code,
+      status: normalized.status,
+      message: redact(normalized.message),
+      endpoint: redact(endpoint),
+    };
+
+    throw normalized;
   } finally {
-    timeout.clear();
+    if (abort.timer) {
+      clearTimeout(abort.timer);
+    }
   }
 }
 
 /* =========================================================
-   VERBS
+   METHOD HELPERS
 ========================================================= */
 
 export function get(endpoint = "/", options = {}) {
   return request(endpoint, {
     ...options,
     method: "GET",
-  });
-}
-
-export function head(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...options,
-    method: "HEAD",
-  });
-}
-
-export function optionsRequest(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...options,
-    method: "OPTIONS",
   });
 }
 
@@ -1364,108 +1214,209 @@ export function del(endpoint = "/", options = {}) {
   });
 }
 
-export function upload(endpoint = "/", formData, options = {}) {
-  return request(endpoint, {
-    ...options,
-    method: options.method || "POST",
-    body: formData,
-  });
-}
-
-export function download(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...options,
-    method: "GET",
-    responseType: "blob",
-  });
-}
-
-export function raw(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...options,
-    raw: true,
-  });
-}
+export { del as delete };
 
 /* =========================================================
    AUTH HELPERS
 ========================================================= */
 
-export async function login(credentials = {}, options = {}) {
-  const result = await post(AUTH_ENDPOINTS.login, credentials, publicOptions(options));
+export function login(payload = {}, options = {}) {
+  return post(AUTH_ENDPOINTS.login, payload, {
+    ...options,
+    public: true,
+    auth: false,
+    noAuthHeader: true,
+  });
+}
 
-  setAuthTokens(result);
+export function logout(options = {}) {
+  return post(AUTH_ENDPOINTS.logout, {}, {
+    ...options,
+    auth: true,
+  });
+}
 
-  return result;
+export function logoutAll(options = {}) {
+  return post(AUTH_ENDPOINTS.logoutAll, {}, {
+    ...options,
+    auth: true,
+  });
 }
 
 export function me(options = {}) {
-  return get(AUTH_ENDPOINTS.me, privateOptions(options));
+  return get(AUTH_ENDPOINTS.me, {
+    ...options,
+    auth: true,
+  });
 }
 
-export async function refreshSession(body = {}, options = {}) {
-  const result = await post(AUTH_ENDPOINTS.refresh, body, publicOptions(options));
-
-  setAuthTokens(result);
-
-  return result;
+export function refreshSession(body = {}, options = {}) {
+  return post(AUTH_ENDPOINTS.refresh, body, {
+    ...options,
+    public: true,
+    auth: false,
+    noAuthHeader: true,
+  });
 }
 
-export function refresh(options = {}) {
-  const opts = isObject(options) ? { ...options } : {};
-  const body = isObject(opts.body) ? opts.body : {};
-
-  delete opts.body;
-
-  return refreshSession(body, opts);
+export function activateAccount(payload = {}, options = {}) {
+  return post(AUTH_ENDPOINTS.activateAccount, payload, {
+    ...options,
+    public: true,
+    auth: false,
+    noAuthHeader: true,
+  });
 }
 
-export async function logout(options = {}) {
-  try {
-    return await post(AUTH_ENDPOINTS.logout, {}, privateOptions(options));
-  } finally {
-    clearAuthTokens({
-      clearState: true,
-      clearSession: true,
+export function requestPasswordReset(payload = {}, options = {}) {
+  return post(AUTH_ENDPOINTS.requestPasswordReset, payload, {
+    ...options,
+    public: true,
+    auth: false,
+    noAuthHeader: true,
+  });
+}
+
+export function confirmPasswordReset(payload = {}, options = {}) {
+  return post(AUTH_ENDPOINTS.confirmPasswordReset, payload, {
+    ...options,
+    public: true,
+    auth: false,
+    noAuthHeader: true,
+  });
+}
+
+/* =========================================================
+   BLOB / DOWNLOADS
+========================================================= */
+
+function fallbackFileName(value = "", fallback = "descarga") {
+  const name = cleanText(value, fallback)
+    .replace(/[\\/:*?"<>|#]+/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^[-_.]+|[-_.]+$/g, "")
+    .slice(0, 180);
+
+  return name || fallback;
+}
+
+export async function blob(endpoint = "/", options = {}) {
+  return request(endpoint, {
+    ...options,
+    method: options.method || "GET",
+    responseType: "blob",
+  });
+}
+
+export async function arrayBuffer(endpoint = "/", options = {}) {
+  return request(endpoint, {
+    ...options,
+    method: options.method || "GET",
+    responseType: "arrayBuffer",
+  });
+}
+
+export async function downloadBlob(endpoint = "/", options = {}) {
+  const url = buildApiUrl(endpoint, options);
+
+  if (!url) {
+    throw createHttpError({
+      code: "HTTP_ENDPOINT_INVALID",
+      message: "Endpoint API inválido.",
+      status: 0,
+      endpoint,
     });
+  }
+
+  const method = cleanText(options.method, "GET").toUpperCase();
+  const fetchOptions = buildFetchOptions(endpoint, {
+    ...options,
+    method,
+  });
+
+  const timeoutMs = Number(options.timeout || options.timeoutMs || DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
+  const abort = createAbortController(timeoutMs);
+
+  if (abort.controller) {
+    fetchOptions.signal = options.signal || abort.controller.signal;
+  } else if (options.signal) {
+    fetchOptions.signal = options.signal;
+  }
+
+  try {
+    const response = await ensureFetch()(url, fetchOptions);
+    const data = await parseResponse(response, {
+      ...options,
+      method,
+      responseType: "blob",
+    });
+
+    if (!response.ok) {
+      throw createHttpError({
+        code: extractErrorCode(data, response),
+        message: extractErrorMessage(data, `HTTP ${response.status}`),
+        status: response.status,
+        endpoint,
+        url,
+        method,
+        payload: data,
+        response,
+      });
+    }
+
+    const filename = fallbackFileName(
+      options.filename ||
+        dispositionFilename(response) ||
+        "descarga",
+      "descarga"
+    );
+
+    if (options.autoDownload !== false && isBrowser() && data instanceof Blob) {
+      const objectUrl = URL.createObjectURL(data);
+      const link = document.createElement("a");
+
+      link.href = objectUrl;
+      link.download = filename;
+      link.rel = "noopener";
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      setTimeout(() => {
+        URL.revokeObjectURL(objectUrl);
+      }, 1000);
+    }
+
+    return {
+      ok: true,
+      blob: data,
+      filename,
+      contentType: contentTypeOf(response),
+      size: data?.size || null,
+    };
+  } finally {
+    if (abort.timer) {
+      clearTimeout(abort.timer);
+    }
   }
 }
 
-export function activate(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.activate, body, publicOptions(options));
-}
-
-export function activateAccount(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.activateAccount, body, publicOptions(options));
-}
-
-export function requestPasswordReset(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.requestPasswordReset, body, publicOptions(options));
-}
-
-export function confirmPasswordReset(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.confirmPasswordReset, body, publicOptions(options));
-}
+export const download = downloadBlob;
+export const downloadFactura = downloadBlob;
 
 /* =========================================================
    INSTALL / SNAPSHOT
 ========================================================= */
 
-export function installHttp(core = null, options = {}) {
+export function install(core = null) {
   if (core) {
     appCore = core;
   }
 
-  if (options.apiOrigin || options.apiBase || options.baseUrl) {
-    setApiOrigin(options.apiOrigin || options.apiBase || options.baseUrl);
-  }
-
   try {
     appCore?.registerModule?.("http", Http, {
-      overwrite: true,
-    });
-
-    appCore?.modules?.register?.("http", Http, {
       overwrite: true,
     });
   } catch {
@@ -1475,118 +1426,87 @@ export function installHttp(core = null, options = {}) {
   return Http;
 }
 
-export const installCoreHttp = installHttp;
-export const install = installHttp;
-
-export function getHttpSnapshot() {
+export function getSnapshot() {
   return {
     version: HTTP_VERSION,
-
-    origin: getApiOrigin(),
+    apiOrigin,
     installed: Boolean(appCore),
-    hasAccessToken: Boolean(getAccessToken()),
-
+    hasRuntimeToken: Boolean(runtime.accessToken),
+    hasCoreToken: Boolean(stateAccessToken()),
+    endpoints: AUTH_ENDPOINTS,
     stats: {
       ...stats,
       lastUrl: redact(stats.lastUrl),
-      lastError: stats.lastError
-        ? {
-            ...stats.lastError,
-            message: redact(stats.lastError.message || ""),
-            url: redact(stats.lastError.url || ""),
-          }
-        : null,
+      lastError: sanitizeData(stats.lastError),
     },
-
-    endpoints: {
-      auth: AUTH_ENDPOINTS,
-      public: [...PUBLIC_API_PATHS],
-      private: [...PRIVATE_API_PATHS],
-    },
-
     policy: {
-      singleHttpClient: true,
-      usesFetchHereOnly: true,
       credentialsInclude: true,
-      noCoreRequestDependency: true,
-      noServicesDependency: true,
-      noInterceptors: true,
       noAutoRefresh: true,
       noRouter: true,
       noToast: true,
+      noStore: true,
+      noServices: true,
       noStorage: true,
-      noRefreshTokenStorage: true,
-      authErrorsClassifiedOnly: true,
-      tokenExpiredDoesNotMeanLogout: true,
-      snapshotRedacted: true,
     },
   };
 }
 
+export const getDebugSnapshot = getSnapshot;
+export const snapshot = getSnapshot;
+
 /* =========================================================
-   FACADE
+   DEFAULT EXPORT
 ========================================================= */
 
 export const Http = {
   version: HTTP_VERSION,
 
-  get origin() {
-    return getApiOrigin();
-  },
+  AUTH_ENDPOINTS,
+
+  install,
 
   getApiOrigin,
   setApiOrigin,
-
-  buildUrl: buildApiUrl,
   buildApiUrl,
-  redactHttpText,
 
   request,
-
   get,
-  head,
-  options: optionsRequest,
-  optionsRequest,
   post,
   put,
   patch,
-
   delete: del,
   del,
 
-  upload,
-  download,
-  raw,
-
   login,
-  me,
-  refresh,
-  refreshSession,
   logout,
+  logoutAll,
+  me,
+  refreshSession,
 
-  activate,
   activateAccount,
   requestPasswordReset,
   confirmPasswordReset,
+
+  blob,
+  arrayBuffer,
+  downloadBlob,
+  download,
+  downloadFactura,
 
   getAccessToken,
   setAccessToken,
   setAuthTokens,
   clearAuthTokens,
 
-  getHttpErrorCode,
-  getHttpStatus,
-  normalizeHttpError,
+  isAuthError,
   isRefreshableAuthError,
   shouldClearSessionForAuthError,
 
-  install: installHttp,
+  redactHttpText,
 
-  getSnapshot: getHttpSnapshot,
-  getDebugSnapshot: getHttpSnapshot,
-  snapshot: getHttpSnapshot,
+  getSnapshot,
+  getDebugSnapshot,
+  snapshot,
 };
-
-export const http = Http;
 
 export default Http;

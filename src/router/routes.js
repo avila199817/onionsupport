@@ -8,13 +8,14 @@
    - Resolver /@{slug} hacia ruta interna.
    - Marcar rutas públicas, privadas y admin.
    - Rutas públicas viven en /src/views/public/*
-   - Sin Auth, sin guards, sin history, sin storage,
-     sin Toast, sin snapshots gigantes y sin rutas inventadas.
+   - Sin Auth, guards, history, storage, Toast, shell,
+     snapshots gigantes ni rutas inventadas.
 ========================================================= */
 
 import {
   ROUTES,
   USER_HOME_PREFIX,
+  ALLOWED_ROLES,
   isAdminRoute as configIsAdminRoute,
   isBlockedRoutePath,
   normalizeRoutePath as configNormalizeRoutePath,
@@ -22,7 +23,11 @@ import {
   getUserScopedRouteInfo as configGetUserScopedRouteInfo,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.minimal.v2";
+export const ROUTES_VERSION = "routes.minimal.v3";
+
+/* =========================================================
+   PATHS / NAMES
+========================================================= */
 
 export const ROUTE_PATHS = Object.freeze({
   HOME: ROUTES.home || "/",
@@ -58,7 +63,12 @@ export const ROUTE_NAMES = Object.freeze({
   ACTIVATE_ACCOUNT: "activate-account",
 });
 
-export const VALID_ROLES = Object.freeze(["admin", "user"]);
+export const VALID_ROLES = Object.freeze(
+  Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
+    ? [...ALLOWED_ROLES]
+    : ["admin", "user"]
+);
+
 export const ADMIN_ROLES = Object.freeze(["admin"]);
 
 export const PUBLIC_AUTH_ROUTES = Object.freeze([
@@ -215,7 +225,9 @@ export function resolveRouteLookupPath(path = "/") {
 
   const scoped = getUserScopedRouteInfo(clean);
 
-  return scoped.scoped ? scoped.canonicalPath || scoped.restPath || "/" : clean;
+  return scoped.scoped
+    ? scoped.canonicalPath || scoped.restPath || "/"
+    : clean;
 }
 
 export function getUserHomeSlugFromPath(path = "/") {
@@ -297,7 +309,11 @@ const VIEW_LOADERS = Object.freeze({
 
   "password-request": () =>
     import("../views/public/password-reset/index.js").then((module) =>
-      pickView(module, ["PasswordRequestView", "PasswordResetView", "ResetPasswordView"])
+      pickView(module, [
+        "PasswordRequestView",
+        "PasswordResetView",
+        "ResetPasswordView",
+      ])
     ),
 
   "password-reset": () =>
@@ -369,8 +385,8 @@ function createRoute({
   const finalPath = normalizePath(path);
   const finalName = cleanName(name || viewKey || finalPath);
   const finalViewKey = cleanName(viewKey || finalName);
-  const finalAdminOnly = Boolean(adminOnly || configIsAdminRoute(finalPath));
   const finalPublic = Boolean(isPublic);
+  const finalAdminOnly = Boolean(adminOnly || configIsAdminRoute(finalPath));
 
   if (!finalPath || isBlockedRoutePath(finalPath)) {
     throw new Error(`Ruta no permitida: "${path}".`);
@@ -380,12 +396,17 @@ function createRoute({
     throw new Error(`No se declaran rutas reales bajo "${USER_HOME_PREFIX}".`);
   }
 
+  if (!VIEW_LOADERS[finalViewKey]) {
+    throw new Error(`No existe loader para la vista "${finalViewKey}".`);
+  }
+
   return Object.freeze({
     id: finalName,
     version: ROUTES_VERSION,
 
     path: finalPath,
     canonicalPath: finalPath,
+
     name: finalName,
     title: cleanText(title, finalName),
 
@@ -619,7 +640,7 @@ export function validateRoutesTable(_core = null, routes = getImmutableRoutes())
 }
 
 /* =========================================================
-   SNAPSHOT MÍNIMO
+   SNAPSHOT
 ========================================================= */
 
 export function getRoutesSnapshot() {

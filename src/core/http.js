@@ -3,80 +3,99 @@
    Archivo: /src/core/http.js
 
    Responsabilidad:
-   - Fachada única sobre core/request.js.
-   - API real única desde core/config.js.
-   - Endpoints auth reales desde core/config.js.
-   - /api/auth/me privado siempre.
-   - /api/auth/refresh público y sin Authorization.
-   - Enviar Authorization sólo cuando hay access token válido.
-   - No reutilizar token runtime si AppCore ya marcó sesión sin token.
-   - Clasificar errores auth sin decidir logout por su cuenta.
-   - TOKEN_EXPIRED / 401 recuperable NO implica logout.
-   - Access token caducado/rotado NO equivale a sesión perdida.
-   - Session/Auth decide refresh o clearSession().
-   - Sin fetch propio.
-   - Sin parser propio.
-   - Sin retry propio.
-   - Sin refresh automático.
-   - Sin Auth discovery.
-   - Sin Router.
-   - Sin Toast.
-   - Sin Storage.
+   - Cliente HTTP único de la SPA.
+   - Usar la API real configurada o https://api.onionit.net.
+   - Enviar credentials: "include".
+   - Enviar Authorization sólo si hay access token.
+   - Parsear JSON/text/blob.
+   - Descargar blobs para facturas.
+   - Clasificar errores auth sin decidir navegación.
+   - Sin core/request.js, sin services, sin interceptors,
+     sin runtime paralelo, sin refresh automático, sin Router,
+     sin Toast y sin Storage.
 ========================================================= */
 
-import {
-  config,
-  AUTH_ENDPOINTS,
-  PUBLIC_API_PATHS,
-  PRIVATE_API_PATHS,
-  SENSITIVE_QUERY_PARAMS,
-  getApiBase,
-  isCanonicalBackendApiBase,
-  isPublicApiPath,
-} from "./config.js";
+import * as ConfigModule from "./config.js";
 
-import {
-  createRequest,
-  createApiClient,
-} from "./request.js";
+export const HTTP_VERSION = "core.http.minimal.v1";
 
-export const HTTP_VERSION = "core.http.v9";
+const config = ConfigModule.config || ConfigModule.default || {};
 
-export const DEFAULT_API_ORIGIN = getApiBase();
-export const DEFAULT_TIMEOUT_MS = config?.api?.timeout || 30000;
+const DEFAULT_API_FALLBACK = "https://api.onionit.net";
+const DEFAULT_TIMEOUT_MS = Number(config?.api?.timeout || config?.timeout || 30000) || 30000;
 
-let apiOrigin = normalizeOrigin(
-  config?.apiBase ||
-    config?.apiOrigin ||
-    config?.api?.baseUrl ||
-    config?.api?.base ||
-    DEFAULT_API_ORIGIN
+const RAW_AUTH_ENDPOINTS = {
+  ...(config?.auth?.endpoints || {}),
+  ...(config?.endpoints?.auth || {}),
+  ...(ConfigModule.AUTH_ENDPOINTS || {}),
+};
+
+export const AUTH_ENDPOINTS = Object.freeze({
+  login: first(RAW_AUTH_ENDPOINTS.login, "/api/auth/login"),
+  logout: first(RAW_AUTH_ENDPOINTS.logout, "/api/auth/logout"),
+  me: first(RAW_AUTH_ENDPOINTS.me, "/api/auth/me"),
+  refresh: first(RAW_AUTH_ENDPOINTS.refresh, "/api/auth/refresh"),
+
+  activate: first(RAW_AUTH_ENDPOINTS.activate, "/api/auth/activate"),
+  activateAccount: first(
+    RAW_AUTH_ENDPOINTS.activateAccount,
+    RAW_AUTH_ENDPOINTS.activate_account,
+    RAW_AUTH_ENDPOINTS.activate,
+    "/api/auth/activate-account"
+  ),
+
+  requestPasswordReset: first(
+    RAW_AUTH_ENDPOINTS.requestPasswordReset,
+    RAW_AUTH_ENDPOINTS.passwordRequest,
+    RAW_AUTH_ENDPOINTS.password_request,
+    "/api/auth/password-request"
+  ),
+
+  confirmPasswordReset: first(
+    RAW_AUTH_ENDPOINTS.confirmPasswordReset,
+    RAW_AUTH_ENDPOINTS.passwordReset,
+    RAW_AUTH_ENDPOINTS.password_reset,
+    "/api/auth/password-reset"
+  ),
+});
+
+const PUBLIC_API_PATHS = new Set(
+  [
+    ...(Array.isArray(config?.api?.publicPaths) ? config.api.publicPaths : []),
+    ...(Array.isArray(ConfigModule.PUBLIC_API_PATHS) ? ConfigModule.PUBLIC_API_PATHS : []),
+
+    AUTH_ENDPOINTS.login,
+    AUTH_ENDPOINTS.refresh,
+    AUTH_ENDPOINTS.activate,
+    AUTH_ENDPOINTS.activateAccount,
+    AUTH_ENDPOINTS.requestPasswordReset,
+    AUTH_ENDPOINTS.confirmPasswordReset,
+  ]
+    .map(cleanApiPathLiteral)
+    .filter(Boolean)
 );
 
-let appCore = null;
-let requestEngine = null;
-let apiEngine = null;
+const PRIVATE_API_PATHS = new Set(
+  [
+    ...(Array.isArray(config?.api?.privatePaths) ? config.api.privatePaths : []),
+    ...(Array.isArray(ConfigModule.PRIVATE_API_PATHS) ? ConfigModule.PRIVATE_API_PATHS : []),
 
-const runtimeTokens = {
-  accessToken: "",
-};
+    AUTH_ENDPOINTS.me,
+    AUTH_ENDPOINTS.logout,
+  ]
+    .map(cleanApiPathLiteral)
+    .filter(Boolean)
+);
 
-const stats = {
-  total: 0,
-  success: 0,
-  error: 0,
-
-  lastUrl: "",
-  lastMethod: "",
-  lastError: null,
-
-  lastAuthCode: "",
-  lastRefreshable: false,
-};
-
-/* =========================================================
-   AUTH ERROR POLICY
-========================================================= */
+const ALLOWED_METHODS = new Set([
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+]);
 
 const REFRESHABLE_AUTH_CODES = new Set([
   "TOKEN_EXPIRED",
@@ -114,50 +133,63 @@ const CLEAR_SESSION_AUTH_CODES = new Set([
 
 const SENSITIVE_QUERY_KEYS = new Set(
   [
-    ...(Array.isArray(SENSITIVE_QUERY_PARAMS) ? SENSITIVE_QUERY_PARAMS : []),
+    ...(Array.isArray(config?.sensitiveQueryParams) ? config.sensitiveQueryParams : []),
+    ...(Array.isArray(ConfigModule.SENSITIVE_QUERY_PARAMS) ? ConfigModule.SENSITIVE_QUERY_PARAMS : []),
+
     "token",
     "access_token",
-    "accessToken",
+    "accesstoken",
     "refresh_token",
-    "refreshToken",
+    "refreshtoken",
     "id_token",
-    "idToken",
+    "idtoken",
     "jwt",
     "authorization",
     "session",
-    "sessionId",
-    "secret",
+    "session_id",
+    "sessionid",
     "code",
+    "secret",
     "password",
     "pwd",
     "key",
     "sig",
     "signature",
     "reset_token",
-    "resetToken",
+    "resettoken",
     "activation_token",
-    "activationToken",
+    "activationtoken",
   ]
-    .map((key) => String(key || "").trim().toLowerCase())
+    .map((key) => normalizeKey(key))
     .filter(Boolean)
 );
 
-const SENSITIVE_ERROR_KEY_RE =
-  /(token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|accessToken|access_token|idToken|id_token|apiKey|api_key|privateKey|private_key|connectionString|connection_string|sas|otp|totp|mfa|twofa|2fa|backupCode|backup_code|backupCodes|backup_codes|sessionId|session_id|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
+const SENSITIVE_OBJECT_KEY_RE =
+  /(token|authorization|cookie|password|passwd|pwd|secret|credential|jwt|bearer|refresh|access|idtoken|api[_-]?key|private[_-]?key|connection[_-]?string|sas|otp|totp|mfa|twofa|2fa|backup[_-]?code|session[_-]?id|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i;
 
-const ALLOWED_METHODS = new Set([
-  "GET",
-  "HEAD",
-  "POST",
-  "PUT",
-  "PATCH",
-  "DELETE",
-  "OPTIONS",
-]);
+let apiOrigin = resolveInitialApiOrigin();
+let appCore = null;
+
+const runtime = {
+  accessToken: "",
+};
+
+const stats = {
+  total: 0,
+  success: 0,
+  error: 0,
+  lastUrl: "",
+  lastMethod: "",
+  lastError: null,
+};
 
 /* =========================================================
    BASICS
 ========================================================= */
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -187,41 +219,20 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
+function normalizeKey(value = "") {
+  return cleanText(value, "")
+    .replace(/[-_\s]/g, "")
+    .toLowerCase();
+}
+
 function first(...values) {
   for (const value of values) {
-    if (value === null || value === undefined) continue;
+    if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     return value;
   }
 
   return null;
-}
-
-function escapeRegExp(value = "") {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function sensitiveQueryPattern() {
-  const keys = [...SENSITIVE_QUERY_KEYS]
-    .map(escapeRegExp)
-    .filter(Boolean)
-    .join("|");
-
-  return keys
-    ? new RegExp(`([?&#](?:${keys})=)([^&#\\s]+)`, "gi")
-    : null;
-}
-
-function redact(value = "") {
-  const pattern = sensitiveQueryPattern();
-  const text = cleanText(value, "");
-
-  return (pattern ? text.replace(pattern, "$1***") : text)
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
 }
 
 function normalizeErrorCode(value = "") {
@@ -230,133 +241,147 @@ function normalizeErrorCode(value = "") {
     .toUpperCase();
 }
 
-function keyIsSensitive(value = "") {
-  const key = cleanText(value, "");
-  const lower = key.toLowerCase();
+function cleanApiPathLiteral(value = "") {
+  let raw = cleanText(value, "");
 
-  return SENSITIVE_QUERY_KEYS.has(lower) || SENSITIVE_ERROR_KEY_RE.test(key);
-}
+  if (!raw) return "";
 
-function headersFrom(input = null) {
-  const headers = {};
-
-  if (!input) return headers;
-
-  if (typeof Headers !== "undefined" && input instanceof Headers) {
-    input.forEach((value, key) => {
-      headers[key] = value;
-    });
-
-    return headers;
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      const url = new URL(raw);
+      raw = `${url.pathname}${url.search}`;
+    }
+  } catch {
+    return "";
   }
 
-  if (Array.isArray(input)) {
-    for (const entry of input) {
-      if (!Array.isArray(entry) || entry.length < 2) continue;
+  raw = raw.split("#")[0] || "";
 
-      const key = cleanText(entry[0], "");
-      const value = entry[1];
+  const queryIndex = raw.indexOf("?");
+  const pathname = queryIndex >= 0 ? raw.slice(0, queryIndex) : raw;
 
-      if (key) {
-        headers[key] = value;
+  let path = pathname.startsWith("/") ? pathname : `/${pathname}`;
+
+  path = path.replace(/\/{2,}/g, "/");
+
+  if (path.length > 1) {
+    path = path.replace(/\/+$/g, "");
+  }
+
+  return path || "/";
+}
+
+function redact(value = "") {
+  let text = cleanText(value, "");
+
+  try {
+    const parsed = new URL(text, "https://onionsupport.local");
+
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+        parsed.searchParams.set(key, "***");
       }
     }
 
-    return headers;
+    if (/^https?:\/\//i.test(text)) {
+      text = parsed.toString();
+    } else {
+      text = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {
+    text = text.replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    );
   }
 
-  if (isObject(input)) {
-    return {
-      ...input,
-    };
-  }
-
-  return headers;
+  return text
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
-function removeHeader(headers = {}, name = "") {
-  const target = cleanText(name, "").toLowerCase();
+function sanitizeData(value, depth = 0) {
+  if (depth > 5) return null;
 
-  if (!target) return headers;
+  if (value === undefined) return undefined;
+  if (value === null) return null;
 
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === target) {
-      delete headers[key];
+  const type = typeof value;
+
+  if (type === "string") return redact(value);
+  if (type === "number" || type === "boolean") return value;
+  if (type === "function" || type === "symbol" || type === "bigint") return undefined;
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 100)
+      .map((item) => sanitizeData(item, depth + 1))
+      .filter((item) => item !== undefined);
+  }
+
+  if (!isPlainObject(value)) return null;
+
+  const output = {};
+
+  for (const [key, child] of Object.entries(value)) {
+    if (SENSITIVE_OBJECT_KEY_RE.test(key) || SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+      output[key] = child ? "***" : null;
+      continue;
+    }
+
+    const clean = sanitizeData(child, depth + 1);
+
+    if (clean !== undefined) {
+      output[key] = clean;
     }
   }
 
-  return headers;
-}
-
-function stripAuthHeaders(input = null) {
-  return removeHeader(headersFrom(input), "authorization");
-}
-
-function sessionCredentials(options = {}) {
-  return {
-    ...options,
-    credentials: options.credentials || "include",
-  };
-}
-
-function publicSessionOptions(options = {}) {
-  return {
-    ...sessionCredentials(options),
-    auth: false,
-    public: true,
-    skipAuth: true,
-    noAuthHeader: true,
-    cache: "no-store",
-  };
-}
-
-function privateSessionOptions(options = {}) {
-  return {
-    ...sessionCredentials(options),
-    auth: true,
-    public: false,
-    skipAuth: false,
-    noAuthHeader: false,
-    cache: "no-store",
-  };
-}
-
-function resetEngines() {
-  requestEngine = null;
-  apiEngine = null;
-  return true;
+  return output;
 }
 
 /* =========================================================
-   ORIGIN
+   ORIGIN / URL
 ========================================================= */
 
+function resolveConfigApiBase() {
+  try {
+    if (isFunction(ConfigModule.getApiBase)) {
+      const value = ConfigModule.getApiBase();
+
+      if (value) return value;
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  return first(
+    config?.apiBase,
+    config?.apiOrigin,
+    config?.api?.baseUrl,
+    config?.api?.base,
+    config?.api?.origin,
+    DEFAULT_API_FALLBACK
+  );
+}
+
 function normalizeOrigin(value = "") {
-  const raw = cleanText(value, DEFAULT_API_ORIGIN).replace(/\/+$/g, "");
+  const raw = cleanText(value, DEFAULT_API_FALLBACK).replace(/\/+$/g, "");
 
   try {
     const url = new URL(raw);
 
     if (!["http:", "https:"].includes(url.protocol)) {
-      return DEFAULT_API_ORIGIN;
-    }
-
-    if (!isCanonicalBackendApiBase(url.origin)) {
-      return DEFAULT_API_ORIGIN;
+      return DEFAULT_API_FALLBACK;
     }
 
     return url.origin;
   } catch {
-    return DEFAULT_API_ORIGIN;
+    return DEFAULT_API_FALLBACK;
   }
 }
 
-function apiUrlOrigin() {
-  try {
-    return new URL(apiOrigin).origin;
-  } catch {
-    return DEFAULT_API_ORIGIN;
-  }
+function resolveInitialApiOrigin() {
+  return normalizeOrigin(resolveConfigApiBase());
 }
 
 export function getApiOrigin() {
@@ -364,9 +389,122 @@ export function getApiOrigin() {
 }
 
 export function setApiOrigin(value = "") {
-  apiOrigin = normalizeOrigin(value || DEFAULT_API_ORIGIN);
-  resetEngines();
+  apiOrigin = normalizeOrigin(value || DEFAULT_API_FALLBACK);
   return apiOrigin;
+}
+
+function endpointToPath(endpoint = "/") {
+  const raw = cleanText(endpoint, "");
+
+  if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      const url = new URL(raw);
+
+      if (url.origin !== apiOrigin) {
+        return "";
+      }
+
+      return `${url.pathname || "/"}${cleanSearch(url.search)}`;
+    }
+  } catch {
+    return "";
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+
+  const withoutHash = raw.split("#")[0] || "";
+  const queryIndex = withoutHash.indexOf("?");
+
+  const rawPath = queryIndex >= 0
+    ? withoutHash.slice(0, queryIndex)
+    : withoutHash;
+
+  const rawSearch = queryIndex >= 0
+    ? withoutHash.slice(queryIndex)
+    : "";
+
+  let path = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
+
+  path = path.replace(/\/{2,}/g, "/");
+
+  if (path.length > 1) {
+    path = path.replace(/\/+$/g, "");
+  }
+
+  return `${path || "/"}${cleanSearch(rawSearch)}`;
+}
+
+function cleanSearch(search = "") {
+  const raw = cleanText(search, "");
+
+  if (!raw || raw === "?") return "";
+
+  const normalized = raw.startsWith("?")
+    ? raw
+    : `?${raw.replace(/^\?+/, "")}`;
+
+  try {
+    const params = new URLSearchParams(normalized);
+
+    for (const key of [...params.keys()]) {
+      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+        params.delete(key);
+      }
+    }
+
+    const output = params.toString();
+
+    return output ? `?${output}` : "";
+  } catch {
+    return "";
+  }
+}
+
+function appendQuery(url = "", query = null) {
+  const parsed = new URL(url);
+
+  if (isObject(query)) {
+    for (const [key, value] of Object.entries(query)) {
+      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) continue;
+      if (value === undefined || value === null || value === "") continue;
+
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (item !== undefined && item !== null && item !== "") {
+            parsed.searchParams.append(key, String(item));
+          }
+        }
+
+        continue;
+      }
+
+      parsed.searchParams.set(key, String(value));
+    }
+  }
+
+  for (const key of [...parsed.searchParams.keys()]) {
+    if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+      parsed.searchParams.delete(key);
+    }
+  }
+
+  return parsed.toString();
+}
+
+export function buildApiUrl(endpoint = "/", options = {}) {
+  const path = endpointToPath(endpoint);
+
+  if (!path) return "";
+
+  return appendQuery(`${apiOrigin}${path}`, options.query || options.params);
+}
+
+export function redactHttpText(value = "") {
+  return redact(value);
 }
 
 /* =========================================================
@@ -397,83 +535,85 @@ function cleanToken(value = "") {
   return token;
 }
 
-function getState() {
-  return isObject(appCore?.state) ? appCore.state : {};
+function readCoreState() {
+  if (!appCore) return null;
+
+  try {
+    if (isFunction(appCore.getState)) {
+      return appCore.getState({
+        includeToken: true,
+      });
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  return isObject(appCore.state) ? appCore.state : null;
 }
 
-function stateAccessToken(state = getState()) {
+function stateAccessToken(state = readCoreState()) {
+  if (!isObject(state)) return "";
+
   return cleanToken(
-    state.token ||
-      state.accessToken ||
-      state.access_token ||
+    first(
+      state.token,
+      state.accessToken,
+      state.access_token,
       ""
+    )
   );
 }
 
-function stateExplicitlyHasNoToken(state = getState()) {
+function stateExplicitlyCleared(state = readCoreState()) {
   return Boolean(
-    state.hasToken === false &&
+    isObject(state) &&
+      state.hasToken === false &&
       !stateAccessToken(state)
   );
 }
 
-function patchStateAccessToken(token = "", options = {}) {
-  const state = getState();
-
-  if (!isObject(state)) return false;
+function patchCoreToken(token = "", options = {}) {
+  if (!appCore) return false;
 
   const value = cleanToken(token);
 
-  if (value) {
-    state.token = value;
-    state.accessToken = value;
-    state.access_token = value;
-    state.hasToken = true;
-    return true;
+  try {
+    if (isFunction(appCore.setToken)) {
+      appCore.setToken(value, {
+        silent: true,
+        ...options,
+      });
+      return true;
+    }
+  } catch {
+    // fallback abajo
   }
 
-  if (
-    options.clearState === true ||
-    options.clearSession === true ||
-    options.forceUnauthenticated === true
-  ) {
-    delete state.token;
-    delete state.accessToken;
-    delete state.access_token;
-
-    state.hasToken = false;
-    return true;
+  try {
+    if (isObject(appCore.state)) {
+      appCore.state.token = value || null;
+      appCore.state.accessToken = value || null;
+      appCore.state.hasToken = Boolean(value);
+      return true;
+    }
+  } catch {
+    // noop
   }
 
   return false;
 }
 
-function normalizeTokenOptions(options = {}) {
-  if (options === true) {
-    return {
-      clearState: true,
-    };
-  }
-
-  return isObject(options) ? options : {};
-}
-
-function nestedPayloads(payload = {}) {
-  if (!isObject(payload)) return [];
-
-  return [
-    payload,
-    isObject(payload.data) ? payload.data : null,
-    isObject(payload.payload) ? payload.payload : null,
-    isObject(payload.result) ? payload.result : null,
-    isObject(payload.auth) ? payload.auth : null,
-    isObject(payload.session) ? payload.session : null,
-    isObject(payload.sessionData) ? payload.sessionData : null,
-  ].filter(Boolean);
-}
-
 function accessTokenFromPayload(payload = {}) {
-  for (const source of nestedPayloads(payload)) {
+  const candidates = [
+    payload,
+    isObject(payload?.data) ? payload.data : null,
+    isObject(payload?.payload) ? payload.payload : null,
+    isObject(payload?.result) ? payload.result : null,
+    isObject(payload?.auth) ? payload.auth : null,
+    isObject(payload?.session) ? payload.session : null,
+  ].filter(Boolean);
+
+  for (const source of candidates) {
     const token = cleanToken(
       first(
         source.token,
@@ -490,272 +630,221 @@ function accessTokenFromPayload(payload = {}) {
 }
 
 export function getAccessToken() {
-  const state = getState();
+  const state = readCoreState();
 
-  if (stateExplicitlyHasNoToken(state)) {
+  if (stateExplicitlyCleared(state)) {
     return "";
   }
 
-  const token = stateAccessToken(state);
-
-  if (token) return token;
-
-  return cleanToken(runtimeTokens.accessToken || "");
+  return stateAccessToken(state) || cleanToken(runtime.accessToken);
 }
 
 export function setAccessToken(token = "", options = {}) {
-  const opts = normalizeTokenOptions(options);
   const value = cleanToken(token);
 
-  if (!value) {
-    runtimeTokens.accessToken = "";
-    patchStateAccessToken("", opts);
-    return "";
-  }
-
-  runtimeTokens.accessToken = value;
-  patchStateAccessToken(value, opts);
+  runtime.accessToken = value;
+  patchCoreToken(value, options);
 
   return value;
 }
 
 export function setAuthTokens(payload = {}) {
-  const nextToken = accessTokenFromPayload(payload);
-  const access = nextToken
-    ? setAccessToken(nextToken)
-    : getAccessToken();
+  const token = accessTokenFromPayload(payload);
+
+  if (token) {
+    setAccessToken(token);
+  }
 
   return {
-    token: access || "",
-    accessToken: access || "",
-    access_token: access || "",
+    token: getAccessToken(),
+    accessToken: getAccessToken(),
+    access_token: getAccessToken(),
   };
 }
 
 export function clearAuthTokens(options = {}) {
-  const opts = normalizeTokenOptions(options);
+  runtime.accessToken = "";
 
-  runtimeTokens.accessToken = "";
-  patchStateAccessToken("", opts);
+  if (options.clearState === true || options.clearSession === true || options.forceUnauthenticated === true) {
+    patchCoreToken("", {
+      clearSession: true,
+      forceUnauthenticated: true,
+    });
+  }
 
   return true;
 }
 
 /* =========================================================
-   ENDPOINTS
+   AUTH POLICY
 ========================================================= */
 
-function sanitizeSearch(search = "") {
-  const raw = cleanText(search, "");
-
-  if (!raw || raw === "?") return "";
-
-  const normalized = raw.startsWith("?")
-    ? raw
-    : `?${raw.replace(/^\?+/, "")}`;
-
-  try {
-    const params = new URLSearchParams(normalized);
-
-    for (const key of [...params.keys()]) {
-      if (keyIsSensitive(key)) {
-        params.delete(key);
-      }
-    }
-
-    const output = params.toString();
-
-    return output ? `?${output}` : "";
-  } catch {
-    return "";
-  }
-}
-
-function endpointToPath(endpoint = "/") {
-  const raw = cleanText(endpoint, "");
-
-  if (!raw) return "";
-  if (raw.startsWith("//")) return "";
-  if (/[\r\n\t\\]/.test(raw)) return "";
-
-  try {
-    if (/^https?:\/\//i.test(raw)) {
-      const url = new URL(raw);
-
-      if (url.origin !== apiUrlOrigin()) {
-        return "";
-      }
-
-      return `${url.pathname || "/"}${sanitizeSearch(url.search)}`;
-    }
-  } catch {
-    return "";
-  }
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    return "";
-  }
-
-  const withoutHash = raw.split("#")[0] || "";
-  const queryIndex = withoutHash.indexOf("?");
-  const rawPath = queryIndex >= 0
-    ? withoutHash.slice(0, queryIndex)
-    : withoutHash;
-  const rawSearch = queryIndex >= 0
-    ? withoutHash.slice(queryIndex)
-    : "";
-
-  let path = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
-
-  path = path.replace(/\/{2,}/g, "/");
-
-  return `${path || "/"}${sanitizeSearch(rawSearch)}`;
-}
-
 function endpointCleanPath(endpoint = "/") {
-  const clean = endpointToPath(endpoint);
-
-  if (!clean) return "";
-
-  return clean.split("?")[0] || "/";
-}
-
-function stripSensitiveQueryParams(url = "") {
-  try {
-    const parsed = new URL(url, apiOrigin);
-
-    for (const key of [...parsed.searchParams.keys()]) {
-      if (keyIsSensitive(key)) {
-        parsed.searchParams.delete(key);
-      }
-    }
-
-    return parsed.toString();
-  } catch {
-    return "";
-  }
-}
-
-function appendQuery(url = "", query = null) {
-  if (!url) return "";
-
-  let parsed;
-
-  try {
-    parsed = new URL(url, apiOrigin);
-  } catch {
-    return "";
-  }
-
-  if (isObject(query)) {
-    for (const [key, value] of Object.entries(query)) {
-      if (keyIsSensitive(key)) continue;
-      if (value === undefined || value === null || value === "") continue;
-
-      parsed.searchParams.set(key, String(value));
-    }
-  }
-
-  return stripSensitiveQueryParams(parsed.toString());
-}
-
-export function buildApiUrl(endpoint = "/", options = {}) {
   const path = endpointToPath(endpoint);
 
   if (!path) return "";
 
-  return appendQuery(`${apiOrigin}${path}`, options.query || options.params);
+  return cleanApiPathLiteral(path);
 }
 
-export function redactHttpText(value = "") {
-  return redact(value);
-}
+function endpointIsPrivate(endpoint = "") {
+  const clean = endpointCleanPath(endpoint);
 
-function endpointIsMe(endpoint = "") {
-  return endpointCleanPath(endpoint) === AUTH_ENDPOINTS.me;
+  if (!clean) return false;
+  if (clean === cleanApiPathLiteral(AUTH_ENDPOINTS.me)) return true;
+
+  return PRIVATE_API_PATHS.has(clean);
 }
 
 function endpointIsPublic(endpoint = "") {
   const clean = endpointCleanPath(endpoint);
 
   if (!clean) return false;
-  if (clean === AUTH_ENDPOINTS.me) return false;
+  if (endpointIsPrivate(clean)) return false;
 
-  return isPublicApiPath(clean);
+  return PUBLIC_API_PATHS.has(clean);
 }
 
 function shouldUseAuth(endpoint = "", options = {}) {
-  if (endpointIsMe(endpoint)) return true;
-  if (endpointIsPublic(endpoint)) return false;
-
-  if (
-    options.auth === false ||
-    options.public === true ||
-    options.skipAuth === true ||
-    options.noAuthHeader === true
-  ) {
+  if (options.auth === false || options.public === true || options.skipAuth === true || options.noAuthHeader === true) {
     return false;
   }
 
-  if (options.auth === true) return true;
+  if (options.auth === true || endpointIsPrivate(endpoint)) {
+    return true;
+  }
+
+  if (endpointIsPublic(endpoint)) {
+    return false;
+  }
 
   return true;
 }
 
 /* =========================================================
-   ERROR
+   HEADERS / BODY
 ========================================================= */
 
-function sanitizeErrorData(value = null, depth = 0) {
-  if (depth > 5) return null;
+function headersFrom(input = null) {
+  const headers = {};
 
-  if (value === undefined) return undefined;
-  if (value === null) return null;
+  if (!input) return headers;
 
-  const valueType = typeof value;
+  if (typeof Headers !== "undefined" && input instanceof Headers) {
+    input.forEach((value, key) => {
+      headers[key] = value;
+    });
 
-  if (valueType === "string") {
-    return redact(value);
+    return headers;
   }
 
-  if (valueType === "number" || valueType === "boolean") {
-    return value;
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      if (!Array.isArray(item) || item.length < 2) continue;
+
+      const key = cleanText(item[0], "");
+      const value = item[1];
+
+      if (key) {
+        headers[key] = value;
+      }
+    }
+
+    return headers;
+  }
+
+  if (isObject(input)) {
+    return {
+      ...input,
+    };
+  }
+
+  return headers;
+}
+
+function hasHeader(headers = {}, name = "") {
+  const target = cleanText(name, "").toLowerCase();
+
+  return Object.keys(headers).some((key) => key.toLowerCase() === target);
+}
+
+function removeHeader(headers = {}, name = "") {
+  const target = cleanText(name, "").toLowerCase();
+
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === target) {
+      delete headers[key];
+    }
+  }
+
+  return headers;
+}
+
+function buildHeaders(options = {}, auth = false, token = "") {
+  const headers = headersFrom(options.headers);
+
+  removeHeader(headers, "authorization");
+
+  if (!hasHeader(headers, "accept")) {
+    headers.Accept = "application/json, text/plain, */*";
+  }
+
+  const accessToken = cleanToken(token);
+
+  if (auth && accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
+  return headers;
+}
+
+function isBodyPayload(value) {
+  if (value === undefined || value === null) return false;
+
+  return true;
+}
+
+function prepareBody(body = undefined, headers = {}) {
+  if (!isBodyPayload(body)) {
+    return {
+      body: undefined,
+      headers,
+    };
   }
 
   if (
-    valueType === "function" ||
-    valueType === "symbol" ||
-    valueType === "bigint"
+    typeof FormData !== "undefined" && body instanceof FormData ||
+    typeof Blob !== "undefined" && body instanceof Blob ||
+    typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer ||
+    typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams ||
+    typeof ReadableStream !== "undefined" && body instanceof ReadableStream
   ) {
-    return undefined;
+    return {
+      body,
+      headers,
+    };
   }
 
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 100)
-      .map((item) => sanitizeErrorData(item, depth + 1))
-      .filter((item) => item !== undefined);
-  }
-
-  if (!isPlainObject(value)) return null;
-
-  const output = {};
-
-  for (const [key, child] of Object.entries(value)) {
-    if (keyIsSensitive(key)) {
-      output[key] = child ? "***" : null;
-      continue;
+  if (isPlainObject(body) || Array.isArray(body)) {
+    if (!hasHeader(headers, "content-type")) {
+      headers["Content-Type"] = "application/json";
     }
 
-    const clean = sanitizeErrorData(child, depth + 1);
-
-    if (clean !== undefined) {
-      output[key] = clean;
-    }
+    return {
+      body: JSON.stringify(body),
+      headers,
+    };
   }
 
-  return output;
+  return {
+    body,
+    headers,
+  };
 }
+
+/* =========================================================
+   ERROR
+========================================================= */
 
 export class HttpError extends Error {
   constructor(message = "HTTP_ERROR", options = {}) {
@@ -764,10 +853,10 @@ export class HttpError extends Error {
     this.name = "HttpError";
     this.status = Number(options.status || options.statusCode || 0) || 0;
     this.statusCode = this.status;
-    this.code = normalizeErrorCode(options.code) || "HTTP_ERROR";
+    this.code = normalizeErrorCode(options.code || "HTTP_ERROR") || "HTTP_ERROR";
     this.method = cleanText(options.method, "");
     this.url = redact(options.url || "");
-    this.data = sanitizeErrorData(options.data ?? null);
+    this.data = sanitizeData(options.data ?? null);
 
     this.canRefresh = options.canRefresh === true;
     this.refreshRequired = options.refreshRequired === true;
@@ -776,72 +865,91 @@ export class HttpError extends Error {
   }
 }
 
-function getErrorPayload(error = null) {
+function payloadFrom(error = null) {
   if (!error) return {};
 
   if (isObject(error.data)) return error.data;
   if (isObject(error.body)) return error.body;
   if (isObject(error.payload)) return error.payload;
   if (isObject(error.responseData)) return error.responseData;
-  if (isObject(error.response) && !isFunction(error.response.blob)) return error.response;
 
   return {};
 }
 
-export function getHttpErrorCode(error = null) {
-  const payload = getErrorPayload(error);
+function extractErrorCodeFromPayload(payload = {}) {
   const auth = isObject(payload.auth) ? payload.auth : {};
 
   return normalizeErrorCode(
     first(
       auth.code,
       auth.error,
-
       payload.code,
       payload.errorCode,
       payload.error_code,
-
-      error?.code,
-      error?.error,
-
       payload.error,
       ""
     )
   );
 }
 
+function extractErrorMessage(payload = {}, fallback = "HTTP_ERROR") {
+  return cleanText(
+    first(
+      payload.message,
+      payload.error_description,
+      payload.detail,
+      payload.reason,
+      payload.error,
+      fallback
+    ),
+    fallback
+  );
+}
+
+export function getHttpErrorCode(error = null) {
+  if (!error) return "";
+
+  return normalizeErrorCode(
+    first(
+      error.code,
+      extractErrorCodeFromPayload(payloadFrom(error)),
+      ""
+    )
+  );
+}
+
 export function getHttpStatus(error = null) {
-  const payload = getErrorPayload(error);
+  if (!error) return 0;
 
   return Number(
-    error?.status ||
-      error?.statusCode ||
-      error?.response?.status ||
-      payload.status ||
-      payload.statusCode ||
+    error.status ||
+      error.statusCode ||
+      error.response?.status ||
+      payloadFrom(error).status ||
+      payloadFrom(error).statusCode ||
       0
   ) || 0;
 }
 
 export function shouldClearSessionForAuthError(error = null) {
-  if (error?.shouldLogout === true || error?.clearClientSession === true) {
+  if (!error) return false;
+
+  if (error.shouldLogout === true || error.clearClientSession === true) {
     return true;
   }
 
-  const payload = getErrorPayload(error);
+  const payload = payloadFrom(error);
   const auth = isObject(payload.auth) ? payload.auth : {};
   const code = getHttpErrorCode(error);
 
   if (
-    auth.clearClientSession === true ||
+    payload.clearSession === true ||
     payload.clearClientSession === true ||
+    payload.shouldLogout === true ||
     auth.clearSession === true ||
-    payload.clearSession === true
+    auth.clearClientSession === true ||
+    auth.shouldLogout === true
   ) {
-    return true;
-  }
-
-  if (auth.shouldLogout === true || payload.shouldLogout === true) {
     return true;
   }
 
@@ -849,24 +957,24 @@ export function shouldClearSessionForAuthError(error = null) {
 }
 
 export function isRefreshableAuthError(error = null) {
-  if (shouldClearSessionForAuthError(error)) {
-    return false;
-  }
+  if (!error) return false;
+  if (shouldClearSessionForAuthError(error)) return false;
 
-  if (error?.canRefresh === true || error?.refreshRequired === true) {
+  if (error.canRefresh === true || error.refreshRequired === true) {
     return true;
   }
 
-  const payload = getErrorPayload(error);
+  const payload = payloadFrom(error);
   const auth = isObject(payload.auth) ? payload.auth : {};
   const code = getHttpErrorCode(error);
   const status = getHttpStatus(error);
 
-  if (auth.refreshRequired === true || payload.refreshRequired === true) {
-    return true;
-  }
-
-  if (auth.canRefresh === true || payload.canRefresh === true) {
+  if (
+    payload.canRefresh === true ||
+    payload.refreshRequired === true ||
+    auth.canRefresh === true ||
+    auth.refreshRequired === true
+  ) {
     return true;
   }
 
@@ -878,31 +986,18 @@ export function isRefreshableAuthError(error = null) {
 }
 
 export function normalizeHttpError(error = null) {
-  const payload = getErrorPayload(error);
-  const code = getHttpErrorCode(error);
+  const payload = payloadFrom(error);
+  const code = getHttpErrorCode(error) || "HTTP_ERROR";
   const status = getHttpStatus(error);
   const shouldLogout = shouldClearSessionForAuthError(error);
   const canRefresh = shouldLogout ? false : isRefreshableAuthError(error);
 
   return {
     name: error?.name || "Error",
-    message: redact(
-      cleanText(
-        first(
-          error?.message,
-          payload.message,
-          payload.error_description,
-          payload.detail,
-          payload.reason,
-          code,
-          "HTTP_ERROR"
-        ),
-        "HTTP_ERROR"
-      )
-    ),
+    message: redact(error?.message || extractErrorMessage(payload, code)),
     status,
     statusCode: status,
-    code: code || "HTTP_ERROR",
+    code,
 
     canRefresh,
     refreshRequired: canRefresh,
@@ -911,39 +1006,43 @@ export function normalizeHttpError(error = null) {
   };
 }
 
-function decorateError(error = null, normalized = null) {
-  if (!error || !isObject(error) || !normalized) {
-    return error;
-  }
+function createResponseError(response, data, url, method) {
+  const code = extractErrorCodeFromPayload(data) || `HTTP_${response.status}`;
+  const message = extractErrorMessage(data, response.statusText || code);
 
-  try {
-    error.status = normalized.status;
-    error.statusCode = normalized.statusCode;
-    error.code = normalized.code;
-    error.canRefresh = normalized.canRefresh;
-    error.refreshRequired = normalized.refreshRequired;
-    error.shouldLogout = normalized.shouldLogout;
-    error.clearClientSession = normalized.clearClientSession;
-  } catch {
-    // noop
-  }
+  const error = new HttpError(message, {
+    status: response.status,
+    code,
+    method,
+    url,
+    data,
+  });
+
+  const normalized = normalizeHttpError(error);
+
+  error.canRefresh = normalized.canRefresh;
+  error.refreshRequired = normalized.refreshRequired;
+  error.shouldLogout = normalized.shouldLogout;
+  error.clearClientSession = normalized.clearClientSession;
 
   return error;
 }
 
-function recordHttpError(error = null, url = "", method = "") {
+function recordSuccess() {
+  stats.success += 1;
+}
+
+function recordError(error = null, url = "", method = "") {
   const normalized = normalizeHttpError(error);
 
   stats.error += 1;
-  stats.lastAuthCode = normalized.code || "";
-  stats.lastRefreshable = Boolean(normalized.canRefresh);
   stats.lastError = {
     name: normalized.name,
-    message: redact(normalized.message || String(error)),
+    message: redact(normalized.message || String(error || "")),
     status: normalized.status,
     code: normalized.code,
     url: redact(url),
-    method: cleanText(method, ""),
+    method,
     canRefresh: normalized.canRefresh,
     shouldLogout: normalized.shouldLogout,
   };
@@ -952,41 +1051,82 @@ function recordHttpError(error = null, url = "", method = "") {
 }
 
 /* =========================================================
-   ENGINE
+   RESPONSE
 ========================================================= */
 
-function ensureEngines() {
-  if (requestEngine && apiEngine) {
-    return {
-      requestEngine,
-      apiEngine,
-    };
+async function readResponsePayload(response) {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    try {
+      return await response.json();
+    } catch {
+      return null;
+    }
   }
 
-  if (!isFunction(createRequest)) {
-    throw new Error("createRequest() no disponible.");
+  try {
+    const text = await response.text();
+
+    if (!text) return null;
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return {
+        message: text,
+      };
+    }
+  } catch {
+    return null;
   }
-
-  if (!isFunction(createApiClient)) {
-    throw new Error("createApiClient() no disponible.");
-  }
-
-  requestEngine = createRequest({
-    state: () => getState(),
-  });
-
-  apiEngine = createApiClient(requestEngine);
-
-  return {
-    requestEngine,
-    apiEngine,
-  };
 }
+
+async function parseSuccessResponse(response, options = {}) {
+  if (options.raw === true) {
+    return response;
+  }
+
+  if (response.status === 204 || response.status === 205 || options.method === "HEAD") {
+    return null;
+  }
+
+  const responseType = cleanText(options.responseType || options.type || "", "").toLowerCase();
+  const contentType = response.headers.get("content-type") || "";
+
+  if (responseType === "blob") {
+    return response.blob();
+  }
+
+  if (responseType === "arraybuffer" || responseType === "array-buffer") {
+    return response.arrayBuffer();
+  }
+
+  if (responseType === "text") {
+    return response.text();
+  }
+
+  if (contentType.includes("application/json")) {
+    try {
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }
+
+  const text = await response.text();
+
+  return text || null;
+}
+
+/* =========================================================
+   REQUEST
+========================================================= */
 
 function normalizeRequestArgs(firstArg = "/", second = {}, third = {}) {
   if (
     typeof firstArg === "string" &&
-    /^[A-Z]+$/i.test(firstArg) &&
+    ALLOWED_METHODS.has(firstArg.toUpperCase()) &&
     typeof second === "string"
   ) {
     return {
@@ -1014,103 +1154,162 @@ function normalizeRequestArgs(firstArg = "/", second = {}, third = {}) {
   };
 }
 
-function requestMethod(options = {}) {
-  const method = cleanText(options.method, "GET").toUpperCase();
+function normalizeMethod(value = "GET") {
+  const method = cleanText(value, "GET").toUpperCase();
 
   return ALLOWED_METHODS.has(method) ? method : "GET";
 }
 
-function buildAuthHeaders(options = {}, token = "") {
-  const headers = stripAuthHeaders(options.headers);
-  const value = cleanToken(token);
-
-  if (value) {
-    headers.Authorization = `Bearer ${value}`;
-  }
-
-  return headers;
+function publicOptions(options = {}) {
+  return {
+    ...options,
+    credentials: options.credentials || "include",
+    auth: false,
+    public: true,
+    skipAuth: true,
+    noAuthHeader: true,
+    cache: options.cache || "no-store",
+  };
 }
 
-/* =========================================================
-   REQUEST
-========================================================= */
+function privateOptions(options = {}) {
+  return {
+    ...options,
+    credentials: options.credentials || "include",
+    auth: true,
+    public: false,
+    skipAuth: false,
+    noAuthHeader: false,
+    cache: options.cache || "no-store",
+  };
+}
+
+function withTimeout(signal = null, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  if (typeof AbortController === "undefined") {
+    return {
+      signal,
+      clear: () => {},
+    };
+  }
+
+  const timeout = Number(timeoutMs || 0);
+
+  if (!timeout || timeout <= 0) {
+    return {
+      signal,
+      clear: () => {},
+    };
+  }
+
+  const controller = new AbortController();
+
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener("abort", () => controller.abort(), {
+        once: true,
+      });
+    }
+  }
+
+  const timer = window.setTimeout(() => controller.abort(), timeout);
+
+  return {
+    signal: controller.signal,
+    clear: () => window.clearTimeout(timer),
+  };
+}
 
 export async function request(firstArg = "/", second = {}, third = {}) {
   const parsed = normalizeRequestArgs(firstArg, second, third);
   const options = isObject(parsed.options) ? parsed.options : {};
-  const method = requestMethod(options);
+  const method = normalizeMethod(options.method);
   const endpoint = endpointToPath(parsed.endpoint);
+  const url = endpoint ? buildApiUrl(endpoint, options) : "";
 
   stats.total += 1;
   stats.lastMethod = method;
+  stats.lastUrl = redact(url || parsed.endpoint || "");
 
-  if (!endpoint) {
+  if (!url) {
     const error = new HttpError("Endpoint no permitido.", {
       code: "ENDPOINT_NOT_ALLOWED",
       method,
       url: parsed.endpoint || "",
     });
 
-    stats.lastUrl = redact(parsed.endpoint || "");
-    recordHttpError(error, parsed.endpoint || "", method);
-
-    throw error;
-  }
-
-  const url = buildApiUrl(endpoint, options);
-
-  if (!url) {
-    const error = new HttpError("URL de API no permitida.", {
-      code: "API_URL_NOT_ALLOWED",
-      method,
-      url: parsed.endpoint || endpoint,
-    });
-
-    stats.lastUrl = redact(parsed.endpoint || endpoint);
-    recordHttpError(error, parsed.endpoint || endpoint, method);
-
+    recordError(error, parsed.endpoint || "", method);
     throw error;
   }
 
   const auth = shouldUseAuth(endpoint, options);
-  const token = auth ? cleanToken(options.token || getAccessToken()) : "";
+  const token = auth ? cleanToken(first(options.token, options.accessToken, getAccessToken(), "")) : "";
 
-  const finalOptions = {
-    ...options,
+  const headers = buildHeaders(options, auth, token);
+  const prepared = prepareBody(
+    method === "GET" || method === "HEAD" ? undefined : options.body,
+    headers
+  );
 
-    query: undefined,
-    params: undefined,
-    token: undefined,
+  const timeout = withTimeout(options.signal, options.timeout || DEFAULT_TIMEOUT_MS);
 
+  const fetchOptions = {
     method,
+    headers: prepared.headers,
+    body: prepared.body,
 
-    auth,
-    public: !auth,
-    skipAuth: !auth,
-    noAuthHeader: !auth,
-
-    headers: auth
-      ? buildAuthHeaders(options, token)
-      : stripAuthHeaders(options.headers),
+    credentials: options.credentials || "include",
+    cache: options.cache || "no-store",
+    mode: options.mode || "cors",
+    signal: timeout.signal,
   };
 
-  stats.lastUrl = redact(url);
-
   try {
-    const result = await ensureEngines().apiEngine.request(url, finalOptions);
+    const response = await fetch(url, fetchOptions);
 
-    stats.success += 1;
+    if (!response.ok) {
+      const data = await readResponsePayload(response);
+      throw createResponseError(response, data, url, method);
+    }
+
+    const result = await parseSuccessResponse(response, {
+      ...options,
+      method,
+    });
+
+    recordSuccess();
 
     return result;
   } catch (error) {
-    const normalized = recordHttpError(error, url, method);
-    decorateError(error, normalized);
-    throw error;
+    if (error instanceof HttpError) {
+      recordError(error, url, method);
+      throw error;
+    }
+
+    const isAbort = error?.name === "AbortError";
+
+    const wrapped = new HttpError(
+      isAbort ? "Tiempo de espera agotado." : "Error de red.",
+      {
+        code: isAbort ? "REQUEST_TIMEOUT" : "NETWORK_ERROR",
+        method,
+        url,
+        data: {
+          message: error?.message || String(error || ""),
+        },
+      }
+    );
+
+    recordError(wrapped, url, method);
+    throw wrapped;
+  } finally {
+    timeout.clear();
   }
 }
 
 /* =========================================================
-   HTTP VERBS
+   VERBS
 ========================================================= */
 
 export function get(endpoint = "/", options = {}) {
@@ -1177,7 +1376,7 @@ export function download(endpoint = "/", options = {}) {
   return request(endpoint, {
     ...options,
     method: "GET",
-    responseType: options.responseType || "blob",
+    responseType: "blob",
   });
 }
 
@@ -1192,16 +1391,24 @@ export function raw(endpoint = "/", options = {}) {
    AUTH HELPERS
 ========================================================= */
 
-export function login(credentials = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.login, credentials, publicSessionOptions(options));
+export async function login(credentials = {}, options = {}) {
+  const result = await post(AUTH_ENDPOINTS.login, credentials, publicOptions(options));
+
+  setAuthTokens(result);
+
+  return result;
 }
 
 export function me(options = {}) {
-  return get(AUTH_ENDPOINTS.me, privateSessionOptions(options));
+  return get(AUTH_ENDPOINTS.me, privateOptions(options));
 }
 
-export function refreshSession(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.refresh, body, publicSessionOptions(options));
+export async function refreshSession(body = {}, options = {}) {
+  const result = await post(AUTH_ENDPOINTS.refresh, body, publicOptions(options));
+
+  setAuthTokens(result);
+
+  return result;
 }
 
 export function refresh(options = {}) {
@@ -1213,56 +1420,56 @@ export function refresh(options = {}) {
   return refreshSession(body, opts);
 }
 
-export function logout(options = {}) {
-  return post(AUTH_ENDPOINTS.logout, {}, privateSessionOptions(options))
-    .finally(() => {
-      clearAuthTokens({
-        clearState: true,
-      });
+export async function logout(options = {}) {
+  try {
+    return await post(AUTH_ENDPOINTS.logout, {}, privateOptions(options));
+  } finally {
+    clearAuthTokens({
+      clearState: true,
+      clearSession: true,
     });
+  }
 }
 
 export function activate(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.activate, body, publicSessionOptions(options));
+  return post(AUTH_ENDPOINTS.activate, body, publicOptions(options));
 }
 
 export function activateAccount(body = {}, options = {}) {
-  return post(
-    AUTH_ENDPOINTS.activateAccount || AUTH_ENDPOINTS.activate,
-    body,
-    publicSessionOptions(options)
-  );
+  return post(AUTH_ENDPOINTS.activateAccount, body, publicOptions(options));
 }
 
 export function requestPasswordReset(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.requestPasswordReset, body, publicSessionOptions(options));
+  return post(AUTH_ENDPOINTS.requestPasswordReset, body, publicOptions(options));
 }
 
 export function confirmPasswordReset(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.confirmPasswordReset, body, publicSessionOptions(options));
+  return post(AUTH_ENDPOINTS.confirmPasswordReset, body, publicOptions(options));
 }
 
 /* =========================================================
-   INSTALL
+   INSTALL / SNAPSHOT
 ========================================================= */
 
-export function installHttp(AppCore = null, options = {}) {
-  appCore = AppCore || appCore;
+export function installHttp(core = null, options = {}) {
+  if (core) {
+    appCore = core;
+  }
 
   if (options.apiOrigin || options.apiBase || options.baseUrl) {
     setApiOrigin(options.apiOrigin || options.apiBase || options.baseUrl);
-  } else {
-    resetEngines();
   }
 
-  if (isObject(appCore)) {
-    if (isObject(appCore.services)) {
-      appCore.services.http = Http;
-    }
-
-    appCore.modules?.register?.("http", Http, {
+  try {
+    appCore?.registerModule?.("http", Http, {
       overwrite: true,
     });
+
+    appCore?.modules?.register?.("http", Http, {
+      overwrite: true,
+    });
+  } catch {
+    // noop
   }
 
   return Http;
@@ -1271,20 +1478,12 @@ export function installHttp(AppCore = null, options = {}) {
 export const installCoreHttp = installHttp;
 export const install = installHttp;
 
-/* =========================================================
-   SNAPSHOT
-========================================================= */
-
 export function getHttpSnapshot() {
   return {
     version: HTTP_VERSION,
 
     origin: getApiOrigin(),
     installed: Boolean(appCore),
-
-    hasRequestEngine: Boolean(requestEngine),
-    hasApiEngine: Boolean(apiEngine),
-
     hasAccessToken: Boolean(getAccessToken()),
 
     stats: {
@@ -1299,47 +1498,26 @@ export function getHttpSnapshot() {
         : null,
     },
 
-    endpoints: AUTH_ENDPOINTS,
-    publicEndpoints: PUBLIC_API_PATHS,
-    privateEndpoints: PRIVATE_API_PATHS,
-
-    authPolicy: {
-      mePrivate: !isPublicApiPath(AUTH_ENDPOINTS.me),
-      refreshPublic: isPublicApiPath(AUTH_ENDPOINTS.refresh),
-      refreshUsesAuthHeader: shouldUseAuth(AUTH_ENDPOINTS.refresh, {}),
-      meUsesAuthHeader: shouldUseAuth(AUTH_ENDPOINTS.me, {}),
-      credentials: "include",
+    endpoints: {
+      auth: AUTH_ENDPOINTS,
+      public: [...PUBLIC_API_PATHS],
+      private: [...PRIVATE_API_PATHS],
     },
 
     policy: {
-      singleHttpFacade: true,
-      configIsSourceOfEndpoints: true,
-
-      noOwnFetch: true,
-      noOwnParser: true,
-      noRetry: true,
+      singleHttpClient: true,
+      usesFetchHereOnly: true,
+      credentialsInclude: true,
+      noCoreRequestDependency: true,
+      noServicesDependency: true,
+      noInterceptors: true,
       noAutoRefresh: true,
-
-      authErrorClassificationOnly: true,
-      sessionOwnsSilentRefresh: true,
-
       noRouter: true,
       noToast: true,
       noStorage: true,
-
-      mePrivate: true,
-      refreshPublicNoAuthHeader: true,
-
-      stripsSensitiveQueryParams: true,
-      tokenQueryNotAllowed: true,
-
-      accessTokenRuntimeOnlyAsFallback: true,
-      blocksStaleRuntimeTokenWhenStateCleared: true,
       noRefreshTokenStorage: true,
-
+      authErrorsClassifiedOnly: true,
       tokenExpiredDoesNotMeanLogout: true,
-      bare401IsRefreshable: true,
-      clearSessionOnlyForTerminalBackendSignals: true,
       snapshotRedacted: true,
     },
   };
@@ -1356,14 +1534,11 @@ export const Http = {
     return getApiOrigin();
   },
 
-  setOrigin: setApiOrigin,
-
   getApiOrigin,
   setApiOrigin,
 
   buildUrl: buildApiUrl,
   buildApiUrl,
-
   redactHttpText,
 
   request,
@@ -1394,11 +1569,10 @@ export const Http = {
   requestPasswordReset,
   confirmPasswordReset,
 
+  getAccessToken,
   setAccessToken,
   setAuthTokens,
   clearAuthTokens,
-
-  getAccessToken,
 
   getHttpErrorCode,
   getHttpStatus,

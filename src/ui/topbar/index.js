@@ -3,24 +3,37 @@
    Archivo: /src/ui/topbar/index.js
 
    Responsabilidad:
-   - Topbar mínimo del panel.
+   - Controlador mínimo del topbar.
    - Montar en #topbar-mount / #app-topbar.
+   - Consumir template.js para TODO el DOM visual.
    - Mostrar título de ruta.
    - Ocultarse en rutas públicas/auth.
+   - Cachear refs en AppCore.dom.
    - Registrarse en AppCore.
-   - Sin search, sin Auth, sin Router propio, sin HTTP,
-     sin Toast, sin Store, sin logout, sin sidebar bridge.
+   - Sin Auth, Router propio, HTTP, Toast, Store, logout,
+     sidebar bridge ni motor de búsqueda.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-export const TOPBAR_VERSION = "topbar.minimal.v1";
+import {
+  createTopbarTemplate,
+  getTopbarTemplateRefs,
+  setTopbarTemplateTitle,
+  setTopbarTemplateVisible,
+  clearTopbarSearchResults,
+} from "./template.js";
 
+export const TOPBAR_VERSION = "topbar.controller.v1";
+
+const TOPBAR_ROOT_ID = "app-topbar";
+const TOPBAR_MOUNT_ID = "topbar-mount";
 const APP_TITLE_PREFIX = "Onion";
 
 let initialized = false;
 let mounted = false;
 let root = null;
+let cleanupEvents = null;
 
 /* =========================================================
    BASICS
@@ -50,6 +63,7 @@ function titleCase(value = "") {
 
   return clean
     .replace(/^\/+/, "")
+    .replace(/^@[^/]+\/?/, "")
     .replace(/-/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -77,109 +91,141 @@ function clear(node = null) {
   }
 }
 
-function setHidden(node = null, hidden = false) {
-  if (!node) return false;
-
-  const value = Boolean(hidden);
-
-  node.hidden = value;
-  node.setAttribute("aria-hidden", value ? "true" : "false");
-  node.dataset.topbarVisible = value ? "false" : "true";
-
-  return true;
-}
-
 function getMount() {
+  if (!isBrowser()) return null;
+
   return (
-    byId("topbar-mount") ||
-    byId("app-topbar") ||
+    byId(TOPBAR_MOUNT_ID) ||
+    byId(TOPBAR_ROOT_ID) ||
     document.querySelector?.("[data-topbar-mount]") ||
     document.querySelector?.("[data-topbar-root]") ||
     null
   );
 }
 
-function createRoot() {
-  const header = document.createElement("header");
-
-  header.id = "app-topbar";
-  header.className = "topbar app-topbar";
-  header.dataset.topbarRoot = "true";
-  header.setAttribute("role", "banner");
-  header.setAttribute("aria-label", "Barra superior");
-
-  const left = document.createElement("div");
-  left.className = "topbar-left";
-  left.dataset.topbarLeft = "true";
-
-  const title = document.createElement("h1");
-  title.id = "topbar-title";
-  title.className = "topbar-title";
-  title.dataset.topbarTitle = "true";
-  title.textContent = `${APP_TITLE_PREFIX} Home`;
-
-  left.appendChild(title);
-  header.appendChild(left);
-
-  return header;
+function getRefs() {
+  return getTopbarTemplateRefs(root);
 }
 
-function ensureRoot() {
-  if (!isBrowser()) return null;
+function setHidden(node = null, hidden = false) {
+  if (!node) return false;
 
+  const value = Boolean(hidden);
+
+  try {
+    node.hidden = value;
+    node.setAttribute("aria-hidden", value ? "true" : "false");
+
+    if (node.dataset) {
+      node.dataset.topbarVisible = value ? "false" : "true";
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function syncMountVisibility(hidden = false) {
+  const mount = byId(TOPBAR_MOUNT_ID);
+
+  if (!mount || mount === root) return false;
+
+  return setHidden(mount, hidden);
+}
+
+function mountRoot(nextRoot) {
   const mount = getMount();
 
-  if (!mount) return null;
+  if (!mount || !nextRoot) return null;
+
+  unbindEvents();
 
   if (mount.matches?.("[data-topbar-root], #app-topbar")) {
+    clear(mount);
+
+    for (const child of [...nextRoot.childNodes]) {
+      mount.appendChild(child);
+    }
+
+    mount.className = nextRoot.className;
+
+    for (const [key, value] of Object.entries(nextRoot.dataset || {})) {
+      mount.dataset[key] = value;
+    }
+
+    mount.setAttribute("role", nextRoot.getAttribute("role") || "banner");
+    mount.setAttribute("aria-label", nextRoot.getAttribute("aria-label") || "Barra superior");
+    mount.setAttribute("aria-hidden", nextRoot.getAttribute("aria-hidden") || "false");
+
+    mount.hidden = nextRoot.hidden === true;
+
     root = mount;
   } else {
-    root = mount.querySelector("[data-topbar-root]");
-
-    if (!root) {
-      root = createRoot();
-      clear(mount);
-      mount.appendChild(root);
-    }
+    clear(mount);
+    mount.appendChild(nextRoot);
+    root = nextRoot;
   }
 
-  if (!root.querySelector("[data-topbar-title]")) {
-    clear(root);
-
-    const left = document.createElement("div");
-    left.className = "topbar-left";
-    left.dataset.topbarLeft = "true";
-
-    const title = document.createElement("h1");
-    title.id = "topbar-title";
-    title.className = "topbar-title";
-    title.dataset.topbarTitle = "true";
-
-    left.appendChild(title);
-    root.appendChild(left);
-  }
-
+  bindEvents();
   cacheDom();
+  mounted = true;
+
   return root;
 }
 
+function ensureRoot(options = {}) {
+  if (!isBrowser()) return null;
+
+  const current =
+    root ||
+    byId(TOPBAR_ROOT_ID) ||
+    document.querySelector?.("[data-topbar-root]") ||
+    null;
+
+  if (current) {
+    root = current;
+    bindEvents();
+    cacheDom();
+    mounted = true;
+    return root;
+  }
+
+  const topbar = createTopbarTemplate({
+    id: TOPBAR_ROOT_ID,
+    title: resolveRouteTitle(options),
+    visible: options.visible === true,
+    search: options.search !== false,
+    searchOptions: options.searchOptions || {},
+  });
+
+  return mountRoot(topbar);
+}
+
+/* =========================================================
+   DOM CACHE
+========================================================= */
+
 function cacheDom() {
+  const refs = getRefs();
+
   try {
     AppCore.dom = isObject(AppCore.dom) ? AppCore.dom : {};
 
-    AppCore.dom.topbar = root;
-    AppCore.dom.appTopbar = root;
-    AppCore.dom.topbarRoot = root;
+    AppCore.dom.topbar = refs.root;
+    AppCore.dom.appTopbar = refs.root;
+    AppCore.dom.topbarRoot = refs.root;
     AppCore.dom.topbarMount =
-      byId("topbar-mount") ||
-      (root?.parentElement?.id === "topbar-mount" ? root.parentElement : null);
-    AppCore.dom.topbarTitle = root?.querySelector?.("[data-topbar-title]") || null;
+      byId(TOPBAR_MOUNT_ID) ||
+      (refs.root?.parentElement?.id === TOPBAR_MOUNT_ID ? refs.root.parentElement : null);
 
-    delete AppCore.dom.search;
-    delete AppCore.dom.searchForm;
-    delete AppCore.dom.searchInput;
-    delete AppCore.dom.searchSubmit;
-    delete AppCore.dom.searchResults;
+    AppCore.dom.topbarTitle = refs.title;
+
+    AppCore.dom.search = refs.search;
+    AppCore.dom.searchForm = refs.search;
+    AppCore.dom.searchInput = refs.searchInput;
+    AppCore.dom.searchSubmit = refs.searchSubmit;
+    AppCore.dom.searchResults = refs.searchResults;
 
     return true;
   } catch {
@@ -255,18 +301,11 @@ function resolveRouteTitle(options = {}) {
 }
 
 function syncTitle(options = {}) {
-  ensureRoot();
+  ensureRoot(options);
 
-  const title = root?.querySelector?.("[data-topbar-title]");
+  if (!root) return false;
 
-  if (!title) return false;
-
-  const next = resolveRouteTitle(options);
-
-  title.textContent = next;
-  title.dataset.routeTitle = next;
-
-  return true;
+  return setTopbarTemplateTitle(root, resolveRouteTitle(options));
 }
 
 /* =========================================================
@@ -281,17 +320,93 @@ function shouldHide(options = {}) {
     route?.public === true ||
       route?.hideShell === true ||
       route?.layout === "auth" ||
+      options.routeMode === "auth" ||
+      options.chrome === "hidden" ||
       state.routeMode === "auth" ||
-      state.chromeHidden === true
+      state.chromeHidden === true ||
+      state.chrome === "hidden"
   );
 }
 
 function syncVisibility(options = {}) {
-  ensureRoot();
+  ensureRoot(options);
 
   if (!root) return false;
 
-  return setHidden(root, shouldHide(options));
+  const hidden = shouldHide(options);
+
+  setTopbarTemplateVisible(root, !hidden);
+  syncMountVisibility(hidden);
+
+  if (hidden) {
+    clearTopbarSearchResults(root);
+  }
+
+  return true;
+}
+
+/* =========================================================
+   LOCAL EVENTS
+========================================================= */
+
+function onSubmit(event) {
+  event.preventDefault();
+}
+
+function onKeydown(event) {
+  if (event.key !== "Escape") return;
+
+  clearTopbarSearchResults(root);
+}
+
+function onInput(event) {
+  const value = cleanText(event.target?.value || "", "");
+
+  if (!value) {
+    clearTopbarSearchResults(root);
+  }
+}
+
+function bindEvents() {
+  if (!root || cleanupEvents) return false;
+
+  const refs = getRefs();
+
+  try {
+    refs.search?.addEventListener?.("submit", onSubmit);
+    refs.searchInput?.addEventListener?.("keydown", onKeydown);
+    refs.searchInput?.addEventListener?.("input", onInput);
+  } catch {
+    cleanupEvents = null;
+    return false;
+  }
+
+  cleanupEvents = () => {
+    try {
+      refs.search?.removeEventListener?.("submit", onSubmit);
+      refs.searchInput?.removeEventListener?.("keydown", onKeydown);
+      refs.searchInput?.removeEventListener?.("input", onInput);
+    } catch {
+      // noop
+    }
+
+    cleanupEvents = null;
+    return true;
+  };
+
+  return true;
+}
+
+function unbindEvents() {
+  try {
+    cleanupEvents?.();
+  } catch {
+    cleanupEvents = null;
+  }
+
+  cleanupEvents = null;
+
+  return true;
 }
 
 /* =========================================================
@@ -347,12 +462,13 @@ function unregisterModule() {
 ========================================================= */
 
 function sync(options = {}) {
-  ensureRoot();
+  ensureRoot(options);
 
   if (!root) return false;
 
   syncTitle(options);
   syncVisibility(options);
+  cacheDom();
 
   mounted = true;
 
@@ -363,8 +479,19 @@ function init(options = {}) {
   initialized = true;
 
   registerModule();
-  ensureRoot();
-  sync(options);
+
+  /*
+    App inicializa UI antes de que Router resuelva la ruta.
+    Por eso el topbar se monta oculto hasta que Router haga sync(route).
+  */
+  ensureRoot({
+    ...options,
+    visible: false,
+  });
+
+  setTopbarTemplateVisible(root, false);
+  syncMountVisibility(true);
+  cacheDom();
 
   return TopbarUI;
 }
@@ -378,12 +505,17 @@ function refresh(options = {}) {
 }
 
 function destroy(options = {}) {
+  unbindEvents();
+
   if (options.unmount === true && root) {
     try {
       root.remove();
     } catch {
       clear(root);
     }
+  } else if (root) {
+    setHidden(root, true);
+    clearTopbarSearchResults(root);
   }
 
   root = null;
@@ -401,13 +533,26 @@ function destroy(options = {}) {
 ========================================================= */
 
 function getSnapshot() {
+  const refs = getRefs();
+
   return {
     version: TOPBAR_VERSION,
+
     initialized,
     mounted,
-    visible: Boolean(root && !root.hidden),
-    title: root?.querySelector?.("[data-topbar-title]")?.textContent || "",
-    hasRoot: Boolean(root),
+
+    visible: Boolean(refs.root && refs.root.hidden !== true),
+    title: refs.title?.textContent || "",
+    hasRoot: Boolean(refs.root),
+
+    search: {
+      enabled: Boolean(refs.search),
+      hasInput: Boolean(refs.searchInput),
+      hasSubmit: Boolean(refs.searchSubmit),
+      hasResults: Boolean(refs.searchResults),
+      expanded: refs.searchInput?.getAttribute?.("aria-expanded") || null,
+      resultsHidden: refs.searchResults ? refs.searchResults.hidden === true : null,
+    },
   };
 }
 
@@ -435,10 +580,22 @@ export const TopbarUI = {
   syncTitle,
   resolveRouteTitle,
 
-  getDom: () => ({
-    topbar: root,
-    title: root?.querySelector?.("[data-topbar-title]") || null,
-  }),
+  clearSearch: () => clearTopbarSearchResults(root),
+
+  getDom: () => {
+    const refs = getRefs();
+
+    return {
+      topbar: refs.root,
+      title: refs.title,
+
+      search: refs.search,
+      searchForm: refs.search,
+      searchInput: refs.searchInput,
+      searchSubmit: refs.searchSubmit,
+      searchResults: refs.searchResults,
+    };
+  },
 
   getState: getSnapshot,
   getSnapshot,

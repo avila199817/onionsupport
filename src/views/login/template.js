@@ -11,93 +11,18 @@
 
 import { ROUTES } from "../../core/config.js";
 
+import {
+  escapeAttr,
+  escapeHtml,
+  renderAuthShell,
+  safeInternalHref,
+} from "../../shared/password-field/index.js";
+
 export const LOGIN_TEMPLATE_VERSION = "login.template.minimal.v1";
-
-const APP_NAME = "Onion Support";
-
-const LOGO_SRC = new URL(
-  "../../media/img/favicon_black_circle.png",
-  import.meta.url
-).href;
 
 const PASSWORD_REQUEST_HREF = ROUTES.passwordRequest || "/password-request";
 
-function text(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
-
-function safeInternalHref(value = "", fallback = "/") {
-  const raw = text(value, fallback);
-
-  if (!raw) return fallback;
-  if (!raw.startsWith("/")) return fallback;
-  if (raw.startsWith("//")) return fallback;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
-  if (/[\r\n\t\\]/.test(raw)) return fallback;
-  if (/[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(raw)) {
-    return fallback;
-  }
-
-  return raw;
-}
-
-function create(tag = "div", options = {}) {
-  const node = document.createElement(tag);
-
-  if (options.className) {
-    node.className = options.className;
-  }
-
-  if (options.textContent) {
-    node.textContent = options.textContent;
-  }
-
-  for (const [key, value] of Object.entries(options.attrs || {})) {
-    if (value === false || value === null || value === undefined) continue;
-    node.setAttribute(key, value === true ? "" : String(value));
-  }
-
-  for (const [key, value] of Object.entries(options.dataset || {})) {
-    if (value === false || value === null || value === undefined) continue;
-    node.dataset[key] = String(value);
-  }
-
-  return node;
-}
-
-function createLogo() {
-  const wrap = create("div", {
-    className: "login-logo-wrap",
-  });
-
-  const img = create("img", {
-    className: "login-logo",
-    attrs: {
-      src: LOGO_SRC,
-      alt: "",
-      width: "56",
-      height: "56",
-      loading: "eager",
-      decoding: "async",
-      draggable: "false",
-      "aria-hidden": "true",
-    },
-    dataset: {
-      loginLogo: "true",
-      authLogo: "public",
-    },
-  });
-
-  wrap.appendChild(img);
-  return wrap;
-}
-
-function createField({
+function field({
   id,
   name,
   label,
@@ -106,183 +31,120 @@ function createField({
   placeholder = "",
   dataKey = "",
 } = {}) {
-  const field = create("div", {
-    className: "auth-field login-field login-field-card",
-    dataset: {
-      loginField: name,
-    },
-  });
+  return `
+    <div
+      class="auth-field login-field login-field-card"
+      data-login-field="${escapeAttr(name)}"
+    >
+      <label
+        class="auth-label login-label"
+        for="${escapeAttr(id)}"
+      >
+        ${escapeHtml(label)}
+      </label>
 
-  const labelNode = create("label", {
-    className: "auth-label login-label",
-    textContent: label,
-    attrs: {
-      for: id,
-    },
-  });
+      <input
+        class="auth-input login-input"
+        id="${escapeAttr(id)}"
+        name="${escapeAttr(name)}"
+        type="${escapeAttr(type)}"
+        autocomplete="${escapeAttr(autocomplete)}"
+        placeholder="${escapeAttr(placeholder)}"
+        required
+        spellcheck="false"
+        autocapitalize="none"
+        aria-invalid="false"
+        aria-describedby="${escapeAttr(id)}-error"
+        data-login-input="${escapeAttr(name)}"
+        data-${escapeAttr(dataKey)}="true"
+      >
 
-  const input = create("input", {
-    className: "auth-input login-input",
-    attrs: {
-      id,
-      name,
-      type,
-      autocomplete,
-      placeholder,
-      required: true,
-      spellcheck: "false",
-      autocapitalize: "none",
-      "aria-invalid": "false",
-      "aria-describedby": `${id}-error`,
-    },
-    dataset: {
-      loginInput: name,
-      [dataKey]: "true",
-    },
-  });
+      <p
+        class="auth-field-error login-field-error"
+        id="${escapeAttr(id)}-error"
+        data-login-error="${escapeAttr(name)}"
+        aria-live="polite"
+        hidden
+      ></p>
+    </div>
+  `;
+}
 
-  const error = create("p", {
-    className: "auth-field-error login-field-error",
-    attrs: {
-      id: `${id}-error`,
-      hidden: true,
-      "aria-live": "polite",
-    },
-    dataset: {
-      loginError: name,
-    },
-  });
+export function getLoginTemplate() {
+  const forgotHref = safeInternalHref(PASSWORD_REQUEST_HREF, "/password-request");
 
-  field.append(labelNode, input, error);
-  return field;
+  return renderAuthShell({
+    view: "login",
+    title: "Acceso",
+    subtitle: "Entra en tu panel de Onion Support.",
+
+    body: `
+      <p
+        class="auth-error login-global-error"
+        data-login-global-error="true"
+        role="alert"
+        aria-live="polite"
+        hidden
+      ></p>
+
+      <form
+        class="auth-form login-form"
+        id="login-form"
+        autocomplete="on"
+        novalidate
+        data-login-form="true"
+      >
+        ${field({
+          id: "login-identifier",
+          name: "identifier",
+          label: "Usuario o email",
+          type: "text",
+          autocomplete: "username",
+          placeholder: "Usuario o email",
+          dataKey: "login-identifier",
+        })}
+
+        ${field({
+          id: "login-password",
+          name: "password",
+          label: "Contraseña",
+          type: "password",
+          autocomplete: "current-password",
+          placeholder: "Contraseña",
+          dataKey: "login-password",
+        })}
+
+        <button
+          class="auth-button auth-submit login-submit"
+          type="submit"
+          data-login-submit="true"
+          data-default-text="Entrar"
+          data-loading-text="Accediendo..."
+        >
+          Entrar
+        </button>
+
+        <p class="auth-links login-links">
+          <a
+            class="auth-link login-link"
+            href="${escapeAttr(forgotHref)}"
+            data-spa="true"
+            data-route="${escapeAttr(forgotHref)}"
+            data-login-forgot-password="true"
+          >
+            ¿Has olvidado tu contraseña?
+          </a>
+        </p>
+      </form>
+    `,
+  });
 }
 
 export function createLoginTemplate() {
-  const forgotHref = safeInternalHref(PASSWORD_REQUEST_HREF, "/password-request");
+  const template = document.createElement("template");
+  template.innerHTML = getLoginTemplate().trim();
 
-  const view = create("section", {
-    className: "auth-view login-view",
-    attrs: {
-      "aria-labelledby": "login-title",
-    },
-    dataset: {
-      view: "login",
-      loginView: "true",
-      templateVersion: LOGIN_TEMPLATE_VERSION,
-    },
-  });
-
-  const shell = create("div", {
-    className: "auth-shell login-shell",
-  });
-
-  const card = create("article", {
-    className: "auth-card login-card",
-  });
-
-  const header = create("header", {
-    className: "auth-header login-header",
-  });
-
-  const title = create("h1", {
-    className: "auth-title login-title",
-    textContent: "Acceso",
-    attrs: {
-      id: "login-title",
-    },
-  });
-
-  const subtitle = create("p", {
-    className: "auth-subtitle login-subtitle",
-    textContent: `Entra en tu panel de ${APP_NAME}.`,
-  });
-
-  header.append(createLogo(), title, subtitle);
-
-  const globalError = create("p", {
-    className: "auth-error login-global-error",
-    attrs: {
-      hidden: true,
-      role: "alert",
-      "aria-live": "polite",
-    },
-    dataset: {
-      loginGlobalError: "true",
-    },
-  });
-
-  const form = create("form", {
-    className: "auth-form login-form",
-    attrs: {
-      id: "login-form",
-      autocomplete: "on",
-      novalidate: true,
-      "aria-describedby": "login-global-error",
-    },
-    dataset: {
-      loginForm: "true",
-    },
-  });
-
-  form.append(
-    createField({
-      id: "login-identifier",
-      name: "identifier",
-      label: "Usuario o email",
-      type: "text",
-      autocomplete: "username",
-      placeholder: "Usuario o email",
-      dataKey: "loginIdentifier",
-    }),
-    createField({
-      id: "login-password",
-      name: "password",
-      label: "Contraseña",
-      type: "password",
-      autocomplete: "current-password",
-      placeholder: "Contraseña",
-      dataKey: "loginPassword",
-    })
-  );
-
-  const submit = create("button", {
-    className: "auth-button auth-submit login-submit",
-    textContent: "Entrar",
-    attrs: {
-      type: "submit",
-    },
-    dataset: {
-      loginSubmit: "true",
-      defaultText: "Entrar",
-      loadingText: "Accediendo...",
-    },
-  });
-
-  const links = create("p", {
-    className: "auth-links login-links",
-  });
-
-  const forgot = create("a", {
-    className: "auth-link login-link",
-    textContent: "¿Has olvidado tu contraseña?",
-    attrs: {
-      href: forgotHref,
-    },
-    dataset: {
-      spa: "true",
-      route: forgotHref,
-      loginForgotPassword: "true",
-    },
-  });
-
-  links.appendChild(forgot);
-  form.append(submit, links);
-
-  card.append(header, globalError, form);
-  shell.appendChild(card);
-  view.appendChild(shell);
-
-  return view;
+  return template.content.firstElementChild;
 }
 
 export default createLoginTemplate;

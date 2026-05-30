@@ -26,7 +26,7 @@ import {
 
 import Http from "./http.js";
 
-export const CORE_VERSION = "core.minimal.v3";
+export const CORE_VERSION = "core.minimal.v4";
 
 const APP_NAME = config?.appName || config?.name || "Onion Support";
 const ROOT_PATH = "/";
@@ -75,16 +75,6 @@ const SENSITIVE_KEYS = new Set([
   "connectionstring",
   "connection_string",
   "sas",
-
-  "otp",
-  "totp",
-  "mfa",
-  "twofa",
-  "twofa_secret",
-  "backupcode",
-  "backupcodes",
-  "backup_code",
-  "backup_codes",
 
   "_rid",
   "_self",
@@ -398,9 +388,7 @@ function isUsableUser(user = null) {
   if (!isObject(user)) return false;
   if (user.disabled === true) return false;
 
-  const status = userStatus(user);
-
-  return !DISABLED_STATUSES.has(status);
+  return !DISABLED_STATUSES.has(userStatus(user));
 }
 
 function publicUser(user = null) {
@@ -424,10 +412,8 @@ function publicUser(user = null) {
       user.profile?.displayName,
       user.profile?.name,
       user.username,
-      ""
+      "Usuario"
     ),
-
-    email: first(user.email, user.mail, null),
 
     role,
     rol: role,
@@ -446,7 +432,6 @@ function publicUser(user = null) {
       ""
     ),
 
-    active: user.active !== false,
     status: userStatus(user) || "active",
   };
 }
@@ -467,7 +452,10 @@ function updateAuthFlags() {
   const usableUser = isUsableUser(user);
   const token = cleanToken(state.token || state.accessToken || state.access_token);
 
-  const role = normalizeRole(first(user?.role, user?.rol, user?.roles, state.role, state.rol, "user")) || "user";
+  const role = normalizeRole(
+    first(user?.role, user?.rol, user?.roles, state.role, state.rol, "user")
+  ) || "user";
+
   const slug = extractUserSlug(user);
 
   state.token = token;
@@ -882,7 +870,7 @@ function setToken(token = null) {
   return getState();
 }
 
-function applySession(payload = {}, options = {}) {
+function applySession(payload = {}) {
   if (!isObject(payload)) return getState();
 
   const token = first(
@@ -917,7 +905,7 @@ function applySession(payload = {}, options = {}) {
   );
 
   if (token !== null && token !== undefined) {
-    setToken(token, options);
+    setToken(token);
   }
 
   if (user !== null && user !== undefined) {
@@ -1257,6 +1245,17 @@ async function init() {
    SNAPSHOT
 ========================================================= */
 
+function snapshotUser(user = null) {
+  const safe = publicUser(user);
+
+  if (!safe) return null;
+
+  return {
+    ...safe,
+    avatarUrl: safe.avatarUrl ? "***" : "",
+  };
+}
+
 function getSnapshot() {
   const snapshot = getState();
 
@@ -1273,7 +1272,7 @@ function getSnapshot() {
     hasToken: snapshot.hasToken === true,
     hasUser: snapshot.hasUser === true,
 
-    user: publicUser(snapshot.user),
+    user: snapshotUser(snapshot.user),
     role: snapshot.role,
     roles: Array.isArray(snapshot.roles) ? [...snapshot.roles] : [],
 

@@ -7,6 +7,7 @@
    - Vistas lazy.
    - Resolver /@{slug} hacia ruta interna.
    - Marcar rutas públicas, privadas y admin.
+   - Rutas públicas viven en /src/views/public/*
    - Sin Auth, sin guards, sin history, sin storage,
      sin Toast, sin snapshots gigantes y sin rutas inventadas.
 ========================================================= */
@@ -21,7 +22,7 @@ import {
   getUserScopedRouteInfo as configGetUserScopedRouteInfo,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.minimal.v1";
+export const ROUTES_VERSION = "routes.minimal.v2";
 
 export const ROUTE_PATHS = Object.freeze({
   HOME: ROUTES.home || "/",
@@ -42,6 +43,7 @@ export const ROUTE_PATHS = Object.freeze({
 
 export const ROUTE_NAMES = Object.freeze({
   HOME: "home",
+
   INCIDENCIAS: "incidencias",
   FACTURAS: "facturas",
   CLIENTES: "clientes",
@@ -289,22 +291,22 @@ const VIEW_LOADERS = Object.freeze({
     ),
 
   login: () =>
-    import("../views/login/index.js").then((module) =>
+    import("../views/public/login/index.js").then((module) =>
       pickView(module, ["LoginView"])
     ),
 
   "password-request": () =>
-    import("../views/password-reset/index.js").then((module) =>
+    import("../views/public/password-reset/index.js").then((module) =>
       pickView(module, ["PasswordRequestView", "PasswordResetView", "ResetPasswordView"])
     ),
 
   "password-reset": () =>
-    import("../views/password-reset/index.js").then((module) =>
+    import("../views/public/password-reset/index.js").then((module) =>
       pickView(module, ["PasswordResetView", "ResetPasswordView"])
     ),
 
   "activate-account": () =>
-    import("../views/activate-account/index.js").then((module) =>
+    import("../views/public/activate-account/index.js").then((module) =>
       pickView(module, ["ActivateAccountView"])
     ),
 });

@@ -1,17 +1,18 @@
 /* =========================================================
-   Onion Support - Login View
-   Archivo: /src/views/login/index.js
+   Onion Support - Login View Controller
+   Archivo: /src/views/public/login/index.js
 
    Responsabilidad:
-   - Controlador mínimo de la vista Login.
-   - Montar el template recibido desde template.js.
+   - Controlador mínimo de la vista Login pública.
+   - Montar el template recibido desde ./template.js.
    - Leer refs por data attributes.
    - Validar formulario mínimo.
    - Llamar Auth.login().
    - Navegar vía Router tras login correcto.
-   - Gestionar estado loading/error del formulario.
+   - Gestionar loading/error del formulario.
    - Sin HTML inline.
    - Sin construir campos.
+   - Sin logo/card/layout.
    - Sin HTTP directo.
    - Sin Store.
    - Sin Toast directo.
@@ -24,7 +25,7 @@ import { AppCore } from "../../../core/index.js";
 import { Auth } from "../../../features/auth/index.js";
 import createLoginTemplate from "./template.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.controller.v1";
+export const LOGIN_VIEW_VERSION = "login.view.public.controller.v1";
 
 const SOURCE = "login.view";
 
@@ -38,10 +39,6 @@ let lastInstance = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isFunction(value) {
@@ -83,6 +80,15 @@ function clearNode(node = null) {
   }
 }
 
+function isDomNode(value = null) {
+  return Boolean(
+    isBrowser() &&
+      value &&
+      typeof Node !== "undefined" &&
+      value instanceof Node
+  );
+}
+
 /* =========================================================
    ROUTER
 ========================================================= */
@@ -112,35 +118,29 @@ async function goAfterLogin(result = {}, context = {}) {
     Auth.getDefaultHome?.() ||
     "/";
 
+  const options = {
+    source: SOURCE,
+    replaceState: true,
+    force: true,
+  };
+
   if (isFunction(router.goAfterLogin)) {
-    return router.goAfterLogin(target, {
-      source: SOURCE,
-      replaceState: true,
-      force: true,
-    });
+    return router.goAfterLogin(target, options);
   }
 
   if (isFunction(router.replace)) {
-    return router.replace(target, {
-      source: SOURCE,
-      replaceState: true,
-      force: true,
-    });
+    return router.replace(target, options);
   }
 
   if (isFunction(router.navigate)) {
-    return router.navigate(target, {
-      source: SOURCE,
-      replaceState: true,
-      force: true,
-    });
+    return router.navigate(target, options);
   }
 
   throw new Error("Router no permite navegación.");
 }
 
 /* =========================================================
-   TEMPLATE MOUNT
+   TEMPLATE
 ========================================================= */
 
 function resolveTemplate(context = {}) {
@@ -154,7 +154,7 @@ function resolveTemplate(context = {}) {
     context,
   });
 
-  if (!view || !(view instanceof Node)) {
+  if (!isDomNode(view)) {
     throw new Error("[LoginView] createLoginTemplate() debe devolver un nodo DOM.");
   }
 
@@ -226,18 +226,18 @@ function getRefs(root = null) {
    FORM STATE
 ========================================================= */
 
-function getFieldErrorNode(refs, name = "") {
-  if (name === "identifier") return refs.identifierError || null;
-  if (name === "password") return refs.passwordError || null;
-
-  return refs.root?.querySelector?.(`[data-login-error="${name}"]`) || null;
-}
-
 function getFieldInput(refs, name = "") {
   if (name === "identifier") return refs.identifier || null;
   if (name === "password") return refs.password || null;
 
   return refs.form?.elements?.[name] || null;
+}
+
+function getFieldErrorNode(refs, name = "") {
+  if (name === "identifier") return refs.identifierError || null;
+  if (name === "password") return refs.passwordError || null;
+
+  return refs.root?.querySelector?.(`[data-login-error="${name}"]`) || null;
 }
 
 function setFieldError(refs, name = "", message = "") {
@@ -286,16 +286,16 @@ function setLoading(refs, loading = false) {
   }
 
   if (refs.submit) {
-    refs.submit.dataset.loading = value ? "true" : "false";
-    refs.submit.setAttribute("aria-busy", value ? "true" : "false");
-
     const loadingText = refs.submit.dataset.loadingText || "Accediendo...";
-    const defaultText = refs.submit.dataset.defaultText || refs.submit.textContent || "Entrar";
+    const currentText = refs.submit.textContent || "Entrar";
+    const defaultText = refs.submit.dataset.defaultText || currentText || "Entrar";
 
     if (!refs.submit.dataset.defaultText) {
       refs.submit.dataset.defaultText = defaultText;
     }
 
+    refs.submit.dataset.loading = value ? "true" : "false";
+    refs.submit.setAttribute("aria-busy", value ? "true" : "false");
     refs.submit.textContent = value ? loadingText : defaultText;
   }
 
@@ -605,4 +605,3 @@ export const LoginView = Object.assign(
 export { renderLoginView as render };
 
 export default LoginView;
-

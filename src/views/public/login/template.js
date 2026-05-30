@@ -1,10 +1,11 @@
 /* =========================================================
    Onion Support - Login Template
-   Archivo: /src/views/login/template.js
+   Archivo: /src/views/public/login/template.js
 
    Responsabilidad:
-   - Construir sólo el DOM del login.
-   - Logo, usuario, contraseña, botón Entrar y recuperación.
+   - Construir sólo el DOM/HTML del login público.
+   - Usar el layout común de /src/views/public/index.js.
+   - Pintar usuario/email, contraseña, botón Entrar y recuperación.
    - Exponer data-* consumidos por index.js.
    - Sin Auth, Router, HTTP, Store, Toast, validación ni eventos.
 ========================================================= */
@@ -14,15 +15,42 @@ import { ROUTES } from "../../../core/config.js";
 import {
   escapeAttr,
   escapeHtml,
-  renderAuthShell,
+  renderPublicShell,
   safeInternalHref,
-} from "../../../shared/password-field/index.js";
+} from "../index.js";
 
-export const LOGIN_TEMPLATE_VERSION = "login.template.minimal.v1";
+export const LOGIN_TEMPLATE_VERSION = "login.template.public.v1";
 
 const PASSWORD_REQUEST_HREF = ROUTES.passwordRequest || "/password-request";
 
-function field({
+/* =========================================================
+   BASICS
+========================================================= */
+
+function text(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return output || fallback;
+}
+
+function dataFlag(name = "") {
+  const clean = text(name, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return clean ? `data-${escapeAttr(clean)}="true"` : "";
+}
+
+/* =========================================================
+   FIELD
+========================================================= */
+
+function renderField({
   id,
   name,
   label,
@@ -31,38 +59,45 @@ function field({
   placeholder = "",
   dataKey = "",
 } = {}) {
+  const cleanId = text(id, "");
+  const cleanName = text(name, "");
+  const cleanLabel = text(label, cleanName);
+  const cleanType = text(type, "text");
+  const cleanAutocomplete = text(autocomplete, "");
+  const cleanPlaceholder = text(placeholder, cleanLabel);
+
   return `
     <div
       class="auth-field login-field login-field-card"
-      data-login-field="${escapeAttr(name)}"
+      data-login-field="${escapeAttr(cleanName)}"
     >
       <label
         class="auth-label login-label"
-        for="${escapeAttr(id)}"
+        for="${escapeAttr(cleanId)}"
       >
-        ${escapeHtml(label)}
+        ${escapeHtml(cleanLabel)}
       </label>
 
       <input
         class="auth-input login-input"
-        id="${escapeAttr(id)}"
-        name="${escapeAttr(name)}"
-        type="${escapeAttr(type)}"
-        autocomplete="${escapeAttr(autocomplete)}"
-        placeholder="${escapeAttr(placeholder)}"
+        id="${escapeAttr(cleanId)}"
+        name="${escapeAttr(cleanName)}"
+        type="${escapeAttr(cleanType)}"
+        autocomplete="${escapeAttr(cleanAutocomplete)}"
+        placeholder="${escapeAttr(cleanPlaceholder)}"
         required
         spellcheck="false"
         autocapitalize="none"
         aria-invalid="false"
-        aria-describedby="${escapeAttr(id)}-error"
-        data-login-input="${escapeAttr(name)}"
-        data-${escapeAttr(dataKey)}="true"
+        aria-describedby="${escapeAttr(cleanId)}-error"
+        data-login-input="${escapeAttr(cleanName)}"
+        ${dataFlag(dataKey)}
       >
 
       <p
         class="auth-field-error login-field-error"
-        id="${escapeAttr(id)}-error"
-        data-login-error="${escapeAttr(name)}"
+        id="${escapeAttr(cleanId)}-error"
+        data-login-error="${escapeAttr(cleanName)}"
         aria-live="polite"
         hidden
       ></p>
@@ -70,10 +105,17 @@ function field({
   `;
 }
 
-export function getLoginTemplate() {
-  const forgotHref = safeInternalHref(PASSWORD_REQUEST_HREF, "/password-request");
+/* =========================================================
+   TEMPLATE
+========================================================= */
 
-  return renderAuthShell({
+export function getLoginTemplate() {
+  const forgotHref = safeInternalHref(
+    PASSWORD_REQUEST_HREF,
+    "/password-request"
+  );
+
+  return renderPublicShell({
     view: "login",
     title: "Acceso",
     subtitle: "Entra en tu panel de Onion Support.",
@@ -94,7 +136,7 @@ export function getLoginTemplate() {
         novalidate
         data-login-form="true"
       >
-        ${field({
+        ${renderField({
           id: "login-identifier",
           name: "identifier",
           label: "Usuario o email",
@@ -104,7 +146,7 @@ export function getLoginTemplate() {
           dataKey: "login-identifier",
         })}
 
-        ${field({
+        ${renderField({
           id: "login-password",
           name: "password",
           label: "Contraseña",
@@ -142,6 +184,7 @@ export function getLoginTemplate() {
 
 export function createLoginTemplate() {
   const template = document.createElement("template");
+
   template.innerHTML = getLoginTemplate().trim();
 
   return template.content.firstElementChild;

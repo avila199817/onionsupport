@@ -1,1445 +1,2394 @@
 /* =========================================================
-   Onion SPA - Facturas Module Index
-   Archivo: src/views/facturas/index.js
+   Onion Support - Facturas Index
+   Archivo: /src/views/facturas/index.js
 
-   FINAL PRO SYSTEM · MODULE ENTRYPOINT · 10/10 EXTREME
-   PATCH · ROUTE SAFE · LEGACY SAFE · NO DUPLICATED HELPERS
-   PATCH · PUBLIC API STABLE · GLOBAL BRIDGE SAFE
-   PATCH · NAMESPACE EXPORT SAFE · ROUTER COMPAT
-
-   RESPONSABILIDADES:
-   - punto de entrada único del módulo Facturas
-   - exportar vista principal para router moderno y legacy
-   - proteger render/init/mount/reload contra rutas incorrectas
-   - aceptar /facturas y /@usuario/facturas
-   - exponer namespaces internos sin duplicar lógica
-   - exponer API pública estable aunque cambien exports internos
-   - registrar bridge global sin sobreescritura destructiva
-
-   IMPORTANTE:
-   - Este archivo NO contiene CSS.
-   - Este archivo NO normaliza facturas.
-   - Este archivo NO contiene lógica de dominio.
-   - La lógica de dominio vive en facturas.model.js.
-   - Los helpers base viven en facturas.utils.js.
+   Responsabilidad:
+   - Controlador mínimo de la vista Facturas.
+   - Montar template principal.
+   - Cargar/listar facturas desde facturas.api.js.
+   - Crear factura.
+   - Abrir detalle.
+   - Ver/descargar PDF.
+   - Enviar factura.
+   - Buscar cliente para crear factura.
+   - Buscar incidencias vinculables para crear factura.
+   - Delegar HTML en templates.
+   - Sin Store.
+   - Sin State externo.
+   - Sin actions/bindings/model/utils/facturasView legacy.
+   - Sin fetch propio.
 ========================================================= */
 
-import RawFacturasView from "./facturasView.js";
+import { AppCore } from "../../core/index.js";
 
-import * as Model from "./facturas.model.js";
-import * as Utils from "./facturas.utils.js";
-import * as State from "./facturas.state.js";
-import * as Store from "./facturas.store.js";
-import * as Api from "./facturas.api.js";
-import * as Loaders from "./facturas.loaders.js";
-import * as Actions from "./facturas.actions.js";
-import * as Bindings from "./facturas.bindings.js";
-import * as Template from "./facturas.template.js";
-import * as DetailTemplate from "./facturas.detail.template.js";
-import * as CreateModal from "./facturas.create.modal.js";
-import * as IncidenciasBridge from "./facturas.incidencias.js";
+import {
+  ROUTES,
+} from "../../core/config.js";
 
-/* =========================================================
-   MODULE META
-========================================================= */
+import {
+  listFacturas,
+  hydrateFacturasFromCache,
+  getFacturaById,
+  createFactura,
+  sendFactura,
+  viewFacturaPdfRequest,
+  downloadFacturaPdfRequest,
+  computeFacturasStats,
+} from "./facturas.api.js";
 
-export const FACTURAS_MODULE_NAME = "facturas";
-export const FACTURAS_VIEW_NAME = "FacturasView";
-export const FACTURAS_MODULE_VERSION = "12.0.0";
-export const FACTURAS_CANONICAL_PATH = "/facturas";
-export const FACTURAS_INDEX_SOURCE = "views:facturas:index";
+import {
+  renderFacturasTemplate,
+  renderFacturasLoadingState,
+  renderFacturasErrorState,
+  bindFacturasTemplateDom,
+  FACTURAS_ACTIONS,
+} from "./facturas.template.js";
 
-/* =========================================================
-   NAMESPACE EXPORTS
-========================================================= */
+import {
+  FACTURA_CREATE_ACTIONS,
+  getFacturaCreateFormDefaults,
+  validateFacturaCreateForm,
+  getFacturaCreateBreakdown,
+} from "./facturas.template.create.js";
 
-export {
-  Model,
-  Utils,
-  State,
-  Store,
-  Api,
-  Loaders,
-  Actions,
-  Bindings,
-  Template,
-  DetailTemplate,
-  CreateModal,
-  IncidenciasBridge,
-};
+import {
+  FACTURA_MODAL_ACTIONS,
+} from "./facturas.template.modal.js";
 
-/* =========================================================
-   INTERNAL HELPERS · FROM UTILS
-========================================================= */
+export const FACTURAS_INDEX_VERSION = "facturas.index.minimal.v1";
+export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
-const safeText = Utils.safeText || ((value, fallback = "") => {
-  if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
-  return text || fallback;
-});
+const DEFAULT_PAGE = 1;
+const DEFAULT_PAGE_SIZE = 5;
+const SEARCH_MIN_LENGTH = 2;
+const SEARCH_LIMIT = 10;
+const TICKET_LIMIT = 60;
+const SEARCH_DEBOUNCE_MS = 260;
 
-const safeObject = Utils.safeObject || ((value, fallback = {}) => (
-  value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback
-));
+const CLIENT_SEARCH_ENDPOINTS = Object.freeze([
+  "/api/search/clientes",
+  "/api/clientes/search",
+  "/api/search/users",
+  "/api/users/search",
+  "/api/usuarios/search",
+  "/api/clientes",
+  "/api/users",
+]);
 
-const safeArray = Utils.safeArray || ((value, fallback = []) => (
-  Array.isArray(value) ? value : fallback
-));
-
-const first = Utils.first || ((...values) => {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-});
-
-const normalizeText = Utils.normalizeText || ((value = "") => (
-  String(value || "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-));
+const TICKET_SEARCH_ENDPOINTS = Object.freeze([
+  "/api/search/tickets",
+  "/api/search/incidencias",
+  "/api/tickets/search",
+  "/api/incidencias/search",
+  "/api/tickets",
+  "/api/incidencias",
+]);
 
 /* =========================================================
-   INTERNAL SAFE HELPERS
+   BASICS
 ========================================================= */
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFn(value) {
-  return typeof value === "function";
-}
-
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function isProxyable(value) {
-  return Boolean(value && (typeof value === "object" || typeof value === "function"));
+function isFunction(value) {
+  return typeof value === "function";
 }
 
-function isNodeLike(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      typeof value.nodeType === "number"
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
+}
+
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return output || fallback;
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && !value.length) continue;
+    if (isObject(value) && !Object.keys(value).length) continue;
+
+    return value;
+  }
+
+  return null;
+}
+
+function number(value = 0, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeKey(value = "") {
+  return cleanText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w:.]/g, "")
+    .replace(/^_+|_+$/g, "");
+}
+
+function redact(value = "") {
+  return cleanText(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+function safeError(error = null, fallback = "No se pudieron cargar las facturas.") {
+  return cleanText(
+    error?.message ||
+      error?.data?.message ||
+      error?.payload?.message ||
+      error?.response?.message ||
+      fallback,
+    fallback
   );
 }
 
-function getGlobalRoot() {
-  try {
-    if (typeof globalThis !== "undefined") return globalThis;
-  } catch {}
+function normalizeRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
 
-  try {
-    if (typeof window !== "undefined") return window;
-  } catch {}
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
 
-  return {};
+    return "";
+  }
+
+  const role = cleanText(value, "").toLowerCase();
+
+  if (role === "admin") return "admin";
+  if (role === "user") return "user";
+
+  return "";
 }
 
-function safeWarn(...args) {
-  try {
-    Utils.safeWarn?.("[FacturasIndex]", ...args);
-    return true;
-  } catch {}
+function parseBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
 
-  try {
-    const root = getGlobalRoot();
-    root?.AppCore?.utils?.warn?.("[FacturasIndex]", ...args);
-    return true;
-  } catch {}
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
 
-  try {
-    console.warn("[FacturasIndex]", ...args);
-    return true;
-  } catch {}
+  if (typeof value === "string") {
+    const key = normalizeKey(value);
 
-  return false;
-}
-
-function safeEmit(eventName = "", payload = {}) {
-  const name = safeText(eventName, "");
-  if (!name) return false;
-
-  try {
-    if (typeof Utils.safeEmit === "function") {
-      return Utils.safeEmit(name, payload);
-    }
-  } catch {}
-
-  const root = getGlobalRoot();
-  let emitted = false;
-
-  try {
-    root?.AppCore?.events?.emit?.(name, payload);
-    emitted = true;
-  } catch {}
-
-  try {
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(
-        new CustomEvent(name, {
-          detail: payload,
-        })
-      );
-
-      emitted = true;
-    }
-  } catch {}
-
-  return emitted;
-}
-
-function safeCall(target, method, args = [], fallback = undefined) {
-  try {
-    const fn = target?.[method];
-
-    if (typeof fn === "function") {
-      return fn.apply(target, Array.isArray(args) ? args : []);
-    }
-  } catch (error) {
-    safeWarn(`Error calling ${method}`, error);
+    if (["true", "1", "yes", "si", "sí", "on"].includes(key)) return true;
+    if (["false", "0", "no", "off"].includes(key)) return false;
   }
 
   return fallback;
-}
-
-function callAny(candidates = [], args = [], fallback = undefined, options = {}) {
-  const opts = safeObject(options);
-
-  for (const candidate of safeArray(candidates)) {
-    const target = candidate?.[0];
-    const method = candidate?.[1];
-
-    if (!target || !method) continue;
-
-    const result = opts.guarded === true
-      ? guardedCall(target, method, args, undefined)
-      : safeCall(target, method, args, undefined);
-
-    if (result !== undefined) {
-      return result;
-    }
-  }
-
-  return fallback;
-}
-
-function moduleMethod(moduleRef, method, fallback = undefined) {
-  return (...args) => safeCall(moduleRef, method, args, fallback);
 }
 
 /* =========================================================
-   ROUTE GUARD
+   CORE / ROUTER
 ========================================================= */
 
-const GUARDED_VIEW_METHODS = new Set([
-  "init",
-  "mount",
-  "render",
-  "reload",
-  "refresh",
-  "bootstrap",
-  "loadFacturas",
-  "openFactura",
-  "openFacturaPdf",
-  "viewFacturaPdf",
-  "downloadFacturaPdf",
-  "downloadFactura",
-  "sendFacturaToClient",
-  "sendFactura",
-  "exportFacturasCsv",
-]);
-
-const ALWAYS_ALLOWED_VIEW_METHODS = new Set([
-  "destroy",
-  "unmount",
-  "dispose",
-  "closeDetail",
-  "closeFacturaDetail",
-  "getItems",
-  "getFacturas",
-  "getState",
-  "getSnapshot",
-  "isInitialized",
-  "isDestroyed",
-  "isMounted",
-]);
-
-function getBaseOrigin() {
-  if (isBrowser() && window.location?.origin) {
-    return window.location.origin;
+function getState() {
+  try {
+    return AppCore.getState?.() || AppCore.state || {};
+  } catch {
+    return AppCore.state || {};
   }
-
-  return "http://localhost";
 }
 
-function normalizePathnameOnly(pathname = "/") {
-  let value = String(pathname || "/")
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
+function getCurrentUser() {
+  const state = getState();
 
-  if (!value) value = "/";
-  if (!value.startsWith("/")) value = `/${value}`;
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || "/";
+  try {
+    return AppCore.getCurrentUser?.() || state.user || state.currentUser || null;
+  } catch {
+    return state.user || state.currentUser || null;
   }
-
-  return value;
 }
 
-function isHashRouterPath(value = "") {
-  const raw = safeText(value, "");
-  return raw.startsWith("#/") || raw.startsWith("#!");
+function getCurrentRole() {
+  const state = getState();
+  const user = safeObject(getCurrentUser(), {});
+
+  return (
+    normalizeRole(
+      first(
+        AppCore.getCurrentRole?.(),
+        state.role,
+        state.rol,
+        state.roles,
+        user.role,
+        user.rol,
+        user.roles,
+        ""
+      )
+    ) || "user"
+  );
 }
 
-function normalizeHashRouterPath(value = "") {
-  const raw = safeText(value, "");
-
-  if (!raw) return "/";
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/");
-  }
-
-  return raw.replace(/^#\/?/, "/");
+function isAdmin() {
+  return getCurrentRole() === "admin";
 }
 
-function splitPath(value = "/") {
-  const raw = safeText(value, "/");
+function getRouter(context = {}) {
+  return (
+    context.Router ||
+    AppCore.router ||
+    AppCore.Router ||
+    AppCore.getModule?.("router") ||
+    null
+  );
+}
 
-  if (isHashRouterPath(raw)) {
-    return splitPath(normalizeHashRouterPath(raw));
-  }
-
-  let pathname = raw;
-  let search = "";
-  let hash = "";
-
-  const hashIndex = pathname.indexOf("#");
-
-  if (hashIndex >= 0) {
-    hash = pathname.slice(hashIndex);
-    pathname = pathname.slice(0, hashIndex) || "/";
-  }
-
-  const searchIndex = pathname.indexOf("?");
-
-  if (searchIndex >= 0) {
-    search = pathname.slice(searchIndex);
-    pathname = pathname.slice(0, searchIndex) || "/";
-  }
-
+function getRoutes() {
   return {
-    pathname: normalizePathnameOnly(pathname),
-    search,
-    hash,
+    facturas: ROUTES.facturas || "/facturas",
+    incidencias: ROUTES.incidencias || "/incidencias",
+    clientes: ROUTES.clientes || "/clientes",
+    usuarios: ROUTES.usuarios || "/usuarios",
   };
 }
 
-function normalizeFullPath(path = "/") {
-  const raw = safeText(path, "/");
-
-  if (!raw) return "/";
-
-  if (isHashRouterPath(raw)) {
-    return normalizeFullPath(normalizeHashRouterPath(raw));
-  }
-
-  try {
-    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed = new URL(raw, getBaseOrigin());
-
-      if (parsed.hash && isHashRouterPath(parsed.hash)) {
-        return normalizeFullPath(normalizeHashRouterPath(parsed.hash));
-      }
-
-      return normalizeFullPath(
-        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
-      );
-    }
-  } catch {}
-
-  const { pathname, search, hash } = splitPath(raw);
-
-  return `${pathname}${search}${hash}`;
-}
-
-function stripSearchAndHash(path = "/") {
-  return normalizeFullPath(path)
-    .split("?")[0]
-    .split("#")[0] || "/";
-}
-
-function isUsernameSegment(segment = "") {
-  return /^@[A-Za-z0-9._-]{1,80}$/.test(safeText(segment, ""));
-}
-
-function stripUsernamePrefix(path = "/") {
-  const { pathname, search, hash } = splitPath(normalizeFullPath(path));
-  const segments = pathname.split("/").filter(Boolean);
-
-  if (segments.length > 0 && isUsernameSegment(segments[0])) {
-    const rest = segments.slice(1).join("/");
-    const cleanPathname = rest ? normalizePathnameOnly(`/${rest}`) : "/";
-
-    return `${cleanPathname}${search}${hash}`;
-  }
-
-  return `${pathname}${search}${hash}`;
-}
-
-function canonicalizePath(path = "/") {
-  return normalizeFullPath(stripUsernamePrefix(path || "/"));
-}
-
-function getCleanCanonicalPath(path = "/") {
-  return stripSearchAndHash(canonicalizePath(path || "/"));
-}
-
-function isFacturasPath(path = "") {
-  return getCleanCanonicalPath(path || "/") === FACTURAS_CANONICAL_PATH;
-}
-
-function getBrowserPath() {
-  if (!isBrowser()) return "";
-
-  try {
-    const pathname = window.location.pathname || "/";
-    const search = window.location.search || "";
-    const hash = window.location.hash || "";
-
-    if (hash && isHashRouterPath(hash)) {
-      return normalizeFullPath(normalizeHashRouterPath(hash));
-    }
-
-    return normalizeFullPath(`${pathname}${search}${hash}`);
-  } catch {
-    return "";
-  }
-}
-
-function getAppCore() {
-  const root = getGlobalRoot();
-
-  try {
-    return (
-      root?.AppCore ||
-      root?.OnionApp?.AppCore ||
-      root?.Onion?.AppCore ||
-      null
-    );
-  } catch {
-    return null;
-  }
-}
-
-function getAppRoutePath() {
-  const AppCore = getAppCore();
-
-  return safeText(
+function getFacturaId(item = {}) {
+  return cleanText(
     first(
-      AppCore?.state?.route,
-      AppCore?.state?.canonicalPath,
-      AppCore?.state?.path,
-      ""
+      item.id,
+      item.facturaId,
+      item.invoiceId,
+      item.numeroFacturaLegal,
+      item.numeroFacturaSistema,
+      item.numeroFactura,
+      item.numero,
+      item.number
     ),
     ""
   );
 }
 
-function getAppPublicPath() {
-  const AppCore = getAppCore();
+function upsertFactura(items = [], factura = null) {
+  const next = safeObject(factura, null);
 
-  return safeText(
-    first(
-      AppCore?.state?.publicPath,
-      AppCore?.state?.resolvedPath,
-      ""
-    ),
-    ""
-  );
-}
+  if (!next) return safeArray(items);
 
-function pushPathSignal(signals, label, value) {
-  const text = safeText(value, "");
-  if (!text) return;
+  const id = getFacturaId(next);
 
-  signals.push({
-    type: "path",
-    label,
-    value: text,
-    canonical: getCleanCanonicalPath(text),
-    isFacturas: isFacturasPath(text),
+  if (!id) return safeArray(items);
+
+  const map = new Map();
+
+  map.set(id, next);
+
+  for (const current of safeArray(items)) {
+    const currentId = getFacturaId(current);
+
+    if (!currentId || map.has(currentId)) continue;
+
+    map.set(currentId, current);
+  }
+
+  return [...map.values()].sort((a, b) => {
+    const left = Date.parse(a.issuedAt || a.updatedAt || a.createdAt || 0);
+    const right = Date.parse(b.issuedAt || b.updatedAt || b.createdAt || 0);
+
+    return right - left;
   });
-}
-
-function pushViewSignal(signals, label, value) {
-  const text = safeText(value, "");
-  if (!text) return;
-
-  const normalized = normalizeText(text);
-
-  signals.push({
-    type: "view",
-    label,
-    value: normalized,
-    isFacturas:
-      normalized === "facturas" ||
-      normalized === "facturasview" ||
-      normalized === "facturas-view",
-  });
-}
-
-function collectRouteSignalsFromObject(signals, value, label = "arg") {
-  if (!isObject(value) || isNodeLike(value)) return;
-
-  pushViewSignal(signals, `${label}.viewKey`, value.viewKey);
-  pushViewSignal(signals, `${label}.viewName`, value.viewName);
-  pushViewSignal(signals, `${label}.name`, value.name);
-
-  pushViewSignal(signals, `${label}.route.viewKey`, value.route?.viewKey);
-  pushViewSignal(signals, `${label}.route.viewName`, value.route?.viewName);
-  pushViewSignal(signals, `${label}.route.name`, value.route?.name);
-
-  pushPathSignal(signals, `${label}.canonicalPath`, value.canonicalPath);
-  pushPathSignal(signals, `${label}.routePath`, value.routePath);
-  pushPathSignal(signals, `${label}.publicPath`, value.publicPath);
-  pushPathSignal(signals, `${label}.requestedPath`, value.requestedPath);
-  pushPathSignal(signals, `${label}.path`, value.path);
-
-  pushPathSignal(signals, `${label}.route.path`, value.route?.path);
-  pushPathSignal(signals, `${label}.route.canonicalPath`, value.route?.canonicalPath);
-  pushPathSignal(signals, `${label}.route.publicPath`, value.route?.publicPath);
-
-  collectRouteSignalsFromObject(signals, value.options, `${label}.options`);
-  collectRouteSignalsFromObject(signals, value.meta, `${label}.meta`);
-}
-
-function collectExplicitRouteSignals(args = []) {
-  const signals = [];
-
-  safeArray(args).forEach((arg, index) => {
-    collectRouteSignalsFromObject(signals, arg, `args[${index}]`);
-  });
-
-  return signals;
-}
-
-function collectRuntimeRouteSignals() {
-  const signals = [];
-
-  const browserPath = getBrowserPath();
-  if (browserPath) {
-    pushPathSignal(signals, "window.location", browserPath);
-  }
-
-  const appRoute = getAppRoutePath();
-  if (appRoute) {
-    pushPathSignal(signals, "AppCore.state.route", appRoute);
-  }
-
-  const publicPath = getAppPublicPath();
-  if (publicPath) {
-    pushPathSignal(signals, "AppCore.state.publicPath", publicPath);
-  }
-
-  return signals;
-}
-
-function getBlockingSignal(signals = []) {
-  return safeArray(signals).find((signal) => signal.isFacturas === false) || null;
-}
-
-function hasPositiveFacturasSignal(signals = []) {
-  return safeArray(signals).some((signal) => signal.isFacturas === true);
-}
-
-function shouldAllowFacturasMethod(method = "", args = []) {
-  const cleanMethod = safeText(method, "");
-
-  if (!cleanMethod) return true;
-  if (ALWAYS_ALLOWED_VIEW_METHODS.has(cleanMethod)) return true;
-  if (!GUARDED_VIEW_METHODS.has(cleanMethod)) return true;
-
-  const explicitSignals = collectExplicitRouteSignals(args);
-
-  if (explicitSignals.length) {
-    return hasPositiveFacturasSignal(explicitSignals) && !getBlockingSignal(explicitSignals);
-  }
-
-  const browserPath = getBrowserPath();
-
-  if (browserPath) {
-    return isFacturasPath(browserPath);
-  }
-
-  const runtimeSignals = collectRuntimeRouteSignals();
-
-  if (runtimeSignals.length) {
-    return hasPositiveFacturasSignal(runtimeSignals) && !getBlockingSignal(runtimeSignals);
-  }
-
-  return true;
-}
-
-function logBlockedFacturasMethod(method = "", args = []) {
-  const explicitSignals = collectExplicitRouteSignals(args);
-  const runtimeSignals = collectRuntimeRouteSignals();
-  const signals = [...explicitSignals, ...runtimeSignals];
-
-  safeWarn(`FacturasView.${method} bloqueado: ruta actual no es Facturas.`, {
-    method,
-    browserPath: getBrowserPath(),
-    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
-    appRoute: getAppRoutePath(),
-    appPublicPath: getAppPublicPath(),
-    explicitSignals,
-    runtimeSignals,
-    blockingSignal: getBlockingSignal(signals),
-  });
-}
-
-function getDefaultFallback(method = "") {
-  switch (method) {
-    case "destroy":
-    case "unmount":
-    case "dispose":
-    case "closeDetail":
-    case "closeFacturaDetail":
-      return true;
-
-    case "downloadFacturaPdf":
-    case "downloadFactura":
-    case "sendFacturaToClient":
-    case "sendFactura":
-    case "exportFacturasCsv":
-    case "copyFacturaIdAction":
-      return false;
-
-    case "getItems":
-    case "getFacturas":
-      return [];
-
-    case "getState":
-    case "getSnapshot":
-      return null;
-
-    default:
-      return null;
-  }
-}
-
-function guardedCall(target, method, args = [], fallback = undefined) {
-  const callArgs = Array.isArray(args) ? args : [];
-
-  if (!shouldAllowFacturasMethod(method, callArgs)) {
-    logBlockedFacturasMethod(method, callArgs);
-
-    return fallback !== undefined
-      ? fallback
-      : getDefaultFallback(method);
-  }
-
-  return safeCall(target, method, callArgs, fallback);
 }
 
 /* =========================================================
-   GUARDED VIEW BRIDGE
+   HTTP SEARCH HELPERS
 ========================================================= */
 
-function createGuardedFacturasViewBridge(viewRef) {
-  const source = viewRef || {};
-  const cache = new Map();
+function getHttpClient() {
+  try {
+    return AppCore.getHttpClient?.() || AppCore.http || AppCore.Http || null;
+  } catch {
+    return AppCore.http || AppCore.Http || null;
+  }
+}
 
-  if (typeof Proxy !== "function" || !isProxyable(source)) {
-    return source;
+async function requestGet(endpoint = "", query = {}, source = "views.facturas") {
+  const path = cleanText(endpoint, "");
+
+  if (!path) {
+    throw new Error("FACTURAS_SEARCH_ENDPOINT_REQUIRED");
   }
 
-  return new Proxy(source, {
-    get(target, prop, receiver) {
-      if (prop === "__raw") return target;
-      if (prop === "__source") return FACTURAS_INDEX_SOURCE;
-      if (prop === "routeViewKey") return "facturas";
-      if (prop === "routeViewName") return FACTURAS_VIEW_NAME;
+  if (isFunction(AppCore.request)) {
+    return AppCore.request(path, {
+      method: "GET",
+      query: safeObject(query),
+      source,
+    });
+  }
 
-      const value = Reflect.get(target, prop, receiver);
+  const client = getHttpClient();
 
-      if (!isFn(value)) {
-        return value;
+  if (isFunction(client?.get)) {
+    return client.get(path, {
+      query: safeObject(query),
+      source,
+    });
+  }
+
+  if (isFunction(client?.request)) {
+    return client.request(path, {
+      method: "GET",
+      query: safeObject(query),
+      source,
+    });
+  }
+
+  throw new Error("FACTURAS_HTTP_CLIENT_UNAVAILABLE");
+}
+
+function unwrapList(payload = null) {
+  if (Array.isArray(payload)) return payload;
+
+  const object = safeObject(payload, {});
+
+  return safeArray(
+    first(
+      object.items,
+      object.rows,
+      object.results,
+      object.records,
+      object.list,
+      object.data,
+      object.clientes,
+      object.clients,
+      object.customers,
+      object.users,
+      object.usuarios,
+      object.tickets,
+      object.incidencias,
+
+      object.data?.items,
+      object.data?.rows,
+      object.data?.results,
+      object.data?.clientes,
+      object.data?.clients,
+      object.data?.customers,
+      object.data?.users,
+      object.data?.usuarios,
+      object.data?.tickets,
+      object.data?.incidencias,
+
+      object.payload?.items,
+      object.payload?.clientes,
+      object.payload?.users,
+      object.payload?.tickets,
+      object.payload?.incidencias,
+
+      object.result?.items,
+      object.result?.clientes,
+      object.result?.users,
+      object.result?.tickets,
+      object.result?.incidencias,
+
+      []
+    )
+  );
+}
+
+function normalizeClientCandidate(raw = {}) {
+  const item = safeObject(raw);
+
+  const id = cleanText(
+    first(
+      item.clienteId,
+      item.clientId,
+      item.customerId,
+      item.id,
+      item.userId,
+      item.username
+    ),
+    ""
+  );
+
+  const userId = cleanText(first(item.userId, item.usuarioId, item.uid, item.id), "");
+  const clienteId = cleanText(first(item.clienteId, item.clientId, item.customerId, id), id);
+
+  if (!id && !clienteId && !userId) return null;
+
+  const name = cleanText(
+    first(
+      item.name,
+      item.nombre,
+      item.displayName,
+      item.nombreContacto,
+      item.fullName,
+      item.razonSocial,
+      item.companyName,
+      item.empresa,
+      item.username
+    ),
+    id ? `Cliente ${id}` : "Cliente"
+  );
+
+  const email = cleanText(
+    first(
+      item.email,
+      item.mail,
+      item.emailCliente,
+      item.clienteEmail,
+      item.clientEmail,
+      item.emailLower
+    ),
+    ""
+  ).toLowerCase();
+
+  const avatarUrl = cleanText(
+    first(
+      item.avatarUrl,
+      item.avatar,
+      item.logoUrl,
+      item.logo,
+      item.photoUrl,
+      item.picture,
+      item.userAvatarUrl,
+      item.clientAvatarUrl,
+      item.profile?.avatarUrl,
+      ""
+    ),
+    ""
+  );
+
+  return {
+    ...item,
+
+    id: clienteId || userId || id,
+    clienteId: clienteId || id,
+    clientId: clienteId || id,
+    userId,
+
+    name,
+    nombre: name,
+    displayName: name,
+    nombreContacto: cleanText(first(item.nombreContacto, item.contactName, name), name),
+    razonSocial: cleanText(first(item.razonSocial, item.companyName, item.empresa, name), name),
+
+    email,
+    telefono: cleanText(first(item.telefono, item.phone, item.mobile, item.movil), ""),
+    nif: cleanText(first(item.nif, item.cif, item.taxId, item.vatId), ""),
+    username: cleanText(first(item.username, item.slug, email ? email.split("@")[0] : ""), ""),
+
+    avatarUrl,
+    avatar: avatarUrl,
+
+    subtitle: cleanText(
+      first(
+        email,
+        item.razonSocial && item.razonSocial !== name ? item.razonSocial : "",
+        item.telefono,
+        item.nif,
+        clienteId || userId || id
+      ),
+      clienteId || userId || id
+    ),
+  };
+}
+
+function normalizeTicketCandidate(raw = {}) {
+  const item = safeObject(raw);
+
+  const id = cleanText(
+    first(item.ticketId, item.incidenciaId, item.id, item.code, item.numero),
+    ""
+  );
+
+  if (!id) return null;
+
+  const subject = cleanText(
+    first(item.subject, item.asunto, item.title, item.name, item.preview, item.description),
+    id
+  );
+
+  const status = cleanText(first(item.status, item.estado, item.state), "");
+  const category = cleanText(first(item.category, item.categoria, item.tipo), "");
+
+  return {
+    ...item,
+
+    id,
+    ticketId: id,
+    incidenciaId: id,
+
+    subject,
+    asunto: subject,
+    title: subject,
+
+    clienteId: cleanText(first(item.clienteId, item.clientId, item.cliente?.clienteId), ""),
+    userId: cleanText(first(item.userId, item.usuarioId, item.userRef?.userId), ""),
+
+    status,
+    estado: status,
+    category,
+    categoria: category,
+
+    facturaLinked: Boolean(
+      item.facturaLinked ||
+        item.meta?.facturaLinked ||
+        item.meta?.hasFactura ||
+        item.facturaId ||
+        item.invoiceId
+    ),
+
+    subtitle:
+      [
+        status ? `Estado: ${status}` : "",
+        category ? `Tipo: ${category}` : "",
+        item.facturaLinked || item.meta?.hasFactura ? "Ya facturada" : "",
+      ]
+        .filter(Boolean)
+        .join(" · ") || id,
+  };
+}
+
+function dedupeClients(items = []) {
+  const map = new Map();
+
+  for (const item of safeArray(items)) {
+    const normalized = normalizeClientCandidate(item);
+
+    if (!normalized?.id) continue;
+
+    const key = normalized.clienteId || normalized.userId || normalized.id;
+
+    if (!map.has(key)) {
+      map.set(key, normalized);
+    }
+  }
+
+  return [...map.values()].slice(0, SEARCH_LIMIT);
+}
+
+function dedupeTickets(items = [], selectedClientes = []) {
+  const map = new Map();
+
+  for (const item of safeArray(items)) {
+    const normalized = normalizeTicketCandidate(item);
+
+    if (!normalized?.id) continue;
+
+    if (!ticketBelongsToClients(normalized, selectedClientes)) continue;
+
+    if (!map.has(normalized.id)) {
+      map.set(normalized.id, normalized);
+    }
+  }
+
+  return [...map.values()]
+    .sort((a, b) => {
+      const left = Date.parse(a.updatedAt || a.lastActivityAt || a.createdAt || 0);
+      const right = Date.parse(b.updatedAt || b.lastActivityAt || b.createdAt || 0);
+      return right - left;
+    })
+    .slice(0, TICKET_LIMIT);
+}
+
+function ticketBelongsToClients(ticket = {}, clients = []) {
+  const selected = safeArray(clients);
+
+  if (!selected.length) return true;
+
+  const ticketClienteId = cleanText(ticket.clienteId, "");
+  const ticketUserId = cleanText(ticket.userId, "");
+
+  if (!ticketClienteId && !ticketUserId) return true;
+
+  return selected.some((client) => {
+    const clienteId = cleanText(first(client.clienteId, client.id), "");
+    const userId = cleanText(client.userId, "");
+
+    return (
+      (clienteId && ticketClienteId === clienteId) ||
+      (userId && ticketUserId === userId)
+    );
+  });
+}
+
+function selectedClienteIds(clients = []) {
+  return [
+    ...new Set(
+      safeArray(clients)
+        .map((item) => cleanText(first(item.clienteId, item.id), ""))
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function selectedUserIds(clients = []) {
+  return [
+    ...new Set(
+      safeArray(clients)
+        .map((item) => cleanText(item.userId, ""))
+        .filter(Boolean)
+    ),
+  ];
+}
+
+async function searchClients(query = "") {
+  const q = cleanText(query, "");
+
+  if (!isAdmin() || q.length < SEARCH_MIN_LENGTH) return [];
+
+  let lastError = null;
+
+  for (const endpoint of CLIENT_SEARCH_ENDPOINTS) {
+    try {
+      const response = await requestGet(
+        endpoint,
+        {
+          q,
+          search: q,
+          limit: SEARCH_LIMIT,
+        },
+        "views.facturas.client-search"
+      );
+
+      const items = dedupeClients(unwrapList(response));
+
+      if (items.length) return items;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) throw lastError;
+
+  return [];
+}
+
+async function searchTickets(query = "", selectedClientes = []) {
+  const q = cleanText(query, "");
+  const clienteIds = selectedClienteIds(selectedClientes);
+  const userIds = selectedUserIds(selectedClientes);
+
+  if (!selectedClientes.length) return [];
+
+  let lastError = null;
+  let collected = [];
+
+  for (const endpoint of TICKET_SEARCH_ENDPOINTS) {
+    try {
+      const response = await requestGet(
+        endpoint,
+        {
+          ...(q
+            ? {
+                q,
+                search: q,
+              }
+            : {}),
+
+          limit: TICKET_LIMIT,
+          includeTotal: true,
+          includeClosed: true,
+          includeAll: true,
+          onlyMine: false,
+
+          ...(clienteIds[0] ? { clienteId: clienteIds[0] } : {}),
+          ...(userIds[0] ? { userId: userIds[0] } : {}),
+
+          ...(clienteIds.length ? { clienteIds: clienteIds.join(",") } : {}),
+          ...(userIds.length ? { userIds: userIds.join(",") } : {}),
+        },
+        "views.facturas.ticket-search"
+      );
+
+      const rows = unwrapList(response);
+
+      if (rows.length) {
+        collected = collected.concat(rows);
       }
+    } catch (error) {
+      lastError = error;
+    }
+  }
 
-      const method = String(prop);
+  const normalized = dedupeTickets(collected, selectedClientes);
 
-      if (cache.has(method)) {
-        return cache.get(method);
-      }
+  if (normalized.length) return normalized;
 
-      const wrapped = function guardedFacturasViewMethod(...args) {
-        if (!shouldAllowFacturasMethod(method, args)) {
-          logBlockedFacturasMethod(method, args);
-          return getDefaultFallback(method);
-        }
+  if (lastError && !collected.length) throw lastError;
 
-        try {
-          return value.apply(target, args);
-        } catch (error) {
-          safeWarn(`FacturasView.${method} falló.`, error);
-          throw error;
-        }
-      };
+  return [];
+}
 
+/* =========================================================
+   BODY / FILE / CSV
+========================================================= */
+
+function syncBodyModalClass(open = false) {
+  if (!isBrowser()) return false;
+
+  try {
+    document.body?.classList.toggle("modal-open", open);
+    document.body?.classList.toggle("facturas-modal-open", open);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function openUrl(url = "") {
+  if (!isBrowser()) return false;
+
+  const target = cleanText(url, "");
+
+  if (!target) return false;
+
+  try {
+    window.open(target, "_blank", "noopener,noreferrer");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function downloadTextFile(filename = "facturas.csv", content = "") {
+  if (!isBrowser()) return false;
+
+  try {
+    const blob = new Blob([content], {
+      type: "text/csv;charset=utf-8",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = filename;
+    link.rel = "noopener";
+    link.style.display = "none";
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(() => {
       try {
-        Object.defineProperties(wrapped, {
-          name: {
-            value: `guardedFacturas_${method}`,
-          },
-          routeViewKey: {
-            value: "facturas",
-            enumerable: true,
-          },
-          routeViewName: {
-            value: FACTURAS_VIEW_NAME,
-            enumerable: true,
-          },
-        });
-      } catch {}
+        URL.revokeObjectURL(url);
+      } catch {
+        // noop
+      }
+    }, 1000);
 
-      cache.set(method, wrapped);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-      return wrapped;
+function csvCell(value = "") {
+  const text = String(value ?? "").replace(/"/g, '""');
+  return `"${text}"`;
+}
+
+function exportCsv(items = []) {
+  const rows = safeArray(items);
+  const header = [
+    "Factura",
+    "Cliente",
+    "Email",
+    "Estado pago",
+    "Total",
+    "Incidencia",
+    "Fecha",
+  ];
+
+  const lines = rows.map((item) => [
+    getFacturaLabel(item),
+    cleanText(first(item.clientName, item.clienteNombre, item.clienteName, item.customerName), ""),
+    cleanText(first(item.clienteEmail, item.emailCliente, item.email), ""),
+    cleanText(first(item.paymentStatus, item.estadoPago), ""),
+    cleanText(first(item.total, item.amount, item.importe), ""),
+    cleanText(first(item.ticketId, item.incidenciaId, item.relatedTicketId), ""),
+    cleanText(first(item.issuedAt, item.fechaEmision, item.createdAt), ""),
+  ].map(csvCell).join(";"));
+
+  const csv = [
+    header.map(csvCell).join(";"),
+    ...lines,
+  ].join("\n");
+
+  return downloadTextFile("facturas.csv", csv);
+}
+
+function getFacturaLabel(item = {}) {
+  return cleanText(
+    first(
+      item.numeroFacturaLegal,
+      item.numeroFactura,
+      item.number,
+      item.invoiceNumber,
+      item.facturaId,
+      item.invoiceId,
+      item.id
+    ),
+    "Factura"
+  );
+}
+
+/* =========================================================
+   FORM HELPERS
+========================================================= */
+
+function readField(form = null, name = "") {
+  if (!form || !name) return "";
+
+  const field = form.querySelector?.(`[data-field="${name}"], [name="${name}"]`);
+
+  if (!field) return "";
+
+  if (field.type === "checkbox") {
+    return Boolean(field.checked);
+  }
+
+  return cleanText(field.value, "");
+}
+
+function clientIndexFromNode(node = null) {
+  const index = Number(node?.dataset?.clientIndex || "");
+  return Number.isInteger(index) ? index : -1;
+}
+
+function ticketIndexFromNode(node = null) {
+  const index = Number(node?.dataset?.ticketIndex || "");
+  return Number.isInteger(index) ? index : -1;
+}
+
+/* =========================================================
+   CONTROLLER
+========================================================= */
+
+function createFacturasController(host = null, context = {}) {
+  let destroyed = false;
+
+  const cache = hydrateFacturasFromCache();
+
+  let items = safeArray(cache.items);
+  let total = number(cache.total, items.length);
+
+  let loading = false;
+  let refreshing = false;
+  let creating = false;
+  let error = "";
+
+  let page = DEFAULT_PAGE;
+  let pageSize = DEFAULT_PAGE_SIZE;
+  let filter = "all";
+  let search = "";
+  let sort = "date_desc";
+
+  let openingFacturaId = "";
+  let viewingFacturaId = "";
+  let downloadingFacturaId = "";
+  let sendingFacturaId = "";
+
+  let clientSearchSeq = 0;
+  let ticketSearchSeq = 0;
+  let clientSearchTimer = null;
+  let ticketSearchTimer = null;
+
+  const objectUrls = new Set();
+
+  const createModal = {
+    open: false,
+    canCreate: isAdmin(),
+    submitting: false,
+    serverError: "",
+    successMessage: "",
+    createdFacturaId: "",
+    errors: {},
+    form: getFacturaCreateFormDefaults(),
+
+    selectedClientes: [],
+    selectedTickets: [],
+
+    clientSearch: {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
     },
 
-    apply(target, thisArg, args) {
-      if (!shouldAllowFacturasMethod("render", args)) {
-        logBlockedFacturasMethod("render", args);
+    ticketSearch: {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
+    },
+  };
+
+  const detailModal = {
+    open: false,
+    detailOpen: false,
+    detailLoading: false,
+    factura: null,
+    sendingFacturaId: "",
+    viewingFacturaId: "",
+    downloadingFacturaId: "",
+  };
+
+  function clearTimers() {
+    if (clientSearchTimer) {
+      clearTimeout(clientSearchTimer);
+      clientSearchTimer = null;
+    }
+
+    if (ticketSearchTimer) {
+      clearTimeout(ticketSearchTimer);
+      ticketSearchTimer = null;
+    }
+  }
+
+  function revokeObjectUrls() {
+    for (const url of objectUrls) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        // noop
+      }
+    }
+
+    objectUrls.clear();
+  }
+
+  function payload(extra = {}) {
+    return {
+      user: getCurrentUser(),
+      role: getCurrentRole(),
+      admin: isAdmin(),
+      canCreateFactura: isAdmin(),
+
+      routes: getRoutes(),
+
+      items,
+      facturas: items,
+      total,
+      remoteCount: total,
+
+      page,
+      pageSize,
+      filter,
+      search,
+      sort,
+
+      loading,
+      refreshing,
+      creating,
+      error,
+
+      state: {
+        loading,
+        refreshing,
+        creating,
+        error,
+
+        page,
+        pageSize,
+        filter,
+        search,
+        sort,
+
+        openingFacturaId,
+        viewingFacturaId,
+        downloadingFacturaId,
+        sendingFacturaId,
+
+        role: getCurrentRole(),
+        admin: isAdmin(),
+        canCreateFactura: isAdmin(),
+      },
+
+      createModal,
+      detailModal,
+
+      ...extra,
+    };
+  }
+
+  function focusAfterRender(selector = "", placeEnd = true) {
+    if (!selector || !host) return false;
+
+    try {
+      const node = host.querySelector(selector);
+
+      if (!node) return false;
+
+      node.focus({
+        preventScroll: true,
+      });
+
+      if (placeEnd && typeof node.setSelectionRange === "function") {
+        const end = String(node.value || "").length;
+        node.setSelectionRange(end, end);
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function render(options = {}) {
+    if (destroyed || !host) return false;
+
+    host.innerHTML = renderFacturasTemplate(payload());
+
+    bindFacturasTemplateDom(host);
+
+    syncBodyModalClass(createModal.open || detailModal.open);
+
+    if (options.focusSelector) {
+      focusAfterRender(options.focusSelector, options.focusEnd !== false);
+    }
+
+    return true;
+  }
+
+  function renderLoading() {
+    if (destroyed || !host) return false;
+
+    host.innerHTML = renderFacturasLoadingState(payload());
+    bindFacturasTemplateDom(host);
+
+    return true;
+  }
+
+  function renderError(message = "No se pudieron cargar las facturas.") {
+    if (destroyed || !host) return false;
+
+    host.innerHTML = renderFacturasErrorState(message);
+    return true;
+  }
+
+  async function load(options = {}) {
+    loading = options.silent ? loading : true;
+    refreshing = options.force === true;
+    error = "";
+
+    if (!options.silent) {
+      render();
+    }
+
+    try {
+      const response = await listFacturas({
+        page,
+        limit: Math.max(pageSize * 4, 50),
+        search,
+        sortBy: "recent",
+        sortDir: "desc",
+        returnStaleOnError: true,
+        force: options.force === true,
+      });
+
+      items = safeArray(response.items);
+      total = number(response.total, items.length);
+
+      error = response.stale ? cleanText(response.error?.message, "") : "";
+      loading = false;
+      refreshing = false;
+
+      render();
+
+      return response;
+    } catch (loadError) {
+      error = safeError(loadError);
+      loading = false;
+      refreshing = false;
+
+      if (items.length) {
+        render();
         return null;
       }
 
-      return Reflect.apply(target, thisArg, args);
-    },
-
-    set(target, prop, value) {
-      try {
-        target[prop] = value;
-        return true;
-      } catch {
-        return false;
-      }
-    },
-  });
-}
-
-export const FacturasView = createGuardedFacturasViewBridge(RawFacturasView);
-
-export { FacturasView as View };
-
-export const view = FacturasView;
-export const component = FacturasView;
-export const page = FacturasView;
-
-export default FacturasView;
-
-/* =========================================================
-   VIEW API
-========================================================= */
-
-export const init = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "init"],
-      [RawFacturasView, "mount"],
-      [RawFacturasView, "render"],
-    ],
-    args,
-    null,
-    { guarded: true }
-  );
-
-export const mount = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "mount"],
-      [RawFacturasView, "init"],
-      [RawFacturasView, "render"],
-    ],
-    args,
-    null,
-    { guarded: true }
-  );
-
-export const render = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "render"],
-      [RawFacturasView, "mount"],
-      [RawFacturasView, "init"],
-    ],
-    args,
-    null,
-    { guarded: true }
-  );
-
-export const reload = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "reload"],
-      [RawFacturasView, "refresh"],
-      [RawFacturasView, "loadFacturas"],
-      [Loaders, "loadFacturasCollection"],
-    ],
-    args,
-    null,
-    { guarded: true }
-  );
-
-export const refresh = (...args) => reload(...args);
-export const bootstrap = (...args) => init(...args);
-
-export const destroy = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "destroy"],
-      [RawFacturasView, "unmount"],
-      [RawFacturasView, "dispose"],
-    ],
-    args,
-    true
-  );
-
-export const unmount = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "unmount"],
-      [RawFacturasView, "destroy"],
-      [RawFacturasView, "dispose"],
-    ],
-    args,
-    true
-  );
-
-export const dispose = (...args) => destroy(...args);
-
-/* =========================================================
-   ACTION API · VIEW FIRST + FALLBACKS
-========================================================= */
-
-export const loadFacturas = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "loadFacturas"],
-      [RawFacturasView, "reload"],
-      [Loaders, "loadFacturasCollection"],
-    ],
-    args,
-    null,
-    { guarded: true }
-  );
-
-export const openFactura = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "openFactura"],
-      [Actions, "openFacturaAction"],
-    ],
-    args,
-    null,
-    { guarded: true }
-  );
-
-export const openFacturaPdf = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "openFacturaPdf"],
-      [RawFacturasView, "viewFacturaPdf"],
-      [Actions, "openFacturaPdfAction"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-export const viewFacturaPdf = (...args) => openFacturaPdf(...args);
-
-export const downloadFacturaPdf = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "downloadFacturaPdf"],
-      [RawFacturasView, "downloadFactura"],
-      [Actions, "downloadFacturaPdfAction"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-export const sendFacturaToClient = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "sendFacturaToClient"],
-      [RawFacturasView, "sendFactura"],
-      [Actions, "sendFacturaToClientAction"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-export const closeDetail = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "closeDetail"],
-      [RawFacturasView, "closeFacturaDetail"],
-      [State, "closeFacturasDetail"],
-    ],
-    args,
-    true
-  );
-
-export const exportFacturasCsv = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "exportFacturasCsv"],
-      [Actions, "exportFacturasCsvAction"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-/* =========================================================
-   CREATE MODAL API
-========================================================= */
-
-export const openFacturasCreateModal = (...args) =>
-  callAny(
-    [
-      [CreateModal, "openFacturasCreateModal"],
-      [CreateModal.OnionFacturasCreateModal, "open"],
-      [CreateModal.default, "open"],
-    ],
-    args,
-    false
-  );
-
-export const closeFacturasCreateModal = (...args) =>
-  callAny(
-    [
-      [CreateModal, "closeFacturasCreateModal"],
-      [CreateModal.OnionFacturasCreateModal, "close"],
-      [CreateModal.default, "close"],
-    ],
-    args,
-    false
-  );
-
-export const updateFacturasCreateModal = (...args) =>
-  callAny(
-    [
-      [CreateModal, "updateFacturasCreateModal"],
-      [CreateModal.OnionFacturasCreateModal, "update"],
-      [CreateModal.default, "update"],
-    ],
-    args,
-    false
-  );
-
-export const OnionFacturasCreateModal =
-  CreateModal.OnionFacturasCreateModal ||
-  CreateModal.default ||
-  null;
-
-/* =========================================================
-   INCIDENCIAS BRIDGE API
-========================================================= */
-
-export const openFacturaIncidenciaModal = (...args) =>
-  callAny(
-    [
-      [IncidenciasBridge, "openFacturaIncidenciaModal"],
-      [IncidenciasBridge.default, "openFacturaIncidenciaModal"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-/* =========================================================
-   DATA / DEBUG API
-========================================================= */
-
-export const getItems = (...args) =>
-  callAny(
-    [
-      [RawFacturasView, "getItems"],
-      [RawFacturasView, "getFacturas"],
-      [Store, "getFacturasStore"],
-    ],
-    args,
-    []
-  );
-
-export const getFacturasView = () => FacturasView;
-export const getRawFacturasView = () => RawFacturasView;
-
-export const canRenderFacturasNow = (...args) =>
-  shouldAllowFacturasMethod("render", args);
-
-export const getFacturasRouteDebug = (...args) => {
-  const explicitSignals = collectExplicitRouteSignals(args);
-  const runtimeSignals = collectRuntimeRouteSignals();
-  const signals = [...explicitSignals, ...runtimeSignals];
-
-  return {
-    source: FACTURAS_INDEX_SOURCE,
-    allowed: shouldAllowFacturasMethod("render", args),
-    browserPath: getBrowserPath(),
-    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
-    appRoute: getAppRoutePath(),
-    appPublicPath: getAppPublicPath(),
-    explicitSignals,
-    runtimeSignals,
-    signals,
-    blockingSignal: getBlockingSignal(signals),
-  };
-};
-
-export const isInitialized = () =>
-  Boolean(
-    RawFacturasView?.initialized ||
-      RawFacturasView?.isInitialized ||
-      safeCall(RawFacturasView, "isInitialized", [], false)
-  );
-
-export const isDestroyed = () =>
-  Boolean(
-    RawFacturasView?.destroyed ||
-      RawFacturasView?.isDestroyed ||
-      safeCall(RawFacturasView, "isDestroyed", [], false)
-  );
-
-export const isMounted = () =>
-  Boolean(
-    RawFacturasView?.mounted ||
-      RawFacturasView?.isMounted ||
-      safeCall(RawFacturasView, "isMounted", [], false)
-  );
-
-export const getModuleSnapshot = (...args) => {
-  const base = callAny(
-    [
-      [RawFacturasView, "getSnapshot"],
-      [RawFacturasView, "getState"],
-    ],
-    args,
-    null
-  );
-
-  return {
-    ...(isObject(base) ? base : {}),
-
-    module: FACTURAS_MODULE_NAME,
-    viewName: FACTURAS_VIEW_NAME,
-    version: FACTURAS_MODULE_VERSION,
-    source: FACTURAS_INDEX_SOURCE,
-
-    initialized: isInitialized(),
-    destroyed: isDestroyed(),
-    mounted: isMounted(),
-
-    items: getItems(),
-
-    browserPath: getBrowserPath(),
-    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
-    appRoute: getAppRoutePath(),
-    appPublicPath: getAppPublicPath(),
-    facturasAllowedNow: canRenderFacturasNow(...args),
-  };
-};
-
-/* =========================================================
-   MODEL PUBLIC WRAPPERS
-========================================================= */
-
-export const DEFAULT_FACTURAS_SORT = Model.DEFAULT_FACTURAS_SORT;
-export const DEFAULT_FACTURA_CURRENCY = Model.DEFAULT_FACTURA_CURRENCY;
-
-export const truncate = moduleMethod(Model, "truncate", "");
-export const formatMoney = moduleMethod(Model, "formatMoney", "");
-export const formatDate = moduleMethod(Model, "formatDate", "—");
-export const formatDateTime = moduleMethod(Model, "formatDateTime", "—");
-export const formatRelativeDate = moduleMethod(Model, "formatRelativeDate", "Sin fecha");
-export const getInitials = moduleMethod(Model, "getInitials", "ON");
-
-export const normalizeEstadoPago = moduleMethod(Model, "normalizeEstadoPago", "pending");
-export const normalizeEstado = moduleMethod(Model, "normalizeEstado", "issued");
-export const getEstadoPagoLabel = moduleMethod(Model, "getEstadoPagoLabel", "Pendiente");
-export const getEstadoLabel = moduleMethod(Model, "getEstadoLabel", "Emitida");
-
-export const isFacturaDocument = moduleMethod(Model, "isFacturaDocument", true);
-export const getFacturaIdentityList = moduleMethod(Model, "getFacturaIdentityList", []);
-export const getFacturaPrimaryId = moduleMethod(Model, "getFacturaPrimaryId", "");
-export const sameFacturaIdentity = moduleMethod(Model, "sameFacturaIdentity", false);
-
-export const getFacturaNumero = moduleMethod(Model, "getFacturaNumero", "—");
-export const getFacturaFecha = moduleMethod(Model, "getFacturaFecha", null);
-export const getFacturaUpdatedAt = moduleMethod(Model, "getFacturaUpdatedAt", null);
-export const getFacturaClienteObject = moduleMethod(Model, "getFacturaClienteObject", {});
-export const getFacturaClienteNombre = moduleMethod(Model, "getFacturaClienteNombre", "Cliente");
-export const getFacturaClienteEmpresa = moduleMethod(Model, "getFacturaClienteEmpresa", "-");
-export const getFacturaClienteEmail = moduleMethod(Model, "getFacturaClienteEmail", "-");
-export const getFacturaPreview = moduleMethod(Model, "getFacturaPreview", "Sin detalle");
-export const getFacturaCurrency = moduleMethod(Model, "getFacturaCurrency", "EUR");
-export const getFacturaTotal = moduleMethod(Model, "getFacturaTotal", 0);
-export const getFacturaBaseImponible = moduleMethod(Model, "getFacturaBaseImponible", 0);
-export const getFacturaImpuestosTotal = moduleMethod(Model, "getFacturaImpuestosTotal", 0);
-export const getFacturaDescuentoTotal = moduleMethod(Model, "getFacturaDescuentoTotal", 0);
-export const getFacturaPaidAmount = moduleMethod(Model, "getFacturaPaidAmount", 0);
-export const getFacturaPendingAmount = moduleMethod(Model, "getFacturaPendingAmount", 0);
-export const getEffectiveEstadoPago = moduleMethod(Model, "getEffectiveEstadoPago", "pending");
-
-export const isFacturaPaid = moduleMethod(Model, "isFacturaPaid", false);
-export const isFacturaPending = moduleMethod(Model, "isFacturaPending", false);
-export const isFacturaOverdue = moduleMethod(Model, "isFacturaOverdue", false);
-
-export const getFacturaIncidenciaId = moduleMethod(Model, "getFacturaIncidenciaId", "");
-export const hasFacturaIncidencia = moduleMethod(Model, "hasFacturaIncidencia", false);
-export const buildFacturaIncidenciaPayload = moduleMethod(Model, "buildFacturaIncidenciaPayload", null);
-
-export const normalizeFactura = moduleMethod(Model, "normalizeFactura", {});
-export const extractFacturas = moduleMethod(Model, "extractFacturas", []);
-export const extractNormalizedFacturas = moduleMethod(Model, "extractNormalizedFacturas", []);
-export const getRemoteCount = moduleMethod(Model, "getRemoteCount", 0);
-export const extractStats = moduleMethod(Model, "extractStats", null);
-
-export const sumFacturasTotal = moduleMethod(Model, "sumFacturasTotal", 0);
-export const sumFacturasBase = moduleMethod(Model, "sumFacturasBase", 0);
-export const countFacturasByEstadoPago = moduleMethod(Model, "countFacturasByEstadoPago", 0);
-export const countFacturasByEstado = moduleMethod(Model, "countFacturasByEstado", 0);
-export const computeFacturasStats = moduleMethod(Model, "computeFacturasStats", {});
-export const sortFacturas = moduleMethod(Model, "sortFacturas", []);
-export const filterFacturas = moduleMethod(Model, "filterFacturas", []);
-
-/* =========================================================
-   UTILS PUBLIC WRAPPERS
-========================================================= */
-
-export const safeString = moduleMethod(Utils, "safeString", "");
-export const safeNumber = moduleMethod(Utils, "safeNumber", 0);
-export const safeArrayExport = moduleMethod(Utils, "safeArray", []);
-export const safeObjectExport = moduleMethod(Utils, "safeObject", {});
-export const safeBoolean = moduleMethod(Utils, "safeBoolean", false);
-export const escapeHtml = moduleMethod(Utils, "escapeHtml", "");
-export const normalizeWhitespace = moduleMethod(Utils, "normalizeWhitespace", "");
-export const normalizeKey = moduleMethod(Utils, "normalizeKey", "");
-export const normalizeIdentity = moduleMethod(Utils, "normalizeIdentity", "");
-export const showToast = moduleMethod(Utils, "showToast", false);
-export const safeEmitEvent = moduleMethod(Utils, "safeEmit", false);
-
-/* =========================================================
-   STATE PUBLIC WRAPPERS
-========================================================= */
-
-export const DEFAULT_PAGE_SIZE = State.DEFAULT_PAGE_SIZE || 5;
-
-export const createFacturasState = moduleMethod(State, "createFacturasState", {});
-export const resetFacturasViewState = moduleMethod(State, "resetFacturasViewState");
-export const resetFacturasDetailState = moduleMethod(State, "resetFacturasDetailState");
-export const resetFacturasInflightState = moduleMethod(State, "resetFacturasInflightState");
-export const resetFacturasState = moduleMethod(State, "resetFacturasState");
-
-export const getFacturasViewState = moduleMethod(State, "getFacturasViewState", {});
-export const getFacturasDetailState = moduleMethod(State, "getFacturasDetailState", {});
-export const getFacturasActionsState = moduleMethod(State, "getFacturasActionsState", {});
-export const getFacturasInflightState = moduleMethod(State, "getFacturasInflightState", {});
-
-export const isFacturasHydrated = moduleMethod(State, "isFacturasHydrated", false);
-export const isFacturasLoading = moduleMethod(State, "isFacturasLoading", false);
-export const isFacturasLoaded = moduleMethod(State, "isFacturasLoaded", false);
-export const isFacturasRefreshing = moduleMethod(State, "isFacturasRefreshing", false);
-export const isFacturasBootstrapped = moduleMethod(State, "isFacturasBootstrapped", false);
-
-export const getFacturasError = moduleMethod(State, "getFacturasError", null);
-export const getFacturasRemoteCount = moduleMethod(State, "getFacturasRemoteCount", 0);
-export const getFacturasLastSyncAt = moduleMethod(State, "getFacturasLastSyncAt", "");
-export const getFacturasPage = moduleMethod(State, "getFacturasPage", 1);
-export const getFacturasPageSize = moduleMethod(State, "getFacturasPageSize", DEFAULT_PAGE_SIZE);
-
-export const isFacturasDetailOpen = moduleMethod(State, "isFacturasDetailOpen", false);
-export const isFacturasDetailLoading = moduleMethod(State, "isFacturasDetailLoading", false);
-export const getFacturasDetailData = moduleMethod(State, "getFacturasDetailData", null);
-
-export const getFacturasSendingFacturaId = moduleMethod(State, "getFacturasSendingFacturaId", "");
-export const getFacturasDownloadingFacturaId = moduleMethod(State, "getFacturasDownloadingFacturaId", "");
-export const getFacturasViewingFacturaId = moduleMethod(State, "getFacturasViewingFacturaId", "");
-export const getFacturasOpeningFacturaId = moduleMethod(State, "getFacturasOpeningFacturaId", "");
-export const getFacturasSelectedFacturaId = moduleMethod(State, "getFacturasSelectedFacturaId", "");
-
-export const getFacturasInflightLoad = moduleMethod(State, "getFacturasInflightLoad", null);
-export const getFacturasInflightDetail = moduleMethod(State, "getFacturasInflightDetail", null);
-export const getFacturasCollectionToken = moduleMethod(State, "getFacturasCollectionToken", 0);
-export const getFacturasDetailToken = moduleMethod(State, "getFacturasDetailToken", 0);
-export const getFacturasDetailFacturaId = moduleMethod(State, "getFacturasDetailFacturaId", "");
-
-export const setFacturasHydrated = moduleMethod(State, "setFacturasHydrated");
-export const setFacturasLoading = moduleMethod(State, "setFacturasLoading");
-export const setFacturasLoaded = moduleMethod(State, "setFacturasLoaded");
-export const setFacturasError = moduleMethod(State, "setFacturasError");
-export const clearFacturasError = moduleMethod(State, "clearFacturasError");
-export const setFacturasRefreshing = moduleMethod(State, "setFacturasRefreshing");
-export const setFacturasBootstrapped = moduleMethod(State, "setFacturasBootstrapped");
-export const setFacturasRemoteCount = moduleMethod(State, "setFacturasRemoteCount");
-export const setFacturasLastSyncAt = moduleMethod(State, "setFacturasLastSyncAt");
-export const setFacturasPage = moduleMethod(State, "setFacturasPage");
-export const setFacturasPageSize = moduleMethod(State, "setFacturasPageSize");
-
-export const setFacturasDetailOpen = moduleMethod(State, "setFacturasDetailOpen");
-export const setFacturasDetailLoading = moduleMethod(State, "setFacturasDetailLoading");
-export const setFacturasDetailData = moduleMethod(State, "setFacturasDetailData");
-export const openFacturasDetail = moduleMethod(State, "openFacturasDetail");
-export const closeFacturasDetail = moduleMethod(State, "closeFacturasDetail");
-
-export const setFacturasSendingFacturaId = moduleMethod(State, "setFacturasSendingFacturaId");
-export const setFacturasDownloadingFacturaId = moduleMethod(State, "setFacturasDownloadingFacturaId");
-export const setFacturasViewingFacturaId = moduleMethod(State, "setFacturasViewingFacturaId");
-export const setFacturasOpeningFacturaId = moduleMethod(State, "setFacturasOpeningFacturaId");
-export const setFacturasSelectedFacturaId = moduleMethod(State, "setFacturasSelectedFacturaId");
-export const clearFacturasActionIds = moduleMethod(State, "clearFacturasActionIds");
-
-export const setFacturasInflightLoad = moduleMethod(State, "setFacturasInflightLoad");
-export const setFacturasInflightDetail = moduleMethod(State, "setFacturasInflightDetail");
-export const setFacturasCollectionToken = moduleMethod(State, "setFacturasCollectionToken");
-export const setFacturasDetailToken = moduleMethod(State, "setFacturasDetailToken");
-export const setFacturasDetailFacturaId = moduleMethod(State, "setFacturasDetailFacturaId");
-export const clearFacturasCollectionInflight = moduleMethod(State, "clearFacturasCollectionInflight");
-export const clearFacturasDetailInflight = moduleMethod(State, "clearFacturasDetailInflight");
-
-export const patchFacturasViewState = moduleMethod(State, "patchFacturasViewState");
-export const patchFacturasDetailState = moduleMethod(State, "patchFacturasDetailState");
-export const patchFacturasActionsState = moduleMethod(State, "patchFacturasActionsState");
-export const patchFacturasInflightState = moduleMethod(State, "patchFacturasInflightState");
-
-export const getFacturasTemplateState = moduleMethod(State, "getFacturasTemplateState", {});
-export const getFacturasStateSnapshot = moduleMethod(State, "getFacturasStateSnapshot", {});
-
-/* =========================================================
-   STORE PUBLIC WRAPPERS
-========================================================= */
-
-export const getFacturasStore = moduleMethod(Store, "getFacturasStore", []);
-export const getSortedFacturasStore = moduleMethod(Store, "getSortedFacturasStore", []);
-export const getFacturaByIdStore = moduleMethod(Store, "getFacturaByIdStore", null);
-export const getFacturaByIncidenciaIdStore = moduleMethod(Store, "getFacturaByIncidenciaIdStore", null);
-export const hasFacturasStore = moduleMethod(Store, "hasFacturasStore", false);
-export const countFacturasStore = moduleMethod(Store, "countFacturasStore", 0);
-
-export const setFacturasStore = moduleMethod(Store, "setFacturasStore", false);
-export const appendFacturasStore = moduleMethod(Store, "appendFacturasStore", false);
-export const upsertFacturaStore = moduleMethod(Store, "upsertFacturaStore", false);
-export const removeFacturaByIdStore = moduleMethod(Store, "removeFacturaByIdStore", false);
-export const clearFacturasStore = moduleMethod(Store, "clearFacturasStore", false);
-
-export const debugFacturasIncidenciasStore = moduleMethod(Store, "debugFacturasIncidenciasStore", []);
-
-/* =========================================================
-   API / LOADERS / ACTIONS PUBLIC WRAPPERS
-========================================================= */
-
-export const fetchFacturasRequest = moduleMethod(Api, "fetchFacturasRequest", null);
-export const fetchFacturaDetailRequest = moduleMethod(Api, "fetchFacturaDetailRequest", null);
-export const fetchFacturaPdfUrlRequest = moduleMethod(Api, "fetchFacturaPdfUrlRequest", null);
-export const sendFacturaRequest = moduleMethod(Api, "sendFacturaRequest", null);
-
-export const loadFacturasCollection = moduleMethod(Loaders, "loadFacturasCollection", null);
-export const loadFacturaDetailById = moduleMethod(Loaders, "loadFacturaDetailById", null);
-
-export const getFacturaDetailFromStoreAction = moduleMethod(Actions, "getFacturaDetailFromStoreAction", null);
-export const getFacturaDetailAction = moduleMethod(Actions, "getFacturaDetailAction", null);
-export const openFacturaAction = moduleMethod(Actions, "openFacturaAction", null);
-export const refreshFacturaDetailAction = moduleMethod(Actions, "refreshFacturaDetailAction", null);
-export const openFacturaPdfAction = moduleMethod(Actions, "openFacturaPdfAction", false);
-export const downloadFacturaPdfAction = moduleMethod(Actions, "downloadFacturaPdfAction", false);
-export const sendFacturaToClientAction = moduleMethod(Actions, "sendFacturaToClientAction", false);
-export const copyFacturaIdAction = moduleMethod(Actions, "copyFacturaIdAction", false);
-export const exportFacturasCsvAction = moduleMethod(Actions, "exportFacturasCsvAction", false);
-
-export const bindFacturasView = moduleMethod(Bindings, "bindFacturasView", null);
-
-/* =========================================================
-   TEMPLATE PUBLIC WRAPPERS
-========================================================= */
-
-export const renderHeader = moduleMethod(Template, "renderHeader", "");
-export const renderCards = moduleMethod(Template, "renderCards", "");
-export const renderLoadingState = moduleMethod(Template, "renderLoadingState", "");
-export const renderErrorState = moduleMethod(Template, "renderErrorState", "");
-export const renderFacturasTemplate = moduleMethod(Template, "renderFacturasTemplate", "");
-
-export const renderMiniMeta = moduleMethod(DetailTemplate, "renderMiniMeta", "");
-export const renderDetailStat = moduleMethod(DetailTemplate, "renderDetailStat", "");
-export const renderSectionCard = moduleMethod(DetailTemplate, "renderSectionCard", "");
-export const renderHeaderActions = moduleMethod(DetailTemplate, "renderHeaderActions", "");
-export const renderFacturasDetailContent = moduleMethod(DetailTemplate, "renderFacturasDetailContent", "");
-export const renderFacturasDetailModal = moduleMethod(DetailTemplate, "renderFacturasDetailModal", "");
-
-/* =========================================================
-   PUBLIC MODULE OBJECT
-========================================================= */
-
-export const FacturasModule = Object.freeze({
-  name: FACTURAS_MODULE_NAME,
-  viewName: FACTURAS_VIEW_NAME,
-  version: FACTURAS_MODULE_VERSION,
-  canonicalPath: FACTURAS_CANONICAL_PATH,
-  source: FACTURAS_INDEX_SOURCE,
-
-  View: FacturasView,
-  RawView: RawFacturasView,
-  FacturasView,
-
-  view,
-  component,
-  page,
-
-  Model,
-  Utils,
-  State,
-  Store,
-  Api,
-  Loaders,
-  Actions,
-  Bindings,
-  Template,
-  DetailTemplate,
-  CreateModal,
-  IncidenciasBridge,
-
-  init,
-  mount,
-  render,
-  reload,
-  refresh,
-  bootstrap,
-  destroy,
-  unmount,
-  dispose,
-
-  loadFacturas,
-  openFactura,
-  openFacturaPdf,
-  viewFacturaPdf,
-  downloadFacturaPdf,
-  sendFacturaToClient,
-  closeDetail,
-  exportFacturasCsv,
-
-  openFacturasCreateModal,
-  closeFacturasCreateModal,
-  updateFacturasCreateModal,
-  OnionFacturasCreateModal,
-
-  openFacturaIncidenciaModal,
-
-  getItems,
-  getFacturasView,
-  getRawFacturasView,
-  getModuleSnapshot,
-  canRenderFacturasNow,
-  getFacturasRouteDebug,
-
-  isInitialized,
-  isDestroyed,
-  isMounted,
-});
-
-/* =========================================================
-   GLOBAL BRIDGE
-========================================================= */
-
-export function registerGlobalBridge() {
-  const root = getGlobalRoot();
-
-  try {
-    const previous =
-      root.OnionFacturas &&
-      typeof root.OnionFacturas === "object"
-        ? root.OnionFacturas
-        : {};
-
-    root.OnionFacturas = {
-      ...previous,
-      ...FacturasModule,
+      renderError(error);
+      return null;
+    }
+  }
+
+  async function refresh() {
+    return load({
+      force: true,
+    });
+  }
+
+  function setFilter(value = "all") {
+    filter = cleanText(value, "all");
+    page = DEFAULT_PAGE;
+    render();
+
+    return true;
+  }
+
+  function setSearch(value = "") {
+    search = cleanText(value, "");
+    page = DEFAULT_PAGE;
+
+    render({
+      focusSelector: "[data-facturas-search-input]",
+    });
+
+    return true;
+  }
+
+  function clearFilters() {
+    filter = "all";
+    search = "";
+    page = DEFAULT_PAGE;
+    render({
+      focusSelector: "[data-facturas-search-input]",
+    });
+
+    return true;
+  }
+
+  function setSort(value = "date_desc") {
+    sort = cleanText(value, "date_desc");
+    page = DEFAULT_PAGE;
+    render();
+
+    return true;
+  }
+
+  function setPage(value = DEFAULT_PAGE) {
+    page = Math.max(1, number(value, DEFAULT_PAGE));
+    render();
+
+    return true;
+  }
+
+  function closeCreateModal() {
+    if (createModal.submitting) return false;
+
+    clearTimers();
+
+    createModal.open = false;
+    createModal.submitting = false;
+    createModal.serverError = "";
+    createModal.successMessage = "";
+    createModal.createdFacturaId = "";
+    createModal.errors = {};
+    createModal.form = getFacturaCreateFormDefaults();
+    createModal.selectedClientes = [];
+    createModal.selectedTickets = [];
+    createModal.clientSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
+    };
+    createModal.ticketSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
     };
 
-    root.OnionFacturasView = FacturasView;
-    root.FacturasView = FacturasView;
-
-    if (OnionFacturasCreateModal && !root.OnionFacturasCreateModal) {
-      root.OnionFacturasCreateModal = OnionFacturasCreateModal;
-    }
-  } catch (error) {
-    safeWarn("No se pudo registrar bridge global.", error);
+    render();
+    return true;
   }
 
-  try {
-    const appCore = root?.AppCore;
+  function openCreateModal(draft = {}) {
+    if (!isAdmin()) return false;
 
-    if (appCore) {
-      if (!appCore.modules || typeof appCore.modules !== "object") {
-        appCore.modules = {};
-      }
+    creating = true;
 
-      appCore.modules.facturas = FacturasModule;
-      appCore.modules.Facturas = FacturasModule;
-      appCore.modules.FacturasView = FacturasModule;
-      appCore.modules.OnionFacturas = FacturasModule;
+    createModal.open = true;
+    createModal.canCreate = true;
+    createModal.submitting = false;
+    createModal.serverError = "";
+    createModal.successMessage = "";
+    createModal.createdFacturaId = "";
+    createModal.errors = {};
+    createModal.form = {
+      ...getFacturaCreateFormDefaults(),
+      ...safeObject(draft),
+    };
+    createModal.selectedClientes = safeArray(draft.selectedClientes || draft.clientes).map(normalizeClientCandidate).filter(Boolean);
+    createModal.selectedTickets = safeArray(draft.selectedTickets || draft.tickets || draft.incidencias).map(normalizeTicketCandidate).filter(Boolean);
+    createModal.clientSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
+    };
+    createModal.ticketSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
+    };
 
-      if (typeof appCore.registerModule === "function") {
-        appCore.registerModule("facturas", FacturasModule);
-      }
+    syncPrimaryClientToForm();
+    syncPrimaryTicketToForm();
+
+    creating = false;
+
+    render({
+      focusSelector: createModal.selectedClientes.length
+        ? "[data-field='descripcion']"
+        : "[data-field='clienteSearch']",
+    });
+
+    if (createModal.selectedClientes.length && !createModal.selectedTickets.length) {
+      void loadTicketsForSelectedClients({
+        autoSelectLatest: true,
+      });
     }
-  } catch (error) {
-    safeWarn("No se pudo registrar bridge en AppCore.modules.", error);
+
+    return true;
   }
 
-  safeEmit("facturas:index:ready", {
-    source: FACTURAS_INDEX_SOURCE,
-    hasView: Boolean(FacturasView),
-    hasRawView: Boolean(RawFacturasView),
-    browserPath: getBrowserPath(),
-    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
-    appRoute: getAppRoutePath(),
-    appPublicPath: getAppPublicPath(),
-    allowedNow: canRenderFacturasNow(),
-  });
+  function syncPrimaryClientToForm() {
+    const primary = createModal.selectedClientes[0] || null;
 
-  return FacturasModule;
+    if (!primary) {
+      createModal.form = {
+        ...createModal.form,
+        clienteId: "",
+        clienteUserId: "",
+        clienteNombre: "",
+        clienteEmail: "",
+        clienteAvatar: "",
+      };
+
+      return null;
+    }
+
+    createModal.form = {
+      ...createModal.form,
+      clienteId: primary.clienteId || primary.id || "",
+      clienteUserId: primary.userId || "",
+      clienteNombre: primary.name || primary.nombreContacto || primary.razonSocial || "",
+      clienteEmail: primary.email || "",
+      clienteAvatar: primary.avatarUrl || primary.avatar || "",
+    };
+
+    return primary;
+  }
+
+  function syncPrimaryTicketToForm() {
+    const primary = createModal.selectedTickets[0] || null;
+
+    if (!primary) {
+      createModal.form = {
+        ...createModal.form,
+        ticketId: "",
+        incidenciaId: "",
+        incidenciaSubject: "",
+      };
+
+      return null;
+    }
+
+    createModal.form = {
+      ...createModal.form,
+      ticketId: primary.ticketId || primary.id || "",
+      incidenciaId: primary.incidenciaId || primary.id || "",
+      incidenciaSubject: primary.subject || primary.asunto || primary.title || primary.id || "",
+    };
+
+    return primary;
+  }
+
+  function patchCreateFormFromField(field = null) {
+    if (!field) return false;
+
+    const name = cleanText(field.dataset?.field || field.name, "");
+
+    if (!name || name === "clienteSearch" || name === "ticketSearch") return false;
+
+    createModal.form = {
+      ...createModal.form,
+      [name]: field.type === "checkbox" ? Boolean(field.checked) : field.value,
+    };
+
+    if (createModal.errors[name]) {
+      const next = { ...createModal.errors };
+      delete next[name];
+      createModal.errors = next;
+    }
+
+    createModal.serverError = "";
+    createModal.successMessage = "";
+    createModal.createdFacturaId = "";
+
+    render({
+      focusSelector: `[data-field='${name}']`,
+    });
+
+    return true;
+  }
+
+  function scheduleClientSearch(value = "") {
+    const query = cleanText(value, "");
+
+    createModal.clientSearch.query = query;
+    createModal.clientSearch.error = "";
+    createModal.clientSearch.empty = false;
+
+    if (clientSearchTimer) {
+      clearTimeout(clientSearchTimer);
+      clientSearchTimer = null;
+    }
+
+    if (query.length < SEARCH_MIN_LENGTH) {
+      createModal.clientSearch.loading = false;
+      createModal.clientSearch.results = [];
+      render({
+        focusSelector: "[data-field='clienteSearch']",
+      });
+      return true;
+    }
+
+    createModal.clientSearch.loading = true;
+    render({
+      focusSelector: "[data-field='clienteSearch']",
+    });
+
+    clientSearchTimer = setTimeout(() => {
+      void runClientSearch(query);
+    }, SEARCH_DEBOUNCE_MS);
+
+    return true;
+  }
+
+  async function runClientSearch(query = "") {
+    const seq = ++clientSearchSeq;
+
+    try {
+      const results = await searchClients(query);
+
+      if (seq !== clientSearchSeq) return false;
+
+      createModal.clientSearch.loading = false;
+      createModal.clientSearch.error = "";
+      createModal.clientSearch.results = results;
+      createModal.clientSearch.empty = results.length === 0;
+
+      render({
+        focusSelector: "[data-field='clienteSearch']",
+      });
+
+      return true;
+    } catch (searchError) {
+      if (seq !== clientSearchSeq) return false;
+
+      createModal.clientSearch.loading = false;
+      createModal.clientSearch.results = [];
+      createModal.clientSearch.empty = false;
+      createModal.clientSearch.error = safeError(searchError, "No se pudo buscar cliente.");
+
+      render({
+        focusSelector: "[data-field='clienteSearch']",
+      });
+
+      return false;
+    }
+  }
+
+  function selectClient(index = -1) {
+    const item = createModal.clientSearch.results[index];
+
+    if (!item?.id) return false;
+
+    const exists = createModal.selectedClientes.some((client) => {
+      return (
+        client.id === item.id ||
+        client.clienteId === item.clienteId ||
+        (client.userId && client.userId === item.userId)
+      );
+    });
+
+    if (!exists) {
+      createModal.selectedClientes = [
+        ...createModal.selectedClientes,
+        item,
+      ];
+    }
+
+    syncPrimaryClientToForm();
+
+    const nextErrors = { ...createModal.errors };
+    delete nextErrors.clienteId;
+    delete nextErrors.incidenciaId;
+    createModal.errors = nextErrors;
+
+    createModal.clientSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
+    };
+
+    createModal.ticketSearch.query = "";
+    createModal.ticketSearch.error = "";
+    createModal.ticketSearch.results = [];
+    createModal.ticketSearch.empty = false;
+
+    render({
+      focusSelector: "[data-field='ticketSearch']",
+    });
+
+    void loadTicketsForSelectedClients({
+      autoSelectLatest: createModal.selectedTickets.length === 0,
+    });
+
+    return true;
+  }
+
+  function removeClient(index = -1) {
+    if (index < 0) return false;
+
+    createModal.selectedClientes = createModal.selectedClientes.filter((_, currentIndex) => {
+      return currentIndex !== index;
+    });
+
+    syncPrimaryClientToForm();
+
+    if (!createModal.selectedClientes.length) {
+      createModal.selectedTickets = [];
+      createModal.ticketSearch = {
+        query: "",
+        loading: false,
+        error: "",
+        results: [],
+        empty: false,
+      };
+      syncPrimaryTicketToForm();
+
+      render({
+        focusSelector: "[data-field='clienteSearch']",
+      });
+
+      return true;
+    }
+
+    createModal.selectedTickets = createModal.selectedTickets.filter((ticket) => {
+      return ticketBelongsToClients(ticket, createModal.selectedClientes);
+    });
+
+    syncPrimaryTicketToForm();
+
+    render();
+
+    void loadTicketsForSelectedClients({
+      autoSelectLatest: createModal.selectedTickets.length === 0,
+    });
+
+    return true;
+  }
+
+  function makeClientPrimary(index = -1) {
+    if (index <= 0 || index >= createModal.selectedClientes.length) return false;
+
+    const item = createModal.selectedClientes[index];
+
+    createModal.selectedClientes = [
+      item,
+      ...createModal.selectedClientes.filter((_, currentIndex) => currentIndex !== index),
+    ];
+
+    syncPrimaryClientToForm();
+
+    render();
+
+    void loadTicketsForSelectedClients({
+      autoSelectLatest: createModal.selectedTickets.length === 0,
+    });
+
+    return true;
+  }
+
+  function clearClients() {
+    createModal.selectedClientes = [];
+    createModal.selectedTickets = [];
+    createModal.clientSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
+    };
+    createModal.ticketSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
+    };
+
+    syncPrimaryClientToForm();
+    syncPrimaryTicketToForm();
+
+    render({
+      focusSelector: "[data-field='clienteSearch']",
+    });
+
+    return true;
+  }
+
+  function scheduleTicketSearch(value = "") {
+    const query = cleanText(value, "");
+
+    createModal.ticketSearch.query = query;
+    createModal.ticketSearch.error = "";
+    createModal.ticketSearch.empty = false;
+
+    if (ticketSearchTimer) {
+      clearTimeout(ticketSearchTimer);
+      ticketSearchTimer = null;
+    }
+
+    if (!createModal.selectedClientes.length) {
+      createModal.ticketSearch.loading = false;
+      createModal.ticketSearch.results = [];
+      render({
+        focusSelector: "[data-field='ticketSearch']",
+      });
+      return true;
+    }
+
+    createModal.ticketSearch.loading = true;
+    render({
+      focusSelector: "[data-field='ticketSearch']",
+    });
+
+    ticketSearchTimer = setTimeout(() => {
+      void loadTicketsForSelectedClients({
+        query,
+        autoSelectLatest: false,
+      });
+    }, SEARCH_DEBOUNCE_MS);
+
+    return true;
+  }
+
+  async function loadTicketsForSelectedClients({
+    query = createModal.ticketSearch.query,
+    autoSelectLatest = false,
+  } = {}) {
+    if (!createModal.selectedClientes.length) {
+      createModal.ticketSearch.loading = false;
+      createModal.ticketSearch.results = [];
+      createModal.ticketSearch.empty = false;
+      return [];
+    }
+
+    const seq = ++ticketSearchSeq;
+
+    createModal.ticketSearch.loading = true;
+    createModal.ticketSearch.error = "";
+    createModal.ticketSearch.empty = false;
+
+    render({
+      focusSelector: "[data-field='ticketSearch']",
+    });
+
+    try {
+      const results = await searchTickets(query, createModal.selectedClientes);
+
+      if (seq !== ticketSearchSeq) return [];
+
+      createModal.ticketSearch.loading = false;
+      createModal.ticketSearch.error = "";
+      createModal.ticketSearch.results = results;
+      createModal.ticketSearch.empty = results.length === 0;
+
+      if (autoSelectLatest && results[0]?.id && !createModal.selectedTickets.length) {
+        createModal.selectedTickets = [results[0]];
+        syncPrimaryTicketToForm();
+      }
+
+      render({
+        focusSelector: "[data-field='ticketSearch']",
+      });
+
+      return results;
+    } catch (searchError) {
+      if (seq !== ticketSearchSeq) return [];
+
+      createModal.ticketSearch.loading = false;
+      createModal.ticketSearch.results = [];
+      createModal.ticketSearch.empty = false;
+      createModal.ticketSearch.error = safeError(searchError, "No se pudieron cargar incidencias.");
+
+      render({
+        focusSelector: "[data-field='ticketSearch']",
+      });
+
+      return [];
+    }
+  }
+
+  function selectTicket(index = -1) {
+    const item = createModal.ticketSearch.results[index];
+
+    if (!item?.id) return false;
+
+    const exists = createModal.selectedTickets.some((ticket) => {
+      return ticket.id === item.id || ticket.ticketId === item.id || ticket.incidenciaId === item.id;
+    });
+
+    if (!exists) {
+      createModal.selectedTickets = [
+        ...createModal.selectedTickets,
+        item,
+      ];
+    }
+
+    syncPrimaryTicketToForm();
+
+    const nextErrors = { ...createModal.errors };
+    delete nextErrors.incidenciaId;
+    createModal.errors = nextErrors;
+
+    createModal.ticketSearch.query = "";
+
+    render({
+      focusSelector: "[data-field='ticketSearch']",
+    });
+
+    return true;
+  }
+
+  function removeTicket(index = -1) {
+    if (index < 0) return false;
+
+    createModal.selectedTickets = createModal.selectedTickets.filter((_, currentIndex) => {
+      return currentIndex !== index;
+    });
+
+    syncPrimaryTicketToForm();
+
+    render({
+      focusSelector: "[data-field='ticketSearch']",
+    });
+
+    return true;
+  }
+
+  function makeTicketPrimary(index = -1) {
+    if (index <= 0 || index >= createModal.selectedTickets.length) return false;
+
+    const item = createModal.selectedTickets[index];
+
+    createModal.selectedTickets = [
+      item,
+      ...createModal.selectedTickets.filter((_, currentIndex) => currentIndex !== index),
+    ];
+
+    syncPrimaryTicketToForm();
+
+    render({
+      focusSelector: "[data-field='ticketSearch']",
+    });
+
+    return true;
+  }
+
+  function clearTickets() {
+    createModal.selectedTickets = [];
+    createModal.ticketSearch.query = "";
+    syncPrimaryTicketToForm();
+
+    render({
+      focusSelector: "[data-field='ticketSearch']",
+    });
+
+    return true;
+  }
+
+  function buildFacturaPayload() {
+    syncPrimaryClientToForm();
+    syncPrimaryTicketToForm();
+
+    const form = createModal.form;
+    const breakdown = getFacturaCreateBreakdown(form);
+
+    const primaryCliente = createModal.selectedClientes[0] || null;
+    const primaryTicket = createModal.selectedTickets[0] || null;
+
+    const clienteIds = selectedClienteIds(createModal.selectedClientes);
+    const userIds = selectedUserIds(createModal.selectedClientes);
+
+    const ticketIds = [
+      ...new Set(
+        createModal.selectedTickets
+          .map((ticket) => cleanText(first(ticket.ticketId, ticket.incidenciaId, ticket.id), ""))
+          .filter(Boolean)
+      ),
+    ];
+
+    const clienteId = cleanText(first(primaryCliente?.clienteId, primaryCliente?.id, form.clienteId), "");
+    const userId = cleanText(first(primaryCliente?.userId, form.clienteUserId), "");
+    const clienteNombre = cleanText(first(primaryCliente?.name, primaryCliente?.displayName, form.clienteNombre), "");
+    const clienteEmail = cleanText(first(primaryCliente?.email, form.clienteEmail), "").toLowerCase();
+    const clienteAvatar = cleanText(first(primaryCliente?.avatarUrl, primaryCliente?.avatar, form.clienteAvatar), "");
+
+    const ticketId = cleanText(first(primaryTicket?.ticketId, primaryTicket?.incidenciaId, primaryTicket?.id, form.ticketId, form.incidenciaId), "");
+    const incidenciaSubject = cleanText(first(primaryTicket?.subject, primaryTicket?.asunto, form.incidenciaSubject, ticketId), ticketId);
+
+    return {
+      ...form,
+
+      clienteId,
+      userId,
+      clienteUserId: userId,
+      clienteNombre,
+      clienteEmail,
+      clienteAvatar,
+
+      clienteIds,
+      userIds,
+      clientes: createModal.selectedClientes,
+
+      ticketId,
+      incidenciaId: ticketId,
+      relatedTicketId: ticketId,
+      relatedIncidentId: ticketId,
+      incidenciaSubject,
+      ticketSubject: incidenciaSubject,
+
+      ticketIds,
+      incidenciaIds: ticketIds,
+      tickets: createModal.selectedTickets,
+      incidencias: createModal.selectedTickets,
+
+      total: breakdown.totalFactura,
+      amount: breakdown.totalFactura,
+      importe: breakdown.totalFactura,
+      totalFactura: breakdown.totalFactura,
+
+      subtotal: breakdown.base,
+      baseImponible: breakdown.base,
+
+      iva: breakdown.ivaTotal,
+      ivaTotal: breakdown.ivaTotal,
+      irpf: Math.abs(breakdown.irpfTotal),
+      irpfTotal: breakdown.irpfTotal,
+
+      currency: "EUR",
+      moneda: "EUR",
+
+      lineas: [
+        {
+          id: "linea-1",
+          concepto: form.concepto,
+          descripcion: form.descripcion,
+          cantidad: breakdown.cantidad,
+          precioUnitario: breakdown.precioUnitario,
+          subtotal: breakdown.base,
+          base: breakdown.base,
+          baseImponible: breakdown.base,
+          total: breakdown.base,
+          importe: breakdown.base,
+          iva: {
+            porcentaje: breakdown.ivaRate,
+            importe: breakdown.ivaTotal,
+          },
+          irpf: {
+            porcentaje: breakdown.irpfRate,
+            importe: breakdown.irpfTotal,
+          },
+          totalConImpuestos: breakdown.totalFactura,
+        },
+      ],
+
+      sendEmail: parseBoolean(form.sendEmail, true),
+    };
+  }
+
+  async function submitCreate(formNode = null) {
+    if (createModal.submitting || !isAdmin()) return false;
+
+    if (formNode) {
+      createModal.form = {
+        ...createModal.form,
+        fechaServicio: readField(formNode, "fechaServicio"),
+        formaPago: readField(formNode, "formaPago"),
+        estadoPago: readField(formNode, "estadoPago"),
+        sendEmail: readField(formNode, "sendEmail"),
+        concepto: readField(formNode, "concepto"),
+        descripcion: readField(formNode, "descripcion"),
+        cantidad: readField(formNode, "cantidad"),
+        precioUnitario: readField(formNode, "precioUnitario"),
+      };
+    }
+
+    const validation = validateFacturaCreateForm({
+      form: createModal.form,
+      selectedClientes: createModal.selectedClientes,
+      selectedTickets: createModal.selectedTickets,
+    });
+
+    createModal.errors = validation.errors;
+    createModal.form = validation.form;
+
+    if (!validation.valid) {
+      render({
+        focusSelector:
+          createModal.errors.clienteId
+            ? "[data-field='clienteSearch']"
+            : createModal.errors.incidenciaId
+              ? "[data-field='ticketSearch']"
+              : createModal.errors.concepto
+                ? "[data-field='concepto']"
+                : createModal.errors.descripcion
+                  ? "[data-field='descripcion']"
+                  : "",
+      });
+
+      return false;
+    }
+
+    createModal.submitting = true;
+    createModal.serverError = "";
+    createModal.successMessage = "";
+    createModal.createdFacturaId = "";
+
+    render();
+
+    try {
+      const created = await createFactura(buildFacturaPayload());
+
+      if (created) {
+        items = upsertFactura(items, created);
+        total = Math.max(total, items.length);
+      }
+
+      createModal.submitting = false;
+      createModal.successMessage = "Factura creada.";
+      createModal.createdFacturaId = getFacturaId(created);
+      createModal.open = false;
+      createModal.errors = {};
+      createModal.form = getFacturaCreateFormDefaults();
+      createModal.selectedClientes = [];
+      createModal.selectedTickets = [];
+
+      render();
+
+      return true;
+    } catch (createError) {
+      createModal.submitting = false;
+      createModal.serverError = safeError(createError, "No se pudo crear la factura.");
+
+      render({
+        focusSelector: "[data-field='concepto']",
+      });
+
+      return false;
+    }
+  }
+
+  function closeDetailModal() {
+    detailModal.open = false;
+    detailModal.detailOpen = false;
+    detailModal.detailLoading = false;
+    detailModal.factura = null;
+    detailModal.sendingFacturaId = "";
+    detailModal.viewingFacturaId = "";
+    detailModal.downloadingFacturaId = "";
+
+    render();
+
+    return true;
+  }
+
+  async function openFactura(facturaId = "") {
+    const id = cleanText(facturaId, "");
+
+    if (!id) return false;
+
+    openingFacturaId = id;
+
+    detailModal.open = true;
+    detailModal.detailOpen = true;
+    detailModal.detailLoading = true;
+    detailModal.factura = items.find((item) => getFacturaId(item) === id) || null;
+
+    render({
+      focusSelector: "[data-facturas-detail-modal='true']",
+      focusEnd: false,
+    });
+
+    try {
+      const detail = await getFacturaById(id);
+
+      if (detail) {
+        detailModal.factura = detail;
+        items = upsertFactura(items, detail);
+      }
+
+      detailModal.detailLoading = false;
+      openingFacturaId = "";
+
+      render({
+        focusSelector: "[data-facturas-detail-modal='true']",
+        focusEnd: false,
+      });
+
+      return true;
+    } catch (detailError) {
+      detailModal.detailLoading = false;
+      openingFacturaId = "";
+      error = safeError(detailError, "No se pudo abrir el detalle de factura.");
+
+      render();
+
+      return false;
+    }
+  }
+
+  async function viewPdf(facturaId = "") {
+    const id = cleanText(facturaId, "");
+
+    if (!id) return false;
+
+    viewingFacturaId = id;
+    detailModal.viewingFacturaId = id;
+
+    render();
+
+    try {
+      const result = await viewFacturaPdfRequest(id);
+
+      let url = cleanText(first(result?.url, result?.viewUrl, result?.objectUrl), "");
+
+      if (!url && result?.blob && isBrowser()) {
+        url = URL.createObjectURL(result.blob);
+        objectUrls.add(url);
+      }
+
+      if (url) {
+        openUrl(url);
+      }
+
+      viewingFacturaId = "";
+      detailModal.viewingFacturaId = "";
+      render();
+
+      return true;
+    } catch (pdfError) {
+      viewingFacturaId = "";
+      detailModal.viewingFacturaId = "";
+      error = safeError(pdfError, "No se pudo abrir el PDF.");
+
+      render();
+
+      return false;
+    }
+  }
+
+  async function downloadPdf(facturaId = "") {
+    const id = cleanText(facturaId, "");
+
+    if (!id) return false;
+
+    downloadingFacturaId = id;
+    detailModal.downloadingFacturaId = id;
+
+    render();
+
+    try {
+      await downloadFacturaPdfRequest(id, {
+        autoDownload: true,
+        filename: `${id}.pdf`,
+      });
+
+      downloadingFacturaId = "";
+      detailModal.downloadingFacturaId = "";
+      render();
+
+      return true;
+    } catch (downloadError) {
+      downloadingFacturaId = "";
+      detailModal.downloadingFacturaId = "";
+      error = safeError(downloadError, "No se pudo descargar la factura.");
+
+      render();
+
+      return false;
+    }
+  }
+
+  async function sendFacturaToClient(facturaId = "") {
+    const id = cleanText(facturaId, "");
+
+    if (!id) return false;
+
+    sendingFacturaId = id;
+    detailModal.sendingFacturaId = id;
+
+    render();
+
+    try {
+      const result = await sendFactura(id);
+
+      if (isObject(result) && (result.id || result.facturaId || result.invoiceId)) {
+        items = upsertFactura(items, result);
+
+        if (detailModal.factura && getFacturaId(detailModal.factura) === id) {
+          detailModal.factura = result;
+        }
+      }
+
+      sendingFacturaId = "";
+      detailModal.sendingFacturaId = "";
+      render();
+
+      return true;
+    } catch (sendError) {
+      sendingFacturaId = "";
+      detailModal.sendingFacturaId = "";
+      error = safeError(sendError, "No se pudo enviar la factura.");
+
+      render();
+
+      return false;
+    }
+  }
+
+  async function openIncidencia(ticketId = "") {
+    const id = cleanText(ticketId, "");
+
+    if (!id) return false;
+
+    const Router = getRouter(context);
+    const route = ROUTES.incidencias || "/incidencias";
+
+    if (isFunction(Router?.navigate)) {
+      await Router.navigate(route, {
+        source: "facturas.open-incidencia",
+        ticketId: id,
+      });
+
+      return true;
+    }
+
+    return false;
+  }
+
+  async function handleAction(action = "", node = null) {
+    const type = cleanText(action, "");
+
+    if (!type) return false;
+
+    if (type === FACTURAS_ACTIONS.REFRESH) return refresh();
+    if (type === FACTURAS_ACTIONS.EXPORT) return exportCsv(items);
+    if (type === FACTURAS_ACTIONS.CREATE_OPEN) return openCreateModal();
+
+    if (type === FACTURAS_ACTIONS.FILTER) return setFilter(node?.dataset?.filter || "all");
+    if (type === FACTURAS_ACTIONS.CLEAR_FILTERS) return clearFilters();
+    if (type === FACTURAS_ACTIONS.CLEAR_SEARCH) return setSearch("");
+    if (type === FACTURAS_ACTIONS.SORT) return setSort(node?.dataset?.sort || node?.dataset?.sortMode || "date_desc");
+    if (type === FACTURAS_ACTIONS.PREV_PAGE || type === FACTURAS_ACTIONS.NEXT_PAGE) return setPage(node?.dataset?.page || DEFAULT_PAGE);
+
+    if (type === FACTURAS_ACTIONS.OPEN_FACTURA || type === FACTURA_MODAL_ACTIONS.CLOSE) {
+      if (type === FACTURA_MODAL_ACTIONS.CLOSE) return closeDetailModal();
+      return openFactura(node?.dataset?.facturaId || "");
+    }
+
+    if (type === FACTURAS_ACTIONS.VIEW_PDF || type === FACTURA_MODAL_ACTIONS.VIEW_PDF) {
+      return viewPdf(node?.dataset?.facturaId || "");
+    }
+
+    if (type === FACTURAS_ACTIONS.DOWNLOAD_PDF || type === FACTURA_MODAL_ACTIONS.DOWNLOAD_PDF) {
+      return downloadPdf(node?.dataset?.facturaId || "");
+    }
+
+    if (type === FACTURAS_ACTIONS.SEND_FACTURA || type === FACTURA_MODAL_ACTIONS.SEND) {
+      return sendFacturaToClient(node?.dataset?.facturaId || "");
+    }
+
+    if (type === FACTURAS_ACTIONS.OPEN_INCIDENCIA || type === FACTURA_MODAL_ACTIONS.OPEN_INCIDENCIA) {
+      return openIncidencia(node?.dataset?.ticketId || node?.dataset?.incidenciaId || "");
+    }
+
+    if (type === FACTURA_CREATE_ACTIONS.CLOSE) return closeCreateModal();
+    if (type === FACTURA_CREATE_ACTIONS.SUBMIT) return submitCreate(node?.closest?.("form"));
+
+    if (type === FACTURA_CREATE_ACTIONS.CLIENT_SELECT) return selectClient(clientIndexFromNode(node));
+    if (type === FACTURA_CREATE_ACTIONS.CLIENT_REMOVE) return removeClient(clientIndexFromNode(node));
+    if (type === FACTURA_CREATE_ACTIONS.CLIENT_PRIMARY) return makeClientPrimary(clientIndexFromNode(node));
+    if (type === FACTURA_CREATE_ACTIONS.CLIENT_CLEAR) return clearClients();
+
+    if (type === FACTURA_CREATE_ACTIONS.TICKET_SELECT) return selectTicket(ticketIndexFromNode(node));
+    if (type === FACTURA_CREATE_ACTIONS.TICKET_REMOVE) return removeTicket(ticketIndexFromNode(node));
+    if (type === FACTURA_CREATE_ACTIONS.TICKET_PRIMARY) return makeTicketPrimary(ticketIndexFromNode(node));
+    if (type === FACTURA_CREATE_ACTIONS.TICKET_CLEAR) return clearTickets();
+    if (type === FACTURA_CREATE_ACTIONS.TICKET_REFRESH) {
+      return loadTicketsForSelectedClients({
+        autoSelectLatest: createModal.selectedTickets.length === 0,
+      });
+    }
+
+    return false;
+  }
+
+  function actionFrom(node = null) {
+    return cleanText(
+      node?.dataset?.facturasAction ||
+        node?.dataset?.facturaCreateAction ||
+        node?.dataset?.action ||
+        "",
+      ""
+    );
+  }
+
+  function onClick(event) {
+    const target = event.target?.nodeType === 3
+      ? event.target.parentElement
+      : event.target;
+
+    if (!target?.closest) return;
+
+    const actionNode = target.closest("[data-facturas-action], [data-factura-create-action], [data-action]");
+
+    if (actionNode && host?.contains(actionNode)) {
+      const action = actionFrom(actionNode);
+
+      if (action) {
+        event.preventDefault();
+        event.stopPropagation();
+        void handleAction(action, actionNode);
+        return;
+      }
+    }
+
+    const row = target.closest("[data-facturas-row='true']");
+
+    if (row && host?.contains(row)) {
+      event.preventDefault();
+      void openFactura(row.dataset.facturaId || "");
+      return;
+    }
+
+    const createOverlay = target.closest("[data-facturas-create-modal-overlay='true']");
+    const createPanel = target.closest("[data-facturas-create-modal-panel='true']");
+
+    if (createOverlay && !createPanel && target === createOverlay) {
+      closeCreateModal();
+      return;
+    }
+
+    const detailOverlay = target.closest("[data-facturas-detail-overlay='true']");
+    const detailPanel = target.closest("[data-facturas-detail-modal='true'], [data-role='facturas-detail-modal']");
+
+    if (detailOverlay && !detailPanel && target === detailOverlay) {
+      closeDetailModal();
+    }
+  }
+
+  function onInput(event) {
+    const target = event.target;
+    const field = cleanText(target?.dataset?.field || "", "");
+
+    if (!field) return;
+
+    if (field === "search") {
+      setSearch(target.value || "");
+      return;
+    }
+
+    if (field === "clienteSearch") {
+      scheduleClientSearch(target.value || "");
+      return;
+    }
+
+    if (field === "ticketSearch") {
+      scheduleTicketSearch(target.value || "");
+      return;
+    }
+
+    if (createModal.open) {
+      patchCreateFormFromField(target);
+    }
+  }
+
+  function onChange(event) {
+    const target = event.target;
+    const field = cleanText(target?.dataset?.field || target?.name || "", "");
+
+    if (!field) return;
+
+    if (createModal.open) {
+      patchCreateFormFromField(target);
+    }
+  }
+
+  function onSubmit(event) {
+    const form = event.target?.closest?.("form");
+
+    if (!form || !host?.contains(form)) return;
+
+    if (form.matches("#facturas-create-form, [data-facturas-create-form='true']")) {
+      event.preventDefault();
+      void submitCreate(form);
+    }
+  }
+
+  function onKeydown(event) {
+    if (event.key === "Escape") {
+      if (detailModal.open) {
+        event.preventDefault();
+        closeDetailModal();
+        return;
+      }
+
+      if (createModal.open) {
+        event.preventDefault();
+        closeCreateModal();
+        return;
+      }
+    }
+
+    if (event.key !== "Enter" && event.key !== " ") return;
+
+    const row = event.target?.closest?.("[data-facturas-row='true']");
+
+    if (!row || !host?.contains(row)) return;
+
+    event.preventDefault();
+    void openFactura(row.dataset.facturaId || "");
+  }
+
+  function bind() {
+    host?.addEventListener?.("click", onClick);
+    host?.addEventListener?.("input", onInput);
+    host?.addEventListener?.("change", onChange);
+    host?.addEventListener?.("submit", onSubmit);
+    host?.addEventListener?.("keydown", onKeydown);
+  }
+
+  function unbind() {
+    host?.removeEventListener?.("click", onClick);
+    host?.removeEventListener?.("input", onInput);
+    host?.removeEventListener?.("change", onChange);
+    host?.removeEventListener?.("submit", onSubmit);
+    host?.removeEventListener?.("keydown", onKeydown);
+  }
+
+  return {
+    version: FACTURAS_VIEW_VERSION,
+
+    async mount() {
+      bind();
+
+      loading = true;
+      renderLoading();
+
+      await load({
+        silent: false,
+      });
+
+      return this;
+    },
+
+    destroy() {
+      destroyed = true;
+
+      clearTimers();
+      unbind();
+      revokeObjectUrls();
+
+      createModal.open = false;
+      detailModal.open = false;
+      detailModal.detailOpen = false;
+
+      syncBodyModalClass(false);
+
+      if (host) {
+        host.replaceChildren();
+      }
+
+      return true;
+    },
+
+    unmount() {
+      return this.destroy();
+    },
+
+    cleanup() {
+      return this.destroy();
+    },
+
+    refresh,
+
+    getSnapshot() {
+      return {
+        version: FACTURAS_VIEW_VERSION,
+
+        destroyed,
+        loading,
+        refreshing,
+        creating,
+
+        total,
+        count: items.length,
+
+        page,
+        pageSize,
+        filter,
+        searchLength: search.length,
+        sort,
+
+        createModalOpen: createModal.open,
+        detailModalOpen: detailModal.open,
+
+        openingFacturaId: openingFacturaId ? "***" : "",
+        viewingFacturaId: viewingFacturaId ? "***" : "",
+        downloadingFacturaId: downloadingFacturaId ? "***" : "",
+        sendingFacturaId: sendingFacturaId ? "***" : "",
+
+        role: getCurrentRole(),
+        admin: isAdmin(),
+
+        stats: computeFacturasStats(items),
+
+        error: redact(error),
+      };
+    },
+  };
 }
 
 /* =========================================================
-   READY
+   VIEW ENTRY
 ========================================================= */
 
-export const bridge = registerGlobalBridge();
-export const ready = true;
+export async function FacturasView(host = null, context = {}) {
+  const controller = createFacturasController(host, context);
+  return controller.mount();
+}
+
+export const FacturasIndex = FacturasView;
+
+export default FacturasView;

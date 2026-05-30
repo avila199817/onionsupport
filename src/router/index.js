@@ -3,2215 +3,1481 @@
    Archivo: /src/router/index.js
 
    Responsabilidad:
-   - Orquestador mínimo de navegación SPA.
-   - Resolver rutas públicas y privadas.
-   - Resolver rutas privadas con prefijo /@{slug}.
-   - Canonicalizar rutas privadas sin slug a /@{slug}/ruta.
-   - Validar que /@{slug} coincide con el usuario real.
-   - Esperar restore Auth si ya está en curso antes de decidir guard.
-   - Consultar guard.
+   - Router SPA mínimo.
+   - Resolver rutas públicas/privadas/admin.
+   - Resolver /@{slug} y /@{slug}/{ruta}.
+   - Validar slug real del usuario autenticado.
    - Renderizar vista.
    - Actualizar history.
    - Actualizar estado de ruta.
-   - Actualizar shell.
-   - Sincronizar chrome registrado tras render sin bloquear la transición visual.
-   - Ruta privada sin sesión válida -> /login.
-   - Login con sesión válida -> /@{user.slug}.
-   - Rutas admin definidas en core/config.js requieren rol admin.
-   - Home interna: /
-   - Home visible: /@{user.slug}
-   - Navegación latest-wins: no serializar cambios de vista en cola rígida.
-   - Sin Auth estático.
-   - Sin iniciar restore.
-   - Sin refresh.
-   - Sin fetch.
-   - Sin storage.
-   - Sin Toast.
-   - Sin alias /home.
-   - Sin rutas inventadas.
-   - Sin /403 ni /404 como rutas.
-   - Sin 2FA/MFA/OTP.
+   - Actualizar shell/chrome básico.
+   - Sin guards.js, history.js, render.js, shell.js,
+     storage, fetch, Toast, 2FA/MFA/OTP ni rutas inventadas.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
+import { Auth } from "../features/auth/index.js";
 
 import {
-  USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
-  canonicalRoutePath as configCanonicalRoutePath,
-  getUserScopedRouteInfo as getConfigUserScopedRouteInfo,
-  isAdminRoute as isConfigAdminRoute,
-  isBlockedRoutePath as isConfigBlockedRoutePath,
-  normalizeRoutePath as configNormalizeRoutePath,
-  normalizeUserSlug as configNormalizeUserSlug,
-  routePathFromUrlLike as configRoutePathFromUrlLike,
+  ROUTES,
+  USER_HOME_PREFIX,
+  buildUserHomeRoute,
+  buildUserScopedRoute,
+  getUserScopedRouteInfo,
+  isBlockedRoutePath,
+  normalizeRoutePath,
+  normalizeUserSlug,
+  routePathFromUrlLike,
 } from "../core/config.js";
 
 import * as Routes from "./routes.js";
-import * as RouteGuards from "./guards.js";
-import * as History from "./history.js";
-import * as Render from "./render.js";
-import * as Shell from "./shell.js";
 
-export const ROUTER_VERSION = "router.index.v16";
+export const ROUTER_VERSION = "router.minimal.v1";
 
-const ROUTE_PATHS = Routes.ROUTE_PATHS || {
-  HOME: "/",
-  LOGIN: "/login",
-};
+const HOME_PATH = ROUTES.home || "/";
+const LOGIN_PATH = ROUTES.login || "/login";
+const APP_TITLE = "Onion Support";
 
-const getImmutableRoutes = Routes.getImmutableRoutes || (() => []);
+let initialized = false;
+let bound = false;
+let activeView = null;
+let renderSeq = 0;
+let renderPromise = Promise.resolve();
 
-export const Router = (() => {
-  "use strict";
+const disposers = [];
 
-  const SOURCE = "router";
+/* =========================================================
+   BASICS
+========================================================= */
 
-  const HOME_PATH = "/";
-  const LOGIN_PATH = ROUTE_PATHS.LOGIN || "/login";
-  const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || Routes.USER_HOME_PREFIX || "/@";
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
-  const INVALID_USER_STATUSES = new Set([
-    "suspended",
-    "desactivado",
-  ]);
+function isFunction(value) {
+  return typeof value === "function";
+}
 
-  const routes = getImmutableRoutes();
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
-  let initialized = false;
-  let bound = false;
-  let activeView = null;
-  let renderSeq = 0;
-  let renderPromise = Promise.resolve();
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  const disposers = [];
+  return output || fallback;
+}
 
-  /* =======================================================
-     BASICS
-  ======================================================= */
+function redact(value = "") {
+  return cleanText(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
 
-  function isBrowser() {
-    return typeof window !== "undefined" && typeof document !== "undefined";
+function getRoutes() {
+  return isFunction(Routes.getImmutableRoutes)
+    ? Routes.getImmutableRoutes()
+    : [];
+}
+
+function readState() {
+  try {
+    return isObject(AppCore?.getState)
+      ? AppCore.getState()
+      : AppCore?.state || {};
+  } catch {
+    return AppCore?.state || {};
   }
+}
 
-  function isFunction(value) {
-    return typeof value === "function";
-  }
-
-  function isObject(value) {
-    return Boolean(value && typeof value === "object" && !Array.isArray(value));
-  }
-
-  function cleanText(value = "", fallback = "") {
-    const output = String(value ?? "")
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    return output || fallback;
-  }
-
-  function readState() {
-    return isObject(AppCore?.state) ? AppCore.state : {};
-  }
-
-  function safeCall(fn = null, ...args) {
-    try {
-      return isFunction(fn) ? fn(...args) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function redact(value = "") {
-    return cleanText(value, "")
-      .replace(
-        /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-        "$1***"
-      )
-      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-      .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-  }
-
-  function safeRouteParams(params = {}) {
-    if (!isObject(params)) return {};
-
-    return Object.fromEntries(
-      Object.entries(params).map(([key, value]) => [
-        key,
-        typeof value === "string" ? redact(value) : value,
-      ])
-    );
-  }
-
-  function isCurrentRenderSeq(seq = 0) {
-    return Boolean(seq && seq === renderSeq);
-  }
-
-  function getTimerHost() {
-    if (typeof window !== "undefined") return window;
-    return globalThis;
-  }
-
-  function deferAfterPaint(callback = null) {
-    if (!isFunction(callback)) return false;
-
-    const host = getTimerHost();
-
-    const run = () => {
-      try {
-        callback();
-      } catch {
-        // noop
-      }
-    };
-
-    try {
-      if (isFunction(host.requestAnimationFrame)) {
-        host.requestAnimationFrame(() => {
-          host.requestAnimationFrame(run);
-        });
-
-        return true;
-      }
-    } catch {
-      // fallback abajo
-    }
-
-    try {
-      host.setTimeout(run, 0);
+function writeState(patch = {}) {
+  try {
+    if (isFunction(AppCore?.setState)) {
+      AppCore.setState(patch, {
+        source: "router",
+      });
       return true;
-    } catch {
-      return false;
     }
+  } catch {
+    // fallback abajo
   }
 
-  /* =======================================================
-     PATHS
-  ======================================================= */
-
-  function isHashRouterPath(value = "") {
-    const raw = cleanText(value, "");
-    return raw.startsWith("#/") || raw.startsWith("#!");
+  try {
+    Object.assign(AppCore.state || {}, patch);
+    return true;
+  } catch {
+    return false;
   }
+}
 
-  function normalizeHashPath(value = "") {
+/* =========================================================
+   PATHS
+========================================================= */
+
+function routePathFromInput(value = HOME_PATH) {
+  try {
+    return routePathFromUrlLike(value) || HOME_PATH;
+  } catch {
     const raw = cleanText(value, HOME_PATH);
 
-    if (raw.startsWith("#!")) {
-      return raw.replace(/^#!\/?/, "/") || HOME_PATH;
-    }
-
-    if (raw.startsWith("#/")) {
-      return raw.slice(1) || HOME_PATH;
-    }
-
-    return raw || HOME_PATH;
-  }
-
-  function normalizeSearch(search = "") {
-    const value = cleanText(search, "");
-
-    if (!value || value === "?") return "";
-
-    return value.startsWith("?")
-      ? value
-      : `?${value.replace(/^\?+/, "")}`;
-  }
-
-  function normalizeHash(hash = "") {
-    const value = cleanText(hash, "");
-
-    if (!value || value === "#") return "";
-
-    return value.startsWith("#")
-      ? value
-      : `#${value.replace(/^#+/, "")}`;
-  }
-
-  function pathFromInput(path = HOME_PATH) {
-    try {
-      return configRoutePathFromUrlLike(path) || HOME_PATH;
-    } catch {
-      const raw = cleanText(path, HOME_PATH);
-
-      if (isHashRouterPath(raw)) {
-        return normalizeHashPath(raw);
-      }
-
-      if (!raw || raw.startsWith("//")) {
-        return HOME_PATH;
-      }
-
-      if (/^https?:\/\//i.test(raw)) {
-        try {
-          const base = isBrowser() ? window.location.origin : "http://localhost";
-          const url = new URL(raw, base);
-
-          if (url.origin !== base) {
-            return HOME_PATH;
-          }
-
-          if (isHashRouterPath(url.hash)) {
-            return normalizeHashPath(url.hash);
-          }
-
-          return `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
-        } catch {
-          return HOME_PATH;
-        }
-      }
-
-      if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-        return HOME_PATH;
-      }
-
-      return raw || HOME_PATH;
-    }
-  }
-
-  function normalizePathname(pathname = HOME_PATH) {
-    try {
-      return configNormalizeRoutePath(pathname) || HOME_PATH;
-    } catch {
-      let value = cleanText(pathname, HOME_PATH).replace(/\\/g, "/");
-
-      if (!value.startsWith("/")) {
-        value = `/${value}`;
-      }
-
-      value = value.replace(/\/{2,}/g, "/");
-
-      if (value.length > 1) {
-        value = value.replace(/\/+$/g, "") || HOME_PATH;
-      }
-
-      return value || HOME_PATH;
-    }
-  }
-
-  function splitPath(path = HOME_PATH) {
-    let raw = pathFromInput(path);
-    let pathname = raw;
-    let search = "";
-    let hash = "";
-
-    const hashIndex = pathname.indexOf("#");
-
-    if (hashIndex >= 0) {
-      hash = pathname.slice(hashIndex);
-      pathname = pathname.slice(0, hashIndex) || HOME_PATH;
-    }
-
-    const searchIndex = pathname.indexOf("?");
-
-    if (searchIndex >= 0) {
-      search = pathname.slice(searchIndex);
-      pathname = pathname.slice(0, searchIndex) || HOME_PATH;
-    }
-
-    return {
-      pathname: normalizePathname(pathname),
-      search: normalizeSearch(search),
-      hash: normalizeHash(hash),
-    };
-  }
-
-  function publicPathname(path = HOME_PATH) {
-    return splitPath(path || HOME_PATH).pathname || HOME_PATH;
-  }
-
-  function joinPath(parts = {}) {
-    return [
-      normalizePathname(parts.pathname || HOME_PATH),
-      normalizeSearch(parts.search || ""),
-      normalizeHash(parts.hash || ""),
-    ].join("");
-  }
-
-  function normalizePublicPath(path = HOME_PATH) {
-    return joinPath(splitPath(path));
-  }
-
-  function userScopedPathIsRoutable(restPath = HOME_PATH) {
-    const clean = normalizePathname(restPath || HOME_PATH);
-
-    return routes.some((route) => {
-      if (!route || route.public === true) return false;
-      return normalizePathname(route.path || HOME_PATH) === clean;
-    });
-  }
-
-  function getUserPathInfo(path = HOME_PATH) {
-    const pathname = splitPath(path).pathname || HOME_PATH;
-
-    try {
-      const info = getConfigUserScopedRouteInfo(path);
-
-      if (isObject(info)) {
-        const restPath = normalizePathname(
-          info.restPath ||
-            info.canonicalPath ||
-            pathname
-        );
-
-        const configuredLookupPath = normalizePathname(
-          info.canonicalPath ||
-            info.lookupPath ||
-            restPath
-        );
-
-        const routable = Object.prototype.hasOwnProperty.call(info, "routable")
-          ? Boolean(info.routable)
-          : userScopedPathIsRoutable(restPath);
-
-        return {
-          scoped: Boolean(info.scoped),
-          routable,
-          slug: normalizeUserSlug(info.slug || ""),
-          restPath,
-          lookupPath: routable ? configuredLookupPath : pathname,
-          isHome: Boolean(info.home && routable),
-        };
-      }
-    } catch {
-      // fallback abajo
-    }
-
-    if (!pathname.startsWith(USER_HOME_PREFIX)) {
-      return {
-        scoped: false,
-        routable: false,
-        slug: "",
-        restPath: pathname,
-        lookupPath: pathname,
-        isHome: false,
-      };
-    }
-
-    const rest = pathname.slice(USER_HOME_PREFIX.length);
-    const [slugSegment = "", ...restSegments] = rest.split("/");
-    const slug = normalizeUserSlug(slugSegment);
-
-    if (!slug) {
-      return {
-        scoped: false,
-        routable: false,
-        slug: "",
-        restPath: pathname,
-        lookupPath: pathname,
-        isHome: false,
-      };
-    }
-
-    const restPath = restSegments.length
-      ? normalizePathname(`/${restSegments.join("/")}`)
-      : HOME_PATH;
-
-    const routable = userScopedPathIsRoutable(restPath);
-
-    return {
-      scoped: true,
-      routable,
-      slug,
-      restPath,
-      lookupPath: routable ? restPath : pathname,
-      isHome: Boolean(routable && restPath === HOME_PATH),
-    };
-  }
-
-  function normalizeCanonicalPath(path = HOME_PATH) {
-    const pathname = splitPath(path).pathname || HOME_PATH;
-    const scoped = getUserPathInfo(pathname);
-
-    if (scoped.scoped && !scoped.routable) {
-      return pathname;
-    }
-
-    try {
-      return normalizePathname(
-        configCanonicalRoutePath(path) ||
-          (scoped.scoped && scoped.routable ? scoped.lookupPath : pathname) ||
-          HOME_PATH
-      );
-    } catch {
-      return scoped.scoped && scoped.routable ? scoped.lookupPath : pathname;
-    }
-  }
-
-  function canonicalAuthPath(path = HOME_PATH) {
-    return normalizeCanonicalPath(path);
-  }
-
-  function withSearchHashFrom(sourcePath = HOME_PATH, targetPathname = HOME_PATH) {
-    const parts = splitPath(sourcePath);
-
-    return joinPath({
-      pathname: targetPathname,
-      search: parts.search,
-      hash: parts.hash,
-    });
-  }
-
-  function browserPath() {
-    if (!isBrowser()) return HOME_PATH;
-
-    try {
-      const hash = window.location.hash || "";
-
-      if (isHashRouterPath(hash)) {
-        return normalizePublicPath(hash);
-      }
-
-      return normalizePublicPath(
-        `${window.location.pathname || HOME_PATH}${window.location.search || ""}${hash}`
-      );
-    } catch {
-      return HOME_PATH;
-    }
-  }
-
-  function currentPublicPath() {
-    return normalizePublicPath(readState().publicPath || browserPath());
-  }
-
-  function currentCanonicalPath() {
-    return normalizeCanonicalPath(
-      readState().canonicalPath ||
-        readState().route ||
-        currentPublicPath()
-    );
-  }
-
-  function hasSensitiveQuery(value = "") {
-    return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
-      String(value || "")
-    );
-  }
-
-  function isUnsafeHref(href = "") {
-    const value = cleanText(href, "");
-
-    return Boolean(
-      !value ||
-        value.startsWith("//") ||
-        (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^https?:\/\//i.test(value)) ||
-        /[\r\n\t\\]/.test(value)
-    );
-  }
-
-  function isExternalHref(href = "") {
-    if (!isBrowser()) return false;
-
-    const value = cleanText(href, "");
-
-    if (!/^https?:\/\//i.test(value)) return false;
-
-    try {
-      return new URL(value, window.location.origin).origin !== window.location.origin;
-    } catch {
-      return true;
-    }
-  }
-
-  function isHashOnlyHref(href = "") {
-    const value = cleanText(href, "");
-    return value.startsWith("#") && !isHashRouterPath(value);
-  }
-
-  function isBlockedRouterPath(path = HOME_PATH) {
-    const raw = cleanText(path, "");
-
-    if (!raw) return false;
-
-    try {
-      if (isConfigBlockedRoutePath(raw) === true) return true;
-    } catch {
-      // noop
-    }
-
-    const parts = splitPath(raw);
-
-    try {
-      if (isConfigBlockedRoutePath(parts.pathname) === true) return true;
-    } catch {
-      // noop
-    }
-
-    const scoped = getUserPathInfo(parts.pathname);
-
-    if (scoped.scoped && scoped.restPath) {
+    if (!raw) return HOME_PATH;
+    if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || HOME_PATH;
+    if (raw.startsWith("#/")) return raw.slice(1) || HOME_PATH;
+    if (raw.startsWith("//")) return HOME_PATH;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^https?:\/\//i.test(raw)) return HOME_PATH;
+    if (/[\r\n\t\\]/.test(raw)) return HOME_PATH;
+
+    if (/^https?:\/\//i.test(raw) && isBrowser()) {
       try {
-        if (isConfigBlockedRoutePath(scoped.restPath) === true) return true;
+        const url = new URL(raw);
+
+        if (url.origin !== window.location.origin) return HOME_PATH;
+
+        return `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
       } catch {
-        // noop
+        return HOME_PATH;
       }
     }
 
-    try {
-      const canonical = normalizeCanonicalPath(raw);
-      return isConfigBlockedRoutePath(canonical) === true;
-    } catch {
-      return false;
-    }
+    return raw;
   }
+}
 
-  function safeRedirectPath(path = HOME_PATH, fallback = HOME_PATH) {
-    const value = cleanText(path, "");
+function normalizePathname(pathname = HOME_PATH) {
+  try {
+    return normalizeRoutePath(pathname) || HOME_PATH;
+  } catch {
+    let value = cleanText(pathname, HOME_PATH)
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/\\/g, "/");
 
-    if (
-      isUnsafeHref(value) ||
-      isExternalHref(value) ||
-      isHashOnlyHref(value) ||
-      hasSensitiveQuery(value) ||
-      isBlockedRouterPath(value)
-    ) {
-      return normalizePublicPath(fallback);
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
     }
 
-    const normalized = normalizePublicPath(value || fallback);
+    value = value.replace(/\/{2,}/g, "/");
 
-    return isBlockedRouterPath(normalized)
-      ? normalizePublicPath(fallback)
-      : normalized;
-  }
-
-  /* =======================================================
-     AUTH BRIDGE
-  ======================================================= */
-
-  function getAuth() {
-    try {
-      return (
-        AppCore?.auth ||
-        AppCore?.Auth ||
-        AppCore?.modules?.get?.("auth") ||
-        AppCore?.modules?.get?.("Auth") ||
-        null
-      );
-    } catch {
-      return null;
-    }
-  }
-
-  function authCall(method = "", fallback = null, ...args) {
-    const Auth = getAuth();
-    const fn = Auth?.[method];
-
-    if (!isFunction(fn)) return fallback;
-
-    try {
-      return fn.call(Auth, ...args);
-    } catch {
-      return fallback;
-    }
-  }
-
-  function getAuthSessionState() {
-    const Auth = getAuth();
-
-    return isObject(Auth?.session) ? Auth.session : {};
-  }
-
-  function getInFlightAuthPromise() {
-    const session = getAuthSessionState();
-
-    const candidate =
-      session.restorePromise ||
-      session.mePromise ||
-      session.refreshPromise ||
-      null;
-
-    return candidate && isFunction(candidate.then) ? candidate : null;
-  }
-
-  function isAuthResolving() {
-    const session = getAuthSessionState();
-    const state = readState();
-
-    return Boolean(
-      session.restoring ||
-        session.checking ||
-        session.refreshing ||
-        session.restorePromise ||
-        session.mePromise ||
-        session.refreshPromise ||
-        state.authRestoring === true ||
-        state.sessionRestoring === true ||
-        state.restoringSession === true
-    );
-  }
-
-  async function waitForAuthIfNeeded(data = {}, options = {}) {
-    if (options.skipAuthWait === true) return false;
-    if (isAuthenticated()) return false;
-
-    const route = data.route || null;
-
-    const shouldWait = Boolean(
-      routeIsPrivate(route) ||
-        route?.guestOnly === true ||
-        route?.publicOnly === true ||
-        isAuthResolving()
-    );
-
-    if (!shouldWait) return false;
-
-    const promise = getInFlightAuthPromise();
-
-    if (!promise) return false;
-
-    try {
-      await promise;
-    } catch {
-      // Restore fallido se decide después por guards.
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "") || HOME_PATH;
     }
 
+    return value || HOME_PATH;
+  }
+}
+
+function normalizeSearch(search = "") {
+  const value = cleanText(search, "");
+
+  if (!value || value === "?") return "";
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = cleanText(hash, "");
+
+  if (!value || value === "#") return "";
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
+function splitPath(path = HOME_PATH) {
+  let raw = routePathFromInput(path);
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || HOME_PATH;
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || HOME_PATH;
+  }
+
+  return {
+    pathname: normalizePathname(pathname),
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
+  };
+}
+
+function joinPath(parts = {}) {
+  return `${normalizePathname(parts.pathname || HOME_PATH)}${normalizeSearch(parts.search || "")}${normalizeHash(parts.hash || "")}`;
+}
+
+function normalizePublicPath(path = HOME_PATH) {
+  return joinPath(splitPath(path));
+}
+
+function browserPath() {
+  if (!isBrowser()) return HOME_PATH;
+
+  const hash = window.location.hash || "";
+
+  if (hash.startsWith("#/") || hash.startsWith("#!")) {
+    return normalizePublicPath(hash);
+  }
+
+  return normalizePublicPath(
+    `${window.location.pathname || HOME_PATH}${window.location.search || ""}${hash}`
+  );
+}
+
+function currentPublicPath() {
+  return normalizePublicPath(readState().publicPath || browserPath());
+}
+
+function currentCanonicalPath() {
+  return normalizePathname(readState().canonicalPath || readState().route || HOME_PATH);
+}
+
+function publicPathname(path = HOME_PATH) {
+  return splitPath(path).pathname;
+}
+
+function withSearchHashFrom(sourcePath = HOME_PATH, targetPathname = HOME_PATH) {
+  const parts = splitPath(sourcePath);
+
+  return joinPath({
+    pathname: targetPathname,
+    search: parts.search,
+    hash: parts.hash,
+  });
+}
+
+function hasSensitiveQuery(path = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
+    String(path || "")
+  );
+}
+
+function isUnsafeHref(href = "") {
+  const value = cleanText(href, "");
+
+  return Boolean(
+    !value ||
+      value.startsWith("//") ||
+      (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^https?:\/\//i.test(value)) ||
+      /[\r\n\t\\]/.test(value)
+  );
+}
+
+function isExternalHref(href = "") {
+  if (!isBrowser()) return false;
+
+  const value = cleanText(href, "");
+
+  if (!/^https?:\/\//i.test(value)) return false;
+
+  try {
+    return new URL(value, window.location.origin).origin !== window.location.origin;
+  } catch {
     return true;
   }
+}
 
-  function getCurrentUser() {
-    return (
-      authCall("getUser", null) ||
-      authCall("getCurrentUser", null) ||
-      safeCall(AppCore?.getCurrentUser?.bind?.(AppCore) || AppCore?.getCurrentUser) ||
-      null
-    );
+function isHashOnlyHref(href = "") {
+  const value = cleanText(href, "");
+  return value.startsWith("#") && !value.startsWith("#/") && !value.startsWith("#!");
+}
+
+function isBlockedPath(path = HOME_PATH) {
+  const parts = splitPath(path);
+
+  try {
+    if (isBlockedRoutePath(parts.pathname)) return true;
+  } catch {
+    // noop
   }
 
-  function stripBearer(value = "") {
-    return cleanText(value, "").replace(/^Bearer\s+/i, "");
+  const scoped = getScopedInfo(parts.pathname);
+
+  try {
+    return Boolean(scoped.scoped && isBlockedRoutePath(scoped.restPath || scoped.canonicalPath || HOME_PATH));
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   AUTH
+========================================================= */
+
+function getAuth() {
+  return AppCore.auth || AppCore.Auth || Auth;
+}
+
+function authCall(method = "", fallback = null, ...args) {
+  const auth = getAuth();
+  const fn = auth?.[method];
+
+  if (!isFunction(fn)) return fallback;
+
+  try {
+    return fn.call(auth, ...args);
+  } catch {
+    return fallback;
+  }
+}
+
+function getAuthSession() {
+  const auth = getAuth();
+  return isObject(auth?.session) ? auth.session : {};
+}
+
+function getInFlightAuthPromise() {
+  const session = getAuthSession();
+  const candidate = session.restorePromise || session.mePromise || session.refreshPromise || null;
+
+  return candidate && isFunction(candidate.then) ? candidate : null;
+}
+
+function isAuthResolving() {
+  const session = getAuthSession();
+
+  return Boolean(
+    session.restoring ||
+      session.checking ||
+      session.refreshing ||
+      session.restorePromise ||
+      session.mePromise ||
+      session.refreshPromise
+  );
+}
+
+async function waitForAuthIfNeeded(route = null) {
+  if (authCall("isAuthenticated", false) === true) return false;
+  if (!route || route.public === true) return false;
+  if (!isAuthResolving()) return false;
+
+  const promise = getInFlightAuthPromise();
+
+  if (!promise) return false;
+
+  try {
+    await promise;
+  } catch {
+    // El guard decide después.
   }
 
-  function tokenOk(value = "") {
-    const token = stripBearer(value);
+  return true;
+}
 
-    if (!token) return false;
-    if (/\s/.test(token)) return false;
-    if (token.length > 8192) return false;
+function isAuthenticated() {
+  return authCall("isAuthenticated", false) === true;
+}
 
-    return ![
-      "null",
-      "undefined",
-      "false",
-      "true",
-      "[object object]",
-      "{}",
-      "[]",
-    ].includes(token.toLowerCase());
-  }
+function getCurrentUser() {
+  return authCall("getUser", null) || authCall("getCurrentUser", null) || AppCore.getCurrentUser?.() || null;
+}
 
-  function hasAuthToken() {
-    if (authCall("hasValidToken", false) === true) return true;
-    if (authCall("hasToken", false) === true) return true;
+function getCurrentRole() {
+  return authCall("getRole", "") || authCall("getCurrentRole", "") || AppCore.getCurrentRole?.() || "";
+}
 
-    const state = readState();
+function isAdmin() {
+  return authCall("isAdmin", false) === true || getCurrentRole() === "admin";
+}
 
-    const token =
-      authCall("getToken", "") ||
-      authCall("getAccessToken", "") ||
-      state.token ||
-      state.accessToken ||
-      state.access_token ||
-      "";
+function getCurrentUserSlug() {
+  const fromAuth = authCall("getUserSlug", "");
 
-    return tokenOk(token);
-  }
+  if (fromAuth) return normalizeUserSlug(fromAuth);
 
-  function isUserUsable(user = null) {
-    if (!isObject(user)) return false;
+  const user = getCurrentUser();
 
-    const status = cleanText(
-      user.status ||
-        user.estado ||
-        user.state ||
-        "",
+  return normalizeUserSlug(
+    user?.slug ||
+      user?.lookup?.slug ||
+      user?.profile?.slug ||
+      user?.username ||
+      user?.userId ||
+      user?.id ||
       ""
-    ).toLowerCase();
+  );
+}
 
-    return !(
-      user.disabled === true ||
-        user.suspended === true ||
-        user.active === false ||
-        user.enabled === false ||
-        INVALID_USER_STATUSES.has(status)
-    );
-  }
+/* =========================================================
+   USER SCOPE
+========================================================= */
 
-  function isAuthenticated() {
-    const authResult = authCall("isAuthenticated", null);
+function getScopedInfo(path = HOME_PATH) {
+  try {
+    return getUserScopedRouteInfo(path);
+  } catch {
+    const clean = normalizePathname(path);
 
-    if (authResult === false) return false;
-
-    const strict = Boolean(
-      hasAuthToken() &&
-        isUserUsable(getCurrentUser())
-    );
-
-    if (authResult === true) return strict;
-
-    return safeCall(AppCore?.isAuthenticated?.bind?.(AppCore) || AppCore?.isAuthenticated) === true &&
-      strict;
-  }
-
-  function normalizeRole(value = "") {
-    if (Array.isArray(value)) {
-      const roles = value.map(normalizeRole).filter(Boolean);
-
-      if (roles.includes("admin")) return "admin";
-      if (roles.includes("user")) return "user";
-
-      return "";
+    if (!clean.startsWith(USER_HOME_PREFIX)) {
+      return {
+        scoped: false,
+        home: false,
+        slug: "",
+        restPath: clean,
+        canonicalPath: clean,
+        lookupPath: clean,
+      };
     }
 
-    const role = cleanText(value, "").toLowerCase();
-
-    if (role === "admin") return "admin";
-    if (role === "user") return "user";
-
-    return "";
-  }
-
-  function getCurrentRole() {
-    if (!isAuthenticated()) return "";
-
-    const fromAuth =
-      authCall("getRole", "") ||
-      authCall("getCurrentRole", "");
-
-    const role = normalizeRole(fromAuth);
-
-    if (role) return role;
-
-    const user = getCurrentUser();
-    const state = readState();
-
-    return (
-      normalizeRole(user?.role || user?.rol || user?.roles) ||
-      normalizeRole(state.role || state.rol || state.roles) ||
-      "user"
-    );
-  }
-
-  /* =======================================================
-     USER SLUG ROUTES
-  ======================================================= */
-
-  function normalizeUserSlug(value = "") {
-    try {
-      return configNormalizeUserSlug(value) || "";
-    } catch {
-      if (isFunction(Routes.normalizeUserHomeSlug)) {
-        return Routes.normalizeUserHomeSlug(value);
-      }
-
-      const slug = cleanText(value, "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/^\/+/, "")
-        .replace(/^@+/, "")
-        .split(/[/?#]/)[0]
-        .replace(/\s+/g, "")
-        .replace(/[^a-zA-Z0-9._-]/g, "")
-        .toLowerCase();
-
-      if (!slug) return "";
-
-      return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
-    }
-  }
-
-  function getCurrentUserSlug() {
-    if (!isAuthenticated()) return "";
-
-    const fromAuth =
-      authCall("getUserSlug", "") ||
-      authCall("extractUserSlug", "", getCurrentUser());
-
-    if (fromAuth) return normalizeUserSlug(fromAuth);
-
-    const user = getCurrentUser();
-    const state = readState();
-
-    return normalizeUserSlug(
-      user?.slug ||
-        user?.lookup?.slug ||
-        user?.profile?.slug ||
-        state.userSlug ||
-        ""
-    );
-  }
-
-  function extractSlugFromPath(path = HOME_PATH) {
-    return getUserPathInfo(path).slug;
-  }
-
-  function isUserHomePath(path = HOME_PATH) {
-    return getUserPathInfo(path).isHome;
-  }
-
-  function isUserScopedPath(path = HOME_PATH) {
-    const info = getUserPathInfo(path);
-    return Boolean(info.scoped && info.routable);
-  }
-
-  function isCurrentUserScopedPath(path = HOME_PATH) {
-    const requestedSlug = extractSlugFromPath(path);
-    const realSlug = getCurrentUserSlug();
-
-    return Boolean(requestedSlug && realSlug && requestedSlug === realSlug);
-  }
-
-  function buildUserScopedPath(canonicalPath = HOME_PATH, slug = getCurrentUserSlug()) {
-    const cleanSlug = normalizeUserSlug(slug);
-    const canonical = normalizeCanonicalPath(canonicalPath);
-
-    if (!cleanSlug) return canonical;
-    if (canonical === HOME_PATH) return `${USER_HOME_PREFIX}${cleanSlug}`;
-
-    return `${USER_HOME_PREFIX}${cleanSlug}${canonical}`;
-  }
-
-  function buildUserHomePath(slug = getCurrentUserSlug()) {
-    return buildUserScopedPath(HOME_PATH, slug);
-  }
-
-  function getDefaultHome() {
-    return buildUserHomePath();
-  }
-
-  function resolveRouteLookupPath(path = HOME_PATH) {
-    const canonical = normalizeCanonicalPath(path);
-    const scoped = getUserPathInfo(canonical);
-
-    if (scoped.scoped && scoped.routable) {
-      return scoped.restPath;
-    }
-
-    if (scoped.scoped && !scoped.routable) {
-      return canonical;
-    }
-
-    if (isFunction(Routes.resolveRouteLookupPath)) {
-      return normalizeCanonicalPath(Routes.resolveRouteLookupPath(canonical));
-    }
-
-    return canonical;
-  }
-
-  function routeIsPrivate(route = null) {
-    return Boolean(route && route.public !== true);
-  }
-
-  function buildScopedPublicPath(data = {}, slug = getCurrentUserSlug()) {
-    return withSearchHashFrom(
-      data.publicPath || data.canonicalPath || HOME_PATH,
-      buildUserScopedPath(data.canonicalPath || HOME_PATH, slug)
-    );
-  }
-
-  function getUserHomeRedirect(data = {}) {
-    const route = data.route || null;
-
-    if (!route || route.path !== HOME_PATH || route.public === true) return "";
-    if (!isAuthenticated()) return "";
-
-    const realSlug = getCurrentUserSlug();
-
-    if (!realSlug) return "";
-
-    const publicPath = data.publicPath || data.canonicalPath || HOME_PATH;
-    const visiblePathname = publicPathname(publicPath);
-    const requestedSlug = normalizeUserSlug(
-      data.routeParams?.slug || extractSlugFromPath(publicPath)
-    );
-
-    const expectedPathname = buildUserScopedPath(HOME_PATH, realSlug);
-    const expected = withSearchHashFrom(publicPath, expectedPathname);
-
-    /*
-      Si está en "/" canónico y ya hay sesión, debe ir a /@{slug}.
-    */
-    if (visiblePathname === HOME_PATH) return expected;
-
-    /*
-      Si intenta entrar con otro slug, corregimos al slug real.
-    */
-    if (requestedSlug && requestedSlug !== realSlug) return expected;
-
-    /*
-      Comparar contra la URL visible, no contra canonicalPath.
-      /@{slug} canonicaliza internamente a "/", pero visualmente ya es correcto.
-    */
-    if (visiblePathname !== expectedPathname) return expected;
-
-    return "";
-  }
-
-  function getPrivateRouteSlugRedirect(data = {}) {
-    const route = data.route || null;
-
-    if (!routeIsPrivate(route)) return "";
-    if (!isAuthenticated()) return "";
-
-    const realSlug = getCurrentUserSlug();
-
-    if (!realSlug) return "";
-
-    const canonicalPath = data.canonicalPath || HOME_PATH;
-    const publicPath = data.publicPath || canonicalPath;
-
-    const visiblePathname = publicPathname(publicPath);
-    const requestedSlug = normalizeUserSlug(
-      data.routeParams?.slug || extractSlugFromPath(publicPath)
-    );
-
-    const expectedPathname = buildUserScopedPath(canonicalPath, realSlug);
-    const expected = withSearchHashFrom(publicPath, expectedPathname);
-
-    /*
-      Ruta privada canónica sin /@slug:
-        /incidencias -> /@{slug}/incidencias
-        /             -> /@{slug}
-    */
-    if (!requestedSlug && visiblePathname === canonicalPath) return expected;
-
-    /*
-      Slug incorrecto:
-        /@otro/incidencias -> /@{slug}/incidencias
-    */
-    if (requestedSlug && requestedSlug !== realSlug) return expected;
-
-    /*
-      Comparar contra la URL visible, no contra canonicalPath.
-      /@{slug}/ruta canonicaliza internamente a /ruta.
-    */
-    if (visiblePathname !== expectedPathname) return expected;
-
-    return "";
-  }
-
-  /* =======================================================
-     ROUTES
-  ======================================================= */
-
-  function routePath(route = null) {
-    return normalizeCanonicalPath(route?.path || HOME_PATH);
-  }
-
-  function getStaticRouteByPath(path = HOME_PATH) {
-    const lookup = normalizeCanonicalPath(path);
-    return routes.find((route) => routePath(route) === lookup) || null;
-  }
-
-  function getRouteMatch(path = HOME_PATH) {
-    const publicPath = normalizePublicPath(path);
-    const publicPathnameValue = publicPathname(publicPath);
-    const visibleCanonicalPath = normalizeCanonicalPath(publicPath);
-
-    /*
-      Importante:
-      El slug debe leerse desde la URL pública visible.
-      Si usamos visibleCanonicalPath, /@{slug} ya se convirtió en "/"
-      y perdemos routeParams.slug.
-    */
-    const scoped = getUserPathInfo(publicPathnameValue);
-
-    const lookupPath = scoped.scoped && scoped.routable
-      ? scoped.restPath
-      : scoped.scoped
-        ? publicPathnameValue
-        : resolveRouteLookupPath(visibleCanonicalPath);
-
-    const blockedLegacy = Boolean(
-      isBlockedRouterPath(publicPath) ||
-        isBlockedRouterPath(publicPathnameValue) ||
-        isBlockedRouterPath(visibleCanonicalPath) ||
-        isBlockedRouterPath(lookupPath)
-    );
-
-    let route = blockedLegacy
-      ? null
-      : getStaticRouteByPath(lookupPath);
-
-    /*
-      Sólo las rutas privadas pueden vivir bajo /@{slug}.
-      Las rutas públicas/auth no deben renderizarse como /@slug/login, etc.
-    */
-    if (scoped.scoped && route?.public === true) {
-      route = null;
-    }
+    const rest = clean.slice(USER_HOME_PREFIX.length);
+    const [slugSegment = "", ...segments] = rest.split("/");
+    const slug = normalizeUserSlug(slugSegment);
+    const restPath = segments.length ? normalizePathname(`/${segments.join("/")}`) : HOME_PATH;
 
     return {
-      route,
-      publicPath,
-      canonicalPath: route ? routePath(route) : lookupPath,
-      visibleCanonicalPath,
-      lookupPath,
-      routeParams: scoped.slug ? { slug: scoped.slug } : {},
-      matchedBy: route
-        ? scoped.scoped && scoped.routable
-          ? "user-scope"
-          : "static"
-        : "none",
-      blockedLegacy,
+      scoped: Boolean(slug),
+      home: restPath === HOME_PATH,
+      slug,
+      restPath,
+      canonicalPath: restPath,
+      lookupPath: restPath,
     };
   }
+}
 
-  function getRoute(path = HOME_PATH) {
-    return getRouteMatch(path).route;
+function getUserSlugFromPath(path = HOME_PATH) {
+  return getScopedInfo(path).slug || "";
+}
+
+function isUserHomePath(path = HOME_PATH) {
+  return getScopedInfo(path).home === true;
+}
+
+function isUserScopedPath(path = HOME_PATH) {
+  return getScopedInfo(path).scoped === true;
+}
+
+function buildUserHomePath(slug = getCurrentUserSlug()) {
+  const clean = normalizeUserSlug(slug);
+
+  if (!clean) return HOME_PATH;
+
+  try {
+    return buildUserHomeRoute(clean) || `${USER_HOME_PREFIX}${clean}`;
+  } catch {
+    return `${USER_HOME_PREFIX}${clean}`;
+  }
+}
+
+function buildUserScopedPath(canonicalPath = HOME_PATH, slug = getCurrentUserSlug()) {
+  const clean = normalizeUserSlug(slug);
+  const canonical = normalizePathname(canonicalPath);
+
+  if (!clean) return canonical;
+
+  try {
+    return buildUserScopedRoute(clean, canonical);
+  } catch {
+    return canonical === HOME_PATH
+      ? `${USER_HOME_PREFIX}${clean}`
+      : `${USER_HOME_PREFIX}${clean}${canonical}`;
+  }
+}
+
+function getDefaultHome() {
+  return buildUserHomePath();
+}
+
+/* =========================================================
+   ROUTE MATCHING
+========================================================= */
+
+function getRouteByCanonicalPath(path = HOME_PATH) {
+  const canonical = normalizePathname(path);
+
+  return getRoutes().find((route) => normalizePathname(route.path) === canonical) || null;
+}
+
+function routeIsPrivate(route = null) {
+  return Boolean(route && route.public !== true);
+}
+
+function routeRequiresAdmin(route = null) {
+  return Boolean(route?.adminOnly || route?.requiresAdmin);
+}
+
+function getRouteMatch(path = HOME_PATH) {
+  const publicPath = normalizePublicPath(path);
+  const pathname = publicPathname(publicPath);
+  const scoped = getScopedInfo(pathname);
+
+  const lookupPath = scoped.scoped
+    ? normalizePathname(scoped.canonicalPath || scoped.restPath || HOME_PATH)
+    : normalizePathname(pathname);
+
+  let route = isBlockedPath(publicPath) ? null : getRouteByCanonicalPath(lookupPath);
+
+  /*
+    Las rutas públicas no pueden vivir bajo /@{slug}.
+    /@cristian/login no es ruta válida.
+  */
+  if (scoped.scoped && route?.public === true) {
+    route = null;
   }
 
-  function routeExists(path = HOME_PATH) {
-    return Boolean(getRoute(path));
+  return {
+    route,
+    publicPath,
+    pathname,
+    canonicalPath: route ? normalizePathname(route.path) : lookupPath,
+    lookupPath,
+    routeParams: scoped.slug ? { slug: scoped.slug } : {},
+    scoped,
+    blocked: isBlockedPath(publicPath),
+  };
+}
+
+function getRoute(path = HOME_PATH) {
+  return getRouteMatch(path).route;
+}
+
+function routeExists(path = HOME_PATH) {
+  return Boolean(getRoute(path));
+}
+
+function getCurrentRoute() {
+  return getRoute(currentPublicPath());
+}
+
+/* =========================================================
+   REDIRECTS / GUARDS
+========================================================= */
+
+function isPublicAuthRoute(path = HOME_PATH) {
+  const route = getRoute(path);
+  return route?.public === true;
+}
+
+function routeIsTokenRoute(path = HOME_PATH) {
+  const route = getRoute(path);
+  return route?.tokenRoute === true;
+}
+
+function isValidPostLoginTarget(path = "") {
+  const target = normalizePublicPath(path);
+
+  if (!target) return false;
+  if (hasSensitiveQuery(target)) return false;
+  if (isBlockedPath(target)) return false;
+  if (isPublicAuthRoute(target)) return false;
+
+  return routeExists(target);
+}
+
+function loginRedirectTarget(publicPath = HOME_PATH) {
+  const target = normalizePublicPath(publicPath || HOME_PATH);
+
+  if (!isValidPostLoginTarget(target)) {
+    return LOGIN_PATH;
   }
 
-  function getCurrentRoute() {
-    return getRoute(currentPublicPath());
+  return `${LOGIN_PATH}?redirect=${encodeURIComponent(target)}`;
+}
+
+function redirectParamFromCurrentLocation() {
+  if (!isBrowser()) return "";
+
+  try {
+    return new URLSearchParams(window.location.search || "").get("redirect") || "";
+  } catch {
+    return "";
   }
+}
 
-  function isPublicAuthRoutePath(path = HOME_PATH) {
-    const canonical = canonicalAuthPath(path);
+function normalizePostLoginTarget(fallback = getDefaultHome()) {
+  const target = redirectParamFromCurrentLocation();
 
-    if (isBlockedRouterPath(canonical)) return false;
-
-    if (isFunction(Routes.isPublicAuthPath)) {
-      return Routes.isPublicAuthPath(canonical) === true;
-    }
-
-    const route = getRoute(canonical);
-    return Boolean(route?.public === true);
-  }
-
-  function normalizeNavigationTarget(path = HOME_PATH, options = {}) {
-    const publicPath = normalizePublicPath(path);
-    const canonicalPath = normalizeCanonicalPath(publicPath);
-
-    if (
-      options.useSlugHome !== false &&
-      options.keepCanonicalHome !== true &&
-      canonicalPath === HOME_PATH &&
-      isAuthenticated()
-    ) {
-      return withSearchHashFrom(publicPath, buildUserHomePath());
-    }
-
-    const match = getRouteMatch(publicPath);
-
-    if (
-      options.useSlugPrivate !== false &&
-      routeIsPrivate(match.route) &&
-      isAuthenticated() &&
-      getCurrentUserSlug()
-    ) {
-      return buildScopedPublicPath(match, getCurrentUserSlug());
-    }
-
-    return publicPath;
-  }
-
-  function isValidPostLoginTarget(path = "") {
-    const target = normalizePublicPath(path);
-
-    if (!target) return false;
-    if (hasSensitiveQuery(target)) return false;
-    if (isBlockedRouterPath(target)) return false;
-    if (isPublicAuthRoutePath(target)) return false;
-
-    return routeExists(target);
-  }
-
-  function normalizePostLoginTarget(path = "", fallback = getDefaultHome()) {
-    const target = normalizePublicPath(path || fallback || HOME_PATH);
-
-    if (!isValidPostLoginTarget(target)) {
-      return normalizeNavigationTarget(fallback || HOME_PATH);
-    }
-
+  if (isValidPostLoginTarget(target)) {
     return normalizeNavigationTarget(target);
   }
 
-  /* =======================================================
-     STATE / SHELL / CHROME
-  ======================================================= */
+  return normalizeNavigationTarget(fallback || getDefaultHome());
+}
 
-  function setRouterState({
-    canonicalPath = HOME_PATH,
-    publicPath = HOME_PATH,
-    routeParams = {},
-  } = {}) {
-    const canonical = normalizeCanonicalPath(canonicalPath);
-    const visible = normalizePublicPath(publicPath || canonical);
-    const params = isObject(routeParams) ? { ...routeParams } : {};
+function normalizeNavigationTarget(path = HOME_PATH, options = {}) {
+  const publicPath = normalizePublicPath(path);
+  const match = getRouteMatch(publicPath);
 
-    const patch = {
-      route: canonical,
-      canonicalPath: canonical,
-      publicPath: visible,
-      routeParams: params,
-      initialRouteRendered: true,
+  if (
+    options.useSlug !== false &&
+    isAuthenticated() &&
+    routeIsPrivate(match.route)
+  ) {
+    return withSearchHashFrom(
+      publicPath,
+      buildUserScopedPath(match.canonicalPath, getCurrentUserSlug())
+    );
+  }
+
+  if (
+    options.useSlug !== false &&
+    isAuthenticated() &&
+    match.canonicalPath === HOME_PATH &&
+    match.route?.public !== true
+  ) {
+    return withSearchHashFrom(publicPath, buildUserHomePath());
+  }
+
+  return publicPath;
+}
+
+function privateSlugRedirect(match = {}) {
+  const route = match.route;
+
+  if (!routeIsPrivate(route)) return "";
+  if (!isAuthenticated()) return "";
+
+  const realSlug = getCurrentUserSlug();
+
+  if (!realSlug) return "";
+
+  const requestedSlug = normalizeUserSlug(match.routeParams?.slug || "");
+  const expectedPathname = buildUserScopedPath(match.canonicalPath, realSlug);
+  const currentPathname = publicPathname(match.publicPath);
+
+  if (!requestedSlug && currentPathname === match.canonicalPath) {
+    return withSearchHashFrom(match.publicPath, expectedPathname);
+  }
+
+  if (requestedSlug && requestedSlug !== realSlug) {
+    return withSearchHashFrom(match.publicPath, expectedPathname);
+  }
+
+  if (currentPathname !== expectedPathname) {
+    return withSearchHashFrom(match.publicPath, expectedPathname);
+  }
+
+  return "";
+}
+
+function checkAccess(match = {}) {
+  const route = match.route;
+
+  if (!route) {
+    return {
+      allowed: false,
+      reason: "not-found",
     };
+  }
 
-    try {
-      AppCore?.setState?.(patch, {
-        source: SOURCE,
-        silent: true,
-        emit: false,
-      });
-    } catch {
-      try {
-        Object.assign(readState(), patch);
-      } catch {
-        // noop
-      }
+  if (route.public === true) {
+    if (route.guestOnly === true && isAuthenticated()) {
+      return {
+        allowed: false,
+        reason: "guest-only",
+        redirectTo: getDefaultHome(),
+      };
     }
 
     return {
-      canonicalPath: canonical,
-      publicPath: visible,
-      routeParams: params,
+      allowed: true,
+      reason: "public",
     };
   }
 
-  function updateShell(route = null, canonicalPath = HOME_PATH) {
-    safeCall(Shell.setShellMode, AppCore, route);
-    safeCall(Shell.setActiveMenu, AppCore, canonicalPath);
-    safeCall(
-      Shell.setDocumentTitle,
-      AppCore,
-      route?.title || route?.label || route?.name || "Onion Support"
-    );
-
-    return true;
-  }
-
-  function getChromeModule(...names) {
-    for (const name of names.flat().filter(Boolean)) {
-      try {
-        const module =
-          AppCore?.modules?.get?.(name) ||
-          AppCore?.ui?.[name] ||
-          AppCore?.[name] ||
-          null;
-
-        if (module) return module;
-      } catch {
-        // noop
-      }
-    }
-
-    return null;
-  }
-
-  function syncChromeModule(module = null, context = {}) {
-    if (!module) return false;
-
-    for (const method of ["sync", "refresh", "render"]) {
-      try {
-        if (isFunction(module?.[method])) {
-          module[method](context);
-          return true;
-        }
-      } catch {
-        return false;
-      }
-    }
-
-    return false;
-  }
-
-  function syncRouteChrome(route = null, state = {}, options = {}) {
-    const context = {
-      AppCore,
-      core: AppCore,
-      route,
-      canonicalPath: state.canonicalPath || HOME_PATH,
-      publicPath: state.publicPath || state.canonicalPath || HOME_PATH,
-      routeParams: state.routeParams || {},
-      source: options.source || SOURCE,
-      reason: "route-render",
+  if (!isAuthenticated()) {
+    return {
+      allowed: false,
+      reason: "not-authenticated",
+      redirectTo: loginRedirectTarget(match.publicPath),
     };
-
-    syncChromeModule(getChromeModule("sidebar", "SidebarUI", "Sidebar"), context);
-    syncChromeModule(getChromeModule("topbar", "TopbarUI", "Topbar"), context);
-
-    return true;
   }
 
-  function syncRouteChromeDeferred(route = null, state = {}, options = {}, seq = renderSeq) {
-    return deferAfterPaint(() => {
-      if (!isCurrentRenderSeq(seq)) return;
-
-      syncRouteChrome(route, state, options);
-    });
-  }
-
-  function clearChrome() {
-    safeCall(Shell.clearDynamicContainers, AppCore);
-    return true;
-  }
-
-  function cleanupViewInstance(view = null) {
-    if (!view) return false;
-
-    for (const method of ["destroy", "unmount", "cleanup"]) {
-      try {
-        if (isFunction(view?.[method])) {
-          view[method]();
-          return true;
-        }
-      } catch {
-        // noop
-      }
-    }
-
-    return false;
-  }
-
-  function destroyActiveView() {
-    if (!activeView) return false;
-
-    cleanupViewInstance(activeView);
-    activeView = null;
-
-    return true;
-  }
-
-  function viewRoot() {
-    if (!isBrowser()) return null;
-
-    return (
-      document.getElementById("view-container") ||
-      document.getElementById("app-content") ||
-      document.getElementById("main-content") ||
-      document.body ||
-      null
-    );
-  }
-
-  function renderFallback(title = "Onion Support", message = "") {
-    const root = viewRoot();
-
-    if (!root) return null;
-
-    const section = document.createElement("section");
-    section.className = "route-fallback-view";
-    section.setAttribute("role", "status");
-
-    const h1 = document.createElement("h1");
-    h1.textContent = title;
-    section.appendChild(h1);
-
-    if (message) {
-      const p = document.createElement("p");
-      p.textContent = message;
-      section.appendChild(p);
-    }
-
-    root.replaceChildren(section);
-
-    return section;
-  }
-
-  function beginRouteTransition(route = null, data = {}, options = {}) {
-    const state = setRouterState(data);
-
-    updateShell(route, state.canonicalPath);
-    writeHistory(state.publicPath, options);
-
-    return state;
-  }
-
-  /* =======================================================
-     GUARDS
-  ======================================================= */
-
-  function loginRedirectTarget(publicPath = HOME_PATH) {
-    const target = normalizePublicPath(publicPath || HOME_PATH);
-
-    if (
-      !target ||
-      hasSensitiveQuery(target) ||
-      isBlockedRouterPath(target) ||
-      isPublicAuthRoutePath(target) ||
-      !routeExists(target)
-    ) {
-      return LOGIN_PATH;
-    }
-
-    return `${LOGIN_PATH}?redirect=${encodeURIComponent(target)}`;
-  }
-
-  function routeRoles(route = null) {
-    const values = Array.isArray(route?.roles)
-      ? route.roles
-      : route?.roles
-        ? [route.roles]
-        : [];
-
-    return values.map(normalizeRole).filter(Boolean);
-  }
-
-  function routeRequiresAdmin(route = null, canonicalPath = HOME_PATH) {
-    if (!route || route.public === true) return false;
-    if (route.adminOnly === true || route.requiresAdmin === true) return true;
-
-    const roles = routeRoles(route);
-
-    if (roles.includes("admin") && !roles.includes("user")) return true;
-
-    try {
-      return isConfigAdminRoute(canonicalPath || routePath(route)) === true;
-    } catch {
-      return false;
-    }
-  }
-
-  function adminRouteAccessResult(route, canonicalPath, publicPath) {
-    if (!routeRequiresAdmin(route, canonicalPath)) return null;
-
-    if (!isAuthenticated()) {
-      return {
-        allowed: false,
-        reason: "not-authenticated",
-        redirectTo: loginRedirectTarget(publicPath),
-      };
-    }
-
-    if (getCurrentRole() === "admin") {
-      return {
-        allowed: true,
-        reason: "admin",
-      };
-    }
-
+  if (routeRequiresAdmin(route) && !isAdmin()) {
     return {
       allowed: false,
       reason: "admin-required",
     };
   }
 
-  function enforceAdminRouteAccess(result, route, canonicalPath, publicPath) {
-    const adminResult = adminRouteAccessResult(route, canonicalPath, publicPath);
+  return {
+    allowed: true,
+    reason: routeRequiresAdmin(route) ? "admin" : "authenticated",
+  };
+}
 
-    if (!adminResult) return result;
-    if (!adminResult.allowed) return adminResult;
+/* =========================================================
+   HISTORY
+========================================================= */
 
-    return result;
-  }
+function ensureInitialHistoryState() {
+  if (!isBrowser()) return false;
 
-  function fallbackAllowRoute({ route, requestedCanonicalPath, requestedPublicPath }) {
-    if (!route) {
-      return {
-        allowed: false,
-        reason: "not-found",
-      };
+  try {
+    if (!window.history.state) {
+      window.history.replaceState(
+        {
+          router: true,
+          path: browserPath(),
+        },
+        "",
+        browserPath()
+      );
     }
 
-    if (route.public === true) {
-      if (route.guestOnly === true && isAuthenticated()) {
-        return {
-          allowed: false,
-          reason: "guest-only",
-          redirectTo: getDefaultHome(),
-        };
-      }
-
-      return {
-        allowed: true,
-        reason: "public",
-      };
-    }
-
-    if (!isAuthenticated()) {
-      return {
-        allowed: false,
-        reason: "not-authenticated",
-        redirectTo: loginRedirectTarget(requestedPublicPath),
-      };
-    }
-
-    const adminAccess = adminRouteAccessResult(
-      route,
-      requestedCanonicalPath || routePath(route),
-      requestedPublicPath
-    );
-
-    if (adminAccess && !adminAccess.allowed) return adminAccess;
-
-    const roles = routeRoles(route);
-
-    if (!roles.length) {
-      return {
-        allowed: true,
-        reason: "authenticated",
-      };
-    }
-
-    const role = getCurrentRole();
-
-    if (role === "admin") {
-      return {
-        allowed: true,
-        reason: "admin",
-      };
-    }
-
-    const allowed = roles.includes(role);
-
-    return {
-      allowed,
-      reason: allowed ? "role-match" : "insufficient-role",
-    };
-  }
-
-  function checkAccess(route, canonicalPath, publicPath) {
-    const shouldAllowRoute = RouteGuards.shouldAllowRoute;
-    const requiresAdmin = routeRequiresAdmin(route, canonicalPath);
-
-    try {
-      if (isFunction(shouldAllowRoute)) {
-        const result = shouldAllowRoute({
-          AppCore,
-          Auth: getAuth(),
-
-          route,
-
-          requestedCanonicalPath: canonicalPath,
-          requestedPublicPath: publicPath,
-          requestedSlug: extractSlugFromPath(publicPath),
-
-          currentUser: getCurrentUser(),
-          currentUserSlug: getCurrentUserSlug(),
-
-          currentRole: getCurrentRole(),
-          requiresAdmin,
-          adminOnly: requiresAdmin,
-          isAdminRoute: isConfigAdminRoute,
-
-          defaultHome: getDefaultHome(),
-
-          buildUserHomePath,
-          buildUserScopedPath,
-          getRoute,
-
-          isAuthenticated,
-        });
-
-        if (isObject(result)) {
-          return enforceAdminRouteAccess(
-            {
-              allowed: result.allowed !== false,
-              ...result,
-            },
-            route,
-            canonicalPath,
-            publicPath
-          );
-        }
-
-        if (typeof result === "boolean") {
-          return enforceAdminRouteAccess(
-            {
-              allowed: result,
-              reason: result ? "guard-allow" : "guard-deny",
-            },
-            route,
-            canonicalPath,
-            publicPath
-          );
-        }
-      }
-    } catch (error) {
-      return {
-        allowed: false,
-        reason: "guard-error",
-        error,
-      };
-    }
-
-    return fallbackAllowRoute({
-      route,
-      requestedCanonicalPath: canonicalPath,
-      requestedPublicPath: publicPath,
-    });
-  }
-
-  /* =======================================================
-     HISTORY
-  ======================================================= */
-
-  function writeHistory(publicPath = HOME_PATH, options = {}) {
-    if (options.skipHistory === true) return false;
-
-    return Boolean(
-      safeCall(History.updateHistory, {
-        AppCore,
-        pathname: publicPath,
-        options,
-      })
-    );
-  }
-
-  function initHistory() {
-    safeCall(History.ensureInitialHistoryState, { AppCore });
     return true;
+  } catch {
+    return false;
+  }
+}
+
+function writeHistory(publicPath = HOME_PATH, options = {}) {
+  if (!isBrowser()) return false;
+  if (options.skipHistory === true) return false;
+
+  const target = normalizePublicPath(publicPath);
+  const current = browserPath();
+
+  try {
+    const method = options.replaceState === true || current === target
+      ? "replaceState"
+      : "pushState";
+
+    window.history[method](
+      {
+        router: true,
+        path: target,
+      },
+      "",
+      target
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   SHELL / CHROME
+========================================================= */
+
+function node(id = "") {
+  if (!isBrowser()) return null;
+  return document.getElementById(id);
+}
+
+function setHidden(element = null, hidden = false) {
+  if (!element) return false;
+
+  try {
+    element.hidden = Boolean(hidden);
+    element.setAttribute("aria-hidden", hidden ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setShell(route = null) {
+  const publicRoute = route?.public === true;
+
+  const html = isBrowser() ? document.documentElement : null;
+  const body = isBrowser() ? document.body : null;
+
+  for (const root of [html, body].filter(Boolean)) {
+    root.dataset.routeMode = publicRoute ? "auth" : "app";
+    root.dataset.chrome = publicRoute ? "hidden" : "visible";
+    root.dataset.shell = "ready";
   }
 
-  /* =======================================================
-     RENDER HELPERS
-  ======================================================= */
+  setHidden(node("app-shell"), false);
+  setHidden(node("main-content"), false);
+  setHidden(node("app-content"), false);
+  setHidden(node("view-container"), false);
 
-  function renderNotFound(data, options = {}, seq = renderSeq) {
-    destroyActiveView();
-    clearChrome();
+  setHidden(node("sidebar-mount"), publicRoute);
+  setHidden(node("topbar-mount"), publicRoute);
 
-    const state = beginRouteTransition(null, data, options);
+  const tableHead = node("table-head");
+  const tableHeadContainer = node("tablehead-container");
 
-    if (isFunction(Render.renderRouteNotFound)) {
-      Render.renderRouteNotFound({
-        AppCore,
-        route: null,
-        requestedPath: data.publicPath,
-        canonicalPath: data.canonicalPath,
-        publicPath: data.publicPath,
-        routeParams: data.routeParams || {},
-        renderSeq: seq,
-        isCurrentRender: () => isCurrentRenderSeq(seq),
-      });
-    } else {
-      renderFallback("Ruta no encontrada", "La vista solicitada no existe.");
+  try {
+    tableHead?.replaceChildren();
+    tableHeadContainer?.replaceChildren();
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+function setDocumentTitle(route = null) {
+  if (!isBrowser()) return false;
+
+  const title = cleanText(route?.title || route?.name || "", "");
+
+  document.title = title ? `${title} · ${APP_TITLE}` : APP_TITLE;
+
+  return true;
+}
+
+function setActiveMenu(route = null) {
+  if (!isBrowser()) return false;
+
+  const key = cleanText(route?.sidebarKey || route?.viewKey || route?.name || "", "");
+  const path = cleanText(route?.path || "", "");
+
+  for (const item of document.querySelectorAll("[data-sidebar-key], [data-route]")) {
+    const itemKey = cleanText(item.getAttribute("data-sidebar-key"), "");
+    const itemRoute = cleanText(item.getAttribute("data-route"), "");
+
+    const active = Boolean(
+      (key && itemKey === key) ||
+        (path && itemRoute === path)
+    );
+
+    item.classList.toggle("is-active", active);
+    item.setAttribute("aria-current", active ? "page" : "false");
+  }
+
+  return true;
+}
+
+function syncChrome(route = null, context = {}) {
+  const modules = [
+    AppCore.sidebar,
+    AppCore.Sidebar,
+    AppCore.getModule?.("sidebar"),
+    AppCore.topbar,
+    AppCore.Topbar,
+    AppCore.getModule?.("topbar"),
+  ].filter(Boolean);
+
+  for (const module of modules) {
+    try {
+      if (isFunction(module.sync)) {
+        module.sync(context);
+      } else if (isFunction(module.refresh)) {
+        module.refresh(context);
+      }
+    } catch {
+      // noop
     }
+  }
 
-    syncRouteChromeDeferred(null, state, options, seq);
+  return true;
+}
 
+/* =========================================================
+   RENDER
+========================================================= */
+
+function viewRoot() {
+  if (!isBrowser()) return null;
+
+  return (
+    node("view-container") ||
+    node("app-content") ||
+    node("main-content") ||
+    document.body ||
+    null
+  );
+}
+
+function cleanupView(view = null) {
+  if (!view || !isObject(view)) return false;
+
+  for (const method of ["destroy", "unmount", "cleanup", "dispose"]) {
+    try {
+      if (isFunction(view[method])) {
+        view[method]();
+        return true;
+      }
+    } catch {
+      // noop
+    }
+  }
+
+  return false;
+}
+
+function destroyActiveView() {
+  cleanupView(activeView);
+  activeView = null;
+}
+
+function renderFallback(title = "Onion Support", message = "") {
+  const root = viewRoot();
+
+  if (!root) return null;
+
+  const section = document.createElement("section");
+  section.className = "route-fallback-view";
+  section.setAttribute("role", "status");
+
+  const heading = document.createElement("h1");
+  heading.textContent = title;
+  section.appendChild(heading);
+
+  if (message) {
+    const paragraph = document.createElement("p");
+    paragraph.textContent = message;
+    section.appendChild(paragraph);
+  }
+
+  root.replaceChildren(section);
+
+  return section;
+}
+
+function setRouteState(match = {}) {
+  const patch = {
+    route: match.canonicalPath || HOME_PATH,
+    canonicalPath: match.canonicalPath || HOME_PATH,
+    publicPath: match.publicPath || HOME_PATH,
+    routeParams: match.routeParams || {},
+    initialRouteRendered: true,
+  };
+
+  writeState(patch);
+
+  return patch;
+}
+
+function beginTransition(match = {}, options = {}) {
+  const route = match.route || null;
+  const state = setRouteState(match);
+
+  setShell(route);
+  setDocumentTitle(route);
+  setActiveMenu(route);
+  writeHistory(state.publicPath, options);
+
+  return state;
+}
+
+async function renderRoute(match = {}, options = {}, seq = renderSeq) {
+  const route = match.route;
+
+  destroyActiveView();
+
+  const state = beginTransition(match, options);
+  const root = viewRoot();
+
+  if (!root) {
     return {
-      ok: true,
-      found: false,
-      canonicalPath: state.canonicalPath,
-      publicPath: state.publicPath,
-      routeParams: state.routeParams,
+      ok: false,
+      reason: "missing-root",
     };
   }
 
-  function renderForbidden(route, data, reason = "forbidden", options = {}, seq = renderSeq) {
-    destroyActiveView();
-    clearChrome();
+  root.replaceChildren();
 
-    const state = beginRouteTransition(route, data, options);
-
-    if (isFunction(Render.renderRouteForbidden)) {
-      Render.renderRouteForbidden({
-        AppCore,
-        route,
-        requestedPath: data.publicPath,
-        canonicalPath: data.canonicalPath,
-        publicPath: data.publicPath,
-        routeParams: data.routeParams || {},
-        renderSeq: seq,
-        isCurrentRender: () => isCurrentRenderSeq(seq),
-      });
-    } else {
-      renderFallback("Acceso no permitido", "No tienes permisos para ver esta vista.");
+  try {
+    if (!isFunction(route?.render)) {
+      throw new Error("La ruta no tiene render().");
     }
 
-    syncRouteChromeDeferred(route, state, options, seq);
-
-    return {
-      ok: true,
-      forbidden: true,
-      reason,
+    const result = await route.render(root, {
+      AppCore,
+      Auth: getAuth(),
+      Router,
+      route,
       canonicalPath: state.canonicalPath,
       publicPath: state.publicPath,
       routeParams: state.routeParams,
-    };
-  }
+      source: "router",
+      isCurrentRender: () => seq === renderSeq,
+    });
 
-  async function renderSuccess(route, data, options = {}, seq = renderSeq) {
-    /*
-      Transición visual inmediata:
-      - estado de ruta
-      - active menu
-      - título
-      - history
-      antes del render pesado/lazy.
-    */
-    const transitionState = beginRouteTransition(route, data, options);
-
-    destroyActiveView();
-    clearChrome();
-
-    if (!isCurrentRenderSeq(seq)) {
-      return {
-        ok: false,
-        skipped: true,
-        reason: "stale-before-render",
-        canonicalPath: transitionState.canonicalPath,
-        publicPath: transitionState.publicPath,
-        routeParams: transitionState.routeParams,
-      };
-    }
-
-    let view = null;
-
-    if (isFunction(Render.renderRouteSuccess)) {
-      view = await Render.renderRouteSuccess({
-        AppCore,
-        route,
-        requestedPath: data.publicPath,
-        canonicalPath: data.canonicalPath,
-        publicPath: data.publicPath,
-        routeParams: data.routeParams || {},
-        renderSeq: seq,
-        isCurrentRender: () => isCurrentRenderSeq(seq),
-      });
-    } else if (isFunction(route?.render)) {
-      view = await route.render(viewRoot(), {
-        AppCore,
-        route,
-        requestedPath: data.publicPath,
-        canonicalPath: data.canonicalPath,
-        publicPath: data.publicPath,
-        routeParams: data.routeParams || {},
-        renderSeq: seq,
-        isCurrentRender: () => isCurrentRenderSeq(seq),
-      });
-    }
-
-    if (!isCurrentRenderSeq(seq)) {
-      cleanupViewInstance(view);
+    if (seq !== renderSeq) {
+      cleanupView(result);
 
       return {
         ok: false,
         skipped: true,
-        reason: "stale-after-render",
-        canonicalPath: data.canonicalPath,
-        publicPath: data.publicPath,
-        routeParams: data.routeParams || {},
+        reason: "stale-render",
       };
     }
 
-    activeView = view || null;
+    if (typeof Node !== "undefined" && result instanceof Node && result !== root && !root.contains(result)) {
+      root.replaceChildren(result);
+    } else if (typeof result === "string") {
+      root.innerHTML = result;
+    } else if (isObject(result)) {
+      activeView = result;
+    }
 
-    syncRouteChromeDeferred(route, transitionState, options, seq);
+    syncChrome(route, {
+      AppCore,
+      Auth: getAuth(),
+      Router,
+      route,
+      canonicalPath: state.canonicalPath,
+      publicPath: state.publicPath,
+      routeParams: state.routeParams,
+    });
 
     return {
       ok: true,
       found: true,
-      canonicalPath: transitionState.canonicalPath,
-      publicPath: transitionState.publicPath,
-      routeParams: transitionState.routeParams,
       route,
+      canonicalPath: state.canonicalPath,
+      publicPath: state.publicPath,
+      routeParams: state.routeParams,
     };
-  }
-
-  async function renderRuntimeError(route, data, error, options = {}, seq = renderSeq) {
-    destroyActiveView();
-    clearChrome();
-
-    const state = beginRouteTransition(route, data, options);
-
-    if (isFunction(Render.renderRouteRuntimeError)) {
-      await Render.renderRouteRuntimeError({
-        AppCore,
-        route,
-        error,
-        requestedPath: data.publicPath,
-        canonicalPath: data.canonicalPath,
-        publicPath: data.publicPath,
-        routeParams: data.routeParams || {},
-        renderSeq: seq,
-        isCurrentRender: () => isCurrentRenderSeq(seq),
-      });
-    } else {
-      renderFallback("Error de vista", "No se pudo renderizar esta vista.");
+  } catch (error) {
+    if (seq !== renderSeq) {
+      return {
+        ok: false,
+        skipped: true,
+        reason: "stale-error",
+      };
     }
 
-    syncRouteChromeDeferred(route, state, options, seq);
+    renderFallback("Error de vista", "No se pudo renderizar esta vista.");
 
     return {
       ok: false,
       error,
       canonicalPath: state.canonicalPath,
       publicPath: state.publicPath,
-      routeParams: state.routeParams,
+    };
+  }
+}
+
+function renderNotFound(match = {}, options = {}, seq = renderSeq) {
+  destroyActiveView();
+
+  const state = beginTransition(
+    {
+      ...match,
+      route: null,
+      canonicalPath: match.canonicalPath || HOME_PATH,
+    },
+    options
+  );
+
+  renderFallback("Ruta no encontrada", "La vista solicitada no existe.");
+
+  return {
+    ok: true,
+    found: false,
+    canonicalPath: state.canonicalPath,
+    publicPath: state.publicPath,
+    routeParams: state.routeParams,
+    renderSeq: seq,
+  };
+}
+
+function renderForbidden(match = {}, reason = "forbidden", options = {}, seq = renderSeq) {
+  destroyActiveView();
+
+  const state = beginTransition(match, options);
+
+  renderFallback("Acceso no permitido", "No tienes permisos para ver esta vista.");
+
+  return {
+    ok: true,
+    forbidden: true,
+    reason,
+    canonicalPath: state.canonicalPath,
+    publicPath: state.publicPath,
+    routeParams: state.routeParams,
+    renderSeq: seq,
+  };
+}
+
+async function redirectTo(path = HOME_PATH, options = {}, reason = "redirect") {
+  const depth = Number(options.__redirectDepth || 0);
+
+  if (depth >= 5) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "redirect-loop",
+      redirectTo: path,
     };
   }
 
-  async function redirectTo(path = HOME_PATH, options = {}, reason = "redirect") {
-    const depth = Number(options.__redirectDepth || 0);
+  return executeRender(path, {
+    ...options,
+    replaceState: true,
+    source: reason,
+    __redirectDepth: depth + 1,
+  });
+}
 
-    if (depth >= 5) {
-      return {
-        ok: false,
-        skipped: true,
-        reason: "redirect-loop",
-        redirectTo: path,
-      };
+async function executeRender(path = HOME_PATH, options = {}) {
+  const seq = ++renderSeq;
+  let match = getRouteMatch(path);
+
+  if (match.blocked) {
+    return isAuthenticated()
+      ? renderNotFound(match, options, seq)
+      : redirectTo(LOGIN_PATH, options, "blocked-login");
+  }
+
+  await waitForAuthIfNeeded(match.route);
+
+  if (seq !== renderSeq) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "stale",
+    };
+  }
+
+  match = getRouteMatch(path);
+
+  if (!match.route) {
+    return isAuthenticated()
+      ? renderNotFound(match, options, seq)
+      : redirectTo(LOGIN_PATH, options, "not-found-login");
+  }
+
+  const access = checkAccess(match);
+
+  if (!access.allowed) {
+    if (access.redirectTo) {
+      return redirectTo(access.redirectTo, options, access.reason || "guard-redirect");
     }
 
-    return executeRender(safeRedirectPath(path, HOME_PATH), {
-      ...options,
-      replaceState: true,
-      skipHistory: false,
-      source: reason,
-      __redirectDepth: depth + 1,
+    return renderForbidden(match, access.reason || "forbidden", options, seq);
+  }
+
+  const slugRedirect = options.keepCanonicalHome === true
+    ? ""
+    : privateSlugRedirect(match);
+
+  if (slugRedirect) {
+    return redirectTo(slugRedirect, options, "user-scope");
+  }
+
+  return renderRoute(match, options, seq);
+}
+
+function render(path = HOME_PATH, options = {}) {
+  const task = executeRender(path, isObject(options) ? options : {});
+
+  renderPromise = Promise.resolve(task).catch(() => null);
+
+  return task;
+}
+
+function renderCurrent(options = {}) {
+  return render(browserPath(), {
+    ...options,
+    replaceState: true,
+    skipHistory: options.skipHistory ?? true,
+    source: options.source || "render-current",
+  });
+}
+
+/* =========================================================
+   NAVIGATION
+========================================================= */
+
+function hrefAllowed(href = "") {
+  if (isUnsafeHref(href)) return false;
+  if (isExternalHref(href)) return false;
+  if (isHashOnlyHref(href)) return false;
+  if (isBlockedPath(href)) return false;
+
+  if (hasSensitiveQuery(href) && !routeIsTokenRoute(href)) {
+    return false;
+  }
+
+  return true;
+}
+
+function navigate(path = HOME_PATH, options = {}) {
+  const href = cleanText(path, HOME_PATH);
+
+  if (!hrefAllowed(href)) {
+    return Promise.resolve({
+      ok: true,
+      skipped: true,
+      reason: "ignored-href",
     });
   }
 
-  async function executeRender(path = HOME_PATH, options = {}) {
-    const seq = ++renderSeq;
-    let data = getRouteMatch(path);
+  return render(normalizeNavigationTarget(href, options), options);
+}
 
-    if (data.blockedLegacy) {
-      if (!isAuthenticated()) {
-        return redirectTo(LOGIN_PATH, options, "blocked-legacy-login");
-      }
+function replace(path = HOME_PATH, options = {}) {
+  return navigate(path, {
+    ...options,
+    replaceState: true,
+  });
+}
 
-      return renderNotFound(data, options, seq);
-    }
+function goAfterLogin(fallback = HOME_PATH, options = {}) {
+  return replace(normalizePostLoginTarget(fallback), {
+    ...options,
+    source: "login",
+  });
+}
 
-    const waitedAuth = await waitForAuthIfNeeded(data, options);
+/* =========================================================
+   EVENTS
+========================================================= */
 
-    if (waitedAuth) {
-      if (!isCurrentRenderSeq(seq)) {
-        return {
-          ok: false,
-          skipped: true,
-          reason: "stale",
-        };
-      }
+function linkHref(element = null) {
+  return cleanText(
+    element?.dataset?.route ||
+      element?.dataset?.href ||
+      element?.dataset?.to ||
+      element?.getAttribute?.("data-route") ||
+      element?.getAttribute?.("data-href") ||
+      element?.getAttribute?.("data-to") ||
+      element?.getAttribute?.("href"),
+    ""
+  );
+}
 
-      data = getRouteMatch(path);
-    }
+function onClick(event) {
+  if (
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  ) {
+    return;
+  }
 
-    if (!data.route) {
-      if (!isAuthenticated()) {
-        return redirectTo(
-          loginRedirectTarget(data.publicPath),
-          options,
-          "not-found-auth-required"
-        );
-      }
+  const target = event.target?.nodeType === 3
+    ? event.target.parentElement
+    : event.target;
 
-      return renderNotFound(data, options, seq);
-    }
+  const element = target?.closest?.("a[data-spa], a[data-route], a[href^='/'], button[data-route], [data-router-link]");
 
-    const access = checkAccess(data.route, data.canonicalPath, data.publicPath);
+  if (!element || element.hasAttribute?.("download")) return;
 
-    if (!isCurrentRenderSeq(seq)) {
-      return {
-        ok: false,
-        skipped: true,
-        reason: "stale",
-      };
-    }
+  const href = linkHref(element);
+  const targetAttr = cleanText(element.getAttribute?.("target"), "").toLowerCase();
 
-    if (!access.allowed) {
-      if (access.redirectTo) {
-        return redirectTo(access.redirectTo, options, access.reason || "guard-redirect");
-      }
+  if (!href || targetAttr === "_blank") return;
+  if (!hrefAllowed(href)) return;
 
-      return renderForbidden(data.route, data, access.reason || "forbidden", options, seq);
-    }
+  event.preventDefault();
 
-    const privateSlugRedirect = options.keepCanonicalHome === true
-      ? ""
-      : getPrivateRouteSlugRedirect(data);
+  navigate(href, {
+    source: "link-click",
+  });
+}
 
-    if (privateSlugRedirect) {
-      return redirectTo(privateSlugRedirect, options, "user-scope");
-    }
+function onPopState() {
+  render(browserPath(), {
+    skipHistory: true,
+    replaceState: true,
+    source: "popstate",
+  });
+}
 
-    const homeRedirect = options.keepCanonicalHome === true
-      ? ""
-      : getUserHomeRedirect(data);
+function onDom(target, eventName, handler, options = false) {
+  if (!target || !isFunction(target.addEventListener)) return () => false;
 
-    if (homeRedirect) {
-      return redirectTo(homeRedirect, options, "user-home");
-    }
+  target.addEventListener(eventName, handler, options);
 
+  return () => {
     try {
-      return await renderSuccess(data.route, data, options, seq);
-    } catch (error) {
-      if (!isCurrentRenderSeq(seq)) {
-        return {
-          ok: false,
-          skipped: true,
-          reason: "stale-error",
-          error,
-        };
-      }
-
-      return renderRuntimeError(data.route, data, error, options, seq);
-    }
-  }
-
-  function render(path = HOME_PATH, options = {}) {
-    /*
-      Navegación latest-wins.
-      No se encadenan renders con .then(), porque eso congela el cambio
-      de vista si una vista anterior tarda en resolver.
-    */
-    const task = executeRender(path, isObject(options) ? options : {});
-
-    renderPromise = Promise.resolve(task).catch(() => null);
-
-    return task;
-  }
-
-  function renderCurrent(options = {}) {
-    return render(browserPath(), {
-      ...options,
-      replaceState: true,
-      skipHistory: true,
-      source: options.source || "render-current",
-    });
-  }
-
-  /* =======================================================
-     NAVIGATION
-  ======================================================= */
-
-  function navigate(path = HOME_PATH, options = {}) {
-    const href = cleanText(path, HOME_PATH);
-
-    if (
-      isUnsafeHref(href) ||
-      isExternalHref(href) ||
-      isHashOnlyHref(href) ||
-      hasSensitiveQuery(href) ||
-      isBlockedRouterPath(href)
-    ) {
-      return Promise.resolve({
-        ok: true,
-        skipped: true,
-        reason: "ignored-href",
-      });
-    }
-
-    return render(normalizeNavigationTarget(href, options), options);
-  }
-
-  function replace(path = HOME_PATH, options = {}) {
-    return navigate(path, {
-      ...options,
-      replaceState: true,
-    });
-  }
-
-  function goAfterLogin(fallback = HOME_PATH, options = {}) {
-    const target = normalizePostLoginTarget(
-      readState().postLoginTarget || fallback,
-      getDefaultHome()
-    );
-
-    return navigate(target, {
-      ...options,
-      replaceState: true,
-      force: true,
-      source: "login",
-    });
-  }
-
-  /* =======================================================
-     EVENTS / BIND
-  ======================================================= */
-
-  function onDom(target, eventName, handler, options = false) {
-    if (!target || !isFunction(target.addEventListener) || !isFunction(handler)) {
-      return () => false;
-    }
-
-    try {
-      target.addEventListener(eventName, handler, options);
-    } catch {
-      return () => false;
-    }
-
-    return () => {
-      try {
-        target.removeEventListener(eventName, handler, options);
-      } catch {
-        // noop
-      }
-
+      target.removeEventListener(eventName, handler, options);
       return true;
-    };
-  }
-
-  function linkHref(link = null) {
-    return cleanText(
-      link?.dataset?.route ||
-        link?.dataset?.href ||
-        link?.dataset?.to ||
-        link?.getAttribute?.("data-route") ||
-        link?.getAttribute?.("data-href") ||
-        link?.getAttribute?.("data-to") ||
-        link?.getAttribute?.("href"),
-      ""
-    );
-  }
-
-  function onClick(event) {
-    if (
-      event.defaultPrevented ||
-      event.button !== 0 ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey
-    ) {
-      return;
+    } catch {
+      return false;
     }
+  };
+}
 
-    const target = event.target?.nodeType === 3
-      ? event.target.parentElement
-      : event.target;
+/* =========================================================
+   LIFECYCLE
+========================================================= */
 
-    const link = target?.closest?.("a[data-spa]");
-
-    if (!link || link.hasAttribute("download")) return;
-
-    const href = linkHref(link);
-    const linkTarget = cleanText(link.getAttribute("target"), "").toLowerCase();
-
-    if (!href || linkTarget === "_blank") return;
-    if (isUnsafeHref(href) || isExternalHref(href) || isHashOnlyHref(href)) return;
-    if (hasSensitiveQuery(href) || isBlockedRouterPath(href)) return;
-
-    event.preventDefault();
-
-    navigate(href, {
-      source: "link-click",
+function attachToCore() {
+  try {
+    AppCore.Router = Router;
+    AppCore.router = Router;
+    AppCore.registerModule?.("router", Router, {
+      overwrite: true,
     });
+    AppCore.modules?.register?.("router", Router, {
+      overwrite: true,
+    });
+  } catch {
+    // noop
   }
 
-  function handlePopState() {
-    render(browserPath(), {
-      skipHistory: true,
-      replaceState: true,
-      source: "popstate",
-    });
+  return true;
+}
+
+function init() {
+  if (initialized) return Router;
+
+  initialized = true;
+
+  ensureInitialHistoryState();
+  attachToCore();
+
+  return Router;
+}
+
+function bind() {
+  if (bound) return Router;
+
+  init();
+
+  if (isBrowser()) {
+    disposers.push(onDom(document, "click", onClick));
+    disposers.push(onDom(window, "popstate", onPopState));
   }
 
-  function attachToCore() {
+  bound = true;
+  attachToCore();
+
+  return Router;
+}
+
+function unbind() {
+  while (disposers.length) {
     try {
-      AppCore.Router = api;
-      AppCore.router = api;
-      AppCore.modules?.register?.("router", api, {
-        overwrite: true,
-      });
+      disposers.pop()?.();
     } catch {
       // noop
     }
-
-    return true;
   }
 
-  function init() {
-    if (initialized) return api;
+  destroyActiveView();
+  bound = false;
 
-    initialized = true;
+  return Router;
+}
 
-    initHistory();
-    attachToCore();
+function start(options = {}) {
+  bind();
 
-    return api;
-  }
+  return renderCurrent({
+    ...options,
+    source: options.source || "router.start",
+  });
+}
 
-  function bind() {
-    if (bound) return api;
+/* =========================================================
+   SNAPSHOT
+========================================================= */
 
-    init();
-
-    if (isBrowser()) {
-      disposers.push(onDom(document, "click", onClick));
-      disposers.push(onDom(window, "popstate", handlePopState));
-    }
-
-    bound = true;
-    attachToCore();
-
-    return api;
-  }
-
-  function unbind() {
-    while (disposers.length) {
-      try {
-        disposers.pop()?.();
-      } catch {
-        // noop
-      }
-    }
-
-    destroyActiveView();
-    bound = false;
-
-    return api;
-  }
-
-  /* =======================================================
-     SNAPSHOT
-  ======================================================= */
-
-  function getSnapshot() {
-    return {
-      version: ROUTER_VERSION,
-
-      initialized,
-      bound,
-      renderSeq,
-      hasActiveView: Boolean(activeView),
-      hasRenderPromise: Boolean(renderPromise),
-
-      route: redact(readState().route || HOME_PATH),
-      canonicalPath: redact(currentCanonicalPath()),
-      publicPath: redact(currentPublicPath()),
-      routeParams: safeRouteParams(readState().routeParams || {}),
-
-      authenticated: isAuthenticated(),
-      authResolving: isAuthResolving(),
-      hasAuthPromise: Boolean(getInFlightAuthPromise()),
-
-      defaultHome: redact(getDefaultHome()),
-      currentUserSlug: getCurrentUserSlug() || null,
-      currentRole: getCurrentRole(),
-
-      routes: routes.map((route) => ({
-        path: route.path,
-        name: route.name || route.id || "",
-        title: route.title || route.label || "",
-        public: Boolean(route.public),
-        roles: Array.isArray(route.roles) ? route.roles : [],
-        adminOnly: routeRequiresAdmin(route, route.path),
-      })),
-
-      policy: {
-        routerOrchestrator: true,
-
-        latestWinsNavigation: true,
-        noRigidRenderQueue: true,
-        routeStateBeforeHeavyRender: true,
-        shellUpdateBeforeHeavyRender: true,
-        chromeSyncDeferredAfterPaint: true,
-        staleRenderProtection: true,
-
-        ownAuthStatic: false,
-        authDelegated: true,
-        waitsForInFlightAuthRestore: true,
-        doesNotStartRestore: true,
-        doesNotClearSession: true,
-        tokenExpiredDoesNotMeanLogout: true,
-
-        ownStorage: false,
-        ownTransport: false,
-        ownToast: false,
-
-        strictAuth: true,
-        accessTokenAndUserRequired: true,
-        userUsableRequired: true,
-        invalidStatuses: ["suspended", "desactivado"],
-
-        adminRoutesDelegatedToConfig: true,
-        adminRoutesRequireAdmin: true,
-
-        privateRouteWithoutSessionRedirectsLogin: true,
-        userSlugHome: true,
-        userSlugPrivateRoutes: true,
-        validatesRealUserSlug: true,
-        preservesVisibleUserSlugBeforeCanonicalizing: true,
-        respectsRoutableUserScope: true,
-
-        homeInternalPath: HOME_PATH,
-        homeVisiblePattern: "/@{user.slug}",
-        privateVisiblePattern: "/@{user.slug}/{route}",
-
-        syncsRegisteredChromeAfterRender: true,
-
-        blockedRoutesDelegatedToCoreConfig: true,
-        noLocalBlockedRouteList: true,
-
-        noHomeAlias: true,
-        noHomeRoute: true,
-        blocksHomeAlias: true,
-        blocks403Route: true,
-        blocks404Route: true,
-
-        no2fa: true,
-        noMfa: true,
-        noOtp: true,
-
-        snapshotRedacted: true,
-      },
-    };
-  }
-
-  function debug(path = "") {
-    const target = cleanText(path, "");
-
-    return target
-      ? {
-          target: redact(target),
-          match: getRouteMatch(target),
-          snapshot: getSnapshot(),
-        }
-      : getSnapshot();
-  }
-
-  const api = {
+function getSnapshot() {
+  return {
     version: ROUTER_VERSION,
-    routes,
 
-    init,
+    initialized,
+    bound,
+    renderSeq,
+    hasActiveView: Boolean(activeView),
+    hasRenderPromise: Boolean(renderPromise),
 
-    bind,
-    unbind,
-    destroy: unbind,
+    publicPath: redact(currentPublicPath()),
+    canonicalPath: redact(currentCanonicalPath()),
 
-    getRoute,
-    routeExists,
-    getRouteMatch,
-    getCurrentRoute,
+    authenticated: isAuthenticated(),
+    role: getCurrentRole() || null,
+    isAdmin: isAdmin(),
+    userSlug: getCurrentUserSlug() || null,
+    defaultHome: redact(getDefaultHome()),
 
-    getCurrentPath: currentPublicPath,
-    getCurrentCanonicalPath: currentCanonicalPath,
-    getCurrentPublicPath: currentPublicPath,
-
-    navigate,
-    replace,
-
-    render,
-    renderCurrent,
-
-    goAfterLogin,
-
-    buildPublicPath: normalizeNavigationTarget,
-    resolveSpaHref: normalizeNavigationTarget,
-
-    buildUserHomePath,
-    buildUserScopedPath,
-    getDefaultHome,
-
-    extractSlugFromPath,
-    isUserHomePath,
-    isUserScopedPath,
-    isCurrentUserScopedPath,
-
-    isSameCanonicalPath: (a = HOME_PATH, b = HOME_PATH) =>
-      normalizeCanonicalPath(a) === normalizeCanonicalPath(b),
-
-    getRequestedData: getRouteMatch,
-
-    safePath: normalizePublicPath,
-    safePublicPath: normalizePublicPath,
-    safeCanonicalPath: normalizeCanonicalPath,
-
-    getSnapshot,
-    getDebugSnapshot: getSnapshot,
-    debug,
+    routes: getRoutes().map((route) => ({
+      path: route.path,
+      name: route.name,
+      title: route.title,
+      public: route.public,
+      adminOnly: route.adminOnly,
+      viewKey: route.viewKey,
+    })),
   };
+}
 
-  return api;
-})();
+function debug(path = "") {
+  const target = cleanText(path, "");
+
+  return target
+    ? {
+        target: redact(target),
+        match: getRouteMatch(target),
+        snapshot: getSnapshot(),
+      }
+    : getSnapshot();
+}
+
+/* =========================================================
+   API
+========================================================= */
+
+export const Router = {
+  version: ROUTER_VERSION,
+
+  get routes() {
+    return getRoutes();
+  },
+
+  init,
+  bind,
+  unbind,
+  destroy: unbind,
+
+  start,
+  boot: start,
+  renderInitialRoute: start,
+
+  getRoute,
+  routeExists,
+  getRouteMatch,
+  getCurrentRoute,
+
+  getCurrentPath: currentPublicPath,
+  getCurrentPublicPath: currentPublicPath,
+  getCurrentCanonicalPath: currentCanonicalPath,
+
+  navigate,
+  replace,
+
+  render,
+  renderCurrent,
+
+  goAfterLogin,
+
+  buildPublicPath: normalizeNavigationTarget,
+  resolveSpaHref: normalizeNavigationTarget,
+
+  buildUserHomePath,
+  buildUserScopedPath,
+  getDefaultHome,
+
+  extractSlugFromPath: getUserSlugFromPath,
+  isUserHomePath,
+  isUserScopedPath,
+
+  isSameCanonicalPath: (a = HOME_PATH, b = HOME_PATH) =>
+    normalizePathname(a) === normalizePathname(b),
+
+  safePath: normalizePublicPath,
+  safePublicPath: normalizePublicPath,
+  safeCanonicalPath: normalizePathname,
+
+  getSnapshot,
+  getDebugSnapshot: getSnapshot,
+  snapshot: getSnapshot,
+  debug,
+};
 
 export default Router;

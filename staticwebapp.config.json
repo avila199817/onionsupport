@@ -236,6 +236,6 @@
     ".js": "application/javascript",
     ".mjs": "application/javascript",
     ".css": "text/css",
-    ".webmanifest": "application/manifest+json"
+    ".webmanifest": "application/manifest+json",
   }
 }

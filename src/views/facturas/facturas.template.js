@@ -1,70 +1,57 @@
 /* =========================================================
-   Onion SPA - Facturas Template
-   Archivo: src/views/facturas/facturas.template.js
+   Onion Support - Facturas Template
+   Archivo: /src/views/facturas/facturas.template.js
 
-   FINAL PRO SAAS PANEL · FACTURAS TEMPLATE · CSP CLEAN · 12/10 EXTREME
-   PATCH · EXTERNAL CSS ONLY · NO STYLE INJECTION
-   PATCH · NO INLINE STYLE · NO INLINE EVENTS
-   PATCH · NO NATIVE TITLE TOOLTIP · DATA-TOOLTIP ONLY
-   PATCH · REAL TABLE LOCK · NO ::BEFORE ON <TR>
-   PATCH · FILTERS + DATE SORT TOGGLE + SEARCH · SINGLE DATA FLOW
-   PATCH · SORT ÚNICO: FECHA DESC ⇄ FECHA ASC
-   PATCH · INVOICE NUMBER AS INTERNAL TIEBREAKER ONLY
-   PATCH · AVATAR TONES VIA CSS CLASSES
-   PATCH · DATA-CONTRACT READY FOR VIEW.JS
-   PATCH · ROW CLICK READY FOR DETAIL VIEW
-
-   RESPONSABILIDADES:
-   - Render premium de vista de facturas.
-   - Consumir el CSS externo /src/css/views/facturas.css.
-   - No inyectar <style> desde JS.
-   - No usar style="" dinámico.
-   - No usar eventos inline.
-   - No usar title="" nativo.
-   - Usar data-tooltip + aria-label.
-   - Tabla real blindada.
-   - Filtros visuales: todas / pendientes / pagadas / vencidas.
-   - Orden visual único por fecha: más recientes / más antiguas.
-   - Primer click: Fecha ↓, mayor a menor.
-   - Segundo click: Fecha ↑, menor a mayor.
-   - Número de factura usado solo como desempate interno.
-   - Búsqueda por factura, cliente, email, importe, forma de pago e incidencia.
-   - Paginación real de 5 items por defecto sobre resultados filtrados.
-   - Acciones compatibles con data-facturas-action y data-action.
-   - Botón admin "Crear factura".
-   - Envío de factura conectado a send-factura.
-   - Estado "Enviar / Reenviar" según delivery/meta.
-   - Bloqueo seguro de acciones sin PDF/email.
-   - Loader icon-only estable sin mover layout.
-   - Refresh overlay sin desplazar columnas.
-   - Avatares fallback con color estable por cliente.
-   - Chips de pago con contraste real dark/light.
-   - Incidencia relacionada lista para modal.
-   - Estados loading/error/empty blindados.
-   - HTML endurecido con escape/fallbacks.
-   - Filas preparadas para apertura de detalle vía bindings.
-
-   NOTA CSP:
-   - Para fallback de imagen sin onerror inline, llamar a:
-     bindFacturasTemplateDom(root)
-     desde facturas.view.js después de pintar la vista.
+   Responsabilidad:
+   - Render HTML puro de la vista Facturas.
+   - Header, stats, filtros, búsqueda, orden y tabla.
+   - Integrar modal de creación y modal de detalle.
+   - Exponer data-action/data-facturas-action para index.js.
+   - Mantener clases CSS externas facturas-*.
+   - Sin AppCore.
+   - Sin Auth.
+   - Sin Router.
+   - Sin HTTP.
+   - Sin Store.
+   - Sin State externo.
+   - Sin lógica de negocio real.
 ========================================================= */
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
+import {
+  renderFacturasCreateModal,
+} from "./facturas.template.create.js";
+
+import {
+  renderFacturasDetailModal,
+} from "./facturas.template.modal.js";
+
+export const FACTURAS_TEMPLATE_VERSION = "facturas.template.v1";
+
+export const FACTURAS_ACTIONS = Object.freeze({
+  REFRESH: "refresh",
+  EXPORT: "export",
+
+  CREATE_OPEN: "create-factura",
+
+  FILTER: "filter",
+  CLEAR_FILTERS: "clear-filters",
+  CLEAR_SEARCH: "clear-search",
+  SEARCH: "search",
+  SORT: "sort",
+
+  PREV_PAGE: "prev-page",
+  NEXT_PAGE: "next-page",
+
+  OPEN_FACTURA: "open-factura",
+  VIEW_PDF: "view-factura-pdf",
+  DOWNLOAD_PDF: "download-factura",
+  SEND_FACTURA: "send-factura",
+
+  OPEN_INCIDENCIA: "open-incidencia",
+});
 
 const DEFAULT_PAGE_SIZE = 5;
 const DEFAULT_CURRENCY = "EUR";
-
-const ADMIN_ROLES = new Set([
-  "admin",
-  "administrator",
-  "superadmin",
-  "super_admin",
-  "root",
-  "owner",
-]);
 
 const FILTERS = Object.freeze([
   { key: "all", label: "Todas" },
@@ -86,72 +73,80 @@ const SORT_OPTIONS = Object.freeze([
 ]);
 
 /* =========================================================
-   BASE HELPERS
+   BASICS
 ========================================================= */
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-
-  const text = String(value).trim();
-  return text || fallback;
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-
-  if (typeof value === "string") {
-    let normalized = value
-      .trim()
-      .replace(/€/g, "")
-      .replace(/\$/g, "")
-      .replace(/£/g, "")
-      .replace(/%/g, "")
-      .replace(/[^\d.,+\-\s]/g, "")
-      .replace(/\s/g, "");
-
-    const hasComma = normalized.includes(",");
-    const hasDot = normalized.includes(".");
-
-    if (hasComma && hasDot) {
-      const lastComma = normalized.lastIndexOf(",");
-      const lastDot = normalized.lastIndexOf(".");
-
-      normalized =
-        lastComma > lastDot
-          ? normalized.replace(/\./g, "").replace(/,/g, ".")
-          : normalized.replace(/,/g, "");
-    } else if (hasComma) {
-      normalized = normalized.replace(/,/g, ".");
-    }
-
-    const n = Number(normalized);
-    return Number.isFinite(n) ? n : fallback;
-  }
-
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
 }
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return output || fallback;
 }
 
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
+    if (Array.isArray(value) && !value.length) continue;
+    if (isObject(value) && !Object.keys(value).length) continue;
 
     return value;
   }
 
   return null;
+}
+
+function number(value = 0, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  if (typeof value === "string") {
+    let clean = value
+      .trim()
+      .replace(/[€$£¥%]/g, "")
+      .replace(/[^\d.,+\-\s]/g, "")
+      .replace(/\s+/g, "");
+
+    if (!clean || clean === "-" || clean === "+") return fallback;
+
+    const hasComma = clean.includes(",");
+    const hasDot = clean.includes(".");
+
+    if (hasComma && hasDot) {
+      const lastComma = clean.lastIndexOf(",");
+      const lastDot = clean.lastIndexOf(".");
+
+      clean =
+        lastComma > lastDot
+          ? clean.replace(/\./g, "").replace(/,/g, ".")
+          : clean.replace(/,/g, "");
+    } else if (hasComma) {
+      clean = clean.replace(/,/g, ".");
+    }
+
+    const parsed = Number(clean);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function escapeHtml(value = "") {
@@ -163,71 +158,14 @@ function escapeHtml(value = "") {
     .replace(/'/g, "&#39;");
 }
 
-function normalizeWhitespace(value = "") {
-  return safeText(value, "").replace(/\s+/g, " ").trim();
-}
-
-function normalizeText(value = "") {
-  return safeText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function normalizeKey(value = "") {
-  return normalizeText(value)
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function normalizeRole(value = "") {
-  return safeText(value, "").toLowerCase();
-}
-
-function isValidEmail(value = "") {
-  const email = safeText(value, "").toLowerCase();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function bool(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value === 1;
-
-  const key = normalizeText(value);
-
-  if (["true", "1", "yes", "si", "sí", "on"].includes(key)) return true;
-  if (["false", "0", "no", "off"].includes(key)) return false;
-
-  return fallback;
-}
-
-function hashString(value = "") {
-  const text = safeText(value, "onion");
-  let hash = 2166136261;
-
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash +=
-      (hash << 1) +
-      (hash << 4) +
-      (hash << 7) +
-      (hash << 8) +
-      (hash << 24);
-  }
-
-  return Math.abs(hash >>> 0);
-}
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
+function attr(value = "") {
+  return escapeHtml(cleanText(value, ""));
 }
 
 function htmlAttrs(attrs = {}) {
   return Object.entries(safeObject(attrs))
     .map(([key, value]) => {
+      if (!key) return "";
       if (value === false || value === null || value === undefined) return "";
       if (value === true) return escapeHtml(key);
 
@@ -238,8 +176,8 @@ function htmlAttrs(attrs = {}) {
 }
 
 function tooltipAttrs(tooltip = "", ariaLabel = "") {
-  const cleanTooltip = safeText(tooltip, "");
-  const cleanAria = safeText(ariaLabel, cleanTooltip);
+  const cleanTooltip = cleanText(tooltip, "");
+  const cleanAria = cleanText(ariaLabel, cleanTooltip);
 
   return htmlAttrs({
     "aria-label": cleanAria || false,
@@ -256,8 +194,8 @@ function disabledAttrs(disabled = false, busy = false) {
 }
 
 function actionAttrs(action = "", facturaId = "") {
-  const cleanAction = safeText(action, "");
-  const cleanFacturaId = safeText(facturaId, "");
+  const cleanAction = cleanText(action, "");
+  const cleanFacturaId = cleanText(facturaId, "");
 
   return htmlAttrs({
     "data-action": cleanAction,
@@ -265,6 +203,59 @@ function actionAttrs(action = "", facturaId = "") {
     "data-factura-id": cleanFacturaId || false,
   });
 }
+
+function normalizeText(value = "") {
+  return cleanText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeKey(value = "") {
+  return normalizeText(value)
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function bool(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+
+  const key = normalizeText(value);
+
+  if (["true", "1", "yes", "si", "sí", "on"].includes(key)) return true;
+  if (["false", "0", "no", "off"].includes(key)) return false;
+
+  return fallback;
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function hashString(value = "") {
+  const text = cleanText(value, "onion");
+  let hash = 2166136261;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash +=
+      (hash << 1) +
+      (hash << 4) +
+      (hash << 7) +
+      (hash << 8) +
+      (hash << 24);
+  }
+
+  return Math.abs(hash >>> 0);
+}
+
+/* =========================================================
+   INPUT
+========================================================= */
 
 function getInputItems(input = {}) {
   const data = safeObject(input);
@@ -298,17 +289,41 @@ function getRuntimeState(input = {}) {
   );
 }
 
+function isAdmin(input = {}) {
+  const data = safeObject(input);
+  const runtime = getRuntimeState(data);
+
+  const role = normalizeKey(
+    first(
+      data.role,
+      data.rol,
+      runtime.role,
+      runtime.rol,
+      data.user?.role,
+      data.user?.rol,
+      runtime.user?.role,
+      runtime.user?.rol,
+      ""
+    )
+  );
+
+  return (
+    data.admin === true ||
+    runtime.admin === true ||
+    runtime.canCreateFactura === true ||
+    data.canCreateFactura === true ||
+    role === "admin"
+  );
+}
+
 /* =========================================================
-   DATE HELPERS
+   DATE / MONEY
 ========================================================= */
 
 function isDateOnlyValue(value = null) {
-  const raw = safeText(value, "");
+  const raw = cleanText(value, "");
 
-  return (
-    /^\d{4}-\d{2}-\d{2}$/.test(raw) ||
-    /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw)
-  );
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) || /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw);
 }
 
 function toTimestamp(value = null) {
@@ -322,7 +337,8 @@ function toTimestamp(value = null) {
     return value > 9999999999 ? value : value * 1000;
   }
 
-  const raw = safeText(value, "");
+  const raw = cleanText(value, "");
+
   if (!raw) return 0;
 
   const numeric = Number(raw);
@@ -355,124 +371,73 @@ function toTimestamp(value = null) {
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
-/* =========================================================
-   FORMATTERS
-========================================================= */
-
-const moneyFormatterCache = new Map();
-const dateTimeFormatterCache = new Map();
-
-function getMoneyFormatter(currency = DEFAULT_CURRENCY) {
-  const code = safeText(currency, DEFAULT_CURRENCY).toUpperCase();
-
-  if (moneyFormatterCache.has(code)) {
-    return moneyFormatterCache.get(code);
-  }
-
-  const formatter = new Intl.NumberFormat("es-ES", {
-    style: "currency",
-    currency: code,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
-  moneyFormatterCache.set(code, formatter);
-
-  return formatter;
-}
-
 function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
-  const amount = safeNumber(value, NaN);
+  const amount = number(value, NaN);
+  const code = cleanText(currency, DEFAULT_CURRENCY).toUpperCase();
 
   if (!Number.isFinite(amount)) return "—";
 
-  const code = safeText(currency, DEFAULT_CURRENCY).toUpperCase();
-
   try {
-    return getMoneyFormatter(code).format(amount);
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: code,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
   } catch {
     return `${amount.toFixed(2).replace(".", ",")} ${code}`;
   }
 }
 
-function getDateTimeFormatter() {
-  const key = "es-ES:date-time";
-
-  if (dateTimeFormatterCache.has(key)) {
-    return dateTimeFormatterCache.get(key);
-  }
-
-  const formatter = new Intl.DateTimeFormat("es-ES", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  dateTimeFormatterCache.set(key, formatter);
-
-  return formatter;
-}
-
-function getDateFormatter() {
-  const key = "es-ES:date";
-
-  if (dateTimeFormatterCache.has(key)) {
-    return dateTimeFormatterCache.get(key);
-  }
-
-  const formatter = new Intl.DateTimeFormat("es-ES", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-
-  dateTimeFormatterCache.set(key, formatter);
-
-  return formatter;
-}
-
 function formatDateTime(value = null) {
-  const ts = toTimestamp(value);
-  if (!ts) return "—";
+  const timestamp = toTimestamp(value);
+
+  if (!timestamp) return "—";
 
   try {
-    return getDateTimeFormatter().format(new Date(ts));
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(timestamp));
   } catch {
     return "—";
   }
 }
 
 function formatDateShort(value = null) {
-  const ts = toTimestamp(value);
-  if (!ts) return "—";
+  const timestamp = toTimestamp(value);
+
+  if (!timestamp) return "—";
 
   try {
-    return getDateFormatter().format(new Date(ts));
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(new Date(timestamp));
   } catch {
     return "—";
   }
 }
 
 function formatDateTooltip(value = null) {
-  if (isDateOnlyValue(value)) return formatDateShort(value);
-  return formatDateTime(value);
+  return isDateOnlyValue(value) ? formatDateShort(value) : formatDateTime(value);
 }
 
 function formatRelativeDate(value = null) {
-  const ts = toTimestamp(value);
-  if (!ts) return "Sin fecha";
+  const timestamp = toTimestamp(value);
 
-  const diffMs = ts - Date.now();
+  if (!timestamp) return "Sin fecha";
+
+  const diffMs = timestamp - Date.now();
   const diffMin = Math.round(diffMs / 60000);
   const absMin = Math.abs(diffMin);
 
   if (absMin < 1) return "Ahora mismo";
-
-  if (absMin < 60) {
-    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
-  }
+  if (absMin < 60) return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
 
   const diffHours = Math.round(absMin / 60);
 
@@ -496,7 +461,8 @@ function formatRelativeDate(value = null) {
 ========================================================= */
 
 function icon(name = "") {
-  const common = `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+  const common =
+    `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 
   const icons = {
     refresh: `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
@@ -520,97 +486,8 @@ function icon(name = "") {
 }
 
 /* =========================================================
-   AUTH / ROLE
+   DOMAIN PICKERS
 ========================================================= */
-
-function hasPermission(state = {}, permission = "") {
-  const runtime = safeObject(state);
-  const target = safeText(permission, "");
-
-  if (!target) return false;
-
-  const permissions = first(
-    runtime.permissions,
-    runtime.user?.permissions,
-    runtime.currentUser?.permissions,
-    runtime.session?.user?.permissions,
-    runtime.auth?.user?.permissions
-  );
-
-  if (Array.isArray(permissions)) {
-    return permissions.includes(target);
-  }
-
-  if (typeof permissions === "string") {
-    return permissions
-      .split(/[,\s]+/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .includes(target);
-  }
-
-  return false;
-}
-
-function isAdminState(state = {}) {
-  const runtime = safeObject(state);
-
-  if (
-    runtime.canCreateFactura === true ||
-    runtime.view?.canCreateFactura === true ||
-    hasPermission(runtime, "facturas:create")
-  ) {
-    return true;
-  }
-
-  const role = normalizeRole(
-    first(
-      runtime.role,
-      runtime.rol,
-      runtime.user?.role,
-      runtime.user?.rol,
-      runtime.currentUser?.role,
-      runtime.currentUser?.rol,
-      runtime.session?.user?.role,
-      runtime.session?.user?.rol,
-      runtime.auth?.role,
-      runtime.auth?.user?.role,
-      runtime.auth?.user?.rol
-    )
-  );
-
-  return ADMIN_ROLES.has(role);
-}
-
-/* =========================================================
-   DOMAIN HELPERS
-========================================================= */
-
-function pickTicketIdFromArray(value = []) {
-  for (const item of safeArray(value)) {
-    if (typeof item === "string" && item.trim()) {
-      return item.trim();
-    }
-
-    if (!item || typeof item !== "object") continue;
-
-    const candidate = first(
-      item.ticketId,
-      item.incidenciaId,
-      item.id,
-      item.code,
-      item.numero,
-      item.relatedTicketId,
-      item.relatedIncidentId,
-      item.supportTicketId,
-      item.caseId
-    );
-
-    if (candidate) return safeText(candidate, "");
-  }
-
-  return "";
-}
 
 function getRaw(item = {}) {
   return safeObject(item?.raw);
@@ -619,17 +496,15 @@ function getRaw(item = {}) {
 function getFacturaId(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return cleanText(
     first(
       item.id,
-      item._id,
       item.facturaId,
       item.invoiceId,
       item.numeroFacturaLegal,
       item.numeroFacturaSistema,
       item.numero,
       raw.id,
-      raw._id,
       raw.facturaId,
       raw.invoiceId,
       raw.numeroFacturaLegal,
@@ -643,41 +518,35 @@ function getFacturaId(item = {}) {
 function getFacturaNumero(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return cleanText(
     first(
       item.numeroFacturaLegal,
       item.numeroFactura,
-      item.legalInvoiceNumber,
-      item.numero,
+      item.number,
       item.invoiceNumber,
+      item.numero,
       item.code,
       item.facturaId,
       item.invoiceId,
-      item.numeroFacturaSistema,
       item.id,
       raw.numeroFacturaLegal,
       raw.numeroFactura,
-      raw.legalInvoiceNumber,
-      raw.numero,
+      raw.number,
       raw.invoiceNumber,
+      raw.numero,
       raw.code,
       raw.facturaId,
       raw.invoiceId,
-      raw.numeroFacturaSistema,
       raw.id
     ),
     "Factura sin número"
   );
 }
 
-function getFacturaDisplayId(item = {}) {
-  return getFacturaNumero(item);
-}
-
 function getFacturaSistema(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return cleanText(
     first(
       item.numeroFacturaSistema,
       item.systemInvoiceNumber,
@@ -692,7 +561,7 @@ function getFacturaSistema(item = {}) {
 function getCompanyName(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return cleanText(
     first(
       item.clienteEmpresa,
       item.empresa,
@@ -702,18 +571,11 @@ function getCompanyName(item = {}) {
       item.cliente?.razonSocial,
       item.cliente?.companyName,
       item.cliente?.empresa,
-      item.cliente?.company,
       item.client?.razonSocial,
       item.client?.companyName,
-      item.client?.empresa,
-      item.client?.company,
       item.customer?.razonSocial,
       item.customer?.companyName,
-      item.customer?.empresa,
-      item.customer?.company,
       item.clienteSnapshot?.razonSocial,
-      item.clienteSnapshot?.companyName,
-      item.clienteSnapshot?.empresa,
       raw.clienteEmpresa,
       raw.empresa,
       raw.company,
@@ -722,18 +584,11 @@ function getCompanyName(item = {}) {
       raw.cliente?.razonSocial,
       raw.cliente?.companyName,
       raw.cliente?.empresa,
-      raw.cliente?.company,
       raw.client?.razonSocial,
       raw.client?.companyName,
-      raw.client?.empresa,
-      raw.client?.company,
       raw.customer?.razonSocial,
       raw.customer?.companyName,
-      raw.customer?.empresa,
-      raw.customer?.company,
-      raw.clienteSnapshot?.razonSocial,
-      raw.clienteSnapshot?.companyName,
-      raw.clienteSnapshot?.empresa
+      raw.clienteSnapshot?.razonSocial
     ),
     ""
   );
@@ -742,7 +597,7 @@ function getCompanyName(item = {}) {
 function getContactName(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return cleanText(
     first(
       item.clienteNombre,
       item.nombreContacto,
@@ -753,9 +608,7 @@ function getContactName(item = {}) {
       item.cliente?.displayName,
       item.clienteSnapshot?.nombreContacto,
       item.clientName,
-      item.client?.nombreContacto,
       item.client?.name,
-      item.customer?.nombreContacto,
       item.customer?.name,
       item.name,
       item.nombre,
@@ -768,9 +621,7 @@ function getContactName(item = {}) {
       raw.cliente?.displayName,
       raw.clienteSnapshot?.nombreContacto,
       raw.clientName,
-      raw.client?.nombreContacto,
       raw.client?.name,
-      raw.customer?.nombreContacto,
       raw.customer?.name,
       raw.name,
       raw.nombre
@@ -780,7 +631,7 @@ function getContactName(item = {}) {
 }
 
 function getClientName(item = {}) {
-  return safeText(first(getCompanyName(item), getContactName(item)), "Cliente");
+  return cleanText(first(getCompanyName(item), getContactName(item)), "Cliente");
 }
 
 function getClientSecondaryName(item = {}) {
@@ -797,7 +648,7 @@ function getClientSecondaryName(item = {}) {
 function getClientEmail(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return cleanText(
     first(
       item.clienteEmail,
       item.emailCliente,
@@ -829,7 +680,7 @@ function getClientEmailLabel(item = {}) {
 function getClientAvatar(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return cleanText(
     first(
       item.clienteAvatar,
       item.clientAvatar,
@@ -882,95 +733,49 @@ function getClientStableKey(item = {}) {
       item.customerId,
       item.userId,
       item.uid,
-      item.cliente?.id,
-      item.cliente?.userId,
-      item.client?.id,
-      item.client?.userId,
-      item.customer?.id,
-      item.customer?.userId,
       item.clienteEmail,
       item.emailCliente,
       item.clientEmail,
       item.email,
-      item.cliente?.email,
-      item.client?.email,
-      item.customer?.email,
       raw.clienteId,
       raw.clientId,
       raw.customerId,
       raw.userId,
       raw.uid,
-      raw.cliente?.id,
-      raw.cliente?.userId,
-      raw.client?.id,
-      raw.client?.userId,
-      raw.customer?.id,
-      raw.customer?.userId,
       raw.clienteEmail,
       raw.emailCliente,
       raw.clientEmail,
       raw.email,
-      raw.cliente?.email,
-      raw.client?.email,
-      raw.customer?.email,
       getClientName(item)
     )
   );
 }
 
 function getInitials(value = "") {
-  const text = normalizeWhitespace(value);
+  const text = cleanText(value, "");
 
   if (!text) return "ON";
 
-  const parts = text.split(" ").filter(Boolean);
+  const parts = text.split(/\s+/).filter(Boolean);
 
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
 
   return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
 }
 
 function getAvatarToneClass(item = {}) {
-  const seed = getClientStableKey(item);
-  return `facturas-avatar--tone-${hashString(seed) % 10}`;
+  return `facturas-avatar--tone-${hashString(getClientStableKey(item)) % 10}`;
 }
 
 function getEstadoPagoKey(value = "") {
   const key = normalizeKey(value);
 
-  if (
-    ["paid", "pagada", "pagado", "cobrada", "cobrado", "abonada", "abonado"].includes(
-      key
-    )
-  ) {
-    return "paid";
-  }
-
-  if (["pending", "pendiente", "unpaid", "sin_pagar"].includes(key)) {
-    return "pending";
-  }
-
-  if (["partial", "parcial", "pago_parcial"].includes(key)) {
-    return "partial";
-  }
-
-  if (["overdue", "vencida", "vencido"].includes(key)) {
-    return "overdue";
-  }
-
-  if (
-    ["cancelled", "canceled", "cancelada", "cancelado", "anulada", "anulado"].includes(
-      key
-    )
-  ) {
-    return "cancelled";
-  }
-
-  if (["draft", "borrador"].includes(key)) {
-    return "draft";
-  }
+  if (["paid", "pagada", "pagado", "cobrada", "cobrado", "abonada", "abonado"].includes(key)) return "paid";
+  if (["pending", "pendiente", "unpaid", "sin_pagar"].includes(key)) return "pending";
+  if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
+  if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
+  if (["cancelled", "canceled", "cancelada", "cancelado", "anulada", "anulado"].includes(key)) return "cancelled";
+  if (["draft", "borrador"].includes(key)) return "draft";
 
   return "pending";
 }
@@ -985,7 +790,7 @@ function getEstadoPagoLabel(value = "") {
   if (key === "cancelled") return "Cancelada";
   if (key === "draft") return "Borrador";
 
-  return safeText(value, "Pendiente");
+  return cleanText(value, "Pendiente");
 }
 
 function getEstadoPagoChipClass(value = "") {
@@ -1007,10 +812,34 @@ function getPaymentRaw(item = {}) {
   );
 }
 
+function pickTicketIdFromArray(value = []) {
+  for (const item of safeArray(value)) {
+    if (typeof item === "string" && item.trim()) return item.trim();
+
+    if (!isObject(item)) continue;
+
+    const candidate = first(
+      item.ticketId,
+      item.incidenciaId,
+      item.id,
+      item.code,
+      item.numero,
+      item.relatedTicketId,
+      item.relatedIncidentId,
+      item.supportTicketId,
+      item.caseId
+    );
+
+    if (candidate) return cleanText(candidate, "");
+  }
+
+  return "";
+}
+
 function getIncidenciaId(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return cleanText(
     first(
       item.ticketId,
       item.incidenciaId,
@@ -1038,9 +867,7 @@ function getIncidenciaId(item = {}) {
       pickTicketIdFromArray(item.incidencias),
       pickTicketIdFromArray(item.tickets),
       pickTicketIdFromArray(item.relatedTickets),
-      pickTicketIdFromArray(item.facturasRelacionadas),
-      pickTicketIdFromArray(item.linkedInvoices?.tickets),
-      pickTicketIdFromArray(item.relations),
+
       raw.ticketId,
       raw.incidenciaId,
       raw.incidencia?.id,
@@ -1066,10 +893,7 @@ function getIncidenciaId(item = {}) {
       pickTicketIdFromArray(raw.linkedTickets),
       pickTicketIdFromArray(raw.incidencias),
       pickTicketIdFromArray(raw.tickets),
-      pickTicketIdFromArray(raw.relatedTickets),
-      pickTicketIdFromArray(raw.facturasRelacionadas),
-      pickTicketIdFromArray(raw.linkedInvoices?.tickets),
-      pickTicketIdFromArray(raw.relations)
+      pickTicketIdFromArray(raw.relatedTickets)
     ),
     ""
   );
@@ -1078,7 +902,7 @@ function getIncidenciaId(item = {}) {
 function getIncidenciaSubject(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return cleanText(
     first(
       item.incidencia?.subject,
       item.incidencia?.asunto,
@@ -1089,6 +913,7 @@ function getIncidenciaSubject(item = {}) {
       item.linkedTicket?.subject,
       item.linkedTicket?.asunto,
       item.linkedTicket?.title,
+
       raw.incidencia?.subject,
       raw.incidencia?.asunto,
       raw.incidencia?.title,
@@ -1131,7 +956,7 @@ function getTotalRaw(item = {}) {
 function getCurrency(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return cleanText(
     first(
       item.moneda,
       item.currency,
@@ -1167,14 +992,13 @@ function getTotalCaption(item = {}) {
     raw.ivaIncluido
   );
 
-  if (taxIncluded === false) return "Impuestos no incl.";
-  return "Impuestos incl.";
+  return taxIncluded === false ? "Impuestos no incl." : "Impuestos incl.";
 }
 
 function getFormaPago(item = {}) {
   const raw = getRaw(item);
 
-  return safeText(
+  return cleanText(
     first(
       item.formaPago,
       item.metodoPago,
@@ -1201,15 +1025,16 @@ function getCreatedAt(item = {}) {
     item.issueDate,
     item.issuedAt,
     item.fecha,
+    item.createdAt,
+    item.lifecycle?.createdAt,
+    item.fechaCreacion,
+
     raw.fechaFactura,
     raw.fechaFacturaISO,
     raw.lifecycle?.issuedAt,
     raw.issueDate,
     raw.issuedAt,
     raw.fecha,
-    item.createdAt,
-    item.lifecycle?.createdAt,
-    item.fechaCreacion,
     raw.createdAt,
     raw.lifecycle?.createdAt,
     raw.fechaCreacion
@@ -1230,6 +1055,7 @@ function getUpdatedAt(item = {}) {
     item.mailSentAt,
     item.fechaActualizacion,
     item.lastUpdateAt,
+
     raw.updatedAt,
     raw.lifecycle?.updatedAt,
     raw.lastActivityAt,
@@ -1254,6 +1080,7 @@ function getSentAt(item = {}) {
     item.delivery?.lastSentAt,
     item.lifecycle?.sentAt,
     item.meta?.lastSentAt,
+
     raw.fechaEnvio,
     raw.sentAt,
     raw.mailSentAt,
@@ -1268,10 +1095,10 @@ function getSortTimestamp(item = {}) {
   const raw = getRaw(item);
 
   return (
-    safeNumber(item?.meta?.updatedAtMs, 0) ||
-    safeNumber(item?.meta?.timestampMs, 0) ||
-    safeNumber(raw?.meta?.updatedAtMs, 0) ||
-    safeNumber(raw?.meta?.timestampMs, 0) ||
+    number(item?.meta?.updatedAtMs, 0) ||
+    number(item?.meta?.timestampMs, 0) ||
+    number(raw?.meta?.updatedAtMs, 0) ||
+    number(raw?.meta?.timestampMs, 0) ||
     toTimestamp(getUpdatedAt(item)) ||
     toTimestamp(getCreatedAt(item)) ||
     toTimestamp(raw?._ts) ||
@@ -1284,8 +1111,8 @@ function getEmissionTimestamp(item = {}) {
 }
 
 function compareFacturaNumeroAsc(a = {}, b = {}) {
-  return safeText(getFacturaNumero(a), "").localeCompare(
-    safeText(getFacturaNumero(b), ""),
+  return cleanText(getFacturaNumero(a), "").localeCompare(
+    cleanText(getFacturaNumero(b), ""),
     "es",
     {
       numeric: true,
@@ -1295,8 +1122,8 @@ function compareFacturaNumeroAsc(a = {}, b = {}) {
 }
 
 function compareFacturaNumeroDesc(a = {}, b = {}) {
-  return safeText(getFacturaNumero(b), "").localeCompare(
-    safeText(getFacturaNumero(a), ""),
+  return cleanText(getFacturaNumero(b), "").localeCompare(
+    cleanText(getFacturaNumero(a), ""),
     "es",
     {
       numeric: true,
@@ -1307,16 +1134,12 @@ function compareFacturaNumeroDesc(a = {}, b = {}) {
 
 function compareFacturasDateDesc(a = {}, b = {}) {
   const diff = getEmissionTimestamp(b) - getEmissionTimestamp(a);
-  if (diff !== 0) return diff;
-
-  return compareFacturaNumeroDesc(a, b);
+  return diff || compareFacturaNumeroDesc(a, b);
 }
 
 function compareFacturasDateAsc(a = {}, b = {}) {
   const diff = getEmissionTimestamp(a) - getEmissionTimestamp(b);
-  if (diff !== 0) return diff;
-
-  return compareFacturaNumeroAsc(a, b);
+  return diff || compareFacturaNumeroAsc(a, b);
 }
 
 function sortFacturasNewestFirst(items = []) {
@@ -1348,7 +1171,7 @@ function hasPdf(item = {}) {
     return true;
   }
 
-  if (
+  return Boolean(
     first(
       item.blobPath,
       item.blobName,
@@ -1369,35 +1192,12 @@ function hasPdf(item = {}) {
       raw.document?.blobPath,
       raw.document?.fileName
     )
-  ) {
-    return true;
-  }
-
-  const files = safeArray(
-    first(
-      item.attachments,
-      item.files,
-      item.adjuntos,
-      raw.attachments,
-      raw.files,
-      raw.adjuntos,
-      []
-    )
   );
+}
 
-  return files.some((file) => {
-    const value = safeObject(file);
-
-    const type = normalizeText(
-      first(value.contentType, value.mimeType, value.mimetype, value.type)
-    );
-
-    const name = normalizeText(
-      first(value.name, value.filename, value.fileName, value.url)
-    );
-
-    return type.includes("pdf") || name.endsWith(".pdf");
-  });
+function isValidEmail(value = "") {
+  const email = cleanText(value, "").toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 function isFacturaSent(item = {}) {
@@ -1444,7 +1244,7 @@ function canSendFactura(item = {}) {
 }
 
 /* =========================================================
-   FILTERS / SEARCH / SORT
+   FILTER / SEARCH / SORT
 ========================================================= */
 
 function normalizeFilter(value = "") {
@@ -1452,25 +1252,11 @@ function normalizeFilter(value = "") {
 
   if (!key || ["all", "todo", "todos", "todas", "total"].includes(key)) return "all";
 
-  if (
-    [
-      "pending",
-      "pendiente",
-      "pendientes",
-      "partial",
-      "parcial",
-      "draft",
-      "borrador",
-      "unpaid",
-      "sin_pagar",
-    ].includes(key)
-  ) {
+  if (["pending", "pendiente", "pendientes", "partial", "parcial", "draft", "borrador", "unpaid", "sin_pagar"].includes(key)) {
     return "pending";
   }
 
-  if (
-    ["paid", "pagada", "pagado", "pagadas", "cobrada", "cobrado"].includes(key)
-  ) {
+  if (["paid", "pagada", "pagado", "pagadas", "cobrada", "cobrado"].includes(key)) {
     return "paid";
   }
 
@@ -1503,15 +1289,14 @@ function getActiveFilter(input = {}) {
 }
 
 function getFilterLabel(filter = "all") {
-  const key = normalizeFilter(filter);
-  return FILTERS.find((item) => item.key === key)?.label || "Todas";
+  return FILTERS.find((item) => item.key === normalizeFilter(filter))?.label || "Todas";
 }
 
 function getSearchQuery(input = {}) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
 
-  return normalizeWhitespace(
+  return cleanText(
     first(
       data.search,
       data.searchQuery,
@@ -1528,7 +1313,8 @@ function getSearchQuery(input = {}) {
       runtime.keyword,
       runtime.facturasSearch,
       ""
-    )
+    ),
+    ""
   );
 }
 
@@ -1545,8 +1331,6 @@ function normalizeSort(value = "") {
       "oldest",
       "oldest_first",
       "menor_fecha",
-
-      /* Legacy compat: invoice asc now maps to date asc */
       "invoice_asc",
       "factura_asc",
       "numero_asc",
@@ -1591,26 +1375,23 @@ function getSortDirection(sortMode = "date_desc") {
 function getSortOption(sortMode = "date_desc") {
   const mode = normalizeSort(sortMode);
 
-  return (
-    SORT_OPTIONS.find((option) => option.modes.includes(mode)) ||
-    SORT_OPTIONS[0]
-  );
+  return SORT_OPTIONS.find((option) => option.modes.includes(mode)) || SORT_OPTIONS[0];
 }
 
 function getNextSortMode(option = SORT_OPTIONS[0], currentSortMode = "date_desc") {
   const mode = normalizeSort(currentSortMode);
-  const isActive = option.modes.includes(mode);
+  const active = option.modes.includes(mode);
 
-  if (!isActive) return option.desc;
+  if (!active) return option.desc;
 
   return mode.endsWith("_desc") ? option.asc : option.desc;
 }
 
 function getSortButtonLabel(option = SORT_OPTIONS[0], currentSortMode = "date_desc") {
   const mode = normalizeSort(currentSortMode);
-  const isActive = option.modes.includes(mode);
+  const active = option.modes.includes(mode);
 
-  if (!isActive) return `${option.label} ↓`;
+  if (!active) return `${option.label} ↓`;
 
   return `${option.label} ${mode.endsWith("_asc") ? "↑" : "↓"}`;
 }
@@ -1688,22 +1469,18 @@ function itemMatchesSearch(item = {}, query = "") {
 }
 
 function filterFacturas(items = [], input = {}) {
-  const activeFilter = getActiveFilter(input);
-  const searchQuery = getSearchQuery(input);
+  const filter = getActiveFilter(input);
+  const search = getSearchQuery(input);
 
-  return safeArray(items).filter((item) => (
-    itemMatchesFilter(item, activeFilter) && itemMatchesSearch(item, searchQuery)
-  ));
+  return safeArray(items)
+    .filter((item) => itemMatchesFilter(item, filter))
+    .filter((item) => itemMatchesSearch(item, search));
 }
 
 function sortFacturas(items = [], input = {}) {
-  const sortMode = getSortMode(input);
-
-  if (sortMode === "date_asc") {
-    return sortFacturasOldestFirst(items);
-  }
-
-  return sortFacturasNewestFirst(items);
+  return getSortMode(input) === "date_asc"
+    ? sortFacturasOldestFirst(items)
+    : sortFacturasNewestFirst(items);
 }
 
 function filterAndSortFacturas(items = [], input = {}) {
@@ -1735,7 +1512,7 @@ function computeFilterCounts(items = [], input = {}) {
 function computeStats(items = []) {
   return safeArray(items).reduce(
     (acc, item) => {
-      const total = safeNumber(getTotalRaw(item), 0);
+      const total = number(getTotalRaw(item), 0);
       const paymentKey = getEstadoPagoKey(getPaymentRaw(item));
 
       acc.total += 1;
@@ -1783,7 +1560,7 @@ function normalizePageSize(input = {}) {
   const runtime = getRuntimeState(data);
 
   return clamp(
-    safeNumber(
+    number(
       first(
         data.pageSize,
         runtime.pageSize,
@@ -1808,11 +1585,12 @@ function getPagination(items = [], input = {}) {
   const filtering = isFilterActive(data);
 
   const remoteTotal = Math.max(
-    safeNumber(
+    number(
       first(
         data.totalCount,
         data.remoteCount,
         data.totalMatched,
+        data.total,
         runtime.totalCount,
         runtime.remoteCount,
         runtime.totalMatched,
@@ -1828,7 +1606,7 @@ function getPagination(items = [], input = {}) {
 
   const totalPagesFromProps = filtering
     ? 0
-    : safeNumber(first(data.totalPages, runtime.totalPages), 0);
+    : number(first(data.totalPages, runtime.totalPages), 0);
 
   const totalPages = Math.max(
     1,
@@ -1836,7 +1614,7 @@ function getPagination(items = [], input = {}) {
   );
 
   const currentPage = clamp(
-    safeNumber(
+    number(
       first(data.page, runtime.page, runtime.currentPage, runtime.facturasPage, 1),
       1
     ),
@@ -1876,20 +1654,16 @@ function getPagination(items = [], input = {}) {
   };
 }
 
-/* =========================================================
-   BUSY STATE
-========================================================= */
-
 function resolveBusyMeta(item = {}, state = {}) {
   const runtime = safeObject(state);
   const facturaId = getFacturaId(item);
 
   return {
     facturaId,
-    isOpening: safeText(runtime.openingFacturaId, "") === facturaId,
-    isViewingPdf: safeText(runtime.viewingFacturaId, "") === facturaId,
-    isDownloading: safeText(runtime.downloadingFacturaId, "") === facturaId,
-    isSending: safeText(runtime.sendingFacturaId, "") === facturaId,
+    isOpening: cleanText(runtime.openingFacturaId, "") === facturaId,
+    isViewingPdf: cleanText(runtime.viewingFacturaId, "") === facturaId,
+    isDownloading: cleanText(runtime.downloadingFacturaId, "") === facturaId,
+    isSending: cleanText(runtime.sendingFacturaId, "") === facturaId,
   };
 }
 
@@ -1901,11 +1675,7 @@ function renderSpinner(label = "") {
   return `
     <span class="facturas-inline-loading">
       <span class="facturas-inline-spinner" aria-hidden="true"></span>
-      ${
-        label
-          ? `<span class="facturas-inline-loading-text">${escapeHtml(label)}</span>`
-          : ""
-      }
+      ${label ? `<span class="facturas-inline-loading-text">${escapeHtml(label)}</span>` : ""}
     </span>
   `;
 }
@@ -1931,19 +1701,19 @@ function renderAvatar(item = {}) {
   if (avatarUrl) {
     return `
       <div
-        class="facturas-avatar has-image ${escapeHtml(toneClass)}"
+        class="facturas-avatar has-image ${attr(toneClass)}"
         ${tooltipAttrs(fullName, fullName)}
         data-fallback="false"
         data-facturas-avatar="true"
       >
         <img
           class="facturas-avatar-img"
-          src="${escapeHtml(avatarUrl)}"
-          alt="${escapeHtml(fullName)}"
+          src="${attr(avatarUrl)}"
+          alt="${attr(fullName)}"
           loading="lazy"
           referrerpolicy="no-referrer"
           data-facturas-avatar-img="true"
-        />
+        >
         <span class="facturas-avatar-fallback">${escapeHtml(initials)}</span>
       </div>
     `;
@@ -1951,7 +1721,7 @@ function renderAvatar(item = {}) {
 
   return `
     <div
-      class="facturas-avatar facturas-avatar--fallback ${escapeHtml(toneClass)}"
+      class="facturas-avatar facturas-avatar--fallback ${attr(toneClass)}"
       ${tooltipAttrs(fullName, fullName)}
       data-fallback="true"
       data-facturas-avatar="true"
@@ -1967,7 +1737,7 @@ function renderEstadoPagoChip(item = {}) {
   const klass = getEstadoPagoChipClass(rawStatus);
 
   return `
-    <span class="facturas-chip ${escapeHtml(klass)}">
+    <span class="facturas-chip ${attr(klass)}">
       <span class="facturas-chip-dot" aria-hidden="true"></span>
       ${escapeHtml(label)}
     </span>
@@ -2046,9 +1816,9 @@ function renderIncidenciaLink(item = {}) {
     <button
       type="button"
       class="facturas-incidencia-link"
-      ${actionAttrs("open-incidencia", facturaId)}
-      data-ticket-id="${escapeHtml(incidenciaId)}"
-      data-incidencia-id="${escapeHtml(incidenciaId)}"
+      ${actionAttrs(FACTURAS_ACTIONS.OPEN_INCIDENCIA, facturaId)}
+      data-ticket-id="${attr(incidenciaId)}"
+      data-incidencia-id="${attr(incidenciaId)}"
       ${tooltipAttrs(tooltip, tooltip)}
     >
       ${icon("ticket")}
@@ -2070,8 +1840,8 @@ function renderPagination(pagination = {}, state = {}) {
       <button
         type="button"
         class="facturas-pagination-btn"
-        ${actionAttrs("prev-page")}
-        data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
+        ${actionAttrs(FACTURAS_ACTIONS.PREV_PAGE)}
+        data-page="${attr(String(Math.max(1, pagination.currentPage - 1)))}"
         ${disabledAttrs(prevDisabled)}
       >
         Anterior
@@ -2084,10 +1854,8 @@ function renderPagination(pagination = {}, state = {}) {
       <button
         type="button"
         class="facturas-pagination-btn facturas-pagination-btn--next"
-        ${actionAttrs("next-page")}
-        data-page="${escapeHtml(
-          String(Math.min(pagination.totalPages, pagination.currentPage + 1))
-        )}"
+        ${actionAttrs(FACTURAS_ACTIONS.NEXT_PAGE)}
+        data-page="${attr(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
         ${disabledAttrs(nextDisabled)}
       >
         Siguiente
@@ -2109,15 +1877,16 @@ function renderSearch(input = {}) {
         id="facturas-search-input"
         class="facturas-search-input"
         type="search"
-        value="${escapeHtml(searchQuery)}"
+        value="${attr(searchQuery)}"
         placeholder="Buscar factura, cliente, email, importe..."
         autocomplete="off"
         spellcheck="false"
-        data-facturas-action="search"
-        data-action="search-facturas"
+        data-facturas-action="${FACTURAS_ACTIONS.SEARCH}"
+        data-action="${FACTURAS_ACTIONS.SEARCH}"
+        data-field="search"
         data-facturas-search-input="true"
         aria-label="Buscar facturas por cliente, email, importe o número de factura"
-      />
+      >
 
       ${
         searchQuery
@@ -2125,8 +1894,8 @@ function renderSearch(input = {}) {
             <button
               type="button"
               class="facturas-search-clear"
-              data-facturas-action="clear-search"
-              data-action="clear-search"
+              data-facturas-action="${FACTURAS_ACTIONS.CLEAR_SEARCH}"
+              data-action="${FACTURAS_ACTIONS.CLEAR_SEARCH}"
               ${tooltipAttrs("Limpiar búsqueda", "Limpiar búsqueda")}
             >
               ${icon("close")}
@@ -2153,19 +1922,19 @@ function renderFilters(input = {}, pagination = {}) {
         aria-label="Filtrar facturas por estado de pago"
       >
         ${FILTERS.map((filter) => {
-          const isActive = filter.key === activeFilter;
+          const active = filter.key === activeFilter;
           const count = counts[filter.key] ?? 0;
 
           return `
             <button
               type="button"
-              class="facturas-filter-pill${isActive ? " is-active" : ""}"
-              data-facturas-action="filter"
-              data-action="filter-facturas"
-              data-filter="${escapeHtml(filter.key)}"
-              data-filter-status="${escapeHtml(filter.key)}"
-              data-payment-filter="${escapeHtml(filter.key)}"
-              aria-pressed="${isActive ? "true" : "false"}"
+              class="facturas-filter-pill${active ? " is-active" : ""}"
+              data-facturas-action="${FACTURAS_ACTIONS.FILTER}"
+              data-action="${FACTURAS_ACTIONS.FILTER}"
+              data-filter="${attr(filter.key)}"
+              data-filter-status="${attr(filter.key)}"
+              data-payment-filter="${attr(filter.key)}"
+              aria-pressed="${active ? "true" : "false"}"
             >
               <span>${escapeHtml(filter.label)}</span>
               <strong>${escapeHtml(String(count))}</strong>
@@ -2178,10 +1947,10 @@ function renderFilters(input = {}, pagination = {}) {
         class="facturas-sort-pills"
         role="group"
         aria-label="Ordenar listado de facturas"
-        data-current-sort="${escapeHtml(sortMode)}"
+        data-current-sort="${attr(sortMode)}"
       >
         ${SORT_OPTIONS.map((option) => {
-          const isActive = option.modes.includes(sortMode);
+          const active = option.modes.includes(sortMode);
           const nextSortMode = getNextSortMode(option, sortMode);
           const nextDirection = getSortDirection(nextSortMode);
           const label = getSortButtonLabel(option, sortMode);
@@ -2190,18 +1959,18 @@ function renderFilters(input = {}, pagination = {}) {
           return `
             <button
               type="button"
-              class="facturas-sort-pill${isActive ? " is-active" : ""}"
-              data-facturas-action="sort"
-              data-action="sort-facturas"
-              data-sort="${escapeHtml(nextSortMode)}"
-              data-sort-mode="${escapeHtml(nextSortMode)}"
-              data-facturas-sort="${escapeHtml(nextSortMode)}"
-              data-current-sort="${escapeHtml(sortMode)}"
-              data-next-sort="${escapeHtml(nextSortMode)}"
-              data-sort-key="${escapeHtml(option.key)}"
-              data-sort-direction="${escapeHtml(nextDirection)}"
+              class="facturas-sort-pill${active ? " is-active" : ""}"
+              data-facturas-action="${FACTURAS_ACTIONS.SORT}"
+              data-action="${FACTURAS_ACTIONS.SORT}"
+              data-sort="${attr(nextSortMode)}"
+              data-sort-mode="${attr(nextSortMode)}"
+              data-facturas-sort="${attr(nextSortMode)}"
+              data-current-sort="${attr(sortMode)}"
+              data-next-sort="${attr(nextSortMode)}"
+              data-sort-key="${attr(option.key)}"
+              data-sort-direction="${attr(nextDirection)}"
               ${tooltipAttrs(tooltip, tooltip)}
-              aria-pressed="${isActive ? "true" : "false"}"
+              aria-pressed="${active ? "true" : "false"}"
             >
               <span>${escapeHtml(label)}</span>
             </button>
@@ -2230,15 +1999,19 @@ function renderActionButton({
   const finalBusy = Boolean(ariaBusy || loading);
   const finalTooltip = tooltip || label;
 
-  const classes = ["facturas-action-btn", klass, loading ? "is-loading" : ""]
-    .map((item) => safeText(item, ""))
+  const classes = [
+    "facturas-action-btn",
+    klass,
+    loading ? "is-loading" : "",
+  ]
+    .map((item) => cleanText(item, ""))
     .filter(Boolean)
     .join(" ");
 
   return `
     <button
       type="button"
-      class="${escapeHtml(classes)}"
+      class="${attr(classes)}"
       ${actionAttrs(action, facturaId)}
       ${tooltipAttrs(finalTooltip, finalTooltip)}
       ${disabledAttrs(finalDisabled, finalBusy)}
@@ -2255,11 +2028,15 @@ function renderActionButton({
   `;
 }
 
+/* =========================================================
+   ROW / TABLE
+========================================================= */
+
 function renderRow(item = {}, state = {}) {
   const busy = resolveBusyMeta(item, state);
 
   const facturaId = busy.facturaId;
-  const numero = getFacturaDisplayId(item);
+  const numero = getFacturaNumero(item);
   const numeroSistema = getFacturaSistema(item);
   const clientName = getClientName(item);
   const secondaryName = getClientSecondaryName(item);
@@ -2277,7 +2054,7 @@ function renderRow(item = {}, state = {}) {
   const sendLabel = sent ? "Reenviar" : "Enviar";
   const sendTooltip = !pdfAvailable
     ? "No se puede enviar: falta PDF"
-    : !isValidEmail(getClientEmail(item))
+    : !getClientEmail(item)
       ? "No se puede enviar: falta email válido"
       : sent
         ? "Reenviar factura al cliente"
@@ -2287,14 +2064,14 @@ function renderRow(item = {}, state = {}) {
 
   return `
     <tr
-      class="facturas-table-row facturas-table-row--${escapeHtml(paymentKey)}"
+      class="facturas-table-row facturas-table-row--${attr(paymentKey)}"
       data-facturas-row="true"
-      data-factura-id="${escapeHtml(facturaId)}"
+      data-factura-id="${attr(facturaId)}"
       data-sent="${sent ? "true" : "false"}"
       data-has-pdf="${pdfAvailable ? "true" : "false"}"
       data-row-click-disabled="false"
       tabindex="0"
-      aria-label="Abrir detalle de factura ${escapeHtml(numero)}"
+      aria-label="Abrir detalle de factura ${attr(numero)}"
     >
       <td class="facturas-cell facturas-cell--main">
         <div class="facturas-main">
@@ -2303,6 +2080,7 @@ function renderRow(item = {}, state = {}) {
           <div class="facturas-main-copy">
             <div class="facturas-factura-line">
               <span class="facturas-factura-id">${escapeHtml(numero)}</span>
+
               ${
                 numeroSistema && numeroSistema !== numero
                   ? `<span class="facturas-system-id">${escapeHtml(numeroSistema)}</span>`
@@ -2358,7 +2136,7 @@ function renderRow(item = {}, state = {}) {
       <td class="facturas-cell facturas-cell--actions">
         <div class="facturas-actions">
           ${renderActionButton({
-            action: "open-factura",
+            action: FACTURAS_ACTIONS.OPEN_FACTURA,
             facturaId,
             label: "Detalle",
             loadingLabel: "Abriendo detalle",
@@ -2369,7 +2147,7 @@ function renderRow(item = {}, state = {}) {
           })}
 
           ${renderActionButton({
-            action: "view-factura-pdf",
+            action: FACTURAS_ACTIONS.VIEW_PDF,
             facturaId,
             label: "Ver PDF",
             loadingLabel: "Abriendo PDF",
@@ -2382,7 +2160,7 @@ function renderRow(item = {}, state = {}) {
 
           ${renderActionButton({
             klass: "facturas-action-btn--primary",
-            action: "download-factura",
+            action: FACTURAS_ACTIONS.DOWNLOAD_PDF,
             facturaId,
             label: "Descargar",
             loadingLabel: "Descargando factura",
@@ -2395,7 +2173,7 @@ function renderRow(item = {}, state = {}) {
 
           ${renderActionButton({
             klass: "facturas-action-btn--success",
-            action: "send-factura",
+            action: FACTURAS_ACTIONS.SEND_FACTURA,
             facturaId,
             label: sendLabel,
             loadingLabel: "Enviando factura",
@@ -2414,27 +2192,23 @@ function renderRow(item = {}, state = {}) {
 function renderTableLoading(rows = DEFAULT_PAGE_SIZE) {
   return `
     <div class="facturas-table-loading" aria-hidden="true">
-      ${Array.from({ length: rows })
-        .map(
-          () => `
-            <div class="facturas-table-loading-row">
-              <div class="facturas-skeleton facturas-skeleton--avatar"></div>
+      ${Array.from({ length: rows }).map(() => `
+        <div class="facturas-table-loading-row">
+          <div class="facturas-skeleton facturas-skeleton--avatar"></div>
 
-              <div class="facturas-table-loading-copy">
-                <div class="facturas-skeleton facturas-skeleton--xs"></div>
-                <div class="facturas-skeleton facturas-skeleton--lg"></div>
-                <div class="facturas-skeleton facturas-skeleton--md"></div>
-              </div>
+          <div class="facturas-table-loading-copy">
+            <div class="facturas-skeleton facturas-skeleton--xs"></div>
+            <div class="facturas-skeleton facturas-skeleton--lg"></div>
+            <div class="facturas-skeleton facturas-skeleton--md"></div>
+          </div>
 
-              <div class="facturas-skeleton facturas-skeleton--pill"></div>
-              <div class="facturas-skeleton facturas-skeleton--date"></div>
-              <div class="facturas-skeleton facturas-skeleton--amount"></div>
-              <div class="facturas-skeleton facturas-skeleton--ticket"></div>
-              <div class="facturas-skeleton facturas-skeleton--actions"></div>
-            </div>
-          `
-        )
-        .join("")}
+          <div class="facturas-skeleton facturas-skeleton--pill"></div>
+          <div class="facturas-skeleton facturas-skeleton--date"></div>
+          <div class="facturas-skeleton facturas-skeleton--amount"></div>
+          <div class="facturas-skeleton facturas-skeleton--ticket"></div>
+          <div class="facturas-skeleton facturas-skeleton--actions"></div>
+        </div>
+      `).join("")}
     </div>
   `;
 }
@@ -2484,8 +2258,8 @@ function renderEmptyState({ hasError = false, filtering = false, searchQuery = "
             <button
               type="button"
               class="facturas-btn"
-              data-facturas-action="clear-filters"
-              data-action="clear-filters"
+              data-facturas-action="${FACTURAS_ACTIONS.CLEAR_FILTERS}"
+              data-action="${FACTURAS_ACTIONS.CLEAR_FILTERS}"
             >
               ${icon("close")}
               <span class="facturas-btn-text">Limpiar filtros</span>
@@ -2507,7 +2281,7 @@ export function renderHeader(input = {}) {
   const runtime = getRuntimeState(data);
 
   const stats = computeStats(rows);
-  const canCreateFactura = isAdminState(runtime);
+  const canCreateFactura = isAdmin(data);
 
   const updatedAt = first(
     data.lastUpdatedAt,
@@ -2519,14 +2293,16 @@ export function renderHeader(input = {}) {
 
   const remoteCount = Math.max(
     stats.total,
-    safeNumber(
+    number(
       first(
         data.remoteCount,
         data.totalCount,
         data.totalMatched,
+        data.total,
         runtime.remoteCount,
         runtime.totalCount,
         runtime.totalMatched,
+        runtime.total,
         stats.total
       ),
       stats.total
@@ -2552,8 +2328,8 @@ export function renderHeader(input = {}) {
             type="button"
             id="facturas-export-btn"
             class="facturas-btn"
-            data-action="export"
-            data-facturas-action="export"
+            data-action="${FACTURAS_ACTIONS.EXPORT}"
+            data-facturas-action="${FACTURAS_ACTIONS.EXPORT}"
             ${disabledAttrs(loading || refreshing || !rows.length)}
           >
             ${icon("export")}
@@ -2567,8 +2343,8 @@ export function renderHeader(input = {}) {
                   type="button"
                   id="facturas-create-btn"
                   class="facturas-btn facturas-btn--create${creating ? " is-loading" : ""}"
-                  data-action="create-factura"
-                  data-facturas-action="create-factura"
+                  data-action="${FACTURAS_ACTIONS.CREATE_OPEN}"
+                  data-facturas-action="${FACTURAS_ACTIONS.CREATE_OPEN}"
                   aria-label="Crear nueva factura"
                   ${disabledAttrs(creating, creating)}
                 >
@@ -2586,8 +2362,8 @@ export function renderHeader(input = {}) {
             type="button"
             id="facturas-refresh-btn"
             class="facturas-btn facturas-btn--primary${refreshing ? " is-loading" : ""}"
-            data-action="refresh"
-            data-facturas-action="refresh"
+            data-action="${FACTURAS_ACTIONS.REFRESH}"
+            data-facturas-action="${FACTURAS_ACTIONS.REFRESH}"
             ${disabledAttrs(refreshing || loading, refreshing)}
           >
             ${
@@ -2634,9 +2410,7 @@ export function renderHeader(input = {}) {
 
         <article class="facturas-stat-card facturas-stat-card--success">
           <div class="facturas-stat-label">Importe agregado</div>
-          <div class="facturas-stat-value">${escapeHtml(
-            formatMoney(stats.totalImporte, DEFAULT_CURRENCY)
-          )}</div>
+          <div class="facturas-stat-value">${escapeHtml(formatMoney(stats.totalImporte, DEFAULT_CURRENCY))}</div>
           <div class="facturas-stat-text">Suma de la colección actualmente visible.</div>
         </article>
 
@@ -2648,9 +2422,7 @@ export function renderHeader(input = {}) {
 
         <article class="facturas-stat-card facturas-stat-card--danger">
           <div class="facturas-stat-label">Vencidas / pagadas</div>
-          <div class="facturas-stat-value">${escapeHtml(
-            `${stats.overdueCount} / ${stats.paidCount}`
-          )}</div>
+          <div class="facturas-stat-value">${escapeHtml(`${stats.overdueCount} / ${stats.paidCount}`)}</div>
           <div class="facturas-stat-text">Balance rápido entre deuda vencida y cobros cerrados.</div>
         </article>
       </div>
@@ -2662,24 +2434,49 @@ export function renderHeader(input = {}) {
    LOADING / ERROR
 ========================================================= */
 
-export function renderLoadingState() {
+export function renderFacturasLoadingState(input = {}) {
   return `
-    <section class="facturas-history">
-      ${renderTableLoading(DEFAULT_PAGE_SIZE)}
+    <section
+      class="facturas-view-root facturas-view-root--loading"
+      data-facturas-scope="true"
+      data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}"
+      aria-busy="true"
+    >
+      ${renderHeader({ ...safeObject(input), loading: true })}
+      <section class="facturas-history">
+        ${renderTableLoading(DEFAULT_PAGE_SIZE)}
+      </section>
     </section>
   `;
 }
 
-export function renderErrorState(message = "No se pudieron cargar las facturas.") {
+export function renderFacturasErrorState(message = "No se pudieron cargar las facturas.") {
   return `
-    <section class="facturas-error">
-      <h3 class="facturas-error-title">No se pudo renderizar la vista de facturas</h3>
-      <p class="facturas-error-text">${escapeHtml(
-        safeText(message, "Error desconocido al cargar la vista.")
-      )}</p>
+    <section
+      class="facturas-view-root facturas-view-root--error"
+      data-facturas-scope="true"
+      data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}"
+    >
+      <section class="facturas-error">
+        <h3 class="facturas-error-title">No se pudo renderizar la vista de facturas</h3>
+        <p class="facturas-error-text">${escapeHtml(cleanText(message, "Error desconocido al cargar la vista."))}</p>
+
+        <button
+          type="button"
+          class="facturas-btn facturas-btn--primary"
+          data-facturas-action="${FACTURAS_ACTIONS.REFRESH}"
+          data-action="${FACTURAS_ACTIONS.REFRESH}"
+        >
+          ${icon("refresh")}
+          <span class="facturas-btn-text">Reintentar</span>
+        </button>
+      </section>
     </section>
   `;
 }
+
+export const renderLoadingState = renderFacturasLoadingState;
+export const renderErrorState = renderFacturasErrorState;
 
 /* =========================================================
    MAIN TABLE
@@ -2689,44 +2486,40 @@ export function renderCards(input = {}) {
   const data = safeObject(input);
   const items = getInputItems(data);
   const runtime = getRuntimeState(data);
-
   const pagination = getPagination(items, data);
 
   const loading = Boolean(first(runtime.loading, data.loading));
   const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
-  const hasError = Boolean(safeText(first(runtime.error, data.error), ""));
+  const hasError = Boolean(cleanText(first(runtime.error, data.error), ""));
 
   const showInitialLoading = loading && !pagination.pageItems.length;
   const showRefreshOverlay = refreshing && pagination.pageItems.length;
 
   const activeFilterLabel = getFilterLabel(pagination.activeFilter);
   const searchQuery = pagination.searchQuery;
-  const activeSortDirection = getSortDirection(pagination.sortMode);
-  const activeSortLabel =
-    activeSortDirection === "asc"
-      ? "fecha ascendente"
-      : "fecha descendente";
+  const sortDirection = getSortDirection(pagination.sortMode);
+  const sortLabel = sortDirection === "asc"
+    ? "fecha ascendente"
+    : "fecha descendente";
 
   const activeCriteria = [
     pagination.activeFilter !== "all" ? activeFilterLabel : "",
     searchQuery ? `búsqueda “${searchQuery}”` : "",
-    activeSortLabel ? `orden ${activeSortLabel}` : "",
+    sortLabel ? `orden ${sortLabel}` : "",
   ].filter(Boolean);
 
   const subtitle = showInitialLoading
     ? "Cargando facturas..."
     : pagination.filtering
       ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · ${activeCriteria.join(" · ")}`
-      : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages} · orden ${activeSortLabel}`;
+      : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages} · orden ${sortLabel}`;
 
   return `
     <section class="facturas-history">
       <div class="facturas-history-head">
         <div class="facturas-history-copy">
           <h2 class="facturas-history-title">Historial de facturas</h2>
-          <p class="facturas-history-subtitle">
-            ${escapeHtml(subtitle)}
-          </p>
+          <p class="facturas-history-subtitle">${escapeHtml(subtitle)}</p>
         </div>
 
         ${renderPagination(pagination, runtime)}
@@ -2784,10 +2577,6 @@ export function renderCards(input = {}) {
   `;
 }
 
-/* =========================================================
-   ALIAS PARA COMPATIBILIDAD
-========================================================= */
-
 export const renderTable = renderCards;
 
 /* =========================================================
@@ -2800,11 +2589,7 @@ export function renderFacturasTemplate(input = {}) {
   const runtime = getRuntimeState(data);
 
   if (runtime.error && !items.length) {
-    return `
-      <section class="facturas-view-root" data-facturas-scope="true">
-        ${renderErrorState(runtime.error)}
-      </section>
-    `;
+    return renderFacturasErrorState(runtime.error);
   }
 
   const payload = {
@@ -2814,15 +2599,36 @@ export function renderFacturasTemplate(input = {}) {
   };
 
   return `
-    <section class="facturas-view-root" data-facturas-scope="true">
+    <section
+      class="facturas-view-root"
+      data-facturas-scope="true"
+      data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}"
+      data-total="${attr(String(first(data.total, data.remoteCount, items.length)))}"
+      data-count="${attr(String(items.length))}"
+      aria-busy="${payload.loading || runtime.loading || runtime.refreshing ? "true" : "false"}"
+    >
+      ${
+        cleanText(first(data.error, runtime.error), "")
+          ? `
+            <div class="facturas-alert facturas-alert--error" role="alert">
+              ${icon("lock")}
+              <span>${escapeHtml(cleanText(first(data.error, runtime.error), ""))}</span>
+            </div>
+          `
+          : ""
+      }
+
       ${renderHeader(payload)}
       ${renderCards(payload)}
+
+      ${renderFacturasCreateModal(data.createModal || {})}
+      ${renderFacturasDetailModal(data.detailModal || {})}
     </section>
   `;
 }
 
 /* =========================================================
-   DOM BINDINGS · CSP CLEAN
+   OPTIONAL DOM HARDENING
 ========================================================= */
 
 export function bindFacturasTemplateDom(root = null) {
@@ -2854,7 +2660,9 @@ export function bindFacturasTemplateDom(root = null) {
 
       try {
         img.hidden = true;
-      } catch {}
+      } catch {
+        // noop
+      }
     };
 
     img.addEventListener("error", setFallback, { passive: true });
@@ -2868,15 +2676,65 @@ export function bindFacturasTemplateDom(root = null) {
 }
 
 /* =========================================================
-   DEFAULT EXPORT
+   SNAPSHOT
 ========================================================= */
 
+export function getFacturasTemplateSnapshot() {
+  return {
+    version: FACTURAS_TEMPLATE_VERSION,
+
+    actions: FACTURAS_ACTIONS,
+    filters: FILTERS,
+    sortOptions: SORT_OPTIONS,
+
+    policy: {
+      templateMain: true,
+      includesCreateModal: true,
+      includesDetailModal: true,
+
+      noAppCore: true,
+      noAuth: true,
+      noRouter: true,
+      noHttp: true,
+      noStore: true,
+      noStateExternal: true,
+
+      tableMarkup: true,
+      filtersMarkup: true,
+      searchMarkup: true,
+      paginationMarkup: true,
+      pdfActions: true,
+      sendActions: true,
+      openIncidenciaAction: true,
+
+      optionalAvatarFallbackBinding: true,
+    },
+  };
+}
+
+/* =========================================================
+   EXPORTS
+========================================================= */
+
+export const renderFacturasViewTemplate = renderFacturasTemplate;
+
 export default {
+  FACTURAS_TEMPLATE_VERSION,
+  FACTURAS_ACTIONS,
+
   renderHeader,
   renderCards,
   renderTable,
+
   renderLoadingState,
   renderErrorState,
+  renderFacturasLoadingState,
+  renderFacturasErrorState,
+
   renderFacturasTemplate,
+  renderFacturasViewTemplate,
+
   bindFacturasTemplateDom,
+
+  getFacturasTemplateSnapshot,
 };

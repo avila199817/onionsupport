@@ -11,7 +11,7 @@
    - Sin Auth, Router, Store, Services, fetch, storage ni dominio.
 ========================================================= */
 
-export const MAIN_VERSION = "main.minimal.v2";
+export const MAIN_VERSION = "main.minimal.v3";
 
 const APP_MODULE = "./app/index.js";
 const BOOT_PROMISE_KEY = "__ONION_BOOT_PROMISE__";
@@ -61,6 +61,9 @@ function setAppState(state = "booting") {
     node.dataset.appReady = ready ? "true" : "false";
     node.dataset.appFatal = fatal ? "true" : "false";
 
+    node.classList.remove("no-js");
+    node.classList.add("js");
+
     node.classList.toggle("app-booting", booting);
     node.classList.toggle("app-loading", booting);
     node.classList.toggle("app-ready", ready);
@@ -75,10 +78,18 @@ function showNode(node) {
     node.hidden = false;
     node.removeAttribute("hidden");
     node.removeAttribute("inert");
+
     node.setAttribute("aria-hidden", "false");
     node.setAttribute("aria-busy", "false");
 
-    node.classList.remove("is-hidden", "app-hidden", "shell-hidden");
+    node.classList.remove(
+      "is-hidden",
+      "app-hidden",
+      "shell-hidden",
+      "route-hidden",
+      "chrome-hidden"
+    );
+
     node.classList.add("is-visible");
 
     node.style.removeProperty("display");

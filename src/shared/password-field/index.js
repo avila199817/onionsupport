@@ -1,6 +1,6 @@
 /* =========================================================
    Onion Support - Shared Auth Template
-   Archivo: /src/shared/auth-template/index.js
+   Archivo: /src/shared/password-field/index.js
 
    Responsabilidad:
    - Template base para vistas públicas/auth.

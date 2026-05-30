@@ -32,7 +32,7 @@ import {
 
 import * as Routes from "./routes.js";
 
-export const ROUTER_VERSION = "router.minimal.v1";
+export const ROUTER_VERSION = "router.minimal.v2";
 
 const HOME_PATH = ROUTES.home || "/";
 const LOGIN_PATH = ROUTES.login || "/login";
@@ -89,12 +89,14 @@ function getRoutes() {
 
 function readState() {
   try {
-    return isObject(AppCore?.getState)
-      ? AppCore.getState()
-      : AppCore?.state || {};
+    if (isFunction(AppCore?.getState)) {
+      return AppCore.getState();
+    }
   } catch {
-    return AppCore?.state || {};
+    // fallback abajo
   }
+
+  return isObject(AppCore?.state) ? AppCore.state : {};
 }
 
 function writeState(patch = {}) {
@@ -778,9 +780,50 @@ function node(id = "") {
 function setHidden(element = null, hidden = false) {
   if (!element) return false;
 
+  const value = Boolean(hidden);
+
   try {
-    element.hidden = Boolean(hidden);
-    element.setAttribute("aria-hidden", hidden ? "true" : "false");
+    element.hidden = value;
+    element.setAttribute("aria-hidden", value ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function forceVisible(element = null, mode = "app") {
+  if (!element) return false;
+
+  try {
+    element.hidden = false;
+    element.removeAttribute("hidden");
+    element.removeAttribute("inert");
+
+    element.setAttribute("aria-hidden", "false");
+    element.setAttribute("aria-busy", "false");
+
+    element.dataset.routeMode = mode;
+    element.dataset.shell = "visible";
+    element.dataset.shellState = "ready";
+    element.dataset.appReady = "true";
+    element.dataset.appLoading = "false";
+    element.dataset.chrome = "visible";
+
+    element.classList.remove(
+      "is-hidden",
+      "app-hidden",
+      "shell-hidden",
+      "route-hidden",
+      "chrome-hidden"
+    );
+
+    element.classList.add("is-visible");
+
+    element.style.removeProperty("display");
+    element.style.removeProperty("visibility");
+    element.style.removeProperty("opacity");
+    element.style.removeProperty("pointer-events");
+
     return true;
   } catch {
     return false;
@@ -789,23 +832,47 @@ function setHidden(element = null, hidden = false) {
 
 function setShell(route = null) {
   const publicRoute = route?.public === true;
+  const mode = publicRoute ? "auth" : "app";
+  const chrome = publicRoute ? "hidden" : "visible";
 
   const html = isBrowser() ? document.documentElement : null;
   const body = isBrowser() ? document.body : null;
 
   for (const root of [html, body].filter(Boolean)) {
-    root.dataset.routeMode = publicRoute ? "auth" : "app";
-    root.dataset.chrome = publicRoute ? "hidden" : "visible";
-    root.dataset.shell = "ready";
+    root.dataset.routeMode = mode;
+    root.dataset.shell = "visible";
+    root.dataset.shellState = "ready";
+    root.dataset.appReady = "true";
+    root.dataset.appLoading = "false";
+    root.dataset.chrome = chrome;
+
+    root.classList.toggle("route-auth", publicRoute);
+    root.classList.toggle("route-app", !publicRoute);
+    root.classList.toggle("chrome-hidden", publicRoute);
+    root.classList.toggle("chrome-visible", !publicRoute);
   }
 
-  setHidden(node("app-shell"), false);
-  setHidden(node("main-content"), false);
-  setHidden(node("app-content"), false);
-  setHidden(node("view-container"), false);
+  const appShell = node("app-shell");
+  const mainContent = node("main-content");
+  const appContent = node("app-content");
+  const viewContainer = node("view-container");
 
-  setHidden(node("sidebar-mount"), publicRoute);
-  setHidden(node("topbar-mount"), publicRoute);
+  for (const element of [appShell, mainContent, appContent, viewContainer].filter(Boolean)) {
+    forceVisible(element, mode);
+  }
+
+  const sidebar = node("sidebar-mount");
+  const topbar = node("topbar-mount");
+
+  setHidden(sidebar, publicRoute);
+  setHidden(topbar, publicRoute);
+
+  for (const element of [sidebar, topbar].filter(Boolean)) {
+    element.dataset.routeMode = mode;
+    element.dataset.chrome = chrome;
+    element.classList.toggle("is-hidden", publicRoute);
+    element.classList.toggle("is-visible", !publicRoute);
+  }
 
   const tableHead = node("table-head");
   const tableHeadContainer = node("tablehead-container");
@@ -980,6 +1047,7 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
     };
   }
 
+  forceVisible(root, route?.public === true ? "auth" : "app");
   root.replaceChildren();
 
   try {

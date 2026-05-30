@@ -9,10 +9,10 @@
    - Usar rutas reales desde router/routes.js.
    - Ocultar rutas admin para usuarios no admin.
    - Construir URLs visibles /@{user.slug}/{ruta}.
-   - Delegar navegación en Router.
+   - Dejar navegación en el Router global mediante data-spa/data-route.
    - Delegar logout en Auth.
-   - Sin submódulos, sin HTTP, sin Toast, sin Store,
-     sin dropdown externo, sin template externo y sin rutas inventadas.
+   - Sin submódulos, HTTP, Toast, Store, dropdown externo,
+     template externo ni rutas inventadas.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -31,7 +31,7 @@ import {
 
 import { getImmutableRoutes } from "../../router/routes.js";
 
-export const SIDEBAR_VERSION = "sidebar.minimal.v1";
+export const SIDEBAR_VERSION = "sidebar.minimal.v2";
 
 const SIDEBAR_ROOT_ID = "app-sidebar";
 const BRAND_LABEL = "Onion Support";
@@ -138,10 +138,13 @@ function setHidden(node = null, hidden = false) {
 
   const value = Boolean(hidden);
 
-  node.hidden = value;
-  node.setAttribute("aria-hidden", value ? "true" : "false");
-
-  return true;
+  try {
+    node.hidden = value;
+    node.setAttribute("aria-hidden", value ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getMount() {
@@ -149,7 +152,7 @@ function getMount() {
 
   return (
     byId("sidebar-mount") ||
-    byId("app-sidebar") ||
+    byId(SIDEBAR_ROOT_ID) ||
     document.querySelector?.("[data-sidebar-mount]") ||
     document.querySelector?.("[data-sidebar-root]") ||
     null
@@ -228,11 +231,26 @@ function safeImageUrl(value = "") {
   const raw = cleanText(value, "");
 
   if (!raw) return "";
-  if (/[\r\n\t]/.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
 
   if (raw.startsWith("/")) return raw;
-  if (/^https?:\/\//i.test(raw)) return raw;
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw);
+
+      if (
+        url.hostname === "api.onionit.net" ||
+        url.hostname.endsWith(".onionit.net") ||
+        url.hostname.endsWith(".blob.core.windows.net")
+      ) {
+        return url.toString();
+      }
+    } catch {
+      return "";
+    }
+  }
 
   return "";
 }
@@ -489,7 +507,7 @@ function routeLabel(route = null) {
 }
 
 function isRouteAdmin(route = null) {
-  return Boolean(route?.adminOnly || route?.requiresAdmin || route?.routeGroup === "admin");
+  return Boolean(route?.adminOnly || route?.requiresAdmin);
 }
 
 function isRouteVisible(route = null, user = getUserViewModel()) {
@@ -535,6 +553,7 @@ function getMenuItems(context = getContext()) {
       const lookup = routeLookupPath(path);
 
       if (seen.has(lookup)) return null;
+
       seen.add(lookup);
 
       return {
@@ -564,18 +583,6 @@ function getCurrentRoute() {
   }
 }
 
-function shouldRenderSidebar(context = getContext()) {
-  if (!context.authenticated || !context.user?.hasUser) return false;
-
-  const route = context.route;
-
-  if (route?.public === true) return false;
-  if (route?.hideShell === true) return false;
-  if (route?.layout === "auth") return false;
-
-  return true;
-}
-
 function getContext() {
   const user = getUserViewModel();
 
@@ -597,17 +604,31 @@ function getContext() {
   };
 }
 
+function shouldRenderSidebar(context = getContext()) {
+  if (!context.authenticated || !context.user?.hasUser) return false;
+
+  const route = context.route;
+
+  if (route?.public === true) return false;
+  if (route?.hideShell === true) return false;
+  if (route?.layout === "auth") return false;
+
+  return true;
+}
+
 /* =========================================================
    RENDER
 ========================================================= */
 
 function createBrand(context) {
+  const href = userHomeHref(context.user);
+
   const brand = create("a", {
     className: "sidebar-brand",
     attrs: {
-      href: userHomeHref(context.user),
+      href,
       "data-spa": "true",
-      "data-route": userHomeHref(context.user),
+      "data-route": href,
       "aria-label": BRAND_LABEL,
     },
   });
@@ -638,9 +659,16 @@ function createMenuItem(item) {
       "data-spa": "true",
       "data-route": item.href,
       "data-sidebar-key": item.key,
-      "aria-current": item.active ? "page" : "false",
     },
   });
+
+  if (item.active) {
+    link.setAttribute("aria-current", "page");
+  }
+
+  if (item.adminOnly) {
+    link.dataset.adminOnly = "true";
+  }
 
   const icon = create("span", {
     className: "sidebar-link-icon",
@@ -656,10 +684,6 @@ function createMenuItem(item) {
   });
 
   link.append(icon, label);
-
-  if (item.adminOnly) {
-    link.dataset.adminOnly = "true";
-  }
 
   return link;
 }
@@ -703,6 +727,7 @@ function createAvatar(user) {
         alt: "",
         loading: "lazy",
         referrerpolicy: "no-referrer",
+        draggable: "false",
       },
     });
 
@@ -771,7 +796,11 @@ function createRoot(context, items) {
     },
   });
 
-  aside.append(createBrand(context), createMenu(items), createUserBlock(context.user));
+  aside.append(
+    createBrand(context),
+    createMenu(items),
+    createUserBlock(context.user)
+  );
 
   return aside;
 }
@@ -854,8 +883,7 @@ function renderSidebar(context = getContext()) {
     return SidebarUI;
   }
 
-  const items = getMenuItems(context);
-  const nextRoot = createRoot(context, items);
+  const nextRoot = createRoot(context, getMenuItems(context));
 
   mountRoot(nextRoot);
   syncSidebarStateToDom();
@@ -885,7 +913,6 @@ async function navigateTo(path = "/", options = {}) {
   });
 
   closeSidebar();
-  sync();
 
   return true;
 }
@@ -924,8 +951,6 @@ async function handleLogout(options = {}) {
       source: "sidebar.logout",
       replaceState: true,
     });
-
-    sync();
   }
 
   return true;
@@ -935,46 +960,23 @@ async function handleLogout(options = {}) {
    EVENTS
 ========================================================= */
 
-function linkHref(element = null) {
-  return cleanText(
-    element?.dataset?.route ||
-      element?.dataset?.href ||
-      element?.dataset?.to ||
-      element?.getAttribute?.("href"),
-    ""
-  );
-}
-
 function onClick(event) {
   const action = event.target?.closest?.("[data-sidebar-action]");
-  const link = event.target?.closest?.("a[data-spa], a[data-route]");
 
-  if (action) {
-    const type = cleanText(action.dataset.sidebarAction, "");
+  if (!action) return;
 
-    event.preventDefault();
-
-    if (type === "logout") {
-      void handleLogout();
-      return;
-    }
-
-    if (type === "open") openSidebar();
-    if (type === "close") closeSidebar();
-    if (type === "toggle") toggleSidebar();
-
-    return;
-  }
-
-  if (!link) return;
-
-  const href = linkHref(link);
-
-  if (!href || isUnsafePath(href)) return;
+  const type = cleanText(action.dataset.sidebarAction, "");
 
   event.preventDefault();
 
-  void navigateTo(href);
+  if (type === "logout") {
+    void handleLogout();
+    return;
+  }
+
+  if (type === "open") openSidebar();
+  if (type === "close") closeSidebar();
+  if (type === "toggle") toggleSidebar();
 }
 
 function bindEvents() {

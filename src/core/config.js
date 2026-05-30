@@ -6,26 +6,16 @@
    - Config estática mínima del frontend.
    - API real única.
    - Rutas reales actuales.
+   - Roles únicos: admin / user.
    - Home interna: /.
    - Home visible autenticada: /@{user.slug}.
-   - Rutas privadas visibles: /@{user.slug}/{ruta}.
-   - Rutas admin reales: clientes, usuarios, servidor.
-   - Auth endpoints mínimos alineados con backend.
-   - /api/auth/me siempre privado.
-   - /api/auth/refresh público y sin Authorization.
-   - Token param único: token.
-   - Roles únicos: admin / user.
-   - Idioma base único: es.
+   - Endpoints auth mínimos.
    - Denylist legacy/técnica centralizada.
-   - Sesión persistente con restore/silent refresh.
-   - Sin rutas inventadas.
-   - Sin /home como ruta real.
-   - Sin storage real.
-   - Sin runtime complejo.
-   - Sin 2FA/MFA/OTP funcional.
+   - Sin runtime, sin storage, sin lógica de sesión,
+     sin i18n funcional y sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.v10";
+export const CONFIG_VERSION = "core.config.minimal.v1";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
@@ -44,7 +34,9 @@ export const KNOWN_FRONTEND_ORIGINS = Object.freeze([
   "http://www.onionsupport.com",
 ]);
 
-export const FORBIDDEN_FRONTEND_API_ORIGINS = KNOWN_FRONTEND_ORIGINS;
+export const FORBIDDEN_FRONTEND_API_ORIGINS = Object.freeze([
+  ...KNOWN_FRONTEND_ORIGINS,
+]);
 
 export const TOKEN_PARAM = "token";
 export const USER_HOME_PREFIX = "/@";
@@ -83,6 +75,7 @@ export const SENSITIVE_QUERY_PARAMS = Object.freeze([
   "authorization",
   "session",
   "sessionId",
+  "session_id",
   "secret",
   "code",
   "password",
@@ -112,11 +105,10 @@ export const ROUTES = Object.freeze({
   incidencias: "/incidencias",
   facturas: "/facturas",
   clientes: "/clientes",
-  cuenta: "/cuenta",
-  ajustes: "/ajustes",
-
   usuarios: "/usuarios",
   servidor: "/servidor",
+  cuenta: "/cuenta",
+  ajustes: "/ajustes",
 });
 
 export const PUBLIC_ROUTES = Object.freeze([
@@ -196,7 +188,7 @@ export const PRIVATE_API_PATHS = Object.freeze([
 ]);
 
 /* =========================================================
-   INTERNAL HELPERS
+   BASICS
 ========================================================= */
 
 function freeze(value) {
@@ -216,8 +208,8 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
-function hasOwn(obj, key) {
-  return Object.prototype.hasOwnProperty.call(Object(obj), key);
+function hasOwn(object = {}, key = "") {
+  return Object.prototype.hasOwnProperty.call(Object(object), key);
 }
 
 function isBrowser() {
@@ -233,11 +225,7 @@ function cleanOrigin(value = "") {
 }
 
 function isCurrentBrowserOrigin(origin = "") {
-  return Boolean(
-    isBrowser() &&
-      origin &&
-      origin === window.location.origin
-  );
+  return Boolean(isBrowser() && origin && origin === window.location.origin);
 }
 
 function isAllowedFrontendOrigin(origin = "") {
@@ -260,38 +248,11 @@ function normalizeApiBase(value = "") {
 
   const origin = cleanOrigin(raw);
 
-  if (!origin) {
-    return CANONICAL_PRODUCTION_API_BASE;
-  }
-
-  if (FORBIDDEN_FRONTEND_API_ORIGINS.includes(origin)) {
-    return CANONICAL_PRODUCTION_API_BASE;
-  }
-
-  if (!isAllowedBackendOrigin(origin)) {
-    return CANONICAL_PRODUCTION_API_BASE;
-  }
+  if (!origin) return CANONICAL_PRODUCTION_API_BASE;
+  if (FORBIDDEN_FRONTEND_API_ORIGINS.includes(origin)) return CANONICAL_PRODUCTION_API_BASE;
+  if (!isAllowedBackendOrigin(origin)) return CANONICAL_PRODUCTION_API_BASE;
 
   return origin;
-}
-
-function isHashRouterPath(value = "") {
-  const raw = text(value, "");
-  return raw.startsWith("#/") || raw.startsWith("#!");
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw = text(value, "/");
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/") || "/";
-  }
-
-  if (raw.startsWith("#/")) {
-    return raw.slice(1) || "/";
-  }
-
-  return raw || "/";
 }
 
 function normalizePathname(pathname = "/") {
@@ -317,44 +278,38 @@ function pathIsOrStartsWith(path = "", candidate = "") {
   const current = normalizePathname(path).toLowerCase();
   const target = normalizePathname(candidate).toLowerCase();
 
-  return Boolean(
-    current === target ||
-      current.startsWith(`${target}/`)
-  );
+  return current === target || current.startsWith(`${target}/`);
 }
 
 function pathMatches(path = "", candidate = "") {
-  const current = normalizeRoutePath(path);
-  const target = normalizeRoutePath(candidate);
-
-  return Boolean(current && target && current === target);
+  return normalizeRoutePath(path) === normalizeRoutePath(candidate);
 }
 
 function endpointMatches(path = "", candidate = "") {
-  const current = normalizeEndpointPath(path);
-  const target = normalizeEndpointPath(candidate);
-
-  return Boolean(current && target && current === target);
+  return normalizeEndpointPath(path) === normalizeEndpointPath(candidate);
 }
 
-function isBlockedNormalizedPath(path = "") {
-  const clean = normalizePathname(path).toLowerCase();
-
-  return BLOCKED_FRONTEND_ROUTES.some((blocked) =>
-    pathIsOrStartsWith(clean, blocked)
-  );
+function isHashRouterPath(value = "") {
+  const raw = text(value, "");
+  return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
-function isPublicCanonicalRoute(path = "") {
-  const route = normalizeRoutePath(path);
+function normalizeHashRouterPath(value = "") {
+  const raw = text(value, "/");
 
-  if (!route) return false;
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/") || "/";
+  }
 
-  return PUBLIC_ROUTES.some((item) => pathMatches(route, item));
+  if (raw.startsWith("#/")) {
+    return raw.slice(1) || "/";
+  }
+
+  return raw || "/";
 }
 
 /* =========================================================
-   URL / PATH NORMALIZATION
+   URL / PATH
 ========================================================= */
 
 export function routePathFromUrlLike(value = "") {
@@ -388,13 +343,8 @@ export function routePathFromUrlLike(value = "") {
     return "/";
   }
 
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    return "/";
-  }
-
-  if (/[\r\n\t\\]/.test(raw)) {
-    return "/";
-  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "/";
+  if (/[\r\n\t\\]/.test(raw)) return "/";
 
   return raw;
 }
@@ -403,10 +353,7 @@ export function endpointPathFromUrlLike(value = "") {
   const raw = text(value, "");
 
   if (!raw) return "";
-
-  if (raw.startsWith("//")) {
-    return "";
-  }
+  if (raw.startsWith("//")) return "";
 
   try {
     if (/^https?:\/\//i.test(raw)) {
@@ -422,13 +369,8 @@ export function endpointPathFromUrlLike(value = "") {
     return "";
   }
 
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    return "";
-  }
-
-  if (/[\r\n\t\\]/.test(raw)) {
-    return "";
-  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
 
   return raw;
 }
@@ -454,7 +396,7 @@ export function normalizeEndpointPath(path = "") {
 }
 
 /* =========================================================
-   USER SCOPE / HOME
+   USER SCOPE
 ========================================================= */
 
 export function normalizeUserSlug(value = "") {
@@ -526,7 +468,7 @@ export function extractUserHomeSlugFromRoute(path = "") {
 }
 
 export function isUserScopedRoute(path = "") {
-  return Boolean(getUserScopedRouteInfo(path).scoped);
+  return getUserScopedRouteInfo(path).scoped === true;
 }
 
 export function isUserHomeRoute(path = "") {
@@ -542,18 +484,24 @@ export function buildUserScopedRoute(slug = "", route = ROUTES.home) {
   const clean = normalizeUserSlug(slug);
   const canonical = normalizeRoutePath(route) || ROUTES.home;
 
-  if (isBlockedRoutePath(canonical)) {
-    return clean ? `${USER_HOME_PREFIX}${clean}` : ROUTES.home;
-  }
-
-  if (isPublicCanonicalRoute(canonical)) {
-    return canonical;
-  }
-
   if (!clean) return canonical;
-  if (canonical === ROUTES.home) return `${USER_HOME_PREFIX}${clean}`;
+  if (isPublicRoute(canonical)) return canonical;
+  if (isBlockedRoutePath(canonical)) return buildUserHomeRoute(clean);
+  if (canonical === ROUTES.home) return buildUserHomeRoute(clean);
 
   return `${USER_HOME_PREFIX}${clean}${canonical}`;
+}
+
+/* =========================================================
+   ROUTE POLICY
+========================================================= */
+
+function isBlockedNormalizedPath(path = "") {
+  const clean = normalizePathname(path).toLowerCase();
+
+  return BLOCKED_FRONTEND_ROUTES.some((blocked) =>
+    pathIsOrStartsWith(clean, blocked)
+  );
 }
 
 export function isBlockedRoutePath(path = "") {
@@ -561,10 +509,7 @@ export function isBlockedRoutePath(path = "") {
   const scoped = getUserScopedRouteInfo(route);
 
   if (isBlockedNormalizedPath(route)) return true;
-
-  if (scoped.scoped && isBlockedNormalizedPath(scoped.restPath)) {
-    return true;
-  }
+  if (scoped.scoped && isBlockedNormalizedPath(scoped.restPath)) return true;
 
   return false;
 }
@@ -575,11 +520,62 @@ export function canonicalRoutePath(path = "") {
   if (isBlockedRoutePath(path)) return "";
 
   const info = getUserScopedRouteInfo(path);
+
   return info.scoped ? info.canonicalPath : normalizeRoutePath(path);
 }
 
+export function isPublicRoute(path = "") {
+  if (isBlockedRoutePath(path)) return false;
+
+  const scoped = getUserScopedRouteInfo(path);
+
+  if (scoped.scoped) return false;
+
+  const route = canonicalRoutePath(path);
+
+  return PUBLIC_ROUTES.some((item) => pathMatches(route, item));
+}
+
+export function isTechnicalPublicRoute(path = "") {
+  return isPublicRoute(path);
+}
+
+export function isAuthLikeRoute(path = "") {
+  return isPublicRoute(path);
+}
+
+export function isAdminRoute(path = "") {
+  if (isBlockedRoutePath(path)) return false;
+
+  const route = canonicalRoutePath(path);
+
+  return ADMIN_ROUTES.some((item) => pathIsOrStartsWith(route, item));
+}
+
 /* =========================================================
-   CONFIG
+   API POLICY
+========================================================= */
+
+export function isPublicApiPath(path = "") {
+  const clean = normalizeEndpointPath(path);
+
+  if (!clean) return false;
+  if (clean === AUTH_ENDPOINTS.me) return false;
+
+  return PUBLIC_API_PATHS.some((item) => endpointMatches(clean, item));
+}
+
+export function isPrivateApiPath(path = "") {
+  const clean = normalizeEndpointPath(path);
+
+  if (!clean) return false;
+  if (clean === AUTH_ENDPOINTS.me) return true;
+
+  return PRIVATE_API_PATHS.some((item) => endpointMatches(clean, item));
+}
+
+/* =========================================================
+   CONFIG OBJECT
 ========================================================= */
 
 export const config = freeze({
@@ -587,8 +583,6 @@ export const config = freeze({
 
   appName: "Onion Support",
   name: "Onion Support",
-  appId: "onion",
-  appKey: "onion",
   version: "1.0.0",
 
   env: "production",
@@ -599,35 +593,24 @@ export const config = freeze({
   apiOrigin: CANONICAL_PRODUCTION_API_BASE,
   apiUrl: CANONICAL_PRODUCTION_API_BASE,
 
-  canonicalProductionApiBase: CANONICAL_PRODUCTION_API_BASE,
-  canonicalBackendApiOrigins: CANONICAL_BACKEND_API_ORIGINS,
-  canonicalFrontendOrigins: CANONICAL_FRONTEND_ORIGINS,
-  knownFrontendOrigins: KNOWN_FRONTEND_ORIGINS,
-  forbiddenFrontendApiOrigins: FORBIDDEN_FRONTEND_API_ORIGINS,
-
   defaultLang: "es",
   fallbackLang: "es",
   supportedLangs: SUPPORTED_LANGS,
 
   defaultTheme: "system",
 
+  tokenParam: TOKEN_PARAM,
   userHomePrefix: USER_HOME_PREFIX,
+  sensitiveQueryParams: SENSITIVE_QUERY_PARAMS,
 
   routes: ROUTES,
-
   publicRoutes: PUBLIC_ROUTES,
   authLikeRoutes: PUBLIC_ROUTES,
   technicalPublicRoutes: TECHNICAL_PUBLIC_ROUTES,
-
   privateRoutes: PRIVATE_ROUTES,
   adminRoutes: ADMIN_ROUTES,
-
-  protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
-
   blockedFrontendRoutes: BLOCKED_FRONTEND_ROUTES,
-
-  tokenParam: TOKEN_PARAM,
-  sensitiveQueryParams: SENSITIVE_QUERY_PARAMS,
+  protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
 
   publicApiPaths: PUBLIC_API_PATHS,
   privateApiPaths: PRIVATE_API_PATHS,
@@ -643,11 +626,6 @@ export const config = freeze({
 
     publicPaths: PUBLIC_API_PATHS,
     privatePaths: PRIVATE_API_PATHS,
-
-    headers: freeze({
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    }),
   }),
 
   auth: freeze({
@@ -655,14 +633,10 @@ export const config = freeze({
     tokenHeader: "Authorization",
 
     loginRoute: ROUTES.login,
-
     homeRoute: ROUTES.home,
-    homeCanonicalRoute: ROUTES.home,
     userHomePrefix: USER_HOME_PREFIX,
-    postLoginFallback: ROUTES.home,
 
     allowedRoles: ALLOWED_ROLES,
-
     endpoints: AUTH_ENDPOINTS,
 
     endpointGroups: freeze({
@@ -692,7 +666,6 @@ export const config = freeze({
 
     publicRoutes: PUBLIC_ROUTES,
     technicalPublicRoutes: TECHNICAL_PUBLIC_ROUTES,
-    publicTechnicalRoutes: TECHNICAL_PUBLIC_ROUTES,
     protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
 
     tokenParamNames: freeze({
@@ -706,33 +679,9 @@ export const config = freeze({
       restoreOnBoot: true,
       silentRefresh: true,
       requireTokenForAuthenticated: true,
-      clearGhostUserWithoutToken: false,
       tokenRotationDoesNotLogout: true,
       emptyAccessTokenDoesNotClearUser: true,
-      userHomePrefix: USER_HOME_PREFIX,
     }),
-  }),
-
-  ui: freeze({
-    defaultTheme: "system",
-    theme: "system",
-    themeOwnedBySystem: true,
-
-    shellId: "app-shell",
-    loaderId: "app-loader",
-    sidebarMountId: "sidebar-mount",
-    topbarMountId: "topbar-mount",
-    viewContainerId: "view-container",
-    mainContentId: "main-content",
-    appContentId: "app-content",
-    tableheadId: "table-head",
-    tableheadContainerId: "tablehead-container",
-  }),
-
-  i18n: freeze({
-    defaultLang: "es",
-    fallbackLang: "es",
-    supported: SUPPORTED_LANGS,
   }),
 
   router: freeze({
@@ -747,62 +696,37 @@ export const config = freeze({
     userScopedPrivateRoutes: true,
 
     routes: ROUTES,
-
     publicRoutes: PUBLIC_ROUTES,
-    authLikeRoutes: PUBLIC_ROUTES,
-    technicalPublicRoutes: TECHNICAL_PUBLIC_ROUTES,
-
     privateRoutes: PRIVATE_ROUTES,
     adminRoutes: ADMIN_ROUTES,
-
-    protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
     blockedFrontendRoutes: BLOCKED_FRONTEND_ROUTES,
+    protectedPublicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
   }),
 
-  loader: freeze({
-    staticLoaderId: "app-loader",
-    bootClass: "app-booting",
-    loadingClass: "app-loading",
-    readyClass: "app-ready",
-    fatalClass: "app-fatal",
-    hiddenClass: "is-hidden",
-    visibleClass: "is-visible",
+  ui: freeze({
+    shellId: "app-shell",
+    loaderId: "app-loader",
+    sidebarMountId: "sidebar-mount",
+    topbarMountId: "topbar-mount",
+    mainContentId: "main-content",
+    appContentId: "app-content",
+    viewContainerId: "view-container",
+    tableheadId: "table-head",
+    tableheadContainerId: "tablehead-container",
+    defaultTheme: "system",
   }),
 
-  featureFlags: freeze({
-    restoreSessionOnBoot: true,
-    silentRefresh: true,
-    persistentSession: true,
-
-    requireAuthorizationForMe: true,
-    keepMeEndpointPrivate: true,
-
-    userSlugHome: true,
-    userScopedPrivateRoutes: true,
-
-    themeOwnedBySystem: true,
-    langBaseEs: true,
-  }),
-
-  diagnostics: freeze({
-    enabled: false,
-    logPrefix: "[Onion]",
-    redactTokens: true,
+  i18n: freeze({
+    defaultLang: "es",
+    fallbackLang: "es",
+    supported: SUPPORTED_LANGS,
   }),
 
   security: freeze({
     privateSpa: true,
     noIndex: true,
-    redactTokens: true,
-
     tokenParam: TOKEN_PARAM,
     sensitiveQueryParams: SENSITIVE_QUERY_PARAMS,
-
-    canonicalProductionApiBase: CANONICAL_PRODUCTION_API_BASE,
-    canonicalBackendApiOrigins: CANONICAL_BACKEND_API_ORIGINS,
-    canonicalFrontendOrigins: CANONICAL_FRONTEND_ORIGINS,
-    knownFrontendOrigins: KNOWN_FRONTEND_ORIGINS,
-    forbiddenFrontendApiOrigins: FORBIDDEN_FRONTEND_API_ORIGINS,
   }),
 });
 
@@ -831,8 +755,7 @@ export function isForbiddenFrontendApiOrigin(value = "") {
 }
 
 export function isCanonicalFrontendOrigin(value = "") {
-  const origin = cleanOrigin(value);
-  return CANONICAL_FRONTEND_ORIGINS.includes(origin);
+  return CANONICAL_FRONTEND_ORIGINS.includes(cleanOrigin(value));
 }
 
 export function isCanonicalBackendApiBase(value = "") {
@@ -840,71 +763,11 @@ export function isCanonicalBackendApiBase(value = "") {
 }
 
 export function getRoute(key = "home", fallback = "/") {
-  if (hasOwn(config.routes, key)) {
-    return config.routes[key];
-  }
-
-  return fallback;
+  return hasOwn(config.routes, key) ? config.routes[key] : fallback;
 }
 
 export function getRouteAlias() {
   return "";
-}
-
-export function isPublicApiPath(path = "") {
-  const clean = normalizeEndpointPath(path);
-
-  if (!clean) return false;
-  if (clean === AUTH_ENDPOINTS.me) return false;
-
-  return config.publicApiPaths.some((item) => endpointMatches(clean, item));
-}
-
-export function isPrivateApiPath(path = "") {
-  const clean = normalizeEndpointPath(path);
-
-  if (!clean) return false;
-  if (clean === AUTH_ENDPOINTS.me) return true;
-
-  return config.privateApiPaths.some((item) => endpointMatches(clean, item));
-}
-
-export function isTechnicalPublicRoute(path = "") {
-  if (isBlockedRoutePath(path)) return false;
-
-  const scoped = getUserScopedRouteInfo(path);
-
-  if (scoped.scoped) return false;
-
-  const route = canonicalRoutePath(path);
-
-  return config.technicalPublicRoutes.some((item) => pathMatches(route, item));
-}
-
-export function isPublicRoute(path = "") {
-  if (isBlockedRoutePath(path)) return false;
-
-  const scoped = getUserScopedRouteInfo(path);
-
-  if (scoped.scoped) return false;
-
-  const route = canonicalRoutePath(path);
-
-  return config.publicRoutes.some((item) => pathMatches(route, item));
-}
-
-export function isAuthLikeRoute(path = "") {
-  return isPublicRoute(path);
-}
-
-export function isAdminRoute(path = "") {
-  if (isBlockedRoutePath(path)) return false;
-
-  const route = canonicalRoutePath(path);
-
-  return config.adminRoutes.some((item) =>
-    pathIsOrStartsWith(route, item)
-  );
 }
 
 export function getProtectedPublicTokenRoutes() {
@@ -930,17 +793,14 @@ export function getConfigSnapshot() {
 
     appName: config.appName,
     env: config.env,
-
     apiBase: config.apiBase,
 
     defaultLang: config.defaultLang,
-    fallbackLang: config.fallbackLang,
     supportedLangs: config.supportedLangs,
     defaultTheme: config.defaultTheme,
 
     routes: config.routes,
     publicRoutes: config.publicRoutes,
-    technicalPublicRoutes: config.technicalPublicRoutes,
     privateRoutes: config.privateRoutes,
     adminRoutes: config.adminRoutes,
     blockedFrontendRoutes: config.blockedFrontendRoutes,
@@ -950,92 +810,25 @@ export function getConfigSnapshot() {
       canonical: ROUTES.home,
     },
 
-    userScopedRoutes: {
-      enabled: true,
-      visiblePattern: "/@{user.slug}/{route}",
-      homePattern: "/@{user.slug}",
-    },
-
     authEndpoints: config.auth.endpoints,
-
     publicApiPaths: config.publicApiPaths,
     privateApiPaths: config.privateApiPaths,
 
     tokenParam: config.tokenParam,
-    sensitiveQueryParams: config.sensitiveQueryParams,
 
     meIsPublic: isPublicApiPath(AUTH_ENDPOINTS.me),
     meIsPrivate: isPrivateApiPath(AUTH_ENDPOINTS.me),
 
-    endpointsAligned: {
-      login: AUTH_ENDPOINTS.login,
-      refresh: AUTH_ENDPOINTS.refresh,
-      me: AUTH_ENDPOINTS.me,
-      logout: AUTH_ENDPOINTS.logout,
-      logoutAll: AUTH_ENDPOINTS.logoutAll,
-      activateAccount: AUTH_ENDPOINTS.activateAccount,
-      passwordRequest: AUTH_ENDPOINTS.requestPasswordReset,
-      passwordReset: AUTH_ENDPOINTS.confirmPasswordReset,
-    },
-
-    origins: {
-      api: CANONICAL_PRODUCTION_API_BASE,
-      backend: [...CANONICAL_BACKEND_API_ORIGINS],
-      frontendCanonical: [...CANONICAL_FRONTEND_ORIGINS],
-      frontendKnown: [...KNOWN_FRONTEND_ORIGINS],
-    },
-
     policy: {
       configOnly: true,
       apiUnique: true,
-      apiBaseCannotBeFrontend: true,
-      tokenParamUnique: true,
-
-      noHomeRoute: true,
-      noRouteAliases: true,
-
-      legacyRoutesOnlyAsDenylist: true,
-      blockedHomeAlias: true,
-      blocked403: true,
-      blocked404: true,
-      blocked2fa: true,
-      blockedMfa: true,
-      blockedOtp: true,
-      blockedApiFrontendRoute: true,
-      blockedAzureAuthRoute: true,
-      blockedDocsRoute: true,
-
-      blocksNestedLegacyRoutes: true,
-      blocksUserScopedLegacyRoutes: true,
-      publicRoutesCannotLiveUnderUserScope: true,
-
       roles: [...ALLOWED_ROLES],
-
-      clientesAdminOnly: true,
-      usuariosAdminOnly: true,
-      servidorAdminOnly: true,
-
       langBase: "es",
-      supportedLangsOnlyEs: true,
-      themeOwnedBySystem: true,
-
-      sessionPersistent: true,
-      restoreSessionOnBoot: true,
-      silentRefresh: true,
-      accessTokenLossDoesNotClearUser: true,
-      clearGhostUserWithoutToken: false,
-
       userSlugHome: true,
       userScopedPrivateRoutes: true,
-      preservesAtSlug: true,
-
-      noRuntime: true,
-      noStorage: true,
-      no2fa: true,
-      noOtp: true,
-      noMfa: true,
-
-      invalidApiEndpointsReturnEmpty: true,
+      noHomeRoute: true,
+      noMfaOtp: true,
+      minimal: true,
     },
   };
 }

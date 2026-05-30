@@ -4,24 +4,19 @@
 
    Responsabilidad:
    - Controlar únicamente #app-loader.
-   - No controlar html/body, shell, textos, Auth, Router, Store,
-     fetch, storage, timers ni eventos.
+   - Sin Auth, Router, Store, fetch, storage, timers ni eventos.
 ========================================================= */
 
-export const LOADER_VERSION = "app.loader.v7";
+export const LOADER_VERSION = "app.loader.minimal.v1";
 
 const LOADER_ID = "app-loader";
 
-const LOADER_STATES = Object.freeze({
+const STATES = Object.freeze({
   BOOTING: "booting",
   READY: "ready",
   FATAL: "fatal",
   HIDDEN: "hidden",
 });
-
-/* =========================================================
-   BASICS
-========================================================= */
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -36,131 +31,76 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
-function normalizeState(state = LOADER_STATES.BOOTING) {
-  const value = cleanText(state, LOADER_STATES.BOOTING).toLowerCase();
+function normalizeState(value = STATES.BOOTING) {
+  const state = cleanText(value, STATES.BOOTING).toLowerCase();
 
-  if (["booting", "boot", "loading"].includes(value)) {
-    return LOADER_STATES.BOOTING;
-  }
+  if (["booting", "boot", "loading"].includes(state)) return STATES.BOOTING;
+  if (["ready", "done", "complete", "completed"].includes(state)) return STATES.READY;
+  if (["fatal", "error", "failed", "fail"].includes(state)) return STATES.FATAL;
+  if (["hidden", "hide", "closed", "none"].includes(state)) return STATES.HIDDEN;
 
-  if (["ready", "done", "complete", "completed"].includes(value)) {
-    return LOADER_STATES.READY;
-  }
-
-  if (["fatal", "error", "failed", "fail"].includes(value)) {
-    return LOADER_STATES.FATAL;
-  }
-
-  if (["hidden", "hide", "closed", "none"].includes(value)) {
-    return LOADER_STATES.HIDDEN;
-  }
-
-  return LOADER_STATES.BOOTING;
+  return STATES.BOOTING;
 }
-
-/* =========================================================
-   ELEMENT / STATE
-========================================================= */
 
 export function getLoaderElement() {
   if (!isBrowser()) return null;
   return document.getElementById(LOADER_ID);
 }
 
-function isVisibleElement(loader = null) {
+export function isLoaderVisible() {
+  const loader = getLoaderElement();
+
   return Boolean(
     loader &&
       loader.hidden !== true &&
-      loader.getAttribute("aria-hidden") !== "true" &&
-      loader.dataset?.loaderVisible === "true"
+      loader.getAttribute("aria-hidden") !== "true"
   );
 }
 
-export function isLoaderVisible() {
-  return isVisibleElement(getLoaderElement());
-}
-
-function writeLoaderState(visible = false, state = LOADER_STATES.BOOTING) {
+function setLoader(visible = false, state = STATES.BOOTING) {
   const loader = getLoaderElement();
 
   if (!loader) return false;
 
   const normalized = normalizeState(state);
-  const show = Boolean(visible) && normalized !== LOADER_STATES.HIDDEN;
-  const nextState = show ? normalized : LOADER_STATES.HIDDEN;
-  const busy = show && nextState === LOADER_STATES.BOOTING;
+  const show = Boolean(visible) && normalized !== STATES.HIDDEN;
+  const finalState = show ? normalized : STATES.HIDDEN;
+  const busy = show && finalState === STATES.BOOTING;
 
-  try {
-    loader.hidden = !show;
+  loader.hidden = !show;
 
-    loader.classList.toggle("is-visible", show);
-    loader.classList.toggle("is-hidden", !show);
+  loader.classList.toggle("is-visible", show);
+  loader.classList.toggle("is-hidden", !show);
 
-    loader.dataset.loaderVisible = show ? "true" : "false";
-    loader.dataset.loaderState = nextState;
+  loader.dataset.loaderVisible = show ? "true" : "false";
+  loader.dataset.loaderState = finalState;
 
-    loader.setAttribute("aria-hidden", show ? "false" : "true");
-    loader.setAttribute("aria-busy", busy ? "true" : "false");
+  loader.setAttribute("aria-hidden", show ? "false" : "true");
+  loader.setAttribute("aria-busy", busy ? "true" : "false");
 
-    return true;
-  } catch {
-    return false;
-  }
+  return true;
 }
 
-/* =========================================================
-   PUBLIC API
-========================================================= */
-
-export function showLoader(state = LOADER_STATES.BOOTING) {
-  return writeLoaderState(true, state);
+export function showLoader(state = STATES.BOOTING) {
+  return setLoader(true, state);
 }
 
 export function hideLoader() {
-  return writeLoaderState(false, LOADER_STATES.HIDDEN);
+  return setLoader(false, STATES.HIDDEN);
 }
 
 export function forceHideLoader() {
   return hideLoader();
 }
 
-/* =========================================================
-   SNAPSHOT
-========================================================= */
-
 export function getLoaderSnapshot() {
   const loader = getLoaderElement();
 
   return {
     version: LOADER_VERSION,
-
     exists: Boolean(loader),
-    visible: isVisibleElement(loader),
+    visible: isLoaderVisible(),
     state: loader?.dataset?.loaderState || (loader ? "unknown" : "missing"),
-
-    dom: {
-      id: loader?.id || null,
-      hidden: loader?.hidden ?? null,
-      ariaHidden: loader?.getAttribute?.("aria-hidden") || null,
-      ariaBusy: loader?.getAttribute?.("aria-busy") || null,
-      loaderVisible: loader?.dataset?.loaderVisible || null,
-      classVisible: loader?.classList?.contains?.("is-visible") ?? null,
-      classHidden: loader?.classList?.contains?.("is-hidden") ?? null,
-    },
-
-    policy: {
-      loaderOnly: true,
-      noRootStateMutation: true,
-      noShell: true,
-      noTextMutation: true,
-      noEvents: true,
-      noTimers: true,
-      noFallbackDom: true,
-      noAuth: true,
-      noRouter: true,
-      noFetch: true,
-      noStorage: true,
-    },
   };
 }
 

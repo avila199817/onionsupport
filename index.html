@@ -17,25 +17,16 @@
 >
 <head>
   <meta charset="UTF-8">
-  <base href="/">
-
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0, viewport-fit=cover"
   >
+  <base href="/">
 
   <title>Onion Support</title>
 
-  <meta
-    name="application-name"
-    content="Onion Support"
-  >
-
-  <meta
-    name="apple-mobile-web-app-title"
-    content="Onion Support"
-  >
-
+  <meta name="application-name" content="Onion Support">
+  <meta name="apple-mobile-web-app-title" content="Onion Support">
   <meta
     name="description"
     content="Onion Support · Panel privado SaaS de soporte, incidencias, facturación y gestión interna."
@@ -45,45 +36,30 @@
     name="robots"
     content="noindex, nofollow, noarchive, noimageindex, nosnippet"
   >
-
   <meta
     name="googlebot"
     content="noindex, nofollow, noarchive, noimageindex, nosnippet"
   >
-
   <meta
     name="bingbot"
     content="noindex, nofollow, noarchive, noimageindex, nosnippet"
   >
 
-  <meta
-    name="referrer"
-    content="strict-origin-when-cross-origin"
-  >
-
-  <meta
-    name="format-detection"
-    content="telephone=no, date=no, address=no, email=no"
-  >
-
-  <meta
-    name="color-scheme"
-    content="light dark"
-  >
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+  <meta name="color-scheme" content="light dark">
 
   <meta
     name="theme-color"
     content="#0a0c11"
     data-onion-theme-color="true"
   >
-
   <meta
     name="theme-color"
     media="(prefers-color-scheme: light)"
     content="#ffffff"
     data-onion-theme-color-light="true"
   >
-
   <meta
     name="theme-color"
     media="(prefers-color-scheme: dark)"
@@ -91,44 +67,19 @@
     data-onion-theme-color-dark="true"
   >
 
-  <meta
-    name="mobile-web-app-capable"
-    content="yes"
-  >
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
 
-  <meta
-    name="apple-mobile-web-app-capable"
-    content="yes"
-  >
-
-  <meta
-    name="apple-mobile-web-app-status-bar-style"
-    content="default"
-  >
-
-  <link
-    rel="icon"
-    href="/favicon.ico"
-    sizes="any"
-  >
-
-  <link
-    rel="manifest"
-    href="/site.webmanifest"
-  >
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="manifest" href="/site.webmanifest">
 
   <script src="/src/preboot/theme.js"></script>
 
-  <link
-    rel="stylesheet"
-    href="/src/css/app.css"
-  >
+  <link rel="stylesheet" href="/src/css/app.css">
 
   <noscript>
-    <link
-      rel="stylesheet"
-      href="/src/css/core/noscript.css"
-    >
+    <link rel="stylesheet" href="/src/css/core/noscript.css">
   </noscript>
 </head>
 
@@ -137,6 +88,7 @@
   data-app="onion"
   data-app-name="Onion Support"
   data-density="default"
+  data-app-state="booting"
   data-app-loading="true"
   data-app-ready="false"
   data-route-mode="boot"
@@ -159,6 +111,7 @@
     role="status"
     aria-live="polite"
     aria-busy="true"
+    aria-atomic="true"
     aria-hidden="false"
     aria-labelledby="app-loader-title"
     aria-describedby="app-loader-text"
@@ -210,10 +163,13 @@
 
       <div
         class="app-loader__bar"
-        aria-hidden="true"
         data-loader-bar="true"
+        aria-hidden="true"
       >
-        <span class="app-loader__bar-fill"></span>
+        <span
+          class="app-loader__bar-fill"
+          data-loader-bar-fill="true"
+        ></span>
       </div>
     </div>
   </div>
@@ -234,9 +190,9 @@
           lang="es"
         >
           <h1>Se requiere JavaScript</h1>
-
           <p>
             Onion Support necesita JavaScript para cargar el panel privado.
+            Actívalo en tu navegador e inténtalo de nuevo.
           </p>
         </section>
       </main>

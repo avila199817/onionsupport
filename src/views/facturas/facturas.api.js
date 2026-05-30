@@ -21,7 +21,7 @@
 
 import Http from "../../core/http.js";
 
-export const FACTURAS_API_VERSION = "facturas.api.minimal.v1";
+export const FACTURAS_API_VERSION = "facturas.api.minimal.v2";
 
 /* =========================================================
    ENDPOINTS / TIMEOUTS
@@ -71,6 +71,10 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function isFunction(value) {
+  return typeof value === "function";
+}
+
 function isBlob(value) {
   return typeof Blob !== "undefined" && value instanceof Blob;
 }
@@ -110,6 +114,14 @@ function number(value = 0, fallback = 0) {
 
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : fallback;
+  }
+
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+
+  if (typeof value === "object") {
+    return fallback;
   }
 
   if (typeof value === "string") {
@@ -194,6 +206,8 @@ function safeUrl(value = "") {
   if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature)=/i.test(raw)) {
     return "";
   }
+
+  if (/^blob:/i.test(raw)) return raw;
 
   if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
 
@@ -835,7 +849,7 @@ export function normalizeFactura(item = {}) {
       raw.pagado,
       raw.payment?.paidAmount,
       raw.totales?.pagado,
-      paymentStatus === "paid" || paymentStatus === "pagada" ? total : 0
+      ["paid", "pagada", "pagado"].includes(normalizeKey(paymentStatus)) ? total : 0
     )
   );
 
@@ -936,6 +950,9 @@ export function normalizeFactura(item = {}) {
     clienteName: clientName,
     clienteNombre: clientName,
 
+    clienteEmail: cleanText(first(raw.clienteEmail, raw.emailCliente, raw.clientEmail, raw.customerEmail, raw.cliente?.email, raw.client?.email), ""),
+    emailCliente: cleanText(first(raw.emailCliente, raw.clienteEmail, raw.clientEmail, raw.customerEmail, raw.cliente?.email, raw.client?.email), ""),
+
     ticketId: incidenciaId,
     incidenciaId,
     relatedTicketId: incidenciaId,
@@ -950,16 +967,22 @@ export function normalizeFactura(item = {}) {
     pdfUrl: safeUrl(first(raw.pdfUrl, raw.file?.url, raw.file?.viewUrl, "")),
     viewUrl: safeUrl(first(raw.viewUrl, raw.pdfUrl, raw.file?.viewUrl, "")),
     downloadUrl: safeUrl(first(raw.downloadUrl, raw.file?.downloadUrl, "")),
+    hasPdf: Boolean(first(raw.hasPdf, raw.pdfAvailable, raw.pdfUrl, raw.file?.url, raw.file?.viewUrl, raw.file?.downloadUrl, "")),
 
     createdAt: first(raw.createdAt, raw.fechaCreacion, raw.date, null),
     issuedAt: first(raw.issuedAt, raw.fechaEmision, raw.createdAt, raw.date, null),
     dueAt: first(raw.dueAt, raw.fechaVencimiento, raw.vencimiento, null),
     paidAt: first(raw.paidAt, raw.fechaPago, raw.payment?.paidAt, null),
     updatedAt: first(raw.updatedAt, raw.modifiedAt, raw.fechaActualizacion, raw.createdAt, null),
+    sentAt: first(raw.sentAt, raw.fechaEnvio, raw.email?.sentAt, raw.delivery?.lastSentAt, null),
+
+    raw,
 
     meta: {
+      ...safeObject(raw.meta),
       hasIncidencia: Boolean(incidenciaId),
       hasLinkedTicket: Boolean(incidenciaId),
+      hasPdf: Boolean(first(raw.hasPdf, raw.pdfAvailable, raw.pdfUrl, raw.file?.url, raw.file?.viewUrl, raw.file?.downloadUrl, "")),
       incidenciaId,
       ticketId: incidenciaId,
     },
@@ -999,6 +1022,8 @@ export function normalizeIncidenciaForFactura(item = {}) {
     status: cleanText(first(raw.status, raw.estado, raw.state), "open"),
     priority: cleanText(first(raw.priority, raw.prioridad, raw.severity), "medium"),
     requesterName: safePublicText(first(raw.requesterName, raw.userName, raw.clientName, raw.clienteName), "Usuario"),
+    clienteId: cleanText(first(raw.clienteId, raw.clientId, raw.cliente?.clienteId), ""),
+    userId: cleanText(first(raw.userId, raw.usuarioId, raw.userRef?.userId), ""),
     createdAt: first(raw.createdAt, raw.fechaCreacion, raw.created_at, null),
     updatedAt: first(raw.updatedAt, raw.updated_at, raw.lastActivityAt, raw.createdAt, null),
   };
@@ -1038,8 +1063,8 @@ export function normalizeFacturasListResponse(payload = null, requestMeta = {}) 
     page,
     limit,
 
-    stats: safeObject(namedObjectFromPayload(payload, "stats")),
-    filters: safeObject(namedObjectFromPayload(payload, "filters")),
+    stats: safeObject(first(namedObjectFromPayload(payload, "stats"), {})),
+    filters: safeObject(first(namedObjectFromPayload(payload, "filters"), {})),
 
     meta: {
       ...meta,
@@ -1066,9 +1091,12 @@ export function normalizeFacturaDetailResponse(payload = null) {
 }
 
 export function normalizeFacturasStatsResponse(payload = null) {
+  const envelope = safeObject(unwrapEnvelope(payload), {});
+  const stats = safeObject(first(namedObjectFromPayload(payload, "stats"), envelope.stats, envelope), {});
+
   return {
     ok: true,
-    stats: safeObject(namedObjectFromPayload(payload, "stats"), safeObject(unwrapEnvelope(payload), {})),
+    stats,
     meta: metaFromPayload(payload),
   };
 }
@@ -1192,6 +1220,10 @@ export function normalizeFacturaPayload(payload = {}) {
     ""
   );
 
+  const clienteId = cleanText(first(source.clienteId, source.clientId, source.customerId), "");
+  const clienteNombre = cleanText(first(source.clienteNombre, source.clientName, source.clienteName, source.customerName), "");
+  const clienteEmail = cleanText(first(source.clienteEmail, source.emailCliente, source.clientEmail, source.customerEmail), "");
+
   return {
     ...source,
 
@@ -1202,6 +1234,7 @@ export function normalizeFacturaPayload(payload = {}) {
     total,
     amount: total,
     importe: total,
+    totalFactura: total,
 
     currency,
     moneda: currency,
@@ -1211,6 +1244,30 @@ export function normalizeFacturaPayload(payload = {}) {
 
     paymentStatus: cleanText(first(source.paymentStatus, source.estadoPago, "pending"), "pending"),
     estadoPago: cleanText(first(source.estadoPago, source.paymentStatus, "pending"), "pending"),
+
+    ...(clienteId
+      ? {
+          clienteId,
+          clientId: clienteId,
+          customerId: clienteId,
+        }
+      : {}),
+
+    ...(clienteNombre
+      ? {
+          clienteNombre,
+          clientName: clienteNombre,
+          clienteName: clienteNombre,
+        }
+      : {}),
+
+    ...(clienteEmail
+      ? {
+          clienteEmail,
+          emailCliente: clienteEmail,
+          clientEmail: clienteEmail,
+        }
+      : {}),
 
     ...(incidenciaId
       ? {
@@ -1231,42 +1288,91 @@ async function getJson(endpoint = "", options = {}) {
   return Http.get(endpoint, {
     timeout: options.timeout || FACTURAS_TIMEOUT,
     query: safeObject(options.query || options.params),
-    source: "views.facturas",
+    source: options.source || "views.facturas",
   });
 }
 
 async function postJson(endpoint = "", body = {}, options = {}) {
   return Http.post(endpoint, body, {
     timeout: options.timeout || FACTURAS_TIMEOUT,
-    source: "views.facturas",
+    source: options.source || "views.facturas",
   });
 }
 
 async function putJson(endpoint = "", body = {}, options = {}) {
+  if (!isFunction(Http.put)) {
+    return patchJson(endpoint, body, options);
+  }
+
   return Http.put(endpoint, body, {
     timeout: options.timeout || FACTURAS_TIMEOUT,
-    source: "views.facturas",
+    source: options.source || "views.facturas",
   });
 }
 
 async function patchJson(endpoint = "", body = {}, options = {}) {
+  if (!isFunction(Http.patch)) {
+    return postJson(endpoint, body, options);
+  }
+
   return Http.patch(endpoint, body, {
     timeout: options.timeout || FACTURAS_TIMEOUT,
-    source: "views.facturas",
+    source: options.source || "views.facturas",
   });
 }
 
 async function deleteJson(endpoint = "", options = {}) {
   const fn = Http.delete || Http.del;
 
-  if (typeof fn !== "function") {
+  if (!isFunction(fn)) {
     throw new Error("FACTURAS_DELETE_UNAVAILABLE");
   }
 
-  return fn(endpoint, {
+  return fn.call(Http, endpoint, {
     timeout: options.timeout || FACTURAS_TIMEOUT,
-    source: "views.facturas",
+    source: options.source || "views.facturas",
   });
+}
+
+async function blobRequest(endpoint = "", options = {}) {
+  if (isFunction(Http.blob)) {
+    return Http.blob(endpoint, {
+      timeout: options.timeout || FACTURAS_PDF_TIMEOUT,
+      source: options.source || "views.facturas.blob",
+    });
+  }
+
+  if (isFunction(Http.downloadBlob)) {
+    return Http.downloadBlob(endpoint, {
+      timeout: options.timeout || FACTURAS_PDF_TIMEOUT,
+      autoDownload: false,
+      filename: options.filename,
+      source: options.source || "views.facturas.blob",
+    });
+  }
+
+  if (isFunction(Http.get)) {
+    return Http.get(endpoint, {
+      timeout: options.timeout || FACTURAS_PDF_TIMEOUT,
+      responseType: "blob",
+      source: options.source || "views.facturas.blob",
+    });
+  }
+
+  throw new Error("FACTURAS_BLOB_UNAVAILABLE");
+}
+
+async function downloadBlobRequest(endpoint = "", options = {}) {
+  if (isFunction(Http.downloadBlob)) {
+    return Http.downloadBlob(endpoint, {
+      timeout: options.timeout || FACTURAS_PDF_TIMEOUT,
+      autoDownload: options.autoDownload !== false,
+      filename: options.filename,
+      source: options.source || "views.facturas.download",
+    });
+  }
+
+  return blobRequest(endpoint, options);
 }
 
 /* =========================================================
@@ -1277,6 +1383,7 @@ export async function fetchFacturasRequest(options = {}) {
   return getJson(FACTURAS_ENDPOINT, {
     timeout: FACTURAS_LIST_TIMEOUT,
     query: buildListQuery(options),
+    source: "views.facturas.list",
   });
 }
 
@@ -1325,6 +1432,7 @@ export async function loadFacturas(options = {}) {
 export async function fetchFacturaDetailRequest(id = "", options = {}) {
   const response = await getJson(getFacturaEndpoint(id), {
     timeout: options.timeout || FACTURAS_DETAIL_TIMEOUT,
+    source: "views.facturas.detail",
   });
 
   return normalizeFacturaDetailResponse(response);
@@ -1338,6 +1446,7 @@ export async function getFacturaById(id = "", options = {}) {
 export async function fetchFacturasStatsRequest(options = {}) {
   const response = await getJson(`${FACTURAS_ENDPOINT}/stats`, {
     timeout: options.timeout || FACTURAS_LIST_TIMEOUT,
+    source: "views.facturas.stats",
   });
 
   const normalized = normalizeFacturasStatsResponse(response);
@@ -1360,6 +1469,7 @@ export async function createFacturaRequest(payload = {}, options = {}) {
 
   const response = await postJson(FACTURAS_ENDPOINT, body, {
     timeout: options.timeout || FACTURAS_CREATE_TIMEOUT,
+    source: "views.facturas.create",
   });
 
   return normalizeFacturaCreateResponse(response);
@@ -1370,10 +1480,11 @@ export async function createFactura(payload = {}, options = {}) {
   const created = response.item;
 
   if (created) {
+    const nextItems = normalizeFacturas([created, ...lastList.items]);
+
     lastList = {
-      ...lastList,
-      items: normalizeFacturas([created, ...lastList.items]),
-      total: Math.max(number(lastList.total, 0), lastList.items.length + 1),
+      items: nextItems,
+      total: Math.max(number(lastList.total, 0), nextItems.length),
     };
   }
 
@@ -1383,6 +1494,7 @@ export async function createFactura(payload = {}, options = {}) {
 export async function updateFacturaRequest(id = "", payload = {}, options = {}) {
   const response = await putJson(getFacturaEndpoint(id), normalizeFacturaPayload(payload), {
     timeout: options.timeout || FACTURAS_TIMEOUT,
+    source: "views.facturas.update",
   });
 
   return normalizeFacturaDetailResponse(response);
@@ -1396,6 +1508,7 @@ export async function updateFactura(id = "", payload = {}, options = {}) {
 export async function patchFacturaRequest(id = "", payload = {}, options = {}) {
   const response = await patchJson(getFacturaEndpoint(id), normalizeFacturaPayload(payload), {
     timeout: options.timeout || FACTURAS_TIMEOUT,
+    source: "views.facturas.patch",
   });
 
   return normalizeFacturaDetailResponse(response);
@@ -1409,6 +1522,7 @@ export async function patchFactura(id = "", payload = {}, options = {}) {
 export async function removeFacturaRequest(id = "", options = {}) {
   return deleteJson(getFacturaEndpoint(id), {
     timeout: options.timeout || FACTURAS_TIMEOUT,
+    source: "views.facturas.remove",
   });
 }
 
@@ -1418,8 +1532,9 @@ export async function removeFactura(id = "", options = {}) {
   const facturaId = normalizeFacturaId(id);
 
   lastList = {
-    ...lastList,
-    items: lastList.items.filter((item) => item.id !== facturaId && item.facturaId !== facturaId),
+    items: lastList.items.filter((item) => {
+      return item.id !== facturaId && item.facturaId !== facturaId && item.invoiceId !== facturaId;
+    }),
     total: Math.max(0, number(lastList.total, 0) - 1),
   };
 
@@ -1429,6 +1544,7 @@ export async function removeFactura(id = "", options = {}) {
 export async function sendFacturaRequest(id = "", payload = {}, options = {}) {
   const response = await postJson(getFacturaSendEndpoint(id), safeObject(payload), {
     timeout: options.timeout || FACTURAS_SEND_TIMEOUT,
+    source: "views.facturas.send",
   });
 
   return normalizeFacturaSendResponse(response);
@@ -1444,25 +1560,28 @@ export async function sendFactura(id = "", payload = {}, options = {}) {
 ========================================================= */
 
 export async function viewFacturaPdfRequest(id = "", options = {}) {
-  const endpoint = getFacturaPdfEndpoint(id, FACTURA_PDF_MODES.VIEW);
+  const facturaId = normalizeFacturaId(id);
+  const endpoint = getFacturaPdfEndpoint(facturaId, FACTURA_PDF_MODES.VIEW);
 
-  const blob = await Http.blob(endpoint, {
+  const response = await blobRequest(endpoint, {
     timeout: options.timeout || FACTURAS_PDF_TIMEOUT,
+    filename: options.filename || `${safeFilename(facturaId, "factura")}.pdf`,
     source: "views.facturas.pdf.view",
   });
 
-  return normalizeFacturaPdfResponse(blob, {
-    filename: `${safeFilename(id, "factura")}.pdf`,
+  return normalizeFacturaPdfResponse(response, {
+    filename: options.filename || `${safeFilename(facturaId, "factura")}.pdf`,
   });
 }
 
 export async function downloadFacturaPdfRequest(id = "", options = {}) {
-  const endpoint = getFacturaPdfEndpoint(id, FACTURA_PDF_MODES.DOWNLOAD);
+  const facturaId = normalizeFacturaId(id);
+  const endpoint = getFacturaPdfEndpoint(facturaId, FACTURA_PDF_MODES.DOWNLOAD);
 
-  return Http.downloadBlob(endpoint, {
+  return downloadBlobRequest(endpoint, {
     timeout: options.timeout || FACTURAS_PDF_TIMEOUT,
     autoDownload: options.autoDownload !== false,
-    filename: options.filename || `${safeFilename(id, "factura")}.pdf`,
+    filename: options.filename || `${safeFilename(facturaId, "factura")}.pdf`,
     source: "views.facturas.pdf.download",
   });
 }
@@ -1472,7 +1591,9 @@ export async function fetchFacturaPdfRequest(
   mode = FACTURA_PDF_MODES.DOWNLOAD,
   options = {}
 ) {
-  return normalizeKey(mode) === "view" || normalizeKey(mode) === "inline"
+  const normalizedMode = normalizeKey(mode);
+
+  return ["view", "inline", "ver"].includes(normalizedMode)
     ? viewFacturaPdfRequest(id, options)
     : downloadFacturaPdfRequest(id, options);
 }
@@ -1523,6 +1644,7 @@ export async function searchFacturaIncidencias({
       includeTotal: true,
       includeClosed,
     },
+    source: "views.facturas.search-incidencias",
   });
 
   return listFromTicketPayload(response)
@@ -1592,20 +1714,25 @@ export function computeFacturasStats(items = lastList.items) {
       acc.total += 1;
 
       const payment = normalizeKey(first(item.paymentStatus, item.estadoPago, item.status, item.estado));
+      const amount = getFacturaAmount(item);
 
       if (["paid", "pagada", "pagado", "completed", "complete"].includes(payment)) {
         acc.paid += 1;
-        acc.paidAmount += getFacturaAmount(item);
+        acc.paidAmount += amount;
       } else {
         acc.pending += 1;
-        acc.pendingAmount += getFacturaAmount(item);
+        acc.pendingAmount += amount;
       }
 
       if (hasFacturaIncidencia(item)) {
         acc.withIncidencia += 1;
       }
 
-      acc.amount += getFacturaAmount(item);
+      if (item.hasPdf || item.meta?.hasPdf || item.pdfUrl || item.viewUrl || item.downloadUrl) {
+        acc.withPdf += 1;
+      }
+
+      acc.amount += amount;
 
       return acc;
     },
@@ -1614,6 +1741,7 @@ export function computeFacturasStats(items = lastList.items) {
       paid: 0,
       pending: 0,
       withIncidencia: 0,
+      withPdf: 0,
       amount: 0,
       paidAmount: 0,
       pendingAmount: 0,
@@ -1695,7 +1823,6 @@ export function getFacturasApiSnapshot() {
 
 export const fetchFacturas = listFacturas;
 export const getFacturaByIdRequest = fetchFacturaDetailRequest;
-export const getFacturaById = getFacturaById;
 export const detailFactura = getFacturaById;
 
 export const createInvoice = createFactura;
@@ -1758,6 +1885,8 @@ export const FacturasApi = Object.freeze({
 
   fetchFacturaDetailRequest,
   getFacturaById,
+  getFacturaByIdRequest,
+  detailFactura,
 
   fetchFacturasStatsRequest,
   loadFacturasStats,

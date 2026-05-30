@@ -13,7 +13,7 @@
   data-app-ready="false"
   data-route-mode="boot"
   data-chrome="hidden"
-  class="app-booting app-loading"
+  class="app-booting app-loading no-js"
 >
 <head>
   <meta charset="UTF-8">
@@ -113,19 +113,6 @@
   >
 
   <link
-    rel="icon"
-    href="/src/media/img/favicon_black_circle.png"
-    type="image/png"
-    sizes="128x128"
-  >
-
-  <link
-    rel="apple-touch-icon"
-    href="/src/media/img/favicon_black_circle.png"
-    sizes="128x128"
-  >
-
-  <link
     rel="manifest"
     href="/site.webmanifest"
   >
@@ -191,25 +178,12 @@
         data-loader-brand="true"
         aria-hidden="true"
       >
-        <img
-          class="app-loader__logo"
-          src="/src/media/img/favicon_black_circle.png"
-          alt=""
-          width="64"
-          height="64"
-          loading="eager"
-          decoding="async"
-          fetchpriority="high"
-          draggable="false"
-          data-loader-logo="true"
-        >
-
         <div
           class="app-loader__logo-fallback"
           data-loader-logo-fallback="true"
           aria-hidden="true"
         >
-          O
+          ON
         </div>
       </div>
 

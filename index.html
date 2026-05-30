@@ -5,24 +5,15 @@
   data-app="onion"
   data-app-name="Onion Support"
   data-locale="es"
-  data-locale-source="initial"
-  data-locale-fallback="es"
-  data-locale-supported="es ca en"
   data-theme="system"
   data-theme-mode="system"
-  data-theme-source="initial"
   data-theme-ready="false"
   data-app-state="booting"
   data-app-loading="true"
-  data-app-booting="true"
   data-app-ready="false"
-  data-authenticated="false"
   data-route-mode="boot"
-  data-shell="visible"
-  data-shell-state="booting"
-  data-shell-interactive="false"
   data-chrome="hidden"
-  class="no-js app-booting app-loading"
+  class="app-booting app-loading"
 >
 <head>
   <meta charset="UTF-8">
@@ -82,6 +73,12 @@
 
   <meta
     name="theme-color"
+    content="#0a0c11"
+    data-onion-theme-color="true"
+  >
+
+  <meta
+    name="theme-color"
     media="(prefers-color-scheme: light)"
     content="#ffffff"
     data-onion-theme-color-light="true"
@@ -133,11 +130,6 @@
     href="/site.webmanifest"
   >
 
-  <link
-    rel="modulepreload"
-    href="/src/main.js"
-  >
-
   <script src="/src/preboot/theme.js"></script>
 
   <link
@@ -159,13 +151,8 @@
   data-app-name="Onion Support"
   data-density="default"
   data-app-loading="true"
-  data-app-booting="true"
   data-app-ready="false"
-  data-authenticated="false"
   data-route-mode="boot"
-  data-shell="visible"
-  data-shell-state="booting"
-  data-shell-interactive="false"
   data-chrome="hidden"
 >
   <a
@@ -187,7 +174,7 @@
     aria-busy="true"
     aria-hidden="false"
     aria-labelledby="app-loader-title"
-    aria-describedby="app-loader-text app-loader-subtext"
+    aria-describedby="app-loader-text"
   >
     <div
       class="app-loader__backdrop"
@@ -205,8 +192,8 @@
         aria-hidden="true"
       >
         <img
-          class="app-loader__logo app-loader__logo--dark"
-          src="/src/media/img/favicon_white.png"
+          class="app-loader__logo"
+          src="/src/media/img/favicon_black_circle.png"
           alt=""
           width="64"
           height="64"
@@ -214,20 +201,7 @@
           decoding="async"
           fetchpriority="high"
           draggable="false"
-          data-loader-logo-dark="true"
-        >
-
-        <img
-          class="app-loader__logo app-loader__logo--light"
-          src="/src/media/img/favicon_black.png"
-          alt=""
-          width="64"
-          height="64"
-          loading="eager"
-          decoding="async"
-          fetchpriority="low"
-          draggable="false"
-          data-loader-logo-light="true"
+          data-loader-logo="true"
         >
 
         <div
@@ -256,16 +230,8 @@
           class="app-loader__text"
           data-loader-text="true"
         >
-          Cargando sesión...
+          Cargando panel...
         </span>
-
-        <small
-          id="app-loader-subtext"
-          class="app-loader__subtext"
-          data-loader-subtext="true"
-        >
-          Preparando panel seguro
-        </small>
       </div>
 
       <div
@@ -309,7 +275,6 @@
     data-app-shell="true"
     data-shell="visible"
     data-shell-state="booting"
-    data-shell-interactive="false"
     data-chrome="hidden"
     data-route-mode="boot"
     aria-busy="true"
@@ -318,8 +283,6 @@
     <div
       id="sidebar-mount"
       data-sidebar-mount="true"
-      data-shell="visible"
-      data-shell-state="booting"
       data-chrome="hidden"
       data-route-mode="boot"
       hidden
@@ -329,8 +292,6 @@
     <div
       id="topbar-mount"
       data-topbar-mount="true"
-      data-shell="visible"
-      data-shell-state="booting"
       data-chrome="hidden"
       data-route-mode="boot"
       hidden
@@ -355,8 +316,6 @@
         id="table-head"
         class="table-head"
         data-tablehead="true"
-        data-shell="visible"
-        data-shell-state="booting"
         data-chrome="hidden"
         data-route-mode="boot"
         hidden
@@ -375,6 +334,7 @@
         data-shell-state="booting"
         data-route-mode="boot"
         aria-busy="true"
+        aria-hidden="false"
       >
         <div
           id="view-container"

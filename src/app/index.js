@@ -22,13 +22,12 @@ import TopbarUI from "../ui/topbar/index.js";
 
 import { showLoader, hideLoader } from "./loader.js";
 
-export const APP_VERSION = "app.minimal.v1";
+export const APP_VERSION = "app.minimal.v2";
 
 const AUTH_BOOT_OPTIONS = Object.freeze({
   persistent: true,
   restoreOnBoot: true,
   silent: true,
-  silentRefresh: true,
   credentials: "include",
   skipRedirect: true,
   skipNavigation: true,
@@ -38,6 +37,10 @@ let bootPromise = null;
 let ready = false;
 let lastError = null;
 let lastRestore = null;
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -89,160 +92,132 @@ function safeError(error = null) {
 }
 
 function createBootPayload(options = {}) {
-  const initialPath = cleanText(options?.initialPath || currentPath(), "/");
-
   return {
     ...options,
 
     source: cleanText(options?.source, "app"),
     version: APP_VERSION,
-    initialPath,
+    initialPath: cleanText(options?.initialPath || currentPath(), "/"),
 
     AppCore,
     core: AppCore,
 
     Auth,
     Router,
+
     Toast,
     SidebarUI,
     TopbarUI,
   };
 }
 
-function registerCoreModule(name = "", module = null) {
-  if (!name || !module) return false;
-
-  try {
-    if (isFunction(AppCore?.registerModule)) {
-      AppCore.registerModule(name, module, { overwrite: true });
-      return true;
-    }
-
-    if (isFunction(AppCore?.modules?.register)) {
-      AppCore.modules.register(name, module, { overwrite: true });
-      return true;
-    }
-
-    AppCore[name] = module;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function registerCoreModules() {
-  registerCoreModule("auth", Auth);
-  registerCoreModule("router", Router);
-  registerCoreModule("toast", Toast);
-  return true;
-}
-
-async function optionalCall(target = null, method = "", payload = {}) {
+async function call(target = null, method = "", payload = {}, critical = true) {
   const fn = target?.[method];
 
-  if (!isFunction(fn)) return null;
-
-  return fn.call(target, payload);
-}
-
-async function callFirst(target = null, methods = [], payload = {}) {
-  for (const method of methods) {
-    const fn = target?.[method];
-
-    if (!isFunction(fn)) continue;
-
+  if (!isFunction(fn)) {
     return {
-      called: true,
+      called: false,
+      ok: false,
       method,
-      value: await fn.call(target, payload),
+      value: null,
+      error: null,
     };
   }
 
-  return {
-    called: false,
-    method: null,
-    value: null,
-  };
+  try {
+    return {
+      called: true,
+      ok: true,
+      method,
+      value: await fn.call(target, payload),
+      error: null,
+    };
+  } catch (error) {
+    if (critical) throw error;
+
+    return {
+      called: true,
+      ok: false,
+      method,
+      value: null,
+      error: safeError(error),
+    };
+  }
 }
 
+/* =========================================================
+   BOOT STEPS
+========================================================= */
+
 async function initCore(payload = {}) {
-  await optionalCall(AppCore, "init", payload);
-  registerCoreModules();
+  await call(AppCore, "init", payload, true);
 }
 
 async function initToast(payload = {}) {
-  await optionalCall(Toast, "init", payload);
+  await call(Toast, "init", payload, false);
 }
 
 async function initAuth(payload = {}) {
-  await optionalCall(Auth, "init", {
-    ...payload,
-    ...AUTH_BOOT_OPTIONS,
-    restoreOnBoot: false,
-  });
-}
-
-async function restoreAuth(payload = {}) {
-  const restore = await callFirst(
+  await call(
     Auth,
-    [
-      "restoreSession",
-      "restoreAuthSession",
-      "restore",
-      "silentRestore",
-      "refreshSession",
-      "syncSession",
-    ],
+    "init",
     {
       ...payload,
       ...AUTH_BOOT_OPTIONS,
-    }
+      restoreOnBoot: false,
+    },
+    true
+  );
+}
+
+async function restoreAuth(payload = {}) {
+  const result = await call(
+    Auth,
+    "restoreSession",
+    {
+      ...payload,
+      ...AUTH_BOOT_OPTIONS,
+    },
+    false
   );
 
   lastRestore = {
-    attempted: restore.called,
-    method: restore.method,
-    ok: restore.called ? restore.value !== false : null,
+    attempted: result.called,
+    method: result.method,
+    ok: result.called ? result.ok && result.value !== false : null,
+    error: result.error,
   };
 
-  return restore.value;
+  return result.value;
 }
 
 async function initGlobalUI(payload = {}) {
-  await optionalCall(SidebarUI, "init", payload);
-  await optionalCall(TopbarUI, "init", payload);
-}
-
-async function syncGlobalUI(payload = {}) {
-  await optionalCall(SidebarUI, "sync", payload);
-  await optionalCall(TopbarUI, "sync", payload);
+  /*
+    Sidebar/Topbar se registran en AppCore dentro de su propio init().
+    El Router sincroniza chrome tras renderizar la ruta.
+  */
+  await call(SidebarUI, "init", payload, false);
+  await call(TopbarUI, "init", payload, false);
 }
 
 async function startRouter(payload = {}) {
-  const result = await callFirst(
-    Router,
-    [
-      "start",
-      "boot",
-      "init",
-      "renderInitialRoute",
-    ],
-    payload
-  );
+  const result = await call(Router, "start", payload, true);
 
-  if (result.called) return result.value;
-
-  if (isFunction(Router?.navigate)) {
-    return Router.navigate(payload.initialPath || currentPath(), {
-      replace: true,
-      source: "app.boot",
-    });
+  if (result.called) {
+    return result.value;
   }
 
   throw new Error("Router.start() no disponible.");
 }
 
+/* =========================================================
+   BOOT STATE
+========================================================= */
+
 function markBooting() {
+  ready = false;
+  lastError = null;
+
   try {
     showLoader("booting");
   } catch {
@@ -272,14 +247,15 @@ function markFailed(error = null) {
   }
 }
 
+/* =========================================================
+   RUN
+========================================================= */
+
 async function runBoot(options = {}) {
   const payload = createBootPayload(options);
 
-  ready = false;
-  lastError = null;
-  lastRestore = null;
-
   markBooting();
+  lastRestore = null;
 
   await initCore(payload);
   await initToast(payload);
@@ -287,23 +263,13 @@ async function runBoot(options = {}) {
 
   /*
     Restore antes del primer render.
-    Un fallo recuperable de restore no debe tumbar el boot:
-    Router decidirá si muestra login o zona privada.
+    Si no hay sesión o no hay token, Auth.restoreSession() debe resolver
+    sin tumbar el boot. El Router decide si muestra login o zona privada.
   */
-  try {
-    await restoreAuth(payload);
-  } catch (error) {
-    lastRestore = {
-      attempted: true,
-      method: "restore",
-      ok: false,
-      error: safeError(error),
-    };
-  }
+  await restoreAuth(payload);
 
   await initGlobalUI(payload);
   await startRouter(payload);
-  await syncGlobalUI(payload);
 
   markReady();
 
@@ -331,12 +297,19 @@ export function isReady() {
   return ready;
 }
 
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
 export function getAppSnapshot() {
   return {
     version: APP_VERSION,
+
     ready,
     booting: Boolean(bootPromise),
+
     path: redact(currentPath()),
+
     lastError,
     lastRestore,
 
@@ -351,6 +324,10 @@ export function getAppSnapshot() {
   };
 }
 
+/* =========================================================
+   API
+========================================================= */
+
 export const App = {
   version: APP_VERSION,
 
@@ -359,6 +336,7 @@ export const App = {
   isReady,
 
   getSnapshot: getAppSnapshot,
+  getDebugSnapshot: getAppSnapshot,
   snapshot: getAppSnapshot,
 };
 

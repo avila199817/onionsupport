@@ -1,4 +1,5 @@
 /* =========================================================
+
    Onion Support - Password Reset Template
    Archivo: /src/views/public/password-reset/template.js
 
@@ -17,6 +18,7 @@
    - Sin validación.
    - Sin eventos.
    - Sin exponer token sensible en markup.
+   
 ========================================================= */
 
 import {

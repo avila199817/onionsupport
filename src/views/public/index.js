@@ -1,40 +1,73 @@
 /* =========================================================
-   Onion Support - Login View Controller
-   Archivo: /src/views/public/login/index.js
+   Onion Support - Public Views Shared
+   Archivo: /src/views/public/index.js
 
    Responsabilidad:
-   - Controlador mínimo de la vista Login pública.
-   - Montar el template recibido desde ./template.js.
-   - Leer refs por contrato data-*.
-   - Activar controles mínimos del password ya pintados por template.
-   - Validar formulario mínimo.
-   - Llamar Auth.login().
-   - Navegar vía Router tras login correcto.
-   - Gestionar loading/error del formulario.
-   - Sin HTML inline.
-   - Sin construir campos.
-   - Sin logo/card/layout.
-   - Sin controlar copys/estructura interna del template.
-   - Sin shared/password-field inexistente.
-   - Sin HTTP directo.
+   - Shared mínimo para vistas públicas.
+   - Layout común de auth/public.
+   - Logo público auth.
+   - Helpers seguros de escape, assets y href internos.
+   - Sin Auth.
+   - Sin Router.
+   - Sin HTTP.
    - Sin Store.
-   - Sin Toast directo.
-   - Sin storage.
-   - Sin eventos globales.
-   - Sin navegación browser paralela.
+   - Sin Toast.
+   - Sin eventos.
+   - Sin navegación real.
+   - Sin lógica de vistas concretas.
 ========================================================= */
 
-import { AppCore } from "../../../core/index.js";
-import { Auth } from "../../../features/auth/index.js";
-import createLoginTemplate from "./template.js";
+import {
+  ROUTES,
+  SENSITIVE_QUERY_PARAMS,
+  isBlockedRoutePath,
+  normalizeRoutePath,
+  routePathFromUrlLike,
+} from "../../core/config.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.public.controller.v3";
+export const PUBLIC_SHARED_VERSION = "public.shared.v1";
 
-const SOURCE = "login.view";
+export const PUBLIC_AUTH_LOGO = new URL(
+  "../../media/img/favicon_black_circle.png",
+  import.meta.url
+).href;
 
-const INSTANCES = new WeakMap();
+const APP_NAME = "Onion Support";
+const DEFAULT_PUBLIC_VIEW = "public";
+const DEFAULT_SAFE_HREF = ROUTES.login || "/login";
 
-let lastInstance = null;
+const SENSITIVE_QUERY_KEYS = new Set(
+  (Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
+    ? SENSITIVE_QUERY_PARAMS
+    : [
+        "token",
+        "access_token",
+        "accessToken",
+        "refresh_token",
+        "refreshToken",
+        "id_token",
+        "idToken",
+        "jwt",
+        "authorization",
+        "session",
+        "sessionId",
+        "session_id",
+        "secret",
+        "code",
+        "password",
+        "pwd",
+        "key",
+        "sig",
+        "signature",
+        "reset_token",
+        "resetToken",
+        "activation_token",
+        "activationToken",
+      ]
+  )
+    .map((key) => normalizeKey(key))
+    .filter(Boolean)
+);
 
 /* =========================================================
    BASICS
@@ -44,11 +77,7 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFunction(value) {
-  return typeof value === "function";
-}
-
-function cleanText(value = "", fallback = "") {
+function text(value = "", fallback = "") {
   const output = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
@@ -57,696 +86,397 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
-function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+function normalizeKey(value = "") {
+  return text(value, "")
+    .replace(/[-_\s]/g, "")
+    .toLowerCase();
 }
 
-function clearNode(node = null) {
-  if (!node) return false;
+function normalizeViewKey(value = "") {
+  return text(value, DEFAULT_PUBLIC_VIEW)
+    .toLowerCase()
+    .replace(/[^a-z0-9._:-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || DEFAULT_PUBLIC_VIEW;
+}
+
+function splitUrlLike(value = "") {
+  const raw = text(value, "");
+
+  if (!raw) {
+    return {
+      pathname: "",
+      search: "",
+      hash: "",
+    };
+  }
+
+  let clean = "";
 
   try {
-    node.replaceChildren();
-    return true;
+    clean = routePathFromUrlLike(raw) || "";
   } catch {
-    try {
-      node.textContent = "";
-      return true;
-    } catch {
-      return false;
+    clean = "";
+  }
+
+  if (!clean) {
+    return {
+      pathname: "",
+      search: "",
+      hash: "",
+    };
+  }
+
+  let pathname = clean;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || "/";
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || "/";
+  }
+
+  return {
+    pathname,
+    search,
+    hash,
+  };
+}
+
+/* =========================================================
+   ESCAPE
+========================================================= */
+
+export function escapeHtml(value = "") {
+  return text(value, "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+export function escapeAttr(value = "") {
+  return escapeHtml(value)
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/`/g, "&#96;");
+}
+
+/* =========================================================
+   SECURITY
+========================================================= */
+
+function hasSensitiveQuery(value = "") {
+  const raw = String(value || "");
+
+  if (!raw) return false;
+
+  try {
+    const url = new URL(raw, "https://onionsupport.local");
+
+    for (const key of url.searchParams.keys()) {
+      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+        return true;
+      }
     }
-  }
-}
 
-function isDomNode(value = null) {
-  return Boolean(
-    isBrowser() &&
-      value &&
-      typeof Node !== "undefined" &&
-      value instanceof Node
-  );
-}
+    if (url.hash) {
+      const hash = url.hash.replace(/^#/, "");
 
-function setHidden(node = null, hidden = true) {
-  if (!node) return false;
+      if (hash.includes("=")) {
+        const params = new URLSearchParams(hash);
 
-  node.hidden = Boolean(hidden);
-  return true;
-}
-
-function focusSafe(node = null) {
-  if (!node) return false;
-
-  try {
-    node.focus({
-      preventScroll: true,
-    });
+        for (const key of params.keys()) {
+          if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+            return true;
+          }
+        }
+      }
+    }
   } catch {
-    node.focus?.();
-  }
-
-  return true;
-}
-
-/* =========================================================
-   ROUTER
-========================================================= */
-
-function getRouter(context = {}) {
-  return (
-    context.Router ||
-    AppCore.router ||
-    AppCore.Router ||
-    AppCore.getModule?.("router") ||
-    null
-  );
-}
-
-async function goAfterLogin(result = {}, context = {}) {
-  const router = getRouter(context);
-
-  if (!router) {
-    throw new Error("Router no disponible.");
-  }
-
-  const target =
-    result.postLoginTarget ||
-    result.homePath ||
-    result.defaultHome ||
-    Auth.getPostLoginTarget?.() ||
-    Auth.getDefaultHome?.() ||
-    "/";
-
-  const options = {
-    source: SOURCE,
-    replaceState: true,
-    force: true,
-  };
-
-  if (isFunction(router.goAfterLogin)) {
-    return router.goAfterLogin(target, options);
-  }
-
-  if (isFunction(router.replace)) {
-    return router.replace(target, options);
-  }
-
-  if (isFunction(router.navigate)) {
-    return router.navigate(target, options);
-  }
-
-  throw new Error("Router no permite navegación.");
-}
-
-/* =========================================================
-   TEMPLATE
-========================================================= */
-
-function resolveTemplate() {
-  if (!isFunction(createLoginTemplate)) {
-    throw new Error("[LoginView] template.js debe exportar createLoginTemplate().");
-  }
-
-  const view = createLoginTemplate();
-
-  if (!isDomNode(view)) {
-    throw new Error("[LoginView] createLoginTemplate() debe devolver un nodo DOM.");
-  }
-
-  return view;
-}
-
-function mountTemplate(container) {
-  const view = resolveTemplate();
-
-  clearNode(container);
-  container.appendChild(view);
-
-  return view;
-}
-
-/* =========================================================
-   REFS
-========================================================= */
-
-function getRefs(root = null) {
-  if (!root) {
-    throw new Error("[LoginView] root inválido.");
-  }
-
-  const refs = {
-    root,
-
-    form: root.querySelector("[data-login-form]"),
-    identifier: root.querySelector("[data-login-identifier]"),
-    password: root.querySelector("[data-login-password]"),
-    submit: root.querySelector("[data-login-submit]"),
-
-    globalError: root.querySelector("[data-login-global-error]"),
-    identifierError: root.querySelector("[data-login-error='identifier']"),
-    passwordError: root.querySelector("[data-login-error='password']"),
-
-    passwordWrapper: root.querySelector("[data-password-wrapper]"),
-    passwordToggle: root.querySelector("[data-password-toggle]"),
-    passwordCaps: root.querySelector("[data-password-caps]"),
-    passwordEye: root.querySelector(".password-eye-icon"),
-    passwordEyeOff: root.querySelector(".password-eye-off-icon"),
-  };
-
-  if (!refs.form) {
-    throw new Error("[LoginView] falta [data-login-form].");
-  }
-
-  if (!refs.identifier) {
-    throw new Error("[LoginView] falta [data-login-identifier].");
-  }
-
-  if (!refs.password) {
-    throw new Error("[LoginView] falta [data-login-password].");
-  }
-
-  if (!refs.submit) {
-    throw new Error("[LoginView] falta [data-login-submit].");
-  }
-
-  return refs;
-}
-
-/* =========================================================
-   PASSWORD CONTROLS
-========================================================= */
-
-function readCapsLock(event = null) {
-  try {
-    return Boolean(event?.getModifierState?.("CapsLock"));
-  } catch {
-    return false;
-  }
-}
-
-function setPasswordVisible(refs, visible = false) {
-  const value = Boolean(visible);
-  const type = value ? "text" : "password";
-
-  if (!refs.password) return false;
-
-  try {
-    refs.password.type = type;
-  } catch {
-    refs.password.setAttribute("type", type);
-  }
-
-  if (refs.passwordToggle) {
-    refs.passwordToggle.setAttribute("aria-pressed", value ? "true" : "false");
-    refs.passwordToggle.setAttribute(
-      "aria-label",
-      value ? "Ocultar contraseña" : "Mostrar contraseña"
+    return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
+      raw
     );
-    refs.passwordToggle.dataset.passwordVisible = value ? "true" : "false";
-  }
-
-  if (refs.passwordWrapper) {
-    refs.passwordWrapper.dataset.passwordVisible = value ? "true" : "false";
-  }
-
-  setHidden(refs.passwordEye, value);
-  setHidden(refs.passwordEyeOff, !value);
-
-  return true;
-}
-
-function setCapsVisible(refs, visible = false) {
-  const value = Boolean(visible);
-
-  if (refs.passwordCaps) {
-    refs.passwordCaps.hidden = !value;
-  }
-
-  if (refs.passwordWrapper) {
-    refs.passwordWrapper.dataset.capsLock = value ? "true" : "false";
-  }
-
-  return true;
-}
-
-function initPasswordControls(refs) {
-  let destroyed = false;
-  let visible = false;
-
-  function toggleVisibility() {
-    if (destroyed) return false;
-    if (!refs.password || refs.password.disabled) return false;
-    if (refs.passwordToggle?.disabled) return false;
-
-    visible = !visible;
-    setPasswordVisible(refs, visible);
-    focusSafe(refs.password);
-
-    return true;
-  }
-
-  function syncCaps(event = null) {
-    if (destroyed) return false;
-
-    setCapsVisible(refs, readCapsLock(event));
-    return true;
-  }
-
-  function hideCaps() {
-    if (destroyed) return false;
-
-    setCapsVisible(refs, false);
-    return true;
-  }
-
-  refs.passwordToggle?.addEventListener("click", toggleVisibility);
-  refs.password?.addEventListener("keydown", syncCaps);
-  refs.password?.addEventListener("keyup", syncCaps);
-  refs.password?.addEventListener("blur", hideCaps);
-
-  setPasswordVisible(refs, false);
-  setCapsVisible(refs, false);
-
-  return {
-    setDisabled(disabled = false) {
-      if (refs.passwordToggle) {
-        refs.passwordToggle.disabled = Boolean(disabled);
-      }
-
-      return true;
-    },
-
-    destroy() {
-      destroyed = true;
-      visible = false;
-
-      try {
-        refs.passwordToggle?.removeEventListener("click", toggleVisibility);
-        refs.password?.removeEventListener("keydown", syncCaps);
-        refs.password?.removeEventListener("keyup", syncCaps);
-        refs.password?.removeEventListener("blur", hideCaps);
-      } catch {
-        // noop
-      }
-
-      try {
-        setPasswordVisible(refs, false);
-        setCapsVisible(refs, false);
-      } catch {
-        // noop
-      }
-
-      return true;
-    },
-
-    getSnapshot() {
-      return {
-        available: Boolean(refs.password && refs.passwordToggle),
-        visible,
-        capsVisible: refs.passwordCaps?.hidden === false,
-      };
-    },
-  };
-}
-
-/* =========================================================
-   FORM STATE
-========================================================= */
-
-function getFieldInput(refs, name = "") {
-  if (name === "identifier") return refs.identifier || null;
-  if (name === "password") return refs.password || null;
-
-  return null;
-}
-
-function getFieldErrorNode(refs, name = "") {
-  if (name === "identifier") return refs.identifierError || null;
-  if (name === "password") return refs.passwordError || null;
-
-  return null;
-}
-
-function setFieldError(refs, name = "", message = "") {
-  const input = getFieldInput(refs, name);
-  const error = getFieldErrorNode(refs, name);
-  const hasError = Boolean(message);
-
-  if (input) {
-    input.setAttribute("aria-invalid", hasError ? "true" : "false");
-  }
-
-  if (error) {
-    error.textContent = message;
-    error.hidden = !hasError;
-  }
-
-  return hasError;
-}
-
-function clearErrors(refs) {
-  setFieldError(refs, "identifier", "");
-  setFieldError(refs, "password", "");
-
-  if (refs.globalError) {
-    refs.globalError.textContent = "";
-    refs.globalError.hidden = true;
-  }
-
-  return true;
-}
-
-function setGlobalError(refs, message = "") {
-  if (!refs.globalError) return false;
-
-  refs.globalError.textContent = cleanText(message, "No se pudo iniciar sesión.");
-  refs.globalError.hidden = false;
-
-  return true;
-}
-
-function setLoading(refs, loading = false, passwordControls = null) {
-  const value = Boolean(loading);
-  const busy = value ? "true" : "false";
-
-  for (const node of [refs.identifier, refs.password, refs.submit].filter(Boolean)) {
-    node.disabled = value;
-  }
-
-  passwordControls?.setDisabled?.(value);
-
-  if (refs.submit) {
-    refs.submit.dataset.loading = busy;
-    refs.submit.setAttribute("aria-busy", busy);
-  }
-
-  if (refs.form) {
-    refs.form.dataset.loading = busy;
-    refs.form.setAttribute("aria-busy", busy);
-  }
-
-  return true;
-}
-
-function readPayload(refs) {
-  return {
-    identifier: cleanText(refs.identifier?.value || "", ""),
-    password: String(refs.password?.value || ""),
-  };
-}
-
-function validatePayload(payload = {}) {
-  const errors = {};
-
-  if (!cleanText(payload.identifier, "")) {
-    errors.identifier = "Introduce tu email o usuario.";
-  }
-
-  if (!String(payload.password || "")) {
-    errors.password = "Introduce tu contraseña.";
-  }
-
-  return errors;
-}
-
-function applyErrors(refs, errors = {}) {
-  let firstInvalid = null;
-
-  for (const [name, message] of Object.entries(errors)) {
-    setFieldError(refs, name, message);
-
-    if (!firstInvalid) {
-      firstInvalid = getFieldInput(refs, name);
-    }
-  }
-
-  focusSafe(firstInvalid);
-
-  return Object.keys(errors).length > 0;
-}
-
-function authErrorMessage(error = null) {
-  const status = Number(error?.status || error?.statusCode || error?.response?.status || 0);
-  const code = cleanText(error?.code || error?.error || "", "").toUpperCase();
-
-  if (status === 401 || code.includes("INVALID") || code.includes("UNAUTHORIZED")) {
-    return "Credenciales incorrectas.";
-  }
-
-  if (status === 403 || code.includes("DISABLED") || code.includes("BLOCKED")) {
-    return "Tu usuario no tiene acceso activo.";
-  }
-
-  if (status >= 500) {
-    return "El servidor no respondió correctamente. Inténtalo de nuevo.";
-  }
-
-  return cleanText(error?.message || "", "No se pudo iniciar sesión.");
-}
-
-/* =========================================================
-   INSTANCE
-========================================================= */
-
-function destroyPrevious(container) {
-  const previous = INSTANCES.get(container);
-
-  if (previous?.destroy) {
-    previous.destroy({
-      remount: true,
-    });
-
-    return true;
   }
 
   return false;
 }
 
-function storeInstance(container, instance) {
-  INSTANCES.set(container, instance);
-  lastInstance = instance;
-  return true;
-}
+function safeSearch(value = "") {
+  const raw = text(value, "");
 
-function clearInstance(container, instance) {
-  if (INSTANCES.get(container) === instance) {
-    INSTANCES.delete(container);
-  }
+  if (!raw || raw === "?") return "";
+  if (!raw.startsWith("?")) return "";
+  if (hasSensitiveQuery(raw)) return "";
 
-  if (lastInstance === instance) {
-    lastInstance = null;
-  }
-
-  return true;
-}
-
-/* =========================================================
-   VIEW
-========================================================= */
-
-export function renderLoginView(container, context = {}) {
-  if (!isBrowser()) return null;
-
-  if (!container) {
-    throw new Error("[LoginView] container requerido.");
-  }
-
-  destroyPrevious(container);
-
-  const view = mountTemplate(container);
-  const refs = getRefs(view);
-  const passwordControls = initPasswordControls(refs);
-
-  let mounted = true;
-  let submitting = false;
-
-  function setSubmitting(value = false) {
-    submitting = Boolean(value);
-    setLoading(refs, submitting, passwordControls);
-  }
-
-  async function submit(event = null) {
-    event?.preventDefault?.();
-
-    if (!mounted || submitting) return false;
-
-    clearErrors(refs);
-
-    const payload = readPayload(refs);
-    const errors = validatePayload(payload);
-
-    if (Object.keys(errors).length) {
-      applyErrors(refs, errors);
-      return false;
-    }
-
-    setSubmitting(true);
-
-    try {
-      const result = await Auth.login(
-        {
-          identifier: payload.identifier,
-          password: payload.password,
-        },
-        {
-          source: SOURCE,
-          skipNavigation: true,
-          skipRedirect: true,
-          noRedirect: true,
-        }
-      );
-
-      if (result?.authenticated !== true && Auth.isAuthenticated?.() !== true) {
-        throw new Error("Login inválido.");
-      }
-
-      const navigation = await goAfterLogin(result || {}, context);
-
-      if (navigation === false || navigation?.ok === false) {
-        throw new Error("No se pudo completar la navegación tras el login.");
-      }
-
-      return true;
-    } catch (error) {
-      setGlobalError(refs, authErrorMessage(error));
-      return false;
-    } finally {
-      if (mounted) {
-        setSubmitting(false);
-      }
-    }
-  }
-
-  function onInput() {
-    clearErrors(refs);
-  }
-
-  refs.form.addEventListener("submit", submit);
-  refs.identifier.addEventListener("input", onInput);
-  refs.password.addEventListener("input", onInput);
-
-  focusSafe(refs.identifier);
-
-  const instance = {
-    version: LOGIN_VIEW_VERSION,
-
-    root: view,
-
-    submit,
-
-    unlock() {
-      setSubmitting(false);
-      return true;
-    },
-
-    destroy() {
-      mounted = false;
-      submitting = false;
-
-      try {
-        refs.form.removeEventListener("submit", submit);
-        refs.identifier.removeEventListener("input", onInput);
-        refs.password.removeEventListener("input", onInput);
-      } catch {
-        // noop
-      }
-
-      try {
-        passwordControls.destroy();
-      } catch {
-        // noop
-      }
-
-      try {
-        setLoading(refs, false, passwordControls);
-      } catch {
-        // noop
-      }
-
-      clearInstance(container, instance);
-
-      return true;
-    },
-
-    getSnapshot() {
-      const authenticated = Auth.isAuthenticated?.() === true;
-
-      return {
-        version: LOGIN_VIEW_VERSION,
-        mounted,
-        submitting,
-        authenticated,
-        passwordControls: passwordControls.getSnapshot(),
-        target: authenticated
-          ? redact(Auth.getPostLoginTarget?.() || Auth.getDefaultHome?.() || "/")
-          : null,
-      };
-    },
-
-    getDebugSnapshot() {
-      return this.getSnapshot();
-    },
-  };
-
-  storeInstance(container, instance);
-
-  return instance;
-}
-
-/* =========================================================
-   EXPORTS
-========================================================= */
-
-export function init(container, context = {}) {
-  return renderLoginView(container, context);
-}
-
-export function mount(container, context = {}) {
-  return renderLoginView(container, context);
-}
-
-export function destroy(options = {}) {
   try {
-    return Boolean(lastInstance?.destroy?.(options));
+    const params = new URLSearchParams(raw);
+
+    for (const key of [...params.keys()]) {
+      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+        params.delete(key);
+      }
+    }
+
+    const output = params.toString();
+
+    return output ? `?${output}` : "";
   } catch {
-    return false;
+    return "";
   }
 }
 
-export function getSnapshot() {
-  if (lastInstance?.getSnapshot) {
-    return lastInstance.getSnapshot();
+function safeHash(value = "") {
+  const raw = text(value, "");
+
+  if (!raw || raw === "#") return "";
+  if (!raw.startsWith("#")) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (hasSensitiveQuery(raw)) return "";
+
+  return raw;
+}
+
+function normalizeInternalPath(value = "") {
+  const raw = text(value, "");
+
+  if (!raw) return "";
+  if (!raw.startsWith("/") && !/^https?:\/\//i.test(raw)) return "";
+  if (raw.startsWith("//")) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
+  if (hasSensitiveQuery(raw)) return "";
+
+  const parts = splitUrlLike(raw);
+
+  if (!parts.pathname) return "";
+
+  let pathname = "";
+
+  try {
+    pathname = normalizeRoutePath(parts.pathname) || "";
+  } catch {
+    pathname = "";
   }
 
+  if (!pathname) return "";
+  if (!pathname.startsWith("/")) return "";
+  if (pathname.startsWith("//")) return "";
+  if (/[\r\n\t\\]/.test(pathname)) return "";
+
+  try {
+    if (isBlockedRoutePath(pathname)) return "";
+  } catch {
+    return "";
+  }
+
+  return `${pathname}${safeSearch(parts.search)}${safeHash(parts.hash)}`;
+}
+
+/* =========================================================
+   PUBLIC HELPERS
+========================================================= */
+
+export function safeInternalHref(value = "", fallback = DEFAULT_SAFE_HREF) {
+  const href = normalizeInternalPath(value);
+
+  if (href) return href;
+
+  if (fallback === "") return "";
+
+  return normalizeInternalPath(fallback) || "/";
+}
+
+export function safeAssetSrc(value = "", fallback = "") {
+  const src = text(value, fallback);
+
+  if (!src) return fallback;
+  if (/[\r\n\t\\]/.test(src)) return fallback;
+  if (hasSensitiveQuery(src)) return fallback;
+  if (/^(javascript|data|vbscript|file):/i.test(src)) return fallback;
+
+  if (src.startsWith("/")) {
+    if (src.startsWith("//")) return fallback;
+
+    return src.replace(/\/{2,}/g, "/") || fallback;
+  }
+
+  if (/^https?:\/\//i.test(src)) {
+    try {
+      const url = new URL(src);
+
+      if (url.protocol === "http:" || url.protocol === "https:") {
+        return url.href;
+      }
+    } catch {
+      return fallback;
+    }
+  }
+
+  return fallback;
+}
+
+/* =========================================================
+   PUBLIC SHELL
+========================================================= */
+
+function renderPublicHeader({
+  appName = APP_NAME,
+  title = "",
+  subtitle = "",
+} = {}) {
+  const cleanTitle = text(title, appName);
+  const cleanSubtitle = text(subtitle, "");
+
+  return `
+    <header
+      class="public-auth-header"
+      data-public-header="true"
+    >
+      <div
+        class="public-auth-brand"
+        data-public-brand="true"
+        aria-label="${escapeAttr(appName)}"
+      >
+        <img
+          class="public-auth-brand-logo"
+          src="${escapeAttr(safeAssetSrc(PUBLIC_AUTH_LOGO, PUBLIC_AUTH_LOGO))}"
+          alt=""
+          width="40"
+          height="40"
+          loading="eager"
+          decoding="async"
+          draggable="false"
+          data-public-brand-logo="true"
+        >
+
+        <span class="public-auth-brand-name">
+          ${escapeHtml(appName)}
+        </span>
+      </div>
+
+      <div class="public-auth-header-copy">
+        <h1 class="public-auth-title">
+          ${escapeHtml(cleanTitle)}
+        </h1>
+
+        ${
+          cleanSubtitle
+            ? `
+              <p class="public-auth-subtitle">
+                ${escapeHtml(cleanSubtitle)}
+              </p>
+            `
+            : ""
+        }
+      </div>
+    </header>
+  `;
+}
+
+export function renderPublicShell({
+  view = DEFAULT_PUBLIC_VIEW,
+  appName = APP_NAME,
+  title = "",
+  subtitle = "",
+  header = true,
+  body = "",
+  ariaLabel = "",
+  ariaLabelledBy = "",
+} = {}) {
+  const viewKey = normalizeViewKey(view);
+  const cleanAppName = text(appName, APP_NAME);
+  const cleanBody = String(body ?? "");
+  const label = text(ariaLabel, `${cleanAppName} · Acceso`);
+  const labelledBy = text(ariaLabelledBy, "");
+
+  return `
+    <section
+      class="public-auth-shell public-auth-shell--${escapeAttr(viewKey)}"
+      data-public-shell="true"
+      data-public-view="${escapeAttr(viewKey)}"
+      data-public-shared-version="${escapeAttr(PUBLIC_SHARED_VERSION)}"
+      ${labelledBy ? `aria-labelledby="${escapeAttr(labelledBy)}"` : `aria-label="${escapeAttr(label)}"`}
+    >
+      <div
+        class="public-auth-background"
+        data-public-background="true"
+        aria-hidden="true"
+      ></div>
+
+      ${
+        header
+          ? renderPublicHeader({
+              appName: cleanAppName,
+              title,
+              subtitle,
+            })
+          : ""
+      }
+
+      <div
+        class="public-auth-body"
+        data-public-body="true"
+      >
+        ${cleanBody}
+      </div>
+    </section>
+  `;
+}
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
+export function getPublicSharedSnapshot() {
   return {
-    version: LOGIN_VIEW_VERSION,
-    mounted: false,
-    authenticated: Auth.isAuthenticated?.() === true,
+    version: PUBLIC_SHARED_VERSION,
+    appName: APP_NAME,
+    hasLogo: Boolean(PUBLIC_AUTH_LOGO),
+    browser: isBrowser(),
+    policy: {
+      sharedOnly: true,
+      noAuth: true,
+      noRouter: true,
+      noHttp: true,
+      noStore: true,
+      noToast: true,
+      noEvents: true,
+      noNavigation: true,
+    },
   };
 }
 
-export const getDebugSnapshot = getSnapshot;
+export const getSnapshot = getPublicSharedSnapshot;
+export const getDebugSnapshot = getPublicSharedSnapshot;
 
-export const LoginView = Object.assign(
-  function LoginViewCompat(container, context = {}) {
-    return renderLoginView(container, context);
-  },
-  {
-    version: LOGIN_VIEW_VERSION,
-    render: renderLoginView,
-    init,
-    mount,
-    destroy,
-    getSnapshot,
-    getDebugSnapshot,
-  }
-);
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
-export { renderLoginView as render };
+export default {
+  version: PUBLIC_SHARED_VERSION,
 
-export default LoginView;
+  PUBLIC_AUTH_LOGO,
+
+  escapeHtml,
+  escapeAttr,
+
+  safeAssetSrc,
+  safeInternalHref,
+
+  renderPublicShell,
+
+  getPublicSharedSnapshot,
+  getSnapshot,
+  getDebugSnapshot,
+};

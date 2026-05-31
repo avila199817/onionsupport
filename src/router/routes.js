@@ -5,17 +5,24 @@
    Responsabilidad:
    - Tabla mínima de rutas SPA.
    - Vistas lazy.
-   - Resolver /@{slug} hacia ruta interna.
-   - Marcar rutas públicas, privadas y admin.
+   - Resolver /@{slug} hacia ruta interna privada.
+   - Marcar rutas públicas, privadas, admin y token routes.
    - Rutas públicas viven en /src/views/public/*
-   - Sin Auth, guards, history, storage, Toast, shell,
-     snapshots gigantes ni rutas inventadas.
+   - Sin Auth.
+   - Sin guards.
+   - Sin history.
+   - Sin storage.
+   - Sin Toast.
+   - Sin shell.
+   - Sin rutas inventadas.
 ========================================================= */
 
 import {
   ROUTES,
   USER_HOME_PREFIX,
   ALLOWED_ROLES,
+  PUBLIC_ROUTES,
+  PROTECTED_PUBLIC_TOKEN_ROUTES,
   isAdminRoute as configIsAdminRoute,
   isBlockedRoutePath,
   normalizeRoutePath as configNormalizeRoutePath,
@@ -23,7 +30,7 @@ import {
   getUserScopedRouteInfo as configGetUserScopedRouteInfo,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.minimal.v3";
+export const ROUTES_VERSION = "routes.minimal.v4";
 
 /* =========================================================
    PATHS / NAMES
@@ -65,23 +72,11 @@ export const ROUTE_NAMES = Object.freeze({
 
 export const VALID_ROLES = Object.freeze(
   Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length
-    ? [...ALLOWED_ROLES]
+    ? [...new Set(ALLOWED_ROLES.map((role) => String(role).toLowerCase()))]
     : ["admin", "user"]
 );
 
 export const ADMIN_ROLES = Object.freeze(["admin"]);
-
-export const PUBLIC_AUTH_ROUTES = Object.freeze([
-  ROUTE_PATHS.LOGIN,
-  ROUTE_PATHS.PASSWORD_REQUEST,
-  ROUTE_PATHS.PASSWORD_RESET,
-  ROUTE_PATHS.ACTIVATE_ACCOUNT,
-]);
-
-export const TOKEN_ROUTE_PATHS = Object.freeze([
-  ROUTE_PATHS.PASSWORD_RESET,
-  ROUTE_PATHS.ACTIVATE_ACCOUNT,
-]);
 
 export const ROUTE_ALIASES = Object.freeze({});
 
@@ -137,6 +132,53 @@ function cleanName(value = "") {
     .slice(0, 96);
 }
 
+function normalizePathList(paths = []) {
+  const seen = new Set();
+
+  for (const path of Array.isArray(paths) ? paths : []) {
+    const clean = normalizePath(path);
+
+    if (!clean) continue;
+    if (clean.startsWith(USER_HOME_PREFIX)) continue;
+    if (isBlockedRoutePath(clean)) continue;
+
+    seen.add(clean);
+  }
+
+  return Object.freeze([...seen]);
+}
+
+function pathInList(path = "/", paths = []) {
+  const clean = normalizePath(path);
+
+  return paths.some((item) => normalizePath(item) === clean);
+}
+
+function tokenRoutePathsFromConfig() {
+  const paths = [];
+
+  for (const item of Array.isArray(PROTECTED_PUBLIC_TOKEN_ROUTES)
+    ? PROTECTED_PUBLIC_TOKEN_ROUTES
+    : []) {
+    if (item?.path) {
+      paths.push(item.path);
+    }
+
+    if (Array.isArray(item?.paths)) {
+      paths.push(...item.paths);
+    }
+  }
+
+  return normalizePathList(
+    paths.length
+      ? paths
+      : [
+          ROUTE_PATHS.PASSWORD_RESET,
+          ROUTE_PATHS.ACTIVATE_ACCOUNT,
+        ]
+  );
+}
+
 function pickView(module, names = []) {
   for (const name of names) {
     if (module?.[name]) return module[name];
@@ -154,6 +196,23 @@ function resolveRenderer(view, viewKey = "") {
 
   throw new Error(`La vista "${viewKey}" no expone init(), mount() ni render().`);
 }
+
+/* =========================================================
+   PUBLIC / TOKEN ROUTES
+========================================================= */
+
+export const PUBLIC_AUTH_ROUTES = normalizePathList(
+  Array.isArray(PUBLIC_ROUTES) && PUBLIC_ROUTES.length
+    ? PUBLIC_ROUTES
+    : [
+        ROUTE_PATHS.LOGIN,
+        ROUTE_PATHS.PASSWORD_REQUEST,
+        ROUTE_PATHS.PASSWORD_RESET,
+        ROUTE_PATHS.ACTIVATE_ACCOUNT,
+      ]
+);
+
+export const TOKEN_ROUTE_PATHS = tokenRoutePathsFromConfig();
 
 /* =========================================================
    USER SCOPE
@@ -221,13 +280,26 @@ export function getUserScopedRouteInfo(path = "/") {
 export function resolveRouteLookupPath(path = "/") {
   const clean = normalizePath(path);
 
+  if (!clean) return "";
   if (isBlockedRoutePath(clean)) return "";
 
   const scoped = getUserScopedRouteInfo(clean);
 
-  return scoped.scoped
-    ? scoped.canonicalPath || scoped.restPath || "/"
-    : clean;
+  if (!scoped.scoped) {
+    return clean;
+  }
+
+  const lookup = scoped.canonicalPath || scoped.restPath || "/";
+
+  /*
+    Las rutas públicas Auth no son válidas bajo /@{slug}.
+    Ejemplo inválido: /@cristian/login
+  */
+  if (pathInList(lookup, PUBLIC_AUTH_ROUTES)) {
+    return "";
+  }
+
+  return lookup;
 }
 
 export function getUserHomeSlugFromPath(path = "/") {
@@ -385,7 +457,8 @@ function createRoute({
   const finalPath = normalizePath(path);
   const finalName = cleanName(name || viewKey || finalPath);
   const finalViewKey = cleanName(viewKey || finalName);
-  const finalPublic = Boolean(isPublic);
+  const finalPublic = Boolean(isPublic || pathInList(finalPath, PUBLIC_AUTH_ROUTES));
+  const finalTokenRoute = Boolean(tokenRoute || pathInList(finalPath, TOKEN_ROUTE_PATHS));
   const finalAdminOnly = Boolean(adminOnly || configIsAdminRoute(finalPath));
 
   if (!finalPath || isBlockedRoutePath(finalPath)) {
@@ -394,6 +467,14 @@ function createRoute({
 
   if (finalPath.startsWith(USER_HOME_PREFIX)) {
     throw new Error(`No se declaran rutas reales bajo "${USER_HOME_PREFIX}".`);
+  }
+
+  if (finalPublic && finalAdminOnly) {
+    throw new Error(`Una ruta pública no puede ser admin-only: "${finalPath}".`);
+  }
+
+  if (finalTokenRoute && !finalPublic) {
+    throw new Error(`Una token route debe ser pública: "${finalPath}".`);
   }
 
   if (!VIEW_LOADERS[finalViewKey]) {
@@ -424,9 +505,10 @@ function createRoute({
     requiresAdmin: finalAdminOnly,
     roles: finalAdminOnly ? ADMIN_ROLES : [],
 
-    tokenRoute: Boolean(tokenRoute),
-    preserveSearch: finalPublic || tokenRoute,
-    preserveHash: finalPublic || tokenRoute,
+    tokenRoute: finalTokenRoute,
+    publicTokenRoute: finalTokenRoute,
+    preserveSearch: finalPublic || finalTokenRoute,
+    preserveHash: finalPublic || finalTokenRoute,
 
     hideShell: finalPublic,
     showShell: !finalPublic,
@@ -568,6 +650,7 @@ export function getImmutableRoutes() {
 export function resetRoutesCacheForTests() {
   routesCache = null;
   VIEW_CACHE.clear();
+
   return true;
 }
 
@@ -585,11 +668,13 @@ export function getRouteByPath(path = "/") {
 
 export function getRouteByName(name = "") {
   const clean = cleanName(name);
+
   return getImmutableRoutes().find((route) => route.name === clean) || null;
 }
 
 export function getRouteByViewKey(viewKey = "") {
   const clean = cleanName(viewKey);
+
   return getImmutableRoutes().find((route) => route.viewKey === clean) || null;
 }
 
@@ -599,21 +684,25 @@ export function resolveRouteAlias(path = "/") {
 
 export function isPublicAuthPath(path = "/") {
   const route = getRouteByPath(path);
+
   return route?.public === true;
 }
 
 export function isTokenPublicRoutePath(path = "/") {
   const route = getRouteByPath(path);
+
   return route?.tokenRoute === true;
 }
 
 export function isPrivateRoutePath(path = "/") {
   const route = getRouteByPath(path);
+
   return Boolean(route && route.requiresAuth === true);
 }
 
 export function isAdminRoutePath(path = "/") {
   const route = getRouteByPath(path);
+
   return Boolean(route?.adminOnly || route?.requiresAdmin);
 }
 
@@ -622,18 +711,32 @@ export function validateRoutesTable(_core = null, routes = getImmutableRoutes())
     throw new Error("Tabla de rutas inválida.");
   }
 
-  const seen = new Set();
+  const seenPaths = new Set();
+  const seenNames = new Set();
 
   for (const route of routes) {
     if (!route?.path || !route?.render) {
       throw new Error("Ruta inválida.");
     }
 
-    if (seen.has(route.path)) {
+    if (seenPaths.has(route.path)) {
       throw new Error(`Ruta duplicada: ${route.path}`);
     }
 
-    seen.add(route.path);
+    if (seenNames.has(route.name)) {
+      throw new Error(`Nombre de ruta duplicado: ${route.name}`);
+    }
+
+    if (route.path.startsWith(USER_HOME_PREFIX)) {
+      throw new Error(`Ruta user-scoped declarada incorrectamente: ${route.path}`);
+    }
+
+    if (isBlockedRoutePath(route.path)) {
+      throw new Error(`Ruta bloqueada declarada incorrectamente: ${route.path}`);
+    }
+
+    seenPaths.add(route.path);
+    seenNames.add(route.name);
   }
 
   return true;
@@ -650,6 +753,7 @@ export function getRoutesSnapshot() {
     title: route.title,
     viewKey: route.viewKey,
     public: route.public,
+    guestOnly: route.guestOnly,
     requiresAuth: route.requiresAuth,
     adminOnly: route.adminOnly,
     tokenRoute: route.tokenRoute,
@@ -675,7 +779,9 @@ export function getRouteDebug(path = "/") {
           name: route.name,
           viewKey: route.viewKey,
           public: route.public,
+          guestOnly: route.guestOnly,
           adminOnly: route.adminOnly,
+          tokenRoute: route.tokenRoute,
         }
       : null,
   };
@@ -691,6 +797,8 @@ export function getRoutesIntegritySnapshot() {
     count: getImmutableRoutes().length,
     routes: getRoutesSnapshot(),
     userHomePrefix: USER_HOME_PREFIX,
+    publicAuthRoutes: [...PUBLIC_AUTH_ROUTES],
+    tokenRoutePaths: [...TOKEN_ROUTE_PATHS],
     loadedViews: [...VIEW_CACHE.keys()],
   };
 }

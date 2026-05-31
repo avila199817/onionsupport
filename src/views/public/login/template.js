@@ -13,14 +13,17 @@
 import { ROUTES } from "../../../core/config.js";
 
 import {
+  PUBLIC_AUTH_LOGO,
   escapeAttr,
   escapeHtml,
   renderPublicShell,
+  safeAssetSrc,
   safeInternalHref,
 } from "../index.js";
 
-export const LOGIN_TEMPLATE_VERSION = "login.template.public.v2";
+export const LOGIN_TEMPLATE_VERSION = "login.template.public.v3";
 
+const APP_NAME = "Onion Support";
 const PASSWORD_REQUEST_HREF = ROUTES.passwordRequest || "/password-request";
 
 /* =========================================================
@@ -66,43 +69,43 @@ function renderIcon(name = "") {
         <path d="M12 15.25v1.5"></path>
       </svg>
     `,
-
-    shield: `
-      <svg class="login-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path d="M12 3.75 19.25 6v5.25c0 4.35-2.88 7.55-7.25 9-4.37-1.45-7.25-4.65-7.25-9V6L12 3.75Z"></path>
-        <path d="m9.25 12.25 1.85 1.85 3.9-4.2"></path>
-      </svg>
-    `,
-
-    spark: `
-      <svg class="login-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path d="M12 3.75 13.65 9 19 10.65 13.65 12.3 12 17.75 10.35 12.3 5 10.65 10.35 9 12 3.75Z"></path>
-        <path d="M18.25 15.75 19 18l2.25.75L19 19.5l-.75 2.25-.75-2.25-2.25-.75L17.5 18l.75-2.25Z"></path>
-      </svg>
-    `,
   };
 
   return icons[name] || "";
 }
 
 /* =========================================================
-   UI PARTIALS
+   LOGO
 ========================================================= */
 
-function renderTrustItem({ icon = "shield", title = "", text: body = "" } = {}) {
+function renderLoginLogo() {
+  const logoSrc = safeAssetSrc(PUBLIC_AUTH_LOGO, PUBLIC_AUTH_LOGO);
+
   return `
-    <li class="login-trust-item">
-      <span class="login-trust-icon" aria-hidden="true">
-        ${renderIcon(icon)}
+    <div class="login-card-logo-wrap" aria-label="${escapeAttr(APP_NAME)}">
+      <span class="login-card-logo-shell" aria-hidden="true">
+        <img
+          class="login-card-logo"
+          src="${escapeAttr(logoSrc)}"
+          alt=""
+          width="72"
+          height="72"
+          loading="eager"
+          decoding="async"
+          draggable="false"
+        >
       </span>
 
-      <span class="login-trust-copy">
-        <strong>${escapeHtml(text(title, ""))}</strong>
-        <span>${escapeHtml(text(body, ""))}</span>
+      <span class="login-card-logo-name">
+        ${escapeHtml(APP_NAME)}
       </span>
-    </li>
+    </div>
   `;
 }
+
+/* =========================================================
+   FIELD
+========================================================= */
 
 function renderField({
   id,
@@ -205,162 +208,121 @@ export function getLoginTemplate() {
 
   return renderPublicShell({
     view: "login",
-    title: "Acceso privado",
-    subtitle: "Onion Support · Panel seguro",
+    appName: APP_NAME,
+    title: "Acceso a Onion Support",
+    subtitle: "",
+    logo: false,
 
     body: `
       <section
         class="login-pro"
-        aria-label="Acceso a Onion Support"
+        aria-labelledby="login-panel-title"
         data-login-template-version="${escapeAttr(LOGIN_TEMPLATE_VERSION)}"
       >
         <div class="login-orb login-orb-primary" aria-hidden="true"></div>
         <div class="login-orb login-orb-secondary" aria-hidden="true"></div>
         <div class="login-grid-glow" aria-hidden="true"></div>
 
-        <div class="login-pro-grid">
-          <aside class="login-hero" aria-label="Resumen de Onion Support">
-            <div class="login-brand-stack">
-              <div class="login-brand-mark" aria-hidden="true">
-                <span>OS</span>
-              </div>
+        <section
+          class="login-card-panel"
+          aria-labelledby="login-panel-title"
+        >
+          <div class="login-card-sheen" aria-hidden="true"></div>
 
-              <div class="login-brand-copy">
-                <p class="login-eyebrow">Onion Support SPA</p>
-                <h2 class="login-hero-title">
-                  Gestión privada, rápida y precisa.
-                </h2>
-              </div>
-            </div>
+          <header class="login-card-header">
+            ${renderLoginLogo()}
 
-            <p class="login-hero-text">
-              Accede al panel para gestionar incidencias, clientes, facturas y operaciones internas desde una experiencia limpia y segura.
+            <p class="login-card-kicker">
+              Acceso privado
             </p>
 
-            <div class="login-status-card" aria-label="Estado del acceso">
-              <span class="login-status-pulse" aria-hidden="true"></span>
+            <h2
+              class="login-card-title"
+              id="login-panel-title"
+            >
+              Entra en tu panel
+            </h2>
 
-              <div class="login-status-copy">
-                <strong>Área restringida</strong>
-                <span>Entrada exclusiva para usuarios autorizados.</span>
-              </div>
+            <p class="login-card-subtitle">
+              Introduce tus credenciales para continuar.
+            </p>
+          </header>
+
+          <p
+            class="auth-error login-global-error"
+            data-login-global-error="true"
+            role="alert"
+            aria-live="polite"
+            hidden
+          ></p>
+
+          <form
+            class="auth-form login-form"
+            id="login-form"
+            autocomplete="on"
+            novalidate
+            data-login-form="true"
+          >
+            ${renderField({
+              id: "login-identifier",
+              name: "identifier",
+              label: "Usuario o email",
+              type: "text",
+              autocomplete: "username",
+              placeholder: "usuario@empresa.com",
+              icon: "user",
+              dataKey: "login-identifier",
+              enterKeyHint: "next",
+            })}
+
+            ${renderField({
+              id: "login-password",
+              name: "password",
+              label: "Contraseña",
+              type: "password",
+              autocomplete: "current-password",
+              placeholder: "Introduce tu contraseña",
+              icon: "lock",
+              dataKey: "login-password",
+              enterKeyHint: "go",
+            })}
+
+            <div class="login-form-row">
+              <span class="login-form-note">
+                Acceso seguro
+              </span>
+
+              <a
+                class="auth-link login-link login-forgot-link"
+                href="${escapeAttr(forgotHref)}"
+                data-spa="true"
+                data-route="${escapeAttr(forgotHref)}"
+                data-login-forgot-password="true"
+              >
+                ¿Has olvidado tu contraseña?
+              </a>
             </div>
 
-            <ul class="login-trust-list" aria-label="Características del panel">
-              ${renderTrustItem({
-                icon: "shield",
-                title: "Acceso protegido",
-                text: "Validación de sesión y rutas privadas desde la SPA.",
-              })}
-
-              ${renderTrustItem({
-                icon: "spark",
-                title: "Panel optimizado",
-                text: "Interfaz modular, ligera y preparada para operación diaria.",
-              })}
-
-              ${renderTrustItem({
-                icon: "lock",
-                title: "Datos sensibles fuera del cliente",
-                text: "Sin exposición de tokens, secretos ni lógica crítica en la vista.",
-              })}
-            </ul>
-          </aside>
-
-          <section
-            class="login-card-panel"
-            aria-labelledby="login-panel-title"
-          >
-            <div class="login-card-sheen" aria-hidden="true"></div>
-
-            <header class="login-card-header">
-              <p class="login-card-kicker">Bienvenido de nuevo</p>
-
-              <h2
-                class="login-card-title"
-                id="login-panel-title"
-              >
-                Entra en tu panel
-              </h2>
-
-              <p class="login-card-subtitle">
-                Introduce tus credenciales para continuar.
-              </p>
-            </header>
-
-            <p
-              class="auth-error login-global-error"
-              data-login-global-error="true"
-              role="alert"
-              aria-live="polite"
-              hidden
-            ></p>
-
-            <form
-              class="auth-form login-form"
-              id="login-form"
-              autocomplete="on"
-              novalidate
-              data-login-form="true"
+            <button
+              class="auth-button auth-submit login-submit"
+              type="submit"
+              data-login-submit="true"
+              data-default-text="Entrar al panel"
+              data-loading-text="Accediendo..."
             >
-              ${renderField({
-                id: "login-identifier",
-                name: "identifier",
-                label: "Usuario o email",
-                type: "text",
-                autocomplete: "username",
-                placeholder: "tu.usuario@empresa.com",
-                hint: "Usa el identificador asociado a tu cuenta.",
-                icon: "user",
-                dataKey: "login-identifier",
-                enterKeyHint: "next",
-              })}
+              Entrar al panel
+            </button>
 
-              ${renderField({
-                id: "login-password",
-                name: "password",
-                label: "Contraseña",
-                type: "password",
-                autocomplete: "current-password",
-                placeholder: "Introduce tu contraseña",
-                hint: "La contraseña se valida de forma segura en el backend.",
-                icon: "lock",
-                dataKey: "login-password",
-                enterKeyHint: "go",
-              })}
+            <p class="login-security-note">
+              Onion Support nunca solicitará tu contraseña fuera de esta pantalla.
+            </p>
+          </form>
 
-              <div class="login-form-row">
-                <span class="login-form-note">
-                  Acceso seguro
-                </span>
-
-                <a
-                  class="auth-link login-link login-forgot-link"
-                  href="${escapeAttr(forgotHref)}"
-                  data-spa="true"
-                  data-route="${escapeAttr(forgotHref)}"
-                  data-login-forgot-password="true"
-                >
-                  ¿Has olvidado tu contraseña?
-                </a>
-              </div>
-
-              <button
-                class="auth-button auth-submit login-submit"
-                type="submit"
-                data-login-submit="true"
-                data-default-text="Entrar al panel"
-                data-loading-text="Accediendo..."
-              >
-                Entrar al panel
-              </button>
-
-              <p class="login-security-note">
-                Onion Support nunca solicitará tu contraseña fuera de esta pantalla.
-              </p>
-            </form>
-          </section>
-        </div>
+          <footer class="login-card-footer" aria-label="Información de Onion Support">
+            <span>Acceso registrado · Onion Support</span>
+            <span>© 2026 · Todos los derechos reservados.</span>
+          </footer>
+        </section>
       </section>
     `,
   });

@@ -4,12 +4,19 @@
 
    Responsabilidad:
    - Layout base para vistas públicas/auth.
-   - Logo, shell, card, título, subtítulo, body y footer.
+   - Logo, shell, card, header opcional, body y footer.
+   - Utilidades HTML seguras para templates públicos.
    - Consumible por login, password-reset, activate-account.
-   - Sin Auth, Router, HTTP, Store, Toast, validación ni eventos.
+   - Sin Auth.
+   - Sin Router.
+   - Sin HTTP.
+   - Sin Store.
+   - Sin Toast.
+   - Sin validación de formularios.
+   - Sin eventos.
 ========================================================= */
 
-export const PUBLIC_TEMPLATE_VERSION = "public.template.v1";
+export const PUBLIC_TEMPLATE_VERSION = "public.template.v2";
 
 export const PUBLIC_AUTH_LOGO = new URL(
   "../../media/img/favicon_black_circle.png",
@@ -20,6 +27,9 @@ const DEFAULT_APP_NAME = "Onion Support";
 const DEFAULT_VIEW = "public";
 const DEFAULT_TITLE = "Onion Support";
 const DEFAULT_LOGIN_HREF = "/login";
+
+const SENSITIVE_QUERY_RE =
+  /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i;
 
 /* =========================================================
    BASICS
@@ -47,10 +57,23 @@ function cleanKey(value = "", fallback = DEFAULT_VIEW) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9._-]/g, "-")
+    .replace(/^data-/, "")
+    .replace(/[^a-z0-9-]/g, "-")
     .replace(/-+/g, "-")
-    .replace(/^[._-]+|[._-]+$/g, "")
+    .replace(/^-+|-+$/g, "")
     .slice(0, 80);
+
+  return output || fallback;
+}
+
+function cleanId(value = "", fallback = "") {
+  const output = text(value, fallback)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w:-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[^\w]+/, "")
+    .slice(0, 120);
 
   return output || fallback;
 }
@@ -64,8 +87,22 @@ function cleanClass(value = "", fallback = "") {
     .slice(0, 300);
 }
 
+function cleanDimension(value = "", fallback = 56) {
+  const numeric = Number(value);
+
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  return Math.min(Math.max(Math.round(numeric), 1), 512);
+}
+
+function hasSensitiveQuery(value = "") {
+  return SENSITIVE_QUERY_RE.test(String(value || ""));
+}
+
 /* =========================================================
-   ESCAPE / SAFE
+   ESCAPE
 ========================================================= */
 
 export function escapeHtml(value = "") {
@@ -81,30 +118,42 @@ export function escapeAttr(value = "") {
   return escapeHtml(text(value, ""));
 }
 
-function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
-    String(value || "")
-  );
+/* =========================================================
+   SAFE URLS
+========================================================= */
+
+function safeRootPath(value = "", fallback = "") {
+  const raw = text(value, "");
+
+  if (!raw) return fallback;
+  if (!raw.startsWith("/")) return fallback;
+  if (raw.startsWith("//")) return fallback;
+  if (/[\r\n\t\\]/.test(raw)) return fallback;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
+  if (hasSensitiveQuery(raw)) return fallback;
+
+  return raw.replace(/\/{2,}/g, "/") || fallback;
 }
 
 export function safeAssetSrc(value = "", fallback = PUBLIC_AUTH_LOGO) {
-  const raw = text(value, "");
   const fallbackSrc = text(fallback, PUBLIC_AUTH_LOGO);
+  const raw = text(value, "");
 
   if (!raw) return fallbackSrc;
   if (/[\r\n\t\\]/.test(raw)) return fallbackSrc;
   if (hasSensitiveQuery(raw)) return fallbackSrc;
 
   if (raw.startsWith("/")) {
-    if (raw.startsWith("//")) return fallbackSrc;
-    return raw.replace(/\/{2,}/g, "/") || fallbackSrc;
+    return safeRootPath(raw, fallbackSrc);
   }
 
   if (/^https?:\/\//i.test(raw) && isBrowser()) {
     try {
       const url = new URL(raw, window.location.origin);
 
-      if (url.origin !== window.location.origin) return fallbackSrc;
+      if (url.origin !== window.location.origin) {
+        return fallbackSrc;
+      }
 
       return `${url.pathname || "/"}${url.search || ""}`;
     } catch {
@@ -116,17 +165,9 @@ export function safeAssetSrc(value = "", fallback = PUBLIC_AUTH_LOGO) {
 }
 
 export function safeInternalHref(value = "", fallback = DEFAULT_LOGIN_HREF) {
-  const raw = text(value, fallback);
-  const fallbackHref = text(fallback, DEFAULT_LOGIN_HREF);
+  const fallbackHref = safeRootPath(fallback, DEFAULT_LOGIN_HREF);
 
-  if (!raw) return fallbackHref;
-  if (!raw.startsWith("/")) return fallbackHref;
-  if (raw.startsWith("//")) return fallbackHref;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallbackHref;
-  if (/[\r\n\t\\]/.test(raw)) return fallbackHref;
-  if (hasSensitiveQuery(raw)) return fallbackHref;
-
-  return raw.replace(/\/{2,}/g, "/") || fallbackHref;
+  return safeRootPath(value, fallbackHref);
 }
 
 /* =========================================================
@@ -141,7 +182,9 @@ function dataAttrs(attrs = {}) {
       const name = cleanKey(key, "");
 
       if (!name) return "";
-      if (value === false || value === null || value === undefined || value === "") return "";
+      if (value === false || value === null || value === undefined || value === "") {
+        return "";
+      }
 
       return ` data-${escapeAttr(name)}="${escapeAttr(value === true ? "true" : value)}"`;
     })
@@ -155,6 +198,8 @@ function dataAttrs(attrs = {}) {
 export function renderPublicLogo(options = {}) {
   const appName = text(options.appName, DEFAULT_APP_NAME);
   const logoSrc = safeAssetSrc(options.logoSrc, PUBLIC_AUTH_LOGO);
+  const width = cleanDimension(options.width, 56);
+  const height = cleanDimension(options.height, width);
   const showName = options.showName !== false;
 
   return `
@@ -163,8 +208,8 @@ export function renderPublicLogo(options = {}) {
         class="auth-logo public-logo"
         src="${escapeAttr(logoSrc)}"
         alt=""
-        width="${escapeAttr(options.width || 56)}"
-        height="${escapeAttr(options.height || 56)}"
+        width="${escapeAttr(width)}"
+        height="${escapeAttr(height)}"
         loading="eager"
         decoding="async"
         draggable="false"
@@ -194,19 +239,59 @@ export const renderAuthLogo = renderPublicLogo;
 export function renderPublicShell(options = {}) {
   const view = cleanKey(options.view, DEFAULT_VIEW);
   const appName = text(options.appName, DEFAULT_APP_NAME);
-  const title = text(options.title, DEFAULT_TITLE);
-  const subtitle = text(options.subtitle, "");
+
+  const hasHeader = options.header !== false;
+  const hasLogo = hasHeader && options.logo !== false;
+  const hasTitle = hasHeader && options.title !== false;
+
+  const title = hasTitle ? text(options.title, DEFAULT_TITLE) : "";
+  const subtitle = hasHeader ? text(options.subtitle, "") : "";
   const body = String(options.body || "");
   const footer = String(options.footer || "");
 
-  const titleId = text(options.titleId, `${view}-title`);
-  const descriptionId = subtitle ? text(options.descriptionId, `${view}-description`) : "";
+  const titleId = cleanId(options.titleId, `${view}-title`);
+  const descriptionId = subtitle
+    ? cleanId(options.descriptionId, `${view}-description`)
+    : "";
 
-  const shellClass = cleanClass(options.shellClass, `auth-shell public-shell ${view}-shell`);
-  const cardClass = cleanClass(options.cardClass, `auth-card public-card ${view}-card`);
-  const headerClass = cleanClass(options.headerClass, `auth-header public-header ${view}-header`);
-  const bodyClass = cleanClass(options.bodyClass, `auth-body public-body ${view}-body`);
-  const footerClass = cleanClass(options.footerClass, `auth-footer public-footer ${view}-footer`);
+  const ariaLabelledBy = text(
+    options.ariaLabelledBy,
+    hasHeader && title ? titleId : ""
+  );
+
+  const ariaDescribedBy = text(
+    options.ariaDescribedBy,
+    descriptionId
+  );
+
+  const ariaLabel = ariaLabelledBy
+    ? ""
+    : text(options.ariaLabel, title || appName);
+
+  const shellClass = cleanClass(
+    options.shellClass,
+    `auth-shell public-shell ${view}-shell`
+  );
+
+  const cardClass = cleanClass(
+    options.cardClass,
+    `auth-card public-card ${view}-card`
+  );
+
+  const headerClass = cleanClass(
+    options.headerClass,
+    `auth-header public-header ${view}-header`
+  );
+
+  const bodyClass = cleanClass(
+    options.bodyClass,
+    `auth-body public-body ${view}-body`
+  );
+
+  const footerClass = cleanClass(
+    options.footerClass,
+    `auth-footer public-footer ${view}-footer`
+  );
 
   return `
     <section
@@ -215,46 +300,62 @@ export function renderPublicShell(options = {}) {
       data-public-view="true"
       data-template-version="${escapeAttr(PUBLIC_TEMPLATE_VERSION)}"
       ${dataAttrs(options.dataAttrs)}
-      aria-labelledby="${escapeAttr(titleId)}"
-      ${descriptionId ? `aria-describedby="${escapeAttr(descriptionId)}"` : ""}
+      ${
+        ariaLabelledBy
+          ? `aria-labelledby="${escapeAttr(ariaLabelledBy)}"`
+          : `aria-label="${escapeAttr(ariaLabel)}"`
+      }
+      ${ariaDescribedBy ? `aria-describedby="${escapeAttr(ariaDescribedBy)}"` : ""}
     >
       <div class="${escapeAttr(shellClass)}" data-public-shell="true">
         <article class="${escapeAttr(cardClass)}" data-public-card="true">
-          <header class="${escapeAttr(headerClass)}" data-public-header="true">
-            ${
-              options.logo === false
-                ? ""
-                : renderPublicLogo({
-                    appName,
-                    logoSrc: options.logoSrc,
-                    showName: options.showLogoName,
-                    width: options.logoWidth,
-                    height: options.logoHeight,
-                  })
-            }
+          ${
+            hasHeader
+              ? `
+                <header class="${escapeAttr(headerClass)}" data-public-header="true">
+                  ${
+                    hasLogo
+                      ? renderPublicLogo({
+                          appName,
+                          logoSrc: options.logoSrc,
+                          showName: options.showLogoName,
+                          width: options.logoWidth,
+                          height: options.logoHeight,
+                        })
+                      : ""
+                  }
 
-            <h1
-              class="auth-title public-title ${escapeAttr(view)}-title"
-              id="${escapeAttr(titleId)}"
-              data-public-title="true"
-            >
-              ${escapeHtml(title)}
-            </h1>
+                  ${
+                    title
+                      ? `
+                        <h1
+                          class="auth-title public-title ${escapeAttr(view)}-title"
+                          id="${escapeAttr(titleId)}"
+                          data-public-title="true"
+                        >
+                          ${escapeHtml(title)}
+                        </h1>
+                      `
+                      : ""
+                  }
 
-            ${
-              subtitle
-                ? `
-                  <p
-                    class="auth-subtitle public-subtitle ${escapeAttr(view)}-subtitle"
-                    id="${escapeAttr(descriptionId)}"
-                    data-public-subtitle="true"
-                  >
-                    ${escapeHtml(subtitle)}
-                  </p>
-                `
-                : ""
-            }
-          </header>
+                  ${
+                    subtitle
+                      ? `
+                        <p
+                          class="auth-subtitle public-subtitle ${escapeAttr(view)}-subtitle"
+                          id="${escapeAttr(descriptionId)}"
+                          data-public-subtitle="true"
+                        >
+                          ${escapeHtml(subtitle)}
+                        </p>
+                      `
+                      : ""
+                  }
+                </header>
+              `
+              : ""
+          }
 
           <div class="${escapeAttr(bodyClass)}" data-public-body="true">
             ${body}

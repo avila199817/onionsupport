@@ -6,6 +6,7 @@
    - Controlador mínimo de la vista Login pública.
    - Montar el template recibido desde ./template.js.
    - Leer refs por contrato data-*.
+   - Activar controles mínimos del password ya pintados por template.
    - Validar formulario mínimo.
    - Llamar Auth.login().
    - Delegar navegación post-login en Router.
@@ -13,7 +14,7 @@
    - Sin HTML inline.
    - Sin construir campos.
    - Sin logo/card/layout.
-   - Sin controlar copys/estructura interna del template.
+   - Sin shared/password-field inexistente.
    - Sin HTTP directo.
    - Sin Store.
    - Sin Toast directo.
@@ -26,7 +27,7 @@ import { AppCore } from "../../../core/index.js";
 import { Auth as DefaultAuth } from "../../../features/auth/index.js";
 import createLoginTemplate from "./template.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.public.controller.v3";
+export const LOGIN_VIEW_VERSION = "login.view.public.controller.v4";
 
 const SOURCE = "login.view";
 
@@ -95,6 +96,44 @@ function isDomNode(value = null) {
       typeof Node !== "undefined" &&
       value instanceof Node
   );
+}
+
+function setHidden(node = null, hidden = true) {
+  if (!node) return false;
+
+  const value = Boolean(hidden);
+
+  try {
+    node.hidden = value;
+
+    if (value) {
+      node.setAttribute("hidden", "");
+    } else {
+      node.removeAttribute("hidden");
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function focusSafe(node = null) {
+  if (!node) return false;
+
+  try {
+    node.focus({
+      preventScroll: true,
+    });
+  } catch {
+    try {
+      node.focus?.();
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /* =========================================================
@@ -206,12 +245,18 @@ function getRefs(root = null) {
 
     form: root.querySelector("[data-login-form]"),
     identifier: root.querySelector("[data-login-identifier]"),
-    password: root.querySelector("[data-login-password]"),
+    password: root.querySelector("[data-login-password], [data-password-input]"),
     submit: root.querySelector("[data-login-submit]"),
 
     globalError: root.querySelector("[data-login-global-error]"),
     identifierError: root.querySelector("[data-login-error='identifier']"),
     passwordError: root.querySelector("[data-login-error='password']"),
+
+    passwordWrapper: root.querySelector("[data-password-wrapper]"),
+    passwordToggle: root.querySelector("[data-password-toggle], [data-login-password-toggle]"),
+    passwordCaps: root.querySelector("[data-password-caps]"),
+    passwordEye: root.querySelector(".password-eye-icon"),
+    passwordEyeOff: root.querySelector(".password-eye-off-icon"),
   };
 
   if (!refs.form) {
@@ -231,6 +276,172 @@ function getRefs(root = null) {
   }
 
   return refs;
+}
+
+/* =========================================================
+   PASSWORD CONTROLS
+========================================================= */
+
+function readCapsLock(event = null) {
+  try {
+    if (!isFunction(event?.getModifierState)) return null;
+    return Boolean(event.getModifierState("CapsLock"));
+  } catch {
+    return null;
+  }
+}
+
+function setPasswordVisible(refs, visible = false) {
+  const value = Boolean(visible);
+  const type = value ? "text" : "password";
+
+  if (!refs.password) return false;
+
+  try {
+    refs.password.type = type;
+  } catch {
+    refs.password.setAttribute("type", type);
+  }
+
+  refs.password.dataset.passwordVisible = value ? "true" : "false";
+
+  if (refs.passwordToggle) {
+    refs.passwordToggle.setAttribute("aria-pressed", value ? "true" : "false");
+    refs.passwordToggle.setAttribute(
+      "aria-label",
+      value ? "Ocultar contraseña" : "Mostrar contraseña"
+    );
+    refs.passwordToggle.dataset.passwordVisible = value ? "true" : "false";
+  }
+
+  if (refs.passwordWrapper) {
+    refs.passwordWrapper.dataset.passwordVisible = value ? "true" : "false";
+  }
+
+  setHidden(refs.passwordEye, value);
+  setHidden(refs.passwordEyeOff, !value);
+
+  return true;
+}
+
+function setCapsVisible(refs, visible = false) {
+  const value = Boolean(visible);
+
+  if (refs.passwordCaps) {
+    refs.passwordCaps.hidden = !value;
+
+    if (value) {
+      refs.passwordCaps.removeAttribute("hidden");
+    } else {
+      refs.passwordCaps.setAttribute("hidden", "");
+    }
+  }
+
+  if (refs.passwordWrapper) {
+    refs.passwordWrapper.dataset.capsLock = value ? "true" : "false";
+  }
+
+  return true;
+}
+
+function initPasswordControls(refs) {
+  let destroyed = false;
+  let visible = false;
+
+  function toggleVisibility(event = null) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+
+    if (destroyed) return false;
+    if (!refs.password || refs.password.disabled) return false;
+    if (refs.passwordToggle?.disabled) return false;
+
+    visible = !visible;
+
+    setPasswordVisible(refs, visible);
+    focusSafe(refs.password);
+
+    return true;
+  }
+
+  function keepPasswordFocus(event = null) {
+    event?.preventDefault?.();
+  }
+
+  function syncCaps(event = null) {
+    if (destroyed) return false;
+
+    const caps = readCapsLock(event);
+
+    if (caps === null) return false;
+
+    setCapsVisible(refs, caps);
+
+    return true;
+  }
+
+  function hideCaps() {
+    if (destroyed) return false;
+
+    setCapsVisible(refs, false);
+
+    return true;
+  }
+
+  refs.passwordToggle?.addEventListener("mousedown", keepPasswordFocus);
+  refs.passwordToggle?.addEventListener("click", toggleVisibility);
+
+  refs.password?.addEventListener("keydown", syncCaps);
+  refs.password?.addEventListener("keyup", syncCaps);
+  refs.password?.addEventListener("keypress", syncCaps);
+  refs.password?.addEventListener("blur", hideCaps);
+
+  setPasswordVisible(refs, false);
+  setCapsVisible(refs, false);
+
+  return {
+    setDisabled(disabled = false) {
+      if (refs.passwordToggle) {
+        refs.passwordToggle.disabled = Boolean(disabled);
+      }
+
+      return true;
+    },
+
+    destroy() {
+      destroyed = true;
+      visible = false;
+
+      try {
+        refs.passwordToggle?.removeEventListener("mousedown", keepPasswordFocus);
+        refs.passwordToggle?.removeEventListener("click", toggleVisibility);
+
+        refs.password?.removeEventListener("keydown", syncCaps);
+        refs.password?.removeEventListener("keyup", syncCaps);
+        refs.password?.removeEventListener("keypress", syncCaps);
+        refs.password?.removeEventListener("blur", hideCaps);
+      } catch {
+        // noop
+      }
+
+      try {
+        setPasswordVisible(refs, false);
+        setCapsVisible(refs, false);
+      } catch {
+        // noop
+      }
+
+      return true;
+    },
+
+    getSnapshot() {
+      return {
+        available: Boolean(refs.password && refs.passwordToggle),
+        visible,
+        capsVisible: refs.passwordCaps?.hidden === false,
+      };
+    },
+  };
 }
 
 /* =========================================================
@@ -289,13 +500,15 @@ function setGlobalError(refs, message = "") {
   return true;
 }
 
-function setLoading(refs, loading = false) {
+function setLoading(refs, loading = false, passwordControls = null) {
   const value = Boolean(loading);
   const busy = value ? "true" : "false";
 
   for (const node of [refs.identifier, refs.password, refs.submit].filter(Boolean)) {
     node.disabled = value;
   }
+
+  passwordControls?.setDisabled?.(value);
 
   if (refs.submit) {
     refs.submit.dataset.loading = busy;
@@ -342,13 +555,7 @@ function applyErrors(refs, errors = {}) {
     }
   }
 
-  try {
-    firstInvalid?.focus?.({
-      preventScroll: true,
-    });
-  } catch {
-    firstInvalid?.focus?.();
-  }
+  focusSafe(firstInvalid);
 
   return Object.keys(errors).length > 0;
 }
@@ -445,13 +652,14 @@ export function renderLoginView(container, context = {}) {
   const auth = getAuth(context);
   const view = mountTemplate(container);
   const refs = getRefs(view);
+  const passwordControls = initPasswordControls(refs);
 
   let mounted = true;
   let submitting = false;
 
   function setSubmitting(value = false) {
     submitting = Boolean(value);
-    setLoading(refs, submitting);
+    setLoading(refs, submitting, passwordControls);
   }
 
   async function submit(event = null) {
@@ -531,13 +739,7 @@ export function renderLoginView(container, context = {}) {
   refs.identifier.addEventListener("input", onInput);
   refs.password.addEventListener("input", onInput);
 
-  try {
-    refs.identifier.focus({
-      preventScroll: true,
-    });
-  } catch {
-    refs.identifier.focus?.();
-  }
+  focusSafe(refs.identifier);
 
   const instance = {
     version: LOGIN_VIEW_VERSION,
@@ -564,7 +766,13 @@ export function renderLoginView(container, context = {}) {
       }
 
       try {
-        setLoading(refs, false);
+        setLoading(refs, false, passwordControls);
+      } catch {
+        // noop
+      }
+
+      try {
+        passwordControls.destroy();
       } catch {
         // noop
       }
@@ -583,6 +791,7 @@ export function renderLoginView(container, context = {}) {
         mounted,
         submitting,
         authenticated,
+        passwordControls: passwordControls.getSnapshot(),
         target: authenticated
           ? redact(
               activeAuth?.getPostLoginTarget?.() ||

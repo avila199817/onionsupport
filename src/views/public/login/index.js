@@ -8,7 +8,7 @@
    - Leer refs por contrato data-*.
    - Validar formulario mínimo.
    - Llamar Auth.login().
-   - Navegar vía Router tras login correcto.
+   - Delegar navegación post-login en Router.
    - Gestionar loading/error del formulario.
    - Sin HTML inline.
    - Sin construir campos.
@@ -23,10 +23,10 @@
 ========================================================= */
 
 import { AppCore } from "../../../core/index.js";
-import { Auth } from "../../../features/auth/index.js";
+import { Auth as DefaultAuth } from "../../../features/auth/index.js";
 import createLoginTemplate from "./template.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.public.controller.v2";
+export const LOGIN_VIEW_VERSION = "login.view.public.controller.v3";
 
 const SOURCE = "login.view";
 
@@ -46,6 +46,10 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function cleanText(value = "", fallback = "") {
   const output = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
@@ -62,7 +66,10 @@ function redact(value = "") {
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 function clearNode(node = null) {
@@ -91,12 +98,25 @@ function isDomNode(value = null) {
 }
 
 /* =========================================================
-   ROUTER
+   AUTH / ROUTER
 ========================================================= */
+
+function getAuth(context = {}) {
+  return (
+    context.Auth ||
+    context.auth ||
+    AppCore.auth ||
+    AppCore.Auth ||
+    AppCore.getModule?.("auth") ||
+    DefaultAuth ||
+    null
+  );
+}
 
 function getRouter(context = {}) {
   return (
     context.Router ||
+    context.router ||
     AppCore.router ||
     AppCore.Router ||
     AppCore.getModule?.("router") ||
@@ -104,25 +124,30 @@ function getRouter(context = {}) {
   );
 }
 
+function resolvePostLoginTarget(result = {}, auth = null) {
+  return (
+    result?.postLoginTarget ||
+    result?.homePath ||
+    result?.defaultHome ||
+    auth?.getPostLoginTarget?.() ||
+    auth?.getDefaultHome?.() ||
+    "/"
+  );
+}
+
 async function goAfterLogin(result = {}, context = {}) {
   const router = getRouter(context);
+  const auth = getAuth(context);
 
   if (!router) {
     throw new Error("Router no disponible.");
   }
 
-  const target =
-    result.postLoginTarget ||
-    result.homePath ||
-    result.defaultHome ||
-    Auth.getPostLoginTarget?.() ||
-    Auth.getDefaultHome?.() ||
-    "/";
+  const target = resolvePostLoginTarget(result, auth);
 
   const options = {
     source: SOURCE,
     replaceState: true,
-    force: true,
   };
 
   if (isFunction(router.goAfterLogin)) {
@@ -329,14 +354,34 @@ function applyErrors(refs, errors = {}) {
 }
 
 function authErrorMessage(error = null) {
-  const status = Number(error?.status || error?.statusCode || error?.response?.status || 0);
+  const status = Number(
+    error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      0
+  );
+
   const code = cleanText(error?.code || error?.error || "", "").toUpperCase();
 
-  if (status === 401 || code.includes("INVALID") || code.includes("UNAUTHORIZED")) {
+  if (
+    status === 401 ||
+    code.includes("INVALID") ||
+    code.includes("UNAUTHORIZED")
+  ) {
     return "Credenciales incorrectas.";
   }
 
-  if (status === 403 || code.includes("DISABLED") || code.includes("BLOCKED")) {
+  if (
+    status === 403 ||
+    code.includes("DISABLED") ||
+    code.includes("DESACTIVADO") ||
+    code.includes("BLOCKED") ||
+    code.includes("BLOQUEADO") ||
+    code.includes("DELETED") ||
+    code.includes("ARCHIVED") ||
+    code.includes("SUSPENDED") ||
+    code.includes("REVOKED")
+  ) {
     return "Tu usuario no tiene acceso activo.";
   }
 
@@ -368,6 +413,7 @@ function destroyPrevious(container) {
 function storeInstance(container, instance) {
   INSTANCES.set(container, instance);
   lastInstance = instance;
+
   return true;
 }
 
@@ -396,6 +442,7 @@ export function renderLoginView(container, context = {}) {
 
   destroyPrevious(container);
 
+  const auth = getAuth(context);
   const view = mountTemplate(container);
   const refs = getRefs(view);
 
@@ -422,10 +469,15 @@ export function renderLoginView(container, context = {}) {
       return false;
     }
 
+    if (!isFunction(auth?.login)) {
+      setGlobalError(refs, "Auth no disponible.");
+      return false;
+    }
+
     setSubmitting(true);
 
     try {
-      const result = await Auth.login(
+      const result = await auth.login(
         {
           identifier: payload.identifier,
           password: payload.password,
@@ -438,11 +490,18 @@ export function renderLoginView(container, context = {}) {
         }
       );
 
-      if (result?.authenticated !== true && Auth.isAuthenticated?.() !== true) {
+      if (!mounted) return false;
+
+      if (result?.authenticated !== true && auth.isAuthenticated?.() !== true) {
         throw new Error("Login inválido.");
       }
 
-      const navigation = await goAfterLogin(result || {}, context);
+      const navigation = await goAfterLogin(result || {}, {
+        ...context,
+        Auth: auth,
+      });
+
+      if (!mounted) return false;
 
       if (navigation === false || navigation?.ok === false) {
         throw new Error("No se pudo completar la navegación tras el login.");
@@ -450,7 +509,10 @@ export function renderLoginView(container, context = {}) {
 
       return true;
     } catch (error) {
-      setGlobalError(refs, authErrorMessage(error));
+      if (mounted) {
+        setGlobalError(refs, authErrorMessage(error));
+      }
+
       return false;
     } finally {
       if (mounted) {
@@ -460,7 +522,9 @@ export function renderLoginView(container, context = {}) {
   }
 
   function onInput() {
-    clearErrors(refs);
+    if (!submitting) {
+      clearErrors(refs);
+    }
   }
 
   refs.form.addEventListener("submit", submit);
@@ -511,7 +575,8 @@ export function renderLoginView(container, context = {}) {
     },
 
     getSnapshot() {
-      const authenticated = Auth.isAuthenticated?.() === true;
+      const activeAuth = getAuth(context);
+      const authenticated = activeAuth?.isAuthenticated?.() === true;
 
       return {
         version: LOGIN_VIEW_VERSION,
@@ -519,7 +584,11 @@ export function renderLoginView(container, context = {}) {
         submitting,
         authenticated,
         target: authenticated
-          ? redact(Auth.getPostLoginTarget?.() || Auth.getDefaultHome?.() || "/")
+          ? redact(
+              activeAuth?.getPostLoginTarget?.() ||
+                activeAuth?.getDefaultHome?.() ||
+                "/"
+            )
           : null,
       };
     },
@@ -559,10 +628,12 @@ export function getSnapshot() {
     return lastInstance.getSnapshot();
   }
 
+  const auth = getAuth();
+
   return {
     version: LOGIN_VIEW_VERSION,
     mounted: false,
-    authenticated: Auth.isAuthenticated?.() === true,
+    authenticated: auth?.isAuthenticated?.() === true,
   };
 }
 

@@ -7,7 +7,15 @@
    - Usar el layout común de /src/views/public/index.js.
    - Pintar usuario/email, contraseña, botón Entrar y recuperación.
    - Exponer data-* consumidos por index.js.
-   - Sin Auth, Router, HTTP, Store, Toast, validación ni eventos.
+   - Exponer contrato DOM data-password-* para shared/password-field.
+   - Sin Auth.
+   - Sin Router.
+   - Sin HTTP.
+   - Sin Store.
+   - Sin Toast.
+   - Sin validación.
+   - Sin eventos.
+   - Sin imports inexistentes del shared password.
 ========================================================= */
 
 import { ROUTES } from "../../../core/config.js";
@@ -21,10 +29,13 @@ import {
   safeInternalHref,
 } from "../index.js";
 
-export const LOGIN_TEMPLATE_VERSION = "login.template.public.v3";
+export const LOGIN_TEMPLATE_VERSION = "login.template.public.v4";
 
 const APP_NAME = "Onion Support";
 const PASSWORD_REQUEST_HREF = ROUTES.passwordRequest || "/password-request";
+
+const MAX_IDENTIFIER_LENGTH = 160;
+const MAX_PASSWORD_LENGTH = 1024;
 
 /* =========================================================
    BASICS
@@ -69,6 +80,29 @@ function renderIcon(name = "") {
         <path d="M12 15.25v1.5"></path>
       </svg>
     `,
+
+    eye: `
+      <svg class="password-eye-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M2.75 12s3.25-6.25 9.25-6.25S21.25 12 21.25 12 18 18.25 12 18.25 2.75 12 2.75 12Z"></path>
+        <path d="M12 14.75a2.75 2.75 0 1 0 0-5.5 2.75 2.75 0 0 0 0 5.5Z"></path>
+      </svg>
+    `,
+
+    eyeOff: `
+      <svg class="password-eye-off-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden>
+        <path d="m3.75 3.75 16.5 16.5"></path>
+        <path d="M9.9 5.98A9.24 9.24 0 0 1 12 5.75c6 0 9.25 6.25 9.25 6.25a17.03 17.03 0 0 1-2.28 3.1"></path>
+        <path d="M14.12 14.12A2.75 2.75 0 0 1 9.88 9.88"></path>
+        <path d="M6.6 7.6A16.35 16.35 0 0 0 2.75 12S6 18.25 12 18.25c1.35 0 2.57-.32 3.65-.82"></path>
+      </svg>
+    `,
+
+    caps: `
+      <svg class="caps-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 3.75 5.25 10.5h4v5h5.5v-5h4L12 3.75Z"></path>
+        <path d="M7.75 20.25h8.5"></path>
+      </svg>
+    `,
   };
 
   return icons[name] || "";
@@ -88,16 +122,12 @@ function renderLoginLogo() {
           class="login-card-logo"
           src="${escapeAttr(logoSrc)}"
           alt=""
-          width="72"
-          height="72"
+          width="96"
+          height="96"
           loading="eager"
           decoding="async"
           draggable="false"
         >
-      </span>
-
-      <span class="login-card-logo-name">
-        ${escapeHtml(APP_NAME)}
       </span>
     </div>
   `;
@@ -107,37 +137,26 @@ function renderLoginLogo() {
    FIELD
 ========================================================= */
 
-function renderField({
+function renderIdentifierField({
   id,
   name,
   label,
-  type = "text",
   autocomplete = "",
   placeholder = "",
-  hint = "",
-  icon = "",
+  icon = "user",
   dataKey = "",
   enterKeyHint = "",
 } = {}) {
   const cleanId = text(id, "");
   const cleanName = text(name, "");
   const cleanLabel = text(label, cleanName);
-  const cleanType = text(type, "text");
   const cleanAutocomplete = text(autocomplete, "");
   const cleanPlaceholder = text(placeholder, cleanLabel);
-  const cleanHint = text(hint, "");
   const cleanEnterKeyHint = text(enterKeyHint, "");
-
-  const describedBy = [
-    cleanHint ? `${cleanId}-hint` : "",
-    `${cleanId}-error`,
-  ]
-    .filter(Boolean)
-    .join(" ");
 
   return `
     <div
-      class="auth-field login-field login-field-card"
+      class="auth-field login-field login-field-card login-field--identifier"
       data-login-field="${escapeAttr(cleanName)}"
     >
       <div class="login-field-head">
@@ -155,40 +174,122 @@ function renderField({
         </span>
 
         <input
-          class="auth-input login-input"
+          class="auth-input login-input input-text"
           id="${escapeAttr(cleanId)}"
           name="${escapeAttr(cleanName)}"
-          type="${escapeAttr(cleanType)}"
+          type="text"
           autocomplete="${escapeAttr(cleanAutocomplete)}"
+          inputmode="text"
           placeholder="${escapeAttr(cleanPlaceholder)}"
+          maxlength="${escapeAttr(MAX_IDENTIFIER_LENGTH)}"
           required
           spellcheck="false"
           autocapitalize="none"
           aria-invalid="false"
-          aria-describedby="${escapeAttr(describedBy)}"
+          aria-describedby="${escapeAttr(cleanId)}-error"
           ${cleanEnterKeyHint ? `enterkeyhint="${escapeAttr(cleanEnterKeyHint)}"` : ""}
           data-login-input="${escapeAttr(cleanName)}"
           ${dataFlag(dataKey)}
         >
       </div>
 
-      ${
-        cleanHint
-          ? `
-            <p
-              class="auth-field-hint login-field-hint"
-              id="${escapeAttr(cleanId)}-hint"
-            >
-              ${escapeHtml(cleanHint)}
-            </p>
-          `
-          : ""
-      }
-
       <p
         class="auth-field-error login-field-error"
         id="${escapeAttr(cleanId)}-error"
         data-login-error="${escapeAttr(cleanName)}"
+        aria-live="polite"
+        hidden
+      ></p>
+    </div>
+  `;
+}
+
+function renderPasswordField() {
+  const id = "login-password";
+  const errorId = `${id}-error`;
+  const capsId = `${id}-caps`;
+
+  return `
+    <div
+      class="auth-field login-field login-field-card login-field--password"
+      data-login-field="password"
+      data-login-password-field="true"
+      data-password-field="true"
+    >
+      <div class="login-field-head">
+        <label
+          class="auth-label login-label password-label"
+          for="${escapeAttr(id)}"
+        >
+          Contraseña
+        </label>
+      </div>
+
+      <div
+        class="password-wrapper login-password-wrapper login-input-shell"
+        data-password-wrapper="true"
+      >
+        <span class="login-input-icon" aria-hidden="true">
+          ${renderIcon("lock")}
+        </span>
+
+        <input
+          class="auth-input login-input input-text"
+          id="${escapeAttr(id)}"
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          placeholder="Introduce tu contraseña"
+          maxlength="${escapeAttr(MAX_PASSWORD_LENGTH)}"
+          required
+          spellcheck="false"
+          autocapitalize="none"
+          aria-invalid="false"
+          aria-describedby="${escapeAttr(`${capsId} ${errorId}`)}"
+          enterkeyhint="go"
+          data-login-input="password"
+          data-login-password="true"
+          data-password-input="true"
+        >
+
+        <button
+          class="password-toggle login-password-toggle"
+          type="button"
+          aria-label="Mostrar contraseña"
+          aria-controls="${escapeAttr(id)}"
+          aria-pressed="false"
+          tabindex="0"
+          data-password-toggle="true"
+          data-login-password-toggle="true"
+        >
+          <span class="password-toggle-icon" data-password-toggle-icon="true">
+            ${renderIcon("eye")}
+            ${renderIcon("eyeOff")}
+          </span>
+        </button>
+
+        <span
+          class="password-caps"
+          id="${escapeAttr(capsId)}"
+          role="status"
+          aria-live="polite"
+          data-password-caps="true"
+          hidden
+        >
+          <span class="caps-icon" data-password-caps-icon-wrapper="true" aria-hidden="true">
+            ${renderIcon("caps")}
+          </span>
+
+          <span class="caps-label" data-password-caps-label="true">
+            Bloq Mayús
+          </span>
+        </span>
+      </div>
+
+      <p
+        class="auth-field-error login-field-error"
+        id="${escapeAttr(errorId)}"
+        data-login-error="password"
         aria-live="polite"
         hidden
       ></p>
@@ -209,9 +310,8 @@ export function getLoginTemplate() {
   return renderPublicShell({
     view: "login",
     appName: APP_NAME,
-    title: "Acceso a Onion Support",
-    subtitle: "",
-    logo: false,
+    header: false,
+    ariaLabelledBy: "login-panel-title",
 
     body: `
       <section
@@ -231,10 +331,6 @@ export function getLoginTemplate() {
 
           <header class="login-card-header">
             ${renderLoginLogo()}
-
-            <p class="login-card-kicker">
-              Acceso privado
-            </p>
 
             <h2
               class="login-card-title"
@@ -263,11 +359,10 @@ export function getLoginTemplate() {
             novalidate
             data-login-form="true"
           >
-            ${renderField({
+            ${renderIdentifierField({
               id: "login-identifier",
               name: "identifier",
               label: "Usuario o email",
-              type: "text",
               autocomplete: "username",
               placeholder: "usuario@empresa.com",
               icon: "user",
@@ -275,17 +370,7 @@ export function getLoginTemplate() {
               enterKeyHint: "next",
             })}
 
-            ${renderField({
-              id: "login-password",
-              name: "password",
-              label: "Contraseña",
-              type: "password",
-              autocomplete: "current-password",
-              placeholder: "Introduce tu contraseña",
-              icon: "lock",
-              dataKey: "login-password",
-              enterKeyHint: "go",
-            })}
+            ${renderPasswordField()}
 
             <div class="login-form-row">
               <span class="login-form-note">

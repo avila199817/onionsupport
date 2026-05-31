@@ -4,9 +4,10 @@
 
    Responsabilidad:
    - Login público premium centrado.
+   - Password request/reset público con el mismo sistema visual.
    - Compatible con /src/views/public/index.js.
    - Compatible con /src/views/public/login/template.js.
-   - Compatible con /src/views/public/login/index.js.
+   - Compatible con /src/views/public/password-reset/template.js.
    - Background SaaS pro sin imágenes externas.
    - Ajuste exacto al viewport.
    - Eye toggle funcional y clicable.
@@ -279,6 +280,7 @@ body.auth-screen.auth-no-scroll {
 
   inline-size: 100%;
   min-inline-size: 0;
+
   min-block-size: 100vh;
   min-block-size: 100svh;
   min-block-size: 100dvh;
@@ -301,24 +303,36 @@ body.auth-screen.auth-no-scroll {
 
 
 /* =========================================================
-   LOGIN VIEW TOKENS
+   AUTH VIEW TOKENS
 ========================================================= */
 
 .public-auth-shell--login,
+.public-auth-shell--password-request,
+.public-auth-shell--password-reset,
 .login-view {
   --login-edge-block: clamp(10px, 2dvh, 22px);
   --login-edge-inline: clamp(12px, 3vw, 32px);
-  --login-card-max: 540px;
+
+  --login-card-max: 470px;
   --login-card-radius: 28px;
-  --login-card-padding-block: clamp(22px, 3.3dvh, 32px);
-  --login-card-padding-inline: clamp(22px, 3.1vw, 34px);
-  --login-card-gap: clamp(13px, 1.8dvh, 16px);
-  --login-form-gap: clamp(11px, 1.55dvh, 14px);
-  --login-input-height: clamp(44px, 6.25dvh, 50px);
-  --login-button-height: clamp(46px, 6.4dvh, 52px);
-  --login-logo-shell: clamp(58px, 8.6dvh, 70px);
+
+  --login-card-padding-block: clamp(24px, 3.3dvh, 32px);
+  --login-card-padding-inline: clamp(24px, 3.1vw, 32px);
+
+  --login-card-gap: clamp(14px, 1.8dvh, 17px);
+  --login-form-gap: clamp(12px, 1.55dvh, 15px);
+
+  --login-input-height: clamp(46px, 6.25dvh, 52px);
+  --login-button-height: clamp(48px, 6.4dvh, 54px);
+
+  --login-logo-shell: clamp(54px, 8.1dvh, 64px);
   --login-logo-size: calc(var(--login-logo-shell) - 16px);
-  --login-title-size: clamp(31px, 4.9dvh, 40px);
+  --login-title-size: clamp(29px, 4.8dvh, 38px);
+}
+
+.public-auth-shell--password-request,
+.public-auth-shell--password-reset {
+  --login-card-max: 450px;
 }
 
 
@@ -326,7 +340,8 @@ body.auth-screen.auth-no-scroll {
    LOGIN STRUCTURE
 ========================================================= */
 
-.login-pro {
+.login-pro,
+.password-reset-pro {
   position: relative;
   isolation: isolate;
 
@@ -342,7 +357,13 @@ body.auth-screen.auth-no-scroll {
   overflow: visible;
 }
 
-.login-pro::before {
+.login-pro--narrow,
+.login-card-panel--narrow {
+  --login-card-max: 470px;
+}
+
+.login-pro::before,
+.password-reset-pro::before {
   content: "";
 
   position: absolute;
@@ -353,21 +374,21 @@ body.auth-screen.auth-no-scroll {
 
   border-radius: var(--login-card-radius);
 
-  opacity: .68;
+  opacity: .66;
 
   background:
     linear-gradient(
       135deg,
-      rgb(255 255 255 / .22),
+      rgb(255 255 255 / .20),
       transparent 25%,
       transparent 72%,
-      color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent)
+      color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent)
     ),
     linear-gradient(
       45deg,
-      color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent),
+      color-mix(in srgb, var(--accent, #41c7d7) 20%, transparent),
       transparent 38%,
-      rgb(34 211 238 / .16)
+      rgb(34 211 238 / .14)
     );
 }
 
@@ -383,7 +404,7 @@ body.auth-screen.auth-no-scroll {
   border-radius: 999px;
 
   filter: blur(76px);
-  opacity: .55;
+  opacity: .52;
 
   transform: translateZ(0);
 }
@@ -397,7 +418,7 @@ body.auth-screen.auth-no-scroll {
 
   background: radial-gradient(
     circle,
-    color-mix(in srgb, var(--accent, #41c7d7) 54%, transparent),
+    color-mix(in srgb, var(--accent, #41c7d7) 50%, transparent),
     transparent 68%
   );
 }
@@ -409,35 +430,35 @@ body.auth-screen.auth-no-scroll {
   inline-size: 300px;
   block-size: 300px;
 
-  background: radial-gradient(circle, rgb(34 211 238 / .34), transparent 70%);
+  background: radial-gradient(circle, rgb(34 211 238 / .30), transparent 70%);
 }
 
 .login-grid-glow {
   inset: -20%;
 
-  opacity: .44;
+  opacity: .4;
 
   background:
     radial-gradient(
       circle at 22% 28%,
-      color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent),
+      color-mix(in srgb, var(--accent, #41c7d7) 20%, transparent),
       transparent 20%
     ),
     radial-gradient(
       circle at 76% 70%,
-      rgb(34 211 238 / .14),
+      rgb(34 211 238 / .12),
       transparent 22%
     ),
     linear-gradient(
       45deg,
       transparent 48%,
-      rgb(255 255 255 / .07) 50%,
+      rgb(255 255 255 / .065) 50%,
       transparent 52%
     ),
     linear-gradient(
       -45deg,
       transparent 48%,
-      color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent) 50%,
+      color-mix(in srgb, var(--accent, #41c7d7) 9%, transparent) 50%,
       transparent 52%
     );
 
@@ -470,7 +491,8 @@ body.auth-screen.auth-no-scroll {
    LOGIN CARD PANEL
 ========================================================= */
 
-.login-card-panel {
+.login-card-panel,
+.password-reset-card-panel {
   position: relative;
   z-index: 2;
   isolation: isolate;
@@ -495,19 +517,19 @@ body.auth-screen.auth-no-scroll {
   background:
     radial-gradient(
       circle at 50% 0%,
-      rgb(255 255 255 / .13),
+      rgb(255 255 255 / .12),
       transparent 34%
     ),
     linear-gradient(
       180deg,
-      rgb(255 255 255 / .105),
-      rgb(255 255 255 / .04)
+      rgb(255 255 255 / .10),
+      rgb(255 255 255 / .038)
     ),
     color-mix(in srgb, var(--auth-card-bg, #101722) 78%, transparent);
 
   box-shadow:
     0 30px 88px rgb(0 0 0 / .50),
-    0 16px 42px color-mix(in srgb, var(--accent, #41c7d7) 13%, transparent),
+    0 16px 42px color-mix(in srgb, var(--accent, #41c7d7) 12%, transparent),
     inset 0 1px 0 rgb(255 255 255 / .16),
     inset 0 -1px 0 rgb(255 255 255 / .055);
 
@@ -515,7 +537,8 @@ body.auth-screen.auth-no-scroll {
   -webkit-backdrop-filter: blur(28px) saturate(1.16);
 }
 
-.login-card-panel::before {
+.login-card-panel::before,
+.password-reset-card-panel::before {
   content: "";
 
   position: absolute;
@@ -529,8 +552,8 @@ body.auth-screen.auth-no-scroll {
   background: linear-gradient(
     90deg,
     transparent,
-    rgb(255 255 255 / .55),
-    color-mix(in srgb, var(--accent, #41c7d7) 50%, transparent),
+    rgb(255 255 255 / .52),
+    color-mix(in srgb, var(--accent, #41c7d7) 48%, transparent),
     transparent
   );
 }
@@ -542,26 +565,29 @@ body.auth-screen.auth-no-scroll {
 
   pointer-events: none;
 
-  opacity: .74;
+  opacity: .72;
   transform: translateZ(0);
 
   background:
     linear-gradient(
       120deg,
       transparent 0%,
-      rgb(255 255 255 / .12) 14%,
+      rgb(255 255 255 / .115) 14%,
       transparent 30%
     ),
     radial-gradient(
       circle at 80% 12%,
-      color-mix(in srgb, var(--accent, #41c7d7) 13%, transparent),
+      color-mix(in srgb, var(--accent, #41c7d7) 12%, transparent),
       transparent 24%
     );
 }
 
 .login-card-header,
+.password-reset-card-header,
 .login-card-panel .login-form,
+.password-reset-card-panel .password-reset-form,
 .login-card-panel .login-global-error,
+.password-reset-card-panel .password-reset-message,
 .login-card-footer {
   position: relative;
   z-index: 1;
@@ -569,10 +595,11 @@ body.auth-screen.auth-no-scroll {
 
 
 /* =========================================================
-   LOGIN LOGO / HEADER
+   HEADER / LOGO
 ========================================================= */
 
-.login-card-header {
+.login-card-header,
+.password-reset-card-header {
   display: grid;
   justify-items: center;
   gap: clamp(6px, 1.1dvh, 9px);
@@ -583,9 +610,8 @@ body.auth-screen.auth-no-scroll {
 .login-card-logo-wrap {
   display: grid;
   justify-items: center;
-  gap: clamp(5px, .8dvh, 7px);
 
-  margin-block-end: clamp(0px, .5dvh, 4px);
+  margin-block-end: clamp(0px, .45dvh, 4px);
 }
 
 .login-card-logo-shell {
@@ -601,23 +627,23 @@ body.auth-screen.auth-no-scroll {
   overflow: hidden;
 
   border: 1px solid rgb(255 255 255 / .20);
-  border-radius: clamp(19px, 3.4dvh, 24px);
+  border-radius: clamp(18px, 3.2dvh, 22px);
 
   background:
     radial-gradient(
       circle at 30% 18%,
-      rgb(255 255 255 / .34),
+      rgb(255 255 255 / .32),
       transparent 30%
     ),
     linear-gradient(
       135deg,
-      color-mix(in srgb, var(--accent, #41c7d7) 38%, transparent),
+      color-mix(in srgb, var(--accent, #41c7d7) 34%, transparent),
       rgb(255 255 255 / .06)
     );
 
   box-shadow:
-    0 18px 42px color-mix(in srgb, var(--accent, #41c7d7) 20%, transparent),
-    inset 0 1px 0 rgb(255 255 255 / .28),
+    0 16px 38px color-mix(in srgb, var(--accent, #41c7d7) 18%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / .26),
     inset 0 -1px 0 rgb(0 0 0 / .18);
 }
 
@@ -631,7 +657,7 @@ body.auth-screen.auth-no-scroll {
   background: linear-gradient(
     45deg,
     transparent 44%,
-    rgb(255 255 255 / .28) 50%,
+    rgb(255 255 255 / .26) 50%,
     transparent 56%
   );
 
@@ -648,32 +674,34 @@ body.auth-screen.auth-no-scroll {
   object-position: center;
 
   filter:
-    drop-shadow(0 10px 20px rgb(0 0 0 / .28))
+    drop-shadow(0 10px 20px rgb(0 0 0 / .26))
     drop-shadow(
-      0 0 16px color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent)
+      0 0 16px color-mix(in srgb, var(--accent, #41c7d7) 20%, transparent)
     );
 }
 
-.login-card-title {
+.login-card-title,
+.password-reset-title {
   margin: 0;
 
   color: var(--text-strong, #ffffff);
 
   font-size: var(--login-title-size);
   font-weight: var(--weight-black, 900);
-  line-height: .96;
-  letter-spacing: -.06em;
+  line-height: .98;
+  letter-spacing: -.055em;
 
   text-wrap: balance;
 }
 
-.login-card-subtitle {
+.login-card-subtitle,
+.password-reset-subtitle {
   max-inline-size: 38ch;
   margin: 0;
 
   color: var(--text-dim, #a8b3c7);
 
-  font-size: clamp(12px, 1.85dvh, 14px);
+  font-size: clamp(12px, 1.8dvh, 14px);
   font-weight: var(--weight-medium, 500);
   line-height: 1.42;
 }
@@ -708,13 +736,15 @@ body.auth-screen.auth-no-scroll {
 ========================================================= */
 
 .auth-form,
-.login-form {
+.login-form,
+.password-reset-form {
   display: grid;
   gap: var(--login-form-gap);
 }
 
 .auth-field,
-.login-field {
+.login-field,
+.password-reset-field {
   position: relative;
 
   display: grid;
@@ -723,7 +753,8 @@ body.auth-screen.auth-no-scroll {
   min-inline-size: 0;
 }
 
-.login-field-card {
+.login-field-card,
+.password-reset-field-card {
   padding: 0;
 }
 
@@ -736,9 +767,14 @@ body.auth-screen.auth-no-scroll {
   min-inline-size: 0;
 }
 
+.login-field--no-label .login-field-head {
+  display: none;
+}
+
 .auth-label,
 .login-label,
-.password-label {
+.password-label,
+.password-reset-label {
   color: var(--text-strong, #ffffff);
 
   font-size: clamp(12px, 1.65dvh, 13px);
@@ -840,7 +876,8 @@ body.auth-screen.auth-no-scroll {
   opacity: 1;
 }
 
-.login-input-shell:has(.login-input[aria-invalid="true"]) {
+.login-input-shell:has(.login-input[aria-invalid="true"]),
+.login-input-shell:has(.password-reset-input[aria-invalid="true"]) {
   border-color: var(--input-border-error, var(--error, #ef4444));
 
   box-shadow:
@@ -888,6 +925,7 @@ body.auth-screen.auth-no-scroll {
 
 .auth-input,
 .login-input,
+.password-reset-input,
 .input-text,
 [data-password-input] {
   display: block;
@@ -922,7 +960,8 @@ body.auth-screen.auth-no-scroll {
     opacity var(--duration-normal, .2s) var(--ease-standard, ease);
 }
 
-.login-input-shell .login-input {
+.login-input-shell .login-input,
+.login-input-shell .password-reset-input {
   position: relative;
   z-index: 1;
 
@@ -939,13 +978,18 @@ body.auth-screen.auth-no-scroll {
 }
 
 .login-password-wrapper .login-input,
+.login-password-wrapper .password-reset-input,
+.password-reset-password-wrapper .login-input,
+.password-reset-password-wrapper .password-reset-input,
 [data-password-wrapper] .login-input,
+[data-password-wrapper] .password-reset-input,
 [data-password-wrapper] [data-password-input] {
   padding-inline-end: 58px;
 }
 
 .auth-input::placeholder,
 .login-input::placeholder,
+.password-reset-input::placeholder,
 .input-text::placeholder,
 [data-password-input]::placeholder {
   color: var(
@@ -958,6 +1002,7 @@ body.auth-screen.auth-no-scroll {
 
 .auth-input:hover,
 .login-input:hover,
+.password-reset-input:hover,
 .input-text:hover,
 [data-password-input]:hover {
   background: var(--input-bg-hover, rgb(17 24 39 / .78));
@@ -968,7 +1013,8 @@ body.auth-screen.auth-no-scroll {
   box-shadow: var(--input-shadow-hover, 0 12px 28px rgb(0 0 0 / .14));
 }
 
-.login-input-shell .login-input:hover {
+.login-input-shell .login-input:hover,
+.login-input-shell .password-reset-input:hover {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
@@ -976,6 +1022,7 @@ body.auth-screen.auth-no-scroll {
 
 .auth-input:focus,
 .login-input:focus,
+.password-reset-input:focus,
 .input-text:focus,
 [data-password-input]:focus {
   background: var(--input-bg-focus, rgb(17 24 39 / .84));
@@ -989,7 +1036,8 @@ body.auth-screen.auth-no-scroll {
   );
 }
 
-.login-input-shell .login-input:focus {
+.login-input-shell .login-input:focus,
+.login-input-shell .password-reset-input:focus {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
@@ -997,6 +1045,7 @@ body.auth-screen.auth-no-scroll {
 
 .auth-input:disabled,
 .login-input:disabled,
+.password-reset-input:disabled,
 .input-text:disabled,
 [data-password-input]:disabled {
   opacity: .66;
@@ -1007,6 +1056,8 @@ body.auth-screen.auth-no-scroll {
 .auth-input.is-invalid,
 .login-input[aria-invalid="true"],
 .login-input.is-invalid,
+.password-reset-input[aria-invalid="true"],
+.password-reset-input.is-invalid,
 .input-text[aria-invalid="true"],
 .input-text.is-invalid,
 [data-password-input][aria-invalid="true"],
@@ -1018,13 +1069,15 @@ body.auth-screen.auth-no-scroll {
     0 10px 24px color-mix(in srgb, var(--error, #ef4444) 8%, transparent);
 }
 
-.login-input-shell .login-input[aria-invalid="true"] {
+.login-input-shell .login-input[aria-invalid="true"],
+.login-input-shell .password-reset-input[aria-invalid="true"] {
   border-color: transparent;
   box-shadow: none;
 }
 
 .auth-input:-webkit-autofill,
 .login-input:-webkit-autofill,
+.password-reset-input:-webkit-autofill,
 .input-text:-webkit-autofill,
 [data-password-input]:-webkit-autofill {
   -webkit-text-fill-color: var(--input-text, var(--text-strong, #ffffff));
@@ -1032,7 +1085,8 @@ body.auth-screen.auth-no-scroll {
   transition: background-color 9999s ease-in-out 0s;
 }
 
-.login-input-shell .login-input:-webkit-autofill {
+.login-input-shell .login-input:-webkit-autofill,
+.login-input-shell .password-reset-input:-webkit-autofill {
   box-shadow:
     0 0 0 1000px
     color-mix(in srgb, var(--auth-input-bg, #0b1220) 86%, transparent)
@@ -1040,7 +1094,8 @@ body.auth-screen.auth-no-scroll {
 }
 
 .auth-field-error,
-.login-field-error {
+.login-field-error,
+.password-reset-field-error {
   margin: 0;
 
   color: var(--error, #ef4444);
@@ -1051,7 +1106,8 @@ body.auth-screen.auth-no-scroll {
 }
 
 .auth-field-error[hidden],
-.login-field-error[hidden] {
+.login-field-error[hidden],
+.password-reset-field-error[hidden] {
   display: none;
 }
 
@@ -1337,9 +1393,16 @@ body.auth-screen.auth-no-scroll {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #41c7d7) 12%, transparent);
 }
 
+.auth-links,
+.login-links,
+.password-reset-links {
+  margin: 0;
+}
+
 .auth-link,
 .login-link,
 .login-reset-link,
+.password-reset-link,
 .auth-reset a,
 .login-reset a {
   color: var(
@@ -1362,6 +1425,7 @@ body.auth-screen.auth-no-scroll {
 .auth-link:hover,
 .login-link:hover,
 .login-reset-link:hover,
+.password-reset-link:hover,
 .auth-reset a:hover,
 .login-reset a:hover {
   color: var(--text-strong, #ffffff);
@@ -1371,6 +1435,7 @@ body.auth-screen.auth-no-scroll {
 .auth-link:focus-visible,
 .login-link:focus-visible,
 .login-reset-link:focus-visible,
+.password-reset-link:focus-visible,
 .auth-reset a:focus-visible,
 .login-reset a:focus-visible {
   outline: none;
@@ -1383,30 +1448,15 @@ body.auth-screen.auth-no-scroll {
   );
 }
 
-.login-security-note {
-  margin: 0;
-
-  color: var(
-    --text-muted,
-    color-mix(in srgb, var(--text-dim, #a8b3c7) 76%, transparent)
-  );
-
-  font-size: clamp(10px, 1.45dvh, 11px);
-  font-weight: var(--weight-medium, 500);
-  line-height: 1.32;
-  text-align: center;
-}
-
 .login-card-footer {
-  display: grid;
-  justify-items: center;
-  gap: 3px;
+  display: block;
 
   padding-block-start: clamp(0px, .5dvh, 3px);
 
-  color: var(
-    --text-muted,
-    color-mix(in srgb, var(--text-dim, #a8b3c7) 70%, transparent)
+  color: color-mix(
+    in srgb,
+    var(--text-strong, #ffffff) 76%,
+    var(--text-dim, #a8b3c7)
   );
 
   font-size: clamp(9px, 1.35dvh, 10px);
@@ -1414,14 +1464,11 @@ body.auth-screen.auth-no-scroll {
   line-height: 1.28;
   letter-spacing: .02em;
   text-align: center;
+  white-space: nowrap;
 }
 
-.login-card-footer span:first-child {
-  color: color-mix(
-    in srgb,
-    var(--text-strong, #ffffff) 76%,
-    var(--text-dim, #a8b3c7)
-  );
+.login-card-footer--single span {
+  display: inline;
 }
 
 
@@ -1432,7 +1479,8 @@ body.auth-screen.auth-no-scroll {
 .auth-button,
 .login-button,
 .auth-submit,
-.login-submit {
+.login-submit,
+.password-reset-submit {
   position: relative;
   isolation: isolate;
 
@@ -1493,7 +1541,8 @@ body.auth-screen.auth-no-scroll {
     opacity var(--duration-normal, .2s) var(--ease-standard, ease);
 }
 
-.login-card-panel .login-submit {
+.login-card-panel .login-submit,
+.password-reset-card-panel .password-reset-submit {
   block-size: var(--login-button-height);
   border-radius: clamp(14px, 2.3dvh, 17px);
 }
@@ -1501,7 +1550,8 @@ body.auth-screen.auth-no-scroll {
 .auth-button::before,
 .login-button::before,
 .auth-submit::before,
-.login-submit::before {
+.login-submit::before,
+.password-reset-submit::before {
   content: "";
 
   position: absolute;
@@ -1534,7 +1584,8 @@ body.auth-screen.auth-no-scroll {
 .auth-button:hover,
 .login-button:hover,
 .auth-submit:hover,
-.login-submit:hover {
+.login-submit:hover,
+.password-reset-submit:hover {
   transform: translateY(-1px);
   filter: brightness(1.04) saturate(1.08);
 
@@ -1551,21 +1602,24 @@ body.auth-screen.auth-no-scroll {
 .auth-button:hover::before,
 .login-button:hover::before,
 .auth-submit:hover::before,
-.login-submit:hover::before {
+.login-submit:hover::before,
+.password-reset-submit:hover::before {
   transform: translateX(12%);
 }
 
 .auth-button:active,
 .login-button:active,
 .auth-submit:active,
-.login-submit:active {
+.login-submit:active,
+.password-reset-submit:active {
   transform: translateY(0) scale(.998);
 }
 
 .auth-button:focus-visible,
 .login-button:focus-visible,
 .auth-submit:focus-visible,
-.login-submit:focus-visible {
+.login-submit:focus-visible,
+.password-reset-submit:focus-visible {
   outline: none;
 
   box-shadow:
@@ -1582,7 +1636,8 @@ body.auth-screen.auth-no-scroll {
 .auth-button:disabled,
 .login-button:disabled,
 .auth-submit:disabled,
-.login-submit:disabled {
+.login-submit:disabled,
+.password-reset-submit:disabled {
   opacity: .76;
   cursor: not-allowed;
   filter: saturate(.95);
@@ -1591,19 +1646,23 @@ body.auth-screen.auth-no-scroll {
 
 .auth-submit[aria-busy="true"],
 .login-submit[aria-busy="true"],
+.password-reset-submit[aria-busy="true"],
 .auth-button[aria-busy="true"],
 .login-button[aria-busy="true"],
 .auth-submit[data-loading="true"],
-.login-submit[data-loading="true"] {
+.login-submit[data-loading="true"],
+.password-reset-submit[data-loading="true"] {
   cursor: progress;
 }
 
 .auth-submit[aria-busy="true"]::after,
 .login-submit[aria-busy="true"]::after,
+.password-reset-submit[aria-busy="true"]::after,
 .auth-button[aria-busy="true"]::after,
 .login-button[aria-busy="true"]::after,
 .auth-submit[data-loading="true"]::after,
-.login-submit[data-loading="true"]::after {
+.login-submit[data-loading="true"]::after,
+.password-reset-submit[data-loading="true"]::after {
   content: "";
 
   flex: none;
@@ -1627,7 +1686,8 @@ body.auth-screen.auth-no-scroll {
 .login-message,
 .auth-error,
 .login-error,
-.login-global-error {
+.login-global-error,
+.password-reset-message {
   display: none;
 
   margin: 0;
@@ -1667,7 +1727,8 @@ body.auth-screen.auth-no-scroll {
 .auth-error.is-visible:not(:empty),
 .login-error:not([hidden]):not(:empty),
 .login-error.is-visible:not(:empty),
-.login-global-error:not([hidden]):not(:empty) {
+.login-global-error:not([hidden]):not(:empty),
+.password-reset-message:not([hidden]):not(:empty) {
   display: block;
 }
 
@@ -1675,8 +1736,25 @@ body.auth-screen.auth-no-scroll {
 .login-message[hidden],
 .auth-error[hidden],
 .login-error[hidden],
-.login-global-error[hidden] {
+.login-global-error[hidden],
+.password-reset-message[hidden] {
   display: none;
+}
+
+.auth-message.is-success,
+.password-reset-message.is-success,
+.password-reset-message[data-message-type="success"] {
+  border-color: color-mix(in srgb, var(--accent, #41c7d7) 34%, rgb(255 255 255 / .12));
+
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent, #41c7d7) 12%, transparent),
+      rgb(255 255 255 / .035)
+    ),
+    color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent);
+
+  color: var(--text-strong, #ffffff);
 }
 
 
@@ -1768,46 +1846,57 @@ body.auth-screen.auth-no-scroll {
 
 @media (max-width: 760px) {
   .public-auth-shell--login,
+  .public-auth-shell--password-request,
+  .public-auth-shell--password-reset,
   .login-view {
     --login-edge-block: clamp(8px, 1.5dvh, 14px);
     --login-edge-inline: 12px;
+
     --login-card-max: 100%;
     --login-card-radius: 24px;
-    --login-card-padding-block: clamp(19px, 3dvh, 25px);
+
+    --login-card-padding-block: clamp(20px, 3dvh, 26px);
     --login-card-padding-inline: clamp(16px, 4vw, 22px);
-    --login-card-gap: clamp(11px, 1.65dvh, 14px);
-    --login-form-gap: clamp(10px, 1.5dvh, 13px);
-    --login-logo-shell: clamp(54px, 8dvh, 64px);
-    --login-title-size: clamp(28px, 8vw, 36px);
+
+    --login-card-gap: clamp(12px, 1.65dvh, 15px);
+    --login-form-gap: clamp(11px, 1.5dvh, 14px);
+
+    --login-logo-shell: clamp(52px, 8dvh, 62px);
+    --login-title-size: clamp(27px, 8vw, 35px);
   }
 
   .public-auth-shell {
     padding: 14px;
   }
 
-  .login-card-panel {
+  .login-card-panel,
+  .password-reset-card-panel {
     inline-size: 100%;
     border-radius: var(--login-card-radius);
   }
 
-  .login-card-subtitle {
+  .login-card-subtitle,
+  .password-reset-subtitle {
     font-size: 13px;
   }
 
   .auth-input,
   .login-input,
+  .password-reset-input,
   .input-text,
   [data-password-input],
   .auth-button,
   .login-button,
   .auth-submit,
-  .login-submit {
+  .login-submit,
+  .password-reset-submit {
     block-size: 50px;
     border-radius: 15px;
     font-size: 16px;
   }
 
-  .login-input-shell .login-input {
+  .login-input-shell .login-input,
+  .login-input-shell .password-reset-input {
     block-size: var(--login-input-height);
   }
 
@@ -1841,18 +1930,25 @@ body.auth-screen.auth-no-scroll {
 
 @media (max-width: 520px) {
   .public-auth-shell--login,
+  .public-auth-shell--password-request,
+  .public-auth-shell--password-reset,
   .login-view {
     --login-edge-block: 8px;
     --login-edge-inline: 10px;
+
     --login-card-radius: 22px;
+
     --login-card-padding-block: 20px;
     --login-card-padding-inline: 14px;
+
     --login-card-gap: 13px;
     --login-form-gap: 11px;
+
     --login-input-height: 48px;
     --login-button-height: 49px;
-    --login-logo-shell: 58px;
-    --login-title-size: 29px;
+
+    --login-logo-shell: 56px;
+    --login-title-size: 28px;
   }
 
   .public-auth-shell {
@@ -1883,7 +1979,8 @@ body.auth-screen.auth-no-scroll {
     gap: 9px;
   }
 
-  .login-input-shell .login-input {
+  .login-input-shell .login-input,
+  .login-input-shell .password-reset-input {
     padding-inline-start: 47px;
     padding-inline-end: 54px;
   }
@@ -1897,8 +1994,8 @@ body.auth-screen.auth-no-scroll {
     max-inline-size: calc(100% - 98px);
   }
 
-  .login-card-footer span:last-child {
-    display: none;
+  .login-card-footer {
+    white-space: normal;
   }
 }
 
@@ -1909,52 +2006,57 @@ body.auth-screen.auth-no-scroll {
 
 @media (max-height: 780px) and (min-width: 761px) {
   .public-auth-shell--login,
+  .public-auth-shell--password-request,
+  .public-auth-shell--password-reset,
   .login-view {
     --login-edge-block: clamp(8px, 1.6dvh, 16px);
+
     --login-card-padding-block: clamp(20px, 2.85dvh, 28px);
-    --login-card-padding-inline: clamp(26px, 3vw, 32px);
+    --login-card-padding-inline: clamp(24px, 3vw, 30px);
+
     --login-card-gap: clamp(12px, 1.55dvh, 15px);
     --login-form-gap: clamp(10px, 1.35dvh, 12px);
+
     --login-input-height: clamp(43px, 6dvh, 48px);
     --login-button-height: clamp(45px, 6.15dvh, 50px);
-    --login-logo-shell: clamp(56px, 8dvh, 66px);
-    --login-title-size: clamp(30px, 4.7dvh, 37px);
+
+    --login-logo-shell: clamp(52px, 8dvh, 62px);
+    --login-title-size: clamp(28px, 4.7dvh, 35px);
   }
 
-  .login-card-subtitle {
+  .login-card-subtitle,
+  .password-reset-subtitle {
     line-height: 1.34;
   }
 
-  .login-security-note {
-    line-height: 1.25;
-  }
-
   .login-card-footer {
-    gap: 2px;
     line-height: 1.22;
   }
 }
 
 @media (max-height: 700px) and (min-width: 761px) {
   .public-auth-shell--login,
+  .public-auth-shell--password-request,
+  .public-auth-shell--password-reset,
   .login-view {
     --login-edge-block: 8px;
-    --login-card-padding-block: 20px;
-    --login-card-padding-inline: 30px;
+
+    --login-card-padding-block: 19px;
+    --login-card-padding-inline: 28px;
+
     --login-card-gap: 12px;
     --login-form-gap: 10px;
+
     --login-input-height: 44px;
     --login-button-height: 46px;
-    --login-logo-shell: 56px;
-    --login-title-size: 31px;
+
+    --login-logo-shell: 52px;
+    --login-title-size: 30px;
   }
 
-  .login-card-subtitle {
+  .login-card-subtitle,
+  .password-reset-subtitle {
     font-size: 12px;
-  }
-
-  .login-security-note {
-    font-size: 10px;
   }
 
   .login-card-footer {
@@ -1964,22 +2066,22 @@ body.auth-screen.auth-no-scroll {
 
 @media (max-height: 620px) and (min-width: 761px) {
   .public-auth-shell--login,
+  .public-auth-shell--password-request,
+  .public-auth-shell--password-reset,
   .login-view {
     --login-card-padding-block: 16px;
     --login-card-gap: 10px;
     --login-form-gap: 9px;
+
     --login-input-height: 42px;
     --login-button-height: 44px;
-    --login-logo-shell: 48px;
-    --login-title-size: 28px;
+
+    --login-logo-shell: 46px;
+    --login-title-size: 27px;
   }
 
   .login-card-subtitle,
-  .login-security-note {
-    display: none;
-  }
-
-  .login-card-footer span:last-child {
+  .password-reset-subtitle {
     display: none;
   }
 }
@@ -1989,8 +2091,9 @@ body.auth-screen.auth-no-scroll {
     display: none;
   }
 
-  .login-card-panel {
-    inline-size: min(100%, 500px);
+  .login-card-panel,
+  .password-reset-card-panel {
+    inline-size: min(100%, 450px);
   }
 }
 
@@ -2000,7 +2103,8 @@ body.auth-screen.auth-no-scroll {
 ========================================================= */
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .login-card-panel {
+  .login-card-panel,
+  .password-reset-card-panel {
     background-color: color-mix(in srgb, var(--main-bg, #070a12) 92%, #ffffff 8%);
   }
 }
@@ -2013,11 +2117,14 @@ body.auth-screen.auth-no-scroll {
 @media (prefers-reduced-motion: reduce) {
   .auth-submit[aria-busy="true"]::after,
   .login-submit[aria-busy="true"]::after,
+  .password-reset-submit[aria-busy="true"]::after,
   .auth-button[aria-busy="true"]::after,
   .login-button[aria-busy="true"]::after,
   .auth-submit[data-loading="true"]::after,
   .login-submit[data-loading="true"]::after,
+  .password-reset-submit[data-loading="true"]::after,
   .login-card-panel.shake,
+  .password-reset-card-panel.shake,
   .login-orb-primary,
   .login-orb-secondary,
   .login-card-logo-shell::before,
@@ -2029,15 +2136,18 @@ body.auth-screen.auth-no-scroll {
   .login-button,
   .auth-submit,
   .login-submit,
+  .password-reset-submit,
   .auth-input,
   .login-input,
+  .password-reset-input,
   .input-text,
   [data-password-input],
   .login-input-shell,
   .password-toggle,
   [data-password-toggle],
   .auth-link,
-  .login-link {
+  .login-link,
+  .password-reset-link {
     transition: none;
   }
 
@@ -2045,6 +2155,7 @@ body.auth-screen.auth-no-scroll {
   .login-button:hover,
   .auth-submit:hover,
   .login-submit:hover,
+  .password-reset-submit:hover,
   .login-input-shell:focus-within {
     transform: none;
   }
@@ -2071,7 +2182,9 @@ body.auth-screen.auth-no-scroll {
   .public-auth-shell,
   .public-auth-body,
   .login-pro,
-  .login-card-panel {
+  .password-reset-pro,
+  .login-card-panel,
+  .password-reset-card-panel {
     display: block;
 
     inline-size: 100%;

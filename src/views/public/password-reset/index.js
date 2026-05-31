@@ -1,7 +1,8 @@
 /* =========================================================
+
    Onion Support - Password Reset View Controller
    Archivo: /src/views/public/password-reset/index.js
-
+   
    Responsabilidad:
    - Controlador mínimo de recuperación/restablecimiento de contraseña.
    - Montar el template recibido desde ./template.js.
@@ -20,6 +21,7 @@
    - Sin storage.
    - Sin eventos globales.
    - Sin navegación browser paralela.
+   
 ========================================================= */
 
 import { AppCore } from "../../../core/index.js";

@@ -7,7 +7,7 @@
    - Usar el layout común de /src/views/public/index.js.
    - Pintar usuario/email, contraseña, botón Entrar y recuperación.
    - Exponer data-* consumidos por index.js.
-   - Exponer contrato DOM data-password-* para shared/password-field.
+   - Exponer contrato DOM data-password-* para password controls.
    - Sin Auth.
    - Sin Router.
    - Sin HTTP.
@@ -29,7 +29,7 @@ import {
   safeInternalHref,
 } from "../index.js";
 
-export const LOGIN_TEMPLATE_VERSION = "login.template.public.v4";
+export const LOGIN_TEMPLATE_VERSION = "login.template.public.v5";
 
 const APP_NAME = "Onion Support";
 const PASSWORD_REQUEST_HREF = ROUTES.passwordRequest || "/password-request";
@@ -156,18 +156,9 @@ function renderIdentifierField({
 
   return `
     <div
-      class="auth-field login-field login-field-card login-field--identifier"
+      class="auth-field login-field login-field-card login-field--identifier login-field--no-label"
       data-login-field="${escapeAttr(cleanName)}"
     >
-      <div class="login-field-head">
-        <label
-          class="auth-label login-label"
-          for="${escapeAttr(cleanId)}"
-        >
-          ${escapeHtml(cleanLabel)}
-        </label>
-      </div>
-
       <div class="login-input-shell">
         <span class="login-input-icon" aria-hidden="true">
           ${renderIcon(icon)}
@@ -185,6 +176,7 @@ function renderIdentifierField({
           required
           spellcheck="false"
           autocapitalize="none"
+          aria-label="${escapeAttr(cleanLabel)}"
           aria-invalid="false"
           aria-describedby="${escapeAttr(cleanId)}-error"
           ${cleanEnterKeyHint ? `enterkeyhint="${escapeAttr(cleanEnterKeyHint)}"` : ""}
@@ -211,20 +203,11 @@ function renderPasswordField() {
 
   return `
     <div
-      class="auth-field login-field login-field-card login-field--password"
+      class="auth-field login-field login-field-card login-field--password login-field--no-label"
       data-login-field="password"
       data-login-password-field="true"
       data-password-field="true"
     >
-      <div class="login-field-head">
-        <label
-          class="auth-label login-label password-label"
-          for="${escapeAttr(id)}"
-        >
-          Contraseña
-        </label>
-      </div>
-
       <div
         class="password-wrapper login-password-wrapper login-input-shell"
         data-password-wrapper="true"
@@ -244,6 +227,7 @@ function renderPasswordField() {
           required
           spellcheck="false"
           autocapitalize="none"
+          aria-label="Contraseña"
           aria-invalid="false"
           aria-describedby="${escapeAttr(`${capsId} ${errorId}`)}"
           enterkeyhint="go"
@@ -315,17 +299,20 @@ export function getLoginTemplate() {
 
     body: `
       <section
-        class="login-pro"
+        class="login-pro login-pro--narrow"
         aria-labelledby="login-panel-title"
         data-login-template-version="${escapeAttr(LOGIN_TEMPLATE_VERSION)}"
+        data-login-density="compact"
       >
         <div class="login-orb login-orb-primary" aria-hidden="true"></div>
         <div class="login-orb login-orb-secondary" aria-hidden="true"></div>
         <div class="login-grid-glow" aria-hidden="true"></div>
 
         <section
-          class="login-card-panel"
+          class="login-card-panel login-card-panel--narrow"
           aria-labelledby="login-panel-title"
+          data-login-card="true"
+          data-login-card-size="narrow"
         >
           <div class="login-card-sheen" aria-hidden="true"></div>
 
@@ -353,7 +340,7 @@ export function getLoginTemplate() {
           ></p>
 
           <form
-            class="auth-form login-form"
+            class="auth-form login-form login-form--compact"
             id="login-form"
             autocomplete="on"
             novalidate
@@ -397,15 +384,12 @@ export function getLoginTemplate() {
             >
               Entrar al panel
             </button>
-
-            <p class="login-security-note">
-              Onion Support nunca solicitará tu contraseña fuera de esta pantalla.
-            </p>
           </form>
 
-          <footer class="login-card-footer" aria-label="Información de Onion Support">
-            <span>Acceso registrado · Onion Support</span>
-            <span>© 2026 · Todos los derechos reservados.</span>
+          <footer class="login-card-footer login-card-footer--single" aria-label="Información de Onion Support">
+            <span>
+              Acceso registrado · Onion Support · © 2026 · Todos los derechos reservados.
+            </span>
           </footer>
         </section>
       </section>

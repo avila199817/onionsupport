@@ -6,10 +6,16 @@
    - Boot mínimo de la SPA.
    - Inicializar Core/Auth/UI.
    - Restaurar sesión antes del primer render del Router.
-   - Arrancar Router.
+   - Arrancar Router respetando la URL actual.
    - Ocultar loader al terminar.
-   - Sin Store, Services, i18n funcional, warmup, eventos custom,
-     fetch directo, storage directo ni lógica de dominio.
+   - Sin Store.
+   - Sin Services.
+   - Sin i18n funcional.
+   - Sin warmup.
+   - Sin eventos custom.
+   - Sin fetch directo.
+   - Sin storage directo.
+   - Sin lógica de dominio.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -22,7 +28,7 @@ import TopbarUI from "../ui/topbar/index.js";
 
 import { showLoader, hideLoader } from "./loader.js";
 
-export const APP_VERSION = "app.minimal.v2";
+export const APP_VERSION = "app.minimal.v3";
 
 const AUTH_BOOT_OPTIONS = Object.freeze({
   persistent: true,
@@ -46,6 +52,10 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function isFunction(value) {
   return typeof value === "function";
 }
@@ -66,7 +76,10 @@ function redact(value = "") {
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 function currentPath() {
@@ -89,6 +102,21 @@ function safeError(error = null) {
     status: error.status || error.statusCode || error.response?.status || null,
     code: error.code || error.error || null,
   };
+}
+
+function authResultOk(value = null) {
+  if (value === false) return false;
+  if (value === true) return true;
+
+  if (isObject(value)) {
+    return value.ok !== false;
+  }
+
+  return value !== null && value !== undefined;
+}
+
+function authResultAuthenticated(value = null) {
+  return isObject(value) && value.authenticated === true;
 }
 
 function createBootPayload(options = {}) {
@@ -158,6 +186,11 @@ async function initToast(payload = {}) {
 }
 
 async function initAuth(payload = {}) {
+  /*
+    Auth se inicializa sin restaurar aquí.
+    La restauración se hace una única vez en restoreAuth(),
+    antes de arrancar Router.
+  */
   await call(
     Auth,
     "init",
@@ -171,6 +204,13 @@ async function initAuth(payload = {}) {
 }
 
 async function restoreAuth(payload = {}) {
+  /*
+    Punto crítico:
+    - Tras F5 puede no existir access token en memoria.
+    - El refresh debe intentarse igualmente con credentials include.
+    - Auth decide si hay cookie/sesión restaurable.
+    - Router no arranca hasta que esto termina.
+  */
   const result = await call(
     Auth,
     "restoreSession",
@@ -181,20 +221,25 @@ async function restoreAuth(payload = {}) {
     false
   );
 
+  const value = result.value;
+
   lastRestore = {
     attempted: result.called,
     method: result.method,
-    ok: result.called ? result.ok && result.value !== false : null,
+    ok: result.called ? result.ok === true && authResultOk(value) : null,
+    authenticated: authResultAuthenticated(value),
+    skippedRefresh: isObject(value) ? value.skippedRefresh === true : false,
+    reason: isObject(value) ? value.reason || null : null,
     error: result.error,
   };
 
-  return result.value;
+  return value;
 }
 
 async function initGlobalUI(payload = {}) {
   /*
     Sidebar/Topbar se registran en AppCore dentro de su propio init().
-    El Router sincroniza chrome tras renderizar la ruta.
+    Router sincroniza chrome/active state tras renderizar la ruta.
   */
   await call(SidebarUI, "init", payload, false);
   await call(TopbarUI, "init", payload, false);
@@ -262,9 +307,15 @@ async function runBoot(options = {}) {
   await initAuth(payload);
 
   /*
-    Restore antes del primer render.
-    Si no hay sesión o no hay token, Auth.restoreSession() debe resolver
-    sin tumbar el boot. El Router decide si muestra login o zona privada.
+    Orden obligatorio:
+    1. Core listo.
+    2. Auth instalado.
+    3. Restore con cookie httpOnly / credentials include.
+    4. UI global registrada.
+    5. Router renderiza la URL actual.
+
+    Así una recarga en /@slug/incidencias no cae a login antes
+    de que Auth haya intentado restaurar la sesión.
   */
   await restoreAuth(payload);
 

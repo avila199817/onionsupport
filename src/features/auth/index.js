@@ -8,8 +8,15 @@
    - Sesión actual delegada en AppCore.
    - HTTP delegado en core/http.js.
    - Home visible autenticada: /@{user.slug}.
-   - Sin Router, Toast, Store, Storage, fetch propio,
-     eventos internos, 2FA/MFA/OTP ni lógica de vistas.
+   - Restaurar sesión tras refresh del navegador usando cookie httpOnly.
+   - Sin Router.
+   - Sin Toast.
+   - Sin Store.
+   - Sin Storage.
+   - Sin fetch propio.
+   - Sin eventos internos.
+   - Sin 2FA/MFA/OTP.
+   - Sin lógica de vistas.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -24,7 +31,7 @@ import {
   normalizeUserSlug,
 } from "../../core/config.js";
 
-export const AUTH_VERSION = "auth.minimal.v4";
+export const AUTH_VERSION = "auth.minimal.v5";
 
 const ROOT_PATH = "/";
 
@@ -95,7 +102,10 @@ function redact(value = "") {
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 function safeError(error = null, type = "auth") {
@@ -174,7 +184,11 @@ function safePayload(value, depth = 0) {
   const output = {};
 
   for (const [key, child] of Object.entries(value)) {
-    if (/(token|refresh|password|secret|authorization|jwt|cookie|sessionid|session_id|code|sig|signature)/i.test(key)) {
+    if (
+      /(token|refresh|password|secret|authorization|jwt|cookie|sessionid|session_id|code|sig|signature)/i.test(
+        key
+      )
+    ) {
       output[key] = child ? "***" : null;
       continue;
     }
@@ -269,7 +283,10 @@ function publicUser(user = null) {
     slug: normalized.slug || null,
     displayName: normalized.displayName || normalized.username || "Usuario",
     role: normalized.role || "user",
-    roles: Array.isArray(normalized.roles) ? normalized.roles : [normalized.role || "user"],
+    rol: normalized.role || "user",
+    roles: Array.isArray(normalized.roles)
+      ? normalized.roles
+      : [normalized.role || "user"],
     avatarUrl: normalized.avatarUrl || "",
   };
 }
@@ -758,7 +775,23 @@ function getAuthModuleSnapshot() {
 ========================================================= */
 
 function shouldAttemptRefresh(options = {}) {
+  if (options.skipRefresh === true || options.noRefresh === true) {
+    return false;
+  }
+
   if (options.forceRefresh === true || options.forceRestore === true) {
+    return true;
+  }
+
+  if (
+    options.restoreOnBoot === true ||
+    options.persistent === true ||
+    options.silent === true
+  ) {
+    return true;
+  }
+
+  if (cleanText(options.credentials, "").toLowerCase() === "include") {
     return true;
   }
 
@@ -938,7 +971,7 @@ async function restoreSession(options = {}) {
         return getPublicAuthResult({
           ok: false,
           skippedRefresh: true,
-          reason: "no-token-no-refresh",
+          reason: "refresh-not-requested",
         });
       }
 

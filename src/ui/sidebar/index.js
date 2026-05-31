@@ -11,13 +11,17 @@
    - Dejar navegación normal en Router global vía data-spa/data-route.
    - Delegar logout en Auth.
    - Sin construir HTML visual.
-   - Sin submódulos externos.
-   - Sin HTTP, Toast, Store, Services ni rutas inventadas.
+   - Sin guards.
+   - Sin HTTP.
+   - Sin Toast.
+   - Sin Store.
+   - Sin Services.
+   - Sin rutas inventadas.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-import { Auth } from "../../features/auth/index.js";
-import { Router } from "../../router/index.js";
+import { Auth as DefaultAuth } from "../../features/auth/index.js";
+import { Router as DefaultRouter } from "../../router/index.js";
 
 import {
   ROUTES,
@@ -39,7 +43,7 @@ import {
   closeSidebarDropdown,
 } from "./template.js";
 
-export const SIDEBAR_VERSION = "sidebar.controller.v1";
+export const SIDEBAR_VERSION = "sidebar.controller.v2";
 
 const SIDEBAR_ROOT_ID = "app-sidebar";
 const SIDEBAR_MOUNT_ID = "sidebar-mount";
@@ -85,7 +89,10 @@ function redact(value = "") {
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 /* =========================================================
@@ -94,6 +101,7 @@ function redact(value = "") {
 
 function byId(id = "") {
   if (!isBrowser() || !id) return null;
+
   return document.getElementById(id);
 }
 
@@ -102,9 +110,7 @@ function getMount() {
 
   return (
     byId(SIDEBAR_MOUNT_ID) ||
-    byId(SIDEBAR_ROOT_ID) ||
     document.querySelector?.("[data-sidebar-mount]") ||
-    document.querySelector?.("[data-sidebar-root]") ||
     null
   );
 }
@@ -116,8 +122,12 @@ function clear(node = null) {
     node.replaceChildren();
     return true;
   } catch {
-    node.textContent = "";
-    return true;
+    try {
+      node.textContent = "";
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -137,14 +147,14 @@ function setHidden(node = null, hidden = false) {
 
 function cacheDom() {
   try {
-    AppCore.dom = isObject(AppCore.dom) ? AppCore.dom : {};
+    const dom = isObject(AppCore.dom) ? AppCore.dom : null;
 
-    AppCore.dom.sidebar = root;
-    AppCore.dom.appSidebar = root;
-    AppCore.dom.sidebarRoot = root;
-    AppCore.dom.sidebarMount =
-      byId(SIDEBAR_MOUNT_ID) ||
-      (root?.parentElement?.id === SIDEBAR_MOUNT_ID ? root.parentElement : null);
+    if (!dom) return false;
+
+    dom.sidebar = root;
+    dom.appSidebar = root;
+    dom.sidebarRoot = root;
+    dom.sidebarMount = byId(SIDEBAR_MOUNT_ID) || null;
 
     return true;
   } catch {
@@ -188,40 +198,82 @@ function unbindTemplate() {
 }
 
 /* =========================================================
-   AUTH / USER
+   AUTH / ROUTER
 ========================================================= */
 
+function getAuth() {
+  return (
+    AppCore.auth ||
+    AppCore.Auth ||
+    AppCore.getModule?.("auth") ||
+    DefaultAuth ||
+    null
+  );
+}
+
+function getRouter() {
+  return (
+    AppCore.router ||
+    AppCore.Router ||
+    AppCore.getModule?.("router") ||
+    DefaultRouter ||
+    null
+  );
+}
+
 function getAuthUser() {
+  const auth = getAuth();
+
   try {
-    return Auth.getUser?.() || Auth.getCurrentUser?.() || AppCore.getCurrentUser?.() || null;
+    return (
+      auth?.getUser?.() ||
+      auth?.getCurrentUser?.() ||
+      AppCore.getCurrentUser?.() ||
+      null
+    );
   } catch {
     return null;
   }
 }
 
 function getRole() {
+  const auth = getAuth();
+
   try {
-    return Auth.getRole?.() || Auth.getCurrentRole?.() || AppCore.getCurrentRole?.() || "";
+    return (
+      auth?.getRole?.() ||
+      auth?.getCurrentRole?.() ||
+      AppCore.getCurrentRole?.() ||
+      ""
+    );
   } catch {
     return "";
   }
 }
 
 function isAuthenticated() {
+  const auth = getAuth();
+
   try {
-    return Auth.isAuthenticated?.() === true || AppCore.isAuthenticated?.() === true;
+    return auth?.isAuthenticated?.() === true || AppCore.isAuthenticated?.() === true;
   } catch {
     return false;
   }
 }
 
 function isAdmin() {
+  const auth = getAuth();
+
   try {
-    return Auth.isAdmin?.() === true || getRole() === "admin";
+    return auth?.isAdmin?.() === true || getRole() === "admin";
   } catch {
     return false;
   }
 }
+
+/* =========================================================
+   USER
+========================================================= */
 
 function safeImageUrl(value = "") {
   const raw = cleanText(value, "");
@@ -263,6 +315,12 @@ function initialsFrom(value = "") {
   );
 }
 
+function normalizeRole(value = "") {
+  const role = cleanText(value, "").toLowerCase();
+
+  return role === "admin" ? "admin" : "user";
+}
+
 function getUserViewModel() {
   const raw = getAuthUser();
 
@@ -285,12 +343,11 @@ function getUserViewModel() {
     ? AppCore.publicUser(raw)
     : raw;
 
-  const role = cleanText(
+  const role = normalizeRole(
     publicUser?.role ||
       raw.role ||
       raw.rol ||
-      getRole(),
-    "user"
+      getRole()
   );
 
   const displayName = cleanText(
@@ -344,7 +401,7 @@ function getUserViewModel() {
 
     role,
     rol: role,
-    roles: role ? [role] : [],
+    roles: [role],
 
     roleLabel: role === "admin" ? "Administrador" : "Estándar",
 
@@ -398,10 +455,12 @@ function routeLookupPath(path = "/") {
 }
 
 function currentPublicPath() {
+  const router = getRouter();
+
   try {
     return (
-      Router.getCurrentPublicPath?.() ||
-      Router.getCurrentPath?.() ||
+      router?.getCurrentPublicPath?.() ||
+      router?.getCurrentPath?.() ||
       AppCore.state?.publicPath ||
       (isBrowser()
         ? `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
@@ -413,9 +472,11 @@ function currentPublicPath() {
 }
 
 function currentCanonicalPath() {
+  const router = getRouter();
+
   try {
     return normalizePath(
-      Router.getCurrentCanonicalPath?.() ||
+      router?.getCurrentCanonicalPath?.() ||
         AppCore.state?.canonicalPath ||
         AppCore.state?.route ||
         routeLookupPath(currentPublicPath())
@@ -519,7 +580,9 @@ function isRouteAdmin(route = null) {
 }
 
 function isRouteVisible(route = null, user = getUserViewModel()) {
+  if (!user?.hasUser) return false;
   if (!route?.path) return false;
+
   if (route.public === true) return false;
   if (route.hideShell === true || route.layout === "auth") return false;
   if (route.showInSidebar === false || route.sidebar === false) return false;
@@ -551,6 +614,8 @@ function isActive(path = "/", current = currentCanonicalPath()) {
 }
 
 function getMenuItems(context = getContext()) {
+  if (!context.authenticated || !context.user?.hasUser) return [];
+
   const user = context.user;
   const seen = new Set();
 
@@ -584,20 +649,24 @@ function getMenuItems(context = getContext()) {
 ========================================================= */
 
 function getCurrentRoute() {
+  const router = getRouter();
+
   try {
-    return Router.getCurrentRoute?.() || null;
+    return router?.getCurrentRoute?.() || null;
   } catch {
     return null;
   }
 }
 
 function getContext() {
+  const auth = getAuth();
+  const router = getRouter();
   const user = getUserViewModel();
 
   return {
     AppCore,
-    Auth,
-    Router,
+    Auth: auth,
+    Router: router,
 
     user,
     role: user.role || "",
@@ -662,29 +731,12 @@ function mountRoot(nextRoot) {
 
   unbindTemplate();
 
-  if (mount.matches?.("[data-sidebar-root], #app-sidebar")) {
-    clear(mount);
+  clear(mount);
+  mount.appendChild(nextRoot);
 
-    for (const child of [...nextRoot.childNodes]) {
-      mount.appendChild(child);
-    }
+  root = nextRoot;
 
-    mount.className = nextRoot.className;
-
-    for (const [key, value] of Object.entries(nextRoot.dataset || {})) {
-      mount.dataset[key] = value;
-    }
-
-    mount.setAttribute("aria-label", nextRoot.getAttribute("aria-label") || "Panel lateral");
-    mount.setAttribute("aria-hidden", "false");
-
-    root = mount;
-  } else {
-    clear(mount);
-    mount.appendChild(nextRoot);
-    root = nextRoot;
-  }
-
+  setHidden(mount, false);
   setHidden(root, false);
 
   cleanupTemplate = bindSidebarTemplate(root, {
@@ -701,10 +753,15 @@ function mountRoot(nextRoot) {
 function hideSidebar() {
   unbindTemplate();
 
+  const mount = getMount();
   const current = root || byId(SIDEBAR_ROOT_ID);
 
   if (current) {
     setHidden(current, true);
+  }
+
+  if (mount) {
+    setHidden(mount, true);
   }
 
   mounted = false;
@@ -752,12 +809,13 @@ function sync() {
 ========================================================= */
 
 async function navigateTo(path = "/", options = {}) {
+  const router = getRouter();
   const context = getContext();
   const target = routeHref(path, context.user);
 
-  if (!target) return false;
+  if (!router || !target) return false;
 
-  await Router.navigate?.(target, {
+  await router.navigate?.(target, {
     source: "sidebar",
     ...options,
   });
@@ -804,11 +862,16 @@ function toggleSidebar() {
 async function handleLogout(options = {}) {
   if (logoutInFlight) return false;
 
+  const auth = getAuth();
+  const router = getRouter();
+
   logoutInFlight = true;
   sync();
 
   try {
-    await Auth.logout?.(options);
+    await auth?.logout?.(options);
+  } catch {
+    // logout remoto best-effort
   } finally {
     logoutInFlight = false;
     sidebarOpen = false;
@@ -821,7 +884,9 @@ async function handleLogout(options = {}) {
       // noop
     }
 
-    await Router.replace?.(ROUTES.login || "/login", {
+    hideSidebar();
+
+    await router?.replace?.(ROUTES.login || "/login", {
       source: "sidebar.logout",
       replaceState: true,
     });
@@ -836,17 +901,11 @@ async function handleLogout(options = {}) {
 
 function registerModule() {
   try {
-    AppCore.ui = isObject(AppCore.ui) ? AppCore.ui : {};
-    AppCore.ui.sidebar = SidebarUI;
-
-    AppCore.sidebar = SidebarUI;
-    AppCore.Sidebar = SidebarUI;
+    if (isObject(AppCore.ui)) {
+      AppCore.ui.sidebar = SidebarUI;
+    }
 
     AppCore.registerModule?.("sidebar", SidebarUI, {
-      overwrite: true,
-    });
-
-    AppCore.modules?.register?.("sidebar", SidebarUI, {
       overwrite: true,
     });
 
@@ -860,14 +919,6 @@ function unregisterModule() {
   try {
     if (AppCore.ui?.sidebar === SidebarUI) {
       delete AppCore.ui.sidebar;
-    }
-
-    if (AppCore.sidebar === SidebarUI) {
-      delete AppCore.sidebar;
-    }
-
-    if (AppCore.Sidebar === SidebarUI) {
-      delete AppCore.Sidebar;
     }
 
     AppCore.modules?.remove?.("sidebar");
@@ -894,8 +945,15 @@ function init() {
 function destroy() {
   unbindTemplate();
 
+  const mount = getMount();
+
   if (root) {
     setHidden(root, true);
+  }
+
+  if (mount) {
+    clear(mount);
+    setHidden(mount, true);
   }
 
   mounted = false;
@@ -916,7 +974,7 @@ function destroy() {
 
 function getSnapshot() {
   const context = getContext();
-  const items = getMenuItems(context);
+  const items = shouldRenderSidebar(context) ? getMenuItems(context) : [];
 
   return {
     version: SIDEBAR_VERSION,

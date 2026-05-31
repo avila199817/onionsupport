@@ -16,12 +16,13 @@
    - Sin logout real.
    - Sin navegación real.
    - Sin leer sesión.
-   - Sin decidir permisos.
+   - Sin decidir permisos reales.
 ========================================================= */
 
 import {
   ROUTES,
   USER_HOME_PREFIX,
+  SENSITIVE_QUERY_PARAMS,
   buildUserHomeRoute,
   buildUserScopedRoute,
   isBlockedRoutePath,
@@ -29,7 +30,7 @@ import {
   normalizeUserSlug,
 } from "../../core/config.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.unified.v1";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.unified.v2";
 
 const SIDEBAR_ROOT_ID = "app-sidebar";
 const BRAND_LABEL = "Onion Support";
@@ -205,6 +206,45 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function normalizeKey(value = "") {
+  return text(value, "")
+    .replace(/[-_\s]/g, "")
+    .toLowerCase();
+}
+
+const SENSITIVE_QUERY_KEYS = new Set(
+  (Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
+    ? SENSITIVE_QUERY_PARAMS
+    : [
+        "token",
+        "access_token",
+        "accessToken",
+        "refresh_token",
+        "refreshToken",
+        "id_token",
+        "idToken",
+        "code",
+        "secret",
+        "session",
+        "sessionId",
+        "session_id",
+        "password",
+        "pwd",
+        "key",
+        "sig",
+        "signature",
+        "jwt",
+        "authorization",
+        "reset_token",
+        "resetToken",
+        "activation_token",
+        "activationToken",
+      ]
+  )
+    .map((key) => normalizeKey(key))
+    .filter(Boolean)
+);
+
 function classNames(...values) {
   return values
     .flat()
@@ -284,6 +324,7 @@ function contains(parent = null, child = null) {
 
 function eventElement(target = null) {
   if (!target) return null;
+
   return target.nodeType === 3 ? target.parentElement : target;
 }
 
@@ -292,9 +333,36 @@ function eventElement(target = null) {
 ========================================================= */
 
 function hasSensitiveQuery(value = "") {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
-    String(value || "")
-  );
+  const raw = String(value || "");
+
+  if (!raw) return false;
+
+  try {
+    const url = new URL(raw, "https://onionsupport.local");
+
+    for (const key of url.searchParams.keys()) {
+      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+        return true;
+      }
+    }
+
+    if (url.hash) {
+      const hash = url.hash.replace(/^#/, "");
+      const params = new URLSearchParams(hash.includes("=") ? hash : "");
+
+      for (const key of params.keys()) {
+        if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) {
+          return true;
+        }
+      }
+    }
+  } catch {
+    return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
+      raw
+    );
+  }
+
+  return false;
 }
 
 function normalizeInternalPath(value = "") {
@@ -345,18 +413,22 @@ function safeAssetSrc(value = "", fallback = "") {
   const src = text(value, fallback);
 
   if (!src) return fallback;
+  if (/[\r\n\t\\]/.test(src)) return fallback;
+  if (hasSensitiveQuery(src)) return fallback;
 
   if (src.startsWith("/")) {
     if (src.startsWith("//")) return fallback;
-    if (/[\r\n\t\\]/.test(src)) return fallback;
-    if (hasSensitiveQuery(src)) return fallback;
 
     return src.replace(/\/{2,}/g, "/") || fallback;
   }
 
-  if (/^https:\/\/.+/i.test(src) && !hasSensitiveQuery(src)) {
+  if (/^https?:\/\//i.test(src)) {
     try {
-      return new URL(src).href;
+      const url = new URL(src);
+
+      if (url.protocol === "http:" || url.protocol === "https:") {
+        return url.href;
+      }
     } catch {
       return fallback;
     }
@@ -369,17 +441,23 @@ function safeAvatarSrc(value = "") {
   const src = text(value, "");
 
   if (!src) return "";
-  if (src.startsWith("//")) return "";
   if (/[\r\n\t\\]/.test(src)) return "";
   if (hasSensitiveQuery(src)) return "";
+  if (/^(javascript|data|vbscript|file):/i.test(src)) return "";
 
   if (src.startsWith("/")) {
+    if (src.startsWith("//")) return "";
+
     return src.replace(/\/{2,}/g, "/") || "";
   }
 
-  if (/^https:\/\/.+/i.test(src)) {
+  if (/^https?:\/\//i.test(src)) {
     try {
-      return new URL(src).href;
+      const url = new URL(src);
+
+      if (url.protocol === "http:" || url.protocol === "https:") {
+        return url.href;
+      }
     } catch {
       return "";
     }
@@ -447,57 +525,59 @@ function initialsFromName(value = "") {
 }
 
 function normalizeUser(user = {}) {
+  const source = isObject(user) ? user : {};
+
   const name = text(
-    user.displayName ||
-      user.name ||
-      user.fullName ||
-      user.username,
+    source.displayName ||
+      source.name ||
+      source.fullName ||
+      source.username,
     "Usuario"
   );
 
   const initials = text(
-    user.initials,
+    source.initials,
     initialsFromName(name)
   )
     .slice(0, 2)
     .toUpperCase();
 
   const slug = normalizeUserSlug(
-    user.slug ||
-      user.publicSlug ||
-      user.lookup?.slug ||
-      user.profile?.slug ||
-      user.username ||
-      user.userId ||
-      user.id ||
+    source.slug ||
+      source.publicSlug ||
+      source.lookup?.slug ||
+      source.profile?.slug ||
+      source.username ||
+      source.userId ||
+      source.id ||
       ""
   );
 
   const avatarUrl = safeAvatarSrc(
-    user.avatarUrl ||
-      user.avatar ||
-      user.photoUrl ||
-      user.photoURL ||
-      user.picture ||
-      user.image ||
-      user.profile?.avatarUrl ||
-      user.profile?.avatar ||
-      user.profile?.photoUrl ||
-      user.profile?.photoURL ||
-      user.profile?.picture ||
+    source.avatarUrl ||
+      source.avatar ||
+      source.photoUrl ||
+      source.photoURL ||
+      source.picture ||
+      source.image ||
+      source.profile?.avatarUrl ||
+      source.profile?.avatar ||
+      source.profile?.photoUrl ||
+      source.profile?.photoURL ||
+      source.profile?.picture ||
       ""
   );
 
   return {
-    ...user,
+    ...source,
     name,
     displayName: name,
     initials,
     slug,
     avatarUrl,
     hasAvatar: Boolean(avatarUrl),
-    roleLabel: text(user.roleLabel, defaultRoleLabel(user)),
-    isAdmin: isAdminUser(user),
+    roleLabel: text(source.roleLabel, defaultRoleLabel(source)),
+    isAdmin: isAdminUser(source),
   };
 }
 
@@ -539,15 +619,16 @@ function userScopedPrivateHref(path = "", user = {}) {
 }
 
 function normalizeItem(item = {}) {
-  const rawHref = item.href || item.path || "";
+  const source = isObject(item) ? item : {};
+  const rawHref = source.href || source.path || "";
   const href = safeInternalHref(rawHref, "");
-  const label = text(item.label || item.title || item.name, href);
-  const icon = normalizeIconName(item.icon || item.viewKey || item.name || ICONS.home);
-  const roles = itemRoles(item);
+  const label = text(source.label || source.title || source.name, href);
+  const icon = normalizeIconName(source.icon || source.viewKey || source.name || ICONS.home);
+  const roles = itemRoles(source);
   const adminOnly = Boolean(
-    item.adminOnly === true ||
-      item.requiresAdmin === true ||
-      item.admin === true ||
+    source.adminOnly === true ||
+      source.requiresAdmin === true ||
+      source.admin === true ||
       (
         roles.includes(ROLE_ADMIN) &&
         !roles.includes(ROLE_USER)
@@ -559,14 +640,14 @@ function normalizeItem(item = {}) {
     label,
     icon,
 
-    active: item.active === true,
-    disabled: item.disabled === true,
-    hidden: item.hidden === true || !href,
+    active: source.active === true,
+    disabled: source.disabled === true,
+    hidden: source.hidden === true || !href,
     adminOnly,
 
-    key: text(item.key || item.sidebarKey || item.viewKey || item.name || href, href),
-    badge: text(item.badge, ""),
-    requiredRole: text(item.requiredRole || item.role, ""),
+    key: text(source.key || source.sidebarKey || source.viewKey || source.name || href, href),
+    badge: text(source.badge, ""),
+    requiredRole: text(source.requiredRole || source.role, ""),
     requiredRoles: roles.join(" "),
   };
 }
@@ -658,7 +739,7 @@ export function createSidebarBrandLogo() {
     attrs: {
       "aria-hidden": "true",
       "data-sidebar-brand-logo": "true",
-      "data-sidebar-brand-logo-mode": "image",
+      "data-sidebar-brand-logo-mode": preferredLogo ? "image" : "fallback",
       "data-sidebar-brand-logo-white": whiteLogo,
       "data-sidebar-brand-logo-black": blackLogo,
     },
@@ -849,7 +930,10 @@ export function createSidebarHeader(options = {}) {
     createSidebarIcon(ICONS.menu, "sidebar-toggle-svg"),
     createSpan(
       "sidebar-toggle-label",
-      open ? "Cerrar barra lateral" : "Abrir barra lateral"
+      open ? "Cerrar barra lateral" : "Abrir barra lateral",
+      {
+        "data-sidebar-toggle-label": "true",
+      }
     ),
   ]);
 
@@ -913,12 +997,12 @@ export function createSidebarNavItem(rawItem = {}) {
       item.disabled ? CLASSES.linkDisabled : ""
     ),
     attrs: cleanAttrs({
-      href: item.href,
+      href: item.disabled ? null : item.href,
 
-      "data-spa": "true",
+      "data-spa": item.disabled ? null : "true",
       "data-sidebar-link": "true",
       "data-sidebar-nav-link": "true",
-      "data-route": item.href,
+      "data-route": item.disabled ? null : item.href,
       "data-sidebar-key": item.key,
       "data-sidebar-active": item.active ? "true" : "false",
       "data-sidebar-disabled": item.disabled ? "true" : "false",
@@ -1324,6 +1408,7 @@ export function setSidebarTemplateOpen(root = null, open = true, options = {}) {
   if (!isElement(root)) return false;
 
   const value = Boolean(open);
+  const label = value ? "Cerrar barra lateral" : "Abrir barra lateral";
 
   try {
     root.classList.toggle(CLASSES.open, value);
@@ -1333,11 +1418,20 @@ export function setSidebarTemplateOpen(root = null, open = true, options = {}) {
     root.dataset.sidebarState = value ? "open" : "collapsed";
 
     const toggle = root.querySelector("[data-sidebar-toggle='true']");
+    const toggleLabel = root.querySelector("[data-sidebar-toggle-label='true']");
 
     if (toggle) {
       toggle.setAttribute("aria-expanded", value ? "true" : "false");
-      toggle.setAttribute("aria-label", value ? "Cerrar barra lateral" : "Abrir barra lateral");
+      toggle.setAttribute("aria-label", label);
       toggle.dataset.state = value ? "open" : "collapsed";
+    }
+
+    if (toggleLabel) {
+      toggleLabel.textContent = label;
+    }
+
+    if (!value) {
+      setDropdownDomState(root, false);
     }
 
     if (isFunction(options.onOpenChange)) {
@@ -1430,7 +1524,9 @@ function attachDocumentDropdownHandlers(root = null) {
   if (!isBrowser() || !isElement(root)) return false;
 
   if (activeDropdownRoot && activeDropdownRoot !== root) {
-    closeSidebarDropdown(activeDropdownRoot, { focus: false });
+    closeSidebarDropdown(activeDropdownRoot, {
+      focus: false,
+    });
   }
 
   if (activeDropdownRoot === root && documentPointerHandler && documentKeyHandler) {
@@ -1444,7 +1540,9 @@ function attachDocumentDropdownHandlers(root = null) {
 
     if (contains(root, target)) return;
 
-    closeSidebarDropdown(root, { focus: false });
+    closeSidebarDropdown(root, {
+      focus: false,
+    });
   };
 
   documentKeyHandler = (event) => {
@@ -1452,7 +1550,9 @@ function attachDocumentDropdownHandlers(root = null) {
 
     event.preventDefault();
 
-    closeSidebarDropdown(root, { focus: true });
+    closeSidebarDropdown(root, {
+      focus: true,
+    });
   };
 
   try {
@@ -1537,7 +1637,11 @@ export function bindSidebarTemplate(root = null, options = {}) {
 
     const dropdownTrigger = target.closest?.(DROPDOWN_TRIGGER_SELECTOR);
 
-    if (dropdownTrigger && contains(root, dropdownTrigger) && !isDisabledElement(dropdownTrigger)) {
+    if (
+      dropdownTrigger &&
+      contains(root, dropdownTrigger) &&
+      !isDisabledElement(dropdownTrigger)
+    ) {
       event.preventDefault();
       event.stopPropagation();
 
@@ -1674,8 +1778,8 @@ export function getSidebarTemplateSnapshot(root = null) {
     icons: Object.keys(ICON_PATHS),
 
     brandLogo: {
-      white: BRAND_LOGOS.white,
-      black: BRAND_LOGOS.black,
+      white: Boolean(BRAND_LOGOS.white),
+      black: Boolean(BRAND_LOGOS.black),
     },
 
     policy: {

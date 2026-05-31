@@ -6,6 +6,7 @@
    - Controlador mínimo de recuperación/restablecimiento de contraseña.
    - Montar el template recibido desde ./template.js.
    - Detectar modo request/reset según ruta y token.
+   - Activar controles mínimos de password ya pintados por template.
    - Leer refs por data attributes.
    - Validar formulario mínimo.
    - Llamar Auth.requestPasswordReset() o Auth.confirmResetPassword().
@@ -22,7 +23,7 @@
 ========================================================= */
 
 import { AppCore } from "../../../core/index.js";
-import { Auth } from "../../../features/auth/index.js";
+import { Auth as DefaultAuth } from "../../../features/auth/index.js";
 
 import {
   ROUTES,
@@ -31,11 +32,10 @@ import {
 
 import createPasswordResetTemplate from "./template.js";
 
-export const PASSWORD_RESET_VIEW_VERSION = "password-reset.view.public.controller.v1";
+export const PASSWORD_RESET_VIEW_VERSION = "password-reset.view.public.controller.v2";
 
 const SOURCE = "password-reset.view";
 
-const LOGIN_ROUTE = ROUTES.login || "/login";
 const PASSWORD_REQUEST_ROUTE = ROUTES.passwordRequest || "/password-request";
 const PASSWORD_RESET_ROUTE = ROUTES.passwordReset || "/password-reset";
 
@@ -54,6 +54,10 @@ let lastInstance = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isFunction(value) {
@@ -76,7 +80,10 @@ function redact(value = "") {
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 function clearNode(node = null) {
@@ -102,6 +109,115 @@ function isDomNode(value = null) {
       typeof Node !== "undefined" &&
       value instanceof Node
   );
+}
+
+function setHidden(node = null, hidden = true) {
+  if (!node) return false;
+
+  const value = Boolean(hidden);
+
+  try {
+    node.hidden = value;
+
+    if (value) {
+      node.setAttribute("hidden", "");
+    } else {
+      node.removeAttribute("hidden");
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function focusSafe(node = null) {
+  if (!node) return false;
+
+  try {
+    node.focus({
+      preventScroll: true,
+    });
+  } catch {
+    try {
+      node.focus?.();
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/* =========================================================
+   AUTH / ROUTER
+========================================================= */
+
+function getAuth(context = {}) {
+  return (
+    context.Auth ||
+    context.auth ||
+    AppCore.auth ||
+    AppCore.Auth ||
+    AppCore.getModule?.("auth") ||
+    DefaultAuth ||
+    null
+  );
+}
+
+function getRouter(context = {}) {
+  return (
+    context.Router ||
+    context.router ||
+    AppCore.router ||
+    AppCore.Router ||
+    AppCore.getModule?.("router") ||
+    null
+  );
+}
+
+function resolvePostLoginTarget(result = {}, auth = null) {
+  return (
+    result?.postLoginTarget ||
+    result?.homePath ||
+    result?.defaultHome ||
+    auth?.getPostLoginTarget?.() ||
+    auth?.getDefaultHome?.() ||
+    "/"
+  );
+}
+
+async function goAfterAuthenticated(result = {}, context = {}) {
+  const auth = getAuth(context);
+
+  if (result?.authenticated !== true && auth?.isAuthenticated?.() !== true) {
+    return false;
+  }
+
+  const router = getRouter(context);
+
+  if (!router) return false;
+
+  const target = resolvePostLoginTarget(result, auth);
+
+  const options = {
+    source: SOURCE,
+    replaceState: true,
+  };
+
+  if (isFunction(router.goAfterLogin)) {
+    return router.goAfterLogin(target, options);
+  }
+
+  if (isFunction(router.replace)) {
+    return router.replace(target, options);
+  }
+
+  if (isFunction(router.navigate)) {
+    return router.navigate(target, options);
+  }
+
+  return false;
 }
 
 /* =========================================================
@@ -142,21 +258,6 @@ function pathnameOnly(value = "") {
   }
 }
 
-function tokenFromPath(value = "") {
-  const raw = cleanText(value, "");
-
-  if (!raw) return "";
-
-  try {
-    const base = isBrowser() ? window.location.origin : "https://onionsupport.local";
-    const url = new URL(raw, base);
-
-    return cleanToken(url.searchParams.get(TOKEN_PARAM) || url.searchParams.get("token") || "");
-  } catch {
-    return "";
-  }
-}
-
 function cleanToken(value = "") {
   const token = cleanText(value, "").replace(/^Bearer\s+/i, "");
 
@@ -179,6 +280,46 @@ function cleanToken(value = "") {
   }
 
   return token;
+}
+
+function tokenFromSearchParams(params = null) {
+  if (!params) return "";
+
+  try {
+    return cleanToken(
+      params.get(TOKEN_PARAM) ||
+        params.get("token") ||
+        params.get("reset_token") ||
+        params.get("resetToken") ||
+        ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function tokenFromPath(value = "") {
+  const raw = cleanText(value, "");
+
+  if (!raw) return "";
+
+  try {
+    const base = isBrowser() ? window.location.origin : "https://onionsupport.local";
+    const url = new URL(raw, base);
+    const fromSearch = tokenFromSearchParams(url.searchParams);
+
+    if (fromSearch) return fromSearch;
+
+    const hash = cleanText(url.hash.replace(/^#/, ""), "");
+
+    if (hash && hash.includes("=")) {
+      return tokenFromSearchParams(new URLSearchParams(hash));
+    }
+
+    return "";
+  } catch {
+    return "";
+  }
 }
 
 function inferMode(context = {}) {
@@ -204,58 +345,6 @@ function inferMode(context = {}) {
 }
 
 /* =========================================================
-   ROUTER
-========================================================= */
-
-function getRouter(context = {}) {
-  return (
-    context.Router ||
-    AppCore.router ||
-    AppCore.Router ||
-    AppCore.getModule?.("router") ||
-    null
-  );
-}
-
-async function goAfterAuthenticated(result = {}, context = {}) {
-  if (result?.authenticated !== true && Auth.isAuthenticated?.() !== true) {
-    return false;
-  }
-
-  const router = getRouter(context);
-
-  if (!router) return false;
-
-  const target =
-    result.postLoginTarget ||
-    result.homePath ||
-    result.defaultHome ||
-    Auth.getPostLoginTarget?.() ||
-    Auth.getDefaultHome?.() ||
-    "/";
-
-  const options = {
-    source: SOURCE,
-    replaceState: true,
-    force: true,
-  };
-
-  if (isFunction(router.goAfterLogin)) {
-    return router.goAfterLogin(target, options);
-  }
-
-  if (isFunction(router.replace)) {
-    return router.replace(target, options);
-  }
-
-  if (isFunction(router.navigate)) {
-    return router.navigate(target, options);
-  }
-
-  return false;
-}
-
-/* =========================================================
    TEMPLATE
 ========================================================= */
 
@@ -269,7 +358,7 @@ function resolveTemplate(context = {}) {
 
   const view = createPasswordResetTemplate({
     AppCore,
-    Auth,
+    Auth: getAuth(context),
     context,
     mode,
     tokenPresent: Boolean(token),
@@ -356,6 +445,10 @@ function getRefs(root = null, mode = MODE_REQUEST) {
       root.querySelector("[data-password-reset-error-for='confirm-password']") ||
       root.querySelector("[data-reset-password-error-for='confirm-password']") ||
       root.querySelector("[data-password-reset-error='confirm-password']"),
+
+    passwordWrappers: [
+      ...root.querySelectorAll("[data-password-wrapper]"),
+    ],
   };
 
   if (!refs.form) {
@@ -379,6 +472,246 @@ function getRefs(root = null, mode = MODE_REQUEST) {
   }
 
   return refs;
+}
+
+/* =========================================================
+   PASSWORD CONTROLS
+========================================================= */
+
+function readCapsLock(event = null) {
+  try {
+    if (!isFunction(event?.getModifierState)) return null;
+    return Boolean(event.getModifierState("CapsLock"));
+  } catch {
+    return null;
+  }
+}
+
+function getPasswordControlRefs(wrapper = null) {
+  if (!wrapper) return null;
+
+  return {
+    wrapper,
+    input:
+      wrapper.querySelector("[data-password-input]") ||
+      wrapper.querySelector("input[type='password']") ||
+      wrapper.querySelector("input[type='text']") ||
+      null,
+    toggle:
+      wrapper.querySelector("[data-password-toggle]") ||
+      wrapper.querySelector("[data-reset-password-toggle]") ||
+      null,
+    caps:
+      wrapper.querySelector("[data-password-caps]") ||
+      null,
+    eye:
+      wrapper.querySelector(".password-eye-icon") ||
+      null,
+    eyeOff:
+      wrapper.querySelector(".password-eye-off-icon") ||
+      null,
+  };
+}
+
+function setPasswordVisible(refs = null, visible = false) {
+  if (!refs?.input) return false;
+
+  const value = Boolean(visible);
+  const type = value ? "text" : "password";
+
+  try {
+    refs.input.type = type;
+  } catch {
+    refs.input.setAttribute("type", type);
+  }
+
+  refs.input.dataset.passwordVisible = value ? "true" : "false";
+
+  if (refs.toggle) {
+    refs.toggle.setAttribute("aria-pressed", value ? "true" : "false");
+    refs.toggle.setAttribute(
+      "aria-label",
+      value ? "Ocultar contraseña" : "Mostrar contraseña"
+    );
+    refs.toggle.dataset.passwordVisible = value ? "true" : "false";
+  }
+
+  if (refs.wrapper) {
+    refs.wrapper.dataset.passwordVisible = value ? "true" : "false";
+  }
+
+  setHidden(refs.eye, value);
+  setHidden(refs.eyeOff, !value);
+
+  return true;
+}
+
+function setCapsVisible(refs = null, visible = false) {
+  if (!refs?.wrapper) return false;
+
+  const value = Boolean(visible);
+
+  if (refs.caps) {
+    refs.caps.hidden = !value;
+
+    if (value) {
+      refs.caps.removeAttribute("hidden");
+    } else {
+      refs.caps.setAttribute("hidden", "");
+    }
+  }
+
+  refs.wrapper.dataset.capsLock = value ? "true" : "false";
+
+  return true;
+}
+
+function initSinglePasswordControl(wrapper = null) {
+  const refs = getPasswordControlRefs(wrapper);
+
+  if (!refs?.input) {
+    return {
+      setDisabled() {
+        return false;
+      },
+      destroy() {
+        return false;
+      },
+      getSnapshot() {
+        return {
+          available: false,
+          visible: false,
+          capsVisible: false,
+        };
+      },
+    };
+  }
+
+  let destroyed = false;
+  let visible = false;
+
+  function toggleVisibility(event = null) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+
+    if (destroyed) return false;
+    if (!refs.input || refs.input.disabled) return false;
+    if (refs.toggle?.disabled) return false;
+
+    visible = !visible;
+
+    setPasswordVisible(refs, visible);
+    focusSafe(refs.input);
+
+    return true;
+  }
+
+  function keepPasswordFocus(event = null) {
+    event?.preventDefault?.();
+  }
+
+  function syncCaps(event = null) {
+    if (destroyed) return false;
+
+    const caps = readCapsLock(event);
+
+    if (caps === null) return false;
+
+    setCapsVisible(refs, caps);
+
+    return true;
+  }
+
+  function hideCaps() {
+    if (destroyed) return false;
+
+    setCapsVisible(refs, false);
+
+    return true;
+  }
+
+  refs.toggle?.addEventListener("mousedown", keepPasswordFocus);
+  refs.toggle?.addEventListener("click", toggleVisibility);
+
+  refs.input.addEventListener("keydown", syncCaps);
+  refs.input.addEventListener("keyup", syncCaps);
+  refs.input.addEventListener("keypress", syncCaps);
+  refs.input.addEventListener("blur", hideCaps);
+
+  setPasswordVisible(refs, false);
+  setCapsVisible(refs, false);
+
+  return {
+    setDisabled(disabled = false) {
+      if (refs.toggle) {
+        refs.toggle.disabled = Boolean(disabled);
+      }
+
+      return true;
+    },
+
+    destroy() {
+      destroyed = true;
+      visible = false;
+
+      try {
+        refs.toggle?.removeEventListener("mousedown", keepPasswordFocus);
+        refs.toggle?.removeEventListener("click", toggleVisibility);
+
+        refs.input?.removeEventListener("keydown", syncCaps);
+        refs.input?.removeEventListener("keyup", syncCaps);
+        refs.input?.removeEventListener("keypress", syncCaps);
+        refs.input?.removeEventListener("blur", hideCaps);
+      } catch {
+        // noop
+      }
+
+      try {
+        setPasswordVisible(refs, false);
+        setCapsVisible(refs, false);
+      } catch {
+        // noop
+      }
+
+      return true;
+    },
+
+    getSnapshot() {
+      return {
+        available: Boolean(refs.input && refs.toggle),
+        visible,
+        capsVisible: refs.caps?.hidden === false,
+      };
+    },
+  };
+}
+
+function initPasswordControls(refs = {}) {
+  const controls = (refs.passwordWrappers || [])
+    .map(initSinglePasswordControl)
+    .filter(Boolean);
+
+  return {
+    setDisabled(disabled = false) {
+      for (const control of controls) {
+        control.setDisabled?.(disabled);
+      }
+
+      return true;
+    },
+
+    destroy() {
+      for (const control of controls) {
+        control.destroy?.();
+      }
+
+      return true;
+    },
+
+    getSnapshot() {
+      return controls.map((control) => control.getSnapshot?.() || null);
+    },
+  };
 }
 
 /* =========================================================
@@ -422,9 +755,10 @@ function setFieldError(refs, name = "", message = "") {
 function setMessage(refs, message = "", type = "info") {
   if (!refs.message) return false;
 
-  const hasMessage = Boolean(cleanText(message, ""));
+  const clean = cleanText(message, "");
+  const hasMessage = Boolean(clean);
 
-  refs.message.textContent = hasMessage ? message : "";
+  refs.message.textContent = hasMessage ? clean : "";
   refs.message.hidden = !hasMessage;
   refs.message.dataset.messageType = cleanText(type, "info");
   refs.message.classList.toggle("is-error", type === "error");
@@ -444,7 +778,7 @@ function clearErrors(refs) {
   return true;
 }
 
-function setLoading(refs, loading = false) {
+function setLoading(refs, loading = false, passwordControls = null) {
   const value = Boolean(loading);
 
   for (const node of [
@@ -455,6 +789,8 @@ function setLoading(refs, loading = false) {
   ].filter(Boolean)) {
     node.disabled = value;
   }
+
+  passwordControls?.setDisabled?.(value);
 
   if (refs.submit) {
     const loadingText = refs.submit.dataset.loadingText || "Procesando...";
@@ -530,26 +866,32 @@ function applyErrors(refs, errors = {}) {
     }
   }
 
-  try {
-    firstInvalid?.focus?.({
-      preventScroll: true,
-    });
-  } catch {
-    firstInvalid?.focus?.();
-  }
+  focusSafe(firstInvalid);
 
   return Object.keys(errors).length > 0;
 }
 
 function authErrorMessage(error = null, fallback = "No se pudo completar la operación.") {
-  const status = Number(error?.status || error?.statusCode || error?.response?.status || 0);
+  const status = Number(
+    error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      0
+  );
+
   const code = cleanText(error?.code || error?.error || "", "").toUpperCase();
 
   if (status === 400 || code.includes("INVALID")) {
     return "Los datos no son válidos.";
   }
 
-  if (status === 401 || code.includes("UNAUTHORIZED") || code.includes("TOKEN")) {
+  if (
+    status === 401 ||
+    code.includes("UNAUTHORIZED") ||
+    code.includes("TOKEN") ||
+    code.includes("EXPIRED") ||
+    code.includes("CADUCADO")
+  ) {
     return "El enlace no es válido o ha caducado.";
   }
 
@@ -585,6 +927,7 @@ function destroyPrevious(container) {
 function storeInstance(container, instance) {
   INSTANCES.set(container, instance);
   lastInstance = instance;
+
   return true;
 }
 
@@ -613,10 +956,12 @@ export function renderPasswordResetView(container, context = {}) {
 
   destroyPrevious(container);
 
+  const auth = getAuth(context);
   const mountedTemplate = mountTemplate(container, context);
   const mode = mountedTemplate.mode;
   const token = mountedTemplate.token;
   const refs = getRefs(mountedTemplate.view, mode);
+  const passwordControls = initPasswordControls(refs);
 
   let mounted = true;
   let submitting = false;
@@ -624,7 +969,7 @@ export function renderPasswordResetView(container, context = {}) {
 
   function setSubmitting(value = false) {
     submitting = Boolean(value);
-    setLoading(refs, submitting);
+    setLoading(refs, submitting, passwordControls);
   }
 
   async function submit(event = null) {
@@ -642,11 +987,27 @@ export function renderPasswordResetView(container, context = {}) {
       return false;
     }
 
+    if (
+      mode === MODE_CONFIRM &&
+      !isFunction(auth?.confirmResetPassword)
+    ) {
+      setMessage(refs, "Auth no permite restablecer contraseña.", "error");
+      return false;
+    }
+
+    if (
+      mode === MODE_REQUEST &&
+      !isFunction(auth?.requestPasswordReset)
+    ) {
+      setMessage(refs, "Auth no permite solicitar recuperación.", "error");
+      return false;
+    }
+
     setSubmitting(true);
 
     try {
       if (mode === MODE_CONFIRM) {
-        const result = await Auth.confirmResetPassword(
+        const result = await auth.confirmResetPassword(
           {
             token: payload.token,
             password: payload.password,
@@ -657,6 +1018,8 @@ export function renderPasswordResetView(container, context = {}) {
           }
         );
 
+        if (!mounted) return false;
+
         completed = true;
 
         setMessage(
@@ -665,12 +1028,15 @@ export function renderPasswordResetView(container, context = {}) {
           "success"
         );
 
-        await goAfterAuthenticated(result || {}, context);
+        await goAfterAuthenticated(result || {}, {
+          ...context,
+          Auth: auth,
+        });
 
         return true;
       }
 
-      await Auth.requestPasswordReset(
+      await auth.requestPasswordReset(
         {
           identifier: payload.identifier,
         },
@@ -678,6 +1044,8 @@ export function renderPasswordResetView(container, context = {}) {
           source: SOURCE,
         }
       );
+
+      if (!mounted) return false;
 
       completed = true;
 
@@ -689,7 +1057,10 @@ export function renderPasswordResetView(container, context = {}) {
 
       return true;
     } catch (error) {
-      setMessage(refs, authErrorMessage(error), "error");
+      if (mounted) {
+        setMessage(refs, authErrorMessage(error), "error");
+      }
+
       return false;
     } finally {
       if (mounted) {
@@ -699,7 +1070,9 @@ export function renderPasswordResetView(container, context = {}) {
   }
 
   function onInput() {
-    clearErrors(refs);
+    if (!submitting) {
+      clearErrors(refs);
+    }
   }
 
   refs.form.addEventListener("submit", submit);
@@ -712,17 +1085,7 @@ export function renderPasswordResetView(container, context = {}) {
     input.addEventListener("input", onInput);
   }
 
-  const primaryInput = mode === MODE_CONFIRM
-    ? refs.password
-    : refs.identifier;
-
-  try {
-    primaryInput?.focus?.({
-      preventScroll: true,
-    });
-  } catch {
-    primaryInput?.focus?.();
-  }
+  focusSafe(mode === MODE_CONFIRM ? refs.password : refs.identifier);
 
   const instance = {
     version: PASSWORD_RESET_VIEW_VERSION,
@@ -757,7 +1120,13 @@ export function renderPasswordResetView(container, context = {}) {
       }
 
       try {
-        setLoading(refs, false);
+        setLoading(refs, false, passwordControls);
+      } catch {
+        // noop
+      }
+
+      try {
+        passwordControls.destroy();
       } catch {
         // noop
       }
@@ -768,6 +1137,8 @@ export function renderPasswordResetView(container, context = {}) {
     },
 
     getSnapshot() {
+      const authenticated = auth?.isAuthenticated?.() === true;
+
       return {
         version: PASSWORD_RESET_VIEW_VERSION,
         mounted,
@@ -775,9 +1146,14 @@ export function renderPasswordResetView(container, context = {}) {
         completed,
         mode,
         tokenPresent: Boolean(token),
-        authenticated: Auth.isAuthenticated?.() === true,
-        target: Auth.isAuthenticated?.() === true
-          ? redact(Auth.getPostLoginTarget?.() || Auth.getDefaultHome?.() || "/")
+        authenticated,
+        passwordControls: passwordControls.getSnapshot(),
+        target: authenticated
+          ? redact(
+              auth?.getPostLoginTarget?.() ||
+                auth?.getDefaultHome?.() ||
+                "/"
+            )
           : null,
       };
     },
@@ -817,10 +1193,12 @@ export function getSnapshot() {
     return lastInstance.getSnapshot();
   }
 
+  const auth = getAuth();
+
   return {
     version: PASSWORD_RESET_VIEW_VERSION,
     mounted: false,
-    authenticated: Auth.isAuthenticated?.() === true,
+    authenticated: auth?.isAuthenticated?.() === true,
   };
 }
 

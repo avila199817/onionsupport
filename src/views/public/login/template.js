@@ -364,15 +364,17 @@ export function getLoginTemplate() {
                 Acceso seguro
               </span>
 
-              <a
-                class="auth-link login-link login-forgot-link"
-                href="${escapeAttr(forgotHref)}"
-                data-spa="true"
-                data-route="${escapeAttr(forgotHref)}"
-                data-login-forgot-password="true"
-              >
-                ¿Has olvidado tu contraseña?
-              </a>
+            <a
+              class="auth-link login-link login-forgot-link"
+              href="${escapeAttr(forgotHref)}"
+              data-spa="true"
+              data-router-link="true"
+              data-route="${escapeAttr(forgotHref)}"
+              data-href="${escapeAttr(forgotHref)}"
+              data-login-forgot-password="true"
+            >
+              ¿Has olvidado tu contraseña?
+            </a>
             </div>
 
             <button

@@ -6,15 +6,22 @@
    - Cargar datos mínimos del Home desde backend real.
    - Usar core/http.js como única capa HTTP.
    - Construir dashboard ligero desde endpoints de listado.
+   - Mantener cache en memoria para no recargar al cambiar de vista.
+   - Dedupe de peticiones concurrentes con in-flight promise.
    - Admin: tickets, facturas, clientes, usuarios.
    - User: tickets y facturas propias según scope backend.
-   - Sin DOM, Router, Store, Storage, fetch propio ni modelos externos.
+   - Sin DOM.
+   - Sin Router.
+   - Sin Store.
+   - Sin Storage.
+   - Sin fetch propio.
+   - Sin modelos externos.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 
-export const HOME_API_VERSION = "home.api.minimal.v1";
+export const HOME_API_VERSION = "home.api.cached.v2";
 
 export const HOME_ENDPOINTS = Object.freeze({
   tickets: "/api/tickets",
@@ -25,10 +32,13 @@ export const HOME_ENDPOINTS = Object.freeze({
 
 export const HOME_TIMEOUT_MS = 15000;
 export const HOME_LIST_LIMIT = 24;
+export const HOME_CACHE_TTL_MS = 60000;
 
 let lastDashboard = null;
 let lastError = null;
 let lastLoadedAt = null;
+let lastCacheKey = "";
+let inFlightPromise = null;
 let loading = false;
 
 /* =========================================================
@@ -68,6 +78,10 @@ function number(value = 0, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function now() {
+  return Date.now();
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -99,6 +113,16 @@ function normalizeRole(value = "") {
 
   return "";
 }
+
+function safeId(value = "") {
+  return cleanText(value, "")
+    .replace(/[\r\n\t]/g, "")
+    .slice(0, 180);
+}
+
+/* =========================================================
+   CORE STATE
+========================================================= */
 
 function getCoreState() {
   try {
@@ -138,8 +162,117 @@ function getCurrentRole() {
   );
 }
 
+function getCurrentUserId() {
+  const user = getCurrentUser() || {};
+
+  return safeId(
+    first(
+      user.userId,
+      user.id,
+      user.username,
+      user.slug,
+      getCoreState().userId,
+      ""
+    )
+  );
+}
+
 function isAdmin() {
   return getCurrentRole() === "admin";
+}
+
+function cacheKey() {
+  return [
+    getCurrentRole(),
+    getCurrentUserId(),
+  ].join(":");
+}
+
+/* =========================================================
+   CACHE
+========================================================= */
+
+function cacheAgeMs() {
+  if (!lastLoadedAt) return Number.POSITIVE_INFINITY;
+
+  const time = Date.parse(lastLoadedAt);
+
+  if (!Number.isFinite(time)) return Number.POSITIVE_INFINITY;
+
+  return Math.max(0, now() - time);
+}
+
+function isCacheFresh(options = {}) {
+  if (!lastDashboard) return false;
+
+  const key = cacheKey();
+
+  if (lastCacheKey && key && lastCacheKey !== key) return false;
+
+  const ttl = number(options.ttlMs ?? options.cacheTtlMs, HOME_CACHE_TTL_MS);
+
+  if (ttl <= 0) return false;
+
+  return cacheAgeMs() <= ttl;
+}
+
+function cloneDashboard(dashboard = null, patch = {}) {
+  if (!isObject(dashboard)) return null;
+
+  return {
+    ...dashboard,
+    ...patch,
+    summary: isObject(dashboard.summary)
+      ? {
+          ...dashboard.summary,
+          ...(isObject(patch.summary) ? patch.summary : {}),
+        }
+      : patch.summary,
+    cache: {
+      hydrated: true,
+      key: lastCacheKey || cacheKey(),
+      ageMs: cacheAgeMs(),
+      ttlMs: HOME_CACHE_TTL_MS,
+      ...(isObject(dashboard.cache) ? dashboard.cache : {}),
+      ...(isObject(patch.cache) ? patch.cache : {}),
+    },
+  };
+}
+
+function setCache(dashboard = null) {
+  if (!isObject(dashboard)) return null;
+
+  lastDashboard = dashboard;
+  lastLoadedAt = dashboard.loadedAt || nowIso();
+  lastCacheKey = cacheKey();
+
+  return lastDashboard;
+}
+
+function getCachedDashboard(options = {}) {
+  if (!lastDashboard) return null;
+
+  const key = cacheKey();
+
+  if (lastCacheKey && key && lastCacheKey !== key) {
+    return null;
+  }
+
+  return cloneDashboard(lastDashboard, {
+    cached: true,
+    stale: options.stale === true ? true : lastDashboard.stale === true,
+  });
+}
+
+export function clearHomeDashboardCache() {
+  lastDashboard = null;
+  lastError = null;
+  lastLoadedAt = null;
+  lastCacheKey = "";
+  inFlightPromise = null;
+  loading = false;
+
+  return true;
 }
 
 /* =========================================================
@@ -160,14 +293,26 @@ function unwrapPayload(response = null) {
     object.documents,
     object.value,
     object.list,
+
     object.data?.items,
     object.data?.rows,
     object.data?.results,
+    object.data?.records,
+    object.data?.docs,
+    object.data?.documents,
+    object.data?.value,
     object.data,
+
     object.payload?.items,
+    object.payload?.rows,
+    object.payload?.results,
     object.payload,
+
     object.result?.items,
+    object.result?.rows,
+    object.result?.results,
     object.result,
+
     []
   );
 }
@@ -229,6 +374,7 @@ function normalizeInvoice(item = {}) {
   const total = number(first(raw.total, raw.amount, raw.importe, raw.totales?.total), 0);
   const paidAmount = number(first(raw.paidAmount, raw.amountPaid, raw.pagado, raw.totales?.pagado), 0);
   const status = cleanText(first(raw.status, raw.estado, raw.paymentStatus, raw.estadoPago), "");
+  const paid = ["paid", "pagada", "pagado", "completed", "complete"].includes(status.toLowerCase());
 
   return {
     id,
@@ -236,12 +382,12 @@ function normalizeInvoice(item = {}) {
     facturaId: id,
 
     title: cleanText(first(raw.title, raw.name, raw.concepto, raw.conceptoPrincipal), id || "Factura"),
-    status,
-    paid: ["paid", "pagada", "pagado", "completed", "complete"].includes(status.toLowerCase()),
+    status: status || (paid ? "paid" : "pending"),
+    paid,
 
     total,
     amount: total,
-    paidAmount,
+    paidAmount: paidAmount || (paid ? total : 0),
     currency: cleanText(first(raw.currency, raw.moneda), "EUR"),
 
     ticketId: cleanText(first(raw.ticketId, raw.incidenciaId, raw.ticketRef?.ticketId), ""),
@@ -310,8 +456,13 @@ async function loadList(endpoint = "", {
 }
 
 /* =========================================================
-   DASHBOARD
+   DASHBOARD BUILDERS
 ========================================================= */
+
+function dateValue(value = "") {
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : 0;
+}
 
 function buildActivity({ tickets = [], facturas = [] } = {}) {
   const ticketItems = tickets.map((ticket) => ({
@@ -329,7 +480,7 @@ function buildActivity({ tickets = [], facturas = [] } = {}) {
   }));
 
   return [...ticketItems, ...invoiceItems]
-    .sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0))
+    .sort((a, b) => dateValue(b.date) - dateValue(a.date))
     .slice(0, 8);
 }
 
@@ -346,6 +497,8 @@ function buildDashboard({
   const paidTotal = facturas.reduce((sum, invoice) => {
     return sum + number(invoice.paid ? first(invoice.paidAmount, invoice.total, invoice.amount) : 0, 0);
   }, 0);
+
+  const loadedAt = nowIso();
 
   const dashboard = {
     role,
@@ -382,14 +535,55 @@ function buildDashboard({
       facturas,
     }),
 
-    updatedAt: nowIso(),
-    loadedAt: nowIso(),
+    cached: false,
+    stale: false,
+
+    updatedAt: loadedAt,
+    loadedAt,
+
+    cache: {
+      hydrated: false,
+      key: cacheKey(),
+      ageMs: 0,
+      ttlMs: HOME_CACHE_TTL_MS,
+    },
   };
 
-  lastDashboard = dashboard;
-  lastLoadedAt = dashboard.loadedAt;
+  setCache(dashboard);
 
-  return dashboard;
+  return cloneDashboard(dashboard, {
+    cached: false,
+    stale: false,
+  });
+}
+
+async function fetchDashboard(options = {}) {
+  const admin = isAdmin();
+
+  const [
+    ticketsRaw,
+    facturasRaw,
+    clientesRaw,
+    usersRaw,
+  ] = await Promise.all([
+    loadList(HOME_ENDPOINTS.tickets, options),
+    loadList(HOME_ENDPOINTS.facturas, options),
+    loadList(HOME_ENDPOINTS.clientes, {
+      ...options,
+      skip: !admin,
+    }),
+    loadList(HOME_ENDPOINTS.users, {
+      ...options,
+      skip: !admin,
+    }),
+  ]);
+
+  return buildDashboard({
+    tickets: ticketsRaw.map(normalizeTicket),
+    facturas: facturasRaw.map(normalizeInvoice),
+    clientes: admin ? clientesRaw.map(normalizeClient) : [],
+    users: admin ? usersRaw.map(normalizeUser) : [],
+  });
 }
 
 /* =========================================================
@@ -397,60 +591,75 @@ function buildDashboard({
 ========================================================= */
 
 export async function loadHomeDashboard(options = {}) {
-  const admin = isAdmin();
+  const force = options.force === true || options.forceRefresh === true;
+  const useCache = options.cache !== false && options.noCache !== true;
+  const returnStaleOnError = options.returnStaleOnError !== false;
+
+  if (!force && useCache && isCacheFresh(options)) {
+    return getCachedDashboard({
+      stale: false,
+    });
+  }
+
+  if (!force && inFlightPromise) {
+    return inFlightPromise;
+  }
 
   loading = true;
   lastError = null;
 
-  try {
-    const [
-      ticketsRaw,
-      facturasRaw,
-      clientesRaw,
-      usersRaw,
-    ] = await Promise.all([
-      loadList(HOME_ENDPOINTS.tickets, options),
-      loadList(HOME_ENDPOINTS.facturas, options),
-      loadList(HOME_ENDPOINTS.clientes, {
-        ...options,
-        skip: !admin,
-      }),
-      loadList(HOME_ENDPOINTS.users, {
-        ...options,
-        skip: !admin,
-      }),
-    ]);
-
-    return buildDashboard({
-      tickets: ticketsRaw.map(normalizeTicket),
-      facturas: facturasRaw.map(normalizeInvoice),
-      clientes: admin ? clientesRaw.map(normalizeClient) : [],
-      users: admin ? usersRaw.map(normalizeUser) : [],
-    });
-  } catch (error) {
-    lastError = {
-      message: redact(error?.message || "No se pudo cargar el Home."),
-      status: error?.status || error?.statusCode || null,
-      code: error?.code || null,
-      at: nowIso(),
-    };
-
-    if (options.returnStaleOnError !== false && lastDashboard) {
-      return {
-        ...lastDashboard,
-        stale: true,
-        error: lastError.message,
+  inFlightPromise = (async () => {
+    try {
+      return await fetchDashboard(options);
+    } catch (error) {
+      lastError = {
+        message: redact(error?.message || "No se pudo cargar el Home."),
+        status: error?.status || error?.statusCode || null,
+        code: error?.code || null,
+        at: nowIso(),
       };
-    }
 
-    throw error;
-  } finally {
-    loading = false;
-  }
+      if (returnStaleOnError && lastDashboard) {
+        return getCachedDashboard({
+          stale: true,
+        }) || {
+          ...lastDashboard,
+          stale: true,
+          error: lastError.message,
+        };
+      }
+
+      throw error;
+    } finally {
+      loading = false;
+      inFlightPromise = null;
+    }
+  })();
+
+  return inFlightPromise;
 }
 
 export function hydrateHomeFromCache() {
-  return lastDashboard || buildDashboard();
+  return getCachedDashboard({
+    stale: false,
+  }) || buildDashboard();
+}
+
+export function hasFreshHomeDashboard(options = {}) {
+  return isCacheFresh(options);
+}
+
+export function getHomeCacheState() {
+  return {
+    hydrated: Boolean(lastDashboard),
+    fresh: isCacheFresh(),
+    key: lastCacheKey,
+    ageMs: cacheAgeMs(),
+    ttlMs: HOME_CACHE_TTL_MS,
+    lastLoadedAt,
+    loading,
+    inFlight: Boolean(inFlightPromise),
+  };
 }
 
 export function getHomeApiSnapshot() {
@@ -458,6 +667,8 @@ export function getHomeApiSnapshot() {
     version: HOME_API_VERSION,
 
     loading,
+    inFlight: Boolean(inFlightPromise),
+
     lastLoadedAt,
     lastError,
 
@@ -467,7 +678,7 @@ export function getHomeApiSnapshot() {
     endpoints: HOME_ENDPOINTS,
 
     cache: {
-      hydrated: Boolean(lastDashboard),
+      ...getHomeCacheState(),
       tickets: lastDashboard?.tickets?.length || 0,
       facturas: lastDashboard?.facturas?.length || 0,
       clientes: lastDashboard?.clientes?.length || 0,
@@ -476,6 +687,11 @@ export function getHomeApiSnapshot() {
 
     policy: {
       singleHttpLayer: true,
+      inMemoryCache: true,
+      ttlCache: true,
+      inFlightDedupe: true,
+      staleOnError: true,
+
       noFetch: true,
       noStore: true,
       noStorage: true,
@@ -485,6 +701,10 @@ export function getHomeApiSnapshot() {
   };
 }
 
+/* =========================================================
+   COMPAT API
+========================================================= */
+
 export const HomeApi = {
   version: HOME_API_VERSION,
 
@@ -493,8 +713,13 @@ export const HomeApi = {
   loadHomeDashboard,
   hydrateHomeFromCache,
 
+  hasFreshHomeDashboard,
+  clearHomeDashboardCache,
+  getHomeCacheState,
+
   getHomeApiSnapshot,
   getSnapshot: getHomeApiSnapshot,
+  getDebugSnapshot: getHomeApiSnapshot,
 };
 
 export default HomeApi;

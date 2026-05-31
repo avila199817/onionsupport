@@ -1587,7 +1587,7 @@ function bind() {
   init();
 
   if (isBrowser()) {
-    disposers.push(onDom(document, "click", onClick));
+    disposers.push(onDom(document, "click", onClick, true));
     disposers.push(onDom(window, "popstate", onPopState));
   }
 

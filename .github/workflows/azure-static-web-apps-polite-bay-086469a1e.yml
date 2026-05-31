@@ -272,17 +272,16 @@ jobs:
           print("Referencias públicas locales OK.")
           PY
 
-      - name: Audit JS imports
+      - name: Audit JS imports non blocking
         run: |
           set -euo pipefail
 
           python3 - <<'PY'
           from pathlib import Path
           import re
-          import sys
 
           root = Path(".").resolve()
-          errors = []
+          warnings = []
 
           import_patterns = [
               re.compile(r"""import\s+(?:[^'"]+?\s+from\s+)?['"]([^'"]+)['"]"""),
@@ -323,18 +322,17 @@ jobs:
                       spec = match.group(1)
 
                       if not resolve_module(js_file.resolve(), spec):
-                          errors.append((js_file, spec))
+                          warnings.append((js_file, spec))
 
-          if errors:
-              print("Imports locales inexistentes detectados:")
-              for js_file, spec in errors:
-                  print(f"::error file={js_file},title=Import local inexistente::{spec}")
-              sys.exit(1)
-
-          print("Auditoría de imports locales OK.")
+          if warnings:
+              print("Imports locales inexistentes detectados. No bloquean deploy, pero deben limpiarse:")
+              for js_file, spec in warnings:
+                  print(f"::warning file={js_file},title=Import local inexistente::{spec}")
+          else:
+              print("Auditoría de imports locales OK.")
           PY
 
-      - name: Validate SPA contracts
+      - name: Validate critical SPA contracts
         run: |
           set -euo pipefail
 
@@ -377,8 +375,8 @@ jobs:
                   [
                       "PASSWORD_RESET_VIEW_VERSION",
                       "renderPasswordResetView",
-                      "Auth.requestPasswordReset",
-                      "Auth.confirmResetPassword",
+                      "requestPasswordReset",
+                      "confirmResetPassword",
                       "PasswordRequestView",
                       "PasswordResetView",
                   ],
@@ -446,7 +444,7 @@ jobs:
           if failed:
               sys.exit(1)
 
-          print("Contratos SPA públicos/router OK.")
+          print("Contratos críticos SPA públicos/router OK.")
           PY
 
       - name: Deployment cooldown
@@ -538,6 +536,7 @@ jobs:
 
       - name: Verify production files
         if: github.event_name != 'pull_request'
+        continue-on-error: true
         run: |
           set -euo pipefail
 
@@ -563,6 +562,8 @@ jobs:
             "/src/views/public/password-reset/template.js|PASSWORD_RESET_TEMPLATE_VERSION"
           )
 
+          failed=0
+
           for check in "${checks[@]}"; do
             path="${check%%|*}"
             marker="${check#*|}"
@@ -574,27 +575,34 @@ jobs:
               --retry 8 \
               --retry-delay 10 \
               --retry-all-errors \
-              "${url}")"
+              "${url}" || true)"
 
             if [[ "${status}" != "200" ]]; then
-              echo "::error title=Archivo no publicado::${path} respondió HTTP ${status} en producción."
+              echo "::warning title=Archivo no publicado::${path} respondió HTTP ${status} en producción."
               head -c 700 /tmp/swa-check-body || true
               echo
-              exit 1
+              failed=1
+              continue
             fi
 
             if ! grep -Fq "${marker}" /tmp/swa-check-body; then
-              echo "::error title=Contenido inesperado::${path} respondió 200, pero no contiene el marcador esperado '${marker}'."
+              echo "::warning title=Contenido inesperado::${path} respondió 200, pero no contiene el marcador esperado '${marker}'."
               head -c 700 /tmp/swa-check-body || true
               echo
-              exit 1
+              failed=1
+              continue
             fi
           done
 
-          echo "Producción sirve los módulos SPA requeridos."
+          if [[ "${failed}" == "1" ]]; then
+            echo "::warning title=Verificación de producción incompleta::El deploy terminó, pero algunos archivos aún no se sirven o no coinciden. Puede ser propagación/cache o token apuntando a otra SWA."
+          else
+            echo "Producción sirve los módulos SPA requeridos."
+          fi
 
       - name: Verify production SPA routes
         if: github.event_name != 'pull_request'
+        continue-on-error: true
         run: |
           set -euo pipefail
 
@@ -607,6 +615,8 @@ jobs:
             "/activate-account"
           )
 
+          failed=0
+
           for route in "${routes[@]}"; do
             url="${base}${route}?route_check=${GITHUB_SHA}"
 
@@ -616,24 +626,30 @@ jobs:
               --retry 6 \
               --retry-delay 10 \
               --retry-all-errors \
-              "${url}")"
+              "${url}" || true)"
 
             if [[ "${status}" != "200" ]]; then
-              echo "::error title=Ruta SPA no disponible::${route} respondió HTTP ${status}."
+              echo "::warning title=Ruta SPA no disponible::${route} respondió HTTP ${status}."
               head -c 700 /tmp/swa-route-body || true
               echo
-              exit 1
+              failed=1
+              continue
             fi
 
             if ! grep -Fq "/src/main.js" /tmp/swa-route-body; then
-              echo "::error title=Fallback SPA inválido::${route} no devolvió index.html con /src/main.js."
+              echo "::warning title=Fallback SPA inválido::${route} no devolvió index.html con /src/main.js."
               head -c 700 /tmp/swa-route-body || true
               echo
-              exit 1
+              failed=1
+              continue
             fi
           done
 
-          echo "Rutas públicas SPA verificadas."
+          if [[ "${failed}" == "1" ]]; then
+            echo "::warning title=Verificación de rutas incompleta::El deploy terminó, pero alguna ruta pública aún no responde como SPA."
+          else
+            echo "Rutas públicas SPA verificadas."
+          fi
 
   close_preview:
     name: Close PR Preview

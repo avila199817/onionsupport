@@ -3,9 +3,10 @@
    Archivo: src/css/auth/login.css
 
    Responsabilidad:
-   - Pantallas auth simples y centradas.
-   - Login premium con card única centrada.
+   - Login público premium con card única centrada.
    - Background SaaS pro con rombos/glow sin imágenes.
+   - Ajuste exacto al viewport: login sin scroll.
+   - Compatible con renderPublicShell.
    - Compatible con shared/password-field.
    - Eye toggle visible.
    - CapsLock visible sólo cuando el DOM lo activa.
@@ -24,52 +25,14 @@
 
 body.auth-screen {
   min-block-size: 100vh;
+  min-block-size: 100svh;
   min-block-size: 100dvh;
+
   background-color: var(--main-bg, #070a12);
   background-image: var(--body-bg, none);
-}
 
-body.auth-screen .sidebar,
-body.auth-screen .topbar,
-body.auth-screen #topbar-mount,
-body.auth-screen [data-topbar-mount],
-body.auth-screen #sidebar-mount,
-body.auth-screen [data-sidebar-mount],
-body.auth-screen #table-head,
-body.auth-screen #tablehead-container,
-body.auth-screen .table-head,
-body.auth-screen [data-tablehead],
-body.auth-screen [data-tablehead-container] {
-  display: none;
-}
-
-body.auth-screen #app-shell {
-  min-block-size: 100vh;
-  min-block-size: 100dvh;
-}
-
-body.auth-screen .main-content {
-  position: fixed;
-  inset: 0;
-  inline-size: 100%;
-  max-inline-size: 100%;
-  min-block-size: 100vh;
-  min-block-size: 100dvh;
-  margin: 0;
-  overflow: auto;
-}
-
-body.auth-screen #app-content,
-body.auth-screen #view-container {
-  min-block-size: 100vh;
-  min-block-size: 100dvh;
-  padding: 0;
-}
-
-body.auth-screen #view-container {
-  position: relative;
-  isolation: isolate;
-  inline-size: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body.auth-screen.login-no-scroll,
@@ -86,22 +49,93 @@ body.auth-screen.auth-no-scroll {
 .login-view {
   position: relative;
   isolation: isolate;
+
   display: grid;
   place-items: center;
+
   inline-size: 100%;
-  min-block-size: 100vh;
-  min-block-size: 100dvh;
-  padding: clamp(18px, 3vw, 34px);
-  overflow: auto;
+  min-inline-size: 0;
+
   color: var(--text, #e8edf7);
-  font-family: var(--font-family, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-family: var(
+    --font-family,
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif
+  );
+
   background:
-    radial-gradient(circle at 11% 14%, color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent), transparent 27%),
-    radial-gradient(circle at 88% 12%, rgb(34 211 238 / .16), transparent 25%),
-    radial-gradient(circle at 82% 84%, color-mix(in srgb, var(--accent, #41c7d7) 13%, transparent), transparent 29%),
-    radial-gradient(circle at 18% 82%, rgb(168 85 247 / .13), transparent 27%),
-    linear-gradient(180deg, rgb(255 255 255 / .045), transparent 44%),
-    var(--body-bg, linear-gradient(135deg, #070a12 0%, #0a1020 50%, #070a12 100%));
+    radial-gradient(
+      circle at 11% 14%,
+      color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent),
+      transparent 27%
+    ),
+    radial-gradient(
+      circle at 88% 12%,
+      rgb(34 211 238 / .16),
+      transparent 25%
+    ),
+    radial-gradient(
+      circle at 82% 84%,
+      color-mix(in srgb, var(--accent, #41c7d7) 13%, transparent),
+      transparent 29%
+    ),
+    radial-gradient(
+      circle at 18% 82%,
+      rgb(168 85 247 / .13),
+      transparent 27%
+    ),
+    linear-gradient(
+      180deg,
+      rgb(255 255 255 / .045),
+      transparent 44%
+    ),
+    var(
+      --body-bg,
+      linear-gradient(135deg, #070a12 0%, #0a1020 50%, #070a12 100%)
+    );
+}
+
+.auth-view {
+  min-block-size: 100vh;
+  min-block-size: 100svh;
+  min-block-size: 100dvh;
+
+  padding: clamp(16px, 3vw, 28px);
+  overflow: auto;
+}
+
+.login-view {
+  --login-edge-block: clamp(10px, 2dvh, 22px);
+  --login-edge-inline: clamp(12px, 3vw, 32px);
+  --login-card-max: 540px;
+  --login-card-radius: 28px;
+  --login-card-padding-block: clamp(22px, 3.3dvh, 32px);
+  --login-card-padding-inline: clamp(22px, 3.1vw, 34px);
+  --login-card-gap: clamp(13px, 1.8dvh, 16px);
+  --login-form-gap: clamp(11px, 1.55dvh, 14px);
+  --login-input-height: clamp(44px, 6.25dvh, 50px);
+  --login-button-height: clamp(46px, 6.4dvh, 52px);
+  --login-logo-shell: clamp(58px, 8.6dvh, 70px);
+  --login-logo-size: calc(var(--login-logo-shell) - 16px);
+  --login-title-size: clamp(31px, 4.9dvh, 40px);
+
+  block-size: 100vh;
+  block-size: 100svh;
+  block-size: 100dvh;
+
+  min-block-size: 0;
+  max-block-size: 100vh;
+  max-block-size: 100svh;
+  max-block-size: 100dvh;
+
+  padding: var(--login-edge-block) var(--login-edge-inline);
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .auth-view,
@@ -118,11 +152,15 @@ body.auth-screen.auth-no-scroll {
 .auth-view::before,
 .login-view::before {
   content: "";
+
   position: absolute;
   inset: 0;
   z-index: 0;
+
   pointer-events: none;
+
   opacity: .9;
+
   background:
     linear-gradient(
       45deg,
@@ -150,51 +188,105 @@ body.auth-screen.auth-no-scroll {
       rgb(255 255 255 / .03) 1px,
       transparent 1px
     );
+
   background-size:
     74px 74px,
     74px 74px,
     48px 48px,
     48px 48px;
+
   background-position:
     0 0,
     37px 37px,
     0 0,
     0 0;
-  mask-image: radial-gradient(circle at 50% 45%, rgb(0 0 0 / .96), rgb(0 0 0 / .78) 45%, transparent 90%);
-  -webkit-mask-image: radial-gradient(circle at 50% 45%, rgb(0 0 0 / .96), rgb(0 0 0 / .78) 45%, transparent 90%);
+
+  mask-image: radial-gradient(
+    circle at 50% 45%,
+    rgb(0 0 0 / .96),
+    rgb(0 0 0 / .78) 45%,
+    transparent 90%
+  );
+  -webkit-mask-image: radial-gradient(
+    circle at 50% 45%,
+    rgb(0 0 0 / .96),
+    rgb(0 0 0 / .78) 45%,
+    transparent 90%
+  );
 }
 
 .auth-view::after,
 .login-view::after {
   content: "";
+
   position: absolute;
   inset: 0;
   z-index: 0;
+
   pointer-events: none;
+
   opacity: .5;
+
   background:
-    radial-gradient(circle at 22% 18%, rgb(255 255 255 / .12) 0 1px, transparent 1.5px),
-    radial-gradient(circle at 78% 28%, color-mix(in srgb, var(--accent, #41c7d7) 42%, transparent) 0 1px, transparent 1.5px),
-    radial-gradient(circle at 48% 76%, rgb(34 211 238 / .22) 0 1px, transparent 1.5px);
+    radial-gradient(
+      circle at 22% 18%,
+      rgb(255 255 255 / .12) 0 1px,
+      transparent 1.5px
+    ),
+    radial-gradient(
+      circle at 78% 28%,
+      color-mix(in srgb, var(--accent, #41c7d7) 42%, transparent) 0 1px,
+      transparent 1.5px
+    ),
+    radial-gradient(
+      circle at 48% 76%,
+      rgb(34 211 238 / .22) 0 1px,
+      transparent 1.5px
+    );
+
   background-size:
     90px 90px,
     112px 112px,
     132px 132px;
+
   background-position:
     0 0,
     12px 24px,
     34px 18px;
-  mask-image: linear-gradient(180deg, transparent, rgb(0 0 0 / .72) 18%, rgb(0 0 0 / .56) 68%, transparent);
-  -webkit-mask-image: linear-gradient(180deg, transparent, rgb(0 0 0 / .72) 18%, rgb(0 0 0 / .56) 68%, transparent);
+
+  mask-image: linear-gradient(
+    180deg,
+    transparent,
+    rgb(0 0 0 / .72) 18%,
+    rgb(0 0 0 / .56) 68%,
+    transparent
+  );
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    transparent,
+    rgb(0 0 0 / .72) 18%,
+    rgb(0 0 0 / .56) 68%,
+    transparent
+  );
 }
 
 .auth-shell,
 .login-shell {
   position: relative;
   z-index: 1;
+
   display: grid;
   place-items: center;
+
   inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.login-view .auth-shell,
+.login-view .login-shell {
+  block-size: 100%;
+  max-block-size: 100%;
+  overflow: hidden;
 }
 
 
@@ -206,15 +298,21 @@ body.auth-screen.auth-no-scroll {
 .login-card {
   position: relative;
   isolation: isolate;
+
   display: grid;
   gap: 22px;
+
   inline-size: min(100%, 460px);
+
   padding: 28px;
   overflow: visible;
+
   border: 1px solid var(--auth-card-border, rgb(255 255 255 / .12));
   border-radius: var(--card-radius-lg, 28px);
+
   background: var(--auth-card-bg, rgb(10 14 24 / .72));
   box-shadow: var(--auth-card-shadow, 0 28px 90px rgb(0 0 0 / .42));
+
   backdrop-filter: var(--blur-xl, blur(24px));
   -webkit-backdrop-filter: var(--blur-xl, blur(24px));
 }
@@ -222,24 +320,40 @@ body.auth-screen.auth-no-scroll {
 .auth-card::before,
 .login-card::before {
   content: "";
+
   position: absolute;
   inset: 0;
   z-index: -1;
+
   pointer-events: none;
+
   border-radius: inherit;
+
   background:
-    radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--text-strong, #ffffff) 8%, transparent), transparent 36%),
-    linear-gradient(180deg, color-mix(in srgb, var(--text-strong, #ffffff) 3%, transparent), transparent 48%);
+    radial-gradient(
+      circle at 50% 0%,
+      color-mix(in srgb, var(--text-strong, #ffffff) 8%, transparent),
+      transparent 36%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong, #ffffff) 3%, transparent),
+      transparent 48%
+    );
 }
 
 .auth-card::after,
 .login-card::after {
   content: "";
+
   position: absolute;
   inset: 1px;
   z-index: 0;
+
   pointer-events: none;
+
   border-radius: calc(var(--card-radius-lg, 28px) - 1px);
+
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--text-strong, #ffffff) 9%, transparent),
     inset 0 -1px 0 color-mix(in srgb, var(--text-strong, #ffffff) 3%, transparent);
@@ -256,22 +370,27 @@ body.auth-screen.auth-no-scroll {
    LOGIN CARD-ONLY OVERRIDE
 ========================================================= */
 
-.login-view .auth-shell,
-.login-view .login-shell {
-  inline-size: 100%;
-  max-inline-size: 640px;
-}
-
 .login-view .auth-card,
 .login-view .login-card {
-  inline-size: min(100%, 620px);
+  display: grid;
+  place-items: center;
+
+  inline-size: min(100%, var(--login-card-max));
+  max-inline-size: var(--login-card-max);
+
+  block-size: auto;
+  max-block-size: 100%;
+
   padding: 0;
   gap: 0;
-  overflow: visible;
+  overflow: hidden;
+
   border: 0;
   border-radius: 0;
+
   background: transparent;
   box-shadow: none;
+
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
@@ -283,17 +402,37 @@ body.auth-screen.auth-no-scroll {
   display: none;
 }
 
+.login-view .auth-body,
+.login-view .public-body,
+.login-view .login-body {
+  display: grid;
+  place-items: center;
+
+  inline-size: 100%;
+  min-inline-size: 0;
+
+  block-size: 100%;
+  max-block-size: 100%;
+
+  overflow: hidden;
+}
+
 .login-view .auth-header,
 .login-view .login-header {
   position: absolute;
+
   inline-size: 1px;
   block-size: 1px;
+
   margin: -1px;
   padding: 0;
   overflow: hidden;
+
   border: 0;
+
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
+
   white-space: nowrap;
 }
 
@@ -307,6 +446,7 @@ body.auth-screen.auth-no-scroll {
   display: grid;
   justify-items: center;
   gap: 10px;
+
   text-align: center;
 }
 
@@ -315,11 +455,16 @@ body.auth-screen.auth-no-scroll {
 .login-logo,
 .login-header img {
   display: block;
+
   inline-size: 52px;
   block-size: 52px;
+
   object-fit: contain;
   object-position: center;
-  filter: drop-shadow(0 10px 24px color-mix(in srgb, var(--shadow-strong, #000000) 32%, transparent));
+
+  filter: drop-shadow(
+    0 10px 24px color-mix(in srgb, var(--shadow-strong, #000000) 32%, transparent)
+  );
 }
 
 .auth-title,
@@ -327,7 +472,9 @@ body.auth-screen.auth-no-scroll {
 .auth-header h1,
 .login-header h1 {
   margin: 0;
+
   color: var(--text-strong, #ffffff);
+
   font-size: clamp(28px, 4vw, 36px);
   font-weight: var(--weight-black, 900);
   line-height: 1.04;
@@ -337,7 +484,9 @@ body.auth-screen.auth-no-scroll {
 .auth-subtitle,
 .login-subtitle {
   margin: 0;
+
   color: var(--text-dim, #a8b3c7);
+
   font-size: var(--font-md, 15px);
   line-height: 1.45;
 }
@@ -350,75 +499,140 @@ body.auth-screen.auth-no-scroll {
 .login-pro {
   position: relative;
   isolation: isolate;
+
   display: grid;
   place-items: center;
+
   inline-size: 100%;
   min-inline-size: 0;
+
+  block-size: 100%;
+  max-block-size: 100%;
+
+  overflow: hidden;
 }
 
 .login-pro::before {
   content: "";
+
   position: absolute;
   inset: -1px;
   z-index: 0;
+
   pointer-events: none;
-  border-radius: 34px;
-  background:
-    linear-gradient(135deg, rgb(255 255 255 / .22), transparent 25%, transparent 72%, color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent)),
-    linear-gradient(45deg, color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent), transparent 38%, rgb(34 211 238 / .16));
+
+  border-radius: var(--login-card-radius);
+
   opacity: .68;
+
+  background:
+    linear-gradient(
+      135deg,
+      rgb(255 255 255 / .22),
+      transparent 25%,
+      transparent 72%,
+      color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent)
+    ),
+    linear-gradient(
+      45deg,
+      color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent),
+      transparent 38%,
+      rgb(34 211 238 / .16)
+    );
 }
 
 .login-orb,
 .login-grid-glow {
   position: absolute;
   z-index: 1;
+
   pointer-events: none;
 }
 
 .login-orb {
   border-radius: 999px;
-  filter: blur(78px);
-  opacity: .58;
+
+  filter: blur(76px);
+  opacity: .55;
+
   transform: translateZ(0);
 }
 
 .login-orb-primary {
   inset-block-start: -86px;
   inset-inline-start: -92px;
-  inline-size: 300px;
-  block-size: 300px;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent, #41c7d7) 54%, transparent), transparent 68%);
+
+  inline-size: 280px;
+  block-size: 280px;
+
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--accent, #41c7d7) 54%, transparent),
+    transparent 68%
+  );
 }
 
 .login-orb-secondary {
   inset-block-end: -98px;
   inset-inline-end: -92px;
-  inline-size: 320px;
-  block-size: 320px;
+
+  inline-size: 300px;
+  block-size: 300px;
+
   background: radial-gradient(circle, rgb(34 211 238 / .34), transparent 70%);
 }
 
 .login-grid-glow {
   inset: -20%;
+
   opacity: .44;
+
   background:
-    radial-gradient(circle at 22% 28%, color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent), transparent 20%),
-    radial-gradient(circle at 76% 70%, rgb(34 211 238 / .14), transparent 22%),
-    linear-gradient(45deg, transparent 48%, rgb(255 255 255 / .07) 50%, transparent 52%),
-    linear-gradient(-45deg, transparent 48%, color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent) 50%, transparent 52%);
+    radial-gradient(
+      circle at 22% 28%,
+      color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent),
+      transparent 20%
+    ),
+    radial-gradient(
+      circle at 76% 70%,
+      rgb(34 211 238 / .14),
+      transparent 22%
+    ),
+    linear-gradient(
+      45deg,
+      transparent 48%,
+      rgb(255 255 255 / .07) 50%,
+      transparent 52%
+    ),
+    linear-gradient(
+      -45deg,
+      transparent 48%,
+      color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent) 50%,
+      transparent 52%
+    );
+
   background-size:
     auto,
     auto,
     180px 180px,
     180px 180px;
+
   background-position:
     0 0,
     0 0,
     24px 16px,
     114px 106px;
-  mask-image: radial-gradient(circle at 50% 42%, rgb(0 0 0 / .86), transparent 74%);
-  -webkit-mask-image: radial-gradient(circle at 50% 42%, rgb(0 0 0 / .86), transparent 74%);
+
+  mask-image: radial-gradient(
+    circle at 50% 42%,
+    rgb(0 0 0 / .86),
+    transparent 74%
+  );
+  -webkit-mask-image: radial-gradient(
+    circle at 50% 42%,
+    rgb(0 0 0 / .86),
+    transparent 74%
+  );
 }
 
 
@@ -429,34 +643,61 @@ body.auth-screen.auth-no-scroll {
 .login-card-panel {
   position: relative;
   z-index: 2;
+  isolation: isolate;
+
   display: grid;
-  gap: 24px;
-  inline-size: min(100%, 560px);
+  gap: var(--login-card-gap);
+
+  inline-size: min(100%, var(--login-card-max));
   min-inline-size: 0;
-  padding: clamp(30px, 4.5vw, 46px);
+
+  max-block-size: calc(100vh - var(--login-edge-block) - var(--login-edge-block));
+  max-block-size: calc(100svh - var(--login-edge-block) - var(--login-edge-block));
+  max-block-size: calc(100dvh - var(--login-edge-block) - var(--login-edge-block));
+
+  padding:
+    var(--login-card-padding-block)
+    var(--login-card-padding-inline);
+
   overflow: hidden;
+
   border: 1px solid rgb(255 255 255 / .15);
-  border-radius: 30px;
+  border-radius: var(--login-card-radius);
+
   background:
-    radial-gradient(circle at 50% 0%, rgb(255 255 255 / .13), transparent 34%),
-    linear-gradient(180deg, rgb(255 255 255 / .105), rgb(255 255 255 / .04)),
+    radial-gradient(
+      circle at 50% 0%,
+      rgb(255 255 255 / .13),
+      transparent 34%
+    ),
+    linear-gradient(
+      180deg,
+      rgb(255 255 255 / .105),
+      rgb(255 255 255 / .04)
+    ),
     color-mix(in srgb, var(--auth-card-bg, #101722) 78%, transparent);
+
   box-shadow:
-    0 34px 105px rgb(0 0 0 / .52),
-    0 18px 48px color-mix(in srgb, var(--accent, #41c7d7) 13%, transparent),
+    0 30px 88px rgb(0 0 0 / .50),
+    0 16px 42px color-mix(in srgb, var(--accent, #41c7d7) 13%, transparent),
     inset 0 1px 0 rgb(255 255 255 / .16),
     inset 0 -1px 0 rgb(255 255 255 / .055);
+
   backdrop-filter: blur(28px) saturate(1.16);
   -webkit-backdrop-filter: blur(28px) saturate(1.16);
 }
 
 .login-card-panel::before {
   content: "";
+
   position: absolute;
   inset-inline: 10%;
   inset-block-start: 0;
+
   block-size: 1px;
+
   pointer-events: none;
+
   background: linear-gradient(
     90deg,
     transparent,
@@ -470,12 +711,24 @@ body.auth-screen.auth-no-scroll {
   position: absolute;
   inset: -1px;
   z-index: 0;
+
   pointer-events: none;
-  background:
-    linear-gradient(120deg, transparent 0%, rgb(255 255 255 / .12) 14%, transparent 30%),
-    radial-gradient(circle at 80% 12%, color-mix(in srgb, var(--accent, #41c7d7) 13%, transparent), transparent 24%);
+
   opacity: .74;
   transform: translateZ(0);
+
+  background:
+    linear-gradient(
+      120deg,
+      transparent 0%,
+      rgb(255 255 255 / .12) 14%,
+      transparent 30%
+    ),
+    radial-gradient(
+      circle at 80% 12%,
+      color-mix(in srgb, var(--accent, #41c7d7) 13%, transparent),
+      transparent 24%
+    );
 }
 
 .login-card-header,
@@ -494,59 +747,89 @@ body.auth-screen.auth-no-scroll {
 .login-card-header {
   display: grid;
   justify-items: center;
-  gap: 10px;
+  gap: clamp(6px, 1.1dvh, 9px);
+
   text-align: center;
 }
 
 .login-card-logo-wrap {
   display: grid;
   justify-items: center;
-  gap: 10px;
-  margin-block-end: 8px;
+  gap: clamp(5px, .8dvh, 7px);
+
+  margin-block-end: clamp(0px, .5dvh, 4px);
 }
 
 .login-card-logo-shell {
   position: relative;
   isolation: isolate;
+
   display: inline-grid;
   place-items: center;
-  inline-size: 86px;
-  block-size: 86px;
+
+  inline-size: var(--login-logo-shell);
+  block-size: var(--login-logo-shell);
+
   overflow: hidden;
+
   border: 1px solid rgb(255 255 255 / .20);
-  border-radius: 28px;
+  border-radius: clamp(19px, 3.4dvh, 24px);
+
   background:
-    radial-gradient(circle at 30% 18%, rgb(255 255 255 / .34), transparent 30%),
-    linear-gradient(135deg, color-mix(in srgb, var(--accent, #41c7d7) 38%, transparent), rgb(255 255 255 / .06));
+    radial-gradient(
+      circle at 30% 18%,
+      rgb(255 255 255 / .34),
+      transparent 30%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent, #41c7d7) 38%, transparent),
+      rgb(255 255 255 / .06)
+    );
+
   box-shadow:
-    0 22px 52px color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent),
+    0 18px 42px color-mix(in srgb, var(--accent, #41c7d7) 20%, transparent),
     inset 0 1px 0 rgb(255 255 255 / .28),
     inset 0 -1px 0 rgb(0 0 0 / .18);
 }
 
 .login-card-logo-shell::before {
   content: "";
+
   position: absolute;
   inset: -34%;
   z-index: -1;
-  background: linear-gradient(45deg, transparent 44%, rgb(255 255 255 / .28) 50%, transparent 56%);
+
+  background: linear-gradient(
+    45deg,
+    transparent 44%,
+    rgb(255 255 255 / .28) 50%,
+    transparent 56%
+  );
+
   transform: translateX(-32%);
 }
 
 .login-card-logo {
   display: block;
-  inline-size: 66px;
-  block-size: 66px;
+
+  inline-size: var(--login-logo-size);
+  block-size: var(--login-logo-size);
+
   object-fit: contain;
   object-position: center;
+
   filter:
-    drop-shadow(0 12px 24px rgb(0 0 0 / .28))
-    drop-shadow(0 0 18px color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent));
+    drop-shadow(0 10px 20px rgb(0 0 0 / .28))
+    drop-shadow(
+      0 0 16px color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent)
+    );
 }
 
 .login-card-logo-name {
   color: var(--text-strong, #ffffff);
-  font-size: 13px;
+
+  font-size: clamp(10px, 1.5dvh, 12px);
   font-weight: var(--weight-black, 900);
   line-height: 1.1;
   letter-spacing: .14em;
@@ -555,8 +838,14 @@ body.auth-screen.auth-no-scroll {
 
 .login-card-kicker {
   margin: 0;
-  color: color-mix(in srgb, var(--accent, #41c7d7) 72%, var(--text-strong, #ffffff));
-  font-size: 11px;
+
+  color: color-mix(
+    in srgb,
+    var(--accent, #41c7d7) 72%,
+    var(--text-strong, #ffffff)
+  );
+
+  font-size: clamp(9px, 1.35dvh, 10px);
   font-weight: var(--weight-black, 900);
   line-height: 1.2;
   letter-spacing: .18em;
@@ -565,21 +854,26 @@ body.auth-screen.auth-no-scroll {
 
 .login-card-title {
   margin: 0;
+
   color: var(--text-strong, #ffffff);
-  font-size: clamp(34px, 5vw, 48px);
+
+  font-size: var(--login-title-size);
   font-weight: var(--weight-black, 900);
   line-height: .96;
   letter-spacing: -.06em;
+
   text-wrap: balance;
 }
 
 .login-card-subtitle {
   max-inline-size: 38ch;
   margin: 0;
+
   color: var(--text-dim, #a8b3c7);
-  font-size: var(--font-md, 15px);
+
+  font-size: clamp(12px, 1.85dvh, 14px);
   font-weight: var(--weight-medium, 500);
-  line-height: 1.55;
+  line-height: 1.42;
 }
 
 
@@ -589,9 +883,12 @@ body.auth-screen.auth-no-scroll {
 
 .login-icon-svg {
   display: block;
-  inline-size: 20px;
-  block-size: 20px;
+
+  inline-size: 19px;
+  block-size: 19px;
+
   color: currentColor;
+
   fill: none;
   stroke: currentColor;
   stroke-width: 1.75;
@@ -615,14 +912,16 @@ body.auth-screen.auth-no-scroll {
 }
 
 .login-card-panel .login-form {
-  gap: 17px;
+  gap: var(--login-form-gap);
 }
 
 .auth-field,
 .login-field {
   position: relative;
+
   display: grid;
   gap: 8px;
+
   min-inline-size: 0;
 }
 
@@ -635,6 +934,7 @@ body.auth-screen.auth-no-scroll {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+
   min-inline-size: 0;
 }
 
@@ -642,7 +942,8 @@ body.auth-screen.auth-no-scroll {
 .login-label,
 .password-label {
   color: var(--text-strong, #ffffff);
-  font-size: var(--font-sm, 13px);
+
+  font-size: clamp(12px, 1.65dvh, 13px);
   font-weight: var(--weight-bold, 700);
   line-height: 1.25;
   letter-spacing: -.01em;
@@ -651,17 +952,32 @@ body.auth-screen.auth-no-scroll {
 .login-input-shell {
   position: relative;
   isolation: isolate;
+
   display: grid;
   align-items: center;
+
   min-inline-size: 0;
-  border: 1px solid color-mix(in srgb, var(--auth-input-border, rgb(255 255 255 / .14)) 86%, transparent);
-  border-radius: var(--input-radius, 18px);
+
+  border: 1px solid color-mix(
+    in srgb,
+    var(--auth-input-border, rgb(255 255 255 / .14)) 86%,
+    transparent
+  );
+
+  border-radius: clamp(14px, 2.2dvh, 17px);
+
   background:
-    linear-gradient(180deg, rgb(255 255 255 / .075), rgb(255 255 255 / .035)),
+    linear-gradient(
+      180deg,
+      rgb(255 255 255 / .075),
+      rgb(255 255 255 / .035)
+    ),
     color-mix(in srgb, var(--auth-input-bg, #0b1220) 78%, transparent);
+
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / .085),
     0 10px 26px rgb(0 0 0 / .12);
+
   transition:
     background var(--duration-normal, .2s) var(--ease-standard, ease),
     border-color var(--duration-normal, .2s) var(--ease-standard, ease),
@@ -671,29 +987,54 @@ body.auth-screen.auth-no-scroll {
 
 .login-input-shell::before {
   content: "";
+
   position: absolute;
   inset: -1px;
   z-index: -1;
+
   pointer-events: none;
+
   border-radius: inherit;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent, #41c7d7) 28%, transparent), transparent 32%, rgb(34 211 238 / .12));
+
   opacity: 0;
+
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent, #41c7d7) 28%, transparent),
+    transparent 32%,
+    rgb(34 211 238 / .12)
+  );
+
   transition: opacity var(--duration-normal, .2s) var(--ease-standard, ease);
 }
 
 .login-input-shell:hover {
-  border-color: color-mix(in srgb, var(--accent, #41c7d7) 34%, var(--auth-input-border, rgb(255 255 255 / .16)));
+  border-color: color-mix(
+    in srgb,
+    var(--accent, #41c7d7) 34%,
+    var(--auth-input-border, rgb(255 255 255 / .16))
+  );
+
   background:
-    linear-gradient(180deg, rgb(255 255 255 / .095), rgb(255 255 255 / .045)),
+    linear-gradient(
+      180deg,
+      rgb(255 255 255 / .095),
+      rgb(255 255 255 / .045)
+    ),
     color-mix(in srgb, var(--input-bg-hover, #111827) 76%, transparent);
 }
 
 .login-input-shell:focus-within {
-  border-color: var(--auth-input-border-focus, color-mix(in srgb, var(--accent, #41c7d7) 78%, #ffffff 8%));
+  border-color: var(
+    --auth-input-border-focus,
+    color-mix(in srgb, var(--accent, #41c7d7) 78%, #ffffff 8%)
+  );
+
   box-shadow:
     0 0 0 4px color-mix(in srgb, var(--accent, #41c7d7) 16%, transparent),
     0 18px 38px color-mix(in srgb, var(--accent, #41c7d7) 12%, transparent),
     inset 0 1px 0 rgb(255 255 255 / .12);
+
   transform: translateY(-1px);
 }
 
@@ -703,6 +1044,7 @@ body.auth-screen.auth-no-scroll {
 
 .login-input-shell:has(.login-input[aria-invalid="true"]) {
   border-color: var(--input-border-error, var(--error, #ef4444));
+
   box-shadow:
     0 0 0 4px color-mix(in srgb, var(--error, #ef4444) 13%, transparent),
     0 16px 34px color-mix(in srgb, var(--error, #ef4444) 10%, transparent),
@@ -711,23 +1053,38 @@ body.auth-screen.auth-no-scroll {
 
 .login-input-icon {
   position: absolute;
-  inset-inline-start: 16px;
+  inset-inline-start: 15px;
   inset-block-start: 50%;
   z-index: 2;
+
   display: inline-grid;
   place-items: center;
-  inline-size: 22px;
-  block-size: 22px;
-  color: color-mix(in srgb, var(--text-dim, #a8b3c7) 88%, var(--accent, #41c7d7));
+
+  inline-size: 21px;
+  block-size: 21px;
+
+  color: color-mix(
+    in srgb,
+    var(--text-dim, #a8b3c7) 88%,
+    var(--accent, #41c7d7)
+  );
+
   pointer-events: none;
+
   transform: translateY(-50%);
+
   transition:
     color var(--duration-normal, .2s) var(--ease-standard, ease),
     transform var(--duration-normal, .2s) var(--ease-standard, ease);
 }
 
 .login-input-shell:focus-within .login-input-icon {
-  color: color-mix(in srgb, var(--accent, #41c7d7) 82%, var(--text-strong, #ffffff));
+  color: color-mix(
+    in srgb,
+    var(--accent, #41c7d7) 82%,
+    var(--text-strong, #ffffff)
+  );
+
   transform: translateY(-50%) scale(1.04);
 }
 
@@ -736,22 +1093,30 @@ body.auth-screen.auth-no-scroll {
 .input-text,
 [data-password-input] {
   display: block;
+
   inline-size: 100%;
   block-size: var(--input-height-lg, 52px);
+
   appearance: none;
   -webkit-appearance: none;
+
   margin: 0;
   padding: 0 16px;
+
   border: 1px solid var(--auth-input-border, rgb(255 255 255 / .14));
   border-radius: var(--input-radius, 18px);
   outline: none;
+
   background: var(--auth-input-bg, rgb(11 18 32 / .74));
   color: var(--input-text, var(--text-strong, #ffffff));
+
   box-shadow: var(--input-shadow, inset 0 1px 0 rgb(255 255 255 / .06));
+
   font: inherit;
   font-size: var(--font-base, 15px);
   font-weight: var(--weight-medium, 500);
   line-height: 1;
+
   transition:
     background var(--duration-normal, .2s) var(--ease-standard, ease),
     border-color var(--duration-normal, .2s) var(--ease-standard, ease),
@@ -762,11 +1127,15 @@ body.auth-screen.auth-no-scroll {
 .login-input-shell .login-input {
   position: relative;
   z-index: 1;
-  block-size: 54px;
-  padding-inline-start: 52px;
-  padding-inline-end: 16px;
+
+  block-size: var(--login-input-height);
+
+  padding-inline-start: 49px;
+  padding-inline-end: 15px;
+
   border: 0;
   border-radius: inherit;
+
   background: transparent;
   box-shadow: none;
 }
@@ -775,7 +1144,11 @@ body.auth-screen.auth-no-scroll {
 .login-input::placeholder,
 .input-text::placeholder,
 [data-password-input]::placeholder {
-  color: var(--input-placeholder, color-mix(in srgb, var(--text-dim, #a8b3c7) 72%, transparent));
+  color: var(
+    --input-placeholder,
+    color-mix(in srgb, var(--text-dim, #a8b3c7) 72%, transparent)
+  );
+
   font-weight: var(--weight-regular, 400);
 }
 
@@ -784,7 +1157,10 @@ body.auth-screen.auth-no-scroll {
 .input-text:hover,
 [data-password-input]:hover {
   background: var(--input-bg-hover, rgb(17 24 39 / .78));
-  border-color: var(--input-border-hover, color-mix(in srgb, var(--accent, #41c7d7) 32%, rgb(255 255 255 / .16)));
+  border-color: var(
+    --input-border-hover,
+    color-mix(in srgb, var(--accent, #41c7d7) 32%, rgb(255 255 255 / .16))
+  );
   box-shadow: var(--input-shadow-hover, 0 12px 28px rgb(0 0 0 / .14));
 }
 
@@ -799,8 +1175,14 @@ body.auth-screen.auth-no-scroll {
 .input-text:focus,
 [data-password-input]:focus {
   background: var(--input-bg-focus, rgb(17 24 39 / .84));
-  border-color: var(--auth-input-border-focus, color-mix(in srgb, var(--accent, #41c7d7) 78%, #ffffff 8%));
-  box-shadow: var(--input-shadow-focus, 0 0 0 4px color-mix(in srgb, var(--accent, #41c7d7) 16%, transparent));
+  border-color: var(
+    --auth-input-border-focus,
+    color-mix(in srgb, var(--accent, #41c7d7) 78%, #ffffff 8%)
+  );
+  box-shadow: var(
+    --input-shadow-focus,
+    0 0 0 4px color-mix(in srgb, var(--accent, #41c7d7) 16%, transparent)
+  );
 }
 
 .login-input-shell .login-input:focus {
@@ -826,6 +1208,7 @@ body.auth-screen.auth-no-scroll {
 [data-password-input][aria-invalid="true"],
 [data-password-input].is-invalid {
   border-color: var(--input-border-error, var(--error, #ef4444));
+
   box-shadow:
     0 0 0 4px color-mix(in srgb, var(--error, #ef4444) 10%, transparent),
     0 10px 24px color-mix(in srgb, var(--error, #ef4444) 8%, transparent);
@@ -846,25 +1229,40 @@ body.auth-screen.auth-no-scroll {
 }
 
 .login-input-shell .login-input:-webkit-autofill {
-  box-shadow: 0 0 0 1000px color-mix(in srgb, var(--auth-input-bg, #0b1220) 86%, transparent) inset;
+  box-shadow:
+    0 0 0 1000px
+    color-mix(in srgb, var(--auth-input-bg, #0b1220) 86%, transparent)
+    inset;
 }
 
 .auth-field-hint,
 .login-field-hint {
   margin: 0;
-  color: var(--text-muted, color-mix(in srgb, var(--text-dim, #a8b3c7) 78%, transparent));
+
+  color: var(
+    --text-muted,
+    color-mix(in srgb, var(--text-dim, #a8b3c7) 78%, transparent)
+  );
+
   font-size: var(--font-xs, 12px);
   font-weight: var(--weight-medium, 500);
-  line-height: 1.4;
+  line-height: 1.35;
+}
+
+.login-card-panel .login-field-hint {
+  font-size: 11px;
+  line-height: 1.25;
 }
 
 .auth-field-error,
 .login-field-error {
   margin: 0;
+
   color: var(--error, #ef4444);
+
   font-size: var(--font-xs, 12px);
   font-weight: var(--weight-semibold, 600);
-  line-height: 1.35;
+  line-height: 1.3;
 }
 
 .auth-field-error[hidden],
@@ -887,22 +1285,35 @@ body.auth-screen.auth-no-scroll {
   flex-wrap: wrap;
 }
 
+.login-form-row {
+  min-block-size: 18px;
+}
+
 .login-form-note {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-muted, color-mix(in srgb, var(--text-dim, #a8b3c7) 78%, transparent));
-  font-size: var(--font-sm, 13px);
+
+  color: var(
+    --text-muted,
+    color-mix(in srgb, var(--text-dim, #a8b3c7) 78%, transparent)
+  );
+
+  font-size: clamp(12px, 1.6dvh, 13px);
   font-weight: var(--weight-semibold, 600);
   line-height: 1.2;
 }
 
 .login-form-note::before {
   content: "";
+
   display: inline-block;
+
   inline-size: 7px;
   block-size: 7px;
+
   border-radius: 999px;
+
   background: color-mix(in srgb, var(--accent, #41c7d7) 72%, #ffffff 8%);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #41c7d7) 12%, transparent);
 }
@@ -918,11 +1329,17 @@ body.auth-screen.auth-no-scroll {
 .login-reset-link,
 .auth-reset a,
 .login-reset a {
-  color: var(--link, color-mix(in srgb, var(--accent, #41c7d7) 78%, var(--text-strong, #ffffff)));
+  color: var(
+    --link,
+    color-mix(in srgb, var(--accent, #41c7d7) 78%, var(--text-strong, #ffffff))
+  );
+
   text-decoration: none;
-  font-size: var(--font-sm, 13px);
+
+  font-size: clamp(12px, 1.6dvh, 13px);
   font-weight: var(--weight-bold, 700);
   line-height: 1.2;
+
   transition:
     color var(--duration-normal, .2s) var(--ease-standard, ease),
     opacity var(--duration-normal, .2s) var(--ease-standard, ease),
@@ -944,8 +1361,13 @@ body.auth-screen.auth-no-scroll {
 .auth-reset a:focus-visible,
 .login-reset a:focus-visible {
   outline: none;
+
   border-radius: var(--radius-sm, 8px);
-  box-shadow: var(--focus-ring, 0 0 0 4px color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent));
+
+  box-shadow: var(
+    --focus-ring,
+    0 0 0 4px color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent)
+  );
 }
 
 .auth-link.is-disabled,
@@ -960,28 +1382,43 @@ body.auth-screen.auth-no-scroll {
 
 .login-security-note {
   margin: 0;
-  color: var(--text-muted, color-mix(in srgb, var(--text-dim, #a8b3c7) 76%, transparent));
-  font-size: var(--font-xs, 12px);
+
+  color: var(
+    --text-muted,
+    color-mix(in srgb, var(--text-dim, #a8b3c7) 76%, transparent)
+  );
+
+  font-size: clamp(10px, 1.45dvh, 11px);
   font-weight: var(--weight-medium, 500);
-  line-height: 1.45;
+  line-height: 1.32;
   text-align: center;
 }
 
 .login-card-footer {
   display: grid;
   justify-items: center;
-  gap: 4px;
-  padding-block-start: 4px;
-  color: var(--text-muted, color-mix(in srgb, var(--text-dim, #a8b3c7) 70%, transparent));
-  font-size: 11px;
+  gap: 3px;
+
+  padding-block-start: clamp(0px, .5dvh, 3px);
+
+  color: var(
+    --text-muted,
+    color-mix(in srgb, var(--text-dim, #a8b3c7) 70%, transparent)
+  );
+
+  font-size: clamp(9px, 1.35dvh, 10px);
   font-weight: var(--weight-semibold, 600);
-  line-height: 1.35;
+  line-height: 1.28;
   letter-spacing: .02em;
   text-align: center;
 }
 
 .login-card-footer span:first-child {
-  color: color-mix(in srgb, var(--text-strong, #ffffff) 76%, var(--text-dim, #a8b3c7));
+  color: color-mix(
+    in srgb,
+    var(--text-strong, #ffffff) 76%,
+    var(--text-dim, #a8b3c7)
+  );
 }
 
 
@@ -992,12 +1429,17 @@ body.auth-screen.auth-no-scroll {
 .auth-check,
 .login-check {
   position: relative;
+
   display: inline-flex;
   align-items: center;
+
   min-block-size: 24px;
+
   color: var(--text-muted, #8b96a8);
+
   cursor: pointer;
   user-select: none;
+
   font-size: var(--font-sm, 13px);
   line-height: 1.2;
 }
@@ -1005,39 +1447,54 @@ body.auth-screen.auth-no-scroll {
 .auth-check input,
 .login-check input {
   position: absolute;
+
   inline-size: 1px;
   block-size: 1px;
+
   margin: 0;
   padding: 0;
+
   opacity: 0;
   overflow: hidden;
+
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
+
   white-space: nowrap;
+
   border: 0;
+
   pointer-events: none;
 }
 
 .auth-check span,
 .login-check span {
   position: relative;
+
   display: inline-flex;
   align-items: center;
   gap: 10px;
+
   color: var(--text-muted, #8b96a8);
+
   transition: color var(--duration-normal, .2s) var(--ease-standard, ease);
 }
 
 .auth-check span::before,
 .login-check span::before {
   content: "";
+
   flex: none;
+
   inline-size: 18px;
   block-size: 18px;
+
   border: 1px solid var(--border-default, rgb(255 255 255 / .14));
   border-radius: 6px;
+
   background: var(--surface-glass, rgb(255 255 255 / .06));
   box-shadow: var(--shadow-inner, inset 0 1px 0 rgb(255 255 255 / .08));
+
   transition:
     background var(--duration-normal, .2s) var(--ease-standard, ease),
     border-color var(--duration-normal, .2s) var(--ease-standard, ease),
@@ -1047,15 +1504,21 @@ body.auth-screen.auth-no-scroll {
 .auth-check span::after,
 .login-check span::after {
   content: "";
+
   position: absolute;
   inset-inline-start: 6px;
   inset-block-start: 3px;
+
   inline-size: 5px;
   block-size: 10px;
+
   border: solid var(--btn-primary-text, #ffffff);
   border-width: 0 2px 2px 0;
+
   opacity: 0;
+
   transform: rotate(45deg) scale(.82);
+
   transition:
     opacity var(--duration-fast, .14s) var(--ease-standard, ease),
     transform var(--duration-fast, .14s) var(--ease-standard, ease);
@@ -1068,8 +1531,16 @@ body.auth-screen.auth-no-scroll {
 
 .auth-check input:checked + span::before,
 .login-check input:checked + span::before {
-  border-color: var(--btn-primary-border, color-mix(in srgb, var(--accent, #41c7d7) 72%, #ffffff 8%));
-  background: var(--btn-primary-bg, linear-gradient(135deg, var(--accent, #41c7d7), #22d3ee));
+  border-color: var(
+    --btn-primary-border,
+    color-mix(in srgb, var(--accent, #41c7d7) 72%, #ffffff 8%)
+  );
+
+  background: var(
+    --btn-primary-bg,
+    linear-gradient(135deg, var(--accent, #41c7d7), #22d3ee)
+  );
+
   box-shadow:
     0 8px 18px color-mix(in srgb, var(--accent, #41c7d7) 18%, transparent),
     0 0 0 4px color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent),
@@ -1085,7 +1556,10 @@ body.auth-screen.auth-no-scroll {
 .auth-check input:focus-visible + span::before,
 .login-check input:focus-visible + span::before {
   box-shadow:
-    var(--focus-ring, 0 0 0 4px color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent)),
+    var(
+      --focus-ring,
+      0 0 0 4px color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent)
+    ),
     0 0 0 5px color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent);
 }
 
@@ -1106,31 +1580,57 @@ body.auth-screen.auth-no-scroll {
 .login-submit {
   position: relative;
   isolation: isolate;
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 10px;
+
   inline-size: 100%;
   block-size: var(--btn-height-lg, 54px);
-  gap: 10px;
+
   padding: 0 18px;
   overflow: hidden;
-  border: 1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #41c7d7) 66%, rgb(255 255 255 / .18)));
+
+  border: 1px solid var(
+    --btn-primary-border,
+    color-mix(in srgb, var(--accent, #41c7d7) 66%, rgb(255 255 255 / .18))
+  );
+
   border-radius: var(--btn-radius, 18px);
   outline: none;
+
   background:
-    radial-gradient(circle at 30% 0%, rgb(255 255 255 / .32), transparent 34%),
-    linear-gradient(135deg, color-mix(in srgb, var(--accent, #41c7d7) 96%, #ffffff 4%), rgb(34 211 238 / .88));
+    radial-gradient(
+      circle at 30% 0%,
+      rgb(255 255 255 / .32),
+      transparent 34%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent, #41c7d7) 96%, #ffffff 4%),
+      rgb(34 211 238 / .88)
+    );
+
   color: var(--btn-primary-text, #ffffff);
+
   box-shadow:
-    var(--btn-primary-shadow, 0 18px 42px color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent)),
+    var(
+      --btn-primary-shadow,
+      0 18px 42px color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent)
+    ),
     inset 0 1px 0 rgb(255 255 255 / .22),
     inset 0 -1px 0 rgb(0 0 0 / .16);
+
   cursor: pointer;
+
   font: inherit;
   font-size: var(--font-base, 15px);
   font-weight: var(--weight-black, 900);
   letter-spacing: -.01em;
+
   text-shadow: 0 1px 1px rgb(0 0 0 / .16);
+
   transition:
     transform .18s var(--ease-standard, ease),
     filter var(--duration-normal, .2s) var(--ease-standard, ease),
@@ -1138,20 +1638,39 @@ body.auth-screen.auth-no-scroll {
     opacity var(--duration-normal, .2s) var(--ease-standard, ease);
 }
 
+.login-card-panel .login-submit {
+  block-size: var(--login-button-height);
+  border-radius: clamp(14px, 2.3dvh, 17px);
+}
+
 .auth-button::before,
 .login-button::before,
 .auth-submit::before,
 .login-submit::before {
   content: "";
+
   position: absolute;
   inset: 0;
   z-index: 0;
+
   pointer-events: none;
-  background:
-    linear-gradient(120deg, transparent 0%, rgb(255 255 255 / .22) 18%, transparent 34%),
-    linear-gradient(180deg, rgb(255 255 255 / .14), transparent 42%);
+
   opacity: .84;
   transform: translateX(-18%);
+
+  background:
+    linear-gradient(
+      120deg,
+      transparent 0%,
+      rgb(255 255 255 / .22) 18%,
+      transparent 34%
+    ),
+    linear-gradient(
+      180deg,
+      rgb(255 255 255 / .14),
+      transparent 42%
+    );
+
   transition:
     opacity var(--duration-normal, .2s) var(--ease-standard, ease),
     transform var(--duration-slow, .35s) var(--ease-standard, ease);
@@ -1163,8 +1682,12 @@ body.auth-screen.auth-no-scroll {
 .login-submit:hover {
   transform: translateY(-1px);
   filter: brightness(1.04) saturate(1.08);
+
   box-shadow:
-    var(--btn-primary-shadow, 0 18px 42px color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent)),
+    var(
+      --btn-primary-shadow,
+      0 18px 42px color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent)
+    ),
     0 18px 48px color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent),
     0 0 0 5px color-mix(in srgb, var(--accent, #41c7d7) 11%, transparent),
     inset 0 1px 0 rgb(255 255 255 / .25);
@@ -1189,9 +1712,16 @@ body.auth-screen.auth-no-scroll {
 .auth-submit:focus-visible,
 .login-submit:focus-visible {
   outline: none;
+
   box-shadow:
-    var(--btn-primary-shadow, 0 18px 42px color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent)),
-    var(--focus-ring-strong, 0 0 0 5px color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent));
+    var(
+      --btn-primary-shadow,
+      0 18px 42px color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent)
+    ),
+    var(
+      --focus-ring-strong,
+      0 0 0 5px color-mix(in srgb, var(--accent, #41c7d7) 24%, transparent)
+    );
 }
 
 .auth-button:disabled,
@@ -1207,21 +1737,29 @@ body.auth-screen.auth-no-scroll {
 .auth-submit[aria-busy="true"],
 .login-submit[aria-busy="true"],
 .auth-button[aria-busy="true"],
-.login-button[aria-busy="true"] {
+.login-button[aria-busy="true"],
+.auth-submit[data-loading="true"],
+.login-submit[data-loading="true"] {
   cursor: progress;
 }
 
 .auth-submit[aria-busy="true"]::after,
 .login-submit[aria-busy="true"]::after,
 .auth-button[aria-busy="true"]::after,
-.login-button[aria-busy="true"]::after {
+.login-button[aria-busy="true"]::after,
+.auth-submit[data-loading="true"]::after,
+.login-submit[data-loading="true"]::after {
   content: "";
+
   flex: none;
+
   inline-size: 16px;
   block-size: 16px;
+
   border: 2px solid rgb(255 255 255 / .42);
   border-block-start-color: currentColor;
   border-radius: 50%;
+
   animation: authButtonSpin .76s linear infinite;
 }
 
@@ -1236,20 +1774,34 @@ body.auth-screen.auth-no-scroll {
 .login-error,
 .login-global-error {
   display: none;
+
   margin: 0;
-  padding: 13px 14px;
-  border: 1px solid var(--border-error, color-mix(in srgb, var(--error, #ef4444) 38%, rgb(255 255 255 / .12)));
+  padding: 12px 13px;
+
+  border: 1px solid var(
+    --border-error,
+    color-mix(in srgb, var(--error, #ef4444) 38%, rgb(255 255 255 / .12))
+  );
+
   border-radius: var(--radius-lg, 16px);
+
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--error, #ef4444) 12%, transparent), rgb(255 255 255 / .035)),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--error, #ef4444) 12%, transparent),
+      rgb(255 255 255 / .035)
+    ),
     var(--error-bg, color-mix(in srgb, var(--error, #ef4444) 10%, transparent));
+
   color: var(--error, #ef4444);
+
   box-shadow:
     var(--shadow-inner, inset 0 1px 0 rgb(255 255 255 / .08)),
     0 10px 26px color-mix(in srgb, var(--error, #ef4444) 9%, transparent);
+
   font-size: var(--font-sm, 13px);
   font-weight: var(--weight-semibold, 600);
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
 .auth-message:not([hidden]):not(:empty),
@@ -1274,8 +1826,16 @@ body.auth-screen.auth-no-scroll {
 
 .auth-message.is-success,
 .login-message.is-success {
-  border-color: var(--accent-border, color-mix(in srgb, var(--accent, #41c7d7) 34%, rgb(255 255 255 / .12)));
-  background: var(--accent-ghost, color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent));
+  border-color: var(
+    --accent-border,
+    color-mix(in srgb, var(--accent, #41c7d7) 34%, rgb(255 255 255 / .12))
+  );
+
+  background: var(
+    --accent-ghost,
+    color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent)
+  );
+
   color: var(--text-strong, #ffffff);
 }
 
@@ -1289,9 +1849,12 @@ body.auth-screen.auth-no-scroll {
 .password-reset-password-wrapper,
 [data-password-wrapper] {
   position: relative;
+
   display: block;
+
   inline-size: 100%;
   min-inline-size: 0;
+
   overflow: visible;
 }
 
@@ -1314,20 +1877,29 @@ body.auth-screen.auth-no-scroll {
   inset-block-start: 50%;
   inset-inline-end: 8px;
   z-index: 3;
+
   display: inline-grid;
   place-items: center;
+
   inline-size: 40px;
   block-size: 40px;
+
   margin: 0;
   padding: 0;
+
   border: 1px solid transparent;
   border-radius: var(--radius-md, 12px);
   outline: none;
+
   background: transparent;
   color: var(--text-dim, #a8b3c7);
+
   line-height: 0;
+
   cursor: pointer;
+
   transform: translateY(-50%);
+
   transition:
     background var(--duration-normal, .2s) var(--ease-standard, ease),
     border-color var(--duration-normal, .2s) var(--ease-standard, ease),
@@ -1340,8 +1912,14 @@ body.auth-screen.auth-no-scroll {
 .password-reset-password-toggle:hover,
 [data-password-toggle]:hover {
   color: var(--text-strong, #ffffff);
-  border-color: var(--accent-border, color-mix(in srgb, var(--accent, #41c7d7) 30%, rgb(255 255 255 / .12)));
-  background: var(--accent-ghost, color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent));
+  border-color: var(
+    --accent-border,
+    color-mix(in srgb, var(--accent, #41c7d7) 30%, rgb(255 255 255 / .12))
+  );
+  background: var(
+    --accent-ghost,
+    color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent)
+  );
 }
 
 .password-toggle:focus-visible,
@@ -1349,7 +1927,10 @@ body.auth-screen.auth-no-scroll {
 .password-reset-password-toggle:focus-visible,
 [data-password-toggle]:focus-visible {
   outline: none;
-  box-shadow: var(--focus-ring, 0 0 0 4px color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent));
+  box-shadow: var(
+    --focus-ring,
+    0 0 0 4px color-mix(in srgb, var(--accent, #41c7d7) 22%, transparent)
+  );
 }
 
 .password-toggle[aria-pressed="true"],
@@ -1361,8 +1942,14 @@ body.auth-screen.auth-no-scroll {
 [data-password-toggle][aria-pressed="true"],
 [data-password-toggle].is-password-visible {
   color: var(--text-strong, #ffffff);
-  border-color: var(--accent-border, color-mix(in srgb, var(--accent, #41c7d7) 30%, rgb(255 255 255 / .12)));
-  background: var(--accent-ghost, color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent));
+  border-color: var(
+    --accent-border,
+    color-mix(in srgb, var(--accent, #41c7d7) 30%, rgb(255 255 255 / .12))
+  );
+  background: var(
+    --accent-ghost,
+    color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent)
+  );
 }
 
 .password-toggle:disabled,
@@ -1377,9 +1964,12 @@ body.auth-screen.auth-no-scroll {
 [data-password-toggle-icon] {
   display: inline-grid;
   place-items: center;
+
   inline-size: 20px;
   block-size: 20px;
+
   color: currentColor;
+
   pointer-events: none;
 }
 
@@ -1388,8 +1978,10 @@ body.auth-screen.auth-no-scroll {
 .password-eye-icon,
 .password-eye-off-icon {
   display: block;
+
   inline-size: 20px;
   block-size: 20px;
+
   color: currentColor;
   stroke: currentColor;
 }
@@ -1417,22 +2009,39 @@ body.auth-screen.auth-no-scroll {
   inset-block-start: 50%;
   inset-inline-end: 56px;
   z-index: 2;
+
   display: inline-flex;
   align-items: center;
   gap: 6px;
+
   min-block-size: 30px;
   max-inline-size: calc(100% - 112px);
+
   padding: 0 10px;
   overflow: hidden;
-  border: 1px solid var(--accent-border, color-mix(in srgb, var(--accent, #41c7d7) 30%, rgb(255 255 255 / .12)));
+
+  border: 1px solid var(
+    --accent-border,
+    color-mix(in srgb, var(--accent, #41c7d7) 30%, rgb(255 255 255 / .12))
+  );
+
   border-radius: var(--radius-md, 12px);
-  background: var(--accent-ghost, color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent));
+
+  background: var(
+    --accent-ghost,
+    color-mix(in srgb, var(--accent, #41c7d7) 10%, transparent)
+  );
+
   color: var(--text-strong, #ffffff);
+
   font-size: var(--font-sm, 13px);
   font-weight: var(--weight-semibold, 600);
   line-height: 1;
+
   white-space: nowrap;
+
   pointer-events: none;
+
   transform: translateY(-50%);
 }
 
@@ -1446,16 +2055,20 @@ body.auth-screen.auth-no-scroll {
   display: inline-grid;
   place-items: center;
   flex: none;
+
   inline-size: 16px;
   block-size: 16px;
+
   color: currentColor;
 }
 
 .caps-icon svg,
 [data-password-caps-icon-wrapper] svg {
   display: block;
+
   inline-size: 16px;
   block-size: 16px;
+
   color: currentColor;
   stroke: currentColor;
 }
@@ -1463,9 +2076,12 @@ body.auth-screen.auth-no-scroll {
 .caps-label,
 [data-password-caps-label] {
   display: inline-block;
+
   min-inline-size: 0;
   overflow: hidden;
+
   color: currentColor;
+
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1479,21 +2095,26 @@ body.auth-screen.auth-no-scroll {
   display: grid;
   justify-items: center;
   gap: 14px;
+
   text-align: center;
 }
 
 .auth-status-title {
   margin: 0;
+
   color: var(--text-strong, #ffffff);
+
   font-size: var(--font-2xl, 24px);
   font-weight: var(--weight-black, 900);
   line-height: 1.15;
 }
 
 .auth-status-text {
-  margin: 0;
   max-inline-size: 44ch;
+  margin: 0;
+
   color: var(--text-dim, #a8b3c7);
+
   font-size: var(--font-md, 15px);
   line-height: var(--line-normal, 1.5);
 }
@@ -1504,7 +2125,9 @@ body.auth-screen.auth-no-scroll {
   align-items: center;
   justify-content: center;
   gap: 10px;
+
   color: var(--text-dim, #a8b3c7);
+
   font-size: var(--font-xs, 12px);
   text-align: center;
 }
@@ -1609,12 +2232,24 @@ body.auth-screen.auth-no-scroll {
 
 
 /* =========================================================
-   RESPONSIVE
+   RESPONSIVE · WIDTH
 ========================================================= */
 
 @media (max-width: 760px) {
-  .auth-view,
   .login-view {
+    --login-edge-block: clamp(8px, 1.5dvh, 14px);
+    --login-edge-inline: 12px;
+    --login-card-max: 100%;
+    --login-card-radius: 24px;
+    --login-card-padding-block: clamp(19px, 3dvh, 25px);
+    --login-card-padding-inline: clamp(16px, 4vw, 22px);
+    --login-card-gap: clamp(11px, 1.65dvh, 14px);
+    --login-form-gap: clamp(10px, 1.5dvh, 13px);
+    --login-logo-shell: clamp(54px, 8dvh, 64px);
+    --login-title-size: clamp(28px, 8vw, 36px);
+  }
+
+  .auth-view {
     min-block-size: 100svh;
     padding: 14px;
   }
@@ -1623,8 +2258,10 @@ body.auth-screen.auth-no-scroll {
   .login-card {
     inline-size: 100%;
     max-inline-size: 460px;
+
     padding: 22px 16px;
     gap: 18px;
+
     border-radius: var(--radius-2xl, 24px);
   }
 
@@ -1637,23 +2274,7 @@ body.auth-screen.auth-no-scroll {
 
   .login-card-panel {
     inline-size: 100%;
-    padding: 28px 20px;
-    border-radius: 24px;
-  }
-
-  .login-card-logo-shell {
-    inline-size: 78px;
-    block-size: 78px;
-    border-radius: 25px;
-  }
-
-  .login-card-logo {
-    inline-size: 60px;
-    block-size: 60px;
-  }
-
-  .login-card-title {
-    font-size: clamp(30px, 9vw, 40px);
+    border-radius: var(--login-card-radius);
   }
 
   .login-card-subtitle {
@@ -1694,7 +2315,7 @@ body.auth-screen.auth-no-scroll {
   }
 
   .login-input-shell .login-input {
-    block-size: 52px;
+    block-size: var(--login-input-height);
   }
 
   .password-wrapper .input-text,
@@ -1747,8 +2368,21 @@ body.auth-screen.auth-no-scroll {
 }
 
 @media (max-width: 520px) {
-  .auth-view,
   .login-view {
+    --login-edge-block: 8px;
+    --login-edge-inline: 10px;
+    --login-card-radius: 22px;
+    --login-card-padding-block: 20px;
+    --login-card-padding-inline: 14px;
+    --login-card-gap: 13px;
+    --login-form-gap: 11px;
+    --login-input-height: 48px;
+    --login-button-height: 49px;
+    --login-logo-shell: 58px;
+    --login-title-size: 29px;
+  }
+
+  .auth-view {
     padding: 10px;
   }
 
@@ -1759,6 +2393,7 @@ body.auth-screen.auth-no-scroll {
       56px 56px,
       42px 42px,
       42px 42px;
+
     background-position:
       0 0,
       28px 28px,
@@ -1776,39 +2411,18 @@ body.auth-screen.auth-no-scroll {
     padding: 0;
   }
 
-  .login-card-panel {
-    gap: 20px;
-    padding: 24px 14px;
-    border-radius: 22px;
-  }
-
   .login-card-logo-wrap {
-    margin-block-end: 4px;
-  }
-
-  .login-card-logo-shell {
-    inline-size: 72px;
-    block-size: 72px;
-    border-radius: 22px;
-  }
-
-  .login-card-logo {
-    inline-size: 56px;
-    block-size: 56px;
+    margin-block-end: 2px;
   }
 
   .login-card-logo-name {
-    font-size: 12px;
-  }
-
-  .login-card-title {
-    font-size: 30px;
+    font-size: 11px;
   }
 
   .login-form-row {
     align-items: flex-start;
     flex-direction: column;
-    gap: 10px;
+    gap: 9px;
   }
 
   .auth-title,
@@ -1826,7 +2440,7 @@ body.auth-screen.auth-no-scroll {
   }
 
   .login-input-shell .login-input {
-    padding-inline-start: 48px;
+    padding-inline-start: 47px;
     padding-inline-end: 14px;
   }
 
@@ -1849,57 +2463,106 @@ body.auth-screen.auth-no-scroll {
   [data-password-caps] {
     max-inline-size: calc(100% - 98px);
   }
+
+  .login-card-footer span:last-child {
+    display: none;
+  }
 }
 
-@media (max-height: 720px) and (min-width: 761px) {
-  .auth-view,
+
+/* =========================================================
+   RESPONSIVE · HEIGHT / NO SCROLL FIT
+========================================================= */
+
+@media (max-height: 780px) and (min-width: 761px) {
   .login-view {
-    padding-block: 16px;
+    --login-edge-block: clamp(8px, 1.6dvh, 16px);
+    --login-card-padding-block: clamp(20px, 2.85dvh, 28px);
+    --login-card-padding-inline: clamp(26px, 3vw, 32px);
+    --login-card-gap: clamp(12px, 1.55dvh, 15px);
+    --login-form-gap: clamp(10px, 1.35dvh, 12px);
+    --login-input-height: clamp(43px, 6dvh, 48px);
+    --login-button-height: clamp(45px, 6.15dvh, 50px);
+    --login-logo-shell: clamp(56px, 8dvh, 66px);
+    --login-title-size: clamp(30px, 4.7dvh, 37px);
   }
 
-  .auth-card,
-  .login-card {
-    padding: 22px;
-    gap: 16px;
+  .login-card-subtitle {
+    line-height: 1.34;
   }
 
-  .login-view .auth-card,
-  .login-view .login-card {
-    padding: 0;
+  .login-security-note {
+    line-height: 1.25;
+  }
+
+  .login-card-footer {
+    gap: 2px;
+    line-height: 1.22;
+  }
+}
+
+@media (max-height: 700px) and (min-width: 761px) {
+  .login-view {
+    --login-edge-block: 8px;
+    --login-card-padding-block: 20px;
+    --login-card-padding-inline: 30px;
+    --login-card-gap: 12px;
+    --login-form-gap: 10px;
+    --login-input-height: 44px;
+    --login-button-height: 46px;
+    --login-logo-shell: 56px;
+    --login-title-size: 31px;
+  }
+
+  .login-card-logo-name {
+    font-size: 10px;
+  }
+
+  .login-card-kicker {
+    font-size: 9px;
+  }
+
+  .login-card-subtitle {
+    font-size: 12px;
+  }
+
+  .login-security-note {
+    font-size: 10px;
+  }
+
+  .login-card-footer {
+    font-size: 9px;
+  }
+}
+
+@media (max-height: 620px) and (min-width: 761px) {
+  .login-view {
+    --login-card-padding-block: 16px;
+    --login-card-gap: 10px;
+    --login-form-gap: 9px;
+    --login-input-height: 42px;
+    --login-button-height: 44px;
+    --login-logo-shell: 48px;
+    --login-title-size: 28px;
+  }
+
+  .login-card-subtitle,
+  .login-security-note {
+    display: none;
+  }
+
+  .login-card-footer span:last-child {
+    display: none;
+  }
+}
+
+@media (max-height: 560px) and (min-width: 761px) {
+  .login-card-logo-wrap {
+    display: none;
   }
 
   .login-card-panel {
-    gap: 18px;
-    padding-block: 30px;
-  }
-
-  .login-card-logo-shell {
-    inline-size: 72px;
-    block-size: 72px;
-  }
-
-  .login-card-logo {
-    inline-size: 56px;
-    block-size: 56px;
-  }
-
-  .login-card-title {
-    font-size: 36px;
-  }
-
-  .auth-input,
-  .login-input,
-  .input-text,
-  [data-password-input],
-  .auth-button,
-  .login-button,
-  .auth-submit,
-  .login-submit {
-    block-size: 48px;
-  }
-
-  .login-input-shell .login-input {
-    block-size: 50px;
+    inline-size: min(100%, 500px);
   }
 }
 
@@ -1926,6 +2589,8 @@ body.auth-screen.auth-no-scroll {
   .login-submit[aria-busy="true"]::after,
   .auth-button[aria-busy="true"]::after,
   .login-button[aria-busy="true"]::after,
+  .auth-submit[data-loading="true"]::after,
+  .login-submit[data-loading="true"]::after,
   .auth-card.shake,
   .login-card.shake,
   .login-card-panel.shake,
@@ -1988,13 +2653,18 @@ body.auth-screen.auth-no-scroll {
   .login-pro,
   .login-card-panel {
     display: block;
+
     inline-size: 100%;
     max-inline-size: none;
     min-block-size: 0;
+
     margin: 0;
     padding: 0;
+
     overflow: visible;
+
     border: 0;
+
     background: transparent;
     box-shadow: none;
   }

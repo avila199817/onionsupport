@@ -31,8 +31,10 @@ env:
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
   PRODUCTION_BRANCH: "main"
+  PUBLIC_SITE_URL: "https://www.onionsupport.com"
   DEPLOY_COOLDOWN_SECONDS: "45"
   DEPLOY_RETRY_SECONDS: "75"
+  PRODUCTION_VERIFY_DELAY_SECONDS: "25"
 
 defaults:
   run:
@@ -87,11 +89,38 @@ jobs:
             "site.webmanifest"
             "robots.txt"
             "favicon.ico"
+
             "src/main.js"
+
             "src/app/index.js"
+            "src/app/loader.js"
+
+            "src/core/config.js"
+            "src/core/http.js"
+            "src/core/index.js"
+
+            "src/features/auth/index.js"
+
+            "src/router/index.js"
+            "src/router/routes.js"
+
             "src/preboot/theme.js"
+
             "src/css/app.css"
             "src/css/core/noscript.css"
+
+            "src/views/public/index.js"
+
+            "src/views/public/login/index.js"
+            "src/views/public/login/template.js"
+
+            "src/views/public/password-reset/index.js"
+            "src/views/public/password-reset/template.js"
+
+            "src/ui/toast/index.js"
+            "src/ui/sidebar/index.js"
+            "src/ui/sidebar/template.js"
+            "src/ui/topbar/index.js"
           )
 
           for file in "${required_files[@]}"; do
@@ -158,6 +187,12 @@ jobs:
             echo "::error title=Referencia obsoleta::No debe quedar BingSiteAuth.xml en index.html, site.webmanifest ni robots.txt."
             exit 1
           fi
+
+          echo "Contrato mínimo de archivos OK."
+
+      - name: Validate local public references
+        run: |
+          set -euo pipefail
 
           python3 - <<'PY'
           from pathlib import Path
@@ -237,18 +272,17 @@ jobs:
           print("Referencias públicas locales OK.")
           PY
 
-          echo "Contrato mínimo de deploy OK."
-
-      - name: Audit JS imports non blocking
+      - name: Audit JS imports
         run: |
           set -euo pipefail
 
           python3 - <<'PY'
           from pathlib import Path
           import re
+          import sys
 
           root = Path(".").resolve()
-          warnings = []
+          errors = []
 
           import_patterns = [
               re.compile(r"""import\s+(?:[^'"]+?\s+from\s+)?['"]([^'"]+)['"]"""),
@@ -271,7 +305,7 @@ jobs:
               if spec.startswith("/"):
                   base = root / spec.lstrip("/")
               else:
-                  base = base_file.parent / spec
+                  base = (base_file.parent / spec).resolve()
 
               candidates = [base]
 
@@ -288,15 +322,131 @@ jobs:
                   for match in pattern.finditer(text):
                       spec = match.group(1)
 
-                      if not resolve_module(js_file, spec):
-                          warnings.append((js_file, spec))
+                      if not resolve_module(js_file.resolve(), spec):
+                          errors.append((js_file, spec))
 
-          if warnings:
-              print("Imports locales inexistentes detectados. No bloquean deploy, pero hay que limpiarlos:")
-              for js_file, spec in warnings:
-                  print(f"::warning file={js_file},title=Import local inexistente::{spec}")
-          else:
-              print("Auditoría de imports locales OK.")
+          if errors:
+              print("Imports locales inexistentes detectados:")
+              for js_file, spec in errors:
+                  print(f"::error file={js_file},title=Import local inexistente::{spec}")
+              sys.exit(1)
+
+          print("Auditoría de imports locales OK.")
+          PY
+
+      - name: Validate SPA contracts
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+
+          checks = [
+              (
+                  "src/views/public/index.js",
+                  [
+                      "PUBLIC_SHARED_VERSION",
+                      "PUBLIC_AUTH_LOGO",
+                      "export function escapeHtml",
+                      "export function escapeAttr",
+                      "export function renderPublicShell",
+                      "export function safeAssetSrc",
+                      "export function safeInternalHref",
+                  ],
+                  [
+                      "LOGIN_VIEW_VERSION",
+                      "renderLoginView",
+                  ],
+              ),
+              (
+                  "src/views/public/login/template.js",
+                  [
+                      "LOGIN_TEMPLATE_VERSION",
+                      "data-login-form",
+                      "data-login-identifier",
+                      "data-login-password",
+                      "data-login-submit",
+                      "data-login-forgot-password",
+                      "ROUTES.passwordRequest",
+                  ],
+                  [],
+              ),
+              (
+                  "src/views/public/password-reset/index.js",
+                  [
+                      "PASSWORD_RESET_VIEW_VERSION",
+                      "renderPasswordResetView",
+                      "Auth.requestPasswordReset",
+                      "Auth.confirmResetPassword",
+                      "PasswordRequestView",
+                      "PasswordResetView",
+                  ],
+                  [],
+              ),
+              (
+                  "src/views/public/password-reset/template.js",
+                  [
+                      "PASSWORD_RESET_TEMPLATE_VERSION",
+                      "createPasswordResetTemplate",
+                      "data-password-reset-form",
+                      "data-password-reset-submit",
+                      "data-password-reset-identifier",
+                      "data-password-reset-password",
+                      "data-password-reset-confirm",
+                  ],
+                  [],
+              ),
+              (
+                  "src/router/routes.js",
+                  [
+                      'PASSWORD_REQUEST',
+                      'viewKey: "password-request"',
+                      'import("../views/public/password-reset/index.js")',
+                      '"PasswordRequestView"',
+                  ],
+                  [],
+              ),
+              (
+                  "src/router/index.js",
+                  [
+                      "Router",
+                      "start",
+                      "bind",
+                      "onClick",
+                      "a[data-spa]",
+                      "a[data-route]",
+                  ],
+                  [],
+              ),
+          ]
+
+          failed = False
+
+          for file_path, required_tokens, forbidden_tokens in checks:
+              path = Path(file_path)
+
+              if not path.is_file():
+                  print(f"::error file={file_path},title=Contrato SPA inválido::No existe el archivo.")
+                  failed = True
+                  continue
+
+              text = path.read_text(encoding="utf-8")
+
+              for token in required_tokens:
+                  if token not in text:
+                      print(f"::error file={file_path},title=Contrato SPA incompleto::Falta token esperado: {token}")
+                      failed = True
+
+              for token in forbidden_tokens:
+                  if token in text:
+                      print(f"::error file={file_path},title=Contrato SPA contaminado::Token prohibido encontrado: {token}")
+                      failed = True
+
+          if failed:
+              sys.exit(1)
+
+          print("Contratos SPA públicos/router OK.")
           PY
 
       - name: Deployment cooldown
@@ -385,6 +535,105 @@ jobs:
 
           echo "::error title=Deploy fallido::Azure SWA rechazó el despliegue tras 3 intentos."
           exit 1
+
+      - name: Verify production files
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+
+          base="${PUBLIC_SITE_URL%/}"
+
+          echo "Esperando ${PRODUCTION_VERIFY_DELAY_SECONDS}s antes de verificar producción..."
+          sleep "${PRODUCTION_VERIFY_DELAY_SECONDS}"
+
+          checks=(
+            "/index.html|/src/main.js"
+            "/src/main.js|/src/app/index.js"
+            "/src/app/index.js|APP_VERSION"
+            "/src/core/config.js|CONFIG_VERSION"
+            "/src/core/http.js|HTTP_VERSION"
+            "/src/core/index.js|CORE_VERSION"
+            "/src/features/auth/index.js|AUTH_VERSION"
+            "/src/router/index.js|ROUTER_VERSION"
+            "/src/router/routes.js|ROUTES_VERSION"
+            "/src/views/public/index.js|PUBLIC_SHARED_VERSION"
+            "/src/views/public/login/index.js|LOGIN_VIEW_VERSION"
+            "/src/views/public/login/template.js|LOGIN_TEMPLATE_VERSION"
+            "/src/views/public/password-reset/index.js|PASSWORD_RESET_VIEW_VERSION"
+            "/src/views/public/password-reset/template.js|PASSWORD_RESET_TEMPLATE_VERSION"
+          )
+
+          for check in "${checks[@]}"; do
+            path="${check%%|*}"
+            marker="${check#*|}"
+            url="${base}${path}?deploy_check=${GITHUB_SHA}"
+
+            echo "Verificando ${url}"
+
+            status="$(curl -L -sS -o /tmp/swa-check-body -w "%{http_code}" \
+              --retry 8 \
+              --retry-delay 10 \
+              --retry-all-errors \
+              "${url}")"
+
+            if [[ "${status}" != "200" ]]; then
+              echo "::error title=Archivo no publicado::${path} respondió HTTP ${status} en producción."
+              head -c 700 /tmp/swa-check-body || true
+              echo
+              exit 1
+            fi
+
+            if ! grep -Fq "${marker}" /tmp/swa-check-body; then
+              echo "::error title=Contenido inesperado::${path} respondió 200, pero no contiene el marcador esperado '${marker}'."
+              head -c 700 /tmp/swa-check-body || true
+              echo
+              exit 1
+            fi
+          done
+
+          echo "Producción sirve los módulos SPA requeridos."
+
+      - name: Verify production SPA routes
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+
+          base="${PUBLIC_SITE_URL%/}"
+
+          routes=(
+            "/login"
+            "/password-request"
+            "/password-reset"
+            "/activate-account"
+          )
+
+          for route in "${routes[@]}"; do
+            url="${base}${route}?route_check=${GITHUB_SHA}"
+
+            echo "Verificando ruta SPA ${url}"
+
+            status="$(curl -L -sS -o /tmp/swa-route-body -w "%{http_code}" \
+              --retry 6 \
+              --retry-delay 10 \
+              --retry-all-errors \
+              "${url}")"
+
+            if [[ "${status}" != "200" ]]; then
+              echo "::error title=Ruta SPA no disponible::${route} respondió HTTP ${status}."
+              head -c 700 /tmp/swa-route-body || true
+              echo
+              exit 1
+            fi
+
+            if ! grep -Fq "/src/main.js" /tmp/swa-route-body; then
+              echo "::error title=Fallback SPA inválido::${route} no devolvió index.html con /src/main.js."
+              head -c 700 /tmp/swa-route-body || true
+              echo
+              exit 1
+            fi
+          done
+
+          echo "Rutas públicas SPA verificadas."
 
   close_preview:
     name: Close PR Preview

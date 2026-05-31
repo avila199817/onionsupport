@@ -108,6 +108,7 @@ jobs:
 
             "src/css/app.css"
             "src/css/core/noscript.css"
+            "src/css/auth/login.css"
 
             "src/views/public/index.js"
 
@@ -144,6 +145,37 @@ jobs:
               exit 1
             fi
           done
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+
+          roots = [
+              Path("src"),
+              Path(".github"),
+          ]
+
+          bad_paths = []
+
+          for root in roots:
+              if not root.exists():
+                  continue
+
+              for path in root.rglob("*"):
+                  parts = path.parts
+
+                  for part in parts:
+                      if part != part.strip():
+                          bad_paths.append(str(path))
+                          break
+
+          if bad_paths:
+              for path in bad_paths:
+                  print(f"::error file={path},title=Ruta con espacios inválidos::El path contiene espacios al inicio/final. Renombra la carpeta/archivo.")
+              sys.exit(1)
+
+          print("Paths sin espacios iniciales/finales OK.")
+          PY
 
           python3 -m json.tool staticwebapp.config.json >/dev/null
           python3 -m json.tool site.webmanifest >/dev/null
@@ -358,11 +390,22 @@ jobs:
                   ],
               ),
               (
+                  "src/views/public/login/index.js",
+                  [
+                      "LOGIN_VIEW_VERSION",
+                      "renderLoginView",
+                      "Auth as DefaultAuth",
+                      "createLoginTemplate",
+                      "goAfterLogin",
+                  ],
+                  [],
+              ),
+              (
                   "src/views/public/login/template.js",
                   [
                       "LOGIN_TEMPLATE_VERSION",
                       "data-login-form",
-                      "data-login-identifier",
+                      "login-identifier",
                       "data-login-password",
                       "data-login-submit",
                       "data-login-forgot-password",
@@ -389,16 +432,17 @@ jobs:
                       "createPasswordResetTemplate",
                       "data-password-reset-form",
                       "data-password-reset-submit",
-                      "data-password-reset-identifier",
-                      "data-password-reset-password",
-                      "data-password-reset-confirm",
+                      "password-reset-identifier",
+                      "password-reset-password",
+                      "password-reset-confirm",
                   ],
                   [],
               ),
               (
                   "src/router/routes.js",
                   [
-                      'PASSWORD_REQUEST',
+                      "ROUTES_VERSION",
+                      "PASSWORD_REQUEST",
                       'viewKey: "password-request"',
                       'import("../views/public/password-reset/index.js")',
                       '"PasswordRequestView"',
@@ -408,12 +452,23 @@ jobs:
               (
                   "src/router/index.js",
                   [
+                      "ROUTER_VERSION",
                       "Router",
                       "start",
                       "bind",
                       "onClick",
                       "a[data-spa]",
                       "a[data-route]",
+                  ],
+                  [],
+              ),
+              (
+                  "src/app/index.js",
+                  [
+                      "APP_VERSION",
+                      "restoreSession",
+                      "Router",
+                      "start",
                   ],
                   [],
               ),
@@ -534,9 +589,8 @@ jobs:
           echo "::error title=Deploy fallido::Azure SWA rechazó el despliegue tras 3 intentos."
           exit 1
 
-      - name: Verify production files
+      - name: Verify production files non blocking
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         run: |
           set -euo pipefail
 
@@ -595,14 +649,13 @@ jobs:
           done
 
           if [[ "${failed}" == "1" ]]; then
-            echo "::warning title=Verificación de producción incompleta::El deploy terminó, pero algunos archivos aún no se sirven o no coinciden. Puede ser propagación/cache o token apuntando a otra SWA."
+            echo "::warning title=Verificación de producción incompleta::El deploy terminó, pero algún archivo aún no se sirve o no coincide. Puede ser propagación/cache o token apuntando a otra SWA."
           else
             echo "Producción sirve los módulos SPA requeridos."
           fi
 
-      - name: Verify production SPA routes
+      - name: Verify production SPA routes non blocking
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         run: |
           set -euo pipefail
 

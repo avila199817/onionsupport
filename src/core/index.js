@@ -9,14 +9,22 @@
    - Helpers básicos de usuario/rol/ruta.
    - Registro mínimo de módulos.
    - Puente único hacia core/http.js.
-   - Sin Store, Services, hooks, cleanup, event bus, network listeners,
-     fetch propio, i18n funcional ni framework interno.
+   - Sin Store.
+   - Sin Services.
+   - Sin hooks.
+   - Sin cleanup global.
+   - Sin event bus.
+   - Sin network listeners.
+   - Sin fetch propio.
+   - Sin i18n funcional.
+   - Sin framework interno.
 ========================================================= */
 
 import {
   config,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
   ALLOWED_ROLES,
+  SENSITIVE_QUERY_PARAMS,
   buildUserHomeRoute as configBuildUserHomeRoute,
   getUserScopedRouteInfo as configGetUserScopedRouteInfo,
   normalizeRoutePath as configNormalizeRoutePath,
@@ -26,7 +34,7 @@ import {
 
 import Http from "./http.js";
 
-export const CORE_VERSION = "core.minimal.v4";
+export const CORE_VERSION = "core.minimal.v5";
 
 const APP_NAME = config?.appName || config?.name || "Onion Support";
 const ROOT_PATH = "/";
@@ -42,6 +50,19 @@ const VALID_ROLES = new Set(
 const DISABLED_STATUSES = new Set([
   "disabled",
   "desactivado",
+  "inactive",
+  "inactivo",
+  "deleted",
+  "eliminado",
+  "archived",
+  "archivado",
+  "revoked",
+  "revocado",
+  "blocked",
+  "bloqueado",
+  "banned",
+  "suspended",
+  "suspendido",
 ]);
 
 const SENSITIVE_KEYS = new Set([
@@ -85,29 +106,38 @@ const SENSITIVE_KEYS = new Set([
   "_metadata",
 ]);
 
-const SENSITIVE_QUERY_KEYS = new Set([
-  "token",
-  "access_token",
-  "accesstoken",
-  "refresh_token",
-  "refreshtoken",
-  "id_token",
-  "idtoken",
-  "code",
-  "secret",
-  "session",
-  "sessionid",
-  "session_id",
-  "password",
-  "pwd",
-  "key",
-  "sig",
-  "signature",
-  "jwt",
-  "authorization",
-  "reset_token",
-  "activation_token",
-]);
+const SENSITIVE_QUERY_KEYS = new Set(
+  (Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
+    ? SENSITIVE_QUERY_PARAMS
+    : [
+        "token",
+        "access_token",
+        "accessToken",
+        "refresh_token",
+        "refreshToken",
+        "id_token",
+        "idToken",
+        "code",
+        "secret",
+        "session",
+        "sessionId",
+        "session_id",
+        "password",
+        "pwd",
+        "key",
+        "sig",
+        "signature",
+        "jwt",
+        "authorization",
+        "reset_token",
+        "resetToken",
+        "activation_token",
+        "activationToken",
+      ]
+  )
+    .map((key) => normalizeKey(key))
+    .filter(Boolean)
+);
 
 const state = {
   initialized: false,
@@ -252,7 +282,10 @@ function redact(value = "") {
 
   return output
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 function safeError(error = null) {
@@ -294,6 +327,7 @@ function tokenOk(value = "") {
 
 function cleanToken(value = "") {
   const token = stripBearer(value);
+
   return tokenOk(token) ? token : null;
 }
 
@@ -384,9 +418,26 @@ function userStatus(user = null) {
   ).toLowerCase();
 }
 
+function userLooksDisabledByFlag(user = null) {
+  if (!isObject(user)) return true;
+
+  return Boolean(
+    user.usable === false ||
+      user.disabled === true ||
+      user.deleted === true ||
+      user.archived === true ||
+      user.revoked === true ||
+      user.blocked === true ||
+      user.banned === true ||
+      user.suspended === true ||
+      user.active === false ||
+      user.enabled === false
+  );
+}
+
 function isUsableUser(user = null) {
   if (!isObject(user)) return false;
-  if (user.disabled === true) return false;
+  if (userLooksDisabledByFlag(user)) return false;
 
   return !DISABLED_STATUSES.has(userStatus(user));
 }
@@ -396,6 +447,7 @@ function publicUser(user = null) {
 
   const role = normalizeRole(first(user.role, user.rol, user.roles, "")) || "user";
   const slug = extractUserSlug(user);
+  const status = userStatus(user) || (userLooksDisabledByFlag(user) ? "disabled" : "active");
 
   return {
     id: first(user.id, user.userId, null),
@@ -432,7 +484,7 @@ function publicUser(user = null) {
       ""
     ),
 
-    status: userStatus(user) || "active",
+    status,
   };
 }
 
@@ -452,30 +504,32 @@ function updateAuthFlags() {
   const usableUser = isUsableUser(user);
   const token = cleanToken(state.token || state.accessToken || state.access_token);
 
+  const safeUser = usableUser ? user : null;
   const role = normalizeRole(
-    first(user?.role, user?.rol, user?.roles, state.role, state.rol, "user")
+    first(safeUser?.role, safeUser?.rol, safeUser?.roles, state.role, state.rol, "user")
   ) || "user";
 
-  const slug = extractUserSlug(user);
+  const slug = extractUserSlug(safeUser);
 
   state.token = token;
   state.accessToken = token;
   state.access_token = token;
   state.hasToken = Boolean(token);
 
-  state.hasUser = usableUser;
-  state.currentUser = user || null;
+  state.user = safeUser;
+  state.currentUser = safeUser;
+  state.hasUser = Boolean(safeUser);
 
-  state.role = usableUser ? role : null;
-  state.rol = usableUser ? role : null;
-  state.roles = usableUser ? [role] : [];
+  state.role = safeUser ? role : null;
+  state.rol = safeUser ? role : null;
+  state.roles = safeUser ? [role] : [];
 
-  state.userSlug = usableUser ? slug || null : null;
-  state.homePath = usableUser ? buildUserHomePath(slug) : ROOT_PATH;
+  state.userSlug = safeUser ? slug || null : null;
+  state.homePath = safeUser ? buildUserHomePath(slug) : ROOT_PATH;
   state.defaultHome = state.homePath;
-  state.postLoginTarget = token && usableUser ? state.homePath : null;
+  state.postLoginTarget = token && safeUser ? state.homePath : null;
 
-  state.authenticated = Boolean(token && usableUser);
+  state.authenticated = Boolean(token && safeUser);
   state.hasSession = Boolean(state.session || state.sessionId || state.sessionUserId);
 
   touch();
@@ -542,7 +596,9 @@ function safeHash(value = "") {
   if (!hash || hash === "#") return "";
   if (/[\r\n\t\\]/.test(hash)) return "";
 
-  return hash.startsWith("#") ? redact(hash) : redact(`#${hash.replace(/^#+/, "")}`);
+  return hash.startsWith("#")
+    ? redact(hash)
+    : redact(`#${hash.replace(/^#+/, "")}`);
 }
 
 function pathFromInput(value = ROOT_PATH) {
@@ -606,6 +662,7 @@ function splitPath(value = ROOT_PATH) {
 
 function normalizePublicPath(value = ROOT_PATH) {
   const parts = splitPath(value);
+
   return `${parts.pathname}${parts.search}${parts.hash}` || ROOT_PATH;
 }
 
@@ -642,6 +699,7 @@ function getUserScopedRouteInfo(value = ROOT_PATH) {
       slug: "",
       canonicalPath: pathname,
       restPath: pathname,
+      lookupPath: pathname,
     };
   }
 
@@ -656,6 +714,7 @@ function getUserScopedRouteInfo(value = ROOT_PATH) {
       slug: "",
       canonicalPath: pathname,
       restPath: pathname,
+      lookupPath: pathname,
     };
   }
 
@@ -669,6 +728,7 @@ function getUserScopedRouteInfo(value = ROOT_PATH) {
     slug,
     canonicalPath: restPath,
     restPath,
+    lookupPath: restPath,
   };
 }
 
@@ -794,7 +854,12 @@ function setState(patch = {}, options = {}) {
   if (!isObject(patch)) return getState(options);
 
   for (const [key, value] of Object.entries(patch)) {
-    if (key === "user" || key === "currentUser" || key === "authUser" || key === "sessionUser") {
+    if (
+      key === "user" ||
+      key === "currentUser" ||
+      key === "authUser" ||
+      key === "sessionUser"
+    ) {
       state.user = normalizeUser(value);
       continue;
     }
@@ -972,6 +1037,7 @@ function clearSession() {
 function setTheme() {
   state.theme = "system";
   touch();
+
   return getState();
 }
 
@@ -979,24 +1045,28 @@ function setLang() {
   state.lang = "es";
   state.locale = "es-ES";
   touch();
+
   return getState();
 }
 
 function setSidebarOpen(value = false) {
   state.sidebarOpen = value === true;
   touch();
+
   return getState();
 }
 
 function setLoading(value = false) {
   state.loading = value === true;
   touch();
+
   return getState();
 }
 
 function setError(error = null) {
   state.error = safeError(error);
   touch();
+
   return getState();
 }
 
@@ -1009,7 +1079,9 @@ function isAuthenticated() {
 }
 
 function getCurrentUser() {
-  return getState().user || null;
+  const snapshot = getState();
+
+  return snapshot.hasUser ? snapshot.user || null : null;
 }
 
 function getCurrentRole() {
@@ -1057,6 +1129,7 @@ function registerModule(name = "", value = null, options = {}) {
   }
 
   moduleRegistry.set(key, value);
+
   return value;
 }
 
@@ -1087,6 +1160,7 @@ function setHttpClient(value = null) {
   if (!value) return false;
 
   httpClient = value;
+
   registerModule("http", httpClient, {
     overwrite: true,
   });
@@ -1098,6 +1172,7 @@ function getHttpClient() {
   if (httpClient) return httpClient;
 
   httpClient = Http;
+
   registerModule("http", httpClient, {
     overwrite: true,
   });
@@ -1157,6 +1232,7 @@ function setShowToast(fn = null) {
   if (!isFunction(fn)) return false;
 
   toastBridge = fn;
+
   return true;
 }
 
@@ -1209,7 +1285,9 @@ function ready(fn = null) {
     return () => true;
   }
 
-  document.addEventListener("DOMContentLoaded", fn, { once: true });
+  document.addEventListener("DOMContentLoaded", fn, {
+    once: true,
+  });
 
   return () => {
     try {
@@ -1411,7 +1489,9 @@ Object.defineProperties(AppCore, {
       return getModule("auth");
     },
     set(value) {
-      registerModule("auth", value, { overwrite: true });
+      registerModule("auth", value, {
+        overwrite: true,
+      });
     },
   },
 
@@ -1420,7 +1500,9 @@ Object.defineProperties(AppCore, {
       return getModule("auth");
     },
     set(value) {
-      registerModule("auth", value, { overwrite: true });
+      registerModule("auth", value, {
+        overwrite: true,
+      });
     },
   },
 
@@ -1429,7 +1511,9 @@ Object.defineProperties(AppCore, {
       return getModule("router");
     },
     set(value) {
-      registerModule("router", value, { overwrite: true });
+      registerModule("router", value, {
+        overwrite: true,
+      });
     },
   },
 
@@ -1438,7 +1522,9 @@ Object.defineProperties(AppCore, {
       return getModule("router");
     },
     set(value) {
-      registerModule("router", value, { overwrite: true });
+      registerModule("router", value, {
+        overwrite: true,
+      });
     },
   },
 
@@ -1447,7 +1533,9 @@ Object.defineProperties(AppCore, {
       return getModule("toast");
     },
     set(value) {
-      registerModule("toast", value, { overwrite: true });
+      registerModule("toast", value, {
+        overwrite: true,
+      });
     },
   },
 
@@ -1456,7 +1544,9 @@ Object.defineProperties(AppCore, {
       return getModule("toast");
     },
     set(value) {
-      registerModule("toast", value, { overwrite: true });
+      registerModule("toast", value, {
+        overwrite: true,
+      });
     },
   },
 
@@ -1465,7 +1555,9 @@ Object.defineProperties(AppCore, {
       return getModule("sidebar");
     },
     set(value) {
-      registerModule("sidebar", value, { overwrite: true });
+      registerModule("sidebar", value, {
+        overwrite: true,
+      });
     },
   },
 
@@ -1474,7 +1566,9 @@ Object.defineProperties(AppCore, {
       return getModule("sidebar");
     },
     set(value) {
-      registerModule("sidebar", value, { overwrite: true });
+      registerModule("sidebar", value, {
+        overwrite: true,
+      });
     },
   },
 
@@ -1483,7 +1577,9 @@ Object.defineProperties(AppCore, {
       return getModule("topbar");
     },
     set(value) {
-      registerModule("topbar", value, { overwrite: true });
+      registerModule("topbar", value, {
+        overwrite: true,
+      });
     },
   },
 
@@ -1492,7 +1588,9 @@ Object.defineProperties(AppCore, {
       return getModule("topbar");
     },
     set(value) {
-      registerModule("topbar", value, { overwrite: true });
+      registerModule("topbar", value, {
+        overwrite: true,
+      });
     },
   },
 });

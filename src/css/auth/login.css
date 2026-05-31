@@ -67,7 +67,7 @@ body.auth-screen.auth-no-scroll {
   block-size: 100svh;
   block-size: 100dvh;
 
-  padding: clamp(10px, 2dvh, 22px) clamp(12px, 3vw, 32px);
+  padding: clamp(12px, 2.4dvh, 26px) clamp(12px, 3vw, 32px);
   overflow: hidden;
 
   color: var(--text, #e8edf7);
@@ -310,24 +310,24 @@ body.auth-screen.auth-no-scroll {
 .public-auth-shell--password-request,
 .public-auth-shell--password-reset,
 .login-view {
-  --login-edge-block: clamp(10px, 2dvh, 22px);
+  --login-edge-block: clamp(12px, 2.6dvh, 28px);
   --login-edge-inline: clamp(12px, 3vw, 32px);
 
   --login-card-max: 470px;
   --login-card-radius: 28px;
 
-  --login-card-padding-block: clamp(24px, 3.3dvh, 32px);
-  --login-card-padding-inline: clamp(24px, 3.1vw, 32px);
+  --login-card-padding-block: clamp(32px, 4.2dvh, 44px);
+  --login-card-padding-inline: clamp(26px, 3.2vw, 34px);
 
-  --login-card-gap: clamp(14px, 1.8dvh, 17px);
-  --login-form-gap: clamp(12px, 1.55dvh, 15px);
+  --login-card-gap: clamp(18px, 2.35dvh, 24px);
+  --login-form-gap: clamp(16px, 2dvh, 20px);
 
-  --login-input-height: clamp(46px, 6.25dvh, 52px);
-  --login-button-height: clamp(48px, 6.4dvh, 54px);
+  --login-input-height: clamp(48px, 6.4dvh, 54px);
+  --login-button-height: clamp(50px, 6.6dvh, 56px);
 
-  --login-logo-shell: clamp(54px, 8.1dvh, 64px);
+  --login-logo-shell: clamp(64px, 9.2dvh, 78px);
   --login-logo-size: calc(var(--login-logo-shell) - 16px);
-  --login-title-size: clamp(29px, 4.8dvh, 38px);
+  --login-title-size: clamp(30px, 4.9dvh, 39px);
 }
 
 .public-auth-shell--password-request,
@@ -503,7 +503,7 @@ body.auth-screen.auth-no-scroll {
   inline-size: min(100%, var(--login-card-max));
   min-inline-size: 0;
 
-  max-block-size: calc(100dvh - 2 * var(--login-edge-block));
+  max-block-size: calc(100dvh - var(--login-edge-block) - var(--login-edge-block));
 
   padding:
     var(--login-card-padding-block)
@@ -602,7 +602,7 @@ body.auth-screen.auth-no-scroll {
 .password-reset-card-header {
   display: grid;
   justify-items: center;
-  gap: clamp(6px, 1.1dvh, 9px);
+  gap: clamp(9px, 1.45dvh, 13px);
 
   text-align: center;
 }
@@ -611,7 +611,7 @@ body.auth-screen.auth-no-scroll {
   display: grid;
   justify-items: center;
 
-  margin-block-end: clamp(0px, .45dvh, 4px);
+  margin-block-end: clamp(4px, .9dvh, 8px);
 }
 
 .login-card-logo-shell {
@@ -627,7 +627,7 @@ body.auth-screen.auth-no-scroll {
   overflow: hidden;
 
   border: 1px solid rgb(255 255 255 / .20);
-  border-radius: clamp(18px, 3.2dvh, 22px);
+  border-radius: clamp(20px, 3.4dvh, 25px);
 
   background:
     radial-gradient(
@@ -642,7 +642,7 @@ body.auth-screen.auth-no-scroll {
     );
 
   box-shadow:
-    0 16px 38px color-mix(in srgb, var(--accent, #41c7d7) 18%, transparent),
+    0 18px 42px color-mix(in srgb, var(--accent, #41c7d7) 20%, transparent),
     inset 0 1px 0 rgb(255 255 255 / .26),
     inset 0 -1px 0 rgb(0 0 0 / .18);
 }
@@ -688,7 +688,7 @@ body.auth-screen.auth-no-scroll {
 
   font-size: var(--login-title-size);
   font-weight: var(--weight-black, 900);
-  line-height: .98;
+  line-height: 1;
   letter-spacing: -.055em;
 
   text-wrap: balance;
@@ -703,7 +703,7 @@ body.auth-screen.auth-no-scroll {
 
   font-size: clamp(12px, 1.8dvh, 14px);
   font-weight: var(--weight-medium, 500);
-  line-height: 1.42;
+  line-height: 1.45;
 }
 
 
@@ -1361,7 +1361,7 @@ body.auth-screen.auth-no-scroll {
 }
 
 .login-form-row {
-  min-block-size: 18px;
+  min-block-size: 20px;
 }
 
 .login-form-note {
@@ -1451,7 +1451,7 @@ body.auth-screen.auth-no-scroll {
 .login-card-footer {
   display: block;
 
-  padding-block-start: clamp(0px, .5dvh, 3px);
+  padding-block-start: clamp(2px, .8dvh, 7px);
 
   color: color-mix(
     in srgb,
@@ -1849,20 +1849,20 @@ body.auth-screen.auth-no-scroll {
   .public-auth-shell--password-request,
   .public-auth-shell--password-reset,
   .login-view {
-    --login-edge-block: clamp(8px, 1.5dvh, 14px);
+    --login-edge-block: clamp(8px, 1.5dvh, 16px);
     --login-edge-inline: 12px;
 
     --login-card-max: 100%;
     --login-card-radius: 24px;
 
-    --login-card-padding-block: clamp(20px, 3dvh, 26px);
+    --login-card-padding-block: clamp(24px, 3.4dvh, 30px);
     --login-card-padding-inline: clamp(16px, 4vw, 22px);
 
-    --login-card-gap: clamp(12px, 1.65dvh, 15px);
-    --login-form-gap: clamp(11px, 1.5dvh, 14px);
+    --login-card-gap: clamp(15px, 2dvh, 18px);
+    --login-form-gap: clamp(13px, 1.7dvh, 16px);
 
-    --login-logo-shell: clamp(52px, 8dvh, 62px);
-    --login-title-size: clamp(27px, 8vw, 35px);
+    --login-logo-shell: clamp(58px, 8.7dvh, 68px);
+    --login-title-size: clamp(28px, 8vw, 35px);
   }
 
   .public-auth-shell {
@@ -1938,16 +1938,16 @@ body.auth-screen.auth-no-scroll {
 
     --login-card-radius: 22px;
 
-    --login-card-padding-block: 20px;
+    --login-card-padding-block: 22px;
     --login-card-padding-inline: 14px;
 
-    --login-card-gap: 13px;
-    --login-form-gap: 11px;
+    --login-card-gap: 14px;
+    --login-form-gap: 12px;
 
     --login-input-height: 48px;
     --login-button-height: 49px;
 
-    --login-logo-shell: 56px;
+    --login-logo-shell: 60px;
     --login-title-size: 28px;
   }
 
@@ -1970,7 +1970,7 @@ body.auth-screen.auth-no-scroll {
   }
 
   .login-card-logo-wrap {
-    margin-block-end: 2px;
+    margin-block-end: 3px;
   }
 
   .login-form-row {
@@ -2011,26 +2011,26 @@ body.auth-screen.auth-no-scroll {
   .login-view {
     --login-edge-block: clamp(8px, 1.6dvh, 16px);
 
-    --login-card-padding-block: clamp(20px, 2.85dvh, 28px);
+    --login-card-padding-block: clamp(24px, 3.35dvh, 34px);
     --login-card-padding-inline: clamp(24px, 3vw, 30px);
 
-    --login-card-gap: clamp(12px, 1.55dvh, 15px);
-    --login-form-gap: clamp(10px, 1.35dvh, 12px);
+    --login-card-gap: clamp(15px, 2dvh, 19px);
+    --login-form-gap: clamp(13px, 1.6dvh, 16px);
 
-    --login-input-height: clamp(43px, 6dvh, 48px);
-    --login-button-height: clamp(45px, 6.15dvh, 50px);
+    --login-input-height: clamp(44px, 6dvh, 50px);
+    --login-button-height: clamp(46px, 6.15dvh, 52px);
 
-    --login-logo-shell: clamp(52px, 8dvh, 62px);
-    --login-title-size: clamp(28px, 4.7dvh, 35px);
+    --login-logo-shell: clamp(58px, 8.4dvh, 70px);
+    --login-title-size: clamp(29px, 4.7dvh, 36px);
   }
 
   .login-card-subtitle,
   .password-reset-subtitle {
-    line-height: 1.34;
+    line-height: 1.36;
   }
 
   .login-card-footer {
-    line-height: 1.22;
+    line-height: 1.24;
   }
 }
 
@@ -2041,16 +2041,16 @@ body.auth-screen.auth-no-scroll {
   .login-view {
     --login-edge-block: 8px;
 
-    --login-card-padding-block: 19px;
+    --login-card-padding-block: 21px;
     --login-card-padding-inline: 28px;
 
-    --login-card-gap: 12px;
-    --login-form-gap: 10px;
+    --login-card-gap: 13px;
+    --login-form-gap: 11px;
 
     --login-input-height: 44px;
     --login-button-height: 46px;
 
-    --login-logo-shell: 52px;
+    --login-logo-shell: 56px;
     --login-title-size: 30px;
   }
 
@@ -2076,7 +2076,7 @@ body.auth-screen.auth-no-scroll {
     --login-input-height: 42px;
     --login-button-height: 44px;
 
-    --login-logo-shell: 46px;
+    --login-logo-shell: 48px;
     --login-title-size: 27px;
   }
 

@@ -5,7 +5,7 @@
    Responsabilidad:
    - Controlador mínimo de la vista Login pública.
    - Montar el template recibido desde ./template.js.
-   - Leer refs por data attributes.
+   - Leer refs por contrato data-*.
    - Validar formulario mínimo.
    - Llamar Auth.login().
    - Navegar vía Router tras login correcto.
@@ -13,6 +13,7 @@
    - Sin HTML inline.
    - Sin construir campos.
    - Sin logo/card/layout.
+   - Sin controlar copys/estructura interna del template.
    - Sin HTTP directo.
    - Sin Store.
    - Sin Toast directo.
@@ -25,7 +26,7 @@ import { AppCore } from "../../../core/index.js";
 import { Auth } from "../../../features/auth/index.js";
 import createLoginTemplate from "./template.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.public.controller.v1";
+export const LOGIN_VIEW_VERSION = "login.view.public.controller.v2";
 
 const SOURCE = "login.view";
 
@@ -143,16 +144,12 @@ async function goAfterLogin(result = {}, context = {}) {
    TEMPLATE
 ========================================================= */
 
-function resolveTemplate(context = {}) {
+function resolveTemplate() {
   if (!isFunction(createLoginTemplate)) {
     throw new Error("[LoginView] template.js debe exportar createLoginTemplate().");
   }
 
-  const view = createLoginTemplate({
-    AppCore,
-    Auth,
-    context,
-  });
+  const view = createLoginTemplate();
 
   if (!isDomNode(view)) {
     throw new Error("[LoginView] createLoginTemplate() debe devolver un nodo DOM.");
@@ -161,8 +158,8 @@ function resolveTemplate(context = {}) {
   return view;
 }
 
-function mountTemplate(container, context = {}) {
-  const view = resolveTemplate(context);
+function mountTemplate(container) {
+  const view = resolveTemplate();
 
   clearNode(container);
   container.appendChild(view);
@@ -183,28 +180,13 @@ function getRefs(root = null) {
     root,
 
     form: root.querySelector("[data-login-form]"),
-
-    identifier:
-      root.querySelector("[data-login-identifier]") ||
-      root.querySelector("[name='identifier']") ||
-      root.querySelector("[name='email']") ||
-      root.querySelector("[name='username']"),
-
-    password:
-      root.querySelector("[data-login-password]") ||
-      root.querySelector("[name='password']"),
-
+    identifier: root.querySelector("[data-login-identifier]"),
+    password: root.querySelector("[data-login-password]"),
     submit: root.querySelector("[data-login-submit]"),
 
     globalError: root.querySelector("[data-login-global-error]"),
-
-    identifierError:
-      root.querySelector("[data-login-error='identifier']") ||
-      root.querySelector("[data-login-identifier-error]"),
-
-    passwordError:
-      root.querySelector("[data-login-error='password']") ||
-      root.querySelector("[data-login-password-error]"),
+    identifierError: root.querySelector("[data-login-error='identifier']"),
+    passwordError: root.querySelector("[data-login-error='password']"),
   };
 
   if (!refs.form) {
@@ -212,11 +194,15 @@ function getRefs(root = null) {
   }
 
   if (!refs.identifier) {
-    throw new Error("[LoginView] falta input identifier.");
+    throw new Error("[LoginView] falta [data-login-identifier].");
   }
 
   if (!refs.password) {
-    throw new Error("[LoginView] falta input password.");
+    throw new Error("[LoginView] falta [data-login-password].");
+  }
+
+  if (!refs.submit) {
+    throw new Error("[LoginView] falta [data-login-submit].");
   }
 
   return refs;
@@ -230,14 +216,14 @@ function getFieldInput(refs, name = "") {
   if (name === "identifier") return refs.identifier || null;
   if (name === "password") return refs.password || null;
 
-  return refs.form?.elements?.[name] || null;
+  return null;
 }
 
 function getFieldErrorNode(refs, name = "") {
   if (name === "identifier") return refs.identifierError || null;
   if (name === "password") return refs.passwordError || null;
 
-  return refs.root?.querySelector?.(`[data-login-error="${name}"]`) || null;
+  return null;
 }
 
 function setFieldError(refs, name = "", message = "") {
@@ -280,26 +266,21 @@ function setGlobalError(refs, message = "") {
 
 function setLoading(refs, loading = false) {
   const value = Boolean(loading);
+  const busy = value ? "true" : "false";
 
   for (const node of [refs.identifier, refs.password, refs.submit].filter(Boolean)) {
     node.disabled = value;
   }
 
   if (refs.submit) {
-    const loadingText = refs.submit.dataset.loadingText || "Accediendo...";
-    const currentText = refs.submit.textContent || "Entrar";
-    const defaultText = refs.submit.dataset.defaultText || currentText || "Entrar";
-
-    if (!refs.submit.dataset.defaultText) {
-      refs.submit.dataset.defaultText = defaultText;
-    }
-
-    refs.submit.dataset.loading = value ? "true" : "false";
-    refs.submit.setAttribute("aria-busy", value ? "true" : "false");
-    refs.submit.textContent = value ? loadingText : defaultText;
+    refs.submit.dataset.loading = busy;
+    refs.submit.setAttribute("aria-busy", busy);
   }
 
-  refs.form?.setAttribute("aria-busy", value ? "true" : "false");
+  if (refs.form) {
+    refs.form.dataset.loading = busy;
+    refs.form.setAttribute("aria-busy", busy);
+  }
 
   return true;
 }
@@ -415,7 +396,7 @@ export function renderLoginView(container, context = {}) {
 
   destroyPrevious(container);
 
-  const view = mountTemplate(container, context);
+  const view = mountTemplate(container);
   const refs = getRefs(view);
 
   let mounted = true;

@@ -8,7 +8,7 @@
    - Resolver /@{slug} y /@{slug}/{ruta}.
    - Validar slug real del usuario autenticado.
    - Respetar la URL actual tras restore de sesión.
-   - Renderizar vista.
+   - Renderizar vista con swap atómico, sin pantalla vacía.
    - Actualizar history.
    - Actualizar estado de ruta.
    - Actualizar shell/chrome básico.
@@ -39,11 +39,13 @@ import {
 
 import * as Routes from "./routes.js";
 
-export const ROUTER_VERSION = "router.minimal.v4";
+export const ROUTER_VERSION = "router.minimal.v5";
 
 const HOME_PATH = ROUTES.home || "/";
 const LOGIN_PATH = ROUTES.login || "/login";
 const APP_TITLE = "Onion Support";
+
+const ROUTE_HOST_CLASS = "route-view-host";
 
 const SENSITIVE_QUERY_KEYS = new Set(
   (Array.isArray(SENSITIVE_QUERY_PARAMS) ? SENSITIVE_QUERY_PARAMS : [])
@@ -54,6 +56,7 @@ const SENSITIVE_QUERY_KEYS = new Set(
 let initialized = false;
 let bound = false;
 let activeView = null;
+let activeHost = null;
 let renderSeq = 0;
 let renderTask = null;
 
@@ -1110,15 +1113,111 @@ function cleanupView(view = null) {
   return false;
 }
 
-function destroyActiveView() {
-  cleanupView(activeView);
-  activeView = null;
+function removeNode(element = null) {
+  try {
+    element?.remove?.();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function renderFallback(title = "Onion Support", message = "") {
+function destroyActiveView() {
+  const previousView = activeView;
+  const previousHost = activeHost;
+
+  activeView = null;
+  activeHost = null;
+
+  cleanupView(previousView);
+  removeNode(previousHost);
+
+  return true;
+}
+
+function createRouteHost(match = {}, state = {}) {
+  const route = match.route || null;
+  const host = document.createElement("div");
+
+  host.className = ROUTE_HOST_CLASS;
+
+  host.hidden = true;
+  host.setAttribute("aria-hidden", "true");
+  host.setAttribute("aria-busy", "true");
+
+  host.dataset.routeHost = "true";
+  host.dataset.routeHostState = "preparing";
+  host.dataset.routePath = state.canonicalPath || match.canonicalPath || HOME_PATH;
+  host.dataset.publicPath = state.publicPath || match.publicPath || HOME_PATH;
+  host.dataset.viewKey = route?.viewKey || route?.name || "";
+
+  return host;
+}
+
+function activateRouteHost(host = null, route = null) {
+  if (!host) return false;
+
+  const publicRoute = route?.public === true;
+  const mode = publicRoute ? "auth" : "app";
+  const chrome = publicRoute ? "hidden" : "visible";
+
+  try {
+    host.hidden = false;
+    host.removeAttribute("hidden");
+    host.removeAttribute("inert");
+
+    host.setAttribute("aria-hidden", "false");
+    host.setAttribute("aria-busy", "false");
+
+    host.dataset.routeHostState = "ready";
+    host.dataset.routeMode = mode;
+    host.dataset.chrome = chrome;
+
+    host.classList.remove("is-hidden", "is-preparing");
+    host.classList.add("is-visible", "is-ready");
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function commitRouteHost(nextHost = null, {
+  route = null,
+  previousView = null,
+  previousHost = null,
+} = {}) {
   const root = viewRoot();
 
-  if (!root) return null;
+  if (!root || !nextHost) return false;
+
+  activateRouteHost(nextHost, route);
+
+  try {
+    if (nextHost.parentNode !== root) {
+      root.appendChild(nextHost);
+    }
+
+    root.replaceChildren(nextHost);
+  } catch {
+    return false;
+  }
+
+  activeHost = nextHost;
+
+  cleanupView(previousView);
+
+  if (previousHost && previousHost !== nextHost) {
+    removeNode(previousHost);
+  }
+
+  return true;
+}
+
+function renderFallback(title = "Onion Support", message = "", host = null) {
+  const target = host || activeHost || viewRoot();
+
+  if (!target) return null;
 
   const section = document.createElement("section");
   section.className = "route-fallback-view";
@@ -1134,7 +1233,7 @@ function renderFallback(title = "Onion Support", message = "") {
     section.appendChild(paragraph);
   }
 
-  root.replaceChildren(section);
+  target.replaceChildren(section);
 
   return section;
 }
@@ -1167,9 +1266,6 @@ function beginTransition(match = {}, options = {}) {
 
 async function renderRoute(match = {}, options = {}, seq = renderSeq) {
   const route = match.route;
-
-  destroyActiveView();
-
   const state = beginTransition(match, options);
   const root = viewRoot();
 
@@ -1186,14 +1282,25 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
     route?.public === true ? "hidden" : "visible"
   );
 
-  root.replaceChildren();
+  const previousView = activeView;
+  const previousHost = activeHost;
+  const nextHost = createRouteHost(match, state);
+
+  try {
+    root.appendChild(nextHost);
+  } catch {
+    return {
+      ok: false,
+      reason: "mount-host-failed",
+    };
+  }
 
   try {
     if (!isFunction(route?.render)) {
       throw new Error("La ruta no tiene render().");
     }
 
-    const result = await route.render(root, {
+    const result = await route.render(nextHost, {
       AppCore,
       Auth: getAuth(),
       Router,
@@ -1210,6 +1317,7 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
 
     if (seq !== renderSeq) {
       cleanupView(result);
+      removeNode(nextHost);
 
       return {
         ok: false,
@@ -1218,19 +1326,29 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
       };
     }
 
+    let nextView = null;
+
     if (
       typeof Node !== "undefined" &&
       result instanceof Node &&
-      result !== root &&
-      !root.contains(result)
+      result !== nextHost &&
+      !nextHost.contains(result)
     ) {
-      root.replaceChildren(result);
+      nextHost.replaceChildren(result);
     } else if (typeof result === "string") {
-      root.textContent = "";
-      root.insertAdjacentHTML("beforeend", result);
+      nextHost.textContent = "";
+      nextHost.insertAdjacentHTML("beforeend", result);
     } else if (isObject(result)) {
-      activeView = result;
+      nextView = result;
     }
+
+    activeView = nextView;
+
+    commitRouteHost(nextHost, {
+      route,
+      previousView,
+      previousHost,
+    });
 
     syncChrome(route, {
       AppCore,
@@ -1253,6 +1371,8 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
     };
   } catch (error) {
     if (seq !== renderSeq) {
+      removeNode(nextHost);
+
       return {
         ok: false,
         skipped: true,
@@ -1260,7 +1380,26 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
       };
     }
 
-    renderFallback("Error de vista", "No se pudo renderizar esta vista.");
+    activeView = null;
+
+    renderFallback("Error de vista", "No se pudo renderizar esta vista.", nextHost);
+
+    commitRouteHost(nextHost, {
+      route,
+      previousView,
+      previousHost,
+    });
+
+    syncChrome(route, {
+      AppCore,
+      Auth: getAuth(),
+      Router,
+
+      route,
+      canonicalPath: state.canonicalPath,
+      publicPath: state.publicPath,
+      routeParams: state.routeParams,
+    });
 
     return {
       ok: false,
@@ -1272,8 +1411,6 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
 }
 
 function renderNotFound(match = {}, options = {}, seq = renderSeq) {
-  destroyActiveView();
-
   const state = beginTransition(
     {
       ...match,
@@ -1283,7 +1420,38 @@ function renderNotFound(match = {}, options = {}, seq = renderSeq) {
     options
   );
 
-  renderFallback("Ruta no encontrada", "La vista solicitada no existe.");
+  const root = viewRoot();
+
+  if (!root) {
+    return {
+      ok: false,
+      found: false,
+      reason: "missing-root",
+      renderSeq: seq,
+    };
+  }
+
+  const previousView = activeView;
+  const previousHost = activeHost;
+  const nextHost = createRouteHost(
+    {
+      ...match,
+      route: null,
+    },
+    state
+  );
+
+  root.appendChild(nextHost);
+
+  activeView = null;
+
+  renderFallback("Ruta no encontrada", "La vista solicitada no existe.", nextHost);
+
+  commitRouteHost(nextHost, {
+    route: null,
+    previousView,
+    previousHost,
+  });
 
   return {
     ok: true,
@@ -1301,11 +1469,33 @@ function renderForbidden(
   options = {},
   seq = renderSeq
 ) {
-  destroyActiveView();
-
   const state = beginTransition(match, options);
+  const root = viewRoot();
 
-  renderFallback("Acceso no permitido", "No tienes permisos para ver esta vista.");
+  if (!root) {
+    return {
+      ok: false,
+      forbidden: true,
+      reason: "missing-root",
+      renderSeq: seq,
+    };
+  }
+
+  const previousView = activeView;
+  const previousHost = activeHost;
+  const nextHost = createRouteHost(match, state);
+
+  root.appendChild(nextHost);
+
+  activeView = null;
+
+  renderFallback("Acceso no permitido", "No tienes permisos para ver esta vista.", nextHost);
+
+  commitRouteHost(nextHost, {
+    route: match.route || null,
+    previousView,
+    previousHost,
+  });
 
   return {
     ok: true,
@@ -1410,9 +1600,17 @@ async function executeRender(path = HOME_PATH, options = {}) {
 }
 
 function render(path = HOME_PATH, options = {}) {
-  const task = executeRender(path, isObject(options) ? options : {});
+  const task = Promise.resolve(
+    executeRender(path, isObject(options) ? options : {})
+  );
 
-  renderTask = Promise.resolve(task).catch(() => null);
+  renderTask = task;
+
+  task.catch(() => null).finally(() => {
+    if (renderTask === task) {
+      renderTask = null;
+    }
+  });
 
   return task;
 }
@@ -1607,7 +1805,9 @@ function unbind() {
   }
 
   destroyActiveView();
+
   bound = false;
+  renderTask = null;
 
   return Router;
 }
@@ -1632,7 +1832,9 @@ function getSnapshot() {
     initialized,
     bound,
     renderSeq,
+
     hasActiveView: Boolean(activeView),
+    hasActiveHost: Boolean(activeHost),
     rendering: Boolean(renderTask),
 
     publicPath: redact(currentPublicPath()),

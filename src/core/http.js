@@ -10,12 +10,13 @@
    - Parsear JSON/text/blob/arrayBuffer.
    - Descargar blobs/documentos.
    - Clasificar errores auth sin navegar.
+   - Refresh automático controlado ante access token expirado.
+   - Retry único de la request original tras refresh OK.
    - Sin Router.
    - Sin Toast.
    - Sin Store.
    - Sin Services.
    - Sin storage.
-   - Sin refresh automático.
 ========================================================= */
 
 import {
@@ -29,7 +30,7 @@ import {
   isPrivateApiPath as configIsPrivateApiPath,
 } from "./config.js";
 
-export const HTTP_VERSION = "core.http.minimal.v3";
+export const HTTP_VERSION = "core.http.refresh.v4";
 
 export const AUTH_ENDPOINTS = CONFIG_AUTH_ENDPOINTS;
 
@@ -45,12 +46,44 @@ const SENSITIVE_KEYS = new Set(
     .filter(Boolean)
 );
 
+const NON_REFRESHABLE_AUTH_CODES = new Set([
+  "INVALID_CREDENTIALS",
+  "BAD_CREDENTIALS",
+  "LOGIN_FAILED",
+  "MFA_REQUIRED",
+  "2FA_REQUIRED",
+  "OTP_REQUIRED",
+
+  "SESSION_REVOKED",
+  "SESSION_INVALID",
+  "SESSION_NOT_FOUND",
+  "REFRESH_TOKEN_REVOKED",
+  "REFRESH_TOKEN_INVALID",
+  "REFRESH_TOKEN_EXPIRED",
+
+  "USER_DISABLED",
+  "USER_DESACTIVADO",
+  "USUARIO_DESACTIVADO",
+  "USER_DELETED",
+  "USER_ARCHIVED",
+  "USER_BLOCKED",
+  "USER_BANNED",
+  "USER_SUSPENDED",
+]);
+
 let appCore = null;
+let refreshPromise = null;
+let lastRefreshAt = null;
+let lastRefreshError = null;
 
 const stats = {
   total: 0,
   success: 0,
   error: 0,
+  refresh: 0,
+  refreshSuccess: 0,
+  refreshError: 0,
+  retryAfterRefresh: 0,
   lastMethod: "",
   lastUrl: "",
   lastStatus: null,
@@ -184,12 +217,16 @@ function sanitizeData(value, depth = 0) {
   return output;
 }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
 /* =========================================================
    API URL
 ========================================================= */
 
 function getApiOrigin() {
-  return getApiBase();
+  return DEFAULT_API_BASE || getApiBase();
 }
 
 function endpointToPath(endpoint = "/") {
@@ -348,6 +385,10 @@ export function setAuthTokens(payload = {}) {
       payload?.data?.token,
       payload?.data?.accessToken,
       payload?.data?.access_token,
+      payload?.payload?.token,
+      payload?.payload?.accessToken,
+      payload?.result?.token,
+      payload?.result?.accessToken,
       ""
     )
   );
@@ -361,6 +402,36 @@ export function setAuthTokens(payload = {}) {
     accessToken: token,
     access_token: token,
   };
+}
+
+function applyAuthPayload(payload = {}) {
+  const tokens = setAuthTokens(payload);
+
+  try {
+    if (isFunction(appCore?.applySession)) {
+      appCore.applySession(payload);
+    }
+  } catch {
+    // noop
+  }
+
+  return tokens;
+}
+
+function clearCoreSessionIfFinal(error = null) {
+  if (!shouldClearSessionForAuthError(error)) return false;
+
+  try {
+    if (isFunction(appCore?.clearSession)) {
+      appCore.clearSession();
+      return true;
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  clearAuthTokens();
+  return true;
 }
 
 /* =========================================================
@@ -414,6 +485,23 @@ function shouldUseAuth(endpoint = "", options = {}) {
   }
 
   return true;
+}
+
+function shouldAutoRefresh(endpoint = "", options = {}, error = null) {
+  if (
+    options.noAutoRefresh === true ||
+    options.skipRefresh === true ||
+    options.refresh === false ||
+    options.__retryAfterRefresh === true ||
+    options.__internalRefresh === true
+  ) {
+    return false;
+  }
+
+  if (isRefreshEndpoint(endpoint)) return false;
+  if (!shouldUseAuth(endpoint, options)) return false;
+
+  return isRefreshableAuthError(error);
 }
 
 /* =========================================================
@@ -496,7 +584,7 @@ function isBodyInit(value) {
   if (typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams) return true;
   if (typeof Blob !== "undefined" && value instanceof Blob) return true;
   if (typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer) return true;
-  if (ArrayBuffer.isView?.(value)) return true;
+  if (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView?.(value)) return true;
   if (typeof value === "string") return true;
 
   return false;
@@ -667,15 +755,18 @@ async function parseResponse(response, options = {}) {
 
 function extractErrorCode(payload = null, response = null) {
   if (isObject(payload)) {
-    return normalizeCode(
+    const explicit = normalizeCode(
       first(
         payload.code,
+        payload.errorCode,
+        payload.error_code,
         payload.error,
-        payload.status,
         payload.name,
         ""
       )
     );
+
+    if (explicit) return explicit;
   }
 
   if (response?.status === 401) return "UNAUTHORIZED";
@@ -739,7 +830,7 @@ function createHttpError({
 
 function isRefreshEndpoint(endpoint = "") {
   const path = endpointPathOnly(endpoint);
-  return path === endpointPathOnly(AUTH_ENDPOINTS.refresh);
+  return path && path === endpointPathOnly(AUTH_ENDPOINTS.refresh);
 }
 
 export function isAuthError(error = null) {
@@ -754,16 +845,9 @@ export function isRefreshableAuthError(error = null) {
   if (status !== 401) return false;
   if (isRefreshEndpoint(error?.endpoint || "")) return false;
   if (shouldClearSessionForAuthError(error)) return false;
+  if (NON_REFRESHABLE_AUTH_CODES.has(code)) return false;
 
-  return (
-    !code ||
-    code === "UNAUTHORIZED" ||
-    code === "AUTH_REQUIRED" ||
-    code === "SESSION_REQUIRED" ||
-    code === "TOKEN_EXPIRED" ||
-    code === "ACCESS_TOKEN_EXPIRED" ||
-    code === "JWT_EXPIRED"
-  );
+  return true;
 }
 
 export function shouldClearSessionForAuthError(error = null) {
@@ -772,18 +856,11 @@ export function shouldClearSessionForAuthError(error = null) {
 
   if (isRefreshEndpoint(error?.endpoint || "") && status === 401) return true;
 
-  return (
-    code === "SESSION_REVOKED" ||
-    code === "SESSION_INVALID" ||
-    code === "SESSION_NOT_FOUND" ||
-    code === "USER_DISABLED" ||
-    code === "USER_DESACTIVADO" ||
-    code === "USUARIO_DESACTIVADO"
-  );
+  return NON_REFRESHABLE_AUTH_CODES.has(code);
 }
 
 /* =========================================================
-   REQUEST
+   REQUEST LOW LEVEL
 ========================================================= */
 
 function ensureFetch() {
@@ -917,8 +994,83 @@ async function fetchParsed(endpoint = "/", options = {}) {
   }
 }
 
+/* =========================================================
+   REFRESH / RETRY
+========================================================= */
+
+async function runRefresh(body = {}, options = {}) {
+  if (refreshPromise) return refreshPromise;
+
+  stats.refresh += 1;
+  lastRefreshError = null;
+
+  refreshPromise = (async () => {
+    try {
+      const result = await fetchParsed(AUTH_ENDPOINTS.refresh, {
+        ...options,
+        method: "POST",
+        body: isPlainObject(body) ? body : {},
+        public: true,
+        auth: false,
+        noAuthHeader: true,
+        noAutoRefresh: true,
+        __internalRefresh: true,
+        source: options.source || "core.http.refresh",
+      });
+
+      applyAuthPayload(result.data || {});
+
+      stats.refreshSuccess += 1;
+      lastRefreshAt = nowIso();
+      lastRefreshError = null;
+
+      return result.data;
+    } catch (error) {
+      stats.refreshError += 1;
+
+      lastRefreshError = {
+        code: error?.code || "REFRESH_FAILED",
+        status: error?.status || error?.statusCode || null,
+        message: redact(error?.message || "No se pudo renovar la sesión."),
+        at: nowIso(),
+      };
+
+      clearCoreSessionIfFinal(error);
+
+      throw error;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
+async function fetchParsedWithRefresh(endpoint = "/", options = {}) {
+  try {
+    return await fetchParsed(endpoint, options);
+  } catch (error) {
+    if (!shouldAutoRefresh(endpoint, options, error)) {
+      clearCoreSessionIfFinal(error);
+      throw error;
+    }
+
+    await runRefresh({}, {
+      timeout: options.refreshTimeout || options.timeout || options.timeoutMs || DEFAULT_TIMEOUT_MS,
+      source: "core.http.auto-refresh",
+    });
+
+    stats.retryAfterRefresh += 1;
+
+    return fetchParsed(endpoint, {
+      ...options,
+      __retryAfterRefresh: true,
+    });
+  }
+}
+
 export async function request(endpoint = "/", options = {}) {
-  const result = await fetchParsed(endpoint, options);
+  const result = await fetchParsedWithRefresh(endpoint, options);
   return result.data;
 }
 
@@ -976,6 +1128,7 @@ export function login(payload = {}, options = {}) {
     public: true,
     auth: false,
     noAuthHeader: true,
+    noAutoRefresh: true,
   });
 }
 
@@ -983,6 +1136,7 @@ export function logout(options = {}) {
   return post(AUTH_ENDPOINTS.logout, {}, {
     ...options,
     auth: true,
+    noAutoRefresh: true,
   });
 }
 
@@ -990,6 +1144,7 @@ export function logoutAll(options = {}) {
   return post(AUTH_ENDPOINTS.logoutAll, {}, {
     ...options,
     auth: true,
+    noAutoRefresh: true,
   });
 }
 
@@ -1001,11 +1156,12 @@ export function me(options = {}) {
 }
 
 export function refreshSession(body = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.refresh, body, {
+  return runRefresh(body, {
     ...options,
     public: true,
     auth: false,
     noAuthHeader: true,
+    noAutoRefresh: true,
   });
 }
 
@@ -1015,6 +1171,7 @@ export function activateAccount(payload = {}, options = {}) {
     public: true,
     auth: false,
     noAuthHeader: true,
+    noAutoRefresh: true,
   });
 }
 
@@ -1024,6 +1181,7 @@ export function requestPasswordReset(payload = {}, options = {}) {
     public: true,
     auth: false,
     noAuthHeader: true,
+    noAutoRefresh: true,
   });
 }
 
@@ -1033,6 +1191,7 @@ export function confirmPasswordReset(payload = {}, options = {}) {
     public: true,
     auth: false,
     noAuthHeader: true,
+    noAutoRefresh: true,
   });
 }
 
@@ -1068,7 +1227,7 @@ export async function arrayBuffer(endpoint = "/", options = {}) {
 }
 
 export async function downloadBlob(endpoint = "/", options = {}) {
-  const result = await fetchParsed(endpoint, {
+  const result = await fetchParsedWithRefresh(endpoint, {
     ...options,
     method: options.method || "GET",
     responseType: "blob",
@@ -1138,16 +1297,26 @@ export function getSnapshot() {
       total: stats.total,
       success: stats.success,
       error: stats.error,
+      refresh: stats.refresh,
+      refreshSuccess: stats.refreshSuccess,
+      refreshError: stats.refreshError,
+      retryAfterRefresh: stats.retryAfterRefresh,
       lastMethod: stats.lastMethod,
       lastUrl: redact(stats.lastUrl),
       lastStatus: stats.lastStatus,
       lastError: sanitizeData(stats.lastError),
     },
+    refresh: {
+      inFlight: Boolean(refreshPromise),
+      lastRefreshAt,
+      lastRefreshError: sanitizeData(lastRefreshError),
+    },
     policy: {
       singleClient: true,
       configDriven: true,
       credentialsInclude: true,
-      noAutoRefresh: true,
+      autoRefresh: true,
+      retryAfterRefreshOnce: true,
       noRouter: true,
       noToast: true,
       noStore: true,

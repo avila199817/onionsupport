@@ -5,7 +5,9 @@
    Responsabilidad:
    - Controlador mínimo de la vista Incidencias.
    - Montar template principal.
-   - Cargar/listar incidencias desde incidencias.api.js.
+   - Hidratar desde cache en memoria.
+   - Pintar inmediatamente sin bloquear el Router.
+   - Cargar/listar incidencias desde incidencias.api.js en background.
    - Crear incidencia.
    - Abrir detalle.
    - Comentar/reabrir/subir adjuntos.
@@ -55,12 +57,19 @@ import {
   validateDetailUpdate,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.minimal.v1";
+export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.fast.v2";
 export const INCIDENCIAS_VIEW_VERSION = INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
 const USER_SEARCH_MIN_LENGTH = 2;
 const USER_SEARCH_LIMIT = 8;
+const USER_SEARCH_DEBOUNCE_MS = 220;
+
+const ROUTER_EVENT_HANDLED_KEY = "__onionRouterHandled";
+
+const INSTANCES = new WeakMap();
+
+let lastInstance = null;
 
 /* =========================================================
    BASICS
@@ -76,6 +85,14 @@ function isObject(value) {
 
 function isFunction(value) {
   return typeof value === "function";
+}
+
+function isDomNode(value = null) {
+  return Boolean(
+    typeof Node !== "undefined" &&
+      value &&
+      value instanceof Node
+  );
 }
 
 function safeArray(value) {
@@ -190,8 +207,33 @@ function upsertByTicketId(items = [], item = null) {
   });
 }
 
+function nextFrame(callback) {
+  if (!isBrowser()) return 0;
+
+  if (typeof window.requestAnimationFrame === "function") {
+    return window.requestAnimationFrame(callback);
+  }
+
+  return window.setTimeout(callback, 0);
+}
+
+function cancelFrame(id = 0) {
+  if (!id || !isBrowser()) return false;
+
+  try {
+    if (typeof window.cancelAnimationFrame === "function") {
+      window.cancelAnimationFrame(id);
+    }
+
+    window.clearTimeout?.(id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /* =========================================================
-   CORE / ROUTER / AUTH
+   CORE / AUTH
 ========================================================= */
 
 function getState() {
@@ -234,16 +276,6 @@ function getCurrentRole() {
 
 function isAdmin() {
   return getCurrentRole() === "admin";
-}
-
-function getRouter(context = {}) {
-  return (
-    context.Router ||
-    AppCore.router ||
-    AppCore.Router ||
-    AppCore.getModule?.("router") ||
-    null
-  );
 }
 
 function getRoutes() {
@@ -409,14 +441,56 @@ function syncBodyModalClass(open = false) {
 }
 
 /* =========================================================
+   INSTANCE REGISTRY
+========================================================= */
+
+function destroyPrevious(host = null) {
+  const previous = host ? INSTANCES.get(host) : null;
+
+  if (previous?.destroy) {
+    previous.destroy({
+      remount: true,
+    });
+
+    return true;
+  }
+
+  return false;
+}
+
+function storeInstance(host = null, instance = null) {
+  if (!host || !instance) return false;
+
+  INSTANCES.set(host, instance);
+  lastInstance = instance;
+
+  return true;
+}
+
+function clearInstance(host = null, instance = null) {
+  if (host && INSTANCES.get(host) === instance) {
+    INSTANCES.delete(host);
+  }
+
+  if (lastInstance === instance) {
+    lastInstance = null;
+  }
+
+  return true;
+}
+
+/* =========================================================
    CONTROLLER
 ========================================================= */
 
 function createIncidenciasController(host = null, context = {}) {
-  let destroyed = false;
+  const cached = hydrateIncidenciasFromCache();
 
-  let items = hydrateIncidenciasFromCache().items || [];
-  let total = hydrateIncidenciasFromCache().total || items.length;
+  let destroyed = false;
+  let mounted = false;
+
+  let items = safeArray(cached.items);
+  let total = Number(cached.total || items.length) || items.length;
 
   let loading = false;
   let refreshing = false;
@@ -429,7 +503,12 @@ function createIncidenciasController(host = null, context = {}) {
   let visibleLimit = DEFAULT_VISIBLE_LIMIT;
   let openingTicketId = "";
 
+  let renderFrame = 0;
+  let pendingRenderOptions = null;
+
+  let loadSeq = 0;
   let userSearchSeq = 0;
+  let userSearchTimer = 0;
 
   const createModal = {
     open: false,
@@ -516,8 +595,32 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
-  function render(options = {}) {
+  function mergeRenderOptions(current = {}, next = {}) {
+    return {
+      ...current,
+      ...next,
+      focusSelector: next.focusSelector || current.focusSelector || "",
+      focusEnd:
+        next.focusEnd !== undefined
+          ? next.focusEnd
+          : current.focusEnd,
+    };
+  }
+
+  function cancelScheduledRender() {
+    if (!renderFrame) return false;
+
+    cancelFrame(renderFrame);
+    renderFrame = 0;
+    pendingRenderOptions = null;
+
+    return true;
+  }
+
+  function renderNow(options = {}) {
     if (destroyed || !host) return false;
+
+    cancelScheduledRender();
 
     host.innerHTML = renderIncidenciasTemplate(payload());
 
@@ -530,34 +633,100 @@ function createIncidenciasController(host = null, context = {}) {
     return true;
   }
 
-  function renderLoading() {
+  function render(options = {}) {
     if (destroyed || !host) return false;
 
+    if (options.immediate === true) {
+      return renderNow(options);
+    }
+
+    pendingRenderOptions = mergeRenderOptions(pendingRenderOptions || {}, options);
+
+    if (renderFrame) return true;
+
+    renderFrame = nextFrame(() => {
+      const nextOptions = pendingRenderOptions || {};
+
+      renderFrame = 0;
+      pendingRenderOptions = null;
+
+      renderNow(nextOptions);
+    });
+
+    return true;
+  }
+
+  function renderLoading(options = {}) {
+    if (destroyed || !host) return false;
+
+    cancelScheduledRender();
+
     host.innerHTML = renderIncidenciasLoadingState(payload());
+
+    syncBodyModalClass(createModal.open || detailModal.open);
+
+    if (options.focusSelector) {
+      focusAfterRender(options.focusSelector, options.focusEnd !== false);
+    }
+
     return true;
   }
 
   function renderError(message = "No se pudieron cargar las incidencias.") {
     if (destroyed || !host) return false;
 
+    cancelScheduledRender();
+
     host.innerHTML = renderIncidenciasErrorState(message);
+
+    syncBodyModalClass(false);
+
+    return true;
+  }
+
+  function clearUserSearchTimer() {
+    if (!userSearchTimer) return false;
+
+    try {
+      window.clearTimeout(userSearchTimer);
+    } catch {
+      // noop
+    }
+
+    userSearchTimer = 0;
+
     return true;
   }
 
   async function load(options = {}) {
-    loading = options.silent ? loading : true;
-    refreshing = options.force === true;
+    const seq = ++loadSeq;
+    const silent = options.silent === true;
+    const force = options.force === true;
+
+    const hasItems = items.length > 0;
+
     error = "";
 
-    if (!options.silent) {
-      render();
+    if (!silent) {
+      loading = !hasItems;
+      refreshing = force && hasItems;
+
+      if (loading) {
+        renderLoading();
+      } else {
+        render();
+      }
     }
 
     try {
       const response = await listIncidencias({
         returnStaleOnError: true,
-        force: options.force === true,
+        force,
       });
+
+      if (destroyed || seq !== loadSeq) {
+        return response;
+      }
 
       items = safeArray(response.items);
       total = Number(response.total || items.length) || items.length;
@@ -570,6 +739,10 @@ function createIncidenciasController(host = null, context = {}) {
 
       return response;
     } catch (loadError) {
+      if (destroyed || seq !== loadSeq) {
+        return null;
+      }
+
       error = safeError(loadError);
       loading = false;
       refreshing = false;
@@ -584,8 +757,30 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
+  function resetCreateModal() {
+    createModal.open = false;
+    createModal.submitting = false;
+    createModal.dragActive = false;
+    createModal.serverError = "";
+    createModal.successMessage = "";
+    createModal.createdTicketId = "";
+    createModal.errors = {};
+    createModal.form = {
+      ...getCreateFormDefaults(),
+      attachments: [],
+    };
+    createModal.userSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      selectedUser: null,
+      empty: false,
+    };
+  }
+
   function openCreateModal() {
-    creating = true;
+    creating = false;
 
     createModal.open = true;
     createModal.submitting = false;
@@ -607,7 +802,6 @@ function createIncidenciasController(host = null, context = {}) {
       empty: false,
     };
 
-    creating = false;
     render({
       focusSelector: "[data-field='subject']",
     });
@@ -618,25 +812,10 @@ function createIncidenciasController(host = null, context = {}) {
   function closeCreateModal() {
     if (createModal.submitting) return false;
 
-    createModal.open = false;
-    createModal.submitting = false;
-    createModal.dragActive = false;
-    createModal.serverError = "";
-    createModal.successMessage = "";
-    createModal.createdTicketId = "";
-    createModal.errors = {};
-    createModal.form = {
-      ...getCreateFormDefaults(),
-      attachments: [],
-    };
-    createModal.userSearch = {
-      query: "",
-      loading: false,
-      error: "",
-      results: [],
-      selectedUser: null,
-      empty: false,
-    };
+    clearUserSearchTimer();
+    userSearchSeq += 1;
+
+    resetCreateModal();
 
     render();
     return true;
@@ -667,33 +846,11 @@ function createIncidenciasController(host = null, context = {}) {
     return true;
   }
 
-  async function handleUserSearch(value = "") {
-    const query = cleanText(value, "");
-    const seq = ++userSearchSeq;
-
-    createModal.userSearch.query = query;
-    createModal.userSearch.error = "";
-    createModal.userSearch.results = [];
-    createModal.userSearch.empty = false;
-
-    if (!isAdmin() || query.length < USER_SEARCH_MIN_LENGTH) {
-      createModal.userSearch.loading = false;
-      render({
-        focusSelector: "[data-create-user-search-input]",
-      });
-      return true;
-    }
-
-    createModal.userSearch.loading = true;
-
-    render({
-      focusSelector: "[data-create-user-search-input]",
-    });
-
+  async function runUserSearch(query = "", seq = userSearchSeq) {
     try {
       const results = await searchUsers(query);
 
-      if (seq !== userSearchSeq) return false;
+      if (destroyed || seq !== userSearchSeq) return false;
 
       createModal.userSearch.results = results;
       createModal.userSearch.loading = false;
@@ -706,7 +863,7 @@ function createIncidenciasController(host = null, context = {}) {
 
       return true;
     } catch (searchError) {
-      if (seq !== userSearchSeq) return false;
+      if (destroyed || seq !== userSearchSeq) return false;
 
       createModal.userSearch.results = [];
       createModal.userSearch.loading = false;
@@ -719,6 +876,41 @@ function createIncidenciasController(host = null, context = {}) {
 
       return false;
     }
+  }
+
+  function handleUserSearch(value = "") {
+    const query = cleanText(value, "");
+    const seq = ++userSearchSeq;
+
+    clearUserSearchTimer();
+
+    createModal.userSearch.query = query;
+    createModal.userSearch.error = "";
+    createModal.userSearch.results = [];
+    createModal.userSearch.empty = false;
+
+    if (!isAdmin() || query.length < USER_SEARCH_MIN_LENGTH) {
+      createModal.userSearch.loading = false;
+
+      render({
+        focusSelector: "[data-create-user-search-input]",
+      });
+
+      return true;
+    }
+
+    createModal.userSearch.loading = true;
+
+    render({
+      focusSelector: "[data-create-user-search-input]",
+    });
+
+    userSearchTimer = window.setTimeout(() => {
+      userSearchTimer = 0;
+      void runUserSearch(query, seq);
+    }, USER_SEARCH_DEBOUNCE_MS);
+
+    return true;
   }
 
   function selectCreateUser(node = null) {
@@ -792,6 +984,7 @@ function createIncidenciasController(host = null, context = {}) {
     }
 
     createModal.serverError = "";
+
     render();
 
     return true;
@@ -867,12 +1060,7 @@ function createIncidenciasController(host = null, context = {}) {
       createModal.successMessage = "Incidencia creada.";
       createModal.createdTicketId = getTicketId(created);
 
-      createModal.open = false;
-      createModal.form = {
-        ...getCreateFormDefaults(),
-        attachments: [],
-      };
-      createModal.errors = {};
+      resetCreateModal();
 
       render();
 
@@ -889,9 +1077,7 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
-  function closeDetailModal() {
-    if (detailModal.submitting) return false;
-
+  function resetDetailModal() {
     detailModal.open = false;
     detailModal.detail = null;
     detailModal.submitting = false;
@@ -902,6 +1088,12 @@ function createIncidenciasController(host = null, context = {}) {
     detailModal.openingAttachmentId = "";
     detailModal.downloadingAttachmentId = "";
     detailModal.previewFile = null;
+  }
+
+  function closeDetailModal() {
+    if (detailModal.submitting) return false;
+
+    resetDetailModal();
 
     render();
     return true;
@@ -912,12 +1104,34 @@ function createIncidenciasController(host = null, context = {}) {
 
     if (!id) return false;
 
+    const local = items.find((item) => getTicketId(item) === id) || null;
+
     openingTicketId = id;
-    render();
+
+    if (local) {
+      detailModal.open = true;
+      detailModal.detail = local;
+      detailModal.submitting = false;
+      detailModal.commentDraft = "";
+      detailModal.pendingFiles = [];
+      detailModal.feedbackMessage = "";
+      detailModal.feedbackType = "info";
+      detailModal.previewFile = null;
+
+      render({
+        focusSelector: "[data-incidencias-modal-panel='true']",
+        focusEnd: false,
+      });
+    } else {
+      render();
+    }
 
     try {
-      const local = items.find((item) => getTicketId(item) === id) || null;
       const detail = await loadIncidenciaDetail(id);
+
+      if (destroyed || openingTicketId !== id) {
+        return false;
+      }
 
       detailModal.open = true;
       detailModal.detail = detail || local;
@@ -933,6 +1147,7 @@ function createIncidenciasController(host = null, context = {}) {
       }
 
       openingTicketId = "";
+
       render({
         focusSelector: "[data-incidencias-modal-panel='true']",
         focusEnd: false,
@@ -940,7 +1155,24 @@ function createIncidenciasController(host = null, context = {}) {
 
       return true;
     } catch (detailError) {
+      if (destroyed || openingTicketId !== id) {
+        return false;
+      }
+
       openingTicketId = "";
+
+      if (local) {
+        detailModal.feedbackMessage = safeError(detailError, "No se pudo actualizar el detalle.");
+        detailModal.feedbackType = "error";
+
+        render({
+          focusSelector: "[data-incidencias-modal-panel='true']",
+          focusEnd: false,
+        });
+
+        return false;
+      }
+
       error = safeError(detailError, "No se pudo abrir el detalle.");
 
       render();
@@ -1001,9 +1233,11 @@ function createIncidenciasController(host = null, context = {}) {
     if (!validation.valid) {
       detailModal.feedbackMessage = validation.message;
       detailModal.feedbackType = "error";
+
       render({
         focusSelector: "[data-field='comment']",
       });
+
       return false;
     }
 
@@ -1092,6 +1326,7 @@ function createIncidenciasController(host = null, context = {}) {
     if (!id || !ticketId) return false;
 
     detailModal.openingAttachmentId = id;
+
     render();
 
     try {
@@ -1108,6 +1343,7 @@ function createIncidenciasController(host = null, context = {}) {
       };
 
       detailModal.openingAttachmentId = "";
+
       render();
 
       return true;
@@ -1130,6 +1366,7 @@ function createIncidenciasController(host = null, context = {}) {
     if (!id || !ticketId) return false;
 
     detailModal.downloadingAttachmentId = id;
+
     render();
 
     try {
@@ -1140,6 +1377,7 @@ function createIncidenciasController(host = null, context = {}) {
       });
 
       detailModal.downloadingAttachmentId = "";
+
       render();
 
       return true;
@@ -1166,6 +1404,7 @@ function createIncidenciasController(host = null, context = {}) {
 
   function closePreview() {
     detailModal.previewFile = null;
+
     render();
 
     return true;
@@ -1205,6 +1444,7 @@ function createIncidenciasController(host = null, context = {}) {
   function setFilter(value = "all") {
     filter = cleanText(value, "all");
     visibleLimit = DEFAULT_VISIBLE_LIMIT;
+
     render();
 
     return true;
@@ -1223,6 +1463,7 @@ function createIncidenciasController(host = null, context = {}) {
 
   function loadMore() {
     visibleLimit += DEFAULT_VISIBLE_LIMIT;
+
     render();
 
     return true;
@@ -1231,6 +1472,7 @@ function createIncidenciasController(host = null, context = {}) {
   async function refresh() {
     return load({
       force: true,
+      silent: false,
     });
   }
 
@@ -1290,6 +1532,9 @@ function createIncidenciasController(host = null, context = {}) {
 
       if (action) {
         event.preventDefault();
+        event.stopPropagation();
+        event[ROUTER_EVENT_HANDLED_KEY] = true;
+
         void handleAction(action, actionNode);
         return;
       }
@@ -1299,6 +1544,9 @@ function createIncidenciasController(host = null, context = {}) {
 
     if (row && host?.contains(row)) {
       event.preventDefault();
+      event.stopPropagation();
+      event[ROUTER_EVENT_HANDLED_KEY] = true;
+
       void openDetail(row.dataset.ticketId || row.dataset.incidenciaId || "");
       return;
     }
@@ -1331,7 +1579,7 @@ function createIncidenciasController(host = null, context = {}) {
     }
 
     if (field === "targetUserSearch") {
-      void handleUserSearch(target.value || "");
+      handleUserSearch(target.value || "");
       return;
     }
 
@@ -1372,6 +1620,9 @@ function createIncidenciasController(host = null, context = {}) {
 
     if (form.matches("#incidencias-create-form, [data-incidencias-create-form='true']")) {
       event.preventDefault();
+      event.stopPropagation();
+      event[ROUTER_EVENT_HANDLED_KEY] = true;
+
       void submitCreate(form);
     }
   }
@@ -1398,6 +1649,9 @@ function createIncidenciasController(host = null, context = {}) {
     if (!row || !host?.contains(row)) return;
 
     event.preventDefault();
+    event.stopPropagation();
+    event[ROUTER_EVENT_HANDLED_KEY] = true;
+
     void openDetail(row.dataset.ticketId || row.dataset.incidenciaId || "");
   }
 
@@ -1447,6 +1701,8 @@ function createIncidenciasController(host = null, context = {}) {
     host?.addEventListener?.("dragover", onDragOver);
     host?.addEventListener?.("dragleave", onDragLeave);
     host?.addEventListener?.("drop", onDrop);
+
+    return true;
   }
 
   function unbind() {
@@ -1458,36 +1714,64 @@ function createIncidenciasController(host = null, context = {}) {
     host?.removeEventListener?.("dragover", onDragOver);
     host?.removeEventListener?.("dragleave", onDragLeave);
     host?.removeEventListener?.("drop", onDrop);
+
+    return true;
   }
 
-  return {
+  const controller = {
     version: INCIDENCIAS_VIEW_VERSION,
 
-    async mount() {
+    mount() {
+      if (destroyed || !host) return controller;
+      if (mounted) return controller;
+
+      mounted = true;
       bind();
 
-      loading = true;
-      renderLoading();
+      const hasCache = items.length > 0;
 
-      await load({
-        silent: false,
+      if (hasCache) {
+        loading = false;
+        refreshing = false;
+        error = "";
+        renderNow();
+      } else {
+        loading = true;
+        refreshing = false;
+        error = "";
+        renderLoading();
+      }
+
+      void load({
+        silent: true,
+        source: "incidencias.mount.background",
       });
 
-      return this;
+      return controller;
     },
 
     destroy() {
       destroyed = true;
+      mounted = false;
+
+      loadSeq += 1;
+      userSearchSeq += 1;
+
+      clearUserSearchTimer();
+      cancelScheduledRender();
+
       unbind();
 
-      createModal.open = false;
-      detailModal.open = false;
+      resetCreateModal();
+      resetDetailModal();
       syncBodyModalClass(false);
 
-      if (host) {
-        host.replaceChildren();
-      }
+      clearInstance(host, controller);
 
+      /*
+        El Router controla el host y hace swap atómico.
+        No vaciamos host aquí para evitar doble clear y flashes.
+      */
       return true;
     },
 
@@ -1499,13 +1783,21 @@ function createIncidenciasController(host = null, context = {}) {
       return this.destroy();
     },
 
+    dispose() {
+      return this.destroy();
+    },
+
     refresh,
+
+    reload: refresh,
 
     getSnapshot() {
       return {
         version: INCIDENCIAS_VIEW_VERSION,
 
+        mounted,
         destroyed,
+
         loading,
         refreshing,
         creating,
@@ -1528,7 +1820,13 @@ function createIncidenciasController(host = null, context = {}) {
         error: redact(error),
       };
     },
+
+    getDebugSnapshot() {
+      return this.getSnapshot();
+    },
   };
+
+  return controller;
 }
 
 /* =========================================================
@@ -1536,10 +1834,43 @@ function createIncidenciasController(host = null, context = {}) {
 ========================================================= */
 
 export async function IncidenciasView(host = null, context = {}) {
+  if (!isDomNode(host)) {
+    return null;
+  }
+
+  destroyPrevious(host);
+
   const controller = createIncidenciasController(host, context);
+
+  storeInstance(host, controller);
+
   return controller.mount();
 }
 
 export const IncidenciasIndex = IncidenciasView;
+
+export function destroy() {
+  try {
+    return Boolean(lastInstance?.destroy?.());
+  } catch {
+    return false;
+  }
+}
+
+export function getSnapshot() {
+  if (lastInstance?.getSnapshot) {
+    return lastInstance.getSnapshot();
+  }
+
+  return {
+    version: INCIDENCIAS_VIEW_VERSION,
+    mounted: false,
+    hasInstance: false,
+    role: getCurrentRole(),
+    admin: isAdmin(),
+  };
+}
+
+export const getDebugSnapshot = getSnapshot;
 
 export default IncidenciasView;

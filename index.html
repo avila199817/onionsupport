@@ -113,8 +113,7 @@
     aria-busy="true"
     aria-atomic="true"
     aria-hidden="false"
-    aria-labelledby="app-loader-title"
-    aria-describedby="app-loader-text"
+    aria-label="Cargando Onion Support"
   >
     <div
       class="app-loader__backdrop"
@@ -123,78 +122,42 @@
     ></div>
 
     <div
-      class="app-loader__card"
-      data-loader-card="true"
+      class="app-loader__brand app-loader__brand--solo"
+      data-loader-brand="true"
+      data-loader-logo-card="true"
+      aria-hidden="true"
     >
       <div
-        class="app-loader__brand"
-        data-loader-brand="true"
+        class="app-loader__logo-fallback app-loader__logo-shell"
+        data-loader-logo-shell="true"
+        data-loader-logo-fallback="true"
         aria-hidden="true"
       >
-        <div
-          class="app-loader__logo-fallback app-loader__logo-shell"
-          data-loader-logo-shell="true"
-          data-loader-logo-fallback="true"
-          aria-hidden="true"
+        <picture
+          class="app-loader__logo-picture"
+          data-loader-logo-picture="true"
         >
-          <picture
-            class="app-loader__logo-picture"
-            data-loader-logo-picture="true"
+          <source
+            srcset="src/media/img/favicon_black.png"
+            media="(prefers-color-scheme: light)"
           >
-            <source
-              srcset="src/media/img/favicon_black.png"
-              media="(prefers-color-scheme: light)"
-            >
-            <source
-              srcset="src/media/img/favicon_white.png"
-              media="(prefers-color-scheme: dark)"
-            >
-            <img
-              class="app-loader__logo"
-              src="src/media/img/favicon_white.png"
-              width="48"
-              height="48"
-              alt=""
-              loading="eager"
-              decoding="async"
-              fetchpriority="high"
-              draggable="false"
-              data-loader-logo="true"
-            >
-          </picture>
-        </div>
-      </div>
-
-      <div
-        class="app-loader__copy"
-        data-loader-copy="true"
-      >
-        <strong
-          id="app-loader-title"
-          class="app-loader__title"
-          data-loader-title="true"
-        >
-          Onion Support
-        </strong>
-
-        <span
-          id="app-loader-text"
-          class="app-loader__text"
-          data-loader-text="true"
-        >
-          Cargando panel...
-        </span>
-      </div>
-
-      <div
-        class="app-loader__bar"
-        data-loader-bar="true"
-        aria-hidden="true"
-      >
-        <span
-          class="app-loader__bar-fill"
-          data-loader-bar-fill="true"
-        ></span>
+          <source
+            srcset="src/media/img/favicon_white.png"
+            media="(prefers-color-scheme: dark)"
+          >
+          <img
+            class="app-loader__logo"
+            src="src/media/img/favicon_white.png"
+            width="48"
+            height="48"
+            alt=""
+            loading="eager"
+            decoding="async"
+            fetchpriority="high"
+            draggable="false"
+            data-loader-logo="true"
+          >
+        </picture>
       </div>
     </div>
   </div>

@@ -13,8 +13,8 @@
    - Comentar/reabrir/subir adjuntos.
    - Abrir/descargar adjuntos.
    - Buscador admin de usuario afectado para creación.
-   - Delegar HTML en templates.
    - Renderizar create modal como isla estable para evitar flicker.
+   - Delegar HTML en templates.
    - Sin Store.
    - Sin State externo.
    - Sin actions/bindings/model/utils/homeView legacy.
@@ -59,7 +59,7 @@ import {
   validateDetailUpdate,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.fast.v4.modal-island";
+export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.fast.v5.modal-island";
 export const INCIDENCIAS_VIEW_VERSION = INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
@@ -359,22 +359,65 @@ function unwrapList(payload = null) {
 
   const object = safeObject(payload, {});
 
+  const direct = first(
+    object.items,
+    object.rows,
+    object.results,
+    object.records,
+    object.users,
+    object.usuarios,
+    object.data,
+    object.payload,
+    object.result,
+    object.response,
+    object.body
+  );
+
+  if (Array.isArray(direct)) return direct;
+
+  const data = safeObject(object.data);
+  const payloadObject = safeObject(object.payload);
+  const result = safeObject(object.result);
+  const response = safeObject(object.response);
+  const body = safeObject(object.body);
+
   return safeArray(
     first(
-      object.items,
-      object.rows,
-      object.results,
-      object.records,
-      object.users,
-      object.usuarios,
-      object.data?.items,
-      object.data?.rows,
-      object.data?.results,
-      object.data?.users,
-      object.payload?.items,
-      object.payload?.users,
-      object.result?.items,
-      object.result?.users,
+      data.items,
+      data.rows,
+      data.results,
+      data.records,
+      data.users,
+      data.usuarios,
+
+      payloadObject.items,
+      payloadObject.rows,
+      payloadObject.results,
+      payloadObject.records,
+      payloadObject.users,
+      payloadObject.usuarios,
+
+      result.items,
+      result.rows,
+      result.results,
+      result.records,
+      result.users,
+      result.usuarios,
+
+      response.items,
+      response.rows,
+      response.results,
+      response.records,
+      response.users,
+      response.usuarios,
+
+      body.items,
+      body.rows,
+      body.results,
+      body.records,
+      body.users,
+      body.usuarios,
+
       []
     )
   );
@@ -418,34 +461,40 @@ async function searchUsers(query = "") {
 
   if (!isAdmin() || q.length < USER_SEARCH_MIN_LENGTH) return [];
 
-  const request =
-    AppCore.request ||
-    AppCore.http?.get ||
-    AppCore.Http?.get ||
-    AppCore.getHttpClient?.()?.get ||
-    null;
+  const requestOptions = {
+    method: "GET",
+    query: {
+      q,
+      search: q,
+      query: q,
+      limit: USER_SEARCH_LIMIT,
+    },
+    params: {
+      q,
+      search: q,
+      query: q,
+      limit: USER_SEARCH_LIMIT,
+    },
+    source: "views.incidencias.user-search",
+  };
 
-  if (!isFunction(request)) return [];
+  let response = null;
 
-  const response =
-    request === AppCore.request
-      ? await request.call(AppCore, "/api/users", {
-          method: "GET",
-          query: {
-            q,
-            search: q,
-            limit: USER_SEARCH_LIMIT,
-          },
-          source: "views.incidencias.user-search",
-        })
-      : await request.call(AppCore.http || AppCore.Http, "/api/users", {
-          query: {
-            q,
-            search: q,
-            limit: USER_SEARCH_LIMIT,
-          },
-          source: "views.incidencias.user-search",
-        });
+  if (isFunction(AppCore.request)) {
+    response = await AppCore.request.call(AppCore, "/api/users", requestOptions);
+  } else {
+    const httpClient =
+      AppCore.http ||
+      AppCore.Http ||
+      AppCore.getHttpClient?.() ||
+      null;
+
+    const get = httpClient?.get || null;
+
+    if (!isFunction(get)) return [];
+
+    response = await get.call(httpClient, "/api/users", requestOptions);
+  }
 
   return unwrapList(response)
     .map(normalizeUserResult)
@@ -505,13 +554,13 @@ function fileIndexFromNode(node = null) {
    BODY STATE
 ========================================================= */
 
-function syncBodyModalClass(open = false) {
+function syncBodyModalClass(open = false, createOpen = false) {
   if (!isBrowser()) return false;
 
   try {
     document.body?.classList.toggle("modal-open", open);
     document.body?.classList.toggle("incidencias-modal-open", open);
-    document.body?.classList.toggle("incidencias-create-open", open);
+    document.body?.classList.toggle("incidencias-create-open", createOpen);
     return true;
   } catch {
     return false;
@@ -658,10 +707,6 @@ function createIncidenciasController(host = null, context = {}) {
 
   function viewPayload(extra = {}) {
     return payload({
-      /*
-        El create modal se renderiza como isla estable fuera del host.
-        Así la vista puede re-renderizarse sin destruir el modal.
-      */
       createModal: {
         ...createModal,
         open: false,
@@ -798,15 +843,16 @@ function createIncidenciasController(host = null, context = {}) {
 
     const keep = new Set(["id"]);
 
-    for (const attr of Array.from(current.attributes || [])) {
-      if (keep.has(attr.name)) continue;
-      if (!next.hasAttribute(attr.name)) {
-        current.removeAttribute(attr.name);
+    for (const currentAttr of Array.from(current.attributes || [])) {
+      if (keep.has(currentAttr.name)) continue;
+
+      if (!next.hasAttribute(currentAttr.name)) {
+        current.removeAttribute(currentAttr.name);
       }
     }
 
-    for (const attr of Array.from(next.attributes || [])) {
-      current.setAttribute(attr.name, attr.value);
+    for (const nextAttr of Array.from(next.attributes || [])) {
+      current.setAttribute(nextAttr.name, nextAttr.value);
     }
 
     return true;
@@ -1007,7 +1053,7 @@ function createIncidenciasController(host = null, context = {}) {
     if (!html) {
       if (currentRoot) currentRoot.remove();
 
-      syncBodyModalClass(createModal.open || detailModal.open);
+      syncBodyModalClass(createModal.open || detailModal.open, createModal.open);
       return true;
     }
 
@@ -1018,7 +1064,7 @@ function createIncidenciasController(host = null, context = {}) {
     if (!currentRoot) {
       target.replaceChildren(nextRoot);
 
-      syncBodyModalClass(createModal.open || detailModal.open);
+      syncBodyModalClass(createModal.open || detailModal.open, createModal.open);
 
       if (options.focusSelector) {
         focusAfterRender(options.focusSelector, options.focusEnd !== false, target);
@@ -1041,7 +1087,7 @@ function createIncidenciasController(host = null, context = {}) {
       }
     }
 
-    syncBodyModalClass(createModal.open || detailModal.open);
+    syncBodyModalClass(createModal.open || detailModal.open, createModal.open);
 
     return true;
   }
@@ -1083,7 +1129,7 @@ function createIncidenciasController(host = null, context = {}) {
       preserveFocus: true,
     });
 
-    syncBodyModalClass(createModal.open || detailModal.open);
+    syncBodyModalClass(createModal.open || detailModal.open, createModal.open);
 
     if (options.focusSelector) {
       focusAfterRender(options.focusSelector, options.focusEnd !== false);
@@ -1126,7 +1172,7 @@ function createIncidenciasController(host = null, context = {}) {
       preserveFocus: true,
     });
 
-    syncBodyModalClass(createModal.open || detailModal.open);
+    syncBodyModalClass(createModal.open || detailModal.open, createModal.open);
 
     if (options.focusSelector) {
       focusAfterRender(options.focusSelector, options.focusEnd !== false);
@@ -1146,7 +1192,7 @@ function createIncidenciasController(host = null, context = {}) {
       preserveFocus: true,
     });
 
-    syncBodyModalClass(createModal.open || detailModal.open);
+    syncBodyModalClass(createModal.open || detailModal.open, createModal.open);
 
     return true;
   }
@@ -1381,12 +1427,14 @@ function createIncidenciasController(host = null, context = {}) {
       return true;
     }
 
-    /*
-      No re-render inmediato por cada tecla.
-      El input ya tiene el valor real en DOM; sólo pintamos cuando llegan resultados.
-      Esto evita el flicker principal del modal.
-    */
     createModal.userSearch.loading = true;
+
+    if (hadVisibleSearchState) {
+      renderCreateModal({
+        focusSelector: "[data-create-user-search-input]",
+        preserveFocus: true,
+      });
+    }
 
     userSearchTimer = window.setTimeout(() => {
       userSearchTimer = 0;
@@ -1415,6 +1463,7 @@ function createIncidenciasController(host = null, context = {}) {
       ),
       "Usuario"
     );
+
     const userEmail = cleanText(
       first(
         node?.dataset?.userEmail,
@@ -1424,6 +1473,7 @@ function createIncidenciasController(host = null, context = {}) {
       ),
       ""
     ).toLowerCase();
+
     const userAvatar = cleanText(
       first(
         node?.dataset?.userAvatar,
@@ -1591,6 +1641,10 @@ function createIncidenciasController(host = null, context = {}) {
       createModal.createdTicketId = getTicketId(created);
 
       resetCreateModal();
+
+      renderCreateModal({
+        immediate: true,
+      });
 
       render();
 
@@ -2263,7 +2317,6 @@ function createIncidenciasController(host = null, context = {}) {
 
   function bind() {
     bindTarget(host);
-
     ensureModalHost();
 
     return true;
@@ -2329,7 +2382,7 @@ function createIncidenciasController(host = null, context = {}) {
       resetDetailModal();
 
       removeModalHost();
-      syncBodyModalClass(false);
+      syncBodyModalClass(false, false);
 
       clearInstance(host, controller);
 

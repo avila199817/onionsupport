@@ -2,23 +2,24 @@
    Onion Support - Home View CSS
    Archivo: /src/css/views/home/index.css
 
+   ONIONSUPPORT SPA · HOME PREMIUM · CSS BACKGROUND · EXTREME 10/10
+
    Responsabilidad:
    - CSS único de Home alineado con /src/views/home/home.template.js.
+   - Background premium generado 100% con CSS, sin PNG, sin url().
+   - Separación superior real contra Topbar.
+   - Cards de estadísticas con tamaño equilibrado.
+   - Colores vivos por tipo de card.
+   - Glass premium nítido sobre fondo azul/deep gradient.
    - Scope cerrado en .home-view-root / [data-home-scope].
-   - Panel SaaS premium, compacto, nítido y responsive.
-   - Header con avatar + saludo + CTA "Crear incidencia".
+   - Header con avatar + saludo + CTA Crear incidencia.
    - Stats, actividad, facturas y entidades admin.
    - Estados loading, stale y error.
-   - Sin quick actions legacy.
-   - Sin CSV.
-   - Sin refresh superior.
-   - Sin health/server/ping.
-   - Sin tabla legacy.
-   - Sin modal legacy.
+   - Responsive sólido.
+   - Sin JS.
+   - Sin Store.
    - Sin CSS inline.
    - Sin dependencias externas.
-   - Sin paletas paralelas.
-   - Consume tokens globales y respeta tema del sistema.
 ========================================================= */
 
 
@@ -27,89 +28,126 @@
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]) {
-  --home-accent: var(--accent, #71717a);
-  --home-accent-strong: var(--accent-strong, #a1a1aa);
+  --home-blue-0: #07152f;
+  --home-blue-1: #10264e;
+  --home-blue-2: #244a8f;
+  --home-blue-3: #4f7dd9;
 
-  --home-success: var(--success, #22c55e);
-  --home-warning: var(--warning, #f59e0b);
-  --home-danger: var(--error, #ef4444);
-  --home-info: var(--info, #60a5fa);
+  --home-sky: #38bdf8;
+  --home-cyan: #22d3ee;
+  --home-blue: #60a5fa;
+  --home-indigo: #818cf8;
+  --home-violet: #a78bfa;
+  --home-fuchsia: #e879f9;
+  --home-pink: #fb7185;
+  --home-orange: #fb923c;
+  --home-amber: #facc15;
+  --home-lime: #a3e635;
+  --home-emerald: #34d399;
+  --home-teal: #2dd4bf;
+  --home-red: #f87171;
 
-  --home-bg-0: var(--surface-0, #0a0a0a);
-  --home-bg-1: var(--surface-1, #111113);
-  --home-bg-2: var(--surface-2, #18181b);
-  --home-bg-3: var(--surface-3, #27272a);
+  --home-accent: var(--accent, var(--home-blue));
+  --home-accent-strong: var(--accent-strong, var(--home-cyan));
 
-  --home-text: var(--text, rgba(255, 255, 255, .92));
-  --home-text-strong: var(--text-strong, #fff);
-  --home-text-soft: var(--text-soft, rgba(255, 255, 255, .82));
-  --home-text-muted: var(--text-muted, rgba(255, 255, 255, .62));
-  --home-text-dim: var(--text-dim, rgba(255, 255, 255, .44));
-  --home-text-faint: var(--text-faint, rgba(255, 255, 255, .28));
+  --home-success: var(--success, var(--home-emerald));
+  --home-warning: var(--warning, var(--home-amber));
+  --home-danger: var(--error, var(--home-red));
+  --home-info: var(--info, var(--home-blue));
 
-  --home-border: var(--border-default, rgba(255, 255, 255, .12));
-  --home-border-soft: var(--border-soft, rgba(255, 255, 255, .075));
-  --home-border-strong: var(--border-strong, rgba(255, 255, 255, .18));
+  --home-bg-0: var(--surface-0, #06070a);
+  --home-bg-1: var(--surface-1, rgba(18, 20, 28, .80));
+  --home-bg-2: var(--surface-2, rgba(27, 29, 40, .86));
+  --home-bg-3: var(--surface-3, rgba(38, 41, 55, .90));
+
+  --home-text: var(--text, rgba(255, 255, 255, .94));
+  --home-text-strong: var(--text-strong, #ffffff);
+  --home-text-soft: var(--text-soft, rgba(255, 255, 255, .84));
+  --home-text-muted: var(--text-muted, rgba(255, 255, 255, .68));
+  --home-text-dim: var(--text-dim, rgba(255, 255, 255, .50));
+  --home-text-faint: var(--text-faint, rgba(255, 255, 255, .30));
+
+  --home-border: var(--border-default, rgba(255, 255, 255, .145));
+  --home-border-soft: var(--border-soft, rgba(255, 255, 255, .080));
+  --home-border-strong: var(--border-strong, rgba(255, 255, 255, .24));
 
   --home-radius-xs: 8px;
   --home-radius-sm: var(--radius-sm, 11px);
-  --home-radius-md: var(--radius-md, 14px);
-  --home-radius-lg: var(--radius-lg, 18px);
-  --home-radius-xl: var(--radius-xl, 22px);
-  --home-radius-2xl: var(--radius-2xl, 26px);
+  --home-radius-md: var(--radius-md, 15px);
+  --home-radius-lg: var(--radius-lg, 19px);
+  --home-radius-xl: var(--radius-xl, 24px);
+  --home-radius-2xl: var(--radius-2xl, 30px);
+  --home-radius-3xl: var(--radius-3xl, 36px);
   --home-radius-pill: 999px;
 
-  --home-shadow-xs: 0 8px 18px rgba(0, 0, 0, .18);
-  --home-shadow-sm: var(--shadow-sm, 0 14px 34px rgba(0, 0, 0, .26));
-  --home-shadow-md: var(--shadow-md, 0 22px 56px rgba(0, 0, 0, .34));
-  --home-shadow-lg: var(--shadow-lg, 0 34px 86px rgba(0, 0, 0, .46));
+  --home-shadow-xs: 0 8px 22px rgba(0, 0, 0, .22);
+  --home-shadow-sm: var(--shadow-sm, 0 18px 42px rgba(0, 0, 0, .30));
+  --home-shadow-md: var(--shadow-md, 0 26px 68px rgba(0, 0, 0, .40));
+  --home-shadow-lg: var(--shadow-lg, 0 42px 110px rgba(0, 0, 0, .52));
 
-  --home-blur: blur(18px) saturate(1.05);
+  --home-blur: blur(22px) saturate(1.18);
+  --home-blur-strong: blur(30px) saturate(1.28);
 
   --home-ease: cubic-bezier(.16, 1, .3, 1);
   --home-ease-standard: cubic-bezier(.2, .8, .2, 1);
   --home-fast: .13s;
   --home-normal: .22s;
-  --home-slow: .34s;
+  --home-slow: .36s;
 
-  --home-content-max: min(100%, 1400px);
-  --home-content-pad-x: clamp(8px, 1.1vw, 18px);
-  --home-content-pad-top: clamp(8px, .75vw, 14px);
-  --home-content-pad-bottom: clamp(20px, 1.6vw, 30px);
+  --home-content-max: min(100%, 1480px);
 
-  --home-gap: clamp(12px, 1.15vw, 18px);
-  --home-gap-lg: clamp(14px, 1.35vw, 22px);
+  /*
+    Aire superior:
+    separa Home del Topbar sin tocar layout global.
+  */
+  --home-content-pad-x: clamp(14px, 1.45vw, 26px);
+  --home-content-pad-top: clamp(30px, 2.2vw, 46px);
+  --home-content-pad-bottom: clamp(30px, 2vw, 44px);
 
-  --home-main-grid-columns: minmax(0, 1.14fr) minmax(320px, .86fr);
+  --home-gap: clamp(16px, 1.35vw, 24px);
+  --home-gap-lg: clamp(18px, 1.65vw, 30px);
+
+  /*
+    Cards equilibradas:
+    stats siempre columnas iguales.
+  */
+  --home-stat-min-height: clamp(148px, 10.7vw, 182px);
+  --home-panel-min-height: clamp(305px, 24vw, 430px);
+  --home-main-grid-columns: repeat(2, minmax(0, 1fr));
 
   --home-glass-1:
-    linear-gradient(180deg, rgba(255, 255, 255, .086), rgba(255, 255, 255, .032) 58%, rgba(255, 255, 255, .018)),
-    var(--home-bg-1);
+    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, .13), transparent 36%),
+    linear-gradient(180deg, rgba(255, 255, 255, .125), rgba(255, 255, 255, .045) 58%, rgba(255, 255, 255, .022)),
+    rgba(16, 18, 26, .72);
 
   --home-glass-2:
-    radial-gradient(circle at 16% 0%, rgba(255, 255, 255, .095), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, .080), rgba(255, 255, 255, .030)),
-    var(--home-bg-1);
+    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, .16), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, .135), rgba(255, 255, 255, .047)),
+    rgba(18, 20, 29, .74);
 
   --home-glass-hover:
-    radial-gradient(circle at 16% 0%, rgba(255, 255, 255, .125), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, .108), rgba(255, 255, 255, .040)),
-    var(--home-bg-2);
+    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, .20), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, .165), rgba(255, 255, 255, .060)),
+    rgba(24, 27, 38, .80);
 
   --home-focus:
-    0 0 0 3px rgba(255, 255, 255, .18),
-    0 0 0 6px rgba(255, 255, 255, .075);
+    0 0 0 3px rgba(255, 255, 255, .22),
+    0 0 0 7px color-mix(in srgb, var(--home-accent) 26%, transparent);
+
+  position: relative;
+  isolation: isolate;
 
   inline-size: var(--home-content-max);
   max-inline-size: var(--home-content-max);
   min-inline-size: 0;
 
   margin-inline: auto;
+
   padding-inline: var(--home-content-pad-x);
   padding-block: var(--home-content-pad-top) var(--home-content-pad-bottom);
 
   display: grid;
-  gap: var(--home-gap);
+  gap: var(--home-gap-lg);
 
   color: var(--home-text);
   font-family: var(--font-family, inherit);
@@ -149,6 +187,176 @@
 
 
 /* =========================================================
+   PURE CSS BACKGROUND · NO PNG / NO URL
+========================================================= */
+
+:where(.home-view-root, [data-home-scope])::before {
+  content: "";
+
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+
+  pointer-events: none;
+
+  /*
+    Fondo tipo "gradient salt":
+    azul luminoso a la izquierda, navy profundo a la derecha,
+    con manchas suaves, fractales grandes y grano fino CSS.
+  */
+  background:
+    radial-gradient(
+      circle at 0% 0%,
+      rgba(113, 156, 255, .96) 0%,
+      rgba(80, 119, 205, .76) 28%,
+      transparent 56%
+    ),
+    radial-gradient(
+      circle at 15% 28%,
+      rgba(96, 165, 250, .72) 0%,
+      rgba(59, 130, 246, .46) 24%,
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse at 45% 14%,
+      rgba(74, 113, 202, .40) 0%,
+      transparent 48%
+    ),
+    radial-gradient(
+      ellipse at 80% 16%,
+      rgba(28, 56, 112, .50) 0%,
+      transparent 52%
+    ),
+    radial-gradient(
+      circle at 100% 100%,
+      rgba(2, 12, 34, .98) 0%,
+      rgba(6, 22, 55, .82) 34%,
+      transparent 63%
+    ),
+    linear-gradient(
+      90deg,
+      #557ac9 0%,
+      #4a70bd 18%,
+      #365a9a 38%,
+      #203b6f 62%,
+      #12284f 80%,
+      #0b1b37 100%
+    );
+
+  filter:
+    saturate(1.06)
+    contrast(1.03)
+    brightness(.90);
+
+  transform: translateZ(0);
+
+  animation:
+    homeBackgroundDrift
+    18s
+    cubic-bezier(.2, .8, .2, 1)
+    infinite
+    alternate;
+}
+
+:where(.home-view-root, [data-home-scope])::after {
+  content: "";
+
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+
+  pointer-events: none;
+
+  /*
+    "Salt / low-poly" sólo con CSS:
+    - conic gradients para cortes geométricos suaves.
+    - micro-texture con repeating-radial/linear muy sutil.
+    - overlay oscuro para que el contenido premium respire.
+  */
+  background:
+    conic-gradient(
+      from 25deg at 8% 18%,
+      rgba(255, 255, 255, .060) 0deg 42deg,
+      transparent 42deg 118deg,
+      rgba(96, 165, 250, .070) 118deg 175deg,
+      transparent 175deg 360deg
+    ),
+    conic-gradient(
+      from 145deg at 32% 8%,
+      transparent 0deg 58deg,
+      rgba(255, 255, 255, .045) 58deg 118deg,
+      transparent 118deg 218deg,
+      rgba(59, 130, 246, .055) 218deg 282deg,
+      transparent 282deg 360deg
+    ),
+    conic-gradient(
+      from 250deg at 55% 34%,
+      rgba(255, 255, 255, .035) 0deg 50deg,
+      transparent 50deg 130deg,
+      rgba(14, 165, 233, .050) 130deg 200deg,
+      transparent 200deg 360deg
+    ),
+    conic-gradient(
+      from 320deg at 82% 24%,
+      transparent 0deg 70deg,
+      rgba(255, 255, 255, .030) 70deg 128deg,
+      transparent 128deg 234deg,
+      rgba(37, 99, 235, .040) 234deg 300deg,
+      transparent 300deg 360deg
+    ),
+    repeating-radial-gradient(
+      circle at 30% 30%,
+      rgba(255, 255, 255, .030) 0 1px,
+      transparent 1px 4px
+    ),
+    linear-gradient(
+      180deg,
+      rgba(2, 6, 23, .50),
+      rgba(2, 6, 23, .68) 46%,
+      rgba(0, 0, 0, .84)
+    ),
+    linear-gradient(
+      90deg,
+      rgba(0, 0, 0, .22),
+      transparent 34% 68%,
+      rgba(0, 0, 0, .36)
+    );
+
+  background-size:
+    74% 64%,
+    72% 68%,
+    82% 74%,
+    78% 72%,
+    7px 7px,
+    cover,
+    cover;
+
+  background-position:
+    0% 0%,
+    8% 0%,
+    38% 16%,
+    92% 12%,
+    0 0,
+    center,
+    center;
+
+  background-repeat:
+    no-repeat,
+    no-repeat,
+    no-repeat,
+    no-repeat,
+    repeat,
+    no-repeat,
+    no-repeat;
+
+  opacity: .95;
+
+  backdrop-filter: blur(1.6px) saturate(1.07);
+  -webkit-backdrop-filter: blur(1.6px) saturate(1.07);
+}
+
+
+/* =========================================================
    ROOT STATES
 ========================================================= */
 
@@ -157,11 +365,11 @@
 }
 
 :where(.home-view-root, [data-home-scope]).is-stale {
-  --home-border: color-mix(in srgb, var(--home-warning) 18%, var(--border-default, rgba(255, 255, 255, .12)));
+  --home-border: color-mix(in srgb, var(--home-warning) 22%, var(--border-default, rgba(255, 255, 255, .12)));
 }
 
 :where(.home-view-root, [data-home-scope]).has-error {
-  --home-border: color-mix(in srgb, var(--home-danger) 22%, var(--border-default, rgba(255, 255, 255, .12)));
+  --home-border: color-mix(in srgb, var(--home-danger) 28%, var(--border-default, rgba(255, 255, 255, .12)));
 }
 
 
@@ -172,32 +380,34 @@
 :where(.home-view-root, [data-home-scope]) .home-btn,
 :where(.home-view-root, [data-home-scope]) .home-link-button,
 :where(.home-view-root, [data-home-scope]) .home-mini-action {
-  min-block-size: 36px;
+  min-block-size: 38px;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 9px;
 
-  padding: 0 14px;
+  padding: 0 15px;
 
   appearance: none;
-  border: 1px solid rgba(255, 255, 255, .13);
-  border-radius: 15px;
+
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 16px;
 
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .105), rgba(255, 255, 255, .044)),
-    rgba(255, 255, 255, .034);
+    radial-gradient(circle at 28% 0%, rgba(255, 255, 255, .18), transparent 44%),
+    linear-gradient(180deg, rgba(255, 255, 255, .14), rgba(255, 255, 255, .052)),
+    rgba(255, 255, 255, .040);
 
   color: var(--home-text-soft);
 
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .065),
-    0 10px 22px rgba(0, 0, 0, .18);
+    inset 0 1px 0 rgba(255, 255, 255, .085),
+    0 12px 28px rgba(0, 0, 0, .24);
 
   font-size: 12px;
   line-height: 1;
-  font-weight: 850;
+  font-weight: 900;
   text-decoration: none;
   white-space: nowrap;
 
@@ -213,27 +423,29 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-mini-action {
-  min-block-size: 28px;
-  padding-inline: 10px;
-  border-radius: 11px;
+  min-block-size: 30px;
+  padding-inline: 11px;
+  border-radius: 12px;
   font-size: 10px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-link-button:hover,
 :where(.home-view-root, [data-home-scope]) .home-btn:hover,
 :where(.home-view-root, [data-home-scope]) .home-mini-action:hover {
-  transform: translateY(-1px);
-  border-color: rgba(255, 255, 255, .24);
+  transform: translateY(-2px);
+
+  border-color: rgba(255, 255, 255, .32);
 
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .150), rgba(255, 255, 255, .060)),
-    rgba(255, 255, 255, .058);
+    radial-gradient(circle at 22% 0%, rgba(255, 255, 255, .26), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, .20), rgba(255, 255, 255, .070)),
+    rgba(255, 255, 255, .070);
 
   color: var(--home-text-strong);
 
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .09),
-    0 16px 32px rgba(0, 0, 0, .28);
+    inset 0 1px 0 rgba(255, 255, 255, .12),
+    0 18px 42px rgba(0, 0, 0, .34);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-link-button:active,
@@ -268,21 +480,22 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-btn--primary {
-  border-color: rgba(255, 255, 255, .18);
+  border-color: color-mix(in srgb, var(--home-emerald) 42%, rgba(255, 255, 255, .22));
 
   background:
-    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, .20), transparent 42%),
-    linear-gradient(135deg, var(--home-accent-strong), var(--home-accent));
+    radial-gradient(circle at 20% 0%, rgba(255, 255, 255, .22), transparent 46%),
+    linear-gradient(135deg, #22c55e, #06b6d4 58%, #3b82f6);
 
   color: #fff;
 
   box-shadow:
-    0 16px 36px color-mix(in srgb, var(--home-accent) 18%, rgba(0, 0, 0, .36)),
-    inset 0 1px 0 rgba(255, 255, 255, .12);
+    0 18px 46px rgba(34, 197, 94, .22),
+    0 12px 34px rgba(59, 130, 246, .16),
+    inset 0 1px 0 rgba(255, 255, 255, .16);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-btn--ghost {
-  background: rgba(255, 255, 255, .026);
+  background: rgba(255, 255, 255, .035);
   color: var(--home-text-muted);
 }
 
@@ -297,25 +510,31 @@
   align-items: center;
   gap: 12px;
 
-  padding: 12px 14px;
+  padding: 13px 15px;
 
-  border: 1px solid color-mix(in srgb, var(--home-danger) 38%, transparent);
+  border: 1px solid color-mix(in srgb, var(--home-danger) 44%, transparent);
   border-radius: var(--home-radius-xl);
 
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--home-danger) 18%, transparent), transparent 44%),
-    color-mix(in srgb, var(--home-danger) 8%, transparent);
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--home-danger) 24%, transparent), transparent 46%),
+    color-mix(in srgb, var(--home-danger) 10%, rgba(10, 10, 10, .62));
 
   color: var(--home-text);
-  box-shadow: var(--home-shadow-xs);
+
+  box-shadow:
+    var(--home-shadow-xs),
+    inset 0 1px 0 rgba(255, 255, 255, .08);
+
+  backdrop-filter: var(--home-blur);
+  -webkit-backdrop-filter: var(--home-blur);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-alert--stale {
-  border-color: color-mix(in srgb, var(--home-warning) 36%, transparent);
+  border-color: color-mix(in srgb, var(--home-warning) 42%, transparent);
 
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--home-warning) 16%, transparent), transparent 44%),
-    color-mix(in srgb, var(--home-warning) 7%, transparent);
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--home-warning) 22%, transparent), transparent 46%),
+    color-mix(in srgb, var(--home-warning) 9%, rgba(10, 10, 10, .62));
 }
 
 :where(.home-view-root, [data-home-scope]) .home-alert-icon,
@@ -329,43 +548,44 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state {
-  min-block-size: 152px;
+  min-block-size: 180px;
 
   display: grid;
   place-items: center;
   align-content: center;
   justify-items: center;
-  gap: 9px;
+  gap: 10px;
 
-  padding: clamp(24px, 3vw, 42px) 18px;
+  padding: clamp(28px, 3vw, 46px) 20px;
 
   text-align: center;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state-icon {
-  inline-size: 50px;
-  block-size: 50px;
+  inline-size: 56px;
+  block-size: 56px;
 
   display: grid;
   place-items: center;
 
-  border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, .17);
+  border-radius: 19px;
 
   background:
-    radial-gradient(circle at 28% 16%, rgba(255, 255, 255, .16), transparent 52%),
-    rgba(255, 255, 255, .054);
+    radial-gradient(circle at 28% 16%, rgba(255, 255, 255, .22), transparent 52%),
+    linear-gradient(135deg, rgba(96, 165, 250, .18), rgba(232, 121, 249, .10)),
+    rgba(255, 255, 255, .060);
 
   color: var(--home-text-muted);
 
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .065),
-    0 12px 26px rgba(0, 0, 0, .20);
+    inset 0 1px 0 rgba(255, 255, 255, .085),
+    0 14px 30px rgba(0, 0, 0, .24);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state-icon svg {
-  inline-size: 18px;
-  block-size: 18px;
+  inline-size: 19px;
+  block-size: 19px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state h3 {
@@ -373,21 +593,21 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(16px, 1.35vw, 21px);
+  font-size: clamp(17px, 1.45vw, 23px);
   line-height: 1.08;
   font-weight: 950;
-  letter-spacing: -.042em;
+  letter-spacing: -.045em;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-empty-state p {
   margin: 0;
-  max-inline-size: 56ch;
+  max-inline-size: 58ch;
 
   color: var(--home-text-muted);
 
   font-size: 12px;
   line-height: 1.64;
-  font-weight: 550;
+  font-weight: 600;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-skeleton {
@@ -399,7 +619,7 @@
   border-radius: var(--home-radius-md);
 
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, .075), rgba(255, 255, 255, .135), rgba(255, 255, 255, .075));
+    linear-gradient(90deg, rgba(255, 255, 255, .080), rgba(255, 255, 255, .17), rgba(255, 255, 255, .080));
 
   background-size: 220% 100%;
 
@@ -407,9 +627,9 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-skeleton--icon {
-  inline-size: 40px;
-  block-size: 40px;
-  border-radius: 15px;
+  inline-size: 44px;
+  block-size: 44px;
+  border-radius: 16px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-skeleton--title {
@@ -419,7 +639,7 @@
 
 :where(.home-view-root, [data-home-scope]) .home-skeleton--value {
   inline-size: 40%;
-  block-size: 30px;
+  block-size: 34px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-skeleton--text {
@@ -434,13 +654,13 @@
 
 :where(.home-view-root, [data-home-scope]) .home-current-user-avatar {
   --avatar-bg:
-    radial-gradient(circle at 30% 18%, rgba(255, 255, 255, .24), transparent 30%),
-    linear-gradient(135deg, var(--avatar-bg-2, #71717a), var(--avatar-bg, #27272a) 74%);
+    radial-gradient(circle at 30% 18%, rgba(255, 255, 255, .30), transparent 30%),
+    linear-gradient(135deg, #60a5fa, #818cf8 48%, #e879f9);
 
   position: relative;
 
-  inline-size: clamp(56px, 4.3vw, 66px);
-  block-size: clamp(56px, 4.3vw, 66px);
+  inline-size: clamp(58px, 4.4vw, 70px);
+  block-size: clamp(58px, 4.4vw, 70px);
 
   display: grid;
   place-items: center;
@@ -448,15 +668,16 @@
 
   overflow: hidden;
 
-  border: 1px solid rgba(255, 255, 255, .14);
-  border-radius: 21px;
+  border: 1px solid rgba(255, 255, 255, .20);
+  border-radius: 23px;
 
   background: var(--avatar-bg);
   color: var(--avatar-text, #fff);
 
   box-shadow:
-    0 14px 28px rgba(0, 0, 0, .28),
-    inset 0 1px 0 rgba(255, 255, 255, .12);
+    0 18px 36px rgba(0, 0, 0, .34),
+    0 0 32px rgba(96, 165, 250, .16),
+    inset 0 1px 0 rgba(255, 255, 255, .16);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-current-user-avatar::after {
@@ -471,8 +692,8 @@
   pointer-events: none;
 
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .18), transparent 50%),
-    linear-gradient(135deg, rgba(255, 255, 255, .09), transparent 44%);
+    linear-gradient(180deg, rgba(255, 255, 255, .22), transparent 50%),
+    linear-gradient(135deg, rgba(255, 255, 255, .11), transparent 44%);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-current-user-avatar img {
@@ -502,7 +723,7 @@
 
   color: #fff;
 
-  font-size: clamp(21px, 1.8vw, 28px);
+  font-size: clamp(22px, 1.9vw, 30px);
   font-weight: 950;
   line-height: 1;
   letter-spacing: -.055em;
@@ -515,9 +736,9 @@
 
 :where(.home-view-root, [data-home-scope]) .home-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(270px, 360px);
-  align-items: center;
-  gap: clamp(16px, 1.6vw, 26px);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 390px);
+  align-items: stretch;
+  gap: clamp(18px, 1.75vw, 30px);
 
   padding-block-start: 0;
 }
@@ -528,14 +749,14 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: clamp(14px, 1.2vw, 18px);
+  gap: clamp(15px, 1.3vw, 20px);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-header-copy {
   min-inline-size: 0;
 
   display: grid;
-  gap: 6px;
+  gap: 7px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-eyebrow,
@@ -543,12 +764,12 @@
 :where(.home-view-root, [data-home-scope]) .home-kicker {
   margin: 0;
 
-  color: var(--home-text-dim);
+  color: rgba(255, 255, 255, .60);
 
   font-size: 10px;
   line-height: 1.1;
   font-weight: 950;
-  letter-spacing: .09em;
+  letter-spacing: .105em;
   text-transform: uppercase;
 }
 
@@ -561,26 +782,26 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(36px, 4vw, 58px);
-  line-height: .94;
+  font-size: clamp(38px, 4.1vw, 62px);
+  line-height: .93;
   font-weight: 950;
-  letter-spacing: -.070em;
+  letter-spacing: -.074em;
   text-wrap: balance;
 
   text-shadow:
-    0 1px 0 rgba(255, 255, 255, .08),
-    0 18px 34px rgba(0, 0, 0, .34);
+    0 1px 0 rgba(255, 255, 255, .09),
+    0 20px 38px rgba(0, 0, 0, .40);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-subtitle {
   margin: 0;
-  max-inline-size: 820px;
+  max-inline-size: 850px;
 
-  color: var(--home-text-muted);
+  color: rgba(255, 255, 255, .70);
 
   font-size: clamp(12px, .9vw, 14px);
-  line-height: 1.50;
-  font-weight: 650;
+  line-height: 1.52;
+  font-weight: 700;
 }
 
 
@@ -598,43 +819,50 @@
   isolation: isolate;
 
   inline-size: 100%;
-  min-block-size: 88px;
+  min-block-size: 104px;
   block-size: 100%;
 
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) 34px;
+  grid-template-columns: 52px minmax(0, 1fr) 36px;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 
-  padding: 14px;
+  padding: 16px;
 
   overflow: hidden;
 
   appearance: none;
-  border: 1px solid rgba(255, 255, 255, .145);
+
+  border: 1px solid color-mix(in srgb, var(--home-emerald) 38%, rgba(255, 255, 255, .16));
   border-radius: var(--home-radius-2xl);
 
   background:
-    radial-gradient(circle at 10% 0%, rgba(255, 255, 255, .16), transparent 36%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--home-success) 14%, transparent), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, .092), rgba(255, 255, 255, .034)),
-    var(--home-bg-1);
+    radial-gradient(circle at 10% 0%, rgba(255, 255, 255, .22), transparent 36%),
+    radial-gradient(circle at 100% 0%, rgba(52, 211, 153, .32), transparent 36%),
+    radial-gradient(circle at 80% 100%, rgba(34, 211, 238, .20), transparent 42%),
+    linear-gradient(135deg, rgba(16, 185, 129, .22), rgba(59, 130, 246, .12)),
+    rgba(13, 20, 32, .66);
 
   color: var(--home-text);
 
   box-shadow:
     var(--home-shadow-sm),
-    inset 0 1px 0 rgba(255, 255, 255, .074);
+    0 0 48px rgba(52, 211, 153, .12),
+    inset 0 1px 0 rgba(255, 255, 255, .095);
 
   text-align: left;
 
   cursor: pointer;
 
+  backdrop-filter: var(--home-blur);
+  -webkit-backdrop-filter: var(--home-blur);
+
   transition:
     transform var(--home-normal) var(--home-ease),
     border-color var(--home-normal) var(--home-ease-standard),
     background var(--home-normal) var(--home-ease-standard),
-    box-shadow var(--home-normal) var(--home-ease-standard);
+    box-shadow var(--home-normal) var(--home-ease-standard),
+    filter var(--home-normal) var(--home-ease-standard);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-button::before {
@@ -642,7 +870,7 @@
 
   position: absolute;
   inset-block-start: 0;
-  inset-inline: 16px;
+  inset-inline: 18px;
   z-index: -1;
 
   block-size: 1px;
@@ -651,48 +879,53 @@
     linear-gradient(
       90deg,
       transparent,
-      rgba(255, 255, 255, .28),
-      color-mix(in srgb, var(--home-success) 38%, transparent),
+      rgba(255, 255, 255, .34),
+      rgba(52, 211, 153, .68),
+      rgba(34, 211, 238, .48),
       transparent
     );
 
-  opacity: .9;
+  opacity: .95;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-button::after {
   content: "";
 
   position: absolute;
-  inset-inline-end: -48px;
-  inset-block-end: -62px;
+  inset-inline-end: -54px;
+  inset-block-end: -74px;
   z-index: -1;
 
-  inline-size: 140px;
-  block-size: 140px;
+  inline-size: 168px;
+  block-size: 168px;
 
   border-radius: 999px;
 
-  background: color-mix(in srgb, var(--home-success) 13%, transparent);
-  filter: blur(24px);
+  background:
+    radial-gradient(circle, rgba(52, 211, 153, .34), transparent 70%);
 
-  opacity: .82;
+  filter: blur(22px);
+
+  opacity: .90;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-button:hover {
-  transform: translateY(-3px);
+  transform: translateY(-4px);
 
-  border-color: rgba(255, 255, 255, .24);
+  border-color: color-mix(in srgb, var(--home-emerald) 56%, rgba(255, 255, 255, .24));
 
   background:
-    radial-gradient(circle at 10% 0%, rgba(255, 255, 255, .20), transparent 36%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--home-success) 18%, transparent), transparent 36%),
-    linear-gradient(180deg, rgba(255, 255, 255, .118), rgba(255, 255, 255, .046)),
-    var(--home-bg-2);
+    radial-gradient(circle at 10% 0%, rgba(255, 255, 255, .27), transparent 38%),
+    radial-gradient(circle at 100% 0%, rgba(52, 211, 153, .40), transparent 38%),
+    radial-gradient(circle at 80% 100%, rgba(34, 211, 238, .26), transparent 44%),
+    linear-gradient(135deg, rgba(16, 185, 129, .28), rgba(59, 130, 246, .18)),
+    rgba(18, 25, 40, .74);
 
   box-shadow:
     var(--home-shadow-md),
-    0 0 44px color-mix(in srgb, var(--home-success) 7%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, .10);
+    0 0 60px rgba(52, 211, 153, .18),
+    0 0 46px rgba(34, 211, 238, .10),
+    inset 0 1px 0 rgba(255, 255, 255, .13);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-button:active {
@@ -700,36 +933,38 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-icon {
-  inline-size: 48px;
-  block-size: 48px;
+  inline-size: 52px;
+  block-size: 52px;
 
   display: grid;
   place-items: center;
 
-  border: 1px solid color-mix(in srgb, var(--home-success) 34%, rgba(255, 255, 255, .10));
-  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--home-emerald) 44%, rgba(255, 255, 255, .14));
+  border-radius: 19px;
 
   background:
-    radial-gradient(circle at 34% 20%, color-mix(in srgb, var(--home-success) 30%, transparent), transparent 58%),
-    color-mix(in srgb, var(--home-success) 10%, rgba(255, 255, 255, .040));
+    radial-gradient(circle at 34% 20%, rgba(255, 255, 255, .20), transparent 56%),
+    linear-gradient(135deg, rgba(52, 211, 153, .34), rgba(34, 211, 238, .16)),
+    rgba(52, 211, 153, .10);
 
-  color: color-mix(in srgb, var(--home-success) 76%, var(--home-text-strong));
+  color: color-mix(in srgb, var(--home-emerald) 82%, #ffffff);
 
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .080),
-    0 12px 24px rgba(0, 0, 0, .20);
+    inset 0 1px 0 rgba(255, 255, 255, .11),
+    0 14px 28px rgba(0, 0, 0, .26),
+    0 0 26px rgba(52, 211, 153, .16);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-icon svg {
-  inline-size: 19px;
-  block-size: 19px;
+  inline-size: 20px;
+  block-size: 20px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-content {
   min-inline-size: 0;
 
   display: grid;
-  gap: 4px;
+  gap: 5px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-content strong {
@@ -738,10 +973,10 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(18px, 1.25vw, 22px);
+  font-size: clamp(19px, 1.32vw, 23px);
   line-height: 1.04;
   font-weight: 950;
-  letter-spacing: -.052em;
+  letter-spacing: -.055em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -750,27 +985,27 @@
   min-inline-size: 0;
   overflow: hidden;
 
-  color: var(--home-text-muted);
+  color: rgba(255, 255, 255, .70);
 
   font-size: 12px;
-  line-height: 1.32;
-  font-weight: 650;
+  line-height: 1.35;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-arrow {
-  inline-size: 34px;
-  block-size: 34px;
+  inline-size: 36px;
+  block-size: 36px;
 
   display: grid;
   place-items: center;
 
-  border: 1px solid rgba(255, 255, 255, .10);
-  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, .13);
+  border-radius: 15px;
 
-  background: rgba(255, 255, 255, .046);
-  color: var(--home-text-muted);
+  background: rgba(255, 255, 255, .060);
+  color: rgba(255, 255, 255, .74);
 
   transition:
     transform var(--home-normal) var(--home-ease),
@@ -784,19 +1019,20 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-create-card-button:hover .home-create-card-arrow {
-  transform: translateX(3px);
-  background: rgba(255, 255, 255, .070);
-  color: var(--home-text-strong);
+  transform: translateX(4px);
+  background: rgba(255, 255, 255, .085);
+  color: #fff;
 }
 
 
 /* =========================================================
-   STATS
+   STATS · EQUAL CARDS
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]) .home-stats {
   display: grid;
-  grid-template-columns: var(--home-main-grid-columns);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
   gap: var(--home-gap);
 
   inline-size: 100%;
@@ -805,40 +1041,49 @@
 
 :where(.home-view-root, [data-home-scope]) .home-stat-card {
   --home-stat-color: var(--home-accent);
+  --home-stat-color-2: var(--home-accent-strong);
 
   position: relative;
   isolation: isolate;
 
   min-inline-size: 0;
-  min-block-size: 122px;
+  min-block-size: var(--home-stat-min-height);
+  block-size: 100%;
 
   overflow: hidden;
 
-  border: 1px solid color-mix(in srgb, var(--home-stat-color) 18%, var(--home-border));
+  border: 1px solid color-mix(in srgb, var(--home-stat-color) 32%, rgba(255, 255, 255, .15));
   border-radius: var(--home-radius-2xl);
 
   background:
-    radial-gradient(circle at 86% 0%, color-mix(in srgb, var(--home-stat-color) 18%, transparent), transparent 34%),
+    radial-gradient(circle at 84% -4%, color-mix(in srgb, var(--home-stat-color-2) 42%, transparent), transparent 36%),
+    radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--home-stat-color) 26%, transparent), transparent 44%),
+    linear-gradient(135deg, color-mix(in srgb, var(--home-stat-color) 20%, transparent), color-mix(in srgb, var(--home-stat-color-2) 10%, transparent)),
     var(--home-glass-2);
 
   box-shadow:
     var(--home-shadow-sm),
-    inset 0 1px 0 rgba(255, 255, 255, .060);
+    0 0 48px color-mix(in srgb, var(--home-stat-color) 12%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .085);
 
   transform: translateZ(0);
+
+  backdrop-filter: var(--home-blur);
+  -webkit-backdrop-filter: var(--home-blur);
 
   transition:
     transform var(--home-normal) var(--home-ease),
     border-color var(--home-normal) var(--home-ease-standard),
     box-shadow var(--home-normal) var(--home-ease-standard),
-    background var(--home-normal) var(--home-ease-standard);
+    background var(--home-normal) var(--home-ease-standard),
+    filter var(--home-normal) var(--home-ease-standard);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-card::before {
   content: "";
 
   position: absolute;
-  inset-inline: 16px;
+  inset-inline: 18px;
   inset-block-start: 0;
   z-index: 0;
 
@@ -848,45 +1093,50 @@
     linear-gradient(
       90deg,
       transparent,
-      color-mix(in srgb, var(--home-stat-color) 48%, rgba(255, 255, 255, .18)),
+      rgba(255, 255, 255, .30),
+      color-mix(in srgb, var(--home-stat-color) 70%, rgba(255, 255, 255, .20)),
       transparent
     );
 
-  opacity: .82;
+  opacity: .92;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-card::after {
   content: "";
 
   position: absolute;
-  inset-inline-end: -50px;
-  inset-block-end: -60px;
+  inset-inline-end: -58px;
+  inset-block-end: -72px;
   z-index: 0;
 
-  inline-size: 134px;
-  block-size: 134px;
+  inline-size: 170px;
+  block-size: 170px;
 
   border-radius: 999px;
 
-  background: color-mix(in srgb, var(--home-stat-color) 13%, transparent);
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--home-stat-color) 28%, transparent), transparent 70%);
+
   filter: blur(28px);
 
   pointer-events: none;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-card:hover {
-  transform: translateY(-3px);
+  transform: translateY(-4px);
 
-  border-color: color-mix(in srgb, var(--home-stat-color) 34%, var(--home-border-strong));
+  border-color: color-mix(in srgb, var(--home-stat-color) 52%, rgba(255, 255, 255, .25));
 
   background:
-    radial-gradient(circle at 86% 0%, color-mix(in srgb, var(--home-stat-color) 23%, transparent), transparent 34%),
+    radial-gradient(circle at 84% -4%, color-mix(in srgb, var(--home-stat-color-2) 52%, transparent), transparent 38%),
+    radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--home-stat-color) 34%, transparent), transparent 46%),
+    linear-gradient(135deg, color-mix(in srgb, var(--home-stat-color) 26%, transparent), color-mix(in srgb, var(--home-stat-color-2) 15%, transparent)),
     var(--home-glass-hover);
 
   box-shadow:
     var(--home-shadow-md),
-    0 0 42px color-mix(in srgb, var(--home-stat-color) 8%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, .090);
+    0 0 64px color-mix(in srgb, var(--home-stat-color) 18%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .12);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-card-button {
@@ -894,15 +1144,16 @@
   z-index: 1;
 
   inline-size: 100%;
+  block-size: 100%;
   min-block-size: inherit;
 
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 58px minmax(0, 1fr);
   align-content: center;
   align-items: center;
-  gap: 13px;
+  gap: 17px;
 
-  padding: 17px 18px;
+  padding: clamp(18px, 1.55vw, 24px);
 
   appearance: none;
   border: 0;
@@ -917,42 +1168,44 @@
 :where(.home-view-root, [data-home-scope]) .home-stat-card--loading {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 12px;
 
-  padding: 16px;
+  padding: 18px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-icon {
-  inline-size: 48px;
-  block-size: 48px;
+  inline-size: 58px;
+  block-size: 58px;
 
   display: grid;
   place-items: center;
 
-  border: 1px solid color-mix(in srgb, var(--home-stat-color) 25%, rgba(255, 255, 255, .10));
-  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--home-stat-color) 42%, rgba(255, 255, 255, .14));
+  border-radius: 21px;
 
   background:
-    radial-gradient(circle at 34% 20%, color-mix(in srgb, var(--home-stat-color) 28%, transparent), transparent 58%),
-    color-mix(in srgb, var(--home-stat-color) 9%, rgba(255, 255, 255, .035));
+    radial-gradient(circle at 34% 20%, rgba(255, 255, 255, .22), transparent 56%),
+    linear-gradient(135deg, color-mix(in srgb, var(--home-stat-color) 34%, transparent), color-mix(in srgb, var(--home-stat-color-2) 18%, transparent)),
+    color-mix(in srgb, var(--home-stat-color) 10%, rgba(255, 255, 255, .040));
 
-  color: color-mix(in srgb, var(--home-stat-color) 78%, var(--home-text-strong));
+  color: color-mix(in srgb, var(--home-stat-color) 84%, var(--home-text-strong));
 
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .07),
-    0 12px 24px rgba(0, 0, 0, .18);
+    inset 0 1px 0 rgba(255, 255, 255, .11),
+    0 14px 30px rgba(0, 0, 0, .24),
+    0 0 28px color-mix(in srgb, var(--home-stat-color) 14%, transparent);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-icon svg {
-  inline-size: 18px;
-  block-size: 18px;
+  inline-size: 21px;
+  block-size: 21px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-content {
   min-inline-size: 0;
 
   display: grid;
-  gap: 6px;
+  gap: 7px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-label {
@@ -960,12 +1213,12 @@
 
   overflow: hidden;
 
-  color: var(--home-text-dim);
+  color: rgba(255, 255, 255, .58);
 
   font-size: 11px;
   line-height: 1.1;
   font-weight: 950;
-  letter-spacing: .085em;
+  letter-spacing: .105em;
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
@@ -978,40 +1231,51 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(34px, 2.75vw, 48px);
-  line-height: .88;
+  font-size: clamp(38px, 3vw, 56px);
+  line-height: .86;
   font-weight: 950;
-  letter-spacing: -.072em;
+  letter-spacing: -.078em;
   text-overflow: ellipsis;
   white-space: nowrap;
+
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, .08),
+    0 18px 34px rgba(0, 0, 0, .34);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-text {
-  color: var(--home-text-muted);
+  color: rgba(255, 255, 255, .72);
 
-  font-size: clamp(12px, .82vw, 13px);
-  line-height: 1.38;
-  font-weight: 550;
+  font-size: clamp(12px, .86vw, 14px);
+  line-height: 1.42;
+  font-weight: 700;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-card--tickets,
 :where(.home-view-root, [data-home-scope]) .home-stat-card--ticket,
 :where(.home-view-root, [data-home-scope]) .home-stat-card--incidencias,
 :where(.home-view-root, [data-home-scope]) .home-stat-card--incidencia {
-  --home-stat-color: var(--home-info);
+  --home-stat-color: #60a5fa;
+  --home-stat-color-2: #22d3ee;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-card--facturas,
 :where(.home-view-root, [data-home-scope]) .home-stat-card--invoice,
 :where(.home-view-root, [data-home-scope]) .home-stat-card--billing {
-  --home-stat-color: var(--home-warning);
+  --home-stat-color: #facc15;
+  --home-stat-color-2: #fb923c;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-stat-card--clientes,
-:where(.home-view-root, [data-home-scope]) .home-stat-card--clients,
+:where(.home-view-root, [data-home-scope]) .home-stat-card--clients {
+  --home-stat-color: #34d399;
+  --home-stat-color-2: #22c55e;
+}
+
 :where(.home-view-root, [data-home-scope]) .home-stat-card--usuarios,
 :where(.home-view-root, [data-home-scope]) .home-stat-card--users {
-  --home-stat-color: var(--home-success);
+  --home-stat-color: #a78bfa;
+  --home-stat-color-2: #e879f9;
 }
 
 
@@ -1041,6 +1305,7 @@
 
   min-inline-size: 0;
   inline-size: 100%;
+  min-block-size: var(--home-panel-min-height);
 
   overflow: hidden;
 
@@ -1052,7 +1317,8 @@
 
   box-shadow:
     var(--home-shadow-sm),
-    inset 0 1px 0 rgba(255, 255, 255, .045);
+    0 0 56px rgba(96, 165, 250, .07),
+    inset 0 1px 0 rgba(255, 255, 255, .060);
 
   backdrop-filter: var(--home-blur);
   -webkit-backdrop-filter: var(--home-blur);
@@ -1068,17 +1334,18 @@
   pointer-events: none;
 
   background:
-    radial-gradient(circle at 14% 0%, rgba(255, 255, 255, .075), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, .038), transparent 38%);
+    radial-gradient(circle at 14% 0%, rgba(255, 255, 255, .105), transparent 34%),
+    radial-gradient(circle at 96% 8%, rgba(96, 165, 250, .11), transparent 36%),
+    linear-gradient(180deg, rgba(255, 255, 255, .046), transparent 40%);
 
-  opacity: .82;
+  opacity: .90;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-panel::after {
   content: "";
 
   position: absolute;
-  inset-inline: 20px;
+  inset-inline: 22px;
   inset-block-start: 0;
   z-index: 0;
 
@@ -1088,11 +1355,12 @@
     linear-gradient(
       90deg,
       transparent,
-      rgba(255, 255, 255, .22),
+      rgba(255, 255, 255, .28),
+      rgba(96, 165, 250, .34),
       transparent
     );
 
-  opacity: .86;
+  opacity: .90;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-panel > * {
@@ -1110,17 +1378,21 @@
 
 :where(.home-view-root, [data-home-scope]) .home-panel--entities {
   grid-area: entities;
+  min-block-size: clamp(220px, 17vw, 300px);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-panel-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 14px;
+  gap: 15px;
 
-  padding: 16px 18px 12px;
+  padding: 18px 20px 14px;
 
   border-block-end: 1px solid var(--home-border-soft);
+
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .040), transparent);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-panel-header h2 {
@@ -1131,12 +1403,15 @@
 
   color: var(--home-text-strong);
 
-  font-size: clamp(19px, 1.35vw, 24px);
-  line-height: 1.02;
+  font-size: clamp(22px, 1.55vw, 28px);
+  line-height: 1;
   font-weight: 950;
-  letter-spacing: -.050em;
+  letter-spacing: -.058em;
   text-overflow: ellipsis;
   white-space: nowrap;
+
+  text-shadow:
+    0 16px 30px rgba(0, 0, 0, .28);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-panel-header h3,
@@ -1159,7 +1434,7 @@
 :where(.home-view-root, [data-home-scope]) .home-activity-list,
 :where(.home-view-root, [data-home-scope]) .home-invoice-list,
 :where(.home-view-root, [data-home-scope]) .home-mini-list {
-  padding: 12px;
+  padding: 14px;
   margin: 0;
 
   list-style: none;
@@ -1167,25 +1442,25 @@
 
 :where(.home-view-root, [data-home-scope]) .home-activity-list {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-item {
   --home-activity-color: var(--home-accent);
 
-  min-block-size: 62px;
+  min-block-size: 66px;
 
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 
-  padding: 9px 10px;
+  padding: 10px 12px;
 
   border: 1px solid transparent;
-  border-radius: 17px;
+  border-radius: 18px;
 
-  background: transparent;
+  background: rgba(255, 255, 255, .020);
   color: inherit;
 
   transition:
@@ -1196,15 +1471,17 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-item:hover {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
 
-  border-color: color-mix(in srgb, var(--home-activity-color) 22%, rgba(255, 255, 255, .10));
+  border-color: color-mix(in srgb, var(--home-activity-color) 28%, rgba(255, 255, 255, .12));
 
   background:
-    radial-gradient(circle at 0% 20%, color-mix(in srgb, var(--home-activity-color) 10%, transparent), transparent 42%),
-    rgba(255, 255, 255, .044);
+    radial-gradient(circle at 0% 20%, color-mix(in srgb, var(--home-activity-color) 16%, transparent), transparent 44%),
+    rgba(255, 255, 255, .052);
 
-  box-shadow: 0 12px 24px rgba(0, 0, 0, .18);
+  box-shadow:
+    0 14px 28px rgba(0, 0, 0, .22),
+    0 0 28px color-mix(in srgb, var(--home-activity-color) 10%, transparent);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-item--invoice {
@@ -1215,35 +1492,45 @@
   --home-activity-color: var(--home-info);
 }
 
-:where(.home-view-root, [data-home-scope]) .home-activity-item--client,
-:where(.home-view-root, [data-home-scope]) .home-activity-item--user {
+:where(.home-view-root, [data-home-scope]) .home-activity-item--client {
   --home-activity-color: var(--home-success);
 }
 
+:where(.home-view-root, [data-home-scope]) .home-activity-item--user {
+  --home-activity-color: var(--home-violet);
+}
+
 :where(.home-view-root, [data-home-scope]) .home-activity-icon {
-  inline-size: 38px;
-  block-size: 38px;
+  inline-size: 42px;
+  block-size: 42px;
 
   display: grid;
   place-items: center;
 
-  border: 1px solid color-mix(in srgb, var(--home-activity-color) 26%, rgba(255, 255, 255, .10));
-  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--home-activity-color) 34%, rgba(255, 255, 255, .12));
+  border-radius: 15px;
 
-  background: color-mix(in srgb, var(--home-activity-color) 10%, rgba(255, 255, 255, .035));
-  color: color-mix(in srgb, var(--home-activity-color) 76%, var(--home-text-strong));
+  background:
+    radial-gradient(circle at 34% 20%, rgba(255, 255, 255, .18), transparent 58%),
+    color-mix(in srgb, var(--home-activity-color) 13%, rgba(255, 255, 255, .035));
+
+  color: color-mix(in srgb, var(--home-activity-color) 82%, var(--home-text-strong));
+
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .08),
+    0 10px 22px rgba(0, 0, 0, .18);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-icon svg {
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: 17px;
+  block-size: 17px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-body {
   min-inline-size: 0;
 
   display: grid;
-  gap: 3px;
+  gap: 4px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-body strong {
@@ -1254,7 +1541,7 @@
 
   font-size: 12px;
   line-height: 1.15;
-  font-weight: 900;
+  font-weight: 950;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1263,17 +1550,17 @@
   min-inline-size: 0;
   overflow: hidden;
 
-  color: var(--home-text-dim);
+  color: rgba(255, 255, 255, .58);
 
   font-size: 11px;
   line-height: 1.35;
-  font-weight: 600;
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-activity-item time {
-  color: var(--home-text-dim);
+  color: rgba(255, 255, 255, .50);
 
   font-size: 10px;
   font-weight: 950;
@@ -1287,79 +1574,90 @@
 
 :where(.home-view-root, [data-home-scope]) .home-billing-total {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 
-  margin: 12px 12px 0;
-  padding: 16px 18px;
+  margin: 14px 14px 0;
+  padding: 18px 20px;
 
-  border: 1px solid color-mix(in srgb, var(--home-warning) 24%, var(--home-border));
+  border: 1px solid color-mix(in srgb, var(--home-warning) 36%, var(--home-border));
   border-radius: var(--home-radius-xl);
 
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--home-warning) 13%, transparent), transparent 40%),
-    rgba(255, 255, 255, .032);
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--home-warning) 23%, transparent), transparent 42%),
+    radial-gradient(circle at 100% 100%, rgba(251, 146, 60, .12), transparent 42%),
+    rgba(255, 255, 255, .038);
 
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .055),
-    0 10px 24px rgba(0, 0, 0, .15);
+    inset 0 1px 0 rgba(255, 255, 255, .075),
+    0 12px 28px rgba(0, 0, 0, .18),
+    0 0 36px rgba(250, 204, 21, .10);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-billing-total span {
-  color: var(--home-text-dim);
+  color: rgba(255, 255, 255, .56);
 
   font-size: 10px;
   line-height: 1.1;
   font-weight: 950;
-  letter-spacing: .08em;
+  letter-spacing: .09em;
   text-transform: uppercase;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-billing-total strong {
   color: var(--home-text-strong);
 
-  font-size: clamp(32px, 3vw, 48px);
-  line-height: .90;
+  font-size: clamp(38px, 3.2vw, 58px);
+  line-height: .88;
   font-weight: 950;
-  letter-spacing: -.070em;
+  letter-spacing: -.080em;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-invoice-list {
   display: grid;
-  gap: 8px;
+  gap: 9px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-invoice-item {
-  min-block-size: 56px;
+  min-block-size: 60px;
 
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
 
-  padding: 10px 12px;
+  padding: 11px 13px;
 
-  border: 1px solid color-mix(in srgb, var(--home-warning) 18%, var(--home-border));
-  border-radius: 17px;
+  border: 1px solid color-mix(in srgb, var(--home-warning) 22%, var(--home-border));
+  border-radius: 18px;
 
-  background: rgba(255, 255, 255, .034);
+  background:
+    radial-gradient(circle at 0% 20%, rgba(250, 204, 21, .08), transparent 44%),
+    rgba(255, 255, 255, .038);
 
   transition:
     background var(--home-fast) var(--home-ease-standard),
     border-color var(--home-fast) var(--home-ease-standard),
-    transform var(--home-fast) var(--home-ease);
+    transform var(--home-fast) var(--home-ease),
+    box-shadow var(--home-fast) var(--home-ease-standard);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-invoice-item:hover {
-  transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--home-warning) 28%, rgba(255, 255, 255, .14));
-  background: rgba(255, 255, 255, .052);
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--home-warning) 34%, rgba(255, 255, 255, .16));
+  background:
+    radial-gradient(circle at 0% 20%, rgba(250, 204, 21, .14), transparent 46%),
+    rgba(255, 255, 255, .058);
+
+  box-shadow:
+    0 14px 28px rgba(0, 0, 0, .20),
+    0 0 30px rgba(250, 204, 21, .10);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-invoice-main {
   min-inline-size: 0;
 
   display: grid;
-  gap: 3px;
+  gap: 4px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-invoice-main strong {
@@ -1376,15 +1674,15 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-invoice-main span {
-  color: var(--home-text-dim);
+  color: rgba(255, 255, 255, .56);
 
   font-size: 11px;
   line-height: 1.36;
-  font-weight: 600;
+  font-weight: 650;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-invoice-amount {
-  color: color-mix(in srgb, var(--home-warning) 82%, var(--home-text-strong));
+  color: color-mix(in srgb, var(--home-warning) 88%, var(--home-text-strong));
 
   font-size: 11px;
   font-weight: 950;
@@ -1400,9 +1698,9 @@
 :where(.home-view-root, [data-home-scope]) .home-entity-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
 
-  padding: 12px;
+  padding: 14px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-entity-column {
@@ -1410,7 +1708,7 @@
 
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 11px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-entity-column-head {
@@ -1424,35 +1722,41 @@
 
 :where(.home-view-root, [data-home-scope]) .home-mini-list {
   display: grid;
-  gap: 8px;
+  gap: 9px;
   padding: 0;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-mini-list li {
-  min-block-size: 54px;
+  min-block-size: 58px;
 
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
 
-  padding: 10px 12px;
+  padding: 11px 13px;
 
   border: 1px solid var(--home-border-soft);
-  border-radius: 17px;
+  border-radius: 18px;
 
-  background: rgba(255, 255, 255, .034);
+  background:
+    radial-gradient(circle at 0% 20%, rgba(255, 255, 255, .055), transparent 44%),
+    rgba(255, 255, 255, .038);
 
   transition:
     background var(--home-fast) var(--home-ease-standard),
     border-color var(--home-fast) var(--home-ease-standard),
-    transform var(--home-fast) var(--home-ease);
+    transform var(--home-fast) var(--home-ease),
+    box-shadow var(--home-fast) var(--home-ease-standard);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-mini-list li:hover {
-  transform: translateY(-1px);
-  border-color: rgba(255, 255, 255, .14);
-  background: rgba(255, 255, 255, .052);
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, .17);
+  background: rgba(255, 255, 255, .058);
+
+  box-shadow:
+    0 14px 28px rgba(0, 0, 0, .20);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-mini-list strong {
@@ -1470,11 +1774,11 @@
 
 :where(.home-view-root, [data-home-scope]) .home-mini-list span,
 :where(.home-view-root, [data-home-scope]) .home-panel-muted {
-  color: var(--home-text-dim);
+  color: rgba(255, 255, 255, .56);
 
   font-size: 11px;
   line-height: 1.36;
-  font-weight: 600;
+  font-weight: 650;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-panel-muted {
@@ -1492,11 +1796,7 @@
   }
 
   :where(.home-view-root, [data-home-scope]) .home-create-card-button {
-    min-block-size: 82px;
-  }
-
-  :where(.home-view-root, [data-home-scope]) .home-stats {
-    grid-template-columns: 1fr;
+    min-block-size: 96px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-grid,
@@ -1507,9 +1807,17 @@
       "invoices"
       "entities";
   }
+
+  :where(.home-view-root, [data-home-scope]) .home-panel {
+    min-block-size: auto;
+  }
 }
 
 @container (max-width: 920px) {
+  :where(.home-view-root, [data-home-scope]) .home-stats {
+    grid-template-columns: 1fr;
+  }
+
   :where(.home-view-root, [data-home-scope]) .home-panel-header {
     grid-template-columns: 1fr;
   }
@@ -1517,39 +1825,51 @@
 
 @container (max-width: 720px) {
   :where(.home-view-root, [data-home-scope]) {
-    gap: 12px;
-    padding-inline: 0;
+    gap: 14px;
+    padding-inline: clamp(10px, 3.5vw, 18px);
+    padding-block-start: clamp(22px, 5vw, 32px);
   }
 
   :where(.home-view-root, [data-home-scope]) .home-header-main {
-    grid-template-columns: 50px minmax(0, 1fr);
-    gap: 11px;
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 12px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-current-user-avatar {
-    inline-size: 50px;
-    block-size: 50px;
-    border-radius: 17px;
+    inline-size: 52px;
+    block-size: 52px;
+    border-radius: 18px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-header h1 {
-    font-size: clamp(30px, 8vw, 40px);
-    letter-spacing: -.060em;
+    font-size: clamp(30px, 8vw, 42px);
+    letter-spacing: -.062em;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-create-card-button {
-    grid-template-columns: 44px minmax(0, 1fr);
-    min-block-size: 78px;
+    grid-template-columns: 46px minmax(0, 1fr);
+    min-block-size: 82px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-create-card-icon {
-    inline-size: 44px;
-    block-size: 44px;
-    border-radius: 16px;
+    inline-size: 46px;
+    block-size: 46px;
+    border-radius: 17px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-create-card-arrow {
     display: none;
+  }
+
+  :where(.home-view-root, [data-home-scope]) .home-stat-card-button {
+    grid-template-columns: 50px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  :where(.home-view-root, [data-home-scope]) .home-stat-icon {
+    inline-size: 50px;
+    block-size: 50px;
+    border-radius: 18px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-entity-columns {
@@ -1580,23 +1900,27 @@
 @container (max-width: 480px) {
   :where(.home-view-root, [data-home-scope]) .home-create-card-button {
     grid-template-columns: 1fr;
-    gap: 9px;
+    gap: 10px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-create-card-icon {
-    inline-size: 42px;
-    block-size: 42px;
+    inline-size: 44px;
+    block-size: 44px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-stat-card-button {
-    grid-template-columns: 42px minmax(0, 1fr);
-    padding: 14px;
+    grid-template-columns: 44px minmax(0, 1fr);
+    padding: 15px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-stat-icon {
-    inline-size: 42px;
-    block-size: 42px;
-    border-radius: 15px;
+    inline-size: 44px;
+    block-size: 44px;
+    border-radius: 16px;
+  }
+
+  :where(.home-view-root, [data-home-scope]) .home-stat-value {
+    font-size: clamp(34px, 12vw, 46px);
   }
 }
 
@@ -1610,10 +1934,6 @@
     grid-template-columns: 1fr;
   }
 
-  :where(.home-view-root, [data-home-scope]) .home-stats {
-    grid-template-columns: 1fr;
-  }
-
   :where(.home-view-root, [data-home-scope]) .home-grid,
   :where(.home-view-root--admin, [data-home-admin="true"]) .home-grid {
     grid-template-columns: 1fr;
@@ -1621,6 +1941,12 @@
       "activity"
       "invoices"
       "entities";
+  }
+}
+
+@media (max-width: 920px) {
+  :where(.home-view-root, [data-home-scope]) .home-stats {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1649,13 +1975,13 @@
   }
 
   :where(.home-view-root, [data-home-scope]) .home-panel {
-    border-radius: 20px;
+    border-radius: 22px;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-panel-header,
   :where(.home-view-root, [data-home-scope]) .home-activity-list,
   :where(.home-view-root, [data-home-scope]) .home-invoice-list {
-    padding-inline: 10px;
+    padding-inline: 11px;
   }
 }
 
@@ -1682,10 +2008,22 @@
   :where(.home-view-root, [data-home-scope]) .home-create-card-button:hover {
     transform: none;
   }
+
+  :where(.home-view-root, [data-home-scope])::before {
+    animation: none;
+  }
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  :where(.home-view-root, [data-home-scope]) .home-panel {
+  :where(.home-view-root, [data-home-scope]) .home-panel,
+  :where(.home-view-root, [data-home-scope]) .home-stat-card,
+  :where(.home-view-root, [data-home-scope]) .home-create-card-button,
+  :where(.home-view-root, [data-home-scope]) .home-alert {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  :where(.home-view-root, [data-home-scope])::after {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
@@ -1696,7 +2034,7 @@
   :where(.home-view-root, [data-home-scope]) .home-stat-card::after,
   :where(.home-view-root, [data-home-scope]) .home-create-card-button::before,
   :where(.home-view-root, [data-home-scope]) .home-create-card-button::after {
-    opacity: .35;
+    opacity: .45;
   }
 }
 
@@ -1714,6 +2052,8 @@
     box-shadow: none;
   }
 
+  :where(.home-view-root, [data-home-scope])::before,
+  :where(.home-view-root, [data-home-scope])::after,
   :where(.home-view-root, [data-home-scope]) .home-panel::before,
   :where(.home-view-root, [data-home-scope]) .home-panel::after,
   :where(.home-view-root, [data-home-scope]) .home-stat-card::before,
@@ -1735,6 +2075,11 @@
 
     color: #000;
     background: #fff;
+  }
+
+  :where(.home-view-root, [data-home-scope])::before,
+  :where(.home-view-root, [data-home-scope])::after {
+    display: none;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-panel,
@@ -1768,5 +2113,23 @@
 
   100% {
     background-position: -120% 0;
+  }
+}
+
+@keyframes homeBackgroundDrift {
+  0% {
+    filter:
+      saturate(1.05)
+      contrast(1.02)
+      brightness(.88);
+    transform: translate3d(-.35%, -.25%, 0) scale(1.006);
+  }
+
+  100% {
+    filter:
+      saturate(1.12)
+      contrast(1.04)
+      brightness(.94);
+    transform: translate3d(.35%, .25%, 0) scale(1.014);
   }
 }

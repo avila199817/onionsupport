@@ -9,6 +9,7 @@
    - Adjuntos iniciales.
    - Estados visuales: loading, errors, success.
    - Exponer data-field/data-action para index.js.
+   - Estructura estable para reducir flicker en rerenders.
    - Sin Auth.
    - Sin Router.
    - Sin HTTP.
@@ -21,7 +22,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.v1";
+  "incidencias.template.create.v2.production";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -102,7 +103,7 @@ function cleanText(value = "", fallback = "") {
 }
 
 function first(...values) {
-  for (const value of values) {
+  for (const value of values.flat(Infinity)) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && !value.length) continue;
@@ -163,6 +164,28 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
+function normalizeEmail(value = "") {
+  const email = cleanText(value, "").toLowerCase();
+
+  if (!email) return "";
+
+  if (
+    [
+      "null",
+      "undefined",
+      "none",
+      "sin email",
+      "no email",
+      "no_email",
+      "__no_email__",
+    ].includes(email)
+  ) {
+    return "";
+  }
+
+  return email.includes("@") ? email : "";
+}
+
 function hasSensitiveQuery(value = "") {
   return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(
     String(value || "")
@@ -178,6 +201,8 @@ function safeImageSrc(value = "") {
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
   if (hasSensitiveQuery(raw)) return "";
 
+  if (/^blob:/i.test(raw)) return raw;
+
   if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
 
   if (/^https:\/\//i.test(raw)) {
@@ -188,7 +213,57 @@ function safeImageSrc(value = "") {
     }
   }
 
+  if (/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
   return "";
+}
+
+function firstImageSrc(...values) {
+  for (const value of values.flat(Infinity)) {
+    if (value === undefined || value === null) continue;
+
+    if (isObject(value)) {
+      const nested = firstImageSrc(
+        value.avatarUrl,
+        value.avatar,
+        value.picture,
+        value.photoUrl,
+        value.photoURL,
+        value.imageUrl,
+        value.profile?.avatarUrl,
+        value.profile?.avatar,
+        value.profile?.photoUrl,
+        value.profile?.photoURL,
+        value.profile?.picture
+      );
+
+      if (nested) return nested;
+      continue;
+    }
+
+    const src = safeImageSrc(value);
+    if (src) return src;
+  }
+
+  return "";
+}
+
+function hashText(value = "") {
+  const text = cleanText(value, "");
+  let hash = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return Math.abs(hash);
 }
 
 /* =========================================================
@@ -248,21 +323,70 @@ function icon(name = "") {
 
 function normalizeUserResult(user = {}) {
   const raw = safeObject(user);
-  const id = cleanText(first(raw.userId, raw.id, raw.uid, raw.sub, raw.username), "");
+
+  const id = cleanText(
+    first(
+      raw.userId,
+      raw.id,
+      raw.uid,
+      raw.sub,
+      raw.username
+    ),
+    ""
+  );
+
   const name = cleanText(
-    first(raw.displayName, raw.fullName, raw.name, raw.nombre, raw.username),
+    first(
+      raw.displayName,
+      raw.fullName,
+      raw.name,
+      raw.nombre,
+      raw.username
+    ),
     "Usuario"
   );
+
+  const email = normalizeEmail(
+    first(
+      raw.email,
+      raw.emailLower,
+      raw.userEmail,
+      raw.mail,
+      raw.profile?.email,
+      ""
+    )
+  );
+
+  const avatarUrl = firstImageSrc(
+    raw.avatarUrl,
+    raw.avatar,
+    raw.picture,
+    raw.photoUrl,
+    raw.photoURL,
+    raw.imageUrl,
+    raw.profile?.avatarUrl,
+    raw.profile?.avatar,
+    raw.profile?.photoUrl,
+    raw.profile?.photoURL,
+    raw.profile?.picture
+  );
+
+  const username = cleanText(first(raw.username, raw.userName, raw.slug, ""), "");
+  const role = cleanText(first(raw.role, raw.rol, Array.isArray(raw.roles) ? raw.roles[0] : "", "user"), "user");
 
   return {
     id,
     userId: id,
     displayName: name,
     name,
-    username: cleanText(first(raw.username, raw.userName, ""), ""),
-    role: cleanText(first(raw.role, raw.rol, Array.isArray(raw.roles) ? raw.roles[0] : ""), "user"),
-    avatarUrl: safeImageSrc(first(raw.avatarUrl, raw.avatar, raw.picture, raw.photoUrl, raw.profile?.avatarUrl, "")),
+    email,
+    emailLower: email,
+    username,
+    role,
+    avatarUrl,
+    avatar: avatarUrl || null,
     initials: cleanText(raw.initials, initialsFrom(name)),
+    tone: hashText(`${id}:${email}:${name}`) % 10,
   };
 }
 
@@ -272,22 +396,82 @@ function normalizeForm(form = {}) {
     ...safeObject(form),
   };
 
+  const targetUserEmail = normalizeEmail(
+    first(
+      input.targetUserEmail,
+      input.userEmail,
+      input.clienteEmail,
+      input.clientEmail,
+      input.email,
+      ""
+    )
+  );
+
+  const targetUserAvatar = firstImageSrc(
+    input.targetUserAvatar,
+    input.userAvatar,
+    input.clienteAvatar,
+    input.clientAvatar,
+    input.avatar,
+    input.avatarUrl
+  );
+
   return {
     targetUserId: cleanText(first(input.targetUserId, input.userId, input.usuarioId), ""),
     targetUserName: cleanText(first(input.targetUserName, input.userName, input.clienteNombre, input.clientName), ""),
-    targetUserEmail: cleanText(first(input.targetUserEmail, input.userEmail, input.clienteEmail, input.clientEmail), ""),
-    targetUserAvatar: safeImageSrc(first(input.targetUserAvatar, input.userAvatar, input.clienteAvatar, input.avatar, input.avatarUrl)),
+    targetUserEmail,
+    targetUserAvatar,
 
     subject: cleanText(first(input.subject, input.asunto, input.title), ""),
     description: cleanText(first(input.description, input.descripcion, input.message, input.body), ""),
 
-    priority: cleanText(input.priority, "medium"),
-    status: cleanText(input.status, "open"),
-    category: cleanText(input.category, "general"),
+    priority: normalizeKey(input.priority) || "medium",
+    status: normalizeKey(input.status) || "open",
+    category: normalizeKey(input.category) || "general",
     source: cleanText(input.source, "panel"),
 
     attachments: safeArray(input.attachments),
   };
+}
+
+function buildSelectedUser(form = {}, userSearch = {}) {
+  const selected = safeObject(userSearch.selectedUser);
+
+  if (!form.targetUserId && !selected.id && !selected.userId) {
+    return null;
+  }
+
+  return normalizeUserResult({
+    ...selected,
+
+    userId: first(selected.userId, selected.id, form.targetUserId),
+    id: first(selected.id, selected.userId, form.targetUserId),
+
+    displayName: first(
+      selected.displayName,
+      selected.fullName,
+      selected.name,
+      selected.nombre,
+      form.targetUserName
+    ),
+
+    email: first(
+      selected.email,
+      selected.emailLower,
+      selected.userEmail,
+      selected.mail,
+      form.targetUserEmail
+    ),
+
+    avatarUrl: first(
+      selected.avatarUrl,
+      selected.avatar,
+      selected.picture,
+      selected.photoUrl,
+      selected.photoURL,
+      form.targetUserAvatar
+    ),
+  });
 }
 
 function buildVm(input = {}) {
@@ -295,14 +479,12 @@ function buildVm(input = {}) {
   const form = normalizeForm(data.form || data.draft || {});
   const errors = safeObject(data.errors);
   const userSearch = safeObject(data.userSearch);
+  const query = cleanText(userSearch.query || data.userSearchQuery, "");
+  const results = safeArray(userSearch.results)
+    .map(normalizeUserResult)
+    .filter((item) => item.id);
 
-  const selectedUser = form.targetUserId
-    ? normalizeUserResult({
-        userId: form.targetUserId,
-        displayName: form.targetUserName,
-        avatarUrl: form.targetUserAvatar,
-      })
-    : normalizeUserResult(userSearch.selectedUser || {});
+  const selectedUser = buildSelectedUser(form, userSearch);
 
   return {
     open: data.open === true,
@@ -321,17 +503,17 @@ function buildVm(input = {}) {
     errors,
 
     userSearch: {
-      query: cleanText(userSearch.query || data.userSearchQuery, ""),
+      query,
       loading: userSearch.loading === true,
       error: cleanText(userSearch.error, ""),
-      results: safeArray(userSearch.results).map(normalizeUserResult).filter((item) => item.id),
-      selectedUser: selectedUser.id ? selectedUser : null,
+      results,
+      selectedUser,
       empty:
         userSearch.empty === true ||
         (
-          cleanText(userSearch.query || "", "").length >= 2 &&
+          query.length >= 2 &&
           userSearch.loading !== true &&
-          !safeArray(userSearch.results).length
+          !results.length
         ),
     },
   };
@@ -368,18 +550,22 @@ function renderInput({
   autocomplete = "off",
   disabled = false,
 } = {}) {
+  const hasError = Boolean(cleanText(error, ""));
+
   return `
-    <label class="inc-create-field">
+    <label class="inc-create-field" data-create-field="${attr(name)}">
       <span class="inc-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
 
       <input
-        class="inc-create-input ${error ? "is-error" : ""}"
+        class="${joinClasses("inc-create-input", hasError ? "is-error" : "")}"
         data-field="${attr(name)}"
         name="${attr(name)}"
         type="${attr(type)}"
         value="${attr(value)}"
         placeholder="${attr(placeholder)}"
         autocomplete="${attr(autocomplete)}"
+        spellcheck="${type === "text" ? "true" : "false"}"
+        ${required ? "required" : ""}
         ${disabledAttrs(disabled, disabled)}
       >
 
@@ -398,16 +584,19 @@ function renderTextarea({
   rows = 5,
   disabled = false,
 } = {}) {
+  const hasError = Boolean(cleanText(error, ""));
+
   return `
-    <label class="inc-create-field">
+    <label class="inc-create-field" data-create-field="${attr(name)}">
       <span class="inc-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
 
       <textarea
-        class="inc-create-textarea ${error ? "is-error" : ""}"
+        class="${joinClasses("inc-create-textarea", hasError ? "is-error" : "")}"
         data-field="${attr(name)}"
         name="${attr(name)}"
         rows="${number(rows, 5)}"
         placeholder="${attr(placeholder)}"
+        ${required ? "required" : ""}
         ${disabledAttrs(disabled, disabled)}
       >${escapeHtml(value)}</textarea>
 
@@ -429,15 +618,18 @@ function renderSelect({
   error = "",
   disabled = false,
 } = {}) {
+  const hasError = Boolean(cleanText(error, ""));
+
   return `
-    <label class="inc-create-field">
+    <label class="inc-create-field" data-create-field="${attr(name)}">
       <span class="inc-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
 
       <span class="inc-create-select-wrap">
         <select
-          class="inc-create-select ${error ? "is-error" : ""}"
+          class="${joinClasses("inc-create-select", hasError ? "is-error" : "")}"
           data-field="${attr(name)}"
           name="${attr(name)}"
+          ${required ? "required" : ""}
           ${disabledAttrs(disabled, disabled)}
         >
           ${safeArray(options).map((option) => {
@@ -464,21 +656,41 @@ function renderSelect({
    ADMIN USER SEARCH
 ========================================================= */
 
-function renderUserAvatar(user = {}) {
+function renderUserAvatar(user = {}, extraClass = "") {
   const item = normalizeUserResult(user);
   const image = safeImageSrc(item.avatarUrl);
+  const initials = item.initials || initialsFrom(item.displayName);
 
   return `
     <span
-      class="inc-create-user-avatar ${image ? "has-image" : "is-fallback"}"
+      class="${joinClasses(
+        "inc-create-user-avatar",
+        "inc-create-search-avatar",
+        extraClass,
+        image ? "has-image" : "is-fallback"
+      )}"
+      data-avatar-tone="${attr(String(item.tone))}"
+      data-has-avatar="${image ? "true" : "false"}"
+      data-fallback="${image ? "false" : "true"}"
       aria-hidden="true"
     >
       ${
         image
-          ? `<img src="${attr(image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">`
+          ? `
+            <img
+              src="${attr(image)}"
+              alt=""
+              width="44"
+              height="44"
+              loading="lazy"
+              decoding="async"
+              referrerpolicy="no-referrer"
+              draggable="false"
+            >
+          `
           : ""
       }
-      <span>${escapeHtml(item.initials || initialsFrom(item.displayName))}</span>
+      <span class="inc-create-search-avatar-fallback">${escapeHtml(initials)}</span>
     </span>
   `;
 }
@@ -494,23 +706,33 @@ function renderSelectedUser(vm = {}) {
     : normalizeUserResult({
         userId: form.targetUserId,
         displayName: form.targetUserName,
+        email: form.targetUserEmail,
         avatarUrl: form.targetUserAvatar,
       });
 
-  return `
-    <section class="inc-create-selected-user" data-create-selected-user="true">
-      <div class="inc-create-selected-user-main">
-        ${renderUserAvatar(user)}
+  const subtitle = [
+    user.email,
+    user.username || user.userId || user.id,
+  ].filter(Boolean).join(" · ");
 
-        <span class="inc-create-selected-user-copy">
+  return `
+    <section
+      class="inc-create-selected-user inc-create-target-user-card"
+      data-create-selected-user="true"
+      data-user-id="${attr(user.userId || user.id)}"
+    >
+      <div class="inc-create-selected-user-main">
+        ${renderUserAvatar(user, "inc-create-target-user-avatar")}
+
+        <span class="inc-create-selected-user-copy inc-create-target-user-copy">
           <strong>${escapeHtml(user.displayName || "Usuario seleccionado")}</strong>
-          <span>${escapeHtml(user.username || user.userId || user.id)}</span>
+          <span>${escapeHtml(subtitle || "Usuario seleccionado")}</span>
         </span>
       </div>
 
       <button
         type="button"
-        class="inc-create-selected-user-clear"
+        class="inc-create-selected-user-clear inc-create-target-user-clear"
         data-create-action="${CREATE_ACTIONS.USER_CLEAR}"
         data-incidencias-action="${CREATE_ACTIONS.USER_CLEAR}"
         data-action="${CREATE_ACTIONS.USER_CLEAR}"
@@ -527,16 +749,24 @@ function renderUserSearchResults(vm = {}) {
 
   if (search.loading) {
     return `
-      <div class="inc-create-user-search-state" data-user-search-state="loading">
+      <div
+        class="inc-create-user-search-state inc-create-search-state"
+        data-user-search-state="loading"
+        aria-live="polite"
+      >
         <span class="inc-create-spinner" aria-hidden="true"></span>
-        Buscando usuarios...
+        <span>Buscando usuarios...</span>
       </div>
     `;
   }
 
   if (search.error) {
     return `
-      <div class="inc-create-user-search-state is-error" data-user-search-state="error">
+      <div
+        class="inc-create-user-search-state inc-create-search-state is-error"
+        data-user-search-state="error"
+        role="alert"
+      >
         ${escapeHtml(search.error)}
       </div>
     `;
@@ -544,7 +774,11 @@ function renderUserSearchResults(vm = {}) {
 
   if (search.empty) {
     return `
-      <div class="inc-create-user-search-state" data-user-search-state="empty">
+      <div
+        class="inc-create-user-search-state inc-create-search-state"
+        data-user-search-state="empty"
+        aria-live="polite"
+      >
         No hay usuarios para esta búsqueda.
       </div>
     `;
@@ -553,28 +787,43 @@ function renderUserSearchResults(vm = {}) {
   if (!search.results.length) return "";
 
   return `
-    <div class="inc-create-user-results" role="listbox" data-create-user-results="true">
-      ${search.results.map((user) => `
-        <button
-          type="button"
-          class="inc-create-user-result"
-          role="option"
-          data-create-action="${CREATE_ACTIONS.USER_SELECT}"
-          data-incidencias-action="${CREATE_ACTIONS.USER_SELECT}"
-          data-action="${CREATE_ACTIONS.USER_SELECT}"
-          data-user-id="${attr(user.userId || user.id)}"
-          data-user-name="${attr(user.displayName)}"
-          data-user-avatar="${attr(user.avatarUrl)}"
-          ${disabledAttrs(vm.submitting, vm.submitting)}
-        >
-          ${renderUserAvatar(user)}
+    <div
+      class="inc-create-user-results inc-create-search-results"
+      role="listbox"
+      data-create-user-results="true"
+      aria-label="Resultados de búsqueda de usuarios"
+    >
+      ${search.results.map((user) => {
+        const subtitle = [
+          user.email,
+          user.username,
+          user.role,
+        ].filter(Boolean).join(" · ");
 
-          <span class="inc-create-user-result-copy">
-            <strong>${escapeHtml(user.displayName)}</strong>
-            <span>${escapeHtml([user.username, user.role].filter(Boolean).join(" · "))}</span>
-          </span>
-        </button>
-      `).join("")}
+        return `
+          <button
+            type="button"
+            class="inc-create-user-result inc-create-search-item"
+            role="option"
+            data-create-action="${CREATE_ACTIONS.USER_SELECT}"
+            data-incidencias-action="${CREATE_ACTIONS.USER_SELECT}"
+            data-action="${CREATE_ACTIONS.USER_SELECT}"
+            data-user-id="${attr(user.userId || user.id)}"
+            data-user-name="${attr(user.displayName)}"
+            data-user-email="${attr(user.email)}"
+            data-email="${attr(user.email)}"
+            data-user-avatar="${attr(user.avatarUrl)}"
+            ${disabledAttrs(vm.submitting, vm.submitting)}
+          >
+            ${renderUserAvatar(user)}
+
+            <span class="inc-create-user-result-copy inc-create-search-item-copy">
+              <strong>${escapeHtml(user.displayName)}</strong>
+              <span>${escapeHtml(subtitle || user.userId || user.id)}</span>
+            </span>
+          </button>
+        `;
+      }).join("")}
     </div>
   `;
 }
@@ -583,7 +832,12 @@ function renderAdminUserSearch(vm = {}) {
   if (!vm.admin) return "";
 
   return `
-    <section class="inc-create-block inc-create-block--user-search" data-create-admin-user-search="true">
+    <section
+      class="inc-create-block inc-create-block--user-search inc-create-block--target"
+      data-create-admin-user-search="true"
+      data-user-search-active="${vm.userSearch.query ? "true" : "false"}"
+      data-user-selected="${vm.form.targetUserId ? "true" : "false"}"
+    >
       <div class="inc-create-block-head">
         <div>
           <strong>Usuario afectado</strong>
@@ -591,22 +845,26 @@ function renderAdminUserSearch(vm = {}) {
         </div>
       </div>
 
-      ${renderSelectedUser(vm)}
+      <div class="inc-create-selected-user-slot" data-create-selected-user-slot="true">
+        ${renderSelectedUser(vm)}
+      </div>
 
-      <label class="inc-create-field">
+      <label class="inc-create-field" data-create-field="targetUserSearch">
         <span class="inc-create-label">Buscar usuario</span>
 
-        <span class="inc-create-search-control">
-          <span class="inc-create-search-icon" aria-hidden="true">${icon("search")}</span>
+        <span class="inc-create-search-control inc-create-search-input-wrap">
+          <span class="inc-create-search-icon inc-create-search-input-icon" aria-hidden="true">
+            ${icon("search")}
+          </span>
 
           <input
-            class="inc-create-input inc-create-user-search-input"
+            class="inc-create-input inc-create-input--with-icon inc-create-user-search-input"
             data-field="targetUserSearch"
             data-create-user-search-input="true"
             name="targetUserSearch"
             type="search"
             value="${attr(vm.userSearch.query)}"
-            placeholder="Nombre, usuario o ID"
+            placeholder="Nombre, usuario, email o ID"
             autocomplete="off"
             spellcheck="false"
             aria-autocomplete="list"
@@ -618,9 +876,16 @@ function renderAdminUserSearch(vm = {}) {
 
       <input type="hidden" data-field="targetUserId" name="targetUserId" value="${attr(vm.form.targetUserId)}">
       <input type="hidden" data-field="targetUserName" name="targetUserName" value="${attr(vm.form.targetUserName)}">
+      <input type="hidden" data-field="targetUserEmail" name="targetUserEmail" value="${attr(vm.form.targetUserEmail)}">
       <input type="hidden" data-field="targetUserAvatar" name="targetUserAvatar" value="${attr(vm.form.targetUserAvatar)}">
 
-      ${renderUserSearchResults(vm)}
+      <div class="inc-create-user-search-slot" data-create-user-search-slot="true">
+        ${renderUserSearchResults(vm)}
+      </div>
+
+      <div class="inc-create-target-error-slot">
+        ${renderFieldError(vm.errors.targetUserId || vm.errors.targetUser)}
+      </div>
     </section>
   `;
 }
@@ -637,35 +902,52 @@ function fileSize(file = {}) {
   return number(file.size || file.sizeBytes, 0);
 }
 
-function renderFilesSummary(files = []) {
+function fileType(file = {}) {
+  return cleanText(file.type || file.contentType || file.mimetype || file.mimeType, "");
+}
+
+function renderFilesSummary(files = [], vm = {}) {
   const items = safeArray(files);
 
   if (!items.length) return "";
 
   return `
-    <div class="inc-create-files-list">
-      ${items.map((file, index) => `
-        <div class="inc-create-file-row">
-          <div class="inc-create-file-meta">
-            <strong class="inc-create-file-name">${escapeHtml(fileName(file, index))}</strong>
-            <span class="inc-create-file-size">
-              ${escapeHtml([cleanText(file.type || file.contentType, ""), formatBytes(fileSize(file))].filter(Boolean).join(" · "))}
-            </span>
-          </div>
+    <div class="inc-create-files-list" data-create-files-list="true">
+      ${items.map((file, index) => {
+        const name = fileName(file, index);
+        const size = fileSize(file);
+        const type = fileType(file);
+        const meta = [type, formatBytes(size)].filter(Boolean).join(" · ");
 
-          <button
-            type="button"
-            data-create-action="${CREATE_ACTIONS.ATTACHMENT_REMOVE}"
-            data-incidencias-action="${CREATE_ACTIONS.ATTACHMENT_REMOVE}"
-            data-action="${CREATE_ACTIONS.ATTACHMENT_REMOVE}"
-            data-remove-attachment="${attr(String(index))}"
-            class="inc-create-file-remove"
+        return `
+          <div
+            class="inc-create-file-row"
+            data-create-file-row="true"
+            data-file-index="${attr(String(index))}"
           >
-            ${icon("trash")}
-            <span>Quitar</span>
-          </button>
-        </div>
-      `).join("")}
+            <div class="inc-create-file-meta">
+              <strong class="inc-create-file-name">${escapeHtml(name)}</strong>
+              <span class="inc-create-file-size">
+                ${escapeHtml(meta || "Archivo preparado")}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              data-create-action="${CREATE_ACTIONS.ATTACHMENT_REMOVE}"
+              data-incidencias-action="${CREATE_ACTIONS.ATTACHMENT_REMOVE}"
+              data-action="${CREATE_ACTIONS.ATTACHMENT_REMOVE}"
+              data-remove-attachment="${attr(String(index))}"
+              data-file-index="${attr(String(index))}"
+              class="inc-create-file-remove"
+              ${disabledAttrs(vm.submitting, vm.submitting)}
+            >
+              ${icon("trash")}
+              <span>Quitar</span>
+            </button>
+          </div>
+        `;
+      }).join("")}
     </div>
   `;
 }
@@ -680,7 +962,11 @@ function renderFileInput(vm = {}) {
       : `${files.length} archivos`;
 
   return `
-    <section class="inc-create-files-card">
+    <section
+      class="inc-create-files-card"
+      data-create-files-card="true"
+      data-files-count="${attr(String(files.length))}"
+    >
       <div class="inc-create-files-head">
         <strong>${icon("paperclip")} Adjuntos</strong>
         <span>${escapeHtml(countText)}</span>
@@ -688,7 +974,11 @@ function renderFileInput(vm = {}) {
 
       <label
         data-dropzone="attachments"
-        class="inc-create-dropzone ${vm.dragActive ? "is-active" : ""} ${error ? "is-error" : ""}"
+        class="${joinClasses(
+          "inc-create-dropzone",
+          vm.dragActive ? "is-active" : "",
+          error ? "is-error" : ""
+        )}"
       >
         <input
           id="incidencias-create-attachments-input"
@@ -708,7 +998,7 @@ function renderFileInput(vm = {}) {
       </label>
 
       ${renderFieldError(error)}
-      ${renderFilesSummary(files)}
+      ${renderFilesSummary(files, vm)}
     </section>
   `;
 }
@@ -724,7 +1014,7 @@ function renderAlert(type = "info", title = "", body = "") {
   if (!safeTitle && !safeBody) return "";
 
   return `
-    <div class="inc-create-alert is-${attr(type)}">
+    <div class="inc-create-alert is-${attr(type)}" role="${type === "error" ? "alert" : "status"}">
       <span class="inc-create-alert-icon">
         ${type === "success" ? icon("check") : type === "error" ? icon("alert") : icon("ticket")}
       </span>
@@ -763,8 +1053,14 @@ export function renderIncidenciasCreateModal(input = {}) {
       class="inc-create-modal-root"
       data-incidencias-create-root="true"
       data-template-version="${attr(INCIDENCIAS_CREATE_TEMPLATE_VERSION)}"
+      data-open="true"
+      data-submitting="${vm.submitting ? "true" : "false"}"
+      data-admin="${vm.admin ? "true" : "false"}"
     >
-      <div data-incidencias-create-modal-overlay="true" class="inc-create-overlay">
+      <div
+        data-incidencias-create-modal-overlay="true"
+        class="inc-create-overlay"
+      >
         <div
           id="${PANEL_ID}"
           data-incidencias-create-modal-panel="true"
@@ -772,7 +1068,7 @@ export function renderIncidenciasCreateModal(input = {}) {
           aria-modal="true"
           aria-labelledby="incidencias-create-modal-title"
           tabindex="-1"
-          class="inc-create-panel ${vm.submitting ? "is-submitting" : ""}"
+          class="${joinClasses("inc-create-panel", vm.submitting ? "is-submitting" : "")}"
         >
           ${vm.submitting ? renderLoadingOverlay("Creando incidencia...") : ""}
 
@@ -948,7 +1244,11 @@ export function validateCreateForm(form = {}) {
   return {
     valid: Object.keys(errors).length === 0,
     errors,
-    form: current,
+    form: {
+      ...current,
+      category,
+      priority,
+    },
   };
 }
 
@@ -962,6 +1262,7 @@ export function getCreateTemplateSnapshot() {
       "targetUserSearch",
       "targetUserId",
       "targetUserName",
+      "targetUserEmail",
       "targetUserAvatar",
       "subject",
       "category",
@@ -977,10 +1278,17 @@ export function getCreateTemplateSnapshot() {
       actionClear: CREATE_ACTIONS.USER_CLEAR,
     },
 
+    limits: {
+      maxFiles: MAX_FILES,
+      maxFileSize: MAX_FILE_SIZE,
+    },
+
     policy: {
       templateOnly: true,
       adminUserSearchMarkup: true,
-
+      stableSlots: true,
+      targetUserEmailField: true,
+      avatarAliasCompatibility: true,
       noAuth: true,
       noRouter: true,
       noHttp: true,

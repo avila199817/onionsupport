@@ -3,44 +3,21 @@
    Archivo: /src/css/core/loader.css
 
    ONION SUPPORT · BOOT LOADER · EXTREME 10/10
-   REFRESH SAFE · SOLID GRAPHITE · TOKEN FIRST · CSP CLEAN
+   LOW POLY BACKGROUND · LOGO SAFE · TOKEN FIRST · CSP CLEAN
 
-   Arquitectura:
-   - variables.css = tokens base / dark.
-   - light.css     = overrides light.
-   - layout.css    = shell / mounts / main scroll.
-   - loader.css    = loader, estados y animaciones.
-
-   Reglas:
-   - Sin :root global.
-   - Sin bloque local de paleta light.
-   - Sin duplicar sistema global.
-   - Sin controlar layout principal.
-   - Sin search.
-   - Sin body::before/body::after.
-   - Todo consume tokens existentes con fallback defensivo.
-   - Theme switch sólo para elegir logo.
+   Responsabilidad:
+   - Control visual completo de #app-loader.
+   - Fondo low-poly/fractal sin asset externo.
+   - Card premium graphite/glass.
+   - Logo real desde index.html: picture/img.
+   - Fallback "ON" si no hay imagen.
    - Compatible con markup app-loader__*.
    - Compatible con markup legacy loader-*.
-
-   Contrato:
-   - index.html deja #app-loader visible desde refresh.
-   - theme.js resuelve html[data-theme] antes de app.css.
-   - layout.css gobierna #app-shell.
-   - loader.js/main.js pueden usar:
-     · is-visible
-     · is-leaving
-     · is-hidden
-     · has-hidden
-     · data-loader-visible
-     · data-loader-state
-     · aria-hidden
-
-   Logo:
-   - Fuente de verdad durante boot: html[data-theme].
-   - body[data-theme] no participa para evitar carreras.
-   - dark  -> favicon_white.png
-   - light -> favicon_black.png
+   - Sin Auth.
+   - Sin Router.
+   - Sin Store.
+   - Sin JS.
+   - Sin body::before/body::after.
 ========================================================= */
 
 
@@ -94,8 +71,6 @@ body[data-app-loading="false"] {
 
 /* =========================================================
    SHELL ANTI FLICKER BRIDGE
-   layout.css es la fuente de verdad del shell.
-   Aquí sólo se refuerzan estados de boot/ready para evitar flash.
 ========================================================= */
 
 html.app-booting #app-shell,
@@ -132,120 +107,109 @@ body[data-app-loading="false"] #app-shell,
 
 
 /* =========================================================
-   ROOT OVERLAY / SCOPED LOADER TOKENS
+   ROOT OVERLAY / TOKENS
 ========================================================= */
 
 #app-loader,
 .app-loader {
   --loader-z: var(--z-loader, 2147483000);
 
-  --loader-solid-bg: var(--loader-bg, var(--main-bg, #0D0D0D));
-  --loader-solid-card: var(--loader-dark-card, var(--card-bg, #242424));
-  --loader-solid-card-strong: var(--loader-dark-card-strong, var(--surface-strong, #3B3B3B));
+  --loader-card-width-final: var(--loader-card-width, min(430px, calc(100vw - 48px)));
+  --loader-card-padding-final: var(--loader-card-padding, 34px 34px 30px);
+  --loader-card-radius-final: var(--loader-card-radius, var(--radius-3xl, 30px));
 
-  --loader-overlay-bg:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--graphite-400, #242424), var(--loader-solid-bg) 72%) 0%,
-      var(--loader-solid-bg) 100%
-    );
+  --loader-brand-size-final: var(--loader-brand-size, 82px);
+  --loader-logo-size-final: var(--loader-logo-size, 58px);
+  --loader-logo-radius-final: var(--loader-logo-radius, var(--radius-2xl, 24px));
 
-  --loader-overlay-aura:
-    radial-gradient(
-      circle at 50% 0%,
-      color-mix(in srgb, var(--graphite-100, #696969), transparent 86%),
-      transparent 38%
-    ),
-    radial-gradient(
-      circle at 18% 18%,
-      color-mix(in srgb, var(--graphite-300, #3B3B3B), transparent 82%),
-      transparent 32%
-    ),
-    radial-gradient(
-      circle at 82% 24%,
-      color-mix(in srgb, var(--graphite-200, #525252), transparent 86%),
-      transparent 34%
-    );
-
-  --loader-card-surface:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-strong, #fff), transparent 96%),
-      transparent 42%
-    ),
-    var(--loader-solid-card);
-
-  --loader-card-surface-strong:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-strong, #fff), transparent 95%),
-      transparent 48%
-    ),
-    var(--loader-solid-card-strong);
-
-  --loader-card-border:
-    color-mix(in srgb, var(--text-strong, #ffffff), transparent 88%);
-
-  --loader-card-border-strong:
-    color-mix(in srgb, var(--text-strong, #ffffff), transparent 78%);
-
-  --loader-card-shadow:
-    var(--shadow-xl, 0 36px 100px rgba(0,0,0,.52)),
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong, #fff), transparent 94%);
-
-  --loader-brand-shadow:
-    var(--shadow-md, 0 16px 44px rgba(0,0,0,.34)),
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong, #fff), transparent 92%);
-
-  --loader-brand-surface:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-strong, #fff), transparent 92%),
-      color-mix(in srgb, var(--text-strong, #fff), transparent 97%)
-    ),
-    var(--surface-glass-strong, rgba(255,255,255,.08));
-
-  --loader-brand-core-surface:
-    var(--loader-card-surface-strong);
-
-  --loader-card-shine:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-strong, #ffffff), transparent 94%),
-      transparent 42%
-    ),
-    radial-gradient(
-      circle at 50% 0%,
-      color-mix(in srgb, var(--text-strong, #ffffff), transparent 94%),
-      transparent 34%
-    );
-
-  --loader-progress-track:
-    color-mix(in srgb, var(--text, #ffffff), transparent 90%);
-
-  --loader-progress-active:
-    linear-gradient(
-      90deg,
-      var(--graphite-300, #3B3B3B),
-      var(--graphite-200, #525252),
-      var(--graphite-100, #696969)
-    );
+  --loader-progress-height-final: var(--loader-progress-height, 7px);
 
   --loader-text-main: var(--text-strong, #ffffff);
   --loader-text-muted: var(--text-muted, rgba(255,255,255,.72));
   --loader-text-soft: var(--text-dim, rgba(255,255,255,.50));
 
-  --loader-brand-size-final: var(--loader-brand-size, 74px);
-  --loader-logo-size-final: var(--loader-logo-size, 52px);
-  --loader-card-width-final: var(--loader-card-width, min(360px, calc(100vw - 48px)));
-  --loader-card-padding-final: var(--loader-card-padding, 28px 26px 24px);
-  --loader-card-radius-final: var(--loader-card-radius, var(--radius-3xl, 28px));
-  --loader-logo-radius-final: var(--loader-logo-radius, var(--radius-2xl, 22px));
-  --loader-progress-height-final: var(--loader-progress-height, 7px);
+  --loader-card-border:
+    color-mix(in srgb, var(--text-strong, #ffffff), transparent 84%);
 
-  --loader-ring-size: 3px;
+  --loader-card-border-strong:
+    color-mix(in srgb, var(--text-strong, #ffffff), transparent 72%);
+
+  --loader-card-surface:
+    radial-gradient(
+      circle at 18% 0%,
+      rgba(255,255,255,.105),
+      transparent 38%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.110),
+      rgba(255,255,255,.050) 42%,
+      rgba(255,255,255,.034)
+    ),
+    rgba(28,28,28,.86);
+
+  --loader-card-shine:
+    radial-gradient(
+      circle at 50% -12%,
+      rgba(255,255,255,.18),
+      transparent 34%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.085),
+      transparent 46%
+    );
+
+  --loader-brand-surface:
+    radial-gradient(
+      circle at 35% 16%,
+      rgba(255,255,255,.24),
+      transparent 42%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.125),
+      rgba(255,255,255,.048)
+    ),
+    rgba(38,38,38,.90);
+
+  --loader-brand-core-surface:
+    radial-gradient(
+      circle at 50% 0%,
+      rgba(255,255,255,.12),
+      transparent 45%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(56,56,56,.98),
+      rgba(25,25,25,.98)
+    );
+
+  --loader-card-shadow:
+    0 42px 110px rgba(0,0,0,.58),
+    0 18px 42px rgba(0,0,0,.34),
+    inset 0 1px 0 rgba(255,255,255,.11);
+
+  --loader-brand-shadow:
+    0 18px 44px rgba(0,0,0,.42),
+    inset 0 1px 0 rgba(255,255,255,.12);
+
+  --loader-progress-track:
+    rgba(255,255,255,.105);
+
+  --loader-progress-active:
+    linear-gradient(
+      90deg,
+      rgba(255,255,255,.42),
+      rgba(255,255,255,.74),
+      rgba(255,255,255,.36)
+    );
+
+  --loader-backdrop-blur: blur(16px) saturate(1.08);
+  --loader-card-blur: blur(20px) saturate(1.12);
+
   --loader-spin-speed: 1s;
-  --loader-orbit-speed-final: var(--loader-duration-orbit, 2.2s);
+  --loader-orbit-speed-final: var(--loader-duration-orbit, 2.45s);
   --loader-pulse-speed: 1.55s;
   --loader-bar-speed-final: var(--loader-duration-bar, 1.08s);
   --loader-fade-speed: var(--loader-duration-fade, var(--duration-normal, 220ms));
@@ -276,7 +240,6 @@ body[data-app-loading="false"] #app-shell,
 
   overflow: hidden;
 
-  background: var(--loader-overlay-bg);
   color: var(--loader-text-main);
 
   opacity: 1;
@@ -286,12 +249,179 @@ body[data-app-loading="false"] #app-shell,
   isolation: isolate;
   contain: layout paint style;
 
-  backdrop-filter: var(--loader-backdrop-blur, blur(18px) saturate(1.02));
-  -webkit-backdrop-filter: var(--loader-backdrop-blur, blur(18px) saturate(1.02));
+  background:
+    linear-gradient(115deg, rgba(255,228,75,.95) 0%, transparent 27%),
+    linear-gradient(150deg, rgba(255,180,78,.88) 0%, transparent 36%),
+    linear-gradient(25deg, rgba(246,98,116,.88) 18%, transparent 52%),
+    linear-gradient(135deg, rgba(241,70,133,.82) 30%, transparent 62%),
+    linear-gradient(210deg, rgba(132,43,122,.90) 38%, transparent 72%),
+    linear-gradient(315deg, rgba(7,47,119,.98) 0%, rgba(26,18,66,.96) 36%, transparent 68%),
+    #161111;
+
+  backdrop-filter: var(--loader-backdrop-blur);
+  -webkit-backdrop-filter: var(--loader-backdrop-blur);
 
   transition:
     opacity var(--loader-fade-speed) var(--ease-standard, ease),
     visibility var(--loader-fade-speed) var(--ease-standard, ease);
+}
+
+
+/* =========================================================
+   LOW POLY FRACTAL BACKGROUND
+========================================================= */
+
+#app-loader::before,
+.app-loader::before {
+  content: "";
+
+  position: absolute;
+  inset: -2%;
+  z-index: 0;
+
+  pointer-events: none;
+
+  background:
+    conic-gradient(from 126deg at 7% 7%,
+      rgba(255,238,90,.72) 0 12%,
+      rgba(255,198,78,.62) 12% 25%,
+      rgba(255,161,92,.52) 25% 38%,
+      transparent 38% 100%
+    ),
+    conic-gradient(from 244deg at 18% 26%,
+      rgba(255,231,95,.42) 0 14%,
+      rgba(255,160,76,.58) 14% 32%,
+      rgba(188,139,106,.38) 32% 48%,
+      transparent 48% 100%
+    ),
+    conic-gradient(from 38deg at 33% 12%,
+      rgba(255,190,78,.64) 0 18%,
+      rgba(255,123,94,.55) 18% 38%,
+      rgba(255,87,118,.42) 38% 54%,
+      transparent 54% 100%
+    ),
+    conic-gradient(from 195deg at 48% 35%,
+      rgba(255,95,119,.72) 0 16%,
+      rgba(224,58,124,.62) 16% 36%,
+      rgba(161,64,132,.50) 36% 58%,
+      transparent 58% 100%
+    ),
+    conic-gradient(from 78deg at 61% 8%,
+      rgba(242,142,92,.44) 0 18%,
+      rgba(158,112,102,.34) 18% 36%,
+      rgba(112,84,100,.30) 36% 55%,
+      transparent 55% 100%
+    ),
+    conic-gradient(from 315deg at 78% 22%,
+      rgba(130,77,105,.46) 0 18%,
+      rgba(103,57,109,.56) 18% 42%,
+      rgba(75,43,103,.42) 42% 62%,
+      transparent 62% 100%
+    ),
+    conic-gradient(from 155deg at 91% 44%,
+      rgba(119,38,96,.60) 0 18%,
+      rgba(72,37,103,.64) 18% 44%,
+      rgba(20,51,125,.70) 44% 67%,
+      transparent 67% 100%
+    ),
+    conic-gradient(from 20deg at 16% 63%,
+      rgba(175,140,107,.32) 0 18%,
+      rgba(152,111,105,.38) 18% 40%,
+      rgba(126,92,101,.34) 40% 62%,
+      transparent 62% 100%
+    ),
+    conic-gradient(from 252deg at 43% 74%,
+      rgba(151,77,113,.40) 0 22%,
+      rgba(136,52,112,.48) 22% 46%,
+      rgba(99,51,111,.45) 46% 70%,
+      transparent 70% 100%
+    ),
+    conic-gradient(from 35deg at 73% 71%,
+      rgba(90,45,112,.60) 0 18%,
+      rgba(50,47,120,.66) 18% 40%,
+      rgba(5,43,111,.72) 40% 64%,
+      transparent 64% 100%
+    ),
+    linear-gradient(
+      135deg,
+      rgba(255,227,82,.92) 0%,
+      rgba(255,171,83,.86) 20%,
+      rgba(247,83,117,.86) 43%,
+      rgba(112,48,116,.90) 68%,
+      rgba(3,35,101,.98) 100%
+    );
+
+  background-size:
+    48% 40%,
+    54% 54%,
+    62% 44%,
+    54% 48%,
+    50% 38%,
+    48% 44%,
+    52% 56%,
+    44% 48%,
+    56% 48%,
+    52% 52%,
+    100% 100%;
+
+  background-position:
+    0% 0%,
+    0% 16%,
+    20% 0%,
+    34% 28%,
+    54% 0%,
+    68% 16%,
+    88% 38%,
+    0% 64%,
+    34% 76%,
+    74% 78%,
+    0% 0%;
+
+  background-repeat: no-repeat;
+
+  opacity: .96;
+
+  transform: translateZ(0) scale(1.02);
+
+  animation:
+    loaderPolyDrift
+    11s
+    cubic-bezier(.2,.8,.2,1)
+    infinite
+    alternate;
+}
+
+#app-loader::after,
+.app-loader::after {
+  content: "";
+
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+
+  pointer-events: none;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(0,0,0,.26),
+      rgba(0,0,0,.36) 38%,
+      rgba(0,0,0,.60)
+    ),
+    radial-gradient(
+      circle at 50% 38%,
+      transparent 0 28%,
+      rgba(0,0,0,.30) 70%,
+      rgba(0,0,0,.56) 100%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(0,0,0,.42),
+      transparent 30% 70%,
+      rgba(0,0,0,.46)
+    );
+
+  opacity: .88;
 }
 
 
@@ -345,11 +475,6 @@ body[data-app-loading="true"] #app-loader {
   pointer-events: none;
 }
 
-/*
-   Hard-off:
-   si la app está ready, el loader no debe seguir tapando
-   por un atributo legacy olvidado.
-*/
 html.app-ready #app-loader:not([data-loader-force="true"]),
 html[data-app-state="ready"] #app-loader:not([data-loader-force="true"]),
 body.app-ready #app-loader:not([data-loader-force="true"]),
@@ -365,10 +490,6 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   pointer-events: none;
 }
 
-/*
-   Corte final real.
-   No se redefine [hidden]; reset.css ya lo gestiona correctamente.
-*/
 #app-loader.has-hidden,
 .app-loader.has-hidden,
 #app-loader[data-loader-state="removed"],
@@ -389,11 +510,26 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
 .app-loader [data-loader-backdrop="true"] {
   position: absolute;
   inset: 0;
-  z-index: 0;
-
-  background: var(--loader-overlay-aura);
+  z-index: 1;
 
   pointer-events: none;
+
+  background:
+    radial-gradient(
+      circle at 50% 36%,
+      rgba(255,255,255,.12),
+      transparent 28%
+    ),
+    radial-gradient(
+      circle at 10% 4%,
+      rgba(255,238,132,.18),
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at 96% 96%,
+      rgba(0,36,116,.38),
+      transparent 42%
+    );
 }
 
 #app-loader .app-loader__backdrop::before,
@@ -403,29 +539,29 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   content: "";
 
   position: absolute;
-  inset: -20%;
+  inset: -18%;
 
   background:
     radial-gradient(
-      circle at 50% 50%,
-      color-mix(in srgb, var(--graphite-100, #696969), transparent 90%),
-      transparent 42%
+      circle at 52% 48%,
+      rgba(255,255,255,.12),
+      transparent 38%
     );
 
-  opacity: .68;
+  opacity: .52;
   pointer-events: none;
 
   animation:
     loaderBackdropDrift
-    5.8s
-    var(--ease-standard, ease-in-out)
+    6.8s
+    cubic-bezier(.2,.8,.2,1)
     infinite
     alternate;
 }
 
 
 /* =========================================================
-   PANEL · NEW + LEGACY
+   PANEL
 ========================================================= */
 
 #app-loader .app-loader__card,
@@ -433,14 +569,14 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
 .app-loader .app-loader__card,
 .app-loader .loader-card {
   position: relative;
-  z-index: 2;
+  z-index: 3;
 
   inline-size: var(--loader-card-width-final);
-  min-inline-size: min(92vw, 280px);
+  min-inline-size: min(92vw, 292px);
   max-inline-size: var(--loader-card-width-final);
 
   display: grid;
-  gap: 18px;
+  gap: 19px;
   justify-items: center;
 
   padding: var(--loader-card-padding-final);
@@ -460,15 +596,15 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   isolation: isolate;
   contain: layout paint style;
 
-  backdrop-filter: var(--loader-card-blur, blur(16px) saturate(1.02));
-  -webkit-backdrop-filter: var(--loader-card-blur, blur(16px) saturate(1.02));
+  backdrop-filter: var(--loader-card-blur);
+  -webkit-backdrop-filter: var(--loader-card-blur);
 
   transform: translateZ(0);
 
   animation:
     loaderCardIn
-    .36s
-    var(--ease-emphasis, ease-out)
+    .38s
+    cubic-bezier(.16,1,.3,1)
     both;
 }
 
@@ -486,7 +622,7 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
 
   background: var(--loader-card-shine);
 
-  opacity: .82;
+  opacity: .88;
 }
 
 #app-loader .app-loader__card::after,
@@ -496,7 +632,7 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   content: "";
 
   position: absolute;
-  inset-inline: 18px;
+  inset-inline: 22px;
   inset-block-end: 0;
   z-index: 0;
 
@@ -506,12 +642,12 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
     linear-gradient(
       90deg,
       transparent,
-      color-mix(in srgb, var(--text-strong, #fff), transparent 74%),
-      color-mix(in srgb, var(--graphite-100, #696969), transparent 64%),
+      rgba(255,255,255,.26),
+      rgba(255,255,255,.14),
       transparent
     );
 
-  opacity: .74;
+  opacity: .82;
 }
 
 #app-loader .app-loader__card > *,
@@ -539,7 +675,7 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
 
   overflow: hidden;
 
-  border: 1px solid color-mix(in srgb, var(--text-strong, #fff), transparent 92%);
+  border: 1px solid rgba(255,255,255,.14);
   border-radius: var(--loader-logo-radius-final);
 
   background: var(--loader-brand-surface);
@@ -553,20 +689,20 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   content: "";
 
   position: absolute;
-  inset: -38%;
+  inset: -42%;
   z-index: 0;
 
   background:
     conic-gradient(
       from 180deg,
       transparent,
-      color-mix(in srgb, var(--graphite-100, #696969), transparent 54%),
-      color-mix(in srgb, var(--graphite-200, #525252), transparent 58%),
-      color-mix(in srgb, var(--graphite-300, #3B3B3B), transparent 66%),
+      rgba(255,255,255,.24),
+      rgba(255,255,255,.10),
+      rgba(255,255,255,.22),
       transparent
     );
 
-  opacity: .56;
+  opacity: .62;
 
   animation:
     loaderSpin
@@ -588,7 +724,7 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   background: var(--loader-brand-core-surface);
 
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong, #fff), transparent 94%);
+    inset 0 1px 0 rgba(255,255,255,.11);
 }
 
 #app-loader .app-loader__brand > *,
@@ -596,12 +732,48 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   grid-area: 1 / 1;
 }
 
+#app-loader .app-loader__logo-shell,
+.app-loader .app-loader__logo-shell,
+#app-loader [data-loader-logo-shell="true"],
+.app-loader [data-loader-logo-shell="true"] {
+  position: relative;
+  z-index: 3;
+
+  inline-size: var(--loader-logo-size-final);
+  block-size: var(--loader-logo-size-final);
+
+  display: grid;
+  place-items: center;
+
+  border-radius: var(--radius-lg, 16px);
+
+  background: transparent;
+
+  color: var(--text-on-accent, #ffffff);
+
+  font-size: 0;
+  line-height: 1;
+}
+
+#app-loader .app-loader__logo-picture,
+.app-loader .app-loader__logo-picture,
+#app-loader [data-loader-logo-picture="true"],
+.app-loader [data-loader-logo-picture="true"] {
+  inline-size: 100%;
+  block-size: 100%;
+
+  display: grid;
+  place-items: center;
+}
+
 #app-loader .app-loader__logo,
 .app-loader .app-loader__logo,
 #app-loader .loader-logo,
-.app-loader .loader-logo {
+.app-loader .loader-logo,
+#app-loader [data-loader-logo="true"],
+.app-loader [data-loader-logo="true"] {
   position: relative;
-  z-index: 3;
+  z-index: 4;
 
   inline-size: var(--loader-logo-size-final);
   block-size: var(--loader-logo-size-final);
@@ -612,58 +784,11 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   object-position: center;
 
   filter:
-    drop-shadow(
-      0 8px 18px color-mix(in srgb, var(--text, #ffffff), transparent 84%)
-    );
+    drop-shadow(0 10px 22px rgba(0,0,0,.42))
+    drop-shadow(0 1px 0 rgba(255,255,255,.12));
 
   user-select: none;
   -webkit-user-drag: none;
-}
-
-
-/* =========================================================
-   LOGO THEME SWITCH
-   Fuente de verdad: html[data-theme] / html.theme-*
-========================================================= */
-
-#app-loader .app-loader__logo--default,
-.app-loader .app-loader__logo--default,
-#app-loader .app-loader__logo--light,
-.app-loader .app-loader__logo--light {
-  display: none !important;
-}
-
-#app-loader .app-loader__logo--dark,
-.app-loader .app-loader__logo--dark {
-  display: block !important;
-}
-
-html[data-theme="light"] #app-loader .app-loader__logo--dark,
-html[data-theme="light"] .app-loader .app-loader__logo--dark,
-html.theme-light #app-loader .app-loader__logo--dark,
-html.theme-light .app-loader .app-loader__logo--dark {
-  display: none !important;
-}
-
-html[data-theme="light"] #app-loader .app-loader__logo--light,
-html[data-theme="light"] .app-loader .app-loader__logo--light,
-html.theme-light #app-loader .app-loader__logo--light,
-html.theme-light .app-loader .app-loader__logo--light {
-  display: block !important;
-}
-
-html[data-theme="dark"] #app-loader .app-loader__logo--light,
-html[data-theme="dark"] .app-loader .app-loader__logo--light,
-html.theme-dark #app-loader .app-loader__logo--light,
-html.theme-dark .app-loader .app-loader__logo--light {
-  display: none !important;
-}
-
-html[data-theme="dark"] #app-loader .app-loader__logo--dark,
-html[data-theme="dark"] .app-loader .app-loader__logo--dark,
-html.theme-dark #app-loader .app-loader__logo--dark,
-html.theme-dark .app-loader .app-loader__logo--dark {
-  display: block !important;
 }
 
 #app-loader .app-loader__logo-fallback,
@@ -674,33 +799,44 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   inline-size: var(--loader-logo-size-final);
   block-size: var(--loader-logo-size-final);
 
-  display: none;
+  display: grid;
   place-items: center;
 
-  border-radius: var(--radius-lg, 14px);
+  border-radius: var(--radius-lg, 16px);
 
   background:
     linear-gradient(
       135deg,
-      var(--graphite-100, #696969),
-      var(--graphite-200, #525252) 52%,
-      var(--graphite-300, #3B3B3B)
+      rgba(255,255,255,.16),
+      rgba(255,255,255,.04)
     );
 
   color: var(--text-on-accent, #ffffff);
 
-  font-size: 24px;
+  font-size: 23px;
   font-weight: var(--weight-black, 900);
   line-height: 1;
-  letter-spacing: -.05em;
+  letter-spacing: -.06em;
 
-  opacity: .96;
+  opacity: .98;
+}
+
+#app-loader .app-loader__logo-fallback:has(.app-loader__logo),
+.app-loader .app-loader__logo-fallback:has(.app-loader__logo),
+#app-loader .app-loader__logo-fallback:has([data-loader-logo="true"]),
+.app-loader .app-loader__logo-fallback:has([data-loader-logo="true"]) {
+  background: transparent;
+  font-size: 0;
 }
 
 #app-loader.has-logo-error .app-loader__logo,
 .app-loader.has-logo-error .app-loader__logo,
 #app-loader[data-logo-error="true"] .app-loader__logo,
-.app-loader[data-logo-error="true"] .app-loader__logo {
+.app-loader[data-logo-error="true"] .app-loader__logo,
+#app-loader.has-logo-error [data-loader-logo="true"],
+.app-loader.has-logo-error [data-loader-logo="true"],
+#app-loader[data-logo-error="true"] [data-loader-logo="true"],
+.app-loader[data-logo-error="true"] [data-loader-logo="true"] {
   display: none !important;
 }
 
@@ -709,6 +845,15 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 #app-loader[data-logo-error="true"] .app-loader__logo-fallback,
 .app-loader[data-logo-error="true"] .app-loader__logo-fallback {
   display: grid !important;
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255,255,255,.20),
+      rgba(255,255,255,.055)
+    );
+
+  font-size: 23px;
 }
 
 
@@ -743,20 +888,20 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 #app-loader .loader-spinner::before,
 .app-loader .loader-spinner::before {
   border:
-    var(--loader-ring-size)
+    3px
     solid
-    color-mix(in srgb, var(--text, #ffffff), transparent 90%);
+    rgba(255,255,255,.11);
 }
 
 #app-loader .loader-spinner::after,
 .app-loader .loader-spinner::after {
   border:
-    var(--loader-ring-size)
+    3px
     solid
     transparent;
 
-  border-block-start-color: var(--graphite-100, #696969);
-  border-inline-end-color: var(--graphite-200, #525252);
+  border-block-start-color: rgba(255,255,255,.70);
+  border-inline-end-color: rgba(255,255,255,.34);
 
   animation:
     loaderSpin
@@ -775,24 +920,23 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   background:
     radial-gradient(
       circle,
-      color-mix(in srgb, var(--text-on-accent, #fff), transparent 78%),
+      rgba(255,255,255,.32),
       transparent 62%
     ),
     linear-gradient(
       135deg,
-      var(--graphite-100, #696969),
-      var(--graphite-200, #525252),
-      var(--graphite-300, #3B3B3B)
+      rgba(255,255,255,.28),
+      rgba(255,255,255,.08)
     );
 
   box-shadow:
-    0 0 20px color-mix(in srgb, var(--text, #fff), transparent 94%),
-    0 0 26px color-mix(in srgb, var(--graphite-100, #696969), transparent 74%);
+    0 0 20px rgba(255,255,255,.08),
+    0 0 26px rgba(255,255,255,.12);
 
   animation:
     loaderPulse
     var(--loader-pulse-speed)
-    var(--ease-standard, ease-in-out)
+    cubic-bezier(.2,.8,.2,1)
     infinite;
 }
 
@@ -807,7 +951,7 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   z-index: 2;
 
   display: grid;
-  gap: 5px;
+  gap: 6px;
 
   max-inline-size: 100%;
 }
@@ -820,11 +964,15 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 
   color: var(--loader-text-main);
 
-  font-size: var(--loader-title-size, 18px);
-  line-height: 1.15;
-  font-weight: var(--weight-black, 900);
-  letter-spacing: -.035em;
+  font-size: var(--loader-title-size, 22px);
+  line-height: 1.05;
+  font-weight: var(--weight-black, 950);
+  letter-spacing: -.055em;
   text-wrap: balance;
+
+  text-shadow:
+    0 1px 0 rgba(255,255,255,.08),
+    0 14px 28px rgba(0,0,0,.30);
 }
 
 #app-loader .loader-title,
@@ -842,9 +990,12 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 
   color: var(--loader-text-muted);
 
-  font-size: var(--loader-text-size, 13px);
+  font-size: var(--loader-text-size, 14px);
   line-height: 1.45;
-  font-weight: var(--weight-medium, 500);
+  font-weight: var(--weight-semibold, 650);
+
+  text-shadow:
+    0 10px 22px rgba(0,0,0,.32);
 }
 
 #app-loader .app-loader__subtext,
@@ -898,19 +1049,20 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   position: relative;
 
   inline-size: 100%;
-  max-inline-size: 250px;
+  max-inline-size: 280px;
 
   block-size: var(--loader-progress-height-final);
 
   overflow: hidden;
 
-  border: 1px solid color-mix(in srgb, var(--text-strong, #fff), transparent 92%);
+  border: 1px solid rgba(255,255,255,.13);
   border-radius: var(--radius-pill, 999px);
 
   background: var(--loader-progress-track);
 
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong, #fff), transparent 94%);
+    inset 0 1px 0 rgba(255,255,255,.08),
+    0 12px 28px rgba(0,0,0,.16);
 }
 
 #app-loader .app-loader__bar-fill,
@@ -921,22 +1073,22 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   inset-block: 0;
   inset-inline-start: 0;
 
-  inline-size: 46%;
-  min-inline-size: 46%;
+  inline-size: 48%;
+  min-inline-size: 48%;
 
   border-radius: inherit;
 
   background: var(--loader-progress-active);
 
   box-shadow:
-    0 0 14px color-mix(in srgb, var(--graphite-100, #696969), transparent 72%);
+    0 0 16px rgba(255,255,255,.18);
 
   transform: translateX(-120%);
 
   animation:
     loaderBar
     var(--loader-bar-speed-final)
-    var(--ease-standard, ease)
+    cubic-bezier(.2,.8,.2,1)
     infinite;
 }
 
@@ -950,21 +1102,21 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   inset-block: 0;
   inset-inline-start: 0;
 
-  inline-size: 46%;
+  inline-size: 48%;
 
   border-radius: inherit;
 
   background: var(--loader-progress-active);
 
   box-shadow:
-    0 0 14px color-mix(in srgb, var(--graphite-100, #696969), transparent 72%);
+    0 0 16px rgba(255,255,255,.18);
 
   transform: translateX(-120%);
 
   animation:
     loaderBar
     var(--loader-bar-speed-final)
-    var(--ease-standard, ease)
+    cubic-bezier(.2,.8,.2,1)
     infinite;
 }
 
@@ -1015,7 +1167,7 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   animation:
     loaderPulse
     var(--loader-pulse-speed)
-    var(--ease-standard, ease-in-out)
+    cubic-bezier(.2,.8,.2,1)
     infinite;
 }
 
@@ -1072,8 +1224,9 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   --loader-progress-active:
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--error, #ef4444), transparent 28%),
-      var(--error, #ef4444)
+      rgba(239,68,68,.65),
+      rgba(255,255,255,.72),
+      rgba(239,68,68,.65)
     );
 }
 
@@ -1085,7 +1238,7 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 #app-loader[data-loader-state="error"] .loader-card,
 .app-loader[data-loader-state="error"] .app-loader__card,
 .app-loader[data-loader-state="error"] .loader-card {
-  border-color: color-mix(in srgb, var(--error, #ef4444), transparent 62%);
+  border-color: color-mix(in srgb, var(--error, #ef4444), transparent 54%);
 }
 
 #app-loader.is-error .app-loader__status,
@@ -1184,7 +1337,7 @@ body[data-app-state="ready"] #app-shell {
 @keyframes loaderCardIn {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(.985);
+    transform: translateY(10px) scale(.982);
   }
 
   to {
@@ -1196,12 +1349,24 @@ body[data-app-state="ready"] #app-shell {
 @keyframes loaderBackdropDrift {
   from {
     transform: translate3d(-1.5%, -1%, 0) scale(1);
-    opacity: .58;
+    opacity: .46;
   }
 
   to {
     transform: translate3d(1.5%, 1%, 0) scale(1.035);
-    opacity: .82;
+    opacity: .72;
+  }
+}
+
+@keyframes loaderPolyDrift {
+  from {
+    transform: translate3d(-.85%, -.6%, 0) scale(1.018);
+    filter: saturate(1.04) brightness(.98);
+  }
+
+  to {
+    transform: translate3d(.85%, .6%, 0) scale(1.032);
+    filter: saturate(1.10) brightness(1.03);
   }
 }
 
@@ -1213,11 +1378,12 @@ body[data-app-state="ready"] #app-shell {
 @media (max-width: 640px) {
   #app-loader,
   .app-loader {
-    --loader-brand-size-final: calc(66px * var(--ui-scale, 1));
-    --loader-logo-size-final: calc(48px * var(--ui-scale, 1));
-    --loader-card-radius-final: var(--radius-2xl, 22px);
-    --loader-logo-radius-final: var(--radius-xl, 18px);
-    --loader-card-width-final: min(304px, calc(100vw - 32px));
+    --loader-brand-size-final: calc(70px * var(--ui-scale, 1));
+    --loader-logo-size-final: calc(50px * var(--ui-scale, 1));
+    --loader-card-radius-final: var(--radius-2xl, 23px);
+    --loader-logo-radius-final: var(--radius-xl, 19px);
+    --loader-card-width-final: min(320px, calc(100vw - 32px));
+    --loader-card-padding-final: 26px 20px 22px;
 
     padding:
       max(16px, var(--app-safe-top, 0px))
@@ -1230,14 +1396,13 @@ body[data-app-state="ready"] #app-shell {
   #app-loader .loader-card,
   .app-loader .app-loader__card,
   .app-loader .loader-card {
-    min-inline-size: min(92vw, 272px);
-    padding: 24px 18px 20px;
+    min-inline-size: min(92vw, 276px);
     gap: 16px;
   }
 
   #app-loader .app-loader__title,
   .app-loader .app-loader__title {
-    font-size: 17px;
+    font-size: 19px;
   }
 
   #app-loader .loader-title,
@@ -1258,7 +1423,7 @@ body[data-app-state="ready"] #app-shell {
   .app-loader .app-loader__progress,
   .app-loader .app-loader__bar,
   .app-loader .loader-progress {
-    max-inline-size: 220px;
+    max-inline-size: 230px;
   }
 }
 
@@ -1298,14 +1463,20 @@ body[data-app-state="ready"] #app-shell {
 @supports not ((backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px))) {
   #app-loader,
   .app-loader {
-    background: var(--body-bg, var(--main-bg, #0D0D0D));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 
   #app-loader .app-loader__card,
   #app-loader .loader-card,
   .app-loader .app-loader__card,
   .app-loader .loader-card {
-    background: var(--card-bg, var(--surface-elevated, #242424));
+    background:
+      linear-gradient(
+        180deg,
+        rgba(54,54,54,.96),
+        rgba(28,28,28,.98)
+      );
   }
 }
 
@@ -1320,6 +1491,13 @@ body[data-app-state="ready"] #app-shell {
     background: Canvas;
     color: CanvasText;
     forced-color-adjust: auto;
+  }
+
+  #app-loader::before,
+  #app-loader::after,
+  .app-loader::before,
+  .app-loader::after {
+    display: none;
   }
 
   #app-loader .app-loader__card,
@@ -1384,6 +1562,12 @@ body[data-app-state="ready"] #app-shell {
     transition: none !important;
   }
 
+  #app-loader::before,
+  .app-loader::before {
+    transform: none;
+    filter: none;
+  }
+
   #app-loader .loader-core,
   .app-loader .loader-core {
     opacity: 1;
@@ -1427,9 +1611,14 @@ body[data-app-state="ready"] #app-shell {
     -webkit-backdrop-filter: none;
   }
 
+  #app-loader::after,
+  .app-loader::after {
+    opacity: .94;
+  }
+
   #app-loader .app-loader__backdrop::before,
   .app-loader .app-loader__backdrop::before {
-    opacity: .28;
+    opacity: .24;
   }
 }
 

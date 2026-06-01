@@ -9,6 +9,8 @@
    - Validar slug real del usuario autenticado.
    - Respetar la URL actual tras restore de sesión.
    - Renderizar vista con swap atómico, sin pantalla vacía.
+   - Dar feedback inmediato de navegación sin vaciar la vista anterior.
+   - Evitar rerenders innecesarios de la misma ruta.
    - Actualizar history.
    - Actualizar estado de ruta.
    - Actualizar shell/chrome básico.
@@ -39,13 +41,14 @@ import {
 
 import * as Routes from "./routes.js";
 
-export const ROUTER_VERSION = "router.minimal.v5";
+export const ROUTER_VERSION = "router.minimal.v6";
 
 const HOME_PATH = ROUTES.home || "/";
 const LOGIN_PATH = ROUTES.login || "/login";
 const APP_TITLE = "Onion Support";
 
 const ROUTE_HOST_CLASS = "route-view-host";
+const ROUTER_EVENT_HANDLED_KEY = "__onionRouterHandled";
 
 const SENSITIVE_QUERY_KEYS = new Set(
   (Array.isArray(SENSITIVE_QUERY_PARAMS) ? SENSITIVE_QUERY_PARAMS : [])
@@ -55,10 +58,15 @@ const SENSITIVE_QUERY_KEYS = new Set(
 
 let initialized = false;
 let bound = false;
+
 let activeView = null;
 let activeHost = null;
+
 let renderSeq = 0;
 let renderTask = null;
+
+let pendingSeq = 0;
+let pendingPath = "";
 
 const disposers = [];
 
@@ -305,6 +313,17 @@ function withSearchHashFrom(sourcePath = HOME_PATH, targetPathname = HOME_PATH) 
     search: parts.search,
     hash: parts.hash,
   });
+}
+
+function canonicalPathFromPublicPath(path = HOME_PATH) {
+  const pathname = publicPathname(path);
+  const scoped = getScopedInfo(pathname);
+
+  if (scoped.scoped) {
+    return normalizePathname(scoped.canonicalPath || scoped.restPath || HOME_PATH);
+  }
+
+  return normalizePathname(pathname);
 }
 
 function queryHasSensitiveKey(search = "") {
@@ -920,7 +939,6 @@ function forceVisible(element = null, mode = "app", chrome = "visible") {
     element.removeAttribute("inert");
 
     element.setAttribute("aria-hidden", "false");
-    element.setAttribute("aria-busy", "false");
 
     element.dataset.routeMode = mode;
     element.dataset.shell = "visible";
@@ -1024,29 +1042,41 @@ function setDocumentTitle(route = null) {
   return true;
 }
 
-function setActiveMenu(route = null) {
+function setActiveMenu(route = null, context = {}) {
   if (!isBrowser()) return false;
 
   const key = cleanText(route?.sidebarKey || route?.viewKey || route?.name || "", "");
-  const path = cleanText(route?.path || "", "");
+  const canonicalPath = normalizePathname(
+    context.canonicalPath ||
+      route?.path ||
+      HOME_PATH
+  );
+
+  const publicPath = normalizePublicPath(context.publicPath || "");
+  const pending = context.pending === true;
 
   for (const item of document.querySelectorAll(
     "#sidebar-mount [data-sidebar-key], #sidebar-mount [data-route]"
   )) {
     const itemKey = cleanText(item.getAttribute("data-sidebar-key"), "");
     const itemRoute = cleanText(item.getAttribute("data-route"), "");
+    const itemCanonical = itemRoute ? canonicalPathFromPublicPath(itemRoute) : "";
 
     const active = Boolean(
       (key && itemKey === key) ||
-        (path && itemRoute === path)
+        (canonicalPath && itemCanonical === canonicalPath) ||
+        (publicPath && itemRoute === publicPath)
     );
 
     item.classList.toggle("is-active", active);
+    item.classList.toggle("is-pending", active && pending);
 
     if (active) {
       item.setAttribute("aria-current", "page");
+      item.setAttribute("data-route-pending", pending ? "true" : "false");
     } else {
       item.removeAttribute("aria-current");
+      item.removeAttribute("data-route-pending");
     }
   }
 
@@ -1076,6 +1106,114 @@ function syncChrome(route = null, context = {}) {
       // noop
     }
   }
+
+  return true;
+}
+
+/* =========================================================
+   ROUTE PENDING STATE
+========================================================= */
+
+function setElementBusy(element = null, busy = false) {
+  if (!element) return false;
+
+  try {
+    element.setAttribute("aria-busy", busy ? "true" : "false");
+    element.classList.toggle("is-route-pending", busy);
+    element.dataset.routePending = busy ? "true" : "false";
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setRoutePending(match = {}, options = {}, seq = renderSeq) {
+  if (!isBrowser()) return false;
+
+  const route = match.route || null;
+  const publicPath = normalizePublicPath(match.publicPath || HOME_PATH);
+  const canonicalPath = normalizePathname(match.canonicalPath || route?.path || HOME_PATH);
+  const viewKey = cleanText(route?.viewKey || route?.name || "", "");
+
+  pendingSeq = seq;
+  pendingPath = publicPath;
+
+  const html = document.documentElement;
+  const body = document.body;
+
+  for (const root of [html, body].filter(Boolean)) {
+    root.classList.add("route-pending");
+    root.classList.add("is-route-pending");
+
+    root.dataset.routePending = "true";
+    root.dataset.routePendingPath = publicPath;
+    root.dataset.routePendingCanonicalPath = canonicalPath;
+    root.dataset.routePendingView = viewKey;
+    root.dataset.routePendingSource = cleanText(options.source, "router");
+  }
+
+  for (const element of [
+    node("app-shell"),
+    node("main-content"),
+    node("app-content"),
+    node("view-container"),
+  ].filter(Boolean)) {
+    setElementBusy(element, true);
+  }
+
+  setActiveMenu(route, {
+    publicPath,
+    canonicalPath,
+    pending: true,
+  });
+
+  writeState({
+    routePending: true,
+    pendingPublicPath: publicPath,
+    pendingCanonicalPath: canonicalPath,
+    pendingViewKey: viewKey,
+  });
+
+  return true;
+}
+
+function clearRoutePending(seq = renderSeq) {
+  if (!isBrowser()) return false;
+  if (seq && pendingSeq && seq !== pendingSeq) return false;
+
+  pendingSeq = 0;
+  pendingPath = "";
+
+  const html = document.documentElement;
+  const body = document.body;
+
+  for (const root of [html, body].filter(Boolean)) {
+    root.classList.remove("route-pending");
+    root.classList.remove("is-route-pending");
+
+    delete root.dataset.routePending;
+    delete root.dataset.routePendingPath;
+    delete root.dataset.routePendingCanonicalPath;
+    delete root.dataset.routePendingView;
+    delete root.dataset.routePendingSource;
+  }
+
+  for (const element of [
+    node("app-shell"),
+    node("main-content"),
+    node("app-content"),
+    node("view-container"),
+  ].filter(Boolean)) {
+    setElementBusy(element, false);
+  }
+
+  writeState({
+    routePending: false,
+    pendingPublicPath: "",
+    pendingCanonicalPath: "",
+    pendingViewKey: "",
+  });
 
   return true;
 }
@@ -1184,6 +1322,7 @@ function activateRouteHost(host = null, route = null) {
 
 function commitRouteHost(nextHost = null, {
   route = null,
+  nextView = null,
   previousView = null,
   previousHost = null,
 } = {}) {
@@ -1204,6 +1343,7 @@ function commitRouteHost(nextHost = null, {
   }
 
   activeHost = nextHost;
+  activeView = nextView || null;
 
   cleanupView(previousView);
 
@@ -1258,7 +1398,13 @@ function beginTransition(match = {}, options = {}) {
 
   setShell(route);
   setDocumentTitle(route);
-  setActiveMenu(route);
+
+  setActiveMenu(route, {
+    publicPath: state.publicPath,
+    canonicalPath: state.canonicalPath,
+    pending: false,
+  });
+
   writeHistory(state.publicPath, options);
 
   return state;
@@ -1269,7 +1415,11 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
   const state = beginTransition(match, options);
   const root = viewRoot();
 
+  setRoutePending(match, options, seq);
+
   if (!root) {
+    clearRoutePending(seq);
+
     return {
       ok: false,
       reason: "missing-root",
@@ -1289,6 +1439,8 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
   try {
     root.appendChild(nextHost);
   } catch {
+    clearRoutePending(seq);
+
     return {
       ok: false,
       reason: "mount-host-failed",
@@ -1342,13 +1494,25 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
       nextView = result;
     }
 
-    activeView = nextView;
-
-    commitRouteHost(nextHost, {
+    const committed = commitRouteHost(nextHost, {
       route,
+      nextView,
       previousView,
       previousHost,
     });
+
+    if (!committed) {
+      cleanupView(nextView);
+      removeNode(nextHost);
+      clearRoutePending(seq);
+
+      return {
+        ok: false,
+        reason: "commit-failed",
+        canonicalPath: state.canonicalPath,
+        publicPath: state.publicPath,
+      };
+    }
 
     syncChrome(route, {
       AppCore,
@@ -1360,6 +1524,14 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
       publicPath: state.publicPath,
       routeParams: state.routeParams,
     });
+
+    setActiveMenu(route, {
+      publicPath: state.publicPath,
+      canonicalPath: state.canonicalPath,
+      pending: false,
+    });
+
+    clearRoutePending(seq);
 
     return {
       ok: true,
@@ -1380,26 +1552,29 @@ async function renderRoute(match = {}, options = {}, seq = renderSeq) {
       };
     }
 
-    activeView = null;
-
     renderFallback("Error de vista", "No se pudo renderizar esta vista.", nextHost);
 
-    commitRouteHost(nextHost, {
+    const committed = commitRouteHost(nextHost, {
       route,
+      nextView: null,
       previousView,
       previousHost,
     });
 
-    syncChrome(route, {
-      AppCore,
-      Auth: getAuth(),
-      Router,
+    if (committed) {
+      syncChrome(route, {
+        AppCore,
+        Auth: getAuth(),
+        Router,
 
-      route,
-      canonicalPath: state.canonicalPath,
-      publicPath: state.publicPath,
-      routeParams: state.routeParams,
-    });
+        route,
+        canonicalPath: state.canonicalPath,
+        publicPath: state.publicPath,
+        routeParams: state.routeParams,
+      });
+    }
+
+    clearRoutePending(seq);
 
     return {
       ok: false,
@@ -1420,9 +1595,13 @@ function renderNotFound(match = {}, options = {}, seq = renderSeq) {
     options
   );
 
+  setRoutePending(match, options, seq);
+
   const root = viewRoot();
 
   if (!root) {
+    clearRoutePending(seq);
+
     return {
       ok: false,
       found: false,
@@ -1443,15 +1622,16 @@ function renderNotFound(match = {}, options = {}, seq = renderSeq) {
 
   root.appendChild(nextHost);
 
-  activeView = null;
-
   renderFallback("Ruta no encontrada", "La vista solicitada no existe.", nextHost);
 
   commitRouteHost(nextHost, {
     route: null,
+    nextView: null,
     previousView,
     previousHost,
   });
+
+  clearRoutePending(seq);
 
   return {
     ok: true,
@@ -1470,9 +1650,14 @@ function renderForbidden(
   seq = renderSeq
 ) {
   const state = beginTransition(match, options);
+
+  setRoutePending(match, options, seq);
+
   const root = viewRoot();
 
   if (!root) {
+    clearRoutePending(seq);
+
     return {
       ok: false,
       forbidden: true,
@@ -1487,15 +1672,16 @@ function renderForbidden(
 
   root.appendChild(nextHost);
 
-  activeView = null;
-
   renderFallback("Acceso no permitido", "No tienes permisos para ver esta vista.", nextHost);
 
   commitRouteHost(nextHost, {
     route: match.route || null,
+    nextView: null,
     previousView,
     previousHost,
   });
+
+  clearRoutePending(seq);
 
   return {
     ok: true,
@@ -1533,6 +1719,8 @@ async function executeRender(path = HOME_PATH, options = {}) {
   const seq = ++renderSeq;
   let match = getRouteMatch(path);
 
+  setRoutePending(match, options, seq);
+
   if (
     hasSensitiveQuery(match.publicPath) &&
     !routeAllowsSensitiveQuery(match.route)
@@ -1561,6 +1749,8 @@ async function executeRender(path = HOME_PATH, options = {}) {
   }
 
   match = getRouteMatch(path);
+
+  setRoutePending(match, options, seq);
 
   if (
     hasSensitiveQuery(match.publicPath) &&
@@ -1641,6 +1831,16 @@ function hrefAllowed(href = "") {
   return true;
 }
 
+function shouldSkipSameNavigation(target = HOME_PATH, options = {}) {
+  if (options.force === true || options.reload === true || options.forceRefresh === true) {
+    return false;
+  }
+
+  const normalizedTarget = normalizePublicPath(target);
+
+  return normalizedTarget === currentPublicPath();
+}
+
 function navigate(path = HOME_PATH, options = {}) {
   const href = cleanText(path, HOME_PATH);
 
@@ -1652,7 +1852,36 @@ function navigate(path = HOME_PATH, options = {}) {
     });
   }
 
-  return render(normalizeNavigationTarget(href, options), options);
+  const target = normalizeNavigationTarget(href, options);
+  const normalizedTarget = normalizePublicPath(target);
+
+  if (renderTask && pendingPath && pendingPath === normalizedTarget) {
+    return renderTask;
+  }
+
+  if (shouldSkipSameNavigation(normalizedTarget, options)) {
+    const match = getRouteMatch(normalizedTarget);
+
+    setActiveMenu(match.route, {
+      publicPath: match.publicPath,
+      canonicalPath: match.canonicalPath,
+      pending: false,
+    });
+
+    return Promise.resolve({
+      ok: true,
+      skipped: true,
+      reason: "same-route",
+      publicPath: normalizedTarget,
+      canonicalPath: canonicalPathFromPublicPath(normalizedTarget),
+    });
+  }
+
+  const match = getRouteMatch(normalizedTarget);
+
+  setRoutePending(match, options, renderSeq + 1);
+
+  return render(normalizedTarget, options);
 }
 
 function replace(path = HOME_PATH, options = {}) {
@@ -1689,6 +1918,7 @@ function linkHref(element = null) {
 function onClick(event) {
   if (
     event.defaultPrevented ||
+    event[ROUTER_EVENT_HANDLED_KEY] === true ||
     event.button !== 0 ||
     event.metaKey ||
     event.ctrlKey ||
@@ -1703,8 +1933,16 @@ function onClick(event) {
       ? event.target.parentElement
       : event.target;
 
+  /*
+    No interceptar button[data-route] genérico.
+    Las vistas pueden usar botones con data-route para acciones propias.
+    El router sólo captura:
+    - anchors SPA
+    - anchors internos
+    - elementos marcados explícitamente con data-router-link
+  */
   const element = target?.closest?.(
-    "a[data-spa], a[data-route], a[href^='/'], button[data-route], [data-router-link]"
+    "a[data-spa], a[data-route], a[href^='/'], [data-router-link]"
   );
 
   if (!element || element.hasAttribute?.("download")) return;
@@ -1716,6 +1954,7 @@ function onClick(event) {
   if (!hrefAllowed(href)) return;
 
   event.preventDefault();
+  event[ROUTER_EVENT_HANDLED_KEY] = true;
 
   navigate(href, {
     source: "link-click",
@@ -1805,6 +2044,7 @@ function unbind() {
   }
 
   destroyActiveView();
+  clearRoutePending();
 
   bound = false;
   renderTask = null;
@@ -1835,7 +2075,10 @@ function getSnapshot() {
 
     hasActiveView: Boolean(activeView),
     hasActiveHost: Boolean(activeHost),
+
     rendering: Boolean(renderTask),
+    pending: Boolean(pendingPath),
+    pendingPath: redact(pendingPath),
 
     publicPath: redact(currentPublicPath()),
     canonicalPath: redact(currentCanonicalPath()),

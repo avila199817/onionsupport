@@ -4,7 +4,7 @@
 
    FINAL SIDEBAR SYSTEM · PRIVATE SPA · EXTREME 10/10
    SOLID GRAPHITE · DESKTOP · COLLAPSED · MOBILE RAIL
-   REVISION: precision collapsed rail / unified SVG box / calibrated motion / intense logout danger
+   REVISION: production calibrated rail / natural motion / logout hover-only danger
 
    Responsabilidad:
    - Pintar y organizar visualmente el sidebar.
@@ -43,15 +43,17 @@
   );
 
   /* Motion */
-  --sidebar-motion-open-duration: .46s;
-  --sidebar-motion-close-duration: .34s;
-  --sidebar-motion-mobile-open-duration: .40s;
-  --sidebar-motion-mobile-close-duration: .30s;
-  --sidebar-motion-content-duration: .18s;
-  --sidebar-motion-content-delay: .13s;
-  --sidebar-motion-fast: .14s;
-  --sidebar-motion-ease: cubic-bezier(.22, 1, .24, 1);
-  --sidebar-motion-ease-fast: cubic-bezier(.20, .80, .20, 1);
+  --sidebar-motion-open-duration: .34s;
+  --sidebar-motion-close-duration: .28s;
+  --sidebar-motion-mobile-open-duration: .30s;
+  --sidebar-motion-mobile-close-duration: .25s;
+
+  --sidebar-motion-content-duration: .16s;
+  --sidebar-motion-content-delay: .035s;
+  --sidebar-motion-fast: .12s;
+
+  --sidebar-motion-ease: cubic-bezier(.22, .86, .24, 1);
+  --sidebar-motion-ease-fast: cubic-bezier(.2, .72, .2, 1);
 
   /* Palette */
   --sidebar-local-bg: var(--sidebar-bg, #242424);
@@ -85,10 +87,10 @@
   --sidebar-local-menu-active: var(--sidebar-dropdown-item-active, #525252);
   --sidebar-local-menu-separator: var(--sidebar-dropdown-separator, rgba(255,255,255,.12));
 
-  --sidebar-local-danger: #ff4d4f;
-  --sidebar-local-danger-bg: rgba(239, 68, 68, .18);
-  --sidebar-local-danger-hover: rgba(239, 68, 68, .26);
-  --sidebar-local-danger-border: rgba(248, 113, 113, .38);
+  --sidebar-local-danger: #ff5f63;
+  --sidebar-local-danger-hover-bg: #dc2626;
+  --sidebar-local-danger-hover-border: rgba(252, 165, 165, .72);
+  --sidebar-local-danger-active-bg: #991b1b;
 
   --sidebar-local-avatar-bg: var(--sidebar-avatar-bg, #3B3B3B);
   --sidebar-local-avatar-text: var(--sidebar-avatar-text, #ffffff);
@@ -107,14 +109,15 @@
   --sidebar-local-header-height: var(--sidebar-top-height, 58px);
   --sidebar-local-item-height: var(--sidebar-item-height, 42px);
 
-  --sidebar-local-icon-size: var(--sidebar-icon-size, 20px);
   --sidebar-local-icon-render-size: 20px;
+  --sidebar-local-icon-size: var(--sidebar-icon-size, 20px);
   --sidebar-local-icon-box: var(--sidebar-icon-box, 36px);
+
   --sidebar-local-collapsed-slot: var(--sidebar-collapsed-slot, 44px);
+  --sidebar-local-collapsed-toggle-slot: var(--sidebar-collapsed-toggle-slot, 36px);
 
   --sidebar-local-toggle-size: var(--sidebar-toggle-size, 32px);
   --sidebar-local-toggle-icon-size: var(--sidebar-toggle-icon-size, 20px);
-  --sidebar-local-collapsed-toggle-slot: var(--sidebar-collapsed-toggle-slot, 36px);
 
   --sidebar-local-avatar-size: var(--sidebar-user-avatar-size, 34px);
   --sidebar-local-avatar-collapsed-size: 32px;
@@ -201,19 +204,21 @@
 
   isolation: isolate;
   pointer-events: auto;
+
   transform: translate3d(0, 0, 0);
   backface-visibility: hidden;
-  will-change: inline-size, width, max-inline-size, max-width, transform;
+  will-change: inline-size, width, min-inline-size, min-width, max-inline-size, max-width;
 
   transition:
     inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
     width var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
+    min-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
+    min-width var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
     max-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
     max-width var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    transform var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    background-color var(--duration-normal, .20s) var(--ease-standard, ease),
-    border-color var(--duration-normal, .20s) var(--ease-standard, ease),
-    box-shadow var(--duration-normal, .20s) var(--ease-standard, ease);
+    border-color .18s var(--sidebar-motion-ease-fast),
+    box-shadow .18s var(--sidebar-motion-ease-fast),
+    background-color .18s var(--sidebar-motion-ease-fast);
 }
 
 
@@ -255,10 +260,10 @@ body[data-theme="dark"] .sidebar,
   --sidebar-local-menu-active: #525252;
   --sidebar-local-menu-separator: rgba(255,255,255,.12);
 
-  --sidebar-local-danger: #ff4d4f;
-  --sidebar-local-danger-bg: rgba(239, 68, 68, .18);
-  --sidebar-local-danger-hover: rgba(239, 68, 68, .26);
-  --sidebar-local-danger-border: rgba(248, 113, 113, .38);
+  --sidebar-local-danger: #ff5f63;
+  --sidebar-local-danger-hover-bg: #dc2626;
+  --sidebar-local-danger-hover-border: rgba(252, 165, 165, .72);
+  --sidebar-local-danger-active-bg: #991b1b;
 
   --sidebar-local-avatar-bg: #3B3B3B;
   --sidebar-local-avatar-text: #ffffff;
@@ -308,9 +313,9 @@ body[data-theme="light"] .sidebar,
   --sidebar-local-menu-separator: rgba(13,13,13,.08);
 
   --sidebar-local-danger: #b91c1c;
-  --sidebar-local-danger-bg: rgba(185, 28, 28, .105);
-  --sidebar-local-danger-hover: rgba(220, 38, 38, .16);
-  --sidebar-local-danger-border: rgba(185, 28, 28, .30);
+  --sidebar-local-danger-hover-bg: #b91c1c;
+  --sidebar-local-danger-hover-border: rgba(185, 28, 28, .42);
+  --sidebar-local-danger-active-bg: #7f1d1d;
 
   --sidebar-local-avatar-bg: #e8e8e8;
   --sidebar-local-avatar-text: #111111;
@@ -467,17 +472,19 @@ body[data-sidebar-open="true"] .sidebar {
   transition:
     inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
     width var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
+    min-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
+    min-width var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
     max-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
     max-width var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    transform var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    background-color var(--duration-normal, .20s) var(--ease-standard, ease),
-    border-color var(--duration-normal, .20s) var(--ease-standard, ease),
-    box-shadow var(--duration-normal, .20s) var(--ease-standard, ease);
+    border-color .18s var(--sidebar-motion-ease-fast),
+    box-shadow .18s var(--sidebar-motion-ease-fast),
+    background-color .18s var(--sidebar-motion-ease-fast);
 }
 
 .sidebar.is-collapsed,
 .sidebar[data-open="false"],
 .sidebar[data-sidebar-state="collapsed"],
+.sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
 body.sidebar-collapsed .sidebar,
 body[data-sidebar-state="collapsed"] .sidebar,
 body[data-sidebar-open="false"] .sidebar {
@@ -494,12 +501,13 @@ body[data-sidebar-open="false"] .sidebar {
   transition:
     inline-size var(--sidebar-motion-close-duration) var(--sidebar-motion-ease),
     width var(--sidebar-motion-close-duration) var(--sidebar-motion-ease),
+    min-inline-size var(--sidebar-motion-close-duration) var(--sidebar-motion-ease),
+    min-width var(--sidebar-motion-close-duration) var(--sidebar-motion-ease),
     max-inline-size var(--sidebar-motion-close-duration) var(--sidebar-motion-ease),
     max-width var(--sidebar-motion-close-duration) var(--sidebar-motion-ease),
-    transform var(--sidebar-motion-close-duration) var(--sidebar-motion-ease),
-    background-color var(--duration-normal, .20s) var(--ease-standard, ease),
-    border-color var(--duration-normal, .20s) var(--ease-standard, ease),
-    box-shadow var(--duration-normal, .20s) var(--ease-standard, ease);
+    border-color .16s var(--sidebar-motion-ease-fast),
+    box-shadow .16s var(--sidebar-motion-ease-fast),
+    background-color .16s var(--sidebar-motion-ease-fast);
 }
 
 .sidebar [data-role-visible="false"],
@@ -913,15 +921,6 @@ body[data-sidebar-open="false"] .sidebar {
   box-shadow: none !important;
 
   transition:
-    inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    min-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    max-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    block-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    min-block-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    max-block-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    padding var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    gap var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    border-radius var(--sidebar-motion-fast) var(--sidebar-motion-ease-fast),
     background-color var(--duration-fast, .12s) var(--ease-standard, ease),
     border-color var(--duration-fast, .12s) var(--ease-standard, ease),
     color var(--duration-fast, .12s) var(--ease-standard, ease),
@@ -994,9 +993,9 @@ body[data-sidebar-open="false"] .sidebar {
 
   color: currentColor !important;
 
-  transform: translateZ(0);
-  transform-box: fill-box;
-  transform-origin: center;
+  transform: none !important;
+  transform-origin: center !important;
+  transform-box: fill-box !important;
 }
 
 .sidebar .sidebar-link-content {
@@ -1017,10 +1016,8 @@ body[data-sidebar-open="false"] .sidebar {
 
   transition:
     opacity var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    visibility var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    transform var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    max-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease);
+    visibility 0s linear var(--sidebar-motion-content-duration),
+    transform var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast);
 }
 
 .sidebar .sidebar-link-label {
@@ -1042,10 +1039,8 @@ body[data-sidebar-open="false"] .sidebar {
 
   transition:
     opacity var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    visibility var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    transform var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    max-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease);
+    visibility 0s linear var(--sidebar-motion-content-duration),
+    transform var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast);
 }
 
 .sidebar .sidebar-link-badge {
@@ -1076,10 +1071,8 @@ body[data-sidebar-open="false"] .sidebar {
 
   transition:
     opacity var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    visibility var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    transform var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    max-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease);
+    visibility 0s linear var(--sidebar-motion-content-duration),
+    transform var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast);
 }
 
 
@@ -1195,14 +1188,6 @@ body[data-sidebar-open="false"] .sidebar {
   box-shadow: none !important;
 
   transition:
-    inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    min-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    max-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    block-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    min-block-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    max-block-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    padding var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    gap var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
     background-color var(--duration-fast, .12s) var(--ease-standard, ease),
     border-color var(--duration-fast, .12s) var(--ease-standard, ease),
     color var(--duration-fast, .12s) var(--ease-standard, ease),
@@ -1267,11 +1252,9 @@ body[data-sidebar-open="false"] .sidebar {
 
   transition:
     inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    min-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    max-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
     block-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    min-block-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    max-block-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease);
+    border-color var(--duration-fast, .12s) var(--ease-standard, ease),
+    background-color var(--duration-fast, .12s) var(--ease-standard, ease);
 }
 
 .sidebar .sidebar-user-avatar-img {
@@ -1335,10 +1318,8 @@ body[data-sidebar-open="false"] .sidebar {
 
   transition:
     opacity var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    visibility var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    transform var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    max-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease);
+    visibility 0s linear var(--sidebar-motion-content-duration),
+    transform var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast);
 }
 
 .sidebar .sidebar-user-name {
@@ -1393,7 +1374,7 @@ body[data-sidebar-open="false"] .sidebar {
 
   transition:
     opacity var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    visibility var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
+    visibility 0s linear var(--sidebar-motion-content-duration),
     transform var(--duration-fast, .12s) var(--ease-standard, ease),
     color var(--duration-fast, .12s) var(--ease-standard, ease);
 }
@@ -1572,8 +1553,8 @@ body[data-sidebar-open="false"] .sidebar {
 
   padding: 8px 10px;
 
-  border: 0;
-  border-radius: 12px;
+  border: 1px solid transparent;
+  border-radius: 14px;
 
   background: transparent !important;
   background-color: transparent !important;
@@ -1616,70 +1597,6 @@ body[data-sidebar-open="false"] .sidebar {
   background-image: none !important;
 
   transform: scale(.992);
-}
-
-.sidebar .sidebar-account-menu-item.is-danger,
-.sidebar .sidebar-account-menu-item[data-danger="true"],
-.sidebar .sidebar-account-menu-item[data-sidebar-logout="true"],
-.sidebar .sidebar-account-menu-item[data-sidebar-action="logout"],
-.sidebar .sidebar-account-menu-item[data-sidebar-menu-action="logout"] {
-  border: 1px solid var(--sidebar-local-danger-border) !important;
-  border-radius: 13px !important;
-
-  background: var(--sidebar-local-danger-bg) !important;
-  background-color: var(--sidebar-local-danger-bg) !important;
-  background-image: none !important;
-
-  color: var(--sidebar-local-danger) !important;
-
-  font-weight: 650 !important;
-
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .055) !important;
-}
-
-.sidebar .sidebar-account-menu-item.is-danger:hover,
-.sidebar .sidebar-account-menu-item[data-danger="true"]:hover,
-.sidebar .sidebar-account-menu-item[data-sidebar-logout="true"]:hover,
-.sidebar .sidebar-account-menu-item[data-sidebar-action="logout"]:hover,
-.sidebar .sidebar-account-menu-item[data-sidebar-menu-action="logout"]:hover {
-  border-color: rgba(248, 113, 113, .60) !important;
-
-  background: #dc2626 !important;
-  background-color: #dc2626 !important;
-  background-image: none !important;
-
-  color: #ffffff !important;
-}
-
-.sidebar .sidebar-account-menu-item.is-danger:active,
-.sidebar .sidebar-account-menu-item[data-danger="true"]:active,
-.sidebar .sidebar-account-menu-item[data-sidebar-logout="true"]:active,
-.sidebar .sidebar-account-menu-item[data-sidebar-action="logout"]:active,
-.sidebar .sidebar-account-menu-item[data-sidebar-menu-action="logout"]:active {
-  border-color: rgba(248, 113, 113, .50) !important;
-
-  background: #991b1b !important;
-  background-color: #991b1b !important;
-
-  color: #ffffff !important;
-
-  transform: scale(.99) !important;
-}
-
-html[data-theme="light"] .sidebar .sidebar-account-menu-item.is-danger:hover,
-html[data-theme="light"] .sidebar .sidebar-account-menu-item[data-danger="true"]:hover,
-html[data-theme="light"] .sidebar .sidebar-account-menu-item[data-sidebar-logout="true"]:hover,
-body[data-theme="light"] .sidebar .sidebar-account-menu-item.is-danger:hover,
-body[data-theme="light"] .sidebar .sidebar-account-menu-item[data-danger="true"]:hover,
-body[data-theme="light"] .sidebar .sidebar-account-menu-item[data-sidebar-logout="true"]:hover,
-.sidebar[data-theme="light"] .sidebar-account-menu-item.is-danger:hover,
-.sidebar[data-theme="light"] .sidebar-account-menu-item[data-danger="true"]:hover,
-.sidebar[data-theme="light"] .sidebar-account-menu-item[data-sidebar-logout="true"]:hover {
-  background: #b91c1c !important;
-  background-color: #b91c1c !important;
-
-  color: #ffffff !important;
 }
 
 .sidebar .sidebar-account-menu-icon {
@@ -1727,6 +1644,107 @@ body[data-theme="light"] .sidebar .sidebar-account-menu-item[data-sidebar-logout
 
 
 /* =========================================================
+   LOGOUT / DANGER — REST SIN CAJA ROJA
+========================================================= */
+
+.sidebar .sidebar-account-menu-item.is-danger,
+.sidebar .sidebar-account-menu-item[data-danger="true"],
+.sidebar .sidebar-account-menu-item[data-sidebar-logout="true"],
+.sidebar .sidebar-account-menu-item[data-sidebar-action="logout"],
+.sidebar .sidebar-account-menu-item[data-sidebar-menu-action="logout"],
+.sidebar .sidebar-logout {
+  border: 1px solid transparent !important;
+  border-radius: 14px !important;
+
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+
+  color: var(--sidebar-local-danger) !important;
+
+  font-weight: 700 !important;
+
+  box-shadow: none !important;
+  text-shadow: none !important;
+
+  transition:
+    background-color .14s var(--sidebar-motion-ease-fast),
+    border-color .14s var(--sidebar-motion-ease-fast),
+    color .14s var(--sidebar-motion-ease-fast),
+    transform .12s var(--sidebar-motion-ease-fast) !important;
+}
+
+.sidebar .sidebar-account-menu-item.is-danger .sidebar-account-menu-icon,
+.sidebar .sidebar-account-menu-item[data-danger="true"] .sidebar-account-menu-icon,
+.sidebar .sidebar-account-menu-item[data-sidebar-logout="true"] .sidebar-account-menu-icon,
+.sidebar .sidebar-account-menu-item[data-sidebar-action="logout"] .sidebar-account-menu-icon,
+.sidebar .sidebar-account-menu-item[data-sidebar-menu-action="logout"] .sidebar-account-menu-icon,
+.sidebar .sidebar-logout .sidebar-logout-icon {
+  color: currentColor !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sidebar .sidebar-account-menu-item.is-danger:hover,
+  .sidebar .sidebar-account-menu-item[data-danger="true"]:hover,
+  .sidebar .sidebar-account-menu-item[data-sidebar-logout="true"]:hover,
+  .sidebar .sidebar-account-menu-item[data-sidebar-action="logout"]:hover,
+  .sidebar .sidebar-account-menu-item[data-sidebar-menu-action="logout"]:hover,
+  .sidebar .sidebar-logout:hover {
+    border-color: var(--sidebar-local-danger-hover-border) !important;
+
+    background: var(--sidebar-local-danger-hover-bg) !important;
+    background-color: var(--sidebar-local-danger-hover-bg) !important;
+    background-image: none !important;
+
+    color: #ffffff !important;
+
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .12) !important;
+  }
+}
+
+.sidebar .sidebar-account-menu-item.is-danger:active,
+.sidebar .sidebar-account-menu-item[data-danger="true"]:active,
+.sidebar .sidebar-account-menu-item[data-sidebar-logout="true"]:active,
+.sidebar .sidebar-account-menu-item[data-sidebar-action="logout"]:active,
+.sidebar .sidebar-account-menu-item[data-sidebar-menu-action="logout"]:active,
+.sidebar .sidebar-logout:active {
+  border-color: rgba(248, 113, 113, .58) !important;
+
+  background: var(--sidebar-local-danger-active-bg) !important;
+  background-color: var(--sidebar-local-danger-active-bg) !important;
+  background-image: none !important;
+
+  color: #ffffff !important;
+
+  transform: scale(.99) !important;
+
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .10) !important;
+}
+
+.sidebar .sidebar-account-menu-item.is-danger:focus-visible,
+.sidebar .sidebar-account-menu-item[data-danger="true"]:focus-visible,
+.sidebar .sidebar-account-menu-item[data-sidebar-logout="true"]:focus-visible,
+.sidebar .sidebar-account-menu-item[data-sidebar-action="logout"]:focus-visible,
+.sidebar .sidebar-account-menu-item[data-sidebar-menu-action="logout"]:focus-visible,
+.sidebar .sidebar-logout:focus-visible {
+  border-color: transparent !important;
+
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+
+  color: var(--sidebar-local-danger) !important;
+
+  outline: 2px solid currentColor !important;
+  outline-offset: 2px !important;
+
+  box-shadow: none !important;
+}
+
+
+/* =========================================================
    LEGACY LOGOUT SAFETY
 ========================================================= */
 
@@ -1743,51 +1761,13 @@ body[data-theme="light"] .sidebar .sidebar-account-menu-item[data-sidebar-logout
 
   padding: 8px 10px;
 
-  border: 1px solid var(--sidebar-local-danger-border);
-  border-radius: 13px;
-
-  background: var(--sidebar-local-danger-bg) !important;
-  background-color: var(--sidebar-local-danger-bg) !important;
-  background-image: none !important;
-
-  color: var(--sidebar-local-danger) !important;
-
   font: inherit;
   font-family: var(--sidebar-local-font-family);
   font-size: 14px;
   line-height: 20px;
-  font-weight: 650;
   text-align: start;
 
   cursor: pointer;
-
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .055) !important;
-
-  transition:
-    background-color var(--duration-fast, .12s) var(--ease-standard, ease),
-    border-color var(--duration-fast, .12s) var(--ease-standard, ease),
-    color var(--duration-fast, .12s) var(--ease-standard, ease),
-    transform var(--duration-fast, .12s) var(--ease-out, ease);
-}
-
-.sidebar .sidebar-logout:hover {
-  border-color: rgba(248, 113, 113, .60) !important;
-
-  background: #dc2626 !important;
-  background-color: #dc2626 !important;
-  background-image: none !important;
-
-  color: #ffffff !important;
-}
-
-.sidebar .sidebar-logout:active {
-  background: #991b1b !important;
-  background-color: #991b1b !important;
-
-  color: #ffffff !important;
-
-  transform: scale(.99);
 }
 
 .sidebar .sidebar-logout-icon {
@@ -1827,10 +1807,8 @@ body[data-theme="light"] .sidebar .sidebar-account-menu-item[data-sidebar-logout
 
   transition:
     opacity var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    visibility var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    transform var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast),
-    max-inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease),
-    inline-size var(--sidebar-motion-open-duration) var(--sidebar-motion-ease);
+    visibility 0s linear var(--sidebar-motion-content-duration),
+    transform var(--sidebar-motion-content-duration) var(--sidebar-motion-ease-fast);
 }
 
 
@@ -1868,7 +1846,7 @@ body[data-theme="light"] .sidebar .sidebar-account-menu-item[data-sidebar-logout
 
   color: currentColor !important;
 
-  transform: translateZ(0);
+  transform: none !important;
   transform-box: fill-box;
   transform-origin: center;
 
@@ -1892,14 +1870,17 @@ body[data-theme="light"] .sidebar .sidebar-account-menu-item[data-sidebar-logout
    COLLAPSED — DESKTOP RAIL
 ========================================================= */
 
-.sidebar.is-collapsed,
-.sidebar[data-open="false"],
-.sidebar[data-sidebar-state="collapsed"],
-.sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
-body.sidebar-collapsed .sidebar,
-body[data-sidebar-state="collapsed"] .sidebar,
-body[data-sidebar-open="false"] .sidebar {
-  --sidebar-local-pad-x: var(--sidebar-inline-padding, 8px);
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) {
+  --sidebar-local-pad-x: 0px;
+  padding-inline: 0 !important;
 }
 
 :is(
@@ -1916,7 +1897,7 @@ body[data-sidebar-open="false"] .sidebar {
 
   display: flex;
   flex-direction: column;
-  align-items: stretch;
+  align-items: center;
 }
 
 :is(
@@ -2118,6 +2099,8 @@ body[data-sidebar-open="false"] .sidebar {
 
   overflow: hidden;
 
+  border-radius: 14px !important;
+
   line-height: 0;
   text-align: center;
 }
@@ -2151,7 +2134,7 @@ body[data-sidebar-open="false"] .sidebar {
   display: grid !important;
   place-items: center !important;
 
-  flex: 0 0 100% !important;
+  flex: none !important;
 
   margin: 0 !important;
   padding: 0 !important;
@@ -2180,7 +2163,7 @@ body[data-sidebar-open="false"] .sidebar {
   padding: 0 !important;
   margin-inline: auto !important;
 
-  border-radius: 10px;
+  border-radius: 11px !important;
 }
 
 :is(
@@ -2202,7 +2185,7 @@ body[data-sidebar-open="false"] .sidebar {
 
   flex: 0 0 var(--sidebar-local-avatar-collapsed-size) !important;
 
-  margin: 0 !important;
+  margin: 0 auto !important;
 }
 
 :is(
@@ -2231,25 +2214,7 @@ body[data-sidebar-open="false"] .sidebar {
   body.sidebar-collapsed .sidebar,
   body[data-sidebar-state="collapsed"] .sidebar,
   body[data-sidebar-open="false"] .sidebar
-) .sidebar-account-chevron {
-  display: flex !important;
-
-  inline-size: 0 !important;
-  min-inline-size: 0 !important;
-  max-inline-size: 0 !important;
-
-  flex: 0 0 0 !important;
-
-  overflow: hidden !important;
-
-  opacity: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-
-  transform: translateX(-6px);
-  transition-delay: 0s !important;
-}
-
+) .sidebar-account-chevron,
 :is(
   .sidebar.is-collapsed,
   .sidebar[data-open="false"],
@@ -2267,23 +2232,7 @@ body[data-sidebar-open="false"] .sidebar {
   body.sidebar-collapsed .sidebar,
   body[data-sidebar-state="collapsed"] .sidebar,
   body[data-sidebar-open="false"] .sidebar
-) .sidebar-logout-label {
-  display: block !important;
-
-  inline-size: 0 !important;
-  min-inline-size: 0 !important;
-  max-inline-size: 0 !important;
-
-  overflow: hidden !important;
-
-  opacity: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-
-  transform: translateX(-4px);
-  transition-delay: 0s !important;
-}
-
+) .sidebar-logout-label,
 :is(
   .sidebar.is-collapsed,
   .sidebar[data-open="false"],
@@ -2293,11 +2242,11 @@ body[data-sidebar-open="false"] .sidebar {
   body[data-sidebar-state="collapsed"] .sidebar,
   body[data-sidebar-open="false"] .sidebar
 ) .sidebar-link-badge {
-  display: inline-grid !important;
-
   inline-size: 0 !important;
   min-inline-size: 0 !important;
   max-inline-size: 0 !important;
+
+  flex: 0 0 0 !important;
 
   padding-inline: 0 !important;
   border-width: 0 !important;
@@ -2308,7 +2257,7 @@ body[data-sidebar-open="false"] .sidebar {
   visibility: hidden !important;
   pointer-events: none !important;
 
-  transform: scale(.96);
+  transform: translateX(-5px) !important;
   transition-delay: 0s !important;
 }
 
@@ -2333,7 +2282,7 @@ body[data-sidebar-open="false"] .sidebar {
 
 
 /* =========================================================
-   OPEN — DELAYED CONTENT REVEAL
+   OPEN — CONTENT REVEAL
 ========================================================= */
 
 :is(
@@ -2532,7 +2481,7 @@ body[data-sidebar-open="false"] .sidebar {
   visibility: visible !important;
   pointer-events: auto !important;
 
-  transform: translateX(0);
+  transform: translateX(0) !important;
   transition-delay: var(--sidebar-motion-content-delay) !important;
 }
 
@@ -2573,7 +2522,7 @@ body[data-sidebar-open="false"] .sidebar {
   visibility: visible !important;
   pointer-events: auto !important;
 
-  transform: translateX(0);
+  transform: translateX(0) !important;
   transition-delay: var(--sidebar-motion-content-delay) !important;
 }
 
@@ -2598,7 +2547,7 @@ body[data-sidebar-open="false"] .sidebar {
   visibility: visible !important;
   pointer-events: auto !important;
 
-  transform: scale(1);
+  transform: scale(1) !important;
   transition-delay: var(--sidebar-motion-content-delay) !important;
 }
 
@@ -2741,8 +2690,23 @@ body[data-sidebar-open="false"] .sidebar {
 
 
 /* =========================================================
-   RESPONSIVE / ACCESSIBILITY
+   TOUCH DEVICES — NO HOVER STICKY
 ========================================================= */
+
+@media (hover: none) {
+  .sidebar .sidebar-account-menu-item.is-danger,
+  .sidebar .sidebar-account-menu-item[data-danger="true"],
+  .sidebar .sidebar-account-menu-item[data-sidebar-logout="true"],
+  .sidebar .sidebar-account-menu-item[data-sidebar-action="logout"],
+  .sidebar .sidebar-account-menu-item[data-sidebar-menu-action="logout"],
+  .sidebar .sidebar-logout {
+    border-color: transparent !important;
+
+    background: transparent !important;
+    background-color: transparent !important;
+    background-image: none !important;
+  }
+}
 
 @media (hover: none) and (pointer: coarse) {
   .sidebar .sidebar-link,
@@ -2763,6 +2727,11 @@ body[data-sidebar-open="false"] .sidebar {
     transform: none;
   }
 }
+
+
+/* =========================================================
+   FORCED COLORS
+========================================================= */
 
 @media (forced-colors: active) {
   .sidebar {
@@ -2799,6 +2768,11 @@ body[data-sidebar-open="false"] .sidebar {
   }
 }
 
+
+/* =========================================================
+   REDUCED TRANSPARENCY
+========================================================= */
+
 @media (prefers-reduced-transparency: reduce) {
   .sidebar,
   .sidebar .sidebar-account-menu {
@@ -2806,6 +2780,11 @@ body[data-sidebar-open="false"] .sidebar {
     -webkit-backdrop-filter: none !important;
   }
 }
+
+
+/* =========================================================
+   REDUCED MOTION
+========================================================= */
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar {
@@ -2835,6 +2814,11 @@ body[data-sidebar-open="false"] .sidebar {
     transform: none !important;
   }
 }
+
+
+/* =========================================================
+   PRINT
+========================================================= */
 
 @media print {
   .sidebar {

@@ -23,7 +23,7 @@
 
 import Http from "../../core/http.js";
 
-export const INCIDENCIAS_API_VERSION = "incidencias.api.cached.v2";
+export const INCIDENCIAS_API_VERSION = "incidencias.api.cached.v3";
 
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
 
@@ -178,9 +178,11 @@ function safeUrl(value = "") {
   if (raw.startsWith("//")) return "";
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
-  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature)=/i.test(raw)) {
+  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(raw)) {
     return "";
   }
+
+  if (/^blob:/i.test(raw)) return raw;
 
   if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
 
@@ -192,7 +194,84 @@ function safeUrl(value = "") {
     }
   }
 
+  if (/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
   return "";
+}
+
+function firstUrl(...values) {
+  for (const value of values.flat(Infinity)) {
+    if (value === undefined || value === null) continue;
+
+    if (isObject(value)) {
+      const nested = firstUrl(
+        value.avatarUrl,
+        value.avatar,
+        value.photoUrl,
+        value.photoURL,
+        value.imageUrl,
+        value.picture,
+        value.viewUrl,
+        value.openUrl,
+        value.downloadUrl,
+        value.url,
+        value.href,
+        value.src
+      );
+
+      if (nested) return nested;
+      continue;
+    }
+
+    const url = safeUrl(value);
+    if (url) return url;
+  }
+
+  return "";
+}
+
+function normalizeEmail(value = "") {
+  const email = cleanText(value, "").toLowerCase();
+
+  if (!email) return "";
+
+  if (
+    [
+      "null",
+      "undefined",
+      "none",
+      "sin email",
+      "no email",
+      "no_email",
+      "__no_email__",
+    ].includes(email)
+  ) {
+    return "";
+  }
+
+  return email.includes("@") ? email : "";
+}
+
+function firstEmail(...values) {
+  for (const value of values.flat(Infinity)) {
+    const email = normalizeEmail(value);
+    if (email) return email;
+  }
+
+  return "";
+}
+
+function countFrom(...values) {
+  return Math.max(
+    0,
+    ...values.map((value) => number(value, 0))
+  );
 }
 
 function encodeSegment(value = "") {
@@ -269,6 +348,7 @@ function cachedListResponse({
   cached = true,
   stale = false,
   error = null,
+  options = {},
 } = {}) {
   const items = safeArray(lastList.items);
   const total = number(lastList.total, items.length);
@@ -290,8 +370,8 @@ function cachedListResponse({
       hydrated: Boolean(lastLoadedAt),
       key: lastCacheKey,
       ageMs: cacheAgeMs(),
-      ttlMs: INCIDENCIAS_CACHE_TTL_MS,
-      fresh: isCacheFresh(),
+      ttlMs: number(options.ttlMs ?? options.cacheTtlMs, INCIDENCIAS_CACHE_TTL_MS),
+      fresh: !stale && !error && isCacheFresh(options),
     },
   };
 }
@@ -331,6 +411,56 @@ function getIncidenciaStableId(item = {}) {
   );
 }
 
+function shouldPreserveExisting(value) {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "string" && value.trim() === "") return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  if (isObject(value) && !Object.keys(value).length) return true;
+
+  return false;
+}
+
+function mergeIncidenciaData(current = {}, next = {}) {
+  const base = safeObject(current, {});
+  const incoming = safeObject(next, {});
+  const output = { ...base };
+
+  for (const [key, value] of Object.entries(incoming)) {
+    const previous = output[key];
+
+    if (isObject(previous) && isObject(value)) {
+      output[key] = mergeIncidenciaData(previous, value);
+      continue;
+    }
+
+    output[key] =
+      shouldPreserveExisting(value) && previous !== undefined && previous !== null
+        ? previous
+        : value;
+  }
+
+  return output;
+}
+
+function incidenciaSortTime(item = {}) {
+  const timestamp = Date.parse(
+    first(
+      item.lastActivityAt,
+      item.updatedAt,
+      item.modifiedAt,
+      item.closedAt,
+      item.createdAt,
+      item.lifecycle?.lastActivityAt,
+      item.lifecycle?.updatedAt,
+      item.lifecycle?.closedAt,
+      item.lifecycle?.createdAt,
+      0
+    )
+  );
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function upsertCachedIncidencia(item = null) {
   const raw = safeObject(item, null);
 
@@ -341,11 +471,14 @@ function upsertCachedIncidencia(item = null) {
 
   if (!id) return normalized;
 
+  const currentItems = safeArray(lastList.items);
+  const existing = currentItems.find((current) => getIncidenciaStableId(current) === id) || null;
+  const merged = existing ? mergeIncidenciaData(existing, normalized) : normalized;
   const map = new Map();
 
-  map.set(id, normalized);
+  map.set(id, merged);
 
-  for (const current of safeArray(lastList.items)) {
+  for (const current of currentItems) {
     const currentId = getIncidenciaStableId(current);
 
     if (!currentId || map.has(currentId)) continue;
@@ -362,7 +495,7 @@ function upsertCachedIncidencia(item = null) {
 
   lastLoadedAt = lastLoadedAt || nowIso();
 
-  return normalized;
+  return merged;
 }
 
 export function hasFreshIncidenciasCache(options = {}) {
@@ -623,45 +756,52 @@ function fileFromPayload(payload = null) {
 
 function normalizePerson(value = {}) {
   const raw = safeObject(value);
+  const email = firstEmail(
+    raw.email,
+    raw.emailLower,
+    raw.userEmail,
+    raw.mail,
+    raw.profile?.email,
+    raw.auth?.email,
+    raw.lookup?.emailLower
+  );
+  const avatarUrl = firstUrl(
+    raw.avatarUrl,
+    raw.avatar,
+    raw.picture,
+    raw.photoUrl,
+    raw.photoURL,
+    raw.imageUrl,
+    raw.profile?.avatarUrl,
+    raw.profile?.avatar,
+    raw.profile?.photoUrl,
+    raw.profile?.photoURL
+  );
+  const name = cleanText(
+    first(
+      raw.displayName,
+      raw.fullName,
+      raw.name,
+      raw.nombre,
+      raw.profile?.displayName,
+      raw.profile?.name,
+      raw.username
+    ),
+    ""
+  );
 
   return {
     id: cleanText(first(raw.id, raw.userId, raw.uid, raw.sub, raw.username, raw.slug), ""),
     userId: cleanText(first(raw.userId, raw.id, raw.uid, raw.sub), ""),
     username: cleanText(first(raw.username, raw.userName, raw.slug), ""),
-    displayName: cleanText(
-      first(
-        raw.displayName,
-        raw.fullName,
-        raw.name,
-        raw.nombre,
-        raw.profile?.displayName,
-        raw.profile?.name,
-        raw.username
-      ),
-      ""
-    ),
-    name: cleanText(
-      first(
-        raw.name,
-        raw.nombre,
-        raw.displayName,
-        raw.fullName,
-        raw.profile?.name,
-        raw.profile?.displayName
-      ),
-      ""
-    ),
+    displayName: name,
+    name,
+    email: email || null,
+    emailLower: email || null,
     role: cleanText(first(raw.role, raw.rol, Array.isArray(raw.roles) ? raw.roles[0] : ""), ""),
-    avatarUrl: safeUrl(
-      first(
-        raw.avatarUrl,
-        raw.avatar,
-        raw.picture,
-        raw.photoUrl,
-        raw.profile?.avatarUrl,
-        raw.profile?.avatar
-      )
-    ),
+    avatar: avatarUrl || null,
+    avatarUrl,
+    hasAvatar: Boolean(avatarUrl),
   };
 }
 
@@ -703,23 +843,21 @@ function normalizeAttachment(file = {}, index = 0) {
     `archivo_${index + 1}`
   );
 
-  const url = safeUrl(
-    first(
-      raw.viewUrl,
-      raw.openUrl,
-      raw.signedUrl,
-      raw.url,
-      raw.blobUrl,
-      raw.publicUrl,
-      raw.downloadUrl,
-      rawNested.viewUrl,
-      rawNested.openUrl,
-      rawNested.signedUrl,
-      rawNested.url,
-      rawNested.blobUrl,
-      rawNested.publicUrl,
-      rawNested.downloadUrl
-    )
+  const url = firstUrl(
+    raw.viewUrl,
+    raw.openUrl,
+    raw.signedUrl,
+    raw.url,
+    raw.blobUrl,
+    raw.publicUrl,
+    raw.downloadUrl,
+    rawNested.viewUrl,
+    rawNested.openUrl,
+    rawNested.signedUrl,
+    rawNested.url,
+    rawNested.blobUrl,
+    rawNested.publicUrl,
+    rawNested.downloadUrl
   );
 
   return {
@@ -733,9 +871,9 @@ function normalizeAttachment(file = {}, index = 0) {
     contentType: cleanText(first(raw.contentType, raw.mimetype, raw.mimeType, raw.type, rawNested.contentType), ""),
     uploadedAt: first(raw.uploadedAt, raw.createdAt, raw.date, rawNested.uploadedAt, rawNested.createdAt, null),
     url,
-    viewUrl: safeUrl(first(raw.viewUrl, raw.openUrl, raw.signedUrl, raw.url, url)),
-    openUrl: safeUrl(first(raw.openUrl, raw.viewUrl, raw.signedUrl, raw.url, url)),
-    downloadUrl: safeUrl(first(raw.downloadUrl, raw.signedUrl, raw.url, url)),
+    viewUrl: firstUrl(raw.viewUrl, raw.openUrl, raw.signedUrl, raw.url, url),
+    openUrl: firstUrl(raw.openUrl, raw.viewUrl, raw.signedUrl, raw.url, url),
+    downloadUrl: firstUrl(raw.downloadUrl, raw.signedUrl, raw.url, url),
   };
 }
 
@@ -829,19 +967,168 @@ export function normalizeIncidencia(item = {}) {
       raw.ownerName,
       raw.clientName,
       raw.clienteName,
+      raw.clienteNombre,
       raw.userName,
+      raw.usuarioName,
+      raw.name,
+      raw.requesterSnapshotName,
+      raw.requesterSnapshotNombre,
       raw.requesterSnapshot?.displayName,
       raw.requesterSnapshot?.name,
-      raw.clienteSnapshot?.displayName,
-      raw.clienteSnapshot?.name,
-      raw.userSnapshot?.displayName,
-      raw.userSnapshot?.name,
-      raw.user?.displayName,
-      raw.user?.name,
+      raw.requesterSnapshot?.nombre,
       raw.cliente?.displayName,
-      raw.cliente?.name
+      raw.cliente?.name,
+      raw.cliente?.nombre,
+      raw.client?.displayName,
+      raw.client?.name,
+      raw.user?.displayName,
+      raw.user?.name
     ),
     "Usuario"
+  );
+
+  const requesterEmail = firstEmail(
+    raw.requesterEmail,
+    raw.requesterEmailLower,
+    raw.clientEmail,
+    raw.clientEmailLower,
+    raw.clienteEmail,
+    raw.clienteEmailLower,
+    raw.userEmail,
+    raw.userEmailLower,
+    raw.email,
+    raw.emailLower,
+    raw.emailCliente,
+    raw.rootEmail,
+    raw.rootUserEmail,
+    raw.rootClienteEmail,
+    raw.rootClienteEmailLower,
+    raw.requesterSnapshotEmail,
+    raw.requesterSnapshotEmailLower,
+    raw.clienteEmailNested,
+    raw.clienteEmailLowerNested,
+    raw.receptorEmail,
+    raw.receptorEmailLower,
+    raw.createdByEmail,
+    raw.createdByEmailLower,
+    raw.requesterSnapshot?.email,
+    raw.requesterSnapshot?.emailLower,
+    raw.cliente?.email,
+    raw.cliente?.emailLower,
+    raw.client?.email,
+    raw.client?.emailLower,
+    raw.usuario?.email,
+    raw.usuario?.emailLower,
+    raw.user?.email,
+    raw.user?.emailLower,
+    raw.receptor?.email,
+    raw.receptor?.emailLower,
+    raw.createdBy?.email,
+    raw.createdBy?.emailLower,
+    raw.meta?.requesterEmail,
+    raw.meta?.clientEmail,
+    raw.meta?.clienteEmail,
+    raw.meta?.userEmail
+  );
+
+  const requesterAvatarUrl = firstUrl(
+    raw.requesterAvatarUrl,
+    raw.requesterAvatar,
+    raw.clientAvatarUrl,
+    raw.clientAvatar,
+    raw.clienteAvatarUrl,
+    raw.clienteAvatar,
+    raw.userAvatarUrl,
+    raw.userAvatar,
+    raw.avatarUrl,
+    raw.avatar,
+    raw.photoUrl,
+    raw.photoURL,
+    raw.picture,
+    raw.requesterSnapshotAvatarUrl,
+    raw.requesterSnapshotAvatar,
+    raw.clienteAvatarUrl,
+    raw.clienteAvatar,
+    raw.receptorAvatarUrl,
+    raw.receptorAvatar,
+    raw.createdByAvatarUrl,
+    raw.createdByAvatar,
+    raw.requesterSnapshot?.avatarUrl,
+    raw.requesterSnapshot?.avatar,
+    raw.requesterSnapshot?.photoUrl,
+    raw.requesterSnapshot?.photoURL,
+    raw.cliente?.avatarUrl,
+    raw.cliente?.avatar,
+    raw.cliente?.photoUrl,
+    raw.client?.avatarUrl,
+    raw.client?.avatar,
+    raw.user?.avatarUrl,
+    raw.user?.avatar,
+    raw.receptor?.avatarUrl,
+    raw.receptor?.avatar,
+    raw.createdBy?.avatarUrl,
+    raw.createdBy?.avatar,
+    raw.meta?.requesterAvatarUrl,
+    raw.meta?.requesterAvatar,
+    raw.meta?.clientAvatarUrl,
+    raw.meta?.clientAvatar
+  );
+
+  const requesterUserId = cleanText(
+    first(
+      raw.userId,
+      raw.usuarioId,
+      raw.requesterUserId,
+      raw.ownerUserId,
+      raw.createdByUserId,
+      raw.receptorUserId,
+      raw.requesterSnapshotUserId,
+      raw.clienteUserId,
+      raw.createdByUserIdNested,
+      raw.userRef?.userId,
+      raw.requesterSnapshot?.userId,
+      raw.requesterSnapshot?.id,
+      raw.cliente?.userId,
+      raw.client?.userId,
+      raw.user?.userId,
+      raw.user?.id
+    ),
+    ""
+  );
+
+  const requesterClienteId = cleanText(
+    first(
+      raw.clienteId,
+      raw.clientId,
+      raw.customerId,
+      raw.requesterSnapshotClienteId,
+      raw.clienteClienteId,
+      raw.receptorClienteId,
+      raw.clienteRef?.clienteId,
+      raw.requesterSnapshot?.clienteId,
+      raw.cliente?.clienteId,
+      raw.cliente?.id,
+      raw.client?.clienteId,
+      raw.client?.id
+    ),
+    ""
+  );
+
+  const requesterUsername = cleanText(
+    first(
+      raw.requesterUsername,
+      raw.username,
+      raw.userName,
+      raw.requesterSnapshotUsername,
+      raw.clienteUsername,
+      raw.receptorUsername,
+      raw.createdByUsername,
+      raw.requesterSnapshot?.username,
+      raw.cliente?.username,
+      raw.client?.username,
+      raw.user?.username
+    ),
+    ""
   );
 
   const assignedTo = normalizePerson(
@@ -849,8 +1136,11 @@ export function normalizeIncidencia(item = {}) {
       raw.assignedTo,
       raw.tecnico,
       raw.technician,
+      raw.agent,
       raw.assignedTechnician,
       raw.assignedUser,
+      raw.assignment?.technician,
+      raw.assignment?.assignedTo,
       {}
     )
   );
@@ -862,17 +1152,227 @@ export function normalizeIncidencia(item = {}) {
       raw.tecnicoName,
       raw.assigneeName,
       raw.agentName,
+      raw.assignmentAssignedToName,
+      raw.assignmentTechnicianName,
+      raw.assignmentTechnicianNombre,
+      raw.assignmentName,
+      raw.assignedToNombre,
+      raw.tecnicoNombre,
+      raw.metaTechnicianName,
+      raw.metaAssignedTechnicianName,
+      raw.metaLastTechnicianName,
       raw.assignment?.assignedToName,
       raw.assignment?.technicianName,
+      raw.assignment?.agentName,
+      raw.assignment?.name,
+      raw.meta?.technicianName,
+      raw.meta?.assignedTechnicianName,
+      raw.meta?.lastTechnicianName,
       assignedTo.displayName,
       assignedTo.name
     ),
     "Sin asignar"
   );
 
+  const assignedToEmail = firstEmail(
+    raw.assignedToEmail,
+    raw.technicianEmail,
+    raw.tecnicoEmail,
+    raw.agentEmail,
+    raw.assignmentAssignedToEmail,
+    raw.assignmentTechnicianEmail,
+    raw.assignmentEmail,
+    raw.metaTechnicianEmail,
+    raw.metaAssignedTechnicianEmail,
+    raw.metaLastTechnicianEmail,
+    raw.assignment?.assignedToEmail,
+    raw.assignment?.technicianEmail,
+    raw.assignment?.agentEmail,
+    raw.assignment?.email,
+    raw.assignedTo?.email,
+    raw.technician?.email,
+    raw.tecnico?.email,
+    raw.agent?.email,
+    raw.meta?.technicianEmail,
+    raw.meta?.assignedTechnicianEmail,
+    raw.meta?.lastTechnicianEmail,
+    assignedTo.email,
+    assignedTo.emailLower
+  );
+
+  const assignedToAvatarUrl = firstUrl(
+    raw.assignedToAvatarUrl,
+    raw.assignedToAvatar,
+    raw.technicianAvatarUrl,
+    raw.technicianAvatar,
+    raw.tecnicoAvatarUrl,
+    raw.tecnicoAvatar,
+    raw.agentAvatarUrl,
+    raw.agentAvatar,
+    raw.assignmentAssignedToAvatarUrl,
+    raw.assignmentAssignedToAvatar,
+    raw.assignmentTechnicianAvatarUrl,
+    raw.assignmentTechnicianAvatar,
+    raw.assignmentAvatarUrl,
+    raw.assignmentAvatar,
+    raw.metaTechnicianAvatarUrl,
+    raw.metaTechnicianAvatar,
+    raw.metaAssignedTechnicianAvatarUrl,
+    raw.metaAssignedTechnicianAvatar,
+    raw.metaLastTechnicianAvatarUrl,
+    raw.metaLastTechnicianAvatar,
+    raw.assignment?.assignedToAvatarUrl,
+    raw.assignment?.assignedToAvatar,
+    raw.assignment?.technicianAvatarUrl,
+    raw.assignment?.technicianAvatar,
+    raw.assignment?.agentAvatarUrl,
+    raw.assignment?.agentAvatar,
+    raw.assignment?.avatarUrl,
+    raw.assignment?.avatar,
+    raw.assignedTo?.avatarUrl,
+    raw.assignedTo?.avatar,
+    raw.technician?.avatarUrl,
+    raw.technician?.avatar,
+    raw.tecnico?.avatarUrl,
+    raw.tecnico?.avatar,
+    raw.agent?.avatarUrl,
+    raw.agent?.avatar,
+    raw.meta?.technicianAvatarUrl,
+    raw.meta?.technicianAvatar,
+    raw.meta?.assignedTechnicianAvatarUrl,
+    raw.meta?.assignedTechnicianAvatar,
+    raw.meta?.lastTechnicianAvatarUrl,
+    raw.meta?.lastTechnicianAvatar,
+    assignedTo.avatarUrl,
+    assignedTo.avatar
+  );
+
+  const assignedToUserId = cleanText(
+    first(
+      raw.assignedToUserId,
+      raw.technicianUserId,
+      raw.tecnicoUserId,
+      raw.agentUserId,
+      raw.assignmentAssignedToUserId,
+      raw.assignmentTechnicianUserId,
+      raw.assignmentTechnicianId,
+      raw.assignmentUserId,
+      raw.assignedToUserIdNested,
+      raw.assignedToId,
+      raw.tecnicoId,
+      raw.metaTechnicianUserId,
+      raw.metaAssignedTechnicianUserId,
+      raw.metaLastTechnicianUserId,
+      raw.assignment?.assignedToUserId,
+      raw.assignment?.technicianUserId,
+      raw.assignment?.userId,
+      raw.assignedTo?.userId,
+      raw.assignedTo?.id,
+      raw.technician?.userId,
+      raw.technician?.id,
+      raw.tecnico?.userId,
+      raw.tecnico?.id,
+      raw.agent?.userId,
+      raw.agent?.id,
+      assignedTo.userId,
+      assignedTo.id
+    ),
+    ""
+  );
+
+  const technician = {
+    ...assignedTo,
+    id: assignedToUserId || assignedTo.id,
+    userId: assignedToUserId || assignedTo.userId,
+    name: assignedToName,
+    nombre: assignedToName,
+    displayName: assignedToName,
+    email: assignedToEmail || null,
+    emailLower: assignedToEmail || null,
+    avatar: assignedToAvatarUrl || null,
+    avatarUrl: assignedToAvatarUrl,
+    hasAvatar: Boolean(assignedToAvatarUrl),
+    assigned: Boolean(
+      assignedToUserId ||
+        assignedToEmail ||
+        assignedToAvatarUrl ||
+        (assignedToName && normalizeKey(assignedToName) !== "sin_asignar")
+    ),
+  };
+
+  const requesterSnapshot = {
+    ...safeObject(raw.requesterSnapshot),
+    userId: requesterUserId,
+    id: requesterUserId,
+    clienteId: requesterClienteId,
+    name: requesterName,
+    nombre: requesterName,
+    displayName: requesterName,
+    email: requesterEmail || null,
+    emailLower: requesterEmail || null,
+    username: requesterUsername || null,
+    usernameLower: requesterUsername ? requesterUsername.toLowerCase() : null,
+    avatar: requesterAvatarUrl || null,
+    avatarUrl: requesterAvatarUrl || null,
+    hasAvatar: Boolean(requesterAvatarUrl),
+  };
+
+  const cliente = {
+    ...safeObject(raw.cliente || raw.client),
+    id: requesterClienteId,
+    userId: requesterUserId,
+    clienteId: requesterClienteId,
+    name: requesterName,
+    nombre: requesterName,
+    displayName: requesterName,
+    email: requesterEmail || null,
+    emailLower: requesterEmail || null,
+    username: requesterUsername || null,
+    usernameLower: requesterUsername ? requesterUsername.toLowerCase() : null,
+    avatar: requesterAvatarUrl || null,
+    avatarUrl: requesterAvatarUrl || null,
+    hasAvatar: Boolean(requesterAvatarUrl),
+  };
+
+  const assignment = {
+    ...safeObject(raw.assignment),
+    assignedToUserId: technician.userId || null,
+    assignedToName: technician.name,
+    assignedToEmail: technician.email,
+    assignedToAvatar: technician.avatarUrl || null,
+    assignedToAvatarUrl: technician.avatarUrl || null,
+    technicianAvatar: technician.avatarUrl || null,
+    technicianAvatarUrl: technician.avatarUrl || null,
+    agentAvatar: technician.avatarUrl || null,
+    agentAvatarUrl: technician.avatarUrl || null,
+    avatar: technician.avatarUrl || null,
+    avatarUrl: technician.avatarUrl || null,
+    assignedToHasAvatar: technician.hasAvatar,
+  };
+
   const attachments = safeArray(first(raw.attachments, raw.files, raw.adjuntos, [])).map(normalizeAttachment);
+  const attachmentsCount = countFrom(
+    attachments.length,
+    raw.attachmentsCount,
+    raw.filesCount,
+    raw.adjuntosCount,
+    raw.meta?.attachmentsCount,
+    raw.meta?.filesCount
+  );
+
+  const comments = safeArray(first(raw.comments, raw.notes, raw.messages, []));
+  const history = safeArray(first(raw.history, raw.events, []));
+  const commentsCount = countFrom(comments.length, raw.commentsCount, raw.meta?.commentsCount);
+  const historyCount = countFrom(history.length, raw.historyCount, raw.meta?.historyCount);
 
   const invoices = safeArray(first(raw.invoices, raw.facturas, raw.linkedInvoices?.items, []));
+  const invoicesCount = countFrom(
+    raw.facturasCount,
+    raw.invoicesCount,
+    raw.linkedInvoicesCount,
+    raw.linkedInvoices?.count,
+    invoices.length
+  );
 
   const invoiceTotal = number(
     first(
@@ -885,19 +1385,47 @@ export function normalizeIncidencia(item = {}) {
       raw.importeFactura,
       raw.totalFactura,
       raw.invoiceAmount,
+      raw.linkedInvoicesTotal,
+      raw.linkedInvoicesAmount,
+      raw.linkedInvoicesImporte,
       raw.linkedInvoices?.total,
       raw.linkedInvoices?.amount,
       raw.meta?.invoicesTotal,
+      raw.meta?.invoiceTotal,
       0
     ),
     0
   );
+
+  const currency = cleanText(
+    first(
+      raw.currency,
+      raw.moneda,
+      raw.facturaCurrency,
+      raw.facturaMoneda,
+      raw.linkedInvoicesCurrency,
+      raw.linkedInvoicesMoneda,
+      raw.linkedInvoices?.currency,
+      raw.linkedInvoices?.moneda,
+      raw.meta?.invoiceCurrency,
+      "EUR"
+    ),
+    "EUR"
+  ).toUpperCase();
+
+  const createdAt = first(raw.createdAt, raw.fechaCreacion, raw.created_at, raw.lifecycle?.createdAt, null);
+  const updatedAt = first(raw.updatedAt, raw.updated_at, raw.modifiedAt, raw.lastActivityAt, raw.lifecycle?.updatedAt, null);
+  const lastActivityAt = first(raw.lastActivityAt, raw.lifecycle?.lastActivityAt, updatedAt, createdAt, null);
+  const closedAt = first(raw.closedAt, raw.lifecycle?.closedAt, null);
 
   return {
     id: ticketId,
     ticketId,
     incidenciaId: ticketId,
     entityId: ticketId,
+
+    entityType: cleanText(first(raw.entityType, "ticket"), "ticket"),
+    tipoDocumento: cleanText(first(raw.tipoDocumento, "ticket"), "ticket"),
 
     subject,
     asunto: subject,
@@ -910,61 +1438,175 @@ export function normalizeIncidencia(item = {}) {
 
     status,
     estado: status,
+    statusKey: cleanText(first(raw.statusKey, status), status),
+    statusReason: cleanText(first(raw.statusReason, raw.motivoEstado), ""),
+
     priority,
     prioridad: priority,
+    priorityKey: cleanText(first(raw.priorityKey, priority), priority),
+
     category,
     categoria: category,
+    tipo: cleanText(first(raw.tipo, raw.type, category), category),
+    type: cleanText(first(raw.type, raw.tipo, category), category),
 
-    userId: cleanText(first(raw.userId, raw.usuarioId, raw.requesterUserId, raw.userRef?.userId), ""),
-    usuarioId: cleanText(first(raw.usuarioId, raw.userId, raw.requesterUserId, raw.userRef?.userId), ""),
-    clienteId: cleanText(first(raw.clienteId, raw.clientId, raw.customerId, raw.clienteRef?.clienteId), ""),
-    clientId: cleanText(first(raw.clientId, raw.clienteId, raw.customerId, raw.clienteRef?.clienteId), ""),
+    source: cleanText(first(raw.source, raw.origen), ""),
+    origen: cleanText(first(raw.origen, raw.source), ""),
+    channel: cleanText(raw.channel, ""),
+
+    userId: requesterUserId,
+    usuarioId: requesterUserId,
+    clienteId: requesterClienteId,
+    clientId: requesterClienteId,
 
     requesterName,
-    clientName: safePublicText(first(raw.clientName, raw.clienteName, requesterName), requesterName),
-    userName: safePublicText(first(raw.userName, raw.usuarioName, requesterName), requesterName),
+    requesterInitials: cleanText(raw.requesterInitials, ""),
+    requesterEmail: requesterEmail || null,
+    requesterEmailLower: requesterEmail || null,
+    requesterAvatarUrl,
+    requesterAvatar: requesterAvatarUrl || null,
+    requesterUsername: requesterUsername || null,
 
-    avatarUrl: safeUrl(first(raw.avatarUrl, raw.requesterAvatarUrl, raw.userAvatarUrl, raw.photoUrl)),
-    requesterAvatarUrl: safeUrl(first(raw.requesterAvatarUrl, raw.avatarUrl, raw.userAvatarUrl)),
-    userAvatarUrl: safeUrl(first(raw.userAvatarUrl, raw.avatarUrl, raw.requesterAvatarUrl)),
+    clientName: requesterName,
+    clienteName: requesterName,
+    clienteNombre: requesterName,
+    userName: requesterName,
 
-    assignedTo,
-    tecnico: assignedTo,
-    technician: assignedTo,
-    assignedToName,
-    technicianName: assignedToName,
-    tecnicoName: assignedToName,
-    assignedToAvatarUrl: safeUrl(first(raw.assignedToAvatarUrl, raw.technicianAvatarUrl, raw.tecnicoAvatarUrl, raw.assignment?.assignedToAvatarUrl)),
-    technicianAvatarUrl: safeUrl(first(raw.technicianAvatarUrl, raw.tecnicoAvatarUrl, raw.assignedToAvatarUrl, raw.assignment?.technicianAvatarUrl)),
-    tecnicoAvatarUrl: safeUrl(first(raw.tecnicoAvatarUrl, raw.technicianAvatarUrl, raw.assignedToAvatarUrl)),
+    clientEmail: requesterEmail || null,
+    clienteEmail: requesterEmail || null,
+    userEmail: requesterEmail || null,
+    email: requesterEmail || null,
+    emailLower: requesterEmail || null,
 
-    assignment: safeObject(raw.assignment, null),
+    avatar: requesterAvatarUrl || null,
+    avatarUrl: requesterAvatarUrl,
+    clientAvatar: requesterAvatarUrl || null,
+    clientAvatarUrl: requesterAvatarUrl,
+    clienteAvatar: requesterAvatarUrl || null,
+    clienteAvatarUrl: requesterAvatarUrl,
+    userAvatar: requesterAvatarUrl || null,
+    userAvatarUrl: requesterAvatarUrl,
+    hasAvatar: Boolean(requesterAvatarUrl),
 
-    invoiceId: cleanText(first(raw.invoiceId, raw.facturaId), ""),
-    facturaId: cleanText(first(raw.facturaId, raw.invoiceId), ""),
+    requesterSnapshot,
+    cliente,
+    client: cliente,
+
+    assignedTo: technician,
+    tecnico: technician,
+    technician,
+
+    assignment,
+
+    assignedToUserId: technician.userId,
+    assignedToName: technician.name,
+    assignedToEmail: technician.email,
+    assignedToAvatar: technician.avatarUrl || null,
+    assignedToAvatarUrl: technician.avatarUrl,
+
+    technicianName: technician.name,
+    technicianEmail: technician.email,
+    technicianAvatar: technician.avatarUrl || null,
+    technicianAvatarUrl: technician.avatarUrl,
+
+    tecnicoName: technician.name,
+    tecnicoEmail: technician.email,
+    tecnicoAvatar: technician.avatarUrl || null,
+    tecnicoAvatarUrl: technician.avatarUrl,
+
+    agentName: technician.name,
+    agentEmail: technician.email,
+    agentAvatar: technician.avatarUrl || null,
+    agentAvatarUrl: technician.avatarUrl,
+
+    invoiceId: cleanText(first(raw.invoiceId, raw.facturaId, raw.linkedInvoiceId, raw.linkedFacturaId), ""),
+    facturaId: cleanText(first(raw.facturaId, raw.invoiceId, raw.linkedFacturaId, raw.linkedInvoiceId), ""),
     invoiceIds: safeArray(raw.invoiceIds),
     facturaIds: safeArray(raw.facturaIds),
     invoices,
     facturas: invoices,
+    facturasCount: invoicesCount,
+    invoicesCount,
+
+    numeroFacturaLegal: cleanText(first(raw.numeroFacturaLegal, raw.numeroFactura, raw.invoiceNumber), ""),
+    numeroFactura: cleanText(first(raw.numeroFactura, raw.numeroFacturaLegal, raw.invoiceNumber), ""),
+    invoiceNumber: cleanText(first(raw.invoiceNumber, raw.numeroFacturaLegal, raw.numeroFactura), ""),
+
     invoiceTotal,
     invoicesTotal: invoiceTotal,
     facturasTotal: invoiceTotal,
+    facturaTotal: invoiceTotal,
+    facturaImporte: invoiceTotal,
+    importeFactura: invoiceTotal,
+    totalFactura: invoiceTotal,
+    invoiceAmount: invoiceTotal,
+    amount: invoiceTotal,
+    total: invoiceTotal,
+    importe: invoiceTotal,
+    price: invoiceTotal,
+
+    currency,
+    moneda: currency,
+    facturaCurrency: currency,
+    facturaMoneda: currency,
+
     paymentStatus: cleanText(first(raw.paymentStatus, raw.estadoPago, raw.linkedInvoices?.paymentStatus), ""),
 
     attachments,
     files: attachments,
     adjuntos: attachments,
-    attachmentsCount: attachments.length,
-    filesCount: attachments.length,
+    attachmentsCount,
+    filesCount: attachmentsCount,
+    adjuntosCount: attachmentsCount,
 
-    comments: safeArray(first(raw.comments, raw.notes, raw.messages, [])),
-    history: safeArray(first(raw.history, raw.events, [])),
+    comments,
+    history,
     timeline: normalizeTimeline(raw),
+    commentsCount,
+    historyCount,
 
-    createdAt: first(raw.createdAt, raw.fechaCreacion, raw.created_at, raw.lifecycle?.createdAt, null),
-    updatedAt: first(raw.updatedAt, raw.updated_at, raw.modifiedAt, raw.lastActivityAt, raw.lifecycle?.updatedAt, null),
-    lastActivityAt: first(raw.lastActivityAt, raw.updatedAt, raw.lifecycle?.lastActivityAt, null),
-    closedAt: first(raw.closedAt, raw.lifecycle?.closedAt, null),
+    createdAt,
+    createdAtES: raw.createdAtES || null,
+    updatedAt,
+    updatedAtES: raw.updatedAtES || null,
+    lastActivityAt,
+    lastActivityAtES: raw.lastActivityAtES || null,
+    closedAt,
+    closedAtES: raw.closedAtES || null,
+
+    lifecycle: {
+      ...safeObject(raw.lifecycle),
+      createdAt,
+      updatedAt,
+      lastActivityAt,
+      closedAt,
+    },
+
+    meta: {
+      ...safeObject(raw.meta),
+
+      requesterEmail: requesterEmail || null,
+      requesterAvatar: requesterAvatarUrl || null,
+      requesterAvatarUrl: requesterAvatarUrl || null,
+      requesterHasAvatar: Boolean(requesterAvatarUrl),
+
+      technicianUserId: technician.userId,
+      technicianName: technician.name,
+      technicianEmail: technician.email,
+      technicianAvatar: technician.avatarUrl || null,
+      technicianAvatarUrl: technician.avatarUrl || null,
+      technicianHasAvatar: technician.hasAvatar,
+
+      attachmentsCount,
+      commentsCount,
+      historyCount,
+      linkedInvoiceCount: invoicesCount,
+      invoicesTotal: invoiceTotal,
+      invoiceTotal,
+      invoiceCurrency: currency,
+
+      frontendReady: true,
+    },
   };
 }
 
@@ -976,14 +1618,24 @@ function normalizeList(items = []) {
     const id = cleanText(first(normalized.ticketId, normalized.id), "");
 
     if (!id) continue;
-    if (!map.has(id)) map.set(id, normalized);
+
+    map.set(
+      id,
+      map.has(id)
+        ? mergeIncidenciaData(map.get(id), normalized)
+        : normalized
+    );
   }
 
   return [...map.values()].sort((a, b) => {
-    const left = Date.parse(a.lastActivityAt || a.updatedAt || a.createdAt || 0);
-    const right = Date.parse(b.lastActivityAt || b.updatedAt || b.createdAt || 0);
+    const diff = incidenciaSortTime(b) - incidenciaSortTime(a);
 
-    return right - left;
+    if (diff !== 0) return diff;
+
+    return getIncidenciaStableId(b).localeCompare(getIncidenciaStableId(a), "es", {
+      numeric: true,
+      sensitivity: "base",
+    });
   });
 }
 
@@ -994,26 +1646,24 @@ function normalizeFileResponse(response = null, fallback = {}) {
     ...file,
   };
 
-  const url = safeUrl(
-    first(
-      source.url,
-      source.viewUrl,
-      source.openUrl,
-      source.downloadUrl,
-      source.signedUrl,
-      source.blobUrl,
-      source.publicUrl,
-      source.href
-    )
+  const url = firstUrl(
+    source.url,
+    source.viewUrl,
+    source.openUrl,
+    source.downloadUrl,
+    source.signedUrl,
+    source.blobUrl,
+    source.publicUrl,
+    source.href
   );
 
   return {
     ...source,
     url,
-    viewUrl: safeUrl(first(source.viewUrl, source.openUrl, url)),
-    openUrl: safeUrl(first(source.openUrl, source.viewUrl, url)),
-    downloadUrl: safeUrl(first(source.downloadUrl, url)),
-    signedUrl: safeUrl(first(source.signedUrl, url)),
+    viewUrl: firstUrl(source.viewUrl, source.openUrl, url),
+    openUrl: firstUrl(source.openUrl, source.viewUrl, url),
+    downloadUrl: firstUrl(source.downloadUrl, url),
+    signedUrl: firstUrl(source.signedUrl, url),
     filename: cleanText(first(source.filename, source.fileName, source.name), "archivo"),
     fileName: cleanText(first(source.fileName, source.filename, source.name), "archivo"),
     name: cleanText(first(source.name, source.filename, source.fileName), "archivo"),
@@ -1065,7 +1715,8 @@ function normalizeCreatePayload(payload = {}) {
 
   const targetUserId = cleanText(first(source.targetUserId, source.userId, source.usuarioId, source.clienteId), "");
   const targetUserName = cleanText(first(source.targetUserName, source.userName, source.clienteNombre, source.clientName), "");
-  const targetUserAvatar = safeUrl(first(source.targetUserAvatar, source.userAvatar, source.clienteAvatar, source.avatar, source.avatarUrl));
+  const targetUserEmail = firstEmail(source.targetUserEmail, source.userEmail, source.clienteEmail, source.clientEmail, source.email);
+  const targetUserAvatar = firstUrl(source.targetUserAvatar, source.userAvatar, source.clienteAvatar, source.clientAvatar, source.avatar, source.avatarUrl);
 
   return {
     ...withoutFileFields(source),
@@ -1100,10 +1751,22 @@ function normalizeCreatePayload(payload = {}) {
           clienteId: targetUserId,
           targetUserId,
           targetUserName,
+
+          ...(targetUserEmail
+            ? {
+                targetUserEmail,
+                userEmail: targetUserEmail,
+                clienteEmail: targetUserEmail,
+                clientEmail: targetUserEmail,
+                email: targetUserEmail,
+              }
+            : {}),
+
           clienteNombre: targetUserName,
           clientName: targetUserName,
           targetUserAvatar,
           clienteAvatar: targetUserAvatar,
+          clientAvatar: targetUserAvatar,
           avatar: targetUserAvatar,
           avatarUrl: targetUserAvatar,
         }
@@ -1220,6 +1883,7 @@ export async function listIncidencias(options = {}) {
     return cachedListResponse({
       cached: true,
       stale: false,
+      options,
     });
   }
 
@@ -1258,7 +1922,7 @@ export async function listIncidencias(options = {}) {
           hydrated: true,
           key: lastCacheKey,
           ageMs: 0,
-          ttlMs: INCIDENCIAS_CACHE_TTL_MS,
+          ttlMs: number(options.ttlMs ?? options.cacheTtlMs, INCIDENCIAS_CACHE_TTL_MS),
           fresh: true,
         },
       };
@@ -1270,6 +1934,7 @@ export async function listIncidencias(options = {}) {
           cached: true,
           stale: true,
           error: lastError,
+          options,
         });
       }
 
@@ -1303,11 +1968,7 @@ export async function getIncidenciaByIdRequest(
   });
 
   const detail = detailFromPayload(response);
-  const item = detail ? normalizeIncidencia(detail) : null;
-
-  if (item) {
-    upsertCachedIncidencia(item);
-  }
+  const item = detail ? upsertCachedIncidencia(detail) : null;
 
   return item;
 }
@@ -1340,7 +2001,7 @@ export async function createIncidencia(payload = {}, options = {}) {
   const created = await createIncidenciaRequest(payload, options);
 
   if (created) {
-    upsertCachedIncidencia(created);
+    return upsertCachedIncidencia(created);
   }
 
   return created;
@@ -1374,11 +2035,7 @@ export async function updateIncidenciaRequest(
 
 export async function updateIncidencia(id = "", payload = {}, options = {}) {
   const updated = await updateIncidenciaRequest(id, payload, options);
-  const item = updated || await getIncidenciaByIdRequest(id);
-
-  if (item) {
-    upsertCachedIncidencia(item);
-  }
+  const item = updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
 
   return item;
 }
@@ -1418,11 +2075,7 @@ export async function commentIncidenciaRequest(
 
 export async function commentIncidencia(id = "", message = "", options = {}) {
   const updated = await commentIncidenciaRequest(id, message, options);
-  const item = updated || await getIncidenciaByIdRequest(id);
-
-  if (item) {
-    upsertCachedIncidencia(item);
-  }
+  const item = updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
 
   return item;
 }
@@ -1451,11 +2104,7 @@ export async function reopenIncidenciaRequest(
 
 export async function reopenIncidencia(id = "", options = {}) {
   const updated = await reopenIncidenciaRequest(id, options);
-  const item = updated || await getIncidenciaByIdRequest(id);
-
-  if (item) {
-    upsertCachedIncidencia(item);
-  }
+  const item = updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
 
   return item;
 }
@@ -1497,11 +2146,7 @@ export async function uploadIncidenciaAttachmentsRequest(
 
 export async function uploadIncidenciaAttachments(id = "", files = [], options = {}) {
   const updated = await uploadIncidenciaAttachmentsRequest(id, files, options);
-  const item = updated || await getIncidenciaByIdRequest(id);
-
-  if (item) {
-    upsertCachedIncidencia(item);
-  }
+  const item = updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
 
   return item;
 }
@@ -1692,6 +2337,12 @@ export function getIncidenciasApiSnapshot() {
       inFlightDedupe: true,
       staleOnError: true,
       mutationCacheSync: true,
+      nonDestructiveCacheMerge: true,
+
+      requesterEmailAliasCompatibility: true,
+      technicianAvatarAliasCompatibility: true,
+      preservesLightweightCounts: true,
+
       noFetch: true,
       noStore: true,
       noStateExternal: true,

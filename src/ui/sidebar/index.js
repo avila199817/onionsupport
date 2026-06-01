@@ -694,6 +694,35 @@ function shouldRenderSidebar(context = getContext()) {
 }
 
 /* =========================================================
+   DOCUMENT STATE
+========================================================= */
+
+function syncDocumentSidebarState(open = false, options = {}) {
+  if (!isBrowser()) return false;
+
+  const hidden = options?.hidden === true;
+  const nextOpen = hidden ? false : open === true;
+  const state = hidden ? "hidden" : nextOpen ? "open" : "collapsed";
+
+  const nodes = [
+    document.documentElement,
+    document.body,
+  ].filter(Boolean);
+
+  for (const node of nodes) {
+    node.classList.toggle("sidebar-open", state === "open");
+    node.classList.toggle("sidebar-collapsed", state === "collapsed");
+    node.classList.toggle("sidebar-hidden", state === "hidden");
+
+    node.setAttribute("data-sidebar-state", state);
+    node.setAttribute("data-sidebar-open", state === "open" ? "true" : "false");
+    node.setAttribute("data-sidebar-hidden", state === "hidden" ? "true" : "false");
+  }
+
+  return true;
+}
+
+/* =========================================================
    TEMPLATE CALLBACKS
 ========================================================= */
 
@@ -701,8 +730,7 @@ function onTemplateOpenChange(open = false) {
   sidebarOpen = open === true;
 
   try {
-    document.body?.classList.toggle("sidebar-open", sidebarOpen);
-    document.documentElement?.classList.toggle("sidebar-open", sidebarOpen);
+    syncDocumentSidebarState(sidebarOpen);
   } catch {
     // noop
   }
@@ -762,6 +790,14 @@ function hideSidebar() {
 
   if (mount) {
     setHidden(mount, true);
+  }
+
+  try {
+    syncDocumentSidebarState(false, {
+      hidden: true,
+    });
+  } catch {
+    // noop
   }
 
   mounted = false;
@@ -954,6 +990,14 @@ function destroy() {
   if (mount) {
     clear(mount);
     setHidden(mount, true);
+  }
+
+  try {
+    syncDocumentSidebarState(false, {
+      hidden: true,
+    });
+  } catch {
+    // noop
   }
 
   mounted = false;

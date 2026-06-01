@@ -132,11 +132,36 @@
         aria-hidden="true"
       >
         <div
-          class="app-loader__logo-fallback"
+          class="app-loader__logo-fallback app-loader__logo-shell"
+          data-loader-logo-shell="true"
           data-loader-logo-fallback="true"
           aria-hidden="true"
         >
-          ON
+          <picture
+            class="app-loader__logo-picture"
+            data-loader-logo-picture="true"
+          >
+            <source
+              srcset="src/media/img/favicon_black.png"
+              media="(prefers-color-scheme: light)"
+            >
+            <source
+              srcset="src/media/img/favicon_white.png"
+              media="(prefers-color-scheme: dark)"
+            >
+            <img
+              class="app-loader__logo"
+              src="src/media/img/favicon_white.png"
+              width="48"
+              height="48"
+              alt=""
+              loading="eager"
+              decoding="async"
+              fetchpriority="high"
+              draggable="false"
+              data-loader-logo="true"
+            >
+          </picture>
         </div>
       </div>
 

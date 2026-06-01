@@ -2,21 +2,18 @@
    ONION SUPPORT — INCIDENCIAS VIEW.CSS
    Archivo: /src/css/views/incidencias/index.css
 
-   INCIDENCIAS LIST VIEW · FINAL GOD MODE · PRODUCTIVE SPA
-   FLOATING HOME-LIKE CARDS · 6-COLUMN TABLE · NO ACTIONS COLUMN
+   INCIDENCIAS LIST VIEW · COMPACT EXTREME · PRODUCTIVE SPA
+   6-COLUMN TABLE · NO ACTIONS COLUMN · SPACE OPTIMIZED
 
    Responsabilidad:
    - Vista Incidencias premium, fluida y productiva.
-   - Hero sin mega-card envolvente.
-   - Stats flotantes con colorimetría tipo Home.
-   - Tabla de 6 columnas sin columna Acciones.
+   - Tabla más compacta y mejor optimizada en espacio.
+   - 6 columnas sin columna Acciones.
    - Fila completa clicable para abrir detalle.
    - Sin scroll lateral en Full HD.
    - Avatar de tabla compacto.
+   - Avatar técnico real/fallback compatible.
    - Color/difuminado de fila sólo en primera celda.
-   - Botón crear incidencia más suave.
-   - Badge "Abierta" azul/cyan premium.
-   - Soporte visual para avatar técnico en fila y modal.
    - Sin JS.
    - Sin Store.
    - Sin CSS inline.
@@ -80,15 +77,15 @@
     rgba(22, 24, 31, .82);
 
   --inc-shadow-sm:
-    0 12px 28px rgba(0, 0, 0, .24),
+    0 10px 24px rgba(0, 0, 0, .22),
     inset 0 1px 0 rgba(255, 255, 255, .060);
 
   --inc-shadow-md:
-    0 20px 54px rgba(0, 0, 0, .34),
+    0 16px 44px rgba(0, 0, 0, .31),
     inset 0 1px 0 rgba(255, 255, 255, .070);
 
   --inc-shadow-lg:
-    0 30px 82px rgba(0, 0, 0, .46),
+    0 24px 68px rgba(0, 0, 0, .42),
     inset 0 1px 0 rgba(255, 255, 255, .10);
 
   --inc-blur: blur(22px) saturate(1.16);
@@ -107,23 +104,24 @@
   --inc-radius-2xl: var(--radius-2xl, 30px);
   --inc-radius-pill: 999px;
 
-  --inc-content-pad-x: clamp(14px, 1.35vw, 24px);
-  --inc-content-pad-top: clamp(22px, 1.8vw, 36px);
-  --inc-content-pad-bottom: clamp(28px, 2vw, 44px);
-  --inc-section-gap: clamp(20px, 1.65vw, 30px);
+  --inc-content-pad-x: clamp(10px, 1vw, 18px);
+  --inc-content-pad-top: clamp(16px, 1.35vw, 26px);
+  --inc-content-pad-bottom: clamp(22px, 1.6vw, 34px);
+  --inc-section-gap: clamp(14px, 1.15vw, 22px);
 
-  /* 6-column table */
+  /* 6-column compact table */
   --inc-table-min-width: 0px;
-  --inc-table-x: clamp(12px, .95vw, 16px);
-  --inc-table-y: clamp(13px, .90vw, 16px);
-  --inc-row-height: 96px;
+  --inc-table-x: clamp(8px, .62vw, 11px);
+  --inc-table-y: clamp(7px, .55vw, 9px);
+  --inc-row-height: 78px;
+  --inc-head-height: 40px;
 
-  --inc-col-main: 43%;
-  --inc-col-status: 11%;
-  --inc-col-created: 14%;
-  --inc-col-updated: 15%;
-  --inc-col-amount: 11%;
-  --inc-col-attachments: 6%;
+  --inc-col-main: 45%;
+  --inc-col-status: 10%;
+  --inc-col-created: 12.5%;
+  --inc-col-updated: 13.5%;
+  --inc-col-amount: 10.5%;
+  --inc-col-attachments: 8.5%;
 
   --inc-row-accent: var(--inc-blue);
   --inc-row-accent-soft: rgba(96, 165, 250, .12);
@@ -135,10 +133,10 @@
     linear-gradient(180deg, rgba(56, 189, 248, .20), rgba(14, 165, 233, .105)),
     rgba(14, 165, 233, .080);
   --inc-status-open-border: rgba(125, 211, 252, .38);
-  --inc-status-open-glow: rgba(56, 189, 248, .26);
+  --inc-status-open-glow: rgba(56, 189, 248, .22);
 
-  --inc-avatar-size: 46px;
-  --inc-agent-avatar-size: 18px;
+  --inc-avatar-size: 38px;
+  --inc-agent-avatar-size: 16px;
 
   display: grid;
   gap: var(--inc-section-gap);
@@ -185,7 +183,6 @@
 .panel-content[data-view="incidencias"] {
   display: grid;
   gap: var(--inc-section-gap);
-
   inline-size: 100%;
   min-inline-size: 0;
 }
@@ -195,7 +192,6 @@
 .incidencias-view__content {
   display: grid;
   gap: var(--inc-section-gap);
-
   inline-size: 100%;
   min-inline-size: 0;
 }
@@ -208,17 +204,12 @@
 .incidencias-hidden,
 .incidencias-visually-hidden {
   position: absolute !important;
-
   inline-size: 1px !important;
   block-size: 1px !important;
-
   margin: -1px !important;
   padding: 0 !important;
-
   overflow: hidden !important;
-
   border: 0 !important;
-
   clip: rect(0 0 0 0) !important;
   white-space: nowrap !important;
 }
@@ -248,7 +239,6 @@
 .incidencias-load-more-btn:focus-visible,
 .incidencias-row--clickable:focus-visible {
   outline: none;
-
   box-shadow:
     0 0 0 3px rgba(255, 255, 255, .18),
     0 0 0 7px rgba(96, 165, 250, .14) !important;
@@ -256,7 +246,7 @@
 
 
 /* =========================================================
-   HERO · NO BIG WRAPPER CARD
+   HERO
 ========================================================= */
 
 .incidencias-hero {
@@ -301,49 +291,45 @@
   grid-template-columns: minmax(0, 1fr) auto !important;
   align-items: start !important;
 
-  gap: clamp(18px, 1.6vw, 30px) !important;
+  gap: clamp(14px, 1.25vw, 24px) !important;
 
   min-inline-size: 0;
-
   padding-inline: 0;
 }
 
 .incidencias-hero-copy {
   display: grid;
-  gap: 8px;
-
+  gap: 6px;
   min-inline-size: 0;
 }
 
 .incidencias-page-title {
   margin: 0;
-
   max-inline-size: 100%;
 
   overflow-wrap: anywhere;
 
   color: var(--inc-text-strong) !important;
 
-  font-size: clamp(40px, 3.85vw, 64px) !important;
-  line-height: .92 !important;
+  font-size: clamp(34px, 3.15vw, 54px) !important;
+  line-height: .94 !important;
   font-weight: 950 !important;
-  letter-spacing: -.072em !important;
+  letter-spacing: -.068em !important;
   text-wrap: balance;
 
   text-shadow:
     0 1px 0 rgba(255, 255, 255, .08),
-    0 20px 38px rgba(0, 0, 0, .38);
+    0 18px 34px rgba(0, 0, 0, .34);
 }
 
 .incidencias-page-subtitle {
   margin: 0;
+  max-inline-size: 860px;
 
-  max-inline-size: 920px;
+  color: rgba(255, 255, 255, .68) !important;
 
-  color: rgba(255, 255, 255, .70) !important;
-
-  font-size: clamp(13px, 1vw, 16px) !important;
-  line-height: 1.52 !important;
+  font-size: clamp(12px, .92vw, 15px) !important;
+  line-height: 1.46 !important;
   font-weight: 650 !important;
 }
 
@@ -352,7 +338,7 @@
   align-items: flex-start !important;
   justify-content: flex-end !important;
 
-  gap: 10px !important;
+  gap: 8px !important;
   flex-wrap: wrap;
 }
 
@@ -369,31 +355,31 @@
   align-items: center;
   flex-wrap: wrap;
 
-  gap: 10px !important;
+  gap: 8px !important;
 
-  margin-block-start: clamp(16px, 1.2vw, 22px) !important;
+  margin-block-start: clamp(12px, .95vw, 18px) !important;
 }
 
 
 /* =========================================================
-   BUTTONS · SOFT CREATE BUTTON
+   BUTTONS
 ========================================================= */
 
 .incidencias-btn {
   appearance: none;
 
-  min-block-size: 48px !important;
+  min-block-size: 42px !important;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
 
-  gap: 9px;
+  gap: 8px;
 
-  padding-inline: 18px !important;
+  padding-inline: 15px !important;
 
   border: 1px solid rgba(255, 255, 255, .18);
-  border-radius: 16px !important;
+  border-radius: 14px !important;
 
   background:
     radial-gradient(circle at 28% 0%, rgba(255, 255, 255, .18), transparent 44%),
@@ -404,11 +390,11 @@
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .09),
-    0 14px 30px rgba(0, 0, 0, .26);
+    0 12px 26px rgba(0, 0, 0, .24);
 
   cursor: pointer;
 
-  font-size: 13px !important;
+  font-size: 12px !important;
   line-height: 1;
   font-weight: 850 !important;
   text-decoration: none;
@@ -425,8 +411,8 @@
 }
 
 .incidencias-btn svg {
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: 15px;
+  block-size: 15px;
 }
 
 .incidencias-btn:hover {
@@ -443,7 +429,7 @@
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .12),
-    0 20px 44px rgba(0, 0, 0, .36);
+    0 18px 38px rgba(0, 0, 0, .34);
 }
 
 .incidencias-btn:active {
@@ -476,8 +462,8 @@
   color: rgba(255, 255, 255, .96) !important;
 
   box-shadow:
-    0 16px 40px rgba(34, 211, 238, .12),
-    0 12px 34px rgba(52, 211, 153, .12),
+    0 14px 34px rgba(34, 211, 238, .12),
+    0 10px 28px rgba(52, 211, 153, .12),
     inset 0 1px 0 rgba(255, 255, 255, .14) !important;
 }
 
@@ -490,8 +476,8 @@
     rgba(20, 184, 166, .22) !important;
 
   box-shadow:
-    0 18px 46px rgba(34, 211, 238, .16),
-    0 12px 34px rgba(52, 211, 153, .14),
+    0 16px 40px rgba(34, 211, 238, .15),
+    0 10px 30px rgba(52, 211, 153, .13),
     inset 0 1px 0 rgba(255, 255, 255, .17) !important;
 }
 
@@ -523,15 +509,15 @@
 ========================================================= */
 
 .incidencias-meta-pill {
-  min-block-size: 36px !important;
+  min-block-size: 31px !important;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
 
-  gap: 7px;
+  gap: 6px;
 
-  padding-inline: 14px !important;
+  padding-inline: 11px !important;
 
   border: 1px solid rgba(255, 255, 255, .18) !important;
   border-radius: 999px !important;
@@ -545,24 +531,24 @@
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .08),
-    0 10px 24px rgba(0, 0, 0, .18) !important;
+    0 8px 18px rgba(0, 0, 0, .16) !important;
 
-  font-size: 11px !important;
+  font-size: 10px !important;
   line-height: 1;
   font-weight: 900 !important;
-  letter-spacing: .065em !important;
+  letter-spacing: .060em !important;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
 .incidencias-meta-pill svg {
-  inline-size: 14px;
-  block-size: 14px;
+  inline-size: 13px;
+  block-size: 13px;
 }
 
 
 /* =========================================================
-   STATS · FLOATING HOME-LIKE CARDS
+   STATS
 ========================================================= */
 
 .incidencias-stats {
@@ -570,9 +556,9 @@
   grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
   grid-auto-rows: 1fr;
 
-  gap: clamp(14px, 1.25vw, 20px) !important;
+  gap: clamp(10px, .95vw, 16px) !important;
 
-  margin-block-start: clamp(18px, 1.55vw, 26px) !important;
+  margin-block-start: clamp(14px, 1.15vw, 20px) !important;
 
   min-inline-size: 0;
 }
@@ -586,27 +572,27 @@
 
   display: grid;
   align-content: center;
-  gap: 10px;
+  gap: 8px;
 
   min-inline-size: 0;
-  min-block-size: clamp(148px, 10.7vw, 182px) !important;
+  min-block-size: clamp(118px, 8.7vw, 150px) !important;
 
-  padding: clamp(20px, 1.6vw, 26px) !important;
+  padding: clamp(15px, 1.15vw, 20px) !important;
 
   overflow: hidden;
 
-  border: 1px solid color-mix(in srgb, var(--inc-stat-color) 32%, rgba(255, 255, 255, .15)) !important;
-  border-radius: 24px !important;
+  border: 1px solid color-mix(in srgb, var(--inc-stat-color) 30%, rgba(255, 255, 255, .14)) !important;
+  border-radius: 20px !important;
 
   background:
-    radial-gradient(circle at 84% -4%, color-mix(in srgb, var(--inc-stat-color-2) 42%, transparent), transparent 36%),
-    radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--inc-stat-color) 26%, transparent), transparent 44%),
-    linear-gradient(135deg, color-mix(in srgb, var(--inc-stat-color) 20%, transparent), color-mix(in srgb, var(--inc-stat-color-2) 10%, transparent)),
+    radial-gradient(circle at 84% -4%, color-mix(in srgb, var(--inc-stat-color-2) 38%, transparent), transparent 36%),
+    radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--inc-stat-color) 22%, transparent), transparent 44%),
+    linear-gradient(135deg, color-mix(in srgb, var(--inc-stat-color) 17%, transparent), color-mix(in srgb, var(--inc-stat-color-2) 8%, transparent)),
     var(--inc-float-bg) !important;
 
   box-shadow:
     var(--inc-shadow-md),
-    0 0 48px color-mix(in srgb, var(--inc-stat-color) 12%, transparent) !important;
+    0 0 38px color-mix(in srgb, var(--inc-stat-color) 10%, transparent) !important;
 
   backdrop-filter: var(--inc-blur) !important;
   -webkit-backdrop-filter: var(--inc-blur) !important;
@@ -625,7 +611,7 @@
   content: "";
 
   position: absolute;
-  inset-inline: 18px;
+  inset-inline: 14px;
   inset-block-start: 0;
   z-index: 0;
 
@@ -635,49 +621,49 @@
     linear-gradient(
       90deg,
       transparent,
-      rgba(255, 255, 255, .30),
-      color-mix(in srgb, var(--inc-stat-color) 70%, rgba(255, 255, 255, .20)),
+      rgba(255, 255, 255, .28),
+      color-mix(in srgb, var(--inc-stat-color) 66%, rgba(255, 255, 255, .18)),
       transparent
     );
 
-  opacity: .92;
+  opacity: .88;
 }
 
 .incidencias-stat-card::after {
   content: "";
 
   position: absolute;
-  inset-inline-end: -58px;
-  inset-block-end: -72px;
+  inset-inline-end: -48px;
+  inset-block-end: -58px;
   z-index: 0;
 
-  inline-size: 170px;
-  block-size: 170px;
+  inline-size: 136px;
+  block-size: 136px;
 
   border-radius: 999px;
 
   background:
-    radial-gradient(circle, color-mix(in srgb, var(--inc-stat-color) 28%, transparent), transparent 70%);
+    radial-gradient(circle, color-mix(in srgb, var(--inc-stat-color) 24%, transparent), transparent 70%);
 
-  filter: blur(28px);
+  filter: blur(24px);
 
   pointer-events: none;
 }
 
 .incidencias-stat-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-3px);
 
-  border-color: color-mix(in srgb, var(--inc-stat-color) 52%, rgba(255, 255, 255, .25)) !important;
+  border-color: color-mix(in srgb, var(--inc-stat-color) 48%, rgba(255, 255, 255, .22)) !important;
 
   background:
-    radial-gradient(circle at 84% -4%, color-mix(in srgb, var(--inc-stat-color-2) 52%, transparent), transparent 38%),
-    radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--inc-stat-color) 34%, transparent), transparent 46%),
-    linear-gradient(135deg, color-mix(in srgb, var(--inc-stat-color) 26%, transparent), color-mix(in srgb, var(--inc-stat-color-2) 15%, transparent)),
+    radial-gradient(circle at 84% -4%, color-mix(in srgb, var(--inc-stat-color-2) 48%, transparent), transparent 38%),
+    radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--inc-stat-color) 30%, transparent), transparent 46%),
+    linear-gradient(135deg, color-mix(in srgb, var(--inc-stat-color) 22%, transparent), color-mix(in srgb, var(--inc-stat-color-2) 12%, transparent)),
     var(--inc-float-bg-hover) !important;
 
   box-shadow:
     var(--inc-shadow-lg),
-    0 0 64px color-mix(in srgb, var(--inc-stat-color) 18%, transparent) !important;
+    0 0 52px color-mix(in srgb, var(--inc-stat-color) 15%, transparent) !important;
 }
 
 .incidencias-stat-card > * {
@@ -710,34 +696,34 @@
 }
 
 .incidencias-stat-label {
-  color: rgba(255, 255, 255, .58) !important;
+  color: rgba(255, 255, 255, .56) !important;
 
-  font-size: 11px !important;
+  font-size: 10px !important;
   line-height: 1.1 !important;
   font-weight: 950 !important;
-  letter-spacing: .105em !important;
+  letter-spacing: .095em !important;
   text-transform: uppercase;
 }
 
 .incidencias-stat-value {
   color: #ffffff !important;
 
-  font-size: clamp(38px, 3vw, 56px) !important;
-  line-height: .86 !important;
+  font-size: clamp(30px, 2.45vw, 46px) !important;
+  line-height: .88 !important;
   font-weight: 950 !important;
-  letter-spacing: -.078em !important;
+  letter-spacing: -.074em !important;
   font-variant-numeric: tabular-nums;
 
   text-shadow:
     0 1px 0 rgba(255, 255, 255, .08),
-    0 18px 34px rgba(0, 0, 0, .34);
+    0 16px 30px rgba(0, 0, 0, .32);
 }
 
 .incidencias-stat-text {
-  color: rgba(255, 255, 255, .72) !important;
+  color: rgba(255, 255, 255, .70) !important;
 
-  font-size: clamp(12px, .86vw, 14px) !important;
-  line-height: 1.42 !important;
+  font-size: clamp(11px, .78vw, 13px) !important;
+  line-height: 1.36 !important;
   font-weight: 700 !important;
 }
 
@@ -771,10 +757,10 @@
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) !important;
 
-  gap: 16px !important;
+  gap: 12px !important;
   align-items: start;
 
-  padding: clamp(4px, .7vw, 10px) 0 14px !important;
+  padding: clamp(2px, .5vw, 7px) 0 10px !important;
 
   border: 0 !important;
   border-bottom: 0 !important;
@@ -786,8 +772,7 @@
 
 .incidencias-history-copy {
   display: grid;
-  gap: 4px;
-
+  gap: 3px;
   min-inline-size: 0;
 }
 
@@ -796,22 +781,22 @@
 
   color: #ffffff !important;
 
-  font-size: clamp(20px, 1.45vw, 26px) !important;
+  font-size: clamp(18px, 1.25vw, 23px) !important;
   line-height: 1 !important;
   font-weight: 950 !important;
-  letter-spacing: -.052em !important;
+  letter-spacing: -.050em !important;
 
   text-shadow:
-    0 14px 28px rgba(0, 0, 0, .34);
+    0 12px 24px rgba(0, 0, 0, .32);
 }
 
 .incidencias-history-subtitle {
   margin: 0;
 
-  color: rgba(255, 255, 255, .56) !important;
+  color: rgba(255, 255, 255, .54) !important;
 
-  font-size: 12px !important;
-  line-height: 1.35 !important;
+  font-size: 11px !important;
+  line-height: 1.32 !important;
   font-weight: 650 !important;
 }
 
@@ -824,14 +809,14 @@
   grid-column: 1 / -1;
 
   display: grid !important;
-  grid-template-columns: minmax(360px, 1fr) minmax(320px, 520px) !important;
+  grid-template-columns: minmax(320px, 1fr) minmax(280px, 460px) !important;
 
-  gap: 14px !important;
+  gap: 10px !important;
   align-items: center;
 
   min-inline-size: 0;
 
-  padding-block-start: 4px !important;
+  padding-block-start: 2px !important;
 }
 
 .incidencias-filter-pills {
@@ -839,14 +824,14 @@
 
   min-inline-size: 0;
   max-inline-size: 100%;
-  min-block-size: 50px;
+  min-block-size: 42px;
 
   display: inline-flex;
   align-items: center;
 
   gap: 3px;
 
-  padding: 5px !important;
+  padding: 4px !important;
 
   overflow-x: auto;
   overflow-y: hidden;
@@ -861,7 +846,7 @@
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .07),
-    0 14px 30px rgba(0, 0, 0, .20) !important;
+    0 12px 24px rgba(0, 0, 0, .18) !important;
 
   scrollbar-width: none;
 
@@ -881,15 +866,15 @@
 
   flex: 0 0 auto;
 
-  min-block-size: 38px !important;
+  min-block-size: 32px !important;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
 
-  gap: 7px;
+  gap: 6px;
 
-  padding-inline: 16px !important;
+  padding-inline: 13px !important;
 
   border: 1px solid transparent;
   border-radius: 999px !important;
@@ -901,7 +886,7 @@
 
   cursor: pointer;
 
-  font-size: 12px !important;
+  font-size: 11px !important;
   line-height: 1;
   font-weight: 900 !important;
   white-space: nowrap;
@@ -916,21 +901,21 @@
 }
 
 .incidencias-filter-pill strong {
-  min-inline-size: 22px;
-  min-block-size: 20px;
+  min-inline-size: 20px;
+  min-block-size: 18px;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
 
-  padding-inline: 6px;
+  padding-inline: 5px;
 
   border-radius: 999px;
 
   background: color-mix(in srgb, currentColor 12%, transparent);
   color: inherit;
 
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 900;
 }
 
@@ -954,7 +939,7 @@
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .10),
-    0 10px 22px rgba(0, 0, 0, .18) !important;
+    0 8px 18px rgba(0, 0, 0, .16) !important;
 
   transform: translateY(0);
 }
@@ -971,7 +956,7 @@
 
 .incidencias-search-icon {
   position: absolute;
-  inset-inline-start: 14px;
+  inset-inline-start: 13px;
   inset-block: 0;
 
   display: inline-flex;
@@ -984,8 +969,8 @@
 }
 
 .incidencias-search-icon svg {
-  inline-size: 15px;
-  block-size: 15px;
+  inline-size: 14px;
+  block-size: 14px;
 }
 
 .incidencias-search-input {
@@ -993,9 +978,9 @@
 
   inline-size: 100%;
   min-inline-size: 0;
-  min-block-size: 44px !important;
+  min-block-size: 38px !important;
 
-  padding: 0 42px 0 40px !important;
+  padding: 0 38px 0 36px !important;
 
   border: 1px solid rgba(255, 255, 255, .13) !important;
   border-radius: 999px !important;
@@ -1009,9 +994,9 @@
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .055),
-    0 12px 28px rgba(0, 0, 0, .18) !important;
+    0 10px 22px rgba(0, 0, 0, .16) !important;
 
-  font-size: 12px !important;
+  font-size: 11px !important;
   line-height: 1;
   font-weight: 750 !important;
 
@@ -1042,18 +1027,18 @@
   box-shadow:
     0 0 0 3px rgba(96, 165, 250, .14),
     inset 0 1px 0 rgba(255, 255, 255, .075),
-    0 16px 34px rgba(0, 0, 0, .24) !important;
+    0 14px 28px rgba(0, 0, 0, .22) !important;
 }
 
 .incidencias-search-clear {
   appearance: none;
 
   position: absolute;
-  inset-inline-end: 7px;
+  inset-inline-end: 6px;
   inset-block-start: 50%;
 
-  inline-size: 30px;
-  block-size: 30px;
+  inline-size: 27px;
+  block-size: 27px;
 
   display: inline-flex;
   align-items: center;
@@ -1085,8 +1070,8 @@
 }
 
 .incidencias-search-clear svg {
-  inline-size: 13px;
-  block-size: 13px;
+  inline-size: 12px;
+  block-size: 12px;
 }
 
 .incidencias-search-clear[hidden] {
@@ -1116,7 +1101,7 @@
 .incidencias-table-wrap {
   position: relative;
 
-  min-block-size: 120px;
+  min-block-size: 100px;
   min-inline-size: 0;
 
   overflow: visible;
@@ -1137,12 +1122,12 @@
   overflow-y: hidden !important;
 
   border: 1px solid rgba(255, 255, 255, .115) !important;
-  border-radius: 22px !important;
+  border-radius: 18px !important;
 
   background: var(--inc-panel-bg) !important;
 
   box-shadow:
-    0 20px 54px rgba(0, 0, 0, .32),
+    0 16px 44px rgba(0, 0, 0, .30),
     inset 0 1px 0 rgba(255, 255, 255, .060) !important;
 
   overscroll-behavior-x: contain;
@@ -1259,7 +1244,7 @@
   inset-block-start: 0;
   z-index: 2;
 
-  height: 48px !important;
+  height: var(--inc-head-height) !important;
 
   padding: 0 var(--inc-table-x) !important;
 
@@ -1271,10 +1256,10 @@
 
   color: rgba(255, 255, 255, .54) !important;
 
-  font-size: 11px !important;
+  font-size: 10px !important;
   line-height: 1 !important;
   font-weight: 950 !important;
-  letter-spacing: .105em !important;
+  letter-spacing: .095em !important;
   text-transform: uppercase !important;
   white-space: nowrap !important;
 
@@ -1282,7 +1267,7 @@
 }
 
 .incidencias-table thead th:nth-child(1) {
-  padding-inline-start: 26px !important;
+  padding-inline-start: 18px !important;
   text-align: left !important;
 }
 
@@ -1303,7 +1288,7 @@
 
   padding: var(--inc-table-y) var(--inc-table-x) !important;
 
-  border-bottom: 1px solid rgba(255, 255, 255, .075) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, .070) !important;
 
   background: transparent !important;
 
@@ -1321,14 +1306,14 @@
 }
 
 .incidencias-table tbody tr:nth-child(even) > td {
-  background: rgba(255, 255, 255, .012) !important;
+  background: rgba(255, 255, 255, .010) !important;
 }
 
 .incidencias-row {
   --inc-row-accent: var(--inc-blue);
   --inc-row-accent-soft: rgba(96, 165, 250, .12);
 
-  scroll-margin-block: calc(var(--topbar-height, 72px) + 16px);
+  scroll-margin-block: calc(var(--topbar-height, 72px) + 12px);
 }
 
 .incidencias-row--clickable,
@@ -1351,8 +1336,8 @@
 .incidencias-row.is-selected > .incidencias-cell--main,
 .incidencias-row[aria-selected="true"] > .incidencias-cell--main {
   background:
-    radial-gradient(circle at 0% 50%, color-mix(in srgb, var(--inc-row-accent) 18%, transparent), transparent 54%),
-    linear-gradient(90deg, color-mix(in srgb, var(--inc-row-accent) 10%, transparent), transparent 82%) !important;
+    radial-gradient(circle at 0% 50%, color-mix(in srgb, var(--inc-row-accent) 16%, transparent), transparent 54%),
+    linear-gradient(90deg, color-mix(in srgb, var(--inc-row-accent) 9%, transparent), transparent 82%) !important;
 }
 
 .incidencias-row.is-disabled {
@@ -1396,14 +1381,14 @@
 
 .incidencias-cell--main {
   position: relative;
-  padding-inline-start: 26px !important;
+  padding-inline-start: 18px !important;
 }
 
 .incidencias-cell--main::before {
   content: "";
 
   position: absolute;
-  inset-block: 18px !important;
+  inset-block: 13px !important;
   inset-inline-start: 0;
 
   inline-size: 4px !important;
@@ -1412,13 +1397,13 @@
 
   background: var(--inc-row-accent);
 
-  opacity: .72 !important;
+  opacity: .70 !important;
 
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--inc-row-accent) 8%, transparent),
-    0 0 16px color-mix(in srgb, var(--inc-row-accent) 18%, transparent) !important;
+    0 0 14px color-mix(in srgb, var(--inc-row-accent) 16%, transparent) !important;
 
-  transform: scaleY(.78);
+  transform: scaleY(.76);
   transform-origin: center;
 
   transition:
@@ -1460,9 +1445,10 @@
   grid-template-columns: var(--inc-avatar-size) minmax(0, 1fr) !important;
   align-items: center !important;
 
-  gap: 12px !important;
+  gap: 9px !important;
 
   min-inline-size: 0;
+  overflow: hidden;
 }
 
 .incidencias-avatar {
@@ -1491,9 +1477,9 @@
   color: #ffffff;
 
   box-shadow:
-    0 10px 22px rgba(0, 0, 0, .26),
-    0 0 0 2px rgba(255, 255, 255, .055),
-    inset 0 1px 0 rgba(255, 255, 255, .15) !important;
+    0 8px 18px rgba(0, 0, 0, .24),
+    0 0 0 2px rgba(255, 255, 255, .050),
+    inset 0 1px 0 rgba(255, 255, 255, .14) !important;
 
   transform: translateZ(0);
 }
@@ -1510,8 +1496,8 @@
   pointer-events: none;
 
   background:
-    radial-gradient(circle at 30% 22%, rgba(255,255,255,.30), transparent 34%),
-    linear-gradient(180deg, rgba(255,255,255,.07), rgba(0,0,0,.10));
+    radial-gradient(circle at 30% 22%, rgba(255,255,255,.28), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.065), rgba(0,0,0,.10));
 
   mix-blend-mode: screen;
 }
@@ -1544,14 +1530,14 @@
 
   color: #ffffff;
 
-  font-size: 17px;
+  font-size: 15px;
   line-height: 1;
   font-weight: 950;
   letter-spacing: -.045em;
 
   text-shadow:
     0 1px 2px rgba(0,0,0,.24),
-    0 0 14px rgba(255,255,255,.16);
+    0 0 12px rgba(255,255,255,.14);
 }
 
 .incidencias-avatar[data-fallback="true"] .incidencias-avatar-fallback,
@@ -1571,20 +1557,22 @@
 
 .incidencias-main-copy {
   display: grid;
-  gap: 3px !important;
+  gap: 2px !important;
 
   min-inline-size: 0;
+  overflow: hidden;
 }
 
 .incidencias-ticket-line {
-  min-block-size: 19px;
+  min-block-size: 16px;
 
   display: flex;
   align-items: center;
 
-  gap: 7px;
+  gap: 6px;
 
   min-inline-size: 0;
+  overflow: hidden;
 }
 
 .incidencias-ticket-id {
@@ -1594,10 +1582,10 @@
 
   color: rgba(255, 255, 255, .50);
 
-  font-size: 11px !important;
-  line-height: 1.18;
+  font-size: 10px !important;
+  line-height: 1.15;
   font-weight: 900 !important;
-  letter-spacing: .055em !important;
+  letter-spacing: .050em !important;
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
@@ -1606,26 +1594,26 @@
 .incidencias-category-pill {
   flex: 0 1 auto;
 
-  max-inline-size: 132px;
-  min-block-size: 21px !important;
+  max-inline-size: 116px;
+  min-block-size: 18px !important;
 
   display: inline-flex;
   align-items: center;
 
-  padding-inline: 8px !important;
+  padding-inline: 7px !important;
 
   overflow: hidden;
 
-  border: 1px solid rgba(255, 255, 255, .16);
+  border: 1px solid rgba(255, 255, 255, .15);
   border-radius: 999px;
 
-  background: rgba(255, 255, 255, .070);
+  background: rgba(255, 255, 255, .065);
   color: rgba(255, 255, 255, .62);
 
-  font-size: 10px !important;
+  font-size: 9px !important;
   line-height: 1;
   font-weight: 900 !important;
-  letter-spacing: .045em;
+  letter-spacing: .040em;
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
@@ -1638,12 +1626,12 @@
 
   display: -webkit-box;
 
-  font-size: 14px !important;
-  line-height: 1.14 !important;
+  font-size: 13px !important;
+  line-height: 1.12 !important;
   font-weight: 950 !important;
-  letter-spacing: -.035em !important;
+  letter-spacing: -.030em !important;
 
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
 
   text-overflow: ellipsis;
@@ -1653,10 +1641,10 @@
 .incidencias-ticket-description {
   overflow: hidden;
 
-  color: rgba(255, 255, 255, .63);
+  color: rgba(255, 255, 255, .62);
 
-  font-size: 11px !important;
-  line-height: 1.22 !important;
+  font-size: 10px !important;
+  line-height: 1.18 !important;
   font-weight: 750 !important;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1667,7 +1655,7 @@
   display: flex;
   align-items: center;
 
-  gap: 5px;
+  gap: 4px;
 
   min-inline-size: 0;
 
@@ -1675,8 +1663,8 @@
 
   color: rgba(255, 255, 255, .48);
 
-  font-size: 11px !important;
-  line-height: 1.22 !important;
+  font-size: 10px !important;
+  line-height: 1.18 !important;
   font-weight: 650;
 }
 
@@ -1699,9 +1687,7 @@
 
 .incidencias-client-name {
   flex: 0 1 auto;
-
   color: rgba(255, 255, 255, .58);
-
   font-weight: 800;
 }
 
@@ -1714,15 +1700,15 @@
 }
 
 .incidencias-row-badges {
-  min-block-size: 21px;
+  min-block-size: 19px;
 
   display: flex;
   align-items: center;
   flex-wrap: wrap;
 
-  gap: 6px !important;
+  gap: 5px !important;
 
-  margin-block-start: 2px;
+  margin-block-start: 1px;
 }
 
 
@@ -1731,15 +1717,15 @@
 ========================================================= */
 
 .incidencias-mini-badge {
-  min-block-size: 21px;
-  max-inline-size: 190px;
+  min-block-size: 19px;
+  max-inline-size: 176px;
 
   display: inline-flex;
   align-items: center;
 
-  gap: 5px;
+  gap: 4px;
 
-  padding-inline: 8px;
+  padding-inline: 7px;
 
   overflow: hidden;
 
@@ -1747,49 +1733,49 @@
   border-radius: 999px;
 
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .070), rgba(255, 255, 255, .030)),
-    rgba(255, 255, 255, .040);
+    linear-gradient(180deg, rgba(255, 255, 255, .068), rgba(255, 255, 255, .028)),
+    rgba(255, 255, 255, .038);
 
   color: rgba(255, 255, 255, .58);
 
-  font-size: 10px;
+  font-size: 9px;
   line-height: 1;
   font-weight: 900;
-  letter-spacing: .035em;
+  letter-spacing: .030em;
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
 .incidencias-mini-badge svg {
-  inline-size: 12px;
-  block-size: 12px;
+  inline-size: 11px;
+  block-size: 11px;
 }
 
 .incidencias-mini-badge--critical,
 .incidencias-mini-badge--urgent {
   color: #fb7185;
-  background: rgba(251, 113, 133, .115);
-  border-color: rgba(251, 113, 133, .30);
+  background: rgba(251, 113, 133, .110);
+  border-color: rgba(251, 113, 133, .28);
 }
 
 .incidencias-mini-badge--medium {
   color: #facc15;
   background: rgba(250, 204, 21, .105);
-  border-color: rgba(250, 204, 21, .30);
+  border-color: rgba(250, 204, 21, .28);
 }
 
 .incidencias-mini-badge--low {
   color: #7dd3fc;
   background: rgba(56, 189, 248, .105);
-  border-color: rgba(56, 189, 248, .30);
+  border-color: rgba(56, 189, 248, .28);
 }
 
 .incidencias-mini-badge--agent {
-  gap: 6px;
+  gap: 5px;
 
   color: rgba(255, 255, 255, .56);
-  background: rgba(255, 255, 255, .052);
+  background: rgba(255, 255, 255, .050);
   border-color: rgba(255, 255, 255, .13);
 }
 
@@ -1816,8 +1802,8 @@
     linear-gradient(135deg, rgba(96, 165, 250, .72), rgba(34, 211, 238, .52)) !important;
 
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, .15),
-    0 4px 10px rgba(0, 0, 0, .16) !important;
+    inset 0 0 0 1px rgba(255, 255, 255, .14),
+    0 3px 8px rgba(0, 0, 0, .15) !important;
 }
 
 .incidencias-agent-avatar-img {
@@ -1854,7 +1840,7 @@
   background:
     linear-gradient(135deg, rgba(96, 165, 250, .82), rgba(34, 211, 238, .62));
 
-  font-size: 9px !important;
+  font-size: 8px !important;
   line-height: 1 !important;
   font-weight: 950 !important;
   letter-spacing: -.03em;
@@ -1876,9 +1862,7 @@
 
 .incidencias-agent-name {
   min-inline-size: 0;
-
   overflow: hidden;
-
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1889,35 +1873,35 @@
 ========================================================= */
 
 .incidencias-chip {
-  min-inline-size: 104px !important;
-  min-block-size: 31px !important;
+  min-inline-size: 94px !important;
+  min-block-size: 27px !important;
 
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
 
-  gap: 7px !important;
+  gap: 6px !important;
 
-  padding-inline: 12px !important;
+  padding-inline: 10px !important;
 
   border: 1px solid transparent;
   border-radius: 999px !important;
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .075),
-    0 8px 18px rgba(0, 0, 0, .18) !important;
+    0 7px 16px rgba(0, 0, 0, .17) !important;
 
-  font-size: 11px !important;
+  font-size: 10px !important;
   line-height: 1 !important;
   font-weight: 950 !important;
-  letter-spacing: .060em !important;
+  letter-spacing: .055em !important;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
 .incidencias-chip-dot {
-  inline-size: 7px;
-  block-size: 7px;
+  inline-size: 6px;
+  block-size: 6px;
 
   border-radius: 999px;
 
@@ -1934,15 +1918,13 @@
 
 .incidencias-chip--open {
   color: var(--inc-status-open-text) !important;
-
   border-color: var(--inc-status-open-border) !important;
-
   background: var(--inc-status-open-bg) !important;
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .085),
-    0 0 24px var(--inc-status-open-glow),
-    0 8px 18px rgba(0, 0, 0, .20) !important;
+    0 0 20px var(--inc-status-open-glow),
+    0 7px 16px rgba(0, 0, 0, .19) !important;
 }
 
 .incidencias-chip--open .incidencias-chip-dot {
@@ -1950,7 +1932,7 @@
 
   box-shadow:
     0 0 0 3px rgba(56, 189, 248, .16),
-    0 0 12px rgba(56, 189, 248, .60) !important;
+    0 0 10px rgba(56, 189, 248, .54) !important;
 }
 
 .incidencias-chip--progress {
@@ -1972,27 +1954,27 @@
 ========================================================= */
 
 .incidencias-date-inline {
-  inline-size: 132px !important;
+  inline-size: 116px !important;
   max-inline-size: 100%;
 
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
 
-  color: rgba(255, 255, 255, .78) !important;
+  color: rgba(255, 255, 255, .76) !important;
 
-  font-size: 12px !important;
-  line-height: 1.2 !important;
+  font-size: 11px !important;
+  line-height: 1.18 !important;
   font-weight: 800 !important;
   font-variant-numeric: tabular-nums !important;
   white-space: nowrap;
 }
 
 .incidencias-importe {
-  inline-size: 104px !important;
-  min-inline-size: 104px !important;
-  max-inline-size: 104px !important;
-  min-block-size: 33px !important;
+  inline-size: 94px !important;
+  min-inline-size: 94px !important;
+  max-inline-size: 94px !important;
+  min-block-size: 29px !important;
 
   display: inline-flex;
   align-items: center;
@@ -2006,12 +1988,12 @@
   border-radius: 999px !important;
 
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .070), rgba(255, 255, 255, .030)),
-    rgba(255, 255, 255, .040);
+    linear-gradient(180deg, rgba(255, 255, 255, .068), rgba(255, 255, 255, .028)),
+    rgba(255, 255, 255, .038);
 
-  color: rgba(255, 255, 255, .76);
+  color: rgba(255, 255, 255, .74);
 
-  font-size: 11px !important;
+  font-size: 10px !important;
   line-height: 1;
   font-weight: 900 !important;
   font-variant-numeric: tabular-nums !important;
@@ -2019,13 +2001,13 @@
 }
 
 .incidencias-importe svg {
-  inline-size: 13px;
-  block-size: 13px;
+  inline-size: 12px;
+  block-size: 12px;
 }
 
 .incidencias-importe--money {
   border-color: rgba(255, 255, 255, .16);
-  background: rgba(255, 255, 255, .060);
+  background: rgba(255, 255, 255, .058);
   color: rgba(255, 255, 255, .82);
 }
 
@@ -2056,10 +2038,10 @@
 }
 
 .incidencias-attachments-pill {
-  inline-size: 58px !important;
-  min-inline-size: 58px !important;
-  max-inline-size: 58px !important;
-  min-block-size: 33px !important;
+  inline-size: 52px !important;
+  min-inline-size: 52px !important;
+  max-inline-size: 52px !important;
+  min-block-size: 29px !important;
 
   display: inline-flex;
   align-items: center;
@@ -2073,20 +2055,20 @@
   border-radius: 999px !important;
 
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .070), rgba(255, 255, 255, .030)),
-    rgba(255, 255, 255, .040);
+    linear-gradient(180deg, rgba(255, 255, 255, .068), rgba(255, 255, 255, .028)),
+    rgba(255, 255, 255, .038);
 
-  color: rgba(255, 255, 255, .72);
+  color: rgba(255, 255, 255, .70);
 
-  font-size: 11px !important;
+  font-size: 10px !important;
   line-height: 1;
   font-weight: 900 !important;
   white-space: nowrap;
 }
 
 .incidencias-attachments-pill svg {
-  inline-size: 13px;
-  block-size: 13px;
+  inline-size: 12px;
+  block-size: 12px;
 }
 
 
@@ -2095,8 +2077,8 @@
 ========================================================= */
 
 .incidencias-loader-only {
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: 15px;
+  block-size: 15px;
 
   display: inline-flex;
   align-items: center;
@@ -2110,7 +2092,7 @@
   align-items: center;
   justify-content: center;
 
-  gap: 8px;
+  gap: 7px;
 
   white-space: nowrap;
 }
@@ -2120,8 +2102,8 @@
 }
 
 .incidencias-inline-spinner {
-  inline-size: 14px;
-  block-size: 14px;
+  inline-size: 13px;
+  block-size: 13px;
 
   flex: 0 0 auto;
 
@@ -2151,16 +2133,16 @@
 }
 
 .incidencias-refresh-card {
-  min-block-size: 46px;
+  min-block-size: 40px;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
 
-  padding-inline: 18px;
+  padding-inline: 15px;
 
   border: 1px solid rgba(255, 255, 255, .14);
-  border-radius: 16px;
+  border-radius: 14px;
 
   background:
     linear-gradient(180deg, rgba(255, 255, 255, .10), rgba(255, 255, 255, .040)),
@@ -2169,10 +2151,10 @@
   color: rgba(255, 255, 255, .84);
 
   box-shadow:
-    0 18px 46px rgba(0, 0, 0, .42),
+    0 16px 38px rgba(0, 0, 0, .40),
     inset 0 1px 0 rgba(255, 255, 255, .08);
 
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -2186,9 +2168,9 @@
   display: grid;
   place-items: center;
 
-  gap: 10px;
+  gap: 8px;
 
-  padding: 18px 20px 22px;
+  padding: 14px 18px 18px;
 
   border: 0 !important;
 
@@ -2200,30 +2182,30 @@
 }
 
 .incidencias-feed-end-text {
-  min-block-size: 38px;
+  min-block-size: 34px;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
 
-  padding-inline: 16px;
+  padding-inline: 14px;
 
   border: 1px solid rgba(255, 255, 255, .13);
   border-radius: 999px;
 
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .070), rgba(255, 255, 255, .030)),
-    rgba(255, 255, 255, .040);
+    linear-gradient(180deg, rgba(255, 255, 255, .068), rgba(255, 255, 255, .028)),
+    rgba(255, 255, 255, .038);
 
   color: rgba(255, 255, 255, .54);
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .055),
-    0 10px 22px rgba(0, 0, 0, .16);
+    0 8px 18px rgba(0, 0, 0, .15);
 
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 850;
-  letter-spacing: .060em;
+  letter-spacing: .055em;
   text-align: center;
   text-transform: uppercase;
   white-space: nowrap;
@@ -2232,15 +2214,15 @@
 .incidencias-load-more-btn {
   appearance: none;
 
-  min-block-size: 44px;
+  min-block-size: 40px;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
 
-  gap: 9px;
+  gap: 8px;
 
-  padding-inline: 20px;
+  padding-inline: 18px;
 
   border: 1px solid rgba(255, 255, 255, .14);
   border-radius: 999px;
@@ -2253,11 +2235,11 @@
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .065),
-    0 10px 22px rgba(0, 0, 0, .16);
+    0 8px 18px rgba(0, 0, 0, .15);
 
   cursor: pointer;
 
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1;
   font-weight: 900;
   white-space: nowrap;
@@ -2273,8 +2255,8 @@
 }
 
 .incidencias-load-more-btn svg {
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: 15px;
+  block-size: 15px;
 }
 
 .incidencias-load-more-btn:hover {
@@ -2290,7 +2272,7 @@
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .09),
-    0 14px 30px rgba(0, 0, 0, .24);
+    0 12px 24px rgba(0, 0, 0, .22);
 }
 
 .incidencias-load-more-btn:active {
@@ -2308,22 +2290,22 @@
 }
 
 .incidencias-load-more-count {
-  min-block-size: 22px;
+  min-block-size: 20px;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
 
-  padding-inline: 8px;
+  padding-inline: 7px;
 
   border-radius: 999px;
 
   background: color-mix(in srgb, currentColor 10%, transparent);
   color: inherit;
 
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 900;
-  letter-spacing: .035em;
+  letter-spacing: .030em;
   text-transform: uppercase;
 }
 
@@ -2340,43 +2322,43 @@
 
 .incidencias-table-loading {
   display: grid;
-  gap: 14px;
+  gap: 10px;
 
-  padding: 14px 0 20px;
+  padding: 10px 0 16px;
 }
 
 .incidencias-table-loading-row {
   display: grid;
   grid-template-columns:
     var(--inc-avatar-size)
-    minmax(190px, 1.1fr)
-    102px
-    130px
-    126px
-    108px
-    54px
-    116px;
+    minmax(180px, 1.1fr)
+    92px
+    116px
+    116px
+    94px
+    52px
+    104px;
 
-  gap: 12px;
+  gap: 9px;
   align-items: center;
 
-  min-block-size: 86px;
+  min-block-size: 72px;
 }
 
 .incidencias-table-loading-row--no-actions {
   grid-template-columns:
     var(--inc-avatar-size)
-    minmax(190px, 1.1fr)
-    102px
-    130px
-    126px
-    108px
-    54px;
+    minmax(180px, 1.1fr)
+    92px
+    116px
+    116px
+    94px
+    52px;
 }
 
 .incidencias-table-loading-copy {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .incidencias-skeleton {
@@ -2386,7 +2368,7 @@
 
   display: block;
 
-  border-radius: 12px;
+  border-radius: 10px;
 
   background:
     linear-gradient(90deg, rgba(255, 255, 255, .060), rgba(255, 255, 255, .14), rgba(255, 255, 255, .060));
@@ -2404,49 +2386,49 @@
 }
 
 .incidencias-skeleton--xs {
-  inline-size: 120px;
-  block-size: 10px;
+  inline-size: 108px;
+  block-size: 9px;
 }
 
 .incidencias-skeleton--lg {
-  inline-size: 74%;
-  block-size: 16px;
+  inline-size: 72%;
+  block-size: 14px;
 }
 
 .incidencias-skeleton--md {
-  inline-size: 56%;
-  block-size: 12px;
+  inline-size: 54%;
+  block-size: 10px;
 }
 
 .incidencias-skeleton--pill {
-  inline-size: 86px;
-  block-size: 30px;
+  inline-size: 80px;
+  block-size: 27px;
 
   border-radius: 999px;
 }
 
 .incidencias-skeleton--date {
-  inline-size: 124px;
-  block-size: 12px;
+  inline-size: 112px;
+  block-size: 11px;
 }
 
 .incidencias-skeleton--amount {
-  inline-size: 92px;
-  block-size: 30px;
+  inline-size: 88px;
+  block-size: 27px;
 }
 
 .incidencias-skeleton--attach {
   inline-size: 48px;
-  block-size: 30px;
+  block-size: 27px;
 
   border-radius: 999px;
 }
 
 .incidencias-skeleton--btn {
-  inline-size: 112px;
-  block-size: 42px;
+  inline-size: 104px;
+  block-size: 38px;
 
-  border-radius: 15px;
+  border-radius: 14px;
 }
 
 
@@ -2459,12 +2441,12 @@
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
 
-  gap: 10px;
+  gap: 9px;
 
-  padding: 13px 15px;
+  padding: 11px 13px;
 
   border: 1px solid rgba(248, 113, 113, .34);
-  border-radius: 18px;
+  border-radius: 16px;
 
   background:
     radial-gradient(circle at 0% 0%, rgba(248, 113, 113, .18), transparent 46%),
@@ -2473,38 +2455,38 @@
   color: #fecaca;
 
   box-shadow:
-    0 14px 34px rgba(0, 0, 0, .24),
+    0 12px 28px rgba(0, 0, 0, .22),
     inset 0 1px 0 rgba(255, 255, 255, .06);
 
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 750;
 }
 
 .incidencias-alert svg {
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: 15px;
+  block-size: 15px;
 }
 
 .incidencias-empty {
   display: grid;
   justify-items: center;
 
-  gap: 12px;
+  gap: 11px;
 
-  padding: clamp(48px, 5vw, 78px) 20px;
+  padding: clamp(42px, 4.2vw, 68px) 18px;
 
   text-align: center;
 }
 
 .incidencias-empty-icon {
-  inline-size: 58px;
-  block-size: 58px;
+  inline-size: 52px;
+  block-size: 52px;
 
   display: grid;
   place-items: center;
 
   border: 1px solid rgba(255, 255, 255, .15);
-  border-radius: 20px;
+  border-radius: 18px;
 
   background:
     radial-gradient(circle at 28% 16%, rgba(255, 255, 255, .18), transparent 52%),
@@ -2515,12 +2497,12 @@
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .075),
-    0 14px 30px rgba(0, 0, 0, .24);
+    0 12px 26px rgba(0, 0, 0, .22);
 }
 
 .incidencias-empty-icon svg {
-  inline-size: 24px;
-  block-size: 24px;
+  inline-size: 22px;
+  block-size: 22px;
 }
 
 .incidencias-empty-title {
@@ -2528,7 +2510,7 @@
 
   color: #ffffff;
 
-  font-size: 22px;
+  font-size: 20px;
   line-height: 1.08;
   font-weight: 950;
   letter-spacing: -.045em;
@@ -2541,8 +2523,8 @@
 
   color: rgba(255, 255, 255, .60);
 
-  font-size: 13px;
-  line-height: 1.58;
+  font-size: 12px;
+  line-height: 1.54;
   font-weight: 650;
 }
 
@@ -2550,12 +2532,12 @@
   display: grid;
   justify-items: start;
 
-  gap: 12px;
+  gap: 11px;
 
-  padding: 24px;
+  padding: 20px;
 
   border: 1px solid rgba(248, 113, 113, .34);
-  border-radius: 22px;
+  border-radius: 20px;
 
   background:
     radial-gradient(circle at 0% 0%, rgba(248, 113, 113, .18), transparent 46%),
@@ -2565,7 +2547,7 @@
   color: #fecaca;
 
   box-shadow:
-    0 18px 46px rgba(0, 0, 0, .30),
+    0 16px 38px rgba(0, 0, 0, .28),
     inset 0 1px 0 rgba(255, 255, 255, .06);
 }
 
@@ -2574,7 +2556,7 @@
 
   color: #ffffff;
 
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1.08;
   font-weight: 950;
   letter-spacing: -.045em;
@@ -2585,8 +2567,8 @@
 
   color: rgba(255, 255, 255, .68);
 
-  font-size: 14px;
-  line-height: 1.58;
+  font-size: 13px;
+  line-height: 1.54;
   font-weight: 650;
 }
 
@@ -2598,7 +2580,7 @@
 .incidencias-modal-technician-inline {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-inline-size: 0;
 }
 
@@ -2612,10 +2594,10 @@
 .incidencias-modal-technician-avatar {
   position: relative;
 
-  inline-size: 28px;
-  block-size: 28px;
-  min-inline-size: 28px;
-  min-block-size: 28px;
+  inline-size: 26px;
+  block-size: 26px;
+  min-inline-size: 26px;
+  min-block-size: 26px;
 
   display: inline-grid;
   place-items: center;
@@ -2631,9 +2613,9 @@
 
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, .18),
-    0 8px 18px rgba(0, 0, 0, .18);
+    0 7px 15px rgba(0, 0, 0, .17);
 
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 950;
   letter-spacing: -.03em;
 }
@@ -2752,7 +2734,7 @@
 }
 
 [data-theme="light"] .incidencias-table tbody tr:nth-child(even) > td {
-  background: rgba(15, 23, 42, .012) !important;
+  background: rgba(15, 23, 42, .010) !important;
 }
 
 [data-theme="light"] .incidencias-table thead th {
@@ -2851,20 +2833,44 @@
 
 @media (max-width: 1360px) {
   :where(.incidencias-view, .incidencias-view-root, [data-incidencias-scope]) {
-    --inc-avatar-size: 44px;
-    --inc-table-x: 12px;
-    --inc-col-main: 42%;
-    --inc-col-status: 11%;
-    --inc-col-created: 14%;
-    --inc-col-updated: 15%;
+    --inc-avatar-size: 36px;
+    --inc-agent-avatar-size: 15px;
+    --inc-table-x: 8px;
+    --inc-table-y: 7px;
+    --inc-row-height: 74px;
+
+    --inc-col-main: 44%;
+    --inc-col-status: 10%;
+    --inc-col-created: 12.5%;
+    --inc-col-updated: 13.5%;
     --inc-col-amount: 11%;
-    --inc-col-attachments: 7%;
+    --inc-col-attachments: 9%;
+  }
+
+  .incidencias-ticket-subject {
+    font-size: 12px !important;
+  }
+
+  .incidencias-ticket-description,
+  .incidencias-client-line {
+    font-size: 9.5px !important;
+  }
+
+  .incidencias-date-inline {
+    inline-size: 108px !important;
+    font-size: 10px !important;
+  }
+
+  .incidencias-importe {
+    inline-size: 88px !important;
+    min-inline-size: 88px !important;
+    max-inline-size: 88px !important;
   }
 }
 
 @media (max-width: 1180px) {
   :where(.incidencias-view, .incidencias-view-root, [data-incidencias-scope]) {
-    --inc-table-min-width: 1040px;
+    --inc-table-min-width: 960px;
   }
 
   .incidencias-table-shell {
@@ -2888,21 +2894,21 @@
   }
 
   .incidencias-search {
-    max-inline-size: 560px;
+    max-inline-size: 520px;
   }
 }
 
 @media (max-width: 760px) {
   :where(.incidencias-view, .incidencias-view-root, [data-incidencias-scope]) {
-    --inc-table-min-width: 980px;
-    --inc-avatar-size: 42px;
-
-    gap: 18px;
+    --inc-table-min-width: 940px;
+    --inc-avatar-size: 36px;
+    --inc-row-height: 74px;
+    gap: 16px;
   }
 
   .incidencias-view-root {
     padding-inline: clamp(10px, 3.5vw, 16px);
-    padding-block-start: clamp(20px, 5vw, 30px);
+    padding-block-start: clamp(18px, 4.8vw, 28px);
   }
 
   .incidencias-stats {
@@ -2910,18 +2916,17 @@
   }
 
   .incidencias-page-title {
-    font-size: clamp(32px, 8.5vw, 44px) !important;
+    font-size: clamp(30px, 8vw, 42px) !important;
     letter-spacing: -.060em !important;
   }
 
   .incidencias-page-subtitle {
-    font-size: 13px !important;
+    font-size: 12px !important;
   }
 
   .incidencias-hero-actions {
     display: grid !important;
     grid-template-columns: 1fr !important;
-
     inline-size: 100%;
   }
 
@@ -2936,12 +2941,11 @@
   .incidencias-filter-pills {
     inline-size: 100%;
     justify-content: flex-start;
-
-    border-radius: 18px !important;
+    border-radius: 16px !important;
   }
 
   .incidencias-filter-pill {
-    min-block-size: 38px !important;
+    min-block-size: 32px !important;
   }
 
   .incidencias-search {
@@ -2949,7 +2953,7 @@
   }
 
   .incidencias-table-shell {
-    border-radius: 18px !important;
+    border-radius: 16px !important;
     overflow-x: auto !important;
   }
 

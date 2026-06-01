@@ -9,7 +9,9 @@
    - Adjuntos iniciales.
    - Estados visuales: loading, errors, success.
    - Exponer data-field/data-action para index.js.
-   - Estructura estable para reducir flicker en rerenders.
+   - Estructura estable para modal island y rerender sin flicker.
+   - Alineado 1:1 con incidencias.index.js v5.
+   - Alineado con incidencias.api.js normalizeCreatePayload().
    - Sin Auth.
    - Sin Router.
    - Sin HTTP.
@@ -22,7 +24,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.v2.production";
+  "incidencias.template.create.v3.modal-island-ready";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -40,24 +42,58 @@ const MODAL_ID = "incidencias-create-modal-root";
 const PANEL_ID = "incidencias-create-modal-panel";
 const FORM_ID = "incidencias-create-form";
 
+const USER_SEARCH_MIN_LENGTH = 2;
 const MAX_FILES = 10;
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 const CATEGORY_OPTIONS = Object.freeze([
-  { value: "general", label: "General" },
-  { value: "technical", label: "Técnica" },
-  { value: "billing", label: "Facturación" },
-  { value: "access", label: "Acceso" },
-  { value: "hardware", label: "Hardware" },
-  { value: "software", label: "Software" },
-  { value: "account", label: "Cuenta" },
+  {
+    value: "general",
+    label: "General",
+  },
+  {
+    value: "technical",
+    label: "Técnica",
+  },
+  {
+    value: "billing",
+    label: "Facturación",
+  },
+  {
+    value: "access",
+    label: "Acceso",
+  },
+  {
+    value: "hardware",
+    label: "Hardware",
+  },
+  {
+    value: "software",
+    label: "Software",
+  },
+  {
+    value: "account",
+    label: "Cuenta",
+  },
 ]);
 
 const PRIORITY_OPTIONS = Object.freeze([
-  { value: "low", label: "Baja" },
-  { value: "medium", label: "Media" },
-  { value: "high", label: "Alta" },
-  { value: "urgent", label: "Urgente" },
+  {
+    value: "low",
+    label: "Baja",
+  },
+  {
+    value: "medium",
+    label: "Media",
+  },
+  {
+    value: "high",
+    label: "Alta",
+  },
+  {
+    value: "urgent",
+    label: "Urgente",
+  },
 ]);
 
 const DEFAULT_FORM = Object.freeze({
@@ -240,7 +276,13 @@ function firstImageSrc(...values) {
         value.profile?.avatar,
         value.profile?.photoUrl,
         value.profile?.photoURL,
-        value.profile?.picture
+        value.profile?.picture,
+        value.raw?.avatarUrl,
+        value.raw?.avatar,
+        value.raw?.picture,
+        value.raw?.photoUrl,
+        value.raw?.photoURL,
+        value.raw?.imageUrl
       );
 
       if (nested) return nested;
@@ -330,6 +372,9 @@ function normalizeUserResult(user = {}) {
       raw.id,
       raw.uid,
       raw.sub,
+      raw.clienteId,
+      raw.clientId,
+      raw.usuarioId,
       raw.username
     ),
     ""
@@ -341,7 +386,10 @@ function normalizeUserResult(user = {}) {
       raw.fullName,
       raw.name,
       raw.nombre,
-      raw.username
+      raw.clienteNombre,
+      raw.clientName,
+      raw.username,
+      raw.email
     ),
     "Usuario"
   );
@@ -352,7 +400,11 @@ function normalizeUserResult(user = {}) {
       raw.emailLower,
       raw.userEmail,
       raw.mail,
+      raw.clienteEmail,
+      raw.clientEmail,
       raw.profile?.email,
+      raw.auth?.email,
+      raw.lookup?.emailLower,
       ""
     )
   );
@@ -364,6 +416,9 @@ function normalizeUserResult(user = {}) {
     raw.photoUrl,
     raw.photoURL,
     raw.imageUrl,
+    raw.clienteAvatar,
+    raw.clientAvatar,
+    raw.userAvatar,
     raw.profile?.avatarUrl,
     raw.profile?.avatar,
     raw.profile?.photoUrl,
@@ -417,8 +472,8 @@ function normalizeForm(form = {}) {
   );
 
   return {
-    targetUserId: cleanText(first(input.targetUserId, input.userId, input.usuarioId), ""),
-    targetUserName: cleanText(first(input.targetUserName, input.userName, input.clienteNombre, input.clientName), ""),
+    targetUserId: cleanText(first(input.targetUserId, input.userId, input.usuarioId, input.clienteId, input.clientId), ""),
+    targetUserName: cleanText(first(input.targetUserName, input.userName, input.clienteNombre, input.clientName, input.name), ""),
     targetUserEmail,
     targetUserAvatar,
 
@@ -479,6 +534,7 @@ function buildVm(input = {}) {
   const form = normalizeForm(data.form || data.draft || {});
   const errors = safeObject(data.errors);
   const userSearch = safeObject(data.userSearch);
+
   const query = cleanText(userSearch.query || data.userSearchQuery, "");
   const results = safeArray(userSearch.results)
     .map(normalizeUserResult)
@@ -508,13 +564,13 @@ function buildVm(input = {}) {
       error: cleanText(userSearch.error, ""),
       results,
       selectedUser,
-      empty:
-        userSearch.empty === true ||
-        (
-          query.length >= 2 &&
-          userSearch.loading !== true &&
-          !results.length
-        ),
+
+      /*
+        El template NO decide vacío sólo por query.
+        El index marca empty=true únicamente tras recibir respuesta real.
+        Esto evita falso "No hay usuarios" durante debounce/búsqueda.
+      */
+      empty: userSearch.empty === true && query.length >= USER_SEARCH_MIN_LENGTH,
     },
   };
 }
@@ -720,8 +776,9 @@ function renderSelectedUser(vm = {}) {
       class="inc-create-selected-user inc-create-target-user-card"
       data-create-selected-user="true"
       data-user-id="${attr(user.userId || user.id)}"
+      data-user-email="${attr(user.email)}"
     >
-      <div class="inc-create-selected-user-main">
+      <div class="inc-create-selected-user-main" data-create-selected-user-main="true">
         ${renderUserAvatar(user, "inc-create-target-user-avatar")}
 
         <span class="inc-create-selected-user-copy inc-create-target-user-copy">
@@ -784,7 +841,9 @@ function renderUserSearchResults(vm = {}) {
     `;
   }
 
-  if (!search.results.length) return "";
+  if (!search.results.length) {
+    return "";
+  }
 
   return `
     <div
@@ -1273,6 +1332,7 @@ export function getCreateTemplateSnapshot() {
 
     admin: {
       userSearch: true,
+      userSearchMinLength: USER_SEARCH_MIN_LENGTH,
       actionSearch: CREATE_ACTIONS.USER_SEARCH,
       actionSelect: CREATE_ACTIONS.USER_SELECT,
       actionClear: CREATE_ACTIONS.USER_CLEAR,
@@ -1285,10 +1345,23 @@ export function getCreateTemplateSnapshot() {
 
     policy: {
       templateOnly: true,
-      adminUserSearchMarkup: true,
+
+      modalIslandReady: true,
       stableSlots: true,
+      noFalseEmptyDuringDebounce: true,
+
+      adminUserSearchMarkup: true,
       targetUserEmailField: true,
+      targetUserAvatarField: true,
+      userSearchResultEmailDataset: true,
+      userSearchResultAvatarDataset: true,
+
+      createApiPayloadCompatible: true,
+      attachmentsFieldCompatible: true,
+
       avatarAliasCompatibility: true,
+      blobAvatarSupport: true,
+
       noAuth: true,
       noRouter: true,
       noHttp: true,

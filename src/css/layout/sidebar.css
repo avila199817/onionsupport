@@ -4,7 +4,7 @@
 
    FINAL SIDEBAR SYSTEM · PRIVATE SPA · EXTREME 10/10
    SOLID GRAPHITE · DESKTOP · COLLAPSED · MOBILE RAIL
-   REVISION: production calibrated rail / natural motion / logout hover-only danger
+   REVISION: collapsed rail grid fix / no scrollbar gutter drift / soft logout danger
 
    Responsabilidad:
    - Pintar y organizar visualmente el sidebar.
@@ -87,10 +87,10 @@
   --sidebar-local-menu-active: var(--sidebar-dropdown-item-active, #525252);
   --sidebar-local-menu-separator: var(--sidebar-dropdown-separator, rgba(255,255,255,.12));
 
-  --sidebar-local-danger: #ff5f63;
-  --sidebar-local-danger-hover-bg: #dc2626;
-  --sidebar-local-danger-hover-border: rgba(252, 165, 165, .72);
-  --sidebar-local-danger-active-bg: #991b1b;
+  --sidebar-local-danger: #ff8a8a;
+  --sidebar-local-danger-hover-bg: #c94b4b;
+  --sidebar-local-danger-hover-border: rgba(248, 113, 113, .38);
+  --sidebar-local-danger-active-bg: #a63a3a;
 
   --sidebar-local-avatar-bg: var(--sidebar-avatar-bg, #3B3B3B);
   --sidebar-local-avatar-text: var(--sidebar-avatar-text, #ffffff);
@@ -260,10 +260,10 @@ body[data-theme="dark"] .sidebar,
   --sidebar-local-menu-active: #525252;
   --sidebar-local-menu-separator: rgba(255,255,255,.12);
 
-  --sidebar-local-danger: #ff5f63;
-  --sidebar-local-danger-hover-bg: #dc2626;
-  --sidebar-local-danger-hover-border: rgba(252, 165, 165, .72);
-  --sidebar-local-danger-active-bg: #991b1b;
+  --sidebar-local-danger: #ff8a8a;
+  --sidebar-local-danger-hover-bg: #c94b4b;
+  --sidebar-local-danger-hover-border: rgba(248, 113, 113, .38);
+  --sidebar-local-danger-active-bg: #a63a3a;
 
   --sidebar-local-avatar-bg: #3B3B3B;
   --sidebar-local-avatar-text: #ffffff;
@@ -312,10 +312,10 @@ body[data-theme="light"] .sidebar,
   --sidebar-local-menu-active: #e8e8e8;
   --sidebar-local-menu-separator: rgba(13,13,13,.08);
 
-  --sidebar-local-danger: #b91c1c;
-  --sidebar-local-danger-hover-bg: #b91c1c;
-  --sidebar-local-danger-hover-border: rgba(185, 28, 28, .42);
-  --sidebar-local-danger-active-bg: #7f1d1d;
+  --sidebar-local-danger: #b84a4a;
+  --sidebar-local-danger-hover-bg: #c94b4b;
+  --sidebar-local-danger-hover-border: rgba(185, 28, 28, .30);
+  --sidebar-local-danger-active-bg: #a63a3a;
 
   --sidebar-local-avatar-bg: #e8e8e8;
   --sidebar-local-avatar-text: #111111;
@@ -818,6 +818,11 @@ body[data-sidebar-open="false"] .sidebar {
   background-image: none !important;
 
   scrollbar-width: thin;
+  /*
+     En abierto reservamos gutter para que el texto no baile al aparecer scroll.
+     En collapsed se anula más abajo: si queda `stable`, el scrollport pierde
+     ~15px a la derecha y todos los iconos/hover quedan visualmente desplazados.
+  */
   scrollbar-gutter: stable;
   scrollbar-color: var(--sidebar-local-scroll-thumb) transparent;
 }
@@ -1699,7 +1704,7 @@ body[data-sidebar-open="false"] .sidebar {
     color: #ffffff !important;
 
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, .12) !important;
+      inset 0 1px 0 rgba(255, 255, 255, .10) !important;
   }
 }
 
@@ -1881,6 +1886,74 @@ body[data-sidebar-open="false"] .sidebar {
 ) {
   --sidebar-local-pad-x: 0px;
   padding-inline: 0 !important;
+}
+
+/*
+   FIX CRÍTICO — COLLAPSED RAIL CENTERING
+   -------------------------------------
+   La barra usa .sidebar-nav como scroll container. En modo abierto puede usar
+   `scrollbar-gutter: stable`, pero en modo collapsed ese gutter reserva espacio
+   dentro del rail y centra los slots contra un ancho falso. Resultado: iconos,
+   hover y active quedan desplazados hacia la izquierda. En collapsed ocultamos
+   el gutter/scrollbar visual para que el centro matemático sea el centro real
+   del rail.
+*/
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-nav {
+  inline-size: 100% !important;
+  min-inline-size: 0 !important;
+
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+
+  scrollbar-width: none !important;
+  scrollbar-gutter: auto !important;
+  scrollbar-color: transparent transparent !important;
+}
+
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-nav::-webkit-scrollbar {
+  inline-size: 0 !important;
+  width: 0 !important;
+  block-size: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-nav::-webkit-scrollbar-track,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-nav::-webkit-scrollbar-thumb {
+  background: transparent !important;
+  border: 0 !important;
 }
 
 :is(
@@ -2103,6 +2176,48 @@ body[data-sidebar-open="false"] .sidebar {
 
   line-height: 0;
   text-align: center;
+
+  justify-content: center !important;
+}
+
+/* La caja de hover/active siempre queda en el centro exacto del rail collapsed. */
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-list,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-menu,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) [data-sidebar-list="true"] {
+  inline-size: 100% !important;
+  min-inline-size: 0 !important;
+
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+
+  padding-inline: 0 !important;
+  margin-inline: 0 !important;
 }
 
 :is(

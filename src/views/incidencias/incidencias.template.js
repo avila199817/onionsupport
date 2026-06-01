@@ -28,7 +28,7 @@ import {
   renderIncidenciasDetailModal,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.production.v3";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.production.v4";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -247,6 +247,8 @@ function safeImageSrc(value = "") {
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
   if (hasSensitiveQuery(raw)) return "";
 
+  if (/^blob:/i.test(raw)) return raw;
+
   if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
 
   if (/^https:\/\//i.test(raw)) {
@@ -255,6 +257,73 @@ function safeImageSrc(value = "") {
     } catch {
       return "";
     }
+  }
+
+  if (/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
+}
+
+function firstImageSrc(...values) {
+  for (const value of values.flat(Infinity)) {
+    if (value === null || value === undefined) continue;
+
+    if (isObject(value)) {
+      const nested = firstImageSrc(
+        value.avatarUrl,
+        value.avatar,
+        value.photoUrl,
+        value.photoURL,
+        value.imageUrl,
+        value.picture,
+        value.url,
+        value.src,
+        value.href
+      );
+
+      if (nested) return nested;
+      continue;
+    }
+
+    const src = safeImageSrc(value);
+    if (src) return src;
+  }
+
+  return "";
+}
+
+function normalizeEmail(value = "") {
+  const email = cleanText(value, "").toLowerCase();
+
+  if (!email) return "";
+
+  if (
+    [
+      "null",
+      "undefined",
+      "none",
+      "sin email",
+      "no email",
+      "no_email",
+      "__no_email__",
+    ].includes(email)
+  ) {
+    return "";
+  }
+
+  return email.includes("@") ? email : "";
+}
+
+function firstEmail(...values) {
+  for (const value of values.flat(Infinity)) {
+    const email = normalizeEmail(value);
+    if (email) return email;
   }
 
   return "";
@@ -499,32 +568,180 @@ function getClientName(item = {}) {
 }
 
 function getClientEmail(item = {}) {
-  return cleanText(
-    first(
-      item.clientEmail,
-      item.clienteEmail,
-      item.email,
-      item.emailCliente,
-      item.requesterSnapshot?.email,
-      item.cliente?.email,
-      item.client?.email
-    ),
-    ""
-  ).toLowerCase();
+  const raw = safeObject(item.raw);
+
+  return firstEmail(
+    item.requesterEmail,
+    item.requesterEmailLower,
+    item.clientEmail,
+    item.clientEmailLower,
+    item.clienteEmail,
+    item.clienteEmailLower,
+    item.userEmail,
+    item.userEmailLower,
+    item.email,
+    item.emailLower,
+    item.emailCliente,
+    item.rootEmail,
+    item.rootUserEmail,
+    item.rootClienteEmail,
+    item.rootClienteEmailLower,
+    item.requesterSnapshotEmail,
+    item.requesterSnapshotEmailLower,
+    item.clienteEmailNested,
+    item.clienteEmailLowerNested,
+    item.receptorEmail,
+    item.receptorEmailLower,
+    item.createdByEmail,
+    item.createdByEmailLower,
+
+    item.requesterSnapshot?.email,
+    item.requesterSnapshot?.emailLower,
+    item.cliente?.email,
+    item.cliente?.emailLower,
+    item.client?.email,
+    item.client?.emailLower,
+    item.usuario?.email,
+    item.usuario?.emailLower,
+    item.owner?.email,
+    item.owner?.emailLower,
+    item.receptor?.email,
+    item.receptor?.emailLower,
+    item.createdBy?.email,
+    item.createdBy?.emailLower,
+    item.user?.email,
+    item.user?.emailLower,
+
+    item.meta?.requesterEmail,
+    item.meta?.clientEmail,
+    item.meta?.clienteEmail,
+    item.meta?.userEmail,
+
+    raw.requesterEmail,
+    raw.requesterEmailLower,
+    raw.clientEmail,
+    raw.clientEmailLower,
+    raw.clienteEmail,
+    raw.clienteEmailLower,
+    raw.userEmail,
+    raw.userEmailLower,
+    raw.email,
+    raw.emailLower,
+    raw.emailCliente,
+    raw.rootEmail,
+    raw.rootUserEmail,
+    raw.rootClienteEmail,
+    raw.rootClienteEmailLower,
+    raw.requesterSnapshotEmail,
+    raw.requesterSnapshotEmailLower,
+    raw.clienteEmailNested,
+    raw.clienteEmailLowerNested,
+    raw.receptorEmail,
+    raw.receptorEmailLower,
+    raw.createdByEmail,
+    raw.createdByEmailLower,
+    raw.requesterSnapshot?.email,
+    raw.requesterSnapshot?.emailLower,
+    raw.cliente?.email,
+    raw.cliente?.emailLower,
+    raw.client?.email,
+    raw.client?.emailLower,
+    raw.receptor?.email,
+    raw.receptor?.emailLower,
+    raw.createdBy?.email,
+    raw.createdBy?.emailLower,
+    raw.meta?.requesterEmail,
+    raw.meta?.clientEmail,
+    raw.meta?.clienteEmail,
+    raw.meta?.userEmail
+  );
 }
 
 function getAvatarUrl(item = {}) {
-  return safeImageSrc(
-    first(
-      item.clientAvatar,
-      item.avatar,
-      item.avatarUrl,
-      item.requesterAvatarUrl,
-      item.userAvatarUrl,
-      item.requesterSnapshot?.avatarUrl,
-      item.cliente?.avatarUrl,
-      item.client?.avatarUrl
-    )
+  const raw = safeObject(item.raw);
+
+  return firstImageSrc(
+    item.requesterAvatarUrl,
+    item.requesterAvatar,
+    item.userAvatarUrl,
+    item.userAvatar,
+    item.clientAvatarUrl,
+    item.clientAvatar,
+    item.clienteAvatarUrl,
+    item.clienteAvatar,
+    item.avatarUrl,
+    item.avatar,
+    item.photoUrl,
+    item.photoURL,
+    item.imageUrl,
+    item.picture,
+    item.requesterSnapshotAvatarUrl,
+    item.requesterSnapshotAvatar,
+    item.clienteAvatarUrl,
+    item.clienteAvatar,
+    item.receptorAvatarUrl,
+    item.receptorAvatar,
+    item.createdByAvatarUrl,
+    item.createdByAvatar,
+
+    item.requesterSnapshot?.avatarUrl,
+    item.requesterSnapshot?.avatar,
+    item.requesterSnapshot?.photoUrl,
+    item.requesterSnapshot?.photoURL,
+    item.requesterSnapshot?.imageUrl,
+    item.requesterSnapshot?.picture,
+    item.cliente?.avatarUrl,
+    item.cliente?.avatar,
+    item.cliente?.photoUrl,
+    item.cliente?.photoURL,
+    item.client?.avatarUrl,
+    item.client?.avatar,
+    item.client?.photoUrl,
+    item.client?.photoURL,
+    item.usuario?.avatarUrl,
+    item.usuario?.avatar,
+    item.user?.avatarUrl,
+    item.user?.avatar,
+    item.receptor?.avatarUrl,
+    item.receptor?.avatar,
+    item.createdBy?.avatarUrl,
+    item.createdBy?.avatar,
+
+    item.meta?.requesterAvatarUrl,
+    item.meta?.requesterAvatar,
+    item.meta?.clientAvatarUrl,
+    item.meta?.clientAvatar,
+
+    raw.requesterAvatarUrl,
+    raw.requesterAvatar,
+    raw.userAvatarUrl,
+    raw.userAvatar,
+    raw.clientAvatarUrl,
+    raw.clientAvatar,
+    raw.clienteAvatarUrl,
+    raw.clienteAvatar,
+    raw.avatarUrl,
+    raw.avatar,
+    raw.requesterSnapshotAvatarUrl,
+    raw.requesterSnapshotAvatar,
+    raw.clienteAvatarUrl,
+    raw.clienteAvatar,
+    raw.receptorAvatarUrl,
+    raw.receptorAvatar,
+    raw.createdByAvatarUrl,
+    raw.createdByAvatar,
+    raw.requesterSnapshot?.avatarUrl,
+    raw.requesterSnapshot?.avatar,
+    raw.cliente?.avatarUrl,
+    raw.cliente?.avatar,
+    raw.client?.avatarUrl,
+    raw.client?.avatar,
+    raw.receptor?.avatarUrl,
+    raw.receptor?.avatar,
+    raw.createdBy?.avatarUrl,
+    raw.createdBy?.avatar,
+    raw.meta?.requesterAvatarUrl,
+    raw.meta?.requesterAvatar
   );
 }
 
@@ -598,41 +815,199 @@ function getCategory(item = {}) {
 }
 
 function getAssignedTo(item = {}) {
+  const raw = safeObject(item.raw);
+
   return cleanText(
     first(
       item.assignedToName,
       item.technicianName,
       item.tecnicoName,
+      item.agentName,
+      item.assignmentAssignedToName,
+      item.assignmentTechnicianName,
+      item.assignmentTechnicianNombre,
+      item.assignmentName,
+      item.assignedToNombre,
+      item.tecnicoNombre,
+      item.metaTechnicianName,
+      item.metaAssignedTechnicianName,
+      item.metaLastTechnicianName,
       item.assignment?.assignedToName,
       item.assignment?.agentName,
       item.assignment?.technicianName,
+      item.assignment?.name,
       item.tecnico?.displayName,
       item.tecnico?.name,
+      item.tecnico?.nombre,
       item.assignedTo?.displayName,
       item.assignedTo?.name,
+      item.assignedTo?.nombre,
       item.technician?.displayName,
       item.technician?.name,
+      item.technician?.nombre,
       item.agent?.displayName,
-      item.agent?.name
+      item.agent?.name,
+      item.agent?.nombre,
+      item.meta?.technicianName,
+      item.meta?.assignedTechnicianName,
+      item.meta?.lastTechnicianName,
+      raw.assignedToName,
+      raw.technicianName,
+      raw.tecnicoName,
+      raw.agentName,
+      raw.assignmentAssignedToName,
+      raw.assignmentTechnicianName,
+      raw.assignmentTechnicianNombre,
+      raw.assignmentName,
+      raw.assignedToNombre,
+      raw.tecnicoNombre,
+      raw.metaTechnicianName,
+      raw.metaAssignedTechnicianName,
+      raw.metaLastTechnicianName,
+      raw.assignment?.assignedToName,
+      raw.assignment?.agentName,
+      raw.assignment?.technicianName,
+      raw.assignment?.name,
+      raw.assignedTo?.displayName,
+      raw.assignedTo?.name,
+      raw.technician?.displayName,
+      raw.technician?.name,
+      raw.tecnico?.displayName,
+      raw.tecnico?.name,
+      raw.agent?.displayName,
+      raw.agent?.name,
+      raw.meta?.technicianName,
+      raw.meta?.assignedTechnicianName,
+      raw.meta?.lastTechnicianName
     ),
     "Sin asignar"
   );
 }
 
 function getAssignedAvatarUrl(item = {}) {
-  return safeImageSrc(
-    first(
-      item.assignedToAvatarUrl,
-      item.tecnicoAvatarUrl,
-      item.technicianAvatarUrl,
-      item.agentAvatarUrl,
-      item.assignment?.assignedToAvatarUrl,
-      item.assignment?.technicianAvatarUrl,
-      item.tecnico?.avatarUrl,
-      item.assignedTo?.avatarUrl,
-      item.technician?.avatarUrl,
-      item.agent?.avatarUrl
-    )
+  const raw = safeObject(item.raw);
+
+  return firstImageSrc(
+    item.assignedToAvatarUrl,
+    item.assignedToAvatar,
+    item.technicianAvatarUrl,
+    item.technicianAvatar,
+    item.tecnicoAvatarUrl,
+    item.tecnicoAvatar,
+    item.agentAvatarUrl,
+    item.agentAvatar,
+    item.avatarTecnicoUrl,
+    item.avatarTecnico,
+    item.assignmentAssignedToAvatarUrl,
+    item.assignmentAssignedToAvatar,
+    item.assignmentTechnicianAvatarUrl,
+    item.assignmentTechnicianAvatar,
+    item.assignmentAvatarUrl,
+    item.assignmentAvatar,
+    item.assignedToAvatar,
+    item.assignedToAvatarUrl,
+    item.tecnicoAvatar,
+    item.tecnicoAvatarUrl,
+    item.metaTechnicianAvatarUrl,
+    item.metaTechnicianAvatar,
+    item.metaAssignedTechnicianAvatarUrl,
+    item.metaAssignedTechnicianAvatar,
+    item.metaLastTechnicianAvatarUrl,
+    item.metaLastTechnicianAvatar,
+
+    item.assignment?.assignedToAvatarUrl,
+    item.assignment?.assignedToAvatar,
+    item.assignment?.technicianAvatarUrl,
+    item.assignment?.technicianAvatar,
+    item.assignment?.agentAvatarUrl,
+    item.assignment?.agentAvatar,
+    item.assignment?.avatarUrl,
+    item.assignment?.avatar,
+    item.assignment?.photoUrl,
+    item.assignment?.photoURL,
+    item.assignment?.imageUrl,
+    item.assignment?.picture,
+
+    item.assignedTo?.avatarUrl,
+    item.assignedTo?.avatar,
+    item.assignedTo?.photoUrl,
+    item.assignedTo?.photoURL,
+    item.assignedTo?.imageUrl,
+    item.assignedTo?.picture,
+    item.technician?.avatarUrl,
+    item.technician?.avatar,
+    item.technician?.photoUrl,
+    item.technician?.photoURL,
+    item.technician?.imageUrl,
+    item.technician?.picture,
+    item.tecnico?.avatarUrl,
+    item.tecnico?.avatar,
+    item.tecnico?.photoUrl,
+    item.tecnico?.photoURL,
+    item.tecnico?.imageUrl,
+    item.tecnico?.picture,
+    item.agent?.avatarUrl,
+    item.agent?.avatar,
+    item.agent?.photoUrl,
+    item.agent?.photoURL,
+    item.agent?.imageUrl,
+    item.agent?.picture,
+
+    item.meta?.technicianAvatarUrl,
+    item.meta?.technicianAvatar,
+    item.meta?.assignedTechnicianAvatarUrl,
+    item.meta?.assignedTechnicianAvatar,
+    item.meta?.lastTechnicianAvatarUrl,
+    item.meta?.lastTechnicianAvatar,
+    item.meta?.agentAvatarUrl,
+    item.meta?.agentAvatar,
+
+    raw.assignedToAvatarUrl,
+    raw.assignedToAvatar,
+    raw.technicianAvatarUrl,
+    raw.technicianAvatar,
+    raw.tecnicoAvatarUrl,
+    raw.tecnicoAvatar,
+    raw.agentAvatarUrl,
+    raw.agentAvatar,
+    raw.assignmentAssignedToAvatarUrl,
+    raw.assignmentAssignedToAvatar,
+    raw.assignmentTechnicianAvatarUrl,
+    raw.assignmentTechnicianAvatar,
+    raw.assignmentAvatarUrl,
+    raw.assignmentAvatar,
+    raw.assignedToAvatarUrl,
+    raw.assignedToAvatar,
+    raw.tecnicoAvatarUrl,
+    raw.tecnicoAvatar,
+    raw.metaTechnicianAvatarUrl,
+    raw.metaTechnicianAvatar,
+    raw.metaAssignedTechnicianAvatarUrl,
+    raw.metaAssignedTechnicianAvatar,
+    raw.metaLastTechnicianAvatarUrl,
+    raw.metaLastTechnicianAvatar,
+    raw.assignment?.assignedToAvatarUrl,
+    raw.assignment?.assignedToAvatar,
+    raw.assignment?.technicianAvatarUrl,
+    raw.assignment?.technicianAvatar,
+    raw.assignment?.agentAvatarUrl,
+    raw.assignment?.agentAvatar,
+    raw.assignment?.avatarUrl,
+    raw.assignment?.avatar,
+    raw.assignedTo?.avatarUrl,
+    raw.assignedTo?.avatar,
+    raw.technician?.avatarUrl,
+    raw.technician?.avatar,
+    raw.tecnico?.avatarUrl,
+    raw.tecnico?.avatar,
+    raw.agent?.avatarUrl,
+    raw.agent?.avatar,
+    raw.meta?.technicianAvatarUrl,
+    raw.meta?.technicianAvatar,
+    raw.meta?.assignedTechnicianAvatarUrl,
+    raw.meta?.assignedTechnicianAvatar,
+    raw.meta?.lastTechnicianAvatarUrl,
+    raw.meta?.lastTechnicianAvatar
   );
 }
 
@@ -1818,6 +2193,9 @@ export function getIncidenciasTemplateSnapshot() {
       fullHdNoActionsLayout: true,
 
       preservesTechnicianAvatarData: true,
+      requesterEmailAliasCompatibility: true,
+      technicianAvatarAliasCompatibility: true,
+      blobAvatarSupport: true,
       delegatesDetailModal: true,
 
       includesCreateTemplate: true,

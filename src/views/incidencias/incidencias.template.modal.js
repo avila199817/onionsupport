@@ -4,9 +4,11 @@
 
    Responsabilidad:
    - Render HTML puro del modal detalle de incidencia.
-   - Pintar detalle, técnico, factura vinculada, adjuntos,
-     preview, comentario y timeline.
+   - Pintar detalle, cliente, técnico, factura vinculada,
+     adjuntos, preview, comentario y timeline.
    - Exponer data-action/data-field para index.js.
+   - Alineado 1:1 con incidencias.index.js.
+   - Alineado con incidencias.api.js.
    - Sin Auth.
    - Sin Router.
    - Sin HTTP.
@@ -19,7 +21,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.v1";
+  "incidencias.template.modal.v2.production";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -42,6 +44,7 @@ const MODAL_ID = "incidencias-detail-modal-root";
 const PANEL_ID = "incidencias-detail-modal-panel";
 
 const DEFAULT_CURRENCY = "EUR";
+const MAX_COMMENT_LENGTH = 4000;
 
 /* =========================================================
    BASICS
@@ -68,8 +71,19 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
+function cleanMultiline(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim();
+
+  return output || fallback;
+}
+
 function first(...values) {
-  for (const value of values) {
+  for (const value of values.flat(Infinity)) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && !value.length) continue;
@@ -88,13 +102,35 @@ function number(value = 0, fallback = 0) {
     return Number.isFinite(value) ? value : fallback;
   }
 
-  const parsed = Number(
-    String(value)
+  if (typeof value === "string") {
+    let clean = value
+      .trim()
       .replace(/[€$£¥%]/g, "")
       .replace(/[^\d.,+\-\s]/g, "")
-      .replace(/\s+/g, "")
-      .replace(",", ".")
-  );
+      .replace(/\s+/g, "");
+
+    if (!clean || clean === "-" || clean === "+") return fallback;
+
+    const hasComma = clean.includes(",");
+    const hasDot = clean.includes(".");
+
+    if (hasComma && hasDot) {
+      const lastComma = clean.lastIndexOf(",");
+      const lastDot = clean.lastIndexOf(".");
+
+      clean =
+        lastComma > lastDot
+          ? clean.replace(/\./g, "").replace(/,/g, ".")
+          : clean.replace(/,/g, "");
+    } else if (hasComma) {
+      clean = clean.replace(/,/g, ".");
+    }
+
+    const parsed = Number(clean);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  const parsed = Number(value);
 
   return Number.isFinite(parsed) ? parsed : fallback;
 }
@@ -143,6 +179,28 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
+function normalizeEmail(value = "") {
+  const email = cleanText(value, "").toLowerCase();
+
+  if (!email) return "";
+
+  if (
+    [
+      "null",
+      "undefined",
+      "none",
+      "sin email",
+      "no email",
+      "no_email",
+      "__no_email__",
+    ].includes(email)
+  ) {
+    return "";
+  }
+
+  return email.includes("@") ? email : "";
+}
+
 function redact(value = "") {
   return String(value ?? "")
     .replace(
@@ -151,6 +209,17 @@ function redact(value = "") {
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+function safePublicText(value = "", fallback = "") {
+  const text = redact(cleanText(value, ""));
+
+  if (!text) return fallback;
+  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature)=/i.test(text)) {
+    return fallback;
+  }
+
+  return text;
 }
 
 function hasSensitiveQuery(value = "") {
@@ -180,6 +249,42 @@ function safeUrl(value = "") {
     }
   }
 
+  if (/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
+}
+
+function firstUrl(...values) {
+  for (const value of values.flat(Infinity)) {
+    if (value === undefined || value === null) continue;
+
+    if (isObject(value)) {
+      const nested = firstUrl(
+        value.viewUrl,
+        value.openUrl,
+        value.downloadUrl,
+        value.signedUrl,
+        value.url,
+        value.blobUrl,
+        value.publicUrl,
+        value.href,
+        value.src
+      );
+
+      if (nested) return nested;
+      continue;
+    }
+
+    const url = safeUrl(value);
+    if (url) return url;
+  }
+
   return "";
 }
 
@@ -190,6 +295,43 @@ function safeImageSrc(value = "") {
   if (/^blob:/i.test(raw)) return raw;
   if (raw.startsWith("/")) return raw;
   if (/^https:\/\//i.test(raw)) return raw;
+  if (/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(raw)) return raw;
+
+  return "";
+}
+
+function firstImageSrc(...values) {
+  for (const value of values.flat(Infinity)) {
+    if (value === undefined || value === null) continue;
+
+    if (isObject(value)) {
+      const nested = firstImageSrc(
+        value.avatarUrl,
+        value.avatar,
+        value.photoUrl,
+        value.photoURL,
+        value.imageUrl,
+        value.picture,
+        value.viewUrl,
+        value.openUrl,
+        value.signedUrl,
+        value.url,
+        value.href,
+        value.src,
+        value.profile?.avatarUrl,
+        value.profile?.avatar,
+        value.profile?.photoUrl,
+        value.profile?.photoURL,
+        value.profile?.picture
+      );
+
+      if (nested) return nested;
+      continue;
+    }
+
+    const src = safeImageSrc(value);
+    if (src) return src;
+  }
 
   return "";
 }
@@ -203,6 +345,18 @@ function safeFilename(value = "", fallback = "archivo") {
     .slice(0, 180);
 
   return clean || fallback;
+}
+
+function hashText(value = "") {
+  const text = cleanText(value, "");
+  let hash = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return Math.abs(hash);
 }
 
 /* =========================================================
@@ -378,14 +532,16 @@ function getTicketId(detail = {}) {
 function getTitle(detail = {}) {
   const raw = getRaw(detail);
 
-  return cleanText(
+  return safePublicText(
     first(
       detail.title,
       detail.subject,
       detail.asunto,
+      detail.name,
       raw.title,
       raw.subject,
-      raw.asunto
+      raw.asunto,
+      raw.name
     ),
     "Incidencia"
   );
@@ -394,16 +550,20 @@ function getTitle(detail = {}) {
 function getDescription(detail = {}) {
   const raw = getRaw(detail);
 
-  return cleanText(
+  return cleanMultiline(
     first(
       detail.description,
       detail.descripcion,
       detail.message,
       detail.preview,
+      detail.text,
+      detail.body,
       raw.description,
       raw.descripcion,
       raw.message,
-      raw.preview
+      raw.preview,
+      raw.text,
+      raw.body
     ),
     "Sin descripción."
   );
@@ -416,47 +576,135 @@ function getClientName(detail = {}) {
     first(
       detail.requesterName,
       detail.clientName,
+      detail.clienteName,
       detail.clienteNombre,
-      detail.name,
       detail.userName,
+      detail.name,
       detail.requesterSnapshot?.displayName,
       detail.requesterSnapshot?.name,
+      detail.requesterSnapshot?.nombre,
       detail.cliente?.displayName,
       detail.cliente?.name,
+      detail.cliente?.nombre,
       detail.client?.displayName,
       detail.client?.name,
+      detail.user?.displayName,
+      detail.user?.name,
       raw.requesterName,
       raw.clientName,
+      raw.clienteName,
       raw.clienteNombre,
-      raw.name,
       raw.userName,
+      raw.name,
       raw.requesterSnapshot?.displayName,
-      raw.requesterSnapshot?.name
+      raw.requesterSnapshot?.name,
+      raw.requesterSnapshot?.nombre,
+      raw.cliente?.displayName,
+      raw.cliente?.name,
+      raw.client?.displayName,
+      raw.client?.name
     ),
     "Cliente"
+  );
+}
+
+function getClientEmail(detail = {}) {
+  const raw = getRaw(detail);
+
+  return normalizeEmail(
+    first(
+      detail.requesterEmail,
+      detail.requesterEmailLower,
+      detail.clientEmail,
+      detail.clientEmailLower,
+      detail.clienteEmail,
+      detail.clienteEmailLower,
+      detail.userEmail,
+      detail.userEmailLower,
+      detail.email,
+      detail.emailLower,
+      detail.requesterSnapshot?.email,
+      detail.requesterSnapshot?.emailLower,
+      detail.cliente?.email,
+      detail.cliente?.emailLower,
+      detail.client?.email,
+      detail.client?.emailLower,
+      detail.user?.email,
+      detail.user?.emailLower,
+      detail.meta?.requesterEmail,
+      detail.meta?.clientEmail,
+      detail.meta?.clienteEmail,
+      raw.requesterEmail,
+      raw.requesterEmailLower,
+      raw.clientEmail,
+      raw.clientEmailLower,
+      raw.clienteEmail,
+      raw.clienteEmailLower,
+      raw.userEmail,
+      raw.userEmailLower,
+      raw.email,
+      raw.emailLower,
+      raw.requesterSnapshot?.email,
+      raw.requesterSnapshot?.emailLower,
+      raw.cliente?.email,
+      raw.cliente?.emailLower,
+      raw.client?.email,
+      raw.client?.emailLower,
+      raw.user?.email,
+      raw.user?.emailLower,
+      raw.meta?.requesterEmail,
+      raw.meta?.clientEmail,
+      raw.meta?.clienteEmail
+    )
   );
 }
 
 function getClientAvatar(detail = {}) {
   const raw = getRaw(detail);
 
-  return safeImageSrc(
-    first(
-      detail.avatarUrl,
-      detail.requesterAvatarUrl,
-      detail.userAvatarUrl,
-      detail.clientAvatar,
-      detail.avatar,
-      detail.cliente?.avatarUrl,
-      detail.client?.avatarUrl,
-      detail.requesterSnapshot?.avatarUrl,
-      raw.avatarUrl,
-      raw.requesterAvatarUrl,
-      raw.userAvatarUrl,
-      raw.clientAvatar,
-      raw.avatar,
-      raw.requesterSnapshot?.avatarUrl
-    )
+  return firstImageSrc(
+    detail.requesterAvatarUrl,
+    detail.requesterAvatar,
+    detail.userAvatarUrl,
+    detail.userAvatar,
+    detail.clientAvatarUrl,
+    detail.clientAvatar,
+    detail.clienteAvatarUrl,
+    detail.clienteAvatar,
+    detail.avatarUrl,
+    detail.avatar,
+    detail.photoUrl,
+    detail.photoURL,
+    detail.imageUrl,
+    detail.picture,
+    detail.cliente,
+    detail.client,
+    detail.user,
+    detail.requesterSnapshot,
+    detail.meta?.requesterAvatarUrl,
+    detail.meta?.requesterAvatar,
+    detail.meta?.clientAvatarUrl,
+    raw.requesterAvatarUrl,
+    raw.requesterAvatar,
+    raw.userAvatarUrl,
+    raw.userAvatar,
+    raw.clientAvatarUrl,
+    raw.clientAvatar,
+    raw.clienteAvatarUrl,
+    raw.clienteAvatar,
+    raw.avatarUrl,
+    raw.avatar,
+    raw.photoUrl,
+    raw.photoURL,
+    raw.imageUrl,
+    raw.picture,
+    raw.cliente,
+    raw.client,
+    raw.user,
+    raw.requesterSnapshot,
+    raw.meta?.requesterAvatarUrl,
+    raw.meta?.requesterAvatar,
+    raw.meta?.clientAvatarUrl
   );
 }
 
@@ -468,65 +716,209 @@ function getTechnicianName(detail = {}) {
       detail.assignedToName,
       detail.technicianName,
       detail.tecnicoName,
+      detail.agentName,
       detail.assignedTo?.displayName,
       detail.assignedTo?.name,
+      detail.assignedTo?.nombre,
       detail.technician?.displayName,
       detail.technician?.name,
+      detail.technician?.nombre,
       detail.tecnico?.displayName,
       detail.tecnico?.name,
+      detail.tecnico?.nombre,
+      detail.agent?.displayName,
+      detail.agent?.name,
       detail.assignment?.assignedToName,
       detail.assignment?.technicianName,
+      detail.assignment?.agentName,
+      detail.assignment?.name,
+      detail.meta?.technicianName,
+      detail.meta?.assignedTechnicianName,
+      detail.meta?.lastTechnicianName,
       raw.assignedToName,
       raw.technicianName,
       raw.tecnicoName,
+      raw.agentName,
       raw.assignedTo?.displayName,
       raw.assignedTo?.name,
-      raw.assignment?.assignedToName
+      raw.technician?.displayName,
+      raw.technician?.name,
+      raw.tecnico?.displayName,
+      raw.tecnico?.name,
+      raw.assignment?.assignedToName,
+      raw.assignment?.technicianName,
+      raw.meta?.technicianName,
+      raw.meta?.assignedTechnicianName,
+      raw.meta?.lastTechnicianName
     ),
     "Sin asignar"
+  );
+}
+
+function getTechnicianEmail(detail = {}) {
+  const raw = getRaw(detail);
+
+  return normalizeEmail(
+    first(
+      detail.assignedToEmail,
+      detail.technicianEmail,
+      detail.tecnicoEmail,
+      detail.agentEmail,
+      detail.assignedTo?.email,
+      detail.assignedTo?.emailLower,
+      detail.technician?.email,
+      detail.technician?.emailLower,
+      detail.tecnico?.email,
+      detail.tecnico?.emailLower,
+      detail.agent?.email,
+      detail.assignment?.assignedToEmail,
+      detail.assignment?.technicianEmail,
+      detail.assignment?.agentEmail,
+      detail.assignment?.email,
+      detail.meta?.technicianEmail,
+      detail.meta?.assignedTechnicianEmail,
+      detail.meta?.lastTechnicianEmail,
+      raw.assignedToEmail,
+      raw.technicianEmail,
+      raw.tecnicoEmail,
+      raw.agentEmail,
+      raw.assignedTo?.email,
+      raw.technician?.email,
+      raw.tecnico?.email,
+      raw.assignment?.assignedToEmail,
+      raw.assignment?.technicianEmail,
+      raw.assignment?.email,
+      raw.meta?.technicianEmail,
+      raw.meta?.assignedTechnicianEmail,
+      raw.meta?.lastTechnicianEmail
+    )
   );
 }
 
 function getTechnicianAvatar(detail = {}) {
   const raw = getRaw(detail);
 
-  return safeImageSrc(
-    first(
-      detail.assignedToAvatarUrl,
-      detail.technicianAvatarUrl,
-      detail.tecnicoAvatarUrl,
-      detail.assignedTo?.avatarUrl,
-      detail.technician?.avatarUrl,
-      detail.tecnico?.avatarUrl,
-      detail.assignment?.assignedToAvatarUrl,
-      detail.assignment?.technicianAvatarUrl,
-      raw.assignedToAvatarUrl,
-      raw.technicianAvatarUrl,
-      raw.tecnicoAvatarUrl,
-      raw.assignedTo?.avatarUrl,
-      raw.assignment?.assignedToAvatarUrl
-    )
+  return firstImageSrc(
+    detail.assignedToAvatarUrl,
+    detail.assignedToAvatar,
+    detail.technicianAvatarUrl,
+    detail.technicianAvatar,
+    detail.tecnicoAvatarUrl,
+    detail.tecnicoAvatar,
+    detail.agentAvatarUrl,
+    detail.agentAvatar,
+    detail.assignedTo,
+    detail.technician,
+    detail.tecnico,
+    detail.agent,
+    detail.assignment?.assignedToAvatarUrl,
+    detail.assignment?.assignedToAvatar,
+    detail.assignment?.technicianAvatarUrl,
+    detail.assignment?.technicianAvatar,
+    detail.assignment?.agentAvatarUrl,
+    detail.assignment?.agentAvatar,
+    detail.assignment?.avatarUrl,
+    detail.assignment?.avatar,
+    detail.assignment?.technician,
+    detail.assignment?.assignedTo,
+    detail.meta?.technicianAvatarUrl,
+    detail.meta?.technicianAvatar,
+    detail.meta?.assignedTechnicianAvatarUrl,
+    detail.meta?.assignedTechnicianAvatar,
+    detail.meta?.lastTechnicianAvatarUrl,
+    detail.meta?.lastTechnicianAvatar,
+    raw.assignedToAvatarUrl,
+    raw.assignedToAvatar,
+    raw.technicianAvatarUrl,
+    raw.technicianAvatar,
+    raw.tecnicoAvatarUrl,
+    raw.tecnicoAvatar,
+    raw.agentAvatarUrl,
+    raw.agentAvatar,
+    raw.assignedTo,
+    raw.technician,
+    raw.tecnico,
+    raw.assignment?.assignedToAvatarUrl,
+    raw.assignment?.assignedToAvatar,
+    raw.assignment?.technicianAvatarUrl,
+    raw.assignment?.technicianAvatar,
+    raw.assignment?.avatarUrl,
+    raw.assignment?.avatar,
+    raw.meta?.technicianAvatarUrl,
+    raw.meta?.technicianAvatar,
+    raw.meta?.assignedTechnicianAvatarUrl,
+    raw.meta?.assignedTechnicianAvatar,
+    raw.meta?.lastTechnicianAvatarUrl,
+    raw.meta?.lastTechnicianAvatar
   );
 }
 
 function getStatus(detail = {}) {
   const raw = getRaw(detail);
-  return cleanText(first(detail.status, detail.estado, detail.state, raw.status, raw.estado), "open");
+
+  return cleanText(
+    first(
+      detail.status,
+      detail.estado,
+      detail.state,
+      detail.lifecycle?.status,
+      raw.status,
+      raw.estado,
+      raw.state,
+      raw.lifecycle?.status
+    ),
+    "open"
+  );
 }
 
 function getPriority(detail = {}) {
   const raw = getRaw(detail);
-  return cleanText(first(detail.priority, detail.prioridad, raw.priority, raw.prioridad), "medium");
+
+  return cleanText(
+    first(
+      detail.priority,
+      detail.prioridad,
+      detail.severity,
+      detail.urgency,
+      raw.priority,
+      raw.prioridad,
+      raw.severity,
+      raw.urgency
+    ),
+    "medium"
+  );
+}
+
+function getCategory(detail = {}) {
+  const raw = getRaw(detail);
+
+  return cleanText(
+    first(
+      detail.category,
+      detail.categoria,
+      detail.type,
+      detail.tipo,
+      detail.subcategory,
+      raw.category,
+      raw.categoria,
+      raw.type,
+      raw.tipo,
+      raw.subcategory
+    ),
+    "General"
+  );
 }
 
 function statusLabel(value = "") {
   const key = normalizeKey(value);
 
-  if (["open", "abierta", "abierto"].includes(key)) return "Abierta";
-  if (["pending", "pendiente"].includes(key)) return "Pendiente";
-  if (["in_progress", "progress", "proceso", "en_proceso"].includes(key)) return "En proceso";
-  if (["resolved", "resuelta", "resuelto"].includes(key)) return "Resuelta";
-  if (["closed", "cerrada", "cerrado"].includes(key)) return "Cerrada";
+  if (["open", "opened", "abierta", "abierto"].includes(key)) return "Abierta";
+  if (["pending", "pendiente", "new", "nueva", "nuevo"].includes(key)) return "Pendiente";
+  if (["in_progress", "progress", "inprogress", "proceso", "en_proceso", "working"].includes(key)) return "En proceso";
+  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "Resuelta";
+  if (["closed", "close", "cerrada", "cerrado"].includes(key)) return "Cerrada";
+  if (["cancelled", "canceled", "cancelada", "cancelado"].includes(key)) return "Cancelada";
+  if (["archived", "archivada", "archivado"].includes(key)) return "Archivada";
 
   return cleanText(value, "Abierta");
 }
@@ -534,11 +926,13 @@ function statusLabel(value = "") {
 function statusClass(value = "") {
   const key = normalizeKey(value);
 
-  if (["open", "abierta", "abierto"].includes(key)) return "open";
-  if (["pending", "pendiente"].includes(key)) return "pending";
-  if (["in_progress", "progress", "proceso", "en_proceso"].includes(key)) return "progress";
-  if (["resolved", "resuelta", "resuelto"].includes(key)) return "resolved";
-  if (["closed", "cerrada", "cerrado"].includes(key)) return "closed";
+  if (["open", "opened", "abierta", "abierto"].includes(key)) return "open";
+  if (["pending", "pendiente", "new", "nueva", "nuevo"].includes(key)) return "pending";
+  if (["in_progress", "progress", "inprogress", "proceso", "en_proceso", "working"].includes(key)) return "progress";
+  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
+  if (["closed", "close", "cerrada", "cerrado"].includes(key)) return "closed";
+  if (["cancelled", "canceled", "cancelada", "cancelado"].includes(key)) return "closed";
+  if (["archived", "archivada", "archivado"].includes(key)) return "closed";
 
   return "neutral";
 }
@@ -546,10 +940,10 @@ function statusClass(value = "") {
 function priorityLabel(value = "") {
   const key = normalizeKey(value);
 
-  if (["critical", "critica", "critico"].includes(key)) return "Crítica";
-  if (["urgent", "urgente", "high", "alta"].includes(key)) return "Urgente";
-  if (["low", "baja"].includes(key)) return "Baja";
-  if (["medium", "media", "normal"].includes(key)) return "Media";
+  if (["critical", "critica", "crítico", "critico", "crítica", "p0"].includes(key)) return "Crítica";
+  if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) return "Urgente";
+  if (["low", "baja", "minor", "p3"].includes(key)) return "Baja";
+  if (["medium", "media", "normal", "p2"].includes(key)) return "Media";
 
   return cleanText(value, "Media");
 }
@@ -557,9 +951,9 @@ function priorityLabel(value = "") {
 function priorityClass(value = "") {
   const key = normalizeKey(value);
 
-  if (["critical", "critica", "critico"].includes(key)) return "critical";
-  if (["urgent", "urgente", "high", "alta"].includes(key)) return "high";
-  if (["low", "baja"].includes(key)) return "low";
+  if (["critical", "critica", "crítico", "critico", "crítica", "p0"].includes(key)) return "critical";
+  if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) return "high";
+  if (["low", "baja", "minor", "p3"].includes(key)) return "low";
 
   return "medium";
 }
@@ -591,21 +985,40 @@ function getInvoiceLabel(detail = {}) {
     detail.facturaTotal,
     detail.facturaImporte,
     detail.importeFactura,
+    detail.amount,
+    detail.total,
     raw.facturasTotal,
     raw.invoicesTotal,
     raw.importeFacturas,
     raw.invoiceTotal,
     raw.facturaTotal,
     raw.facturaImporte,
-    raw.importeFactura
+    raw.importeFactura,
+    raw.amount,
+    raw.total
   );
 
-  const currency = cleanText(first(detail.currency, detail.moneda, raw.currency, raw.moneda), DEFAULT_CURRENCY);
+  const currency = cleanText(
+    first(
+      detail.currency,
+      detail.moneda,
+      detail.facturaCurrency,
+      detail.facturaMoneda,
+      detail.meta?.invoiceCurrency,
+      raw.currency,
+      raw.moneda,
+      raw.facturaCurrency,
+      raw.facturaMoneda,
+      raw.meta?.invoiceCurrency
+    ),
+    DEFAULT_CURRENCY
+  );
+
   const numeric = number(amount, NaN);
 
-  if (code && Number.isFinite(numeric)) return `${code} · ${formatMoney(numeric, currency)}`;
+  if (code && Number.isFinite(numeric) && numeric > 0) return `${code} · ${formatMoney(numeric, currency)}`;
   if (code) return code;
-  if (Number.isFinite(numeric)) return formatMoney(numeric, currency);
+  if (Number.isFinite(numeric) && numeric > 0) return formatMoney(numeric, currency);
 
   const payment = normalizeKey(first(detail.paymentStatus, detail.estadoPago, raw.paymentStatus, raw.estadoPago));
 
@@ -632,6 +1045,8 @@ function getAttachments(detail = {}) {
     )
   ).map((file, index) => {
     const item = safeObject(file);
+    const nested = safeObject(item.raw);
+
     const id = cleanText(
       first(
         item.id,
@@ -640,43 +1055,64 @@ function getAttachments(detail = {}) {
         item.blobName,
         item.storageKey,
         item.path,
-        item.key
+        item.key,
+        nested.id,
+        nested.fileId,
+        nested.attachmentId,
+        nested.blobName,
+        nested.storageKey,
+        nested.path,
+        nested.key
       ),
       `attachment-${index + 1}`
     );
 
     const name = safeFilename(
-      first(item.name, item.filename, item.fileName, item.title),
+      first(
+        item.name,
+        item.filename,
+        item.fileName,
+        item.title,
+        nested.name,
+        nested.filename,
+        nested.fileName,
+        nested.title
+      ),
       `archivo_${index + 1}`
     );
 
-    const url = safeUrl(
-      first(
-        item.viewUrl,
-        item.openUrl,
-        item.signedUrl,
-        item.url,
-        item.blobUrl,
-        item.publicUrl,
-        item.downloadUrl
-      )
+    const url = firstUrl(
+      item.viewUrl,
+      item.openUrl,
+      item.signedUrl,
+      item.url,
+      item.blobUrl,
+      item.publicUrl,
+      item.downloadUrl,
+      nested.viewUrl,
+      nested.openUrl,
+      nested.signedUrl,
+      nested.url,
+      nested.blobUrl,
+      nested.publicUrl,
+      nested.downloadUrl
     );
 
     return {
       ...item,
       id,
-      attachmentId: cleanText(first(item.attachmentId, id), id),
+      attachmentId: cleanText(first(item.attachmentId, nested.attachmentId, id), id),
       name,
-      filename: safeFilename(first(item.filename, item.fileName, item.name), name),
-      fileName: safeFilename(first(item.fileName, item.filename, item.name), name),
-      size: number(first(item.size, item.sizeBytes, item.contentLength), 0),
-      type: cleanText(first(item.type, item.contentType, item.mimetype, item.mimeType), ""),
-      contentType: cleanText(first(item.contentType, item.mimetype, item.mimeType, item.type), ""),
-      uploadedAt: first(item.uploadedAt, item.createdAt, item.date, null),
+      filename: safeFilename(first(item.filename, item.fileName, item.name, nested.filename, nested.fileName, nested.name), name),
+      fileName: safeFilename(first(item.fileName, item.filename, item.name, nested.fileName, nested.filename, nested.name), name),
+      size: number(first(item.size, item.sizeBytes, item.contentLength, nested.size, nested.sizeBytes, nested.contentLength), 0),
+      type: cleanText(first(item.type, item.contentType, item.mimetype, item.mimeType, nested.type), ""),
+      contentType: cleanText(first(item.contentType, item.mimetype, item.mimeType, item.type, nested.contentType), ""),
+      uploadedAt: first(item.uploadedAt, item.createdAt, item.date, nested.uploadedAt, nested.createdAt, null),
       url,
-      viewUrl: safeUrl(first(item.viewUrl, item.openUrl, item.signedUrl, item.url, url)),
-      openUrl: safeUrl(first(item.openUrl, item.viewUrl, item.signedUrl, item.url, url)),
-      downloadUrl: safeUrl(first(item.downloadUrl, item.signedUrl, item.url, url)),
+      viewUrl: firstUrl(item.viewUrl, item.openUrl, item.signedUrl, item.url, url),
+      openUrl: firstUrl(item.openUrl, item.viewUrl, item.signedUrl, item.url, url),
+      downloadUrl: firstUrl(item.downloadUrl, item.signedUrl, item.url, url),
     };
   });
 }
@@ -751,7 +1187,7 @@ function buildVm(input = {}) {
     ticketId,
 
     submitting: data.submitting === true,
-    commentDraft: cleanText(data.commentDraft, ""),
+    commentDraft: cleanMultiline(data.commentDraft, ""),
     pendingFiles: safeArray(data.pendingFiles),
 
     feedbackMessage: cleanText(data.feedbackMessage, ""),
@@ -797,19 +1233,28 @@ function renderChip(label = "", modifier = "neutral") {
 
 function renderAvatar(detail = {}) {
   const name = getClientName(detail);
+  const email = getClientEmail(detail);
   const initials = initialsFrom(name);
   const avatarUrl = getClientAvatar(detail);
+  const tone = hashText(`${name}:${email}:${getTicketId(detail)}`) % 10;
 
   if (avatarUrl) {
     return `
       <div class="incidencias-modal-avatar" title="${attr(name)}">
-        <div class="incidencias-modal-avatar-frame" data-modal-avatar-frame="true" data-fallback="false">
+        <div
+          class="incidencias-modal-avatar-frame"
+          data-modal-avatar-frame="true"
+          data-has-avatar="true"
+          data-fallback="false"
+          data-avatar-tone="${attr(String(tone))}"
+        >
           <img
             src="${attr(avatarUrl)}"
             alt="${attr(name)}"
             loading="lazy"
             decoding="async"
             referrerpolicy="no-referrer"
+            draggable="false"
             data-modal-avatar-img="true"
           >
           <span class="incidencias-modal-avatar-fallback">${escapeHtml(initials)}</span>
@@ -820,7 +1265,13 @@ function renderAvatar(detail = {}) {
 
   return `
     <div class="incidencias-modal-avatar" title="${attr(name)}">
-      <div class="incidencias-modal-avatar-frame incidencias-modal-avatar-frame--fallback" data-modal-avatar-frame="true" data-fallback="true">
+      <div
+        class="incidencias-modal-avatar-frame incidencias-modal-avatar-frame--fallback"
+        data-modal-avatar-frame="true"
+        data-has-avatar="false"
+        data-fallback="true"
+        data-avatar-tone="${attr(String(tone))}"
+      >
         <span class="incidencias-modal-avatar-fallback">${escapeHtml(initials)}</span>
       </div>
     </div>
@@ -829,27 +1280,44 @@ function renderAvatar(detail = {}) {
 
 function renderTechnicianValue(detail = {}) {
   const name = getTechnicianName(detail);
+  const email = getTechnicianEmail(detail);
   const avatarUrl = getTechnicianAvatar(detail);
   const initials = initialsFrom(name);
+  const tone = hashText(`${name}:${email}`) % 10;
 
   if (!avatarUrl) {
     return `
-      <span class="incidencias-modal-technician-inline">
-        <span class="incidencias-modal-technician-avatar incidencias-modal-technician-avatar--fallback">${escapeHtml(initials)}</span>
+      <span class="incidencias-modal-technician-inline" data-modal-technician="true">
+        <span
+          class="incidencias-modal-technician-avatar incidencias-modal-technician-avatar--fallback"
+          data-modal-technician-avatar-frame="true"
+          data-has-avatar="false"
+          data-fallback="true"
+          data-avatar-tone="${attr(String(tone))}"
+        >
+          <span>${escapeHtml(initials)}</span>
+        </span>
         <strong>${escapeHtml(name)}</strong>
       </span>
     `;
   }
 
   return `
-    <span class="incidencias-modal-technician-inline">
-      <span class="incidencias-modal-technician-avatar" data-modal-technician-avatar-frame="true" data-fallback="false">
+    <span class="incidencias-modal-technician-inline" data-modal-technician="true">
+      <span
+        class="incidencias-modal-technician-avatar"
+        data-modal-technician-avatar-frame="true"
+        data-has-avatar="true"
+        data-fallback="false"
+        data-avatar-tone="${attr(String(tone))}"
+      >
         <img
           src="${attr(avatarUrl)}"
           alt=""
           loading="lazy"
           decoding="async"
           referrerpolicy="no-referrer"
+          draggable="false"
           data-modal-technician-avatar-img="true"
         >
         <span>${escapeHtml(initials)}</span>
@@ -876,7 +1344,7 @@ function renderFeedbackBox(vm = {}) {
   const type = normalizeKey(vm.feedbackType || "info");
 
   return `
-    <div class="incidencias-modal-feedback incidencias-modal-feedback--${attr(type)}">
+    <div class="incidencias-modal-feedback incidencias-modal-feedback--${attr(type)}" role="${type === "error" ? "alert" : "status"}">
       <strong>
         ${
           type === "error"
@@ -895,7 +1363,7 @@ function renderFeedbackBox(vm = {}) {
 
 function renderLoadingOverlay(label = "Procesando...") {
   return `
-    <div class="incidencias-modal-loading-overlay">
+    <div class="incidencias-modal-loading-overlay" aria-live="polite" aria-busy="true">
       <div class="incidencias-modal-loading-box">
         <span aria-hidden="true"></span>
         <strong>${escapeHtml(label)}</strong>
@@ -920,26 +1388,31 @@ function renderPendingFiles(vm = {}) {
   }
 
   return `
-    <div class="incidencias-modal-pending-list">
-      ${files.map((file, index) => `
-        <div class="incidencias-modal-pending-file">
-          <div>
-            <strong>${escapeHtml(safeFilename(file.name || `archivo_${index + 1}`, `archivo_${index + 1}`))}</strong>
-            <span>${escapeHtml([cleanText(file.type, ""), formatBytes(file.size)].filter(Boolean).join(" · ") || "Archivo preparado")}</span>
-          </div>
+    <div class="incidencias-modal-pending-list" data-modal-pending-files="true">
+      ${files.map((file, index) => {
+        const name = safeFilename(file.name || `archivo_${index + 1}`, `archivo_${index + 1}`);
+        const meta = [cleanText(file.type, ""), formatBytes(file.size)].filter(Boolean).join(" · ");
 
-          <button
-            type="button"
-            data-detail-action="${DETAIL_ACTIONS.PENDING_FILE_REMOVE}"
-            data-incidencias-action="${DETAIL_ACTIONS.PENDING_FILE_REMOVE}"
-            data-action="${DETAIL_ACTIONS.PENDING_FILE_REMOVE}"
-            data-file-index="${attr(String(index))}"
-            ${disabledAttrs(vm.submitting, vm.submitting)}
-          >
-            Quitar
-          </button>
-        </div>
-      `).join("")}
+        return `
+          <div class="incidencias-modal-pending-file" data-file-index="${attr(String(index))}">
+            <div>
+              <strong>${escapeHtml(name)}</strong>
+              <span>${escapeHtml(meta || "Archivo preparado")}</span>
+            </div>
+
+            <button
+              type="button"
+              data-detail-action="${DETAIL_ACTIONS.PENDING_FILE_REMOVE}"
+              data-incidencias-action="${DETAIL_ACTIONS.PENDING_FILE_REMOVE}"
+              data-action="${DETAIL_ACTIONS.PENDING_FILE_REMOVE}"
+              data-file-index="${attr(String(index))}"
+              ${disabledAttrs(vm.submitting, vm.submitting)}
+            >
+              Quitar
+            </button>
+          </div>
+        `;
+      }).join("")}
     </div>
   `;
 }
@@ -948,7 +1421,7 @@ function renderComposer(vm = {}) {
   const disabled = disabledAttrs(vm.submitting, vm.submitting);
 
   return `
-    <section class="incidencias-modal-composer">
+    <section class="incidencias-modal-composer" data-modal-composer="true">
       <div class="incidencias-modal-composer-head">
         <div class="incidencias-modal-composer-icon" aria-hidden="true">${icon("plus")}</div>
         <div class="incidencias-modal-composer-copy">
@@ -961,6 +1434,8 @@ function renderComposer(vm = {}) {
         id="incidencias-modal-comment-input"
         data-detail-field="comment"
         data-field="comment"
+        name="comment"
+        maxlength="${attr(String(MAX_COMMENT_LENGTH))}"
         placeholder="Ejemplo: He probado de nuevo y adjunto captura..."
         ${disabled}
         class="incidencias-modal-comment-textarea"
@@ -970,12 +1445,13 @@ function renderComposer(vm = {}) {
         <span>Al pulsar “Actualizar incidencia”, se enviará esta información y la incidencia volverá a estado abierta.</span>
       </div>
 
-      <label for="incidencias-modal-attachments-input" class="incidencias-modal-dropzone">
+      <label for="incidencias-modal-attachments-input" class="incidencias-modal-dropzone" data-dropzone="detail-attachments">
         <input
           id="incidencias-modal-attachments-input"
           type="file"
           data-detail-field="attachments"
           data-field="attachments"
+          name="attachments"
           multiple
           ${disabled}
         >
@@ -1000,7 +1476,7 @@ function isImageLikeAttachment(file = {}) {
 }
 
 function getAttachmentBusyMeta(file = {}, vm = {}) {
-  const attachmentId = cleanText(file.id, "");
+  const attachmentId = cleanText(first(file.id, file.attachmentId), "");
 
   return {
     attachmentId,
@@ -1009,10 +1485,11 @@ function getAttachmentBusyMeta(file = {}, vm = {}) {
   };
 }
 
-function renderAttachmentPreviewSquare(file = {}) {
+function renderAttachmentPreviewSquare(file = {}, vm = {}) {
+  const busy = getAttachmentBusyMeta(file, vm);
   const isImage = isImageLikeAttachment(file);
   const url = isImage
-    ? safeImageSrc(first(file.viewUrl, file.openUrl, file.signedUrl, file.url, file.blobUrl, file.publicUrl))
+    ? firstImageSrc(file.viewUrl, file.openUrl, file.signedUrl, file.url, file.blobUrl, file.publicUrl)
     : "";
 
   const name = safeFilename(file.name || file.filename || "archivo", "archivo");
@@ -1024,9 +1501,10 @@ function renderAttachmentPreviewSquare(file = {}) {
         data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}"
         data-incidencias-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}"
         data-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}"
-        data-attachment-id="${attr(file.id)}"
+        data-attachment-id="${attr(busy.attachmentId)}"
         class="incidencias-modal-file-square"
         aria-label="Ver ${attr(name)}"
+        ${disabledAttrs(vm.submitting || busy.isOpening, busy.isOpening)}
       >
         <span>${isImage ? "IMG" : "DOC"}</span>
       </button>
@@ -1039,11 +1517,12 @@ function renderAttachmentPreviewSquare(file = {}) {
       data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}"
       data-incidencias-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}"
       data-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}"
-      data-attachment-id="${attr(file.id)}"
+      data-attachment-id="${attr(busy.attachmentId)}"
       class="incidencias-modal-image-thumb-wrap"
       aria-label="Ampliar ${attr(name)}"
       data-modal-thumb-frame="true"
       data-thumb-error="false"
+      ${disabledAttrs(vm.submitting || busy.isOpening, busy.isOpening)}
     >
       <img
         src="${attr(url)}"
@@ -1051,11 +1530,12 @@ function renderAttachmentPreviewSquare(file = {}) {
         loading="lazy"
         decoding="async"
         referrerpolicy="no-referrer"
+        draggable="false"
         class="incidencias-modal-image-thumb"
         data-modal-thumb-img="true"
       >
       <span class="incidencias-modal-image-thumb-fallback">IMG</span>
-      <span class="incidencias-modal-image-open-badge">Ampliar</span>
+      <span class="incidencias-modal-image-open-badge">${busy.isOpening ? "Abriendo..." : "Ampliar"}</span>
     </button>
   `;
 }
@@ -1071,7 +1551,7 @@ function renderAttachmentActionButtons(file = {}, vm = {}) {
         data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}"
         data-incidencias-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}"
         data-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}"
-        data-attachment-id="${attr(file.id)}"
+        data-attachment-id="${attr(busy.attachmentId)}"
         ${disabledAttrs(busy.isOpening || vm.submitting, busy.isOpening)}
         class="incidencias-modal-view-btn"
         aria-label="Ver ${attr(name)}"
@@ -1088,7 +1568,7 @@ function renderAttachmentActionButtons(file = {}, vm = {}) {
         data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DOWNLOAD}"
         data-incidencias-action="${DETAIL_ACTIONS.ATTACHMENT_DOWNLOAD}"
         data-action="${DETAIL_ACTIONS.ATTACHMENT_DOWNLOAD}"
-        data-attachment-id="${attr(file.id)}"
+        data-attachment-id="${attr(busy.attachmentId)}"
         ${disabledAttrs(busy.isDownloading || vm.submitting, busy.isDownloading)}
         class="incidencias-modal-download-btn"
         aria-label="Descargar ${attr(name)}"
@@ -1107,7 +1587,7 @@ function renderAttachments(vm = {}) {
   const files = getAttachments(vm.detail);
 
   return `
-    <div class="incidencias-modal-files-block incidencias-modal-files-block--compact">
+    <div class="incidencias-modal-files-block incidencias-modal-files-block--compact" data-modal-files-block="true">
       <section class="incidencias-modal-current-files">
         <div class="incidencias-modal-section-head">
           <h3>Documentos actuales</h3>
@@ -1121,15 +1601,20 @@ function renderAttachments(vm = {}) {
               <div class="incidencias-modal-attachments-grid">
                 ${files.map((file) => {
                   const name = safeFilename(file.name || file.filename || "Archivo", "Archivo");
+                  const meta = [
+                    file.contentType || file.type,
+                    formatBytes(file.size),
+                    file.uploadedAt ? formatDate(file.uploadedAt) : "",
+                  ].filter(Boolean).join(" · ");
 
                   return `
-                    <article class="incidencias-modal-attachment-card">
+                    <article class="incidencias-modal-attachment-card" data-attachment-id="${attr(file.id)}">
                       <div class="incidencias-modal-attachment-row">
-                        ${renderAttachmentPreviewSquare(file)}
+                        ${renderAttachmentPreviewSquare(file, vm)}
 
                         <div class="incidencias-modal-attachment-copy">
                           <strong>${escapeHtml(name)}</strong>
-                          <span>${escapeHtml([file.contentType || file.type, formatBytes(file.size), file.uploadedAt ? formatDate(file.uploadedAt) : ""].filter(Boolean).join(" · ") || "Archivo adjunto")}</span>
+                          <span>${escapeHtml(meta || "Archivo adjunto")}</span>
                         </div>
 
                         ${renderAttachmentActionButtons(file, vm)}
@@ -1165,7 +1650,7 @@ function isPreviewPdf(file = {}) {
 
 function renderAttachmentPreview(vm = {}) {
   const file = safeObject(vm.previewFile, null);
-  const url = safeUrl(file?.url || file?.viewUrl || file?.openUrl || file?.downloadUrl);
+  const url = firstUrl(file?.url, file?.viewUrl, file?.openUrl, file?.downloadUrl, file?.signedUrl);
 
   if (!file || !url) return "";
 
@@ -1177,7 +1662,7 @@ function renderAttachmentPreview(vm = {}) {
   const meta = [type || "Vista previa", size].filter(Boolean).join(" · ");
 
   return `
-    <section class="incidencias-modal-preview">
+    <section class="incidencias-modal-preview" data-modal-preview="true">
       <div class="incidencias-modal-preview-head">
         <div class="incidencias-modal-preview-copy">
           <strong>${escapeHtml(filename)}</strong>
@@ -1217,8 +1702,26 @@ function renderAttachmentPreview(vm = {}) {
       <div class="incidencias-modal-preview-frame ${image ? "is-image" : ""}">
         ${
           image
-            ? `<img src="${attr(safeImageSrc(url))}" alt="${attr(filename)}" class="incidencias-modal-preview-image">`
-            : `<iframe src="${attr(url)}" title="${attr(filename)}" class="incidencias-modal-preview-iframe" loading="lazy" referrerpolicy="no-referrer"></iframe>`
+            ? `
+              <img
+                src="${attr(safeImageSrc(url))}"
+                alt="${attr(filename)}"
+                class="incidencias-modal-preview-image"
+                loading="lazy"
+                decoding="async"
+                referrerpolicy="no-referrer"
+                draggable="false"
+              >
+            `
+            : `
+              <iframe
+                src="${attr(url)}"
+                title="${attr(filename)}"
+                class="incidencias-modal-preview-iframe"
+                loading="lazy"
+                referrerpolicy="no-referrer"
+              ></iframe>
+            `
         }
       </div>
 
@@ -1250,7 +1753,7 @@ function renderTimeline(detail = {}) {
         const isComment = kind === "comment";
         const isCreated = type === "created";
         const title = cleanText(entry.title, isComment ? "Comentario" : isCreated ? "Incidencia creada" : "Actualización");
-        const body = cleanText(entry.body, "Actualización registrada.");
+        const body = cleanMultiline(entry.body, "Actualización registrada.");
 
         return `
           <article class="incidencias-timeline-card ${isComment ? "is-comment" : ""} ${isCreated ? "is-created" : ""}">
@@ -1308,9 +1811,23 @@ export function renderIncidenciasDetailModal(input = {}) {
   const ticketId = vm.ticketId;
   const title = getTitle(detail);
   const description = getDescription(detail);
-  const createdAt = formatDate(first(detail.createdAt, detail.raw?.createdAt));
-  const updatedAt = first(detail.updatedAt, detail.lastActivityAt, detail.raw?.updatedAt, detail.raw?.lastActivityAt, detail.createdAt);
-  const updatedAgo = formatRelativeDate(updatedAt);
+  const clientName = getClientName(detail);
+  const clientEmail = getClientEmail(detail);
+  const category = getCategory(detail);
+
+  const createdAtRaw = first(detail.createdAt, detail.raw?.createdAt, detail.lifecycle?.createdAt);
+  const updatedAtRaw = first(
+    detail.lastActivityAt,
+    detail.updatedAt,
+    detail.raw?.lastActivityAt,
+    detail.raw?.updatedAt,
+    detail.lifecycle?.lastActivityAt,
+    detail.lifecycle?.updatedAt,
+    createdAtRaw
+  );
+
+  const createdAt = formatDate(createdAtRaw);
+  const updatedAgo = formatRelativeDate(updatedAtRaw);
   const attachments = getAttachments(detail);
 
   const status = getStatus(detail);
@@ -1323,6 +1840,8 @@ export function renderIncidenciasDetailModal(input = {}) {
       data-incidencias-detail-root="true"
       data-template-version="${attr(INCIDENCIAS_MODAL_TEMPLATE_VERSION)}"
       data-ticket-id="${attr(ticketId)}"
+      data-open="true"
+      data-submitting="${vm.submitting ? "true" : "false"}"
     >
       <div data-incidencias-modal-overlay="true" class="incidencias-modal-overlay">
         <div
@@ -1356,6 +1875,7 @@ export function renderIncidenciasDetailModal(input = {}) {
 
                   ${renderChip(statusLabel(status), `status-${statusClass(status)}`)}
                   ${renderChip(priorityLabel(priority), `priority-${priorityClass(priority)}`)}
+                  ${renderChip(category, "category")}
                 </div>
 
                 <h2 id="incidencias-modal-title" class="incidencias-modal-title">
@@ -1363,7 +1883,9 @@ export function renderIncidenciasDetailModal(input = {}) {
                 </h2>
 
                 <span class="incidencias-modal-updated">
-                  Última actualización ${escapeHtml(updatedAgo)}
+                  ${escapeHtml(clientName)}
+                  ${clientEmail ? ` · ${escapeHtml(clientEmail)}` : ""}
+                  · Última actualización ${escapeHtml(updatedAgo)}
                 </span>
               </div>
             </div>
@@ -1428,7 +1950,7 @@ export function renderIncidenciasDetailModalClosed() {
 ========================================================= */
 
 export function getDetailCommentValue(formLike = {}) {
-  return cleanText(
+  return cleanMultiline(
     first(
       formLike.comment,
       formLike.message,
@@ -1444,7 +1966,7 @@ export function validateDetailUpdate({
   comment = "",
   pendingFiles = [],
 } = {}) {
-  const message = cleanText(comment, "");
+  const message = cleanMultiline(comment, "");
   const files = safeArray(pendingFiles);
 
   if (!message && !files.length) {
@@ -1458,6 +1980,13 @@ export function validateDetailUpdate({
     return {
       valid: false,
       message: "Añade un poco más de detalle antes de enviar la actualización.",
+    };
+  }
+
+  if (message.length > MAX_COMMENT_LENGTH) {
+    return {
+      valid: false,
+      message: `El comentario no puede superar ${MAX_COMMENT_LENGTH} caracteres.`,
     };
   }
 
@@ -1484,6 +2013,24 @@ export function getDetailTemplateSnapshot() {
 
     policy: {
       templateOnly: true,
+
+      indexCompatible: true,
+      detailActionsStable: true,
+      dataActionCompatibility: true,
+      dataFieldCompatibility: true,
+
+      apiNormalizedTicketCompatible: true,
+      requesterAliasCompatibility: true,
+      requesterEmailAliasCompatibility: true,
+      technicianAliasCompatibility: true,
+      technicianAvatarAliasCompatibility: true,
+      attachmentAliasCompatibility: true,
+      timelineAliasCompatibility: true,
+      invoiceAliasCompatibility: true,
+
+      blobPreviewSupport: true,
+      localhostImageSupport: true,
+      sensitiveUrlProtection: true,
 
       noAuth: true,
       noRouter: true,

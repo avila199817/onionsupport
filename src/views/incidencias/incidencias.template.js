@@ -8,6 +8,7 @@
    - Integrar modal de creación y modal de detalle.
    - Exponer data-incidencias-action/data-field para index.js.
    - Mantener columnas 1:1 con CSS.
+   - Tabla sin columna Acciones: la fila abre el detalle.
    - Sin Auth.
    - Sin Router.
    - Sin HTTP.
@@ -27,7 +28,7 @@ import {
   renderIncidenciasDetailModal,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.production.v2";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.production.v3";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -102,13 +103,6 @@ export const INCIDENCIAS_TABLE_COLUMNS = Object.freeze([
     colClass: "incidencias-col--attachments",
     thClass: "incidencias-th incidencias-th--attachments",
     cellClass: "incidencias-cell incidencias-cell--attachments",
-  },
-  {
-    key: "actions",
-    label: "Acciones",
-    colClass: "incidencias-col--actions",
-    thClass: "incidencias-th incidencias-th--actions",
-    cellClass: "incidencias-cell incidencias-cell--actions",
   },
 ]);
 
@@ -266,6 +260,18 @@ function safeImageSrc(value = "") {
   return "";
 }
 
+function hashText(value = "") {
+  const text = cleanText(value, "");
+  let hash = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return Math.abs(hash);
+}
+
 /* =========================================================
    FORMATTERS
 ========================================================= */
@@ -403,18 +409,6 @@ function initialsFrom(value = "") {
   );
 }
 
-function hashText(value = "") {
-  const text = cleanText(value, "");
-  let hash = 0;
-
-  for (let index = 0; index < text.length; index += 1) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(index);
-    hash |= 0;
-  }
-
-  return Math.abs(hash);
-}
-
 /* =========================================================
    ICONS
 ========================================================= */
@@ -427,7 +421,6 @@ function icon(name = "") {
     refresh: `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
     plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
     ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
-    eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
     paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
     alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
     close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
@@ -934,6 +927,7 @@ function buildVm(input = {}) {
   return {
     data,
     state,
+
     route,
 
     title: cleanText(data.title, "Tus incidencias y solicitudes"),
@@ -979,14 +973,6 @@ function renderSpinner(label = "") {
     <span class="incidencias-inline-loading">
       <span class="incidencias-inline-spinner" aria-hidden="true"></span>
       ${label ? `<span class="incidencias-inline-loading-text">${escapeHtml(label)}</span>` : ""}
-    </span>
-  `;
-}
-
-function renderLoaderOnly(label = "Cargando") {
-  return `
-    <span class="incidencias-loader-only" role="status" aria-label="${attr(label)}">
-      <span class="incidencias-inline-spinner" aria-hidden="true"></span>
     </span>
   `;
 }
@@ -1146,43 +1132,6 @@ function renderImporteChip(item = {}) {
       ${isMoney ? icon("euro") : ""}
       <span>${escapeHtml(label)}</span>
     </span>
-  `;
-}
-
-function renderActionButton({
-  action = INCIDENCIAS_ACTIONS.OPEN_DETAIL,
-  ticketId = "",
-  label = "Detalle",
-  loadingLabel = "Cargando detalle",
-  loading = false,
-  disabled = false,
-  iconName = "eye",
-} = {}) {
-  const finalDisabled = disabled || loading;
-
-  return `
-    <button
-      type="button"
-      class="incidencias-detail-btn${loading ? " is-loading" : ""}"
-      data-incidencias-action="${attr(action)}"
-      data-ticket-id="${attr(ticketId)}"
-      data-incidencia-id="${attr(ticketId)}"
-      aria-label="${attr(label)}"
-      ${htmlAttrs({
-        disabled: finalDisabled,
-        "aria-disabled": finalDisabled ? "true" : false,
-        "aria-busy": loading ? "true" : false,
-      })}
-    >
-      ${
-        loading
-          ? renderLoaderOnly(loadingLabel)
-          : `
-            <span class="incidencias-action-icon">${icon(iconName)}</span>
-            <span class="incidencias-btn-text">${escapeHtml(label)}</span>
-          `
-      }
-    </button>
   `;
 }
 
@@ -1415,7 +1364,7 @@ function renderRow(item = {}, vm = {}) {
 
   return `
     <tr
-      class="incidencias-row incidencias-row--${attr(statusKey)} incidencias-row--clickable"
+      class="incidencias-row incidencias-row--${attr(statusKey)} incidencias-row--clickable${opening ? " is-loading" : ""}"
       data-ticket-row="true"
       data-ticket-id="${attr(ticketId)}"
       data-incidencia-id="${attr(ticketId)}"
@@ -1425,6 +1374,9 @@ function renderRow(item = {}, vm = {}) {
       role="button"
       tabindex="0"
       aria-label="Abrir detalle de incidencia ${attr(ticketId)}"
+      ${htmlAttrs({
+        "aria-busy": opening ? "true" : false,
+      })}
     >
       <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[0].cellClass)}" data-column="main">
         <div class="incidencias-main">
@@ -1482,16 +1434,6 @@ function renderRow(item = {}, vm = {}) {
           <span>${escapeHtml(formatNumber(attachmentsCount))}</span>
         </span>
       </td>
-
-      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[6].cellClass)}" data-column="actions">
-        ${renderActionButton({
-          ticketId,
-          loading: opening,
-          label: "Detalle",
-          loadingLabel: "Cargando detalle",
-          iconName: "eye",
-        })}
-      </td>
     </tr>
   `;
 }
@@ -1500,7 +1442,7 @@ function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
   return `
     <div class="incidencias-table-loading" aria-hidden="true">
       ${Array.from({ length: Math.max(3, number(rows, DEFAULT_VISIBLE_ROWS)) }).map(() => `
-        <div class="incidencias-table-loading-row">
+        <div class="incidencias-table-loading-row incidencias-table-loading-row--no-actions">
           <div class="incidencias-skeleton incidencias-skeleton--avatar"></div>
           <div class="incidencias-table-loading-copy">
             <div class="incidencias-skeleton incidencias-skeleton--xs"></div>
@@ -1512,7 +1454,6 @@ function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
           <div class="incidencias-skeleton incidencias-skeleton--date"></div>
           <div class="incidencias-skeleton incidencias-skeleton--amount"></div>
           <div class="incidencias-skeleton incidencias-skeleton--attach"></div>
-          <div class="incidencias-skeleton incidencias-skeleton--btn"></div>
         </div>
       `).join("")}
     </div>
@@ -1660,7 +1601,13 @@ function renderTable(vm = {}) {
 
   return `
     <div class="incidencias-table-shell">
-      <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
+      <table
+        class="incidencias-table incidencias-table--no-actions"
+        role="table"
+        aria-label="Listado de incidencias"
+        data-table-columns="6"
+        data-table-actions="false"
+      >
         ${renderTableColgroup()}
         ${renderTableHead()}
 
@@ -1743,6 +1690,7 @@ export function renderIncidenciasLoadingState(input = {}) {
       data-total="${attr(String(vm.total))}"
       data-visible="${attr(String(vm.visibleCount))}"
       data-filter="${attr(vm.filter)}"
+      data-table-actions="false"
       aria-busy="true"
     >
       ${renderHeader(vm)}
@@ -1757,6 +1705,7 @@ export function renderIncidenciasErrorState(message = "No se pudieron cargar las
       class="incidencias-view-root incidencias-view-root--error has-error"
       data-incidencias-scope="true"
       data-template-version="${attr(INCIDENCIAS_TEMPLATE_VERSION)}"
+      data-table-actions="false"
       aria-busy="false"
     >
       <section class="incidencias-error">
@@ -1803,6 +1752,7 @@ export function renderIncidenciasTemplate(input = {}) {
       data-search-active="${vm.search ? "true" : "false"}"
       data-loading="${vm.loading ? "true" : "false"}"
       data-refreshing="${vm.refreshing ? "true" : "false"}"
+      data-table-actions="false"
       aria-busy="${vm.loading || vm.refreshing ? "true" : "false"}"
     >
       ${
@@ -1861,8 +1811,14 @@ export function getIncidenciasTemplateSnapshot() {
       noToast: true,
 
       centralizedTableColumns: true,
+      noActionsColumn: true,
+      rowClickOpensDetail: true,
       noGenericDataActionDuplication: true,
       amountImporteClassCompatibility: true,
+      fullHdNoActionsLayout: true,
+
+      preservesTechnicianAvatarData: true,
+      delegatesDetailModal: true,
 
       includesCreateTemplate: true,
       includesDetailTemplate: true,

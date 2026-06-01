@@ -6,9 +6,12 @@
    - Centralizar llamadas HTTP de Incidencias.
    - Adaptar backend /api/tickets al frontend.
    - Normalizar DTOs ligeros para la vista.
+   - Cachear listado en memoria con TTL.
+   - Dedupe de peticiones concurrentes de listado.
    - Crear incidencias con/sin adjuntos.
    - Cargar detalle, comentar, reabrir y subir adjuntos.
    - Abrir/descargar adjuntos mediante endpoint backend.
+   - Mantener cache coherente tras mutaciones.
    - Sin DOM.
    - Sin Router.
    - Sin Auth directo.
@@ -20,7 +23,7 @@
 
 import Http from "../../core/http.js";
 
-export const INCIDENCIAS_API_VERSION = "incidencias.api.minimal.v1";
+export const INCIDENCIAS_API_VERSION = "incidencias.api.cached.v2";
 
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
 
@@ -29,10 +32,16 @@ export const INCIDENCIAS_DETAIL_TIMEOUT = 25000;
 export const INCIDENCIAS_UPLOAD_TIMEOUT = 90000;
 
 export const INCIDENCIAS_LIST_LIMIT = 48;
+export const INCIDENCIAS_CACHE_TTL_MS = 60000;
 
 let loading = false;
 let lastLoadedAt = null;
 let lastError = null;
+let lastCacheKey = "";
+
+let inFlightListPromise = null;
+let inFlightListKey = "";
+
 let lastList = {
   items: [],
   total: 0,
@@ -52,10 +61,6 @@ function isBlob(value) {
 
 function isFile(value) {
   return typeof File !== "undefined" && value instanceof File;
-}
-
-function isFormData(value) {
-  return typeof FormData !== "undefined" && value instanceof FormData;
 }
 
 function safeArray(value) {
@@ -127,6 +132,10 @@ function number(value = 0, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function now() {
+  return Date.now();
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -194,6 +203,185 @@ function encodeSegment(value = "") {
   }
 
   return encodeURIComponent(clean);
+}
+
+function stableSerialize(value = null) {
+  if (value === null || value === undefined) return "";
+  if (typeof value !== "object") return String(value);
+
+  if (Array.isArray(value)) {
+    return `[${value.map(stableSerialize).join(",")}]`;
+  }
+
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${key}:${stableSerialize(value[key])}`)
+    .join(",")}}`;
+}
+
+/* =========================================================
+   CACHE
+========================================================= */
+
+function cacheAgeMs() {
+  if (!lastLoadedAt) return Number.POSITIVE_INFINITY;
+
+  const time = Date.parse(lastLoadedAt);
+
+  if (!Number.isFinite(time)) return Number.POSITIVE_INFINITY;
+
+  return Math.max(0, now() - time);
+}
+
+function buildListQuery({
+  query = {},
+  params = {},
+} = {}) {
+  return {
+    limit: INCIDENCIAS_LIST_LIMIT,
+    includeTotal: true,
+    sortBy: "updatedAt",
+    sortDir: "DESC",
+    ...safeObject(params),
+    ...safeObject(query),
+  };
+}
+
+function listCacheKey(options = {}) {
+  return stableSerialize(buildListQuery(options));
+}
+
+function isCacheFresh(options = {}) {
+  if (!lastLoadedAt) return false;
+
+  const key = listCacheKey(options);
+
+  if (lastCacheKey && key && lastCacheKey !== key) return false;
+
+  const ttl = number(options.ttlMs ?? options.cacheTtlMs, INCIDENCIAS_CACHE_TTL_MS);
+
+  if (ttl <= 0) return false;
+
+  return cacheAgeMs() <= ttl;
+}
+
+function cachedListResponse({
+  cached = true,
+  stale = false,
+  error = null,
+} = {}) {
+  const items = safeArray(lastList.items);
+  const total = number(lastList.total, items.length);
+
+  return {
+    ok: !error,
+    cached,
+    stale,
+
+    items,
+    total,
+    count: items.length,
+
+    loadedAt: lastLoadedAt,
+
+    ...(error ? { error } : {}),
+
+    cache: {
+      hydrated: Boolean(lastLoadedAt),
+      key: lastCacheKey,
+      ageMs: cacheAgeMs(),
+      ttlMs: INCIDENCIAS_CACHE_TTL_MS,
+      fresh: isCacheFresh(),
+    },
+  };
+}
+
+function setListCache({
+  items = [],
+  total = 0,
+  key = "",
+} = {}) {
+  const normalizedItems = normalizeList(items);
+
+  lastList = {
+    items: normalizedItems,
+    total: Math.max(number(total, normalizedItems.length), normalizedItems.length),
+  };
+
+  lastLoadedAt = nowIso();
+  lastCacheKey = key || lastCacheKey || "";
+
+  return lastList;
+}
+
+function getIncidenciaStableId(item = {}) {
+  const raw = safeObject(item);
+
+  return cleanText(
+    first(
+      raw.ticketId,
+      raw.incidenciaId,
+      raw.id,
+      raw._id,
+      raw.code,
+      raw.numero,
+      raw.ticketCode
+    ),
+    ""
+  );
+}
+
+function upsertCachedIncidencia(item = null) {
+  const raw = safeObject(item, null);
+
+  if (!raw) return null;
+
+  const normalized = normalizeIncidencia(raw);
+  const id = getIncidenciaStableId(normalized);
+
+  if (!id) return normalized;
+
+  const map = new Map();
+
+  map.set(id, normalized);
+
+  for (const current of safeArray(lastList.items)) {
+    const currentId = getIncidenciaStableId(current);
+
+    if (!currentId || map.has(currentId)) continue;
+
+    map.set(currentId, current);
+  }
+
+  const items = normalizeList([...map.values()]);
+
+  lastList = {
+    items,
+    total: Math.max(number(lastList.total, items.length), items.length),
+  };
+
+  lastLoadedAt = lastLoadedAt || nowIso();
+
+  return normalized;
+}
+
+export function hasFreshIncidenciasCache(options = {}) {
+  return isCacheFresh(options);
+}
+
+export function getIncidenciasCacheState() {
+  return {
+    hydrated: Boolean(lastLoadedAt),
+    fresh: isCacheFresh(),
+    key: lastCacheKey,
+    ageMs: cacheAgeMs(),
+    ttlMs: INCIDENCIAS_CACHE_TTL_MS,
+    lastLoadedAt,
+    loading,
+    inFlight: Boolean(inFlightListPromise),
+    items: lastList.items.length,
+    total: lastList.total,
+  };
 }
 
 /* =========================================================
@@ -1013,66 +1201,90 @@ async function patchJson(endpoint = "", body = {}, options = {}) {
    LIST / DETAIL
 ========================================================= */
 
-export async function fetchIncidenciasRequest({
-  query = {},
-  params = {},
-  timeout = INCIDENCIAS_TIMEOUT,
-} = {}) {
+export async function fetchIncidenciasRequest(options = {}) {
+  const timeout = options.timeout || INCIDENCIAS_TIMEOUT;
+
   return getJson(INCIDENCIAS_ENDPOINT, {
     timeout,
-    query: {
-      limit: INCIDENCIAS_LIST_LIMIT,
-      includeTotal: true,
-      sortBy: "updatedAt",
-      sortDir: "DESC",
-      ...safeObject(params),
-      ...safeObject(query),
-    },
+    query: buildListQuery(options),
   });
 }
 
 export async function listIncidencias(options = {}) {
+  const force = options.force === true || options.forceRefresh === true;
+  const useCache = options.cache !== false && options.noCache !== true;
+  const returnStaleOnError = options.returnStaleOnError !== false;
+  const key = listCacheKey(options);
+
+  if (!force && useCache && isCacheFresh(options)) {
+    return cachedListResponse({
+      cached: true,
+      stale: false,
+    });
+  }
+
+  if (!force && inFlightListPromise && inFlightListKey === key) {
+    return inFlightListPromise;
+  }
+
   loading = true;
   lastError = null;
+  inFlightListKey = key;
 
-  try {
-    const response = await fetchIncidenciasRequest(options);
-    const rawItems = listFromPayload(response);
-    const items = normalizeList(rawItems);
-    const total = totalFromPayload(response, items.length);
+  inFlightListPromise = (async () => {
+    try {
+      const response = await fetchIncidenciasRequest(options);
+      const rawItems = listFromPayload(response);
+      const items = normalizeList(rawItems);
+      const total = totalFromPayload(response, items.length);
 
-    lastList = {
-      items,
-      total,
-    };
+      setListCache({
+        items,
+        total,
+        key,
+      });
 
-    lastLoadedAt = nowIso();
-
-    return {
-      ok: true,
-      items,
-      total,
-      count: items.length,
-      loadedAt: lastLoadedAt,
-    };
-  } catch (error) {
-    lastError = normalizeError(error);
-
-    if (options.returnStaleOnError !== false && lastList.items.length) {
       return {
-        ok: false,
-        stale: true,
+        ok: true,
+        cached: false,
+        stale: false,
+
         items: lastList.items,
         total: lastList.total,
         count: lastList.items.length,
-        error: lastError,
-      };
-    }
+        loadedAt: lastLoadedAt,
 
-    throw error;
-  } finally {
-    loading = false;
-  }
+        cache: {
+          hydrated: true,
+          key: lastCacheKey,
+          ageMs: 0,
+          ttlMs: INCIDENCIAS_CACHE_TTL_MS,
+          fresh: true,
+        },
+      };
+    } catch (error) {
+      lastError = normalizeError(error);
+
+      if (returnStaleOnError && lastLoadedAt) {
+        return cachedListResponse({
+          cached: true,
+          stale: true,
+          error: lastError,
+        });
+      }
+
+      throw error;
+    } finally {
+      loading = false;
+
+      if (inFlightListKey === key) {
+        inFlightListPromise = null;
+        inFlightListKey = "";
+      }
+    }
+  })();
+
+  return inFlightListPromise;
 }
 
 export async function loadIncidencias(options = {}) {
@@ -1091,8 +1303,13 @@ export async function getIncidenciaByIdRequest(
   });
 
   const detail = detailFromPayload(response);
+  const item = detail ? normalizeIncidencia(detail) : null;
 
-  return detail ? normalizeIncidencia(detail) : null;
+  if (item) {
+    upsertCachedIncidencia(item);
+  }
+
+  return item;
 }
 
 export const loadIncidenciaDetail = getIncidenciaByIdRequest;
@@ -1123,11 +1340,7 @@ export async function createIncidencia(payload = {}, options = {}) {
   const created = await createIncidenciaRequest(payload, options);
 
   if (created) {
-    lastList = {
-      ...lastList,
-      items: normalizeList([created, ...safeArray(lastList.items)]),
-      total: Math.max(number(lastList.total, 0), safeArray(lastList.items).length + 1),
-    };
+    upsertCachedIncidencia(created);
   }
 
   return created;
@@ -1161,7 +1374,13 @@ export async function updateIncidenciaRequest(
 
 export async function updateIncidencia(id = "", payload = {}, options = {}) {
   const updated = await updateIncidenciaRequest(id, payload, options);
-  return updated || getIncidenciaByIdRequest(id);
+  const item = updated || await getIncidenciaByIdRequest(id);
+
+  if (item) {
+    upsertCachedIncidencia(item);
+  }
+
+  return item;
 }
 
 export async function commentIncidenciaRequest(
@@ -1199,7 +1418,13 @@ export async function commentIncidenciaRequest(
 
 export async function commentIncidencia(id = "", message = "", options = {}) {
   const updated = await commentIncidenciaRequest(id, message, options);
-  return updated || getIncidenciaByIdRequest(id);
+  const item = updated || await getIncidenciaByIdRequest(id);
+
+  if (item) {
+    upsertCachedIncidencia(item);
+  }
+
+  return item;
 }
 
 export async function reopenIncidenciaRequest(
@@ -1226,7 +1451,13 @@ export async function reopenIncidenciaRequest(
 
 export async function reopenIncidencia(id = "", options = {}) {
   const updated = await reopenIncidenciaRequest(id, options);
-  return updated || getIncidenciaByIdRequest(id);
+  const item = updated || await getIncidenciaByIdRequest(id);
+
+  if (item) {
+    upsertCachedIncidencia(item);
+  }
+
+  return item;
 }
 
 /* =========================================================
@@ -1266,7 +1497,13 @@ export async function uploadIncidenciaAttachmentsRequest(
 
 export async function uploadIncidenciaAttachments(id = "", files = [], options = {}) {
   const updated = await uploadIncidenciaAttachmentsRequest(id, files, options);
-  return updated || getIncidenciaByIdRequest(id);
+  const item = updated || await getIncidenciaByIdRequest(id);
+
+  if (item) {
+    upsertCachedIncidencia(item);
+  }
+
+  return item;
 }
 
 export async function getIncidenciaAttachmentFileRequest(
@@ -1405,7 +1642,10 @@ export function hydrateIncidenciasFromCache() {
     items: safeArray(lastList.items),
     total: number(lastList.total, safeArray(lastList.items).length),
     loadedAt: lastLoadedAt,
-    hydrated: safeArray(lastList.items).length > 0,
+    hydrated: Boolean(lastLoadedAt),
+    fresh: isCacheFresh(),
+    ageMs: cacheAgeMs(),
+    ttlMs: INCIDENCIAS_CACHE_TTL_MS,
   };
 }
 
@@ -1417,6 +1657,12 @@ export function clearIncidenciasCache() {
 
   lastLoadedAt = null;
   lastError = null;
+  lastCacheKey = "";
+
+  inFlightListPromise = null;
+  inFlightListKey = "";
+
+  loading = false;
 
   return true;
 }
@@ -1428,18 +1674,24 @@ export function getIncidenciasApiSnapshot() {
     endpoint: INCIDENCIAS_ENDPOINT,
 
     loading,
+    inFlight: Boolean(inFlightListPromise),
+
     lastLoadedAt,
     lastError,
 
     cache: {
-      items: lastList.items.length,
-      total: lastList.total,
-      hydrated: lastList.items.length > 0,
+      ...getIncidenciasCacheState(),
+      stats: computeIncidenciasStats(lastList.items),
     },
 
     policy: {
       apiOnly: true,
       singleHttpLayer: true,
+      inMemoryCache: true,
+      ttlCache: true,
+      inFlightDedupe: true,
+      staleOnError: true,
+      mutationCacheSync: true,
       noFetch: true,
       noStore: true,
       noStateExternal: true,
@@ -1477,6 +1729,7 @@ export const IncidenciasApi = Object.freeze({
   timeout: INCIDENCIAS_TIMEOUT,
   detailTimeout: INCIDENCIAS_DETAIL_TIMEOUT,
   uploadTimeout: INCIDENCIAS_UPLOAD_TIMEOUT,
+  cacheTtl: INCIDENCIAS_CACHE_TTL_MS,
 
   normalizeIncidenciaId,
 
@@ -1527,6 +1780,8 @@ export const IncidenciasApi = Object.freeze({
   loadIncidenciasStats,
 
   hydrateIncidenciasFromCache,
+  hasFreshIncidenciasCache,
+  getIncidenciasCacheState,
   clearIncidenciasCache,
 
   getIncidenciasApiSnapshot,

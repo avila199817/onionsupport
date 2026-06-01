@@ -6,7 +6,8 @@
    - Render HTML puro de la vista Incidencias.
    - Header/hero, stats, filtros, búsqueda y listado.
    - Integrar modal de creación y modal de detalle.
-   - Exponer data-action/data-field para index.js.
+   - Exponer data-incidencias-action/data-field para index.js.
+   - Mantener columnas 1:1 con CSS.
    - Sin Auth.
    - Sin Router.
    - Sin HTTP.
@@ -26,7 +27,7 @@ import {
   renderIncidenciasDetailModal,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.v1";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.production.v2";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -45,9 +46,70 @@ const DEFAULT_VISIBLE_ROWS = 20;
 const DEFAULT_CURRENCY = "EUR";
 
 const FILTERS = Object.freeze([
-  { key: "all", label: "Todas" },
-  { key: "open", label: "Abiertas" },
-  { key: "closed", label: "Cerradas" },
+  {
+    key: "all",
+    label: "Todas",
+  },
+  {
+    key: "open",
+    label: "Abiertas",
+  },
+  {
+    key: "closed",
+    label: "Cerradas",
+  },
+]);
+
+export const INCIDENCIAS_TABLE_COLUMNS = Object.freeze([
+  {
+    key: "main",
+    label: "Incidencia",
+    colClass: "incidencias-col--main",
+    thClass: "incidencias-th incidencias-th--main",
+    cellClass: "incidencias-cell incidencias-cell--main",
+  },
+  {
+    key: "status",
+    label: "Estado",
+    colClass: "incidencias-col--status",
+    thClass: "incidencias-th incidencias-th--status",
+    cellClass: "incidencias-cell incidencias-cell--status",
+  },
+  {
+    key: "created",
+    label: "Creada",
+    colClass: "incidencias-col--created",
+    thClass: "incidencias-th incidencias-th--created",
+    cellClass: "incidencias-cell incidencias-cell--date incidencias-cell--created",
+  },
+  {
+    key: "updated",
+    label: "Última novedad",
+    colClass: "incidencias-col--updated",
+    thClass: "incidencias-th incidencias-th--updated",
+    cellClass: "incidencias-cell incidencias-cell--date incidencias-cell--updated",
+  },
+  {
+    key: "amount",
+    label: "Importe",
+    colClass: "incidencias-col--amount incidencias-col--importe",
+    thClass: "incidencias-th incidencias-th--amount incidencias-th--importe",
+    cellClass: "incidencias-cell incidencias-cell--amount incidencias-cell--importe",
+  },
+  {
+    key: "attachments",
+    label: "Adjuntos",
+    colClass: "incidencias-col--attachments",
+    thClass: "incidencias-th incidencias-th--attachments",
+    cellClass: "incidencias-cell incidencias-cell--attachments",
+  },
+  {
+    key: "actions",
+    label: "Acciones",
+    colClass: "incidencias-col--actions",
+    thClass: "incidencias-th incidencias-th--actions",
+    cellClass: "incidencias-cell incidencias-cell--actions",
+  },
 ]);
 
 /* =========================================================
@@ -329,19 +391,6 @@ function formatLastUpdate(value = null) {
   return diffHours <= 72 ? formatRelativeDate(value) : formatDateTime(value);
 }
 
-function formatBytes(bytes = 0) {
-  const size = number(bytes, 0);
-
-  if (!size || size <= 0) return "0 B";
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  if (size < 1024 * 1024 * 1024) {
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
-  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
 function initialsFrom(value = "") {
   return (
     cleanText(value, "")
@@ -352,6 +401,18 @@ function initialsFrom(value = "") {
       .join("")
       .slice(0, 2) || "ON"
   );
+}
+
+function hashText(value = "") {
+  const text = cleanText(value, "");
+  let hash = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return Math.abs(hash);
 }
 
 /* =========================================================
@@ -618,6 +679,21 @@ function getImporteLabel(item = {}) {
   return "—";
 }
 
+function getImporteKey(item = {}) {
+  const amount = getInvoiceTotal(item);
+
+  if (amount > 0) return "money";
+
+  const paymentKey = normalizeKey(first(item.paymentStatus, item.estadoPago, ""));
+
+  if (["paid", "pagada", "pagado"].includes(paymentKey)) return "paid";
+  if (["pending", "pendiente"].includes(paymentKey)) return "pending";
+  if (["partial", "parcial"].includes(paymentKey)) return "partial";
+  if (["overdue", "vencida", "vencido"].includes(paymentKey)) return "overdue";
+
+  return "idle";
+}
+
 function getCreatedAt(item = {}) {
   return first(item.createdAt, item.fechaCreacion, item.created_at, item.lifecycle?.createdAt, null);
 }
@@ -858,7 +934,6 @@ function buildVm(input = {}) {
   return {
     data,
     state,
-
     route,
 
     title: cleanText(data.title, "Tus incidencias y solicitudes"),
@@ -875,6 +950,7 @@ function buildVm(input = {}) {
     visibleCount: visibleItems.length,
     remainingCount: Math.max(0, filteredTotal - visibleItems.length),
     hasMore: data.hasMore === true || filteredTotal > visibleItems.length,
+
     loading,
     refreshing,
     loadingMore,
@@ -919,14 +995,17 @@ function renderAvatar(item = {}) {
   const fullName = getClientName(item);
   const initials = initialsFrom(fullName);
   const avatarUrl = getAvatarUrl(item);
+  const tone = hashText(`${fullName}:${getTicketId(item)}`) % 10;
 
   if (avatarUrl) {
     return `
       <div
         class="incidencias-avatar"
         title="${attr(fullName)}"
+        data-tooltip="${attr(fullName)}"
         data-has-avatar="true"
         data-fallback="false"
+        data-avatar-tone="${attr(String(tone))}"
         data-incidencias-avatar="true"
       >
         <img
@@ -936,6 +1015,7 @@ function renderAvatar(item = {}) {
           loading="lazy"
           decoding="async"
           referrerpolicy="no-referrer"
+          draggable="false"
           data-incidencias-avatar-img="true"
         >
         <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
@@ -947,8 +1027,10 @@ function renderAvatar(item = {}) {
     <div
       class="incidencias-avatar incidencias-avatar--fallback"
       title="${attr(fullName)}"
+      data-tooltip="${attr(fullName)}"
       data-has-avatar="false"
       data-fallback="true"
+      data-avatar-tone="${attr(String(tone))}"
       data-incidencias-avatar="true"
     >
       <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
@@ -962,9 +1044,13 @@ function renderStatusChip(item = {}) {
   const label = getStatusLabel(rawStatus);
 
   return `
-    <span class="incidencias-chip incidencias-chip--${attr(key)}">
+    <span
+      class="incidencias-chip incidencias-chip--${attr(key)}"
+      data-status="${attr(key)}"
+      title="${attr(`Estado · ${label}`)}"
+    >
       <span class="incidencias-chip-dot" aria-hidden="true"></span>
-      ${escapeHtml(label)}
+      <span class="incidencias-chip-label">${escapeHtml(label)}</span>
     </span>
   `;
 }
@@ -974,9 +1060,13 @@ function renderPriorityBadge(item = {}) {
   const label = getPriorityLabel(item);
 
   return `
-    <span class="incidencias-mini-badge incidencias-mini-badge--${attr(key)}" title="Prioridad ${attr(label)}">
+    <span
+      class="incidencias-mini-badge incidencias-mini-badge--${attr(key)}"
+      title="Prioridad ${attr(label)}"
+      data-priority="${attr(key)}"
+    >
       ${key === "critical" || key === "urgent" ? icon("alert") : icon("activity")}
-      ${escapeHtml(label)}
+      <span>${escapeHtml(label)}</span>
     </span>
   `;
 }
@@ -991,6 +1081,7 @@ function renderAssignedAvatar(item = {}) {
       <span
         class="incidencias-agent-avatar incidencias-agent-avatar--fallback"
         title="${attr(assigned)}"
+        data-tooltip="${attr(assigned)}"
         data-technician-avatar="true"
         data-has-avatar="false"
         data-fallback="true"
@@ -1005,6 +1096,7 @@ function renderAssignedAvatar(item = {}) {
     <span
       class="incidencias-agent-avatar incidencias-agent-avatar--image"
       title="${attr(assigned)}"
+      data-tooltip="${attr(assigned)}"
       data-technician-avatar="true"
       data-has-avatar="true"
       data-fallback="false"
@@ -1042,20 +1134,17 @@ function renderAssignedBadge(item = {}) {
 
 function renderImporteChip(item = {}) {
   const label = getImporteLabel(item);
-  const isMoney = /€|EUR|\$|USD|£|GBP/i.test(label);
-
-  if (isMoney) {
-    return `
-      <span class="incidencias-importe incidencias-importe--money">
-        ${icon("euro")}
-        ${escapeHtml(label)}
-      </span>
-    `;
-  }
+  const key = getImporteKey(item);
+  const isMoney = key === "money";
 
   return `
-    <span class="incidencias-importe incidencias-importe--status">
-      ${escapeHtml(label)}
+    <span
+      class="incidencias-importe incidencias-importe--${attr(key)}${isMoney ? " incidencias-importe--money" : ""}"
+      data-amount-state="${attr(key)}"
+      title="${attr(`Importe · ${label}`)}"
+    >
+      ${isMoney ? icon("euro") : ""}
+      <span>${escapeHtml(label)}</span>
     </span>
   `;
 }
@@ -1076,7 +1165,6 @@ function renderActionButton({
       type="button"
       class="incidencias-detail-btn${loading ? " is-loading" : ""}"
       data-incidencias-action="${attr(action)}"
-      data-action="${attr(action)}"
       data-ticket-id="${attr(ticketId)}"
       data-incidencia-id="${attr(ticketId)}"
       aria-label="${attr(label)}"
@@ -1107,7 +1195,7 @@ function renderHeader(vm = {}) {
   const updatedAt = first(vm.items[0]?.lastActivityAt, vm.items[0]?.updatedAt, vm.items[0]?.createdAt, null);
 
   return `
-    <section class="incidencias-hero">
+    <section class="incidencias-hero" data-incidencias-hero="true">
       <div class="incidencias-hero-top">
         <div class="incidencias-hero-copy">
           <h1 class="incidencias-page-title">${escapeHtml(vm.title)}</h1>
@@ -1120,7 +1208,6 @@ function renderHeader(vm = {}) {
             id="incidencias-create-btn"
             class="incidencias-btn incidencias-btn--create${vm.creating ? " is-loading" : ""}"
             data-incidencias-action="${INCIDENCIAS_ACTIONS.CREATE_OPEN}"
-            data-action="${INCIDENCIAS_ACTIONS.CREATE_OPEN}"
             ${htmlAttrs({
               disabled: vm.creating,
               "aria-disabled": vm.creating ? "true" : false,
@@ -1139,7 +1226,6 @@ function renderHeader(vm = {}) {
             id="incidencias-refresh-btn"
             class="incidencias-btn incidencias-btn--accent incidencias-btn--refresh${vm.refreshing ? " is-loading" : ""}"
             data-incidencias-action="${INCIDENCIAS_ACTIONS.REFRESH}"
-            data-action="${INCIDENCIAS_ACTIONS.REFRESH}"
             ${htmlAttrs({
               disabled: vm.refreshing || vm.loading,
               "aria-disabled": vm.refreshing || vm.loading ? "true" : false,
@@ -1156,32 +1242,47 @@ function renderHeader(vm = {}) {
       </div>
 
       <div class="incidencias-hero-meta">
-        <span class="incidencias-meta-pill">${icon("ticket")}${escapeHtml(`${formatNumber(vm.total)} solicitudes registradas`)}</span>
-        <span class="incidencias-meta-pill">${icon("refresh")}${updatedAt ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span>
-        <span class="incidencias-meta-pill">${icon("paperclip")}${escapeHtml(`${formatNumber(stats.attachments)} adjuntos`)}</span>
-        <span class="incidencias-meta-pill">${icon("euro")}${escapeHtml(formatMoney(stats.invoiceTotal, DEFAULT_CURRENCY))}</span>
+        <span class="incidencias-meta-pill" data-meta="total">
+          ${icon("ticket")}
+          <span>${escapeHtml(`${formatNumber(vm.total)} solicitudes registradas`)}</span>
+        </span>
+
+        <span class="incidencias-meta-pill" data-meta="updated">
+          ${icon("refresh")}
+          <span>${updatedAt ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span>
+        </span>
+
+        <span class="incidencias-meta-pill" data-meta="attachments">
+          ${icon("paperclip")}
+          <span>${escapeHtml(`${formatNumber(stats.attachments)} adjuntos`)}</span>
+        </span>
+
+        <span class="incidencias-meta-pill" data-meta="amount">
+          ${icon("euro")}
+          <span>${escapeHtml(formatMoney(stats.invoiceTotal, DEFAULT_CURRENCY))}</span>
+        </span>
       </div>
 
       <div class="incidencias-stats">
-        <article class="incidencias-stat-card incidencias-stat-card--open">
+        <article class="incidencias-stat-card incidencias-stat-card--open" data-stat="open">
           <div class="incidencias-stat-label">Abiertas</div>
           <div class="incidencias-stat-value">${escapeHtml(formatNumber(stats.open))}</div>
           <div class="incidencias-stat-text">Solicitudes activas, pendientes o en proceso.</div>
         </article>
 
-        <article class="incidencias-stat-card incidencias-stat-card--closed">
+        <article class="incidencias-stat-card incidencias-stat-card--closed" data-stat="closed">
           <div class="incidencias-stat-label">Cerradas</div>
           <div class="incidencias-stat-value">${escapeHtml(formatNumber(stats.closed))}</div>
           <div class="incidencias-stat-text">Casos resueltos o cerrados.</div>
         </article>
 
-        <article class="incidencias-stat-card incidencias-stat-card--urgent">
+        <article class="incidencias-stat-card incidencias-stat-card--urgent" data-stat="urgent">
           <div class="incidencias-stat-label">Urgentes</div>
           <div class="incidencias-stat-value">${escapeHtml(formatNumber(stats.urgent))}</div>
           <div class="incidencias-stat-text">Incidencias marcadas como urgentes o críticas.</div>
         </article>
 
-        <article class="incidencias-stat-card incidencias-stat-card--amount">
+        <article class="incidencias-stat-card incidencias-stat-card--amount" data-stat="amount">
           <div class="incidencias-stat-label">Importe asociado</div>
           <div class="incidencias-stat-value">${escapeHtml(formatMoney(stats.invoiceTotal, DEFAULT_CURRENCY))}</div>
           <div class="incidencias-stat-text">Total vinculado a facturas visibles.</div>
@@ -1221,7 +1322,6 @@ function renderSearch(vm = {}) {
               type="button"
               class="incidencias-search-clear"
               data-incidencias-action="${INCIDENCIAS_ACTIONS.CLEAR_SEARCH}"
-              data-action="${INCIDENCIAS_ACTIONS.CLEAR_SEARCH}"
               aria-label="Limpiar búsqueda"
             >
               ${icon("close")}
@@ -1246,7 +1346,6 @@ function renderFilters(vm = {}) {
               type="button"
               class="incidencias-filter-pill${active ? " is-active" : ""}"
               data-incidencias-action="${INCIDENCIAS_ACTIONS.FILTER}"
-              data-action="${INCIDENCIAS_ACTIONS.FILTER}"
               data-filter="${attr(filter.key)}"
               data-filter-status="${attr(filter.key)}"
               aria-pressed="${active ? "true" : "false"}"
@@ -1267,6 +1366,37 @@ function renderFilters(vm = {}) {
    TABLE
 ========================================================= */
 
+function renderTableColgroup() {
+  return `
+    <colgroup>
+      ${INCIDENCIAS_TABLE_COLUMNS.map((column) => `
+        <col
+          class="incidencias-col ${attr(column.colClass)}"
+          data-column="${attr(column.key)}"
+        >
+      `).join("")}
+    </colgroup>
+  `;
+}
+
+function renderTableHead() {
+  return `
+    <thead>
+      <tr>
+        ${INCIDENCIAS_TABLE_COLUMNS.map((column) => `
+          <th
+            class="${attr(column.thClass)}"
+            scope="col"
+            data-column="${attr(column.key)}"
+          >
+            ${escapeHtml(column.label)}
+          </th>
+        `).join("")}
+      </tr>
+    </thead>
+  `;
+}
+
 function renderRow(item = {}, vm = {}) {
   const ticketId = getTicketId(item);
   const subject = getSubject(item);
@@ -1280,6 +1410,7 @@ function renderRow(item = {}, vm = {}) {
   const attachmentsCount = getAttachmentsCount(item);
   const category = getCategory(item);
   const statusKey = getStatusKey(getStatusRaw(item));
+  const priorityKey = getPriorityKey(item);
   const opening = vm.openingTicketId === ticketId;
 
   return `
@@ -1289,11 +1420,13 @@ function renderRow(item = {}, vm = {}) {
       data-ticket-id="${attr(ticketId)}"
       data-incidencia-id="${attr(ticketId)}"
       data-detail-target="true"
+      data-status="${attr(statusKey)}"
+      data-priority="${attr(priorityKey)}"
       role="button"
       tabindex="0"
       aria-label="Abrir detalle de incidencia ${attr(ticketId)}"
     >
-      <td class="incidencias-cell incidencias-cell--main">
+      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[0].cellClass)}" data-column="main">
         <div class="incidencias-main">
           ${renderAvatar(item)}
 
@@ -1320,37 +1453,37 @@ function renderRow(item = {}, vm = {}) {
         </div>
       </td>
 
-      <td class="incidencias-cell incidencias-cell--status">
+      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[1].cellClass)}" data-column="status">
         ${renderStatusChip(item)}
       </td>
 
-      <td class="incidencias-cell incidencias-cell--date">
+      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[2].cellClass)}" data-column="created">
         <span class="incidencias-date-inline" title="${attr(createdAt)}">
           ${escapeHtml(createdAt)}
         </span>
       </td>
 
-      <td class="incidencias-cell incidencias-cell--date">
+      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[3].cellClass)}" data-column="updated">
         <span class="incidencias-date-inline" title="${attr(formatDateTime(updatedAtRaw))}">
           ${escapeHtml(updatedAt)}
         </span>
       </td>
 
-      <td class="incidencias-cell incidencias-cell--importe">
+      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[4].cellClass)}" data-column="amount">
         ${renderImporteChip(item)}
       </td>
 
-      <td class="incidencias-cell incidencias-cell--attachments">
+      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[5].cellClass)}" data-column="attachments">
         <span
           class="incidencias-attachments-pill"
           title="${attr(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}"
         >
           ${icon("paperclip")}
-          ${escapeHtml(formatNumber(attachmentsCount))}
+          <span>${escapeHtml(formatNumber(attachmentsCount))}</span>
         </span>
       </td>
 
-      <td class="incidencias-cell incidencias-cell--actions">
+      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[6].cellClass)}" data-column="actions">
         ${renderActionButton({
           ticketId,
           loading: opening,
@@ -1435,7 +1568,6 @@ function renderEmptyState(vm = {}) {
               type="button"
               class="incidencias-btn incidencias-btn--primary"
               data-incidencias-action="${INCIDENCIAS_ACTIONS.REFRESH}"
-              data-action="${INCIDENCIAS_ACTIONS.REFRESH}"
             >
               ${icon("refresh")}
               <span class="incidencias-btn-text">Reintentar</span>
@@ -1447,7 +1579,6 @@ function renderEmptyState(vm = {}) {
                 type="button"
                 class="incidencias-btn"
                 data-incidencias-action="${INCIDENCIAS_ACTIONS.CLEAR_FILTERS}"
-                data-action="${INCIDENCIAS_ACTIONS.CLEAR_FILTERS}"
               >
                 ${icon("close")}
                 <span class="incidencias-btn-text">Limpiar filtros</span>
@@ -1491,7 +1622,6 @@ function renderFeedFooter(vm = {}) {
         type="button"
         class="incidencias-load-more-btn${vm.loadingMore ? " is-loading" : ""}"
         data-incidencias-action="${INCIDENCIAS_ACTIONS.LOAD_MORE}"
-        data-action="${INCIDENCIAS_ACTIONS.LOAD_MORE}"
         data-incidencias-load-more-button="true"
         ${htmlAttrs({
           disabled: vm.loadingMore,
@@ -1520,6 +1650,27 @@ function renderFeedFooter(vm = {}) {
         aria-hidden="true"
       ></div>
     </div>
+  `;
+}
+
+function renderTable(vm = {}) {
+  if (!vm.visibleItems.length) {
+    return renderEmptyState(vm);
+  }
+
+  return `
+    <div class="incidencias-table-shell">
+      <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
+        ${renderTableColgroup()}
+        ${renderTableHead()}
+
+        <tbody>
+          ${vm.visibleItems.map((item) => renderRow(item, vm)).join("")}
+        </tbody>
+      </table>
+    </div>
+
+    ${renderFeedFooter(vm)}
   `;
 }
 
@@ -1566,44 +1717,7 @@ function renderHistory(vm = {}) {
               data-incidencias-scroll-mode="infinite"
             >
               ${showRefreshOverlay ? renderRefreshOverlay() : ""}
-
-              ${
-                vm.visibleItems.length
-                  ? `
-                    <div class="incidencias-table-shell">
-                      <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
-                        <colgroup>
-                          <col class="incidencias-col incidencias-col--main">
-                          <col class="incidencias-col incidencias-col--status">
-                          <col class="incidencias-col incidencias-col--created">
-                          <col class="incidencias-col incidencias-col--updated">
-                          <col class="incidencias-col incidencias-col--amount">
-                          <col class="incidencias-col incidencias-col--attachments">
-                          <col class="incidencias-col incidencias-col--actions">
-                        </colgroup>
-
-                        <thead>
-                          <tr>
-                            <th>Incidencia</th>
-                            <th>Estado</th>
-                            <th>Creada</th>
-                            <th>Última novedad</th>
-                            <th>Importe</th>
-                            <th>Adjuntos</th>
-                            <th>Acciones</th>
-                          </tr>
-                        </thead>
-
-                        <tbody>
-                          ${vm.visibleItems.map((item) => renderRow(item, vm)).join("")}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    ${renderFeedFooter(vm)}
-                  `
-                  : renderEmptyState(vm)
-              }
+              ${renderTable(vm)}
             </div>
           `
       }
@@ -1623,9 +1737,12 @@ export function renderIncidenciasLoadingState(input = {}) {
 
   return `
     <section
-      class="incidencias-view-root incidencias-view-root--loading"
+      class="incidencias-view-root incidencias-view-root--loading is-loading"
       data-incidencias-scope="true"
       data-template-version="${attr(INCIDENCIAS_TEMPLATE_VERSION)}"
+      data-total="${attr(String(vm.total))}"
+      data-visible="${attr(String(vm.visibleCount))}"
+      data-filter="${attr(vm.filter)}"
       aria-busy="true"
     >
       ${renderHeader(vm)}
@@ -1637,9 +1754,10 @@ export function renderIncidenciasLoadingState(input = {}) {
 export function renderIncidenciasErrorState(message = "No se pudieron cargar las incidencias.") {
   return `
     <section
-      class="incidencias-view-root incidencias-view-root--error"
+      class="incidencias-view-root incidencias-view-root--error has-error"
       data-incidencias-scope="true"
       data-template-version="${attr(INCIDENCIAS_TEMPLATE_VERSION)}"
+      aria-busy="false"
     >
       <section class="incidencias-error">
         <h3 class="incidencias-error-title">No se pudo renderizar la vista de incidencias</h3>
@@ -1649,7 +1767,6 @@ export function renderIncidenciasErrorState(message = "No se pudieron cargar las
           type="button"
           class="incidencias-btn incidencias-btn--primary"
           data-incidencias-action="${INCIDENCIAS_ACTIONS.REFRESH}"
-          data-action="${INCIDENCIAS_ACTIONS.REFRESH}"
         >
           ${icon("refresh")}
           <span class="incidencias-btn-text">Reintentar</span>
@@ -1665,6 +1782,8 @@ export function renderIncidenciasErrorState(message = "No se pudieron cargar las
 
 export function renderIncidenciasTemplate(input = {}) {
   const vm = buildVm(input);
+  const admin = input.admin === true || input.role === "admin" || vm.data.admin === true;
+  const role = input.role || vm.data.role || "";
 
   return `
     <section
@@ -1677,25 +1796,33 @@ export function renderIncidenciasTemplate(input = {}) {
       )}"
       data-incidencias-scope="true"
       data-template-version="${attr(INCIDENCIAS_TEMPLATE_VERSION)}"
+      data-route="${attr(vm.route)}"
       data-total="${attr(String(vm.total))}"
       data-visible="${attr(String(vm.visibleCount))}"
       data-filter="${attr(vm.filter)}"
+      data-search-active="${vm.search ? "true" : "false"}"
+      data-loading="${vm.loading ? "true" : "false"}"
+      data-refreshing="${vm.refreshing ? "true" : "false"}"
       aria-busy="${vm.loading || vm.refreshing ? "true" : "false"}"
     >
-      ${vm.error ? `
-        <div class="incidencias-alert incidencias-alert--error" role="alert">
-          ${icon("alert")}
-          <span>${escapeHtml(vm.error)}</span>
-        </div>
-      ` : ""}
+      ${
+        vm.error
+          ? `
+            <div class="incidencias-alert incidencias-alert--error" role="alert">
+              ${icon("alert")}
+              <span>${escapeHtml(vm.error)}</span>
+            </div>
+          `
+          : ""
+      }
 
       ${renderHeader(vm)}
       ${renderHistory(vm)}
 
       ${renderIncidenciasCreateModal({
         ...vm.createModal,
-        admin: input.admin === true || input.role === "admin" || vm.data.admin === true,
-        role: input.role || vm.data.role || "",
+        admin,
+        role,
       })}
 
       ${renderIncidenciasDetailModal(vm.detailModal)}
@@ -1713,9 +1840,16 @@ export function getIncidenciasTemplateSnapshot() {
 
     actions: INCIDENCIAS_ACTIONS,
     filters: FILTERS,
+    tableColumns: INCIDENCIAS_TABLE_COLUMNS.map((column) => ({
+      key: column.key,
+      label: column.label,
+      colClass: column.colClass,
+      cellClass: column.cellClass,
+    })),
 
     policy: {
       templateOnly: true,
+
       noAuth: true,
       noRouter: true,
       noHttp: true,
@@ -1725,6 +1859,10 @@ export function getIncidenciasTemplateSnapshot() {
       noListeners: true,
       noDomApi: true,
       noToast: true,
+
+      centralizedTableColumns: true,
+      noGenericDataActionDuplication: true,
+      amountImporteClassCompatibility: true,
 
       includesCreateTemplate: true,
       includesDetailTemplate: true,

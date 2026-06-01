@@ -57,7 +57,7 @@ import {
   validateDetailUpdate,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.fast.v2";
+export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.fast.v3";
 export const INCIDENCIAS_VIEW_VERSION = INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
@@ -178,6 +178,56 @@ function getTicketId(item = {}) {
   );
 }
 
+function shouldPreserveExisting(value) {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "string" && value.trim() === "") return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  if (isObject(value) && !Object.keys(value).length) return true;
+
+  return false;
+}
+
+function mergeTicketData(current = {}, next = {}) {
+  const base = safeObject(current, {});
+  const incoming = safeObject(next, {});
+  const output = { ...base };
+
+  for (const [key, value] of Object.entries(incoming)) {
+    const previous = output[key];
+
+    if (isObject(previous) && isObject(value)) {
+      output[key] = mergeTicketData(previous, value);
+      continue;
+    }
+
+    output[key] =
+      shouldPreserveExisting(value) && previous !== undefined && previous !== null
+        ? previous
+        : value;
+  }
+
+  return output;
+}
+
+function ticketSortTime(item = {}) {
+  const timestamp = Date.parse(
+    first(
+      item.lastActivityAt,
+      item.updatedAt,
+      item.modifiedAt,
+      item.closedAt,
+      item.createdAt,
+      item.lifecycle?.lastActivityAt,
+      item.lifecycle?.updatedAt,
+      item.lifecycle?.closedAt,
+      item.lifecycle?.createdAt,
+      0
+    )
+  );
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function upsertByTicketId(items = [], item = null) {
   const next = safeObject(item, null);
 
@@ -187,11 +237,14 @@ function upsertByTicketId(items = [], item = null) {
 
   if (!id) return safeArray(items);
 
+  const currentItems = safeArray(items);
+  const existing = currentItems.find((current) => getTicketId(current) === id) || null;
+  const merged = existing ? mergeTicketData(existing, next) : next;
   const map = new Map();
 
-  map.set(id, next);
+  map.set(id, merged);
 
-  for (const current of safeArray(items)) {
+  for (const current of currentItems) {
     const currentId = getTicketId(current);
 
     if (!currentId || map.has(currentId)) continue;
@@ -200,10 +253,14 @@ function upsertByTicketId(items = [], item = null) {
   }
 
   return [...map.values()].sort((a, b) => {
-    const left = Date.parse(a.lastActivityAt || a.updatedAt || a.createdAt || 0);
-    const right = Date.parse(b.lastActivityAt || b.updatedAt || b.createdAt || 0);
+    const diff = ticketSortTime(b) - ticketSortTime(a);
 
-    return right - left;
+    if (diff !== 0) return diff;
+
+    return getTicketId(b).localeCompare(getTicketId(a), "es", {
+      numeric: true,
+      sensitivity: "base",
+    });
   });
 }
 
@@ -324,12 +381,26 @@ function normalizeUserResult(user = {}) {
     first(raw.displayName, raw.fullName, raw.name, raw.nombre, raw.username),
     "Usuario"
   );
+  const email = cleanText(
+    first(
+      raw.email,
+      raw.emailLower,
+      raw.userEmail,
+      raw.mail,
+      raw.profile?.email,
+      raw.auth?.email,
+      raw.lookup?.emailLower
+    ),
+    ""
+  ).toLowerCase();
 
   return {
     id,
     userId: id,
     displayName: name,
     name,
+    email,
+    emailLower: email,
     username: cleanText(first(raw.username, raw.userName, raw.slug), ""),
     role: normalizeRole(first(raw.role, raw.rol, raw.roles, "user")) || "user",
     avatarUrl: cleanText(first(raw.avatarUrl, raw.avatar, raw.picture, raw.photoUrl, raw.profile?.avatarUrl), ""),
@@ -915,15 +986,46 @@ function createIncidenciasController(host = null, context = {}) {
 
   function selectCreateUser(node = null) {
     const userId = cleanText(node?.dataset?.userId, "");
-    const userName = cleanText(node?.dataset?.userName, "");
-    const userAvatar = cleanText(node?.dataset?.userAvatar, "");
 
     if (!userId) return false;
+
+    const selected =
+      safeArray(createModal.userSearch.results).find((user) => {
+        return cleanText(first(user.userId, user.id), "") === userId;
+      }) || {};
+
+    const userName = cleanText(
+      first(
+        node?.dataset?.userName,
+        selected.displayName,
+        selected.name,
+        selected.username
+      ),
+      "Usuario"
+    );
+    const userEmail = cleanText(
+      first(
+        node?.dataset?.userEmail,
+        node?.dataset?.email,
+        selected.email,
+        selected.emailLower
+      ),
+      ""
+    ).toLowerCase();
+    const userAvatar = cleanText(
+      first(
+        node?.dataset?.userAvatar,
+        selected.avatarUrl,
+        selected.avatar
+      ),
+      ""
+    );
 
     createModal.form = {
       ...createModal.form,
       targetUserId: userId,
       targetUserName: userName,
+      targetUserEmail: userEmail,
       targetUserAvatar: userAvatar,
     };
 
@@ -937,6 +1039,8 @@ function createIncidenciasController(host = null, context = {}) {
         userId,
         displayName: userName,
         name: userName,
+        email: userEmail,
+        emailLower: userEmail,
         avatarUrl: userAvatar,
       },
       empty: false,
@@ -1013,6 +1117,7 @@ function createIncidenciasController(host = null, context = {}) {
         description: readField(formNode, "description"),
         targetUserId: readField(formNode, "targetUserId") || createModal.form.targetUserId,
         targetUserName: readField(formNode, "targetUserName") || createModal.form.targetUserName,
+        targetUserEmail: readField(formNode, "targetUserEmail") || createModal.form.targetUserEmail,
         targetUserAvatar: readField(formNode, "targetUserAvatar") || createModal.form.targetUserAvatar,
       };
     }
@@ -1133,8 +1238,12 @@ function createIncidenciasController(host = null, context = {}) {
         return false;
       }
 
+      const mergedDetail = detail
+        ? mergeTicketData(local || {}, detail)
+        : local;
+
       detailModal.open = true;
-      detailModal.detail = detail || local;
+      detailModal.detail = mergedDetail;
       detailModal.submitting = false;
       detailModal.commentDraft = "";
       detailModal.pendingFiles = [];
@@ -1142,8 +1251,8 @@ function createIncidenciasController(host = null, context = {}) {
       detailModal.feedbackType = "info";
       detailModal.previewFile = null;
 
-      if (detail) {
-        items = upsertByTicketId(items, detail);
+      if (mergedDetail) {
+        items = upsertByTicketId(items, mergedDetail);
       }
 
       openingTicketId = "";
@@ -1271,6 +1380,8 @@ function createIncidenciasController(host = null, context = {}) {
       } else if (detailModal.pendingFiles.length) {
         nextDetail = await reopenIncidencia(ticketId) || nextDetail;
       }
+
+      nextDetail = mergeTicketData(detailModal.detail || {}, nextDetail || {});
 
       detailModal.submitting = false;
       detailModal.detail = nextDetail;

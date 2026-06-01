@@ -5,6 +5,8 @@
    Responsabilidad:
    - Tabla mínima de rutas SPA.
    - Vistas lazy.
+   - Cachear módulos de vista cargados.
+   - Exponer preload de vistas para navegación rápida.
    - Resolver /@{slug} hacia ruta interna privada.
    - Marcar rutas públicas, privadas, admin y token routes.
    - Rutas públicas viven en /src/views/public/*
@@ -30,7 +32,7 @@ import {
   getUserScopedRouteInfo as configGetUserScopedRouteInfo,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.minimal.v4";
+export const ROUTES_VERSION = "routes.minimal.v5";
 
 /* =========================================================
    PATHS / NAMES
@@ -140,7 +142,12 @@ function normalizePathList(paths = []) {
 
     if (!clean) continue;
     if (clean.startsWith(USER_HOME_PREFIX)) continue;
-    if (isBlockedRoutePath(clean)) continue;
+
+    try {
+      if (isBlockedRoutePath(clean)) continue;
+    } catch {
+      continue;
+    }
 
     seen.add(clean);
   }
@@ -180,7 +187,7 @@ function tokenRoutePathsFromConfig() {
 }
 
 function pickView(module, names = []) {
-  for (const name of names) {
+  for (const name of Array.isArray(names) ? names : []) {
     if (module?.[name]) return module[name];
   }
 
@@ -281,7 +288,12 @@ export function resolveRouteLookupPath(path = "/") {
   const clean = normalizePath(path);
 
   if (!clean) return "";
-  if (isBlockedRoutePath(clean)) return "";
+
+  try {
+    if (isBlockedRoutePath(clean)) return "";
+  } catch {
+    return "";
+  }
 
   const scoped = getUserScopedRouteInfo(clean);
 
@@ -440,6 +452,102 @@ function createRender(viewKey = "") {
 }
 
 /* =========================================================
+   VIEW PRELOAD API
+========================================================= */
+
+export function hasRouteViewLoader(viewKey = "") {
+  const key = cleanName(viewKey);
+  return Boolean(VIEW_LOADERS[key]);
+}
+
+export function isRouteViewLoaded(viewKey = "") {
+  const key = cleanName(viewKey);
+  return VIEW_CACHE.has(key);
+}
+
+export function preloadRouteView(viewKey = "") {
+  const key = cleanName(viewKey);
+
+  if (!VIEW_LOADERS[key]) {
+    return Promise.resolve(null);
+  }
+
+  return loadView(key).catch(() => null);
+}
+
+export function preloadRouteByPath(path = "/") {
+  const route = getRouteByPath(path);
+
+  if (!route?.viewKey) {
+    return Promise.resolve(null);
+  }
+
+  return preloadRouteView(route.viewKey);
+}
+
+export function preloadRouteByName(name = "") {
+  const route = getRouteByName(name);
+
+  if (!route?.viewKey) {
+    return Promise.resolve(null);
+  }
+
+  return preloadRouteView(route.viewKey);
+}
+
+export function preloadRouteByViewKey(viewKey = "") {
+  return preloadRouteView(viewKey);
+}
+
+export function preloadRoutes(values = []) {
+  const list = Array.isArray(values) ? values : [values];
+  const promises = [];
+
+  for (const value of list) {
+    if (isObject(value)) {
+      if (value.viewKey) {
+        promises.push(preloadRouteView(value.viewKey));
+        continue;
+      }
+
+      if (value.path) {
+        promises.push(preloadRouteByPath(value.path));
+        continue;
+      }
+
+      if (value.name) {
+        promises.push(preloadRouteByName(value.name));
+        continue;
+      }
+    }
+
+    const text = cleanText(value, "");
+
+    if (!text) continue;
+
+    if (text.startsWith("/")) {
+      promises.push(preloadRouteByPath(text));
+    } else {
+      promises.push(preloadRouteView(text));
+    }
+  }
+
+  return Promise.allSettled(promises);
+}
+
+export function preloadPrivateRouteViews() {
+  return preloadRoutes(
+    getImmutableRoutes()
+      .filter((route) => route.public !== true)
+      .map((route) => route.viewKey)
+  );
+}
+
+export function getLoadedRouteViewKeys() {
+  return [...VIEW_CACHE.keys()];
+}
+
+/* =========================================================
    ROUTES
 ========================================================= */
 
@@ -522,6 +630,7 @@ function createRoute({
     order: Number(order) || 0,
 
     render: createRender(finalViewKey),
+    preload: () => preloadRouteView(finalViewKey),
   });
 }
 
@@ -661,7 +770,13 @@ export function resetRoutesCacheForTests() {
 export function getRouteByPath(path = "/") {
   const lookup = resolveRouteLookupPath(path);
 
-  if (!lookup || isBlockedRoutePath(lookup)) return null;
+  if (!lookup) return null;
+
+  try {
+    if (isBlockedRoutePath(lookup)) return null;
+  } catch {
+    return null;
+  }
 
   return getImmutableRoutes().find((route) => route.path === lookup) || null;
 }
@@ -735,6 +850,10 @@ export function validateRoutesTable(_core = null, routes = getImmutableRoutes())
       throw new Error(`Ruta bloqueada declarada incorrectamente: ${route.path}`);
     }
 
+    if (!VIEW_LOADERS[route.viewKey]) {
+      throw new Error(`Loader inexistente para vista: ${route.viewKey}`);
+    }
+
     seenPaths.add(route.path);
     seenNames.add(route.name);
   }
@@ -759,6 +878,7 @@ export function getRoutesSnapshot() {
     tokenRoute: route.tokenRoute,
     hideShell: route.hideShell,
     showInSidebar: route.showInSidebar,
+    loaded: isRouteViewLoaded(route.viewKey),
   }));
 }
 
@@ -782,6 +902,7 @@ export function getRouteDebug(path = "/") {
           guestOnly: route.guestOnly,
           adminOnly: route.adminOnly,
           tokenRoute: route.tokenRoute,
+          loaded: isRouteViewLoaded(route.viewKey),
         }
       : null,
   };
@@ -799,7 +920,19 @@ export function getRoutesIntegritySnapshot() {
     userHomePrefix: USER_HOME_PREFIX,
     publicAuthRoutes: [...PUBLIC_AUTH_ROUTES],
     tokenRoutePaths: [...TOKEN_ROUTE_PATHS],
-    loadedViews: [...VIEW_CACHE.keys()],
+    loadedViews: getLoadedRouteViewKeys(),
+    policy: {
+      routesOnly: true,
+      lazyViews: true,
+      preloadApi: true,
+      noAuth: true,
+      noGuards: true,
+      noHistory: true,
+      noStorage: true,
+      noToast: true,
+      noShell: true,
+      noInventedRoutes: true,
+    },
   };
 }
 
@@ -846,6 +979,16 @@ export default {
   isTokenPublicRoutePath,
   isPrivateRoutePath,
   isAdminRoutePath,
+
+  hasRouteViewLoader,
+  isRouteViewLoaded,
+  preloadRouteView,
+  preloadRouteByPath,
+  preloadRouteByName,
+  preloadRouteByViewKey,
+  preloadRoutes,
+  preloadPrivateRouteViews,
+  getLoadedRouteViewKeys,
 
   getRoutesSnapshot,
   getRouteDebug,

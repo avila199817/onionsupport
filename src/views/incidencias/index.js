@@ -15,6 +15,7 @@
    - Abrir/descargar adjuntos.
    - Renderizar modales en isla única.
    - Cero reconstrucción del modal durante búsqueda admin.
+   - Cero reconstrucción del modal al adjuntar/quitar archivos en create.
    - Cero reconstrucción del modal por renders de vista/listado.
    - Delegar búsqueda de usuarios en incidencias.api.js.
    - Delegar HTML en templates.
@@ -66,7 +67,7 @@ import {
   validateDetailUpdate,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.lean.v13.zero-modal-flicker";
+export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.lean.v14.zero-create-flicker";
 export const INCIDENCIAS_VIEW_VERSION = INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
@@ -897,7 +898,7 @@ function createIncidenciasController(host = null, context = {}) {
     return true;
   }
 
-  function patchCreateUserDom(options = {}) {
+  function patchCreateDomSlots(options = {}) {
     if (destroyed || !isBrowser() || !createModal.open) return false;
 
     const target = ensureModalHost();
@@ -914,11 +915,14 @@ function createIncidenciasController(host = null, context = {}) {
 
     if (!nextRoot) return false;
 
-    const selectors = [
-      "[data-create-selected-user-slot='true']",
-      "[data-create-user-search-slot='true']",
-      ".inc-create-target-error-slot",
-    ];
+    const selectors = safeArray(options.selectors).length
+      ? safeArray(options.selectors)
+      : [
+          "[data-create-selected-user-slot='true']",
+          "[data-create-user-search-slot='true']",
+          ".inc-create-target-error-slot",
+          "[data-create-files-card='true']",
+        ];
 
     for (const selector of selectors) {
       const currentNode = currentRoot.querySelector(selector);
@@ -971,6 +975,26 @@ function createIncidenciasController(host = null, context = {}) {
     }
 
     return true;
+  }
+
+  function patchCreateUserDom(options = {}) {
+    return patchCreateDomSlots({
+      ...options,
+      selectors: [
+        "[data-create-selected-user-slot='true']",
+        "[data-create-user-search-slot='true']",
+        ".inc-create-target-error-slot",
+      ],
+    });
+  }
+
+  function patchCreateFilesDom(options = {}) {
+    return patchCreateDomSlots({
+      ...options,
+      selectors: [
+        "[data-create-files-card='true']",
+      ],
+    });
   }
 
   function renderNow(options = {}) {
@@ -1471,7 +1495,7 @@ function createIncidenciasController(host = null, context = {}) {
 
     createModal.serverError = "";
 
-    renderModals({
+    patchCreateFilesDom({
       preserveFocus: true,
     });
 
@@ -1485,7 +1509,7 @@ function createIncidenciasController(host = null, context = {}) {
       (_, currentIndex) => currentIndex !== index
     );
 
-    renderModals({
+    patchCreateFilesDom({
       preserveFocus: true,
     });
 
@@ -2210,7 +2234,10 @@ function createIncidenciasController(host = null, context = {}) {
 
     if (!createModal.dragActive) {
       createModal.dragActive = true;
-      renderModals({ preserveFocus: true });
+
+      patchCreateFilesDom({
+        preserveFocus: true,
+      });
     }
   }
 
@@ -2224,7 +2251,10 @@ function createIncidenciasController(host = null, context = {}) {
     if (related && zone.dropzone.contains(related)) return;
 
     createModal.dragActive = false;
-    renderModals({ preserveFocus: true });
+
+    patchCreateFilesDom({
+      preserveFocus: true,
+    });
   }
 
   function onDrop(event) {
@@ -2393,6 +2423,8 @@ function createIncidenciasController(host = null, context = {}) {
           hasError: Boolean(createModal.userSearch.error),
           hasSelectedUser: Boolean(createModal.form.targetUserId),
         },
+
+        createAttachments: safeArray(createModal.form.attachments).length,
 
         openingTicketId: openingTicketId ? "***" : "",
         role: getCurrentRole(),

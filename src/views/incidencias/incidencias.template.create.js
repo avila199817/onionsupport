@@ -8,10 +8,12 @@
    - Buscador de usuario afectado sólo para admin.
    - Adjuntos iniciales.
    - Estados visuales: loading, errors, success.
-   - Exponer data-field/data-action para index.js.
+   - Exponer data-field/data-create-action para index.js.
    - Estructura estable para modal island y rerender sin flicker.
-   - Alineado 1:1 con incidencias.index.js v5.
+   - Alineado 1:1 con incidencias.index.js.
    - Alineado con incidencias.api.js normalizeCreatePayload().
+   - Preservar targetClienteId real si backend lo devuelve.
+   - No inventar clienteId desde targetUserId.
    - Sin Auth.
    - Sin Router.
    - Sin HTTP.
@@ -24,7 +26,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.v3.modal-island-ready";
+  "incidencias.template.create.productive.v4";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -47,57 +49,25 @@ const MAX_FILES = 10;
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 const CATEGORY_OPTIONS = Object.freeze([
-  {
-    value: "general",
-    label: "General",
-  },
-  {
-    value: "technical",
-    label: "Técnica",
-  },
-  {
-    value: "billing",
-    label: "Facturación",
-  },
-  {
-    value: "access",
-    label: "Acceso",
-  },
-  {
-    value: "hardware",
-    label: "Hardware",
-  },
-  {
-    value: "software",
-    label: "Software",
-  },
-  {
-    value: "account",
-    label: "Cuenta",
-  },
+  { value: "general", label: "General" },
+  { value: "technical", label: "Técnica" },
+  { value: "billing", label: "Facturación" },
+  { value: "access", label: "Acceso" },
+  { value: "hardware", label: "Hardware" },
+  { value: "software", label: "Software" },
+  { value: "account", label: "Cuenta" },
 ]);
 
 const PRIORITY_OPTIONS = Object.freeze([
-  {
-    value: "low",
-    label: "Baja",
-  },
-  {
-    value: "medium",
-    label: "Media",
-  },
-  {
-    value: "high",
-    label: "Alta",
-  },
-  {
-    value: "urgent",
-    label: "Urgente",
-  },
+  { value: "low", label: "Baja" },
+  { value: "medium", label: "Media" },
+  { value: "high", label: "Alta" },
+  { value: "urgent", label: "Urgente" },
 ]);
 
 const DEFAULT_FORM = Object.freeze({
   targetUserId: "",
+  targetClienteId: "",
   targetUserName: "",
   targetUserEmail: "",
   targetUserAvatar: "",
@@ -272,11 +242,20 @@ function firstImageSrc(...values) {
         value.photoUrl,
         value.photoURL,
         value.imageUrl,
+
+        value.clienteAvatar,
+        value.clienteAvatarUrl,
+        value.clientAvatar,
+        value.clientAvatarUrl,
+        value.userAvatar,
+        value.userAvatarUrl,
+
         value.profile?.avatarUrl,
         value.profile?.avatar,
         value.profile?.photoUrl,
         value.profile?.photoURL,
         value.profile?.picture,
+
         value.raw?.avatarUrl,
         value.raw?.avatar,
         value.raw?.picture,
@@ -365,6 +344,7 @@ function icon(name = "") {
 
 function normalizeUserResult(user = {}) {
   const raw = safeObject(user);
+  const rawNested = safeObject(raw.raw);
 
   const id = cleanText(
     first(
@@ -372,10 +352,45 @@ function normalizeUserResult(user = {}) {
       raw.id,
       raw.uid,
       raw.sub,
+      raw.usuarioId,
+      raw.lookup?.userId,
+      raw.lookup?.id,
+      raw.profile?.userId,
+      raw.auth?.userId,
+
+      rawNested.userId,
+      rawNested.id,
+      rawNested.uid,
+      rawNested.sub,
+      rawNested.usuarioId,
+
+      raw.username
+    ),
+    ""
+  );
+
+  const clienteId = cleanText(
+    first(
+      raw.targetClienteId,
       raw.clienteId,
       raw.clientId,
-      raw.usuarioId,
-      raw.username
+      raw.customerId,
+      raw.lookup?.clienteId,
+      raw.lookup?.clientId,
+      raw.tenant?.clienteId,
+      raw.cliente?.clienteId,
+      raw.cliente?.id,
+      raw.client?.clienteId,
+      raw.client?.id,
+
+      rawNested.targetClienteId,
+      rawNested.clienteId,
+      rawNested.clientId,
+      rawNested.customerId,
+      rawNested.cliente?.clienteId,
+      rawNested.cliente?.id,
+      rawNested.client?.clienteId,
+      rawNested.client?.id
     ),
     ""
   );
@@ -386,8 +401,22 @@ function normalizeUserResult(user = {}) {
       raw.fullName,
       raw.name,
       raw.nombre,
+      raw.publicName,
       raw.clienteNombre,
       raw.clientName,
+      raw.profile?.publicName,
+      raw.profile?.displayName,
+      raw.profile?.name,
+      raw.lookup?.displayName,
+      raw.lookup?.name,
+      [raw.firstName, raw.lastName].filter(Boolean).join(" "),
+      [raw.nombre, raw.apellidos].filter(Boolean).join(" "),
+
+      rawNested.displayName,
+      rawNested.fullName,
+      rawNested.name,
+      rawNested.nombre,
+
       raw.username,
       raw.email
     ),
@@ -404,9 +433,37 @@ function normalizeUserResult(user = {}) {
       raw.clientEmail,
       raw.profile?.email,
       raw.auth?.email,
+      raw.contacto?.email,
+      raw.contacto?.emailLower,
+      raw.lookup?.email,
       raw.lookup?.emailLower,
+
+      rawNested.email,
+      rawNested.emailLower,
+      rawNested.userEmail,
+      rawNested.mail,
       ""
     )
+  );
+
+  const username = cleanText(
+    first(
+      raw.username,
+      raw.userName,
+      raw.usernameLower,
+      raw.lookup?.username,
+      raw.lookup?.usernameLower,
+      raw.slug,
+      raw.lookup?.slug,
+      raw.profile?.slug,
+
+      rawNested.username,
+      rawNested.userName,
+      rawNested.usernameLower,
+      rawNested.slug,
+      ""
+    ),
+    ""
   );
 
   const avatarUrl = firstImageSrc(
@@ -416,32 +473,72 @@ function normalizeUserResult(user = {}) {
     raw.photoUrl,
     raw.photoURL,
     raw.imageUrl,
+
     raw.clienteAvatar,
+    raw.clienteAvatarUrl,
     raw.clientAvatar,
+    raw.clientAvatarUrl,
     raw.userAvatar,
+    raw.userAvatarUrl,
+
     raw.profile?.avatarUrl,
     raw.profile?.avatar,
     raw.profile?.photoUrl,
     raw.profile?.photoURL,
-    raw.profile?.picture
+    raw.profile?.picture,
+
+    rawNested.avatarUrl,
+    rawNested.avatar,
+    rawNested.picture,
+    rawNested.photoUrl,
+    rawNested.photoURL,
+    rawNested.imageUrl
   );
 
-  const username = cleanText(first(raw.username, raw.userName, raw.slug, ""), "");
-  const role = cleanText(first(raw.role, raw.rol, Array.isArray(raw.roles) ? raw.roles[0] : "", "user"), "user");
+  const role = cleanText(
+    first(
+      raw.role,
+      raw.rol,
+      Array.isArray(raw.roles) ? raw.roles[0] : "",
+      rawNested.role,
+      rawNested.rol,
+      Array.isArray(rawNested.roles) ? rawNested.roles[0] : "",
+      "user"
+    ),
+    "user"
+  );
 
   return {
     id,
     userId: id,
+
+    clienteId,
+    clientId: clienteId,
+    targetClienteId: clienteId,
+
     displayName: name,
+    fullName: name,
     name,
+    nombre: name,
+
     email,
     emailLower: email,
+    userEmail: email,
+    mail: email,
+
     username,
+    usernameLower: username.toLowerCase(),
+
     role,
+    rol: role,
+    roles: safeArray(raw.roles).length ? safeArray(raw.roles) : [role],
+
     avatarUrl,
     avatar: avatarUrl || null,
+    picture: avatarUrl || "",
+
     initials: cleanText(raw.initials, initialsFrom(name)),
-    tone: hashText(`${id}:${email}:${name}`) % 10,
+    tone: hashText(`${id}:${clienteId}:${email}:${name}`) % 10,
   };
 }
 
@@ -465,15 +562,51 @@ function normalizeForm(form = {}) {
   const targetUserAvatar = firstImageSrc(
     input.targetUserAvatar,
     input.userAvatar,
+    input.userAvatarUrl,
     input.clienteAvatar,
+    input.clienteAvatarUrl,
     input.clientAvatar,
+    input.clientAvatarUrl,
     input.avatar,
     input.avatarUrl
   );
 
   return {
-    targetUserId: cleanText(first(input.targetUserId, input.userId, input.usuarioId, input.clienteId, input.clientId), ""),
-    targetUserName: cleanText(first(input.targetUserName, input.userName, input.clienteNombre, input.clientName, input.name), ""),
+    targetUserId: cleanText(
+      first(
+        input.targetUserId,
+        input.userId,
+        input.usuarioId,
+        input.uid,
+        ""
+      ),
+      ""
+    ),
+
+    targetClienteId: cleanText(
+      first(
+        input.targetClienteId,
+        input.clienteId,
+        input.clientId,
+        input.customerId,
+        ""
+      ),
+      ""
+    ),
+
+    targetUserName: cleanText(
+      first(
+        input.targetUserName,
+        input.userName,
+        input.clienteNombre,
+        input.clientName,
+        input.name,
+        input.nombre,
+        ""
+      ),
+      ""
+    ),
+
     targetUserEmail,
     targetUserAvatar,
 
@@ -501,6 +634,25 @@ function buildSelectedUser(form = {}, userSearch = {}) {
 
     userId: first(selected.userId, selected.id, form.targetUserId),
     id: first(selected.id, selected.userId, form.targetUserId),
+
+    targetClienteId: first(
+      selected.targetClienteId,
+      selected.clienteId,
+      selected.clientId,
+      form.targetClienteId
+    ),
+    clienteId: first(
+      selected.clienteId,
+      selected.targetClienteId,
+      selected.clientId,
+      form.targetClienteId
+    ),
+    clientId: first(
+      selected.clientId,
+      selected.clienteId,
+      selected.targetClienteId,
+      form.targetClienteId
+    ),
 
     displayName: first(
       selected.displayName,
@@ -555,7 +707,10 @@ function buildVm(input = {}) {
     successMessage: cleanText(data.successMessage, ""),
     createdTicketId: cleanText(data.createdTicketId, ""),
 
-    form,
+    form: {
+      ...form,
+      targetClienteId: form.targetClienteId || selectedUser?.targetClienteId || "",
+    },
     errors,
 
     userSearch: {
@@ -567,7 +722,7 @@ function buildVm(input = {}) {
 
       /*
         El template NO decide vacío sólo por query.
-        El index marca empty=true únicamente tras recibir respuesta real.
+        index.js marca empty=true únicamente tras respuesta real.
         Esto evita falso "No hay usuarios" durante debounce/búsqueda.
       */
       empty: userSearch.empty === true && query.length >= USER_SEARCH_MIN_LENGTH,
@@ -761,6 +916,8 @@ function renderSelectedUser(vm = {}) {
     ? selected
     : normalizeUserResult({
         userId: form.targetUserId,
+        targetClienteId: form.targetClienteId,
+        clienteId: form.targetClienteId,
         displayName: form.targetUserName,
         email: form.targetUserEmail,
         avatarUrl: form.targetUserAvatar,
@@ -776,6 +933,8 @@ function renderSelectedUser(vm = {}) {
       class="inc-create-selected-user inc-create-target-user-card"
       data-create-selected-user="true"
       data-user-id="${attr(user.userId || user.id)}"
+      data-user-cliente-id="${attr(user.targetClienteId || user.clienteId || "")}"
+      data-cliente-id="${attr(user.targetClienteId || user.clienteId || "")}"
       data-user-email="${attr(user.email)}"
     >
       <div class="inc-create-selected-user-main" data-create-selected-user-main="true">
@@ -791,8 +950,6 @@ function renderSelectedUser(vm = {}) {
         type="button"
         class="inc-create-selected-user-clear inc-create-target-user-clear"
         data-create-action="${CREATE_ACTIONS.USER_CLEAR}"
-        data-incidencias-action="${CREATE_ACTIONS.USER_CLEAR}"
-        data-action="${CREATE_ACTIONS.USER_CLEAR}"
         ${disabledAttrs(vm.submitting, vm.submitting)}
       >
         Quitar
@@ -853,10 +1010,11 @@ function renderUserSearchResults(vm = {}) {
       aria-label="Resultados de búsqueda de usuarios"
     >
       ${search.results.map((user) => {
+        const item = normalizeUserResult(user);
         const subtitle = [
-          user.email,
-          user.username,
-          user.role,
+          item.email,
+          item.username,
+          item.role,
         ].filter(Boolean).join(" · ");
 
         return `
@@ -865,20 +1023,20 @@ function renderUserSearchResults(vm = {}) {
             class="inc-create-user-result inc-create-search-item"
             role="option"
             data-create-action="${CREATE_ACTIONS.USER_SELECT}"
-            data-incidencias-action="${CREATE_ACTIONS.USER_SELECT}"
-            data-action="${CREATE_ACTIONS.USER_SELECT}"
-            data-user-id="${attr(user.userId || user.id)}"
-            data-user-name="${attr(user.displayName)}"
-            data-user-email="${attr(user.email)}"
-            data-email="${attr(user.email)}"
-            data-user-avatar="${attr(user.avatarUrl)}"
+            data-user-id="${attr(item.userId || item.id)}"
+            data-user-cliente-id="${attr(item.targetClienteId || item.clienteId || "")}"
+            data-cliente-id="${attr(item.targetClienteId || item.clienteId || "")}"
+            data-user-name="${attr(item.displayName)}"
+            data-user-email="${attr(item.email)}"
+            data-email="${attr(item.email)}"
+            data-user-avatar="${attr(item.avatarUrl)}"
             ${disabledAttrs(vm.submitting, vm.submitting)}
           >
-            ${renderUserAvatar(user)}
+            ${renderUserAvatar(item)}
 
             <span class="inc-create-user-result-copy inc-create-search-item-copy">
-              <strong>${escapeHtml(user.displayName)}</strong>
-              <span>${escapeHtml(subtitle || user.userId || user.id)}</span>
+              <strong>${escapeHtml(item.displayName)}</strong>
+              <span>${escapeHtml(subtitle || item.userId || item.id)}</span>
             </span>
           </button>
         `;
@@ -934,6 +1092,7 @@ function renderAdminUserSearch(vm = {}) {
       </label>
 
       <input type="hidden" data-field="targetUserId" name="targetUserId" value="${attr(vm.form.targetUserId)}">
+      <input type="hidden" data-field="targetClienteId" name="targetClienteId" value="${attr(vm.form.targetClienteId)}">
       <input type="hidden" data-field="targetUserName" name="targetUserName" value="${attr(vm.form.targetUserName)}">
       <input type="hidden" data-field="targetUserEmail" name="targetUserEmail" value="${attr(vm.form.targetUserEmail)}">
       <input type="hidden" data-field="targetUserAvatar" name="targetUserAvatar" value="${attr(vm.form.targetUserAvatar)}">
@@ -994,8 +1153,6 @@ function renderFilesSummary(files = [], vm = {}) {
             <button
               type="button"
               data-create-action="${CREATE_ACTIONS.ATTACHMENT_REMOVE}"
-              data-incidencias-action="${CREATE_ACTIONS.ATTACHMENT_REMOVE}"
-              data-action="${CREATE_ACTIONS.ATTACHMENT_REMOVE}"
               data-remove-attachment="${attr(String(index))}"
               data-file-index="${attr(String(index))}"
               class="inc-create-file-remove"
@@ -1142,8 +1299,6 @@ export function renderIncidenciasCreateModal(input = {}) {
             <button
               type="button"
               data-create-action="${CREATE_ACTIONS.CLOSE}"
-              data-incidencias-action="${CREATE_ACTIONS.CLOSE}"
-              data-action="${CREATE_ACTIONS.CLOSE}"
               aria-label="Cerrar modal"
               ${disabledAttrs(vm.submitting, vm.submitting)}
               class="inc-create-close"
@@ -1153,18 +1308,20 @@ export function renderIncidenciasCreateModal(input = {}) {
           </div>
 
           <div class="inc-create-body">
-            ${vm.successMessage
-              ? renderAlert(
-                  "success",
-                  "Incidencia creada.",
-                  vm.createdTicketId ? `Referencia: ${vm.createdTicketId}` : vm.successMessage
-                )
-              : ""
+            ${
+              vm.successMessage
+                ? renderAlert(
+                    "success",
+                    "Incidencia creada.",
+                    vm.createdTicketId ? `Referencia: ${vm.createdTicketId}` : vm.successMessage
+                  )
+                : ""
             }
 
-            ${vm.serverError
-              ? renderAlert("error", "No se pudo crear la incidencia.", vm.serverError)
-              : ""
+            ${
+              vm.serverError
+                ? renderAlert("error", "No se pudo crear la incidencia.", vm.serverError)
+                : ""
             }
 
             <form
@@ -1225,8 +1382,6 @@ export function renderIncidenciasCreateModal(input = {}) {
                   id="incidencias-create-submit-btn"
                   type="submit"
                   data-create-action="${CREATE_ACTIONS.SUBMIT}"
-                  data-incidencias-action="${CREATE_ACTIONS.SUBMIT}"
-                  data-action="${CREATE_ACTIONS.SUBMIT}"
                   ${disabledAttrs(vm.submitting, vm.submitting)}
                   class="inc-create-submit"
                 >
@@ -1307,6 +1462,8 @@ export function validateCreateForm(form = {}) {
       ...current,
       category,
       priority,
+      status: current.status || "open",
+      source: current.source || "panel",
     },
   };
 }
@@ -1320,6 +1477,7 @@ export function getCreateTemplateSnapshot() {
     fields: [
       "targetUserSearch",
       "targetUserId",
+      "targetClienteId",
       "targetUserName",
       "targetUserEmail",
       "targetUserAvatar",
@@ -1336,6 +1494,7 @@ export function getCreateTemplateSnapshot() {
       actionSearch: CREATE_ACTIONS.USER_SEARCH,
       actionSelect: CREATE_ACTIONS.USER_SELECT,
       actionClear: CREATE_ACTIONS.USER_CLEAR,
+      preservesTargetClienteId: true,
     },
 
     limits: {
@@ -1349,18 +1508,15 @@ export function getCreateTemplateSnapshot() {
       modalIslandReady: true,
       stableSlots: true,
       noFalseEmptyDuringDebounce: true,
+      noGenericActionDuplication: true,
 
-      adminUserSearchMarkup: true,
-      targetUserEmailField: true,
-      targetUserAvatarField: true,
-      userSearchResultEmailDataset: true,
-      userSearchResultAvatarDataset: true,
+      targetClienteIdCompatible: true,
+      doesNotInventClienteId: true,
+      preservesBackendClienteId: true,
 
-      createApiPayloadCompatible: true,
-      attachmentsFieldCompatible: true,
-
-      avatarAliasCompatibility: true,
-      blobAvatarSupport: true,
+      createPayloadCompatible: true,
+      hiddenTargetFields: true,
+      adminUserSearchOnly: true,
 
       noAuth: true,
       noRouter: true,
@@ -1370,6 +1526,7 @@ export function getCreateTemplateSnapshot() {
       noListeners: true,
       noDomApi: true,
       noToast: true,
+      noCreationLogic: true,
     },
   };
 }
@@ -1378,7 +1535,7 @@ export function getCreateTemplateSnapshot() {
    EXPORTS
 ========================================================= */
 
+export const renderCreateIncidenciaModal = renderIncidenciasCreateModal;
 export const renderCreateModal = renderIncidenciasCreateModal;
-export const renderCreateModalClosed = renderIncidenciasCreateModalClosed;
 
 export default renderIncidenciasCreateModal;

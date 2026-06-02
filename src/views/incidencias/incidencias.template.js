@@ -5,7 +5,7 @@
    Responsabilidad:
    - Render HTML puro de la vista Incidencias.
    - Header/hero, stats, filtros, búsqueda y listado.
-   - Integrar modal de creación y modal de detalle.
+   - No renderizar modales: index.js los monta como isla externa estable.
    - Exponer data-incidencias-action/data-field para index.js.
    - Mantener columnas 1:1 con CSS.
    - Tabla sin columna Acciones: la fila abre el detalle.
@@ -20,15 +20,7 @@
    - Sin Toast.
 ========================================================= */
 
-import {
-  renderIncidenciasCreateModal,
-} from "./incidencias.template.create.js";
-
-import {
-  renderIncidenciasDetailModal,
-} from "./incidencias.template.modal.js";
-
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.production.v4";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.productive.v6";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -47,18 +39,9 @@ const DEFAULT_VISIBLE_ROWS = 20;
 const DEFAULT_CURRENCY = "EUR";
 
 const FILTERS = Object.freeze([
-  {
-    key: "all",
-    label: "Todas",
-  },
-  {
-    key: "open",
-    label: "Abiertas",
-  },
-  {
-    key: "closed",
-    label: "Cerradas",
-  },
+  { key: "all", label: "Todas" },
+  { key: "open", label: "Abiertas" },
+  { key: "closed", label: "Cerradas" },
 ]);
 
 export const INCIDENCIAS_TABLE_COLUMNS = Object.freeze([
@@ -132,7 +115,7 @@ function cleanText(value = "", fallback = "") {
 }
 
 function first(...values) {
-  for (const value of values) {
+  for (const value of values.flat(Infinity)) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && !value.length) continue;
@@ -167,10 +150,9 @@ function number(value = 0, fallback = 0) {
       const lastComma = clean.lastIndexOf(",");
       const lastDot = clean.lastIndexOf(".");
 
-      clean =
-        lastComma > lastDot
-          ? clean.replace(/\./g, "").replace(/,/g, ".")
-          : clean.replace(/,/g, "");
+      clean = lastComma > lastDot
+        ? clean.replace(/\./g, "").replace(/,/g, ".")
+        : clean.replace(/,/g, "");
     } else if (hasComma) {
       clean = clean.replace(/,/g, ".");
     }
@@ -248,7 +230,6 @@ function safeImageSrc(value = "") {
   if (hasSensitiveQuery(raw)) return "";
 
   if (/^blob:/i.test(raw)) return raw;
-
   if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
 
   if (/^https:\/\//i.test(raw)) {
@@ -272,7 +253,7 @@ function safeImageSrc(value = "") {
 
 function firstImageSrc(...values) {
   for (const value of values.flat(Infinity)) {
-    if (value === null || value === undefined) continue;
+    if (value === undefined || value === null) continue;
 
     if (isObject(value)) {
       const nested = firstImageSrc(
@@ -284,7 +265,12 @@ function firstImageSrc(...values) {
         value.picture,
         value.url,
         value.src,
-        value.href
+        value.href,
+        value.profile?.avatarUrl,
+        value.profile?.avatar,
+        value.profile?.photoUrl,
+        value.profile?.photoURL,
+        value.profile?.picture
       );
 
       if (nested) return nested;
@@ -327,6 +313,26 @@ function firstEmail(...values) {
   }
 
   return "";
+}
+
+function valueAt(source = {}, path = "") {
+  if (!isObject(source) || !path) return undefined;
+
+  return path.split(".").reduce((acc, key) => {
+    if (acc === undefined || acc === null) return undefined;
+    return acc[key];
+  }, source);
+}
+
+function pickValue(item = {}, paths = []) {
+  const raw = safeObject(item?.raw);
+
+  for (const path of paths) {
+    const value = first(valueAt(item, path), valueAt(raw, path));
+    if (value !== null && value !== undefined) return value;
+  }
+
+  return null;
 }
 
 function hashText(value = "") {
@@ -496,11 +502,18 @@ function icon(name = "") {
     search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
     euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
     activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
-    filter: `<svg ${common}><path d="M22 3H2l8 9.46V19l4 2v-8.54Z"/></svg>`,
     chevronDown: `<svg ${common}><path d="m6 9 6 6 6-6"/></svg>`,
+    user: `<svg ${common}><path d="M12 11.25a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4.75 20.75a7.25 7.25 0 0 1 14.5 0"/></svg>`,
   };
 
   return icons[name] || "";
+}
+
+function renderSpinner(label = "Cargando...") {
+  return `
+    <span class="incidencias-spinner" aria-hidden="true"></span>
+    <span class="incidencias-btn-text">${escapeHtml(label)}</span>
+  `;
 }
 
 /* =========================================================
@@ -509,248 +522,130 @@ function icon(name = "") {
 
 function getTicketId(item = {}) {
   return cleanText(
-    first(
-      item.ticketId,
-      item.incidenciaId,
-      item.code,
-      item.numero,
-      item.ticketCode,
-      item.id
-    ),
+    pickValue(item, [
+      "ticketId",
+      "incidenciaId",
+      "code",
+      "numero",
+      "ticketCode",
+      "id",
+      "_id",
+    ]),
     "INC-SIN-ID"
   );
 }
 
 function getSubject(item = {}) {
   return cleanText(
-    first(
-      item.subject,
-      item.title,
-      item.asunto,
-      item.name,
-      item.preview
-    ),
+    pickValue(item, ["subject", "title", "asunto", "name", "preview"]),
     "Incidencia sin asunto"
   );
 }
 
 function getDescription(item = {}) {
   return cleanText(
-    first(
-      item.description,
-      item.descripcion,
-      item.message,
-      item.body,
-      item.preview,
-      item.text
-    ),
+    pickValue(item, ["description", "descripcion", "message", "body", "preview", "text"]),
     "Sin descripción."
   );
 }
 
 function getClientName(item = {}) {
   return cleanText(
-    first(
-      item.clientName,
-      item.clienteNombre,
-      item.requesterName,
-      item.userName,
-      item.name,
-      item.requesterSnapshot?.displayName,
-      item.requesterSnapshot?.name,
-      item.cliente?.displayName,
-      item.cliente?.name,
-      item.client?.displayName,
-      item.client?.name
-    ),
+    pickValue(item, [
+      "clientName",
+      "clienteNombre",
+      "clienteName",
+      "requesterName",
+      "userName",
+      "name",
+      "requesterSnapshot.displayName",
+      "requesterSnapshot.name",
+      "requesterSnapshot.nombre",
+      "cliente.displayName",
+      "cliente.name",
+      "cliente.nombre",
+      "client.displayName",
+      "client.name",
+      "user.displayName",
+      "user.name",
+    ]),
     "Cliente"
   );
 }
 
 function getClientEmail(item = {}) {
-  const raw = safeObject(item.raw);
-
   return firstEmail(
-    item.requesterEmail,
-    item.requesterEmailLower,
-    item.clientEmail,
-    item.clientEmailLower,
-    item.clienteEmail,
-    item.clienteEmailLower,
-    item.userEmail,
-    item.userEmailLower,
-    item.email,
-    item.emailLower,
-    item.emailCliente,
-    item.rootEmail,
-    item.rootUserEmail,
-    item.rootClienteEmail,
-    item.rootClienteEmailLower,
-    item.requesterSnapshotEmail,
-    item.requesterSnapshotEmailLower,
-    item.clienteEmailNested,
-    item.clienteEmailLowerNested,
-    item.receptorEmail,
-    item.receptorEmailLower,
-    item.createdByEmail,
-    item.createdByEmailLower,
-
-    item.requesterSnapshot?.email,
-    item.requesterSnapshot?.emailLower,
-    item.cliente?.email,
-    item.cliente?.emailLower,
-    item.client?.email,
-    item.client?.emailLower,
-    item.usuario?.email,
-    item.usuario?.emailLower,
-    item.owner?.email,
-    item.owner?.emailLower,
-    item.receptor?.email,
-    item.receptor?.emailLower,
-    item.createdBy?.email,
-    item.createdBy?.emailLower,
-    item.user?.email,
-    item.user?.emailLower,
-
-    item.meta?.requesterEmail,
-    item.meta?.clientEmail,
-    item.meta?.clienteEmail,
-    item.meta?.userEmail,
-
-    raw.requesterEmail,
-    raw.requesterEmailLower,
-    raw.clientEmail,
-    raw.clientEmailLower,
-    raw.clienteEmail,
-    raw.clienteEmailLower,
-    raw.userEmail,
-    raw.userEmailLower,
-    raw.email,
-    raw.emailLower,
-    raw.emailCliente,
-    raw.rootEmail,
-    raw.rootUserEmail,
-    raw.rootClienteEmail,
-    raw.rootClienteEmailLower,
-    raw.requesterSnapshotEmail,
-    raw.requesterSnapshotEmailLower,
-    raw.clienteEmailNested,
-    raw.clienteEmailLowerNested,
-    raw.receptorEmail,
-    raw.receptorEmailLower,
-    raw.createdByEmail,
-    raw.createdByEmailLower,
-    raw.requesterSnapshot?.email,
-    raw.requesterSnapshot?.emailLower,
-    raw.cliente?.email,
-    raw.cliente?.emailLower,
-    raw.client?.email,
-    raw.client?.emailLower,
-    raw.receptor?.email,
-    raw.receptor?.emailLower,
-    raw.createdBy?.email,
-    raw.createdBy?.emailLower,
-    raw.meta?.requesterEmail,
-    raw.meta?.clientEmail,
-    raw.meta?.clienteEmail,
-    raw.meta?.userEmail
+    pickValue(item, ["requesterEmail"]),
+    pickValue(item, ["requesterEmailLower"]),
+    pickValue(item, ["clientEmail"]),
+    pickValue(item, ["clientEmailLower"]),
+    pickValue(item, ["clienteEmail"]),
+    pickValue(item, ["clienteEmailLower"]),
+    pickValue(item, ["userEmail"]),
+    pickValue(item, ["userEmailLower"]),
+    pickValue(item, ["email"]),
+    pickValue(item, ["emailLower"]),
+    pickValue(item, ["requesterSnapshot.email"]),
+    pickValue(item, ["requesterSnapshot.emailLower"]),
+    pickValue(item, ["cliente.email"]),
+    pickValue(item, ["cliente.emailLower"]),
+    pickValue(item, ["client.email"]),
+    pickValue(item, ["client.emailLower"]),
+    pickValue(item, ["user.email"]),
+    pickValue(item, ["user.emailLower"]),
+    pickValue(item, ["meta.requesterEmail"]),
+    pickValue(item, ["meta.clientEmail"]),
+    pickValue(item, ["meta.clienteEmail"]),
+    pickValue(item, ["meta.userEmail"])
   );
 }
 
 function getAvatarUrl(item = {}) {
-  const raw = safeObject(item.raw);
-
   return firstImageSrc(
-    item.requesterAvatarUrl,
-    item.requesterAvatar,
-    item.userAvatarUrl,
-    item.userAvatar,
-    item.clientAvatarUrl,
-    item.clientAvatar,
-    item.clienteAvatarUrl,
-    item.clienteAvatar,
-    item.avatarUrl,
-    item.avatar,
-    item.photoUrl,
-    item.photoURL,
-    item.imageUrl,
-    item.picture,
-    item.requesterSnapshotAvatarUrl,
-    item.requesterSnapshotAvatar,
-    item.clienteAvatarUrl,
-    item.clienteAvatar,
-    item.receptorAvatarUrl,
-    item.receptorAvatar,
-    item.createdByAvatarUrl,
-    item.createdByAvatar,
-
-    item.requesterSnapshot?.avatarUrl,
-    item.requesterSnapshot?.avatar,
-    item.requesterSnapshot?.photoUrl,
-    item.requesterSnapshot?.photoURL,
-    item.requesterSnapshot?.imageUrl,
-    item.requesterSnapshot?.picture,
-    item.cliente?.avatarUrl,
-    item.cliente?.avatar,
-    item.cliente?.photoUrl,
-    item.cliente?.photoURL,
-    item.client?.avatarUrl,
-    item.client?.avatar,
-    item.client?.photoUrl,
-    item.client?.photoURL,
-    item.usuario?.avatarUrl,
-    item.usuario?.avatar,
-    item.user?.avatarUrl,
-    item.user?.avatar,
-    item.receptor?.avatarUrl,
-    item.receptor?.avatar,
-    item.createdBy?.avatarUrl,
-    item.createdBy?.avatar,
-
-    item.meta?.requesterAvatarUrl,
-    item.meta?.requesterAvatar,
-    item.meta?.clientAvatarUrl,
-    item.meta?.clientAvatar,
-
-    raw.requesterAvatarUrl,
-    raw.requesterAvatar,
-    raw.userAvatarUrl,
-    raw.userAvatar,
-    raw.clientAvatarUrl,
-    raw.clientAvatar,
-    raw.clienteAvatarUrl,
-    raw.clienteAvatar,
-    raw.avatarUrl,
-    raw.avatar,
-    raw.requesterSnapshotAvatarUrl,
-    raw.requesterSnapshotAvatar,
-    raw.clienteAvatarUrl,
-    raw.clienteAvatar,
-    raw.receptorAvatarUrl,
-    raw.receptorAvatar,
-    raw.createdByAvatarUrl,
-    raw.createdByAvatar,
-    raw.requesterSnapshot?.avatarUrl,
-    raw.requesterSnapshot?.avatar,
-    raw.cliente?.avatarUrl,
-    raw.cliente?.avatar,
-    raw.client?.avatarUrl,
-    raw.client?.avatar,
-    raw.receptor?.avatarUrl,
-    raw.receptor?.avatar,
-    raw.createdBy?.avatarUrl,
-    raw.createdBy?.avatar,
-    raw.meta?.requesterAvatarUrl,
-    raw.meta?.requesterAvatar
+    pickValue(item, ["requesterAvatarUrl"]),
+    pickValue(item, ["requesterAvatar"]),
+    pickValue(item, ["userAvatarUrl"]),
+    pickValue(item, ["userAvatar"]),
+    pickValue(item, ["clientAvatarUrl"]),
+    pickValue(item, ["clientAvatar"]),
+    pickValue(item, ["clienteAvatarUrl"]),
+    pickValue(item, ["clienteAvatar"]),
+    pickValue(item, ["avatarUrl"]),
+    pickValue(item, ["avatar"]),
+    pickValue(item, ["photoUrl"]),
+    pickValue(item, ["photoURL"]),
+    pickValue(item, ["imageUrl"]),
+    pickValue(item, ["picture"]),
+    pickValue(item, ["requesterSnapshot"]),
+    pickValue(item, ["cliente"]),
+    pickValue(item, ["client"]),
+    pickValue(item, ["user"]),
+    pickValue(item, ["meta.requesterAvatarUrl"]),
+    pickValue(item, ["meta.requesterAvatar"]),
+    pickValue(item, ["meta.clientAvatarUrl"]),
+    pickValue(item, ["meta.clientAvatar"])
   );
 }
 
 function getStatusRaw(item = {}) {
-  return first(item.status, item.estado, item.state, item.lifecycle?.status, "open");
+  return first(
+    pickValue(item, ["status"]),
+    pickValue(item, ["estado"]),
+    pickValue(item, ["state"]),
+    pickValue(item, ["lifecycle.status"]),
+    "open"
+  );
 }
 
 function getPriorityRaw(item = {}) {
-  return first(item.priority, item.prioridad, item.severity, item.urgency, "medium");
+  return first(
+    pickValue(item, ["priority"]),
+    pickValue(item, ["prioridad"]),
+    pickValue(item, ["severity"]),
+    pickValue(item, ["urgency"]),
+    pickValue(item, ["sla.priority"]),
+    "medium"
+  );
 }
 
 function getStatusKey(value = "") {
@@ -760,7 +655,7 @@ function getStatusKey(value = "") {
   if (["pending", "pendiente", "new", "nueva", "nuevo"].includes(key)) return "pending";
   if (["in_progress", "progress", "inprogress", "proceso", "en_proceso", "working"].includes(key)) return "progress";
   if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
-  if (["closed", "cerrada", "cerrado", "cancelled", "archived"].includes(key)) return "closed";
+  if (["closed", "close", "cerrada", "cerrado", "cancelled", "canceled", "archived", "archivada"].includes(key)) return "closed";
 
   return "pending";
 }
@@ -780,10 +675,7 @@ function getStatusLabel(value = "") {
 function getPriorityKey(item = {}) {
   const key = normalizeKey(getPriorityRaw(item));
 
-  if (["critical", "critica", "crítica", "critico", "crítico", "p0"].includes(key)) {
-    return "critical";
-  }
-
+  if (["critical", "critica", "crítica", "critico", "crítico", "p0"].includes(key)) return "critical";
   if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) return "urgent";
   if (["low", "baja", "minor", "p3"].includes(key)) return "low";
 
@@ -802,224 +694,87 @@ function getPriorityLabel(item = {}) {
 
 function getCategory(item = {}) {
   return cleanText(
-    first(
-      item.category,
-      item.categoria,
-      item.type,
-      item.tipo,
-      item.subcategory,
-      item.subcategoria
-    ),
+    pickValue(item, ["category", "categoria", "type", "tipo", "subcategory", "subcategoria"]),
     "Soporte"
   );
 }
 
 function getAssignedTo(item = {}) {
-  const raw = safeObject(item.raw);
-
   return cleanText(
-    first(
-      item.assignedToName,
-      item.technicianName,
-      item.tecnicoName,
-      item.agentName,
-      item.assignmentAssignedToName,
-      item.assignmentTechnicianName,
-      item.assignmentTechnicianNombre,
-      item.assignmentName,
-      item.assignedToNombre,
-      item.tecnicoNombre,
-      item.metaTechnicianName,
-      item.metaAssignedTechnicianName,
-      item.metaLastTechnicianName,
-      item.assignment?.assignedToName,
-      item.assignment?.agentName,
-      item.assignment?.technicianName,
-      item.assignment?.name,
-      item.tecnico?.displayName,
-      item.tecnico?.name,
-      item.tecnico?.nombre,
-      item.assignedTo?.displayName,
-      item.assignedTo?.name,
-      item.assignedTo?.nombre,
-      item.technician?.displayName,
-      item.technician?.name,
-      item.technician?.nombre,
-      item.agent?.displayName,
-      item.agent?.name,
-      item.agent?.nombre,
-      item.meta?.technicianName,
-      item.meta?.assignedTechnicianName,
-      item.meta?.lastTechnicianName,
-      raw.assignedToName,
-      raw.technicianName,
-      raw.tecnicoName,
-      raw.agentName,
-      raw.assignmentAssignedToName,
-      raw.assignmentTechnicianName,
-      raw.assignmentTechnicianNombre,
-      raw.assignmentName,
-      raw.assignedToNombre,
-      raw.tecnicoNombre,
-      raw.metaTechnicianName,
-      raw.metaAssignedTechnicianName,
-      raw.metaLastTechnicianName,
-      raw.assignment?.assignedToName,
-      raw.assignment?.agentName,
-      raw.assignment?.technicianName,
-      raw.assignment?.name,
-      raw.assignedTo?.displayName,
-      raw.assignedTo?.name,
-      raw.technician?.displayName,
-      raw.technician?.name,
-      raw.tecnico?.displayName,
-      raw.tecnico?.name,
-      raw.agent?.displayName,
-      raw.agent?.name,
-      raw.meta?.technicianName,
-      raw.meta?.assignedTechnicianName,
-      raw.meta?.lastTechnicianName
-    ),
+    pickValue(item, [
+      "assignedToName",
+      "technicianName",
+      "tecnicoName",
+      "agentName",
+      "assignmentAssignedToName",
+      "assignmentTechnicianName",
+      "assignment.name",
+      "assignment.assignedToName",
+      "assignment.technicianName",
+      "assignment.agentName",
+      "assignedTo.displayName",
+      "assignedTo.name",
+      "assignedTo.nombre",
+      "technician.displayName",
+      "technician.name",
+      "tecnico.displayName",
+      "tecnico.name",
+      "agent.displayName",
+      "agent.name",
+      "meta.technicianName",
+      "meta.assignedTechnicianName",
+      "meta.lastTechnicianName",
+    ]),
     "Sin asignar"
   );
 }
 
 function getAssignedAvatarUrl(item = {}) {
-  const raw = safeObject(item.raw);
-
   return firstImageSrc(
-    item.assignedToAvatarUrl,
-    item.assignedToAvatar,
-    item.technicianAvatarUrl,
-    item.technicianAvatar,
-    item.tecnicoAvatarUrl,
-    item.tecnicoAvatar,
-    item.agentAvatarUrl,
-    item.agentAvatar,
-    item.avatarTecnicoUrl,
-    item.avatarTecnico,
-    item.assignmentAssignedToAvatarUrl,
-    item.assignmentAssignedToAvatar,
-    item.assignmentTechnicianAvatarUrl,
-    item.assignmentTechnicianAvatar,
-    item.assignmentAvatarUrl,
-    item.assignmentAvatar,
-    item.assignedToAvatar,
-    item.assignedToAvatarUrl,
-    item.tecnicoAvatar,
-    item.tecnicoAvatarUrl,
-    item.metaTechnicianAvatarUrl,
-    item.metaTechnicianAvatar,
-    item.metaAssignedTechnicianAvatarUrl,
-    item.metaAssignedTechnicianAvatar,
-    item.metaLastTechnicianAvatarUrl,
-    item.metaLastTechnicianAvatar,
-
-    item.assignment?.assignedToAvatarUrl,
-    item.assignment?.assignedToAvatar,
-    item.assignment?.technicianAvatarUrl,
-    item.assignment?.technicianAvatar,
-    item.assignment?.agentAvatarUrl,
-    item.assignment?.agentAvatar,
-    item.assignment?.avatarUrl,
-    item.assignment?.avatar,
-    item.assignment?.photoUrl,
-    item.assignment?.photoURL,
-    item.assignment?.imageUrl,
-    item.assignment?.picture,
-
-    item.assignedTo?.avatarUrl,
-    item.assignedTo?.avatar,
-    item.assignedTo?.photoUrl,
-    item.assignedTo?.photoURL,
-    item.assignedTo?.imageUrl,
-    item.assignedTo?.picture,
-    item.technician?.avatarUrl,
-    item.technician?.avatar,
-    item.technician?.photoUrl,
-    item.technician?.photoURL,
-    item.technician?.imageUrl,
-    item.technician?.picture,
-    item.tecnico?.avatarUrl,
-    item.tecnico?.avatar,
-    item.tecnico?.photoUrl,
-    item.tecnico?.photoURL,
-    item.tecnico?.imageUrl,
-    item.tecnico?.picture,
-    item.agent?.avatarUrl,
-    item.agent?.avatar,
-    item.agent?.photoUrl,
-    item.agent?.photoURL,
-    item.agent?.imageUrl,
-    item.agent?.picture,
-
-    item.meta?.technicianAvatarUrl,
-    item.meta?.technicianAvatar,
-    item.meta?.assignedTechnicianAvatarUrl,
-    item.meta?.assignedTechnicianAvatar,
-    item.meta?.lastTechnicianAvatarUrl,
-    item.meta?.lastTechnicianAvatar,
-    item.meta?.agentAvatarUrl,
-    item.meta?.agentAvatar,
-
-    raw.assignedToAvatarUrl,
-    raw.assignedToAvatar,
-    raw.technicianAvatarUrl,
-    raw.technicianAvatar,
-    raw.tecnicoAvatarUrl,
-    raw.tecnicoAvatar,
-    raw.agentAvatarUrl,
-    raw.agentAvatar,
-    raw.assignmentAssignedToAvatarUrl,
-    raw.assignmentAssignedToAvatar,
-    raw.assignmentTechnicianAvatarUrl,
-    raw.assignmentTechnicianAvatar,
-    raw.assignmentAvatarUrl,
-    raw.assignmentAvatar,
-    raw.assignedToAvatarUrl,
-    raw.assignedToAvatar,
-    raw.tecnicoAvatarUrl,
-    raw.tecnicoAvatar,
-    raw.metaTechnicianAvatarUrl,
-    raw.metaTechnicianAvatar,
-    raw.metaAssignedTechnicianAvatarUrl,
-    raw.metaAssignedTechnicianAvatar,
-    raw.metaLastTechnicianAvatarUrl,
-    raw.metaLastTechnicianAvatar,
-    raw.assignment?.assignedToAvatarUrl,
-    raw.assignment?.assignedToAvatar,
-    raw.assignment?.technicianAvatarUrl,
-    raw.assignment?.technicianAvatar,
-    raw.assignment?.agentAvatarUrl,
-    raw.assignment?.agentAvatar,
-    raw.assignment?.avatarUrl,
-    raw.assignment?.avatar,
-    raw.assignedTo?.avatarUrl,
-    raw.assignedTo?.avatar,
-    raw.technician?.avatarUrl,
-    raw.technician?.avatar,
-    raw.tecnico?.avatarUrl,
-    raw.tecnico?.avatar,
-    raw.agent?.avatarUrl,
-    raw.agent?.avatar,
-    raw.meta?.technicianAvatarUrl,
-    raw.meta?.technicianAvatar,
-    raw.meta?.assignedTechnicianAvatarUrl,
-    raw.meta?.assignedTechnicianAvatar,
-    raw.meta?.lastTechnicianAvatarUrl,
-    raw.meta?.lastTechnicianAvatar
+    pickValue(item, ["assignedToAvatarUrl"]),
+    pickValue(item, ["assignedToAvatar"]),
+    pickValue(item, ["technicianAvatarUrl"]),
+    pickValue(item, ["technicianAvatar"]),
+    pickValue(item, ["tecnicoAvatarUrl"]),
+    pickValue(item, ["tecnicoAvatar"]),
+    pickValue(item, ["agentAvatarUrl"]),
+    pickValue(item, ["agentAvatar"]),
+    pickValue(item, ["assignment.assignedToAvatarUrl"]),
+    pickValue(item, ["assignment.assignedToAvatar"]),
+    pickValue(item, ["assignment.technicianAvatarUrl"]),
+    pickValue(item, ["assignment.technicianAvatar"]),
+    pickValue(item, ["assignment.agentAvatarUrl"]),
+    pickValue(item, ["assignment.agentAvatar"]),
+    pickValue(item, ["assignment.avatarUrl"]),
+    pickValue(item, ["assignment.avatar"]),
+    pickValue(item, ["assignedTo"]),
+    pickValue(item, ["technician"]),
+    pickValue(item, ["tecnico"]),
+    pickValue(item, ["agent"]),
+    pickValue(item, ["meta.technicianAvatarUrl"]),
+    pickValue(item, ["meta.technicianAvatar"]),
+    pickValue(item, ["meta.assignedTechnicianAvatarUrl"]),
+    pickValue(item, ["meta.assignedTechnicianAvatar"]),
+    pickValue(item, ["meta.lastTechnicianAvatarUrl"]),
+    pickValue(item, ["meta.lastTechnicianAvatar"])
   );
 }
 
 function getInvoiceTotal(item = {}) {
   return number(
     first(
-      item.invoiceTotal,
-      item.invoicesTotal,
-      item.facturasTotal,
-      item.importeFacturas,
-      item.facturaTotal,
-      item.invoiceAmount,
+      pickValue(item, ["invoiceTotal"]),
+      pickValue(item, ["invoicesTotal"]),
+      pickValue(item, ["facturasTotal"]),
+      pickValue(item, ["importeFacturas"]),
+      pickValue(item, ["facturaTotal"]),
+      pickValue(item, ["facturaImporte"]),
+      pickValue(item, ["importeFactura"]),
+      pickValue(item, ["invoiceAmount"]),
+      pickValue(item, ["amount"]),
+      pickValue(item, ["total"]),
+      pickValue(item, ["meta.invoiceTotal"]),
+      pickValue(item, ["meta.invoicesTotal"]),
       0
     ),
     0
@@ -1027,7 +782,17 @@ function getInvoiceTotal(item = {}) {
 }
 
 function getInvoiceCurrency(item = {}) {
-  return cleanText(first(item.currency, item.moneda, item.meta?.invoiceCurrency), DEFAULT_CURRENCY);
+  return cleanText(
+    first(
+      pickValue(item, ["currency"]),
+      pickValue(item, ["moneda"]),
+      pickValue(item, ["facturaCurrency"]),
+      pickValue(item, ["facturaMoneda"]),
+      pickValue(item, ["meta.invoiceCurrency"]),
+      DEFAULT_CURRENCY
+    ),
+    DEFAULT_CURRENCY
+  ).toUpperCase();
 }
 
 function getImporteLabel(item = {}) {
@@ -1037,7 +802,7 @@ function getImporteLabel(item = {}) {
     return formatMoney(amount, getInvoiceCurrency(item));
   }
 
-  const paymentKey = normalizeKey(first(item.paymentStatus, item.estadoPago, ""));
+  const paymentKey = normalizeKey(first(pickValue(item, ["paymentStatus"]), pickValue(item, ["estadoPago"]), ""));
 
   if (["paid", "pagada", "pagado"].includes(paymentKey)) return "Pagado";
   if (["pending", "pendiente"].includes(paymentKey)) return "Pendiente";
@@ -1052,7 +817,7 @@ function getImporteKey(item = {}) {
 
   if (amount > 0) return "money";
 
-  const paymentKey = normalizeKey(first(item.paymentStatus, item.estadoPago, ""));
+  const paymentKey = normalizeKey(first(pickValue(item, ["paymentStatus"]), pickValue(item, ["estadoPago"]), ""));
 
   if (["paid", "pagada", "pagado"].includes(paymentKey)) return "paid";
   if (["pending", "pendiente"].includes(paymentKey)) return "pending";
@@ -1063,29 +828,55 @@ function getImporteKey(item = {}) {
 }
 
 function getCreatedAt(item = {}) {
-  return first(item.createdAt, item.fechaCreacion, item.created_at, item.lifecycle?.createdAt, null);
+  return first(
+    pickValue(item, ["createdAt"]),
+    pickValue(item, ["fechaCreacion"]),
+    pickValue(item, ["created_at"]),
+    pickValue(item, ["lifecycle.createdAt"]),
+    null
+  );
 }
 
 function getUpdatedAt(item = {}) {
   return first(
-    item.lastActivityAt,
-    item.updatedAt,
-    item.updated_at,
-    item.modifiedAt,
-    item.closedAt,
-    item.createdAt,
-    item.lifecycle?.updatedAt,
-    item.lifecycle?.lastActivityAt,
+    pickValue(item, ["lastActivityAt"]),
+    pickValue(item, ["updatedAt"]),
+    pickValue(item, ["updated_at"]),
+    pickValue(item, ["modifiedAt"]),
+    pickValue(item, ["closedAt"]),
+    pickValue(item, ["createdAt"]),
+    pickValue(item, ["lifecycle.lastActivityAt"]),
+    pickValue(item, ["lifecycle.updatedAt"]),
+    pickValue(item, ["lifecycle.closedAt"]),
+    pickValue(item, ["lifecycle.createdAt"]),
     null
   );
 }
 
 function getAttachmentsCount(item = {}) {
-  const attachments = first(item.attachments, item.files, item.adjuntos);
+  const attachments = first(
+    pickValue(item, ["attachments"]),
+    pickValue(item, ["files"]),
+    pickValue(item, ["adjuntos"])
+  );
 
   if (Array.isArray(attachments)) return attachments.length;
 
-  return number(first(item.attachmentsCount, item.filesCount, item.adjuntosCount, 0), 0);
+  return number(
+    first(
+      pickValue(item, ["attachmentsCount"]),
+      pickValue(item, ["filesCount"]),
+      pickValue(item, ["adjuntosCount"]),
+      pickValue(item, ["meta.attachmentsCount"]),
+      pickValue(item, ["meta.filesCount"]),
+      0
+    ),
+    0
+  );
+}
+
+function itemSortTime(item = {}) {
+  return Math.max(toTimestamp(getUpdatedAt(item)), toTimestamp(getCreatedAt(item)), 0);
 }
 
 /* =========================================================
@@ -1096,114 +887,69 @@ function normalizeFilter(value = "") {
   const key = normalizeKey(value);
 
   if (["all", "todo", "todos", "todas", "total", "totales"].includes(key)) return "all";
-
-  if (
-    [
-      "open",
-      "opened",
-      "abierta",
-      "abierto",
-      "abiertas",
-      "abiertos",
-      "active",
-      "pending",
-      "pendiente",
-      "progress",
-      "in_progress",
-      "inprogress",
-      "en_proceso",
-      "working",
-      "assigned",
-    ].includes(key)
-  ) {
-    return "open";
-  }
-
-  if (
-    [
-      "closed",
-      "close",
-      "cerrada",
-      "cerrado",
-      "cerradas",
-      "cerrados",
-      "resolved",
-      "resuelta",
-      "resuelto",
-      "solved",
-      "cancelled",
-      "archived",
-    ].includes(key)
-  ) {
-    return "closed";
-  }
+  if (["open", "opened", "abierta", "abierto", "pending", "pendiente", "progress", "in_progress", "proceso", "en_proceso"].includes(key)) return "open";
+  if (["closed", "close", "cerrada", "cerrado", "resolved", "resuelta", "resuelto", "cancelled", "archived"].includes(key)) return "closed";
 
   return "all";
 }
 
-function isOpenLike(item = {}) {
-  return ["open", "pending", "progress"].includes(getStatusKey(getStatusRaw(item)));
+function isClosedItem(item = {}) {
+  return ["closed", "resolved"].includes(getStatusKey(getStatusRaw(item)));
 }
 
-function isClosedLike(item = {}) {
-  return ["resolved", "closed"].includes(getStatusKey(getStatusRaw(item)));
+function isOpenItem(item = {}) {
+  return !isClosedItem(item);
 }
 
-function isUrgentLike(item = {}) {
+function isUrgentItem(item = {}) {
   return ["urgent", "critical"].includes(getPriorityKey(item));
 }
 
-function getSearchHaystack(item = {}) {
-  return [
+function matchesFilter(item = {}, filter = "all") {
+  const key = normalizeFilter(filter);
+
+  if (key === "open") return isOpenItem(item);
+  if (key === "closed") return isClosedItem(item);
+
+  return true;
+}
+
+function itemSearchText(item = {}) {
+  return normalizeText([
     getTicketId(item),
     getSubject(item),
     getDescription(item),
     getClientName(item),
     getClientEmail(item),
-    getCategory(item),
     getAssignedTo(item),
+    getCategory(item),
     getStatusLabel(getStatusRaw(item)),
     getPriorityLabel(item),
-    getImporteLabel(item),
-    item.userId,
-    item.clienteId,
-  ]
-    .map((value) => normalizeText(value))
-    .filter(Boolean)
-    .join(" · ");
+  ].join(" "));
 }
 
-function itemMatchesSearch(item = {}, query = "") {
-  const normalizedQuery = normalizeText(query);
+function matchesSearch(item = {}, query = "") {
+  const q = normalizeText(query);
 
-  if (!normalizedQuery) return true;
+  if (!q) return true;
 
-  const terms = normalizedQuery.split(" ").filter(Boolean);
-  const haystack = getSearchHaystack(item);
-
-  return terms.every((term) => haystack.includes(term));
+  return itemSearchText(item).includes(q);
 }
 
-function itemMatchesFilter(item = {}, filter = "all") {
-  const key = normalizeFilter(filter);
-
-  if (key === "all") return true;
-  if (key === "open") return isOpenLike(item);
-  if (key === "closed") return isClosedLike(item);
-
-  return true;
-}
-
-function computeStats(items = []) {
+function computeLocalStats(items = []) {
   return safeArray(items).reduce(
     (acc, item) => {
       acc.total += 1;
-      acc.invoiceTotal += getInvoiceTotal(item);
-      acc.attachments += getAttachmentsCount(item);
 
-      if (isOpenLike(item)) acc.open += 1;
-      if (isClosedLike(item)) acc.closed += 1;
-      if (isUrgentLike(item)) acc.urgent += 1;
+      if (isOpenItem(item)) acc.open += 1;
+      if (isClosedItem(item)) acc.closed += 1;
+      if (isUrgentItem(item)) acc.urgent += 1;
+
+      acc.attachments += getAttachmentsCount(item);
+      acc.invoiceTotal += getInvoiceTotal(item);
+
+      const updatedAt = itemSortTime(item);
+      if (updatedAt > acc.lastUpdateTs) acc.lastUpdateTs = updatedAt;
 
       return acc;
     },
@@ -1214,30 +960,54 @@ function computeStats(items = []) {
       urgent: 0,
       attachments: 0,
       invoiceTotal: 0,
+      lastUpdateTs: 0,
     }
   );
 }
 
-function computeFilterCounts(items = [], query = "") {
-  const searchable = safeArray(items).filter((item) => itemMatchesSearch(item, query));
+function mergeStats(items = [], provided = {}) {
+  const local = computeLocalStats(items);
+  const stats = safeObject(provided);
 
   return {
-    all: searchable.length,
-    open: searchable.filter((item) => itemMatchesFilter(item, "open")).length,
-    closed: searchable.filter((item) => itemMatchesFilter(item, "closed")).length,
+    total: number(first(stats.total, local.total), local.total),
+    open: number(first(stats.open, local.open), local.open),
+    closed: number(first(stats.closed, local.closed), local.closed),
+    urgent: number(first(stats.urgent, local.urgent), local.urgent),
+    attachments: number(first(stats.attachments, local.attachments), local.attachments),
+    invoiceTotal: number(first(stats.invoiceTotal, local.invoiceTotal), local.invoiceTotal),
+    lastUpdateTs: number(first(stats.lastUpdateTs, local.lastUpdateTs), local.lastUpdateTs),
   };
 }
 
-function buildVisibleItems({
-  items = [],
-  filter = "all",
-  search = "",
-  visibleLimit = DEFAULT_VISIBLE_ROWS,
-} = {}) {
-  return safeArray(items)
-    .filter((item) => itemMatchesSearch(item, search))
-    .filter((item) => itemMatchesFilter(item, filter))
-    .slice(0, Math.max(1, number(visibleLimit, DEFAULT_VISIBLE_ROWS)));
+function countByFilter(items = []) {
+  return {
+    all: safeArray(items).length,
+    open: safeArray(items).filter(isOpenItem).length,
+    closed: safeArray(items).filter(isClosedItem).length,
+  };
+}
+
+function normalizeItems(items = []) {
+  const map = new Map();
+
+  for (const item of safeArray(items)) {
+    const id = getTicketId(item);
+
+    if (!id) continue;
+    if (!map.has(id)) map.set(id, item);
+  }
+
+  return [...map.values()].sort((a, b) => {
+    const diff = itemSortTime(b) - itemSortTime(a);
+
+    if (diff !== 0) return diff;
+
+    return getTicketId(b).localeCompare(getTicketId(a), "es", {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
 }
 
 /* =========================================================
@@ -1246,172 +1016,102 @@ function buildVisibleItems({
 
 function buildVm(input = {}) {
   const data = safeObject(input);
+  const allItems = normalizeItems(data.items);
+  const filter = normalizeFilter(data.filter);
+  const search = cleanText(data.search, "");
+  const visibleLimit = Math.max(1, number(data.visibleLimit, DEFAULT_VISIBLE_ROWS));
+  const stats = mergeStats(allItems, data.stats);
 
-  const allItems = safeArray(
-    first(
-      data.items,
-      data.allItems,
-      data.tickets,
-      data.incidencias,
-      data.data?.items,
-      []
-    )
-  );
+  const filteredItems = allItems
+    .filter((item) => matchesFilter(item, filter))
+    .filter((item) => matchesSearch(item, search));
 
-  const state = safeObject(data.state);
-  const search = cleanText(first(data.search, data.searchQuery, state.search, state.searchQuery, ""), "");
-  const filter = normalizeFilter(first(data.filter, data.activeFilter, state.filter, state.activeFilter, "all"));
-  const visibleLimit = Math.max(1, number(first(data.visibleLimit, state.visibleLimit, DEFAULT_VISIBLE_ROWS), DEFAULT_VISIBLE_ROWS));
-
-  const explicitVisible = safeArray(first(data.visibleItems, data.pageItems, state.visibleItems, state.pageItems, []));
-  const visibleItems = explicitVisible.length
-    ? explicitVisible
-    : buildVisibleItems({
-        items: allItems,
-        filter,
-        search,
-        visibleLimit,
-      });
-
-  const filteredTotal = safeArray(allItems)
-    .filter((item) => itemMatchesSearch(item, search))
-    .filter((item) => itemMatchesFilter(item, filter)).length;
-
-  const total = Math.max(
-    allItems.length,
-    number(first(data.total, data.remoteCount, state.total, state.remoteCount, allItems.length), allItems.length)
-  );
-
-  const stats = {
-    ...computeStats(allItems),
-    ...safeObject(data.stats),
-  };
-
-  const filterCounts = {
-    ...computeFilterCounts(allItems, search),
-    ...safeObject(data.filterCounts),
-  };
-
-  const loading = data.loading === true || state.loading === true;
-  const refreshing = data.refreshing === true || state.refreshing === true;
-  const loadingMore = data.loadingMore === true || state.loadingMore === true;
-  const creating = data.creating === true || state.creating === true;
-
-  const route = cleanText(first(data.route, data.routes?.incidencias, DEFAULT_ROUTE), DEFAULT_ROUTE);
+  const visibleItems = filteredItems.slice(0, visibleLimit);
+  const total = Math.max(number(data.total, allItems.length), allItems.length);
+  const filteredTotal = filteredItems.length;
+  const visibleCount = visibleItems.length;
+  const remainingCount = Math.max(0, filteredTotal - visibleCount);
 
   return {
     data,
-    state,
 
-    route,
-
-    title: cleanText(data.title, "Tus incidencias y solicitudes"),
-    subtitle: cleanText(
-      data.subtitle,
-      "Consulta el estado de tus incidencias, revisa actualizaciones y crea nuevas solicitudes."
-    ),
+    route: cleanText(first(data.route, data.routes?.incidencias, DEFAULT_ROUTE), DEFAULT_ROUTE),
+    routes: safeObject(data.routes),
 
     items: allItems,
+    filteredItems,
     visibleItems,
 
     total,
     filteredTotal,
-    visibleCount: visibleItems.length,
-    remainingCount: Math.max(0, filteredTotal - visibleItems.length),
-    hasMore: data.hasMore === true || filteredTotal > visibleItems.length,
+    visibleCount,
+    visibleLimit,
+    remainingCount,
+    hasMore: remainingCount > 0,
 
-    loading,
-    refreshing,
-    loadingMore,
-    creating,
+    loading: data.loading === true,
+    refreshing: data.refreshing === true,
+    creating: data.creating === true,
+    loadingMore: data.loadingMore === true,
 
-    error: cleanText(first(data.error, state.error, ""), ""),
-
+    error: cleanText(data.error, ""),
     filter,
     search,
-    filterCounts,
+    filterCounts: countByFilter(allItems),
     stats,
 
-    openingTicketId: cleanText(first(data.openingTicketId, state.openingTicketId, ""), ""),
-
-    createModal: safeObject(data.createModal),
-    detailModal: safeObject(data.detailModal),
+    openingTicketId: cleanText(data.openingTicketId, ""),
   };
 }
 
 /* =========================================================
-   UI PARTIALS
+   ROW PARTIALS
 ========================================================= */
 
-function renderSpinner(label = "") {
+function renderAvatar(item = {}) {
+  const name = getClientName(item);
+  const src = getAvatarUrl(item);
+  const initials = initialsFrom(name);
+  const tone = hashText(`${getTicketId(item)}:${name}`) % 10;
+
   return `
-    <span class="incidencias-inline-loading">
-      <span class="incidencias-inline-spinner" aria-hidden="true"></span>
-      ${label ? `<span class="incidencias-inline-loading-text">${escapeHtml(label)}</span>` : ""}
+    <span
+      class="incidencias-avatar${src ? " has-image" : " is-fallback"}"
+      data-avatar-tone="${attr(String(tone))}"
+      data-has-avatar="${src ? "true" : "false"}"
+      aria-hidden="true"
+    >
+      ${
+        src
+          ? `
+            <img
+              src="${attr(src)}"
+              alt=""
+              width="48"
+              height="48"
+              loading="lazy"
+              decoding="async"
+              referrerpolicy="no-referrer"
+              draggable="false"
+              class="incidencias-avatar-img"
+            >
+          `
+          : ""
+      }
+      <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
     </span>
   `;
 }
 
-function renderAvatar(item = {}) {
-  const fullName = getClientName(item);
-  const initials = initialsFrom(fullName);
-  const avatarUrl = getAvatarUrl(item);
-  const tone = hashText(`${fullName}:${getTicketId(item)}`) % 10;
-
-  if (avatarUrl) {
-    return `
-      <div
-        class="incidencias-avatar"
-        title="${attr(fullName)}"
-        data-tooltip="${attr(fullName)}"
-        data-has-avatar="true"
-        data-fallback="false"
-        data-avatar-tone="${attr(String(tone))}"
-        data-incidencias-avatar="true"
-      >
-        <img
-          class="incidencias-avatar-img"
-          src="${attr(avatarUrl)}"
-          alt="${attr(fullName)}"
-          loading="lazy"
-          decoding="async"
-          referrerpolicy="no-referrer"
-          draggable="false"
-          data-incidencias-avatar-img="true"
-        >
-        <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
-      </div>
-    `;
-  }
-
-  return `
-    <div
-      class="incidencias-avatar incidencias-avatar--fallback"
-      title="${attr(fullName)}"
-      data-tooltip="${attr(fullName)}"
-      data-has-avatar="false"
-      data-fallback="true"
-      data-avatar-tone="${attr(String(tone))}"
-      data-incidencias-avatar="true"
-    >
-      <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
-    </div>
-  `;
-}
-
 function renderStatusChip(item = {}) {
-  const rawStatus = getStatusRaw(item);
-  const key = getStatusKey(rawStatus);
-  const label = getStatusLabel(rawStatus);
+  const raw = getStatusRaw(item);
+  const key = getStatusKey(raw);
+  const label = getStatusLabel(raw);
 
   return `
-    <span
-      class="incidencias-chip incidencias-chip--${attr(key)}"
-      data-status="${attr(key)}"
-      title="${attr(`Estado · ${label}`)}"
-    >
-      <span class="incidencias-chip-dot" aria-hidden="true"></span>
-      <span class="incidencias-chip-label">${escapeHtml(label)}</span>
+    <span class="incidencias-status-chip incidencias-status-chip--${attr(key)} is-${attr(key)}" data-status-chip="${attr(key)}">
+      <span class="incidencias-status-dot" aria-hidden="true"></span>
+      <span>${escapeHtml(label)}</span>
     </span>
   `;
 }
@@ -1421,116 +1121,84 @@ function renderPriorityBadge(item = {}) {
   const label = getPriorityLabel(item);
 
   return `
-    <span
-      class="incidencias-mini-badge incidencias-mini-badge--${attr(key)}"
-      title="Prioridad ${attr(label)}"
-      data-priority="${attr(key)}"
-    >
-      ${key === "critical" || key === "urgent" ? icon("alert") : icon("activity")}
+    <span class="incidencias-priority-badge incidencias-priority-badge--${attr(key)}" data-priority-badge="${attr(key)}">
+      <span aria-hidden="true">↯</span>
       <span>${escapeHtml(label)}</span>
     </span>
   `;
 }
 
-function renderAssignedAvatar(item = {}) {
-  const assigned = getAssignedTo(item);
-  const initials = initialsFrom(assigned);
-  const avatarUrl = getAssignedAvatarUrl(item);
-
-  if (!avatarUrl) {
-    return `
-      <span
-        class="incidencias-agent-avatar incidencias-agent-avatar--fallback"
-        title="${attr(assigned)}"
-        data-tooltip="${attr(assigned)}"
-        data-technician-avatar="true"
-        data-has-avatar="false"
-        data-fallback="true"
-        aria-hidden="true"
-      >
-        <span class="incidencias-agent-avatar-fallback">${escapeHtml(initials)}</span>
-      </span>
-    `;
-  }
-
-  return `
-    <span
-      class="incidencias-agent-avatar incidencias-agent-avatar--image"
-      title="${attr(assigned)}"
-      data-tooltip="${attr(assigned)}"
-      data-technician-avatar="true"
-      data-has-avatar="true"
-      data-fallback="false"
-      aria-hidden="true"
-    >
-      <img
-        class="incidencias-agent-avatar-img"
-        src="${attr(avatarUrl)}"
-        alt=""
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
-        draggable="false"
-        data-incidencias-agent-avatar-img="true"
-      >
-      <span class="incidencias-agent-avatar-fallback">${escapeHtml(initials)}</span>
-    </span>
-  `;
-}
-
 function renderAssignedBadge(item = {}) {
-  const assigned = getAssignedTo(item);
+  const assignedTo = getAssignedTo(item);
+  const normalized = normalizeKey(assignedTo);
+
+  if (!assignedTo || normalized === "sin_asignar") return "";
+
+  const avatar = getAssignedAvatarUrl(item);
+  const initials = initialsFrom(assignedTo);
 
   return `
-    <span
-      class="incidencias-mini-badge incidencias-mini-badge--agent"
-      aria-label="Técnico · ${attr(assigned)}"
-      data-assigned-technician="${attr(assigned)}"
-    >
-      ${renderAssignedAvatar(item)}
-      <span class="incidencias-agent-name">${escapeHtml(assigned)}</span>
+    <span class="incidencias-assigned-badge" data-assigned="true">
+      <span class="incidencias-assigned-avatar${avatar ? " has-image" : " is-fallback"}" aria-hidden="true">
+        ${
+          avatar
+            ? `
+              <img
+                src="${attr(avatar)}"
+                alt=""
+                width="20"
+                height="20"
+                loading="lazy"
+                decoding="async"
+                referrerpolicy="no-referrer"
+                draggable="false"
+              >
+            `
+            : ""
+        }
+        <span>${escapeHtml(initials)}</span>
+      </span>
+      <span>${escapeHtml(assignedTo)}</span>
     </span>
   `;
 }
 
 function renderImporteChip(item = {}) {
-  const label = getImporteLabel(item);
   const key = getImporteKey(item);
-  const isMoney = key === "money";
+  const label = getImporteLabel(item);
 
   return `
-    <span
-      class="incidencias-importe incidencias-importe--${attr(key)}${isMoney ? " incidencias-importe--money" : ""}"
-      data-amount-state="${attr(key)}"
-      title="${attr(`Importe · ${label}`)}"
-    >
-      ${isMoney ? icon("euro") : ""}
+    <span class="incidencias-importe-chip incidencias-importe-chip--${attr(key)}" data-importe-status="${attr(key)}">
+      ${key === "money" ? icon("euro") : ""}
       <span>${escapeHtml(label)}</span>
     </span>
   `;
 }
 
 /* =========================================================
-   HEADER
+   HEADER / HERO
 ========================================================= */
 
 function renderHeader(vm = {}) {
   const stats = vm.stats;
-  const updatedAt = first(vm.items[0]?.lastActivityAt, vm.items[0]?.updatedAt, vm.items[0]?.createdAt, null);
+  const updatedAt = stats.lastUpdateTs ? new Date(stats.lastUpdateTs).toISOString() : null;
 
   return `
     <section class="incidencias-hero" data-incidencias-hero="true">
       <div class="incidencias-hero-top">
         <div class="incidencias-hero-copy">
-          <h1 class="incidencias-page-title">${escapeHtml(vm.title)}</h1>
-          <p class="incidencias-page-subtitle">${escapeHtml(vm.subtitle)}</p>
+          <p class="incidencias-eyebrow">Incidencias</p>
+          <h1 class="incidencias-title">Tus incidencias y solicitudes</h1>
+          <p class="incidencias-subtitle">
+            Consulta el estado de tus incidencias, revisa actualizaciones y crea nuevas solicitudes.
+          </p>
         </div>
 
-        <div class="incidencias-hero-actions incidencias-hero-actions--facturas-order">
+        <div class="incidencias-hero-actions" aria-label="Acciones de incidencias">
           <button
             type="button"
             id="incidencias-create-btn"
-            class="incidencias-btn incidencias-btn--create${vm.creating ? " is-loading" : ""}"
+            class="incidencias-btn incidencias-btn--primary incidencias-btn--create${vm.creating ? " is-loading" : ""}"
             data-incidencias-action="${INCIDENCIAS_ACTIONS.CREATE_OPEN}"
             ${htmlAttrs({
               disabled: vm.creating,
@@ -1538,11 +1206,7 @@ function renderHeader(vm = {}) {
               "aria-busy": vm.creating ? "true" : false,
             })}
           >
-            ${
-              vm.creating
-                ? renderSpinner("Abriendo...")
-                : `${icon("plus")}<span class="incidencias-btn-text">Crear incidencia</span>`
-            }
+            ${vm.creating ? renderSpinner("Creando...") : `${icon("plus")}<span class="incidencias-btn-text">Crear incidencia</span>`}
           </button>
 
           <button
@@ -1556,11 +1220,7 @@ function renderHeader(vm = {}) {
               "aria-busy": vm.refreshing ? "true" : false,
             })}
           >
-            ${
-              vm.refreshing
-                ? renderSpinner("Actualizando...")
-                : `${icon("refresh")}<span class="incidencias-btn-text">Actualizar</span>`
-            }
+            ${vm.refreshing ? renderSpinner("Actualizando...") : `${icon("refresh")}<span class="incidencias-btn-text">Actualizar</span>`}
           </button>
         </div>
       </div>
@@ -1814,66 +1474,65 @@ function renderRow(item = {}, vm = {}) {
 }
 
 function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
+  const totalRows = Math.max(4, number(rows, DEFAULT_VISIBLE_ROWS));
+
   return `
-    <div class="incidencias-table-loading" aria-hidden="true">
-      ${Array.from({ length: Math.max(3, number(rows, DEFAULT_VISIBLE_ROWS)) }).map(() => `
-        <div class="incidencias-table-loading-row incidencias-table-loading-row--no-actions">
-          <div class="incidencias-skeleton incidencias-skeleton--avatar"></div>
-          <div class="incidencias-table-loading-copy">
-            <div class="incidencias-skeleton incidencias-skeleton--xs"></div>
-            <div class="incidencias-skeleton incidencias-skeleton--lg"></div>
-            <div class="incidencias-skeleton incidencias-skeleton--md"></div>
-          </div>
-          <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
-          <div class="incidencias-skeleton incidencias-skeleton--date"></div>
-          <div class="incidencias-skeleton incidencias-skeleton--date"></div>
-          <div class="incidencias-skeleton incidencias-skeleton--amount"></div>
-          <div class="incidencias-skeleton incidencias-skeleton--attach"></div>
-        </div>
-      `).join("")}
+    <div class="incidencias-table-wrap is-loading" data-incidencias-table-wrap="true">
+      <div class="incidencias-table-shell">
+        <table
+          class="incidencias-table incidencias-table--no-actions incidencias-table--loading"
+          role="table"
+          aria-label="Cargando incidencias"
+          data-table-columns="6"
+          data-table-actions="false"
+        >
+          ${renderTableColgroup()}
+          ${renderTableHead()}
+
+          <tbody>
+            ${Array.from({ length: totalRows }).map((_, index) => `
+              <tr class="incidencias-row incidencias-row--skeleton" aria-hidden="true" data-skeleton-row="${index + 1}">
+                ${INCIDENCIAS_TABLE_COLUMNS.map((column) => `
+                  <td class="${attr(column.cellClass)}" data-column="${attr(column.key)}">
+                    <span class="incidencias-skeleton incidencias-skeleton--${attr(column.key)}"></span>
+                  </td>
+                `).join("")}
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
     </div>
   `;
 }
 
 function renderRefreshOverlay() {
   return `
-    <div class="incidencias-refresh-overlay" aria-live="polite">
-      <div class="incidencias-refresh-card">
-        ${renderSpinner("Actualizando historial...")}
-      </div>
+    <div class="incidencias-refresh-overlay" aria-live="polite" aria-busy="true">
+      <span class="incidencias-spinner" aria-hidden="true"></span>
+      <span>Actualizando incidencias...</span>
     </div>
   `;
 }
 
 function renderEmptyState(vm = {}) {
-  const filtering = vm.filter !== "all" || Boolean(vm.search);
   const hasError = Boolean(vm.error);
+  const filtering = vm.filter !== "all" || Boolean(vm.search);
 
   return `
-    <div class="incidencias-empty">
+    <div class="incidencias-empty" data-incidencias-empty="true">
       <div class="incidencias-empty-icon" aria-hidden="true">
-        ${hasError ? icon("alert") : filtering ? icon("filter") : icon("ticket")}
+        ${hasError ? icon("alert") : icon("ticket")}
       </div>
 
-      <h3 class="incidencias-empty-title">
+      <h3>${hasError ? "No se pudieron cargar las incidencias" : filtering ? "No hay incidencias con esos filtros" : "Todavía no hay incidencias"}</h3>
+      <p>
         ${
           hasError
-            ? "No se pudieron cargar las incidencias"
+            ? escapeHtml(vm.error)
             : filtering
-              ? "No hay incidencias con este criterio"
-              : "No hay incidencias para mostrar"
-        }
-      </h3>
-
-      <p class="incidencias-empty-text">
-        ${
-          hasError
-            ? "Puedes reintentar la carga desde el botón de actualizar."
-            : filtering
-              ? vm.search
-                ? `No se encontraron incidencias para “${escapeHtml(vm.search)}”.`
-                : "Cambia el filtro activo para volver al historial completo."
-              : "Cuando haya solicitudes registradas aparecerán aquí con su estado, seguimiento, adjuntos, facturación asociada y acciones disponibles."
+              ? "Prueba a limpiar la búsqueda o cambia el filtro activo para volver al historial completo."
+              : "Cuando haya solicitudes registradas aparecerán aquí con su estado, seguimiento, adjuntos y facturación asociada."
         }
       </p>
 
@@ -1999,10 +1658,7 @@ function renderTable(vm = {}) {
 function renderHistory(vm = {}) {
   const showInitialLoading = vm.loading && !vm.visibleItems.length;
   const showRefreshOverlay = vm.refreshing && vm.visibleItems.length;
-
-  const activeFilterLabel =
-    FILTERS.find((item) => item.key === vm.filter)?.label || "Todas";
-
+  const activeFilterLabel = FILTERS.find((item) => item.key === vm.filter)?.label || "Todas";
   const activeCriteria = [
     vm.filter !== "all" ? activeFilterLabel : "",
     vm.search ? `búsqueda “${vm.search}”` : "",
@@ -2106,8 +1762,6 @@ export function renderIncidenciasErrorState(message = "No se pudieron cargar las
 
 export function renderIncidenciasTemplate(input = {}) {
   const vm = buildVm(input);
-  const admin = input.admin === true || input.role === "admin" || vm.data.admin === true;
-  const role = input.role || vm.data.role || "";
 
   return `
     <section
@@ -2143,14 +1797,6 @@ export function renderIncidenciasTemplate(input = {}) {
 
       ${renderHeader(vm)}
       ${renderHistory(vm)}
-
-      ${renderIncidenciasCreateModal({
-        ...vm.createModal,
-        admin,
-        role,
-      })}
-
-      ${renderIncidenciasDetailModal(vm.detailModal)}
     </section>
   `;
 }
@@ -2196,10 +1842,11 @@ export function getIncidenciasTemplateSnapshot() {
       requesterEmailAliasCompatibility: true,
       technicianAvatarAliasCompatibility: true,
       blobAvatarSupport: true,
-      delegatesDetailModal: true,
 
-      includesCreateTemplate: true,
-      includesDetailTemplate: true,
+      externalModalIslands: true,
+      doesNotRenderCreateModal: true,
+      doesNotRenderDetailModal: true,
+
       tableMarkup: true,
       searchMarkup: true,
       filtersMarkup: true,

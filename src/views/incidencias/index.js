@@ -14,6 +14,7 @@
    - Comentar/reabrir/subir adjuntos.
    - Abrir/descargar adjuntos.
    - Renderizar modales en isla única para evitar duplicidad/flicker.
+   - Evitar rerender completo del modal en cada tecla del search admin.
    - Delegar búsqueda de usuarios en incidencias.api.js.
    - Delegar HTML en templates.
    - Controlar orden visual mayor/menor para el template.
@@ -64,7 +65,7 @@ import {
   validateDetailUpdate,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.lean.v11.modals-production";
+export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.lean.v12.no-search-flicker";
 export const INCIDENCIAS_VIEW_VERSION = INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
@@ -1074,7 +1075,7 @@ function createIncidenciasController(host = null, context = {}) {
 
     renderModals({
       immediate: true,
-      focusSelector: "[data-field='subject']",
+      focusSelector: isAdmin() ? "[data-create-user-search-input]" : "[data-field='subject']",
       preserveFocus: false,
     });
 
@@ -1083,6 +1084,8 @@ function createIncidenciasController(host = null, context = {}) {
 
   function closeCreateModal() {
     if (createModal.submitting) return false;
+
+    creating = false;
 
     clearUserSearchTimer();
     userSearchSeq += 1;
@@ -1178,10 +1181,18 @@ function createIncidenciasController(host = null, context = {}) {
     createModal.userSearch.error = "";
     createModal.userSearch.results = [];
     createModal.userSearch.empty = false;
+    createModal.userSearch.loading = false;
+
+    if (createModal.errors.targetUserId || createModal.errors.targetUser) {
+      const next = { ...createModal.errors };
+      delete next.targetUserId;
+      delete next.targetUser;
+      createModal.errors = next;
+    }
+
+    createModal.serverError = "";
 
     if (!isAdmin() || query.length < USER_SEARCH_MIN_LENGTH) {
-      createModal.userSearch.loading = false;
-
       if (hadVisibleSearchState) {
         renderModals({
           focusSelector: "[data-create-user-search-input]",
@@ -1192,15 +1203,16 @@ function createIncidenciasController(host = null, context = {}) {
       return true;
     }
 
-    createModal.userSearch.loading = true;
-
-    renderModals({
-      focusSelector: "[data-create-user-search-input]",
-      preserveFocus: true,
-    });
-
     userSearchTimer = window.setTimeout(() => {
-      userSearchTimer = 0;
+      if (destroyed || seq !== userSearchSeq) return;
+
+      createModal.userSearch.loading = true;
+
+      renderModals({
+        focusSelector: "[data-create-user-search-input]",
+        preserveFocus: true,
+      });
+
       void runUserSearch(query, seq);
     }, USER_SEARCH_DEBOUNCE_MS);
 
@@ -1317,6 +1329,7 @@ function createIncidenciasController(host = null, context = {}) {
     createModal.serverError = "";
 
     renderModals({
+      focusSelector: "[data-field='subject']",
       preserveFocus: false,
     });
 
@@ -1324,6 +1337,9 @@ function createIncidenciasController(host = null, context = {}) {
   }
 
   function clearCreateUser() {
+    clearUserSearchTimer();
+    userSearchSeq += 1;
+
     createModal.form = {
       ...createModal.form,
       targetUserId: "",

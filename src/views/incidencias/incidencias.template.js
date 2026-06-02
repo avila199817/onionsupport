@@ -10,7 +10,7 @@
    - Mantener columnas 1:1 con CSS.
    - Tabla sin columna Acciones: la fila abre el detalle.
    - Tabla marcada para escala visual 110%.
-   - Botón de filtro por fecha preparado para el controlador.
+   - Botón de orden mayor/menor preparado para el controlador.
    - Sin Auth.
    - Sin Router.
    - Sin HTTP.
@@ -22,18 +22,16 @@
    - Sin Toast.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.productive.v7";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.productive.v8.sort-avatar";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
   CREATE_OPEN: "create-open",
 
   FILTER: "filter",
+  SORT_TOGGLE: "sort-toggle",
   CLEAR_FILTERS: "clear-filters",
   CLEAR_SEARCH: "clear-search",
-
-  DATE_FILTER: "date-filter",
-  CLEAR_DATE_FILTER: "clear-date-filter",
 
   OPEN_DETAIL: "open-detail",
   LOAD_MORE: "load-more",
@@ -43,6 +41,7 @@ const DEFAULT_ROUTE = "/incidencias";
 const DEFAULT_VISIBLE_ROWS = 20;
 const DEFAULT_CURRENCY = "EUR";
 const TABLE_SCALE = "110";
+const DEFAULT_SORT_ORDER = "desc";
 
 const FILTERS = Object.freeze([
   { key: "all", label: "Todas" },
@@ -507,16 +506,12 @@ function icon(name = "") {
     close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
     search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
     euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
-    activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
-    calendar: `<svg ${common}><path d="M8 2v4"/><path d="M16 2v4"/><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg>`,
     chevronDown: `<svg ${common}><path d="m6 9 6 6 6-6"/></svg>`,
-    user: `<svg ${common}><path d="M12 11.25a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4.75 20.75a7.25 7.25 0 0 1 14.5 0"/></svg>`,
 
     badgeBolt: `<svg ${common}><path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z"/></svg>`,
     badgeSignal: `<svg ${common}><path d="M4 13h3v7H4z"/><path d="M10.5 9h3v11h-3z"/><path d="M17 4h3v16h-3z"/></svg>`,
     badgeShield: `<svg ${common}><path d="M12 3 20 7v5c0 5-3.4 8.3-8 9-4.6-.7-8-4-8-9V7l8-4Z"/><path d="M9.5 12.2 11.3 14l3.5-4"/></svg>`,
     badgeLeaf: `<svg ${common}><path d="M19 4c-7.5.6-12 4.5-12 10.5 0 3.2 2.3 5.5 5.5 5.5C18.5 20 21.4 13.5 19 4Z"/><path d="M7 17c2.2-3.7 5.2-6.2 9-7.5"/></svg>`,
-    badgeUser: `<svg ${common}><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>`,
   };
 
   return icons[name] || "";
@@ -901,7 +896,7 @@ function itemSortTime(item = {}) {
 }
 
 /* =========================================================
-   FILTER / STATS
+   FILTER / SORT / STATS
 ========================================================= */
 
 function normalizeFilter(value = "") {
@@ -912,6 +907,43 @@ function normalizeFilter(value = "") {
   if (["closed", "close", "cerrada", "cerrado", "resolved", "resuelta", "resuelto", "cancelled", "archived"].includes(key)) return "closed";
 
   return "all";
+}
+
+function normalizeSortOrder(value = "") {
+  const key = normalizeKey(value);
+
+  if (["asc", "ascending", "menor", "menor_mayor", "menor_a_mayor", "oldest", "older", "antiguas", "antiguos"].includes(key)) {
+    return "asc";
+  }
+
+  return "desc";
+}
+
+function getSortLabel(sortOrder = DEFAULT_SORT_ORDER) {
+  return normalizeSortOrder(sortOrder) === "asc" ? "Menor a mayor" : "Mayor a menor";
+}
+
+function getNextSortOrder(sortOrder = DEFAULT_SORT_ORDER) {
+  return normalizeSortOrder(sortOrder) === "asc" ? "desc" : "asc";
+}
+
+function sortItems(items = [], sortOrder = DEFAULT_SORT_ORDER) {
+  const order = normalizeSortOrder(sortOrder);
+
+  return [...safeArray(items)].sort((a, b) => {
+    const diff = itemSortTime(a) - itemSortTime(b);
+
+    if (diff !== 0) {
+      return order === "asc" ? diff : -diff;
+    }
+
+    const idDiff = getTicketId(a).localeCompare(getTicketId(b), "es", {
+      numeric: true,
+      sensitivity: "base",
+    });
+
+    return order === "asc" ? idDiff : -idDiff;
+  });
 }
 
 function isClosedItem(item = {}) {
@@ -955,61 +987,6 @@ function matchesSearch(item = {}, query = "") {
   if (!q) return true;
 
   return itemSearchText(item).includes(q);
-}
-
-function getDateFilterTimestamp(item = {}) {
-  return toTimestamp(getCreatedAt(item)) || itemSortTime(item);
-}
-
-function getDateBoundary(value = "", mode = "start") {
-  const raw = cleanText(value, "");
-
-  if (!raw) return 0;
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    const suffix = mode === "end" ? "T23:59:59.999" : "T00:00:00.000";
-    return toTimestamp(`${raw}${suffix}`);
-  }
-
-  const timestamp = toTimestamp(raw);
-
-  if (!timestamp) return 0;
-
-  const date = new Date(timestamp);
-
-  if (mode === "end") {
-    date.setHours(23, 59, 59, 999);
-  } else {
-    date.setHours(0, 0, 0, 0);
-  }
-
-  return date.getTime();
-}
-
-function matchesDateFilter(item = {}, dateFrom = "", dateTo = "") {
-  const from = getDateBoundary(dateFrom, "start");
-  const to = getDateBoundary(dateTo, "end");
-
-  if (!from && !to) return true;
-
-  const itemTime = getDateFilterTimestamp(item);
-
-  if (!itemTime) return false;
-  if (from && itemTime < from) return false;
-  if (to && itemTime > to) return false;
-
-  return true;
-}
-
-function getDateFilterLabel(vm = {}) {
-  const explicit = cleanText(vm.dateLabel, "");
-
-  if (explicit) return explicit;
-  if (vm.dateFrom && vm.dateTo) return `${formatDateShort(vm.dateFrom)} - ${formatDateShort(vm.dateTo)}`;
-  if (vm.dateFrom) return `Desde ${formatDateShort(vm.dateFrom)}`;
-  if (vm.dateTo) return `Hasta ${formatDateShort(vm.dateTo)}`;
-
-  return "Fecha";
 }
 
 function computeLocalStats(items = []) {
@@ -1074,16 +1051,7 @@ function normalizeItems(items = []) {
     if (!map.has(id)) map.set(id, item);
   }
 
-  return [...map.values()].sort((a, b) => {
-    const diff = itemSortTime(b) - itemSortTime(a);
-
-    if (diff !== 0) return diff;
-
-    return getTicketId(b).localeCompare(getTicketId(a), "es", {
-      numeric: true,
-      sensitivity: "base",
-    });
-  });
+  return sortItems([...map.values()], DEFAULT_SORT_ORDER);
 }
 
 /* =========================================================
@@ -1095,17 +1063,16 @@ function buildVm(input = {}) {
   const allItems = normalizeItems(data.items);
   const filter = normalizeFilter(data.filter);
   const search = cleanText(data.search, "");
-  const dateFrom = cleanText(first(data.dateFrom, data.filters?.dateFrom, data.dateFilter?.from, data.date?.from), "");
-  const dateTo = cleanText(first(data.dateTo, data.filters?.dateTo, data.dateFilter?.to, data.date?.to), "");
-  const dateLabel = cleanText(first(data.dateLabel, data.filters?.dateLabel, data.dateFilter?.label, data.date?.label), "");
-  const dateFilterActive = Boolean(dateFrom || dateTo || dateLabel || data.dateFilterActive === true);
+  const sortOrder = normalizeSortOrder(first(data.sortOrder, data.order, data.sort?.order, data.sort?.direction, DEFAULT_SORT_ORDER));
   const visibleLimit = Math.max(1, number(data.visibleLimit, DEFAULT_VISIBLE_ROWS));
   const stats = mergeStats(allItems, data.stats);
 
-  const filteredItems = allItems
-    .filter((item) => matchesFilter(item, filter))
-    .filter((item) => matchesSearch(item, search))
-    .filter((item) => matchesDateFilter(item, dateFrom, dateTo));
+  const filteredItems = sortItems(
+    allItems
+      .filter((item) => matchesFilter(item, filter))
+      .filter((item) => matchesSearch(item, search)),
+    sortOrder
+  );
 
   const visibleItems = filteredItems.slice(0, visibleLimit);
   const total = Math.max(number(data.total, allItems.length), allItems.length);
@@ -1138,10 +1105,10 @@ function buildVm(input = {}) {
     error: cleanText(data.error, ""),
     filter,
     search,
-    dateFrom,
-    dateTo,
-    dateLabel,
-    dateFilterActive,
+    sortOrder,
+    sortLabel: getSortLabel(sortOrder),
+    nextSortOrder: getNextSortOrder(sortOrder),
+    nextSortLabel: getSortLabel(getNextSortOrder(sortOrder)),
     filterCounts: countByFilter(allItems),
     stats,
 
@@ -1223,7 +1190,7 @@ function renderAssignedBadge(item = {}) {
   const initials = initialsFrom(assignedTo);
 
   return `
-    <span class="incidencias-assigned-badge" data-assigned="true">
+    <span class="incidencias-assigned-badge" data-assigned="true" title="${attr(assignedTo)}">
       <span class="incidencias-assigned-avatar${avatar ? " has-image" : " is-fallback"}" aria-hidden="true">
         ${
           avatar
@@ -1243,8 +1210,7 @@ function renderAssignedBadge(item = {}) {
         }
         <span>${escapeHtml(initials)}</span>
       </span>
-      <span class="incidencias-badge-icon incidencias-assigned-badge-icon" aria-hidden="true">${icon("badgeUser")}</span>
-      <span>${escapeHtml(assignedTo)}</span>
+      <span class="incidencias-assigned-name">${escapeHtml(assignedTo)}</span>
     </span>
   `;
 }
@@ -1402,53 +1368,32 @@ function renderSearch(vm = {}) {
   `;
 }
 
-function renderDateFilterButton(vm = {}) {
-  const active = vm.dateFilterActive === true;
-  const label = getDateFilterLabel(vm);
+function renderSortButton(vm = {}) {
+  const order = normalizeSortOrder(vm.sortOrder);
+  const label = getSortLabel(order);
+  const nextOrder = getNextSortOrder(order);
+  const nextLabel = getSortLabel(nextOrder);
 
   return `
-    <span
-      class="incidencias-date-filter${active ? " is-active" : ""}"
-      data-incidencias-date-filter="true"
-      data-date-filter-active="${active ? "true" : "false"}"
-      data-date-from="${attr(vm.dateFrom)}"
-      data-date-to="${attr(vm.dateTo)}"
+    <button
+      type="button"
+      class="incidencias-filter-pill incidencias-filter-pill--sort is-active"
+      data-incidencias-action="${INCIDENCIAS_ACTIONS.SORT_TOGGLE}"
+      data-sort-order="${attr(order)}"
+      data-next-sort-order="${attr(nextOrder)}"
+      aria-pressed="true"
+      aria-label="${attr(`Orden actual: ${label}. Cambiar a ${nextLabel}`)}"
+      title="${attr(`Cambiar a ${nextLabel}`)}"
     >
-      <button
-        type="button"
-        class="incidencias-filter-pill incidencias-filter-pill--date${active ? " is-active" : ""}"
-        data-incidencias-action="${INCIDENCIAS_ACTIONS.DATE_FILTER}"
-        data-date-filter-action="open"
-        aria-pressed="${active ? "true" : "false"}"
-        aria-label="Filtrar incidencias por fecha"
-      >
-        ${icon("calendar")}
-        <span>${escapeHtml(label)}</span>
-      </button>
-
-      ${
-        active
-          ? `
-            <button
-              type="button"
-              class="incidencias-date-filter-clear"
-              data-incidencias-action="${INCIDENCIAS_ACTIONS.CLEAR_DATE_FILTER}"
-              data-date-filter-action="clear"
-              aria-label="Limpiar filtro de fecha"
-            >
-              ${icon("close")}
-            </button>
-          `
-          : ""
-      }
-    </span>
+      <span>${escapeHtml(label)}</span>
+    </button>
   `;
 }
 
 function renderFilters(vm = {}) {
   return `
     <div class="incidencias-filters" aria-label="Filtros y búsqueda de incidencias">
-      <div class="incidencias-filter-pills" role="group" aria-label="Filtrar incidencias por estado">
+      <div class="incidencias-filter-pills" role="group" aria-label="Filtrar y ordenar incidencias">
         ${FILTERS.map((filter) => {
           const active = filter.key === vm.filter;
           const count = vm.filterCounts[filter.key] ?? 0;
@@ -1469,7 +1414,7 @@ function renderFilters(vm = {}) {
         }).join("")}
 
         <span class="incidencias-filter-divider" aria-hidden="true"></span>
-        ${renderDateFilterButton(vm)}
+        ${renderSortButton(vm)}
       </div>
 
       ${renderSearch(vm)}
@@ -1649,7 +1594,7 @@ function renderRefreshOverlay() {
 
 function renderEmptyState(vm = {}) {
   const hasError = Boolean(vm.error);
-  const filtering = vm.filter !== "all" || Boolean(vm.search) || vm.dateFilterActive === true;
+  const filtering = vm.filter !== "all" || Boolean(vm.search);
 
   return `
     <div class="incidencias-empty" data-incidencias-empty="true">
@@ -1774,6 +1719,7 @@ function renderTable(vm = {}) {
         data-table-columns="6"
         data-table-actions="false"
         data-table-scale="${attr(TABLE_SCALE)}"
+        data-sort-order="${attr(vm.sortOrder)}"
       >
         ${renderTableColgroup()}
         ${renderTableHead()}
@@ -1795,14 +1741,13 @@ function renderHistory(vm = {}) {
   const activeCriteria = [
     vm.filter !== "all" ? activeFilterLabel : "",
     vm.search ? `búsqueda “${vm.search}”` : "",
-    vm.dateFilterActive ? `fecha “${getDateFilterLabel(vm)}”` : "",
   ].filter(Boolean);
 
   const subtitle = showInitialLoading
     ? "Cargando incidencias..."
-    : vm.filter !== "all" || vm.search || vm.dateFilterActive
-      ? `Mostrando ${formatNumber(vm.visibleCount)} de ${formatNumber(vm.filteredTotal)}${activeCriteria.length ? ` · ${activeCriteria.join(" · ")}` : ""}`
-      : `Mostrando ${formatNumber(vm.visibleCount)} de ${formatNumber(vm.total)} · ordenadas de más nuevas a más antiguas`;
+    : vm.filter !== "all" || vm.search
+      ? `Mostrando ${formatNumber(vm.visibleCount)} de ${formatNumber(vm.filteredTotal)}${activeCriteria.length ? ` · ${activeCriteria.join(" · ")}` : ""} · orden ${getSortLabel(vm.sortOrder).toLowerCase()}`
+      : `Mostrando ${formatNumber(vm.visibleCount)} de ${formatNumber(vm.total)} · orden ${getSortLabel(vm.sortOrder).toLowerCase()}`;
 
   return `
     <section
@@ -1855,7 +1800,7 @@ export function renderIncidenciasLoadingState(input = {}) {
       data-total="${attr(String(vm.total))}"
       data-visible="${attr(String(vm.visibleCount))}"
       data-filter="${attr(vm.filter)}"
-      data-date-filter-active="${vm.dateFilterActive ? "true" : "false"}"
+      data-sort-order="${attr(vm.sortOrder)}"
       data-table-actions="false"
       data-table-scale="${attr(TABLE_SCALE)}"
       aria-busy="true"
@@ -1916,9 +1861,7 @@ export function renderIncidenciasTemplate(input = {}) {
       data-visible="${attr(String(vm.visibleCount))}"
       data-filter="${attr(vm.filter)}"
       data-search-active="${vm.search ? "true" : "false"}"
-      data-date-filter-active="${vm.dateFilterActive ? "true" : "false"}"
-      data-date-from="${attr(vm.dateFrom)}"
-      data-date-to="${attr(vm.dateTo)}"
+      data-sort-order="${attr(vm.sortOrder)}"
       data-loading="${vm.loading ? "true" : "false"}"
       data-refreshing="${vm.refreshing ? "true" : "false"}"
       data-table-actions="false"
@@ -1953,6 +1896,7 @@ export function getIncidenciasTemplateSnapshot() {
     actions: INCIDENCIAS_ACTIONS,
     filters: FILTERS,
     tableScale: TABLE_SCALE,
+    defaultSortOrder: DEFAULT_SORT_ORDER,
     tableColumns: INCIDENCIAS_TABLE_COLUMNS.map((column) => ({
       key: column.key,
       label: column.label,
@@ -1983,9 +1927,11 @@ export function getIncidenciasTemplateSnapshot() {
       fullHdNoActionsLayout: true,
       tableScale110: true,
 
-      dateFilterButtonMarkup: true,
-      dateFilterPureVmSupport: true,
-      improvedBadgeSvgIcons: true,
+      sortToggleButtonMarkup: true,
+      noCalendarDateFilter: true,
+      sortOrderPureVmSupport: true,
+      improvedPriorityBadgeSvgIcons: true,
+      assignedBadgeHasNoExtraUserSvg: true,
 
       preservesTechnicianAvatarData: true,
       requesterEmailAliasCompatibility: true,

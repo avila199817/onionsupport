@@ -1986,9 +1986,11 @@ function buildUsersSearchQuery(query = "", limit = USERS_SEARCH_LIMIT) {
   return {
     q: query,
     search: query,
+    query,
+    term: query,
+    text: query,
     limit,
     includeTotal: false,
-    active: true,
   };
 }
 

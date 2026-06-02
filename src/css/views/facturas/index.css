@@ -2,7 +2,7 @@
    ONION SUPPORT — FACTURAS.CSS
    Archivo: /src/css/views/facturas/index.css
 
-   FACTURAS VIEW · GRAPHITE GLASS · PRODUCTIVE SPA
+   FACTURAS VIEW · TRANSPARENT GRAPHITE HEADER · PRODUCTIVE SPA
    TOKEN PRO SYSTEM · CSP CLEAN · NO CSS IN JS
 
    ARQUITECTURA:
@@ -205,7 +205,11 @@
 
 
 /* =========================================================
-   HERO · INCIDENCIAS FLOW ADAPTADO
+   HERO · TRANSPARENT GRAPHITE FLOW
+   Ajuste productivo:
+   - Sin card gigante envolviendo el header.
+   - El hero queda transparente sobre el layout del SPA.
+   - Se conservan las stats cards con el color premium actual.
 ========================================================= */
 
 .facturas-hero {
@@ -217,75 +221,30 @@
 
   min-inline-size: 0;
 
-  padding: clamp(18px, 1.55vw, 28px);
+  padding:
+    clamp(10px, 1vw, 18px)
+    clamp(10px, 1.25vw, 24px)
+    clamp(8px, .9vw, 16px);
 
-  overflow: hidden;
+  overflow: visible;
 
-  border: 1px solid rgba(255, 255, 255, .125);
-  border-radius: 28px;
+  border: 1px solid transparent;
+  border-radius: 0;
 
-  background:
-    radial-gradient(circle at 0% 0%, rgba(34, 211, 238, .145), transparent 34%),
-    radial-gradient(circle at 100% 0%, rgba(96, 165, 250, .130), transparent 35%),
-    radial-gradient(circle at 82% 100%, rgba(52, 211, 153, .080), transparent 38%),
-    linear-gradient(180deg, rgba(255, 255, 255, .078), rgba(255, 255, 255, .026)),
-    rgba(12, 14, 20, .64);
+  background: transparent;
 
-  box-shadow:
-    0 22px 64px rgba(0, 0, 0, .36),
-    inset 0 1px 0 rgba(255, 255, 255, .085);
+  box-shadow: none;
 
-  backdrop-filter: blur(22px) saturate(1.16);
-  -webkit-backdrop-filter: blur(22px) saturate(1.16);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 
   transform: translateZ(0);
 }
 
-.facturas-hero::before {
-  content: "";
-
-  position: absolute;
-  inset-inline: 22px;
-  inset-block-start: 0;
-  z-index: 0;
-
-  block-size: 1px;
-
-  pointer-events: none;
-
-  background:
-    linear-gradient(
-      90deg,
-      transparent,
-      rgba(255, 255, 255, .24),
-      rgba(56, 189, 248, .55),
-      rgba(52, 211, 153, .30),
-      transparent
-    );
-
-  opacity: .88;
-}
-
+.facturas-hero::before,
 .facturas-hero::after {
-  content: "";
-
-  position: absolute;
-  inset-inline-end: -120px;
-  inset-block-start: -130px;
-  z-index: 0;
-
-  inline-size: 280px;
-  block-size: 280px;
-
-  border-radius: 999px;
-
-  pointer-events: none;
-
-  background:
-    radial-gradient(circle, rgba(34, 211, 238, .20), rgba(96, 165, 250, .08) 42%, transparent 70%);
-
-  filter: blur(14px);
-  opacity: .95;
+  content: none;
+  display: none;
 }
 
 .facturas-hero > * {
@@ -314,7 +273,7 @@
 
   max-inline-size: 980px;
 
-  color: #ffffff;
+  color: var(--text-strong, #ffffff);
 
   font-size: clamp(36px, 3.15vw, 58px);
   line-height: .91;
@@ -325,16 +284,16 @@
   white-space: normal;
 
   text-shadow:
-    0 1px 0 rgba(255, 255, 255, .08),
-    0 18px 38px rgba(0, 0, 0, .40);
+    0 1px 0 rgba(255, 255, 255, .07),
+    0 18px 38px rgba(0, 0, 0, .34);
 }
 
 .facturas-page-subtitle {
   margin: 0;
 
-  max-inline-size: 820px;
+  max-inline-size: 840px;
 
-  color: rgba(255, 255, 255, .72);
+  color: color-mix(in srgb, var(--text-muted) 88%, var(--text-strong) 12%);
 
   font-size: clamp(13px, .92vw, 16px);
   line-height: 1.45;
@@ -491,7 +450,8 @@
 
 
 /* =========================================================
-   HERO ACTIONS · FLOW INCIDENCIAS ADAPTADO
+   HERO ACTIONS · GRAPHITE BUTTONS
+   Botones del header alineados con la botonera gris del SPA.
 ========================================================= */
 
 .facturas-hero .facturas-btn {
@@ -499,81 +459,95 @@
 
   padding-inline: 16px;
 
-  border: 1px solid rgba(255, 255, 255, .15);
+  border: 1px solid var(--btn-secondary-border);
   border-radius: var(--radius-pill);
 
   background:
-    radial-gradient(circle at 22% 0%, rgba(255, 255, 255, .145), transparent 44%),
-    linear-gradient(180deg, rgba(255, 255, 255, .100), rgba(255, 255, 255, .034)),
-    rgba(255, 255, 255, .044);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 5%, transparent),
+      transparent 54%
+    ),
+    var(--btn-secondary-bg);
 
-  color: rgba(255, 255, 255, .84);
+  color: var(--btn-secondary-text);
 
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .070),
-    0 12px 28px rgba(0, 0, 0, .20);
+  box-shadow: var(--btn-secondary-shadow);
 
   gap: 8px;
 
   font-size: 12px;
   font-weight: 950;
 
-  backdrop-filter: blur(16px) saturate(1.10);
-  -webkit-backdrop-filter: blur(16px) saturate(1.10);
+  backdrop-filter: var(--glass-blur-sm, blur(12px));
+  -webkit-backdrop-filter: var(--glass-blur-sm, blur(12px));
 }
 
 .facturas-hero .facturas-btn:hover {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 
-  border-color: rgba(255, 255, 255, .26);
+  border-color:
+    color-mix(in srgb, var(--btn-secondary-border) 70%, var(--border-strong));
 
   background:
-    radial-gradient(circle at 22% 0%, rgba(255, 255, 255, .190), transparent 44%),
-    linear-gradient(180deg, rgba(255, 255, 255, .135), rgba(255, 255, 255, .045)),
-    rgba(255, 255, 255, .060);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 7%, transparent),
+      transparent 56%
+    ),
+    var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
 
-  color: #ffffff;
+  color: var(--text-strong);
 
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .105),
-    0 17px 36px rgba(0, 0, 0, .30);
+    var(--btn-secondary-shadow),
+    0 10px 22px color-mix(in srgb, #000 18%, transparent);
 }
 
 .facturas-hero .facturas-btn--create,
 .facturas-hero .facturas-btn--primary {
-  border-color: rgba(94, 234, 212, .36);
+  border-color:
+    color-mix(in srgb, var(--btn-secondary-border) 76%, var(--border-strong));
 
   background:
-    radial-gradient(circle at 20% 0%, rgba(255, 255, 255, .170), transparent 46%),
-    linear-gradient(135deg, rgba(52, 211, 153, .90), rgba(34, 211, 238, .70) 58%, rgba(96, 165, 250, .62)),
-    rgba(20, 184, 166, .18);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-4) 44%, transparent),
+      color-mix(in srgb, var(--surface-2) 46%, transparent)
+    ),
+    var(--btn-secondary-bg);
 
-  color: rgba(255, 255, 255, .98);
+  color: var(--btn-secondary-text);
 
   box-shadow:
-    0 14px 34px rgba(34, 211, 238, .14),
-    0 10px 28px rgba(52, 211, 153, .13),
-    inset 0 1px 0 rgba(255, 255, 255, .16);
+    var(--btn-secondary-shadow),
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 6%, transparent);
 }
 
 .facturas-hero .facturas-btn--create:hover,
 .facturas-hero .facturas-btn--primary:hover {
-  border-color: rgba(125, 211, 252, .52);
+  border-color:
+    color-mix(in srgb, var(--btn-secondary-border) 58%, var(--border-strong));
 
   background:
-    radial-gradient(circle at 20% 0%, rgba(255, 255, 255, .210), transparent 46%),
-    linear-gradient(135deg, rgba(52, 211, 153, .98), rgba(34, 211, 238, .82) 58%, rgba(96, 165, 250, .72)),
-    rgba(20, 184, 166, .22);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-5) 52%, transparent),
+      color-mix(in srgb, var(--surface-3) 50%, transparent)
+    ),
+    var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
+
+  color: var(--text-strong);
 
   box-shadow:
-    0 18px 42px rgba(34, 211, 238, .18),
-    0 12px 32px rgba(52, 211, 153, .15),
-    inset 0 1px 0 rgba(255, 255, 255, .20);
+    var(--btn-secondary-shadow),
+    0 12px 24px color-mix(in srgb, #000 20%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 8%, transparent);
 }
 
 
 /* =========================================================
-   META PILLS · FLOW INCIDENCIAS ADAPTADO
+   META PILLS · GRAPHITE
 ========================================================= */
 
 .facturas-meta-pill {
@@ -587,19 +561,22 @@
 
   padding-inline: 12px;
 
-  border: 1px solid rgba(255, 255, 255, .145);
+  border: 1px solid var(--badge-border);
   border-radius: var(--radius-pill);
 
   background:
-    radial-gradient(circle at 24% 0%, rgba(255, 255, 255, .16), transparent 44%),
-    linear-gradient(180deg, rgba(255, 255, 255, .095), rgba(255, 255, 255, .036)),
-    rgba(255, 255, 255, .048);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent 60%
+    ),
+    var(--badge-bg);
 
-  color: rgba(255, 255, 255, .74);
+  color: var(--badge-text);
 
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .070),
-    0 9px 20px rgba(0, 0, 0, .16);
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 5%, transparent),
+    0 8px 18px color-mix(in srgb, #000 14%, transparent);
 
   font-size: 10px;
   line-height: 1;
@@ -613,19 +590,22 @@
   inline-size: 14px;
   block-size: 14px;
   flex: 0 0 auto;
-  opacity: .9;
+  opacity: .88;
 }
 
 .facturas-meta-pill--success,
 .facturas-meta-pill--warning,
 .facturas-meta-pill--danger,
 .facturas-meta-pill--info {
-  color: rgba(255, 255, 255, .74);
+  color: var(--badge-text);
   background:
-    radial-gradient(circle at 24% 0%, rgba(255, 255, 255, .16), transparent 44%),
-    linear-gradient(180deg, rgba(255, 255, 255, .095), rgba(255, 255, 255, .036)),
-    rgba(255, 255, 255, .048);
-  border-color: rgba(255, 255, 255, .145);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent 60%
+    ),
+    var(--badge-bg);
+  border-color: var(--badge-border);
 }
 
 
@@ -2532,7 +2512,6 @@
     0 8px 18px color-mix(in srgb, var(--accent) 11%, transparent);
 }
 
-[data-theme="light"] .facturas-hero,
 [data-theme="light"] .facturas-history {
   background:
     radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 38%),
@@ -2658,39 +2637,21 @@
 
 
 /* =========================================================
-   LIGHT THEME · HEADER FLOW INCIDENCIAS ADAPTADO
+   LIGHT THEME · TRANSPARENT GRAPHITE HEADER
 ========================================================= */
 
 [data-theme="light"] .facturas-hero {
-  border-color: rgba(15, 23, 42, .11);
-
-  background:
-    radial-gradient(circle at 0% 0%, rgba(14, 165, 233, .16), transparent 34%),
-    radial-gradient(circle at 100% 0%, rgba(37, 99, 235, .12), transparent 35%),
-    radial-gradient(circle at 82% 100%, rgba(16, 185, 129, .09), transparent 38%),
-    linear-gradient(180deg, rgba(255, 255, 255, .86), rgba(255, 255, 255, .62)),
-    rgba(255, 255, 255, .78);
-
-  box-shadow:
-    0 12px 30px rgba(15, 23, 42, .09),
-    inset 0 1px 0 rgba(255, 255, 255, .78);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
-[data-theme="light"] .facturas-hero::before {
-  background:
-    linear-gradient(
-      90deg,
-      transparent,
-      rgba(15, 23, 42, .10),
-      rgba(14, 165, 233, .40),
-      rgba(16, 185, 129, .24),
-      transparent
-    );
-}
-
+[data-theme="light"] .facturas-hero::before,
 [data-theme="light"] .facturas-hero::after {
-  background:
-    radial-gradient(circle, rgba(14, 165, 233, .18), rgba(37, 99, 235, .075) 42%, transparent 70%);
+  content: none;
+  display: none;
 }
 
 [data-theme="light"] .facturas-page-title,
@@ -2708,49 +2669,63 @@
 [data-theme="light"] .facturas-meta-pill--success,
 [data-theme="light"] .facturas-meta-pill--warning,
 [data-theme="light"] .facturas-meta-pill--danger,
-[data-theme="light"] .facturas-meta-pill--info,
-[data-theme="light"] .facturas-hero .facturas-btn {
-  border-color: rgba(15, 23, 42, .11);
+[data-theme="light"] .facturas-meta-pill--info {
+  border-color: var(--badge-border);
 
   background:
-    radial-gradient(circle at 24% 0%, rgba(255, 255, 255, .86), transparent 44%),
-    linear-gradient(180deg, rgba(255, 255, 255, .88), rgba(255, 255, 255, .62)),
-    rgba(255, 255, 255, .74);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 72%, transparent),
+      color-mix(in srgb, #ffffff 34%, transparent)
+    ),
+    var(--badge-bg);
 
-  color: rgba(15, 23, 42, .56);
+  color: var(--badge-text);
 
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .78),
-    0 9px 20px rgba(15, 23, 42, .07);
+    0 7px 18px rgba(15, 23, 42, .055);
 }
 
-[data-theme="light"] .facturas-hero .facturas-btn:hover {
-  border-color: rgba(15, 23, 42, .18);
-
-  background:
-    radial-gradient(circle at 22% 0%, rgba(255, 255, 255, .98), transparent 44%),
-    linear-gradient(180deg, rgba(255, 255, 255, .95), rgba(255, 255, 255, .72)),
-    rgba(255, 255, 255, .86);
-
-  color: #0f172a;
-}
-
+[data-theme="light"] .facturas-hero .facturas-btn,
 [data-theme="light"] .facturas-hero .facturas-btn--create,
 [data-theme="light"] .facturas-hero .facturas-btn--primary,
 [data-theme="light"] .facturas-hero .facturas-btn--create:hover,
 [data-theme="light"] .facturas-hero .facturas-btn--primary:hover {
-  border-color: rgba(20, 184, 166, .30);
+  border-color: var(--btn-secondary-border);
 
   background:
-    radial-gradient(circle at 20% 0%, rgba(255, 255, 255, .34), transparent 46%),
-    linear-gradient(135deg, rgba(52, 211, 153, .94), rgba(34, 211, 238, .76) 58%, rgba(96, 165, 250, .66));
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 78%, transparent),
+      color-mix(in srgb, #ffffff 36%, transparent)
+    ),
+    var(--btn-secondary-bg);
 
-  color: #ffffff;
+  color: var(--btn-secondary-text);
+
+  box-shadow: var(--btn-secondary-shadow);
+}
+
+[data-theme="light"] .facturas-hero .facturas-btn:hover,
+[data-theme="light"] .facturas-hero .facturas-btn--create:hover,
+[data-theme="light"] .facturas-hero .facturas-btn--primary:hover {
+  border-color:
+    color-mix(in srgb, var(--btn-secondary-border) 70%, var(--border-strong));
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 88%, transparent),
+      color-mix(in srgb, #ffffff 46%, transparent)
+    ),
+    var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
+
+  color: var(--text-strong);
 
   box-shadow:
-    0 14px 34px rgba(34, 211, 238, .16),
-    0 10px 28px rgba(52, 211, 153, .13),
-    inset 0 1px 0 rgba(255, 255, 255, .24);
+    var(--btn-secondary-shadow),
+    0 10px 22px rgba(15, 23, 42, .075);
 }
 
 [data-theme="light"] .facturas-stat-card {
@@ -2836,7 +2811,10 @@
   }
 
   .facturas-hero {
-    padding: var(--space-lg);
+    padding:
+      clamp(10px, 1vw, 18px)
+      clamp(10px, 1.25vw, 24px)
+      clamp(8px, .9vw, 16px);
   }
 
   .facturas-hero-top {
@@ -2868,8 +2846,8 @@
   }
 
   .facturas-hero {
-    padding: var(--space-lg) var(--space-md);
-    border-radius: var(--radius-xl);
+    padding: var(--space-md) var(--space-sm);
+    border-radius: 0;
   }
 
   .facturas-history {

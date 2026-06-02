@@ -9,10 +9,10 @@
    - Pintar inmediatamente sin bloquear el Router.
    - Cargar/listar incidencias desde incidencias.api.js en background.
    - Crear incidencia.
+   - Admin: buscar usuarios y crear incidencias para usuarios.
    - Abrir detalle.
    - Comentar/reabrir/subir adjuntos.
    - Abrir/descargar adjuntos.
-   - Buscador admin de usuario afectado para creación.
    - Renderizar modales en isla única para evitar duplicidad/flicker.
    - Delegar búsqueda de usuarios en incidencias.api.js.
    - Delegar HTML en templates.
@@ -64,7 +64,7 @@ import {
   validateDetailUpdate,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.lean.v10.sort-toggle";
+export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.lean.v11.modals-production";
 export const INCIDENCIAS_VIEW_VERSION = INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
@@ -1134,9 +1134,9 @@ function createIncidenciasController(host = null, context = {}) {
 
       if (destroyed || seq !== userSearchSeq) return false;
 
-      createModal.userSearch.results = results;
+      createModal.userSearch.results = safeArray(results);
       createModal.userSearch.loading = false;
-      createModal.userSearch.empty = results.length === 0;
+      createModal.userSearch.empty = safeArray(results).length === 0;
       createModal.userSearch.error = "";
 
       renderModals({
@@ -1194,12 +1194,10 @@ function createIncidenciasController(host = null, context = {}) {
 
     createModal.userSearch.loading = true;
 
-    if (hadVisibleSearchState) {
-      renderModals({
-        focusSelector: "[data-create-user-search-input]",
-        preserveFocus: true,
-      });
-    }
+    renderModals({
+      focusSelector: "[data-create-user-search-input]",
+      preserveFocus: true,
+    });
 
     userSearchTimer = window.setTimeout(() => {
       userSearchTimer = 0;
@@ -1213,6 +1211,9 @@ function createIncidenciasController(host = null, context = {}) {
     const userId = cleanText(node?.dataset?.userId, "");
 
     if (!userId) return false;
+
+    clearUserSearchTimer();
+    userSearchSeq += 1;
 
     const selected =
       safeArray(createModal.userSearch.results).find((user) => {
@@ -1305,6 +1306,15 @@ function createIncidenciasController(host = null, context = {}) {
       },
       empty: false,
     };
+
+    if (createModal.errors.targetUserId || createModal.errors.targetUser) {
+      const next = { ...createModal.errors };
+      delete next.targetUserId;
+      delete next.targetUser;
+      createModal.errors = next;
+    }
+
+    createModal.serverError = "";
 
     renderModals({
       preserveFocus: false,
@@ -1401,15 +1411,22 @@ function createIncidenciasController(host = null, context = {}) {
       ...validation.form,
     };
 
-    if (!validation.valid) {
+    if (isAdmin() && !createModal.form.targetUserId) {
+      createModal.errors = {
+        ...createModal.errors,
+        targetUserId: "Selecciona el usuario afectado antes de crear la incidencia.",
+      };
+    }
+
+    if (Object.keys(createModal.errors).length > 0 || !validation.valid) {
       renderModals({
         focusSelector:
-          createModal.errors.subject
-            ? "[data-field='subject']"
-            : createModal.errors.description
-              ? "[data-field='description']"
-              : createModal.errors.targetUserId || createModal.errors.targetUser
-                ? "[data-create-user-search-input]"
+          createModal.errors.targetUserId || createModal.errors.targetUser
+            ? "[data-create-user-search-input]"
+            : createModal.errors.subject
+              ? "[data-field='subject']"
+              : createModal.errors.description
+                ? "[data-field='description']"
                 : "",
         preserveFocus: false,
       });
@@ -1589,6 +1606,11 @@ function createIncidenciasController(host = null, context = {}) {
       ...safeArray(detailModal.pendingFiles),
       ...safeArray(files),
     ]);
+
+    if (detailModal.feedbackMessage) {
+      detailModal.feedbackMessage = "";
+      detailModal.feedbackType = "info";
+    }
 
     renderModals({
       focusSelector: "[data-field='comment']",
@@ -2262,6 +2284,7 @@ function createIncidenciasController(host = null, context = {}) {
           results: createModal.userSearch.results.length,
           empty: createModal.userSearch.empty,
           hasError: Boolean(createModal.userSearch.error),
+          hasSelectedUser: Boolean(createModal.form.targetUserId),
         },
 
         openingTicketId: openingTicketId ? "***" : "",

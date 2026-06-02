@@ -13,7 +13,7 @@
    - Comentar/reabrir/subir adjuntos.
    - Abrir/descargar adjuntos.
    - Buscador admin de usuario afectado para creación.
-   - Renderizar create modal como isla estable para evitar flicker.
+   - Renderizar modales en isla única para evitar duplicidad/flicker.
    - Delegar búsqueda de usuarios en incidencias.api.js.
    - Delegar HTML en templates.
    - Sin Store.
@@ -58,11 +58,12 @@ import {
 } from "./incidencias.template.create.js";
 
 import {
+  renderIncidenciasDetailModal,
   DETAIL_ACTIONS,
   validateDetailUpdate,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.fast.v6.api-user-search";
+export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.lean.v8.production";
 export const INCIDENCIAS_VIEW_VERSION = INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
@@ -72,9 +73,11 @@ const USER_SEARCH_DEBOUNCE_MS = 220;
 
 const ROUTER_EVENT_HANDLED_KEY = "__onionRouterHandled";
 
-const CREATE_MODAL_ROOT_ID = "incidencias-create-modal-root";
+const MODAL_HOST_SELECTOR = "[data-incidencias-modal-host='true']";
 const CREATE_MODAL_PANEL_SELECTOR = "[data-incidencias-create-modal-panel='true']";
+const DETAIL_MODAL_PANEL_SELECTOR = "[data-incidencias-modal-panel='true']";
 const CREATE_MODAL_OVERLAY_SELECTOR = "[data-incidencias-create-modal-overlay='true']";
+const DETAIL_MODAL_OVERLAY_SELECTOR = "[data-incidencias-modal-overlay='true']";
 
 const INSTANCES = new WeakMap();
 
@@ -170,14 +173,16 @@ function safeError(error = null, fallback = "No se pudieron cargar las incidenci
 }
 
 function getTicketId(item = {}) {
+  const raw = safeObject(item);
+
   return cleanText(
     first(
-      item.ticketId,
-      item.incidenciaId,
-      item.id,
-      item.code,
-      item.numero,
-      item.ticketCode
+      raw.ticketId,
+      raw.incidenciaId,
+      raw.id,
+      raw.code,
+      raw.numero,
+      raw.ticketCode
     ),
     ""
   );
@@ -215,17 +220,18 @@ function mergeTicketData(current = {}, next = {}) {
 }
 
 function ticketSortTime(item = {}) {
+  const raw = safeObject(item);
   const timestamp = Date.parse(
     first(
-      item.lastActivityAt,
-      item.updatedAt,
-      item.modifiedAt,
-      item.closedAt,
-      item.createdAt,
-      item.lifecycle?.lastActivityAt,
-      item.lifecycle?.updatedAt,
-      item.lifecycle?.closedAt,
-      item.lifecycle?.createdAt,
+      raw.lastActivityAt,
+      raw.updatedAt,
+      raw.modifiedAt,
+      raw.closedAt,
+      raw.createdAt,
+      raw.lifecycle?.lastActivityAt,
+      raw.lifecycle?.updatedAt,
+      raw.lifecycle?.closedAt,
+      raw.lifecycle?.createdAt,
       0
     )
   );
@@ -242,14 +248,12 @@ function upsertByTicketId(items = [], item = null) {
 
   if (!id) return safeArray(items);
 
-  const currentItems = safeArray(items);
-  const existing = currentItems.find((current) => getTicketId(current) === id) || null;
-  const merged = existing ? mergeTicketData(existing, next) : next;
   const map = new Map();
+  const existing = safeArray(items).find((current) => getTicketId(current) === id) || null;
 
-  map.set(id, merged);
+  map.set(id, existing ? mergeTicketData(existing, next) : next);
 
-  for (const current of currentItems) {
+  for (const current of safeArray(items)) {
     const currentId = getTicketId(current);
 
     if (!currentId || map.has(currentId)) continue;
@@ -346,11 +350,12 @@ function getRoutes() {
     facturas: ROUTES.facturas || "/facturas",
     clientes: ROUTES.clientes || "/clientes",
     usuarios: ROUTES.usuarios || "/usuarios",
+    servidor: ROUTES.servidor || "/servidor",
   };
 }
 
 /* =========================================================
-   CREATE FORM
+   FORM HELPERS
 ========================================================= */
 
 function getCreateDefaults() {
@@ -360,24 +365,6 @@ function getCreateDefaults() {
     attachments: [],
   };
 }
-
-/* =========================================================
-   USER SEARCH
-========================================================= */
-
-async function searchUsers(query = "") {
-  const q = cleanText(query, "");
-
-  if (!isAdmin() || q.length < USER_SEARCH_MIN_LENGTH) return [];
-
-  return searchIncidenciaUsers(q, {
-    limit: USER_SEARCH_LIMIT,
-  });
-}
-
-/* =========================================================
-   FORM HELPERS
-========================================================= */
 
 function readField(form = null, name = "") {
   if (!form || !name) return "";
@@ -421,23 +408,6 @@ function fileIndexFromNode(node = null) {
   const index = Number(value);
 
   return Number.isFinite(index) ? index : -1;
-}
-
-/* =========================================================
-   BODY STATE
-========================================================= */
-
-function syncBodyModalClass(open = false, createOpen = false) {
-  if (!isBrowser()) return false;
-
-  try {
-    document.body?.classList.toggle("modal-open", open);
-    document.body?.classList.toggle("incidencias-modal-open", open);
-    document.body?.classList.toggle("incidencias-create-open", createOpen);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /* =========================================================
@@ -506,9 +476,8 @@ function createIncidenciasController(host = null, context = {}) {
   let renderFrame = 0;
   let pendingRenderOptions = null;
 
-  let createModalFrame = 0;
-  let pendingCreateModalOptions = null;
-
+  let modalFrame = 0;
+  let pendingModalOptions = null;
   let modalHost = null;
   let modalHostBound = false;
 
@@ -584,6 +553,10 @@ function createIncidenciasController(host = null, context = {}) {
         ...createModal,
         open: false,
       },
+      detailModal: {
+        ...detailModal,
+        open: false,
+      },
       ...extra,
     });
   }
@@ -596,16 +569,45 @@ function createIncidenciasController(host = null, context = {}) {
     };
   }
 
+  function modalsOpen() {
+    return createModal.open || detailModal.open;
+  }
+
+  function syncBodyModalClass() {
+    if (!isBrowser()) return false;
+
+    try {
+      document.body?.classList.toggle("modal-open", modalsOpen());
+      document.body?.classList.toggle("incidencias-modal-open", modalsOpen());
+      document.body?.classList.toggle("incidencias-create-open", createModal.open);
+      document.body?.classList.toggle("incidencias-detail-open", detailModal.open);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function ownsNode(node = null) {
+    if (!node) return false;
+
+    return Boolean(
+      host?.contains?.(node) ||
+        modalHost?.contains?.(node)
+    );
+  }
+
   function ensureModalHost() {
     if (!isBrowser()) return null;
 
     if (modalHost?.isConnected) return modalHost;
 
-    modalHost = document.createElement("div");
+    modalHost = document.querySelector(MODAL_HOST_SELECTOR) || document.createElement("div");
     modalHost.setAttribute("data-incidencias-modal-host", "true");
     modalHost.setAttribute("data-owner", INCIDENCIAS_VIEW_VERSION);
 
-    document.body.appendChild(modalHost);
+    if (!modalHost.isConnected) {
+      document.body.appendChild(modalHost);
+    }
 
     if (mounted && !modalHostBound) {
       bindTarget(modalHost);
@@ -623,6 +625,7 @@ function createIncidenciasController(host = null, context = {}) {
         unbindTarget(modalHost);
       }
 
+      modalHost.replaceChildren();
       modalHost.remove();
     } catch {
       // noop
@@ -632,15 +635,6 @@ function createIncidenciasController(host = null, context = {}) {
     modalHostBound = false;
 
     return true;
-  }
-
-  function ownsNode(node = null) {
-    if (!node) return false;
-
-    return Boolean(
-      host?.contains?.(node) ||
-        modalHost?.contains?.(node)
-    );
   }
 
   function focusAfterRender(selector = "", placeEnd = true, root = host) {
@@ -666,87 +660,16 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
-  function mergeRenderOptions(current = {}, next = {}) {
-    return {
-      ...current,
-      ...next,
-      focusSelector: next.focusSelector || current.focusSelector || "",
-      focusEnd:
-        next.focusEnd !== undefined
-          ? next.focusEnd
-          : current.focusEnd,
-      preserveFocus:
-        next.preserveFocus !== undefined
-          ? next.preserveFocus
-          : current.preserveFocus,
-    };
-  }
-
-  function cancelScheduledRender() {
-    if (!renderFrame) return false;
-
-    cancelFrame(renderFrame);
-    renderFrame = 0;
-    pendingRenderOptions = null;
-
-    return true;
-  }
-
-  function cancelScheduledCreateModalRender() {
-    if (!createModalFrame) return false;
-
-    cancelFrame(createModalFrame);
-    createModalFrame = 0;
-    pendingCreateModalOptions = null;
-
-    return true;
-  }
-
-  function parseHtmlElement(html = "") {
-    if (!isBrowser()) return null;
-
-    const template = document.createElement("template");
-    template.innerHTML = String(html || "").trim();
-
-    return template.content.firstElementChild || null;
-  }
-
-  function patchElementAttributes(current = null, next = null) {
-    if (!current || !next) return false;
-
-    const keep = new Set(["id"]);
-
-    for (const currentAttr of Array.from(current.attributes || [])) {
-      if (keep.has(currentAttr.name)) continue;
-
-      if (!next.hasAttribute(currentAttr.name)) {
-        current.removeAttribute(currentAttr.name);
-      }
-    }
-
-    for (const nextAttr of Array.from(next.attributes || [])) {
-      current.setAttribute(nextAttr.name, nextAttr.value);
-    }
-
-    return true;
-  }
-
-  function directChildByClass(parent = null, className = "") {
-    if (!parent || !className) return null;
-
-    return Array.from(parent.children || []).find((child) => {
-      return child.classList?.contains(className);
-    }) || null;
-  }
-
-  function captureCreateModalDomState(root = null) {
+  function captureModalDomState(root = null) {
     if (!isBrowser() || !root) return null;
 
-    const panel = root.querySelector(CREATE_MODAL_PANEL_SELECTOR);
     const active = document.activeElement;
+    const createPanel = root.querySelector(CREATE_MODAL_PANEL_SELECTOR);
+    const detailPanel = root.querySelector(DETAIL_MODAL_PANEL_SELECTOR);
 
     const state = {
-      panelScrollTop: panel?.scrollTop || 0,
+      createScrollTop: createPanel?.scrollTop || 0,
+      detailScrollTop: detailPanel?.scrollTop || 0,
       activeField: "",
       activeName: "",
       activeId: "",
@@ -755,12 +678,9 @@ function createIncidenciasController(host = null, context = {}) {
     };
 
     if (!active || !root.contains(active)) return state;
+    if (active.matches?.("input[type='file']")) return state;
 
-    if (active.matches?.("input[type='file']")) {
-      return state;
-    }
-
-    state.activeField = cleanText(active.dataset?.field, "");
+    state.activeField = cleanText(active.dataset?.field || active.dataset?.detailField, "");
     state.activeName = cleanText(active.getAttribute?.("name"), "");
     state.activeId = cleanText(active.id, "");
 
@@ -790,11 +710,11 @@ function createIncidenciasController(host = null, context = {}) {
       if (byId) return byId;
     }
 
-    const candidates = Array.from(root.querySelectorAll("[data-field], [name]"));
+    const candidates = Array.from(root.querySelectorAll("[data-field], [data-detail-field], [name]"));
 
     if (state.activeField) {
       const byField = candidates.find((node) => {
-        return cleanText(node.dataset?.field, "") === state.activeField;
+        return cleanText(node.dataset?.field || node.dataset?.detailField, "") === state.activeField;
       });
 
       if (byField) return byField;
@@ -811,24 +731,25 @@ function createIncidenciasController(host = null, context = {}) {
     return null;
   }
 
-  function restoreCreateModalDomState(root = null, state = null, options = {}) {
+  function restoreModalDomState(root = null, state = null, options = {}) {
     if (!isBrowser() || !root) return false;
 
-    const panel = root.querySelector(CREATE_MODAL_PANEL_SELECTOR);
+    const createPanel = root.querySelector(CREATE_MODAL_PANEL_SELECTOR);
+    const detailPanel = root.querySelector(DETAIL_MODAL_PANEL_SELECTOR);
 
-    if (panel && state) {
-      panel.scrollTop = state.panelScrollTop || 0;
+    if (createPanel && state) createPanel.scrollTop = state.createScrollTop || 0;
+    if (detailPanel && state) detailPanel.scrollTop = state.detailScrollTop || 0;
 
-      nextFrame(() => {
-        try {
-          panel.scrollTop = state.panelScrollTop || 0;
-        } catch {
-          // noop
-        }
-      });
-    }
+    nextFrame(() => {
+      try {
+        if (createPanel && state) createPanel.scrollTop = state.createScrollTop || 0;
+        if (detailPanel && state) detailPanel.scrollTop = state.detailScrollTop || 0;
+      } catch {
+        // noop
+      }
+    });
 
-    if (options.preserveFocus === false || createModal.submitting) return true;
+    if (options.preserveFocus === false) return true;
 
     const target = findRestorableField(root, state, options.focusSelector || "");
 
@@ -860,132 +781,87 @@ function createIncidenciasController(host = null, context = {}) {
     return true;
   }
 
-  function patchCreateModalDom(currentRoot = null, nextRoot = null, options = {}) {
-    if (!currentRoot || !nextRoot) return false;
+  function mergeRenderOptions(current = {}, next = {}) {
+    return {
+      ...current,
+      ...next,
+      focusSelector: next.focusSelector || current.focusSelector || "",
+      focusEnd:
+        next.focusEnd !== undefined
+          ? next.focusEnd
+          : current.focusEnd,
+      preserveFocus:
+        next.preserveFocus !== undefined
+          ? next.preserveFocus
+          : current.preserveFocus,
+    };
+  }
 
-    const state = captureCreateModalDomState(currentRoot);
+  function cancelScheduledRender() {
+    if (!renderFrame) return false;
 
-    patchElementAttributes(currentRoot, nextRoot);
-
-    const currentOverlay = currentRoot.querySelector(CREATE_MODAL_OVERLAY_SELECTOR);
-    const nextOverlay = nextRoot.querySelector(CREATE_MODAL_OVERLAY_SELECTOR);
-
-    if (!currentOverlay || !nextOverlay) return false;
-
-    patchElementAttributes(currentOverlay, nextOverlay);
-
-    const currentPanel = currentRoot.querySelector(CREATE_MODAL_PANEL_SELECTOR);
-    const nextPanel = nextRoot.querySelector(CREATE_MODAL_PANEL_SELECTOR);
-
-    if (!currentPanel || !nextPanel) return false;
-
-    patchElementAttributes(currentPanel, nextPanel);
-
-    const currentLoading = directChildByClass(currentPanel, "inc-create-loading-overlay");
-    const nextLoading = directChildByClass(nextPanel, "inc-create-loading-overlay");
-
-    if (nextLoading && currentLoading) {
-      currentLoading.replaceWith(nextLoading.cloneNode(true));
-    } else if (nextLoading && !currentLoading) {
-      currentPanel.prepend(nextLoading.cloneNode(true));
-    } else if (!nextLoading && currentLoading) {
-      currentLoading.remove();
-    }
-
-    const currentHeader = directChildByClass(currentPanel, "inc-create-header");
-    const nextHeader = directChildByClass(nextPanel, "inc-create-header");
-
-    if (currentHeader && nextHeader) {
-      currentHeader.replaceWith(nextHeader.cloneNode(true));
-    }
-
-    const currentBody = directChildByClass(currentPanel, "inc-create-body");
-    const nextBody = directChildByClass(nextPanel, "inc-create-body");
-
-    if (currentBody && nextBody) {
-      currentBody.replaceWith(nextBody.cloneNode(true));
-    }
-
-    restoreCreateModalDomState(currentRoot, state, options);
+    cancelFrame(renderFrame);
+    renderFrame = 0;
+    pendingRenderOptions = null;
 
     return true;
   }
 
-  function renderCreateModalNow(options = {}) {
+  function cancelScheduledModalRender() {
+    if (!modalFrame) return false;
+
+    cancelFrame(modalFrame);
+    modalFrame = 0;
+    pendingModalOptions = null;
+
+    return true;
+  }
+
+  function renderModalsNow(options = {}) {
     if (destroyed || !isBrowser()) return false;
 
-    cancelScheduledCreateModalRender();
+    cancelScheduledModalRender();
+
+    if (!modalsOpen()) {
+      removeModalHost();
+      syncBodyModalClass();
+      return true;
+    }
 
     const target = ensureModalHost();
 
     if (!target) return false;
 
-    const html = renderIncidenciasCreateModal(createModalPayload());
-    const currentRoot = target.querySelector(`#${CREATE_MODAL_ROOT_ID}`);
+    const state = captureModalDomState(target);
+    const createHtml = createModal.open ? renderIncidenciasCreateModal(createModalPayload()) : "";
+    const detailHtml = detailModal.open ? renderIncidenciasDetailModal(detailModal) : "";
 
-    if (!html) {
-      if (currentRoot) currentRoot.remove();
+    target.innerHTML = `${createHtml}${detailHtml}`;
 
-      syncBodyModalClass(createModal.open || detailModal.open, createModal.open);
-      return true;
-    }
-
-    const nextRoot = parseHtmlElement(html);
-
-    if (!nextRoot) return false;
-
-    if (!currentRoot) {
-      target.replaceChildren(nextRoot);
-
-      syncBodyModalClass(createModal.open || detailModal.open, createModal.open);
-
-      if (options.focusSelector) {
-        focusAfterRender(options.focusSelector, options.focusEnd !== false, target);
-      }
-
-      return true;
-    }
-
-    const patched = patchCreateModalDom(currentRoot, nextRoot, {
-      preserveFocus: options.preserveFocus !== false,
-      focusSelector: options.focusSelector || "",
-      focusEnd: options.focusEnd,
-    });
-
-    if (!patched) {
-      target.replaceChildren(nextRoot);
-
-      if (options.focusSelector) {
-        focusAfterRender(options.focusSelector, options.focusEnd !== false, target);
-      }
-    }
-
-    syncBodyModalClass(createModal.open || detailModal.open, createModal.open);
+    syncBodyModalClass();
+    restoreModalDomState(target, state, options);
 
     return true;
   }
 
-  function renderCreateModal(options = {}) {
+  function renderModals(options = {}) {
     if (destroyed || !isBrowser()) return false;
 
     if (options.immediate === true) {
-      return renderCreateModalNow(options);
+      return renderModalsNow(options);
     }
 
-    pendingCreateModalOptions = mergeRenderOptions(
-      pendingCreateModalOptions || {},
-      options
-    );
+    pendingModalOptions = mergeRenderOptions(pendingModalOptions || {}, options);
 
-    if (createModalFrame) return true;
+    if (modalFrame) return true;
 
-    createModalFrame = nextFrame(() => {
-      const nextOptions = pendingCreateModalOptions || {};
+    modalFrame = nextFrame(() => {
+      const nextOptions = pendingModalOptions || {};
 
-      createModalFrame = 0;
-      pendingCreateModalOptions = null;
+      modalFrame = 0;
+      pendingModalOptions = null;
 
-      renderCreateModalNow(nextOptions);
+      renderModalsNow(nextOptions);
     });
 
     return true;
@@ -998,11 +874,9 @@ function createIncidenciasController(host = null, context = {}) {
 
     host.innerHTML = renderIncidenciasTemplate(viewPayload());
 
-    renderCreateModalNow({
-      preserveFocus: true,
-    });
-
-    syncBodyModalClass(createModal.open || detailModal.open, createModal.open);
+    if (options.skipModals !== true) {
+      renderModalsNow({ preserveFocus: true });
+    }
 
     if (options.focusSelector) {
       focusAfterRender(options.focusSelector, options.focusEnd !== false);
@@ -1040,12 +914,7 @@ function createIncidenciasController(host = null, context = {}) {
     cancelScheduledRender();
 
     host.innerHTML = renderIncidenciasLoadingState(viewPayload());
-
-    renderCreateModalNow({
-      preserveFocus: true,
-    });
-
-    syncBodyModalClass(createModal.open || detailModal.open, createModal.open);
+    renderModalsNow({ preserveFocus: true });
 
     if (options.focusSelector) {
       focusAfterRender(options.focusSelector, options.focusEnd !== false);
@@ -1060,12 +929,7 @@ function createIncidenciasController(host = null, context = {}) {
     cancelScheduledRender();
 
     host.innerHTML = renderIncidenciasErrorState(message);
-
-    renderCreateModalNow({
-      preserveFocus: true,
-    });
-
-    syncBodyModalClass(createModal.open || detailModal.open, createModal.open);
+    renderModalsNow({ preserveFocus: true });
 
     return true;
   }
@@ -1088,7 +952,6 @@ function createIncidenciasController(host = null, context = {}) {
     const seq = ++loadSeq;
     const silent = options.silent === true;
     const force = options.force === true;
-
     const hasItems = items.length > 0;
 
     error = "";
@@ -1182,9 +1045,10 @@ function createIncidenciasController(host = null, context = {}) {
       empty: false,
     };
 
-    renderCreateModal({
-      focusSelector: "[data-field='subject']",
+    renderModals({
       immediate: true,
+      focusSelector: "[data-field='subject']",
+      preserveFocus: false,
     });
 
     return true;
@@ -1197,10 +1061,7 @@ function createIncidenciasController(host = null, context = {}) {
     userSearchSeq += 1;
 
     resetCreateModal();
-
-    renderCreateModal({
-      immediate: true,
-    });
+    renderModals({ immediate: true });
 
     return true;
   }
@@ -1230,6 +1091,16 @@ function createIncidenciasController(host = null, context = {}) {
     return true;
   }
 
+  async function searchUsers(query = "") {
+    const q = cleanText(query, "");
+
+    if (!isAdmin() || q.length < USER_SEARCH_MIN_LENGTH) return [];
+
+    return searchIncidenciaUsers(q, {
+      limit: USER_SEARCH_LIMIT,
+    });
+  }
+
   async function runUserSearch(query = "", seq = userSearchSeq) {
     try {
       const results = await searchUsers(query);
@@ -1241,7 +1112,7 @@ function createIncidenciasController(host = null, context = {}) {
       createModal.userSearch.empty = results.length === 0;
       createModal.userSearch.error = "";
 
-      renderCreateModal({
+      renderModals({
         focusSelector: "[data-create-user-search-input]",
         preserveFocus: true,
       });
@@ -1255,7 +1126,7 @@ function createIncidenciasController(host = null, context = {}) {
       createModal.userSearch.empty = false;
       createModal.userSearch.error = safeError(searchError, "No se pudieron buscar usuarios.");
 
-      renderCreateModal({
+      renderModals({
         focusSelector: "[data-create-user-search-input]",
         preserveFocus: true,
       });
@@ -1285,7 +1156,7 @@ function createIncidenciasController(host = null, context = {}) {
       createModal.userSearch.loading = false;
 
       if (hadVisibleSearchState) {
-        renderCreateModal({
+        renderModals({
           focusSelector: "[data-create-user-search-input]",
           preserveFocus: true,
         });
@@ -1297,7 +1168,7 @@ function createIncidenciasController(host = null, context = {}) {
     createModal.userSearch.loading = true;
 
     if (hadVisibleSearchState) {
-      renderCreateModal({
+      renderModals({
         focusSelector: "[data-create-user-search-input]",
         preserveFocus: true,
       });
@@ -1408,7 +1279,7 @@ function createIncidenciasController(host = null, context = {}) {
       empty: false,
     };
 
-    renderCreateModal({
+    renderModals({
       preserveFocus: false,
     });
 
@@ -1434,7 +1305,7 @@ function createIncidenciasController(host = null, context = {}) {
       empty: false,
     };
 
-    renderCreateModal({
+    renderModals({
       focusSelector: "[data-create-user-search-input]",
       preserveFocus: true,
     });
@@ -1456,7 +1327,7 @@ function createIncidenciasController(host = null, context = {}) {
 
     createModal.serverError = "";
 
-    renderCreateModal({
+    renderModals({
       preserveFocus: true,
     });
 
@@ -1470,7 +1341,7 @@ function createIncidenciasController(host = null, context = {}) {
       (_, currentIndex) => currentIndex !== index
     );
 
-    renderCreateModal({
+    renderModals({
       preserveFocus: true,
     });
 
@@ -1504,7 +1375,7 @@ function createIncidenciasController(host = null, context = {}) {
     };
 
     if (!validation.valid) {
-      renderCreateModal({
+      renderModals({
         focusSelector:
           createModal.errors.subject
             ? "[data-field='subject']"
@@ -1519,12 +1390,13 @@ function createIncidenciasController(host = null, context = {}) {
       return false;
     }
 
+    creating = true;
     createModal.submitting = true;
     createModal.serverError = "";
     createModal.successMessage = "";
     createModal.createdTicketId = "";
 
-    renderCreateModal({
+    renderModals({
       immediate: true,
       preserveFocus: false,
     });
@@ -1540,24 +1412,19 @@ function createIncidenciasController(host = null, context = {}) {
         total = Math.max(total, items.length);
       }
 
-      createModal.submitting = false;
-      createModal.successMessage = "Incidencia creada.";
-      createModal.createdTicketId = getTicketId(created);
-
+      creating = false;
       resetCreateModal();
 
-      renderCreateModal({
-        immediate: true,
-      });
-
+      renderModals({ immediate: true });
       render();
 
       return true;
     } catch (createError) {
+      creating = false;
       createModal.submitting = false;
       createModal.serverError = safeError(createError, "No se pudo crear la incidencia.");
 
-      renderCreateModal({
+      renderModals({
         focusSelector: "[data-field='subject']",
         preserveFocus: false,
       });
@@ -1583,8 +1450,8 @@ function createIncidenciasController(host = null, context = {}) {
     if (detailModal.submitting) return false;
 
     resetDetailModal();
+    renderModals({ immediate: true });
 
-    render();
     return true;
   }
 
@@ -1607,9 +1474,12 @@ function createIncidenciasController(host = null, context = {}) {
       detailModal.feedbackType = "info";
       detailModal.previewFile = null;
 
-      render({
-        focusSelector: "[data-incidencias-modal-panel='true']",
+      render({ skipModals: true });
+      renderModals({
+        immediate: true,
+        focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
         focusEnd: false,
+        preserveFocus: false,
       });
     } else {
       render();
@@ -1626,7 +1496,7 @@ function createIncidenciasController(host = null, context = {}) {
         ? mergeTicketData(local || {}, detail)
         : local;
 
-      detailModal.open = true;
+      detailModal.open = Boolean(mergedDetail);
       detailModal.detail = mergedDetail;
       detailModal.submitting = false;
       detailModal.commentDraft = "";
@@ -1641,9 +1511,11 @@ function createIncidenciasController(host = null, context = {}) {
 
       openingTicketId = "";
 
-      render({
-        focusSelector: "[data-incidencias-modal-panel='true']",
+      render({ skipModals: true });
+      renderModals({
+        focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
         focusEnd: false,
+        preserveFocus: false,
       });
 
       return true;
@@ -1658,8 +1530,9 @@ function createIncidenciasController(host = null, context = {}) {
         detailModal.feedbackMessage = safeError(detailError, "No se pudo actualizar el detalle.");
         detailModal.feedbackType = "error";
 
-        render({
-          focusSelector: "[data-incidencias-modal-panel='true']",
+        render({ skipModals: true });
+        renderModals({
+          focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
           focusEnd: false,
         });
 
@@ -1669,7 +1542,6 @@ function createIncidenciasController(host = null, context = {}) {
       error = safeError(detailError, "No se pudo abrir el detalle.");
 
       render();
-
       return false;
     }
   }
@@ -1691,7 +1563,7 @@ function createIncidenciasController(host = null, context = {}) {
       ...safeArray(files),
     ]);
 
-    render({
+    renderModals({
       focusSelector: "[data-field='comment']",
     });
 
@@ -1705,7 +1577,7 @@ function createIncidenciasController(host = null, context = {}) {
       (_, currentIndex) => currentIndex !== index
     );
 
-    render({
+    renderModals({
       focusSelector: "[data-field='comment']",
     });
 
@@ -1727,7 +1599,7 @@ function createIncidenciasController(host = null, context = {}) {
       detailModal.feedbackMessage = validation.message;
       detailModal.feedbackType = "error";
 
-      render({
+      renderModals({
         focusSelector: "[data-field='comment']",
       });
 
@@ -1738,7 +1610,7 @@ function createIncidenciasController(host = null, context = {}) {
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
 
-    render();
+    renderModals();
 
     try {
       let nextDetail = detailModal.detail;
@@ -1776,8 +1648,9 @@ function createIncidenciasController(host = null, context = {}) {
 
       items = upsertByTicketId(items, nextDetail);
 
-      render({
-        focusSelector: "[data-incidencias-modal-panel='true']",
+      render({ skipModals: true });
+      renderModals({
+        focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
         focusEnd: false,
       });
 
@@ -1787,7 +1660,7 @@ function createIncidenciasController(host = null, context = {}) {
       detailModal.feedbackMessage = safeError(updateError, "No se pudo actualizar la incidencia.");
       detailModal.feedbackType = "error";
 
-      render({
+      renderModals({
         focusSelector: "[data-field='comment']",
       });
 
@@ -1822,7 +1695,7 @@ function createIncidenciasController(host = null, context = {}) {
 
     detailModal.openingAttachmentId = id;
 
-    render();
+    renderModals();
 
     try {
       const file = await openIncidenciaAttachment({
@@ -1839,7 +1712,7 @@ function createIncidenciasController(host = null, context = {}) {
 
       detailModal.openingAttachmentId = "";
 
-      render();
+      renderModals();
 
       return true;
     } catch (attachmentError) {
@@ -1847,7 +1720,7 @@ function createIncidenciasController(host = null, context = {}) {
       detailModal.feedbackMessage = safeError(attachmentError, "No se pudo abrir el adjunto.");
       detailModal.feedbackType = "error";
 
-      render();
+      renderModals();
 
       return false;
     }
@@ -1862,7 +1735,7 @@ function createIncidenciasController(host = null, context = {}) {
 
     detailModal.downloadingAttachmentId = id;
 
-    render();
+    renderModals();
 
     try {
       await downloadIncidenciaAttachment({
@@ -1873,7 +1746,7 @@ function createIncidenciasController(host = null, context = {}) {
 
       detailModal.downloadingAttachmentId = "";
 
-      render();
+      renderModals();
 
       return true;
     } catch (downloadError) {
@@ -1881,7 +1754,7 @@ function createIncidenciasController(host = null, context = {}) {
       detailModal.feedbackMessage = safeError(downloadError, "No se pudo descargar el adjunto.");
       detailModal.feedbackType = "error";
 
-      render();
+      renderModals();
 
       return false;
     }
@@ -1900,8 +1773,7 @@ function createIncidenciasController(host = null, context = {}) {
   function closePreview() {
     detailModal.previewFile = null;
 
-    render();
-
+    renderModals();
     return true;
   }
 
@@ -1919,8 +1791,7 @@ function createIncidenciasController(host = null, context = {}) {
       detailModal.feedbackType = "warning";
     }
 
-    render();
-
+    renderModals();
     return true;
   }
 
@@ -1941,7 +1812,6 @@ function createIncidenciasController(host = null, context = {}) {
     visibleLimit = DEFAULT_VISIBLE_LIMIT;
 
     render();
-
     return true;
   }
 
@@ -1960,7 +1830,6 @@ function createIncidenciasController(host = null, context = {}) {
     visibleLimit += DEFAULT_VISIBLE_LIMIT;
 
     render();
-
     return true;
   }
 
@@ -2046,16 +1915,16 @@ function createIncidenciasController(host = null, context = {}) {
       return;
     }
 
-    const createOverlay = target.closest("[data-incidencias-create-modal-overlay='true']");
-    const createPanel = target.closest("[data-incidencias-create-modal-panel='true']");
+    const createOverlay = target.closest(CREATE_MODAL_OVERLAY_SELECTOR);
+    const createPanel = target.closest(CREATE_MODAL_PANEL_SELECTOR);
 
     if (createOverlay && !createPanel && target === createOverlay) {
       closeCreateModal();
       return;
     }
 
-    const detailOverlay = target.closest("[data-incidencias-modal-overlay='true']");
-    const detailPanel = target.closest("[data-incidencias-modal-panel='true']");
+    const detailOverlay = target.closest(DETAIL_MODAL_OVERLAY_SELECTOR);
+    const detailPanel = target.closest(DETAIL_MODAL_PANEL_SELECTOR);
 
     if (detailOverlay && !detailPanel && target === detailOverlay) {
       closeDetailModal();
@@ -2064,7 +1933,7 @@ function createIncidenciasController(host = null, context = {}) {
 
   function onInput(event) {
     const target = event.target;
-    const field = cleanText(target?.dataset?.field || target?.dataset?.incidenciasField || "", "");
+    const field = cleanText(target?.dataset?.field || target?.dataset?.incidenciasField || target?.dataset?.detailField || "", "");
 
     if (!field || !ownsNode(target)) return;
 
@@ -2126,15 +1995,15 @@ function createIncidenciasController(host = null, context = {}) {
     if (!ownsNode(event.target)) return;
 
     if (event.key === "Escape") {
-      if (detailModal.open) {
-        event.preventDefault();
-        closeDetailModal();
-        return;
-      }
-
       if (createModal.open) {
         event.preventDefault();
         closeCreateModal();
+        return;
+      }
+
+      if (detailModal.open) {
+        event.preventDefault();
+        closeDetailModal();
         return;
       }
     }
@@ -2152,45 +2021,63 @@ function createIncidenciasController(host = null, context = {}) {
     void openDetail(row.dataset.ticketId || row.dataset.incidenciaId || "");
   }
 
-  function onDragOver(event) {
-    const dropzone = event.target?.closest?.("[data-dropzone='attachments']");
+  function getDropzone(target = null) {
+    const dropzone = target?.closest?.("[data-dropzone]") || null;
 
-    if (!dropzone || !ownsNode(dropzone) || !createModal.open) return;
+    if (!dropzone || !ownsNode(dropzone)) return null;
+
+    const kind = cleanText(dropzone.dataset?.dropzone, "");
+
+    if (kind === "attachments" && createModal.open) return { dropzone, kind: "create" };
+    if (kind === "detail-attachments" && detailModal.open) return { dropzone, kind: "detail" };
+
+    return null;
+  }
+
+  function onDragOver(event) {
+    const zone = getDropzone(event.target);
+
+    if (!zone) return;
 
     event.preventDefault();
 
+    if (zone.kind !== "create") return;
+
     if (!createModal.dragActive) {
       createModal.dragActive = true;
-      renderCreateModal({
-        preserveFocus: true,
-      });
+      renderModals({ preserveFocus: true });
     }
   }
 
   function onDragLeave(event) {
-    const dropzone = event.target?.closest?.("[data-dropzone='attachments']");
+    const zone = getDropzone(event.target);
 
-    if (!dropzone || !ownsNode(dropzone) || !createModal.open) return;
+    if (!zone || zone.kind !== "create") return;
 
     const related = event.relatedTarget;
 
-    if (related && dropzone.contains(related)) return;
+    if (related && zone.dropzone.contains(related)) return;
 
     createModal.dragActive = false;
-    renderCreateModal({
-      preserveFocus: true,
-    });
+    renderModals({ preserveFocus: true });
   }
 
   function onDrop(event) {
-    const dropzone = event.target?.closest?.("[data-dropzone='attachments']");
+    const zone = getDropzone(event.target);
 
-    if (!dropzone || !ownsNode(dropzone) || !createModal.open) return;
+    if (!zone) return;
 
     event.preventDefault();
 
-    createModal.dragActive = false;
-    addCreateAttachments(Array.from(event.dataTransfer?.files || []));
+    const files = Array.from(event.dataTransfer?.files || []);
+
+    if (zone.kind === "create") {
+      createModal.dragActive = false;
+      addCreateAttachments(files);
+      return;
+    }
+
+    addDetailPendingFiles(files);
   }
 
   function bindTarget(target = null) {
@@ -2221,8 +2108,6 @@ function createIncidenciasController(host = null, context = {}) {
 
   function bind() {
     bindTarget(host);
-    ensureModalHost();
-
     return true;
   }
 
@@ -2278,7 +2163,7 @@ function createIncidenciasController(host = null, context = {}) {
 
       clearUserSearchTimer();
       cancelScheduledRender();
-      cancelScheduledCreateModalRender();
+      cancelScheduledModalRender();
 
       unbind();
 
@@ -2286,7 +2171,7 @@ function createIncidenciasController(host = null, context = {}) {
       resetDetailModal();
 
       removeModalHost();
-      syncBodyModalClass(false, false);
+      syncBodyModalClass();
 
       clearInstance(host, controller);
 
@@ -2331,8 +2216,8 @@ function createIncidenciasController(host = null, context = {}) {
         createModalOpen: createModal.open,
         detailModalOpen: detailModal.open,
 
-        createModalIsland: Boolean(modalHost?.isConnected),
-        createModalBound: modalHostBound,
+        modalHost: Boolean(modalHost?.isConnected),
+        modalHostBound,
 
         userSearch: {
           queryLength: createModal.userSearch.query.length,

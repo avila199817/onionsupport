@@ -184,15 +184,23 @@
 /* =========================================================
    VIEWS · INCIDENCIAS
 
-   Orden:
-   1. index.css
-   2. create.css
-   3. detail.css
+   index.css:
+   - Vista principal de incidencias.
+   - Modal de creación de incidencia.
+   - Modal de detalle de incidencia.
+   - Tabla compacta 6 columnas sin acciones.
+   - Isla estable de modales vía index.js.
+
+   Retirados:
+   - ./views/incidencias/create.css
+   - ./views/incidencias/detail.css
+
+   Motivo:
+   - El CSS único de incidencias ya cubre los 3 templates visuales.
+   - Evita duplicidad de estilos, pisadas de cascada y parpadeos.
 ========================================================= */
 
 @import url("./views/incidencias/index.css") layer(views);
-@import url("./views/incidencias/create.css") layer(views);
-@import url("./views/incidencias/detail.css") layer(views);
 
 
 /* =========================================================

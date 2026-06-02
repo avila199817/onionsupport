@@ -14,11 +14,13 @@
    - Abrir/descargar adjuntos.
    - Buscador admin de usuario afectado para creación.
    - Renderizar create modal como isla estable para evitar flicker.
+   - Delegar búsqueda de usuarios en incidencias.api.js.
    - Delegar HTML en templates.
    - Sin Store.
    - Sin State externo.
    - Sin actions/bindings/model/utils/homeView legacy.
    - Sin fetch propio.
+   - Sin HTTP duplicado.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -38,6 +40,7 @@ import {
   openIncidenciaAttachment,
   downloadIncidenciaAttachment,
   computeIncidenciasStats,
+  searchIncidenciaUsers,
 } from "./incidencias.api.js";
 
 import {
@@ -59,7 +62,7 @@ import {
   validateDetailUpdate,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.fast.v5.modal-island";
+export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.fast.v6.api-user-search";
 export const INCIDENCIAS_VIEW_VERSION = INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
@@ -87,10 +90,6 @@ function isBrowser() {
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function isDomNode(value = null) {
@@ -351,155 +350,29 @@ function getRoutes() {
 }
 
 /* =========================================================
-   USER SEARCH
+   CREATE FORM
 ========================================================= */
 
-function unwrapList(payload = null) {
-  if (Array.isArray(payload)) return payload;
-
-  const object = safeObject(payload, {});
-
-  const direct = first(
-    object.items,
-    object.rows,
-    object.results,
-    object.records,
-    object.users,
-    object.usuarios,
-    object.data,
-    object.payload,
-    object.result,
-    object.response,
-    object.body
-  );
-
-  if (Array.isArray(direct)) return direct;
-
-  const data = safeObject(object.data);
-  const payloadObject = safeObject(object.payload);
-  const result = safeObject(object.result);
-  const response = safeObject(object.response);
-  const body = safeObject(object.body);
-
-  return safeArray(
-    first(
-      data.items,
-      data.rows,
-      data.results,
-      data.records,
-      data.users,
-      data.usuarios,
-
-      payloadObject.items,
-      payloadObject.rows,
-      payloadObject.results,
-      payloadObject.records,
-      payloadObject.users,
-      payloadObject.usuarios,
-
-      result.items,
-      result.rows,
-      result.results,
-      result.records,
-      result.users,
-      result.usuarios,
-
-      response.items,
-      response.rows,
-      response.results,
-      response.records,
-      response.users,
-      response.usuarios,
-
-      body.items,
-      body.rows,
-      body.results,
-      body.records,
-      body.users,
-      body.usuarios,
-
-      []
-    )
-  );
-}
-
-function normalizeUserResult(user = {}) {
-  const raw = safeObject(user);
-  const id = cleanText(first(raw.userId, raw.id, raw.uid, raw.sub, raw.username), "");
-  const name = cleanText(
-    first(raw.displayName, raw.fullName, raw.name, raw.nombre, raw.username),
-    "Usuario"
-  );
-  const email = cleanText(
-    first(
-      raw.email,
-      raw.emailLower,
-      raw.userEmail,
-      raw.mail,
-      raw.profile?.email,
-      raw.auth?.email,
-      raw.lookup?.emailLower
-    ),
-    ""
-  ).toLowerCase();
-
+function getCreateDefaults() {
   return {
-    id,
-    userId: id,
-    displayName: name,
-    name,
-    email,
-    emailLower: email,
-    username: cleanText(first(raw.username, raw.userName, raw.slug), ""),
-    role: normalizeRole(first(raw.role, raw.rol, raw.roles, "user")) || "user",
-    avatarUrl: cleanText(first(raw.avatarUrl, raw.avatar, raw.picture, raw.photoUrl, raw.profile?.avatarUrl), ""),
+    ...getCreateFormDefaults(),
+    targetClienteId: "",
+    attachments: [],
   };
 }
+
+/* =========================================================
+   USER SEARCH
+========================================================= */
 
 async function searchUsers(query = "") {
   const q = cleanText(query, "");
 
   if (!isAdmin() || q.length < USER_SEARCH_MIN_LENGTH) return [];
 
-  const requestOptions = {
-    method: "GET",
-    query: {
-      q,
-      search: q,
-      query: q,
-      limit: USER_SEARCH_LIMIT,
-    },
-    params: {
-      q,
-      search: q,
-      query: q,
-      limit: USER_SEARCH_LIMIT,
-    },
-    source: "views.incidencias.user-search",
-  };
-
-  let response = null;
-
-  if (isFunction(AppCore.request)) {
-    response = await AppCore.request.call(AppCore, "/api/users", requestOptions);
-  } else {
-    const httpClient =
-      AppCore.http ||
-      AppCore.Http ||
-      AppCore.getHttpClient?.() ||
-      null;
-
-    const get = httpClient?.get || null;
-
-    if (!isFunction(get)) return [];
-
-    response = await get.call(httpClient, "/api/users", requestOptions);
-  }
-
-  return unwrapList(response)
-    .map(normalizeUserResult)
-    .filter((user) => user.id)
-    .slice(0, USER_SEARCH_LIMIT);
+  return searchIncidenciaUsers(q, {
+    limit: USER_SEARCH_LIMIT,
+  });
 }
 
 /* =========================================================
@@ -651,7 +524,7 @@ function createIncidenciasController(host = null, context = {}) {
     successMessage: "",
     createdTicketId: "",
     errors: {},
-    form: getCreateFormDefaults(),
+    form: getCreateDefaults(),
     userSearch: {
       query: "",
       loading: false,
@@ -1278,10 +1151,7 @@ function createIncidenciasController(host = null, context = {}) {
     createModal.successMessage = "";
     createModal.createdTicketId = "";
     createModal.errors = {};
-    createModal.form = {
-      ...getCreateFormDefaults(),
-      attachments: [],
-    };
+    createModal.form = getCreateDefaults();
     createModal.userSearch = {
       query: "",
       loading: false,
@@ -1302,10 +1172,7 @@ function createIncidenciasController(host = null, context = {}) {
     createModal.successMessage = "";
     createModal.createdTicketId = "";
     createModal.errors = {};
-    createModal.form = {
-      ...getCreateFormDefaults(),
-      attachments: [],
-    };
+    createModal.form = getCreateDefaults();
     createModal.userSearch = {
       query: "",
       loading: false,
@@ -1454,11 +1321,24 @@ function createIncidenciasController(host = null, context = {}) {
         return cleanText(first(user.userId, user.id), "") === userId;
       }) || {};
 
+    const clienteId = cleanText(
+      first(
+        node?.dataset?.userClienteId,
+        node?.dataset?.clienteId,
+        selected.targetClienteId,
+        selected.clienteId,
+        selected.clientId
+      ),
+      ""
+    );
+
     const userName = cleanText(
       first(
         node?.dataset?.userName,
         selected.displayName,
+        selected.fullName,
         selected.name,
+        selected.nombre,
         selected.username
       ),
       "Usuario"
@@ -1469,7 +1349,9 @@ function createIncidenciasController(host = null, context = {}) {
         node?.dataset?.userEmail,
         node?.dataset?.email,
         selected.email,
-        selected.emailLower
+        selected.emailLower,
+        selected.userEmail,
+        selected.mail
       ),
       ""
     ).toLowerCase();
@@ -1478,7 +1360,9 @@ function createIncidenciasController(host = null, context = {}) {
       first(
         node?.dataset?.userAvatar,
         selected.avatarUrl,
-        selected.avatar
+        selected.avatar,
+        selected.picture,
+        selected.photoUrl
       ),
       ""
     );
@@ -1486,6 +1370,7 @@ function createIncidenciasController(host = null, context = {}) {
     createModal.form = {
       ...createModal.form,
       targetUserId: userId,
+      targetClienteId: clienteId,
       targetUserName: userName,
       targetUserEmail: userEmail,
       targetUserAvatar: userAvatar,
@@ -1499,11 +1384,26 @@ function createIncidenciasController(host = null, context = {}) {
       selectedUser: {
         id: userId,
         userId,
+
+        clienteId,
+        clientId: clienteId,
+        targetClienteId: clienteId,
+
         displayName: userName,
+        fullName: userName,
         name: userName,
+        nombre: userName,
+
         email: userEmail,
         emailLower: userEmail,
+        userEmail,
+        mail: userEmail,
+
+        avatar: userAvatar,
         avatarUrl: userAvatar,
+
+        username: cleanText(first(selected.username, selected.userName, ""), ""),
+        role: cleanText(first(selected.role, selected.rol, "user"), "user"),
       },
       empty: false,
     };
@@ -1519,6 +1419,7 @@ function createIncidenciasController(host = null, context = {}) {
     createModal.form = {
       ...createModal.form,
       targetUserId: "",
+      targetClienteId: "",
       targetUserName: "",
       targetUserEmail: "",
       targetUserAvatar: "",
@@ -1587,6 +1488,7 @@ function createIncidenciasController(host = null, context = {}) {
         priority: readField(formNode, "priority"),
         description: readField(formNode, "description"),
         targetUserId: readField(formNode, "targetUserId") || createModal.form.targetUserId,
+        targetClienteId: readField(formNode, "targetClienteId") || createModal.form.targetClienteId,
         targetUserName: readField(formNode, "targetUserName") || createModal.form.targetUserName,
         targetUserEmail: readField(formNode, "targetUserEmail") || createModal.form.targetUserEmail,
         targetUserAvatar: readField(formNode, "targetUserAvatar") || createModal.form.targetUserAvatar,
@@ -1608,7 +1510,9 @@ function createIncidenciasController(host = null, context = {}) {
             ? "[data-field='subject']"
             : createModal.errors.description
               ? "[data-field='description']"
-              : "",
+              : createModal.errors.targetUserId || createModal.errors.targetUser
+                ? "[data-create-user-search-input]"
+                : "",
         preserveFocus: false,
       });
 
@@ -2386,10 +2290,6 @@ function createIncidenciasController(host = null, context = {}) {
 
       clearInstance(host, controller);
 
-      /*
-        El Router controla el host y hace swap atómico.
-        No vaciamos host aquí para evitar doble clear y flashes.
-      */
       return true;
     },
 
@@ -2433,6 +2333,14 @@ function createIncidenciasController(host = null, context = {}) {
 
         createModalIsland: Boolean(modalHost?.isConnected),
         createModalBound: modalHostBound,
+
+        userSearch: {
+          queryLength: createModal.userSearch.query.length,
+          loading: createModal.userSearch.loading,
+          results: createModal.userSearch.results.length,
+          empty: createModal.userSearch.empty,
+          hasError: Boolean(createModal.userSearch.error),
+        },
 
         openingTicketId: openingTicketId ? "***" : "",
         role: getCurrentRole(),

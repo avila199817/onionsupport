@@ -2319,7 +2319,7 @@ export function renderHeader(input = {}) {
         <div class="facturas-hero-copy">
           <h1 class="facturas-page-title">Centro de control de facturas</h1>
           <p class="facturas-page-subtitle">
-            Gestiona emisión, seguimiento, consulta, descarga y envío de documentos fiscales desde una vista clara, premium y conectada con sus incidencias relacionadas.
+            Gestiona emisión, seguimiento, consulta, descarga y envío de documentos fiscales y conectada con sus incidencias.
           </p>
         </div>
 

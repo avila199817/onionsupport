@@ -25,11 +25,12 @@
 
 import Http from "../../core/http.js";
 
-export const INCIDENCIAS_API_VERSION = "incidencias.api.cached.v5.production";
+export const INCIDENCIAS_API_VERSION = "incidencias.api.cached.v6.production";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
 
 export const USERS_SEARCH_ENDPOINT = "/api/users";
 export const USERS_SEARCH_LIMIT = 8;
+export const USERS_SEARCH_MIN_LENGTH = 2;
 
 export const INCIDENCIAS_TIMEOUT = 15000;
 export const INCIDENCIAS_DETAIL_TIMEOUT = 25000;
@@ -1783,13 +1784,25 @@ function usersListFromPayload(payload = null) {
 export function normalizeCreateSearchUser(user = {}) {
   const raw = safeObject(user);
 
+  const rawNested = safeObject(raw.raw);
+
   const userId = cleanText(
     first(
       raw.userId,
       raw.id,
+      raw._id,
       raw.uid,
       raw.sub,
       raw.usuarioId,
+      raw.lookup?.userId,
+      raw.lookup?.id,
+      raw.profile?.userId,
+      raw.auth?.userId,
+      rawNested.userId,
+      rawNested.id,
+      rawNested._id,
+      rawNested.uid,
+      rawNested.sub,
       raw.username
     ),
     ""
@@ -1800,8 +1813,17 @@ export function normalizeCreateSearchUser(user = {}) {
       raw.clienteId,
       raw.clientId,
       raw.customerId,
+      raw.targetClienteId,
       raw.lookup?.clienteId,
+      raw.lookup?.clientId,
       raw.tenant?.clienteId,
+      raw.cliente?.clienteId,
+      raw.cliente?.id,
+      raw.client?.clienteId,
+      raw.client?.id,
+      rawNested.clienteId,
+      rawNested.clientId,
+      rawNested.customerId,
       ""
     ),
     ""
@@ -1817,6 +1839,13 @@ export function normalizeCreateSearchUser(user = {}) {
       raw.profile?.publicName,
       raw.profile?.displayName,
       raw.profile?.name,
+      [raw.firstName, raw.lastName].filter(Boolean).join(" "),
+      [raw.nombre, raw.apellidos].filter(Boolean).join(" "),
+      raw.lookup?.displayName,
+      raw.lookup?.name,
+      rawNested.displayName,
+      rawNested.fullName,
+      rawNested.name,
       raw.username,
       raw.email
     ),
@@ -1832,7 +1861,10 @@ export function normalizeCreateSearchUser(user = {}) {
     raw.auth?.email,
     raw.contacto?.email,
     raw.contacto?.emailLower,
-    raw.lookup?.emailLower
+    raw.lookup?.email,
+    raw.lookup?.emailLower,
+    rawNested.email,
+    rawNested.emailLower
   );
 
   const username = cleanText(
@@ -1840,9 +1872,14 @@ export function normalizeCreateSearchUser(user = {}) {
       raw.username,
       raw.userName,
       raw.usernameLower,
+      raw.lookup?.username,
       raw.lookup?.usernameLower,
       raw.slug,
-      raw.lookup?.slug
+      raw.lookup?.slug,
+      raw.profile?.slug,
+      rawNested.username,
+      rawNested.userName,
+      rawNested.slug
     ),
     ""
   );
@@ -1858,7 +1895,11 @@ export function normalizeCreateSearchUser(user = {}) {
     raw.profile?.avatar,
     raw.profile?.photoUrl,
     raw.profile?.photoURL,
-    raw.profile?.picture
+    raw.profile?.picture,
+    rawNested.avatarUrl,
+    rawNested.avatar,
+    rawNested.picture,
+    rawNested.photoUrl
   );
 
   const role = cleanText(
@@ -1904,6 +1945,53 @@ export function normalizeCreateSearchUser(user = {}) {
   };
 }
 
+function responseLooksFailed(response = null) {
+  if (!isObject(response)) return false;
+
+  const status = Number(first(response.status, response.statusCode, response.codeStatus, 0));
+
+  if (status >= 400) return true;
+  if (response.ok === false) return true;
+  if (response.success === false) return true;
+
+  const error = first(response.error, response.errorMessage, response.error_description, null);
+
+  if (!error) return false;
+
+  if (typeof error === "string") {
+    return normalizeKey(error) !== "ok" && normalizeKey(error) !== "success";
+  }
+
+  return true;
+}
+
+function responseErrorMessage(response = null, fallback = "No se pudieron buscar usuarios.") {
+  const source = safeObject(response);
+
+  return cleanText(
+    first(
+      source.message,
+      source.errorMessage,
+      source.error_description,
+      source.detail,
+      source.title,
+      typeof source.error === "string" ? source.error : "",
+      fallback
+    ),
+    fallback
+  );
+}
+
+function buildUsersSearchQuery(query = "", limit = USERS_SEARCH_LIMIT) {
+  return {
+    q: query,
+    search: query,
+    limit,
+    includeTotal: false,
+    active: true,
+  };
+}
+
 export async function searchIncidenciaUsers(query = "", options = {}) {
   const q = cleanText(query, "");
   const limit = Math.max(
@@ -1911,34 +1999,15 @@ export async function searchIncidenciaUsers(query = "", options = {}) {
     Math.min(Number(options.limit || USERS_SEARCH_LIMIT) || USERS_SEARCH_LIMIT, 20)
   );
 
-  if (q.length < 2) return [];
+  if (q.length < USERS_SEARCH_MIN_LENGTH) return [];
 
   const response = await getJson(USERS_SEARCH_ENDPOINT, {
     timeout: options.timeout || INCIDENCIAS_TIMEOUT,
-    query: {
-      q,
-      search: q,
-      query: q,
-      term: q,
-      text: q,
-      limit,
-      includeTotal: false,
-      active: true,
-    },
+    query: buildUsersSearchQuery(q, limit),
   });
 
-  if (
-    response?.ok === false ||
-    response?.success === false ||
-    response?.error ||
-    response?.code
-  ) {
-    throw new Error(
-      response?.message ||
-        response?.error ||
-        response?.code ||
-        "No se pudieron buscar usuarios."
-    );
+  if (responseLooksFailed(response)) {
+    throw new Error(responseErrorMessage(response));
   }
 
   return usersListFromPayload(response)
@@ -2720,6 +2789,7 @@ export function getIncidenciasApiSnapshot() {
       doesNotInventClienteId: true,
       targetClienteIdCompatible: true,
       createUserSearchViaApi: true,
+      createUserSearchDoesNotTreatSuccessCodeAsError: true,
 
       requesterEmailAliasCompatibility: true,
       requesterAvatarAliasCompatibility: true,
@@ -2768,6 +2838,7 @@ export const IncidenciasApi = Object.freeze({
 
   USERS_SEARCH_ENDPOINT,
   USERS_SEARCH_LIMIT,
+  USERS_SEARCH_MIN_LENGTH,
 
   normalizeIncidenciaId,
 

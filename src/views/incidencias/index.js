@@ -63,7 +63,7 @@ import {
   validateDetailUpdate,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.lean.v8.production";
+export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.lean.v9.template-v7";
 export const INCIDENCIAS_VIEW_VERSION = INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
@@ -410,6 +410,44 @@ function fileIndexFromNode(node = null) {
   return Number.isFinite(index) ? index : -1;
 }
 
+function isIsoDate(value = "") {
+  return /^\d{4}-\d{2}-\d{2}$/.test(cleanText(value, ""));
+}
+
+function normalizeDateInput(value = "") {
+  const raw = cleanText(value, "");
+
+  if (!raw) return "";
+  if (isIsoDate(raw)) return raw;
+
+  const parsed = Date.parse(raw);
+
+  if (!Number.isFinite(parsed)) return "";
+
+  const date = new Date(parsed);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateFilterLabel(value = "") {
+  const date = normalizeDateInput(value);
+
+  if (!date) return "Fecha";
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(new Date(`${date}T00:00:00`));
+  } catch {
+    return date;
+  }
+}
+
 /* =========================================================
    INSTANCE REGISTRY
 ========================================================= */
@@ -470,6 +508,9 @@ function createIncidenciasController(host = null, context = {}) {
   let error = "";
   let filter = "all";
   let search = "";
+  let dateFrom = "";
+  let dateTo = "";
+  let dateLabel = "";
   let visibleLimit = DEFAULT_VISIBLE_LIMIT;
   let openingTicketId = "";
 
@@ -535,6 +576,10 @@ function createIncidenciasController(host = null, context = {}) {
 
       filter,
       search,
+      dateFrom,
+      dateTo,
+      dateLabel,
+      dateFilterActive: Boolean(dateFrom || dateTo || dateLabel),
       visibleLimit,
       openingTicketId,
 
@@ -1798,6 +1843,9 @@ function createIncidenciasController(host = null, context = {}) {
   function clearFilters() {
     filter = "all";
     search = "";
+    dateFrom = "";
+    dateTo = "";
+    dateLabel = "";
     visibleLimit = DEFAULT_VISIBLE_LIMIT;
 
     render({
@@ -1826,6 +1874,126 @@ function createIncidenciasController(host = null, context = {}) {
     return true;
   }
 
+  function setDateFilter(value = "") {
+    const date = normalizeDateInput(value);
+
+    if (!date) return false;
+
+    dateFrom = date;
+    dateTo = date;
+    dateLabel = formatDateFilterLabel(date);
+    visibleLimit = DEFAULT_VISIBLE_LIMIT;
+
+    render();
+    return true;
+  }
+
+  function clearDateFilter() {
+    dateFrom = "";
+    dateTo = "";
+    dateLabel = "";
+    visibleLimit = DEFAULT_VISIBLE_LIMIT;
+
+    render();
+    return true;
+  }
+
+  function promptDateFilter(fallbackValue = "") {
+    if (!isBrowser() || typeof window.prompt !== "function") return false;
+
+    const value = window.prompt(
+      "Filtrar por fecha (AAAA-MM-DD). Deja vacío para limpiar.",
+      fallbackValue
+    );
+
+    if (value === null) return false;
+
+    const date = normalizeDateInput(value);
+
+    if (!cleanText(value, "")) return clearDateFilter();
+    if (!date) return false;
+
+    return setDateFilter(date);
+  }
+
+  function openDateFilter() {
+    if (!isBrowser()) return false;
+
+    const current = dateFrom && dateFrom === dateTo
+      ? dateFrom
+      : dateFrom || dateTo || "";
+
+    try {
+      document
+        .querySelectorAll("[data-incidencias-native-date-input='true']")
+        .forEach((node) => node.remove());
+    } catch {
+      // noop
+    }
+
+    const input = document.createElement("input");
+
+    input.type = "date";
+    input.value = normalizeDateInput(current);
+    input.setAttribute("aria-label", "Filtrar incidencias por fecha");
+    input.setAttribute("data-incidencias-native-date-input", "true");
+
+    Object.assign(input.style, {
+      position: "fixed",
+      insetInlineStart: "0",
+      insetBlockStart: "0",
+      inlineSize: "1px",
+      blockSize: "1px",
+      opacity: "0",
+      pointerEvents: "none",
+      zIndex: "-1",
+    });
+
+    let closed = false;
+
+    const removeInput = () => {
+      if (closed) return;
+      closed = true;
+
+      try {
+        input.remove();
+      } catch {
+        // noop
+      }
+    };
+
+    input.addEventListener("change", () => {
+      const selected = normalizeDateInput(input.value);
+
+      removeInput();
+
+      if (selected) {
+        setDateFilter(selected);
+      }
+    }, { once: true });
+
+    input.addEventListener("blur", () => {
+      window.setTimeout(removeInput, 30000);
+    }, { once: true });
+
+    document.body.appendChild(input);
+
+    try {
+      input.focus({ preventScroll: true });
+
+      if (typeof input.showPicker === "function") {
+        input.showPicker();
+        return true;
+      }
+
+      removeInput();
+      return promptDateFilter(current);
+    } catch {
+      removeInput();
+      return promptDateFilter(current);
+    }
+  }
+
   function loadMore() {
     visibleLimit += DEFAULT_VISIBLE_LIMIT;
 
@@ -1850,6 +2018,8 @@ function createIncidenciasController(host = null, context = {}) {
     if (type === INCIDENCIAS_ACTIONS.FILTER) return setFilter(node?.dataset?.filter || "all");
     if (type === INCIDENCIAS_ACTIONS.CLEAR_FILTERS) return clearFilters();
     if (type === INCIDENCIAS_ACTIONS.CLEAR_SEARCH) return setSearch("");
+    if (type === INCIDENCIAS_ACTIONS.DATE_FILTER) return openDateFilter();
+    if (type === INCIDENCIAS_ACTIONS.CLEAR_DATE_FILTER) return clearDateFilter();
     if (type === INCIDENCIAS_ACTIONS.OPEN_DETAIL) return openDetail(node?.dataset?.ticketId || node?.dataset?.incidenciaId || "");
     if (type === INCIDENCIAS_ACTIONS.LOAD_MORE) return loadMore();
 
@@ -2212,6 +2382,7 @@ function createIncidenciasController(host = null, context = {}) {
 
         filter,
         searchLength: search.length,
+        dateFilterActive: Boolean(dateFrom || dateTo || dateLabel),
 
         createModalOpen: createModal.open,
         detailModalOpen: detailModal.open,

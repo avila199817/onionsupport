@@ -4,23 +4,15 @@
 
    Responsabilidad:
    - Render HTML puro de la vista Incidencias.
-   - Header/hero, stats, filtros, búsqueda y listado.
+   - Toolbar compacta: estado, fecha, búsqueda, crear y actualizar.
+   - Listado en tabla 6 columnas sin columna Acciones.
+   - Fila completa clicable para abrir detalle.
    - No renderizar modales: index.js los monta como isla externa estable.
    - Exponer data-incidencias-action/data-field para index.js.
-   - Mantener columnas 1:1 con CSS.
-   - Tabla sin columna Acciones: la fila abre el detalle.
-   - Sin Auth.
-   - Sin Router.
-   - Sin HTTP.
-   - Sin Store.
-   - Sin State externo.
-   - Sin Model externo.
-   - Sin listeners.
-   - Sin DOM API.
-   - Sin Toast.
+   - Sin Auth, Router, HTTP, Store, listeners, DOM API ni Toast.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.productive.v6";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.compact-table.v7";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -30,6 +22,9 @@ export const INCIDENCIAS_ACTIONS = Object.freeze({
   CLEAR_FILTERS: "clear-filters",
   CLEAR_SEARCH: "clear-search",
 
+  DATE_FILTER: "date-filter",
+  CLEAR_DATE_FILTER: "clear-date-filter",
+
   OPEN_DETAIL: "open-detail",
   LOAD_MORE: "load-more",
 });
@@ -37,6 +32,7 @@ export const INCIDENCIAS_ACTIONS = Object.freeze({
 const DEFAULT_ROUTE = "/incidencias";
 const DEFAULT_VISIBLE_ROWS = 20;
 const DEFAULT_CURRENCY = "EUR";
+const TABLE_SCALE = "110";
 
 const FILTERS = Object.freeze([
   { key: "all", label: "Todas" },
@@ -130,9 +126,7 @@ function first(...values) {
 function number(value = 0, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
 
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : fallback;
-  }
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
 
   if (typeof value === "string") {
     let clean = value
@@ -147,10 +141,7 @@ function number(value = 0, fallback = 0) {
     const hasDot = clean.includes(".");
 
     if (hasComma && hasDot) {
-      const lastComma = clean.lastIndexOf(",");
-      const lastDot = clean.lastIndexOf(".");
-
-      clean = lastComma > lastDot
+      clean = clean.lastIndexOf(",") > clean.lastIndexOf(".")
         ? clean.replace(/\./g, "").replace(/,/g, ".")
         : clean.replace(/,/g, "");
     } else if (hasComma) {
@@ -228,7 +219,6 @@ function safeImageSrc(value = "") {
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
   if (hasSensitiveQuery(raw)) return "";
-
   if (/^blob:/i.test(raw)) return raw;
   if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
 
@@ -288,20 +278,7 @@ function normalizeEmail(value = "") {
   const email = cleanText(value, "").toLowerCase();
 
   if (!email) return "";
-
-  if (
-    [
-      "null",
-      "undefined",
-      "none",
-      "sin email",
-      "no email",
-      "no_email",
-      "__no_email__",
-    ].includes(email)
-  ) {
-    return "";
-  }
+  if (["null", "undefined", "none", "sin email", "no email", "no_email", "__no_email__"].includes(email)) return "";
 
   return email.includes("@") ? email : "";
 }
@@ -395,7 +372,6 @@ function toTimestamp(value = null) {
   }
 
   const parsed = Date.parse(raw);
-
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -447,9 +423,7 @@ function formatRelativeDate(value = null) {
 
   const diffHours = Math.round(absMin / 60);
 
-  if (diffHours < 24) {
-    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
-  }
+  if (diffHours < 24) return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
 
   const diffDays = Math.round(diffHours / 24);
 
@@ -501,9 +475,13 @@ function icon(name = "") {
     close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
     search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
     euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
-    activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
+    calendar: `<svg ${common}><path d="M8 2v4"/><path d="M16 2v4"/><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg>`,
     chevronDown: `<svg ${common}><path d="m6 9 6 6 6-6"/></svg>`,
-    user: `<svg ${common}><path d="M12 11.25a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4.75 20.75a7.25 7.25 0 0 1 14.5 0"/></svg>`,
+    badgeBolt: `<svg ${common}><path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z"/></svg>`,
+    badgeSignal: `<svg ${common}><path d="M4 13h3v7H4z"/><path d="M10.5 9h3v11h-3z"/><path d="M17 4h3v16h-3z"/></svg>`,
+    badgeShield: `<svg ${common}><path d="M12 3 20 7v5c0 5-3.4 8.3-8 9-4.6-.7-8-4-8-9V7l8-4Z"/><path d="M9.5 12.2 11.3 14l3.5-4"/></svg>`,
+    badgeLeaf: `<svg ${common}><path d="M19 4c-7.5.6-12 4.5-12 10.5 0 3.2 2.3 5.5 5.5 5.5C18.5 20 21.4 13.5 19 4Z"/><path d="M7 17c2.2-3.7 5.2-6.2 9-7.5"/></svg>`,
+    badgeUser: `<svg ${common}><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>`,
   };
 
   return icons[name] || "";
@@ -522,24 +500,13 @@ function renderSpinner(label = "Cargando...") {
 
 function getTicketId(item = {}) {
   return cleanText(
-    pickValue(item, [
-      "ticketId",
-      "incidenciaId",
-      "code",
-      "numero",
-      "ticketCode",
-      "id",
-      "_id",
-    ]),
+    pickValue(item, ["ticketId", "incidenciaId", "code", "numero", "ticketCode", "id", "_id"]),
     "INC-SIN-ID"
   );
 }
 
 function getSubject(item = {}) {
-  return cleanText(
-    pickValue(item, ["subject", "title", "asunto", "name", "preview"]),
-    "Incidencia sin asunto"
-  );
+  return cleanText(pickValue(item, ["subject", "title", "asunto", "name", "preview"]), "Incidencia sin asunto");
 }
 
 function getDescription(item = {}) {
@@ -592,11 +559,7 @@ function getClientEmail(item = {}) {
     pickValue(item, ["client.email"]),
     pickValue(item, ["client.emailLower"]),
     pickValue(item, ["user.email"]),
-    pickValue(item, ["user.emailLower"]),
-    pickValue(item, ["meta.requesterEmail"]),
-    pickValue(item, ["meta.clientEmail"]),
-    pickValue(item, ["meta.clienteEmail"]),
-    pickValue(item, ["meta.userEmail"])
+    pickValue(item, ["user.emailLower"])
   );
 }
 
@@ -619,11 +582,7 @@ function getAvatarUrl(item = {}) {
     pickValue(item, ["requesterSnapshot"]),
     pickValue(item, ["cliente"]),
     pickValue(item, ["client"]),
-    pickValue(item, ["user"]),
-    pickValue(item, ["meta.requesterAvatarUrl"]),
-    pickValue(item, ["meta.requesterAvatar"]),
-    pickValue(item, ["meta.clientAvatarUrl"]),
-    pickValue(item, ["meta.clientAvatar"])
+    pickValue(item, ["user"])
   );
 }
 
@@ -693,10 +652,7 @@ function getPriorityLabel(item = {}) {
 }
 
 function getCategory(item = {}) {
-  return cleanText(
-    pickValue(item, ["category", "categoria", "type", "tipo", "subcategory", "subcategoria"]),
-    "Soporte"
-  );
+  return cleanText(pickValue(item, ["category", "categoria", "type", "tipo", "subcategory", "subcategoria"]), "Soporte");
 }
 
 function getAssignedTo(item = {}) {
@@ -706,24 +662,17 @@ function getAssignedTo(item = {}) {
       "technicianName",
       "tecnicoName",
       "agentName",
-      "assignmentAssignedToName",
-      "assignmentTechnicianName",
       "assignment.name",
       "assignment.assignedToName",
       "assignment.technicianName",
-      "assignment.agentName",
       "assignedTo.displayName",
       "assignedTo.name",
-      "assignedTo.nombre",
       "technician.displayName",
       "technician.name",
       "tecnico.displayName",
       "tecnico.name",
       "agent.displayName",
       "agent.name",
-      "meta.technicianName",
-      "meta.assignedTechnicianName",
-      "meta.lastTechnicianName",
     ]),
     "Sin asignar"
   );
@@ -740,23 +689,13 @@ function getAssignedAvatarUrl(item = {}) {
     pickValue(item, ["agentAvatarUrl"]),
     pickValue(item, ["agentAvatar"]),
     pickValue(item, ["assignment.assignedToAvatarUrl"]),
-    pickValue(item, ["assignment.assignedToAvatar"]),
     pickValue(item, ["assignment.technicianAvatarUrl"]),
-    pickValue(item, ["assignment.technicianAvatar"]),
-    pickValue(item, ["assignment.agentAvatarUrl"]),
-    pickValue(item, ["assignment.agentAvatar"]),
     pickValue(item, ["assignment.avatarUrl"]),
     pickValue(item, ["assignment.avatar"]),
     pickValue(item, ["assignedTo"]),
     pickValue(item, ["technician"]),
     pickValue(item, ["tecnico"]),
-    pickValue(item, ["agent"]),
-    pickValue(item, ["meta.technicianAvatarUrl"]),
-    pickValue(item, ["meta.technicianAvatar"]),
-    pickValue(item, ["meta.assignedTechnicianAvatarUrl"]),
-    pickValue(item, ["meta.assignedTechnicianAvatar"]),
-    pickValue(item, ["meta.lastTechnicianAvatarUrl"]),
-    pickValue(item, ["meta.lastTechnicianAvatar"])
+    pickValue(item, ["agent"])
   );
 }
 
@@ -768,8 +707,6 @@ function getInvoiceTotal(item = {}) {
       pickValue(item, ["facturasTotal"]),
       pickValue(item, ["importeFacturas"]),
       pickValue(item, ["facturaTotal"]),
-      pickValue(item, ["facturaImporte"]),
-      pickValue(item, ["importeFactura"]),
       pickValue(item, ["invoiceAmount"]),
       pickValue(item, ["amount"]),
       pickValue(item, ["total"]),
@@ -783,14 +720,7 @@ function getInvoiceTotal(item = {}) {
 
 function getInvoiceCurrency(item = {}) {
   return cleanText(
-    first(
-      pickValue(item, ["currency"]),
-      pickValue(item, ["moneda"]),
-      pickValue(item, ["facturaCurrency"]),
-      pickValue(item, ["facturaMoneda"]),
-      pickValue(item, ["meta.invoiceCurrency"]),
-      DEFAULT_CURRENCY
-    ),
+    first(pickValue(item, ["currency"]), pickValue(item, ["moneda"]), pickValue(item, ["facturaCurrency"]), DEFAULT_CURRENCY),
     DEFAULT_CURRENCY
   ).toUpperCase();
 }
@@ -798,9 +728,7 @@ function getInvoiceCurrency(item = {}) {
 function getImporteLabel(item = {}) {
   const amount = getInvoiceTotal(item);
 
-  if (amount > 0) {
-    return formatMoney(amount, getInvoiceCurrency(item));
-  }
+  if (amount > 0) return formatMoney(amount, getInvoiceCurrency(item));
 
   const paymentKey = normalizeKey(first(pickValue(item, ["paymentStatus"]), pickValue(item, ["estadoPago"]), ""));
 
@@ -854,11 +782,7 @@ function getUpdatedAt(item = {}) {
 }
 
 function getAttachmentsCount(item = {}) {
-  const attachments = first(
-    pickValue(item, ["attachments"]),
-    pickValue(item, ["files"]),
-    pickValue(item, ["adjuntos"])
-  );
+  const attachments = first(pickValue(item, ["attachments"]), pickValue(item, ["files"]), pickValue(item, ["adjuntos"]));
 
   if (Array.isArray(attachments)) return attachments.length;
 
@@ -880,7 +804,7 @@ function itemSortTime(item = {}) {
 }
 
 /* =========================================================
-   FILTER / STATS
+   FILTERS / VIEW MODEL
 ========================================================= */
 
 function normalizeFilter(value = "") {
@@ -899,10 +823,6 @@ function isClosedItem(item = {}) {
 
 function isOpenItem(item = {}) {
   return !isClosedItem(item);
-}
-
-function isUrgentItem(item = {}) {
-  return ["urgent", "critical"].includes(getPriorityKey(item));
 }
 
 function matchesFilter(item = {}, filter = "all") {
@@ -936,48 +856,53 @@ function matchesSearch(item = {}, query = "") {
   return itemSearchText(item).includes(q);
 }
 
-function computeLocalStats(items = []) {
-  return safeArray(items).reduce(
-    (acc, item) => {
-      acc.total += 1;
-
-      if (isOpenItem(item)) acc.open += 1;
-      if (isClosedItem(item)) acc.closed += 1;
-      if (isUrgentItem(item)) acc.urgent += 1;
-
-      acc.attachments += getAttachmentsCount(item);
-      acc.invoiceTotal += getInvoiceTotal(item);
-
-      const updatedAt = itemSortTime(item);
-      if (updatedAt > acc.lastUpdateTs) acc.lastUpdateTs = updatedAt;
-
-      return acc;
-    },
-    {
-      total: 0,
-      open: 0,
-      closed: 0,
-      urgent: 0,
-      attachments: 0,
-      invoiceTotal: 0,
-      lastUpdateTs: 0,
-    }
-  );
+function getDateFilterTimestamp(item = {}) {
+  return toTimestamp(getCreatedAt(item)) || itemSortTime(item);
 }
 
-function mergeStats(items = [], provided = {}) {
-  const local = computeLocalStats(items);
-  const stats = safeObject(provided);
+function getDateBoundary(value = "", mode = "start") {
+  const raw = cleanText(value, "");
 
-  return {
-    total: number(first(stats.total, local.total), local.total),
-    open: number(first(stats.open, local.open), local.open),
-    closed: number(first(stats.closed, local.closed), local.closed),
-    urgent: number(first(stats.urgent, local.urgent), local.urgent),
-    attachments: number(first(stats.attachments, local.attachments), local.attachments),
-    invoiceTotal: number(first(stats.invoiceTotal, local.invoiceTotal), local.invoiceTotal),
-    lastUpdateTs: number(first(stats.lastUpdateTs, local.lastUpdateTs), local.lastUpdateTs),
-  };
+  if (!raw) return 0;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const suffix = mode === "end" ? "T23:59:59.999" : "T00:00:00.000";
+    return toTimestamp(`${raw}${suffix}`);
+  }
+
+  const timestamp = toTimestamp(raw);
+
+  if (!timestamp) return 0;
+
+  const date = new Date(timestamp);
+  date.setHours(mode === "end" ? 23 : 0, mode === "end" ? 59 : 0, mode === "end" ? 59 : 0, mode === "end" ? 999 : 0);
+  return date.getTime();
+}
+
+function matchesDateFilter(item = {}, dateFrom = "", dateTo = "") {
+  const from = getDateBoundary(dateFrom, "start");
+  const to = getDateBoundary(dateTo, "end");
+
+  if (!from && !to) return true;
+
+  const itemTime = getDateFilterTimestamp(item);
+
+  if (!itemTime) return false;
+  if (from && itemTime < from) return false;
+  if (to && itemTime > to) return false;
+
+  return true;
+}
+
+function getDateFilterLabel(vm = {}) {
+  const explicit = cleanText(vm.dateLabel, "");
+
+  if (explicit) return explicit;
+  if (vm.dateFrom && vm.dateTo) return `${formatDateShort(vm.dateFrom)} - ${formatDateShort(vm.dateTo)}`;
+  if (vm.dateFrom) return `Desde ${formatDateShort(vm.dateFrom)}`;
+  if (vm.dateTo) return `Hasta ${formatDateShort(vm.dateTo)}`;
+
+  return "Fecha";
 }
 
 function countByFilter(items = []) {
@@ -1010,21 +935,21 @@ function normalizeItems(items = []) {
   });
 }
 
-/* =========================================================
-   VIEW MODEL
-========================================================= */
-
 function buildVm(input = {}) {
   const data = safeObject(input);
   const allItems = normalizeItems(data.items);
   const filter = normalizeFilter(data.filter);
   const search = cleanText(data.search, "");
+  const dateFrom = cleanText(first(data.dateFrom, data.filters?.dateFrom, data.dateFilter?.from, data.date?.from), "");
+  const dateTo = cleanText(first(data.dateTo, data.filters?.dateTo, data.dateFilter?.to, data.date?.to), "");
+  const dateLabel = cleanText(first(data.dateLabel, data.filters?.dateLabel, data.dateFilter?.label, data.date?.label), "");
+  const dateFilterActive = Boolean(dateFrom || dateTo || dateLabel || data.dateFilterActive === true);
   const visibleLimit = Math.max(1, number(data.visibleLimit, DEFAULT_VISIBLE_ROWS));
-  const stats = mergeStats(allItems, data.stats);
 
   const filteredItems = allItems
     .filter((item) => matchesFilter(item, filter))
-    .filter((item) => matchesSearch(item, search));
+    .filter((item) => matchesSearch(item, search))
+    .filter((item) => matchesDateFilter(item, dateFrom, dateTo));
 
   const visibleItems = filteredItems.slice(0, visibleLimit);
   const total = Math.max(number(data.total, allItems.length), allItems.length);
@@ -1034,7 +959,6 @@ function buildVm(input = {}) {
 
   return {
     data,
-
     route: cleanText(first(data.route, data.routes?.incidencias, DEFAULT_ROUTE), DEFAULT_ROUTE),
     routes: safeObject(data.routes),
 
@@ -1057,8 +981,11 @@ function buildVm(input = {}) {
     error: cleanText(data.error, ""),
     filter,
     search,
+    dateFrom,
+    dateTo,
+    dateLabel,
+    dateFilterActive,
     filterCounts: countByFilter(allItems),
-    stats,
 
     openingTicketId: cleanText(data.openingTicketId, ""),
   };
@@ -1116,13 +1043,21 @@ function renderStatusChip(item = {}) {
   `;
 }
 
+function getPriorityIconName(key = "") {
+  if (key === "critical") return "badgeBolt";
+  if (key === "urgent") return "badgeSignal";
+  if (key === "low") return "badgeLeaf";
+
+  return "badgeShield";
+}
+
 function renderPriorityBadge(item = {}) {
   const key = getPriorityKey(item);
   const label = getPriorityLabel(item);
 
   return `
     <span class="incidencias-priority-badge incidencias-priority-badge--${attr(key)}" data-priority-badge="${attr(key)}">
-      <span aria-hidden="true">↯</span>
+      <span class="incidencias-badge-icon incidencias-priority-badge-icon" aria-hidden="true">${icon(getPriorityIconName(key))}</span>
       <span>${escapeHtml(label)}</span>
     </span>
   `;
@@ -1158,6 +1093,7 @@ function renderAssignedBadge(item = {}) {
         }
         <span>${escapeHtml(initials)}</span>
       </span>
+      <span class="incidencias-badge-icon incidencias-assigned-badge-icon" aria-hidden="true">${icon("badgeUser")}</span>
       <span>${escapeHtml(assignedTo)}</span>
     </span>
   `;
@@ -1176,108 +1112,7 @@ function renderImporteChip(item = {}) {
 }
 
 /* =========================================================
-   HEADER / HERO
-========================================================= */
-
-function renderHeader(vm = {}) {
-  const stats = vm.stats;
-  const updatedAt = stats.lastUpdateTs ? new Date(stats.lastUpdateTs).toISOString() : null;
-
-  return `
-    <section class="incidencias-hero" data-incidencias-hero="true">
-      <div class="incidencias-hero-top">
-        <div class="incidencias-hero-copy">
-          <p class="incidencias-eyebrow">Incidencias</p>
-          <h1 class="incidencias-title">Tus incidencias y solicitudes</h1>
-          <p class="incidencias-subtitle">
-            Consulta el estado de tus incidencias, revisa actualizaciones y crea nuevas solicitudes.
-          </p>
-        </div>
-
-        <div class="incidencias-hero-actions" aria-label="Acciones de incidencias">
-          <button
-            type="button"
-            id="incidencias-create-btn"
-            class="incidencias-btn incidencias-btn--primary incidencias-btn--create${vm.creating ? " is-loading" : ""}"
-            data-incidencias-action="${INCIDENCIAS_ACTIONS.CREATE_OPEN}"
-            ${htmlAttrs({
-              disabled: vm.creating,
-              "aria-disabled": vm.creating ? "true" : false,
-              "aria-busy": vm.creating ? "true" : false,
-            })}
-          >
-            ${vm.creating ? renderSpinner("Creando...") : `${icon("plus")}<span class="incidencias-btn-text">Crear incidencia</span>`}
-          </button>
-
-          <button
-            type="button"
-            id="incidencias-refresh-btn"
-            class="incidencias-btn incidencias-btn--accent incidencias-btn--refresh${vm.refreshing ? " is-loading" : ""}"
-            data-incidencias-action="${INCIDENCIAS_ACTIONS.REFRESH}"
-            ${htmlAttrs({
-              disabled: vm.refreshing || vm.loading,
-              "aria-disabled": vm.refreshing || vm.loading ? "true" : false,
-              "aria-busy": vm.refreshing ? "true" : false,
-            })}
-          >
-            ${vm.refreshing ? renderSpinner("Actualizando...") : `${icon("refresh")}<span class="incidencias-btn-text">Actualizar</span>`}
-          </button>
-        </div>
-      </div>
-
-      <div class="incidencias-hero-meta">
-        <span class="incidencias-meta-pill" data-meta="total">
-          ${icon("ticket")}
-          <span>${escapeHtml(`${formatNumber(vm.total)} solicitudes registradas`)}</span>
-        </span>
-
-        <span class="incidencias-meta-pill" data-meta="updated">
-          ${icon("refresh")}
-          <span>${updatedAt ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span>
-        </span>
-
-        <span class="incidencias-meta-pill" data-meta="attachments">
-          ${icon("paperclip")}
-          <span>${escapeHtml(`${formatNumber(stats.attachments)} adjuntos`)}</span>
-        </span>
-
-        <span class="incidencias-meta-pill" data-meta="amount">
-          ${icon("euro")}
-          <span>${escapeHtml(formatMoney(stats.invoiceTotal, DEFAULT_CURRENCY))}</span>
-        </span>
-      </div>
-
-      <div class="incidencias-stats">
-        <article class="incidencias-stat-card incidencias-stat-card--open" data-stat="open">
-          <div class="incidencias-stat-label">Abiertas</div>
-          <div class="incidencias-stat-value">${escapeHtml(formatNumber(stats.open))}</div>
-          <div class="incidencias-stat-text">Solicitudes activas, pendientes o en proceso.</div>
-        </article>
-
-        <article class="incidencias-stat-card incidencias-stat-card--closed" data-stat="closed">
-          <div class="incidencias-stat-label">Cerradas</div>
-          <div class="incidencias-stat-value">${escapeHtml(formatNumber(stats.closed))}</div>
-          <div class="incidencias-stat-text">Casos resueltos o cerrados.</div>
-        </article>
-
-        <article class="incidencias-stat-card incidencias-stat-card--urgent" data-stat="urgent">
-          <div class="incidencias-stat-label">Urgentes</div>
-          <div class="incidencias-stat-value">${escapeHtml(formatNumber(stats.urgent))}</div>
-          <div class="incidencias-stat-text">Incidencias marcadas como urgentes o críticas.</div>
-        </article>
-
-        <article class="incidencias-stat-card incidencias-stat-card--amount" data-stat="amount">
-          <div class="incidencias-stat-label">Importe asociado</div>
-          <div class="incidencias-stat-value">${escapeHtml(formatMoney(stats.invoiceTotal, DEFAULT_CURRENCY))}</div>
-          <div class="incidencias-stat-text">Total vinculado a facturas visibles.</div>
-        </article>
-      </div>
-    </section>
-  `;
-}
-
-/* =========================================================
-   FILTERS / SEARCH
+   TOOLBAR / SEARCH
 ========================================================= */
 
 function renderSearch(vm = {}) {
@@ -1317,6 +1152,49 @@ function renderSearch(vm = {}) {
   `;
 }
 
+function renderDateFilterButton(vm = {}) {
+  const active = vm.dateFilterActive === true;
+  const label = getDateFilterLabel(vm);
+
+  return `
+    <div
+      class="incidencias-date-filter${active ? " is-active" : ""}"
+      data-incidencias-date-filter="true"
+      data-date-filter-active="${active ? "true" : "false"}"
+      data-date-from="${attr(vm.dateFrom)}"
+      data-date-to="${attr(vm.dateTo)}"
+    >
+      <button
+        type="button"
+        class="incidencias-date-filter-btn${active ? " is-active" : ""}"
+        data-incidencias-action="${INCIDENCIAS_ACTIONS.DATE_FILTER}"
+        data-date-filter-action="open"
+        aria-pressed="${active ? "true" : "false"}"
+        aria-label="Filtrar incidencias por fecha"
+      >
+        <span class="incidencias-date-filter-icon" aria-hidden="true">${icon("calendar")}</span>
+        <span class="incidencias-date-filter-text">${escapeHtml(label)}</span>
+      </button>
+
+      ${
+        active
+          ? `
+            <button
+              type="button"
+              class="incidencias-date-filter-clear"
+              data-incidencias-action="${INCIDENCIAS_ACTIONS.CLEAR_DATE_FILTER}"
+              data-date-filter-action="clear"
+              aria-label="Limpiar filtro de fecha"
+            >
+              ${icon("close")}
+            </button>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
 function renderFilters(vm = {}) {
   return `
     <div class="incidencias-filters" aria-label="Filtros y búsqueda de incidencias">
@@ -1341,7 +1219,40 @@ function renderFilters(vm = {}) {
         }).join("")}
       </div>
 
-      ${renderSearch(vm)}
+      <div class="incidencias-filter-tools" data-incidencias-filter-tools="true">
+        ${renderDateFilterButton(vm)}
+        ${renderSearch(vm)}
+
+        <div class="incidencias-inline-actions" aria-label="Acciones rápidas de incidencias">
+          <button
+            type="button"
+            id="incidencias-create-btn"
+            class="incidencias-btn incidencias-btn--primary incidencias-btn--create${vm.creating ? " is-loading" : ""}"
+            data-incidencias-action="${INCIDENCIAS_ACTIONS.CREATE_OPEN}"
+            ${htmlAttrs({
+              disabled: vm.creating,
+              "aria-disabled": vm.creating ? "true" : false,
+              "aria-busy": vm.creating ? "true" : false,
+            })}
+          >
+            ${vm.creating ? renderSpinner("Creando...") : `${icon("plus")}<span class="incidencias-btn-text">Crear</span>`}
+          </button>
+
+          <button
+            type="button"
+            id="incidencias-refresh-btn"
+            class="incidencias-btn incidencias-btn--refresh${vm.refreshing ? " is-loading" : ""}"
+            data-incidencias-action="${INCIDENCIAS_ACTIONS.REFRESH}"
+            ${htmlAttrs({
+              disabled: vm.refreshing || vm.loading,
+              "aria-disabled": vm.refreshing || vm.loading ? "true" : false,
+              "aria-busy": vm.refreshing ? "true" : false,
+            })}
+          >
+            ${vm.refreshing ? renderSpinner("Actualizando...") : `${icon("refresh")}<span class="incidencias-btn-text">Actualizar</span>`}
+          </button>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -1480,11 +1391,12 @@ function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
     <div class="incidencias-table-wrap is-loading" data-incidencias-table-wrap="true">
       <div class="incidencias-table-shell">
         <table
-          class="incidencias-table incidencias-table--no-actions incidencias-table--loading"
+          class="incidencias-table incidencias-table--no-actions incidencias-table--scale-110 incidencias-table--loading"
           role="table"
           aria-label="Cargando incidencias"
           data-table-columns="6"
           data-table-actions="false"
+          data-table-scale="${attr(TABLE_SCALE)}"
         >
           ${renderTableColgroup()}
           ${renderTableHead()}
@@ -1510,14 +1422,14 @@ function renderRefreshOverlay() {
   return `
     <div class="incidencias-refresh-overlay" aria-live="polite" aria-busy="true">
       <span class="incidencias-spinner" aria-hidden="true"></span>
-      <span>Actualizando incidencias...</span>
+      <span>Actualizando listado...</span>
     </div>
   `;
 }
 
 function renderEmptyState(vm = {}) {
   const hasError = Boolean(vm.error);
-  const filtering = vm.filter !== "all" || Boolean(vm.search);
+  const filtering = vm.filter !== "all" || Boolean(vm.search) || vm.dateFilterActive === true;
 
   return `
     <div class="incidencias-empty" data-incidencias-empty="true">
@@ -1525,14 +1437,14 @@ function renderEmptyState(vm = {}) {
         ${hasError ? icon("alert") : icon("ticket")}
       </div>
 
-      <h3>${hasError ? "No se pudieron cargar las incidencias" : filtering ? "No hay incidencias con esos filtros" : "Todavía no hay incidencias"}</h3>
+      <h3>${hasError ? "No se pudo cargar el listado" : filtering ? "No hay solicitudes con esos filtros" : "Todavía no hay solicitudes"}</h3>
       <p>
         ${
           hasError
             ? escapeHtml(vm.error)
             : filtering
-              ? "Prueba a limpiar la búsqueda o cambia el filtro activo para volver al historial completo."
-              : "Cuando haya solicitudes registradas aparecerán aquí con su estado, seguimiento, adjuntos y facturación asociada."
+              ? "Prueba a limpiar la búsqueda, fecha o estado activo para volver al historial completo."
+              : "Cuando haya solicitudes registradas aparecerán aquí con su estado, seguimiento, adjuntos e importe asociado."
         }
       </p>
 
@@ -1585,7 +1497,7 @@ function renderFeedFooter(vm = {}) {
         data-incidencias-load-more="false"
       >
         <span class="incidencias-feed-end-text">
-          Has visto todas las incidencias disponibles.
+          Has visto todas las solicitudes disponibles.
         </span>
       </div>
     `;
@@ -1606,7 +1518,7 @@ function renderFeedFooter(vm = {}) {
       >
         ${
           vm.loadingMore
-            ? renderSpinner("Cargando más incidencias...")
+            ? renderSpinner("Cargando más...")
             : `
               ${icon("chevronDown")}
               <span class="incidencias-btn-text">Mostrar más</span>
@@ -1629,18 +1541,17 @@ function renderFeedFooter(vm = {}) {
 }
 
 function renderTable(vm = {}) {
-  if (!vm.visibleItems.length) {
-    return renderEmptyState(vm);
-  }
+  if (!vm.visibleItems.length) return renderEmptyState(vm);
 
   return `
     <div class="incidencias-table-shell">
       <table
-        class="incidencias-table incidencias-table--no-actions"
+        class="incidencias-table incidencias-table--no-actions incidencias-table--scale-110"
         role="table"
         aria-label="Listado de incidencias"
         data-table-columns="6"
         data-table-actions="false"
+        data-table-scale="${attr(TABLE_SCALE)}"
       >
         ${renderTableColgroup()}
         ${renderTableHead()}
@@ -1662,11 +1573,12 @@ function renderHistory(vm = {}) {
   const activeCriteria = [
     vm.filter !== "all" ? activeFilterLabel : "",
     vm.search ? `búsqueda “${vm.search}”` : "",
+    vm.dateFilterActive ? `fecha “${getDateFilterLabel(vm)}”` : "",
   ].filter(Boolean);
 
   const subtitle = showInitialLoading
-    ? "Cargando incidencias..."
-    : vm.filter !== "all" || vm.search
+    ? "Cargando listado..."
+    : vm.filter !== "all" || vm.search || vm.dateFilterActive
       ? `Mostrando ${formatNumber(vm.visibleCount)} de ${formatNumber(vm.filteredTotal)}${activeCriteria.length ? ` · ${activeCriteria.join(" · ")}` : ""}`
       : `Mostrando ${formatNumber(vm.visibleCount)} de ${formatNumber(vm.total)} · ordenadas de más nuevas a más antiguas`;
 
@@ -1675,13 +1587,9 @@ function renderHistory(vm = {}) {
       class="incidencias-history"
       data-incidencias-scroll-host="true"
       data-incidencias-scroll-mode="infinite"
+      data-incidencias-result-summary="${attr(subtitle)}"
     >
       <div class="incidencias-history-head" data-incidencias-history-head="true">
-        <div class="incidencias-history-copy">
-          <h2 class="incidencias-history-title">Historial de incidencias</h2>
-          <p class="incidencias-history-subtitle">${escapeHtml(subtitle)}</p>
-        </div>
-
         ${renderFilters(vm)}
       </div>
 
@@ -1721,26 +1629,28 @@ export function renderIncidenciasLoadingState(input = {}) {
       data-total="${attr(String(vm.total))}"
       data-visible="${attr(String(vm.visibleCount))}"
       data-filter="${attr(vm.filter)}"
+      data-date-filter-active="${vm.dateFilterActive ? "true" : "false"}"
       data-table-actions="false"
+      data-table-scale="${attr(TABLE_SCALE)}"
       aria-busy="true"
     >
-      ${renderHeader(vm)}
       ${renderHistory(vm)}
     </section>
   `;
 }
 
-export function renderIncidenciasErrorState(message = "No se pudieron cargar las incidencias.") {
+export function renderIncidenciasErrorState(message = "No se pudo cargar el listado.") {
   return `
     <section
       class="incidencias-view-root incidencias-view-root--error has-error"
       data-incidencias-scope="true"
       data-template-version="${attr(INCIDENCIAS_TEMPLATE_VERSION)}"
       data-table-actions="false"
+      data-table-scale="${attr(TABLE_SCALE)}"
       aria-busy="false"
     >
       <section class="incidencias-error">
-        <h3 class="incidencias-error-title">No se pudo renderizar la vista de incidencias</h3>
+        <h3 class="incidencias-error-title">No se pudo renderizar el listado</h3>
         <p class="incidencias-error-text">${escapeHtml(cleanText(message, "Error desconocido al cargar la vista."))}</p>
 
         <button
@@ -1779,9 +1689,13 @@ export function renderIncidenciasTemplate(input = {}) {
       data-visible="${attr(String(vm.visibleCount))}"
       data-filter="${attr(vm.filter)}"
       data-search-active="${vm.search ? "true" : "false"}"
+      data-date-filter-active="${vm.dateFilterActive ? "true" : "false"}"
+      data-date-from="${attr(vm.dateFrom)}"
+      data-date-to="${attr(vm.dateTo)}"
       data-loading="${vm.loading ? "true" : "false"}"
       data-refreshing="${vm.refreshing ? "true" : "false"}"
       data-table-actions="false"
+      data-table-scale="${attr(TABLE_SCALE)}"
       aria-busy="${vm.loading || vm.refreshing ? "true" : "false"}"
     >
       ${
@@ -1795,7 +1709,6 @@ export function renderIncidenciasTemplate(input = {}) {
           : ""
       }
 
-      ${renderHeader(vm)}
       ${renderHistory(vm)}
     </section>
   `;
@@ -1808,19 +1721,17 @@ export function renderIncidenciasTemplate(input = {}) {
 export function getIncidenciasTemplateSnapshot() {
   return {
     version: INCIDENCIAS_TEMPLATE_VERSION,
-
     actions: INCIDENCIAS_ACTIONS,
     filters: FILTERS,
+    tableScale: TABLE_SCALE,
     tableColumns: INCIDENCIAS_TABLE_COLUMNS.map((column) => ({
       key: column.key,
       label: column.label,
       colClass: column.colClass,
       cellClass: column.cellClass,
     })),
-
     policy: {
       templateOnly: true,
-
       noAuth: true,
       noRouter: true,
       noHttp: true,
@@ -1830,23 +1741,18 @@ export function getIncidenciasTemplateSnapshot() {
       noListeners: true,
       noDomApi: true,
       noToast: true,
-
+      compactHeader: true,
+      noVisiblePageTitle: true,
       centralizedTableColumns: true,
       noActionsColumn: true,
       rowClickOpensDetail: true,
-      noGenericDataActionDuplication: true,
       amountImporteClassCompatibility: true,
-      fullHdNoActionsLayout: true,
-
-      preservesTechnicianAvatarData: true,
-      requesterEmailAliasCompatibility: true,
-      technicianAvatarAliasCompatibility: true,
-      blobAvatarSupport: true,
-
+      tableScale: TABLE_SCALE,
+      dateFilterButtonMarkup: true,
+      improvedBadgeSvgIcons: true,
       externalModalIslands: true,
       doesNotRenderCreateModal: true,
       doesNotRenderDetailModal: true,
-
       tableMarkup: true,
       searchMarkup: true,
       filtersMarkup: true,

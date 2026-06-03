@@ -12,6 +12,7 @@
    - Clasificar errores auth sin navegar.
    - Refresh automático controlado ante access token expirado.
    - Retry único de la request original tras refresh OK.
+   - Soporte PDF/blob 1:1 contra backend.
    - Sin Router.
    - Sin Toast.
    - Sin Store.
@@ -30,7 +31,7 @@ import {
   isPrivateApiPath as configIsPrivateApiPath,
 } from "./config.js";
 
-export const HTTP_VERSION = "core.http.refresh.v4";
+export const HTTP_VERSION = "core.http.refresh.blob.v5";
 
 export const AUTH_ENDPOINTS = CONFIG_AUTH_ENDPOINTS;
 
@@ -39,6 +40,12 @@ const DEFAULT_API_BASE = getApiBase();
 
 const BODYLESS_METHODS = new Set(["GET", "HEAD"]);
 const VALID_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
+
+const BINARY_RESPONSE_TYPES = new Set([
+  "blob",
+  "arraybuffer",
+  "array-buffer",
+]);
 
 const SENSITIVE_KEYS = new Set(
   (Array.isArray(SENSITIVE_QUERY_PARAMS) ? SENSITIVE_QUERY_PARAMS : [])
@@ -117,6 +124,10 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
+function isBlob(value) {
+  return typeof Blob !== "undefined" && value instanceof Blob;
+}
+
 function cleanText(value = "", fallback = "") {
   const output = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
@@ -165,7 +176,7 @@ function redact(value = "") {
       : `${url.pathname}${url.search}${url.hash}`;
   } catch {
     text = text.replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
       "$1***"
     );
   }
@@ -183,9 +194,17 @@ function sanitizeData(value, depth = 0) {
 
   const type = typeof value;
 
-  if (type === "string") return redact(value);
+  if (type === "string") return redact(value).slice(0, 1200);
   if (type === "number" || type === "boolean") return value;
   if (type === "function" || type === "symbol" || type === "bigint") return undefined;
+
+  if (isBlob(value)) {
+    return {
+      type: value.type || "",
+      size: value.size || 0,
+      blob: true,
+    };
+  }
 
   if (Array.isArray(value)) {
     return value
@@ -235,15 +254,23 @@ function endpointToPath(endpoint = "/") {
   if (!raw) return "";
 
   try {
-    return endpointPathFromUrlLike(raw) || "";
+    const parsed = new URL(raw, getApiOrigin());
+    const normalizedPath = normalizeEndpointPath(parsed.pathname) || parsed.pathname || "/";
+    return `${normalizedPath}${parsed.search}`;
   } catch {
-    return "";
+    try {
+      return endpointPathFromUrlLike(raw) || "";
+    } catch {
+      return "";
+    }
   }
 }
 
 function endpointPathOnly(endpoint = "/") {
   try {
-    return normalizeEndpointPath(endpointToPath(endpoint)) || "";
+    const pathWithQuery = endpointToPath(endpoint);
+    const pathname = pathWithQuery.split("?")[0].split("#")[0];
+    return normalizeEndpointPath(pathname) || "";
   } catch {
     return "";
   }
@@ -577,6 +604,28 @@ function deleteHeader(headers = {}, name = "") {
   return headers;
 }
 
+function getResponseType(options = {}) {
+  return cleanText(options.responseType, "").toLowerCase();
+}
+
+function isBinaryResponse(options = {}) {
+  return BINARY_RESPONSE_TYPES.has(getResponseType(options));
+}
+
+function buildDefaultAccept(options = {}) {
+  const responseType = getResponseType(options);
+
+  if (responseType === "blob") {
+    return "application/pdf, application/octet-stream, */*";
+  }
+
+  if (responseType === "arraybuffer" || responseType === "array-buffer") {
+    return "application/octet-stream, application/pdf, */*";
+  }
+
+  return "application/json, text/plain, */*";
+}
+
 function isBodyInit(value) {
   if (value === undefined || value === null) return false;
 
@@ -640,7 +689,7 @@ function buildFetchOptions(endpoint = "", options = {}) {
   const headers = headersFrom(options.headers);
 
   if (!hasHeader(headers, "Accept")) {
-    setHeader(headers, "Accept", "application/json, text/plain, */*");
+    setHeader(headers, "Accept", buildDefaultAccept(options));
   }
 
   if (shouldUseAuth(endpoint, options)) {
@@ -714,7 +763,7 @@ async function parseResponse(response, options = {}) {
     return null;
   }
 
-  const responseType = cleanText(options.responseType, "").toLowerCase();
+  const responseType = getResponseType(options);
 
   if (responseType === "blob") return response.blob();
   if (responseType === "arraybuffer" || responseType === "array-buffer") return response.arrayBuffer();
@@ -746,6 +795,28 @@ async function parseResponse(response, options = {}) {
     return await response.blob();
   } catch {
     return response.text();
+  }
+}
+
+async function parseErrorPayload(response) {
+  const contentType = contentTypeOf(response).toLowerCase();
+
+  try {
+    const text = await response.text();
+
+    if (!text) return null;
+
+    if (contentType.includes("application/json") || contentType.includes("+json")) {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text.slice(0, 1200);
+      }
+    }
+
+    return text.slice(0, 1200);
+  } catch {
+    return null;
   }
 }
 
@@ -790,11 +861,11 @@ function extractErrorMessage(payload = null, fallback = "Error HTTP") {
         ""
       ),
       fallback
-    );
+    ).slice(0, 1200);
   }
 
   if (typeof payload === "string") {
-    return cleanText(payload, fallback);
+    return cleanText(payload, fallback).slice(0, 1200);
   }
 
   return fallback;
@@ -935,25 +1006,28 @@ async function fetchParsed(endpoint = "/", options = {}) {
 
   try {
     const response = await ensureFetch()(url, fetchOptions);
-    const data = await parseResponse(response, {
-      ...options,
-      method,
-    });
 
     stats.lastStatus = response.status;
 
     if (!response.ok) {
+      const errorPayload = await parseErrorPayload(response);
+
       throw createHttpError({
-        code: extractErrorCode(data, response),
-        message: extractErrorMessage(data, `HTTP ${response.status}`),
+        code: extractErrorCode(errorPayload, response),
+        message: extractErrorMessage(errorPayload, `HTTP ${response.status}`),
         status: response.status,
         endpoint,
         url,
         method,
-        payload: data,
+        payload: errorPayload,
         response,
       });
     }
+
+    const data = await parseResponse(response, {
+      ...options,
+      method,
+    });
 
     stats.success += 1;
 
@@ -984,6 +1058,7 @@ async function fetchParsed(endpoint = "/", options = {}) {
       status: normalized.status,
       message: redact(normalized.message),
       endpoint: redact(endpoint),
+      binary: isBinaryResponse(options),
     };
 
     throw normalized;
@@ -1235,11 +1310,25 @@ export async function downloadBlob(endpoint = "/", options = {}) {
 
   const data = result.data;
   const filename = safeFileName(
-    options.filename || dispositionFilename(result.response) || "descarga",
+    dispositionFilename(result.response) || options.filename || "descarga",
     "descarga"
   );
 
-  if (options.autoDownload !== false && isBrowser() && data instanceof Blob) {
+  const contentType = contentTypeOf(result.response);
+
+  if (!(data instanceof Blob)) {
+    throw createHttpError({
+      code: "HTTP_BLOB_RESPONSE_INVALID",
+      message: "La respuesta de descarga no es un Blob válido.",
+      endpoint,
+      url: result.url,
+      method: result.method,
+      payload: data,
+      response: result.response,
+    });
+  }
+
+  if (options.autoDownload !== false && isBrowser()) {
     const objectUrl = URL.createObjectURL(data);
     const link = document.createElement("a");
 
@@ -1260,8 +1349,10 @@ export async function downloadBlob(endpoint = "/", options = {}) {
     ok: true,
     blob: data,
     filename,
-    contentType: contentTypeOf(result.response),
-    size: data?.size || null,
+    contentType,
+    size: data.size || null,
+    response: result.response,
+    url: result.url,
   };
 }
 
@@ -1317,6 +1408,8 @@ export function getSnapshot() {
       credentialsInclude: true,
       autoRefresh: true,
       retryAfterRefreshOnce: true,
+      binaryErrorsParsedAsJsonOrText: true,
+      downloadUsesBackendFilename: true,
       noRouter: true,
       noToast: true,
       noStore: true,

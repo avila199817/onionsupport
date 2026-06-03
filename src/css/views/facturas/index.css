@@ -2784,6 +2784,147 @@
   box-shadow: none !important;
 }
 
+/* =========================================================
+   OVERRIDE FINAL · FACTURAS INFINITE END STATUS
+   Objetivo:
+   - Dar estilo correcto a "No hay más facturas."
+   - Mantener sentinel funcional para scroll infinito.
+   - No tocar JS ni template.
+========================================================= */
+
+:where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope]) .facturas-infinite {
+  inline-size: 100% !important;
+  min-inline-size: 0 !important;
+
+  display: grid !important;
+  place-items: center !important;
+
+  gap: 8px !important;
+
+  padding: 16px var(--space-lg, 24px) 20px !important;
+
+  border-top: 1px solid var(--data-table-row-border, rgba(255, 255, 255, .08)) !important;
+
+  background: transparent !important;
+
+  transform: translateZ(0) !important;
+}
+
+:where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope]) .facturas-infinite-sentinel {
+  inline-size: 100% !important;
+  block-size: 1px !important;
+
+  margin: 0 !important;
+  padding: 0 !important;
+
+  overflow: hidden !important;
+
+  background: transparent !important;
+
+  pointer-events: none !important;
+}
+
+:where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope]) .facturas-infinite-status {
+  min-block-size: 38px !important;
+  max-inline-size: 100% !important;
+
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  gap: 8px !important;
+
+  padding-inline: 16px !important;
+
+  border: 1px solid var(--badge-border, rgba(255, 255, 255, .14)) !important;
+  border-radius: var(--radius-pill, 999px) !important;
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong, #ffffff) 5%, transparent),
+      transparent 58%
+    ),
+    var(--badge-bg, rgba(255, 255, 255, .04)) !important;
+
+  color: var(--badge-text, rgba(255, 255, 255, .56)) !important;
+
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong, #ffffff) 6%, transparent),
+    0 9px 20px color-mix(in srgb, #000000 16%, transparent) !important;
+
+  font-size: 11px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: .055em !important;
+  text-align: center !important;
+  text-transform: uppercase !important;
+  white-space: nowrap !important;
+}
+
+:where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope]) .facturas-infinite-status.is-complete {
+  color: var(--text-muted, rgba(255, 255, 255, .56)) !important;
+}
+
+:where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope]) .facturas-infinite-status.is-loading {
+  color: var(--text-soft, rgba(255, 255, 255, .78)) !important;
+}
+
+:where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope]) .facturas-infinite-status .facturas-inline-loading {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  gap: 8px !important;
+}
+
+:where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope]) .facturas-infinite-status .facturas-inline-spinner {
+  inline-size: 14px !important;
+  block-size: 14px !important;
+}
+
+/* LIGHT THEME */
+[data-theme="light"] :where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope]) .facturas-infinite {
+  border-top-color: var(--data-table-row-border, rgba(15, 23, 42, .08)) !important;
+}
+
+[data-theme="light"] :where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope]) .facturas-infinite-status {
+  border-color: var(--badge-border, rgba(15, 23, 42, .11)) !important;
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 76%, transparent),
+      color-mix(in srgb, #ffffff 36%, transparent)
+    ),
+    var(--badge-bg, rgba(255, 255, 255, .68)) !important;
+
+  color: var(--badge-text, rgba(15, 23, 42, .56)) !important;
+
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .78),
+    0 9px 20px rgba(15, 23, 42, .055) !important;
+}
+
+/* RESPONSIVE */
+@media (max-width: 760px) {
+  :where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope]) .facturas-infinite {
+    padding: 14px 16px 18px !important;
+  }
+
+  :where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope]) .facturas-infinite-status {
+    inline-size: 100% !important;
+    white-space: normal !important;
+  }
+}
+
+/* PRINT */
+@media print {
+  :where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope]) .facturas-infinite {
+    display: none !important;
+  }
+}
+
 
 /* =========================================================
    RESPONSIVE

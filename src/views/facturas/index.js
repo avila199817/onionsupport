@@ -13,7 +13,7 @@
    - Evitar renders innecesarios en búsqueda y modal de creación.
    - Crear factura.
    - Abrir detalle.
-   - Ver/descargar PDF.
+   - Ver/descargar PDF resolviendo respuestas JSON/SAS/blob de forma segura.
    - Enviar factura.
    - Buscar cliente para crear factura.
    - Buscar incidencias vinculables para crear factura.
@@ -21,7 +21,7 @@
    - Sin Store.
    - Sin State externo.
    - Sin actions/bindings/model/utils/facturasView legacy.
-   - Sin fetch propio.
+   - Sin fetch propio salvo resolución segura de blob/objectUrl/pdf.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -60,7 +60,7 @@ import {
   FACTURA_MODAL_ACTIONS,
 } from "./facturas.template.modal.js";
 
-export const FACTURAS_INDEX_VERSION = "facturas.index.productive.v5.fast-mount";
+export const FACTURAS_INDEX_VERSION = "facturas.index.productive.v6.pdf-sas-safe";
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
 const DEFAULT_PAGE = 1;
@@ -814,7 +814,7 @@ async function searchTickets(query = "", selectedClientes = []) {
 }
 
 /* =========================================================
-   BODY / FILE / CSV
+   BODY / FILE / CSV / PDF RESOLUTION
 ========================================================= */
 
 function syncBodyModalClass(open = false) {
@@ -841,6 +841,516 @@ function openUrl(url = "") {
   } catch {
     return false;
   }
+}
+
+function isBlob(value = null) {
+  return typeof Blob !== "undefined" && value instanceof Blob;
+}
+
+function isResponse(value = null) {
+  return typeof Response !== "undefined" && value instanceof Response;
+}
+
+function getContentType(value = null) {
+  return cleanText(
+    value?.type ||
+      value?.headers?.get?.("content-type") ||
+      value?.contentType ||
+      value?.mimeType ||
+      value?.mimetype ||
+      "",
+    ""
+  ).toLowerCase();
+}
+
+function isJsonContentType(type = "") {
+  const contentType = cleanText(type, "").toLowerCase();
+
+  return (
+    contentType.includes("application/json") ||
+    contentType.includes("text/json") ||
+    contentType.includes("+json") ||
+    contentType.includes("text/plain")
+  );
+}
+
+function isPdfContentType(type = "") {
+  return cleanText(type, "").toLowerCase().includes("application/pdf");
+}
+
+function isPdfUrl(url = "") {
+  const value = cleanText(url, "");
+
+  if (!value) return false;
+
+  return (
+    /\.pdf(?:[?#]|$)/i.test(value) ||
+    /rsct=application%2Fpdf/i.test(value) ||
+    /rsct=application\/pdf/i.test(value)
+  );
+}
+
+async function blobStartsWithPdf(blob = null) {
+  if (!isBlob(blob)) return false;
+
+  try {
+    const head = await blob.slice(0, 5).text();
+    return head === "%PDF-";
+  } catch {
+    return false;
+  }
+}
+
+async function readJsonBlob(blob = null) {
+  if (!isBlob(blob)) return null;
+
+  try {
+    if (await blobStartsWithPdf(blob)) return null;
+
+    const text = await blob.text();
+    const clean = String(text || "").trim();
+
+    if (!clean || (!clean.startsWith("{") && !clean.startsWith("["))) {
+      return null;
+    }
+
+    return JSON.parse(clean);
+  } catch {
+    return null;
+  }
+}
+
+async function readJsonResponse(response = null) {
+  if (!isResponse(response)) return null;
+
+  try {
+    const type = getContentType(response);
+
+    if (isPdfContentType(type)) return null;
+
+    const clone = response.clone?.() || response;
+
+    if (isJsonContentType(type)) {
+      return await clone.json();
+    }
+
+    const text = await clone.text();
+    const clean = String(text || "").trim();
+
+    if (!clean || (!clean.startsWith("{") && !clean.startsWith("["))) {
+      return null;
+    }
+
+    return JSON.parse(clean);
+  } catch {
+    return null;
+  }
+}
+
+function getFacturaPdfFilename(payload = null, fallback = "factura.pdf") {
+  const data = safeObject(payload, {});
+
+  const filename = cleanText(
+    first(
+      data.filename,
+      data.fileName,
+      data.name,
+      data.originalName,
+
+      data.file?.filename,
+      data.file?.fileName,
+      data.file?.name,
+      data.file?.originalName,
+
+      data.pdf?.filename,
+      data.pdf?.fileName,
+      data.pdf?.name,
+      data.pdf?.originalName,
+
+      data.blob?.filename,
+      data.blob?.fileName,
+      data.blob?.name,
+      data.blob?.originalName,
+
+      data.document?.filename,
+      data.document?.fileName,
+      data.document?.name,
+      data.document?.originalName,
+
+      data.factura?.document?.filename,
+      data.factura?.document?.fileName,
+      data.factura?.document?.name,
+
+      data.factura?.numeroFacturaLegal ? `${data.factura.numeroFacturaLegal}.pdf` : "",
+      data.item?.numeroFacturaLegal ? `${data.item.numeroFacturaLegal}.pdf` : "",
+      data.data?.numeroFacturaLegal ? `${data.data.numeroFacturaLegal}.pdf` : "",
+      data.invoice?.numeroFacturaLegal ? `${data.invoice.numeroFacturaLegal}.pdf` : "",
+
+      data.numeroFacturaLegal ? `${data.numeroFacturaLegal}.pdf` : "",
+      data.invoiceNumber ? `${data.invoiceNumber}.pdf` : ""
+    ),
+    fallback
+  );
+
+  return filename.toLowerCase().endsWith(".pdf")
+    ? filename
+    : `${filename}.pdf`;
+}
+
+function pickFacturaPdfUrl(payload = null, mode = "view") {
+  const data = safeObject(payload, {});
+  const download = mode === "download";
+
+  return cleanText(
+    first(
+      download ? data.downloadUrl : data.viewUrl,
+      data.signedUrl,
+      data.sasUrl,
+      data.url,
+
+      download ? data.file?.downloadUrl : data.file?.viewUrl,
+      data.file?.signedUrl,
+      data.file?.sasUrl,
+      data.file?.url,
+
+      download ? data.pdf?.downloadUrl : data.pdf?.viewUrl,
+      data.pdf?.signedUrl,
+      data.pdf?.sasUrl,
+      data.pdf?.url,
+
+      download ? data.blob?.downloadUrl : data.blob?.viewUrl,
+      data.blob?.signedUrl,
+      data.blob?.sasUrl,
+      data.blob?.url,
+
+      download ? data.document?.downloadUrl : data.document?.viewUrl,
+      data.document?.signedUrl,
+      data.document?.sasUrl,
+      data.document?.pdfUrl,
+      data.document?.blobUrl,
+      data.document?.url,
+
+      download ? data.factura?.downloadUrl : data.factura?.viewUrl,
+      data.factura?.signedUrl,
+      data.factura?.sasUrl,
+      data.factura?.pdfUrl,
+      data.factura?.blobUrl,
+
+      download ? data.factura?.document?.downloadUrl : data.factura?.document?.viewUrl,
+      data.factura?.document?.signedUrl,
+      data.factura?.document?.sasUrl,
+      data.factura?.document?.pdfUrl,
+      data.factura?.document?.blobUrl,
+      data.factura?.document?.url,
+
+      download ? data.item?.downloadUrl : data.item?.viewUrl,
+      data.item?.signedUrl,
+      data.item?.sasUrl,
+      data.item?.pdfUrl,
+      data.item?.blobUrl,
+
+      download ? data.data?.downloadUrl : data.data?.viewUrl,
+      data.data?.signedUrl,
+      data.data?.sasUrl,
+      data.data?.pdfUrl,
+      data.data?.blobUrl,
+
+      download ? data.invoice?.downloadUrl : data.invoice?.viewUrl,
+      data.invoice?.signedUrl,
+      data.invoice?.sasUrl,
+      data.invoice?.pdfUrl,
+      data.invoice?.blobUrl
+    ),
+    ""
+  );
+}
+
+async function resolveBlobPdfResult(blob = null, {
+  mode = "view",
+  payload = null,
+  objectUrls = null,
+} = {}) {
+  if (!isBlob(blob)) {
+    return {
+      url: "",
+      filename: getFacturaPdfFilename(payload),
+      payload,
+    };
+  }
+
+  const type = getContentType(blob);
+
+  if (isJsonContentType(type)) {
+    const json = await readJsonBlob(blob);
+
+    return {
+      url: pickFacturaPdfUrl(json, mode),
+      filename: getFacturaPdfFilename(json),
+      payload: json,
+    };
+  }
+
+  if (isPdfContentType(type) || await blobStartsWithPdf(blob)) {
+    const objectUrl = URL.createObjectURL(blob);
+    objectUrls?.add?.(objectUrl);
+
+    return {
+      url: objectUrl,
+      filename: getFacturaPdfFilename(payload),
+      payload,
+    };
+  }
+
+  const json = await readJsonBlob(blob);
+
+  if (json) {
+    return {
+      url: pickFacturaPdfUrl(json, mode),
+      filename: getFacturaPdfFilename(json),
+      payload: json,
+    };
+  }
+
+  return {
+    url: "",
+    filename: getFacturaPdfFilename(payload),
+    payload,
+  };
+}
+
+async function resolveFacturaPdfResult(result = null, {
+  mode = "view",
+  objectUrls = null,
+} = {}) {
+  if (typeof result === "string") {
+    return {
+      url: cleanText(result, ""),
+      filename: "factura.pdf",
+      payload: null,
+    };
+  }
+
+  if (isResponse(result)) {
+    const type = getContentType(result);
+
+    if (isPdfContentType(type)) {
+      const blob = await result.blob();
+
+      return resolveBlobPdfResult(blob, {
+        mode,
+        payload: null,
+        objectUrls,
+      });
+    }
+
+    const json = await readJsonResponse(result);
+
+    return {
+      url: pickFacturaPdfUrl(json, mode),
+      filename: getFacturaPdfFilename(json),
+      payload: json,
+    };
+  }
+
+  if (isBlob(result)) {
+    return resolveBlobPdfResult(result, {
+      mode,
+      payload: null,
+      objectUrls,
+    });
+  }
+
+  const payload = safeObject(result, null);
+  const url = pickFacturaPdfUrl(payload, mode);
+
+  if (url) {
+    return {
+      url,
+      filename: getFacturaPdfFilename(payload),
+      payload,
+    };
+  }
+
+  if (isBlob(result?.blob)) {
+    const resolved = await resolveBlobPdfResult(result.blob, {
+      mode,
+      payload,
+      objectUrls,
+    });
+
+    if (resolved.url || resolved.payload) {
+      return resolved.payload
+        ? {
+            ...resolved,
+            url: pickFacturaPdfUrl(resolved.payload, mode),
+            filename: getFacturaPdfFilename(resolved.payload),
+          }
+        : resolved;
+    }
+  }
+
+  const objectUrl = cleanText(result?.objectUrl, "");
+
+  if (objectUrl) {
+    if (objectUrl.startsWith("blob:")) {
+      try {
+        const response = await fetch(objectUrl);
+        const blob = await response.blob();
+
+        const resolved = await resolveBlobPdfResult(blob, {
+          mode,
+          payload,
+          objectUrls,
+        });
+
+        if (resolved.url || resolved.payload) {
+          return resolved.payload
+            ? {
+                ...resolved,
+                url: pickFacturaPdfUrl(resolved.payload, mode),
+                filename: getFacturaPdfFilename(resolved.payload),
+              }
+            : resolved;
+        }
+      } catch {
+        // No abrir blob local a ciegas si puede ser JSON.
+      }
+    }
+
+    if (isPdfUrl(objectUrl)) {
+      return {
+        url: objectUrl,
+        filename: getFacturaPdfFilename(payload),
+        payload,
+      };
+    }
+  }
+
+  return {
+    url: "",
+    filename: getFacturaPdfFilename(payload),
+    payload,
+  };
+}
+
+function openPendingWindow(title = "Abriendo factura…") {
+  if (!isBrowser()) return null;
+
+  try {
+    const popup = window.open("about:blank", "_blank");
+
+    if (!popup) return null;
+
+    try {
+      popup.opener = null;
+    } catch {
+      // noop
+    }
+
+    try {
+      popup.document.title = title;
+      popup.document.body.style.margin = "0";
+      popup.document.body.style.background = "#111";
+      popup.document.body.style.color = "#fff";
+      popup.document.body.style.fontFamily = "system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+      popup.document.body.style.display = "grid";
+      popup.document.body.style.placeItems = "center";
+      popup.document.body.style.minHeight = "100vh";
+      popup.document.body.innerHTML = `<div style="font-size:14px;font-weight:700;opacity:.86">${title}</div>`;
+    } catch {
+      // noop
+    }
+
+    return popup;
+  } catch {
+    return null;
+  }
+}
+
+function navigateWindowOrOpen(url = "", popup = null) {
+  const target = cleanText(url, "");
+
+  if (!target) return false;
+
+  try {
+    if (popup && !popup.closed) {
+      popup.location.replace(target);
+      return true;
+    }
+  } catch {
+    // noop
+  }
+
+  return openUrl(target);
+}
+
+function closePendingWindow(popup = null) {
+  try {
+    if (popup && !popup.closed) {
+      popup.close();
+      return true;
+    }
+  } catch {
+    // noop
+  }
+
+  return false;
+}
+
+function triggerDownloadLink(url = "", filename = "factura.pdf") {
+  if (!isBrowser()) return false;
+
+  const target = cleanText(url, "");
+  if (!target) return false;
+
+  try {
+    const link = document.createElement("a");
+
+    link.href = target;
+    link.download = getFacturaPdfFilename({ filename }, "factura.pdf");
+    link.rel = "noopener";
+    link.target = "_blank";
+    link.style.display = "none";
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    return true;
+  } catch {
+    return openUrl(target);
+  }
+}
+
+async function downloadRemotePdf(url = "", filename = "factura.pdf", objectUrls = null) {
+  if (!isBrowser()) return false;
+
+  const target = cleanText(url, "");
+  if (!target) return false;
+
+  const safeFilename = getFacturaPdfFilename({ filename }, "factura.pdf");
+
+  try {
+    const response = await fetch(target, {
+      method: "GET",
+      credentials: "omit",
+    });
+
+    if (response.ok) {
+      const blob = await response.blob();
+
+      if (isPdfContentType(getContentType(blob)) || await blobStartsWithPdf(blob)) {
+        const objectUrl = URL.createObjectURL(blob);
+        objectUrls?.add?.(objectUrl);
+
+        return triggerDownloadLink(objectUrl, safeFilename);
+      }
+    }
+  } catch {
+    // Puede fallar por CORS de Azure. Fallback: navegación al SAS.
+  }
+
+  return triggerDownloadLink(target, safeFilename);
 }
 
 function downloadTextFile(filename = "facturas.csv", content = "") {
@@ -959,6 +1469,7 @@ function facturaIdFromNode(node = null) {
 
 function createFacturasController(host = null, context = {}) {
   let destroyed = false;
+  let mounted = false;
 
   const cache = hydrateFacturasFromCache();
 
@@ -2421,6 +2932,8 @@ function createFacturasController(host = null, context = {}) {
     const id = cleanText(facturaId, "");
     if (!id) return false;
 
+    const popup = openPendingWindow("Abriendo factura…");
+
     viewingFacturaId = id;
     detailModal.viewingFacturaId = id;
 
@@ -2432,14 +2945,17 @@ function createFacturasController(host = null, context = {}) {
       const result = await viewFacturaPdfRequest(id, {
         factura,
       });
-      let url = cleanText(first(result?.url, result?.viewUrl, result?.objectUrl), "");
 
-      if (!url && result?.blob && isBrowser()) {
-        url = URL.createObjectURL(result.blob);
-        objectUrls.add(url);
+      const resolved = await resolveFacturaPdfResult(result, {
+        mode: "view",
+        objectUrls,
+      });
+
+      if (!resolved.url) {
+        throw new Error("FACTURA_PDF_URL_NOT_FOUND");
       }
 
-      if (url) openUrl(url);
+      navigateWindowOrOpen(resolved.url, popup);
 
       viewingFacturaId = "";
       detailModal.viewingFacturaId = "";
@@ -2447,6 +2963,8 @@ function createFacturasController(host = null, context = {}) {
 
       return true;
     } catch (pdfError) {
+      closePendingWindow(popup);
+
       viewingFacturaId = "";
       detailModal.viewingFacturaId = "";
       error = safeError(pdfError, "No se pudo abrir el PDF.");
@@ -2468,10 +2986,36 @@ function createFacturasController(host = null, context = {}) {
     try {
       const factura = getFacturaForPdf(id);
 
-      await downloadFacturaPdfRequest(id, {
-        autoDownload: true,
+      let result = await downloadFacturaPdfRequest(id, {
+        autoDownload: false,
         factura,
       });
+
+      let resolved = await resolveFacturaPdfResult(result, {
+        mode: "download",
+        objectUrls,
+      });
+
+      if (!resolved.url) {
+        result = await viewFacturaPdfRequest(id, {
+          factura,
+        });
+
+        resolved = await resolveFacturaPdfResult(result, {
+          mode: "download",
+          objectUrls,
+        });
+      }
+
+      if (!resolved.url) {
+        throw new Error("FACTURA_PDF_DOWNLOAD_URL_NOT_FOUND");
+      }
+
+      await downloadRemotePdf(
+        resolved.url,
+        resolved.filename || "factura.pdf",
+        objectUrls
+      );
 
       downloadingFacturaId = "";
       detailModal.downloadingFacturaId = "";
@@ -2790,7 +3334,9 @@ function createFacturasController(host = null, context = {}) {
 
     mount() {
       if (destroyed || !host) return this;
+      if (mounted) return this;
 
+      mounted = true;
       bind();
 
       pageSize = clamp(number(context.pageSize || context.limit || DEFAULT_BATCH_SIZE, DEFAULT_BATCH_SIZE), MIN_BATCH_SIZE, MAX_BATCH_SIZE);
@@ -2823,6 +3369,10 @@ function createFacturasController(host = null, context = {}) {
 
     destroy() {
       destroyed = true;
+      mounted = false;
+      listSeq += 1;
+      clientSearchSeq += 1;
+      ticketSearchSeq += 1;
 
       clearTimers();
       cancelScheduledRender();
@@ -2858,6 +3408,7 @@ function createFacturasController(host = null, context = {}) {
       return {
         version: FACTURAS_VIEW_VERSION,
 
+        mounted,
         destroyed,
         loading,
         refreshing,

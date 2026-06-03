@@ -7,6 +7,8 @@
    - Montar template principal.
    - Cargar/listar facturas desde facturas.api.js.
    - Scroll infinito real: page + limit + hasMore + nextPage.
+   - Respetar orden/paginación del backend y API de Facturas.
+   - Evitar renders innecesarios en búsqueda y modal de creación.
    - Crear factura.
    - Abrir detalle.
    - Ver/descargar PDF.
@@ -56,7 +58,7 @@ import {
   FACTURA_MODAL_ACTIONS,
 } from "./facturas.template.modal.js";
 
-export const FACTURAS_INDEX_VERSION = "facturas.index.infinite.v2";
+export const FACTURAS_INDEX_VERSION = "facturas.index.productive.v4";
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
 const DEFAULT_PAGE = 1;
@@ -74,22 +76,22 @@ const INFINITE_ROOT_MARGIN = "900px 0px 900px 0px";
 const LOAD_MORE_ACTION = FACTURAS_ACTIONS.LOAD_MORE || "load-more";
 
 const CLIENT_SEARCH_ENDPOINTS = Object.freeze([
-  "/api/search/clientes",
-  "/api/clientes/search",
-  "/api/search/users",
-  "/api/users/search",
-  "/api/usuarios/search",
   "/api/clientes",
   "/api/users",
+  "/api/clientes/search",
+  "/api/users/search",
+  "/api/usuarios/search",
+  "/api/search/clientes",
+  "/api/search/users",
 ]);
 
 const TICKET_SEARCH_ENDPOINTS = Object.freeze([
-  "/api/search/tickets",
-  "/api/search/incidencias",
-  "/api/tickets/search",
-  "/api/incidencias/search",
   "/api/tickets",
   "/api/incidencias",
+  "/api/tickets/search",
+  "/api/incidencias/search",
+  "/api/search/tickets",
+  "/api/search/incidencias",
 ]);
 
 /* =========================================================
@@ -188,10 +190,10 @@ function normalizeRole(value = "") {
     return "";
   }
 
-  const role = cleanText(value, "").toLowerCase();
+  const role = normalizeKey(value);
 
-  if (role === "admin") return "admin";
-  if (role === "user") return "user";
+  if (["admin", "administrator", "superadmin", "super_admin", "root", "owner"].includes(role)) return "admin";
+  if (["user", "usuario", "client", "cliente", "customer"].includes(role)) return "user";
 
   return "";
 }
@@ -311,73 +313,58 @@ function getFacturaId(item = {}) {
   );
 }
 
-function getFacturaTime(item = {}) {
-  const value = first(
-    item.issuedAt,
-    item.fechaFactura,
-    item.fechaEmision,
-    item.updatedAt,
-    item.createdAt,
-    item.sentAt,
-    item.fechaEnvio,
-    item.meta?.timestampMs,
-    0
-  );
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value > 9999999999 ? value : value * 1000;
-  }
-
-  const parsed = Date.parse(cleanText(value, ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function sortFacturasByDateDesc(rows = []) {
-  return [...safeArray(rows)].sort((a, b) => {
-    const diff = getFacturaTime(b) - getFacturaTime(a);
-
-    if (diff) return diff;
-
-    return cleanText(getFacturaId(b), "").localeCompare(
-      cleanText(getFacturaId(a), ""),
-      "es",
-      {
-        numeric: true,
-        sensitivity: "base",
-      }
-    );
-  });
-}
-
-function mergeFacturas(currentItems = [], nextItems = []) {
+function mergeFacturas(currentItems = [], nextItems = [], { append = true } = {}) {
   const map = new Map();
 
-  for (const item of safeArray(currentItems)) {
-    const id = getFacturaId(item);
-    if (!id) continue;
-    map.set(id, item);
+  const push = (item = {}) => {
+    const factura = safeObject(item, null);
+    if (!factura) return;
+
+    const id = getFacturaId(factura);
+    if (!id) return;
+
+    if (map.has(id)) {
+      map.set(id, {
+        ...map.get(id),
+        ...factura,
+      });
+      return;
+    }
+
+    map.set(id, factura);
+  };
+
+  if (append) {
+    safeArray(currentItems).forEach(push);
   }
 
-  for (const item of safeArray(nextItems)) {
-    const id = getFacturaId(item);
-    if (!id) continue;
-    map.set(id, item);
-  }
+  safeArray(nextItems).forEach(push);
 
-  return sortFacturasByDateDesc([...map.values()]);
+  return [...map.values()];
 }
 
-function upsertFactura(items = [], factura = null) {
+function upsertFactura(items = [], factura = null, sortMode = "date_desc") {
   const next = safeObject(factura, null);
   if (!next) return safeArray(items);
 
   const id = getFacturaId(next);
   if (!id) return safeArray(items);
 
-  return mergeFacturas(
-    safeArray(items).filter((item) => getFacturaId(item) !== id),
-    [next]
-  );
+  const current = safeArray(items);
+  const index = current.findIndex((item) => getFacturaId(item) === id);
+
+  if (index >= 0) {
+    const copy = [...current];
+    copy[index] = {
+      ...copy[index],
+      ...next,
+    };
+    return copy;
+  }
+
+  return normalizeKey(sortMode).endsWith("_asc")
+    ? [...current, next]
+    : [next, ...current];
 }
 
 function getFacturaLabel(item = {}) {
@@ -771,7 +758,6 @@ async function searchTickets(query = "", selectedClientes = []) {
   if (!selectedClientes.length) return [];
 
   let lastError = null;
-  let collected = [];
 
   for (const endpoint of TICKET_SEARCH_ENDPOINTS) {
     try {
@@ -781,7 +767,7 @@ async function searchTickets(query = "", selectedClientes = []) {
           ...(q ? { q, search: q } : {}),
 
           limit: TICKET_LIMIT,
-          includeTotal: true,
+          includeTotal: false,
           includeClosed: true,
           includeAll: true,
           onlyMine: false,
@@ -795,20 +781,15 @@ async function searchTickets(query = "", selectedClientes = []) {
         "views.facturas.ticket-search"
       );
 
-      const rows = unwrapList(response);
+      const items = dedupeTickets(unwrapList(response), selectedClientes);
 
-      if (rows.length) {
-        collected = collected.concat(rows);
-      }
+      if (items.length) return items;
     } catch (error) {
       lastError = error;
     }
   }
 
-  const normalized = dedupeTickets(collected, selectedClientes);
-
-  if (normalized.length) return normalized;
-  if (lastError && !collected.length) throw lastError;
+  if (lastError) throw lastError;
 
   return [];
 }
@@ -1083,35 +1064,32 @@ function createFacturasController(host = null, context = {}) {
 
   function getSortParts() {
     const normalized = normalizeKey(sort || "date_desc");
-
-    if (normalized.endsWith("_asc")) {
-      return {
-        sortBy: "date",
-        sortDir: "asc",
-      };
-    }
+    const sortMode = normalized.endsWith("_asc") ? "date_asc" : "date_desc";
+    const direction = sortMode.endsWith("_asc") ? "asc" : "desc";
 
     return {
-      sortBy: "date",
-      sortDir: "desc",
+      sortMode,
+      sort: sortMode,
+      sortBy: sortMode,
+      direction,
+      sortDir: direction,
     };
   }
 
   function getListFilters() {
-    const filters = {
-      includeStats: false,
-      includeStatsAll: false,
-    };
+    if (filter === "pending") {
+      return { estadoPago: "pending" };
+    }
 
     if (filter === "paid") {
-      filters.estadoPago = "paid";
+      return { estadoPago: "paid" };
     }
 
     if (filter === "overdue") {
-      filters.estadoPago = "overdue";
+      return { estadoPago: "overdue" };
     }
 
-    return filters;
+    return {};
   }
 
   function updatePagingFromResponse(response = {}, requestedPage = DEFAULT_PAGE) {
@@ -1363,11 +1341,17 @@ function createFacturasController(host = null, context = {}) {
         limit: pageSize,
         search,
         q: search,
+        sortMode: sortParts.sortMode,
+        sort: sortParts.sort,
         sortBy: sortParts.sortBy,
+        direction: sortParts.direction,
         sortDir: sortParts.sortDir,
-        direction: sortParts.sortDir,
+        includeStats: false,
+        includeStatsAll: false,
         filters: getListFilters(),
-        returnStaleOnError: true,
+        cacheAppend: append,
+        returnStaleOnError: !append,
+        dedupe: true,
         force: force === true,
       });
 
@@ -1383,7 +1367,7 @@ function createFacturasController(host = null, context = {}) {
         )
       );
 
-      items = append ? mergeFacturas(items, rows) : mergeFacturas([], rows);
+      items = append ? mergeFacturas(items, rows, { append: true }) : mergeFacturas([], rows, { append: false });
       updatePagingFromResponse(response || {}, requestedPage);
 
       error = response?.stale ? cleanText(response.error?.message, "") : "";
@@ -1493,7 +1477,9 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function setFilter(value = "all") {
-    filter = normalizeKey(value || "all") || "all";
+    const next = normalizeKey(value || "all") || "all";
+    filter = ["all", "pending", "paid", "overdue"].includes(next) ? next : "all";
+
     resetListState({ keepItems: true });
     render();
 
@@ -1537,7 +1523,9 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function setSort(value = "date_desc") {
-    sort = cleanText(value, "date_desc");
+    const next = normalizeKey(value || "date_desc");
+    sort = next.endsWith("_asc") ? "date_asc" : "date_desc";
+
     resetListState({ keepItems: true });
     render();
 
@@ -1714,12 +1702,15 @@ function createFacturasController(host = null, context = {}) {
 
     if (!name || name === "clienteSearch" || name === "ticketSearch") return false;
 
+    const hadError = Boolean(createModal.errors[name]);
+    const hadFeedback = Boolean(createModal.serverError || createModal.successMessage || createModal.createdFacturaId);
+
     createModal.form = {
       ...createModal.form,
       [name]: field.type === "checkbox" ? Boolean(field.checked) : field.value,
     };
 
-    if (createModal.errors[name]) {
+    if (hadError) {
       const next = { ...createModal.errors };
       delete next[name];
       createModal.errors = next;
@@ -1729,9 +1720,28 @@ function createFacturasController(host = null, context = {}) {
     createModal.successMessage = "";
     createModal.createdFacturaId = "";
 
-    render({
-      focusSelector: `[data-field='${name}']`,
-    });
+    const liveFields = new Set([
+      "cantidad",
+      "precioUnitario",
+      "precio",
+      "unitPrice",
+      "ivaRate",
+      "ivaPorcentaje",
+      "porcentajeIVA",
+      "irpfRate",
+      "irpfPorcentaje",
+      "porcentajeIRPF",
+      "aplicaIVA",
+      "aplicaIRPF",
+      "sendEmail",
+      "estadoPago",
+    ]);
+
+    if (hadError || hadFeedback || liveFields.has(name)) {
+      render({
+        focusSelector: `[data-field='${name}']`,
+      });
+    }
 
     return true;
   }
@@ -2237,7 +2247,7 @@ function createFacturasController(host = null, context = {}) {
       const created = await createFactura(buildFacturaPayload());
 
       if (created) {
-        items = upsertFactura(items, created);
+        items = upsertFactura(items, created, sort);
         total = Math.max(total + 1, items.length);
       }
 
@@ -2298,7 +2308,7 @@ function createFacturasController(host = null, context = {}) {
 
       if (detail) {
         detailModal.factura = detail;
-        items = upsertFactura(items, detail);
+        items = upsertFactura(items, detail, sort);
       }
 
       detailModal.detailLoading = false;
@@ -2398,7 +2408,7 @@ function createFacturasController(host = null, context = {}) {
       const result = await sendFactura(id);
 
       if (isObject(result) && (result.id || result.facturaId || result.invoiceId)) {
-        items = upsertFactura(items, result);
+        items = upsertFactura(items, result, sort);
 
         if (detailModal.factura && getFacturaId(detailModal.factura) === id) {
           detailModal.factura = result;
@@ -2689,6 +2699,18 @@ function createFacturasController(host = null, context = {}) {
       bind();
 
       pageSize = clamp(number(context.pageSize || context.limit || DEFAULT_BATCH_SIZE, DEFAULT_BATCH_SIZE), MIN_BATCH_SIZE, MAX_BATCH_SIZE);
+
+      if (items.length) {
+        loading = false;
+        render();
+
+        await load({
+          page: DEFAULT_PAGE,
+          silent: true,
+        });
+
+        return this;
+      }
 
       loading = true;
       renderLoading();

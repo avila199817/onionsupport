@@ -265,6 +265,44 @@ function safeFilename(value = "", fallback = "factura") {
   return clean || fallback;
 }
 
+export function resolveFacturaPdfFilename(id = "", options = {}) {
+  const factura = safeObject(
+    first(
+      options.factura,
+      options.invoice,
+      options.item,
+      options.data,
+      {}
+    )
+  );
+
+  const legalNumber = cleanText(
+    first(
+      options.numeroFacturaLegal,
+      options.legalInvoiceNumber,
+      options.numeroFactura,
+      options.invoiceNumber,
+      options.number,
+
+      factura.numeroFacturaLegal,
+      factura.legalInvoiceNumber,
+      factura.numeroFactura,
+      factura.invoiceNumber,
+      factura.number,
+      factura.numero,
+
+      ""
+    ),
+    ""
+  );
+
+  if (legalNumber) {
+    return `${safeFilename(legalNumber, "factura")}.pdf`;
+  }
+
+  return `${safeFilename(id, "factura")}.pdf`;
+}
+
 function encodeSegment(value = "") {
   const clean = cleanText(value, "");
 
@@ -2012,12 +2050,12 @@ export async function viewFacturaPdfRequest(id = "", options = {}) {
 
   const response = await blobRequest(endpoint, {
     timeout: options.timeout || FACTURAS_PDF_TIMEOUT,
-    filename: options.filename || `${safeFilename(facturaId, "factura")}.pdf`,
+    filename: options.filename || resolveFacturaPdfFilename(facturaId, options),
     source: "views.facturas.pdf.view",
   });
 
   return normalizeFacturaPdfResponse(response, {
-    filename: options.filename || `${safeFilename(facturaId, "factura")}.pdf`,
+    filename: options.filename || resolveFacturaPdfFilename(facturaId, options),
   });
 }
 
@@ -2028,7 +2066,7 @@ export async function downloadFacturaPdfRequest(id = "", options = {}) {
   return downloadBlobRequest(endpoint, {
     timeout: options.timeout || FACTURAS_PDF_TIMEOUT,
     autoDownload: options.autoDownload !== false,
-    filename: options.filename || `${safeFilename(facturaId, "factura")}.pdf`,
+    filename: options.filename || resolveFacturaPdfFilename(facturaId, options),
     source: "views.facturas.pdf.download",
   });
 }
@@ -2340,6 +2378,7 @@ export const FacturasApi = Object.freeze({
   normalizeFactura,
   normalizeIncidenciaForFactura,
   normalizeFacturaPayload,
+  resolveFacturaPdfFilename,
 
   normalizeFacturasListResponse,
   normalizeFacturaDetailResponse,

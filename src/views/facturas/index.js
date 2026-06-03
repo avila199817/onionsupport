@@ -2330,6 +2330,20 @@ function createFacturasController(host = null, context = {}) {
     }
   }
 
+  function getFacturaForPdf(facturaId = "") {
+    const id = cleanText(facturaId, "");
+
+    if (!id) return null;
+
+    const detail = safeObject(detailModal.factura, null);
+
+    if (detail && getFacturaId(detail) === id) {
+      return detail;
+    }
+
+    return items.find((item) => getFacturaId(item) === id) || null;
+  }
+
   async function viewPdf(facturaId = "") {
     const id = cleanText(facturaId, "");
     if (!id) return false;
@@ -2340,7 +2354,11 @@ function createFacturasController(host = null, context = {}) {
     render();
 
     try {
-      const result = await viewFacturaPdfRequest(id);
+      const factura = getFacturaForPdf(id);
+
+      const result = await viewFacturaPdfRequest(id, {
+        factura,
+      });
       let url = cleanText(first(result?.url, result?.viewUrl, result?.objectUrl), "");
 
       if (!url && result?.blob && isBrowser()) {
@@ -2375,9 +2393,11 @@ function createFacturasController(host = null, context = {}) {
     render();
 
     try {
+      const factura = getFacturaForPdf(id);
+
       await downloadFacturaPdfRequest(id, {
         autoDownload: true,
-        filename: `${id}.pdf`,
+        factura,
       });
 
       downloadingFacturaId = "";

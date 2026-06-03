@@ -10,7 +10,7 @@
    - Mantener columnas 1:1 con CSS.
    - Tabla sin columna Acciones: la fila abre el detalle.
    - Tabla marcada para escala visual 110%.
-   - Botón de orden mayor/menor preparado para el controlador.
+   - Botón de orden de fecha preparado para el controlador.
    - Sin Auth.
    - Sin Router.
    - Sin HTTP.
@@ -22,7 +22,7 @@
    - Sin Toast.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.productive.v8.sort-avatar";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.productive.v9.fecha-sort";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -920,7 +920,7 @@ function normalizeSortOrder(value = "") {
 }
 
 function getSortLabel(sortOrder = DEFAULT_SORT_ORDER) {
-  return normalizeSortOrder(sortOrder) === "asc" ? "Menor a mayor" : "Mayor a menor";
+  return normalizeSortOrder(sortOrder) === "asc" ? "Fecha ↑" : "Fecha ↓";
 }
 
 function getNextSortOrder(sortOrder = DEFAULT_SORT_ORDER) {

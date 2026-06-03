@@ -24,7 +24,7 @@
 ========================================================= */
 
 export const FACTURAS_CREATE_TEMPLATE_VERSION =
-  "facturas.template.create.v1";
+  "facturas.template.create.v2";
 
 export const FACTURA_CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -125,6 +125,14 @@ function number(value = 0, fallback = 0) {
     return Number.isFinite(value) ? value : fallback;
   }
 
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+
+  if (typeof value === "object") {
+    return fallback;
+  }
+
   if (typeof value === "string") {
     let clean = value
       .trim()
@@ -138,11 +146,8 @@ function number(value = 0, fallback = 0) {
     const hasDot = clean.includes(".");
 
     if (hasComma && hasDot) {
-      const lastComma = clean.lastIndexOf(",");
-      const lastDot = clean.lastIndexOf(".");
-
       clean =
-        lastComma > lastDot
+        clean.lastIndexOf(",") > clean.lastIndexOf(".")
           ? clean.replace(/\./g, "").replace(/,/g, ".")
           : clean.replace(/,/g, "");
     } else if (hasComma) {
@@ -296,11 +301,7 @@ function icon(name = "") {
   const icons = {
     close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
     search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
-    user: `<svg ${common}><path d="M12 11.25a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4.75 20.75a7.25 7.25 0 0 1 14.5 0"/></svg>`,
     ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
-    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-    check: `<svg ${common}><path d="m20 6-11 11-5-5"/></svg>`,
-    refresh: `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
   };
 
   return icons[name] || "";
@@ -314,7 +315,14 @@ function normalizeClient(item = {}) {
   const raw = safeObject(item);
 
   const id = cleanText(
-    first(raw.clienteId, raw.clientId, raw.customerId, raw.id, raw.userId, raw.username),
+    first(
+      raw.clienteId,
+      raw.clientId,
+      raw.customerId,
+      raw.id,
+      raw.userId,
+      raw.username
+    ),
     ""
   );
 
@@ -333,7 +341,14 @@ function normalizeClient(item = {}) {
   );
 
   const email = cleanText(
-    first(raw.email, raw.mail, raw.emailCliente, raw.clienteEmail, raw.clientEmail, raw.emailLower),
+    first(
+      raw.email,
+      raw.mail,
+      raw.emailCliente,
+      raw.clienteEmail,
+      raw.clientEmail,
+      raw.emailLower
+    ),
     ""
   ).toLowerCase();
 
@@ -480,20 +495,16 @@ function getInvoiceBreakdown(form = {}) {
   const precioUnitario = number(current.precioUnitario, 0);
 
   const base = round2(cantidad * precioUnitario);
-
-  const ivaRate = DEFAULT_IVA_RATE;
-  const irpfRate = DEFAULT_IRPF_RATE;
-
-  const ivaTotal = round2(base * (ivaRate / 100));
-  const irpfTotal = round2(-(base * (irpfRate / 100)));
+  const ivaTotal = round2(base * (DEFAULT_IVA_RATE / 100));
+  const irpfTotal = round2(-(base * (DEFAULT_IRPF_RATE / 100)));
   const totalFactura = round2(base + ivaTotal + irpfTotal);
 
   return {
     cantidad,
     precioUnitario,
     base,
-    ivaRate,
-    irpfRate,
+    ivaRate: DEFAULT_IVA_RATE,
+    irpfRate: DEFAULT_IRPF_RATE,
     ivaTotal,
     irpfTotal,
     totalFactura,
@@ -531,6 +542,16 @@ function buildVm(input = {}) {
     .map(normalizeTicket)
     .filter((item) => item.id);
 
+  const clientQuery = cleanText(
+    first(clientSearch.query, data.clientSearchQuery, data.clienteSearchQuery, ""),
+    ""
+  );
+
+  const ticketQuery = cleanText(
+    first(ticketSearch.query, data.ticketSearchQuery, data.incidenciaSearchQuery, ""),
+    ""
+  );
+
   return {
     open: data.open === true,
     canCreate: data.canCreate !== false,
@@ -549,28 +570,28 @@ function buildVm(input = {}) {
     selectedTickets,
 
     clientSearch: {
-      query: cleanText(clientSearch.query || data.clientSearchQuery || data.clienteSearchQuery, ""),
+      query: clientQuery,
       loading: clientSearch.loading === true,
       error: cleanText(clientSearch.error, ""),
       results: clientResults,
       empty:
         clientSearch.empty === true ||
         (
-          cleanText(clientSearch.query || "", "").length >= 2 &&
+          clientQuery.length >= 2 &&
           clientSearch.loading !== true &&
           !clientResults.length
         ),
     },
 
     ticketSearch: {
-      query: cleanText(ticketSearch.query || data.ticketSearchQuery || data.incidenciaSearchQuery, ""),
+      query: ticketQuery,
       loading: ticketSearch.loading === true,
       error: cleanText(ticketSearch.error, ""),
       results: ticketResults,
       empty:
         ticketSearch.empty === true ||
         (
-          cleanText(ticketSearch.query || "", "").length >= 2 &&
+          ticketQuery.length >= 2 &&
           ticketSearch.loading !== true &&
           !ticketResults.length
         ),
@@ -860,7 +881,7 @@ function renderSelectedClientes(vm = {}) {
     return `
       <div class="fac-create-empty-pro">
         <strong>Sin clientes seleccionados</strong>
-        <span>Busca y añade uno o varios clientes destino para esta factura.</span>
+        <span>Busca y añade el cliente destino para esta factura.</span>
       </div>
     `;
   }
@@ -949,7 +970,7 @@ function renderSelectedTickets(vm = {}) {
     return `
       <div class="fac-create-empty-pro is-locked">
         <strong>Selecciona primero cliente</strong>
-        <span>Después se cargarán incidencias compatibles automáticamente.</span>
+        <span>Después se cargarán incidencias compatibles.</span>
       </div>
     `;
   }
@@ -1086,12 +1107,9 @@ function renderTargetBlock(vm = {}) {
     <section class="fac-create-target fac-create-target--pro">
       <div class="fac-create-target-head fac-create-target-head--pro">
         <div class="fac-create-target-title-block">
-          <span>Destino de facturación</span>
+          <span>Destino</span>
           <h3>Clientes e incidencias</h3>
-          <p>
-            Puedes facturar contra un cliente principal, añadir clientes destino extra
-            y vincular una o varias incidencias reales.
-          </p>
+          <p>Vincula la factura al cliente y a sus incidencias reales.</p>
         </div>
 
         <div class="fac-create-target-metrics">
@@ -1111,7 +1129,7 @@ function renderTargetBlock(vm = {}) {
           <div class="fac-create-pro-card-head">
             <div>
               <span>Clientes destino</span>
-              <strong>Selecciona uno o varios</strong>
+              <strong>Selecciona cliente</strong>
             </div>
 
             <button
@@ -1121,7 +1139,7 @@ function renderTargetBlock(vm = {}) {
               data-action="${FACTURA_CREATE_ACTIONS.CLIENT_CLEAR}"
               ${disabledAttrs(vm.submitting || !clientCount, vm.submitting)}
             >
-              Limpiar clientes
+              Limpiar
             </button>
           </div>
 
@@ -1145,7 +1163,7 @@ function renderTargetBlock(vm = {}) {
                 name="clienteSearch"
                 type="search"
                 value="${attr(vm.clientSearch.query)}"
-                placeholder="Buscar por nombre, email, empresa o usuario..."
+                placeholder="Nombre, email, empresa o usuario..."
                 autocomplete="off"
                 spellcheck="false"
                 ${disabledAttrs(vm.submitting, vm.submitting)}
@@ -1162,7 +1180,7 @@ function renderTargetBlock(vm = {}) {
           <div class="fac-create-pro-card-head">
             <div>
               <span>Incidencias vinculadas</span>
-              <strong>Una o varias referencias</strong>
+              <strong>Selecciona referencias</strong>
             </div>
 
             <button
@@ -1196,7 +1214,7 @@ function renderTargetBlock(vm = {}) {
                 name="ticketSearch"
                 type="search"
                 value="${attr(vm.ticketSearch.query)}"
-                placeholder="Filtrar por código, asunto, estado..."
+                placeholder="Código, asunto o estado..."
                 autocomplete="off"
                 spellcheck="false"
                 ${disabledAttrs(vm.submitting || vm.ticketSearch.loading || !clientCount, vm.ticketSearch.loading)}
@@ -1244,7 +1262,7 @@ function renderLoadingOverlay() {
       <div class="fac-create-loading-card">
         <span class="fac-create-loading-spinner" aria-hidden="true"></span>
         <strong>Creando factura...</strong>
-        <small>Generando documento, relación, PDF, auditoría y envío.</small>
+        <small>Generando documento, PDF, auditoría y envío.</small>
       </div>
     </div>
   `;
@@ -1282,10 +1300,7 @@ export function renderFacturasCreateModal(input = {}) {
           <div class="fac-create-header">
             <div class="fac-create-header-copy">
               <h2 id="facturas-create-modal-title">Crear factura</h2>
-              <p>
-                Genera una factura vinculada a clientes e incidencias reales.
-                El backend resolverá numeración, PDF, Blob, auditoría y envío.
-              </p>
+              <p>Factura vinculada a cliente e incidencias reales.</p>
             </div>
 
             <button
@@ -1296,7 +1311,7 @@ export function renderFacturasCreateModal(input = {}) {
               aria-label="Cerrar modal"
               ${disabledAttrs(vm.submitting, vm.submitting)}
             >
-              ✕
+              ${icon("close")}
             </button>
           </div>
 
@@ -1410,7 +1425,7 @@ export function renderFacturasCreateModal(input = {}) {
                   label: "Enviar email al cliente",
                   name: "sendEmail",
                   checked: vm.form.sendEmail,
-                  help: "Adjunta el PDF generado y utiliza el envío configurado para facturas.",
+                  help: "Adjunta el PDF generado si el backend lo permite.",
                   disabled: vm.submitting || !vm.canCreate,
                 })}
               </div>

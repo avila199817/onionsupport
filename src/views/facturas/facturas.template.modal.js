@@ -20,7 +20,7 @@
 ========================================================= */
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
-  "facturas.template.modal.v1";
+  "facturas.template.modal.v2";
 
 export const FACTURA_MODAL_ACTIONS = Object.freeze({
   CLOSE: "close-factura-detail",
@@ -102,11 +102,8 @@ function number(value = 0, fallback = 0) {
     const hasDot = clean.includes(".");
 
     if (hasComma && hasDot) {
-      const lastComma = clean.lastIndexOf(",");
-      const lastDot = clean.lastIndexOf(".");
-
       clean =
-        lastComma > lastDot
+        clean.lastIndexOf(",") > clean.lastIndexOf(".")
           ? clean.replace(/\./g, "").replace(/,/g, ".")
           : clean.replace(/,/g, "");
     } else if (hasComma) {
@@ -134,6 +131,27 @@ function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
 }
 
+function htmlAttrs(attrs = {}) {
+  return Object.entries(safeObject(attrs))
+    .map(([key, value]) => {
+      if (!key) return "";
+      if (value === false || value === null || value === undefined) return "";
+      if (value === true) return escapeHtml(key);
+
+      return `${escapeHtml(key)}="${escapeHtml(value)}"`;
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
+function disabledAttrs(disabled = false, busy = false) {
+  return htmlAttrs({
+    disabled: Boolean(disabled),
+    "aria-disabled": disabled ? "true" : false,
+    "aria-busy": busy ? "true" : false,
+  });
+}
+
 function normalizeText(value = "") {
   return cleanText(value, "")
     .toLowerCase()
@@ -152,7 +170,7 @@ function bool(value, fallback = false) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value === 1;
 
-  const key = normalizeText(value);
+  const key = normalizeKey(value);
 
   if (["true", "1", "yes", "si", "sí", "on"].includes(key)) return true;
   if (["false", "0", "no", "off"].includes(key)) return false;
@@ -166,15 +184,10 @@ function readPath(source = {}, path = "") {
     .map((part) => part.trim())
     .filter(Boolean);
 
-  if (!parts.length) return undefined;
-
   let current = source;
 
   for (const part of parts) {
-    if (current === null || current === undefined) {
-      return undefined;
-    }
-
+    if (current === null || current === undefined) return undefined;
     current = current?.[part];
   }
 
@@ -302,7 +315,6 @@ function normalizeDateInput(value = null) {
   }
 
   const raw = cleanText(value, "");
-
   if (!raw) return null;
 
   return new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
@@ -377,7 +389,6 @@ function capitalizeFirst(value = "", fallback = "—") {
   if (!text || text === fallback) return text;
 
   const clean = text.replace(/\s+/g, " ").trim();
-
   if (!clean) return fallback;
 
   const normalizeRest =
@@ -891,9 +902,7 @@ function pickTicketIdFromArray(value = []) {
       item.linkedTicket?.id
     );
 
-    if (candidate) {
-      return cleanText(candidate, "");
-    }
+    if (candidate) return cleanText(candidate, "");
   }
 
   return "";
@@ -995,9 +1004,7 @@ function getFacturaIncidenciaId(factura = {}) {
       pickTicketIdFromArray(source.invoiceRelations)
     );
 
-    if (arrayCandidate) {
-      return cleanText(arrayCandidate, "");
-    }
+    if (arrayCandidate) return cleanText(arrayCandidate, "");
   }
 
   return "";
@@ -1089,14 +1096,7 @@ function getLineaDescripcion(linea = {}) {
 }
 
 function getLineaCantidad(linea = {}) {
-  return number(
-    first(
-      linea?.cantidad,
-      linea?.qty,
-      linea?.quantity
-    ),
-    0
-  );
+  return number(first(linea?.cantidad, linea?.qty, linea?.quantity), 0);
 }
 
 function getLineaUnitario(linea = {}) {
@@ -1113,12 +1113,7 @@ function getLineaUnitario(linea = {}) {
 }
 
 function getLineaSubtotal(linea = {}) {
-  const explicit = first(
-    linea?.subtotal,
-    linea?.base,
-    linea?.importeBase,
-    linea?.total
-  );
+  const explicit = first(linea?.subtotal, linea?.base, linea?.importeBase, linea?.total);
 
   if (explicit !== null && explicit !== undefined && explicit !== "") {
     return number(explicit, 0);
@@ -1349,13 +1344,7 @@ function normalizeTaxLine(entry = {}) {
       0
     ),
 
-    sign: cleanText(
-      first(
-        impuesto.sign,
-        impuesto.tipoOperacion
-      ),
-      ""
-    ),
+    sign: cleanText(first(impuesto.sign, impuesto.tipoOperacion), ""),
   };
 }
 
@@ -1704,7 +1693,7 @@ export function renderHeaderActions({
   downloading = false,
 } = {}) {
   const facturaId = getFacturaId(factura);
-  const pdfAvailable = getFacturaPdfAvailable(factura) || Boolean(facturaId);
+  const pdfAvailable = Boolean(facturaId && (getFacturaPdfAvailable(factura) || facturaId));
 
   return `
     <div class="facturas-detail-actions">
@@ -1714,7 +1703,7 @@ export function renderHeaderActions({
         data-action="${FACTURA_MODAL_ACTIONS.VIEW_PDF}"
         data-facturas-action="${FACTURA_MODAL_ACTIONS.VIEW_PDF}"
         data-factura-id="${attr(facturaId)}"
-        ${pdfAvailable && !viewingPdf ? "" : "disabled aria-disabled=\"true\""}
+        ${disabledAttrs(!pdfAvailable || viewingPdf, viewingPdf)}
       >
         ${viewingPdf ? renderActionSpinner("Abriendo...") : "Ver PDF"}
       </button>
@@ -1725,7 +1714,7 @@ export function renderHeaderActions({
         data-action="${FACTURA_MODAL_ACTIONS.DOWNLOAD_PDF}"
         data-facturas-action="${FACTURA_MODAL_ACTIONS.DOWNLOAD_PDF}"
         data-factura-id="${attr(facturaId)}"
-        ${pdfAvailable && !downloading ? "" : "disabled aria-disabled=\"true\""}
+        ${disabledAttrs(!pdfAvailable || downloading, downloading)}
       >
         ${downloading ? renderActionSpinner("Bajando...") : "Descargar"}
       </button>
@@ -1736,7 +1725,7 @@ export function renderHeaderActions({
         data-action="${FACTURA_MODAL_ACTIONS.SEND}"
         data-facturas-action="${FACTURA_MODAL_ACTIONS.SEND}"
         data-factura-id="${attr(facturaId)}"
-        ${sending ? "disabled aria-disabled=\"true\"" : ""}
+        ${disabledAttrs(!facturaId || sending, sending)}
       >
         ${sending ? renderActionSpinner("Enviando...") : "Enviar"}
       </button>
@@ -1761,6 +1750,7 @@ export function renderHeaderActions({
 
 function renderHeroMeta(factura = {}) {
   const servicioAt = getFacturaServicioAt(factura);
+  const moneda = getFacturaMoneda(factura);
 
   return `
     <div class="facturas-detail-meta-grid">
@@ -1770,8 +1760,8 @@ function renderHeroMeta(factura = {}) {
       ${renderMiniMeta("Forma de pago", getFacturaFormaPago(factura))}
       ${renderIncidenciaMini(factura)}
       ${renderMiniMeta("Enviado a", getFacturaEnviadoA(factura))}
-      ${renderMiniMeta("Pagado", formatMoney(getFacturaPagado(factura), getFacturaMoneda(factura)))}
-      ${renderMiniMeta("Pendiente", formatMoney(getFacturaPendiente(factura), getFacturaMoneda(factura)))}
+      ${renderMiniMeta("Pagado", formatMoney(getFacturaPagado(factura), moneda))}
+      ${renderMiniMeta("Pendiente", formatMoney(getFacturaPendiente(factura), moneda))}
     </div>
   `;
 }
@@ -1812,7 +1802,7 @@ function renderImpuestosSection(factura = {}) {
 
   return renderSectionCard({
     title: "Impuestos",
-    subtitle: "Desglose fiscal real: IVA, IRPF/retenciones y otros conceptos detectados en la factura.",
+    subtitle: "Desglose fiscal real: IVA, IRPF/retenciones y otros conceptos detectados.",
     content: cards.length
       ? `<div class="facturas-detail-tax-grid">${cards.join("")}</div>`
       : renderMiniMeta("Desglose", "Sin desglose fiscal disponible"),
@@ -1895,8 +1885,10 @@ function renderLineasSection(factura = {}) {
 function renderEnvioSection(factura = {}) {
   const fechaEnvio = getFacturaFechaEnvio(factura);
   const enviadoA = getFacturaEnviadoA(factura);
+  const pdfAvailable = getFacturaPdfAvailable(factura);
+  const updatedAt = getFacturaUpdatedAt(factura);
 
-  if (!fechaEnvio && enviadoA === "—") {
+  if (!fechaEnvio && enviadoA === "—" && !pdfAvailable && !updatedAt) {
     return "";
   }
 
@@ -1907,8 +1899,8 @@ function renderEnvioSection(factura = {}) {
       <div class="facturas-detail-meta-grid">
         ${renderMiniMeta("Enviado a", enviadoA)}
         ${renderMiniMeta("Fecha envío", fechaEnvio ? formatDateTime(fechaEnvio) : "—")}
-        ${renderMiniMeta("PDF", getFacturaPdfAvailable(factura) ? "Disponible" : "No disponible")}
-        ${renderMiniMeta("Última actualización", formatDateTime(getFacturaUpdatedAt(factura)))}
+        ${renderMiniMeta("PDF", pdfAvailable ? "Disponible" : "No disponible")}
+        ${renderMiniMeta("Última actualización", updatedAt ? formatDateTime(updatedAt) : "—")}
       </div>
     `,
   });
@@ -1950,10 +1942,12 @@ export function renderFacturasDetailContent({
 
   const paymentRaw = getFacturaEstadoPagoRaw(factura);
   const estadoRaw = getFacturaEstadoRaw(factura);
+  const numero = getFacturaNumero(factura);
   const numeroSistema = getFacturaSistema(factura);
   const clienteEmail = getClienteEmail(factura);
   const empresa = getClienteEmpresa(factura);
   const clienteNombre = getClienteNombre(factura);
+  const updatedAt = getFacturaUpdatedAt(factura);
 
   return `
     <div class="facturas-detail-layout">
@@ -1965,11 +1959,11 @@ export function renderFacturasDetailContent({
             <div class="facturas-detail-title-stack">
               <div class="facturas-detail-chip-row">
                 <span class="facturas-detail-number">
-                  ${escapeHtml(getFacturaNumero(factura))}
+                  ${escapeHtml(numero)}
                 </span>
 
                 ${
-                  numeroSistema && numeroSistema !== getFacturaNumero(factura)
+                  numeroSistema && numeroSistema !== numero
                     ? `<span class="facturas-detail-system-number">${escapeHtml(numeroSistema)}</span>`
                     : ""
                 }
@@ -1996,7 +1990,7 @@ export function renderFacturasDetailContent({
                 }
 
                 <span class="facturas-detail-subtitle">
-                  Última actualización ${escapeHtml(formatRelativeDate(getFacturaUpdatedAt(factura)))}
+                  Última actualización ${escapeHtml(formatRelativeDate(updatedAt))}
                 </span>
               </div>
             </div>

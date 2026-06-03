@@ -5,7 +5,9 @@
    Responsabilidad:
    - Controlador mínimo de la vista Facturas.
    - Montar template principal.
-   - Cargar/listar facturas desde facturas.api.js.
+   - Hidratar desde cache en memoria.
+   - Pintar inmediatamente sin bloquear el Router.
+   - Cargar/listar facturas desde facturas.api.js en background.
    - Scroll infinito real: page + limit + hasMore + nextPage.
    - Respetar orden/paginación del backend y API de Facturas.
    - Evitar renders innecesarios en búsqueda y modal de creación.
@@ -58,7 +60,7 @@ import {
   FACTURA_MODAL_ACTIONS,
 } from "./facturas.template.modal.js";
 
-export const FACTURAS_INDEX_VERSION = "facturas.index.productive.v4";
+export const FACTURAS_INDEX_VERSION = "facturas.index.productive.v5.fast-mount";
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
 const DEFAULT_PAGE = 1;
@@ -216,16 +218,33 @@ function parseBoolean(value, fallback = false) {
   return fallback;
 }
 
-function nextAnimationFrame(callback = null) {
-  if (!isBrowser() || !isFunction(callback)) return false;
+function nextFrame(callback = null) {
+  if (!isBrowser() || !isFunction(callback)) return 0;
+
+  if (isFunction(window.requestAnimationFrame)) {
+    return window.requestAnimationFrame(callback);
+  }
+
+  return window.setTimeout(callback, 0);
+}
+
+function cancelFrame(id = 0) {
+  if (!id || !isBrowser()) return false;
 
   try {
-    window.requestAnimationFrame(callback);
+    if (isFunction(window.cancelAnimationFrame)) {
+      window.cancelAnimationFrame(id);
+    }
+
+    window.clearTimeout?.(id);
     return true;
   } catch {
-    callback();
     return false;
   }
+}
+
+function nextAnimationFrame(callback = null) {
+  return Boolean(nextFrame(callback));
 }
 
 /* =========================================================
@@ -979,6 +998,9 @@ function createFacturasController(host = null, context = {}) {
   let infiniteObserver = null;
   let scrollTicking = false;
 
+  let renderFrame = 0;
+  let pendingRenderOptions = null;
+
   const objectUrls = new Set();
 
   const createModal = {
@@ -1060,6 +1082,28 @@ function createFacturasController(host = null, context = {}) {
     }
 
     objectUrls.clear();
+  }
+
+  function mergeRenderOptions(current = {}, next = {}) {
+    return {
+      ...current,
+      ...next,
+      focusSelector: next.focusSelector || current.focusSelector || "",
+      focusEnd:
+        next.focusEnd !== undefined
+          ? next.focusEnd
+          : current.focusEnd,
+    };
+  }
+
+  function cancelScheduledRender() {
+    if (!renderFrame) return false;
+
+    cancelFrame(renderFrame);
+    renderFrame = 0;
+    pendingRenderOptions = null;
+
+    return true;
   }
 
   function getSortParts() {
@@ -1267,8 +1311,10 @@ function createFacturasController(host = null, context = {}) {
     }
   }
 
-  function render(options = {}) {
+  function renderNow(options = {}) {
     if (destroyed || !host) return false;
+
+    cancelScheduledRender();
 
     host.innerHTML = renderFacturasTemplate(payload());
     bindFacturasTemplateDom(host);
@@ -1283,8 +1329,33 @@ function createFacturasController(host = null, context = {}) {
     return true;
   }
 
+  function render(options = {}) {
+    if (destroyed || !host) return false;
+
+    if (options.immediate === true) {
+      return renderNow(options);
+    }
+
+    pendingRenderOptions = mergeRenderOptions(pendingRenderOptions || {}, options);
+
+    if (renderFrame) return true;
+
+    renderFrame = nextFrame(() => {
+      const nextOptions = pendingRenderOptions || {};
+
+      renderFrame = 0;
+      pendingRenderOptions = null;
+
+      renderNow(nextOptions);
+    });
+
+    return true;
+  }
+
   function renderLoading() {
     if (destroyed || !host) return false;
+
+    cancelScheduledRender();
 
     host.innerHTML = renderFacturasLoadingState(payload());
     bindFacturasTemplateDom(host);
@@ -1295,6 +1366,8 @@ function createFacturasController(host = null, context = {}) {
 
   function renderError(message = "No se pudieron cargar las facturas.") {
     if (destroyed || !host) return false;
+
+    cancelScheduledRender();
 
     host.innerHTML = renderFacturasErrorState(message);
     syncBodyModalClass(false);
@@ -2715,29 +2788,34 @@ function createFacturasController(host = null, context = {}) {
   return {
     version: FACTURAS_VIEW_VERSION,
 
-    async mount() {
+    mount() {
+      if (destroyed || !host) return this;
+
       bind();
 
       pageSize = clamp(number(context.pageSize || context.limit || DEFAULT_BATCH_SIZE, DEFAULT_BATCH_SIZE), MIN_BATCH_SIZE, MAX_BATCH_SIZE);
 
       if (items.length) {
         loading = false;
-        render();
+        refreshing = false;
+        loadingMore = false;
+        error = "";
 
-        await load({
-          page: DEFAULT_PAGE,
-          silent: true,
+        render({
+          immediate: true,
         });
+      } else {
+        loading = true;
+        refreshing = false;
+        loadingMore = false;
+        error = "";
 
-        return this;
+        renderLoading();
       }
 
-      loading = true;
-      renderLoading();
-
-      await load({
+      void load({
         page: DEFAULT_PAGE,
-        silent: false,
+        silent: true,
       });
 
       return this;
@@ -2747,6 +2825,7 @@ function createFacturasController(host = null, context = {}) {
       destroyed = true;
 
       clearTimers();
+      cancelScheduledRender();
       disconnectInfiniteObserver();
       unbind();
       revokeObjectUrls();

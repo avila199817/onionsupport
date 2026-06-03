@@ -58,9 +58,10 @@ import {
 
 import {
   FACTURA_MODAL_ACTIONS,
+  renderFacturasDetailModal,
 } from "./facturas.template.modal.js";
 
-export const FACTURAS_INDEX_VERSION = "facturas.index.productive.v6.pdf-sas-safe";
+export const FACTURAS_INDEX_VERSION = "facturas.index.productive.v7.modal-island-zero-flicker";
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
 const DEFAULT_PAGE = 1;
@@ -74,6 +75,11 @@ const TICKET_LIMIT = 60;
 const SEARCH_DEBOUNCE_MS = 260;
 const LIST_SEARCH_DEBOUNCE_MS = 280;
 const INFINITE_ROOT_MARGIN = "900px 0px 900px 0px";
+
+const DETAIL_MODAL_HOST_ID = "facturas-detail-root";
+const DETAIL_MODAL_HOST_SELECTOR = `#${DETAIL_MODAL_HOST_ID}`;
+const DETAIL_MODAL_PANEL_SELECTOR =
+  "[data-facturas-detail-modal='true'], [data-role='facturas-detail-modal']";
 
 const LOAD_MORE_ACTION = FACTURAS_ACTIONS.LOAD_MORE || "load-more";
 
@@ -817,12 +823,14 @@ async function searchTickets(query = "", selectedClientes = []) {
    BODY / FILE / CSV / PDF RESOLUTION
 ========================================================= */
 
-function syncBodyModalClass(open = false) {
+function syncBodyModalClass(open = false, { detailOpen = false, createOpen = false } = {}) {
   if (!isBrowser()) return false;
 
   try {
     document.body?.classList.toggle("modal-open", open);
     document.body?.classList.toggle("facturas-modal-open", open);
+    document.body?.classList.toggle("facturas-detail-open", detailOpen);
+    document.body?.classList.toggle("facturas-create-open", createOpen);
     return true;
   } catch {
     return false;
@@ -1512,6 +1520,11 @@ function createFacturasController(host = null, context = {}) {
   let renderFrame = 0;
   let pendingRenderOptions = null;
 
+  let detailRenderFrame = 0;
+  let pendingDetailRenderOptions = null;
+  let detailModalHost = null;
+  let detailModalHostBound = false;
+
   const objectUrls = new Set();
 
   const createModal = {
@@ -1613,6 +1626,32 @@ function createFacturasController(host = null, context = {}) {
     cancelFrame(renderFrame);
     renderFrame = 0;
     pendingRenderOptions = null;
+
+    return true;
+  }
+
+  function mergeDetailRenderOptions(current = {}, next = {}) {
+    return {
+      ...current,
+      ...next,
+      focusSelector: next.focusSelector || current.focusSelector || "",
+      focusEnd:
+        next.focusEnd !== undefined
+          ? next.focusEnd
+          : current.focusEnd,
+      preserveFocus:
+        next.preserveFocus !== undefined
+          ? next.preserveFocus
+          : current.preserveFocus,
+    };
+  }
+
+  function cancelScheduledDetailRender() {
+    if (!detailRenderFrame) return false;
+
+    cancelFrame(detailRenderFrame);
+    detailRenderFrame = 0;
+    pendingDetailRenderOptions = null;
 
     return true;
   }
@@ -1762,11 +1801,11 @@ function createFacturasController(host = null, context = {}) {
     };
   }
 
-  function focusAfterRender(selector = "", placeEnd = true) {
-    if (!selector || !host) return false;
+  function focusAfterRender(selector = "", placeEnd = true, root = host) {
+    if (!selector || !root) return false;
 
     try {
-      const node = host.querySelector(selector);
+      const node = root.querySelector(selector);
 
       if (!node) return false;
 
@@ -1781,6 +1820,255 @@ function createFacturasController(host = null, context = {}) {
     } catch {
       return false;
     }
+  }
+
+  function detailModalIsOpen() {
+    return detailModal.open === true || detailModal.detailOpen === true;
+  }
+
+  function syncModalBodyState() {
+    return syncBodyModalClass(createModal.open || detailModalIsOpen(), {
+      createOpen: createModal.open,
+      detailOpen: detailModalIsOpen(),
+    });
+  }
+
+  function ownsNode(node = null) {
+    return Boolean(
+      node &&
+        (
+          host?.contains?.(node) ||
+          detailModalHost?.contains?.(node)
+        )
+    );
+  }
+
+  function ensureDetailModalHost() {
+    if (!isBrowser()) return null;
+
+    if (detailModalHost?.isConnected) return detailModalHost;
+
+    detailModalHost =
+      document.querySelector(DETAIL_MODAL_HOST_SELECTOR) ||
+      document.createElement("div");
+
+    detailModalHost.id = DETAIL_MODAL_HOST_ID;
+    detailModalHost.setAttribute("data-facturas-detail-host", "true");
+    detailModalHost.setAttribute("data-owner", FACTURAS_VIEW_VERSION);
+
+    if (!detailModalHost.isConnected) {
+      document.body.appendChild(detailModalHost);
+    }
+
+    if (mounted && !detailModalHostBound) {
+      bindTarget(detailModalHost);
+      detailModalHostBound = true;
+    }
+
+    return detailModalHost;
+  }
+
+  function removeDetailModalHost() {
+    cancelScheduledDetailRender();
+
+    if (!detailModalHost) return false;
+
+    try {
+      if (detailModalHostBound) {
+        unbindTarget(detailModalHost);
+      }
+
+      detailModalHost.replaceChildren();
+      detailModalHost.remove();
+    } catch {
+      // noop
+    }
+
+    detailModalHost = null;
+    detailModalHostBound = false;
+
+    return true;
+  }
+
+  function captureDetailModalDomState(root = null) {
+    if (!isBrowser() || !root) return null;
+
+    const active = document.activeElement;
+    const panel = root.querySelector(DETAIL_MODAL_PANEL_SELECTOR);
+
+    const state = {
+      scrollTop: panel?.scrollTop || 0,
+      activeField: "",
+      activeName: "",
+      activeId: "",
+      selectionStart: null,
+      selectionEnd: null,
+      hadFocus: false,
+    };
+
+    if (!active || !root.contains(active)) return state;
+
+    state.hadFocus = true;
+    state.activeField = cleanText(active.dataset?.field || active.dataset?.detailField || "", "");
+    state.activeName = cleanText(active.getAttribute?.("name"), "");
+    state.activeId = cleanText(active.id, "");
+
+    try {
+      if (typeof active.selectionStart === "number") {
+        state.selectionStart = active.selectionStart;
+        state.selectionEnd = active.selectionEnd;
+      }
+    } catch {
+      // noop
+    }
+
+    return state;
+  }
+
+  function findRestorableDetailNode(root = null, state = null, explicitSelector = "") {
+    if (!root) return null;
+
+    if (explicitSelector) {
+      return root.querySelector(explicitSelector);
+    }
+
+    if (!state) return null;
+
+    if (state.activeId) {
+      const byId = root.querySelector(`#${state.activeId}`);
+      if (byId) return byId;
+    }
+
+    const candidates = Array.from(root.querySelectorAll("[data-field], [data-detail-field], [name], button, [tabindex]"));
+
+    if (state.activeField) {
+      const byField = candidates.find((node) => {
+        return cleanText(node.dataset?.field || node.dataset?.detailField || "", "") === state.activeField;
+      });
+
+      if (byField) return byField;
+    }
+
+    if (state.activeName) {
+      const byName = candidates.find((node) => cleanText(node.getAttribute("name"), "") === state.activeName);
+      if (byName) return byName;
+    }
+
+    return null;
+  }
+
+  function restoreDetailModalDomState(root = null, state = null, options = {}) {
+    if (!isBrowser() || !root) return false;
+
+    const panel = root.querySelector(DETAIL_MODAL_PANEL_SELECTOR);
+
+    if (panel && state) {
+      panel.scrollTop = state.scrollTop || 0;
+    }
+
+    nextFrame(() => {
+      try {
+        if (panel && state) panel.scrollTop = state.scrollTop || 0;
+      } catch {
+        // noop
+      }
+    });
+
+    if (options.preserveFocus === false) {
+      return focusAfterRender(
+        options.focusSelector || DETAIL_MODAL_PANEL_SELECTOR,
+        options.focusEnd !== false,
+        root
+      );
+    }
+
+    const target = findRestorableDetailNode(root, state, options.focusSelector || "");
+
+    if (!target) {
+      return focusAfterRender(DETAIL_MODAL_PANEL_SELECTOR, false, root);
+    }
+
+    try {
+      target.focus({ preventScroll: true });
+
+      if (
+        options.focusEnd !== false &&
+        typeof target.setSelectionRange === "function"
+      ) {
+        const valueLength = String(target.value || "").length;
+        const start = Number.isFinite(state?.selectionStart)
+          ? Math.min(state.selectionStart, valueLength)
+          : valueLength;
+        const end = Number.isFinite(state?.selectionEnd)
+          ? Math.min(state.selectionEnd, valueLength)
+          : valueLength;
+
+        target.setSelectionRange(start, end);
+      }
+    } catch {
+      // noop
+    }
+
+    return true;
+  }
+
+  function renderDetailModalNow(options = {}) {
+    if (destroyed || !isBrowser()) return false;
+
+    cancelScheduledDetailRender();
+
+    if (!detailModalIsOpen()) {
+      removeDetailModalHost();
+      syncModalBodyState();
+      return true;
+    }
+
+    const target = ensureDetailModalHost();
+
+    if (!target) return false;
+
+    const state = captureDetailModalDomState(target);
+
+    target.innerHTML = renderFacturasDetailModal(detailModal);
+
+    syncModalBodyState();
+    restoreDetailModalDomState(target, state, options);
+
+    return true;
+  }
+
+  function renderDetailModal(options = {}) {
+    if (destroyed || !isBrowser()) return false;
+
+    if (options.immediate === true) {
+      return renderDetailModalNow(options);
+    }
+
+    pendingDetailRenderOptions = mergeDetailRenderOptions(pendingDetailRenderOptions || {}, options);
+
+    if (detailRenderFrame) return true;
+
+    detailRenderFrame = nextFrame(() => {
+      const nextOptions = pendingDetailRenderOptions || {};
+
+      detailRenderFrame = 0;
+      pendingDetailRenderOptions = null;
+
+      renderDetailModalNow(nextOptions);
+    });
+
+    return true;
+  }
+
+  function viewPayload(extra = {}) {
+    return payload({
+      detailModal: {
+        ...detailModal,
+        open: false,
+        detailOpen: false,
+      },
+      ...extra,
+    });
   }
 
   function syncInfiniteObserver() {
@@ -1827,9 +2115,9 @@ function createFacturasController(host = null, context = {}) {
 
     cancelScheduledRender();
 
-    host.innerHTML = renderFacturasTemplate(payload());
+    host.innerHTML = renderFacturasTemplate(viewPayload());
     bindFacturasTemplateDom(host);
-    syncBodyModalClass(createModal.open || detailModal.open);
+    syncModalBodyState();
 
     if (options.focusSelector) {
       focusAfterRender(options.focusSelector, options.focusEnd !== false);
@@ -1868,9 +2156,9 @@ function createFacturasController(host = null, context = {}) {
 
     cancelScheduledRender();
 
-    host.innerHTML = renderFacturasLoadingState(payload());
+    host.innerHTML = renderFacturasLoadingState(viewPayload());
     bindFacturasTemplateDom(host);
-    syncBodyModalClass(createModal.open || detailModal.open);
+    syncModalBodyState();
 
     return true;
   }
@@ -1881,7 +2169,7 @@ function createFacturasController(host = null, context = {}) {
     cancelScheduledRender();
 
     host.innerHTML = renderFacturasErrorState(message);
-    syncBodyModalClass(false);
+    syncModalBodyState();
     disconnectInfiniteObserver();
 
     return true;
@@ -2866,6 +3154,7 @@ function createFacturasController(host = null, context = {}) {
     detailModal.viewingFacturaId = "";
     detailModal.downloadingFacturaId = "";
 
+    renderDetailModal({ immediate: true });
     render();
 
     return true;
@@ -2875,16 +3164,24 @@ function createFacturasController(host = null, context = {}) {
     const id = cleanText(facturaId, "");
     if (!id) return false;
 
+    const local = items.find((item) => getFacturaId(item) === id) || null;
+
     openingFacturaId = id;
 
     detailModal.open = true;
     detailModal.detailOpen = true;
     detailModal.detailLoading = true;
-    detailModal.factura = items.find((item) => getFacturaId(item) === id) || null;
+    detailModal.factura = local;
+    detailModal.sendingFacturaId = "";
+    detailModal.viewingFacturaId = "";
+    detailModal.downloadingFacturaId = "";
 
-    render({
-      focusSelector: "[data-facturas-detail-modal='true']",
+    render();
+    renderDetailModal({
+      immediate: true,
+      focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
       focusEnd: false,
+      preserveFocus: false,
     });
 
     try {
@@ -2898,9 +3195,11 @@ function createFacturasController(host = null, context = {}) {
       detailModal.detailLoading = false;
       openingFacturaId = "";
 
-      render({
-        focusSelector: "[data-facturas-detail-modal='true']",
+      render();
+      renderDetailModal({
+        focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
         focusEnd: false,
+        preserveFocus: false,
       });
 
       return true;
@@ -2909,6 +3208,16 @@ function createFacturasController(host = null, context = {}) {
       openingFacturaId = "";
       error = safeError(detailError, "No se pudo abrir el detalle de factura.");
 
+      if (local) {
+        render();
+        renderDetailModal({
+          focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
+          focusEnd: false,
+        });
+        return false;
+      }
+
+      closeDetailModal();
       render();
       return false;
     }
@@ -2938,6 +3247,7 @@ function createFacturasController(host = null, context = {}) {
     detailModal.viewingFacturaId = id;
 
     render();
+    renderDetailModal();
 
     try {
       const factura = getFacturaForPdf(id);
@@ -2960,6 +3270,7 @@ function createFacturasController(host = null, context = {}) {
       viewingFacturaId = "";
       detailModal.viewingFacturaId = "";
       render();
+      renderDetailModal();
 
       return true;
     } catch (pdfError) {
@@ -2970,6 +3281,7 @@ function createFacturasController(host = null, context = {}) {
       error = safeError(pdfError, "No se pudo abrir el PDF.");
 
       render();
+      renderDetailModal();
       return false;
     }
   }
@@ -2982,6 +3294,7 @@ function createFacturasController(host = null, context = {}) {
     detailModal.downloadingFacturaId = id;
 
     render();
+    renderDetailModal();
 
     try {
       const factura = getFacturaForPdf(id);
@@ -3020,6 +3333,7 @@ function createFacturasController(host = null, context = {}) {
       downloadingFacturaId = "";
       detailModal.downloadingFacturaId = "";
       render();
+      renderDetailModal();
 
       return true;
     } catch (downloadError) {
@@ -3028,6 +3342,7 @@ function createFacturasController(host = null, context = {}) {
       error = safeError(downloadError, "No se pudo descargar la factura.");
 
       render();
+      renderDetailModal();
       return false;
     }
   }
@@ -3040,6 +3355,7 @@ function createFacturasController(host = null, context = {}) {
     detailModal.sendingFacturaId = id;
 
     render();
+    renderDetailModal();
 
     try {
       const result = await sendFactura(id);
@@ -3055,6 +3371,7 @@ function createFacturasController(host = null, context = {}) {
       sendingFacturaId = "";
       detailModal.sendingFacturaId = "";
       render();
+      renderDetailModal();
 
       return true;
     } catch (sendError) {
@@ -3063,6 +3380,7 @@ function createFacturasController(host = null, context = {}) {
       error = safeError(sendError, "No se pudo enviar la factura.");
 
       render();
+      renderDetailModal();
       return false;
     }
   }
@@ -3166,7 +3484,7 @@ function createFacturasController(host = null, context = {}) {
 
     const actionNode = target.closest("[data-facturas-action], [data-factura-create-action], [data-action]");
 
-    if (actionNode && host?.contains(actionNode)) {
+    if (actionNode && ownsNode(actionNode)) {
       const action = actionFrom(actionNode);
 
       if (action) {
@@ -3241,7 +3559,7 @@ function createFacturasController(host = null, context = {}) {
   function onSubmit(event) {
     const form = event.target?.closest?.("form");
 
-    if (!form || !host?.contains(form)) return;
+    if (!form || !ownsNode(form)) return;
 
     if (form.matches("#facturas-create-form, [data-facturas-create-form='true']")) {
       event.preventDefault();
@@ -3251,7 +3569,7 @@ function createFacturasController(host = null, context = {}) {
 
   function onKeydown(event) {
     if (event.key === "Escape") {
-      if (detailModal.open) {
+      if (detailModalIsOpen()) {
         event.preventDefault();
         closeDetailModal();
         return;
@@ -3303,12 +3621,28 @@ function createFacturasController(host = null, context = {}) {
     });
   }
 
+  function bindTarget(target = null) {
+    target?.addEventListener?.("click", onClick);
+    target?.addEventListener?.("input", onInput);
+    target?.addEventListener?.("change", onChange);
+    target?.addEventListener?.("submit", onSubmit);
+    target?.addEventListener?.("keydown", onKeydown);
+
+    return true;
+  }
+
+  function unbindTarget(target = null) {
+    target?.removeEventListener?.("click", onClick);
+    target?.removeEventListener?.("input", onInput);
+    target?.removeEventListener?.("change", onChange);
+    target?.removeEventListener?.("submit", onSubmit);
+    target?.removeEventListener?.("keydown", onKeydown);
+
+    return true;
+  }
+
   function bind() {
-    host?.addEventListener?.("click", onClick);
-    host?.addEventListener?.("input", onInput);
-    host?.addEventListener?.("change", onChange);
-    host?.addEventListener?.("submit", onSubmit);
-    host?.addEventListener?.("keydown", onKeydown);
+    bindTarget(host);
 
     if (isBrowser()) {
       window.addEventListener("scroll", onWindowScroll, { passive: true });
@@ -3317,11 +3651,12 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function unbind() {
-    host?.removeEventListener?.("click", onClick);
-    host?.removeEventListener?.("input", onInput);
-    host?.removeEventListener?.("change", onChange);
-    host?.removeEventListener?.("submit", onSubmit);
-    host?.removeEventListener?.("keydown", onKeydown);
+    unbindTarget(host);
+
+    if (detailModalHostBound) {
+      unbindTarget(detailModalHost);
+      detailModalHostBound = false;
+    }
 
     if (isBrowser()) {
       window.removeEventListener("scroll", onWindowScroll);
@@ -3376,15 +3711,17 @@ function createFacturasController(host = null, context = {}) {
 
       clearTimers();
       cancelScheduledRender();
+      cancelScheduledDetailRender();
       disconnectInfiniteObserver();
       unbind();
+      removeDetailModalHost();
       revokeObjectUrls();
 
       createModal.open = false;
       detailModal.open = false;
       detailModal.detailOpen = false;
 
-      syncBodyModalClass(false);
+      syncBodyModalClass(false, { createOpen: false, detailOpen: false });
 
       if (host) {
         host.replaceChildren();
@@ -3427,7 +3764,9 @@ function createFacturasController(host = null, context = {}) {
         sort,
 
         createModalOpen: createModal.open,
-        detailModalOpen: detailModal.open,
+        detailModalOpen: detailModalIsOpen(),
+        detailModalHost: Boolean(detailModalHost?.isConnected),
+        detailModalHostBound,
 
         openingFacturaId: openingFacturaId ? "***" : "",
         viewingFacturaId: viewingFacturaId ? "***" : "",

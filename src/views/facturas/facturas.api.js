@@ -9,6 +9,8 @@
    - Listar, crear, actualizar, eliminar y enviar facturas.
    - Ver/descargar PDF.
    - Buscar incidencias vinculables para crear factura.
+   - Respetar el orden/paginación del backend.
+   - Dedupe de peticiones simultáneas equivalentes.
    - Sin DOM.
    - Sin Router.
    - Sin Auth directo.
@@ -21,7 +23,7 @@
 
 import Http from "../../core/http.js";
 
-export const FACTURAS_API_VERSION = "facturas.api.minimal.v2";
+export const FACTURAS_API_VERSION = "facturas.api.fast.v3";
 
 /* =========================================================
    ENDPOINTS / TIMEOUTS
@@ -42,6 +44,7 @@ export const FACTURAS_DEFAULT_LIMIT = 100;
 export const FACTURAS_MAX_LIMIT = 200;
 
 const DEFAULT_CURRENCY = "EUR";
+const MAX_INFLIGHT_REQUESTS = 24;
 
 export const FACTURA_PDF_MODES = Object.freeze({
   VIEW: "view",
@@ -61,9 +64,12 @@ let lastError = null;
 let lastList = {
   items: [],
   total: 0,
+  queryKey: "",
 };
 
 let lastStats = null;
+
+const inflight = new Map();
 
 /* =========================================================
    BASICS
@@ -99,7 +105,7 @@ function cleanText(value = "", fallback = "") {
 }
 
 function first(...values) {
-  for (const value of values) {
+  for (const value of values.flat(Infinity)) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && !value.length) continue;
@@ -177,6 +183,28 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
+function toTimestamp(value = null) {
+  if (!value) return 0;
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 9999999999 ? value : value * 1000;
+  }
+
+  const raw = cleanText(value, "");
+  if (!raw) return 0;
+
+  const numeric = Number(raw);
+
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric > 9999999999 ? numeric : numeric * 1000;
+  }
+
+  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+  const time = date.getTime();
+
+  return Number.isFinite(time) ? time : 0;
+}
+
 function redact(value = "") {
   return String(value ?? "")
     .replace(
@@ -187,13 +215,17 @@ function redact(value = "") {
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(
+    String(value || "")
+  );
+}
+
 function safePublicText(value = "", fallback = "") {
   const text = redact(cleanText(value, ""));
 
   if (!text) return fallback;
-  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature)=/i.test(text)) {
-    return fallback;
-  }
+  if (hasSensitiveQuery(text)) return fallback;
 
   return text;
 }
@@ -205,9 +237,7 @@ function safeUrl(value = "") {
   if (raw.startsWith("//")) return "";
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
-  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature)=/i.test(raw)) {
-    return "";
-  }
+  if (hasSensitiveQuery(raw)) return "";
 
   if (/^blob:/i.test(raw)) return raw;
 
@@ -243,6 +273,52 @@ function encodeSegment(value = "") {
   }
 
   return encodeURIComponent(clean);
+}
+
+function stableStringify(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value !== "object") return String(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${key}:${stableStringify(value[key])}`)
+    .join(",")}}`;
+}
+
+function setInflight(key = "", promise = null) {
+  if (!key || !promise) return promise;
+
+  if (inflight.size >= MAX_INFLIGHT_REQUESTS) {
+    inflight.delete(inflight.keys().next().value);
+  }
+
+  inflight.set(key, promise);
+
+  promise.then(
+    () => {
+      if (inflight.get(key) === promise) inflight.delete(key);
+    },
+    () => {
+      if (inflight.get(key) === promise) inflight.delete(key);
+    }
+  );
+
+  return promise;
+}
+
+function mergeById(items = []) {
+  const map = new Map();
+
+  for (const item of safeArray(items)) {
+    const factura = safeObject(item);
+    const id = cleanText(first(factura.id, factura.facturaId, factura.invoiceId, factura.number, factura.numeroFacturaLegal), "");
+
+    if (!id) continue;
+    if (!map.has(id)) map.set(id, factura);
+  }
+
+  return [...map.values()];
 }
 
 /* =========================================================
@@ -301,7 +377,7 @@ function cleanQueryValue(value) {
   const text = cleanText(value, "");
 
   if (!text) return "";
-  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature)=/i.test(text)) return "";
+  if (hasSensitiveQuery(text)) return "";
 
   return text;
 }
@@ -328,15 +404,60 @@ function appendQuery(params, key = "", value = "") {
   }
 }
 
+function normalizeSortMode(value = "") {
+  const key = normalizeKey(value);
+
+  if (["date_asc", "fecha_asc", "oldest", "oldest_first", "menor_fecha"].includes(key)) return "date_asc";
+  if (["date_desc", "fecha_desc", "newest", "newest_first", "recent", "recent_desc", "mayor_fecha"].includes(key)) return "date_desc";
+  if (["asc", "ascending"].includes(key)) return "date_asc";
+
+  return "date_desc";
+}
+
+function resolveSort({ sort = "", sortBy = "", orderBy = "", sortMode = "", direction = "", sortDir = "", orderDir = "" } = {}) {
+  const rawSort = cleanText(first(sortMode, sortBy, sort, orderBy, "date_desc"), "date_desc");
+  const sortKey = normalizeKey(rawSort);
+  const rawDirection = normalizeKey(first(sortDir, direction, orderDir, ""));
+
+  if (["numero", "number", "invoice", "invoice_number", "factura", "numero_factura", "total", "amount", "importe", "cliente", "customer", "client", "estado_pago", "payment_status", "payment"].includes(sortKey)) {
+    const finalDirection = rawDirection === "asc" ? "asc" : "desc";
+
+    return {
+      sort: sortKey,
+      sortBy: sortKey,
+      sortMode: sortKey,
+      direction: finalDirection,
+      sortDir: finalDirection,
+    };
+  }
+
+  const mode = normalizeSortMode(rawSort);
+  const directionFromMode = mode.endsWith("_asc") ? "asc" : "desc";
+  const finalDirection = rawDirection === "asc" || rawDirection === "desc" ? rawDirection : directionFromMode;
+
+  return {
+    sort: mode,
+    sortBy: mode,
+    sortMode: mode,
+    direction: finalDirection,
+    sortDir: finalDirection,
+  };
+}
+
 function buildListQuery({
   page = FACTURAS_DEFAULT_PAGE,
   limit = FACTURAS_DEFAULT_LIMIT,
   search = "",
   q = "",
-  sort = "recent",
+  sort = "date_desc",
   direction = "desc",
   sortBy = "",
   sortDir = "",
+  orderBy = "",
+  orderDir = "",
+  sortMode = "",
+  includeStats = true,
+  includeStatsAll = false,
   filters = {},
 } = {}) {
   const query = {};
@@ -357,18 +478,14 @@ function buildListQuery({
     query.search = finalSearch;
   }
 
-  const finalSort = cleanText(first(sortBy, sort), "");
+  Object.assign(query, resolveSort({ sort, direction, sortBy, sortDir, orderBy, orderDir, sortMode }));
 
-  if (finalSort) {
-    query.sort = finalSort;
-    query.sortBy = finalSort;
+  if (includeStats !== undefined && includeStats !== null) {
+    query.includeStats = Boolean(includeStats);
   }
 
-  const finalDirection = cleanText(first(sortDir, direction), "");
-
-  if (finalDirection) {
-    query.direction = finalDirection;
-    query.sortDir = finalDirection;
+  if (includeStatsAll) {
+    query.includeStatsAll = true;
   }
 
   const aliases = {
@@ -389,6 +506,8 @@ function buildListQuery({
     fechaHasta: "to",
 
     hasIncidencia: "withIncidencia",
+    withTicket: "withIncidencia",
+    hasTicket: "withIncidencia",
     hasPdf: "withPdf",
   };
 
@@ -484,6 +603,7 @@ function listFromPayload(payload = null) {
   const object = safeObject(unwrapEnvelope(payload), {});
 
   for (const key of [
+    "facturas",
     "items",
     "rows",
     "records",
@@ -492,8 +612,8 @@ function listFromPayload(payload = null) {
     "documents",
     "value",
     "list",
-    "facturas",
     "invoices",
+    "data",
   ]) {
     if (Array.isArray(object[key])) return object[key];
   }
@@ -504,25 +624,27 @@ function listFromPayload(payload = null) {
 function totalFromPayload(payload = null, fallback = 0) {
   const object = safeObject(payload, {});
   const envelope = safeObject(unwrapEnvelope(payload), {});
+  const paging = safeObject(first(envelope.paging, envelope.pagination, envelope.page, object.paging, object.pagination, object.page, {}));
 
   return Math.max(
     fallback,
     number(
       first(
         envelope.total,
-        envelope.count,
-        envelope.totalCount,
+        envelope.totalMatched,
         envelope.remoteCount,
+        envelope.totalCount,
         envelope.meta?.total,
         envelope.meta?.count,
         envelope.meta?.totalCount,
-        envelope.pagination?.total,
-        envelope.pagination?.totalCount,
-        envelope.page?.total,
+        paging.total,
+        paging.remoteCount,
+        paging.totalCount,
         object.total,
+        object.totalMatched,
+        object.remoteCount,
         object.count,
         object.totalCount,
-        object.remoteCount,
         fallback
       ),
       fallback
@@ -537,14 +659,45 @@ function metaFromPayload(payload = null) {
   return safeObject(
     first(
       object.meta,
+      object.paging,
       object.pagination,
       object.page,
       original.meta,
+      original.paging,
       original.pagination,
       original.page,
       {}
     )
   );
+}
+
+function pagingFromPayload(payload = null, requestMeta = {}, itemsCount = 0) {
+  const envelope = safeObject(unwrapEnvelope(payload), {});
+  const original = safeObject(payload, {});
+  const paging = safeObject(first(envelope.paging, original.paging, envelope.pagination, original.pagination, envelope.page, original.page, {}));
+
+  const page = number(first(envelope.page, paging.page, paging.currentPage, requestMeta.page, FACTURAS_DEFAULT_PAGE), FACTURAS_DEFAULT_PAGE);
+  const limit = number(first(envelope.limit, paging.limit, paging.pageSize, requestMeta.limit, itemsCount || FACTURAS_DEFAULT_LIMIT), itemsCount || FACTURAS_DEFAULT_LIMIT);
+  const total = totalFromPayload(payload, itemsCount);
+  const nextPage = first(envelope.nextPage, paging.nextPage, null);
+  const totalPages = number(first(envelope.totalPages, paging.totalPages, Math.ceil((total || 0) / (limit || 1))), Math.max(1, Math.ceil((total || 0) / (limit || 1))));
+  const hasMore = Boolean(first(envelope.hasMore, paging.hasMore, nextPage ? true : null, false));
+  const offset = number(first(envelope.offset, paging.offset, requestMeta.offset, Math.max(0, (page - 1) * limit)), Math.max(0, (page - 1) * limit));
+
+  return {
+    ...paging,
+    page,
+    nextPage: nextPage === null || nextPage === undefined || nextPage === "" ? null : number(nextPage, null),
+    totalPages,
+    hasMore,
+    offset,
+    limit,
+    returned: number(first(envelope.count, paging.returned, itemsCount), itemsCount),
+    total,
+    remoteCount: total,
+    fetchLimit: number(first(envelope.fetchLimit, paging.fetchLimit, limit), limit),
+    mode: cleanText(first(envelope.queryMode, paging.mode, paging.queryMode, ""), ""),
+  };
 }
 
 function looksLikeFactura(value = null) {
@@ -651,6 +804,8 @@ function pickIncidenciaId(item = {}) {
       factura.incidenciaId,
       factura.relatedTicketId,
       factura.relatedIncidentId,
+      factura.supportTicketId,
+      factura.caseId,
 
       factura.ticket?.ticketId,
       factura.ticket?.incidenciaId,
@@ -660,9 +815,16 @@ function pickIncidenciaId(item = {}) {
       factura.incidencia?.incidenciaId,
       factura.incidencia?.id,
 
+      factura.linkedTicket?.ticketId,
+      factura.linkedTicket?.incidenciaId,
+      factura.linkedTicket?.id,
+
       factura.relations?.ticket?.ticketId,
       factura.relations?.ticket?.incidenciaId,
       factura.relations?.ticket?.id,
+      factura.relations?.incidencia?.ticketId,
+      factura.relations?.incidencia?.incidenciaId,
+      factura.relations?.incidencia?.id,
 
       factura.meta?.ticketId,
       factura.meta?.incidenciaId,
@@ -671,6 +833,8 @@ function pickIncidenciaId(item = {}) {
       relationIdFromArray(factura.ticketIds),
       relationIdFromArray(factura.incidenciaIds),
       relationIdFromArray(factura.relatedTickets),
+      relationIdFromArray(factura.relatedTicketIds),
+      relationIdFromArray(factura.relatedIncidentIds),
       relationIdFromArray(factura.tickets),
       relationIdFromArray(factura.incidencias),
 
@@ -678,6 +842,8 @@ function pickIncidenciaId(item = {}) {
       raw.incidenciaId,
       raw.relatedTicketId,
       raw.relatedIncidentId,
+      raw.supportTicketId,
+      raw.caseId,
 
       raw.ticket?.ticketId,
       raw.ticket?.incidenciaId,
@@ -687,9 +853,16 @@ function pickIncidenciaId(item = {}) {
       raw.incidencia?.incidenciaId,
       raw.incidencia?.id,
 
+      raw.linkedTicket?.ticketId,
+      raw.linkedTicket?.incidenciaId,
+      raw.linkedTicket?.id,
+
       raw.relations?.ticket?.ticketId,
       raw.relations?.ticket?.incidenciaId,
       raw.relations?.ticket?.id,
+      raw.relations?.incidencia?.ticketId,
+      raw.relations?.incidencia?.incidenciaId,
+      raw.relations?.incidencia?.id,
 
       raw.meta?.ticketId,
       raw.meta?.incidenciaId,
@@ -698,6 +871,8 @@ function pickIncidenciaId(item = {}) {
       relationIdFromArray(raw.ticketIds),
       relationIdFromArray(raw.incidenciaIds),
       relationIdFromArray(raw.relatedTickets),
+      relationIdFromArray(raw.relatedTicketIds),
+      relationIdFromArray(raw.relatedIncidentIds),
       relationIdFromArray(raw.tickets),
       relationIdFromArray(raw.incidencias)
     ),
@@ -715,21 +890,47 @@ function normalizeLine(line = {}, index = 0) {
   const quantity = number(first(raw.quantity, raw.cantidad, raw.qty, 1), 1);
   const unitPrice = number(first(raw.unitPrice, raw.precioUnitario, raw.price, raw.importeUnitario, 0), 0);
   const total = number(first(raw.total, raw.amount, raw.importe, quantity * unitPrice), quantity * unitPrice);
+  const concept = safePublicText(first(raw.concept, raw.concepto, raw.description, raw.descripcion, raw.name), `Concepto ${index + 1}`);
 
   return {
     id: cleanText(first(raw.id, raw.lineId, `line-${index + 1}`), `line-${index + 1}`),
-    concept: safePublicText(first(raw.concept, raw.concepto, raw.description, raw.descripcion, raw.name), "Concepto"),
-    description: safePublicText(first(raw.description, raw.descripcion, raw.concept, raw.concepto), ""),
+    concept,
+    concepto: concept,
+    description: safePublicText(first(raw.description, raw.descripcion, raw.concept, raw.concepto, concept), concept),
+    descripcion: safePublicText(first(raw.descripcion, raw.description, raw.concepto, raw.concept, concept), concept),
     quantity,
+    cantidad: quantity,
     unitPrice: round2(unitPrice),
+    precio: round2(unitPrice),
     total: round2(total),
+    importe: round2(total),
     taxRate: number(first(raw.taxRate, raw.iva, raw.vatRate, 0), 0),
   };
 }
 
-export function normalizeFactura(item = {}) {
+function normalizeAttachment(file = {}, index = 0) {
+  const raw = safeObject(file);
+  const name = safePublicText(first(raw.name, raw.filename, raw.fileName, raw.originalName, `adjunto-${index + 1}`), `adjunto-${index + 1}`);
+  const contentType = cleanText(first(raw.contentType, raw.mimeType, raw.mimetype, raw.type, ""), "");
+  const size = number(first(raw.size, raw.sizeBytes, raw.bytes, 0), 0);
+
+  return {
+    id: cleanText(first(raw.id, raw.attachmentId, raw.fileId, raw.blobName, name), name),
+    name,
+    filename: name,
+    fileName: name,
+    contentType: contentType || null,
+    mimeType: contentType || null,
+    size,
+    sizeBytes: size,
+    isPdf: normalizeKey(`${contentType} ${name}`).includes("pdf") || normalizeKey(name).endsWith("_pdf"),
+  };
+}
+
+export function normalizeFactura(item = {}, options = {}) {
   const raw = safeObject(item);
   const rawNested = safeObject(raw.raw);
+  const includeRaw = options?.includeRaw === true;
 
   const id = cleanText(
     first(
@@ -760,16 +961,19 @@ export function normalizeFactura(item = {}) {
   const numberValue = cleanText(
     first(
       raw.number,
-      raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema,
-      raw.numeroFactura,
       raw.numero,
+      raw.numeroFacturaLegal,
+      raw.numeroFactura,
       raw.invoiceNumber,
       raw.code,
+      raw.numeroFacturaSistema,
       id
     ),
     id
   );
+
+  const numeroFacturaLegal = cleanText(first(raw.numeroFacturaLegal, raw.numeroFactura, raw.invoiceNumber, numberValue), numberValue);
+  const numeroFacturaSistema = cleanText(first(raw.numeroFacturaSistema, raw.systemInvoiceNumber, raw.numeroSistema, ""), "");
 
   const title = safePublicText(
     first(
@@ -778,38 +982,21 @@ export function normalizeFactura(item = {}) {
       raw.conceptoPrincipal,
       raw.concepto,
       raw.descripcionPrincipal,
+      raw.preview,
       numberValue
     ),
     numberValue || "Factura"
   );
 
-  const status = cleanText(
-    first(
-      raw.status,
-      raw.estado,
-      raw.invoiceStatus,
-      raw.estadoFactura,
-      ""
-    ),
-    ""
-  );
-
-  const paymentStatus = cleanText(
-    first(
-      raw.paymentStatus,
-      raw.estadoPago,
-      raw.payment?.status,
-      status,
-      ""
-    ),
-    ""
-  );
+  const estado = cleanText(first(raw.estado, raw.status, raw.invoiceStatus, raw.estadoFactura, ""), "");
+  const paymentStatus = cleanText(first(raw.paymentStatus, raw.estadoPago, raw.payment?.status, estado, ""), "");
 
   const total = round2(
     first(
       raw.total,
       raw.amount,
       raw.importe,
+      raw.importeTotal,
       raw.totalFactura,
       raw.facturaTotal,
       raw.facturaImporte,
@@ -828,6 +1015,8 @@ export function normalizeFactura(item = {}) {
       raw.baseImponible,
       raw.totales?.subtotal,
       raw.totals?.subtotal,
+      raw.totales?.baseImponible,
+      raw.totals?.baseImponible,
       0
     )
   );
@@ -837,8 +1026,10 @@ export function normalizeFactura(item = {}) {
       raw.tax,
       raw.iva,
       raw.vat,
-      raw.impuestos,
+      raw.ivaTotal,
       raw.totales?.iva,
+      raw.totals?.iva,
+      raw.totales?.tax,
       raw.totals?.tax,
       0
     )
@@ -870,7 +1061,9 @@ export function normalizeFactura(item = {}) {
     first(
       raw.currency,
       raw.moneda,
+      raw.facturaCurrency,
       raw.totales?.currency,
+      raw.totals?.currency,
       raw.payment?.currency,
       DEFAULT_CURRENCY
     ),
@@ -879,16 +1072,9 @@ export function normalizeFactura(item = {}) {
 
   const incidenciaId = pickIncidenciaId(raw);
 
-  const lines = safeArray(
-    first(
-      raw.lines,
-      raw.lineas,
-      raw.items,
-      raw.concepts,
-      raw.conceptos,
-      []
-    )
-  ).map(normalizeLine);
+  const lines = safeArray(first(raw.lines, raw.lineas, raw.items, raw.concepts, raw.conceptos, [])).map(normalizeLine);
+  const attachments = safeArray(first(raw.attachments, raw.files, raw.adjuntos, [])).map(normalizeAttachment);
+  const attachmentsCount = number(first(raw.attachmentsCount, raw.filesCount, attachments.length), attachments.length);
 
   const clientName = safePublicText(
     first(
@@ -896,9 +1082,11 @@ export function normalizeFactura(item = {}) {
       raw.clienteName,
       raw.clienteNombre,
       raw.customerName,
+      raw.nombreContacto,
       raw.cliente?.displayName,
       raw.cliente?.name,
       raw.cliente?.nombre,
+      raw.cliente?.nombreContacto,
       raw.client?.displayName,
       raw.client?.name,
       raw.customer?.displayName,
@@ -907,104 +1095,256 @@ export function normalizeFactura(item = {}) {
     "Cliente"
   );
 
-  return {
+  const companyName = safePublicText(
+    first(
+      raw.clienteEmpresa,
+      raw.companyName,
+      raw.company,
+      raw.empresa,
+      raw.razonSocial,
+      raw.cliente?.razonSocial,
+      raw.cliente?.empresa,
+      raw.cliente?.companyName,
+      raw.clienteSnapshot?.razonSocial,
+      raw.clienteSnapshot?.empresa,
+      raw.clienteSnapshot?.companyName,
+      clientName
+    ),
+    clientName
+  );
+
+  const emailCliente = cleanText(first(raw.clienteEmail, raw.emailCliente, raw.clientEmail, raw.customerEmail, raw.email, raw.cliente?.email, raw.client?.email), "").toLowerCase();
+  const clienteAvatar = safeUrl(first(raw.clienteAvatar, raw.clientAvatar, raw.avatar, raw.avatarUrl, raw.cliente?.avatar, raw.cliente?.avatarUrl, raw.cliente?.logo, raw.cliente?.logoUrl, ""));
+
+  const issuedAt = first(raw.issuedAt, raw.fechaFactura, raw.fechaFacturaISO, raw.invoiceDate, raw.date, raw.createdAt, null);
+  const updatedAt = first(raw.updatedAt, raw.modifiedAt, raw.fechaActualizacion, raw.lifecycle?.updatedAt, raw.sentAt, raw.fechaEnvio, raw.createdAt, null);
+  const sentAt = first(raw.sentAt, raw.fechaEnvio, raw.mailSentAt, raw.email?.sentAt, raw.delivery?.sentAt, raw.delivery?.lastSentAt, null);
+  const hasPdf = Boolean(first(raw.hasPdf, raw.pdfAvailable, raw.pdfUrl, raw.viewUrl, raw.downloadUrl, raw.file?.url, raw.file?.viewUrl, raw.file?.downloadUrl, raw.blobPath, raw.pdfPath, ""));
+  const sent = Boolean(raw.delivery?.sent === true || raw.meta?.isSent === true || sentAt);
+
+  const normalized = {
     id,
     facturaId: id,
     invoiceId: id,
 
     number: numberValue,
-    numeroFactura: numberValue,
-    numeroFacturaLegal: cleanText(first(raw.numeroFacturaLegal, numberValue), numberValue),
-    invoiceNumber: numberValue,
+    numero: numberValue,
+    code: numberValue,
+    numeroFactura: numeroFacturaLegal,
+    numeroFacturaLegal,
+    numeroFacturaSistema,
+    invoiceNumber: numeroFacturaLegal,
 
     title,
     name: title,
     concepto: safePublicText(first(raw.concepto, raw.conceptoPrincipal, title), title),
+    preview: safePublicText(first(raw.preview, raw.description, raw.descripcion, title), title),
+    description: safePublicText(first(raw.description, raw.descripcion, raw.preview, title), title),
+    descripcion: safePublicText(first(raw.descripcion, raw.description, raw.preview, title), title),
 
-    status,
-    estado: cleanText(first(raw.estado, status), status),
+    status: estado,
+    estado: cleanText(first(raw.estado, estado), estado),
+    estadoFactura: cleanText(first(raw.estadoFactura, estado), estado),
     paymentStatus,
     estadoPago: cleanText(first(raw.estadoPago, paymentStatus), paymentStatus),
+    estadoPagoLabel: cleanText(first(raw.estadoPagoLabel, ""), ""),
 
     total,
     amount: total,
     importe: total,
+    importeTotal: total,
+    totalFactura: total,
+    facturaTotal: total,
+    invoiceAmount: total,
 
     subtotal,
+    baseImponible: subtotal,
     tax,
     iva: tax,
+    ivaTotal: tax,
+    irpf: round2(first(raw.irpf, raw.irpfTotal, raw.retencionesTotal, 0)),
+    irpfTotal: round2(first(raw.irpfTotal, raw.irpf, raw.retencionesTotal, 0)),
 
     paidAmount,
     paid: paidAmount,
     pagado: paidAmount,
-
     pendingAmount,
     pendiente: pendingAmount,
 
     currency,
     moneda: currency,
+    facturaCurrency: currency,
+
+    formaPago: cleanText(first(raw.formaPago, raw.metodoPago, raw.paymentMethod, raw.payment?.method, "—"), "—"),
+    metodoPago: cleanText(first(raw.metodoPago, raw.formaPago, raw.paymentMethod, raw.payment?.method, "—"), "—"),
+    paymentMethod: cleanText(first(raw.paymentMethod, raw.metodoPago, raw.formaPago, raw.payment?.method, "—"), "—"),
 
     clienteId: cleanText(first(raw.clienteId, raw.clientId, raw.customerId, raw.cliente?.clienteId, raw.cliente?.id), ""),
     clientId: cleanText(first(raw.clientId, raw.clienteId, raw.customerId, raw.client?.id), ""),
     customerId: cleanText(first(raw.customerId, raw.clientId, raw.clienteId), ""),
+    userId: cleanText(first(raw.userId, raw.usuarioId, raw.cliente?.userId), ""),
+    clienteIds: safeArray(raw.clienteIds),
+    userIds: safeArray(raw.userIds),
 
     clientName,
     clienteName: clientName,
     clienteNombre: clientName,
+    nombreContacto: clientName,
+    contactName: clientName,
+    customerName: clientName,
 
-    clienteEmail: cleanText(first(raw.clienteEmail, raw.emailCliente, raw.clientEmail, raw.customerEmail, raw.cliente?.email, raw.client?.email), ""),
-    emailCliente: cleanText(first(raw.emailCliente, raw.clienteEmail, raw.clientEmail, raw.customerEmail, raw.cliente?.email, raw.client?.email), ""),
+    clienteEmpresa: companyName,
+    empresa: companyName,
+    company: companyName,
+    companyName,
+    razonSocial: companyName,
+
+    clienteEmail: emailCliente,
+    emailCliente,
+    clientEmail: emailCliente,
+    customerEmail: emailCliente,
+    email: emailCliente,
+
+    clienteAvatar,
+    clientAvatar: clienteAvatar,
+    avatar: clienteAvatar,
+    avatarUrl: clienteAvatar,
+
+    cliente: {
+      ...safeObject(raw.cliente),
+      id: cleanText(first(raw.cliente?.id, raw.clienteId, raw.clientId, raw.customerId), "") || null,
+      clienteId: cleanText(first(raw.cliente?.clienteId, raw.clienteId, raw.clientId, raw.customerId), "") || null,
+      userId: cleanText(first(raw.cliente?.userId, raw.userId), "") || null,
+      nombre: clientName,
+      name: clientName,
+      displayName: clientName,
+      email: emailCliente,
+      emailLower: emailCliente,
+      avatar: clienteAvatar || null,
+      avatarUrl: clienteAvatar || null,
+      empresa: companyName,
+      razonSocial: companyName,
+      companyName,
+    },
+    clientes: safeArray(raw.clientes),
+    clientesSnapshot: safeArray(raw.clientesSnapshot),
 
     ticketId: incidenciaId,
     incidenciaId,
     relatedTicketId: incidenciaId,
     relatedIncidentId: incidenciaId,
+    ticketIds: safeArray(first(raw.ticketIds, raw.incidenciaIds, incidenciaId ? [incidenciaId] : [])),
+    incidenciaIds: safeArray(first(raw.incidenciaIds, raw.ticketIds, incidenciaId ? [incidenciaId] : [])),
+    ticket: safeObject(first(raw.ticket, raw.incidencia, raw.linkedTicket, {})),
+    incidencia: safeObject(first(raw.incidencia, raw.ticket, raw.linkedTicket, {})),
+    linkedTicket: safeObject(first(raw.linkedTicket, raw.incidencia, raw.ticket, {})),
+    tickets: safeArray(first(raw.tickets, raw.incidencias, [])),
+    incidencias: safeArray(first(raw.incidencias, raw.tickets, [])),
+    relations: safeObject(raw.relations),
+    relationType: cleanText(first(raw.relationType, raw.meta?.relationType, incidenciaId ? "linked_ticket" : ""), ""),
 
     hasIncidencia: Boolean(incidenciaId),
     hasLinkedTicket: Boolean(incidenciaId),
 
     lines,
     lineas: lines,
+    items: lines,
+    conceptos: lines,
+    lineasCount: number(first(raw.lineasCount, raw.linesCount, lines.length), lines.length),
 
     pdfUrl: safeUrl(first(raw.pdfUrl, raw.file?.url, raw.file?.viewUrl, "")),
     viewUrl: safeUrl(first(raw.viewUrl, raw.pdfUrl, raw.file?.viewUrl, "")),
     downloadUrl: safeUrl(first(raw.downloadUrl, raw.file?.downloadUrl, "")),
-    hasPdf: Boolean(first(raw.hasPdf, raw.pdfAvailable, raw.pdfUrl, raw.file?.url, raw.file?.viewUrl, raw.file?.downloadUrl, "")),
+    blobPath: cleanText(first(raw.blobPath, raw.pdfPath, raw.blobName, raw.document?.blobPath, ""), ""),
+    blobName: cleanText(first(raw.blobName, raw.blobPath, raw.pdfPath, ""), ""),
+    pdfPath: cleanText(first(raw.pdfPath, raw.blobPath, raw.blobName, ""), ""),
+    hasPdf,
+    pdfAvailable: Boolean(first(raw.pdfAvailable, hasPdf)),
 
-    createdAt: first(raw.createdAt, raw.fechaCreacion, raw.date, null),
-    issuedAt: first(raw.issuedAt, raw.fechaEmision, raw.createdAt, raw.date, null),
+    attachments,
+    files: attachments,
+    adjuntos: attachments,
+    attachmentsCount,
+    filesCount: attachmentsCount,
+
+    links: safeObject(raw.links),
+
+    createdAt: first(raw.createdAt, raw.fechaCreacion, raw.date, issuedAt, null),
+    issuedAt,
+    issueDate: first(raw.issueDate, issuedAt, null),
+    invoiceDate: first(raw.invoiceDate, issuedAt, null),
+    fecha: first(raw.fecha, issuedAt, null),
+    fechaFactura: first(raw.fechaFactura, issuedAt, null),
+    fechaFacturaISO: first(raw.fechaFacturaISO, issuedAt, null),
     dueAt: first(raw.dueAt, raw.fechaVencimiento, raw.vencimiento, null),
     paidAt: first(raw.paidAt, raw.fechaPago, raw.payment?.paidAt, null),
-    updatedAt: first(raw.updatedAt, raw.modifiedAt, raw.fechaActualizacion, raw.createdAt, null),
-    sentAt: first(raw.sentAt, raw.fechaEnvio, raw.email?.sentAt, raw.delivery?.lastSentAt, null),
+    fechaPago: first(raw.fechaPago, raw.paidAt, raw.payment?.paidAt, null),
+    updatedAt,
+    sentAt,
+    fechaEnvio: sentAt,
+    mailSentAt: first(raw.mailSentAt, sentAt, null),
 
-    raw,
+    delivery: {
+      ...safeObject(raw.delivery),
+      sent,
+      sentAt,
+      sentTo: cleanText(first(raw.delivery?.sentTo, raw.enviadoA, emailCliente), "") || null,
+      sentToAll: safeArray(raw.delivery?.sentToAll),
+    },
+
+    payment: {
+      ...safeObject(raw.payment),
+      status: paymentStatus,
+      estadoPago: paymentStatus,
+      paidAmount,
+      pendingAmount,
+      currency,
+    },
+
+    raw: includeRaw ? raw : undefined,
 
     meta: {
       ...safeObject(raw.meta),
+      timestampMs: number(first(raw.meta?.timestampMs, toTimestamp(updatedAt), toTimestamp(issuedAt), toTimestamp(raw.createdAt)), 0),
       hasIncidencia: Boolean(incidenciaId),
       hasLinkedTicket: Boolean(incidenciaId),
-      hasPdf: Boolean(first(raw.hasPdf, raw.pdfAvailable, raw.pdfUrl, raw.file?.url, raw.file?.viewUrl, raw.file?.downloadUrl, "")),
+      hasTicket: Boolean(incidenciaId),
+      hasPdf,
+      isSent: sent,
       incidenciaId,
       ticketId: incidenciaId,
+      ticketIds: safeArray(first(raw.ticketIds, raw.incidenciaIds, incidenciaId ? [incidenciaId] : [])),
+      incidenciaIds: safeArray(first(raw.incidenciaIds, raw.ticketIds, incidenciaId ? [incidenciaId] : [])),
     },
   };
+
+  if (!includeRaw) {
+    delete normalized.raw;
+  }
+
+  return normalized;
 }
 
-function normalizeFacturas(items = []) {
+function normalizeFacturas(items = [], options = {}) {
+  const preserveOrder = options?.preserveOrder !== false;
+  const includeRaw = options?.includeRaw === true;
   const map = new Map();
 
   for (const item of safeArray(items)) {
-    const factura = normalizeFactura(item);
+    const factura = normalizeFactura(item, { includeRaw });
     const id = cleanText(first(factura.id, factura.facturaId, factura.number), "");
 
     if (!id) continue;
     if (!map.has(id)) map.set(id, factura);
   }
 
-  return [...map.values()].sort((a, b) => {
-    const left = Date.parse(a.issuedAt || a.updatedAt || a.createdAt || 0);
-    const right = Date.parse(b.issuedAt || b.updatedAt || b.createdAt || 0);
+  const rows = [...map.values()];
+
+  if (preserveOrder) return rows;
+
+  return rows.sort((a, b) => {
+    const left = toTimestamp(first(a.issuedAt, a.fechaFactura, a.updatedAt, a.createdAt));
+    const right = toTimestamp(first(b.issuedAt, b.fechaFactura, b.updatedAt, b.createdAt));
 
     return right - left;
   });
@@ -1037,51 +1377,64 @@ export function normalizeIncidenciaForFactura(item = {}) {
 
 export function normalizeFacturasListResponse(payload = null, requestMeta = {}) {
   const rawItems = listFromPayload(payload);
-  const items = normalizeFacturas(rawItems);
-  const total = totalFromPayload(payload, items.length);
-  const meta = metaFromPayload(payload);
+  const items = normalizeFacturas(rawItems, {
+    preserveOrder: true,
+    includeRaw: requestMeta.includeRaw === true,
+  });
 
-  const page = number(
-    first(meta.page, meta.currentPage, requestMeta.page, FACTURAS_DEFAULT_PAGE),
-    FACTURAS_DEFAULT_PAGE
-  );
-
-  const limit = number(
-    first(meta.limit, meta.pageSize, requestMeta.limit, items.length || FACTURAS_DEFAULT_LIMIT),
-    items.length || FACTURAS_DEFAULT_LIMIT
-  );
+  const paging = pagingFromPayload(payload, requestMeta, items.length);
+  const total = paging.total;
+  const envelope = safeObject(unwrapEnvelope(payload), {});
 
   return {
-    ok: true,
+    ok: envelope.ok !== false,
+    success: envelope.success !== false,
+    requestId: first(envelope.requestId, safeObject(payload).requestId, null),
 
     items,
     facturas: items,
     data: items,
+    invoices: items,
 
     total,
     count: items.length,
     remoteCount: total,
+    totalMatched: total,
 
-    page,
-    limit,
+    page: paging.page,
+    nextPage: paging.nextPage,
+    totalPages: paging.totalPages,
+    hasMore: paging.hasMore,
+    offset: paging.offset,
+    limit: paging.limit,
+    fetchLimit: paging.fetchLimit,
+
+    paging,
 
     stats: safeObject(first(namedObjectFromPayload(payload, "stats"), {})),
+    statsAllMatched: safeObject(first(namedObjectFromPayload(payload, "statsAllMatched"), {})),
     filters: safeObject(first(namedObjectFromPayload(payload, "filters"), {})),
+    diagnostics: safeObject(first(namedObjectFromPayload(payload, "diagnostics"), {})),
 
     meta: {
-      ...meta,
+      ...metaFromPayload(payload),
       total,
       count: items.length,
       remoteCount: total,
-      page,
-      limit,
+      totalMatched: total,
+      page: paging.page,
+      nextPage: paging.nextPage,
+      totalPages: paging.totalPages,
+      hasMore: paging.hasMore,
+      offset: paging.offset,
+      limit: paging.limit,
     },
   };
 }
 
 export function normalizeFacturaDetailResponse(payload = null) {
   const detail = detailFromPayload(payload);
-  const item = detail ? normalizeFactura(detail) : null;
+  const item = detail ? normalizeFactura(detail, { includeRaw: true }) : null;
 
   return {
     ok: Boolean(item),
@@ -1097,7 +1450,7 @@ export function normalizeFacturasStatsResponse(payload = null) {
   const stats = safeObject(first(namedObjectFromPayload(payload, "stats"), envelope.stats, envelope), {});
 
   return {
-    ok: true,
+    ok: envelope.ok !== false,
     stats,
     meta: metaFromPayload(payload),
   };
@@ -1105,7 +1458,7 @@ export function normalizeFacturasStatsResponse(payload = null) {
 
 export function normalizeFacturaCreateResponse(payload = null) {
   const detail = detailFromPayload(payload);
-  const item = detail ? normalizeFactura(detail) : null;
+  const item = detail ? normalizeFactura(detail, { includeRaw: true }) : null;
 
   return {
     ok: Boolean(item),
@@ -1121,7 +1474,7 @@ export function normalizeFacturaCreateResponse(payload = null) {
 
 export function normalizeFacturaSendResponse(payload = null) {
   const detail = detailFromPayload(payload);
-  const item = detail ? normalizeFactura(detail) : null;
+  const item = detail ? normalizeFactura(detail, { includeRaw: true }) : null;
 
   return {
     ok: true,
@@ -1382,48 +1735,82 @@ async function downloadBlobRequest(endpoint = "", options = {}) {
 ========================================================= */
 
 export async function fetchFacturasRequest(options = {}) {
+  const query = buildListQuery(options);
+
   return getJson(FACTURAS_ENDPOINT, {
-    timeout: FACTURAS_LIST_TIMEOUT,
-    query: buildListQuery(options),
+    timeout: options.timeout || FACTURAS_LIST_TIMEOUT,
+    query,
     source: "views.facturas.list",
   });
 }
 
 export async function listFacturas(options = {}) {
+  const query = buildListQuery(options);
+  const queryKey = `list:${stableStringify(query)}`;
+
+  if (options.dedupe !== false && inflight.has(queryKey)) {
+    return inflight.get(queryKey);
+  }
+
   loading = true;
   lastError = null;
 
-  try {
-    const response = await fetchFacturasRequest(options);
-    const normalized = normalizeFacturasListResponse(response, options);
+  const task = (async () => {
+    try {
+      const response = await getJson(FACTURAS_ENDPOINT, {
+        timeout: options.timeout || FACTURAS_LIST_TIMEOUT,
+        query,
+        source: "views.facturas.list",
+      });
 
-    lastList = {
-      items: normalized.items,
-      total: normalized.total,
-    };
+      const normalized = normalizeFacturasListResponse(response, {
+        ...options,
+        ...query,
+      });
 
-    lastLoadedAt = nowIso();
+      const cacheAppend = options.cacheAppend === true || options.appendToCache === true;
+      const cachedItems = cacheAppend
+        ? mergeById([...lastList.items, ...normalized.items])
+        : normalized.items;
 
-    return normalized;
-  } catch (error) {
-    lastError = normalizeError(error);
-
-    if (options.returnStaleOnError !== false && lastList.items.length) {
-      return {
-        ok: false,
-        stale: true,
-        items: lastList.items,
-        facturas: lastList.items,
-        total: lastList.total,
-        count: lastList.items.length,
-        error: lastError,
+      lastList = {
+        items: cachedItems,
+        total: normalized.total,
+        queryKey,
       };
-    }
 
-    throw error;
-  } finally {
-    loading = false;
-  }
+      if (normalized.stats && Object.keys(normalized.stats).length) {
+        lastStats = normalized.stats;
+      }
+
+      lastLoadedAt = nowIso();
+
+      return normalized;
+    } catch (error) {
+      lastError = normalizeError(error);
+
+      if (options.returnStaleOnError !== false && lastList.items.length) {
+        return {
+          ok: false,
+          success: false,
+          stale: true,
+          items: lastList.items,
+          facturas: lastList.items,
+          data: lastList.items,
+          invoices: lastList.items,
+          total: lastList.total,
+          count: lastList.items.length,
+          error: lastError,
+        };
+      }
+
+      throw error;
+    } finally {
+      loading = false;
+    }
+  })();
+
+  return setInflight(queryKey, task);
 }
 
 export async function loadFacturas(options = {}) {
@@ -1432,12 +1819,23 @@ export async function loadFacturas(options = {}) {
 }
 
 export async function fetchFacturaDetailRequest(id = "", options = {}) {
-  const response = await getJson(getFacturaEndpoint(id), {
-    timeout: options.timeout || FACTURAS_DETAIL_TIMEOUT,
-    source: "views.facturas.detail",
-  });
+  const facturaId = normalizeFacturaId(id);
+  const key = `detail:${facturaId}`;
 
-  return normalizeFacturaDetailResponse(response);
+  if (options.dedupe !== false && inflight.has(key)) {
+    return inflight.get(key);
+  }
+
+  const task = (async () => {
+    const response = await getJson(getFacturaEndpoint(facturaId), {
+      timeout: options.timeout || FACTURAS_DETAIL_TIMEOUT,
+      source: "views.facturas.detail",
+    });
+
+    return normalizeFacturaDetailResponse(response);
+  })();
+
+  return setInflight(key, task);
 }
 
 export async function getFacturaById(id = "", options = {}) {
@@ -1446,15 +1844,27 @@ export async function getFacturaById(id = "", options = {}) {
 }
 
 export async function fetchFacturasStatsRequest(options = {}) {
-  const response = await getJson(`${FACTURAS_ENDPOINT}/stats`, {
-    timeout: options.timeout || FACTURAS_LIST_TIMEOUT,
-    source: "views.facturas.stats",
-  });
+  const query = safeObject(options.query || options.params || options.filters);
+  const key = `stats:${stableStringify(query)}`;
 
-  const normalized = normalizeFacturasStatsResponse(response);
-  lastStats = normalized.stats;
+  if (options.dedupe !== false && inflight.has(key)) {
+    return inflight.get(key);
+  }
 
-  return normalized;
+  const task = (async () => {
+    const response = await getJson(`${FACTURAS_ENDPOINT}/stats`, {
+      timeout: options.timeout || FACTURAS_LIST_TIMEOUT,
+      query,
+      source: "views.facturas.stats",
+    });
+
+    const normalized = normalizeFacturasStatsResponse(response);
+    lastStats = normalized.stats;
+
+    return normalized;
+  })();
+
+  return setInflight(key, task);
 }
 
 export async function loadFacturasStats(options = {}) {
@@ -1482,11 +1892,12 @@ export async function createFactura(payload = {}, options = {}) {
   const created = response.item;
 
   if (created) {
-    const nextItems = normalizeFacturas([created, ...lastList.items]);
+    const nextItems = mergeById([normalizeFactura(created), ...lastList.items]);
 
     lastList = {
+      ...lastList,
       items: nextItems,
-      total: Math.max(number(lastList.total, 0), nextItems.length),
+      total: Math.max(number(lastList.total, 0) + 1, nextItems.length),
     };
   }
 
@@ -1504,7 +1915,18 @@ export async function updateFacturaRequest(id = "", payload = {}, options = {}) 
 
 export async function updateFactura(id = "", payload = {}, options = {}) {
   const response = await updateFacturaRequest(id, payload, options);
-  return response.item;
+  const updated = response.item;
+
+  if (updated) {
+    const stableId = getFacturaStableId(updated);
+
+    lastList = {
+      ...lastList,
+      items: lastList.items.map((item) => getFacturaStableId(item) === stableId ? normalizeFactura(updated) : item),
+    };
+  }
+
+  return updated;
 }
 
 export async function patchFacturaRequest(id = "", payload = {}, options = {}) {
@@ -1518,7 +1940,18 @@ export async function patchFacturaRequest(id = "", payload = {}, options = {}) {
 
 export async function patchFactura(id = "", payload = {}, options = {}) {
   const response = await patchFacturaRequest(id, payload, options);
-  return response.item;
+  const patched = response.item;
+
+  if (patched) {
+    const stableId = getFacturaStableId(patched);
+
+    lastList = {
+      ...lastList,
+      items: lastList.items.map((item) => getFacturaStableId(item) === stableId ? normalizeFactura(patched) : item),
+    };
+  }
+
+  return patched;
 }
 
 export async function removeFacturaRequest(id = "", options = {}) {
@@ -1534,6 +1967,7 @@ export async function removeFactura(id = "", options = {}) {
   const facturaId = normalizeFacturaId(id);
 
   lastList = {
+    ...lastList,
     items: lastList.items.filter((item) => {
       return item.id !== facturaId && item.facturaId !== facturaId && item.invoiceId !== facturaId;
     }),
@@ -1554,7 +1988,18 @@ export async function sendFacturaRequest(id = "", payload = {}, options = {}) {
 
 export async function sendFactura(id = "", payload = {}, options = {}) {
   const response = await sendFacturaRequest(id, payload, options);
-  return response.item || response;
+  const sentItem = response.item;
+
+  if (sentItem) {
+    const stableId = getFacturaStableId(sentItem);
+
+    lastList = {
+      ...lastList,
+      items: lastList.items.map((item) => getFacturaStableId(item) === stableId ? normalizeFactura(sentItem) : item),
+    };
+  }
+
+  return sentItem || response;
 }
 
 /* =========================================================
@@ -1637,22 +2082,33 @@ export async function searchFacturaIncidencias({
 
   if (query.length < 2) return [];
 
-  const response = await getJson(FACTURAS_TICKETS_ENDPOINT, {
-    timeout: FACTURAS_LIST_TIMEOUT,
-    query: {
-      q: query,
-      search: query,
-      limit,
-      includeTotal: true,
-      includeClosed,
-    },
-    source: "views.facturas.search-incidencias",
-  });
+  const finalLimit = Math.min(Math.max(1, number(limit, 12)), 25);
+  const key = `incidencias:${query}:${finalLimit}:${includeClosed ? "1" : "0"}`;
 
-  return listFromTicketPayload(response)
-    .map(normalizeIncidenciaForFactura)
-    .filter((item) => item.id)
-    .slice(0, limit);
+  if (inflight.has(key)) {
+    return inflight.get(key);
+  }
+
+  const task = (async () => {
+    const response = await getJson(FACTURAS_TICKETS_ENDPOINT, {
+      timeout: FACTURAS_LIST_TIMEOUT,
+      query: {
+        q: query,
+        search: query,
+        limit: finalLimit,
+        includeTotal: false,
+        includeClosed,
+      },
+      source: "views.facturas.search-incidencias",
+    });
+
+    return listFromTicketPayload(response)
+      .map(normalizeIncidenciaForFactura)
+      .filter((item) => item.id)
+      .slice(0, finalLimit);
+  })();
+
+  return setInflight(key, task);
 }
 
 /* =========================================================
@@ -1730,8 +2186,12 @@ export function computeFacturasStats(items = lastList.items) {
         acc.withIncidencia += 1;
       }
 
-      if (item.hasPdf || item.meta?.hasPdf || item.pdfUrl || item.viewUrl || item.downloadUrl) {
+      if (item.hasPdf || item.pdfAvailable || item.meta?.hasPdf || item.pdfUrl || item.viewUrl || item.downloadUrl) {
         acc.withPdf += 1;
+      }
+
+      if (item.delivery?.sent || item.meta?.isSent || item.sentAt || item.fechaEnvio) {
+        acc.sent += 1;
       }
 
       acc.amount += amount;
@@ -1742,6 +2202,7 @@ export function computeFacturasStats(items = lastList.items) {
       total: 0,
       paid: 0,
       pending: 0,
+      sent: 0,
       withIncidencia: 0,
       withPdf: 0,
       amount: 0,
@@ -1778,11 +2239,13 @@ export function clearFacturasCache() {
   lastList = {
     items: [],
     total: 0,
+    queryKey: "",
   };
 
   lastStats = null;
   lastLoadedAt = null;
   lastError = null;
+  inflight.clear();
 
   return true;
 }
@@ -1801,7 +2264,10 @@ export function getFacturasApiSnapshot() {
       items: lastList.items.length,
       total: lastList.total,
       hydrated: lastList.items.length > 0,
+      queryKey: lastList.queryKey,
     },
+
+    inflight: inflight.size,
 
     stats: lastStats || computeFacturasStats(lastList.items),
 
@@ -1815,6 +2281,8 @@ export function getFacturasApiSnapshot() {
       noUtilsExternal: true,
       noDom: true,
       noRouter: true,
+      preservesBackendOrder: true,
+      dedupeInflightRequests: true,
     },
   };
 }

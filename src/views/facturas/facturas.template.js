@@ -7,6 +7,7 @@
    - Header, stats, filtros, búsqueda, orden y tabla.
    - Integrar modal de creación y modal de detalle.
    - Exponer data-action/data-facturas-action para index.js.
+   - Exponer sentinel para scroll infinito.
    - Mantener clases CSS externas facturas-*.
    - Sin AppCore.
    - Sin Auth.
@@ -25,7 +26,7 @@ import {
   renderFacturasDetailModal,
 } from "./facturas.template.modal.js";
 
-export const FACTURAS_TEMPLATE_VERSION = "facturas.template.v1";
+export const FACTURAS_TEMPLATE_VERSION = "facturas.template.infinite.v2";
 
 export const FACTURAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -38,9 +39,7 @@ export const FACTURAS_ACTIONS = Object.freeze({
   CLEAR_SEARCH: "clear-search",
   SEARCH: "search",
   SORT: "sort",
-
-  PREV_PAGE: "prev-page",
-  NEXT_PAGE: "next-page",
+  LOAD_MORE: "load-more",
 
   OPEN_FACTURA: "open-factura",
   VIEW_PDF: "view-factura-pdf",
@@ -50,7 +49,8 @@ export const FACTURAS_ACTIONS = Object.freeze({
   OPEN_INCIDENCIA: "open-incidencia",
 });
 
-const DEFAULT_PAGE_SIZE = 5;
+const DEFAULT_SKELETON_ROWS = 5;
+const DEFAULT_BATCH_SIZE = 100;
 const DEFAULT_CURRENCY = "EUR";
 
 const FILTERS = Object.freeze([
@@ -112,10 +112,9 @@ function first(...values) {
 
 function number(value = 0, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
-
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : fallback;
-  }
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value === "object") return fallback;
 
   if (typeof value === "string") {
     let clean = value
@@ -130,13 +129,9 @@ function number(value = 0, fallback = 0) {
     const hasDot = clean.includes(".");
 
     if (hasComma && hasDot) {
-      const lastComma = clean.lastIndexOf(",");
-      const lastDot = clean.lastIndexOf(".");
-
-      clean =
-        lastComma > lastDot
-          ? clean.replace(/\./g, "").replace(/,/g, ".")
-          : clean.replace(/,/g, "");
+      clean = clean.lastIndexOf(",") > clean.lastIndexOf(".")
+        ? clean.replace(/\./g, "").replace(/,/g, ".")
+        : clean.replace(/,/g, "");
     } else if (hasComma) {
       clean = clean.replace(/,/g, ".");
     }
@@ -224,7 +219,7 @@ function bool(value, fallback = false) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value === 1;
 
-  const key = normalizeText(value);
+  const key = normalizeKey(value);
 
   if (["true", "1", "yes", "si", "sí", "on"].includes(key)) return true;
   if (["false", "0", "no", "off"].includes(key)) return false;
@@ -253,8 +248,61 @@ function hashString(value = "") {
   return Math.abs(hash >>> 0);
 }
 
+function readPath(source = {}, path = "") {
+  const parts = cleanText(path, "")
+    .split(".")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  let current = source;
+
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    current = current?.[part];
+  }
+
+  return current;
+}
+
+function firstPath(source = {}, paths = []) {
+  for (const path of safeArray(paths)) {
+    const value = readPath(source, path);
+
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && !value.length) continue;
+    if (isObject(value) && !Object.keys(value).length) continue;
+
+    return value;
+  }
+
+  return null;
+}
+
+function safeImageSrc(value = "") {
+  const raw = cleanText(value, "");
+
+  if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
+  if (/[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(raw)) return "";
+
+  if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
+
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
+}
+
 /* =========================================================
-   INPUT
+   INPUT / STATE
 ========================================================= */
 
 function getInputItems(input = {}) {
@@ -292,20 +340,7 @@ function getRuntimeState(input = {}) {
 function isAdmin(input = {}) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
-
-  const role = normalizeKey(
-    first(
-      data.role,
-      data.rol,
-      runtime.role,
-      runtime.rol,
-      data.user?.role,
-      data.user?.rol,
-      runtime.user?.role,
-      runtime.user?.rol,
-      ""
-    )
-  );
+  const role = normalizeKey(first(data.role, data.rol, runtime.role, runtime.rol, data.user?.role, data.user?.rol, ""));
 
   return (
     data.admin === true ||
@@ -320,54 +355,26 @@ function isAdmin(input = {}) {
    DATE / MONEY
 ========================================================= */
 
-function isDateOnlyValue(value = null) {
-  const raw = cleanText(value, "");
-
-  return /^\d{4}-\d{2}-\d{2}$/.test(raw) || /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw);
-}
-
 function toTimestamp(value = null) {
   if (!value) return 0;
-
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? 0 : value.getTime();
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value > 9999999999 ? value : value * 1000;
-  }
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? 0 : value.getTime();
+  if (typeof value === "number" && Number.isFinite(value)) return value > 9999999999 ? value : value * 1000;
 
   const raw = cleanText(value, "");
-
   if (!raw) return 0;
 
   const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric > 9999999999 ? numeric : numeric * 1000;
 
-  if (Number.isFinite(numeric) && numeric > 0) {
-    return numeric > 9999999999 ? numeric : numeric * 1000;
-  }
-
-  const esMatch = raw.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
-  );
+  const esMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
 
   if (esMatch) {
     const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = esMatch;
-
-    const date = new Date(
-      Number(yyyy),
-      Number(mm) - 1,
-      Number(dd),
-      Number(hh),
-      Number(min),
-      Number(ss)
-    );
-
+    const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(ss));
     return Number.isNaN(date.getTime()) ? 0 : date.getTime();
   }
 
   const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
-
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
@@ -389,9 +396,23 @@ function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
   }
 }
 
+function formatDateShort(value = null) {
+  const timestamp = toTimestamp(value);
+  if (!timestamp) return "—";
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(new Date(timestamp));
+  } catch {
+    return "—";
+  }
+}
+
 function formatDateTime(value = null) {
   const timestamp = toTimestamp(value);
-
   if (!timestamp) return "—";
 
   try {
@@ -407,46 +428,20 @@ function formatDateTime(value = null) {
   }
 }
 
-function formatDateShort(value = null) {
-  const timestamp = toTimestamp(value);
-
-  if (!timestamp) return "—";
-
-  try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(timestamp));
-  } catch {
-    return "—";
-  }
-}
-
-function formatDateTooltip(value = null) {
-  return isDateOnlyValue(value) ? formatDateShort(value) : formatDateTime(value);
-}
-
 function formatRelativeDate(value = null) {
   const timestamp = toTimestamp(value);
-
   if (!timestamp) return "Sin fecha";
 
-  const diffMs = timestamp - Date.now();
-  const diffMin = Math.round(diffMs / 60000);
+  const diffMin = Math.round((timestamp - Date.now()) / 60000);
   const absMin = Math.abs(diffMin);
 
   if (absMin < 1) return "Ahora mismo";
   if (absMin < 60) return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
 
   const diffHours = Math.round(absMin / 60);
-
-  if (diffHours < 24) {
-    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
-  }
+  if (diffHours < 24) return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
 
   const diffDays = Math.round(diffHours / 24);
-
   if (diffDays <= 7) {
     return diffMin > 0
       ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
@@ -493,141 +488,76 @@ function getRaw(item = {}) {
   return safeObject(item?.raw);
 }
 
-function getFacturaId(item = {}) {
+function fromItem(item = {}, paths = [], fallback = "") {
   const raw = getRaw(item);
+  return cleanText(first(firstPath(item, paths), firstPath(raw, paths)), fallback);
+}
 
-  return cleanText(
-    first(
-      item.id,
-      item.facturaId,
-      item.invoiceId,
-      item.numeroFacturaLegal,
-      item.numeroFacturaSistema,
-      item.numero,
-      raw.id,
-      raw.facturaId,
-      raw.invoiceId,
-      raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema,
-      raw.numero
-    ),
-    "FAC-SIN-ID"
-  );
+function getFacturaId(item = {}) {
+  return fromItem(item, [
+    "id",
+    "facturaId",
+    "invoiceId",
+    "numeroFacturaLegal",
+    "numeroFacturaSistema",
+    "numeroFactura",
+    "numero",
+    "number",
+  ], "FAC-SIN-ID");
 }
 
 function getFacturaNumero(item = {}) {
-  const raw = getRaw(item);
-
-  return cleanText(
-    first(
-      item.numeroFacturaLegal,
-      item.numeroFactura,
-      item.number,
-      item.invoiceNumber,
-      item.numero,
-      item.code,
-      item.facturaId,
-      item.invoiceId,
-      item.id,
-      raw.numeroFacturaLegal,
-      raw.numeroFactura,
-      raw.number,
-      raw.invoiceNumber,
-      raw.numero,
-      raw.code,
-      raw.facturaId,
-      raw.invoiceId,
-      raw.id
-    ),
-    "Factura sin número"
-  );
+  return fromItem(item, [
+    "numeroFacturaLegal",
+    "numeroFactura",
+    "number",
+    "invoiceNumber",
+    "numero",
+    "code",
+    "facturaId",
+    "invoiceId",
+    "id",
+  ], "Factura sin número");
 }
 
 function getFacturaSistema(item = {}) {
-  const raw = getRaw(item);
-
-  return cleanText(
-    first(
-      item.numeroFacturaSistema,
-      item.systemInvoiceNumber,
-      raw.numeroFacturaSistema,
-      raw.systemInvoiceNumber,
-      ""
-    ),
-    ""
-  );
+  return fromItem(item, ["numeroFacturaSistema", "systemInvoiceNumber", "systemNumber"], "");
 }
 
 function getCompanyName(item = {}) {
-  const raw = getRaw(item);
-
-  return cleanText(
-    first(
-      item.clienteEmpresa,
-      item.empresa,
-      item.company,
-      item.companyName,
-      item.razonSocial,
-      item.cliente?.razonSocial,
-      item.cliente?.companyName,
-      item.cliente?.empresa,
-      item.client?.razonSocial,
-      item.client?.companyName,
-      item.customer?.razonSocial,
-      item.customer?.companyName,
-      item.clienteSnapshot?.razonSocial,
-      raw.clienteEmpresa,
-      raw.empresa,
-      raw.company,
-      raw.companyName,
-      raw.razonSocial,
-      raw.cliente?.razonSocial,
-      raw.cliente?.companyName,
-      raw.cliente?.empresa,
-      raw.client?.razonSocial,
-      raw.client?.companyName,
-      raw.customer?.razonSocial,
-      raw.customer?.companyName,
-      raw.clienteSnapshot?.razonSocial
-    ),
-    ""
-  );
+  return fromItem(item, [
+    "clienteEmpresa",
+    "empresa",
+    "company",
+    "companyName",
+    "razonSocial",
+    "cliente.razonSocial",
+    "cliente.companyName",
+    "cliente.empresa",
+    "client.razonSocial",
+    "client.companyName",
+    "customer.razonSocial",
+    "customer.companyName",
+    "clienteSnapshot.razonSocial",
+  ], "");
 }
 
 function getContactName(item = {}) {
-  const raw = getRaw(item);
-
-  return cleanText(
-    first(
-      item.clienteNombre,
-      item.nombreContacto,
-      item.contactName,
-      item.cliente?.nombreContacto,
-      item.cliente?.nombre,
-      item.cliente?.name,
-      item.cliente?.displayName,
-      item.clienteSnapshot?.nombreContacto,
-      item.clientName,
-      item.client?.name,
-      item.customer?.name,
-      item.name,
-      item.nombre,
-      raw.clienteNombre,
-      raw.nombreContacto,
-      raw.contactName,
-      raw.cliente?.nombreContacto,
-      raw.cliente?.nombre,
-      raw.cliente?.name,
-      raw.cliente?.displayName,
-      raw.clienteSnapshot?.nombreContacto,
-      raw.clientName,
-      raw.client?.name,
-      raw.customer?.name,
-      raw.name,
-      raw.nombre
-    ),
-    ""
-  );
+  return fromItem(item, [
+    "clienteNombre",
+    "nombreContacto",
+    "contactName",
+    "cliente.nombreContacto",
+    "cliente.nombre",
+    "cliente.name",
+    "cliente.displayName",
+    "clienteSnapshot.nombreContacto",
+    "clientName",
+    "client.name",
+    "customer.name",
+    "name",
+    "nombre",
+  ], "");
 }
 
 function getClientName(item = {}) {
@@ -638,39 +568,23 @@ function getClientSecondaryName(item = {}) {
   const company = getCompanyName(item);
   const contact = getContactName(item);
 
-  if (company && contact && normalizeText(company) !== normalizeText(contact)) {
-    return contact;
-  }
-
-  return "";
+  return company && contact && normalizeText(company) !== normalizeText(contact)
+    ? contact
+    : "";
 }
 
 function getClientEmail(item = {}) {
-  const raw = getRaw(item);
-
-  return cleanText(
-    first(
-      item.clienteEmail,
-      item.emailCliente,
-      item.cliente?.email,
-      item.cliente?.emailLower,
-      item.clienteSnapshot?.email,
-      item.email,
-      item.clientEmail,
-      item.client?.email,
-      item.customer?.email,
-      raw.clienteEmail,
-      raw.emailCliente,
-      raw.cliente?.email,
-      raw.cliente?.emailLower,
-      raw.clienteSnapshot?.email,
-      raw.email,
-      raw.clientEmail,
-      raw.client?.email,
-      raw.customer?.email
-    ),
-    ""
-  ).toLowerCase();
+  return fromItem(item, [
+    "clienteEmail",
+    "emailCliente",
+    "cliente.email",
+    "cliente.emailLower",
+    "clienteSnapshot.email",
+    "email",
+    "clientEmail",
+    "client.email",
+    "customer.email",
+  ], "").toLowerCase();
 }
 
 function getClientEmailLabel(item = {}) {
@@ -678,93 +592,65 @@ function getClientEmailLabel(item = {}) {
 }
 
 function getClientAvatar(item = {}) {
-  const raw = getRaw(item);
-
-  return cleanText(
-    first(
-      item.clienteAvatar,
-      item.clientAvatar,
-      item.avatar,
-      item.avatarUrl,
-      item.logo,
-      item.logoUrl,
-      item.photo,
-      item.photoUrl,
-      item.picture,
-      item.pictureUrl,
-      item.cliente?.avatar,
-      item.cliente?.avatarUrl,
-      item.cliente?.logo,
-      item.cliente?.logoUrl,
-      item.client?.avatar,
-      item.client?.avatarUrl,
-      item.customer?.avatar,
-      item.customer?.avatarUrl,
-      raw.clienteAvatar,
-      raw.clientAvatar,
-      raw.avatar,
-      raw.avatarUrl,
-      raw.logo,
-      raw.logoUrl,
-      raw.photo,
-      raw.photoUrl,
-      raw.picture,
-      raw.pictureUrl,
-      raw.cliente?.avatar,
-      raw.cliente?.avatarUrl,
-      raw.cliente?.logo,
-      raw.cliente?.logoUrl,
-      raw.client?.avatar,
-      raw.client?.avatarUrl,
-      raw.customer?.avatar,
-      raw.customer?.avatarUrl
-    ),
-    ""
-  );
-}
-
-function getClientStableKey(item = {}) {
-  const raw = getRaw(item);
-
-  return normalizeKey(
-    first(
-      item.clienteId,
-      item.clientId,
-      item.customerId,
-      item.userId,
-      item.uid,
-      item.clienteEmail,
-      item.emailCliente,
-      item.clientEmail,
-      item.email,
-      raw.clienteId,
-      raw.clientId,
-      raw.customerId,
-      raw.userId,
-      raw.uid,
-      raw.clienteEmail,
-      raw.emailCliente,
-      raw.clientEmail,
-      raw.email,
-      getClientName(item)
-    )
-  );
+  return safeImageSrc(firstPath(item, [
+    "clienteAvatar",
+    "clientAvatar",
+    "avatar",
+    "avatarUrl",
+    "logo",
+    "logoUrl",
+    "photo",
+    "photoUrl",
+    "picture",
+    "pictureUrl",
+    "cliente.avatar",
+    "cliente.avatarUrl",
+    "cliente.logo",
+    "cliente.logoUrl",
+    "client.avatar",
+    "client.avatarUrl",
+    "customer.avatar",
+    "customer.avatarUrl",
+  ]) || firstPath(getRaw(item), [
+    "clienteAvatar",
+    "clientAvatar",
+    "avatar",
+    "avatarUrl",
+    "logo",
+    "logoUrl",
+    "photo",
+    "photoUrl",
+    "picture",
+    "pictureUrl",
+    "cliente.avatar",
+    "cliente.avatarUrl",
+    "client.avatar",
+    "client.avatarUrl",
+  ]));
 }
 
 function getInitials(value = "") {
   const text = cleanText(value, "");
-
   if (!text) return "ON";
 
   const parts = text.split(/\s+/).filter(Boolean);
-
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
 
   return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
 }
 
 function getAvatarToneClass(item = {}) {
-  return `facturas-avatar--tone-${hashString(getClientStableKey(item)) % 10}`;
+  const stable = first(
+    item.clienteId,
+    item.clientId,
+    item.customerId,
+    item.userId,
+    item.uid,
+    getClientEmail(item),
+    getClientName(item)
+  );
+
+  return `facturas-avatar--tone-${hashString(stable) % 10}`;
 }
 
 function getEstadoPagoKey(value = "") {
@@ -793,145 +679,72 @@ function getEstadoPagoLabel(value = "") {
   return cleanText(value, "Pendiente");
 }
 
-function getEstadoPagoChipClass(value = "") {
-  return `facturas-chip--${getEstadoPagoKey(value) || "pending"}`;
-}
-
 function getPaymentRaw(item = {}) {
-  const raw = getRaw(item);
-
   return first(
     item.estadoPago,
     item.paymentStatus,
     item.payment?.status,
     item.billing?.paymentStatus,
-    raw.estadoPago,
-    raw.paymentStatus,
-    raw.payment?.status,
-    raw.billing?.paymentStatus
+    getRaw(item).estadoPago,
+    getRaw(item).paymentStatus,
+    getRaw(item).payment?.status,
+    getRaw(item).billing?.paymentStatus,
+    "pending"
   );
 }
 
-function pickTicketIdFromArray(value = []) {
-  for (const item of safeArray(value)) {
-    if (typeof item === "string" && item.trim()) return item.trim();
+function getIncidenciaId(item = {}) {
+  const direct = fromItem(item, [
+    "ticketId",
+    "incidenciaId",
+    "incidencia.id",
+    "incidencia.ticketId",
+    "incidencia.incidenciaId",
+    "ticket.id",
+    "ticket.ticketId",
+    "ticket.incidenciaId",
+    "linkedTicket.id",
+    "linkedTicket.ticketId",
+    "linkedTicket.incidenciaId",
+    "relatedTicketId",
+    "relatedIncidentId",
+    "supportTicketId",
+    "caseId",
+    "meta.ticketId",
+    "meta.linkedTicketId",
+    "meta.incidenciaId",
+  ], "");
 
-    if (!isObject(item)) continue;
+  if (direct) return direct;
 
-    const candidate = first(
-      item.ticketId,
-      item.incidenciaId,
-      item.id,
-      item.code,
-      item.numero,
-      item.relatedTicketId,
-      item.relatedIncidentId,
-      item.supportTicketId,
-      item.caseId
-    );
-
-    if (candidate) return cleanText(candidate, "");
+  for (const list of [item.ticketIds, item.incidenciaIds, item.relatedTicketIds, item.relatedIncidentIds, item.linkedTickets, item.incidencias, item.tickets]) {
+    for (const entry of safeArray(list)) {
+      if (typeof entry === "string" && entry.trim()) return cleanText(entry, "");
+      if (isObject(entry)) {
+        const id = cleanText(first(entry.ticketId, entry.incidenciaId, entry.id, entry.code, entry.numero), "");
+        if (id) return id;
+      }
+    }
   }
 
   return "";
 }
 
-function getIncidenciaId(item = {}) {
-  const raw = getRaw(item);
-
-  return cleanText(
-    first(
-      item.ticketId,
-      item.incidenciaId,
-      item.incidencia?.id,
-      item.incidencia?.ticketId,
-      item.incidencia?.incidenciaId,
-      item.ticket?.id,
-      item.ticket?.ticketId,
-      item.ticket?.incidenciaId,
-      item.linkedTicket?.id,
-      item.linkedTicket?.ticketId,
-      item.linkedTicket?.incidenciaId,
-      item.relatedTicketId,
-      item.relatedIncidentId,
-      item.supportTicketId,
-      item.caseId,
-      item.meta?.ticketId,
-      item.meta?.linkedTicketId,
-      item.meta?.incidenciaId,
-      pickTicketIdFromArray(item.ticketIds),
-      pickTicketIdFromArray(item.incidenciaIds),
-      pickTicketIdFromArray(item.relatedTicketIds),
-      pickTicketIdFromArray(item.relatedIncidentIds),
-      pickTicketIdFromArray(item.linkedTickets),
-      pickTicketIdFromArray(item.incidencias),
-      pickTicketIdFromArray(item.tickets),
-      pickTicketIdFromArray(item.relatedTickets),
-
-      raw.ticketId,
-      raw.incidenciaId,
-      raw.incidencia?.id,
-      raw.incidencia?.ticketId,
-      raw.incidencia?.incidenciaId,
-      raw.ticket?.id,
-      raw.ticket?.ticketId,
-      raw.ticket?.incidenciaId,
-      raw.linkedTicket?.id,
-      raw.linkedTicket?.ticketId,
-      raw.linkedTicket?.incidenciaId,
-      raw.relatedTicketId,
-      raw.relatedIncidentId,
-      raw.supportTicketId,
-      raw.caseId,
-      raw.meta?.ticketId,
-      raw.meta?.linkedTicketId,
-      raw.meta?.incidenciaId,
-      pickTicketIdFromArray(raw.ticketIds),
-      pickTicketIdFromArray(raw.incidenciaIds),
-      pickTicketIdFromArray(raw.relatedTicketIds),
-      pickTicketIdFromArray(raw.relatedIncidentIds),
-      pickTicketIdFromArray(raw.linkedTickets),
-      pickTicketIdFromArray(raw.incidencias),
-      pickTicketIdFromArray(raw.tickets),
-      pickTicketIdFromArray(raw.relatedTickets)
-    ),
-    ""
-  );
-}
-
 function getIncidenciaSubject(item = {}) {
-  const raw = getRaw(item);
-
-  return cleanText(
-    first(
-      item.incidencia?.subject,
-      item.incidencia?.asunto,
-      item.incidencia?.title,
-      item.ticket?.subject,
-      item.ticket?.asunto,
-      item.ticket?.title,
-      item.linkedTicket?.subject,
-      item.linkedTicket?.asunto,
-      item.linkedTicket?.title,
-
-      raw.incidencia?.subject,
-      raw.incidencia?.asunto,
-      raw.incidencia?.title,
-      raw.ticket?.subject,
-      raw.ticket?.asunto,
-      raw.ticket?.title,
-      raw.linkedTicket?.subject,
-      raw.linkedTicket?.asunto,
-      raw.linkedTicket?.title,
-      ""
-    ),
-    ""
-  );
+  return fromItem(item, [
+    "incidencia.subject",
+    "incidencia.asunto",
+    "incidencia.title",
+    "ticket.subject",
+    "ticket.asunto",
+    "ticket.title",
+    "linkedTicket.subject",
+    "linkedTicket.asunto",
+    "linkedTicket.title",
+  ], "");
 }
 
 function getTotalRaw(item = {}) {
-  const raw = getRaw(item);
-
   return first(
     item.total,
     item.amount,
@@ -941,39 +754,20 @@ function getTotalRaw(item = {}) {
     item.facturaTotal,
     item.invoiceAmount,
     item.totales?.total,
-    raw.total,
-    raw.amount,
-    raw.importe,
-    raw.importeTotal,
-    raw.totalFactura,
-    raw.facturaTotal,
-    raw.invoiceAmount,
-    raw.totales?.total,
+    getRaw(item).total,
+    getRaw(item).amount,
+    getRaw(item).importe,
+    getRaw(item).importeTotal,
+    getRaw(item).totalFactura,
+    getRaw(item).facturaTotal,
+    getRaw(item).invoiceAmount,
+    getRaw(item).totales?.total,
     0
   );
 }
 
 function getCurrency(item = {}) {
-  const raw = getRaw(item);
-
-  return cleanText(
-    first(
-      item.moneda,
-      item.currency,
-      item.facturaCurrency,
-      item.totales?.currency,
-      item.payment?.currency,
-      item.meta?.currency,
-      raw.moneda,
-      raw.currency,
-      raw.facturaCurrency,
-      raw.totales?.currency,
-      raw.payment?.currency,
-      raw.meta?.currency,
-      DEFAULT_CURRENCY
-    ),
-    DEFAULT_CURRENCY
-  );
+  return fromItem(item, ["moneda", "currency", "facturaCurrency", "totales.currency", "payment.currency", "meta.currency"], DEFAULT_CURRENCY).toUpperCase();
 }
 
 function getTotalLabel(item = {}) {
@@ -981,43 +775,15 @@ function getTotalLabel(item = {}) {
 }
 
 function getTotalCaption(item = {}) {
-  const raw = getRaw(item);
-
-  const taxIncluded = first(
-    item.taxIncluded,
-    item.impuestosIncluidos,
-    item.ivaIncluido,
-    raw.taxIncluded,
-    raw.impuestosIncluidos,
-    raw.ivaIncluido
-  );
-
+  const taxIncluded = first(item.taxIncluded, item.impuestosIncluidos, item.ivaIncluido, getRaw(item).taxIncluded, getRaw(item).impuestosIncluidos, getRaw(item).ivaIncluido);
   return taxIncluded === false ? "Impuestos no incl." : "Impuestos incl.";
 }
 
 function getFormaPago(item = {}) {
-  const raw = getRaw(item);
-
-  return cleanText(
-    first(
-      item.formaPago,
-      item.metodoPago,
-      item.paymentMethod,
-      item.payment?.methodLabel,
-      item.payment?.method,
-      raw.formaPago,
-      raw.metodoPago,
-      raw.paymentMethod,
-      raw.payment?.methodLabel,
-      raw.payment?.method
-    ),
-    "—"
-  );
+  return fromItem(item, ["formaPago", "metodoPago", "paymentMethod", "payment.methodLabel", "payment.method"], "—");
 }
 
 function getCreatedAt(item = {}) {
-  const raw = getRaw(item);
-
   return first(
     item.fechaFactura,
     item.fechaFacturaISO,
@@ -1028,22 +794,19 @@ function getCreatedAt(item = {}) {
     item.createdAt,
     item.lifecycle?.createdAt,
     item.fechaCreacion,
-
-    raw.fechaFactura,
-    raw.fechaFacturaISO,
-    raw.lifecycle?.issuedAt,
-    raw.issueDate,
-    raw.issuedAt,
-    raw.fecha,
-    raw.createdAt,
-    raw.lifecycle?.createdAt,
-    raw.fechaCreacion
+    getRaw(item).fechaFactura,
+    getRaw(item).fechaFacturaISO,
+    getRaw(item).lifecycle?.issuedAt,
+    getRaw(item).issueDate,
+    getRaw(item).issuedAt,
+    getRaw(item).fecha,
+    getRaw(item).createdAt,
+    getRaw(item).lifecycle?.createdAt,
+    getRaw(item).fechaCreacion
   );
 }
 
 function getUpdatedAt(item = {}) {
-  const raw = getRaw(item);
-
   return first(
     item.updatedAt,
     item.lifecycle?.updatedAt,
@@ -1055,53 +818,32 @@ function getUpdatedAt(item = {}) {
     item.mailSentAt,
     item.fechaActualizacion,
     item.lastUpdateAt,
-
-    raw.updatedAt,
-    raw.lifecycle?.updatedAt,
-    raw.lastActivityAt,
-    raw.lifecycle?.lastActivityAt,
-    raw.fechaEnvio,
-    raw.delivery?.lastSentAt,
-    raw.sentAt,
-    raw.mailSentAt,
-    raw.fechaActualizacion,
-    raw.lastUpdateAt
+    getRaw(item).updatedAt,
+    getRaw(item).lifecycle?.updatedAt,
+    getRaw(item).lastActivityAt,
+    getRaw(item).lifecycle?.lastActivityAt,
+    getRaw(item).fechaEnvio,
+    getRaw(item).delivery?.lastSentAt,
+    getRaw(item).sentAt,
+    getRaw(item).mailSentAt,
+    getRaw(item).fechaActualizacion,
+    getRaw(item).lastUpdateAt
   );
 }
 
 function getSentAt(item = {}) {
-  const raw = getRaw(item);
-
-  return first(
-    item.fechaEnvio,
-    item.sentAt,
-    item.mailSentAt,
-    item.email?.sentAt,
-    item.delivery?.lastSentAt,
-    item.lifecycle?.sentAt,
-    item.meta?.lastSentAt,
-
-    raw.fechaEnvio,
-    raw.sentAt,
-    raw.mailSentAt,
-    raw.email?.sentAt,
-    raw.delivery?.lastSentAt,
-    raw.lifecycle?.sentAt,
-    raw.meta?.lastSentAt
-  );
+  return first(item.fechaEnvio, item.sentAt, item.mailSentAt, item.email?.sentAt, item.delivery?.lastSentAt, item.lifecycle?.sentAt, item.meta?.lastSentAt, getRaw(item).fechaEnvio, getRaw(item).sentAt, getRaw(item).email?.sentAt);
 }
 
 function getSortTimestamp(item = {}) {
-  const raw = getRaw(item);
-
   return (
     number(item?.meta?.updatedAtMs, 0) ||
     number(item?.meta?.timestampMs, 0) ||
-    number(raw?.meta?.updatedAtMs, 0) ||
-    number(raw?.meta?.timestampMs, 0) ||
+    number(getRaw(item)?.meta?.updatedAtMs, 0) ||
+    number(getRaw(item)?.meta?.timestampMs, 0) ||
     toTimestamp(getUpdatedAt(item)) ||
     toTimestamp(getCreatedAt(item)) ||
-    toTimestamp(raw?._ts) ||
+    toTimestamp(getRaw(item)?._ts) ||
     0
   );
 }
@@ -1110,133 +852,21 @@ function getEmissionTimestamp(item = {}) {
   return toTimestamp(getCreatedAt(item)) || getSortTimestamp(item);
 }
 
-function compareFacturaNumeroAsc(a = {}, b = {}) {
-  return cleanText(getFacturaNumero(a), "").localeCompare(
-    cleanText(getFacturaNumero(b), ""),
-    "es",
-    {
-      numeric: true,
-      sensitivity: "base",
-    }
-  );
-}
-
-function compareFacturaNumeroDesc(a = {}, b = {}) {
-  return cleanText(getFacturaNumero(b), "").localeCompare(
-    cleanText(getFacturaNumero(a), ""),
-    "es",
-    {
-      numeric: true,
-      sensitivity: "base",
-    }
-  );
-}
-
-function compareFacturasDateDesc(a = {}, b = {}) {
-  const diff = getEmissionTimestamp(b) - getEmissionTimestamp(a);
-  return diff || compareFacturaNumeroDesc(a, b);
-}
-
-function compareFacturasDateAsc(a = {}, b = {}) {
-  const diff = getEmissionTimestamp(a) - getEmissionTimestamp(b);
-  return diff || compareFacturaNumeroAsc(a, b);
-}
-
-function sortFacturasNewestFirst(items = []) {
-  return [...safeArray(items)].sort(compareFacturasDateDesc);
-}
-
-function sortFacturasOldestFirst(items = []) {
-  return [...safeArray(items)].sort(compareFacturasDateAsc);
-}
-
 function hasPdf(item = {}) {
-  const raw = getRaw(item);
+  if (bool(first(item.pdfAvailable, item.hasPdf, item.document?.available, item.meta?.hasPdf, getRaw(item).pdfAvailable, getRaw(item).hasPdf), false)) return true;
 
-  if (
-    bool(
-      first(
-        item.pdfAvailable,
-        item.hasPdf,
-        item.document?.available,
-        item.meta?.hasPdf,
-        raw.pdfAvailable,
-        raw.hasPdf,
-        raw.document?.available,
-        raw.meta?.hasPdf
-      ),
-      false
-    )
-  ) {
-    return true;
-  }
+  return Boolean(first(item.blobPath, item.blobName, item.pdfPath, item.pdfUrl, item.downloadUrl, item.viewUrl, item.pdf, item.document?.blobPath, item.document?.fileName, getRaw(item).blobPath, getRaw(item).blobName, getRaw(item).pdfPath, getRaw(item).pdfUrl, getRaw(item).downloadUrl, getRaw(item).viewUrl, getRaw(item).document?.blobPath));
+}
 
-  return Boolean(
-    first(
-      item.blobPath,
-      item.blobName,
-      item.pdfPath,
-      item.pdfUrl,
-      item.downloadUrl,
-      item.viewUrl,
-      item.pdf,
-      item.document?.blobPath,
-      item.document?.fileName,
-      raw.blobPath,
-      raw.blobName,
-      raw.pdfPath,
-      raw.pdfUrl,
-      raw.downloadUrl,
-      raw.viewUrl,
-      raw.pdf,
-      raw.document?.blobPath,
-      raw.document?.fileName
-    )
-  );
+function isFacturaSent(item = {}) {
+  if (getSentAt(item)) return true;
+
+  return bool(first(item.email?.sent, item.delivery?.sent, item.lifecycle?.sent, item.meta?.isSent, item.meta?.hasEmailSent, getRaw(item).email?.sent, getRaw(item).delivery?.sent, getRaw(item).meta?.isSent), false);
 }
 
 function isValidEmail(value = "") {
   const email = cleanText(value, "").toLowerCase();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function isFacturaSent(item = {}) {
-  const raw = getRaw(item);
-
-  const sentDate = first(
-    item.fechaEnvio,
-    item.sentAt,
-    item.mailSentAt,
-    item.email?.sentAt,
-    item.delivery?.lastSentAt,
-    item.lifecycle?.sentAt,
-    item.meta?.lastSentAt,
-    raw.fechaEnvio,
-    raw.sentAt,
-    raw.mailSentAt,
-    raw.email?.sentAt,
-    raw.delivery?.lastSentAt,
-    raw.lifecycle?.sentAt,
-    raw.meta?.lastSentAt
-  );
-
-  if (sentDate) return true;
-
-  return bool(
-    first(
-      item.email?.sent,
-      item.delivery?.sent,
-      item.lifecycle?.sent,
-      item.meta?.isSent,
-      item.meta?.hasEmailSent,
-      raw.email?.sent,
-      raw.delivery?.sent,
-      raw.lifecycle?.sent,
-      raw.meta?.isSent,
-      raw.meta?.hasEmailSent
-    ),
-    false
-  );
 }
 
 function canSendFactura(item = {}) {
@@ -1251,41 +881,27 @@ function normalizeFilter(value = "") {
   const key = normalizeKey(value);
 
   if (!key || ["all", "todo", "todos", "todas", "total"].includes(key)) return "all";
-
-  if (["pending", "pendiente", "pendientes", "partial", "parcial", "draft", "borrador", "unpaid", "sin_pagar"].includes(key)) {
-    return "pending";
-  }
-
-  if (["paid", "pagada", "pagado", "pagadas", "cobrada", "cobrado"].includes(key)) {
-    return "paid";
-  }
-
-  if (["overdue", "vencida", "vencido", "vencidas"].includes(key)) {
-    return "overdue";
-  }
+  if (["pending", "pendiente", "pendientes", "partial", "parcial", "draft", "borrador", "unpaid", "sin_pagar"].includes(key)) return "pending";
+  if (["paid", "pagada", "pagado", "pagadas", "cobrada", "cobrado"].includes(key)) return "paid";
+  if (["overdue", "vencida", "vencido", "vencidas"].includes(key)) return "overdue";
 
   return "all";
 }
 
-function getActiveFilter(input = {}) {
+function getRuntimeValue(input = {}, keys = [], fallback = "") {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
 
-  return normalizeFilter(
-    first(
-      data.filter,
-      data.paymentFilter,
-      data.statusFilter,
-      data.activeFilter,
-      data.facturasFilter,
-      runtime.filter,
-      runtime.paymentFilter,
-      runtime.statusFilter,
-      runtime.activeFilter,
-      runtime.facturasFilter,
-      "all"
-    )
-  );
+  for (const key of safeArray(keys)) {
+    const value = first(data[key], runtime[key]);
+    if (value !== null && value !== undefined && !(typeof value === "string" && !value.trim())) return value;
+  }
+
+  return fallback;
+}
+
+function getActiveFilter(input = {}) {
+  return normalizeFilter(getRuntimeValue(input, ["filter", "paymentFilter", "statusFilter", "activeFilter", "facturasFilter"], "all"));
 }
 
 function getFilterLabel(filter = "all") {
@@ -1293,79 +909,27 @@ function getFilterLabel(filter = "all") {
 }
 
 function getSearchQuery(input = {}) {
-  const data = safeObject(input);
-  const runtime = getRuntimeState(data);
-
-  return cleanText(
-    first(
-      data.search,
-      data.searchQuery,
-      data.query,
-      data.q,
-      data.term,
-      data.keyword,
-      data.facturasSearch,
-      runtime.search,
-      runtime.searchQuery,
-      runtime.query,
-      runtime.q,
-      runtime.term,
-      runtime.keyword,
-      runtime.facturasSearch,
-      ""
-    ),
-    ""
-  );
+  return cleanText(getRuntimeValue(input, ["search", "searchQuery", "query", "q", "term", "keyword", "facturasSearch"], ""), "");
 }
 
 function normalizeSort(value = "") {
   const key = normalizeKey(value);
-
-  if (
-    [
-      "date_asc",
-      "fecha_asc",
-      "emission_asc",
-      "issue_date_asc",
-      "fecha_emision_asc",
-      "oldest",
-      "oldest_first",
-      "menor_fecha",
-      "invoice_asc",
-      "factura_asc",
-      "numero_asc",
-      "n_factura_asc",
-      "num_factura_asc",
-      "number_asc",
-      "invoice_number_asc",
-      "menor_factura",
-    ].includes(key)
-  ) {
-    return "date_asc";
-  }
-
-  return "date_desc";
+  return [
+    "date_asc",
+    "fecha_asc",
+    "emission_asc",
+    "issue_date_asc",
+    "fecha_emision_asc",
+    "oldest",
+    "oldest_first",
+    "menor_fecha",
+  ].includes(key)
+    ? "date_asc"
+    : "date_desc";
 }
 
 function getSortMode(input = {}) {
-  const data = safeObject(input);
-  const runtime = getRuntimeState(data);
-
-  return normalizeSort(
-    first(
-      data.sort,
-      data.sortBy,
-      data.orderBy,
-      data.sortMode,
-      data.facturasSort,
-      runtime.sort,
-      runtime.sortBy,
-      runtime.orderBy,
-      runtime.sortMode,
-      runtime.facturasSort,
-      "date_desc"
-    )
-  );
+  return normalizeSort(getRuntimeValue(input, ["sort", "sortBy", "orderBy", "sortMode", "facturasSort"], "date_desc"));
 }
 
 function getSortDirection(sortMode = "date_desc") {
@@ -1374,17 +938,12 @@ function getSortDirection(sortMode = "date_desc") {
 
 function getSortOption(sortMode = "date_desc") {
   const mode = normalizeSort(sortMode);
-
   return SORT_OPTIONS.find((option) => option.modes.includes(mode)) || SORT_OPTIONS[0];
 }
 
 function getNextSortMode(option = SORT_OPTIONS[0], currentSortMode = "date_desc") {
   const mode = normalizeSort(currentSortMode);
-  const active = option.modes.includes(mode);
-
-  if (!active) return option.desc;
-
-  return mode.endsWith("_desc") ? option.asc : option.desc;
+  return option.modes.includes(mode) && mode.endsWith("_desc") ? option.asc : option.desc;
 }
 
 function getSortButtonLabel(option = SORT_OPTIONS[0], currentSortMode = "date_desc") {
@@ -1392,13 +951,11 @@ function getSortButtonLabel(option = SORT_OPTIONS[0], currentSortMode = "date_de
   const active = option.modes.includes(mode);
 
   if (!active) return `${option.label} ↓`;
-
   return `${option.label} ${mode.endsWith("_asc") ? "↑" : "↓"}`;
 }
 
 function getSortButtonTooltip(option = SORT_OPTIONS[0], currentSortMode = "date_desc") {
-  const nextMode = getNextSortMode(option, currentSortMode);
-  return nextMode.endsWith("_asc") ? option.tooltipAsc : option.tooltipDesc;
+  return getNextSortMode(option, currentSortMode).endsWith("_asc") ? option.tooltipAsc : option.tooltipDesc;
 }
 
 function itemMatchesFilter(item = {}, filter = "all") {
@@ -1414,8 +971,6 @@ function itemMatchesFilter(item = {}, filter = "all") {
 }
 
 function getSearchHaystack(item = {}) {
-  const raw = getRaw(item);
-
   return [
     getFacturaId(item),
     getFacturaNumero(item),
@@ -1423,9 +978,7 @@ function getSearchHaystack(item = {}) {
     getCompanyName(item),
     getContactName(item),
     getClientName(item),
-    getClientSecondaryName(item),
     getClientEmail(item),
-    getClientEmailLabel(item),
     getEstadoPagoLabel(getPaymentRaw(item)),
     getTotalLabel(item),
     getFormaPago(item),
@@ -1433,24 +986,11 @@ function getSearchHaystack(item = {}) {
     getIncidenciaSubject(item),
     getCreatedAt(item),
     getUpdatedAt(item),
-
     item.clienteId,
     item.clientId,
     item.customerId,
     item.userId,
     item.uid,
-    item.blobPath,
-    item.blobName,
-    item.pdfPath,
-
-    raw.clienteId,
-    raw.clientId,
-    raw.customerId,
-    raw.userId,
-    raw.uid,
-    raw.blobPath,
-    raw.blobName,
-    raw.pdfPath,
   ]
     .map((value) => normalizeText(value))
     .filter(Boolean)
@@ -1459,13 +999,37 @@ function getSearchHaystack(item = {}) {
 
 function itemMatchesSearch(item = {}, query = "") {
   const normalizedQuery = normalizeText(query);
-
   if (!normalizedQuery) return true;
 
-  const terms = normalizedQuery.split(" ").filter(Boolean);
   const haystack = getSearchHaystack(item);
+  return normalizedQuery.split(" ").filter(Boolean).every((term) => haystack.includes(term));
+}
 
-  return terms.every((term) => haystack.includes(term));
+function compareFacturaNumeroAsc(a = {}, b = {}) {
+  return cleanText(getFacturaNumero(a), "").localeCompare(cleanText(getFacturaNumero(b), ""), "es", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function compareFacturaNumeroDesc(a = {}, b = {}) {
+  return cleanText(getFacturaNumero(b), "").localeCompare(cleanText(getFacturaNumero(a), ""), "es", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function sortFacturas(items = [], input = {}) {
+  const sortMode = getSortMode(input);
+
+  return [...safeArray(items)].sort((a, b) => {
+    const diff = sortMode === "date_asc"
+      ? getEmissionTimestamp(a) - getEmissionTimestamp(b)
+      : getEmissionTimestamp(b) - getEmissionTimestamp(a);
+
+    if (diff) return diff;
+    return sortMode === "date_asc" ? compareFacturaNumeroAsc(a, b) : compareFacturaNumeroDesc(a, b);
+  });
 }
 
 function filterFacturas(items = [], input = {}) {
@@ -1475,12 +1039,6 @@ function filterFacturas(items = [], input = {}) {
   return safeArray(items)
     .filter((item) => itemMatchesFilter(item, filter))
     .filter((item) => itemMatchesSearch(item, search));
-}
-
-function sortFacturas(items = [], input = {}) {
-  return getSortMode(input) === "date_asc"
-    ? sortFacturasOldestFirst(items)
-    : sortFacturasNewestFirst(items);
 }
 
 function filterAndSortFacturas(items = [], input = {}) {
@@ -1497,16 +1055,13 @@ function computeFilterCounts(items = [], input = {}) {
   const searchableRows = rows.filter((item) => itemMatchesSearch(item, searchQuery));
 
   return FILTERS.reduce((acc, filter) => {
-    acc[filter.key] = searchableRows.filter((item) =>
-      itemMatchesFilter(item, filter.key)
-    ).length;
-
+    acc[filter.key] = searchableRows.filter((item) => itemMatchesFilter(item, filter.key)).length;
     return acc;
   }, {});
 }
 
 /* =========================================================
-   STATS / PAGINATION
+   STATS / LIST STATE
 ========================================================= */
 
 function computeStats(items = []) {
@@ -1555,96 +1110,63 @@ function computeStats(items = []) {
   );
 }
 
-function normalizePageSize(input = {}) {
+function getRemoteTotal(input = {}, fallback = 0) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
 
-  return clamp(
-    number(
-      first(
-        data.pageSize,
-        runtime.pageSize,
-        runtime.limit,
-        runtime.facturasPageSize,
-        DEFAULT_PAGE_SIZE
-      ),
-      DEFAULT_PAGE_SIZE
-    ),
-    1,
-    50
+  return Math.max(
+    number(first(data.totalCount, data.remoteCount, data.totalMatched, data.total, runtime.totalCount, runtime.remoteCount, runtime.totalMatched, runtime.total, fallback), fallback),
+    fallback
   );
 }
 
-function getPagination(items = [], input = {}) {
+function getBatchSize(input = {}) {
+  const data = safeObject(input);
+  const runtime = getRuntimeState(data);
+
+  return clamp(number(first(data.batchSize, data.limit, data.pageSize, runtime.batchSize, runtime.limit, runtime.pageSize, DEFAULT_BATCH_SIZE), DEFAULT_BATCH_SIZE), 1, 200);
+}
+
+function getListState(items = [], input = {}) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
 
   const rawItems = safeArray(items);
-  const filteredAndSortedItems = filterAndSortFacturas(rawItems, data);
-  const pageSize = normalizePageSize(data);
+  const visibleItems = filterAndSortFacturas(rawItems, data);
+  const loadedCount = rawItems.length;
+  const visibleCount = visibleItems.length;
+  const remoteTotal = getRemoteTotal(data, loadedCount);
+  const batchSize = getBatchSize(data);
   const filtering = isFilterActive(data);
 
-  const remoteTotal = Math.max(
-    number(
-      first(
-        data.totalCount,
-        data.remoteCount,
-        data.totalMatched,
-        data.total,
-        runtime.totalCount,
-        runtime.remoteCount,
-        runtime.totalMatched,
-        runtime.total,
-        rawItems.length
-      ),
-      rawItems.length
-    ),
-    rawItems.length
-  );
+  const currentPage = Math.max(1, number(first(data.page, runtime.page, runtime.currentPage, runtime.facturasPage, 1), 1));
+  const nextPage = Math.max(1, number(first(data.nextPage, runtime.nextPage, currentPage + 1), currentPage + 1));
 
-  const reportedTotal = filtering ? filteredAndSortedItems.length : remoteTotal;
-
-  const totalPagesFromProps = filtering
-    ? 0
-    : number(first(data.totalPages, runtime.totalPages), 0);
-
-  const totalPages = Math.max(
-    1,
-    totalPagesFromProps || Math.ceil((reportedTotal || 1) / pageSize)
-  );
-
-  const currentPage = clamp(
-    number(
-      first(data.page, runtime.page, runtime.currentPage, runtime.facturasPage, 1),
-      1
-    ),
-    1,
-    totalPages
-  );
-
-  const startIndex = (currentPage - 1) * pageSize;
-  const pageItems = filteredAndSortedItems.slice(startIndex, startIndex + pageSize);
-
-  const rangeStart = reportedTotal && pageItems.length ? startIndex + 1 : 0;
-  const rangeEnd = reportedTotal
-    ? Math.min(startIndex + pageItems.length, reportedTotal)
-    : 0;
-
+  const explicitHasMore = first(data.hasMore, data.more, data.canLoadMore, runtime.hasMore, runtime.more, runtime.canLoadMore, null);
+  const hasMore = explicitHasMore === null ? loadedCount < remoteTotal : bool(explicitHasMore, false);
+  const loadingMore = Boolean(first(data.loadingMore, data.loadingNextPage, runtime.loadingMore, runtime.loadingNextPage, false));
   const sortMode = getSortMode(data);
 
   return {
-    allItems: filteredAndSortedItems,
-    pageItems,
-    pageSize,
+    allItems: visibleItems,
+    visibleItems,
+    pageItems: visibleItems,
+    batchSize,
+    pageSize: batchSize,
     currentPage,
-    totalPages,
-    totalCount: reportedTotal,
-    unfilteredCount: rawItems.length,
+    nextPage,
+    totalPages: Math.max(1, Math.ceil((remoteTotal || loadedCount || 1) / batchSize)),
+    totalCount: filtering ? visibleCount : remoteTotal,
+    unfilteredCount: loadedCount,
+    loadedCount,
+    visibleCount,
     remoteTotal,
-    rangeStart,
-    rangeEnd,
-    hasPrev: currentPage > 1,
-    hasNext: currentPage < totalPages,
+    rangeStart: visibleCount ? 1 : 0,
+    rangeEnd: visibleCount,
+    hasPrev: false,
+    hasNext: hasMore,
+    hasMore,
+    loadingMore,
     filtering,
     activeFilter: getActiveFilter(data),
     searchQuery: getSearchQuery(data),
@@ -1734,10 +1256,10 @@ function renderAvatar(item = {}) {
 function renderEstadoPagoChip(item = {}) {
   const rawStatus = getPaymentRaw(item);
   const label = getEstadoPagoLabel(rawStatus);
-  const klass = getEstadoPagoChipClass(rawStatus);
+  const key = getEstadoPagoKey(rawStatus);
 
   return `
-    <span class="facturas-chip ${attr(klass)}">
+    <span class="facturas-chip facturas-chip--${attr(key)}">
       <span class="facturas-chip-dot" aria-hidden="true"></span>
       ${escapeHtml(label)}
     </span>
@@ -1749,15 +1271,10 @@ function renderDeliveryBadge(item = {}) {
   const sentAt = getSentAt(item);
 
   if (sent) {
-    const tooltip = sentAt
-      ? `Enviada · ${formatDateTooltip(sentAt)}`
-      : "Factura enviada";
+    const tooltip = sentAt ? `Enviada · ${formatDateTime(sentAt)}` : "Factura enviada";
 
     return `
-      <span
-        class="facturas-mini-badge facturas-mini-badge--sent"
-        ${tooltipAttrs(tooltip, tooltip)}
-      >
+      <span class="facturas-mini-badge facturas-mini-badge--sent" ${tooltipAttrs(tooltip, tooltip)}>
         ${icon("check")}
         Enviada
       </span>
@@ -1765,10 +1282,7 @@ function renderDeliveryBadge(item = {}) {
   }
 
   return `
-    <span
-      class="facturas-mini-badge facturas-mini-badge--idle"
-      ${tooltipAttrs("Factura no enviada todavía", "Factura no enviada todavía")}
-    >
+    <span class="facturas-mini-badge facturas-mini-badge--idle" ${tooltipAttrs("Factura no enviada todavía", "Factura no enviada todavía")}>
       ${icon("mail")}
       No enviada
     </span>
@@ -1778,10 +1292,7 @@ function renderDeliveryBadge(item = {}) {
 function renderPdfBadge(item = {}) {
   if (hasPdf(item)) {
     return `
-      <span
-        class="facturas-mini-badge facturas-mini-badge--pdf"
-        ${tooltipAttrs("PDF disponible", "PDF disponible")}
-      >
+      <span class="facturas-mini-badge facturas-mini-badge--pdf" ${tooltipAttrs("PDF disponible", "PDF disponible")}>
         ${icon("pdf")}
         PDF
       </span>
@@ -1789,10 +1300,7 @@ function renderPdfBadge(item = {}) {
   }
 
   return `
-    <span
-      class="facturas-mini-badge facturas-mini-badge--blocked"
-      ${tooltipAttrs("PDF no disponible", "PDF no disponible")}
-    >
+    <span class="facturas-mini-badge facturas-mini-badge--blocked" ${tooltipAttrs("PDF no disponible", "PDF no disponible")}>
       ${icon("lock")}
       Sin PDF
     </span>
@@ -1804,9 +1312,7 @@ function renderIncidenciaLink(item = {}) {
   const incidenciaSubject = getIncidenciaSubject(item);
   const facturaId = getFacturaId(item);
 
-  if (!incidenciaId) {
-    return `<span class="facturas-incidencia-empty">—</span>`;
-  }
+  if (!incidenciaId) return `<span class="facturas-incidencia-empty">—</span>`;
 
   const tooltip = incidenciaSubject
     ? `Abrir incidencia · ${incidenciaSubject}`
@@ -1827,42 +1333,46 @@ function renderIncidenciaLink(item = {}) {
   `;
 }
 
-function renderPagination(pagination = {}, state = {}) {
-  const runtime = safeObject(state);
-  const loading = Boolean(runtime.loading);
-  const refreshing = Boolean(runtime.refreshing);
-
-  const prevDisabled = !pagination.hasPrev || loading || refreshing;
-  const nextDisabled = !pagination.hasNext || loading || refreshing;
+function renderActionButton({
+  klass = "",
+  action = "",
+  facturaId = "",
+  label = "",
+  loadingLabel = "",
+  iconName = "",
+  loading = false,
+  disabled = false,
+  tooltip = "",
+  ariaBusy = false,
+} = {}) {
+  const finalDisabled = Boolean(disabled || loading);
+  const finalBusy = Boolean(ariaBusy || loading);
+  const finalTooltip = tooltip || label;
+  const classes = ["facturas-action-btn", klass, loading ? "is-loading" : ""].map((item) => cleanText(item, "")).filter(Boolean).join(" ");
 
   return `
-    <div class="facturas-pagination" aria-label="Paginación de facturas">
-      <button
-        type="button"
-        class="facturas-pagination-btn"
-        ${actionAttrs(FACTURAS_ACTIONS.PREV_PAGE)}
-        data-page="${attr(String(Math.max(1, pagination.currentPage - 1)))}"
-        ${disabledAttrs(prevDisabled)}
-      >
-        Anterior
-      </button>
-
-      <span class="facturas-pagination-status">
-        ${escapeHtml(`${pagination.currentPage}/${pagination.totalPages}`)}
-      </span>
-
-      <button
-        type="button"
-        class="facturas-pagination-btn facturas-pagination-btn--next"
-        ${actionAttrs(FACTURAS_ACTIONS.NEXT_PAGE)}
-        data-page="${attr(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
-        ${disabledAttrs(nextDisabled)}
-      >
-        Siguiente
-      </button>
-    </div>
+    <button
+      type="button"
+      class="${attr(classes)}"
+      ${actionAttrs(action, facturaId)}
+      ${tooltipAttrs(finalTooltip, finalTooltip)}
+      ${disabledAttrs(finalDisabled, finalBusy)}
+    >
+      ${
+        loading
+          ? renderLoaderOnly(loadingLabel || label)
+          : `
+            <span class="facturas-action-icon">${icon(iconName)}</span>
+            <span class="facturas-btn-text">${escapeHtml(label)}</span>
+          `
+      }
+    </button>
   `;
 }
+
+/* =========================================================
+   FILTERS
+========================================================= */
 
 function renderSearch(input = {}) {
   const searchQuery = getSearchQuery(input);
@@ -1907,20 +1417,16 @@ function renderSearch(input = {}) {
   `;
 }
 
-function renderFilters(input = {}, pagination = {}) {
+function renderFilters(input = {}, listState = {}) {
   const data = safeObject(input);
   const items = getInputItems(data);
   const counts = computeFilterCounts(items, data);
-  const activeFilter = normalizeFilter(pagination.activeFilter || getActiveFilter(data));
-  const sortMode = normalizeSort(pagination.sortMode || getSortMode(data));
+  const activeFilter = normalizeFilter(listState.activeFilter || getActiveFilter(data));
+  const sortMode = normalizeSort(listState.sortMode || getSortMode(data));
 
   return `
     <div class="facturas-filters" aria-label="Filtros, orden y búsqueda de facturas">
-      <div
-        class="facturas-filter-pills"
-        role="group"
-        aria-label="Filtrar facturas por estado de pago"
-      >
+      <div class="facturas-filter-pills" role="group" aria-label="Filtrar facturas por estado de pago">
         ${FILTERS.map((filter) => {
           const active = filter.key === activeFilter;
           const count = counts[filter.key] ?? 0;
@@ -1983,58 +1489,12 @@ function renderFilters(input = {}, pagination = {}) {
   `;
 }
 
-function renderActionButton({
-  klass = "",
-  action = "",
-  facturaId = "",
-  label = "",
-  loadingLabel = "",
-  iconName = "",
-  loading = false,
-  disabled = false,
-  tooltip = "",
-  ariaBusy = false,
-} = {}) {
-  const finalDisabled = Boolean(disabled || loading);
-  const finalBusy = Boolean(ariaBusy || loading);
-  const finalTooltip = tooltip || label;
-
-  const classes = [
-    "facturas-action-btn",
-    klass,
-    loading ? "is-loading" : "",
-  ]
-    .map((item) => cleanText(item, ""))
-    .filter(Boolean)
-    .join(" ");
-
-  return `
-    <button
-      type="button"
-      class="${attr(classes)}"
-      ${actionAttrs(action, facturaId)}
-      ${tooltipAttrs(finalTooltip, finalTooltip)}
-      ${disabledAttrs(finalDisabled, finalBusy)}
-    >
-      ${
-        loading
-          ? renderLoaderOnly(loadingLabel || label)
-          : `
-            <span class="facturas-action-icon">${icon(iconName)}</span>
-            <span class="facturas-btn-text">${escapeHtml(label)}</span>
-          `
-      }
-    </button>
-  `;
-}
-
 /* =========================================================
    ROW / TABLE
 ========================================================= */
 
 function renderRow(item = {}, state = {}) {
   const busy = resolveBusyMeta(item, state);
-
   const facturaId = busy.facturaId;
   const numero = getFacturaNumero(item);
   const numeroSistema = getFacturaSistema(item);
@@ -2043,13 +1503,14 @@ function renderRow(item = {}, state = {}) {
   const clientEmail = getClientEmailLabel(item);
   const createdAtRaw = getCreatedAt(item);
   const createdAt = formatDateShort(createdAtRaw);
-  const createdAtTooltip = formatDateTooltip(createdAtRaw);
+  const createdAtTooltip = formatDateTime(createdAtRaw);
   const total = getTotalLabel(item);
   const totalCaption = getTotalCaption(item);
   const formaPago = getFormaPago(item);
   const pdfAvailable = hasPdf(item);
   const sent = isFacturaSent(item);
   const canSend = canSendFactura(item);
+  const paymentKey = getEstadoPagoKey(getPaymentRaw(item));
 
   const sendLabel = sent ? "Reenviar" : "Enviar";
   const sendTooltip = !pdfAvailable
@@ -2059,8 +1520,6 @@ function renderRow(item = {}, state = {}) {
       : sent
         ? "Reenviar factura al cliente"
         : "Enviar factura al cliente";
-
-  const paymentKey = getEstadoPagoKey(getPaymentRaw(item));
 
   return `
     <tr
@@ -2080,25 +1539,12 @@ function renderRow(item = {}, state = {}) {
           <div class="facturas-main-copy">
             <div class="facturas-factura-line">
               <span class="facturas-factura-id">${escapeHtml(numero)}</span>
-
-              ${
-                numeroSistema && numeroSistema !== numero
-                  ? `<span class="facturas-system-id">${escapeHtml(numeroSistema)}</span>`
-                  : ""
-              }
+              ${numeroSistema && numeroSistema !== numero ? `<span class="facturas-system-id">${escapeHtml(numeroSistema)}</span>` : ""}
             </div>
 
             <div class="facturas-factura-client">${escapeHtml(clientName)}</div>
-
-            ${
-              secondaryName
-                ? `<div class="facturas-factura-contact">${escapeHtml(secondaryName)}</div>`
-                : ""
-            }
-
-            <div class="facturas-factura-email">
-              ${escapeHtml(clientEmail)}
-            </div>
+            ${secondaryName ? `<div class="facturas-factura-contact">${escapeHtml(secondaryName)}</div>` : ""}
+            <div class="facturas-factura-email">${escapeHtml(clientEmail)}</div>
 
             <div class="facturas-row-badges">
               ${renderDeliveryBadge(item)}
@@ -2113,10 +1559,7 @@ function renderRow(item = {}, state = {}) {
       </td>
 
       <td class="facturas-cell facturas-cell--date">
-        <span
-          class="facturas-date-inline"
-          ${tooltipAttrs(createdAtTooltip, `Fecha de emisión ${createdAtTooltip}`)}
-        >
+        <span class="facturas-date-inline" ${tooltipAttrs(createdAtTooltip, `Fecha de emisión ${createdAtTooltip}`)}>
           ${escapeHtml(createdAt)}
         </span>
       </td>
@@ -2189,7 +1632,7 @@ function renderRow(item = {}, state = {}) {
   `;
 }
 
-function renderTableLoading(rows = DEFAULT_PAGE_SIZE) {
+function renderTableLoading(rows = DEFAULT_SKELETON_ROWS) {
   return `
     <div class="facturas-table-loading" aria-hidden="true">
       ${Array.from({ length: rows }).map(() => `
@@ -2271,15 +1714,68 @@ function renderEmptyState({ hasError = false, filtering = false, searchQuery = "
   `;
 }
 
+function renderInfiniteScrollFooter(listState = {}, state = {}) {
+  const runtime = safeObject(state);
+  const loading = Boolean(runtime.loading);
+  const refreshing = Boolean(runtime.refreshing);
+  const loadingMore = Boolean(first(listState.loadingMore, runtime.loadingMore, runtime.loadingNextPage));
+  const hasMore = Boolean(listState.hasMore);
+  const hasRows = number(listState.visibleCount, 0) > 0;
+  const blocked = loading || refreshing || loadingMore;
+
+  const statusText = hasMore
+    ? "Sigue bajando para cargar más facturas."
+    : hasRows
+      ? "No hay más facturas."
+      : "";
+
+  const statusHtml = loadingMore
+    ? renderSpinner("Cargando más facturas...")
+    : statusText
+      ? escapeHtml(statusText)
+      : "";
+
+  return `
+    <div
+      class="facturas-infinite"
+      data-facturas-infinite="true"
+      data-loaded="${attr(String(listState.loadedCount || 0))}"
+      data-visible="${attr(String(listState.visibleCount || 0))}"
+      data-total="${attr(String(listState.remoteTotal || listState.totalCount || 0))}"
+      data-has-more="${hasMore ? "true" : "false"}"
+      aria-live="polite"
+    >
+      <div
+        class="facturas-infinite-sentinel"
+        data-facturas-infinite-sentinel="true"
+        data-facturas-action="${FACTURAS_ACTIONS.LOAD_MORE}"
+        data-action="${FACTURAS_ACTIONS.LOAD_MORE}"
+        data-next-page="${attr(String(listState.nextPage || 1))}"
+        data-disabled="${blocked || !hasMore ? "true" : "false"}"
+        aria-hidden="true"
+      ></div>
+
+      ${
+        statusHtml
+          ? `
+            <div class="facturas-infinite-status${loadingMore ? " is-loading" : ""}${!hasMore && hasRows ? " is-complete" : ""}">
+              ${statusHtml}
+            </div>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
 /* =========================================================
    HEADER
 ========================================================= */
 
 export function renderHeader(input = {}) {
   const data = safeObject(input);
-  const rows = sortFacturasNewestFirst(getInputItems(data));
+  const rows = sortFacturas(getInputItems(data), { sort: "date_desc" });
   const runtime = getRuntimeState(data);
-
   const stats = computeStats(rows);
   const canCreateFactura = isAdmin(data);
 
@@ -2291,24 +1787,7 @@ export function renderHeader(input = {}) {
     ...rows.map((item) => getUpdatedAt(item))
   );
 
-  const remoteCount = Math.max(
-    stats.total,
-    number(
-      first(
-        data.remoteCount,
-        data.totalCount,
-        data.totalMatched,
-        data.total,
-        runtime.remoteCount,
-        runtime.totalCount,
-        runtime.totalMatched,
-        runtime.total,
-        stats.total
-      ),
-      stats.total
-    )
-  );
-
+  const remoteCount = getRemoteTotal(data, stats.total);
   const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
   const loading = Boolean(first(runtime.loading, data.loading));
   const creating = Boolean(first(runtime.creating, runtime.creatingFactura, data.creating));
@@ -2383,11 +1862,7 @@ export function renderHeader(input = {}) {
 
         <span class="facturas-meta-pill">
           ${icon("refresh")}
-          ${
-            updatedAt
-              ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`)
-              : "Sin actualizaciones recientes"
-          }
+          ${updatedAt ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}
         </span>
 
         <span class="facturas-meta-pill">
@@ -2444,7 +1919,7 @@ export function renderFacturasLoadingState(input = {}) {
     >
       ${renderHeader({ ...safeObject(input), loading: true })}
       <section class="facturas-history">
-        ${renderTableLoading(DEFAULT_PAGE_SIZE)}
+        ${renderTableLoading(DEFAULT_SKELETON_ROWS)}
       </section>
     </section>
   `;
@@ -2486,33 +1961,35 @@ export function renderCards(input = {}) {
   const data = safeObject(input);
   const items = getInputItems(data);
   const runtime = getRuntimeState(data);
-  const pagination = getPagination(items, data);
+  const listState = getListState(items, data);
 
   const loading = Boolean(first(runtime.loading, data.loading));
   const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
   const hasError = Boolean(cleanText(first(runtime.error, data.error), ""));
 
-  const showInitialLoading = loading && !pagination.pageItems.length;
-  const showRefreshOverlay = refreshing && pagination.pageItems.length;
+  const showInitialLoading = loading && !listState.visibleItems.length;
+  const showRefreshOverlay = refreshing && listState.visibleItems.length;
 
-  const activeFilterLabel = getFilterLabel(pagination.activeFilter);
-  const searchQuery = pagination.searchQuery;
-  const sortDirection = getSortDirection(pagination.sortMode);
-  const sortLabel = sortDirection === "asc"
-    ? "fecha ascendente"
-    : "fecha descendente";
+  const activeFilterLabel = getFilterLabel(listState.activeFilter);
+  const searchQuery = listState.searchQuery;
+  const sortDirection = getSortDirection(listState.sortMode);
+  const sortLabel = sortDirection === "asc" ? "fecha ascendente" : "fecha descendente";
 
   const activeCriteria = [
-    pagination.activeFilter !== "all" ? activeFilterLabel : "",
+    listState.activeFilter !== "all" ? activeFilterLabel : "",
     searchQuery ? `búsqueda “${searchQuery}”` : "",
     sortLabel ? `orden ${sortLabel}` : "",
   ].filter(Boolean);
 
+  const visibleLabel = `${listState.visibleCount} ${listState.visibleCount === 1 ? "factura" : "facturas"}`;
+  const loadedLabel = `${listState.loadedCount} ${listState.loadedCount === 1 ? "cargada" : "cargadas"}`;
+  const remoteLabel = `${listState.remoteTotal} ${listState.remoteTotal === 1 ? "registro" : "registros"}`;
+
   const subtitle = showInitialLoading
     ? "Cargando facturas..."
-    : pagination.filtering
-      ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · ${activeCriteria.join(" · ")}`
-      : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages} · orden ${sortLabel}`;
+    : listState.filtering
+      ? `Mostrando ${visibleLabel} de ${loadedLabel}${activeCriteria.length ? ` · ${activeCriteria.join(" · ")}` : ""}`
+      : `Mostrando ${visibleLabel} de ${remoteLabel} · ${listState.hasMore ? "scroll infinito activo" : "historial completo"} · orden ${sortLabel}`;
 
   return `
     <section class="facturas-history">
@@ -2522,19 +1999,18 @@ export function renderCards(input = {}) {
           <p class="facturas-history-subtitle">${escapeHtml(subtitle)}</p>
         </div>
 
-        ${renderPagination(pagination, runtime)}
-        ${renderFilters(data, pagination)}
+        ${renderFilters(data, listState)}
       </div>
 
       ${
         showInitialLoading
-          ? renderTableLoading(Math.max(3, pagination.pageSize || DEFAULT_PAGE_SIZE))
+          ? renderTableLoading(DEFAULT_SKELETON_ROWS)
           : `
             <div class="facturas-table-wrap${refreshing ? " is-refreshing" : ""}">
               ${showRefreshOverlay ? renderRefreshOverlay() : ""}
 
               ${
-                pagination.pageItems.length
+                listState.visibleItems.length
                   ? `
                     <div class="facturas-table-shell">
                       <table class="facturas-table" role="table" aria-label="Listado de facturas">
@@ -2559,14 +2035,16 @@ export function renderCards(input = {}) {
                         </thead>
 
                         <tbody>
-                          ${pagination.pageItems.map((item) => renderRow(item, runtime)).join("")}
+                          ${listState.visibleItems.map((item) => renderRow(item, runtime)).join("")}
                         </tbody>
                       </table>
                     </div>
+
+                    ${renderInfiniteScrollFooter(listState, runtime)}
                   `
                   : renderEmptyState({
                       hasError,
-                      filtering: pagination.filtering,
+                      filtering: listState.filtering,
                       searchQuery,
                     })
               }
@@ -2605,7 +2083,7 @@ export function renderFacturasTemplate(input = {}) {
       data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}"
       data-total="${attr(String(first(data.total, data.remoteCount, items.length)))}"
       data-count="${attr(String(items.length))}"
-      aria-busy="${payload.loading || runtime.loading || runtime.refreshing ? "true" : "false"}"
+      aria-busy="${payload.loading || runtime.loading || runtime.refreshing || runtime.loadingMore ? "true" : "false"}"
     >
       ${
         cleanText(first(data.error, runtime.error), "")
@@ -2638,9 +2116,7 @@ export function bindFacturasTemplateDom(root = null) {
       ? document.querySelector(".facturas-view-root, [data-facturas-scope]")
       : null);
 
-  if (!scope || typeof scope.querySelectorAll !== "function") {
-    return false;
-  }
+  if (!scope || typeof scope.querySelectorAll !== "function") return false;
 
   const images = scope.querySelectorAll("[data-facturas-avatar-img='true']");
 
@@ -2648,7 +2124,6 @@ export function bindFacturasTemplateDom(root = null) {
     if (!img || img.dataset.facturasAvatarBound === "true") return;
 
     img.dataset.facturasAvatarBound = "true";
-
     const avatar = img.closest("[data-facturas-avatar='true']");
 
     const setFallback = () => {
@@ -2702,7 +2177,8 @@ export function getFacturasTemplateSnapshot() {
       tableMarkup: true,
       filtersMarkup: true,
       searchMarkup: true,
-      paginationMarkup: true,
+      paginationMarkup: false,
+      infiniteScrollMarkup: true,
       pdfActions: true,
       sendActions: true,
       openIncidenciaAction: true,

@@ -691,13 +691,17 @@
 
 /* =========================================================
    FILTERS / SORT / SEARCH
+   1:1 FACTURAS:
+   - Filtros en card propio.
+   - Sort / Fecha en card propio.
+   - Search independiente.
 ========================================================= */
 
 .incidencias-filters {
   grid-column: 1 / -1;
 
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 430px);
+  grid-template-columns: minmax(0, 1fr) auto minmax(280px, 430px);
 
   gap: var(--space-sm);
   align-items: center;
@@ -705,10 +709,6 @@
   min-inline-size: 0;
 
   padding-block-start: var(--space-xs);
-}
-
-.incidencias-filters:has(.incidencias-sort-pills) {
-  grid-template-columns: minmax(0, 1fr) auto minmax(280px, 430px);
 }
 
 .incidencias-filter-pills,
@@ -815,50 +815,44 @@
 .incidencias-filter-pill:hover,
 .incidencias-sort-pill:hover {
   transform: translateY(-1px);
+
+  background: transparent;
   color: var(--text-strong);
+
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .incidencias-filter-pill.is-active,
 .incidencias-sort-pill.is-active,
 .incidencias-filter-pill[aria-pressed="true"],
-.incidencias-sort-pill[aria-pressed="true"],
-.incidencias-filter-pill--sort {
+.incidencias-sort-pill[aria-pressed="true"] {
   border-color: var(--inc-segment-active-border);
   background: var(--inc-segment-active-bg);
   color: var(--inc-segment-active-text);
   box-shadow: var(--inc-segment-active-shadow);
+  transform: translateY(0);
 }
 
 .incidencias-filter-pill.is-active:hover,
 .incidencias-sort-pill.is-active:hover,
 .incidencias-filter-pill[aria-pressed="true"]:hover,
-.incidencias-sort-pill[aria-pressed="true"]:hover,
-.incidencias-filter-pill--sort:hover {
+.incidencias-sort-pill[aria-pressed="true"]:hover {
   border-color: var(--inc-segment-active-border);
   background: var(--inc-segment-active-bg);
   color: var(--inc-segment-active-text);
   box-shadow: var(--inc-segment-active-shadow);
+  transform: translateY(-1px);
 }
 
-.incidencias-filter-pills .incidencias-filter-pill--sort {
-  margin-inline-start: auto;
+.incidencias-filter-pill:disabled,
+.incidencias-sort-pill:disabled {
+  pointer-events: none;
+  opacity: .48;
 }
 
 .incidencias-filter-divider {
-  flex: 0 0 1px;
-
-  inline-size: 1px;
-  block-size: 22px;
-
-  margin-inline: 3px;
-
-  background:
-    linear-gradient(
-      180deg,
-      transparent,
-      color-mix(in srgb, var(--border-default) 76%, transparent),
-      transparent
-    );
+  display: none;
 }
 
 .incidencias-search {

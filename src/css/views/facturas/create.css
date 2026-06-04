@@ -2003,3 +2003,104 @@ body:has(.fac-create-overlay) {
     transform: rotate(360deg);
   }
 }
+
+
+/* =========================================================
+   FACTURAS CREATE · FULLSCREEN MODAL HOST FIX
+   Generado por patch productivo v8.
+   - Host global en body.
+   - Create modal fuera de view-container.
+   - Fullscreen real.
+   - Scroll único en .fac-create-panel.
+========================================================= */
+
+#facturas-create-modal-host {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483000 !important;
+
+  inline-size: 100vw !important;
+  block-size: 100dvh !important;
+
+  pointer-events: none !important;
+
+  font-family: var(--font-family);
+}
+
+#facturas-create-modal-host:empty {
+  display: none !important;
+}
+
+#facturas-create-modal-host #facturas-create-modal-root {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: inherit !important;
+
+  inline-size: 100vw !important;
+  block-size: 100dvh !important;
+
+  min-inline-size: 100vw !important;
+  min-block-size: 100dvh !important;
+
+  pointer-events: none !important;
+}
+
+#facturas-create-modal-host .fac-create-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: inherit !important;
+
+  inline-size: 100vw !important;
+  block-size: 100dvh !important;
+
+  display: grid !important;
+  place-items: stretch !important;
+
+  padding: 0 !important;
+  margin: 0 !important;
+
+  overflow: hidden !important;
+
+  pointer-events: auto !important;
+}
+
+#facturas-create-modal-host .fac-create-panel {
+  inline-size: 100vw !important;
+  block-size: 100dvh !important;
+
+  max-inline-size: none !important;
+  max-block-size: none !important;
+
+  border: 0 !important;
+  border-radius: 0 !important;
+
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+
+  overscroll-behavior: contain !important;
+}
+
+#facturas-create-modal-host .fac-create-panel::before {
+  z-index: 40 !important;
+}
+
+body.facturas-create-open,
+body.facturas-create-modal-open,
+body.facturas-modal-open,
+body.modal-open,
+body:has(#facturas-create-modal-host:not(:empty)) {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+
+@media (max-width: 760px) {
+  #facturas-create-modal-host .fac-create-panel {
+    border-radius: 0 !important;
+  }
+
+  #facturas-create-modal-host .fac-create-overlay {
+    align-items: stretch !important;
+    padding: 0 !important;
+  }
+}
+

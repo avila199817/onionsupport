@@ -2004,15 +2004,15 @@ body:has(.fac-create-overlay) {
   }
 }
 
-
 /* =========================================================
-   FACTURAS CREATE · DETAIL-LIKE COMPACT MODAL
+   FACTURAS CREATE · WIDE PREMIUM FLOW MODAL
    Objetivo:
-   - Create modal prácticamente 1:1 con Detail modal.
-   - Modal centrado, compacto, no fullscreen bruto.
-   - Header fijo real: sólo scrollea .fac-create-body.
-   - Mismo lenguaje graphite premium que detail.
-   - Mantiene template y JS intactos.
+   - Create 1:1 con Detail.
+   - Modal más ancho.
+   - Texto ligeramente más pequeño.
+   - Ningún elemento interno sticky/fixed.
+   - Scroll interno único en .fac-create-panel.
+   - Header, body y footer suben/bajan juntos.
 ========================================================= */
 
 #facturas-create-modal-host,
@@ -2025,7 +2025,6 @@ body:has(.fac-create-overlay) {
   block-size: 100dvh !important;
 
   pointer-events: none !important;
-
   font-family: var(--font-family) !important;
 }
 
@@ -2057,23 +2056,22 @@ body:has(.fac-create-overlay) {
   display: grid !important;
   place-items: center !important;
 
-  padding: clamp(14px, 2vw, 30px) !important;
+  padding: clamp(14px, 1.6vw, 26px) !important;
   margin: 0 !important;
 
   overflow: hidden !important;
-
   pointer-events: auto !important;
 
   background:
-    radial-gradient(circle at 18% 14%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 32%),
-    radial-gradient(circle at 82% 10%, color-mix(in srgb, var(--info) 14%, transparent), transparent 30%),
-    radial-gradient(circle at 50% 110%, color-mix(in srgb, var(--success) 7%, transparent), transparent 42%),
+    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 30%),
+    radial-gradient(circle at 84% 10%, color-mix(in srgb, var(--info) 13%, transparent), transparent 30%),
+    radial-gradient(circle at 52% 108%, color-mix(in srgb, var(--success) 7%, transparent), transparent 42%),
     color-mix(in srgb, var(--backdrop-bg, rgba(2, 6, 23, .82)) 90%, transparent) !important;
 
   color: var(--text) !important;
 
-  backdrop-filter: blur(22px) saturate(1.16) !important;
-  -webkit-backdrop-filter: blur(22px) saturate(1.16) !important;
+  backdrop-filter: blur(22px) saturate(1.14) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(1.14) !important;
 
   animation: facCreateOverlayIn .16s var(--ease-standard) both !important;
 }
@@ -2092,10 +2090,10 @@ body:has(.fac-create-overlay) {
       135deg,
       color-mix(in srgb, #ffffff 5%, transparent),
       transparent 32%,
-      color-mix(in srgb, #000000 12%, transparent)
+      color-mix(in srgb, #000000 13%, transparent)
     ) !important;
 
-  opacity: .95 !important;
+  opacity: .94 !important;
 }
 
 .fac-create-overlay > * {
@@ -2105,37 +2103,37 @@ body:has(.fac-create-overlay) {
 
 .fac-create-panel,
 #facturas-create-modal-host .fac-create-panel {
-  --fc-compact-width: clamp(760px, 52vw, 1020px);
-  --fc-compact-height: min(92dvh, 980px);
+  --fc-wide-width: clamp(980px, 66vw, 1280px);
+  --fc-wide-height: min(92dvh, 990px);
 
   position: relative !important;
   isolation: isolate !important;
 
-  inline-size: var(--fc-compact-width) !important;
-  block-size: var(--fc-compact-height) !important;
+  inline-size: var(--fc-wide-width) !important;
+  block-size: var(--fc-wide-height) !important;
 
   min-inline-size: 0 !important;
   min-block-size: 0 !important;
 
-  max-inline-size: calc(100vw - 40px) !important;
-  max-block-size: calc(100dvh - 36px) !important;
+  max-inline-size: calc(100vw - 36px) !important;
+  max-block-size: calc(100dvh - 32px) !important;
 
-  display: grid !important;
-  grid-template-rows: auto minmax(0, 1fr) !important;
+  display: block !important;
 
-  overflow: hidden !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
   overscroll-behavior: contain !important;
 
   border: 1px solid color-mix(in srgb, var(--border-strong) 72%, var(--accent-border) 28%) !important;
-  border-radius: clamp(24px, 2vw, 34px) !important;
+  border-radius: clamp(24px, 1.8vw, 34px) !important;
 
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 32%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 10%, transparent), transparent 30%),
-    radial-gradient(circle at 100% 100%, color-mix(in srgb, var(--success) 5%, transparent), transparent 40%),
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 31%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 9%, transparent), transparent 30%),
+    radial-gradient(circle at 100% 100%, color-mix(in srgb, var(--success) 5%, transparent), transparent 42%),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--surface-3) 48%, transparent),
+      color-mix(in srgb, var(--surface-3) 45%, transparent),
       color-mix(in srgb, var(--surface-1) 88%, #000 12%)
     ),
     var(--panel-bg) !important;
@@ -2143,22 +2141,33 @@ body:has(.fac-create-overlay) {
   color: var(--text) !important;
 
   box-shadow:
-    0 34px 110px color-mix(in srgb, #000 44%, transparent),
+    0 34px 110px color-mix(in srgb, #000 42%, transparent),
     0 0 0 1px color-mix(in srgb, #fff 5%, transparent),
-    0 0 70px color-mix(in srgb, var(--accent) 8%, transparent),
+    0 0 70px color-mix(in srgb, var(--accent) 7%, transparent),
     inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent) !important;
 
   outline: none !important;
   pointer-events: auto !important;
 
-  scrollbar-width: none !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: var(--scrollbar-thumb) transparent !important;
 
-  transform-origin: center !important;
-  animation: facCreatePanelDetailLikeIn .20s cubic-bezier(.16, 1, .3, 1) both !important;
+  animation: facCreateWidePremiumIn .20s cubic-bezier(.16, 1, .3, 1) both !important;
 }
 
 .fac-create-panel::-webkit-scrollbar {
-  display: none !important;
+  inline-size: var(--scrollbar-size, 10px) !important;
+}
+
+.fac-create-panel::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.fac-create-panel::-webkit-scrollbar-thumb {
+  border: 2px solid transparent !important;
+  border-radius: var(--radius-pill) !important;
+  background: var(--scrollbar-thumb) !important;
+  background-clip: padding-box !important;
 }
 
 .fac-create-panel::before {
@@ -2170,7 +2179,6 @@ body:has(.fac-create-overlay) {
   z-index: 50 !important;
 
   block-size: 1px !important;
-
   margin: 0 !important;
 
   pointer-events: none !important;
@@ -2180,49 +2188,48 @@ body:has(.fac-create-overlay) {
       90deg,
       transparent,
       color-mix(in srgb, var(--accent) 48%, transparent),
-      color-mix(in srgb, var(--info) 32%, transparent),
+      color-mix(in srgb, var(--info) 30%, transparent),
       transparent
     ) !important;
 
   opacity: .92 !important;
 }
 
-/* Header fijo real: queda fuera del scroll */
-.fac-create-header,
-#facturas-create-modal-host .fac-create-header {
+/* Sin sticky/fixed interno: todo fluye con el scroll del panel */
+.fac-create-header {
   position: relative !important;
   inset: auto !important;
-  z-index: 40 !important;
+  top: auto !important;
+  z-index: 2 !important;
 
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) auto !important;
-  gap: clamp(12px, 1.15vw, 18px) !important;
+
+  gap: clamp(12px, 1vw, 18px) !important;
   align-items: start !important;
 
-  min-inline-size: 0 !important;
-
   padding:
-    clamp(14px, 1.1vw, 18px)
-    clamp(18px, 1.65vw, 26px)
-    clamp(12px, 1vw, 16px) !important;
+    clamp(14px, 1vw, 18px)
+    clamp(18px, 1.45vw, 26px)
+    clamp(12px, .9vw, 16px) !important;
 
   border-bottom: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent) !important;
 
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 38%),
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 38%),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--panel-bg) 96%, #000 4%),
-      color-mix(in srgb, var(--panel-bg) 88%, transparent)
+      color-mix(in srgb, var(--panel-bg) 95%, #000 5%),
+      color-mix(in srgb, var(--panel-bg) 86%, transparent)
     ),
-    color-mix(in srgb, var(--surface-2) 90%, #000 10%) !important;
+    color-mix(in srgb, var(--surface-2) 88%, #000 12%) !important;
 
   box-shadow:
-    0 14px 32px color-mix(in srgb, #000 18%, transparent),
+    0 12px 28px color-mix(in srgb, #000 16%, transparent),
     inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent) !important;
 
-  backdrop-filter: blur(18px) saturate(1.12) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(1.12) !important;
+  backdrop-filter: blur(16px) saturate(1.10) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.10) !important;
 }
 
 .fac-create-header::after {
@@ -2230,28 +2237,23 @@ body:has(.fac-create-overlay) {
 
   position: absolute !important;
   inset-inline: 34% -10% !important;
-  inset-block-end: -78px !important;
+  inset-block-end: -70px !important;
   z-index: -1 !important;
 
-  block-size: 142px !important;
+  block-size: 132px !important;
 
   pointer-events: none !important;
 
   background:
-    radial-gradient(
-      circle,
-      color-mix(in srgb, var(--accent) 11%, transparent),
-      transparent 70%
-    ) !important;
+    radial-gradient(circle, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%) !important;
 
   filter: blur(18px) !important;
-  opacity: .74 !important;
+  opacity: .7 !important;
 }
 
 .fac-create-header-copy {
   display: grid !important;
   gap: 5px !important;
-  min-inline-size: 0 !important;
 }
 
 .fac-create-header h2 {
@@ -2261,12 +2263,10 @@ body:has(.fac-create-overlay) {
 
   color: var(--text-strong) !important;
 
-  font-size: clamp(25px, 2.2vw, 37px) !important;
-  line-height: .96 !important;
+  font-size: clamp(23px, 1.95vw, 34px) !important;
+  line-height: .98 !important;
   font-weight: var(--weight-black) !important;
-  letter-spacing: -.06em !important;
-
-  text-wrap: balance !important;
+  letter-spacing: -.058em !important;
 }
 
 .fac-create-header p {
@@ -2276,70 +2276,43 @@ body:has(.fac-create-overlay) {
 
   color: var(--text-muted) !important;
 
-  font-size: 12px !important;
-  line-height: 1.35 !important;
+  font-size: 11px !important;
+  line-height: 1.3 !important;
   font-weight: var(--weight-semibold) !important;
 }
 
 .fac-create-close {
-  inline-size: 34px !important;
-  block-size: 34px !important;
+  inline-size: 32px !important;
+  block-size: 32px !important;
 
   border-radius: var(--radius-pill) !important;
-
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent),
-    0 1px 2px color-mix(in srgb, #000 12%, transparent) !important;
 }
 
 .fac-create-close svg {
-  inline-size: 15px !important;
-  block-size: 15px !important;
+  inline-size: 14px !important;
+  block-size: 14px !important;
 }
 
-/* Sólo scrollea el body */
-.fac-create-body,
-#facturas-create-modal-host .fac-create-body {
+.fac-create-body {
   min-inline-size: 0 !important;
-  min-block-size: 0 !important;
-  block-size: 100% !important;
+  min-block-size: auto !important;
+  block-size: auto !important;
 
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
-  overscroll-behavior: contain !important;
+  overflow: visible !important;
 
   padding:
-    clamp(14px, 1.25vw, 20px)
-    clamp(18px, 1.65vw, 26px)
-    clamp(18px, 1.65vw, 28px) !important;
-
-  scrollbar-width: thin !important;
-  scrollbar-color: var(--scrollbar-thumb) transparent !important;
-}
-
-.fac-create-body::-webkit-scrollbar {
-  inline-size: var(--scrollbar-size, 10px) !important;
-}
-
-.fac-create-body::-webkit-scrollbar-track {
-  background: transparent !important;
-}
-
-.fac-create-body::-webkit-scrollbar-thumb {
-  border: 2px solid transparent !important;
-  border-radius: var(--radius-pill) !important;
-  background: var(--scrollbar-thumb) !important;
-  background-clip: padding-box !important;
+    clamp(14px, 1.1vw, 20px)
+    clamp(18px, 1.45vw, 26px)
+    clamp(20px, 1.8vw, 30px) !important;
 }
 
 .fac-create-form {
   display: grid !important;
-  gap: clamp(12px, 1vw, 18px) !important;
-  min-inline-size: 0 !important;
+  gap: clamp(12px, .9vw, 16px) !important;
 }
 
 .fac-create-grid {
-  gap: 10px !important;
+  gap: 9px !important;
 }
 
 .fac-create-grid--2 {
@@ -2351,324 +2324,226 @@ body:has(.fac-create-overlay) {
 }
 
 .fac-create-label {
-  font-size: 9px !important;
+  font-size: 8.5px !important;
   letter-spacing: .075em !important;
 }
 
 .fac-create-input,
 .fac-create-select {
-  min-block-size: 38px !important;
-
-  padding-inline: 12px !important;
-
-  border-radius: 14px !important;
-
-  font-size: 12px !important;
-}
-
-.fac-create-textarea {
-  min-block-size: 86px !important;
-
-  padding: 10px 12px !important;
-
-  border-radius: 14px !important;
-
-  font-size: 12px !important;
-}
-
-.fac-create-select {
-  padding-inline-end: 34px !important;
-}
-
-.fac-create-error {
+  min-block-size: 35px !important;
+  padding-inline: 11px !important;
+  border-radius: 13px !important;
   font-size: 11px !important;
 }
 
-/* Target block 1:1 detail section language */
+.fac-create-textarea {
+  min-block-size: 78px !important;
+  padding: 10px 11px !important;
+  border-radius: 13px !important;
+  font-size: 11px !important;
+}
+
+.fac-create-error {
+  font-size: 10px !important;
+}
+
 .fac-create-target {
-  gap: 12px !important;
-
-  padding: clamp(14px, 1.25vw, 20px) !important;
-
-  border-radius: 20px !important;
-
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 38%),
-    var(--glass-shine),
-    color-mix(in srgb, var(--card-bg) 94%, transparent) !important;
-
-  box-shadow:
-    0 12px 36px color-mix(in srgb, #000 13%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent) !important;
-}
-
-.fac-create-target-head {
-  gap: 12px !important;
-}
-
-.fac-create-target-title-block {
-  gap: 3px !important;
+  gap: 11px !important;
+  padding: clamp(13px, 1vw, 18px) !important;
+  border-radius: 19px !important;
 }
 
 .fac-create-target-title-block > span {
-  font-size: 9px !important;
+  font-size: 8.5px !important;
 }
 
 .fac-create-target-title-block h3 {
-  font-size: clamp(16px, 1.15vw, 21px) !important;
+  font-size: clamp(15px, 1vw, 20px) !important;
 }
 
 .fac-create-target-title-block p {
-  font-size: 12px !important;
-  line-height: 1.35 !important;
-}
-
-.fac-create-target-metrics {
-  gap: 7px !important;
+  font-size: 11px !important;
+  line-height: 1.3 !important;
 }
 
 .fac-create-target-metrics > div {
-  min-inline-size: 78px !important;
-
-  padding: 10px !important;
-
-  border-radius: 15px !important;
+  min-inline-size: 74px !important;
+  padding: 9px !important;
+  border-radius: 14px !important;
 }
 
 .fac-create-target-metrics strong {
-  font-size: 20px !important;
+  font-size: 19px !important;
 }
 
 .fac-create-target-metrics span {
-  font-size: 9px !important;
+  font-size: 8.5px !important;
 }
 
-/* Cards cliente/incidencia */
 .fac-create-pro-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  gap: 10px !important;
+  gap: 9px !important;
 }
 
 .fac-create-pro-card {
-  min-block-size: 260px !important;
-
-  gap: 10px !important;
-
-  padding: 14px !important;
-
-  border-radius: 17px !important;
-
-  box-shadow:
-    0 12px 34px color-mix(in srgb, #000 12%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent) !important;
-}
-
-.fac-create-pro-card-head {
-  gap: 10px !important;
+  min-block-size: 235px !important;
+  gap: 9px !important;
+  padding: 12px !important;
+  border-radius: 16px !important;
 }
 
 .fac-create-pro-card-head span {
-  font-size: 9px !important;
+  font-size: 8.5px !important;
 }
 
 .fac-create-pro-card-head strong {
-  font-size: 14px !important;
+  font-size: 13px !important;
 }
 
 .fac-create-mini-button,
 .fac-create-icon-button {
-  min-block-size: 28px !important;
-
-  padding-inline: 9px !important;
-
-  font-size: 10px !important;
+  min-block-size: 26px !important;
+  padding-inline: 8px !important;
+  font-size: 9px !important;
 }
 
 .fac-create-empty-pro {
-  gap: 3px !important;
-
-  padding: 13px !important;
-
-  border-radius: 15px !important;
+  padding: 12px !important;
+  border-radius: 14px !important;
 }
 
 .fac-create-empty-pro strong {
-  font-size: 12px !important;
+  font-size: 11px !important;
 }
 
 .fac-create-empty-pro span {
-  font-size: 11px !important;
+  font-size: 10px !important;
 }
 
 .fac-create-selected-stack,
 .fac-create-search-results,
 .fac-create-ticket-list {
-  gap: 8px !important;
+  gap: 7px !important;
 }
 
 .fac-create-search-results,
 .fac-create-ticket-list {
-  max-block-size: 220px !important;
+  max-block-size: 200px !important;
 }
 
 .fac-create-selected-card,
 .fac-create-search-item,
 .fac-create-ticket-option,
 .fac-create-check {
-  padding: 10px !important;
-  border-radius: 15px !important;
-}
-
-.fac-create-selected-card,
-.fac-create-search-item,
-.fac-create-ticket-option {
-  gap: 9px !important;
+  padding: 9px !important;
+  border-radius: 14px !important;
 }
 
 .fac-create-avatar {
-  inline-size: 38px !important;
-  block-size: 38px !important;
+  inline-size: 35px !important;
+  block-size: 35px !important;
 }
 
 .fac-create-avatar--search {
-  inline-size: 32px !important;
-  block-size: 32px !important;
-}
-
-.fac-create-avatar--selected,
-.fac-create-ticket-badge {
-  inline-size: 38px !important;
-  block-size: 38px !important;
-}
-
-.fac-create-ticket-mini-badge {
   inline-size: 30px !important;
   block-size: 30px !important;
 }
 
+.fac-create-avatar--selected,
+.fac-create-ticket-badge {
+  inline-size: 35px !important;
+  block-size: 35px !important;
+}
+
+.fac-create-ticket-mini-badge {
+  inline-size: 28px !important;
+  block-size: 28px !important;
+}
+
 .fac-create-avatar-fallback {
-  font-size: 13px !important;
+  font-size: 12px !important;
 }
 
 .fac-create-selected-copy span,
 .fac-create-search-copy span,
 .fac-create-ticket-option-copy small {
-  font-size: 10px !important;
+  font-size: 9.5px !important;
 }
 
 .fac-create-selected-copy strong,
 .fac-create-search-copy strong,
 .fac-create-ticket-option-copy strong {
-  font-size: 12px !important;
+  font-size: 11px !important;
 }
 
 .fac-create-selected-copy small {
-  font-size: 11px !important;
+  font-size: 10px !important;
 }
 
 .fac-create-add-pill {
-  min-block-size: 24px !important;
-  padding-inline: 8px !important;
-  font-size: 9px !important;
+  min-block-size: 22px !important;
+  padding-inline: 7px !important;
+  font-size: 8.5px !important;
 }
 
-/* Total strip como detail stats */
 .fac-create-total-strip {
   grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-  gap: 10px !important;
-}
-
-.fac-create-total-strip > div {
-  min-block-size: 92px !important;
-
-  padding: 14px !important;
-
-  border-radius: 17px !important;
-
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent),
-    0 12px 30px color-mix(in srgb, #000 10%, transparent) !important;
-}
-
-.fac-create-total-strip span {
-  font-size: 9px !important;
-  letter-spacing: .075em !important;
-}
-
-.fac-create-total-strip strong {
-  font-size: clamp(24px, 1.9vw, 36px) !important;
-}
-
-.fac-create-check {
   gap: 9px !important;
 }
 
-.fac-create-check input {
-  inline-size: 18px !important;
-  block-size: 18px !important;
-}
-
-.fac-create-check strong {
-  font-size: 12px !important;
-}
-
-.fac-create-check small {
-  font-size: 11px !important;
-}
-
-.fac-create-actions {
-  padding-block-start: 12px !important;
-  border-top-color: color-mix(in srgb, var(--border-default) 68%, transparent) !important;
-}
-
-.fac-create-submit {
-  min-block-size: 38px !important;
-
-  padding-inline: 18px !important;
-
-  border-radius: 15px !important;
-
-  font-size: 12px !important;
-}
-
-.fac-create-alert {
+.fac-create-total-strip > div {
+  min-block-size: 82px !important;
   padding: 12px !important;
   border-radius: 16px !important;
 }
 
-.fac-create-alert strong {
-  font-size: 13px !important;
+.fac-create-total-strip span {
+  font-size: 8.5px !important;
 }
 
-.fac-create-alert span {
+.fac-create-total-strip strong {
+  font-size: clamp(22px, 1.7vw, 32px) !important;
+}
+
+.fac-create-check strong {
+  font-size: 11px !important;
+}
+
+.fac-create-check small {
+  font-size: 10px !important;
+}
+
+.fac-create-actions {
+  position: relative !important;
+  inset: auto !important;
+
+  padding-block-start: 12px !important;
+
+  border-top-color: color-mix(in srgb, var(--border-default) 68%, transparent) !important;
+  background: transparent !important;
+}
+
+.fac-create-submit {
+  min-block-size: 36px !important;
+  padding-inline: 17px !important;
+  border-radius: 14px !important;
+  font-size: 11px !important;
+}
+
+.fac-create-alert {
+  padding: 11px !important;
+  border-radius: 15px !important;
+}
+
+.fac-create-alert strong {
   font-size: 12px !important;
 }
 
-/* Submit overlay dentro del panel compacto */
-.fac-create-loading-overlay {
-  position: absolute !important;
-  inset: 0 !important;
-  z-index: 80 !important;
-
-  background:
-    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 48%),
-    color-mix(in srgb, var(--backdrop-bg) 72%, transparent) !important;
+.fac-create-alert span {
+  font-size: 11px !important;
 }
 
-.fac-create-loading-card {
-  min-inline-size: min(340px, 100%) !important;
-  padding: 22px !important;
-  border-radius: 22px !important;
-}
-
-/* Light fit 1:1 detail */
-[data-theme="light"] .fac-create-overlay {
-  background:
-    radial-gradient(circle at 18% 14%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 34%),
-    radial-gradient(circle at 82% 10%, color-mix(in srgb, var(--info) 9%, transparent), transparent 30%),
-    rgba(248, 250, 252, .82) !important;
-}
-
+/* Light fit */
 [data-theme="light"] .fac-create-panel {
   background:
     radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 32%),
@@ -2686,32 +2561,23 @@ body:has(.fac-create-overlay) {
 [data-theme="light"] .fac-create-header {
   background:
     radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 38%),
-    linear-gradient(
-      180deg,
-      rgba(255,255,255,.92),
-      rgba(255,255,255,.78)
-    ) !important;
+    linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,255,255,.78)) !important;
 
   box-shadow:
     0 12px 28px rgba(15, 23, 42, .08),
     inset 0 1px 0 rgba(255,255,255,.86) !important;
 }
 
-/* Responsive */
 @media (max-width: 1180px) {
   .fac-create-panel {
-    --fc-compact-width: min(820px, calc(100vw - 28px));
+    --fc-wide-width: min(920px, calc(100vw - 28px));
 
-    inline-size: var(--fc-compact-width) !important;
+    inline-size: var(--fc-wide-width) !important;
     block-size: min(92dvh, 940px) !important;
   }
 
   .fac-create-pro-grid {
     grid-template-columns: 1fr !important;
-  }
-
-  .fac-create-pro-card {
-    min-block-size: auto !important;
   }
 }
 
@@ -2725,9 +2591,6 @@ body:has(.fac-create-overlay) {
     inline-size: calc(100vw - 16px) !important;
     block-size: calc(100dvh - 16px) !important;
 
-    max-inline-size: none !important;
-    max-block-size: none !important;
-
     border-radius: 24px 24px 0 0 !important;
   }
 
@@ -2740,8 +2603,7 @@ body:has(.fac-create-overlay) {
   }
 
   .fac-create-header h2 {
-    font-size: clamp(26px, 8vw, 36px) !important;
-    line-height: 1 !important;
+    font-size: clamp(25px, 8vw, 35px) !important;
   }
 
   .fac-create-grid--2,
@@ -2755,14 +2617,6 @@ body:has(.fac-create-overlay) {
     grid-template-columns: 1fr !important;
   }
 
-  .fac-create-target-metrics {
-    inline-size: 100% !important;
-  }
-
-  .fac-create-target-metrics > div {
-    flex: 1 1 0 !important;
-  }
-
   .fac-create-actions {
     justify-items: stretch !important;
   }
@@ -2773,30 +2627,10 @@ body:has(.fac-create-overlay) {
   }
 }
 
-@media (max-width: 460px) {
-  .fac-create-overlay {
-    padding-inline: 0 !important;
-    padding-block-end: 0 !important;
-  }
-
-  .fac-create-panel {
-    inline-size: 100vw !important;
-    block-size: 96dvh !important;
-
-    border-inline: 0 !important;
-    border-block-end: 0 !important;
-  }
-
-  .fac-create-target-metrics {
-    display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
-  }
-}
-
-@keyframes facCreatePanelDetailLikeIn {
+@keyframes facCreateWidePremiumIn {
   from {
     opacity: 0;
-    transform: translateY(18px) scale(.965);
+    transform: translateY(16px) scale(.972);
   }
 
   to {

@@ -62,7 +62,7 @@ import {
   renderFacturasDetailModal,
 } from "./facturas.template.modal.js";
 
-export const FACTURAS_INDEX_VERSION = "facturas.index.productive.v9.create-zero-flicker";
+export const FACTURAS_INDEX_VERSION = "facturas.index.productive.v8.create-detail-modal-islands";
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
 const DEFAULT_PAGE = 1;
@@ -2090,350 +2090,6 @@ function createFacturasController(host = null, context = {}) {
     return true;
   }
 
-
-  /* =========================================================
-     CREATE MODAL ZERO FLICKER DOM PATCHES
-     - No reconstruye el modal entero al escribir.
-     - Parchea sólo slots: clientes, tickets, resultados, errores y totales.
-     - Mantiene foco, caret y scroll.
-  ========================================================= */
-
-  function getCreateCurrentRoot() {
-    return (
-      createModalHost?.querySelector?.("[data-facturas-create-root='true']") ||
-      createModalHost?.querySelector?.("#facturas-create-modal-root") ||
-      null
-    );
-  }
-
-  function getCreateRenderedRoot() {
-    if (!isBrowser()) return null;
-
-    const template = document.createElement("template");
-
-    template.innerHTML = renderFacturasCreateModal(createModalPayload());
-
-    return (
-      template.content.querySelector("[data-facturas-create-root='true']") ||
-      template.content.querySelector("#facturas-create-modal-root") ||
-      null
-    );
-  }
-
-  function syncCreateModalIsland(options = {}) {
-    if (!createModalIsOpen()) {
-      return renderCreateModal(options);
-    }
-
-    if (!getCreateCurrentRoot()) {
-      return renderCreateModal(options);
-    }
-
-    syncModalBodyState();
-    return true;
-  }
-
-  function getCreatePanel(root = createModalHost) {
-    return root?.querySelector?.(CREATE_MODAL_PANEL_SELECTOR) || null;
-  }
-
-  function captureCreatePatchState(root = createModalHost) {
-    if (!isBrowser() || !root) return null;
-
-    const active = document.activeElement;
-    const panel = getCreatePanel(root);
-
-    const state = {
-      scrollTop: panel?.scrollTop || 0,
-      activeField: "",
-      activeName: "",
-      activeId: "",
-      selectionStart: null,
-      selectionEnd: null,
-    };
-
-    if (!active || !root.contains(active)) return state;
-
-    state.activeField = cleanText(active.dataset?.field || active.dataset?.createField || "", "");
-    state.activeName = cleanText(active.getAttribute?.("name"), "");
-    state.activeId = cleanText(active.id, "");
-
-    try {
-      if (typeof active.selectionStart === "number") {
-        state.selectionStart = active.selectionStart;
-        state.selectionEnd = active.selectionEnd;
-      }
-    } catch {
-      // noop
-    }
-
-    return state;
-  }
-
-  function restoreCreatePatchState(root = createModalHost, state = null, options = {}) {
-    if (!isBrowser() || !root) return false;
-
-    const panel = getCreatePanel(root);
-
-    if (panel && state) {
-      panel.scrollTop = state.scrollTop || 0;
-    }
-
-    nextFrame(() => {
-      try {
-        if (panel && state) panel.scrollTop = state.scrollTop || 0;
-      } catch {
-        // noop
-      }
-    });
-
-    if (options.focusSelector) {
-      return focusAfterRender(
-        options.focusSelector,
-        options.focusEnd !== false,
-        root
-      );
-    }
-
-    if (!state) return false;
-
-    const candidates = Array.from(
-      root.querySelectorAll("[data-field], [name], button, [tabindex]")
-    );
-
-    let target = null;
-
-    if (state.activeId) {
-      target = candidates.find((node) => cleanText(node.id, "") === state.activeId);
-    }
-
-    if (!target && state.activeField) {
-      target = candidates.find((node) => {
-        return cleanText(node.dataset?.field || node.dataset?.createField || "", "") === state.activeField;
-      });
-    }
-
-    if (!target && state.activeName) {
-      target = candidates.find((node) => cleanText(node.getAttribute("name"), "") === state.activeName);
-    }
-
-    if (!target) return false;
-
-    try {
-      target.focus({ preventScroll: true });
-
-      if (
-        options.focusEnd !== false &&
-        typeof target.setSelectionRange === "function"
-      ) {
-        const valueLength = String(target.value || "").length;
-        const start = Number.isFinite(state.selectionStart)
-          ? Math.min(state.selectionStart, valueLength)
-          : valueLength;
-        const end = Number.isFinite(state.selectionEnd)
-          ? Math.min(state.selectionEnd, valueLength)
-          : valueLength;
-
-        target.setSelectionRange(start, end);
-      }
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function replaceCreateSelector(currentRoot = null, nextRoot = null, selector = "") {
-    if (!currentRoot || !nextRoot || !selector) return false;
-
-    const currentNodes = Array.from(currentRoot.querySelectorAll(selector));
-    const nextNodes = Array.from(nextRoot.querySelectorAll(selector));
-
-    if (!currentNodes.length && !nextNodes.length) return false;
-
-    currentNodes.forEach((currentNode, index) => {
-      const nextNode = nextNodes[index];
-
-      if (currentNode && nextNode) {
-        currentNode.replaceWith(nextNode.cloneNode(true));
-        return;
-      }
-
-      if (currentNode && !nextNode) {
-        currentNode.replaceChildren();
-      }
-    });
-
-    return true;
-  }
-
-  function patchCreateDomSlots(options = {}) {
-    if (destroyed || !isBrowser()) return false;
-
-    if (!createModalIsOpen()) {
-      return renderCreateModal(options);
-    }
-
-    const currentRoot = getCreateCurrentRoot();
-    const nextRoot = getCreateRenderedRoot();
-
-    if (!currentRoot || !nextRoot) {
-      return renderCreateModal({
-        ...options,
-        immediate: true,
-      });
-    }
-
-    const state = captureCreatePatchState(currentRoot);
-
-    safeArray(options.selectors).forEach((selector) => {
-      replaceCreateSelector(currentRoot, nextRoot, selector);
-    });
-
-    syncModalBodyState();
-
-    if (options.preserveFocus !== false) {
-      restoreCreatePatchState(currentRoot, state, options);
-    } else if (options.focusSelector) {
-      focusAfterRender(options.focusSelector, options.focusEnd !== false, currentRoot);
-    }
-
-    return true;
-  }
-
-  function patchCreateFieldWrappers(fields = [], options = {}) {
-    if (destroyed || !isBrowser()) return false;
-
-    if (!createModalIsOpen()) {
-      return renderCreateModal(options);
-    }
-
-    const currentRoot = getCreateCurrentRoot();
-    const nextRoot = getCreateRenderedRoot();
-
-    if (!currentRoot || !nextRoot) {
-      return renderCreateModal({
-        ...options,
-        immediate: true,
-      });
-    }
-
-    const state = captureCreatePatchState(currentRoot);
-
-    safeArray(fields).forEach((field) => {
-      const selector = `[data-field="${field}"], [name="${field}"]`;
-      const currentInput = currentRoot.querySelector(selector);
-      const nextInput = nextRoot.querySelector(selector);
-
-      const currentWrapper = currentInput?.closest?.(".fac-create-field, .fac-create-check");
-      const nextWrapper = nextInput?.closest?.(".fac-create-field, .fac-create-check");
-
-      if (currentWrapper && nextWrapper) {
-        currentWrapper.replaceWith(nextWrapper.cloneNode(true));
-      }
-    });
-
-    syncModalBodyState();
-    restoreCreatePatchState(currentRoot, state, options);
-
-    return true;
-  }
-
-  function clearCreateFieldVisualState(field = null) {
-    if (!field) return false;
-
-    try {
-      field.classList?.remove?.("is-error");
-
-      const wrapper = field.closest?.(".fac-create-field, .fac-create-check");
-      const error = wrapper?.querySelector?.(".fac-create-error");
-
-      error?.remove?.();
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function clearCreateFeedbackAlerts() {
-    if (!createModalHost) return false;
-
-    try {
-      createModalHost
-        .querySelectorAll(".fac-create-alert")
-        .forEach((node) => node.remove());
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function patchCreateClientDom(options = {}) {
-    return patchCreateDomSlots({
-      ...options,
-      selectors: [
-        "[data-slot='selected-clientes']",
-        "[data-slot='client-search-results']",
-        "[data-error-slot='clienteId']",
-        ".fac-create-target-metrics",
-      ],
-    });
-  }
-
-  function patchCreateTicketDom(options = {}) {
-    return patchCreateDomSlots({
-      ...options,
-      selectors: [
-        "[data-slot='selected-tickets']",
-        "[data-slot='ticket-search-results']",
-        "[data-error-slot='incidenciaId']",
-        ".fac-create-target-metrics",
-      ],
-    });
-  }
-
-  function patchCreateTargetDom(options = {}) {
-    return patchCreateDomSlots({
-      ...options,
-      selectors: [
-        "[data-slot='selected-clientes']",
-        "[data-slot='client-search-results']",
-        "[data-error-slot='clienteId']",
-        "[data-slot='selected-tickets']",
-        "[data-slot='ticket-search-results']",
-        "[data-error-slot='incidenciaId']",
-        ".fac-create-target-metrics",
-      ],
-    });
-  }
-
-  function patchCreateTotalsDom(options = {}) {
-    return patchCreateDomSlots({
-      ...options,
-      selectors: [
-        ".fac-create-total-strip",
-      ],
-    });
-  }
-
-  function patchCreateValidationDom(options = {}) {
-    patchCreateDomSlots({
-      ...options,
-      preserveFocus: false,
-      selectors: [
-        "[data-error-slot='clienteId']",
-        "[data-error-slot='incidenciaId']",
-      ],
-    });
-
-    return patchCreateFieldWrappers(
-      ["concepto", "descripcion", "cantidad", "precioUnitario"],
-      options
-    );
-  }
-
   function detailModalIsOpen() {
     return detailModal.open === true || detailModal.detailOpen === true;
   }
@@ -2735,7 +2391,7 @@ function createFacturasController(host = null, context = {}) {
     host.innerHTML = renderFacturasTemplate(viewPayload());
     bindFacturasTemplateDom(host);
     syncModalBodyState();
-    syncCreateModalIsland(options);
+    renderCreateModal(options);
 
     if (options.focusSelector) {
       focusAfterRender(options.focusSelector, options.focusEnd !== false);
@@ -2777,7 +2433,7 @@ function createFacturasController(host = null, context = {}) {
     host.innerHTML = renderFacturasLoadingState(viewPayload());
     bindFacturasTemplateDom(host);
     syncModalBodyState();
-    syncCreateModalIsland();
+    renderCreateModal();
 
     return true;
   }
@@ -3198,11 +2854,7 @@ function createFacturasController(host = null, context = {}) {
     if (!name || name === "clienteSearch" || name === "ticketSearch") return false;
 
     const hadError = Boolean(createModal.errors[name]);
-    const hadFeedback = Boolean(
-      createModal.serverError ||
-        createModal.successMessage ||
-        createModal.createdFacturaId
-    );
+    const hadFeedback = Boolean(createModal.serverError || createModal.successMessage || createModal.createdFacturaId);
 
     createModal.form = {
       ...createModal.form,
@@ -3213,18 +2865,13 @@ function createFacturasController(host = null, context = {}) {
       const next = { ...createModal.errors };
       delete next[name];
       createModal.errors = next;
-      clearCreateFieldVisualState(field);
-    }
-
-    if (hadFeedback) {
-      clearCreateFeedbackAlerts();
     }
 
     createModal.serverError = "";
     createModal.successMessage = "";
     createModal.createdFacturaId = "";
 
-    const totalFields = new Set([
+    const liveFields = new Set([
       "cantidad",
       "precioUnitario",
       "precio",
@@ -3237,11 +2884,13 @@ function createFacturasController(host = null, context = {}) {
       "porcentajeIRPF",
       "aplicaIVA",
       "aplicaIRPF",
+      "sendEmail",
+      "estadoPago",
     ]);
 
-    if (totalFields.has(name)) {
-      patchCreateTotalsDom({
-        preserveFocus: true,
+    if (hadError || hadFeedback || liveFields.has(name)) {
+      renderCreateModal({
+        focusSelector: `[data-field='${name}']`,
       });
     }
 
@@ -3263,21 +2912,12 @@ function createFacturasController(host = null, context = {}) {
     if (query.length < SEARCH_MIN_LENGTH) {
       createModal.clientSearch.loading = false;
       createModal.clientSearch.results = [];
-
-      patchCreateClientDom({
-        focusSelector: "[data-field='clienteSearch']",
-        preserveFocus: true,
-      });
-
+      renderCreateModal({ focusSelector: "[data-field='clienteSearch']" });
       return true;
     }
 
     createModal.clientSearch.loading = true;
-
-    patchCreateClientDom({
-      focusSelector: "[data-field='clienteSearch']",
-      preserveFocus: true,
-    });
+    renderCreateModal({ focusSelector: "[data-field='clienteSearch']" });
 
     clientSearchTimer = setTimeout(() => {
       void runClientSearch(query);
@@ -3299,10 +2939,7 @@ function createFacturasController(host = null, context = {}) {
       createModal.clientSearch.results = results;
       createModal.clientSearch.empty = results.length === 0;
 
-      patchCreateClientDom({
-        focusSelector: "[data-field='clienteSearch']",
-        preserveFocus: true,
-      });
+      renderCreateModal({ focusSelector: "[data-field='clienteSearch']" });
 
       return true;
     } catch (searchError) {
@@ -3313,10 +2950,7 @@ function createFacturasController(host = null, context = {}) {
       createModal.clientSearch.empty = false;
       createModal.clientSearch.error = safeError(searchError, "No se pudo buscar cliente.");
 
-      patchCreateClientDom({
-        focusSelector: "[data-field='clienteSearch']",
-        preserveFocus: true,
-      });
+      renderCreateModal({ focusSelector: "[data-field='clienteSearch']" });
 
       return false;
     }
@@ -3362,10 +2996,7 @@ function createFacturasController(host = null, context = {}) {
     createModal.ticketSearch.results = [];
     createModal.ticketSearch.empty = false;
 
-    patchCreateTargetDom({
-      focusSelector: "[data-field='ticketSearch']",
-      preserveFocus: false,
-    });
+    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
 
     void loadTicketsForSelectedClients({
       autoSelectLatest: createModal.selectedTickets.length === 0,
@@ -3392,11 +3023,7 @@ function createFacturasController(host = null, context = {}) {
       };
       syncPrimaryTicketToForm();
 
-      patchCreateTargetDom({
-        focusSelector: "[data-field='clienteSearch']",
-        preserveFocus: false,
-      });
-
+      renderCreateModal({ focusSelector: "[data-field='clienteSearch']" });
       return true;
     }
 
@@ -3405,10 +3032,7 @@ function createFacturasController(host = null, context = {}) {
     });
 
     syncPrimaryTicketToForm();
-
-    patchCreateTargetDom({
-      preserveFocus: true,
-    });
+    render();
 
     void loadTicketsForSelectedClients({
       autoSelectLatest: createModal.selectedTickets.length === 0,
@@ -3428,10 +3052,7 @@ function createFacturasController(host = null, context = {}) {
     ];
 
     syncPrimaryClientToForm();
-
-    patchCreateTargetDom({
-      preserveFocus: true,
-    });
+    render();
 
     void loadTicketsForSelectedClients({
       autoSelectLatest: createModal.selectedTickets.length === 0,
@@ -3461,10 +3082,7 @@ function createFacturasController(host = null, context = {}) {
     syncPrimaryClientToForm();
     syncPrimaryTicketToForm();
 
-    patchCreateTargetDom({
-      focusSelector: "[data-field='clienteSearch']",
-      preserveFocus: false,
-    });
+    renderCreateModal({ focusSelector: "[data-field='clienteSearch']" });
 
     return true;
   }
@@ -3484,21 +3102,12 @@ function createFacturasController(host = null, context = {}) {
     if (!createModal.selectedClientes.length) {
       createModal.ticketSearch.loading = false;
       createModal.ticketSearch.results = [];
-
-      patchCreateTicketDom({
-        focusSelector: "[data-field='ticketSearch']",
-        preserveFocus: true,
-      });
-
+      renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
       return true;
     }
 
     createModal.ticketSearch.loading = true;
-
-    patchCreateTicketDom({
-      focusSelector: "[data-field='ticketSearch']",
-      preserveFocus: true,
-    });
+    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
 
     ticketSearchTimer = setTimeout(() => {
       void loadTicketsForSelectedClients({
@@ -3513,66 +3122,6 @@ function createFacturasController(host = null, context = {}) {
   async function loadTicketsForSelectedClients({
     query = createModal.ticketSearch.query,
     autoSelectLatest = false,
-  } = {}) {
-    if (!createModal.selectedClientes.length) {
-      createModal.ticketSearch.loading = false;
-      createModal.ticketSearch.results = [];
-      createModal.ticketSearch.empty = false;
-
-      patchCreateTicketDom({
-        preserveFocus: true,
-      });
-
-      return [];
-    }
-
-    const seq = ++ticketSearchSeq;
-
-    createModal.ticketSearch.loading = true;
-    createModal.ticketSearch.error = "";
-    createModal.ticketSearch.empty = false;
-
-    patchCreateTicketDom({
-      focusSelector: "[data-field='ticketSearch']",
-      preserveFocus: true,
-    });
-
-    try {
-      const results = await searchTickets(query, createModal.selectedClientes);
-
-      if (seq !== ticketSearchSeq || destroyed) return [];
-
-      createModal.ticketSearch.loading = false;
-      createModal.ticketSearch.error = "";
-      createModal.ticketSearch.results = results;
-      createModal.ticketSearch.empty = results.length === 0;
-
-      if (autoSelectLatest && results[0]?.id && !createModal.selectedTickets.length) {
-        createModal.selectedTickets = [results[0]];
-        syncPrimaryTicketToForm();
-      }
-
-      patchCreateTicketDom({
-        focusSelector: "[data-field='ticketSearch']",
-        preserveFocus: true,
-      });
-
-      return results;
-    } catch (searchError) {
-      if (seq !== ticketSearchSeq || destroyed) return [];
-
-      createModal.ticketSearch.loading = false;
-      createModal.ticketSearch.results = [];
-      createModal.ticketSearch.empty = false;
-      createModal.ticketSearch.error = safeError(searchError, "No se pudieron cargar incidencias.");
-
-      patchCreateTicketDom({
-        focusSelector: "[data-field='ticketSearch']",
-        preserveFocus: true,
-      });
-
-      return [];
-    }
   } = {}) {
     if (!createModal.selectedClientes.length) {
       createModal.ticketSearch.loading = false;
@@ -3645,10 +3194,7 @@ function createFacturasController(host = null, context = {}) {
 
     createModal.ticketSearch.query = "";
 
-    patchCreateTicketDom({
-      focusSelector: "[data-field='ticketSearch']",
-      preserveFocus: false,
-    });
+    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
 
     return true;
   }
@@ -3659,10 +3205,7 @@ function createFacturasController(host = null, context = {}) {
     createModal.selectedTickets = createModal.selectedTickets.filter((_, currentIndex) => currentIndex !== index);
     syncPrimaryTicketToForm();
 
-    patchCreateTicketDom({
-      focusSelector: "[data-field='ticketSearch']",
-      preserveFocus: true,
-    });
+    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
 
     return true;
   }
@@ -3679,10 +3222,7 @@ function createFacturasController(host = null, context = {}) {
 
     syncPrimaryTicketToForm();
 
-    patchCreateTicketDom({
-      focusSelector: "[data-field='ticketSearch']",
-      preserveFocus: true,
-    });
+    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
 
     return true;
   }
@@ -3692,10 +3232,7 @@ function createFacturasController(host = null, context = {}) {
     createModal.ticketSearch.query = "";
     syncPrimaryTicketToForm();
 
-    patchCreateTicketDom({
-      focusSelector: "[data-field='ticketSearch']",
-      preserveFocus: false,
-    });
+    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
 
     return true;
   }
@@ -3834,7 +3371,7 @@ function createFacturasController(host = null, context = {}) {
     createModal.form = validation.form;
 
     if (!validation.valid) {
-      patchCreateValidationDom({
+      renderCreateModal({
         focusSelector:
           createModal.errors.clienteId
             ? "[data-field='clienteSearch']"
@@ -4406,11 +3943,6 @@ function createFacturasController(host = null, context = {}) {
   function unbind() {
     unbindTarget(host);
 
-    if (createModalHostBound) {
-      unbindTarget(createModalHost);
-      createModalHostBound = false;
-    }
-
     if (detailModalHostBound) {
       unbindTarget(detailModalHost);
       detailModalHostBound = false;
@@ -4469,11 +4001,9 @@ function createFacturasController(host = null, context = {}) {
 
       clearTimers();
       cancelScheduledRender();
-      cancelScheduledCreateRender();
       cancelScheduledDetailRender();
       disconnectInfiniteObserver();
       unbind();
-      removeCreateModalHost();
       removeDetailModalHost();
       revokeObjectUrls();
 

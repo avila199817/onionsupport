@@ -42,8 +42,8 @@ export const FACTURA_PDF_MODES = Object.freeze({
   VIEW: "view",
   INLINE: "inline",
   DOWNLOAD: "download",
-  ATTACHMENT: "attachment",
-});
+  ATTACHMENT: "attachment"
+    });
 
 /* =========================================================
    RUNTIME CACHE
@@ -57,8 +57,8 @@ let lastStats = null;
 let lastList = {
   items: [],
   total: 0,
-  queryKey: "",
-};
+  queryKey: ""
+    };
 
 const inflight = new Map();
 
@@ -382,8 +382,8 @@ function buildListQuery({
   sortMode = "",
   includeStats = true,
   includeStatsAll = false,
-  filters = {},
-} = {}) {
+  filters = {}
+    } = {}) {
   const query = {};
 
   query.page = Math.max(1, number(page, FACTURAS_DEFAULT_PAGE));
@@ -415,8 +415,8 @@ function buildListQuery({
     hasIncidencia: "withIncidencia",
     withTicket: "withIncidencia",
     hasTicket: "withIncidencia",
-    hasPdf: "withPdf",
-  };
+    hasPdf: "withPdf"
+    };
 
   for (const [rawKey, value] of Object.entries(safeObject(filters))) {
     const key = cleanText(rawKey, "");
@@ -555,8 +555,8 @@ function pagingFromPayload(payload = null, requestMeta = {}, itemsCount = 0) {
     total,
     remoteCount: total,
     fetchLimit: number(first(envelope.fetchLimit, paging.fetchLimit, limit), limit),
-    mode: cleanText(first(envelope.queryMode, paging.mode, paging.queryMode, ""), ""),
-  };
+    mode: cleanText(first(envelope.queryMode, paging.mode, paging.queryMode, ""), "")
+    };
 }
 
 function looksLikeFactura(value = null) {
@@ -762,8 +762,8 @@ function normalizeFacturaPdfFields(raw = {}) {
     blobUrl: publicUrl,
     blobPath,
     pdfPath: blobPath,
-    document: Object.keys(document).length ? document : null,
-  };
+    document: Object.keys(document).length ? document : null
+    };
 }
 
 export function normalizeFactura(item = {}, options = {}) {
@@ -875,9 +875,9 @@ export function normalizeFactura(item = {}, options = {}) {
       ticketId,
       incidenciaId: ticketId,
       ticketIds,
-      incidenciaIds: ticketIds,
-    },
-  };
+      incidenciaIds: ticketIds
+    }
+    };
 
   if (options.includeRaw === true) {
     normalized.raw = raw;
@@ -912,8 +912,8 @@ export function normalizeIncidenciaForFactura(item = {}) {
     estado: status,
     category,
     categoria: category,
-    facturaLinked: Boolean(raw.facturaLinked || raw.meta?.facturaLinked || raw.meta?.hasFactura || raw.facturaId || raw.invoiceId),
-  };
+    facturaLinked: Boolean(raw.facturaLinked || raw.meta?.facturaLinked || raw.meta?.hasFactura || raw.facturaId || raw.invoiceId)
+    };
 }
 
 function mergeById(items = []) {
@@ -975,9 +975,9 @@ export function normalizeFacturasListResponse(payload = null, requestMeta = {}) 
       totalPages: paging.totalPages,
       hasMore: paging.hasMore,
       offset: paging.offset,
-      limit: paging.limit,
-    },
-  };
+      limit: paging.limit
+    }
+    };
 }
 
 export function normalizeFacturaDetailResponse(payload = null) {
@@ -989,8 +989,8 @@ export function normalizeFacturaDetailResponse(payload = null) {
     item,
     factura: item,
     data: item,
-    meta: metaFromPayload(payload),
-  };
+    meta: metaFromPayload(payload)
+    };
 }
 
 export function normalizeFacturasStatsResponse(payload = null) {
@@ -1000,8 +1000,8 @@ export function normalizeFacturasStatsResponse(payload = null) {
   return {
     ok: envelope.ok !== false,
     stats,
-    meta: metaFromPayload(payload),
-  };
+    meta: metaFromPayload(payload)
+    };
 }
 
 export function normalizeFacturaCreateResponse(payload = null) {
@@ -1016,8 +1016,8 @@ export function normalizeFacturaCreateResponse(payload = null) {
     created: Boolean(item),
     file: namedObjectFromPayload(payload, "file"),
     email: namedObjectFromPayload(payload, "email"),
-    meta: metaFromPayload(payload),
-  };
+    meta: metaFromPayload(payload)
+    };
 }
 
 export function normalizeFacturaSendResponse(payload = null) {
@@ -1030,8 +1030,8 @@ export function normalizeFacturaSendResponse(payload = null) {
     factura: item,
     sent: namedObjectFromPayload(payload, "sent"),
     message: cleanText(first(safeObject(payload).message, safeObject(payload).data?.message, safeObject(payload).result?.message, "Factura enviada correctamente."), "Factura enviada correctamente."),
-    meta: metaFromPayload(payload),
-  };
+    meta: metaFromPayload(payload)
+    };
 }
 
 function normalizePdfFileObject(file = {}, fallback = {}) {
@@ -1049,8 +1049,8 @@ function normalizePdfFileObject(file = {}, fallback = {}) {
     publicBlobUrl,
     blobUrl: publicBlobUrl,
     filename: ensurePdfFilename(first(raw.filename, raw.fileName, raw.name, fallback.filename), "factura.pdf"),
-    contentType: cleanText(first(raw.contentType, raw.type, raw.mimeType, fallback.contentType), "application/pdf"),
-  };
+    contentType: cleanText(first(raw.contentType, raw.type, raw.mimeType, fallback.contentType), "application/pdf")
+    };
 }
 
 export function normalizeFacturaPdfResponse(response = null, fallback = {}) {
@@ -1062,7 +1062,7 @@ export function normalizeFacturaPdfResponse(response = null, fallback = {}) {
       size: response.size,
       contentType: response.type || "application/pdf",
       filename: ensurePdfFilename(fallback.filename, "factura.pdf"),
-      raw: response,
+      raw: response
     };
   }
 
@@ -1092,8 +1092,8 @@ export function normalizeFacturaPdfResponse(response = null, fallback = {}) {
     data: factura,
     meta: safeObject(first(envelope.meta, object.meta, {})),
     requestId: first(envelope.requestId, object.requestId, null),
-    raw: response,
-  };
+    raw: response
+    };
 }
 
 /* =========================================================
@@ -1142,8 +1142,8 @@ export function normalizeFacturaPayload(payload = {}) {
     ...(clienteId ? { clienteId, clientId: clienteId, customerId: clienteId } : {}),
     ...(clienteNombre ? { clienteNombre, clientName: clienteNombre, clienteName: clienteNombre } : {}),
     ...(clienteEmail ? { clienteEmail, emailCliente: clienteEmail, clientEmail: clienteEmail } : {}),
-    ...(incidenciaId ? { ticketId: incidenciaId, incidenciaId, relatedTicketId: incidenciaId, relatedIncidentId: incidenciaId } : {}),
-  };
+    ...(incidenciaId ? { ticketId: incidenciaId, incidenciaId, relatedTicketId: incidenciaId, relatedIncidentId: incidenciaId } : {})
+    };
 }
 
 /* =========================================================
@@ -1217,8 +1217,8 @@ export async function fetchFacturasRequest(options = {}) {
   return getJson(FACTURAS_ENDPOINT, {
     timeout: options.timeout || FACTURAS_LIST_TIMEOUT,
     query,
-    source: "views.facturas.list.raw",
-  });
+    source: "views.facturas.list.raw"
+    });
 }
 
 export async function listFacturas(options = {}) {
@@ -1235,8 +1235,8 @@ export async function listFacturas(options = {}) {
       const response = await getJson(FACTURAS_ENDPOINT, {
         timeout: options.timeout || FACTURAS_LIST_TIMEOUT,
         query,
-        source: "views.facturas.list",
-      });
+        source: "views.facturas.list"
+    });
 
       const normalized = normalizeFacturasListResponse(response, { ...options, ...query });
       const cacheAppend = options.cacheAppend === true || options.appendToCache === true;
@@ -1245,8 +1245,8 @@ export async function listFacturas(options = {}) {
       lastList = {
         items: cachedItems,
         total: normalized.total,
-        queryKey,
-      };
+        queryKey
+    };
 
       if (normalized.stats && Object.keys(normalized.stats).length) lastStats = normalized.stats;
       lastLoadedAt = nowIso();
@@ -1266,8 +1266,8 @@ export async function listFacturas(options = {}) {
           invoices: lastList.items,
           total: lastList.total,
           count: lastList.items.length,
-          error: lastError,
-        };
+          error: lastError
+    };
       }
 
       throw error;
@@ -1293,7 +1293,7 @@ export async function fetchFacturaDetailRequest(id = "", options = {}) {
   const task = (async () => {
     const response = await getJson(getFacturaEndpoint(facturaId), {
       timeout: options.timeout || FACTURAS_DETAIL_TIMEOUT,
-      source: "views.facturas.detail",
+      source: "views.facturas.detail"
     });
 
     return normalizeFacturaDetailResponse(response);
@@ -1317,7 +1317,7 @@ export async function fetchFacturasStatsRequest(options = {}) {
     const response = await getJson(`${FACTURAS_ENDPOINT}/stats`, {
       timeout: options.timeout || FACTURAS_LIST_TIMEOUT,
       query,
-      source: "views.facturas.stats",
+      source: "views.facturas.stats"
     });
 
     const normalized = normalizeFacturasStatsResponse(response);
@@ -1340,8 +1340,8 @@ export async function loadFacturasStats(options = {}) {
 export async function createFacturaRequest(payload = {}, options = {}) {
   const response = await postJson(FACTURAS_ENDPOINT, normalizeFacturaPayload(payload), {
     timeout: options.timeout || FACTURAS_CREATE_TIMEOUT,
-    source: "views.facturas.create",
-  });
+    source: "views.facturas.create"
+    });
 
   return normalizeFacturaCreateResponse(response);
 }
@@ -1361,8 +1361,8 @@ export async function createFactura(payload = {}, options = {}) {
 export async function updateFacturaRequest(id = "", payload = {}, options = {}) {
   const response = await putJson(getFacturaEndpoint(id), normalizeFacturaPayload(payload), {
     timeout: options.timeout || FACTURAS_TIMEOUT,
-    source: "views.facturas.update",
-  });
+    source: "views.facturas.update"
+    });
 
   return normalizeFacturaDetailResponse(response);
 }
@@ -1375,7 +1375,7 @@ export async function updateFactura(id = "", payload = {}, options = {}) {
     const stableId = getFacturaStableId(updated);
     lastList = {
       ...lastList,
-      items: lastList.items.map((item) => getFacturaStableId(item) === stableId ? normalizeFactura(updated) : item),
+      items: lastList.items.map((item) => getFacturaStableId(item) === stableId ? normalizeFactura(updated) : item)
     };
   }
 
@@ -1385,8 +1385,8 @@ export async function updateFactura(id = "", payload = {}, options = {}) {
 export async function patchFacturaRequest(id = "", payload = {}, options = {}) {
   const response = await patchJson(getFacturaEndpoint(id), normalizeFacturaPayload(payload), {
     timeout: options.timeout || FACTURAS_TIMEOUT,
-    source: "views.facturas.patch",
-  });
+    source: "views.facturas.patch"
+    });
 
   return normalizeFacturaDetailResponse(response);
 }
@@ -1399,7 +1399,7 @@ export async function patchFactura(id = "", payload = {}, options = {}) {
     const stableId = getFacturaStableId(patched);
     lastList = {
       ...lastList,
-      items: lastList.items.map((item) => getFacturaStableId(item) === stableId ? normalizeFactura(patched) : item),
+      items: lastList.items.map((item) => getFacturaStableId(item) === stableId ? normalizeFactura(patched) : item)
     };
   }
 
@@ -1409,8 +1409,8 @@ export async function patchFactura(id = "", payload = {}, options = {}) {
 export async function removeFacturaRequest(id = "", options = {}) {
   return deleteJson(getFacturaEndpoint(id), {
     timeout: options.timeout || FACTURAS_TIMEOUT,
-    source: "views.facturas.remove",
-  });
+    source: "views.facturas.remove"
+    });
 }
 
 export async function removeFactura(id = "", options = {}) {
@@ -1420,8 +1420,8 @@ export async function removeFactura(id = "", options = {}) {
   lastList = {
     ...lastList,
     items: lastList.items.filter((item) => ![item.id, item.facturaId, item.invoiceId].includes(facturaId)),
-    total: Math.max(0, number(lastList.total, 0) - 1),
-  };
+    total: Math.max(0, number(lastList.total, 0) - 1)
+    };
 
   return true;
 }
@@ -1429,8 +1429,8 @@ export async function removeFactura(id = "", options = {}) {
 export async function sendFacturaRequest(id = "", payload = {}, options = {}) {
   const response = await postJson(getFacturaSendEndpoint(id), safeObject(payload), {
     timeout: options.timeout || FACTURAS_SEND_TIMEOUT,
-    source: "views.facturas.send",
-  });
+    source: "views.facturas.send"
+    });
 
   return normalizeFacturaSendResponse(response);
 }
@@ -1443,7 +1443,7 @@ export async function sendFactura(id = "", payload = {}, options = {}) {
     const stableId = getFacturaStableId(sentItem);
     lastList = {
       ...lastList,
-      items: lastList.items.map((item) => getFacturaStableId(item) === stableId ? normalizeFactura(sentItem) : item),
+      items: lastList.items.map((item) => getFacturaStableId(item) === stableId ? normalizeFactura(sentItem) : item)
     };
   }
 
@@ -1464,8 +1464,8 @@ function buildPdfQuery(mode = FACTURA_PDF_MODES.VIEW, options = {}) {
     ...PDF_JSON_QUERY,
     disposition,
     mode: disposition,
-    ...(options.force === true ? { force: true } : {}),
-  };
+    ...(options.force === true ? { force: true } : {})
+    };
 }
 
 export async function viewFacturaPdfRequest(id = "", options = {}) {
@@ -1476,11 +1476,10 @@ export async function viewFacturaPdfRequest(id = "", options = {}) {
     timeout: options.timeout || FACTURAS_PDF_TIMEOUT,
     query: buildPdfQuery(FACTURA_PDF_MODES.VIEW, options),
     headers: {
-      Accept: "application/json",
-      "X-Onion-Pdf-Mode": "inline",
+      Accept: "application/json"
     },
-    source: "views.facturas.pdf.view",
-  });
+    source: "views.facturas.pdf.view"
+    });
 
   return normalizeFacturaPdfResponse(response, { filename });
 }
@@ -1493,11 +1492,10 @@ export async function downloadFacturaPdfRequest(id = "", options = {}) {
     timeout: options.timeout || FACTURAS_PDF_TIMEOUT,
     query: buildPdfQuery(FACTURA_PDF_MODES.DOWNLOAD, options),
     headers: {
-      Accept: "application/json",
-      "X-Onion-Pdf-Mode": "attachment",
+      Accept: "application/json"
     },
-    source: "views.facturas.pdf.download",
-  });
+    source: "views.facturas.pdf.download"
+    });
 
   return normalizeFacturaPdfResponse(response, { filename });
 }
@@ -1534,14 +1532,14 @@ export async function searchFacturaIncidencias({
   includeClosed = true,
   includeAll = true,
   onlyMine = false,
-  timeout = FACTURAS_LIST_TIMEOUT,
-} = {}) {
+  timeout = FACTURAS_LIST_TIMEOUT
+    } = {}) {
   const query = {
     limit: Math.min(Math.max(1, number(limit, 50)), 100),
     includeClosed: Boolean(includeClosed),
     includeAll: Boolean(includeAll),
-    onlyMine: Boolean(onlyMine),
-  };
+    onlyMine: Boolean(onlyMine)
+    };
 
   const term = cleanText(first(q, search), "");
   if (term) {
@@ -1555,8 +1553,8 @@ export async function searchFacturaIncidencias({
   const response = await getJson(FACTURAS_TICKETS_ENDPOINT, {
     timeout,
     query,
-    source: "views.facturas.ticket-search",
-  });
+    source: "views.facturas.ticket-search"
+    });
 
   return listFromTicketPayload(response).map(normalizeIncidenciaForFactura).filter(Boolean);
 }
@@ -1631,7 +1629,7 @@ export function computeFacturasStats(items = lastList.items) {
       withPdf: 0,
       amount: 0,
       paidAmount: 0,
-      pendingAmount: 0,
+      pendingAmount: 0
     }
   );
 }
@@ -1645,8 +1643,8 @@ function normalizeError(error = null) {
     message: redact(error?.message || "No se pudieron cargar las facturas."),
     status: error?.status || error?.statusCode || error?.response?.status || null,
     code: error?.code || error?.error || null,
-    at: nowIso(),
-  };
+    at: nowIso()
+    };
 }
 
 export function hydrateFacturasFromCache() {
@@ -1655,8 +1653,8 @@ export function hydrateFacturasFromCache() {
     total: number(lastList.total, safeArray(lastList.items).length),
     stats: lastStats || computeFacturasStats(lastList.items),
     loadedAt: lastLoadedAt,
-    hydrated: safeArray(lastList.items).length > 0,
-  };
+    hydrated: safeArray(lastList.items).length > 0
+    };
 }
 
 export function clearFacturasCache() {
@@ -1679,7 +1677,7 @@ export function getFacturasApiSnapshot() {
       items: lastList.items.length,
       total: lastList.total,
       hydrated: lastList.items.length > 0,
-      queryKey: lastList.queryKey,
+      queryKey: lastList.queryKey
     },
     inflight: inflight.size,
     stats: lastStats || computeFacturasStats(lastList.items),
@@ -1692,9 +1690,9 @@ export function getFacturasApiSnapshot() {
       preservesBackendOrder: true,
       dedupeInflightRequests: true,
       pdfJsonSasContract: true,
-      preservesSignedUrls: true,
-    },
-  };
+      preservesSignedUrls: true
+    }
+    };
 }
 
 /* =========================================================
@@ -1729,14 +1727,14 @@ export const FacturasApi = Object.freeze({
     detail: FACTURAS_DETAIL_TIMEOUT,
     create: FACTURAS_CREATE_TIMEOUT,
     pdf: FACTURAS_PDF_TIMEOUT,
-    send: FACTURAS_SEND_TIMEOUT,
-  }),
+    send: FACTURAS_SEND_TIMEOUT
+    }),
 
   defaults: Object.freeze({
     page: FACTURAS_DEFAULT_PAGE,
     limit: FACTURAS_DEFAULT_LIMIT,
-    maxLimit: FACTURAS_MAX_LIMIT,
-  }),
+    maxLimit: FACTURAS_MAX_LIMIT
+    }),
 
   normalizeFacturaId,
   getFacturaEndpoint,
@@ -1809,7 +1807,7 @@ export const FacturasApi = Object.freeze({
   clearFacturasCache,
 
   getFacturasApiSnapshot,
-  getSnapshot: getFacturasApiSnapshot,
-});
+  getSnapshot: getFacturasApiSnapshot
+    });
 
 export default FacturasApi;

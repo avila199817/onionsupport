@@ -693,7 +693,7 @@
    FILTERS / SORT / SEARCH
    1:1 FACTURAS:
    - Filtros en card propio.
-   - Sort / Fecha en card propio.
+   - Sort Fecha en card propio.
    - Search independiente.
 ========================================================= */
 
@@ -706,6 +706,7 @@
   gap: var(--space-sm);
   align-items: center;
 
+  inline-size: 100%;
   min-inline-size: 0;
 
   padding-block-start: var(--space-xs);
@@ -742,7 +743,12 @@
   display: none;
 }
 
+.incidencias-filter-pills {
+  justify-self: stretch;
+}
+
 .incidencias-sort-pills {
+  justify-self: start;
   justify-content: center;
   flex-wrap: nowrap;
   min-inline-size: max-content;

@@ -22,7 +22,7 @@
    - Sin Toast.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.productive.v9.fecha-sort";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.productive.v10.sort-card";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -1377,7 +1377,7 @@ function renderSortButton(vm = {}) {
   return `
     <button
       type="button"
-      class="incidencias-filter-pill incidencias-filter-pill--sort is-active"
+      class="incidencias-sort-pill incidencias-filter-pill--sort is-active"
       data-incidencias-action="${INCIDENCIAS_ACTIONS.SORT_TOGGLE}"
       data-sort-order="${attr(order)}"
       data-next-sort-order="${attr(nextOrder)}"
@@ -1393,7 +1393,7 @@ function renderSortButton(vm = {}) {
 function renderFilters(vm = {}) {
   return `
     <div class="incidencias-filters" aria-label="Filtros y búsqueda de incidencias">
-      <div class="incidencias-filter-pills" role="group" aria-label="Filtrar y ordenar incidencias">
+      <div class="incidencias-filter-pills" role="group" aria-label="Filtrar incidencias">
         ${FILTERS.map((filter) => {
           const active = filter.key === vm.filter;
           const count = vm.filterCounts[filter.key] ?? 0;
@@ -1413,7 +1413,9 @@ function renderFilters(vm = {}) {
           `;
         }).join("")}
 
-        <span class="incidencias-filter-divider" aria-hidden="true"></span>
+      </div>
+
+      <div class="incidencias-sort-pills" role="group" aria-label="Ordenar incidencias">
         ${renderSortButton(vm)}
       </div>
 

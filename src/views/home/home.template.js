@@ -9,7 +9,7 @@
    - Stats principales.
    - Actividad reciente.
    - Facturación resumida.
-   - Admin ve clientes/usuarios.
+   - Admin mantiene accesos resumidos en stats.
    - User ve sólo incidencias/facturas propias según backend.
    - Sin DOM API.
    - Sin listeners.
@@ -23,7 +23,7 @@
    - Sin handlers inline.
 ========================================================= */
 
-export const HOME_TEMPLATE_VERSION = "home.template.dashboard.v2";
+export const HOME_TEMPLATE_VERSION = "home.template.dashboard.v3.clean";
 
 const ACTIONS = Object.freeze({
   RETRY: "retry",
@@ -180,7 +180,9 @@ function safeImageSrc(value = "") {
   if (raw.startsWith("//")) return "";
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
-  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature|jwt|authorization)=/i.test(raw)) return "";
+  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature|jwt|authorization)=/i.test(raw)) {
+    return "";
+  }
 
   if (raw.startsWith("/")) return raw;
 
@@ -201,7 +203,9 @@ function safeRoute(value = "", fallback = "/") {
   if (!route.startsWith("/")) return fallback;
   if (route.startsWith("//")) return fallback;
   if (/[\r\n\t\\]/.test(route)) return fallback;
-  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature|jwt|authorization)=/i.test(route)) return fallback;
+  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature|jwt|authorization)=/i.test(route)) {
+    return fallback;
+  }
 
   return route;
 }
@@ -209,11 +213,6 @@ function safeRoute(value = "", fallback = "/") {
 function normalizeStatus(value = "") {
   const status = cleanText(value, "").toLowerCase();
   return STATUS_LABELS[status] || cleanText(value, "Sin estado");
-}
-
-function normalizePriority(value = "") {
-  const priority = cleanText(value, "").toLowerCase();
-  return PRIORITY_LABELS[priority] || cleanText(value, "Normal");
 }
 
 /* =========================================================
@@ -235,7 +234,6 @@ function icon(name = "activity") {
     alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
     arrowRight: `<svg ${common}><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>`,
     clock: `<svg ${common}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
-    shield: `<svg ${common}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>`,
   };
 
   return icons[name] || icons.activity;
@@ -295,8 +293,6 @@ function buildVm(input = {}) {
 
     tickets,
     facturas,
-    clientes,
-    users,
     activity,
 
     routes,
@@ -457,7 +453,7 @@ function header(vm) {
 
           <p class="home-subtitle">
             ${vm.admin
-              ? "Resumen operativo de incidencias, facturas, clientes y usuarios."
+              ? "Resumen operativo de incidencias, facturas y accesos principales."
               : "Resumen de tus incidencias y facturas."
             }
           </p>
@@ -680,100 +676,6 @@ function invoices(vm) {
 }
 
 /* =========================================================
-   ADMIN ENTITIES
-========================================================= */
-
-function clientItem(client = {}) {
-  const source = isObject(client) ? client : {};
-  const name = cleanText(
-    first(source.name, source.nombre, source.displayName, source.razonSocial, source.companyName),
-    "Cliente"
-  );
-
-  return `
-    <li>
-      <strong>${escapeHtml(name)}</strong>
-      <span>${escapeHtml(source.active === false ? "Inactivo" : "Activo")}</span>
-    </li>
-  `;
-}
-
-function userItem(user = {}) {
-  const source = isObject(user) ? user : {};
-  const name = cleanText(
-    first(source.displayName, source.name, source.nombre, source.fullName, source.username),
-    "Usuario"
-  );
-
-  const role = cleanText(source.role, "user");
-
-  return `
-    <li>
-      <strong>${escapeHtml(name)}</strong>
-      <span>${escapeHtml(role)}</span>
-    </li>
-  `;
-}
-
-function entities(vm) {
-  if (!vm.admin) return "";
-
-  const clientes = vm.clientes.slice(0, 5);
-  const users = vm.users.slice(0, 5);
-
-  return `
-    <section class="home-panel home-panel--entities" data-home-section="entities">
-      <div class="home-panel-header">
-        <div>
-          <p class="home-panel-kicker">Administración</p>
-          <h2>Clientes y usuarios</h2>
-        </div>
-      </div>
-
-      <div class="home-entity-columns">
-        <div class="home-entity-column">
-          <div class="home-entity-column-head">
-            <h3>Clientes</h3>
-
-            ${actionButton({
-              label: "Ver",
-              route: vm.routes.clientes,
-              iconName: "arrowRight",
-              className: "home-mini-action",
-              ariaLabel: "Ver clientes",
-            })}
-          </div>
-
-          ${clientes.length
-            ? `<ul class="home-mini-list">${clientes.map(clientItem).join("")}</ul>`
-            : `<p class="home-panel-muted">Sin clientes visibles.</p>`
-          }
-        </div>
-
-        <div class="home-entity-column">
-          <div class="home-entity-column-head">
-            <h3>Usuarios</h3>
-
-            ${actionButton({
-              label: "Ver",
-              route: vm.routes.usuarios,
-              iconName: "arrowRight",
-              className: "home-mini-action",
-              ariaLabel: "Ver usuarios",
-            })}
-          </div>
-
-          ${users.length
-            ? `<ul class="home-mini-list">${users.map(userItem).join("")}</ul>`
-            : `<p class="home-panel-muted">Sin usuarios visibles.</p>`
-          }
-        </div>
-      </div>
-    </section>
-  `;
-}
-
-/* =========================================================
    STATES
 ========================================================= */
 
@@ -825,7 +727,6 @@ export function renderHomeTemplate(input = {}) {
       <section class="home-grid" data-home-section="main-grid">
         ${activity(vm)}
         ${invoices(vm)}
-        ${entities(vm)}
       </section>
     </section>
   `;

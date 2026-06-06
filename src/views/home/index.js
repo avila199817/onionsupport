@@ -5,7 +5,7 @@
    Responsabilidad:
    - Controlador mínimo de la vista Home.
    - Montar template.
-   - Hidratar desde cache en memoria.
+   - Hidratar desde cache real en memoria.
    - Cargar dashboard desde home.api.js sólo cuando toca.
    - Evitar recarga innecesaria al cambiar de vista.
    - Delegar navegación en Router.
@@ -37,7 +37,7 @@ import {
   renderHomeErrorState,
 } from "./home.template.js";
 
-export const HOME_INDEX_VERSION = "home.index.cached.v2";
+export const HOME_INDEX_VERSION = "home.index.cached.v3.real-hydration";
 export const HOME_VIEW_VERSION = HOME_INDEX_VERSION;
 
 const SOURCE = "home.view";
@@ -234,16 +234,31 @@ function createHomeController(host = null, context = {}) {
   let destroyed = false;
   let mounted = false;
   let loading = false;
-  let dashboard = hydrateHomeFromCache();
+  let dashboard = null;
   let lastError = null;
   let lastRenderAt = null;
   let loadSeq = 0;
 
+  function getCachedDashboard() {
+    try {
+      const cached = hydrateHomeFromCache?.();
+      return isObject(cached) ? cached : null;
+    } catch {
+      return null;
+    }
+  }
+
   function cacheFresh(options = {}) {
     try {
-      return hasFreshHomeDashboard?.({
-        ttlMs: options.ttlMs ?? DEFAULT_CACHE_TTL_MS,
-      }) === true;
+      if (
+        hasFreshHomeDashboard?.({
+          ttlMs: options.ttlMs ?? DEFAULT_CACHE_TTL_MS,
+        }) !== true
+      ) {
+        return false;
+      }
+
+      return isObject(getCachedDashboard());
     } catch {
       return false;
     }
@@ -360,14 +375,19 @@ function createHomeController(host = null, context = {}) {
     lastError = null;
 
     if (fresh) {
-      dashboard = hydrateHomeFromCache();
-      loading = false;
-      render({
-        dashboard,
-        loading: false,
-      });
+      const cached = getCachedDashboard();
 
-      return dashboard;
+      if (isObject(cached)) {
+        dashboard = cached;
+        loading = false;
+
+        render({
+          dashboard,
+          loading: false,
+        });
+
+        return dashboard;
+      }
     }
 
     loading = true;
@@ -472,10 +492,11 @@ function createHomeController(host = null, context = {}) {
     mounted = true;
     bind();
 
-    dashboard = hydrateHomeFromCache();
+    dashboard = getCachedDashboard();
 
-    if (cacheFresh(options)) {
+    if (isObject(dashboard) && cacheFresh(options)) {
       loading = false;
+
       render({
         dashboard,
         loading: false,
@@ -486,6 +507,7 @@ function createHomeController(host = null, context = {}) {
 
     if (isObject(dashboard)) {
       loading = false;
+
       render({
         dashboard,
         loading: false,
@@ -497,6 +519,8 @@ function createHomeController(host = null, context = {}) {
 
       return controller;
     }
+
+    loading = true;
 
     renderLoading({
       preferCached: false,

@@ -1821,15 +1821,63 @@ body[data-sidebar-open="false"] .sidebar {
    SVG UNIFICATION — SAME BOX, SAME STROKE, SAME ALIGNMENT
 ========================================================= */
 
+/* =========================================================
+   SVG UNIFICATION — SAME BOX, SAME STROKE, SAME ALIGNMENT
+========================================================= */
+
 .sidebar .sidebar-link-icon,
 .sidebar .sidebar-toggle,
 .sidebar .sidebar-account-chevron,
 .sidebar .sidebar-account-menu-icon,
 .sidebar .sidebar-logout-icon {
+  inline-size: var(--sidebar-local-icon-box);
+  min-inline-size: var(--sidebar-local-icon-box);
+  max-inline-size: var(--sidebar-local-icon-box);
+
+  block-size: var(--sidebar-local-icon-box);
+  min-block-size: var(--sidebar-local-icon-box);
+  max-block-size: var(--sidebar-local-icon-box);
+
+  display: grid;
+  place-items: center;
+
+  flex: 0 0 var(--sidebar-local-icon-box);
+
+  margin: 0;
+  padding: 0;
+
   line-height: 0;
   text-align: center;
 
   color: currentColor !important;
+
+  transform: translateZ(0);
+}
+
+.sidebar .sidebar-toggle {
+  inline-size: var(--sidebar-local-toggle-size);
+  min-inline-size: var(--sidebar-local-toggle-size);
+  max-inline-size: var(--sidebar-local-toggle-size);
+
+  block-size: var(--sidebar-local-toggle-size);
+  min-block-size: var(--sidebar-local-toggle-size);
+  max-block-size: var(--sidebar-local-toggle-size);
+
+  flex: 0 0 var(--sidebar-local-toggle-size);
+}
+
+.sidebar .sidebar-account-chevron,
+.sidebar .sidebar-account-menu-icon,
+.sidebar .sidebar-logout-icon {
+  inline-size: 24px;
+  min-inline-size: 24px;
+  max-inline-size: 24px;
+
+  block-size: 24px;
+  min-block-size: 24px;
+  max-block-size: 24px;
+
+  flex: 0 0 24px;
 }
 
 .sidebar .sidebar-link-svg,
@@ -1848,12 +1896,15 @@ body[data-sidebar-open="false"] .sidebar {
   display: block !important;
 
   margin: 0 !important;
+  padding: 0 !important;
+
+  overflow: visible;
 
   color: currentColor !important;
 
   transform: none !important;
-  transform-box: fill-box;
-  transform-origin: center;
+  transform-origin: center center !important;
+  transform-box: fill-box !important;
 
   shape-rendering: geometricPrecision;
 }
@@ -1872,7 +1923,7 @@ body[data-sidebar-open="false"] .sidebar {
 
 
 /* =========================================================
-   COLLAPSED — DESKTOP RAIL
+   COLLAPSED — DESKTOP RAIL · PERFECT CENTERED SQUARES
 ========================================================= */
 
 :is(
@@ -1885,19 +1936,21 @@ body[data-sidebar-open="false"] .sidebar {
   body[data-sidebar-open="false"] .sidebar
 ) {
   --sidebar-local-pad-x: 0px;
+
+  /*
+     Slot real del rail:
+     72px rail → 52px caja → 10px aire por lado.
+     Así hover, active y SVG comparten centro matemático.
+  */
+  --sidebar-local-collapsed-slot: min(52px, calc(var(--sidebar-local-collapsed-width) - 18px));
+  --sidebar-local-collapsed-toggle-slot: 44px;
+  --sidebar-local-avatar-collapsed-size: 34px;
+
   padding-inline: 0 !important;
 }
 
-/*
-   FIX CRÍTICO — COLLAPSED RAIL CENTERING
-   -------------------------------------
-   La barra usa .sidebar-nav como scroll container. En modo abierto puede usar
-   `scrollbar-gutter: stable`, pero en modo collapsed ese gutter reserva espacio
-   dentro del rail y centra los slots contra un ancho falso. Resultado: iconos,
-   hover y active quedan desplazados hacia la izquierda. En collapsed ocultamos
-   el gutter/scrollbar visual para que el centro matemático sea el centro real
-   del rail.
-*/
+/* El scroll container no puede reservar gutter en collapsed:
+   si lo reserva, el centro visual se va a la izquierda. */
 :is(
   .sidebar.is-collapsed,
   .sidebar[data-open="false"],
@@ -1912,6 +1965,9 @@ body[data-sidebar-open="false"] .sidebar {
 
   overflow-x: hidden !important;
   overflow-y: auto !important;
+
+  padding-block: 6px 10px !important;
+  padding-inline: 0 !important;
 
   scrollbar-width: none !important;
   scrollbar-gutter: auto !important;
@@ -1965,12 +2021,12 @@ body[data-sidebar-open="false"] .sidebar {
   body[data-sidebar-state="collapsed"] .sidebar,
   body[data-sidebar-open="false"] .sidebar
 ) .sidebar-inner {
-  inline-size: 100%;
-  min-inline-size: 0;
+  inline-size: 100% !important;
+  min-inline-size: 0 !important;
 
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
 }
 
 :is(
@@ -1982,14 +2038,14 @@ body[data-sidebar-open="false"] .sidebar {
   body[data-sidebar-state="collapsed"] .sidebar,
   body[data-sidebar-open="false"] .sidebar
 ) .sidebar-header {
-  inline-size: 100%;
-  min-block-size: var(--sidebar-local-header-height);
+  inline-size: 100% !important;
+  min-block-size: var(--sidebar-local-header-height) !important;
 
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 
-  padding: 0 0 8px;
+  padding: 0 0 8px !important;
 }
 
 :is(
@@ -2030,22 +2086,6 @@ body[data-sidebar-open="false"] .sidebar {
   body.sidebar-collapsed .sidebar,
   body[data-sidebar-state="collapsed"] .sidebar,
   body[data-sidebar-open="false"] .sidebar
-) .sidebar-nav {
-  inline-size: 100%;
-  min-inline-size: 0;
-
-  padding-block: 6px 10px;
-  padding-inline: 0;
-}
-
-:is(
-  .sidebar.is-collapsed,
-  .sidebar[data-open="false"],
-  .sidebar[data-sidebar-state="collapsed"],
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
-  body.sidebar-collapsed .sidebar,
-  body[data-sidebar-state="collapsed"] .sidebar,
-  body[data-sidebar-open="false"] .sidebar
 ) .sidebar-list,
 :is(
   .sidebar.is-collapsed,
@@ -2065,14 +2105,18 @@ body[data-sidebar-open="false"] .sidebar {
   body[data-sidebar-state="collapsed"] .sidebar,
   body[data-sidebar-open="false"] .sidebar
 ) [data-sidebar-list="true"] {
-  inline-size: 100%;
-  min-inline-size: 0;
+  inline-size: 100% !important;
+  min-inline-size: 0 !important;
 
   display: flex !important;
-  flex-direction: column;
+  flex-direction: column !important;
   align-items: center !important;
+  justify-content: flex-start !important;
 
   gap: 6px !important;
+
+  padding: 0 !important;
+  margin: 0 !important;
 }
 
 :is(
@@ -2125,8 +2169,12 @@ body[data-sidebar-open="false"] .sidebar {
 
   display: flex !important;
   justify-content: center !important;
+
+  padding: 0 !important;
+  margin: 0 !important;
 }
 
+/* Caja única: hover, active e icono comparten el mismo cuadrado. */
 :is(
   .sidebar.is-collapsed,
   .sidebar[data-open="false"],
@@ -2162,99 +2210,30 @@ body[data-sidebar-open="false"] .sidebar {
   min-block-size: var(--sidebar-local-collapsed-slot) !important;
   max-block-size: var(--sidebar-local-collapsed-slot) !important;
 
-  display: inline-grid !important;
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  grid-template-rows: 1fr !important;
   place-items: center !important;
+  place-content: center !important;
 
   gap: 0 !important;
 
   padding: 0 !important;
   margin-inline: auto !important;
 
-  overflow: hidden;
+  overflow: hidden !important;
 
-  border-radius: 14px !important;
+  border-radius: 16px !important;
 
-  line-height: 0;
-  text-align: center;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  text-align: center !important;
 
   justify-content: center !important;
+  align-content: center !important;
 }
 
-/* La caja de hover/active siempre queda en el centro exacto del rail collapsed. */
-:is(
-  .sidebar.is-collapsed,
-  .sidebar[data-open="false"],
-  .sidebar[data-sidebar-state="collapsed"],
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
-  body.sidebar-collapsed .sidebar,
-  body[data-sidebar-state="collapsed"] .sidebar,
-  body[data-sidebar-open="false"] .sidebar
-) .sidebar-list,
-:is(
-  .sidebar.is-collapsed,
-  .sidebar[data-open="false"],
-  .sidebar[data-sidebar-state="collapsed"],
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
-  body.sidebar-collapsed .sidebar,
-  body[data-sidebar-state="collapsed"] .sidebar,
-  body[data-sidebar-open="false"] .sidebar
-) .sidebar-menu,
-:is(
-  .sidebar.is-collapsed,
-  .sidebar[data-open="false"],
-  .sidebar[data-sidebar-state="collapsed"],
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
-  body.sidebar-collapsed .sidebar,
-  body[data-sidebar-state="collapsed"] .sidebar,
-  body[data-sidebar-open="false"] .sidebar
-) [data-sidebar-list="true"] {
-  inline-size: 100% !important;
-  min-inline-size: 0 !important;
-
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-
-  padding-inline: 0 !important;
-  margin-inline: 0 !important;
-}
-
-:is(
-  .sidebar.is-collapsed,
-  .sidebar[data-open="false"],
-  .sidebar[data-sidebar-state="collapsed"],
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
-  body.sidebar-collapsed .sidebar,
-  body[data-sidebar-state="collapsed"] .sidebar,
-  body[data-sidebar-open="false"] .sidebar
-) .sidebar-link-icon,
-:is(
-  .sidebar.is-collapsed,
-  .sidebar[data-open="false"],
-  .sidebar[data-sidebar-state="collapsed"],
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
-  body.sidebar-collapsed .sidebar,
-  body[data-sidebar-state="collapsed"] .sidebar,
-  body[data-sidebar-open="false"] .sidebar
-) .sidebar-logout-icon {
-  inline-size: 100% !important;
-  min-inline-size: 100% !important;
-  max-inline-size: 100% !important;
-
-  block-size: 100% !important;
-  min-block-size: 100% !important;
-  max-block-size: 100% !important;
-
-  display: grid !important;
-  place-items: center !important;
-
-  flex: none !important;
-
-  margin: 0 !important;
-  padding: 0 !important;
-}
-
+/* Toggle superior: misma lógica, ligeramente más compacto. */
 :is(
   .sidebar.is-collapsed,
   .sidebar[data-open="false"],
@@ -2272,37 +2251,23 @@ body[data-sidebar-open="false"] .sidebar {
   min-block-size: var(--sidebar-local-collapsed-toggle-slot) !important;
   max-block-size: var(--sidebar-local-collapsed-toggle-slot) !important;
 
-  display: inline-grid !important;
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  grid-template-rows: 1fr !important;
   place-items: center !important;
+  place-content: center !important;
 
   padding: 0 !important;
   margin-inline: auto !important;
 
-  border-radius: 11px !important;
+  border-radius: 14px !important;
+
+  font-size: 0 !important;
+  line-height: 0 !important;
 }
 
-:is(
-  .sidebar.is-collapsed,
-  .sidebar[data-open="false"],
-  .sidebar[data-sidebar-state="collapsed"],
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
-  body.sidebar-collapsed .sidebar,
-  body[data-sidebar-state="collapsed"] .sidebar,
-  body[data-sidebar-open="false"] .sidebar
-) .sidebar-user-avatar {
-  inline-size: var(--sidebar-local-avatar-collapsed-size) !important;
-  min-inline-size: var(--sidebar-local-avatar-collapsed-size) !important;
-  max-inline-size: var(--sidebar-local-avatar-collapsed-size) !important;
-
-  block-size: var(--sidebar-local-avatar-collapsed-size) !important;
-  min-block-size: var(--sidebar-local-avatar-collapsed-size) !important;
-  max-block-size: var(--sidebar-local-avatar-collapsed-size) !important;
-
-  flex: 0 0 var(--sidebar-local-avatar-collapsed-size) !important;
-
-  margin: 0 auto !important;
-}
-
+/* En collapsed no basta con opacity/width 0:
+   si el contenido sigue como grid item, descuadra el centro. */
 :is(
   .sidebar.is-collapsed,
   .sidebar[data-open="false"],
@@ -2312,6 +2277,24 @@ body[data-sidebar-open="false"] .sidebar {
   body[data-sidebar-state="collapsed"] .sidebar,
   body[data-sidebar-open="false"] .sidebar
 ) .sidebar-link-content,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link-label,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link-badge,
 :is(
   .sidebar.is-collapsed,
   .sidebar[data-open="false"],
@@ -2338,33 +2321,22 @@ body[data-sidebar-open="false"] .sidebar {
   body.sidebar-collapsed .sidebar,
   body[data-sidebar-state="collapsed"] .sidebar,
   body[data-sidebar-open="false"] .sidebar
-) .sidebar-link-label,
-:is(
-  .sidebar.is-collapsed,
-  .sidebar[data-open="false"],
-  .sidebar[data-sidebar-state="collapsed"],
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
-  body.sidebar-collapsed .sidebar,
-  body[data-sidebar-state="collapsed"] .sidebar,
-  body[data-sidebar-open="false"] .sidebar
-) .sidebar-logout-label,
-:is(
-  .sidebar.is-collapsed,
-  .sidebar[data-open="false"],
-  .sidebar[data-sidebar-state="collapsed"],
-  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
-  body.sidebar-collapsed .sidebar,
-  body[data-sidebar-state="collapsed"] .sidebar,
-  body[data-sidebar-open="false"] .sidebar
-) .sidebar-link-badge {
+) .sidebar-logout-label {
+  display: none !important;
+
   inline-size: 0 !important;
   min-inline-size: 0 !important;
   max-inline-size: 0 !important;
 
+  block-size: 0 !important;
+  min-block-size: 0 !important;
+  max-block-size: 0 !important;
+
   flex: 0 0 0 !important;
 
-  padding-inline: 0 !important;
-  border-width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
 
   overflow: hidden !important;
 
@@ -2372,10 +2344,220 @@ body[data-sidebar-open="false"] .sidebar {
   visibility: hidden !important;
   pointer-events: none !important;
 
-  transform: translateX(-5px) !important;
+  transform: none !important;
   transition-delay: 0s !important;
 }
 
+/* El slot de icono ocupa exactamente el cuadrado del link. */
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link-icon,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-logout-icon {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+
+  inline-size: 100% !important;
+  min-inline-size: 100% !important;
+  max-inline-size: 100% !important;
+
+  block-size: 100% !important;
+  min-block-size: 100% !important;
+  max-block-size: 100% !important;
+
+  display: grid !important;
+  place-items: center !important;
+  place-content: center !important;
+
+  flex: none !important;
+
+  margin: 0 !important;
+  padding: 0 !important;
+
+  border: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+
+  line-height: 0 !important;
+}
+
+/* SVG exactamente centrado. Sin baseline, sin empuje, sin escala. */
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link-svg,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-toggle-svg,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-logout-icon > svg {
+  inline-size: var(--sidebar-local-icon-render-size) !important;
+  min-inline-size: var(--sidebar-local-icon-render-size) !important;
+  max-inline-size: var(--sidebar-local-icon-render-size) !important;
+
+  block-size: var(--sidebar-local-icon-render-size) !important;
+  min-block-size: var(--sidebar-local-icon-render-size) !important;
+  max-block-size: var(--sidebar-local-icon-render-size) !important;
+
+  display: block !important;
+
+  margin: 0 !important;
+  padding: 0 !important;
+
+  position: static !important;
+
+  transform: none !important;
+  translate: none !important;
+}
+
+/* Avatar inferior en el mismo eje que los iconos. */
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-user-avatar {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+
+  inline-size: var(--sidebar-local-avatar-collapsed-size) !important;
+  min-inline-size: var(--sidebar-local-avatar-collapsed-size) !important;
+  max-inline-size: var(--sidebar-local-avatar-collapsed-size) !important;
+
+  block-size: var(--sidebar-local-avatar-collapsed-size) !important;
+  min-block-size: var(--sidebar-local-avatar-collapsed-size) !important;
+  max-block-size: var(--sidebar-local-avatar-collapsed-size) !important;
+
+  display: grid !important;
+  place-items: center !important;
+
+  flex: none !important;
+
+  margin: 0 auto !important;
+
+  border-radius: 999px !important;
+}
+
+/* Active y hover usan la misma caja cuadrada. */
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link:hover,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link[aria-current="page"],
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link[data-active="true"],
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link[data-sidebar-active="true"],
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-link.is-active,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-user:hover,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar-account-trigger:hover,
+:is(
+  .sidebar.is-collapsed,
+  .sidebar[data-open="false"],
+  .sidebar[data-sidebar-state="collapsed"],
+  .sidebar:not(.is-open):not([data-open="true"]):not([data-sidebar-state="open"]),
+  body.sidebar-collapsed .sidebar,
+  body[data-sidebar-state="collapsed"] .sidebar,
+  body[data-sidebar-open="false"] .sidebar
+) .sidebar.is-account-menu-open .sidebar-account-trigger {
+  inline-size: var(--sidebar-local-collapsed-slot) !important;
+  min-inline-size: var(--sidebar-local-collapsed-slot) !important;
+  max-inline-size: var(--sidebar-local-collapsed-slot) !important;
+
+  block-size: var(--sidebar-local-collapsed-slot) !important;
+  min-block-size: var(--sidebar-local-collapsed-slot) !important;
+  max-block-size: var(--sidebar-local-collapsed-slot) !important;
+
+  border-radius: 16px !important;
+}
+
+/* Menú de cuenta cuando el rail está collapsed. */
 :is(
   .sidebar.is-collapsed,
   .sidebar[data-open="false"],
@@ -2394,7 +2576,6 @@ body[data-sidebar-open="false"] .sidebar {
 
   transform-origin: bottom left;
 }
-
 
 /* =========================================================
    OPEN — CONTENT REVEAL

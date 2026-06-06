@@ -2,18 +2,18 @@
    Onion Support - Home View CSS
    Archivo: /src/css/views/home/index.css
 
-   ONIONSUPPORT SPA · HOME PREMIUM · CSS BACKGROUND · EXTREME 10/10
+   ONIONSUPPORT SPA · HOME PREMIUM · CLEAN SURFACE · EXTREME 10/10
 
    Responsabilidad:
    - CSS único de Home alineado con /src/views/home/home.template.js.
-   - Background premium generado 100% con CSS, sin PNG, sin url().
+   - Sin background global: respeta el fondo real del Shell/App.
    - Separación superior real contra Topbar.
    - Cards de estadísticas con tamaño equilibrado.
    - Colores vivos por tipo de card.
-   - Glass premium nítido sobre fondo azul/deep gradient.
+   - Glass premium nítido, sin pseudo-fondos fijos.
    - Scope cerrado en .home-view-root / [data-home-scope].
    - Header con avatar + saludo + CTA Crear incidencia.
-   - Stats, actividad, facturas y entidades admin.
+   - Stats, actividad y facturas.
    - Estados loading, stale y error.
    - Responsive sólido.
    - Sin JS.
@@ -28,11 +28,6 @@
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]) {
-  --home-blue-0: #07152f;
-  --home-blue-1: #10264e;
-  --home-blue-2: #244a8f;
-  --home-blue-3: #4f7dd9;
-
   --home-sky: #38bdf8;
   --home-cyan: #22d3ee;
   --home-blue: #60a5fa;
@@ -71,7 +66,6 @@
   --home-border-soft: var(--border-soft, rgba(255, 255, 255, .080));
   --home-border-strong: var(--border-strong, rgba(255, 255, 255, .24));
 
-  --home-radius-xs: 8px;
   --home-radius-sm: var(--radius-sm, 11px);
   --home-radius-md: var(--radius-md, 15px);
   --home-radius-lg: var(--radius-lg, 19px);
@@ -95,11 +89,6 @@
   --home-slow: .36s;
 
   --home-content-max: min(100%, 1480px);
-
-  /*
-    Aire superior:
-    separa Home del Topbar sin tocar layout global.
-  */
   --home-content-pad-x: clamp(14px, 1.45vw, 26px);
   --home-content-pad-top: clamp(30px, 2.2vw, 46px);
   --home-content-pad-bottom: clamp(30px, 2vw, 44px);
@@ -107,26 +96,24 @@
   --home-gap: clamp(16px, 1.35vw, 24px);
   --home-gap-lg: clamp(18px, 1.65vw, 30px);
 
-  /*
-    Cards equilibradas:
-    stats siempre columnas iguales.
-  */
   --home-stat-min-height: clamp(148px, 10.7vw, 182px);
   --home-panel-min-height: clamp(305px, 24vw, 430px);
-  --home-main-grid-columns: repeat(2, minmax(0, 1fr));
 
   --home-glass-1:
-    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, .13), transparent 36%),
-    linear-gradient(180deg, rgba(255, 255, 255, .125), rgba(255, 255, 255, .045) 58%, rgba(255, 255, 255, .022)),
-    rgba(16, 18, 26, .72);
+    radial-gradient(circle at 16% 0%, rgba(255, 255, 255, .125), transparent 36%),
+    radial-gradient(circle at 98% 4%, rgba(96, 165, 250, .095), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, .115), rgba(255, 255, 255, .042) 58%, rgba(255, 255, 255, .020)),
+    rgba(15, 17, 25, .70);
 
   --home-glass-2:
     radial-gradient(circle at 18% 0%, rgba(255, 255, 255, .16), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, .135), rgba(255, 255, 255, .047)),
+    radial-gradient(circle at 100% 0%, rgba(96, 165, 250, .10), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, .132), rgba(255, 255, 255, .047)),
     rgba(18, 20, 29, .74);
 
   --home-glass-hover:
     radial-gradient(circle at 18% 0%, rgba(255, 255, 255, .20), transparent 34%),
+    radial-gradient(circle at 100% 0%, rgba(96, 165, 250, .14), transparent 38%),
     linear-gradient(180deg, rgba(255, 255, 255, .165), rgba(255, 255, 255, .060)),
     rgba(24, 27, 38, .80);
 
@@ -150,6 +137,7 @@
   gap: var(--home-gap-lg);
 
   color: var(--home-text);
+  background: transparent;
   font-family: var(--font-family, inherit);
 
   container-type: inline-size;
@@ -187,176 +175,6 @@
 
 
 /* =========================================================
-   PURE CSS BACKGROUND · NO PNG / NO URL
-========================================================= */
-
-:where(.home-view-root, [data-home-scope])::before {
-  content: "";
-
-  position: fixed;
-  inset: 0;
-  z-index: -2;
-
-  pointer-events: none;
-
-  /*
-    Fondo tipo "gradient salt":
-    azul luminoso a la izquierda, navy profundo a la derecha,
-    con manchas suaves, fractales grandes y grano fino CSS.
-  */
-  background:
-    radial-gradient(
-      circle at 0% 0%,
-      rgba(113, 156, 255, .96) 0%,
-      rgba(80, 119, 205, .76) 28%,
-      transparent 56%
-    ),
-    radial-gradient(
-      circle at 15% 28%,
-      rgba(96, 165, 250, .72) 0%,
-      rgba(59, 130, 246, .46) 24%,
-      transparent 55%
-    ),
-    radial-gradient(
-      ellipse at 45% 14%,
-      rgba(74, 113, 202, .40) 0%,
-      transparent 48%
-    ),
-    radial-gradient(
-      ellipse at 80% 16%,
-      rgba(28, 56, 112, .50) 0%,
-      transparent 52%
-    ),
-    radial-gradient(
-      circle at 100% 100%,
-      rgba(2, 12, 34, .98) 0%,
-      rgba(6, 22, 55, .82) 34%,
-      transparent 63%
-    ),
-    linear-gradient(
-      90deg,
-      #557ac9 0%,
-      #4a70bd 18%,
-      #365a9a 38%,
-      #203b6f 62%,
-      #12284f 80%,
-      #0b1b37 100%
-    );
-
-  filter:
-    saturate(1.06)
-    contrast(1.03)
-    brightness(.90);
-
-  transform: translateZ(0);
-
-  animation:
-    homeBackgroundDrift
-    18s
-    cubic-bezier(.2, .8, .2, 1)
-    infinite
-    alternate;
-}
-
-:where(.home-view-root, [data-home-scope])::after {
-  content: "";
-
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-
-  pointer-events: none;
-
-  /*
-    "Salt / low-poly" sólo con CSS:
-    - conic gradients para cortes geométricos suaves.
-    - micro-texture con repeating-radial/linear muy sutil.
-    - overlay oscuro para que el contenido premium respire.
-  */
-  background:
-    conic-gradient(
-      from 25deg at 8% 18%,
-      rgba(255, 255, 255, .060) 0deg 42deg,
-      transparent 42deg 118deg,
-      rgba(96, 165, 250, .070) 118deg 175deg,
-      transparent 175deg 360deg
-    ),
-    conic-gradient(
-      from 145deg at 32% 8%,
-      transparent 0deg 58deg,
-      rgba(255, 255, 255, .045) 58deg 118deg,
-      transparent 118deg 218deg,
-      rgba(59, 130, 246, .055) 218deg 282deg,
-      transparent 282deg 360deg
-    ),
-    conic-gradient(
-      from 250deg at 55% 34%,
-      rgba(255, 255, 255, .035) 0deg 50deg,
-      transparent 50deg 130deg,
-      rgba(14, 165, 233, .050) 130deg 200deg,
-      transparent 200deg 360deg
-    ),
-    conic-gradient(
-      from 320deg at 82% 24%,
-      transparent 0deg 70deg,
-      rgba(255, 255, 255, .030) 70deg 128deg,
-      transparent 128deg 234deg,
-      rgba(37, 99, 235, .040) 234deg 300deg,
-      transparent 300deg 360deg
-    ),
-    repeating-radial-gradient(
-      circle at 30% 30%,
-      rgba(255, 255, 255, .030) 0 1px,
-      transparent 1px 4px
-    ),
-    linear-gradient(
-      180deg,
-      rgba(2, 6, 23, .50),
-      rgba(2, 6, 23, .68) 46%,
-      rgba(0, 0, 0, .84)
-    ),
-    linear-gradient(
-      90deg,
-      rgba(0, 0, 0, .22),
-      transparent 34% 68%,
-      rgba(0, 0, 0, .36)
-    );
-
-  background-size:
-    74% 64%,
-    72% 68%,
-    82% 74%,
-    78% 72%,
-    7px 7px,
-    cover,
-    cover;
-
-  background-position:
-    0% 0%,
-    8% 0%,
-    38% 16%,
-    92% 12%,
-    0 0,
-    center,
-    center;
-
-  background-repeat:
-    no-repeat,
-    no-repeat,
-    no-repeat,
-    no-repeat,
-    repeat,
-    no-repeat,
-    no-repeat;
-
-  opacity: .95;
-
-  backdrop-filter: blur(1.6px) saturate(1.07);
-  -webkit-backdrop-filter: blur(1.6px) saturate(1.07);
-}
-
-
-/* =========================================================
    ROOT STATES
 ========================================================= */
 
@@ -378,8 +196,7 @@
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]) .home-btn,
-:where(.home-view-root, [data-home-scope]) .home-link-button,
-:where(.home-view-root, [data-home-scope]) .home-mini-action {
+:where(.home-view-root, [data-home-scope]) .home-link-button {
   min-block-size: 38px;
 
   display: inline-flex;
@@ -422,16 +239,8 @@
     opacity var(--home-fast) var(--home-ease-standard);
 }
 
-:where(.home-view-root, [data-home-scope]) .home-mini-action {
-  min-block-size: 30px;
-  padding-inline: 11px;
-  border-radius: 12px;
-  font-size: 10px;
-}
-
 :where(.home-view-root, [data-home-scope]) .home-link-button:hover,
-:where(.home-view-root, [data-home-scope]) .home-btn:hover,
-:where(.home-view-root, [data-home-scope]) .home-mini-action:hover {
+:where(.home-view-root, [data-home-scope]) .home-btn:hover {
   transform: translateY(-2px);
 
   border-color: rgba(255, 255, 255, .32);
@@ -449,17 +258,14 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-link-button:active,
-:where(.home-view-root, [data-home-scope]) .home-btn:active,
-:where(.home-view-root, [data-home-scope]) .home-mini-action:active {
+:where(.home-view-root, [data-home-scope]) .home-btn:active {
   transform: translateY(0) scale(.985);
 }
 
 :where(.home-view-root, [data-home-scope]) .home-btn:disabled,
 :where(.home-view-root, [data-home-scope]) .home-btn[aria-disabled="true"],
 :where(.home-view-root, [data-home-scope]) .home-link-button:disabled,
-:where(.home-view-root, [data-home-scope]) .home-link-button[aria-disabled="true"],
-:where(.home-view-root, [data-home-scope]) .home-mini-action:disabled,
-:where(.home-view-root, [data-home-scope]) .home-mini-action[aria-disabled="true"] {
+:where(.home-view-root, [data-home-scope]) .home-link-button[aria-disabled="true"] {
   opacity: .46;
   cursor: not-allowed;
   pointer-events: none;
@@ -467,16 +273,10 @@
 }
 
 :where(.home-view-root, [data-home-scope]) .home-btn svg,
-:where(.home-view-root, [data-home-scope]) .home-link-button svg,
-:where(.home-view-root, [data-home-scope]) .home-mini-action svg {
+:where(.home-view-root, [data-home-scope]) .home-link-button svg {
   inline-size: 15px;
   block-size: 15px;
   flex: 0 0 auto;
-}
-
-:where(.home-view-root, [data-home-scope]) .home-mini-action svg {
-  inline-size: 12px;
-  block-size: 12px;
 }
 
 :where(.home-view-root, [data-home-scope]) .home-btn--primary {
@@ -1285,18 +1085,12 @@
 
 :where(.home-view-root, [data-home-scope]) .home-grid {
   display: grid;
-  grid-template-columns: var(--home-main-grid-columns);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-areas: "activity invoices";
   gap: var(--home-gap);
   align-items: start;
 
   min-inline-size: 0;
-}
-
-:where(.home-view-root--admin, [data-home-admin="true"]) .home-grid {
-  grid-template-areas:
-    "activity invoices"
-    "activity entities";
 }
 
 :where(.home-view-root, [data-home-scope]) .home-panel {
@@ -1376,11 +1170,6 @@
   grid-area: invoices;
 }
 
-:where(.home-view-root, [data-home-scope]) .home-panel--entities {
-  grid-area: entities;
-  min-block-size: clamp(220px, 17vw, 300px);
-}
-
 :where(.home-view-root, [data-home-scope]) .home-panel-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1414,26 +1203,13 @@
     0 16px 30px rgba(0, 0, 0, .28);
 }
 
-:where(.home-view-root, [data-home-scope]) .home-panel-header h3,
-:where(.home-view-root, [data-home-scope]) .home-entity-columns h3 {
-  margin: 0;
-
-  color: var(--home-text-strong);
-
-  font-size: 13px;
-  line-height: 1.15;
-  font-weight: 950;
-  letter-spacing: -.025em;
-}
-
 
 /* =========================================================
    ACTIVITY
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]) .home-activity-list,
-:where(.home-view-root, [data-home-scope]) .home-invoice-list,
-:where(.home-view-root, [data-home-scope]) .home-mini-list {
+:where(.home-view-root, [data-home-scope]) .home-invoice-list {
   padding: 14px;
   margin: 0;
 
@@ -1484,19 +1260,23 @@
     0 0 28px color-mix(in srgb, var(--home-activity-color) 10%, transparent);
 }
 
-:where(.home-view-root, [data-home-scope]) .home-activity-item--invoice {
+:where(.home-view-root, [data-home-scope]) .home-activity-item--invoice,
+:where(.home-view-root, [data-home-scope]) .home-activity-item--factura {
   --home-activity-color: var(--home-warning);
 }
 
-:where(.home-view-root, [data-home-scope]) .home-activity-item--ticket {
+:where(.home-view-root, [data-home-scope]) .home-activity-item--ticket,
+:where(.home-view-root, [data-home-scope]) .home-activity-item--incidencia {
   --home-activity-color: var(--home-info);
 }
 
-:where(.home-view-root, [data-home-scope]) .home-activity-item--client {
+:where(.home-view-root, [data-home-scope]) .home-activity-item--client,
+:where(.home-view-root, [data-home-scope]) .home-activity-item--cliente {
   --home-activity-color: var(--home-success);
 }
 
-:where(.home-view-root, [data-home-scope]) .home-activity-item--user {
+:where(.home-view-root, [data-home-scope]) .home-activity-item--user,
+:where(.home-view-root, [data-home-scope]) .home-activity-item--usuario {
   --home-activity-color: var(--home-violet);
 }
 
@@ -1692,101 +1472,6 @@
 
 
 /* =========================================================
-   ADMIN ENTITIES
-========================================================= */
-
-:where(.home-view-root, [data-home-scope]) .home-entity-columns {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-
-  padding: 14px;
-}
-
-:where(.home-view-root, [data-home-scope]) .home-entity-column {
-  min-inline-size: 0;
-
-  display: grid;
-  align-content: start;
-  gap: 11px;
-}
-
-:where(.home-view-root, [data-home-scope]) .home-entity-column-head {
-  min-inline-size: 0;
-
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-:where(.home-view-root, [data-home-scope]) .home-mini-list {
-  display: grid;
-  gap: 9px;
-  padding: 0;
-}
-
-:where(.home-view-root, [data-home-scope]) .home-mini-list li {
-  min-block-size: 58px;
-
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-
-  padding: 11px 13px;
-
-  border: 1px solid var(--home-border-soft);
-  border-radius: 18px;
-
-  background:
-    radial-gradient(circle at 0% 20%, rgba(255, 255, 255, .055), transparent 44%),
-    rgba(255, 255, 255, .038);
-
-  transition:
-    background var(--home-fast) var(--home-ease-standard),
-    border-color var(--home-fast) var(--home-ease-standard),
-    transform var(--home-fast) var(--home-ease),
-    box-shadow var(--home-fast) var(--home-ease-standard);
-}
-
-:where(.home-view-root, [data-home-scope]) .home-mini-list li:hover {
-  transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, .17);
-  background: rgba(255, 255, 255, .058);
-
-  box-shadow:
-    0 14px 28px rgba(0, 0, 0, .20);
-}
-
-:where(.home-view-root, [data-home-scope]) .home-mini-list strong {
-  min-inline-size: 0;
-  overflow: hidden;
-
-  color: var(--home-text-strong);
-
-  font-size: 12px;
-  line-height: 1.18;
-  font-weight: 950;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-:where(.home-view-root, [data-home-scope]) .home-mini-list span,
-:where(.home-view-root, [data-home-scope]) .home-panel-muted {
-  color: rgba(255, 255, 255, .56);
-
-  font-size: 11px;
-  line-height: 1.36;
-  font-weight: 650;
-}
-
-:where(.home-view-root, [data-home-scope]) .home-panel-muted {
-  margin: 0;
-}
-
-
-/* =========================================================
    RESPONSIVE · CONTAINER QUERIES
 ========================================================= */
 
@@ -1799,13 +1484,11 @@
     min-block-size: 96px;
   }
 
-  :where(.home-view-root, [data-home-scope]) .home-grid,
-  :where(.home-view-root--admin, [data-home-admin="true"]) .home-grid {
+  :where(.home-view-root, [data-home-scope]) .home-grid {
     grid-template-columns: 1fr;
     grid-template-areas:
       "activity"
-      "invoices"
-      "entities";
+      "invoices";
   }
 
   :where(.home-view-root, [data-home-scope]) .home-panel {
@@ -1872,18 +1555,13 @@
     border-radius: 18px;
   }
 
-  :where(.home-view-root, [data-home-scope]) .home-entity-columns {
-    grid-template-columns: 1fr;
-  }
-
   :where(.home-view-root, [data-home-scope]) .home-btn,
   :where(.home-view-root, [data-home-scope]) .home-link-button {
     inline-size: 100%;
   }
 
   :where(.home-view-root, [data-home-scope]) .home-activity-item,
-  :where(.home-view-root, [data-home-scope]) .home-invoice-item,
-  :where(.home-view-root, [data-home-scope]) .home-mini-list li {
+  :where(.home-view-root, [data-home-scope]) .home-invoice-item {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -1934,13 +1612,11 @@
     grid-template-columns: 1fr;
   }
 
-  :where(.home-view-root, [data-home-scope]) .home-grid,
-  :where(.home-view-root--admin, [data-home-admin="true"]) .home-grid {
+  :where(.home-view-root, [data-home-scope]) .home-grid {
     grid-template-columns: 1fr;
     grid-template-areas:
       "activity"
-      "invoices"
-      "entities";
+      "invoices";
   }
 }
 
@@ -1952,10 +1628,6 @@
 
 @media (max-width: 680px) {
   :where(.home-view-root, [data-home-scope]) .home-panel-header {
-    grid-template-columns: 1fr;
-  }
-
-  :where(.home-view-root, [data-home-scope]) .home-entity-columns {
     grid-template-columns: 1fr;
   }
 
@@ -2002,15 +1674,11 @@
 
   :where(.home-view-root, [data-home-scope]) .home-btn:hover,
   :where(.home-view-root, [data-home-scope]) .home-link-button:hover,
-  :where(.home-view-root, [data-home-scope]) .home-mini-action:hover,
   :where(.home-view-root, [data-home-scope]) .home-stat-card:hover,
   :where(.home-view-root, [data-home-scope]) .home-activity-item:hover,
+  :where(.home-view-root, [data-home-scope]) .home-invoice-item:hover,
   :where(.home-view-root, [data-home-scope]) .home-create-card-button:hover {
     transform: none;
-  }
-
-  :where(.home-view-root, [data-home-scope])::before {
-    animation: none;
   }
 }
 
@@ -2019,11 +1687,6 @@
   :where(.home-view-root, [data-home-scope]) .home-stat-card,
   :where(.home-view-root, [data-home-scope]) .home-create-card-button,
   :where(.home-view-root, [data-home-scope]) .home-alert {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-
-  :where(.home-view-root, [data-home-scope])::after {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
@@ -2052,8 +1715,6 @@
     box-shadow: none;
   }
 
-  :where(.home-view-root, [data-home-scope])::before,
-  :where(.home-view-root, [data-home-scope])::after,
   :where(.home-view-root, [data-home-scope]) .home-panel::before,
   :where(.home-view-root, [data-home-scope]) .home-panel::after,
   :where(.home-view-root, [data-home-scope]) .home-stat-card::before,
@@ -2077,11 +1738,6 @@
     background: #fff;
   }
 
-  :where(.home-view-root, [data-home-scope])::before,
-  :where(.home-view-root, [data-home-scope])::after {
-    display: none;
-  }
-
   :where(.home-view-root, [data-home-scope]) .home-panel,
   :where(.home-view-root, [data-home-scope]) .home-stat-card,
   :where(.home-view-root, [data-home-scope]) .home-create-card-button {
@@ -2095,7 +1751,6 @@
 
   :where(.home-view-root, [data-home-scope]) .home-btn,
   :where(.home-view-root, [data-home-scope]) .home-link-button,
-  :where(.home-view-root, [data-home-scope]) .home-mini-action,
   :where(.home-view-root, [data-home-scope]) .home-create-card {
     display: none;
   }
@@ -2113,23 +1768,5 @@
 
   100% {
     background-position: -120% 0;
-  }
-}
-
-@keyframes homeBackgroundDrift {
-  0% {
-    filter:
-      saturate(1.05)
-      contrast(1.02)
-      brightness(.88);
-    transform: translate3d(-.35%, -.25%, 0) scale(1.006);
-  }
-
-  100% {
-    filter:
-      saturate(1.12)
-      contrast(1.04)
-      brightness(.94);
-    transform: translate3d(.35%, .25%, 0) scale(1.014);
   }
 }

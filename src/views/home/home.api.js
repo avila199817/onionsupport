@@ -1,58 +1,78 @@
 /* =========================================================
-   Onion Support - Home Index
-   Archivo: /src/views/home/index.js
+   Onion Support - Home API
+   Archivo: /src/views/home/home.api.js
 
    Responsabilidad:
-   - Controlador mínimo de la vista Home.
-   - Montar template.
-   - Hidratar desde cache real en memoria.
-   - Cargar dashboard desde home.api.js sólo cuando toca.
-   - Evitar recarga innecesaria al cambiar de vista.
-   - Delegar navegación en Router.
+   - Construir el dashboard ligero del Home.
+   - Reutilizar APIs de dominio existentes.
+   - Usar core/http.js sólo para dominios sin API propia aún.
+   - Mantener cache en memoria del dashboard ensamblado.
+   - Dedupe de peticiones concurrentes con in-flight promise.
+   - Admin: incidencias, facturas, clientes, usuarios.
+   - User: incidencias y facturas propias según scope backend.
+   - Hidratar cache sólo si existe cache real.
+   - No bloquear todo el Home por fallos secundarios admin.
+   - Sin DOM.
+   - Sin Router.
    - Sin Store.
-   - Sin storage.
-   - Sin fetch directo.
-   - Sin HTTP directo.
-   - Sin selectors externos.
-   - Sin modelos externos.
-   - Sin bindings globales.
+   - Sin Storage.
+   - Sin fetch propio.
+   - Sin normalizar de nuevo Incidencias/Facturas.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import Http from "../../core/http.js";
 
-import {
-  ROUTES,
-} from "../../core/config.js";
+import IncidenciasApi from "../incidencias/incidencias.api.js";
+import FacturasApi from "../facturas/facturas.api.js";
 
-import {
-  loadHomeDashboard,
-  hydrateHomeFromCache,
-  hasFreshHomeDashboard,
-  getHomeCacheState,
-} from "./home.api.js";
+export const HOME_API_VERSION = "home.api.domain-aggregator.v5.production";
 
-import {
-  renderHomeTemplate,
-  renderHomeLoadingState,
-  renderHomeErrorState,
-} from "./home.template.js";
-
-export const HOME_INDEX_VERSION = "home.index.cached.v3.real-hydration";
-export const HOME_VIEW_VERSION = HOME_INDEX_VERSION;
-
-const SOURCE = "home.view";
-
-const DEFAULT_CACHE_TTL_MS = 60000;
-
-const ACTIONS = Object.freeze({
-  RETRY: "retry",
-  CREATE_INCIDENCIA: "create_incidencia",
-  NAVIGATE: "navigate",
+export const HOME_ENDPOINTS = Object.freeze({
+  tickets: "/api/tickets",
+  facturas: "/api/facturas",
+  clientes: "/api/clientes",
+  users: "/api/users",
 });
 
-const INSTANCES = new WeakMap();
+export const HOME_TIMEOUT_MS = 15000;
+export const HOME_LIST_LIMIT = 24;
+export const HOME_ADMIN_LIST_LIMIT = 24;
+export const HOME_CACHE_TTL_MS = 60000;
 
-let lastInstance = null;
+const LIST_KEYS = Object.freeze([
+  "items",
+  "rows",
+  "results",
+  "records",
+  "docs",
+  "documents",
+  "value",
+  "list",
+  "tickets",
+  "incidencias",
+  "facturas",
+  "invoices",
+  "clientes",
+  "clients",
+  "users",
+  "usuarios",
+]);
+
+const WRAPPER_KEYS = Object.freeze([
+  "data",
+  "payload",
+  "result",
+  "response",
+  "body",
+]);
+
+let lastDashboard = null;
+let lastError = null;
+let lastLoadedAt = null;
+let lastCacheKey = "";
+let inFlightPromise = null;
+let loading = false;
 
 /* =========================================================
    BASICS
@@ -62,8 +82,12 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function isFunction(value) {
-  return typeof value === "function";
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
 }
 
 function cleanText(value = "", fallback = "") {
@@ -75,564 +99,788 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
-function safeError(error = null) {
-  if (!error) return "No se pudo cargar el Home.";
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && !value.length) continue;
+    if (isObject(value) && !Object.keys(value).length) continue;
 
-  return cleanText(
-    error.message ||
-      error.data?.message ||
-      error.payload?.message ||
-      error.response?.message ||
-      "No se pudo cargar el Home.",
-    "No se pudo cargar el Home."
-  );
+    return value;
+  }
+
+  return null;
+}
+
+function number(value = 0, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function now() {
   return Date.now();
 }
 
-function isDomNode(value = null) {
-  return Boolean(
-    typeof Node !== "undefined" &&
-      value &&
-      value instanceof Node
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function redact(value = "") {
+  return String(value ?? "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+function normalizeRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = cleanText(value, "").toLowerCase();
+
+  if (role === "admin") return "admin";
+  if (role === "user") return "user";
+
+  return "";
+}
+
+function safeId(value = "") {
+  return cleanText(value, "")
+    .replace(/[\r\n\t]/g, "")
+    .slice(0, 180);
+}
+
+function errorStatus(error = null) {
+  return number(
+    first(
+      error?.status,
+      error?.statusCode,
+      error?.response?.status,
+      error?.data?.status,
+      error?.payload?.status,
+      null
+    ),
+    0
   );
 }
 
+function isUnauthorizedError(error = null) {
+  return errorStatus(error) === 401;
+}
+
+function normalizeDomainError(domain = "home", error = null) {
+  return {
+    domain: cleanText(domain, "home"),
+    message: redact(error?.message || "No se pudo cargar el recurso."),
+    status: errorStatus(error) || null,
+    code: cleanText(error?.code, "") || null,
+    at: nowIso(),
+  };
+}
+
 /* =========================================================
-   CORE / ROUTER
+   CORE STATE
 ========================================================= */
 
-function getCurrentUser() {
+function getCoreState() {
   try {
-    return AppCore.getCurrentUser?.() || AppCore.state?.user || AppCore.state?.currentUser || null;
+    return AppCore.getState?.() || AppCore.state || {};
   } catch {
-    return AppCore.state?.user || null;
+    return AppCore.state || {};
+  }
+}
+
+function getCurrentUser() {
+  const state = getCoreState();
+
+  try {
+    return AppCore.getCurrentUser?.() || state.user || state.currentUser || null;
+  } catch {
+    return state.user || state.currentUser || null;
   }
 }
 
 function getCurrentRole() {
-  try {
-    return AppCore.getCurrentRole?.() || AppCore.state?.role || "user";
-  } catch {
-    return "user";
-  }
-}
+  const state = getCoreState();
+  const user = getCurrentUser() || {};
 
-function getRouter(context = {}) {
   return (
-    context.Router ||
-    context.router ||
-    AppCore.router ||
-    AppCore.Router ||
-    AppCore.getModule?.("router") ||
-    null
+    normalizeRole(
+      first(
+        AppCore.getCurrentRole?.(),
+        state.role,
+        state.rol,
+        state.roles,
+        user.role,
+        user.rol,
+        user.roles,
+        ""
+      )
+    ) || "user"
   );
 }
 
-function getRoutes() {
+function getCurrentUserId() {
+  const state = getCoreState();
+  const user = getCurrentUser() || {};
+
+  return safeId(
+    first(
+      user.userId,
+      user.id,
+      user.username,
+      user.slug,
+      state.userId,
+      ""
+    )
+  );
+}
+
+function isAdmin() {
+  return getCurrentRole() === "admin";
+}
+
+function cacheKey() {
+  return [
+    getCurrentRole(),
+    getCurrentUserId(),
+  ].join(":");
+}
+
+/* =========================================================
+   CACHE
+========================================================= */
+
+function cacheAgeMs() {
+  if (!lastLoadedAt) return Number.POSITIVE_INFINITY;
+
+  const time = Date.parse(lastLoadedAt);
+
+  if (!Number.isFinite(time)) return Number.POSITIVE_INFINITY;
+
+  return Math.max(0, now() - time);
+}
+
+function isCacheFresh(options = {}) {
+  if (!lastDashboard) return false;
+
+  const key = cacheKey();
+
+  if (lastCacheKey && key && lastCacheKey !== key) return false;
+
+  const ttl = number(options.ttlMs ?? options.cacheTtlMs, HOME_CACHE_TTL_MS);
+
+  if (ttl <= 0) return false;
+
+  return cacheAgeMs() <= ttl;
+}
+
+function cloneDashboard(dashboard = null, patch = {}) {
+  if (!isObject(dashboard)) return null;
+
+  const cachePatch = isObject(patch.cache) ? patch.cache : {};
+  const currentCache = isObject(dashboard.cache) ? dashboard.cache : {};
+
   return {
-    incidencias: ROUTES.incidencias || "/incidencias",
-    facturas: ROUTES.facturas || "/facturas",
-    clientes: ROUTES.clientes || "/clientes",
-    usuarios: ROUTES.usuarios || "/usuarios",
-    servidor: ROUTES.servidor || "/servidor",
-    cuenta: ROUTES.cuenta || "/cuenta",
-    ajustes: ROUTES.ajustes || "/ajustes",
-  };
-}
-
-function basePayload(extra = {}) {
-  return {
-    user: getCurrentUser(),
-    role: getCurrentRole(),
-    routes: getRoutes(),
-    ...extra,
-  };
-}
-
-/* =========================================================
-   DOM
-========================================================= */
-
-function renderHtml(host = null, html = "") {
-  if (!host) return false;
-
-  host.innerHTML = String(html || "");
-  return true;
-}
-
-function clearHost(host = null) {
-  if (!host) return false;
-
-  try {
-    host.replaceChildren();
-    return true;
-  } catch {
-    try {
-      host.textContent = "";
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-
-function closestAction(target = null) {
-  const element = target?.nodeType === 3
-    ? target.parentElement
-    : target;
-
-  return element?.closest?.("[data-home-action], [data-action]") || null;
-}
-
-/* =========================================================
-   INSTANCE REGISTRY
-========================================================= */
-
-function destroyPrevious(host = null) {
-  const previous = INSTANCES.get(host);
-
-  if (previous?.destroy) {
-    previous.destroy({
-      remount: true,
-    });
-
-    return true;
-  }
-
-  return false;
-}
-
-function storeInstance(host = null, instance = null) {
-  if (!host || !instance) return false;
-
-  INSTANCES.set(host, instance);
-  lastInstance = instance;
-
-  return true;
-}
-
-function clearInstance(host = null, instance = null) {
-  if (host && INSTANCES.get(host) === instance) {
-    INSTANCES.delete(host);
-  }
-
-  if (lastInstance === instance) {
-    lastInstance = null;
-  }
-
-  return true;
-}
-
-/* =========================================================
-   CONTROLLER
-========================================================= */
-
-function createHomeController(host = null, context = {}) {
-  let destroyed = false;
-  let mounted = false;
-  let loading = false;
-  let dashboard = null;
-  let lastError = null;
-  let lastRenderAt = null;
-  let loadSeq = 0;
-
-  function getCachedDashboard() {
-    try {
-      const cached = hydrateHomeFromCache?.();
-      return isObject(cached) ? cached : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function cacheFresh(options = {}) {
-    try {
-      if (
-        hasFreshHomeDashboard?.({
-          ttlMs: options.ttlMs ?? DEFAULT_CACHE_TTL_MS,
-        }) !== true
-      ) {
-        return false;
-      }
-
-      return isObject(getCachedDashboard());
-    } catch {
-      return false;
-    }
-  }
-
-  function cacheState() {
-    try {
-      return getHomeCacheState?.() || null;
-    } catch {
-      return null;
-    }
-  }
-
-  function payload(extra = {}) {
-    return basePayload({
-      dashboard,
-      loading,
-      error: lastError,
-      ...extra,
-    });
-  }
-
-  function render(data = {}) {
-    if (destroyed || !host) return false;
-
-    lastRenderAt = now();
-
-    return renderHtml(
-      host,
-      renderHomeTemplate(
-        payload(data)
-      )
-    );
-  }
-
-  function renderLoading({ preferCached = true } = {}) {
-    if (destroyed || !host) return false;
-
-    lastRenderAt = now();
-
-    if (preferCached && isObject(dashboard)) {
-      return renderHtml(
-        host,
-        renderHomeTemplate(
-          payload({
-            dashboard,
-            loading: true,
-          })
-        )
-      );
-    }
-
-    return renderHtml(
-      host,
-      renderHomeLoadingState(
-        payload({
-          dashboard,
-          loading: true,
-        })
-      )
-    );
-  }
-
-  function renderError(error = null) {
-    if (destroyed || !host) return false;
-
-    const message = safeError(error);
-    lastError = message;
-    lastRenderAt = now();
-
-    if (isObject(dashboard)) {
-      return renderHtml(
-        host,
-        renderHomeTemplate(
-          payload({
-            dashboard: {
-              ...dashboard,
-              stale: true,
-              error: message,
-            },
-            loading: false,
-            error: message,
-          })
-        )
-      );
-    }
-
-    return renderHtml(host, renderHomeErrorState(message));
-  }
-
-  async function navigateTo(path = "") {
-    const route = cleanText(path, "");
-
-    if (!route) return false;
-
-    const Router = getRouter(context);
-
-    if (isFunction(Router?.navigate)) {
-      await Router.navigate(route, {
-        source: SOURCE,
-      });
-
-      return true;
-    }
-
-    return false;
-  }
-
-  async function load(options = {}) {
-    const seq = ++loadSeq;
-    const force = options.force === true || options.forceRefresh === true;
-    const fresh = !force && cacheFresh(options);
-
-    lastError = null;
-
-    if (fresh) {
-      const cached = getCachedDashboard();
-
-      if (isObject(cached)) {
-        dashboard = cached;
-        loading = false;
-
-        render({
-          dashboard,
-          loading: false,
-        });
-
-        return dashboard;
-      }
-    }
-
-    loading = true;
-
-    renderLoading({
-      preferCached: true,
-    });
-
-    try {
-      const nextDashboard = await loadHomeDashboard({
-        returnStaleOnError: true,
-        ttlMs: DEFAULT_CACHE_TTL_MS,
-        ...options,
-      });
-
-      if (destroyed || seq !== loadSeq) {
-        return nextDashboard;
-      }
-
-      dashboard = nextDashboard;
-      loading = false;
-      lastError = cleanText(nextDashboard?.error || "", "");
-
-      render({
-        dashboard,
-        loading: false,
-        error: lastError,
-      });
-
-      return dashboard;
-    } catch (error) {
-      if (destroyed || seq !== loadSeq) {
-        return null;
-      }
-
-      loading = false;
-      renderError(error);
-
-      return null;
-    }
-  }
-
-  async function refresh() {
-    return load({
-      force: true,
-      source: `${SOURCE}.refresh`,
-    });
-  }
-
-  async function handleAction(action = "", node = null) {
-    const type = cleanText(action, "");
-    const route = cleanText(node?.dataset?.route || node?.dataset?.href || "", "");
-
-    if (type === ACTIONS.RETRY) {
-      await refresh();
-      return true;
-    }
-
-    if (type === ACTIONS.CREATE_INCIDENCIA) {
-      await navigateTo(route || ROUTES.incidencias || "/incidencias");
-      return true;
-    }
-
-    if (type === ACTIONS.NAVIGATE) {
-      await navigateTo(route);
-      return true;
-    }
-
-    return false;
-  }
-
-  function onClick(event) {
-    if (destroyed) return;
-
-    const node = closestAction(event.target);
-
-    if (!node || !host?.contains?.(node)) return;
-
-    const action = cleanText(node.dataset.homeAction || node.dataset.action, "");
-
-    if (!action) return;
-
-    event.preventDefault();
-
-    void handleAction(action, node);
-  }
-
-  function bind() {
-    host?.addEventListener?.("click", onClick);
-    return true;
-  }
-
-  function unbind() {
-    host?.removeEventListener?.("click", onClick);
-    return true;
-  }
-
-  async function mount(options = {}) {
-    if (destroyed || !host) return null;
-    if (mounted) return controller;
-
-    mounted = true;
-    bind();
-
-    dashboard = getCachedDashboard();
-
-    if (isObject(dashboard) && cacheFresh(options)) {
-      loading = false;
-
-      render({
-        dashboard,
-        loading: false,
-      });
-
-      return controller;
-    }
-
-    if (isObject(dashboard)) {
-      loading = false;
-
-      render({
-        dashboard,
-        loading: false,
-      });
-
-      void load({
-        source: `${SOURCE}.background`,
-      });
-
-      return controller;
-    }
-
-    loading = true;
-
-    renderLoading({
-      preferCached: false,
-    });
-
-    void load({
-      source: `${SOURCE}.initial`,
-    });
-
-    return controller;
-  }
-
-  function destroy() {
-    destroyed = true;
-    mounted = false;
-    loading = false;
-    loadSeq += 1;
-
-    unbind();
-
-    if (host) {
-      clearHost(host);
-    }
-
-    clearInstance(host, controller);
-
-    return true;
-  }
-
-  const controller = {
-    version: HOME_VIEW_VERSION,
-
-    mount,
-    destroy,
-
-    unmount: destroy,
-    cleanup: destroy,
-    dispose: destroy,
-
-    refresh,
-
-    reload: refresh,
-
-    getSnapshot() {
-      return {
-        version: HOME_VIEW_VERSION,
-
-        mounted,
-        destroyed,
-        loading,
-
-        hasHost: Boolean(host),
-        hasDashboard: isObject(dashboard),
-
-        role: getCurrentRole(),
-
-        lastError,
-        lastRenderAt,
-
-        cache: cacheState(),
-      };
-    },
-
-    getDebugSnapshot() {
-      return this.getSnapshot();
+    ...dashboard,
+    ...patch,
+
+    summary: isObject(dashboard.summary)
+      ? {
+          ...dashboard.summary,
+          ...(isObject(patch.summary) ? patch.summary : {}),
+        }
+      : patch.summary,
+
+    cache: {
+      hydrated: true,
+      key: lastCacheKey || cacheKey(),
+      ageMs: cacheAgeMs(),
+      ttlMs: HOME_CACHE_TTL_MS,
+      ...currentCache,
+      ...cachePatch,
     },
   };
-
-  return controller;
 }
 
-/* =========================================================
-   VIEW EXPORT
-========================================================= */
+function setCache(dashboard = null) {
+  if (!isObject(dashboard)) return null;
 
-export async function HomeView(host = null, context = {}) {
-  if (!isDomNode(host)) {
+  lastDashboard = dashboard;
+  lastLoadedAt = dashboard.loadedAt || nowIso();
+  lastCacheKey = cacheKey();
+
+  return lastDashboard;
+}
+
+function getCachedDashboard(options = {}) {
+  if (!lastDashboard) return null;
+
+  const key = cacheKey();
+
+  if (lastCacheKey && key && lastCacheKey !== key) {
     return null;
   }
 
-  destroyPrevious(host);
-
-  const controller = createHomeController(host, context);
-
-  storeInstance(host, controller);
-
-  return controller.mount();
+  return cloneDashboard(lastDashboard, {
+    cached: true,
+    stale: options.stale === true ? true : lastDashboard.stale === true,
+  });
 }
 
-export const HomeIndex = HomeView;
+export function clearHomeDashboardCache() {
+  lastDashboard = null;
+  lastError = null;
+  lastLoadedAt = null;
+  lastCacheKey = "";
+  inFlightPromise = null;
+  loading = false;
 
-export function destroy() {
-  try {
-    return Boolean(lastInstance?.destroy?.());
-  } catch {
-    return false;
-  }
+  return true;
 }
 
-export function getSnapshot() {
-  if (lastInstance?.getSnapshot) {
-    return lastInstance.getSnapshot();
+/* =========================================================
+   RESPONSE UNWRAP
+========================================================= */
+
+function hasKnownListShape(value = null) {
+  if (!isObject(value)) return false;
+
+  return (
+    LIST_KEYS.some((key) => Object.prototype.hasOwnProperty.call(value, key)) ||
+    WRAPPER_KEYS.some((key) => Object.prototype.hasOwnProperty.call(value, key))
+  );
+}
+
+function unwrapList(value = null, depth = 0) {
+  if (Array.isArray(value)) return value;
+  if (!isObject(value) || depth > 4) return [];
+
+  for (const key of LIST_KEYS) {
+    if (Array.isArray(value[key])) {
+      return value[key];
+    }
   }
+
+  for (const key of WRAPPER_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+
+    const nested = value[key];
+    const output = unwrapList(nested, depth + 1);
+
+    if (Array.isArray(nested) || output.length || hasKnownListShape(nested)) {
+      return output;
+    }
+  }
+
+  return [];
+}
+
+async function loadAdminList(endpoint = "", {
+  skip = false,
+  params = {},
+  timeout = HOME_TIMEOUT_MS,
+  source = "views.home.admin",
+} = {}) {
+  if (skip) return [];
+
+  const response = await Http.get(endpoint, {
+    timeout,
+    source,
+    query: {
+      limit: HOME_ADMIN_LIST_LIMIT,
+      includeTotal: true,
+      ...safeObject(params),
+    },
+  });
+
+  return unwrapList(response);
+}
+
+/* =========================================================
+   LIGHT DTOs · ONLY FOR DOMAINS WITHOUT API MODULE YET
+========================================================= */
+
+function normalizeClient(item = {}) {
+  const raw = safeObject(item);
+  const id = cleanText(first(raw.clienteId, raw.clientId, raw.id, raw.userId), "");
 
   return {
-    version: HOME_VIEW_VERSION,
-    mounted: false,
-    hasInstance: false,
-    role: getCurrentRole(),
+    id,
+    clienteId: id,
+    clientId: id,
+    name: cleanText(first(raw.name, raw.nombre, raw.displayName, raw.razonSocial, raw.companyName), "Cliente"),
+    active: raw.active !== false,
+    createdAt: first(raw.createdAt, ""),
+    updatedAt: first(raw.updatedAt, raw.modifiedAt, ""),
   };
 }
 
-export const getDebugSnapshot = getSnapshot;
+function normalizeUser(item = {}) {
+  const raw = safeObject(item);
+  const id = cleanText(first(raw.userId, raw.id, raw.username, raw.slug), "");
 
-export default HomeView;
+  return {
+    id,
+    userId: id,
+    username: cleanText(first(raw.username, raw.userName, raw.slug), ""),
+    displayName: cleanText(first(raw.displayName, raw.name, raw.nombre, raw.fullName, raw.username), "Usuario"),
+    role: normalizeRole(first(raw.role, raw.rol, raw.roles, "user")) || "user",
+    active: raw.disabled === true ? false : raw.active !== false,
+    avatarUrl: cleanText(first(raw.avatarUrl, raw.avatar, raw.picture, raw.profile?.avatarUrl), ""),
+  };
+}
+
+/* =========================================================
+   DOMAIN LOADERS
+========================================================= */
+
+async function loadIncidenciasForHome(options = {}) {
+  if (!IncidenciasApi?.listIncidencias) return [];
+
+  const response = await IncidenciasApi.listIncidencias({
+    timeout: options.timeout || HOME_TIMEOUT_MS,
+    query: {
+      limit: HOME_LIST_LIMIT,
+      includeTotal: true,
+      sortBy: "updatedAt",
+      sortDir: "DESC",
+      ...(isObject(options.ticketsQuery) ? options.ticketsQuery : {}),
+      ...(isObject(options.incidenciasQuery) ? options.incidenciasQuery : {}),
+    },
+    returnStaleOnError: options.returnStaleOnError !== false,
+  });
+
+  return unwrapList(response);
+}
+
+async function loadFacturasForHome(options = {}) {
+  if (!FacturasApi?.listFacturas) return [];
+
+  const response = await FacturasApi.listFacturas({
+    timeout: options.timeout || HOME_TIMEOUT_MS,
+    page: 1,
+    limit: HOME_LIST_LIMIT,
+    sort: "recent",
+    direction: "desc",
+    returnStaleOnError: options.returnStaleOnError !== false,
+    ...(isObject(options.facturasOptions) ? options.facturasOptions : {}),
+  });
+
+  return unwrapList(response);
+}
+
+async function loadClientesForHome(options = {}) {
+  const admin = isAdmin();
+
+  if (options.skip === true || !admin) return [];
+
+  const clientes = await loadAdminList(HOME_ENDPOINTS.clientes, {
+    timeout: options.timeout || HOME_TIMEOUT_MS,
+    source: "views.home.clientes",
+    params: isObject(options.clientesQuery) ? options.clientesQuery : {},
+  });
+
+  return clientes.map(normalizeClient).filter((item) => item.id);
+}
+
+async function loadUsersForHome(options = {}) {
+  const admin = isAdmin();
+
+  if (options.skip === true || !admin) return [];
+
+  const users = await loadAdminList(HOME_ENDPOINTS.users, {
+    timeout: options.timeout || HOME_TIMEOUT_MS,
+    source: "views.home.users",
+    params: isObject(options.usersQuery) ? options.usersQuery : {},
+  });
+
+  return users.map(normalizeUser).filter((item) => item.id);
+}
+
+async function loadDomain(domain = "home", loader = null) {
+  try {
+    const items = await loader?.();
+
+    return {
+      domain,
+      items: safeArray(items),
+      error: null,
+    };
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      throw error;
+    }
+
+    return {
+      domain,
+      items: [],
+      error: normalizeDomainError(domain, error),
+    };
+  }
+}
+
+/* =========================================================
+   DASHBOARD BUILDERS
+========================================================= */
+
+function dateValue(value = "") {
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function invoicePaid(invoice = {}) {
+  const status = cleanText(
+    first(
+      invoice.paymentStatus,
+      invoice.estadoPago,
+      invoice.status,
+      invoice.estado,
+      ""
+    ),
+    ""
+  ).toLowerCase();
+
+  return Boolean(
+    invoice.paid === true ||
+      invoice.isPaid === true ||
+      invoice.pagada === true ||
+      ["paid", "pagada", "pagado", "completed", "complete", "settled"].includes(status)
+  );
+}
+
+function invoiceAmount(invoice = {}) {
+  return number(
+    first(
+      invoice.total,
+      invoice.totalAmount,
+      invoice.amount,
+      invoice.importe,
+      invoice.importeTotal,
+      invoice.paidAmount,
+      invoice.pagado,
+      invoice.summary?.total,
+      0
+    ),
+    0
+  );
+}
+
+function invoiceCurrency(invoice = {}) {
+  return cleanText(first(invoice.currency, invoice.moneda, invoice.summary?.currency, "EUR"), "EUR").toUpperCase();
+}
+
+function buildActivity({ tickets = [], facturas = [] } = {}) {
+  const ticketItems = safeArray(tickets).map((ticket) => ({
+    type: "ticket",
+    title: cleanText(first(ticket.subject, ticket.asunto, ticket.title), "Incidencia"),
+    text: cleanText(first(ticket.status, ticket.estado, ticket.priority, ticket.prioridad), "Actualizada"),
+    date: first(ticket.lastActivityAt, ticket.updatedAt, ticket.createdAt, ""),
+  }));
+
+  const invoiceItems = safeArray(facturas).map((invoice) => ({
+    type: "invoice",
+    title: cleanText(first(invoice.title, invoice.name, invoice.number, invoice.numero, invoice.numeroFacturaLegal, invoice.id), "Factura"),
+    text: cleanText(first(invoice.paymentStatus, invoice.estadoPago, invoice.status, invoice.estado), "Factura"),
+    date: first(invoice.updatedAt, invoice.issuedAt, invoice.fechaEmision, invoice.createdAt, ""),
+  }));
+
+  return [...ticketItems, ...invoiceItems]
+    .sort((a, b) => dateValue(b.date) - dateValue(a.date))
+    .slice(0, 8);
+}
+
+function buildDashboard({
+  tickets = [],
+  facturas = [],
+  clientes = [],
+  users = [],
+  warnings = [],
+  cached = false,
+  stale = false,
+} = {}) {
+  const role = getCurrentRole();
+  const admin = role === "admin";
+  const user = getCurrentUser();
+  const loadedAt = nowIso();
+
+  const ticketRows = safeArray(tickets);
+  const invoiceRows = safeArray(facturas);
+  const clientRows = admin ? safeArray(clientes) : [];
+  const userRows = admin ? safeArray(users) : [];
+  const domainWarnings = safeArray(warnings).filter(Boolean);
+
+  const paidTotal = invoiceRows.reduce((sum, invoice) => {
+    return sum + (invoicePaid(invoice) ? invoiceAmount(invoice) : 0);
+  }, 0);
+
+  const dashboard = {
+    role,
+    admin,
+    user,
+
+    tickets: ticketRows,
+    incidencias: ticketRows,
+
+    facturas: invoiceRows,
+    invoices: invoiceRows,
+
+    clientes: clientRows,
+    clients: clientRows,
+
+    users: userRows,
+    usuarios: userRows,
+
+    summary: {
+      tickets: ticketRows.length,
+      incidencias: ticketRows.length,
+
+      facturas: invoiceRows.length,
+      invoices: invoiceRows.length,
+
+      clientes: clientRows.length,
+      clients: clientRows.length,
+
+      users: userRows.length,
+      usuarios: userRows.length,
+
+      paidTotal,
+      currency: invoiceCurrency(invoiceRows[0]),
+    },
+
+    activity: buildActivity({
+      tickets: ticketRows,
+      facturas: invoiceRows,
+    }),
+
+    warnings: domainWarnings,
+    partial: domainWarnings.length > 0,
+
+    cached,
+    stale,
+
+    updatedAt: loadedAt,
+    loadedAt,
+
+    cache: {
+      hydrated: false,
+      key: cacheKey(),
+      ageMs: 0,
+      ttlMs: HOME_CACHE_TTL_MS,
+    },
+  };
+
+  setCache(dashboard);
+
+  return cloneDashboard(dashboard, {
+    cached,
+    stale,
+  });
+}
+
+async function fetchDashboard(options = {}) {
+  const admin = isAdmin();
+
+  const [
+    ticketsResult,
+    facturasResult,
+    clientesResult,
+    usersResult,
+  ] = await Promise.all([
+    loadDomain("incidencias", () => loadIncidenciasForHome(options)),
+    loadDomain("facturas", () => loadFacturasForHome(options)),
+    loadDomain("clientes", () => loadClientesForHome({
+      ...options,
+      skip: !admin,
+    })),
+    loadDomain("usuarios", () => loadUsersForHome({
+      ...options,
+      skip: !admin,
+    })),
+  ]);
+
+  const primaryErrors = [
+    ticketsResult.error,
+    facturasResult.error,
+  ].filter(Boolean);
+
+  if (primaryErrors.length === 2) {
+    const error = new Error("No se pudo cargar el resumen del Home.");
+    error.status = primaryErrors[0]?.status || null;
+    error.code = primaryErrors[0]?.code || "HOME_PRIMARY_LOAD_FAILED";
+    error.details = primaryErrors;
+    throw error;
+  }
+
+  const warnings = [
+    ticketsResult.error,
+    facturasResult.error,
+    clientesResult.error,
+    usersResult.error,
+  ].filter(Boolean);
+
+  return buildDashboard({
+    tickets: ticketsResult.items,
+    facturas: facturasResult.items,
+    clientes: admin ? clientesResult.items : [],
+    users: admin ? usersResult.items : [],
+    warnings,
+    cached: false,
+    stale: false,
+  });
+}
+
+/* =========================================================
+   PUBLIC API
+========================================================= */
+
+export async function loadHomeDashboard(options = {}) {
+  const force = options.force === true || options.forceRefresh === true;
+  const useCache = options.cache !== false && options.noCache !== true;
+  const returnStaleOnError = options.returnStaleOnError !== false;
+
+  if (!force && useCache && isCacheFresh(options)) {
+    return getCachedDashboard({
+      stale: false,
+    });
+  }
+
+  if (!force && inFlightPromise) {
+    return inFlightPromise;
+  }
+
+  loading = true;
+  lastError = null;
+
+  inFlightPromise = (async () => {
+    try {
+      return await fetchDashboard(options);
+    } catch (error) {
+      lastError = {
+        message: redact(error?.message || "No se pudo cargar el Home."),
+        status: errorStatus(error) || null,
+        code: error?.code || null,
+        at: nowIso(),
+      };
+
+      if (returnStaleOnError && lastDashboard) {
+        return getCachedDashboard({
+          stale: true,
+        }) || cloneDashboard(lastDashboard, {
+          stale: true,
+          error: lastError.message,
+        });
+      }
+
+      throw error;
+    } finally {
+      loading = false;
+      inFlightPromise = null;
+    }
+  })();
+
+  return inFlightPromise;
+}
+
+export function hydrateHomeFromCache() {
+  return getCachedDashboard({
+    stale: false,
+  });
+}
+
+export function hasFreshHomeDashboard(options = {}) {
+  return isCacheFresh(options);
+}
+
+export function getHomeCacheState() {
+  return {
+    hydrated: Boolean(lastDashboard),
+    fresh: isCacheFresh(),
+    key: lastCacheKey,
+    ageMs: cacheAgeMs(),
+    ttlMs: HOME_CACHE_TTL_MS,
+    lastLoadedAt,
+    loading,
+    inFlight: Boolean(inFlightPromise),
+  };
+}
+
+export function getHomeApiSnapshot() {
+  return {
+    version: HOME_API_VERSION,
+
+    loading,
+    inFlight: Boolean(inFlightPromise),
+
+    lastLoadedAt,
+    lastError,
+
+    role: getCurrentRole(),
+    admin: isAdmin(),
+
+    endpoints: HOME_ENDPOINTS,
+
+    cache: {
+      ...getHomeCacheState(),
+      tickets: lastDashboard?.tickets?.length || 0,
+      facturas: lastDashboard?.facturas?.length || 0,
+      clientes: lastDashboard?.clientes?.length || 0,
+      users: lastDashboard?.users?.length || 0,
+    },
+
+    warnings: safeArray(lastDashboard?.warnings),
+
+    policy: {
+      singleHttpLayer: true,
+      domainAggregator: true,
+      reuseIncidenciasApi: true,
+      reuseFacturasApi: true,
+      directAdminFallbackUntilDomainApisExist: true,
+
+      inMemoryCache: true,
+      ttlCache: true,
+      inFlightDedupe: true,
+      staleOnError: true,
+      noEmptyCacheHydration: true,
+      partialDomainTolerance: true,
+
+      noFetch: true,
+      noStore: true,
+      noStorage: true,
+      noDom: true,
+      noRouter: true,
+    },
+  };
+}
+
+/* =========================================================
+   COMPAT API
+========================================================= */
+
+export const HomeApi = {
+  version: HOME_API_VERSION,
+
+  endpoints: HOME_ENDPOINTS,
+
+  loadHomeDashboard,
+  hydrateHomeFromCache,
+
+  hasFreshHomeDashboard,
+  clearHomeDashboardCache,
+  getHomeCacheState,
+
+  getHomeApiSnapshot,
+  getSnapshot: getHomeApiSnapshot,
+  getDebugSnapshot: getHomeApiSnapshot,
+};
+
+export default HomeApi;

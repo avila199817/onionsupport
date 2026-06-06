@@ -5,13 +5,13 @@
    Responsabilidad:
    - Controlador mínimo del topbar.
    - Montar en #topbar-mount / #app-topbar.
-   - Consumir template.js para TODO el DOM visual.
+   - Consumir template.js para el DOM base.
    - Mostrar título de ruta.
    - Ocultarse en rutas públicas/auth.
    - Cachear refs en AppCore.dom.
    - Registrarse en AppCore.
-   - Activar búsqueda local del topbar.
-   - Navegar por SPA delegando en Router/AppCore.
+   - Activar búsqueda local simple.
+   - Delegar navegación en Router/AppCore/evento SPA.
    - Sin Auth real.
    - Sin Router propio.
    - Sin HTTP.
@@ -24,73 +24,57 @@
 import { AppCore } from "../../core/index.js";
 
 import {
-  ROUTES,
-  USER_HOME_PREFIX,
-  buildUserHomeRoute,
-  buildUserScopedRoute,
-  isBlockedRoutePath,
-  normalizeRoutePath,
-  normalizeUserSlug,
-} from "../../core/config.js";
-
-import {
   createTopbarTemplate,
   getTopbarTemplateRefs,
   setTopbarTemplateTitle,
   setTopbarTemplateVisible,
   clearTopbarSearchResults,
-  renderTopbarSearchResults,
-  setTopbarSearchActiveIndex,
   setTopbarSearchExpanded,
 } from "./template.js";
 
-export const TOPBAR_VERSION = "topbar.controller.v2.search";
+export const TOPBAR_VERSION = "topbar.controller.v2.search-safe";
 
 const TOPBAR_ROOT_ID = "app-topbar";
 const TOPBAR_MOUNT_ID = "topbar-mount";
 const APP_TITLE_PREFIX = "Onion";
-const SOURCE = "topbar.search";
 
+const SOURCE = "topbar.search";
 const SEARCH_LIMIT = 8;
 
 const ROLE_ADMIN = "admin";
 const ROLE_USER = "user";
 
-const DEFAULT_SEARCH_ROUTES = Object.freeze([
+const SEARCH_ROUTES = Object.freeze([
   {
     key: "home",
     label: "Home",
     description: "Panel principal",
-    routeKey: "home",
     route: "/",
-    icon: "home",
+    icon: "HM",
     keywords: ["inicio", "dashboard", "panel", "principal"],
   },
   {
     key: "incidencias",
     label: "Incidencias",
     description: "Tickets y solicitudes de soporte",
-    routeKey: "incidencias",
     route: "/incidencias",
-    icon: "incidencias",
+    icon: "IN",
     keywords: ["tickets", "soporte", "solicitudes", "casos", "crear incidencia", "nueva incidencia"],
   },
   {
     key: "facturas",
     label: "Facturas",
     description: "Facturación, importes y pagos",
-    routeKey: "facturas",
     route: "/facturas",
-    icon: "facturas",
+    icon: "FA",
     keywords: ["billing", "pagos", "importe", "facturacion", "invoice"],
   },
   {
     key: "clientes",
     label: "Clientes",
     description: "Administración de clientes",
-    routeKey: "clientes",
     route: "/clientes",
-    icon: "clientes",
+    icon: "CL",
     adminOnly: true,
     keywords: ["clients", "empresas", "cuentas", "administracion"],
   },
@@ -98,9 +82,8 @@ const DEFAULT_SEARCH_ROUTES = Object.freeze([
     key: "usuarios",
     label: "Usuarios",
     description: "Administración de usuarios",
-    routeKey: "usuarios",
     route: "/usuarios",
-    icon: "usuarios",
+    icon: "US",
     adminOnly: true,
     keywords: ["users", "miembros", "permisos", "roles"],
   },
@@ -108,9 +91,8 @@ const DEFAULT_SEARCH_ROUTES = Object.freeze([
     key: "servidor",
     label: "Servidor",
     description: "Estado y configuración del servidor",
-    routeKey: "servidor",
     route: "/servidor",
-    icon: "servidor",
+    icon: "SV",
     adminOnly: true,
     keywords: ["server", "estado", "sistema", "infraestructura"],
   },
@@ -118,18 +100,16 @@ const DEFAULT_SEARCH_ROUTES = Object.freeze([
     key: "cuenta",
     label: "Cuenta",
     description: "Perfil y datos de cuenta",
-    routeKey: "cuenta",
     route: "/cuenta",
-    icon: "cuenta",
+    icon: "CU",
     keywords: ["perfil", "profile", "mi cuenta", "account"],
   },
   {
     key: "ajustes",
     label: "Ajustes",
     description: "Preferencias y configuración",
-    routeKey: "ajustes",
     route: "/ajustes",
-    icon: "ajustes",
+    icon: "AJ",
     keywords: ["settings", "configuracion", "preferencias"],
   },
 ]);
@@ -242,39 +222,30 @@ function safeInternalPath(value = "", fallback = "") {
   if (/[\r\n\t\\]/.test(raw)) return fallback;
   if (hasSensitiveQuery(raw)) return fallback;
 
-  let normalized = raw;
-
-  try {
-    normalized = normalizeRoutePath(raw) || raw;
-  } catch {
-    normalized = raw;
-  }
-
-  if (!normalized.startsWith("/")) return fallback;
-  if (normalized.startsWith("//")) return fallback;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(normalized)) return fallback;
-  if (/[\r\n\t\\]/.test(normalized)) return fallback;
-  if (hasSensitiveQuery(normalized)) return fallback;
-
-  try {
-    if (isBlockedRoutePath(normalized)) return fallback;
-  } catch {
+  if (
+    raw === "/api" ||
+    raw.startsWith("/api/") ||
+    raw === "/.auth" ||
+    raw.startsWith("/.auth/") ||
+    raw === "/docs" ||
+    raw.startsWith("/docs/")
+  ) {
     return fallback;
   }
 
-  return normalized;
+  return raw;
 }
 
-function routeFromQuery(value = "") {
-  const raw = cleanText(value, "");
+function directRouteFromQuery(value = "") {
+  const query = cleanText(value, "");
 
-  if (!raw.startsWith("/")) return "";
+  if (!query.startsWith("/")) return "";
 
-  return safeInternalPath(raw, "");
+  return safeInternalPath(query, "");
 }
 
 /* =========================================================
-   CORE / USER / ROUTER
+   CORE / ROLE / ROUTER
 ========================================================= */
 
 function getCoreState() {
@@ -340,69 +311,6 @@ function getCurrentRole() {
 
 function isAdmin() {
   return getCurrentRole() === ROLE_ADMIN;
-}
-
-function currentPath() {
-  const state = getCoreState();
-
-  if (typeof state.canonicalPath === "string" && state.canonicalPath) {
-    return cleanText(state.canonicalPath, "/");
-  }
-
-  if (typeof state.route === "string" && state.route) {
-    return cleanText(state.route, "/");
-  }
-
-  if (typeof state.path === "string" && state.path) {
-    return cleanText(state.path, "/");
-  }
-
-  if (!isBrowser()) return "/";
-
-  return cleanText(window.location.pathname || "/", "/");
-}
-
-function currentUserSlug() {
-  const user = getCurrentUser() || {};
-  const path = currentPath();
-  const pathMatch = path.match(/^\/@([^/]+)/);
-
-  return normalizeUserSlug(
-    first(
-      pathMatch?.[1],
-      user.slug,
-      user.publicSlug,
-      user.lookup?.slug,
-      user.profile?.slug,
-      user.username,
-      user.userId,
-      user.id,
-      ""
-    )
-  );
-}
-
-function scopedPrivateHref(path = "") {
-  const canonical = safeInternalPath(path, "");
-
-  if (!canonical) return "";
-  if (canonical.startsWith(`${USER_HOME_PREFIX}`)) return canonical;
-
-  const slug = currentUserSlug();
-
-  if (!slug) return canonical;
-
-  try {
-    if (canonical === "/") {
-      return buildUserHomeRoute(slug) || `${USER_HOME_PREFIX}${slug}`;
-    }
-
-    return buildUserScopedRoute(slug, canonical);
-  } catch {
-    return canonical === "/"
-      ? `${USER_HOME_PREFIX}${slug}`
-      : `${USER_HOME_PREFIX}${slug}${canonical}`;
-  }
 }
 
 function getRouter(context = {}) {
@@ -494,6 +402,7 @@ function clear(node = null) {
 
 function eventElement(target = null) {
   if (!target) return null;
+
   return target.nodeType === 3 ? target.parentElement : target;
 }
 
@@ -519,6 +428,27 @@ function getMount() {
 
 function getRefs() {
   return getTopbarTemplateRefs(root);
+}
+
+function createElement(tag = "div", options = {}) {
+  const node = document.createElement(tag);
+
+  if (options.className) {
+    node.className = options.className;
+  }
+
+  if (options.textContent !== undefined && options.textContent !== null) {
+    node.textContent = String(options.textContent);
+  }
+
+  for (const [key, value] of Object.entries(options.attrs || {})) {
+    if (!key) continue;
+    if (value === undefined || value === null || value === false) continue;
+
+    node.setAttribute(key, value === true ? "true" : String(value));
+  }
+
+  return node;
 }
 
 function setHidden(node = null, hidden = false) {
@@ -673,6 +603,18 @@ function clearDomCache() {
    ROUTE TITLE
 ========================================================= */
 
+function currentPath() {
+  const state = getCoreState();
+
+  if (state.canonicalPath || state.route || state.path) {
+    return cleanText(state.canonicalPath || state.route || state.path, "/");
+  }
+
+  if (!isBrowser()) return "/";
+
+  return cleanText(window.location.pathname || "/", "/");
+}
+
 function resolveTitleFromPath(path = "/") {
   const clean = cleanText(path, "/").split("?")[0].split("#")[0];
 
@@ -751,59 +693,22 @@ function syncVisibility(options = {}) {
 }
 
 /* =========================================================
-   SEARCH INDEX
+   SEARCH ENGINE
 ========================================================= */
 
-function defaultRouteFor(item = {}) {
-  const routeKey = cleanText(item.routeKey || item.key, "");
-
-  return safeInternalPath(
-    first(
-      routeKey ? ROUTES?.[routeKey] : "",
-      item.route,
-      item.href,
-      item.path,
-      ""
-    ),
-    ""
-  );
-}
-
-function normalizeSearchItem(item = {}, source = "default", order = 0) {
-  const raw = isObject(item) ? item : {};
-
-  const baseRoute = defaultRouteFor(raw);
-  const scoped = raw.scoped === false ? baseRoute : scopedPrivateHref(baseRoute);
-
-  const label = cleanText(raw.label || raw.title || raw.name, "");
-  const key = cleanText(raw.key || raw.id || raw.routeKey || label || scoped, "");
-
-  const requiredRoles = normalizeRoleList(
-    first(raw.requiredRoles, raw.roles, raw.requiredRole, raw.role, [])
-  );
-
-  const adminOnly = Boolean(
-    raw.adminOnly === true ||
-      raw.requiresAdmin === true ||
-      raw.admin === true ||
-      (
-        requiredRoles.includes(ROLE_ADMIN) &&
-        !requiredRoles.includes(ROLE_USER)
-      )
-  );
+function normalizeSearchItem(item = {}, order = 0) {
+  const source = isObject(item) ? item : {};
+  const route = safeInternalPath(source.route || source.href || source.path || "", "");
 
   return {
-    key,
-    label: label || titleCase(scoped),
-    description: cleanText(raw.description || raw.subtitle || raw.text, ""),
-    route: scoped,
-    icon: cleanText(raw.icon || raw.viewKey || raw.routeKey || key, ""),
-    type: cleanText(raw.type || "route", "route"),
-    keywords: safeArray(raw.keywords).map((value) => cleanText(value, "")).filter(Boolean),
-    adminOnly,
-    requiredRoles,
-    hidden: raw.hidden === true || !scoped,
-    source,
+    key: cleanText(source.key || source.id || source.label || route, route),
+    label: cleanText(source.label || source.title || source.name, route),
+    description: cleanText(source.description || source.subtitle || source.text, ""),
+    route,
+    icon: cleanText(source.icon, "").slice(0, 2).toUpperCase(),
+    keywords: safeArray(source.keywords).map((value) => cleanText(value, "")).filter(Boolean),
+    adminOnly: source.adminOnly === true || source.requiresAdmin === true,
+    hidden: source.hidden === true || !route,
     order,
   };
 }
@@ -827,20 +732,15 @@ function coreSearchItems(options = {}) {
 function buildSearchIndex(options = {}) {
   const admin = isAdmin();
 
-  const defaults = DEFAULT_SEARCH_ROUTES.map((item, index) =>
-    normalizeSearchItem(item, "default", index)
-  );
-
+  const defaults = SEARCH_ROUTES.map((item, index) => normalizeSearchItem(item, index));
   const custom = coreSearchItems(options).map((item, index) =>
-    normalizeSearchItem(item, "core", DEFAULT_SEARCH_ROUTES.length + index)
+    normalizeSearchItem(item, SEARCH_ROUTES.length + index)
   );
 
   return uniqueBy([...defaults, ...custom], (item) => `${item.route}:${item.label}`)
     .filter((item) => {
       if (item.hidden) return false;
       if (item.adminOnly && !admin) return false;
-      if (!item.route) return false;
-
       return true;
     });
 }
@@ -863,10 +763,8 @@ function scoreSearchItem(item = {}, query = "") {
 
   if (label === q) score += 160;
   if (route === q) score += 150;
-
   if (label.startsWith(q)) score += 100;
   if (route.startsWith(q)) score += 82;
-
   if (label.includes(q)) score += 64;
   if (route.includes(q)) score += 46;
   if (keywords.includes(q)) score += 42;
@@ -884,7 +782,7 @@ function scoreSearchItem(item = {}, query = "") {
 }
 
 function directRouteResult(query = "") {
-  const route = routeFromQuery(query);
+  const route = directRouteFromQuery(query);
 
   if (!route) return null;
 
@@ -893,10 +791,10 @@ function directRouteResult(query = "") {
     label: `Ir a ${route}`,
     description: "Ruta directa",
     route,
-    icon: "route",
-    type: "direct",
+    icon: "→",
     keywords: [],
-    source: "direct",
+    adminOnly: false,
+    hidden: false,
     order: -1,
     score: 999,
   };
@@ -908,6 +806,7 @@ function searchTopbar(query = "", options = {}) {
   if (!q) return [];
 
   const direct = directRouteResult(q);
+
   const index = buildSearchIndex(options)
     .map((item) => ({
       ...item,
@@ -925,30 +824,181 @@ function searchTopbar(query = "", options = {}) {
 }
 
 /* =========================================================
-   SEARCH UI / ACTIONS
+   SEARCH RENDER
 ========================================================= */
 
-function renderSearch(query = "") {
-  if (!root) return false;
+function createResultNode(item = {}, index = 0) {
+  const selected = index === activeSearchIndex;
+  const route = safeInternalPath(item.route, "");
+
+  const node = createElement(route ? "a" : "button", {
+    className: [
+      "topbar-search-result",
+      selected ? "is-active" : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    attrs: {
+      id: `topbar-search-option-${index}`,
+      role: "option",
+      tabindex: "-1",
+      href: route || null,
+      type: route ? null : "button",
+      "aria-selected": selected ? "true" : "false",
+      "data-spa": route ? "true" : null,
+      "data-route": route || null,
+      "data-href": route || null,
+      "data-topbar-search-result": "true",
+      "data-topbar-search-result-index": String(index),
+    },
+  });
+
+  const icon = createElement("span", {
+    className: "topbar-search-result-icon",
+    textContent: cleanText(item.icon, "").slice(0, 2).toUpperCase() || "→",
+    attrs: {
+      "aria-hidden": "true",
+    },
+  });
+
+  const copy = createElement("span", {
+    className: "topbar-search-result-copy",
+  });
+
+  copy.appendChild(
+    createElement("span", {
+      className: "topbar-search-result-label",
+      textContent: cleanText(item.label, "Resultado"),
+    })
+  );
+
+  if (item.description) {
+    copy.appendChild(
+      createElement("span", {
+        className: "topbar-search-result-description",
+        textContent: cleanText(item.description, ""),
+      })
+    );
+  }
+
+  if (route) {
+    copy.appendChild(
+      createElement("span", {
+        className: "topbar-search-result-route",
+        textContent: route,
+        attrs: {
+          "aria-hidden": "true",
+        },
+      })
+    );
+  }
+
+  node.appendChild(icon);
+  node.appendChild(copy);
+
+  return node;
+}
+
+function createEmptyNode(query = "") {
+  const empty = createElement("div", {
+    className: "topbar-search-empty",
+    attrs: {
+      role: "status",
+      "data-topbar-search-empty": "true",
+    },
+  });
+
+  empty.appendChild(
+    createElement("span", {
+      className: "topbar-search-empty-title",
+      textContent: "Sin resultados",
+    })
+  );
+
+  empty.appendChild(
+    createElement("span", {
+      className: "topbar-search-empty-text",
+      textContent: query
+        ? `No hay coincidencias para “${query}”.`
+        : "Escribe para buscar en la aplicación.",
+    })
+  );
+
+  return empty;
+}
+
+function setActiveSearch(index = 0) {
+  const refs = getRefs();
+  const items = Array.from(
+    refs.searchResults?.querySelectorAll?.("[data-topbar-search-result='true']") || []
+  );
+
+  if (!items.length) {
+    activeSearchIndex = -1;
+    refs.searchInput?.removeAttribute?.("aria-activedescendant");
+    return false;
+  }
+
+  activeSearchIndex = Math.max(0, Math.min(Number(index) || 0, items.length - 1));
+
+  items.forEach((item, itemIndex) => {
+    const selected = itemIndex === activeSearchIndex;
+
+    item.classList.toggle("is-active", selected);
+    item.setAttribute("aria-selected", selected ? "true" : "false");
+  });
+
+  const activeItem = items[activeSearchIndex];
+
+  if (activeItem?.id && refs.searchInput) {
+    refs.searchInput.setAttribute("aria-activedescendant", activeItem.id);
+  }
+
+  return true;
+}
+
+function renderSearchResults(query = "") {
+  const refs = getRefs();
+
+  if (!refs.searchResults) return false;
 
   const clean = cleanText(query, "");
-
+  latestSearchResults = clean ? searchTopbar(clean, lastOptions) : [];
+  activeSearchIndex = latestSearchResults.length ? 0 : -1;
   lastSearchQuery = clean;
 
+  refs.searchResults.replaceChildren();
+
   if (!clean) {
-    latestSearchResults = [];
-    activeSearchIndex = -1;
     clearTopbarSearchResults(root);
     return true;
   }
 
-  latestSearchResults = searchTopbar(clean, lastOptions);
-  activeSearchIndex = latestSearchResults.length ? 0 : -1;
+  refs.searchResults.hidden = false;
+  refs.searchResults.setAttribute("aria-hidden", "false");
+  refs.searchResults.classList.add("active");
+  refs.searchResults.dataset.searchOpen = "true";
+  refs.searchResults.dataset.searchQuery = clean;
+  refs.searchResults.dataset.searchCount = String(latestSearchResults.length);
 
-  renderTopbarSearchResults(root, latestSearchResults, {
-    query: clean,
-    activeIndex: activeSearchIndex,
+  refs.search?.classList?.add?.("is-search-open");
+  refs.root?.classList?.add?.("is-search-focused");
+  refs.searchInput?.setAttribute?.("aria-expanded", "true");
+
+  if (!latestSearchResults.length) {
+    refs.searchResults.appendChild(createEmptyNode(clean));
+    refs.searchInput?.removeAttribute?.("aria-activedescendant");
+    return true;
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  latestSearchResults.forEach((item, index) => {
+    fragment.appendChild(createResultNode(item, index));
   });
+
+  refs.searchResults.appendChild(fragment);
+  setActiveSearch(activeSearchIndex);
 
   return true;
 }
@@ -956,22 +1006,7 @@ function renderSearch(query = "") {
 function moveActiveSearch(delta = 0) {
   if (!latestSearchResults.length) return false;
 
-  const max = latestSearchResults.length - 1;
-  const next = Math.max(0, Math.min(activeSearchIndex + delta, max));
-
-  activeSearchIndex = next;
-  setTopbarSearchActiveIndex(root, next);
-
-  return true;
-}
-
-function setActiveSearch(index = 0) {
-  if (!latestSearchResults.length) return false;
-
-  activeSearchIndex = Math.max(0, Math.min(Number(index) || 0, latestSearchResults.length - 1));
-  setTopbarSearchActiveIndex(root, activeSearchIndex);
-
-  return true;
+  return setActiveSearch(activeSearchIndex + delta);
 }
 
 async function openSearchResult(result = null) {
@@ -1004,9 +1039,14 @@ function clearSearch(options = {}) {
   activeSearchIndex = -1;
   lastSearchQuery = "";
 
-  clearTopbarSearchResults(root, {
-    input: opts.input === true,
-  });
+  clearTopbarSearchResults(root);
+
+  refs.search?.classList?.remove?.("is-search-open");
+  refs.root?.classList?.remove?.("is-search-focused");
+
+  if (opts.input === true && refs.searchInput) {
+    refs.searchInput.value = "";
+  }
 
   if (opts.focus === true) {
     try {
@@ -1040,16 +1080,14 @@ function onSubmit(event) {
   }
 
   if (!latestSearchResults.length || query !== lastSearchQuery) {
-    renderSearch(query);
+    renderSearchResults(query);
   }
 
   void openSearchResult();
 }
 
 function onInput(event) {
-  const value = cleanText(event.target?.value || "", "");
-
-  renderSearch(value);
+  renderSearchResults(event.target?.value || "");
 }
 
 function onFocus() {
@@ -1057,7 +1095,9 @@ function onFocus() {
   const value = cleanText(refs.searchInput?.value || "", "");
 
   if (value) {
-    renderSearch(value);
+    renderSearchResults(value);
+  } else {
+    setTopbarSearchExpanded(root, false);
   }
 }
 
@@ -1079,7 +1119,7 @@ function onKeydown(event) {
     event.preventDefault();
 
     if (!latestSearchResults.length) {
-      renderSearch(refs.searchInput?.value || "");
+      renderSearchResults(refs.searchInput?.value || "");
     } else {
       moveActiveSearch(1);
     }
@@ -1091,7 +1131,7 @@ function onKeydown(event) {
     event.preventDefault();
 
     if (!latestSearchResults.length) {
-      renderSearch(refs.searchInput?.value || "");
+      renderSearchResults(refs.searchInput?.value || "");
     } else {
       moveActiveSearch(-1);
     }
@@ -1154,6 +1194,8 @@ function onDocumentPointerDown(event) {
   if (!refs.search || contains(refs.search, target)) return;
 
   clearTopbarSearchResults(root);
+  refs.search?.classList?.remove?.("is-search-open");
+  refs.root?.classList?.remove?.("is-search-focused");
 }
 
 function bindEvents() {
@@ -1297,8 +1339,11 @@ function init(options = {}) {
     visible: false,
   });
 
-  setTopbarTemplateVisible(root, false);
-  setTopbarSearchExpanded(root, false);
+  if (root) {
+    setTopbarTemplateVisible(root, false);
+    setTopbarSearchExpanded(root, false);
+  }
+
   syncMountVisibility(true);
   cacheDom();
 
@@ -1401,16 +1446,17 @@ export const TopbarUI = {
 
   search: (query = "") => {
     ensureRoot(lastOptions);
-    renderSearch(query);
+    renderSearchResults(query);
     return latestSearchResults;
   },
 
   clearSearch,
 
-  getSearchIndex: (options = {}) => buildSearchIndex({
-    ...lastOptions,
-    ...options,
-  }),
+  getSearchIndex: (options = {}) =>
+    buildSearchIndex({
+      ...lastOptions,
+      ...options,
+    }),
 
   getDom: () => {
     const refs = getRefs();

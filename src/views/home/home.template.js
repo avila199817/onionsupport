@@ -23,7 +23,7 @@
    - Sin handlers inline.
 ========================================================= */
 
-export const HOME_TEMPLATE_VERSION = "home.template.dashboard.v3.clean";
+export const HOME_TEMPLATE_VERSION = "home.template.dashboard.v4.no-eyebrow";
 
 const ACTIONS = Object.freeze({
   RETRY: "retry",
@@ -56,15 +56,6 @@ const STATUS_LABELS = Object.freeze({
   overdue: "Vencida",
   active: "Activo",
   inactive: "Inactivo",
-});
-
-const PRIORITY_LABELS = Object.freeze({
-  low: "Baja",
-  normal: "Normal",
-  medium: "Media",
-  high: "Alta",
-  urgent: "Urgente",
-  critical: "Crítica",
 });
 
 /* =========================================================
@@ -447,8 +438,6 @@ function header(vm) {
         ${avatar(vm.user)}
 
         <div class="home-header-copy">
-          <p class="home-eyebrow">${vm.admin ? "Panel administrador" : "Panel privado"}</p>
-
           <h1>Hola, ${escapeHtml(vm.user.displayName)}</h1>
 
           <p class="home-subtitle">

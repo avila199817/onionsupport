@@ -2,23 +2,18 @@
    Onion Support - Topbar UI
    Archivo: /src/ui/topbar/index.js
 
+   FULL PRO SAAS PANEL · BACKEND SEARCH · GOD MODE
+
    Responsabilidad:
-   - Controlador mínimo del topbar.
-   - Montar en #topbar-mount / #app-topbar.
-   - Consumir template.js para el DOM base.
+   - Montar topbar en #topbar-mount / #app-topbar.
    - Mostrar título de ruta.
    - Ocultarse en rutas públicas/auth.
-   - Cachear refs en AppCore.dom.
-   - Registrarse en AppCore.
-   - Activar búsqueda local simple.
-   - Delegar navegación en Router/AppCore/evento SPA.
-   - Sin Auth real.
-   - Sin Router propio.
-   - Sin HTTP.
-   - Sin Toast.
-   - Sin Store.
-   - Sin logout.
-   - Sin sidebar bridge.
+   - Consumir /api/search del backend.
+   - Pintar resultados remotos: facturas, tickets, clientes, usuarios y rutas.
+   - Mantener fallback local de navegación.
+   - Debounce, AbortController, cache corta y control anti-race.
+   - Navegación SPA segura.
+   - Sin exponer tokens, secretos ni rutas externas.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -30,19 +25,58 @@ import {
   setTopbarTemplateVisible,
   clearTopbarSearchResults,
   setTopbarSearchExpanded,
+  renderTopbarSearchResults,
+  setTopbarSearchActiveIndex,
 } from "./template.js";
 
-export const TOPBAR_VERSION = "topbar.controller.v2.search-safe";
+export const TOPBAR_VERSION = "topbar.controller.backend-search.v4";
 
 const TOPBAR_ROOT_ID = "app-topbar";
 const TOPBAR_MOUNT_ID = "topbar-mount";
 const APP_TITLE_PREFIX = "Onion";
 
 const SOURCE = "topbar.search";
-const SEARCH_LIMIT = 8;
+
+const SEARCH_ENDPOINT_DEFAULT = "/api/search";
+const SEARCH_LIMIT = 10;
+const BACKEND_LIMIT = 12;
+const BACKEND_DEBOUNCE_MS = 150;
+const BACKEND_TIMEOUT_MS = 9000;
+const BACKEND_CACHE_TTL_MS = 25_000;
+const BACKEND_CACHE_MAX = 80;
 
 const ROLE_ADMIN = "admin";
 const ROLE_USER = "user";
+
+const SEARCH_STATUS = Object.freeze({
+  IDLE: "idle",
+  LOADING: "loading",
+  READY: "ready",
+  EMPTY: "empty",
+  ERROR: "error",
+});
+
+const RESULT_TYPES = Object.freeze({
+  NAV: "nav",
+  SETTINGS: "settings",
+  CLIENTE: "cliente",
+  USER: "user",
+  INCIDENCIA: "incidencia",
+  FACTURA: "factura",
+  HARDWARE: "hardware",
+  GENERAL: "general",
+});
+
+const TYPE_ICON = Object.freeze({
+  [RESULT_TYPES.NAV]: "→",
+  [RESULT_TYPES.SETTINGS]: "AJ",
+  [RESULT_TYPES.CLIENTE]: "CL",
+  [RESULT_TYPES.USER]: "US",
+  [RESULT_TYPES.INCIDENCIA]: "IN",
+  [RESULT_TYPES.FACTURA]: "FA",
+  [RESULT_TYPES.HARDWARE]: "HW",
+  [RESULT_TYPES.GENERAL]: "⌕",
+});
 
 const SEARCH_ROUTES = Object.freeze([
   {
@@ -51,7 +85,7 @@ const SEARCH_ROUTES = Object.freeze([
     description: "Panel principal",
     route: "/",
     icon: "HM",
-    keywords: ["inicio", "dashboard", "panel", "principal"],
+    keywords: ["inicio", "dashboard", "panel", "principal", "home"],
   },
   {
     key: "incidencias",
@@ -59,15 +93,38 @@ const SEARCH_ROUTES = Object.freeze([
     description: "Tickets y solicitudes de soporte",
     route: "/incidencias",
     icon: "IN",
-    keywords: ["tickets", "soporte", "solicitudes", "casos", "crear incidencia", "nueva incidencia"],
+    keywords: [
+      "incidencias",
+      "incidencia",
+      "ticket",
+      "tickets",
+      "soporte",
+      "solicitudes",
+      "casos",
+      "crear incidencia",
+      "nueva incidencia",
+      "mis tickets",
+      "mis incidencias",
+    ],
   },
   {
     key: "facturas",
     label: "Facturas",
-    description: "Facturación, importes y pagos",
+    description: "Facturación, importes, PDFs y pagos",
     route: "/facturas",
     icon: "FA",
-    keywords: ["billing", "pagos", "importe", "facturacion", "invoice"],
+    keywords: [
+      "factura",
+      "facturas",
+      "billing",
+      "pagos",
+      "importe",
+      "facturacion",
+      "facturación",
+      "invoice",
+      "pdf",
+      "mis facturas",
+    ],
   },
   {
     key: "clientes",
@@ -76,7 +133,17 @@ const SEARCH_ROUTES = Object.freeze([
     route: "/clientes",
     icon: "CL",
     adminOnly: true,
-    keywords: ["clients", "empresas", "cuentas", "administracion"],
+    keywords: [
+      "cliente",
+      "clientes",
+      "clients",
+      "empresas",
+      "cuentas",
+      "administracion",
+      "administración",
+      "perfil cliente",
+      "ficha cliente",
+    ],
   },
   {
     key: "usuarios",
@@ -85,7 +152,15 @@ const SEARCH_ROUTES = Object.freeze([
     route: "/usuarios",
     icon: "US",
     adminOnly: true,
-    keywords: ["users", "miembros", "permisos", "roles"],
+    keywords: [
+      "usuario",
+      "usuarios",
+      "users",
+      "miembros",
+      "permisos",
+      "roles",
+      "buscar usuario",
+    ],
   },
   {
     key: "servidor",
@@ -94,7 +169,7 @@ const SEARCH_ROUTES = Object.freeze([
     route: "/servidor",
     icon: "SV",
     adminOnly: true,
-    keywords: ["server", "estado", "sistema", "infraestructura"],
+    keywords: ["server", "servidor", "estado", "sistema", "infraestructura"],
   },
   {
     key: "cuenta",
@@ -102,7 +177,15 @@ const SEARCH_ROUTES = Object.freeze([
     description: "Perfil y datos de cuenta",
     route: "/cuenta",
     icon: "CU",
-    keywords: ["perfil", "profile", "mi cuenta", "account"],
+    keywords: [
+      "perfil",
+      "profile",
+      "mi cuenta",
+      "mi perfil",
+      "account",
+      "usuario",
+      "mi usuario",
+    ],
   },
   {
     key: "ajustes",
@@ -110,7 +193,13 @@ const SEARCH_ROUTES = Object.freeze([
     description: "Preferencias y configuración",
     route: "/ajustes",
     icon: "AJ",
-    keywords: ["settings", "configuracion", "preferencias"],
+    keywords: [
+      "settings",
+      "ajustes",
+      "configuracion",
+      "configuración",
+      "preferencias",
+    ],
   },
 ]);
 
@@ -119,9 +208,18 @@ let mounted = false;
 let root = null;
 let cleanupEvents = null;
 let lastOptions = {};
+
 let latestSearchResults = [];
 let activeSearchIndex = -1;
 let lastSearchQuery = "";
+let lastSearchStatus = SEARCH_STATUS.IDLE;
+let lastSearchError = "";
+
+let backendTimer = null;
+let backendSeq = 0;
+let backendAbort = null;
+
+const backendCache = new Map();
 
 /* =========================================================
    BASICS
@@ -172,6 +270,10 @@ function normalizeText(value = "") {
     .toLowerCase();
 }
 
+function normalizeCompact(value = "") {
+  return normalizeText(value).replace(/[^a-z0-9@._\-/#]/gi, "");
+}
+
 function titleCase(value = "") {
   const clean = cleanText(value, "");
 
@@ -200,6 +302,32 @@ function uniqueBy(list = [], keyFn = (item) => item) {
   }
 
   return output;
+}
+
+function clampNumber(value, min, max, fallback = min) {
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) return fallback;
+
+  return Math.min(Math.max(n, min), max);
+}
+
+function truncate(value = "", max = 180) {
+  const text = cleanText(value, "");
+
+  if (text.length <= max) return text;
+
+  return `${text.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function callMaybe(fn, ...args) {
+  if (!isFunction(fn)) return null;
+
+  try {
+    return fn(...args);
+  } catch {
+    return null;
+  }
 }
 
 /* =========================================================
@@ -236,12 +364,35 @@ function safeInternalPath(value = "", fallback = "") {
   return raw;
 }
 
+function safeFetchUrl(value = "") {
+  const raw = cleanText(value, "");
+
+  if (!raw) return "";
+
+  if (raw.startsWith("/")) return raw;
+
+  try {
+    const parsed = new URL(raw);
+
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+    if (hasSensitiveQuery(parsed.search)) return "";
+
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
 function directRouteFromQuery(value = "") {
   const query = cleanText(value, "");
 
   if (!query.startsWith("/")) return "";
 
   return safeInternalPath(query, "");
+}
+
+function encodeParam(value = "") {
+  return encodeURIComponent(cleanText(value, ""));
 }
 
 /* =========================================================
@@ -269,8 +420,8 @@ function getCurrentUser() {
 function normalizeRole(value = "") {
   const role = cleanText(value, "").toLowerCase();
 
-  if (role === ROLE_ADMIN) return ROLE_ADMIN;
-  if (role === ROLE_USER) return ROLE_USER;
+  if (["admin", "superadmin", "owner", "root"].includes(role)) return ROLE_ADMIN;
+  if (["user", "usuario", "client", "cliente"].includes(role)) return ROLE_USER;
 
   return "";
 }
@@ -294,7 +445,7 @@ function getCurrentRole() {
   const user = getCurrentUser() || {};
 
   const roles = normalizeRoleList([
-    AppCore.getCurrentRole?.(),
+    callMaybe(AppCore.getCurrentRole?.bind?.(AppCore) || AppCore.getCurrentRole),
     state.role,
     state.rol,
     state.roles,
@@ -313,13 +464,30 @@ function isAdmin() {
   return getCurrentRole() === ROLE_ADMIN;
 }
 
+function getCurrentUserId() {
+  const state = getCoreState();
+  const user = getCurrentUser() || {};
+
+  return cleanText(
+    first(
+      user.userId,
+      user.uid,
+      user.id,
+      user.sub,
+      state.userId,
+      state.uid
+    ),
+    ""
+  );
+}
+
 function getRouter(context = {}) {
   return (
     context.Router ||
     context.router ||
     AppCore.router ||
     AppCore.Router ||
-    AppCore.getModule?.("router") ||
+    callMaybe(AppCore.getModule?.bind?.(AppCore), "router") ||
     null
   );
 }
@@ -430,27 +598,6 @@ function getRefs() {
   return getTopbarTemplateRefs(root);
 }
 
-function createElement(tag = "div", options = {}) {
-  const node = document.createElement(tag);
-
-  if (options.className) {
-    node.className = options.className;
-  }
-
-  if (options.textContent !== undefined && options.textContent !== null) {
-    node.textContent = String(options.textContent);
-  }
-
-  for (const [key, value] of Object.entries(options.attrs || {})) {
-    if (!key) continue;
-    if (value === undefined || value === null || value === false) continue;
-
-    node.setAttribute(key, value === true ? "true" : String(value));
-  }
-
-  return node;
-}
-
 function setHidden(node = null, hidden = false) {
   if (!node) return false;
 
@@ -528,11 +675,15 @@ function ensureRoot(options = {}) {
     null;
 
   if (current) {
-    root = current;
-    bindEvents();
-    cacheDom();
-    mounted = true;
-    return root;
+    const refs = getTopbarTemplateRefs(current);
+
+    if (refs.title && refs.searchInput && refs.searchResults) {
+      root = current;
+      bindEvents();
+      cacheDom();
+      mounted = true;
+      return root;
+    }
   }
 
   const topbar = createTopbarTemplate({
@@ -540,7 +691,10 @@ function ensureRoot(options = {}) {
     title: resolveRouteTitle(options),
     visible: options.visible === true,
     search: options.search !== false,
-    searchOptions: options.searchOptions || {},
+    searchOptions: {
+      placeholder: "Buscar facturas, tickets, clientes…",
+      ...(options.searchOptions || {}),
+    },
   });
 
   return mountRoot(topbar);
@@ -693,8 +847,303 @@ function syncVisibility(options = {}) {
 }
 
 /* =========================================================
-   SEARCH ENGINE
+   BACKEND CONFIG
 ========================================================= */
+
+function readWindowConfig(...names) {
+  if (!isBrowser()) return "";
+
+  const buckets = [
+    window.ONION_CONFIG,
+    window.__ONION_CONFIG__,
+    window.APP_CONFIG,
+    window.__APP_CONFIG__,
+    window.__ENV__,
+    window.env,
+  ].filter(isObject);
+
+  for (const name of names) {
+    if (!name) continue;
+
+    if (window[name] !== undefined && window[name] !== null) {
+      return window[name];
+    }
+
+    for (const bucket of buckets) {
+      if (bucket[name] !== undefined && bucket[name] !== null) {
+        return bucket[name];
+      }
+    }
+  }
+
+  return "";
+}
+
+function stripTrailingSlash(value = "") {
+  return cleanText(value, "").replace(/\/+$/, "");
+}
+
+function getCoreConfig() {
+  const state = getCoreState();
+
+  return {
+    ...(isObject(AppCore.config) ? AppCore.config : {}),
+    ...(isObject(AppCore.env) ? AppCore.env : {}),
+    ...(isObject(state.config) ? state.config : {}),
+    ...(isObject(state.env) ? state.env : {}),
+  };
+}
+
+function resolveApiBase(options = {}) {
+  const config = getCoreConfig();
+
+  const base = cleanText(
+    first(
+      options.apiBaseUrl,
+      options.apiBase,
+      options.baseUrl,
+      options.backendUrl,
+      config.apiBaseUrl,
+      config.apiBase,
+      config.backendUrl,
+      readWindowConfig(
+        "ONION_API_BASE_URL",
+        "API_BASE_URL",
+        "VITE_API_BASE_URL",
+        "apiBaseUrl",
+        "apiBase",
+        "backendUrl"
+      )
+    ),
+    ""
+  );
+
+  if (!base) return "";
+
+  if (base.startsWith("/")) {
+    return stripTrailingSlash(base);
+  }
+
+  try {
+    const parsed = new URL(base);
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+    return stripTrailingSlash(parsed.toString());
+  } catch {
+    return "";
+  }
+}
+
+function resolveSearchEndpoint(options = {}) {
+  const config = getCoreConfig();
+
+  const endpoint = cleanText(
+    first(
+      options.searchEndpoint,
+      options.searchUrl,
+      options.searchApiUrl,
+      config.searchEndpoint,
+      config.searchUrl,
+      config.searchApiUrl,
+      readWindowConfig(
+        "SEARCH_ENDPOINT",
+        "SEARCH_URL",
+        "searchEndpoint",
+        "searchUrl"
+      ),
+      SEARCH_ENDPOINT_DEFAULT
+    ),
+    SEARCH_ENDPOINT_DEFAULT
+  );
+
+  const safeEndpoint = safeFetchUrl(endpoint) || SEARCH_ENDPOINT_DEFAULT;
+  const apiBase = resolveApiBase(options);
+
+  if (/^https?:\/\//i.test(safeEndpoint)) {
+    return safeEndpoint;
+  }
+
+  if (apiBase && safeEndpoint.startsWith("/")) {
+    return `${apiBase}${safeEndpoint}`;
+  }
+
+  return safeEndpoint.startsWith("/") ? safeEndpoint : `/${safeEndpoint}`;
+}
+
+function getAuthToken(options = {}) {
+  const state = getCoreState();
+
+  return cleanText(
+    first(
+      options.accessToken,
+      options.token,
+      callMaybe(AppCore.auth?.getAccessToken?.bind?.(AppCore.auth)),
+      callMaybe(AppCore.auth?.getToken?.bind?.(AppCore.auth)),
+      callMaybe(AppCore.getAccessToken?.bind?.(AppCore)),
+      callMaybe(AppCore.getToken?.bind?.(AppCore)),
+      state.accessToken,
+      state.authToken,
+      state.token
+    ),
+    ""
+  );
+}
+
+function buildSearchHeaders(options = {}) {
+  const headers = new Headers();
+
+  headers.set("Accept", "application/json");
+  headers.set("X-Requested-With", "XMLHttpRequest");
+  headers.set("X-Search-Source", SOURCE);
+
+  const token = getAuthToken(options);
+
+  if (token) {
+    headers.set(
+      "Authorization",
+      /^Bearer\s+/i.test(token) ? token : `Bearer ${token}`
+    );
+  }
+
+  return headers;
+}
+
+function buildSearchUrl(query = "", options = {}) {
+  const endpoint = resolveSearchEndpoint(options);
+
+  let url;
+
+  try {
+    url = new URL(
+      endpoint,
+      isBrowser() ? window.location.origin : "http://localhost"
+    );
+  } catch {
+    url = new URL(
+      SEARCH_ENDPOINT_DEFAULT,
+      isBrowser() ? window.location.origin : "http://localhost"
+    );
+  }
+
+  url.searchParams.set("q", cleanText(query, ""));
+  url.searchParams.set("limit", String(clampNumber(options.limit, 1, 20, BACKEND_LIMIT)));
+  url.searchParams.set("includeClosed", "true");
+  url.searchParams.set("source", SOURCE);
+
+  const extraParams = isObject(options.searchParams)
+    ? options.searchParams
+    : isObject(options.params)
+      ? options.params
+      : {};
+
+  for (const [key, value] of Object.entries(extraParams)) {
+    if (!key || value === undefined || value === null || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+
+  return url.toString();
+}
+
+/* =========================================================
+   CACHE
+========================================================= */
+
+function buildCacheKey(query = "", options = {}) {
+  return [
+    normalizeText(query),
+    resolveSearchEndpoint(options),
+    getCurrentRole(),
+    getCurrentUserId(),
+  ].join("|");
+}
+
+function getCachedResults(query = "", options = {}) {
+  const key = buildCacheKey(query, options);
+  const entry = backendCache.get(key);
+
+  if (!entry) return null;
+
+  if (Date.now() - entry.at > BACKEND_CACHE_TTL_MS) {
+    backendCache.delete(key);
+    return null;
+  }
+
+  return safeArray(entry.results);
+}
+
+function setCachedResults(query = "", results = [], options = {}) {
+  const key = buildCacheKey(query, options);
+
+  backendCache.set(key, {
+    at: Date.now(),
+    results: safeArray(results),
+  });
+
+  while (backendCache.size > BACKEND_CACHE_MAX) {
+    const firstKey = backendCache.keys().next().value;
+    backendCache.delete(firstKey);
+  }
+
+  return true;
+}
+
+function clearSearchCache() {
+  backendCache.clear();
+  return true;
+}
+
+/* =========================================================
+   LOCAL SEARCH INDEX
+========================================================= */
+
+function normalizeResultType(value = "") {
+  const raw = normalizeCompact(value);
+
+  const map = {
+    nav: RESULT_TYPES.NAV,
+    route: RESULT_TYPES.NAV,
+    ruta: RESULT_TYPES.NAV,
+
+    settings: RESULT_TYPES.SETTINGS,
+    setting: RESULT_TYPES.SETTINGS,
+    ajustes: RESULT_TYPES.SETTINGS,
+    ajuste: RESULT_TYPES.SETTINGS,
+
+    cliente: RESULT_TYPES.CLIENTE,
+    clientes: RESULT_TYPES.CLIENTE,
+    client: RESULT_TYPES.CLIENTE,
+    clients: RESULT_TYPES.CLIENTE,
+    empresa: RESULT_TYPES.CLIENTE,
+
+    user: RESULT_TYPES.USER,
+    users: RESULT_TYPES.USER,
+    usuario: RESULT_TYPES.USER,
+    usuarios: RESULT_TYPES.USER,
+    profile: RESULT_TYPES.USER,
+    perfil: RESULT_TYPES.USER,
+    cuenta: RESULT_TYPES.USER,
+
+    factura: RESULT_TYPES.FACTURA,
+    facturas: RESULT_TYPES.FACTURA,
+    invoice: RESULT_TYPES.FACTURA,
+    invoices: RESULT_TYPES.FACTURA,
+    bill: RESULT_TYPES.FACTURA,
+    billing: RESULT_TYPES.FACTURA,
+
+    incidencia: RESULT_TYPES.INCIDENCIA,
+    incidencias: RESULT_TYPES.INCIDENCIA,
+    ticket: RESULT_TYPES.INCIDENCIA,
+    tickets: RESULT_TYPES.INCIDENCIA,
+    issue: RESULT_TYPES.INCIDENCIA,
+    support: RESULT_TYPES.INCIDENCIA,
+    soporte: RESULT_TYPES.INCIDENCIA,
+
+    hardware: RESULT_TYPES.HARDWARE,
+    device: RESULT_TYPES.HARDWARE,
+    devices: RESULT_TYPES.HARDWARE,
+  };
+
+  return map[raw] || RESULT_TYPES.GENERAL;
+}
 
 function normalizeSearchItem(item = {}, order = 0) {
   const source = isObject(item) ? item : {};
@@ -706,10 +1155,12 @@ function normalizeSearchItem(item = {}, order = 0) {
     description: cleanText(source.description || source.subtitle || source.text, ""),
     route,
     icon: cleanText(source.icon, "").slice(0, 2).toUpperCase(),
+    type: normalizeResultType(source.type || RESULT_TYPES.NAV),
     keywords: safeArray(source.keywords).map((value) => cleanText(value, "")).filter(Boolean),
     adminOnly: source.adminOnly === true || source.requiresAdmin === true,
     hidden: source.hidden === true || !route,
     order,
+    source: "local",
   };
 }
 
@@ -788,19 +1239,24 @@ function directRouteResult(query = "") {
 
   return {
     key: `route:${route}`,
+    id: `route:${route}`,
     label: `Ir a ${route}`,
+    title: `Ir a ${route}`,
     description: "Ruta directa",
     route,
+    href: route,
     icon: "→",
+    type: RESULT_TYPES.NAV,
     keywords: [],
     adminOnly: false,
     hidden: false,
     order: -1,
     score: 999,
+    source: "local",
   };
 }
 
-function searchTopbar(query = "", options = {}) {
+function searchLocalTopbar(query = "", options = {}) {
   const q = cleanText(query, "");
 
   if (!q) return [];
@@ -824,181 +1280,517 @@ function searchTopbar(query = "", options = {}) {
 }
 
 /* =========================================================
-   SEARCH RENDER
+   BACKEND RESULT NORMALIZATION
 ========================================================= */
 
-function createResultNode(item = {}, index = 0) {
-  const selected = index === activeSearchIndex;
-  const route = safeInternalPath(item.route, "");
+function extractBackendResults(payload) {
+  if (Array.isArray(payload)) return payload;
 
-  const node = createElement(route ? "a" : "button", {
-    className: [
-      "topbar-search-result",
-      selected ? "is-active" : "",
-    ]
-      .filter(Boolean)
-      .join(" "),
-    attrs: {
-      id: `topbar-search-option-${index}`,
-      role: "option",
-      tabindex: "-1",
-      href: route || null,
-      type: route ? null : "button",
-      "aria-selected": selected ? "true" : "false",
-      "data-spa": route ? "true" : null,
-      "data-route": route || null,
-      "data-href": route || null,
-      "data-topbar-search-result": "true",
-      "data-topbar-search-result-index": String(index),
-    },
-  });
+  const data = isObject(payload) ? payload : {};
+  const nested = isObject(data.data) ? data.data : {};
 
-  const icon = createElement("span", {
-    className: "topbar-search-result-icon",
-    textContent: cleanText(item.icon, "").slice(0, 2).toUpperCase() || "→",
-    attrs: {
-      "aria-hidden": "true",
-    },
-  });
-
-  const copy = createElement("span", {
-    className: "topbar-search-result-copy",
-  });
-
-  copy.appendChild(
-    createElement("span", {
-      className: "topbar-search-result-label",
-      textContent: cleanText(item.label, "Resultado"),
-    })
+  return safeArray(
+    first(
+      data.results,
+      data.items,
+      data.resources,
+      data.matches,
+      data.searchResults,
+      nested.results,
+      nested.items,
+      nested.resources,
+      nested.matches,
+      nested.searchResults,
+      []
+    )
   );
-
-  if (item.description) {
-    copy.appendChild(
-      createElement("span", {
-        className: "topbar-search-result-description",
-        textContent: cleanText(item.description, ""),
-      })
-    );
-  }
-
-  if (route) {
-    copy.appendChild(
-      createElement("span", {
-        className: "topbar-search-result-route",
-        textContent: route,
-        attrs: {
-          "aria-hidden": "true",
-        },
-      })
-    );
-  }
-
-  node.appendChild(icon);
-  node.appendChild(copy);
-
-  return node;
 }
 
-function createEmptyNode(query = "") {
-  const empty = createElement("div", {
-    className: "topbar-search-empty",
-    attrs: {
-      role: "status",
-      "data-topbar-search-empty": "true",
-    },
-  });
-
-  empty.appendChild(
-    createElement("span", {
-      className: "topbar-search-empty-title",
-      textContent: "Sin resultados",
-    })
+function getResultId(item = {}) {
+  return cleanText(
+    first(
+      item.entityId,
+      item.facturaId,
+      item.invoiceId,
+      item.ticketId,
+      item.incidenciaId,
+      item.clienteId,
+      item.clientId,
+      item.userId,
+      item.usuarioId,
+      item.id,
+      item.key
+    ),
+    ""
   );
-
-  empty.appendChild(
-    createElement("span", {
-      className: "topbar-search-empty-text",
-      textContent: query
-        ? `No hay coincidencias para “${query}”.`
-        : "Escribe para buscar en la aplicación.",
-    })
-  );
-
-  return empty;
 }
+
+function iconForResult(item = {}, type = RESULT_TYPES.GENERAL) {
+  const icon = cleanText(item.icon || item.avatarInitials || "", "")
+    .slice(0, 2)
+    .toUpperCase();
+
+  if (icon) return icon;
+
+  return TYPE_ICON[type] || TYPE_ICON[RESULT_TYPES.GENERAL];
+}
+
+function routeFromBackendResult(item = {}) {
+  const type = normalizeResultType(
+    first(item.type, item.entity, item.kind, item.entityType)
+  );
+
+  const direct = safeInternalPath(
+    first(item.route, item.href, item.url, item.path, item.to),
+    ""
+  );
+
+  if (direct) {
+    if (!isAdmin() && type === RESULT_TYPES.USER && direct.startsWith("/usuarios")) {
+      return "/cuenta";
+    }
+
+    return direct;
+  }
+
+  const action = normalizeCompact(item.action || item.openAction || item.searchAction);
+  const entityId = getResultId(item);
+  const raw = isObject(item.raw) ? item.raw : {};
+  const payload = isObject(item.payload) ? item.payload : {};
+
+  const currentUserId = getCurrentUserId();
+
+  const facturaId = cleanText(
+    first(
+      item.facturaId,
+      item.invoiceId,
+      raw.facturaId,
+      raw.invoiceId,
+      payload.facturaId,
+      payload.invoiceId,
+      entityId
+    ),
+    ""
+  );
+
+  const ticketId = cleanText(
+    first(
+      item.ticketId,
+      item.incidenciaId,
+      raw.ticketId,
+      raw.incidenciaId,
+      payload.ticketId,
+      payload.incidenciaId,
+      entityId
+    ),
+    ""
+  );
+
+  const clienteId = cleanText(
+    first(
+      item.clienteId,
+      item.clientId,
+      raw.clienteId,
+      raw.clientId,
+      payload.clienteId,
+      payload.clientId,
+      entityId
+    ),
+    ""
+  );
+
+  const userId = cleanText(
+    first(
+      item.userId,
+      item.usuarioId,
+      raw.userId,
+      raw.usuarioId,
+      payload.userId,
+      payload.usuarioId,
+      entityId
+    ),
+    ""
+  );
+
+  if (type === RESULT_TYPES.FACTURA || action.includes("factura")) {
+    return facturaId ? `/facturas?factura=${encodeParam(facturaId)}` : "/facturas";
+  }
+
+  if (
+    type === RESULT_TYPES.INCIDENCIA ||
+    action.includes("incidencia") ||
+    action.includes("ticket")
+  ) {
+    return ticketId ? `/incidencias?ticket=${encodeParam(ticketId)}` : "/incidencias";
+  }
+
+  if (type === RESULT_TYPES.CLIENTE || action.includes("cliente")) {
+    return clienteId ? `/clientes?cliente=${encodeParam(clienteId)}` : "/clientes";
+  }
+
+  if (
+    type === RESULT_TYPES.USER ||
+    action.includes("usuario") ||
+    action.includes("user")
+  ) {
+    if (!isAdmin()) return "/cuenta";
+
+    if (userId && currentUserId && normalizeCompact(userId) === normalizeCompact(currentUserId)) {
+      return "/cuenta";
+    }
+
+    return userId ? `/usuarios?usuario=${encodeParam(userId)}` : "/usuarios";
+  }
+
+  if (type === RESULT_TYPES.SETTINGS) {
+    return "/ajustes";
+  }
+
+  return "/";
+}
+
+function normalizeBackendResult(item = {}, order = 0) {
+  const source = isObject(item) ? item : {};
+  const raw = isObject(source.raw) ? source.raw : {};
+  const payload = isObject(source.payload) ? source.payload : {};
+
+  const type = normalizeResultType(
+    first(source.type, source.entity, source.kind, source.entityType, raw.type, raw.entity)
+  );
+
+  const entityId = getResultId(source);
+
+  const label = cleanText(
+    first(
+      source.label,
+      source.title,
+      source.name,
+      source.displayName,
+      raw.title,
+      raw.name,
+      raw.displayName,
+      entityId
+    ),
+    "Resultado"
+  );
+
+  const description = truncate(
+    cleanText(
+      first(
+        source.description,
+        source.subtitle,
+        source.text,
+        raw.subtitle,
+        raw.description,
+        raw.status,
+        payload.status
+      ),
+      ""
+    ),
+    180
+  );
+
+  const route = routeFromBackendResult(source);
+
+  const id = cleanText(
+    first(source.id, source.key, `${type}:${entityId || label}:${order}`),
+    `${type}:${entityId || label}:${order}`
+  );
+
+  const score = Number.isFinite(Number(source.score))
+    ? Number(source.score)
+    : Number.isFinite(Number(source._score))
+      ? Number(source._score)
+      : 0;
+
+  return {
+    key: id,
+    id,
+
+    label,
+    title: label,
+
+    description,
+    subtitle: description,
+
+    route,
+    href: route,
+    path: route,
+
+    icon: iconForResult(source, type),
+    type,
+    kind: type,
+
+    entityId,
+
+    action: cleanText(source.action || source.openAction || source.searchAction, ""),
+    score,
+    order,
+    source: "backend",
+
+    payload,
+    raw,
+    backend: source,
+  };
+}
+
+function mergeResults(query = "", backendResults = [], localResults = []) {
+  const direct = directRouteResult(query);
+
+  const combined = [
+    ...(direct ? [direct] : []),
+    ...safeArray(backendResults),
+    ...safeArray(localResults),
+  ];
+
+  return uniqueBy(combined, (item) => {
+    const route = safeInternalPath(item.route, "");
+    const entityKey = [
+      normalizeResultType(item.type),
+      normalizeCompact(item.entityId || item.id || item.key || ""),
+    ].join(":");
+
+    return route || entityKey || normalizeText(item.label || item.title || "");
+  }).slice(0, SEARCH_LIMIT);
+}
+
+/* =========================================================
+   REMOTE SEARCH
+========================================================= */
+
+function abortBackendSearch() {
+  if (backendTimer) {
+    clearTimeout(backendTimer);
+    backendTimer = null;
+  }
+
+  if (backendAbort) {
+    try {
+      backendAbort.abort();
+    } catch {
+      // noop
+    }
+  }
+
+  backendAbort = null;
+}
+
+async function fetchBackendResults(query = "", options = {}) {
+  const clean = cleanText(query, "");
+
+  if (!clean) return [];
+
+  const controller = new AbortController();
+  const timeoutMs = clampNumber(
+    options.timeoutMs,
+    1500,
+    30_000,
+    BACKEND_TIMEOUT_MS
+  );
+
+  const timer = setTimeout(() => {
+    try {
+      controller.abort();
+    } catch {
+      // noop
+    }
+  }, timeoutMs);
+
+  backendAbort = controller;
+
+  try {
+    const response = await fetch(buildSearchUrl(clean, options), {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: buildSearchHeaders(options),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const message =
+        response.status === 401
+          ? "Sesión no autorizada para buscar."
+          : `Search backend HTTP ${response.status}`;
+
+      throw new Error(message);
+    }
+
+    const payload = await response.json();
+    const rawItems = extractBackendResults(payload);
+
+    return rawItems
+      .map((item, index) => normalizeBackendResult(item, index))
+      .filter((item) => item.label || item.route);
+  } finally {
+    clearTimeout(timer);
+
+    if (backendAbort === controller) {
+      backendAbort = null;
+    }
+  }
+}
+
+/* =========================================================
+   SEARCH RENDER STATE
+========================================================= */
 
 function setActiveSearch(index = 0) {
-  const refs = getRefs();
-  const items = Array.from(
-    refs.searchResults?.querySelectorAll?.("[data-topbar-search-result='true']") || []
-  );
-
-  if (!items.length) {
+  if (!latestSearchResults.length) {
     activeSearchIndex = -1;
-    refs.searchInput?.removeAttribute?.("aria-activedescendant");
+    getRefs().searchInput?.removeAttribute?.("aria-activedescendant");
     return false;
   }
 
-  activeSearchIndex = Math.max(0, Math.min(Number(index) || 0, items.length - 1));
+  activeSearchIndex = Math.max(
+    0,
+    Math.min(Number(index) || 0, latestSearchResults.length - 1)
+  );
 
-  items.forEach((item, itemIndex) => {
-    const selected = itemIndex === activeSearchIndex;
-
-    item.classList.toggle("is-active", selected);
-    item.setAttribute("aria-selected", selected ? "true" : "false");
-  });
-
-  const activeItem = items[activeSearchIndex];
-
-  if (activeItem?.id && refs.searchInput) {
-    refs.searchInput.setAttribute("aria-activedescendant", activeItem.id);
-  }
+  setTopbarSearchActiveIndex(root, activeSearchIndex);
 
   return true;
 }
 
-function renderSearchResults(query = "") {
-  const refs = getRefs();
-
-  if (!refs.searchResults) return false;
-
+function renderSearchState(query = "", results = [], options = {}) {
   const clean = cleanText(query, "");
-  latestSearchResults = clean ? searchTopbar(clean, lastOptions) : [];
-  activeSearchIndex = latestSearchResults.length ? 0 : -1;
-  lastSearchQuery = clean;
+  const status = cleanText(options.status, SEARCH_STATUS.READY);
+  const error = cleanText(options.error, "");
 
-  refs.searchResults.replaceChildren();
+  latestSearchResults = clean ? safeArray(results) : [];
+  activeSearchIndex = latestSearchResults.length ? Math.max(0, activeSearchIndex) : -1;
+  lastSearchQuery = clean;
+  lastSearchStatus = status;
+  lastSearchError = error;
 
   if (!clean) {
     clearTopbarSearchResults(root);
     return true;
   }
 
-  refs.searchResults.hidden = false;
-  refs.searchResults.setAttribute("aria-hidden", "false");
-  refs.searchResults.classList.add("active");
-  refs.searchResults.dataset.searchOpen = "true";
-  refs.searchResults.dataset.searchQuery = clean;
-  refs.searchResults.dataset.searchCount = String(latestSearchResults.length);
+  renderTopbarSearchResults(root, latestSearchResults, {
+    query: clean,
+    activeIndex: activeSearchIndex >= 0 ? activeSearchIndex : 0,
+    status,
+    error,
+    source: SOURCE,
+  });
 
-  refs.search?.classList?.add?.("is-search-open");
-  refs.root?.classList?.add?.("is-search-focused");
-  refs.searchInput?.setAttribute?.("aria-expanded", "true");
+  if (latestSearchResults.length) {
+    setActiveSearch(activeSearchIndex >= 0 ? activeSearchIndex : 0);
+  }
 
-  if (!latestSearchResults.length) {
-    refs.searchResults.appendChild(createEmptyNode(clean));
-    refs.searchInput?.removeAttribute?.("aria-activedescendant");
+  return true;
+}
+
+async function executeSearch(query = "", options = {}) {
+  const clean = cleanText(query, "");
+  const seq = ++backendSeq;
+
+  if (!clean) {
+    abortBackendSearch();
+    renderSearchState("", [], {
+      status: SEARCH_STATUS.IDLE,
+    });
+
+    return [];
+  }
+
+  const localResults = searchLocalTopbar(clean, lastOptions);
+  const cached = options.force !== true ? getCachedResults(clean, lastOptions) : null;
+
+  if (cached) {
+    const mergedCached = mergeResults(clean, cached, localResults);
+
+    renderSearchState(clean, mergedCached, {
+      status: SEARCH_STATUS.READY,
+    });
+
+    return mergedCached;
+  }
+
+  abortBackendSearch();
+
+  renderSearchState(clean, mergeResults(clean, [], localResults), {
+    status: SEARCH_STATUS.LOADING,
+  });
+
+  try {
+    const remoteResults = await fetchBackendResults(clean, {
+      ...lastOptions,
+      ...options,
+    });
+
+    if (seq !== backendSeq) return [];
+    if (cleanText(getRefs().searchInput?.value || "", "") !== clean && options.force !== true) {
+      return [];
+    }
+
+    setCachedResults(clean, remoteResults, lastOptions);
+
+    const merged = mergeResults(clean, remoteResults, localResults);
+
+    renderSearchState(clean, merged, {
+      status: merged.length ? SEARCH_STATUS.READY : SEARCH_STATUS.EMPTY,
+    });
+
+    return merged;
+  } catch (error) {
+    if (seq !== backendSeq) return [];
+
+    const message = cleanText(
+      error?.message || "No se pudo completar la búsqueda.",
+      "No se pudo completar la búsqueda."
+    );
+
+    const fallback = mergeResults(clean, [], localResults);
+
+    renderSearchState(clean, fallback, {
+      status: fallback.length ? SEARCH_STATUS.READY : SEARCH_STATUS.ERROR,
+      error: message,
+    });
+
+    return latestSearchResults;
+  }
+}
+
+function scheduleSearch(query = "", options = {}) {
+  const clean = cleanText(query, "");
+
+  lastSearchQuery = clean;
+
+  if (backendTimer) {
+    clearTimeout(backendTimer);
+    backendTimer = null;
+  }
+
+  if (!clean) {
+    abortBackendSearch();
+
+    renderSearchState("", [], {
+      status: SEARCH_STATUS.IDLE,
+    });
+
     return true;
   }
 
-  const fragment = document.createDocumentFragment();
+  const localResults = searchLocalTopbar(clean, lastOptions);
+  const cached = getCachedResults(clean, lastOptions);
 
-  latestSearchResults.forEach((item, index) => {
-    fragment.appendChild(createResultNode(item, index));
-  });
+  if (cached) {
+    renderSearchState(clean, mergeResults(clean, cached, localResults), {
+      status: SEARCH_STATUS.READY,
+    });
+  } else {
+    renderSearchState(clean, mergeResults(clean, [], localResults), {
+      status: SEARCH_STATUS.LOADING,
+    });
+  }
 
-  refs.searchResults.appendChild(fragment);
-  setActiveSearch(activeSearchIndex);
+  backendTimer = setTimeout(() => {
+    backendTimer = null;
+    void executeSearch(clean, options);
+  }, options.immediate === true ? 0 : BACKEND_DEBOUNCE_MS);
 
   return true;
 }
@@ -1014,9 +1806,28 @@ async function openSearchResult(result = null) {
 
   if (!item?.route) return false;
 
+  try {
+    if (isBrowser()) {
+      window.dispatchEvent(
+        new CustomEvent("topbar:search:open", {
+          detail: {
+            source: SOURCE,
+            query: lastSearchQuery,
+            result: item,
+          },
+        })
+      );
+    }
+  } catch {
+    // noop
+  }
+
   const ok = await navigateTo(item.route, {
     query: lastSearchQuery,
     result: item.key || item.label || item.route,
+    resultType: item.type || "",
+    entityId: item.entityId || "",
+    action: item.action || "",
   });
 
   if (ok) {
@@ -1035,9 +1846,14 @@ function clearSearch(options = {}) {
   const opts = isObject(options) ? options : {};
   const refs = getRefs();
 
+  abortBackendSearch();
+
+  backendSeq += 1;
   latestSearchResults = [];
   activeSearchIndex = -1;
   lastSearchQuery = "";
+  lastSearchStatus = SEARCH_STATUS.IDLE;
+  lastSearchError = "";
 
   clearTopbarSearchResults(root);
 
@@ -1065,7 +1881,7 @@ function clearSearch(options = {}) {
    LOCAL EVENTS
 ========================================================= */
 
-function onSubmit(event) {
+async function onSubmit(event) {
   event.preventDefault();
 
   const refs = getRefs();
@@ -1076,18 +1892,26 @@ function onSubmit(event) {
       input: true,
       focus: true,
     });
+
     return;
   }
 
-  if (!latestSearchResults.length || query !== lastSearchQuery) {
-    renderSearchResults(query);
+  if (
+    !latestSearchResults.length ||
+    query !== lastSearchQuery ||
+    lastSearchStatus === SEARCH_STATUS.LOADING
+  ) {
+    await executeSearch(query, {
+      force: true,
+      immediate: true,
+    });
   }
 
   void openSearchResult();
 }
 
 function onInput(event) {
-  renderSearchResults(event.target?.value || "");
+  scheduleSearch(event.target?.value || "");
 }
 
 function onFocus() {
@@ -1095,7 +1919,7 @@ function onFocus() {
   const value = cleanText(refs.searchInput?.value || "", "");
 
   if (value) {
-    renderSearchResults(value);
+    scheduleSearch(value);
   } else {
     setTopbarSearchExpanded(root, false);
   }
@@ -1119,7 +1943,9 @@ function onKeydown(event) {
     event.preventDefault();
 
     if (!latestSearchResults.length) {
-      renderSearchResults(refs.searchInput?.value || "");
+      scheduleSearch(refs.searchInput?.value || "", {
+        immediate: true,
+      });
     } else {
       moveActiveSearch(1);
     }
@@ -1131,7 +1957,9 @@ function onKeydown(event) {
     event.preventDefault();
 
     if (!latestSearchResults.length) {
-      renderSearchResults(refs.searchInput?.value || "");
+      scheduleSearch(refs.searchInput?.value || "", {
+        immediate: true,
+      });
     } else {
       moveActiveSearch(-1);
     }
@@ -1360,6 +2188,8 @@ function refresh(options = {}) {
 
 function destroy(options = {}) {
   unbindEvents();
+  abortBackendSearch();
+  clearSearchCache();
 
   if (root) {
     clearSearch({
@@ -1406,6 +2236,13 @@ function getSnapshot() {
     title: refs.title?.textContent || "",
     hasRoot: Boolean(refs.root),
 
+    backend: {
+      endpoint: resolveSearchEndpoint(lastOptions),
+      cacheSize: backendCache.size,
+      active: Boolean(backendAbort),
+      debounceActive: Boolean(backendTimer),
+    },
+
     search: {
       enabled: Boolean(refs.search),
       hasInput: Boolean(refs.searchInput),
@@ -1414,8 +2251,18 @@ function getSnapshot() {
       expanded: refs.searchInput?.getAttribute?.("aria-expanded") || null,
       resultsHidden: refs.searchResults ? refs.searchResults.hidden === true : null,
       query: refs.searchInput?.value || "",
+      lastSearchQuery,
+      status: lastSearchStatus,
+      error: lastSearchError,
       resultCount: latestSearchResults.length,
       activeSearchIndex,
+      results: latestSearchResults.map((item) => ({
+        label: item.label,
+        route: item.route,
+        type: item.type,
+        source: item.source,
+        score: item.score,
+      })),
     },
   };
 }
@@ -1444,13 +2291,26 @@ export const TopbarUI = {
   syncTitle,
   resolveRouteTitle,
 
-  search: (query = "") => {
+  search: (query = "", options = {}) => {
     ensureRoot(lastOptions);
-    renderSearchResults(query);
+    scheduleSearch(query, {
+      ...options,
+      immediate: options.immediate === true,
+    });
     return latestSearchResults;
   },
 
+  searchAsync: async (query = "", options = {}) => {
+    ensureRoot(lastOptions);
+    return executeSearch(query, {
+      ...options,
+      force: true,
+      immediate: true,
+    });
+  },
+
   clearSearch,
+  clearSearchCache,
 
   getSearchIndex: (options = {}) =>
     buildSearchIndex({

@@ -1,54 +1,58 @@
 /* =========================================================
-   Onion SPA - Cuenta View
+   Onion SPA - Cuenta View Controller
    Archivo: src/views/cuenta/index.js
 
-   EXTREME PRO SYSTEM · ENTRYPOINT REAL · CUENTA · ROUTE SAFE · 13/10
-   ROUTER SAFE · LEGACY SAFE · NAMESPACE EXPORT SAFE
-   VIEW/ACTIONS/LOADERS FALLBACK CHAIN
-   PUBLIC API STABLE · GLOBAL BRIDGE SAFE
-   ACCOUNT SETTINGS / THEME / LANGUAGE / PASSWORD SAFE
-
-   RESPONSABILIDADES:
-   - punto de entrada único del módulo cuenta
-   - export limpio del módulo principal
-   - compatibilidad router legacy y moderna
-   - puente entre router y cuentaView.js
-   - init / mount / render / reload / destroy seguros
-   - exponer save / theme / language / password / modal / helpers públicos
-   - evitar duplicidad de lógica en index.js
-   - mantener superficie pública estable aunque cambien exports internos
-   - registrar bridge global estable window.OnionCuenta / window.CuentaView
-   - registrar AppCore.modules.Cuenta si AppCore está disponible
-
-   HARDENING EXTREME:
-   - route guard por evaluación ponderada, no por primer falso
-   - prioridad a señales explícitas del router
-   - soporta /cuenta y /@usuario/cuenta
-   - soporta hash router #/cuenta y #!/cuenta
-   - no bloquea por rutas antiguas de AppCore si browser/publicPath es cuenta
-   - destroy/unmount/dispose/close siempre permitidos
-   - getters/snapshot/debug siempre disponibles
-   - flags booleanos corregidos: no confunde función con valor
-   - bridge global estable sin romper imports antiguos
+   Controlador real de la vista Cuenta.
+   - Sin cuentaView.js legacy.
+   - Sin router paralelo.
+   - Sin HTTP directo.
+   - Sin store propio.
 ========================================================= */
 
-import RawCuentaView from "./cuentaView.js";
+import * as CuentaTemplate from "./cuenta.template.js";
+import * as CuentaApiModule from "./cuenta.api.js";
+
+export const CUENTA_INDEX_VERSION = "cuenta.index.stable.v1";
+export const CUENTA_VIEW_NAME = "cuenta";
+
+const MOUNT_SELECTOR = "#view-container, #app-content, main";
+const ACTION_SELECTOR = "[data-cuenta-action], [data-action]";
+const FIELD_SELECTOR = "[data-cuenta-field], [data-field]";
+
+const state = {
+  mounted: false,
+  loading: false,
+  refreshing: false,
+  saving: false,
+  error: null,
+  item: null,
+  root: null,
+  container: null,
+  abortController: null,
+  view: {
+    form: {},
+  },
+};
 
 /* =========================================================
-   MODULE META
+   BASIC HELPERS
 ========================================================= */
 
-export const CUENTA_MODULE_NAME = "cuenta";
-export const CUENTA_VIEW_NAME = "CuentaView";
-export const CUENTA_MODULE_VERSION = "13.0.0";
-export const CUENTA_CANONICAL_PATH = "/cuenta";
-export const CUENTA_INDEX_SOURCE = "views:cuenta:index";
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
-/* =========================================================
-   LOCAL SAFE HELPERS
-========================================================= */
+function isElement(value) {
+  return Boolean(value && value.nodeType === 1);
+}
 
-function localSafeText(value, fallback = "") {
+function safeObject(value, fallback = {}) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : fallback;
+}
+
+function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
   const text = String(value)
@@ -59,66 +63,7 @@ function localSafeText(value, fallback = "") {
   return text || fallback;
 }
 
-function localSafeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-
-  const n = Number(value);
-
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function localSafeArray(value, fallback = []) {
-  return Array.isArray(value) ? value : fallback;
-}
-
-function localSafeObject(value, fallback = {}) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
-}
-
-function localSafeBoolean(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-    return value !== 0;
-  }
-
-  const normalized = localSafeText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-
-  if (["true", "1", "yes", "y", "si", "sí", "on", "enabled", "activo"].includes(normalized)) {
-    return true;
-  }
-
-  if (["false", "0", "no", "n", "off", "disabled", "inactivo"].includes(normalized)) {
-    return false;
-  }
-
-  return Boolean(fallback);
-}
-
-function localFirst(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-
-    return value;
-  }
-
-  return null;
-}
-
-function localNormalizeWhitespace(value = "") {
-  return localSafeText(value, "").replace(/\s+/g, " ").trim();
-}
-
-function localEscapeHtml(value = "") {
+function escapeHtml(value = "") {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -127,1242 +72,842 @@ function localEscapeHtml(value = "") {
     .replace(/'/g, "&#39;");
 }
 
-function localTruncate(value = "", max = 140) {
-  const text = localSafeText(value, "");
-  const limit = localSafeNumber(max, 140);
+function normalizeBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
 
-  if (!text) return "";
-  if (limit <= 0) return text;
-  if (text.length <= limit) return text;
+  const key = safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 
-  return `${text.slice(0, limit).trim()}…`;
+  if (["true", "1", "yes", "si", "sí", "on", "dark", "activo"].includes(key)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "off", "light", "inactivo"].includes(key)) {
+    return false;
+  }
+
+  return Boolean(fallback);
+}
+
+function emit(eventName, detail = {}) {
+  if (!isBrowser()) return false;
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent(eventName, {
+        detail: {
+          view: CUENTA_VIEW_NAME,
+          version: CUENTA_INDEX_VERSION,
+          ...safeObject(detail),
+        },
+      })
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
-   INTERNAL HELPERS
+   MODULE RESOLUTION
 ========================================================= */
 
-function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
+function getCuentaApi() {
+  return CuentaApiModule.CuentaApi || CuentaApiModule.default || CuentaApiModule;
 }
 
-function isFn(value) {
-  return typeof value === "function";
+function getApiMethod(name) {
+  const api = getCuentaApi();
+  const fn = CuentaApiModule[name] || api?.[name];
+
+  return typeof fn === "function" ? fn.bind(api) : null;
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+function getTemplateMethod(name) {
+  const template = CuentaTemplate.default || CuentaTemplate;
+  const fn = CuentaTemplate[name] || template?.[name];
+
+  return typeof fn === "function" ? fn.bind(template) : null;
 }
 
-function isProxyable(value) {
-  return Boolean(value && (typeof value === "object" || typeof value === "function"));
+function renderCuentaTemplate(payload = {}) {
+  const renderer =
+    getTemplateMethod("renderCuentaTemplate") ||
+    getTemplateMethod("renderCuentaViewTemplate");
+
+  if (!renderer) {
+    throw new Error("CUENTA_TEMPLATE_RENDERER_MISSING");
+  }
+
+  return renderer(payload);
 }
 
-function isNodeLike(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      typeof value.nodeType === "number"
+/* =========================================================
+   DOM RESOLUTION
+========================================================= */
+
+function resolveContainer(target = null) {
+  if (!isBrowser()) return null;
+  if (isElement(target)) return target;
+
+  const candidate =
+    target?.container ||
+    target?.root ||
+    target?.el ||
+    target?.element ||
+    target?.target ||
+    null;
+
+  if (isElement(candidate)) return candidate;
+  if (typeof candidate === "string") return document.querySelector(candidate);
+  if (typeof target === "string") return document.querySelector(target);
+
+  return document.querySelector(MOUNT_SELECTOR);
+}
+
+function getActionName(element) {
+  return safeText(
+    element?.dataset?.cuentaAction ||
+      element?.dataset?.action ||
+      element?.getAttribute?.("data-cuenta-action") ||
+      element?.getAttribute?.("data-action") ||
+      "",
+    ""
   );
 }
 
-function internalSafeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
+function getFieldName(element) {
+  return safeText(
+    element?.dataset?.cuentaField ||
+      element?.dataset?.field ||
+      element?.name ||
+      "",
+    ""
+  );
 }
 
-function getGlobalRoot() {
-  try {
-    if (typeof globalThis !== "undefined") return globalThis;
-  } catch {}
+function getFieldValue(element) {
+  if (!element) return "";
 
-  try {
-    if (typeof window !== "undefined") return window;
-  } catch {}
+  if (element.type === "checkbox") return Boolean(element.checked);
+  if (element.type === "radio") return element.checked ? element.value : undefined;
 
-  return {};
+  return element.value;
 }
 
-function getWindowAppCore() {
-  const root = getGlobalRoot();
+function readForm() {
+  if (!state.root) return {};
+
+  const form = {};
+
+  state.root.querySelectorAll(FIELD_SELECTOR).forEach((field) => {
+    const name = getFieldName(field);
+    if (!name) return;
+
+    const value = getFieldValue(field);
+    if (value === undefined) return;
+
+    form[name] = value;
+  });
+
+  return form;
+}
+
+/* =========================================================
+   STATE
+========================================================= */
+
+function patchState(patch = {}) {
+  const next = safeObject(patch);
+
+  Object.assign(state, next, {
+    view: {
+      ...state.view,
+      ...safeObject(next.view),
+      form: {
+        ...state.view.form,
+        ...safeObject(next.view?.form),
+      },
+    },
+  });
+}
+
+function getPublicState() {
+  return {
+    loading: state.loading,
+    refreshing: state.refreshing,
+    saving: state.saving,
+    error: state.error,
+    item: state.item,
+    view: {
+      form: { ...state.view.form },
+    },
+    action: {
+      saving: state.saving,
+    },
+  };
+}
+
+/* =========================================================
+   RENDER
+========================================================= */
+
+function renderFallback(type = "loading", message = "") {
+  const cleanMessage = escapeHtml(
+    safeText(
+      message,
+      type === "error" ? "No se pudo cargar la cuenta." : "Cargando cuenta..."
+    )
+  );
+
+  if (type === "error") {
+    return `
+      <section class="cuenta-view cuenta-state cuenta-error-state" data-view="cuenta">
+        <h2 class="cuenta-state-title">No se pudo cargar la cuenta</h2>
+        <p class="cuenta-state-text">${cleanMessage}</p>
+        <button
+          type="button"
+          class="cuenta-btn cuenta-btn-primary"
+          data-action="refresh-cuenta"
+          data-cuenta-action="refresh-cuenta"
+        >
+          Reintentar
+        </button>
+      </section>
+    `;
+  }
+
+  return `
+    <section
+      class="cuenta-view cuenta-state cuenta-loading-state"
+      data-view="cuenta"
+      aria-busy="true"
+    >
+      <p class="cuenta-state-text">${cleanMessage}</p>
+    </section>
+  `;
+}
+
+function renderView() {
+  if (!state.container) return null;
+
+  let html = "";
+
+  if (state.loading && !state.item) {
+    const renderLoadingState = getTemplateMethod("renderLoadingState");
+
+    html = renderLoadingState
+      ? renderLoadingState()
+      : renderFallback("loading");
+  } else if (state.error && !state.item) {
+    const renderErrorState = getTemplateMethod("renderErrorState");
+
+    html = renderErrorState
+      ? renderErrorState(state.error)
+      : renderFallback("error", state.error);
+  } else {
+    html = renderCuentaTemplate({
+      item: state.item,
+      state: getPublicState(),
+    });
+  }
+
+  state.container.innerHTML = html;
+
+  state.root =
+    state.container.querySelector('[data-view="cuenta"]') ||
+    state.container.firstElementChild ||
+    state.container;
+
+  if (state.root?.dataset) {
+    state.root.dataset.cuentaController = CUENTA_INDEX_VERSION;
+    state.root.dataset.cuentaMounted = state.mounted ? "true" : "false";
+    state.root.dataset.cuentaLoading = state.loading ? "true" : "false";
+    state.root.dataset.cuentaSaving = state.saving ? "true" : "false";
+  }
+
+  return state.root;
+}
+
+/* =========================================================
+   PAYLOADS
+========================================================= */
+
+function buildCuentaPayload(form = {}) {
+  const source = safeObject(form);
+  const payload = {};
+
+  if (Object.prototype.hasOwnProperty.call(source, "name")) {
+    payload.name = safeText(source.name, "");
+  }
+
+  if (Object.prototype.hasOwnProperty.call(source, "phone")) {
+    payload.phone = safeText(source.phone, "");
+    payload.telefono = payload.phone;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(source, "privacyMode")) {
+    payload.privacyMode = normalizeBoolean(source.privacyMode, false);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(source, "darkMode")) {
+    payload.darkMode = normalizeBoolean(source.darkMode, false);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(source, "lang")) {
+    payload.lang = safeText(source.lang, "es") || "es";
+    payload.language = payload.lang;
+    payload.locale = payload.lang;
+  }
+
+  return payload;
+}
+
+function buildPasswordPayload(form = {}) {
+  return {
+    currentPassword: safeText(form.currentPassword, ""),
+    newPassword: safeText(form.newPassword, ""),
+    confirmPassword: safeText(form.confirmPassword, ""),
+  };
+}
+
+function validatePasswordPayload(payload = {}) {
+  if (!payload.currentPassword || !payload.newPassword || !payload.confirmPassword) {
+    return "Completa los tres campos de contraseña.";
+  }
+
+  if (payload.newPassword !== payload.confirmPassword) {
+    return "La nueva contraseña no coincide.";
+  }
+
+  if (payload.newPassword.length < 8) {
+    return "La nueva contraseña debe tener al menos 8 caracteres.";
+  }
+
+  return "";
+}
+
+/* =========================================================
+   DATA FLOW
+========================================================= */
+
+async function loadCuentaData({ force = false, silent = false } = {}) {
+  const hydrateFromCache = getApiMethod("hydrateCuentaFromCache");
+  const loadCuentaApi = getApiMethod("loadCuenta");
+
+  if (!loadCuentaApi) {
+    patchState({
+      loading: false,
+      refreshing: false,
+      error: "cuenta.api.js no expone loadCuenta().",
+    });
+
+    renderView();
+    return null;
+  }
 
   try {
-    return (
-      root?.AppCore ||
-      root?.OnionApp?.AppCore ||
-      root?.Onion?.AppCore ||
-      null
-    );
-  } catch {
+    const cached = hydrateFromCache?.();
+
+    if (cached && !state.item) {
+      patchState({ item: cached });
+    }
+  } catch {}
+
+  patchState({
+    loading: !state.item && !silent,
+    refreshing: Boolean(state.item || silent),
+    error: null,
+  });
+
+  renderView();
+
+  try {
+    const item = await loadCuentaApi({ force, silent });
+
+    patchState({
+      item: item || state.item,
+      loading: false,
+      refreshing: false,
+      error: null,
+    });
+
+    renderView();
+    emit("cuenta:loaded", { item: state.item });
+
+    return state.item;
+  } catch (error) {
+    const message = safeText(error?.message, "No se pudo cargar la cuenta.");
+
+    patchState({
+      loading: false,
+      refreshing: false,
+      error: message,
+    });
+
+    renderView();
+    emit("cuenta:error", { error: message });
+
     return null;
   }
 }
 
-function safeWarn(...args) {
-  try {
-    getWindowAppCore()?.utils?.warn?.("[CuentaIndex]", ...args);
-  } catch {}
+async function saveCuentaData() {
+  const updateCuentaApi = getApiMethod("updateCuenta");
+  const form = readForm();
+  const payload = buildCuentaPayload(form);
 
-  try {
-    console.warn("[CuentaIndex]", ...args);
-  } catch {}
-}
+  if (!updateCuentaApi) {
+    patchState({
+      error: "cuenta.api.js no expone updateCuenta().",
+      view: { form },
+    });
 
-function safeEmit(event = "", payload = {}) {
-  const eventName = localSafeText(event, "");
-  if (!eventName) return false;
-
-  const root = getGlobalRoot();
-  let emitted = false;
-
-  try {
-    if (isFn(root?.AppCore?.events?.emit)) {
-      root.AppCore.events.emit(eventName, payload);
-      emitted = true;
-    }
-  } catch {}
-
-  try {
-    if (isBrowser()) {
-      window.dispatchEvent(
-        new CustomEvent(eventName, {
-          detail: payload,
-        })
-      );
-
-      emitted = true;
-    }
-  } catch {}
-
-  return emitted;
-}
-
-/* =========================================================
-   ROUTE GUARD CONFIG
-========================================================= */
-
-const GUARDED_VIEW_METHODS = new Set([
-  "init",
-  "mount",
-  "render",
-  "reload",
-  "refresh",
-  "bootstrap",
-
-  "loadCuenta",
-  "refreshCuenta",
-
-  "save",
-  "saveCuenta",
-  "saveProfile",
-  "savePerfil",
-  "updateProfile",
-  "updatePerfil",
-  "updateCuenta",
-
-  "updateTheme",
-  "updateCuentaTheme",
-  "setTheme",
-  "setCuentaTheme",
-
-  "updateLanguage",
-  "updateCuentaLanguage",
-  "setLanguage",
-  "setCuentaLanguage",
-
-  "changePassword",
-  "updatePassword",
-  "savePassword",
-
-  "openModal",
-  "openCuentaModal",
-]);
-
-const ALWAYS_ALLOWED_VIEW_METHODS = new Set([
-  "destroy",
-  "unmount",
-  "dispose",
-
-  "closeModal",
-  "closeCuentaModal",
-  "close",
-
-  "getItem",
-  "getCuenta",
-  "getUser",
-  "getProfile",
-  "getPerfil",
-
-  "getState",
-  "getSnapshot",
-  "getCuentaSnapshot",
-  "getModuleSnapshot",
-
-  "getRouteDebug",
-  "getCuentaRouteDebug",
-
-  "isInitialized",
-  "isDestroyed",
-  "isMounted",
-]);
-
-/* =========================================================
-   PATH NORMALIZATION
-========================================================= */
-
-function getBaseOrigin() {
-  if (isBrowser() && window.location?.origin) {
-    return window.location.origin;
+    renderView();
+    return null;
   }
 
-  return "http://localhost";
-}
-
-function normalizePathnameOnly(pathname = "/") {
-  let value = String(pathname || "/")
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  if (!value) value = "/";
-  if (!value.startsWith("/")) value = `/${value}`;
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || "/";
-  }
-
-  return value;
-}
-
-function isHashRouterPath(value = "") {
-  const raw = localSafeText(value, "");
-  return raw.startsWith("#/") || raw.startsWith("#!");
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw = localSafeText(value, "");
-
-  if (!raw) return "/";
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/");
-  }
-
-  return raw.replace(/^#\/?/, "/");
-}
-
-function splitPath(value = "/") {
-  const raw = localSafeText(value, "/");
-
-  if (isHashRouterPath(raw)) {
-    return splitPath(normalizeHashRouterPath(raw));
-  }
-
-  let pathname = raw;
-  let search = "";
-  let hash = "";
-
-  const hashIndex = pathname.indexOf("#");
-
-  if (hashIndex >= 0) {
-    hash = pathname.slice(hashIndex);
-    pathname = pathname.slice(0, hashIndex) || "/";
-  }
-
-  const searchIndex = pathname.indexOf("?");
-
-  if (searchIndex >= 0) {
-    search = pathname.slice(searchIndex);
-    pathname = pathname.slice(0, searchIndex) || "/";
-  }
-
-  return {
-    pathname: normalizePathnameOnly(pathname),
-    search,
-    hash,
-  };
-}
-
-function normalizeFullPath(path = "/") {
-  const raw = localSafeText(path, "/");
-
-  if (!raw) return "/";
-
-  if (isHashRouterPath(raw)) {
-    return normalizeFullPath(normalizeHashRouterPath(raw));
-  }
-
-  try {
-    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed = new URL(raw, getBaseOrigin());
-
-      if (parsed.hash && isHashRouterPath(parsed.hash)) {
-        return normalizeFullPath(normalizeHashRouterPath(parsed.hash));
-      }
-
-      return normalizeFullPath(
-        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
-      );
-    }
-  } catch {}
-
-  const { pathname, search, hash } = splitPath(raw);
-
-  return `${pathname}${search}${hash}`;
-}
-
-function stripSearchAndHash(path = "/") {
-  return normalizeFullPath(path).split("?")[0].split("#")[0] || "/";
-}
-
-function isUsernameSegment(segment = "") {
-  return /^@[A-Za-z0-9._-]{1,80}$/.test(localSafeText(segment, ""));
-}
-
-function stripUsernamePrefix(path = "/") {
-  const { pathname, search, hash } = splitPath(normalizeFullPath(path));
-  const segments = pathname.split("/").filter(Boolean);
-
-  if (segments.length > 0 && isUsernameSegment(segments[0])) {
-    const rest = segments.slice(1).join("/");
-    const cleanPathname = rest ? normalizePathnameOnly(`/${rest}`) : "/";
-
-    return `${cleanPathname}${search}${hash}`;
-  }
-
-  return `${pathname}${search}${hash}`;
-}
-
-function canonicalizePath(path = "/") {
-  return normalizeFullPath(stripUsernamePrefix(path || "/"));
-}
-
-function getCleanCanonicalPath(path = "/") {
-  return stripSearchAndHash(canonicalizePath(path || "/"));
-}
-
-function isCuentaPath(path = "") {
-  return getCleanCanonicalPath(path || "/") === CUENTA_CANONICAL_PATH;
-}
-
-function getBrowserPath() {
-  if (!isBrowser()) return "";
-
-  try {
-    const pathname = window.location.pathname || "/";
-    const search = window.location.search || "";
-    const hash = window.location.hash || "";
-
-    if (hash && isHashRouterPath(hash)) {
-      return normalizeFullPath(normalizeHashRouterPath(hash));
-    }
-
-    return normalizeFullPath(`${pathname}${search}${hash}`);
-  } catch {
-    return "";
-  }
-}
-
-function getAppStatePath() {
-  const AppCore = getWindowAppCore();
-
-  try {
-    return localSafeText(
-      localFirst(
-        AppCore?.state?.canonicalPath,
-        AppCore?.state?.route,
-        AppCore?.state?.path,
-        ""
-      ),
-      ""
-    );
-  } catch {
-    return "";
-  }
-}
-
-function getAppPublicPath() {
-  const AppCore = getWindowAppCore();
-
-  try {
-    return localSafeText(AppCore?.state?.publicPath || "", "");
-  } catch {
-    return "";
-  }
-}
-
-/* =========================================================
-   ROUTE SIGNALS
-========================================================= */
-
-function pushPathSignal(signals, label, value, origin = "explicit") {
-  const text = localSafeText(value, "");
-  if (!text) return;
-
-  signals.push({
-    type: "path",
-    origin,
-    label,
-    value: text,
-    canonical: getCleanCanonicalPath(text),
-    isCuenta: isCuentaPath(text),
-  });
-}
-
-function pushViewSignal(signals, label, value, origin = "explicit") {
-  const text = localSafeText(value, "");
-  if (!text) return;
-
-  const normalized = text
-    .toLowerCase()
-    .replace(/[\s_]+/g, "-")
-    .trim();
-
-  signals.push({
-    type: "view",
-    origin,
-    label,
-    value: normalized,
-    canonical: normalized,
-    isCuenta:
-      normalized === "cuenta" ||
-      normalized === "cuentaview" ||
-      normalized === "cuenta-view" ||
-      normalized === "account" ||
-      normalized === "accountview" ||
-      normalized === "account-view",
-  });
-}
-
-function collectRouteSignalsFromObject(signals, value, label = "arg", origin = "explicit", depth = 0) {
-  if (!isObject(value) || isNodeLike(value) || depth > 2) return;
-
-  pushViewSignal(signals, `${label}.viewKey`, value.viewKey, origin);
-  pushViewSignal(signals, `${label}.route.viewKey`, value.route?.viewKey, origin);
-
-  pushViewSignal(signals, `${label}.viewName`, value.viewName, origin);
-  pushViewSignal(signals, `${label}.route.viewName`, value.route?.viewName, origin);
-
-  pushViewSignal(signals, `${label}.name`, value.name, origin);
-  pushViewSignal(signals, `${label}.route.name`, value.route?.name, origin);
-
-  pushPathSignal(signals, `${label}.canonicalPath`, value.canonicalPath, origin);
-  pushPathSignal(signals, `${label}.routePath`, value.routePath, origin);
-  pushPathSignal(signals, `${label}.route.path`, value.route?.path, origin);
-  pushPathSignal(signals, `${label}.publicPath`, value.publicPath, origin);
-  pushPathSignal(signals, `${label}.requestedPath`, value.requestedPath, origin);
-  pushPathSignal(signals, `${label}.path`, value.path, origin);
-  pushPathSignal(signals, `${label}.href`, value.href, origin);
-  pushPathSignal(signals, `${label}.url`, value.url, origin);
-
-  collectRouteSignalsFromObject(signals, value.options, `${label}.options`, origin, depth + 1);
-  collectRouteSignalsFromObject(signals, value.payload, `${label}.payload`, origin, depth + 1);
-  collectRouteSignalsFromObject(signals, value.detail, `${label}.detail`, origin, depth + 1);
-  collectRouteSignalsFromObject(signals, value.route, `${label}.route`, origin, depth + 1);
-}
-
-function collectRouteSignals(args = []) {
-  const signals = [];
-  const list = Array.isArray(args) ? args : [];
-
-  list.forEach((arg, index) => {
-    collectRouteSignalsFromObject(signals, arg, `args[${index}]`, "explicit");
+  patchState({
+    saving: true,
+    error: null,
+    view: { form },
   });
 
-  pushPathSignal(signals, "AppCore.state.route", getAppStatePath(), "ambient");
-  pushPathSignal(signals, "AppCore.state.publicPath", getAppPublicPath(), "ambient");
-  pushPathSignal(signals, "window.location", getBrowserPath(), "ambient");
+  renderView();
 
-  return signals;
+  try {
+    const item = await updateCuentaApi(payload);
+
+    patchState({
+      item: item || { ...safeObject(state.item), ...payload },
+      saving: false,
+      error: null,
+    });
+
+    renderView();
+    emit("cuenta:saved", { item: state.item });
+
+    return state.item;
+  } catch (error) {
+    const message = safeText(error?.message, "No se pudo guardar la cuenta.");
+
+    patchState({
+      saving: false,
+      error: message,
+      view: { form },
+    });
+
+    renderView();
+    emit("cuenta:error", { error: message });
+
+    return null;
+  }
 }
 
-function getExplicitSignals(signals = []) {
-  return signals.filter((signal) => signal.origin === "explicit");
+async function updateThemeData() {
+  const form = readForm();
+  const darkMode = normalizeBoolean(form.darkMode, false);
+  const updateThemeApi = getApiMethod("updateCuentaTheme");
+  const updateCuentaApi = getApiMethod("updateCuenta");
+
+  patchState({
+    saving: true,
+    error: null,
+    view: { form },
+  });
+
+  renderView();
+
+  try {
+    const item = updateThemeApi
+      ? await updateThemeApi(darkMode)
+      : await updateCuentaApi?.({ darkMode });
+
+    patchState({
+      item: item || state.item,
+      saving: false,
+      error: null,
+    });
+
+    renderView();
+    emit("cuenta:theme:updated", { darkMode });
+
+    return state.item;
+  } catch (error) {
+    const message = safeText(error?.message, "No se pudo actualizar la apariencia.");
+
+    patchState({
+      saving: false,
+      error: message,
+      view: { form },
+    });
+
+    renderView();
+    emit("cuenta:error", { error: message });
+
+    return null;
+  }
 }
 
-function getAmbientSignals(signals = []) {
-  return signals.filter((signal) => signal.origin === "ambient");
+async function updateLanguageData() {
+  const form = readForm();
+  const lang = safeText(form.lang, "es") || "es";
+  const updateLanguageApi = getApiMethod("updateCuentaLanguage");
+  const updateCuentaApi = getApiMethod("updateCuenta");
+
+  patchState({
+    saving: true,
+    error: null,
+    view: { form },
+  });
+
+  renderView();
+
+  try {
+    const item = updateLanguageApi
+      ? await updateLanguageApi(lang)
+      : await updateCuentaApi?.({ lang, language: lang, locale: lang });
+
+    patchState({
+      item: item || state.item,
+      saving: false,
+      error: null,
+    });
+
+    renderView();
+    emit("cuenta:language:updated", { lang });
+
+    return state.item;
+  } catch (error) {
+    const message = safeText(error?.message, "No se pudo actualizar el idioma.");
+
+    patchState({
+      saving: false,
+      error: message,
+      view: { form },
+    });
+
+    renderView();
+    emit("cuenta:error", { error: message });
+
+    return null;
+  }
 }
 
-function getBlockingSignal(signals = []) {
-  const explicit = getExplicitSignals(signals);
-  const ambient = getAmbientSignals(signals);
+async function changePasswordData() {
+  const changePasswordApi = getApiMethod("changePassword");
+  const form = readForm();
+  const payload = buildPasswordPayload(form);
+  const validationError = validatePasswordPayload(payload);
 
-  const explicitPositive = explicit.find((signal) => signal.isCuenta === true);
-  if (explicitPositive) return null;
+  if (validationError) {
+    patchState({
+      error: validationError,
+      view: { form },
+    });
 
-  const explicitNegative = explicit.find((signal) => signal.isCuenta === false);
-  if (explicitNegative) return explicitNegative;
-
-  const ambientPositive = ambient.find((signal) => signal.isCuenta === true);
-  if (ambientPositive) return null;
-
-  if (ambient.length > 0) {
-    return ambient.find((signal) => signal.isCuenta === false) || null;
+    renderView();
+    return false;
   }
 
-  return null;
-}
+  if (!changePasswordApi) {
+    patchState({
+      error: "El cambio de contraseña todavía no está conectado en cuenta.api.js.",
+      view: { form },
+    });
 
-function hasPositiveCuentaSignal(signals = []) {
-  return signals.some((signal) => signal.isCuenta === true);
-}
-
-function evaluateCuentaRoute(args = []) {
-  const signals = collectRouteSignals(args);
-  const explicit = getExplicitSignals(signals);
-  const ambient = getAmbientSignals(signals);
-
-  const explicitPositive = explicit.find((signal) => signal.isCuenta === true);
-  const explicitNegative = explicit.find((signal) => signal.isCuenta === false);
-
-  if (explicitPositive) {
-    return {
-      allowed: true,
-      reason: "explicit-positive",
-      signals,
-      blockingSignal: null,
-      positiveSignal: explicitPositive,
-    };
+    renderView();
+    return false;
   }
 
-  if (explicitNegative) {
-    return {
-      allowed: false,
-      reason: "explicit-negative",
-      signals,
-      blockingSignal: explicitNegative,
-      positiveSignal: null,
-    };
-  }
+  patchState({
+    saving: true,
+    error: null,
+    view: { form },
+  });
 
-  const ambientPositive = ambient.find((signal) => signal.isCuenta === true);
+  renderView();
 
-  if (ambientPositive) {
-    return {
-      allowed: true,
-      reason: "ambient-positive",
-      signals,
-      blockingSignal: null,
-      positiveSignal: ambientPositive,
-    };
-  }
+  try {
+    await changePasswordApi(payload);
 
-  if (ambient.length > 0) {
-    const blockingSignal = ambient.find((signal) => signal.isCuenta === false) || null;
+    patchState({
+      saving: false,
+      error: null,
+      view: {
+        form: {
+          ...form,
+          currentPassword: "",
+          newPassword: "",
+          confirmPassword: "",
+        },
+      },
+    });
 
-    return {
-      allowed: false,
-      reason: "ambient-negative",
-      signals,
-      blockingSignal,
-      positiveSignal: null,
-    };
-  }
+    renderView();
+    emit("cuenta:password:changed");
 
-  return {
-    allowed: true,
-    reason: "no-route-signal",
-    signals,
-    blockingSignal: null,
-    positiveSignal: null,
-  };
-}
-
-function shouldAllowCuentaMethod(method = "", args = []) {
-  const cleanMethod = localSafeText(method, "");
-
-  if (!cleanMethod) return true;
-
-  if (ALWAYS_ALLOWED_VIEW_METHODS.has(cleanMethod)) {
     return true;
-  }
+  } catch (error) {
+    const message = safeText(error?.message, "No se pudo cambiar la contraseña.");
 
-  if (!GUARDED_VIEW_METHODS.has(cleanMethod)) {
-    return true;
-  }
+    patchState({
+      saving: false,
+      error: message,
+      view: { form },
+    });
 
-  return evaluateCuentaRoute(args).allowed;
+    renderView();
+    emit("cuenta:error", { error: message });
+
+    return false;
+  }
 }
 
-function logBlockedCuentaMethod(method = "", args = []) {
-  const evaluation = evaluateCuentaRoute(args);
+/* =========================================================
+   EVENTS
+========================================================= */
 
-  safeWarn(`CuentaView.${method} bloqueado: ruta actual no es Cuenta.`, {
-    method,
-    reason: evaluation.reason,
-    browserPath: getBrowserPath(),
-    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
-    appRoute: getAppStatePath(),
-    appPublicPath: getAppPublicPath(),
-    signals: evaluation.signals,
-    blockingSignal: evaluation.blockingSignal,
-  });
-}
-
-function getDefaultFallback(method = "") {
-  switch (method) {
-    case "init":
-    case "mount":
-    case "bootstrap":
+async function handleAction(action = "") {
+  switch (safeText(action, "")) {
+    case "refresh-cuenta":
+    case "reload-cuenta":
     case "reload":
-    case "refresh":
-    case "loadCuenta":
-      return CuentaView;
+      return loadCuentaData({ force: true });
 
-    case "render":
-      return null;
-
-    case "destroy":
-    case "unmount":
-    case "dispose":
-    case "closeModal":
-    case "closeCuentaModal":
-    case "close":
-      return true;
-
-    case "saveCuenta":
+    case "save-cuenta":
     case "save":
-    case "saveProfile":
-    case "savePerfil":
-    case "updateProfile":
-    case "updatePerfil":
-    case "updateCuenta":
-    case "updateTheme":
-    case "updateCuentaTheme":
-    case "setTheme":
-    case "setCuentaTheme":
-    case "updateLanguage":
-    case "updateCuentaLanguage":
-    case "setLanguage":
-    case "setCuentaLanguage":
-    case "refreshCuenta":
-    case "changePassword":
-    case "updatePassword":
-    case "savePassword":
-    case "openModal":
-    case "openCuentaModal":
-      return false;
+      return saveCuentaData();
 
-    case "getItem":
-    case "getCuenta":
-    case "getUser":
-    case "getProfile":
-    case "getPerfil":
-    case "getState":
-    case "getSnapshot":
-    case "getCuentaSnapshot":
-    case "getModuleSnapshot":
-      return null;
+    case "toggle-theme":
+    case "change-theme":
+      return updateThemeData();
+
+    case "change-language":
+    case "update-language":
+      return updateLanguageData();
+
+    case "change-password":
+      return changePasswordData();
 
     default:
       return null;
   }
 }
 
-/* =========================================================
-   SAFE CALL
-========================================================= */
+function onClick(event) {
+  const trigger = event.target?.closest?.(ACTION_SELECTOR);
 
-function safeCall(target, method, args = [], fallback = undefined) {
-  try {
-    const fn = target?.[method];
+  if (!trigger || !state.container?.contains(trigger)) return;
 
-    if (typeof fn === "function") {
-      return fn.apply(target, Array.isArray(args) ? args : []);
-    }
-  } catch (error) {
-    safeWarn(`Error calling ${method}`, error);
-  }
+  const action = getActionName(trigger);
+  if (!action) return;
 
-  return fallback;
+  event.preventDefault();
+  void handleAction(action);
 }
 
-function guardedCall(target, method, args = [], fallback = undefined) {
-  const callArgs = Array.isArray(args) ? args : [];
+function onChange(event) {
+  const field = event.target?.closest?.(FIELD_SELECTOR);
 
-  if (!shouldAllowCuentaMethod(method, callArgs)) {
-    logBlockedCuentaMethod(method, callArgs);
+  if (!field || !state.container?.contains(field)) return;
 
-    return fallback !== undefined ? fallback : getDefaultFallback(method);
-  }
+  const form = readForm();
 
-  return safeCall(target, method, callArgs, fallback);
-}
+  patchState({
+    view: { form },
+  });
 
-function callAny(candidates = [], args = [], fallback = undefined, options = {}) {
-  const opts = internalSafeObject(options);
+  const action = getActionName(field);
 
-  for (const candidate of candidates) {
-    const target = candidate?.[0];
-    const method = candidate?.[1];
-
-    if (!target || !method) continue;
-
-    const result =
-      opts.guarded === true
-        ? guardedCall(target, method, args, undefined)
-        : safeCall(target, method, args, undefined);
-
-    if (result !== undefined) {
-      return result;
-    }
-  }
-
-  return fallback;
-}
-
-function asyncCallAny(candidates = [], args = [], fallback = undefined, options = {}) {
-  try {
-    return Promise.resolve(callAny(candidates, args, fallback, options));
-  } catch (error) {
-    safeWarn("asyncCallAny falló.", error);
-    return Promise.resolve(fallback);
+  if (action === "change-language") {
+    void updateLanguageData();
   }
 }
 
-/* =========================================================
-   GUARDED VIEW BRIDGE
-========================================================= */
+function bindEvents() {
+  if (!state.container || state.abortController) return;
 
-function createGuardedCuentaViewBridge(view) {
-  const source = view || {};
-  const cache = new Map();
+  state.abortController = new AbortController();
 
-  if (typeof Proxy !== "function" || !isProxyable(source)) {
-    return source;
-  }
+  state.container.addEventListener("click", onClick, {
+    signal: state.abortController.signal,
+  });
 
-  return new Proxy(source, {
-    get(target, prop, receiver) {
-      if (prop === "__raw") return target;
-      if (prop === "__source") return CUENTA_INDEX_SOURCE;
-      if (prop === "__module") return CUENTA_MODULE_NAME;
-
-      const value = Reflect.get(target, prop, receiver);
-
-      if (!isFn(value)) {
-        return value;
-      }
-
-      const method = String(prop);
-
-      if (cache.has(method)) {
-        return cache.get(method);
-      }
-
-      const wrapped = function guardedCuentaViewMethod(...args) {
-        if (!shouldAllowCuentaMethod(method, args)) {
-          logBlockedCuentaMethod(method, args);
-          return getDefaultFallback(method);
-        }
-
-        try {
-          return value.apply(target, args);
-        } catch (error) {
-          safeWarn(`CuentaView.${method} falló.`, error);
-          throw error;
-        }
-      };
-
-      try {
-        Object.defineProperties(wrapped, {
-          name: {
-            value: `guardedCuenta_${method}`,
-          },
-          routeViewKey: {
-            value: "cuenta",
-            enumerable: true,
-          },
-          routeViewName: {
-            value: CUENTA_VIEW_NAME,
-            enumerable: true,
-          },
-        });
-      } catch {}
-
-      cache.set(method, wrapped);
-
-      return wrapped;
-    },
-
-    apply(target, thisArg, args) {
-      if (!shouldAllowCuentaMethod("render", args)) {
-        logBlockedCuentaMethod("render", args);
-        return null;
-      }
-
-      return Reflect.apply(target, thisArg, args);
-    },
-
-    set(target, prop, value) {
-      try {
-        target[prop] = value;
-        return true;
-      } catch {
-        return false;
-      }
-    },
+  state.container.addEventListener("change", onChange, {
+    signal: state.abortController.signal,
   });
 }
 
-export const CuentaView = createGuardedCuentaViewBridge(RawCuentaView);
-
-/* =========================================================
-   CORE EXPORTS
-========================================================= */
-
-export { CuentaView as View };
-
-export const view = CuentaView;
-export const component = CuentaView;
-export const page = CuentaView;
-
-/* =========================================================
-   VIEW API
-========================================================= */
-
-export const init = (...args) =>
-  asyncCallAny(
-    [
-      [RawCuentaView, "init"],
-      [RawCuentaView, "mount"],
-      [RawCuentaView, "render"],
-    ],
-    args,
-    CuentaView,
-    { guarded: true }
-  );
-
-export const mount = (...args) =>
-  asyncCallAny(
-    [
-      [RawCuentaView, "mount"],
-      [RawCuentaView, "init"],
-      [RawCuentaView, "render"],
-    ],
-    args,
-    CuentaView,
-    { guarded: true }
-  );
-
-export const render = (...args) =>
-  callAny(
-    [
-      [RawCuentaView, "render"],
-      [RawCuentaView, "mount"],
-      [RawCuentaView, "init"],
-    ],
-    args,
-    null,
-    { guarded: true }
-  );
-
-export const reload = (...args) =>
-  asyncCallAny(
-    [
-      [RawCuentaView, "reload"],
-      [RawCuentaView, "refresh"],
-      [RawCuentaView, "refreshCuenta"],
-      [RawCuentaView, "loadCuenta"],
-      [RawCuentaView, "load"],
-    ],
-    args,
-    CuentaView,
-    { guarded: true }
-  );
-
-export const refresh = (...args) =>
-  reload(...args);
-
-export const destroy = (...args) =>
-  callAny(
-    [
-      [RawCuentaView, "destroy"],
-      [RawCuentaView, "unmount"],
-      [RawCuentaView, "dispose"],
-    ],
-    args,
-    true
-  );
-
-export const unmount = (...args) =>
-  callAny(
-    [
-      [RawCuentaView, "unmount"],
-      [RawCuentaView, "destroy"],
-      [RawCuentaView, "dispose"],
-    ],
-    args,
-    true
-  );
-
-export const dispose = destroy;
-export const bootstrap = init;
-
-/* =========================================================
-   ACTIONS API
-========================================================= */
-
-export const loadCuenta = (...args) =>
-  asyncCallAny(
-    [
-      [RawCuentaView, "loadCuenta"],
-      [RawCuentaView, "reload"],
-      [RawCuentaView, "refresh"],
-      [RawCuentaView, "load"],
-    ],
-    args,
-    CuentaView,
-    { guarded: true }
-  );
-
-export const saveCuenta = (...args) =>
-  asyncCallAny(
-    [
-      [RawCuentaView, "saveCuenta"],
-      [RawCuentaView, "save"],
-      [RawCuentaView, "saveProfile"],
-      [RawCuentaView, "savePerfil"],
-      [RawCuentaView, "updateProfile"],
-      [RawCuentaView, "updatePerfil"],
-      [RawCuentaView, "updateCuenta"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-export const save = (...args) =>
-  saveCuenta(...args);
-
-export const saveProfile = (...args) =>
-  saveCuenta(...args);
-
-export const savePerfil = (...args) =>
-  saveCuenta(...args);
-
-export const updateProfile = (...args) =>
-  saveCuenta(...args);
-
-export const updatePerfil = (...args) =>
-  saveCuenta(...args);
-
-export const updateCuenta = (...args) =>
-  saveCuenta(...args);
-
-export const updateTheme = (...args) =>
-  asyncCallAny(
-    [
-      [RawCuentaView, "updateTheme"],
-      [RawCuentaView, "updateCuentaTheme"],
-      [RawCuentaView, "setTheme"],
-      [RawCuentaView, "setCuentaTheme"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-export const updateCuentaTheme = (...args) =>
-  updateTheme(...args);
-
-export const setTheme = (...args) =>
-  updateTheme(...args);
-
-export const setCuentaTheme = (...args) =>
-  updateTheme(...args);
-
-export const updateLanguage = (...args) =>
-  asyncCallAny(
-    [
-      [RawCuentaView, "updateLanguage"],
-      [RawCuentaView, "updateCuentaLanguage"],
-      [RawCuentaView, "setLanguage"],
-      [RawCuentaView, "setCuentaLanguage"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-export const updateCuentaLanguage = (...args) =>
-  updateLanguage(...args);
-
-export const setLanguage = (...args) =>
-  updateLanguage(...args);
-
-export const setCuentaLanguage = (...args) =>
-  updateLanguage(...args);
-
-export const refreshCuenta = (...args) =>
-  asyncCallAny(
-    [
-      [RawCuentaView, "refreshCuenta"],
-      [RawCuentaView, "refresh"],
-      [RawCuentaView, "reload"],
-      [RawCuentaView, "loadCuenta"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-export const changePassword = (...args) =>
-  asyncCallAny(
-    [
-      [RawCuentaView, "changePassword"],
-      [RawCuentaView, "updatePassword"],
-      [RawCuentaView, "savePassword"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-export const updatePassword = (...args) =>
-  changePassword(...args);
-
-export const savePassword = (...args) =>
-  changePassword(...args);
-
-export const openModal = (...args) =>
-  callAny(
-    [
-      [RawCuentaView, "openModal"],
-      [RawCuentaView, "openCuentaModal"],
-      [RawCuentaView, "open"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-export const openCuentaModal = (...args) =>
-  openModal(...args);
-
-export const closeModal = (...args) =>
-  callAny(
-    [
-      [RawCuentaView, "closeModal"],
-      [RawCuentaView, "closeCuentaModal"],
-      [RawCuentaView, "close"],
-    ],
-    args,
-    true
-  );
-
-export const closeCuentaModal = (...args) =>
-  closeModal(...args);
-
-/* =========================================================
-   DATA API
-========================================================= */
-
-export const getItem = (...args) =>
-  callAny(
-    [
-      [RawCuentaView, "getItem"],
-      [RawCuentaView, "getCuenta"],
-      [RawCuentaView, "getUser"],
-      [RawCuentaView, "getProfile"],
-      [RawCuentaView, "getPerfil"],
-    ],
-    args,
-    null
-  );
-
-export const getCuenta = (...args) =>
-  getItem(...args);
-
-export const getUser = (...args) =>
-  getItem(...args);
-
-export const getProfile = (...args) =>
-  getItem(...args);
-
-export const getPerfil = (...args) =>
-  getItem(...args);
-
-export const getState = (...args) =>
-  callAny(
-    [
-      [RawCuentaView, "getState"],
-      [RawCuentaView, "getSnapshot"],
-      [RawCuentaView, "getCuentaSnapshot"],
-    ],
-    args,
-    null
-  );
-
-export const getCuentaView = () =>
-  CuentaView;
-
-export const getRawCuentaView = () =>
-  RawCuentaView;
-
-export const canRenderCuentaNow = (...args) =>
-  shouldAllowCuentaMethod("render", args);
-
-export const getCuentaRouteDebug = (...args) => {
-  const evaluation = evaluateCuentaRoute(args);
-
-  return {
-    source: CUENTA_INDEX_SOURCE,
-    allowed: evaluation.allowed,
-    reason: evaluation.reason,
-
-    browserPath: getBrowserPath(),
-    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
-
-    appRoute: getAppStatePath(),
-    appRouteCanonicalPath: getCleanCanonicalPath(getAppStatePath() || "/"),
-
-    appPublicPath: getAppPublicPath(),
-    appPublicCanonicalPath: getCleanCanonicalPath(getAppPublicPath() || "/"),
-
-    signals: evaluation.signals,
-    positiveSignal: evaluation.positiveSignal,
-    blockingSignal: evaluation.blockingSignal,
-  };
-};
-
-export const getSnapshot = (...args) => {
-  const base = callAny(
-    [
-      [RawCuentaView, "getSnapshot"],
-      [RawCuentaView, "getCuentaSnapshot"],
-      [RawCuentaView, "getState"],
-    ],
-    args,
-    null
-  );
-
-  return {
-    ...(isObject(base) ? base : {}),
-
-    module: CUENTA_MODULE_NAME,
-    viewName: CUENTA_VIEW_NAME,
-    version: CUENTA_MODULE_VERSION,
-    source: CUENTA_INDEX_SOURCE,
-
-    initialized: isInitialized(),
-    destroyed: isDestroyed(),
-    mounted: isMounted(),
-
-    item: getItem(),
-
-    hasView: Boolean(CuentaView),
-    hasRawView: Boolean(RawCuentaView),
-
-    route: getCuentaRouteDebug(...args),
-    cuentaAllowedNow: canRenderCuentaNow(...args),
-  };
-};
-
-export const getCuentaSnapshot = (...args) =>
-  getSnapshot(...args);
-
-export const getModuleSnapshot = (...args) =>
-  getSnapshot(...args);
-
-/* =========================================================
-   UTILS REUTILIZABLES
-========================================================= */
-
-export const safeText = (...args) =>
-  localSafeText(...args);
-
-export const safeNumber = (...args) =>
-  localSafeNumber(...args);
-
-export const safeArray = (...args) =>
-  localSafeArray(...args);
-
-export const safeObject = (...args) =>
-  localSafeObject(...args);
-
-export const safeBoolean = (...args) =>
-  localSafeBoolean(...args);
-
-export const first = (...args) =>
-  localFirst(...args);
-
-export const normalizeWhitespace = (...args) =>
-  localNormalizeWhitespace(...args);
-
-export const escapeHtml = (...args) =>
-  localEscapeHtml(...args);
-
-export const truncate = (...args) =>
-  localTruncate(...args);
-
-export const truncateText = (...args) =>
-  localTruncate(...args);
-
-/* =========================================================
-   FLAGS · CORREGIDOS
-========================================================= */
-
-function readViewBooleanFlag(propName = "", methodName = "") {
+function unbindEvents() {
   try {
-    if (methodName && typeof RawCuentaView?.[methodName] === "function") {
-      return Boolean(RawCuentaView[methodName]());
-    }
+    state.abortController?.abort();
   } catch {}
 
-  try {
-    const value = RawCuentaView?.[propName];
-
-    if (typeof value === "function") {
-      return Boolean(value.call(RawCuentaView));
-    }
-
-    return Boolean(value);
-  } catch {
-    return false;
-  }
+  state.abortController = null;
 }
 
-export const isInitialized = () =>
-  readViewBooleanFlag("initialized", "isInitialized");
+function setContainer(container) {
+  if (!container || container === state.container) return;
 
-export const isDestroyed = () =>
-  readViewBooleanFlag("destroyed", "isDestroyed");
+  unbindEvents();
 
-export const isMounted = () =>
-  readViewBooleanFlag("mounted", "isMounted");
+  state.container = container;
+  state.container.dataset.view = CUENTA_VIEW_NAME;
+  state.container.dataset.cuentaController = CUENTA_INDEX_VERSION;
+
+  bindEvents();
+}
 
 /* =========================================================
-   PUBLIC API OBJECT
+   ROUTER PUBLIC API
 ========================================================= */
 
-export const CuentaModule = Object.freeze({
-  name: CUENTA_MODULE_NAME,
-  viewName: CUENTA_VIEW_NAME,
-  version: CUENTA_MODULE_VERSION,
-  source: CUENTA_INDEX_SOURCE,
+export async function mount(target = null, options = {}) {
+  const container = resolveContainer(target);
 
-  View: CuentaView,
-  RawView: RawCuentaView,
+  if (!container) {
+    throw new Error("CUENTA_MOUNT_TARGET_MISSING");
+  }
 
-  CuentaView,
-  RawCuentaView,
+  setContainer(container);
 
-  view,
-  component,
-  page,
+  patchState({
+    mounted: true,
+    error: null,
+    view: {
+      form: safeObject(options?.form),
+    },
+  });
 
-  init,
+  await loadCuentaData({
+    force: Boolean(options?.force),
+    silent: Boolean(options?.silent),
+  });
+
+  emit("cuenta:mounted", { item: state.item });
+
+  return CuentaView;
+}
+
+export function render(target = null, options = {}) {
+  const container = resolveContainer(target) || state.container;
+
+  if (container) {
+    setContainer(container);
+  }
+
+  if (options?.item !== undefined) {
+    patchState({ item: options.item });
+  }
+
+  if (options?.state) {
+    patchState(options.state);
+  }
+
+  return renderView();
+}
+
+export async function reload(options = {}) {
+  return loadCuentaData({
+    force: true,
+    silent: Boolean(options?.silent),
+  });
+}
+
+export function destroy() {
+  unbindEvents();
+
+  if (state.container) {
+    delete state.container.dataset.cuentaController;
+  }
+
+  patchState({
+    mounted: false,
+    loading: false,
+    refreshing: false,
+    saving: false,
+    error: null,
+    root: null,
+    container: null,
+    abortController: null,
+  });
+
+  emit("cuenta:destroyed");
+
+  return true;
+}
+
+export const init = mount;
+export const bootstrap = mount;
+export const refresh = reload;
+export const unmount = destroy;
+export const dispose = destroy;
+
+export function getState() {
+  return {
+    mounted: state.mounted,
+    loading: state.loading,
+    refreshing: state.refreshing,
+    saving: state.saving,
+    error: state.error,
+    item: state.item,
+    view: {
+      form: { ...state.view.form },
+    },
+    version: CUENTA_INDEX_VERSION,
+  };
+}
+
+export const getSnapshot = getState;
+export const getCuentaSnapshot = getState;
+
+export const getItem = () => state.item;
+export const getCuenta = () => state.item;
+
+export const loadCuenta = reload;
+export const refreshCuenta = reload;
+
+export const saveCuenta = saveCuentaData;
+export const save = saveCuentaData;
+export const saveProfile = saveCuentaData;
+export const savePerfil = saveCuentaData;
+export const updateProfile = saveCuentaData;
+export const updatePerfil = saveCuentaData;
+export const updateCuenta = saveCuentaData;
+
+export const updateTheme = updateThemeData;
+export const updateCuentaTheme = updateThemeData;
+export const setTheme = updateThemeData;
+
+export const updateLanguage = updateLanguageData;
+export const updateCuentaLanguage = updateLanguageData;
+export const setLanguage = updateLanguageData;
+
+export const changePassword = changePasswordData;
+export const updatePassword = changePasswordData;
+export const savePassword = changePasswordData;
+
+export const CuentaView = Object.freeze({
+  name: CUENTA_VIEW_NAME,
+  version: CUENTA_INDEX_VERSION,
+
   mount,
+  init,
+  bootstrap,
   render,
   reload,
   refresh,
   destroy,
   unmount,
   dispose,
-  bootstrap,
 
   loadCuenta,
+  refreshCuenta,
 
   saveCuenta,
   save,
@@ -1375,130 +920,25 @@ export const CuentaModule = Object.freeze({
   updateTheme,
   updateCuentaTheme,
   setTheme,
-  setCuentaTheme,
 
   updateLanguage,
   updateCuentaLanguage,
   setLanguage,
-  setCuentaLanguage,
-
-  refreshCuenta,
 
   changePassword,
   updatePassword,
   savePassword,
 
-  openModal,
-  openCuentaModal,
-  closeModal,
-  closeCuentaModal,
-
-  getItem,
-  getCuenta,
-  getUser,
-  getProfile,
-  getPerfil,
-
   getState,
   getSnapshot,
   getCuentaSnapshot,
-  getModuleSnapshot,
-
-  getCuentaView,
-  getRawCuentaView,
-
-  canRenderCuentaNow,
-  getCuentaRouteDebug,
-
-  isInitialized,
-  isDestroyed,
-  isMounted,
-
-  safeText,
-  safeNumber,
-  safeArray,
-  safeObject,
-  safeBoolean,
-  first,
-  normalizeWhitespace,
-  escapeHtml,
-  truncate,
-  truncateText,
+  getItem,
+  getCuenta,
 });
 
-/* =========================================================
-   LEGACY GLOBAL BRIDGE
-========================================================= */
-
-export function registerGlobalBridge() {
-  const root = getGlobalRoot();
-
-  try {
-    const previousOnionCuenta =
-      root.OnionCuenta && typeof root.OnionCuenta === "object"
-        ? root.OnionCuenta
-        : {};
-
-    root.OnionCuenta = {
-      ...previousOnionCuenta,
-      ...CuentaModule,
-    };
-
-    root.CuentaView = CuentaView;
-    root.OnionCuentaView = CuentaView;
-    root.CuentaModule = CuentaModule;
-  } catch (error) {
-    safeWarn("No se pudo registrar bridge global.", error);
-  }
-
-  try {
-    const appCore = root?.AppCore;
-
-    if (appCore) {
-      if (!appCore.modules || typeof appCore.modules !== "object") {
-        appCore.modules = {};
-      }
-
-      appCore.modules.Cuenta = CuentaModule;
-      appCore.modules.CuentaView = CuentaModule;
-      appCore.modules.OnionCuenta = CuentaModule;
-
-      if (typeof appCore.modules.set === "function") {
-        try { appCore.modules.set("Cuenta", CuentaModule); } catch {}
-        try { appCore.modules.set("CuentaView", CuentaModule); } catch {}
-        try { appCore.modules.set("OnionCuenta", CuentaModule); } catch {}
-      }
-
-      if (typeof appCore.modules.register === "function") {
-        try { appCore.modules.register("Cuenta", CuentaModule); } catch {}
-        try { appCore.modules.register("CuentaView", CuentaModule); } catch {}
-        try { appCore.modules.register("OnionCuenta", CuentaModule); } catch {}
-      }
-    }
-  } catch (error) {
-    safeWarn("No se pudo registrar bridge en AppCore.modules.", error);
-  }
-
-  safeEmit("cuenta:index:ready", {
-    source: CUENTA_INDEX_SOURCE,
-    version: CUENTA_MODULE_VERSION,
-
-    hasView: Boolean(CuentaView),
-    hasRawView: Boolean(RawCuentaView),
-
-    route: getCuentaRouteDebug(),
-    allowedNow: canRenderCuentaNow(),
-  });
-
-  return CuentaModule;
-}
-
-/* =========================================================
-   READY
-========================================================= */
-
-export const bridge = registerGlobalBridge();
-
-export const ready = true;
+export const View = CuentaView;
+export const view = CuentaView;
+export const component = CuentaView;
+export const page = CuentaView;
 
 export default CuentaView;

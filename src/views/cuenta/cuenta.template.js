@@ -2,32 +2,18 @@
    Onion SPA - Cuenta Template
    Archivo: src/views/cuenta/cuenta.template.js
 
-   EXTREME PRO SYSTEM · ACCOUNT SETTINGS COMMAND CENTER · 14/10
-   CLEAN TEMPLATE ONLY · NO INLINE CSS · NO STYLE INJECTION
-   NO INLINE IMG HANDLERS · NO NATIVE TITLE TOOLTIP · CSP CLEAN
-   VARIABLES.CSS + UI.CSS + CUENTA.CSS EXTERNAL ONLY
-
-   RESPONSABILIDADES:
-   - render header premium de cuenta
-   - render panel productivo de ajustes
-   - render perfil / apariencia / idioma / privacidad / seguridad / actividad
-   - render loading / error / empty
-   - soportar avatar real + fallback por iniciales
-   - soportar darkMode / idioma / cambio de contraseña
-   - mantener compatibilidad con cuentaView.js
-   - mantener compatibilidad con cuenta.bindings.js
-   - acciones compatibles con data-action y data-cuenta-action
-   - inputs compatibles con data-role / data-cuenta-field / name
-   - preservar valores de state.view.form en rerender
-   - evitar IDs duplicados
-   - no inyectar CSS desde JS
-   - no usar handlers inline
-   - no definir :root local
+   Template puro de la vista Cuenta.
+   - Sin imports.
+   - Sin estado global.
+   - Sin store.
+   - Sin API.
+   - Sin Router.
+   - Sin listeners.
+   - Sin CSS inline.
+   - Sólo HTML seguro + data-* para el controlador.
 ========================================================= */
 
-import { cuentaState } from "./cuenta.state.js";
-import { getCuentaStore } from "./cuenta.store.js";
-import { normalizeCuentaModel } from "./cuenta.model.js";
+export const CUENTA_TEMPLATE_VERSION = "cuenta.template.stable.v1";
 
 /* =========================================================
    SAFE HELPERS
@@ -44,41 +30,10 @@ function safeText(value, fallback = "—") {
   return text || fallback;
 }
 
-function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-
-  if (typeof value === "string") {
-    let text = value
-      .trim()
-      .replace(/€/g, "")
-      .replace(/%/g, "")
-      .replace(/\s+/g, "");
-
-    const hasComma = text.includes(",");
-    const hasDot = text.includes(".");
-
-    if (hasComma && hasDot) {
-      text = text.replace(/\./g, "").replace(/,/g, ".");
-    } else if (hasComma) {
-      text = text.replace(/,/g, ".");
-    }
-
-    const parsed = Number(text);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
 function safeObject(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : fallback;
-}
-
-function safeArray(value, fallback = []) {
-  return Array.isArray(value) ? value : fallback;
 }
 
 function first(...values) {
@@ -106,29 +61,25 @@ function escapeAttr(value = "") {
   return escapeHtml(value);
 }
 
-function normalizeWhitespace(value = "") {
-  return safeText(value, "").replace(/\s+/g, " ").trim();
-}
-
-function normalizeKey(value = "") {
+function normalizeText(value = "") {
   return safeText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeKey(value = "") {
+  return normalizeText(value)
     .replace(/[\s-]+/g, "_")
     .replace(/[^\w]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .trim();
+    .replace(/^_+|_+$/g, "");
 }
 
 function safeBoolean(value, fallback = false) {
   if (typeof value === "boolean") return value;
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-    return value !== 0;
-  }
+  if (typeof value === "number") return value !== 0;
 
   const key = normalizeKey(value);
 
@@ -143,6 +94,7 @@ function safeBoolean(value, fallback = false) {
       "on",
       "dark",
       "enabled",
+      "active",
       "activo",
       "activa",
     ].includes(key)
@@ -159,6 +111,7 @@ function safeBoolean(value, fallback = false) {
       "off",
       "light",
       "disabled",
+      "inactive",
       "inactivo",
       "inactiva",
     ].includes(key)
@@ -167,16 +120,6 @@ function safeBoolean(value, fallback = false) {
   }
 
   return Boolean(fallback);
-}
-
-function truncate(value = "", max = 120) {
-  const text = safeText(value, "");
-  const limit = Math.max(1, safeNumber(max, 120));
-
-  if (!text) return "";
-  if (text.length <= limit) return text;
-
-  return `${text.slice(0, limit).trim()}…`;
 }
 
 function joinClasses(...values) {
@@ -194,6 +137,20 @@ function joinClasses(...values) {
 function boolAttr(condition, attr = "") {
   return condition ? attr : "";
 }
+
+function truncate(value = "", max = 120) {
+  const text = safeText(value, "");
+  const limit = Number.isFinite(Number(max)) ? Number(max) : 120;
+
+  if (!text) return "";
+  if (text.length <= limit) return text;
+
+  return `${text.slice(0, limit).trim()}…`;
+}
+
+/* =========================================================
+   NORMALIZATION
+========================================================= */
 
 function normalizeLangValue(value = "es") {
   const key = normalizeKey(value);
@@ -232,7 +189,7 @@ function isRenderableImageUrl(value = "") {
 }
 
 /* =========================================================
-   FORMAT
+   DATE FORMAT
 ========================================================= */
 
 function formatDate(value = null) {
@@ -240,9 +197,7 @@ function formatDate(value = null) {
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
+  if (Number.isNaN(date.getTime())) return "—";
 
   try {
     return new Intl.DateTimeFormat("es-ES", {
@@ -262,9 +217,7 @@ function formatDateOnly(value = null) {
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
+  if (Number.isNaN(date.getTime())) return "—";
 
   try {
     return new Intl.DateTimeFormat("es-ES", {
@@ -282,9 +235,7 @@ function formatRelativeDate(value = null) {
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return "Sin fecha";
-  }
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
 
   const diffMs = date.getTime() - Date.now();
   const diffMin = Math.round(diffMs / 60000);
@@ -317,63 +268,36 @@ function formatRelativeDate(value = null) {
    DATA RESOLUTION
 ========================================================= */
 
-function normalizeDetailSafe(raw = null) {
-  if (!raw || typeof raw !== "object") return null;
-
-  try {
-    const normalized = normalizeCuentaModel(raw);
-    return normalized || raw;
-  } catch {
-    return raw;
-  }
-}
-
 function resolveCuentaItem(item = null) {
-  if (item && typeof item === "object") {
-    return normalizeDetailSafe(item);
-  }
-
-  try {
-    const fromStore = getCuentaStore();
-
-    if (fromStore) {
-      return normalizeDetailSafe(fromStore);
-    }
-  } catch {}
-
-  try {
-    const fromState = safeObject(cuentaState?.item);
-
-    if (Object.keys(fromState).length) {
-      return normalizeDetailSafe(fromState);
-    }
-  } catch {}
-
-  return null;
+  return item && typeof item === "object" && !Array.isArray(item)
+    ? item
+    : null;
 }
 
 function resolveLocalState(state = {}) {
+  const source = safeObject(state);
+
   return {
-    ...safeObject(cuentaState),
-    ...safeObject(state),
+    loading: Boolean(source.loading),
+    refreshing: Boolean(source.refreshing),
+    saving: Boolean(source.saving),
+    error: source.error || null,
+    item: source.item || null,
     view: {
-      ...safeObject(cuentaState?.view),
-      ...safeObject(state?.view),
+      ...safeObject(source.view),
       form: {
-        ...safeObject(cuentaState?.view?.form),
-        ...safeObject(state?.view?.form),
+        ...safeObject(source.view?.form),
       },
     },
     action: {
-      ...safeObject(cuentaState?.action),
-      ...safeObject(state?.action),
+      ...safeObject(source.action),
     },
   };
 }
 
 function resolveForm(detail = {}, state = {}) {
   const localState = resolveLocalState(state);
-  const form = safeObject(localState?.view?.form);
+  const form = safeObject(localState.view?.form);
 
   const rawTheme = first(
     form.theme,
@@ -382,9 +306,16 @@ function resolveForm(detail = {}, state = {}) {
     detail.theme,
     detail.mode,
     detail.appearance,
+    detail.colorMode,
     detail.preferences?.theme,
+    detail.preferences?.mode,
     detail.preferences?.appearance,
+    detail.settings?.theme,
+    detail.settings?.mode,
+    detail.settings?.appearance,
     detail.raw?.theme,
+    detail.raw?.mode,
+    detail.raw?.appearance,
     ""
   );
 
@@ -399,6 +330,7 @@ function resolveForm(detail = {}, state = {}) {
       detail.preferences?.darkMode,
       detail.settings?.darkMode,
       detail.raw?.darkMode,
+      detail.raw?.isDark,
       false
     ),
     false
@@ -412,11 +344,16 @@ function resolveForm(detail = {}, state = {}) {
       detail.lang,
       detail.language,
       detail.locale,
+      detail.idioma,
       detail.preferences?.lang,
       detail.preferences?.language,
+      detail.preferences?.locale,
       detail.settings?.lang,
+      detail.settings?.language,
+      detail.settings?.locale,
       detail.raw?.lang,
       detail.raw?.language,
+      detail.raw?.locale,
       "es"
     )
   );
@@ -430,6 +367,7 @@ function resolveForm(detail = {}, state = {}) {
       detail.preferences?.privacyMode,
       detail.settings?.privacyMode,
       detail.raw?.privacyMode,
+      detail.raw?.privateMode,
       false
     ),
     false
@@ -444,6 +382,10 @@ function resolveForm(detail = {}, state = {}) {
       detail.fullName,
       detail.displayName,
       detail.nombre,
+      detail.profile?.name,
+      detail.profile?.displayName,
+      detail.user?.name,
+      detail.user?.displayName,
       detail.username,
       detail.email,
       "Usuario Onion"
@@ -460,12 +402,15 @@ function resolveForm(detail = {}, state = {}) {
       detail.telefono,
       detail.mobile,
       detail.profile?.phone,
-      detail.raw?.phone,
-      detail.raw?.telefono,
+      detail.profile?.telefono,
+      detail.user?.phone,
+      detail.user?.telefono,
       ""
     ),
     ""
   );
+
+  const theme = darkMode ? "dark" : normalizeThemeValue(rawTheme, darkMode);
 
   return {
     name,
@@ -485,9 +430,9 @@ function resolveForm(detail = {}, state = {}) {
     language: lang,
     locale: lang,
 
-    theme: darkMode ? "dark" : normalizeThemeValue(rawTheme, darkMode),
-    mode: darkMode ? "dark" : normalizeThemeValue(rawTheme, darkMode),
-    appearance: darkMode ? "dark" : normalizeThemeValue(rawTheme, darkMode),
+    theme,
+    mode: theme,
+    appearance: theme,
   };
 }
 
@@ -501,25 +446,14 @@ function getDisplayName(detail = {}, state = {}) {
       detail.fullName,
       detail.displayName,
       detail.nombre,
-      detail.username,
-      detail.email,
-
       detail.profile?.name,
       detail.profile?.fullName,
       detail.profile?.displayName,
-
       detail.user?.name,
       detail.user?.fullName,
       detail.user?.displayName,
-
-      detail.raw?.name,
-      detail.raw?.fullName,
-      detail.raw?.displayName,
-      detail.raw?.nombre,
-      detail.raw?.username,
-      detail.raw?.email,
-      detail.raw?.user?.name,
-      detail.raw?.user?.displayName
+      detail.username,
+      detail.email
     ),
     "Usuario Onion"
   );
@@ -534,10 +468,10 @@ function getEmail(detail = {}) {
       detail.userEmail,
       detail.profile?.email,
       detail.user?.email,
+      detail.account?.email,
       detail.raw?.email,
       detail.raw?.emailLower,
-      detail.raw?.mail,
-      detail.raw?.user?.email
+      detail.raw?.mail
     ),
     "Sin email"
   );
@@ -553,11 +487,10 @@ function getUsername(detail = {}) {
       detail.handle,
       detail.profile?.username,
       detail.user?.username,
+      detail.account?.username,
       detail.raw?.username,
       detail.raw?.usernameLower,
-      detail.raw?.slug,
-      detail.raw?.handle,
-      detail.raw?.user?.username
+      detail.raw?.slug
     ),
     "sin-usuario"
   );
@@ -574,12 +507,10 @@ function getUserId(detail = {}) {
       detail.profileId,
       detail.user?.userId,
       detail.user?.id,
+      detail.account?.userId,
+      detail.account?.id,
       detail.raw?.userId,
-      detail.raw?.id,
-      detail.raw?.uid,
-      detail.raw?.sub,
-      detail.raw?.user?.userId,
-      detail.raw?.user?.id
+      detail.raw?.id
     ),
     "—"
   );
@@ -593,13 +524,11 @@ function getClienteId(detail = {}) {
       detail.customerId,
       detail.cliente?.clienteId,
       detail.cliente?.id,
-      detail.client?.id,
-      detail.customer?.id,
+      detail.user?.clienteId,
+      detail.account?.clienteId,
       detail.raw?.clienteId,
       detail.raw?.clientId,
-      detail.raw?.customerId,
-      detail.raw?.cliente?.clienteId,
-      detail.raw?.cliente?.id
+      detail.raw?.customerId
     ),
     "—"
   );
@@ -612,9 +541,10 @@ function getRoleValue(detail = {}) {
     detail.accountRole,
     detail.profileRole,
     detail.user?.role,
+    detail.user?.rol,
+    detail.account?.role,
     detail.raw?.role,
     detail.raw?.rol,
-    detail.raw?.user?.role,
     "user"
   );
 
@@ -628,15 +558,11 @@ function getRoleValue(detail = {}) {
 function getRole(detail = {}) {
   const role = getRoleValue(detail);
 
-  if (role === "admin" || role === "administrator") return "Administrador";
-  if (role === "superadmin" || role === "super_admin" || role === "root") return "Super admin";
-  if (role === "support" || role === "soporte") return "Soporte";
-  if (role === "technician" || role === "tecnico" || role === "técnico") return "Técnico";
-  if (role === "owner") return "Owner";
-  if (role === "client" || role === "cliente") return "Cliente";
-  if (role === "user") return "Usuario";
+  if (["admin", "administrator", "superadmin", "super_admin", "root", "owner"].includes(role)) {
+    return "Administrador";
+  }
 
-  return safeText(role, "Usuario");
+  return "Usuario";
 }
 
 function getPhone(detail = {}, state = {}) {
@@ -649,14 +575,12 @@ function getPhone(detail = {}, state = {}) {
       detail.phone,
       detail.telefono,
       detail.mobile,
-      detail.telefonoMovil,
       detail.profile?.phone,
       detail.profile?.telefono,
       detail.user?.phone,
+      detail.user?.telefono,
       detail.raw?.phone,
-      detail.raw?.telefono,
-      detail.raw?.mobile,
-      detail.raw?.user?.phone
+      detail.raw?.telefono
     ),
     "No configurado"
   );
@@ -683,47 +607,27 @@ function getAvatarUrl(detail = {}) {
       detail.profile?.avatarUrl,
       detail.profile?.avatar,
       detail.profile?.photoUrl,
-      detail.profile?.photo,
+      detail.profile?.photoURL,
       detail.profile?.imageUrl,
-      detail.profile?.image,
       detail.profile?.picture,
 
       detail.user?.avatarUrl,
       detail.user?.avatar,
       detail.user?.photoUrl,
-      detail.user?.photo,
+      detail.user?.photoURL,
       detail.user?.imageUrl,
-      detail.user?.image,
       detail.user?.picture,
 
+      detail.account?.avatarUrl,
+      detail.account?.avatar,
+      detail.account?.photoUrl,
+      detail.account?.imageUrl,
+
       detail.raw?.avatarUrl,
-      detail.raw?.avatarURL,
-      detail.raw?.avatar_url,
       detail.raw?.avatar,
       detail.raw?.photoUrl,
-      detail.raw?.photoURL,
-      detail.raw?.photo_url,
-      detail.raw?.photo,
       detail.raw?.imageUrl,
-      detail.raw?.image,
-      detail.raw?.picture,
-      detail.raw?.pictureUrl,
-      detail.raw?.profilePicture,
-      detail.raw?.profilePictureUrl,
-
-      detail.raw?.profile?.avatarUrl,
-      detail.raw?.profile?.avatar,
-      detail.raw?.profile?.photoUrl,
-      detail.raw?.profile?.photo,
-      detail.raw?.profile?.imageUrl,
-
-      detail.raw?.user?.avatarUrl,
-      detail.raw?.user?.avatar,
-      detail.raw?.user?.photoUrl,
-      detail.raw?.user?.photo,
-      detail.raw?.user?.imageUrl,
-      detail.raw?.user?.image,
-      detail.raw?.user?.picture
+      detail.raw?.picture
     ),
     ""
   );
@@ -736,11 +640,9 @@ function getCreatedAt(detail = {}) {
     detail.created,
     detail.registeredAt,
     detail.user?.createdAt,
+    detail.account?.createdAt,
     detail.raw?.createdAt,
-    detail.raw?.created_at,
-    detail.raw?.created,
-    detail.raw?.registeredAt,
-    detail.raw?.user?.createdAt
+    detail.raw?.created_at
   );
 }
 
@@ -753,15 +655,10 @@ function getUpdatedAt(detail = {}) {
     detail.preferences?.updatedAt,
     detail.settings?.updatedAt,
     detail.user?.updatedAt,
-    detail.createdAt,
+    detail.account?.updatedAt,
     detail.raw?.updatedAt,
     detail.raw?.updated_at,
-    detail.raw?.modifiedAt,
-    detail.raw?.lastUpdatedAt,
-    detail.raw?.preferences?.updatedAt,
-    detail.raw?.settings?.updatedAt,
-    detail.raw?.user?.updatedAt,
-    detail.raw?.createdAt
+    detail.raw?.preferences?.updatedAt
   );
 }
 
@@ -773,10 +670,7 @@ function getLastLoginAt(detail = {}) {
     detail.lastAccessAt,
     detail.session?.lastLoginAt,
     detail.raw?.lastLoginAt,
-    detail.raw?.lastLogin,
-    detail.raw?.lastSeenAt,
-    detail.raw?.lastAccessAt,
-    detail.raw?.session?.lastLoginAt
+    detail.raw?.lastSeenAt
   );
 }
 
@@ -786,26 +680,14 @@ function getLangValue(detail = {}, state = {}) {
   return normalizeLangValue(
     first(
       form.lang,
-      form.language,
-      form.locale,
       detail.lang,
       detail.language,
       detail.locale,
       detail.idioma,
       detail.preferences?.lang,
       detail.preferences?.language,
-      detail.preferences?.locale,
       detail.settings?.lang,
       detail.settings?.language,
-      detail.settings?.locale,
-      detail.raw?.lang,
-      detail.raw?.language,
-      detail.raw?.locale,
-      detail.raw?.idioma,
-      detail.raw?.preferences?.lang,
-      detail.raw?.preferences?.language,
-      detail.raw?.settings?.lang,
-      detail.raw?.settings?.language,
       "es"
     )
   );
@@ -823,7 +705,7 @@ function getLangLabel(detail = {}, state = {}) {
 function getThemeValue(detail = {}, state = {}) {
   const form = resolveForm(detail, state);
 
-  const explicitTheme = normalizeThemeValue(
+  return normalizeThemeValue(
     first(
       form.theme,
       form.mode,
@@ -838,11 +720,6 @@ function getThemeValue(detail = {}, state = {}) {
       detail.settings?.theme,
       detail.settings?.mode,
       detail.settings?.appearance,
-      detail.raw?.theme,
-      detail.raw?.mode,
-      detail.raw?.appearance,
-      detail.raw?.preferences?.theme,
-      detail.raw?.settings?.theme,
       ""
     ),
     safeBoolean(
@@ -851,17 +728,11 @@ function getThemeValue(detail = {}, state = {}) {
         detail.darkMode,
         detail.isDark,
         detail.preferences?.darkMode,
-        detail.settings?.darkMode,
-        detail.raw?.darkMode,
-        detail.raw?.isDark,
-        detail.raw?.preferences?.darkMode,
-        detail.raw?.settings?.darkMode
+        detail.settings?.darkMode
       ),
       false
     )
   );
-
-  return explicitTheme;
 }
 
 function isDarkMode(detail = {}, state = {}) {
@@ -882,15 +753,11 @@ function getPrivacyMode(detail = {}, state = {}) {
   return safeBoolean(
     first(
       form.privacyMode,
-      form.privateMode,
       detail.privacyMode,
       detail.privateMode,
       detail.preferences?.privacyMode,
       detail.settings?.privacyMode,
-      detail.raw?.privacyMode,
-      detail.raw?.privateMode,
-      detail.raw?.preferences?.privacyMode,
-      detail.raw?.settings?.privacyMode
+      false
     ),
     false
   );
@@ -903,11 +770,7 @@ function getPrivacyLabel(detail = {}, state = {}) {
 function getSecurityStatusLabel(detail = {}) {
   const lastLogin = getLastLoginAt(detail);
 
-  if (lastLogin) {
-    return `Último acceso ${formatRelativeDate(lastLogin)}`;
-  }
-
-  return "Cambio manual";
+  return lastLogin ? `Último acceso ${formatRelativeDate(lastLogin)}` : "Cambio manual";
 }
 
 function getAccountStatus(detail = {}) {
@@ -917,17 +780,18 @@ function getAccountStatus(detail = {}) {
       detail.estado,
       detail.accountStatus,
       detail.profileStatus,
+      detail.user?.status,
+      detail.account?.status,
       detail.raw?.status,
-      detail.raw?.estado,
-      detail.raw?.accountStatus,
       "active"
     )
   );
 
   if (["active", "activo", "enabled"].includes(status)) return "Activa";
   if (["pending", "pendiente"].includes(status)) return "Pendiente";
-  if (["blocked", "bloqueada", "disabled", "inactive", "inactivo"].includes(status)) return "Bloqueada";
-  if (["suspended", "suspendida"].includes(status)) return "Suspendida";
+  if (["disabled", "inactive", "inactivo", "blocked", "bloqueado"].includes(status)) return "Bloqueada";
+  if (["suspended", "suspendido"].includes(status)) return "Suspendida";
+  if (["deleted", "eliminado", "archived", "archivado"].includes(status)) return "No disponible";
 
   return safeText(status, "Activa");
 }
@@ -937,13 +801,13 @@ function getAccountStatusTone(detail = {}) {
 
   if (["activa", "active"].includes(status)) return "success";
   if (["pendiente", "pending"].includes(status)) return "warning";
-  if (["bloqueada", "blocked", "disabled", "suspendida", "suspended"].includes(status)) return "danger";
+  if (["bloqueada", "blocked", "suspendida", "suspended", "no_disponible"].includes(status)) return "danger";
 
   return "default";
 }
 
 function getInitials(value = "") {
-  const text = normalizeWhitespace(value);
+  const text = safeText(value, "");
 
   if (!text) return "ON";
 
@@ -1004,14 +868,15 @@ function renderAvatar(detail = {}, state = {}, size = "hero") {
 
   return `
     <div
-      class="${joinClasses(
-        "cuenta-avatar",
-        `cuenta-avatar--${normalizeKey(size) || "hero"}`,
-        hasImage ? "has-image" : ""
+      class="${escapeAttr(
+        joinClasses(
+          "cuenta-avatar",
+          `cuenta-avatar--${normalizeKey(size) || "hero"}`,
+          hasImage ? "has-image" : ""
+        )
       )}"
       role="img"
       aria-label="${escapeAttr(name)}"
-      data-tooltip="${escapeAttr(name)}"
       data-has-avatar="${hasImage ? "true" : "false"}"
     >
       ${
@@ -1102,7 +967,7 @@ function renderField({
   const fieldName = safeText(field || name || dataRole, "");
 
   return `
-    <label class="${joinClasses("cuenta-field", wide ? "cuenta-field--wide" : "")}">
+    <label class="${escapeAttr(joinClasses("cuenta-field", wide ? "cuenta-field--wide" : ""))}">
       <span class="cuenta-field-label">${escapeHtml(label)}</span>
 
       <input
@@ -1134,7 +999,7 @@ function renderSwitchRow({
   disabled = false,
   checkedLabel = "Activo",
   uncheckedLabel = "Inactivo",
-  buttonLabel = "",
+  buttonLabel = "Guardar",
   loadingLabel = "Procesando...",
 } = {}) {
   const isChecked = Boolean(checked);
@@ -1150,7 +1015,13 @@ function renderSwitchRow({
       <div class="cuenta-switch-area">
         <label
           for="${escapeAttr(inputId)}"
-          class="${joinClasses("cuenta-switch", isChecked ? "is-checked" : "", disabled ? "is-disabled" : "")}"
+          class="${escapeAttr(
+            joinClasses(
+              "cuenta-switch",
+              isChecked ? "is-checked" : "",
+              disabled ? "is-disabled" : ""
+            )
+          )}"
           aria-label="${escapeAttr(title)}"
         >
           <span class="cuenta-switch-track" aria-hidden="true">
@@ -1178,7 +1049,7 @@ function renderSwitchRow({
       <div class="cuenta-control-actions">
         ${renderButton({
           action,
-          label: buttonLabel || "Cambiar",
+          label: buttonLabel,
           variant: "soft",
           loading: disabled,
           loadingLabel,
@@ -1305,21 +1176,12 @@ function renderFeedback({ state = {}, hasDetail = false } = {}) {
   const localState = resolveLocalState(state);
 
   const error = safeText(
-    first(
-      localState.error,
-      localState.view?.serverError,
-      localState.view?.error,
-      ""
-    ),
+    first(localState.error, localState.view?.serverError, localState.view?.error, ""),
     ""
   );
 
   const success = safeText(
-    first(
-      localState.view?.successMessage,
-      localState.successMessage,
-      ""
-    ),
+    first(localState.view?.successMessage, localState.successMessage, ""),
     ""
   );
 
@@ -1358,32 +1220,30 @@ function renderFeedback({ state = {}, hasDetail = false } = {}) {
 ========================================================= */
 
 export function renderHeader({ item = null, state = {} } = {}) {
-  const detail = resolveCuentaItem(item);
+  const detail = resolveCuentaItem(item) || {};
   const localState = resolveLocalState(state);
 
   const loading = Boolean(localState.loading);
   const refreshing = Boolean(localState.refreshing);
   const saving = Boolean(localState.saving);
 
-  const name = detail ? getDisplayName(detail, localState) : "Ajustes de cuenta";
-  const email = detail ? getEmail(detail) : "Preferencias del usuario";
-  const username = detail ? getUsername(detail) : "sin-usuario";
-  const role = detail ? getRole(detail) : "Usuario";
+  const name = item ? getDisplayName(detail, localState) : "Ajustes de cuenta";
+  const email = item ? getEmail(detail) : "Preferencias del usuario";
+  const username = item ? getUsername(detail) : "sin-usuario";
+  const role = item ? getRole(detail) : "Usuario";
 
-  const updatedAt = detail ? getUpdatedAt(detail) : null;
-  const updatedText = updatedAt
-    ? formatRelativeDate(updatedAt)
-    : "Sin sincronización reciente";
+  const updatedAt = item ? getUpdatedAt(detail) : null;
+  const updatedText = updatedAt ? formatRelativeDate(updatedAt) : "Sin sincronización reciente";
 
-  const status = detail ? getAccountStatus(detail) : "Activa";
-  const statusTone = detail ? getAccountStatusTone(detail) : "success";
+  const status = item ? getAccountStatus(detail) : "Activa";
+  const statusTone = item ? getAccountStatusTone(detail) : "success";
 
-  const privacyMode = detail ? getPrivacyMode(detail, localState) : false;
+  const privacyMode = item ? getPrivacyMode(detail, localState) : false;
   const privacyLabel = privacyMode ? "Activa" : "Estándar";
   const privacyTone = privacyMode ? "success" : "default";
 
-  const themeLabel = detail ? getThemeLabel(detail, localState) : "Light mode";
-  const langLabel = detail ? getLangLabel(detail, localState) : "Español";
+  const themeLabel = item ? getThemeLabel(detail, localState) : "Light mode";
+  const langLabel = item ? getLangLabel(detail, localState) : "Español";
 
   return `
     <section class="cuenta-hero" data-cuenta-section="hero">
@@ -1422,7 +1282,7 @@ export function renderHeader({ item = null, state = {} } = {}) {
         </div>
 
         <div class="cuenta-command-strip cuenta-account-strip">
-          ${renderAvatar(detail || {}, localState, "hero")}
+          ${renderAvatar(detail, localState, "hero")}
 
           <div class="cuenta-account-copy">
             <div class="cuenta-account-name">${escapeHtml(name)}</div>
@@ -1625,7 +1485,7 @@ function renderAppearanceCard(detail = {}, state = {}, { disabled = false } = {}
         <div class="cuenta-card-copy">
           <h2 class="cuenta-card-title">Apariencia</h2>
           <p class="cuenta-card-text">
-            Ajusta el modo visual principal. El cambio sincroniza DOM, AppCore, storage y tokens CSS.
+            Ajusta el modo visual principal de la interfaz.
           </p>
         </div>
 
@@ -1644,7 +1504,7 @@ function renderAppearanceCard(detail = {}, state = {}, { disabled = false } = {}
         disabled,
         checkedLabel: "Dark",
         uncheckedLabel: "Light",
-        buttonLabel: dark ? "Cambiar a light" : "Cambiar a dark",
+        buttonLabel: "Guardar apariencia",
       })}
 
       <div class="cuenta-meta-list">
@@ -1666,7 +1526,7 @@ function renderLanguageCard(detail = {}, state = {}, { disabled = false } = {}) 
         <div class="cuenta-card-copy">
           <h2 class="cuenta-card-title">Idioma</h2>
           <p class="cuenta-card-text">
-            Define el idioma activo de la SPA. Compatible con Español, English y Català.
+            Define el idioma activo de la SPA.
           </p>
         </div>
 
@@ -1675,7 +1535,7 @@ function renderLanguageCard(detail = {}, state = {}, { disabled = false } = {}) 
 
       ${renderSelectRow({
         title: "Idioma del sistema",
-        description: "Selecciona el idioma que utilizarán las vistas y componentes compatibles con i18n.",
+        description: "Selecciona el idioma que utilizarán las vistas compatibles.",
         value: langValue,
         inputId: "cuenta-language-select",
         dataRole: "cuenta-language-select",
@@ -1688,7 +1548,7 @@ function renderLanguageCard(detail = {}, state = {}, { disabled = false } = {}) 
       <div class="cuenta-meta-list">
         ${renderMetaRow("Idioma actual", langLabel)}
         ${renderMetaRow("Código", langValue)}
-        ${renderMetaRow("Motor", "I18n")}
+        ${renderMetaRow("Base", "es")}
       </div>
     </article>
   `;
@@ -1703,7 +1563,7 @@ function renderPrivacyCard(detail = {}, state = {}, { disabled = false } = {}) {
         <div class="cuenta-card-copy">
           <h2 class="cuenta-card-title">Privacidad</h2>
           <p class="cuenta-card-text">
-            Control local para preferencias de privacidad del perfil y futuras reglas de visibilidad.
+            Preferencia local de privacidad para vistas y módulos compatibles.
           </p>
         </div>
 
@@ -1712,7 +1572,7 @@ function renderPrivacyCard(detail = {}, state = {}, { disabled = false } = {}) {
 
       ${renderSwitchRow({
         title: "Modo privacidad",
-        description: "Activa una preferencia de privacidad para vistas y módulos compatibles.",
+        description: "Activa una preferencia de privacidad para la interfaz.",
         checked: privacy,
         inputId: "cuenta-privacymode-input",
         dataRole: "cuenta-privacymode-input",
@@ -1740,16 +1600,14 @@ function renderSecurityCard(detail = {}, { disabled = false } = {}) {
         <div class="cuenta-card-copy">
           <h2 class="cuenta-card-title">Seguridad</h2>
           <p class="cuenta-card-text">
-            Actualiza la contraseña de acceso. La mutación queda delegada al bridge de cuenta.
+            Actualiza la contraseña de acceso.
           </p>
         </div>
 
         <div class="cuenta-card-icon" aria-hidden="true">SC</div>
       </div>
 
-      ${renderPasswordRow({
-        disabled,
-      })}
+      ${renderPasswordRow({ disabled })}
 
       <div class="cuenta-meta-list">
         ${renderMetaRow("Último acceso", getLastLoginAt(detail) ? formatRelativeDate(getLastLoginAt(detail)) : "Sin dato")}
@@ -1772,7 +1630,7 @@ function renderAuditCard(detail = {}, state = {}) {
         <div class="cuenta-card-copy">
           <h2 class="cuenta-card-title">Actividad</h2>
           <p class="cuenta-card-text">
-            Resumen técnico de sincronización, sesión y metadatos visibles de cuenta.
+            Resumen de sincronización, sesión y metadatos visibles de cuenta.
           </p>
         </div>
 
@@ -1858,11 +1716,7 @@ export function renderPanel({ item = null, state = {} } = {}) {
       ${
         busy
           ? `
-            <div
-              class="cuenta-panel-overlay"
-              aria-live="polite"
-              aria-busy="true"
-            >
+            <div class="cuenta-panel-overlay" aria-live="polite" aria-busy="true">
               <div class="cuenta-panel-overlay-card">
                 <span class="cuenta-panel-overlay-spinner" aria-hidden="true"></span>
                 <strong>${saving ? "Guardando cambios..." : "Actualizando cuenta..."}</strong>
@@ -1887,7 +1741,7 @@ export function renderCuentaTemplate({ item = null, state = {} } = {}) {
     <div
       class="cuenta-view"
       data-view="cuenta"
-      data-cuenta-template="true"
+      data-cuenta-template="${CUENTA_TEMPLATE_VERSION}"
       data-cuenta-has-item="${detail ? "true" : "false"}"
       data-cuenta-loading="${localState.loading ? "true" : "false"}"
       data-cuenta-refreshing="${localState.refreshing ? "true" : "false"}"
@@ -1919,6 +1773,8 @@ export function renderCuentaViewTemplate({ item = null, state = {} } = {}) {
 }
 
 export default {
+  version: CUENTA_TEMPLATE_VERSION,
+
   renderHeader,
   renderLoadingState,
   renderErrorState,

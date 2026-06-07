@@ -1,31 +1,38 @@
 /* =========================================================
-   Onion SPA - Cuenta View
+   Onion SPA - Cuenta Index
    Archivo: src/views/cuenta/index.js
 
-   Controlador real de Cuenta.
-   - Patrón Router 1:1 con Home.
-   - Render inmediato.
-   - Carga API en background.
+   Responsabilidad:
+   - Controlador mínimo de la vista Cuenta.
+   - Montar template.
+   - Hidratar desde memoria/Core.
+   - Pintar inmediatamente sin bloquear el Router.
+   - Cargar cuenta desde cuenta.api.js sólo cuando toca.
+   - NO refrescar al cambiar de vista si ya está cargada.
+   - Guardar perfil/preferencias.
+   - Cambiar contraseña.
+   - Delegar HTML en template.
+   - Delegar API en cuenta.api.js.
    - Sin cuentaView.js.
-   - Sin store.
+   - Sin Store.
+   - Sin State externo.
    - Sin storage.
-   - Sin fetch directo.
-   - Sin HTTP directo.
+   - Sin fetch propio.
+   - Sin HTTP duplicado.
    - Sin Router paralelo.
-   - Sin bridges globales.
 ========================================================= */
 
 import * as CuentaTemplate from "./cuenta.template.js";
 import * as CuentaApiModule from "./cuenta.api.js";
 
-export const CUENTA_INDEX_VERSION = "cuenta.index.stable.v2.router-fast";
+export const CUENTA_INDEX_VERSION = "cuenta.index.solid.v3.no-remount-refresh";
 export const CUENTA_VIEW_VERSION = CUENTA_INDEX_VERSION;
 
-const VIEW_NAME = "cuenta";
 const SOURCE = "cuenta.view";
 
 const ACTION_SELECTOR = "[data-cuenta-action], [data-action]";
 const FIELD_SELECTOR = "[data-cuenta-field], [data-field]";
+const ROUTER_EVENT_HANDLED_KEY = "__onionRouterHandled";
 
 const ACTIONS = Object.freeze({
   REFRESH: "refresh-cuenta",
@@ -49,6 +56,16 @@ const ACTIONS = Object.freeze({
 const INSTANCES = new WeakMap();
 
 let lastInstance = null;
+
+const cuentaMemory = {
+  item: null,
+  userKey: "",
+  loaded: false,
+  loadedAt: 0,
+  error: "",
+};
+
+let sharedLoadPromise = null;
 
 /* =========================================================
    BASICS
@@ -74,6 +91,10 @@ function isDomNode(value = null) {
   );
 }
 
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
+}
+
 function cleanText(value = "", fallback = "") {
   const output = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
@@ -83,15 +104,12 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
 function first(...values) {
-  for (const value of values) {
+  for (const value of values.flat(Infinity)) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
 
     return value;
   }
@@ -156,6 +174,15 @@ function normalizeBoolean(value, fallback = false) {
   return Boolean(fallback);
 }
 
+function escapeHtml(value = "") {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function safeError(error = null, fallback = "No se pudo procesar la cuenta.") {
   return cleanText(
     first(
@@ -190,6 +217,18 @@ function getTemplateMethod(name = "") {
   return isFunction(fn) ? fn.bind(template) : null;
 }
 
+function renderCuentaTemplate(payload = {}) {
+  const renderer =
+    getTemplateMethod("renderCuentaTemplate") ||
+    getTemplateMethod("renderCuentaViewTemplate");
+
+  if (!renderer) {
+    throw new Error("CUENTA_TEMPLATE_RENDERER_MISSING");
+  }
+
+  return renderer(payload);
+}
+
 function getCuentaApi() {
   return CuentaApiModule.CuentaApi || CuentaApiModule.default || CuentaApiModule;
 }
@@ -201,20 +240,107 @@ function getApiMethod(name = "") {
   return isFunction(fn) ? fn.bind(api) : null;
 }
 
-function renderCuentaTemplate(payload = {}) {
-  const renderFn =
-    getTemplateMethod("renderCuentaTemplate") ||
-    getTemplateMethod("renderCuentaViewTemplate");
+/* =========================================================
+   MEMORY CACHE
+========================================================= */
 
-  if (!renderFn) {
-    throw new Error("CUENTA_TEMPLATE_RENDERER_MISSING");
+function getCuentaKey(item = null) {
+  const raw = safeObject(item, {});
+
+  return cleanText(
+    first(
+      raw.userId,
+      raw.uid,
+      raw.sub,
+      raw.id,
+      raw.email,
+      raw.emailLower,
+      raw.username,
+      raw.usernameLower,
+      raw.slug,
+      ""
+    ),
+    ""
+  ).toLowerCase();
+}
+
+function clearCuentaMemory() {
+  cuentaMemory.item = null;
+  cuentaMemory.userKey = "";
+  cuentaMemory.loaded = false;
+  cuentaMemory.loadedAt = 0;
+  cuentaMemory.error = "";
+  sharedLoadPromise = null;
+
+  return true;
+}
+
+function setCuentaMemory(item = null, { loaded = true, error = "" } = {}) {
+  if (!hasContent(item)) return null;
+
+  const key = getCuentaKey(item);
+
+  cuentaMemory.item = item;
+  cuentaMemory.userKey = key;
+  cuentaMemory.loaded = Boolean(loaded);
+  cuentaMemory.loadedAt = loaded ? now() : cuentaMemory.loadedAt || 0;
+  cuentaMemory.error = cleanText(error, "");
+
+  return cuentaMemory.item;
+}
+
+function getHydratedCuenta() {
+  const hydrate = getApiMethod("hydrateCuentaFromCache");
+
+  try {
+    const item = hydrate?.();
+    return hasContent(item) ? item : null;
+  } catch {
+    return null;
+  }
+}
+
+function getInitialCuenta() {
+  const hydrated = getHydratedCuenta();
+  const hydratedKey = getCuentaKey(hydrated);
+
+  if (
+    hydratedKey &&
+    cuentaMemory.userKey &&
+    hydratedKey !== cuentaMemory.userKey
+  ) {
+    clearCuentaMemory();
   }
 
-  return renderFn(payload);
+  if (hasContent(cuentaMemory.item)) {
+    return {
+      item: cuentaMemory.item,
+      loaded: cuentaMemory.loaded,
+      source: cuentaMemory.loaded ? "memory.loaded" : "memory.hydrated",
+    };
+  }
+
+  if (hasContent(hydrated)) {
+    setCuentaMemory(hydrated, {
+      loaded: false,
+    });
+
+    return {
+      item: hydrated,
+      loaded: false,
+      source: "api.hydrated",
+    };
+  }
+
+  return {
+    item: null,
+    loaded: false,
+    source: "empty",
+  };
 }
 
 /* =========================================================
-   DOM HELPERS
+   DOM
 ========================================================= */
 
 function renderHtml(host = null, html = "") {
@@ -298,7 +424,7 @@ function getFieldValue(element = null) {
 ========================================================= */
 
 function destroyPrevious(host = null) {
-  const previous = INSTANCES.get(host);
+  const previous = host ? INSTANCES.get(host) : null;
 
   if (previous?.destroy) {
     previous.destroy({
@@ -435,22 +561,12 @@ function createCuentaController(host = null, context = {}) {
   let item = null;
   let form = {};
 
-  let lastError = null;
+  let lastError = "";
   let lastSuccess = "";
   let lastRenderAt = null;
+  let mountedFrom = "";
 
   let loadSeq = 0;
-
-  function getCachedCuenta() {
-    const hydrate = getApiMethod("hydrateCuentaFromCache");
-
-    try {
-      const cached = hydrate?.();
-      return hasContent(cached) ? cached : null;
-    } catch {
-      return null;
-    }
-  }
 
   function readForm() {
     if (!host) return {};
@@ -459,9 +575,11 @@ function createCuentaController(host = null, context = {}) {
 
     host.querySelectorAll(FIELD_SELECTOR).forEach((field) => {
       const name = getFieldName(field);
+
       if (!name) return;
 
       const value = getFieldValue(field);
+
       if (value === undefined) return;
 
       next[name] = value;
@@ -500,12 +618,10 @@ function createCuentaController(host = null, context = {}) {
   function render(data = {}) {
     if (destroyed || !host) return false;
 
-    const detail = data.item ?? item;
-
     lastRenderAt = now();
 
     try {
-      host.dataset.view = VIEW_NAME;
+      host.dataset.view = "cuenta";
       host.dataset.cuentaController = CUENTA_INDEX_VERSION;
       host.dataset.cuentaMounted = mounted ? "true" : "false";
       host.dataset.cuentaLoading = loading ? "true" : "false";
@@ -517,52 +633,26 @@ function createCuentaController(host = null, context = {}) {
     return renderHtml(
       host,
       renderCuentaTemplate({
-        item: detail,
+        item: data.item ?? item,
         state: viewState(data),
       })
     );
   }
 
-  function renderLoading({ preferCached = true } = {}) {
+  function renderLoading() {
     if (destroyed || !host) return false;
 
-    lastRenderAt = now();
+    loading = true;
+    refreshing = false;
+    saving = false;
 
-    if (preferCached || item) {
-      return render({
-        item,
-        loading: !item,
-        refreshing: Boolean(item),
-      });
-    }
-
-    try {
-      return renderHtml(
-        host,
-        renderCuentaTemplate({
-          item: null,
-          state: viewState({
-            loading: true,
-            refreshing: false,
-            saving: false,
-            error: null,
-          }),
-        })
-      );
-    } catch {
-      const renderLoadingState = getTemplateMethod("renderLoadingState");
-
-      return renderHtml(
-        host,
-        renderLoadingState
-          ? renderLoadingState()
-          : `
-            <section class="cuenta-state cuenta-loading-state" aria-busy="true">
-              <p class="cuenta-state-text">Cargando cuenta...</p>
-            </section>
-          `
-      );
-    }
+    return render({
+      item,
+      loading: true,
+      refreshing: false,
+      saving: false,
+      error: "",
+    });
   }
 
   function renderError(error = null) {
@@ -572,7 +662,6 @@ function createCuentaController(host = null, context = {}) {
 
     lastError = message;
     lastSuccess = "";
-    lastRenderAt = now();
 
     if (item) {
       return render({
@@ -593,8 +682,13 @@ function createCuentaController(host = null, context = {}) {
         : `
           <section class="cuenta-state cuenta-error-state">
             <h3 class="cuenta-state-title">No se pudo cargar la cuenta</h3>
-            <p class="cuenta-state-text">${message}</p>
-            <button type="button" class="cuenta-btn cuenta-btn--primary" data-action="refresh-cuenta" data-cuenta-action="refresh-cuenta">
+            <p class="cuenta-state-text">${escapeHtml(message)}</p>
+            <button
+              type="button"
+              class="cuenta-btn cuenta-btn--primary"
+              data-action="refresh-cuenta"
+              data-cuenta-action="refresh-cuenta"
+            >
               Reintentar
             </button>
           </section>
@@ -602,50 +696,90 @@ function createCuentaController(host = null, context = {}) {
     );
   }
 
-  async function load(options = {}) {
-    const seq = ++loadSeq;
+  async function fetchCuenta(options = {}) {
     const loadCuenta = getApiMethod("loadCuenta");
 
     if (!loadCuenta) {
-      loading = false;
-      refreshing = false;
-      saving = false;
-      lastError = "cuenta.api.js no expone loadCuenta().";
-      lastSuccess = "";
-
-      renderError(lastError);
-      return null;
+      throw new Error("cuenta.api.js no expone loadCuenta().");
     }
 
-    lastError = null;
-    lastSuccess = "";
+    const force = options.force === true || options.forceRefresh === true;
 
-    loading = !item;
-    refreshing = Boolean(item);
-    saving = false;
+    if (!force && sharedLoadPromise) {
+      return sharedLoadPromise;
+    }
 
-    renderLoading({
-      preferCached: true,
-    });
-
-    try {
-      const nextItem = await loadCuenta({
-        force: options.force === true || options.forceRefresh === true,
+    const promise = Promise.resolve(
+      loadCuenta({
+        force,
         silent: options.silent === true,
         source: cleanText(options.source, `${SOURCE}.load`),
+      })
+    );
+
+    if (!force) {
+      sharedLoadPromise = promise;
+    }
+
+    try {
+      return await promise;
+    } finally {
+      if (sharedLoadPromise === promise) {
+        sharedLoadPromise = null;
+      }
+    }
+  }
+
+  async function load(options = {}) {
+    const seq = ++loadSeq;
+    const force = options.force === true || options.forceRefresh === true;
+    const silent = options.silent === true;
+
+    lastError = "";
+    lastSuccess = "";
+
+    if (!silent) {
+      loading = !item;
+      refreshing = force && Boolean(item);
+      saving = false;
+
+      if (loading) {
+        renderLoading();
+      } else {
+        render({
+          loading: false,
+          refreshing,
+          saving: false,
+          error: "",
+        });
+      }
+    }
+
+    try {
+      const nextItem = await fetchCuenta({
+        ...options,
+        force,
+        silent,
       });
+
+      if (hasContent(nextItem)) {
+        setCuentaMemory(nextItem, {
+          loaded: true,
+        });
+      }
 
       if (destroyed || seq !== loadSeq) {
         return nextItem || null;
       }
 
-      item = hasContent(nextItem) ? nextItem : item;
+      item = hasContent(nextItem)
+        ? nextItem
+        : item;
 
       loading = false;
       refreshing = false;
       saving = false;
       lastError = cleanText(nextItem?.error || "", "");
-      lastSuccess = "";
 
       render({
         item,
@@ -664,16 +798,30 @@ function createCuentaController(host = null, context = {}) {
       loading = false;
       refreshing = false;
       saving = false;
+      lastError = safeError(error, "No se pudo cargar la cuenta.");
 
-      renderError(error);
+      if (item) {
+        render({
+          item,
+          loading: false,
+          refreshing: false,
+          saving: false,
+          error: lastError,
+        });
+
+        return null;
+      }
+
+      renderError(lastError);
 
       return null;
     }
   }
 
-  function refresh() {
+  async function refresh() {
     return load({
       force: true,
+      silent: false,
       source: `${SOURCE}.refresh`,
     });
   }
@@ -697,27 +845,26 @@ function createCuentaController(host = null, context = {}) {
     const payload = buildCuentaPayload(form);
 
     if (!Object.keys(payload).length) {
-      lastError = null;
+      lastError = "";
       lastSuccess = "No hay cambios para guardar.";
 
       render({
-        error: null,
+        error: "",
         successMessage: lastSuccess,
       });
 
       return item;
     }
 
+    saving = true;
     loading = false;
     refreshing = false;
-    saving = true;
-
-    lastError = null;
+    lastError = "";
     lastSuccess = "";
 
     render({
       saving: true,
-      error: null,
+      error: "",
     });
 
     try {
@@ -732,14 +879,18 @@ function createCuentaController(host = null, context = {}) {
             ...payload,
           };
 
+      setCuentaMemory(item, {
+        loaded: true,
+      });
+
       saving = false;
-      lastError = null;
+      lastError = "";
       lastSuccess = "Cambios guardados correctamente.";
 
       render({
         item,
         saving: false,
-        error: null,
+        error: "",
         successMessage: lastSuccess,
       });
 
@@ -781,16 +932,15 @@ function createCuentaController(host = null, context = {}) {
       return null;
     }
 
+    saving = true;
     loading = false;
     refreshing = false;
-    saving = true;
-
-    lastError = null;
+    lastError = "";
     lastSuccess = "";
 
     render({
       saving: true,
-      error: null,
+      error: "",
     });
 
     try {
@@ -809,14 +959,18 @@ function createCuentaController(host = null, context = {}) {
             ...payload,
           };
 
+      setCuentaMemory(item, {
+        loaded: true,
+      });
+
       saving = false;
-      lastError = null;
+      lastError = "";
       lastSuccess = "Apariencia actualizada correctamente.";
 
       render({
         item,
         saving: false,
-        error: null,
+        error: "",
         successMessage: lastSuccess,
       });
 
@@ -858,16 +1012,15 @@ function createCuentaController(host = null, context = {}) {
       return null;
     }
 
+    saving = true;
     loading = false;
     refreshing = false;
-    saving = true;
-
-    lastError = null;
+    lastError = "";
     lastSuccess = "";
 
     render({
       saving: true,
-      error: null,
+      error: "",
     });
 
     try {
@@ -886,14 +1039,18 @@ function createCuentaController(host = null, context = {}) {
             ...payload,
           };
 
+      setCuentaMemory(item, {
+        loaded: true,
+      });
+
       saving = false;
-      lastError = null;
+      lastError = "";
       lastSuccess = "Idioma actualizado correctamente.";
 
       render({
         item,
         saving: false,
-        error: null,
+        error: "",
         successMessage: lastSuccess,
       });
 
@@ -945,16 +1102,15 @@ function createCuentaController(host = null, context = {}) {
       return false;
     }
 
+    saving = true;
     loading = false;
     refreshing = false;
-    saving = true;
-
-    lastError = null;
+    lastError = "";
     lastSuccess = "";
 
     render({
       saving: true,
-      error: null,
+      error: "",
     });
 
     try {
@@ -962,10 +1118,20 @@ function createCuentaController(host = null, context = {}) {
         source: `${SOURCE}.password`,
       });
 
-      const nextItem = result?.item || result?.user || result?.usuario || result?.account || null;
+      const nextItem = first(
+        result?.item,
+        result?.user,
+        result?.usuario,
+        result?.account,
+        null
+      );
 
       if (hasContent(nextItem)) {
         item = nextItem;
+
+        setCuentaMemory(item, {
+          loaded: true,
+        });
       }
 
       form = {
@@ -976,13 +1142,13 @@ function createCuentaController(host = null, context = {}) {
       };
 
       saving = false;
-      lastError = null;
+      lastError = "";
       lastSuccess = "Contraseña actualizada correctamente.";
 
       render({
         item,
         saving: false,
-        error: null,
+        error: "",
         successMessage: lastSuccess,
         view: {
           form,
@@ -1037,12 +1203,12 @@ function createCuentaController(host = null, context = {}) {
     }
 
     saving = true;
-    lastError = null;
+    lastError = "";
     lastSuccess = "";
 
     render({
       saving: true,
-      error: null,
+      error: "",
     });
 
     try {
@@ -1052,16 +1218,20 @@ function createCuentaController(host = null, context = {}) {
 
       if (hasContent(updated)) {
         item = updated;
+
+        setCuentaMemory(item, {
+          loaded: true,
+        });
       }
 
       saving = false;
-      lastError = null;
+      lastError = "";
       lastSuccess = "Avatar actualizado correctamente.";
 
       render({
         item,
         saving: false,
-        error: null,
+        error: "",
         successMessage: lastSuccess,
       });
 
@@ -1095,12 +1265,12 @@ function createCuentaController(host = null, context = {}) {
     }
 
     saving = true;
-    lastError = null;
+    lastError = "";
     lastSuccess = "";
 
     render({
       saving: true,
-      error: null,
+      error: "",
     });
 
     try {
@@ -1110,16 +1280,20 @@ function createCuentaController(host = null, context = {}) {
 
       if (hasContent(updated)) {
         item = updated;
+
+        setCuentaMemory(item, {
+          loaded: true,
+        });
       }
 
       saving = false;
-      lastError = null;
+      lastError = "";
       lastSuccess = "Avatar eliminado correctamente.";
 
       render({
         item,
         saving: false,
-        error: null,
+        error: "",
         successMessage: lastSuccess,
       });
 
@@ -1141,45 +1315,51 @@ function createCuentaController(host = null, context = {}) {
   async function handleAction(action = "", node = null) {
     const type = cleanText(action, "");
 
-    switch (type) {
-      case ACTIONS.REFRESH:
-      case ACTIONS.RELOAD:
-      case "refresh":
-      case "reload":
-        await refresh();
-        return true;
+    if (!type) return false;
 
-      case ACTIONS.SAVE:
-      case "save":
-        await saveCuenta();
-        return true;
-
-      case ACTIONS.TOGGLE_THEME:
-      case ACTIONS.CHANGE_THEME:
-      case ACTIONS.UPDATE_THEME:
-        await updateTheme();
-        return true;
-
-      case ACTIONS.CHANGE_LANGUAGE:
-      case ACTIONS.UPDATE_LANGUAGE:
-        await updateLanguage();
-        return true;
-
-      case ACTIONS.CHANGE_PASSWORD:
-        await changePassword();
-        return true;
-
-      case ACTIONS.UPLOAD_AVATAR:
-        await uploadAvatar(node);
-        return true;
-
-      case ACTIONS.DELETE_AVATAR:
-        await deleteAvatar();
-        return true;
-
-      default:
-        return false;
+    if (type === ACTIONS.REFRESH || type === ACTIONS.RELOAD || type === "refresh" || type === "reload") {
+      await refresh();
+      return true;
     }
+
+    if (type === ACTIONS.SAVE || type === "save") {
+      await saveCuenta();
+      return true;
+    }
+
+    if (
+      type === ACTIONS.TOGGLE_THEME ||
+      type === ACTIONS.CHANGE_THEME ||
+      type === ACTIONS.UPDATE_THEME
+    ) {
+      await updateTheme();
+      return true;
+    }
+
+    if (
+      type === ACTIONS.CHANGE_LANGUAGE ||
+      type === ACTIONS.UPDATE_LANGUAGE
+    ) {
+      await updateLanguage();
+      return true;
+    }
+
+    if (type === ACTIONS.CHANGE_PASSWORD) {
+      await changePassword();
+      return true;
+    }
+
+    if (type === ACTIONS.UPLOAD_AVATAR) {
+      await uploadAvatar(node);
+      return true;
+    }
+
+    if (type === ACTIONS.DELETE_AVATAR) {
+      await deleteAvatar();
+      return true;
+    }
+
+    return false;
   }
 
   function onClick(event) {
@@ -1191,9 +1371,12 @@ function createCuentaController(host = null, context = {}) {
     if (node.disabled || node.getAttribute("aria-disabled") === "true") return;
 
     const action = getActionName(node);
+
     if (!action) return;
 
     event.preventDefault();
+    event.stopPropagation();
+    event[ROUTER_EVENT_HANDLED_KEY] = true;
 
     void handleAction(action, node);
   }
@@ -1232,12 +1415,25 @@ function createCuentaController(host = null, context = {}) {
     }
   }
 
+  function onSubmit(event) {
+    const formNode = event.target?.closest?.("form");
+
+    if (!formNode || !host?.contains?.(formNode)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event[ROUTER_EVENT_HANDLED_KEY] = true;
+
+    void saveCuenta();
+  }
+
   function bind() {
     if (bound || !host) return false;
 
     host.addEventListener("click", onClick);
     host.addEventListener("input", onInput);
     host.addEventListener("change", onChange);
+    host.addEventListener("submit", onSubmit);
 
     bound = true;
 
@@ -1250,55 +1446,62 @@ function createCuentaController(host = null, context = {}) {
     host.removeEventListener("click", onClick);
     host.removeEventListener("input", onInput);
     host.removeEventListener("change", onChange);
+    host.removeEventListener("submit", onSubmit);
 
     bound = false;
 
     return true;
   }
 
+  function shouldLoadOnMount(options = {}) {
+    if (options.force === true || options.forceRefresh === true) return true;
+    if (options.refreshOnMount === true) return true;
+    if (!item) return true;
+    if (!cuentaMemory.loaded) return true;
+
+    return false;
+  }
+
   function mount(options = {}) {
-    if (destroyed || !host) return null;
+    if (destroyed || !host) return controller;
     if (mounted) return controller;
 
     mounted = true;
-
     bind();
 
-    form = safeObject(options.form);
+    const initial = getInitialCuenta();
 
-    item = getCachedCuenta();
+    item = initial.item;
+    mountedFrom = initial.source;
+
+    form = safeObject(options.form);
 
     loading = !item;
     refreshing = false;
     saving = false;
-
-    lastError = null;
+    lastError = "";
     lastSuccess = "";
 
     if (item) {
       render({
         item,
         loading: false,
+        refreshing: false,
+        saving: false,
       });
-
-      void load({
-        force: Boolean(options.force),
-        silent: true,
-        source: `${SOURCE}.background`,
-      });
-
-      return controller;
+    } else {
+      renderLoading();
     }
 
-    renderLoading({
-      preferCached: false,
-    });
-
-    void load({
-      force: Boolean(options.force),
-      silent: Boolean(options.silent),
-      source: `${SOURCE}.initial`,
-    });
+    if (shouldLoadOnMount(options)) {
+      void load({
+        force: options.force === true || options.forceRefresh === true,
+        silent: Boolean(item),
+        source: item
+          ? `${SOURCE}.mount.background.once`
+          : `${SOURCE}.mount.initial`,
+      });
+    }
 
     return controller;
   }
@@ -1322,7 +1525,6 @@ function createCuentaController(host = null, context = {}) {
 
   const controller = {
     version: CUENTA_VIEW_VERSION,
-    name: VIEW_NAME,
 
     mount,
     destroy,
@@ -1379,6 +1581,7 @@ function createCuentaController(host = null, context = {}) {
 
         mounted,
         destroyed,
+
         loading,
         refreshing,
         saving,
@@ -1386,11 +1589,19 @@ function createCuentaController(host = null, context = {}) {
         hasHost: Boolean(host),
         hasItem: hasContent(item),
 
+        memory: {
+          loaded: cuentaMemory.loaded,
+          loadedAt: cuentaMemory.loadedAt,
+          hasItem: hasContent(cuentaMemory.item),
+          userKey: cuentaMemory.userKey ? "***" : "",
+          inFlight: Boolean(sharedLoadPromise),
+        },
+
+        mountedFrom,
+
         lastError,
         lastSuccess,
         lastRenderAt,
-
-        source: SOURCE,
       };
     },
 
@@ -1403,10 +1614,10 @@ function createCuentaController(host = null, context = {}) {
 }
 
 /* =========================================================
-   VIEW EXPORT
+   VIEW ENTRY
 ========================================================= */
 
-export function CuentaView(host = null, context = {}) {
+export async function CuentaView(host = null, context = {}) {
   if (!isDomNode(host)) {
     return null;
   }
@@ -1423,6 +1634,7 @@ export function CuentaView(host = null, context = {}) {
 }
 
 export const CuentaIndex = CuentaView;
+
 export const View = CuentaView;
 export const view = CuentaView;
 export const component = CuentaView;
@@ -1509,13 +1721,17 @@ export const savePassword = changePassword;
 
 export function getItem() {
   try {
-    return lastInstance?.getItem?.() || null;
+    return lastInstance?.getItem?.() || cuentaMemory.item || null;
   } catch {
-    return null;
+    return cuentaMemory.item || null;
   }
 }
 
 export const getCuenta = getItem;
+
+export function clearCuentaViewCache() {
+  return clearCuentaMemory();
+}
 
 export function getSnapshot() {
   if (lastInstance?.getSnapshot) {
@@ -1526,7 +1742,13 @@ export function getSnapshot() {
     version: CUENTA_VIEW_VERSION,
     mounted: false,
     hasInstance: false,
-    source: SOURCE,
+    memory: {
+      loaded: cuentaMemory.loaded,
+      loadedAt: cuentaMemory.loadedAt,
+      hasItem: hasContent(cuentaMemory.item),
+      userKey: cuentaMemory.userKey ? "***" : "",
+      inFlight: Boolean(sharedLoadPromise),
+    },
   };
 }
 

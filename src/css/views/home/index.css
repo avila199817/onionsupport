@@ -2,16 +2,14 @@
    Onion Support - Home View CSS
    Archivo: /src/css/views/home/index.css
 
-   ONIONSUPPORT SPA · HOME 1:1 INCIDENCIAS · DEFINITIVO
+   ONIONSUPPORT SPA · HOME 1:1 INCIDENCIAS · PRODUCTIVO
 
-   Responsabilidad:
-   - CSS único de Home alineado con /src/views/home/home.template.js.
-   - Visual 1:1 con Incidencias: márgenes, hero, stats, cards y paneles.
-   - Sin background global: respeta el fondo real del Shell/App.
-   - Header transparente estilo Incidencias.
-   - Stats compactas estilo Incidencias.
-   - Paneles tipo history shell estilo Incidencias.
-   - Botones pill estilo Incidencias.
+   Objetivo:
+   - Header/Home 1:1 con Incidencias a nivel de márgenes, padding y gaps.
+   - Header transparente, sin background global.
+   - Avatar más grande, rectangular, con bordes redondeados.
+   - Avatar sin brillo: más intensidad por saturación, contraste y borde.
+   - Cards, stats y paneles mantienen el look actual.
    - Dark + light.
    - Scope cerrado en .home-view-root / [data-home-scope].
    - Sin JS.
@@ -43,6 +41,9 @@
   --home-stat-color-2: var(--home-cyan);
 
   --home-panel-min-height: clamp(260px, 20vw, 380px);
+
+  --home-avatar-size-header: clamp(72px, 5.05vw, 92px);
+  --home-avatar-radius: clamp(18px, 1.35vw, 24px);
 
   display: grid;
   gap: var(--view-section-gap, var(--space-lg));
@@ -133,7 +134,8 @@
 
 
 /* =========================================================
-   HEADER / HERO 1:1 INCIDENCIAS
+   HEADER / HERO
+   1:1 INCIDENCIAS EN MÁRGENES, PADDING Y GAPS
 ========================================================= */
 
 .home-header {
@@ -179,20 +181,27 @@
 
 .home-header-main {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) var(--home-avatar-size-header);
   align-items: center;
-  gap: clamp(13px, 1vw, 18px);
+  gap: clamp(16px, 1.4vw, 26px);
 
   min-inline-size: 0;
 }
 
 .home-header-copy {
+  order: 1;
+
   display: grid;
   gap: 7px;
   min-inline-size: 0;
 }
 
-.home-header h1 {
+.home-current-user-avatar {
+  order: 2;
+}
+
+.home-header h1,
+.home-title {
   margin: 0;
   max-inline-size: 980px;
 
@@ -240,14 +249,22 @@
 
 
 /* =========================================================
-   AVATAR 1:1 INCIDENCIAS
+   AVATAR PRO
+   Grande · rectangular · bordes redondeados · sin brillo
 ========================================================= */
 
 .home-current-user-avatar {
-  --home-avatar-size: var(--avatar-size-lg);
-  --home-avatar-a: color-mix(in srgb, var(--accent) 84%, var(--surface-5));
-  --home-avatar-b: color-mix(in srgb, var(--info) 62%, var(--surface-4));
-  --home-avatar-bg: linear-gradient(135deg, var(--home-avatar-a), var(--home-avatar-b));
+  --home-avatar-size: var(--home-avatar-size-header);
+  --home-avatar-a: color-mix(in srgb, var(--accent) 92%, #0f172a 8%);
+  --home-avatar-b: color-mix(in srgb, var(--info) 78%, #111827 22%);
+  --home-avatar-c: color-mix(in srgb, var(--home-indigo) 68%, #020617 32%);
+  --home-avatar-bg:
+    linear-gradient(
+      135deg,
+      var(--home-avatar-a) 0%,
+      var(--home-avatar-b) 48%,
+      var(--home-avatar-c) 100%
+    );
 
   position: relative;
 
@@ -260,36 +277,26 @@
 
   overflow: hidden;
 
-  border: 0;
-  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--home-avatar-a) 44%, rgba(255, 255, 255, .16));
+  border-radius: var(--home-avatar-radius);
 
   background: var(--home-avatar-bg);
   color: var(--avatar-text);
 
   box-shadow:
-    0 10px 22px color-mix(in srgb, var(--home-avatar-b) 15%, transparent),
-    0 0 0 3px color-mix(in srgb, var(--home-avatar-a) 18%, transparent),
-    var(--shadow-inner);
+    0 16px 30px rgba(0, 0, 0, .34),
+    inset 0 0 0 1px rgba(255, 255, 255, .075),
+    inset 0 -18px 28px rgba(0, 0, 0, .16);
+
+  filter: saturate(1.14) contrast(1.04);
 
   transform: translateZ(0);
 }
 
+.home-current-user-avatar::before,
 .home-current-user-avatar::after {
-  content: "";
-
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-
-  border-radius: inherit;
-
-  pointer-events: none;
-
-  background:
-    radial-gradient(circle at 30% 22%, rgba(255, 255, 255, .34), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, .08), rgba(0, 0, 0, .10));
-
-  mix-blend-mode: screen;
+  content: none;
+  display: none;
 }
 
 .home-current-user-avatar img {
@@ -305,6 +312,8 @@
   object-fit: cover;
   object-position: center;
   border-radius: inherit;
+
+  filter: saturate(1.16) contrast(1.045);
 }
 
 .home-avatar-initials {
@@ -318,19 +327,29 @@
 
   color: #ffffff;
 
-  font-size: var(--font-2xl);
+  font-size: clamp(25px, 1.75vw, 34px);
   line-height: 1;
   font-weight: var(--weight-black);
-  letter-spacing: -.045em;
+  letter-spacing: -.055em;
 
-  text-shadow:
-    0 1px 2px rgba(0, 0, 0, .24),
-    0 0 14px rgba(255, 255, 255, .16);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, .38);
 }
+
+.home-current-user-avatar[data-avatar-tone="0"] { --home-avatar-bg: linear-gradient(135deg, #475569, #1e293b); }
+.home-current-user-avatar[data-avatar-tone="1"] { --home-avatar-bg: linear-gradient(135deg, #2563eb, #0f172a); }
+.home-current-user-avatar[data-avatar-tone="2"] { --home-avatar-bg: linear-gradient(135deg, #64748b, #18181b); }
+.home-current-user-avatar[data-avatar-tone="3"] { --home-avatar-bg: linear-gradient(135deg, #15803d, #052e16); }
+.home-current-user-avatar[data-avatar-tone="4"] { --home-avatar-bg: linear-gradient(135deg, #4f46e5, #111827); }
+.home-current-user-avatar[data-avatar-tone="5"] { --home-avatar-bg: linear-gradient(135deg, #b45309, #1c1917); }
+.home-current-user-avatar[data-avatar-tone="6"] { --home-avatar-bg: linear-gradient(135deg, #0f766e, #042f2e); }
+.home-current-user-avatar[data-avatar-tone="7"] { --home-avatar-bg: linear-gradient(135deg, #be123c, #1f2937); }
+.home-current-user-avatar[data-avatar-tone="8"] { --home-avatar-bg: linear-gradient(135deg, #4b5563, #030712); }
+.home-current-user-avatar[data-avatar-tone="9"] { --home-avatar-bg: linear-gradient(135deg, #4338ca, #172554); }
 
 
 /* =========================================================
-   HEADER CTA 1:1 INCIDENCIAS BUTTONS
+   HEADER CTA
+   1:1 INCIDENCIAS BUTTONS
 ========================================================= */
 
 .home-create-card {
@@ -1345,6 +1364,7 @@
 }
 
 [data-theme="light"] .home-header h1,
+[data-theme="light"] .home-title,
 [data-theme="light"] .home-stat-value,
 [data-theme="light"] .home-billing-total strong {
   color: #0f172a;
@@ -1357,8 +1377,26 @@
 }
 
 [data-theme="light"] .home-stat-label,
-[data-theme="light"] .home-billing-total span {
+[data-theme="light"] .home-billing-total span,
+[data-theme="light"] .home-panel-kicker,
+[data-theme="light"] .home-kicker,
+[data-theme="light"] .home-eyebrow {
   color: rgba(15, 23, 42, .50);
+}
+
+[data-theme="light"] .home-current-user-avatar {
+  border-color: color-mix(in srgb, var(--accent) 28%, rgba(15, 23, 42, .16));
+
+  box-shadow:
+    0 14px 28px rgba(15, 23, 42, .13),
+    inset 0 0 0 1px rgba(255, 255, 255, .72),
+    inset 0 -16px 26px rgba(15, 23, 42, .10);
+
+  filter: saturate(1.12) contrast(1.035);
+}
+
+[data-theme="light"] .home-current-user-avatar img {
+  filter: saturate(1.12) contrast(1.035);
 }
 
 [data-theme="light"] .home-stat-card {
@@ -1448,6 +1486,9 @@
 
 @media (max-width: 760px) {
   :where(.panel-content[data-view="home"], .home-view-root, [data-home-scope]) {
+    --home-avatar-size-header: clamp(62px, 13vw, 78px);
+    --home-avatar-radius: 18px;
+
     gap: var(--space-md);
   }
 
@@ -1462,11 +1503,13 @@
   }
 
   .home-header-main {
-    grid-template-columns: var(--avatar-size-lg) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) var(--home-avatar-size-header);
     align-items: center;
+    gap: var(--space-sm);
   }
 
-  .home-header h1 {
+  .home-header h1,
+  .home-title {
     font-size: clamp(var(--font-3xl), 8vw, var(--font-4xl));
     line-height: 1;
   }

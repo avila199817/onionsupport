@@ -2,82 +2,38 @@
    Onion SPA - Cuenta API
    Archivo: src/views/cuenta/cuenta.api.js
 
-   EXTREME PRO SYSTEM · API LAYER · FULL PATCH 12/10
-   USER PREFERENCES CONTRACT · PROFILE PRESERVER · AVATAR READY
-   SINGLE RESOURCE MODE · RACE SAFE · STORE/STATE SYNC
-
-   BACKEND CONTRACT:
-   - GET    /api/user/preferences
-   - PATCH  /api/user/preferences
-   - PUT    /api/user/preferences
-   - PATCH  /api/user/preferences/theme
-   - PATCH  /api/user/preferences/theme/toggle
-   - PATCH  /api/user/preferences/privacy
-   - PATCH  /api/user/preferences/privacy/toggle
-   - PATCH  /api/user/preferences/language
-   - PATCH  /api/user/preferences/lang
-   - GET    /api/user/preferences/_meta
-
-   RESPONSABILIDADES:
-   - centralizar llamadas HTTP del módulo cuenta
-   - detalle + update + theme + privacy + language + meta
-   - hidratar store/state
-   - normalizar payloads backend heterogéneos
-   - preservar perfil visible: name/email/username/phone/avatar/role/status
-   - preservar preferencias: darkMode/privacyMode/theme/lang
-   - fusionar preferencias backend con usuario autenticado de AppCore
-   - soportar múltiples adapters de request
-   - prevenir race conditions blandas
-   - mantener compatibilidad con cuentaView.js / cuenta.actions.js
-   - registrar API pública en AppCore.modules/window
+   API real de la vista Cuenta.
+   - Sin state/store local.
+   - Sin storage.
+   - Sin fetch propio.
+   - Sin token manual.
+   - Sin bridges globales.
+   - Sólo delega en Core HTTP.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import Http from "../../core/http.js";
 
-import {
-  cuentaState,
-  setLoading,
-  setRefreshing,
-  setSaving,
-  setError,
-  setItem,
-  setLastSyncAt,
-  setLoaded,
-  setHydrated,
-  setMeta,
-} from "./cuenta.state.js";
-
-import {
-  getCuentaStore,
-  replaceCuentaStore,
-  upsertCuentaStore,
-} from "./cuenta.store.js";
-
-/* =========================================================
-   CONFIG
-========================================================= */
+export const CUENTA_API_VERSION = "cuenta.api.stable.v1";
 
 export const CUENTA_RESOURCE = "cuenta";
 
-export const CUENTA_ENDPOINT = "/api/user/preferences";
-export const CUENTA_ALT_ENDPOINT = "/api/user/settings";
+export const CUENTA_ENDPOINTS = Object.freeze({
+  me: "/api/auth/me",
+  changePassword: "/api/auth/change-password",
 
-export const CUENTA_THEME_ENDPOINT = "/api/user/preferences/theme";
-export const CUENTA_THEME_TOGGLE_ENDPOINT = "/api/user/preferences/theme/toggle";
+  users: "/api/users",
+  usersMeta: "/api/users/_meta",
+  usersSessions: "/api/users/sessions",
+  usersAvatar: "/api/users/avatar",
+});
 
-export const CUENTA_PRIVACY_ENDPOINT = "/api/user/preferences/privacy";
-export const CUENTA_PRIVACY_TOGGLE_ENDPOINT = "/api/user/preferences/privacy/toggle";
+export const CUENTA_ENDPOINT = CUENTA_ENDPOINTS.me;
+export const CUENTA_ALT_ENDPOINT = CUENTA_ENDPOINTS.users;
 
-export const CUENTA_LANGUAGE_ENDPOINT = "/api/user/preferences/language";
-export const CUENTA_LANG_ENDPOINT = "/api/user/preferences/lang";
-
-export const CUENTA_META_ENDPOINT = "/api/user/preferences/_meta";
-
-export const CUENTA_TIMEOUT = 15000;
-export const CUENTA_DETAIL_TIMEOUT = 25000;
-
-const CACHE_KEY = "onion:cuenta:cache:v12";
-const CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 6;
+export const CUENTA_TIMEOUT = 30000;
+export const CUENTA_DETAIL_TIMEOUT = 30000;
+export const CUENTA_UPLOAD_TIMEOUT = 60000;
 
 const DEFAULT_LANG = "es";
 const DEFAULT_THEME = "light";
@@ -87,8 +43,28 @@ const DEFAULT_STATUS = "active";
 let lastLoadToken = 0;
 
 /* =========================================================
-   SAFE HELPERS
+   BASIC HELPERS
 ========================================================= */
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function safeObject(value, fallback = {}) {
+  return isPlainObject(value) ? value : fallback;
+}
+
+function safeArray(value, fallback = []) {
+  return Array.isArray(value) ? value : fallback;
+}
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
@@ -105,32 +81,6 @@ function safeLower(value, fallback = "") {
   return safeText(value, fallback).toLowerCase();
 }
 
-function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function safeArray(value, fallback = []) {
-  return Array.isArray(value) ? value : fallback;
-}
-
-function safeObject(value, fallback = {}) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
-}
-
-function hasOwnKeys(value = {}) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      Object.keys(value).length
-  );
-}
-
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
@@ -141,6 +91,10 @@ function first(...values) {
   }
 
   return null;
+}
+
+function hasOwn(object = {}, key = "") {
+  return Object.prototype.hasOwnProperty.call(Object(object), key);
 }
 
 function normalizeText(value = "") {
@@ -159,338 +113,9 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function cleanPayload(payload = {}) {
-  const source = safeObject(payload);
-  const next = {};
-
-  Object.entries(source).forEach(([key, value]) => {
-    if (value === undefined) return;
-    next[key] = value;
-  });
-
-  return next;
-}
-
-function callSafe(fn, ...args) {
-  try {
-    if (typeof fn === "function") {
-      return fn(...args);
-    }
-  } catch {}
-
-  return undefined;
-}
-
-function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isFormData(value) {
-  return typeof FormData !== "undefined" && value instanceof FormData;
-}
-
-function isBlob(value) {
-  return typeof Blob !== "undefined" && value instanceof Blob;
-}
-
-function isArrayBuffer(value) {
-  return typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer;
-}
-
-function isAbsoluteUrl(value = "") {
-  return /^https?:\/\//i.test(safeText(value, ""));
-}
-
-function encodeUrlPathSegment(value = "") {
-  return encodeURIComponent(safeText(value, ""));
-}
-
-function safeEmit(event = "", payload = {}) {
-  const eventName = safeText(event, "");
-  if (!eventName) return false;
-
-  let emitted = false;
-
-  try {
-    AppCore?.events?.emit?.(eventName, payload);
-    emitted = true;
-  } catch {}
-
-  try {
-    if (isBrowser()) {
-      window.dispatchEvent(
-        new CustomEvent(eventName, {
-          detail: payload,
-        })
-      );
-
-      emitted = true;
-    }
-  } catch {}
-
-  return emitted;
-}
-
-/* =========================================================
-   TOKENS / RACE
-========================================================= */
-
-function nextLoadToken() {
-  lastLoadToken += 1;
-  return lastLoadToken;
-}
-
-function isActiveLoadToken(token) {
-  return token === lastLoadToken;
-}
-
-/* =========================================================
-   URL / AUTH HELPERS
-========================================================= */
-
-function getApiBase() {
-  const apiBase = safeText(
-    first(
-      AppCore?.config?.apiBase,
-      AppCore?.config?.api?.baseUrl,
-      AppCore?.state?.apiBase,
-      isBrowser() ? window.ONION_API_BASE : "",
-      isBrowser() ? window.API_BASE : ""
-    ),
-    ""
-  );
-
-  return apiBase.replace(/\/+$/, "");
-}
-
-function appendQueryParams(url = "", query = {}) {
-  const cleanUrl = safeText(url, "");
-  const params = safeObject(query);
-  const pairs = [];
-
-  Object.entries(params).forEach(([key, value]) => {
-    if (value === undefined || value === null) return;
-    if (typeof value === "string" && value.trim() === "") return;
-
-    if (Array.isArray(value)) {
-      value.forEach((item) => {
-        if (item === undefined || item === null) return;
-        if (typeof item === "string" && item.trim() === "") return;
-
-        pairs.push(
-          `${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`
-        );
-      });
-
-      return;
-    }
-
-    pairs.push(
-      `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`
-    );
-  });
-
-  if (!pairs.length) return cleanUrl;
-
-  const separator = cleanUrl.includes("?") ? "&" : "?";
-  return `${cleanUrl}${separator}${pairs.join("&")}`;
-}
-
-function buildAbsoluteUrl(path = "", query = {}) {
-  const cleanPath = safeText(path, "");
-
-  if (!cleanPath) {
-    return appendQueryParams(getApiBase(), query);
-  }
-
-  if (isAbsoluteUrl(cleanPath)) {
-    return appendQueryParams(cleanPath, query);
-  }
-
-  const apiBase = getApiBase();
-  const finalPath = cleanPath.startsWith("/") ? cleanPath : `/${cleanPath}`;
-
-  if (!apiBase) {
-    return appendQueryParams(finalPath, query);
-  }
-
-  return appendQueryParams(`${apiBase}${finalPath}`, query);
-}
-
-function getStorageValue(key = "") {
-  const cleanKey = safeText(key, "");
-  if (!cleanKey || !isBrowser()) return "";
-
-  try {
-    const localValue = localStorage.getItem(cleanKey);
-    if (localValue) return localValue;
-  } catch {}
-
-  try {
-    const sessionValue = sessionStorage.getItem(cleanKey);
-    if (sessionValue) return sessionValue;
-  } catch {}
-
-  return "";
-}
-
-function tryParseJson(value = null) {
-  if (!value || typeof value !== "string") return null;
-
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
-function getAuthToken() {
-  return safeText(
-    first(
-      AppCore?.state?.token,
-      AppCore?.state?.accessToken,
-      AppCore?.auth?.getToken?.(),
-      AppCore?.Auth?.getToken?.(),
-      isBrowser() ? window.Auth?.getToken?.() : "",
-      getStorageValue("token"),
-      getStorageValue("accessToken"),
-      getStorageValue("access_token"),
-      getStorageValue("onion:token")
-    ),
-    ""
-  );
-}
-
-function getRequestHeaders(extraHeaders = {}, body = null) {
-  const token = getAuthToken();
-
-  const headers = {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...safeObject(extraHeaders),
-  };
-
-  if (isFormData(body)) {
-    delete headers["Content-Type"];
-    delete headers["content-type"];
-  }
-
-  return headers;
-}
-
-function getApiClient() {
-  return AppCore?.apiClient || null;
-}
-
-function getHttpModule() {
-  return (
-    AppCore?.modules?.Http ||
-    AppCore?.Http ||
-    (isBrowser() ? window.Http : null) ||
-    null
-  );
-}
-
-/* =========================================================
-   ENDPOINT HELPERS
-========================================================= */
-
-export function getCuentaEndpoint() {
-  return CUENTA_ENDPOINT;
-}
-
-export function getCuentaAltEndpoint() {
-  return CUENTA_ALT_ENDPOINT;
-}
-
-export function getCuentaThemeEndpoint() {
-  return CUENTA_THEME_ENDPOINT;
-}
-
-export function getCuentaThemeToggleEndpoint() {
-  return CUENTA_THEME_TOGGLE_ENDPOINT;
-}
-
-export function getCuentaPrivacyEndpoint() {
-  return CUENTA_PRIVACY_ENDPOINT;
-}
-
-export function getCuentaPrivacyToggleEndpoint() {
-  return CUENTA_PRIVACY_TOGGLE_ENDPOINT;
-}
-
-export function getCuentaLanguageEndpoint() {
-  return CUENTA_LANGUAGE_ENDPOINT;
-}
-
-export function getCuentaLangEndpoint() {
-  return CUENTA_LANG_ENDPOINT;
-}
-
-export function getCuentaMetaEndpoint() {
-  return CUENTA_META_ENDPOINT;
-}
-
-export function getCuentaByIdEndpoint(id = "") {
-  const cleanId = safeText(id, "");
-  if (!cleanId) return CUENTA_ENDPOINT;
-
-  return `${CUENTA_ENDPOINT}/${encodeUrlPathSegment(cleanId)}`;
-}
-
-/* =========================================================
-   ERROR HELPERS
-========================================================= */
-
-function normalizeErrorMessage(error = null, fallback = "Error de API.") {
-  return safeText(
-    first(
-      error?.message,
-      error?.response?.message,
-      error?.response?.data?.message,
-      error?.data?.message,
-      error?.response?.error,
-      error?.data?.error,
-      error?.error,
-      error?.detail,
-      error?.code,
-      fallback
-    ),
-    fallback
-  );
-}
-
-function getErrorStatus(error = null) {
-  return safeNumber(
-    first(
-      error?.status,
-      error?.statusCode,
-      error?.response?.status,
-      error?.data?.status
-    ),
-    0
-  );
-}
-
-function shouldTryNextEndpoint(error = null) {
-  const status = getErrorStatus(error);
-
-  if (!status) return true;
-
-  return [404, 405, 409, 415, 422, 500, 502, 503, 504].includes(status);
-}
-
-/* =========================================================
-   DOMAIN NORMALIZATION
-========================================================= */
-
 function normalizeBoolean(value = undefined, fallback = false) {
   if (typeof value === "boolean") return value;
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-    return value !== 0;
-  }
+  if (typeof value === "number") return value !== 0;
 
   const key = normalizeKey(value);
 
@@ -538,13 +163,8 @@ function normalizeBoolean(value = undefined, fallback = false) {
 function normalizeLang(value = DEFAULT_LANG) {
   const key = normalizeKey(value);
 
-  if (["en", "eng", "english", "en_us", "en_gb"].includes(key)) {
-    return "en";
-  }
-
-  if (["ca", "cat", "catala", "catalan", "ca_es", "catalunya"].includes(key)) {
-    return "ca";
-  }
+  if (["en", "eng", "english", "en_us", "en_gb"].includes(key)) return "en";
+  if (["ca", "cat", "catala", "catalan", "ca_es", "catalunya"].includes(key)) return "ca";
 
   return "es";
 }
@@ -552,114 +172,245 @@ function normalizeLang(value = DEFAULT_LANG) {
 function normalizeTheme(value = "", fallbackDarkMode = false) {
   const key = normalizeKey(value);
 
-  if (["dark", "oscuro", "night", "theme_dark"].includes(key)) {
-    return "dark";
-  }
-
-  if (["light", "claro", "day", "theme_light"].includes(key)) {
-    return "light";
-  }
+  if (["dark", "oscuro", "night", "theme_dark"].includes(key)) return "dark";
+  if (["light", "claro", "day", "theme_light"].includes(key)) return "light";
 
   return fallbackDarkMode ? "dark" : "light";
 }
 
 function normalizeRole(value = DEFAULT_ROLE) {
-  const obj = safeObject(value, null);
+  const role = normalizeKey(value);
 
-  const raw = obj
-    ? first(obj.name, obj.nombre, obj.code, obj.id, DEFAULT_ROLE)
-    : value;
-
-  const key = normalizeKey(raw);
-
-  if (
-    [
-      "admin",
-      "administrator",
-      "superadmin",
-      "super_admin",
-      "root",
-      "owner",
-    ].includes(key)
-  ) {
-    return "admin";
-  }
-
-  if (["support", "soporte"].includes(key)) return "support";
-  if (["technician", "tecnico", "técnico"].includes(key)) return "technician";
-  if (["client", "cliente", "customer"].includes(key)) return "client";
+  if (role === "admin") return "admin";
 
   return "user";
 }
 
 function normalizeStatus(value = DEFAULT_STATUS) {
-  const key = normalizeKey(value);
+  const status = normalizeKey(value);
 
-  if (["inactive", "inactivo", "disabled", "bloqueado", "blocked"].includes(key)) {
-    return "inactive";
+  if (["disabled", "inactive", "inactivo", "desactivado", "blocked", "bloqueado"].includes(status)) {
+    return "disabled";
   }
 
-  if (["pending", "pendiente"].includes(key)) return "pending";
-  if (["deleted", "eliminado", "removed"].includes(key)) return "deleted";
-  if (["suspended", "suspendido"].includes(key)) return "suspended";
+  if (["deleted", "eliminado", "removed"].includes(status)) return "deleted";
+  if (["archived", "archivado"].includes(status)) return "archived";
+  if (["suspended", "suspendido"].includes(status)) return "suspended";
+  if (["pending", "pendiente"].includes(status)) return "pending";
 
   return "active";
 }
 
+function encodePathSegment(value = "") {
+  return encodeURIComponent(safeText(value, ""));
+}
+
+function cleanPayload(payload = {}) {
+  const source = safeObject(payload);
+  const output = {};
+
+  Object.entries(source).forEach(([key, value]) => {
+    if (value === undefined) return;
+    output[key] = value;
+  });
+
+  return output;
+}
+
+function nextLoadToken() {
+  lastLoadToken += 1;
+  return lastLoadToken;
+}
+
+function isActiveLoadToken(token) {
+  return token === lastLoadToken;
+}
+
 /* =========================================================
-   SESSION / FALLBACK USER PRESERVER
+   CORE / HTTP
 ========================================================= */
 
-function getSessionUserFromStorage() {
-  const candidates = [
-    "user",
-    "sessionUser",
-    "currentUser",
-    "onion:user",
-    "onion:session:user",
-    "auth:user",
-  ];
+function getHttpClient() {
+  const client =
+    AppCore?.getHttpClient?.() ||
+    AppCore?.getActiveApiClient?.() ||
+    AppCore?.Http ||
+    AppCore?.http ||
+    Http;
 
-  for (const key of candidates) {
-    const parsed = tryParseJson(getStorageValue(key));
+  if (!client) {
+    throw new Error("CUENTA_HTTP_UNAVAILABLE");
+  }
 
-    if (hasOwnKeys(parsed)) {
-      return parsed;
+  return client;
+}
+
+async function requestJson(method = "GET", endpoint = "", { body, query, timeout = CUENTA_TIMEOUT } = {}) {
+  const client = getHttpClient();
+  const verb = safeText(method, "GET").toUpperCase();
+
+  const options = {
+    timeout,
+    query,
+    auth: true,
+  };
+
+  if (verb === "GET" && isFunction(client.get)) {
+    return client.get(endpoint, options);
+  }
+
+  if (verb === "POST" && isFunction(client.post)) {
+    return client.post(endpoint, body, options);
+  }
+
+  if (verb === "PUT" && isFunction(client.put)) {
+    return client.put(endpoint, body, options);
+  }
+
+  if (verb === "PATCH" && isFunction(client.patch)) {
+    return client.patch(endpoint, body, options);
+  }
+
+  if (verb === "DELETE") {
+    const deleteFn = client.del || client.delete;
+
+    if (isFunction(deleteFn)) {
+      return deleteFn.call(client, endpoint, options);
     }
   }
 
-  return {};
+  if (isFunction(client.request)) {
+    return client.request(endpoint, {
+      ...options,
+      method: verb,
+      body,
+    });
+  }
+
+  throw new Error("CUENTA_HTTP_METHOD_UNAVAILABLE");
 }
 
-function getSessionUserFallback() {
-  const authUser = callSafe(AppCore?.auth?.getUser);
-  const AuthUser = callSafe(AppCore?.Auth?.getUser);
-  const windowUser = isBrowser() ? callSafe(window?.Auth?.getUser) : null;
+function getCoreState() {
+  try {
+    return safeObject(AppCore?.getState?.(), {});
+  } catch {
+    return safeObject(AppCore?.state, {});
+  }
+}
 
-  const stateUser = safeObject(
+function getCurrentCoreUser() {
+  return safeObject(
     first(
-      AppCore?.state?.user,
-      AppCore?.state?.currentUser,
-      AppCore?.state?.session?.user,
-      AppCore?.state?.auth?.user,
-      {}
-    )
+      AppCore?.getCurrentUser?.(),
+      getCoreState().user,
+      getCoreState().currentUser,
+      null
+    ),
+    null
   );
-
-  const storedUser = getSessionUserFromStorage();
-
-  const source = {
-    ...safeObject(storedUser),
-    ...safeObject(stateUser),
-    ...safeObject(AuthUser),
-    ...safeObject(authUser),
-    ...safeObject(windowUser),
-  };
-
-  if (!hasOwnKeys(source)) return {};
-
-  return source;
 }
+
+function applyCuentaToCore(item = null) {
+  const detail = normalizeCuentaDetail(item);
+
+  if (!detail) return null;
+
+  try {
+    AppCore?.setUser?.({
+      id: detail.id,
+      userId: detail.userId,
+      uid: detail.userId,
+
+      username: detail.username,
+      usernameLower: detail.usernameLower,
+      slug: detail.slug,
+
+      name: detail.name,
+      displayName: detail.displayName,
+      fullName: detail.fullName,
+
+      avatar: detail.avatar,
+      avatarUrl: detail.avatarUrl,
+      picture: detail.picture,
+
+      role: detail.role,
+      rol: detail.role,
+      roles: [detail.role],
+
+      status: detail.status,
+      active: detail.active,
+      usable: detail.usable,
+    });
+  } catch {}
+
+  return detail;
+}
+
+/* =========================================================
+   ERROR NORMALIZATION
+========================================================= */
+
+function getErrorStatus(error = null) {
+  return Number(
+    error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      error?.payload?.status ||
+      error?.data?.status ||
+      0
+  ) || 0;
+}
+
+function getErrorCode(error = null) {
+  return safeText(
+    first(
+      error?.code,
+      error?.error,
+      error?.payload?.code,
+      error?.payload?.error,
+      error?.data?.code,
+      error?.data?.error,
+      error?.response?.code,
+      error?.response?.error,
+      ""
+    ),
+    ""
+  );
+}
+
+function normalizeErrorMessage(error = null, fallback = "Error de cuenta.") {
+  return safeText(
+    first(
+      error?.message,
+      error?.payload?.message,
+      error?.payload?.detail,
+      error?.data?.message,
+      error?.data?.detail,
+      error?.response?.message,
+      error?.response?.detail,
+      error?.error,
+      error?.code,
+      fallback
+    ),
+    fallback
+  );
+}
+
+function createCuentaError(error = null, fallback = "Error de cuenta.") {
+  const normalized = new Error(normalizeErrorMessage(error, fallback));
+
+  normalized.name = "CuentaApiError";
+  normalized.code = getErrorCode(error) || "CUENTA_API_ERROR";
+  normalized.status = getErrorStatus(error);
+  normalized.statusCode = normalized.status;
+  normalized.cause = error || null;
+
+  return normalized;
+}
+
+/* =========================================================
+   RESPONSE NORMALIZATION
+========================================================= */
 
 function hasProfileEvidence(value = {}) {
   const obj = safeObject(value);
@@ -675,6 +426,7 @@ function hasProfileEvidence(value = {}) {
       obj.username ||
       obj.usernameLower ||
       obj.userName ||
+      obj.slug ||
       obj.name ||
       obj.nombre ||
       obj.fullName ||
@@ -685,11 +437,11 @@ function hasProfileEvidence(value = {}) {
       obj.photoUrl ||
       obj.picture ||
       obj.pictureUrl ||
-      obj.profilePicture ||
-      obj.profilePictureUrl ||
       obj.profile ||
       obj.user ||
-      obj.account
+      obj.usuario ||
+      obj.account ||
+      obj.me
   );
 }
 
@@ -697,14 +449,14 @@ function hasPreferenceEvidence(value = {}) {
   const obj = safeObject(value);
 
   return Boolean(
-    Object.prototype.hasOwnProperty.call(obj, "darkMode") ||
-      Object.prototype.hasOwnProperty.call(obj, "privacyMode") ||
-      Object.prototype.hasOwnProperty.call(obj, "theme") ||
-      Object.prototype.hasOwnProperty.call(obj, "mode") ||
-      Object.prototype.hasOwnProperty.call(obj, "appearance") ||
-      Object.prototype.hasOwnProperty.call(obj, "lang") ||
-      Object.prototype.hasOwnProperty.call(obj, "language") ||
-      Object.prototype.hasOwnProperty.call(obj, "locale") ||
+    hasOwn(obj, "darkMode") ||
+      hasOwn(obj, "privacyMode") ||
+      hasOwn(obj, "theme") ||
+      hasOwn(obj, "mode") ||
+      hasOwn(obj, "appearance") ||
+      hasOwn(obj, "lang") ||
+      hasOwn(obj, "language") ||
+      hasOwn(obj, "locale") ||
       obj.preferences ||
       obj.settings
   );
@@ -714,144 +466,151 @@ function hasCuentaEvidence(value = {}) {
   return hasProfileEvidence(value) || hasPreferenceEvidence(value);
 }
 
-function getCachedCuenta() {
-  const sessionUser = getSessionUserFallback();
+function unwrapEnvelope(payload = null) {
+  if (payload === null || payload === undefined) return null;
+  if (Array.isArray(payload)) return payload[0] || null;
 
-  try {
-    const fromStore = getCuentaStore?.();
-
-    if (hasCuentaEvidence(fromStore)) {
-      return {
-        ...safeObject(sessionUser),
-        ...safeObject(fromStore),
-      };
-    }
-  } catch {}
-
-  try {
-    const fromState = safeObject(cuentaState?.item);
-
-    if (hasCuentaEvidence(fromState)) {
-      return {
-        ...safeObject(sessionUser),
-        ...fromState,
-      };
-    }
-  } catch {}
-
-  if (hasCuentaEvidence(sessionUser)) {
-    return sessionUser;
-  }
-
-  return {};
-}
-
-/* =========================================================
-   RESPONSE SOURCE COLLECTOR
-========================================================= */
-
-function collectCuentaSource(payload = null, fallback = {}) {
   const root = safeObject(payload);
-  const baseFallback = safeObject(fallback);
+
+  if (!Object.keys(root).length) return payload;
 
   const data = safeObject(root.data);
-  const item = safeObject(root.item);
-  const cuenta = safeObject(root.cuenta);
-  const account = safeObject(root.account);
-  const user = safeObject(root.user);
-  const profile = safeObject(root.profile);
-  const result = safeObject(root.result);
+  const auth = safeObject(root.auth);
   const payloadObj = safeObject(root.payload);
+  const result = safeObject(root.result);
 
-  const dataUser = safeObject(data.user);
-  const dataAccount = safeObject(data.account);
-  const dataItem = safeObject(data.item);
-  const dataProfile = safeObject(data.profile);
+  return first(
+    root.user,
+    root.usuario,
+    root.me,
+    root.account,
+    root.profile,
+    root.item,
+    root.cuenta,
 
-  const payloadUser = safeObject(payloadObj.user);
-  const payloadAccount = safeObject(payloadObj.account);
-  const payloadProfile = safeObject(payloadObj.profile);
+    data.user,
+    data.usuario,
+    data.me,
+    data.account,
+    data.profile,
+    data.item,
+    data.cuenta,
 
-  const resultUser = safeObject(result.user);
-  const resultAccount = safeObject(result.account);
-  const resultProfile = safeObject(result.profile);
+    auth.user,
+    auth.usuario,
+    auth.me,
+    auth.account,
+    auth.profile,
+
+    payloadObj.user,
+    payloadObj.usuario,
+    payloadObj.me,
+    payloadObj.account,
+    payloadObj.profile,
+    payloadObj.item,
+    payloadObj.cuenta,
+
+    result.user,
+    result.usuario,
+    result.me,
+    result.account,
+    result.profile,
+    result.item,
+    result.cuenta,
+
+    root
+  );
+}
+
+function collectCuentaSource(payload = null, fallback = {}) {
+  const base = safeObject(fallback);
+  const root = safeObject(payload);
+  const unwrapped = safeObject(unwrapEnvelope(payload));
+
+  const data = safeObject(root.data);
+  const auth = safeObject(root.auth);
+
+  const user = safeObject(
+    first(
+      root.user,
+      root.usuario,
+      root.me,
+      data.user,
+      data.usuario,
+      data.me,
+      auth.user,
+      auth.usuario,
+      auth.me,
+      unwrapped.user,
+      unwrapped.usuario,
+      unwrapped.me,
+      {}
+    )
+  );
+
+  const account = safeObject(
+    first(
+      root.account,
+      data.account,
+      auth.account,
+      unwrapped.account,
+      {}
+    )
+  );
+
+  const profile = safeObject(
+    first(
+      root.profile,
+      data.profile,
+      auth.profile,
+      unwrapped.profile,
+      user.profile,
+      account.profile,
+      {}
+    )
+  );
 
   const preferences = safeObject(
     first(
       root.preferences,
       data.preferences,
-      item.preferences,
-      cuenta.preferences,
-      account.preferences,
+      auth.preferences,
+      unwrapped.preferences,
       user.preferences,
+      account.preferences,
       profile.preferences,
-      payloadObj.preferences,
-      result.preferences,
-      dataUser.preferences,
-      dataAccount.preferences,
-      payloadUser.preferences,
-      payloadAccount.preferences,
-      baseFallback.preferences
-    )
-  );
-
-  const primary = safeObject(
-    first(
-      item,
-      cuenta,
-      account,
-      user,
-      profile,
-      dataItem,
-      dataAccount,
-      dataUser,
-      dataProfile,
-      payloadObj.item,
-      payloadObj.cuenta,
-      payloadAccount,
-      payloadUser,
-      payloadProfile,
-      result.item,
-      result.cuenta,
-      resultAccount,
-      resultUser,
-      resultProfile,
-      data,
-      payloadObj,
-      result,
-      root
+      root.settings,
+      data.settings,
+      unwrapped.settings,
+      base.preferences,
+      base.settings,
+      {}
     )
   );
 
   return {
-    ...baseFallback,
-    ...primary,
+    ...base,
+    ...unwrapped,
+    ...account,
+    ...user,
+    ...profile,
     ...preferences,
 
-    user: hasOwnKeys(user)
-      ? user
-      : hasOwnKeys(primary.user)
-        ? primary.user
-        : safeObject(baseFallback.user),
-
-    account: hasOwnKeys(account)
-      ? account
-      : hasOwnKeys(primary.account)
-        ? primary.account
-        : safeObject(baseFallback.account),
-
-    profile: {
-      ...safeObject(baseFallback.profile),
-      ...safeObject(profile),
-      ...safeObject(primary.profile),
-    },
+    user,
+    usuario: user,
+    account,
+    profile,
 
     preferences: {
-      ...safeObject(baseFallback.preferences),
+      ...safeObject(base.preferences),
       ...preferences,
     },
 
-    raw: payload,
+    settings: {
+      ...safeObject(base.settings),
+      ...safeObject(unwrapped.settings),
+      ...preferences,
+    },
   };
 }
 
@@ -859,12 +618,7 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
   const fallbackObj = safeObject(fallback);
   const source = collectCuentaSource(detail, fallbackObj);
 
-  const hasRealSource =
-    hasCuentaEvidence(detail) ||
-    hasCuentaEvidence(source) ||
-    hasCuentaEvidence(fallbackObj);
-
-  if (!hasRealSource) {
+  if (!hasCuentaEvidence(source) && !hasCuentaEvidence(fallbackObj)) {
     return null;
   }
 
@@ -876,9 +630,12 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
     source.preferences?.theme,
     source.preferences?.mode,
     source.preferences?.appearance,
+    source.settings?.theme,
+    source.settings?.mode,
+    source.settings?.appearance,
     fallbackObj.theme,
-    fallbackObj.mode,
-    fallbackObj.appearance
+    fallbackObj.preferences?.theme,
+    DEFAULT_THEME
   );
 
   const darkMode = normalizeBoolean(
@@ -886,20 +643,17 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       source.darkMode,
       source.isDark,
       source.preferences?.darkMode,
-      source.preferences?.isDark,
+      source.settings?.darkMode,
       rawTheme === "dark" ? true : null,
       rawTheme === "light" ? false : null,
       fallbackObj.darkMode,
       fallbackObj.preferences?.darkMode,
       DEFAULT_THEME === "dark"
     ),
-    normalizeTheme(rawTheme, Boolean(fallbackObj.darkMode)) === "dark"
+    false
   );
 
-  const theme = normalizeTheme(
-    first(rawTheme, darkMode ? "dark" : "light"),
-    darkMode
-  );
+  const theme = normalizeTheme(rawTheme, darkMode);
 
   const privacyMode = normalizeBoolean(
     first(
@@ -907,7 +661,7 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       source.privateMode,
       source.isPrivate,
       source.preferences?.privacyMode,
-      source.preferences?.privateMode,
+      source.settings?.privacyMode,
       fallbackObj.privacyMode,
       fallbackObj.preferences?.privacyMode,
       false
@@ -923,10 +677,8 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       source.idioma,
       source.preferences?.lang,
       source.preferences?.language,
-      source.preferences?.locale,
+      source.settings?.lang,
       fallbackObj.lang,
-      fallbackObj.language,
-      fallbackObj.locale,
       fallbackObj.preferences?.lang,
       DEFAULT_LANG
     )
@@ -938,14 +690,11 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       source.uid,
       source.sub,
       source.user_id,
-      source.user?.userId,
-      source.user?.id,
       source.account?.userId,
-      source.preferences?.userId,
+      source.user?.userId,
       fallbackObj.userId,
-      fallbackObj.uid,
-      fallbackObj.sub,
-      fallbackObj.id
+      fallbackObj.id,
+      ""
     ),
     ""
   );
@@ -973,7 +722,7 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       source.account?.email,
       fallbackObj.email,
       fallbackObj.emailLower,
-      fallbackObj.mail
+      ""
     ),
     ""
   );
@@ -983,6 +732,7 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       source.username,
       source.usernameLower,
       source.userName,
+      source.user_name,
       source.handle,
       source.slug,
       source.profile?.username,
@@ -990,10 +740,22 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       source.account?.username,
       fallbackObj.username,
       fallbackObj.usernameLower,
-      fallbackObj.userName
+      ""
     ),
     ""
   );
+
+  const slug = safeLower(
+    first(
+      source.slug,
+      source.lookup?.slug,
+      source.routing?.slug,
+      username,
+      fallbackObj.slug,
+      ""
+    ),
+    ""
+  ).replace(/^@+/, "");
 
   const name = safeText(
     first(
@@ -1012,8 +774,6 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       source.account?.name,
       source.account?.displayName,
       fallbackObj.name,
-      fallbackObj.nombre,
-      fallbackObj.fullName,
       fallbackObj.displayName,
       username,
       email,
@@ -1032,9 +792,10 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       source.profile?.telefono,
       source.user?.phone,
       source.user?.telefono,
+      source.account?.phone,
       fallbackObj.phone,
       fallbackObj.telefono,
-      fallbackObj.mobile
+      ""
     ),
     ""
   );
@@ -1061,18 +822,14 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       source.profile?.photoUrl,
       source.profile?.photoURL,
       source.profile?.imageUrl,
-      source.profile?.image,
       source.profile?.picture,
-      source.profile?.pictureUrl,
 
       source.user?.avatarUrl,
       source.user?.avatar,
       source.user?.photoUrl,
       source.user?.photoURL,
       source.user?.imageUrl,
-      source.user?.image,
       source.user?.picture,
-      source.user?.pictureUrl,
 
       source.account?.avatarUrl,
       source.account?.avatar,
@@ -1082,9 +839,7 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       fallbackObj.avatarUrl,
       fallbackObj.avatar,
       fallbackObj.photoUrl,
-      fallbackObj.photoURL,
       fallbackObj.picture,
-      fallbackObj.pictureUrl,
       ""
     ),
     ""
@@ -1094,13 +849,11 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
     first(
       source.role,
       source.rol,
-      source.accountRole,
-      source.profileRole,
+      safeArray(source.roles)[0],
       source.user?.role,
       source.user?.rol,
       source.account?.role,
       fallbackObj.role,
-      fallbackObj.rol,
       DEFAULT_ROLE
     )
   );
@@ -1114,10 +867,31 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       source.user?.status,
       source.account?.status,
       fallbackObj.status,
-      fallbackObj.estado,
       DEFAULT_STATUS
     )
   );
+
+  const invalidStatus = ["disabled", "deleted", "archived", "suspended"].includes(status);
+
+  const active = normalizeBoolean(
+    first(
+      source.active,
+      source.enabled,
+      invalidStatus ? false : null,
+      fallbackObj.active,
+      true
+    ),
+    true
+  );
+
+  const usable =
+    source.usable !== false &&
+    source.disabled !== true &&
+    source.deleted !== true &&
+    source.archived !== true &&
+    source.blocked !== true &&
+    active === true &&
+    !invalidStatus;
 
   const clienteId = safeText(
     first(
@@ -1129,20 +903,6 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
       source.user?.clienteId,
       source.account?.clienteId,
       fallbackObj.clienteId,
-      fallbackObj.clientId,
-      fallbackObj.customerId,
-      ""
-    ),
-    ""
-  );
-
-  const nif = safeText(
-    first(
-      source.nif,
-      source.taxId,
-      source.cif,
-      fallbackObj.nif,
-      fallbackObj.taxId,
       ""
     ),
     ""
@@ -1153,8 +913,9 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
     source.created_at,
     source.created,
     source.registeredAt,
+    source.user?.createdAt,
+    source.account?.createdAt,
     fallbackObj.createdAt,
-    fallbackObj.created_at,
     null
   );
 
@@ -1164,9 +925,10 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
     source.modifiedAt,
     source.lastUpdatedAt,
     source.preferences?.updatedAt,
+    source.settings?.updatedAt,
+    source.user?.updatedAt,
+    source.account?.updatedAt,
     fallbackObj.updatedAt,
-    fallbackObj.updated_at,
-    fallbackObj.preferences?.updatedAt,
     null
   );
 
@@ -1177,19 +939,7 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
     source.lastAccessAt,
     source.session?.lastLoginAt,
     fallbackObj.lastLoginAt,
-    fallbackObj.lastSeenAt,
     null
-  );
-
-  const active = normalizeBoolean(
-    first(
-      source.active,
-      source.enabled,
-      status === "active" ? true : null,
-      fallbackObj.active,
-      true
-    ),
-    true
   );
 
   const preferences = {
@@ -1234,30 +984,28 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
   };
 
   return {
-    ...fallbackObj,
-    ...source,
-
     id,
-    _id: safeText(first(source._id, id), id),
+    _id: id,
 
     userId,
-    uid: safeText(first(source.uid, userId), userId),
-    sub: safeText(first(source.sub, userId), userId),
+    uid: userId,
+    sub: userId,
 
     email,
-    emailLower: safeLower(first(source.emailLower, email), email),
+    emailLower: email,
 
     username,
-    usernameLower: safeLower(first(source.usernameLower, username), username),
+    usernameLower: safeLower(username),
+    slug,
 
     name,
-    nombre: safeText(first(source.nombre, name), name),
-    fullName: safeText(first(source.fullName, name), name),
-    displayName: safeText(first(source.displayName, name, username, email), name),
+    nombre: name,
+    fullName: name,
+    displayName: name,
 
     phone,
-    telefono: safeText(first(source.telefono, phone), phone),
-    mobile: safeText(first(source.mobile, phone), phone),
+    telefono: phone,
+    mobile: phone,
 
     avatar: avatarUrl,
     avatarUrl,
@@ -1275,16 +1023,16 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
 
     role,
     rol: role,
+    roles: [role],
 
     status,
     estado: status,
     active,
+    usable,
 
     clienteId,
-    clientId: safeText(first(source.clientId, clienteId), clienteId),
-    customerId: safeText(first(source.customerId, clienteId), clienteId),
-
-    nif,
+    clientId: clienteId,
+    customerId: clienteId,
 
     darkMode,
     privacyMode,
@@ -1301,641 +1049,301 @@ export function normalizeCuentaDetail(detail = {}, fallback = {}) {
 
     createdAt,
     created_at: createdAt,
-
     updatedAt,
     updated_at: updatedAt,
-
     lastLoginAt,
 
     preferences,
-
     settings: {
-      ...safeObject(fallbackObj.settings),
       ...safeObject(source.settings),
       ...preferences,
     },
-
     profile,
 
     user: {
-      ...safeObject(source.user),
       id,
       userId,
       email,
       username,
+      slug,
       name,
       displayName: name,
       phone,
+      avatar: avatarUrl,
       avatarUrl,
       role,
+      rol: role,
+      roles: [role],
       status,
+      active,
+      usable,
+      ...preferences,
+    },
+
+    usuario: {
+      id,
+      userId,
+      email,
+      username,
+      slug,
+      name,
+      displayName: name,
+      phone,
+      avatar: avatarUrl,
+      avatarUrl,
+      role,
+      rol: role,
+      roles: [role],
+      status,
+      active,
+      usable,
       ...preferences,
     },
 
     account: {
-      ...safeObject(source.account),
       id,
       userId,
       email,
       username,
+      slug,
       name,
       displayName: name,
       phone,
+      avatar: avatarUrl,
       avatarUrl,
       role,
       status,
+      active,
+      usable,
       clienteId,
       ...preferences,
     },
-
-    raw: detail,
   };
-}
-
-function looksLikeCuenta(value = null) {
-  const obj = safeObject(value);
-
-  return Boolean(
-    Object.prototype.hasOwnProperty.call(obj, "darkMode") ||
-      Object.prototype.hasOwnProperty.call(obj, "privacyMode") ||
-      Object.prototype.hasOwnProperty.call(obj, "theme") ||
-      Object.prototype.hasOwnProperty.call(obj, "appearance") ||
-      Object.prototype.hasOwnProperty.call(obj, "lang") ||
-      Object.prototype.hasOwnProperty.call(obj, "language") ||
-      Object.prototype.hasOwnProperty.call(obj, "locale") ||
-      obj.updatedAt ||
-      obj.updated_at ||
-      obj.userId ||
-      obj.uid ||
-      obj.sub ||
-      obj.id ||
-      obj.preferences ||
-      obj.profile ||
-      obj.account ||
-      obj.cuenta ||
-      obj.user ||
-      obj.email ||
-      obj.username ||
-      obj.name ||
-      obj.displayName ||
-      obj.avatarUrl ||
-      obj.avatar
-  );
-}
-
-/* =========================================================
-   RESPONSE NORMALIZATION
-========================================================= */
-
-function unwrapResponseEnvelope(payload = null) {
-  if (payload === null || payload === undefined) return null;
-  if (Array.isArray(payload)) return payload;
-
-  const obj = safeObject(payload);
-
-  if (!Object.keys(obj).length) return payload;
-
-  if (Array.isArray(obj.items)) return obj.items;
-  if (Array.isArray(obj.results)) return obj.results;
-  if (Array.isArray(obj.rows)) return obj.rows;
-  if (Array.isArray(obj.data)) return obj.data;
-
-  if (obj.item) return obj.item;
-  if (obj.cuenta) return obj.cuenta;
-  if (obj.account) return obj.account;
-  if (obj.user) return obj.user;
-  if (obj.profile) return obj.profile;
-  if (obj.detail) return obj.detail;
-  if (obj.result) return obj.result;
-
-  if (obj.payload) return unwrapResponseEnvelope(obj.payload);
-
-  if (obj.data && typeof obj.data === "object") {
-    return unwrapResponseEnvelope(obj.data);
-  }
-
-  if (obj.preferences) return obj;
-
-  return obj;
-}
-
-function pickDetail(payload = null) {
-  if (!payload) return null;
-  if (Array.isArray(payload)) return payload[0] || null;
-  if (looksLikeCuenta(payload)) return payload;
-
-  const obj = safeObject(payload);
-
-  if (looksLikeCuenta(obj.item)) return obj.item;
-  if (looksLikeCuenta(obj.cuenta)) return obj.cuenta;
-  if (looksLikeCuenta(obj.account)) return obj.account;
-  if (looksLikeCuenta(obj.user)) return obj.user;
-  if (looksLikeCuenta(obj.profile)) return obj.profile;
-  if (looksLikeCuenta(obj.detail)) return obj.detail;
-  if (looksLikeCuenta(obj.result)) return obj.result;
-  if (looksLikeCuenta(obj.payload)) return obj.payload;
-  if (looksLikeCuenta(obj.data)) return obj.data;
-
-  if (obj.data && typeof obj.data === "object") {
-    return pickDetail(obj.data);
-  }
-
-  if (obj.payload && typeof obj.payload === "object") {
-    return pickDetail(obj.payload);
-  }
-
-  return Object.keys(obj).length ? obj : null;
 }
 
 function normalizeCuentaResponse(response = null, fallback = {}) {
-  const source =
-    pickDetail(response) ||
-    unwrapResponseEnvelope(response) ||
-    response ||
-    {};
-
-  return normalizeCuentaDetail(source, fallback);
+  return normalizeCuentaDetail(response, fallback);
 }
 
-function pickMeta(payload = null) {
-  const obj = safeObject(payload);
-  const data = safeObject(obj.data);
-  const payloadObj = safeObject(obj.payload);
-  const meta = safeObject(first(obj.meta, data.meta, payloadObj.meta, obj));
-
-  return {
-    ok: Boolean(first(obj.ok, data.ok, payloadObj.ok, true)),
-    service: safeText(
-      first(
-        meta.service,
-        obj.service,
-        data.service,
-        payloadObj.service,
-        "user-preferences"
-      ),
-      "user-preferences"
-    ),
-    version: safeText(
-      first(meta.version, obj.version, data.version, payloadObj.version),
-      ""
-    ),
-    container: safeText(
-      first(meta.container, obj.container, data.container, payloadObj.container),
-      ""
-    ),
-    partitionKey: safeText(
-      first(
-        meta.partitionKey,
-        obj.partitionKey,
-        data.partitionKey,
-        payloadObj.partitionKey
-      ),
-      ""
-    ),
-    defaults: safeObject(
-      first(meta.defaults, obj.defaults, data.defaults, payloadObj.defaults)
-    ),
-    endpoints: safeArray(
-      first(meta.endpoints, obj.endpoints, data.endpoints, payloadObj.endpoints)
-    ),
-    accepts: safeObject(
-      first(meta.accepts, obj.accepts, data.accepts, payloadObj.accepts)
-    ),
-    user: safeObject(
-      first(meta.user, obj.user, data.user, payloadObj.user)
-    ),
-    raw: payload,
-  };
+function getCurrentCuentaFallback() {
+  return normalizeCuentaDetail(getCurrentCoreUser(), {}) || {};
 }
 
 /* =========================================================
-   REQUEST ADAPTERS
+   ENDPOINT HELPERS
 ========================================================= */
 
-async function requestViaApiClient(method = "GET", path = "", options = {}) {
-  const client = getApiClient();
-
-  if (!client) {
-    throw new Error("CUENTA_API_CLIENT_UNAVAILABLE");
-  }
-
-  const verb = safeText(method, "GET").toLowerCase();
-  const timeout = safeNumber(options.timeout, CUENTA_TIMEOUT);
-
-  if (verb === "get" && typeof client.get === "function") {
-    return client.get(path, {
-      timeout,
-      auth: true,
-      headers: options.headers,
-      query: options.query,
-      params: options.params,
-    });
-  }
-
-  if (verb === "post" && typeof client.post === "function") {
-    return client.post(path, options.body, {
-      timeout,
-      auth: true,
-      headers: options.headers,
-      query: options.query,
-      params: options.params,
-    });
-  }
-
-  if (verb === "patch" && typeof client.patch === "function") {
-    return client.patch(path, options.body, {
-      timeout,
-      auth: true,
-      headers: options.headers,
-      query: options.query,
-      params: options.params,
-    });
-  }
-
-  if (verb === "put" && typeof client.put === "function") {
-    return client.put(path, options.body, {
-      timeout,
-      auth: true,
-      headers: options.headers,
-      query: options.query,
-      params: options.params,
-    });
-  }
-
-  if (typeof client.request === "function") {
-    return client.request(path, {
-      method: method.toUpperCase(),
-      timeout,
-      auth: true,
-      headers: options.headers,
-      query: options.query,
-      params: options.params,
-      body: options.body,
-    });
-  }
-
-  throw new Error("CUENTA_API_CLIENT_METHOD_UNAVAILABLE");
+export function getCuentaEndpoint() {
+  return CUENTA_ENDPOINTS.me;
 }
 
-async function requestViaAppCoreRequest(method = "GET", path = "", options = {}) {
-  if (typeof AppCore?.request !== "function") {
-    throw new Error("APP_CORE_REQUEST_UNAVAILABLE");
-  }
-
-  return AppCore.request(path, {
-    method: method.toUpperCase(),
-    timeout: options.timeout,
-    headers: options.headers,
-    query: options.query,
-    params: options.params,
-    body: options.body,
-  });
+export function getCuentaAltEndpoint() {
+  return CUENTA_ENDPOINTS.users;
 }
 
-async function requestViaHttpModule(method = "GET", path = "", options = {}) {
-  const Http = getHttpModule();
+export function getCuentaByIdEndpoint(id = "") {
+  const cleanId = safeText(id, "");
 
-  if (!Http) {
-    throw new Error("HTTP_MODULE_UNAVAILABLE");
-  }
+  if (!cleanId) return CUENTA_ENDPOINTS.me;
 
-  const verb = safeText(method, "GET").toLowerCase();
-
-  if (verb === "get" && typeof Http.get === "function") {
-    return Http.get(path, {
-      headers: options.headers,
-      query: options.query,
-      params: options.params,
-      timeout: options.timeout,
-    });
-  }
-
-  if (verb === "post" && typeof Http.post === "function") {
-    return Http.post(path, options.body, {
-      headers: options.headers,
-      query: options.query,
-      params: options.params,
-      timeout: options.timeout,
-    });
-  }
-
-  if (verb === "patch" && typeof Http.patch === "function") {
-    return Http.patch(path, options.body, {
-      headers: options.headers,
-      query: options.query,
-      params: options.params,
-      timeout: options.timeout,
-    });
-  }
-
-  if (verb === "put" && typeof Http.put === "function") {
-    return Http.put(path, options.body, {
-      headers: options.headers,
-      query: options.query,
-      params: options.params,
-      timeout: options.timeout,
-    });
-  }
-
-  if (typeof Http.request === "function") {
-    return Http.request(path, {
-      method: method.toUpperCase(),
-      headers: options.headers,
-      query: options.query,
-      params: options.params,
-      timeout: options.timeout,
-      body: options.body,
-    });
-  }
-
-  throw new Error("HTTP_MODULE_METHOD_UNAVAILABLE");
+  return `${CUENTA_ENDPOINTS.users}/${encodePathSegment(cleanId)}`;
 }
 
-async function requestViaFetch(method = "GET", path = "", options = {}) {
-  const body = options.body;
-  const url = buildAbsoluteUrl(path, options.query || options.params || {});
-  const controller = new AbortController();
-
-  const timeout = safeNumber(options.timeout, CUENTA_TIMEOUT);
-
-  const timeoutId = setTimeout(() => {
-    try {
-      controller.abort();
-    } catch {}
-  }, timeout);
-
-  const headers = getRequestHeaders(options.headers, body);
-
-  const finalOptions = {
-    method: method.toUpperCase(),
-    headers,
-    credentials: "include",
-    signal: controller.signal,
-  };
-
-  if (body !== undefined && body !== null) {
-    if (isFormData(body)) {
-      finalOptions.body = body;
-    } else if (
-      typeof body === "string" ||
-      isBlob(body) ||
-      isArrayBuffer(body)
-    ) {
-      finalOptions.body = body;
-    } else {
-      finalOptions.headers = {
-        ...headers,
-        "Content-Type": headers["Content-Type"] || "application/json",
-      };
-
-      finalOptions.body = JSON.stringify(body);
-    }
-  }
-
-  try {
-    const response = await fetch(url, finalOptions);
-    const contentType = safeText(response.headers.get("content-type"), "");
-
-    let data = null;
-
-    if (response.status !== 204) {
-      if (contentType.includes("application/json")) {
-        try {
-          data = await response.json();
-        } catch {
-          data = null;
-        }
-      } else {
-        const text = await response.text();
-
-        try {
-          data = text ? JSON.parse(text) : null;
-        } catch {
-          data = text ? { raw: text } : null;
-        }
-      }
-    }
-
-    if (!response.ok) {
-      const error = new Error(
-        normalizeErrorMessage(
-          data,
-          `HTTP ${response.status} en ${method.toUpperCase()} ${path}`
-        )
-      );
-
-      error.response = data;
-      error.status = response.status;
-      error.statusCode = response.status;
-      error.url = url;
-
-      throw error;
-    }
-
-    return data;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+export function getCuentaUpdateEndpoint(id = "") {
+  return getCuentaByIdEndpoint(id);
 }
 
-async function request(method = "GET", path = "", options = {}) {
-  const body = options.body;
-
-  const requestOptions = {
-    timeout: safeNumber(options.timeout, CUENTA_TIMEOUT),
-    query: safeObject(options.query),
-    params: safeObject(options.params),
-    body,
-    headers: getRequestHeaders(
-      {
-        ...(!isFormData(body) &&
-        body !== undefined &&
-        body !== null &&
-        !isBlob(body) &&
-        !isArrayBuffer(body)
-          ? { "Content-Type": "application/json" }
-          : {}),
-        ...safeObject(options.headers),
-      },
-      body
-    ),
-  };
-
-  const adapters = isFormData(body)
-    ? [
-        requestViaFetch,
-        requestViaApiClient,
-        requestViaAppCoreRequest,
-        requestViaHttpModule,
-      ]
-    : [
-        requestViaApiClient,
-        requestViaAppCoreRequest,
-        requestViaHttpModule,
-        requestViaFetch,
-      ];
-
-  let lastError = null;
-
-  for (const adapter of adapters) {
-    try {
-      return await adapter(method, path, requestOptions);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError || new Error("CUENTA_REQUEST_FAILED");
+export function getCuentaThemeEndpoint(id = "") {
+  return getCuentaUpdateEndpoint(id);
 }
 
-async function requestFirst(method = "GET", paths = [], options = {}) {
-  const candidates = safeArray(paths)
-    .map((path) => safeText(path, ""))
-    .filter(Boolean);
+export function getCuentaThemeToggleEndpoint(id = "") {
+  return getCuentaUpdateEndpoint(id);
+}
 
-  let lastError = null;
+export function getCuentaPrivacyEndpoint(id = "") {
+  return getCuentaUpdateEndpoint(id);
+}
 
-  for (const path of candidates) {
-    try {
-      return await request(method, path, options);
-    } catch (error) {
-      lastError = error;
+export function getCuentaPrivacyToggleEndpoint(id = "") {
+  return getCuentaUpdateEndpoint(id);
+}
 
-      if (!shouldTryNextEndpoint(error)) {
-        break;
-      }
-    }
-  }
+export function getCuentaLanguageEndpoint(id = "") {
+  return getCuentaUpdateEndpoint(id);
+}
 
-  throw lastError || new Error("CUENTA_REQUEST_CANDIDATES_FAILED");
+export function getCuentaLangEndpoint(id = "") {
+  return getCuentaUpdateEndpoint(id);
+}
+
+export function getCuentaMetaEndpoint() {
+  return CUENTA_ENDPOINTS.usersMeta;
+}
+
+export function getCuentaAvatarEndpoint() {
+  return CUENTA_ENDPOINTS.usersAvatar;
+}
+
+export function getCuentaSessionsEndpoint() {
+  return CUENTA_ENDPOINTS.usersSessions;
+}
+
+export function getCuentaChangePasswordEndpoint() {
+  return CUENTA_ENDPOINTS.changePassword;
 }
 
 /* =========================================================
    PAYLOAD BUILDERS
 ========================================================= */
 
+function resolveCuentaId(input = {}) {
+  const source = safeObject(input);
+  const current = getCurrentCuentaFallback();
+
+  return safeText(
+    first(
+      source.userId,
+      source.uid,
+      source.id,
+      current.userId,
+      current.id,
+      ""
+    ),
+    ""
+  );
+}
+
 function normalizeCuentaUpdatePayload(payload = {}) {
   const body = safeObject(payload);
-
-  const hasDarkMode =
-    Object.prototype.hasOwnProperty.call(body, "darkMode") ||
-    Object.prototype.hasOwnProperty.call(body, "isDark") ||
-    Object.prototype.hasOwnProperty.call(body, "theme") ||
-    Object.prototype.hasOwnProperty.call(body, "mode") ||
-    Object.prototype.hasOwnProperty.call(body, "appearance");
-
-  const hasPrivacyMode =
-    Object.prototype.hasOwnProperty.call(body, "privacyMode") ||
-    Object.prototype.hasOwnProperty.call(body, "privateMode") ||
-    Object.prototype.hasOwnProperty.call(body, "privacy");
-
-  const hasLang =
-    Object.prototype.hasOwnProperty.call(body, "lang") ||
-    Object.prototype.hasOwnProperty.call(body, "language") ||
-    Object.prototype.hasOwnProperty.call(body, "locale") ||
-    Object.prototype.hasOwnProperty.call(body, "idioma");
+  const output = {};
+  const preferences = {};
 
   const hasName =
-    Object.prototype.hasOwnProperty.call(body, "name") ||
-    Object.prototype.hasOwnProperty.call(body, "displayName") ||
-    Object.prototype.hasOwnProperty.call(body, "fullName") ||
-    Object.prototype.hasOwnProperty.call(body, "nombre");
+    hasOwn(body, "name") ||
+    hasOwn(body, "nombre") ||
+    hasOwn(body, "displayName") ||
+    hasOwn(body, "fullName");
 
   const hasPhone =
-    Object.prototype.hasOwnProperty.call(body, "phone") ||
-    Object.prototype.hasOwnProperty.call(body, "telefono") ||
-    Object.prototype.hasOwnProperty.call(body, "mobile");
+    hasOwn(body, "phone") ||
+    hasOwn(body, "telefono") ||
+    hasOwn(body, "mobile");
 
-  const rawTheme = first(
-    body.theme,
-    body.mode,
-    body.appearance,
-    body.darkMode === true ? "dark" : null,
-    body.darkMode === false ? "light" : null
-  );
+  const hasDarkMode =
+    hasOwn(body, "darkMode") ||
+    hasOwn(body, "isDark") ||
+    hasOwn(body, "theme") ||
+    hasOwn(body, "mode") ||
+    hasOwn(body, "appearance");
 
-  const darkMode = normalizeBoolean(
-    first(
-      body.darkMode,
-      body.isDark,
-      rawTheme === "dark" ? true : null,
-      rawTheme === "light" ? false : null
-    ),
-    false
-  );
+  const hasPrivacyMode =
+    hasOwn(body, "privacyMode") ||
+    hasOwn(body, "privateMode") ||
+    hasOwn(body, "privacy");
 
-  const privacyMode = normalizeBoolean(
-    first(body.privacyMode, body.privateMode, body.privacy),
-    false
-  );
+  const hasLang =
+    hasOwn(body, "lang") ||
+    hasOwn(body, "language") ||
+    hasOwn(body, "locale") ||
+    hasOwn(body, "idioma");
 
-  const lang = normalizeLang(
-    first(body.lang, body.language, body.locale, body.idioma, DEFAULT_LANG)
-  );
+  if (hasName) {
+    const name = safeText(
+      first(body.name, body.nombre, body.displayName, body.fullName),
+      ""
+    );
 
-  const name = safeText(
-    first(body.name, body.displayName, body.fullName, body.nombre),
-    ""
-  );
+    output.name = name;
+    output.nombre = name;
+    output.displayName = name;
+    output.fullName = name;
+  }
 
-  const phone = safeText(
-    first(body.phone, body.telefono, body.mobile),
-    ""
-  );
+  if (hasPhone) {
+    const phone = safeText(first(body.phone, body.telefono, body.mobile), "");
 
-  return cleanPayload({
-    ...body,
+    output.phone = phone;
+    output.telefono = phone;
+    output.mobile = phone;
+  }
 
-    ...(hasName
-      ? {
-          name,
-          displayName: name,
-          fullName: name,
-          nombre: name,
-        }
-      : {}),
+  if (hasDarkMode) {
+    const rawTheme = first(
+      body.theme,
+      body.mode,
+      body.appearance,
+      body.darkMode === true ? "dark" : null,
+      body.darkMode === false ? "light" : null
+    );
 
-    ...(hasPhone
-      ? {
-          phone,
-          telefono: phone,
-          mobile: phone,
-        }
-      : {}),
+    const darkMode = normalizeBoolean(
+      first(
+        body.darkMode,
+        body.isDark,
+        rawTheme === "dark" ? true : null,
+        rawTheme === "light" ? false : null
+      ),
+      false
+    );
 
-    ...(hasDarkMode
-      ? {
-          darkMode,
-          theme: darkMode ? "dark" : "light",
-          mode: darkMode ? "dark" : "light",
-          appearance: darkMode ? "dark" : "light",
-        }
-      : {}),
+    const theme = darkMode ? "dark" : "light";
 
-    ...(hasPrivacyMode
-      ? {
-          privacyMode,
-        }
-      : {}),
+    output.darkMode = darkMode;
+    output.theme = theme;
+    output.mode = theme;
+    output.appearance = theme;
 
-    ...(hasLang
-      ? {
-          lang,
-          language: lang,
-          locale: lang,
-        }
-      : {}),
-  });
+    preferences.darkMode = darkMode;
+    preferences.theme = theme;
+    preferences.mode = theme;
+    preferences.appearance = theme;
+  }
+
+  if (hasPrivacyMode) {
+    const privacyMode = normalizeBoolean(
+      first(body.privacyMode, body.privateMode, body.privacy),
+      false
+    );
+
+    output.privacyMode = privacyMode;
+    preferences.privacyMode = privacyMode;
+  }
+
+  if (hasLang) {
+    const lang = normalizeLang(
+      first(body.lang, body.language, body.locale, body.idioma, DEFAULT_LANG)
+    );
+
+    output.lang = lang;
+    output.language = lang;
+    output.locale = lang;
+    output.idioma = lang;
+
+    preferences.lang = lang;
+    preferences.language = lang;
+    preferences.locale = lang;
+  }
+
+  if (Object.keys(preferences).length) {
+    output.preferences = {
+      ...preferences,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  return cleanPayload(output);
 }
 
 function normalizeThemePayload(darkMode = true) {
-  const nextDarkMode = normalizeBoolean(darkMode, true);
+  const enabled = normalizeBoolean(darkMode, true);
+  const theme = enabled ? "dark" : "light";
 
   return {
-    darkMode: nextDarkMode,
-    theme: nextDarkMode ? "dark" : "light",
-    mode: nextDarkMode ? "dark" : "light",
-    appearance: nextDarkMode ? "dark" : "light",
+    darkMode: enabled,
+    theme,
+    mode: theme,
+    appearance: theme,
   };
 }
 
@@ -1952,7 +1360,38 @@ function normalizeLanguagePayload(lang = DEFAULT_LANG) {
     lang: nextLang,
     language: nextLang,
     locale: nextLang,
+    idioma: nextLang,
   };
+}
+
+function normalizePasswordPayload(payload = {}) {
+  const body = safeObject(payload);
+
+  return cleanPayload({
+    currentPassword: String(
+      body.currentPassword ??
+        body.current_password ??
+        body.oldPassword ??
+        body.old_password ??
+        ""
+    ),
+
+    newPassword: String(
+      body.newPassword ??
+        body.new_password ??
+        body.password ??
+        body.pass ??
+        ""
+    ),
+
+    confirmPassword: String(
+      body.confirmPassword ??
+        body.passwordConfirm ??
+        body.repeatPassword ??
+        body.password2 ??
+        ""
+    ),
+  });
 }
 
 /* =========================================================
@@ -1963,19 +1402,24 @@ export async function fetchCuentaRequest({
   timeout = CUENTA_TIMEOUT,
   query = {},
 } = {}) {
-  const response = await requestFirst(
-    "GET",
-    [
-      CUENTA_ENDPOINT,
-      CUENTA_ALT_ENDPOINT,
-    ],
-    {
-      timeout,
-      query,
-    }
-  );
+  try {
+    const client = getHttpClient();
 
-  return normalizeCuentaResponse(response, getCachedCuenta());
+    const response = isFunction(client.me)
+      ? await client.me({
+          timeout,
+          query,
+          auth: true,
+        })
+      : await requestJson("GET", CUENTA_ENDPOINTS.me, {
+          timeout,
+          query,
+        });
+
+    return normalizeCuentaResponse(response, getCurrentCuentaFallback());
+  } catch (error) {
+    throw createCuentaError(error, "No se pudo cargar la cuenta.");
+  }
 }
 
 export async function getCuentaByIdRequest(
@@ -1986,24 +1430,21 @@ export async function getCuentaByIdRequest(
 ) {
   const cleanId = safeText(id, "");
 
-  const response = await requestFirst(
-    "GET",
-    cleanId
-      ? [
-          getCuentaByIdEndpoint(cleanId),
-          CUENTA_ENDPOINT,
-          CUENTA_ALT_ENDPOINT,
-        ]
-      : [
-          CUENTA_ENDPOINT,
-          CUENTA_ALT_ENDPOINT,
-        ],
-    {
+  if (!cleanId) {
+    return fetchCuentaRequest({
       timeout,
-    }
-  );
+    });
+  }
 
-  return normalizeCuentaResponse(response, getCachedCuenta());
+  try {
+    const response = await requestJson("GET", getCuentaByIdEndpoint(cleanId), {
+      timeout,
+    });
+
+    return normalizeCuentaResponse(response, getCurrentCuentaFallback());
+  } catch (error) {
+    throw createCuentaError(error, "No se pudo obtener el usuario.");
+  }
 }
 
 export async function updateCuentaRequest(
@@ -2013,25 +1454,42 @@ export async function updateCuentaRequest(
     method = "PATCH",
   } = {}
 ) {
+  const fallback = getCurrentCuentaFallback();
+  const userId = resolveCuentaId({
+    ...fallback,
+    ...safeObject(payload),
+  });
+
+  if (!userId) {
+    throw createCuentaError(
+      {
+        code: "CUENTA_USER_ID_MISSING",
+        message: "No se pudo resolver el usuario de la cuenta.",
+      },
+      "No se pudo resolver el usuario de la cuenta."
+    );
+  }
+
   const body = normalizeCuentaUpdatePayload(payload);
   const httpMethod = safeText(method, "PATCH").toUpperCase() === "PUT" ? "PUT" : "PATCH";
 
-  const response = await requestFirst(
-    httpMethod,
-    [
-      CUENTA_ENDPOINT,
-      CUENTA_ALT_ENDPOINT,
-    ],
-    {
+  if (!Object.keys(body).length) {
+    return normalizeCuentaDetail(fallback, {});
+  }
+
+  try {
+    const response = await requestJson(httpMethod, getCuentaUpdateEndpoint(userId), {
       timeout,
       body,
-    }
-  );
+    });
 
-  return normalizeCuentaResponse(response, {
-    ...getCachedCuenta(),
-    ...body,
-  });
+    return normalizeCuentaResponse(response, {
+      ...fallback,
+      ...body,
+    });
+  } catch (error) {
+    throw createCuentaError(error, "No se pudo actualizar la cuenta.");
+  }
 }
 
 export async function updateCuentaThemeRequest(
@@ -2040,55 +1498,20 @@ export async function updateCuentaThemeRequest(
     timeout = CUENTA_TIMEOUT,
   } = {}
 ) {
-  const body = normalizeThemePayload(darkMode);
-
-  const response = await requestFirst(
-    "PATCH",
-    [
-      CUENTA_THEME_ENDPOINT,
-      CUENTA_ENDPOINT,
-      CUENTA_ALT_ENDPOINT,
-    ],
-    {
-      timeout,
-      body,
-    }
-  );
-
-  return normalizeCuentaResponse(response, {
-    ...getCachedCuenta(),
-    ...body,
+  return updateCuentaRequest(normalizeThemePayload(darkMode), {
+    timeout,
   });
 }
 
 export async function toggleCuentaThemeRequest({
   timeout = CUENTA_TIMEOUT,
 } = {}) {
-  try {
-    const response = await requestFirst(
-      "PATCH",
-      [
-        CUENTA_THEME_TOGGLE_ENDPOINT,
-      ],
-      {
-        timeout,
-        body: {},
-      }
-    );
+  const current = normalizeCuentaDetail(getCurrentCuentaFallback(), {}) || {};
+  const nextDarkMode = !normalizeBoolean(current.darkMode, false);
 
-    return normalizeCuentaResponse(response, getCachedCuenta());
-  } catch (error) {
-    if (!shouldTryNextEndpoint(error)) {
-      throw error;
-    }
-
-    const current = normalizeCuentaDetail(getCachedCuenta(), {}) || {};
-    const nextDarkMode = !normalizeBoolean(current.darkMode, false);
-
-    return updateCuentaThemeRequest(nextDarkMode, {
-      timeout,
-    });
-  }
+  return updateCuentaThemeRequest(nextDarkMode, {
+    timeout,
+  });
 }
 
 export async function updateCuentaPrivacyRequest(
@@ -2097,55 +1520,20 @@ export async function updateCuentaPrivacyRequest(
     timeout = CUENTA_TIMEOUT,
   } = {}
 ) {
-  const body = normalizePrivacyPayload(privacyMode);
-
-  const response = await requestFirst(
-    "PATCH",
-    [
-      CUENTA_PRIVACY_ENDPOINT,
-      CUENTA_ENDPOINT,
-      CUENTA_ALT_ENDPOINT,
-    ],
-    {
-      timeout,
-      body,
-    }
-  );
-
-  return normalizeCuentaResponse(response, {
-    ...getCachedCuenta(),
-    ...body,
+  return updateCuentaRequest(normalizePrivacyPayload(privacyMode), {
+    timeout,
   });
 }
 
 export async function toggleCuentaPrivacyRequest({
   timeout = CUENTA_TIMEOUT,
 } = {}) {
-  try {
-    const response = await requestFirst(
-      "PATCH",
-      [
-        CUENTA_PRIVACY_TOGGLE_ENDPOINT,
-      ],
-      {
-        timeout,
-        body: {},
-      }
-    );
+  const current = normalizeCuentaDetail(getCurrentCuentaFallback(), {}) || {};
+  const nextPrivacyMode = !normalizeBoolean(current.privacyMode, false);
 
-    return normalizeCuentaResponse(response, getCachedCuenta());
-  } catch (error) {
-    if (!shouldTryNextEndpoint(error)) {
-      throw error;
-    }
-
-    const current = normalizeCuentaDetail(getCachedCuenta(), {}) || {};
-    const nextPrivacyMode = !normalizeBoolean(current.privacyMode, false);
-
-    return updateCuentaPrivacyRequest(nextPrivacyMode, {
-      timeout,
-    });
-  }
+  return updateCuentaPrivacyRequest(nextPrivacyMode, {
+    timeout,
+  });
 }
 
 export async function updateCuentaLanguageRequest(
@@ -2154,195 +1542,137 @@ export async function updateCuentaLanguageRequest(
     timeout = CUENTA_TIMEOUT,
   } = {}
 ) {
-  const body = normalizeLanguagePayload(lang);
+  return updateCuentaRequest(normalizeLanguagePayload(lang), {
+    timeout,
+  });
+}
 
-  const response = await requestFirst(
-    "PATCH",
-    [
-      CUENTA_LANGUAGE_ENDPOINT,
-      CUENTA_LANG_ENDPOINT,
-      CUENTA_ENDPOINT,
-      CUENTA_ALT_ENDPOINT,
-    ],
-    {
+export async function changePasswordRequest(
+  payload = {},
+  {
+    timeout = CUENTA_TIMEOUT,
+  } = {}
+) {
+  const body = normalizePasswordPayload(payload);
+
+  try {
+    const response = await requestJson("POST", CUENTA_ENDPOINTS.changePassword, {
       timeout,
       body,
-    }
-  );
+    });
 
-  return normalizeCuentaResponse(response, {
-    ...getCachedCuenta(),
-    ...body,
-  });
+    const normalized = normalizeCuentaResponse(response, getCurrentCuentaFallback());
+
+    if (normalized) {
+      applyCuentaToCore(normalized);
+    }
+
+    return {
+      ok: true,
+      success: true,
+      passwordChanged: response?.passwordChanged !== false,
+      item: normalized,
+      response,
+    };
+  } catch (error) {
+    throw createCuentaError(error, "No se pudo cambiar la contraseña.");
+  }
+}
+
+export async function uploadCuentaAvatarRequest(
+  file,
+  {
+    timeout = CUENTA_UPLOAD_TIMEOUT,
+    fieldName = "avatar",
+  } = {}
+) {
+  if (!isBrowser() || typeof FormData === "undefined") {
+    throw createCuentaError(
+      {
+        code: "FORM_DATA_UNAVAILABLE",
+        message: "FormData no está disponible.",
+      },
+      "No se pudo preparar el avatar."
+    );
+  }
+
+  if (!file) {
+    throw createCuentaError(
+      {
+        code: "AVATAR_FILE_REQUIRED",
+        message: "Selecciona una imagen de avatar.",
+      },
+      "Selecciona una imagen de avatar."
+    );
+  }
+
+  const formData = new FormData();
+  const filename = safeText(file?.name, "avatar");
+
+  formData.append(fieldName, file, filename);
+
+  try {
+    const response = await requestJson("POST", CUENTA_ENDPOINTS.usersAvatar, {
+      timeout,
+      body: formData,
+    });
+
+    return normalizeCuentaResponse(response, getCurrentCuentaFallback());
+  } catch (error) {
+    throw createCuentaError(error, "No se pudo subir el avatar.");
+  }
+}
+
+export async function deleteCuentaAvatarRequest({
+  timeout = CUENTA_TIMEOUT,
+} = {}) {
+  try {
+    const response = await requestJson("DELETE", CUENTA_ENDPOINTS.usersAvatar, {
+      timeout,
+    });
+
+    return normalizeCuentaResponse(response, {
+      ...getCurrentCuentaFallback(),
+      avatar: "",
+      avatarUrl: "",
+      hasAvatar: false,
+    });
+  } catch (error) {
+    throw createCuentaError(error, "No se pudo eliminar el avatar.");
+  }
 }
 
 export async function fetchCuentaMetaRequest({
   timeout = CUENTA_TIMEOUT,
 } = {}) {
-  const response = await requestFirst(
-    "GET",
-    [
-      CUENTA_META_ENDPOINT,
-      `${CUENTA_ENDPOINT}/_meta`,
-      `${CUENTA_ALT_ENDPOINT}/_meta`,
-    ],
-    {
+  try {
+    return requestJson("GET", CUENTA_ENDPOINTS.usersMeta, {
       timeout,
-    }
-  );
+    });
+  } catch (error) {
+    throw createCuentaError(error, "No se pudo cargar la metadata de cuenta.");
+  }
+}
 
-  return pickMeta(response);
+export async function fetchCuentaSessionsRequest({
+  timeout = CUENTA_TIMEOUT,
+} = {}) {
+  try {
+    return requestJson("GET", CUENTA_ENDPOINTS.usersSessions, {
+      timeout,
+    });
+  } catch (error) {
+    throw createCuentaError(error, "No se pudieron cargar las sesiones.");
+  }
 }
 
 /* =========================================================
-   CACHE
+   PUBLIC FLOW
 ========================================================= */
-
-function readCache() {
-  if (!isBrowser()) return null;
-
-  try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw);
-    const createdAt = safeNumber(parsed?.createdAt, 0);
-
-    if (!createdAt || Date.now() - createdAt > CACHE_MAX_AGE_MS) {
-      return null;
-    }
-
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function writeCache(item = null) {
-  if (!isBrowser()) return false;
-
-  try {
-    if (!hasCuentaEvidence(item)) return false;
-
-    localStorage.setItem(
-      CACHE_KEY,
-      JSON.stringify({
-        createdAt: Date.now(),
-        item,
-      })
-    );
-
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export function hydrateCuentaFromCache() {
-  try {
-    const sessionFallback = getSessionUserFallback();
-
-    const current = safeObject(cuentaState?.item);
-
-    if (hasCuentaEvidence(current)) {
-      const normalized = normalizeCuentaDetail(current, sessionFallback);
-
-      if (normalized) {
-        replaceCuentaStore(normalized);
-        callSafe(setItem, normalized);
-        callSafe(setHydrated, true);
-        callSafe(setLoaded, true);
-
-        return normalized;
-      }
-    }
-
-    const stored = safeObject(getCuentaStore?.());
-
-    if (hasCuentaEvidence(stored)) {
-      const normalized = normalizeCuentaDetail(stored, sessionFallback);
-
-      if (normalized) {
-        replaceCuentaStore(normalized);
-        callSafe(setItem, normalized);
-        callSafe(setHydrated, true);
-        callSafe(setLoaded, true);
-
-        return normalized;
-      }
-    }
-
-    const cached = readCache();
-
-    if (hasCuentaEvidence(cached?.item)) {
-      const normalized = normalizeCuentaDetail(cached.item, sessionFallback);
-
-      if (normalized) {
-        replaceCuentaStore(normalized);
-        callSafe(setItem, normalized);
-        callSafe(setHydrated, true);
-        callSafe(setLoaded, true);
-
-        return normalized;
-      }
-    }
-
-    if (hasCuentaEvidence(sessionFallback)) {
-      const normalized = normalizeCuentaDetail(sessionFallback, {});
-
-      if (normalized) {
-        replaceCuentaStore(normalized);
-        callSafe(setItem, normalized);
-        callSafe(setHydrated, true);
-
-        return normalized;
-      }
-    }
-
-    return {};
-  } catch {
-    return {};
-  }
+  return getCurrentCuentaFallback();
 }
-
-/* =========================================================
-   STATE HYDRATION
-========================================================= */
-
-function applyLoadedDetailToState(detail = null, { replace = true } = {}) {
-  const normalized = normalizeCuentaDetail(detail, getCachedCuenta());
-
-  if (!normalized) return null;
-
-  if (replace) {
-    replaceCuentaStore(normalized);
-  } else {
-    try {
-      upsertCuentaStore?.(normalized);
-    } catch {
-      replaceCuentaStore(normalized);
-    }
-  }
-
-  callSafe(setItem, normalized);
-  callSafe(setLastSyncAt, Date.now());
-  callSafe(setLoaded, true);
-  callSafe(setHydrated, true);
-  callSafe(setError, null);
-
-  writeCache(normalized);
-
-  safeEmit("cuenta:api:state:applied", {
-    detail: normalized,
-    replace,
-  });
-
-  return normalized;
-}
-
-/* =========================================================
-   LOAD DETAIL
-========================================================= */
 
 export async function loadCuenta({
   force = false,
@@ -2351,307 +1681,223 @@ export async function loadCuenta({
 } = {}) {
   const loadToken = nextLoadToken();
 
-  const cached = getCachedCuenta();
-
-  const firstLoad =
-    !Boolean(cuentaState?.hydrated) &&
-    !hasCuentaEvidence(cuentaState?.item) &&
-    !hasCuentaEvidence(cached);
-
-  const shouldShowLoading = firstLoad && !force && !silent;
-
   try {
-    callSafe(setError, null);
-
-    if (shouldShowLoading) {
-      callSafe(setLoading, true);
-    } else if (!silent) {
-      callSafe(setRefreshing, true);
-    }
-
     const detail = await fetchCuentaRequest({
       timeout: CUENTA_TIMEOUT,
       query: {
         ...safeObject(query),
         ...(force ? { _t: Date.now() } : {}),
+        ...(silent ? { silent: "1" } : {}),
       },
     });
 
     if (!isActiveLoadToken(loadToken)) {
-      return normalizeCuentaDetail(cuentaState?.item, getCachedCuenta());
+      return normalizeCuentaDetail(getCurrentCuentaFallback(), {});
     }
 
-    return applyLoadedDetailToState(detail, {
-      replace: true,
-    });
+    applyCuentaToCore(detail);
+
+    return detail;
   } catch (error) {
-    const message = normalizeErrorMessage(
-      error,
-      "No se pudo cargar la cuenta."
-    );
-
     if (!isActiveLoadToken(loadToken)) {
-      return normalizeCuentaDetail(cuentaState?.item, getCachedCuenta());
+      return normalizeCuentaDetail(getCurrentCuentaFallback(), {});
     }
-
-    console.error("❌ CUENTA LOAD:", error);
-
-    callSafe(setError, message);
-    callSafe(setLoaded, true);
-    callSafe(setHydrated, true);
 
     throw error;
-  } finally {
-    if (isActiveLoadToken(loadToken)) {
-      callSafe(setLoading, false);
-      callSafe(setRefreshing, false);
-    }
   }
 }
 
-/* =========================================================
-   MUTATIONS
-========================================================= */
-
 export async function updateCuenta(payload = {}, options = {}) {
-  try {
-    callSafe(setSaving, true);
-    callSafe(setError, null);
+  const updated = await updateCuentaRequest(payload, options);
 
-    const updated = await updateCuentaRequest(payload, options);
+  applyCuentaToCore(updated);
 
-    return applyLoadedDetailToState(updated, {
-      replace: false,
-    });
-  } catch (error) {
-    console.error("❌ CUENTA UPDATE:", error);
-
-    callSafe(
-      setError,
-      normalizeErrorMessage(
-        error,
-        "No se pudo actualizar la cuenta."
-      )
-    );
-
-    throw error;
-  } finally {
-    callSafe(setSaving, false);
-  }
+  return updated;
 }
 
 export async function updateCuentaTheme(darkMode = true, options = {}) {
-  try {
-    callSafe(setSaving, true);
-    callSafe(setError, null);
+  const updated = await updateCuentaThemeRequest(darkMode, options);
 
-    const updated = await updateCuentaThemeRequest(darkMode, options);
+  applyCuentaToCore(updated);
 
-    return applyLoadedDetailToState(updated, {
-      replace: false,
-    });
-  } catch (error) {
-    console.error("❌ CUENTA THEME UPDATE:", error);
-
-    callSafe(
-      setError,
-      normalizeErrorMessage(
-        error,
-        "No se pudo actualizar el tema."
-      )
-    );
-
-    throw error;
-  } finally {
-    callSafe(setSaving, false);
-  }
+  return updated;
 }
 
 export async function toggleCuentaTheme(options = {}) {
-  try {
-    callSafe(setSaving, true);
-    callSafe(setError, null);
+  const updated = await toggleCuentaThemeRequest(options);
 
-    const updated = await toggleCuentaThemeRequest(options);
+  applyCuentaToCore(updated);
 
-    return applyLoadedDetailToState(updated, {
-      replace: false,
-    });
-  } catch (error) {
-    console.error("❌ CUENTA THEME TOGGLE:", error);
-
-    callSafe(
-      setError,
-      normalizeErrorMessage(
-        error,
-        "No se pudo alternar el tema."
-      )
-    );
-
-    throw error;
-  } finally {
-    callSafe(setSaving, false);
-  }
+  return updated;
 }
 
 export async function updateCuentaPrivacy(privacyMode = false, options = {}) {
-  try {
-    callSafe(setSaving, true);
-    callSafe(setError, null);
+  const updated = await updateCuentaPrivacyRequest(privacyMode, options);
 
-    const updated = await updateCuentaPrivacyRequest(privacyMode, options);
+  applyCuentaToCore(updated);
 
-    return applyLoadedDetailToState(updated, {
-      replace: false,
-    });
-  } catch (error) {
-    console.error("❌ CUENTA PRIVACY UPDATE:", error);
-
-    callSafe(
-      setError,
-      normalizeErrorMessage(
-        error,
-        "No se pudo actualizar la privacidad."
-      )
-    );
-
-    throw error;
-  } finally {
-    callSafe(setSaving, false);
-  }
+  return updated;
 }
 
 export async function toggleCuentaPrivacy(options = {}) {
-  try {
-    callSafe(setSaving, true);
-    callSafe(setError, null);
+  const updated = await toggleCuentaPrivacyRequest(options);
 
-    const updated = await toggleCuentaPrivacyRequest(options);
+  applyCuentaToCore(updated);
 
-    return applyLoadedDetailToState(updated, {
-      replace: false,
-    });
-  } catch (error) {
-    console.error("❌ CUENTA PRIVACY TOGGLE:", error);
-
-    callSafe(
-      setError,
-      normalizeErrorMessage(
-        error,
-        "No se pudo alternar la privacidad."
-      )
-    );
-
-    throw error;
-  } finally {
-    callSafe(setSaving, false);
-  }
+  return updated;
 }
 
 export async function updateCuentaLanguage(lang = DEFAULT_LANG, options = {}) {
-  try {
-    callSafe(setSaving, true);
-    callSafe(setError, null);
+  const updated = await updateCuentaLanguageRequest(lang, options);
 
-    const updated = await updateCuentaLanguageRequest(lang, options);
+  applyCuentaToCore(updated);
 
-    return applyLoadedDetailToState(updated, {
-      replace: false,
-    });
-  } catch (error) {
-    console.error("❌ CUENTA LANGUAGE UPDATE:", error);
-
-    callSafe(
-      setError,
-      normalizeErrorMessage(
-        error,
-        "No se pudo actualizar el idioma."
-      )
-    );
-
-    throw error;
-  } finally {
-    callSafe(setSaving, false);
-  }
+  return updated;
 }
 
-export async function loadCuentaMeta() {
-  try {
-    const meta = await fetchCuentaMetaRequest({
-      timeout: CUENTA_TIMEOUT,
-    });
+export async function changePassword(payload = {}, options = {}) {
+  return changePasswordRequest(payload, options);
+}
 
-    callSafe(setMeta, meta);
+export async function updatePassword(payload = {}, options = {}) {
+  return changePassword(payload, options);
+}
 
-    return meta;
-  } catch (error) {
-    console.error("❌ CUENTA META:", error);
-    throw error;
-  }
+export async function savePassword(payload = {}, options = {}) {
+  return changePassword(payload, options);
+}
+
+export async function uploadCuentaAvatar(file, options = {}) {
+  const updated = await uploadCuentaAvatarRequest(file, options);
+
+  applyCuentaToCore(updated);
+
+  return updated;
+}
+
+export async function deleteCuentaAvatar(options = {}) {
+  const updated = await deleteCuentaAvatarRequest(options);
+
+  applyCuentaToCore(updated);
+
+  return updated;
+}
+
+export async function loadCuentaMeta(options = {}) {
+  return fetchCuentaMetaRequest(options);
+}
+
+export async function loadCuentaSessions(options = {}) {
+  return fetchCuentaSessionsRequest(options);
 }
 
 /* =========================================================
-   PUBLIC BRIDGE
+   ALIASES ESTABLES
 ========================================================= */
 
-function registerCuentaApiBridge(api) {
-  try {
-    if (!AppCore.modules || typeof AppCore.modules !== "object") {
-      AppCore.modules = {};
-    }
+export const getCuenta = loadCuenta;
+export const fetchCuenta = loadCuenta;
+export const refreshCuenta = loadCuenta;
+export const reloadCuenta = loadCuenta;
 
-    AppCore.modules.CuentaApi = api;
-    AppCore.modules.OnionCuentaApi = api;
-    AppCore.modules.UserPreferencesApi = api;
-  } catch {}
+export const saveCuenta = updateCuenta;
+export const save = updateCuenta;
+export const saveProfile = updateCuenta;
+export const savePerfil = updateCuenta;
+export const updateProfile = updateCuenta;
+export const updatePerfil = updateCuenta;
 
-  try {
-    if (isBrowser()) {
-      window.OnionCuentaApi = api;
-      window.CuentaApi = api;
-      window.UserPreferencesApi = api;
-    }
-  } catch {}
+export const updateTheme = updateCuentaTheme;
+export const setTheme = updateCuentaTheme;
+export const setCuentaTheme = updateCuentaTheme;
 
-  return api;
-}
+export const updateLanguage = updateCuentaLanguage;
+export const setLanguage = updateCuentaLanguage;
+export const setCuentaLanguage = updateCuentaLanguage;
+
+export const updatePrivacy = updateCuentaPrivacy;
+export const setPrivacy = updateCuentaPrivacy;
+export const setCuentaPrivacy = updateCuentaPrivacy;
 
 /* =========================================================
-   PUBLIC API
+   SNAPSHOT
+========================================================= */
+
+export function getCuentaApiSnapshot() {
+  const current = getCurrentCuentaFallback();
+
+  return {
+    version: CUENTA_API_VERSION,
+    resource: CUENTA_RESOURCE,
+
+    endpoints: {
+      ...CUENTA_ENDPOINTS,
+    },
+
+    hasHttp: Boolean(getHttpClient()),
+    hasCurrentUser: Boolean(current?.userId || current?.id),
+
+    current: current
+      ? {
+          userId: current.userId ? "***" : "",
+          id: current.id ? "***" : "",
+          username: current.username || "",
+          email: current.email ? "***" : "",
+          role: current.role || "",
+          status: current.status || "",
+          avatar: current.avatarUrl ? "set" : "",
+        }
+      : null,
+
+    policy: {
+      singleHttpClient: true,
+      noStorage: true,
+      noLocalStore: true,
+      noRawFetch: true,
+      noGlobalBridge: true,
+      noLegacyPreferencesEndpoint: true,
+    },
+  };
+}
+
+export const getSnapshot = getCuentaApiSnapshot;
+export const snapshot = getCuentaApiSnapshot;
+
+/* =========================================================
+   PUBLIC API OBJECT
 ========================================================= */
 
 export const CuentaApi = Object.freeze({
+  version: CUENTA_API_VERSION,
   resource: CUENTA_RESOURCE,
+
+  endpoints: CUENTA_ENDPOINTS,
 
   endpoint: CUENTA_ENDPOINT,
   altEndpoint: CUENTA_ALT_ENDPOINT,
 
-  themeEndpoint: CUENTA_THEME_ENDPOINT,
-  themeToggleEndpoint: CUENTA_THEME_TOGGLE_ENDPOINT,
-
-  privacyEndpoint: CUENTA_PRIVACY_ENDPOINT,
-  privacyToggleEndpoint: CUENTA_PRIVACY_TOGGLE_ENDPOINT,
-
-  languageEndpoint: CUENTA_LANGUAGE_ENDPOINT,
-  langEndpoint: CUENTA_LANG_ENDPOINT,
-
-  metaEndpoint: CUENTA_META_ENDPOINT,
-
   timeout: CUENTA_TIMEOUT,
   detailTimeout: CUENTA_DETAIL_TIMEOUT,
+  uploadTimeout: CUENTA_UPLOAD_TIMEOUT,
+
+  normalizeCuentaDetail,
 
   getCuentaEndpoint,
   getCuentaAltEndpoint,
+  getCuentaByIdEndpoint,
+  getCuentaUpdateEndpoint,
+
   getCuentaThemeEndpoint,
   getCuentaThemeToggleEndpoint,
   getCuentaPrivacyEndpoint,
   getCuentaPrivacyToggleEndpoint,
   getCuentaLanguageEndpoint,
   getCuentaLangEndpoint,
-  getCuentaMetaEndpoint,
-  getCuentaByIdEndpoint,
 
-  normalizeCuentaDetail,
+  getCuentaMetaEndpoint,
+  getCuentaAvatarEndpoint,
+  getCuentaSessionsEndpoint,
+  getCuentaChangePasswordEndpoint,
 
   hydrateCuentaFromCache,
 
@@ -2663,18 +1909,56 @@ export const CuentaApi = Object.freeze({
   updateCuentaPrivacyRequest,
   toggleCuentaPrivacyRequest,
   updateCuentaLanguageRequest,
+  changePasswordRequest,
+  uploadCuentaAvatarRequest,
+  deleteCuentaAvatarRequest,
   fetchCuentaMetaRequest,
+  fetchCuentaSessionsRequest,
 
   loadCuenta,
+  getCuenta,
+  fetchCuenta,
+  refreshCuenta,
+  reloadCuenta,
+
   updateCuenta,
+  saveCuenta,
+  save,
+  saveProfile,
+  savePerfil,
+  updateProfile,
+  updatePerfil,
+
   updateCuentaTheme,
   toggleCuentaTheme,
+  updateTheme,
+  setTheme,
+  setCuentaTheme,
+
   updateCuentaPrivacy,
   toggleCuentaPrivacy,
-  updateCuentaLanguage,
-  loadCuentaMeta,
-});
+  updatePrivacy,
+  setPrivacy,
+  setCuentaPrivacy,
 
-registerCuentaApiBridge(CuentaApi);
+  updateCuentaLanguage,
+  updateLanguage,
+  setLanguage,
+  setCuentaLanguage,
+
+  changePassword,
+  updatePassword,
+  savePassword,
+
+  uploadCuentaAvatar,
+  deleteCuentaAvatar,
+
+  loadCuentaMeta,
+  loadCuentaSessions,
+
+  getCuentaApiSnapshot,
+  getSnapshot,
+  snapshot,
+});
 
 export default CuentaApi;

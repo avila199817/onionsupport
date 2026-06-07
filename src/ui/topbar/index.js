@@ -1,1360 +1,2516 @@
 /* =========================================================
-   Onion API - Search Module
-   Archivo: /router/search/index.js
+   Onion Support - Topbar UI
+   Archivo: /src/ui/topbar/index.js
 
-   FULL PRO SAAS PANEL · EXTREME GOD MODE · CORS READY
+   FULL PRO SAAS PANEL · BACKEND SEARCH · GOD MODE FINAL
 
-   Responsabilidades:
-   - montar el módulo global de búsqueda
-   - aplicar request id por petición
-   - resolver CORS/preflight antes de auth
-   - endurecer auth guard del módulo
-   - añadir trazabilidad útil para debug
-   - aplicar rate limit ligero anti spam
-   - montar submódulos de users / clientes / incidencias
-   - montar aliases estables:
-     · /users       + /usuarios
-     · /clientes    + /clients
-     · /incidencias + /tickets
-   - montar búsqueda global para topbar
-   - responder health local del módulo
-   - centralizar 404 y error handler del search
-   - mantener logs útiles sin exponer secretos
-
-   Subrutas:
-   - OPTIONS /api/search/*
-   - GET     /api/search/_health
-   - HEAD    /api/search/_health
-   - /api/search/users
-   - /api/search/usuarios
-   - /api/search/clientes
-   - /api/search/clients
-   - /api/search/incidencias
-   - /api/search/tickets
-   - /api/search/
+   Responsabilidad:
+   - Montar topbar en #topbar-mount / #app-topbar.
+   - Mostrar título de ruta.
+   - Ocultarse en rutas públicas/auth.
+   - Consumir /api/search del backend.
+   - Pintar resultados remotos vía template.js.
+   - Mantener fallback local de navegación.
+   - Debounce, AbortController, cache corta y control anti-race.
+   - Portar dropdown fuera del form para evitar overflow clipping.
+   - Navegación SPA segura.
+   - Exponer window.OnionTopbar para diagnóstico productivo.
 ========================================================= */
 
-"use strict";
+import { AppCore } from "../../core/index.js";
 
-import express from "express";
-import crypto from "crypto";
+import {
+  createTopbarTemplate,
+  getTopbarTemplateRefs,
+  setTopbarTemplateTitle,
+  setTopbarTemplateVisible,
+  clearTopbarSearchResults,
+  setTopbarSearchExpanded,
+  renderTopbarSearchResults,
+  setTopbarSearchActiveIndex,
+} from "./template.js";
 
-import searchRouter from "./search.router.js";
-import usersSearchCreate from "./search_users_create.js";
-import clientesSearchCreate from "./search_clientes_create.js";
-import incidenciasSearchCreate from "./search_incidencias_create.js";
+export const TOPBAR_VERSION = "topbar.controller.backend-search.v5.godmode";
+
+const TOPBAR_ROOT_ID = "app-topbar";
+const TOPBAR_MOUNT_ID = "topbar-mount";
+const APP_TITLE_PREFIX = "Onion";
+
+const SOURCE = "topbar.search";
+
+const SEARCH_ENDPOINT_DEFAULT = "/api/search";
+const PRODUCTION_API_BASE = "https://api.onionit.net";
+
+const SEARCH_LIMIT = 10;
+const BACKEND_LIMIT = 12;
+const BACKEND_DEBOUNCE_MS = 140;
+const BACKEND_TIMEOUT_MS = 9000;
+const BACKEND_CACHE_TTL_MS = 25_000;
+const BACKEND_CACHE_MAX = 80;
+
+const ROLE_ADMIN = "admin";
+const ROLE_USER = "user";
+
+const SEARCH_STATUS = Object.freeze({
+  IDLE: "idle",
+  LOADING: "loading",
+  READY: "ready",
+  EMPTY: "empty",
+  ERROR: "error",
+});
+
+const RESULT_TYPES = Object.freeze({
+  NAV: "nav",
+  SETTINGS: "settings",
+  CLIENTE: "cliente",
+  USER: "user",
+  INCIDENCIA: "incidencia",
+  FACTURA: "factura",
+  HARDWARE: "hardware",
+  GENERAL: "general",
+});
+
+const TYPE_ICON = Object.freeze({
+  [RESULT_TYPES.NAV]: "→",
+  [RESULT_TYPES.SETTINGS]: "AJ",
+  [RESULT_TYPES.CLIENTE]: "CL",
+  [RESULT_TYPES.USER]: "US",
+  [RESULT_TYPES.INCIDENCIA]: "IN",
+  [RESULT_TYPES.FACTURA]: "FA",
+  [RESULT_TYPES.HARDWARE]: "HW",
+  [RESULT_TYPES.GENERAL]: "⌕",
+});
+
+const SEARCH_ROUTES = Object.freeze([
+  {
+    key: "home",
+    label: "Inicio",
+    title: "Inicio",
+    description: "Panel principal",
+    route: "/",
+    icon: "HM",
+    type: RESULT_TYPES.NAV,
+    keywords: ["inicio", "dashboard", "panel", "principal", "home"],
+  },
+  {
+    key: "incidencias",
+    label: "Incidencias",
+    title: "Incidencias",
+    description: "Tickets y solicitudes de soporte",
+    route: "/incidencias",
+    icon: "IN",
+    type: RESULT_TYPES.INCIDENCIA,
+    keywords: [
+      "incidencias",
+      "incidencia",
+      "ticket",
+      "tickets",
+      "soporte",
+      "solicitudes",
+      "casos",
+      "crear incidencia",
+      "nueva incidencia",
+      "mis tickets",
+      "mis incidencias",
+    ],
+  },
+  {
+    key: "facturas",
+    label: "Facturas",
+    title: "Facturas",
+    description: "Facturación, importes, PDFs y pagos",
+    route: "/facturas",
+    icon: "FA",
+    type: RESULT_TYPES.FACTURA,
+    keywords: [
+      "factura",
+      "facturas",
+      "billing",
+      "pagos",
+      "importe",
+      "facturacion",
+      "facturación",
+      "invoice",
+      "pdf",
+      "mis facturas",
+    ],
+  },
+  {
+    key: "clientes",
+    label: "Clientes",
+    title: "Clientes",
+    description: "Administración de clientes",
+    route: "/clientes",
+    icon: "CL",
+    type: RESULT_TYPES.CLIENTE,
+    adminOnly: true,
+    keywords: [
+      "cliente",
+      "clientes",
+      "clients",
+      "empresas",
+      "cuentas",
+      "administracion",
+      "administración",
+      "perfil cliente",
+      "ficha cliente",
+    ],
+  },
+  {
+    key: "usuarios",
+    label: "Usuarios",
+    title: "Usuarios",
+    description: "Administración de usuarios",
+    route: "/usuarios",
+    icon: "US",
+    type: RESULT_TYPES.USER,
+    adminOnly: true,
+    keywords: [
+      "usuario",
+      "usuarios",
+      "users",
+      "miembros",
+      "permisos",
+      "roles",
+      "buscar usuario",
+    ],
+  },
+  {
+    key: "servidor",
+    label: "Servidor",
+    title: "Servidor",
+    description: "Estado y configuración del servidor",
+    route: "/servidor",
+    icon: "SV",
+    type: RESULT_TYPES.SETTINGS,
+    adminOnly: true,
+    keywords: ["server", "servidor", "estado", "sistema", "infraestructura"],
+  },
+  {
+    key: "cuenta",
+    label: "Cuenta",
+    title: "Cuenta",
+    description: "Perfil y datos de cuenta",
+    route: "/cuenta",
+    icon: "CU",
+    type: RESULT_TYPES.USER,
+    keywords: [
+      "perfil",
+      "profile",
+      "mi cuenta",
+      "mi perfil",
+      "account",
+      "usuario",
+      "mi usuario",
+    ],
+  },
+  {
+    key: "ajustes",
+    label: "Ajustes",
+    title: "Ajustes",
+    description: "Preferencias y configuración",
+    route: "/ajustes",
+    icon: "AJ",
+    type: RESULT_TYPES.SETTINGS,
+    keywords: [
+      "settings",
+      "ajustes",
+      "configuracion",
+      "configuración",
+      "preferencias",
+    ],
+  },
+]);
+
+let initialized = false;
+let mounted = false;
+let root = null;
+let cleanupEvents = null;
+let lastOptions = {};
+
+let latestSearchResults = [];
+let activeSearchIndex = -1;
+let lastSearchQuery = "";
+let lastSearchStatus = SEARCH_STATUS.IDLE;
+let lastSearchError = "";
+
+let backendTimer = null;
+let backendSeq = 0;
+let backendAbort = null;
+
+const backendCache = new Map();
 
 /* =========================================================
-   MODULE FACTORY
+   BASICS
 ========================================================= */
 
-export default function createSearchModule(
-  clientesContainer,
-  usersContainer,
-  ticketsContainer,
-  facturasContainer,
-  requireAuth
-) {
-  const router = express.Router({
-    caseSensitive: false,
-    strict: false,
-  });
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
-  /* =========================================================
-     CONSTANTS
-  ========================================================= */
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
-  const MODULE_NAME = "onion-search";
-  const MODULE_VERSION = "2026.06.extreme.cors.1";
+function isFunction(value) {
+  return typeof value === "function";
+}
 
-  const REQUEST_ID_HEADER = "x-request-id";
-  const CORRELATION_ID_HEADER = "x-correlation-id";
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
 
-  const RATE_LIMIT_WINDOW_MS = envNumber("SEARCH_RATE_LIMIT_WINDOW_MS", 10_000);
-  const RATE_LIMIT_MAX_HITS = envNumber("SEARCH_RATE_LIMIT_MAX_HITS", 48);
-  const RATE_LIMIT_SWEEP_MS = envNumber("SEARCH_RATE_LIMIT_SWEEP_MS", 60_000);
-  const RATE_LIMIT_ENTRY_TTL_MS = RATE_LIMIT_WINDOW_MS * 3;
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  const REQUEST_ID_MAX_LENGTH = 96;
-  const LOG_QUERY_MAX_LENGTH = 220;
-  const LOG_UA_MAX_LENGTH = 220;
-  const LOG_PATH_MAX_LENGTH = 260;
-  const MAX_METHOD_LENGTH = 12;
+  return output || fallback;
+}
 
-  const hits = new Map();
-  let lastSweepAt = Date.now();
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && !value.length) continue;
+    if (isObject(value) && !Object.keys(value).length) continue;
 
-  const PUBLIC_HEALTH =
-    parseBoolean(process.env.SEARCH_PUBLIC_HEALTH, true);
-
-  const REQUIRE_USER_ID =
-    parseBoolean(process.env.SEARCH_REQUIRE_USER_ID, true);
-
-  const LOG_SUCCESS_IN_PRODUCTION =
-    parseBoolean(process.env.SEARCH_LOG_SUCCESS_IN_PRODUCTION, false);
-
-  const ALLOWED_METHODS = new Set([
-    "GET",
-    "HEAD",
-    "OPTIONS",
-  ]);
-
-  const DEFAULT_CORS_ALLOWED_ORIGINS = new Set([
-    "https://www.onionsupport.com",
-    "https://onionsupport.com",
-
-    "https://api.onionit.net",
-
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://localhost:5500",
-    "http://localhost:8080",
-
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:5500",
-    "http://127.0.0.1:8080",
-  ]);
-
-  const DEFAULT_CORS_HEADERS = [
-    "Authorization",
-    "Content-Type",
-    "Accept",
-    "Origin",
-    "X-Requested-With",
-    "X-Search-Source",
-    "X-Request-Id",
-    "X-Correlation-Id",
-    "X-CSRF-Token",
-    "X-XSRF-Token",
-  ];
-
-  const EXPOSED_CORS_HEADERS = [
-    "X-Request-Id",
-    "X-Correlation-Id",
-    "X-Search-Module",
-    "X-Search-Version",
-    "X-Search-Route-Group",
-    "X-Rate-Limit-Window-Ms",
-    "X-Rate-Limit-Max",
-    "X-Rate-Limit-Remaining",
-    "X-Rate-Limit-Reset-Ms",
-    "Retry-After",
-  ];
-
-  /* =========================================================
-     BASIC HELPERS
-  ========================================================= */
-
-  function now() {
-    return Date.now();
+    return value;
   }
 
-  function envNumber(name = "", fallback = 0) {
-    const value = Number(process.env[name]);
-    return Number.isFinite(value) && value > 0 ? value : fallback;
+  return null;
+}
+
+function normalizeText(value = "") {
+  return cleanText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function normalizeCompact(value = "") {
+  return normalizeText(value).replace(/[^a-z0-9@._\-/#]/gi, "");
+}
+
+function titleCase(value = "") {
+  const clean = cleanText(value, "");
+
+  if (!clean) return "";
+
+  return clean
+    .replace(/^\/+/, "")
+    .replace(/^@[^/]+\/?/, "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function uniqueBy(list = [], keyFn = (item) => item) {
+  const seen = new Set();
+  const output = [];
+
+  for (const item of safeArray(list)) {
+    const key = cleanText(keyFn(item), "");
+
+    if (!key || seen.has(key)) continue;
+
+    seen.add(key);
+    output.push(item);
   }
 
-  function safeString(value, fallback = "") {
-    if (value === null || value === undefined) return fallback;
+  return output;
+}
 
-    const text = String(value)
-      .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
-      .trim();
+function clampNumber(value, min, max, fallback = min) {
+  const n = Number(value);
 
-    return text || fallback;
+  if (!Number.isFinite(n)) return fallback;
+
+  return Math.min(Math.max(n, min), max);
+}
+
+function truncate(value = "", max = 180) {
+  const text = cleanText(value, "");
+
+  if (text.length <= max) return text;
+
+  return `${text.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function callMaybe(fn, ...args) {
+  if (!isFunction(fn)) return null;
+
+  try {
+    return fn(...args);
+  } catch {
+    return null;
   }
+}
 
-  function safeObject(value, fallback = {}) {
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? value
-      : fallback;
-  }
+/* =========================================================
+   SECURITY / PATHS
+========================================================= */
 
-  function parseBoolean(value, fallback = false) {
-    if (value === null || value === undefined || value === "") {
-      return fallback;
-    }
+function hasSensitiveQuery(value = "") {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
+    String(value || "")
+  );
+}
 
-    if (typeof value === "boolean") return value;
+function safeInternalPath(value = "", fallback = "") {
+  const raw = cleanText(value, "");
 
-    if (typeof value === "number") {
-      if (value === 1) return true;
-      if (value === 0) return false;
-    }
+  if (!raw) return fallback;
+  if (!raw.startsWith("/")) return fallback;
+  if (raw.startsWith("//")) return fallback;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
+  if (/[\r\n\t\\]/.test(raw)) return fallback;
+  if (hasSensitiveQuery(raw)) return fallback;
 
-    const text = safeString(value, "").toLowerCase();
-
-    if (["1", "true", "yes", "y", "on", "enabled", "si", "sí"].includes(text)) {
-      return true;
-    }
-
-    if (["0", "false", "no", "n", "off", "disabled"].includes(text)) {
-      return false;
-    }
-
+  if (
+    raw === "/api" ||
+    raw.startsWith("/api/") ||
+    raw === "/.auth" ||
+    raw.startsWith("/.auth/") ||
+    raw === "/docs" ||
+    raw.startsWith("/docs/")
+  ) {
     return fallback;
   }
 
-  function truncate(value = "", maxLength = 120) {
-    const text = safeString(value, "");
+  return raw;
+}
 
-    if (text.length <= maxLength) return text;
+function safeFetchUrl(value = "") {
+  const raw = cleanText(value, "");
 
-    return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
+  if (!raw) return "";
+
+  if (raw.startsWith("/")) return raw;
+
+  try {
+    const parsed = new URL(raw);
+
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+    if (hasSensitiveQuery(parsed.search)) return "";
+
+    return parsed.toString();
+  } catch {
+    return "";
   }
+}
 
-  function normalizeHeaderValue(value = "") {
-    return safeString(value, "")
-      .replace(/[\r\n]/g, "")
-      .slice(0, REQUEST_ID_MAX_LENGTH);
+function directRouteFromQuery(value = "") {
+  const query = cleanText(value, "");
+
+  if (!query.startsWith("/")) return "";
+
+  return safeInternalPath(query, "");
+}
+
+function encodeParam(value = "") {
+  return encodeURIComponent(cleanText(value, ""));
+}
+
+/* =========================================================
+   CORE / ROLE / ROUTER
+========================================================= */
+
+function getCoreState() {
+  try {
+    return AppCore.getState?.() || AppCore.state || {};
+  } catch {
+    return AppCore.state || {};
   }
+}
 
-  function getHeader(req, name = "") {
-    const key = safeString(name, "").toLowerCase();
+function getCurrentUser() {
+  const state = getCoreState();
 
-    if (!key || !req?.headers) return "";
-
-    try {
-      if (typeof req.get === "function") {
-        return safeString(req.get(key), "");
-      }
-    } catch {}
-
-    const value = req.headers[key];
-
-    if (Array.isArray(value)) {
-      return safeString(value[0], "");
-    }
-
-    return safeString(value, "");
+  try {
+    return AppCore.getCurrentUser?.() || state.user || state.currentUser || null;
+  } catch {
+    return state.user || state.currentUser || null;
   }
+}
 
-  function getFirstHeaderValue(value) {
-    if (Array.isArray(value)) return value[0] || "";
-    return value || "";
-  }
+function normalizeRole(value = "") {
+  const role = cleanText(value, "").toLowerCase();
 
-  function getClientIp(req) {
-    const forwardedFor = getFirstHeaderValue(req?.headers?.["x-forwarded-for"]);
-    const forwardedIp = forwardedFor ? forwardedFor.split(",")[0]?.trim() : "";
+  if (["admin", "superadmin", "owner", "root"].includes(role)) return ROLE_ADMIN;
+  if (["user", "usuario", "client", "cliente"].includes(role)) return ROLE_USER;
 
-    return safeString(
-      getFirstHeaderValue(req?.headers?.["cf-connecting-ip"]) ||
-        forwardedIp ||
-        getFirstHeaderValue(req?.headers?.["x-real-ip"]) ||
-        req?.ip ||
-        req?.socket?.remoteAddress ||
-        "",
-      ""
-    )
-      .replace(/^::ffff:/, "")
-      .trim();
-  }
+  return "";
+}
 
-  function normalizeRole(value = "") {
-    return safeString(value, "").toLowerCase();
-  }
+function normalizeRoleList(value = []) {
+  const raw = Array.isArray(value)
+    ? value.flat(Infinity)
+    : cleanText(value, "").split(/[,\s|;]+/);
 
-  function normalizeEmail(value = "") {
-    return safeString(value, "").toLowerCase();
-  }
-
-  function getUserRole(req) {
-    return normalizeRole(
-      req?.user?.role ||
-        req?.user?.rol ||
-        req?.user?.profile?.role ||
-        req?.user?.profile?.rol ||
-        req?.user?.claims?.role ||
-        req?.user?.claims?.rol ||
-        ""
-    );
-  }
-
-  function getUserId(req) {
-    return safeString(
-      req?.user?.userId ||
-        req?.user?.uid ||
-        req?.user?.id ||
-        req?.user?.sub ||
-        req?.user?.user_id ||
-        req?.user?.profile?.userId ||
-        req?.user?.profile?.id ||
-        req?.user?.claims?.userId ||
-        req?.user?.claims?.sub ||
-        "",
-      ""
-    );
-  }
-
-  function getUserEmail(req) {
-    return normalizeEmail(
-      req?.user?.email ||
-        req?.user?.mail ||
-        req?.user?.profile?.email ||
-        req?.user?.claims?.email ||
-        ""
-    );
-  }
-
-  function getUserClienteId(req) {
-    return safeString(
-      req?.user?.clienteId ||
-        req?.user?.clientId ||
-        req?.user?.customerId ||
-        req?.user?.empresaId ||
-        req?.user?.profile?.clienteId ||
-        req?.user?.profile?.clientId ||
-        req?.user?.cliente?.id ||
-        req?.user?.cliente?.clienteId ||
-        req?.user?.client?.id ||
-        req?.user?.claims?.clienteId ||
-        "",
-      ""
-    );
-  }
-
-  function buildRequestId(req) {
-    const incoming =
-      normalizeHeaderValue(getHeader(req, REQUEST_ID_HEADER)) ||
-      normalizeHeaderValue(getHeader(req, CORRELATION_ID_HEADER));
-
-    if (incoming && /^[a-zA-Z0-9._:/@=-]{8,96}$/.test(incoming)) {
-      return incoming;
-    }
-
-    if (typeof crypto.randomUUID === "function") {
-      return crypto.randomUUID();
-    }
-
-    return crypto.randomBytes(16).toString("hex");
-  }
-
-  function getLogEnabled() {
-    if (parseBoolean(process.env.SEARCH_LOG_DISABLED, false)) {
-      return false;
-    }
-
-    if (safeString(process.env.NODE_ENV, "") === "test") {
-      return false;
-    }
-
-    return true;
-  }
-
-  function getDebugEnabled() {
-    return parseBoolean(process.env.SEARCH_DEBUG, false);
-  }
-
-  function shouldLogRequest(req, statusCode = 200) {
-    if (!getLogEnabled()) return false;
-    if (req.method === "HEAD") return false;
-    if (req.method === "OPTIONS") return getDebugEnabled();
-
-    if (
-      process.env.NODE_ENV === "production" &&
-      statusCode < 400 &&
-      !LOG_SUCCESS_IN_PRODUCTION &&
-      !getDebugEnabled()
-    ) {
-      return false;
-    }
-
-    return true;
-  }
-
-  function getSearchPath(req) {
-    const originalUrl = safeString(req?.originalUrl || req?.url, "");
-    const baseUrl = safeString(req?.baseUrl, "/api/search");
-
-    try {
-      const parsed = new URL(originalUrl, "http://localhost");
-      const pathname = parsed.pathname || "/";
-
-      if (baseUrl && pathname.startsWith(baseUrl)) {
-        return pathname.slice(baseUrl.length) || "/";
-      }
-
-      const marker = "/api/search";
-
-      if (pathname.includes(marker)) {
-        return pathname.slice(pathname.indexOf(marker) + marker.length) || "/";
-      }
-
-      return pathname || "/";
-    } catch {
-      return safeString(req?.path || req?.url, "/");
-    }
-  }
-
-  function getRouteGroup(req) {
-    const path = getSearchPath(req).toLowerCase();
-
-    if (path === "/" || path === "") return "global";
-    if (path === "/_health" || path.startsWith("/_health/")) return "health";
-
-    if (path === "/users" || path.startsWith("/users/")) return "users";
-    if (path === "/usuarios" || path.startsWith("/usuarios/")) return "users";
-
-    if (path === "/clientes" || path.startsWith("/clientes/")) return "clientes";
-    if (path === "/clients" || path.startsWith("/clients/")) return "clientes";
-
-    if (path === "/incidencias" || path.startsWith("/incidencias/")) return "incidencias";
-    if (path === "/tickets" || path.startsWith("/tickets/")) return "incidencias";
-
-    return "unknown";
-  }
-
-  function getRequestUrlInfo(req) {
-    const searchPath = getSearchPath(req);
-
-    return {
-      originalUrl: truncate(req?.originalUrl, LOG_PATH_MAX_LENGTH),
-      baseUrl: truncate(req?.baseUrl, LOG_PATH_MAX_LENGTH),
-      path: truncate(req?.path, LOG_PATH_MAX_LENGTH),
-      url: truncate(req?.url, LOG_PATH_MAX_LENGTH),
-      searchPath: truncate(searchPath, LOG_PATH_MAX_LENGTH),
-      routeGroup: getRouteGroup(req),
-    };
-  }
-
-  function redactEmail(value = "") {
-    const email = normalizeEmail(value);
-
-    if (!email || !email.includes("@")) return email;
-
-    const [local = "", domain = ""] = email.split("@");
-
-    return `${local.slice(0, 2)}***@${domain || "***"}`;
-  }
-
-  function redactFreeText(value = "", max = LOG_QUERY_MAX_LENGTH) {
-    return truncate(
-      safeString(value, "")
-        .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer ***")
-        .replace(/token=[^&\s]+/gi, "token=***")
-        .replace(/password=[^&\s]+/gi, "password=***")
-        .replace(/sig=[^&\s]+/gi, "sig=***")
-        .replace(/signature=[^&\s]+/gi, "signature=***"),
-      max
-    );
-  }
-
-  function buildSafeQueryLog(req) {
-    const query = safeObject(req?.query);
-    const result = {};
-
-    const pick = (name, value, max = LOG_QUERY_MAX_LENGTH, transform = null) => {
-      const raw = typeof transform === "function" ? transform(value) : value;
-      const text = redactFreeText(raw, max);
-      if (text) result[name] = text;
-    };
-
-    pick("q", query.q || query.search || query.term || query.text);
-    pick("type", query.type || query.entity || query.kind, 60);
-    pick("mode", query.mode, 60);
-
-    pick("id", query.id, 90);
-    pick("ticketId", query.ticketId || query.incidenciaId || query.incidentId, 90);
-    pick("clienteId", query.clienteId || query.clientId || query.customerId || query.empresaId, 90);
-    pick("userId", query.userId || query.uid || query.usuarioId, 90);
-
-    pick("email", query.email || query.mail, 120, redactEmail);
-    pick("username", query.username || query.slug, 80);
-
-    if (query.nif || query.cif || query.dni || query.taxId) {
-      result.taxId = "***";
-    }
-
-    pick("status", query.status || query.estado, 60);
-    pick("priority", query.priority || query.prioridad, 60);
-    pick("severity", query.severity || query.gravedad, 60);
-    pick("category", query.category || query.categoria, 80);
-    pick("subcategory", query.subcategory || query.subcategoria, 80);
-
-    pick("source", query.source || query.origen, 80);
-    pick("channel", query.channel || query.canal, 80);
-
-    pick("includeClosed", query.includeClosed, 16);
-    pick("includeAll", query.includeAll, 16);
-    pick("onlyMine", query.onlyMine, 16);
-    pick("includeAttachments", query.includeAttachments, 16);
-    pick("includeHistory", query.includeHistory, 16);
-    pick("includeAudit", query.includeAudit, 16);
-    pick("includeTotal", query.includeTotal, 16);
-    pick("includeRaw", query.includeRaw, 16);
-    pick("includeInactive", query.includeInactive, 16);
-    pick("includeUsers", query.includeUsers, 16);
-    pick("recent", query.recent, 16);
-
-    pick("limit", query.limit, 24);
-    pick("offset", query.offset, 24);
-    pick("fetchLimit", query.fetchLimit, 24);
-    pick("contactLimit", query.contactLimit, 24);
-
-    return result;
-  }
-
-  function buildTracePayload(req, extra = {}) {
-    return {
-      requestId: req.requestId,
-      module: MODULE_NAME,
-      version: MODULE_VERSION,
-      method: truncate(req.method, MAX_METHOD_LENGTH),
-      ...getRequestUrlInfo(req),
-      userId: getUserId(req) || null,
-      clienteId: getUserClienteId(req) || null,
-      email: getUserEmail(req) ? redactEmail(getUserEmail(req)) : null,
-      role: getUserRole(req) || null,
-      ip: getClientIp(req) || null,
-      ...extra,
-    };
-  }
-
-  function isValidMethod(req) {
-    return ALLOWED_METHODS.has(safeString(req?.method, "").toUpperCase());
-  }
-
-  /* =========================================================
-     CORS HELPERS
-     Importante:
-     - Con credentials no se puede usar "*".
-     - OPTIONS debe responder antes de requireAuth.
-  ========================================================= */
-
-  function splitEnvList(value = "") {
-    return safeString(value, "")
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-
-  function normalizeOrigin(value = "") {
-    const origin = safeString(value, "");
-
-    if (!origin) return "";
-
-    try {
-      const parsed = new URL(origin);
-      return `${parsed.protocol}//${parsed.host}`;
-    } catch {
-      return "";
-    }
-  }
-
-  function getCorsAllowedOrigins() {
-    const values = [
-      ...DEFAULT_CORS_ALLOWED_ORIGINS,
-      ...splitEnvList(process.env.SEARCH_CORS_ORIGINS),
-      ...splitEnvList(process.env.CORS_ORIGINS),
-      ...splitEnvList(process.env.ALLOWED_ORIGINS),
-      ...splitEnvList(process.env.FRONTEND_ORIGINS),
-      ...splitEnvList(process.env.FRONTEND_URL),
-      ...splitEnvList(process.env.CLIENT_URL),
-    ];
-
-    return new Set(
-      values
-        .map(normalizeOrigin)
+  return [
+    ...new Set(
+      raw
+        .map(normalizeRole)
         .filter(Boolean)
+    ),
+  ];
+}
+
+function getCurrentRole() {
+  const state = getCoreState();
+  const user = getCurrentUser() || {};
+
+  const roleGetter =
+    isFunction(AppCore.getCurrentRole)
+      ? AppCore.getCurrentRole.bind(AppCore)
+      : null;
+
+  const roles = normalizeRoleList([
+    callMaybe(roleGetter),
+    state.role,
+    state.rol,
+    state.roles,
+    user.role,
+    user.rol,
+    user.roles,
+  ]);
+
+  if (user.isAdmin === true || roles.includes(ROLE_ADMIN)) return ROLE_ADMIN;
+  if (roles.includes(ROLE_USER)) return ROLE_USER;
+
+  return ROLE_USER;
+}
+
+function isAdmin() {
+  return getCurrentRole() === ROLE_ADMIN;
+}
+
+function getCurrentUserId() {
+  const state = getCoreState();
+  const user = getCurrentUser() || {};
+
+  return cleanText(
+    first(
+      user.userId,
+      user.uid,
+      user.id,
+      user.sub,
+      state.userId,
+      state.uid
+    ),
+    ""
+  );
+}
+
+function getRouter(context = {}) {
+  let moduleRouter = null;
+
+  try {
+    moduleRouter = isFunction(AppCore.getModule)
+      ? AppCore.getModule("router")
+      : null;
+  } catch {
+    moduleRouter = null;
+  }
+
+  return (
+    context.Router ||
+    context.router ||
+    AppCore.router ||
+    AppCore.Router ||
+    moduleRouter ||
+    null
+  );
+}
+
+async function navigateTo(path = "", meta = {}) {
+  const route = safeInternalPath(path, "");
+
+  if (!route) return false;
+
+  const Router = getRouter(lastOptions);
+
+  if (isFunction(Router?.navigate)) {
+    await Router.navigate(route, {
+      source: SOURCE,
+      ...meta,
+    });
+
+    return true;
+  }
+
+  if (isFunction(AppCore.navigate)) {
+    await AppCore.navigate(route, {
+      source: SOURCE,
+      ...meta,
+    });
+
+    return true;
+  }
+
+  if (isFunction(Router?.go)) {
+    await Router.go(route, {
+      source: SOURCE,
+      ...meta,
+    });
+
+    return true;
+  }
+
+  if (isBrowser()) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent("app:navigate", {
+          detail: {
+            route,
+            source: SOURCE,
+            ...meta,
+          },
+        })
+      );
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+/* =========================================================
+   DOM
+========================================================= */
+
+function byId(id = "") {
+  if (!isBrowser() || !id) return null;
+  return document.getElementById(id);
+}
+
+function clear(node = null) {
+  if (!node) return false;
+
+  try {
+    node.replaceChildren();
+    return true;
+  } catch {
+    node.textContent = "";
+    return true;
+  }
+}
+
+function eventElement(target = null) {
+  if (!target) return null;
+
+  return target.nodeType === 3 ? target.parentElement : target;
+}
+
+function contains(parent = null, child = null) {
+  try {
+    return Boolean(parent && child && (parent === child || parent.contains(child)));
+  } catch {
+    return false;
+  }
+}
+
+function getMount() {
+  if (!isBrowser()) return null;
+
+  return (
+    byId(TOPBAR_MOUNT_ID) ||
+    byId(TOPBAR_ROOT_ID) ||
+    document.querySelector?.("[data-topbar-mount]") ||
+    document.querySelector?.("[data-topbar-root]") ||
+    null
+  );
+}
+
+function getRefs() {
+  return getTopbarTemplateRefs(root);
+}
+
+function setHidden(node = null, hidden = false) {
+  if (!node) return false;
+
+  const value = Boolean(hidden);
+
+  try {
+    node.hidden = value;
+    node.setAttribute("aria-hidden", value ? "true" : "false");
+
+    if (node.dataset) {
+      node.dataset.topbarVisible = value ? "false" : "true";
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function syncMountVisibility(hidden = false) {
+  const mount = byId(TOPBAR_MOUNT_ID);
+
+  if (!mount || mount === root) return false;
+
+  return setHidden(mount, hidden);
+}
+
+/*
+  El template crea el dropdown dentro del form.
+  Este controlador lo mueve al root del topbar para evitar clipping por
+  overflow/transform del input pill.
+*/
+function portalSearchResultsToRoot() {
+  const refs = getTopbarTemplateRefs(root);
+
+  if (!refs.root || !refs.searchResults) return false;
+
+  if (refs.searchResults.parentElement !== refs.root) {
+    refs.root.appendChild(refs.searchResults);
+  }
+
+  return true;
+}
+
+function mountRoot(nextRoot) {
+  const mount = getMount();
+
+  if (!mount || !nextRoot) return null;
+
+  unbindEvents();
+
+  if (mount.matches?.("[data-topbar-root], #app-topbar")) {
+    clear(mount);
+
+    for (const child of [...nextRoot.childNodes]) {
+      mount.appendChild(child);
+    }
+
+    mount.className = nextRoot.className;
+
+    for (const [key, value] of Object.entries(nextRoot.dataset || {})) {
+      mount.dataset[key] = value;
+    }
+
+    mount.setAttribute("role", nextRoot.getAttribute("role") || "banner");
+    mount.setAttribute("aria-label", nextRoot.getAttribute("aria-label") || "Barra superior");
+    mount.setAttribute("aria-hidden", nextRoot.getAttribute("aria-hidden") || "false");
+
+    mount.hidden = nextRoot.hidden === true;
+
+    root = mount;
+  } else {
+    clear(mount);
+    mount.appendChild(nextRoot);
+    root = nextRoot;
+  }
+
+  portalSearchResultsToRoot();
+  bindEvents();
+  cacheDom();
+  mounted = true;
+
+  return root;
+}
+
+function ensureRoot(options = {}) {
+  if (!isBrowser()) return null;
+
+  const current =
+    root ||
+    byId(TOPBAR_ROOT_ID) ||
+    document.querySelector?.("[data-topbar-root]") ||
+    null;
+
+  if (current) {
+    const refs = getTopbarTemplateRefs(current);
+
+    if (refs.title && refs.searchInput && refs.searchResults) {
+      root = current;
+
+      portalSearchResultsToRoot();
+      bindEvents();
+      cacheDom();
+
+      mounted = true;
+      return root;
+    }
+  }
+
+  const topbar = createTopbarTemplate({
+    id: TOPBAR_ROOT_ID,
+    title: resolveRouteTitle(options),
+    visible: options.visible === true,
+    search: options.search !== false,
+    searchOptions: {
+      placeholder: "Buscar facturas, tickets, clientes…",
+      ...(options.searchOptions || {}),
+    },
+  });
+
+  return mountRoot(topbar);
+}
+
+/* =========================================================
+   DOM CACHE
+========================================================= */
+
+function cacheDom() {
+  const refs = getRefs();
+
+  try {
+    AppCore.dom = isObject(AppCore.dom) ? AppCore.dom : {};
+
+    AppCore.dom.topbar = refs.root;
+    AppCore.dom.appTopbar = refs.root;
+    AppCore.dom.topbarRoot = refs.root;
+    AppCore.dom.topbarMount =
+      byId(TOPBAR_MOUNT_ID) ||
+      (refs.root?.parentElement?.id === TOPBAR_MOUNT_ID ? refs.root.parentElement : null);
+
+    AppCore.dom.topbarTitle = refs.title;
+
+    AppCore.dom.search = refs.search;
+    AppCore.dom.searchForm = refs.search;
+    AppCore.dom.searchInput = refs.searchInput;
+    AppCore.dom.searchSubmit = refs.searchSubmit;
+    AppCore.dom.searchResults = refs.searchResults;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearDomCache() {
+  try {
+    if (!isObject(AppCore.dom)) return false;
+
+    delete AppCore.dom.topbar;
+    delete AppCore.dom.appTopbar;
+    delete AppCore.dom.topbarRoot;
+    delete AppCore.dom.topbarMount;
+    delete AppCore.dom.topbarTitle;
+
+    delete AppCore.dom.search;
+    delete AppCore.dom.searchForm;
+    delete AppCore.dom.searchInput;
+    delete AppCore.dom.searchSubmit;
+    delete AppCore.dom.searchResults;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   ROUTE TITLE
+========================================================= */
+
+function currentPath() {
+  const state = getCoreState();
+
+  if (state.canonicalPath || state.route || state.path) {
+    return cleanText(state.canonicalPath || state.route || state.path, "/");
+  }
+
+  if (!isBrowser()) return "/";
+
+  return cleanText(window.location.pathname || "/", "/");
+}
+
+function resolveTitleFromPath(path = "/") {
+  const clean = cleanText(path, "/").split("?")[0].split("#")[0];
+
+  if (clean === "/" || clean.startsWith("/@")) {
+    const parts = clean.split("/").filter(Boolean);
+
+    if (parts.length <= 1) return "Home";
+
+    return titleCase(parts[1]) || "Home";
+  }
+
+  return titleCase(clean) || "Home";
+}
+
+function resolveRouteTitle(options = {}) {
+  const route = options.route || null;
+
+  if (route?.title) return `${APP_TITLE_PREFIX} ${cleanText(route.title)}`;
+  if (route?.name) return `${APP_TITLE_PREFIX} ${titleCase(route.name)}`;
+
+  const path =
+    options.canonicalPath ||
+    options.path ||
+    options.publicPath ||
+    currentPath();
+
+  return `${APP_TITLE_PREFIX} ${resolveTitleFromPath(path)}`;
+}
+
+function syncTitle(options = {}) {
+  ensureRoot(options);
+
+  if (!root) return false;
+
+  return setTopbarTemplateTitle(root, resolveRouteTitle(options));
+}
+
+/* =========================================================
+   VISIBILITY
+========================================================= */
+
+function shouldHide(options = {}) {
+  const route = options.route || null;
+  const state = getCoreState();
+
+  return Boolean(
+    route?.public === true ||
+      route?.hideShell === true ||
+      route?.layout === "auth" ||
+      options.routeMode === "auth" ||
+      options.chrome === "hidden" ||
+      state.routeMode === "auth" ||
+      state.chromeHidden === true ||
+      state.chrome === "hidden"
+  );
+}
+
+function syncVisibility(options = {}) {
+  ensureRoot(options);
+
+  if (!root) return false;
+
+  const hidden = shouldHide(options);
+
+  setTopbarTemplateVisible(root, !hidden);
+  syncMountVisibility(hidden);
+
+  if (hidden) {
+    clearSearch({
+      input: true,
+      focus: false,
+    });
+  }
+
+  return true;
+}
+
+/* =========================================================
+   BACKEND CONFIG
+========================================================= */
+
+function readWindowConfig(...names) {
+  if (!isBrowser()) return "";
+
+  const buckets = [
+    window.ONION_CONFIG,
+    window.__ONION_CONFIG__,
+    window.APP_CONFIG,
+    window.__APP_CONFIG__,
+    window.__ENV__,
+    window.env,
+  ].filter(isObject);
+
+  for (const name of names) {
+    if (!name) continue;
+
+    if (window[name] !== undefined && window[name] !== null) {
+      return window[name];
+    }
+
+    for (const bucket of buckets) {
+      if (bucket[name] !== undefined && bucket[name] !== null) {
+        return bucket[name];
+      }
+    }
+  }
+
+  return "";
+}
+
+function stripTrailingSlash(value = "") {
+  return cleanText(value, "").replace(/\/+$/, "");
+}
+
+function getCoreConfig() {
+  const state = getCoreState();
+
+  return {
+    ...(isObject(AppCore.config) ? AppCore.config : {}),
+    ...(isObject(AppCore.env) ? AppCore.env : {}),
+    ...(isObject(state.config) ? state.config : {}),
+    ...(isObject(state.env) ? state.env : {}),
+  };
+}
+
+function inferApiBaseFromLocation() {
+  if (!isBrowser()) return "";
+
+  const host = cleanText(window.location.hostname, "").toLowerCase();
+
+  if (host === "www.onionsupport.com" || host === "onionsupport.com") {
+    return PRODUCTION_API_BASE;
+  }
+
+  return "";
+}
+
+function resolveApiBase(options = {}) {
+  const config = getCoreConfig();
+
+  const base = cleanText(
+    first(
+      options.apiBaseUrl,
+      options.apiBase,
+      options.baseUrl,
+      options.backendUrl,
+      config.apiBaseUrl,
+      config.apiBase,
+      config.backendUrl,
+      readWindowConfig(
+        "ONION_API_BASE_URL",
+        "API_BASE_URL",
+        "VITE_API_BASE_URL",
+        "apiBaseUrl",
+        "apiBase",
+        "backendUrl"
+      ),
+      inferApiBaseFromLocation()
+    ),
+    ""
+  );
+
+  if (!base) return "";
+
+  if (base.startsWith("/")) {
+    return stripTrailingSlash(base);
+  }
+
+  try {
+    const parsed = new URL(base);
+
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+
+    return stripTrailingSlash(parsed.toString());
+  } catch {
+    return "";
+  }
+}
+
+function resolveSearchEndpoint(options = {}) {
+  const config = getCoreConfig();
+
+  const endpoint = cleanText(
+    first(
+      options.searchEndpoint,
+      options.searchUrl,
+      options.searchApiUrl,
+      config.searchEndpoint,
+      config.searchUrl,
+      config.searchApiUrl,
+      readWindowConfig(
+        "SEARCH_ENDPOINT",
+        "SEARCH_URL",
+        "searchEndpoint",
+        "searchUrl"
+      ),
+      SEARCH_ENDPOINT_DEFAULT
+    ),
+    SEARCH_ENDPOINT_DEFAULT
+  );
+
+  const safeEndpoint = safeFetchUrl(endpoint) || SEARCH_ENDPOINT_DEFAULT;
+  const apiBase = resolveApiBase(options);
+
+  if (/^https?:\/\//i.test(safeEndpoint)) {
+    return safeEndpoint;
+  }
+
+  if (apiBase && safeEndpoint.startsWith("/")) {
+    return `${apiBase}${safeEndpoint}`;
+  }
+
+  return safeEndpoint.startsWith("/") ? safeEndpoint : `/${safeEndpoint}`;
+}
+
+function getAuthToken(options = {}) {
+  const state = getCoreState();
+
+  const authAccessToken =
+    AppCore.auth && isFunction(AppCore.auth.getAccessToken)
+      ? callMaybe(AppCore.auth.getAccessToken.bind(AppCore.auth))
+      : null;
+
+  const authToken =
+    AppCore.auth && isFunction(AppCore.auth.getToken)
+      ? callMaybe(AppCore.auth.getToken.bind(AppCore.auth))
+      : null;
+
+  const coreAccessToken =
+    isFunction(AppCore.getAccessToken)
+      ? callMaybe(AppCore.getAccessToken.bind(AppCore))
+      : null;
+
+  const coreToken =
+    isFunction(AppCore.getToken)
+      ? callMaybe(AppCore.getToken.bind(AppCore))
+      : null;
+
+  return cleanText(
+    first(
+      options.accessToken,
+      options.token,
+      authAccessToken,
+      authToken,
+      coreAccessToken,
+      coreToken,
+      state.accessToken,
+      state.authToken,
+      state.token
+    ),
+    ""
+  );
+}
+
+function buildSearchHeaders(options = {}) {
+  const headers = new Headers();
+
+  /*
+    Mantener headers mínimos:
+    - Accept es safelisted.
+    - Authorization sólo si existe token.
+    - source via query param para evitar preflight innecesario.
+  */
+  headers.set("Accept", "application/json");
+
+  const token = getAuthToken(options);
+
+  if (token) {
+    headers.set(
+      "Authorization",
+      /^Bearer\s+/i.test(token) ? token : `Bearer ${token}`
     );
   }
 
-  function isAllowedSearchOrigin(origin = "") {
-    const normalized = normalizeOrigin(origin);
+  return headers;
+}
 
-    if (!normalized) return false;
+function buildSearchUrl(query = "", options = {}) {
+  const endpoint = resolveSearchEndpoint(options);
 
-    const allowed = getCorsAllowedOrigins();
+  let url;
 
-    if (allowed.has(normalized)) return true;
+  try {
+    url = new URL(
+      endpoint,
+      isBrowser() ? window.location.origin : "http://localhost"
+    );
+  } catch {
+    url = new URL(
+      SEARCH_ENDPOINT_DEFAULT,
+      isBrowser() ? window.location.origin : "http://localhost"
+    );
+  }
 
-    if (parseBoolean(process.env.SEARCH_CORS_ALLOW_ALL, false)) {
+  url.searchParams.set("q", cleanText(query, ""));
+  url.searchParams.set("limit", String(clampNumber(options.limit, 1, 20, BACKEND_LIMIT)));
+  url.searchParams.set("includeClosed", "true");
+  url.searchParams.set("source", SOURCE);
+
+  const extraParams = isObject(options.searchParams)
+    ? options.searchParams
+    : isObject(options.params)
+      ? options.params
+      : {};
+
+  for (const [key, value] of Object.entries(extraParams)) {
+    if (!key || value === undefined || value === null || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+
+  return url.toString();
+}
+
+/* =========================================================
+   CACHE
+========================================================= */
+
+function buildCacheKey(query = "", options = {}) {
+  return [
+    normalizeText(query),
+    resolveSearchEndpoint(options),
+    getCurrentRole(),
+    getCurrentUserId(),
+  ].join("|");
+}
+
+function getCachedResults(query = "", options = {}) {
+  const key = buildCacheKey(query, options);
+  const entry = backendCache.get(key);
+
+  if (!entry) return null;
+
+  if (Date.now() - entry.at > BACKEND_CACHE_TTL_MS) {
+    backendCache.delete(key);
+    return null;
+  }
+
+  return safeArray(entry.results);
+}
+
+function setCachedResults(query = "", results = [], options = {}) {
+  const key = buildCacheKey(query, options);
+
+  backendCache.set(key, {
+    at: Date.now(),
+    results: safeArray(results),
+  });
+
+  while (backendCache.size > BACKEND_CACHE_MAX) {
+    const firstKey = backendCache.keys().next().value;
+    backendCache.delete(firstKey);
+  }
+
+  return true;
+}
+
+function clearSearchCache() {
+  backendCache.clear();
+  return true;
+}
+
+/* =========================================================
+   LOCAL SEARCH INDEX
+========================================================= */
+
+function normalizeResultType(value = "") {
+  const raw = normalizeCompact(value);
+
+  const map = {
+    nav: RESULT_TYPES.NAV,
+    route: RESULT_TYPES.NAV,
+    ruta: RESULT_TYPES.NAV,
+
+    settings: RESULT_TYPES.SETTINGS,
+    setting: RESULT_TYPES.SETTINGS,
+    ajustes: RESULT_TYPES.SETTINGS,
+    ajuste: RESULT_TYPES.SETTINGS,
+
+    cliente: RESULT_TYPES.CLIENTE,
+    clientes: RESULT_TYPES.CLIENTE,
+    client: RESULT_TYPES.CLIENTE,
+    clients: RESULT_TYPES.CLIENTE,
+    empresa: RESULT_TYPES.CLIENTE,
+
+    user: RESULT_TYPES.USER,
+    users: RESULT_TYPES.USER,
+    usuario: RESULT_TYPES.USER,
+    usuarios: RESULT_TYPES.USER,
+    profile: RESULT_TYPES.USER,
+    perfil: RESULT_TYPES.USER,
+    cuenta: RESULT_TYPES.USER,
+
+    factura: RESULT_TYPES.FACTURA,
+    facturas: RESULT_TYPES.FACTURA,
+    invoice: RESULT_TYPES.FACTURA,
+    invoices: RESULT_TYPES.FACTURA,
+    bill: RESULT_TYPES.FACTURA,
+    billing: RESULT_TYPES.FACTURA,
+
+    incidencia: RESULT_TYPES.INCIDENCIA,
+    incidencias: RESULT_TYPES.INCIDENCIA,
+    ticket: RESULT_TYPES.INCIDENCIA,
+    tickets: RESULT_TYPES.INCIDENCIA,
+    issue: RESULT_TYPES.INCIDENCIA,
+    support: RESULT_TYPES.INCIDENCIA,
+    soporte: RESULT_TYPES.INCIDENCIA,
+
+    hardware: RESULT_TYPES.HARDWARE,
+    device: RESULT_TYPES.HARDWARE,
+    devices: RESULT_TYPES.HARDWARE,
+  };
+
+  return map[raw] || RESULT_TYPES.GENERAL;
+}
+
+function normalizeSearchItem(item = {}, order = 0) {
+  const source = isObject(item) ? item : {};
+  const route = safeInternalPath(source.route || source.href || source.path || "", "");
+
+  return {
+    key: cleanText(source.key || source.id || source.label || route, route),
+    id: cleanText(source.id || source.key || source.label || route, route),
+    label: cleanText(source.label || source.title || source.name, route),
+    title: cleanText(source.title || source.label || source.name, route),
+    description: cleanText(source.description || source.subtitle || source.text, ""),
+    subtitle: cleanText(source.subtitle || source.description || source.text, ""),
+    route,
+    href: route,
+    icon: cleanText(source.icon, "").slice(0, 2).toUpperCase(),
+    type: normalizeResultType(source.type || RESULT_TYPES.NAV),
+    keywords: safeArray(source.keywords).map((value) => cleanText(value, "")).filter(Boolean),
+    adminOnly: source.adminOnly === true || source.requiresAdmin === true,
+    hidden: source.hidden === true || !route,
+    order,
+    source: "local",
+  };
+}
+
+function coreSearchItems(options = {}) {
+  const state = getCoreState();
+  const router = getRouter(options);
+
+  return [
+    ...safeArray(options.searchItems),
+    ...safeArray(options.topbarSearchItems),
+    ...safeArray(state.searchItems),
+    ...safeArray(state.topbarSearchItems),
+    ...safeArray(AppCore.searchItems),
+    ...safeArray(AppCore.topbarSearchItems),
+    ...safeArray(router?.searchItems),
+    ...safeArray(router?.topbarSearchItems),
+  ];
+}
+
+function buildSearchIndex(options = {}) {
+  const admin = isAdmin();
+
+  const defaults = SEARCH_ROUTES.map((item, index) => normalizeSearchItem(item, index));
+  const custom = coreSearchItems(options).map((item, index) =>
+    normalizeSearchItem(item, SEARCH_ROUTES.length + index)
+  );
+
+  return uniqueBy([...defaults, ...custom], (item) => `${item.route}:${item.label}`)
+    .filter((item) => {
+      if (item.hidden) return false;
+      if (item.adminOnly && !admin) return false;
       return true;
+    });
+}
+
+function scoreSearchItem(item = {}, query = "") {
+  const q = normalizeText(query);
+
+  if (!q) return 0;
+
+  const tokens = q.split(/\s+/).filter(Boolean);
+
+  const label = normalizeText(item.label);
+  const route = normalizeText(item.route);
+  const description = normalizeText(item.description);
+  const keywords = normalizeText(safeArray(item.keywords).join(" "));
+
+  const haystack = [label, route, description, keywords].join(" ");
+
+  let score = 0;
+
+  if (label === q) score += 160;
+  if (route === q) score += 150;
+  if (label.startsWith(q)) score += 100;
+  if (route.startsWith(q)) score += 82;
+  if (label.includes(q)) score += 64;
+  if (route.includes(q)) score += 46;
+  if (keywords.includes(q)) score += 42;
+  if (description.includes(q)) score += 22;
+
+  const tokenHits = tokens.filter((token) => haystack.includes(token)).length;
+
+  if (tokens.length && tokenHits === tokens.length) {
+    score += 34;
+  } else {
+    score += tokenHits * 11;
+  }
+
+  return score;
+}
+
+function directRouteResult(query = "") {
+  const route = directRouteFromQuery(query);
+
+  if (!route) return null;
+
+  return {
+    key: `route:${route}`,
+    id: `route:${route}`,
+    label: `Ir a ${route}`,
+    title: `Ir a ${route}`,
+    description: "Ruta directa",
+    subtitle: "Ruta directa",
+    route,
+    href: route,
+    icon: "→",
+    type: RESULT_TYPES.NAV,
+    keywords: [],
+    adminOnly: false,
+    hidden: false,
+    order: -1,
+    score: 999,
+    source: "local",
+  };
+}
+
+function searchLocalTopbar(query = "", options = {}) {
+  const q = cleanText(query, "");
+
+  if (!q) return [];
+
+  const direct = directRouteResult(q);
+
+  const index = buildSearchIndex(options)
+    .map((item) => ({
+      ...item,
+      score: scoreSearchItem(item, q),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.order - b.order;
+    });
+
+  const results = direct ? [direct, ...index] : index;
+
+  return uniqueBy(results, (item) => item.route).slice(0, SEARCH_LIMIT);
+}
+
+/* =========================================================
+   BACKEND RESULT NORMALIZATION
+========================================================= */
+
+function extractBackendResults(payload) {
+  if (Array.isArray(payload)) return payload;
+
+  const data = isObject(payload) ? payload : {};
+  const nested = isObject(data.data) ? data.data : {};
+
+  return safeArray(
+    first(
+      data.results,
+      data.items,
+      data.resources,
+      data.matches,
+      data.searchResults,
+      nested.results,
+      nested.items,
+      nested.resources,
+      nested.matches,
+      nested.searchResults,
+      []
+    )
+  );
+}
+
+function getResultId(item = {}) {
+  return cleanText(
+    first(
+      item.entityId,
+      item.facturaId,
+      item.invoiceId,
+      item.ticketId,
+      item.incidenciaId,
+      item.clienteId,
+      item.clientId,
+      item.userId,
+      item.usuarioId,
+      item.id,
+      item.key
+    ),
+    ""
+  );
+}
+
+function iconForResult(item = {}, type = RESULT_TYPES.GENERAL) {
+  const icon = cleanText(item.icon || item.avatarInitials || "", "")
+    .slice(0, 2)
+    .toUpperCase();
+
+  if (icon) return icon;
+
+  return TYPE_ICON[type] || TYPE_ICON[RESULT_TYPES.GENERAL];
+}
+
+function routeFromBackendResult(item = {}) {
+  const type = normalizeResultType(
+    first(item.type, item.entity, item.kind, item.entityType)
+  );
+
+  const direct = safeInternalPath(
+    first(item.route, item.href, item.url, item.path, item.to),
+    ""
+  );
+
+  if (direct) {
+    if (!isAdmin() && type === RESULT_TYPES.USER && direct.startsWith("/usuarios")) {
+      return "/cuenta";
     }
 
+    return direct;
+  }
+
+  const action = normalizeCompact(item.action || item.openAction || item.searchAction);
+  const entityId = getResultId(item);
+  const raw = isObject(item.raw) ? item.raw : {};
+  const payload = isObject(item.payload) ? item.payload : {};
+
+  const currentUserId = getCurrentUserId();
+
+  const facturaId = cleanText(
+    first(
+      item.facturaId,
+      item.invoiceId,
+      raw.facturaId,
+      raw.invoiceId,
+      payload.facturaId,
+      payload.invoiceId,
+      entityId
+    ),
+    ""
+  );
+
+  const ticketId = cleanText(
+    first(
+      item.ticketId,
+      item.incidenciaId,
+      raw.ticketId,
+      raw.incidenciaId,
+      payload.ticketId,
+      payload.incidenciaId,
+      entityId
+    ),
+    ""
+  );
+
+  const clienteId = cleanText(
+    first(
+      item.clienteId,
+      item.clientId,
+      raw.clienteId,
+      raw.clientId,
+      payload.clienteId,
+      payload.clientId,
+      entityId
+    ),
+    ""
+  );
+
+  const userId = cleanText(
+    first(
+      item.userId,
+      item.usuarioId,
+      raw.userId,
+      raw.usuarioId,
+      payload.userId,
+      payload.usuarioId,
+      entityId
+    ),
+    ""
+  );
+
+  if (type === RESULT_TYPES.FACTURA || action.includes("factura")) {
+    return facturaId ? `/facturas?factura=${encodeParam(facturaId)}` : "/facturas";
+  }
+
+  if (
+    type === RESULT_TYPES.INCIDENCIA ||
+    action.includes("incidencia") ||
+    action.includes("ticket")
+  ) {
+    return ticketId ? `/incidencias?ticket=${encodeParam(ticketId)}` : "/incidencias";
+  }
+
+  if (type === RESULT_TYPES.CLIENTE || action.includes("cliente")) {
+    return clienteId ? `/clientes?cliente=${encodeParam(clienteId)}` : "/clientes";
+  }
+
+  if (
+    type === RESULT_TYPES.USER ||
+    action.includes("usuario") ||
+    action.includes("user")
+  ) {
+    if (!isAdmin()) return "/cuenta";
+
+    if (userId && currentUserId && normalizeCompact(userId) === normalizeCompact(currentUserId)) {
+      return "/cuenta";
+    }
+
+    return userId ? `/usuarios?usuario=${encodeParam(userId)}` : "/usuarios";
+  }
+
+  if (type === RESULT_TYPES.SETTINGS) {
+    return "/ajustes";
+  }
+
+  return "/";
+}
+
+function normalizeBackendResult(item = {}, order = 0) {
+  const source = isObject(item) ? item : {};
+  const raw = isObject(source.raw) ? source.raw : {};
+  const payload = isObject(source.payload) ? source.payload : {};
+
+  const type = normalizeResultType(
+    first(source.type, source.entity, source.kind, source.entityType, raw.type, raw.entity)
+  );
+
+  const entityId = getResultId(source);
+
+  const label = cleanText(
+    first(
+      source.label,
+      source.title,
+      source.name,
+      source.displayName,
+      raw.title,
+      raw.name,
+      raw.displayName,
+      entityId
+    ),
+    "Resultado"
+  );
+
+  const description = truncate(
+    cleanText(
+      first(
+        source.description,
+        source.subtitle,
+        source.text,
+        raw.subtitle,
+        raw.description,
+        raw.status,
+        payload.status
+      ),
+      ""
+    ),
+    180
+  );
+
+  const route = routeFromBackendResult(source);
+
+  const id = cleanText(
+    first(source.id, source.key, `${type}:${entityId || label}:${order}`),
+    `${type}:${entityId || label}:${order}`
+  );
+
+  const score = Number.isFinite(Number(source.score))
+    ? Number(source.score)
+    : Number.isFinite(Number(source._score))
+      ? Number(source._score)
+      : 0;
+
+  return {
+    key: id,
+    id,
+
+    label,
+    title: label,
+
+    description,
+    subtitle: description,
+
+    route,
+    href: route,
+    path: route,
+
+    icon: iconForResult(source, type),
+    type,
+    kind: type,
+
+    entityId,
+
+    action: cleanText(source.action || source.openAction || source.searchAction, ""),
+    score,
+    order,
+    source: "backend",
+
+    payload,
+    raw,
+    backend: source,
+  };
+}
+
+function mergeResults(query = "", backendResults = [], localResults = []) {
+  const direct = directRouteResult(query);
+
+  const combined = [
+    ...(direct ? [direct] : []),
+    ...safeArray(backendResults),
+    ...safeArray(localResults),
+  ];
+
+  return uniqueBy(combined, (item) => {
+    const route = safeInternalPath(item.route, "");
+    const entityKey = [
+      normalizeResultType(item.type),
+      normalizeCompact(item.entityId || item.id || item.key || ""),
+    ].join(":");
+
+    return route || entityKey || normalizeText(item.label || item.title || "");
+  }).slice(0, SEARCH_LIMIT);
+}
+
+/* =========================================================
+   REMOTE SEARCH
+========================================================= */
+
+function abortBackendSearch() {
+  if (backendTimer) {
+    clearTimeout(backendTimer);
+    backendTimer = null;
+  }
+
+  if (backendAbort) {
+    try {
+      backendAbort.abort();
+    } catch {
+      // noop
+    }
+  }
+
+  backendAbort = null;
+}
+
+async function fetchBackendResults(query = "", options = {}) {
+  const clean = cleanText(query, "");
+
+  if (!clean) return [];
+
+  const controller = new AbortController();
+  const timeoutMs = clampNumber(
+    options.timeoutMs,
+    1500,
+    30_000,
+    BACKEND_TIMEOUT_MS
+  );
+
+  const timer = setTimeout(() => {
+    try {
+      controller.abort();
+    } catch {
+      // noop
+    }
+  }, timeoutMs);
+
+  backendAbort = controller;
+
+  try {
+    const response = await fetch(buildSearchUrl(clean, options), {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: buildSearchHeaders(options),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const message =
+        response.status === 401
+          ? "Sesión no autorizada para buscar."
+          : `Search backend HTTP ${response.status}`;
+
+      throw new Error(message);
+    }
+
+    const payload = await response.json();
+    const rawItems = extractBackendResults(payload);
+
+    return rawItems
+      .map((item, index) => normalizeBackendResult(item, index))
+      .filter((item) => item.label || item.route);
+  } finally {
+    clearTimeout(timer);
+
+    if (backendAbort === controller) {
+      backendAbort = null;
+    }
+  }
+}
+
+/* =========================================================
+   SEARCH RENDER STATE
+========================================================= */
+
+function setActiveSearch(index = 0) {
+  if (!latestSearchResults.length) {
+    activeSearchIndex = -1;
+    getRefs().searchInput?.removeAttribute?.("aria-activedescendant");
     return false;
   }
 
-  function appendVaryHeader(res, value = "Origin") {
-    const current = safeString(res.getHeader?.("vary"), "");
+  activeSearchIndex = Math.max(
+    0,
+    Math.min(Number(index) || 0, latestSearchResults.length - 1)
+  );
 
-    if (!current) {
-      res.setHeader("vary", value);
-      return;
+  setTopbarSearchActiveIndex(root, activeSearchIndex);
+
+  return true;
+}
+
+function renderSearchState(query = "", results = [], options = {}) {
+  portalSearchResultsToRoot();
+
+  const clean = cleanText(query, "");
+  const status = cleanText(options.status, SEARCH_STATUS.READY);
+  const error = cleanText(options.error, "");
+
+  latestSearchResults = clean ? safeArray(results) : [];
+  activeSearchIndex = latestSearchResults.length ? Math.max(0, activeSearchIndex) : -1;
+  lastSearchQuery = clean;
+  lastSearchStatus = status;
+  lastSearchError = error;
+
+  if (!clean) {
+    clearTopbarSearchResults(root);
+    return true;
+  }
+
+  renderTopbarSearchResults(root, latestSearchResults, {
+    query: clean,
+    activeIndex: activeSearchIndex >= 0 ? activeSearchIndex : 0,
+    status,
+    error,
+    source: SOURCE,
+  });
+
+  if (latestSearchResults.length) {
+    setActiveSearch(activeSearchIndex >= 0 ? activeSearchIndex : 0);
+  }
+
+  return true;
+}
+
+async function executeSearch(query = "", options = {}) {
+  const clean = cleanText(query, "");
+  const seq = ++backendSeq;
+
+  if (!clean) {
+    abortBackendSearch();
+    renderSearchState("", [], {
+      status: SEARCH_STATUS.IDLE,
+    });
+
+    return [];
+  }
+
+  const localResults = searchLocalTopbar(clean, lastOptions);
+  const cached = options.force !== true ? getCachedResults(clean, lastOptions) : null;
+
+  if (cached) {
+    const mergedCached = mergeResults(clean, cached, localResults);
+
+    renderSearchState(clean, mergedCached, {
+      status: SEARCH_STATUS.READY,
+    });
+
+    return mergedCached;
+  }
+
+  abortBackendSearch();
+
+  renderSearchState(clean, mergeResults(clean, [], localResults), {
+    status: SEARCH_STATUS.LOADING,
+  });
+
+  try {
+    const remoteResults = await fetchBackendResults(clean, {
+      ...lastOptions,
+      ...options,
+    });
+
+    if (seq !== backendSeq) return [];
+    if (
+      cleanText(getRefs().searchInput?.value || "", "") !== clean &&
+      options.force !== true
+    ) {
+      return [];
     }
 
-    const values = new Set(
-      current
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean)
+    setCachedResults(clean, remoteResults, lastOptions);
+
+    const merged = mergeResults(clean, remoteResults, localResults);
+
+    renderSearchState(clean, merged, {
+      status: merged.length ? SEARCH_STATUS.READY : SEARCH_STATUS.EMPTY,
+    });
+
+    return merged;
+  } catch (error) {
+    if (seq !== backendSeq) return [];
+
+    const message = cleanText(
+      error?.message || "No se pudo completar la búsqueda.",
+      "No se pudo completar la búsqueda."
     );
 
-    values.add(value);
+    const fallback = mergeResults(clean, [], localResults);
 
-    res.setHeader("vary", Array.from(values).join(", "));
-  }
-
-  function getRequestedCorsHeaders(req) {
-    const requested = safeString(req.headers?.["access-control-request-headers"], "");
-
-    if (requested) {
-      return requested
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .join(", ");
-    }
-
-    return DEFAULT_CORS_HEADERS.join(", ");
-  }
-
-  function applySearchCors(req, res) {
-    const origin = safeString(req.headers?.origin, "");
-
-    if (!origin) return false;
-    if (!isAllowedSearchOrigin(origin)) return false;
-
-    const normalizedOrigin = normalizeOrigin(origin);
-
-    res.setHeader("Access-Control-Allow-Origin", normalizedOrigin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", getRequestedCorsHeaders(req));
-    res.setHeader("Access-Control-Expose-Headers", EXPOSED_CORS_HEADERS.join(", "));
-    res.setHeader("Access-Control-Max-Age", "600");
-
-    appendVaryHeader(res, "Origin");
-    appendVaryHeader(res, "Access-Control-Request-Method");
-    appendVaryHeader(res, "Access-Control-Request-Headers");
-
-    return true;
-  }
-
-  function sendCorsPreflight(req, res) {
-    const origin = safeString(req.headers?.origin, "");
-
-    applySearchCors(req, res);
-
-    if (origin && !isAllowedSearchOrigin(origin)) {
-      return res.status(403).json({
-        ok: false,
-        success: false,
-        error: "CORS_ORIGIN_NOT_ALLOWED",
-        code: "CORS_ORIGIN_NOT_ALLOWED",
-        message: "Origen no permitido para el módulo de búsqueda.",
-        requestId: req.requestId || null,
-      });
-    }
-
-    return res.status(204).end();
-  }
-
-  /* =========================================================
-     RATE LIMIT HELPERS
-  ========================================================= */
-
-  function sweepRateLimitStore() {
-    const current = now();
-
-    if (current - lastSweepAt < RATE_LIMIT_SWEEP_MS) {
-      return;
-    }
-
-    lastSweepAt = current;
-
-    for (const [key, entry] of hits.entries()) {
-      if (!entry || current - entry.lastHitAt > RATE_LIMIT_ENTRY_TTL_MS) {
-        hits.delete(key);
-      }
-    }
-  }
-
-  function buildRateLimitKey(req) {
-    const userId = getUserId(req);
-    const routeGroup = getRouteGroup(req);
-
-    if (userId) {
-      return `uid:${userId}:route:${routeGroup}`;
-    }
-
-    const ip = getClientIp(req);
-
-    if (ip) {
-      return `ip:${ip}:route:${routeGroup}`;
-    }
-
-    return `anonymous:route:${routeGroup}`;
-  }
-
-  function shouldApplyRateLimit(req) {
-    const searchPath = getSearchPath(req).toLowerCase();
-
-    if (req.method === "OPTIONS") return false;
-    if (req.method === "HEAD") return false;
-
-    if (searchPath === "/_health") return false;
-    if (searchPath.endsWith("/_health")) return false;
-    if (searchPath.includes("/_cache/")) return false;
-
-    return true;
-  }
-
-  function getRateLimitEntry(key = "") {
-    const current = now();
-    const existing = hits.get(key);
-
-    if (!existing || current >= existing.resetAt) {
-      return {
-        count: 0,
-        firstHitAt: current,
-        lastHitAt: current,
-        resetAt: current + RATE_LIMIT_WINDOW_MS,
-      };
-    }
-
-    return existing;
-  }
-
-  function applyRateLimit(req, res) {
-    sweepRateLimitStore();
-
-    if (!shouldApplyRateLimit(req)) {
-      return {
-        limited: false,
-        remaining: RATE_LIMIT_MAX_HITS,
-        resetAt: now() + RATE_LIMIT_WINDOW_MS,
-      };
-    }
-
-    const key = buildRateLimitKey(req);
-    const current = now();
-    const entry = getRateLimitEntry(key);
-
-    entry.count += 1;
-    entry.lastHitAt = current;
-
-    hits.set(key, entry);
-
-    const remaining = Math.max(0, RATE_LIMIT_MAX_HITS - entry.count);
-    const resetInMs = Math.max(0, entry.resetAt - current);
-
-    try {
-      res.setHeader("x-rate-limit-window-ms", String(RATE_LIMIT_WINDOW_MS));
-      res.setHeader("x-rate-limit-max", String(RATE_LIMIT_MAX_HITS));
-      res.setHeader("x-rate-limit-remaining", String(remaining));
-      res.setHeader("x-rate-limit-reset-ms", String(resetInMs));
-    } catch {}
-
-    if (entry.count > RATE_LIMIT_MAX_HITS) {
-      return {
-        limited: true,
-        key,
-        remaining,
-        resetAt: entry.resetAt,
-        resetInMs,
-      };
-    }
-
-    return {
-      limited: false,
-      key,
-      remaining,
-      resetAt: entry.resetAt,
-      resetInMs,
-    };
-  }
-
-  /* =========================================================
-     CONTAINER HEALTH
-  ========================================================= */
-
-  function containerStatus(container) {
-    return Boolean(container?.items && typeof container?.items?.query === "function");
-  }
-
-  function buildHealthPayload(req = null) {
-    return {
-      ok: true,
-      service: "search",
-      module: MODULE_NAME,
-      version: MODULE_VERSION,
-      status: "running",
-      timestamp: new Date().toISOString(),
-      requestId: req?.requestId || null,
-
-      auth: {
-        middlewareConfigured: typeof requireAuth === "function",
-        publicHealth: PUBLIC_HEALTH,
-        requireUserId: REQUIRE_USER_ID,
-      },
-
-      cors: {
-        enabled: true,
-        credentials: true,
-        allowedOrigins: Array.from(getCorsAllowedOrigins()),
-        env: {
-          SEARCH_CORS_ORIGINS: Boolean(process.env.SEARCH_CORS_ORIGINS),
-          CORS_ORIGINS: Boolean(process.env.CORS_ORIGINS),
-          SEARCH_CORS_ALLOW_ALL: parseBoolean(process.env.SEARCH_CORS_ALLOW_ALL, false),
-        },
-      },
-
-      containers: {
-        clientes: containerStatus(clientesContainer),
-        users: containerStatus(usersContainer),
-        usuarios: containerStatus(usersContainer),
-        tickets: containerStatus(ticketsContainer),
-        incidencias: containerStatus(ticketsContainer),
-        facturas: containerStatus(facturasContainer),
-      },
-
-      routes: {
-        health: "/_health",
-        global: "/",
-        users: "/users",
-        usuarios: "/usuarios",
-        clientes: "/clientes",
-        clients: "/clients",
-        incidencias: "/incidencias",
-        tickets: "/tickets",
-      },
-
-      aliases: {
-        users: ["/users", "/usuarios"],
-        clientes: ["/clientes", "/clients"],
-        incidencias: ["/incidencias", "/tickets"],
-      },
-
-      rateLimit: {
-        windowMs: RATE_LIMIT_WINDOW_MS,
-        maxHits: RATE_LIMIT_MAX_HITS,
-        routeScoped: true,
-        activeKeys: hits.size,
-      },
-
-      partitions: {
-        clientes: "/id",
-        usuarios: "/userId",
-        users: "/userId",
-        tickets: "/ticketId",
-        facturas: "/clienteId",
-      },
-    };
-  }
-
-  /* =========================================================
-     RESPONSE HELPERS
-  ========================================================= */
-
-  function sendJson(res, status, payload) {
-    if (res.headersSent || res.writableEnded || res.destroyed) {
-      return undefined;
-    }
-
-    return res.status(status).json(payload);
-  }
-
-  function sendUnauthorized(req, res) {
-    return sendJson(res, 401, {
-      ok: false,
-      success: false,
-      error: "UNAUTHORIZED",
-      code: "UNAUTHORIZED",
-      message: "Sesión no autenticada.",
-      requestId: req.requestId,
-    });
-  }
-
-  function sendRateLimited(req, res, meta) {
-    try {
-      res.setHeader(
-        "retry-after",
-        String(Math.ceil((meta?.resetInMs || RATE_LIMIT_WINDOW_MS) / 1000))
-      );
-    } catch {}
-
-    return sendJson(res, 429, {
-      ok: false,
-      success: false,
-      error: "RATE_LIMIT",
-      code: "RATE_LIMIT",
-      message: "Demasiadas búsquedas seguidas. Espera unos segundos e inténtalo de nuevo.",
-      requestId: req.requestId,
-      retryAfterMs: meta?.resetInMs || RATE_LIMIT_WINDOW_MS,
-    });
-  }
-
-  function sendMissingAuthMiddleware(req, res) {
-    return sendJson(res, 500, {
-      ok: false,
-      success: false,
-      error: "AUTH_MIDDLEWARE_MISSING",
-      code: "AUTH_MIDDLEWARE_MISSING",
-      message: "El módulo de búsqueda no tiene middleware de autenticación configurado.",
-      requestId: req.requestId,
-    });
-  }
-
-  function sendMethodNotAllowed(req, res) {
-    try {
-      res.setHeader("allow", Array.from(ALLOWED_METHODS).join(", "));
-    } catch {}
-
-    return sendJson(res, 405, {
-      ok: false,
-      success: false,
-      error: "METHOD_NOT_ALLOWED",
-      code: "METHOD_NOT_ALLOWED",
-      message: "Método no permitido en el módulo de búsqueda.",
-      requestId: req.requestId,
-      method: req.method,
-    });
-  }
-
-  function sendNotFound(req, res) {
-    return sendJson(res, 404, {
-      ok: false,
-      success: false,
-      error: "SEARCH_ROUTE_NOT_FOUND",
-      code: "SEARCH_ROUTE_NOT_FOUND",
-      message: "Ruta de búsqueda no encontrada.",
-      requestId: req.requestId,
-      method: req.method,
-      ...getRequestUrlInfo(req),
-      availableRoutes: {
-        health: "/_health",
-        global: "/",
-        users: "/users",
-        usuarios: "/usuarios",
-        clientes: "/clientes",
-        clients: "/clients",
-        incidencias: "/incidencias",
-        tickets: "/tickets",
-      },
-    });
-  }
-
-  function createUnavailableRouter(name = "unknown", reason = "ROUTER_UNAVAILABLE") {
-    const fallbackRouter = express.Router({
-      caseSensitive: false,
-      strict: false,
+    renderSearchState(clean, fallback, {
+      status: fallback.length ? SEARCH_STATUS.READY : SEARCH_STATUS.ERROR,
+      error: message,
     });
 
-    fallbackRouter.use((req, res) => {
-      applySearchCors(req, res);
-
-      return sendJson(res, 503, {
-        ok: false,
-        success: false,
-        error: "SEARCH_SUBMODULE_UNAVAILABLE",
-        code: "SEARCH_SUBMODULE_UNAVAILABLE",
-        message: `El submódulo de búsqueda ${name} no está disponible.`,
-        requestId: req.requestId,
-        submodule: name,
-        reason,
-      });
-    });
-
-    return fallbackRouter;
+    return latestSearchResults;
   }
-
-  function createSafeSubrouter(name = "unknown", factory, args = []) {
-    try {
-      if (typeof factory !== "function") {
-        return createUnavailableRouter(name, "FACTORY_NOT_FUNCTION");
-      }
-
-      const instance = factory(...args);
-
-      if (!instance || typeof instance !== "function") {
-        return createUnavailableRouter(name, "ROUTER_NOT_FUNCTION");
-      }
-
-      return instance;
-    } catch (error) {
-      console.error("❌ SEARCH SUBROUTER INIT ERROR", {
-        module: MODULE_NAME,
-        submodule: name,
-        message: error?.message || "UNKNOWN_ERROR",
-        code: error?.code || null,
-        stack: getDebugEnabled() ? error?.stack || null : null,
-      });
-
-      return createUnavailableRouter(
-        name,
-        error?.code || error?.message || "INIT_ERROR"
-      );
-    }
-  }
-
-  /* =========================================================
-     ROUTER INSTANCES
-     Nota:
-     - Se crean una sola vez.
-     - Luego se montan en aliases.
-     - Así no duplicamos caches internas de users/clientes.
-  ========================================================= */
-
-  const usersRouter = createSafeSubrouter(
-    "users",
-    usersSearchCreate,
-    [usersContainer, clientesContainer]
-  );
-
-  const clientesRouter = createSafeSubrouter(
-    "clientes",
-    clientesSearchCreate,
-    [clientesContainer, usersContainer]
-  );
-
-  const incidenciasRouter = createSafeSubrouter(
-    "incidencias",
-    incidenciasSearchCreate,
-    [ticketsContainer, clientesContainer, usersContainer]
-  );
-
-  const globalRouter = createSafeSubrouter(
-    "global",
-    searchRouter,
-    [clientesContainer, usersContainer, ticketsContainer, facturasContainer]
-  );
-
-  /* =========================================================
-     REQUEST ID / SECURITY HEADERS / TRACE BASE
-  ========================================================= */
-
-  router.use((req, res, next) => {
-    req.requestId = buildRequestId(req);
-    req.searchStartedAt = now();
-
-    try {
-      res.setHeader(REQUEST_ID_HEADER, req.requestId);
-      res.setHeader(CORRELATION_ID_HEADER, req.requestId);
-      res.setHeader("x-search-module", MODULE_NAME);
-      res.setHeader("x-search-version", MODULE_VERSION);
-
-      res.setHeader("x-content-type-options", "nosniff");
-      res.setHeader("referrer-policy", "strict-origin-when-cross-origin");
-      res.setHeader("x-permitted-cross-domain-policies", "none");
-
-      res.setHeader(
-        "cache-control",
-        "no-store, no-cache, must-revalidate, proxy-revalidate, private"
-      );
-      res.setHeader("pragma", "no-cache");
-      res.setHeader("expires", "0");
-      res.setHeader("surrogate-control", "no-store");
-
-      res.removeHeader("x-powered-by");
-    } catch {}
-
-    res.locals.search = {
-      requestId: req.requestId,
-      startedAt: req.searchStartedAt,
-      module: MODULE_NAME,
-      version: MODULE_VERSION,
-      searchPath: getSearchPath(req),
-      routeGroup: getRouteGroup(req),
-    };
-
-    next();
-  });
-
-  /* =========================================================
-     CORS / PREFLIGHT
-     Debe ir antes de method guard, requireAuth y rate limit.
-  ========================================================= */
-
-  router.use((req, res, next) => {
-    applySearchCors(req, res);
-
-    if (req.method === "OPTIONS") {
-      return sendCorsPreflight(req, res);
-    }
-
-    return next();
-  });
-
-  /* =========================================================
-     METHOD GUARD
-  ========================================================= */
-
-  router.use((req, res, next) => {
-    if (!isValidMethod(req)) {
-      return sendMethodNotAllowed(req, res);
-    }
-
-    next();
-  });
-
-  /* =========================================================
-     HEALTH LOCAL
-     Nota:
-     - Por defecto queda antes de requireAuth para diagnosticar montaje.
-     - Si SEARCH_PUBLIC_HEALTH=false, pasa por auth.
-  ========================================================= */
-
-  if (PUBLIC_HEALTH) {
-    router.get("/_health", (req, res) => {
-      applySearchCors(req, res);
-      return res.json(buildHealthPayload(req));
-    });
-
-    router.head("/_health", (req, res) => {
-      applySearchCors(req, res);
-      return res.status(204).end();
-    });
-  }
-
-  /* =========================================================
-     AUTH FAIL-CLOSED
-  ========================================================= */
-
-  router.use((req, res, next) => {
-    applySearchCors(req, res);
-
-    if (typeof requireAuth !== "function") {
-      return sendMissingAuthMiddleware(req, res);
-    }
-
-    try {
-      const result = requireAuth(req, res, next);
-
-      if (result && typeof result.catch === "function") {
-        result.catch(next);
-      }
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  if (!PUBLIC_HEALTH) {
-    router.get("/_health", (req, res) => {
-      applySearchCors(req, res);
-      return res.json(buildHealthPayload(req));
-    });
-
-    router.head("/_health", (req, res) => {
-      applySearchCors(req, res);
-      return res.status(204).end();
-    });
-  }
-
-  /* =========================================================
-     GUARD EXTRA: req.user obligatorio
-  ========================================================= */
-
-  router.use((req, res, next) => {
-    applySearchCors(req, res);
-
-    if (!req.user) {
-      return sendUnauthorized(req, res);
-    }
-
-    if (REQUIRE_USER_ID && !getUserId(req)) {
-      return sendUnauthorized(req, res);
-    }
-
-    next();
-  });
-
-  /* =========================================================
-     DEBUG / TRACE PER REQUEST
-  ========================================================= */
-
-  router.use((req, res, next) => {
-    const startedAt = now();
-
-    res.on("finish", () => {
-      if (!shouldLogRequest(req, res.statusCode)) {
-        return;
-      }
-
-      const durationMs = now() - startedAt;
-
-      const payload = buildTracePayload(req, {
-        status: res.statusCode,
-        durationMs,
-        query: buildSafeQueryLog(req),
-        corsOrigin: req.headers?.origin ? normalizeOrigin(req.headers.origin) : null,
-      });
-
-      if (getDebugEnabled()) {
-        payload.ua = truncate(req.headers["user-agent"] || "-", LOG_UA_MAX_LENGTH);
-        payload.rateLimitRemaining = res.getHeader("x-rate-limit-remaining") || null;
-        payload.rateLimitResetMs = res.getHeader("x-rate-limit-reset-ms") || null;
-      }
-
-      const isError = res.statusCode >= 500;
-      const isWarn = res.statusCode >= 400 && res.statusCode < 500;
-
-      if (isError) {
-        console.error("❌ SEARCH REQUEST", payload);
-        return;
-      }
-
-      if (isWarn) {
-        console.warn("⚠️ SEARCH REQUEST", payload);
-        return;
-      }
-
-      console.log("🔎 SEARCH REQUEST", payload);
-    });
-
-    next();
-  });
-
-  /* =========================================================
-     RATE LIMIT LIGHT / ROUTE-SCOPED
-  ========================================================= */
-
-  router.use((req, res, next) => {
-    const meta = applyRateLimit(req, res);
-
-    if (meta.limited) {
-      if (getLogEnabled()) {
-        console.warn(
-          "🚧 SEARCH RATE LIMIT",
-          buildTracePayload(req, {
-            rateLimitKey: meta.key,
-            retryAfterMs: meta.resetInMs,
-          })
-        );
-      }
-
-      return sendRateLimited(req, res, meta);
-    }
-
-    next();
-  });
-
-  /* =========================================================
-     ROUTE MARKER
-     Ayuda a saber qué router recibió la request.
-  ========================================================= */
-
-  router.use((req, res, next) => {
-    const routeGroup = getRouteGroup(req);
-
-    try {
-      res.setHeader("x-search-route-group", routeGroup);
-    } catch {}
-
-    if (res.locals.search) {
-      res.locals.search.routeGroup = routeGroup;
-      res.locals.search.searchPath = getSearchPath(req);
-    }
-
-    next();
-  });
-
-  /* =========================================================
-     SEARCH USERS
-     Aliases:
-     - /users
-     - /usuarios
-  ========================================================= */
-
-  router.use("/users", usersRouter);
-  router.use("/usuarios", usersRouter);
-
-  /* =========================================================
-     SEARCH CLIENTES
-     Aliases:
-     - /clientes
-     - /clients
-  ========================================================= */
-
-  router.use("/clientes", clientesRouter);
-  router.use("/clients", clientesRouter);
-
-  /* =========================================================
-     SEARCH INCIDENCIAS / TICKETS
-     Aliases:
-     - /incidencias
-     - /tickets
-  ========================================================= */
-
-  router.use("/incidencias", incidenciasRouter);
-  router.use("/tickets", incidenciasRouter);
-
-  /* =========================================================
-     GLOBAL SEARCH
-     Topbar/global:
-     - /api/search?q=...
-     - /api/search?type=incidencia&q=...
-  ========================================================= */
-
-  router.use("/", globalRouter);
-
-  /* =========================================================
-     404 LOCAL
-     Nota: si globalRouter tiene su propio 404 final, este fallback no se ejecutará.
-     Se conserva para subrouters que hagan next().
-  ========================================================= */
-
-  router.use((req, res) => {
-    applySearchCors(req, res);
-    return sendNotFound(req, res);
-  });
-
-  /* =========================================================
-     ERROR HANDLER LOCAL
-  ========================================================= */
-
-  router.use((err, req, res, _next) => {
-    applySearchCors(req, res);
-
-    const statusCode = Number(err?.status || err?.statusCode || 500);
-    const safeStatus = statusCode >= 400 && statusCode < 600 ? statusCode : 500;
-
-    const payload = buildTracePayload(req, {
-      status: safeStatus,
-      error: err?.message || "UNKNOWN_ERROR",
-      code: err?.code || null,
-    });
-
-    if (getDebugEnabled()) {
-      payload.stack = err?.stack || null;
-    }
-
-    console.error("❌ SEARCH ERROR", payload);
-
-    if (res.headersSent || res.writableEnded || res.destroyed) {
-      return undefined;
-    }
-
-    if (safeStatus === 401) {
-      return sendUnauthorized(req, res);
-    }
-
-    if (safeStatus === 429) {
-      return sendRateLimited(req, res, {
-        resetInMs: RATE_LIMIT_WINDOW_MS,
-      });
-    }
-
-    return sendJson(res, safeStatus, {
-      ok: false,
-      success: false,
-      error: safeStatus >= 500 ? "INTERNAL_ERROR" : "SEARCH_REQUEST_ERROR",
-      code: safeStatus >= 500 ? "INTERNAL_ERROR" : "SEARCH_REQUEST_ERROR",
-      message:
-        safeStatus >= 500
-          ? "Error interno del módulo de búsqueda."
-          : err?.message || "No se pudo procesar la búsqueda.",
-      requestId: req.requestId,
-      ...(getDebugEnabled()
-        ? {
-            detail: err?.message || null,
-            stack: err?.stack || null,
-          }
-        : {}),
-    });
-  });
-
-  return router;
 }
+
+function scheduleSearch(query = "", options = {}) {
+  const clean = cleanText(query, "");
+
+  lastSearchQuery = clean;
+
+  if (backendTimer) {
+    clearTimeout(backendTimer);
+    backendTimer = null;
+  }
+
+  if (!clean) {
+    abortBackendSearch();
+
+    renderSearchState("", [], {
+      status: SEARCH_STATUS.IDLE,
+    });
+
+    return true;
+  }
+
+  const localResults = searchLocalTopbar(clean, lastOptions);
+  const cached = getCachedResults(clean, lastOptions);
+
+  if (cached) {
+    renderSearchState(clean, mergeResults(clean, cached, localResults), {
+      status: SEARCH_STATUS.READY,
+    });
+  } else {
+    renderSearchState(clean, mergeResults(clean, [], localResults), {
+      status: SEARCH_STATUS.LOADING,
+    });
+  }
+
+  backendTimer = setTimeout(() => {
+    backendTimer = null;
+    void executeSearch(clean, options);
+  }, options.immediate === true ? 0 : BACKEND_DEBOUNCE_MS);
+
+  return true;
+}
+
+function moveActiveSearch(delta = 0) {
+  if (!latestSearchResults.length) return false;
+
+  return setActiveSearch(activeSearchIndex + delta);
+}
+
+async function openSearchResult(result = null) {
+  const item = result || latestSearchResults[activeSearchIndex] || latestSearchResults[0];
+
+  if (!item?.route) return false;
+
+  try {
+    if (isBrowser()) {
+      window.dispatchEvent(
+        new CustomEvent("topbar:search:open", {
+          detail: {
+            source: SOURCE,
+            query: lastSearchQuery,
+            result: item,
+          },
+        })
+      );
+    }
+  } catch {
+    // noop
+  }
+
+  const ok = await navigateTo(item.route, {
+    query: lastSearchQuery,
+    result: item.key || item.label || item.route,
+    resultType: item.type || "",
+    entityId: item.entityId || "",
+    action: item.action || "",
+  });
+
+  if (ok) {
+    clearSearch({
+      input: true,
+      focus: false,
+    });
+
+    getRefs().searchInput?.blur?.();
+  }
+
+  return ok;
+}
+
+function clearSearch(options = {}) {
+  const opts = isObject(options) ? options : {};
+  const refs = getRefs();
+
+  abortBackendSearch();
+
+  backendSeq += 1;
+  latestSearchResults = [];
+  activeSearchIndex = -1;
+  lastSearchQuery = "";
+  lastSearchStatus = SEARCH_STATUS.IDLE;
+  lastSearchError = "";
+
+  clearTopbarSearchResults(root);
+
+  refs.search?.classList?.remove?.("is-search-open");
+  refs.root?.classList?.remove?.("is-search-focused");
+
+  if (opts.input === true && refs.searchInput) {
+    refs.searchInput.value = "";
+  }
+
+  if (opts.focus === true) {
+    try {
+      refs.searchInput?.focus?.({
+        preventScroll: true,
+      });
+    } catch {
+      refs.searchInput?.focus?.();
+    }
+  }
+
+  return true;
+}
+
+/* =========================================================
+   LOCAL EVENTS
+========================================================= */
+
+async function onSubmit(event) {
+  event.preventDefault();
+
+  const refs = getRefs();
+  const query = cleanText(refs.searchInput?.value || "", "");
+
+  if (!query) {
+    clearSearch({
+      input: true,
+      focus: true,
+    });
+
+    return;
+  }
+
+  if (
+    !latestSearchResults.length ||
+    query !== lastSearchQuery ||
+    lastSearchStatus === SEARCH_STATUS.LOADING
+  ) {
+    await executeSearch(query, {
+      force: true,
+      immediate: true,
+    });
+  }
+
+  void openSearchResult();
+}
+
+function onInput(event) {
+  scheduleSearch(event.target?.value || "");
+}
+
+function onFocus() {
+  const refs = getRefs();
+  const value = cleanText(refs.searchInput?.value || "", "");
+
+  if (value) {
+    scheduleSearch(value);
+  } else {
+    setTopbarSearchExpanded(root, false);
+  }
+}
+
+function onKeydown(event) {
+  const refs = getRefs();
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+
+    clearSearch({
+      input: false,
+      focus: true,
+    });
+
+    return;
+  }
+
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+
+    if (!latestSearchResults.length) {
+      scheduleSearch(refs.searchInput?.value || "", {
+        immediate: true,
+      });
+    } else {
+      moveActiveSearch(1);
+    }
+
+    return;
+  }
+
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+
+    if (!latestSearchResults.length) {
+      scheduleSearch(refs.searchInput?.value || "", {
+        immediate: true,
+      });
+    } else {
+      moveActiveSearch(-1);
+    }
+
+    return;
+  }
+
+  if (event.key === "Home" && latestSearchResults.length) {
+    event.preventDefault();
+    setActiveSearch(0);
+    return;
+  }
+
+  if (event.key === "End" && latestSearchResults.length) {
+    event.preventDefault();
+    setActiveSearch(latestSearchResults.length - 1);
+    return;
+  }
+
+  if (event.key === "Enter" && latestSearchResults.length) {
+    event.preventDefault();
+    void openSearchResult();
+  }
+}
+
+function onResultsClick(event) {
+  const target = eventElement(event.target);
+  const resultNode = target?.closest?.("[data-topbar-search-result='true']");
+
+  if (!resultNode || !root?.contains?.(resultNode)) return;
+
+  event.preventDefault();
+
+  const index = Number(resultNode.dataset.topbarSearchResultIndex);
+
+  if (Number.isFinite(index)) {
+    setActiveSearch(index);
+  }
+
+  void openSearchResult(latestSearchResults[activeSearchIndex]);
+}
+
+function onResultsPointerMove(event) {
+  const target = eventElement(event.target);
+  const resultNode = target?.closest?.("[data-topbar-search-result='true']");
+
+  if (!resultNode || !root?.contains?.(resultNode)) return;
+
+  const index = Number(resultNode.dataset.topbarSearchResultIndex);
+
+  if (Number.isFinite(index)) {
+    setActiveSearch(index);
+  }
+}
+
+function onDocumentPointerDown(event) {
+  const target = eventElement(event.target);
+  const refs = getRefs();
+
+  if (!refs.root) return;
+  if (refs.search && contains(refs.search, target)) return;
+  if (refs.searchResults && contains(refs.searchResults, target)) return;
+
+  clearTopbarSearchResults(root);
+  refs.search?.classList?.remove?.("is-search-open");
+  refs.root?.classList?.remove?.("is-search-focused");
+}
+
+function bindEvents() {
+  if (!root || cleanupEvents) return false;
+
+  portalSearchResultsToRoot();
+
+  const refs = getRefs();
+
+  try {
+    refs.search?.addEventListener?.("submit", onSubmit);
+    refs.searchInput?.addEventListener?.("keydown", onKeydown);
+    refs.searchInput?.addEventListener?.("input", onInput);
+    refs.searchInput?.addEventListener?.("focus", onFocus);
+    refs.searchResults?.addEventListener?.("click", onResultsClick);
+    refs.searchResults?.addEventListener?.("pointermove", onResultsPointerMove);
+
+    document.addEventListener("pointerdown", onDocumentPointerDown, true);
+  } catch {
+    cleanupEvents = null;
+    return false;
+  }
+
+  cleanupEvents = () => {
+    try {
+      refs.search?.removeEventListener?.("submit", onSubmit);
+      refs.searchInput?.removeEventListener?.("keydown", onKeydown);
+      refs.searchInput?.removeEventListener?.("input", onInput);
+      refs.searchInput?.removeEventListener?.("focus", onFocus);
+      refs.searchResults?.removeEventListener?.("click", onResultsClick);
+      refs.searchResults?.removeEventListener?.("pointermove", onResultsPointerMove);
+
+      document.removeEventListener("pointerdown", onDocumentPointerDown, true);
+    } catch {
+      // noop
+    }
+
+    cleanupEvents = null;
+    return true;
+  };
+
+  return true;
+}
+
+function unbindEvents() {
+  try {
+    cleanupEvents?.();
+  } catch {
+    cleanupEvents = null;
+  }
+
+  cleanupEvents = null;
+
+  return true;
+}
+
+/* =========================================================
+   DEBUG BRIDGE
+========================================================= */
+
+function exposeDebugBridge() {
+  if (!isBrowser()) return false;
+
+  try {
+    window.OnionTopbar = TopbarUI;
+    window.__ONION_TOPBAR__ = TopbarUI;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeDebugBridge() {
+  if (!isBrowser()) return false;
+
+  try {
+    if (window.OnionTopbar === TopbarUI) {
+      delete window.OnionTopbar;
+    }
+
+    if (window.__ONION_TOPBAR__ === TopbarUI) {
+      delete window.__ONION_TOPBAR__;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   REGISTRATION
+========================================================= */
+
+function registerModule() {
+  try {
+    AppCore.ui = isObject(AppCore.ui) ? AppCore.ui : {};
+    AppCore.ui.topbar = TopbarUI;
+
+    AppCore.topbar = TopbarUI;
+    AppCore.Topbar = TopbarUI;
+
+    AppCore.registerModule?.("topbar", TopbarUI, {
+      overwrite: true,
+    });
+
+    AppCore.modules?.register?.("topbar", TopbarUI, {
+      overwrite: true,
+    });
+
+    exposeDebugBridge();
+
+    return true;
+  } catch {
+    exposeDebugBridge();
+    return false;
+  }
+}
+
+function unregisterModule() {
+  try {
+    if (AppCore.ui?.topbar === TopbarUI) {
+      delete AppCore.ui.topbar;
+    }
+
+    if (AppCore.topbar === TopbarUI) {
+      delete AppCore.topbar;
+    }
+
+    if (AppCore.Topbar === TopbarUI) {
+      delete AppCore.Topbar;
+    }
+
+    AppCore.modules?.remove?.("topbar");
+
+    removeDebugBridge();
+
+    return true;
+  } catch {
+    removeDebugBridge();
+    return false;
+  }
+}
+
+/* =========================================================
+   LIFECYCLE
+========================================================= */
+
+function sync(options = {}) {
+  lastOptions = {
+    ...lastOptions,
+    ...options,
+  };
+
+  ensureRoot(lastOptions);
+
+  if (!root) return false;
+
+  portalSearchResultsToRoot();
+  syncTitle(lastOptions);
+  syncVisibility(lastOptions);
+  cacheDom();
+  exposeDebugBridge();
+
+  mounted = true;
+
+  return true;
+}
+
+function init(options = {}) {
+  initialized = true;
+
+  lastOptions = {
+    ...options,
+  };
+
+  registerModule();
+
+  /*
+    App inicializa UI antes de que Router resuelva la ruta.
+    Por eso el topbar se monta oculto hasta que Router haga sync(route).
+  */
+  ensureRoot({
+    ...lastOptions,
+    visible: false,
+  });
+
+  if (root) {
+    portalSearchResultsToRoot();
+    setTopbarTemplateVisible(root, false);
+    setTopbarSearchExpanded(root, false);
+  }
+
+  syncMountVisibility(true);
+  cacheDom();
+  exposeDebugBridge();
+
+  return TopbarUI;
+}
+
+function render(options = {}) {
+  return sync(options);
+}
+
+function refresh(options = {}) {
+  return sync(options);
+}
+
+function destroy(options = {}) {
+  unbindEvents();
+  abortBackendSearch();
+  clearSearchCache();
+
+  if (root) {
+    clearSearch({
+      input: true,
+      focus: false,
+    });
+  }
+
+  if (options.unmount === true && root) {
+    try {
+      root.remove();
+    } catch {
+      clear(root);
+    }
+  } else if (root) {
+    setHidden(root, true);
+  }
+
+  root = null;
+  mounted = false;
+  initialized = false;
+  lastOptions = {};
+
+  clearDomCache();
+  unregisterModule();
+
+  return true;
+}
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
+function getSnapshot() {
+  const refs = getRefs();
+
+  return {
+    version: TOPBAR_VERSION,
+
+    initialized,
+    mounted,
+
+    visible: Boolean(refs.root && refs.root.hidden !== true),
+    title: refs.title?.textContent || "",
+    hasRoot: Boolean(refs.root),
+
+    dom: {
+      hasSearch: Boolean(refs.search),
+      hasSearchInput: Boolean(refs.searchInput),
+      hasSearchResults: Boolean(refs.searchResults),
+      resultsParent:
+        refs.searchResults?.parentElement?.id ||
+        refs.searchResults?.parentElement?.className ||
+        null,
+    },
+
+    backend: {
+      endpoint: resolveSearchEndpoint(lastOptions),
+      apiBase: resolveApiBase(lastOptions),
+      cacheSize: backendCache.size,
+      active: Boolean(backendAbort),
+      debounceActive: Boolean(backendTimer),
+    },
+
+    search: {
+      enabled: Boolean(refs.search),
+      hasInput: Boolean(refs.searchInput),
+      hasSubmit: Boolean(refs.searchSubmit),
+      hasResults: Boolean(refs.searchResults),
+      expanded: refs.searchInput?.getAttribute?.("aria-expanded") || null,
+      resultsHidden: refs.searchResults ? refs.searchResults.hidden === true : null,
+      resultsClassName: refs.searchResults?.className || "",
+      query: refs.searchInput?.value || "",
+      lastSearchQuery,
+      status: lastSearchStatus,
+      error: lastSearchError,
+      resultCount: latestSearchResults.length,
+      activeSearchIndex,
+      results: latestSearchResults.map((item) => ({
+        label: item.label,
+        route: item.route,
+        type: item.type,
+        source: item.source,
+        score: item.score,
+      })),
+    },
+  };
+}
+
+/* =========================================================
+   API
+========================================================= */
+
+export const TopbarUI = {
+  version: TOPBAR_VERSION,
+
+  init,
+  render,
+  refresh,
+  sync,
+  destroy,
+
+  mountTopbar: ensureRoot,
+
+  unmountTopbar: (options = {}) =>
+    destroy({
+      ...options,
+      unmount: true,
+    }),
+
+  syncTitle,
+  resolveRouteTitle,
+
+  search: (query = "", options = {}) => {
+    ensureRoot(lastOptions);
+    scheduleSearch(query, {
+      ...options,
+      immediate: options.immediate === true,
+    });
+    return latestSearchResults;
+  },
+
+  searchAsync: async (query = "", options = {}) => {
+    ensureRoot(lastOptions);
+
+    return executeSearch(query, {
+      ...options,
+      force: true,
+      immediate: true,
+    });
+  },
+
+  clearSearch,
+  clearSearchCache,
+
+  getSearchIndex: (options = {}) =>
+    buildSearchIndex({
+      ...lastOptions,
+      ...options,
+    }),
+
+  getDom: () => {
+    const refs = getRefs();
+
+    return {
+      topbar: refs.root,
+      title: refs.title,
+
+      search: refs.search,
+      searchForm: refs.search,
+      searchInput: refs.searchInput,
+      searchSubmit: refs.searchSubmit,
+      searchResults: refs.searchResults,
+    };
+  },
+
+  getState: getSnapshot,
+  getSnapshot,
+  getDebugSnapshot: getSnapshot,
+
+  get initialized() {
+    return initialized;
+  },
+
+  get mounted() {
+    return mounted;
+  },
+};
+
+exposeDebugBridge();
+
+export default TopbarUI;

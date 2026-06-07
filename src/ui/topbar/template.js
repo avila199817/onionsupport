@@ -2,12 +2,15 @@
    Onion Support - Topbar Template
    Archivo: /src/ui/topbar/template.js
 
+   FULL PRO SAAS PANEL · BACKEND SEARCH TEMPLATE
+
    Responsabilidad:
    - Construir sólo el DOM visual del topbar.
    - Título de ruta.
-   - Buscador visual local.
+   - Buscador visual.
    - Contenedor estable de resultados.
    - Renderizar resultados recibidos desde index.js.
+   - Estados visuales: ready / loading / empty / error.
    - Exponer refs/data-* consumidos por index.js.
    - Sin AppCore.
    - Sin Auth.
@@ -16,11 +19,9 @@
    - Sin Toast.
    - Sin Store.
    - Sin navegación.
-   - Sin motor de búsqueda.
-   - Sin imports.
 ========================================================= */
 
-export const TOPBAR_TEMPLATE_VERSION = "topbar.template.search.v2";
+export const TOPBAR_TEMPLATE_VERSION = "topbar.template.backend-search.v4";
 
 const TOPBAR_ID = "app-topbar";
 const TITLE_ID = "topbar-title";
@@ -28,7 +29,7 @@ const SEARCH_INPUT_ID = "topbar-search-input";
 const SEARCH_RESULTS_ID = "topbar-search-results";
 
 const DEFAULT_TITLE = "Onion Home";
-const DEFAULT_PLACEHOLDER = "Buscar";
+const DEFAULT_PLACEHOLDER = "Buscar facturas, tickets, clientes…";
 
 /* =========================================================
    BASICS
@@ -93,6 +94,89 @@ function appendChildren(parent = null, children = []) {
   }
 
   return parent;
+}
+
+function normalizeType(value = "") {
+  const raw = text(value, "general").toLowerCase();
+
+  const map = {
+    nav: "nav",
+    route: "nav",
+    ruta: "nav",
+    settings: "settings",
+    setting: "settings",
+    ajuste: "settings",
+    ajustes: "settings",
+
+    cliente: "cliente",
+    clientes: "cliente",
+    client: "cliente",
+    clients: "cliente",
+    empresa: "cliente",
+    empresas: "cliente",
+
+    user: "user",
+    users: "user",
+    usuario: "user",
+    usuarios: "user",
+    perfil: "user",
+    profile: "user",
+    cuenta: "user",
+
+    factura: "factura",
+    facturas: "factura",
+    invoice: "factura",
+    invoices: "factura",
+    billing: "factura",
+    bill: "factura",
+
+    incidencia: "incidencia",
+    incidencias: "incidencia",
+    ticket: "incidencia",
+    tickets: "incidencia",
+    soporte: "incidencia",
+    issue: "incidencia",
+
+    hardware: "hardware",
+    device: "hardware",
+    devices: "hardware",
+  };
+
+  return map[raw] || raw || "general";
+}
+
+function typeLabel(value = "") {
+  const type = normalizeType(value);
+
+  const map = {
+    nav: "Ruta",
+    settings: "Ajuste",
+    cliente: "Cliente",
+    user: "Usuario",
+    factura: "Factura",
+    incidencia: "Ticket",
+    hardware: "Hardware",
+    general: "Resultado",
+  };
+
+  return map[type] || "Resultado";
+}
+
+function typeIcon(value = "", fallback = "⌕") {
+  const type = normalizeType(value);
+
+  const map = {
+    nav: "→",
+    settings: "AJ",
+    cliente: "CL",
+    user: "US",
+    factura: "FA",
+    incidencia: "IN",
+    hardware: "HW",
+    general: "⌕",
+  };
+
+  return text(map[type] || fallback, fallback).slice(0, 2).toUpperCase();
 }
 
 /* =========================================================
@@ -182,6 +266,7 @@ export function createTopbarSearch(options = {}) {
       hidden: "true",
       "aria-label": "Resultados de búsqueda",
       "aria-hidden": "true",
+      "aria-busy": "false",
       "data-topbar-search-results": "true",
     },
   });
@@ -193,28 +278,62 @@ export function createTopbarSearch(options = {}) {
 }
 
 /* =========================================================
-   SEARCH RESULTS
+   RESULT NORMALIZATION
 ========================================================= */
 
 function normalizeResult(item = {}, index = 0) {
   const source = item && typeof item === "object" ? item : {};
 
-  const label = text(source.label || source.title || source.name, "Resultado");
-  const description = text(source.description || source.text || source.subtitle, "");
-  const route = text(source.route || source.href || source.path || source.to, "");
-  const icon = text(source.icon || source.key || "", "");
-  const type = text(source.type || source.kind || "", "");
+  const label = text(
+    source.label ||
+      source.title ||
+      source.name ||
+      source.displayName,
+    "Resultado"
+  );
+
+  const description = text(
+    source.description ||
+      source.text ||
+      source.subtitle ||
+      source.status ||
+      "",
+    ""
+  );
+
+  const route = text(
+    source.route ||
+      source.href ||
+      source.path ||
+      source.to ||
+      "",
+    ""
+  );
+
+  const type = normalizeType(source.type || source.kind || source.entity || "");
+  const icon = text(source.icon || "", "") || typeIcon(type);
 
   return {
     ...source,
-    id: text(source.id, `topbar-search-option-${index}`),
+    id: text(source.id || source.key, `topbar-search-option-${index}`),
     label,
+    title: label,
     description,
+    subtitle: description,
     route,
+    href: route,
     icon,
     type,
+    typeLabel: text(source.typeLabel, typeLabel(type)),
+    source: text(source.source, ""),
+    entityId: text(source.entityId, ""),
+    action: text(source.action, ""),
   };
 }
+
+/* =========================================================
+   SEARCH RESULT NODES
+========================================================= */
 
 function createTopbarSearchResult(item = {}, index = 0, options = {}) {
   const result = normalizeResult(item, index);
@@ -226,31 +345,40 @@ function createTopbarSearchResult(item = {}, index = 0, options = {}) {
     className: [
       "topbar-search-result",
       selected ? "is-active" : "",
-      result.icon ? `topbar-search-result--${result.icon}` : "",
       result.type ? `topbar-search-result-type--${result.type}` : "",
+      result.source ? `topbar-search-result-source--${result.source}` : "",
     ]
       .filter(Boolean)
       .join(" "),
     attrs: {
-      id: result.id,
+      id: result.id || `topbar-search-option-${index}`,
       role: "option",
       tabindex: "-1",
       "aria-selected": selected ? "true" : "false",
+
       href: route || null,
       type: route ? null : "button",
+
       "data-spa": route ? "true" : null,
       "data-route": route || null,
       "data-href": route || null,
+
       "data-topbar-search-result": "true",
       "data-topbar-search-result-index": String(index),
       "data-topbar-search-result-label": result.label,
       "data-topbar-search-result-route": route || null,
+      "data-topbar-search-result-type": result.type || null,
+      "data-topbar-search-result-source": result.source || null,
+      "data-topbar-search-result-entity-id": result.entityId || null,
+      "data-topbar-search-result-action": result.action || null,
     },
   });
 
   const icon = createElement("span", {
     className: "topbar-search-result-icon",
-    textContent: result.icon ? result.icon.slice(0, 2).toUpperCase() : "→",
+    textContent: result.icon
+      ? result.icon.slice(0, 2).toUpperCase()
+      : typeIcon(result.type),
     attrs: {
       "aria-hidden": "true",
     },
@@ -260,12 +388,30 @@ function createTopbarSearchResult(item = {}, index = 0, options = {}) {
     className: "topbar-search-result-copy",
   });
 
+  const head = createElement("span", {
+    className: "topbar-search-result-head",
+  });
+
   const label = createElement("span", {
     className: "topbar-search-result-label",
     textContent: result.label,
   });
 
-  appendChildren(copy, label);
+  const badge = createElement("span", {
+    className: [
+      "topbar-search-result-badge",
+      result.type ? `topbar-search-result-badge--${result.type}` : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    textContent: result.typeLabel,
+    attrs: {
+      "aria-hidden": "true",
+    },
+  });
+
+  appendChildren(head, [label, badge]);
+  appendChildren(copy, head);
 
   if (result.description) {
     appendChildren(
@@ -320,35 +466,103 @@ function createTopbarSearchEmpty(query = "") {
   return empty;
 }
 
+function createTopbarSearchLoading(query = "") {
+  const loading = createElement("div", {
+    className: "topbar-search-loading",
+    attrs: {
+      role: "status",
+      "aria-live": "polite",
+      "data-topbar-search-loading": "true",
+    },
+  });
+
+  appendChildren(loading, [
+    createElement("span", {
+      className: "topbar-search-loading-dot",
+      attrs: {
+        "aria-hidden": "true",
+      },
+    }),
+    createElement("span", {
+      className: "topbar-search-loading-text",
+      textContent: query ? `Buscando “${query}”…` : "Buscando…",
+    }),
+  ]);
+
+  return loading;
+}
+
+function createTopbarSearchError(error = "") {
+  const node = createElement("div", {
+    className: "topbar-search-error",
+    attrs: {
+      role: "status",
+      "data-topbar-search-error": "true",
+    },
+  });
+
+  appendChildren(node, [
+    createElement("span", {
+      className: "topbar-search-error-title",
+      textContent: "No se pudo buscar",
+    }),
+    createElement("span", {
+      className: "topbar-search-error-text",
+      textContent: text(error, "Revisa la conexión o inténtalo de nuevo."),
+    }),
+  ]);
+
+  return node;
+}
+
+/* =========================================================
+   RENDER RESULTS
+========================================================= */
+
 export function renderTopbarSearchResults(root = null, results = [], options = {}) {
   const refs = getTopbarTemplateRefs(root);
 
   if (!refs.searchResults) return false;
 
   const query = text(options.query, "");
+  const status = text(options.status, "ready");
+  const error = text(options.error, "");
   const activeIndex = Number.isFinite(Number(options.activeIndex))
     ? Number(options.activeIndex)
     : 0;
 
   const items = Array.isArray(results) ? results : [];
+  const isLoading = status === "loading";
+  const isError = status === "error";
 
   refs.searchResults.replaceChildren();
   refs.searchResults.hidden = false;
   refs.searchResults.setAttribute("aria-hidden", "false");
+  refs.searchResults.setAttribute("aria-busy", isLoading ? "true" : "false");
   refs.searchResults.classList.add("active");
+
   refs.searchResults.dataset.searchOpen = "true";
   refs.searchResults.dataset.searchQuery = query;
   refs.searchResults.dataset.searchCount = String(items.length);
+  refs.searchResults.dataset.searchStatus = status;
 
   refs.root?.classList?.add?.("is-search-focused");
   refs.search?.classList?.add?.("is-search-open");
+  refs.search?.classList?.toggle?.("is-search-loading", isLoading);
+  refs.search?.classList?.toggle?.("is-search-error", isError);
 
   if (refs.searchInput) {
     refs.searchInput.setAttribute("aria-expanded", "true");
   }
 
   if (!items.length) {
-    appendChildren(refs.searchResults, createTopbarSearchEmpty(query));
+    if (isLoading) {
+      appendChildren(refs.searchResults, createTopbarSearchLoading(query));
+    } else if (isError) {
+      appendChildren(refs.searchResults, createTopbarSearchError(error));
+    } else {
+      appendChildren(refs.searchResults, createTopbarSearchEmpty(query));
+    }
 
     if (refs.searchInput) {
       refs.searchInput.removeAttribute("aria-activedescendant");
@@ -421,13 +635,16 @@ export function getTopbarSearchResultsState(root = null) {
     refs.searchResults?.querySelectorAll?.("[data-topbar-search-result='true']") || []
   );
 
-  const activeIndex = items.findIndex((item) => item.getAttribute("aria-selected") === "true");
+  const activeIndex = items.findIndex(
+    (item) => item.getAttribute("aria-selected") === "true"
+  );
 
   return {
     query: refs.searchInput?.value || "",
     open: Boolean(refs.searchResults && refs.searchResults.hidden !== true),
     count: items.length,
     activeIndex,
+    status: refs.searchResults?.dataset?.searchStatus || "",
     activeRoute:
       activeIndex >= 0
         ? items[activeIndex]?.dataset?.route || items[activeIndex]?.dataset?.href || ""
@@ -574,11 +791,13 @@ export function clearTopbarSearchResults(root = null, options = {}) {
   refs.searchResults.hidden = true;
   refs.searchResults.replaceChildren();
   refs.searchResults.setAttribute("aria-hidden", "true");
+  refs.searchResults.setAttribute("aria-busy", "false");
   refs.searchResults.classList.remove("active");
 
   delete refs.searchResults.dataset.searchOpen;
   delete refs.searchResults.dataset.searchQuery;
   delete refs.searchResults.dataset.searchCount;
+  delete refs.searchResults.dataset.searchStatus;
 
   if (refs.searchInput) {
     refs.searchInput.setAttribute("aria-expanded", "false");
@@ -591,6 +810,8 @@ export function clearTopbarSearchResults(root = null, options = {}) {
 
   refs.root?.classList?.remove?.("is-search-focused");
   refs.search?.classList?.remove?.("is-search-open");
+  refs.search?.classList?.remove?.("is-search-loading");
+  refs.search?.classList?.remove?.("is-search-error");
 
   return true;
 }
@@ -612,11 +833,17 @@ export function setTopbarSearchExpanded(root = null, expanded = false) {
       refs.searchResults.dataset.searchOpen = "true";
     } else {
       delete refs.searchResults.dataset.searchOpen;
+      delete refs.searchResults.dataset.searchStatus;
     }
   }
 
   refs.root?.classList?.toggle?.("is-search-focused", value);
   refs.search?.classList?.toggle?.("is-search-open", value);
+
+  if (!value) {
+    refs.search?.classList?.remove?.("is-search-loading");
+    refs.search?.classList?.remove?.("is-search-error");
+  }
 
   return Boolean(refs.searchInput || refs.searchResults);
 }
@@ -648,6 +875,7 @@ export function getTopbarTemplateSnapshot(root = null) {
       query: state.query,
       count: state.count,
       activeIndex: state.activeIndex,
+      status: state.status,
     },
 
     policy: {

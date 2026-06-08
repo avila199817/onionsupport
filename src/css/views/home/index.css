@@ -1,26 +1,23 @@
 /* =========================================================
-   Onion Support - Home View CSS
+   Onion Support - CSS de Inicio
    Archivo: /src/css/views/home/index.css
 
-   ONIONSUPPORT SPA · HOME 1:1 INCIDENCIAS · PRODUCTIVO
-
-   Objetivo:
-   - Header/Home 1:1 con Incidencias a nivel de márgenes, padding y gaps.
-   - Header transparente, sin background global.
-   - Avatar más grande, rectangular, con bordes redondeados.
-   - Avatar sin brillo: más intensidad por saturación, contraste y borde.
-   - Cards, stats y paneles mantienen el look actual.
-   - Dark + light.
-   - Scope cerrado en .home-view-root / [data-home-scope].
-   - Sin JS.
-   - Sin Store.
+   Producción:
+   - Márgenes alineados con Incidencias.
+   - Cabecera transparente.
+   - Sin botón Crear incidencia.
+   - Avatar grande a la izquierda.
+   - Avatar rectangular con bordes redondeados.
+   - Avatar sin brillo artificial, sólo más intensidad.
+   - Textos, paneles, estados y responsive listos.
+   - Tema oscuro y tema claro.
    - Sin CSS inline.
    - Sin dependencias externas.
 ========================================================= */
 
 
 /* =========================================================
-   ROOT
+   RAÍZ
 ========================================================= */
 
 :where(.panel-content[data-view="home"], .home-view-root, [data-home-scope]) {
@@ -37,20 +34,26 @@
   --home-red: #f87171;
   --home-rose: #fb7185;
 
+  --home-view-x: clamp(10px, 1.25vw, 24px);
+  --home-view-y: clamp(10px, 1vw, 18px);
+  --home-view-y-end: clamp(8px, .9vw, 16px);
+  --home-flow-gap: var(--view-section-gap, var(--space-lg));
+
+  --home-avatar-size: clamp(86px, 5.9vw, 112px);
+  --home-avatar-radius: clamp(18px, 1.25vw, 26px);
+
+  --home-panel-min-height: clamp(280px, 23vw, 430px);
+
   --home-stat-color: var(--home-blue);
   --home-stat-color-2: var(--home-cyan);
 
-  --home-panel-min-height: clamp(260px, 20vw, 380px);
-
-  --home-avatar-size-header: clamp(72px, 5.05vw, 92px);
-  --home-avatar-radius: clamp(18px, 1.35vw, 24px);
-
   display: grid;
-  gap: var(--view-section-gap, var(--space-lg));
+  gap: var(--home-flow-gap);
   inline-size: 100%;
   min-inline-size: 0;
 
   padding: 0;
+  margin: 0;
 
   color: var(--text);
   background: transparent;
@@ -62,10 +65,11 @@
 .panel-content[data-view="home"],
 .home-view-root {
   display: grid;
-  gap: var(--view-section-gap, var(--space-lg));
+  gap: var(--home-flow-gap, var(--view-section-gap, var(--space-lg)));
   inline-size: 100%;
   min-inline-size: 0;
   padding: 0;
+  margin: 0;
 }
 
 :where(.panel-content[data-view="home"], .home-view-root, [data-home-scope]) *,
@@ -94,30 +98,7 @@
 
 
 /* =========================================================
-   INTERACTION / FOCUS
-========================================================= */
-
-.home-btn,
-.home-link-button,
-.home-create-card-button,
-.home-stat-card-button {
-  -webkit-tap-highlight-color: transparent;
-  user-select: none;
-}
-
-.home-btn:focus-visible,
-.home-link-button:focus-visible,
-.home-create-card-button:focus-visible,
-.home-stat-card-button:focus-visible {
-  outline: none;
-  box-shadow:
-    var(--focus-ring),
-    0 0 0 5px color-mix(in srgb, var(--accent) 8%, transparent) !important;
-}
-
-
-/* =========================================================
-   ROOT STATES
+   ESTADOS DE RAÍZ
 ========================================================= */
 
 :where(.home-view-root, [data-home-scope]).is-loading {
@@ -134,8 +115,28 @@
 
 
 /* =========================================================
-   HEADER / HERO
-   1:1 INCIDENCIAS EN MÁRGENES, PADDING Y GAPS
+   FOCO E INTERACCIÓN
+========================================================= */
+
+.home-btn,
+.home-link-button,
+.home-stat-card-button {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.home-btn:focus-visible,
+.home-link-button:focus-visible,
+.home-stat-card-button:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--focus-ring),
+    0 0 0 5px color-mix(in srgb, var(--accent) 8%, transparent) !important;
+}
+
+
+/* =========================================================
+   CABECERA 1:1 CON INCIDENCIAS
 ========================================================= */
 
 .home-header {
@@ -143,16 +144,14 @@
   isolation: isolate;
 
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: clamp(16px, 1.4vw, 26px);
+  gap: clamp(13px, 1vw, 18px);
 
   min-inline-size: 0;
 
   padding:
-    clamp(10px, 1vw, 18px)
-    clamp(10px, 1.25vw, 24px)
-    clamp(8px, .9vw, 16px);
+    var(--home-view-y)
+    var(--home-view-x)
+    var(--home-view-y-end);
 
   overflow: visible;
 
@@ -181,7 +180,7 @@
 
 .home-header-main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--home-avatar-size-header);
+  grid-template-columns: var(--home-avatar-size) minmax(0, 1fr);
   align-items: center;
   gap: clamp(16px, 1.4vw, 26px);
 
@@ -189,30 +188,24 @@
 }
 
 .home-header-copy {
-  order: 1;
-
   display: grid;
   gap: 7px;
   min-inline-size: 0;
 }
 
-.home-current-user-avatar {
-  order: 2;
-}
-
 .home-header h1,
 .home-title {
   margin: 0;
-  max-inline-size: 980px;
+  max-inline-size: 1040px;
 
   overflow-wrap: anywhere;
 
   color: var(--text-strong, #ffffff);
 
-  font-size: clamp(36px, 3.15vw, 58px);
-  line-height: .91;
+  font-size: clamp(38px, 3.35vw, 64px);
+  line-height: .9;
   font-weight: 950;
-  letter-spacing: -.074em;
+  letter-spacing: -.078em;
 
   text-wrap: balance;
   white-space: normal;
@@ -224,13 +217,13 @@
 
 .home-subtitle {
   margin: 0;
-  max-inline-size: 840px;
+  max-inline-size: 880px;
 
   color: color-mix(in srgb, var(--text-muted) 88%, var(--text-strong) 12%);
 
-  font-size: clamp(13px, .92vw, 16px);
+  font-size: clamp(13px, .94vw, 16px);
   line-height: 1.45;
-  font-weight: 680;
+  font-weight: 720;
 }
 
 .home-panel-kicker,
@@ -249,20 +242,18 @@
 
 
 /* =========================================================
-   AVATAR PRO
-   Grande · rectangular · bordes redondeados · sin brillo
+   AVATAR PRO A LA IZQUIERDA
 ========================================================= */
 
 .home-current-user-avatar {
-  --home-avatar-size: var(--home-avatar-size-header);
   --home-avatar-a: color-mix(in srgb, var(--accent) 92%, #0f172a 8%);
-  --home-avatar-b: color-mix(in srgb, var(--info) 78%, #111827 22%);
-  --home-avatar-c: color-mix(in srgb, var(--home-indigo) 68%, #020617 32%);
+  --home-avatar-b: color-mix(in srgb, var(--info) 74%, #111827 26%);
+  --home-avatar-c: color-mix(in srgb, var(--home-indigo) 62%, #020617 38%);
   --home-avatar-bg:
     linear-gradient(
       135deg,
       var(--home-avatar-a) 0%,
-      var(--home-avatar-b) 48%,
+      var(--home-avatar-b) 50%,
       var(--home-avatar-c) 100%
     );
 
@@ -277,26 +268,26 @@
 
   overflow: hidden;
 
-  border: 1px solid color-mix(in srgb, var(--home-avatar-a) 44%, rgba(255, 255, 255, .16));
+  border: 1px solid color-mix(in srgb, var(--home-avatar-a) 42%, rgba(255, 255, 255, .16));
   border-radius: var(--home-avatar-radius);
 
   background: var(--home-avatar-bg);
-  color: var(--avatar-text);
+  color: #ffffff;
 
   box-shadow:
-    0 16px 30px rgba(0, 0, 0, .34),
+    0 18px 34px rgba(0, 0, 0, .34),
     inset 0 0 0 1px rgba(255, 255, 255, .075),
-    inset 0 -18px 28px rgba(0, 0, 0, .16);
+    inset 0 -18px 28px rgba(0, 0, 0, .18);
 
-  filter: saturate(1.14) contrast(1.04);
+  filter: saturate(1.18) contrast(1.06);
 
   transform: translateZ(0);
 }
 
 .home-current-user-avatar::before,
 .home-current-user-avatar::after {
-  content: none;
-  display: none;
+  content: none !important;
+  display: none !important;
 }
 
 .home-current-user-avatar img {
@@ -313,7 +304,7 @@
   object-position: center;
   border-radius: inherit;
 
-  filter: saturate(1.16) contrast(1.045);
+  filter: saturate(1.18) contrast(1.06);
 }
 
 .home-avatar-initials {
@@ -327,12 +318,12 @@
 
   color: #ffffff;
 
-  font-size: clamp(25px, 1.75vw, 34px);
+  font-size: clamp(28px, 1.95vw, 38px);
   line-height: 1;
-  font-weight: var(--weight-black);
+  font-weight: var(--weight-black, 950);
   letter-spacing: -.055em;
 
-  text-shadow: 0 2px 6px rgba(0, 0, 0, .38);
+  text-shadow: 0 2px 7px rgba(0, 0, 0, .42);
 }
 
 .home-current-user-avatar[data-avatar-tone="0"] { --home-avatar-bg: linear-gradient(135deg, #475569, #1e293b); }
@@ -348,142 +339,20 @@
 
 
 /* =========================================================
-   HEADER CTA
-   1:1 INCIDENCIAS BUTTONS
+   SEGURO CONTRA CTA ANTIGUO
 ========================================================= */
 
-.home-create-card {
-  align-self: start;
-
-  display: inline-flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-
-  min-inline-size: 0;
-}
-
-.home-create-card-button {
-  appearance: none;
-
-  min-block-size: 48px;
-
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  gap: 8px;
-
-  padding-inline: 16px;
-
-  border: 1px solid color-mix(in srgb, var(--btn-secondary-border) 76%, var(--border-strong));
-  border-radius: var(--radius-pill);
-
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--surface-4) 44%, transparent),
-      color-mix(in srgb, var(--surface-2) 46%, transparent)
-    ),
-    var(--btn-secondary-bg);
-
-  color: var(--btn-secondary-text);
-
-  box-shadow:
-    var(--btn-secondary-shadow),
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 6%, transparent);
-
-  cursor: pointer;
-
-  font-family: var(--font-family);
-  font-size: 12px;
-  font-weight: 950;
-  line-height: 1;
-  text-align: left;
-  text-decoration: none;
-  white-space: nowrap;
-
-  backdrop-filter: var(--glass-blur-sm, blur(12px));
-  -webkit-backdrop-filter: var(--glass-blur-sm, blur(12px));
-
-  transition:
-    transform var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard),
-    filter var(--duration-fast) var(--ease-standard);
-}
-
-.home-create-card-button:hover {
-  transform: translateY(-1px);
-
-  border-color: color-mix(in srgb, var(--btn-secondary-border) 70%, var(--border-strong));
-
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-strong) 7%, transparent),
-      transparent 56%
-    ),
-    var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
-
-  color: var(--text-strong);
-
-  box-shadow:
-    var(--btn-secondary-shadow),
-    0 10px 22px color-mix(in srgb, #000 18%, transparent);
-}
-
-.home-create-card-button:active {
-  transform: translateY(0) scale(.985);
-}
-
-.home-create-card-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  inline-size: 16px;
-  block-size: 16px;
-
-  color: currentColor;
-}
-
-.home-create-card-icon svg {
-  inline-size: 16px;
-  block-size: 16px;
-}
-
-.home-create-card-content {
-  display: inline-flex;
-  align-items: center;
-  min-inline-size: 0;
-}
-
-.home-create-card-content .home-panel-kicker,
-.home-create-card-content > span:last-child,
+.home-create-card,
+.home-create-card-button,
+.home-create-card-icon,
+.home-create-card-content,
 .home-create-card-arrow {
   display: none !important;
 }
 
-.home-create-card-content strong {
-  min-inline-size: 0;
-  overflow: hidden;
-
-  color: inherit;
-
-  font-size: inherit;
-  line-height: 1;
-  font-weight: inherit;
-  letter-spacing: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 
 /* =========================================================
-   BUTTONS / LINKS
+   BOTONES
 ========================================================= */
 
 .home-btn,
@@ -566,7 +435,7 @@
 
 
 /* =========================================================
-   ALERT / STALE / ERROR
+   ALERTAS
 ========================================================= */
 
 .home-alert {
@@ -576,6 +445,7 @@
 
   gap: 10px;
 
+  margin-inline: var(--home-view-x);
   padding: 13px 15px;
 
   border: 1px solid var(--border-error);
@@ -620,7 +490,7 @@
 
 
 /* =========================================================
-   STATS 1:1 INCIDENCIAS
+   ESTADÍSTICAS 1:1 CON INCIDENCIAS
 ========================================================= */
 
 .home-stats {
@@ -632,6 +502,7 @@
 
   min-inline-size: 0;
   margin-block-start: 0;
+  margin-inline: var(--home-view-x);
 }
 
 .home-view-root--admin .home-stats,
@@ -875,17 +746,19 @@
 
 
 /* =========================================================
-   PANELS / GRID 1:1 HISTORY SHELL
+   PANELES
 ========================================================= */
 
 .home-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-areas: "activity invoices";
-  gap: var(--view-section-gap, var(--space-lg));
+  gap: var(--home-flow-gap);
+
   align-items: start;
 
   min-inline-size: 0;
+  margin-inline: var(--home-view-x);
 }
 
 .home-panel {
@@ -967,7 +840,7 @@
 
 
 /* =========================================================
-   ACTIVITY
+   ACTIVIDAD
 ========================================================= */
 
 .home-activity-list,
@@ -1110,7 +983,7 @@
 
 
 /* =========================================================
-   INVOICES
+   FACTURAS
 ========================================================= */
 
 .home-billing-total {
@@ -1237,7 +1110,7 @@
 
 
 /* =========================================================
-   EMPTY / SKELETON
+   VACÍO Y CARGA
 ========================================================= */
 
 .home-empty-state {
@@ -1348,7 +1221,7 @@
 
 
 /* =========================================================
-   LIGHT THEME
+   TEMA CLARO
 ========================================================= */
 
 [data-theme="light"] :where(.panel-content[data-view="home"], .home-view-root, [data-home-scope]) {
@@ -1388,15 +1261,15 @@
   border-color: color-mix(in srgb, var(--accent) 28%, rgba(15, 23, 42, .16));
 
   box-shadow:
-    0 14px 28px rgba(15, 23, 42, .13),
-    inset 0 0 0 1px rgba(255, 255, 255, .72),
+    0 16px 30px rgba(15, 23, 42, .14),
+    inset 0 0 0 1px rgba(255, 255, 255, .70),
     inset 0 -16px 26px rgba(15, 23, 42, .10);
 
-  filter: saturate(1.12) contrast(1.035);
+  filter: saturate(1.14) contrast(1.04);
 }
 
 [data-theme="light"] .home-current-user-avatar img {
-  filter: saturate(1.12) contrast(1.035);
+  filter: saturate(1.14) contrast(1.04);
 }
 
 [data-theme="light"] .home-stat-card {
@@ -1459,12 +1332,8 @@
 ========================================================= */
 
 @media (max-width: 1180px) {
-  .home-header {
-    grid-template-columns: 1fr;
-  }
-
-  .home-create-card {
-    justify-content: flex-start;
+  :where(.panel-content[data-view="home"], .home-view-root, [data-home-scope]) {
+    --home-avatar-size: clamp(78px, 8vw, 98px);
   }
 
   .home-view-root--admin .home-stats,
@@ -1486,10 +1355,9 @@
 
 @media (max-width: 760px) {
   :where(.panel-content[data-view="home"], .home-view-root, [data-home-scope]) {
-    --home-avatar-size-header: clamp(62px, 13vw, 78px);
+    --home-avatar-size: clamp(64px, 13vw, 82px);
     --home-avatar-radius: 18px;
-
-    gap: var(--space-md);
+    --home-flow-gap: var(--space-md);
   }
 
   .panel-content[data-view="home"],
@@ -1498,32 +1366,31 @@
   }
 
   .home-header {
-    padding: var(--space-md) var(--space-sm);
-    border-radius: 0;
+    padding:
+      var(--space-md)
+      var(--space-sm)
+      var(--space-sm);
+  }
+
+  .home-stats,
+  .home-grid,
+  .home-alert {
+    margin-inline: var(--space-sm);
   }
 
   .home-header-main {
-    grid-template-columns: minmax(0, 1fr) var(--home-avatar-size-header);
-    align-items: center;
+    grid-template-columns: var(--home-avatar-size) minmax(0, 1fr);
     gap: var(--space-sm);
   }
 
   .home-header h1,
   .home-title {
     font-size: clamp(var(--font-3xl), 8vw, var(--font-4xl));
-    line-height: 1;
+    line-height: .98;
   }
 
   .home-subtitle {
     font-size: var(--font-base);
-  }
-
-  .home-create-card {
-    inline-size: 100%;
-  }
-
-  .home-create-card-button {
-    inline-size: 100%;
   }
 
   .home-stats,
@@ -1561,16 +1428,39 @@
 }
 
 @media (max-width: 520px) {
+  :where(.panel-content[data-view="home"], .home-view-root, [data-home-scope]) {
+    --home-avatar-size: 62px;
+    --home-avatar-radius: 16px;
+  }
+
+  .home-header-main {
+    grid-template-columns: var(--home-avatar-size) minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .home-header h1,
+  .home-title {
+    font-size: clamp(30px, 9vw, 38px);
+    letter-spacing: -.064em;
+  }
+
+  .home-subtitle {
+    font-size: 12px;
+  }
+
+  .home-stat-card-button {
+    gap: 11px;
+  }
+}
+
+@media (max-width: 390px) {
   .home-header-main {
     grid-template-columns: 1fr;
   }
 
   .home-current-user-avatar {
-    display: none;
-  }
-
-  .home-create-card-button {
-    justify-content: center;
+    inline-size: 72px;
+    block-size: 72px;
   }
 }
 
@@ -1582,11 +1472,10 @@
 
 
 /* =========================================================
-   PRINT / MOTION / KEYFRAMES
+   IMPRESIÓN Y MOVIMIENTO
 ========================================================= */
 
 @media print {
-  .home-create-card,
   .home-link-button,
   .home-btn {
     display: none !important;
@@ -1616,7 +1505,6 @@
 
   .home-btn:hover,
   .home-link-button:hover,
-  .home-create-card-button:hover,
   .home-stat-card:hover,
   .home-activity-item:hover,
   .home-invoice-item:hover {

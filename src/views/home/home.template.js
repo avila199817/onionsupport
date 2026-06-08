@@ -1,21 +1,17 @@
 /* =========================================================
-   Onion Support - Home Template
+   Onion Support - Plantilla de Inicio
    Archivo: /src/views/home/home.template.js
 
    Responsabilidad:
-   - Render HTML puro del Home.
-   - Consumir dashboard ligero desde index.js/home.api.js.
-   - Header limpio con CTA Crear incidencia.
-   - Stats principales.
-   - Actividad reciente.
-   - Facturación resumida.
-   - Admin mantiene accesos resumidos en stats.
-   - User ve sólo incidencias/facturas propias según backend.
+   - Pintar HTML puro de Inicio.
+   - Usar datos ya preparados por index.js/home.api.js.
+   - Mantener todo el texto visible en castellano.
+   - No pintar el botón Crear incidencia.
+   - Avatar a la izquierda desde estructura.
    - Sin DOM API.
-   - Sin listeners.
+   - Sin escuchadores.
    - Sin Auth.
    - Sin Router.
-   - Sin AppCore.
    - Sin HTTP.
    - Sin Store.
    - Sin storage.
@@ -23,11 +19,10 @@
    - Sin handlers inline.
 ========================================================= */
 
-export const HOME_TEMPLATE_VERSION = "home.template.dashboard.v4.no-eyebrow";
+export const HOME_TEMPLATE_VERSION = "home.template.inicio.v6.es.no-cta";
 
 const ACTIONS = Object.freeze({
   RETRY: "retry",
-  CREATE_INCIDENCIA: "create_incidencia",
   NAVIGATE: "navigate",
 });
 
@@ -49,17 +44,29 @@ const STATUS_LABELS = Object.freeze({
   pending: "Pendiente",
   in_progress: "En curso",
   progress: "En curso",
+  processing: "En curso",
   resolved: "Resuelta",
   closed: "Cerrada",
+  solved: "Resuelta",
+
   paid: "Pagada",
   unpaid: "Pendiente",
+  pending_payment: "Pendiente",
   overdue: "Vencida",
+  issued: "Emitida",
+  draft: "Borrador",
+  cancelled: "Cancelada",
+  canceled: "Cancelada",
+  refunded: "Reembolsada",
+
   active: "Activo",
   inactive: "Inactivo",
+  enabled: "Activo",
+  disabled: "Inactivo",
 });
 
 /* =========================================================
-   BASICS
+   AYUDANTES BASE
 ========================================================= */
 
 function cleanText(value = "", fallback = "") {
@@ -80,10 +87,12 @@ function safeArray(value) {
 }
 
 function first(...values) {
-  for (const value of values) {
+  for (const value of values.flat(Infinity)) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && !value.length) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
+
     return value;
   }
 
@@ -106,9 +115,11 @@ function attr(value = "") {
 function normalizeKey(value = "") {
   return cleanText(value, "")
     .toLowerCase()
-    .replace(/[^a-z0-9._:-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w.:]+/g, "_")
+    .replace(/^_+|_+$/g, "")
     .slice(0, 80);
 }
 
@@ -116,6 +127,15 @@ function number(value = 0, fallback = 0) {
   const output = Number(value);
   return Number.isFinite(output) ? output : fallback;
 }
+
+function hasAmount(value = null) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed !== 0;
+}
+
+/* =========================================================
+   FORMATO
+========================================================= */
 
 function formatNumber(value = 0) {
   try {
@@ -133,22 +153,41 @@ function formatMoney(value = 0, currency = "EUR") {
       maximumFractionDigits: 2,
     }).format(number(value, 0));
   } catch {
-    return `${number(value, 0).toFixed(2)} €`;
+    return `${number(value, 0).toFixed(2).replace(".", ",")} €`;
   }
 }
 
-function formatDate(value = "") {
-  const time = Date.parse(value);
+function toDate(value = "") {
+  if (!value) return null;
 
-  if (!Number.isFinite(time)) return "Sin fecha";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const numericDate = new Date(value);
+    return Number.isNaN(numericDate.getTime()) ? null : numericDate;
+  }
+
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? new Date(time) : null;
+}
+
+function formatDate(value = "") {
+  const date = toDate(value);
+
+  if (!date) return "Sin fecha";
 
   try {
     return new Intl.DateTimeFormat("es-ES", {
-      dateStyle: "short",
-      timeStyle: "short",
-    }).format(new Date(time));
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
   } catch {
-    return new Date(time).toLocaleString("es-ES");
+    return date.toLocaleString("es-ES");
   }
 }
 
@@ -164,13 +203,34 @@ function initialsFrom(value = "") {
   );
 }
 
+function normalizeStatus(value = "") {
+  const raw = cleanText(value, "");
+  const key = normalizeKey(raw);
+
+  return STATUS_LABELS[key] || raw || "Sin estado";
+}
+
+function visibleText(value = "", fallback = "") {
+  const text = cleanText(value, "");
+
+  if (!text) return fallback;
+
+  const key = normalizeKey(text);
+
+  return STATUS_LABELS[key] || text;
+}
+
+/* =========================================================
+   SEGURIDAD DE URLS
+========================================================= */
+
 function safeImageSrc(value = "") {
   const raw = cleanText(value, "");
 
   if (!raw) return "";
   if (raw.startsWith("//")) return "";
   if (/[\r\n\t\\]/.test(raw)) return "";
-  if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
+  if (/^(javascript|vbscript|file):/i.test(raw)) return "";
   if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature|jwt|authorization)=/i.test(raw)) {
     return "";
   }
@@ -201,13 +261,8 @@ function safeRoute(value = "", fallback = "/") {
   return route;
 }
 
-function normalizeStatus(value = "") {
-  const status = cleanText(value, "").toLowerCase();
-  return STATUS_LABELS[status] || cleanText(value, "Sin estado");
-}
-
 /* =========================================================
-   ICONS
+   ICONOS
 ========================================================= */
 
 function icon(name = "activity") {
@@ -215,7 +270,6 @@ function icon(name = "activity") {
     `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"`;
 
   const icons = {
-    plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
     ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
     invoice: `<svg ${common}><path d="M6 2h12v20l-3-2-3 2-3-2-3 2Z"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>`,
     client: `<svg ${common}><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>`,
@@ -231,23 +285,23 @@ function icon(name = "activity") {
 }
 
 /* =========================================================
-   VM
+   MODELO DE VISTA
 ========================================================= */
 
 function buildVm(input = {}) {
   const data = isObject(input) ? input : {};
   const dashboard = isObject(data.dashboard) ? data.dashboard : data;
   const summary = isObject(dashboard.summary) ? dashboard.summary : {};
-  const user = isObject(first(data.user, dashboard.user, {}))
-    ? first(data.user, dashboard.user, {})
-    : {};
+
+  const userCandidate = first(data.user, dashboard.user, {});
+  const user = isObject(userCandidate) ? userCandidate : {};
 
   const role = cleanText(
     first(data.role, dashboard.role, user.role, user.rol, "user"),
     "user"
   ).toLowerCase();
 
-  const admin = dashboard.admin === true || role === "admin" || user.role === "admin";
+  const admin = dashboard.admin === true || normalizeKey(role) === "admin" || normalizeKey(user.role) === "admin";
 
   const routes = {
     ...DEFAULT_ROUTES,
@@ -258,15 +312,36 @@ function buildVm(input = {}) {
   const facturas = safeArray(first(dashboard.facturas, dashboard.invoices, []));
   const clientes = admin ? safeArray(first(dashboard.clientes, dashboard.clients, [])) : [];
   const users = admin ? safeArray(first(dashboard.users, dashboard.usuarios, [])) : [];
-  const activity = safeArray(dashboard.activity);
+  const activity = safeArray(first(dashboard.activity, dashboard.actividad, dashboard.movimientos, []));
 
   const displayName = cleanText(
-    first(user.displayName, user.name, user.fullName, user.username, data.displayName),
+    first(
+      user.displayName,
+      user.name,
+      user.fullName,
+      user.nombre,
+      user.username,
+      data.displayName
+    ),
     "Usuario"
   );
 
-  const paidTotal = number(first(summary.paidTotal, summary.totalPaid, 0), 0);
-  const currency = cleanText(summary.currency, facturas[0]?.currency || "EUR");
+  const paidTotal = number(
+    first(
+      summary.paidTotal,
+      summary.totalPaid,
+      summary.totalPagado,
+      summary.importePagado,
+      summary.paid,
+      0
+    ),
+    0
+  );
+
+  const currency = cleanText(
+    first(summary.currency, summary.moneda, facturas[0]?.currency, facturas[0]?.moneda),
+    "EUR"
+  );
 
   return {
     dashboard,
@@ -276,7 +351,17 @@ function buildVm(input = {}) {
       ...user,
       displayName,
       initials: cleanText(user.initials, initialsFrom(displayName)),
-      avatarUrl: safeImageSrc(first(user.avatarUrl, user.avatar, user.picture, "")),
+      avatarUrl: safeImageSrc(
+        first(
+          user.avatarUrl,
+          user.avatar,
+          user.picture,
+          user.photoUrl,
+          user.photoURL,
+          user.imageUrl,
+          ""
+        )
+      ),
     },
 
     role,
@@ -304,7 +389,7 @@ function buildVm(input = {}) {
 }
 
 /* =========================================================
-   SMALL PARTIALS
+   PIEZAS PEQUEÑAS
 ========================================================= */
 
 function avatar(user = {}) {
@@ -313,9 +398,20 @@ function avatar(user = {}) {
   const initials = cleanText(user.initials, initialsFrom(name));
 
   return `
-    <span class="home-current-user-avatar ${image ? "has-image" : "is-fallback"}" aria-label="${attr(name)}">
-      ${image ? `<img src="${attr(image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
-      <span class="home-avatar-initials" aria-hidden="true">${escapeHtml(initials)}</span>
+    <span
+      class="home-current-user-avatar ${image ? "has-image" : "is-fallback"}"
+      aria-label="${attr(name)}"
+      data-has-avatar="${image ? "true" : "false"}"
+    >
+      ${
+        image
+          ? `<img src="${attr(image)}" alt="${attr(name)}" loading="eager" decoding="async" fetchpriority="high" referrerpolicy="no-referrer" draggable="false">`
+          : ""
+      }
+
+      <span class="home-avatar-initials" aria-hidden="${image ? "true" : "false"}">
+        ${escapeHtml(initials)}
+      </span>
     </span>
   `;
 }
@@ -350,6 +446,7 @@ function errorBanner(message = "") {
     <div class="home-alert home-alert--error" role="alert">
       <span class="home-alert-icon" aria-hidden="true">${icon("alert")}</span>
       <span>${escapeHtml(text)}</span>
+
       <button
         type="button"
         class="home-btn home-btn--ghost"
@@ -400,36 +497,8 @@ function actionButton({
 }
 
 /* =========================================================
-   HEADER
+   CABECERA
 ========================================================= */
-
-function createCard(vm) {
-  const route = safeRoute(vm.routes.incidencias, "/incidencias");
-
-  return `
-    <aside class="home-create-card home-create-card--incidencia" data-home-section="create-incidencia">
-      <button
-        type="button"
-        class="home-create-card-button"
-        data-home-action="${ACTIONS.CREATE_INCIDENCIA}"
-        data-action="${ACTIONS.CREATE_INCIDENCIA}"
-        data-route="${attr(route)}"
-        data-href="${attr(route)}"
-        aria-label="Crear incidencia"
-      >
-        <span class="home-create-card-icon" aria-hidden="true">${icon("plus")}</span>
-
-        <span class="home-create-card-content">
-          <span class="home-panel-kicker">Nueva solicitud</span>
-          <strong>Crear incidencia</strong>
-          <span>Abre una incidencia de soporte.</span>
-        </span>
-
-        <span class="home-create-card-arrow" aria-hidden="true">${icon("arrowRight")}</span>
-      </button>
-    </aside>
-  `;
-}
 
 function header(vm) {
   return `
@@ -438,24 +507,23 @@ function header(vm) {
         ${avatar(vm.user)}
 
         <div class="home-header-copy">
-          <h1>Hola, ${escapeHtml(vm.user.displayName)}</h1>
+          <h1 class="home-title">Hola, ${escapeHtml(vm.user.displayName)}</h1>
 
           <p class="home-subtitle">
-            ${vm.admin
-              ? "Resumen operativo de incidencias, facturas y accesos principales."
-              : "Resumen de tus incidencias y facturas."
+            ${
+              vm.admin
+                ? "Resumen operativo de incidencias, facturas, clientes y usuarios."
+                : "Resumen de tus incidencias y facturas."
             }
           </p>
         </div>
       </div>
-
-      ${createCard(vm)}
     </header>
   `;
 }
 
 /* =========================================================
-   STATS
+   ESTADÍSTICAS
 ========================================================= */
 
 function statCard({ label, value, text, iconName, route, modifier }) {
@@ -501,7 +569,7 @@ function stats(vm) {
       text: "Incidencias visibles en el panel.",
       iconName: "ticket",
       route: vm.routes.incidencias,
-      modifier: "tickets",
+      modifier: "incidencias",
     },
     {
       label: "Facturas",
@@ -542,11 +610,11 @@ function stats(vm) {
 }
 
 /* =========================================================
-   ACTIVITY
+   ACTIVIDAD
 ========================================================= */
 
 function activityIcon(type = "") {
-  const normalized = cleanText(type, "").toLowerCase();
+  const normalized = normalizeKey(type);
 
   if (normalized.includes("invoice") || normalized.includes("factura")) return "invoice";
   if (normalized.includes("ticket") || normalized.includes("incidencia")) return "ticket";
@@ -558,10 +626,20 @@ function activityIcon(type = "") {
 
 function activityItem(item = {}) {
   const source = isObject(item) ? item : {};
-  const type = normalizeKey(source.type || "activity");
-  const title = cleanText(first(source.title, source.subject, source.name), "Actividad");
-  const text = cleanText(first(source.text, source.description, source.status), "Actualización registrada.");
-  const date = first(source.date, source.updatedAt, source.createdAt, "");
+  const type = normalizeKey(first(source.type, source.tipo, "activity"));
+
+  const title = visibleText(
+    first(source.title, source.titulo, source.subject, source.asunto, source.name, source.nombre),
+    "Actividad registrada"
+  );
+
+  const statusText = normalizeStatus(first(source.status, source.estado, ""));
+  const bodyText = visibleText(
+    first(source.text, source.description, source.descripcion, ""),
+    statusText || "Actualización registrada."
+  );
+
+  const date = first(source.date, source.fecha, source.updatedAt, source.createdAt, source.creadoEn, "");
 
   return `
     <li class="home-activity-item home-activity-item--${attr(type)}">
@@ -569,7 +647,7 @@ function activityItem(item = {}) {
 
       <span class="home-activity-body">
         <strong>${escapeHtml(title)}</strong>
-        <span>${escapeHtml(text)}</span>
+        <span>${escapeHtml(bodyText)}</span>
       </span>
 
       <time datetime="${attr(date || "")}">${escapeHtml(formatDate(date))}</time>
@@ -589,42 +667,45 @@ function activity(vm) {
         </div>
       </div>
 
-      ${items.length
-        ? `<ul class="home-activity-list">${items.map(activityItem).join("")}</ul>`
-        : emptyState("Sin actividad reciente", "Todavía no hay movimientos visibles en el Home.", "activity")
+      ${
+        items.length
+          ? `<ul class="home-activity-list">${items.map(activityItem).join("")}</ul>`
+          : emptyState("Sin actividad reciente", "Todavía no hay movimientos visibles en el inicio.", "activity")
       }
     </section>
   `;
 }
 
 /* =========================================================
-   INVOICES
+   FACTURAS
 ========================================================= */
 
 function invoiceItem(invoice = {}) {
   const source = isObject(invoice) ? invoice : {};
+
   const id = cleanText(
-    first(source.invoiceId, source.facturaId, source.id, source.title),
+    first(source.invoiceId, source.facturaId, source.id, source.title, source.titulo),
     "Factura"
   );
 
-  const title = cleanText(first(source.title, source.name, source.concepto), id);
-  const status = cleanText(source.status, source.paid ? "paid" : "pending");
-  const amount = source.paid
-    ? first(source.paidAmount, source.total, source.amount, 0)
-    : first(source.total, source.amount, 0);
+  const title = visibleText(
+    first(source.title, source.titulo, source.name, source.nombre, source.concepto),
+    "Factura disponible para consulta."
+  );
 
-  const currency = cleanText(source.currency, "EUR");
+  const status = normalizeStatus(first(source.status, source.estado, source.paid ? "paid" : "issued"));
+  const amount = first(source.paidAmount, source.totalPaid, source.total, source.amount, source.importe, 0);
+  const currency = cleanText(first(source.currency, source.moneda), "EUR");
 
   return `
-    <li class="home-invoice-item">
+    <li class="home-invoice-item" data-home-invoice="${attr(id)}">
       <span class="home-invoice-main">
         <strong>${escapeHtml(title)}</strong>
-        <span>${escapeHtml(normalizeStatus(status))}</span>
+        <span>${escapeHtml(status)}</span>
       </span>
 
       <span class="home-invoice-amount">
-        ${source.paid ? escapeHtml(formatMoney(amount, currency)) : "—"}
+        ${hasAmount(amount) || source.paid ? escapeHtml(formatMoney(amount, currency)) : "—"}
       </span>
     </li>
   `;
@@ -656,16 +737,17 @@ function invoices(vm) {
         <strong>${escapeHtml(formatMoney(vm.counts.paidTotal, vm.counts.currency))}</strong>
       </div>
 
-      ${items.length
-        ? `<ul class="home-invoice-list">${items.map(invoiceItem).join("")}</ul>`
-        : emptyState("Sin facturas visibles", "Cuando haya facturas disponibles aparecerán aquí.", "invoice")
+      ${
+        items.length
+          ? `<ul class="home-invoice-list">${items.map(invoiceItem).join("")}</ul>`
+          : emptyState("Sin facturas visibles", "Cuando haya facturas disponibles aparecerán aquí.", "invoice")
       }
     </section>
   `;
 }
 
 /* =========================================================
-   STATES
+   ESTADOS
 ========================================================= */
 
 export function renderHomeLoadingState(input = {}) {
@@ -675,7 +757,7 @@ export function renderHomeLoadingState(input = {}) {
   });
 }
 
-export function renderHomeErrorState(message = "No se pudo cargar el Home.") {
+export function renderHomeErrorState(message = "No se pudo cargar el inicio.") {
   return `
     <section
       class="home-view-root home-view-root--error"
@@ -686,14 +768,14 @@ export function renderHomeErrorState(message = "No se pudo cargar el Home.") {
       ${errorBanner(message)}
 
       <section class="home-panel">
-        ${emptyState("No se pudo cargar el Home", message, "alert")}
+        ${emptyState("No se pudo cargar el inicio", message, "alert")}
       </section>
     </section>
   `;
 }
 
 /* =========================================================
-   MAIN TEMPLATE
+   PLANTILLA PRINCIPAL
 ========================================================= */
 
 export function renderHomeTemplate(input = {}) {
@@ -722,7 +804,7 @@ export function renderHomeTemplate(input = {}) {
 }
 
 /* =========================================================
-   COMPAT EXPORTS
+   EXPORTS COMPATIBLES
 ========================================================= */
 
 export const renderHomeViewTemplate = renderHomeTemplate;
@@ -746,6 +828,8 @@ export function getHomeTemplateSnapshot() {
       noStorage: true,
       noCssInline: true,
       noInlineHandlers: true,
+      noCreateIncidenciaButton: true,
+      visibleTextLanguage: "es",
     },
   };
 }

@@ -2,31 +2,17 @@
    Onion Support - Incidencias Create Template
    Archivo: /src/views/incidencias/incidencias.template.create.js
 
-   Responsabilidad:
-   - Render HTML puro del modal de creación de incidencia.
-   - Formulario de creación.
-   - Buscador de usuario afectado sólo para admin.
-   - Adjuntos iniciales.
-   - Estados visuales: loading, errors, success.
-   - Exponer data-field/data-create-action para index.js.
-   - Estructura estable para modal island y rerender sin flicker.
-   - Alineado 1:1 con incidencias.index.js.
-   - Alineado con incidencias.api.js normalizeCreatePayload().
-   - Preservar targetClienteId real si backend lo devuelve.
-   - No inventar clienteId desde targetUserId.
-   - Sin Auth.
-   - Sin Router.
-   - Sin HTTP.
-   - Sin Store.
-   - Sin State externo.
-   - Sin listeners.
-   - Sin DOM API.
-   - Sin Toast.
-   - Sin lógica de creación real.
+   Contrato productivo:
+   - Sólo renderiza HTML y valida forma local.
+   - No hace HTTP, no toca Auth, no toca Store, no toca DOM.
+   - Expone data-field y data-create-action estables para index.js.
+   - El input de adjuntos SIEMPRE se llama attachments.
+   - Compatible con backend /api/tickets + multer upload.any().
+   - Compatible con Cosmos tickets 1:1: targetUserId/targetClienteId reales.
 ========================================================= */
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.productive.v4";
+  "incidencias.template.create.aligned.blob.v10";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -46,7 +32,44 @@ const FORM_ID = "incidencias-create-form";
 
 const USER_SEARCH_MIN_LENGTH = 2;
 const MAX_FILES = 10;
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_FILE_SIZE = 100 * 1024 * 1024;
+
+const ACCEPT_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".gif",
+  ".heic",
+  ".heif",
+  ".pdf",
+  ".txt",
+  ".log",
+  ".csv",
+  ".json",
+  ".zip",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".ppt",
+  ".pptx",
+  ".mp4",
+  ".m4v",
+  ".mov",
+  ".webm",
+  ".mkv",
+  ".avi",
+  ".wmv",
+  ".mpeg",
+  ".mpg",
+  ".ogv",
+  ".3gp",
+  ".mp3",
+  ".m4a",
+  ".wav",
+  ".weba",
+];
 
 const CATEGORY_OPTIONS = Object.freeze([
   { value: "general", label: "General" },
@@ -56,6 +79,9 @@ const CATEGORY_OPTIONS = Object.freeze([
   { value: "hardware", label: "Hardware" },
   { value: "software", label: "Software" },
   { value: "account", label: "Cuenta" },
+  { value: "network", label: "Redes" },
+  { value: "documentation", label: "Documentación" },
+  { value: "sales", label: "Ventas" },
 ]);
 
 const PRIORITY_OPTIONS = Object.freeze([
@@ -78,7 +104,7 @@ const DEFAULT_FORM = Object.freeze({
   priority: "medium",
   status: "open",
   category: "general",
-  source: "panel",
+  source: "panel_admin",
 
   attachments: [],
 });
@@ -100,20 +126,20 @@ function safeArray(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
+  const text = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  return output || fallback;
+  return text || fallback;
 }
 
 function first(...values) {
   for (const value of values.flat(Infinity)) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (isObject(value) && !Object.keys(value).length) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
 
     return value;
   }
@@ -137,19 +163,6 @@ function escapeHtml(value = "") {
 
 function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
-}
-
-function htmlAttrs(attrs = {}) {
-  return Object.entries(safeObject(attrs))
-    .map(([key, value]) => {
-      if (!key) return "";
-      if (value === false || value === null || value === undefined) return "";
-      if (value === true) return escapeHtml(key);
-
-      return `${escapeHtml(key)}="${escapeHtml(value)}"`;
-    })
-    .filter(Boolean)
-    .join(" ");
 }
 
 function joinClasses(...values) {
@@ -206,9 +219,7 @@ function safeImageSrc(value = "") {
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
   if (hasSensitiveQuery(raw)) return "";
-
   if (/^blob:/i.test(raw)) return raw;
-
   if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
 
   if (/^https:\/\//i.test(raw)) {
@@ -242,20 +253,17 @@ function firstImageSrc(...values) {
         value.photoUrl,
         value.photoURL,
         value.imageUrl,
-
+        value.userAvatar,
+        value.userAvatarUrl,
         value.clienteAvatar,
         value.clienteAvatarUrl,
         value.clientAvatar,
         value.clientAvatarUrl,
-        value.userAvatar,
-        value.userAvatarUrl,
-
         value.profile?.avatarUrl,
         value.profile?.avatar,
         value.profile?.photoUrl,
         value.profile?.photoURL,
         value.profile?.picture,
-
         value.raw?.avatarUrl,
         value.raw?.avatar,
         value.raw?.picture,
@@ -287,21 +295,15 @@ function hashText(value = "") {
   return Math.abs(hash);
 }
 
-/* =========================================================
-   FORMATTERS
-========================================================= */
-
 function formatBytes(bytes = 0) {
   const size = number(bytes, 0);
 
   if (!size || size <= 0) return "0 B";
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  if (size < 1024 * 1024 * 1024) {
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  }
+  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
 
-  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
 function initialsFrom(value = "") {
@@ -313,6 +315,24 @@ function initialsFrom(value = "") {
       .map((part) => part[0]?.toUpperCase() || "")
       .join("")
       .slice(0, 2) || "ON"
+  );
+}
+
+function fileExtension(value = "") {
+  const name = cleanText(value, "").toLowerCase();
+  const index = name.lastIndexOf(".");
+
+  if (index <= 0) return "";
+
+  return name.slice(index);
+}
+
+function isFileLike(value = null) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof value.name === "string" &&
+      typeof value.size === "number"
   );
 }
 
@@ -339,14 +359,14 @@ function icon(name = "") {
 }
 
 /* =========================================================
-   VIEW MODEL
+   NORMALIZERS
 ========================================================= */
 
 function normalizeUserResult(user = {}) {
   const raw = safeObject(user);
-  const rawNested = safeObject(raw.raw);
+  const nested = safeObject(raw.raw);
 
-  const id = cleanText(
+  const userId = cleanText(
     first(
       raw.userId,
       raw.id,
@@ -357,14 +377,12 @@ function normalizeUserResult(user = {}) {
       raw.lookup?.id,
       raw.profile?.userId,
       raw.auth?.userId,
-
-      rawNested.userId,
-      rawNested.id,
-      rawNested.uid,
-      rawNested.sub,
-      rawNested.usuarioId,
-
-      raw.username
+      nested.userId,
+      nested.id,
+      nested.uid,
+      nested.sub,
+      nested.usuarioId,
+      ""
     ),
     ""
   );
@@ -382,15 +400,15 @@ function normalizeUserResult(user = {}) {
       raw.cliente?.id,
       raw.client?.clienteId,
       raw.client?.id,
-
-      rawNested.targetClienteId,
-      rawNested.clienteId,
-      rawNested.clientId,
-      rawNested.customerId,
-      rawNested.cliente?.clienteId,
-      rawNested.cliente?.id,
-      rawNested.client?.clienteId,
-      rawNested.client?.id
+      nested.targetClienteId,
+      nested.clienteId,
+      nested.clientId,
+      nested.customerId,
+      nested.cliente?.clienteId,
+      nested.cliente?.id,
+      nested.client?.clienteId,
+      nested.client?.id,
+      ""
     ),
     ""
   );
@@ -411,14 +429,12 @@ function normalizeUserResult(user = {}) {
       raw.lookup?.name,
       [raw.firstName, raw.lastName].filter(Boolean).join(" "),
       [raw.nombre, raw.apellidos].filter(Boolean).join(" "),
-
-      rawNested.displayName,
-      rawNested.fullName,
-      rawNested.name,
-      rawNested.nombre,
-
+      nested.displayName,
+      nested.fullName,
+      nested.name,
+      nested.nombre,
       raw.username,
-      raw.email
+      userId
     ),
     "Usuario"
   );
@@ -428,20 +444,12 @@ function normalizeUserResult(user = {}) {
       raw.email,
       raw.emailLower,
       raw.userEmail,
-      raw.mail,
       raw.clienteEmail,
       raw.clientEmail,
       raw.profile?.email,
-      raw.auth?.email,
-      raw.contacto?.email,
-      raw.contacto?.emailLower,
       raw.lookup?.email,
-      raw.lookup?.emailLower,
-
-      rawNested.email,
-      rawNested.emailLower,
-      rawNested.userEmail,
-      rawNested.mail,
+      nested.email,
+      nested.emailLower,
       ""
     )
   );
@@ -449,96 +457,42 @@ function normalizeUserResult(user = {}) {
   const username = cleanText(
     first(
       raw.username,
-      raw.userName,
       raw.usernameLower,
-      raw.lookup?.username,
-      raw.lookup?.usernameLower,
-      raw.slug,
-      raw.lookup?.slug,
-      raw.profile?.slug,
-
-      rawNested.username,
-      rawNested.userName,
-      rawNested.usernameLower,
-      rawNested.slug,
+      raw.userName,
+      raw.profile?.username,
+      nested.username,
+      nested.usernameLower,
       ""
     ),
     ""
   );
 
-  const avatarUrl = firstImageSrc(
-    raw.avatarUrl,
-    raw.avatar,
-    raw.picture,
-    raw.photoUrl,
-    raw.photoURL,
-    raw.imageUrl,
-
-    raw.clienteAvatar,
-    raw.clienteAvatarUrl,
-    raw.clientAvatar,
-    raw.clientAvatarUrl,
-    raw.userAvatar,
-    raw.userAvatarUrl,
-
-    raw.profile?.avatarUrl,
-    raw.profile?.avatar,
-    raw.profile?.photoUrl,
-    raw.profile?.photoURL,
-    raw.profile?.picture,
-
-    rawNested.avatarUrl,
-    rawNested.avatar,
-    rawNested.picture,
-    rawNested.photoUrl,
-    rawNested.photoURL,
-    rawNested.imageUrl
-  );
-
-  const role = cleanText(
-    first(
-      raw.role,
-      raw.rol,
-      Array.isArray(raw.roles) ? raw.roles[0] : "",
-      rawNested.role,
-      rawNested.rol,
-      Array.isArray(rawNested.roles) ? rawNested.roles[0] : "",
-      "user"
-    ),
-    "user"
-  );
+  const avatarUrl = firstImageSrc(raw, nested);
 
   return {
-    id,
-    userId: id,
-
+    id: userId,
+    userId,
+    uid: userId,
+    targetUserId: userId,
     clienteId,
-    clientId: clienteId,
     targetClienteId: clienteId,
-
-    displayName: name,
-    fullName: name,
+    clientId: clienteId,
     name,
     nombre: name,
-
+    fullName: name,
+    displayName: name,
     email,
     emailLower: email,
-    userEmail: email,
-    mail: email,
-
     username,
     usernameLower: username.toLowerCase(),
-
-    role,
-    rol: role,
-    roles: safeArray(raw.roles).length ? safeArray(raw.roles) : [role],
-
+    role: cleanText(first(raw.role, raw.rol, nested.role, nested.rol, "user"), "user"),
+    phone: cleanText(first(raw.phone, raw.telefono, nested.phone, nested.telefono, ""), ""),
     avatarUrl,
     avatar: avatarUrl || null,
     picture: avatarUrl || "",
-
     initials: cleanText(raw.initials, initialsFrom(name)),
-    tone: hashText(`${id}:${clienteId}:${email}:${name}`) % 10,
+    tone: hashText(`${userId}:${clienteId}:${email}:${name}`) % 10,
+    raw,
   };
 }
 
@@ -573,37 +527,17 @@ function normalizeForm(form = {}) {
 
   return {
     targetUserId: cleanText(
-      first(
-        input.targetUserId,
-        input.userId,
-        input.usuarioId,
-        input.uid,
-        ""
-      ),
+      first(input.targetUserId, input.userId, input.usuarioId, input.uid, ""),
       ""
     ),
 
     targetClienteId: cleanText(
-      first(
-        input.targetClienteId,
-        input.clienteId,
-        input.clientId,
-        input.customerId,
-        ""
-      ),
+      first(input.targetClienteId, input.clienteId, input.clientId, input.customerId, ""),
       ""
     ),
 
     targetUserName: cleanText(
-      first(
-        input.targetUserName,
-        input.userName,
-        input.clienteNombre,
-        input.clientName,
-        input.name,
-        input.nombre,
-        ""
-      ),
+      first(input.targetUserName, input.userName, input.clienteNombre, input.clientName, input.name, input.nombre, ""),
       ""
     ),
 
@@ -616,7 +550,7 @@ function normalizeForm(form = {}) {
     priority: normalizeKey(input.priority) || "medium",
     status: normalizeKey(input.status) || "open",
     category: normalizeKey(input.category) || "general",
-    source: cleanText(input.source, "panel"),
+    source: cleanText(input.source, "panel_admin"),
 
     attachments: safeArray(input.attachments),
   };
@@ -625,161 +559,95 @@ function normalizeForm(form = {}) {
 function buildSelectedUser(form = {}, userSearch = {}) {
   const selected = safeObject(userSearch.selectedUser);
 
-  if (!form.targetUserId && !selected.id && !selected.userId) {
-    return null;
-  }
+  if (!form.targetUserId && !selected.id && !selected.userId) return null;
 
   return normalizeUserResult({
     ...selected,
-
     userId: first(selected.userId, selected.id, form.targetUserId),
     id: first(selected.id, selected.userId, form.targetUserId),
-
-    targetClienteId: first(
-      selected.targetClienteId,
-      selected.clienteId,
-      selected.clientId,
-      form.targetClienteId
-    ),
-    clienteId: first(
-      selected.clienteId,
-      selected.targetClienteId,
-      selected.clientId,
-      form.targetClienteId
-    ),
-    clientId: first(
-      selected.clientId,
-      selected.clienteId,
-      selected.targetClienteId,
-      form.targetClienteId
-    ),
-
-    displayName: first(
-      selected.displayName,
-      selected.fullName,
-      selected.name,
-      selected.nombre,
-      form.targetUserName
-    ),
-
-    email: first(
-      selected.email,
-      selected.emailLower,
-      selected.userEmail,
-      selected.mail,
-      form.targetUserEmail
-    ),
-
-    avatarUrl: first(
-      selected.avatarUrl,
-      selected.avatar,
-      selected.picture,
-      selected.photoUrl,
-      selected.photoURL,
-      form.targetUserAvatar
-    ),
+    targetClienteId: first(selected.targetClienteId, selected.clienteId, selected.clientId, form.targetClienteId),
+    clienteId: first(selected.clienteId, selected.targetClienteId, selected.clientId, form.targetClienteId),
+    clientId: first(selected.clientId, selected.clienteId, selected.targetClienteId, form.targetClienteId),
+    displayName: first(selected.displayName, selected.fullName, selected.name, selected.nombre, form.targetUserName),
+    name: first(selected.name, selected.displayName, selected.fullName, selected.nombre, form.targetUserName),
+    email: first(selected.email, selected.emailLower, form.targetUserEmail),
+    avatarUrl: first(selected.avatarUrl, selected.avatar, form.targetUserAvatar),
   });
 }
 
 function buildVm(input = {}) {
-  const data = safeObject(input);
-  const form = normalizeForm(data.form || data.draft || {});
-  const errors = safeObject(data.errors);
-  const userSearch = safeObject(data.userSearch);
-
-  const query = cleanText(userSearch.query || data.userSearchQuery, "");
-  const results = safeArray(userSearch.results)
-    .map(normalizeUserResult)
-    .filter((item) => item.id);
-
-  const selectedUser = buildSelectedUser(form, userSearch);
+  const raw = safeObject(input);
+  const form = normalizeForm(raw.form || raw.values || raw);
+  const userSearch = {
+    query: cleanText(raw.userSearch?.query, ""),
+    loading: Boolean(raw.userSearch?.loading),
+    error: cleanText(raw.userSearch?.error, ""),
+    empty: Boolean(raw.userSearch?.empty),
+    results: safeArray(raw.userSearch?.results).map(normalizeUserResult),
+    selectedUser: raw.userSearch?.selectedUser ? normalizeUserResult(raw.userSearch.selectedUser) : null,
+  };
 
   return {
-    open: data.open === true,
-
-    admin: data.admin === true || data.role === "admin",
-
-    submitting: data.submitting === true,
-    loading: data.loading === true,
-    dragActive: data.dragActive === true,
-
-    serverError: cleanText(data.serverError || data.error, ""),
-    successMessage: cleanText(data.successMessage, ""),
-    createdTicketId: cleanText(data.createdTicketId, ""),
-
-    form: {
-      ...form,
-      targetClienteId: form.targetClienteId || selectedUser?.targetClienteId || "",
-    },
-    errors,
-
-    userSearch: {
-      query,
-      loading: userSearch.loading === true,
-      error: cleanText(userSearch.error, ""),
-      results,
-      selectedUser,
-
-      /*
-        El template NO decide vacío sólo por query.
-        index.js marca empty=true únicamente tras respuesta real.
-        Esto evita falso "No hay usuarios" durante debounce/búsqueda.
-      */
-      empty: userSearch.empty === true && query.length >= USER_SEARCH_MIN_LENGTH,
-    },
+    open: raw.open !== false,
+    admin: Boolean(raw.admin || raw.isAdmin || raw.role === "admin"),
+    role: cleanText(raw.role, "user"),
+    submitting: Boolean(raw.submitting || raw.loading || raw.creating),
+    dragActive: Boolean(raw.dragActive),
+    serverError: cleanText(raw.serverError || raw.error, ""),
+    successMessage: cleanText(raw.successMessage, ""),
+    createdTicketId: cleanText(raw.createdTicketId || raw.ticketId, ""),
+    errors: safeObject(raw.errors),
+    form,
+    userSearch,
+    selectedUser: buildSelectedUser(form, userSearch),
   };
 }
 
 /* =========================================================
-   FIELD PARTIALS
+   HTML PARTS
 ========================================================= */
 
 function disabledAttrs(disabled = false, busy = false) {
-  return htmlAttrs({
-    disabled: Boolean(disabled),
-    "aria-disabled": disabled ? "true" : false,
-    "aria-busy": busy ? "true" : false,
-  });
+  return disabled
+    ? `disabled aria-disabled="true"${busy ? " aria-busy=\"true\"" : ""}`
+    : "";
 }
 
-function renderFieldError(message = "") {
-  const text = cleanText(message, "");
+function renderFieldError(error = "") {
+  const text = cleanText(error, "");
 
   if (!text) return "";
 
-  return `<span class="inc-create-error">${escapeHtml(text)}</span>`;
+  return `<p class="inc-create-field-error" role="alert">${escapeHtml(text)}</p>`;
 }
 
 function renderInput({
   label = "",
   name = "",
   value = "",
-  type = "text",
   placeholder = "",
+  type = "text",
   required = false,
   error = "",
-  autocomplete = "off",
   disabled = false,
 } = {}) {
-  const hasError = Boolean(cleanText(error, ""));
+  const id = `incidencias-create-${name}`;
 
   return `
-    <label class="inc-create-field" data-create-field="${attr(name)}">
+    <label class="inc-create-field ${error ? "is-error" : ""}" data-create-field="${attr(name)}">
       <span class="inc-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
-
       <input
-        class="${joinClasses("inc-create-input", hasError ? "is-error" : "")}"
+        id="${attr(id)}"
+        class="inc-create-input"
         data-field="${attr(name)}"
         name="${attr(name)}"
         type="${attr(type)}"
         value="${attr(value)}"
         placeholder="${attr(placeholder)}"
-        autocomplete="${attr(autocomplete)}"
-        spellcheck="${type === "text" ? "true" : "false"}"
+        autocomplete="off"
         ${required ? "required" : ""}
         ${disabledAttrs(disabled, disabled)}
       >
-
       ${renderFieldError(error)}
     </label>
   `;
@@ -795,29 +663,24 @@ function renderTextarea({
   rows = 5,
   disabled = false,
 } = {}) {
-  const hasError = Boolean(cleanText(error, ""));
+  const id = `incidencias-create-${name}`;
 
   return `
-    <label class="inc-create-field" data-create-field="${attr(name)}">
+    <label class="inc-create-field ${error ? "is-error" : ""}" data-create-field="${attr(name)}">
       <span class="inc-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
-
       <textarea
-        class="${joinClasses("inc-create-textarea", hasError ? "is-error" : "")}"
+        id="${attr(id)}"
+        class="inc-create-textarea"
         data-field="${attr(name)}"
         name="${attr(name)}"
-        rows="${number(rows, 5)}"
+        rows="${attr(String(rows))}"
         placeholder="${attr(placeholder)}"
         ${required ? "required" : ""}
         ${disabledAttrs(disabled, disabled)}
       >${escapeHtml(value)}</textarea>
-
       ${renderFieldError(error)}
     </label>
   `;
-}
-
-function optionSelected(value = "", current = "") {
-  return String(value) === String(current) ? "selected" : "";
 }
 
 function renderSelect({
@@ -829,15 +692,16 @@ function renderSelect({
   error = "",
   disabled = false,
 } = {}) {
-  const hasError = Boolean(cleanText(error, ""));
+  const id = `incidencias-create-${name}`;
+  const current = normalizeKey(value);
 
   return `
-    <label class="inc-create-field" data-create-field="${attr(name)}">
+    <label class="inc-create-field ${error ? "is-error" : ""}" data-create-field="${attr(name)}">
       <span class="inc-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
-
       <span class="inc-create-select-wrap">
         <select
-          class="${joinClasses("inc-create-select", hasError ? "is-error" : "")}"
+          id="${attr(id)}"
+          class="inc-create-select"
           data-field="${attr(name)}"
           name="${attr(name)}"
           ${required ? "required" : ""}
@@ -845,104 +709,69 @@ function renderSelect({
         >
           ${safeArray(options).map((option) => {
             const optionValue = cleanText(option.value, "");
-            const optionLabel = cleanText(option.label, optionValue);
-
             return `
-              <option value="${attr(optionValue)}" ${optionSelected(optionValue, value)}>
-                ${escapeHtml(optionLabel)}
+              <option value="${attr(optionValue)}" ${normalizeKey(optionValue) === current ? "selected" : ""}>
+                ${escapeHtml(option.label || optionValue)}
               </option>
             `;
           }).join("")}
         </select>
-
         <span class="inc-create-select-chevron" aria-hidden="true">⌄</span>
       </span>
-
       ${renderFieldError(error)}
     </label>
   `;
 }
 
-/* =========================================================
-   ADMIN USER SEARCH
-========================================================= */
+function renderUserAvatar(user = {}, className = "inc-create-user-avatar") {
+  const safeUser = normalizeUserResult(user);
+  const avatar = safeImageSrc(safeUser.avatarUrl || safeUser.avatar);
 
-function renderUserAvatar(user = {}, extraClass = "") {
-  const item = normalizeUserResult(user);
-  const image = safeImageSrc(item.avatarUrl);
-  const initials = item.initials || initialsFrom(item.displayName);
+  if (avatar) {
+    return `
+      <span class="${attr(className)} has-image" data-user-tone="${attr(String(safeUser.tone))}">
+        <img src="${attr(avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer">
+      </span>
+    `;
+  }
 
   return `
-    <span
-      class="${joinClasses(
-        "inc-create-user-avatar",
-        "inc-create-search-avatar",
-        extraClass,
-        image ? "has-image" : "is-fallback"
-      )}"
-      data-avatar-tone="${attr(String(item.tone))}"
-      data-has-avatar="${image ? "true" : "false"}"
-      data-fallback="${image ? "false" : "true"}"
-      aria-hidden="true"
-    >
-      ${
-        image
-          ? `
-            <img
-              src="${attr(image)}"
-              alt=""
-              width="44"
-              height="44"
-              loading="lazy"
-              decoding="async"
-              referrerpolicy="no-referrer"
-              draggable="false"
-            >
-          `
-          : ""
-      }
-      <span class="inc-create-search-avatar-fallback">${escapeHtml(initials)}</span>
+    <span class="${attr(className)}" data-user-tone="${attr(String(safeUser.tone))}">
+      ${escapeHtml(safeUser.initials || initialsFrom(safeUser.displayName || safeUser.name))}
     </span>
   `;
 }
 
 function renderSelectedUser(vm = {}) {
-  const selected = vm.userSearch.selectedUser;
+  const selected = vm.selectedUser;
   const form = vm.form;
 
   if (!selected?.id && !form.targetUserId) return "";
 
-  const user = selected?.id
-    ? selected
-    : normalizeUserResult({
-        userId: form.targetUserId,
-        targetClienteId: form.targetClienteId,
-        clienteId: form.targetClienteId,
-        displayName: form.targetUserName,
-        email: form.targetUserEmail,
-        avatarUrl: form.targetUserAvatar,
-      });
+  const user = normalizeUserResult({
+    ...selected,
+    userId: form.targetUserId || selected?.userId || selected?.id,
+    targetClienteId: form.targetClienteId || selected?.targetClienteId || selected?.clienteId,
+    displayName: form.targetUserName || selected?.displayName || selected?.name,
+    email: form.targetUserEmail || selected?.email,
+    avatarUrl: form.targetUserAvatar || selected?.avatarUrl || selected?.avatar,
+  });
 
-  const subtitle = [
-    user.email,
-    user.username || user.userId || user.id,
-  ].filter(Boolean).join(" · ");
+  const subtitle = [user.email, user.username, user.clienteId].filter(Boolean).join(" · ");
 
   return `
     <section
-      class="inc-create-selected-user inc-create-target-user-card"
+      class="inc-create-selected-user inc-create-target-user"
       data-create-selected-user="true"
       data-user-id="${attr(user.userId || user.id)}"
-      data-user-cliente-id="${attr(user.targetClienteId || user.clienteId || "")}"
-      data-cliente-id="${attr(user.targetClienteId || user.clienteId || "")}"
-      data-user-email="${attr(user.email)}"
+      data-user-cliente-id="${attr(user.targetClienteId || user.clienteId || "") }"
+      data-cliente-id="${attr(user.targetClienteId || user.clienteId || "") }"
     >
       <div class="inc-create-selected-user-main" data-create-selected-user-main="true">
         ${renderUserAvatar(user, "inc-create-target-user-avatar")}
-
         <span class="inc-create-selected-user-copy inc-create-target-user-copy">
           <strong>${escapeHtml(user.displayName || "Usuario seleccionado")}</strong>
-          <span>${escapeHtml(subtitle || "Usuario seleccionado")}</span>
+          <span>${escapeHtml(subtitle || user.userId || "Usuario seleccionado")}</span>
         </span>
       </div>
 
@@ -963,11 +792,7 @@ function renderUserSearchResults(vm = {}) {
 
   if (search.loading) {
     return `
-      <div
-        class="inc-create-user-search-state inc-create-search-state"
-        data-user-search-state="loading"
-        aria-live="polite"
-      >
+      <div class="inc-create-user-search-state inc-create-search-state" data-user-search-state="loading" aria-live="polite">
         <span class="inc-create-spinner" aria-hidden="true"></span>
         <span>Buscando usuarios...</span>
       </div>
@@ -976,11 +801,7 @@ function renderUserSearchResults(vm = {}) {
 
   if (search.error) {
     return `
-      <div
-        class="inc-create-user-search-state inc-create-search-state is-error"
-        data-user-search-state="error"
-        role="alert"
-      >
+      <div class="inc-create-user-search-state inc-create-search-state is-error" data-user-search-state="error" role="alert">
         ${escapeHtml(search.error)}
       </div>
     `;
@@ -988,34 +809,19 @@ function renderUserSearchResults(vm = {}) {
 
   if (search.empty) {
     return `
-      <div
-        class="inc-create-user-search-state inc-create-search-state"
-        data-user-search-state="empty"
-        aria-live="polite"
-      >
+      <div class="inc-create-user-search-state inc-create-search-state" data-user-search-state="empty" aria-live="polite">
         No hay usuarios para esta búsqueda.
       </div>
     `;
   }
 
-  if (!search.results.length) {
-    return "";
-  }
+  if (!search.results.length) return "";
 
   return `
-    <div
-      class="inc-create-user-results inc-create-search-results"
-      role="listbox"
-      data-create-user-results="true"
-      aria-label="Resultados de búsqueda de usuarios"
-    >
+    <div class="inc-create-user-results inc-create-search-results" role="listbox" data-create-user-results="true" aria-label="Resultados de búsqueda de usuarios">
       ${search.results.map((user) => {
         const item = normalizeUserResult(user);
-        const subtitle = [
-          item.email,
-          item.username,
-          item.role,
-        ].filter(Boolean).join(" · ");
+        const subtitle = [item.email, item.username, item.role, item.clienteId].filter(Boolean).join(" · ");
 
         return `
           <button
@@ -1024,8 +830,8 @@ function renderUserSearchResults(vm = {}) {
             role="option"
             data-create-action="${CREATE_ACTIONS.USER_SELECT}"
             data-user-id="${attr(item.userId || item.id)}"
-            data-user-cliente-id="${attr(item.targetClienteId || item.clienteId || "")}"
-            data-cliente-id="${attr(item.targetClienteId || item.clienteId || "")}"
+            data-user-cliente-id="${attr(item.targetClienteId || item.clienteId || "") }"
+            data-cliente-id="${attr(item.targetClienteId || item.clienteId || "") }"
             data-user-name="${attr(item.displayName)}"
             data-user-email="${attr(item.email)}"
             data-email="${attr(item.email)}"
@@ -1033,7 +839,6 @@ function renderUserSearchResults(vm = {}) {
             ${disabledAttrs(vm.submitting, vm.submitting)}
           >
             ${renderUserAvatar(item)}
-
             <span class="inc-create-user-result-copy inc-create-search-item-copy">
               <strong>${escapeHtml(item.displayName)}</strong>
               <span>${escapeHtml(subtitle || item.userId || item.id)}</span>
@@ -1058,7 +863,7 @@ function renderAdminUserSearch(vm = {}) {
       <div class="inc-create-block-head">
         <div>
           <strong>Usuario afectado</strong>
-          <span>Busca el usuario para crear la incidencia en su nombre.</span>
+          <span>Busca el usuario para crear la incidencia 1:1 contra su documento de Cosmos.</span>
         </div>
       </div>
 
@@ -1068,12 +873,8 @@ function renderAdminUserSearch(vm = {}) {
 
       <label class="inc-create-field" data-create-field="targetUserSearch">
         <span class="inc-create-label">Buscar usuario</span>
-
         <span class="inc-create-search-control inc-create-search-input-wrap">
-          <span class="inc-create-search-icon inc-create-search-input-icon" aria-hidden="true">
-            ${icon("search")}
-          </span>
-
+          <span class="inc-create-search-icon inc-create-search-input-icon" aria-hidden="true">${icon("search")}</span>
           <input
             class="inc-create-input inc-create-input--with-icon inc-create-user-search-input"
             data-field="targetUserSearch"
@@ -1108,10 +909,6 @@ function renderAdminUserSearch(vm = {}) {
   `;
 }
 
-/* =========================================================
-   ATTACHMENTS
-========================================================= */
-
 function fileName(file = {}, index = 0) {
   return cleanText(file.name || file.filename || file.fileName, `Adjunto ${index + 1}`);
 }
@@ -1138,18 +935,11 @@ function renderFilesSummary(files = [], vm = {}) {
         const meta = [type, formatBytes(size)].filter(Boolean).join(" · ");
 
         return `
-          <div
-            class="inc-create-file-row"
-            data-create-file-row="true"
-            data-file-index="${attr(String(index))}"
-          >
+          <div class="inc-create-file-row" data-create-file-row="true" data-file-index="${attr(String(index))}">
             <div class="inc-create-file-meta">
               <strong class="inc-create-file-name">${escapeHtml(name)}</strong>
-              <span class="inc-create-file-size">
-                ${escapeHtml(meta || "Archivo preparado")}
-              </span>
+              <span class="inc-create-file-size">${escapeHtml(meta || "Archivo preparado")}</span>
             </div>
-
             <button
               type="button"
               data-create-action="${CREATE_ACTIONS.ATTACHMENT_REMOVE}"
@@ -1178,11 +968,7 @@ function renderFileInput(vm = {}) {
       : `${files.length} archivos`;
 
   return `
-    <section
-      class="inc-create-files-card"
-      data-create-files-card="true"
-      data-files-count="${attr(String(files.length))}"
-    >
+    <section class="inc-create-files-card" data-create-files-card="true" data-files-count="${attr(String(files.length))}">
       <div class="inc-create-files-head">
         <strong>${icon("paperclip")} Adjuntos</strong>
         <span>${escapeHtml(countText)}</span>
@@ -1190,11 +976,7 @@ function renderFileInput(vm = {}) {
 
       <label
         data-dropzone="attachments"
-        class="${joinClasses(
-          "inc-create-dropzone",
-          vm.dragActive ? "is-active" : "",
-          error ? "is-error" : ""
-        )}"
+        class="${joinClasses("inc-create-dropzone", vm.dragActive ? "is-active" : "", error ? "is-error" : "") }"
       >
         <input
           id="incidencias-create-attachments-input"
@@ -1202,14 +984,14 @@ function renderFileInput(vm = {}) {
           name="attachments"
           type="file"
           multiple
-          accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.csv,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+          accept="${attr(ACCEPT_EXTENSIONS.join(","))}"
           class="inc-create-hidden-input"
           ${disabledAttrs(vm.submitting, vm.submitting)}
         >
 
         <div class="inc-create-dropzone-copy">
           <strong>Arrastra archivos o pulsa para seleccionar</strong>
-          <span>Máximo ${MAX_FILES} archivos · ${formatBytes(MAX_FILE_SIZE)} por archivo.</span>
+          <span>Máximo ${MAX_FILES} archivos · ${formatBytes(MAX_FILE_SIZE)} por archivo. Se subirán al container tickets.</span>
         </div>
       </label>
 
@@ -1219,10 +1001,6 @@ function renderFileInput(vm = {}) {
   `;
 }
 
-/* =========================================================
-   ALERTS / STATES
-========================================================= */
-
 function renderAlert(type = "info", title = "", body = "") {
   const safeTitle = cleanText(title, "");
   const safeBody = cleanText(body, "");
@@ -1231,10 +1009,7 @@ function renderAlert(type = "info", title = "", body = "") {
 
   return `
     <div class="inc-create-alert is-${attr(type)}" role="${type === "error" ? "alert" : "status"}">
-      <span class="inc-create-alert-icon">
-        ${type === "success" ? icon("check") : type === "error" ? icon("alert") : icon("ticket")}
-      </span>
-
+      <span class="inc-create-alert-icon">${type === "success" ? icon("check") : type === "error" ? icon("alert") : icon("ticket")}</span>
       <span class="inc-create-alert-copy">
         ${safeTitle ? `<strong>${escapeHtml(safeTitle)}</strong>` : ""}
         ${safeBody ? `<span>${escapeHtml(safeBody)}</span>` : ""}
@@ -1266,70 +1041,55 @@ export function renderIncidenciasCreateModal(input = {}) {
   return `
     <section
       id="${MODAL_ID}"
-      class="inc-create-modal-root"
       data-incidencias-create-root="true"
-      data-template-version="${attr(INCIDENCIAS_CREATE_TEMPLATE_VERSION)}"
+      data-incidencias-modal="create"
       data-open="true"
-      data-submitting="${vm.submitting ? "true" : "false"}"
-      data-admin="${vm.admin ? "true" : "false"}"
+      class="inc-create-root"
+      role="presentation"
     >
-      <div
-        data-incidencias-create-modal-overlay="true"
-        class="inc-create-overlay"
-      >
+      <div class="inc-create-overlay" data-incidencias-create-modal-overlay="true">
         <div
           id="${PANEL_ID}"
           data-incidencias-create-modal-panel="true"
+          class="inc-create-panel"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="incidencias-create-modal-title"
+          aria-labelledby="incidencias-create-title"
           tabindex="-1"
-          class="${joinClasses("inc-create-panel", vm.submitting ? "is-submitting" : "")}"
         >
-          ${vm.submitting ? renderLoadingOverlay("Creando incidencia...") : ""}
-
-          <div class="inc-create-header">
-            <div class="inc-create-header-copy">
-              <h2 id="incidencias-create-modal-title">Crear incidencia</h2>
-              <p>
-                Define el asunto, clasifica el caso y adjunta documentos si hace falta.
-              </p>
+          <header class="inc-create-header">
+            <div class="inc-create-title-wrap">
+              <span class="inc-create-title-icon">${icon("ticket")}</span>
+              <div>
+                <h2 id="incidencias-create-title">Crear incidencia</h2>
+                <p>Contrato 1:1 con Cosmos · adjuntos por Blob en tickets.</p>
+              </div>
             </div>
-
             <button
               type="button"
-              data-create-action="${CREATE_ACTIONS.CLOSE}"
-              aria-label="Cerrar modal"
-              ${disabledAttrs(vm.submitting, vm.submitting)}
               class="inc-create-close"
+              data-create-action="${CREATE_ACTIONS.CLOSE}"
+              aria-label="Cerrar"
+              ${disabledAttrs(vm.submitting, vm.submitting)}
             >
               ${icon("close")}
             </button>
-          </div>
+          </header>
 
           <div class="inc-create-body">
-            ${
-              vm.successMessage
-                ? renderAlert(
-                    "success",
-                    "Incidencia creada.",
-                    vm.createdTicketId ? `Referencia: ${vm.createdTicketId}` : vm.successMessage
-                  )
-                : ""
-            }
-
-            ${
-              vm.serverError
-                ? renderAlert("error", "No se pudo crear la incidencia.", vm.serverError)
-                : ""
-            }
+            ${vm.successMessage ? renderAlert("success", "Incidencia creada.", vm.successMessage) : ""}
+            ${vm.serverError ? renderAlert("error", "No se pudo crear la incidencia.", vm.serverError) : ""}
 
             <form
               id="${FORM_ID}"
               data-incidencias-create-form="true"
               novalidate
               class="inc-create-form"
+              enctype="multipart/form-data"
             >
+              <input type="hidden" data-field="source" name="source" value="${attr(vm.form.source || "panel_admin")}">
+              <input type="hidden" data-field="status" name="status" value="${attr(vm.form.status || "open")}">
+
               ${renderAdminUserSearch(vm)}
 
               ${renderInput({
@@ -1386,16 +1146,14 @@ export function renderIncidenciasCreateModal(input = {}) {
                   class="inc-create-submit"
                 >
                   <span class="inc-create-submit-inner">
-                    ${
-                      vm.submitting
-                        ? `<span class="inc-create-spinner" aria-hidden="true"></span>Creando...`
-                        : "Crear incidencia"
-                    }
+                    ${vm.submitting ? `<span class="inc-create-spinner" aria-hidden="true"></span>Creando...` : "Crear incidencia"}
                   </span>
                 </button>
               </div>
             </form>
           </div>
+
+          ${vm.submitting ? renderLoadingOverlay("Creando incidencia y subiendo adjuntos...") : ""}
         </div>
       </div>
     </section>
@@ -1449,8 +1207,17 @@ export function validateCreateForm(form = {}) {
   }
 
   for (const file of current.attachments) {
-    if (number(file?.size, 0) > MAX_FILE_SIZE) {
-      errors.attachments = `El archivo ${cleanText(file?.name, "archivo")} supera el máximo de ${formatBytes(MAX_FILE_SIZE)}.`;
+    if (!isFileLike(file)) continue;
+
+    const extension = fileExtension(file.name);
+
+    if (extension && !ACCEPT_EXTENSIONS.includes(extension)) {
+      errors.attachments = `El archivo ${cleanText(file.name, "archivo")} tiene una extensión no permitida.`;
+      break;
+    }
+
+    if (number(file.size, 0) > MAX_FILE_SIZE) {
+      errors.attachments = `El archivo ${cleanText(file.name, "archivo")} supera el máximo de ${formatBytes(MAX_FILE_SIZE)}.`;
       break;
     }
   }
@@ -1463,7 +1230,7 @@ export function validateCreateForm(form = {}) {
       category,
       priority,
       status: current.status || "open",
-      source: current.source || "panel",
+      source: current.source || "panel_admin",
     },
   };
 }
@@ -1471,9 +1238,7 @@ export function validateCreateForm(form = {}) {
 export function getCreateTemplateSnapshot() {
   return {
     version: INCIDENCIAS_CREATE_TEMPLATE_VERSION,
-
     actions: CREATE_ACTIONS,
-
     fields: [
       "targetUserSearch",
       "targetUserId",
@@ -1485,9 +1250,10 @@ export function getCreateTemplateSnapshot() {
       "category",
       "priority",
       "description",
+      "source",
+      "status",
       "attachments",
     ],
-
     admin: {
       userSearch: true,
       userSearchMinLength: USER_SEARCH_MIN_LENGTH,
@@ -1496,44 +1262,25 @@ export function getCreateTemplateSnapshot() {
       actionClear: CREATE_ACTIONS.USER_CLEAR,
       preservesTargetClienteId: true,
     },
-
     limits: {
       maxFiles: MAX_FILES,
       maxFileSize: MAX_FILE_SIZE,
+      accept: ACCEPT_EXTENSIONS,
     },
-
     policy: {
       templateOnly: true,
-
       modalIslandReady: true,
       stableSlots: true,
-      noFalseEmptyDuringDebounce: true,
-      noGenericActionDuplication: true,
-
       targetClienteIdCompatible: true,
       doesNotInventClienteId: true,
-      preservesBackendClienteId: true,
-
       createPayloadCompatible: true,
       hiddenTargetFields: true,
       adminUserSearchOnly: true,
-
-      noAuth: true,
-      noRouter: true,
-      noHttp: true,
-      noStore: true,
-      noStateExternal: true,
-      noListeners: true,
-      noDomApi: true,
-      noToast: true,
-      noCreationLogic: true,
+      blobFieldName: "attachments",
+      formEncoding: "multipart/form-data",
     },
   };
 }
-
-/* =========================================================
-   EXPORTS
-========================================================= */
 
 export const renderCreateIncidenciaModal = renderIncidenciasCreateModal;
 export const renderCreateModal = renderIncidenciasCreateModal;

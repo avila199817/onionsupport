@@ -2,48 +2,53 @@
    Onion Support - Incidencias API
    Archivo: /src/views/incidencias/incidencias.api.js
 
-   Responsabilidad:
-   - Centralizar llamadas HTTP de Incidencias.
-   - Adaptar backend /api/tickets al frontend.
-   - Buscar usuarios para modal create vía /api/users.
-   - Normalizar DTOs ligeros para la vista.
-   - Cachear listado en memoria con TTL.
-   - Dedupe de peticiones concurrentes de listado.
-   - Crear incidencias con/sin adjuntos.
-   - Cargar detalle, comentar, reabrir y subir adjuntos.
-   - Abrir/descargar adjuntos mediante endpoint backend.
-   - Mantener cache coherente tras mutaciones.
-   - No inventar clienteId desde targetUserId.
-   - Sin DOM.
-   - Sin Router.
-   - Sin Auth directo.
-   - Sin Store.
-   - Sin State externo.
-   - Sin Model externo.
-   - Sin fetch propio.
+   Contrato productivo:
+   - Centraliza HTTP de incidencias.
+   - Crea incidencias con multipart real cuando hay adjuntos.
+   - Campo de fichero canónico: attachments.
+   - Mantiene aliases para backend: subject/asunto/title,
+     description/descripcion/message/body, category/categoria/tipo/type.
+   - Admin: targetUserId real + targetClienteId sólo si existe.
+   - No inventa clienteId desde targetUserId.
+   - Normaliza respuesta a ticket/item/detail/incidencia/data.
+   - Compatible con Blob container tickets y paths devueltos por backend.
 ========================================================= */
 
 import Http from "../../core/http.js";
 
-export const INCIDENCIAS_API_VERSION = "incidencias.api.cached.v7.users-search-fixed";
+export const INCIDENCIAS_API_VERSION = "incidencias.api.aligned.blob.v10";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
-
 export const USERS_SEARCH_ENDPOINT = "/api/users";
+
 export const USERS_SEARCH_LIMIT = 8;
 export const USERS_SEARCH_MIN_LENGTH = 2;
 
 export const INCIDENCIAS_TIMEOUT = 15000;
 export const INCIDENCIAS_DETAIL_TIMEOUT = 25000;
-export const INCIDENCIAS_UPLOAD_TIMEOUT = 90000;
+export const INCIDENCIAS_UPLOAD_TIMEOUT = 180000;
 
 export const INCIDENCIAS_LIST_LIMIT = 48;
 export const INCIDENCIAS_CACHE_TTL_MS = 60000;
+
+const FIXED_TECHNICIAN = Object.freeze({
+  id: "ON-20260218164977",
+  userId: "ON-20260218164977",
+  name: "Cristian Ávila Luque",
+  nombre: "Cristian Ávila Luque",
+  displayName: "Cristian Ávila Luque",
+  email: "cristian@onionsupport.com",
+  emailLower: "cristian@onionsupport.com",
+  avatar: "https://onionassets.blob.core.windows.net/avatars/ON-20260218164977/avatar.png",
+  avatarUrl: "https://onionassets.blob.core.windows.net/avatars/ON-20260218164977/avatar.png",
+  hasAvatar: true,
+  role: "admin",
+  display: "Cristian Ávila Luque <cristian@onionsupport.com>",
+});
 
 let loading = false;
 let lastLoadedAt = null;
 let lastError = null;
 let lastCacheKey = "";
-
 let inFlightListPromise = null;
 let inFlightListKey = "";
 
@@ -68,8 +73,38 @@ function isFile(value) {
   return typeof File !== "undefined" && value instanceof File;
 }
 
+function isFileLike(value = null) {
+  if (!value || typeof value !== "object") return false;
+  if (isFile(value) || isBlob(value)) return true;
+
+  return Boolean(
+    typeof value.name === "string" &&
+      typeof value.size === "number" &&
+      (
+        typeof value.arrayBuffer === "function" ||
+        typeof value.stream === "function" ||
+        typeof value.slice === "function"
+      )
+  );
+}
+
 function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  if (Array.isArray(value)) return value;
+
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof value.length === "number" &&
+    typeof value !== "string"
+  ) {
+    try {
+      return Array.from(value);
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 }
 
 function safeObject(value, fallback = {}) {
@@ -100,10 +135,7 @@ function first(...values) {
 
 function number(value = 0, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
-
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : fallback;
-  }
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
 
   if (typeof value === "string") {
     let clean = value
@@ -120,11 +152,9 @@ function number(value = 0, fallback = 0) {
     if (hasComma && hasDot) {
       const lastComma = clean.lastIndexOf(",");
       const lastDot = clean.lastIndexOf(".");
-
-      clean =
-        lastComma > lastDot
-          ? clean.replace(/\./g, "").replace(/,/g, ".")
-          : clean.replace(/,/g, "");
+      clean = lastComma > lastDot
+        ? clean.replace(/\./g, "").replace(/,/g, ".")
+        : clean.replace(/,/g, "");
     } else if (hasComma) {
       clean = clean.replace(/,/g, ".");
     }
@@ -153,6 +183,27 @@ function normalizeKey(value = "") {
     .replace(/[\s-]+/g, "_")
     .replace(/[^\w:.]/g, "")
     .replace(/^_+|_+$/g, "");
+}
+
+function normalizeEmail(value = "") {
+  const email = cleanText(value, "").toLowerCase();
+
+  if (!email) return "";
+
+  if (["null", "undefined", "none", "sin email", "no email", "no_email", "__no_email__"].includes(email)) {
+    return "";
+  }
+
+  return email.includes("@") ? email : "";
+}
+
+function firstEmail(...values) {
+  for (const value of values.flat(Infinity)) {
+    const email = normalizeEmail(value);
+    if (email) return email;
+  }
+
+  return "";
 }
 
 function redact(value = "") {
@@ -184,12 +235,8 @@ function safeUrl(value = "") {
   if (raw.startsWith("//")) return "";
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
-  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(raw)) {
-    return "";
-  }
-
+  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(raw)) return "";
   if (/^blob:/i.test(raw)) return raw;
-
   if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
 
   if (/^https:\/\//i.test(raw)) {
@@ -250,50 +297,14 @@ function firstUrl(...values) {
   return "";
 }
 
-function normalizeEmail(value = "") {
-  const email = cleanText(value, "").toLowerCase();
-
-  if (!email) return "";
-
-  if (
-    [
-      "null",
-      "undefined",
-      "none",
-      "sin email",
-      "no email",
-      "no_email",
-      "__no_email__",
-    ].includes(email)
-  ) {
-    return "";
-  }
-
-  return email.includes("@") ? email : "";
-}
-
-function firstEmail(...values) {
-  for (const value of values.flat(Infinity)) {
-    const email = normalizeEmail(value);
-    if (email) return email;
-  }
-
-  return "";
-}
-
 function countFrom(...values) {
-  return Math.max(
-    0,
-    ...values.map((value) => number(value, 0))
-  );
+  return Math.max(0, ...values.map((value) => number(value, 0)));
 }
 
 function encodeSegment(value = "") {
   const clean = cleanText(value, "");
 
-  if (!clean) {
-    throw new Error("INCIDENCIA_ID_REQUIRED");
-  }
+  if (!clean) throw new Error("INCIDENCIA_ID_REQUIRED");
 
   return encodeURIComponent(clean);
 }
@@ -302,14 +313,41 @@ function stableSerialize(value = null) {
   if (value === null || value === undefined) return "";
   if (typeof value !== "object") return String(value);
 
-  if (Array.isArray(value)) {
-    return `[${value.map(stableSerialize).join(",")}]`;
-  }
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
 
   return `{${Object.keys(value)
     .sort()
     .map((key) => `${key}:${stableSerialize(value[key])}`)
     .join(",")}}`;
+}
+
+/* =========================================================
+   ENDPOINTS
+========================================================= */
+
+function getIncidenciaEndpoint(id = "") {
+  return `${INCIDENCIAS_ENDPOINT}/${encodeSegment(id)}`;
+}
+
+function getIncidenciaCommentsEndpoint(id = "") {
+  return `${getIncidenciaEndpoint(id)}/comments`;
+}
+
+function getIncidenciaReopenEndpoint(id = "") {
+  return `${getIncidenciaEndpoint(id)}/reopen`;
+}
+
+function getIncidenciaAttachmentsEndpoint(id = "") {
+  return `${getIncidenciaEndpoint(id)}/attachments`;
+}
+
+function getIncidenciaAttachmentFileEndpoint({
+  ticketId = "",
+  attachmentId = "",
+  mode = "view",
+  kind = "attachments",
+} = {}) {
+  return `${getIncidenciaEndpoint(ticketId)}/${encodeSegment(kind)}/${encodeSegment(attachmentId)}/${encodeSegment(mode)}`;
 }
 
 /* =========================================================
@@ -320,16 +358,12 @@ function cacheAgeMs() {
   if (!lastLoadedAt) return Number.POSITIVE_INFINITY;
 
   const time = Date.parse(lastLoadedAt);
-
   if (!Number.isFinite(time)) return Number.POSITIVE_INFINITY;
 
   return Math.max(0, now() - time);
 }
 
-function buildListQuery({
-  query = {},
-  params = {},
-} = {}) {
+function buildListQuery({ query = {}, params = {} } = {}) {
   return {
     limit: INCIDENCIAS_LIST_LIMIT,
     includeTotal: true,
@@ -348,22 +382,15 @@ function isCacheFresh(options = {}) {
   if (!lastLoadedAt) return false;
 
   const key = listCacheKey(options);
-
   if (lastCacheKey && key && lastCacheKey !== key) return false;
 
   const ttl = number(options.ttlMs ?? options.cacheTtlMs, INCIDENCIAS_CACHE_TTL_MS);
-
   if (ttl <= 0) return false;
 
   return cacheAgeMs() <= ttl;
 }
 
-function cachedListResponse({
-  cached = true,
-  stale = false,
-  error = null,
-  options = {},
-} = {}) {
+function cachedListResponse({ cached = true, stale = false, error = null, options = {} } = {}) {
   const items = safeArray(lastList.items);
   const total = number(lastList.total, items.length);
 
@@ -371,15 +398,11 @@ function cachedListResponse({
     ok: !error,
     cached,
     stale,
-
     items,
     total,
     count: items.length,
-
     loadedAt: lastLoadedAt,
-
     ...(error ? { error } : {}),
-
     cache: {
       hydrated: Boolean(lastLoadedAt),
       key: lastCacheKey,
@@ -390,1590 +413,64 @@ function cachedListResponse({
   };
 }
 
-function setListCache({
-  items = [],
-  total = 0,
-  key = "",
-} = {}) {
-  const normalizedItems = normalizeList(items);
+function setListCache({ items = [], total = 0, key = "" } = {}) {
+  const normalized = normalizeList(items);
 
   lastList = {
-    items: normalizedItems,
-    total: Math.max(number(total, normalizedItems.length), normalizedItems.length),
+    items: normalized,
+    total: number(total, normalized.length),
   };
 
   lastLoadedAt = nowIso();
-  lastCacheKey = key || lastCacheKey || "";
+  lastCacheKey = cleanText(key, "");
 
   return lastList;
 }
 
-function getIncidenciaStableId(item = {}) {
-  const raw = safeObject(item);
-
-  return cleanText(
-    first(
-      raw.ticketId,
-      raw.incidenciaId,
-      raw.id,
-      raw._id,
-      raw.code,
-      raw.numero,
-      raw.ticketCode
-    ),
-    ""
-  );
-}
-
-function shouldPreserveExisting(value) {
-  if (value === undefined || value === null) return true;
-  if (typeof value === "string" && value.trim() === "") return true;
-  if (Array.isArray(value) && value.length === 0) return true;
-  if (isObject(value) && !Object.keys(value).length) return true;
-
-  return false;
-}
-
-function mergeIncidenciaData(current = {}, next = {}) {
-  const base = safeObject(current, {});
-  const incoming = safeObject(next, {});
-  const output = { ...base };
-
-  for (const [key, value] of Object.entries(incoming)) {
-    const previous = output[key];
-
-    if (isObject(previous) && isObject(value)) {
-      output[key] = mergeIncidenciaData(previous, value);
-      continue;
-    }
-
-    output[key] =
-      shouldPreserveExisting(value) && previous !== undefined && previous !== null
-        ? previous
-        : value;
-  }
-
-  return output;
-}
-
-function incidenciaSortTime(item = {}) {
-  const timestamp = Date.parse(
-    first(
-      item.lastActivityAt,
-      item.updatedAt,
-      item.modifiedAt,
-      item.closedAt,
-      item.createdAt,
-      item.lifecycle?.lastActivityAt,
-      item.lifecycle?.updatedAt,
-      item.lifecycle?.closedAt,
-      item.lifecycle?.createdAt,
-      0
-    )
-  );
-
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-function upsertCachedIncidencia(item = null) {
-  const raw = safeObject(item, null);
-
-  if (!raw) return null;
-
-  const normalized = normalizeIncidencia(raw);
-  const id = getIncidenciaStableId(normalized);
-
-  if (!id) return normalized;
-
-  const currentItems = safeArray(lastList.items);
-  const existing = currentItems.find((current) => getIncidenciaStableId(current) === id) || null;
-  const merged = existing ? mergeIncidenciaData(existing, normalized) : normalized;
-  const map = new Map();
-
-  map.set(id, merged);
-
-  for (const current of currentItems) {
-    const currentId = getIncidenciaStableId(current);
-
-    if (!currentId || map.has(currentId)) continue;
-
-    map.set(currentId, current);
-  }
-
-  const items = normalizeList([...map.values()]);
-
-  lastList = {
-    items,
-    total: Math.max(number(lastList.total, items.length), items.length),
-  };
-
-  lastLoadedAt = lastLoadedAt || nowIso();
-
-  return merged;
-}
-
-export function hasFreshIncidenciasCache(options = {}) {
-  return isCacheFresh(options);
-}
-
-export function getIncidenciasCacheState() {
+export function hydrateIncidenciasFromCache() {
   return {
-    hydrated: Boolean(lastLoadedAt),
-    fresh: isCacheFresh(),
-    key: lastCacheKey,
-    ageMs: cacheAgeMs(),
-    ttlMs: INCIDENCIAS_CACHE_TTL_MS,
-    lastLoadedAt,
+    ok: Boolean(lastLoadedAt),
+    cached: true,
+    stale: !lastLoadedAt,
+    items: safeArray(lastList.items),
+    total: number(lastList.total, safeArray(lastList.items).length),
+    count: safeArray(lastList.items).length,
+    loadedAt: lastLoadedAt,
     loading,
-    inFlight: Boolean(inFlightListPromise),
-    items: lastList.items.length,
-    total: lastList.total,
-  };
-}
-
-/* =========================================================
-   ENDPOINTS
-========================================================= */
-
-export function normalizeIncidenciaId(id = "") {
-  const value = cleanText(id, "");
-
-  if (!value) {
-    throw new Error("INCIDENCIA_ID_REQUIRED");
-  }
-
-  return value;
-}
-
-export function getIncidenciaEndpoint(id = "") {
-  return `${INCIDENCIAS_ENDPOINT}/${encodeSegment(normalizeIncidenciaId(id))}`;
-}
-
-export function getIncidenciaCommentsEndpoint(id = "") {
-  return `${getIncidenciaEndpoint(id)}/comments`;
-}
-
-export function getIncidenciaReopenEndpoint(id = "") {
-  return `${getIncidenciaEndpoint(id)}/reopen`;
-}
-
-export function getIncidenciaAttachmentsEndpoint(id = "") {
-  return `${getIncidenciaEndpoint(id)}/attachments`;
-}
-
-export function getIncidenciaAttachmentFileEndpoint({
-  ticketId = "",
-  attachmentId = "",
-  mode = "view",
-  kind = "attachments",
-} = {}) {
-  const id = normalizeIncidenciaId(ticketId);
-  const attId = cleanText(attachmentId, "");
-
-  if (!attId) {
-    throw new Error("ATTACHMENT_ID_REQUIRED");
-  }
-
-  const safeMode = mode === "download" ? "download" : "view";
-  const safeKind = ["attachments", "files", "adjuntos"].includes(kind)
-    ? kind
-    : "attachments";
-
-  return `${getIncidenciaEndpoint(id)}/${safeKind}/${encodeSegment(attId)}/${safeMode}`;
-}
-
-/* =========================================================
-   RESPONSE UNWRAP
-========================================================= */
-
-function unwrapEnvelope(payload = null, depth = 0) {
-  if (depth > 6) return payload;
-  if (payload === null || payload === undefined) return payload;
-  if (Array.isArray(payload)) return payload;
-  if (isBlob(payload)) return payload;
-
-  const object = safeObject(payload, null);
-
-  if (!object) return payload;
-
-  if (
-    Array.isArray(object.items) ||
-    Array.isArray(object.rows) ||
-    Array.isArray(object.results) ||
-    Array.isArray(object.records) ||
-    Array.isArray(object.docs) ||
-    Array.isArray(object.documents) ||
-    Array.isArray(object.value) ||
-    Array.isArray(object.list) ||
-    Array.isArray(object.tickets) ||
-    Array.isArray(object.incidencias) ||
-    Array.isArray(object.users) ||
-    Array.isArray(object.usuarios)
-  ) {
-    return object;
-  }
-
-  if (
-    object.ticket ||
-    object.incidencia ||
-    object.item ||
-    object.detail ||
-    object.file ||
-    object.attachment ||
-    object.adjunto
-  ) {
-    return object;
-  }
-
-  const nested = first(
-    object.data,
-    object.payload,
-    object.result,
-    object.response,
-    object.body
-  );
-
-  if (nested !== null && nested !== undefined && nested !== payload) {
-    return unwrapEnvelope(nested, depth + 1);
-  }
-
-  return object;
-}
-
-function listFromPayload(payload = null) {
-  if (Array.isArray(payload)) return payload;
-
-  const unwrapped = unwrapEnvelope(payload);
-
-  if (Array.isArray(unwrapped)) return unwrapped;
-
-  const object = safeObject(unwrapped, {});
-
-  for (const key of [
-    "items",
-    "rows",
-    "records",
-    "results",
-    "docs",
-    "documents",
-    "value",
-    "list",
-    "tickets",
-    "incidencias",
-  ]) {
-    if (Array.isArray(object[key])) return object[key];
-  }
-
-  return [];
-}
-
-function totalFromPayload(payload = null, fallback = 0) {
-  const object = safeObject(payload, {});
-  const envelope = safeObject(unwrapEnvelope(payload), {});
-
-  return Math.max(
-    fallback,
-    number(
-      first(
-        envelope.total,
-        envelope.count,
-        envelope.totalCount,
-        envelope.remoteCount,
-        envelope.meta?.total,
-        envelope.meta?.count,
-        envelope.meta?.totalCount,
-        envelope.pagination?.total,
-        envelope.pagination?.totalCount,
-        envelope.page?.total,
-        object.total,
-        object.count,
-        object.totalCount,
-        object.remoteCount,
-        fallback
-      ),
-      fallback
-    )
-  );
-}
-
-function looksLikeIncidencia(value = null) {
-  const item = safeObject(value, null);
-
-  if (!item) return false;
-
-  return Boolean(
-    item.ticketId ||
-      item.incidenciaId ||
-      item.id ||
-      item._id ||
-      item.code ||
-      item.numero ||
-      item.ticketCode ||
-      item.subject ||
-      item.asunto ||
-      item.title ||
-      item.message ||
-      item.description ||
-      item.descripcion
-  );
-}
-
-function detailFromPayload(payload = null) {
-  if (!payload) return null;
-  if (Array.isArray(payload)) return payload[0] || null;
-  if (looksLikeIncidencia(payload)) return payload;
-
-  const object = safeObject(unwrapEnvelope(payload), {});
-
-  return (
-    first(
-      looksLikeIncidencia(object.ticket) ? object.ticket : null,
-      looksLikeIncidencia(object.incidencia) ? object.incidencia : null,
-      looksLikeIncidencia(object.item) ? object.item : null,
-      looksLikeIncidencia(object.detail) ? object.detail : null,
-      looksLikeIncidencia(object.result) ? object.result : null,
-      looksLikeIncidencia(object.data) ? object.data : null,
-      looksLikeIncidencia(object.payload) ? object.payload : null,
-      null
-    ) || null
-  );
-}
-
-function fileFromPayload(payload = null) {
-  if (isBlob(payload)) {
-    return {
-      blob: payload,
-      size: payload.size,
-      contentType: payload.type,
-    };
-  }
-
-  const object = safeObject(unwrapEnvelope(payload), {});
-
-  return safeObject(
-    first(
-      object.file,
-      object.attachment,
-      object.adjunto,
-      object.data?.file,
-      object.data?.attachment,
-      object.data?.adjunto,
-      object.payload?.file,
-      object.payload?.attachment,
-      object.payload?.adjunto,
-      object.result?.file,
-      object.result?.attachment,
-      object.result?.adjunto,
-      object
-    ),
-    {}
-  );
-}
-
-/* =========================================================
-   DTO NORMALIZATION
-========================================================= */
-
-function normalizePerson(value = {}) {
-  const raw = safeObject(value);
-  const email = firstEmail(
-    raw.email,
-    raw.emailLower,
-    raw.userEmail,
-    raw.mail,
-    raw.profile?.email,
-    raw.auth?.email,
-    raw.lookup?.emailLower
-  );
-  const avatarUrl = firstUrl(
-    raw.avatarUrl,
-    raw.avatar,
-    raw.picture,
-    raw.photoUrl,
-    raw.photoURL,
-    raw.imageUrl,
-    raw.profile?.avatarUrl,
-    raw.profile?.avatar,
-    raw.profile?.photoUrl,
-    raw.profile?.photoURL
-  );
-  const name = cleanText(
-    first(
-      raw.displayName,
-      raw.fullName,
-      raw.name,
-      raw.nombre,
-      raw.profile?.displayName,
-      raw.profile?.name,
-      raw.username
-    ),
-    ""
-  );
-
-  return {
-    id: cleanText(first(raw.id, raw.userId, raw.uid, raw.sub, raw.username, raw.slug), ""),
-    userId: cleanText(first(raw.userId, raw.id, raw.uid, raw.sub), ""),
-    username: cleanText(first(raw.username, raw.userName, raw.slug), ""),
-    displayName: name,
-    name,
-    email: email || null,
-    emailLower: email || null,
-    role: cleanText(first(raw.role, raw.rol, Array.isArray(raw.roles) ? raw.roles[0] : ""), ""),
-    avatar: avatarUrl || null,
-    avatarUrl,
-    hasAvatar: Boolean(avatarUrl),
-  };
-}
-
-function normalizeAttachment(file = {}, index = 0) {
-  const raw = safeObject(file);
-  const rawNested = safeObject(raw.raw);
-
-  const id = cleanText(
-    first(
-      raw.id,
-      raw.fileId,
-      raw.attachmentId,
-      raw.blobName,
-      raw.storageKey,
-      raw.path,
-      raw.key,
-      rawNested.id,
-      rawNested.fileId,
-      rawNested.attachmentId,
-      rawNested.blobName,
-      rawNested.storageKey,
-      rawNested.path,
-      rawNested.key
-    ),
-    `attachment-${index + 1}`
-  );
-
-  const name = cleanText(
-    first(
-      raw.name,
-      raw.filename,
-      raw.fileName,
-      raw.title,
-      rawNested.name,
-      rawNested.filename,
-      rawNested.fileName,
-      rawNested.title
-    ),
-    `archivo_${index + 1}`
-  );
-
-  const url = firstUrl(
-    raw.viewUrl,
-    raw.openUrl,
-    raw.signedUrl,
-    raw.url,
-    raw.blobUrl,
-    raw.publicUrl,
-    raw.downloadUrl,
-    rawNested.viewUrl,
-    rawNested.openUrl,
-    rawNested.signedUrl,
-    rawNested.url,
-    rawNested.blobUrl,
-    rawNested.publicUrl,
-    rawNested.downloadUrl
-  );
-
-  return {
-    id,
-    attachmentId: cleanText(first(raw.attachmentId, rawNested.attachmentId, id), id),
-    name,
-    filename: cleanText(first(raw.filename, raw.fileName, raw.name, name), name),
-    fileName: cleanText(first(raw.fileName, raw.filename, raw.name, name), name),
-    size: number(first(raw.size, raw.sizeBytes, raw.contentLength, rawNested.size, rawNested.sizeBytes), 0),
-    type: cleanText(first(raw.type, raw.contentType, raw.mimetype, raw.mimeType, rawNested.type), ""),
-    contentType: cleanText(first(raw.contentType, raw.mimetype, raw.mimeType, raw.type, rawNested.contentType), ""),
-    uploadedAt: first(raw.uploadedAt, raw.createdAt, raw.date, rawNested.uploadedAt, rawNested.createdAt, null),
-    url,
-    viewUrl: firstUrl(raw.viewUrl, raw.openUrl, raw.signedUrl, raw.url, url),
-    openUrl: firstUrl(raw.openUrl, raw.viewUrl, raw.signedUrl, raw.url, url),
-    downloadUrl: firstUrl(raw.downloadUrl, raw.signedUrl, raw.url, url),
-  };
-}
-
-function normalizeTimelineEntry(entry = {}, index = 0) {
-  const raw = safeObject(entry);
-
-  const kind = cleanText(
-    first(raw.kind, raw.type === "comment" ? "comment" : "event"),
-    "event"
-  );
-
-  const type = cleanText(
-    first(raw.type, raw.action, kind === "comment" ? "comment" : "update"),
-    "update"
-  );
-
-  return {
-    id: cleanText(first(raw.id, raw.eventId, raw.historyId, raw.commentId), `${kind}-${index + 1}`),
-    kind,
-    type,
-    title: cleanText(
-      first(
-        raw.title,
-        kind === "comment" ? "Comentario" : type === "created" ? "Incidencia creada" : "Actualización"
-      ),
-      "Actualización"
-    ),
-    body: cleanText(
-      first(raw.body, raw.message, raw.text, raw.comment, raw.description, raw.detail),
-      kind === "comment" ? "" : "Actualización registrada."
-    ),
-    author: cleanText(
-      first(raw.author, raw.byName, raw.user, raw.name, raw.createdBy?.name, raw.createdBy?.displayName),
-      kind === "comment" ? "Usuario" : "Sistema"
-    ),
-    createdAt: first(raw.createdAt, raw.date, raw.timestamp, raw.updatedAt, null),
-  };
-}
-
-function normalizeTimeline(item = {}) {
-  const raw = safeObject(item);
-
-  const timeline = safeArray(first(raw.timeline));
-
-  if (timeline.length) {
-    return timeline.map(normalizeTimelineEntry);
-  }
-
-  const history = safeArray(first(raw.history, raw.events));
-  const comments = safeArray(first(raw.comments, raw.notes, raw.messages));
-
-  return [
-    ...history.map((entry, index) => normalizeTimelineEntry(entry, index)),
-    ...comments.map((entry, index) =>
-      normalizeTimelineEntry(
-        {
-          ...safeObject(entry),
-          kind: "comment",
-          type: "comment",
-        },
-        index
-      )
-    ),
-  ].sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
-}
-
-export function normalizeIncidencia(item = {}) {
-  const raw = safeObject(item);
-  const ticketId = cleanText(
-    first(raw.ticketId, raw.incidenciaId, raw.id, raw._id, raw.code, raw.numero, raw.ticketCode),
-    ""
-  );
-
-  const subject = safePublicText(
-    first(raw.subject, raw.asunto, raw.title, raw.titulo, raw.name),
-    "Incidencia"
-  );
-
-  const description = safePublicText(
-    first(raw.description, raw.descripcion, raw.message, raw.preview, raw.text, raw.body),
-    "Sin descripción."
-  );
-
-  const status = cleanText(first(raw.status, raw.estado, raw.state, raw.lifecycle?.status), "open");
-  const priority = cleanText(first(raw.priority, raw.prioridad, raw.severity, raw.urgency, raw.sla?.priority), "medium");
-  const category = cleanText(first(raw.category, raw.categoria, raw.type, raw.tipo, raw.subcategory), "Soporte");
-
-  const requesterName = safePublicText(
-    first(
-      raw.requesterName,
-      raw.ownerName,
-      raw.clientName,
-      raw.clienteName,
-      raw.clienteNombre,
-      raw.userName,
-      raw.usuarioName,
-      raw.name,
-      raw.requesterSnapshotName,
-      raw.requesterSnapshotNombre,
-      raw.requesterSnapshot?.displayName,
-      raw.requesterSnapshot?.name,
-      raw.requesterSnapshot?.nombre,
-      raw.cliente?.displayName,
-      raw.cliente?.name,
-      raw.cliente?.nombre,
-      raw.client?.displayName,
-      raw.client?.name,
-      raw.user?.displayName,
-      raw.user?.name
-    ),
-    "Usuario"
-  );
-
-  const requesterEmail = firstEmail(
-    raw.requesterEmail,
-    raw.requesterEmailLower,
-    raw.clientEmail,
-    raw.clientEmailLower,
-    raw.clienteEmail,
-    raw.clienteEmailLower,
-    raw.userEmail,
-    raw.userEmailLower,
-    raw.email,
-    raw.emailLower,
-    raw.emailCliente,
-    raw.rootEmail,
-    raw.rootUserEmail,
-    raw.rootClienteEmail,
-    raw.rootClienteEmailLower,
-    raw.requesterSnapshotEmail,
-    raw.requesterSnapshotEmailLower,
-    raw.clienteEmailNested,
-    raw.clienteEmailLowerNested,
-    raw.receptorEmail,
-    raw.receptorEmailLower,
-    raw.createdByEmail,
-    raw.createdByEmailLower,
-    raw.requesterSnapshot?.email,
-    raw.requesterSnapshot?.emailLower,
-    raw.cliente?.email,
-    raw.cliente?.emailLower,
-    raw.client?.email,
-    raw.client?.emailLower,
-    raw.usuario?.email,
-    raw.usuario?.emailLower,
-    raw.user?.email,
-    raw.user?.emailLower,
-    raw.receptor?.email,
-    raw.receptor?.emailLower,
-    raw.createdBy?.email,
-    raw.createdBy?.emailLower,
-    raw.meta?.requesterEmail,
-    raw.meta?.clientEmail,
-    raw.meta?.clienteEmail,
-    raw.meta?.userEmail
-  );
-
-  const requesterAvatarUrl = firstUrl(
-    raw.requesterAvatarUrl,
-    raw.requesterAvatar,
-    raw.clientAvatarUrl,
-    raw.clientAvatar,
-    raw.clienteAvatarUrl,
-    raw.clienteAvatar,
-    raw.userAvatarUrl,
-    raw.userAvatar,
-    raw.avatarUrl,
-    raw.avatar,
-    raw.photoUrl,
-    raw.photoURL,
-    raw.picture,
-    raw.requesterSnapshotAvatarUrl,
-    raw.requesterSnapshotAvatar,
-    raw.clienteAvatarUrl,
-    raw.clienteAvatar,
-    raw.receptorAvatarUrl,
-    raw.receptorAvatar,
-    raw.createdByAvatarUrl,
-    raw.createdByAvatar,
-    raw.requesterSnapshot?.avatarUrl,
-    raw.requesterSnapshot?.avatar,
-    raw.requesterSnapshot?.photoUrl,
-    raw.requesterSnapshot?.photoURL,
-    raw.cliente?.avatarUrl,
-    raw.cliente?.avatar,
-    raw.cliente?.photoUrl,
-    raw.client?.avatarUrl,
-    raw.client?.avatar,
-    raw.user?.avatarUrl,
-    raw.user?.avatar,
-    raw.receptor?.avatarUrl,
-    raw.receptor?.avatar,
-    raw.createdBy?.avatarUrl,
-    raw.createdBy?.avatar,
-    raw.meta?.requesterAvatarUrl,
-    raw.meta?.requesterAvatar,
-    raw.meta?.clientAvatarUrl,
-    raw.meta?.clientAvatar
-  );
-
-  const requesterUserId = cleanText(
-    first(
-      raw.userId,
-      raw.usuarioId,
-      raw.requesterUserId,
-      raw.ownerUserId,
-      raw.createdByUserId,
-      raw.receptorUserId,
-      raw.requesterSnapshotUserId,
-      raw.clienteUserId,
-      raw.createdByUserIdNested,
-      raw.userRef?.userId,
-      raw.requesterSnapshot?.userId,
-      raw.requesterSnapshot?.id,
-      raw.cliente?.userId,
-      raw.client?.userId,
-      raw.user?.userId,
-      raw.user?.id
-    ),
-    ""
-  );
-
-  const requesterClienteId = cleanText(
-    first(
-      raw.clienteId,
-      raw.clientId,
-      raw.customerId,
-      raw.targetClienteId,
-      raw.requesterSnapshotClienteId,
-      raw.clienteClienteId,
-      raw.receptorClienteId,
-      raw.clienteRef?.clienteId,
-      raw.requesterSnapshot?.clienteId,
-      raw.cliente?.clienteId,
-      raw.cliente?.id,
-      raw.client?.clienteId,
-      raw.client?.id
-    ),
-    ""
-  );
-
-  const requesterUsername = cleanText(
-    first(
-      raw.requesterUsername,
-      raw.username,
-      raw.userName,
-      raw.requesterSnapshotUsername,
-      raw.clienteUsername,
-      raw.receptorUsername,
-      raw.createdByUsername,
-      raw.requesterSnapshot?.username,
-      raw.cliente?.username,
-      raw.client?.username,
-      raw.user?.username
-    ),
-    ""
-  );
-
-  const assignedTo = normalizePerson(
-    first(
-      raw.assignedTo,
-      raw.tecnico,
-      raw.technician,
-      raw.agent,
-      raw.assignedTechnician,
-      raw.assignedUser,
-      raw.assignment?.technician,
-      raw.assignment?.assignedTo,
-      {}
-    )
-  );
-
-  const assignedToName = safePublicText(
-    first(
-      raw.assignedToName,
-      raw.technicianName,
-      raw.tecnicoName,
-      raw.assigneeName,
-      raw.agentName,
-      raw.assignmentAssignedToName,
-      raw.assignmentTechnicianName,
-      raw.assignmentTechnicianNombre,
-      raw.assignmentName,
-      raw.assignedToNombre,
-      raw.tecnicoNombre,
-      raw.metaTechnicianName,
-      raw.metaAssignedTechnicianName,
-      raw.metaLastTechnicianName,
-      raw.assignment?.assignedToName,
-      raw.assignment?.technicianName,
-      raw.assignment?.agentName,
-      raw.assignment?.name,
-      raw.meta?.technicianName,
-      raw.meta?.assignedTechnicianName,
-      raw.meta?.lastTechnicianName,
-      assignedTo.displayName,
-      assignedTo.name
-    ),
-    "Sin asignar"
-  );
-
-  const assignedToEmail = firstEmail(
-    raw.assignedToEmail,
-    raw.technicianEmail,
-    raw.tecnicoEmail,
-    raw.agentEmail,
-    raw.assignmentAssignedToEmail,
-    raw.assignmentTechnicianEmail,
-    raw.assignmentEmail,
-    raw.metaTechnicianEmail,
-    raw.metaAssignedTechnicianEmail,
-    raw.metaLastTechnicianEmail,
-    raw.assignment?.assignedToEmail,
-    raw.assignment?.technicianEmail,
-    raw.assignment?.agentEmail,
-    raw.assignment?.email,
-    raw.assignedTo?.email,
-    raw.technician?.email,
-    raw.tecnico?.email,
-    raw.agent?.email,
-    raw.meta?.technicianEmail,
-    raw.meta?.assignedTechnicianEmail,
-    raw.meta?.lastTechnicianEmail,
-    assignedTo.email,
-    assignedTo.emailLower
-  );
-
-  const assignedToAvatarUrl = firstUrl(
-    raw.assignedToAvatarUrl,
-    raw.assignedToAvatar,
-    raw.technicianAvatarUrl,
-    raw.technicianAvatar,
-    raw.tecnicoAvatarUrl,
-    raw.tecnicoAvatar,
-    raw.agentAvatarUrl,
-    raw.agentAvatar,
-    raw.assignmentAssignedToAvatarUrl,
-    raw.assignmentAssignedToAvatar,
-    raw.assignmentTechnicianAvatarUrl,
-    raw.assignmentTechnicianAvatar,
-    raw.assignmentAvatarUrl,
-    raw.assignmentAvatar,
-    raw.metaTechnicianAvatarUrl,
-    raw.metaTechnicianAvatar,
-    raw.metaAssignedTechnicianAvatarUrl,
-    raw.metaAssignedTechnicianAvatar,
-    raw.metaLastTechnicianAvatarUrl,
-    raw.metaLastTechnicianAvatar,
-    raw.assignment?.assignedToAvatarUrl,
-    raw.assignment?.assignedToAvatar,
-    raw.assignment?.technicianAvatarUrl,
-    raw.assignment?.technicianAvatar,
-    raw.assignment?.agentAvatarUrl,
-    raw.assignment?.agentAvatar,
-    raw.assignment?.avatarUrl,
-    raw.assignment?.avatar,
-    raw.assignedTo?.avatarUrl,
-    raw.assignedTo?.avatar,
-    raw.technician?.avatarUrl,
-    raw.technician?.avatar,
-    raw.tecnico?.avatarUrl,
-    raw.tecnico?.avatar,
-    raw.agent?.avatarUrl,
-    raw.agent?.avatar,
-    raw.meta?.technicianAvatarUrl,
-    raw.meta?.technicianAvatar,
-    raw.meta?.assignedTechnicianAvatarUrl,
-    raw.meta?.assignedTechnicianAvatar,
-    raw.meta?.lastTechnicianAvatarUrl,
-    raw.meta?.lastTechnicianAvatar,
-    assignedTo.avatarUrl,
-    assignedTo.avatar
-  );
-
-  const assignedToUserId = cleanText(
-    first(
-      raw.assignedToUserId,
-      raw.technicianUserId,
-      raw.tecnicoUserId,
-      raw.agentUserId,
-      raw.assignmentAssignedToUserId,
-      raw.assignmentTechnicianUserId,
-      raw.assignmentTechnicianId,
-      raw.assignmentUserId,
-      raw.assignedToUserIdNested,
-      raw.assignedToId,
-      raw.tecnicoId,
-      raw.metaTechnicianUserId,
-      raw.metaAssignedTechnicianUserId,
-      raw.metaLastTechnicianUserId,
-      raw.assignment?.assignedToUserId,
-      raw.assignment?.technicianUserId,
-      raw.assignment?.userId,
-      raw.assignedTo?.userId,
-      raw.assignedTo?.id,
-      raw.technician?.userId,
-      raw.technician?.id,
-      raw.tecnico?.userId,
-      raw.tecnico?.id,
-      raw.agent?.userId,
-      raw.agent?.id,
-      assignedTo.userId,
-      assignedTo.id
-    ),
-    ""
-  );
-
-  const technician = {
-    ...assignedTo,
-    id: assignedToUserId || assignedTo.id,
-    userId: assignedToUserId || assignedTo.userId,
-    name: assignedToName,
-    nombre: assignedToName,
-    displayName: assignedToName,
-    email: assignedToEmail || null,
-    emailLower: assignedToEmail || null,
-    avatar: assignedToAvatarUrl || null,
-    avatarUrl: assignedToAvatarUrl,
-    hasAvatar: Boolean(assignedToAvatarUrl),
-    assigned: Boolean(
-      assignedToUserId ||
-        assignedToEmail ||
-        assignedToAvatarUrl ||
-        (assignedToName && normalizeKey(assignedToName) !== "sin_asignar")
-    ),
-  };
-
-  const requesterSnapshot = {
-    ...safeObject(raw.requesterSnapshot),
-    userId: requesterUserId,
-    id: requesterUserId,
-    clienteId: requesterClienteId,
-    name: requesterName,
-    nombre: requesterName,
-    displayName: requesterName,
-    email: requesterEmail || null,
-    emailLower: requesterEmail || null,
-    username: requesterUsername || null,
-    usernameLower: requesterUsername ? requesterUsername.toLowerCase() : null,
-    avatar: requesterAvatarUrl || null,
-    avatarUrl: requesterAvatarUrl || null,
-    hasAvatar: Boolean(requesterAvatarUrl),
-  };
-
-  const cliente = {
-    ...safeObject(raw.cliente || raw.client),
-    id: requesterClienteId,
-    userId: requesterUserId,
-    clienteId: requesterClienteId,
-    name: requesterName,
-    nombre: requesterName,
-    displayName: requesterName,
-    email: requesterEmail || null,
-    emailLower: requesterEmail || null,
-    username: requesterUsername || null,
-    usernameLower: requesterUsername ? requesterUsername.toLowerCase() : null,
-    avatar: requesterAvatarUrl || null,
-    avatarUrl: requesterAvatarUrl || null,
-    hasAvatar: Boolean(requesterAvatarUrl),
-  };
-
-  const assignment = {
-    ...safeObject(raw.assignment),
-    assignedToUserId: technician.userId || null,
-    userId: technician.userId || null,
-    assignedToName: technician.name,
-    assignedToEmail: technician.email,
-    assignedToAvatar: technician.avatarUrl || null,
-    assignedToAvatarUrl: technician.avatarUrl || null,
-    technicianAvatar: technician.avatarUrl || null,
-    technicianAvatarUrl: technician.avatarUrl || null,
-    agentAvatar: technician.avatarUrl || null,
-    agentAvatarUrl: technician.avatarUrl || null,
-    avatar: technician.avatarUrl || null,
-    avatarUrl: technician.avatarUrl || null,
-    assignedToHasAvatar: technician.hasAvatar,
-    team: cleanText(first(raw.assignment?.team, "support"), "support"),
-    assignedTo: technician,
-    technician,
-  };
-
-  const attachments = safeArray(first(raw.attachments, raw.files, raw.adjuntos, [])).map(normalizeAttachment);
-  const attachmentsCount = countFrom(
-    attachments.length,
-    raw.attachmentsCount,
-    raw.filesCount,
-    raw.adjuntosCount,
-    raw.meta?.attachmentsCount,
-    raw.meta?.filesCount
-  );
-
-  const comments = safeArray(first(raw.comments, raw.notes, raw.messages, []));
-  const history = safeArray(first(raw.history, raw.events, []));
-  const commentsCount = countFrom(comments.length, raw.commentsCount, raw.meta?.commentsCount);
-  const historyCount = countFrom(history.length, raw.historyCount, raw.meta?.historyCount);
-
-  const invoices = safeArray(first(raw.invoices, raw.facturas, raw.linkedInvoices?.items, []));
-  const invoicesCount = countFrom(
-    raw.facturasCount,
-    raw.invoicesCount,
-    raw.linkedInvoicesCount,
-    raw.linkedInvoices?.count,
-    invoices.length
-  );
-
-  const invoiceTotal = number(
-    first(
-      raw.facturasTotal,
-      raw.invoicesTotal,
-      raw.importeFacturas,
-      raw.invoiceTotal,
-      raw.facturaTotal,
-      raw.facturaImporte,
-      raw.importeFactura,
-      raw.totalFactura,
-      raw.invoiceAmount,
-      raw.linkedInvoicesTotal,
-      raw.linkedInvoicesAmount,
-      raw.linkedInvoicesImporte,
-      raw.linkedInvoices?.total,
-      raw.linkedInvoices?.amount,
-      raw.meta?.invoicesTotal,
-      raw.meta?.invoiceTotal,
-      0
-    ),
-    0
-  );
-
-  const currency = cleanText(
-    first(
-      raw.currency,
-      raw.moneda,
-      raw.facturaCurrency,
-      raw.facturaMoneda,
-      raw.linkedInvoicesCurrency,
-      raw.linkedInvoicesMoneda,
-      raw.linkedInvoices?.currency,
-      raw.linkedInvoices?.moneda,
-      raw.meta?.invoiceCurrency,
-      "EUR"
-    ),
-    "EUR"
-  ).toUpperCase();
-
-  const createdAt = first(raw.createdAt, raw.fechaCreacion, raw.created_at, raw.lifecycle?.createdAt, null);
-  const updatedAt = first(raw.updatedAt, raw.updated_at, raw.modifiedAt, raw.lastActivityAt, raw.lifecycle?.updatedAt, null);
-  const lastActivityAt = first(raw.lastActivityAt, raw.lifecycle?.lastActivityAt, updatedAt, createdAt, null);
-  const closedAt = first(raw.closedAt, raw.lifecycle?.closedAt, null);
-
-  return {
-    id: ticketId,
-    ticketId,
-    incidenciaId: ticketId,
-    entityId: ticketId,
-
-    entityType: cleanText(first(raw.entityType, "ticket"), "ticket"),
-    tipoDocumento: cleanText(first(raw.tipoDocumento, "ticket"), "ticket"),
-
-    subject,
-    asunto: subject,
-    title: subject,
-
-    description,
-    descripcion: description,
-    message: description,
-    preview: description,
-
-    status,
-    estado: status,
-    statusKey: cleanText(first(raw.statusKey, status), status),
-    statusReason: cleanText(first(raw.statusReason, raw.motivoEstado), ""),
-
-    priority,
-    prioridad: priority,
-    priorityKey: cleanText(first(raw.priorityKey, priority), priority),
-
-    category,
-    categoria: category,
-    tipo: cleanText(first(raw.tipo, raw.type, category), category),
-    type: cleanText(first(raw.type, raw.tipo, category), category),
-
-    source: cleanText(first(raw.source, raw.origen), ""),
-    origen: cleanText(first(raw.origen, raw.source), ""),
-    channel: cleanText(raw.channel, ""),
-
-    userId: requesterUserId,
-    usuarioId: requesterUserId,
-    clienteId: requesterClienteId,
-    clientId: requesterClienteId,
-
-    requesterName,
-    requesterInitials: cleanText(raw.requesterInitials, ""),
-    requesterEmail: requesterEmail || null,
-    requesterEmailLower: requesterEmail || null,
-    requesterAvatarUrl,
-    requesterAvatar: requesterAvatarUrl || null,
-    requesterUsername: requesterUsername || null,
-
-    clientName: requesterName,
-    clienteName: requesterName,
-    clienteNombre: requesterName,
-    userName: requesterName,
-
-    clientEmail: requesterEmail || null,
-    clienteEmail: requesterEmail || null,
-    userEmail: requesterEmail || null,
-    email: requesterEmail || null,
-    emailLower: requesterEmail || null,
-
-    avatar: requesterAvatarUrl || null,
-    avatarUrl: requesterAvatarUrl,
-    clientAvatar: requesterAvatarUrl || null,
-    clientAvatarUrl: requesterAvatarUrl,
-    clienteAvatar: requesterAvatarUrl || null,
-    clienteAvatarUrl: requesterAvatarUrl,
-    userAvatar: requesterAvatarUrl || null,
-    userAvatarUrl: requesterAvatarUrl,
-    hasAvatar: Boolean(requesterAvatarUrl),
-
-    requesterSnapshot,
-    cliente,
-    client: cliente,
-
-    assignedTo: technician,
-    tecnico: technician,
-    technician,
-    assignedTechnician: technician,
-
-    assignment,
-
-    assignedToUserId: technician.userId,
-    assignedToName: technician.name,
-    assignedToEmail: technician.email,
-    assignedToAvatar: technician.avatarUrl || null,
-    assignedToAvatarUrl: technician.avatarUrl,
-
-    technicianName: technician.name,
-    technicianEmail: technician.email,
-    technicianAvatar: technician.avatarUrl || null,
-    technicianAvatarUrl: technician.avatarUrl,
-
-    tecnicoName: technician.name,
-    tecnicoEmail: technician.email,
-    tecnicoAvatar: technician.avatarUrl || null,
-    tecnicoAvatarUrl: technician.avatarUrl,
-
-    agentName: technician.name,
-    agentEmail: technician.email,
-    agentAvatar: technician.avatarUrl || null,
-    agentAvatarUrl: technician.avatarUrl,
-
-    invoiceId: cleanText(first(raw.invoiceId, raw.facturaId, raw.linkedInvoiceId, raw.linkedFacturaId), ""),
-    facturaId: cleanText(first(raw.facturaId, raw.invoiceId, raw.linkedFacturaId, raw.linkedInvoiceId), ""),
-    invoiceIds: safeArray(raw.invoiceIds),
-    facturaIds: safeArray(raw.facturaIds),
-    invoices,
-    facturas: invoices,
-    facturasCount: invoicesCount,
-    invoicesCount,
-
-    numeroFacturaLegal: cleanText(first(raw.numeroFacturaLegal, raw.numeroFactura, raw.invoiceNumber), ""),
-    numeroFactura: cleanText(first(raw.numeroFactura, raw.numeroFacturaLegal, raw.invoiceNumber), ""),
-    invoiceNumber: cleanText(first(raw.invoiceNumber, raw.numeroFacturaLegal, raw.numeroFactura), ""),
-
-    invoiceTotal,
-    invoicesTotal: invoiceTotal,
-    facturasTotal: invoiceTotal,
-    facturaTotal: invoiceTotal,
-    facturaImporte: invoiceTotal,
-    importeFactura: invoiceTotal,
-    totalFactura: invoiceTotal,
-    invoiceAmount: invoiceTotal,
-    amount: invoiceTotal,
-    total: invoiceTotal,
-    importe: invoiceTotal,
-    price: invoiceTotal,
-
-    currency,
-    moneda: currency,
-    facturaCurrency: currency,
-    facturaMoneda: currency,
-
-    paymentStatus: cleanText(first(raw.paymentStatus, raw.estadoPago, raw.linkedInvoices?.paymentStatus), ""),
-
-    attachments,
-    files: attachments,
-    adjuntos: attachments,
-    attachmentsCount,
-    filesCount: attachmentsCount,
-    adjuntosCount: attachmentsCount,
-
-    comments,
-    history,
-    timeline: normalizeTimeline(raw),
-    commentsCount,
-    historyCount,
-
-    createdAt,
-    createdAtES: raw.createdAtES || null,
-    updatedAt,
-    updatedAtES: raw.updatedAtES || null,
-    lastActivityAt,
-    lastActivityAtES: raw.lastActivityAtES || null,
-    closedAt,
-    closedAtES: raw.closedAtES || null,
-
-    lifecycle: {
-      ...safeObject(raw.lifecycle),
-      createdAt,
-      updatedAt,
-      lastActivityAt,
-      closedAt,
-    },
-
-    meta: {
-      ...safeObject(raw.meta),
-
-      requesterEmail: requesterEmail || null,
-      requesterAvatar: requesterAvatarUrl || null,
-      requesterAvatarUrl: requesterAvatarUrl || null,
-      requesterHasAvatar: Boolean(requesterAvatarUrl),
-
-      technicianUserId: technician.userId,
-      technicianName: technician.name,
-      technicianEmail: technician.email,
-      technicianAvatar: technician.avatarUrl || null,
-      technicianAvatarUrl: technician.avatarUrl || null,
-      technicianHasAvatar: technician.hasAvatar,
-
-      assignedTechnician: technician,
-      assignedTechnicianUserId: technician.userId,
-      assignedTechnicianName: technician.name,
-      assignedTechnicianEmail: technician.email,
-      assignedTechnicianAvatar: technician.avatarUrl || null,
-      assignedTechnicianAvatarUrl: technician.avatarUrl || null,
-
-      lastTechnicianUserId: technician.userId,
-      lastTechnicianName: technician.name,
-      lastTechnicianEmail: technician.email,
-      lastTechnicianAvatar: technician.avatarUrl || null,
-      lastTechnicianAvatarUrl: technician.avatarUrl || null,
-
-      isAssigned: Boolean(technician.assigned),
-
-      attachmentsCount,
-      commentsCount,
-      historyCount,
-      linkedInvoiceCount: invoicesCount,
-      invoicesTotal: invoiceTotal,
-      invoiceTotal,
-      invoiceCurrency: currency,
-
-      frontendReady: true,
+    error: lastError,
+    cache: {
+      hydrated: Boolean(lastLoadedAt),
+      key: lastCacheKey,
+      ageMs: cacheAgeMs(),
+      ttlMs: INCIDENCIAS_CACHE_TTL_MS,
+      fresh: Boolean(lastLoadedAt) && cacheAgeMs() <= INCIDENCIAS_CACHE_TTL_MS,
     },
   };
 }
 
-function normalizeList(items = []) {
-  const map = new Map();
-
-  for (const item of safeArray(items)) {
-    const normalized = normalizeIncidencia(item);
-    const id = cleanText(first(normalized.ticketId, normalized.id), "");
-
-    if (!id) continue;
-
-    map.set(
-      id,
-      map.has(id)
-        ? mergeIncidenciaData(map.get(id), normalized)
-        : normalized
-    );
-  }
-
-  return [...map.values()].sort((a, b) => {
-    const diff = incidenciaSortTime(b) - incidenciaSortTime(a);
-
-    if (diff !== 0) return diff;
-
-    return getIncidenciaStableId(b).localeCompare(getIncidenciaStableId(a), "es", {
-      numeric: true,
-      sensitivity: "base",
-    });
-  });
-}
-
-function normalizeFileResponse(response = null, fallback = {}) {
-  const file = fileFromPayload(response);
-  const source = {
-    ...safeObject(fallback),
-    ...file,
-  };
-
-  const url = firstUrl(
-    source.url,
-    source.viewUrl,
-    source.openUrl,
-    source.downloadUrl,
-    source.signedUrl,
-    source.blobUrl,
-    source.publicUrl,
-    source.href
-  );
-
-  return {
-    ...source,
-    url,
-    viewUrl: firstUrl(source.viewUrl, source.openUrl, url),
-    openUrl: firstUrl(source.openUrl, source.viewUrl, url),
-    downloadUrl: firstUrl(source.downloadUrl, url),
-    signedUrl: firstUrl(source.signedUrl, url),
-    filename: cleanText(first(source.filename, source.fileName, source.name), "archivo"),
-    fileName: cleanText(first(source.fileName, source.filename, source.name), "archivo"),
-    name: cleanText(first(source.name, source.filename, source.fileName), "archivo"),
-    contentType: cleanText(first(source.contentType, source.mimetype, source.mimeType, source.mime), ""),
-  };
-}
-
-/* =========================================================
-   USERS SEARCH FOR CREATE MODAL
-========================================================= */
-
-function usersListFromPayload(payload = null) {
-  if (Array.isArray(payload)) return payload;
-
-  const unwrapped = unwrapEnvelope(payload);
-
-  if (Array.isArray(unwrapped)) return unwrapped;
-
-  const object = safeObject(unwrapped, {});
-
-  const direct = first(
-    object.items,
-    object.rows,
-    object.results,
-    object.records,
-    object.users,
-    object.usuarios,
-    object.data,
-    object.payload,
-    object.result,
-    object.response,
-    object.body
-  );
-
-  if (Array.isArray(direct)) return direct;
-
-  const data = safeObject(object.data);
-  const payloadObject = safeObject(object.payload);
-  const result = safeObject(object.result);
-  const response = safeObject(object.response);
-  const body = safeObject(object.body);
-
-  return safeArray(
-    first(
-      data.items,
-      data.rows,
-      data.results,
-      data.records,
-      data.users,
-      data.usuarios,
-
-      payloadObject.items,
-      payloadObject.rows,
-      payloadObject.results,
-      payloadObject.records,
-      payloadObject.users,
-      payloadObject.usuarios,
-
-      result.items,
-      result.rows,
-      result.results,
-      result.records,
-      result.users,
-      result.usuarios,
-
-      response.items,
-      response.rows,
-      response.results,
-      response.records,
-      response.users,
-      response.usuarios,
-
-      body.items,
-      body.rows,
-      body.results,
-      body.records,
-      body.users,
-      body.usuarios,
-
-      []
-    )
-  );
-}
-
-export function normalizeCreateSearchUser(user = {}) {
-  const raw = safeObject(user);
-
-  const rawNested = safeObject(raw.raw);
-
-  const userId = cleanText(
-    first(
-      raw.userId,
-      raw.id,
-      raw._id,
-      raw.uid,
-      raw.sub,
-      raw.usuarioId,
-      raw.lookup?.userId,
-      raw.lookup?.id,
-      raw.profile?.userId,
-      raw.auth?.userId,
-      rawNested.userId,
-      rawNested.id,
-      rawNested._id,
-      rawNested.uid,
-      rawNested.sub,
-      raw.username
-    ),
-    ""
-  );
-
-  const clienteId = cleanText(
-    first(
-      raw.clienteId,
-      raw.clientId,
-      raw.customerId,
-      raw.targetClienteId,
-      raw.lookup?.clienteId,
-      raw.lookup?.clientId,
-      raw.tenant?.clienteId,
-      raw.cliente?.clienteId,
-      raw.cliente?.id,
-      raw.client?.clienteId,
-      raw.client?.id,
-      rawNested.clienteId,
-      rawNested.clientId,
-      rawNested.customerId,
-      ""
-    ),
-    ""
-  );
-
-  const name = cleanText(
-    first(
-      raw.displayName,
-      raw.fullName,
-      raw.name,
-      raw.nombre,
-      raw.publicName,
-      raw.profile?.publicName,
-      raw.profile?.displayName,
-      raw.profile?.name,
-      [raw.firstName, raw.lastName].filter(Boolean).join(" "),
-      [raw.nombre, raw.apellidos].filter(Boolean).join(" "),
-      raw.lookup?.displayName,
-      raw.lookup?.name,
-      rawNested.displayName,
-      rawNested.fullName,
-      rawNested.name,
-      raw.username,
-      raw.email
-    ),
-    "Usuario"
-  );
-
-  const email = firstEmail(
-    raw.email,
-    raw.emailLower,
-    raw.userEmail,
-    raw.mail,
-    raw.profile?.email,
-    raw.auth?.email,
-    raw.contacto?.email,
-    raw.contacto?.emailLower,
-    raw.lookup?.email,
-    raw.lookup?.emailLower,
-    rawNested.email,
-    rawNested.emailLower
-  );
-
-  const username = cleanText(
-    first(
-      raw.username,
-      raw.userName,
-      raw.usernameLower,
-      raw.lookup?.username,
-      raw.lookup?.usernameLower,
-      raw.slug,
-      raw.lookup?.slug,
-      raw.profile?.slug,
-      rawNested.username,
-      rawNested.userName,
-      rawNested.slug
-    ),
-    ""
-  );
-
-  const avatarUrl = firstUrl(
-    raw.avatarUrl,
-    raw.avatar,
-    raw.picture,
-    raw.photoUrl,
-    raw.photoURL,
-    raw.imageUrl,
-    raw.profile?.avatarUrl,
-    raw.profile?.avatar,
-    raw.profile?.photoUrl,
-    raw.profile?.photoURL,
-    raw.profile?.picture,
-    rawNested.avatarUrl,
-    rawNested.avatar,
-    rawNested.picture,
-    rawNested.photoUrl
-  );
-
-  const role = cleanText(
-    first(
-      raw.role,
-      raw.rol,
-      Array.isArray(raw.roles) ? raw.roles[0] : "",
-      "user"
-    ),
-    "user"
-  );
-
-  return {
-    id: userId,
-    userId,
-
-    clienteId,
-    clientId: clienteId,
-    targetClienteId: clienteId,
-
-    displayName: name,
-    fullName: name,
-    name,
-    nombre: name,
-
-    email: email || "",
-    emailLower: email || "",
-    userEmail: email || "",
-    mail: email || "",
-
-    username,
-    usernameLower: username.toLowerCase(),
-
-    role,
-    rol: role,
-    roles: safeArray(raw.roles).length ? safeArray(raw.roles) : [role],
-
-    avatar: avatarUrl || "",
-    avatarUrl: avatarUrl || "",
-    picture: avatarUrl || "",
-    photoUrl: avatarUrl || "",
-    hasAvatar: Boolean(avatarUrl || raw.hasAvatar || raw.profile?.avatarEnabled || raw.meta?.hasAvatar),
-  };
-}
-
-function responseLooksFailed(response = null) {
-  if (!isObject(response)) return false;
-
-  const status = Number(first(response.status, response.statusCode, response.codeStatus, 0));
-
-  if (status >= 400) return true;
-  if (response.ok === false) return true;
-  if (response.success === false) return true;
-
-  const error = first(response.error, response.errorMessage, response.error_description, null);
-
-  if (!error) return false;
-
-  if (typeof error === "string") {
-    return normalizeKey(error) !== "ok" && normalizeKey(error) !== "success";
-  }
+export function clearIncidenciasCache() {
+  lastList = { items: [], total: 0 };
+  lastLoadedAt = null;
+  lastError = null;
+  lastCacheKey = "";
+  inFlightListPromise = null;
+  inFlightListKey = "";
+  loading = false;
 
   return true;
 }
 
-function responseErrorMessage(response = null, fallback = "No se pudieron buscar usuarios.") {
+/* =========================================================
+   PAYLOAD READERS
+========================================================= */
+
+function responseLooksFailed(response = {}) {
+  const raw = safeObject(response);
+
+  return raw.ok === false || raw.success === false || raw.error === true;
+}
+
+function responseErrorMessage(response = {}, fallback = "La operación no se pudo completar.") {
   const source = safeObject(response);
 
   return cleanText(
@@ -1988,6 +485,194 @@ function responseErrorMessage(response = null, fallback = "No se pudieron buscar
     ),
     fallback
   );
+}
+
+function listFromPayload(payload = {}) {
+  const raw = safeObject(payload);
+
+  return safeArray(
+    first(
+      raw.items,
+      raw.results,
+      raw.data?.items,
+      raw.data?.results,
+      raw.data,
+      raw.tickets,
+      raw.incidencias,
+      raw.rows,
+      []
+    )
+  );
+}
+
+function detailFromPayload(payload = {}) {
+  const raw = safeObject(payload);
+
+  return safeObject(
+    first(
+      raw.ticket,
+      raw.item,
+      raw.detail,
+      raw.incidencia,
+      raw.data?.ticket,
+      raw.data?.item,
+      raw.data?.detail,
+      raw.data?.incidencia,
+      raw.data,
+      raw.resource,
+      raw.result,
+      raw
+    ),
+    null
+  );
+}
+
+function totalFromPayload(payload = {}, fallback = 0) {
+  const raw = safeObject(payload);
+
+  return countFrom(
+    raw.total,
+    raw.totalCount,
+    raw.countTotal,
+    raw.meta?.total,
+    raw.data?.total,
+    raw.data?.totalCount,
+    fallback
+  );
+}
+
+function usersListFromPayload(payload = {}) {
+  const raw = safeObject(payload);
+
+  return safeArray(
+    first(
+      raw.items,
+      raw.results,
+      raw.users,
+      raw.usuarios,
+      raw.data?.items,
+      raw.data?.results,
+      raw.data?.users,
+      raw.data?.usuarios,
+      raw.data,
+      []
+    )
+  );
+}
+
+/* =========================================================
+   NORMALIZE USERS
+========================================================= */
+
+function normalizeCreateSearchUser(user = {}) {
+  const raw = safeObject(user);
+
+  const userId = cleanText(
+    first(
+      raw.userId,
+      raw.id,
+      raw.uid,
+      raw.sub,
+      raw.usuarioId,
+      raw.auth?.userId,
+      raw.profile?.userId,
+      raw.lookup?.userId,
+      raw.raw?.userId,
+      raw.raw?.id,
+      ""
+    ),
+    ""
+  );
+
+  const clienteId = cleanText(
+    first(
+      raw.targetClienteId,
+      raw.clienteId,
+      raw.clientId,
+      raw.customerId,
+      raw.cliente?.clienteId,
+      raw.cliente?.id,
+      raw.client?.clienteId,
+      raw.client?.id,
+      raw.tenant?.clienteId,
+      raw.lookup?.clienteId,
+      raw.raw?.clienteId,
+      raw.raw?.cliente?.clienteId,
+      raw.raw?.cliente?.id,
+      ""
+    ),
+    ""
+  );
+
+  const name = cleanText(
+    first(
+      raw.displayName,
+      raw.fullName,
+      raw.name,
+      raw.nombre,
+      raw.publicName,
+      raw.clienteNombre,
+      raw.clientName,
+      [raw.firstName, raw.lastName].filter(Boolean).join(" "),
+      [raw.nombre, raw.apellidos].filter(Boolean).join(" "),
+      raw.profile?.displayName,
+      raw.profile?.name,
+      raw.lookup?.displayName,
+      raw.raw?.displayName,
+      raw.raw?.name,
+      raw.raw?.nombre,
+      raw.username,
+      userId
+    ),
+    "Usuario"
+  );
+
+  const email = firstEmail(
+    raw.email,
+    raw.emailLower,
+    raw.userEmail,
+    raw.clienteEmail,
+    raw.clientEmail,
+    raw.profile?.email,
+    raw.lookup?.email,
+    raw.raw?.email,
+    raw.raw?.emailLower
+  );
+
+  const username = cleanText(
+    first(raw.username, raw.usernameLower, raw.profile?.username, raw.raw?.username, ""),
+    ""
+  );
+
+  const avatar = firstUrl(raw, raw.raw, raw.profile, raw.cliente, raw.client);
+  const role = normalizeKey(first(raw.role, raw.rol, raw.raw?.role, raw.raw?.rol, "user")) || "user";
+  const phone = cleanText(first(raw.phone, raw.telefono, raw.raw?.phone, raw.raw?.telefono, ""), "");
+
+  return {
+    id: userId,
+    userId,
+    uid: userId,
+    targetUserId: userId,
+    clienteId,
+    targetClienteId: clienteId,
+    clientId: clienteId,
+    name,
+    nombre: name,
+    fullName: name,
+    displayName: name,
+    email,
+    emailLower: email,
+    username,
+    usernameLower: username.toLowerCase(),
+    role,
+    rol: role,
+    phone,
+    telefono: phone,
+    avatar,
+    avatarUrl: avatar,
+    hasAvatar: Boolean(avatar),
+    raw,
+  };
 }
 
 function buildUsersSearchQuery(query = "", limit = USERS_SEARCH_LIMIT) {
@@ -2005,10 +690,7 @@ function buildUsersSearchQuery(query = "", limit = USERS_SEARCH_LIMIT) {
 
 export async function searchIncidenciaUsers(query = "", options = {}) {
   const q = cleanText(query, "");
-  const limit = Math.max(
-    1,
-    Math.min(Number(options.limit || USERS_SEARCH_LIMIT) || USERS_SEARCH_LIMIT, 20)
-  );
+  const limit = Math.max(1, Math.min(number(options.limit, USERS_SEARCH_LIMIT), 20));
 
   if (q.length < USERS_SEARCH_MIN_LENGTH) return [];
 
@@ -2017,9 +699,7 @@ export async function searchIncidenciaUsers(query = "", options = {}) {
     query: buildUsersSearchQuery(q, limit),
   });
 
-  if (responseLooksFailed(response)) {
-    throw new Error(responseErrorMessage(response));
-  }
+  if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response));
 
   return usersListFromPayload(response)
     .map(normalizeCreateSearchUser)
@@ -2028,21 +708,433 @@ export async function searchIncidenciaUsers(query = "", options = {}) {
 }
 
 /* =========================================================
-   PAYLOAD / FORM DATA
+   NORMALIZE TICKETS
 ========================================================= */
+
+function getTicketId(item = {}) {
+  const raw = safeObject(item);
+
+  return cleanText(
+    first(raw.ticketId, raw.incidenciaId, raw.id, raw.code, raw.numero, raw.ticketCode),
+    ""
+  );
+}
+
+function normalizeStatus(value = "") {
+  const key = normalizeKey(value || "open");
+
+  const map = {
+    pending: "pending",
+    pendiente: "pending",
+    open: "open",
+    abierta: "open",
+    abierto: "open",
+    in_progress: "in_progress",
+    progress: "in_progress",
+    proceso: "in_progress",
+    resolved: "resolved",
+    resuelta: "resolved",
+    resuelto: "resolved",
+    closed: "closed",
+    cerrada: "closed",
+    cerrado: "closed",
+  };
+
+  return map[key] || key || "open";
+}
+
+function normalizePriority(value = "") {
+  const key = normalizeKey(value || "medium");
+
+  const map = {
+    baja: "low",
+    low: "low",
+    media: "medium",
+    normal: "medium",
+    medium: "medium",
+    alta: "high",
+    high: "high",
+    urgente: "urgent",
+    urgent: "urgent",
+    critical: "urgent",
+    critica: "urgent",
+    critico: "urgent",
+  };
+
+  return map[key] || key || "medium";
+}
+
+function normalizeTechnician(value = {}) {
+  const raw = safeObject(value);
+  const avatar = firstUrl(
+    raw.avatarUrl,
+    raw.avatar,
+    raw.assignedToAvatarUrl,
+    raw.assignedToAvatar,
+    raw.technicianAvatarUrl,
+    raw.technicianAvatar,
+    FIXED_TECHNICIAN.avatarUrl
+  );
+
+  const userId = cleanText(first(raw.userId, raw.id, raw.assignedToUserId, FIXED_TECHNICIAN.userId), FIXED_TECHNICIAN.userId);
+  const name = cleanText(first(raw.name, raw.nombre, raw.displayName, raw.assignedToName, FIXED_TECHNICIAN.name), FIXED_TECHNICIAN.name);
+  const email = firstEmail(raw.email, raw.emailLower, raw.assignedToEmail, FIXED_TECHNICIAN.email);
+  const role = normalizeKey(first(raw.role, raw.rol, FIXED_TECHNICIAN.role)) || FIXED_TECHNICIAN.role;
+
+  return {
+    id: userId,
+    userId,
+    name,
+    nombre: name,
+    displayName: name,
+    email,
+    emailLower: email,
+    avatar: avatar || null,
+    avatarUrl: avatar || null,
+    hasAvatar: Boolean(avatar),
+    role,
+    display: email ? `${name} <${email}>` : name,
+  };
+}
+
+function normalizeAttachment(file = {}, index = 0) {
+  const raw = safeObject(file);
+  const id = cleanText(first(raw.id, raw.attachmentId, raw.fileId, `att_${index}`), `att_${index}`);
+  const name = safePublicText(first(raw.name, raw.filename, raw.fileName, raw.originalName, `Adjunto ${index + 1}`), `Adjunto ${index + 1}`);
+  const url = firstUrl(raw.viewUrl, raw.openUrl, raw.downloadUrl, raw.url, raw.blobUrl, raw.publicUrl, raw.signedUrl);
+  const contentType = cleanText(first(raw.contentType, raw.mimeType, raw.mimetype, raw.type, ""), "");
+  const path = safePublicText(first(raw.path, raw.blobPath, raw.blobName, raw.storagePath, raw.storageKey, ""), "");
+
+  return {
+    ...raw,
+    id,
+    attachmentId: id,
+    name,
+    filename: name,
+    fileName: name,
+    originalName: safePublicText(first(raw.originalName, name), name),
+    size: number(first(raw.size, raw.sizeBytes), 0),
+    sizeBytes: number(first(raw.sizeBytes, raw.size), 0),
+    contentType,
+    mimeType: contentType,
+    mimetype: contentType,
+    type: cleanText(raw.type, contentType),
+    url,
+    viewUrl: firstUrl(raw.viewUrl, url),
+    openUrl: firstUrl(raw.openUrl, url),
+    downloadUrl: firstUrl(raw.downloadUrl, url),
+    blobUrl: firstUrl(raw.blobUrl, url),
+    publicUrl: firstUrl(raw.publicUrl, url),
+    path,
+    blobPath: safePublicText(first(raw.blobPath, path), path),
+    blobName: safePublicText(first(raw.blobName, path), path),
+    storagePath: safePublicText(first(raw.storagePath, path), path),
+    storageKey: safePublicText(first(raw.storageKey, path), path),
+    containerName: cleanText(first(raw.containerName, raw.container, "tickets"), "tickets"),
+    isImage: Boolean(raw.isImage || contentType.startsWith("image/")),
+    isVideo: Boolean(raw.isVideo || contentType.startsWith("video/")),
+    isPdf: Boolean(raw.isPdf || contentType === "application/pdf"),
+    uploadedAt: cleanText(first(raw.uploadedAt, raw.createdAt, ""), ""),
+  };
+}
+
+function normalizeRequester(raw = {}) {
+  const source = safeObject(raw);
+  const snap = safeObject(first(source.requesterSnapshot, source.cliente, source.receptor, source.user, {}));
+
+  const userId = cleanText(first(source.userId, snap.userId, snap.id, snap.uid, ""), "");
+  const clienteId = cleanText(first(source.clienteId, snap.clienteId, snap.clientId, ""), "");
+  const name = cleanText(first(source.displayName, source.name, source.nombre, snap.displayName, snap.name, snap.nombre, "Usuario"), "Usuario");
+  const email = firstEmail(source.email, source.emailLower, snap.email, snap.emailLower);
+  const username = cleanText(first(source.username, source.usernameLower, snap.username, snap.usernameLower, ""), "");
+  const phone = cleanText(first(source.phone, source.telefono, snap.phone, snap.telefono, ""), "");
+  const avatar = firstUrl(source.avatarUrl, source.avatar, snap.avatarUrl, snap.avatar);
+  const role = normalizeKey(first(source.role, source.rol, snap.role, snap.rol, "user")) || "user";
+
+  return {
+    id: userId,
+    userId,
+    clienteId: clienteId || null,
+    name,
+    nombre: name,
+    displayName: name,
+    email,
+    emailLower: email,
+    username,
+    usernameLower: username.toLowerCase(),
+    phone,
+    telefono: phone,
+    avatar: avatar || null,
+    avatarUrl: avatar || null,
+    hasAvatar: Boolean(avatar),
+    role,
+    active: source.active !== false && snap.active !== false,
+    tipo: cleanText(first(source.tipo, snap.tipo, ""), ""),
+    nif: cleanText(first(source.nif, snap.nif, ""), ""),
+  };
+}
+
+function normalizeIncidencia(item = {}) {
+  const raw = safeObject(item);
+  const id = getTicketId(raw);
+  const subject = safePublicText(first(raw.subject, raw.asunto, raw.title, "Sin asunto"), "Sin asunto");
+  const message = safePublicText(first(raw.message, raw.description, raw.descripcion, raw.body, ""), "");
+  const status = normalizeStatus(first(raw.status, raw.estado, "open"));
+  const priority = normalizePriority(first(raw.priority, raw.prioridad, "medium"));
+  const category = normalizeKey(first(raw.category, raw.categoria, raw.tipo, raw.type, "general")) || "general";
+  const type = normalizeKey(first(raw.tipo, raw.type, category, "general")) || category;
+  const requester = normalizeRequester(raw);
+  const attachments = safeArray(first(raw.attachments, raw.files, raw.adjuntos, [])).map(normalizeAttachment);
+  const comments = safeArray(raw.comments);
+  const history = safeArray(raw.history);
+  const technician = normalizeTechnician(first(raw.tecnico, raw.assignedTo, raw.assignment?.technician, raw.technician, FIXED_TECHNICIAN));
+  const assignment = {
+    ...safeObject(raw.assignment),
+    status: "assigned",
+    policy: cleanText(raw.assignment?.policy || raw.meta?.assignmentPolicy || "fixed_default_technician", "fixed_default_technician"),
+    assignedToUserId: technician.userId,
+    assignedToName: technician.name,
+    assignedToEmail: technician.email,
+    team: cleanText(raw.assignment?.team, "support"),
+    userId: technician.userId,
+    assignedToAvatar: technician.avatar,
+    assignedToAvatarUrl: technician.avatarUrl,
+    technicianAvatar: technician.avatar,
+    technicianAvatarUrl: technician.avatarUrl,
+    agentAvatar: technician.avatar,
+    agentAvatarUrl: technician.avatarUrl,
+    avatar: technician.avatar,
+    avatarUrl: technician.avatarUrl,
+    assignedToHasAvatar: Boolean(technician.avatar),
+    technician,
+  };
+
+  const normalized = {
+    ...raw,
+
+    id,
+    ticketId: id,
+    incidenciaId: id,
+    entityType: cleanText(raw.entityType, "ticket"),
+    tipoDocumento: cleanText(raw.tipoDocumento, "ticket"),
+    schemaVersion: number(raw.schemaVersion, 1),
+
+    subject,
+    asunto: subject,
+    title: subject,
+    message,
+    description: message,
+    descripcion: message,
+    preview: safePublicText(first(raw.preview, message.slice(0, 240)), message.slice(0, 240)),
+
+    status,
+    estado: status,
+    priority,
+    prioridad: priority,
+    category,
+    categoria: category,
+    tipo: type,
+    type,
+
+    userId: cleanText(first(raw.userId, requester.userId), requester.userId),
+    clienteId: first(raw.clienteId, requester.clienteId, null),
+
+    name: requester.name,
+    displayName: requester.displayName,
+    email: requester.email,
+    avatar: requester.avatar,
+    avatarUrl: requester.avatarUrl,
+    username: requester.username,
+    phone: requester.phone,
+
+    requesterSnapshot: {
+      ...safeObject(raw.requesterSnapshot),
+      ...requester,
+    },
+
+    cliente: {
+      ...safeObject(raw.cliente),
+      id: first(raw.cliente?.id, raw.clienteId, requester.clienteId, requester.userId, null),
+      userId: requester.userId,
+      clienteId: first(raw.cliente?.clienteId, raw.clienteId, requester.clienteId, null),
+      nombre: requester.name,
+      name: requester.name,
+      displayName: requester.displayName,
+      email: requester.email,
+      avatar: requester.avatar,
+      avatarUrl: requester.avatarUrl,
+      username: requester.username,
+      phone: requester.phone,
+      telefono: requester.phone,
+      active: requester.active,
+    },
+
+    receptor: {
+      ...safeObject(raw.receptor),
+      id: requester.userId,
+      userId: requester.userId,
+      clienteId: first(raw.receptor?.clienteId, raw.clienteId, requester.clienteId, null),
+      name: requester.name,
+      displayName: requester.displayName,
+      email: requester.email,
+      username: requester.username,
+      phone: requester.phone,
+      avatar: requester.avatar,
+      avatarUrl: requester.avatarUrl,
+    },
+
+    tecnico: technician,
+    assignedTo: technician,
+    technician,
+    assignment,
+
+    assignedToUserId: technician.userId,
+    assignedToName: technician.name,
+    assignedToEmail: technician.email,
+    assignedToAvatar: technician.avatar,
+    assignedToAvatarUrl: technician.avatarUrl,
+    technicianName: technician.name,
+    technicianEmail: technician.email,
+    technicianAvatar: technician.avatar,
+    technicianAvatarUrl: technician.avatarUrl,
+    tecnicoName: technician.name,
+    tecnicoEmail: technician.email,
+    tecnicoAvatar: technician.avatar,
+    tecnicoAvatarUrl: technician.avatarUrl,
+    agentName: technician.name,
+    agentEmail: technician.email,
+    agentAvatar: technician.avatar,
+    agentAvatarUrl: technician.avatarUrl,
+
+    createdAt: cleanText(first(raw.createdAt, raw.lifecycle?.createdAt, ""), ""),
+    createdAtES: cleanText(first(raw.createdAtES, raw.lifecycle?.createdAtES, ""), ""),
+    updatedAt: cleanText(first(raw.updatedAt, raw.lifecycle?.updatedAt, raw.createdAt, ""), ""),
+    updatedAtES: cleanText(first(raw.updatedAtES, raw.lifecycle?.updatedAtES, raw.createdAtES, ""), ""),
+    lastActivityAt: cleanText(first(raw.lastActivityAt, raw.lifecycle?.lastActivityAt, raw.updatedAt, raw.createdAt, ""), ""),
+    lastActivityAtES: cleanText(first(raw.lastActivityAtES, raw.lifecycle?.lastActivityAtES, raw.updatedAtES, raw.createdAtES, ""), ""),
+
+    attachments,
+    files: attachments,
+    adjuntos: attachments,
+    attachmentsCount: countFrom(raw.attachmentsCount, raw.attachmentCount, raw.filesCount, attachments.length),
+    attachmentCount: countFrom(raw.attachmentCount, raw.attachmentsCount, raw.filesCount, attachments.length),
+    filesCount: countFrom(raw.filesCount, raw.attachmentsCount, attachments.length),
+
+    comments,
+    commentsCount: countFrom(raw.commentsCount, comments.length),
+    history,
+    historyCount: countFrom(raw.historyCount, history.length),
+
+    meta: {
+      ...safeObject(raw.meta),
+      schemaVersion: number(raw.meta?.schemaVersion, number(raw.schemaVersion, 1)),
+      hasAttachments: attachments.length > 0,
+      isAssigned: true,
+      assignmentPolicy: raw.meta?.assignmentPolicy || assignment.policy,
+      blobContainer: raw.meta?.blobContainer || attachments[0]?.containerName || "tickets",
+      blobPathPolicy: raw.meta?.blobPathPolicy || raw.meta?.attachmentStoragePolicy || "userId_userName_ticketId_attachment",
+      assignedTechnicianUserId: technician.userId,
+      assignedTechnicianName: technician.name,
+      assignedTechnicianEmail: technician.email,
+      assignedTechnicianAvatar: technician.avatar,
+      assignedTechnicianAvatarUrl: technician.avatarUrl,
+    },
+  };
+
+  return normalized;
+}
+
+function normalizeList(items = []) {
+  return safeArray(items)
+    .map(normalizeIncidencia)
+    .filter((item) => item.ticketId || item.id)
+    .sort((a, b) => ticketSortTime(b) - ticketSortTime(a));
+}
+
+function ticketSortTime(item = {}) {
+  const raw = safeObject(item);
+  const timestamp = Date.parse(
+    first(
+      raw.lastActivityAt,
+      raw.updatedAt,
+      raw.modifiedAt,
+      raw.closedAt,
+      raw.createdAt,
+      raw.lifecycle?.lastActivityAt,
+      raw.lifecycle?.updatedAt,
+      raw.lifecycle?.closedAt,
+      raw.lifecycle?.createdAt,
+      0
+    )
+  );
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function upsertCachedIncidencia(item = null) {
+  const normalized = normalizeIncidencia(item);
+  const id = getTicketId(normalized);
+
+  if (!id) return normalized;
+
+  const current = safeArray(lastList.items).filter((row) => getTicketId(row) !== id);
+  const next = normalizeList([normalized, ...current]);
+
+  lastList = {
+    items: next,
+    total: Math.max(number(lastList.total, next.length), next.length),
+  };
+
+  lastLoadedAt = lastLoadedAt || nowIso();
+
+  return normalized;
+}
+
+/* =========================================================
+   CREATE PAYLOAD / FORMDATA
+========================================================= */
+
+function normalizeFilesInput(value = null) {
+  if (!value) return [];
+
+  if (isFileLike(value)) return [value];
+
+  if (typeof FileList !== "undefined" && value instanceof FileList) {
+    return Array.from(value).filter(isFileLike);
+  }
+
+  if (Array.isArray(value)) return value.flatMap(normalizeFilesInput).filter(isFileLike);
+
+  if (isObject(value) && typeof value.length === "number") {
+    try {
+      return Array.from(value).filter(isFileLike);
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+}
 
 function extractFiles(payload = {}) {
   const source = safeObject(payload);
 
-  return safeArray(
-    first(
-      source.files,
-      source.attachments,
-      source.adjuntos,
-      source.uploads,
-      []
-    )
-  ).filter((file) => isFile(file) || isBlob(file));
+  return normalizeFilesInput(
+    first(source.attachments, source.files, source.adjuntos, source.uploads, source.file, source.adjunto, [])
+  );
+}
+
+function dedupeFiles(files = []) {
+  const map = new Map();
+
+  for (const file of safeArray(files)) {
+    if (!isFileLike(file)) continue;
+
+    const key = [file.name || "archivo", file.size || 0, file.lastModified || 0, file.type || ""].join("::");
+    if (!map.has(key)) map.set(key, file);
+  }
+
+  return [...map.values()];
 }
 
 function withoutFileFields(payload = {}) {
@@ -2050,7 +1142,7 @@ function withoutFileFields(payload = {}) {
   const output = {};
 
   for (const [key, value] of Object.entries(source)) {
-    if (["files", "attachments", "adjuntos", "uploads"].includes(key)) continue;
+    if (["files", "attachments", "adjuntos", "uploads", "file", "adjunto"].includes(key)) continue;
     if (value === undefined || value === null) continue;
 
     output[key] = value;
@@ -2063,17 +1155,19 @@ function normalizeCreatePayload(payload = {}) {
   const source = safeObject(payload);
 
   const subject = cleanText(first(source.subject, source.asunto, source.title), "");
-  const description = cleanText(first(source.description, source.descripcion, source.message, source.body), "");
-  const priority = cleanText(first(source.priority, source.prioridad, "medium"), "medium");
-  const status = cleanText(first(source.status, source.estado, "open"), "open");
-  const category = cleanText(first(source.category, source.categoria, source.tipo, "general"), "general");
-  const origin = cleanText(first(source.source, source.origen, source.channel, "panel"), "panel");
+  const description = cleanText(first(source.description, source.descripcion, source.message, source.body, source.text), "");
+  const priority = normalizePriority(first(source.priority, source.prioridad, "medium"));
+  const status = normalizeStatus(first(source.status, source.estado, "open"));
+  const category = normalizeKey(first(source.category, source.categoria, source.tipo, "general")) || "general";
+  const origin = cleanText(first(source.source, source.origen, source.channel, "panel_admin"), "panel_admin");
 
   const targetUserId = cleanText(
     first(
       source.targetUserId,
-      source.userId,
+      source.receptorUserId,
+      source.affectedUserId,
       source.usuarioId,
+      source.userId,
       source.user?.userId,
       source.user?.id,
       source.usuario?.userId,
@@ -2102,6 +1196,7 @@ function normalizeCreatePayload(payload = {}) {
     first(
       source.targetUserName,
       source.receptorName,
+      source.affectedUserName,
       source.userName,
       source.clienteNombre,
       source.clientName,
@@ -2120,6 +1215,7 @@ function normalizeCreatePayload(payload = {}) {
   const targetUserEmail = firstEmail(
     source.targetUserEmail,
     source.receptorEmail,
+    source.affectedUserEmail,
     source.userEmail,
     source.clienteEmail,
     source.clientEmail,
@@ -2159,6 +1255,7 @@ function normalizeCreatePayload(payload = {}) {
     descripcion: description,
     message: description,
     body: description,
+    text: description,
 
     priority,
     prioridad: priority,
@@ -2174,29 +1271,36 @@ function normalizeCreatePayload(payload = {}) {
     source: origin,
     origen: origin,
     channel: origin,
+
+    createSource: "incidencias_panel",
+    blobContainer: "tickets",
+    attachmentFieldName: "attachments",
   };
 
   if (targetUserId) {
     normalized.targetUserId = targetUserId;
+    normalized.receptorUserId = targetUserId;
+    normalized.affectedUserId = targetUserId;
     normalized.userId = targetUserId;
     normalized.usuarioId = targetUserId;
     normalized.uid = targetUserId;
   }
 
   /*
-    Importante:
     No inventamos clienteId desde targetUserId.
-    Sólo se envía clienteId/clientId si existe targetClienteId real.
+    Sólo se envía clienteId/clientId cuando el buscador/backend lo devuelve real.
   */
   if (targetClienteId) {
     normalized.targetClienteId = targetClienteId;
     normalized.clienteId = targetClienteId;
     normalized.clientId = targetClienteId;
+    normalized.customerId = targetClienteId;
   }
 
   if (targetUserName) {
     normalized.targetUserName = targetUserName;
     normalized.receptorName = targetUserName;
+    normalized.affectedUserName = targetUserName;
     normalized.userName = targetUserName;
     normalized.clienteNombre = targetUserName;
     normalized.clientName = targetUserName;
@@ -2207,6 +1311,7 @@ function normalizeCreatePayload(payload = {}) {
   if (targetUserEmail) {
     normalized.targetUserEmail = targetUserEmail;
     normalized.receptorEmail = targetUserEmail;
+    normalized.affectedUserEmail = targetUserEmail;
     normalized.userEmail = targetUserEmail;
     normalized.clienteEmail = targetUserEmail;
     normalized.clientEmail = targetUserEmail;
@@ -2227,23 +1332,38 @@ function normalizeCreatePayload(payload = {}) {
     normalized.avatarUrl = targetUserAvatar;
   }
 
+  normalized.assignedToUserId = FIXED_TECHNICIAN.userId;
+  normalized.assignedToName = FIXED_TECHNICIAN.name;
+  normalized.assignedToEmail = FIXED_TECHNICIAN.email;
+  normalized.assignmentPolicy = "fixed_default_technician";
+
   return normalized;
 }
 
+function appendFormValue(formData, key = "", value = null) {
+  if (!key || value === undefined || value === null) return false;
+  if (isFileLike(value)) return false;
+
+  if (typeof value === "object") {
+    formData.append(key, JSON.stringify(value));
+    return true;
+  }
+
+  formData.append(key, String(value));
+  return true;
+}
+
 function buildFormData(payload = {}) {
-  const files = extractFiles(payload);
+  const files = dedupeFiles(extractFiles(payload));
   const cleanPayload = normalizeCreatePayload(payload);
   const formData = new FormData();
 
   for (const [key, value] of Object.entries(cleanPayload)) {
-    if (value === undefined || value === null) continue;
-
-    if (typeof value === "object" && !isBlob(value) && !isFile(value)) {
-      formData.append(key, JSON.stringify(value));
-    } else {
-      formData.append(key, value);
-    }
+    appendFormValue(formData, key, value);
   }
+
+  formData.append("hasAttachments", files.length ? "true" : "false");
+  formData.append("attachmentsCount", String(files.length));
 
   for (const file of files) {
     formData.append("attachments", file, file?.name || "archivo");
@@ -2253,38 +1373,36 @@ function buildFormData(payload = {}) {
 }
 
 function buildMutationBody(payload = {}) {
-  const files = extractFiles(payload);
+  const files = dedupeFiles(extractFiles(payload));
 
   if (files.length && typeof FormData !== "undefined") {
     return {
       body: buildFormData(payload),
       hasFiles: true,
+      filesCount: files.length,
     };
   }
 
   return {
     body: normalizeCreatePayload(payload),
     hasFiles: false,
+    filesCount: 0,
   };
 }
 
 function buildAttachmentsFormData(files = [], extra = {}) {
+  const list = dedupeFiles(normalizeFilesInput(files));
   const formData = new FormData();
 
-  for (const file of safeArray(files)) {
-    if (isFile(file) || isBlob(file)) {
-      formData.append("attachments", file, file?.name || "archivo");
-    }
+  formData.append("hasAttachments", list.length ? "true" : "false");
+  formData.append("attachmentsCount", String(list.length));
+
+  for (const file of list) {
+    formData.append("attachments", file, file?.name || "archivo");
   }
 
   for (const [key, value] of Object.entries(safeObject(extra))) {
-    if (value === undefined || value === null) continue;
-
-    if (typeof value === "object" && !isBlob(value) && !isFile(value)) {
-      formData.append(key, JSON.stringify(value));
-    } else {
-      formData.append(key, value);
-    }
+    appendFormValue(formData, key, value);
   }
 
   return formData;
@@ -2298,21 +1416,42 @@ async function getJson(endpoint = "", options = {}) {
   return Http.get(endpoint, {
     timeout: options.timeout || INCIDENCIAS_TIMEOUT,
     query: safeObject(options.query || options.params),
-    source: "views.incidencias",
+    source: options.source || "views.incidencias",
   });
 }
 
 async function postJson(endpoint = "", body = {}, options = {}) {
   return Http.post(endpoint, body, {
     timeout: options.timeout || INCIDENCIAS_TIMEOUT,
-    source: "views.incidencias",
+    source: options.source || "views.incidencias",
   });
 }
 
 async function patchJson(endpoint = "", body = {}, options = {}) {
   return Http.patch(endpoint, body, {
     timeout: options.timeout || INCIDENCIAS_TIMEOUT,
-    source: "views.incidencias",
+    source: options.source || "views.incidencias",
+  });
+}
+
+async function postMultipart(endpoint = "", formData = null, options = {}) {
+  if (!formData || typeof FormData === "undefined" || !(formData instanceof FormData)) {
+    return postJson(endpoint, formData, options);
+  }
+
+  return Http.post(endpoint, formData, {
+    timeout: options.timeout || INCIDENCIAS_UPLOAD_TIMEOUT,
+    source: options.source || "views.incidencias.multipart",
+
+    // Flags defensivos: si el core/http los soporta, evitan serialización JSON
+    // y dejan que el navegador ponga el boundary correcto.
+    multipart: true,
+    formData: true,
+    isFormData: true,
+    rawBody: true,
+    skipJson: true,
+    skipContentType: true,
+    headers: {},
   });
 }
 
@@ -2321,11 +1460,10 @@ async function patchJson(endpoint = "", body = {}, options = {}) {
 ========================================================= */
 
 export async function fetchIncidenciasRequest(options = {}) {
-  const timeout = options.timeout || INCIDENCIAS_TIMEOUT;
-
   return getJson(INCIDENCIAS_ENDPOINT, {
-    timeout,
+    timeout: options.timeout || INCIDENCIAS_TIMEOUT,
     query: buildListQuery(options),
+    source: "views.incidencias.list",
   });
 }
 
@@ -2336,11 +1474,7 @@ export async function listIncidencias(options = {}) {
   const key = listCacheKey(options);
 
   if (!force && useCache && isCacheFresh(options)) {
-    return cachedListResponse({
-      cached: true,
-      stale: false,
-      options,
-    });
+    return cachedListResponse({ cached: true, stale: false, options });
   }
 
   if (!force && inFlightListPromise && inFlightListKey === key) {
@@ -2358,22 +1492,16 @@ export async function listIncidencias(options = {}) {
       const items = normalizeList(rawItems);
       const total = totalFromPayload(response, items.length);
 
-      setListCache({
-        items,
-        total,
-        key,
-      });
+      setListCache({ items, total, key });
 
       return {
         ok: true,
         cached: false,
         stale: false,
-
         items: lastList.items,
         total: lastList.total,
         count: lastList.items.length,
         loadedAt: lastLoadedAt,
-
         cache: {
           hydrated: true,
           key: lastCacheKey,
@@ -2386,12 +1514,7 @@ export async function listIncidencias(options = {}) {
       lastError = normalizeError(error);
 
       if (returnStaleOnError && lastLoadedAt) {
-        return cachedListResponse({
-          cached: true,
-          stale: true,
-          error: lastError,
-          options,
-        });
+        return cachedListResponse({ cached: true, stale: true, error: lastError, options });
       }
 
       throw error;
@@ -2413,20 +1536,14 @@ export async function loadIncidencias(options = {}) {
   return response.items;
 }
 
-export async function getIncidenciaByIdRequest(
-  id = "",
-  {
-    timeout = INCIDENCIAS_DETAIL_TIMEOUT,
-  } = {}
-) {
+export async function getIncidenciaByIdRequest(id = "", { timeout = INCIDENCIAS_DETAIL_TIMEOUT } = {}) {
   const response = await getJson(getIncidenciaEndpoint(id), {
     timeout,
+    source: "views.incidencias.detail",
   });
 
   const detail = detailFromPayload(response);
-  const item = detail ? upsertCachedIncidencia(detail) : null;
-
-  return item;
+  return detail ? upsertCachedIncidencia(detail) : null;
 }
 
 export const loadIncidenciaDetail = getIncidenciaByIdRequest;
@@ -2435,80 +1552,63 @@ export const loadIncidenciaDetail = getIncidenciaByIdRequest;
    CREATE / UPDATE / COMMENT / REOPEN
 ========================================================= */
 
-export async function createIncidenciaRequest(
-  payload = {},
-  {
-    timeout = INCIDENCIAS_UPLOAD_TIMEOUT,
-  } = {}
-) {
+export async function createIncidenciaRequest(payload = {}, { timeout = INCIDENCIAS_UPLOAD_TIMEOUT } = {}) {
   const mutation = buildMutationBody(payload);
 
-  const response = await Http.post(INCIDENCIAS_ENDPOINT, mutation.body, {
-    timeout: mutation.hasFiles ? INCIDENCIAS_UPLOAD_TIMEOUT : timeout,
-    source: "views.incidencias.create",
-  });
+  const response = mutation.hasFiles
+    ? await postMultipart(INCIDENCIAS_ENDPOINT, mutation.body, {
+        timeout: Math.max(timeout, INCIDENCIAS_UPLOAD_TIMEOUT),
+        source: "views.incidencias.create.multipart",
+      })
+    : await postJson(INCIDENCIAS_ENDPOINT, mutation.body, {
+        timeout,
+        source: "views.incidencias.create.json",
+      });
+
+  if (responseLooksFailed(response)) {
+    throw new Error(responseErrorMessage(response, "No se pudo crear la incidencia."));
+  }
 
   const detail = detailFromPayload(response);
-
   return detail ? normalizeIncidencia(detail) : null;
 }
 
 export async function createIncidencia(payload = {}, options = {}) {
   const created = await createIncidenciaRequest(payload, options);
-
-  if (created) {
-    return upsertCachedIncidencia(created);
-  }
-
-  return created;
+  return created ? upsertCachedIncidencia(created) : created;
 }
 
-export async function updateIncidenciaRequest(
-  id = "",
-  payload = {},
-  {
-    timeout = INCIDENCIAS_TIMEOUT,
-    method = "PATCH",
-  } = {}
-) {
+export async function updateIncidenciaRequest(id = "", payload = {}, { timeout = INCIDENCIAS_TIMEOUT, method = "PATCH" } = {}) {
   const endpoint = getIncidenciaEndpoint(id);
   const verb = cleanText(method, "PATCH").toUpperCase();
 
-  const response =
-    verb === "PUT"
-      ? await Http.put(endpoint, safeObject(payload), {
-          timeout,
-          source: "views.incidencias.update",
-        })
-      : await patchJson(endpoint, safeObject(payload), {
-          timeout,
-        });
+  const response = verb === "PUT"
+    ? await Http.put(endpoint, safeObject(payload), {
+        timeout,
+        source: "views.incidencias.update",
+      })
+    : await patchJson(endpoint, safeObject(payload), {
+        timeout,
+        source: "views.incidencias.update",
+      });
+
+  if (responseLooksFailed(response)) {
+    throw new Error(responseErrorMessage(response, "No se pudo actualizar la incidencia."));
+  }
 
   const detail = detailFromPayload(response);
-
   return detail ? normalizeIncidencia(detail) : null;
 }
 
 export async function updateIncidencia(id = "", payload = {}, options = {}) {
   const updated = await updateIncidenciaRequest(id, payload, options);
-  const item = updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
-
-  return item;
+  return updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
 }
 
-export async function commentIncidenciaRequest(
-  id = "",
-  message = "",
-  {
-    timeout = INCIDENCIAS_TIMEOUT,
-    status = "open",
-  } = {}
-) {
+export async function commentIncidenciaRequest(id = "", message = "", { timeout = INCIDENCIAS_TIMEOUT, status = "open" } = {}) {
   const text = cleanText(message, "");
 
-  if (!text) {
-    throw new Error("INCIDENCIA_COMMENT_REQUIRED");
-  }
+  if (!text) throw new Error("INCIDENCIA_COMMENT_REQUIRED");
 
   const response = await postJson(
     getIncidenciaCommentsEndpoint(id),
@@ -2521,68 +1621,54 @@ export async function commentIncidenciaRequest(
     },
     {
       timeout,
+      source: "views.incidencias.comment",
     }
   );
 
-  const detail = detailFromPayload(response);
+  if (responseLooksFailed(response)) {
+    throw new Error(responseErrorMessage(response, "No se pudo comentar la incidencia."));
+  }
 
+  const detail = detailFromPayload(response);
   return detail ? normalizeIncidencia(detail) : null;
 }
 
 export async function commentIncidencia(id = "", message = "", options = {}) {
   const updated = await commentIncidenciaRequest(id, message, options);
-  const item = updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
-
-  return item;
+  return updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
 }
 
-export async function reopenIncidenciaRequest(
-  id = "",
-  {
-    timeout = INCIDENCIAS_TIMEOUT,
-  } = {}
-) {
+export async function reopenIncidenciaRequest(id = "", { timeout = INCIDENCIAS_TIMEOUT } = {}) {
   const response = await postJson(
     getIncidenciaReopenEndpoint(id),
-    {
-      status: "open",
-      estado: "open",
-    },
+    { status: "open", estado: "open" },
     {
       timeout,
+      source: "views.incidencias.reopen",
     }
   );
 
-  const detail = detailFromPayload(response);
+  if (responseLooksFailed(response)) {
+    throw new Error(responseErrorMessage(response, "No se pudo reabrir la incidencia."));
+  }
 
+  const detail = detailFromPayload(response);
   return detail ? normalizeIncidencia(detail) : null;
 }
 
 export async function reopenIncidencia(id = "", options = {}) {
   const updated = await reopenIncidenciaRequest(id, options);
-  const item = updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
-
-  return item;
+  return updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
 }
 
 /* =========================================================
    ATTACHMENTS
 ========================================================= */
 
-export async function uploadIncidenciaAttachmentsRequest(
-  id = "",
-  files = [],
-  {
-    timeout = INCIDENCIAS_UPLOAD_TIMEOUT,
-    status = "open",
-    extra = {},
-  } = {}
-) {
-  const list = safeArray(files).filter((file) => isFile(file) || isBlob(file));
+export async function uploadIncidenciaAttachmentsRequest(id = "", files = [], { timeout = INCIDENCIAS_UPLOAD_TIMEOUT, status = "open", extra = {} } = {}) {
+  const list = dedupeFiles(normalizeFilesInput(files));
 
-  if (!list.length) {
-    throw new Error("INCIDENCIA_ATTACHMENTS_REQUIRED");
-  }
+  if (!list.length) throw new Error("INCIDENCIA_ATTACHMENTS_REQUIRED");
 
   const formData = buildAttachmentsFormData(list, {
     status,
@@ -2590,81 +1676,67 @@ export async function uploadIncidenciaAttachmentsRequest(
     ...safeObject(extra),
   });
 
-  const response = await Http.post(getIncidenciaAttachmentsEndpoint(id), formData, {
+  const response = await postMultipart(getIncidenciaAttachmentsEndpoint(id), formData, {
     timeout,
-    source: "views.incidencias.attachments",
+    source: "views.incidencias.attachments.multipart",
   });
 
-  const detail = detailFromPayload(response);
+  if (responseLooksFailed(response)) {
+    throw new Error(responseErrorMessage(response, "No se pudieron subir los adjuntos."));
+  }
 
+  const detail = detailFromPayload(response);
   return detail ? normalizeIncidencia(detail) : null;
 }
 
 export async function uploadIncidenciaAttachments(id = "", files = [], options = {}) {
   const updated = await uploadIncidenciaAttachmentsRequest(id, files, options);
-  const item = updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
-
-  return item;
+  return updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
 }
 
-export async function getIncidenciaAttachmentFileRequest(
-  {
-    ticketId = "",
-    attachmentId = "",
-    mode = "view",
-    kind = "attachments",
-  } = {},
-  {
-    timeout = INCIDENCIAS_DETAIL_TIMEOUT,
-  } = {}
-) {
-  const endpoint = getIncidenciaAttachmentFileEndpoint({
-    ticketId,
-    attachmentId,
-    mode,
-    kind,
-  });
+function normalizeFileResponse(response = {}, context = {}) {
+  const raw = safeObject(response);
+  const data = safeObject(first(raw.file, raw.attachment, raw.data?.file, raw.data?.attachment, raw.data, raw), {});
+  const url = firstUrl(data.viewUrl, data.openUrl, data.downloadUrl, data.signedUrl, data.url, raw.url, raw.href);
 
+  return {
+    ...data,
+    ticketId: context.ticketId,
+    attachmentId: context.attachmentId,
+    mode: context.mode,
+    kind: context.kind,
+    id: cleanText(first(data.id, data.attachmentId, context.attachmentId), context.attachmentId),
+    attachmentId: cleanText(first(data.attachmentId, data.id, context.attachmentId), context.attachmentId),
+    url,
+    viewUrl: firstUrl(data.viewUrl, url),
+    openUrl: firstUrl(data.openUrl, url),
+    downloadUrl: firstUrl(data.downloadUrl, url),
+    signedUrl: firstUrl(data.signedUrl, url),
+    name: safePublicText(first(data.name, data.filename, data.fileName, "adjunto"), "adjunto"),
+    contentType: cleanText(first(data.contentType, data.mimeType, data.mimetype, data.type, ""), ""),
+  };
+}
+
+export async function getIncidenciaAttachmentFileRequest({ ticketId = "", attachmentId = "", mode = "view", kind = "attachments" } = {}, { timeout = INCIDENCIAS_DETAIL_TIMEOUT } = {}) {
+  const endpoint = getIncidenciaAttachmentFileEndpoint({ ticketId, attachmentId, mode, kind });
   const response = await getJson(endpoint, {
     timeout,
+    source: "views.incidencias.attachment.file",
   });
 
-  return normalizeFileResponse(response, {
-    ticketId,
-    attachmentId,
-    mode,
-    kind,
-  });
+  if (responseLooksFailed(response)) {
+    throw new Error(responseErrorMessage(response, "No se pudo abrir el adjunto."));
+  }
+
+  return normalizeFileResponse(response, { ticketId, attachmentId, mode, kind });
 }
 
 export async function openIncidenciaAttachment(options = {}, requestOptions = {}) {
-  return getIncidenciaAttachmentFileRequest(
-    {
-      ...options,
-      mode: "view",
-    },
-    requestOptions
-  );
+  return getIncidenciaAttachmentFileRequest({ ...options, mode: "view" }, requestOptions);
 }
 
-export async function downloadIncidenciaAttachment(
-  {
-    ticketId = "",
-    attachmentId = "",
-    kind = "attachments",
-    filename = "",
-  } = {},
-  {
-    timeout = INCIDENCIAS_DETAIL_TIMEOUT,
-    autoDownload = true,
-  } = {}
-) {
-  const endpoint = getIncidenciaAttachmentFileEndpoint({
-    ticketId,
-    attachmentId,
-    kind,
-    mode: "download",
-  });
+export async function downloadIncidenciaAttachment({ ticketId = "", attachmentId = "", kind = "attachments", filename = "" } = {}, { timeout = INCIDENCIAS_DETAIL_TIMEOUT, autoDownload = true } = {}) {
+  const endpoint = getIncidenciaAttachmentFileEndpoint({ ticketId, attachmentId, kind, mode: "download" });
 
   return Http.downloadBlob(endpoint, {
     timeout,
@@ -2679,9 +1751,7 @@ export async function downloadIncidenciaAttachment(
 ========================================================= */
 
 function isClosedStatus(value = "") {
-  return ["closed", "resolved", "cerrada", "cerrado", "resuelta", "resuelto"].includes(
-    normalizeKey(value)
-  );
+  return ["closed", "resolved", "cerrada", "cerrado", "resuelta", "resuelto"].includes(normalizeKey(value));
 }
 
 function isOpenStatus(value = "") {
@@ -2700,7 +1770,6 @@ export function computeIncidenciasStats(items = lastList.items) {
   return rows.reduce(
     (acc, item) => {
       acc.total += 1;
-
       if (isOpenStatus(item.status || item.estado)) acc.open += 1;
       if (isClosedStatus(item.status || item.estado)) acc.closed += 1;
       if (isUrgentPriority(item.priority || item.prioridad)) acc.urgent += 1;
@@ -2726,191 +1795,66 @@ export async function loadIncidenciasStats() {
 }
 
 /* =========================================================
-   ERRORS / CACHE / SNAPSHOT
+   ERRORS / SNAPSHOT
 ========================================================= */
 
 function normalizeError(error = null) {
   return {
     message: redact(error?.message || "No se pudo cargar incidencias."),
     status: error?.status || error?.statusCode || error?.response?.status || null,
-    code: error?.code || error?.error || null,
-    at: nowIso(),
+    code: error?.code || error?.response?.code || "INCIDENCIAS_ERROR",
   };
-}
-
-export function hydrateIncidenciasFromCache() {
-  return {
-    items: safeArray(lastList.items),
-    total: number(lastList.total, safeArray(lastList.items).length),
-    loadedAt: lastLoadedAt,
-    hydrated: Boolean(lastLoadedAt),
-    fresh: isCacheFresh(),
-    ageMs: cacheAgeMs(),
-    ttlMs: INCIDENCIAS_CACHE_TTL_MS,
-  };
-}
-
-export function clearIncidenciasCache() {
-  lastList = {
-    items: [],
-    total: 0,
-  };
-
-  lastLoadedAt = null;
-  lastError = null;
-  lastCacheKey = "";
-
-  inFlightListPromise = null;
-  inFlightListKey = "";
-
-  loading = false;
-
-  return true;
 }
 
 export function getIncidenciasApiSnapshot() {
   return {
     version: INCIDENCIAS_API_VERSION,
-
     endpoint: INCIDENCIAS_ENDPOINT,
-    usersSearchEndpoint: USERS_SEARCH_ENDPOINT,
-
+    usersEndpoint: USERS_SEARCH_ENDPOINT,
     loading,
-    inFlight: Boolean(inFlightListPromise),
-
+    cached: Boolean(lastLoadedAt),
+    total: number(lastList.total, safeArray(lastList.items).length),
+    count: safeArray(lastList.items).length,
     lastLoadedAt,
+    lastCacheKey,
+    cacheAgeMs: cacheAgeMs(),
+    inFlight: Boolean(inFlightListPromise),
     lastError,
-
-    cache: {
-      ...getIncidenciasCacheState(),
-      stats: computeIncidenciasStats(lastList.items),
+    multipart: {
+      createField: "attachments",
+      uploadField: "attachments",
+      forceFormDataWhenFiles: true,
+      noJsonFallbackWhenFiles: true,
+      backendContainer: "tickets",
     },
-
-    policy: {
-      apiOnly: true,
-      singleHttpLayer: true,
-      inMemoryCache: true,
-      ttlCache: true,
-      inFlightDedupe: true,
-      staleOnError: true,
-      mutationCacheSync: true,
-      nonDestructiveCacheMerge: true,
-
-      backendCreatePayload1to1: true,
-      doesNotInventClienteId: true,
-      targetClienteIdCompatible: true,
-      createUserSearchViaApi: true,
-      createUserSearchTestedContract: true,
-      createUserSearchNoActiveFilter: true,
-      createUserSearchDoesNotTreatSuccessCodeAsError: true,
-
-      requesterEmailAliasCompatibility: true,
-      requesterAvatarAliasCompatibility: true,
-      technicianAvatarAliasCompatibility: true,
-      preservesLightweightCounts: true,
-
-      noFetch: true,
-      noStore: true,
-      noStateExternal: true,
-      noModelExternal: true,
-      noDom: true,
-      noRouter: true,
-    },
+    fixedTechnician: FIXED_TECHNICIAN,
   };
 }
 
-/* =========================================================
-   COMPAT EXPORTS
-========================================================= */
+export const getSnapshot = getIncidenciasApiSnapshot;
+export const getDebugSnapshot = getIncidenciasApiSnapshot;
 
-export const fetchIncidencias = listIncidencias;
-export const getIncidenciaById = getIncidenciaByIdRequest;
-
-export const createTicket = createIncidencia;
-export const updateTicket = updateIncidencia;
-export const commentTicket = commentIncidencia;
-export const reopenTicket = reopenIncidencia;
-export const uploadTicketAttachments = uploadIncidenciaAttachments;
-export const openTicketAttachment = openIncidenciaAttachment;
-export const downloadTicketAttachment = downloadIncidenciaAttachment;
-
-/* =========================================================
-   PUBLIC API
-========================================================= */
-
-export const IncidenciasApi = Object.freeze({
-  version: INCIDENCIAS_API_VERSION,
-
-  endpoint: INCIDENCIAS_ENDPOINT,
-  usersSearchEndpoint: USERS_SEARCH_ENDPOINT,
-
-  timeout: INCIDENCIAS_TIMEOUT,
-  detailTimeout: INCIDENCIAS_DETAIL_TIMEOUT,
-  uploadTimeout: INCIDENCIAS_UPLOAD_TIMEOUT,
-  cacheTtl: INCIDENCIAS_CACHE_TTL_MS,
-
-  USERS_SEARCH_ENDPOINT,
-  USERS_SEARCH_LIMIT,
-  USERS_SEARCH_MIN_LENGTH,
-
-  normalizeIncidenciaId,
-
-  getIncidenciaEndpoint,
-  getIncidenciaCommentsEndpoint,
-  getIncidenciaReopenEndpoint,
-  getIncidenciaAttachmentsEndpoint,
-  getIncidenciaAttachmentFileEndpoint,
-
-  normalizeIncidencia,
-  normalizeCreateSearchUser,
-  searchIncidenciaUsers,
-
-  computeIncidenciasStats,
-
-  fetchIncidenciasRequest,
+export default {
   listIncidencias,
   loadIncidencias,
-  fetchIncidencias,
-
-  getIncidenciaByIdRequest,
-  getIncidenciaById,
-  loadIncidenciaDetail,
-
-  createIncidenciaRequest,
-  createIncidencia,
-  createTicket,
-
-  updateIncidenciaRequest,
-  updateIncidencia,
-  updateTicket,
-
-  commentIncidenciaRequest,
-  commentIncidencia,
-  commentTicket,
-
-  reopenIncidenciaRequest,
-  reopenIncidencia,
-  reopenTicket,
-
-  uploadIncidenciaAttachmentsRequest,
-  uploadIncidenciaAttachments,
-  uploadTicketAttachments,
-
-  getIncidenciaAttachmentFileRequest,
-  openIncidenciaAttachment,
-  openTicketAttachment,
-  downloadIncidenciaAttachment,
-  downloadTicketAttachment,
-
-  loadIncidenciasStats,
-
   hydrateIncidenciasFromCache,
-  hasFreshIncidenciasCache,
-  getIncidenciasCacheState,
   clearIncidenciasCache,
-
+  createIncidencia,
+  createIncidenciaRequest,
+  loadIncidenciaDetail,
+  getIncidenciaByIdRequest,
+  updateIncidencia,
+  updateIncidenciaRequest,
+  commentIncidencia,
+  commentIncidenciaRequest,
+  reopenIncidencia,
+  reopenIncidenciaRequest,
+  uploadIncidenciaAttachments,
+  uploadIncidenciaAttachmentsRequest,
+  openIncidenciaAttachment,
+  downloadIncidenciaAttachment,
+  computeIncidenciasStats,
+  loadIncidenciasStats,
+  searchIncidenciaUsers,
   getIncidenciasApiSnapshot,
-  getSnapshot: getIncidenciasApiSnapshot,
-});
-
-export default IncidenciasApi;
+};

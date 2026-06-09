@@ -2,27 +2,21 @@
    Onion Support - Incidencias Template
    Archivo: /src/views/incidencias/incidencias.template.js
 
+   PRODUCTIVO · 1:1 · TABLE PAINT GUARANTEED · 10/10
+
    Responsabilidad:
    - Render HTML puro de la vista Incidencias.
    - Header/hero, stats, filtros, búsqueda y listado.
-   - No renderizar modales: index.js los monta como isla externa estable.
-   - Exponer data-incidencias-action/data-field para index.js.
-   - Mantener columnas 1:1 con CSS.
-   - Tabla sin columna Acciones: la fila abre el detalle.
-   - Tabla marcada para escala visual 110%.
-   - Botón de orden de fecha preparado para el controlador.
-   - Sin Auth.
-   - Sin Router.
-   - Sin HTTP.
-   - Sin Store.
-   - Sin State externo.
-   - Sin Model externo.
-   - Sin listeners.
-   - Sin DOM API.
-   - Sin Toast.
+   - No renderizar modales: index.js monta modales como isla externa.
+   - Exponer data-incidencias-action/data-field estables para index.js.
+   - Tabla sin columna Acciones: click en fila abre detalle.
+   - Blindaje anti “total > 0 pero items vacíos”: acepta items/tickets/
+     incidencias/rows/results/data.items/data.rows/payload.items/etc.
+   - No Auth, no Router, no HTTP, no Store, no DOM API, no listeners.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.productive.v10.sort-card";
+export const INCIDENCIAS_TEMPLATE_VERSION =
+  "incidencias.template.productive.v11.paint-safe";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -40,8 +34,8 @@ export const INCIDENCIAS_ACTIONS = Object.freeze({
 const DEFAULT_ROUTE = "/incidencias";
 const DEFAULT_VISIBLE_ROWS = 20;
 const DEFAULT_CURRENCY = "EUR";
-const TABLE_SCALE = "110";
 const DEFAULT_SORT_ORDER = "desc";
+const TABLE_SCALE = "110";
 
 const FILTERS = Object.freeze([
   { key: "all", label: "Todas" },
@@ -107,7 +101,22 @@ function safeObject(value, fallback = {}) {
 }
 
 function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  if (Array.isArray(value)) return value;
+
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof value.length === "number" &&
+    typeof value !== "string"
+  ) {
+    try {
+      return Array.from(value);
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 }
 
 function cleanText(value = "", fallback = "") {
@@ -123,8 +132,8 @@ function first(...values) {
   for (const value of values.flat(Infinity)) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (isObject(value) && !Object.keys(value).length) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
 
     return value;
   }
@@ -154,7 +163,6 @@ function number(value = 0, fallback = 0) {
     if (hasComma && hasDot) {
       const lastComma = clean.lastIndexOf(",");
       const lastDot = clean.lastIndexOf(".");
-
       clean = lastComma > lastDot
         ? clean.replace(/\./g, "").replace(/,/g, ".")
         : clean.replace(/,/g, "");
@@ -233,7 +241,6 @@ function safeImageSrc(value = "") {
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
   if (hasSensitiveQuery(raw)) return "";
-
   if (/^blob:/i.test(raw)) return raw;
   if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
 
@@ -264,18 +271,24 @@ function firstImageSrc(...values) {
       const nested = firstImageSrc(
         value.avatarUrl,
         value.avatar,
+        value.picture,
         value.photoUrl,
         value.photoURL,
         value.imageUrl,
-        value.picture,
-        value.url,
-        value.src,
-        value.href,
+        value.userAvatar,
+        value.userAvatarUrl,
+        value.clienteAvatar,
+        value.clienteAvatarUrl,
+        value.clientAvatar,
+        value.clientAvatarUrl,
         value.profile?.avatarUrl,
         value.profile?.avatar,
+        value.profile?.picture,
         value.profile?.photoUrl,
         value.profile?.photoURL,
-        value.profile?.picture
+        value.raw?.avatarUrl,
+        value.raw?.avatar,
+        value.raw?.picture
       );
 
       if (nested) return nested;
@@ -289,57 +302,6 @@ function firstImageSrc(...values) {
   return "";
 }
 
-function normalizeEmail(value = "") {
-  const email = cleanText(value, "").toLowerCase();
-
-  if (!email) return "";
-
-  if (
-    [
-      "null",
-      "undefined",
-      "none",
-      "sin email",
-      "no email",
-      "no_email",
-      "__no_email__",
-    ].includes(email)
-  ) {
-    return "";
-  }
-
-  return email.includes("@") ? email : "";
-}
-
-function firstEmail(...values) {
-  for (const value of values.flat(Infinity)) {
-    const email = normalizeEmail(value);
-    if (email) return email;
-  }
-
-  return "";
-}
-
-function valueAt(source = {}, path = "") {
-  if (!isObject(source) || !path) return undefined;
-
-  return path.split(".").reduce((acc, key) => {
-    if (acc === undefined || acc === null) return undefined;
-    return acc[key];
-  }, source);
-}
-
-function pickValue(item = {}, paths = []) {
-  const raw = safeObject(item?.raw);
-
-  for (const path of paths) {
-    const value = first(valueAt(item, path), valueAt(raw, path));
-    if (value !== null && value !== undefined) return value;
-  }
-
-  return null;
-}
-
 function hashText(value = "") {
   const text = cleanText(value, "");
   let hash = 0;
@@ -350,131 +312,6 @@ function hashText(value = "") {
   }
 
   return Math.abs(hash);
-}
-
-/* =========================================================
-   FORMATTERS
-========================================================= */
-
-function formatNumber(value = 0) {
-  try {
-    return new Intl.NumberFormat("es-ES").format(Number(value) || 0);
-  } catch {
-    return String(Number(value) || 0);
-  }
-}
-
-function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
-  const amount = number(value, NaN);
-
-  if (!Number.isFinite(amount)) return "—";
-
-  try {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: cleanText(currency, DEFAULT_CURRENCY).toUpperCase(),
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(2).replace(".", ",")} €`;
-  }
-}
-
-function toTimestamp(value = null) {
-  if (!value) return 0;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? 0 : value.getTime();
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value > 9999999999 ? value : value * 1000;
-  }
-
-  const raw = cleanText(value, "");
-
-  if (!raw) return 0;
-
-  const numeric = Number(raw);
-
-  if (Number.isFinite(numeric) && numeric > 0) {
-    return numeric > 9999999999 ? numeric : numeric * 1000;
-  }
-
-  const parsed = Date.parse(raw);
-
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatDateTime(value = null) {
-  const timestamp = toTimestamp(value);
-
-  if (!timestamp) return "—";
-
-  try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(timestamp));
-  } catch {
-    return "—";
-  }
-}
-
-function formatDateShort(value = null) {
-  const timestamp = toTimestamp(value);
-
-  if (!timestamp) return "—";
-
-  try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(timestamp));
-  } catch {
-    return "—";
-  }
-}
-
-function formatRelativeDate(value = null) {
-  const timestamp = toTimestamp(value);
-
-  if (!timestamp) return "Sin fecha";
-
-  const diffMs = timestamp - Date.now();
-  const diffMin = Math.round(diffMs / 60000);
-  const absMin = Math.abs(diffMin);
-
-  if (absMin < 1) return "Ahora mismo";
-  if (absMin < 60) return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
-
-  const diffHours = Math.round(absMin / 60);
-
-  if (diffHours < 24) {
-    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
-  }
-
-  const diffDays = Math.round(diffHours / 24);
-
-  if (diffDays <= 7) {
-    return diffMin > 0
-      ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
-      : `Hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
-  }
-
-  return formatDateShort(value);
-}
-
-function formatLastUpdate(value = null) {
-  const timestamp = toTimestamp(value);
-
-  if (!timestamp) return "Sin fecha";
-
-  const diffHours = Math.abs(Date.now() - timestamp) / 3600000;
-
-  return diffHours <= 72 ? formatRelativeDate(value) : formatDateTime(value);
 }
 
 function initialsFrom(value = "") {
@@ -495,467 +332,630 @@ function initialsFrom(value = "") {
 
 function icon(name = "") {
   const common =
-    `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+    `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 
   const icons = {
-    refresh: `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
-    plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
     ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
-    paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
-    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+    refresh: `<svg ${common}><path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7"/><path d="M21 21v-5h-5"/></svg>`,
+    plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
     search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
-    euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
+    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+    paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
+    euro: `<svg ${common}><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C8.9 4 5 7.6 5 12s3.9 8 8.8 8A7.7 7.7 0 0 0 19 18"/></svg>`,
     chevronDown: `<svg ${common}><path d="m6 9 6 6 6-6"/></svg>`,
-
-    badgeBolt: `<svg ${common}><path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z"/></svg>`,
-    badgeSignal: `<svg ${common}><path d="M4 13h3v7H4z"/><path d="M10.5 9h3v11h-3z"/><path d="M17 4h3v16h-3z"/></svg>`,
-    badgeShield: `<svg ${common}><path d="M12 3 20 7v5c0 5-3.4 8.3-8 9-4.6-.7-8-4-8-9V7l8-4Z"/><path d="M9.5 12.2 11.3 14l3.5-4"/></svg>`,
-    badgeLeaf: `<svg ${common}><path d="M19 4c-7.5.6-12 4.5-12 10.5 0 3.2 2.3 5.5 5.5 5.5C18.5 20 21.4 13.5 19 4Z"/><path d="M7 17c2.2-3.7 5.2-6.2 9-7.5"/></svg>`,
+    calendar: `<svg ${common}><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>`,
+    clock: `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
+    user: `<svg ${common}><path d="M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>`,
+    hash: `<svg ${common}><path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="m16 3-2 18"/></svg>`,
   };
 
-  return icons[name] || "";
-}
-
-function renderSpinner(label = "Cargando...") {
-  return `
-    <span class="incidencias-spinner" aria-hidden="true"></span>
-    <span class="incidencias-btn-text">${escapeHtml(label)}</span>
-  `;
+  return icons[name] || icons.ticket;
 }
 
 /* =========================================================
-   ITEM PICKERS
+   FORMATTERS
 ========================================================= */
 
+function formatNumber(value = 0) {
+  try {
+    return new Intl.NumberFormat("es-ES").format(number(value, 0));
+  } catch {
+    return String(number(value, 0));
+  }
+}
+
+function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
+  try {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: cleanText(currency, DEFAULT_CURRENCY).toUpperCase(),
+      maximumFractionDigits: 2,
+    }).format(number(value, 0));
+  } catch {
+    return `${number(value, 0).toFixed(2)} €`;
+  }
+}
+
+function formatDate(value = "") {
+  const raw = first(value, "");
+  if (!raw) return "—";
+
+  const date = new Date(raw);
+  if (!Number.isFinite(date.getTime())) return cleanText(raw, "—");
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return date.toISOString();
+  }
+}
+
+function formatShortDate(value = "") {
+  const raw = first(value, "");
+  if (!raw) return "—";
+
+  const date = new Date(raw);
+  if (!Number.isFinite(date.getTime())) return cleanText(raw, "—");
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }).format(date);
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+function formatRelativeDate(value = "") {
+  const raw = first(value, "");
+  if (!raw) return "—";
+
+  const date = new Date(raw);
+  const ms = date.getTime();
+  if (!Number.isFinite(ms)) return cleanText(raw, "—");
+
+  const diff = Date.now() - ms;
+  const abs = Math.abs(diff);
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (abs < minute) return "ahora";
+  if (abs < hour) return `hace ${Math.max(1, Math.round(abs / minute))} min`;
+  if (abs < day) return `hace ${Math.max(1, Math.round(abs / hour))} h`;
+  if (abs < 7 * day) return `hace ${Math.max(1, Math.round(abs / day))} d`;
+
+  return formatShortDate(raw);
+}
+
+function sortTime(value = "") {
+  const raw = first(value, "");
+  if (!raw) return 0;
+
+  const ms = new Date(raw).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/* =========================================================
+   ITEM GETTERS
+========================================================= */
+
+function unwrapItem(value = {}) {
+  const item = safeObject(value, {});
+
+  return safeObject(
+    first(
+      item.ticket,
+      item.incidencia,
+      item.item,
+      item.detail,
+      item.data?.ticket,
+      item.data?.incidencia,
+      item.data?.item,
+      item.data,
+      item
+    ),
+    item
+  );
+}
+
 function getTicketId(item = {}) {
+  const raw = unwrapItem(item);
+
   return cleanText(
-    pickValue(item, [
-      "ticketId",
-      "incidenciaId",
-      "code",
-      "numero",
-      "ticketCode",
-      "id",
-      "_id",
-    ]),
-    "INC-SIN-ID"
+    first(
+      raw.ticketId,
+      raw.incidenciaId,
+      raw.id,
+      raw.entityId,
+      raw.code,
+      raw.numero,
+      raw.ticketCode,
+      raw.reference,
+      raw.ref,
+      ""
+    ),
+    ""
   );
 }
 
 function getSubject(item = {}) {
-  return cleanText(
-    pickValue(item, ["subject", "title", "asunto", "name", "preview"]),
-    "Incidencia sin asunto"
-  );
+  const raw = unwrapItem(item);
+  return cleanText(first(raw.subject, raw.asunto, raw.title, raw.name, "Sin asunto"), "Sin asunto");
 }
 
 function getDescription(item = {}) {
-  return cleanText(
-    pickValue(item, ["description", "descripcion", "message", "body", "preview", "text"]),
-    "Sin descripción."
-  );
+  const raw = unwrapItem(item);
+  return cleanText(first(raw.preview, raw.description, raw.descripcion, raw.message, raw.body, ""), "");
+}
+
+function getStatusRaw(item = {}) {
+  const raw = unwrapItem(item);
+  return cleanText(first(raw.status, raw.estado, raw.statusKey, raw.lifecycle?.status, "open"), "open");
+}
+
+function getPriorityRaw(item = {}) {
+  const raw = unwrapItem(item);
+  return cleanText(first(raw.priority, raw.prioridad, raw.severity, "medium"), "medium");
+}
+
+function getCategory(item = {}) {
+  const raw = unwrapItem(item);
+  return cleanText(first(raw.category, raw.categoria, raw.tipo, raw.type, "general"), "general");
 }
 
 function getClientName(item = {}) {
+  const raw = unwrapItem(item);
+  const requester = safeObject(raw.requesterSnapshot);
+  const cliente = safeObject(raw.cliente);
+  const receptor = safeObject(raw.receptor);
+  const user = safeObject(raw.user);
+
   return cleanText(
-    pickValue(item, [
-      "clientName",
-      "clienteNombre",
-      "clienteName",
-      "requesterName",
-      "userName",
-      "name",
-      "requesterSnapshot.displayName",
-      "requesterSnapshot.name",
-      "requesterSnapshot.nombre",
-      "cliente.displayName",
-      "cliente.name",
-      "cliente.nombre",
-      "client.displayName",
-      "client.name",
-      "user.displayName",
-      "user.name",
-    ]),
-    "Cliente"
+    first(
+      raw.displayName,
+      raw.name,
+      raw.nombre,
+      raw.clientName,
+      raw.clienteNombre,
+      raw.requesterName,
+      requester.displayName,
+      requester.name,
+      requester.nombre,
+      cliente.displayName,
+      cliente.name,
+      cliente.nombre,
+      receptor.displayName,
+      receptor.name,
+      receptor.nombre,
+      user.displayName,
+      user.name,
+      user.nombre,
+      raw.email,
+      getTicketId(raw),
+      "Usuario"
+    ),
+    "Usuario"
   );
 }
 
 function getClientEmail(item = {}) {
-  return firstEmail(
-    pickValue(item, ["requesterEmail"]),
-    pickValue(item, ["requesterEmailLower"]),
-    pickValue(item, ["clientEmail"]),
-    pickValue(item, ["clientEmailLower"]),
-    pickValue(item, ["clienteEmail"]),
-    pickValue(item, ["clienteEmailLower"]),
-    pickValue(item, ["userEmail"]),
-    pickValue(item, ["userEmailLower"]),
-    pickValue(item, ["email"]),
-    pickValue(item, ["emailLower"]),
-    pickValue(item, ["requesterSnapshot.email"]),
-    pickValue(item, ["requesterSnapshot.emailLower"]),
-    pickValue(item, ["cliente.email"]),
-    pickValue(item, ["cliente.emailLower"]),
-    pickValue(item, ["client.email"]),
-    pickValue(item, ["client.emailLower"]),
-    pickValue(item, ["user.email"]),
-    pickValue(item, ["user.emailLower"]),
-    pickValue(item, ["meta.requesterEmail"]),
-    pickValue(item, ["meta.clientEmail"]),
-    pickValue(item, ["meta.clienteEmail"]),
-    pickValue(item, ["meta.userEmail"])
+  const raw = unwrapItem(item);
+  const requester = safeObject(raw.requesterSnapshot);
+  const cliente = safeObject(raw.cliente);
+  const receptor = safeObject(raw.receptor);
+  const user = safeObject(raw.user);
+
+  return cleanText(
+    first(
+      raw.email,
+      raw.emailLower,
+      raw.userEmail,
+      raw.clienteEmail,
+      requester.email,
+      requester.emailLower,
+      cliente.email,
+      cliente.emailLower,
+      receptor.email,
+      receptor.emailLower,
+      user.email,
+      user.emailLower,
+      ""
+    ),
+    ""
+  );
+}
+
+function getClientUserId(item = {}) {
+  const raw = unwrapItem(item);
+  const requester = safeObject(raw.requesterSnapshot);
+  const cliente = safeObject(raw.cliente);
+  const receptor = safeObject(raw.receptor);
+
+  return cleanText(
+    first(raw.userId, requester.userId, requester.id, receptor.userId, receptor.id, cliente.userId, ""),
+    ""
+  );
+}
+
+function getClientId(item = {}) {
+  const raw = unwrapItem(item);
+  const requester = safeObject(raw.requesterSnapshot);
+  const cliente = safeObject(raw.cliente);
+  const receptor = safeObject(raw.receptor);
+
+  return cleanText(
+    first(raw.clienteId, requester.clienteId, cliente.clienteId, cliente.id, receptor.clienteId, ""),
+    ""
   );
 }
 
 function getAvatarUrl(item = {}) {
+  const raw = unwrapItem(item);
+
   return firstImageSrc(
-    pickValue(item, ["requesterAvatarUrl"]),
-    pickValue(item, ["requesterAvatar"]),
-    pickValue(item, ["userAvatarUrl"]),
-    pickValue(item, ["userAvatar"]),
-    pickValue(item, ["clientAvatarUrl"]),
-    pickValue(item, ["clientAvatar"]),
-    pickValue(item, ["clienteAvatarUrl"]),
-    pickValue(item, ["clienteAvatar"]),
-    pickValue(item, ["avatarUrl"]),
-    pickValue(item, ["avatar"]),
-    pickValue(item, ["photoUrl"]),
-    pickValue(item, ["photoURL"]),
-    pickValue(item, ["imageUrl"]),
-    pickValue(item, ["picture"]),
-    pickValue(item, ["requesterSnapshot"]),
-    pickValue(item, ["cliente"]),
-    pickValue(item, ["client"]),
-    pickValue(item, ["user"]),
-    pickValue(item, ["meta.requesterAvatarUrl"]),
-    pickValue(item, ["meta.requesterAvatar"]),
-    pickValue(item, ["meta.clientAvatarUrl"]),
-    pickValue(item, ["meta.clientAvatar"])
-  );
-}
-
-function getStatusRaw(item = {}) {
-  return first(
-    pickValue(item, ["status"]),
-    pickValue(item, ["estado"]),
-    pickValue(item, ["state"]),
-    pickValue(item, ["lifecycle.status"]),
-    "open"
-  );
-}
-
-function getPriorityRaw(item = {}) {
-  return first(
-    pickValue(item, ["priority"]),
-    pickValue(item, ["prioridad"]),
-    pickValue(item, ["severity"]),
-    pickValue(item, ["urgency"]),
-    pickValue(item, ["sla.priority"]),
-    "medium"
-  );
-}
-
-function getStatusKey(value = "") {
-  const key = normalizeKey(value);
-
-  if (["open", "opened", "abierta", "abierto"].includes(key)) return "open";
-  if (["pending", "pendiente", "new", "nueva", "nuevo"].includes(key)) return "pending";
-  if (["in_progress", "progress", "inprogress", "proceso", "en_proceso", "working"].includes(key)) return "progress";
-  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
-  if (["closed", "close", "cerrada", "cerrado", "cancelled", "canceled", "archived", "archivada"].includes(key)) return "closed";
-
-  return "pending";
-}
-
-function getStatusLabel(value = "") {
-  const key = getStatusKey(value);
-
-  if (key === "open") return "Abierta";
-  if (key === "pending") return "Pendiente";
-  if (key === "progress") return "En proceso";
-  if (key === "resolved") return "Resuelta";
-  if (key === "closed") return "Cerrada";
-
-  return "Pendiente";
-}
-
-function getPriorityKey(item = {}) {
-  const key = normalizeKey(getPriorityRaw(item));
-
-  if (["critical", "critica", "crítica", "critico", "crítico", "p0"].includes(key)) return "critical";
-  if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) return "urgent";
-  if (["low", "baja", "minor", "p3"].includes(key)) return "low";
-
-  return "medium";
-}
-
-function getPriorityLabel(item = {}) {
-  const key = getPriorityKey(item);
-
-  if (key === "critical") return "Crítica";
-  if (key === "urgent") return "Urgente";
-  if (key === "low") return "Baja";
-
-  return "Media";
-}
-
-function getPriorityIconName(key = "") {
-  if (key === "critical") return "badgeBolt";
-  if (key === "urgent") return "badgeSignal";
-  if (key === "low") return "badgeLeaf";
-
-  return "badgeShield";
-}
-
-function getCategory(item = {}) {
-  return cleanText(
-    pickValue(item, ["category", "categoria", "type", "tipo", "subcategory", "subcategoria"]),
-    "Soporte"
+    raw.avatarUrl,
+    raw.avatar,
+    raw.userAvatarUrl,
+    raw.userAvatar,
+    raw.clienteAvatarUrl,
+    raw.clienteAvatar,
+    raw.requesterSnapshot,
+    raw.cliente,
+    raw.receptor,
+    raw.user
   );
 }
 
 function getAssignedTo(item = {}) {
+  const raw = unwrapItem(item);
+  const assignment = safeObject(raw.assignment);
+  const tecnico = safeObject(raw.tecnico);
+  const assignedTo = safeObject(raw.assignedTo);
+  const technician = safeObject(raw.technician);
+
   return cleanText(
-    pickValue(item, [
-      "assignedToName",
-      "technicianName",
-      "tecnicoName",
-      "agentName",
-      "assignmentAssignedToName",
-      "assignmentTechnicianName",
-      "assignment.name",
-      "assignment.assignedToName",
-      "assignment.technicianName",
-      "assignment.agentName",
-      "assignedTo.displayName",
-      "assignedTo.name",
-      "assignedTo.nombre",
-      "technician.displayName",
-      "technician.name",
-      "tecnico.displayName",
-      "tecnico.name",
-      "agent.displayName",
-      "agent.name",
-      "meta.technicianName",
-      "meta.assignedTechnicianName",
-      "meta.lastTechnicianName",
-    ]),
-    "Sin asignar"
+    first(
+      raw.assignedToName,
+      raw.technicianName,
+      raw.tecnicoName,
+      raw.agentName,
+      assignment.assignedToName,
+      assignment.technician?.name,
+      assignment.technician?.displayName,
+      tecnico.displayName,
+      tecnico.name,
+      tecnico.nombre,
+      assignedTo.displayName,
+      assignedTo.name,
+      assignedTo.nombre,
+      technician.displayName,
+      technician.name,
+      technician.nombre,
+      "Cristian Ávila Luque"
+    ),
+    "Cristian Ávila Luque"
+  );
+}
+
+function getAssignedEmail(item = {}) {
+  const raw = unwrapItem(item);
+  const assignment = safeObject(raw.assignment);
+  const tecnico = safeObject(raw.tecnico);
+  const assignedTo = safeObject(raw.assignedTo);
+  const technician = safeObject(raw.technician);
+
+  return cleanText(
+    first(
+      raw.assignedToEmail,
+      raw.technicianEmail,
+      raw.tecnicoEmail,
+      raw.agentEmail,
+      assignment.assignedToEmail,
+      assignment.technician?.email,
+      tecnico.email,
+      assignedTo.email,
+      technician.email,
+      ""
+    ),
+    ""
   );
 }
 
 function getAssignedAvatarUrl(item = {}) {
+  const raw = unwrapItem(item);
+  const assignment = safeObject(raw.assignment);
+
   return firstImageSrc(
-    pickValue(item, ["assignedToAvatarUrl"]),
-    pickValue(item, ["assignedToAvatar"]),
-    pickValue(item, ["technicianAvatarUrl"]),
-    pickValue(item, ["technicianAvatar"]),
-    pickValue(item, ["tecnicoAvatarUrl"]),
-    pickValue(item, ["tecnicoAvatar"]),
-    pickValue(item, ["agentAvatarUrl"]),
-    pickValue(item, ["agentAvatar"]),
-    pickValue(item, ["assignment.assignedToAvatarUrl"]),
-    pickValue(item, ["assignment.assignedToAvatar"]),
-    pickValue(item, ["assignment.technicianAvatarUrl"]),
-    pickValue(item, ["assignment.technicianAvatar"]),
-    pickValue(item, ["assignment.agentAvatarUrl"]),
-    pickValue(item, ["assignment.agentAvatar"]),
-    pickValue(item, ["assignment.avatarUrl"]),
-    pickValue(item, ["assignment.avatar"]),
-    pickValue(item, ["assignedTo"]),
-    pickValue(item, ["technician"]),
-    pickValue(item, ["tecnico"]),
-    pickValue(item, ["agent"]),
-    pickValue(item, ["meta.technicianAvatarUrl"]),
-    pickValue(item, ["meta.technicianAvatar"]),
-    pickValue(item, ["meta.assignedTechnicianAvatarUrl"]),
-    pickValue(item, ["meta.assignedTechnicianAvatar"]),
-    pickValue(item, ["meta.lastTechnicianAvatarUrl"]),
-    pickValue(item, ["meta.lastTechnicianAvatar"])
+    raw.assignedToAvatarUrl,
+    raw.assignedToAvatar,
+    raw.technicianAvatarUrl,
+    raw.technicianAvatar,
+    raw.tecnicoAvatarUrl,
+    raw.tecnicoAvatar,
+    raw.agentAvatarUrl,
+    raw.agentAvatar,
+    assignment.assignedToAvatarUrl,
+    assignment.assignedToAvatar,
+    assignment.technicianAvatarUrl,
+    assignment.technicianAvatar,
+    assignment.agentAvatarUrl,
+    assignment.agentAvatar,
+    assignment.avatarUrl,
+    assignment.avatar,
+    assignment.technician,
+    raw.tecnico,
+    raw.assignedTo,
+    raw.technician
+  );
+}
+
+function getCreatedAt(item = {}) {
+  const raw = unwrapItem(item);
+  return first(raw.createdAt, raw.fechaCreacion, raw.created_at, raw.lifecycle?.createdAt, "");
+}
+
+function getUpdatedAt(item = {}) {
+  const raw = unwrapItem(item);
+  return first(raw.lastActivityAt, raw.updatedAt, raw.modifiedAt, raw.updated_at, raw.lifecycle?.lastActivityAt, raw.lifecycle?.updatedAt, getCreatedAt(raw), "");
+}
+
+function getAttachmentsCount(item = {}) {
+  const raw = unwrapItem(item);
+  const attachments = safeArray(first(raw.attachments, raw.files, raw.adjuntos, []));
+
+  return Math.max(
+    attachments.length,
+    number(raw.attachmentsCount, 0),
+    number(raw.attachmentCount, 0),
+    number(raw.filesCount, 0),
+    number(raw.adjuntosCount, 0),
+    number(raw.meta?.attachmentsCount, 0),
+    number(raw.meta?.filesCount, 0)
   );
 }
 
 function getInvoiceTotal(item = {}) {
+  const raw = unwrapItem(item);
+
   return number(
     first(
-      pickValue(item, ["invoiceTotal"]),
-      pickValue(item, ["invoicesTotal"]),
-      pickValue(item, ["facturasTotal"]),
-      pickValue(item, ["importeFacturas"]),
-      pickValue(item, ["facturaTotal"]),
-      pickValue(item, ["facturaImporte"]),
-      pickValue(item, ["importeFactura"]),
-      pickValue(item, ["invoiceAmount"]),
-      pickValue(item, ["amount"]),
-      pickValue(item, ["total"]),
-      pickValue(item, ["meta.invoiceTotal"]),
-      pickValue(item, ["meta.invoicesTotal"]),
+      raw.invoiceTotal,
+      raw.invoicesTotal,
+      raw.facturasTotal,
+      raw.importeFacturas,
+      raw.facturaTotal,
+      raw.facturaImporte,
+      raw.importeFactura,
+      raw.totalFactura,
+      raw.invoiceAmount,
+      raw.billing?.total,
+      raw.billing?.amount,
+      raw.linkedInvoices?.total,
+      raw.linkedInvoices?.amount,
+      raw.meta?.invoiceTotal,
       0
     ),
     0
   );
 }
 
-function getInvoiceCurrency(item = {}) {
+function getCurrency(item = {}) {
+  const raw = unwrapItem(item);
+
   return cleanText(
     first(
-      pickValue(item, ["currency"]),
-      pickValue(item, ["moneda"]),
-      pickValue(item, ["facturaCurrency"]),
-      pickValue(item, ["facturaMoneda"]),
-      pickValue(item, ["meta.invoiceCurrency"]),
+      raw.currency,
+      raw.moneda,
+      raw.facturaCurrency,
+      raw.facturaMoneda,
+      raw.billing?.currency,
+      raw.linkedInvoices?.currency,
+      raw.meta?.invoiceCurrency,
       DEFAULT_CURRENCY
     ),
     DEFAULT_CURRENCY
   ).toUpperCase();
 }
 
-function getImporteLabel(item = {}) {
-  const amount = getInvoiceTotal(item);
+/* =========================================================
+   STATUS / PRIORITY
+========================================================= */
 
-  if (amount > 0) {
-    return formatMoney(amount, getInvoiceCurrency(item));
-  }
+function getStatusKey(value = "") {
+  const key = normalizeKey(value || "open");
 
-  const paymentKey = normalizeKey(first(pickValue(item, ["paymentStatus"]), pickValue(item, ["estadoPago"]), ""));
+  const map = {
+    open: "open",
+    opened: "open",
+    abierta: "open",
+    abierto: "open",
 
-  if (["paid", "pagada", "pagado"].includes(paymentKey)) return "Pagado";
-  if (["pending", "pendiente"].includes(paymentKey)) return "Pendiente";
-  if (["partial", "parcial"].includes(paymentKey)) return "Parcial";
-  if (["overdue", "vencida", "vencido"].includes(paymentKey)) return "Vencido";
+    pending: "pending",
+    pendiente: "pending",
+    new: "pending",
+    nueva: "pending",
+    nuevo: "pending",
 
-  return "—";
+    in_progress: "in_progress",
+    inprogress: "in_progress",
+    progress: "in_progress",
+    proceso: "in_progress",
+    en_proceso: "in_progress",
+    working: "in_progress",
+    assigned: "in_progress",
+    asignada: "in_progress",
+    asignado: "in_progress",
+
+    resolved: "closed",
+    resuelta: "closed",
+    resuelto: "closed",
+    solved: "closed",
+    closed: "closed",
+    close: "closed",
+    cerrada: "closed",
+    cerrado: "closed",
+
+    cancelled: "closed",
+    canceled: "closed",
+    cancelada: "closed",
+    cancelado: "closed",
+    archived: "closed",
+    archivada: "closed",
+    archivado: "closed",
+  };
+
+  return map[key] || key || "open";
+}
+
+function getStatusLabel(value = "") {
+  const key = getStatusKey(value);
+
+  const map = {
+    open: "Abierta",
+    pending: "Pendiente",
+    in_progress: "En proceso",
+    closed: "Cerrada",
+  };
+
+  return map[key] || cleanText(value, "Abierta");
+}
+
+function getPriorityKey(item = {}) {
+  const key = normalizeKey(getPriorityRaw(item) || "medium");
+
+  const map = {
+    low: "low",
+    baja: "low",
+    minor: "low",
+    p3: "low",
+
+    medium: "medium",
+    media: "medium",
+    normal: "medium",
+    p2: "medium",
+
+    high: "high",
+    alta: "high",
+    p1: "high",
+
+    urgent: "urgent",
+    urgente: "urgent",
+    critical: "urgent",
+    critica: "urgent",
+    critico: "urgent",
+    crítica: "urgent",
+    crítico: "urgent",
+    p0: "urgent",
+  };
+
+  return map[key] || key || "medium";
+}
+
+function getPriorityLabel(item = {}) {
+  const key = getPriorityKey(item);
+
+  const map = {
+    low: "Baja",
+    medium: "Media",
+    high: "Alta",
+    urgent: "Urgente",
+  };
+
+  return map[key] || key;
+}
+
+function getPriorityIconName(key = "") {
+  if (key === "urgent" || key === "high") return "alert";
+  return "ticket";
+}
+
+function isOpenItem(item = {}) {
+  return ["open", "pending", "in_progress"].includes(getStatusKey(getStatusRaw(item)));
+}
+
+function isClosedItem(item = {}) {
+  return getStatusKey(getStatusRaw(item)) === "closed";
+}
+
+function isUrgentItem(item = {}) {
+  return ["urgent", "high"].includes(getPriorityKey(item));
 }
 
 function getImporteKey(item = {}) {
-  const amount = getInvoiceTotal(item);
-
-  if (amount > 0) return "money";
-
-  const paymentKey = normalizeKey(first(pickValue(item, ["paymentStatus"]), pickValue(item, ["estadoPago"]), ""));
-
-  if (["paid", "pagada", "pagado"].includes(paymentKey)) return "paid";
-  if (["pending", "pendiente"].includes(paymentKey)) return "pending";
-  if (["partial", "parcial"].includes(paymentKey)) return "partial";
-  if (["overdue", "vencida", "vencido"].includes(paymentKey)) return "overdue";
-
-  return "idle";
+  return getInvoiceTotal(item) > 0 ? "money" : "none";
 }
 
-function getCreatedAt(item = {}) {
-  return first(
-    pickValue(item, ["createdAt"]),
-    pickValue(item, ["fechaCreacion"]),
-    pickValue(item, ["created_at"]),
-    pickValue(item, ["lifecycle.createdAt"]),
-    null
-  );
-}
+function getImporteLabel(item = {}) {
+  const total = getInvoiceTotal(item);
 
-function getUpdatedAt(item = {}) {
-  return first(
-    pickValue(item, ["lastActivityAt"]),
-    pickValue(item, ["updatedAt"]),
-    pickValue(item, ["updated_at"]),
-    pickValue(item, ["modifiedAt"]),
-    pickValue(item, ["closedAt"]),
-    pickValue(item, ["createdAt"]),
-    pickValue(item, ["lifecycle.lastActivityAt"]),
-    pickValue(item, ["lifecycle.updatedAt"]),
-    pickValue(item, ["lifecycle.closedAt"]),
-    pickValue(item, ["lifecycle.createdAt"]),
-    null
-  );
-}
-
-function getAttachmentsCount(item = {}) {
-  const attachments = first(
-    pickValue(item, ["attachments"]),
-    pickValue(item, ["files"]),
-    pickValue(item, ["adjuntos"])
-  );
-
-  if (Array.isArray(attachments)) return attachments.length;
-
-  return number(
-    first(
-      pickValue(item, ["attachmentsCount"]),
-      pickValue(item, ["filesCount"]),
-      pickValue(item, ["adjuntosCount"]),
-      pickValue(item, ["meta.attachmentsCount"]),
-      pickValue(item, ["meta.filesCount"]),
-      0
-    ),
-    0
-  );
-}
-
-function itemSortTime(item = {}) {
-  return Math.max(toTimestamp(getUpdatedAt(item)), toTimestamp(getCreatedAt(item)), 0);
+  if (total <= 0) return "—";
+  return formatMoney(total, getCurrency(item));
 }
 
 /* =========================================================
    FILTER / SORT / STATS
 ========================================================= */
 
-function normalizeFilter(value = "") {
-  const key = normalizeKey(value);
+function normalizeFilter(value = "all") {
+  const key = normalizeKey(value || "all");
 
-  if (["all", "todo", "todos", "todas", "total", "totales"].includes(key)) return "all";
-  if (["open", "opened", "abierta", "abierto", "pending", "pendiente", "progress", "in_progress", "proceso", "en_proceso"].includes(key)) return "open";
-  if (["closed", "close", "cerrada", "cerrado", "resolved", "resuelta", "resuelto", "cancelled", "archived"].includes(key)) return "closed";
+  if (["all", "todas", "todos"].includes(key)) return "all";
+  if (["open", "abiertas", "abiertos", "active", "activas", "activos", "pending", "in_progress"].includes(key)) return "open";
+  if (["closed", "cerradas", "cerrados", "resolved", "resueltas", "resueltos"].includes(key)) return "closed";
 
   return "all";
 }
 
-function normalizeSortOrder(value = "") {
-  const key = normalizeKey(value);
+function normalizeSortOrder(value = DEFAULT_SORT_ORDER) {
+  const key = normalizeKey(value || DEFAULT_SORT_ORDER);
 
-  if (["asc", "ascending", "menor", "menor_mayor", "menor_a_mayor", "oldest", "older", "antiguas", "antiguos"].includes(key)) {
+  if (["asc", "ascending", "menor", "menor_mayor", "menor_a_mayor", "menor-a-mayor", "oldest"].includes(key)) {
     return "asc";
   }
 
   return "desc";
 }
 
-function getSortLabel(sortOrder = DEFAULT_SORT_ORDER) {
-  return normalizeSortOrder(sortOrder) === "asc" ? "Fecha ↑" : "Fecha ↓";
+function getSortLabel(order = DEFAULT_SORT_ORDER) {
+  return normalizeSortOrder(order) === "asc" ? "Fecha ↑" : "Fecha ↓";
 }
 
-function getNextSortOrder(sortOrder = DEFAULT_SORT_ORDER) {
-  return normalizeSortOrder(sortOrder) === "asc" ? "desc" : "asc";
+function getNextSortOrder(order = DEFAULT_SORT_ORDER) {
+  return normalizeSortOrder(order) === "asc" ? "desc" : "asc";
 }
 
-function sortItems(items = [], sortOrder = DEFAULT_SORT_ORDER) {
-  const order = normalizeSortOrder(sortOrder);
+function itemSortTime(item = {}) {
+  const updated = sortTime(getUpdatedAt(item));
+  if (updated) return updated;
+
+  const created = sortTime(getCreatedAt(item));
+  if (created) return created;
+
+  return 0;
+}
+
+function sortItems(items = [], order = DEFAULT_SORT_ORDER) {
+  const direction = normalizeSortOrder(order) === "asc" ? 1 : -1;
 
   return [...safeArray(items)].sort((a, b) => {
     const diff = itemSortTime(a) - itemSortTime(b);
+    if (diff !== 0) return diff * direction;
 
-    if (diff !== 0) {
-      return order === "asc" ? diff : -diff;
-    }
-
-    const idDiff = getTicketId(a).localeCompare(getTicketId(b), "es", {
+    return getTicketId(a).localeCompare(getTicketId(b), "es", {
       numeric: true,
       sensitivity: "base",
-    });
-
-    return order === "asc" ? idDiff : -idDiff;
+    }) * direction;
   });
-}
-
-function isClosedItem(item = {}) {
-  return ["closed", "resolved"].includes(getStatusKey(getStatusRaw(item)));
-}
-
-function isOpenItem(item = {}) {
-  return !isClosedItem(item);
-}
-
-function isUrgentItem(item = {}) {
-  return ["urgent", "critical"].includes(getPriorityKey(item));
 }
 
 function matchesFilter(item = {}, filter = "all") {
@@ -974,7 +974,10 @@ function itemSearchText(item = {}) {
     getDescription(item),
     getClientName(item),
     getClientEmail(item),
+    getClientUserId(item),
+    getClientId(item),
     getAssignedTo(item),
+    getAssignedEmail(item),
     getCategory(item),
     getStatusLabel(getStatusRaw(item)),
     getPriorityLabel(item),
@@ -993,7 +996,6 @@ function computeLocalStats(items = []) {
   return safeArray(items).reduce(
     (acc, item) => {
       acc.total += 1;
-
       if (isOpenItem(item)) acc.open += 1;
       if (isClosedItem(item)) acc.closed += 1;
       if (isUrgentItem(item)) acc.urgent += 1;
@@ -1001,8 +1003,8 @@ function computeLocalStats(items = []) {
       acc.attachments += getAttachmentsCount(item);
       acc.invoiceTotal += getInvoiceTotal(item);
 
-      const updatedAt = itemSortTime(item);
-      if (updatedAt > acc.lastUpdateTs) acc.lastUpdateTs = updatedAt;
+      const updated = itemSortTime(item);
+      if (updated > acc.lastUpdateTs) acc.lastUpdateTs = updated;
 
       return acc;
     },
@@ -1021,37 +1023,158 @@ function computeLocalStats(items = []) {
 function mergeStats(items = [], provided = {}) {
   const local = computeLocalStats(items);
   const stats = safeObject(provided);
+  const useLocal = local.total > 0;
 
   return {
-    total: number(first(stats.total, local.total), local.total),
-    open: number(first(stats.open, local.open), local.open),
-    closed: number(first(stats.closed, local.closed), local.closed),
-    urgent: number(first(stats.urgent, local.urgent), local.urgent),
-    attachments: number(first(stats.attachments, local.attachments), local.attachments),
-    invoiceTotal: number(first(stats.invoiceTotal, local.invoiceTotal), local.invoiceTotal),
-    lastUpdateTs: number(first(stats.lastUpdateTs, local.lastUpdateTs), local.lastUpdateTs),
+    total: useLocal ? local.total : number(first(stats.total, local.total), local.total),
+    open: useLocal ? local.open : number(first(stats.open, local.open), local.open),
+    closed: useLocal ? local.closed : number(first(stats.closed, local.closed), local.closed),
+    urgent: useLocal ? local.urgent : number(first(stats.urgent, local.urgent), local.urgent),
+    attachments: useLocal ? local.attachments : number(first(stats.attachments, local.attachments), local.attachments),
+    invoiceTotal: useLocal ? local.invoiceTotal : number(first(stats.invoiceTotal, local.invoiceTotal), local.invoiceTotal),
+    lastUpdateTs: useLocal ? local.lastUpdateTs : number(first(stats.lastUpdateTs, local.lastUpdateTs), local.lastUpdateTs),
   };
 }
 
 function countByFilter(items = []) {
+  const rows = safeArray(items);
+
   return {
-    all: safeArray(items).length,
-    open: safeArray(items).filter(isOpenItem).length,
-    closed: safeArray(items).filter(isClosedItem).length,
+    all: rows.length,
+    open: rows.filter(isOpenItem).length,
+    closed: rows.filter(isClosedItem).length,
   };
 }
 
-function normalizeItems(items = []) {
+/* =========================================================
+   ITEM EXTRACTION DEFENSIVO
+========================================================= */
+
+function collectArrayCandidates(input = {}) {
+  const data = safeObject(input);
+  const nestedData = safeObject(data.data);
+  const nestedPayload = safeObject(data.payload);
+  const nestedResult = safeObject(data.result);
+  const nestedResponse = safeObject(data.response);
+  const nestedBody = safeObject(data.body);
+  const nestedMeta = safeObject(data.meta);
+
+  return [
+    data.items,
+    data.visibleItems,
+    data.filteredItems,
+    data.rows,
+    data.results,
+    data.records,
+    data.docs,
+    data.documents,
+    data.value,
+    data.list,
+    data.tickets,
+    data.incidencias,
+
+    Array.isArray(data.data) ? data.data : null,
+    nestedData.items,
+    nestedData.visibleItems,
+    nestedData.filteredItems,
+    nestedData.rows,
+    nestedData.results,
+    nestedData.records,
+    nestedData.docs,
+    nestedData.documents,
+    nestedData.value,
+    nestedData.list,
+    nestedData.tickets,
+    nestedData.incidencias,
+
+    Array.isArray(data.payload) ? data.payload : null,
+    nestedPayload.items,
+    nestedPayload.rows,
+    nestedPayload.results,
+    nestedPayload.tickets,
+    nestedPayload.incidencias,
+
+    Array.isArray(data.result) ? data.result : null,
+    nestedResult.items,
+    nestedResult.rows,
+    nestedResult.results,
+    nestedResult.tickets,
+    nestedResult.incidencias,
+
+    Array.isArray(data.response) ? data.response : null,
+    nestedResponse.items,
+    nestedResponse.rows,
+    nestedResponse.results,
+    nestedResponse.tickets,
+    nestedResponse.incidencias,
+
+    Array.isArray(data.body) ? data.body : null,
+    nestedBody.items,
+    nestedBody.rows,
+    nestedBody.results,
+    nestedBody.tickets,
+    nestedBody.incidencias,
+
+    nestedMeta.items,
+    nestedMeta.rows,
+  ].filter(Array.isArray);
+}
+
+function normalizeItems(input = {}) {
+  const candidates = Array.isArray(input) ? [input] : collectArrayCandidates(input);
   const map = new Map();
 
-  for (const item of safeArray(items)) {
-    const id = getTicketId(item);
+  for (const candidate of candidates) {
+    for (const originalItem of safeArray(candidate)) {
+      const item = unwrapItem(originalItem);
+      const id = getTicketId(item);
 
-    if (!id) continue;
-    if (!map.has(id)) map.set(id, item);
+      if (!id) continue;
+
+      const previous = map.get(id);
+      map.set(id, previous ? { ...previous, ...item } : item);
+    }
+
+    if (map.size > 0) break;
   }
 
   return sortItems([...map.values()], DEFAULT_SORT_ORDER);
+}
+
+function getRemoteTotal(data = {}, fallback = 0) {
+  const source = safeObject(data);
+  const nestedData = safeObject(source.data);
+  const nestedPayload = safeObject(source.payload);
+  const nestedResult = safeObject(source.result);
+  const nestedResponse = safeObject(source.response);
+
+  return Math.max(
+    fallback,
+    number(
+      first(
+        source.total,
+        source.count,
+        source.totalCount,
+        source.remoteCount,
+        source.meta?.total,
+        source.meta?.count,
+        source.pagination?.total,
+        source.pagination?.totalCount,
+        nestedData.total,
+        nestedData.count,
+        nestedData.totalCount,
+        nestedData.meta?.total,
+        nestedPayload.total,
+        nestedPayload.count,
+        nestedResult.total,
+        nestedResult.count,
+        nestedResponse.total,
+        nestedResponse.count,
+        fallback
+      ),
+      fallback
+    )
+  );
 }
 
 /* =========================================================
@@ -1060,12 +1183,11 @@ function normalizeItems(items = []) {
 
 function buildVm(input = {}) {
   const data = safeObject(input);
-  const allItems = normalizeItems(data.items);
+  const allItems = normalizeItems(data);
   const filter = normalizeFilter(data.filter);
   const search = cleanText(data.search, "");
   const sortOrder = normalizeSortOrder(first(data.sortOrder, data.order, data.sort?.order, data.sort?.direction, DEFAULT_SORT_ORDER));
   const visibleLimit = Math.max(1, number(data.visibleLimit, DEFAULT_VISIBLE_ROWS));
-  const stats = mergeStats(allItems, data.stats);
 
   const filteredItems = sortItems(
     allItems
@@ -1075,16 +1197,18 @@ function buildVm(input = {}) {
   );
 
   const visibleItems = filteredItems.slice(0, visibleLimit);
-  const total = Math.max(number(data.total, allItems.length), allItems.length);
+  const total = getRemoteTotal(data, allItems.length);
   const filteredTotal = filteredItems.length;
   const visibleCount = visibleItems.length;
   const remainingCount = Math.max(0, filteredTotal - visibleCount);
+  const stats = mergeStats(allItems, data.stats);
 
   return {
     data,
 
     route: cleanText(first(data.route, data.routes?.incidencias, DEFAULT_ROUTE), DEFAULT_ROUTE),
     routes: safeObject(data.routes),
+    admin: Boolean(data.admin || data.role === "admin"),
 
     items: allItems,
     filteredItems,
@@ -1113,6 +1237,13 @@ function buildVm(input = {}) {
     stats,
 
     openingTicketId: cleanText(data.openingTicketId, ""),
+
+    diagnostics: {
+      totalGreaterThanItems: total > 0 && allItems.length === 0,
+      extractedItems: allItems.length,
+      sourceKeys: Object.keys(data).filter(Boolean),
+      templateVersion: INCIDENCIAS_TEMPLATE_VERSION,
+    },
   };
 }
 
@@ -1227,9 +1358,95 @@ function renderImporteChip(item = {}) {
   `;
 }
 
+function renderAttachmentPill(item = {}) {
+  const count = getAttachmentsCount(item);
+
+  return `
+    <span class="incidencias-attachments-pill${count > 0 ? " has-attachments" : " is-empty"}" data-attachments-count="${attr(String(count))}">
+      ${icon("paperclip")}
+      <span>${escapeHtml(formatNumber(count))}</span>
+    </span>
+  `;
+}
+
+function renderRow(item = {}, vm = {}) {
+  const ticketId = getTicketId(item);
+  const subject = getSubject(item);
+  const description = getDescription(item);
+  const clientName = getClientName(item);
+  const clientEmail = getClientEmail(item);
+  const userId = getClientUserId(item);
+  const clienteId = getClientId(item);
+  const createdAt = getCreatedAt(item);
+  const updatedAt = getUpdatedAt(item);
+  const isOpening = vm.openingTicketId && vm.openingTicketId === ticketId;
+
+  return `
+    <tr
+      class="incidencias-row${isOpening ? " is-opening" : ""}"
+      data-ticket-row="true"
+      data-incidencia-row="true"
+      data-ticket-id="${attr(ticketId)}"
+      data-incidencia-id="${attr(ticketId)}"
+      data-incidencias-action="${INCIDENCIAS_ACTIONS.OPEN_DETAIL}"
+      tabindex="0"
+      role="button"
+      aria-label="Abrir incidencia ${attr(ticketId)}"
+    >
+      <td class="incidencias-cell incidencias-cell--main" data-column="main">
+        <div class="incidencias-main-cell">
+          ${renderAvatar(item)}
+          <div class="incidencias-main-copy">
+            <div class="incidencias-main-line">
+              <strong class="incidencias-row-title">${escapeHtml(subject)}</strong>
+              ${renderPriorityBadge(item)}
+            </div>
+            <p class="incidencias-row-description">${escapeHtml(description || "Sin descripción.")}</p>
+            <div class="incidencias-row-meta">
+              <span class="incidencias-row-code">${icon("hash")} ${escapeHtml(ticketId || "Sin ID")}</span>
+              <span class="incidencias-row-client">${icon("user")} ${escapeHtml(clientName)}</span>
+              ${clientEmail ? `<span class="incidencias-row-email">${escapeHtml(clientEmail)}</span>` : ""}
+              ${userId ? `<span class="incidencias-row-userid">${escapeHtml(userId)}</span>` : ""}
+              ${clienteId ? `<span class="incidencias-row-clienteid">${escapeHtml(clienteId)}</span>` : ""}
+              ${renderAssignedBadge(item)}
+            </div>
+          </div>
+        </div>
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--status" data-column="status">
+        ${renderStatusChip(item)}
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--date incidencias-cell--created" data-column="created">
+        <span title="${attr(formatDate(createdAt))}">${escapeHtml(formatShortDate(createdAt))}</span>
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--date incidencias-cell--updated" data-column="updated">
+        <span title="${attr(formatDate(updatedAt))}">${escapeHtml(formatRelativeDate(updatedAt))}</span>
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--amount incidencias-cell--importe" data-column="amount">
+        ${renderImporteChip(item)}
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--attachments" data-column="attachments">
+        ${renderAttachmentPill(item)}
+      </td>
+    </tr>
+  `;
+}
+
 /* =========================================================
    HEADER / HERO
 ========================================================= */
+
+function renderSpinner(label = "Cargando...") {
+  return `
+    <span class="incidencias-spinner" aria-hidden="true"></span>
+    <span class="incidencias-spinner-label">${escapeHtml(label)}</span>
+  `;
+}
 
 function renderHeader(vm = {}) {
   const stats = vm.stats;
@@ -1245,19 +1462,19 @@ function renderHeader(vm = {}) {
           </p>
         </div>
 
-        <div class="incidencias-hero-actions" aria-label="Acciones de incidencias">
+        <div class="incidencias-hero-actions">
           <button
             type="button"
             id="incidencias-create-btn"
-            class="incidencias-btn incidencias-btn--primary incidencias-btn--create${vm.creating ? " is-loading" : ""}"
+            class="incidencias-btn incidencias-btn--primary incidencias-btn--create"
             data-incidencias-action="${INCIDENCIAS_ACTIONS.CREATE_OPEN}"
             ${htmlAttrs({
-              disabled: vm.creating,
-              "aria-disabled": vm.creating ? "true" : false,
+              disabled: vm.creating || vm.loading,
+              "aria-disabled": vm.creating || vm.loading ? "true" : false,
               "aria-busy": vm.creating ? "true" : false,
             })}
           >
-            ${vm.creating ? renderSpinner("Creando...") : `${icon("plus")}<span class="incidencias-btn-text">Crear incidencia</span>`}
+            ${vm.creating ? renderSpinner("Creando...") : `${icon("plus")}<span class="incidencias-btn-text">Nueva incidencia</span>`}
           </button>
 
           <button
@@ -1377,14 +1594,14 @@ function renderSortButton(vm = {}) {
   return `
     <button
       type="button"
-      class="incidencias-sort-pill incidencias-filter-pill--sort is-active"
+      class="incidencias-sort-btn"
       data-incidencias-action="${INCIDENCIAS_ACTIONS.SORT_TOGGLE}"
       data-sort-order="${attr(order)}"
       data-next-sort-order="${attr(nextOrder)}"
-      aria-pressed="true"
-      aria-label="${attr(`Orden actual: ${label}. Cambiar a ${nextLabel}`)}"
-      title="${attr(`Cambiar a ${nextLabel}`)}"
+      aria-label="Cambiar orden a ${attr(nextLabel)}"
+      title="Cambiar orden a ${attr(nextLabel)}"
     >
+      ${icon("calendar")}
       <span>${escapeHtml(label)}</span>
     </button>
   `;
@@ -1392,34 +1609,32 @@ function renderSortButton(vm = {}) {
 
 function renderFilters(vm = {}) {
   return `
-    <div class="incidencias-filters" aria-label="Filtros y búsqueda de incidencias">
-      <div class="incidencias-filter-pills" role="group" aria-label="Filtrar incidencias">
-        ${FILTERS.map((filter) => {
-          const active = filter.key === vm.filter;
-          const count = vm.filterCounts[filter.key] ?? 0;
+    <div class="incidencias-toolbar" data-incidencias-toolbar="true">
+      <div class="incidencias-filter-group" role="tablist" aria-label="Filtrar incidencias">
+        ${FILTERS.map((item) => {
+          const active = item.key === vm.filter;
+          const count = number(vm.filterCounts?.[item.key], 0);
 
           return `
             <button
               type="button"
-              class="incidencias-filter-pill${active ? " is-active" : ""}"
+              role="tab"
+              class="incidencias-filter-btn${active ? " is-active" : ""}"
               data-incidencias-action="${INCIDENCIAS_ACTIONS.FILTER}"
-              data-filter="${attr(filter.key)}"
-              data-filter-status="${attr(filter.key)}"
-              aria-pressed="${active ? "true" : "false"}"
+              data-filter="${attr(item.key)}"
+              aria-selected="${active ? "true" : "false"}"
             >
-              <span>${escapeHtml(filter.label)}</span>
+              <span>${escapeHtml(item.label)}</span>
               <strong>${escapeHtml(formatNumber(count))}</strong>
             </button>
           `;
         }).join("")}
-
       </div>
 
-      <div class="incidencias-sort-pills" role="group" aria-label="Ordenar incidencias">
+      <div class="incidencias-toolbar-side">
         ${renderSortButton(vm)}
+        ${renderSearch(vm)}
       </div>
-
-      ${renderSearch(vm)}
     </div>
   `;
 }
@@ -1431,12 +1646,7 @@ function renderFilters(vm = {}) {
 function renderTableColgroup() {
   return `
     <colgroup>
-      ${INCIDENCIAS_TABLE_COLUMNS.map((column) => `
-        <col
-          class="incidencias-col ${attr(column.colClass)}"
-          data-column="${attr(column.key)}"
-        >
-      `).join("")}
+      ${INCIDENCIAS_TABLE_COLUMNS.map((column) => `<col class="${attr(column.colClass)}">`).join("")}
     </colgroup>
   `;
 }
@@ -1446,108 +1656,12 @@ function renderTableHead() {
     <thead>
       <tr>
         ${INCIDENCIAS_TABLE_COLUMNS.map((column) => `
-          <th
-            class="${attr(column.thClass)}"
-            scope="col"
-            data-column="${attr(column.key)}"
-          >
+          <th class="${attr(column.thClass)}" scope="col" data-column="${attr(column.key)}">
             ${escapeHtml(column.label)}
           </th>
         `).join("")}
       </tr>
     </thead>
-  `;
-}
-
-function renderRow(item = {}, vm = {}) {
-  const ticketId = getTicketId(item);
-  const subject = getSubject(item);
-  const description = getDescription(item);
-  const clientName = getClientName(item);
-  const clientEmail = getClientEmail(item) || "Sin email";
-  const createdAtRaw = getCreatedAt(item);
-  const updatedAtRaw = getUpdatedAt(item);
-  const createdAt = formatDateTime(createdAtRaw);
-  const updatedAt = formatLastUpdate(updatedAtRaw);
-  const attachmentsCount = getAttachmentsCount(item);
-  const category = getCategory(item);
-  const statusKey = getStatusKey(getStatusRaw(item));
-  const priorityKey = getPriorityKey(item);
-  const opening = vm.openingTicketId === ticketId;
-
-  return `
-    <tr
-      class="incidencias-row incidencias-row--${attr(statusKey)} incidencias-row--clickable${opening ? " is-loading" : ""}"
-      data-ticket-row="true"
-      data-ticket-id="${attr(ticketId)}"
-      data-incidencia-id="${attr(ticketId)}"
-      data-detail-target="true"
-      data-status="${attr(statusKey)}"
-      data-priority="${attr(priorityKey)}"
-      role="button"
-      tabindex="0"
-      aria-label="Abrir detalle de incidencia ${attr(ticketId)}"
-      ${htmlAttrs({
-        "aria-busy": opening ? "true" : false,
-      })}
-    >
-      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[0].cellClass)}" data-column="main">
-        <div class="incidencias-main">
-          ${renderAvatar(item)}
-
-          <div class="incidencias-main-copy">
-            <div class="incidencias-ticket-line">
-              <span class="incidencias-ticket-id">${escapeHtml(ticketId)}</span>
-              <span class="incidencias-category-pill">${escapeHtml(category)}</span>
-            </div>
-
-            <div class="incidencias-ticket-subject">${escapeHtml(subject)}</div>
-            <div class="incidencias-ticket-description">${escapeHtml(description)}</div>
-
-            <div class="incidencias-client-line">
-              <span class="incidencias-client-name">${escapeHtml(clientName)}</span>
-              <span class="incidencias-client-separator">·</span>
-              <span class="incidencias-client-email">${escapeHtml(clientEmail)}</span>
-            </div>
-
-            <div class="incidencias-row-badges">
-              ${renderPriorityBadge(item)}
-              ${renderAssignedBadge(item)}
-            </div>
-          </div>
-        </div>
-      </td>
-
-      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[1].cellClass)}" data-column="status">
-        ${renderStatusChip(item)}
-      </td>
-
-      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[2].cellClass)}" data-column="created">
-        <span class="incidencias-date-inline" title="${attr(createdAt)}">
-          ${escapeHtml(createdAt)}
-        </span>
-      </td>
-
-      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[3].cellClass)}" data-column="updated">
-        <span class="incidencias-date-inline" title="${attr(formatDateTime(updatedAtRaw))}">
-          ${escapeHtml(updatedAt)}
-        </span>
-      </td>
-
-      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[4].cellClass)}" data-column="amount">
-        ${renderImporteChip(item)}
-      </td>
-
-      <td class="${attr(INCIDENCIAS_TABLE_COLUMNS[5].cellClass)}" data-column="attachments">
-        <span
-          class="incidencias-attachments-pill"
-          title="${attr(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}"
-        >
-          ${icon("paperclip")}
-          <span>${escapeHtml(formatNumber(attachmentsCount))}</span>
-        </span>
-      </td>
-    </tr>
   `;
 }
 
@@ -1567,7 +1681,6 @@ function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
         >
           ${renderTableColgroup()}
           ${renderTableHead()}
-
           <tbody>
             ${Array.from({ length: totalRows }).map((_, index) => `
               <tr class="incidencias-row incidencias-row--skeleton" aria-hidden="true" data-skeleton-row="${index + 1}">
@@ -1597,26 +1710,35 @@ function renderRefreshOverlay() {
 function renderEmptyState(vm = {}) {
   const hasError = Boolean(vm.error);
   const filtering = vm.filter !== "all" || Boolean(vm.search);
+  const totalWithoutRows = vm.total > 0 && !vm.visibleItems.length && !filtering && !hasError;
+
+  const title = hasError
+    ? "No se pudieron cargar las incidencias"
+    : filtering
+      ? "No hay incidencias con esos filtros"
+      : totalWithoutRows
+        ? "Hay incidencias, pero no llegaron filas al listado"
+        : "Todavía no hay incidencias";
+
+  const text = hasError
+    ? vm.error
+    : filtering
+      ? "Prueba a limpiar la búsqueda o cambia el filtro activo para volver al historial completo."
+      : totalWithoutRows
+        ? "El backend o la capa API está entregando total, pero no está entregando items/tickets/incidencias/rows. Este template ya acepta todos los aliases; revisa /api/tickets?debug=true si sigue ocurriendo."
+        : "Cuando haya solicitudes registradas aparecerán aquí con su estado, seguimiento, adjuntos y facturación asociada.";
 
   return `
-    <div class="incidencias-empty" data-incidencias-empty="true">
+    <div class="incidencias-empty${totalWithoutRows ? " is-data-mismatch" : ""}" data-incidencias-empty="true">
       <div class="incidencias-empty-icon" aria-hidden="true">
-        ${hasError ? icon("alert") : icon("ticket")}
+        ${hasError || totalWithoutRows ? icon("alert") : icon("ticket")}
       </div>
 
-      <h3>${hasError ? "No se pudieron cargar las incidencias" : filtering ? "No hay incidencias con esos filtros" : "Todavía no hay incidencias"}</h3>
-      <p>
-        ${
-          hasError
-            ? escapeHtml(vm.error)
-            : filtering
-              ? "Prueba a limpiar la búsqueda o cambia el filtro activo para volver al historial completo."
-              : "Cuando haya solicitudes registradas aparecerán aquí con su estado, seguimiento, adjuntos y facturación asociada."
-        }
-      </p>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(text)}</p>
 
       ${
-        hasError
+        hasError || totalWithoutRows
           ? `
             <button
               type="button"
@@ -1790,7 +1912,7 @@ function renderHistory(vm = {}) {
 
 export function renderIncidenciasLoadingState(input = {}) {
   const vm = buildVm({
-    ...input,
+    ...safeObject(input),
     loading: true,
   });
 
@@ -1868,6 +1990,8 @@ export function renderIncidenciasTemplate(input = {}) {
       data-refreshing="${vm.refreshing ? "true" : "false"}"
       data-table-actions="false"
       data-table-scale="${attr(TABLE_SCALE)}"
+      data-items-extracted="${attr(String(vm.items.length))}"
+      data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}"
       aria-busy="${vm.loading || vm.refreshing ? "true" : "false"}"
     >
       ${
@@ -1887,77 +2011,40 @@ export function renderIncidenciasTemplate(input = {}) {
   `;
 }
 
-/* =========================================================
-   SNAPSHOT
-========================================================= */
+export function getIncidenciasTemplateSnapshot(input = {}) {
+  const vm = buildVm(input);
 
-export function getIncidenciasTemplateSnapshot() {
   return {
     version: INCIDENCIAS_TEMPLATE_VERSION,
-
-    actions: INCIDENCIAS_ACTIONS,
-    filters: FILTERS,
-    tableScale: TABLE_SCALE,
-    defaultSortOrder: DEFAULT_SORT_ORDER,
-    tableColumns: INCIDENCIAS_TABLE_COLUMNS.map((column) => ({
-      key: column.key,
-      label: column.label,
-      colClass: column.colClass,
-      cellClass: column.cellClass,
-    })),
-
-    policy: {
-      templateOnly: true,
-
-      noAuth: true,
-      noRouter: true,
-      noHttp: true,
-      noStore: true,
-      noStateExternal: true,
-      noModelExternal: true,
-      noListeners: true,
-      noDomApi: true,
-      noToast: true,
-
-      preservesHeaderHero: true,
-      removesOnlyEyebrowText: true,
-      centralizedTableColumns: true,
-      noActionsColumn: true,
-      rowClickOpensDetail: true,
-      noGenericDataActionDuplication: true,
-      amountImporteClassCompatibility: true,
-      fullHdNoActionsLayout: true,
-      tableScale110: true,
-
-      sortToggleButtonMarkup: true,
-      noCalendarDateFilter: true,
-      sortOrderPureVmSupport: true,
-      improvedPriorityBadgeSvgIcons: true,
-      assignedBadgeHasNoExtraUserSvg: true,
-
-      preservesTechnicianAvatarData: true,
-      requesterEmailAliasCompatibility: true,
-      technicianAvatarAliasCompatibility: true,
-      blobAvatarSupport: true,
-
-      externalModalIslands: true,
-      doesNotRenderCreateModal: true,
-      doesNotRenderDetailModal: true,
-
-      tableMarkup: true,
-      searchMarkup: true,
-      filtersMarkup: true,
-      infiniteFeedMarkup: true,
-    },
+    total: vm.total,
+    extractedItems: vm.items.length,
+    visibleCount: vm.visibleCount,
+    filteredTotal: vm.filteredTotal,
+    filter: vm.filter,
+    searchLength: vm.search.length,
+    sortOrder: vm.sortOrder,
+    totalGreaterThanItems: vm.diagnostics.totalGreaterThanItems,
+    acceptedArrayAliases: [
+      "items",
+      "visibleItems",
+      "filteredItems",
+      "tickets",
+      "incidencias",
+      "rows",
+      "results",
+      "records",
+      "data.items",
+      "data.rows",
+      "data.tickets",
+      "data.incidencias",
+      "payload.items",
+      "result.items",
+      "response.items",
+      "body.items",
+    ],
   };
 }
 
-/* =========================================================
-   EXPORTS
-========================================================= */
-
-export const renderIncidenciasViewTemplate = renderIncidenciasTemplate;
-export const renderIncidenciasDashboardTemplate = renderIncidenciasTemplate;
-export const renderIncidencias = renderIncidenciasTemplate;
-
+export const getSnapshot = getIncidenciasTemplateSnapshot;
+export const renderTemplate = renderIncidenciasTemplate;
 export default renderIncidenciasTemplate;

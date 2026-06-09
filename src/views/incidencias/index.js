@@ -2,29 +2,14 @@
    Onion Support - Incidencias Index
    Archivo: /src/views/incidencias/index.js
 
-   Responsabilidad:
-   - Controlador mínimo de la vista Incidencias.
-   - Montar template principal.
-   - Hidratar desde cache en memoria.
-   - Pintar inmediatamente sin bloquear el Router.
-   - Cargar/listar incidencias desde incidencias.api.js en background.
-   - Crear incidencia.
-   - Admin: buscar usuarios y crear incidencias para usuarios.
-   - Abrir detalle.
-   - Comentar/reabrir/subir adjuntos.
-   - Abrir/descargar adjuntos.
-   - Renderizar modales en isla única.
-   - Cero reconstrucción del modal durante búsqueda admin.
-   - Cero reconstrucción del modal al adjuntar/quitar archivos en create.
-   - Cero reconstrucción del modal por renders de vista/listado.
-   - Delegar búsqueda de usuarios en incidencias.api.js.
-   - Delegar HTML en templates.
-   - Controlar orden visual mayor/menor para el template.
-   - Sin Store.
-   - Sin State externo.
-   - Sin actions/bindings/model/utils/homeView legacy.
-   - Sin fetch propio.
-   - Sin HTTP duplicado.
+   Contrato productivo:
+   - Controlador de la vista Incidencias.
+   - Sin fetch propio: todas las llamadas salen por incidencias.api.js.
+   - Crear incidencia con adjuntos reales File/Blob.
+   - Antes de submit re-lee el input file vivo y lo fusiona con memoria.
+   - Admin: crear incidencia 1:1 para targetUserId real de Cosmos.
+   - No inventa targetClienteId/clienteId.
+   - Mantiene modal en isla propia para no destruir estado del listado.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -67,7 +52,7 @@ import {
   validateDetailUpdate,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.lean.v14.zero-create-flicker";
+export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.aligned.blob.v10";
 export const INCIDENCIAS_VIEW_VERSION = INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
@@ -87,7 +72,6 @@ const CREATE_MODAL_OVERLAY_SELECTOR = "[data-incidencias-create-modal-overlay='t
 const DETAIL_MODAL_OVERLAY_SELECTOR = "[data-incidencias-modal-overlay='true']";
 
 const INSTANCES = new WeakMap();
-
 let lastInstance = null;
 
 /* =========================================================
@@ -103,15 +87,49 @@ function isObject(value) {
 }
 
 function isDomNode(value = null) {
+  return Boolean(typeof Node !== "undefined" && value && value instanceof Node);
+}
+
+function isBlob(value) {
+  return typeof Blob !== "undefined" && value instanceof Blob;
+}
+
+function isFile(value) {
+  return typeof File !== "undefined" && value instanceof File;
+}
+
+function isFileLike(value = null) {
+  if (!value || typeof value !== "object") return false;
+  if (isFile(value) || isBlob(value)) return true;
+
   return Boolean(
-    typeof Node !== "undefined" &&
-      value &&
-      value instanceof Node
+    typeof value.name === "string" &&
+      typeof value.size === "number" &&
+      (
+        typeof value.arrayBuffer === "function" ||
+        typeof value.stream === "function" ||
+        typeof value.slice === "function"
+      )
   );
 }
 
 function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  if (Array.isArray(value)) return value;
+
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof value.length === "number" &&
+    typeof value !== "string"
+  ) {
+    try {
+      return Array.from(value);
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 }
 
 function safeObject(value, fallback = {}) {
@@ -153,33 +171,23 @@ function redact(value = "") {
 function normalizeRole(value = "") {
   if (Array.isArray(value)) {
     const roles = value.map(normalizeRole).filter(Boolean);
-
     if (roles.includes("admin")) return "admin";
     if (roles.includes("user")) return "user";
-
     return "";
   }
 
   const role = cleanText(value, "").toLowerCase();
 
-  if (role === "admin") return "admin";
-  if (role === "user") return "user";
+  if (["admin", "administrator", "administrador", "owner", "superadmin"].includes(role)) return "admin";
+  if (["user", "usuario", "client", "cliente"].includes(role)) return "user";
 
-  return "";
+  return role || "";
 }
 
 function normalizeSortOrder(value = "") {
   const order = cleanText(value, DEFAULT_SORT_ORDER).toLowerCase();
 
-  if (
-    order === "asc" ||
-    order === "ascending" ||
-    order === "menor" ||
-    order === "menor_mayor" ||
-    order === "menor-a-mayor" ||
-    order === "menor_a_mayor" ||
-    order === "oldest"
-  ) {
+  if (["asc", "ascending", "menor", "menor_mayor", "menor-a-mayor", "menor_a_mayor", "oldest"].includes(order)) {
     return "asc";
   }
 
@@ -205,14 +213,7 @@ function getTicketId(item = {}) {
   const raw = safeObject(item);
 
   return cleanText(
-    first(
-      raw.ticketId,
-      raw.incidenciaId,
-      raw.id,
-      raw.code,
-      raw.numero,
-      raw.ticketCode
-    ),
+    first(raw.ticketId, raw.incidenciaId, raw.id, raw.code, raw.numero, raw.ticketCode),
     ""
   );
 }
@@ -239,10 +240,9 @@ function mergeTicketData(current = {}, next = {}) {
       continue;
     }
 
-    output[key] =
-      shouldPreserveExisting(value) && previous !== undefined && previous !== null
-        ? previous
-        : value;
+    output[key] = shouldPreserveExisting(value) && previous !== undefined && previous !== null
+      ? previous
+      : value;
   }
 
   return output;
@@ -270,11 +270,9 @@ function ticketSortTime(item = {}) {
 
 function upsertByTicketId(items = [], item = null) {
   const next = safeObject(item, null);
-
   if (!next) return safeArray(items);
 
   const id = getTicketId(next);
-
   if (!id) return safeArray(items);
 
   const map = new Map();
@@ -284,15 +282,12 @@ function upsertByTicketId(items = [], item = null) {
 
   for (const current of safeArray(items)) {
     const currentId = getTicketId(current);
-
     if (!currentId || map.has(currentId)) continue;
-
     map.set(currentId, current);
   }
 
   return [...map.values()].sort((a, b) => {
     const diff = ticketSortTime(b) - ticketSortTime(a);
-
     if (diff !== 0) return diff;
 
     return getTicketId(b).localeCompare(getTicketId(a), "es", {
@@ -304,11 +299,7 @@ function upsertByTicketId(items = [], item = null) {
 
 function nextFrame(callback) {
   if (!isBrowser()) return 0;
-
-  if (typeof window.requestAnimationFrame === "function") {
-    return window.requestAnimationFrame(callback);
-  }
-
+  if (typeof window.requestAnimationFrame === "function") return window.requestAnimationFrame(callback);
   return window.setTimeout(callback, 0);
 }
 
@@ -316,10 +307,7 @@ function cancelFrame(id = 0) {
   if (!id || !isBrowser()) return false;
 
   try {
-    if (typeof window.cancelAnimationFrame === "function") {
-      window.cancelAnimationFrame(id);
-    }
-
+    if (typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(id);
     window.clearTimeout?.(id);
     return true;
   } catch {
@@ -353,20 +341,18 @@ function getCurrentRole() {
   const state = getState();
   const user = safeObject(getCurrentUser(), {});
 
-  return (
-    normalizeRole(
-      first(
-        AppCore.getCurrentRole?.(),
-        state.role,
-        state.rol,
-        state.roles,
-        user.role,
-        user.rol,
-        user.roles,
-        ""
-      )
-    ) || "user"
-  );
+  return normalizeRole(
+    first(
+      AppCore.getCurrentRole?.(),
+      state.role,
+      state.rol,
+      state.roles,
+      user.role,
+      user.rol,
+      user.roles,
+      ""
+    )
+  ) || "user";
 }
 
 function isAdmin() {
@@ -391,6 +377,8 @@ function getCreateDefaults() {
   return {
     ...getCreateFormDefaults(),
     targetClienteId: "",
+    source: "panel_admin",
+    status: "open",
     attachments: [],
   };
 }
@@ -399,7 +387,6 @@ function readField(form = null, name = "") {
   if (!form || !name) return "";
 
   const field = form.querySelector?.(`[data-field="${name}"], [name="${name}"]`);
-
   if (!field) return "";
 
   return cleanText(field.value, "");
@@ -407,25 +394,26 @@ function readField(form = null, name = "") {
 
 function filesFromInput(input = null) {
   try {
-    return Array.from(input?.files || []);
+    return Array.from(input?.files || []).filter(isFileLike);
   } catch {
     return [];
   }
 }
 
+function filesFromForm(form = null) {
+  if (!form) return [];
+
+  const input = form.querySelector?.(`[data-field="attachments"], input[name="attachments"], input[type="file"]`);
+  return filesFromInput(input);
+}
+
 function dedupeFiles(files = []) {
   const map = new Map();
 
-  for (const file of safeArray(files)) {
-    if (!file) continue;
+  for (const file of safeArray(files).flat()) {
+    if (!isFileLike(file)) continue;
 
-    const key = [
-      file.name || "archivo",
-      file.size || 0,
-      file.lastModified || 0,
-      file.type || "",
-    ].join("::");
-
+    const key = [file.name || "archivo", file.size || 0, file.lastModified || 0, file.type || ""].join("::");
     if (!map.has(key)) map.set(key, file);
   }
 
@@ -439,40 +427,45 @@ function fileIndexFromNode(node = null) {
   return Number.isFinite(index) ? index : -1;
 }
 
+function ensureCreateFormFiles(formNode = null) {
+  const liveFiles = filesFromForm(formNode);
+
+  if (liveFiles.length) {
+    return dedupeFiles([
+      ...safeArray(formNode?.__onionCreateFiles || []),
+      ...liveFiles,
+    ]);
+  }
+
+  return [];
+}
+
 /* =========================================================
    INSTANCE REGISTRY
 ========================================================= */
+
+function storeInstance(host = null, controller = null) {
+  if (!host || !controller) return false;
+  INSTANCES.set(host, controller);
+  lastInstance = controller;
+  return true;
+}
+
+function clearInstance(host = null, controller = null) {
+  if (host && INSTANCES.get(host) === controller) INSTANCES.delete(host);
+  if (lastInstance === controller) lastInstance = null;
+  return true;
+}
 
 function destroyPrevious(host = null) {
   const previous = host ? INSTANCES.get(host) : null;
 
   if (previous?.destroy) {
-    previous.destroy({
-      remount: true,
-    });
-
-    return true;
-  }
-
-  return false;
-}
-
-function storeInstance(host = null, instance = null) {
-  if (!host || !instance) return false;
-
-  INSTANCES.set(host, instance);
-  lastInstance = instance;
-
-  return true;
-}
-
-function clearInstance(host = null, instance = null) {
-  if (host && INSTANCES.get(host) === instance) {
-    INSTANCES.delete(host);
-  }
-
-  if (lastInstance === instance) {
-    lastInstance = null;
+    try {
+      previous.destroy();
+    } catch {
+      // noop
+    }
   }
 
   return true;
@@ -504,10 +497,7 @@ function createIncidenciasController(host = null, context = {}) {
   let openingTicketId = "";
 
   let renderFrame = 0;
-  let pendingRenderOptions = null;
-
   let modalFrame = 0;
-  let pendingModalOptions = null;
   let modalHost = null;
   let modalHostBound = false;
 
@@ -547,12 +537,18 @@ function createIncidenciasController(host = null, context = {}) {
     previewFile: null,
   };
 
+  function ownsNode(node = null) {
+    if (!node) return false;
+    return Boolean(host?.contains?.(node) || modalHost?.contains?.(node));
+  }
+
   function payload(extra = {}) {
     return {
       user: getCurrentUser(),
       role: getCurrentRole(),
       admin: isAdmin(),
       routes: getRoutes(),
+      context: safeObject(context),
 
       items,
       total,
@@ -600,6 +596,14 @@ function createIncidenciasController(host = null, context = {}) {
     };
   }
 
+  function detailModalPayload() {
+    return {
+      ...detailModal,
+      admin: isAdmin(),
+      role: getCurrentRole(),
+    };
+  }
+
   function modalsOpen() {
     return createModal.open || detailModal.open;
   }
@@ -618,15 +622,6 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
-  function ownsNode(node = null) {
-    if (!node) return false;
-
-    return Boolean(
-      host?.contains?.(node) ||
-        modalHost?.contains?.(node)
-    );
-  }
-
   function ensureModalHost() {
     if (!isBrowser()) return null;
 
@@ -636,9 +631,7 @@ function createIncidenciasController(host = null, context = {}) {
     modalHost.setAttribute("data-incidencias-modal-host", "true");
     modalHost.setAttribute("data-owner", INCIDENCIAS_VIEW_VERSION);
 
-    if (!modalHost.isConnected) {
-      document.body.appendChild(modalHost);
-    }
+    if (!modalHost.isConnected) document.body.appendChild(modalHost);
 
     if (mounted && !modalHostBound) {
       bindTarget(modalHost);
@@ -652,10 +645,7 @@ function createIncidenciasController(host = null, context = {}) {
     if (!modalHost) return false;
 
     try {
-      if (modalHostBound) {
-        unbindTarget(modalHost);
-      }
-
+      if (modalHostBound) unbindTarget(modalHost);
       modalHost.replaceChildren();
       modalHost.remove();
     } catch {
@@ -664,23 +654,19 @@ function createIncidenciasController(host = null, context = {}) {
 
     modalHost = null;
     modalHostBound = false;
-
     return true;
   }
 
-  function focusAfterRender(selector = "", placeEnd = true, root = host) {
+  function focusAfterRender(selector = "", root = modalHost || host) {
     if (!selector || !root) return false;
 
     try {
       const node = root.querySelector(selector);
-
       if (!node) return false;
 
-      node.focus({
-        preventScroll: true,
-      });
+      node.focus({ preventScroll: true });
 
-      if (placeEnd && typeof node.setSelectionRange === "function") {
+      if (typeof node.setSelectionRange === "function") {
         const end = String(node.value || "").length;
         node.setSelectionRange(end, end);
       }
@@ -691,310 +677,47 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
-  function captureModalDomState(root = null) {
-    if (!isBrowser() || !root) return null;
-
-    const active = document.activeElement;
-    const createPanel = root.querySelector(CREATE_MODAL_PANEL_SELECTOR);
-    const detailPanel = root.querySelector(DETAIL_MODAL_PANEL_SELECTOR);
-
-    const state = {
-      createScrollTop: createPanel?.scrollTop || 0,
-      detailScrollTop: detailPanel?.scrollTop || 0,
-      activeField: "",
-      activeName: "",
-      activeId: "",
-      selectionStart: null,
-      selectionEnd: null,
-    };
-
-    if (!active || !root.contains(active)) return state;
-    if (active.matches?.("input[type='file']")) return state;
-
-    state.activeField = cleanText(active.dataset?.field || active.dataset?.detailField, "");
-    state.activeName = cleanText(active.getAttribute?.("name"), "");
-    state.activeId = cleanText(active.id, "");
-
-    try {
-      if (typeof active.selectionStart === "number") {
-        state.selectionStart = active.selectionStart;
-        state.selectionEnd = active.selectionEnd;
-      }
-    } catch {
-      // noop
-    }
-
-    return state;
-  }
-
-  function findRestorableField(root = null, state = null, explicitSelector = "") {
-    if (!root) return null;
-
-    if (explicitSelector) {
-      return root.querySelector(explicitSelector);
-    }
-
-    if (!state) return null;
-
-    if (state.activeId) {
-      const byId = root.querySelector(`#${state.activeId}`);
-      if (byId) return byId;
-    }
-
-    const candidates = Array.from(root.querySelectorAll("[data-field], [data-detail-field], [name]"));
-
-    if (state.activeField) {
-      const byField = candidates.find((node) => {
-        return cleanText(node.dataset?.field || node.dataset?.detailField, "") === state.activeField;
-      });
-
-      if (byField) return byField;
-    }
-
-    if (state.activeName) {
-      const byName = candidates.find((node) => {
-        return cleanText(node.getAttribute("name"), "") === state.activeName;
-      });
-
-      if (byName) return byName;
-    }
-
-    return null;
-  }
-
-  function restoreModalDomState(root = null, state = null, options = {}) {
-    if (!isBrowser() || !root) return false;
-
-    const createPanel = root.querySelector(CREATE_MODAL_PANEL_SELECTOR);
-    const detailPanel = root.querySelector(DETAIL_MODAL_PANEL_SELECTOR);
-
-    if (createPanel && state) createPanel.scrollTop = state.createScrollTop || 0;
-    if (detailPanel && state) detailPanel.scrollTop = state.detailScrollTop || 0;
-
-    nextFrame(() => {
-      try {
-        if (createPanel && state) createPanel.scrollTop = state.createScrollTop || 0;
-        if (detailPanel && state) detailPanel.scrollTop = state.detailScrollTop || 0;
-      } catch {
-        // noop
-      }
-    });
-
-    if (options.preserveFocus === false) return true;
-
-    const target = findRestorableField(root, state, options.focusSelector || "");
-
-    if (!target) return true;
-
-    try {
-      target.focus({
-        preventScroll: true,
-      });
-
-      if (
-        options.focusEnd !== false &&
-        typeof target.setSelectionRange === "function"
-      ) {
-        const valueLength = String(target.value || "").length;
-        const start = Number.isFinite(state?.selectionStart)
-          ? Math.min(state.selectionStart, valueLength)
-          : valueLength;
-        const end = Number.isFinite(state?.selectionEnd)
-          ? Math.min(state.selectionEnd, valueLength)
-          : valueLength;
-
-        target.setSelectionRange(start, end);
-      }
-    } catch {
-      // noop
-    }
-
-    return true;
-  }
-
-  function mergeRenderOptions(current = {}, next = {}) {
-    return {
-      ...current,
-      ...next,
-      focusSelector: next.focusSelector || current.focusSelector || "",
-      focusEnd:
-        next.focusEnd !== undefined
-          ? next.focusEnd
-          : current.focusEnd,
-      preserveFocus:
-        next.preserveFocus !== undefined
-          ? next.preserveFocus
-          : current.preserveFocus,
-    };
-  }
-
   function cancelScheduledRender() {
     if (!renderFrame) return false;
-
     cancelFrame(renderFrame);
     renderFrame = 0;
-    pendingRenderOptions = null;
-
     return true;
   }
 
   function cancelScheduledModalRender() {
     if (!modalFrame) return false;
-
     cancelFrame(modalFrame);
     modalFrame = 0;
-    pendingModalOptions = null;
-
     return true;
   }
 
   function renderModalsNow(options = {}) {
     if (destroyed || !isBrowser()) return false;
 
-    cancelScheduledModalRender();
-
-    if (!modalsOpen()) {
-      removeModalHost();
-      syncBodyModalClass();
-      return true;
-    }
-
     const target = ensureModalHost();
-
     if (!target) return false;
 
-    const state = captureModalDomState(target);
     const createHtml = createModal.open ? renderIncidenciasCreateModal(createModalPayload()) : "";
-    const detailHtml = detailModal.open ? renderIncidenciasDetailModal(detailModal) : "";
+    const detailHtml = detailModal.open ? renderIncidenciasDetailModal(detailModalPayload()) : "";
 
     target.innerHTML = `${createHtml}${detailHtml}`;
-
     syncBodyModalClass();
-    restoreModalDomState(target, state, options);
+
+    if (options.focusSelector) focusAfterRender(options.focusSelector, target);
 
     return true;
   }
 
   function renderModals(options = {}) {
-    if (destroyed || !isBrowser()) return false;
-
-    if (options.immediate === true) {
-      return renderModalsNow(options);
-    }
-
-    pendingModalOptions = mergeRenderOptions(pendingModalOptions || {}, options);
-
+    if (options.immediate === true) return renderModalsNow(options);
     if (modalFrame) return true;
 
     modalFrame = nextFrame(() => {
-      const nextOptions = pendingModalOptions || {};
-
       modalFrame = 0;
-      pendingModalOptions = null;
-
-      renderModalsNow(nextOptions);
+      renderModalsNow(options);
     });
 
     return true;
-  }
-
-  function patchCreateDomSlots(options = {}) {
-    if (destroyed || !isBrowser() || !createModal.open) return false;
-
-    const target = ensureModalHost();
-    const currentRoot = target?.querySelector?.(CREATE_ROOT_SELECTOR);
-
-    if (!target || !currentRoot) {
-      return renderModals(options);
-    }
-
-    const template = document.createElement("template");
-    template.innerHTML = renderIncidenciasCreateModal(createModalPayload());
-
-    const nextRoot = template.content.querySelector(CREATE_ROOT_SELECTOR);
-
-    if (!nextRoot) return false;
-
-    const selectors = safeArray(options.selectors).length
-      ? safeArray(options.selectors)
-      : [
-          "[data-create-selected-user-slot='true']",
-          "[data-create-user-search-slot='true']",
-          ".inc-create-target-error-slot",
-          "[data-create-files-card='true']",
-        ];
-
-    for (const selector of selectors) {
-      const currentNode = currentRoot.querySelector(selector);
-      const nextNode = nextRoot.querySelector(selector);
-
-      if (currentNode && nextNode) {
-        currentNode.replaceWith(nextNode);
-        continue;
-      }
-
-      if (currentNode && !nextNode) {
-        currentNode.replaceChildren();
-      }
-    }
-
-    const hiddenFields = [
-      "targetUserId",
-      "targetClienteId",
-      "targetUserName",
-      "targetUserEmail",
-      "targetUserAvatar",
-    ];
-
-    for (const fieldName of hiddenFields) {
-      const currentField = currentRoot.querySelector(`[data-field="${fieldName}"]`);
-      const nextField = nextRoot.querySelector(`[data-field="${fieldName}"]`);
-
-      if (currentField && nextField) {
-        currentField.value = nextField.value || "";
-      }
-    }
-
-    if (options.syncInputValue === true) {
-      const currentInput = currentRoot.querySelector("[data-create-user-search-input]");
-      const nextInput = nextRoot.querySelector("[data-create-user-search-input]");
-
-      if (currentInput && nextInput) {
-        currentInput.value = nextInput.value || "";
-      }
-    }
-
-    syncBodyModalClass();
-
-    if (options.focusSelector) {
-      focusAfterRender(
-        options.focusSelector,
-        options.focusEnd !== false,
-        target
-      );
-    }
-
-    return true;
-  }
-
-  function patchCreateUserDom(options = {}) {
-    return patchCreateDomSlots({
-      ...options,
-      selectors: [
-        "[data-create-selected-user-slot='true']",
-        "[data-create-user-search-slot='true']",
-        ".inc-create-target-error-slot",
-      ],
-    });
-  }
-
-  function patchCreateFilesDom(options = {}) {
-    return patchCreateDomSlots({
-      ...options,
-      selectors: [
-        "[data-create-files-card='true']",
-      ],
-    });
   }
 
   function renderNow(options = {}) {
@@ -1004,88 +727,41 @@ function createIncidenciasController(host = null, context = {}) {
 
     host.innerHTML = renderIncidenciasTemplate(viewPayload());
 
-    /*
-      Cero flicker:
-      - Los renders de la vista/listado NO reconstruyen modales abiertos.
-      - El modal sólo se crea/destruye con acciones explícitas.
-    */
-    if (options.skipModals !== true && !modalsOpen()) {
-      renderModalsNow({ preserveFocus: true });
-    }
-
-    if (options.focusSelector) {
-      focusAfterRender(options.focusSelector, options.focusEnd !== false);
-    }
+    if (!options.skipModals) renderModalsNow();
 
     return true;
   }
 
   function render(options = {}) {
-    if (destroyed || !host) return false;
-
-    if (options.immediate === true) {
-      return renderNow(options);
-    }
-
-    pendingRenderOptions = mergeRenderOptions(pendingRenderOptions || {}, options);
-
+    if (options.immediate === true) return renderNow(options);
     if (renderFrame) return true;
 
     renderFrame = nextFrame(() => {
-      const nextOptions = pendingRenderOptions || {};
-
       renderFrame = 0;
-      pendingRenderOptions = null;
-
-      renderNow(nextOptions);
+      renderNow(options);
     });
 
     return true;
   }
 
-  function renderLoading(options = {}) {
-    if (destroyed || !host) return false;
-
-    cancelScheduledRender();
-
-    host.innerHTML = renderIncidenciasLoadingState(viewPayload());
-
-    if (!modalsOpen()) {
-      renderModalsNow({ preserveFocus: true });
-    }
-
-    if (options.focusSelector) {
-      focusAfterRender(options.focusSelector, options.focusEnd !== false);
-    }
-
+  function renderLoading() {
+    if (!host) return false;
+    host.innerHTML = renderIncidenciasLoadingState(payload());
+    renderModalsNow();
     return true;
   }
 
-  function renderError(message = "No se pudieron cargar las incidencias.") {
-    if (destroyed || !host) return false;
-
-    cancelScheduledRender();
-
+  function renderError(message = "") {
+    if (!host) return false;
     host.innerHTML = renderIncidenciasErrorState(message);
-
-    if (!modalsOpen()) {
-      renderModalsNow({ preserveFocus: true });
-    }
-
+    renderModalsNow();
     return true;
   }
 
   function clearUserSearchTimer() {
     if (!userSearchTimer) return false;
-
-    try {
-      window.clearTimeout(userSearchTimer);
-    } catch {
-      // noop
-    }
-
+    try { window.clearTimeout(userSearchTimer); } catch {}
     userSearchTimer = 0;
-
     return true;
   }
 
@@ -1100,38 +776,25 @@ function createIncidenciasController(host = null, context = {}) {
     if (!silent) {
       loading = !hasItems;
       refreshing = force && hasItems;
-
-      if (loading) {
-        renderLoading();
-      } else {
-        render();
-      }
+      if (loading) renderLoading();
+      else render();
     }
 
     try {
-      const response = await listIncidencias({
-        returnStaleOnError: true,
-        force,
-      });
+      const response = await listIncidencias({ returnStaleOnError: true, force });
 
-      if (destroyed || seq !== loadSeq) {
-        return response;
-      }
+      if (destroyed || seq !== loadSeq) return response;
 
       items = safeArray(response.items);
       total = Number(response.total || items.length) || items.length;
-
       error = response.stale ? cleanText(response.error?.message, "") : "";
       loading = false;
       refreshing = false;
 
       render();
-
       return response;
     } catch (loadError) {
-      if (destroyed || seq !== loadSeq) {
-        return null;
-      }
+      if (destroyed || seq !== loadSeq) return null;
 
       error = safeError(loadError);
       loading = false;
@@ -1168,28 +831,12 @@ function createIncidenciasController(host = null, context = {}) {
 
   function openCreateModal() {
     creating = false;
-
+    resetCreateModal();
     createModal.open = true;
-    createModal.submitting = false;
-    createModal.dragActive = false;
-    createModal.serverError = "";
-    createModal.successMessage = "";
-    createModal.createdTicketId = "";
-    createModal.errors = {};
-    createModal.form = getCreateDefaults();
-    createModal.userSearch = {
-      query: "",
-      loading: false,
-      error: "",
-      results: [],
-      selectedUser: null,
-      empty: false,
-    };
 
     renderModals({
       immediate: true,
       focusSelector: isAdmin() ? "[data-create-user-search-input]" : "[data-field='subject']",
-      preserveFocus: false,
     });
 
     return true;
@@ -1199,10 +846,8 @@ function createIncidenciasController(host = null, context = {}) {
     if (createModal.submitting) return false;
 
     creating = false;
-
     clearUserSearchTimer();
     userSearchSeq += 1;
-
     resetCreateModal();
     renderModals({ immediate: true });
 
@@ -1213,7 +858,6 @@ function createIncidenciasController(host = null, context = {}) {
     if (!field) return false;
 
     const name = cleanText(field.dataset?.field || field.name, "");
-
     if (!name || name === "attachments" || name === "targetUserSearch") return false;
 
     createModal.form = {
@@ -1228,232 +872,144 @@ function createIncidenciasController(host = null, context = {}) {
     }
 
     createModal.serverError = "";
-    createModal.successMessage = "";
-    createModal.createdTicketId = "";
-
     return true;
   }
 
-  async function searchUsers(query = "") {
+  async function runUserSearch(query = "") {
     const q = cleanText(query, "");
+    const seq = ++userSearchSeq;
 
-    if (!isAdmin() || q.length < USER_SEARCH_MIN_LENGTH) return [];
+    createModal.userSearch.query = q;
 
-    return searchIncidenciaUsers(q, {
-      limit: USER_SEARCH_LIMIT,
-    });
-  }
-
-  async function runUserSearch(query = "", seq = userSearchSeq) {
-    try {
-      const results = await searchUsers(query);
-
-      if (destroyed || seq !== userSearchSeq) return false;
-
-      createModal.userSearch.results = safeArray(results);
+    if (q.length < USER_SEARCH_MIN_LENGTH) {
       createModal.userSearch.loading = false;
-      createModal.userSearch.empty = safeArray(results).length === 0;
+      createModal.userSearch.error = "";
+      createModal.userSearch.results = [];
+      createModal.userSearch.empty = false;
+      renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
+      return [];
+    }
+
+    createModal.userSearch.loading = true;
+    createModal.userSearch.error = "";
+    createModal.userSearch.empty = false;
+    renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
+
+    try {
+      const results = await searchIncidenciaUsers(q, {
+        limit: USER_SEARCH_LIMIT,
+      });
+
+      if (destroyed || seq !== userSearchSeq) return [];
+
+      createModal.userSearch.loading = false;
+      createModal.userSearch.results = safeArray(results);
+      createModal.userSearch.empty = q.length >= USER_SEARCH_MIN_LENGTH && !results.length;
       createModal.userSearch.error = "";
 
-      patchCreateUserDom({
-        focusSelector: "[data-create-user-search-input]",
-        preserveFocus: true,
-      });
-
-      return true;
+      renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
+      return results;
     } catch (searchError) {
-      if (destroyed || seq !== userSearchSeq) return false;
+      if (destroyed || seq !== userSearchSeq) return [];
 
-      createModal.userSearch.results = [];
       createModal.userSearch.loading = false;
+      createModal.userSearch.results = [];
       createModal.userSearch.empty = false;
-      createModal.userSearch.error = safeError(searchError, "No se pudieron buscar usuarios.");
+      createModal.userSearch.error = safeError(searchError, "No se pudo buscar usuarios.");
 
-      patchCreateUserDom({
-        focusSelector: "[data-create-user-search-input]",
-        preserveFocus: true,
-      });
-
-      return false;
+      renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
+      return [];
     }
   }
 
-  function handleUserSearch(value = "") {
-    const query = cleanText(value, "");
-    const seq = ++userSearchSeq;
+  function handleUserSearch(query = "") {
+    const q = cleanText(query, "");
+    createModal.userSearch.query = q;
 
     clearUserSearchTimer();
 
-    const hadVisibleSearchState =
-      createModal.userSearch.loading ||
-      createModal.userSearch.error ||
-      createModal.userSearch.empty ||
-      createModal.userSearch.results.length > 0;
-
-    createModal.userSearch.query = query;
-    createModal.userSearch.error = "";
-    createModal.userSearch.results = [];
-    createModal.userSearch.empty = false;
-    createModal.userSearch.loading = false;
-
-    if (createModal.errors.targetUserId || createModal.errors.targetUser) {
-      const next = { ...createModal.errors };
-      delete next.targetUserId;
-      delete next.targetUser;
-      createModal.errors = next;
-    }
-
-    createModal.serverError = "";
-
-    if (!isAdmin() || query.length < USER_SEARCH_MIN_LENGTH) {
-      if (hadVisibleSearchState) {
-        patchCreateUserDom({
-          focusSelector: "[data-create-user-search-input]",
-          preserveFocus: true,
-        });
-      }
-
+    if (q.length < USER_SEARCH_MIN_LENGTH) {
+      userSearchSeq += 1;
+      createModal.userSearch.loading = false;
+      createModal.userSearch.error = "";
+      createModal.userSearch.results = [];
+      createModal.userSearch.empty = false;
+      renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
       return true;
     }
 
+    createModal.userSearch.loading = true;
+    renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
+
     userSearchTimer = window.setTimeout(() => {
-      if (destroyed || seq !== userSearchSeq) return;
-
-      createModal.userSearch.loading = true;
-
-      patchCreateUserDom({
-        focusSelector: "[data-create-user-search-input]",
-        preserveFocus: true,
-      });
-
-      void runUserSearch(query, seq);
+      userSearchTimer = 0;
+      void runUserSearch(q);
     }, USER_SEARCH_DEBOUNCE_MS);
 
     return true;
   }
 
   function selectCreateUser(node = null) {
-    const userId = cleanText(node?.dataset?.userId, "");
+    if (!node) return false;
 
-    if (!userId) return false;
-
-    clearUserSearchTimer();
-    userSearchSeq += 1;
-
-    const selected =
-      safeArray(createModal.userSearch.results).find((user) => {
-        return cleanText(first(user.userId, user.id), "") === userId;
-      }) || {};
-
-    const clienteId = cleanText(
-      first(
-        node?.dataset?.userClienteId,
-        node?.dataset?.clienteId,
-        selected.targetClienteId,
-        selected.clienteId,
-        selected.clientId
-      ),
+    const targetUserId = cleanText(node.dataset?.userId || node.dataset?.targetUserId || "", "");
+    const targetClienteId = cleanText(
+      node.dataset?.userClienteId ||
+        node.dataset?.clienteId ||
+        node.dataset?.targetClienteId ||
+        "",
       ""
     );
+    const targetUserName = cleanText(node.dataset?.userName || node.dataset?.name || node.textContent || "", "");
+    const targetUserEmail = cleanText(node.dataset?.userEmail || node.dataset?.email || "", "");
+    const targetUserAvatar = cleanText(node.dataset?.userAvatar || node.dataset?.avatar || "", "");
 
-    const userName = cleanText(
-      first(
-        node?.dataset?.userName,
-        selected.displayName,
-        selected.fullName,
-        selected.name,
-        selected.nombre,
-        selected.username
-      ),
-      "Usuario"
-    );
+    if (!targetUserId) return false;
 
-    const userEmail = cleanText(
-      first(
-        node?.dataset?.userEmail,
-        node?.dataset?.email,
-        selected.email,
-        selected.emailLower,
-        selected.userEmail,
-        selected.mail
-      ),
-      ""
-    ).toLowerCase();
-
-    const userAvatar = cleanText(
-      first(
-        node?.dataset?.userAvatar,
-        selected.avatarUrl,
-        selected.avatar,
-        selected.picture,
-        selected.photoUrl
-      ),
-      ""
-    );
+    const selectedUser = {
+      userId: targetUserId,
+      id: targetUserId,
+      targetClienteId,
+      clienteId: targetClienteId,
+      name: targetUserName,
+      displayName: targetUserName,
+      email: targetUserEmail,
+      avatar: targetUserAvatar,
+      avatarUrl: targetUserAvatar,
+    };
 
     createModal.form = {
       ...createModal.form,
-      targetUserId: userId,
-      targetClienteId: clienteId,
-      targetUserName: userName,
-      targetUserEmail: userEmail,
-      targetUserAvatar: userAvatar,
+      targetUserId,
+      targetClienteId,
+      targetUserName,
+      targetUserEmail,
+      targetUserAvatar,
     };
 
+    createModal.errors = {
+      ...createModal.errors,
+    };
+    delete createModal.errors.targetUserId;
+    delete createModal.errors.targetUser;
+
     createModal.userSearch = {
-      query: "",
+      ...createModal.userSearch,
+      query: targetUserName || targetUserEmail || targetUserId,
       loading: false,
       error: "",
       results: [],
-      selectedUser: {
-        id: userId,
-        userId,
-
-        clienteId,
-        clientId: clienteId,
-        targetClienteId: clienteId,
-
-        displayName: userName,
-        fullName: userName,
-        name: userName,
-        nombre: userName,
-
-        email: userEmail,
-        emailLower: userEmail,
-        userEmail,
-        mail: userEmail,
-
-        avatar: userAvatar,
-        avatarUrl: userAvatar,
-
-        username: cleanText(first(selected.username, selected.userName, ""), ""),
-        role: cleanText(first(selected.role, selected.rol, "user"), "user"),
-      },
+      selectedUser,
       empty: false,
     };
 
-    if (createModal.errors.targetUserId || createModal.errors.targetUser) {
-      const next = { ...createModal.errors };
-      delete next.targetUserId;
-      delete next.targetUser;
-      createModal.errors = next;
-    }
-
     createModal.serverError = "";
 
-    patchCreateUserDom({
-      focusSelector: "[data-field='subject']",
-      syncInputValue: true,
-      preserveFocus: false,
-    });
-
+    renderModals({ immediate: true, focusSelector: "[data-field='subject']" });
     return true;
   }
 
   function clearCreateUser() {
-    clearUserSearchTimer();
-    userSearchSeq += 1;
-
     createModal.form = {
       ...createModal.form,
       targetUserId: "",
@@ -1472,19 +1028,18 @@ function createIncidenciasController(host = null, context = {}) {
       empty: false,
     };
 
-    patchCreateUserDom({
-      focusSelector: "[data-create-user-search-input]",
-      syncInputValue: true,
-      preserveFocus: true,
-    });
-
+    renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
     return true;
   }
 
   function addCreateAttachments(files = []) {
+    const incoming = dedupeFiles(files);
+
+    if (!incoming.length) return false;
+
     createModal.form.attachments = dedupeFiles([
       ...safeArray(createModal.form.attachments),
-      ...safeArray(files),
+      ...incoming,
     ]);
 
     if (createModal.errors.attachments) {
@@ -1494,45 +1049,52 @@ function createIncidenciasController(host = null, context = {}) {
     }
 
     createModal.serverError = "";
-
-    patchCreateFilesDom({
-      preserveFocus: true,
-    });
-
+    renderModals({ immediate: true });
     return true;
   }
 
   function removeCreateAttachment(index = -1) {
     if (index < 0) return false;
 
-    createModal.form.attachments = safeArray(createModal.form.attachments).filter(
-      (_, currentIndex) => currentIndex !== index
-    );
-
-    patchCreateFilesDom({
-      preserveFocus: true,
-    });
-
+    createModal.form.attachments = safeArray(createModal.form.attachments).filter((_, currentIndex) => currentIndex !== index);
+    renderModals({ immediate: true });
     return true;
+  }
+
+  function readCreateForm(formNode = null) {
+    if (!formNode) return createModal.form;
+
+    const liveFiles = filesFromForm(formNode);
+
+    if (liveFiles.length) {
+      createModal.form.attachments = dedupeFiles([
+        ...safeArray(createModal.form.attachments),
+        ...liveFiles,
+      ]);
+    }
+
+    createModal.form = {
+      ...createModal.form,
+      subject: readField(formNode, "subject") || createModal.form.subject,
+      category: readField(formNode, "category") || createModal.form.category,
+      priority: readField(formNode, "priority") || createModal.form.priority,
+      description: readField(formNode, "description") || createModal.form.description,
+      source: readField(formNode, "source") || createModal.form.source || "panel_admin",
+      status: readField(formNode, "status") || createModal.form.status || "open",
+      targetUserId: readField(formNode, "targetUserId") || createModal.form.targetUserId,
+      targetClienteId: readField(formNode, "targetClienteId") || createModal.form.targetClienteId,
+      targetUserName: readField(formNode, "targetUserName") || createModal.form.targetUserName,
+      targetUserEmail: readField(formNode, "targetUserEmail") || createModal.form.targetUserEmail,
+      targetUserAvatar: readField(formNode, "targetUserAvatar") || createModal.form.targetUserAvatar,
+    };
+
+    return createModal.form;
   }
 
   async function submitCreate(formNode = null) {
     if (createModal.submitting) return false;
 
-    if (formNode) {
-      createModal.form = {
-        ...createModal.form,
-        subject: readField(formNode, "subject"),
-        category: readField(formNode, "category"),
-        priority: readField(formNode, "priority"),
-        description: readField(formNode, "description"),
-        targetUserId: readField(formNode, "targetUserId") || createModal.form.targetUserId,
-        targetClienteId: readField(formNode, "targetClienteId") || createModal.form.targetClienteId,
-        targetUserName: readField(formNode, "targetUserName") || createModal.form.targetUserName,
-        targetUserEmail: readField(formNode, "targetUserEmail") || createModal.form.targetUserEmail,
-        targetUserAvatar: readField(formNode, "targetUserAvatar") || createModal.form.targetUserAvatar,
-      };
-    }
+    readCreateForm(formNode);
 
     const validation = validateCreateForm(createModal.form);
 
@@ -1540,6 +1102,7 @@ function createIncidenciasController(host = null, context = {}) {
     createModal.form = {
       ...createModal.form,
       ...validation.form,
+      attachments: dedupeFiles(createModal.form.attachments),
     };
 
     if (isAdmin() && !createModal.form.targetUserId) {
@@ -1551,6 +1114,7 @@ function createIncidenciasController(host = null, context = {}) {
 
     if (Object.keys(createModal.errors).length > 0 || !validation.valid) {
       renderModals({
+        immediate: true,
         focusSelector:
           createModal.errors.targetUserId || createModal.errors.targetUser
             ? "[data-create-user-search-input]"
@@ -1559,7 +1123,6 @@ function createIncidenciasController(host = null, context = {}) {
               : createModal.errors.description
                 ? "[data-field='description']"
                 : "",
-        preserveFocus: false,
       });
 
       return false;
@@ -1571,15 +1134,16 @@ function createIncidenciasController(host = null, context = {}) {
     createModal.successMessage = "";
     createModal.createdTicketId = "";
 
-    renderModals({
-      immediate: true,
-      preserveFocus: false,
-    });
+    renderModals({ immediate: true });
 
     try {
+      const attachments = dedupeFiles(createModal.form.attachments);
+
       const created = await createIncidencia({
         ...createModal.form,
-        attachments: safeArray(createModal.form.attachments),
+        attachments,
+        files: attachments,
+        adjuntos: attachments,
       });
 
       if (created) {
@@ -1589,7 +1153,6 @@ function createIncidenciasController(host = null, context = {}) {
 
       creating = false;
       resetCreateModal();
-
       renderModals({ immediate: true });
       render();
 
@@ -1599,11 +1162,7 @@ function createIncidenciasController(host = null, context = {}) {
       createModal.submitting = false;
       createModal.serverError = safeError(createError, "No se pudo crear la incidencia.");
 
-      renderModals({
-        focusSelector: "[data-field='subject']",
-        preserveFocus: false,
-      });
-
+      renderModals({ immediate: true, focusSelector: "[data-field='subject']" });
       return false;
     }
   }
@@ -1623,20 +1182,16 @@ function createIncidenciasController(host = null, context = {}) {
 
   function closeDetailModal() {
     if (detailModal.submitting) return false;
-
     resetDetailModal();
     renderModals({ immediate: true });
-
     return true;
   }
 
   async function openDetail(ticketId = "") {
     const id = cleanText(ticketId, "");
-
     if (!id) return false;
 
     const local = items.find((item) => getTicketId(item) === id) || null;
-
     openingTicketId = id;
 
     if (local) {
@@ -1650,12 +1205,7 @@ function createIncidenciasController(host = null, context = {}) {
       detailModal.previewFile = null;
 
       render({ skipModals: true });
-      renderModals({
-        immediate: true,
-        focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
-        focusEnd: false,
-        preserveFocus: false,
-      });
+      renderModals({ immediate: true, focusSelector: DETAIL_MODAL_PANEL_SELECTOR });
     } else {
       render();
     }
@@ -1663,13 +1213,9 @@ function createIncidenciasController(host = null, context = {}) {
     try {
       const detail = await loadIncidenciaDetail(id);
 
-      if (destroyed || openingTicketId !== id) {
-        return false;
-      }
+      if (destroyed || openingTicketId !== id) return false;
 
-      const mergedDetail = detail
-        ? mergeTicketData(local || {}, detail)
-        : local;
+      const mergedDetail = detail ? mergeTicketData(local || {}, detail) : local;
 
       detailModal.open = Boolean(mergedDetail);
       detailModal.detail = mergedDetail;
@@ -1680,42 +1226,27 @@ function createIncidenciasController(host = null, context = {}) {
       detailModal.feedbackType = "info";
       detailModal.previewFile = null;
 
-      if (mergedDetail) {
-        items = upsertByTicketId(items, mergedDetail);
-      }
+      if (mergedDetail) items = upsertByTicketId(items, mergedDetail);
 
       openingTicketId = "";
-
       render({ skipModals: true });
-      renderModals({
-        focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
-        focusEnd: false,
-        preserveFocus: false,
-      });
+      renderModals({ immediate: true, focusSelector: DETAIL_MODAL_PANEL_SELECTOR });
 
       return true;
     } catch (detailError) {
-      if (destroyed || openingTicketId !== id) {
-        return false;
-      }
+      if (destroyed || openingTicketId !== id) return false;
 
       openingTicketId = "";
 
       if (local) {
         detailModal.feedbackMessage = safeError(detailError, "No se pudo actualizar el detalle.");
         detailModal.feedbackType = "error";
-
         render({ skipModals: true });
-        renderModals({
-          focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
-          focusEnd: false,
-        });
-
+        renderModals({ immediate: true, focusSelector: DETAIL_MODAL_PANEL_SELECTOR });
         return false;
       }
 
       error = safeError(detailError, "No se pudo abrir el detalle.");
-
       render();
       return false;
     }
@@ -1733,9 +1264,12 @@ function createIncidenciasController(host = null, context = {}) {
   }
 
   function addDetailPendingFiles(files = []) {
+    const incoming = dedupeFiles(files);
+    if (!incoming.length) return false;
+
     detailModal.pendingFiles = dedupeFiles([
       ...safeArray(detailModal.pendingFiles),
-      ...safeArray(files),
+      ...incoming,
     ]);
 
     if (detailModal.feedbackMessage) {
@@ -1743,24 +1277,15 @@ function createIncidenciasController(host = null, context = {}) {
       detailModal.feedbackType = "info";
     }
 
-    renderModals({
-      focusSelector: "[data-field='comment']",
-    });
-
+    renderModals({ immediate: true, focusSelector: "[data-field='comment']" });
     return true;
   }
 
   function removeDetailPendingFile(index = -1) {
     if (index < 0) return false;
 
-    detailModal.pendingFiles = safeArray(detailModal.pendingFiles).filter(
-      (_, currentIndex) => currentIndex !== index
-    );
-
-    renderModals({
-      focusSelector: "[data-field='comment']",
-    });
-
+    detailModal.pendingFiles = safeArray(detailModal.pendingFiles).filter((_, currentIndex) => currentIndex !== index);
+    renderModals({ immediate: true, focusSelector: "[data-field='comment']" });
     return true;
   }
 
@@ -1778,41 +1303,24 @@ function createIncidenciasController(host = null, context = {}) {
     if (!validation.valid) {
       detailModal.feedbackMessage = validation.message;
       detailModal.feedbackType = "error";
-
-      renderModals({
-        focusSelector: "[data-field='comment']",
-      });
-
+      renderModals({ immediate: true, focusSelector: "[data-field='comment']" });
       return false;
     }
 
     detailModal.submitting = true;
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
-
-    renderModals();
+    renderModals({ immediate: true });
 
     try {
       let nextDetail = detailModal.detail;
 
       if (detailModal.pendingFiles.length) {
-        nextDetail = await uploadIncidenciaAttachments(
-          ticketId,
-          detailModal.pendingFiles,
-          {
-            status: "open",
-          }
-        ) || nextDetail;
+        nextDetail = await uploadIncidenciaAttachments(ticketId, detailModal.pendingFiles, { status: "open" }) || nextDetail;
       }
 
       if (detailModal.commentDraft) {
-        nextDetail = await commentIncidencia(
-          ticketId,
-          detailModal.commentDraft,
-          {
-            status: "open",
-          }
-        ) || nextDetail;
+        nextDetail = await commentIncidencia(ticketId, detailModal.commentDraft, { status: "open" }) || nextDetail;
       } else if (detailModal.pendingFiles.length) {
         nextDetail = await reopenIncidencia(ticketId) || nextDetail;
       }
@@ -1829,42 +1337,22 @@ function createIncidenciasController(host = null, context = {}) {
       items = upsertByTicketId(items, nextDetail);
 
       render({ skipModals: true });
-      renderModals({
-        focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
-        focusEnd: false,
-      });
-
+      renderModals({ immediate: true, focusSelector: DETAIL_MODAL_PANEL_SELECTOR });
       return true;
     } catch (updateError) {
       detailModal.submitting = false;
       detailModal.feedbackMessage = safeError(updateError, "No se pudo actualizar la incidencia.");
       detailModal.feedbackType = "error";
-
-      renderModals({
-        focusSelector: "[data-field='comment']",
-      });
-
+      renderModals({ immediate: true, focusSelector: "[data-field='comment']" });
       return false;
     }
   }
 
   function getAttachmentById(attachmentId = "") {
     const id = cleanText(attachmentId, "");
+    const attachments = safeArray(first(detailModal.detail?.attachments, detailModal.detail?.files, detailModal.detail?.adjuntos, []));
 
-    const attachments = safeArray(
-      first(
-        detailModal.detail?.attachments,
-        detailModal.detail?.files,
-        detailModal.detail?.adjuntos,
-        []
-      )
-    );
-
-    return (
-      attachments.find((file) => {
-        return cleanText(first(file.id, file.attachmentId, file.fileId), "") === id;
-      }) || null
-    );
+    return attachments.find((file) => cleanText(first(file.id, file.attachmentId, file.fileId), "") === id) || null;
   }
 
   async function openAttachment(attachmentId = "") {
@@ -1874,14 +1362,10 @@ function createIncidenciasController(host = null, context = {}) {
     if (!id || !ticketId) return false;
 
     detailModal.openingAttachmentId = id;
-
-    renderModals();
+    renderModals({ immediate: true });
 
     try {
-      const file = await openIncidenciaAttachment({
-        ticketId,
-        attachmentId: id,
-      });
+      const file = await openIncidenciaAttachment({ ticketId, attachmentId: id });
 
       detailModal.previewFile = {
         ...safeObject(getAttachmentById(id)),
@@ -1889,19 +1373,14 @@ function createIncidenciasController(host = null, context = {}) {
         id,
         attachmentId: id,
       };
-
       detailModal.openingAttachmentId = "";
-
-      renderModals();
-
+      renderModals({ immediate: true });
       return true;
     } catch (attachmentError) {
       detailModal.openingAttachmentId = "";
       detailModal.feedbackMessage = safeError(attachmentError, "No se pudo abrir el adjunto.");
       detailModal.feedbackType = "error";
-
-      renderModals();
-
+      renderModals({ immediate: true });
       return false;
     }
   }
@@ -1914,64 +1393,115 @@ function createIncidenciasController(host = null, context = {}) {
     if (!id || !ticketId) return false;
 
     detailModal.downloadingAttachmentId = id;
-
-    renderModals();
+    renderModals({ immediate: true });
 
     try {
       await downloadIncidenciaAttachment({
         ticketId,
         attachmentId: id,
-        filename: cleanText(first(attachment?.filename, attachment?.fileName, attachment?.name), "archivo"),
+        filename: cleanText(first(attachment?.name, attachment?.filename), ""),
       });
 
       detailModal.downloadingAttachmentId = "";
-
-      renderModals();
-
+      renderModals({ immediate: true });
       return true;
     } catch (downloadError) {
       detailModal.downloadingAttachmentId = "";
       detailModal.feedbackMessage = safeError(downloadError, "No se pudo descargar el adjunto.");
       detailModal.feedbackType = "error";
-
-      renderModals();
-
+      renderModals({ immediate: true });
       return false;
     }
   }
 
-  async function downloadPreview() {
-    const file = safeObject(detailModal.previewFile, null);
-
-    if (!file) return false;
-
-    const attachmentId = cleanText(first(file.attachmentId, file.id), "");
-
-    return downloadAttachment(attachmentId);
-  }
-
   function closePreview() {
     detailModal.previewFile = null;
-
-    renderModals();
+    renderModals({ immediate: true });
     return true;
   }
 
-  function copyTicketId(ticketId = "") {
-    const id = cleanText(ticketId, "");
+  async function downloadPreview() {
+    const file = safeObject(detailModal.previewFile, null);
+    if (!file) return false;
 
-    if (!id) return false;
+    return downloadAttachment(cleanText(first(file.id, file.attachmentId), ""));
+  }
 
-    try {
-      navigator.clipboard?.writeText?.(id);
-      detailModal.feedbackMessage = `ID ${id} copiado.`;
-      detailModal.feedbackType = "success";
-    } catch {
-      detailModal.feedbackMessage = `No se pudo copiar automáticamente el ID ${id}.`;
-      detailModal.feedbackType = "warning";
+  function filteredItems() {
+    let output = safeArray(items);
+
+    const q = cleanText(search, "").toLowerCase();
+    if (q) {
+      output = output.filter((item) => {
+        const haystack = [
+          item.ticketId,
+          item.id,
+          item.subject,
+          item.asunto,
+          item.title,
+          item.message,
+          item.description,
+          item.descripcion,
+          item.name,
+          item.displayName,
+          item.email,
+          item.username,
+          item.category,
+          item.categoria,
+          item.tipo,
+          item.priority,
+          item.status,
+        ].filter(Boolean).join(" ").toLowerCase();
+
+        return haystack.includes(q);
+      });
     }
 
-    renderModals();
+    if (filter && filter !== "all") {
+      output = output.filter((item) => {
+        const status = cleanText(first(item.status, item.estado), "").toLowerCase();
+        const priority = cleanText(first(item.priority, item.prioridad), "").toLowerCase();
+
+        if (filter === "open") return ["open", "pending", "in_progress"].includes(status);
+        if (filter === "closed") return ["closed", "resolved"].includes(status);
+        if (filter === "urgent") return ["urgent", "high"].includes(priority);
+
+        return true;
+      });
+    }
+
+    output = [...output].sort((a, b) => {
+      const diff = ticketSortTime(b) - ticketSortTime(a);
+      return normalizeSortOrder(sortOrder) === "asc" ? -diff : diff;
+    });
+
+    return output.slice(0, visibleLimit);
+  }
+
+  function renderWithFilteredItems(options = {}) {
+    const previousItems = items;
+    const visible = filteredItems();
+
+    // El template recibe items visibles, pero mantenemos total real.
+    const payloadItems = items;
+    items = visible;
+    render(options);
+    items = payloadItems || previousItems;
+
+    return true;
+  }
+
+  function setSearch(value = "") {
+    search = cleanText(value, "");
+    visibleLimit = DEFAULT_VISIBLE_LIMIT;
+    renderWithFilteredItems();
+    return true;
+  }
+
+  function setFilter(value = "all") {
+    filter = cleanText(value, "all") || "all";
+    visibleLimit = DEFAULT_VISIBLE_LIMIT;
+    renderWithFilteredItems();
     return true;
   }
 
@@ -1979,58 +1509,30 @@ function createIncidenciasController(host = null, context = {}) {
     filter = "all";
     search = "";
     visibleLimit = DEFAULT_VISIBLE_LIMIT;
-
-    render({
-      focusSelector: "[data-incidencias-search-input]",
-    });
-
-    return true;
-  }
-
-  function setFilter(value = "all") {
-    filter = cleanText(value, "all");
-    visibleLimit = DEFAULT_VISIBLE_LIMIT;
-
-    render();
-    return true;
-  }
-
-  function setSearch(value = "") {
-    search = cleanText(value, "");
-    visibleLimit = DEFAULT_VISIBLE_LIMIT;
-
-    render({
-      focusSelector: "[data-incidencias-search-input]",
-    });
-
+    renderWithFilteredItems();
     return true;
   }
 
   function toggleSortOrder() {
     sortOrder = getNextSortOrder(sortOrder);
-    visibleLimit = DEFAULT_VISIBLE_LIMIT;
-
-    render();
+    renderWithFilteredItems();
     return true;
   }
 
   function loadMore() {
+    loadingMore = true;
     visibleLimit += DEFAULT_VISIBLE_LIMIT;
-
-    render();
+    renderWithFilteredItems();
+    loadingMore = false;
     return true;
   }
 
   async function refresh() {
-    return load({
-      force: true,
-      silent: false,
-    });
+    return load({ force: true, silent: false });
   }
 
   async function handleAction(action = "", node = null) {
     const type = cleanText(action, "");
-
     if (!type) return false;
 
     if (type === INCIDENCIAS_ACTIONS.REFRESH) return refresh();
@@ -2072,10 +1574,7 @@ function createIncidenciasController(host = null, context = {}) {
   }
 
   function onClick(event) {
-    const target = event.target?.nodeType === 3
-      ? event.target.parentElement
-      : event.target;
-
+    const target = event.target?.nodeType === 3 ? event.target.parentElement : event.target;
     if (!target?.closest) return;
 
     const actionNode = target.closest("[data-incidencias-action], [data-create-action], [data-detail-action], [data-action]");
@@ -2087,7 +1586,6 @@ function createIncidenciasController(host = null, context = {}) {
         event.preventDefault();
         event.stopPropagation();
         event[ROUTER_EVENT_HANDLED_KEY] = true;
-
         void handleAction(action, actionNode);
         return;
       }
@@ -2099,7 +1597,6 @@ function createIncidenciasController(host = null, context = {}) {
       event.preventDefault();
       event.stopPropagation();
       event[ROUTER_EVENT_HANDLED_KEY] = true;
-
       void openDetail(row.dataset.ticketId || row.dataset.incidenciaId || "");
       return;
     }
@@ -2115,15 +1612,12 @@ function createIncidenciasController(host = null, context = {}) {
     const detailOverlay = target.closest(DETAIL_MODAL_OVERLAY_SELECTOR);
     const detailPanel = target.closest(DETAIL_MODAL_PANEL_SELECTOR);
 
-    if (detailOverlay && !detailPanel && target === detailOverlay) {
-      closeDetailModal();
-    }
+    if (detailOverlay && !detailPanel && target === detailOverlay) closeDetailModal();
   }
 
   function onInput(event) {
     const target = event.target;
     const field = cleanText(target?.dataset?.field || target?.dataset?.incidenciasField || target?.dataset?.detailField || "", "");
-
     if (!field || !ownsNode(target)) return;
 
     if (field === "search") {
@@ -2136,46 +1630,38 @@ function createIncidenciasController(host = null, context = {}) {
       return;
     }
 
-    if (createModal.open) {
-      patchCreateFormFromField(target);
-    }
-
-    if (detailModal.open && field === "comment") {
-      patchDetailComment(target);
-    }
+    if (createModal.open) patchCreateFormFromField(target);
+    if (detailModal.open && field === "comment") patchDetailComment(target);
   }
 
   function onChange(event) {
     const target = event.target;
     const field = cleanText(target?.dataset?.field || target?.dataset?.detailField || "", "");
-
     if (!field || !ownsNode(target)) return;
 
     if (createModal.open && field === "attachments") {
       addCreateAttachments(filesFromInput(target));
+      try { target.value = ""; } catch {}
       return;
     }
 
     if (detailModal.open && field === "attachments") {
       addDetailPendingFiles(filesFromInput(target));
+      try { target.value = ""; } catch {}
       return;
     }
 
-    if (createModal.open) {
-      patchCreateFormFromField(target);
-    }
+    if (createModal.open) patchCreateFormFromField(target);
   }
 
   function onSubmit(event) {
     const form = event.target?.closest?.("form");
-
     if (!form || !ownsNode(form)) return;
 
     if (form.matches("#incidencias-create-form, [data-incidencias-create-form='true']")) {
       event.preventDefault();
       event.stopPropagation();
       event[ROUTER_EVENT_HANDLED_KEY] = true;
-
       void submitCreate(form);
     }
   }
@@ -2200,32 +1686,26 @@ function createIncidenciasController(host = null, context = {}) {
     if (event.key !== "Enter" && event.key !== " ") return;
 
     const row = event.target?.closest?.("[data-ticket-row='true']");
-
     if (!row || !host?.contains(row)) return;
 
     event.preventDefault();
     event.stopPropagation();
     event[ROUTER_EVENT_HANDLED_KEY] = true;
-
     void openDetail(row.dataset.ticketId || row.dataset.incidenciaId || "");
   }
 
   function getDropzone(target = null) {
     const dropzone = target?.closest?.("[data-dropzone]") || null;
-
     if (!dropzone || !ownsNode(dropzone)) return null;
 
     const kind = cleanText(dropzone.dataset?.dropzone, "");
-
     if (kind === "attachments" && createModal.open) return { dropzone, kind: "create" };
     if (kind === "detail-attachments" && detailModal.open) return { dropzone, kind: "detail" };
-
     return null;
   }
 
   function onDragOver(event) {
     const zone = getDropzone(event.target);
-
     if (!zone) return;
 
     event.preventDefault();
@@ -2234,37 +1714,28 @@ function createIncidenciasController(host = null, context = {}) {
 
     if (!createModal.dragActive) {
       createModal.dragActive = true;
-
-      patchCreateFilesDom({
-        preserveFocus: true,
-      });
+      renderModals({ immediate: true });
     }
   }
 
   function onDragLeave(event) {
     const zone = getDropzone(event.target);
-
     if (!zone || zone.kind !== "create") return;
 
     const related = event.relatedTarget;
-
     if (related && zone.dropzone.contains(related)) return;
 
     createModal.dragActive = false;
-
-    patchCreateFilesDom({
-      preserveFocus: true,
-    });
+    renderModals({ immediate: true });
   }
 
   function onDrop(event) {
     const zone = getDropzone(event.target);
-
     if (!zone) return;
 
     event.preventDefault();
 
-    const files = Array.from(event.dataTransfer?.files || []);
+    const files = Array.from(event.dataTransfer?.files || []).filter(isFileLike);
 
     if (zone.kind === "create") {
       createModal.dragActive = false;
@@ -2284,7 +1755,6 @@ function createIncidenciasController(host = null, context = {}) {
     target?.addEventListener?.("dragover", onDragOver);
     target?.addEventListener?.("dragleave", onDragLeave);
     target?.addEventListener?.("drop", onDrop);
-
     return true;
   }
 
@@ -2297,35 +1767,32 @@ function createIncidenciasController(host = null, context = {}) {
     target?.removeEventListener?.("dragover", onDragOver);
     target?.removeEventListener?.("dragleave", onDragLeave);
     target?.removeEventListener?.("drop", onDrop);
-
     return true;
   }
 
-  function bind() {
-    bindTarget(host);
-    return true;
-  }
+  async function copyTicketId(ticketId = "") {
+    const id = cleanText(ticketId, "");
+    if (!id || !isBrowser()) return false;
 
-  function unbind() {
-    unbindTarget(host);
-
-    if (modalHostBound) {
-      unbindTarget(modalHost);
-      modalHostBound = false;
+    try {
+      await navigator.clipboard?.writeText?.(id);
+      return true;
+    } catch {
+      return false;
     }
-
-    return true;
   }
 
   const controller = {
     version: INCIDENCIAS_VIEW_VERSION,
 
     mount() {
-      if (destroyed || !host) return controller;
-      if (mounted) return controller;
+      if (destroyed || mounted || !host) return controller;
 
       mounted = true;
-      bind();
+      destroyed = false;
+
+      bindTarget(host);
+      ensureModalHost();
 
       const hasCache = items.length > 0;
 
@@ -2341,80 +1808,55 @@ function createIncidenciasController(host = null, context = {}) {
         renderLoading();
       }
 
-      void load({
-        silent: true,
-        source: "incidencias.mount.background",
-      });
-
+      void load({ silent: true, source: "incidencias.mount.background" });
       return controller;
     },
 
     destroy() {
       destroyed = true;
       mounted = false;
-
       loadSeq += 1;
       userSearchSeq += 1;
-
       clearUserSearchTimer();
       cancelScheduledRender();
       cancelScheduledModalRender();
-
-      unbind();
-
+      unbindTarget(host);
       resetCreateModal();
       resetDetailModal();
-
       removeModalHost();
       syncBodyModalClass();
-
       clearInstance(host, controller);
-
       return true;
     },
 
-    unmount() {
-      return this.destroy();
-    },
-
-    cleanup() {
-      return this.destroy();
-    },
-
-    dispose() {
-      return this.destroy();
-    },
+    unmount() { return this.destroy(); },
+    cleanup() { return this.destroy(); },
+    dispose() { return this.destroy(); },
 
     refresh,
-
     reload: refresh,
+    openCreateModal,
+    closeCreateModal,
 
     getSnapshot() {
       return {
         version: INCIDENCIAS_VIEW_VERSION,
-
         mounted,
         destroyed,
-
         loading,
         refreshing,
         creating,
         loadingMore,
-
         total,
         count: items.length,
         visibleLimit,
-
         filter,
         searchLength: search.length,
         sortOrder,
-
         createModalOpen: createModal.open,
         detailModalOpen: detailModal.open,
-
         modalHost: Boolean(modalHost?.isConnected),
         modalHostBound,
-
         userSearch: {
           queryLength: createModal.userSearch.query.length,
           loading: createModal.userSearch.loading,
@@ -2423,14 +1865,17 @@ function createIncidenciasController(host = null, context = {}) {
           hasError: Boolean(createModal.userSearch.error),
           hasSelectedUser: Boolean(createModal.form.targetUserId),
         },
-
         createAttachments: safeArray(createModal.form.attachments).length,
-
+        createFilesAreReal: safeArray(createModal.form.attachments).every(isFileLike),
         openingTicketId: openingTicketId ? "***" : "",
         role: getCurrentRole(),
         admin: isAdmin(),
-
         error: redact(error),
+        blob: {
+          createField: "attachments",
+          submitRereadsLiveFileInput: true,
+          sendsFilesAliases: ["attachments", "files", "adjuntos"],
+        },
       };
     },
 
@@ -2447,16 +1892,11 @@ function createIncidenciasController(host = null, context = {}) {
 ========================================================= */
 
 export async function IncidenciasView(host = null, context = {}) {
-  if (!isDomNode(host)) {
-    return null;
-  }
+  if (!isDomNode(host)) return null;
 
   destroyPrevious(host);
-
   const controller = createIncidenciasController(host, context);
-
   storeInstance(host, controller);
-
   return controller.mount();
 }
 
@@ -2471,9 +1911,7 @@ export function destroy() {
 }
 
 export function getSnapshot() {
-  if (lastInstance?.getSnapshot) {
-    return lastInstance.getSnapshot();
-  }
+  if (lastInstance?.getSnapshot) return lastInstance.getSnapshot();
 
   return {
     version: INCIDENCIAS_VIEW_VERSION,

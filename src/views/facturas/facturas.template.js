@@ -474,6 +474,7 @@ function icon(name = "") {
     check: `<svg ${common}><path d="m20 6-11 11-5-5"/></svg>`,
     search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
     close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+    calendar: `<svg ${common}><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>`,
     filter: `<svg ${common}><path d="M22 3H2l8 9.46V19l4 2v-8.54Z"/></svg>`,
   };
 
@@ -1478,6 +1479,7 @@ function renderFilters(input = {}, listState = {}) {
               ${tooltipAttrs(tooltip, tooltip)}
               aria-pressed="${active ? "true" : "false"}"
             >
+              ${icon("calendar")}
               <span>${escapeHtml(label)}</span>
             </button>
           `;

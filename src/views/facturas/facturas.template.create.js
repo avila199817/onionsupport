@@ -24,7 +24,7 @@
 ========================================================= */
 
 export const FACTURAS_CREATE_TEMPLATE_VERSION =
-  "facturas.template.create.v2";
+  "facturas.template.create.v3.stable-dom-islands";
 
 export const FACTURA_CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -1166,12 +1166,16 @@ function renderTargetBlock(vm = {}) {
                 placeholder="Nombre, email, empresa o usuario..."
                 autocomplete="off"
                 spellcheck="false"
-                ${disabledAttrs(vm.submitting, vm.submitting)}
+                ${disabledAttrs(vm.submitting, vm.submitting || vm.clientSearch.loading)}
               >
             </span>
           </label>
 
-          <div data-slot="client-search-results">
+          <div
+            data-slot="client-search-results"
+            aria-live="polite"
+            aria-busy="${vm.clientSearch.loading ? "true" : "false"}"
+          >
             ${renderClientSearchResults(vm)}
           </div>
         </article>
@@ -1217,12 +1221,16 @@ function renderTargetBlock(vm = {}) {
                 placeholder="Código, asunto o estado..."
                 autocomplete="off"
                 spellcheck="false"
-                ${disabledAttrs(vm.submitting || vm.ticketSearch.loading || !clientCount, vm.ticketSearch.loading)}
+                ${disabledAttrs(vm.submitting || !clientCount, vm.ticketSearch.loading)}
               >
             </span>
           </label>
 
-          <div data-slot="ticket-search-results">
+          <div
+            data-slot="ticket-search-results"
+            aria-live="polite"
+            aria-busy="${vm.ticketSearch.loading ? "true" : "false"}"
+          >
             ${renderTicketSearchResults(vm)}
           </div>
         </article>
@@ -1470,6 +1478,30 @@ export function renderFacturasCreateModalClosed() {
 }
 
 /* =========================================================
+   STABLE DOM ISLAND RENDERERS
+========================================================= */
+
+export function renderFacturaCreateClientSearchSlot(input = {}) {
+  return renderClientSearchResults(buildVm(input));
+}
+
+export function renderFacturaCreateTicketSearchSlot(input = {}) {
+  return renderTicketSearchResults(buildVm(input));
+}
+
+export function renderFacturaCreateSelectedClientsSlot(input = {}) {
+  return renderSelectedClientes(buildVm(input));
+}
+
+export function renderFacturaCreateSelectedTicketsSlot(input = {}) {
+  return renderSelectedTickets(buildVm(input));
+}
+
+export function renderFacturaCreateTotalsSlot(input = {}) {
+  return renderTotalStrip(buildVm(input));
+}
+
+/* =========================================================
    HELPERS FOR INDEX.JS
 ========================================================= */
 
@@ -1561,6 +1593,9 @@ export function getFacturaCreateTemplateSnapshot() {
       multiClientMarkup: true,
       multiTicketMarkup: true,
       totalsPreview: true,
+      stableDomIslands: true,
+      searchInputsRemainMounted: true,
+      liveTotalsWithoutFullRender: true,
     },
   };
 }

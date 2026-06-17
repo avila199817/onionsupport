@@ -1433,3 +1433,1628 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* =========================================================
+   CUENTA · VISUAL 1:1 CON INCIDENCIAS
+   Capa final autoritativa.
+   Conserva íntegramente la API de selectores de Cuenta.
+========================================================= */
+
+/* =========================================================
+   ROOT / VIEW
+========================================================= */
+
+:where(.panel-content[data-view="cuenta"], .cuenta-view, [data-cuenta-scope]) {
+  --cuenta-blue: #60a5fa;
+  --cuenta-sky: #38bdf8;
+  --cuenta-cyan: #22d3ee;
+  --cuenta-indigo: #818cf8;
+  --cuenta-emerald: #34d399;
+  --cuenta-green: #22c55e;
+  --cuenta-amber: #facc15;
+  --cuenta-orange: #fb923c;
+  --cuenta-red: #f87171;
+  --cuenta-rose: #fb7185;
+
+  display: grid;
+  gap: var(--view-section-gap, var(--space-lg));
+  inline-size: 100%;
+  min-inline-size: 0;
+
+  color: var(--text);
+  font-family: var(--font-family);
+
+  container-type: inline-size;
+}
+
+.cuenta-shell,
+.cuenta-content-wrapper,
+.cuenta-view {
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.cuenta-content-wrapper,
+.cuenta-view {
+  display: grid;
+  gap: var(--view-section-gap, var(--space-lg));
+}
+
+.cuenta-view {
+  position: relative;
+  isolation: isolate;
+}
+
+.cuenta-view,
+.cuenta-view *,
+.cuenta-view *::before,
+.cuenta-view *::after {
+  box-sizing: border-box;
+}
+
+.cuenta-view button,
+.cuenta-view input,
+.cuenta-view select,
+.cuenta-view textarea {
+  font: inherit;
+}
+
+.cuenta-view button {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.cuenta-view img {
+  display: block;
+  max-inline-size: 100%;
+}
+
+/* =========================================================
+   SHARED INTERACTION
+========================================================= */
+
+.cuenta-btn,
+.cuenta-switch,
+.cuenta-select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cuenta-btn:focus-visible,
+.cuenta-select:focus-visible,
+.cuenta-field input:focus-visible,
+.cuenta-switch:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--focus-ring),
+    0 0 0 5px color-mix(in srgb, var(--accent) 8%, transparent) !important;
+}
+
+/* =========================================================
+   HERO · MISMO SISTEMA QUE INCIDENCIAS
+========================================================= */
+
+.cuenta-hero {
+  position: relative;
+  isolation: isolate;
+
+  display: grid;
+  gap: clamp(13px, 1vw, 18px);
+
+  min-inline-size: 0;
+  overflow: visible;
+
+  border: 1px solid transparent;
+  border-radius: 0;
+
+  background: transparent;
+  box-shadow: none;
+
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+
+  animation: cuentaFloatIn var(--duration-normal, .28s) var(--ease-standard) both;
+  transform: translateZ(0);
+}
+
+.cuenta-hero::before,
+.cuenta-hero::after {
+  content: none;
+  display: none;
+}
+
+.cuenta-hero-inner {
+  display: grid;
+  gap: clamp(13px, 1vw, 18px);
+
+  padding:
+    clamp(10px, 1vw, 18px)
+    clamp(10px, 1.25vw, 24px)
+    clamp(8px, .9vw, 16px);
+}
+
+.cuenta-hero-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: clamp(16px, 1.4vw, 26px);
+  min-inline-size: 0;
+}
+
+.cuenta-hero-copy {
+  display: grid;
+  gap: 7px;
+  min-inline-size: 0;
+}
+
+.cuenta-eyebrow {
+  width: max-content;
+  min-block-size: 34px;
+
+  padding-inline: 12px;
+
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-pill);
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent 60%
+    ),
+    var(--badge-bg);
+
+  color: var(--badge-text);
+
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 5%, transparent),
+    0 8px 18px color-mix(in srgb, #000 14%, transparent);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cuenta-title {
+  margin: 0;
+  max-inline-size: 980px;
+
+  color: var(--text-strong, #fff);
+
+  font-size: clamp(36px, 3.15vw, 58px);
+  line-height: .91;
+  font-weight: 950;
+  letter-spacing: -.074em;
+
+  text-wrap: balance;
+  white-space: normal;
+
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, .07),
+    0 18px 38px rgba(0, 0, 0, .34);
+}
+
+.cuenta-subtitle {
+  margin: 0;
+  max-inline-size: 840px;
+
+  color: color-mix(in srgb, var(--text-muted) 88%, var(--text-strong) 12%);
+
+  font-size: clamp(13px, .92vw, 16px);
+  line-height: 1.45;
+  font-weight: 680;
+}
+
+.cuenta-hero-actions {
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+  min-inline-size: 0;
+}
+
+.cuenta-hero-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-inline-size: 0;
+}
+
+/* =========================================================
+   BUTTONS · PILL GRAPHITE
+========================================================= */
+
+.cuenta-btn {
+  min-block-size: var(--btn-height);
+  padding-inline: var(--space-md);
+
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: var(--btn-radius);
+
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+
+  box-shadow: var(--btn-secondary-shadow);
+
+  cursor: pointer;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+
+  font-family: var(--font-family);
+  font-size: var(--font-md);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+
+  transition:
+    transform var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard);
+}
+
+.cuenta-hero .cuenta-btn {
+  min-block-size: 48px;
+  padding-inline: 16px;
+
+  border-radius: var(--radius-pill);
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 5%, transparent),
+      transparent 54%
+    ),
+    var(--btn-secondary-bg);
+
+  gap: 8px;
+
+  font-size: 12px;
+  font-weight: 950;
+
+  backdrop-filter: var(--glass-blur-sm, blur(12px));
+  -webkit-backdrop-filter: var(--glass-blur-sm, blur(12px));
+}
+
+.cuenta-btn:hover {
+  transform: translateY(-1px);
+  background: var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
+  color: var(--text-strong);
+  border-color: color-mix(in srgb, var(--btn-secondary-border) 74%, var(--border-strong));
+  box-shadow:
+    var(--btn-secondary-shadow),
+    0 10px 22px color-mix(in srgb, #000 18%, transparent);
+}
+
+.cuenta-btn:active {
+  transform: translateY(0) scale(.985);
+}
+
+.cuenta-btn--primary {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--btn-primary-border));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #fff 10%, transparent),
+      transparent 52%
+    ),
+    var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow:
+    var(--btn-primary-shadow),
+    0 12px 28px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.cuenta-btn--primary:hover {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #fff 14%, transparent),
+      transparent 54%
+    ),
+    var(--btn-primary-bg-hover);
+  border-color: var(--btn-primary-border-hover);
+}
+
+.cuenta-btn--soft {
+  min-block-size: calc(38px * var(--ui-scale, 1));
+  padding-inline: var(--space-sm);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-sm);
+}
+
+.cuenta-btn.is-loading,
+.cuenta-btn:disabled,
+.cuenta-btn[aria-busy="true"] {
+  pointer-events: none;
+  cursor: wait;
+  opacity: .54;
+  filter: saturate(.75);
+  transform: none;
+}
+
+/* =========================================================
+   ACCOUNT COMMAND STRIP · STAT CARD DE INCIDENCIAS
+========================================================= */
+
+.cuenta-command-strip {
+  --cuenta-stat-color: var(--cuenta-blue);
+  --cuenta-stat-color-2: var(--cuenta-cyan);
+
+  position: relative;
+  isolation: isolate;
+
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: clamp(14px, 1vw, 20px);
+
+  min-inline-size: 0;
+  min-block-size: clamp(118px, 8vw, 148px);
+
+  padding: clamp(14px, 1vw, 18px);
+
+  overflow: hidden;
+
+  border: 1px solid color-mix(in srgb, var(--cuenta-stat-color) 30%, rgba(255,255,255,.14));
+  border-radius: 20px;
+
+  background:
+    radial-gradient(circle at 84% -4%, color-mix(in srgb, var(--cuenta-stat-color-2) 38%, transparent), transparent 36%),
+    radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--cuenta-stat-color) 22%, transparent), transparent 44%),
+    linear-gradient(135deg, color-mix(in srgb, var(--cuenta-stat-color) 16%, transparent), color-mix(in srgb, var(--cuenta-stat-color-2) 8%, transparent)),
+    radial-gradient(circle at 14% 0%, rgba(255,255,255,.11), transparent 35%),
+    linear-gradient(180deg, rgba(255,255,255,.095), rgba(255,255,255,.03)),
+    rgba(16,18,24,.72);
+
+  box-shadow:
+    0 16px 44px rgba(0,0,0,.32),
+    inset 0 1px 0 rgba(255,255,255,.075),
+    0 0 38px color-mix(in srgb, var(--cuenta-stat-color) 10%, transparent);
+
+  backdrop-filter: blur(16px) saturate(1.1);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+
+  transform: translateZ(0);
+
+  transition:
+    transform var(--duration-normal, .22s) cubic-bezier(.16,1,.3,1),
+    border-color var(--duration-normal, .22s) var(--ease-standard),
+    box-shadow var(--duration-normal, .22s) var(--ease-standard);
+}
+
+.cuenta-command-strip::before {
+  content: "";
+  position: absolute;
+  inset-inline: 14px;
+  inset-block-start: 0;
+  z-index: 0;
+  block-size: 1px;
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      rgba(255,255,255,.28),
+      color-mix(in srgb, var(--cuenta-stat-color) 66%, rgba(255,255,255,.18)),
+      transparent
+    );
+  opacity: .88;
+}
+
+.cuenta-command-strip::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: -48px;
+  inset-block-end: -58px;
+  z-index: 0;
+  inline-size: 136px;
+  block-size: 136px;
+  border-radius: 999px;
+  pointer-events: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--cuenta-stat-color) 24%, transparent), transparent 70%);
+  filter: blur(24px);
+}
+
+.cuenta-command-strip:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--cuenta-stat-color) 48%, rgba(255,255,255,.22));
+  box-shadow:
+    0 24px 74px rgba(0,0,0,.44),
+    inset 0 1px 0 rgba(255,255,255,.095),
+    0 0 54px color-mix(in srgb, var(--cuenta-stat-color) 15%, transparent);
+}
+
+.cuenta-command-strip > * {
+  position: relative;
+  z-index: 1;
+}
+
+.cuenta-account-copy {
+  display: grid;
+  gap: 5px;
+  min-inline-size: 0;
+}
+
+.cuenta-account-name {
+  min-inline-size: 0;
+  overflow: hidden;
+
+  color: #fff;
+
+  font-size: clamp(26px, 2.05vw, 38px);
+  line-height: .94;
+  font-weight: 950;
+  letter-spacing: -.062em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  text-shadow:
+    0 1px 0 rgba(255,255,255,.08),
+    0 16px 30px rgba(0,0,0,.32);
+}
+
+.cuenta-account-line {
+  min-inline-size: 0;
+  overflow: hidden;
+
+  color: rgba(255,255,255,.68);
+
+  font-size: clamp(11px, .76vw, 13px);
+  line-height: 1.35;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cuenta-account-stats {
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* =========================================================
+   AVATAR
+========================================================= */
+
+.cuenta-avatar {
+  position: relative;
+  isolation: isolate;
+
+  display: grid;
+  place-items: center;
+
+  overflow: hidden;
+
+  border-radius: var(--radius-pill);
+
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255,255,255,.42), transparent 30%),
+    linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 42%, #111827));
+
+  color: var(--avatar-text, var(--text-on-accent));
+
+  box-shadow:
+    0 16px 34px color-mix(in srgb, var(--accent) 24%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--accent-ring) 72%, transparent),
+    var(--shadow-inner);
+
+  transform: translateZ(0);
+}
+
+.cuenta-avatar--hero {
+  inline-size: calc(72px * var(--ui-scale, 1));
+  block-size: calc(72px * var(--ui-scale, 1));
+  min-inline-size: calc(72px * var(--ui-scale, 1));
+}
+
+.cuenta-avatar--small {
+  inline-size: calc(42px * var(--ui-scale, 1));
+  block-size: calc(42px * var(--ui-scale, 1));
+  min-inline-size: calc(42px * var(--ui-scale, 1));
+}
+
+.cuenta-avatar::before {
+  content: "";
+  position: absolute;
+  inset: -34%;
+  z-index: 0;
+  background: conic-gradient(
+    from 120deg,
+    transparent,
+    color-mix(in srgb, var(--accent) 32%, transparent),
+    transparent,
+    rgba(255,255,255,.18),
+    transparent
+  );
+  opacity: .92;
+}
+
+.cuenta-avatar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.12));
+  mix-blend-mode: screen;
+}
+
+.cuenta-avatar img {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.cuenta-avatar-fallback {
+  position: relative;
+  z-index: 2;
+  color: currentColor;
+  font-size: var(--font-3xl);
+  font-weight: var(--weight-black);
+  letter-spacing: -.055em;
+  text-shadow: 0 1px 2px rgba(0,0,0,.26);
+}
+
+/* =========================================================
+   CHIPS / MINI STATS
+========================================================= */
+
+.cuenta-chip {
+  min-block-size: 34px;
+  padding-inline: 12px;
+
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-pill);
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent 60%
+    ),
+    var(--badge-bg);
+
+  color: var(--badge-text);
+
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 5%, transparent),
+    0 8px 18px color-mix(in srgb, #000 14%, transparent);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cuenta-chip--accent {
+  color: color-mix(in srgb, var(--text-strong) 88%, var(--accent) 12%);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 13%, var(--surface-3)),
+      color-mix(in srgb, var(--accent) 7%, var(--surface-2))
+    );
+  border-color: color-mix(in srgb, var(--accent-border) 62%, var(--border-default));
+}
+
+.cuenta-chip--success {
+  color: var(--success);
+  background: var(--success-bg);
+  border-color: var(--border-success);
+}
+
+.cuenta-chip--warning {
+  color: var(--warning);
+  background: var(--warning-bg);
+  border-color: var(--border-warning);
+}
+
+.cuenta-chip--danger {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--border-danger);
+}
+
+.cuenta-mini-stat {
+  min-inline-size: 124px;
+  min-block-size: 58px;
+
+  display: grid;
+  align-content: center;
+  gap: 3px;
+
+  padding: 9px 12px;
+
+  border: 1px solid rgba(255,255,255,.13);
+  border-radius: 14px;
+
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.025)),
+    rgba(8,10,14,.24);
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 10px 24px rgba(0,0,0,.18);
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.cuenta-mini-stat span {
+  color: rgba(255,255,255,.56);
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .085em;
+  text-transform: uppercase;
+}
+
+.cuenta-mini-stat strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cuenta-mini-stat--success {
+  border-color: color-mix(in srgb, var(--success) 40%, rgba(255,255,255,.14));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 16%, transparent), transparent),
+    rgba(8,10,14,.24);
+}
+
+.cuenta-mini-stat--warning {
+  border-color: color-mix(in srgb, var(--warning) 40%, rgba(255,255,255,.14));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--warning) 16%, transparent), transparent),
+    rgba(8,10,14,.24);
+}
+
+.cuenta-mini-stat--danger {
+  border-color: color-mix(in srgb, var(--danger) 40%, rgba(255,255,255,.14));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--danger) 16%, transparent), transparent),
+    rgba(8,10,14,.24);
+}
+
+/* =========================================================
+   MAIN PANEL · HISTORY SHELL DE INCIDENCIAS
+========================================================= */
+
+.cuenta-panel {
+  position: relative;
+  min-inline-size: 0;
+
+  overflow: hidden;
+
+  border: 1px solid var(--data-table-border);
+  border-radius: var(--data-table-radius);
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent 26%
+    ),
+    var(--data-table-bg);
+
+  box-shadow: var(--data-table-shadow);
+
+  backdrop-filter: var(--glass-blur-md);
+  -webkit-backdrop-filter: var(--glass-blur-md);
+
+  animation: cuentaFloatIn var(--duration-normal, .28s) var(--ease-standard) both;
+}
+
+.cuenta-panel::before {
+  content: "";
+  position: absolute;
+  inset-inline: 14px;
+  inset-block-start: 0;
+  z-index: 1;
+  block-size: 1px;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--text-strong) 18%, transparent),
+      transparent
+    );
+}
+
+.cuenta-cards-grid {
+  position: relative;
+  z-index: 1;
+
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(360px, .92fr);
+  gap: clamp(10px, .9vw, 15px);
+
+  padding: var(--space-md);
+
+  min-inline-size: 0;
+}
+
+.cuenta-column {
+  display: grid;
+  align-content: start;
+  gap: clamp(10px, .9vw, 15px);
+  min-inline-size: 0;
+}
+
+/* =========================================================
+   CARDS · GRAPHITE GLASS
+========================================================= */
+
+.cuenta-card {
+  --cuenta-card-accent: var(--cuenta-blue);
+
+  position: relative;
+  isolation: isolate;
+
+  display: grid;
+  align-content: start;
+  gap: var(--space-md);
+
+  min-inline-size: 0;
+
+  padding: clamp(15px, 1.15vw, 20px);
+
+  overflow: hidden;
+
+  border: 1px solid color-mix(in srgb, var(--cuenta-card-accent) 13%, var(--card-border));
+  border-radius: 18px;
+
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--cuenta-card-accent) 10%, transparent), transparent 34%),
+    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 5%, transparent), transparent 40%),
+    color-mix(in srgb, var(--card-bg) 92%, transparent);
+
+  box-shadow:
+    0 14px 34px color-mix(in srgb, #000 20%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 6%, transparent);
+
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  transition:
+    transform var(--duration-normal, .22s) cubic-bezier(.16,1,.3,1),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.cuenta-card::before {
+  content: "";
+  position: absolute;
+  inset-inline: 14px;
+  inset-block-start: 0;
+  z-index: 0;
+  block-size: 1px;
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--cuenta-card-accent) 52%, rgba(255,255,255,.18)),
+      transparent
+    );
+  opacity: .72;
+}
+
+.cuenta-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.cuenta-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--cuenta-card-accent) 28%, var(--card-border));
+  box-shadow:
+    0 22px 56px color-mix(in srgb, #000 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 8%, transparent);
+}
+
+.cuenta-card--accent {
+  --cuenta-card-accent: var(--cuenta-sky);
+}
+
+.cuenta-card--success {
+  --cuenta-card-accent: var(--cuenta-emerald);
+}
+
+.cuenta-card--warning {
+  --cuenta-card-accent: var(--cuenta-amber);
+}
+
+.cuenta-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-sm);
+}
+
+.cuenta-card-copy {
+  display: grid;
+  gap: 5px;
+  min-inline-size: 0;
+}
+
+.cuenta-card-title {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(18px, 1.2vw, 23px);
+  line-height: 1.08;
+  font-weight: 900;
+  letter-spacing: -.035em;
+}
+
+.cuenta-card-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  line-height: 1.48;
+  font-weight: 580;
+}
+
+.cuenta-card-icon {
+  inline-size: 44px;
+  block-size: 44px;
+
+  border: 1px solid color-mix(in srgb, var(--cuenta-card-accent) 30%, transparent);
+  border-radius: 14px;
+
+  background:
+    radial-gradient(circle at 30% 18%, rgba(255,255,255,.16), transparent 36%),
+    color-mix(in srgb, var(--cuenta-card-accent) 13%, transparent);
+
+  color: color-mix(in srgb, var(--text-strong) 82%, var(--cuenta-card-accent) 18%);
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.07),
+    0 10px 22px color-mix(in srgb, var(--cuenta-card-accent) 12%, transparent);
+
+  display: grid;
+  place-items: center;
+
+  font-size: var(--font-sm);
+  font-weight: 900;
+  letter-spacing: -.03em;
+}
+
+/* =========================================================
+   FEEDBACK / BANNERS
+========================================================= */
+
+.cuenta-feedback {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.cuenta-feedback-item,
+.cuenta-banner {
+  position: relative;
+
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-sm);
+
+  padding: var(--space-sm) var(--space-md);
+
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 4%, transparent), transparent),
+    var(--surface-1);
+
+  color: var(--text-soft);
+
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 5%, transparent),
+    0 10px 24px color-mix(in srgb, #000 14%, transparent);
+
+  font-size: var(--font-sm);
+  line-height: 1.5;
+}
+
+.cuenta-banner {
+  display: block;
+  margin-block-end: var(--space-md);
+}
+
+.cuenta-feedback-item strong {
+  color: var(--text-strong);
+  font-weight: 900;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.cuenta-feedback-item--error,
+.cuenta-banner--error {
+  border-color: var(--border-danger);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--danger) 7%, transparent), transparent),
+    var(--danger-bg);
+  color: var(--danger);
+}
+
+.cuenta-feedback-item--success,
+.cuenta-banner--success {
+  border-color: var(--border-success);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--success) 7%, transparent), transparent),
+    var(--success-bg);
+  color: var(--success);
+}
+
+.cuenta-banner--info {
+  border-color: var(--border-info);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--info) 7%, transparent), transparent),
+    var(--info-bg);
+  color: var(--info);
+}
+
+/* =========================================================
+   FIELDS / INPUTS
+========================================================= */
+
+.cuenta-profile-grid,
+.cuenta-password-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.cuenta-field {
+  display: grid;
+  gap: 7px;
+  min-inline-size: 0;
+}
+
+.cuenta-field--wide {
+  grid-column: 1 / -1;
+}
+
+.cuenta-field-label {
+  color: var(--form-label-color, var(--text-soft));
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: .035em;
+}
+
+.cuenta-select,
+.cuenta-field input {
+  inline-size: 100%;
+  min-block-size: var(--input-height);
+
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-pill);
+
+  background: var(--input-bg);
+  color: var(--input-text);
+
+  box-shadow: var(--input-shadow);
+
+  outline: none;
+
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.cuenta-field input {
+  padding-inline: 15px;
+}
+
+.cuenta-select {
+  min-inline-size: min(100%, 240px);
+  padding-inline: 15px;
+  cursor: pointer;
+}
+
+.cuenta-select:hover,
+.cuenta-field input:hover {
+  background: var(--input-bg-hover);
+  border-color: var(--input-border-hover);
+  box-shadow: var(--input-shadow-hover);
+}
+
+.cuenta-select:focus,
+.cuenta-field input:focus {
+  border-color: var(--input-border-focus);
+  background: var(--input-bg-focus);
+  box-shadow: var(--input-shadow-focus);
+}
+
+.cuenta-field input[readonly] {
+  opacity: .86;
+  cursor: default;
+}
+
+.cuenta-select:disabled,
+.cuenta-field input:disabled {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity, .68);
+}
+
+/* =========================================================
+   CONTROLS / SWITCH
+========================================================= */
+
+.cuenta-control-row,
+.cuenta-password-block {
+  display: grid;
+  gap: var(--space-sm);
+
+  padding-block: var(--space-sm);
+
+  border-top: 1px solid var(--data-table-row-border);
+}
+
+.cuenta-control-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.cuenta-control-title {
+  color: var(--text-strong);
+  font-size: var(--font-md);
+  line-height: 1.25;
+  font-weight: 850;
+}
+
+.cuenta-control-description {
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  line-height: 1.48;
+}
+
+.cuenta-switch-area {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.cuenta-switch {
+  display: inline-flex;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cuenta-switch.is-disabled {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity, .72);
+}
+
+.cuenta-switch-track {
+  position: relative;
+
+  display: inline-flex;
+
+  inline-size: calc(62px * var(--ui-scale, 1));
+  block-size: calc(34px * var(--ui-scale, 1));
+
+  padding: 4px;
+
+  border: 1px solid var(--switch-border, var(--border-default));
+  border-radius: var(--radius-pill);
+
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 4%, transparent), transparent),
+    var(--switch-bg);
+
+  box-shadow:
+    inset 0 1px 2px color-mix(in srgb, #000 20%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 4%, transparent);
+
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.cuenta-switch-thumb {
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-start: 4px;
+
+  inline-size: calc(24px * var(--ui-scale, 1));
+  block-size: calc(24px * var(--ui-scale, 1));
+
+  border-radius: var(--radius-pill);
+
+  background: var(--switch-thumb-bg, var(--text-strong));
+
+  box-shadow:
+    0 5px 12px color-mix(in srgb, #000 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+
+  transition:
+    inset-inline-start var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.cuenta-switch.is-checked .cuenta-switch-track {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 7%, transparent), transparent),
+    color-mix(in srgb, var(--accent) 24%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent),
+    0 0 20px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.cuenta-switch.is-checked .cuenta-switch-thumb {
+  inset-inline-start: calc(34px * var(--ui-scale, 1));
+  background: var(--accent);
+}
+
+.cuenta-native-control {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+  clip-path: inset(50%);
+}
+
+.cuenta-control-state {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
+.cuenta-control-actions,
+.cuenta-password-actions,
+.cuenta-select-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+/* =========================================================
+   META LIST
+========================================================= */
+
+.cuenta-meta-list {
+  display: grid;
+  gap: 0;
+  margin-block-start: auto;
+  border-top: 1px solid var(--data-table-row-border);
+}
+
+.cuenta-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+
+  min-inline-size: 0;
+
+  padding-block: 10px;
+
+  border-bottom: 1px solid var(--data-table-row-border);
+
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.cuenta-meta-row:last-child {
+  border-bottom: 0;
+}
+
+.cuenta-meta-row:hover {
+  background: color-mix(in srgb, var(--data-table-row-hover) 72%, transparent);
+}
+
+.cuenta-meta-label {
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  line-height: 1.3;
+}
+
+.cuenta-meta-value {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-sm);
+  font-weight: 750;
+  text-align: end;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cuenta-meta-row--success .cuenta-meta-value { color: var(--success); }
+.cuenta-meta-row--warning .cuenta-meta-value { color: var(--warning); }
+.cuenta-meta-row--danger .cuenta-meta-value { color: var(--danger); }
+
+/* =========================================================
+   LOADING / STATES / SKELETON
+========================================================= */
+
+.cuenta-state {
+  position: relative;
+  overflow: hidden;
+
+  display: grid;
+  justify-items: center;
+  gap: var(--space-sm);
+
+  padding: var(--space-4xl) var(--space-lg) var(--space-5xl);
+
+  border: 1px solid var(--data-table-border);
+  border-radius: var(--data-table-radius);
+
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 4%, transparent), transparent 26%),
+    var(--data-table-bg);
+
+  box-shadow: var(--data-table-shadow);
+
+  text-align: center;
+}
+
+.cuenta-state-title {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--font-3xl);
+  line-height: var(--line-tight);
+  font-weight: 900;
+  letter-spacing: var(--letter-tight);
+}
+
+.cuenta-state-text {
+  margin: 0;
+  max-inline-size: 620px;
+  color: var(--text-muted);
+  font-size: var(--font-md);
+  line-height: var(--line-relaxed);
+}
+
+.cuenta-loading-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(10px, .9vw, 15px);
+  inline-size: 100%;
+}
+
+.cuenta-skeleton-card {
+  display: grid;
+  gap: var(--space-sm);
+
+  min-block-size: 260px;
+
+  padding: var(--space-lg);
+
+  border: 1px solid var(--card-border);
+  border-radius: 18px;
+
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 4%, transparent), transparent),
+    var(--card-bg);
+
+  box-shadow:
+    0 14px 34px color-mix(in srgb, #000 20%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 5%, transparent);
+}
+
+.cuenta-skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--skeleton-radius, var(--radius-md));
+  background: var(--skeleton-bg);
+}
+
+.cuenta-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--skeleton-shine), transparent);
+  animation: cuentaSkeleton 1.2s var(--ease-standard) infinite;
+}
+
+/* =========================================================
+   PANEL OVERLAY
+========================================================= */
+
+.cuenta-panel-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+
+  display: grid;
+  place-items: center;
+
+  padding: var(--space-lg);
+
+  background: color-mix(in srgb, var(--surface-1) 76%, transparent);
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.cuenta-panel-overlay-card {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-sm);
+
+  min-inline-size: min(100%, 260px);
+
+  padding: var(--space-lg) var(--space-xl);
+
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border-soft));
+  border-radius: 18px;
+
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 5%, transparent), transparent),
+    var(--popover-bg);
+
+  color: var(--text-strong);
+
+  box-shadow:
+    0 24px 64px color-mix(in srgb, #000 34%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 7%, transparent);
+
+  font-size: var(--font-md);
+  font-weight: 800;
+}
+
+/* =========================================================
+   LIGHT
+========================================================= */
+
+[data-theme="light"] .cuenta-command-strip {
+  background:
+    radial-gradient(circle at 84% -4%, color-mix(in srgb, var(--cuenta-stat-color-2) 22%, transparent), transparent 36%),
+    radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--cuenta-stat-color) 13%, transparent), transparent 44%),
+    linear-gradient(135deg, color-mix(in srgb, var(--cuenta-stat-color) 8%, transparent), color-mix(in srgb, var(--cuenta-stat-color-2) 4%, transparent)),
+    linear-gradient(180deg, rgba(255,255,255,.96), rgba(246,248,252,.92));
+}
+
+[data-theme="light"] .cuenta-account-name,
+[data-theme="light"] .cuenta-mini-stat strong {
+  color: var(--text-strong);
+  text-shadow: none;
+}
+
+[data-theme="light"] .cuenta-account-line,
+[data-theme="light"] .cuenta-mini-stat span {
+  color: var(--text-muted);
+}
+
+[data-theme="light"] .cuenta-mini-stat {
+  border-color: color-mix(in srgb, var(--border-default) 88%, transparent);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,.56)),
+    color-mix(in srgb, var(--surface-1) 86%, transparent);
+}
+
+/* =========================================================
+   RESPONSIVE · MISMO RITMO QUE INCIDENCIAS
+========================================================= */
+
+@container (max-width: 1180px) {
+  .cuenta-hero-top,
+  .cuenta-command-strip,
+  .cuenta-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cuenta-hero-actions,
+  .cuenta-account-stats {
+    justify-content: flex-start;
+  }
+
+  .cuenta-loading-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container (max-width: 900px) {
+  .cuenta-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container (max-width: 760px) {
+  .cuenta-view {
+    gap: var(--space-md);
+  }
+
+  .cuenta-hero-inner {
+    padding: 10px 4px 8px;
+  }
+
+  .cuenta-hero-top {
+    grid-template-columns: 1fr;
+    gap: 13px;
+  }
+
+  .cuenta-title {
+    font-size: clamp(34px, 10vw, 48px);
+    line-height: .94;
+  }
+
+  .cuenta-subtitle {
+    font-size: var(--font-base);
+  }
+
+  .cuenta-hero-actions,
+  .cuenta-select-line,
+  .cuenta-control-actions,
+  .cuenta-password-actions,
+  .cuenta-account-stats {
+    inline-size: 100%;
+  }
+
+  .cuenta-btn,
+  .cuenta-select,
+  .cuenta-mini-stat {
+    inline-size: 100%;
+  }
+
+  .cuenta-command-strip {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .cuenta-account-stats {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cuenta-cards-grid {
+    padding: var(--space-sm);
+  }
+
+  .cuenta-card {
+    padding: var(--space-md);
+  }
+
+  .cuenta-card-head,
+  .cuenta-profile-grid,
+  .cuenta-password-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cuenta-field--wide {
+    grid-column: auto;
+  }
+
+  .cuenta-feedback-item {
+    grid-template-columns: 1fr;
+  }
+
+  .cuenta-meta-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-2xs);
+  }
+
+  .cuenta-meta-value {
+    text-align: start;
+    white-space: normal;
+  }
+
+  .cuenta-avatar--hero {
+    inline-size: 62px;
+    block-size: 62px;
+    min-inline-size: 62px;
+  }
+}
+
+@container (max-width: 420px) {
+  .cuenta-hero-inner,
+  .cuenta-card {
+    padding: var(--space-md);
+  }
+
+  .cuenta-command-strip {
+    grid-template-columns: 1fr;
+    justify-items: start;
+    padding: var(--space-sm);
+  }
+
+  .cuenta-cards-grid {
+    padding: var(--space-xs);
+  }
+
+  .cuenta-card-icon {
+    inline-size: 38px;
+    block-size: 38px;
+    border-radius: var(--radius-md);
+  }
+
+  .cuenta-account-stats,
+  .cuenta-hero-meta {
+    display: grid;
+    grid-template-columns: 1fr;
+    inline-size: 100%;
+  }
+
+  .cuenta-chip {
+    inline-size: 100%;
+    justify-content: center;
+  }
+}
+
+/* Fallback viewport para navegadores sin container queries */
+@media (max-width: 1180px) {
+  .cuenta-hero-top,
+  .cuenta-command-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .cuenta-hero-actions,
+  .cuenta-account-stats {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 900px) {
+  .cuenta-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .cuenta-title {
+    font-size: clamp(34px, 10vw, 48px);
+  }
+
+  .cuenta-profile-grid,
+  .cuenta-password-grid,
+  .cuenta-card-head {
+    grid-template-columns: 1fr;
+  }
+}
+

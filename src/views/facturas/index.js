@@ -62,7 +62,7 @@ import {
   renderFacturasDetailModal,
 } from "./facturas.template.modal.js";
 
-export const FACTURAS_INDEX_VERSION = "facturas.index.productive.v8.create-detail-modal-islands";
+export const FACTURAS_INDEX_VERSION = "facturas.index.productive.v9.create-modal-stable-dom";
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
 const DEFAULT_PAGE = 1;
@@ -1578,12 +1578,7 @@ function createFacturasController(host = null, context = {}) {
     downloadingFacturaId: "",
   };
 
-  function clearTimers() {
-    if (listSearchTimer) {
-      clearTimeout(listSearchTimer);
-      listSearchTimer = null;
-    }
-
+  function clearCreateTimers() {
     if (clientSearchTimer) {
       clearTimeout(clientSearchTimer);
       clientSearchTimer = null;
@@ -1593,6 +1588,17 @@ function createFacturasController(host = null, context = {}) {
       clearTimeout(ticketSearchTimer);
       ticketSearchTimer = null;
     }
+
+    return true;
+  }
+
+  function clearTimers() {
+    if (listSearchTimer) {
+      clearTimeout(listSearchTimer);
+      listSearchTimer = null;
+    }
+
+    clearCreateTimers();
   }
 
   function disconnectInfiniteObserver() {
@@ -1860,6 +1866,10 @@ function createFacturasController(host = null, context = {}) {
         next.preserveFocus !== undefined
           ? next.preserveFocus
           : current.preserveFocus,
+      structural:
+        next.structural !== undefined
+          ? next.structural
+          : current.structural,
     };
   }
 
@@ -2042,6 +2052,459 @@ function createFacturasController(host = null, context = {}) {
     return true;
   }
 
+  function getCreateFieldNode(name = "") {
+    const key = cleanText(name, "");
+
+    if (!key || !createModalHost) return null;
+
+    return Array.from(
+      createModalHost.querySelectorAll("[data-field], [name]")
+    ).find((node) => {
+      return cleanText(node.dataset?.field || node.getAttribute?.("name"), "") === key;
+    }) || null;
+  }
+
+  function getCreateActionNode(action = "") {
+    const key = cleanText(action, "");
+
+    if (!key || !createModalHost) return null;
+
+    return Array.from(
+      createModalHost.querySelectorAll("[data-factura-create-action], [data-action]")
+    ).find((node) => actionFrom(node) === key) || null;
+  }
+
+  function setCreateNodeDisabled(node = null, disabled = false, busy = false) {
+    if (!node) return false;
+
+    const isDisabled = Boolean(disabled);
+    const isBusy = Boolean(busy);
+
+    try {
+      node.disabled = isDisabled;
+      node.toggleAttribute?.("disabled", isDisabled);
+
+      if (isDisabled) {
+        node.setAttribute("aria-disabled", "true");
+      } else {
+        node.removeAttribute("aria-disabled");
+      }
+
+      if (isBusy) {
+        node.setAttribute("aria-busy", "true");
+      } else {
+        node.removeAttribute("aria-busy");
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function setCreateFieldValue(name = "", value = "", { force = false } = {}) {
+    const field = getCreateFieldNode(name);
+
+    if (!field) return false;
+    if (!force && document.activeElement === field) return true;
+
+    try {
+      if (field.type === "checkbox") {
+        field.checked = Boolean(value);
+      } else {
+        const nextValue = String(value ?? "");
+        if (field.value !== nextValue) field.value = nextValue;
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function focusCreateField(name = "", placeEnd = true) {
+    const field = getCreateFieldNode(name);
+
+    if (!field) return false;
+
+    try {
+      field.focus({ preventScroll: true });
+
+      if (placeEnd && typeof field.setSelectionRange === "function") {
+        const end = String(field.value || "").length;
+        field.setSelectionRange(end, end);
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function createModalSnapshot() {
+    if (!isBrowser()) return null;
+
+    try {
+      const template = document.createElement("template");
+      template.innerHTML = renderFacturasCreateModal(createModalPayload()).trim();
+      return template.content;
+    } catch {
+      return null;
+    }
+  }
+
+  function patchCreateSlotFromSnapshot(selector = "", snapshot = null) {
+    if (!selector || !createModalHost) return false;
+
+    const sourceRoot = snapshot || createModalSnapshot();
+    const target = createModalHost.querySelector(selector);
+    const source = sourceRoot?.querySelector?.(selector);
+
+    if (!target || !source) return false;
+
+    if (target.innerHTML !== source.innerHTML) {
+      target.innerHTML = source.innerHTML;
+    }
+
+    return true;
+  }
+
+  function patchCreateCountsDom() {
+    if (!createModalHost) return false;
+
+    const clientCount = createModalHost.querySelector("[data-client-count='true']");
+    const ticketCount = createModalHost.querySelector("[data-ticket-count='true']");
+
+    if (clientCount) {
+      clientCount.textContent = String(createModal.selectedClientes.length);
+    }
+
+    if (ticketCount) {
+      ticketCount.textContent = String(createModal.selectedTickets.length);
+    }
+
+    return true;
+  }
+
+  function formatCreateMoney(value = 0) {
+    const amount = number(value, 0);
+
+    try {
+      return new Intl.NumberFormat("es-ES", {
+        style: "currency",
+        currency: "EUR",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(amount);
+    } catch {
+      return `${amount.toFixed(2).replace(".", ",")} €`;
+    }
+  }
+
+  function patchCreateTotalsDom() {
+    if (!createModalHost) return false;
+
+    const breakdown = getFacturaCreateBreakdown(createModal.form);
+    const base = createModalHost.querySelector("[data-role='base-preview-inline']");
+    const taxes = createModalHost.querySelector("[data-role='tax-preview-inline']");
+    const totalNode = createModalHost.querySelector("[data-role='total-preview-inline']");
+
+    if (base) base.textContent = formatCreateMoney(breakdown.base);
+    if (taxes) {
+      taxes.textContent = `${formatCreateMoney(breakdown.ivaTotal)} / ${formatCreateMoney(breakdown.irpfTotal)}`;
+    }
+    if (totalNode) totalNode.textContent = formatCreateMoney(breakdown.totalFactura);
+
+    return true;
+  }
+
+  function setCreateSearchState(slot = null, text = "", isError = false) {
+    if (!slot) return false;
+
+    const message = cleanText(text, "");
+
+    if (!message) {
+      if (slot.childNodes.length) slot.replaceChildren();
+      return true;
+    }
+
+    const current = slot.childElementCount === 1
+      ? slot.firstElementChild
+      : null;
+
+    if (
+      current?.classList?.contains("fac-create-search-state") &&
+      current.textContent === message
+    ) {
+      current.classList.toggle("is-error", Boolean(isError));
+      return true;
+    }
+
+    const node = document.createElement("div");
+    node.className = `fac-create-search-state${isError ? " is-error" : ""}`;
+    node.textContent = message;
+    slot.replaceChildren(node);
+
+    return true;
+  }
+
+  function patchCreateSearchDom(type = "client", snapshot = null) {
+    if (!createModalHost) return false;
+
+    const client = type === "client";
+    const searchState = client ? createModal.clientSearch : createModal.ticketSearch;
+    const selector = client
+      ? "[data-slot='client-search-results']"
+      : "[data-slot='ticket-search-results']";
+    const slot = createModalHost.querySelector(selector);
+
+    if (!slot) return false;
+
+    slot.setAttribute("aria-live", "polite");
+    slot.setAttribute("aria-busy", searchState.loading ? "true" : "false");
+
+    if (client && !searchState.query) {
+      return setCreateSearchState(slot, "");
+    }
+
+    if (!client && !createModal.selectedClientes.length) {
+      return setCreateSearchState(slot, "");
+    }
+
+    if (searchState.loading) {
+      return setCreateSearchState(
+        slot,
+        client ? "Buscando cliente..." : "Cargando incidencias..."
+      );
+    }
+
+    if (searchState.error) {
+      return setCreateSearchState(slot, searchState.error, true);
+    }
+
+    if (searchState.empty) {
+      return setCreateSearchState(
+        slot,
+        client
+          ? "Sin resultados."
+          : "Sin incidencias disponibles para los clientes seleccionados."
+      );
+    }
+
+    if (!searchState.results.length) {
+      return setCreateSearchState(slot, "");
+    }
+
+    return patchCreateSlotFromSnapshot(selector, snapshot);
+  }
+
+  function patchCreateControlStateDom() {
+    if (!createModalHost) return false;
+
+    const clientCount = createModal.selectedClientes.length;
+    const clientInput = getCreateFieldNode("clienteSearch");
+    const ticketInput = getCreateFieldNode("ticketSearch");
+    const clientClear = getCreateActionNode(FACTURA_CREATE_ACTIONS.CLIENT_CLEAR);
+    const ticketRefresh = getCreateActionNode(FACTURA_CREATE_ACTIONS.TICKET_REFRESH);
+    const closeButton = getCreateActionNode(FACTURA_CREATE_ACTIONS.CLOSE);
+    const submitButton = getCreateActionNode(FACTURA_CREATE_ACTIONS.SUBMIT);
+
+    setCreateNodeDisabled(clientInput, createModal.submitting, createModal.clientSearch.loading);
+
+    // El buscador de incidencias permanece escribible mientras carga.
+    setCreateNodeDisabled(
+      ticketInput,
+      createModal.submitting || !clientCount,
+      createModal.ticketSearch.loading
+    );
+
+    setCreateNodeDisabled(
+      clientClear,
+      createModal.submitting || !clientCount,
+      createModal.submitting
+    );
+
+    setCreateNodeDisabled(
+      ticketRefresh,
+      createModal.submitting || createModal.ticketSearch.loading || !clientCount,
+      createModal.ticketSearch.loading
+    );
+
+    if (ticketRefresh) {
+      ticketRefresh.textContent = createModal.ticketSearch.loading
+        ? "Cargando..."
+        : "Recargar";
+    }
+
+    setCreateNodeDisabled(closeButton, createModal.submitting, createModal.submitting);
+    setCreateNodeDisabled(
+      submitButton,
+      createModal.submitting || !createModal.canCreate,
+      createModal.submitting
+    );
+
+    const clientLabel = clientInput?.closest?.("label")?.querySelector?.(".fac-create-label");
+    if (clientLabel) {
+      clientLabel.textContent = clientCount
+        ? "Añadir otro cliente"
+        : "Buscar cliente";
+    }
+
+    return true;
+  }
+
+  function patchCreateFieldErrorDom(name = "", message = "") {
+    const errorKey = cleanText(name, "");
+    const text = cleanText(message, "");
+    const fieldName = errorKey === "clienteId"
+      ? "clienteSearch"
+      : errorKey === "incidenciaId"
+        ? "ticketSearch"
+        : errorKey;
+    const field = getCreateFieldNode(fieldName);
+
+    field?.classList?.toggle("is-error", Boolean(text));
+
+    if (errorKey === "clienteId" || errorKey === "incidenciaId") {
+      const slot = createModalHost?.querySelector?.(`[data-error-slot='${errorKey}']`);
+
+      if (!slot) return Boolean(field);
+
+      if (!text) {
+        slot.replaceChildren();
+        return true;
+      }
+
+      let errorNode = slot.querySelector(".fac-create-error");
+
+      if (!errorNode) {
+        errorNode = document.createElement("span");
+        errorNode.className = "fac-create-error";
+        slot.replaceChildren(errorNode);
+      }
+
+      errorNode.textContent = text;
+      return true;
+    }
+
+    const container = field?.closest?.(".fac-create-field");
+    if (!container) return false;
+
+    let errorNode = Array.from(container.children).find((node) => {
+      return node.classList?.contains?.("fac-create-error");
+    }) || null;
+
+    if (!text) {
+      errorNode?.remove?.();
+      return true;
+    }
+
+    if (!errorNode) {
+      errorNode = document.createElement("span");
+      errorNode.className = "fac-create-error";
+      container.appendChild(errorNode);
+    }
+
+    errorNode.textContent = text;
+    return true;
+  }
+
+  function patchCreateValidationDom() {
+    const fields = [
+      "fechaServicio",
+      "formaPago",
+      "concepto",
+      "descripcion",
+      "cantidad",
+      "precioUnitario",
+      "estadoPago",
+      "clienteId",
+      "incidenciaId",
+    ];
+
+    for (const field of fields) {
+      patchCreateFieldErrorDom(field, createModal.errors[field] || "");
+    }
+
+    return true;
+  }
+
+  function clearCreateFeedbackDom() {
+    if (!createModalHost) return false;
+
+    const body = createModalHost.querySelector(".fac-create-body");
+    if (!body) return false;
+
+    Array.from(body.children).forEach((node) => {
+      if (node.classList?.contains?.("fac-create-alert")) {
+        node.remove();
+      }
+    });
+
+    return true;
+  }
+
+  function patchCreateTargetDom({
+    syncClientQuery = false,
+    syncTicketQuery = false,
+    focusField = "",
+  } = {}) {
+    if (!createModalHost) return false;
+
+    const snapshot = createModalSnapshot();
+
+    patchCreateSlotFromSnapshot("[data-slot='selected-clientes']", snapshot);
+    patchCreateSlotFromSnapshot("[data-slot='selected-tickets']", snapshot);
+    patchCreateSearchDom("client", snapshot);
+    patchCreateSearchDom("ticket", snapshot);
+    patchCreateCountsDom();
+    patchCreateValidationDom();
+    patchCreateControlStateDom();
+
+    if (syncClientQuery) {
+      setCreateFieldValue("clienteSearch", createModal.clientSearch.query, { force: true });
+    }
+
+    if (syncTicketQuery) {
+      setCreateFieldValue("ticketSearch", createModal.ticketSearch.query, { force: true });
+    }
+
+    if (focusField) {
+      nextFrame(() => focusCreateField(focusField));
+    }
+
+    return true;
+  }
+
+  function patchCreateModalDom(options = {}) {
+    if (!createModalHost) return false;
+
+    if (options.targets !== false) {
+      patchCreateTargetDom({
+        syncClientQuery: options.syncClientQuery === true,
+        syncTicketQuery: options.syncTicketQuery === true,
+      });
+    }
+
+    if (options.totals !== false) {
+      patchCreateTotalsDom();
+    }
+
+    patchCreateControlStateDom();
+
+    if (options.focusSelector) {
+      nextFrame(() => {
+        focusAfterRender(
+          options.focusSelector,
+          options.focusEnd !== false,
+          createModalHost
+        );
+      });
+    }
+
+    return true;
+  }
+
   function renderCreateModalNow(options = {}) {
     if (destroyed || !isBrowser()) return false;
 
@@ -2057,11 +2520,20 @@ function createFacturasController(host = null, context = {}) {
 
     if (!target) return false;
 
+    const mountedRoot = target.querySelector("[data-facturas-create-root='true']");
+    const structural = options.structural === true || !mountedRoot;
+
+    if (!structural) {
+      syncModalBodyState();
+      return patchCreateModalDom(options);
+    }
+
     const state = captureCreateModalDomState(target);
 
     target.innerHTML = renderFacturasCreateModal(createModalPayload());
 
     syncModalBodyState();
+    patchCreateControlStateDom();
     restoreCreateModalDomState(target, state, options);
 
     return true;
@@ -2391,7 +2863,6 @@ function createFacturasController(host = null, context = {}) {
     host.innerHTML = renderFacturasTemplate(viewPayload());
     bindFacturasTemplateDom(host);
     syncModalBodyState();
-    renderCreateModal(options);
 
     if (options.focusSelector) {
       focusAfterRender(options.focusSelector, options.focusEnd !== false);
@@ -2433,7 +2904,6 @@ function createFacturasController(host = null, context = {}) {
     host.innerHTML = renderFacturasLoadingState(viewPayload());
     bindFacturasTemplateDom(host);
     syncModalBodyState();
-    renderCreateModal();
 
     return true;
   }
@@ -2446,7 +2916,6 @@ function createFacturasController(host = null, context = {}) {
     host.innerHTML = renderFacturasErrorState(message);
     syncModalBodyState();
     disconnectInfiniteObserver();
-    renderCreateModal();
 
     return true;
   }
@@ -2701,11 +3170,7 @@ function createFacturasController(host = null, context = {}) {
     });
   }
 
-  function closeCreateModal() {
-    if (createModal.submitting) return false;
-
-    clearTimers();
-
+  function resetCreateModalState() {
     createModal.open = false;
     createModal.submitting = false;
     createModal.serverError = "";
@@ -2730,13 +3195,30 @@ function createFacturasController(host = null, context = {}) {
       empty: false,
     };
 
+    return true;
+  }
+
+  function closeCreateModal() {
+    if (createModal.submitting) return false;
+
+    clearCreateTimers();
+    clientSearchSeq += 1;
+    ticketSearchSeq += 1;
+
+    resetCreateModalState();
+    removeCreateModalHost();
+    syncModalBodyState();
     render();
+
     return true;
   }
 
   function openCreateModal(draft = {}) {
     if (!isAdmin()) return false;
 
+    clearCreateTimers();
+    clientSearchSeq += 1;
+    ticketSearchSeq += 1;
     creating = true;
 
     createModal.open = true;
@@ -2779,6 +3261,7 @@ function createFacturasController(host = null, context = {}) {
     render();
     renderCreateModal({
       immediate: true,
+      structural: true,
       focusSelector: createModal.selectedClientes.length
         ? "[data-field='descripcion']"
         : "[data-field='clienteSearch']",
@@ -2854,24 +3337,35 @@ function createFacturasController(host = null, context = {}) {
     if (!name || name === "clienteSearch" || name === "ticketSearch") return false;
 
     const hadError = Boolean(createModal.errors[name]);
-    const hadFeedback = Boolean(createModal.serverError || createModal.successMessage || createModal.createdFacturaId);
+    const hadFeedback = Boolean(
+      createModal.serverError ||
+      createModal.successMessage ||
+      createModal.createdFacturaId
+    );
+    const value = field.type === "checkbox"
+      ? Boolean(field.checked)
+      : field.value;
 
     createModal.form = {
       ...createModal.form,
-      [name]: field.type === "checkbox" ? Boolean(field.checked) : field.value,
+      [name]: value,
     };
 
     if (hadError) {
       const next = { ...createModal.errors };
       delete next[name];
       createModal.errors = next;
+      patchCreateFieldErrorDom(name, "");
     }
 
-    createModal.serverError = "";
-    createModal.successMessage = "";
-    createModal.createdFacturaId = "";
+    if (hadFeedback) {
+      createModal.serverError = "";
+      createModal.successMessage = "";
+      createModal.createdFacturaId = "";
+      clearCreateFeedbackDom();
+    }
 
-    const liveFields = new Set([
+    if ([
       "cantidad",
       "precioUnitario",
       "precio",
@@ -2884,14 +3378,8 @@ function createFacturasController(host = null, context = {}) {
       "porcentajeIRPF",
       "aplicaIVA",
       "aplicaIRPF",
-      "sendEmail",
-      "estadoPago",
-    ]);
-
-    if (hadError || hadFeedback || liveFields.has(name)) {
-      renderCreateModal({
-        focusSelector: `[data-field='${name}']`,
-      });
+    ].includes(name)) {
+      patchCreateTotalsDom();
     }
 
     return true;
@@ -2899,6 +3387,7 @@ function createFacturasController(host = null, context = {}) {
 
   function scheduleClientSearch(value = "") {
     const query = cleanText(value, "");
+    const seq = ++clientSearchSeq;
 
     createModal.clientSearch.query = query;
     createModal.clientSearch.error = "";
@@ -2912,45 +3401,68 @@ function createFacturasController(host = null, context = {}) {
     if (query.length < SEARCH_MIN_LENGTH) {
       createModal.clientSearch.loading = false;
       createModal.clientSearch.results = [];
-      renderCreateModal({ focusSelector: "[data-field='clienteSearch']" });
+      patchCreateSearchDom("client");
+      patchCreateControlStateDom();
       return true;
     }
 
     createModal.clientSearch.loading = true;
-    renderCreateModal({ focusSelector: "[data-field='clienteSearch']" });
+    createModal.clientSearch.results = [];
+    patchCreateSearchDom("client");
+    patchCreateControlStateDom();
 
     clientSearchTimer = setTimeout(() => {
-      void runClientSearch(query);
+      clientSearchTimer = null;
+      void runClientSearch(query, seq);
     }, SEARCH_DEBOUNCE_MS);
 
     return true;
   }
 
-  async function runClientSearch(query = "") {
-    const seq = ++clientSearchSeq;
+  async function runClientSearch(query = "", seq = null) {
+    const requestQuery = cleanText(query, "");
+    const requestSeq = Number.isInteger(seq)
+      ? seq
+      : ++clientSearchSeq;
 
     try {
-      const results = await searchClients(query);
+      const results = await searchClients(requestQuery);
 
-      if (seq !== clientSearchSeq || destroyed) return false;
+      if (
+        requestSeq !== clientSearchSeq ||
+        requestQuery !== createModal.clientSearch.query ||
+        destroyed ||
+        !createModal.open
+      ) {
+        return false;
+      }
 
       createModal.clientSearch.loading = false;
       createModal.clientSearch.error = "";
       createModal.clientSearch.results = results;
       createModal.clientSearch.empty = results.length === 0;
 
-      renderCreateModal({ focusSelector: "[data-field='clienteSearch']" });
+      patchCreateSearchDom("client");
+      patchCreateControlStateDom();
 
       return true;
     } catch (searchError) {
-      if (seq !== clientSearchSeq || destroyed) return false;
+      if (
+        requestSeq !== clientSearchSeq ||
+        requestQuery !== createModal.clientSearch.query ||
+        destroyed ||
+        !createModal.open
+      ) {
+        return false;
+      }
 
       createModal.clientSearch.loading = false;
       createModal.clientSearch.results = [];
       createModal.clientSearch.empty = false;
       createModal.clientSearch.error = safeError(searchError, "No se pudo buscar cliente.");
 
-      renderCreateModal({ focusSelector: "[data-field='clienteSearch']" });
+      patchCreateSearchDom("client");
+      patchCreateControlStateDom();
 
       return false;
     }
@@ -2960,6 +3472,10 @@ function createFacturasController(host = null, context = {}) {
     const item = createModal.clientSearch.results[index];
 
     if (!item?.id) return false;
+
+    clientSearchSeq += 1;
+    ticketSearchSeq += 1;
+    clearCreateTimers();
 
     const exists = createModal.selectedClientes.some((client) => {
       return (
@@ -2991,12 +3507,19 @@ function createFacturasController(host = null, context = {}) {
       empty: false,
     };
 
-    createModal.ticketSearch.query = "";
-    createModal.ticketSearch.error = "";
-    createModal.ticketSearch.results = [];
-    createModal.ticketSearch.empty = false;
+    createModal.ticketSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
+    };
 
-    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
+    patchCreateTargetDom({
+      syncClientQuery: true,
+      syncTicketQuery: true,
+      focusField: "ticketSearch",
+    });
 
     void loadTicketsForSelectedClients({
       autoSelectLatest: createModal.selectedTickets.length === 0,
@@ -3006,9 +3529,18 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function removeClient(index = -1) {
-    if (index < 0) return false;
+    if (index < 0 || index >= createModal.selectedClientes.length) return false;
 
-    createModal.selectedClientes = createModal.selectedClientes.filter((_, currentIndex) => currentIndex !== index);
+    ticketSearchSeq += 1;
+
+    if (ticketSearchTimer) {
+      clearTimeout(ticketSearchTimer);
+      ticketSearchTimer = null;
+    }
+
+    createModal.selectedClientes = createModal.selectedClientes.filter((_, currentIndex) => {
+      return currentIndex !== index;
+    });
 
     syncPrimaryClientToForm();
 
@@ -3023,7 +3555,11 @@ function createFacturasController(host = null, context = {}) {
       };
       syncPrimaryTicketToForm();
 
-      renderCreateModal({ focusSelector: "[data-field='clienteSearch']" });
+      patchCreateTargetDom({
+        syncTicketQuery: true,
+        focusField: "clienteSearch",
+      });
+
       return true;
     }
 
@@ -3031,8 +3567,19 @@ function createFacturasController(host = null, context = {}) {
       return ticketBelongsToClients(ticket, createModal.selectedClientes);
     });
 
+    createModal.ticketSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
+    };
+
     syncPrimaryTicketToForm();
-    render();
+    patchCreateTargetDom({
+      syncTicketQuery: true,
+      focusField: "ticketSearch",
+    });
 
     void loadTicketsForSelectedClients({
       autoSelectLatest: createModal.selectedTickets.length === 0,
@@ -3044,6 +3591,13 @@ function createFacturasController(host = null, context = {}) {
   function makeClientPrimary(index = -1) {
     if (index <= 0 || index >= createModal.selectedClientes.length) return false;
 
+    ticketSearchSeq += 1;
+
+    if (ticketSearchTimer) {
+      clearTimeout(ticketSearchTimer);
+      ticketSearchTimer = null;
+    }
+
     const item = createModal.selectedClientes[index];
 
     createModal.selectedClientes = [
@@ -3051,8 +3605,25 @@ function createFacturasController(host = null, context = {}) {
       ...createModal.selectedClientes.filter((_, currentIndex) => currentIndex !== index),
     ];
 
+    createModal.selectedTickets = createModal.selectedTickets.filter((ticket) => {
+      return ticketBelongsToClients(ticket, createModal.selectedClientes);
+    });
+
+    createModal.ticketSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
+    };
+
     syncPrimaryClientToForm();
-    render();
+    syncPrimaryTicketToForm();
+
+    patchCreateTargetDom({
+      syncTicketQuery: true,
+      focusField: "ticketSearch",
+    });
 
     void loadTicketsForSelectedClients({
       autoSelectLatest: createModal.selectedTickets.length === 0,
@@ -3062,6 +3633,10 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function clearClients() {
+    clientSearchSeq += 1;
+    ticketSearchSeq += 1;
+    clearCreateTimers();
+
     createModal.selectedClientes = [];
     createModal.selectedTickets = [];
     createModal.clientSearch = {
@@ -3082,13 +3657,18 @@ function createFacturasController(host = null, context = {}) {
     syncPrimaryClientToForm();
     syncPrimaryTicketToForm();
 
-    renderCreateModal({ focusSelector: "[data-field='clienteSearch']" });
+    patchCreateTargetDom({
+      syncClientQuery: true,
+      syncTicketQuery: true,
+      focusField: "clienteSearch",
+    });
 
     return true;
   }
 
   function scheduleTicketSearch(value = "") {
     const query = cleanText(value, "");
+    const seq = ++ticketSearchSeq;
 
     createModal.ticketSearch.query = query;
     createModal.ticketSearch.error = "";
@@ -3102,17 +3682,22 @@ function createFacturasController(host = null, context = {}) {
     if (!createModal.selectedClientes.length) {
       createModal.ticketSearch.loading = false;
       createModal.ticketSearch.results = [];
-      renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
+      patchCreateSearchDom("ticket");
+      patchCreateControlStateDom();
       return true;
     }
 
     createModal.ticketSearch.loading = true;
-    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
+    createModal.ticketSearch.results = [];
+    patchCreateSearchDom("ticket");
+    patchCreateControlStateDom();
 
     ticketSearchTimer = setTimeout(() => {
+      ticketSearchTimer = null;
       void loadTicketsForSelectedClients({
         query,
         autoSelectLatest: false,
+        seq,
       });
     }, SEARCH_DEBOUNCE_MS);
 
@@ -3122,26 +3707,51 @@ function createFacturasController(host = null, context = {}) {
   async function loadTicketsForSelectedClients({
     query = createModal.ticketSearch.query,
     autoSelectLatest = false,
+    seq = null,
   } = {}) {
     if (!createModal.selectedClientes.length) {
       createModal.ticketSearch.loading = false;
       createModal.ticketSearch.results = [];
       createModal.ticketSearch.empty = false;
+      patchCreateSearchDom("ticket");
+      patchCreateControlStateDom();
       return [];
     }
 
-    const seq = ++ticketSearchSeq;
+    const requestQuery = cleanText(query, "");
+    const requestSeq = Number.isInteger(seq)
+      ? seq
+      : ++ticketSearchSeq;
+    const clientKey = [
+      ...selectedClienteIds(createModal.selectedClientes),
+      ...selectedUserIds(createModal.selectedClientes),
+    ].sort().join("|");
 
+    createModal.ticketSearch.query = requestQuery;
     createModal.ticketSearch.loading = true;
     createModal.ticketSearch.error = "";
     createModal.ticketSearch.empty = false;
+    createModal.ticketSearch.results = [];
 
-    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
+    patchCreateSearchDom("ticket");
+    patchCreateControlStateDom();
 
     try {
-      const results = await searchTickets(query, createModal.selectedClientes);
+      const results = await searchTickets(requestQuery, createModal.selectedClientes);
+      const currentClientKey = [
+        ...selectedClienteIds(createModal.selectedClientes),
+        ...selectedUserIds(createModal.selectedClientes),
+      ].sort().join("|");
 
-      if (seq !== ticketSearchSeq || destroyed) return [];
+      if (
+        requestSeq !== ticketSearchSeq ||
+        requestQuery !== createModal.ticketSearch.query ||
+        clientKey !== currentClientKey ||
+        destroyed ||
+        !createModal.open
+      ) {
+        return [];
+      }
 
       createModal.ticketSearch.loading = false;
       createModal.ticketSearch.error = "";
@@ -3153,18 +3763,32 @@ function createFacturasController(host = null, context = {}) {
         syncPrimaryTicketToForm();
       }
 
-      renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
+      patchCreateTargetDom();
 
       return results;
     } catch (searchError) {
-      if (seq !== ticketSearchSeq || destroyed) return [];
+      const currentClientKey = [
+        ...selectedClienteIds(createModal.selectedClientes),
+        ...selectedUserIds(createModal.selectedClientes),
+      ].sort().join("|");
+
+      if (
+        requestSeq !== ticketSearchSeq ||
+        requestQuery !== createModal.ticketSearch.query ||
+        clientKey !== currentClientKey ||
+        destroyed ||
+        !createModal.open
+      ) {
+        return [];
+      }
 
       createModal.ticketSearch.loading = false;
       createModal.ticketSearch.results = [];
       createModal.ticketSearch.empty = false;
       createModal.ticketSearch.error = safeError(searchError, "No se pudieron cargar incidencias.");
 
-      renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
+      patchCreateSearchDom("ticket");
+      patchCreateControlStateDom();
 
       return [];
     }
@@ -3174,6 +3798,13 @@ function createFacturasController(host = null, context = {}) {
     const item = createModal.ticketSearch.results[index];
 
     if (!item?.id) return false;
+
+    ticketSearchSeq += 1;
+
+    if (ticketSearchTimer) {
+      clearTimeout(ticketSearchTimer);
+      ticketSearchTimer = null;
+    }
 
     const exists = createModal.selectedTickets.some((ticket) => {
       return ticket.id === item.id || ticket.ticketId === item.id || ticket.incidenciaId === item.id;
@@ -3192,20 +3823,33 @@ function createFacturasController(host = null, context = {}) {
     delete nextErrors.incidenciaId;
     createModal.errors = nextErrors;
 
-    createModal.ticketSearch.query = "";
+    createModal.ticketSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
+    };
 
-    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
+    patchCreateTargetDom({
+      syncTicketQuery: true,
+      focusField: "ticketSearch",
+    });
 
     return true;
   }
 
   function removeTicket(index = -1) {
-    if (index < 0) return false;
+    if (index < 0 || index >= createModal.selectedTickets.length) return false;
 
-    createModal.selectedTickets = createModal.selectedTickets.filter((_, currentIndex) => currentIndex !== index);
+    createModal.selectedTickets = createModal.selectedTickets.filter((_, currentIndex) => {
+      return currentIndex !== index;
+    });
     syncPrimaryTicketToForm();
 
-    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
+    patchCreateTargetDom({
+      focusField: "ticketSearch",
+    });
 
     return true;
   }
@@ -3222,17 +3866,35 @@ function createFacturasController(host = null, context = {}) {
 
     syncPrimaryTicketToForm();
 
-    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
+    patchCreateTargetDom({
+      focusField: "ticketSearch",
+    });
 
     return true;
   }
 
   function clearTickets() {
+    ticketSearchSeq += 1;
+
+    if (ticketSearchTimer) {
+      clearTimeout(ticketSearchTimer);
+      ticketSearchTimer = null;
+    }
+
     createModal.selectedTickets = [];
-    createModal.ticketSearch.query = "";
+    createModal.ticketSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      empty: false,
+    };
     syncPrimaryTicketToForm();
 
-    renderCreateModal({ focusSelector: "[data-field='ticketSearch']" });
+    patchCreateTargetDom({
+      syncTicketQuery: true,
+      focusField: "ticketSearch",
+    });
 
     return true;
   }
@@ -3371,19 +4033,26 @@ function createFacturasController(host = null, context = {}) {
     createModal.form = validation.form;
 
     if (!validation.valid) {
-      renderCreateModal({
-        focusSelector:
-          createModal.errors.clienteId
-            ? "[data-field='clienteSearch']"
-            : createModal.errors.incidenciaId
-              ? "[data-field='ticketSearch']"
-              : createModal.errors.concepto
-                ? "[data-field='concepto']"
-                : createModal.errors.descripcion
-                  ? "[data-field='descripcion']"
-                  : "",
-        preserveFocus: false,
-      });
+      patchCreateValidationDom();
+      patchCreateTotalsDom();
+
+      const focusField = createModal.errors.clienteId
+        ? "clienteSearch"
+        : createModal.errors.incidenciaId
+          ? "ticketSearch"
+          : createModal.errors.concepto
+            ? "concepto"
+            : createModal.errors.descripcion
+              ? "descripcion"
+              : createModal.errors.cantidad
+                ? "cantidad"
+                : createModal.errors.precioUnitario
+                  ? "precioUnitario"
+                  : "";
+
+      if (focusField) {
+        nextFrame(() => focusCreateField(focusField));
+      }
 
       return false;
     }
@@ -3395,6 +4064,7 @@ function createFacturasController(host = null, context = {}) {
 
     renderCreateModal({
       immediate: true,
+      structural: true,
       preserveFocus: false,
     });
 
@@ -3415,7 +4085,8 @@ function createFacturasController(host = null, context = {}) {
       createModal.selectedClientes = [];
       createModal.selectedTickets = [];
 
-      renderCreateModal({ immediate: true });
+      removeCreateModalHost();
+      syncModalBodyState();
       render();
 
       return true;
@@ -3423,7 +4094,12 @@ function createFacturasController(host = null, context = {}) {
       createModal.submitting = false;
       createModal.serverError = safeError(createError, "No se pudo crear la factura.");
 
-      renderCreateModal({ focusSelector: "[data-field='concepto']" });
+      renderCreateModal({
+        immediate: true,
+        structural: true,
+        focusSelector: "[data-field='concepto']",
+        preserveFocus: false,
+      });
 
       return false;
     }
@@ -4004,6 +4680,7 @@ function createFacturasController(host = null, context = {}) {
       cancelScheduledDetailRender();
       disconnectInfiniteObserver();
       unbind();
+      removeCreateModalHost();
       removeDetailModalHost();
       revokeObjectUrls();
 

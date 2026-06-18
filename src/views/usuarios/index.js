@@ -1,51 +1,53 @@
 /* =========================================================
-   Onion SPA - Usuarios View
-   Archivo: src/views/usuarios/index.js
+   Onion Support - Usuarios Index
+   Archivo: /src/views/usuarios/index.js
 
-   FINAL PRO SYSTEM · ENTRYPOINT REAL · ADMIN USERS · ROUTE SAFE · 10/10
+   PRODUCTIVO · CONTROLADOR ÚNICO · LÓGICA FACTURAS · 10/10
 
-   RESPONSABILIDADES:
-   - punto de entrada único del módulo usuarios
-   - export limpio del módulo principal
-   - compatibilidad router legacy y moderna
-   - puente entre router y usuariosView.js
-   - init / mount / render / reload / destroy seguros
-   - exponer create / modal / helpers públicos
-   - exponer actions públicas útiles
-   - evitar duplicidad de lógica en index.js
-   - registrar bridge global estable
-
-   HARDENING PRO:
-   - fallback si cambia nombre del módulo
-   - re-export default + named
-   - superficie pública estable
-   - compatible con imports antiguos
-   - lazy wrappers seguros
-   - no rompe si un submódulo no existe
-   - global bridge opcional idempotente
-
-   FIX ROUTE SAFE:
-   - UsuariosView.init/render/mount/reload/refresh solo corren en /usuarios
-   - acepta /@usuario/usuarios como publicPath válido
-   - bloquea renders tardíos si la ruta actual ya no es usuarios
-   - destroy/unmount/close siempre permitidos
-   - actions/store/model/state siguen disponibles
+   Responsabilidad:
+   - Punto de entrada real de la vista Usuarios.
+   - Montaje inmediato desde cache/store sin bloquear el Router.
+   - Carga remota en background mediante usuarios.api.js.
+   - Un único controlador activo por host y por aplicación.
+   - Sin dependencia de usuariosView.js ni usuarios.actions.js.
+   - Delegación de HTML en usuarios.table.template.js.
+   - Integración directa con usuarios.modal.js.
+   - Integración compatible con usuarios.create.modal.js.
+   - Búsqueda, filtros y paginación local estable.
+   - Apertura de detalle con API + fallback de cache.
+   - Exportación CSV segura.
+   - Render diferido mientras existe un modal abierto.
+   - Limpieza total de listeners, timers y renders tardíos.
+   - Compatible con /usuarios y /@usuario/usuarios.
 ========================================================= */
 
-import RawUsuariosView from "./usuariosView.js";
-import RawUsuariosCreateView from "./usuarios.create.modal.js";
-import RawUsuariosModal from "./usuarios.modal.js";
+import { AppCore } from "../../core/index.js";
 
 import {
-  openUsuarioAction,
-  getUsuarioDetailAction,
-  getUsuarioDetailFromStoreAction,
-  refreshUsuarioDetailAction,
-  copyUsuarioIdAction,
-  exportUsuariosCsvAction,
-  createUsuarioAction,
-  submitCreateUsuarioAction,
-} from "./usuarios.actions.js";
+  hydrateFromCache,
+  loadUsuarios,
+  loadUsuarioDetail,
+  createUsuario as createUsuarioApi,
+  updateUsuario as updateUsuarioApi,
+  deleteUsuario as deleteUsuarioApi,
+  fetchUsuariosRequest,
+  getUsuarioByIdRequest,
+  createUsuarioRequest,
+  updateUsuarioRequest,
+  deleteUsuarioRequest,
+} from "./usuarios.api.js";
+
+import {
+  renderUsuariosTableTemplate,
+  renderHeader,
+  renderTable,
+  renderLoadingState,
+  renderErrorState,
+  renderAccessDeniedState,
+} from "./usuarios.table.template.js";
+
+import UsuariosCreateModal from "./usuarios.create.modal.js";
+import UsuariosDetailModal from "./usuarios.modal.js";
 
 import {
   usuariosState,
@@ -70,17 +72,62 @@ import {
 } from "./usuarios.model.js";
 
 /* =========================================================
-   MODULE META
+   META / CONSTANTS
 ========================================================= */
 
 export const USUARIOS_MODULE_NAME = "usuarios";
 export const USUARIOS_VIEW_NAME = "UsuariosView";
-export const USUARIOS_MODULE_VERSION = "11.0.0";
 export const USUARIOS_CANONICAL_PATH = "/usuarios";
-export const USUARIOS_INDEX_SOURCE = "views:usuarios:index";
+export const USUARIOS_INDEX_VERSION =
+  "usuarios.index.productive.v12.facturas-controller";
+export const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
+export const USUARIOS_MODULE_VERSION = USUARIOS_INDEX_VERSION;
+export const USUARIOS_INDEX_SOURCE = "views.usuarios.index";
+
+const DEFAULT_PAGE = 1;
+const DEFAULT_PAGE_SIZE = 5;
+const SEARCH_DEBOUNCE_MS = 220;
+
+const USUARIOS_CONTROLLER_KEY = Symbol.for(
+  "onion.support.usuarios.controller"
+);
+
+const USUARIOS_GLOBAL_CONTROLLER_KEY = Symbol.for(
+  "onion.support.usuarios.active-controller"
+);
+
+const DETAIL_ACTION = "detail";
+const CREATE_ACTION = "create";
+const REFRESH_ACTION = "refresh";
+const RETRY_ACTION = "retry";
+const EXPORT_ACTION = "export";
+const FILTER_ACTION = "filter";
+const CLEAR_SEARCH_ACTION = "clear-search";
+const CLEAR_FILTERS_ACTION = "clear-filters";
+const PREV_PAGE_ACTION = "prev-page";
+const NEXT_PAGE_ACTION = "next-page";
+
+const CREATE_SUCCESS_EVENTS = Object.freeze([
+  "usuarios:create:success",
+  "usuarios:create:created",
+  "usuarios:created",
+  "usuario:created",
+]);
+
+const CREATE_CLOSE_EVENTS = Object.freeze([
+  "usuarios:create:closed",
+  "usuarios:create:close",
+]);
+
+const DETAIL_CLOSE_EVENTS = Object.freeze([
+  "usuarios:modal:closed",
+]);
+
+let controllerSequence = 0;
+let lastController = null;
 
 /* =========================================================
-   CORE RE-EXPORTS
+   RE-EXPORTS COMPATIBLES
 ========================================================= */
 
 export {
@@ -100,14 +147,19 @@ export {
   paginateUsuarios,
   computeUsuariosStats,
 
-  openUsuarioAction,
-  getUsuarioDetailAction,
-  getUsuarioDetailFromStoreAction,
-  refreshUsuarioDetailAction,
-  copyUsuarioIdAction,
-  exportUsuariosCsvAction,
-  createUsuarioAction,
-  submitCreateUsuarioAction,
+  hydrateFromCache,
+  loadUsuarios,
+  loadUsuarioDetail,
+
+  fetchUsuariosRequest,
+  getUsuarioByIdRequest,
+  createUsuarioRequest,
+  updateUsuarioRequest,
+  deleteUsuarioRequest,
+
+  createUsuarioApi,
+  updateUsuarioApi,
+  deleteUsuarioApi,
 };
 
 /* =========================================================
@@ -115,1595 +167,2098 @@ export {
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFn(value) {
+function isFunction(value) {
   return typeof value === "function";
 }
 
 function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
-}
-
-function isProxyable(value) {
-  return Boolean(
-    value &&
-      (
-        typeof value === "object" ||
-        typeof value === "function"
-      )
-  );
-}
-
-function isNodeLike(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      typeof value.nodeType === "number"
-  );
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function safeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : fallback;
+  return isObject(value) ? value : fallback;
 }
 
-function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return output || fallback;
+}
+
+function first(...values) {
+  for (const value of values.flat(Infinity)) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
+
+    return value;
   }
 
-  const text =
-    String(value)
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+  return null;
+}
 
-  return text || fallback;
+function number(value = 0, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clamp(value = 0, min = 0, max = 1) {
+  return Math.min(Math.max(number(value, min), min), max);
+}
+
+function normalizeKey(value = "") {
+  return cleanText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w:.]/g, "")
+    .replace(/^_+|_+$/g, "");
+}
+
+function normalizeSearch(value = "") {
+  return cleanText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function safeError(error = null, fallback = "No se pudieron cargar los usuarios.") {
+  return cleanText(
+    first(
+      error?.message,
+      error?.data?.message,
+      error?.response?.data?.message,
+      error?.response?.message,
+      error?.payload?.message,
+      error?.error,
+      fallback
+    ),
+    fallback
+  );
 }
 
 function getGlobalObject() {
   try {
-    if (typeof globalThis !== "undefined") {
-      return globalThis;
-    }
-  } catch {}
-
-  try {
-    if (typeof window !== "undefined") {
-      return window;
-    }
-  } catch {}
-
-  return {};
+    return globalThis;
+  } catch {
+    return {};
+  }
 }
 
-function safeWarn(...args) {
-  try {
-    const root =
-      getGlobalObject();
-
-    root?.AppCore?.utils?.warn?.(
-      "[UsuariosIndex]",
-      ...args
-    );
-  } catch {}
+function nextFrame(callback = null) {
+  if (!isBrowser() || !isFunction(callback)) return 0;
 
   try {
-    console.warn(
-      "[UsuariosIndex]",
-      ...args
-    );
-  } catch {}
+    return window.requestAnimationFrame(callback);
+  } catch {
+    return window.setTimeout(callback, 0);
+  }
 }
 
-function safeEmit(event = "", payload = {}) {
-  const eventName =
-    safeText(event, "");
+function cancelFrame(id = 0) {
+  if (!id || !isBrowser()) return false;
 
-  if (!eventName) {
+  try {
+    window.cancelAnimationFrame?.(id);
+    window.clearTimeout?.(id);
+    return true;
+  } catch {
     return false;
   }
+}
 
-  const root =
-    getGlobalObject();
-
-  let emitted = false;
-
+function safeCall(target = null, method = "", args = [], fallback = null) {
   try {
-    if (isFn(root?.AppCore?.events?.emit)) {
-      root.AppCore.events.emit(
-        eventName,
-        payload
-      );
+    const fn = target?.[method];
+    return isFunction(fn) ? fn.apply(target, safeArray(args)) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
-      emitted = true;
+async function safeAsyncCall(
+  target = null,
+  methods = [],
+  args = [],
+  fallback = null
+) {
+  for (const method of safeArray(methods)) {
+    try {
+      const fn = target?.[method];
+
+      if (isFunction(fn)) {
+        return await fn.apply(target, safeArray(args));
+      }
+    } catch (error) {
+      throw error;
     }
-  } catch {}
+  }
 
-  try {
-    if (
-      !emitted &&
-      typeof window !== "undefined"
-    ) {
-      window.dispatchEvent(
-        new CustomEvent(eventName, {
-          detail:
-            payload,
-        })
-      );
-
-      emitted = true;
-    }
-  } catch {}
-
-  return emitted;
+  return fallback;
 }
 
 /* =========================================================
-   ROUTE GUARD
+   APP / AUTH / ROUTE
 ========================================================= */
 
-const GUARDED_VIEW_METHODS = new Set([
-  "init",
-  "mount",
-  "render",
-  "reload",
-  "refresh",
-  "bootstrap",
-
-  "openUsuario",
-  "open",
-  "openById",
-  "copyUsuarioId",
-  "createUsuario",
-  "create",
-  "exportCsv",
-
-  "goToPage",
-  "goPrevPage",
-  "prevPage",
-  "goNextPage",
-  "nextPage",
-  "changePageSize",
-  "setPageSize",
-
-  "initCreate",
-  "openCreate",
-  "renderCreate",
-  "resetCreate",
-
-  "openModal",
-  "refreshModal",
-  "updateModal",
-]);
-
-const ALWAYS_ALLOWED_VIEW_METHODS = new Set([
-  "destroy",
-  "unmount",
-  "dispose",
-
-  "closeCreate",
-  "closeModal",
-
-  "getItems",
-  "getPageItems",
-  "getPagination",
-  "getUsuarioById",
-  "getState",
-  "isAdmin",
-  "getSnapshot",
-  "isInitialized",
-  "isDestroyed",
-  "isMounted",
-]);
-
-function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
+function getAppState() {
+  try {
+    return AppCore.getState?.() || AppCore.state || {};
+  } catch {
+    return AppCore.state || {};
   }
-
-  return "http://localhost";
 }
 
-function normalizePathnameOnly(pathname = "/") {
-  let value =
-    String(pathname || "/")
-      .trim()
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
+function getCurrentUser() {
+  const state = getAppState();
 
-  if (!value) {
-    value = "/";
+  try {
+    return AppCore.getCurrentUser?.() || state.user || state.currentUser || null;
+  } catch {
+    return state.user || state.currentUser || null;
+  }
+}
+
+function normalizeRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    return roles[0] || "";
   }
 
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
+  const role = normalizeKey(value);
+
+  if (
+    [
+      "admin",
+      "administrator",
+      "administrador",
+      "superadmin",
+      "super_admin",
+      "root",
+      "owner",
+    ].includes(role)
+  ) {
+    return "admin";
   }
+
+  return role;
+}
+
+function getCurrentRole(context = {}) {
+  const state = getAppState();
+  const user = safeObject(getCurrentUser(), {});
+
+  return (
+    normalizeRole(
+      first(
+        context.role,
+        context.rol,
+        context.user?.role,
+        context.user?.rol,
+        AppCore.getCurrentRole?.(),
+        state.role,
+        state.rol,
+        state.roles,
+        user.role,
+        user.rol,
+        user.roles,
+        ""
+      )
+    ) || "user"
+  );
+}
+
+function isAdminContext(context = {}) {
+  return context.admin === true || getCurrentRole(context) === "admin";
+}
+
+function normalizePathname(path = "/") {
+  let value = cleanText(path, "/")
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!value.startsWith("/")) value = `/${value}`;
+
+  value = value.split("?")[0].split("#")[0] || "/";
 
   if (value.length > 1) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      "/";
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  const segments = value.split("/").filter(Boolean);
+
+  if (segments[0]?.startsWith("@")) {
+    value = `/${segments.slice(1).join("/")}` || "/";
   }
 
   return value;
 }
 
-function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return "/";
-  }
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/");
-  }
-
-  return raw.replace(/^#\/?/, "/");
-}
-
-function splitPath(value = "/") {
-  const raw =
-    safeText(value, "/");
-
-  if (isHashRouterPath(raw)) {
-    return splitPath(
-      normalizeHashRouterPath(raw)
-    );
-  }
-
-  let pathname = raw;
-  let search = "";
-  let hash = "";
-
-  const hashIndex =
-    pathname.indexOf("#");
-
-  if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) ||
-      "/";
-  }
-
-  const searchIndex =
-    pathname.indexOf("?");
-
-  if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) ||
-      "/";
-  }
-
-  return {
-    pathname:
-      normalizePathnameOnly(pathname),
-    search,
-    hash,
-  };
-}
-
-function normalizeFullPath(path = "/") {
-  const raw =
-    safeText(path, "/");
-
-  if (!raw) {
-    return "/";
-  }
-
-  if (isHashRouterPath(raw)) {
-    return normalizeFullPath(
-      normalizeHashRouterPath(raw)
-    );
-  }
-
-  try {
-    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed =
-        new URL(
-          raw,
-          getBaseOrigin()
-        );
-
-      if (
-        parsed.hash &&
-        isHashRouterPath(parsed.hash)
-      ) {
-        return normalizeFullPath(
-          normalizeHashRouterPath(parsed.hash)
-        );
-      }
-
-      return normalizeFullPath(
-        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
-      );
-    }
-  } catch {}
-
-  const {
-    pathname,
-    search,
-    hash,
-  } = splitPath(raw);
-
-  return `${pathname}${search}${hash}`;
-}
-
-function stripSearchAndHash(path = "/") {
-  return (
-    normalizeFullPath(path)
-      .split("?")[0]
-      .split("#")[0] ||
-    "/"
-  );
-}
-
-function isUsernameSegment(segment = "") {
-  return /^@[A-Za-z0-9._-]{1,80}$/.test(
-    safeText(segment, "")
-  );
-}
-
-function stripUsernamePrefix(path = "/") {
-  const {
-    pathname,
-    search,
-    hash,
-  } = splitPath(
-    normalizeFullPath(path)
-  );
-
-  const segments =
-    pathname
-      .split("/")
-      .filter(Boolean);
-
-  if (
-    segments.length > 0 &&
-    isUsernameSegment(segments[0])
-  ) {
-    const rest =
-      segments
-        .slice(1)
-        .join("/");
-
-    const cleanPathname =
-      rest
-        ? normalizePathnameOnly(`/${rest}`)
-        : "/";
-
-    return `${cleanPathname}${search}${hash}`;
-  }
-
-  return `${pathname}${search}${hash}`;
-}
-
-function canonicalizePath(path = "/") {
-  return normalizeFullPath(
-    stripUsernamePrefix(path || "/")
-  );
-}
-
-function getCleanCanonicalPath(path = "/") {
-  return stripSearchAndHash(
-    canonicalizePath(path || "/")
-  );
-}
-
-function isUsuariosPath(path = "") {
-  return (
-    getCleanCanonicalPath(path || "/") ===
-    USUARIOS_CANONICAL_PATH
-  );
-}
-
 function getBrowserPath() {
-  if (!isBrowser()) {
-    return "";
-  }
+  if (!isBrowser()) return "";
 
   try {
-    const pathname =
-      window.location.pathname || "/";
+    const hash = window.location.hash || "";
 
-    const search =
-      window.location.search || "";
-
-    const hash =
-      window.location.hash || "";
-
-    if (
-      hash &&
-      isHashRouterPath(hash)
-    ) {
-      return normalizeFullPath(
-        normalizeHashRouterPath(hash)
-      );
+    if (hash.startsWith("#/")) {
+      return normalizePathname(hash.slice(1));
     }
 
-    return normalizeFullPath(
-      `${pathname}${search}${hash}`
-    );
+    if (hash.startsWith("#!/")) {
+      return normalizePathname(hash.slice(2));
+    }
+
+    return normalizePathname(window.location.pathname || "/");
   } catch {
     return "";
   }
 }
 
-function getWindowAppCore() {
-  const root =
-    getGlobalObject();
-
-  try {
-    return (
-      root?.AppCore ||
-      root?.OnionApp?.AppCore ||
-      root?.Onion?.AppCore ||
-      null
-    );
-  } catch {
-    return null;
-  }
-}
-
-function getAppStatePath() {
-  const AppCore =
-    getWindowAppCore();
-
-  try {
-    return safeText(
-      AppCore?.state?.route ||
-        AppCore?.state?.canonicalPath ||
-        "",
+function routePathFromContext(context = {}) {
+  return cleanText(
+    first(
+      context.canonicalPath,
+      context.routePath,
+      context.route?.path,
+      context.publicPath,
+      context.requestedPath,
+      context.path,
+      context.options?.canonicalPath,
+      context.options?.routePath,
+      context.options?.path,
       ""
-    );
-  } catch {
-    return "";
-  }
-}
-
-function getAppPublicPath() {
-  const AppCore =
-    getWindowAppCore();
-
-  try {
-    return safeText(
-      AppCore?.state?.publicPath ||
-        "",
-      ""
-    );
-  } catch {
-    return "";
-  }
-}
-
-function pushPathSignal(signals, label, value) {
-  const text =
-    safeText(value, "");
-
-  if (!text) {
-    return;
-  }
-
-  signals.push({
-    type:
-      "path",
-    label,
-    value:
-      text,
-    canonical:
-      getCleanCanonicalPath(text),
-    isUsuarios:
-      isUsuariosPath(text),
-  });
-}
-
-function pushViewSignal(signals, label, value) {
-  const text =
-    safeText(value, "");
-
-  if (!text) {
-    return;
-  }
-
-  const normalized =
-    text.toLowerCase();
-
-  signals.push({
-    type:
-      "view",
-    label,
-    value:
-      normalized,
-    isUsuarios:
-      normalized === "usuarios" ||
-      normalized === "usuariosview" ||
-      normalized === "usuarios-view",
-  });
-}
-
-function collectRouteSignalsFromObject(signals, value, label = "arg") {
-  if (
-    !isObject(value) ||
-    isNodeLike(value)
-  ) {
-    return;
-  }
-
-  pushViewSignal(
-    signals,
-    `${label}.viewKey`,
-    value.viewKey
-  );
-
-  pushViewSignal(
-    signals,
-    `${label}.route.viewKey`,
-    value.route?.viewKey
-  );
-
-  pushViewSignal(
-    signals,
-    `${label}.viewName`,
-    value.viewName
-  );
-
-  pushViewSignal(
-    signals,
-    `${label}.route.viewName`,
-    value.route?.viewName
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.canonicalPath`,
-    value.canonicalPath
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.routePath`,
-    value.routePath
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.route.path`,
-    value.route?.path
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.publicPath`,
-    value.publicPath
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.requestedPath`,
-    value.requestedPath
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.path`,
-    value.path
-  );
-
-  collectRouteSignalsFromObject(
-    signals,
-    value.options,
-    `${label}.options`
+    ),
+    ""
   );
 }
 
-function collectRouteSignals(args = []) {
-  const signals = [];
+function isUsuariosRoute(context = {}) {
+  const explicit = routePathFromContext(context);
 
-  const list =
-    Array.isArray(args)
-      ? args
-      : [];
-
-  list.forEach((arg, index) => {
-    collectRouteSignalsFromObject(
-      signals,
-      arg,
-      `args[${index}]`
-    );
-  });
-
-  const statePath =
-    getAppStatePath();
-
-  if (statePath) {
-    pushPathSignal(
-      signals,
-      "AppCore.state.route",
-      statePath
-    );
+  if (explicit) {
+    return normalizePathname(explicit) === USUARIOS_CANONICAL_PATH;
   }
 
-  const publicPath =
-    getAppPublicPath();
-
-  if (publicPath) {
-    pushPathSignal(
-      signals,
-      "AppCore.state.publicPath",
-      publicPath
-    );
-  }
-
-  const browserPath =
-    getBrowserPath();
+  const browserPath = getBrowserPath();
 
   if (browserPath) {
-    pushPathSignal(
-      signals,
-      "window.location",
-      browserPath
-    );
-  }
-
-  return signals;
-}
-
-function getBlockingSignal(signals = []) {
-  return (
-    signals.find((signal) => signal.isUsuarios === false) ||
-    null
-  );
-}
-
-function hasPositiveUsuariosSignal(signals = []) {
-  return signals.some((signal) => signal.isUsuarios === true);
-}
-
-function shouldAllowUsuariosMethod(method = "", args = []) {
-  const cleanMethod =
-    safeText(method, "");
-
-  if (!cleanMethod) {
-    return true;
-  }
-
-  if (ALWAYS_ALLOWED_VIEW_METHODS.has(cleanMethod)) {
-    return true;
-  }
-
-  if (!GUARDED_VIEW_METHODS.has(cleanMethod)) {
-    return true;
-  }
-
-  const browserPath =
-    getBrowserPath();
-
-  if (browserPath) {
-    return isUsuariosPath(browserPath);
-  }
-
-  const signals =
-    collectRouteSignals(args);
-
-  const blockingSignal =
-    getBlockingSignal(signals);
-
-  if (blockingSignal) {
-    return false;
-  }
-
-  if (hasPositiveUsuariosSignal(signals)) {
-    return true;
-  }
-
-  const appRoute =
-    getAppStatePath();
-
-  const appPublicPath =
-    getAppPublicPath();
-
-  if (appRoute || appPublicPath) {
-    return (
-      isUsuariosPath(appRoute || "") ||
-      isUsuariosPath(appPublicPath || "")
-    );
+    return browserPath === USUARIOS_CANONICAL_PATH;
   }
 
   return true;
 }
 
-function logBlockedUsuariosMethod(method = "", args = []) {
-  const signals =
-    collectRouteSignals(args);
+function resolveHost(host = null, context = {}) {
+  if (host?.nodeType === 1) return host;
+  if (context.host?.nodeType === 1) return context.host;
+  if (context.root?.nodeType === 1) return context.root;
+  if (context.container?.nodeType === 1) return context.container;
 
-  safeWarn(
-    `UsuariosView.${method} bloqueado: ruta actual no es Usuarios.`,
-    {
-      method,
-      browserPath:
-        getBrowserPath(),
-      browserCanonicalPath:
-        getCleanCanonicalPath(getBrowserPath() || "/"),
-      appRoute:
-        getAppStatePath(),
-      appPublicPath:
-        getAppPublicPath(),
-      signals,
-      blockingSignal:
-        getBlockingSignal(signals),
-    }
+  if (!isBrowser()) return null;
+
+  return (
+    document.querySelector("[data-view-host='usuarios']") ||
+    document.querySelector("[data-usuarios-host='true']") ||
+    document.querySelector("#app-content") ||
+    document.querySelector("main") ||
+    null
   );
 }
 
-function getDefaultFallback(method = "") {
-  switch (method) {
-    case "destroy":
-    case "unmount":
-    case "dispose":
-    case "closeCreate":
-    case "closeModal":
-      return true;
-
-    case "copyUsuarioId":
-    case "createUsuario":
-    case "exportCsv":
-    case "goToPage":
-    case "goPrevPage":
-    case "prevPage":
-    case "goNextPage":
-    case "nextPage":
-    case "changePageSize":
-    case "setPageSize":
-      return false;
-
-    case "getItems":
-    case "getPageItems":
-      return [];
-
-    case "getPagination":
-    case "getUsuarioById":
-    case "getState":
-    case "getSnapshot":
-      return null;
-
-    default:
-      return null;
-  }
-}
-
 /* =========================================================
-   SAFE CALL
+   TOAST / EVENT BUS
 ========================================================= */
 
-function safeCall(target, method, args = [], fallback = undefined) {
-  try {
-    const fn =
-      target?.[method];
+function showToast(message = "", type = "info") {
+  const text = cleanText(message, "");
+  if (!text) return false;
 
-    if (typeof fn === "function") {
-      return fn.apply(
-        target,
-        Array.isArray(args) ? args : []
-      );
-    }
-  } catch (error) {
-    safeWarn(
-      `safeCall falló: ${method}`,
-      error
-    );
-  }
+  const candidates = [
+    AppCore?.toast,
+    AppCore?.ui?.toast,
+    AppCore?.Toast,
+  ];
 
-  return fallback;
-}
-
-function guardedCall(target, method, args = [], fallback = undefined) {
-  const callArgs =
-    Array.isArray(args)
-      ? args
-      : [];
-
-  if (
-    !shouldAllowUsuariosMethod(
-      method,
-      callArgs
-    )
-  ) {
-    logBlockedUsuariosMethod(
-      method,
-      callArgs
-    );
-
-    return fallback !== undefined
-      ? fallback
-      : getDefaultFallback(method);
-  }
-
-  return safeCall(
-    target,
-    method,
-    callArgs,
-    fallback
-  );
-}
-
-function callAny(candidates = [], args = [], fallback = undefined, options = {}) {
-  const opts =
-    safeObject(options);
-
-  for (const candidate of candidates) {
-    const target =
-      candidate?.[0];
-
-    const method =
-      candidate?.[1];
-
-    if (!target || !method) {
-      continue;
-    }
-
-    const result =
-      opts.guarded === true
-        ? guardedCall(target, method, args, undefined)
-        : safeCall(target, method, args, undefined);
-
-    if (result !== undefined) {
-      return result;
-    }
-  }
-
-  return fallback;
-}
-
-function asyncCallAny(candidates = [], args = [], fallback = undefined, options = {}) {
-  try {
-    return Promise.resolve(
-      callAny(
-        candidates,
-        args,
-        fallback,
-        options
-      )
-    );
-  } catch {
-    return Promise.resolve(fallback);
-  }
-}
-
-/* =========================================================
-   GUARDED VIEW BRIDGE
-========================================================= */
-
-function createGuardedUsuariosViewBridge(view) {
-  const source =
-    view || {};
-
-  const cache =
-    new Map();
-
-  if (
-    typeof Proxy !== "function" ||
-    !isProxyable(source)
-  ) {
-    return source;
-  }
-
-  return new Proxy(source, {
-    get(target, prop, receiver) {
-      if (prop === "__raw") {
-        return target;
-      }
-
-      if (prop === "__source") {
-        return USUARIOS_INDEX_SOURCE;
-      }
-
-      const value =
-        Reflect.get(
-          target,
-          prop,
-          receiver
-        );
-
-      if (!isFn(value)) {
-        return value;
-      }
-
-      const method =
-        String(prop);
-
-      if (cache.has(method)) {
-        return cache.get(method);
-      }
-
-      const wrapped =
-        function guardedUsuariosViewMethod(...args) {
-          if (
-            !shouldAllowUsuariosMethod(
-              method,
-              args
-            )
-          ) {
-            logBlockedUsuariosMethod(
-              method,
-              args
-            );
-
-            return getDefaultFallback(method);
-          }
-
-          try {
-            return value.apply(
-              target,
-              args
-            );
-          } catch (error) {
-            safeWarn(
-              `UsuariosView.${method} falló.`,
-              error
-            );
-
-            throw error;
-          }
-        };
-
-      try {
-        Object.defineProperties(wrapped, {
-          name: {
-            value:
-              `guardedUsuarios_${method}`,
-          },
-
-          routeViewKey: {
-            value:
-              "usuarios",
-            enumerable:
-              true,
-          },
-
-          routeViewName: {
-            value:
-              USUARIOS_VIEW_NAME,
-            enumerable:
-              true,
-          },
-        });
-      } catch {}
-
-      cache.set(
-        method,
-        wrapped
-      );
-
-      return wrapped;
-    },
-
-    apply(target, thisArg, args) {
-      if (
-        !shouldAllowUsuariosMethod(
-          "render",
-          args
-        )
-      ) {
-        logBlockedUsuariosMethod(
-          "render",
-          args
-        );
-
-        return null;
-      }
-
-      return Reflect.apply(
-        target,
-        thisArg,
-        args
-      );
-    },
-
-    set(target, prop, value) {
-      try {
-        target[prop] = value;
+  for (const toast of candidates) {
+    try {
+      if (isFunction(toast?.[type])) {
+        toast[type](text);
         return true;
-      } catch {
-        return false;
       }
-    },
+
+      if (isFunction(toast?.show)) {
+        toast.show(text, type);
+        return true;
+      }
+    } catch {
+      // continue
+    }
+  }
+
+  return false;
+}
+
+function subscribeEvent(eventName = "", handler = null) {
+  const name = cleanText(eventName, "");
+  if (!name || !isFunction(handler)) return () => {};
+
+  let appBound = false;
+  let windowBound = false;
+
+  try {
+    if (isFunction(AppCore?.events?.on)) {
+      AppCore.events.on(name, handler);
+      appBound = true;
+    }
+  } catch {
+    // noop
+  }
+
+  try {
+    if (isBrowser()) {
+      window.addEventListener(name, handler);
+      windowBound = true;
+    }
+  } catch {
+    // noop
+  }
+
+  return () => {
+    try {
+      if (appBound && isFunction(AppCore?.events?.off)) {
+        AppCore.events.off(name, handler);
+      }
+    } catch {
+      // noop
+    }
+
+    try {
+      if (windowBound && isBrowser()) {
+        window.removeEventListener(name, handler);
+      }
+    } catch {
+      // noop
+    }
+  };
+}
+
+function emitEvent(eventName = "", payload = {}) {
+  const name = cleanText(eventName, "");
+  if (!name) return false;
+
+  try {
+    if (isFunction(AppCore?.events?.emit)) {
+      AppCore.events.emit(name, payload);
+      return true;
+    }
+  } catch {
+    // fallback below
+  }
+
+  try {
+    if (isBrowser()) {
+      window.dispatchEvent(new CustomEvent(name, { detail: payload }));
+      return true;
+    }
+  } catch {
+    // noop
+  }
+
+  return false;
+}
+
+function eventPayload(event = null) {
+  return safeObject(
+    first(
+      event?.detail?.detail,
+      event?.detail?.payload,
+      event?.detail,
+      event?.payload,
+      event,
+      {}
+    ),
+    {}
+  );
+}
+
+/* =========================================================
+   USER HELPERS
+========================================================= */
+
+function getUsuarioId(item = {}) {
+  const raw = safeObject(item?.raw, {});
+
+  return cleanText(
+    first(
+      item.userId,
+      item.usuarioId,
+      item.id,
+      item.uid,
+      item._id,
+      item.username,
+      item.email,
+      raw.userId,
+      raw.usuarioId,
+      raw.id,
+      raw.uid,
+      raw._id,
+      raw.username,
+      raw.email,
+      ""
+    ),
+    ""
+  );
+}
+
+function getUsuarioName(item = {}) {
+  const raw = safeObject(item?.raw, {});
+
+  return cleanText(
+    first(
+      item.fullName,
+      item.displayName,
+      item.name,
+      item.nombre,
+      item.username,
+      item.email,
+      raw.fullName,
+      raw.displayName,
+      raw.name,
+      raw.nombre,
+      raw.username,
+      raw.email,
+      "Usuario"
+    ),
+    "Usuario"
+  );
+}
+
+function getUsuarioEmail(item = {}) {
+  const raw = safeObject(item?.raw, {});
+
+  return cleanText(
+    first(item.email, item.mail, raw.email, raw.mail, ""),
+    ""
+  ).toLowerCase();
+}
+
+function getUsuarioPhone(item = {}) {
+  const raw = safeObject(item?.raw, {});
+
+  return cleanText(
+    first(
+      item.phone,
+      item.telefono,
+      item.mobile,
+      raw.phone,
+      raw.telefono,
+      raw.mobile,
+      ""
+    ),
+    ""
+  );
+}
+
+function getUsuarioCity(item = {}) {
+  const raw = safeObject(item?.raw, {});
+
+  return cleanText(
+    first(
+      item.city,
+      item.ciudad,
+      item.location?.city,
+      item.location?.ciudad,
+      item.address?.city,
+      item.address?.ciudad,
+      item.direccion?.city,
+      item.direccion?.ciudad,
+      raw.city,
+      raw.ciudad,
+      raw.location?.city,
+      raw.location?.ciudad,
+      raw.address?.city,
+      raw.address?.ciudad,
+      raw.direccion?.city,
+      raw.direccion?.ciudad,
+      ""
+    ),
+    ""
+  );
+}
+
+function getUsuarioRole(item = {}) {
+  const raw = safeObject(item?.raw, {});
+
+  return cleanText(
+    first(item.role, item.rol, item.userRole, raw.role, raw.rol, raw.userRole, "user"),
+    "user"
+  );
+}
+
+function getUsuarioStatus(item = {}) {
+  const raw = safeObject(item?.raw, {});
+
+  const explicit = first(
+    item.status,
+    item.estado,
+    item.state,
+    raw.status,
+    raw.estado,
+    raw.state
+  );
+
+  if (explicit !== null && explicit !== undefined && explicit !== "") {
+    return normalizeKey(explicit);
+  }
+
+  const active = first(
+    item.active,
+    item.isActive,
+    item.enabled,
+    raw.active,
+    raw.isActive,
+    raw.enabled
+  );
+
+  if (active === false) return "blocked";
+  if (active === true) return "active";
+
+  return "active";
+}
+
+function statusBucket(item = {}) {
+  const status = getUsuarioStatus(item);
+
+  if (
+    [
+      "pending",
+      "pendiente",
+      "invited",
+      "invitation_pending",
+      "unverified",
+      "email_pending",
+    ].includes(status)
+  ) {
+    return "pending";
+  }
+
+  if (
+    [
+      "blocked",
+      "bloqueado",
+      "bloqueada",
+      "inactive",
+      "inactivo",
+      "inactiva",
+      "disabled",
+      "suspended",
+      "deleted",
+    ].includes(status)
+  ) {
+    return "blocked";
+  }
+
+  return "active";
+}
+
+function usuarioSearchText(item = {}) {
+  return normalizeSearch(
+    [
+      getUsuarioId(item),
+      getUsuarioName(item),
+      getUsuarioEmail(item),
+      getUsuarioPhone(item),
+      getUsuarioCity(item),
+      getUsuarioRole(item),
+      getUsuarioStatus(item),
+      item.username,
+      item.userName,
+      item.clienteId,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+}
+
+function filterUsuarios(items = [], { filter = "all", search = "" } = {}) {
+  const normalizedFilter = normalizeKey(filter || "all");
+  const query = normalizeSearch(search);
+  const terms = query.split(" ").filter(Boolean);
+
+  return safeArray(items).filter((item) => {
+    if (normalizedFilter !== "all" && statusBucket(item) !== normalizedFilter) {
+      return false;
+    }
+
+    if (!terms.length) return true;
+
+    const haystack = usuarioSearchText(item);
+    return terms.every((term) => haystack.includes(term));
   });
 }
 
-export const UsuariosView =
-  createGuardedUsuariosViewBridge(
-    RawUsuariosView
-  );
+function cloneItems(items = []) {
+  return safeArray(items).map((item) => ({ ...safeObject(item, {}) }));
+}
 
-export const UsuariosCreateView =
-  RawUsuariosCreateView;
+/* =========================================================
+   CSV
+========================================================= */
 
-export const UsuariosModal =
-  RawUsuariosModal;
+function csvEscape(value = "") {
+  const text = String(value ?? "").replace(/\r?\n/g, " ").trim();
+  return `"${text.replace(/"/g, '""')}"`;
+}
 
-export const view =
-  UsuariosView;
+function buildUsuariosCsv(items = []) {
+  const header = [
+    "ID",
+    "Nombre",
+    "Email",
+    "Teléfono",
+    "Ciudad",
+    "Rol",
+    "Estado",
+  ];
 
-export const component =
-  UsuariosView;
+  const rows = safeArray(items).map((item) => [
+    getUsuarioId(item),
+    getUsuarioName(item),
+    getUsuarioEmail(item),
+    getUsuarioPhone(item),
+    getUsuarioCity(item),
+    getUsuarioRole(item),
+    getUsuarioStatus(item),
+  ]);
 
-export const page =
-  UsuariosView;
+  return [header, ...rows]
+    .map((row) => row.map(csvEscape).join(";"))
+    .join("\r\n");
+}
 
+function downloadTextFile(content = "", filename = "usuarios.csv", type = "text/csv;charset=utf-8") {
+  if (!isBrowser()) return false;
+
+  try {
+    const blob = new Blob(["\uFEFF", String(content || "")], { type });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = cleanText(filename, "usuarios.csv");
+    anchor.rel = "noopener";
+    anchor.style.display = "none";
+
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   CONTROLLER
+========================================================= */
+
+function createUsuariosController(rawHost = null, rawContext = {}) {
+  const context = safeObject(rawContext, {});
+  const host = resolveHost(rawHost, context);
+  const ownerId = `${USUARIOS_VIEW_VERSION}:${++controllerSequence}`;
+
+  let mounted = false;
+  let destroyed = false;
+  let loading = false;
+  let refreshing = false;
+  let exporting = false;
+  let creating = false;
+  let createOpen = false;
+  let openingUserId = "";
+  let error = "";
+
+  let items = [];
+  let remoteCount = 0;
+  let lastSyncAt = null;
+
+  let filter = "all";
+  let search = "";
+  let searchDraft = "";
+  let page = DEFAULT_PAGE;
+  let pageSize = DEFAULT_PAGE_SIZE;
+
+  let loadSequence = 0;
+  let renderFrame = 0;
+  let searchTimer = 0;
+  let deferredRender = null;
+
+  let hostClickHandler = null;
+  let hostInputHandler = null;
+  let hostKeydownHandler = null;
+
+  const unsubscribers = [];
+
+  function isAlive() {
+    return !destroyed && mounted && Boolean(host?.isConnected);
+  }
+
+  function isRouteActive() {
+    return isUsuariosRoute(context);
+  }
+
+  function readStateSnapshot() {
+    try {
+      return safeObject(getUsuariosStateSnapshot?.(), usuariosState);
+    } catch {
+      return safeObject(usuariosState, {});
+    }
+  }
+
+  function syncFromStore() {
+    const state = readStateSnapshot();
+    const storeItems = safeArray(getUsuarios?.());
+    const stateItems = safeArray(state.items);
+    const nextItems = storeItems.length ? storeItems : stateItems;
+
+    items = normalizeUsuariosCollection(nextItems);
+    remoteCount = Math.max(
+      items.length,
+      number(first(state.remoteCount, state.totalCount, state.count, items.length), items.length)
+    );
+    lastSyncAt = first(state.lastSyncAt, state.updatedAt, state.lastUpdatedAt, lastSyncAt);
+
+    return items;
+  }
+
+  function getFilteredItems() {
+    return filterUsuarios(items, { filter, search: searchDraft || search });
+  }
+
+  function getTotalPages() {
+    return Math.max(1, Math.ceil(getFilteredItems().length / pageSize));
+  }
+
+  function normalizePage() {
+    page = clamp(page, 1, getTotalPages());
+    return page;
+  }
+
+  function getPageItemsInternal() {
+    normalizePage();
+    const filtered = getFilteredItems();
+    const start = (page - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }
+
+  function detailModalOpen() {
+    try {
+      return UsuariosDetailModal?.getState?.()?.isOpen === true;
+    } catch {
+      return false;
+    }
+  }
+
+  function createModalOpen() {
+    if (createOpen) return true;
+
+    try {
+      return UsuariosCreateModal?.getState?.()?.isOpen === true;
+    } catch {
+      return false;
+    }
+  }
+
+  function anyModalOpen() {
+    return detailModalOpen() || createModalOpen();
+  }
+
+  function viewState() {
+    const source = readStateSnapshot();
+
+    return {
+      ...source,
+
+      loading,
+      refreshing,
+      exporting,
+      creating,
+      openingUserId,
+      loadingUserId: openingUserId,
+      detailUserId: openingUserId,
+      error,
+
+      filter,
+      activeFilter: filter,
+      statusFilter: filter,
+      search: searchDraft || search,
+      searchQuery: searchDraft || search,
+      page,
+      currentPage: page,
+      usuariosPage: page,
+      pageSize,
+      usuariosPageSize: pageSize,
+
+      remoteCount,
+      totalCount: remoteCount,
+      total: remoteCount,
+      lastSyncAt,
+    };
+  }
+
+  function viewPayload() {
+    const admin = isAdminContext(context);
+
+    return {
+      items,
+      users: items,
+      usuarios: items,
+      rows: items,
+
+      state: viewState(),
+
+      loading,
+      refreshing,
+      exporting,
+      creating,
+      openingUserId,
+      error,
+
+      filter,
+      activeFilter: filter,
+      search: searchDraft || search,
+      searchQuery: searchDraft || search,
+      page,
+      currentPage: page,
+      pageSize,
+
+      remoteCount,
+      totalCount: remoteCount,
+      total: remoteCount,
+      lastSyncAt,
+
+      admin,
+      role: getCurrentRole(context),
+      forbidden: !admin,
+      restricted: !admin,
+      accessDenied: !admin,
+
+      route: USUARIOS_CANONICAL_PATH,
+      source: USUARIOS_INDEX_SOURCE,
+      version: USUARIOS_VIEW_VERSION,
+    };
+  }
+
+  function captureDomState() {
+    if (!host || !isBrowser()) return {};
+
+    const active = document.activeElement;
+    const searchInput = host.querySelector("[data-usuarios-search-input='true']");
+    const activeIsSearch = active === searchInput;
+
+    return {
+      scrollTop: host.scrollTop,
+      activeIsSearch,
+      selectionStart: activeIsSearch ? searchInput.selectionStart : null,
+      selectionEnd: activeIsSearch ? searchInput.selectionEnd : null,
+    };
+  }
+
+  function restoreDomState(snapshot = {}) {
+    if (!host || !isBrowser()) return false;
+
+    try {
+      host.scrollTop = number(snapshot.scrollTop, 0);
+
+      if (snapshot.activeIsSearch) {
+        const input = host.querySelector("[data-usuarios-search-input='true']");
+
+        input?.focus?.({ preventScroll: true });
+
+        if (
+          input &&
+          typeof input.setSelectionRange === "function" &&
+          Number.isInteger(snapshot.selectionStart) &&
+          Number.isInteger(snapshot.selectionEnd)
+        ) {
+          input.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+        }
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function htmlFragment(html = "") {
+    if (!isBrowser()) return null;
+
+    const template = document.createElement("template");
+    template.innerHTML = String(html || "").trim();
+    return template.content;
+  }
+
+  function commitFull(html = "") {
+    if (!host || destroyed) return false;
+
+    const snapshot = captureDomState();
+    const fragment = htmlFragment(html);
+
+    if (!fragment) return false;
+
+    host.replaceChildren(fragment);
+    host.setAttribute("data-usuarios-controller", ownerId);
+    host.setAttribute("data-usuarios-version", USUARIOS_VIEW_VERSION);
+
+    restoreDomState(snapshot);
+    return true;
+  }
+
+  function replaceSection(selector = "", html = "") {
+    if (!host || !selector) return false;
+
+    const current = host.querySelector(selector);
+    const fragment = htmlFragment(html);
+    const next = fragment?.querySelector?.(selector);
+
+    if (!current || !next) return false;
+
+    current.replaceWith(next);
+    return true;
+  }
+
+  function renderNow({ full = false, header = false, history = false, force = false } = {}) {
+    if (destroyed || !host || !isRouteActive()) return false;
+
+    if (!force && anyModalOpen()) {
+      deferredRender = {
+        full: Boolean(deferredRender?.full || full),
+        header: Boolean(deferredRender?.header || header),
+        history: Boolean(deferredRender?.history || history),
+        force: false,
+      };
+
+      return true;
+    }
+
+    deferredRender = null;
+    normalizePage();
+
+    const payload = viewPayload();
+    const hasRoot = Boolean(host.querySelector("[data-usuarios-scope='true']"));
+
+    if (full || !hasRoot) {
+      return commitFull(renderUsuariosTableTemplate(payload));
+    }
+
+    const snapshot = captureDomState();
+    let changed = false;
+
+    if (header) {
+      changed = replaceSection(".usuarios-hero", renderHeader(payload)) || changed;
+    }
+
+    if (history) {
+      changed = replaceSection(".usuarios-history", renderTable(payload)) || changed;
+    }
+
+    if (!changed && (header || history)) {
+      return commitFull(renderUsuariosTableTemplate(payload));
+    }
+
+    restoreDomState(snapshot);
+    return true;
+  }
+
+  function render(options = {}) {
+    if (destroyed || !host) return false;
+
+    const next = {
+      full: options.full === true,
+      header: options.header === true,
+      history: options.history === true,
+      force: options.force === true,
+    };
+
+    if (options.immediate === true) {
+      cancelFrame(renderFrame);
+      renderFrame = 0;
+      return renderNow(next);
+    }
+
+    deferredRender = {
+      full: Boolean(deferredRender?.full || next.full),
+      header: Boolean(deferredRender?.header || next.header),
+      history: Boolean(deferredRender?.history || next.history),
+      force: Boolean(deferredRender?.force || next.force),
+    };
+
+    if (renderFrame) return true;
+
+    renderFrame = nextFrame(() => {
+      const pending = deferredRender || {};
+      renderFrame = 0;
+      deferredRender = null;
+      renderNow(pending);
+    });
+
+    return true;
+  }
+
+  function flushDeferredRender() {
+    if (!deferredRender || anyModalOpen()) return false;
+
+    const pending = deferredRender;
+    deferredRender = null;
+    return render({ ...pending, immediate: true, force: true });
+  }
+
+  function renderInitialLoading() {
+    if (!host || destroyed) return false;
+
+    const admin = isAdminContext(context);
+
+    if (!admin) {
+      return commitFull(`
+        <section class="usuarios-view-root" data-usuarios-scope="true">
+          ${renderAccessDeniedState()}
+        </section>
+      `);
+    }
+
+    return commitFull(`
+      <section class="usuarios-view-root is-loading" data-usuarios-scope="true" aria-busy="true">
+        ${renderHeader(viewPayload())}
+        ${renderLoadingState()}
+      </section>
+    `);
+  }
+
+  function renderFatalError(message = "") {
+    if (!host || destroyed) return false;
+
+    return commitFull(`
+      <section class="usuarios-view-root has-error" data-usuarios-scope="true">
+        ${renderErrorState(cleanText(message, "No se pudieron cargar los usuarios."))}
+      </section>
+    `);
+  }
+
+  async function load({ force = false, silent = false } = {}) {
+    if (destroyed || !isRouteActive()) return items;
+    if (!isAdminContext(context)) return items;
+
+    const sequence = ++loadSequence;
+    const hadItems = items.length > 0;
+
+    error = "";
+    loading = !hadItems;
+    refreshing = hadItems;
+
+    render({
+      full: !hadItems,
+      header: hadItems,
+      history: hadItems,
+      immediate: true,
+    });
+
+    try {
+      await loadUsuarios({
+        force,
+        silent: true,
+      });
+
+      if (destroyed || sequence !== loadSequence || !isRouteActive()) {
+        return items;
+      }
+
+      syncFromStore();
+      error = "";
+      loading = false;
+      refreshing = false;
+      normalizePage();
+
+      render({ full: true, immediate: true });
+      return items;
+    } catch (loadError) {
+      if (destroyed || sequence !== loadSequence) return items;
+
+      syncFromStore();
+      error = safeError(loadError);
+      loading = false;
+      refreshing = false;
+
+      if (items.length) {
+        render({ header: true, history: true, immediate: true });
+        showToast(error, "error");
+      } else {
+        renderFatalError(error);
+      }
+
+      return items;
+    }
+  }
+
+  async function refresh() {
+    if (refreshing || loading) return items;
+    return load({ force: true, silent: true });
+  }
+
+  async function openUsuario(userId = "") {
+    const id = cleanText(userId, "");
+
+    if (!id || openingUserId || destroyed) return null;
+
+    openingUserId = id;
+    error = "";
+    render({ history: true, immediate: true });
+
+    try {
+      const cached = findUsuarioById(items, id) || getUsuarioByIdStore?.(id) || null;
+      const detail = (await loadUsuarioDetail(id)) || cached;
+
+      if (destroyed || !detail) {
+        throw new Error("USUARIO_DETAIL_NOT_FOUND");
+      }
+
+      openingUserId = "";
+      UsuariosDetailModal?.open?.(detail);
+
+      // El loader de la fila se limpia al cerrar el modal sin repintar
+      // la vista que queda detrás del backdrop.
+      render({ history: true });
+
+      emitEvent("usuarios:detail:opened", { detail, userId: id });
+      return detail;
+    } catch (detailError) {
+      openingUserId = "";
+      render({ history: true, immediate: true, force: true });
+      showToast(safeError(detailError, "No se pudo abrir el usuario."), "error");
+      return null;
+    }
+  }
+
+  async function refreshUsuario(userId = "") {
+    const modalState = safeObject(UsuariosDetailModal?.getState?.(), {});
+    const id = cleanText(
+      first(userId, modalState.userId, getUsuarioId(modalState.detail), ""),
+      ""
+    );
+
+    if (!id || destroyed) return null;
+
+    try {
+      const detail = await loadUsuarioDetail(id);
+
+      if (detail) {
+        UsuariosDetailModal?.update?.(detail);
+        syncFromStore();
+        render({ full: true });
+      }
+
+      return detail;
+    } catch (detailError) {
+      showToast(safeError(detailError, "No se pudo actualizar el usuario."), "error");
+      return null;
+    }
+  }
+
+  async function copyUsuarioId(userId = "") {
+    const modalState = safeObject(UsuariosDetailModal?.getState?.(), {});
+    const id = cleanText(
+      first(userId, modalState.userId, getUsuarioId(modalState.detail), ""),
+      ""
+    );
+
+    if (!id || !isBrowser()) return false;
+
+    try {
+      await navigator.clipboard.writeText(id);
+      showToast("ID de usuario copiado.", "success");
+      return true;
+    } catch {
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = id;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand("copy");
+        textarea.remove();
+
+        if (copied) showToast("ID de usuario copiado.", "success");
+        return copied;
+      } catch {
+        showToast("No se pudo copiar el ID del usuario.", "error");
+        return false;
+      }
+    }
+  }
+
+  async function openCreate() {
+    if (destroyed || creating || createModalOpen()) return false;
+
+    creating = true;
+    render({ header: true, immediate: true });
+
+    try {
+      const result = await safeAsyncCall(
+        UsuariosCreateModal,
+        ["open", "mount", "init"],
+        [
+          {
+            source: USUARIOS_INDEX_SOURCE,
+            context,
+          },
+        ],
+        false
+      );
+
+      createOpen = result !== false;
+
+      if (!createOpen) {
+        createOpen = emitEvent("usuarios:create:open", {
+          source: USUARIOS_INDEX_SOURCE,
+        });
+      }
+
+      return createOpen;
+    } catch (createError) {
+      createOpen = false;
+      showToast(safeError(createError, "No se pudo abrir el alta de usuario."), "error");
+      return false;
+    } finally {
+      creating = false;
+      render({ header: true });
+    }
+  }
+
+  function closeCreate() {
+    createOpen = false;
+
+    const closed =
+      safeCall(UsuariosCreateModal, "close", [], null) ??
+      safeCall(UsuariosCreateModal, "unmount", [], null) ??
+      emitEvent("usuarios:create:close", {});
+
+    flushDeferredRender();
+    return Boolean(closed !== false);
+  }
+
+  async function submitCreateUsuario(payload = {}) {
+    try {
+      const direct = await safeAsyncCall(
+        UsuariosCreateModal,
+        ["submit", "submitCreate", "save"],
+        [payload],
+        null
+      );
+
+      if (direct !== null && direct !== undefined) {
+        return direct;
+      }
+
+      const created = await createUsuarioApi(safeObject(payload, {}));
+
+      if (created) {
+        syncFromStore();
+        page = DEFAULT_PAGE;
+        render({ full: true, force: true });
+        showToast("Usuario creado correctamente.", "success");
+      }
+
+      return created;
+    } catch (createError) {
+      showToast(safeError(createError, "No se pudo crear el usuario."), "error");
+      throw createError;
+    }
+  }
+
+  async function exportCsv() {
+    if (exporting || !items.length || destroyed) return false;
+
+    exporting = true;
+    render({ header: true, immediate: true });
+
+    try {
+      const csv = buildUsuariosCsv(items);
+      const date = new Date().toISOString().slice(0, 10);
+      const ok = downloadTextFile(csv, `usuarios-${date}.csv`);
+
+      if (!ok) throw new Error("USUARIOS_CSV_DOWNLOAD_FAILED");
+
+      showToast("CSV de usuarios generado.", "success");
+      return true;
+    } catch (exportError) {
+      showToast(safeError(exportError, "No se pudo exportar el CSV."), "error");
+      return false;
+    } finally {
+      exporting = false;
+      render({ header: true });
+    }
+  }
+
+  function setFilter(value = "all") {
+    filter = ["all", "active", "pending", "blocked"].includes(normalizeKey(value))
+      ? normalizeKey(value)
+      : "all";
+    page = DEFAULT_PAGE;
+    render({ history: true });
+    return filter;
+  }
+
+  function setSearch(value = "") {
+    searchDraft = cleanText(value, "");
+    search = searchDraft;
+    page = DEFAULT_PAGE;
+    render({ history: true });
+    return search;
+  }
+
+  function scheduleSearch(value = "") {
+    searchDraft = String(value ?? "");
+
+    if (searchTimer) {
+      window.clearTimeout(searchTimer);
+      searchTimer = 0;
+    }
+
+    searchTimer = window.setTimeout(() => {
+      searchTimer = 0;
+      setSearch(searchDraft);
+    }, SEARCH_DEBOUNCE_MS);
+
+    return true;
+  }
+
+  function clearFilters() {
+    filter = "all";
+    search = "";
+    searchDraft = "";
+    page = DEFAULT_PAGE;
+    render({ history: true });
+    return true;
+  }
+
+  function goToPage(value = DEFAULT_PAGE) {
+    page = clamp(value, 1, getTotalPages());
+    render({ history: true });
+    return page;
+  }
+
+  function goPrevPage() {
+    return goToPage(page - 1);
+  }
+
+  function goNextPage() {
+    return goToPage(page + 1);
+  }
+
+  function changePageSize(value = DEFAULT_PAGE_SIZE) {
+    pageSize = clamp(value, 1, 50);
+    page = DEFAULT_PAGE;
+    render({ history: true });
+    return pageSize;
+  }
+
+  function actionFrom(node = null) {
+    return normalizeKey(
+      first(
+        node?.getAttribute?.("data-usuarios-action"),
+        node?.getAttribute?.("data-action"),
+        ""
+      )
+    );
+  }
+
+  async function handleAction(node = null, event = null) {
+    const action = actionFrom(node);
+    if (!action) return false;
+
+    const userId = cleanText(
+      first(
+        node?.getAttribute?.("data-user-id"),
+        node?.closest?.("[data-user-id]")?.getAttribute?.("data-user-id"),
+        ""
+      ),
+      ""
+    );
+
+    switch (action) {
+      case DETAIL_ACTION:
+      case "open_user":
+      case "open-user":
+        event?.preventDefault?.();
+        await openUsuario(userId);
+        return true;
+
+      case CREATE_ACTION:
+      case "create_user":
+      case "create-user":
+        event?.preventDefault?.();
+        await openCreate();
+        return true;
+
+      case REFRESH_ACTION:
+      case RETRY_ACTION:
+        event?.preventDefault?.();
+        await refresh();
+        return true;
+
+      case EXPORT_ACTION:
+      case "export_csv":
+      case "export-csv":
+        event?.preventDefault?.();
+        await exportCsv();
+        return true;
+
+      case FILTER_ACTION:
+      case "filter_usuarios":
+      case "filter-usuarios":
+        event?.preventDefault?.();
+        setFilter(
+          first(
+            node?.getAttribute?.("data-filter"),
+            node?.getAttribute?.("data-filter-status"),
+            "all"
+          )
+        );
+        return true;
+
+      case CLEAR_SEARCH_ACTION:
+      case "clear_search":
+        event?.preventDefault?.();
+        setSearch("");
+        return true;
+
+      case CLEAR_FILTERS_ACTION:
+      case "clear_filters":
+        event?.preventDefault?.();
+        clearFilters();
+        return true;
+
+      case PREV_PAGE_ACTION:
+      case "prev_page":
+        event?.preventDefault?.();
+        goToPage(first(node?.getAttribute?.("data-page"), page - 1));
+        return true;
+
+      case NEXT_PAGE_ACTION:
+      case "next_page":
+        event?.preventDefault?.();
+        goToPage(first(node?.getAttribute?.("data-page"), page + 1));
+        return true;
+
+      default:
+        return false;
+    }
+  }
+
+  function bindHost() {
+    if (!host || hostClickHandler) return false;
+
+    hostClickHandler = async (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const actionNode = target.closest("[data-usuarios-action], [data-action]");
+      if (!actionNode || !host.contains(actionNode)) return;
+
+      await handleAction(actionNode, event);
+    };
+
+    hostInputHandler = (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+
+      if (target.matches("[data-usuarios-search-input='true']")) {
+        scheduleSearch(target.value);
+      }
+    };
+
+    hostKeydownHandler = async (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      if (
+        (event.key === "Enter" || event.key === " ") &&
+        target.matches("[data-user-row='true'][data-user-id]")
+      ) {
+        event.preventDefault();
+        await openUsuario(target.getAttribute("data-user-id"));
+      }
+    };
+
+    host.addEventListener("click", hostClickHandler);
+    host.addEventListener("input", hostInputHandler);
+    host.addEventListener("keydown", hostKeydownHandler);
+    return true;
+  }
+
+  function unbindHost() {
+    if (!host) return false;
+
+    try {
+      if (hostClickHandler) host.removeEventListener("click", hostClickHandler);
+      if (hostInputHandler) host.removeEventListener("input", hostInputHandler);
+      if (hostKeydownHandler) host.removeEventListener("keydown", hostKeydownHandler);
+    } catch {
+      // noop
+    }
+
+    hostClickHandler = null;
+    hostInputHandler = null;
+    hostKeydownHandler = null;
+    return true;
+  }
+
+  function bindEvents() {
+    const onModalRefresh = async (event) => {
+      const payload = eventPayload(event);
+      await refreshUsuario(
+        first(payload.userId, payload.usuarioId, payload.id, "")
+      );
+    };
+
+    const onModalCopy = async (event) => {
+      const payload = eventPayload(event);
+      await copyUsuarioId(
+        first(payload.userId, payload.usuarioId, payload.id, "")
+      );
+    };
+
+    const onModalClosed = () => {
+      openingUserId = "";
+      flushDeferredRender();
+    };
+
+    const onCreateSuccess = async () => {
+      createOpen = false;
+      await load({ force: true, silent: true });
+      flushDeferredRender();
+    };
+
+    const onCreateClosed = () => {
+      createOpen = false;
+      flushDeferredRender();
+    };
+
+    unsubscribers.push(
+      subscribeEvent("usuarios:modal:refresh", onModalRefresh),
+      subscribeEvent("usuarios:modal:copy", onModalCopy)
+    );
+
+    for (const eventName of DETAIL_CLOSE_EVENTS) {
+      unsubscribers.push(subscribeEvent(eventName, onModalClosed));
+    }
+
+    for (const eventName of CREATE_SUCCESS_EVENTS) {
+      unsubscribers.push(subscribeEvent(eventName, onCreateSuccess));
+    }
+
+    for (const eventName of CREATE_CLOSE_EVENTS) {
+      unsubscribers.push(subscribeEvent(eventName, onCreateClosed));
+    }
+
+    return true;
+  }
+
+  function unbindEvents() {
+    while (unsubscribers.length) {
+      const unsubscribe = unsubscribers.pop();
+
+      try {
+        unsubscribe?.();
+      } catch {
+        // noop
+      }
+    }
+
+    return true;
+  }
+
+  function clearTimers() {
+    if (searchTimer) {
+      window.clearTimeout?.(searchTimer);
+      searchTimer = 0;
+    }
+
+    cancelFrame(renderFrame);
+    renderFrame = 0;
+    deferredRender = null;
+    return true;
+  }
+
+  const controller = {
+    version: USUARIOS_VIEW_VERSION,
+    name: USUARIOS_MODULE_NAME,
+    ownerId,
+    host,
+    context,
+
+    async mount() {
+      if (destroyed) return controller;
+      if (!host) throw new Error("USUARIOS_HOST_REQUIRED");
+
+      mounted = true;
+      bindHost();
+      bindEvents();
+
+      if (!isRouteActive()) {
+        return controller;
+      }
+
+      if (!isAdminContext(context)) {
+        render({ full: true, immediate: true, force: true });
+        return controller;
+      }
+
+      try {
+        hydrateFromCache({ freshOnly: true });
+      } catch {
+        // cache opcional
+      }
+
+      syncFromStore();
+
+      if (items.length) {
+        loading = false;
+        refreshing = false;
+        render({ full: true, immediate: true, force: true });
+      } else {
+        loading = true;
+        renderInitialLoading();
+      }
+
+      void load({ force: false, silent: true });
+      return controller;
+    },
+
+    render(options = {}) {
+      return render({ full: true, ...safeObject(options, {}) });
+    },
+
+    reload() {
+      return refresh();
+    },
+
+    refresh,
+    load,
+
+    openUsuario,
+    refreshUsuario,
+    copyUsuarioId,
+
+    openCreate,
+    closeCreate,
+    submitCreateUsuario,
+
+    exportCsv,
+
+    setFilter,
+    setSearch,
+    clearFilters,
+    goToPage,
+    goPrevPage,
+    goNextPage,
+    changePageSize,
+
+    getItems() {
+      return cloneItems(items);
+    },
+
+    getFilteredItems() {
+      return cloneItems(getFilteredItems());
+    },
+
+    getPageItems() {
+      return cloneItems(getPageItemsInternal());
+    },
+
+    getPagination() {
+      normalizePage();
+      const filtered = getFilteredItems();
+
+      return {
+        page,
+        currentPage: page,
+        pageSize,
+        totalPages: getTotalPages(),
+        totalCount: filtered.length,
+        remoteCount,
+        hasPrev: page > 1,
+        hasNext: page < getTotalPages(),
+      };
+    },
+
+    getUsuarioById(id = "") {
+      return findUsuarioById(items, id) || getUsuarioByIdStore?.(id) || null;
+    },
+
+    getState() {
+      return {
+        ...viewState(),
+        items: cloneItems(items),
+      };
+    },
+
+    isAdmin() {
+      return isAdminContext(context);
+    },
+
+    isInitialized() {
+      return mounted && !destroyed;
+    },
+
+    isMounted() {
+      return mounted && !destroyed;
+    },
+
+    isDestroyed() {
+      return destroyed;
+    },
+
+    getSnapshot() {
+      return {
+        version: USUARIOS_VIEW_VERSION,
+        ownerId,
+        mounted,
+        destroyed,
+        routeActive: isRouteActive(),
+        admin: isAdminContext(context),
+        role: getCurrentRole(context),
+
+        loading,
+        refreshing,
+        exporting,
+        creating,
+        createOpen: createModalOpen(),
+        detailOpen: detailModalOpen(),
+        openingUserId: openingUserId ? "***" : "",
+
+        count: items.length,
+        filteredCount: getFilteredItems().length,
+        remoteCount,
+        page,
+        pageSize,
+        totalPages: getTotalPages(),
+        filter,
+        searchLength: (searchDraft || search).length,
+        lastSyncAt,
+        error,
+      };
+    },
+
+    destroy() {
+      if (destroyed) return true;
+
+      destroyed = true;
+      mounted = false;
+      loadSequence += 1;
+
+      clearTimers();
+      unbindHost();
+      unbindEvents();
+
+      try {
+        UsuariosDetailModal?.close?.();
+      } catch {
+        // noop
+      }
+
+      try {
+        UsuariosCreateModal?.close?.();
+      } catch {
+        // noop
+      }
+
+      if (host?.[USUARIOS_CONTROLLER_KEY] === controller) {
+        try {
+          delete host[USUARIOS_CONTROLLER_KEY];
+        } catch {
+          host[USUARIOS_CONTROLLER_KEY] = null;
+        }
+      }
+
+      const root = getGlobalObject();
+
+      if (root?.[USUARIOS_GLOBAL_CONTROLLER_KEY] === controller) {
+        try {
+          delete root[USUARIOS_GLOBAL_CONTROLLER_KEY];
+        } catch {
+          root[USUARIOS_GLOBAL_CONTROLLER_KEY] = null;
+        }
+      }
+
+      if (lastController === controller) {
+        lastController = null;
+      }
+
+      if (host) {
+        host.replaceChildren();
+      }
+
+      return true;
+    },
+
+    unmount() {
+      return controller.destroy();
+    },
+
+    cleanup() {
+      return controller.destroy();
+    },
+  };
+
+  return controller;
+}
+
+/* =========================================================
+   VIEW ENTRY
+========================================================= */
+
+export async function UsuariosView(host = null, context = {}) {
+  const resolvedHost = resolveHost(host, context);
+  const root = getGlobalObject();
+
+  const hostController = resolvedHost?.[USUARIOS_CONTROLLER_KEY] || null;
+  const globalController = root?.[USUARIOS_GLOBAL_CONTROLLER_KEY] || null;
+
+  for (const previous of [hostController, globalController]) {
+    if (previous && previous !== hostController && isFunction(previous.destroy)) {
+      try {
+        previous.destroy();
+      } catch {
+        // noop
+      }
+    }
+  }
+
+  if (hostController && isFunction(hostController.destroy)) {
+    try {
+      hostController.destroy();
+    } catch {
+      // noop
+    }
+  }
+
+  const controller = createUsuariosController(resolvedHost, context);
+
+  if (resolvedHost) {
+    resolvedHost[USUARIOS_CONTROLLER_KEY] = controller;
+  }
+
+  root[USUARIOS_GLOBAL_CONTROLLER_KEY] = controller;
+  lastController = controller;
+
+  registerGlobalBridge(controller);
+  return controller.mount();
+}
+
+export const UsuariosIndex = UsuariosView;
+export const view = UsuariosView;
+export const component = UsuariosView;
+export const page = UsuariosView;
 export default UsuariosView;
 
 /* =========================================================
-   VIEW API
+   ACTIVE CONTROLLER / LEGACY WRAPPERS
 ========================================================= */
 
-export const init = (...args) =>
-  asyncCallAny(
-    [
-      [RawUsuariosView, "init"],
-      [RawUsuariosView, "mount"],
-      [RawUsuariosView, "render"],
-    ],
-    args,
-    UsuariosView,
-    { guarded: true }
-  );
+export function getActiveUsuariosController() {
+  const root = getGlobalObject();
+  return root?.[USUARIOS_GLOBAL_CONTROLLER_KEY] || lastController || null;
+}
 
-export const mount = (...args) =>
-  init(...args);
+export const init = (...args) => UsuariosView(...args);
+export const mount = (...args) => UsuariosView(...args);
+export const bootstrap = (...args) => UsuariosView(...args);
 
-export const render = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "render"],
-      [RawUsuariosView, "mount"],
-      [RawUsuariosView, "init"],
-    ],
-    args,
-    null,
-    { guarded: true }
-  );
+export const render = (options = {}) =>
+  getActiveUsuariosController()?.render?.(options) || false;
 
-export const reload = (...args) =>
-  asyncCallAny(
-    [
-      [RawUsuariosView, "reload"],
-      [RawUsuariosView, "refresh"],
-      [RawUsuariosView, "loadUsuarios"],
-    ],
-    args,
-    UsuariosView,
-    { guarded: true }
-  );
+export const reload = () =>
+  getActiveUsuariosController()?.reload?.() || Promise.resolve([]);
 
-export const refresh = (...args) =>
-  reload(...args);
+export const refresh = () =>
+  getActiveUsuariosController()?.refresh?.() || Promise.resolve([]);
 
-export const destroy = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "destroy"],
-      [RawUsuariosView, "unmount"],
-      [RawUsuariosView, "dispose"],
-    ],
-    args,
-    true
-  );
+export const destroy = () =>
+  getActiveUsuariosController()?.destroy?.() || true;
 
-export const unmount = (...args) =>
-  destroy(...args);
+export const unmount = destroy;
+export const dispose = destroy;
 
-export const dispose =
-  destroy;
+export const openUsuario = (userId = "") =>
+  getActiveUsuariosController()?.openUsuario?.(userId) || Promise.resolve(null);
 
-export const bootstrap =
-  init;
+export const refreshUsuario = (userId = "") =>
+  getActiveUsuariosController()?.refreshUsuario?.(userId) || Promise.resolve(null);
 
-/* =========================================================
-   ACTIONS API
-========================================================= */
+export const copyUsuarioId = (userId = "") =>
+  getActiveUsuariosController()?.copyUsuarioId?.(userId) || Promise.resolve(false);
 
-export const openUsuario = (...args) =>
-  asyncCallAny(
-    [
-      [RawUsuariosView, "openUsuario"],
-      [RawUsuariosView, "open"],
-      [RawUsuariosView, "openById"],
-      [{ openUsuarioAction }, "openUsuarioAction"],
-    ],
-    args,
-    null,
-    { guarded: true }
-  );
+export const createUsuario = () =>
+  getActiveUsuariosController()?.openCreate?.() || Promise.resolve(false);
 
-export const copyUsuarioId = (...args) =>
-  asyncCallAny(
-    [
-      [RawUsuariosView, "copyUsuarioId"],
-      [{ copyUsuarioIdAction }, "copyUsuarioIdAction"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
+export const openCreate = createUsuario;
+export const initCreate = createUsuario;
 
-export const createUsuario = (...args) =>
-  asyncCallAny(
-    [
-      [RawUsuariosView, "createUsuario"],
-      [RawUsuariosView, "create"],
-      [{ createUsuarioAction }, "createUsuarioAction"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
+export const closeCreate = () =>
+  getActiveUsuariosController()?.closeCreate?.() || true;
 
-export const exportCsv = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "exportCsv"],
-      [RawUsuariosView, "exportUsuariosCsv"],
-      [{ exportUsuariosCsvAction }, "exportUsuariosCsvAction"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
+export const renderCreate = () =>
+  safeCall(UsuariosCreateModal, "render", [], null);
 
-export const refreshUsuario = (...args) =>
-  refreshUsuarioDetailAction(...args);
+export const resetCreate = () =>
+  safeCall(UsuariosCreateModal, "reset", [], undefined);
 
-export const submitCreateUsuario = (...args) =>
-  guardedCall(
-    { submitCreateUsuarioAction },
-    "submitCreateUsuarioAction",
-    args,
-    false
-  );
+export const getCreateState = () =>
+  safeCall(UsuariosCreateModal, "getState", [], null);
 
-/* =========================================================
-   PAGINATION API
-========================================================= */
+export const submitCreateUsuario = (payload = {}) =>
+  getActiveUsuariosController()?.submitCreateUsuario?.(payload) ||
+  createUsuarioApi(payload);
 
-export const goToPage = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "goToPage"],
-    ],
-    args,
-    1,
-    { guarded: true }
-  );
+export const exportCsv = () =>
+  getActiveUsuariosController()?.exportCsv?.() || Promise.resolve(false);
 
-export const goPrevPage = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "goPrevPage"],
-      [RawUsuariosView, "prevPage"],
-    ],
-    args,
-    1,
-    { guarded: true }
-  );
+export const goToPage = (pageNumber = 1) =>
+  getActiveUsuariosController()?.goToPage?.(pageNumber) || 1;
 
-export const goNextPage = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "goNextPage"],
-      [RawUsuariosView, "nextPage"],
-    ],
-    args,
-    1,
-    { guarded: true }
-  );
+export const goPrevPage = () =>
+  getActiveUsuariosController()?.goPrevPage?.() || 1;
 
-export const changePageSize = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "changePageSize"],
-      [RawUsuariosView, "setPageSize"],
-    ],
-    args,
-    5,
-    { guarded: true }
-  );
+export const goNextPage = () =>
+  getActiveUsuariosController()?.goNextPage?.() || 1;
 
-/* =========================================================
-   DATA API
-========================================================= */
+export const changePageSize = (size = DEFAULT_PAGE_SIZE) =>
+  getActiveUsuariosController()?.changePageSize?.(size) || DEFAULT_PAGE_SIZE;
 
-export const getItems = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "getItems"],
-      [RawUsuariosView, "getUsuarios"],
-      [{ getUsuarios }, "getUsuarios"],
-    ],
-    args,
-    []
-  );
+export const getItems = () =>
+  getActiveUsuariosController()?.getItems?.() || safeArray(getUsuarios?.());
 
-export const getPageItems = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "getPageItems"],
-    ],
-    args,
-    []
-  );
+export const getPageItems = () =>
+  getActiveUsuariosController()?.getPageItems?.() || [];
 
-export const getPagination = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "getPagination"],
-    ],
-    args,
-    null
-  );
+export const getPagination = () =>
+  getActiveUsuariosController()?.getPagination?.() || null;
 
-export const getUsuarioById = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "getUsuarioById"],
-      [RawUsuariosView, "findUsuarioById"],
-      [{ getUsuarioByIdStore }, "getUsuarioByIdStore"],
-    ],
-    args,
-    null
-  );
+export const getUsuarioById = (id = "") =>
+  getActiveUsuariosController()?.getUsuarioById?.(id) ||
+  getUsuarioByIdStore?.(id) ||
+  null;
 
-export const getState = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "getState"],
-      [{ getUsuariosStateSnapshot }, "getUsuariosStateSnapshot"],
-    ],
-    args,
-    getUsuariosStateSnapshot?.() || usuariosState
-  );
+export const getState = () =>
+  getActiveUsuariosController()?.getState?.() ||
+  getUsuariosStateSnapshot?.() ||
+  usuariosState;
 
-export const isAdmin = (...args) =>
-  callAny(
-    [
-      [RawUsuariosView, "isAdmin"],
-    ],
-    args,
-    false
-  );
+export const getSnapshot = () =>
+  getActiveUsuariosController()?.getSnapshot?.() || {
+    version: USUARIOS_VIEW_VERSION,
+    mounted: false,
+    destroyed: false,
+  };
 
-/* =========================================================
-   CREATE VIEW API
-========================================================= */
-
-export const initCreate = (...args) =>
-  guardedCall(
-    RawUsuariosCreateView,
-    "init",
-    args,
-    undefined
-  );
-
-export const openCreate = (...args) =>
-  callAny(
-    [
-      [RawUsuariosCreateView, "open"],
-      [RawUsuariosCreateView, "mount"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-export const closeCreate = (...args) =>
-  callAny(
-    [
-      [RawUsuariosCreateView, "close"],
-      [RawUsuariosCreateView, "destroy"],
-      [RawUsuariosCreateView, "unmount"],
-    ],
-    args,
-    true
-  );
-
-export const renderCreate = (...args) =>
-  callAny(
-    [
-      [RawUsuariosCreateView, "render"],
-    ],
-    args,
-    null,
-    { guarded: true }
-  );
-
-export const resetCreate = (...args) =>
-  callAny(
-    [
-      [RawUsuariosCreateView, "reset"],
-    ],
-    args,
-    undefined,
-    { guarded: true }
-  );
-
-export const getCreateState = (...args) =>
-  callAny(
-    [
-      [RawUsuariosCreateView, "getState"],
-    ],
-    args,
-    null
-  );
-
-/* =========================================================
-   MODAL API
-========================================================= */
-
-export const openModal = (...args) =>
-  callAny(
-    [
-      [RawUsuariosModal, "open"],
-      [RawUsuariosModal, "mount"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-export const closeModal = (...args) =>
-  callAny(
-    [
-      [RawUsuariosModal, "close"],
-      [RawUsuariosModal, "destroy"],
-      [RawUsuariosModal, "unmount"],
-    ],
-    args,
-    true
-  );
-
-export const refreshModal = (...args) =>
-  asyncCallAny(
-    [
-      [RawUsuariosModal, "refresh"],
-      [RawUsuariosModal, "reload"],
-    ],
-    args,
-    null,
-    { guarded: true }
-  );
-
-export const updateModal = (...args) =>
-  callAny(
-    [
-      [RawUsuariosModal, "update"],
-      [RawUsuariosModal, "setState"],
-    ],
-    args,
-    false,
-    { guarded: true }
-  );
-
-export const getModalState = (...args) =>
-  callAny(
-    [
-      [RawUsuariosModal, "getState"],
-    ],
-    args,
-    null
-  );
-
-/* =========================================================
-   FLAGS / DEBUG
-========================================================= */
+export const isAdmin = () =>
+  getActiveUsuariosController()?.isAdmin?.() || isAdminContext({});
 
 export const isInitialized = () =>
-  Boolean(
-    RawUsuariosView?.initialized ||
-      RawUsuariosView?.isInitialized ||
-      safeCall(RawUsuariosView, "isInitialized", [], false)
-  );
+  getActiveUsuariosController()?.isInitialized?.() || false;
 
 export const isDestroyed = () =>
-  Boolean(
-    RawUsuariosView?.destroyed ||
-      RawUsuariosView?.isDestroyed ||
-      safeCall(RawUsuariosView, "isDestroyed", [], false)
-  );
+  getActiveUsuariosController()?.isDestroyed?.() ?? true;
 
 export const isMounted = () =>
-  Boolean(
-    RawUsuariosView?.mounted ||
-      RawUsuariosView?.isMounted ||
-      safeCall(RawUsuariosView, "isMounted", [], false)
-  );
+  getActiveUsuariosController()?.isMounted?.() || false;
 
-export const canRenderUsuariosNow = (...args) =>
-  shouldAllowUsuariosMethod(
-    "render",
-    args
-  );
+export const canRenderUsuariosNow = (context = {}) =>
+  isUsuariosRoute(safeObject(context, {}));
 
-export const getUsuariosRouteDebug = (...args) => {
-  const signals =
-    collectRouteSignals(args);
+export const getUsuariosRouteDebug = (context = {}) => ({
+  browserPath: getBrowserPath(),
+  contextPath: routePathFromContext(context),
+  canonicalPath: USUARIOS_CANONICAL_PATH,
+  allowed: isUsuariosRoute(context),
+  role: getCurrentRole(context),
+  admin: isAdminContext(context),
+});
 
-  return {
-    source:
-      USUARIOS_INDEX_SOURCE,
+export const openModal = (detail = {}) =>
+  UsuariosDetailModal?.open?.(detail) || false;
 
-    allowed:
-      shouldAllowUsuariosMethod(
-        "render",
-        args
-      ),
+export const closeModal = () =>
+  UsuariosDetailModal?.close?.() || true;
 
-    browserPath:
-      getBrowserPath(),
+export const refreshModal = () =>
+  UsuariosDetailModal?.refresh?.() || false;
 
-    browserCanonicalPath:
-      getCleanCanonicalPath(
-        getBrowserPath() || "/"
-      ),
+export const updateModal = (detail = {}) =>
+  UsuariosDetailModal?.update?.(detail) || false;
 
-    appRoute:
-      getAppStatePath(),
-
-    appPublicPath:
-      getAppPublicPath(),
-
-    signals,
-
-    blockingSignal:
-      getBlockingSignal(signals),
-  };
-};
-
-export const getSnapshot = (...args) => {
-  const base =
-    callAny(
-      [
-        [RawUsuariosView, "getSnapshot"],
-        [RawUsuariosView, "getState"],
-      ],
-      args,
-      null
-    );
-
-  return {
-    ...(isObject(base) ? base : {}),
-
-    module:
-      USUARIOS_MODULE_NAME,
-
-    viewName:
-      USUARIOS_VIEW_NAME,
-
-    version:
-      USUARIOS_MODULE_VERSION,
-
-    source:
-      USUARIOS_INDEX_SOURCE,
-
-    initialized:
-      isInitialized(),
-
-    destroyed:
-      isDestroyed(),
-
-    mounted:
-      isMounted(),
-
-    hasView:
-      Boolean(UsuariosView),
-
-    hasRawView:
-      Boolean(RawUsuariosView),
-
-    hasCreateView:
-      Boolean(RawUsuariosCreateView),
-
-    hasModal:
-      Boolean(RawUsuariosModal),
-
-    browserPath:
-      getBrowserPath(),
-
-    browserCanonicalPath:
-      getCleanCanonicalPath(
-        getBrowserPath() || "/"
-      ),
-
-    appRoute:
-      getAppStatePath(),
-
-    appPublicPath:
-      getAppPublicPath(),
-
-    usuariosAllowedNow:
-      canRenderUsuariosNow(...args),
-  };
-};
+export const getModalState = () =>
+  UsuariosDetailModal?.getState?.() || null;
 
 /* =========================================================
-   PUBLIC MODULE SHAPE
+   PUBLIC MODULE / GLOBAL BRIDGE
 ========================================================= */
 
-export const UsuariosModule = Object.freeze({
-  name:
-    USUARIOS_MODULE_NAME,
-
-  viewName:
-    USUARIOS_VIEW_NAME,
-
-  version:
-    USUARIOS_MODULE_VERSION,
-
-  source:
-    USUARIOS_INDEX_SOURCE,
+export const UsuariosModule = {
+  name: USUARIOS_MODULE_NAME,
+  viewName: USUARIOS_VIEW_NAME,
+  version: USUARIOS_VIEW_VERSION,
+  source: USUARIOS_INDEX_SOURCE,
 
   UsuariosView,
-  RawUsuariosView,
-  UsuariosCreateView,
-  UsuariosModal,
-
-  View:
-    UsuariosView,
-
-  RawView:
-    RawUsuariosView,
-
+  UsuariosIndex,
+  View: UsuariosView,
   view,
   component,
   page,
 
   init,
   mount,
+  bootstrap,
   render,
   reload,
   refresh,
   destroy,
   unmount,
   dispose,
-  bootstrap,
 
   openUsuario,
-  copyUsuarioId,
-  createUsuario,
-  submitCreateUsuario,
-  exportCsv,
   refreshUsuario,
+  copyUsuarioId,
+
+  createUsuario,
+  openCreate,
+  closeCreate,
+  renderCreate,
+  resetCreate,
+  getCreateState,
+  submitCreateUsuario,
+
+  exportCsv,
 
   goToPage,
   goPrevPage,
@@ -1716,14 +2271,6 @@ export const UsuariosModule = Object.freeze({
   getUsuarioById,
   getState,
   getSnapshot,
-  isAdmin,
-
-  initCreate,
-  openCreate,
-  closeCreate,
-  renderCreate,
-  resetCreate,
-  getCreateState,
 
   openModal,
   closeModal,
@@ -1731,22 +2278,20 @@ export const UsuariosModule = Object.freeze({
   updateModal,
   getModalState,
 
+  isAdmin,
   isInitialized,
   isDestroyed,
   isMounted,
-
   canRenderUsuariosNow,
   getUsuariosRouteDebug,
 
-  actions: {
-    openUsuarioAction,
-    getUsuarioDetailAction,
-    getUsuarioDetailFromStoreAction,
-    refreshUsuarioDetailAction,
-    copyUsuarioIdAction,
-    exportUsuariosCsvAction,
-    createUsuarioAction,
-    submitCreateUsuarioAction,
+  api: {
+    hydrateFromCache,
+    loadUsuarios,
+    loadUsuarioDetail,
+    createUsuario: createUsuarioApi,
+    updateUsuario: updateUsuarioApi,
+    deleteUsuario: deleteUsuarioApi,
   },
 
   store: {
@@ -1766,136 +2311,55 @@ export const UsuariosModule = Object.freeze({
     computeUsuariosStats,
   },
 
-  state:
-    usuariosState,
-});
+  state: usuariosState,
+};
 
-/* =========================================================
-   LEGACY GLOBAL BRIDGE OPTIONAL
-========================================================= */
-
-export function registerGlobalBridge() {
-  const root =
-    getGlobalObject();
+export function registerGlobalBridge(controller = null) {
+  const root = getGlobalObject();
+  const active = controller || getActiveUsuariosController();
 
   try {
-    const previous =
-      root.OnionUsuarios &&
-      typeof root.OnionUsuarios === "object"
-        ? root.OnionUsuarios
-        : {};
-
     root.OnionUsuarios = {
-      ...previous,
+      ...safeObject(root.OnionUsuarios, {}),
       ...UsuariosModule,
+      controller: active,
     };
 
-    root.OnionUsuariosView =
-      root.OnionUsuariosView &&
-      typeof root.OnionUsuariosView === "object"
-        ? {
-            ...root.OnionUsuariosView,
-            ...UsuariosModule,
-            view:
-              UsuariosView,
-          }
-        : UsuariosView;
+    root.OnionUsuariosView = UsuariosView;
+    root.UsuariosView = UsuariosView;
 
-    root.UsuariosView =
-      root.UsuariosView &&
-      typeof root.UsuariosView === "object"
-        ? {
-            ...root.UsuariosView,
-            ...UsuariosModule,
-            view:
-              UsuariosView,
-          }
-        : UsuariosView;
-
-    if (!root.OnionUsuariosModal && RawUsuariosModal) {
-      root.OnionUsuariosModal =
-        RawUsuariosModal;
+    if (!root.OnionUsuariosModal) {
+      root.OnionUsuariosModal = UsuariosDetailModal;
     }
 
-    if (!root.OnionUsuariosCreateModal && RawUsuariosCreateView) {
-      root.OnionUsuariosCreateModal =
-        RawUsuariosCreateView;
+    if (!root.OnionUsuariosCreateModal) {
+      root.OnionUsuariosCreateModal = UsuariosCreateModal;
     }
-  } catch (error) {
-    safeWarn(
-      "No se pudo registrar bridge global.",
-      error
-    );
+  } catch {
+    // noop
   }
 
   try {
-    const appCore =
-      root?.AppCore;
+    if (AppCore) {
+      if (!isObject(AppCore.modules)) AppCore.modules = {};
 
-    if (appCore) {
-      if (
-        !appCore.modules ||
-        typeof appCore.modules !== "object"
-      ) {
-        appCore.modules = {};
-      }
-
-      appCore.modules.Usuarios =
-        UsuariosModule;
-
-      appCore.modules.UsuariosView =
-        UsuariosModule;
-
-      appCore.modules.OnionUsuarios =
-        UsuariosModule;
+      AppCore.modules.Usuarios = UsuariosModule;
+      AppCore.modules.UsuariosView = UsuariosModule;
+      AppCore.modules.OnionUsuarios = UsuariosModule;
     }
-  } catch (error) {
-    safeWarn(
-      "No se pudo registrar bridge en AppCore.modules.",
-      error
-    );
+  } catch {
+    // noop
   }
 
-  safeEmit(
-    "usuarios:index:ready",
-    {
-      source:
-        USUARIOS_INDEX_SOURCE,
-
-      hasView:
-        Boolean(UsuariosView),
-
-      hasRawView:
-        Boolean(RawUsuariosView),
-
-      hasCreateView:
-        Boolean(RawUsuariosCreateView),
-
-      hasModal:
-        Boolean(RawUsuariosModal),
-
-      browserPath:
-        getBrowserPath(),
-
-      browserCanonicalPath:
-        getCleanCanonicalPath(
-          getBrowserPath() || "/"
-        ),
-
-      allowedNow:
-        canRenderUsuariosNow(),
-    }
-  );
+  emitEvent("usuarios:index:ready", {
+    version: USUARIOS_VIEW_VERSION,
+    source: USUARIOS_INDEX_SOURCE,
+    mounted: Boolean(active?.isMounted?.()),
+    route: getBrowserPath(),
+  });
 
   return UsuariosModule;
 }
 
-/* =========================================================
-   READY
-========================================================= */
-
-export const bridge =
-  registerGlobalBridge();
-
-export const ready =
-  true;
+export const bridge = registerGlobalBridge();
+export const ready = true;

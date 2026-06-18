@@ -15,52 +15,112 @@
    - Sin DOM, Router, Toast ni listeners.
    - Sin borrar cache válida ante respuestas incompletas.
    - Sincronización compatible con usuarios.state/store/model.
+   - Enlace ESM tolerante a exports opcionales de versiones anteriores.
 ========================================================= */
 
 import Http from "../../core/http.js";
 
-import {
-  usuariosState,
+import * as UsuariosStateModule from "./usuarios.state.js";
+import * as UsuariosStoreModule from "./usuarios.store.js";
+import * as UsuariosModelModule from "./usuarios.model.js";
 
-  getInflightLoad,
-  setInflightLoad,
-  clearInflightLoad,
+/* =========================================================
+   COMPATIBILITY BRIDGE
 
-  setLoading,
-  setRefreshing,
-  setError,
-  clearError,
-  setItems,
-  setRemoteCount,
-  setLastSyncAt,
-  touchLastSyncAt,
-  setLoaded,
-  setHydrated,
+   Evita que una exportación opcional ausente rompa TODO el
+   módulo durante el enlace ESM. Las piezas críticas conservan
+   fallback seguro y las disponibles se usan de forma nativa.
+========================================================= */
 
-  writeCachePayload,
-  hydrateStateFromCache,
-} from "./usuarios.state.js";
+const moduleFunction = (source, name, fallback = () => undefined) =>
+  typeof source?.[name] === "function" ? source[name] : fallback;
 
-import {
-  getUsuarios,
-  replaceUsuariosStore,
-  upsertUsuarioStore,
-  getUsuarioByIdStore,
-} from "./usuarios.store.js";
+const usuariosState =
+  UsuariosStateModule?.usuariosState &&
+  typeof UsuariosStateModule.usuariosState === "object"
+    ? UsuariosStateModule.usuariosState
+    : {};
 
-import {
-  normalizeUsuarioModel,
-  normalizeUsuariosCollection,
-  unwrapUsuariosPayload,
-  findUsuarioById,
-} from "./usuarios.model.js";
+const getInflightLoad = moduleFunction(
+  UsuariosStateModule,
+  "getInflightLoad",
+  () => null
+);
+const setInflightLoad = moduleFunction(UsuariosStateModule, "setInflightLoad");
+const clearInflightLoad = moduleFunction(UsuariosStateModule, "clearInflightLoad");
+const setLoading = moduleFunction(UsuariosStateModule, "setLoading");
+const setRefreshing = moduleFunction(UsuariosStateModule, "setRefreshing");
+const setError = moduleFunction(UsuariosStateModule, "setError");
+const clearError = moduleFunction(UsuariosStateModule, "clearError");
+const setItems = moduleFunction(UsuariosStateModule, "setItems");
+const setRemoteCount = moduleFunction(UsuariosStateModule, "setRemoteCount");
+const setLastSyncAt = moduleFunction(UsuariosStateModule, "setLastSyncAt");
+const touchLastSyncAt = moduleFunction(UsuariosStateModule, "touchLastSyncAt");
+const setLoaded = moduleFunction(UsuariosStateModule, "setLoaded");
+const setHydrated = moduleFunction(UsuariosStateModule, "setHydrated");
+const writeCachePayload = moduleFunction(UsuariosStateModule, "writeCachePayload");
+const hydrateStateFromCache = moduleFunction(
+  UsuariosStateModule,
+  "hydrateStateFromCache",
+  () => false
+);
+
+const getUsuarios = moduleFunction(UsuariosStoreModule, "getUsuarios", () => []);
+const replaceUsuariosStore = moduleFunction(
+  UsuariosStoreModule,
+  "replaceUsuariosStore"
+);
+const upsertUsuarioStore = moduleFunction(UsuariosStoreModule, "upsertUsuarioStore");
+const getUsuarioByIdStore = moduleFunction(
+  UsuariosStoreModule,
+  "getUsuarioByIdStore",
+  () => null
+);
+
+const normalizeUsuarioModel = moduleFunction(
+  UsuariosModelModule,
+  "normalizeUsuarioModel",
+  (item = {}) => item && typeof item === "object" ? item : {}
+);
+const normalizeUsuariosCollection = moduleFunction(
+  UsuariosModelModule,
+  "normalizeUsuariosCollection",
+  (items = []) => Array.isArray(items) ? items : []
+);
+const unwrapUsuariosPayload = moduleFunction(
+  UsuariosModelModule,
+  "unwrapUsuariosPayload",
+  (payload = null) => payload
+);
+const findUsuarioById = moduleFunction(
+  UsuariosModelModule,
+  "findUsuarioById",
+  (items = [], id = "") => {
+    const target = String(id ?? "").trim();
+    if (!target || !Array.isArray(items)) return null;
+
+    return items.find((item = {}) => {
+      const candidate =
+        item?.userId ??
+        item?.usuarioId ??
+        item?.id ??
+        item?._id ??
+        item?.uid ??
+        item?.email ??
+        item?.username ??
+        "";
+
+      return String(candidate ?? "").trim() === target;
+    }) || null;
+  }
+);
 
 /* =========================================================
    META / CONFIG
 ========================================================= */
 
 export const USUARIOS_API_VERSION =
-  "usuarios.api.productive.v12.http-single.facturas-logic";
+  "usuarios.api.productive.v13.esm-compat.http-single";
 
 export const USUARIOS_ENDPOINT = "/api/users";
 

@@ -2,8 +2,8 @@
    Onion SPA - Usuarios Table Template
    Archivo: src/views/usuarios/usuarios.table.template.js
 
-   FINAL PRODUCTION TEMPLATE · USERS VIEW · EXTREME SAAS MODE · 14/10
-   CLEAN TEMPLATE · NO CSS INJECTION · NO INLINE STYLES · CSP READY
+   PRODUCTIVO · TEMPLATE PURO · LÓGICA FACTURAS · 10/10
+   STABLE DOM ISLANDS · NO CSS INJECTION · NO INLINE STYLES · CSP READY
    ALIGNED WITH VARIABLES.CSS + UI.CSS + /css/views/usuarios/index.css
 
    RESPONSABILIDADES:
@@ -11,7 +11,7 @@
    - render de tabla productiva con paginación real
    - render de filtros visuales compatibles con state/props/bindings
    - render de búsqueda compatible con state/props/bindings
-   - compatibilidad con usuariosView.js
+   - compatibilidad directa con /src/views/usuarios/index.js
    - loading visual en detalle / nuevo usuario / refresh / retry / export
    - soporte para payloads backend heterogéneos y envelopes anidados
    - acciones compatibles con data-usuarios-action y data-action
@@ -36,7 +36,25 @@
    CONSTANTS
 ========================================================= */
 
-const DEFAULT_PAGE_SIZE = 5;
+export const USUARIOS_TABLE_TEMPLATE_VERSION =
+  "usuarios.table.template.v15.facturas-controller";
+
+export const USUARIOS_TABLE_ACTIONS = Object.freeze({
+  DETAIL: "detail",
+  CREATE: "create",
+  REFRESH: "refresh",
+  RETRY: "retry",
+  EXPORT: "export",
+  FILTER: "filter",
+  CLEAR_SEARCH: "clear-search",
+  CLEAR_FILTERS: "clear-filters",
+  PREV_PAGE: "prev-page",
+  NEXT_PAGE: "next-page",
+});
+
+export const USUARIOS_DEFAULT_PAGE_SIZE = 5;
+
+const DEFAULT_PAGE_SIZE = USUARIOS_DEFAULT_PAGE_SIZE;
 const AVATAR_TONE_COUNT = 10;
 
 const FILTERS = Object.freeze([
@@ -1573,10 +1591,16 @@ function renderRow(item = {}, state = {}) {
 
   return `
     <tr
-      class="usuarios-row usuarios-row--${escapeHtml(statusKey)}"
+      class="usuarios-row usuarios-row--${escapeHtml(statusKey)}${isOpening ? " is-loading" : ""}"
       data-user-row="true"
       data-user-id="${escapeHtml(userId)}"
       data-usuario-id="${escapeHtml(userId)}"
+      data-usuarios-action="${USUARIOS_TABLE_ACTIONS.DETAIL}"
+      data-action="open-user"
+      tabindex="0"
+      role="button"
+      aria-label="Abrir detalle de ${escapeHtml(name)}"
+      ${isOpening ? 'aria-busy="true"' : ""}
     >
       <td class="usuarios-cell usuarios-cell--main">
         <div class="usuarios-main">
@@ -1701,9 +1725,9 @@ function renderSearch(input = {}) {
         placeholder="Buscar nombre, email, ciudad, teléfono, ID..."
         autocomplete="off"
         spellcheck="false"
-        data-usuarios-action="search"
-        data-action="search-usuarios"
         data-usuarios-search-input="true"
+        data-usuarios-field="search"
+        data-field="search"
         aria-label="Buscar usuarios por nombre, email, ciudad, teléfono o identificador"
       />
 
@@ -1928,7 +1952,11 @@ export function renderHeader(input = {}) {
   const exporting = Boolean(first(state.exporting, data.exporting));
 
   return `
-    <section class="usuarios-hero">
+    <section
+      class="usuarios-hero${loading || refreshing || creating || exporting ? " is-busy" : ""}"
+      data-usuarios-hero="true"
+      aria-busy="${loading || refreshing || creating || exporting ? "true" : "false"}"
+    >
       <div class="usuarios-hero-top">
         <div class="usuarios-hero-copy">
           <h1 class="usuarios-page-title">${escapeHtml(title)}</h1>
@@ -2025,7 +2053,12 @@ export function renderHeader(input = {}) {
 
 export function renderLoadingState() {
   return `
-    <section class="usuarios-history">
+    <section
+      class="usuarios-history is-loading"
+      data-usuarios-history="true"
+      aria-live="polite"
+      aria-busy="true"
+    >
       ${renderTableLoading(DEFAULT_PAGE_SIZE)}
     </section>
   `;
@@ -2033,16 +2066,25 @@ export function renderLoadingState() {
 
 export function renderErrorState(message = "No se pudieron cargar los usuarios.") {
   return `
-    <section class="usuarios-error">
-      <h3 class="usuarios-error-title">No se pudo renderizar la vista de usuarios</h3>
+    <section class="usuarios-error" role="alert" aria-live="assertive">
+      <h3 class="usuarios-error-title">No se pudo cargar la vista de usuarios</h3>
       <p class="usuarios-error-text">${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}</p>
+      <button
+        type="button"
+        class="usuarios-btn usuarios-btn--primary"
+        data-usuarios-action="${USUARIOS_TABLE_ACTIONS.RETRY}"
+        data-action="retry"
+      >
+        ${icon("refresh")}
+        <span class="usuarios-btn-text">Reintentar</span>
+      </button>
     </section>
   `;
 }
 
 export function renderAccessDeniedState() {
   return `
-    <section class="usuarios-history">
+    <section class="usuarios-history" data-usuarios-history="true">
       ${renderEmptyContent({ restricted: true })}
     </section>
   `;
@@ -2068,7 +2110,6 @@ export function renderTable(input = {}) {
   const pagination = getPagination(items, {
     ...data,
     remoteCount: resolveRemoteCount(data, items),
-    pageSize: DEFAULT_PAGE_SIZE,
   });
 
   const loading = Boolean(first(state.loading, data.loading));
@@ -2094,7 +2135,17 @@ export function renderTable(input = {}) {
       : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`;
 
   return `
-    <section class="usuarios-history">
+    <section
+      class="usuarios-history${loading ? " is-loading" : ""}${refreshing ? " is-refreshing" : ""}${hasError ? " has-error" : ""}"
+      data-usuarios-history="true"
+      data-current-page="${escapeHtml(String(pagination.currentPage))}"
+      data-total-pages="${escapeHtml(String(pagination.totalPages))}"
+      data-visible="${escapeHtml(String(pagination.pageItems.length))}"
+      data-filter="${escapeHtml(pagination.activeFilter)}"
+      data-search-active="${searchQuery ? "true" : "false"}"
+      aria-live="polite"
+      aria-busy="${loading || refreshing ? "true" : "false"}"
+    >
       <div class="usuarios-history-head">
         <div class="usuarios-history-copy">
           <h2 class="usuarios-history-title">Historial de usuarios</h2>
@@ -2184,22 +2235,48 @@ export const renderCards = renderTable;
 
 export function renderUsuariosTableTemplate(input = {}) {
   const data = safeObject(input);
+  const items = getResolvedItems(data);
+  const state = safeObject(data.state);
+  const error = safeText(first(state.error, data.error), "");
+  const loading = Boolean(first(state.loading, data.loading));
+  const refreshing = Boolean(first(state.refreshing, data.refreshing));
+  const pagination = getPagination(items, {
+    ...data,
+    remoteCount: resolveRemoteCount(data, items),
+  });
+
+  const rootAttrs = `
+    data-usuarios-scope="true"
+    data-template-version="${escapeHtml(USUARIOS_TABLE_TEMPLATE_VERSION)}"
+    data-total="${escapeHtml(String(pagination.totalCount))}"
+    data-visible="${escapeHtml(String(pagination.pageItems.length))}"
+    data-filter="${escapeHtml(pagination.activeFilter)}"
+    data-search-active="${pagination.searchQuery ? "true" : "false"}"
+    data-page="${escapeHtml(String(pagination.currentPage))}"
+    data-loading="${loading ? "true" : "false"}"
+    data-refreshing="${refreshing ? "true" : "false"}"
+  `;
 
   if (shouldRenderRestricted(data)) {
     return `
-      <section class="usuarios-view-root" data-usuarios-scope="true">
+      <section
+        class="usuarios-view-root is-restricted"
+        ${rootAttrs}
+        aria-busy="false"
+      >
         ${renderAccessDeniedState()}
       </section>
     `;
   }
 
-  const items = getResolvedItems(data);
-  const state = safeObject(data.state);
-
-  if (state.error && !items.length) {
+  if (error && !items.length) {
     return `
-      <section class="usuarios-view-root" data-usuarios-scope="true">
-        ${renderErrorState(state.error)}
+      <section
+        class="usuarios-view-root has-error"
+        ${rootAttrs}
+        aria-busy="false"
+      >
+        ${renderErrorState(error)}
       </section>
     `;
   }
@@ -2211,12 +2288,52 @@ export function renderUsuariosTableTemplate(input = {}) {
   };
 
   return `
-    <section class="usuarios-view-root" data-usuarios-scope="true">
+    <section
+      class="usuarios-view-root${loading ? " is-loading" : ""}${refreshing ? " is-refreshing" : ""}${error ? " has-error" : ""}"
+      ${rootAttrs}
+      aria-busy="${loading || refreshing ? "true" : "false"}"
+    >
       ${renderHeader(payload)}
       ${renderTable(payload)}
     </section>
   `;
 }
+
+/* =========================================================
+   SNAPSHOT / COMPATIBILITY
+========================================================= */
+
+export function getUsuariosTableTemplateSnapshot(input = {}) {
+  const data = safeObject(input);
+  const items = getResolvedItems(data);
+  const pagination = getPagination(items, {
+    ...data,
+    remoteCount: resolveRemoteCount(data, items),
+  });
+
+  return {
+    version: USUARIOS_TABLE_TEMPLATE_VERSION,
+    actions: USUARIOS_TABLE_ACTIONS,
+    total: pagination.totalCount,
+    visible: pagination.pageItems.length,
+    currentPage: pagination.currentPage,
+    totalPages: pagination.totalPages,
+    filter: pagination.activeFilter,
+    searchLength: pagination.searchQuery.length,
+    restricted: shouldRenderRestricted(data),
+    cssContract: {
+      root: "usuarios-view-root",
+      header: "usuarios-hero",
+      history: "usuarios-history",
+      table: "usuarios-table",
+      row: "usuarios-row",
+    },
+  };
+}
+
+export const renderTemplate = renderUsuariosTableTemplate;
+export const renderUsuariosTemplate = renderUsuariosTableTemplate;
+export const getSnapshot = getUsuariosTableTemplateSnapshot;
 
 /* =========================================================
    DEFAULT EXPORT

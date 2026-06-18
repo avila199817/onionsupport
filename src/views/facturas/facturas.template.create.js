@@ -24,7 +24,7 @@
 ========================================================= */
 
 export const FACTURAS_CREATE_TEMPLATE_VERSION =
-  "facturas.template.create.v3.stable-dom-islands";
+  "facturas.template.create.v4.final-ui-clean";
 
 export const FACTURA_CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -295,16 +295,12 @@ function initialsFrom(value = "", fallback = "CL") {
 ========================================================= */
 
 function icon(name = "") {
+  if (name !== "close") return "";
+
   const common =
     `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 
-  const icons = {
-    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-    search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
-    ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
-  };
-
-  return icons[name] || "";
+  return `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
 }
 
 /* =========================================================
@@ -748,27 +744,37 @@ function renderSelect({
   required = false,
   disabled = false,
 } = {}) {
+  const currentValue = cleanText(value, "");
+
   return `
     <label class="fac-create-field">
       <span class="fac-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
 
-      <select
-        class="fac-create-select ${error ? "is-error" : ""}"
-        data-field="${attr(name)}"
-        name="${attr(name)}"
-        ${disabledAttrs(disabled, disabled)}
-      >
-        ${safeArray(options).map((option) => {
-          const optionValue = cleanText(option.value, "");
-          const optionLabel = cleanText(option.label, optionValue);
+      <span class="fac-create-select-control" data-select-control="true">
+        <select
+          class="fac-create-select ${error ? "is-error" : ""}"
+          data-field="${attr(name)}"
+          name="${attr(name)}"
+          ${disabledAttrs(disabled, disabled)}
+        >
+          ${safeArray(options).map((option) => {
+            const optionValue = cleanText(option.value, "");
+            const optionLabel = cleanText(option.label, optionValue);
 
-          return `
-            <option value="${attr(optionValue)}" ${optionValue === cleanText(value, "") ? "selected" : ""}>
-              ${escapeHtml(optionLabel)}
-            </option>
-          `;
-        }).join("")}
-      </select>
+            return `
+              <option value="${attr(optionValue)}" ${optionValue === currentValue ? "selected" : ""}>
+                ${escapeHtml(optionLabel)}
+              </option>
+            `;
+          }).join("")}
+        </select>
+
+        <span
+          class="fac-create-select-indicator"
+          data-select-indicator="true"
+          aria-hidden="true"
+        >⌄</span>
+      </span>
 
       ${renderFieldError(error)}
     </label>
@@ -1131,16 +1137,6 @@ function renderTargetBlock(vm = {}) {
               <span>Clientes destino</span>
               <strong>Selecciona cliente</strong>
             </div>
-
-            <button
-              type="button"
-              class="fac-create-mini-button"
-              data-factura-create-action="${FACTURA_CREATE_ACTIONS.CLIENT_CLEAR}"
-              data-action="${FACTURA_CREATE_ACTIONS.CLIENT_CLEAR}"
-              ${disabledAttrs(vm.submitting || !clientCount, vm.submitting)}
-            >
-              Limpiar
-            </button>
           </div>
 
           <div data-slot="selected-clientes">
@@ -1154,21 +1150,17 @@ function renderTargetBlock(vm = {}) {
           <label class="fac-create-field fac-create-field--search">
             <span class="fac-create-label">${clientCount ? "Añadir otro cliente" : "Buscar cliente"}</span>
 
-            <span class="fac-create-search-control">
-              <span class="fac-create-search-icon" aria-hidden="true">${icon("search")}</span>
-
-              <input
-                class="fac-create-input ${errors.clienteId ? "is-error" : ""}"
-                data-field="clienteSearch"
-                name="clienteSearch"
-                type="search"
-                value="${attr(vm.clientSearch.query)}"
-                placeholder="Nombre, email, empresa o usuario..."
-                autocomplete="off"
-                spellcheck="false"
-                ${disabledAttrs(vm.submitting, vm.submitting || vm.clientSearch.loading)}
-              >
-            </span>
+            <input
+              class="fac-create-input ${errors.clienteId ? "is-error" : ""}"
+              data-field="clienteSearch"
+              name="clienteSearch"
+              type="search"
+              value="${attr(vm.clientSearch.query)}"
+              placeholder="Nombre, email, empresa o usuario..."
+              autocomplete="off"
+              spellcheck="false"
+              ${disabledAttrs(vm.submitting, vm.submitting || vm.clientSearch.loading)}
+            >
           </label>
 
           <div
@@ -1209,21 +1201,17 @@ function renderTargetBlock(vm = {}) {
           <label class="fac-create-field fac-create-field--search">
             <span class="fac-create-label">Filtrar incidencias</span>
 
-            <span class="fac-create-search-control">
-              <span class="fac-create-search-icon" aria-hidden="true">${icon("ticket")}</span>
-
-              <input
-                class="fac-create-input ${errors.incidenciaId ? "is-error" : ""}"
-                data-field="ticketSearch"
-                name="ticketSearch"
-                type="search"
-                value="${attr(vm.ticketSearch.query)}"
-                placeholder="Código, asunto o estado..."
-                autocomplete="off"
-                spellcheck="false"
-                ${disabledAttrs(vm.submitting || !clientCount, vm.ticketSearch.loading)}
-              >
-            </span>
+            <input
+              class="fac-create-input ${errors.incidenciaId ? "is-error" : ""}"
+              data-field="ticketSearch"
+              name="ticketSearch"
+              type="search"
+              value="${attr(vm.ticketSearch.query)}"
+              placeholder="Código, asunto o estado..."
+              autocomplete="off"
+              spellcheck="false"
+              ${disabledAttrs(vm.submitting || !clientCount, vm.ticketSearch.loading)}
+            >
           </label>
 
           <div
@@ -1596,6 +1584,9 @@ export function getFacturaCreateTemplateSnapshot() {
       stableDomIslands: true,
       searchInputsRemainMounted: true,
       liveTotalsWithoutFullRender: true,
+      searchIconsRemoved: true,
+      redundantClientClearRemoved: true,
+      selectIndicatorMarkup: true,
     },
   };
 }

@@ -1,6 +1,6 @@
 /* =========================================================
    Onion SPA - Usuarios Table Template
-   Archivo: src/views/usuarios/usuarios.table.template.js
+   Archivo: src/views/usuarios/usuarios.template.js
 
    PRODUCTIVO · TEMPLATE PURO · LÓGICA FACTURAS · 10/10
    STABLE DOM ISLANDS · NO CSS INJECTION · NO INLINE STYLES · CSP READY

@@ -2,7 +2,7 @@
    Onion SPA - Usuarios Modal
    Archivo: src/views/usuarios/usuarios.template.modal.js
 
-   FINAL PRO SYSTEM · DETAIL MODAL · USUARIOS EDITION · HARDENED 10/10
+   PRODUCTIVO · DETAIL MODAL · AUTÓNOMO SIN usuarios.model.js · 10/10
 
    RESPONSABILIDADES:
    - renderizar modal premium de detalle de usuario
@@ -22,13 +22,325 @@
 
 import { AppCore } from "../../core/index.js";
 
-import {
-  normalizeUsuarioModel,
-  getStatusLabel,
-  getRoleLabel,
-  getAvatarTheme,
-  getInitials,
-} from "./usuarios.model.js";
+/* =========================================================
+   MODEL LOCAL AUTÓNOMO
+
+   Punto cerrado:
+   - Este modal NO importa usuarios.model.js.
+   - No se crea ningún archivo nuevo.
+   - Se conservan los exports públicos originales del modal.
+   - Normalización local mínima, estable y compatible con payloads heterogéneos.
+========================================================= */
+
+function modelIsObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function modelObject(value, fallback = {}) {
+  return modelIsObject(value) ? value : fallback;
+}
+
+function modelText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return output || fallback;
+}
+
+function modelFirst(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (modelIsObject(value) && Object.keys(value).length === 0) continue;
+
+    return value;
+  }
+
+  return null;
+}
+
+function modelKey(value = "") {
+  return modelText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w:.]/g, "")
+    .replace(/^_+|_+$/g, "");
+}
+
+function modelEmail(value = "") {
+  const email = modelText(value, "").toLowerCase();
+
+  if (!email) return "";
+  if (
+    [
+      "null",
+      "undefined",
+      "none",
+      "sin email",
+      "sin_email",
+      "no email",
+      "no_email",
+      "__no_email__",
+    ].includes(email)
+  ) {
+    return "";
+  }
+
+  return email.includes("@") ? email : "";
+}
+
+function modelFirstEmail(...values) {
+  for (const value of values) {
+    const email = modelEmail(value);
+    if (email) return email;
+  }
+
+  return "";
+}
+
+function modelHash(value = "") {
+  const text = modelText(value, "onion");
+  let hash = 2166136261;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash +=
+      (hash << 1) +
+      (hash << 4) +
+      (hash << 7) +
+      (hash << 8) +
+      (hash << 24);
+  }
+
+  return Math.abs(hash >>> 0);
+}
+
+function getInitials(value = "") {
+  const text = modelText(
+    typeof value === "object"
+      ? modelFirst(
+          value.initials,
+          value.userInitials,
+          value.displayName,
+          value.fullName,
+          value.name,
+          value.nombre,
+          value.username,
+          value.userName,
+          value.email,
+          "US"
+        )
+      : value,
+    "US"
+  );
+
+  const parts = text.split(/\s+/).filter(Boolean);
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase() || "US";
+  }
+
+  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "US";
+}
+
+function getAvatarTheme(seed = "") {
+  const themes = [
+    "violet",
+    "emerald",
+    "blue",
+    "amber",
+    "rose",
+    "purple",
+    "cyan",
+    "orange",
+  ];
+
+  return themes[modelHash(seed) % themes.length] || "violet";
+}
+
+function getRoleLabel(value = "") {
+  const role = modelKey(value || "user");
+
+  if (["admin", "administrator", "administrador"].includes(role)) return "Admin";
+  if (["superadmin", "super_admin", "root"].includes(role)) return "Super admin";
+  if (role === "owner") return "Owner";
+  if (["support", "soporte"].includes(role)) return "Soporte";
+  if (["technician", "tecnico", "técnico"].includes(role)) return "Técnico";
+  if (["client", "cliente", "customer"].includes(role)) return "Cliente";
+
+  return "Usuario";
+}
+
+function getStatusLabel(value = "") {
+  const status = modelKey(value || "active");
+
+  if (["active", "activo", "activa", "enabled", "habilitado", "habilitada", "ok"].includes(status)) {
+    return "Activo";
+  }
+
+  if (["pending", "pendiente", "invited", "invitado", "invitada", "invite", "new"].includes(status)) {
+    return "Pendiente";
+  }
+
+  if (["blocked", "bloqueado", "bloqueada", "suspended", "locked", "restricted"].includes(status)) {
+    return "Bloqueado";
+  }
+
+  if (["disabled", "inactive", "inactivo", "inactiva", "archived"].includes(status)) {
+    return "Inactivo";
+  }
+
+  return modelText(value, "Activo");
+}
+
+function normalizeUsuarioModel(item = {}) {
+  const raw = modelObject(item);
+  const profile = modelObject(modelFirst(raw.profile, raw.usuario, raw.user, {}));
+  const address = modelObject(modelFirst(raw.address, raw.direccion, raw.location, raw.ubicacion, profile.address, profile.direccion, {}));
+
+  const firstName = modelText(modelFirst(raw.firstName, raw.nombre, profile.firstName, profile.nombre), "");
+  const lastName = modelText(modelFirst(raw.lastName, raw.apellidos, profile.lastName, profile.apellidos), "");
+  const composedName = [firstName, lastName].filter(Boolean).join(" ");
+
+  const email = modelFirstEmail(
+    raw.email,
+    raw.emailLower,
+    raw.mail,
+    raw.userEmail,
+    profile.email,
+    profile.emailLower,
+    profile.mail
+  );
+
+  const userId = modelText(
+    modelFirst(
+      raw.userId,
+      raw.usuarioId,
+      raw.id,
+      raw._id,
+      raw.uid,
+      raw.sub,
+      raw.code,
+      profile.userId,
+      profile.id,
+      profile.uid,
+      email,
+      raw.username,
+      raw.userName
+    ),
+    ""
+  );
+
+  const username = modelText(modelFirst(raw.username, raw.userName, raw.usernameLower, profile.username, profile.userName), "");
+  const name = modelText(
+    modelFirst(
+      raw.fullName,
+      raw.displayName,
+      raw.name,
+      raw.nombreCompleto,
+      composedName,
+      raw.nombre,
+      profile.fullName,
+      profile.displayName,
+      profile.name,
+      username,
+      email,
+      userId
+    ),
+    "Usuario"
+  );
+
+  const role = modelKey(modelFirst(raw.role, raw.rol, raw.accountRole, profile.role, profile.rol, "user")) || "user";
+  const explicitStatus = modelFirst(raw.status, raw.estado, raw.state, raw.accountStatus, raw.userStatus, profile.status);
+  let status = modelKey(explicitStatus || "");
+
+  if (!status) {
+    if (raw.blocked === true || profile.blocked === true) status = "blocked";
+    else if (raw.active === false || raw.isActive === false || raw.enabled === false || raw.disabled === true) status = "inactive";
+    else status = "active";
+  }
+
+  const phone = modelText(modelFirst(raw.phone, raw.telefono, raw.mobile, raw.movil, profile.phone, profile.telefono, profile.mobile), "");
+  const city = modelText(modelFirst(raw.city, raw.ciudad, raw.locationCity, address.city, address.ciudad, profile.city, profile.ciudad), "");
+  const avatar = modelText(modelFirst(raw.avatarUrl, raw.avatar, raw.photoUrl, raw.photoURL, raw.picture, raw.imageUrl, profile.avatarUrl, profile.avatar, profile.photoUrl, profile.picture), "");
+
+  const createdAt = modelFirst(raw.createdAt, raw.created_at, raw.fechaCreacion, raw.registeredAt, raw.created, raw.lifecycle?.createdAt, raw.audit?.createdAt, null);
+  const updatedAt = modelFirst(raw.updatedAt, raw.updated_at, raw.modifiedAt, raw.lastModifiedAt, raw.lastActivityAt, raw.lastLoginAt, raw.lastAccessAt, raw.ultimoAcceso, raw.lifecycle?.updatedAt, raw.audit?.updatedAt, createdAt, null);
+  const lastLoginAt = modelFirst(raw.lastLoginAt, raw.last_login_at, raw.lastAccessAt, raw.ultimoAcceso, raw.lastSeenAt, raw.session?.lastLoginAt, raw.session?.lastSeenAt, null);
+
+  return {
+    ...raw,
+
+    id: userId || email,
+    userId: userId || email,
+    usuarioId: userId || email,
+    uid: modelText(modelFirst(raw.uid, userId, email), userId || email),
+    code: modelText(modelFirst(raw.code, username, userId, email), userId || email),
+
+    fullName: name,
+    displayName: name,
+    name,
+    nombre: name,
+    firstName,
+    lastName,
+    apellidos: lastName,
+
+    email,
+    emailLower: email,
+    mail: email,
+
+    username,
+    userName: username,
+    usernameLower: username.toLowerCase(),
+
+    role,
+    rol: role,
+
+    status,
+    estado: status,
+    state: status,
+    active: status === "active",
+    isActive: status === "active",
+    enabled: status === "active",
+    blocked: status === "blocked",
+
+    phone,
+    telefono: phone,
+    mobile: modelText(modelFirst(raw.mobile, raw.movil, phone), phone),
+
+    city,
+    ciudad: city,
+    location: {
+      ...modelObject(raw.location),
+      city,
+      ciudad: city,
+    },
+    address: {
+      ...address,
+      city,
+      ciudad: city,
+    },
+
+    avatar,
+    avatarUrl: avatar,
+    photoUrl: modelText(modelFirst(raw.photoUrl, avatar), avatar),
+    picture: modelText(modelFirst(raw.picture, avatar), avatar),
+    hasAvatar: Boolean(avatar),
+
+    createdAt,
+    updatedAt,
+    lastLoginAt,
+    lastAccessAt: modelFirst(raw.lastAccessAt, raw.ultimoAcceso, lastLoginAt, null),
+    lastActivityAt: modelFirst(raw.lastActivityAt, updatedAt, lastLoginAt, createdAt, null),
+  };
+}
+
+
 
 /* =========================================================
    CONSTANTS

@@ -2,7 +2,7 @@
    Onion Support - Usuarios Template
    Archivo: /src/views/usuarios/usuarios.template.js
 
-   PRODUCTIVO · TEMPLATE PURO · LÓGICA FACTURAS · 10/10
+   PRODUCTIVO · TEMPLATE PURO · CSS 1:1 · SIN IMPORTS · 10/10 · V17
    STABLE DOM ISLANDS · NO CSS INJECTION · NO INLINE STYLES · CSP READY
    ALIGNED WITH VARIABLES.CSS + UI.CSS + /css/views/usuarios/index.css
 
@@ -36,8 +36,7 @@
    CONSTANTS
 ========================================================= */
 
-export const USUARIOS_TEMPLATE_VERSION =
-  "usuarios.template.css-1-1.v16.aligned-incidencias";
+export const USUARIOS_TEMPLATE_VERSION = "usuarios.template.productive.v17.css-1-1.no-model-import";
 
 export const USUARIOS_TABLE_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
 export const USUARIOS_VIEW_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;

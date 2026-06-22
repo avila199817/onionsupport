@@ -1,1355 +1,1149 @@
 /* =========================================================
-   Onion SPA - Server API
-   Archivo: src/views/server/server.api.js
+   Onion Support - Servidor API
+   Archivo: /src/views/server/server.api.js
 
-   FINAL PRO SYSTEM · API LAYER · SERVER SNAPSHOT FIRST · 12/10
+   PRODUCTIVO · OBSERVABILIDAD HTTP · SERVIDOR · 10/10
 
-   RESPONSABILIDADES:
-   - centralizar llamadas HTTP del módulo server
-   - cargar snapshot agregado de servidor
-   - resolver dashboard + health interno real
-   - evitar llamadas directas al root legacy /api/dashboard salvo fallback final
-   - medir latencia real dashboard + health
-   - hidratar store/state del módulo server
-   - normalizar payloads backend heterogéneos
-   - soportar adapters múltiples de request
-   - anti-race soft para server load
-   - soportar refresh forzado
-   - exponer health local opcional del módulo
-
-   HARDENING PRO:
-   - endpoint dashboard configurable
-   - fallback canónico antes que legacy
-   - legacy /api/dashboard solo como última opción
-   - Promise.allSettled semántico para evitar romper todo si falla health
-   - fallback AppCore.apiClient -> AppCore.request -> Http -> fetch
-   - persistencia coherente en state/store
-   - tolerancia a payloads heterogéneos
-   - no loading infinito
-   - no pisa snapshot útil con payload vacío accidental
+   Responsabilidad:
+   - Capa HTTP única para estado técnico del sistema.
+   - Backend/API.
+   - Base de datos.
+   - Blob Storage / Storage.
+   - Azure.
+   - Métricas CPU/RAM/Uptime/latencia.
+   - Cache en memoria + localStorage.
+   - Auto refresh opcional.
+   - Sin DOM.
+   - Sin Router.
+   - Sin Toast.
+   - Sin window.fetch.
+   - Sin imports a server.state.js / server.store.js / server.model.js.
 ========================================================= */
 
-import { AppCore } from "../../core/index.js";
-
-import {
-  serverState,
-  setLoading,
-  setRefreshing,
-  setError,
-  setLoaded,
-  setHydrated,
-  setDashboardPayload,
-  setHealthPayload,
-  setDashboardLatencyMs,
-  setHealthLatencyMs,
-  setBrowserMetrics,
-  setEnvironmentMetrics,
-  setTelemetry,
-  setHistory,
-  setAutoRefresh,
-  setLastSyncAt,
-  setRequestId,
-} from "./server.state.js";
-
-import {
-  replaceServerStore,
-} from "./server.store.js";
-
-import {
-  createServerHistoryState,
-  buildServerSnapshot,
-  extractServerTelemetry,
-} from "./server.actions.js";
+import Http from "../../core/http.js";
 
 /* =========================================================
-   CONFIG
+   META / CONFIG
 ========================================================= */
 
-const SERVER_TIMEOUT = 20000;
+export const SERVER_API_VERSION =
+  "server.api.productive.v1.observability.http-single";
 
-const SERVER_HEALTH_ENDPOINT = "/health/internal";
+export const SERVIDOR_API_VERSION = SERVER_API_VERSION;
 
-/*
-  IMPORTANTE:
-  - /api/dashboard es el endpoint legacy que te está generando:
-    ⚠️ DASHBOARD ROOT LEGACY HIT
-  - Este módulo intenta primero endpoints canónicos/configurables.
-  - Si tu backend tiene otro endpoint real, configúralo en AppCore.config:
-      AppCore.config.endpoints.serverDashboard = "/api/dashboard/snapshot"
-    o:
-      AppCore.config.serverDashboardEndpoint = "/api/dashboard/snapshot"
-*/
-const SERVER_DASHBOARD_CANONICAL_ENDPOINTS = Object.freeze([
-  "/api/dashboard/snapshot",
-  "/api/dashboard/server",
-  "/api/dashboard/overview",
-  "/api/dashboard/stats",
-]);
+export const SERVER_REQUEST_TIMEOUT_MS = 12000;
+export const SERVER_CACHE_KEY = "onion.support.server.status.cache.v1";
+export const SERVER_CACHE_TTL_MS = 30000;
+export const SERVER_AUTO_REFRESH_DEFAULT_MS = 30000;
 
-const SERVER_DASHBOARD_LEGACY_ENDPOINT = "/api/dashboard";
+export const SERVER_ENDPOINT_GROUPS = Object.freeze({
+  overview: Object.freeze([
+    "/api/server/status",
+    "/api/server/health",
+    "/api/status",
+    "/api/health",
+    "/health",
+  ]),
 
-let lastLoadToken = 0;
+  metrics: Object.freeze([
+    "/api/server/metrics",
+    "/api/status/metrics",
+    "/api/system/metrics",
+    "/api/metrics",
+  ]),
+
+  database: Object.freeze([
+    "/api/server/database",
+    "/api/server/db",
+    "/api/database/health",
+    "/api/db/health",
+    "/api/health/db",
+  ]),
+
+  blobs: Object.freeze([
+    "/api/server/blobs",
+    "/api/server/storage",
+    "/api/blobs/health",
+    "/api/storage/health",
+    "/api/azure/blob/health",
+  ]),
+
+  azure: Object.freeze([
+    "/api/server/azure",
+    "/api/azure/status",
+    "/api/azure/health",
+  ]),
+});
+
+const autoRefreshRegistry = new Map();
+
+const serverState = {
+  snapshot: null,
+  loading: false,
+  refreshing: false,
+  loaded: false,
+  hydrated: false,
+  error: "",
+  lastSyncAt: 0,
+  inflight: null,
+};
 
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function nowMs() {
-  try {
-    if (
-      typeof performance !== "undefined" &&
-      typeof performance.now === "function"
-    ) {
-      return performance.now();
-    }
-  } catch {}
-
-  return Date.now();
+function isFunction(value) {
+  return typeof value === "function";
 }
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-
-  const text = String(value).trim();
-
-  return text || fallback;
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
 }
 
 function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  if (Array.isArray(value)) return value;
+
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof value.length === "number" &&
+    typeof value !== "string"
+  ) {
+    try {
+      return Array.from(value);
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 }
 
-function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
-}
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-function isMeaningfulValue(value) {
-  if (value === undefined || value === null) return false;
-  if (typeof value === "string" && value.trim() === "") return false;
-  if (Array.isArray(value) && value.length === 0) return false;
-
-  return true;
+  return output || fallback;
 }
 
 function first(...values) {
   for (const value of values) {
-    if (!isMeaningfulValue(value)) continue;
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
+
     return value;
   }
 
   return null;
 }
 
-function unique(values = []) {
-  const seen = new Set();
-  const out = [];
+function number(value = 0, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
 
-  for (const value of values) {
-    const text = safeText(value, "");
-
-    if (!text || seen.has(text)) continue;
-
-    seen.add(text);
-    out.push(text);
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : fallback;
   }
 
-  return out;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function normalizeLatency(startedAt = 0, finishedAt = 0) {
-  const latency = Number(finishedAt) - Number(startedAt);
-
-  if (!Number.isFinite(latency) || latency < 0) {
-    return null;
-  }
-
-  return Math.round((latency + Number.EPSILON) * 100) / 100;
+function clamp(value = 0, min = 0, max = 1) {
+  return Math.min(Math.max(number(value, min), min), max);
 }
 
-/* =========================================================
-   TOKEN / RACE
-========================================================= */
-
-function nextLoadToken() {
-  lastLoadToken += 1;
-  return lastLoadToken;
+function normalizeKey(value = "") {
+  return cleanText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w:.]/g, "")
+    .replace(/^_+|_+$/g, "");
 }
 
-function isActiveLoadToken(token) {
-  return token === lastLoadToken;
-}
-
-/* =========================================================
-   URL / AUTH HELPERS
-========================================================= */
-
-function getApiBase() {
-  const apiBase = safeText(
-    first(
-      AppCore?.config?.apiBase,
-      AppCore?.config?.apiBaseUrl,
-      AppCore?.config?.baseApiUrl,
-      AppCore?.config?.baseUrl,
-      AppCore?.state?.apiBase,
-      AppCore?.state?.apiBaseUrl,
-      isBrowser() ? window.ONION_API_BASE_URL : "",
-      isBrowser() ? window.ONION_API_BASE : "",
-      isBrowser() ? window.API_BASE_URL : ""
-    ),
-    ""
-  );
-
-  return apiBase.replace(/\/+$/, "");
-}
-
-function buildAbsoluteUrl(path = "") {
-  const cleanPath = safeText(path, "");
-
-  if (!cleanPath) {
-    return getApiBase();
-  }
-
-  if (/^https?:\/\//i.test(cleanPath)) {
-    return cleanPath;
-  }
-
-  const base = getApiBase();
-
-  if (!base) {
-    return cleanPath;
-  }
-
-  return `${base}${cleanPath.startsWith("/") ? "" : "/"}${cleanPath}`;
-}
-
-function storageGet(key = "") {
-  if (!isBrowser()) {
-    return "";
-  }
-
-  try {
-    return localStorage.getItem(key) || "";
-  } catch {}
-
-  try {
-    return sessionStorage.getItem(key) || "";
-  } catch {}
-
-  return "";
-}
-
-function getAuthToken() {
-  return safeText(
-    first(
-      AppCore?.state?.token,
-      AppCore?.state?.accessToken,
-      AppCore?.state?.session?.token,
-      AppCore?.state?.session?.accessToken,
-      AppCore?.auth?.getToken?.(),
-      AppCore?.Auth?.getToken?.(),
-      AppCore?.modules?.Auth?.getToken?.(),
-      storageGet("onion_token"),
-      storageGet("onion_access_token"),
-      storageGet("accessToken"),
-      storageGet("access_token"),
-      storageGet("token")
-    ),
-    ""
-  );
-}
-
-function getRequestHeaders(extraHeaders = {}) {
-  const token = getAuthToken();
-
-  return {
-    Accept: "application/json",
-
-    ...(token
-      ? {
-          Authorization: `Bearer ${token}`,
-        }
-      : {}),
-
-    ...safeObject(extraHeaders),
-  };
-}
-
-function getApiClient() {
-  return (
-    AppCore?.apiClient ||
-    AppCore?.api ||
-    AppCore?.modules?.ApiClient ||
-    null
-  );
-}
-
-function getHttpModule() {
-  return (
-    AppCore?.modules?.Http ||
-    AppCore?.Http ||
-    window?.Http ||
-    null
-  );
-}
-
-/* =========================================================
-   ENDPOINT RESOLUTION
-========================================================= */
-
-function getConfiguredDashboardEndpoints() {
-  const endpoints = AppCore?.config?.endpoints || {};
-
-  return unique([
-    endpoints.serverDashboard,
-    endpoints.serverSnapshot,
-    endpoints.dashboardSnapshot,
-    endpoints.dashboardServer,
-    endpoints.dashboardOverview,
-    AppCore?.config?.serverDashboardEndpoint,
-    AppCore?.config?.serverSnapshotEndpoint,
-    AppCore?.config?.dashboardSnapshotEndpoint,
-    isBrowser() ? window.ONION_SERVER_DASHBOARD_ENDPOINT : "",
-    isBrowser() ? window.ONION_DASHBOARD_SNAPSHOT_ENDPOINT : "",
-  ]);
-}
-
-function getDashboardEndpointCandidates() {
-  return unique([
-    ...getConfiguredDashboardEndpoints(),
-    ...SERVER_DASHBOARD_CANONICAL_ENDPOINTS,
-    SERVER_DASHBOARD_LEGACY_ENDPOINT,
-  ]);
-}
-
-function isLegacyDashboardEndpoint(endpoint = "") {
-  return safeText(endpoint, "") === SERVER_DASHBOARD_LEGACY_ENDPOINT;
-}
-
-/* =========================================================
-   ERROR NORMALIZATION
-========================================================= */
-
-function normalizeErrorMessage(
-  error = null,
-  fallback = "Error cargando panel de servidor."
-) {
-  const message = safeText(
+function safeError(error = null, fallback = "No se pudo consultar el estado del servidor.") {
+  return cleanText(
     first(
       error?.message,
-      error?.response?.message,
-      error?.response?.data?.message,
-      error?.response?.error,
       error?.data?.message,
-      error?.data?.error,
+      error?.payload?.message,
+      error?.response?.data?.message,
+      error?.response?.message,
       error?.error,
-      error?.raw,
+      error?.code,
       fallback
     ),
     fallback
   );
-
-  const status = Number(
-    first(
-      error?.status,
-      error?.statusCode,
-      error?.response?.status,
-      error?.response?.statusCode,
-      error?.response?.data?.status,
-      error?.data?.status
-    )
-  );
-
-  const errorCode = safeText(
-    first(
-      error?.code,
-      error?.response?.error,
-      error?.response?.data?.error,
-      error?.data?.error,
-      error?.error
-    ),
-    ""
-  );
-
-  if (status === 401 || errorCode === "UNAUTHORIZED") {
-    return "No autorizado. Inicia sesión de nuevo.";
-  }
-
-  if (status === 403 || errorCode === "FORBIDDEN") {
-    return "No tienes permisos para acceder al panel de servidor.";
-  }
-
-  if (status === 404) {
-    return "El endpoint de servidor no está disponible.";
-  }
-
-  if (errorCode === "HEALTH_ERROR") {
-    return "El health interno devolvió un error.";
-  }
-
-  if (error?.name === "AbortError") {
-    return "La petición al panel de servidor ha superado el tiempo máximo.";
-  }
-
-  return message;
 }
 
-function createEndpointError({
-  endpoint = "",
-  error = null,
-  domain = "server",
-} = {}) {
-  const normalized = new Error(
-    normalizeErrorMessage(
-      error,
-      `No se pudo cargar ${domain}.`
-    )
-  );
-
-  normalized.endpoint = endpoint;
-  normalized.domain = domain;
-  normalized.originalError = error;
-  normalized.status = error?.status || error?.statusCode || error?.response?.status || null;
-  normalized.code = error?.code || error?.error || error?.response?.error || null;
-
-  return normalized;
-}
-
-function createSyntheticErrorPayload({
-  domain = "server",
-  endpoint = "",
-  error = null,
-} = {}) {
-  return {
-    ok: false,
-    status: "error",
-    error: error?.code || error?.error || `${String(domain).toUpperCase()}_LOAD_FAILED`,
-    message: normalizeErrorMessage(error, `No se pudo cargar ${domain}.`),
-    endpoint,
-    timestamp: new Date().toISOString(),
-  };
-}
-
-/* =========================================================
-   RESPONSE NORMALIZATION
-========================================================= */
-
-function looksLikeDashboard(value = null) {
-  const obj = safeObject(value);
-
-  return Boolean(
-    obj.meta ||
-      obj.resumen ||
-      obj.summary ||
-      obj.stats ||
-      obj.metrics ||
-      obj.charts ||
-      obj.widgets ||
-      obj.items ||
-      obj.tickets ||
-      obj.facturas ||
-      obj.usuarios ||
-      obj.clientes ||
-      obj.totalFacturas !== undefined ||
-      obj.ticketsActivos !== undefined ||
-      obj.totalClientes !== undefined ||
-      obj.totalUsuarios !== undefined
-  );
-}
-
-function looksLikeHealth(value = null) {
-  const obj = safeObject(value);
-
-  return Boolean(
-    typeof obj.ok === "boolean" ||
-      obj.status ||
-      obj.timestamp ||
-      obj.api ||
-      obj.db ||
-      obj.database ||
-      obj.cosmos ||
-      obj.system ||
-      obj.server ||
-      obj.runtime ||
-      obj.environment ||
-      obj.health
-  );
-}
-
-function unwrapResponseEnvelope(payload = null) {
-  if (payload === null || payload === undefined) {
-    return null;
-  }
-
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  const obj = safeObject(payload);
-
-  if (!Object.keys(obj).length) {
-    return payload;
-  }
-
-  if (obj.dashboard) return unwrapResponseEnvelope(obj.dashboard);
-  if (obj.health) return unwrapResponseEnvelope(obj.health);
-  if (obj.snapshot) return unwrapResponseEnvelope(obj.snapshot);
-  if (obj.payload) return unwrapResponseEnvelope(obj.payload);
-  if (obj.result) return unwrapResponseEnvelope(obj.result);
-  if (obj.response) return unwrapResponseEnvelope(obj.response);
-  if (obj.data) return unwrapResponseEnvelope(obj.data);
-
-  return obj;
-}
-
-function pickDashboard(payload = null) {
-  if (!payload) {
-    return null;
-  }
-
-  if (looksLikeDashboard(payload)) {
-    return payload;
-  }
-
-  const obj = safeObject(payload);
-
-  const candidates = [
-    obj.dashboard,
-    obj.snapshot?.dashboard,
-    obj.server?.dashboard,
-    obj.data,
-    obj.result,
-    obj.payload,
-    obj.response,
-  ];
-
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-
-    if (looksLikeDashboard(candidate)) {
-      return candidate;
-    }
-
-    const nested = pickDashboard(candidate);
-
-    if (nested) {
-      return nested;
-    }
-  }
-
-  return Object.keys(obj).length ? obj : null;
-}
-
-function pickHealth(payload = null) {
-  if (!payload) {
-    return null;
-  }
-
-  if (looksLikeHealth(payload)) {
-    return payload;
-  }
-
-  const obj = safeObject(payload);
-
-  const candidates = [
-    obj.health,
-    obj.snapshot?.health,
-    obj.server?.health,
-    obj.data,
-    obj.result,
-    obj.payload,
-    obj.response,
-  ];
-
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-
-    if (looksLikeHealth(candidate)) {
-      return candidate;
-    }
-
-    const nested = pickHealth(candidate);
-
-    if (nested) {
-      return nested;
-    }
-  }
-
-  return Object.keys(obj).length ? obj : null;
-}
-
-function getRequestIdFromPayload(payload = null) {
-  const obj = safeObject(payload);
-
-  return safeText(
-    first(
-      obj.requestId,
-      obj.correlationId,
-      obj.traceId,
-      obj.data?.requestId,
-      obj.data?.correlationId,
-      obj.payload?.requestId,
-      obj.payload?.correlationId,
-      obj.response?.requestId,
-      obj.meta?.requestId,
-      obj.meta?.correlationId
-    ),
-    ""
-  );
-}
-
-function normalizeDashboardPayload(payload = null) {
-  const value = pickDashboard(unwrapResponseEnvelope(payload));
-  return safeObject(value);
-}
-
-function normalizeHealthPayload(payload = null) {
-  const value = pickHealth(unwrapResponseEnvelope(payload));
-  return safeObject(value);
-}
-
-/* =========================================================
-   REQUEST ADAPTERS
-========================================================= */
-
-async function requestViaApiClient(method = "GET", path = "", options = {}) {
-  const client = getApiClient();
-
-  if (!client) {
-    throw new Error("SERVER_API_CLIENT_UNAVAILABLE");
-  }
-
-  const verb = safeText(method, "GET").toLowerCase();
-  const timeout = safeNumber(options.timeout, SERVER_TIMEOUT);
-
-  if (verb === "get" && typeof client.get === "function") {
-    return client.get(path, {
-      timeout,
-      auth: true,
-      headers: options.headers,
-      params: options.params,
-    });
-  }
-
-  if (verb === "post" && typeof client.post === "function") {
-    return client.post(path, options.body, {
-      timeout,
-      auth: true,
-      headers: options.headers,
-      params: options.params,
-    });
-  }
-
-  if (typeof client.request === "function") {
-    return client.request(path, {
-      method: method.toUpperCase(),
-      timeout,
-      auth: true,
-      headers: options.headers,
-      params: options.params,
-      body: options.body,
-    });
-  }
-
-  throw new Error("SERVER_API_CLIENT_METHOD_UNAVAILABLE");
-}
-
-async function requestViaAppCoreRequest(method = "GET", path = "", options = {}) {
-  if (typeof AppCore?.request !== "function") {
-    throw new Error("APP_CORE_REQUEST_UNAVAILABLE");
-  }
-
-  return AppCore.request(path, {
-    method: method.toUpperCase(),
-    headers: options.headers,
-    params: options.params,
-    timeout: options.timeout,
-    body:
-      options.body && typeof options.body !== "string"
-        ? JSON.stringify(options.body)
-        : options.body,
-  });
-}
-
-async function requestViaHttpModule(method = "GET", path = "", options = {}) {
-  const Http = getHttpModule();
-
-  if (!Http) {
-    throw new Error("HTTP_MODULE_UNAVAILABLE");
-  }
-
-  const verb = safeText(method, "GET").toLowerCase();
-
-  if (verb === "get" && typeof Http.get === "function") {
-    return Http.get(path, {
-      headers: options.headers,
-      params: options.params,
-      timeout: options.timeout,
-    });
-  }
-
-  if (verb === "post" && typeof Http.post === "function") {
-    return Http.post(path, options.body, {
-      headers: options.headers,
-      params: options.params,
-      timeout: options.timeout,
-    });
-  }
-
-  if (typeof Http.request === "function") {
-    return Http.request(path, {
-      method: method.toUpperCase(),
-      headers: options.headers,
-      params: options.params,
-      timeout: options.timeout,
-      body: options.body,
-    });
-  }
-
-  throw new Error("HTTP_MODULE_METHOD_UNAVAILABLE");
-}
-
-async function requestViaFetch(method = "GET", path = "", options = {}) {
-  const url = buildAbsoluteUrl(path);
-  const controller = new AbortController();
-  const timeout = safeNumber(options.timeout, SERVER_TIMEOUT);
-
-  const timeoutId = setTimeout(() => {
-    try {
-      controller.abort();
-    } catch {}
-  }, timeout);
-
+function nowIso() {
   try {
-    const hasBody = options.body !== undefined && options.body !== null;
-
-    const response = await fetch(url, {
-      method: method.toUpperCase(),
-      headers: options.headers,
-      body: hasBody ? JSON.stringify(options.body) : undefined,
-      signal: controller.signal,
-      cache: "no-store",
-    });
-
-    const text = await response.text();
-
-    let data = null;
-
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = { raw: text };
-    }
-
-    if (!response.ok) {
-      const error = new Error(
-        normalizeErrorMessage(
-          {
-            ...safeObject(data),
-            status: response.status,
-          },
-          `HTTP ${response.status} en ${method.toUpperCase()} ${path}`
-        )
-      );
-
-      error.response = data;
-      error.status = response.status;
-      error.statusCode = response.status;
-      error.endpoint = path;
-
-      throw error;
-    }
-
-    return data;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function request(method = "GET", path = "", options = {}) {
-  const hasBody = options.body !== undefined && options.body !== null;
-
-  const requestOptions = {
-    timeout: safeNumber(options.timeout, SERVER_TIMEOUT),
-    params: options.params,
-    body: options.body,
-    headers: getRequestHeaders({
-      ...(hasBody
-        ? {
-            "Content-Type": "application/json",
-          }
-        : {}),
-      ...safeObject(options.headers),
-    }),
-  };
-
-  const adapters = [
-    requestViaApiClient,
-    requestViaAppCoreRequest,
-    requestViaHttpModule,
-    requestViaFetch,
-  ];
-
-  let lastError = null;
-
-  for (const adapter of adapters) {
-    try {
-      return await adapter(method, path, requestOptions);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError || new Error("SERVER_REQUEST_FAILED");
-}
-
-/* =========================================================
-   ENDPOINT FALLBACK REQUESTS
-========================================================= */
-
-async function requestFirstAvailableEndpoint({
-  method = "GET",
-  endpoints = [],
-  options = {},
-  domain = "server",
-} = {}) {
-  const candidates = unique(endpoints);
-
-  if (!candidates.length) {
-    throw new Error("SERVER_ENDPOINT_CANDIDATES_EMPTY");
-  }
-
-  let lastError = null;
-
-  for (const endpoint of candidates) {
-    try {
-      const response = await request(method, endpoint, options);
-
-      return {
-        endpoint,
-        response,
-        legacy: isLegacyDashboardEndpoint(endpoint),
-      };
-    } catch (error) {
-      lastError = createEndpointError({
-        endpoint,
-        error,
-        domain,
-      });
-    }
-  }
-
-  throw lastError || new Error("SERVER_ENDPOINTS_FAILED");
-}
-
-async function timedRequest(label = "request", fn) {
-  const startedAt = nowMs();
-
-  try {
-    const result = await fn();
-    const finishedAt = nowMs();
-
-    return {
-      ok: true,
-      label,
-      startedAt,
-      finishedAt,
-      latencyMs: normalizeLatency(startedAt, finishedAt),
-      ...safeObject(result),
-    };
-  } catch (error) {
-    const finishedAt = nowMs();
-
-    return {
-      ok: false,
-      label,
-      startedAt,
-      finishedAt,
-      latencyMs: normalizeLatency(startedAt, finishedAt),
-      error,
-    };
-  }
-}
-
-/* =========================================================
-   RAW REQUESTS
-========================================================= */
-
-export async function fetchServerDashboardRequest() {
-  const result = await requestFirstAvailableEndpoint({
-    method: "GET",
-    endpoints: getDashboardEndpointCandidates(),
-    options: {
-      timeout: SERVER_TIMEOUT,
-    },
-    domain: "dashboard",
-  });
-
-  return result.response;
-}
-
-export async function fetchServerDashboardWithMetaRequest() {
-  return requestFirstAvailableEndpoint({
-    method: "GET",
-    endpoints: getDashboardEndpointCandidates(),
-    options: {
-      timeout: SERVER_TIMEOUT,
-    },
-    domain: "dashboard",
-  });
-}
-
-export async function fetchServerHealthRequest() {
-  return request("GET", SERVER_HEALTH_ENDPOINT, {
-    timeout: SERVER_TIMEOUT,
-  });
-}
-
-export async function getServerDashboardRequest() {
-  const response = await fetchServerDashboardRequest();
-  return normalizeDashboardPayload(response);
-}
-
-export async function getServerHealthRequest() {
-  const response = await fetchServerHealthRequest();
-  return normalizeHealthPayload(response);
-}
-
-export async function getServerSnapshotRequest({
-  history = null,
-} = {}) {
-  const dashboardTask = timedRequest("dashboard", () => {
-    return fetchServerDashboardWithMetaRequest();
-  });
-
-  const healthTask = timedRequest("health", async () => {
-    const response = await fetchServerHealthRequest();
-
-    return {
-      endpoint: SERVER_HEALTH_ENDPOINT,
-      response,
-      legacy: false,
-    };
-  });
-
-  const [dashboardResult, healthResult] = await Promise.all([
-    dashboardTask,
-    healthTask,
-  ]);
-
-  if (!dashboardResult.ok && !healthResult.ok) {
-    throw dashboardResult.error || healthResult.error || new Error("SERVER_SNAPSHOT_FAILED");
-  }
-
-  const dashboardPayload = dashboardResult.ok
-    ? normalizeDashboardPayload(dashboardResult.response)
-    : createSyntheticErrorPayload({
-        domain: "dashboard",
-        endpoint: dashboardResult.endpoint || "",
-        error: dashboardResult.error,
-      });
-
-  const healthPayload = healthResult.ok
-    ? normalizeHealthPayload(healthResult.response)
-    : createSyntheticErrorPayload({
-        domain: "health",
-        endpoint: SERVER_HEALTH_ENDPOINT,
-        error: healthResult.error,
-      });
-
-  return buildServerSnapshot({
-    dashboardPayload,
-    healthPayload,
-    dashboardLatencyMs: dashboardResult.latencyMs,
-    healthLatencyMs: healthResult.latencyMs,
-    history: history || createServerHistoryState(),
-  });
-}
-
-/* =========================================================
-   CACHE HYDRATE
-========================================================= */
-
-export function hydrateServerFromCache() {
-  try {
-    const dashboardPayload = safeObject(serverState?.dashboardPayload);
-    const healthPayload = safeObject(serverState?.healthPayload);
-    const browserMetrics = safeObject(serverState?.browserMetrics);
-    const environmentMetrics = safeObject(serverState?.environmentMetrics);
-    const telemetry = safeObject(serverState?.telemetry);
-
-    const history = Object.keys(safeObject(serverState?.history)).length
-      ? safeObject(serverState.history)
-      : createServerHistoryState();
-
-    if (
-      Object.keys(dashboardPayload).length ||
-      Object.keys(healthPayload).length ||
-      Object.keys(telemetry).length
-    ) {
-      replaceServerStore({
-        dashboardPayload,
-        healthPayload,
-        dashboardLatencyMs: serverState?.dashboardLatencyMs ?? null,
-        healthLatencyMs: serverState?.healthLatencyMs ?? null,
-        browserMetrics,
-        environmentMetrics,
-        telemetry,
-        history,
-        requestId: safeText(serverState?.requestId, ""),
-        lastSyncAt: first(serverState?.lastSyncAt, null),
-        autoRefresh:
-          typeof serverState?.autoRefresh === "boolean"
-            ? serverState.autoRefresh
-            : true,
-      });
-
-      setHydrated?.(true);
-    }
-
-    return {
-      dashboardPayload,
-      healthPayload,
-      dashboardLatencyMs: serverState?.dashboardLatencyMs ?? null,
-      healthLatencyMs: serverState?.healthLatencyMs ?? null,
-      browserMetrics,
-      environmentMetrics,
-      telemetry,
-      history,
-    };
+    return new Date().toISOString();
   } catch {
-    return {
-      dashboardPayload: {},
-      healthPayload: {},
-      dashboardLatencyMs: null,
-      healthLatencyMs: null,
-      browserMetrics: {},
-      environmentMetrics: {},
-      telemetry: {},
-      history: createServerHistoryState(),
-    };
+    return "";
   }
 }
 
-/* =========================================================
-   STATE / STORE SYNC
-========================================================= */
-
-function syncServerSnapshotToState({
-  snapshot = {},
-  requestId = "",
-  lastSyncAt = Date.now(),
-} = {}) {
-  const normalizedSnapshot = safeObject(snapshot);
-
-  replaceServerStore({
-    dashboardPayload: safeObject(normalizedSnapshot.dashboardPayload),
-    healthPayload: safeObject(normalizedSnapshot.healthPayload),
-    dashboardLatencyMs: normalizedSnapshot.dashboardLatencyMs ?? null,
-    healthLatencyMs: normalizedSnapshot.healthLatencyMs ?? null,
-    browserMetrics: safeObject(normalizedSnapshot.browserMetrics),
-    environmentMetrics: safeObject(normalizedSnapshot.environmentMetrics),
-    telemetry: safeObject(normalizedSnapshot.telemetry),
-    history: Object.keys(safeObject(normalizedSnapshot.history)).length
-      ? safeObject(normalizedSnapshot.history)
-      : createServerHistoryState(),
-    requestId: safeText(requestId, ""),
-    lastSyncAt,
-    autoRefresh:
-      typeof serverState?.autoRefresh === "boolean"
-        ? serverState.autoRefresh
-        : true,
-  });
-
-  setDashboardPayload?.(safeObject(normalizedSnapshot.dashboardPayload));
-  setHealthPayload?.(safeObject(normalizedSnapshot.healthPayload));
-  setDashboardLatencyMs?.(normalizedSnapshot.dashboardLatencyMs ?? null);
-  setHealthLatencyMs?.(normalizedSnapshot.healthLatencyMs ?? null);
-  setBrowserMetrics?.(safeObject(normalizedSnapshot.browserMetrics));
-  setEnvironmentMetrics?.(safeObject(normalizedSnapshot.environmentMetrics));
-  setTelemetry?.(safeObject(normalizedSnapshot.telemetry));
-  setHistory?.(
-    Object.keys(safeObject(normalizedSnapshot.history)).length
-      ? safeObject(normalizedSnapshot.history)
-      : createServerHistoryState()
-  );
-  setRequestId?.(safeText(requestId, ""));
-  setLastSyncAt?.(lastSyncAt);
-  setLoaded?.(true);
-  setHydrated?.(true);
-  setError?.(null);
-
-  return normalizedSnapshot;
-}
-
-/* =========================================================
-   LOAD SERVER SNAPSHOT
-========================================================= */
-
-export async function loadServerSnapshot({
-  force = false,
-} = {}) {
-  const loadToken = nextLoadToken();
-
-  const hasHydratedData = Boolean(serverState?.hydrated);
-  const shouldShowLoading = !hasHydratedData && !force;
-
+function performanceNow() {
   try {
-    setError?.(null);
-
-    if (shouldShowLoading) {
-      setLoading?.(true);
-    } else {
-      setRefreshing?.(true);
+    if (typeof performance !== "undefined" && isFunction(performance.now)) {
+      return performance.now();
     }
-
-    const dashboardTask = timedRequest("dashboard", () => {
-      return fetchServerDashboardWithMetaRequest();
-    });
-
-    const healthTask = timedRequest("health", async () => {
-      const response = await fetchServerHealthRequest();
-
-      return {
-        endpoint: SERVER_HEALTH_ENDPOINT,
-        response,
-        legacy: false,
-      };
-    });
-
-    const [dashboardResult, healthResult] = await Promise.all([
-      dashboardTask,
-      healthTask,
-    ]);
-
-    if (!dashboardResult.ok && !healthResult.ok) {
-      throw dashboardResult.error || healthResult.error || new Error("SERVER_SNAPSHOT_FAILED");
-    }
-
-    const rawDashboardResponse = dashboardResult.ok
-      ? dashboardResult.response
-      : createSyntheticErrorPayload({
-          domain: "dashboard",
-          endpoint: dashboardResult.endpoint || "",
-          error: dashboardResult.error,
-        });
-
-    const rawHealthResponse = healthResult.ok
-      ? healthResult.response
-      : createSyntheticErrorPayload({
-          domain: "health",
-          endpoint: SERVER_HEALTH_ENDPOINT,
-          error: healthResult.error,
-        });
-
-    const dashboardPayload = normalizeDashboardPayload(rawDashboardResponse);
-    const healthPayload = normalizeHealthPayload(rawHealthResponse);
-
-    const history = Object.keys(safeObject(serverState?.history)).length
-      ? safeObject(serverState.history)
-      : createServerHistoryState();
-
-    const snapshot = buildServerSnapshot({
-      dashboardPayload,
-      healthPayload,
-      dashboardLatencyMs: dashboardResult.latencyMs,
-      healthLatencyMs: healthResult.latencyMs,
-      history,
-    });
-
-    const requestId = safeText(
-      first(
-        getRequestIdFromPayload(rawDashboardResponse),
-        getRequestIdFromPayload(rawHealthResponse)
-      ),
-      ""
-    );
-
-    if (!isActiveLoadToken(loadToken)) {
-      return safeObject(serverState);
-    }
-
-    const synced = syncServerSnapshotToState({
-      snapshot,
-      requestId,
-      lastSyncAt: Date.now(),
-    });
-
-    /*
-      Si dashboard o health fallan de forma parcial, mantenemos snapshot,
-      pero dejamos una señal de error suave para diagnóstico.
-    */
-    if (!dashboardResult.ok || !healthResult.ok) {
-      const partialError = normalizeErrorMessage(
-        dashboardResult.error || healthResult.error,
-        "Snapshot parcial: una fuente técnica no respondió."
-      );
-
-      setError?.(partialError);
-    }
-
-    return synced;
-  } catch (error) {
-    const message = normalizeErrorMessage(
-      error,
-      "No se pudo cargar el panel de servidor."
-    );
-
-    if (!isActiveLoadToken(loadToken)) {
-      return safeObject(serverState);
-    }
-
-    try {
-      console.error("❌ SERVER SNAPSHOT LOAD:", error);
-    } catch {}
-
-    setError?.(message);
-    setLoaded?.(true);
-
-    throw error;
-  } finally {
-    if (isActiveLoadToken(loadToken)) {
-      setLoading?.(false);
-      setRefreshing?.(false);
-    }
+  } catch {
+    // noop
   }
+
+  return Date.now();
+}
+
+function formatBytes(value = 0) {
+  const bytes = number(value, 0);
+
+  if (!bytes) return "—";
+
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let current = Math.abs(bytes);
+  let unit = 0;
+
+  while (current >= 1024 && unit < units.length - 1) {
+    current /= 1024;
+    unit += 1;
+  }
+
+  const sign = bytes < 0 ? "-" : "";
+  const decimals = unit <= 1 ? 0 : 1;
+
+  return `${sign}${current.toFixed(decimals)} ${units[unit]}`;
+}
+
+function formatPercent(value = null) {
+  if (value === null || value === undefined || value === "") return "—";
+
+  const numeric = number(value, NaN);
+  if (!Number.isFinite(numeric)) return "—";
+
+  const normalized = numeric <= 1 && numeric >= 0 ? numeric * 100 : numeric;
+
+  return `${clamp(normalized, 0, 999).toFixed(normalized >= 10 ? 0 : 1)}%`;
+}
+
+function formatMs(value = null) {
+  const numeric = number(value, NaN);
+  if (!Number.isFinite(numeric)) return "—";
+
+  return `${Math.max(0, Math.round(numeric))} ms`;
+}
+
+function formatDuration(seconds = 0) {
+  const value = Math.max(0, number(seconds, 0));
+
+  if (!value) return "—";
+
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes || 1}m`;
 }
 
 /* =========================================================
-   LOAD HEALTH ONLY
+   STORAGE / STATE
 ========================================================= */
 
-export async function loadServerHealth({
-  silent = true,
-} = {}) {
-  const startedAt = nowMs();
+function isStorageAvailable() {
+  return isBrowser() && Boolean(window.localStorage);
+}
+
+function readCachePayload() {
+  if (!isStorageAvailable()) return null;
 
   try {
-    const rawHealth = await fetchServerHealthRequest();
-    const finishedAt = nowMs();
+    const raw = window.localStorage.getItem(SERVER_CACHE_KEY);
+    if (!raw) return null;
 
-    const health = normalizeHealthPayload(rawHealth);
-    const healthLatencyMs = normalizeLatency(startedAt, finishedAt);
-
-    const currentDashboardPayload = safeObject(serverState?.dashboardPayload);
-    const currentDashboardLatencyMs = serverState?.dashboardLatencyMs ?? null;
-
-    const telemetry = extractServerTelemetry({
-      dashboardPayload: currentDashboardPayload,
-      healthPayload: health,
-      dashboardLatencyMs: currentDashboardLatencyMs,
-      healthLatencyMs,
-    });
-
-    setHealthPayload?.(health);
-    setHealthLatencyMs?.(healthLatencyMs);
-    setTelemetry?.(telemetry);
-    setLastSyncAt?.(Date.now());
-
-    replaceServerStore({
-      dashboardPayload: currentDashboardPayload,
-      healthPayload: health,
-      dashboardLatencyMs: currentDashboardLatencyMs,
-      healthLatencyMs,
-      browserMetrics: safeObject(serverState?.browserMetrics),
-      environmentMetrics: safeObject(serverState?.environmentMetrics),
-      telemetry,
-      history: Object.keys(safeObject(serverState?.history)).length
-        ? safeObject(serverState.history)
-        : createServerHistoryState(),
-      requestId: safeText(serverState?.requestId, ""),
-      lastSyncAt: Date.now(),
-      autoRefresh:
-        typeof serverState?.autoRefresh === "boolean"
-          ? serverState.autoRefresh
-          : true,
-    });
-
-    return health;
-  } catch (error) {
-    try {
-      console.error("❌ SERVER HEALTH LOAD:", error);
-    } catch {}
-
-    if (!silent) {
-      throw error;
-    }
-
+    const parsed = JSON.parse(raw);
+    return isObject(parsed) ? parsed : null;
+  } catch {
     return null;
   }
 }
 
+function writeCachePayload(snapshot = null) {
+  if (!isStorageAvailable() || !snapshot) return false;
+
+  try {
+    const payload = {
+      version: SERVER_API_VERSION,
+      snapshot,
+      cachedAt: Date.now(),
+      lastSyncAt: Date.now(),
+    };
+
+    window.localStorage.setItem(SERVER_CACHE_KEY, JSON.stringify(payload));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function hydrateServerFromCache({ freshOnly = true } = {}) {
+  const payload = readCachePayload();
+  if (!payload?.snapshot) return null;
+
+  const cachedAt = number(payload.cachedAt || payload.lastSyncAt, 0);
+  const age = cachedAt ? Date.now() - cachedAt : Number.POSITIVE_INFINITY;
+
+  if (freshOnly && age > SERVER_CACHE_TTL_MS) return null;
+
+  serverState.snapshot = payload.snapshot;
+  serverState.lastSyncAt = number(payload.lastSyncAt, cachedAt || Date.now());
+  serverState.loaded = true;
+  serverState.hydrated = true;
+  serverState.error = "";
+
+  return payload.snapshot;
+}
+
+export function clearServerCache() {
+  serverState.snapshot = null;
+  serverState.loaded = false;
+  serverState.hydrated = false;
+  serverState.error = "";
+  serverState.lastSyncAt = 0;
+
+  if (isStorageAvailable()) {
+    try {
+      window.localStorage.removeItem(SERVER_CACHE_KEY);
+    } catch {
+      // noop
+    }
+  }
+
+  return true;
+}
+
+function setLoading(value = false) {
+  serverState.loading = Boolean(value);
+  return serverState.loading;
+}
+
+function setRefreshing(value = false) {
+  serverState.refreshing = Boolean(value);
+  return serverState.refreshing;
+}
+
+function setError(value = "") {
+  serverState.error = cleanText(value, "");
+  return serverState.error;
+}
+
+function clearError() {
+  serverState.error = "";
+  return true;
+}
+
+function setSnapshot(snapshot = null) {
+  serverState.snapshot = snapshot;
+  serverState.loaded = Boolean(snapshot);
+  serverState.hydrated = Boolean(snapshot);
+  serverState.lastSyncAt = snapshot ? Date.now() : 0;
+
+  if (snapshot) {
+    writeCachePayload(snapshot);
+  }
+
+  return serverState.snapshot;
+}
+
 /* =========================================================
-   REFRESH
+   HTTP
 ========================================================= */
+
+async function httpGet(endpoint = "", options = {}) {
+  const path = cleanText(endpoint, "");
+
+  if (!path) {
+    throw new Error("SERVER_ENDPOINT_REQUIRED");
+  }
+
+  const startedAt = performanceNow();
+
+  let response;
+
+  if (isFunction(Http?.get)) {
+    response = await Http.get(path, {
+      timeout: number(options.timeout, SERVER_REQUEST_TIMEOUT_MS),
+      query: safeObject(options.query),
+      params: safeObject(options.params),
+      headers: safeObject(options.headers),
+      source: cleanText(options.source, "views.server.api"),
+    });
+  } else if (isFunction(Http?.request)) {
+    response = await Http.request(path, {
+      method: "GET",
+      timeout: number(options.timeout, SERVER_REQUEST_TIMEOUT_MS),
+      query: safeObject(options.query),
+      params: safeObject(options.params),
+      headers: safeObject(options.headers),
+      source: cleanText(options.source, "views.server.api"),
+    });
+  } else {
+    throw new Error("HTTP_CORE_UNAVAILABLE");
+  }
+
+  return {
+    endpoint: path,
+    latencyMs: Math.max(0, Math.round(performanceNow() - startedAt)),
+    response,
+  };
+}
+
+export async function probeServerEndpoint(endpoint = "", options = {}) {
+  return httpGet(endpoint, {
+    ...options,
+    source: cleanText(options.source, "views.server.api.probe"),
+  });
+}
+
+export async function probeEndpointGroup(group = "", endpoints = [], options = {}) {
+  const name = cleanText(group, "unknown");
+  const list = safeArray(endpoints);
+  const errors = [];
+
+  for (const endpoint of list) {
+    try {
+      const result = await httpGet(endpoint, {
+        ...options,
+        timeout: number(options.timeout, SERVER_REQUEST_TIMEOUT_MS),
+        source: `views.server.api.${name}`,
+      });
+
+      return {
+        group: name,
+        ok: true,
+        endpoint: result.endpoint,
+        latencyMs: result.latencyMs,
+        data: result.response,
+        error: "",
+        tried: list,
+      };
+    } catch (error) {
+      errors.push({
+        endpoint,
+        message: safeError(error),
+      });
+    }
+  }
+
+  return {
+    group: name,
+    ok: false,
+    endpoint: "",
+    latencyMs: null,
+    data: null,
+    error: errors.at(-1)?.message || `No hay endpoint disponible para ${name}.`,
+    tried: list,
+    errors,
+  };
+}
+
+/* =========================================================
+   NORMALIZATION
+========================================================= */
+
+function unwrapObject(payload = null, maxDepth = 8) {
+  let current = payload;
+  const seen = new Set();
+
+  for (let depth = 0; depth <= maxDepth; depth += 1) {
+    if (!isObject(current) || seen.has(current)) break;
+
+    seen.add(current);
+
+    const nested = first(
+      current.data,
+      current.payload,
+      current.result,
+      current.response,
+      current.body,
+      current.value
+    );
+
+    if (isObject(nested)) {
+      current = nested;
+      continue;
+    }
+
+    break;
+  }
+
+  return safeObject(current, {});
+}
+
+function pickDeep(object = {}, paths = []) {
+  for (const path of safeArray(paths)) {
+    const segments = String(path).split(".").filter(Boolean);
+    let current = object;
+
+    for (const segment of segments) {
+      if (!isObject(current) && !Array.isArray(current)) {
+        current = undefined;
+        break;
+      }
+
+      current = current?.[segment];
+    }
+
+    if (current !== undefined && current !== null && current !== "") {
+      return current;
+    }
+  }
+
+  return null;
+}
+
+function normalizeStatus(value = "") {
+  const key = normalizeKey(value);
+
+  if (
+    [
+      "ok",
+      "up",
+      "online",
+      "healthy",
+      "success",
+      "ready",
+      "running",
+      "connected",
+      "active",
+      "available",
+      "operational",
+    ].includes(key)
+  ) {
+    return "healthy";
+  }
+
+  if (
+    [
+      "warn",
+      "warning",
+      "degraded",
+      "partial",
+      "slow",
+      "limited",
+      "unstable",
+    ].includes(key)
+  ) {
+    return "warning";
+  }
+
+  if (
+    [
+      "error",
+      "fail",
+      "failed",
+      "down",
+      "offline",
+      "unhealthy",
+      "critical",
+      "disconnected",
+      "unavailable",
+      "ko",
+    ].includes(key)
+  ) {
+    return "critical";
+  }
+
+  if (!key) return "unknown";
+
+  return key;
+}
+
+function normalizeBooleanStatus(value = null, fallback = "unknown") {
+  if (value === true) return "healthy";
+  if (value === false) return "critical";
+
+  if (typeof value === "number") {
+    if (value === 1) return "healthy";
+    if (value === 0) return "critical";
+  }
+
+  if (typeof value === "string") {
+    return normalizeStatus(value);
+  }
+
+  return fallback;
+}
+
+function statusWeight(status = "") {
+  const value = normalizeStatus(status);
+
+  if (value === "critical") return 3;
+  if (value === "warning") return 2;
+  if (value === "unknown") return 1;
+  return 0;
+}
+
+function worstStatus(statuses = []) {
+  const list = safeArray(statuses).map(normalizeStatus);
+
+  if (!list.length) return "unknown";
+
+  return list.sort((a, b) => statusWeight(b) - statusWeight(a))[0] || "unknown";
+}
+
+function labelForStatus(status = "") {
+  const value = normalizeStatus(status);
+
+  if (value === "healthy") return "Operativo";
+  if (value === "warning") return "Degradado";
+  if (value === "critical") return "Crítico";
+  return "Desconocido";
+}
+
+function normalizeService({
+  id = "",
+  label = "",
+  status = "unknown",
+  latencyMs = null,
+  endpoint = "",
+  detail = "",
+  value = "",
+  raw = null,
+  error = "",
+} = {}) {
+  const normalizedStatus = normalizeStatus(status);
+
+  return {
+    id: normalizeKey(id || label || endpoint || "service"),
+    label: cleanText(label, "Servicio"),
+    status: normalizedStatus,
+    statusLabel: labelForStatus(normalizedStatus),
+    latencyMs: latencyMs === null || latencyMs === undefined ? null : number(latencyMs, null),
+    endpoint: cleanText(endpoint, ""),
+    detail: cleanText(detail, ""),
+    value: cleanText(value, ""),
+    error: cleanText(error, ""),
+    raw,
+  };
+}
+
+function getResult(results = [], group = "") {
+  return safeArray(results).find((item) => item.group === group) || null;
+}
+
+export function normalizeServerSnapshot(results = []) {
+  const overviewResult = getResult(results, "overview");
+  const metricsResult = getResult(results, "metrics");
+  const databaseResult = getResult(results, "database");
+  const blobsResult = getResult(results, "blobs");
+  const azureResult = getResult(results, "azure");
+
+  const overview = unwrapObject(overviewResult?.data);
+  const metrics = unwrapObject(metricsResult?.data);
+  const database = unwrapObject(first(databaseResult?.data, overview.database, overview.db, overview.mongo, overview.sql));
+  const blobs = unwrapObject(first(blobsResult?.data, overview.blobs, overview.storage, overview.azure?.blobs, overview.azure?.storage));
+  const azure = unwrapObject(first(azureResult?.data, overview.azure, overview.cloud));
+
+  const metricSource = {
+    ...safeObject(overview.metrics),
+    ...safeObject(overview.system),
+    ...safeObject(overview.resourceUsage),
+    ...metrics,
+  };
+
+  const backendStatus = normalizeBooleanStatus(
+    first(
+      overview.ok,
+      overview.healthy,
+      overview.status,
+      overview.health,
+      overview.ready,
+      overview.uptime ? true : null,
+      overviewResult?.ok
+    ),
+    overviewResult?.ok ? "healthy" : "critical"
+  );
+
+  const databaseStatus = normalizeBooleanStatus(
+    first(
+      database.ok,
+      database.connected,
+      database.healthy,
+      database.status,
+      database.health,
+      database.ready,
+      databaseResult?.ok
+    ),
+    databaseResult?.ok ? "healthy" : "unknown"
+  );
+
+  const blobsStatus = normalizeBooleanStatus(
+    first(
+      blobs.ok,
+      blobs.connected,
+      blobs.healthy,
+      blobs.status,
+      blobs.health,
+      blobs.ready,
+      blobsResult?.ok
+    ),
+    blobsResult?.ok ? "healthy" : "unknown"
+  );
+
+  const azureStatus = normalizeBooleanStatus(
+    first(
+      azure.ok,
+      azure.connected,
+      azure.healthy,
+      azure.status,
+      azure.health,
+      azure.ready,
+      azureResult?.ok
+    ),
+    azureResult?.ok ? "healthy" : "unknown"
+  );
+
+  const cpuUsage = first(
+    pickDeep(metricSource, ["cpu.usage", "cpu.percent", "cpu.usedPercent"]),
+    metricSource.cpuUsage,
+    metricSource.cpuPercent,
+    overview.cpuUsage,
+    overview.cpuPercent
+  );
+
+  const memoryUsage = first(
+    pickDeep(metricSource, ["memory.usage", "memory.percent", "memory.usedPercent"]),
+    metricSource.memoryUsage,
+    metricSource.memoryPercent,
+    metricSource.ramUsage,
+    metricSource.ramPercent,
+    overview.memoryUsage,
+    overview.memoryPercent,
+    overview.ramUsage,
+    overview.ramPercent
+  );
+
+  const memoryUsedBytes = first(
+    pickDeep(metricSource, ["memory.used", "memory.usedBytes"]),
+    metricSource.memoryUsed,
+    metricSource.memoryUsedBytes,
+    metricSource.ramUsed,
+    metricSource.ramUsedBytes
+  );
+
+  const memoryTotalBytes = first(
+    pickDeep(metricSource, ["memory.total", "memory.totalBytes"]),
+    metricSource.memoryTotal,
+    metricSource.memoryTotalBytes,
+    metricSource.ramTotal,
+    metricSource.ramTotalBytes
+  );
+
+  const uptimeSeconds = first(
+    overview.uptimeSeconds,
+    overview.uptime,
+    metricSource.uptimeSeconds,
+    metricSource.uptime,
+    pickDeep(metricSource, ["process.uptime", "system.uptime"])
+  );
+
+  const services = [
+    normalizeService({
+      id: "backend",
+      label: "Backend API",
+      status: backendStatus,
+      latencyMs: overviewResult?.latencyMs,
+      endpoint: overviewResult?.endpoint,
+      detail: overviewResult?.ok ? "API principal responde." : overviewResult?.error,
+      raw: overview,
+      error: overviewResult?.error,
+    }),
+
+    normalizeService({
+      id: "database",
+      label: "Base de datos",
+      status: databaseStatus,
+      latencyMs: first(database.latencyMs, database.pingMs, databaseResult?.latencyMs),
+      endpoint: databaseResult?.endpoint,
+      detail: first(database.message, database.detail, database.name, database.database, databaseResult?.error, "Estado de conexión de base de datos."),
+      raw: database,
+      error: databaseResult?.error,
+    }),
+
+    normalizeService({
+      id: "blobs",
+      label: "Blob Storage",
+      status: blobsStatus,
+      latencyMs: first(blobs.latencyMs, blobs.pingMs, blobsResult?.latencyMs),
+      endpoint: blobsResult?.endpoint,
+      detail: first(blobs.message, blobs.detail, blobs.container, blobs.accountName, blobsResult?.error, "Estado de almacenamiento de blobs."),
+      raw: blobs,
+      error: blobsResult?.error,
+    }),
+
+    normalizeService({
+      id: "azure",
+      label: "Azure",
+      status: azureStatus,
+      latencyMs: first(azure.latencyMs, azure.pingMs, azureResult?.latencyMs),
+      endpoint: azureResult?.endpoint,
+      detail: first(azure.message, azure.detail, azure.region, azure.resourceGroup, azureResult?.error, "Estado general de Azure."),
+      raw: azure,
+      error: azureResult?.error,
+    }),
+
+    normalizeService({
+      id: "cpu",
+      label: "CPU",
+      status:
+        cpuUsage === null || cpuUsage === undefined
+          ? "unknown"
+          : number(cpuUsage, 0) >= 90
+            ? "critical"
+            : number(cpuUsage, 0) >= 75
+              ? "warning"
+              : "healthy",
+      value: formatPercent(cpuUsage),
+      detail: "Uso actual de CPU reportado por backend.",
+      raw: cpuUsage,
+    }),
+
+    normalizeService({
+      id: "memory",
+      label: "RAM",
+      status:
+        memoryUsage === null || memoryUsage === undefined
+          ? "unknown"
+          : number(memoryUsage, 0) >= 90
+            ? "critical"
+            : number(memoryUsage, 0) >= 78
+              ? "warning"
+              : "healthy",
+      value: formatPercent(memoryUsage),
+      detail:
+        memoryUsedBytes || memoryTotalBytes
+          ? `${formatBytes(memoryUsedBytes)} / ${formatBytes(memoryTotalBytes)}`
+          : "Uso actual de memoria reportado por backend.",
+      raw: {
+        memoryUsage,
+        memoryUsedBytes,
+        memoryTotalBytes,
+      },
+    }),
+  ];
+
+  const overallStatus = worstStatus(services.map((service) => service.status));
+
+  return {
+    version: SERVER_API_VERSION,
+    status: overallStatus,
+    statusLabel: labelForStatus(overallStatus),
+    ok: overallStatus === "healthy" || overallStatus === "warning",
+    checkedAt: nowIso(),
+
+    uptimeSeconds: number(uptimeSeconds, 0),
+    uptimeLabel: formatDuration(uptimeSeconds),
+
+    latencyMs: overviewResult?.latencyMs ?? null,
+    latencyLabel: formatMs(overviewResult?.latencyMs),
+
+    cpuUsage,
+    cpuUsageLabel: formatPercent(cpuUsage),
+
+    memoryUsage,
+    memoryUsageLabel: formatPercent(memoryUsage),
+    memoryUsedBytes,
+    memoryTotalBytes,
+    memoryLabel:
+      memoryUsedBytes || memoryTotalBytes
+        ? `${formatBytes(memoryUsedBytes)} / ${formatBytes(memoryTotalBytes)}`
+        : formatPercent(memoryUsage),
+
+    services,
+
+    endpoints: Object.fromEntries(
+      safeArray(results).map((result) => [
+        result.group,
+        {
+          ok: result.ok,
+          endpoint: result.endpoint,
+          latencyMs: result.latencyMs,
+          error: result.error,
+          tried: result.tried,
+        },
+      ])
+    ),
+
+    raw: {
+      overview,
+      metrics,
+      database,
+      blobs,
+      azure,
+      results,
+    },
+  };
+}
+
+export function createEmptyServerSnapshot() {
+  return {
+    version: SERVER_API_VERSION,
+    status: "unknown",
+    statusLabel: "Sin datos",
+    ok: false,
+    checkedAt: "",
+    uptimeSeconds: 0,
+    uptimeLabel: "—",
+    latencyMs: null,
+    latencyLabel: "—",
+    cpuUsage: null,
+    cpuUsageLabel: "—",
+    memoryUsage: null,
+    memoryUsageLabel: "—",
+    memoryLabel: "—",
+    services: [
+      normalizeService({ id: "backend", label: "Backend API", status: "unknown", detail: "Pendiente de consulta." }),
+      normalizeService({ id: "database", label: "Base de datos", status: "unknown", detail: "Pendiente de consulta." }),
+      normalizeService({ id: "blobs", label: "Blob Storage", status: "unknown", detail: "Pendiente de consulta." }),
+      normalizeService({ id: "azure", label: "Azure", status: "unknown", detail: "Pendiente de consulta." }),
+      normalizeService({ id: "cpu", label: "CPU", status: "unknown", value: "—", detail: "Pendiente de consulta." }),
+      normalizeService({ id: "memory", label: "RAM", status: "unknown", value: "—", detail: "Pendiente de consulta." }),
+    ],
+    endpoints: {},
+    raw: {},
+  };
+}
+
+/* =========================================================
+   PUBLIC LOADERS
+========================================================= */
+
+export async function loadServerSnapshot(options = {}) {
+  const activeInflight = serverState.inflight;
+
+  if (activeInflight && !options.force) {
+    return activeInflight;
+  }
+
+  const cached = hydrateServerFromCache({ freshOnly: options.freshOnly !== false });
+  if (cached && !options.force) {
+    return cached;
+  }
+
+  setLoading(!serverState.loaded);
+  setRefreshing(Boolean(serverState.loaded));
+  clearError();
+
+  const task = Promise.all(
+    Object.entries(SERVER_ENDPOINT_GROUPS).map(([group, endpoints]) =>
+      probeEndpointGroup(group, endpoints, options)
+    )
+  )
+    .then((results) => {
+      const snapshot = normalizeServerSnapshot(results);
+      setSnapshot(snapshot);
+      return snapshot;
+    })
+    .catch((error) => {
+      setError(safeError(error));
+      throw error;
+    })
+    .finally(() => {
+      setLoading(false);
+      setRefreshing(false);
+      serverState.inflight = null;
+    });
+
+  serverState.inflight = task;
+
+  return task;
+}
+
+export async function loadServerHealth(options = {}) {
+  return loadServerSnapshot(options);
+}
 
 export async function refreshServerSnapshot(options = {}) {
   return loadServerSnapshot({
-    ...safeObject(options),
+    ...options,
     force: true,
   });
 }
 
-/* =========================================================
-   AUTO REFRESH FLAG
-========================================================= */
-
-export function setServerAutoRefresh(enabled = true) {
-  const value = Boolean(enabled);
-
-  setAutoRefresh?.(value);
-
-  return value;
+export async function refreshServerHealth(options = {}) {
+  return refreshServerSnapshot(options);
 }
 
 /* =========================================================
-   DIAGNOSTICS
+   AUTO REFRESH
 ========================================================= */
 
-export function getServerApiDiagnostics() {
+export function setServerAutoRefresh(key = "server:view", enabled = false, options = {}) {
+  const registryKey = cleanText(key, "server:view");
+
+  const current = autoRefreshRegistry.get(registryKey);
+
+  if (current?.timer) {
+    clearInterval(current.timer);
+  }
+
+  autoRefreshRegistry.delete(registryKey);
+
+  if (!enabled) {
+    return {
+      key: registryKey,
+      enabled: false,
+      intervalMs: 0,
+    };
+  }
+
+  const intervalMs = clamp(
+    number(options.intervalMs, SERVER_AUTO_REFRESH_DEFAULT_MS),
+    5000,
+    600000
+  );
+
+  const timer = setInterval(() => {
+    refreshServerSnapshot({
+      ...options,
+      source: `auto-refresh:${registryKey}`,
+      force: true,
+    }).catch(() => {});
+  }, intervalMs);
+
+  autoRefreshRegistry.set(registryKey, {
+    key: registryKey,
+    timer,
+    intervalMs,
+    startedAt: Date.now(),
+  });
+
   return {
-    dashboardEndpointCandidates: getDashboardEndpointCandidates(),
-    healthEndpoint: SERVER_HEALTH_ENDPOINT,
-    apiBase: getApiBase(),
-    legacyDashboardEndpoint: SERVER_DASHBOARD_LEGACY_ENDPOINT,
-    usesLegacyFallback: getDashboardEndpointCandidates().includes(
-      SERVER_DASHBOARD_LEGACY_ENDPOINT
-    ),
-    timeout: SERVER_TIMEOUT,
+    key: registryKey,
+    enabled: true,
+    intervalMs,
   };
 }
+
+export function stopAllServerAutoRefresh() {
+  for (const [, entry] of autoRefreshRegistry) {
+    try {
+      clearInterval(entry.timer);
+    } catch {
+      // noop
+    }
+  }
+
+  autoRefreshRegistry.clear();
+  return true;
+}
+
+/* =========================================================
+   SNAPSHOTS / COMPAT EXPORTS
+========================================================= */
+
+export function getServerSnapshotStore() {
+  return serverState.snapshot || createEmptyServerSnapshot();
+}
+
+export function getServerSnapshot() {
+  return getServerSnapshotStore();
+}
+
+export function getServerStateSnapshot() {
+  return {
+    version: SERVER_API_VERSION,
+    snapshot: getServerSnapshotStore(),
+    loading: serverState.loading,
+    refreshing: serverState.refreshing,
+    loaded: serverState.loaded,
+    hydrated: serverState.hydrated,
+    error: serverState.error,
+    lastSyncAt: serverState.lastSyncAt,
+    autoRefresh: [...autoRefreshRegistry.values()].map((entry) => ({
+      key: entry.key,
+      intervalMs: entry.intervalMs,
+      startedAt: entry.startedAt,
+    })),
+  };
+}
+
+export function getState() {
+  return getServerStateSnapshot();
+}
+
+export function getSnapshot() {
+  return getServerStateSnapshot();
+}
+
+export function getServerServices() {
+  return safeArray(getServerSnapshotStore().services);
+}
+
+export function getServerServiceByIdStore(id = "") {
+  const target = normalizeKey(id);
+  if (!target) return null;
+
+  return getServerServices().find((service) => normalizeKey(service.id) === target) || null;
+}
+
+export {
+  serverState,
+  normalizeStatus,
+  labelForStatus,
+  normalizeService,
+};
 
 /* =========================================================
    DEFAULT EXPORT
 ========================================================= */
 
 export default {
-  fetchServerDashboardRequest,
-  fetchServerDashboardWithMetaRequest,
-  fetchServerHealthRequest,
+  version: SERVER_API_VERSION,
 
-  getServerDashboardRequest,
-  getServerHealthRequest,
-  getServerSnapshotRequest,
+  endpointGroups: SERVER_ENDPOINT_GROUPS,
 
-  hydrateServerFromCache,
   loadServerSnapshot,
   loadServerHealth,
   refreshServerSnapshot,
-  setServerAutoRefresh,
+  refreshServerHealth,
 
-  getServerApiDiagnostics,
+  probeServerEndpoint,
+  probeEndpointGroup,
+
+  hydrateServerFromCache,
+  clearServerCache,
+
+  setServerAutoRefresh,
+  stopAllServerAutoRefresh,
+
+  normalizeServerSnapshot,
+  createEmptyServerSnapshot,
+
+  getServerSnapshotStore,
+  getServerSnapshot,
+  getServerStateSnapshot,
+  getServerServices,
+  getServerServiceByIdStore,
+  getState,
+  getSnapshot,
+
+  serverState,
 };

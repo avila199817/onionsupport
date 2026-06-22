@@ -1,46 +1,59 @@
 /* =========================================================
-   Onion SPA - Clientes Table Template
-   Archivo: src/views/clientes/clientes.table.template.js
+   Onion Support - Clientes Template
+   Archivo: /src/views/clientes/clientes.template.js
 
-   FINAL PRODUCTION TEMPLATE · CLIENTES VIEW · EXTREME SAAS MODE · 13/10
-   CSP CLEAN · NO CSS IN JS · NO INLINE STYLE · TOKEN READY
+   PRODUCTIVO · TEMPLATE PURO · SIN PÁGINAS · LOAD MORE · 10/10
 
-   RESPONSABILIDADES:
-   - render del hero/header de clientes
-   - render de tabla productiva con paginación real
-   - render de filtros visuales compatibles con state/props/bindings
-   - render de búsqueda compatible con state/props/bindings
-   - compatibilidad con clientesView.js
-   - loading visual en detalle / nuevo cliente / refresh / retry / export
-   - soporte para payloads backend heterogéneos y envelopes anidados
-   - acciones compatibles con data-clientes-action y data-action
-   - avatares fallback pseudo-RNG estables mediante clases
-   - dark/light conectado a variables.css + ui.css desde CSS externo
-   - chips de estado y nivel alineados con tokens globales desde CSS externo
-   - tabla blindada por CSS externo contra reset/core/layout/ui global
-   - row accent seguro por CSS externo sin pseudo-elementos sobre <tr>
-   - límite fijo de 5 clientes por hoja
-   - orden descendente por actualización / actividad / creación
-
-   HARDENING PRO:
-   - no depende de imports externos
-   - tolera state + props directas
-   - paginación defensiva
-   - responsive delegado a /src/css/views/clientes/index.css
-   - restricción admin no duplicada: la controla la View,
-     pero soporta forbidden/accessDenied si se llama directamente
-   - sin renderStyles()
-   - sin <style>
-   - sin style=""
-   - sin handlers inline
+   Responsabilidad:
+   - Render del hero/header de Clientes.
+   - Render de stats.
+   - Render de historial/tabla.
+   - Filtros + búsqueda.
+   - Sin paginación clásica.
+   - Compatible con index.js controlador único.
+   - Compatible de transición con clientes.table.template.js.
+   - Compatible con CSS /src/css/views/clientes/index.css.
+   - Sin imports.
+   - Sin HTTP.
+   - Sin DOM directo.
+   - Sin Store.
+   - Sin Router.
+   - Sin modales.
+   - Sin <style>.
+   - Sin style="".
+   - Sin handlers inline.
 ========================================================= */
-
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const DEFAULT_PAGE_SIZE = 5;
+export const CLIENTES_TEMPLATE_VERSION =
+  "clientes.template.productive.v1.no-pages.load-more";
+
+export const CLIENTES_TABLE_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
+export const CLIENTES_VIEW_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
+
+export const CLIENTES_ACTIONS = Object.freeze({
+  DETAIL: "detail",
+  CREATE: "create",
+  REFRESH: "refresh",
+  RETRY: "retry",
+  EXPORT: "export",
+  FILTER: "filter",
+  CLEAR_SEARCH: "clear-search",
+  CLEAR_FILTERS: "clear-filters",
+  LOAD_MORE: "load-more",
+});
+
+export const CLIENTES_TABLE_ACTIONS = CLIENTES_ACTIONS;
+
+export const CLIENTES_DEFAULT_VISIBLE_ROWS = 20;
+export const CLIENTES_DEFAULT_PAGE_SIZE = CLIENTES_DEFAULT_VISIBLE_ROWS;
+
+const DEFAULT_VISIBLE_ROWS = CLIENTES_DEFAULT_VISIBLE_ROWS;
+const VISIBLE_STEP = 20;
+const AVATAR_TONE_COUNT = 10;
 
 const FILTERS = Object.freeze([
   { key: "all", label: "Todos" },
@@ -50,17 +63,49 @@ const FILTERS = Object.freeze([
   { key: "vip", label: "VIP" },
 ]);
 
-const AVATAR_TONE_COUNT = 10;
-
+export const CLIENTES_TABLE_COLUMNS = Object.freeze([
+  { key: "main", label: "Cliente", colClass: "clientes-col clientes-col--main" },
+  { key: "status", label: "Estado", colClass: "clientes-col clientes-col--status" },
+  { key: "date", label: "Alta", colClass: "clientes-col clientes-col--date" },
+  { key: "email", label: "Email", colClass: "clientes-col clientes-col--email" },
+  { key: "location", label: "Ciudad", colClass: "clientes-col clientes-col--location" },
+  { key: "amount", label: "Importe", colClass: "clientes-col clientes-col--amount" },
+  { key: "actions", label: "Acciones", colClass: "clientes-col clientes-col--actions" },
+]);
 
 /* =========================================================
-   HELPERS
+   SAFE HELPERS
 ========================================================= */
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
-  const text = String(value)
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
+}
+
+function safeArray(value) {
+  if (Array.isArray(value)) return value;
+
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof value.length === "number" &&
+    typeof value !== "string"
+  ) {
+    try {
+      return Array.from(value);
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+}
+
+function safeText(value, fallback = "") {
+  const text = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -68,8 +113,30 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+/*
+  IMPORTANTE:
+  No aplanar arrays en first().
+  Si payload trae { items: [...] }, aplanar rompe el listado.
+*/
+function first(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
+
+    return value;
+  }
+
+  return null;
+}
+
 function safeNumber(value, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : fallback;
+  }
 
   if (typeof value === "string") {
     let normalized = value
@@ -96,36 +163,16 @@ function safeNumber(value, fallback = 0) {
       normalized = normalized.replace(/,/g, ".");
     }
 
-    const n = Number(normalized);
-
-    return Number.isFinite(n) ? n : fallback;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  const n = Number(value);
-
-  return Number.isFinite(n) ? n : fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
-}
-
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-
-    return value;
-  }
-
-  return null;
+function clamp(value, min, max) {
+  return Math.min(Math.max(safeNumber(value, min), min), max);
 }
 
 function escapeHtml(value = "") {
@@ -137,8 +184,8 @@ function escapeHtml(value = "") {
     .replace(/'/g, "&#39;");
 }
 
-function normalizeWhitespace(value = "") {
-  return safeText(value, "").replace(/\s+/g, " ").trim();
+function attr(value = "") {
+  return escapeHtml(safeText(value, ""));
 }
 
 function normalizeText(value = "") {
@@ -157,14 +204,14 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function truncate(value = "", max = 96) {
-  const text = normalizeWhitespace(value);
-  const limit = Math.max(1, safeNumber(max, 96));
-
-  if (!text) return "";
-  if (text.length <= limit) return text;
-
-  return `${text.slice(0, Math.max(0, limit - 1)).trim()}…`;
+function normalizeSearch(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9@._+\-\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function hashString(value = "") {
@@ -184,16 +231,34 @@ function hashString(value = "") {
   return Math.abs(hash >>> 0);
 }
 
-function clamp(value, min, max) {
-  const n = safeNumber(value, min);
-  return Math.min(Math.max(n, min), max);
+function isRenderableImageUrl(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return false;
+  if (raw.startsWith("data:image/")) return true;
+  if (raw.startsWith("blob:")) return true;
+  if (raw.startsWith("/")) return true;
+  if (raw.startsWith("./")) return true;
+  if (raw.startsWith("../")) return true;
+
+  try {
+    const url = new URL(raw);
+    return ["http:", "https:"].includes(url.protocol);
+  } catch {
+    return false;
+  }
 }
+
+/* =========================================================
+   DATE / FORMAT
+========================================================= */
 
 function toTimestamp(value = null) {
   if (!value) return 0;
 
   if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? 0 : value.getTime();
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : 0;
   }
 
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -204,7 +269,6 @@ function toTimestamp(value = null) {
   if (!raw) return 0;
 
   const numeric = Number(raw);
-
   if (Number.isFinite(numeric) && numeric > 0) {
     return numeric > 9999999999 ? numeric : numeric * 1000;
   }
@@ -225,114 +289,14 @@ function toTimestamp(value = null) {
       Number(ss)
     );
 
-    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    const ms = date.getTime();
+    return Number.isFinite(ms) ? ms : 0;
   }
 
   const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+  const ms = date.getTime();
 
-  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
-}
-
-function getNamedText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-
-  if (typeof value !== "object") {
-    return safeText(value, fallback);
-  }
-
-  const obj = safeObject(value);
-
-  return safeText(
-    first(
-      obj.fullName,
-      obj.displayName,
-      obj.name,
-      obj.nombre,
-      obj.username,
-      obj.userName,
-      obj.email,
-      obj.id,
-      obj.userId,
-      obj.codigo,
-      obj.code
-    ),
-    fallback
-  );
-}
-
-function isRenderableImageUrl(value = "") {
-  const raw = safeText(value, "");
-  if (!raw) return false;
-
-  if (raw.startsWith("data:image/")) return true;
-  if (raw.startsWith("blob:")) return true;
-  if (raw.startsWith("/")) return true;
-  if (raw.startsWith("./")) return true;
-  if (raw.startsWith("../")) return true;
-
-  try {
-    const url = new URL(raw);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-
-/* =========================================================
-   FORMATTERS
-========================================================= */
-
-const dateTimeFormatterCache = new Map();
-
-function getDateTimeFormatter() {
-  const key = "es-ES:date-time";
-
-  if (dateTimeFormatterCache.has(key)) {
-    return dateTimeFormatterCache.get(key);
-  }
-
-  const formatter = new Intl.DateTimeFormat("es-ES", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  dateTimeFormatterCache.set(key, formatter);
-
-  return formatter;
-}
-
-function getDateFormatter() {
-  const key = "es-ES:date";
-
-  if (dateTimeFormatterCache.has(key)) {
-    return dateTimeFormatterCache.get(key);
-  }
-
-  const formatter = new Intl.DateTimeFormat("es-ES", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-
-  dateTimeFormatterCache.set(key, formatter);
-
-  return formatter;
-}
-
-function formatDateTime(value = null) {
-  const ts = toTimestamp(value);
-
-  if (!ts) return "—";
-
-  try {
-    return getDateTimeFormatter().format(new Date(ts));
-  } catch {
-    return "—";
-  }
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 function formatDateShort(value = null) {
@@ -341,7 +305,29 @@ function formatDateShort(value = null) {
   if (!ts) return "—";
 
   try {
-    return getDateFormatter().format(new Date(ts));
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(ts));
+  } catch {
+    return "—";
+  }
+}
+
+function formatDateTime(value = null) {
+  const ts = toTimestamp(value);
+
+  if (!ts) return "—";
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(ts));
   } catch {
     return "—";
   }
@@ -382,78 +368,129 @@ function formatRelativeDate(value = null) {
 function formatLastUpdate(value = null) {
   const ts = toTimestamp(value);
 
-  if (!ts) return "Sin actualización";
+  if (!ts) return "Sin actividad";
 
   const diffHours = Math.abs(Date.now() - ts) / 3600000;
 
   return diffHours <= 72 ? formatRelativeDate(value) : formatDateTime(value);
 }
 
+function formatAmount(value = 0) {
+  const amount = safeNumber(value, 0);
+
+  try {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: "EUR",
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2).replace(".", ",")} €`;
+  }
+}
+
+function formatPhone(value = "") {
+  const raw = safeText(value, "");
+  if (!raw) return "";
+
+  const digits = raw.replace(/[^\d]/g, "");
+
+  if (!digits) return raw;
+
+  let prefix = "";
+  let national = digits;
+
+  if (digits.length === 11 && digits.startsWith("34")) {
+    prefix = "+34 ";
+    national = digits.slice(2);
+  } else if (raw.trim().startsWith("+34") && digits.length >= 11) {
+    prefix = "+34 ";
+    national = digits.slice(-9);
+  }
+
+  if (national.length === 9) {
+    return `${prefix}${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6)}`;
+  }
+
+  return raw;
+}
 
 /* =========================================================
    ICONS
 ========================================================= */
 
 function icon(name = "") {
-  const common = `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+  const common = [
+    'aria-hidden="true"',
+    'focusable="false"',
+    'width="16"',
+    'height="16"',
+    'viewBox="0 0 24 24"',
+    'fill="none"',
+    'stroke="currentColor"',
+    'stroke-width="2"',
+    'stroke-linecap="round"',
+    'stroke-linejoin="round"',
+  ].join(" ");
 
   const icons = {
     refresh: `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
     export: `<svg ${common}><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`,
     plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
     users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
-    briefcase: `<svg ${common}><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><rect x="2" y="7" width="20" height="13" rx="2"/></svg>`,
     eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
     search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
     close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
     shield: `<svg ${common}><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.5a1.2 1.2 0 0 1 1.52 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>`,
     clock: `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
-    mail: `<svg ${common}><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>`,
-    map: `<svg ${common}><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>`,
-    star: `<svg ${common}><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>`,
+    euro: `<svg ${common}><path d="M4 10h12"/><path d="M4 14h10"/><path d="M19 5.5A7 7 0 1 0 19 18.5"/></svg>`,
+    phone: `<svg ${common}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.63 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.2a2 2 0 0 1 2.11-.45c.84.3 1.71.51 2.61.63A2 2 0 0 1 22 16.92z"/></svg>`,
+    mail: `<svg ${common}><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-10 6L2 7"/></svg>`,
+    map: `<svg ${common}><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>`,
     alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
   };
 
   return icons[name] || "";
 }
 
-
 /* =========================================================
-   BACKEND ENVELOPE
+   PAYLOAD / MODEL
 ========================================================= */
 
-function unwrapItemsEnvelope(value) {
-  if (Array.isArray(value)) return value;
+function unwrapItemsEnvelope(payload = null, maxDepth = 8) {
+  if (Array.isArray(payload)) return payload;
 
-  const obj = safeObject(value);
+  const queue = [{ value: payload, depth: 0 }];
+  const seen = new Set();
 
-  if (Array.isArray(obj.clientes)) return obj.clientes;
-  if (Array.isArray(obj.clients)) return obj.clients;
-  if (Array.isArray(obj.customers)) return obj.customers;
-  if (Array.isArray(obj.items)) return obj.items;
-  if (Array.isArray(obj.rows)) return obj.rows;
-  if (Array.isArray(obj.data)) return obj.data;
-  if (Array.isArray(obj.results)) return obj.results;
-  if (Array.isArray(obj.records)) return obj.records;
+  while (queue.length) {
+    const { value, depth } = queue.shift();
 
-  if (obj.data && typeof obj.data === "object") {
-    return unwrapItemsEnvelope(obj.data);
-  }
+    if (!isObject(value) || seen.has(value) || depth > maxDepth) continue;
 
-  if (obj.payload && typeof obj.payload === "object") {
-    return unwrapItemsEnvelope(obj.payload);
-  }
+    seen.add(value);
 
-  if (obj.response && typeof obj.response === "object") {
-    return unwrapItemsEnvelope(obj.response);
-  }
+    for (const key of [
+      "items",
+      "rows",
+      "clients",
+      "clientes",
+      "customers",
+      "results",
+      "records",
+      "docs",
+      "documents",
+      "list",
+      "value",
+    ]) {
+      if (Array.isArray(value[key])) return value[key];
+    }
 
-  if (obj.result && typeof obj.result === "object") {
-    return unwrapItemsEnvelope(obj.result);
-  }
+    for (const key of ["data", "payload", "result", "response", "body"]) {
+      const nested = value[key];
 
-  if (obj.body && typeof obj.body === "object") {
-    return unwrapItemsEnvelope(obj.body);
+      if (Array.isArray(nested)) return nested;
+      if (isObject(nested)) queue.push({ value: nested, depth: depth + 1 });
+    }
   }
 
   return [];
@@ -461,58 +498,29 @@ function unwrapItemsEnvelope(value) {
 
 function getResolvedItems(input = {}) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
 
-  const candidates = [
-    data.items,
-    data.rows,
-    data.clientes,
-    data.clients,
-    data.customers,
-    data.data,
-    data.results,
-    data.records,
-    data.payload,
-    data.response,
-    data.result,
-    data.body,
-
-    state.items,
-    state.rows,
-    state.clientes,
-    state.clients,
-    state.customers,
-    state.data,
-    state.results,
-    state.records,
-    state.payload,
-    state.response,
-    state.result,
-    state.body,
-
-    input,
-  ];
-
-  for (const candidate of candidates) {
-    const rows = unwrapItemsEnvelope(candidate);
-
-    if (rows.length) {
-      return sortClientesNewestFirst(rows);
-    }
-  }
-
-  return [];
+  return unwrapItemsEnvelope(
+    first(
+      data.items,
+      data.clientes,
+      data.clients,
+      data.customers,
+      data.rows,
+      data.results,
+      data.data,
+      data.payload,
+      data.response,
+      data.state?.items,
+      data.state?.clientes,
+      data.state?.clients,
+      []
+    )
+  );
 }
 
 function resolveRemoteCount(input = {}, items = []) {
   const data = safeObject(input);
   const state = safeObject(data.state);
-
-  const payload = safeObject(first(data.payload, state.payload));
-  const response = safeObject(first(data.response, state.response));
-  const result = safeObject(first(data.result, state.result));
-  const lastResponse = safeObject(first(data.lastResponse, state.lastResponse));
-  const stats = safeObject(first(data.stats, state.stats));
 
   return Math.max(
     safeArray(items).length,
@@ -520,21 +528,12 @@ function resolveRemoteCount(input = {}, items = []) {
       first(
         data.remoteCount,
         data.totalCount,
-        data.count,
         data.total,
+        data.count,
         state.remoteCount,
         state.totalCount,
-        state.count,
         state.total,
-        stats.total,
-        payload.count,
-        payload.total,
-        response.count,
-        response.total,
-        result.count,
-        result.total,
-        lastResponse.count,
-        lastResponse.total,
+        state.count,
         safeArray(items).length
       ),
       safeArray(items).length
@@ -542,203 +541,153 @@ function resolveRemoteCount(input = {}, items = []) {
   );
 }
 
-function shouldRenderRestricted(input = {}) {
-  const data = safeObject(input);
-  const state = safeObject(data.state);
-
-  return Boolean(
-    data.forbidden === true ||
-      data.accessDenied === true ||
-      data.restricted === true ||
-      state.forbidden === true ||
-      state.accessDenied === true ||
-      state.restricted === true
-  );
+function getRaw(item = {}) {
+  return safeObject(item?.raw, {});
 }
 
-
-/* =========================================================
-   DATA PICKERS
-========================================================= */
-
 function getClienteId(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
-      item.clientId,
       item.clienteId,
+      item.clientId,
       item.customerId,
       item.id,
+      item.uid,
       item._id,
       item.code,
-      item.clientCode,
-      item.clienteCode,
-      item.customerCode,
+      item.codigo,
+      item.nif,
+      item.cif,
       item.email,
-      raw.clientId,
+
       raw.clienteId,
+      raw.clientId,
       raw.customerId,
       raw.id,
+      raw.uid,
       raw._id,
       raw.code,
-      raw.clientCode,
-      raw.clienteCode,
-      raw.customerCode,
-      raw.email
+      raw.codigo,
+      raw.nif,
+      raw.cif,
+      raw.email,
+      ""
     ),
     ""
   );
 }
 
 function getClienteCode(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
-      item.clientCode,
-      item.clienteCode,
-      item.customerCode,
-      item.clientId,
-      item.clienteId,
-      item.customerId,
-      item.id,
-      item._id,
       item.code,
-      item.email,
-      raw.clientCode,
-      raw.clienteCode,
-      raw.customerCode,
-      raw.clientId,
-      raw.clienteId,
-      raw.customerId,
-      raw.id,
-      raw._id,
+      item.codigo,
+      item.clienteCode,
+      item.clienteId,
+      item.clientId,
+      item.id,
+      item.nif,
+      item.cif,
       raw.code,
-      raw.email
+      raw.codigo,
+      raw.clienteCode,
+      raw.clienteId,
+      raw.clientId,
+      raw.id,
+      raw.nif,
+      raw.cif,
+      "CLI-SIN-ID"
     ),
     "CLI-SIN-ID"
   );
 }
 
 function getClienteName(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
+
+  const firstName = safeText(first(item.firstName, item.nombre, raw.firstName, raw.nombre), "");
+  const lastName = safeText(first(item.lastName, item.apellidos, raw.lastName, raw.apellidos), "");
+  const composed = safeText(`${firstName} ${lastName}`, "");
 
   return safeText(
     first(
-      item.clientName,
-      item.clienteName,
-      item.customerName,
-      item.nombre,
-      item.name,
+      item.razonSocial,
+      item.businessName,
+      item.companyName,
+      item.empresa,
       item.fullName,
       item.displayName,
-      item.company,
-      item.empresa,
-      item.businessName,
-      item.razonSocial,
-      item.cliente?.nombre,
-      item.cliente?.name,
-      item.client?.name,
-      item.customer?.name,
-      item.profile?.name,
-      item.profile?.displayName,
-      raw.clientName,
-      raw.clienteName,
-      raw.customerName,
-      raw.nombre,
-      raw.name,
+      item.name,
+      item.nombre,
+      composed,
+      item.email,
+
+      raw.razonSocial,
+      raw.businessName,
+      raw.companyName,
+      raw.empresa,
       raw.fullName,
       raw.displayName,
-      raw.company,
-      raw.empresa,
-      raw.businessName,
-      raw.razonSocial,
-      raw.cliente?.nombre,
-      raw.cliente?.name,
-      raw.client?.name,
-      raw.customer?.name,
-      raw.profile?.name,
-      raw.profile?.displayName,
-      item.email,
-      raw.email
+      raw.name,
+      raw.nombre,
+      raw.email,
+      "Cliente"
     ),
     "Cliente"
   );
 }
 
-function getClienteDescription(item = {}) {
-  const raw = safeObject(item?.raw);
+function getClienteEmail(item = {}) {
+  const raw = getRaw(item);
+
+  return safeText(
+    first(
+      item.email,
+      item.mail,
+      item.emailLower,
+      item.contactEmail,
+      item.billingEmail,
+      item.facturacionEmail,
+
+      raw.email,
+      raw.mail,
+      raw.emailLower,
+      raw.contactEmail,
+      raw.billingEmail,
+      raw.facturacionEmail,
+      ""
+    ),
+    ""
+  ).toLowerCase();
+}
+
+function getClientePhone(item = {}) {
+  const raw = getRaw(item);
 
   return safeText(
     first(
       item.phone,
       item.telefono,
       item.mobile,
-      item.description,
-      item.descripcion,
-      item.notes,
-      item.tipo,
-      item.segment,
-      item.category,
-      item.categoria,
-      item.cliente?.phone,
-      item.cliente?.telefono,
-      item.client?.phone,
-      item.customer?.phone,
-      item.profile?.phone,
+      item.movil,
+      item.phoneNumber,
       raw.phone,
       raw.telefono,
       raw.mobile,
-      raw.description,
-      raw.descripcion,
-      raw.notes,
-      raw.tipo,
-      raw.segment,
-      raw.category,
-      raw.categoria,
-      raw.cliente?.phone,
-      raw.cliente?.telefono,
-      raw.client?.phone,
-      raw.customer?.phone,
-      raw.profile?.phone
+      raw.movil,
+      raw.phoneNumber,
+      ""
     ),
-    "Sin teléfono"
+    ""
   );
 }
 
-function getClienteEmail(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return safeText(
-    first(
-      item.clientEmail,
-      item.clienteEmail,
-      item.customerEmail,
-      item.email,
-      item.mail,
-      item.cliente?.email,
-      item.client?.email,
-      item.customer?.email,
-      item.profile?.email,
-      item.contact?.email,
-      raw.clientEmail,
-      raw.clienteEmail,
-      raw.customerEmail,
-      raw.email,
-      raw.mail,
-      raw.cliente?.email,
-      raw.client?.email,
-      raw.customer?.email,
-      raw.profile?.email,
-      raw.contact?.email
-    ),
-    "Sin email"
-  ).toLowerCase();
-}
-
 function getClienteLocation(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -747,324 +696,170 @@ function getClienteLocation(item = {}) {
       item.locationCity,
       item.location?.city,
       item.location?.ciudad,
-      item.ubicacion?.city,
-      item.ubicacion?.ciudad,
       item.address?.city,
       item.address?.ciudad,
       item.direccion?.city,
       item.direccion?.ciudad,
-      item.profile?.city,
-      item.profile?.ciudad,
-      item.cliente?.city,
-      item.cliente?.ciudad,
-      item.client?.city,
-      item.client?.ciudad,
-      item.customer?.city,
-      item.customer?.ciudad,
+
       raw.city,
       raw.ciudad,
       raw.locationCity,
       raw.location?.city,
       raw.location?.ciudad,
-      raw.ubicacion?.city,
-      raw.ubicacion?.ciudad,
       raw.address?.city,
       raw.address?.ciudad,
       raw.direccion?.city,
       raw.direccion?.ciudad,
-      raw.profile?.city,
-      raw.profile?.ciudad,
-      raw.cliente?.city,
-      raw.cliente?.ciudad,
-      raw.client?.city,
-      raw.client?.ciudad,
-      raw.customer?.city,
-      raw.customer?.ciudad
+      ""
     ),
-    "Sin ciudad"
+    ""
   );
 }
 
-function getClienteManager(item = {}) {
-  const raw = safeObject(item?.raw);
+function getClienteNif(item = {}) {
+  const raw = getRaw(item);
 
   return safeText(
     first(
-      item.managerName,
-      item.responsableName,
-      item.ownerName,
-      item.assignedToName,
-      item.accountManagerName,
-      getNamedText(item.manager),
-      getNamedText(item.assignedTo),
-      getNamedText(item.owner),
-      getNamedText(item.responsable),
-      getNamedText(item.accountManager),
-      raw.managerName,
-      raw.responsableName,
-      raw.ownerName,
-      raw.assignedToName,
-      raw.accountManagerName,
-      getNamedText(raw.manager),
-      getNamedText(raw.assignedTo),
-      getNamedText(raw.owner),
-      getNamedText(raw.responsable),
-      getNamedText(raw.accountManager)
+      item.nif,
+      item.cif,
+      item.taxId,
+      item.vat,
+      item.documentId,
+      raw.nif,
+      raw.cif,
+      raw.taxId,
+      raw.vat,
+      raw.documentId,
+      ""
     ),
-    "No asignado"
-  );
+    ""
+  ).toUpperCase();
 }
 
 function getClienteAvatarUrl(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
-      item.clientAvatar,
-      item.clientAvatarUrl,
-      item.clienteAvatar,
-      item.clienteAvatarUrl,
-      item.customerAvatar,
-      item.customerAvatarUrl,
-      item.avatar,
       item.avatarUrl,
-      item.logo,
-      item.logoUrl,
-      item.image,
+      item.avatar,
+      item.picture,
+      item.photoUrl,
+      item.photoURL,
       item.imageUrl,
-      item.cliente?.avatar,
-      item.cliente?.avatarUrl,
-      item.client?.avatar,
-      item.client?.avatarUrl,
-      item.customer?.avatar,
-      item.customer?.avatarUrl,
-      item.profile?.avatar,
-      item.profile?.avatarUrl,
-      raw.clientAvatar,
-      raw.clientAvatarUrl,
-      raw.clienteAvatar,
-      raw.clienteAvatarUrl,
-      raw.customerAvatar,
-      raw.customerAvatarUrl,
-      raw.avatar,
       raw.avatarUrl,
-      raw.logo,
-      raw.logoUrl,
-      raw.image,
+      raw.avatar,
+      raw.picture,
+      raw.photoUrl,
+      raw.photoURL,
       raw.imageUrl,
-      raw.cliente?.avatar,
-      raw.cliente?.avatarUrl,
-      raw.client?.avatar,
-      raw.client?.avatarUrl,
-      raw.customer?.avatar,
-      raw.customer?.avatarUrl,
-      raw.profile?.avatar,
-      raw.profile?.avatarUrl
+      ""
     ),
     ""
   );
 }
 
 function getClienteInitials(item = {}) {
-  const raw = safeObject(item?.raw);
+  const text = getClienteName(item);
+  const parts = text.split(/\s+/).filter(Boolean);
 
-  const text = normalizeWhitespace(
-    first(
-      item.clientInitials,
-      item.clienteInitials,
-      item.customerInitials,
-      item.initials,
-      raw.clientInitials,
-      raw.clienteInitials,
-      raw.customerInitials,
-      raw.initials,
-      getClienteName(item),
-      getClienteCode(item),
-      "CL"
-    )
-  );
-
-  if (!text) return "CL";
-
-  const parts = text.split(" ").filter(Boolean);
-
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase() || "CL";
 
   return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "CL";
 }
 
-function getClienteAvatarTone(item = {}) {
-  const seed = `${getClienteId(item)}|${getClienteEmail(item)}|${getClienteName(item)}`;
-  return hashString(seed) % AVATAR_TONE_COUNT;
+function getClienteType(item = {}) {
+  const raw = getRaw(item);
+
+  return normalizeKey(
+    first(
+      item.type,
+      item.tipo,
+      item.kind,
+      item.segment,
+      item.category,
+      raw.type,
+      raw.tipo,
+      raw.kind,
+      raw.segment,
+      raw.category,
+      "cliente"
+    )
+  );
+}
+
+function getClienteTypeLabel(item = {}) {
+  const type = getClienteType(item);
+
+  if (type === "empresa" || type === "company" || type === "business" || type === "b2b") return "Empresa";
+  if (type === "particular" || type === "persona" || type === "individual" || type === "b2c") return "Particular";
+  if (type === "vip" || type === "premium") return "VIP";
+
+  return "Cliente";
 }
 
 function getStatusValue(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
-  return first(
+  const explicit = first(
     item.status,
     item.estado,
     item.state,
-    item.accountStatus,
     item.clientStatus,
-    item.customerStatus,
-    item.lifecycle?.status,
     raw.status,
     raw.estado,
     raw.state,
-    raw.accountStatus,
-    raw.clientStatus,
-    raw.customerStatus,
-    raw.lifecycle?.status,
-    typeof item.isActive === "boolean" ? (item.isActive ? "active" : "inactive") : null,
-    typeof item.enabled === "boolean" ? (item.enabled ? "active" : "inactive") : null,
-    typeof item.disabled === "boolean" ? (item.disabled ? "inactive" : "active") : null,
-    typeof item.blocked === "boolean" ? (item.blocked ? "blocked" : null) : null,
-    typeof raw.isActive === "boolean" ? (raw.isActive ? "active" : "inactive") : null,
-    typeof raw.enabled === "boolean" ? (raw.enabled ? "active" : "inactive") : null,
-    typeof raw.disabled === "boolean" ? (raw.disabled ? "inactive" : "active") : null,
-    typeof raw.blocked === "boolean" ? (raw.blocked ? "blocked" : null) : null,
-    "active"
+    raw.clientStatus
   );
-}
 
-function getTierValue(item = {}) {
-  const raw = safeObject(item?.raw);
+  if (explicit !== null && explicit !== undefined && explicit !== "") {
+    return normalizeKey(explicit);
+  }
 
-  return first(
-    item.tier,
-    item.plan,
-    item.segment,
-    item.category,
-    item.categoria,
-    item.tipo,
-    item.customerType,
-    item.clientType,
-    item.level,
-    item.nivel,
-    raw.tier,
-    raw.plan,
-    raw.segment,
-    raw.category,
-    raw.categoria,
-    raw.tipo,
-    raw.customerType,
-    raw.clientType,
-    raw.level,
-    raw.nivel,
-    "standard"
+  if (item.vip === true || item.isVip === true || raw.vip === true || raw.isVip === true) return "vip";
+
+  const active = first(
+    item.active,
+    item.isActive,
+    item.enabled,
+    raw.active,
+    raw.isActive,
+    raw.enabled
   );
-}
 
-function getStatusKey(value = "") {
-  const key = normalizeKey(value);
-
-  if (["active", "activo", "activa", "enabled", "habilitado", "habilitada", "ok"].includes(key)) {
-    return "active";
-  }
-
-  if (["pending", "pendiente", "invited", "invitado", "invitada", "invite", "new"].includes(key)) {
-    return "pending";
-  }
-
-  if (
-    [
-      "blocked",
-      "bloqueado",
-      "bloqueada",
-      "suspended",
-      "suspendido",
-      "suspendida",
-      "locked",
-      "restricted",
-      "restringido",
-      "restringida",
-    ].includes(key)
-  ) {
-    return "blocked";
-  }
-
-  if (
-    [
-      "disabled",
-      "inactive",
-      "inactivo",
-      "inactiva",
-      "deshabilitado",
-      "deshabilitada",
-      "archived",
-      "archivado",
-      "archivada",
-    ].includes(key)
-  ) {
-    return "inactive";
-  }
+  if (active === false) return "blocked";
+  if (active === true) return "active";
 
   return "active";
 }
 
-function getStatusLabel(value = "") {
-  const key = getStatusKey(value);
+function statusBucket(item = {}) {
+  const status = getStatusValue(item);
 
-  if (key === "active") return "Activo";
-  if (key === "pending") return "Pendiente";
-  if (key === "blocked") return "Bloqueado";
-  if (key === "inactive") return "Inactivo";
+  if (["vip", "premium"].includes(status)) return "vip";
+  if (["pending", "pendiente", "new", "nuevo", "invited", "invitation_pending", "unverified"].includes(status)) return "pending";
+  if (["blocked", "bloqueado", "bloqueada", "inactive", "inactivo", "inactiva", "disabled", "suspended", "deleted", "archived"].includes(status)) return "blocked";
 
-  return safeText(value, "Activo");
+  return "active";
 }
 
-function getTierKey(value = "") {
-  const key = normalizeKey(value);
+function getStatusLabel(itemOrStatus = {}) {
+  const status =
+    typeof itemOrStatus === "object"
+      ? statusBucket(itemOrStatus)
+      : statusBucket({ status: itemOrStatus });
 
-  if (["vip", "priority", "prioritario", "prioritaria"].includes(key)) {
-    return "vip";
-  }
+  if (status === "active") return "Activa";
+  if (status === "pending") return "Pendiente";
+  if (status === "blocked") return "Bloqueada";
+  if (status === "vip") return "VIP";
 
-  if (
-    [
-      "enterprise",
-      "empresa_enterprise",
-      "empresa",
-      "company",
-      "corporate",
-      "corporativo",
-      "corporativa",
-    ].includes(key)
-  ) {
-    return "enterprise";
-  }
-
-  if (["pro", "premium", "professional", "profesional"].includes(key)) {
-    return "pro";
-  }
-
-  if (["starter", "basic", "basico", "básico", "trial"].includes(key)) {
-    return "starter";
-  }
-
-  if (["particular", "personal", "standard", "estandar", "estándar"].includes(key)) {
-    return "standard";
-  }
-
-  return "standard";
-}
-
-function getTierLabel(value = "") {
-  const key = getTierKey(value);
-
-  if (key === "vip") return "VIP";
-  if (key === "enterprise") return "Enterprise";
-  if (key === "pro") return "Pro";
-  if (key === "starter") return "Starter";
-
-  return "Estándar";
+  return safeText(itemOrStatus, "Activa");
 }
 
 function getCreatedAt(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return first(
     item.createdAt,
@@ -1072,62 +867,48 @@ function getCreatedAt(item = {}) {
     item.fechaCreacion,
     item.registeredAt,
     item.created,
-    item.date,
-    item.lifecycle?.createdAt,
-    item.audit?.createdAt,
+    item.fechaAlta,
+    item.altaAt,
     raw.createdAt,
     raw.created_at,
     raw.fechaCreacion,
     raw.registeredAt,
     raw.created,
-    raw.date,
-    raw.lifecycle?.createdAt,
-    raw.audit?.createdAt
+    raw.fechaAlta,
+    raw.altaAt,
+    null
   );
 }
 
 function getUpdatedAt(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return first(
+    item.lastActivityAt,
     item.updatedAt,
     item.updated_at,
-    item.lastContactAt,
-    item.last_contact_at,
     item.modifiedAt,
-    item.lastModifiedAt,
-    item.lastActivityAt,
-    item.activityAt,
-    item.lifecycle?.updatedAt,
-    item.audit?.updatedAt,
+    item.lastInvoiceAt,
+    item.lastTicketAt,
+    item.lastContactAt,
     item.createdAt,
-    item.created_at,
+
+    raw.lastActivityAt,
     raw.updatedAt,
     raw.updated_at,
-    raw.lastContactAt,
-    raw.last_contact_at,
     raw.modifiedAt,
-    raw.lastModifiedAt,
-    raw.lastActivityAt,
-    raw.activityAt,
-    raw.lifecycle?.updatedAt,
-    raw.audit?.updatedAt,
+    raw.lastInvoiceAt,
+    raw.lastTicketAt,
+    raw.lastContactAt,
     raw.createdAt,
-    raw.created_at
+    null
   );
 }
 
 function getSortTimestamp(item = {}) {
-  const raw = safeObject(item?.raw);
-
   return (
-    safeNumber(item?.meta?.updatedAtMs, 0) ||
-    safeNumber(item?.meta?.timestampMs, 0) ||
-    safeNumber(raw?.meta?.updatedAtMs, 0) ||
-    safeNumber(raw?.meta?.timestampMs, 0) ||
     toTimestamp(getUpdatedAt(item)) ||
     toTimestamp(getCreatedAt(item)) ||
-    toTimestamp(raw?._ts) ||
     0
   );
 }
@@ -1137,244 +918,205 @@ function compareClientesNewestFirst(a = {}, b = {}) {
 
   if (diff !== 0) return diff;
 
-  return safeText(getClienteCode(b), "").localeCompare(
-    safeText(getClienteCode(a), ""),
-    "es",
-    {
-      numeric: true,
-      sensitivity: "base",
-    }
-  );
+  return getClienteCode(a).localeCompare(getClienteCode(b), "es", {
+    numeric: true,
+    sensitivity: "base",
+  });
 }
 
 function sortClientesNewestFirst(items = []) {
   return [...safeArray(items)].sort(compareClientesNewestFirst);
 }
 
-function isActiveLike(item = {}) {
-  return getStatusKey(getStatusValue(item)) === "active";
+function normalizeClienteModel(item = {}) {
+  const raw = safeObject(item);
+  const id = getClienteId(raw);
+  const email = getClienteEmail(raw);
+  const name = getClienteName(raw);
+  const status = getStatusValue(raw);
+  const type = getClienteType(raw);
+  const avatarUrl = getClienteAvatarUrl(raw);
+
+  return {
+    ...raw,
+    raw,
+
+    id: id || email,
+    clienteId: first(raw.clienteId, raw.clientId, id, email, ""),
+    clientId: first(raw.clientId, raw.clienteId, id, email, ""),
+    customerId: first(raw.customerId, id, email, ""),
+    uid: first(raw.uid, id, email, ""),
+
+    code: getClienteCode(raw),
+    codigo: getClienteCode(raw),
+
+    name,
+    nombre: name,
+    fullName: name,
+    displayName: name,
+    razonSocial: first(raw.razonSocial, raw.businessName, raw.companyName, name),
+
+    email,
+    emailLower: email,
+    mail: email,
+
+    phone: getClientePhone(raw),
+    telefono: getClientePhone(raw),
+    mobile: getClientePhone(raw),
+
+    city: getClienteLocation(raw),
+    ciudad: getClienteLocation(raw),
+    nif: getClienteNif(raw),
+    cif: getClienteNif(raw),
+
+    type,
+    tipo: type,
+    role: type,
+    rol: type,
+    segment: normalizeKey(first(raw.segment, type, "")),
+
+    status,
+    estado: status,
+    state: status,
+    active: status === "active" || status === "vip",
+    blocked: status === "blocked",
+    vip: status === "vip" || raw.vip === true || raw.isVip === true,
+    isVip: status === "vip" || raw.vip === true || raw.isVip === true,
+
+    createdAt: getCreatedAt(raw),
+    updatedAt: getUpdatedAt(raw),
+    lastActivityAt: first(raw.lastActivityAt, raw.lastInvoiceAt, raw.lastTicketAt, raw.updatedAt, ""),
+
+    invoicesCount: safeNumber(first(raw.invoicesCount, raw.facturasCount, raw.invoiceCount), 0),
+    ticketsCount: safeNumber(first(raw.ticketsCount, raw.incidenciasCount, raw.ticketCount), 0),
+    totalAmount: safeNumber(first(raw.totalAmount, raw.totalImporte, raw.facturasTotal, raw.invoicesTotal, raw.amount), 0),
+
+    avatarUrl,
+    avatar: avatarUrl,
+    hasAvatar: Boolean(avatarUrl),
+  };
 }
 
-function isPendingLike(item = {}) {
-  return getStatusKey(getStatusValue(item)) === "pending";
-}
+function normalizeClientesCollection(items = []) {
+  const map = new Map();
+  let anonymousIndex = 0;
 
-function isBlockedLike(item = {}) {
-  return ["blocked", "inactive"].includes(getStatusKey(getStatusValue(item)));
-}
+  for (const value of safeArray(items)) {
+    if (!isObject(value)) continue;
 
-function isVipLike(item = {}) {
-  return ["vip", "enterprise"].includes(getTierKey(getTierValue(item)));
-}
+    const normalized = normalizeClienteModel(value);
+    const id = getClienteId(normalized) || normalized.email || `anonymous:${anonymousIndex++}`;
 
+    if (map.has(id)) {
+      map.set(id, {
+        ...map.get(id),
+        ...normalized,
+        raw: {
+          ...safeObject(map.get(id)?.raw),
+          ...safeObject(normalized.raw),
+        },
+      });
+      continue;
+    }
+
+    map.set(id, normalized);
+  }
+
+  return [...map.values()].sort(compareClientesNewestFirst);
+}
 
 /* =========================================================
-   FILTERS / SEARCH
+   FILTERS / STATS / VM
 ========================================================= */
 
-function normalizeFilter(value = "") {
-  const key = normalizeKey(value);
+function normalizeFilter(value = "all") {
+  const filter = normalizeKey(value || "all");
 
-  if (!key || ["all", "todo", "todos", "todas", "total", "totales"].includes(key)) {
-    return "all";
-  }
-
-  if (["active", "activo", "activa", "activos", "activas", "enabled", "habilitado"].includes(key)) {
-    return "active";
-  }
-
-  if (["pending", "pendiente", "pendientes", "invited", "invitado", "invitada", "invite"].includes(key)) {
-    return "pending";
-  }
-
-  if (
-    [
-      "blocked",
-      "bloqueado",
-      "bloqueada",
-      "bloqueados",
-      "bloqueadas",
-      "inactive",
-      "inactivo",
-      "inactiva",
-      "inactivos",
-      "inactivas",
-      "disabled",
-      "deshabilitado",
-      "deshabilitada",
-      "suspended",
-      "suspendido",
-      "suspendida",
-      "locked",
-    ].includes(key)
-  ) {
-    return "blocked";
-  }
-
-  if (
-    [
-      "vip",
-      "priority",
-      "prioritario",
-      "prioritaria",
-      "enterprise",
-      "empresa",
-      "corporate",
-      "corporativo",
-      "corporativa",
-    ].includes(key)
-  ) {
-    return "vip";
-  }
+  if (["all", "todos", "todas", "todo"].includes(filter)) return "all";
+  if (["active", "activo", "activa", "activos", "activas"].includes(filter)) return "active";
+  if (["pending", "pendiente", "pendientes", "new", "nuevo"].includes(filter)) return "pending";
+  if (["blocked", "bloqueado", "bloqueada", "bloqueados", "inactivo", "inactive"].includes(filter)) return "blocked";
+  if (["vip", "premium"].includes(filter)) return "vip";
 
   return "all";
 }
 
 function getActiveFilter(input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const state = safeObject(data.state);
 
-  return normalizeFilter(
-    first(
-      data.filter,
-      data.statusFilter,
-      data.activeFilter,
-      data.tierFilter,
-      runtime.filter,
-      runtime.statusFilter,
-      runtime.activeFilter,
-      runtime.tierFilter,
-      "all"
-    )
-  );
-}
-
-function getFilterLabel(filter = "all") {
-  const key = normalizeFilter(filter);
-  return FILTERS.find((item) => item.key === key)?.label || "Todos";
+  return normalizeFilter(first(data.filter, data.activeFilter, state.filter, state.activeFilter, "all"));
 }
 
 function getSearchQuery(input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const state = safeObject(data.state);
 
-  return normalizeWhitespace(
-    first(
-      data.search,
-      data.searchQuery,
-      data.query,
-      data.q,
-      data.term,
-      data.keyword,
-      runtime.search,
-      runtime.searchQuery,
-      runtime.query,
-      runtime.q,
-      runtime.term,
-      runtime.keyword,
-      ""
-    )
-  );
+  return safeText(first(data.search, data.query, data.q, state.search, state.query, state.q, ""), "");
 }
 
 function itemMatchesFilter(item = {}, filter = "all") {
-  const key = normalizeFilter(filter);
+  const active = normalizeFilter(filter);
 
-  if (key === "all") return true;
-  if (key === "active") return isActiveLike(item);
-  if (key === "pending") return isPendingLike(item);
-  if (key === "blocked") return isBlockedLike(item);
-  if (key === "vip") return isVipLike(item);
+  if (active === "all") return true;
 
-  return true;
+  return statusBucket(item) === active;
 }
 
 function getSearchHaystack(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return [
-    getClienteId(item),
-    getClienteCode(item),
-    getClienteName(item),
-    getClienteDescription(item),
-    getClienteEmail(item),
-    getClienteLocation(item),
-    getClienteManager(item),
-    getStatusLabel(getStatusValue(item)),
-    getTierLabel(getTierValue(item)),
-    item.clientId,
-    item.clienteId,
-    item.customerId,
-    item.company,
-    item.empresa,
-    item.razonSocial,
-    item.phone,
-    item.telefono,
-    raw.clientId,
-    raw.clienteId,
-    raw.customerId,
-    raw.company,
-    raw.empresa,
-    raw.razonSocial,
-    raw.phone,
-    raw.telefono,
-  ]
-    .map((value) => normalizeText(value))
-    .filter(Boolean)
-    .join(" · ");
+  return normalizeSearch(
+    [
+      getClienteId(item),
+      getClienteCode(item),
+      getClienteName(item),
+      getClienteEmail(item),
+      getClientePhone(item),
+      getClienteLocation(item),
+      getClienteNif(item),
+      getClienteType(item),
+      getClienteTypeLabel(item),
+      getStatusLabel(item),
+      item.segment,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
 }
 
 function itemMatchesSearch(item = {}, query = "") {
-  const normalizedQuery = normalizeText(query);
+  const needle = normalizeSearch(query);
+  if (!needle) return true;
 
-  if (!normalizedQuery) return true;
-
-  const terms = normalizedQuery.split(" ").filter(Boolean);
+  const terms = needle.split(" ").filter(Boolean);
   const haystack = getSearchHaystack(item);
 
   return terms.every((term) => haystack.includes(term));
 }
 
 function filterAndSortClientes(items = [], input = {}) {
-  const activeFilter = getActiveFilter(input);
-  const searchQuery = getSearchQuery(input);
+  const filter = getActiveFilter(input);
+  const search = getSearchQuery(input);
 
   return sortClientesNewestFirst(items).filter((item) => {
-    return itemMatchesFilter(item, activeFilter) && itemMatchesSearch(item, searchQuery);
+    return itemMatchesFilter(item, filter) && itemMatchesSearch(item, search);
   });
 }
 
-function isFilterActive(input = {}) {
-  return getActiveFilter(input) !== "all" || Boolean(getSearchQuery(input));
-}
-
-function computeFilterCounts(items = [], input = {}) {
-  const rows = safeArray(items);
-  const searchQuery = getSearchQuery(input);
-  const searchableRows = rows.filter((item) => itemMatchesSearch(item, searchQuery));
-
-  return FILTERS.reduce((acc, filter) => {
-    acc[filter.key] = searchableRows.filter((item) => itemMatchesFilter(item, filter.key)).length;
-    return acc;
-  }, {});
-}
-
-
-/* =========================================================
-   STATS / PAGINATION
-========================================================= */
-
 function computeStats(items = []) {
-  const rows = safeArray(items);
-
-  return rows.reduce(
+  return safeArray(items).reduce(
     (acc, item) => {
       acc.total += 1;
 
-      if (isActiveLike(item)) acc.activeCount += 1;
-      if (isPendingLike(item)) acc.pendingCount += 1;
-      if (isBlockedLike(item)) acc.blockedCount += 1;
-      if (isVipLike(item)) acc.vipCount += 1;
+      const bucket = statusBucket(item);
+
+      if (bucket === "active") acc.activeCount += 1;
+      if (bucket === "pending") acc.pendingCount += 1;
+      if (bucket === "blocked") acc.blockedCount += 1;
+      if (bucket === "vip") acc.vipCount += 1;
+
+      acc.invoicesCount += safeNumber(item.invoicesCount, 0);
+      acc.ticketsCount += safeNumber(item.ticketsCount, 0);
+      acc.totalAmount += safeNumber(item.totalAmount, 0);
 
       return acc;
     },
@@ -1384,969 +1126,719 @@ function computeStats(items = []) {
       pendingCount: 0,
       blockedCount: 0,
       vipCount: 0,
+      invoicesCount: 0,
+      ticketsCount: 0,
+      totalAmount: 0,
     }
   );
 }
 
-function normalizePageSize(input = {}) {
+function normalizeVisibleLimit(input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const state = safeObject(data.state);
 
   return clamp(
     safeNumber(
       first(
-        data.pageSize,
-        runtime.pageSize,
-        runtime.limit,
-        runtime.clientesPageSize,
-        DEFAULT_PAGE_SIZE
+        data.visibleLimit,
+        data.limit,
+        state.visibleLimit,
+        state.clientesVisibleLimit,
+        state.limit,
+        DEFAULT_VISIBLE_ROWS
       ),
-      DEFAULT_PAGE_SIZE
+      DEFAULT_VISIBLE_ROWS
     ),
     1,
-    50
+    500
   );
 }
 
-function getPagination(items = [], input = {}) {
+function getViewModel(input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const rawItems = getResolvedItems(data);
+  const items = normalizeClientesCollection(rawItems);
+  const filteredItems = filterAndSortClientes(items, data);
+  const visibleLimit = normalizeVisibleLimit(data);
+  const visibleItems = filteredItems.slice(0, visibleLimit);
 
-  const allItems = filterAndSortClientes(items, data);
-  const pageSize = normalizePageSize(data);
-  const filtering = isFilterActive(data);
-
-  const remoteTotal = Math.max(
-    safeNumber(
-      first(
-        data.totalCount,
-        data.remoteCount,
-        data.count,
-        data.total,
-        runtime.totalCount,
-        runtime.remoteCount,
-        runtime.count,
-        runtime.total,
-        allItems.length
-      ),
-      allItems.length
-    ),
-    allItems.length
-  );
-
-  const reportedTotal = filtering ? allItems.length : remoteTotal;
-  const totalPagesFromProps = filtering ? 0 : safeNumber(first(data.totalPages, runtime.totalPages), 0);
-
-  const totalPages = Math.max(
-    1,
-    totalPagesFromProps || Math.ceil((reportedTotal || 1) / pageSize)
-  );
-
-  const currentPage = clamp(
-    safeNumber(
-      first(
-        data.page,
-        runtime.page,
-        runtime.currentPage,
-        runtime.clientesPage,
-        1
-      ),
-      1
-    ),
-    1,
-    totalPages
-  );
-
-  const startIndex = (currentPage - 1) * pageSize;
-  const pageItems = allItems.slice(startIndex, startIndex + pageSize);
-
-  const rangeStart = reportedTotal && pageItems.length ? startIndex + 1 : 0;
-  const rangeEnd = reportedTotal ? Math.min(startIndex + pageItems.length, reportedTotal) : 0;
+  const remoteCount = resolveRemoteCount(data, items);
+  const stats = computeStats(items);
+  const activeFilter = getActiveFilter(data);
+  const searchQuery = getSearchQuery(data);
+  const filtering = activeFilter !== "all" || Boolean(searchQuery);
 
   return {
-    allItems,
-    pageItems,
-    pageSize,
-    currentPage,
-    totalPages,
-    totalCount: reportedTotal,
-    unfilteredCount: safeArray(items).length,
-    remoteTotal,
-    rangeStart,
-    rangeEnd,
-    hasPrev: currentPage > 1,
-    hasNext: currentPage < totalPages,
+    data,
+    items,
+    filteredItems,
+    visibleItems,
+    stats,
+
+    remoteCount,
+    totalCount: filtering ? filteredItems.length : Math.max(remoteCount, items.length),
+    filteredCount: filteredItems.length,
+
+    visibleLimit,
+    visibleCount: visibleItems.length,
+    remainingCount: Math.max(0, filteredItems.length - visibleItems.length),
+    hasMore: visibleItems.length < filteredItems.length,
+
+    activeFilter,
+    searchQuery,
     filtering,
-    activeFilter: getActiveFilter(data),
-    searchQuery: getSearchQuery(data),
+
+    loading: Boolean(first(data.loading, data.state?.loading, false)),
+    refreshing: Boolean(first(data.refreshing, data.state?.refreshing, false)),
+    error: safeText(first(data.error, data.state?.error, ""), ""),
+
+    lastSyncAt: first(data.lastSyncAt, data.state?.lastSyncAt, null),
+    forbidden: Boolean(first(data.forbidden, data.accessDenied, data.restricted, data.state?.forbidden, false)),
   };
 }
-
 
 /* =========================================================
    UI PARTIALS
 ========================================================= */
 
-function renderSpinner(label = "") {
+function renderSpinner(label = "Cargando") {
   return `
-    <span class="clientes-inline-loading">
-      <span class="clientes-inline-spinner" aria-hidden="true"></span>
-      ${
-        label
-          ? `<span class="clientes-inline-loading-text">${escapeHtml(label)}</span>`
-          : ""
-      }
-    </span>
+    <span class="clientes-spinner" aria-hidden="true"></span>
+    <span class="clientes-visually-hidden">${escapeHtml(label)}</span>
   `;
 }
 
-function renderLoaderOnly(label = "Cargando") {
-  return `
-    <span
-      class="clientes-loader-only"
-      role="status"
-      aria-label="${escapeHtml(label)}"
-      data-tooltip="${escapeHtml(label)}"
-    >
-      <span class="clientes-inline-spinner" aria-hidden="true"></span>
-    </span>
-  `;
+function getAvatarToneClass(item = {}) {
+  const seed = getClienteId(item) || getClienteEmail(item) || getClienteName(item);
+  return `clientes-avatar-tone-${hashString(seed) % AVATAR_TONE_COUNT}`;
 }
 
 function renderAvatar(item = {}) {
-  const fullName = getClienteName(item);
-  const initials = getClienteInitials(item);
   const avatarUrl = getClienteAvatarUrl(item);
-  const tone = getClienteAvatarTone(item);
-  const hasImage = isRenderableImageUrl(avatarUrl);
+  const initials = getClienteInitials(item);
+  const tone = getAvatarToneClass(item);
 
   return `
-    <div
-      class="clientes-avatar clientes-avatar--tone-${escapeHtml(String(tone))}${hasImage ? " has-image" : " clientes-avatar--fallback"}"
-      aria-label="${escapeHtml(fullName)}"
-      data-tooltip="${escapeHtml(fullName)}"
-      data-avatar-url="${escapeHtml(hasImage ? avatarUrl : "")}"
-      data-has-avatar="${hasImage ? "true" : "false"}"
-    >
+    <span class="clientes-avatar ${tone} ${avatarUrl ? "has-image" : "is-fallback"}" data-has-avatar="${avatarUrl ? "true" : "false"}">
       ${
-        hasImage
-          ? `
-            <img
-              class="clientes-avatar-img"
-              src="${escapeHtml(avatarUrl)}"
-              alt="${escapeHtml(fullName)}"
-              loading="lazy"
-              decoding="async"
-              referrerpolicy="no-referrer"
-            />
-          `
-          : ""
+        avatarUrl && isRenderableImageUrl(avatarUrl)
+          ? `<img class="clientes-avatar-img" src="${attr(avatarUrl)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">`
+          : `<span class="clientes-avatar-fallback">${escapeHtml(initials)}</span>`
       }
-
-      <span class="clientes-avatar-fallback">${escapeHtml(initials)}</span>
-    </div>
+    </span>
   `;
 }
 
 function renderStatusChip(item = {}) {
-  const rawStatus = getStatusValue(item);
-  const key = getStatusKey(rawStatus);
-  const label = getStatusLabel(rawStatus);
+  const bucket = statusBucket(item);
 
   return `
-    <span class="clientes-chip clientes-chip--${escapeHtml(key)}">
-      <span class="clientes-chip-dot" aria-hidden="true"></span>
-      ${escapeHtml(label)}
+    <span class="clientes-status-chip clientes-status-chip--${attr(bucket)} is-${attr(bucket)}" data-status="${attr(bucket)}">
+      <span class="clientes-status-dot" aria-hidden="true"></span>
+      <span>${escapeHtml(getStatusLabel(bucket))}</span>
     </span>
   `;
 }
 
-function renderTierChip(item = {}) {
-  const rawTier = getTierValue(item);
-  const key = getTierKey(rawTier);
-  const label = getTierLabel(rawTier);
+function renderTypeChip(item = {}) {
+  const type = getClienteType(item);
 
   return `
-    <span class="clientes-chip clientes-chip--tier-${escapeHtml(key)}">
-      <span class="clientes-chip-dot" aria-hidden="true"></span>
-      ${escapeHtml(label)}
+    <span class="clientes-type-chip clientes-type-chip--${attr(type)}" data-client-type="${attr(type)}">
+      ${escapeHtml(getClienteTypeLabel(item))}
     </span>
   `;
 }
 
-function renderActionButton({
-  action = "detail",
-  clienteId = "",
-  label = "Detalle",
-  loadingLabel = "Cargando detalle",
-  loading = false,
-  disabled = false,
-  iconName = "eye",
-  tooltip = "",
-} = {}) {
-  const finalDisabled = disabled || loading;
-  const finalTooltip = tooltip || label;
+function renderActionButton(item = {}) {
+  const id = getClienteId(item);
 
   return `
     <button
       type="button"
-      class="clientes-detail-btn${loading ? " is-loading" : ""}"
-      data-clientes-action="${escapeHtml(action)}"
-      data-action="${escapeHtml(action === "detail" ? "open-cliente" : action)}"
-      data-cliente-id="${escapeHtml(clienteId)}"
-      data-client-id="${escapeHtml(clienteId)}"
-      data-customer-id="${escapeHtml(clienteId)}"
-      data-tooltip="${escapeHtml(finalTooltip)}"
-      aria-label="${escapeHtml(finalTooltip)}"
-      ${finalDisabled ? 'disabled aria-disabled="true"' : ""}
-      ${loading ? 'aria-busy="true"' : ""}
+      class="clientes-detail-btn"
+      data-clientes-action="detail"
+      data-action="detail"
+      data-client-id="${attr(id)}"
+      data-cliente-id="${attr(id)}"
+      aria-label="Ver detalle de ${attr(getClienteName(item))}"
     >
-      ${
-        loading
-          ? renderLoaderOnly(loadingLabel)
-          : `
-            <span class="clientes-action-icon">${icon(iconName)}</span>
-            <span class="clientes-btn-text">${escapeHtml(label)}</span>
-          `
-      }
+      ${icon("eye")}
+      <span>Ver</span>
     </button>
   `;
 }
 
-function renderRow(item = {}, state = {}) {
-  const runtime = safeObject(state);
-
-  const clienteId = getClienteId(item);
-  const code = getClienteCode(item);
-  const name = getClienteName(item);
-  const preview = truncate(getClienteDescription(item), 96);
+function renderRow(item = {}) {
+  const id = getClienteId(item);
+  const status = statusBucket(item);
   const email = getClienteEmail(item);
-  const city = getClienteLocation(item);
-  const manager = getClienteManager(item);
-  const createdAtRaw = getCreatedAt(item);
-  const updatedAtRaw = getUpdatedAt(item);
-  const createdAt = formatDateShort(createdAtRaw);
-  const updatedAt = updatedAtRaw ? formatLastUpdate(updatedAtRaw) : "Sin actualización";
-  const statusKey = getStatusKey(getStatusValue(item));
-
-  const openingClienteId = safeText(
-    first(
-      runtime.openingClienteId,
-      runtime.openingClientId,
-      runtime.openingCustomerId,
-      runtime.detailClienteId,
-      runtime.detailClientId,
-      runtime.loadingClienteId,
-      runtime.loadingClientId
-    ),
-    ""
-  );
-
-  const isOpening = Boolean(openingClienteId && openingClienteId === clienteId);
+  const phone = getClientePhone(item);
+  const location = getClienteLocation(item);
+  const nif = getClienteNif(item);
+  const description = [email, nif || phone].filter(Boolean).join(" · ");
+  const amount = safeNumber(item.totalAmount, 0);
 
   return `
     <tr
-      class="clientes-row clientes-row--${escapeHtml(statusKey)}"
+      class="clientes-row clientes-row--${attr(status)}"
+      data-client-row="true"
       data-cliente-row="true"
-      data-cliente-id="${escapeHtml(clienteId)}"
-      data-client-id="${escapeHtml(clienteId)}"
-      data-customer-id="${escapeHtml(clienteId)}"
+      data-client-id="${attr(id)}"
+      data-cliente-id="${attr(id)}"
+      data-clientes-action="detail"
+      data-action="detail"
+      tabindex="0"
     >
-      <td class="clientes-cell clientes-cell--main">
+      <td class="clientes-cell clientes-cell--main" data-column="main">
         <div class="clientes-main">
           ${renderAvatar(item)}
 
           <div class="clientes-main-copy">
-            <div class="clientes-client-line">
-              <span class="clientes-client-id">${escapeHtml(code)}</span>
-              <span class="clientes-role-pill">Cliente</span>
-            </div>
+            <span class="clientes-code">${escapeHtml(getClienteCode(item))}</span>
+            <strong class="clientes-name">${escapeHtml(getClienteName(item))}</strong>
+            <span class="clientes-description">${escapeHtml(description || "Sin datos fiscales")}</span>
 
-            <div class="clientes-client-subject">${escapeHtml(name)}</div>
-            <div class="clientes-client-description">${escapeHtml(preview)}</div>
+            <span class="clientes-row-tags">
+              ${renderTypeChip(item)}
+              ${nif ? `<span class="clientes-nif-chip">${escapeHtml(nif)}</span>` : ""}
+            </span>
           </div>
         </div>
       </td>
 
-      <td class="clientes-cell clientes-cell--status">
+      <td class="clientes-cell clientes-cell--status" data-column="status">
         ${renderStatusChip(item)}
       </td>
 
-      <td class="clientes-cell clientes-cell--tier">
-        ${renderTierChip(item)}
+      <td class="clientes-cell clientes-cell--date" data-column="date">
+        <span class="clientes-date">${escapeHtml(formatDateShort(getCreatedAt(item)))}</span>
       </td>
 
-      <td class="clientes-cell clientes-cell--date">
-        <span
-          class="clientes-date-inline"
-          data-tooltip="${escapeHtml(formatDateTime(createdAtRaw))}"
-        >
-          ${escapeHtml(createdAt)}
-        </span>
+      <td class="clientes-cell clientes-cell--email" data-column="email">
+        <span class="clientes-email">${escapeHtml(email || "Sin email")}</span>
       </td>
 
-      <td class="clientes-cell clientes-cell--email">
-        <span
-          class="clientes-email-inline"
-          data-tooltip="${escapeHtml(email)}"
-        >
-          ${escapeHtml(email)}
-        </span>
+      <td class="clientes-cell clientes-cell--location" data-column="location">
+        <span class="clientes-location">${escapeHtml(location || "Sin ciudad")}</span>
       </td>
 
-      <td class="clientes-cell clientes-cell--location">
-        <span
-          class="clientes-location-inline"
-          data-tooltip="${escapeHtml(city)}"
-        >
-          ${escapeHtml(city)}
-        </span>
+      <td class="clientes-cell clientes-cell--amount" data-column="amount">
+        <span class="clientes-amount">${escapeHtml(formatAmount(amount))}</span>
       </td>
 
-      <td class="clientes-cell clientes-cell--manager">
-        <span
-          class="clientes-manager-inline"
-          data-tooltip="${escapeHtml(manager)}"
-        >
-          ${escapeHtml(manager)}
-        </span>
-      </td>
-
-      <td class="clientes-cell clientes-cell--activity">
-        <span
-          class="clientes-activity-inline"
-          data-tooltip="${escapeHtml(updatedAtRaw ? formatDateTime(updatedAtRaw) : "Sin actualización")}"
-        >
-          ${escapeHtml(updatedAt)}
-        </span>
-      </td>
-
-      <td class="clientes-cell clientes-cell--actions">
-        ${renderActionButton({
-          clienteId,
-          loading: isOpening,
-          label: "Detalle",
-          loadingLabel: "Cargando detalle",
-          iconName: "eye",
-          tooltip: "Abrir detalle de cliente",
-        })}
+      <td class="clientes-cell clientes-cell--actions" data-column="actions">
+        ${renderActionButton(item)}
       </td>
     </tr>
   `;
 }
 
-function renderPagination(pagination = {}, state = {}) {
-  const runtime = safeObject(state);
-  const loading = Boolean(runtime.loading);
-  const refreshing = Boolean(runtime.refreshing);
+function renderLoadMore(vm = {}) {
+  if (!vm.hasMore) return "";
+
+  const nextLimit = Math.max(
+    safeNumber(vm.visibleLimit, DEFAULT_VISIBLE_ROWS) + VISIBLE_STEP,
+    safeNumber(vm.visibleCount, 0) + VISIBLE_STEP
+  );
 
   return `
-    <div class="clientes-pagination" aria-label="Paginación de clientes">
+    <div class="clientes-load-more" aria-label="Cargar más clientes">
       <button
         type="button"
-        class="clientes-pagination-btn"
-        data-clientes-action="prev-page"
-        data-action="prev-page"
-        data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
-        ${!pagination.hasPrev || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+        class="clientes-load-more-btn clientes-pagination-btn clientes-pagination-btn--next"
+        data-clientes-action="load-more"
+        data-action="load-more"
+        data-visible-limit="${attr(String(nextLimit))}"
+        ${vm.loading || vm.refreshing ? 'disabled aria-disabled="true"' : ""}
       >
-        Anterior
+        Cargar más
       </button>
 
-      <span class="clientes-pagination-status">
-        ${escapeHtml(`${pagination.currentPage}/${pagination.totalPages}`)}
+      <span class="clientes-load-more-status clientes-pagination-status">
+        ${escapeHtml(`Mostrando ${vm.visibleCount} de ${vm.filteredCount}`)}
       </span>
-
-      <button
-        type="button"
-        class="clientes-pagination-btn clientes-pagination-btn--next"
-        data-clientes-action="next-page"
-        data-action="next-page"
-        data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
-        ${!pagination.hasNext || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
-      >
-        Siguiente
-      </button>
     </div>
   `;
 }
 
-function renderSearch(input = {}) {
-  const searchQuery = getSearchQuery(input);
+function renderSearch(vm = {}) {
+  const search = vm.searchQuery;
 
   return `
-    <div class="clientes-search" role="search" aria-label="Buscar clientes">
-      <span class="clientes-search-icon" aria-hidden="true">
-        ${icon("search")}
-      </span>
+    <label class="clientes-search">
+      <span class="clientes-search-icon">${icon("search")}</span>
 
       <input
-        id="clientes-search-input"
         class="clientes-search-input"
         type="search"
-        value="${escapeHtml(searchQuery)}"
-        placeholder="Buscar nombre, email, ciudad, responsable, teléfono, ID..."
+        value="${attr(search)}"
+        placeholder="Buscar cliente, email, NIF..."
+        data-clientes-search-input="true"
+        data-search-input="clientes"
         autocomplete="off"
         spellcheck="false"
-        data-clientes-action="search"
-        data-action="search-clientes"
-        data-clientes-search-input="true"
-        aria-label="Buscar clientes por nombre, email, ciudad, responsable, teléfono o identificador"
-      />
+      >
 
-      ${
-        searchQuery
-          ? `
-            <button
-              type="button"
-              class="clientes-search-clear"
-              data-clientes-action="clear-search"
-              data-action="clear-search"
-              data-tooltip="Limpiar búsqueda"
-              aria-label="Limpiar búsqueda"
-            >
-              ${icon("close")}
-            </button>
-          `
-          : ""
-      }
-    </div>
+      <button
+        type="button"
+        class="clientes-search-clear"
+        data-clientes-action="clear-search"
+        data-action="clear-search"
+        ${search ? "" : "hidden"}
+        aria-label="Limpiar búsqueda"
+      >
+        ${icon("close")}
+      </button>
+    </label>
   `;
 }
 
-function renderFilters(input = {}, pagination = {}) {
-  const data = safeObject(input);
-  const items = getResolvedItems(data);
-  const counts = computeFilterCounts(items, data);
-  const activeFilter = normalizeFilter(pagination.activeFilter || getActiveFilter(data));
+function renderFilters(vm = {}) {
+  const stats = vm.stats;
+  const active = vm.activeFilter;
+  const counts = {
+    all: vm.items.length,
+    active: stats.activeCount,
+    pending: stats.pendingCount,
+    blocked: stats.blockedCount,
+    vip: stats.vipCount,
+  };
 
   return `
-    <div class="clientes-filters" aria-label="Filtros y búsqueda de clientes">
-      <div class="clientes-filter-pills">
+    <div class="clientes-filters">
+      <div class="clientes-filter-pills" role="toolbar" aria-label="Filtros de clientes">
         ${FILTERS.map((filter) => {
-          const isActive = filter.key === activeFilter;
-          const count = counts[filter.key] ?? 0;
+          const selected = active === filter.key;
 
           return `
             <button
               type="button"
-              class="clientes-filter-pill${isActive ? " is-active" : ""}"
+              class="clientes-filter-pill ${selected ? "is-active" : ""}"
               data-clientes-action="filter"
-              data-action="filter-clientes"
-              data-filter="${escapeHtml(filter.key)}"
-              data-filter-status="${escapeHtml(filter.key)}"
-              aria-pressed="${isActive ? "true" : "false"}"
+              data-action="filter"
+              data-filter="${attr(filter.key)}"
+              aria-pressed="${selected ? "true" : "false"}"
             >
               <span>${escapeHtml(filter.label)}</span>
-              <strong>${escapeHtml(String(count))}</strong>
+              <strong>${escapeHtml(String(counts[filter.key] ?? 0))}</strong>
             </button>
           `;
         }).join("")}
       </div>
 
-      ${renderSearch(data)}
+      ${renderSearch(vm)}
     </div>
   `;
 }
 
-function renderEmptyContent({
-  hasError = false,
-  filtering = false,
-  searchQuery = "",
-  message = "",
-  restricted = false,
-} = {}) {
-  if (restricted) {
-    return `
-      <div class="clientes-empty clientes-empty--forbidden">
-        <div class="clientes-empty-icon" aria-hidden="true">${icon("shield")}</div>
-        <h3 class="clientes-empty-title">Acceso restringido</h3>
-        <p class="clientes-empty-text">La vista de clientes está reservada para administradores.</p>
-      </div>
-    `;
-  }
+function renderEmptyContent(vm = {}) {
+  const activeCriteria = [
+    vm.activeFilter !== "all" ? `Filtro: ${vm.activeFilter}` : "",
+    vm.searchQuery ? `Búsqueda: ${vm.searchQuery}` : "",
+  ].filter(Boolean);
 
   return `
-    <div class="clientes-empty">
-      <div class="clientes-empty-icon" aria-hidden="true">
-        ${hasError ? icon("alert") : icon("briefcase")}
-      </div>
+    <tr class="clientes-empty-row">
+      <td colspan="${CLIENTES_TABLE_COLUMNS.length}">
+        <div class="clientes-empty">
+          <div class="clientes-empty-icon" aria-hidden="true">${icon("users")}</div>
 
-      <h3 class="clientes-empty-title">
-        ${
-          hasError
-            ? "No se pudieron cargar los clientes"
-            : filtering
-              ? "No hay clientes con este criterio"
-              : "No hay clientes para mostrar"
-        }
-      </h3>
+          <div class="clientes-empty-copy">
+            <strong>No hay clientes para mostrar.</strong>
+            <span>
+              ${
+                activeCriteria.length
+                  ? "Prueba a limpiar filtros o cambiar la búsqueda."
+                  : "Todavía no hay clientes registrados."
+              }
+            </span>
+          </div>
 
-      <p class="clientes-empty-text">
-        ${
-          hasError
-            ? escapeHtml(safeText(message, "Puedes reintentar la carga desde el botón de actualizar."))
-            : filtering
-              ? searchQuery
-                ? `No se encontraron clientes para “${escapeHtml(searchQuery)}”. Prueba con otro nombre, email, ciudad, responsable o identificador.`
-                : "Cambia el filtro activo para volver al listado completo."
-              : "Cuando haya clientes registrados aparecerán aquí con su estado, nivel, alta, email, ciudad, responsable, última actualización y acciones disponibles."
-        }
-      </p>
-
-      ${
-        hasError
-          ? `
-            <button
-              type="button"
-              class="clientes-btn clientes-btn--primary"
-              data-clientes-action="retry"
-              data-action="retry"
-            >
-              ${icon("refresh")}
-              <span class="clientes-btn-text">Reintentar</span>
-            </button>
-          `
-          : filtering
-            ? `
-              <button
-                type="button"
-                class="clientes-btn"
-                data-clientes-action="clear-filters"
-                data-action="clear-filters"
-              >
-                ${icon("close")}
-                <span class="clientes-btn-text">Limpiar filtros</span>
-              </button>
-            `
-            : `
-              <button
-                type="button"
-                class="clientes-btn clientes-btn--primary clientes-btn--create"
-                data-clientes-action="create"
-                data-action="create-cliente"
-              >
-                ${icon("plus")}
-                <span class="clientes-btn-text">Crear cliente</span>
-              </button>
-            `
-      }
-    </div>
+          ${
+            activeCriteria.length
+              ? `
+                <button
+                  type="button"
+                  class="clientes-btn clientes-btn--ghost"
+                  data-clientes-action="clear-filters"
+                  data-action="clear-filters"
+                >
+                  Limpiar filtros
+                </button>
+              `
+              : ""
+          }
+        </div>
+      </td>
+    </tr>
   `;
 }
 
-function renderTableLoading(rows = DEFAULT_PAGE_SIZE) {
-  const totalRows = Math.max(1, safeNumber(rows, DEFAULT_PAGE_SIZE));
+function renderTableLoading(rows = 6) {
+  const count = clamp(rows, 1, 12);
 
   return `
-    <div class="clientes-table-loading" aria-hidden="true">
-      ${Array.from({ length: totalRows })
-        .map(
-          () => `
-            <div class="clientes-table-loading-row">
-              <div class="clientes-skeleton clientes-skeleton--avatar"></div>
+    <div class="clientes-table-shell">
+      <table class="clientes-table" aria-busy="true">
+        <thead>
+          <tr>
+            ${CLIENTES_TABLE_COLUMNS.map((column) => `<th class="${attr(column.colClass)}">${escapeHtml(column.label)}</th>`).join("")}
+          </tr>
+        </thead>
 
-              <div class="clientes-table-loading-copy">
-                <div class="clientes-skeleton clientes-skeleton--xs"></div>
-                <div class="clientes-skeleton clientes-skeleton--lg"></div>
-                <div class="clientes-skeleton clientes-skeleton--md"></div>
-              </div>
-
-              <div class="clientes-skeleton clientes-skeleton--pill"></div>
-              <div class="clientes-skeleton clientes-skeleton--pill"></div>
-              <div class="clientes-skeleton clientes-skeleton--date"></div>
-              <div class="clientes-skeleton clientes-skeleton--email"></div>
-              <div class="clientes-skeleton clientes-skeleton--date"></div>
-              <div class="clientes-skeleton clientes-skeleton--date"></div>
-              <div class="clientes-skeleton clientes-skeleton--date"></div>
-              <div class="clientes-skeleton clientes-skeleton--btn"></div>
-            </div>
-          `
-        )
-        .join("")}
+        <tbody>
+          ${Array.from({ length: count }).map(() => `
+            <tr class="clientes-row clientes-row--skeleton">
+              ${CLIENTES_TABLE_COLUMNS.map(() => `
+                <td class="clientes-cell">
+                  <span class="clientes-skeleton-line"></span>
+                </td>
+              `).join("")}
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
     </div>
   `;
 }
 
 function renderRefreshOverlay() {
   return `
-    <div class="clientes-refresh-overlay" aria-live="polite">
-      <div class="clientes-refresh-card">
-        ${renderSpinner("Actualizando clientes...")}
-      </div>
+    <div class="clientes-refresh-overlay" role="status" aria-live="polite">
+      ${renderSpinner("Actualizando clientes")}
+      <span>Actualizando…</span>
     </div>
   `;
 }
 
-
 /* =========================================================
-   HEADER
+   EXPORTED PARTIALS
 ========================================================= */
 
 export function renderHeader(input = {}) {
-  const data = safeObject(input);
-  const items = getResolvedItems(data);
-  const state = safeObject(data.state);
-
-  const stats = computeStats(items);
-  const remoteCount = resolveRemoteCount(data, items);
-
-  const updatedAt = first(
-    data.lastUpdatedAt,
-    data.updatedAt,
-    state.lastSyncAt,
-    state.lastUpdatedAt,
-    state.updatedAt,
-    ...items.map((item) => getUpdatedAt(item))
-  );
-
-  const title = safeText(
-    first(data.title, state.title, "Centro de control de clientes"),
-    "Centro de control de clientes"
-  );
-
-  const subtitle = safeText(
-    first(
-      data.subtitle,
-      state.subtitle,
-      "Consulta clientes registrados, revisa su estado, nivel de cuenta, responsable y última actualización desde una vista clara, compacta y alineada con el sistema."
-    ),
-    ""
-  );
-
-  const creating = Boolean(first(state.creating, state.creatingCliente, data.creating));
-  const refreshing = Boolean(first(state.refreshing, data.refreshing));
-  const loading = Boolean(first(state.loading, data.loading));
-  const exporting = Boolean(first(state.exporting, data.exporting));
+  const vm = getViewModel(input);
+  const stats = vm.stats;
 
   return `
     <section class="clientes-hero">
       <div class="clientes-hero-top">
         <div class="clientes-hero-copy">
-          <h1 class="clientes-page-title">${escapeHtml(title)}</h1>
-          <p class="clientes-page-subtitle">${escapeHtml(subtitle)}</p>
+          <h1 class="clientes-title clientes-page-title">Tus clientes</h1>
+          <p class="clientes-subtitle clientes-page-subtitle">
+            Consulta clientes, revisa actividad y gestiona contactos desde un único panel.
+          </p>
         </div>
 
         <div class="clientes-hero-actions">
           <button
+            id="clientes-create-btn"
             type="button"
+            class="clientes-btn clientes-btn--create clientes-btn--primary"
+            data-clientes-action="create"
+            data-action="create"
+          >
+            ${icon("plus")}
+            <span>Nuevo cliente</span>
+          </button>
+
+          <button
             id="clientes-refresh-btn"
-            class="clientes-btn${refreshing ? " is-loading" : ""}"
+            type="button"
+            class="clientes-btn"
             data-clientes-action="refresh"
             data-action="refresh"
-            ${refreshing || loading ? 'disabled aria-busy="true"' : ""}
+            ${vm.refreshing ? 'disabled aria-disabled="true"' : ""}
           >
-            ${
-              refreshing
-                ? renderSpinner("Actualizando...")
-                : `${icon("refresh")}<span class="clientes-btn-text">Actualizar</span>`
-            }
-          </button>
-
-          <button
-            type="button"
-            id="clientes-export-btn"
-            class="clientes-btn${exporting ? " is-loading" : ""}"
-            data-clientes-action="export"
-            data-action="export-csv"
-            ${loading || refreshing || exporting || !items.length ? 'disabled aria-disabled="true"' : ""}
-          >
-            ${
-              exporting
-                ? renderSpinner("Exportando...")
-                : `${icon("export")}<span class="clientes-btn-text">Exportar CSV</span>`
-            }
-          </button>
-
-          <button
-            type="button"
-            id="clientes-create-btn"
-            class="clientes-btn clientes-btn--primary clientes-btn--create${creating ? " is-loading" : ""}"
-            data-clientes-action="create"
-            data-action="create-cliente"
-            ${creating ? 'disabled aria-busy="true"' : ""}
-          >
-            ${
-              creating
-                ? renderSpinner("Abriendo...")
-                : `${icon("plus")}<span class="clientes-btn-text">Nuevo cliente</span>`
-            }
+            ${icon("refresh")}
+            <span>${vm.refreshing ? "Actualizando" : "Actualizar"}</span>
           </button>
         </div>
       </div>
 
       <div class="clientes-hero-meta">
         <span class="clientes-meta-pill">
-          ${icon("shield")}
-          Panel admin
+          ${icon("users")}
+          <span>${escapeHtml(`${vm.items.length} clientes registrados`)}</span>
         </span>
 
         <span class="clientes-meta-pill">
-          ${icon("briefcase")}
-          ${escapeHtml(`${remoteCount} clientes registrados`)}
+          ${icon("clock")}
+          <span>${vm.lastSyncAt ? `Última actualización · ${escapeHtml(formatRelativeDate(vm.lastSyncAt))}` : "Pendiente de sincronizar"}</span>
         </span>
 
         <span class="clientes-meta-pill">
-          ${icon("refresh")}
-          ${
-            updatedAt
-              ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`)
-              : "Sin sincronización reciente"
-          }
-        </span>
-
-        <span class="clientes-meta-pill">
-          ${icon("star")}
-          ${escapeHtml(`${stats.vipCount} prioritarios`)}
+          ${icon("euro")}
+          <span>${escapeHtml(formatAmount(stats.totalAmount))}</span>
         </span>
       </div>
 
       <div class="clientes-stats">
         <article class="clientes-stat-card clientes-stat-card--total">
-          <div class="clientes-stat-label">Clientes visibles</div>
-          <div class="clientes-stat-value">${escapeHtml(String(stats.total))}</div>
-          <div class="clientes-stat-text">Registros cargados en la colección actual.</div>
+          <span class="clientes-stat-label">Clientes</span>
+          <strong class="clientes-stat-value">${escapeHtml(String(stats.total))}</strong>
+          <span class="clientes-stat-text">Registros totales visibles.</span>
         </article>
 
         <article class="clientes-stat-card clientes-stat-card--active">
-          <div class="clientes-stat-label">Activos</div>
-          <div class="clientes-stat-value">${escapeHtml(String(stats.activeCount))}</div>
-          <div class="clientes-stat-text">Cuentas operativas o habilitadas actualmente.</div>
+          <span class="clientes-stat-label">Activos</span>
+          <strong class="clientes-stat-value">${escapeHtml(String(stats.activeCount))}</strong>
+          <span class="clientes-stat-text">Clientes operativos.</span>
         </article>
 
         <article class="clientes-stat-card clientes-stat-card--pending">
-          <div class="clientes-stat-label">Pendientes</div>
-          <div class="clientes-stat-value">${escapeHtml(String(stats.pendingCount))}</div>
-          <div class="clientes-stat-text">Cuentas pendientes de completar o revisar.</div>
+          <span class="clientes-stat-label">Pendientes</span>
+          <strong class="clientes-stat-value">${escapeHtml(String(stats.pendingCount))}</strong>
+          <span class="clientes-stat-text">Altas o validaciones pendientes.</span>
         </article>
 
         <article class="clientes-stat-card clientes-stat-card--blocked">
-          <div class="clientes-stat-label">Bloqueados / VIP</div>
-          <div class="clientes-stat-value">${escapeHtml(`${stats.blockedCount} / ${stats.vipCount}`)}</div>
-          <div class="clientes-stat-text">Cuentas restringidas y clientes prioritarios.</div>
+          <span class="clientes-stat-label">Bloqueados</span>
+          <strong class="clientes-stat-value">${escapeHtml(String(stats.blockedCount))}</strong>
+          <span class="clientes-stat-text">Cuentas restringidas o inactivas.</span>
         </article>
       </div>
     </section>
   `;
 }
 
-
-/* =========================================================
-   LOADING / ERROR
-========================================================= */
-
-export function renderLoadingState(options = {}) {
-  const rows =
-    typeof options === "number"
-      ? options
-      : safeNumber(options?.rows, DEFAULT_PAGE_SIZE);
+export function renderLoadingState(input = {}) {
+  const vm = getViewModel(input);
 
   return `
-    <section class="clientes-history">
-      ${renderTableLoading(Math.max(3, safeNumber(rows, DEFAULT_PAGE_SIZE)))}
+    <section class="clientes-view-root" data-clientes-scope="true" data-view="clientes" data-loading="true">
+      ${renderHeader({ ...input, loading: true })}
+
+      <section class="clientes-history">
+        <header class="clientes-history-head">
+          <div class="clientes-history-copy">
+            <h2 class="clientes-history-title">Historial de clientes</h2>
+            <p class="clientes-history-subtitle">Cargando clientes…</p>
+          </div>
+
+          ${renderFilters(vm)}
+        </header>
+
+        <div class="clientes-table-wrap">
+          ${renderTableLoading(6)}
+        </div>
+      </section>
     </section>
   `;
 }
 
-export function renderErrorState(message = "No se pudieron cargar los clientes.") {
+export function renderErrorState(input = {}) {
+  const vm = getViewModel(input);
+  const error = safeText(vm.error, "No se pudieron cargar los clientes.");
+
   return `
-    <section class="clientes-error">
-      <h3 class="clientes-error-title">No se pudo renderizar la vista de clientes</h3>
-      <p class="clientes-error-text">${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}</p>
+    <section class="clientes-view-root" data-clientes-scope="true" data-view="clientes" data-error="true">
+      <div class="clientes-error" role="alert">
+        <div class="clientes-error-icon" aria-hidden="true">${icon("alert")}</div>
+
+        <div class="clientes-error-copy">
+          <h1>Error de clientes</h1>
+          <p>${escapeHtml(error)}</p>
+        </div>
+
+        <button
+          type="button"
+          class="clientes-btn"
+          data-clientes-action="retry"
+          data-action="retry"
+        >
+          ${icon("refresh")}
+          <span>Reintentar</span>
+        </button>
+      </div>
     </section>
   `;
 }
 
 export function renderAccessDeniedState() {
   return `
-    <section class="clientes-history">
-      ${renderEmptyContent({ restricted: true })}
+    <section class="clientes-view-root" data-clientes-scope="true" data-view="clientes" data-forbidden="true">
+      <div class="clientes-error clientes-error--forbidden" role="alert">
+        <div class="clientes-error-icon" aria-hidden="true">${icon("shield")}</div>
+
+        <div class="clientes-error-copy">
+          <h1>Acceso restringido</h1>
+          <p>No tienes permisos suficientes para acceder a la gestión de clientes.</p>
+        </div>
+      </div>
     </section>
   `;
 }
 
-export function renderEmptyClientesState(options = {}) {
-  return `
-    <section class="clientes-history">
-      ${renderEmptyContent(options)}
-    </section>
-  `;
-}
-
-
-/* =========================================================
-   TABLE
-========================================================= */
-
-export function renderTable(input = {}) {
-  const data = safeObject(input);
-  const items = getResolvedItems(data);
-  const state = safeObject(data.state);
-
-  const pagination = getPagination(items, {
-    ...data,
-    remoteCount: resolveRemoteCount(data, items),
-    pageSize: DEFAULT_PAGE_SIZE,
-  });
-
-  const loading = Boolean(first(state.loading, data.loading));
-  const refreshing = Boolean(first(state.refreshing, data.refreshing));
-  const hasError = Boolean(safeText(first(state.error, data.error), ""));
-  const errorMessage = safeText(first(state.error, data.error), "");
-
-  const showInitialLoading = loading && !pagination.pageItems.length;
-  const showRefreshOverlay = refreshing && pagination.pageItems.length;
-
-  const activeFilterLabel = getFilterLabel(pagination.activeFilter);
-  const searchQuery = pagination.searchQuery;
-
-  const activeCriteria = [
-    pagination.activeFilter !== "all" ? activeFilterLabel : "",
-    searchQuery ? `búsqueda “${searchQuery}”` : "",
-  ].filter(Boolean);
-
-  const subtitle = showInitialLoading
-    ? "Cargando clientes..."
-    : pagination.filtering
-      ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · ${activeCriteria.join(" · ")}`
-      : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`;
+export function renderEmptyClientesState(input = {}) {
+  const vm = getViewModel(input);
 
   return `
     <section class="clientes-history">
-      <div class="clientes-history-head">
+      <header class="clientes-history-head">
         <div class="clientes-history-copy">
           <h2 class="clientes-history-title">Historial de clientes</h2>
-          <p class="clientes-history-subtitle">
-            ${escapeHtml(subtitle)}
-          </p>
+          <p class="clientes-history-subtitle">Sin clientes registrados.</p>
         </div>
 
-        ${renderPagination(pagination, state)}
-        ${renderFilters(data, pagination)}
+        ${renderFilters(vm)}
+      </header>
+
+      <div class="clientes-table-wrap">
+        <div class="clientes-table-shell">
+          <table class="clientes-table">
+            <thead>
+              <tr>
+                ${CLIENTES_TABLE_COLUMNS.map((column) => `<th class="${attr(column.colClass)}">${escapeHtml(column.label)}</th>`).join("")}
+              </tr>
+            </thead>
+            <tbody>
+              ${renderEmptyContent(vm)}
+            </tbody>
+          </table>
+        </div>
       </div>
-
-      ${
-        showInitialLoading
-          ? renderTableLoading(Math.max(3, pagination.pageSize || DEFAULT_PAGE_SIZE))
-          : `
-            <div class="clientes-table-wrap${refreshing ? " is-refreshing" : ""}">
-              ${showRefreshOverlay ? renderRefreshOverlay() : ""}
-
-              ${
-                pagination.pageItems.length
-                  ? `
-                    <div class="clientes-table-shell">
-                      <table class="clientes-table" role="table" aria-label="Listado de clientes">
-                        <colgroup>
-                          <col class="clientes-table-col clientes-table-col--main">
-                          <col class="clientes-table-col clientes-table-col--status">
-                          <col class="clientes-table-col clientes-table-col--tier">
-                          <col class="clientes-table-col clientes-table-col--date">
-                          <col class="clientes-table-col clientes-table-col--email">
-                          <col class="clientes-table-col clientes-table-col--location">
-                          <col class="clientes-table-col clientes-table-col--manager">
-                          <col class="clientes-table-col clientes-table-col--activity">
-                          <col class="clientes-table-col clientes-table-col--actions">
-                        </colgroup>
-
-                        <thead>
-                          <tr>
-                            <th scope="col">Cliente</th>
-                            <th scope="col">Estado</th>
-                            <th scope="col">Nivel</th>
-                            <th scope="col">Alta</th>
-                            <th scope="col">Email</th>
-                            <th scope="col">Ciudad</th>
-                            <th scope="col">Responsable</th>
-                            <th scope="col">Actualización</th>
-                            <th scope="col">Acciones</th>
-                          </tr>
-                        </thead>
-
-                        <tbody>
-                          ${pagination.pageItems.map((item) => renderRow(item, state)).join("")}
-                        </tbody>
-                      </table>
-                    </div>
-                  `
-                  : renderEmptyContent({
-                      hasError,
-                      filtering: pagination.filtering,
-                      searchQuery,
-                      message: errorMessage,
-                    })
-              }
-            </div>
-          `
-      }
     </section>
   `;
 }
 
+export function renderTable(input = {}) {
+  const vm = getViewModel(input);
 
-/* =========================================================
-   BACKWARD COMPAT EXPORTS
-========================================================= */
+  const subtitle = vm.filtering
+    ? `Mostrando ${vm.visibleCount} de ${vm.filteredCount} · filtros activos`
+    : `Mostrando ${vm.visibleCount} de ${vm.totalCount}`;
 
-export function renderEmptyState(options = {}) {
   return `
     <section class="clientes-history">
-      ${renderEmptyContent({
-        hasError: Boolean(options?.hasError),
-        filtering: Boolean(options?.filtering),
-        searchQuery: safeText(options?.searchQuery, ""),
-        message: safeText(options?.message, ""),
-      })}
+      <header class="clientes-history-head">
+        <div class="clientes-history-copy">
+          <h2 class="clientes-history-title">Historial de clientes</h2>
+          <p class="clientes-history-subtitle">${escapeHtml(subtitle)}</p>
+        </div>
+
+        <button
+          type="button"
+          class="clientes-btn"
+          data-clientes-action="export"
+          data-action="export"
+          ${!vm.items.length ? 'disabled aria-disabled="true"' : ""}
+        >
+          ${icon("export")}
+          <span>Exportar</span>
+        </button>
+
+        ${renderFilters(vm)}
+      </header>
+
+      <div class="clientes-table-wrap ${vm.refreshing ? "is-refreshing" : ""}">
+        ${
+          vm.loading && !vm.items.length
+            ? renderTableLoading(6)
+            : `
+              <div class="clientes-table-shell">
+                <table class="clientes-table">
+                  <colgroup>
+                    ${CLIENTES_TABLE_COLUMNS.map((column) => `<col class="${attr(column.colClass)}">`).join("")}
+                  </colgroup>
+
+                  <thead>
+                    <tr>
+                      ${CLIENTES_TABLE_COLUMNS.map((column) => `<th class="${attr(column.colClass)}">${escapeHtml(column.label)}</th>`).join("")}
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    ${
+                      vm.visibleItems.length
+                        ? vm.visibleItems.map((item) => renderRow(item)).join("")
+                        : renderEmptyContent(vm)
+                    }
+                  </tbody>
+                </table>
+              </div>
+
+              ${renderLoadMore(vm)}
+            `
+        }
+
+        ${vm.refreshing && vm.items.length ? renderRefreshOverlay() : ""}
+      </div>
     </section>
   `;
 }
 
+export const renderEmptyState = renderEmptyClientesState;
 export const renderCards = renderTable;
 
-
 /* =========================================================
-   FULL TEMPLATE
+   MAIN RENDER
 ========================================================= */
 
 export function renderClientesTableTemplate(input = {}) {
-  const data = safeObject(input);
+  const vm = getViewModel(input);
 
-  if (shouldRenderRestricted(data)) {
-    return `
-      <section class="clientes-view-root" data-clientes-scope="true">
-        ${renderAccessDeniedState()}
-      </section>
-    `;
+  if (vm.forbidden) {
+    return renderAccessDeniedState(input);
   }
 
-  const items = getResolvedItems(data);
-  const state = safeObject(data.state);
-
-  if (state.error && !items.length) {
-    return `
-      <section class="clientes-view-root" data-clientes-scope="true">
-        ${renderErrorState(state.error)}
-      </section>
-    `;
+  if (vm.error) {
+    return renderErrorState(input);
   }
 
-  const payload = {
-    ...data,
-    items,
-    state,
-  };
+  if (vm.loading && !vm.items.length) {
+    return renderLoadingState(input);
+  }
 
   return `
-    <section class="clientes-view-root" data-clientes-scope="true">
-      ${renderHeader(payload)}
-      ${renderTable(payload)}
+    <section
+      class="clientes-view-root"
+      data-clientes-scope="true"
+      data-view="clientes"
+      data-loading="${vm.loading ? "true" : "false"}"
+      data-refreshing="${vm.refreshing ? "true" : "false"}"
+      data-total="${attr(String(vm.totalCount))}"
+      data-visible="${attr(String(vm.visibleCount))}"
+      data-visible-limit="${attr(String(vm.visibleLimit))}"
+      data-has-more="${vm.hasMore ? "true" : "false"}"
+      data-filter="${attr(vm.activeFilter)}"
+      data-search-active="${vm.searchQuery ? "true" : "false"}"
+    >
+      ${renderHeader(input)}
+      ${renderTable(input)}
     </section>
   `;
 }
 
+export function renderClientesTemplate(input = {}) {
+  return renderClientesTableTemplate(input);
+}
 
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
+export function renderTemplate(input = {}) {
+  return renderClientesTableTemplate(input);
+}
+
+export function getClientesTableTemplateSnapshot(input = {}) {
+  const vm = getViewModel(input);
+
+  return {
+    version: CLIENTES_TEMPLATE_VERSION,
+    total: vm.totalCount,
+    visible: vm.visibleCount,
+    visibleLimit: vm.visibleLimit,
+    remainingCount: vm.remainingCount,
+    hasMore: vm.hasMore,
+    filter: vm.activeFilter,
+    searchLength: vm.searchQuery.length,
+    loading: vm.loading,
+    refreshing: vm.refreshing,
+    columns: CLIENTES_TABLE_COLUMNS.map((column) => column.key),
+    actions: { ...CLIENTES_ACTIONS },
+  };
+}
+
+export function getSnapshot(input = {}) {
+  return getClientesTableTemplateSnapshot(input);
+}
 
 export default renderClientesTableTemplate;

@@ -2,7 +2,7 @@
    Onion Support - Usuarios Index
    Archivo: /src/views/usuarios/index.js
 
-   PRODUCTIVO · CONTROLADOR ÚNICO · VISTA USUARIOS · 10/10
+   PRODUCTIVO · CONTROLADOR ÚNICO · VISTA USUARIOS · SIN PÁGINAS · 10/10
 
    Punto cerrado:
    - No depende de usuarios.state.js / usuarios.store.js / usuarios.model.js.
@@ -12,8 +12,9 @@
    - Sin window.fetch propio.
    - Sin duplicar controladores.
    - Compatible con /usuarios y /@usuario/usuarios.
-   - Compatible con usuarios.template.js.
+   - Compatible con usuarios.template.js sin paginación.
    - Compatible con usuarios.template.modal.js y usuarios.template.create.js.
+   - UI 1:1 incidencias: visibleLimit + load-more, sin navegación por páginas.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -39,7 +40,7 @@ export const USUARIOS_MODULE_NAME = "usuarios";
 export const USUARIOS_VIEW_NAME = "UsuariosView";
 export const USUARIOS_CANONICAL_PATH = "/usuarios";
 export const USUARIOS_INDEX_VERSION =
-  "usuarios.index.productive.v15.controller-solid";
+  "usuarios.index.productive.v16.no-pages.load-more.1-1-incidencias";
 export const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_MODULE_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_INDEX_SOURCE = "views.usuarios.index";
@@ -51,8 +52,9 @@ export const USUARIOS_MAX_PAGES = 20;
 export const USUARIOS_CACHE_KEY = "onion.support.usuarios.cache.v1";
 export const USUARIOS_CACHE_TTL_MS = 60_000;
 
-const DEFAULT_PAGE = 1;
-const DEFAULT_PAGE_SIZE = 5;
+const DEFAULT_VISIBLE_ROWS = 20;
+const DEFAULT_PAGE = 1; // compat interno, no UI
+const DEFAULT_PAGE_SIZE = DEFAULT_VISIBLE_ROWS;
 const SEARCH_DEBOUNCE_MS = 220;
 
 const USUARIOS_CONTROLLER_KEY = Symbol.for(
@@ -71,8 +73,7 @@ const EXPORT_ACTION = "export";
 const FILTER_ACTION = "filter";
 const CLEAR_SEARCH_ACTION = "clear-search";
 const CLEAR_FILTERS_ACTION = "clear-filters";
-const PREV_PAGE_ACTION = "prev-page";
-const NEXT_PAGE_ACTION = "next-page";
+const LOAD_MORE_ACTION = "load-more";
 
 const CREATE_SUCCESS_EVENTS = Object.freeze([
   "usuarios:create:success",
@@ -1655,8 +1656,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   let filter = "all";
   let search = "";
   let searchDraft = "";
-  let page = DEFAULT_PAGE;
-  let pageSize = DEFAULT_PAGE_SIZE;
+  let visibleLimit = DEFAULT_VISIBLE_ROWS;
 
   let loadSequence = 0;
   let renderFrame = 0;
@@ -1700,20 +1700,43 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     return filterUsuarios(items, { filter, search: searchDraft || search });
   }
 
+  function normalizeVisibleLimit(value = visibleLimit) {
+    visibleLimit = clamp(value, 1, 500);
+    return visibleLimit;
+  }
+
+  function resetVisibleLimit() {
+    visibleLimit = DEFAULT_VISIBLE_ROWS;
+    return visibleLimit;
+  }
+
+  function getVisibleItemsInternal() {
+    normalizeVisibleLimit();
+    return getFilteredItems().slice(0, visibleLimit);
+  }
+
+  function getRemainingCount() {
+    return Math.max(0, getFilteredItems().length - getVisibleItemsInternal().length);
+  }
+
+  function hasMoreVisibleItems() {
+    return getRemainingCount() > 0;
+  }
+
+  /*
+    Compatibilidad interna: el controlador ya no pagina.
+    Estos aliases existen para no romper código externo antiguo.
+  */
   function getTotalPages() {
-    return Math.max(1, Math.ceil(getFilteredItems().length / pageSize));
+    return 1;
   }
 
   function normalizePage() {
-    page = clamp(page, 1, getTotalPages());
-    return page;
+    return 1;
   }
 
   function getPageItemsInternal() {
-    normalizePage();
-    const filtered = getFilteredItems();
-    const start = (page - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
+    return getVisibleItemsInternal();
   }
 
   function detailModalOpen() {
@@ -1754,11 +1777,13 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       statusFilter: filter,
       search: searchDraft || search,
       searchQuery: searchDraft || search,
-      page,
-      currentPage: page,
-      usuariosPage: page,
-      pageSize,
-      usuariosPageSize: pageSize,
+      visibleLimit,
+      usuariosVisibleLimit: visibleLimit,
+      page: 1,
+      currentPage: 1,
+      usuariosPage: 1,
+      pageSize: visibleLimit,
+      usuariosPageSize: visibleLimit,
 
       remoteCount,
       totalCount: remoteCount,
@@ -1791,9 +1816,11 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       activeFilter: filter,
       search: searchDraft || search,
       searchQuery: searchDraft || search,
-      page,
-      currentPage: page,
-      pageSize,
+      visibleLimit,
+      usuariosVisibleLimit: visibleLimit,
+      page: 1,
+      currentPage: 1,
+      pageSize: visibleLimit,
 
       remoteCount,
       totalCount: remoteCount,
@@ -1907,7 +1934,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     }
 
     deferredRender = null;
-    normalizePage();
+    normalizeVisibleLimit();
 
     const payload = viewPayload();
     const hasRoot = Boolean(host.querySelector("[data-usuarios-scope='true']"));
@@ -2036,7 +2063,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       error = "";
       loading = false;
       refreshing = false;
-      normalizePage();
+      normalizeVisibleLimit();
 
       render({ full: true, immediate: true });
       return items;
@@ -2211,7 +2238,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
 
       if (created) {
         syncFromCache();
-        page = DEFAULT_PAGE;
+        resetVisibleLimit();
         render({ full: true, force: true });
         showToast("Usuario creado correctamente.", "success");
       }
@@ -2251,7 +2278,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     filter = ["all", "active", "pending", "blocked"].includes(normalizeKey(value))
       ? normalizeKey(value)
       : "all";
-    page = DEFAULT_PAGE;
+    resetVisibleLimit();
     render({ history: true });
     return filter;
   }
@@ -2259,7 +2286,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   function setSearch(value = "") {
     searchDraft = cleanText(value, "");
     search = searchDraft;
-    page = DEFAULT_PAGE;
+    resetVisibleLimit();
     render({ history: true });
     return search;
   }
@@ -2284,30 +2311,54 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     filter = "all";
     search = "";
     searchDraft = "";
-    page = DEFAULT_PAGE;
+    resetVisibleLimit();
     render({ history: true });
     return true;
   }
 
-  function goToPage(value = DEFAULT_PAGE) {
-    page = clamp(value, 1, getTotalPages());
+  function loadMore(value = null) {
+    const nextLimit = value === null || value === undefined || value === ""
+      ? visibleLimit + DEFAULT_VISIBLE_ROWS
+      : value;
+
+    visibleLimit = clamp(nextLimit, 1, 500);
     render({ history: true });
-    return page;
+    return visibleLimit;
+  }
+
+  function setVisibleLimit(value = DEFAULT_VISIBLE_ROWS) {
+    visibleLimit = clamp(value, 1, 500);
+    render({ history: true });
+    return visibleLimit;
+  }
+
+  /*
+    Compatibilidad antigua:
+    no pagina ni cambia de página; aumenta límite visible.
+  */
+  function goToPage(value = 1) {
+    const numeric = number(value, 1);
+    if (numeric > 1) {
+      return loadMore(numeric * DEFAULT_VISIBLE_ROWS);
+    }
+
+    resetVisibleLimit();
+    render({ history: true });
+    return 1;
   }
 
   function goPrevPage() {
-    return goToPage(page - 1);
+    resetVisibleLimit();
+    render({ history: true });
+    return 1;
   }
 
   function goNextPage() {
-    return goToPage(page + 1);
+    return loadMore();
   }
 
-  function changePageSize(value = DEFAULT_PAGE_SIZE) {
-    pageSize = clamp(value, 1, 50);
-    page = DEFAULT_PAGE;
-    render({ history: true });
-    return pageSize;
+  function changePageSize(value = DEFAULT_VISIBLE_ROWS) {
+    return setVisibleLimit(value);
   }
 
   function actionFrom(node = null) {
@@ -2380,16 +2431,11 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         clearFilters();
         return true;
 
-      case PREV_PAGE_ACTION:
-      case "prev_page":
+      case LOAD_MORE_ACTION:
+      case "load_more":
+      case "load-more":
         event?.preventDefault?.();
-        goToPage(first(node?.getAttribute?.("data-page"), page - 1));
-        return true;
-
-      case NEXT_PAGE_ACTION:
-      case "next_page":
-        event?.preventDefault?.();
-        goToPage(first(node?.getAttribute?.("data-page"), page + 1));
+        loadMore(first(node?.getAttribute?.("data-visible-limit"), node?.getAttribute?.("data-limit"), null));
         return true;
 
       default:
@@ -2589,6 +2635,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     setFilter,
     setSearch,
     clearFilters,
+    loadMore,
+    setVisibleLimit,
     goToPage,
     goPrevPage,
     goNextPage,
@@ -2603,22 +2651,31 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     },
 
     getPageItems() {
-      return cloneItems(getPageItemsInternal());
+      return cloneItems(getVisibleItemsInternal());
+    },
+
+    getVisibleItems() {
+      return cloneItems(getVisibleItemsInternal());
     },
 
     getPagination() {
-      normalizePage();
+      normalizeVisibleLimit();
       const filtered = getFilteredItems();
+      const visible = getVisibleItemsInternal();
 
       return {
-        page,
-        currentPage: page,
-        pageSize,
-        totalPages: getTotalPages(),
+        page: 1,
+        currentPage: 1,
+        pageSize: visibleLimit,
+        visibleLimit,
+        visibleCount: visible.length,
+        remainingCount: Math.max(0, filtered.length - visible.length),
+        totalPages: 1,
         totalCount: filtered.length,
         remoteCount,
-        hasPrev: page > 1,
-        hasNext: page < getTotalPages(),
+        hasPrev: false,
+        hasNext: false,
+        hasMore: filtered.length > visible.length,
       };
     },
 
@@ -2670,9 +2727,13 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         count: items.length,
         filteredCount: getFilteredItems().length,
         remoteCount,
-        page,
-        pageSize,
-        totalPages: getTotalPages(),
+        page: 1,
+        visibleLimit,
+        visibleCount: getVisibleItemsInternal().length,
+        remainingCount: getRemainingCount(),
+        hasMore: hasMoreVisibleItems(),
+        pageSize: visibleLimit,
+        totalPages: 1,
         filter,
         searchLength: (searchDraft || search).length,
         lastSyncAt,
@@ -2836,6 +2897,15 @@ export const submitCreateUsuario = (payload = {}) =>
 export const exportCsv = () =>
   getActiveUsuariosController()?.exportCsv?.() || Promise.resolve(false);
 
+export const loadMore = (limit = null) =>
+  getActiveUsuariosController()?.loadMore?.(limit) || DEFAULT_VISIBLE_ROWS;
+
+export const setVisibleLimit = (limit = DEFAULT_VISIBLE_ROWS) =>
+  getActiveUsuariosController()?.setVisibleLimit?.(limit) || DEFAULT_VISIBLE_ROWS;
+
+/*
+  Exports legacy: no activan paginación real.
+*/
 export const goToPage = (pageNumber = 1) =>
   getActiveUsuariosController()?.goToPage?.(pageNumber) || 1;
 
@@ -2843,10 +2913,10 @@ export const goPrevPage = () =>
   getActiveUsuariosController()?.goPrevPage?.() || 1;
 
 export const goNextPage = () =>
-  getActiveUsuariosController()?.goNextPage?.() || 1;
+  getActiveUsuariosController()?.goNextPage?.() || DEFAULT_VISIBLE_ROWS;
 
-export const changePageSize = (size = DEFAULT_PAGE_SIZE) =>
-  getActiveUsuariosController()?.changePageSize?.(size) || DEFAULT_PAGE_SIZE;
+export const changePageSize = (size = DEFAULT_VISIBLE_ROWS) =>
+  getActiveUsuariosController()?.changePageSize?.(size) || DEFAULT_VISIBLE_ROWS;
 
 export const getUsuarios = () =>
   getActiveUsuariosController()?.getItems?.() || cloneItems(memoryCache.items);
@@ -2869,6 +2939,9 @@ export const getItems = getUsuarios;
 
 export const getPageItems = () =>
   getActiveUsuariosController()?.getPageItems?.() || [];
+
+export const getVisibleItems = () =>
+  getActiveUsuariosController()?.getVisibleItems?.() || getPageItems();
 
 export const getPagination = () =>
   getActiveUsuariosController()?.getPagination?.() || null;
@@ -2971,6 +3044,8 @@ export const UsuariosModule = {
 
   exportCsv,
 
+  loadMore,
+  setVisibleLimit,
   goToPage,
   goPrevPage,
   goNextPage,
@@ -2979,6 +3054,7 @@ export const UsuariosModule = {
   getUsuarios,
   getItems,
   getPageItems,
+  getVisibleItems,
   getPagination,
   getUsuarioByIdStore,
   getUsuarioById,

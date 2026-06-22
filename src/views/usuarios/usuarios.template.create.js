@@ -1,6 +1,6 @@
 /* =========================================================
    Onion Support - Usuarios Create Modal
-   Archivo: /src/views/usuarios/usuarios.create.modal.js
+   Archivo: /src/views/usuarios/usuarios.template.create.js
 
    PRODUCTIVO · SINGLETON · NO DUPLICIDADES · CSP CLEAN · 10/10
 

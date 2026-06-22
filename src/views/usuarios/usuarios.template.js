@@ -2,13 +2,13 @@
    Onion Support - Usuarios Template
    Archivo: /src/views/usuarios/usuarios.template.js
 
-   PRODUCTIVO · TEMPLATE PURO · CSS 1:1 · SIN IMPORTS · 10/10 · V17
+   PRODUCTIVO · TEMPLATE PURO · SIN PÁGINAS · LOAD MORE 1:1 INCIDENCIAS · 10/10
    STABLE DOM ISLANDS · NO CSS INJECTION · NO INLINE STYLES · CSP READY
    ALIGNED WITH VARIABLES.CSS + UI.CSS + /css/views/usuarios/index.css
 
    RESPONSABILIDADES:
    - render del hero/header de usuarios
-   - render de tabla productiva con paginación real
+   - render de tabla productiva sin paginación, con carga progresiva tipo incidencias
    - render de filtros visuales compatibles con state/props/bindings
    - render de búsqueda compatible con state/props/bindings
    - compatibilidad directa con /src/views/usuarios/index.js
@@ -20,7 +20,7 @@
    - chips de estado alineados con tokens globales
    - tabla blindada desde CSS externo
    - row accent seguro desde CSS externo
-   - límite fijo de 5 usuarios por hoja
+   - límite visible progresivo tipo incidencias
    - orden descendente por actualización / actividad / creación
    - sin <style>, sin style="", sin title nativo, sin handlers inline
 
@@ -36,7 +36,7 @@
    CONSTANTS
 ========================================================= */
 
-export const USUARIOS_TEMPLATE_VERSION = "usuarios.template.productive.v17.css-1-1.no-model-import";
+export const USUARIOS_TEMPLATE_VERSION = "usuarios.template.productive.v18.no-pages.load-more.1-1-incidencias";
 
 export const USUARIOS_TABLE_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
 export const USUARIOS_VIEW_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
@@ -50,15 +50,16 @@ export const USUARIOS_ACTIONS = Object.freeze({
   FILTER: "filter",
   CLEAR_SEARCH: "clear-search",
   CLEAR_FILTERS: "clear-filters",
-  PREV_PAGE: "prev-page",
-  NEXT_PAGE: "next-page",
+  LOAD_MORE: "load-more",
 });
 
 export const USUARIOS_TABLE_ACTIONS = USUARIOS_ACTIONS;
 
-export const USUARIOS_DEFAULT_PAGE_SIZE = 5;
+export const USUARIOS_DEFAULT_VISIBLE_ROWS = 20;
+export const USUARIOS_DEFAULT_PAGE_SIZE = USUARIOS_DEFAULT_VISIBLE_ROWS;
 
-const DEFAULT_PAGE_SIZE = USUARIOS_DEFAULT_PAGE_SIZE;
+const DEFAULT_VISIBLE_ROWS = USUARIOS_DEFAULT_VISIBLE_ROWS;
+const DEFAULT_PAGE_SIZE = USUARIOS_DEFAULT_VISIBLE_ROWS;
 const AVATAR_TONE_COUNT = 10;
 
 const FILTERS = Object.freeze([
@@ -1337,7 +1338,7 @@ function computeFilterCounts(items = [], input = {}) {
 }
 
 /* =========================================================
-   STATS / PAGINATION
+   STATS / VISIBLE ROWS
 ========================================================= */
 
 function computeStats(items = []) {
@@ -1364,32 +1365,40 @@ function computeStats(items = []) {
   );
 }
 
-function normalizePageSize(input = {}) {
+function normalizeVisibleLimit(input = {}) {
   const data = safeObject(input);
   const runtime = safeObject(data.state);
 
   return clamp(
     safeNumber(
       first(
+        data.visibleLimit,
+        data.limit,
         data.pageSize,
-        runtime.pageSize,
+        runtime.visibleLimit,
+        runtime.usuariosVisibleLimit,
         runtime.limit,
-        runtime.usuariosPageSize,
-        DEFAULT_PAGE_SIZE
+        runtime.pageSize,
+        DEFAULT_VISIBLE_ROWS
       ),
-      DEFAULT_PAGE_SIZE
+      DEFAULT_VISIBLE_ROWS
     ),
     1,
-    50
+    500
   );
 }
 
+/*
+  Compatibilidad:
+  Se conserva getPagination() porque renderTable/renderSnapshot ya lo usan,
+  pero NO pagina. Devuelve un VM de visibilidad progresiva 1:1 incidencias.
+*/
 function getPagination(items = [], input = {}) {
   const data = safeObject(input);
   const runtime = safeObject(data.state);
 
   const allItems = filterAndSortUsuarios(items, data);
-  const pageSize = normalizePageSize(data);
+  const visibleLimit = normalizeVisibleLimit(data);
   const filtering = isFilterActive(data);
 
   const remoteTotal = Math.max(
@@ -1412,43 +1421,39 @@ function getPagination(items = [], input = {}) {
     allItems.length
   );
 
-  const reportedTotal = filtering ? allItems.length : remoteTotal;
-  const totalPagesFromProps = filtering
-    ? 0
-    : safeNumber(first(data.totalPages, runtime.totalPages), 0);
-
-  const totalPages = Math.max(
-    1,
-    totalPagesFromProps || Math.ceil((reportedTotal || 1) / pageSize)
-  );
-
-  const currentPage = clamp(
-    safeNumber(first(data.page, runtime.page, runtime.currentPage, runtime.usuariosPage, 1), 1),
-    1,
-    totalPages
-  );
-
-  const startIndex = (currentPage - 1) * pageSize;
-  const pageItems = allItems.slice(startIndex, startIndex + pageSize);
-
-  const rangeStart = reportedTotal && pageItems.length ? startIndex + 1 : 0;
-  const rangeEnd = reportedTotal
-    ? Math.min(startIndex + pageItems.length, reportedTotal)
-    : 0;
+  const totalCount = filtering ? allItems.length : remoteTotal;
+  const pageItems = allItems.slice(0, visibleLimit);
+  const visibleCount = pageItems.length;
+  const remainingCount = Math.max(0, allItems.length - visibleCount);
 
   return {
     allItems,
     pageItems,
-    pageSize,
-    currentPage,
-    totalPages,
-    totalCount: reportedTotal,
+    visibleItems: pageItems,
+
+    pageSize: visibleLimit,
+    visibleLimit,
+    visibleCount,
+    remainingCount,
+
+    /*
+      Aliases antiguos para no romper ningún consumidor,
+      pero la UI NO renderiza páginas.
+    */
+    currentPage: 1,
+    totalPages: 1,
+
+    totalCount,
     unfilteredCount: safeArray(items).length,
     remoteTotal,
-    rangeStart,
-    rangeEnd,
-    hasPrev: currentPage > 1,
-    hasNext: currentPage < totalPages,
+
+    rangeStart: totalCount && visibleCount ? 1 : 0,
+    rangeEnd: visibleCount,
+
+    hasPrev: false,
+    hasNext: false,
+    hasMore: remainingCount > 0,
+
     filtering,
     activeFilter: getActiveFilter(data),
     searchQuery: getSearchQuery(data),
@@ -1690,34 +1695,32 @@ function renderPagination(pagination = {}, state = {}) {
   const runtime = safeObject(state);
   const loading = Boolean(runtime.loading);
   const refreshing = Boolean(runtime.refreshing);
+  const disabled = loading || refreshing || !pagination.hasMore;
+  const nextLimit = Math.max(
+    pagination.visibleLimit + DEFAULT_VISIBLE_ROWS,
+    pagination.visibleCount + DEFAULT_VISIBLE_ROWS
+  );
+
+  if (!pagination.hasMore) {
+    return "";
+  }
 
   return `
-    <div class="usuarios-pagination" aria-label="Paginación de usuarios">
+    <div class="usuarios-load-more" aria-label="Cargar más usuarios">
       <button
         type="button"
-        class="usuarios-pagination-btn"
-        data-usuarios-action="prev-page"
-        data-action="prev-page"
-        data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
-        ${!pagination.hasPrev || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+        class="usuarios-load-more-btn usuarios-pagination-btn usuarios-pagination-btn--next"
+        data-usuarios-action="load-more"
+        data-action="load-more"
+        data-visible-limit="${escapeHtml(String(nextLimit))}"
+        ${disabled ? 'disabled aria-disabled="true"' : ""}
       >
-        Anterior
+        Cargar más
       </button>
 
-      <span class="usuarios-pagination-status">
-        ${escapeHtml(`${pagination.currentPage}/${pagination.totalPages}`)}
+      <span class="usuarios-load-more-status usuarios-pagination-status">
+        ${escapeHtml(`Mostrando ${pagination.visibleCount} de ${pagination.totalCount}`)}
       </span>
-
-      <button
-        type="button"
-        class="usuarios-pagination-btn usuarios-pagination-btn--next"
-        data-usuarios-action="next-page"
-        data-action="next-page"
-        data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
-        ${!pagination.hasNext || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
-      >
-        Siguiente
-      </button>
     </div>
   `;
 }
@@ -2146,15 +2149,16 @@ export function renderTable(input = {}) {
     ? "Cargando usuarios..."
     : pagination.filtering
       ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · ${activeCriteria.join(" · ")}`
-      : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`;
+      : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount}`;
 
   return `
     <section
       class="usuarios-history${loading ? " is-loading" : ""}${refreshing ? " is-refreshing" : ""}${hasError ? " has-error" : ""}"
       data-usuarios-history="true"
-      data-current-page="${escapeHtml(String(pagination.currentPage))}"
-      data-total-pages="${escapeHtml(String(pagination.totalPages))}"
+      data-visible-limit="${escapeHtml(String(pagination.visibleLimit))}"
       data-visible="${escapeHtml(String(pagination.pageItems.length))}"
+      data-has-more="${pagination.hasMore ? "true" : "false"}"
+      data-remaining="${escapeHtml(String(pagination.remainingCount))}"
       data-filter="${escapeHtml(pagination.activeFilter)}"
       data-search-active="${searchQuery ? "true" : "false"}"
       aria-live="polite"
@@ -2264,9 +2268,10 @@ export function renderUsuariosTableTemplate(input = {}) {
     data-template-version="${escapeHtml(USUARIOS_TABLE_TEMPLATE_VERSION)}"
     data-total="${escapeHtml(String(pagination.totalCount))}"
     data-visible="${escapeHtml(String(pagination.pageItems.length))}"
+    data-visible-limit="${escapeHtml(String(pagination.visibleLimit))}"
+    data-has-more="${pagination.hasMore ? "true" : "false"}"
     data-filter="${escapeHtml(pagination.activeFilter)}"
     data-search-active="${pagination.searchQuery ? "true" : "false"}"
-    data-page="${escapeHtml(String(pagination.currentPage))}"
     data-loading="${loading ? "true" : "false"}"
     data-refreshing="${refreshing ? "true" : "false"}"
   `;
@@ -2330,8 +2335,9 @@ export function getUsuariosTableTemplateSnapshot(input = {}) {
     actions: USUARIOS_TABLE_ACTIONS,
     total: pagination.totalCount,
     visible: pagination.pageItems.length,
-    currentPage: pagination.currentPage,
-    totalPages: pagination.totalPages,
+    visibleLimit: pagination.visibleLimit,
+    remainingCount: pagination.remainingCount,
+    hasMore: pagination.hasMore,
     filter: pagination.activeFilter,
     searchLength: pagination.searchQuery.length,
     restricted: shouldRenderRestricted(data),

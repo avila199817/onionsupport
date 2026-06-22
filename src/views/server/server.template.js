@@ -1,102 +1,135 @@
 /* =========================================================
-   Onion SPA - Server Template
-   Archivo: src/views/server/server.template.js
+   Onion Support - Servidor Template
+   Archivo: /src/views/server/server.template.js
 
-   FINAL PRO SYSTEM · SERVER VIEW TEMPLATE · CSP CLEAN · 12/10
-   NO INLINE CSS · NO STYLE TAGS · TOKEN PRO SYSTEM READY
+   PRODUCTIVO · TEMPLATE PURO · OBSERVABILIDAD · 10/10
 
-   RESPONSABILIDADES:
-   - renderizar header premium de la vista Server
-   - renderizar estados loading / error / empty
-   - renderizar panel premium de servicios / telemetry
-   - mostrar loader SOLO en la sección principal
-   - mostrar estado visual al abrir detalle lento
-   - mantener compatibilidad directa con serverView.js
-   - consumir datos reales de /api/dashboard + /health/internal
-   - compartir lenguaje visual con Facturas / Incidencias / Usuarios / Clientes
-   - emitir SOLO clases/atributos para que el CSS viva en:
-     /src/css/views/server/index.css
-
-   HARDENING PRO:
-   - tolerancia a payloads heterogéneos
-   - soporte para snapshot normalizado
-   - lectura preferente del shape normalizado server
-   - paginación defensiva
-   - cards técnicas consistentes
-   - sin CSS inline
-   - sin estilos inyectados
-   - sin duplicidades visuales
+   Responsabilidad:
+   - Render visual de la vista Servidor.
+   - Header / Hero.
+   - Dashboard técnico.
+   - Cards de servicios: Backend, BD, Blobs, Azure, CPU, RAM.
+   - Tabla de endpoints detectados.
+   - Estados loading / error / empty.
+   - Compatible con serverView.js legacy.
+   - Compatible con index.js productivo.
+   - Sin imports.
+   - Sin HTTP.
+   - Sin DOM directo.
+   - Sin Store.
+   - Sin Router.
+   - Sin CSS inline.
+   - Sin handlers inline.
 ========================================================= */
-
-import { serverState } from "./server.state.js";
-
-import {
-  getServerSnapshotStore,
-} from "./server.store.js";
-
-import {
-  normalizeServerSnapshotModel,
-  normalizeServerServiceModel,
-  sortServerServicesByLatencyDesc,
-  getServerStatusLabel,
-  getServerTypeLabel,
-  getInitials,
-  getServerTheme,
-} from "./server.model.js";
-
-import {
-  escapeHtml,
-  formatRelativeDate,
-  formatMs,
-  formatGB,
-  formatMB,
-  truncate,
-} from "./server.utils.js";
 
 /* =========================================================
-   CONSTANTS
+   META / CONSTANTS
 ========================================================= */
 
-const PAGE_SIZE = 6;
+export const SERVER_TEMPLATE_VERSION =
+  "server.template.productive.v1.observability.pure";
+
+export const SERVIDOR_TEMPLATE_VERSION = SERVER_TEMPLATE_VERSION;
+
+export const DEFAULT_PAGE_SIZE = 6;
+
+export const SERVER_ACTIONS = Object.freeze({
+  REFRESH: "refresh",
+  REFRESH_SERVER: "refresh-server",
+  REFRESH_HEALTH: "refresh-health",
+  LOAD_HEALTH: "load-server-health",
+  TOGGLE_LIVE: "toggle-live",
+  COPY_JSON: "copy-json",
+  COPY_DETAIL: "copy-server-detail-id",
+  OPEN_DETAIL: "open-server-detail",
+});
+
+export const SERVER_STATUS = Object.freeze({
+  HEALTHY: "healthy",
+  WARNING: "warning",
+  CRITICAL: "critical",
+  UNKNOWN: "unknown",
+});
 
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
 
-function safeText(value, fallback = "—") {
-  if (value === null || value === undefined) return fallback;
-
-  const text = String(value).trim();
-
-  return text || fallback;
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-
-  return Number.isFinite(n) ? n : fallback;
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
 }
 
 function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  if (Array.isArray(value)) return value;
+
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof value.length === "number" &&
+    typeof value !== "string"
+  ) {
+    try {
+      return Array.from(value);
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 }
 
-function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
+function safeText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return output || fallback;
 }
 
 function first(...values) {
   for (const value of values) {
-    if (value === undefined || value === null) continue;
+    if (value === null || value === undefined) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
 
     return value;
   }
 
   return null;
+}
+
+function safeNumber(value = 0, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clamp(value = 0, min = 0, max = 1) {
+  return Math.min(Math.max(safeNumber(value, min), min), max);
+}
+
+function escapeHtml(value = "") {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function attr(value = "") {
+  return escapeHtml(safeText(value, ""));
 }
 
 function normalizeKey(value = "") {
@@ -105,1027 +138,760 @@ function normalizeKey(value = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]+/g, "_")
+    .replace(/[^\w:.]/g, "")
     .replace(/^_+|_+$/g, "");
 }
 
 /* =========================================================
-   SNAPSHOT RESOLVE
+   FORMAT
 ========================================================= */
 
-function looksLikeServerSnapshot(value) {
-  const obj = safeObject(value);
+function toTimestamp(value = null) {
+  if (!value) return 0;
 
-  return Boolean(
-    obj.dashboardPayload ||
-      obj.healthPayload ||
-      obj.telemetry ||
-      Array.isArray(obj.services) ||
-      obj.history ||
-      obj.browserMetrics ||
-      obj.environmentMetrics
-  );
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 9999999999 ? value : value * 1000;
+  }
+
+  const raw = safeText(value, "");
+  if (!raw) return 0;
+
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric > 9999999999 ? numeric : numeric * 1000;
+  }
+
+  const date = new Date(raw);
+  const ms = date.getTime();
+
+  return Number.isFinite(ms) ? ms : 0;
 }
 
-function unwrapServerSnapshot(value) {
-  if (!value) return {};
-
-  if (looksLikeServerSnapshot(value)) {
-    return value;
-  }
-
-  const obj = safeObject(value);
-
-  if (looksLikeServerSnapshot(obj.data)) {
-    return unwrapServerSnapshot(obj.data);
-  }
-
-  if (looksLikeServerSnapshot(obj.payload)) {
-    return unwrapServerSnapshot(obj.payload);
-  }
-
-  if (looksLikeServerSnapshot(obj.result)) {
-    return unwrapServerSnapshot(obj.result);
-  }
-
-  if (looksLikeServerSnapshot(obj.snapshot)) {
-    return unwrapServerSnapshot(obj.snapshot);
-  }
-
-  if (looksLikeServerSnapshot(obj.response)) {
-    return unwrapServerSnapshot(obj.response);
-  }
-
-  if (looksLikeServerSnapshot(obj.body)) {
-    return unwrapServerSnapshot(obj.body);
-  }
-
-  return {};
-}
-
-function getResolvedSnapshot(data = {}) {
-  const direct = normalizeServerSnapshotModel(data);
-
-  if (
-    direct.servicesCount ||
-    safeArray(direct.services).length ||
-    Object.keys(safeObject(direct.telemetry)).length
-  ) {
-    return direct;
-  }
-
-  const fromEnvelope = normalizeServerSnapshotModel(
-    unwrapServerSnapshot(data)
-  );
-
-  if (
-    fromEnvelope.servicesCount ||
-    safeArray(fromEnvelope.services).length ||
-    Object.keys(safeObject(fromEnvelope.telemetry)).length
-  ) {
-    return fromEnvelope;
-  }
+function formatDateTime(value = null) {
+  const ts = toTimestamp(value);
+  if (!ts) return "—";
 
   try {
-    return normalizeServerSnapshotModel(getServerSnapshotStore());
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(new Date(ts));
   } catch {
-    return normalizeServerSnapshotModel({});
+    return "—";
   }
 }
 
-/* =========================================================
-   PAGINATION
-========================================================= */
+function formatDuration(seconds = 0) {
+  const value = Math.max(0, safeNumber(seconds, 0));
 
-function clampPage(page = 1, totalPages = 1) {
-  const current = safeNumber(page, 1);
+  if (!value) return "—";
 
-  return Math.min(Math.max(current, 1), Math.max(totalPages, 1));
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes || 1}m`;
 }
 
-function getPagination(items = [], state = {}) {
-  const list = safeArray(items);
-  const localState = safeObject(state);
+function formatBytes(value = 0) {
+  const bytes = safeNumber(value, 0);
 
-  const pageSize = Math.max(
-    1,
-    safeNumber(
-      first(
-        localState.pageSize,
-        localState.serverPageSize,
-        PAGE_SIZE
-      ),
-      PAGE_SIZE
-    )
-  );
+  if (!bytes) return "—";
 
-  const totalItems = list.length;
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-  const page = clampPage(first(localState.page, localState.currentPage, 1), totalPages);
-  const start = (page - 1) * pageSize;
-  const end = start + pageSize;
-  const pageItems = list.slice(start, end);
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let current = Math.abs(bytes);
+  let unit = 0;
 
-  return {
-    page,
-    pageSize,
-    totalItems,
-    totalPages,
-    start,
-    end,
-    items: pageItems,
-    from: totalItems && pageItems.length ? start + 1 : 0,
-    to: Math.min(end, totalItems),
-    hasPrev: page > 1,
-    hasNext: page < totalPages,
-  };
+  while (current >= 1024 && unit < units.length - 1) {
+    current /= 1024;
+    unit += 1;
+  }
+
+  const sign = bytes < 0 ? "-" : "";
+  const decimals = unit <= 1 ? 0 : 1;
+
+  return `${sign}${current.toFixed(decimals)} ${units[unit]}`;
 }
 
-/* =========================================================
-   STATS
-========================================================= */
+function formatPercent(value = null) {
+  if (value === null || value === undefined || value === "") return "—";
 
-function computeServerStats(snapshot = {}) {
-  const telemetry = safeObject(snapshot.telemetry);
-  const services = safeArray(snapshot.services);
-  const server = safeObject(telemetry.server);
-  const dashboard = safeObject(telemetry.dashboard);
+  const numeric = safeNumber(value, NaN);
+  if (!Number.isFinite(numeric)) return "—";
 
-  const okCount = services.filter((item) => {
-    const status = normalizeKey(item.status);
+  const normalized = numeric <= 1 && numeric >= 0 ? numeric * 100 : numeric;
 
-    return ["ok", "up", "healthy", "online", "success", "operativo", "operativa"].includes(status);
-  }).length;
+  return `${clamp(normalized, 0, 999).toFixed(normalized >= 10 ? 0 : 1)}%`;
+}
 
-  const warningCount = services.filter((item) => {
-    const status = normalizeKey(item.status);
+function formatMs(value = null) {
+  const numeric = safeNumber(value, NaN);
+  if (!Number.isFinite(numeric)) return "—";
 
-    return ["warning", "pending", "degraded", "slow", "revisar"].includes(status);
-  }).length;
-
-  const errorCount = services.filter((item) => {
-    const status = normalizeKey(item.status);
-
-    return ["error", "critical", "down", "offline", "failed", "disabled"].includes(status);
-  }).length;
-
-  const latencyCount = services.filter((item) => {
-    return Number.isFinite(Number(item.latencyMs));
-  }).length;
-
-  return {
-    servicesTotal: services.length,
-    okCount,
-    warningCount,
-    errorCount,
-    latencyCount,
-
-    cpuPercent: server.cpuPercent ?? null,
-    ramPercent: server.ramPercent ?? null,
-    diskPercent: server.diskPercent ?? null,
-    eventLoopLag: server.eventLoopLag ?? null,
-
-    totalFacturas: safeNumber(dashboard.totalFacturas, 0),
-    ticketsActivos: safeNumber(dashboard.ticketsActivos, 0),
-    totalClientes: safeNumber(dashboard.totalClientes, 0),
-    totalUsuarios: safeNumber(dashboard.totalUsuarios, 0),
-  };
+  return `${Math.max(0, Math.round(numeric))} ms`;
 }
 
 /* =========================================================
-   CLASS HELPERS
+   STATUS
 ========================================================= */
 
-function getStatusClass(value = "") {
+export function normalizeStatus(value = "") {
   const key = normalizeKey(value);
-
-  if (["ok", "up", "healthy", "online", "success", "operativo", "operativa"].includes(key)) {
-    return "ok";
-  }
-
-  if (["warning", "pending", "degraded", "slow", "revisar"].includes(key)) {
-    return "warning";
-  }
-
-  if (["error", "critical", "down", "offline", "failed", "disabled"].includes(key)) {
-    return "error";
-  }
-
-  return "unknown";
-}
-
-function getTypeClass(value = "") {
-  const key = normalizeKey(value);
-
-  if (["api", "service", "runtime"].includes(key)) {
-    return "api";
-  }
-
-  if (["db", "database", "cosmos", "storage", "blob"].includes(key)) {
-    return "db";
-  }
-
-  if (["system", "host", "environment"].includes(key)) {
-    return "system";
-  }
-
-  if (["telemetry", "metric", "metrics", "health"].includes(key)) {
-    return "telemetry";
-  }
-
-  return "default";
-}
-
-function getThemeClass(service = {}) {
-  const theme = safeText(
-    first(
-      service.theme,
-      getServerTheme(service.serviceId || service.title || service.name || "server")
-    ),
-    "violet"
-  );
-
-  const key = normalizeKey(theme);
 
   if (
     [
-      "violet",
-      "emerald",
-      "blue",
-      "amber",
-      "rose",
-      "purple",
-      "cyan",
-      "orange",
+      "ok",
+      "up",
+      "online",
+      "healthy",
+      "success",
+      "ready",
+      "running",
+      "connected",
+      "active",
+      "available",
+      "operational",
     ].includes(key)
   ) {
-    return key;
+    return "healthy";
   }
 
-  return "violet";
+  if (
+    [
+      "warn",
+      "warning",
+      "degraded",
+      "partial",
+      "slow",
+      "limited",
+      "unstable",
+    ].includes(key)
+  ) {
+    return "warning";
+  }
+
+  if (
+    [
+      "error",
+      "fail",
+      "failed",
+      "down",
+      "offline",
+      "unhealthy",
+      "critical",
+      "disconnected",
+      "unavailable",
+      "ko",
+    ].includes(key)
+  ) {
+    return "critical";
+  }
+
+  if (!key) return "unknown";
+
+  return key;
+}
+
+export function getStatusLabel(status = "") {
+  const value = normalizeStatus(status);
+
+  if (value === "healthy") return "Operativo";
+  if (value === "warning") return "Degradado";
+  if (value === "critical") return "Crítico";
+
+  return "Desconocido";
+}
+
+function statusWeight(status = "") {
+  const value = normalizeStatus(status);
+
+  if (value === "critical") return 3;
+  if (value === "warning") return 2;
+  if (value === "unknown") return 1;
+  return 0;
+}
+
+function worstStatus(statuses = []) {
+  const list = safeArray(statuses).map(normalizeStatus);
+
+  if (!list.length) return "unknown";
+
+  return list.sort((a, b) => statusWeight(b) - statusWeight(a))[0] || "unknown";
 }
 
 /* =========================================================
-   UI ATOMS
+   SNAPSHOT NORMALIZATION
 ========================================================= */
 
-function renderInlineLoader(label = "Cargando") {
-  return `
-    <span class="server-inline-loading" role="status" aria-label="${escapeHtml(label)}">
-      <span class="server-inline-spinner" aria-hidden="true"></span>
-      <span class="server-inline-loading-text">${escapeHtml(label)}</span>
-    </span>
-  `;
+function normalizeService(service = {}) {
+  const source = safeObject(service);
+  const status = normalizeStatus(first(source.status, source.health, source.state, "unknown"));
+
+  return {
+    id: normalizeKey(first(source.id, source.key, source.name, source.label, "service")),
+    label: safeText(first(source.label, source.name, source.title, "Servicio"), "Servicio"),
+    status,
+    statusLabel: safeText(first(source.statusLabel, getStatusLabel(status)), getStatusLabel(status)),
+    latencyMs: first(source.latencyMs, source.latency, source.pingMs, null),
+    endpoint: safeText(first(source.endpoint, source.url, source.path, ""), ""),
+    detail: safeText(first(source.detail, source.description, source.message, source.error, ""), ""),
+    value: safeText(first(source.value, source.displayValue, ""), ""),
+    error: safeText(first(source.error, ""), ""),
+    raw: source.raw ?? source,
+  };
 }
 
-function renderStatCard({
-  label = "",
-  value = "0",
-  caption = "",
-  accent = false,
-  tone = "default",
-} = {}) {
-  return `
-    <article class="server-stat-card ${accent ? "server-stat-card--accent" : ""} server-stat-card--${escapeHtml(tone)}">
-      <span class="server-stat-label">${escapeHtml(label)}</span>
-      <strong class="server-stat-value">${escapeHtml(String(value))}</strong>
-      <p class="server-stat-caption">${escapeHtml(caption)}</p>
-    </article>
-  `;
+function createEmptyServices() {
+  return [
+    normalizeService({
+      id: "backend",
+      label: "Backend API",
+      status: "unknown",
+      detail: "Pendiente de consulta.",
+    }),
+    normalizeService({
+      id: "database",
+      label: "Base de datos",
+      status: "unknown",
+      detail: "Pendiente de consulta.",
+    }),
+    normalizeService({
+      id: "blobs",
+      label: "Blob Storage",
+      status: "unknown",
+      detail: "Pendiente de consulta.",
+    }),
+    normalizeService({
+      id: "azure",
+      label: "Azure",
+      status: "unknown",
+      detail: "Pendiente de consulta.",
+    }),
+    normalizeService({
+      id: "cpu",
+      label: "CPU",
+      status: "unknown",
+      value: "—",
+      detail: "Pendiente de consulta.",
+    }),
+    normalizeService({
+      id: "memory",
+      label: "RAM",
+      status: "unknown",
+      value: "—",
+      detail: "Pendiente de consulta.",
+    }),
+  ];
 }
 
-function renderChip({
-  label = "",
-  kind = "default",
-  value = "default",
-} = {}) {
-  return `
-    <span class="server-chip server-chip--${escapeHtml(kind)} server-chip--${escapeHtml(kind)}-${escapeHtml(value)}">
-      <span class="server-chip-dot" aria-hidden="true"></span>
-      ${escapeHtml(label)}
-    </span>
-  `;
-}
+function normalizeSnapshot(input = {}) {
+  const state = safeObject(input);
+  const snapshot = safeObject(first(state.snapshot, state.server, state.statusSnapshot, state.data, state), {});
+  const services = safeArray(first(snapshot.services, state.services, [])).map(normalizeService);
+  const finalServices = services.length ? services : createEmptyServices();
 
-/* =========================================================
-   HERO
-========================================================= */
-
-export function renderHeader({ snapshot = {}, state = {} } = {}) {
-  const resolvedSnapshot = getResolvedSnapshot(snapshot);
-  const localState = safeObject(state || serverState || {});
-  const telemetry = safeObject(resolvedSnapshot.telemetry);
-  const global = safeObject(telemetry.global);
-  const stats = computeServerStats(resolvedSnapshot);
-
-  const loading = Boolean(localState.loading);
-  const refreshing = Boolean(localState.refreshing);
-  const autoRefresh = Boolean(localState.autoRefresh);
-
-  const lastSyncText = localState.lastSyncAt
-    ? formatRelativeDate(localState.lastSyncAt)
-    : "Sin sincronización reciente";
-
-  const requestId = safeText(
-    first(localState.requestId, resolvedSnapshot.requestId),
-    ""
+  const status = normalizeStatus(
+    first(
+      snapshot.status,
+      state.status,
+      worstStatus(finalServices.map((service) => service.status)),
+      "unknown"
+    )
   );
 
-  const healthStatus = safeText(global.status, "unknown");
-  const serviceName = safeText(global.service, "onion-backend");
-  const healthClass = getStatusClass(healthStatus);
+  const cpuUsage = first(snapshot.cpuUsage, snapshot.cpu, state.cpuUsage, state.cpu, null);
+  const memoryUsage = first(snapshot.memoryUsage, snapshot.ramUsage, snapshot.memory, state.memoryUsage, state.ramUsage, null);
+  const memoryUsedBytes = first(snapshot.memoryUsedBytes, snapshot.ramUsedBytes, state.memoryUsedBytes, state.ramUsedBytes, null);
+  const memoryTotalBytes = first(snapshot.memoryTotalBytes, snapshot.ramTotalBytes, state.memoryTotalBytes, state.ramTotalBytes, null);
+  const uptimeSeconds = first(snapshot.uptimeSeconds, snapshot.uptime, state.uptimeSeconds, state.uptime, 0);
+  const latencyMs = first(snapshot.latencyMs, snapshot.latency, state.latencyMs, state.latency, null);
 
-  return `
-    <section class="server-view-root" data-server-scope="true">
-      <section class="server-hero">
-        <div class="server-hero-inner">
-          <div class="server-hero-top">
-            <div class="server-hero-copy">
-              <span class="server-kicker">Observabilidad server</span>
+  return {
+    version: SERVER_TEMPLATE_VERSION,
+    status,
+    statusLabel: safeText(first(snapshot.statusLabel, state.statusLabel, getStatusLabel(status)), getStatusLabel(status)),
+    ok: first(snapshot.ok, state.ok, status === "healthy" || status === "warning", false),
 
-              <div class="server-title-stack">
-                <h1 class="server-page-title">Centro de control del servidor</h1>
+    checkedAt: first(snapshot.checkedAt, state.checkedAt, state.lastSyncAt, ""),
+    uptimeSeconds: safeNumber(uptimeSeconds, 0),
+    uptimeLabel: safeText(first(snapshot.uptimeLabel, formatDuration(uptimeSeconds)), formatDuration(uptimeSeconds)),
 
-                <p class="server-page-subtitle">
-                  Estado agregado de API, base de datos, host, runtime Node/V8,
-                  latencias reales, health interno y métricas clave del entorno
-                  en un panel premium de supervisión técnica.
-                </p>
-              </div>
-            </div>
+    latencyMs,
+    latencyLabel: safeText(first(snapshot.latencyLabel, formatMs(latencyMs)), formatMs(latencyMs)),
 
-            <div class="server-hero-actions">
-              <button
-                id="server-health-btn"
-                type="button"
-                class="server-btn server-btn--secondary"
-                data-action="refresh-health"
-                ${loading || refreshing ? 'aria-busy="true"' : ""}
-              >
-                Refrescar health
-              </button>
+    cpuUsage,
+    cpuUsageLabel: safeText(first(snapshot.cpuUsageLabel, formatPercent(cpuUsage)), formatPercent(cpuUsage)),
 
-              <button
-                id="server-refresh-btn"
-                type="button"
-                class="server-btn server-btn--primary ${refreshing ? "is-loading" : ""}"
-                data-action="refresh"
-                ${loading || refreshing ? 'aria-busy="true"' : ""}
-              >
-                ${refreshing ? renderInlineLoader("Actualizando") : "Actualizar panel"}
-              </button>
-
-              <button
-                id="server-toggle-live-btn"
-                type="button"
-                class="server-btn server-btn--ghost ${autoRefresh ? "is-active" : ""}"
-                data-action="toggle-live"
-                aria-pressed="${autoRefresh ? "true" : "false"}"
-              >
-                ${autoRefresh ? "Live ON" : "Live OFF"}
-              </button>
-            </div>
-          </div>
-
-          <div class="server-hero-meta">
-            <span class="server-meta-pill">
-              <span class="server-meta-label">Servicio</span>
-              <strong>${escapeHtml(serviceName)}</strong>
-            </span>
-
-            <span class="server-meta-pill server-meta-pill--${escapeHtml(healthClass)}">
-              <span class="server-meta-label">Health</span>
-              <strong>${escapeHtml(healthStatus)}</strong>
-            </span>
-
-            <span class="server-meta-pill">
-              <span class="server-meta-label">Última sync</span>
-              <strong>${escapeHtml(lastSyncText)}</strong>
-            </span>
-
-            ${
-              requestId
-                ? `
-                  <span class="server-meta-pill">
-                    <span class="server-meta-label">Request</span>
-                    <strong>${escapeHtml(requestId)}</strong>
-                  </span>
-                `
-                : ""
-            }
-
-            ${
-              refreshing || loading
-                ? `
-                  <span class="server-meta-pill server-meta-pill--syncing" aria-live="polite">
-                    <span class="server-live-dot" aria-hidden="true"></span>
-                    <strong>Sincronizando</strong>
-                  </span>
-                `
-                : ""
-            }
-          </div>
-
-          <div class="server-hero-stats">
-            ${renderStatCard({
-              label: "Servicios / OK",
-              value: `${stats.servicesTotal} / ${stats.okCount}`,
-              caption: "Servicios técnicos resueltos desde health + telemetry.",
-              accent: true,
-              tone: "accent",
-            })}
-
-            ${renderStatCard({
-              label: "CPU / RAM / disco",
-              value: `${stats.cpuPercent ?? "—"}% / ${stats.ramPercent ?? "—"}% / ${stats.diskPercent ?? "—"}%`,
-              caption: "Snapshot actual del host principal.",
-              tone: "system",
-            })}
-
-            ${renderStatCard({
-              label: "Event loop / alertas",
-              value: `${stats.eventLoopLag ? formatMs(stats.eventLoopLag) : "—"} / ${stats.errorCount}`,
-              caption: "Lag del loop y servicios en error.",
-              tone: stats.errorCount ? "danger" : "success",
-            })}
-
-            ${renderStatCard({
-              label: "Facturas / tickets",
-              value: `${stats.totalFacturas} / ${stats.ticketsActivos}`,
-              caption: "Cruce rápido con el dashboard agregado.",
-              tone: "info",
-            })}
-          </div>
-        </div>
-      </section>
-    </section>
-  `;
-}
-
-/* =========================================================
-   STATES
-========================================================= */
-
-export function renderLoadingState() {
-  return `
-    <section class="server-shell server-shell--loading" data-server-loading="true">
-      <div class="server-loading-head">
-        <div class="server-skeleton server-skeleton--title"></div>
-        <div class="server-skeleton server-skeleton--pill"></div>
-      </div>
-
-      <div class="server-skeleton-grid">
-        ${Array.from({ length: PAGE_SIZE })
-          .map(
-            () => `
-              <article class="server-skeleton-card" aria-hidden="true">
-                <div class="server-skeleton-card-head">
-                  <div class="server-skeleton server-skeleton--avatar"></div>
-
-                  <div class="server-skeleton-copy">
-                    <div class="server-skeleton server-skeleton--line-lg"></div>
-                    <div class="server-skeleton server-skeleton--line-sm"></div>
-                  </div>
-
-                  <div class="server-skeleton server-skeleton--chip"></div>
-                </div>
-
-                <div class="server-skeleton server-skeleton--metric"></div>
-                <div class="server-skeleton server-skeleton--line-full"></div>
-                <div class="server-skeleton server-skeleton--line-md"></div>
-
-                <div class="server-skeleton-actions">
-                  <div class="server-skeleton server-skeleton--btn"></div>
-                  <div class="server-skeleton server-skeleton--btn-sm"></div>
-                </div>
-              </article>
-            `
-          )
-          .join("")}
-      </div>
-    </section>
-  `;
-}
-
-export function renderErrorState(message = "No se pudo cargar el panel de servidor.") {
-  return `
-    <section class="server-state server-state--error">
-      <div class="server-state-copy">
-        <span class="server-state-kicker">Error de carga</span>
-
-        <h3 class="server-state-title">No se pudo renderizar la vista Server</h3>
-
-        <p class="server-state-text">
-          ${escapeHtml(safeText(message, "Error desconocido al cargar el panel técnico."))}
-        </p>
-      </div>
-
-      <div class="server-state-actions">
-        <button
-          id="server-retry-btn"
-          type="button"
-          class="server-btn server-btn--primary"
-          data-action="retry"
-        >
-          Reintentar
-        </button>
-      </div>
-    </section>
-  `;
-}
-
-export function renderEmptyState() {
-  return `
-    <section class="server-state server-state--empty">
-      <div class="server-state-copy">
-        <span class="server-state-kicker">Sin datos</span>
-
-        <h3 class="server-state-title">No hay servicios para mostrar</h3>
-
-        <p class="server-state-text">
-          El snapshot técnico no devolvió servicios visibles o todavía no hay
-          datos agregados disponibles del health interno y la telemetría.
-        </p>
-      </div>
-
-      <div class="server-state-actions">
-        <button
-          id="server-refresh-btn"
-          type="button"
-          class="server-btn server-btn--primary"
-          data-action="refresh"
-        >
-          Actualizar panel
-        </button>
-      </div>
-    </section>
-  `;
-}
-
-/* =========================================================
-   SERVICE CARD
-========================================================= */
-
-function renderServiceAvatar(service = {}) {
-  const title = safeText(service.title, "Servicio");
-  const initials = safeText(service.initials, getInitials(title));
-  const icon = safeText(service.icon, "");
-  const themeClass = getThemeClass(service);
-
-  return `
-    <div class="server-service-avatar server-service-avatar--${escapeHtml(themeClass)}" aria-hidden="true">
-      <span>${escapeHtml(icon || initials)}</span>
-    </div>
-  `;
-}
-
-function renderServicePreview(service = {}) {
-  const metadata = safeObject(service.metadata);
-
-  const lines = [
-    first(
-      metadata.detail,
-      metadata.description,
-      service.description
+    memoryUsage,
+    memoryUsageLabel: safeText(first(snapshot.memoryUsageLabel, formatPercent(memoryUsage)), formatPercent(memoryUsage)),
+    memoryUsedBytes,
+    memoryTotalBytes,
+    memoryLabel: safeText(
+      first(
+        snapshot.memoryLabel,
+        memoryUsedBytes || memoryTotalBytes
+          ? `${formatBytes(memoryUsedBytes)} / ${formatBytes(memoryTotalBytes)}`
+          : formatPercent(memoryUsage)
+      ),
+      "—"
     ),
-    metadata.latencyMs !== null && metadata.latencyMs !== undefined
-      ? `Latencia: ${formatMs(metadata.latencyMs)}`
-      : "",
-    metadata.percent !== null && metadata.percent !== undefined
-      ? `Uso: ${Math.round(Number(metadata.percent))}%`
-      : "",
-  ]
-    .filter(Boolean)
-    .slice(0, 2);
 
-  if (!lines.length) {
-    return `
-      <div class="server-service-preview server-service-preview--empty">
-        <span>Sin información adicional.</span>
-      </div>
-    `;
-  }
+    services: finalServices,
+    endpoints: safeObject(first(snapshot.endpoints, state.endpoints, {}), {}),
+    raw: safeObject(first(snapshot.raw, state.raw, {}), {}),
+  };
+}
 
+function getViewModel(input = {}) {
+  const state = safeObject(input);
+  const snapshot = normalizeSnapshot(state);
+
+  return {
+    snapshot,
+    loading: Boolean(first(state.loading, state.isLoading, false)),
+    refreshing: Boolean(first(state.refreshing, state.isRefreshing, false)),
+    live: Boolean(first(state.live, state.autoRefresh, state.realtime, false)),
+    error: safeText(first(state.error, state.message, ""), ""),
+    forbidden: Boolean(first(state.forbidden, state.accessDenied, state.restricted, false)),
+  };
+}
+
+/* =========================================================
+   ICONS
+========================================================= */
+
+function icon(name = "") {
+  const common = [
+    'aria-hidden="true"',
+    'focusable="false"',
+    'width="18"',
+    'height="18"',
+    'viewBox="0 0 24 24"',
+    'fill="none"',
+    'stroke="currentColor"',
+    'stroke-width="2"',
+    'stroke-linecap="round"',
+    'stroke-linejoin="round"',
+  ].join(" ");
+
+  const icons = {
+    server: `<svg ${common}><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></svg>`,
+    refresh: `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
+    live: `<svg ${common}><path d="M4 12a8 8 0 0 1 8-8"/><path d="M4 12a8 8 0 0 0 8 8"/><path d="M20 12a8 8 0 0 0-8-8"/><path d="M20 12a8 8 0 0 1-8 8"/><circle cx="12" cy="12" r="2"/></svg>`,
+    copy: `<svg ${common}><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
+    cpu: `<svg ${common}><rect width="14" height="14" x="5" y="5" rx="2"/><path d="M9 1v4"/><path d="M15 1v4"/><path d="M9 19v4"/><path d="M15 19v4"/><path d="M1 9h4"/><path d="M1 15h4"/><path d="M19 9h4"/><path d="M19 15h4"/></svg>`,
+    db: `<svg ${common}><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg>`,
+    cloud: `<svg ${common}><path d="M17.5 19H8a6 6 0 1 1 5.6-8.1A4.5 4.5 0 1 1 17.5 19z"/></svg>`,
+    memory: `<svg ${common}><path d="M6 19v-3"/><path d="M10 19v-3"/><path d="M14 19v-3"/><path d="M18 19v-3"/><path d="M8 5V2"/><path d="M16 5V2"/><rect width="16" height="11" x="4" y="5" rx="2"/></svg>`,
+    clock: `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
+    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+  };
+
+  return icons[name] || icons.server;
+}
+
+function serviceIcon(service = {}) {
+  const id = normalizeKey(service.id);
+
+  if (id.includes("database") || id.includes("db")) return icon("db");
+  if (id.includes("blob") || id.includes("storage") || id.includes("azure")) return icon("cloud");
+  if (id.includes("cpu")) return icon("cpu");
+  if (id.includes("memory") || id.includes("ram")) return icon("memory");
+
+  return icon("server");
+}
+
+/* =========================================================
+   PARTIALS
+========================================================= */
+
+function renderSpinner(label = "Cargando") {
   return `
-    <div class="server-service-preview">
-      ${lines
-        .map(
-          (line) => `
-            <div class="server-service-preview-row">
-              <span>${escapeHtml(truncate(line, 96))}</span>
-            </div>
-          `
-        )
-        .join("")}
-    </div>
+    <span class="server-spinner" aria-hidden="true"></span>
+    <span>${escapeHtml(label)}</span>
   `;
 }
 
-function renderServiceActionButtons(service = {}, state = {}) {
-  const serviceId = safeText(service.serviceId, "");
-  const route = safeText(service.route, "");
-  const isOpening = safeText(state.openingDetailId, "") === serviceId;
+function renderStatusChip(status = "") {
+  const normalized = normalizeStatus(status);
 
   return `
-    <div class="server-service-actions">
-      <button
-        type="button"
-        class="server-action-btn server-action-btn--secondary ${isOpening ? "is-loading" : ""}"
-        data-action="open-server-detail"
-        data-detail-id="${escapeHtml(serviceId)}"
-        ${isOpening ? 'disabled aria-busy="true"' : ""}
-      >
-        ${isOpening ? renderInlineLoader("Abriendo") : "Ver detalle"}
-      </button>
-
-      <button
-        type="button"
-        class="server-action-btn server-action-btn--primary"
-        data-action="copy-server-detail-id"
-        data-detail-id="${escapeHtml(serviceId)}"
-      >
-        Copiar ID
-      </button>
-
-      ${
-        route
-          ? `
-            <button
-              type="button"
-              class="server-action-btn server-action-btn--ghost"
-              data-action="navigate-server"
-              data-route="${escapeHtml(route)}"
-            >
-              Abrir
-            </button>
-          `
-          : ""
-      }
-    </div>
+    <span class="server-status-chip server-status-chip--${attr(normalized)}">
+      <span class="server-status-dot" aria-hidden="true"></span>
+      ${escapeHtml(getStatusLabel(normalized))}
+    </span>
   `;
 }
 
-function renderServiceCard(item = {}, state = {}) {
-  const service = normalizeServerServiceModel(item);
-
-  const serviceId = safeText(service.serviceId, "");
-  const title = safeText(service.title, "Servicio");
-  const description = safeText(service.description, "Sin descripción.");
-  const typeLabel = getServerTypeLabel(service.type);
-  const statusLabel = getServerStatusLabel(service.status);
-  const statusClass = getStatusClass(service.status);
-  const typeClass = getTypeClass(service.type);
-  const themeClass = getThemeClass(service);
-
-  const primaryValue = service.hasLatency
-    ? formatMs(service.latencyMs)
-    : service.hasPercent
-      ? `${Math.round(Number(service.percent))}%`
-      : service.numericValue !== null && service.numericValue !== undefined
-        ? String(service.numericValue)
-        : "—";
-
-  const metricLabel = service.hasLatency
-    ? "Latencia técnica reportada"
-    : service.hasPercent
-      ? "Uso actual reportado"
-      : "Snapshot actual";
-
-  const updatedAt = service.updatedAt
-    ? formatRelativeDate(service.updatedAt)
-    : "Sin fecha";
-
-  const isOpening = safeText(state.openingDetailId, "") === serviceId;
+export function renderServiceCard(service = {}) {
+  const item = normalizeService(service);
+  const status = normalizeStatus(item.status);
 
   return `
     <article
-      class="server-service-card server-service-card--${escapeHtml(statusClass)} server-service-card--theme-${escapeHtml(themeClass)} ${isOpening ? "is-opening" : ""}"
-      data-detail-id="${escapeHtml(serviceId)}"
-      data-status="${escapeHtml(statusClass)}"
-      data-type="${escapeHtml(typeClass)}"
+      class="server-service-card server-service-card--${attr(status)}"
+      data-server-service="${attr(item.id)}"
+      data-status="${attr(status)}"
     >
-      <div class="server-service-head">
-        <div class="server-service-identity">
-          ${renderServiceAvatar(service)}
+      <div class="server-service-icon">
+        ${serviceIcon(item)}
+      </div>
 
-          <div class="server-service-copy">
-            <button
-              type="button"
-              class="server-service-title-btn"
-              data-action="open-server-detail"
-              data-detail-id="${escapeHtml(serviceId)}"
-              ${isOpening ? "disabled" : ""}
-            >
-              ${escapeHtml(title)}
-            </button>
+      <div class="server-service-copy">
+        <span class="server-service-label">${escapeHtml(item.label)}</span>
+        <strong class="server-service-value">${escapeHtml(item.value || item.statusLabel)}</strong>
+        <span class="server-service-detail">${escapeHtml(item.detail || item.endpoint || "Sin detalle")}</span>
+      </div>
 
-            <span class="server-service-id">
-              Service ${escapeHtml(serviceId || "—")}
-            </span>
+      ${renderStatusChip(status)}
+
+      ${
+        item.latencyMs !== null && item.latencyMs !== undefined
+          ? `<span class="server-service-latency">${escapeHtml(formatMs(item.latencyMs))}</span>`
+          : ""
+      }
+    </article>
+  `;
+}
+
+function renderEndpointRow([key, endpoint] = []) {
+  const item = safeObject(endpoint);
+  const status = item.ok ? "healthy" : "critical";
+
+  return `
+    <tr class="server-endpoint-row server-endpoint-row--${attr(status)}">
+      <td>${escapeHtml(key)}</td>
+      <td>${escapeHtml(item.endpoint || "No disponible")}</td>
+      <td>${escapeHtml(item.latencyMs === null || item.latencyMs === undefined ? "—" : formatMs(item.latencyMs))}</td>
+      <td>${escapeHtml(item.ok ? "OK" : item.error || "KO")}</td>
+    </tr>
+  `;
+}
+
+export function renderHeader(input = {}) {
+  const vm = getViewModel(input);
+  const snapshot = vm.snapshot;
+  const status = normalizeStatus(snapshot.status);
+
+  return `
+    <section class="server-hero servidor-hero">
+      <div class="server-hero-top">
+        <div class="server-hero-copy">
+          <p class="server-kicker">Onion Observability</p>
+          <h1 class="server-title">Estado del servidor</h1>
+          <p class="server-subtitle">
+            Backend, base de datos, blobs, Azure, CPU, RAM y métricas operativas en tiempo real.
+          </p>
+        </div>
+
+        <div class="server-hero-actions">
+          <button
+            type="button"
+            class="server-btn"
+            data-server-action="refresh"
+            data-action="refresh-server"
+            ${vm.refreshing || vm.loading ? 'disabled aria-disabled="true"' : ""}
+          >
+            ${icon("refresh")}
+            <span>${vm.refreshing || vm.loading ? "Consultando" : "Actualizar"}</span>
+          </button>
+
+          <button
+            type="button"
+            class="server-btn ${vm.live ? "is-active" : ""}"
+            data-server-action="toggle-live"
+            data-action="toggle-live"
+            aria-pressed="${vm.live ? "true" : "false"}"
+          >
+            ${icon("live")}
+            <span>${vm.live ? "Live activo" : "Live off"}</span>
+          </button>
+
+          <button
+            type="button"
+            class="server-btn"
+            data-server-action="copy-json"
+            data-action="copy-json"
+            ${!snapshot.checkedAt ? 'disabled aria-disabled="true"' : ""}
+          >
+            ${icon("copy")}
+            <span>Copiar JSON</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="server-hero-meta">
+        <span class="server-meta-pill server-meta-pill--${attr(status)}">
+          ${icon("server")}
+          <span>${escapeHtml(snapshot.statusLabel)}</span>
+        </span>
+
+        <span class="server-meta-pill">
+          ${icon("clock")}
+          <span>${escapeHtml(snapshot.checkedAt ? `Última consulta · ${formatDateTime(snapshot.checkedAt)}` : "Pendiente de consulta")}</span>
+        </span>
+
+        <span class="server-meta-pill">
+          ${icon("clock")}
+          <span>Uptime · ${escapeHtml(snapshot.uptimeLabel || "—")}</span>
+        </span>
+
+        <span class="server-meta-pill">
+          ${icon("server")}
+          <span>Latencia · ${escapeHtml(snapshot.latencyLabel || "—")}</span>
+        </span>
+      </div>
+
+      <div class="server-stats">
+        <article class="server-stat-card server-stat-card--status">
+          <span class="server-stat-label">Estado general</span>
+          <strong class="server-stat-value">${escapeHtml(snapshot.statusLabel)}</strong>
+          <span class="server-stat-text">Peor estado detectado entre servicios críticos.</span>
+        </article>
+
+        <article class="server-stat-card server-stat-card--cpu">
+          <span class="server-stat-label">CPU</span>
+          <strong class="server-stat-value">${escapeHtml(snapshot.cpuUsageLabel || "—")}</strong>
+          <span class="server-stat-text">Uso actual reportado por backend.</span>
+        </article>
+
+        <article class="server-stat-card server-stat-card--memory">
+          <span class="server-stat-label">RAM</span>
+          <strong class="server-stat-value">${escapeHtml(snapshot.memoryUsageLabel || "—")}</strong>
+          <span class="server-stat-text">${escapeHtml(snapshot.memoryLabel || "Uso de memoria.")}</span>
+        </article>
+
+        <article class="server-stat-card server-stat-card--services">
+          <span class="server-stat-label">Servicios</span>
+          <strong class="server-stat-value">${escapeHtml(String(snapshot.services.length))}</strong>
+          <span class="server-stat-text">Backend, BD, blobs, Azure y recursos.</span>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+export function renderDashboard(input = {}) {
+  const vm = getViewModel(input);
+  const snapshot = vm.snapshot;
+  const endpoints = Object.entries(safeObject(snapshot.endpoints));
+
+  return `
+    ${
+      vm.error
+        ? `
+          <div class="server-error" role="alert">
+            <strong>No se pudo completar la consulta.</strong>
+            <span>${escapeHtml(vm.error)}</span>
           </div>
+        `
+        : ""
+    }
+
+    <section class="server-dashboard">
+      <header class="server-section-head">
+        <div>
+          <p class="server-section-kicker">STATUS</p>
+          <h2 class="server-section-title">Servicios monitorizados</h2>
         </div>
+      </header>
 
-        <div class="server-service-chips">
-          ${renderChip({
-            label: typeLabel,
-            kind: "type",
-            value: typeClass,
-          })}
+      <div class="server-services-grid">
+        ${snapshot.services.map((service) => renderServiceCard(service)).join("")}
+      </div>
+    </section>
 
-          ${renderChip({
-            label: statusLabel,
-            kind: "status",
-            value: statusClass,
-          })}
+    <section class="server-dashboard server-dashboard--endpoints">
+      <header class="server-section-head">
+        <div>
+          <p class="server-section-kicker">ENDPOINTS</p>
+          <h2 class="server-section-title">Rutas detectadas</h2>
         </div>
+      </header>
+
+      <div class="server-table-shell">
+        <table class="server-table">
+          <thead>
+            <tr>
+              <th>Grupo</th>
+              <th>Endpoint</th>
+              <th>Latencia</th>
+              <th>Resultado</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${
+              endpoints.length
+                ? endpoints.map(renderEndpointRow).join("")
+                : `
+                  <tr>
+                    <td colspan="4">
+                      <div class="server-empty">
+                        <strong>Sin endpoints detectados.</strong>
+                        <span>Pulsa actualizar para consultar el backend.</span>
+                      </div>
+                    </td>
+                  </tr>
+                `
+            }
+          </tbody>
+        </table>
       </div>
-
-      <div class="server-service-metric">
-        <strong>${escapeHtml(primaryValue)}</strong>
-        <span>${escapeHtml(metricLabel)}</span>
-      </div>
-
-      <p class="server-service-description">
-        ${escapeHtml(truncate(description, 140))}
-      </p>
-
-      ${renderServicePreview(service)}
-
-      <div class="server-service-footer">
-        <span class="server-service-updated">
-          Actualizado ${escapeHtml(updatedAt)}
-        </span>
-
-        ${renderServiceActionButtons(service, state)}
-      </div>
-    </article>
+    </section>
   `;
 }
 
-/* =========================================================
-   TECHNICAL SIDEBAR
-========================================================= */
+export function renderLoadingState(input = {}) {
+  const vm = getViewModel({
+    ...input,
+    loading: true,
+  });
 
-function renderTechnicalBlock({ title = "", rows = [] } = {}) {
   return `
-    <article class="server-tech-block">
-      <strong class="server-tech-block-title">${escapeHtml(title)}</strong>
+    <section
+      class="server-view-root servidor-view-root"
+      data-server-scope="true"
+      data-servidor-scope="true"
+      data-view="servidor"
+      data-loading="true"
+      data-refreshing="${vm.refreshing ? "true" : "false"}"
+      data-live="${vm.live ? "true" : "false"}"
+    >
+      ${renderHeader(vm)}
+      ${renderDashboard(vm)}
 
-      <div class="server-tech-rows">
-        ${safeArray(rows)
-          .map(
-            ([label, value]) => `
-              <div class="server-tech-row">
-                <span>${escapeHtml(String(label))}</span>
-                <strong>${escapeHtml(String(value))}</strong>
-              </div>
-            `
-          )
-          .join("")}
+      <div class="server-loading" role="status" aria-live="polite">
+        ${renderSpinner("Consultando estado del sistema…")}
       </div>
-    </article>
+    </section>
   `;
 }
 
-function renderTechnicalSidebar(snapshot = {}) {
-  const telemetry = safeObject(snapshot.telemetry);
-  const server = safeObject(telemetry.server);
-  const runtime = safeObject(telemetry.runtime);
-  const environment = safeObject(telemetry.environment);
-  const browserMetrics = safeObject(snapshot.browserMetrics);
-
-  const blocks = [
-    {
-      title: "Host",
-      rows: [
-        ["Hostname", server.hostname || "—"],
-        ["SO", server.osName || "—"],
-        ["Platform", server.osPlatform || "—"],
-        ["Arch", server.arch || "—"],
-        ["Uptime host", server.hostUptime || "—"],
-      ],
-    },
-    {
-      title: "Runtime Node",
-      rows: [
-        ["Version", runtime.nodeVersion || "—"],
-        ["PID", runtime.nodePid ?? "—"],
-        ["RSS", runtime.rssMB !== null && runtime.rssMB !== undefined ? formatMB(runtime.rssMB) : "—"],
-        ["Heap used", runtime.heapUsedMB !== null && runtime.heapUsedMB !== undefined ? formatMB(runtime.heapUsedMB) : "—"],
-        ["Heap total", runtime.heapTotalMB !== null && runtime.heapTotalMB !== undefined ? formatMB(runtime.heapTotalMB) : "—"],
-      ],
-    },
-    {
-      title: "Capacidad",
-      rows: [
-        [
-          "RAM",
-          server.ramUsedGB !== null && server.ramUsedGB !== undefined
-            ? `${formatGB(server.ramUsedGB)} / ${formatGB(server.ramTotalGB)}`
-            : "—",
-        ],
-        [
-          "Disco",
-          server.diskUsedGB !== null && server.diskUsedGB !== undefined
-            ? `${formatGB(server.diskUsedGB)} / ${formatGB(server.diskTotalGB)}`
-            : "—",
-        ],
-        [
-          "CPU",
-          server.cpuPercent !== null && server.cpuPercent !== undefined
-            ? `${Math.round(server.cpuPercent)}%`
-            : "—",
-        ],
-        [
-          "Event loop",
-          server.eventLoopLag !== null && server.eventLoopLag !== undefined
-            ? formatMs(server.eventLoopLag)
-            : "—",
-        ],
-        [
-          "TTFB",
-          browserMetrics.ttfb !== null && browserMetrics.ttfb !== undefined
-            ? formatMs(browserMetrics.ttfb)
-            : "—",
-        ],
-      ],
-    },
-    {
-      title: "Entorno",
-      rows: [
-        ["NODE_ENV", environment.env || "—"],
-        ["Timezone", environment.timezone || "—"],
-        ["Azure site", environment.azureSiteName || "—"],
-        ["Azure region", environment.azureRegion || "—"],
-        ["Container", environment.inContainer ? "Sí" : "No"],
-      ],
-    },
-  ];
+export function renderErrorState(input = {}) {
+  const vm = getViewModel(input);
 
   return `
-    <aside class="server-tech-sidebar">
-      <div class="server-tech-head">
-        <div class="server-tech-copy">
-          <strong>Resumen técnico</strong>
-          <span>Vista compacta de host, runtime y entorno.</span>
-        </div>
+    <section
+      class="server-view-root servidor-view-root"
+      data-server-scope="true"
+      data-servidor-scope="true"
+      data-view="servidor"
+      data-status="critical"
+      data-error="true"
+      data-live="${vm.live ? "true" : "false"}"
+    >
+      ${renderHeader(vm)}
 
-        <span class="server-tech-count">4 bloques</span>
+      <div class="server-error" role="alert">
+        <strong>No se pudo completar la consulta.</strong>
+        <span>${escapeHtml(vm.error || "Error desconocido consultando el servidor.")}</span>
       </div>
 
-      <div class="server-tech-list">
-        ${blocks.map((block) => renderTechnicalBlock(block)).join("")}
-      </div>
-    </aside>
+      ${renderDashboard(vm)}
+    </section>
   `;
 }
 
-/* =========================================================
-   TOOLBAR / OVERLAY
-========================================================= */
-
-function renderDashboardToolbar({
-  total = 0,
-  page = 1,
-  totalPages = 1,
-  from = 0,
-  to = 0,
-  refreshing = false,
-} = {}) {
+export function renderAccessDeniedState() {
   return `
-    <div class="server-dashboard-toolbar">
-      <div class="server-dashboard-toolbar-copy">
-        <strong>Servicios y componentes</strong>
-
-        <span>
-          Mostrando ${escapeHtml(String(from))}-${escapeHtml(String(to))} de ${escapeHtml(String(total))}
-          · página ${escapeHtml(String(page))} de ${escapeHtml(String(totalPages))}
-        </span>
+    <section
+      class="server-view-root servidor-view-root"
+      data-server-scope="true"
+      data-servidor-scope="true"
+      data-view="servidor"
+      data-forbidden="true"
+    >
+      <div class="server-error" role="alert">
+        <strong>Acceso restringido.</strong>
+        <span>No tienes permisos suficientes para consultar el estado del servidor.</span>
       </div>
-
-      <div class="server-dashboard-toolbar-actions">
-        <span class="server-toolbar-pill">Vista técnica</span>
-
-        ${
-          refreshing
-            ? `
-              <span class="server-toolbar-pill server-toolbar-pill--syncing" aria-live="polite">
-                <span class="server-live-dot" aria-hidden="true"></span>
-                Actualizando
-              </span>
-            `
-            : ""
-        }
-
-        <button
-          type="button"
-          class="server-pagination-btn"
-          data-action="prev-page"
-          ${page <= 1 ? 'disabled aria-disabled="true"' : ""}
-        >
-          Anterior
-        </button>
-
-        <span class="server-pagination-status">
-          ${escapeHtml(`${page}/${totalPages}`)}
-        </span>
-
-        <button
-          type="button"
-          class="server-pagination-btn"
-          data-action="next-page"
-          ${page >= totalPages ? 'disabled aria-disabled="true"' : ""}
-        >
-          Siguiente
-        </button>
-      </div>
-    </div>
-  `;
-}
-
-function renderDashboardLoadingOverlay(message = "Actualizando panel técnico...") {
-  return `
-    <div class="server-dashboard-overlay" aria-live="polite" aria-busy="true">
-      <div class="server-dashboard-overlay-card">
-        <span class="server-dashboard-overlay-spinner" aria-hidden="true"></span>
-
-        <strong>${escapeHtml(message)}</strong>
-
-        <span>Solo se está actualizando la sección principal</span>
-      </div>
-    </div>
-  `;
-}
-
-/* =========================================================
-   MAIN DASHBOARD
-========================================================= */
-
-export function renderDashboard({ snapshot = {}, state = {} } = {}) {
-  const localState = safeObject(state || serverState || {});
-  const resolvedSnapshot = getResolvedSnapshot(snapshot);
-
-  const services = sortServerServicesByLatencyDesc(
-    safeArray(resolvedSnapshot.services)
-  );
-
-  const refreshing = Boolean(localState.refreshing);
-  const loading = Boolean(localState.loading);
-  const error = safeText(localState.error, "");
-
-  if (loading && !services.length) {
-    return renderLoadingState();
-  }
-
-  if (error && !services.length) {
-    return renderErrorState(error);
-  }
-
-  if (!services.length) {
-    return renderEmptyState();
-  }
-
-  const pagination = getPagination(services, localState);
-
-  return `
-    <section class="server-dashboard-wrap ${refreshing ? "is-refreshing" : ""}">
-      ${renderDashboardToolbar({
-        total: pagination.totalItems,
-        page: pagination.page,
-        totalPages: pagination.totalPages,
-        from: pagination.from,
-        to: pagination.to,
-        refreshing,
-      })}
-
-      <div class="server-dashboard-main-grid">
-        <div class="server-services-grid">
-          ${pagination.items
-            .map((item) => renderServiceCard(item, localState))
-            .join("")}
-        </div>
-
-        ${renderTechnicalSidebar(resolvedSnapshot)}
-      </div>
-
-      ${refreshing ? renderDashboardLoadingOverlay("Actualizando panel técnico...") : ""}
     </section>
   `;
 }
 
 /* =========================================================
-   BACKWARD COMPAT EXPORTS
+   MAIN RENDER
 ========================================================= */
 
-export function renderCards({ snapshot = {}, state = {} } = {}) {
-  return renderDashboard({ snapshot, state });
+export function renderServerTemplate(input = {}) {
+  const vm = getViewModel(input);
+  const snapshot = vm.snapshot;
+  const status = normalizeStatus(snapshot.status);
+
+  if (vm.forbidden) {
+    return renderAccessDeniedState(input);
+  }
+
+  if (vm.loading && !snapshot.checkedAt) {
+    return renderLoadingState(input);
+  }
+
+  return `
+    <section
+      class="server-view-root servidor-view-root"
+      data-server-scope="true"
+      data-servidor-scope="true"
+      data-view="servidor"
+      data-status="${attr(status)}"
+      data-loading="${vm.loading ? "true" : "false"}"
+      data-refreshing="${vm.refreshing ? "true" : "false"}"
+      data-live="${vm.live ? "true" : "false"}"
+    >
+      ${renderHeader(vm)}
+      ${renderDashboard(vm)}
+
+      ${
+        vm.loading
+          ? `
+            <div class="server-loading" role="status" aria-live="polite">
+              ${renderSpinner("Consultando estado del sistema…")}
+            </div>
+          `
+          : ""
+      }
+    </section>
+  `;
 }
 
-export default {
-  renderHeader,
-  renderLoadingState,
-  renderErrorState,
-  renderEmptyState,
-  renderDashboard,
-  renderCards,
-};
+export function renderServidorTemplate(input = {}) {
+  return renderServerTemplate(input);
+}
+
+export function renderTemplate(input = {}) {
+  return renderServerTemplate(input);
+}
+
+export function getServerTemplateSnapshot(input = {}) {
+  const vm = getViewModel(input);
+  const snapshot = vm.snapshot;
+
+  return {
+    version: SERVER_TEMPLATE_VERSION,
+    status: snapshot.status,
+    statusLabel: snapshot.statusLabel,
+    services: snapshot.services.length,
+    endpoints: Object.keys(snapshot.endpoints).length,
+    loading: vm.loading,
+    refreshing: vm.refreshing,
+    live: vm.live,
+    error: vm.error,
+  };
+}
+
+export function getSnapshot(input = {}) {
+  return getServerTemplateSnapshot(input);
+}
+
+export default renderServerTemplate;

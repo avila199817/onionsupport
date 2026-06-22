@@ -1,6 +1,6 @@
 /* =========================================================
-   Onion SPA - Usuarios Table Template
-   Archivo: src/views/usuarios/usuarios.template.js
+   Onion Support - Usuarios Template
+   Archivo: /src/views/usuarios/usuarios.template.js
 
    PRODUCTIVO · TEMPLATE PURO · LÓGICA FACTURAS · 10/10
    STABLE DOM ISLANDS · NO CSS INJECTION · NO INLINE STYLES · CSP READY
@@ -36,10 +36,13 @@
    CONSTANTS
 ========================================================= */
 
-export const USUARIOS_TABLE_TEMPLATE_VERSION =
-  "usuarios.table.template.v15.facturas-controller";
+export const USUARIOS_TEMPLATE_VERSION =
+  "usuarios.template.css-1-1.v16.aligned-incidencias";
 
-export const USUARIOS_TABLE_ACTIONS = Object.freeze({
+export const USUARIOS_TABLE_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
+export const USUARIOS_VIEW_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
+
+export const USUARIOS_ACTIONS = Object.freeze({
   DETAIL: "detail",
   CREATE: "create",
   REFRESH: "refresh",
@@ -52,6 +55,8 @@ export const USUARIOS_TABLE_ACTIONS = Object.freeze({
   NEXT_PAGE: "next-page",
 });
 
+export const USUARIOS_TABLE_ACTIONS = USUARIOS_ACTIONS;
+
 export const USUARIOS_DEFAULT_PAGE_SIZE = 5;
 
 const DEFAULT_PAGE_SIZE = USUARIOS_DEFAULT_PAGE_SIZE;
@@ -62,6 +67,16 @@ const FILTERS = Object.freeze([
   { key: "active", label: "Activos" },
   { key: "pending", label: "Pendientes" },
   { key: "blocked", label: "Bloqueados" },
+]);
+
+export const USUARIOS_TABLE_COLUMNS = Object.freeze([
+  { key: "main", label: "Usuario", colClass: "usuarios-col usuarios-col--main" },
+  { key: "status", label: "Estado", colClass: "usuarios-col usuarios-col--status" },
+  { key: "date", label: "Alta", colClass: "usuarios-col usuarios-col--date" },
+  { key: "email", label: "Email", colClass: "usuarios-col usuarios-col--email" },
+  { key: "location", label: "Ciudad", colClass: "usuarios-col usuarios-col--location" },
+  { key: "activity", label: "Última conexión", colClass: "usuarios-col usuarios-col--activity" },
+  { key: "actions", label: "Acciones", colClass: "usuarios-col usuarios-col--actions" },
 ]);
 
 /* =========================================================

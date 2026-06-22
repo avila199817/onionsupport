@@ -2,7 +2,7 @@
    Onion Support - Usuarios Create Modal
    Archivo: /src/views/usuarios/usuarios.template.create.js
 
-   PRODUCTIVO · SINGLETON · NO DUPLICIDADES · CSP CLEAN · 10/10
+   PRODUCTIVO · SINGLETON · NO DUPLICIDADES · CSP CLEAN · 10/10 · V2
 
    Responsabilidad:
    - Crear el módulo que index.js importa de forma obligatoria.
@@ -22,8 +22,7 @@ import { AppCore } from "../../core/index.js";
    META / CONSTANTS
 ========================================================= */
 
-export const USUARIOS_CREATE_MODAL_VERSION =
-  "usuarios.create.modal.productive.v1.singleton";
+export const USUARIOS_CREATE_MODAL_VERSION = "usuarios.create.modal.productive.v2.singleton.no-pages-ready";
 
 const ROOT_ID = "usuarios-create-modal-root";
 const PANEL_ID = "usuarios-create-modal-panel";

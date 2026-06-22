@@ -28,8 +28,8 @@ import {
   renderAccessDeniedState,
 } from "./usuarios.table.template.js";
 
-import UsuariosCreateModal from "./usuarios.create.modal.js";
-import UsuariosDetailModal from "./usuarios.modal.js";
+import UsuariosCreateModal from "./usuarios.template.create.js";
+import UsuariosDetailModal from "./usuarios.template.modal.js";
 
 /* =========================================================
    META / CONSTANTS

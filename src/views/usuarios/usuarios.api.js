@@ -2,7 +2,7 @@
    Onion Support - Usuarios API
    Archivo: /src/views/usuarios/usuarios.api.js
 
-   PRODUCTIVO · HTTP ÚNICO · PAINT SAFE · SIN MÓDULOS FANTASMA · 10/10
+   PRODUCTIVO · HTTP ÚNICO · PAINT SAFE · AUTÓNOMO · 10/10 · V14
 
    Responsabilidad:
    - HTTP único mediante /core/http.js.
@@ -15,7 +15,7 @@
    - Sin DOM, Router, Toast ni listeners.
    - Sin borrar cache válida ante respuestas incompletas.
    - Cache interno en memoria + localStorage opcional.
-   - Sin imports a usuarios.state.js / usuarios.store.js / usuarios.model.js.
+   - Sin imports a módulos externos de estado, store o modelo.
 ========================================================= */
 
 import Http from "../../core/http.js";
@@ -24,7 +24,7 @@ import Http from "../../core/http.js";
    CACHE / STATE INTERNO
 
    Punto cerrado:
-   - Este archivo NO importa usuarios.state.js / usuarios.store.js / usuarios.model.js.
+   - Este archivo NO importa módulos externos de estado, store o modelo.
    - La vista Usuarios puede existir solo con index.js + usuarios.api.js + template.
    - Estado/cache en memoria con localStorage opcional.
    - Sin DOM, sin Router, sin Toast, sin listeners.
@@ -474,8 +474,7 @@ function toTimestamp(value = null) {
    META / CONFIG
 ========================================================= */
 
-export const USUARIOS_API_VERSION =
-  "usuarios.api.productive.v14.self-contained.no-missing-modules";
+export const USUARIOS_API_VERSION = "usuarios.api.productive.v14.http-single.autonomous";
 
 export const USUARIOS_ENDPOINT = "/api/users";
 export { USUARIOS_CACHE_KEY, USUARIOS_CACHE_TTL_MS };

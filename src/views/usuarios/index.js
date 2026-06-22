@@ -26,7 +26,7 @@ import {
   renderLoadingState,
   renderErrorState,
   renderAccessDeniedState,
-} from "./usuarios.table.template.js";
+} from "./usuarios.template.js";
 
 import UsuariosCreateModal from "./usuarios.template.create.js";
 import UsuariosDetailModal from "./usuarios.template.modal.js";

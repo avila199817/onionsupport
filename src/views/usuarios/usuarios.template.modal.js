@@ -1,6 +1,6 @@
 /* =========================================================
    Onion SPA - Usuarios Modal
-   Archivo: src/views/usuarios/usuarios.modal.js
+   Archivo: src/views/usuarios/usuarios.template.modal.js
 
    FINAL PRO SYSTEM · DETAIL MODAL · USUARIOS EDITION · HARDENED 10/10
 

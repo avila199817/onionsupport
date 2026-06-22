@@ -12,8 +12,8 @@
    - Sin window.fetch propio.
    - Sin duplicar controladores.
    - Compatible con /usuarios y /@usuario/usuarios.
-   - Compatible con usuarios.table.template.js.
-   - Compatible con usuarios.modal.js y usuarios.create.modal.js.
+   - Compatible con usuarios.template.js.
+   - Compatible con usuarios.template.modal.js y usuarios.template.create.js.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -39,7 +39,7 @@ export const USUARIOS_MODULE_NAME = "usuarios";
 export const USUARIOS_VIEW_NAME = "UsuariosView";
 export const USUARIOS_CANONICAL_PATH = "/usuarios";
 export const USUARIOS_INDEX_VERSION =
-  "usuarios.index.productive.v14.no-missing-modules";
+  "usuarios.index.productive.v15.controller-solid";
 export const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_MODULE_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_INDEX_SOURCE = "views.usuarios.index";

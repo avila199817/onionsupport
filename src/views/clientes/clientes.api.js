@@ -2,20 +2,24 @@
    Onion Support - Clientes API
    Archivo: /src/views/clientes/clientes.api.js
 
-   PRODUCTIVO · HTTP ÚNICO · SIN MÓDULOS FANTASMA · 10/10
+   PRODUCTIVO · 1:1 INCIDENCIAS · HTTP ÚNICO · 10/10
 
-   Responsabilidad:
-   - HTTP único mediante /core/http.js.
-   - Listado completo con continuation token.
-   - Dedupe de peticiones de listado.
-   - Protección anti-race soft.
-   - Detalle, creación, actualización y eliminación.
-   - Normalización de envelopes heterogéneos.
-   - Sin fetch propio.
+   Contrato productivo:
+   - Centraliza TODAS las llamadas HTTP de Clientes.
+   - Adaptador frontend para /api/clientes.
+   - Sin window.fetch propio.
    - Sin AppCore obligatorio.
-   - Sin DOM, Router, Toast ni listeners.
-   - Sin imports a clientes.state.js / clientes.store.js.
+   - Sin DOM, Router, Store externo ni módulos fantasma.
+   - Listado completo con continuation token.
    - Cache interno en memoria + localStorage opcional.
+   - Dedupe de peticiones concurrentes.
+   - Protección anti-race soft.
+   - No aplanar arrays en first(): conserva items/rows/clientes.
+   - Compatible 1:1 con index.js y template.js de Clientes.
+   - API pública alineada con incidencias.api.js:
+     hydrateClientesFromCache, listClientes, loadClientes,
+     loadClienteDetail, createCliente, updateCliente, deleteCliente,
+     computeClientesStats, getClientesApiSnapshot.
 ========================================================= */
 
 import Http from "../../core/http.js";
@@ -25,14 +29,19 @@ import Http from "../../core/http.js";
 ========================================================= */
 
 export const CLIENTES_API_VERSION =
-  "clientes.api.productive.v1.http-single.no-phantom-modules";
+  "clientes.api.incidencias-aligned.v2.http-single.no-array-flatten";
 
 export const CLIENTES_ENDPOINT = "/api/clientes";
 export const CLIENTES_FETCH_LIMIT = 250;
 export const CLIENTES_MAX_LIMIT = 500;
 export const CLIENTES_MAX_PAGES = 20;
-export const CLIENTES_CACHE_KEY = "onion.support.clientes.api.cache.v1";
+export const CLIENTES_CACHE_KEY = "onion.support.clientes.api.cache.v2";
 export const CLIENTES_CACHE_TTL_MS = 60_000;
+
+export const CLIENTES_TIMEOUT = 15_000;
+export const CLIENTES_DETAIL_TIMEOUT = 25_000;
+export const CLIENTES_MUTATION_TIMEOUT = 25_000;
+export const CLIENTES_LIST_LIMIT = CLIENTES_FETCH_LIMIT;
 
 let lastLoadToken = 0;
 
@@ -270,6 +279,45 @@ function hydrateStateFromCache({ freshOnly = true } = {}) {
   clientesStore = items;
 
   return true;
+}
+
+export function hydrateClientesFromCache(options = {}) {
+  hydrateStateFromCache({
+    freshOnly: options.freshOnly !== false && options.stale !== true,
+  });
+
+  const items = safeArray(clientesState.items);
+  const lastSyncAt = number(clientesState.lastSyncAt, 0);
+  const ageMs = lastSyncAt ? Math.max(0, Date.now() - lastSyncAt) : Number.POSITIVE_INFINITY;
+  const ttlMs = number(options.ttlMs ?? options.cacheTtlMs, CLIENTES_CACHE_TTL_MS);
+
+  return {
+    ok: Boolean(clientesState.loaded || clientesState.hydrated || items.length),
+    cached: true,
+    stale: !lastSyncAt || ageMs > ttlMs,
+    items,
+    clientes: items,
+    clients: items,
+    customers: items,
+    rows: items,
+    results: items,
+    total: Math.max(number(clientesState.remoteCount, items.length), items.length),
+    totalCount: Math.max(number(clientesState.remoteCount, items.length), items.length),
+    remoteCount: Math.max(number(clientesState.remoteCount, items.length), items.length),
+    count: items.length,
+    loadedAt: lastSyncAt ? new Date(lastSyncAt).toISOString() : null,
+    lastSyncAt,
+    loading: clientesState.loading,
+    refreshing: clientesState.refreshing,
+    error: clientesState.error,
+    cache: {
+      hydrated: Boolean(clientesState.hydrated || items.length),
+      ageMs,
+      ttlMs,
+      fresh: Boolean(lastSyncAt) && ageMs <= ttlMs,
+      key: CLIENTES_CACHE_KEY,
+    },
+  };
 }
 
 function getInflightLoad() {
@@ -1196,7 +1244,7 @@ async function httpRequest(method = "GET", endpoint = "", body = null, options =
 
 async function fetchClientesPageRequest(options = {}) {
   return httpRequest("GET", CLIENTES_ENDPOINT, null, {
-    timeout: number(options.timeout, 20000),
+    timeout: number(options.timeout, CLIENTES_TIMEOUT),
     query: buildListQuery(options),
     source: "views.clientes.api.list.page",
   });
@@ -1330,7 +1378,7 @@ export async function getClienteByIdRequest(id = "", options = {}) {
     `${CLIENTES_ENDPOINT}/${encodeURIComponent(clienteId)}`,
     null,
     {
-      timeout: number(options.timeout, 18000),
+      timeout: number(options.timeout, CLIENTES_DETAIL_TIMEOUT),
       source: "views.clientes.api.detail",
     }
   );
@@ -1358,6 +1406,7 @@ export async function getClienteById(id = "", options = {}) {
 
 export const fetchClienteById = getClienteById;
 export const fetchClienteDetail = getClienteById;
+export const loadClienteDetail = getClienteByIdRequest;
 export const getCliente = getClienteById;
 
 /* =========================================================
@@ -1426,7 +1475,7 @@ export async function createCliente(payload = {}, options = {}) {
   });
 
   const response = await httpRequest("POST", CLIENTES_ENDPOINT, body, {
-    timeout: number(options.timeout, 20000),
+    timeout: number(options.timeout, CLIENTES_MUTATION_TIMEOUT),
     source: "views.clientes.api.create",
   });
 
@@ -1441,6 +1490,8 @@ export async function createCliente(payload = {}, options = {}) {
   return detail || response;
 }
 
+export const createClienteRequest = createCliente;
+
 export async function updateCliente(id = "", payload = {}, options = {}) {
   const clienteId = cleanText(first(id, payload.id, payload.clienteId, payload.clientId), "");
   if (!clienteId) throw new Error("CLIENTE_ID_REQUIRED");
@@ -1452,7 +1503,7 @@ export async function updateCliente(id = "", payload = {}, options = {}) {
     `${CLIENTES_ENDPOINT}/${encodeURIComponent(clienteId)}`,
     body,
     {
-      timeout: number(options.timeout, 20000),
+      timeout: number(options.timeout, CLIENTES_MUTATION_TIMEOUT),
       source: "views.clientes.api.update",
     }
   );
@@ -1467,6 +1518,8 @@ export async function updateCliente(id = "", payload = {}, options = {}) {
 
   return detail || response;
 }
+
+export const updateClienteRequest = updateCliente;
 
 export async function patchCliente(id = "", payload = {}, options = {}) {
   return updateCliente(id, payload, {
@@ -1491,7 +1544,7 @@ export async function deleteCliente(id = "", options = {}) {
     `${CLIENTES_ENDPOINT}/${encodeURIComponent(clienteId)}`,
     null,
     {
-      timeout: number(options.timeout, 20000),
+      timeout: number(options.timeout, CLIENTES_MUTATION_TIMEOUT),
       source: "views.clientes.api.delete",
     }
   );
@@ -1508,6 +1561,8 @@ export async function deleteCliente(id = "", options = {}) {
     clienteId,
   };
 }
+
+export const deleteClienteRequest = deleteCliente;
 
 /* =========================================================
    STORE / SNAPSHOT EXPORTS
@@ -1544,13 +1599,49 @@ export function getClientesStateSnapshot() {
   return getClientesStoreSnapshot();
 }
 
+export function getClientesApiSnapshot() {
+  const snapshot = getClientesStoreSnapshot();
+  const lastSyncAt = number(clientesState.lastSyncAt, 0);
+  const ageMs = lastSyncAt ? Math.max(0, Date.now() - lastSyncAt) : Number.POSITIVE_INFINITY;
+
+  return {
+    ...snapshot,
+    version: CLIENTES_API_VERSION,
+    endpoint: CLIENTES_ENDPOINT,
+    loading: clientesState.loading,
+    cached: Boolean(clientesState.loaded || clientesState.hydrated || clientesState.items.length),
+    lastLoadedAt: lastSyncAt ? new Date(lastSyncAt).toISOString() : null,
+    cacheAgeMs: ageMs,
+    inFlight: Boolean(clientesState.inflightLoad),
+    lastError: clientesState.error ? { message: clientesState.error, code: "CLIENTES_ERROR" } : null,
+    bugfix: {
+      noArrayFlattenInFirst: true,
+      recursiveListAliases: true,
+      keepsBackendItems: true,
+      continuationTokenSafe: true,
+    },
+    contract: {
+      list: "listClientes(options) => { items, total, count, cached, stale }",
+      detail: "loadClienteDetail(id) / getClienteByIdRequest(id)",
+      mutations: "createCliente / updateCliente / deleteCliente",
+      http: "core/http.js only",
+    },
+  };
+}
+
+export async function loadClientesStats() {
+  return computeClientesStats(clientesState.items);
+}
+
 export function getState() {
   return getClientesStoreSnapshot();
 }
 
 export function getSnapshot() {
-  return getClientesStoreSnapshot();
+  return getClientesApiSnapshot();
 }
+
+export const getDebugSnapshot = getClientesApiSnapshot;
 
 export function getItems() {
   return [...clientesState.items];
@@ -1603,6 +1694,7 @@ export {
   upsertClienteStore,
   removeClienteStore,
 
+
   normalizeClienteModel,
   normalizeClientesCollection,
   dedupeClientes,
@@ -1628,24 +1720,31 @@ export default {
   getClientes,
   refreshClientes,
   fetchClientesRequest,
+  hydrateClientesFromCache,
 
   getClienteById,
   getClienteByIdRequest,
   fetchClienteById,
   fetchClienteDetail,
+  loadClienteDetail,
   getCliente,
 
   createCliente,
+  createClienteRequest,
   updateCliente,
+  updateClienteRequest,
   patchCliente,
   putCliente,
   deleteCliente,
+  deleteClienteRequest,
 
   getClienteByIdStore,
   getClientesStoreSnapshot,
   getClientesStateSnapshot,
+  getClientesApiSnapshot,
   getState,
   getSnapshot,
+  getDebugSnapshot,
   getItems,
   getClientesCount,
   hasClientes,
@@ -1657,5 +1756,6 @@ export default {
   findClienteById,
   filterClientes,
   computeClientesStats,
+  loadClientesStats,
   statusBucket,
 };

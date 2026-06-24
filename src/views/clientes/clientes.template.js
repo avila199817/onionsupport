@@ -9,7 +9,7 @@
    - Acepta items/clientes/clients/rows/results/data.items/etc.
 ========================================================= */
 
-export const CLIENTES_TEMPLATE_VERSION = "clientes.template.css-1-1.incidencias-aligned.v2";
+export const CLIENTES_TEMPLATE_VERSION = "clientes.template.css-1-1.incidencias-aligned.v3.table-contact-links";
 export const CLIENTES_TABLE_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 export const CLIENTES_VIEW_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 
@@ -44,7 +44,6 @@ const FILTERS = Object.freeze([
   { key: "active", label: "Activos" },
   { key: "pending", label: "Pendientes" },
   { key: "blocked", label: "Bloqueados" },
-  { key: "vip", label: "VIP" },
 ]);
 
 export const CLIENTES_TABLE_COLUMNS = Object.freeze([
@@ -68,13 +67,6 @@ export const CLIENTES_TABLE_COLUMNS = Object.freeze([
     colClass: "clientes-col clientes-col--date clientes-col--created",
     thClass: "clientes-th clientes-th--date clientes-th--created clientes-col clientes-col--date clientes-col--created",
     cellClass: "clientes-cell clientes-cell--date clientes-cell--created",
-  },
-  {
-    key: "updated",
-    label: "Actividad",
-    colClass: "clientes-col clientes-col--date clientes-col--updated",
-    thClass: "clientes-th clientes-th--date clientes-th--updated clientes-col clientes-col--date clientes-col--updated",
-    cellClass: "clientes-cell clientes-cell--date clientes-cell--updated",
   },
   {
     key: "contact",
@@ -452,7 +444,7 @@ function normalizeSort(value = "") {
 }
 
 const nextSort = (value = DEFAULT_SORT_ORDER) => (normalizeSort(value) === "asc" ? "desc" : "asc");
-const sortLabel = (value = DEFAULT_SORT_ORDER) => (normalizeSort(value) === "asc" ? "Antiguos primero" : "Recientes primero");
+const sortLabel = (value = DEFAULT_SORT_ORDER) => (normalizeSort(value) === "asc" ? "Fecha ↑" : "Fecha ↓");
 
 /* =========================================================
    DATA GETTERS
@@ -574,6 +566,74 @@ function getName(item = {}) {
   );
 }
 
+function getClienteInitials(item = {}) {
+  const r = unwrap(item);
+  const raw = rawOf(item);
+
+  const firstName = txt(
+    first(
+      r.firstName,
+      r.nombrePropio,
+      r.profile?.firstName,
+      r.profile?.nombrePropio,
+      raw.firstName,
+      raw.nombrePropio,
+      raw.profile?.firstName,
+      raw.profile?.nombrePropio
+    ),
+    ""
+  );
+
+  const lastName = txt(
+    first(
+      r.lastName,
+      r.apellidos,
+      r.surname,
+      r.profile?.lastName,
+      r.profile?.apellidos,
+      r.profile?.surname,
+      raw.lastName,
+      raw.apellidos,
+      raw.surname,
+      raw.profile?.lastName,
+      raw.profile?.apellidos,
+      raw.profile?.surname
+    ),
+    ""
+  );
+
+  if (firstName && lastName) return `${firstName[0] || ""}${lastName[0] || ""}`.toUpperCase() || "CL";
+
+  const displayName = txt(
+    first(
+      r.fullName,
+      r.displayName,
+      r.name,
+      r.nombreCompleto,
+      raw.fullName,
+      raw.displayName,
+      raw.name,
+      raw.nombreCompleto,
+      getName(item)
+    ),
+    ""
+  );
+
+  const cleanDisplay = displayName.includes("@") ? "" : displayName;
+  const parts = cleanDisplay.split(/\s+/).filter(Boolean);
+
+  if (parts.length >= 2) return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "CL";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase() || "CL";
+
+  const emailLocal = getEmail(item).split("@")[0] || "";
+  const emailParts = emailLocal.split(/[._+\-\d]+/).filter(Boolean);
+
+  if (emailParts.length >= 2) return `${emailParts[0]?.[0] || ""}${emailParts[1]?.[0] || ""}`.toUpperCase() || "CL";
+  if (emailParts.length === 1) return emailParts[0].slice(0, 2).toUpperCase() || "CL";
+
+  return initials(first(getCode(item), getId(item), "CL"));
+}
+
 function getEmail(item = {}) {
   const r = unwrap(item);
   const raw = rawOf(item);
@@ -606,6 +666,22 @@ function formatPhone(value = "") {
 
   if (national.length === 9) return `${prefix}${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6)}`;
   return raw;
+}
+
+function mailtoHref(email = "") {
+  const safeEmail = txt(email, "").toLowerCase();
+  return safeEmail && safeEmail.includes("@") ? `mailto:${encodeURIComponent(safeEmail).replace(/%40/g, "@").replace(/%2E/g, ".")}` : "";
+}
+
+function telHref(phone = "") {
+  const raw = txt(phone, "");
+  if (!raw) return "";
+
+  const keepPlus = raw.trim().startsWith("+");
+  const digits = raw.replace(/[^\d]/g, "");
+  if (!digits) return "";
+
+  return `tel:${keepPlus ? "+" : ""}${digits}`;
 }
 
 function getLocation(item = {}) {
@@ -661,8 +737,6 @@ function getTypeLabel(item = {}) {
     freelance: "Autónomo",
     particular: "Particular",
     persona: "Particular",
-    vip: "VIP",
-    premium: "Premium",
     cliente: "Cliente",
   };
 
@@ -688,8 +762,8 @@ function statusKey(item = {}) {
 
   if (["pending", "pendiente", "new", "nuevo", "invited", "invitation_pending", "unverified", "sin_validar"].includes(status)) return "pending";
   if (["blocked", "bloqueado", "bloqueada", "inactive", "inactivo", "inactiva", "disabled", "suspended", "deleted", "archived", "banned"].includes(status)) return "blocked";
-  if (["vip", "premium"].includes(status)) return "vip";
-  if (getType(item) === "vip" || unwrap(item).vip === true || unwrap(item).isVip === true) return "vip";
+  if (["vip", "premium"].includes(status)) return "active";
+  if (getType(item) === "vip" || unwrap(item).vip === true || unwrap(item).isVip === true) return "active";
 
   return "active";
 }
@@ -700,7 +774,6 @@ function statusLabel(itemOrStatus = {}) {
     active: "Activo",
     pending: "Pendiente",
     blocked: "Bloqueado",
-    vip: "VIP",
   };
 
   return labels[status] || txt(status.replace(/_/g, " "), "Activo").replace(/^./, (letter) => letter.toUpperCase());
@@ -929,7 +1002,7 @@ function filterAndSort(items = [], input = {}) {
 }
 
 function filterCounts(items = []) {
-  const base = { all: 0, active: 0, pending: 0, blocked: 0, vip: 0 };
+  const base = { all: 0, active: 0, pending: 0, blocked: 0 };
 
   for (const item of normalizeClientesCollection(items)) {
     const status = statusKey(item);
@@ -1025,7 +1098,7 @@ function renderAvatar(item = {}) {
   return `
     <span class="clientes-avatar${src ? " has-image" : " is-fallback"} clientes-avatar-tone-${at(String(tone))}" data-avatar-tone="${at(String(tone))}" data-has-avatar="${src ? "true" : "false"}" data-fallback="${src ? "false" : "true"}" aria-hidden="true">
       ${src ? `<img class="clientes-avatar-img" src="${at(src)}" alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
-      <span class="clientes-avatar-fallback">${esc(initials(name))}</span>
+      <span class="clientes-avatar-fallback">${esc(getClienteInitials(item))}</span>
     </span>
   `;
 }
@@ -1065,15 +1138,18 @@ function renderAmountChip(item = {}) {
 
 function renderContactLine(item = {}) {
   const email = getEmail(item);
-  const phone = formatPhone(getPhone(item));
+  const rawPhone = getPhone(item);
+  const phone = formatPhone(rawPhone);
+  const mailHref = mailtoHref(email);
+  const phoneHref = telHref(rawPhone);
 
   if (!email && !phone) return `<span class="clientes-contact-empty">Sin contacto</span>`;
 
   return `
     <span class="clientes-contact-line">
-      ${email ? `<span class="clientes-email">${icon("mail")}<span>${esc(email)}</span></span>` : ""}
+      ${email ? `<a class="clientes-email clientes-contact-link" href="${at(mailHref)}" data-action="" data-clientes-action="" aria-label="Enviar correo a ${at(email)}">${icon("mail")}<span>${esc(email)}</span></a>` : ""}
       ${email && phone ? `<span class="clientes-client-separator">·</span>` : ""}
-      ${phone ? `<span class="clientes-phone">${icon("phone")}<span>${esc(phone)}</span></span>` : ""}
+      ${phone ? `<a class="clientes-phone clientes-contact-link" href="${at(phoneHref)}" data-action="" data-clientes-action="" aria-label="Llamar a ${at(phone)}">${icon("phone")}<span>${esc(phone)}</span></a>` : ""}
     </span>
   `;
 }
@@ -1115,7 +1191,6 @@ function renderRow(item = {}, vm = {}) {
               ${location ? `<span class="clientes-location">${esc(location)}</span>` : `<span class="clientes-location is-empty">Sin ciudad</span>`}
             </div>
             <div class="clientes-row-badges">
-              ${renderTypeChip(item)}
               ${nif ? `<span class="clientes-nif-chip">${esc(nif)}</span>` : ""}
             </div>
           </div>
@@ -1123,7 +1198,6 @@ function renderRow(item = {}, vm = {}) {
       </td>
       <td class="clientes-cell clientes-cell--status" data-column="status">${renderStatusChip(item)}</td>
       <td class="clientes-cell clientes-cell--date clientes-cell--created" data-column="created"><span class="clientes-date-inline clientes-date" title="${at(formatDate(getCreated(item)))}">${esc(formatShortDate(getCreated(item)))}</span></td>
-      <td class="clientes-cell clientes-cell--date clientes-cell--updated" data-column="updated"><span class="clientes-date-inline clientes-date" title="${at(formatDate(getUpdated(item)))}">${esc(formatRelativeDate(getUpdated(item)))}</span></td>
       <td class="clientes-cell clientes-cell--email clientes-cell--contact" data-column="contact">${renderContactLine(item)}</td>
       <td class="clientes-cell clientes-cell--amount clientes-cell--importe" data-column="amount">${renderAmountChip(item)}</td>
     </tr>
@@ -1145,7 +1219,7 @@ function renderHeader(vm = {}) {
       <div class="clientes-hero-top">
         <div class="clientes-hero-copy">
           <h1 class="clientes-title clientes-page-title">Centro de control de clientes</h1>
-          <p class="clientes-subtitle clientes-page-subtitle">Consulta clientes, revisa actividad, facturación y contactos desde un único panel.</p>
+          <p class="clientes-subtitle clientes-page-subtitle">Consulta clientes, revisa altas, facturación y contactos desde un único panel.</p>
         </div>
         <div class="clientes-hero-actions">
           <button type="button" id="clientes-create-btn" class="clientes-btn clientes-btn--create clientes-btn--primary" data-clientes-action="${CLIENTES_ACTIONS.CREATE_OPEN}" data-action="${CLIENTES_ACTIONS.CREATE_OPEN}" ${htmlAttrs({ disabled: vm.creating || vm.loading, "aria-disabled": vm.creating || vm.loading ? "true" : false, "aria-busy": vm.creating ? "true" : false })}>
@@ -1253,7 +1327,7 @@ function renderEmpty(vm = {}) {
       ? "Prueba a limpiar la búsqueda o cambia el filtro activo para volver al historial completo."
       : mismatch
         ? "La API está entregando total, pero no está entregando ningún array de filas compatible."
-        : "Cuando haya clientes registrados aparecerán aquí con su estado, actividad, contacto y facturación asociada.";
+        : "Cuando haya clientes registrados aparecerán aquí con su estado, alta, contacto y facturación asociada.";
 
   return `
     <div class="clientes-empty${mismatch ? " is-data-mismatch" : ""}" data-clientes-empty="true">

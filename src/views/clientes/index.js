@@ -2,14 +2,14 @@
    Onion Support - Clientes Index
    Archivo: /src/views/clientes/index.js
 
-   PRODUCTIVO · CONTROLADOR CLIENTES · 1:1 INCIDENCIAS
+   PRODUCTIVO · CONTROLADOR CLIENTES · 1:1 INCIDENCIAS · 10/10
 
    Contrato productivo:
    - Controlador único de la vista Clientes.
    - Sin window.fetch propio.
-   - Usa clientes.api.js si está disponible y carga correctamente.
-   - Si clientes.api.js no carga, cae a Http core contra /api/clientes.
-   - Render principal 1:1 con clientes.template.js.
+   - Listado/detalle por clientes.api.js con fallback Http core.
+   - Crear cliente conectado a clientes.template.create.js + clientes.api.js.
+   - Modal detalle conectado a clientes.template.modal.js.
    - Compatible con /clientes y /@usuario/clientes.
    - Sin duplicar controladores.
    - Sin paginación clásica: visibleLimit + load-more.
@@ -30,10 +30,23 @@ import {
   normalizeClientesCollection,
 } from "./clientes.template.js";
 
+import {
+  createCliente as createClienteRequest,
+} from "./clientes.api.js";
+
+import {
+  renderClientesCreateModal,
+  renderClientesCreateModalClosed,
+  CREATE_ACTIONS,
+  getCreateFormDefaults,
+  validateCreateForm,
+  buildClienteCreatePayload,
+} from "./clientes.template.create.js";
+
 export const CLIENTES_MODULE_NAME = "clientes";
 export const CLIENTES_VIEW_NAME = "ClientesView";
 export const CLIENTES_CANONICAL_PATH = "/clientes";
-export const CLIENTES_INDEX_VERSION = "clientes.index.incidencias-aligned.v2";
+export const CLIENTES_INDEX_VERSION = "clientes.index.incidencias-aligned.v4.create-modal-wired";
 export const CLIENTES_VIEW_VERSION = CLIENTES_INDEX_VERSION;
 export const CLIENTES_MODULE_VERSION = CLIENTES_INDEX_VERSION;
 export const CLIENTES_INDEX_SOURCE = "views.clientes.index";
@@ -51,6 +64,17 @@ const DEFAULT_SORT_ORDER = "desc";
 const SEARCH_DEBOUNCE_MS = 220;
 
 const ROUTER_EVENT_HANDLED_KEY = "__onionRouterHandled";
+
+const MODAL_HOST_SELECTOR = "[data-clientes-modal-host='true']";
+const CREATE_ROOT_SELECTOR = "[data-clientes-create-root='true']";
+const CREATE_MODAL_PANEL_SELECTOR = "[data-clientes-create-modal-panel='true']";
+const CREATE_MODAL_OVERLAY_SELECTOR = "[data-clientes-create-modal-overlay='true']";
+
+const USER_SEARCH_MIN_LENGTH = 2;
+const USER_SEARCH_LIMIT = 8;
+const USER_SEARCH_DEBOUNCE_MS = 220;
+const USERS_SEARCH_ENDPOINT = "/api/users";
+
 const INSTANCES = new WeakMap();
 const CLIENTES_GLOBAL_CONTROLLER_KEY = Symbol.for("onion.support.clientes.active-controller");
 
@@ -207,6 +231,26 @@ function normalizeSearch(value = "") {
     .replace(/[^a-z0-9@._+\-\s]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeEmail(value = "") {
+  const email = cleanText(value, "").toLowerCase();
+  if (!email) return "";
+
+  if (["null", "undefined", "none", "sin email", "sin_email", "no email", "no_email", "__no_email__"].includes(email)) {
+    return "";
+  }
+
+  return email.includes("@") ? email : "";
+}
+
+function firstEmail(...values) {
+  for (const value of values) {
+    const email = normalizeEmail(value);
+    if (email) return email;
+  }
+
+  return "";
 }
 
 function normalizeSortOrder(value = "") {
@@ -522,6 +566,183 @@ function emitEvent(eventName = "", payload = {}) {
   }
 
   return false;
+}
+
+function eventPayload(event = null) {
+  return safeObject(
+    first(
+      event?.detail?.detail,
+      event?.detail?.payload,
+      event?.detail,
+      event?.payload,
+      event,
+      {}
+    ),
+    {}
+  );
+}
+
+function firstUrl(...values) {
+  const queue = [...values];
+
+  while (queue.length) {
+    const value = queue.shift();
+    if (value === undefined || value === null) continue;
+
+    if (isObject(value)) {
+      queue.unshift(
+        value.avatarUrl,
+        value.avatar,
+        value.picture,
+        value.photoUrl,
+        value.photoURL,
+        value.imageUrl,
+        value.profile?.avatarUrl,
+        value.profile?.avatar,
+        value.profile?.picture,
+        value.raw?.avatarUrl,
+        value.raw?.avatar,
+        value.raw?.picture
+      );
+      continue;
+    }
+
+    const url = cleanText(value, "");
+    if (!url) continue;
+    if (url.startsWith("//")) continue;
+    if (/[\r\n\t\\]/.test(url)) continue;
+    if (/^(javascript|data|vbscript|file):/i.test(url)) continue;
+    if (/^blob:/i.test(url) || url.startsWith("/")) return url;
+    if (/^https:\/\//i.test(url)) {
+      try { return new URL(url).href; } catch { /* noop */ }
+    }
+  }
+
+  return "";
+}
+
+function normalizeSearchUser(user = {}) {
+  const raw = safeObject(user, {});
+  const nested = safeObject(raw.raw, {});
+
+  const userId = cleanText(
+    first(
+      raw.userId,
+      raw.id,
+      raw.uid,
+      raw.sub,
+      raw.usuarioId,
+      raw.lookup?.userId,
+      raw.lookup?.id,
+      raw.profile?.userId,
+      raw.auth?.userId,
+      nested.userId,
+      nested.id,
+      nested.uid,
+      nested.sub,
+      nested.usuarioId,
+      ""
+    ),
+    ""
+  );
+
+  const clienteId = cleanText(
+    first(
+      raw.targetClienteId,
+      raw.clienteId,
+      raw.clientId,
+      raw.customerId,
+      raw.lookup?.clienteId,
+      raw.lookup?.clientId,
+      raw.tenant?.clienteId,
+      raw.cliente?.clienteId,
+      raw.cliente?.id,
+      raw.client?.clienteId,
+      raw.client?.id,
+      nested.targetClienteId,
+      nested.clienteId,
+      nested.clientId,
+      nested.customerId,
+      nested.cliente?.clienteId,
+      nested.cliente?.id,
+      nested.client?.clienteId,
+      nested.client?.id,
+      ""
+    ),
+    ""
+  );
+
+  const name = cleanText(
+    first(
+      raw.displayName,
+      raw.fullName,
+      raw.name,
+      raw.nombre,
+      raw.publicName,
+      raw.clienteNombre,
+      raw.clientName,
+      raw.profile?.publicName,
+      raw.profile?.displayName,
+      raw.profile?.name,
+      raw.lookup?.displayName,
+      raw.lookup?.name,
+      [raw.firstName, raw.lastName].filter(Boolean).join(" "),
+      [raw.nombre, raw.apellidos].filter(Boolean).join(" "),
+      nested.displayName,
+      nested.fullName,
+      nested.name,
+      nested.nombre,
+      raw.username,
+      userId,
+      "Usuario"
+    ),
+    "Usuario"
+  );
+
+  const email = firstEmail(raw.email, raw.emailLower, raw.userEmail, raw.clienteEmail, raw.clientEmail, raw.profile?.email, raw.lookup?.email, nested.email, nested.emailLower);
+  const phone = cleanText(first(raw.phone, raw.telefono, raw.mobile, raw.movil, nested.phone, nested.telefono, nested.mobile, nested.movil, ""), "");
+  const username = cleanText(first(raw.username, raw.usernameLower, raw.userName, raw.profile?.username, nested.username, nested.usernameLower, ""), "");
+  const role = normalizeRole(first(raw.role, raw.rol, nested.role, nested.rol, "user"));
+  const avatarUrl = firstUrl(raw, nested, raw.profile, raw.lookup);
+
+  return {
+    ...raw,
+    raw,
+    id: userId,
+    userId,
+    uid: userId,
+    targetUserId: userId,
+    clienteId,
+    targetClienteId: clienteId,
+    clientId: clienteId,
+    customerId: clienteId,
+    name,
+    nombre: name,
+    fullName: name,
+    displayName: name,
+    email,
+    emailLower: email,
+    phone,
+    telefono: phone,
+    username,
+    usernameLower: username.toLowerCase(),
+    role,
+    rol: role,
+    avatarUrl,
+    avatar: avatarUrl || null,
+  };
+}
+
+function usersListFromPayload(payload = null) {
+  const candidates = [];
+
+  for (const source of envelopeObjects(payload)) {
+    for (const key of ["items", "results", "users", "usuarios", "rows", "records", "docs", "value"]) {
+      if (Array.isArray(source[key])) candidates.push(source[key]);
+    }
+  }
+
+  return candidates.find((items) => items.length) || [];
 }
 
 /* =========================================================
@@ -1407,8 +1628,32 @@ function createClientesController(host = null, context = {}) {
   let openingClienteId = "";
 
   let renderFrame = 0;
+  let modalFrame = 0;
   let loadSeq = 0;
   let searchTimer = 0;
+  let userSearchTimer = 0;
+  let userSearchSeq = 0;
+
+  let modalHost = null;
+  let modalHostBound = false;
+
+  const createModal = {
+    open: false,
+    submitting: false,
+    serverError: "",
+    successMessage: "",
+    createdClienteId: "",
+    errors: {},
+    form: getCreateFormDefaults(),
+    userSearch: {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      selectedUser: null,
+      empty: false,
+    },
+  };
 
   const disposers = [];
 
@@ -1453,6 +1698,11 @@ function createClientesController(host = null, context = {}) {
       sortOrder,
       visibleLimit,
       openingClienteId,
+
+      createModal,
+      modals: {
+        create: createModal,
+      },
 
       apiImportError: apiImportError ? safeError(apiImportError, "") : "",
 
@@ -1598,7 +1848,7 @@ function createClientesController(host = null, context = {}) {
 
   function setFilter(value = "all") {
     const next = normalizeKey(value || "all") || "all";
-    filter = ["all", "active", "pending", "blocked", "vip"].includes(next) ? next : "all";
+    filter = ["all", "active", "pending", "blocked"].includes(next) ? next : "all";
     visibleLimit = DEFAULT_VISIBLE_LIMIT;
     scheduleRender();
     return filter;
@@ -1641,28 +1891,539 @@ function createClientesController(host = null, context = {}) {
     return visibleLimit;
   }
 
-  async function openCreate() {
-    creating = true;
-    scheduleRender();
+  function createModalPayload(extra = {}) {
+    return {
+      ...createModal,
+      admin: isAdminContext(currentContext),
+      role: getCurrentRole(currentContext),
+      user: getCurrentUser(),
+      routes: getRoutes(),
+      ...extra,
+    };
+  }
+
+  function modalsOpen() {
+    return Boolean(createModal.open);
+  }
+
+  function syncBodyModalClass() {
+    if (!isBrowser()) return false;
 
     try {
-      const module = await importClientesCreateModal();
-      const target = module?.default || module?.ClientesCreateModal || module?.OnionClientesCreateModal || module;
-
-      if (isFunction(target?.open)) return target.open();
-      if (isFunction(target?.show)) return target.show();
-      if (isFunction(target?.mount)) return target.mount();
-
-      emitEvent("clientes:create:open", { source: CLIENTES_INDEX_SOURCE });
+      document.body?.classList.toggle("modal-open", modalsOpen());
+      document.body?.classList.toggle("clientes-modal-open", modalsOpen());
+      document.body?.classList.toggle("clientes-create-open", createModal.open);
       return true;
     } catch {
-      emitEvent("clientes:create:open", { source: CLIENTES_INDEX_SOURCE });
-      return true;
-    } finally {
-      creating = false;
-      scheduleRender();
+      return false;
     }
   }
+
+  function ensureModalHost() {
+    if (!isBrowser()) return null;
+
+    if (modalHost?.isConnected) return modalHost;
+
+    modalHost = document.querySelector(MODAL_HOST_SELECTOR) || document.createElement("div");
+    modalHost.setAttribute("data-clientes-modal-host", "true");
+    modalHost.setAttribute("data-owner", CLIENTES_INDEX_VERSION);
+
+    if (!modalHost.isConnected) document.body.appendChild(modalHost);
+
+    if (!modalHostBound) {
+      modalHost.addEventListener("click", handleModalClick, true);
+      modalHost.addEventListener("submit", handleModalSubmit, true);
+      modalHost.addEventListener("input", handleModalInput, true);
+      modalHost.addEventListener("change", handleModalInput, true);
+      modalHost.addEventListener("keydown", handleModalKeydown, true);
+      modalHostBound = true;
+    }
+
+    return modalHost;
+  }
+
+  function readCreateForm(formNode = null) {
+    const output = {
+      ...safeObject(createModal.form),
+    };
+
+    if (!formNode) return output;
+
+    const fields = Array.from(formNode.querySelectorAll("[data-field][name], [data-field]") || []);
+
+    for (const field of fields) {
+      const name = cleanText(field.getAttribute("data-field") || field.getAttribute("name") || "", "");
+      if (!name) continue;
+
+      if (field instanceof HTMLInputElement && field.type === "checkbox") {
+        output[name] = Boolean(field.checked);
+        continue;
+      }
+
+      if (field instanceof HTMLInputElement && field.type === "radio") {
+        if (field.checked) output[name] = field.value;
+        continue;
+      }
+
+      if ("value" in field) output[name] = field.value;
+    }
+
+    output.userId = cleanText(first(output.userId, output.targetUserId), "");
+    output.targetUserId = cleanText(first(output.targetUserId, output.userId), "");
+    output.clienteTipo = normalizeKey(first(output.clienteTipo, output.tipo, "empresa"));
+    output.segmento = normalizeKey(first(output.segmento, output.tipo, "empresa"));
+    output.status = normalizeKey(first(output.status, "active"));
+    output.estado = normalizeKey(first(output.estado, "activo"));
+    output.active = output.active === true || output.active === "true" || output.active === "1" || output.active === 1;
+
+    for (const key of ["porcentajeIVA", "porcentajeIRPF", "paymentTermsDays"]) {
+      output[key] = number(output[key], key === "paymentTermsDays" ? 30 : 0);
+    }
+
+    return output;
+  }
+
+  function patchCreateForm(patch = {}) {
+    createModal.form = {
+      ...safeObject(createModal.form),
+      ...safeObject(patch),
+    };
+
+    return createModal.form;
+  }
+
+  function renderCreateModalNow() {
+    const hostNode = ensureModalHost();
+    if (!hostNode) return false;
+
+    try {
+      hostNode.innerHTML = createModal.open
+        ? renderClientesCreateModal(createModalPayload())
+        : renderClientesCreateModalClosed();
+
+      syncBodyModalClass();
+
+      if (createModal.open) {
+        try {
+          hostNode.querySelector(CREATE_MODAL_PANEL_SELECTOR)?.focus?.({ preventScroll: true });
+        } catch {
+          // noop
+        }
+      }
+
+      return true;
+    } catch (renderError) {
+      createModal.serverError = safeError(renderError, "No se pudo renderizar el formulario de cliente.");
+      hostNode.innerHTML = renderClientesCreateModal(createModalPayload());
+      syncBodyModalClass();
+      return false;
+    }
+  }
+
+  function scheduleCreateModalRender() {
+    cancelFrame(modalFrame);
+    modalFrame = nextFrame(() => renderCreateModalNow());
+    return modalFrame;
+  }
+
+  function resetCreateModalForm() {
+    createModal.submitting = false;
+    createModal.serverError = "";
+    createModal.successMessage = "";
+    createModal.createdClienteId = "";
+    createModal.errors = {};
+    createModal.form = getCreateFormDefaults();
+    createModal.userSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      selectedUser: null,
+      empty: false,
+    };
+
+    return createModal;
+  }
+
+  function openCreate() {
+    resetCreateModalForm();
+    createModal.open = true;
+    creating = true;
+    scheduleRender();
+    renderCreateModalNow();
+    creating = false;
+    scheduleRender();
+
+    emitEvent("clientes:create:open", { source: CLIENTES_INDEX_SOURCE });
+    return true;
+  }
+
+  function closeCreate({ reset = true } = {}) {
+    createModal.open = false;
+    createModal.submitting = false;
+
+    if (reset) resetCreateModalForm();
+
+    window.clearTimeout?.(userSearchTimer);
+    scheduleCreateModalRender();
+    scheduleRender();
+
+    emitEvent("clientes:create:closed", { source: CLIENTES_INDEX_SOURCE });
+    return true;
+  }
+
+  function selectCreateUserFromNode(node = null) {
+    if (!node) return false;
+
+    const selectedUser = normalizeSearchUser({
+      userId: node.dataset.userId || "",
+      clienteId: node.dataset.userClienteId || node.dataset.clienteId || "",
+      displayName: node.dataset.userName || "",
+      email: node.dataset.userEmail || node.dataset.email || "",
+      phone: node.dataset.userPhone || "",
+      username: node.dataset.userUsername || "",
+      avatarUrl: node.dataset.userAvatar || "",
+    });
+
+    const name = cleanText(selectedUser.displayName || selectedUser.name, "");
+    const email = normalizeEmail(selectedUser.email);
+    const phone = cleanText(selectedUser.phone || selectedUser.telefono, "");
+    const username = cleanText(selectedUser.username || selectedUser.usernameLower, "").toLowerCase();
+
+    patchCreateForm({
+      targetUserId: selectedUser.userId || selectedUser.id,
+      userId: selectedUser.userId || selectedUser.id,
+      targetClienteId: selectedUser.clienteId || selectedUser.targetClienteId || "",
+      targetUserName: name,
+      targetUserEmail: email,
+      targetUserPhone: phone,
+      targetUsername: username,
+      targetUserAvatar: selectedUser.avatarUrl || selectedUser.avatar || "",
+      contactoNombre: createModal.form.contactoNombre || name,
+      contactoEmail: createModal.form.contactoEmail || email,
+      contactoPhone: createModal.form.contactoPhone || phone,
+      emailFacturacion: createModal.form.emailFacturacion || email,
+      username: createModal.form.username || username,
+      slug: createModal.form.slug || username,
+    });
+
+    createModal.userSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      selectedUser,
+      empty: false,
+    };
+
+    createModal.errors = {
+      ...safeObject(createModal.errors),
+      userId: "",
+      targetUserId: "",
+      targetUser: "",
+    };
+
+    scheduleCreateModalRender();
+    return true;
+  }
+
+  function clearCreateUser() {
+    patchCreateForm({
+      targetUserId: "",
+      userId: "",
+      targetClienteId: "",
+      targetUserName: "",
+      targetUserEmail: "",
+      targetUserPhone: "",
+      targetUsername: "",
+      targetUserAvatar: "",
+    });
+
+    createModal.userSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      selectedUser: null,
+      empty: false,
+    };
+
+    scheduleCreateModalRender();
+    return true;
+  }
+
+  function copySelectedUserContact() {
+    const user = safeObject(createModal.userSearch.selectedUser, {});
+    if (!user.userId && !user.id) return false;
+
+    patchCreateForm({
+      contactoNombre: cleanText(first(user.displayName, user.name, createModal.form.contactoNombre), createModal.form.contactoNombre),
+      contactoEmail: normalizeEmail(first(user.email, createModal.form.contactoEmail)),
+      contactoPhone: cleanText(first(user.phone, user.telefono, createModal.form.contactoPhone), createModal.form.contactoPhone),
+      emailFacturacion: normalizeEmail(first(user.email, createModal.form.emailFacturacion)),
+      username: cleanText(first(user.username, createModal.form.username), createModal.form.username).toLowerCase(),
+      slug: cleanText(first(user.username, createModal.form.slug), createModal.form.slug).toLowerCase(),
+    });
+
+    scheduleCreateModalRender();
+    return true;
+  }
+
+  async function searchCreateUsers(query = "") {
+    const q = cleanText(query, "");
+    const seq = ++userSearchSeq;
+
+    createModal.userSearch.query = q;
+    createModal.userSearch.error = "";
+    createModal.userSearch.empty = false;
+
+    if (q.length < USER_SEARCH_MIN_LENGTH) {
+      createModal.userSearch.loading = false;
+      createModal.userSearch.results = [];
+      scheduleCreateModalRender();
+      return [];
+    }
+
+    createModal.userSearch.loading = true;
+    scheduleCreateModalRender();
+
+    try {
+      const response = await httpRequest("GET", USERS_SEARCH_ENDPOINT, null, {
+        timeout: 15000,
+        query: {
+          q,
+          search: q,
+          query: q,
+          term: q,
+          text: q,
+          keyword: q,
+          limit: USER_SEARCH_LIMIT,
+          includeTotal: false,
+        },
+        source: "views.clientes.users.search",
+      });
+
+      if (seq !== userSearchSeq || destroyed) return [];
+
+      const results = usersListFromPayload(response)
+        .map(normalizeSearchUser)
+        .filter((user) => user.userId || user.id)
+        .slice(0, USER_SEARCH_LIMIT);
+
+      createModal.userSearch.loading = false;
+      createModal.userSearch.error = "";
+      createModal.userSearch.results = results;
+      createModal.userSearch.empty = q.length >= USER_SEARCH_MIN_LENGTH && results.length === 0;
+
+      scheduleCreateModalRender();
+      return results;
+    } catch (searchError) {
+      if (seq !== userSearchSeq || destroyed) return [];
+
+      createModal.userSearch.loading = false;
+      createModal.userSearch.error = safeError(searchError, "No se pudieron buscar usuarios.");
+      createModal.userSearch.results = [];
+      createModal.userSearch.empty = false;
+
+      scheduleCreateModalRender();
+      return [];
+    }
+  }
+
+  async function submitCreate(formNode = null) {
+    if (createModal.submitting) return false;
+
+    const form = readCreateForm(formNode);
+    const validation = validateCreateForm(form);
+
+    createModal.form = validation.form || form;
+    createModal.errors = safeObject(validation.errors);
+    createModal.serverError = "";
+    createModal.successMessage = "";
+
+    if (!validation.valid) {
+      scheduleCreateModalRender();
+      return false;
+    }
+
+    createModal.submitting = true;
+    scheduleCreateModalRender();
+
+    try {
+      const payloadToCreate = validation.payload || buildClienteCreatePayload(validation.form || form);
+      const created = await createClienteRequest(payloadToCreate, {
+        source: "views.clientes.index.create",
+      });
+
+      const createdId = cleanText(
+        first(
+          created?.clienteId,
+          created?.id,
+          created?.clientId,
+          created?.customerId,
+          created?.data?.clienteId,
+          created?.data?.id,
+          payloadToCreate?.clienteId,
+          payloadToCreate?.targetClienteId,
+          ""
+        ),
+        ""
+      );
+
+      let finalDetail = created && isObject(created) ? normalizeClienteModel(created) : null;
+
+      if (createdId) {
+        try {
+          finalDetail = await loadClienteDetail(createdId, { dedupe: true }) || finalDetail;
+        } catch {
+          // si el detalle tarda en estar disponible, usamos la respuesta de creación
+        }
+      }
+
+      if (finalDetail) {
+        setItems([finalDetail, ...items], { remoteCount: Math.max(total + 1, items.length + 1), write: true });
+      }
+
+      createModal.submitting = false;
+      createModal.createdClienteId = createdId;
+      createModal.successMessage = createdId ? `Cliente ${createdId} creado correctamente.` : "Cliente creado correctamente.";
+      createModal.serverError = "";
+      createModal.errors = {};
+
+      emitEvent("clientes:create:success", {
+        cliente: finalDetail || created || payloadToCreate,
+        detail: finalDetail || created || payloadToCreate,
+        clienteId: createdId,
+        response: created,
+      });
+
+      showToast(createModal.successMessage, "success");
+      closeCreate({ reset: true });
+      await refresh();
+
+      return true;
+    } catch (submitError) {
+      createModal.submitting = false;
+      createModal.serverError = safeError(submitError, "No se pudo crear el cliente.");
+      createModal.successMessage = "";
+      scheduleCreateModalRender();
+      showToast(createModal.serverError, "error");
+      return false;
+    }
+  }
+
+  function createActionFromTarget(target = null) {
+    if (!(target instanceof Element)) return null;
+
+    const actionable = target.closest("[data-create-action]");
+    if (!actionable || !modalHost?.contains?.(actionable)) return null;
+
+    return {
+      element: actionable,
+      action: cleanText(actionable.getAttribute("data-create-action") || "", ""),
+    };
+  }
+
+  async function handleModalClick(event) {
+    if (!modalHost?.contains?.(event.target)) return;
+
+    const overlay = event.target?.closest?.(CREATE_MODAL_OVERLAY_SELECTOR);
+    if (overlay && event.target === overlay && createModal.open && !createModal.submitting) {
+      event.preventDefault();
+      closeCreate();
+      return;
+    }
+
+    const info = createActionFromTarget(event.target);
+    if (!info?.action) return;
+
+    const { element, action } = info;
+
+    if (Object.values(CREATE_ACTIONS).includes(action)) event.preventDefault();
+
+    if (action === CREATE_ACTIONS.CLOSE) {
+      if (!createModal.submitting) closeCreate();
+      return;
+    }
+
+    if (action === CREATE_ACTIONS.SUBMIT) {
+      const form = element.closest("form") || modalHost.querySelector("[data-clientes-create-form='true']");
+      await submitCreate(form);
+      return;
+    }
+
+    if (action === CREATE_ACTIONS.USER_SELECT) {
+      selectCreateUserFromNode(element);
+      return;
+    }
+
+    if (action === CREATE_ACTIONS.USER_CLEAR) {
+      clearCreateUser();
+      return;
+    }
+
+    if (action === CREATE_ACTIONS.COPY_USER_CONTACT) {
+      copySelectedUserContact();
+      return;
+    }
+  }
+
+  function handleModalSubmit(event) {
+    if (!modalHost?.contains?.(event.target)) return;
+
+    const form = event.target?.closest?.("[data-clientes-create-form='true']");
+    if (!form) return;
+
+    event.preventDefault();
+    submitCreate(form);
+  }
+
+  function handleModalInput(event) {
+    if (!modalHost?.contains?.(event.target)) return;
+
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement) && !(target instanceof HTMLSelectElement)) return;
+
+    const field = cleanText(target.getAttribute("data-field") || target.name || "", "");
+    if (!field) return;
+
+    if (field === "targetUserSearch") {
+      const query = target.value;
+      createModal.userSearch.query = query;
+
+      window.clearTimeout?.(userSearchTimer);
+      userSearchTimer = window.setTimeout?.(() => searchCreateUsers(query), USER_SEARCH_DEBOUNCE_MS);
+      return;
+    }
+
+    const value = target instanceof HTMLInputElement && target.type === "checkbox"
+      ? Boolean(target.checked)
+      : target.value;
+
+    patchCreateForm({ [field]: value });
+
+    if (field === "tipo") {
+      patchCreateForm({ clienteTipo: value, segmento: value });
+    }
+
+    if (field === "contactoEmail") {
+      patchCreateForm({ email: value, emailCliente: value, emailFacturacion: createModal.form.emailFacturacion || value });
+    }
+
+    if (field === "contactoPhone") {
+      patchCreateForm({ phone: value, telefono: value });
+    }
+  }
+
+  function handleModalKeydown(event) {
+    if (!modalHost?.contains?.(event.target)) return;
+
+    if (event.key === "Escape" && createModal.open && !createModal.submitting) {
+      event.preventDefault();
+      closeCreate();
+    }
+  }
+
 
   async function openCliente(idValue = "", detail = null) {
     const clienteId = cleanText(idValue || getClienteId(detail), "");
@@ -1938,6 +2699,21 @@ function createClientesController(host = null, context = {}) {
     }
 
     window.clearTimeout?.(searchTimer);
+    window.clearTimeout?.(userSearchTimer);
+
+    try {
+      if (modalHost && modalHostBound) {
+        modalHost.removeEventListener("click", handleModalClick, true);
+        modalHost.removeEventListener("submit", handleModalSubmit, true);
+        modalHost.removeEventListener("input", handleModalInput, true);
+        modalHost.removeEventListener("change", handleModalInput, true);
+        modalHost.removeEventListener("keydown", handleModalKeydown, true);
+        modalHostBound = false;
+      }
+    } catch {
+      // noop
+    }
+
     mounted = false;
     return true;
   }
@@ -1976,7 +2752,18 @@ function createClientesController(host = null, context = {}) {
     loadSeq += 1;
 
     cancelFrame(renderFrame);
+    cancelFrame(modalFrame);
     detach();
+
+    try {
+      if (modalHost) {
+        modalHost.innerHTML = "";
+        modalHost.remove?.();
+      }
+      syncBodyModalClass();
+    } catch {
+      // noop
+    }
 
     if (clear && root) root.innerHTML = "";
     clearInstance(root, controller);

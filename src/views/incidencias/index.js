@@ -66,6 +66,7 @@ const ROUTER_EVENT_HANDLED_KEY = "__onionRouterHandled";
 
 const MODAL_HOST_SELECTOR = "[data-incidencias-modal-host='true']";
 const CREATE_ROOT_SELECTOR = "[data-incidencias-create-root='true']";
+const DETAIL_ROOT_SELECTOR = "[data-incidencias-modal-root='true']";
 const CREATE_MODAL_PANEL_SELECTOR = "[data-incidencias-create-modal-panel='true']";
 const DETAIL_MODAL_PANEL_SELECTOR = "[data-incidencias-modal-panel='true']";
 const CREATE_MODAL_OVERLAY_SELECTOR = "[data-incidencias-create-modal-overlay='true']";
@@ -870,6 +871,103 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
+  function syncDetailLoadingOverlay(currentRoot = null, nextRoot = null) {
+    const currentPanel = currentRoot?.querySelector?.(DETAIL_MODAL_PANEL_SELECTOR);
+    const nextPanel = nextRoot?.querySelector?.(DETAIL_MODAL_PANEL_SELECTOR);
+    if (!currentPanel || !nextPanel) return false;
+
+    try {
+      currentPanel.querySelectorAll(":scope > .incidencias-modal-loading-overlay").forEach((node) => node.remove());
+
+      const nextOverlay = nextPanel.querySelector(":scope > .incidencias-modal-loading-overlay");
+      if (nextOverlay) currentPanel.insertBefore(nextOverlay.cloneNode(true), currentPanel.firstChild);
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function syncDetailTextarea(currentRoot = null, nextRoot = null) {
+    const selector = "[data-detail-field='comment'], [data-field='comment']";
+    const current = currentRoot?.querySelector?.(selector);
+    const next = nextRoot?.querySelector?.(selector);
+    if (!current || !next) return false;
+
+    try {
+      syncAttributes(current, next);
+
+      if (document.activeElement !== current) {
+        current.value = next.value;
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function patchDetailModalDom(detailHtml = "", options = {}) {
+    if (!detailHtml || !modalHost?.isConnected || options.fullRender === true) return false;
+
+    const currentRoot = modalHost.querySelector(DETAIL_ROOT_SELECTOR);
+    const nextRoot = cloneTemplateRoot(detailHtml, DETAIL_ROOT_SELECTOR);
+
+    if (!currentRoot || !nextRoot) return false;
+
+    const currentTicketId = cleanText(currentRoot.dataset?.ticketId, "");
+    const nextTicketId = cleanText(nextRoot.dataset?.ticketId, "");
+
+    if (currentTicketId && nextTicketId && currentTicketId !== nextTicketId) return false;
+
+    try {
+      const currentPanel = currentRoot.querySelector(DETAIL_MODAL_PANEL_SELECTOR);
+      const nextPanel = nextRoot.querySelector(DETAIL_MODAL_PANEL_SELECTOR);
+      const currentBody = currentRoot.querySelector(".incidencias-modal-body");
+      const nextBody = nextRoot.querySelector(".incidencias-modal-body");
+
+      syncAttributes(currentRoot, nextRoot);
+      syncAttributes(currentPanel, nextPanel);
+      syncAttributes(currentBody, nextBody);
+
+      syncDetailLoadingOverlay(currentRoot, nextRoot);
+
+      for (const selector of [
+        "[data-modal-feedback-slot='true']",
+        "[data-modal-preview-slot='true']",
+        ".incidencias-modal-meta-grid",
+        ".incidencias-modal-description-section",
+        ".incidencias-modal-contact-section",
+        "[data-modal-files-slot='true']",
+        "[data-modal-history-slot='true']",
+        "[data-modal-footer='true']",
+      ]) {
+        replacePart(currentRoot, nextRoot, selector, { preserveFocus: false });
+      }
+
+      syncDetailTextarea(currentRoot, nextRoot);
+
+      for (const selector of [
+        ".incidencias-modal-composer-head",
+        ".incidencias-modal-composer-foot",
+        ".incidencias-modal-dropzone",
+        "[data-modal-pending-files='true']",
+      ]) {
+        replacePart(currentRoot, nextRoot, selector, { preserveFocus: false });
+      }
+
+      const currentInput = currentRoot.querySelector("[data-detail-field='attachments'], [data-field='attachments']");
+      const nextInput = nextRoot.querySelector("[data-detail-field='attachments'], [data-field='attachments']");
+      if (currentInput && nextInput) syncAttributes(currentInput, nextInput);
+
+      if (options.focusSelector) focusAfterRender(options.focusSelector, currentRoot);
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function cancelScheduledRender() {
     if (!renderFrame) return false;
     cancelFrame(renderFrame);
@@ -893,9 +991,16 @@ function createIncidenciasController(host = null, context = {}) {
     const createHtml = createModal.open ? renderIncidenciasCreateModal(createModalPayload()) : "";
     const detailHtml = detailModal.open ? renderIncidenciasDetailModal(detailModalPayload()) : "";
     const hasCreateRoot = Boolean(target.querySelector(CREATE_ROOT_SELECTOR));
+    const hasDetailRoot = Boolean(target.querySelector(DETAIL_ROOT_SELECTOR));
     const canPatchCreate = Boolean(createHtml && hasCreateRoot && !detailHtml);
+    const canPatchDetail = Boolean(detailHtml && hasDetailRoot && !createHtml);
 
     if (canPatchCreate && patchCreateModalDom(createHtml, options)) {
+      syncBodyModalClass();
+      return true;
+    }
+
+    if (canPatchDetail && patchDetailModalDom(detailHtml, options)) {
       syncBodyModalClass();
       return true;
     }

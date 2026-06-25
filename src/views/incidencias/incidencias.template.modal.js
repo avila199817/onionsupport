@@ -2,16 +2,17 @@
    Onion Support - Incidencias Detail Template
    Archivo: /src/views/incidencias/incidencias.template.modal.js
 
-   MODAL DETALLE · SPA SAFE · CSS 1:1 · 10/10
+   MODAL DETALLE · SPA SAFE · CSS 1:1 HEADER FIJO · 10/10
 
    - HTML puro: sin DOM, sin listeners, sin HTTP, sin Store.
+   - 1:1 con detail.css: header fijo y scroll real en body.
    - Contrato estable para index.js: DETAIL_ACTIONS + data-detail-action.
    - Compatible con incidencias.api.js y DTOs Cosmos tickets.
    - Blindado: no aplana arrays de attachments/history/comments.
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.spa-safe.v11";
+  "incidencias.template.modal.css-1a1.header-fixed.v14";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -669,9 +670,43 @@ function renderInlineSpinner(label = "") {
   return `<span class="incidencias-modal-inline-spinner"><span aria-hidden="true"></span>${escapeHtml(label)}</span>`;
 }
 
+function shortTicketId(value = "") {
+  const id = cleanText(value, "");
+  if (!id) return "ID";
+  if (id.length <= 18) return id;
+
+  const parts = id.split(/[\s:_-]+/).filter(Boolean);
+  const last = parts.at(-1) || "";
+
+  if (/^\d{6,}$/.test(last)) return `#${last.slice(-8)}`;
+
+  return `${id.slice(0, 7)}…${id.slice(-6)}`;
+}
+
+function renderTicketIdChip(ticketId = "", vm = {}) {
+  const fullId = cleanText(ticketId, "");
+  const label = shortTicketId(fullId);
+
+  return `
+    <button
+      type="button"
+      data-detail-action="${DETAIL_ACTIONS.COPY_ID}"
+      data-ticket-id="${attr(fullId)}"
+      class="incidencias-modal-id-chip"
+      title="${attr(fullId ? `Copiar ID: ${fullId}` : "ID de incidencia no disponible")}"
+      aria-label="${attr(fullId ? `Copiar ID ${fullId}` : "ID de incidencia") }"
+      ${disabledAttrs(vm.submitting, vm.submitting)}
+    >
+      <span class="incidencias-modal-id-chip-text">${escapeHtml(label)}</span>
+    </button>
+  `;
+}
+
 function renderChip(label = "", modifier = "neutral") {
+  const safeLabel = cleanText(label, "—");
   const safeModifier = normalizeKey(modifier) || "neutral";
-  return `<span class="incidencias-modal-chip incidencias-modal-chip--${attr(safeModifier)}">${escapeHtml(label)}</span>`;
+
+  return `<span class="incidencias-modal-chip incidencias-modal-chip--${attr(safeModifier)}" title="${attr(safeLabel)}">${escapeHtml(safeLabel)}</span>`;
 }
 
 function renderAvatar(detail = {}) {
@@ -765,9 +800,9 @@ function renderComposer(vm = {}) {
 
       <textarea id="incidencias-modal-comment-input" data-detail-field="comment" data-field="comment" name="comment" maxlength="${attr(String(MAX_COMMENT_LENGTH))}" placeholder="Ejemplo: He probado de nuevo y adjunto captura..." ${disabled} class="incidencias-modal-comment-textarea">${escapeHtml(vm.commentDraft)}</textarea>
 
-      <div class="incidencias-modal-composer-foot"><span>Al pulsar “Actualizar incidencia”, se enviará esta información y la incidencia volverá a estado abierta.</span><strong>${escapeHtml(`${vm.commentDraft.length}/${MAX_COMMENT_LENGTH}`)}</strong></div>
+      <div class="incidencias-modal-composer-foot" data-modal-composer-foot="true"><span>Al pulsar “Actualizar incidencia”, se enviará esta información y la incidencia volverá a estado abierta.</span><strong>${escapeHtml(`${vm.commentDraft.length}/${MAX_COMMENT_LENGTH}`)}</strong></div>
 
-      <label for="incidencias-modal-attachments-input" class="incidencias-modal-dropzone" data-dropzone="detail-attachments">
+      <label for="incidencias-modal-attachments-input" class="incidencias-modal-dropzone" data-dropzone="detail-attachments" data-modal-dropzone="true">
         <input id="incidencias-modal-attachments-input" type="file" data-detail-field="attachments" data-field="attachments" name="attachments" multiple ${disabled}>
         <span>Seleccionar archivos</span><small>Imágenes, PDFs y documentos de soporte</small>
       </label>
@@ -857,7 +892,7 @@ function renderAttachments(vm = {}) {
 
   return `
     <div class="incidencias-modal-files-block incidencias-modal-files-block--compact" data-modal-files-block="true">
-      <section class="incidencias-modal-current-files">
+      <section class="incidencias-modal-current-files" data-modal-current-files="true">
         <div class="incidencias-modal-section-head"><h3>Documentos actuales</h3><span>${escapeHtml(String(files.length))} adjunto${files.length === 1 ? "" : "s"}</span></div>
         ${
           !files.length
@@ -977,25 +1012,25 @@ export function renderIncidenciasDetailModal(input = {}) {
         <div id="${PANEL_ID}" class="${joinClasses("incidencias-modal-panel", vm.submitting ? "is-submitting" : "")}" role="dialog" aria-modal="true" aria-labelledby="incidencias-modal-title" tabindex="-1" data-incidencias-modal-panel="true">
           ${vm.submitting ? renderLoadingOverlay("Actualizando incidencia...") : ""}
 
-          <header class="incidencias-modal-header">
-            <div class="incidencias-modal-hero">
+          <header class="incidencias-modal-header" data-modal-header="true">
+            <div class="incidencias-modal-hero" data-modal-hero="true">
               ${renderAvatar(detail)}
               <div class="incidencias-modal-hero-content">
-                <div class="incidencias-modal-hero-chips">
-                  <button type="button" data-detail-action="${DETAIL_ACTIONS.COPY_ID}" data-ticket-id="${attr(ticketId)}" class="incidencias-modal-id-chip" aria-label="Copiar ID" ${disabledAttrs(vm.submitting, vm.submitting)}>${escapeHtml(ticketId || "—")}</button>
+                <div class="incidencias-modal-hero-chips" data-modal-header-chips="true">
+                  ${renderTicketIdChip(ticketId, vm)}
                   ${renderChip(statusLabel(status), `status-${statusClass(status)}`)}
                   ${renderChip(priorityLabel(priority), `priority-${priorityClass(priority)}`)}
                   ${renderChip(category, "category")}
                 </div>
-                <h2 id="incidencias-modal-title" class="incidencias-modal-title">${escapeHtml(title)}</h2>
-                <span class="incidencias-modal-updated">${escapeHtml(clientName)}${clientEmail ? ` · ${escapeHtml(clientEmail)}` : ""} · Última actualización ${escapeHtml(updatedAgo)}</span>
+                <h2 id="incidencias-modal-title" class="incidencias-modal-title" title="${attr(title)}">${escapeHtml(title)}</h2>
+                <span class="incidencias-modal-updated" data-modal-updated="true">${escapeHtml(clientName)}${clientEmail ? ` · ${escapeHtml(clientEmail)}` : ""} · Última actualización ${escapeHtml(updatedAgo)}</span>
               </div>
             </div>
 
             <button type="button" data-detail-action="${DETAIL_ACTIONS.CLOSE}" aria-label="Cerrar modal" ${disabledAttrs(vm.submitting, vm.submitting)} class="incidencias-modal-close-btn">${icon("close")}</button>
           </header>
 
-          <main class="incidencias-modal-body">
+          <main class="incidencias-modal-body" data-modal-body="true">
             <div data-modal-feedback-slot="true">${renderFeedbackBox(vm)}</div>
             <div data-modal-preview-slot="true">${renderAttachmentPreview(vm)}</div>
 

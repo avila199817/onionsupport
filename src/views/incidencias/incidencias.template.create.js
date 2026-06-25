@@ -12,7 +12,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.productivo.clean-header.v11";
+  "incidencias.template.create.productivo.no-copy.v12";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -860,13 +860,6 @@ function renderAdminUserSearch(vm = {}) {
       data-user-search-active="${vm.userSearch.query ? "true" : "false"}"
       data-user-selected="${vm.form.targetUserId ? "true" : "false"}"
     >
-      <div class="inc-create-block-head">
-        <div>
-          <strong>Usuario afectado</strong>
-          <span>Busca el usuario para crear la incidencia 1:1 contra su documento de Cosmos.</span>
-        </div>
-      </div>
-
       <div class="inc-create-selected-user-slot" data-create-selected-user-slot="true">
         ${renderSelectedUser(vm)}
       </div>

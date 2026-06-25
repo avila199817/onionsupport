@@ -52,7 +52,7 @@ import {
   validateDetailUpdate,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.aligned.blob.v10";
+export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.productivo.no-flicker.v12";
 export const INCIDENCIAS_VIEW_VERSION = INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
@@ -677,6 +677,199 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
+  function activeElementInside(root = null) {
+    if (!isBrowser() || !root) return null;
+
+    const active = document.activeElement;
+    if (!active || active === document.body || active === document.documentElement) return null;
+
+    try {
+      return root.contains(active) ? active : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function cloneTemplateRoot(html = "", selector = "") {
+    if (!html || !selector || !isBrowser()) return null;
+
+    try {
+      const template = document.createElement("template");
+      template.innerHTML = String(html).trim();
+      return template.content.querySelector(selector);
+    } catch {
+      return null;
+    }
+  }
+
+  function syncAttributes(target = null, source = null) {
+    if (!target || !source) return false;
+
+    try {
+      for (const attribute of Array.from(target.attributes || [])) {
+        if (!source.hasAttribute(attribute.name)) target.removeAttribute(attribute.name);
+      }
+
+      for (const attribute of Array.from(source.attributes || [])) {
+        if (target.getAttribute(attribute.name) !== attribute.value) {
+          target.setAttribute(attribute.name, attribute.value);
+        }
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function replacePart(currentRoot = null, nextRoot = null, selector = "", options = {}) {
+    if (!currentRoot || !nextRoot || !selector) return false;
+
+    const current = currentRoot.querySelector(selector);
+    const next = nextRoot.querySelector(selector);
+
+    if (!current && !next) return true;
+    if (!current && next) return false;
+
+    const active = activeElementInside(current);
+    if (active && options.preserveFocus !== false) {
+      syncAttributes(current, next || current);
+      return true;
+    }
+
+    if (!next) {
+      current.remove();
+      return true;
+    }
+
+    current.replaceWith(next.cloneNode(true));
+    return true;
+  }
+
+  function syncInputValue(currentRoot = null, nextRoot = null, selector = "") {
+    if (!currentRoot || !nextRoot || !selector) return false;
+
+    const current = currentRoot.querySelector(selector);
+    const next = nextRoot.querySelector(selector);
+    if (!current || !next) return false;
+
+    try {
+      if (current.type === "file") return true;
+
+      const active = activeElementInside(currentRoot);
+      if (active === current) return true;
+
+      current.value = next.value;
+      syncAttributes(current, next);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function syncCreateAlerts(currentRoot = null, nextRoot = null) {
+    const currentBody = currentRoot?.querySelector?.(".inc-create-body");
+    const nextBody = nextRoot?.querySelector?.(".inc-create-body");
+    if (!currentBody || !nextBody) return false;
+
+    try {
+      currentBody.querySelectorAll(":scope > .inc-create-alert").forEach((node) => node.remove());
+
+      const form = currentBody.querySelector(".inc-create-form");
+      const nextAlerts = Array.from(nextBody.querySelectorAll(":scope > .inc-create-alert"));
+
+      for (const alert of nextAlerts) {
+        currentBody.insertBefore(alert.cloneNode(true), form || currentBody.firstChild);
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function syncCreateLoadingOverlay(currentRoot = null, nextRoot = null) {
+    const currentPanel = currentRoot?.querySelector?.(CREATE_MODAL_PANEL_SELECTOR);
+    const nextPanel = nextRoot?.querySelector?.(CREATE_MODAL_PANEL_SELECTOR);
+    if (!currentPanel || !nextPanel) return false;
+
+    try {
+      currentPanel.querySelectorAll(":scope > .inc-create-loading-overlay").forEach((node) => node.remove());
+
+      const nextOverlay = nextPanel.querySelector(":scope > .inc-create-loading-overlay");
+      if (nextOverlay) currentPanel.appendChild(nextOverlay.cloneNode(true));
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function patchCreateModalDom(createHtml = "", options = {}) {
+    if (!createHtml || !modalHost?.isConnected || options.fullRender === true) return false;
+
+    const currentRoot = modalHost.querySelector(CREATE_ROOT_SELECTOR);
+    const nextRoot = cloneTemplateRoot(createHtml, CREATE_ROOT_SELECTOR);
+
+    if (!currentRoot || !nextRoot) return false;
+
+    try {
+      const currentPanel = currentRoot.querySelector(CREATE_MODAL_PANEL_SELECTOR);
+      const nextPanel = nextRoot.querySelector(CREATE_MODAL_PANEL_SELECTOR);
+      const currentForm = currentRoot.querySelector(".inc-create-form");
+      const nextForm = nextRoot.querySelector(".inc-create-form");
+      const currentBlock = currentRoot.querySelector(".inc-create-block--target");
+      const nextBlock = nextRoot.querySelector(".inc-create-block--target");
+
+      syncAttributes(currentRoot, nextRoot);
+      syncAttributes(currentPanel, nextPanel);
+      syncAttributes(currentForm, nextForm);
+      syncAttributes(currentBlock, nextBlock);
+
+      syncCreateAlerts(currentRoot, nextRoot);
+
+      for (const selector of [
+        ".inc-create-selected-user-slot",
+        ".inc-create-user-search-slot",
+        ".inc-create-target-error-slot",
+        ".inc-create-files-card",
+        ".inc-create-actions",
+      ]) {
+        replacePart(currentRoot, nextRoot, selector, { preserveFocus: false });
+      }
+
+      for (const field of [
+        "targetUserSearch",
+        "subject",
+        "category",
+        "priority",
+        "description",
+      ]) {
+        replacePart(currentRoot, nextRoot, `[data-create-field="${field}"]`);
+      }
+
+      for (const field of [
+        "source",
+        "status",
+        "targetUserId",
+        "targetClienteId",
+        "targetUserName",
+        "targetUserEmail",
+        "targetUserAvatar",
+      ]) {
+        syncInputValue(currentRoot, nextRoot, `[data-field="${field}"]`);
+      }
+
+      syncCreateLoadingOverlay(currentRoot, nextRoot);
+
+      if (options.focusSelector) focusAfterRender(options.focusSelector, currentRoot);
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function cancelScheduledRender() {
     if (!renderFrame) return false;
     cancelFrame(renderFrame);
@@ -699,6 +892,13 @@ function createIncidenciasController(host = null, context = {}) {
 
     const createHtml = createModal.open ? renderIncidenciasCreateModal(createModalPayload()) : "";
     const detailHtml = detailModal.open ? renderIncidenciasDetailModal(detailModalPayload()) : "";
+    const hasCreateRoot = Boolean(target.querySelector(CREATE_ROOT_SELECTOR));
+    const canPatchCreate = Boolean(createHtml && hasCreateRoot && !detailHtml);
+
+    if (canPatchCreate && patchCreateModalDom(createHtml, options)) {
+      syncBodyModalClass();
+      return true;
+    }
 
     target.innerHTML = `${createHtml}${detailHtml}`;
     syncBodyModalClass();

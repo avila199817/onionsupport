@@ -9,13 +9,13 @@
    FINAL EXTREME · DOM REAL · CSP CLEAN · NO CSS IN JS
 
    Garantías:
-   - Un único scroll en .inc-create-panel.
-   - Header, body y acciones fluyen juntos.
+   - Header fijo dentro del panel.
+   - Un único scroll real en .inc-create-body, empezando bajo el header.
    - Buscadores compatibles con input simple o con icono existente del template.
    - Acciones, selección de usuario y adjuntos integrados al mismo lenguaje visual.
    - Indicador desplegable propio para select nativo o wrapper del template.
    - Estados, resultados y selecciones estables.
-   - Responsive, temas, impresión y reduced motion.
+   - Layout compacto final, responsive, temas, impresión y reduced motion.
 ========================================================= */
 
 
@@ -2916,3 +2916,509 @@ body:has(.inc-create-overlay) {
     transform: none !important;
   }
 }
+
+/* =========================================================
+   PRODUCTIVO FINAL · CREATE MODAL 1:1 TEMPLATE
+   v13 · HEADER FIJO · BODY SCROLL · COMPACT LOCK
+
+   Decisiones cerradas:
+   - El panel NO scrollea.
+   - El header queda fijo en la primera fila del modal.
+   - El scroll empieza en .inc-create-body, justo debajo del header.
+   - El contenido queda más compacto sin romper clases del template.
+   - Compatible con template v12 sin copy y con posibles restos v11.
+========================================================= */
+
+#incidencias-create-modal-root,
+.inc-create-modal-root,
+.inc-create-root,
+.inc-create-overlay,
+.inc-create-panel {
+  --ic-width: clamp(940px, 66vw, 1240px);
+  --ic-height: min(88dvh, 860px);
+
+  --ic-radius-panel: clamp(22px, 1.55vw, 30px);
+  --ic-radius-section: 18px;
+  --ic-radius-control: 13px;
+  --ic-radius-card: 15px;
+  --ic-radius-small: 13px;
+}
+
+.inc-create-overlay {
+  padding: clamp(10px, 1.15vw, 18px);
+  place-items: center;
+}
+
+.inc-create-panel {
+  inline-size: var(--ic-width) !important;
+  block-size: var(--ic-height) !important;
+  max-inline-size: calc(100vw - 28px) !important;
+  max-block-size: calc(100dvh - 24px) !important;
+
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) !important;
+
+  overflow: hidden !important;
+  overscroll-behavior: contain;
+
+  border-radius: var(--ic-radius-panel);
+  transform: translateZ(0);
+  contain: layout paint;
+}
+
+.inc-create-panel::before {
+  z-index: 60;
+}
+
+.inc-create-header {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 55;
+
+  min-block-size: 66px;
+  align-items: center;
+
+  padding:
+    clamp(12px, .85vw, 16px)
+    clamp(20px, 1.35vw, 26px)
+    clamp(10px, .72vw, 13px);
+
+  border-bottom: 1px solid color-mix(in srgb, var(--ic-border-soft) 88%, transparent);
+
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 40%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--panel-bg) 98%, #000 2%),
+      color-mix(in srgb, var(--panel-bg) 92%, transparent)
+    ),
+    color-mix(in srgb, var(--surface-2) 90%, #000 10%);
+
+  box-shadow:
+    0 10px 24px color-mix(in srgb, #000 16%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
+}
+
+.inc-create-header::after {
+  inset-inline: 42% -12%;
+  inset-block-end: -56px;
+  block-size: 104px;
+  opacity: .48;
+  filter: blur(16px);
+}
+
+.inc-create-title-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 0;
+  min-inline-size: 0;
+}
+
+.inc-create-title-icon,
+.inc-create-header p,
+.inc-create-title-wrap p {
+  display: none !important;
+}
+
+.inc-create-header h2,
+.inc-create-header-copy h2,
+#incidencias-create-title,
+#incidencias-create-modal-title {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(27px, 1.95vw, 38px);
+  line-height: .93;
+  font-weight: var(--weight-black);
+  letter-spacing: -.067em;
+  text-wrap: balance;
+  text-shadow:
+    0 1px 0 color-mix(in srgb, #fff 6%, transparent),
+    0 14px 30px color-mix(in srgb, #000 30%, transparent);
+}
+
+.inc-create-close {
+  inline-size: 36px;
+  block-size: 36px;
+  border-color: color-mix(in srgb, var(--btn-secondary-border) 82%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 6%, transparent), transparent 58%),
+    var(--btn-secondary-bg);
+}
+
+.inc-create-close svg {
+  inline-size: 15px;
+  block-size: 15px;
+}
+
+.inc-create-body {
+  min-inline-size: 0;
+  min-block-size: 0;
+  block-size: 100%;
+
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+
+  padding:
+    clamp(14px, 1vw, 18px)
+    clamp(20px, 1.35vw, 26px)
+    clamp(16px, 1.2vw, 22px);
+
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.inc-create-body::-webkit-scrollbar {
+  inline-size: var(--scrollbar-size, 10px);
+}
+
+.inc-create-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.inc-create-body::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.inc-create-form {
+  gap: clamp(9px, .72vw, 12px);
+}
+
+.inc-create-grid {
+  gap: clamp(8px, .65vw, 11px);
+}
+
+.inc-create-field {
+  gap: 4px;
+}
+
+.inc-create-label {
+  font-size: 8px;
+  letter-spacing: .07em;
+}
+
+.inc-create-input,
+.inc-create-select,
+.inc-create-textarea {
+  border-radius: var(--ic-radius-control);
+  font-size: 11px;
+}
+
+.inc-create-input,
+.inc-create-select {
+  min-block-size: 34px;
+  padding-inline: 11px;
+}
+
+.inc-create-input--with-icon {
+  padding-inline-start: 38px;
+}
+
+.inc-create-textarea {
+  min-block-size: 94px;
+  max-block-size: 170px;
+  padding: 10px 11px;
+}
+
+.inc-create-block,
+.inc-create-block--user-search,
+.inc-create-block--target,
+.inc-create-files-card {
+  gap: 9px;
+  padding:
+    clamp(12px, .85vw, 15px)
+    clamp(14px, 1.1vw, 18px);
+  border-radius: var(--ic-radius-section);
+
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 40%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 3.5%, transparent), transparent 42%),
+    var(--glass-shine),
+    color-mix(in srgb, var(--card-bg) 92%, transparent);
+
+  box-shadow:
+    0 12px 36px color-mix(in srgb, #000 11%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
+}
+
+.inc-create-block::before,
+.inc-create-block--user-search::before,
+.inc-create-block--target::before,
+.inc-create-files-card::before {
+  inline-size: 0;
+  opacity: 0;
+}
+
+.inc-create-block::after,
+.inc-create-block--user-search::after,
+.inc-create-block--target::after,
+.inc-create-files-card::after {
+  inline-size: 126px;
+  block-size: 126px;
+  opacity: .52;
+}
+
+.inc-create-block-head {
+  display: none !important;
+}
+
+.inc-create-files-head {
+  gap: 8px;
+}
+
+.inc-create-files-head strong {
+  font-size: 12.5px;
+}
+
+.inc-create-files-head span {
+  font-size: 10.5px;
+}
+
+.inc-create-search-control,
+.inc-create-search-input-wrap {
+  min-block-size: 34px;
+}
+
+.inc-create-search-icon,
+.inc-create-search-input-icon {
+  inset-inline-start: 11px;
+}
+
+.inc-create-search-icon svg,
+.inc-create-search-input-icon svg {
+  inline-size: 14px;
+  block-size: 14px;
+}
+
+.inc-create-user-results,
+.inc-create-search-results {
+  max-block-size: 178px;
+  gap: 6px;
+  padding: 6px;
+  border-radius: var(--ic-radius-card);
+}
+
+.inc-create-user-result,
+.inc-create-search-item {
+  gap: 9px;
+  padding: 7px;
+  border-radius: var(--ic-radius-small);
+}
+
+.inc-create-user-avatar,
+.inc-create-search-avatar,
+.inc-create-target-user-avatar {
+  inline-size: 32px;
+  block-size: 32px;
+  min-inline-size: 32px;
+  font-size: 11px;
+}
+
+.inc-create-selected-user,
+.inc-create-target-user,
+.inc-create-target-user-card {
+  padding: 8px;
+  border-radius: var(--ic-radius-small);
+}
+
+.inc-create-selected-user-clear,
+.inc-create-target-user-clear,
+.inc-create-file-remove {
+  min-block-size: 25px;
+  padding-inline: 8px;
+  font-size: 8.5px;
+}
+
+.inc-create-user-search-state,
+.inc-create-search-state {
+  min-block-size: 36px;
+  padding: 8px 10px;
+  font-size: 10.5px;
+}
+
+.inc-create-dropzone {
+  min-block-size: 94px;
+  padding: 13px;
+  border-radius: var(--ic-radius-card);
+}
+
+.inc-create-dropzone-copy {
+  gap: 4px;
+}
+
+.inc-create-dropzone-copy strong {
+  font-size: 12.5px;
+}
+
+.inc-create-dropzone-copy span,
+.inc-create-file-meta,
+.inc-create-file-size {
+  font-size: 10px;
+}
+
+.inc-create-files-list {
+  gap: 6px;
+}
+
+.inc-create-file-row {
+  padding: 8px;
+  gap: 9px;
+  border-radius: var(--ic-radius-small);
+}
+
+.inc-create-file-name {
+  font-size: 11.5px;
+}
+
+.inc-create-alert {
+  padding: 9px 10px;
+  border-radius: var(--ic-radius-card);
+}
+
+.inc-create-alert-icon {
+  inline-size: 28px;
+  block-size: 28px;
+}
+
+.inc-create-actions,
+.inc-create-actions--compact {
+  padding: 9px 0 0;
+  gap: 8px;
+}
+
+.inc-create-submit {
+  min-block-size: 35px;
+  padding-inline: 16px;
+  border-radius: var(--ic-radius-small);
+  font-size: 10.5px;
+}
+
+.inc-create-loading-overlay {
+  z-index: 70;
+}
+
+[data-theme="light"] .inc-create-header {
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, .94), rgba(255, 255, 255, .82));
+}
+
+[data-theme="light"] .inc-create-body {
+  scrollbar-color: color-mix(in srgb, #0f172a 24%, transparent) transparent;
+}
+
+@media (max-width: 1180px) {
+  #incidencias-create-modal-root,
+  .inc-create-modal-root,
+  .inc-create-root,
+  .inc-create-overlay,
+  .inc-create-panel {
+    --ic-width: min(960px, calc(100vw - 24px));
+    --ic-height: min(90dvh, 860px);
+  }
+}
+
+@media (max-width: 760px) {
+  #incidencias-create-modal-root,
+  .inc-create-modal-root,
+  .inc-create-root,
+  .inc-create-overlay,
+  .inc-create-panel {
+    --ic-width: calc(100vw - 14px);
+    --ic-height: calc(100dvh - 14px);
+    --ic-radius-panel: 22px;
+  }
+
+  .inc-create-overlay {
+    padding: 7px;
+    place-items: end stretch;
+  }
+
+  .inc-create-panel {
+    inline-size: var(--ic-width) !important;
+    block-size: var(--ic-height) !important;
+    border-radius: 22px 22px 0 0;
+  }
+
+  .inc-create-header {
+    min-block-size: 62px;
+    padding: 12px 14px 10px;
+  }
+
+  .inc-create-header h2,
+  .inc-create-header-copy h2,
+  #incidencias-create-title,
+  #incidencias-create-modal-title {
+    font-size: clamp(25px, 7.2vw, 34px);
+  }
+
+  .inc-create-body {
+    padding: 12px 14px 18px;
+  }
+
+  .inc-create-grid--2,
+  .inc-create-total-strip,
+  .inc-create-pro-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .inc-create-textarea {
+    min-block-size: 104px;
+  }
+
+  .inc-create-dropzone {
+    min-block-size: 100px;
+  }
+}
+
+@media (max-width: 460px) {
+  #incidencias-create-modal-root,
+  .inc-create-modal-root,
+  .inc-create-root,
+  .inc-create-overlay,
+  .inc-create-panel {
+    --ic-width: 100vw;
+    --ic-height: 96dvh;
+  }
+
+  .inc-create-overlay {
+    padding-inline: 0;
+    padding-block-end: 0;
+  }
+
+  .inc-create-panel {
+    border-inline: 0;
+    border-block-end: 0;
+  }
+
+  .inc-create-header {
+    min-block-size: 60px;
+  }
+
+  .inc-create-close {
+    inline-size: 34px;
+    block-size: 34px;
+  }
+}
+
+@media print {
+  .inc-create-panel {
+    display: block !important;
+    overflow: visible !important;
+    contain: none !important;
+  }
+
+  .inc-create-header {
+    position: static !important;
+  }
+
+  .inc-create-body {
+    block-size: auto !important;
+    overflow: visible !important;
+  }
+}
+

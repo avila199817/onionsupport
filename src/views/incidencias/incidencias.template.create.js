@@ -12,7 +12,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.aligned.blob.v10";
+  "incidencias.template.create.productivo.clean-header.v11";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -1058,13 +1058,10 @@ export function renderIncidenciasCreateModal(input = {}) {
           tabindex="-1"
         >
           <header class="inc-create-header">
-            <div class="inc-create-title-wrap">
-              <span class="inc-create-title-icon">${icon("ticket")}</span>
-              <div>
-                <h2 id="incidencias-create-title">Crear incidencia</h2>
-                <p>Contrato 1:1 con Cosmos · adjuntos por Blob en tickets.</p>
-              </div>
+            <div class="inc-create-header-copy" data-create-title-block="true">
+              <h2 id="incidencias-create-title">Crear incidencia</h2>
             </div>
+
             <button
               type="button"
               class="inc-create-close"
@@ -1276,6 +1273,9 @@ export function getCreateTemplateSnapshot() {
       createPayloadCompatible: true,
       hiddenTargetFields: true,
       adminUserSearchOnly: true,
+      cleanHeader: true,
+      headerIcon: false,
+      headerSubtitle: false,
       blobFieldName: "attachments",
       formEncoding: "multipart/form-data",
     },

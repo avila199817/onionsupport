@@ -3,7 +3,7 @@
    Archivo: /src/views/public/home/index.js
 
    Responsabilidad:
-   - Controlador de la landing pública de Onion Support.
+   - Controlador de la landing pública de Onion Support 2026.
    - Montar el template recibido desde ./template.js.
    - Leer refs por contrato data-*.
    - Activar menú móvil accesible.
@@ -24,7 +24,7 @@
 import { AppCore } from "../../../core/index.js";
 import createPublicHomeTemplate from "./template.js";
 
-export const PUBLIC_HOME_VIEW_VERSION = "public.home.view.controller.v1";
+export const PUBLIC_HOME_VIEW_VERSION = "public.home.view.controller.productive.2026.1";
 
 const SOURCE = "public.home.view";
 
@@ -52,6 +52,9 @@ const CLASSES = {
   scrolled: "is-scrolled",
   submitting: "is-submitting",
   invalid: "is-invalid",
+  copied: "is-copied",
+  counterReady: "is-counter-ready",
+  magnetic: "is-magnetic",
 };
 
 const SELECTORS = {
@@ -68,6 +71,9 @@ const SELECTORS = {
   login: "[data-public-home-login]",
   diagnosticForm: "[data-public-home-diagnostic-form]",
   formStatus: "[data-public-home-form-status]",
+  copyAction: "[data-public-home-copy]",
+  metricCounter: "[data-public-home-counter]",
+  magnetic: "[data-public-home-magnetic]",
 };
 
 const DEFAULT_SCROLL_OFFSET = 92;
@@ -388,6 +394,9 @@ function getRefs(view = null) {
 
     diagnosticForm: root.querySelector(SELECTORS.diagnosticForm),
     formStatus: root.querySelector(SELECTORS.formStatus),
+    copyActions: toArray(root.querySelectorAll(SELECTORS.copyAction)),
+    metricCounters: toArray(root.querySelectorAll(SELECTORS.metricCounter)),
+    magneticItems: toArray(root.querySelectorAll(SELECTORS.magnetic)),
   };
 
   if (!refs.navLinks.length) {
@@ -1137,14 +1146,29 @@ function initCtaTracking(refs, cleanups) {
 function initScrollState(refs, cleanups) {
   let frame = 0;
 
+  function getProgress() {
+    if (!isBrowser()) return 0;
+
+    const doc = document.documentElement;
+    const scrollTop = window.scrollY || doc.scrollTop || 0;
+    const maxScroll = Math.max(1, doc.scrollHeight - window.innerHeight);
+
+    return Math.max(0, Math.min(1, scrollTop / maxScroll));
+  }
+
   function sync() {
     frame = 0;
 
     const scrolled = isBrowser() && window.scrollY > 14;
+    const progress = getProgress();
+    const progressValue = progress.toFixed(4);
 
     refs.root.classList.toggle(CLASSES.scrolled, scrolled);
     refs.nav?.classList.toggle(CLASSES.scrolled, scrolled);
     safeDataset(refs.root, "scrolled", scrolled ? "true" : "false");
+    safeDataset(refs.root, "scrollProgress", progressValue);
+    setCssMetric(refs.root, "--public-home-scroll-progress", progressValue);
+    setCssMetric(refs.nav, "--public-home-scroll-progress", progressValue);
   }
 
   function onScroll() {
@@ -1157,10 +1181,17 @@ function initScrollState(refs, cleanups) {
     passive: true,
   });
 
+  addEvent(cleanups, window, "resize", onScroll, {
+    passive: true,
+  });
+
   sync();
 
   cleanups.push(() => {
     cancelFrame(frame);
+    setCssMetric(refs.root, "--public-home-scroll-progress", "0");
+    setCssMetric(refs.nav, "--public-home-scroll-progress", "0");
+    removeDataset(refs.root, "scrollProgress");
   });
 
   return true;
@@ -1356,6 +1387,240 @@ function initPointerFx(refs, cleanups) {
       // noop
     }
   });
+
+  return true;
+}
+
+
+function setCssMetric(node = null, key = "", value = "") {
+  if (!node || !key) return false;
+
+  try {
+    node.style.setProperty(key, String(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function parseNumber(value = "", fallback = 0) {
+  const parsed = Number.parseFloat(String(value ?? "").replace(",", "."));
+
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function formatCounterValue(value = 0, decimals = 0, suffix = "") {
+  const precision = Math.max(0, Math.min(3, Number.parseInt(decimals, 10) || 0));
+  const formatted = Number(value).toLocaleString("es-ES", {
+    minimumFractionDigits: precision,
+    maximumFractionDigits: precision,
+  });
+
+  return `${formatted}${suffix}`;
+}
+
+function writeClipboard(value = "") {
+  if (!isBrowser()) return Promise.resolve(false);
+
+  const clean = cleanText(value, "");
+
+  if (!clean) return Promise.resolve(false);
+
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    return navigator.clipboard.writeText(clean).then(() => true).catch(() => false);
+  }
+
+  return new Promise((resolve) => {
+    try {
+      const input = document.createElement("textarea");
+      input.value = clean;
+      input.setAttribute("readonly", "true");
+      input.style.position = "fixed";
+      input.style.inset = "0 auto auto -9999px";
+      input.style.opacity = "0";
+      document.body.appendChild(input);
+      input.select();
+      const ok = document.execCommand("copy");
+      input.remove();
+      resolve(Boolean(ok));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+function initCopyActions(refs, cleanups) {
+  const actions = refs.copyActions || [];
+
+  if (!actions.length) return false;
+
+  let timer = 0;
+
+  async function onClick(event = null) {
+    const action = event?.target?.closest?.(SELECTORS.copyAction);
+
+    if (!action || !refs.root?.contains?.(action)) return;
+
+    const value =
+      action.getAttribute("data-copy-value") ||
+      action.dataset.publicHomeCopy ||
+      action.href ||
+      action.textContent ||
+      "";
+
+    const ok = await writeClipboard(value);
+
+    action.classList.toggle(CLASSES.copied, ok);
+    safeDataset(action, "copied", ok ? "true" : "false");
+
+    dispatchHomeEvent(refs.root, ok ? "public-home:copy-success" : "public-home:copy-fail", {
+      ok,
+      value: redact(value),
+      label: cleanText(action.textContent, ""),
+    });
+
+    clearTimeout(timer);
+
+    if (ok) {
+      timer = window.setTimeout(() => {
+        action.classList.remove(CLASSES.copied);
+        removeDataset(action, "copied");
+      }, 1500);
+    }
+  }
+
+  addEvent(cleanups, refs.root, "click", onClick);
+
+  cleanups.push(() => {
+    clearTimeout(timer);
+  });
+
+  return true;
+}
+
+function animateCounter(node = null) {
+  if (!node || node.dataset.counterAnimated === "true") return false;
+
+  const target = parseNumber(node.dataset.counterTarget || node.textContent, 0);
+  const start = parseNumber(node.dataset.counterStart || "0", 0);
+  const decimals = Number.parseInt(node.dataset.counterDecimals || "0", 10) || 0;
+  const suffix = cleanText(node.dataset.counterSuffix || "", "");
+  const duration = Math.max(320, Math.min(2200, Number.parseInt(node.dataset.counterDuration || "1100", 10) || 1100));
+  const reduced = getReducedMotion();
+
+  node.dataset.counterAnimated = "true";
+  node.classList.add(CLASSES.counterReady);
+
+  if (reduced) {
+    node.textContent = formatCounterValue(target, decimals, suffix);
+    return true;
+  }
+
+  const startedAt = performance.now();
+
+  function tick(now) {
+    const progress = Math.min(1, Math.max(0, (now - startedAt) / duration));
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const value = start + (target - start) * eased;
+
+    node.textContent = formatCounterValue(value, decimals, suffix);
+
+    if (progress < 1) {
+      requestFrame(tick);
+    } else {
+      node.textContent = formatCounterValue(target, decimals, suffix);
+    }
+  }
+
+  requestFrame(tick);
+
+  return true;
+}
+
+function initMetricCounters(refs, cleanups) {
+  const counters = refs.metricCounters || [];
+
+  if (!counters.length || !isBrowser()) return false;
+
+  if (!("IntersectionObserver" in window)) {
+    counters.forEach(animateCounter);
+    return true;
+  }
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+
+        animateCounter(entry.target);
+        observer.unobserve(entry.target);
+      }
+    },
+    {
+      root: null,
+      rootMargin: "0px 0px -8% 0px",
+      threshold: [0.2, 0.45, 0.7],
+    }
+  );
+
+  for (const counter of counters) {
+    observer.observe(counter);
+  }
+
+  cleanups.push(() => {
+    try {
+      observer.disconnect();
+    } catch {
+      // noop
+    }
+  });
+
+  return true;
+}
+
+function initMagneticCards(refs, cleanups) {
+  const items = refs.magneticItems || [];
+
+  if (!items.length || !isBrowser() || getReducedMotion()) return false;
+
+  try {
+    if (!window.matchMedia("(pointer: fine)").matches) return false;
+  } catch {
+    return false;
+  }
+
+  function onMove(event = null) {
+    const item = event?.currentTarget;
+
+    if (!item) return;
+
+    const rect = item.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * 100;
+    const y = ((event.clientY - rect.top) / Math.max(rect.height, 1)) * 100;
+
+    item.classList.add(CLASSES.magnetic);
+    setCssMetric(item, "--card-pointer-x", `${x.toFixed(2)}%`);
+    setCssMetric(item, "--card-pointer-y", `${y.toFixed(2)}%`);
+  }
+
+  function onLeave(event = null) {
+    const item = event?.currentTarget;
+
+    if (!item) return;
+
+    item.classList.remove(CLASSES.magnetic);
+    setCssMetric(item, "--card-pointer-x", "50%");
+    setCssMetric(item, "--card-pointer-y", "50%");
+  }
+
+  for (const item of items) {
+    addEvent(cleanups, item, "pointermove", onMove, {
+      passive: true,
+    });
+    addEvent(cleanups, item, "pointerleave", onLeave, {
+      passive: true,
+    });
+  }
 
   return true;
 }
@@ -1556,6 +1821,9 @@ export function renderPublicHomeView(container, context = {}) {
   initActiveSection(refs, cleanups);
   initReveal(refs, cleanups);
   initPointerFx(refs, cleanups);
+  initCopyActions(refs, cleanups);
+  initMetricCounters(refs, cleanups);
+  initMagneticCards(refs, cleanups);
   initDiagnosticForm(refs, cleanups);
   initInitialHash(refs);
 
@@ -1653,6 +1921,9 @@ export function renderPublicHomeView(container, context = {}) {
         navLinkCount: refs.navLinks?.length || 0,
         revealCount: refs.revealItems?.length || 0,
         hasDiagnosticForm: Boolean(refs.diagnosticForm),
+        copyActionCount: refs.copyActions?.length || 0,
+        metricCounterCount: refs.metricCounters?.length || 0,
+        magneticItemCount: refs.magneticItems?.length || 0,
         reducedMotion: getReducedMotion(),
         routerAvailable: Boolean(
           router?.navigate ||

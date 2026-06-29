@@ -41,9 +41,16 @@ import {
 
 import * as Routes from "./routes.js";
 
-export const ROUTER_VERSION = "router.minimal.v6";
+export const ROUTER_VERSION = "router.minimal.v7";
 
-const HOME_PATH = ROUTES.home || "/";
+const PUBLIC_HOME_PATH = "/";
+const PRIVATE_HOME_PATH =
+  Routes.ROUTE_PATHS?.HOME ||
+  ROUTES.privateHome ||
+  ROUTES.dashboard ||
+  "/dashboard";
+
+const HOME_PATH = PUBLIC_HOME_PATH;
 const LOGIN_PATH = ROUTES.login || "/login";
 const APP_TITLE = "Onion Support";
 
@@ -320,7 +327,11 @@ function canonicalPathFromPublicPath(path = HOME_PATH) {
   const scoped = getScopedInfo(pathname);
 
   if (scoped.scoped) {
-    return normalizePathname(scoped.canonicalPath || scoped.restPath || HOME_PATH);
+    return normalizePathname(
+      scoped.home
+        ? PRIVATE_HOME_PATH
+        : scoped.canonicalPath || scoped.restPath || HOME_PATH
+    );
   }
 
   return normalizePathname(pathname);
@@ -615,6 +626,10 @@ function buildUserScopedPath(
 
   if (!clean) return canonical;
 
+  if (canonical === PRIVATE_HOME_PATH) {
+    return buildUserHomePath(clean);
+  }
+
   try {
     return buildUserScopedRoute(clean, canonical);
   } catch {
@@ -663,7 +678,11 @@ function getRouteMatch(path = HOME_PATH) {
   const scoped = getScopedInfo(pathname);
 
   const lookupPath = scoped.scoped
-    ? normalizePathname(scoped.canonicalPath || scoped.restPath || HOME_PATH)
+    ? normalizePathname(
+        scoped.home
+          ? PRIVATE_HOME_PATH
+          : scoped.canonicalPath || scoped.restPath || HOME_PATH
+      )
     : normalizePathname(pathname);
 
   let route = isBlockedPath(publicPath)
@@ -770,7 +789,7 @@ function normalizeNavigationTarget(path = HOME_PATH, options = {}) {
   if (
     options.useSlug !== false &&
     isAuthenticated() &&
-    match.canonicalPath === HOME_PATH &&
+    match.canonicalPath === PRIVATE_HOME_PATH &&
     match.route?.public !== true
   ) {
     return withSearchHashFrom(publicPath, buildUserHomePath());

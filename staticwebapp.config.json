@@ -138,14 +138,6 @@
       "statusCode": 404
     },
     {
-      "route": "/sitemap.xml",
-      "statusCode": 404
-    },
-    {
-      "route": "/BingSiteAuth.xml",
-      "statusCode": 404
-    },
-    {
       "route": "/manifest.json",
       "statusCode": 404
     },
@@ -157,13 +149,15 @@
       "route": "/apple-touch-icon.png",
       "statusCode": 404
     },
+
     {
       "route": "/",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache",
-        "Expires": "0"
+        "Expires": "0",
+        "X-Robots-Tag": "index, follow"
       }
     },
     {
@@ -171,9 +165,143 @@
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache",
-        "Expires": "0"
+        "Expires": "0",
+        "X-Robots-Tag": "index, follow"
       }
     },
+
+    {
+      "route": "/login",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/password-request",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/password-reset*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/activate-account*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+
+    {
+      "route": "/dashboard*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/@*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/incidencias*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/facturas*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/clientes*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/usuarios*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/servidor*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/cuenta*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/ajustes*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+
     {
       "route": "/src/media/*",
       "headers": {
@@ -221,6 +349,18 @@
       "headers": {
         "Cache-Control": "public, max-age=3600"
       }
+    },
+    {
+      "route": "/sitemap.xml",
+      "headers": {
+        "Cache-Control": "public, max-age=3600"
+      }
+    },
+    {
+      "route": "/BingSiteAuth.xml",
+      "headers": {
+        "Cache-Control": "public, max-age=3600"
+      }
     }
   ],
   "globalHeaders": {
@@ -228,7 +368,6 @@
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
-    "X-Robots-Tag": "noindex, nofollow",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
     "Content-Security-Policy": "upgrade-insecure-requests; default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self'; font-src 'self' data:; img-src 'self' data: blob: https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net; media-src 'self' data: blob: https://*.blob.core.windows.net; connect-src 'self' https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net wss://api.onionit.net wss://*.onionit.net; manifest-src 'self'; worker-src 'self';"
   },

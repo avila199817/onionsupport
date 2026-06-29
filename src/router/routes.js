@@ -32,14 +32,15 @@ import {
   getUserScopedRouteInfo as configGetUserScopedRouteInfo,
 } from "../core/config.js";
 
-export const ROUTES_VERSION = "routes.minimal.v5";
+export const ROUTES_VERSION = "routes.minimal.v6";
 
 /* =========================================================
    PATHS / NAMES
 ========================================================= */
 
 export const ROUTE_PATHS = Object.freeze({
-  HOME: ROUTES.home || "/",
+  PUBLIC_HOME: "/",
+  HOME: ROUTES.privateHome || ROUTES.dashboard || "/dashboard",
 
   INCIDENCIAS: ROUTES.incidencias || "/incidencias",
   FACTURAS: ROUTES.facturas || "/facturas",
@@ -56,6 +57,7 @@ export const ROUTE_PATHS = Object.freeze({
 });
 
 export const ROUTE_NAMES = Object.freeze({
+  PUBLIC_HOME: "public-home",
   HOME: "home",
 
   INCIDENCIAS: "incidencias",
@@ -301,7 +303,9 @@ export function resolveRouteLookupPath(path = "/") {
     return clean;
   }
 
-  const lookup = scoped.canonicalPath || scoped.restPath || "/";
+  const lookup = scoped.home
+    ? ROUTE_PATHS.HOME
+    : scoped.canonicalPath || scoped.restPath || "/";
 
   /*
     Las rutas públicas Auth no son válidas bajo /@{slug}.
@@ -311,7 +315,7 @@ export function resolveRouteLookupPath(path = "/") {
     return "";
   }
 
-  return lookup;
+  return normalizePath(lookup);
 }
 
 export function getUserHomeSlugFromPath(path = "/") {
@@ -338,7 +342,13 @@ export function isUserHomePath(path = "/") {
 }
 
 export function isHomePath(path = "/") {
-  return normalizePath(path) === "/" || isUserHomePath(path);
+  const clean = normalizePath(path);
+
+  return (
+    clean === ROUTE_PATHS.PUBLIC_HOME ||
+    clean === ROUTE_PATHS.HOME ||
+    isUserHomePath(clean)
+  );
 }
 
 /* =========================================================
@@ -346,6 +356,11 @@ export function isHomePath(path = "/") {
 ========================================================= */
 
 const VIEW_LOADERS = Object.freeze({
+  "public-home": () =>
+    import("../views/public/home/index.js").then((module) =>
+      pickView(module, ["PublicHomeView"])
+    ),
+
   home: () =>
     import("../views/home/index.js").then((module) =>
       pickView(module, ["HomeView"])
@@ -635,6 +650,16 @@ function createRoute({
 }
 
 const ROUTE_DEFINITIONS = Object.freeze([
+  createRoute({
+    path: ROUTE_PATHS.PUBLIC_HOME,
+    name: ROUTE_NAMES.PUBLIC_HOME,
+    title: "Soluciones IT",
+    viewKey: "public-home",
+    public: true,
+    guestOnly: false,
+    order: 1,
+  }),
+
   createRoute({
     path: ROUTE_PATHS.HOME,
     name: ROUTE_NAMES.HOME,

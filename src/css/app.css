@@ -161,7 +161,7 @@
 
 
 /* =========================================================
-   VIEWS · HOME
+   VIEWS · HOME PRIVADA / DASHBOARD
 ========================================================= */
 
 @import url("./views/home/index.css") layer(views);
@@ -191,18 +191,16 @@
    - Tabla compacta 6 columnas sin acciones.
    - Isla estable de modales vía index.js.
 
-   Retirados:
-   - ./views/incidencias/create.css
-   - ./views/incidencias/detail.css
-
-   Motivo:
-   - El CSS único de incidencias ya cubre los 3 templates visuales.
-   - Evita duplicidad de estilos, pisadas de cascada y parpadeos.
+   Nota:
+   - create.css y detail.css se mantienen importados porque existen
+     actualmente en el proyecto y pueden contener overrides activos.
+   - Si index.css ya cubre todo definitivamente, se pueden retirar luego.
 ========================================================= */
 
 @import url("./views/incidencias/index.css") layer(views);
 @import url("./views/incidencias/create.css") layer(views);
 @import url("./views/incidencias/detail.css") layer(views);
+
 
 /* =========================================================
    VIEWS · CUENTA
@@ -229,6 +227,7 @@
    Orden:
    1. index.css
    2. create.css
+   3. detail.css
 ========================================================= */
 
 @import url("./views/clientes/index.css") layer(views);
@@ -259,8 +258,36 @@
    - Activation/reset screens si comparten layout auth.
    - Shell hidden/auth route behavior.
 
-   Auth va al final porque necesita prioridad visual superior
-   frente al shell privado.
+   Importante:
+   - Auth va al final porque necesita prioridad visual superior
+     frente al shell privado.
 ========================================================= */
 
 @import url("./auth/login.css") layer(auth);
+
+
+/* =========================================================
+   PUBLIC · LANDING ONION SUPPORT
+
+   index.css:
+   - Landing pública de Onion Support.
+   - Vista /src/views/public/home.
+   - Navbar pública.
+   - Hero comercial.
+   - Servicios.
+   - Cómo trabajo.
+   - Precios.
+   - Contacto.
+   - FAQ.
+   - WhatsApp flotante.
+   - Overrides del public-auth-shell para permitir scroll.
+
+   Importante:
+   - Se carga DESPUÉS de auth/login.css.
+   - Usa layer(auth) intencionadamente para poder sobreescribir
+     el shell público del login sin crear una capa nueva.
+   - No debe contaminar la app privada porque todo va scopeado bajo
+     .public-auth-shell--home y .public-home.
+========================================================= */
+
+@import url("./views/public/index.css") layer(auth);

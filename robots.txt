@@ -1,2 +1,30 @@
 User-agent: *
-Disallow: /
+Allow: /
+
+Disallow: /login
+Disallow: /password-request
+Disallow: /password-reset
+Disallow: /activate-account
+
+Disallow: /dashboard
+Disallow: /incidencias
+Disallow: /facturas
+Disallow: /clientes
+Disallow: /usuarios
+Disallow: /servidor
+Disallow: /cuenta
+Disallow: /ajustes
+Disallow: /@*
+
+Disallow: /api/
+Disallow: /.auth/
+Disallow: /.well-known/
+Disallow: /docs/
+Disallow: /config/
+Disallow: /node_modules/
+Disallow: /.git/
+Disallow: /.github/
+Disallow: /.vscode/
+Disallow: /.idea/
+
+Sitemap: https://onionsupport.com/sitemap.xml

@@ -13,7 +13,12 @@
 (() => {
   "use strict";
 
+  const PREBOOT_VERSION = "preboot.theme.v2";
+
   const BASE_LOCALE = "es";
+  const BASE_LANG = "es";
+  const BASE_DIR = "ltr";
+
   const DARK_QUERY = "(prefers-color-scheme: dark)";
 
   const THEME_LIGHT = "light";
@@ -58,16 +63,8 @@
     const value = normalizeTheme(theme);
 
     try {
-      element.classList.remove(
-        "no-js",
-        "theme-light",
-        "theme-dark"
-      );
-
-      element.classList.add(
-        "js",
-        `theme-${value}`
-      );
+      element.classList.remove("no-js", "theme-light", "theme-dark");
+      element.classList.add("js", `theme-${value}`);
 
       return true;
     } catch {
@@ -86,6 +83,7 @@
       element.dataset.themeSource = "system";
       element.dataset.systemTheme = value;
       element.dataset.themeReady = "true";
+      element.dataset.prebootThemeVersion = PREBOOT_VERSION;
 
       return true;
     } catch {
@@ -97,8 +95,8 @@
     if (!element) return false;
 
     try {
-      element.lang = BASE_LOCALE;
-      element.dir = "ltr";
+      element.lang = BASE_LANG;
+      element.dir = BASE_DIR;
 
       element.dataset.locale = BASE_LOCALE;
       element.dataset.localeSource = "base";
@@ -149,6 +147,8 @@
 
     try {
       window.__ONION_PREBOOT__ = Object.freeze({
+        version: PREBOOT_VERSION,
+
         theme: value,
         themeMode: THEME_MODE,
         themeSource: "system",
@@ -158,6 +158,9 @@
         localeSource: "base",
         fallbackLocale: BASE_LOCALE,
         supportedLocales: Object.freeze([BASE_LOCALE]),
+
+        ready: true,
+        updatedAt: new Date().toISOString(),
       });
 
       return true;
@@ -228,5 +231,7 @@
     document.addEventListener("DOMContentLoaded", applyPreboot, {
       once: true,
     });
+  } else {
+    applyPreboot();
   }
 })();

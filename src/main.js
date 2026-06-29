@@ -11,14 +11,20 @@
    - Sin Auth, Router, Store, Services, fetch, storage ni dominio.
 ========================================================= */
 
-export const MAIN_VERSION = "main.minimal.v3";
+export const MAIN_VERSION = "main.minimal.v4";
 
 const APP_MODULE = "./app/index.js";
+
 const BOOT_PROMISE_KEY = "__ONION_BOOT_PROMISE__";
 const DISABLE_AUTO_BOOT_KEY = "__ONION_DISABLE_AUTO_BOOT__";
+const MAIN_SNAPSHOT_KEY = "__ONION_MAIN__";
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function getInitialPath() {
@@ -39,14 +45,57 @@ function redact(value = "") {
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***")
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    )
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
+function writeMainSnapshot(patch = {}) {
+  if (!isBrowser()) return false;
+
+  try {
+    const previous = isObject(window[MAIN_SNAPSHOT_KEY])
+      ? window[MAIN_SNAPSHOT_KEY]
+      : {};
+
+    window[MAIN_SNAPSHOT_KEY] = Object.freeze({
+      ...previous,
+      ...patch,
+      version: MAIN_VERSION,
+      updatedAt: new Date().toISOString(),
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function dispatchMainEvent(name = "", detail = {}) {
+  if (!isBrowser() || !name) return false;
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent(`onion:main:${name}`, {
+        detail: {
+          version: MAIN_VERSION,
+          ...detail,
+        },
+      })
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function setAppState(state = "booting") {
-  if (!isBrowser()) return;
+  if (!isBrowser()) return false;
 
   const value = String(state || "booting").toLowerCase();
 
@@ -60,6 +109,11 @@ function setAppState(state = "booting") {
     node.dataset.appBooting = booting ? "true" : "false";
     node.dataset.appReady = ready ? "true" : "false";
     node.dataset.appFatal = fatal ? "true" : "false";
+    node.dataset.mainVersion = MAIN_VERSION;
+
+    if (ready) {
+      node.dataset.appBooted = "true";
+    }
 
     node.classList.remove("no-js");
     node.classList.add("js");
@@ -69,6 +123,13 @@ function setAppState(state = "booting") {
     node.classList.toggle("app-ready", ready);
     node.classList.toggle("app-fatal", fatal);
   }
+
+  writeMainSnapshot({
+    state: value,
+    initialPath: getInitialPath(),
+  });
+
+  return true;
 }
 
 function showNode(node) {
@@ -173,12 +234,23 @@ function showFatalError(error = null) {
   section.append(title, text, button);
   root.replaceChildren(section);
 
+  const cleanError = {
+    name: redact(error?.name || "Error"),
+    message: redact(error?.message || String(error || "")),
+    status: error?.status || error?.statusCode || null,
+  };
+
+  writeMainSnapshot({
+    state: "fatal",
+    error: cleanError,
+  });
+
+  dispatchMainEvent("fatal", {
+    error: cleanError,
+  });
+
   try {
-    console.error("[Onion Main] Error de arranque:", {
-      name: redact(error?.name || "Error"),
-      message: redact(error?.message || String(error || "")),
-      status: error?.status || error?.statusCode || null,
-    });
+    console.error("[Onion Main] Error de arranque:", cleanError);
   } catch {
     // noop
   }
@@ -187,7 +259,18 @@ function showFatalError(error = null) {
 }
 
 async function runBoot() {
+  const initialPath = getInitialPath();
+
   setAppState("booting");
+
+  writeMainSnapshot({
+    state: "booting",
+    initialPath,
+  });
+
+  dispatchMainEvent("boot-start", {
+    initialPath,
+  });
 
   const app = await import(APP_MODULE);
   const bootApp = typeof app.bootApp === "function" ? app.bootApp : app.default;
@@ -198,11 +281,20 @@ async function runBoot() {
 
   await bootApp({
     source: "main",
-    initialPath: getInitialPath(),
+    initialPath,
     version: MAIN_VERSION,
   });
 
   setAppState("ready");
+
+  writeMainSnapshot({
+    state: "ready",
+    initialPath,
+  });
+
+  dispatchMainEvent("ready", {
+    initialPath,
+  });
 
   return true;
 }

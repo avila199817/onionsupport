@@ -24,7 +24,7 @@
 import { AppCore } from "../../../core/index.js";
 import createPublicHomeTemplate from "./template.js";
 
-export const PUBLIC_HOME_VIEW_VERSION = "public.home.view.controller.productive.2026.1";
+export const PUBLIC_HOME_VIEW_VERSION = "public.home.view.controller.final.productivo.2026.22.hero-bg-pass-through-10-10";
 
 const SOURCE = "public.home.view";
 
@@ -50,6 +50,7 @@ const CLASSES = {
   visible: "is-visible",
   menuOpen: "is-menu-open",
   scrolled: "is-scrolled",
+  footerVisible: "is-footer-visible",
   submitting: "is-submitting",
   invalid: "is-invalid",
   copied: "is-copied",
@@ -74,6 +75,8 @@ const SELECTORS = {
   copyAction: "[data-public-home-copy]",
   metricCounter: "[data-public-home-counter]",
   magnetic: "[data-public-home-magnetic]",
+  customScrollbar: "[data-public-home-scrollbar]",
+  customScrollbarThumb: "[data-public-home-scrollbar-thumb]",
 };
 
 const DEFAULT_SCROLL_OFFSET = 92;
@@ -397,6 +400,8 @@ function getRefs(view = null) {
     copyActions: toArray(root.querySelectorAll(SELECTORS.copyAction)),
     metricCounters: toArray(root.querySelectorAll(SELECTORS.metricCounter)),
     magneticItems: toArray(root.querySelectorAll(SELECTORS.magnetic)),
+    customScrollbar: root.querySelector(SELECTORS.customScrollbar),
+    customScrollbarThumb: root.querySelector(SELECTORS.customScrollbarThumb),
   };
 
   if (!refs.navLinks.length) {
@@ -652,6 +657,98 @@ function pickCurrentSection(refs = {}) {
    SCROLL
 ========================================================= */
 
+function isScrollableHostCandidate(node = null) {
+  if (!isBrowser() || !node || node === document || node === window) return false;
+  if (node === document.body || node === document.documentElement) return false;
+
+  try {
+    const style = window.getComputedStyle(node);
+    const overflowY = String(style.overflowY || style.overflow || "").toLowerCase();
+    const canScroll = (node.scrollHeight || 0) - (node.clientHeight || 0) > 2;
+    const allowsScroll = /auto|scroll|overlay/.test(overflowY);
+
+    return Boolean(canScroll && allowsScroll);
+  } catch {
+    return false;
+  }
+}
+
+function getScrollHost(refs = {}) {
+  if (!isBrowser()) return null;
+
+  const candidates = [
+    refs.root?.closest?.(".main-content"),
+    refs.root?.closest?.("[data-scroll-container]"),
+    refs.root?.closest?.(".public-auth-body"),
+    refs.root?.closest?.(".public-auth-shell--home"),
+    document.querySelector(".main-content"),
+    document.querySelector("[data-scroll-container]"),
+    document.querySelector(".public-auth-body"),
+    document.scrollingElement,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (isScrollableHostCandidate(candidate)) {
+      return candidate;
+    }
+  }
+
+  return window;
+}
+
+function isWindowScrollHost(host = null) {
+  return !host || host === window || host === document || host === document.documentElement || host === document.body;
+}
+
+function getScrollTop(host = null) {
+  if (!isBrowser()) return 0;
+
+  if (isWindowScrollHost(host)) {
+    return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+  }
+
+  return host.scrollTop || 0;
+}
+
+function getScrollMax(host = null) {
+  if (!isBrowser()) return 1;
+
+  if (isWindowScrollHost(host)) {
+    const doc = document.documentElement;
+    return Math.max(1, doc.scrollHeight - window.innerHeight);
+  }
+
+  return Math.max(1, host.scrollHeight - host.clientHeight);
+}
+
+function scrollHostTo(host = null, top = 0, behavior = "auto") {
+  if (!isBrowser()) return false;
+
+  const nextTop = Math.max(0, Number(top) || 0);
+
+  try {
+    if (isWindowScrollHost(host)) {
+      window.scrollTo({ top: nextTop, behavior });
+    } else {
+      host.scrollTo({ top: nextTop, behavior });
+    }
+
+    return true;
+  } catch {
+    try {
+      if (isWindowScrollHost(host)) {
+        window.scrollTo(0, nextTop);
+      } else {
+        host.scrollTop = nextTop;
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 function scrollToHash(hash = "", refs = {}, options = {}) {
   if (!isBrowser()) return false;
 
@@ -663,23 +760,15 @@ function scrollToHash(hash = "", refs = {}, options = {}) {
   const reduced = getReducedMotion();
   const behavior = options.behavior || (reduced ? "auto" : "smooth");
   const offset = getScrollOffset(refs);
+  const host = getScrollHost(refs);
+  const hostRectTop = isWindowScrollHost(host) ? 0 : host.getBoundingClientRect().top;
+  const top = getScrollTop(host) + target.getBoundingClientRect().top - hostRectTop - offset;
 
-  try {
-    const top = Math.max(
-      0,
-      window.scrollY + target.getBoundingClientRect().top - offset
-    );
+  const didScroll = scrollHostTo(host, top, behavior);
 
-    window.scrollTo({
-      top,
-      behavior,
-    });
-  } catch {
+  if (!didScroll) {
     try {
-      target.scrollIntoView({
-        behavior,
-        block: "start",
-      });
+      target.scrollIntoView({ behavior, block: "start" });
     } catch {
       return false;
     }
@@ -915,8 +1004,8 @@ function labelFromKey(key = "") {
 
 function buildWhatsAppMessage(payload = {}) {
   const lines = [
-    "Hola, vengo desde Onion Support.",
-    "Quiero solicitar un diagnóstico/presupuesto.",
+    "Hola Cristian, vengo desde Onion Support.",
+    "Quiero solicitar un diagnóstico técnico.",
     "",
   ];
 
@@ -1144,54 +1233,470 @@ function initCtaTracking(refs, cleanups) {
 }
 
 function initScrollState(refs, cleanups) {
+  if (!isBrowser() || !refs?.root) return false;
+
   let frame = 0;
+  let dragging = false;
+  let activePointerId = null;
 
-  function getProgress() {
-    if (!isBrowser()) return 0;
+  function uniqueNodes(list = []) {
+    const seen = new Set();
+    const output = [];
 
-    const doc = document.documentElement;
-    const scrollTop = window.scrollY || doc.scrollTop || 0;
-    const maxScroll = Math.max(1, doc.scrollHeight - window.innerHeight);
+    for (const item of list) {
+      if (!item || seen.has(item)) continue;
+      seen.add(item);
+      output.push(item);
+    }
 
-    return Math.max(0, Math.min(1, scrollTop / maxScroll));
+    return output;
+  }
+
+  function getScrollCandidates() {
+    const candidates = [
+      refs.root?.closest?.(".main-content"),
+      refs.root?.closest?.("[data-scroll-container]"),
+      refs.root?.closest?.(".public-auth-body"),
+      refs.root?.closest?.(".public-auth-shell--home"),
+      document.querySelector(".main-content"),
+      document.querySelector("[data-scroll-container]"),
+      document.querySelector(".public-auth-body"),
+      document.querySelector(".public-auth-shell--home"),
+      document.scrollingElement,
+      document.documentElement,
+      document.body,
+      window,
+    ];
+
+    return uniqueNodes(candidates);
+  }
+
+  function getElementScrollMax(node = null) {
+    if (!node) return 0;
+
+    if (isWindowScrollHost(node)) {
+      const doc = document.documentElement;
+      const body = document.body;
+      const height = Math.max(
+        doc?.scrollHeight || 0,
+        body?.scrollHeight || 0,
+        doc?.offsetHeight || 0,
+        body?.offsetHeight || 0
+      );
+
+      return Math.max(0, height - (window.innerHeight || doc?.clientHeight || 0));
+    }
+
+    return Math.max(0, (node.scrollHeight || 0) - (node.clientHeight || 0));
+  }
+
+  function getElementScrollTop(node = null) {
+    if (!node) return 0;
+
+    if (isWindowScrollHost(node)) {
+      return Math.max(
+        0,
+        window.scrollY ||
+          document.documentElement?.scrollTop ||
+          document.body?.scrollTop ||
+          0
+      );
+    }
+
+    return Math.max(0, node.scrollTop || 0);
+  }
+
+  function getActiveScrollHost() {
+    const candidates = getScrollCandidates();
+    let fallback = window;
+    let fallbackMax = 0;
+
+    for (const candidate of candidates) {
+      const max = getElementScrollMax(candidate);
+      const top = getElementScrollTop(candidate);
+
+      if (max > fallbackMax) {
+        fallback = candidate;
+        fallbackMax = max;
+      }
+
+      if (max > 1 && top > 0) {
+        return candidate;
+      }
+    }
+
+    for (const candidate of candidates) {
+      if (getElementScrollMax(candidate) > 1) {
+        return candidate;
+      }
+    }
+
+    return fallback;
+  }
+
+  function getRootScrollFallback() {
+    const rect = refs.root?.getBoundingClientRect?.();
+
+    if (!rect) {
+      return {
+        top: 0,
+        max: 1,
+      };
+    }
+
+    const viewport = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+    const rootSize = Math.max(viewport, refs.root.scrollHeight || rect.height || viewport);
+    const max = Math.max(1, rootSize - viewport);
+    const top = Math.max(0, Math.min(max, -rect.top));
+
+    return { top, max };
+  }
+
+  function getScrollInfo() {
+    const host = getActiveScrollHost();
+    let top = getElementScrollTop(host);
+    let max = Math.max(1, getElementScrollMax(host));
+
+    /*
+       Cinturón y tirantes:
+       en algunas integraciones el scroll real vive en un contenedor externo al
+       root o cambia después del mount. Si el host detectado sigue a 0 pero el
+       contenido ya se está moviendo en viewport, calculamos la posición por el
+       rect de la vista para que el indicador no se quede clavado arriba.
+    */
+    if (top <= 0) {
+      const fallback = getRootScrollFallback();
+
+      if (fallback.top > 0) {
+        top = fallback.top;
+        max = fallback.max;
+      }
+    }
+
+    return {
+      host,
+      top,
+      max,
+      progress: Math.max(0, Math.min(1, top / max)),
+    };
+  }
+
+  function getViewportSize(host = getActiveScrollHost()) {
+    if (!isBrowser()) return 1;
+
+    if (isWindowScrollHost(host)) {
+      return Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+    }
+
+    return Math.max(1, host.clientHeight || 1);
+  }
+
+  function getScrollSize(host = getActiveScrollHost()) {
+    if (!isBrowser()) return getViewportSize(host);
+
+    if (isWindowScrollHost(host)) {
+      const doc = document.documentElement;
+      const body = document.body;
+
+      return Math.max(
+        getViewportSize(host),
+        doc?.scrollHeight || 0,
+        body?.scrollHeight || 0,
+        getViewportSize(host)
+      );
+    }
+
+    return Math.max(getViewportSize(host), host.scrollHeight || getViewportSize(host));
+  }
+
+  function getScrollbarMetrics(host = getActiveScrollHost()) {
+    const track = refs.customScrollbar;
+    const thumb = refs.customScrollbarThumb;
+
+    if (!track || !thumb) {
+      return null;
+    }
+
+    const rect = track.getBoundingClientRect();
+    const trackSize = Math.max(1, rect.height || 1);
+    const viewportSize = getViewportSize(host);
+    const scrollSize = getScrollSize(host);
+    const rawRatio = viewportSize / Math.max(viewportSize, scrollSize);
+    const ratio = Math.max(0.08, Math.min(1, rawRatio));
+    const maxThumbSize = Math.max(82, Math.round(trackSize * 0.24));
+    const rawThumbSize = Math.round(trackSize * ratio);
+    const thumbSize = Math.max(58, Math.min(trackSize, Math.min(maxThumbSize, rawThumbSize)));
+    const travel = Math.max(1, trackSize - thumbSize);
+
+    return {
+      rect,
+      trackSize,
+      thumbSize,
+      travel,
+    };
   }
 
   function sync() {
     frame = 0;
 
-    const scrolled = isBrowser() && window.scrollY > 14;
-    const progress = getProgress();
+    const info = getScrollInfo();
+    const progress = info.progress;
     const progressValue = progress.toFixed(4);
+    const progressPercent = `${(progress * 100).toFixed(2)}%`;
+    const scrolled = info.top > 14;
+    const metrics = getScrollbarMetrics(info.host);
+    const thumbTopNumber = metrics ? Math.round(metrics.travel * progress) : 0;
+    const thumbSizeNumber = metrics ? Math.round(metrics.thumbSize) : 0;
+    const thumbTop = `${thumbTopNumber}px`;
+    const thumbSize = metrics ? `${thumbSizeNumber}px` : "";
+    const thumbCenter = metrics ? `${Math.round(thumbTopNumber + thumbSizeNumber / 2)}px` : "0px";
 
     refs.root.classList.toggle(CLASSES.scrolled, scrolled);
     refs.nav?.classList.toggle(CLASSES.scrolled, scrolled);
     safeDataset(refs.root, "scrolled", scrolled ? "true" : "false");
     safeDataset(refs.root, "scrollProgress", progressValue);
+    safeDataset(refs.root, "scrollProgressPercent", progressPercent);
+
     setCssMetric(refs.root, "--public-home-scroll-progress", progressValue);
+    setCssMetric(refs.root, "--public-home-scroll-progress-percent", progressPercent);
+    setCssMetric(refs.root, "--public-home-scrollbar-thumb-top", thumbTop);
+    setCssMetric(refs.root, "--public-home-scrollbar-thumb-center", thumbCenter);
+
+    setCssMetric(refs.customScrollbar, "--public-home-scroll-progress", progressValue);
+    setCssMetric(refs.customScrollbar, "--public-home-scroll-progress-percent", progressPercent);
+    setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-top", thumbTop);
+    setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-center", thumbCenter);
+
+    if (refs.customScrollbar) {
+      safeDataset(refs.customScrollbar, "scrollProgress", progressValue);
+      removeDataset(refs.customScrollbar, "scrollPercent");
+    }
+
+    if (thumbSize) {
+      setCssMetric(refs.root, "--public-home-scrollbar-thumb-size", thumbSize);
+      setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-size", thumbSize);
+    }
+
     setCssMetric(refs.nav, "--public-home-scroll-progress", progressValue);
+    setCssMetric(refs.nav, "--public-home-scroll-progress-percent", progressPercent);
   }
 
-  function onScroll() {
+  function scheduleSync() {
     if (frame) return;
 
     frame = requestFrame(sync);
   }
 
-  addEvent(cleanups, window, "scroll", onScroll, {
-    passive: true,
-  });
+  function scrollFromPointer(event = null) {
+    if (!event || !refs.customScrollbar) return false;
 
-  addEvent(cleanups, window, "resize", onScroll, {
-    passive: true,
-  });
+    const host = getActiveScrollHost();
+    const metrics = getScrollbarMetrics(host);
+
+    if (!metrics) return false;
+
+    const y = Number(event.clientY) || 0;
+    const localY = y - metrics.rect.top - metrics.thumbSize / 2;
+    const progress = Math.max(0, Math.min(1, localY / metrics.travel));
+    const nextTop = progress * Math.max(1, getElementScrollMax(host));
+
+    scrollHostTo(host, nextTop, "auto");
+    sync();
+
+    return true;
+  }
+
+  function onScroll() {
+    scheduleSync();
+  }
+
+  function onScrollbarPointerDown(event) {
+    if (!refs.customScrollbar || event?.button !== 0) return;
+
+    dragging = true;
+    activePointerId = event.pointerId ?? null;
+
+    refs.root.classList.add("is-scrollbar-dragging");
+    safeDataset(refs.root, "scrollbarDragging", "true");
+
+    try {
+      refs.customScrollbar.setPointerCapture?.(activePointerId);
+    } catch {
+      // noop
+    }
+
+    scrollFromPointer(event);
+    event.preventDefault?.();
+  }
+
+  function onScrollbarPointerMove(event) {
+    if (!dragging) return;
+
+    scrollFromPointer(event);
+    event.preventDefault?.();
+  }
+
+  function stopScrollbarDrag(event) {
+    if (!dragging) return;
+
+    try {
+      refs.customScrollbar?.releasePointerCapture?.(activePointerId ?? event?.pointerId);
+    } catch {
+      // noop
+    }
+
+    dragging = false;
+    activePointerId = null;
+
+    refs.root.classList.remove("is-scrollbar-dragging");
+    removeDataset(refs.root, "scrollbarDragging");
+  }
+
+  const scrollListeners = getScrollCandidates();
+
+  for (const target of scrollListeners) {
+    addEvent(cleanups, isWindowScrollHost(target) ? window : target, "scroll", onScroll, {
+      passive: true,
+    });
+  }
+
+  addEvent(cleanups, window, "scroll", onScroll, { passive: true });
+  addEvent(cleanups, document, "scroll", onScroll, { passive: true, capture: true });
+  addEvent(cleanups, window, "resize", onScroll, { passive: true });
+  addEvent(cleanups, window, "wheel", onScroll, { passive: true, capture: true });
+  addEvent(cleanups, window, "touchmove", onScroll, { passive: true, capture: true });
+  addEvent(cleanups, window, "keydown", onScroll, { passive: true, capture: true });
+
+  if (refs.customScrollbar) {
+    addEvent(cleanups, refs.customScrollbar, "pointerdown", onScrollbarPointerDown);
+    addEvent(cleanups, refs.customScrollbar, "pointermove", onScrollbarPointerMove);
+    addEvent(cleanups, refs.customScrollbar, "pointerup", stopScrollbarDrag);
+    addEvent(cleanups, refs.customScrollbar, "pointercancel", stopScrollbarDrag);
+    addEvent(cleanups, refs.customScrollbar, "lostpointercapture", stopScrollbarDrag);
+  }
 
   sync();
+  requestFrame(sync);
+
+  const lateSyncOne = window.setTimeout(sync, 80);
+  const lateSyncTwo = window.setTimeout(sync, 260);
+  const lateSyncThree = window.setTimeout(sync, 900);
+  const syncHeartbeat = window.setInterval(sync, 350);
+
+  cleanups.push(() => {
+    window.clearTimeout(lateSyncOne);
+    window.clearTimeout(lateSyncTwo);
+    window.clearTimeout(lateSyncThree);
+    window.clearInterval(syncHeartbeat);
+    cancelFrame(frame);
+    setCssMetric(refs.root, "--public-home-scroll-progress", "0");
+    setCssMetric(refs.root, "--public-home-scroll-progress-percent", "0%");
+    setCssMetric(refs.root, "--public-home-scrollbar-thumb-top", "0px");
+    setCssMetric(refs.root, "--public-home-scrollbar-thumb-center", "0px");
+    setCssMetric(refs.root, "--public-home-scrollbar-thumb-size", "");
+    setCssMetric(refs.customScrollbar, "--public-home-scroll-progress", "0");
+    setCssMetric(refs.customScrollbar, "--public-home-scroll-progress-percent", "0%");
+    setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-top", "0px");
+    setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-center", "0px");
+    setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-size", "");
+    removeDataset(refs.customScrollbar, "scrollPercent");
+    removeDataset(refs.customScrollbar, "scrollProgress");
+    setCssMetric(refs.nav, "--public-home-scroll-progress", "0");
+    setCssMetric(refs.nav, "--public-home-scroll-progress-percent", "0%");
+    refs.root.classList.remove("is-scrollbar-dragging");
+    removeDataset(refs.root, "scrollProgress");
+    removeDataset(refs.root, "scrollProgressPercent");
+    removeDataset(refs.root, "scrollbarDragging");
+  });
+
+  return true;
+}
+
+
+function initFooterHeaderVisibility(refs, cleanups) {
+  if (!isBrowser() || !refs?.root || !refs?.nav) return false;
+
+  const footer = refs.root.querySelector(".public-home-footer");
+
+  if (!footer) return false;
+
+  const scrollHost = getScrollHost(refs);
+  let frame = 0;
+  let lastVisible = null;
+
+  function setVisible(visible) {
+    const value = Boolean(visible);
+
+    if (value === lastVisible) return;
+
+    lastVisible = value;
+    refs.root.classList.toggle(CLASSES.footerVisible, value);
+    refs.nav.classList.toggle(CLASSES.footerVisible, value);
+    safeDataset(refs.root, "footerVisible", value ? "true" : "false");
+
+    dispatchHomeEvent(refs.root, "public-home:footer-visibility", {
+      visible: value,
+    });
+  }
+
+  function compute() {
+    frame = 0;
+
+    const footerRect = footer.getBoundingClientRect();
+    const hostRect = isWindowScrollHost(scrollHost)
+      ? { top: 0, bottom: window.innerHeight }
+      : scrollHost.getBoundingClientRect();
+
+    setVisible(
+      footerRect.top < hostRect.bottom - 2 &&
+      footerRect.bottom > hostRect.top + 2
+    );
+  }
+
+  function schedule() {
+    if (frame) return;
+
+    frame = requestFrame(compute);
+  }
+
+  if ("IntersectionObserver" in window) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        setVisible(entries.some((entry) => entry.isIntersecting));
+      },
+      {
+        root: isWindowScrollHost(scrollHost) ? null : scrollHost,
+        rootMargin: "0px",
+        threshold: [0, 0.01, 0.08],
+      }
+    );
+
+    observer.observe(footer);
+
+    cleanups.push(() => {
+      try {
+        observer.disconnect();
+      } catch {
+        // noop
+      }
+    });
+  }
+
+  addEvent(cleanups, isWindowScrollHost(scrollHost) ? window : scrollHost, "scroll", schedule, {
+    passive: true,
+  });
+
+  addEvent(cleanups, window, "resize", schedule, {
+    passive: true,
+  });
+
+  compute();
 
   cleanups.push(() => {
     cancelFrame(frame);
-    setCssMetric(refs.root, "--public-home-scroll-progress", "0");
-    setCssMetric(refs.nav, "--public-home-scroll-progress", "0");
-    removeDataset(refs.root, "scrollProgress");
+    refs.root.classList.remove(CLASSES.footerVisible);
+    refs.nav.classList.remove(CLASSES.footerVisible);
+    removeDataset(refs.root, "footerVisible");
   });
 
   return true;
@@ -1700,13 +2205,13 @@ function initDiagnosticForm(refs, cleanups) {
       if (opened) {
         setFormStatus(
           refs,
-          "Abriendo WhatsApp para enviar tu solicitud...",
+          "Abriendo la incidencia en WhatsApp...",
           "success"
         );
       } else {
         setFormStatus(
           refs,
-          "Solicitud preparada. Configura data-whatsapp-phone en el formulario para abrir WhatsApp.",
+          "Incidencia preparada. Configura data-whatsapp-phone en el formulario para abrir WhatsApp.",
           "info"
         );
       }
@@ -1715,7 +2220,7 @@ function initDiagnosticForm(refs, cleanups) {
     } catch {
       setFormStatus(
         refs,
-        "No se pudo preparar la solicitud. Inténtalo de nuevo.",
+        "No se pudo preparar la incidencia. Inténtalo de nuevo.",
         "error"
       );
 
@@ -1734,21 +2239,71 @@ function initDiagnosticForm(refs, cleanups) {
   return true;
 }
 
-function initInitialHash(refs) {
+
+function initFaqCollapsed(refs = {}, cleanups = []) {
+  if (!isBrowser() || !refs?.root) return false;
+
+  const items = toArray(refs.root.querySelectorAll(".public-home-faq-item"));
+
+  if (!items.length) return false;
+
+  function collapseAll() {
+    for (const item of items) {
+      try {
+        item.open = false;
+        item.removeAttribute("open");
+      } catch {
+        // noop
+      }
+    }
+  }
+
+  collapseAll();
+  requestFrame(collapseAll);
+
+  cleanups.push(() => {
+    collapseAll();
+  });
+
+  return true;
+}
+
+function initInitialTop(refs) {
   if (!isBrowser()) return false;
 
-  const hash = cleanText(window.location.hash, "");
+  try {
+    if ("scrollRestoration" in window.history) {
+      window.history.scrollRestoration = "manual";
+    }
+  } catch {
+    // noop
+  }
 
-  if (!hash || hash === "#") return false;
+  try {
+    if (window.location.hash && window.location.hash !== "#") {
+      window.history.replaceState(
+        {
+          source: SOURCE,
+          reason: "public-home-initial-top",
+        },
+        "",
+        `${window.location.pathname}${window.location.search}`
+      );
+    }
+  } catch {
+    // noop
+  }
 
-  requestFrame(() => {
-    scrollToHash(hash, refs, {
-      push: false,
-      replace: true,
-      focus: false,
-      behavior: "auto",
-    });
-  });
+  function goTop() {
+    const host = getScrollHost(refs);
+
+    scrollHostTo(host, 0, "auto");
+    setActiveHash(refs, "#inicio");
+  }
+
+  requestFrame(goTop);
+  window.setTimeout(goTop, 0);
+  window.setTimeout(goTop, 120);
 
   return true;
 }
@@ -1818,6 +2373,8 @@ export function renderPublicHomeView(container, context = {}) {
   initAnchorScroll(refs, cleanups, menuControls);
   initCtaTracking(refs, cleanups);
   initScrollState(refs, cleanups);
+  initFooterHeaderVisibility(refs, cleanups);
+  initFaqCollapsed(refs, cleanups);
   initActiveSection(refs, cleanups);
   initReveal(refs, cleanups);
   initPointerFx(refs, cleanups);
@@ -1825,7 +2382,7 @@ export function renderPublicHomeView(container, context = {}) {
   initMetricCounters(refs, cleanups);
   initMagneticCards(refs, cleanups);
   initDiagnosticForm(refs, cleanups);
-  initInitialHash(refs);
+  initInitialTop(refs);
 
   const instance = {
     version: PUBLIC_HOME_VIEW_VERSION,

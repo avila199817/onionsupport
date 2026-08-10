@@ -2,28 +2,24 @@
    Onion Support - Home Index
    Archivo: /src/views/home/index.js
 
-   Producción v10:
-   - Sin parpadeos al volver al Home.
-   - Sin loader después de tener datos cargados.
-   - Sin refresh automático en remount.
-   - Sin borrar el host al desmontar.
-   - Sin fetch directo.
-   - Sin Store.
-   - Sin storage propio.
-   - Sin listeners globales.
-   - Navegación delegada al Router/AppCore.
+   Responsabilidad:
+   - Controlar el ciclo de vida DOM de la vista Inicio.
+   - Delegar datos/cache/dedupe exclusivamente a home.api.js.
+   - Delegar HTML exclusivamente a home.template.js.
+   - Mantener un único listener delegado de acciones sobre el host.
+   - Navegar mediante Router/AppCore, sin HTTP, Store ni Storage propios.
+   - Mantener el DOM al desmontar para evitar parpadeos entre rutas.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { ROUTES } from "../../core/config.js";
 
 import {
-  ROUTES,
-} from "../../core/config.js";
-
-import {
+  HOME_CACHE_TTL_MS,
   loadHomeDashboard,
   hydrateHomeFromCache,
   hasFreshHomeDashboard,
+  clearHomeDashboardCache,
   getHomeCacheState,
 } from "./home.api.js";
 
@@ -32,24 +28,21 @@ import {
   renderHomeErrorState,
 } from "./home.template.js";
 
-export const HOME_INDEX_VERSION = "home.index.v10.no-flicker.memory-locked";
+export const HOME_INDEX_VERSION = "home.index.v11.single-cache.production";
 export const HOME_VIEW_VERSION = HOME_INDEX_VERSION;
 
 const SOURCE = "home.view";
-const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 const ROUTER_EVENT_HANDLED_KEY = "__onionRouterHandled";
 
 const ACTIONS = Object.freeze({
   RETRY: "retry",
-  REFRESH: "refresh",
-  RELOAD: "reload",
   NAVIGATE: "navigate",
 });
 
 const REFRESH_ACTIONS = new Set([
   ACTIONS.RETRY,
-  ACTIONS.REFRESH,
-  ACTIONS.RELOAD,
+  "refresh",
+  "reload",
   "reintentar",
   "actualizar",
 ]);
@@ -63,24 +56,10 @@ const NAVIGATION_ACTIONS = new Set([
 ]);
 
 const INSTANCES = new WeakMap();
-
 let lastInstance = null;
 
-const homeMemory = {
-  dashboard: null,
-  dashboardSignature: "",
-  userKey: "",
-  loaded: false,
-  loadedAt: 0,
-  error: "",
-  source: "",
-};
-
-let sharedLoadPromise = null;
-let sharedLoadUserKey = "";
-
 /* =========================================================
-   BASE
+   BASICS
 ========================================================= */
 
 function isBrowser() {
@@ -116,8 +95,9 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
+/* No aplanar arrays: pueden ser datos válidos completos. */
 function first(...values) {
-  for (const value of values.flat(Infinity)) {
+  for (const value of values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
@@ -137,6 +117,37 @@ function now() {
   return Date.now();
 }
 
+function safeError(error = null, fallback = "No se pudo cargar el inicio.") {
+  const message = cleanText(
+    first(
+      error?.message,
+      error?.data?.message,
+      error?.payload?.message,
+      error?.response?.message,
+      error?.error,
+      error?.code,
+      fallback
+    ),
+    fallback
+  );
+
+  return redact(message) || fallback;
+}
+
+function redact(value = "") {
+  return cleanText(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+}
+
+/* =========================================================
+   CORE / USER / ROUTES
+========================================================= */
+
 function normalizeRole(value = "") {
   if (Array.isArray(value)) {
     const roles = value.map(normalizeRole).filter(Boolean);
@@ -155,7 +166,7 @@ function normalizeRole(value = "") {
     .replace(/[^\w]+/g, "_")
     .replace(/^_+|_+$/g, "");
 
-  if (["admin", "administrator", "superadmin", "super_admin", "root", "owner"].includes(role)) {
+  if (["admin", "administrator", "administrador", "superadmin", "super_admin", "root", "owner"].includes(role)) {
     return "admin";
   }
 
@@ -166,73 +177,7 @@ function normalizeRole(value = "") {
   return "";
 }
 
-function safeError(error = null, fallback = "No se pudo cargar el inicio.") {
-  return cleanText(
-    first(
-      error?.message,
-      error?.data?.message,
-      error?.payload?.message,
-      error?.response?.message,
-      error?.error,
-      error?.code,
-      fallback
-    ),
-    fallback
-  );
-}
-
-function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-}
-
-function stableCopy(value, seen = new WeakSet()) {
-  if (Array.isArray(value)) {
-    return value.map((item) => stableCopy(item, seen));
-  }
-
-  if (!isObject(value)) {
-    return value;
-  }
-
-  if (seen.has(value)) {
-    return "[Circular]";
-  }
-
-  seen.add(value);
-
-  return Object.keys(value)
-    .sort()
-    .reduce((output, key) => {
-      const item = value[key];
-
-      if (item === undefined || typeof item === "function") {
-        return output;
-      }
-
-      output[key] = stableCopy(item, seen);
-      return output;
-    }, {});
-}
-
-function signature(value = null) {
-  try {
-    return JSON.stringify(stableCopy(value));
-  } catch {
-    return String(value ?? "");
-  }
-}
-
-/* =========================================================
-   CORE / USUARIO / RUTAS
-========================================================= */
-
-function getState() {
+function getCoreState() {
   try {
     return AppCore?.getState?.() || AppCore?.state || {};
   } catch {
@@ -242,7 +187,7 @@ function getState() {
 
 function getCurrentUser(context = {}) {
   const ctx = safeObject(context);
-  const state = getState();
+  const state = getCoreState();
 
   try {
     return first(
@@ -270,7 +215,7 @@ function getCurrentUser(context = {}) {
 
 function getCurrentRole(context = {}) {
   const ctx = safeObject(context);
-  const state = getState();
+  const state = getCoreState();
   const user = safeObject(getCurrentUser(ctx), {});
 
   return (
@@ -293,31 +238,6 @@ function getCurrentRole(context = {}) {
   );
 }
 
-function getUserKeyFrom(value = null) {
-  const user = safeObject(value, {});
-
-  return cleanText(
-    first(
-      user.userId,
-      user.uid,
-      user.sub,
-      user.id,
-      user._id,
-      user.email,
-      user.emailLower,
-      user.username,
-      user.usernameLower,
-      user.slug,
-      ""
-    ),
-    ""
-  ).toLowerCase();
-}
-
-function getCurrentUserKey(context = {}) {
-  return getUserKeyFrom(getCurrentUser(context));
-}
-
 function safeRoute(value = "", fallback = "/") {
   const route = cleanText(value, fallback);
 
@@ -335,7 +255,10 @@ function getRoutes(context = {}) {
   const custom = safeObject(context.routes);
 
   return {
-    home: safeRoute(first(custom.home, ROUTES?.home, "/"), "/"),
+    home: safeRoute(
+      first(custom.home, ROUTES?.privateHome, ROUTES?.dashboard, "/dashboard"),
+      "/dashboard"
+    ),
     incidencias: safeRoute(first(custom.incidencias, ROUTES?.incidencias, "/incidencias"), "/incidencias"),
     facturas: safeRoute(first(custom.facturas, ROUTES?.facturas, "/facturas"), "/facturas"),
     clientes: safeRoute(first(custom.clientes, ROUTES?.clientes, "/clientes"), "/clientes"),
@@ -364,96 +287,17 @@ function getRouter(context = {}) {
 }
 
 function basePayload(context = {}, extra = {}) {
-  const ctx = safeObject(context);
-
   return {
-    user: getCurrentUser(ctx),
-    role: getCurrentRole(ctx),
-    routes: getRoutes(ctx),
+    user: getCurrentUser(context),
+    role: getCurrentRole(context),
+    routes: getRoutes(context),
     ...safeObject(extra),
   };
 }
 
 /* =========================================================
-   MEMORIA
+   INITIAL DATA
 ========================================================= */
-
-function getDashboardKey(dashboard = null, fallbackUserKey = "") {
-  const source = safeObject(dashboard, {});
-  const user = safeObject(source.user, {});
-  const account = safeObject(source.account, {});
-  const scope = safeObject(source.scope, {});
-
-  return cleanText(
-    first(
-      source.userId,
-      source.uid,
-      source.sub,
-      source.ownerUserId,
-      user.userId,
-      user.uid,
-      user.sub,
-      user.id,
-      user.email,
-      account.userId,
-      account.id,
-      scope.userId,
-      fallbackUserKey,
-      ""
-    ),
-    ""
-  ).toLowerCase();
-}
-
-function clearHomeMemory() {
-  homeMemory.dashboard = null;
-  homeMemory.dashboardSignature = "";
-  homeMemory.userKey = "";
-  homeMemory.loaded = false;
-  homeMemory.loadedAt = 0;
-  homeMemory.error = "";
-  homeMemory.source = "";
-
-  sharedLoadPromise = null;
-  sharedLoadUserKey = "";
-
-  return true;
-}
-
-function setHomeMemory(
-  dashboard = null,
-  {
-    loaded = true,
-    error = "",
-    source = "memory",
-    userKey = "",
-  } = {}
-) {
-  if (!hasContent(dashboard)) return null;
-
-  const resolvedUserKey = getDashboardKey(dashboard, userKey);
-
-  homeMemory.dashboard = dashboard;
-  homeMemory.dashboardSignature = signature(dashboard);
-  homeMemory.userKey = resolvedUserKey;
-  homeMemory.loaded = Boolean(loaded);
-  homeMemory.loadedAt = loaded ? now() : homeMemory.loadedAt || 0;
-  homeMemory.error = cleanText(error, "");
-  homeMemory.source = cleanText(source, "memory");
-
-  return homeMemory.dashboard;
-}
-
-function syncMemoryUser(context = {}) {
-  const currentKey = getCurrentUserKey(context);
-
-  if (homeMemory.userKey && currentKey && homeMemory.userKey !== currentKey) {
-    clearHomeMemory();
-    return true;
-  }
-
-  return false;
-}
 
 function getContextDashboard(context = {}, options = {}) {
   const ctx = safeObject(context);
@@ -474,74 +318,54 @@ function getContextDashboard(context = {}, options = {}) {
   );
 }
 
-function getHydratedDashboard() {
+function getCachedDashboard() {
   try {
-    const cached = hydrateHomeFromCache?.();
-    return hasContent(cached) ? cached : null;
+    const dashboard = hydrateHomeFromCache?.();
+    return hasContent(dashboard) ? dashboard : null;
   } catch {
     return null;
   }
 }
 
-function isHydratedDashboardFresh(options = {}) {
+function isCachedDashboardFresh(ttlMs = HOME_CACHE_TTL_MS) {
   try {
-    return hasFreshHomeDashboard?.({
-      ttlMs: options.ttlMs ?? DEFAULT_CACHE_TTL_MS,
-    }) === true;
+    return hasFreshHomeDashboard?.({ ttlMs }) === true;
   } catch {
     return false;
   }
 }
 
 function getInitialDashboard(context = {}, options = {}) {
-  syncMemoryUser(context);
+  const opts = safeObject(options);
+  const ttlMs = opts.ttlMs ?? HOME_CACHE_TTL_MS;
+  const cached = getCachedDashboard();
 
-  const currentKey = getCurrentUserKey(context);
-  const contextual = getContextDashboard(context, options);
+  if (cached) {
+    return {
+      dashboard: cached,
+      fresh: isCachedDashboardFresh(ttlMs),
+      source: "api.cache",
+    };
+  }
+
+  const contextual = getContextDashboard(context, opts);
 
   if (hasContent(contextual)) {
-    setHomeMemory(contextual, {
-      loaded: true,
-      userKey: currentKey,
-      source: "context",
-    });
-
+    /*
+       Contexto = semilla visual, no cache autoritativo.
+       Siempre se valida en background para no dejar un dashboard parcial
+       bloqueando la carga real.
+    */
     return {
       dashboard: contextual,
-      loaded: true,
-      source: "context",
-    };
-  }
-
-  if (hasContent(homeMemory.dashboard)) {
-    return {
-      dashboard: homeMemory.dashboard,
-      loaded: homeMemory.loaded,
-      source: homeMemory.loaded ? "memory.loaded" : "memory.hydrated",
-    };
-  }
-
-  const hydrated = getHydratedDashboard();
-
-  if (hasContent(hydrated)) {
-    const fresh = isHydratedDashboardFresh(options);
-
-    setHomeMemory(hydrated, {
-      loaded: fresh,
-      userKey: currentKey,
-      source: fresh ? "api.cache.fresh" : "api.cache.stale",
-    });
-
-    return {
-      dashboard: hydrated,
-      loaded: fresh,
-      source: fresh ? "api.cache.fresh" : "api.cache.stale",
+      fresh: false,
+      source: "context.seed",
     };
   }
 
   return {
     dashboard: null,
-    loaded: false,
+    fresh: false,
     source: "empty",
   };
 }
@@ -570,7 +394,6 @@ function setHostFlags(host = null, state = {}) {
     host.dataset.homeMounted = state.mounted ? "true" : "false";
     host.dataset.homeLoading = loading ? "true" : "false";
     host.dataset.homeRefreshing = refreshing ? "true" : "false";
-    host.dataset.homeMemoryLoaded = homeMemory.loaded ? "true" : "false";
     host.setAttribute("aria-busy", loading || refreshing ? "true" : "false");
 
     return true;
@@ -579,18 +402,18 @@ function setHostFlags(host = null, state = {}) {
   }
 }
 
-function renderHtml(host = null, html = "", cache = {}) {
+function renderHtml(host = null, html = "", renderState = {}) {
   if (!host) return false;
 
   const next = String(html || "");
 
-  if (cache.lastHTML === next || host.innerHTML === next) {
-    cache.lastHTML = next;
+  if (renderState.lastHTML === next || host.innerHTML === next) {
+    renderState.lastHTML = next;
     return false;
   }
 
   host.innerHTML = next;
-  cache.lastHTML = next;
+  renderState.lastHTML = next;
 
   return true;
 }
@@ -612,10 +435,7 @@ function clearHost(host = null) {
 }
 
 function closestAction(target = null) {
-  const element = target?.nodeType === 3
-    ? target.parentElement
-    : target;
-
+  const element = target?.nodeType === 3 ? target.parentElement : target;
   return element?.closest?.("[data-home-action], [data-action]") || null;
 }
 
@@ -635,7 +455,7 @@ function isKnownAction(action = "") {
 }
 
 /* =========================================================
-   REGISTRO DE INSTANCIAS
+   INSTANCES
 ========================================================= */
 
 function destroyPrevious(host = null) {
@@ -656,7 +476,6 @@ function storeInstance(host = null, instance = null) {
 
   INSTANCES.set(host, instance);
   lastInstance = instance;
-
   return true;
 }
 
@@ -673,7 +492,7 @@ function clearInstance(host = null, instance = null) {
 }
 
 /* =========================================================
-   CONTROLADOR
+   CONTROLLER
 ========================================================= */
 
 function createHomeController(host = null, context = {}) {
@@ -682,8 +501,6 @@ function createHomeController(host = null, context = {}) {
   let bound = false;
 
   let dashboard = null;
-  let dashboardSignature = "";
-
   let loading = false;
   let refreshing = false;
   let error = "";
@@ -692,7 +509,7 @@ function createHomeController(host = null, context = {}) {
   let lastRenderAt = 0;
   let loadSeq = 0;
 
-  const renderCache = {
+  const renderState = {
     lastHTML: "",
   };
 
@@ -711,7 +528,6 @@ function createHomeController(host = null, context = {}) {
     if (destroyed || !host) return false;
 
     const data = safeObject(extra);
-
     lastRenderAt = now();
 
     setHostFlags(host, {
@@ -724,22 +540,15 @@ function createHomeController(host = null, context = {}) {
       return renderHtml(
         host,
         renderHomeTemplate(viewPayload(data)),
-        renderCache
+        renderState
       );
     } catch (renderError) {
       const message = safeError(renderError, "No se pudo pintar el inicio.");
-
-      return renderHtml(
-        host,
-        renderHomeErrorState(message),
-        renderCache
-      );
+      return renderHtml(host, renderHomeErrorState(message), renderState);
     }
   }
 
   function renderInitialLoading() {
-    if (destroyed || !host) return false;
-
     loading = true;
     refreshing = false;
     error = "";
@@ -765,119 +574,19 @@ function createHomeController(host = null, context = {}) {
       refreshing: false,
     });
 
-    return renderHtml(
-      host,
-      renderHomeErrorState(error),
-      renderCache
-    );
-  }
-
-  function commitDashboard(nextDashboard = null, meta = {}) {
-    if (!hasContent(nextDashboard)) return dashboard;
-
-    dashboard = nextDashboard;
-    dashboardSignature = signature(nextDashboard);
-
-    setHomeMemory(nextDashboard, {
-      loaded: meta.loaded !== false,
-      error: meta.error || cleanText(nextDashboard?.error || "", ""),
-      source: meta.source || SOURCE,
-      userKey: meta.userKey || getCurrentUserKey(context),
-    });
-
-    return dashboard;
-  }
-
-  function shouldFetchOnMount(initial = {}, options = {}) {
-    const opts = safeObject(options);
-    const force = opts.force === true || opts.forceRefresh === true || opts.hardRefresh === true;
-
-    if (force) return true;
-    if (!hasContent(dashboard)) return true;
-    if (initial.loaded === false && homeMemory.loaded === false) return true;
-
-    return false;
-  }
-
-  async function fetchDashboard(options = {}) {
-    const opts = safeObject(options);
-    const force = opts.force === true || opts.forceRefresh === true || opts.hardRefresh === true;
-    const userKey = getCurrentUserKey(context);
-
-    if (!force && homeMemory.loaded && hasContent(homeMemory.dashboard)) {
-      return homeMemory.dashboard;
-    }
-
-    if (
-      !force &&
-      sharedLoadPromise &&
-      (!sharedLoadUserKey || !userKey || sharedLoadUserKey === userKey)
-    ) {
-      return sharedLoadPromise;
-    }
-
-    const promise = Promise.resolve(
-      loadHomeDashboard({
-        returnStaleOnError: true,
-        ttlMs: opts.ttlMs ?? DEFAULT_CACHE_TTL_MS,
-        ...opts,
-        force,
-        source: cleanText(opts.source, `${SOURCE}.load`),
-      })
-    );
-
-    if (!force) {
-      sharedLoadPromise = promise;
-      sharedLoadUserKey = userKey;
-    }
-
-    try {
-      return await promise;
-    } finally {
-      if (sharedLoadPromise === promise) {
-        sharedLoadPromise = null;
-        sharedLoadUserKey = "";
-      }
-    }
+    return renderHtml(host, renderHomeErrorState(error), renderState);
   }
 
   async function load(options = {}) {
     const opts = safeObject(options);
     const seq = ++loadSeq;
-
     const force = opts.force === true || opts.forceRefresh === true || opts.hardRefresh === true;
     const silent = opts.silent === true;
-    const expectedUserKey = getCurrentUserKey(context);
-
-    if (!force && homeMemory.loaded && hasContent(homeMemory.dashboard)) {
-      dashboard = homeMemory.dashboard;
-      dashboardSignature = homeMemory.dashboardSignature || signature(homeMemory.dashboard);
-
-      loading = false;
-      refreshing = false;
-      error = homeMemory.error || "";
-
-      if (!silent && mounted) {
-        render({
-          dashboard,
-          loading: false,
-          refreshing: false,
-          error,
-        });
-      } else {
-        setHostFlags(host, {
-          mounted,
-          loading: false,
-          refreshing: false,
-        });
-      }
-
-      return dashboard;
-    }
+    const hadDashboard = hasContent(dashboard);
 
     if (!silent) {
-      loading = !hasContent(dashboard);
-      refreshing = force && hasContent(dashboard);
+      loading = !hadDashboard;
+      refreshing = force && hadDashboard;
       error = "";
 
       if (loading) {
@@ -892,95 +601,50 @@ function createHomeController(host = null, context = {}) {
     }
 
     try {
-      const nextDashboard = await fetchDashboard({
+      const nextDashboard = await loadHomeDashboard({
         ...opts,
         force,
-        silent,
-        source: cleanText(opts.source, force ? `${SOURCE}.refresh` : `${SOURCE}.load`),
+        returnStaleOnError: true,
       });
-
-      const currentUserKey = getCurrentUserKey(context);
-
-      if (expectedUserKey && currentUserKey && expectedUserKey !== currentUserKey) {
-        return null;
-      }
-
-      if (hasContent(nextDashboard)) {
-        setHomeMemory(nextDashboard, {
-          loaded: true,
-          error: cleanText(nextDashboard?.error || "", ""),
-          source: cleanText(opts.source, SOURCE),
-          userKey: expectedUserKey,
-        });
-      }
 
       if (destroyed || seq !== loadSeq) {
         return nextDashboard || null;
       }
 
-      const beforeSignature = dashboardSignature;
-      const beforeError = error;
-
       if (hasContent(nextDashboard)) {
         dashboard = nextDashboard;
-        dashboardSignature = signature(nextDashboard);
       }
 
       loading = false;
       refreshing = false;
-      error = cleanText(nextDashboard?.error || "", "");
+      error = cleanText(nextDashboard?.error, "");
 
-      const changed =
-        dashboardSignature !== beforeSignature ||
-        error !== beforeError ||
-        !renderCache.lastHTML;
-
-      if (changed || !silent) {
-        render({
-          dashboard,
-          loading: false,
-          refreshing: false,
-          error,
-        });
-      } else {
-        setHostFlags(host, {
-          mounted,
-          loading: false,
-          refreshing: false,
-        });
-      }
+      render({
+        dashboard,
+        loading: false,
+        refreshing: false,
+        error,
+      });
 
       return dashboard;
     } catch (loadError) {
-      if (destroyed || seq !== loadSeq) {
-        return null;
-      }
+      if (destroyed || seq !== loadSeq) return null;
 
       loading = false;
       refreshing = false;
       error = safeError(loadError, "No se pudo cargar el inicio.");
-      homeMemory.error = error;
 
       if (hasContent(dashboard)) {
-        if (!silent) {
-          render({
-            dashboard: {
-              ...dashboard,
-              stale: true,
-              error,
-            },
-            loading: false,
-            refreshing: false,
+        render({
+          dashboard: {
+            ...dashboard,
+            stale: true,
             error,
-          });
-        } else {
-          setHostFlags(host, {
-            mounted,
-            loading: false,
-            refreshing: false,
-          });
-        }
-
+          },
+          loading: false,
+          refreshing: false,
+          error,
+        });
         return null;
       }
 
@@ -991,26 +655,16 @@ function createHomeController(host = null, context = {}) {
 
   async function ensureLoaded(options = {}) {
     const opts = safeObject(options);
+    const force = opts.force === true || opts.forceRefresh === true || opts.hardRefresh === true;
+    const ttlMs = opts.ttlMs ?? HOME_CACHE_TTL_MS;
 
-    if (homeMemory.loaded && hasContent(homeMemory.dashboard) && opts.force !== true) {
-      dashboard = homeMemory.dashboard;
-      dashboardSignature = homeMemory.dashboardSignature || signature(homeMemory.dashboard);
-
-      if (mounted) {
-        render({
-          dashboard,
-          loading: false,
-          refreshing: false,
-          error: homeMemory.error || "",
-        });
-      }
-
+    if (!force && hasContent(dashboard) && isCachedDashboardFresh(ttlMs)) {
       return dashboard;
     }
 
     return load({
       ...opts,
-      force: false,
+      force,
       silent: opts.silent !== false,
       source: cleanText(opts.source, `${SOURCE}.ensure`),
     });
@@ -1026,82 +680,36 @@ function createHomeController(host = null, context = {}) {
 
   async function navigateTo(path = "") {
     const route = safeRoute(path, "");
-
     if (!route) return false;
 
     const router = getRouter(context);
 
-    if (isFunction(router?.navigate)) {
-      await router.navigate(route, {
-        source: SOURCE,
-      });
+    for (const method of ["navigate", "go", "push"]) {
+      if (!isFunction(router?.[method])) continue;
 
-      return true;
-    }
-
-    if (isFunction(router?.go)) {
-      await router.go(route, {
-        source: SOURCE,
-      });
-
-      return true;
-    }
-
-    if (isFunction(router?.push)) {
-      await router.push(route, {
-        source: SOURCE,
-      });
-
+      await router[method](route, { source: SOURCE });
       return true;
     }
 
     if (isFunction(AppCore?.navigate)) {
-      await AppCore.navigate(route, {
-        source: SOURCE,
-      });
-
+      await AppCore.navigate(route, { source: SOURCE });
       return true;
     }
 
-    if (isBrowser()) {
-      try {
-        window.history.pushState(
-          {
-            source: SOURCE,
-            route,
-          },
-          "",
-          route
-        );
+    if (!isBrowser()) return false;
 
-        window.dispatchEvent(
-          new PopStateEvent("popstate", {
-            state: {
-              source: SOURCE,
-              route,
-            },
-          })
-        );
-
-        return true;
-      } catch {
-        return false;
-      }
+    try {
+      const state = { source: SOURCE, route };
+      window.history.pushState(state, "", route);
+      window.dispatchEvent(new PopStateEvent("popstate", { state }));
+      return true;
+    } catch {
+      return false;
     }
-
-    return false;
   }
 
   async function handleAction(action = "", node = null) {
     const type = cleanText(action, "");
-    const route = cleanText(
-      node?.dataset?.route ||
-        node?.dataset?.href ||
-        node?.getAttribute?.("data-route") ||
-        node?.getAttribute?.("data-href") ||
-        "",
-      ""
-    );
 
     if (REFRESH_ACTIONS.has(type)) {
       await refresh();
@@ -1109,6 +717,15 @@ function createHomeController(host = null, context = {}) {
     }
 
     if (NAVIGATION_ACTIONS.has(type)) {
+      const route = cleanText(
+        node?.dataset?.route ||
+          node?.dataset?.href ||
+          node?.getAttribute?.("data-route") ||
+          node?.getAttribute?.("data-href") ||
+          "",
+        ""
+      );
+
       return navigateTo(route);
     }
 
@@ -1119,11 +736,9 @@ function createHomeController(host = null, context = {}) {
     if (destroyed) return;
 
     const node = closestAction(event.target);
-
     if (!node || !host?.contains?.(node)) return;
 
     const action = actionFrom(node);
-
     if (!isKnownAction(action)) return;
 
     event.preventDefault();
@@ -1135,57 +750,52 @@ function createHomeController(host = null, context = {}) {
 
   function bind() {
     if (bound || !host) return false;
-
     host.addEventListener("click", onClick);
     bound = true;
-
     return true;
   }
 
   function unbind() {
     if (!bound || !host) return false;
-
     host.removeEventListener("click", onClick);
     bound = false;
-
     return true;
   }
 
   function mount(options = {}) {
-    if (destroyed || !host) return controller;
-    if (mounted) return controller;
+    if (destroyed || !host || mounted) return controller;
 
     const opts = safeObject(options);
     const initial = getInitialDashboard(context, opts);
+    const force = opts.force === true || opts.forceRefresh === true || opts.hardRefresh === true;
 
     mounted = true;
     bind();
 
     dashboard = initial.dashboard;
-    dashboardSignature = hasContent(dashboard) ? signature(dashboard) : "";
     mountedFrom = initial.source;
-
     loading = !hasContent(dashboard);
     refreshing = false;
-    error = homeMemory.error || "";
+    error = cleanText(dashboard?.error, "");
 
     if (hasContent(dashboard)) {
       render({
         dashboard,
         loading: false,
         refreshing: false,
-        error: "",
+        error,
       });
     } else {
       renderInitialLoading();
     }
 
-    if (shouldFetchOnMount(initial, opts)) {
+    if (force || !initial.fresh) {
       void load({
-        force: opts.force === true || opts.forceRefresh === true || opts.hardRefresh === true,
+        ...opts,
+        force,
         silent: hasContent(dashboard),
         source: hasContent(dashboard)
-          ? `${SOURCE}.mount.background.once`
+          ? `${SOURCE}.mount.background`
           : `${SOURCE}.mount.initial`,
       });
     }
@@ -1200,7 +810,6 @@ function createHomeController(host = null, context = {}) {
 
     destroyed = true;
     mounted = false;
-
     loading = false;
     refreshing = false;
     loadSeq += 1;
@@ -1209,11 +818,10 @@ function createHomeController(host = null, context = {}) {
 
     if (opts.keepDom === false || opts.clearDom === true || opts.clear === true) {
       clearHost(host);
-      renderCache.lastHTML = "";
+      renderState.lastHTML = "";
     }
 
     clearInstance(host, controller);
-
     return true;
   }
 
@@ -1222,60 +830,32 @@ function createHomeController(host = null, context = {}) {
 
     mount,
     destroy,
-
     unmount: destroy,
-    cleanup: destroy,
-    dispose: destroy,
 
     load,
     ensureLoaded,
-
     refresh,
     reload: refresh,
 
     getDashboard() {
-      return dashboard || homeMemory.dashboard || null;
-    },
-
-    getState() {
-      return this.getSnapshot();
+      return dashboard || getCachedDashboard() || null;
     },
 
     getSnapshot() {
       return {
         version: HOME_VIEW_VERSION,
-
         mounted,
         destroyed,
-
         loading,
         refreshing,
-
         hasHost: Boolean(host),
         hasDashboard: hasContent(dashboard),
-
         mountedFrom,
         role: getCurrentRole(context),
-
         error: redact(error),
         lastRenderAt,
-
-        memory: {
-          loaded: homeMemory.loaded,
-          loadedAt: homeMemory.loadedAt,
-          hasDashboard: hasContent(homeMemory.dashboard),
-          userKey: homeMemory.userKey ? "***" : "",
-          source: homeMemory.source,
-          inFlight: Boolean(sharedLoadPromise),
-          error: redact(homeMemory.error),
-        },
-
         cache: getCacheState(),
       };
-    },
-
-    getDebugSnapshot() {
-      return this.getSnapshot();
     },
   };
 
@@ -1283,36 +863,19 @@ function createHomeController(host = null, context = {}) {
 }
 
 /* =========================================================
-   ENTRADA DE VISTA
+   PUBLIC VIEW
 ========================================================= */
 
 export function HomeView(host = null, context = {}) {
-  if (!isDomNode(host)) {
-    return null;
-  }
+  if (!isDomNode(host)) return null;
 
   destroyPrevious(host);
 
   const controller = createHomeController(host, safeObject(context));
-
   storeInstance(host, controller);
 
-  return controller.mount(
-    safeObject(context)
-  );
+  return controller.mount(safeObject(context));
 }
-
-export const HomeIndex = HomeView;
-
-export const View = HomeView;
-export const view = HomeView;
-export const component = HomeView;
-export const page = HomeView;
-
-export const mount = HomeView;
-export const init = HomeView;
-export const bootstrap = HomeView;
-export const render = HomeView;
 
 export function destroy(options = {}) {
   try {
@@ -1322,10 +885,6 @@ export function destroy(options = {}) {
   }
 }
 
-export const unmount = destroy;
-export const cleanup = destroy;
-export const dispose = destroy;
-
 export function refresh() {
   try {
     return lastInstance?.refresh?.() || null;
@@ -1334,34 +893,31 @@ export function refresh() {
   }
 }
 
-export const reload = refresh;
-export const refreshHome = refresh;
-
 export function loadHome(options = {}) {
   try {
     if (lastInstance?.ensureLoaded) {
       return lastInstance.ensureLoaded(options);
     }
 
-    return homeMemory.dashboard || null;
+    return loadHomeDashboard({
+      ...safeObject(options),
+      returnStaleOnError: true,
+    });
   } catch {
-    return homeMemory.dashboard || null;
+    return null;
   }
 }
 
-export const ensureHome = loadHome;
-export const ensureLoaded = loadHome;
-
 export function getDashboard() {
   try {
-    return lastInstance?.getDashboard?.() || homeMemory.dashboard || null;
+    return lastInstance?.getDashboard?.() || getCachedDashboard() || null;
   } catch {
-    return homeMemory.dashboard || null;
+    return getCachedDashboard();
   }
 }
 
 export function clearHomeViewCache() {
-  return clearHomeMemory();
+  return clearHomeDashboardCache();
 }
 
 export function clearHomeDom() {
@@ -1382,22 +938,9 @@ export function getSnapshot() {
 
   return {
     version: HOME_VIEW_VERSION,
-
     mounted: false,
     hasInstance: false,
-
     role: getCurrentRole({}),
-
-    memory: {
-      loaded: homeMemory.loaded,
-      loadedAt: homeMemory.loadedAt,
-      hasDashboard: hasContent(homeMemory.dashboard),
-      userKey: homeMemory.userKey ? "***" : "",
-      source: homeMemory.source,
-      inFlight: Boolean(sharedLoadPromise),
-      error: redact(homeMemory.error),
-    },
-
     cache: getCacheState(),
   };
 }

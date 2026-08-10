@@ -20,6 +20,7 @@
       "/*.{js,mjs,css,png,jpg,jpeg,gif,svg,webp,avif,bmp,ico,json,txt,xml,webmanifest,map,woff,woff2,ttf,eot,otf,pdf,mp4,webm,mp3,wav,ogg,wasm}"
     ]
   },
+
   "routes": [
     {
       "route": "/api/*",
@@ -363,14 +364,16 @@
       }
     }
   ],
+
   "globalHeaders": {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
-    "Content-Security-Policy": "upgrade-insecure-requests; default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self'; font-src 'self' data:; img-src 'self' data: blob: https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net; media-src 'self' data: blob: https://*.blob.core.windows.net; connect-src 'self' https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net wss://api.onionit.net wss://*.onionit.net; manifest-src 'self'; worker-src 'self';"
+    "Content-Security-Policy": "upgrade-insecure-requests; default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net; media-src 'self' data: blob: https://*.blob.core.windows.net; connect-src 'self' https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net wss://api.onionit.net wss://*.onionit.net; manifest-src 'self'; worker-src 'self';"
   },
+
   "mimeTypes": {
     ".js": "application/javascript",
     ".mjs": "application/javascript",
